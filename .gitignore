@@ -1,4 +1,8 @@
 node_modules/
+node_modules
+tmp/
+.vite/
+.vitest/
 dist/
 test-results/
 playwright-report/
