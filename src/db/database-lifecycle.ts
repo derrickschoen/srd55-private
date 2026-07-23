@@ -159,8 +159,31 @@ export function validateDatabaseConnection(db: Database): void {
   }
 }
 
+function databaseSchemaSignature(db: Database): string {
+  return JSON.stringify(
+    db
+      .selectObjects(
+        `SELECT type, name, tbl_name, sql
+         FROM sqlite_schema
+         WHERE type IN ('table', 'index', 'trigger')
+           AND name NOT LIKE 'sqlite_%'
+         ORDER BY type, name`,
+      )
+      .map((entry) => ({
+        type: String(entry.type),
+        name: String(entry.name),
+        table: String(entry.tbl_name),
+        sql:
+          typeof entry.sql === 'string'
+            ? entry.sql.replace(/\s+/g, ' ').trim()
+            : null,
+      })),
+  );
+}
+
 export class DatabaseLifecycle {
   #context: DatabaseContext | null = null;
+  #expectedSchemaSignature: string | null = null;
 
   constructor(
     private readonly sqlite3: Sqlite3Static,
@@ -189,7 +212,7 @@ export class DatabaseLifecycle {
       if (!hasApplicationSchema(connection)) {
         connection.exec(this.schema);
       }
-      validateDatabaseConnection(connection);
+      this.#validateApplicationDatabase(connection);
       this.#context = new DatabaseContext(connection);
       return this.#context;
     } catch (error) {
@@ -216,7 +239,7 @@ export class DatabaseLifecycle {
   validateBytes(bytes: Uint8Array): void {
     const candidate = openDatabaseImage(this.sqlite3, bytes.slice());
     try {
-      validateDatabaseConnection(candidate);
+      this.#validateApplicationDatabase(candidate);
     } finally {
       candidate.close();
     }
@@ -251,11 +274,36 @@ export class DatabaseLifecycle {
     let bytes: Uint8Array;
     try {
       fresh.exec(this.schema);
-      validateDatabaseConnection(fresh);
+      this.#validateApplicationDatabase(fresh);
       bytes = this.sqlite3.capi.sqlite3_js_db_export(fresh).slice();
     } finally {
       fresh.close();
     }
     return this.replace(bytes);
+  }
+
+  #validateApplicationDatabase(db: Database): void {
+    validateDatabaseConnection(db);
+    if (databaseSchemaSignature(db) !== this.#applicationSchemaSignature()) {
+      throw new Error(
+        'Database image schema does not match the application schema.',
+      );
+    }
+  }
+
+  #applicationSchemaSignature(): string {
+    if (this.#expectedSchemaSignature !== null) {
+      return this.#expectedSchemaSignature;
+    }
+
+    const expected = new this.sqlite3.oo1.DB(':memory:', 'c');
+    try {
+      expected.exec(this.schema);
+      validateDatabaseConnection(expected);
+      this.#expectedSchemaSignature = databaseSchemaSignature(expected);
+      return this.#expectedSchemaSignature;
+    } finally {
+      expected.close();
+    }
   }
 }

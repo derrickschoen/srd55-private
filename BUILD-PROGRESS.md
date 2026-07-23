@@ -112,3 +112,35 @@ Status: done
   in the reusable RPC harness that could discover peer modules during parallel work.
 - The user explicitly requested self-critique and prohibited spawning Codex; no
   external agent was launched. Unresolved findings: none known.
+
+## 2026-07-23 — Integrated Wave 0 review
+
+### Increment 1 review evidence
+
+- Independently reviewed `2c4d00c3a1fc3614b1995d00bb5d3d86adf993ad..HEAD`.
+  The merged path inventory is wholly B00-owned.
+- Rechecked the 38-table schema, column metadata hash, defaults, named/unnamed
+  uniqueness, foreign-key shapes/actions, CHECK, triggers, and persisted cascade,
+  SET NULL, and rejection behavior against the ten migration and four feature-test
+  oracles. No unresolved schema-parity gap remains.
+
+### Increment 2 review evidence
+
+- Fixed row-contract parity: both persisted `caster_fraction` values are strings
+  (`1`, `1/2`, or `1/3`), and `orphaned_by_change_group_id` is numeric.
+- Fixed lifecycle validation that previously accepted structurally altered SQLite
+  images when their table/trigger inventory remained present. Replacement now checks
+  the complete normalized table/index/trigger schema before closing the live database.
+- Added persisted lifecycle coverage proving a real exported image with a dropped
+  column is rejected while the original connection and character row remain intact.
+- Final verification: `npm test` — 4 files, 19 tests passed; `npm run build` passed;
+  `npm run test:browser` — 2 Chromium tests passed; `git diff --check` passed.
+
+### Increment 2 sensitivity evidence
+
+- Green → bypassed the complete-schema signature guard → targeted lifecycle test
+  failed at `rejects.toThrow` because replacement resolved → restored → targeted
+  lifecycle/invariant run passed (11 tests).
+- Green → encoded `true` as SQLite `0` → codec persistence test failed at the exact
+  stored `allowLegacy` assertion (`false` received) → restored → full Unit, build,
+  and browser gates passed.
