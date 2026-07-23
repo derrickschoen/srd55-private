@@ -4,6 +4,15 @@ import sqlite3InitModule, {
 } from '@sqlite.org/sqlite-wasm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import schema from '../../src/db/schema.sql?raw';
+import { DatabaseContext } from '../../src/db/database';
+import {
+  encodeBoolean,
+  encodeJson,
+  sqlBoolean,
+  sqlInteger,
+  sqlJson,
+  sqlString,
+} from '../../src/db/codecs';
 
 const triggerMessage =
   'a spell slot cannot hold both a fixed grant and a user selection';
@@ -108,6 +117,75 @@ describe('connection prerequisites', () => {
     db.exec(schema);
 
     expect(db.selectValue('PRAGMA foreign_keys')).toBe(1);
+  });
+});
+
+describe('typed synchronous persistence primitives', () => {
+  it('decodes persisted scalar, boolean, and JSON values without leaking SQLite rows', () => {
+    const context = new DatabaseContext(openDb());
+    const id = context.exec(
+      `INSERT INTO characters (name, allow_legacy, notes)
+       VALUES (?, ?, ?)`,
+      ['Codec Character', encodeBoolean(true), encodeJson({ source: 'test' })],
+    ).lastInsertId;
+
+    const stored = context.one(
+      `SELECT id, name, allow_legacy, notes
+       FROM characters WHERE id = ?`,
+      [id],
+      (row) => ({
+        id: sqlInteger(row, 'id'),
+        name: sqlString(row, 'name'),
+        allowLegacy: sqlBoolean(row, 'allow_legacy'),
+        notes: sqlJson(row, 'notes'),
+      }),
+    );
+
+    expect(stored).toEqual({
+      id,
+      name: 'Codec Character',
+      allowLegacy: true,
+      notes: { source: 'test' },
+    });
+    expect(context.scalar('SELECT allow_legacy FROM characters WHERE id = ?', [id]))
+      .toBe(1);
+    expect(context.scalar('SELECT notes FROM characters WHERE id = ?', [id]))
+      .toBe('{"source":"test"}');
+  });
+
+  it('uses savepoints for nested work and persists only the successful writes', () => {
+    const context = new DatabaseContext(openDb());
+
+    context.transaction((outer) => {
+      outer.exec("INSERT INTO characters (name) VALUES ('Outer before')");
+      expect(() =>
+        outer.transaction((inner) => {
+          inner.exec("INSERT INTO characters (name) VALUES ('Nested rollback')");
+          throw new Error('rollback nested');
+        }),
+      ).toThrow('rollback nested');
+      outer.exec("INSERT INTO characters (name) VALUES ('Outer after')");
+    });
+
+    expect(
+      context.all('SELECT name FROM characters ORDER BY id'),
+    ).toEqual([
+      { name: 'Outer before' },
+      { name: 'Outer after' },
+    ]);
+    expect(context.transactionDepth).toBe(0);
+  });
+
+  it('rolls back the complete outer transaction when its callback fails', () => {
+    const context = new DatabaseContext(openDb());
+    expect(() =>
+      context.transaction((db) => {
+        db.exec("INSERT INTO characters (name) VALUES ('Never persisted')");
+        throw new Error('rollback outer');
+      }),
+    ).toThrow('rollback outer');
+
+    expect(context.scalar('SELECT count(*) FROM characters')).toBe(0);
   });
 });
 
