@@ -1,89 +1,74 @@
-type RpcMethod =
-  | 'info'
-  | 'reset'
-  | 'writeCharacter'
-  | 'countCharacters'
-  | 'attemptTriggerViolation'
-  | 'attemptForeignKeyViolation';
-
-type RpcResponse =
-  | { id: number; ok: true; result: unknown }
-  | { id: number; ok: false; error: string };
+import './ui/styles/base.css';
+import { RpcClient } from './rpc/client';
+import type { SqlRow } from './db/codecs';
+import type { SystemInfo } from './worker/handlers/system';
+import { Application } from './ui/app';
 
 const worker = new Worker(new URL('./db/worker.ts', import.meta.url), {
   type: 'module',
 });
-let nextId = 1;
-const pending = new Map<
-  number,
-  { resolve: (value: unknown) => void; reject: (reason: Error) => void }
->();
+const rpc = new RpcClient(worker);
 
-worker.addEventListener('message', (event: MessageEvent<RpcResponse>) => {
-  const response = event.data;
-  const request = pending.get(response.id);
-  if (!request) {
-    return;
-  }
-  pending.delete(response.id);
-  if (response.ok) {
-    request.resolve(response.result);
-  } else {
-    request.reject(new Error(response.error));
-  }
-});
-
-worker.addEventListener('error', (event) => {
-  const error = new Error(event.message);
-  for (const request of pending.values()) {
-    request.reject(error);
-  }
-  pending.clear();
-});
-
-function rpc<T>(
-  method: RpcMethod,
-  params?: Record<string, unknown>,
-): Promise<T> {
-  const id = nextId++;
-  return new Promise((resolve, reject) => {
-    pending.set(id, {
-      resolve: resolve as (value: unknown) => void,
-      reject,
-    });
-    worker.postMessage({ id, method, params });
-  });
-}
-
-const api = {
-  info: () => rpc('info'),
-  reset: () => rpc('reset'),
-  writeCharacter: (name: string) => rpc('writeCharacter', { name }),
-  countCharacters: () => rpc<number>('countCharacters'),
-  attemptTriggerViolation: () => rpc('attemptTriggerViolation'),
-  attemptForeignKeyViolation: () => rpc('attemptForeignKeyViolation'),
+const system = {
+  info: () => rpc.call<Record<string, never>, SystemInfo>('system.info', {}),
+  reset: () =>
+    rpc.call<Record<string, never>, { reset: true }>('system.reset', {}),
+  writeCharacter: (name: string) =>
+    rpc.call<{ name: string }, { id: number; name: string }>(
+      'system.writeCharacter',
+      { name },
+    ),
+  countCharacters: () =>
+    rpc.call<Record<string, never>, number>('system.countCharacters', {}),
+  inspectRows: (
+    table: string,
+    where: Record<string, string | number | boolean | null> = {},
+  ) =>
+    rpc.call<{ table: string; where: typeof where }, SqlRow[]>(
+      'system.inspectRows',
+      { table, where },
+    ),
+  exportDatabase: () =>
+    rpc.call<Record<string, never>, Uint8Array>(
+      'system.exportDatabase',
+      {},
+    ),
+  replaceDatabase: (bytes: Uint8Array) =>
+    rpc.call<{ bytes: Uint8Array }, { replaced: true }>(
+      'system.replaceDatabase',
+      { bytes },
+    ),
+  attemptTriggerViolation: () =>
+    rpc.call<
+      Record<string, never>,
+      { rejected: boolean; message: string | null }
+    >('system.attemptTriggerViolation', {}),
+  attemptForeignKeyViolation: () =>
+    rpc.call<
+      Record<string, never>,
+      { rejected: boolean; message: string | null }
+    >('system.attemptForeignKeyViolation', {}),
 };
 
-declare global {
-  interface Window {
-    spikeDb: typeof api;
-  }
+window.appRpc = rpc;
+window.staticApp = system;
+
+const root = document.querySelector<HTMLElement>('#app');
+if (root === null) {
+  throw new Error('Application root #app is missing.');
 }
 
-window.spikeDb = api;
-
 const status = document.querySelector<HTMLOutputElement>('#status');
-api.info()
-  .then((info) => {
-    if (status) {
-      status.value = `Ready: ${JSON.stringify(info)}`;
-      status.dataset.ready = 'true';
-    }
+system
+  .info()
+  .then(() => {
+    new Application(root, rpc).start();
   })
   .catch((error: unknown) => {
-    if (status) {
+    if (status !== null) {
       status.value =
         error instanceof Error ? `Failed: ${error.message}` : `Failed: ${error}`;
       status.dataset.ready = 'false';
+      root.setAttribute('aria-busy', 'false');
     }
   });
