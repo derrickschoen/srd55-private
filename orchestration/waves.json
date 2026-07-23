@@ -1,0 +1,565 @@
+{
+  "waves": [
+    {
+      "index": 0,
+      "mode": "serial",
+      "chunks": [
+        {
+          "id": "B00",
+          "owned_paths": [
+            "package.json",
+            "package-lock.json",
+            "tsconfig.json",
+            "tsconfig.app.json",
+            "tsconfig.node.json",
+            "vite.config.ts",
+            "vitest.config.ts",
+            "playwright.config.ts",
+            "index.html",
+            "src/vite-env.d.ts",
+            "src/main.ts",
+            "src/db/schema.sql",
+            "src/db/database.ts",
+            "src/db/query.ts",
+            "src/db/codecs.ts",
+            "src/db/transaction.ts",
+            "src/db/database-lifecycle.ts",
+            "src/domain/enums.ts",
+            "src/domain/models.ts",
+            "src/domain/command-contracts.ts",
+            "src/domain/read-models.ts",
+            "src/rpc/protocol.ts",
+            "src/rpc/client.ts",
+            "src/worker/handler.ts",
+            "src/worker/registry.ts",
+            "src/worker/handlers/system.ts",
+            "src/db/worker.ts",
+            "src/ui/screen.ts",
+            "src/ui/router.ts",
+            "src/ui/app.ts",
+            "src/ui/dom.ts",
+            "src/ui/styles/base.css",
+            "docs/RPC-CONTRACT.md",
+            "tests/helpers/open-db.ts",
+            "tests/helpers/rpc-harness.ts",
+            "tests/unit/schema.test.ts",
+            "tests/unit/invariants.test.ts",
+            "tests/unit/db/database-lifecycle.test.ts",
+            "tests/unit/rpc/registry.test.ts",
+            "tests/browser/persistence.spec.ts",
+            "tests/browser/database-lifecycle.spec.ts",
+            "BUILD-PROGRESS.md",
+            "progress/B00.md"
+          ],
+          "oracle_files": [
+            "database/migrations/*.php",
+            "app/Domain/Catalog/CatalogSource.php",
+            "app/Domain/Characters/{SelectionEligibility,SlotState,SourceType}.php",
+            "app/Domain/Grants/{FreeCastPoolScope,FreeCastRecovery,GrantRuleKind,SlotBucket}.php",
+            "app/Domain/Rules/{Ability,CastingMode,EffectReliabilityCategory,RulesEdition}.php",
+            "app/Domain/Spells/DuplicateCategory.php",
+            "tests/Feature/{SchemaConstraintsTest,StackHealthTest,WizardPreparationUpgradeMigrationTest,WizardSpellbookSimplificationMigrationTest}.php",
+            "resources/js/types.ts"
+          ],
+          "brief": "Finish BUILD-PLAN increments 1–2 as the shared frozen substrate: preserve and verify the complete schema, add synchronous typed SQLite primitives, transactions and codecs, freeze shared domain/RPC/UI contracts, configure dependencies and tools, and prove database lifecycle, registry discovery and persistence behavior."
+        }
+      ]
+    },
+    {
+      "index": 1,
+      "mode": "parallel",
+      "chunks": [
+        {
+          "id": "R10",
+          "owned_paths": [
+            "src/rules/ability-score.ts",
+            "src/rules/ability-scores.ts",
+            "src/rules/attack-bonus.ts",
+            "src/rules/save-dc.ts",
+            "src/rules/spell-level.ts",
+            "src/rules/progression-type.ts",
+            "src/rules/caster-contribution.ts",
+            "src/rules/spell-slots.ts",
+            "src/rules/proficiency.ts",
+            "src/rules/class-progression-lookup.ts",
+            "tests/unit/rules/value-objects.test.ts",
+            "tests/unit/rules/multiclass-slots.test.ts",
+            "tests/unit/rules/properties.test.ts",
+            "tests/integration/rules/class-progression.test.ts",
+            "progress/R10.md"
+          ],
+          "oracle_files": [
+            "app/Domain/Rules/*.php",
+            "database/seeders/ClassProgressionSeeder.php",
+            "tests/Unit/{DomainTypesTest,MulticlassSlotsTest,RulesPropertyTest}.php",
+            "tests/Feature/{ClassProgressionSeederTest,SubclassProgressionTest,PactApexSeederTest}.php"
+          ],
+          "brief": "Port abilities, scores, modifiers, attack/save values, bounded spell levels, progression behavior, proficiency, class progression lookup, round-before-sum caster contributions, shared multiclass slots, Pact slots, and property cases."
+        },
+        {
+          "id": "G10",
+          "owned_paths": [
+            "src/grants/free-cast.ts",
+            "src/grants/grant-rule.ts",
+            "tests/unit/grants/grant-rule.test.ts",
+            "progress/G10.md"
+          ],
+          "oracle_files": [
+            "app/Domain/Grants/{FreeCast,FreeCastPoolScope,FreeCastRecovery,GrantRule,GrantRuleKind,SlotBucket}.php",
+            "tests/Unit/GrantRuleTest.php",
+            "tests/Feature/GuardCoverageTest.php",
+            "database/seeders/ContentDefinitionSeeder.php"
+          ],
+          "brief": "Parse, normalize, validate and serialize the six actual PHP grant-rule kinds, including source-config activation and free-cast/pool metadata, without inventing the obsolete choice_from_school or nested_source kinds."
+        },
+        {
+          "id": "E10",
+          "owned_paths": [
+            "src/eligibility/spell-selection-eligibility.ts",
+            "src/eligibility/eligible-spell-search.ts",
+            "src/eligibility/spell-selection-service.ts",
+            "tests/unit/eligibility/evaluate.test.ts",
+            "tests/unit/eligibility/search.test.ts",
+            "tests/integration/eligibility/persistence.test.ts",
+            "progress/E10.md"
+          ],
+          "oracle_files": [
+            "app/Domain/Spells/{SpellSelectionEligibility,SpellSelectionService}.php",
+            "app/Domain/Characters/EligibleSpellSearch.php",
+            "tests/Feature/CharacterWorkspaceTest.php",
+            "tests/Feature/GuardCoverageTest.php",
+            "tests/Feature/Api/CharacterWriteSurfaceAbuseTest.php"
+          ],
+          "brief": "Evaluate and persist valid, invalid or unselected eligibility; enforce active catalog, edition, legacy, list, school, tag, level and collection predicates; refresh retained selections; provide literal stable capped search; and enforce direct-selection ownership and active guards."
+        },
+        {
+          "id": "D10",
+          "owned_paths": [
+            "src/duplicates/duplicate-warning-detector.ts",
+            "tests/unit/duplicates/detector.test.ts",
+            "progress/D10.md"
+          ],
+          "oracle_files": [
+            "app/Domain/Spells/{DuplicateCategory,DuplicateWarningDetector}.php",
+            "tests/Unit/DuplicateWarningDetectorTest.php",
+            "tests/Feature/BuildReportTest.php"
+          ],
+          "brief": "Classify same-version wasteful or intentional overlap and cross-version conflicts by identity, preserve same-name different-identity separation, sort the full contract, compute severity and explanations, and reproduce deterministic SHA-256 warning fingerprints."
+        },
+        {
+          "id": "V10",
+          "owned_paths": [
+            "src/commands/payload-validator.ts",
+            "src/commands/canonical-json.ts",
+            "src/commands/integrity.ts",
+            "tests/unit/commands/payload-validator.test.ts",
+            "tests/unit/commands/integrity.test.ts",
+            "progress/V10.md"
+          ],
+          "oracle_files": [
+            "app/Domain/Characters/Commands/{CharacterCommandPayloadValidator,CharacterCommandIntegrity}.php",
+            "tests/Unit/CharacterCommandPayloadValidatorTest.php",
+            "tests/Feature/{CharacterCommandIntegrityTest,CharacterCommandFactoryTest}.php",
+            "tests/Feature/Api/CharacterWriteSurfaceAbuseTest.php"
+          ],
+          "brief": "Validate the closed command payload union, reject unknown or ill-typed fields, validate enums, modes and restore rows, canonicalize nested objects, and sign and verify destructive inverse payloads with deterministic Web Crypto HMAC-SHA-256 behavior."
+        },
+        {
+          "id": "S10",
+          "owned_paths": [
+            "src/character/character-state.ts",
+            "tests/integration/character/state.test.ts",
+            "progress/S10.md"
+          ],
+          "oracle_files": [
+            "app/Domain/Characters/CharacterState.php",
+            "tests/Feature/CharacterWorkspaceTest.php",
+            "tests/Feature/Api/CharacterWriteSurfaceAbuseTest.php"
+          ],
+          "brief": "Capture every restorable table, validate snapshot version, ownership, row shape and active spell references before deletion, restore atomically with IDs and timestamps, and produce deterministic row diffs."
+        }
+      ]
+    },
+    {
+      "index": 2,
+      "mode": "parallel",
+      "chunks": [
+        {
+          "id": "G20",
+          "owned_paths": [
+            "src/grants/grant-rule-slot-generator.ts",
+            "src/grants/source-rule-reader.ts",
+            "tests/integration/grants/slot-generator.test.ts",
+            "tests/integration/grants/nested-sources.test.ts",
+            "tests/integration/grants/wizard-acquisitions.test.ts",
+            "progress/G20.md"
+          ],
+          "oracle_files": [
+            "app/Domain/Grants/GrantRuleSlotGenerator.php",
+            "app/Domain/Characters/SourceType.php",
+            "tests/Feature/{GrantRuleSlotGeneratorTest,CharacterWorkspaceTest,GuardCoverageTest}.php",
+            "database/seeders/{ClassProgressionSeeder,ContentDefinitionSeeder}.php"
+          ],
+          "brief": "Read active class, subclass, static and progression rules and transactionally reconcile stable keyed slots, nested sources, capabilities and simplified Wizard acquisitions while preserving IDs, selections, orphan history, source distinctness and persisted eligibility."
+        },
+        {
+          "id": "C20",
+          "owned_paths": [
+            "src/catalog/catalog-importer.ts",
+            "src/catalog/catalog-schema.ts",
+            "src/catalog/catalog-normalize.ts",
+            "src/catalog/client.ts",
+            "src/worker/handlers/catalog.ts",
+            "docs/CATALOG-IMPORT.md",
+            "tests/unit/catalog/schema.test.ts",
+            "tests/integration/catalog/import.test.ts",
+            "tests/browser/catalog-import.spec.ts",
+            "progress/C20.md"
+          ],
+          "oracle_files": [
+            "app/Domain/Catalog/{CatalogImporter,CatalogSource}.php",
+            "app/Console/Commands/CatalogImportCommand.php",
+            "tests/Feature/CatalogImportTest.php",
+            "tests/Feature/GuardCoverageTest.php",
+            "database/migrations/2026_07_21_000100_create_catalog_tables.php"
+          ],
+          "brief": "Document and validate browser catalog JSON; merge identities, aliases and editions; import optional text and publication pivots; tombstone or reactivate records; refresh selections; support dry-run diff and atomic rollback; and expose a typed self-registering catalog RPC slice."
+        },
+        {
+          "id": "B20",
+          "owned_paths": [
+            "src/backup/backup-version.ts",
+            "src/backup/database-backup.ts",
+            "src/backup/character-backup.ts",
+            "src/backup/client.ts",
+            "src/worker/handlers/backup.ts",
+            "docs/BACKUP-FORMATS.md",
+            "tests/unit/backup/validation.test.ts",
+            "tests/integration/backup/round-trip.test.ts",
+            "tests/browser/backup.spec.ts",
+            "progress/B20.md"
+          ],
+          "oracle_files": [
+            "app/Domain/Characters/CharacterState.php",
+            "tests/Feature/CharacterWorkspaceTest.php",
+            "database/migrations/*.php",
+            "BUILD-PLAN.md"
+          ],
+          "brief": "Version, export, validate and atomically import both a complete SQLite database and a portable per-character document, preserving all user content and rejecting incompatible, corrupt or cross-character data before writes through a typed self-registering backup RPC slice."
+        }
+      ]
+    },
+    {
+      "index": 3,
+      "mode": "serial",
+      "chunks": [
+        {
+          "id": "A30",
+          "owned_paths": [
+            "src/access/spell-slot-assignment.ts",
+            "src/access/spell-slot-assignment-factory.ts",
+            "src/access/spell-access-builder.ts",
+            "src/access/route-key.ts",
+            "tests/unit/access/assignment.test.ts",
+            "tests/unit/access/route-key.test.ts",
+            "tests/integration/access/spell-access.test.ts",
+            "progress/A30.md"
+          ],
+          "oracle_files": [
+            "app/Domain/Spells/{SpellAccessBuilder,SpellSlotAssignment,SpellSlotAssignmentFactory,FixedSpellGrant,UserSpellSelection,UnassignedSpellSlot}.php",
+            "tests/Feature/{BuildReportTest,GrantRuleSlotGeneratorTest,GuardCoverageTest}.php",
+            "tests/Unit/DomainTypesTest.php"
+          ],
+          "brief": "Port assignment hydration plus prepared, known, fixed, free-cast, capability and Wizard ritual routes; casting math; route-key deduplication; source ability resolution; kept_override behavior; and exclusion of inactive versions even when eligibility is stale."
+        }
+      ]
+    },
+    {
+      "index": 4,
+      "mode": "parallel",
+      "chunks": [
+        {
+          "id": "C41",
+          "owned_paths": [
+            "src/commands/update-ability.ts",
+            "src/commands/set-slot/shared.ts",
+            "src/commands/set-slot/select.ts",
+            "src/commands/set-slot/clear.ts",
+            "src/commands/set-slot/keep-override.ts",
+            "src/commands/set-slot/restore.ts",
+            "tests/integration/commands/ability-and-slot.test.ts",
+            "progress/C41.md"
+          ],
+          "oracle_files": [
+            "app/Domain/Characters/Commands/{UpdateAbilityCommand,SetSlotCommand}.php",
+            "tests/Feature/CharacterWorkspaceTest.php",
+            "tests/Feature/{GuardCoverageTest,Api/CharacterWriteSurfaceAbuseTest}.php"
+          ],
+          "brief": "Implement apply and inverse behavior for update_ability and the select, clear, keep-override and restore set_slot modes, enforcing ownership, locks, active eligibility, exact orphan reasons, prior state and timestamps, inverse revalidation and persisted audit-diff inputs."
+        },
+        {
+          "id": "C42",
+          "owned_paths": [
+            "src/commands/update-character-rules.ts",
+            "src/commands/update-source-config.ts",
+            "src/commands/add-source.ts",
+            "src/commands/remove-source.ts",
+            "tests/integration/commands/rules-and-sources.test.ts",
+            "progress/C42.md"
+          ],
+          "oracle_files": [
+            "app/Domain/Characters/Commands/{UpdateCharacterRulesCommand,UpdateSourceConfigCommand,AddSourceCommand,RemoveSourceCommand}.php",
+            "tests/Feature/{CharacterWorkspaceTest,GuardCoverageTest}.php",
+            "tests/Feature/Api/CharacterWriteSurfaceAbuseTest.php"
+          ],
+          "brief": "Implement apply and inverse behavior for character rules, source configuration, source addition and source removal, including regeneration, nested sources, configurable-source validation, stable orphan and reactivation behavior, snapshot inverses and atomic rollback."
+        },
+        {
+          "id": "C43",
+          "owned_paths": [
+            "src/commands/acknowledge-warning.ts",
+            "src/commands/delete-warning-acknowledgement.ts",
+            "src/commands/update-class.ts",
+            "src/commands/restore-snapshot.ts",
+            "tests/integration/commands/warnings-class-and-snapshot.test.ts",
+            "progress/C43.md"
+          ],
+          "oracle_files": [
+            "app/Domain/Characters/Commands/{AcknowledgeWarningCommand,UpdateClassCommand,RestoreSnapshotCommand}.php",
+            "tests/Feature/{CharacterWorkspaceTest,GuardCoverageTest}.php",
+            "tests/Feature/Api/CharacterWriteSurfaceAbuseTest.php"
+          ],
+          "brief": "Implement apply and inverse behavior for warning acknowledgement and deletion, class updates and snapshot restore, including warning fingerprints, acknowledgement invalidation, subclass constraints, regeneration, active references, stable restored rows and atomic rollback."
+        },
+        {
+          "id": "R40",
+          "owned_paths": [
+            "src/reports/build-report-builder.ts",
+            "src/reports/build-report-ordering.ts",
+            "tests/integration/reports/build-report.test.ts",
+            "tests/integration/reports/build-report-fixture.ts",
+            "progress/R40.md"
+          ],
+          "oracle_files": [
+            "app/Domain/Reports/BuildReportBuilder.php",
+            "tests/Feature/{BuildReportTest,SubclassProgressionTest,PactApexSeederTest}.php",
+            "database/seeders/{SeedCharacterSeeder,PactApexSeeder}.php"
+          ],
+          "brief": "Build the exact deterministic read-only character report: caster summary, independently rounded contributions, shared and Pact pools, source sections, spellbook and preparation, access routes, warnings and acknowledgements, invalid selections and preparation callout."
+        }
+      ]
+    },
+    {
+      "index": 5,
+      "mode": "parallel",
+      "chunks": [
+        {
+          "id": "X50",
+          "owned_paths": [
+            "src/commands/character-command-factory.ts",
+            "src/commands/character-command-executor.ts",
+            "src/commands/revision-conflict.ts",
+            "src/commands/audit-log.ts",
+            "src/commands/client.ts",
+            "src/worker/handlers/commands.ts",
+            "tests/integration/commands/executor.test.ts",
+            "tests/integration/commands/idempotency.test.ts",
+            "tests/browser/command-rpc.spec.ts",
+            "progress/X50.md"
+          ],
+          "oracle_files": [
+            "app/Domain/Characters/{CharacterCommandExecutor,RevisionConflict}.php",
+            "app/Domain/Characters/Commands/CharacterCommandFactory.php",
+            "app/Http/Controllers/CharacterMutationController.php",
+            "tests/Feature/{CharacterCommandFactoryTest,CharacterCommandIntegrityTest,CharacterWorkspaceTest,GuardCoverageTest}.php",
+            "tests/Feature/Api/CharacterWriteSurfaceAbuseTest.php"
+          ],
+          "brief": "Construct all thirteen command variants and execute validated commands transactionally with revision, UUID idempotency, replay and narrowly scoped stale-slot merge guards, persisting inverse commands and grouped audit rows and exposing typed commands.execute RPC."
+        },
+        {
+          "id": "P50",
+          "owned_paths": [
+            "src/reports/printable-spell-list-builder.ts",
+            "src/reports/printable-ordering.ts",
+            "tests/integration/reports/printable-list.test.ts",
+            "tests/integration/reports/printable-list-fixture.ts",
+            "progress/P50.md"
+          ],
+          "oracle_files": [
+            "app/Domain/Reports/PrintableSpellListBuilder.php",
+            "tests/Feature/PrintableSpellListTest.php",
+            "resources/js/pages/Characters/Print.vue"
+          ],
+          "brief": "Build deterministic reference and full printable data with grouping, routes, relevant stats, free-cast wording, facts and descriptions, rituals, Wizard prepared and ritual-only states, long-rest swaps and completeness degradation."
+        }
+      ]
+    },
+    {
+      "index": 6,
+      "mode": "serial",
+      "chunks": [
+        {
+          "id": "Q60",
+          "owned_paths": [
+            "src/queries/character-list-builder.ts",
+            "src/queries/character-workspace-builder.ts",
+            "src/queries/character-crud.ts",
+            "src/queries/catalog-queries.ts",
+            "src/queries/save-points.ts",
+            "src/queries/operation-history.ts",
+            "src/queries/client.ts",
+            "src/worker/handlers/queries.ts",
+            "tests/integration/queries/list-and-workspace.test.ts",
+            "tests/integration/queries/crud-and-history.test.ts",
+            "tests/integration/queries/rpc.test.ts",
+            "progress/Q60.md"
+          ],
+          "oracle_files": [
+            "app/Domain/Characters/{CharacterListBuilder,CharacterWorkspaceBuilder,EligibleSpellSearch}.php",
+            "app/Http/Controllers/{CharacterController,EligibleSpellController,SavePointController,BuildReportController,CharacterPrintController}.php",
+            "tests/Feature/CharacterWorkspaceTest.php",
+            "tests/Feature/BuildReportTest.php"
+          ],
+          "brief": "Port character list and workspace builders and expose typed DTO-only RPC for character and catalog CRUD and reads, eligible spells, save points, build reports, printable data and operation history through the single shared query integration surface."
+        }
+      ]
+    },
+    {
+      "index": 7,
+      "mode": "parallel",
+      "chunks": [
+        {
+          "id": "U70",
+          "owned_paths": [
+            "src/ui/screens/character-list/screen.ts",
+            "src/ui/screens/character-list/character-list.ts",
+            "src/ui/screens/character-list/import-backup-controls.ts",
+            "src/ui/screens/character-list/styles.css",
+            "tests/unit/ui/character-list.test.ts",
+            "tests/browser/character-list.spec.ts",
+            "progress/U70.md"
+          ],
+          "oracle_files": [
+            "app/Domain/Characters/CharacterListBuilder.php",
+            "app/Http/Controllers/CharacterController.php",
+            "tests/Feature/{StackHealthTest,CharacterWorkspaceTest}.php",
+            "resources/js/components/AppShell.vue",
+            "resources/js/pages/Characters/Index.vue"
+          ],
+          "brief": "Implement the application shell and character list with durable-storage status, create, open and delete flows, catalog import and database or character backup entry points, and complete loading, empty, confirmation and error states."
+        },
+        {
+          "id": "U71",
+          "owned_paths": [
+            "src/ui/screens/planner/screen.ts",
+            "src/ui/screens/planner/planner-grid.ts",
+            "src/ui/screens/planner/editors.ts",
+            "src/ui/screens/planner/spell-picker.ts",
+            "src/ui/screens/planner/history.ts",
+            "src/ui/screens/planner/warnings.ts",
+            "src/ui/screens/planner/dice.ts",
+            "src/ui/screens/planner/styles.css",
+            "tests/unit/ui/planner.test.ts",
+            "tests/unit/ui/dice.test.ts",
+            "tests/browser/planner.spec.ts",
+            "progress/U71.md"
+          ],
+          "oracle_files": [
+            "app/Domain/Characters/CharacterWorkspaceBuilder.php",
+            "tests/Feature/CharacterWorkspaceTest.php",
+            "resources/js/pages/Characters/Workspace.vue",
+            "resources/js/components/{SpellCombobox,BuildReportPanel,DiceRoller}.vue",
+            "resources/js/stores/character.ts",
+            "resources/js/lib/{dice.ts,dice.test.mjs}"
+          ],
+          "brief": "Port the responsive spreadsheet planner with class, ability, rules and source editors, filters and spell picker, invalid, orphan and override flows, history and save points, warnings, dice helper, and keyboard and focus behavior."
+        },
+        {
+          "id": "U72",
+          "owned_paths": [
+            "src/ui/screens/build-report/screen.ts",
+            "src/ui/screens/build-report/build-report.ts",
+            "src/ui/screens/build-report/styles.css",
+            "src/ui/screens/print/screen.ts",
+            "src/ui/screens/print/printable-list.ts",
+            "src/ui/screens/print/styles.css",
+            "tests/unit/ui/reports.test.ts",
+            "tests/browser/reports-and-print.spec.ts",
+            "progress/U72.md"
+          ],
+          "oracle_files": [
+            "app/Domain/Reports/{BuildReportBuilder,PrintableSpellListBuilder}.php",
+            "tests/Feature/{BuildReportTest,PrintableSpellListTest}.php",
+            "resources/js/pages/{BuildReport.vue,Characters/Print.vue}",
+            "resources/js/components/BuildReportPanel.vue"
+          ],
+          "brief": "Render build report and both printable modes with exact incomplete-data warning, source, route and duplicate annotations, deterministic presentation and accessible print CSS without mutating state."
+        }
+      ]
+    },
+    {
+      "index": 8,
+      "mode": "parallel",
+      "chunks": [
+        {
+          "id": "T80",
+          "owned_paths": [
+            "tests/parity/php-unit-parity.test.ts",
+            "tests/parity/PHP-UNIT-MAP.md",
+            "tests/parity/PHP-UNIT-SENSITIVITY.md",
+            "progress/T80.md"
+          ],
+          "oracle_files": [
+            "tests/Unit/*.php",
+            "app/Domain/Characters/Commands/CharacterCommandPayloadValidator.php",
+            "app/Domain/Characters/SlotState.php",
+            "app/Domain/Grants/{GrantRule,GrantRuleKind,SlotBucket}.php",
+            "app/Domain/Rules/{Ability,AbilityScore,CasterContribution,ProgressionType,SpellLevel,SpellSlots}.php",
+            "app/Domain/Spells/{DuplicateWarningDetector,FixedSpellGrant,SpellSlotAssignment,UnassignedSpellSlot,UserSpellSelection}.php"
+          ],
+          "brief": "Re-base all 57 evaluated PHP Unit cases onto TypeScript value objects and synchronous SQLite boundaries, maintain a case-by-case map, add only missing cross-slice parity tests, and record owner-run sensitivity evidence without editing production."
+        },
+        {
+          "id": "T81",
+          "owned_paths": [
+            "tests/browser/php-feature-parity.spec.ts",
+            "tests/browser/fixtures/php-parity.ts",
+            "tests/parity/PHP-FEATURE-MAP.md",
+            "tests/parity/PHP-FEATURE-SENSITIVITY.md",
+            "progress/T81.md"
+          ],
+          "oracle_files": [
+            "tests/Feature/*.php",
+            "tests/Feature/Api/CharacterWriteSurfaceAbuseTest.php"
+          ],
+          "brief": "Re-base the fixed manifest of 28 end-to-end workflows on Worker RPC and persisted OPFS state, covering mutations, reports, import, backups, reload, concurrency and UI, with persisted-state checks and owner-run sensitivity evidence."
+        }
+      ]
+    },
+    {
+      "index": 9,
+      "mode": "serial",
+      "chunks": [
+        {
+          "id": "S90",
+          "owned_paths": [
+            "PARITY-AUDIT.md",
+            "progress/S90.md"
+          ],
+          "oracle_files": [
+            "BUILD-PLAN.md",
+            "database/migrations/*.php",
+            "app/Domain/**/*.php",
+            "tests/**/*.php",
+            "resources/js/components/{AppShell,BuildReportPanel,DiceRoller,SpellCombobox}.vue",
+            "resources/js/pages/{BuildReport.vue,Characters/Index.vue,Characters/Print.vue,Characters/Workspace.vue}",
+            "resources/js/stores/character.ts",
+            "resources/js/lib/{dice.ts,dice.test.mjs}",
+            "progress/*.md"
+          ],
+          "brief": "Run the final serial parity and durability audit across unit and browser suites, typecheck, production build, fresh-profile lifecycle, schema metadata, oracle coverage, accessibility and sensitivity, and verify aggregated increment evidence while routing fixes back to owners."
+        }
+      ]
+    }
+  ]
+}
