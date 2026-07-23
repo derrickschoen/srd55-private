@@ -88,7 +88,7 @@ export interface ClassDefinitionRow extends TimestampedRow {
   rules_edition: RulesEdition;
   spellcasting_ability: Ability | null;
   progression_type: ProgressionType;
-  caster_fraction: number | null;
+  caster_fraction: string | null;
   caster_rounding: string | null;
   prepares_or_knows: string | null;
   supports_ritual_casting: boolean;
@@ -104,7 +104,7 @@ export interface SubclassDefinitionRow extends TimestampedRow {
   name: string;
   rules_edition: RulesEdition;
   spellcasting_ability: Ability | null;
-  caster_fraction: number | null;
+  caster_fraction: string | null;
   caster_rounding: string | null;
   grant_rules: JsonValue | null;
 }
@@ -159,7 +159,7 @@ export interface SpellSelectionSlotRow extends TimestampedRow {
   is_locked: boolean;
   state: SlotState;
   orphan_reason_code: string | null;
-  orphaned_by_change_group_id: string | null;
+  orphaned_by_change_group_id: number | null;
   orphaned_at: string | null;
   prior_config: JsonObject | null;
   override_note: string | null;

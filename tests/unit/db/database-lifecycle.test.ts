@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import schema from '../../../src/db/schema.sql?raw';
-import { DatabaseLifecycle } from '../../../src/db/database-lifecycle';
+import {
+  DatabaseLifecycle,
+  openDatabaseImage,
+} from '../../../src/db/database-lifecycle';
 import {
   getSqlite3,
   MemoryDatabaseStorage,
@@ -59,6 +62,36 @@ describe('database lifecycle', () => {
     expect(
       lifecycle.database.all('SELECT id, name FROM characters'),
     ).toEqual([{ id: 1, name: 'Protected character' }]);
+  });
+
+  it('rejects a structurally incompatible SQLite image before changing live state', async () => {
+    lifecycle.database.exec(
+      "INSERT INTO characters (name) VALUES ('Schema-protected character')",
+    );
+    const originalConnection = lifecycle.database.connection;
+    const exported = await lifecycle.exportBytes();
+    const sqlite3 = await getSqlite3();
+    const incompatible = openDatabaseImage(sqlite3, exported, {
+      readonly: false,
+    });
+    let incompatibleBytes: Uint8Array;
+    try {
+      incompatible.exec('ALTER TABLE characters DROP COLUMN notes');
+      incompatibleBytes =
+        sqlite3.capi.sqlite3_js_db_export(incompatible).slice();
+    } finally {
+      incompatible.close();
+    }
+
+    await expect(lifecycle.replace(incompatibleBytes)).rejects.toThrow(
+      'Database image schema does not match the application schema.',
+    );
+
+    expect(lifecycle.database.connection).toBe(originalConnection);
+    expect(lifecycle.database.connection.isOpen()).toBe(true);
+    expect(
+      lifecycle.database.all('SELECT id, name FROM characters'),
+    ).toEqual([{ id: 1, name: 'Schema-protected character' }]);
   });
 
   it('restores the prior image and a usable connection after storage replacement fails', async () => {
