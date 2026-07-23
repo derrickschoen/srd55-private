@@ -494,7 +494,7 @@ function foreignKeys(db: Database, table: string): string[] {
       );
       const from = ordered.map((row) => String(row.from)).join(',');
       const to = ordered.map((row) => String(row.to)).join(',');
-      return `${from}->${String(ordered[0].table)}.${to}|${String(ordered[0].on_delete)}`;
+      return `${from}->${String(ordered[0]!.table)}.${to}|${String(ordered[0]!.on_delete)}`;
     })
     .sort();
 }

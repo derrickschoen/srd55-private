@@ -3,13 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>SQLite WASM persistence spike</title>
+    <meta
+      name="description"
+      content="A local-first D&amp;D multiclass spell planner"
+    />
+    <title>D&amp;D Multiclass Spell Planner</title>
   </head>
   <body>
-    <main>
-      <h1>SQLite WASM persistence spike</h1>
-      <output id="status">Starting worker…</output>
-    </main>
+    <div id="app" aria-busy="true">
+      <main class="loading-shell">
+        <h1>D&amp;D Multiclass Spell Planner</h1>
+        <output id="status" role="status">Starting local database…</output>
+      </main>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

@@ -59,3 +59,56 @@ Status: done
   this managed filesystem. No reviewer result was invented or rejected.
 
 Codex session id: `019f90fd-91eb-72f0-a629-74d1f9ec8183`
+
+## 2026-07-23 — Increment 2: Catalog and persistence primitives
+
+Status: done
+
+### Files
+
+- Added the synchronous `DatabaseContext` query API, strict row/boolean/JSON
+  codecs, nested-safe transactions, and reusable in-memory test database/RPC
+  harnesses.
+- Added byte export, read-only candidate validation, recoverable OPFS replacement,
+  reset, close/reopen, and per-connection foreign-key setup.
+- Froze the PHP enum values, database/domain rows, command payload union,
+  presentation read models, open-ended RPC envelopes/client/handlers, and
+  discovery-based Worker/UI composition contracts.
+- Added the non-production persisted-row inspector, Worker request serialization,
+  base application shell, tool/cache configuration, and RPC documentation.
+
+### Tests
+
+- `npm test`: 4 files, 18 Unit tests passed.
+- `npm run build`: TypeScript and Vite production build passed.
+- `npm run test:browser`: 2 Playwright tests passed.
+- Browser assertions read stored `characters` rows before and after reload/image
+  replacement; lifecycle Unit tests likewise assert the reopened stored rows.
+
+### Sensitivity transitions
+
+- Green → `encodeBoolean(true)` persisted `0` → codec test failed at stored
+  `allowLegacy: false` → restored.
+- Green → bypassed transaction/savepoint wrappers → nested row remained and outer
+  failed row remained → both persisted-state assertions failed → restored.
+- Green → bypassed image replacement/recovery → replacement retained the discarded
+  row and injected failure did not reject → restored.
+- Green → bypassed candidate prevalidation → invalid-image test failed because the
+  live connection was unnecessarily replaced → restored.
+- Green → removed registry sorting/duplicate rejection/discovery dispatch and
+  production inspection gating → all four registry assertions failed → restored.
+- Green → enabled SAH-pool `clearOnInit` → reload assertion received no stored
+  character → restored.
+- Green → bypassed lifecycle replacement in the Worker → browser assertion retained
+  the row that should have been removed by image replacement → restored.
+- Restored full Unit, build, and browser suites passed.
+
+### Review
+
+- Self-review found and fixed the worktree's external read-only `node_modules`
+  serving/cache issue, serialized Worker requests around async lifecycle operations,
+  candidate validation before closing the live connection, production exclusion of
+  `system.inspectRows`, defensive cloning of rows/bytes, and an eager-registry import
+  in the reusable RPC harness that could discover peer modules during parallel work.
+- The user explicitly requested self-critique and prohibited spawning Codex; no
+  external agent was launched. Unresolved findings: none known.
