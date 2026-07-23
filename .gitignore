@@ -7,3 +7,7 @@ playwright-report/
 .plan-lock/
 .worktrees/
 .codex-locks/
+orchestration/wave-state
+orchestration/*.verdict
+orchestration/logs/
+.wave-lock/
