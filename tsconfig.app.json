@@ -9,6 +9,10 @@
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "moduleDetection": "force",
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "isolatedModules": true,
+    "tsBuildInfoFile": "/tmp/dnd-multiclass-spells-static-app.tsbuildinfo",
     "noEmit": true,
     "strict": true
   },

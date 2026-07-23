@@ -8,9 +8,19 @@
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "moduleDetection": "force",
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "isolatedModules": true,
+    "tsBuildInfoFile": "/tmp/dnd-multiclass-spells-static-node.tsbuildinfo",
     "noEmit": true,
     "strict": true,
     "types": ["node", "vite/client"]
   },
-  "include": ["vite.config.ts", "vitest.config.ts", "playwright.config.ts", "tests"]
+  "include": [
+    "vite.config.ts",
+    "vitest.config.ts",
+    "playwright.config.ts",
+    "src/vite-env.d.ts",
+    "tests"
+  ]
 }
