@@ -1,5 +1,9 @@
 import type { CharacterCommandPayload } from '../domain/command-contracts';
 import type { CharacterRow } from '../domain/models';
+import {
+  createCatalogClient,
+  type CatalogClient,
+} from '../catalog/client';
 import type {
   CharacterSummary,
   EligibleSpell,
@@ -20,7 +24,7 @@ import type {
 } from './character-crud';
 import type { OperationHistory } from './operation-history';
 
-export interface QueriesClient {
+export interface QueriesClient extends CatalogClient {
   listCharacters(): Promise<CharacterSummary[]>;
   getCharacter(characterId: number): Promise<CharacterRow>;
   createCharacter(name: string): Promise<CharacterRow>;
@@ -54,6 +58,7 @@ export function createQueriesClient(rpc: RpcClient): QueriesClient {
   });
 
   return Object.freeze({
+    ...createCatalogClient(rpc),
     listCharacters: () =>
       rpc.call<Record<string, never>, CharacterSummary[]>(
         'queries.characters.list',
