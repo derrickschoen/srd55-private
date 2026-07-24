@@ -149,13 +149,13 @@ function seedCompleteCharacter(
   );
   const historicalSourceId = db.exec(
     `INSERT INTO character_source_instances (
-       character_id, instance_uuid, source_type, source_definition_id,
-       display_name, notes, created_at, updated_at
+       character_id, instance_uuid, parent_source_instance_id, source_type,
+       source_definition_id, display_name, notes, created_at, updated_at
      ) VALUES (
-       ?, 'historical-source-uuid', 'class', ?, 'Historical Wizard',
+       ?, 'historical-source-uuid', ?, 'class', ?, 'Historical Wizard',
        'save-point only source', ?, ?
      )`,
-    [characterId, catalog.classId, timestamp, timestamp],
+    [characterId, sourceId, catalog.classId, timestamp, timestamp],
   ).lastInsertId;
   db.exec(
     `INSERT INTO spell_selection_slots (
@@ -263,11 +263,21 @@ describe('portable character backup', () => {
       sourceCharacterId,
       '2026-07-23T12:00:00.000Z',
     );
+    const importedDocument = structuredClone(document);
+    const exportedSavePoint =
+      importedDocument.tables.character_save_points[0] as Record<string, unknown>;
+    const reorderedSnapshot = JSON.parse(
+      String(exportedSavePoint.snapshot),
+    ) as {
+      character_source_instances: Array<Record<string, unknown>>;
+    };
+    reorderedSnapshot.character_source_instances.reverse();
+    exportedSavePoint.snapshot = JSON.stringify(reorderedSnapshot);
 
     const target = await database();
     const targetCatalog = seedCatalog(target, true);
     target.exec("INSERT INTO characters (name) VALUES ('Existing target')");
-    const { characterId } = importCharacterBackup(target, document);
+    const { characterId } = importCharacterBackup(target, importedDocument);
     const persisted = persistedCharacter(target, characterId);
 
     expect(characterId).toBe(2);
@@ -357,6 +367,11 @@ describe('portable character backup', () => {
       character_id: characterId,
       id: importedSource.id,
       instance_uuid: importedSource.instance_uuid,
+      source_definition_id: targetCatalog.classId,
+    });
+    expect(saved.character_source_instances[1]).toMatchObject({
+      character_id: characterId,
+      parent_source_instance_id: importedSource.id,
       source_definition_id: targetCatalog.classId,
     });
     expect(saved.spell_selection_slots[0]).toMatchObject({

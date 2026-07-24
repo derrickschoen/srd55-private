@@ -70,7 +70,9 @@ databases.
 Import creates a new character. It assigns new database IDs and globally unique
 source UUIDs, rewrites UUID-derived slot keys, and remaps every foreign key.
 Save-point snapshots are remapped too; IDs needed only by a historical snapshot
-are reserved so a later `CharacterState.restore()` remains valid. Character
+are reserved so a later `CharacterState.restore()` remains valid. Cyclic source
+graphs are rejected and accepted source rows are stored parent-first regardless
+of document order, so nested historical sources remain restorable. Character
 timestamps, revision, notes, source configuration, slot override/orphan state,
 preferences, overrides, acknowledgements, and loadout content are retained.
 

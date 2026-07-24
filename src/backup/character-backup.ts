@@ -592,6 +592,7 @@ function validateDocument(input: unknown): ValidatedDocument {
       referenceMaps,
       `Character backup tables.character_save_points[${index}].snapshot`,
     );
+    topologicalSources(snapshot.character_source_instances);
     return snapshot;
   });
 
@@ -1133,7 +1134,10 @@ function portableSnapshots(
   const sourceRows = new Map(current.sourceRows);
 
   const transformed = snapshots.map((snapshot) => {
-    for (const row of snapshot.character_source_instances) {
+    const orderedSources = topologicalSources(
+      snapshot.character_source_instances,
+    );
+    for (const row of orderedSources) {
       const oldId = Number(row.id);
       reserveSnapshotId(
         ids.character_source_instances,
@@ -1156,7 +1160,7 @@ function portableSnapshots(
       }
     }
 
-    const sources = snapshot.character_source_instances.map((row) => {
+    const sources = orderedSources.map((row) => {
       const oldId = Number(row.id);
       const sourceType = String(row.source_type);
       return {
