@@ -144,3 +144,35 @@ Status: done
 - Green → encoded `true` as SQLite `0` → codec persistence test failed at the exact
   stored `allowLegacy` assertion (`false` received) → restored → full Unit, build,
   and browser gates passed.
+
+## 2026-07-23 — Integrated Wave 1 review
+
+### Review increment W1-R1
+
+- Independently reviewed `6b9d164d2ff046eb77fad026c138a7ed6be545ae..HEAD`
+  across R10, G10, E10, D10, V10, and S10 against every cited PHP domain,
+  seeder, Unit, Feature, and abuse-test oracle.
+- Rechecked assertion sensitivity, SQLite-backed invariants, deterministic ordering
+  and fingerprints, active-catalog guards, cross-character ownership, and atomic
+  snapshot restore. No unresolved parity or ownership finding remains.
+- Fixed the one discovered integration defect: V10's hexadecimal decoder exposed
+  `Uint8Array<ArrayBufferLike>` to Web Crypto and failed the TypeScript build.
+  Returning its concrete `ArrayBuffer` preserves runtime behavior and satisfies the
+  `BufferSource` contract.
+
+### Test increment W1-T1
+
+- `npm test`: 13 files, 131 tests passed.
+- Programmatic Vitest Integration include: 3 files, 83 tests passed, including all
+  persisted class progression, eligibility, and character-state cases.
+- `npm run build`: TypeScript and Vite production build passed after the V10 fix.
+- Focused integrity verification: 1 file, 4 tests passed.
+
+### Sensitivity increment W1-S1
+
+- Green → removed eligible-search character ownership from the slot lookup → the
+  cross-character test failed at its intended `toThrow` assertion → restored →
+  targeted test passed.
+- Green → bypassed `CharacterState`'s restore transaction → the injected ID conflict
+  left changed metadata and deleted child rows, failing the exact persisted-state
+  rollback equality → restored → targeted Integration test passed.
