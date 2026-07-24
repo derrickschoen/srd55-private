@@ -384,3 +384,36 @@ Status: done
 - Green → suppressed stale revision-conflict state → the new Unit test failed
   at `session.stale` (`false` instead of `true`) while its durable-state
   assertions remained intact → restored → focused and full suites passed.
+
+## 2026-07-23 — Integrated Wave 8 review
+
+### Review increment W8-R1
+
+- Independently reviewed
+  `cd95e5675ac36b58c81c90637a023cc1922b2cb0..HEAD` and the six PHP Unit
+  oracle files plus all 28 frozen Feature workflows. The merged inventory
+  contains only T80/T81-owned files.
+- Fixed diluted parity assertions for exact character/list/workspace state,
+  assignment inverses, class/source/audit changes, reports, printable facts,
+  catalog pivots, and portable backups. Workflow 18 now creates its standalone
+  source; workflow 21 covers both PHP dataset branches; warning undo now
+  restores; failed backup imports prove byte-identical state.
+- No unresolved parity, persisted-SQLite, sensitivity, or ownership finding
+  remains.
+
+### Test increment W8-T1
+
+- `npm test`: 41 files, 314 tests passed.
+- `npm run typecheck`: passed.
+- Final owned Chromium run: 28/28 workflows passed.
+- Manifest count remained exactly 28; `git diff --check` passed; nothing is
+  staged and no generated artifact or sensitivity mutation remains.
+
+### Sensitivity increment W8-S1
+
+- Green → changed the exact T80 six-class report name expectation → filtered
+  Vitest failed at `report.character` with the persisted original name →
+  restored → filtered case passed.
+- Green → changed workflow 18's first expected persisted list constraint from
+  Wizard to Cleric → filtered Chromium failed at `allowed_spell_lists` with
+  the stored Wizard value → restored → filtered workflow passed.
