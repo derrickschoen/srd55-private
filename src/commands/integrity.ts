@@ -24,7 +24,7 @@ function hexadecimal(bytes: ArrayBuffer): string {
     .join('');
 }
 
-function bytesFromHex(value: string): Uint8Array {
+function bytesFromHex(value: string): ArrayBuffer {
   const result = new Uint8Array(value.length / 2);
   for (let index = 0; index < result.length; index += 1) {
     result[index] = Number.parseInt(
@@ -32,7 +32,7 @@ function bytesFromHex(value: string): Uint8Array {
       16,
     );
   }
-  return result;
+  return result.buffer;
 }
 
 function assertCharacterId(characterId: number): void {
