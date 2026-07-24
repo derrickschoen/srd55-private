@@ -17,6 +17,7 @@ import {
   type QueriesClient,
 } from '../../../queries/client';
 import type { OperationHistory } from '../../../queries/operation-history';
+import { RpcError } from '../../../rpc/protocol';
 import { defineScreen } from '../../screen';
 import type { ScreenContext } from '../../screen';
 import { renderDiceHelper } from './dice';
@@ -59,6 +60,7 @@ export class PlannerSession {
   history: OperationHistory | null = null;
   saving = false;
   error: string | null = null;
+  stale = false;
   readonly #undo: CharacterCommandPayload[] = [];
   readonly #redo: CharacterCommandPayload[] = [];
 
@@ -100,10 +102,7 @@ export class PlannerSession {
       await this.#refresh();
       return true;
     } catch (error) {
-      this.error =
-        error instanceof Error
-          ? error.message
-          : 'The change could not be saved.';
+      this.#recordError(error, 'The change could not be saved.');
       return false;
     } finally {
       this.saving = false;
@@ -127,8 +126,7 @@ export class PlannerSession {
       return true;
     } catch (error) {
       this.#undo.push(command);
-      this.error =
-        error instanceof Error ? error.message : 'Undo failed.';
+      this.#recordError(error, 'Undo failed.');
       return false;
     } finally {
       this.saving = false;
@@ -152,8 +150,7 @@ export class PlannerSession {
       return true;
     } catch (error) {
       this.#redo.push(command);
-      this.error =
-        error instanceof Error ? error.message : 'Redo failed.';
+      this.#recordError(error, 'Redo failed.');
       return false;
     } finally {
       this.saving = false;
@@ -207,6 +204,20 @@ export class PlannerSession {
     ]);
     this.workspace = workspace;
     this.history = history;
+  }
+
+  #recordError(error: unknown, fallback: string): void {
+    this.error = error instanceof Error ? error.message : fallback;
+    if (
+      error instanceof RpcError &&
+      error.code === 'handler_error' &&
+      error.data !== null &&
+      typeof error.data === 'object' &&
+      !Array.isArray(error.data) &&
+      Number.isSafeInteger(error.data.current_revision)
+    ) {
+      this.stale = true;
+    }
   }
 }
 
@@ -291,6 +302,12 @@ function renderPlanner(
     error.className = 'planner-error';
     error.setAttribute('role', 'alert');
     error.textContent = `Could not save: ${session.error}`;
+    if (session.stale) {
+      const reload = document.createElement('a');
+      reload.href = `/characters/${session.characterId}`;
+      reload.textContent = 'Reload this character';
+      error.append(' ', reload);
+    }
     shell.append(error);
   }
   const layout = document.createElement('main');
@@ -298,7 +315,11 @@ function renderPlanner(
   const primary = document.createElement('div');
   primary.className = 'planner-primary';
   primary.append(
-    renderDiceHelper(workspace.report.character.character_level),
+    renderDiceHelper(
+      workspace.slots,
+      workspace.report.character.character_level,
+      workspace.report.character.abilities,
+    ),
   );
 
   const mutate = async (
@@ -404,7 +425,7 @@ function renderPlanner(
       ),
     removeSource: (sourceId: number, displayName: string) =>
       confirmAction(
-        `Remove ${displayName}? Its spell choices will be preserved as orphaned slots.`,
+        `Remove ${displayName}? Its spell choices will be preserved as orphaned slots until you undo or replace them.`,
         () =>
           void mutate(() =>
             session.execute({
@@ -466,7 +487,7 @@ function renderPlanner(
       void mutate(() => session.createSavePoint(label)),
     restoreSavePoint: (id: number, label: string) =>
       confirmAction(
-        `Restore “${label}”? This restore can be undone.`,
+        `Restore “${label}”? Current unsaved history will be replaced, but this restore can be undone.`,
         () => void mutate(() => session.restoreSavePoint(id)),
       ),
   };

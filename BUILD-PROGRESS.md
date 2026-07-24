@@ -345,3 +345,42 @@ Status: done
   the new test failed at its intended persisted `spell_versions` assertion
   (`null` instead of the exact imported row) → restored → targeted, focused,
   and full suites passed.
+
+## 2026-07-23 — Integrated Wave 7 review
+
+### Review increment W7-R1
+
+- Independently reviewed
+  `69e2c9dd304aaa1cf76f2de023cc987a5a3cbf9a..HEAD` for U70, U71, and U72
+  against every named PHP/Vue oracle. The merged inventory contains only
+  chunk-owned files.
+- Fixed U71 parity gaps: restored the oracle's selected-spell/manual dice
+  profiles, profile-specific inputs, exact metrics, effect eligibility,
+  replayable traces and assumptions; added Pact Magic and Wizard spellbook
+  states to the live report; restored exact destructive/save-point wording;
+  and exposed the stale-revision reload state.
+- Fixed profile fields whose semantic `hidden` state was overridden by planner
+  flex CSS. Strengthened the compressed dice assertions to cover the omitted
+  oracle probability-mass, critical, cap, defense, and trace branches.
+- Added a real SQLite browser fixture that persists warning acknowledgement,
+  override, clear, eligible replacement selection, and source creation, then
+  reloads and rechecks stored rows. No unresolved parity, persistence,
+  assertion-sensitivity, or ownership finding remains.
+
+### Test increment W7-T1
+
+- `npm test`: 40 files, 312 tests passed.
+- `npm run build`: TypeScript and Vite production build passed.
+- Relevant Chromium run: 6 tests passed across character list, planner,
+  reports, and print; final post-review planner rerun: 2 tests passed.
+- Report/print tests retained whole-database hash/export comparisons proving
+  presentation is read-only. `git diff --check` passed.
+
+### Sensitivity increment W7-S1
+
+- Green → renamed the live Pact Magic label → the new browser parity workflow
+  failed at the exact `Pact Magic: 2 × level 3` visibility assertion → restored
+  → the workflow passed.
+- Green → suppressed stale revision-conflict state → the new Unit test failed
+  at `session.stale` (`false` instead of `true`) while its durable-state
+  assertions remained intact → restored → focused and full suites passed.

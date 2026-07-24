@@ -105,6 +105,8 @@ export function renderWarnings(options: {
   );
   const slots = document.createElement('div');
   slots.className = 'slot-badges';
+  const slotsHeading = document.createElement('h3');
+  slotsHeading.textContent = 'Shared spell slots';
   for (const slot of options.report.caster.slots) {
     const badge = document.createElement('span');
     badge.className = 'badge';
@@ -114,7 +116,13 @@ export function renderWarnings(options: {
   if (options.report.caster.slots.length === 0) {
     slots.textContent = 'No shared spell slots.';
   }
-  live.append(heading, metrics, slots);
+  live.append(heading, metrics, slotsHeading, slots);
+  if (options.report.caster.pact_magic !== null) {
+    const pact = document.createElement('p');
+    pact.className = 'pact-magic';
+    pact.textContent = `Pact Magic: ${options.report.caster.pact_magic.count} × level ${options.report.caster.pact_magic.level}`;
+    live.append(pact);
+  }
   aside.append(live);
 
   const ceilings = document.createElement('section');
@@ -171,6 +179,46 @@ export function renderWarnings(options: {
     }
   }
   aside.append(warningSection);
+
+  const wizard = document.createElement('section');
+  wizard.className = 'planner-panel';
+  const wizardHeading = document.createElement('h2');
+  wizardHeading.textContent = 'Wizard spellbook access';
+  const wizardExplanation = document.createElement('p');
+  wizardExplanation.className = 'wizard-explanation';
+  wizardExplanation.textContent = options.report.wizard.explanation;
+  const wizardStates = document.createElement('div');
+  wizardStates.className = 'wizard-states';
+  const stateList = (
+    heading: string,
+    entries: readonly {
+      readonly spell_name: string;
+      readonly active?: boolean;
+    }[],
+  ): HTMLElement => {
+    const section = document.createElement('section');
+    const title = document.createElement('h3');
+    title.textContent = `${heading} · ${entries.length}`;
+    const list = document.createElement('ul');
+    for (const entry of entries) {
+      const item = document.createElement('li');
+      item.textContent =
+        entry.spell_name +
+        (entry.active === false
+          ? ' (unavailable — removed from catalog)'
+          : '');
+      list.append(item);
+    }
+    section.append(title, list);
+    return section;
+  };
+  wizardStates.append(
+    stateList('In my book', options.report.wizard.spellbook),
+    stateList('Prepared', options.report.wizard.prepared),
+    stateList('Ritual-only', options.report.wizard.ritual_only),
+  );
+  wizard.append(wizardHeading, wizardExplanation, wizardStates);
+  aside.append(wizard);
 
   const invalid = document.createElement('section');
   invalid.className = 'planner-panel';
