@@ -316,3 +316,32 @@ Status: done
 - Green → removed source-group attack bonuses while retaining spell-level stats
   → the new persisted Cleric group assertion failed with null instead of 4 →
   restored → focused and full suites passed.
+
+## 2026-07-23 — Integrated Wave 6 review
+
+### Review increment W6-R1
+
+- Independently reviewed
+  `019ec41e91a32216c91bac4ac6a1dd194cd73d26..HEAD` for Q60 against every
+  named character/query builder, controller, and Feature-test oracle. The
+  merged path inventory contains only Q60-owned files.
+- Fixed the shared-client scope gap: `QueriesClient` now composes the existing
+  typed catalog import/mutation client alongside catalog reads and character
+  CRUD, preserving the single integration surface required by Q60.
+- Replaced permissive RPC smoke checks with exact endpoint/DTO assertions and a
+  whole-SQLite before/after hash covering character, list, workspace,
+  eligibility, catalog, report, printable, and history reads.
+
+### Test increment W6-T1
+
+- Focused Q60 Integration run: 3 files, 10 tests passed.
+- `npm test`: 36 files, 297 tests passed.
+- `npm run typecheck`: passed.
+- `git diff --check`: passed.
+
+### Sensitivity increment W6-S1
+
+- Green → forced the newly composed catalog client import into dry-run mode →
+  the new test failed at its intended persisted `spell_versions` assertion
+  (`null` instead of the exact imported row) → restored → targeted, focused,
+  and full suites passed.
