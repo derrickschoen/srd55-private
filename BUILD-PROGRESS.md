@@ -246,3 +246,37 @@ Status: done
 - Green → disabled subclass-definition ability lookup → the persisted subclass
   test received null ability/modifier/attack/DC at its exact route assertion →
   restored → targeted Integration test passed.
+
+## 2026-07-23 — Integrated Wave 4 review
+
+### Review increment W4-R1
+
+- Independently reviewed
+  `cb8402c1d63cbbd7c388e2e8e81c8d61d7fe5fb8..HEAD` for C41, C42, C43, and R40
+  against every named PHP command, report, Feature, guard, abuse, progression,
+  and seeder oracle. The merged path inventory contains only chunk-owned files.
+- Rechecked persisted ownership and locks, active eligibility, orphan diagnostics,
+  timestamps and prior state, signed/revalidated inverses, audit-diff inputs,
+  source/class regeneration and rollback, warning fingerprints/invalidation,
+  snapshot reference validation, deterministic report ordering, slot pools,
+  Wizard splits, acknowledgements, invalid selections, and exact callouts.
+- No unresolved implementation parity or ownership finding remains. Strengthened
+  R40's insensitive coverage by asserting all base-class abilities/subclass values
+  and hashing every persisted SQLite table (including `sqlite_sequence`) before
+  and after report construction instead of only character-owned rows.
+
+### Test increment W4-T1
+
+- Focused Wave 4 Integration run: 4 files, 25 tests passed.
+- `npm test`: 17 files, 144 Unit tests passed.
+- `npm run build`: TypeScript and Vite production build passed.
+- `git diff --check` passed.
+
+### Sensitivity increment W4-S1
+
+- Green → removed the base-class spellcasting-ability fallback → the golden report
+  failed at the new exact Paladin/Ranger/Warlock/Wizard ability assertion →
+  restored → targeted test passed.
+- Green → introduced a write to `class_definitions` during report construction →
+  the expanded whole-database read-only hash assertion failed → restored →
+  targeted test passed.
