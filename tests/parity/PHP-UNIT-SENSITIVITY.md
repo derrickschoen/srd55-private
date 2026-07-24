@@ -59,3 +59,12 @@ Each cited owner transition records green → intentional failure → restoratio
 → green. T80's map therefore has sensitivity evidence for every oracle case,
 while its two added tests have their own directly observed red/green
 transitions.
+
+## Integrated Wave 8 review transition
+
+- Green → changed the newly exact six-class report character name assertion to
+  `Six-class parity sensitivity mutant`.
+- Red: the filtered Vitest run failed at the intended `report.character`
+  equality (`Six-class parity` received).
+- Restored the assertion and reran the filtered case green (1 passed,
+  1 skipped). No production file was edited.

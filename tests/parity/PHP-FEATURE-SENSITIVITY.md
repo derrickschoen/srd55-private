@@ -40,3 +40,12 @@ bypass checks below; no production file was changed by T81.
    restored. The final complete Chromium run verifies the restored path.
 
 The transitions leave no bypass or mutation in the working tree.
+
+## Integrated Wave 8 review transition
+
+- Green → changed the first expected persisted list constraint in workflow 18
+  from `["Wizard"]` to `["Cleric"]`.
+- Red: filtered Chromium failed at the intended
+  `allowed_spell_lists` equality, receiving `["Wizard"]`.
+- Restored the assertion and reran workflow 18 green (1/1). No production file
+  was edited.

@@ -126,6 +126,54 @@ function forCharacter(allRows: Row[], characterId: number): Row[] {
   return allRows.filter((row) => row.character_id === characterId);
 }
 
+async function portableTableCounts(
+  page: Page,
+  characterId: number,
+): Promise<Record<string, number>> {
+  const loadouts = forCharacter(
+    await rows(page, 'spell_loadouts'),
+    characterId,
+  );
+  const loadoutIds = new Set(loadouts.map((row) => row.id));
+  return {
+    character_class_levels: forCharacter(
+      await rows(page, 'character_class_levels'),
+      characterId,
+    ).length,
+    character_rule_overrides: forCharacter(
+      await rows(page, 'character_rule_overrides'),
+      characterId,
+    ).length,
+    character_save_points: forCharacter(
+      await rows(page, 'character_save_points'),
+      characterId,
+    ).length,
+    character_source_instances: forCharacter(
+      await rows(page, 'character_source_instances'),
+      characterId,
+    ).length,
+    character_spell_preferences: forCharacter(
+      await rows(page, 'character_spell_preferences'),
+      characterId,
+    ).length,
+    spell_loadout_entries: (await rows(page, 'spell_loadout_entries'))
+      .filter((row) => loadoutIds.has(row.spell_loadout_id)).length,
+    spell_loadouts: loadouts.length,
+    spell_selection_slots: forCharacter(
+      await rows(page, 'spell_selection_slots'),
+      characterId,
+    ).length,
+    warning_acknowledgements: forCharacter(
+      await rows(page, 'warning_acknowledgements'),
+      characterId,
+    ).length,
+    wizard_spellbook_entries: forCharacter(
+      await rows(page, 'wizard_spellbook_entries'),
+      characterId,
+    ).length,
+  };
+}
+
 test('serves the seeded character list and editable workspace', async ({
   page,
 }) => {
@@ -139,12 +187,13 @@ test('serves the seeded character list and editable workspace', async ({
   );
 
   expect(cards).toEqual([
-    expect.objectContaining({
+    {
       id: workspaceImage.ids.character,
       name: 'R40 Golden',
       level: 8,
       classes: ['Paladin 1', 'Ranger 1', 'Warlock 5', 'Wizard 1'],
-    }),
+      warning_count: 4,
+    },
   ]);
   expect(workspace).toMatchObject({
     revision: 0,
@@ -155,7 +204,14 @@ test('serves the seeded character list and editable workspace', async ({
         proficiency_bonus: 3,
       },
       caster: { pact_magic: { count: 2, level: 3 } },
+      summary: {
+        unique_spells: 8,
+        access_routes: 9,
+        warning_count: 4,
+      },
     },
+    spell_lists: ['Cleric', 'Druid', 'Wizard'],
+    save_points: [],
   });
   expect(workspace.source_catalog.feat).toContainEqual(
     expect.objectContaining({ configuration_kind: 'magic_initiate' }),
@@ -165,7 +221,19 @@ test('serves the seeded character list and editable workspace', async ({
       configuration_kind: 'origin_feat_magic_initiate',
     }),
   );
-  expect(workspace.slots.length).toBeGreaterThan(10);
+  expect(workspace.source_catalog.background).toContainEqual(
+    expect.objectContaining({
+      configuration_kind: 'origin_feat_magic_initiate',
+    }),
+  );
+  expect(workspace.order_sources).toEqual([]);
+  expect(workspace.slots.map((slot: Row) => slot.id).sort((a: number, b: number) => a - b))
+    .toEqual(
+      forCharacter(
+        await rows(page, 'spell_selection_slots'),
+        workspaceImage.ids.character,
+      ).map((row) => row.id).sort((a, b) => a - b),
+    );
 
   await page.goto(`/characters/${workspaceImage.ids.character}`);
   await expect(page.locator('#planner-status')).toHaveAttribute(
@@ -190,10 +258,13 @@ test('builds the complete character list card contract in deterministic order', 
   const second = await rpc<any[]>(page, 'queries.characters.list', {});
   expect(first).toEqual(second);
   expect(first.map((card) => card.name)).toEqual(['R40 Golden']);
-  expect(first[0]).toMatchObject({
+  expect(first).toEqual([{
+    id: workspaceImage.ids.character,
+    name: 'R40 Golden',
     level: 8,
     classes: ['Paladin 1', 'Ranger 1', 'Warlock 5', 'Wizard 1'],
-  });
+    warning_count: 4,
+  }]);
   expect(
     forCharacter(
       await rows(page, 'character_class_levels'),
@@ -229,6 +300,13 @@ test('builds the complete workspace editing contract for the seeded character', 
   ]);
   expect(workspace.revision).toBe(0);
   expect(workspace.allow_legacy).toBe(false);
+  expect(workspace.spell_lists).toEqual(['Cleric', 'Druid', 'Wizard']);
+  expect(workspace.save_points).toEqual([]);
+  expect(workspace.report.summary).toEqual({
+    unique_spells: 8,
+    access_routes: 9,
+    warning_count: 4,
+  });
   expect(workspace.classes.map((item: any) => item.name)).toEqual([
     'Paladin',
     'Ranger',
@@ -265,6 +343,37 @@ test('builds the complete workspace editing contract for the seeded character', 
       }),
     ]),
   );
+  expect(
+    workspace.configurable_sources
+      .map((source: Row) => ({
+        display_name: source.display_name,
+        chosen_list: source.chosen_list,
+        spellcasting_ability: source.spellcasting_ability,
+      }))
+      .sort((a: Row, b: Row) =>
+        String(a.display_name).localeCompare(String(b.display_name))),
+  ).toEqual([
+    {
+      display_name: 'Magic Initiate: Cleric',
+      chosen_list: 'Cleric',
+      spellcasting_ability: 'wisdom',
+    },
+    {
+      display_name: 'Magic Initiate: Druid',
+      chosen_list: 'Druid',
+      spellcasting_ability: 'intelligence',
+    },
+    {
+      display_name: 'Magic Initiate: Wizard',
+      chosen_list: 'Wizard',
+      spellcasting_ability: 'intelligence',
+    },
+    {
+      display_name: 'Wisdom parity source',
+      chosen_list: 'Druid',
+      spellcasting_ability: 'wisdom',
+    },
+  ]);
   expect(workspace.slots[0]).toEqual(
     expect.objectContaining({
       id: expect.any(Number),
@@ -371,6 +480,15 @@ test('captures every restorable character table and reports exact state differen
     'warning_acknowledgements',
     'wizard_spellbook_entries',
   ]);
+  for (const table of [
+    'character_rule_overrides',
+    'character_save_points',
+    'character_spell_preferences',
+    'spell_loadout_entries',
+    'spell_loadouts',
+  ]) {
+    expect(document.tables[table], `${table} is captured exactly`).toEqual([]);
+  }
   expect(await databaseBytes(page)).toEqual(before);
 
   await execute(
@@ -482,6 +600,9 @@ test('changes one slot while leaving every other slot byte-identical', async ({
 
 test('undo restores the prior spell selection', async ({ page }) => {
   await install(page, workspaceImage);
+  const original = (await rows(page, 'spell_selection_slots')).find(
+    (row) => row.id === workspaceImage.ids.targetSlot,
+  )!;
   const changed = await execute(
     page,
     workspaceImage.ids.character,
@@ -494,12 +615,16 @@ test('undo restores the prior spell selection', async ({ page }) => {
     },
     8,
   );
-  expect(changed.inverse).toMatchObject({
+  expect(changed.inverse).toEqual({
     type: 'set_slot',
     slot_id: workspaceImage.ids.targetSlot,
     mode: 'restore',
     state: {
       current_spell_version_id: workspaceImage.ids.originalSpell,
+      selection_eligibility: original.selection_eligibility,
+      selection_invalid_reason: original.selection_invalid_reason,
+      state: original.state,
+      override_note: original.override_note,
     },
     integrity: expect.any(String),
   });
@@ -823,7 +948,10 @@ test('adding a class level generates new slots without disturbing existing slots
   );
   expect(after.filter((row) => before.some((old) => old.id === row.id)))
     .toEqual(before);
-  expect(after.length).toBeGreaterThan(before.length);
+  const addedSlots = after.filter(
+    (row) => !before.some((old) => old.id === row.id),
+  );
+  expect(addedSlots).toHaveLength(6);
   expect(
     forCharacter(
       await rows(page, 'character_class_levels'),
@@ -832,7 +960,11 @@ test('adding a class level generates new slots without disturbing existing slots
       (row) =>
         row.class_definition_id === workspaceImage.ids.sorcererClass,
     ),
-  ).toMatchObject({ level: 1, is_starting_class: 0 });
+  ).toMatchObject({
+    level: 1,
+    is_starting_class: 0,
+    subclass_definition_id: null,
+  });
   expect(
     forCharacter(
       await rows(page, 'character_source_instances'),
@@ -845,7 +977,19 @@ test('adding a class level generates new slots without disturbing existing slots
     display_name: 'Sorcerer 1',
     acquired_at_character_level: 9,
     state: 'active',
+    config: '{"spellcasting_ability":"charisma"}',
   });
+  expect(new Set(addedSlots.map((row) => row.source_instance_id))).toEqual(
+    new Set([
+      forCharacter(
+        await rows(page, 'character_source_instances'),
+        workspaceImage.ids.character,
+      ).find(
+        (row) =>
+          row.source_definition_id === workspaceImage.ids.sorcererClass,
+      )!.id,
+    ]),
+  );
 });
 
 test('undoes a structural class change through its snapshot inverse', async ({
@@ -981,6 +1125,14 @@ test('round-trips character rules and rejects legacy selection while legacy rule
       (row) => row.id === workspaceImage.ids.character,
     ),
   ).toMatchObject({ allow_legacy: 1, revision: 1 });
+  const rulesAudit = (await rows(page, 'change_log')).filter(
+    (row) => row.operation_uuid === operation(16),
+  );
+  expect(rulesAudit).toHaveLength(1);
+  expect(new Set(rulesAudit.map((row) => row.group_id)).size).toBe(1);
+  expect(rulesAudit.map((row) => row.action_type)).toEqual([
+    'update_character_rules',
+  ]);
   await execute(
     page,
     workspaceImage.ids.character,
@@ -1020,6 +1172,11 @@ test('round-trips character rules and rejects legacy selection while legacy rule
       workspaceImage.ids.character,
     ),
   ).toHaveLength(2);
+  expect(
+    (await rows(page, 'change_log')).filter(
+      (row) => row.operation_uuid === operation(161),
+    ),
+  ).toEqual([]);
 });
 
 test('round-trips source configuration with one audit group and rejects unsupported Magic Initiate lists', async ({
@@ -1055,6 +1212,16 @@ test('round-trips source configuration with one audit group and rejects unsuppor
       workspaceImage.ids.character,
     ),
   ).toEqual([]);
+  expect({
+    sources: forCharacter(
+      await rows(page, 'character_source_instances'),
+      workspaceImage.ids.character,
+    ),
+    slots: forCharacter(
+      await rows(page, 'spell_selection_slots'),
+      workspaceImage.ids.character,
+    ),
+  }).toEqual(before);
 
   const changed = await execute(
     page,
@@ -1101,6 +1268,47 @@ test('round-trips source configuration with one audit group and rejects unsuppor
   expect(new Set(audit.map((row) => row.action_type))).toEqual(
     new Set(['update_source_config']),
   );
+  const after = {
+    sources: forCharacter(
+      await rows(page, 'character_source_instances'),
+      workspaceImage.ids.character,
+    ),
+    slots: forCharacter(
+      await rows(page, 'spell_selection_slots'),
+      workspaceImage.ids.character,
+    ),
+  };
+  const replay = await execute(
+    page,
+    workspaceImage.ids.character,
+    0,
+    {
+      type: 'update_source_config',
+      source_instance_id: workspaceImage.ids.nestedChild,
+      chosen_list: 'Cleric',
+    },
+    170,
+  );
+  expect(replay).toMatchObject({
+    revision: 1,
+    idempotent_replay: true,
+  });
+  expect({
+    sources: forCharacter(
+      await rows(page, 'character_source_instances'),
+      workspaceImage.ids.character,
+    ),
+    slots: forCharacter(
+      await rows(page, 'spell_selection_slots'),
+      workspaceImage.ids.character,
+    ),
+  }).toEqual(after);
+  expect(
+    forCharacter(
+      await rows(page, 'character_operations'),
+      workspaceImage.ids.character,
+    ),
+  ).toHaveLength(1);
   await execute(
     page,
     workspaceImage.ids.character,
@@ -1124,42 +1332,65 @@ test('updates a standalone Magic Initiate source and regenerates its slot constr
   page,
 }) => {
   await install(page, workspaceImage);
+  const character = await rpc<any>(page, 'queries.characters.create', {
+    name: 'Standalone Magic Initiate',
+  });
   await execute(
     page,
-    workspaceImage.ids.character,
+    character.id,
     0,
     {
-      type: 'update_source_config',
-      source_instance_id: workspaceImage.ids.magicInitiateSource,
-      chosen_list: 'Cleric',
+      type: 'add_source',
+      source_type: 'feat',
+      source_definition_id: workspaceImage.ids.magicInitiateDefinition,
+      config: {
+        chosen_list: 'Cleric',
+        spellcasting_ability: 'wisdom',
+      },
     },
     18,
   );
+  const source = forCharacter(
+    await rows(page, 'character_source_instances'),
+    character.id,
+  )[0]!;
+  await execute(
+    page,
+    character.id,
+    1,
+    {
+      type: 'update_source_config',
+      source_instance_id: source.id,
+      chosen_list: 'Wizard',
+    },
+    180,
+  );
   expect(
     (await rows(page, 'character_source_instances')).find(
-      (row) => row.id === workspaceImage.ids.magicInitiateSource,
+      (row) => row.id === source.id,
     ),
   ).toMatchObject({
-    display_name: 'Magic Initiate: Cleric',
+    parent_source_instance_id: null,
+    display_name: 'Magic Initiate: Wizard',
     config:
-      '{"chosen_list":"Cleric","spellcasting_ability":"wisdom"}',
+      '{"chosen_list":"Wizard","spellcasting_ability":"intelligence"}',
   });
   const generated = (await rows(page, 'spell_selection_slots')).filter(
     (row) =>
-      row.source_instance_id === workspaceImage.ids.magicInitiateSource &&
+      row.source_instance_id === source.id &&
       String(row.rule_key).startsWith('magic-initiate-'),
   );
   expect(generated).toHaveLength(3);
   expect(generated.map((row) => row.allowed_spell_lists)).toEqual([
-    '["Cleric"]',
-    '["Cleric"]',
-    '["Cleric"]',
+    '["Wizard"]',
+    '["Wizard"]',
+    '["Wizard"]',
   ]);
   expect(
     (await rows(page, 'characters')).find(
-      (row) => row.id === workspaceImage.ids.character,
+      (row) => row.id === character.id,
     ),
-  ).toMatchObject({ revision: 1 });
+  ).toMatchObject({ revision: 2 });
 });
 
 test('adds a class source through the command with its level, DSL slots, and spellbook atomically', async ({
@@ -1207,7 +1438,7 @@ test('adds a class source through the command with its level, DSL slots, and spe
     ),
   ).toHaveLength(6);
 
-  const beforeBadWizard = {
+  const afterSorcerer = {
     levels: forCharacter(
       await rows(page, 'character_class_levels'),
       character.id,
@@ -1221,6 +1452,33 @@ test('adds a class source through the command with its level, DSL slots, and spe
       character.id,
     ),
   };
+  const duplicate = await rejectedRpc(page, 'commands.execute', {
+    character_id: character.id,
+    operation_uuid: operation(189),
+    expected_revision: 1,
+    command: {
+      type: 'add_source',
+      source_type: 'class',
+      source_definition_id: workspaceImage.ids.sorcererClass,
+      config: { level: 1 },
+    },
+  });
+  expect(duplicate.message).toBe('Sorcerer is not repeatable.');
+  expect({
+    levels: forCharacter(
+      await rows(page, 'character_class_levels'),
+      character.id,
+    ),
+    sources: forCharacter(
+      await rows(page, 'character_source_instances'),
+      character.id,
+    ),
+    slots: forCharacter(
+      await rows(page, 'spell_selection_slots'),
+      character.id,
+    ),
+  }).toEqual(afterSorcerer);
+
   const invalid = await rejectedRpc(page, 'commands.execute', {
     character_id: character.id,
     operation_uuid: operation(190),
@@ -1248,7 +1506,7 @@ test('adds a class source through the command with its level, DSL slots, and spe
       await rows(page, 'spell_selection_slots'),
       character.id,
     ),
-  }).toEqual(beforeBadWizard);
+  }).toEqual(afterSorcerer);
 
   await execute(
     page,
@@ -1267,16 +1525,33 @@ test('adds a class source through the command with its level, DSL slots, and spe
     },
     191,
   );
-  expect(
-    forCharacter(
-      await rows(page, 'wizard_spellbook_entries'),
-      character.id,
-    ),
-  ).toEqual([
+  const wizardSource = forCharacter(
+    await rows(page, 'character_source_instances'),
+    character.id,
+  ).find(
+    (row) => row.source_definition_id === workspaceImage.ids.wizardClass,
+  )!;
+  expect(wizardSource).toMatchObject({
+    display_name: 'Wizard 1',
+    acquired_at_character_level: 2,
+    config:
+      '{"spellcasting_ability":"intelligence","wizard_spellbook_acquisitions":[{"spell_version_key":"2024:parity-shield"}]}',
+  });
+  expect(forCharacter(
+    await rows(page, 'wizard_spellbook_entries'),
+    character.id,
+  )).toEqual([
     expect.objectContaining({
       spell_version_id: workspaceImage.ids.acquisitionSpell,
     }),
   ]);
+  expect(
+    new Set(
+      (await rows(page, 'change_log'))
+        .filter((row) => row.character_id === character.id)
+        .map((row) => row.action_type),
+    ),
+  ).toEqual(new Set(['add_source']));
   await execute(page, character.id, 2, added.inverse, 192);
   expect(
     forCharacter(await rows(page, 'character_class_levels'), character.id),
@@ -1290,6 +1565,9 @@ test('adds a class source through the command with its level, DSL slots, and spe
   expect(
     forCharacter(await rows(page, 'spell_selection_slots'), character.id),
   ).toEqual([]);
+  expect(
+    (await rows(page, 'characters')).find((row) => row.id === character.id),
+  ).toMatchObject({ revision: 3 });
 });
 
 test('adds species and background roots with nested Magic Initiate chains and rejects non-repeatable duplicates', async ({
@@ -1411,57 +1689,62 @@ test('removes a root source through the command and cascades to its nested feat'
   page,
 }) => {
   await install(page, workspaceImage);
-  const sourceBefore = (await rows(page, 'character_source_instances'))
-    .filter((row) =>
-      [workspaceImage.ids.nestedRoot, workspaceImage.ids.nestedChild]
-        .includes(row.id),
+  for (const [index, rootId, childId] of [
+    [
+      0,
+      workspaceImage.ids.nestedRoot,
+      workspaceImage.ids.nestedChild,
+    ],
+    [
+      1,
+      workspaceImage.ids.backgroundRoot,
+      workspaceImage.ids.backgroundChild,
+    ],
+  ] as const) {
+    const sourceBefore = (await rows(page, 'character_source_instances'))
+      .filter((row) => [rootId, childId].includes(row.id));
+    const slotBefore = (await rows(page, 'spell_selection_slots')).filter(
+      (row) => row.source_instance_id === childId,
     );
-  const slotBefore = (await rows(page, 'spell_selection_slots')).filter(
-    (row) => row.source_instance_id === workspaceImage.ids.nestedChild,
-  );
-  const removed = await execute(
-    page,
-    workspaceImage.ids.character,
-    0,
-    {
-      type: 'remove_source',
-      source_instance_id: workspaceImage.ids.nestedRoot,
-    },
-    21,
-  );
-  expect(
-    (await rows(page, 'character_source_instances'))
-      .filter((row) =>
-        [workspaceImage.ids.nestedRoot, workspaceImage.ids.nestedChild]
-          .includes(row.id),
-      )
-      .map((row) => row.state),
-  ).toEqual(['tombstoned', 'tombstoned']);
-  expect(
-    (await rows(page, 'spell_selection_slots'))
-      .filter(
-        (row) => row.source_instance_id === workspaceImage.ids.nestedChild,
-      )
-      .map((row) => row.state),
-  ).toEqual(['orphaned', 'orphaned', 'orphaned']);
-  await execute(
-    page,
-    workspaceImage.ids.character,
-    1,
-    removed.inverse,
-    210,
-  );
-  expect(
-    (await rows(page, 'character_source_instances')).filter((row) =>
-      [workspaceImage.ids.nestedRoot, workspaceImage.ids.nestedChild]
-        .includes(row.id),
-    ),
-  ).toEqual(sourceBefore);
-  expect(
-    (await rows(page, 'spell_selection_slots')).filter(
-      (row) => row.source_instance_id === workspaceImage.ids.nestedChild,
-    ),
-  ).toEqual(slotBefore);
+    const expectedRevision = index * 2;
+    const removed = await execute(
+      page,
+      workspaceImage.ids.character,
+      expectedRevision,
+      {
+        type: 'remove_source',
+        source_instance_id: rootId,
+      },
+      21 + index,
+    );
+    expect(
+      (await rows(page, 'character_source_instances'))
+        .filter((row) => [rootId, childId].includes(row.id))
+        .map((row) => row.state),
+    ).toEqual(['tombstoned', 'tombstoned']);
+    expect(
+      (await rows(page, 'spell_selection_slots'))
+        .filter((row) => row.source_instance_id === childId)
+        .map((row) => row.state),
+    ).toEqual(['orphaned', 'orphaned', 'orphaned']);
+    await execute(
+      page,
+      workspaceImage.ids.character,
+      expectedRevision + 1,
+      removed.inverse,
+      210 + index,
+    );
+    expect(
+      (await rows(page, 'character_source_instances')).filter((row) =>
+        [rootId, childId].includes(row.id),
+      ),
+    ).toEqual(sourceBefore);
+    expect(
+      (await rows(page, 'spell_selection_slots')).filter(
+        (row) => row.source_instance_id === childId,
+      ),
+    ).toEqual(slotBefore);
+  }
 });
 
 test('round-trips warning acknowledgement with idempotent replay and grouped audit rows', async ({
@@ -1495,6 +1778,12 @@ test('round-trips warning acknowledgement with idempotent replay and grouped aud
     },
     22,
   );
+  expect(changed.inverse).toEqual({
+    type: 'acknowledge_warning',
+    mode: 'delete',
+    warning_fingerprint: warning.warning_fingerprint,
+    integrity: expect.any(String),
+  });
   expect(
     forCharacter(
       await rows(page, 'warning_acknowledgements'),
@@ -1533,24 +1822,48 @@ test('round-trips warning acknowledgement with idempotent replay and grouped aud
     action_type: 'acknowledge_warning',
     reversible: 1,
   });
-  await execute(
+  const deleted = await execute(
     page,
     workspaceImage.ids.character,
     2,
     changed.inverse,
     220,
   );
+  expect(deleted.inverse).toEqual({
+    type: 'acknowledge_warning',
+    warning_fingerprint: warning.warning_fingerprint,
+    note: 'Intentional.',
+  });
   expect(
     forCharacter(
       await rows(page, 'warning_acknowledgements'),
       workspaceImage.ids.character,
     ),
   ).toEqual([]);
+  await execute(
+    page,
+    workspaceImage.ids.character,
+    3,
+    deleted.inverse,
+    221,
+  );
+  expect(
+    forCharacter(
+      await rows(page, 'warning_acknowledgements'),
+      workspaceImage.ids.character,
+    ),
+  ).toEqual([
+    expect.objectContaining({
+      warning_fingerprint: warning.warning_fingerprint,
+      note: 'Intentional.',
+      invalidated_at: null,
+    }),
+  ]);
   expect(
     (await rows(page, 'characters')).find(
       (row) => row.id === workspaceImage.ids.character,
     ),
-  ).toMatchObject({ revision: 3 });
+  ).toMatchObject({ revision: 4 });
 });
 
 test('merges a stale slot edit only when intervening operations left that slot untouched', async ({
@@ -1648,6 +1961,57 @@ test('builds the golden read-only report values and duplicate classifications', 
     pact_magic: { count: 2, level: 3 },
   });
   expect(
+    report.classes.map((entry: Row) => ({
+      name: entry.name,
+      subclass: entry.subclass,
+      level: entry.class_level,
+      ability: entry.spellcasting_ability,
+      progression: entry.progression_type,
+      prepared: entry.prepared_count,
+      maximum: entry.max_preparable_level,
+    })),
+  ).toEqual([
+    {
+      name: 'Paladin',
+      subclass: null,
+      level: 1,
+      ability: 'charisma',
+      progression: 'half_up',
+      prepared: 2,
+      maximum: 1,
+    },
+    {
+      name: 'Ranger',
+      subclass: null,
+      level: 1,
+      ability: 'wisdom',
+      progression: 'half_up',
+      prepared: 2,
+      maximum: 1,
+    },
+    {
+      name: 'Warlock',
+      subclass: null,
+      level: 5,
+      ability: 'charisma',
+      progression: 'pact',
+      prepared: 6,
+      maximum: 3,
+    },
+    {
+      name: 'Wizard',
+      subclass: null,
+      level: 1,
+      ability: 'intelligence',
+      progression: 'full',
+      prepared: 4,
+      maximum: 1,
+    },
+  ]);
+  expect(report.preparation_callout).toBe(
+    'This build possesses shared Spellcasting slots through 2nd level and Pact Magic slots at 3rd level. Either pool can cast an eligible prepared spell. Class-specific preparation limits reach 3rd-level spells; a slot from either pool does not unlock higher-level choices for another class.',
+  );
+  expect(
     report.access_routes
       .filter((route: any) => route.spell_name === 'Mage Hand')
       .map((route: any) => route.source_name),
@@ -1656,7 +2020,12 @@ test('builds the golden read-only report values and duplicate classifications', 
     report.duplicate_assessments.find(
       (item: any) => item.spell_name === 'Mage Hand',
     ),
-  ).toMatchObject({ category: 'wasteful' });
+  ).toMatchObject({
+    category: 'wasteful',
+    selection_count: 2,
+    sources: ['Magic Initiate: Wizard', 'Wizard 1'],
+    acknowledgement: null,
+  });
   expect(
     report.duplicate_assessments.find(
       (item: any) => item.spell_name === 'Shield',
@@ -1667,10 +2036,67 @@ test('builds the golden read-only report values and duplicate classifications', 
       expect.objectContaining({ edition: '2014' }),
       expect.objectContaining({ edition: '2024' }),
     ],
+    selection_count: 2,
+    acknowledgement: null,
   });
-  expect(report.invalid_selections.map((slot: any) => slot.id)).toEqual(
-    reportImage.ids.invalidSlots,
+  expect(
+    report.duplicate_assessments.find(
+      (item: Row) => item.spell_name === 'Magic Missile',
+    ),
+  ).toMatchObject({
+    category: 'none',
+    selection_count: 1,
+  });
+  expect(
+    report.wizard.spellbook.map((entry: Row) => ({
+      name: entry.spell_name,
+      prepared: entry.prepared,
+      active: entry.active,
+    })),
+  ).toEqual([
+    { name: 'Detect Magic', prepared: false, active: true },
+    { name: 'Mage Armor', prepared: true, active: true },
+    { name: 'Magic Missile', prepared: true, active: true },
+  ]);
+  expect(report.wizard.prepared.map((entry: Row) => entry.spell_name)).toEqual([
+    'Mage Armor',
+    'Magic Missile',
+    'Shield',
+    'Shield',
+  ]);
+  expect(
+    report.wizard.ritual_only.map((entry: Row) => entry.spell_name),
+  ).toEqual(['Detect Magic']);
+  expect(report.wizard.explanation).toContain(
+    'consumes no preparation capacity',
   );
+  expect(
+    report.invalid_selections.map((slot: Row) => ({
+      id: slot.id,
+      state: slot.state,
+      eligibility: slot.eligibility,
+      reason: slot.invalid_reason ?? slot.orphan_reason,
+    })),
+  ).toEqual([
+    {
+      id: reportImage.ids.invalidSlots[0],
+      state: 'orphaned',
+      eligibility: 'unselected',
+      reason: 'grant_rule_removed',
+    },
+    {
+      id: reportImage.ids.invalidSlots[1],
+      state: 'active',
+      eligibility: 'invalid',
+      reason: 'Selected spell is outside the slot level range.',
+    },
+    {
+      id: reportImage.ids.invalidSlots[2],
+      state: 'kept_override',
+      eligibility: 'invalid',
+      reason: 'Selected spell is outside the slot level range.',
+    },
+  ]);
   expect(
     (await rows(page, 'spell_selection_slots'))
       .filter((row) => reportImage.ids.invalidSlots.includes(row.id))
@@ -1678,6 +2104,15 @@ test('builds the golden read-only report values and duplicate classifications', 
   ).toEqual(['active', 'orphaned', 'kept_override']);
   await page.goto(`/characters/${reportImage.ids.character}/report`);
   await expect(page.locator('[data-screen="build-report"]')).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(
+    'R40 Golden',
+  );
+  await expect(page.getByTestId('preparation-callout')).toContainText(
+    'shared Spellcasting slots through 2nd level and Pact Magic slots at 3rd level',
+  );
+  await expect(
+    page.locator('.duplicate-card[data-category="conflicting_version"]'),
+  ).toContainText('Shield (2014)');
   expect(await databaseBytes(page)).toEqual(before);
 });
 
@@ -1699,16 +2134,81 @@ test('builds Mutt printable sources with complete facts and only the mechanicall
     'Gift 10',
     'Wizard 1',
   ]);
+  expect(
+    printable.source_groups.map((group: Row) => ({
+      source: group.source,
+      ability: group.ability,
+      attack_bonus: group.attack_bonus,
+      save_dc: group.save_dc,
+    })),
+  ).toEqual([
+    {
+      source: 'Cleric 1',
+      ability: 'wisdom',
+      attack_bonus: 4,
+      save_dc: 12,
+    },
+    {
+      source: 'Druid 1',
+      ability: 'wisdom',
+      attack_bonus: 4,
+      save_dc: 12,
+    },
+    {
+      source: 'Gift 2',
+      ability: 'charisma',
+      attack_bonus: 6,
+      save_dc: 14,
+    },
+    {
+      source: 'Gift 10',
+      ability: 'charisma',
+      attack_bonus: 6,
+      save_dc: 14,
+    },
+    {
+      source: 'Wizard 1',
+      ability: 'intelligence',
+      attack_bonus: 5,
+      save_dc: 13,
+    },
+  ]);
   const command = printable.source_groups
     .flatMap((group: any) => group.spells)
     .find((spell: any) => spell.spell_version_id === printableImage.ids.command);
-  expect(command).toMatchObject({
+  expect(command).toEqual({
+    spell_version_id: printableImage.ids.command,
+    spell_identity_id: expect.any(Number),
     name: 'Command',
+    edition: '2024',
+    level: 1,
+    school: 'Enchantment',
+    casting_time: 'Action',
+    action_type: 'Action',
+    range: '60 feet',
+    duration: '1 round',
+    concentration: false,
+    ritual: false,
+    components: 'V',
     spellcasting_ability: 'wisdom',
     attack_bonus: null,
     save_dc: 12,
+    attack_modes: [],
     casting_mode: 'with_slots',
     save_abilities: ['wisdom'],
+    description: null,
+  });
+  const thornWhip = printable.source_groups
+    .flatMap((group: Row) => group.spells)
+    .find((spell: Row) => spell.name === 'Thorn Whip');
+  expect(thornWhip).toMatchObject({
+    action_type: 'Bonus Action',
+    spellcasting_ability: 'wisdom',
+    attack_bonus: 4,
+    save_dc: null,
+    attack_modes: ['melee_spell', 'ranged_spell'],
+    save_abilities: [],
+    casting_mode: 'at_will',
   });
   const mistyStep = printable.source_groups
     .flatMap((group: any) => group.spells)
@@ -1735,6 +2235,16 @@ test('builds Mutt printable sources with complete facts and only the mechanicall
   });
   await page.goto(`/characters/${printableImage.ids.character}/print`);
   await expect(page.locator('[data-screen="printable-list"]')).toBeVisible();
+  await expect(
+    page.locator(
+      `.spell-card[data-spell-version="${printableImage.ids.command}"]`,
+    ).first(),
+  ).toContainText('Saving throw: DC 12 · WIS');
+  await expect(
+    page.locator(
+      `.spell-card[data-spell-version="${printableImage.ids.mistyStep}"]`,
+    ),
+  ).toContainText('Access: Slots And Free Cast · CHA');
   expect(await databaseBytes(page)).toEqual(before);
 });
 
@@ -1795,19 +2305,59 @@ test('imports the real index into identities versions publications and normalize
   ]);
   expect(
     (await rows(page, 'spell_version_publications')).map(
-      (row) => row.source_book,
+      (row) => ({
+        version: versions.find((version) => version.id === row.spell_version_id)!
+          .content_key,
+        book: row.source_book,
+        page: row.source_page,
+      }),
     ),
-  ).toEqual(['Legacy Book', 'Modern A', 'Modern B']);
+  ).toEqual([
+    { version: '2014:php-parity-spell', book: 'Legacy Book', page: 81 },
+    { version: '2024:php-parity-spell', book: 'Modern A', page: 81 },
+    { version: '2024:php-parity-spell', book: 'Modern B', page: 82 },
+  ]);
+  expect(
+    (await rows(page, 'spell_list_memberships')).map((row) => ({
+      version: versions.find((version) => version.id === row.spell_version_id)!
+        .content_key,
+      list: row.spell_list_key,
+    })),
+  ).toEqual([
+    { version: '2014:php-parity-spell', list: 'Wizard' },
+    { version: '2024:php-parity-spell', list: 'Cleric' },
+    { version: '2024:php-parity-spell', list: 'Wizard' },
+  ]);
+  expect(
+    (await rows(page, 'spell_version_attack_modes')).map((row) => ({
+      version: versions.find((version) => version.id === row.spell_version_id)!
+        .content_key,
+      mode: row.attack_mode,
+    })),
+  ).toEqual([
+    { version: '2014:php-parity-spell', mode: 'ranged_spell' },
+    { version: '2024:php-parity-spell', mode: 'melee_spell' },
+    { version: '2024:php-parity-spell', mode: 'ranged_spell' },
+  ]);
+  expect(
+    (await rows(page, 'spell_version_save_abilities')).map((row) => ({
+      version: versions.find((version) => version.id === row.spell_version_id)!
+        .content_key,
+      ability: row.save_ability,
+    })),
+  ).toEqual([
+    { version: '2014:php-parity-spell', ability: 'wisdom' },
+    { version: '2024:php-parity-spell', ability: 'wisdom' },
+  ]);
   expect(
     new Set(
-      (await rows(page, 'spell_list_memberships')).map(
-        (row) => row.spell_list_key,
-      ),
-    ),
-  ).toEqual(new Set(['Cleric', 'Wizard']));
-  expect(
-    new Set(
-      (await rows(page, 'spell_version_tags')).map((row) => row.tag),
+      (await rows(page, 'spell_version_tags'))
+        .filter(
+          (row) =>
+            versions.find((version) => version.id === row.spell_version_id)!
+              .content_key === '2024:php-parity-spell',
+        )
+        .map((row) => row.tag),
     ),
   ).toEqual(new Set(['beta', 'concentration', 'parity', 'ritual']));
   const ids = versions.map((row) => ({
@@ -1888,8 +2438,17 @@ test('whole-database and portable-character export/import round-trip, corrupt-ve
       workspaceImage.ids.character,
     ).length,
   );
+  expect(await portableTableCounts(page, imported.characterId)).toEqual(
+    Object.fromEntries(
+      Object.entries(exported.character.tables).map(([table, tableRows]) => [
+        table,
+        (tableRows as Row[]).length,
+      ]),
+    ),
+  );
 
   const countBeforeCorruption = (await rows(page, 'characters')).length;
+  const beforeCorruption = await databaseBytes(page);
   const corruptCharacter = structuredClone(exported.character);
   corruptCharacter.version = 99;
   expect(
@@ -1908,6 +2467,7 @@ test('whole-database and portable-character export/import round-trip, corrupt-ve
       })
     ).message,
   ).toBe('Unsupported database backup version 99.');
+  expect(await databaseBytes(page)).toEqual(beforeCorruption);
   expect(await rows(page, 'characters')).toHaveLength(countBeforeCorruption);
   await page.reload();
   await ready(page);
@@ -1978,7 +2538,15 @@ test('fresh-profile catalog import → create/use → export → reload durabili
       query: 'Journey Spell',
     }),
   ).toEqual([
-    expect.objectContaining({ id: spell.id, name: 'Journey Spell' }),
+    {
+      id: spell.id,
+      name: 'Journey Spell',
+      level: 0,
+      school: 'Evocation',
+      ritual: false,
+      concentration: false,
+      edition: '2024',
+    },
   ]);
   await execute(
     page,

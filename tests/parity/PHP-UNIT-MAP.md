@@ -89,4 +89,6 @@ state before and after derivation.
 
 Result: all 57 oracle cases map to executable TypeScript evidence. T80 adds
 only the two missing SQLite/value-object seams; all other parity remains owned
-by its existing focused shard.
+by its existing focused shard. Integrated review additionally pins the complete
+six-class character projection (identity, name, abilities, total level, and
+proficiency) instead of accepting a partial object.

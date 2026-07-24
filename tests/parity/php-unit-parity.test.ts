@@ -180,9 +180,19 @@ describe('PHP Unit cross-slice parity', () => {
 
     const report = new BuildReportBuilder(db).build(characterId);
 
-    expect(report.character).toMatchObject({
+    expect(report.character).toEqual({
+      id: characterId,
+      name: 'Six-class parity',
       character_level: 6,
       proficiency_bonus: 3,
+      abilities: {
+        strength: 10,
+        dexterity: 10,
+        constitution: 10,
+        intelligence: 10,
+        wisdom: 10,
+        charisma: 10,
+      },
     });
     expect(report.caster).toEqual({
       caster_level: 6,

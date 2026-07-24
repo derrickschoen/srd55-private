@@ -24,16 +24,16 @@ read-only queries compare complete exported database images before and after.
 | 15 | stale revision and idempotent replay | command RPC conflict/replay | one operation row and one committed character revision |
 | 16 | rules round trip and disabled legacy rejection | rules/inverse/select RPCs | stored toggle, revision, unchanged rejected slot, two operations |
 | 17 | nested source config round trip | `update_source_config` RPC | child/parent configs, three constraints, one audit group, exact inverse restore |
-| 18 | standalone Magic Initiate update | source-config RPC | stored display/config and three regenerated list constraints |
+| 18 | standalone Magic Initiate update | create, add-source, then source-config RPC | independently stored source display/config and three regenerated list constraints |
 | 19 | atomic class-source/DSL/spellbook addition | `add_source` RPC | class/source/six slots; failed Wizard leaves no residue; spellbook row; inverse empties state |
 | 20 | nested species/background and repeatability | `add_source` RPC | two roots, two children, three slots per child, rejected duplicate leaves revision 2 |
-| 21 | recursive root removal | `remove_source` plus inverse | root/child tombstones, orphan slots, then exact row restoration |
-| 22 | warning acknowledgement/replay/audit | report plus acknowledgement RPC | acknowledgement row, one operation/audit group, delete inverse, revision 3 |
+| 21 | recursive root removal | species and background `remove_source` plus inverses | both root/child chains tombstone, orphan slots, then restore exact rows |
+| 22 | warning acknowledgement/replay/audit | report plus acknowledgement RPC | acknowledgement row, one operation/audit group, exact delete inverse, delete and restore round trip, revision 4 |
 | 23 | stale disjoint-slot merge only | three concurrent-version command RPCs | two slot values, two operations, revision 2; touched-slot write rejected |
-| 24 | golden build report | report RPC and report UI | invalid/orphan/override rows; complete image unchanged |
-| 25 | Mutt printable facts/relevant number | printable RPC and print UI | fixed/free-cast slot row; complete image unchanged |
-| 26 | real-index import semantics | `catalog.import` with multi-document representative index | shared identity, editions, publications, pivots, stable IDs, reload |
-| 27 | both backup formats/rollback/reload | four `backup.*` RPCs | whole-image restore, portable clone tables, corrupt-version no-write, reload |
+| 24 | golden build report | report RPC and report UI | exact character/caster/classes/callout, all duplicate categories, Wizard splits, invalid/orphan/override rows; complete image unchanged |
+| 25 | Mutt printable facts/relevant number | printable RPC and print UI | exact source stats and Command facts, attack/save separation, fixed/free-cast slot row; complete image unchanged |
+| 26 | real-index import semantics | `catalog.import` with multi-document representative index | shared identity, editions, per-version publications/lists/attack/save/tag pivots, stable IDs, reload |
+| 27 | both backup formats/rollback/reload | four `backup.*` RPCs | whole-image restore, every portable clone table count, byte-exact corrupt-version no-write, reload |
 | 28 | fresh-profile import → create/use → export → reload | catalog/query/command/backup RPC journey | catalog, character, selected slot, both exports, reload, portable clone |
 
 The representative browser catalog in workflow 26 preserves the PHP oracle's
