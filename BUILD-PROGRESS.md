@@ -417,3 +417,43 @@ Status: done
 - Green → changed workflow 18's first expected persisted list constraint from
   Wizard to Cleric → filtered Chromium failed at `allowed_spell_lists` with
   the stored Wizard value → restored → filtered workflow passed.
+
+## 2026-07-23 — Integrated Wave 9 review
+
+### Review increment W9-R1
+
+- Independently reviewed
+  `1d6b43cf6fbf530cfe90296fa151867d804403c4..HEAD`; the merged inventory
+  contains only S90-owned `PARITY-AUDIT.md` and `progress/S90.md`.
+- Recounted 10 migrations, 56 PHP domain files, 24 PHP test/support files, 23
+  prior progress shards, 57 PHP Unit cases/map rows, and 28 fixed browser
+  workflows/map rows. Rechecked persisted-row/image assertions, fresh-profile
+  durability, accessibility/print smoke, and all aggregate increment evidence.
+- Queried the migrated PHP-oracle SQLite database read-only: excluding the
+  migration ledger it has 38 tables, 59 named indexes, two triggers, no
+  foreign-key violations, and metadata hash
+  `fa0e4e9f2af9531e8b66b296660b5db7e28a5c6c2ceda00859c904fe6a4d1b11`.
+  No unresolved parity, persistence, assertion-sensitivity, or ownership
+  finding remains.
+
+### Test increment W9-T1
+
+- `npm test`: 41 files, 314 tests passed.
+- Focused schema metadata/persistence: 1 file, 4 tests passed.
+- `npm run typecheck`: passed.
+- `npm run build`: passed; 35 modules transformed; generated `dist/` removed.
+- `npm run test:browser`: 39 Chromium tests passed serially with one worker in
+  3.7 minutes, including 28/28 parity workflows and the fresh-profile journey.
+
+### Sensitivity increment W9-S1
+
+- In an isolated temporary archive, returned `UnassignedSpellSlot` for a
+  persisted selected reference. Filtered T80 failed at its intended
+  `UserSpellSelection` instance assertion; restoration returned it green.
+- In the same archive, stored a null selected spell ID. Filtered T81 workflow
+  28 failed at its intended persisted `current_spell_version_id` assertion;
+  restoration returned it green.
+- The archive and failure trace were removed; repository production/test files
+  were never changed and no mutation or generated artifact remains.
+
+PORT COMPLETE
