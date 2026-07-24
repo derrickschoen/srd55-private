@@ -8,7 +8,7 @@ import {
   classDefinitionId,
   createBuildReportFixture,
   createCharacter,
-  persistedReportState,
+  persistedReportTableHashes,
   type BuildReportFixture,
 } from './build-report-fixture';
 
@@ -84,12 +84,14 @@ describe('deterministic read-only build report', () => {
       },
     ]);
 
-    const before = persistedReportState(db, fixture.characterId);
+    const before = persistedReportTableHashes(db, fixture.characterId);
     const report = builder.build(fixture.characterId);
     const second = builder.build(fixture.characterId);
 
     expect(report).toEqual(second);
-    expect(persistedReportState(db, fixture.characterId)).toBe(before);
+    expect(persistedReportTableHashes(db, fixture.characterId)).toEqual(
+      before,
+    );
     expect(Object.keys(report)).toEqual([
       'character',
       'caster',
@@ -125,7 +127,9 @@ describe('deterministic read-only build report', () => {
     expect(
       report.classes.map((entry) => ({
         name: entry.name,
+        subclass: entry.subclass,
         level: entry.class_level,
+        ability: entry.spellcasting_ability,
         progression: entry.progression_type,
         prepared: entry.prepared_count,
         maximum: entry.max_preparable_level,
@@ -133,28 +137,36 @@ describe('deterministic read-only build report', () => {
     ).toEqual([
       {
         name: 'Paladin',
+        subclass: null,
         level: 1,
+        ability: 'charisma',
         progression: 'half_up',
         prepared: 2,
         maximum: 1,
       },
       {
         name: 'Ranger',
+        subclass: null,
         level: 1,
+        ability: 'wisdom',
         progression: 'half_up',
         prepared: 2,
         maximum: 1,
       },
       {
         name: 'Warlock',
+        subclass: null,
         level: 5,
+        ability: 'charisma',
         progression: 'pact',
         prepared: 6,
         maximum: 3,
       },
       {
         name: 'Wizard',
+        subclass: null,
         level: 1,
+        ability: 'intelligence',
         progression: 'full',
         prepared: 4,
         maximum: 1,
@@ -315,7 +327,7 @@ describe('deterministic read-only build report', () => {
       created_at: '2026-07-22 12:34:56',
     });
 
-    const beforeActiveBuild = persistedReportState(
+    const beforeActiveBuild = persistedReportTableHashes(
       db,
       fixture.characterId,
     );
@@ -329,7 +341,7 @@ describe('deterministic read-only build report', () => {
       note: 'Accepted for roleplay',
       created_at: '2026-07-22 12:34:56',
     });
-    expect(persistedReportState(db, fixture.characterId)).toBe(
+    expect(persistedReportTableHashes(db, fixture.characterId)).toEqual(
       beforeActiveBuild,
     );
 
@@ -339,7 +351,7 @@ describe('deterministic read-only build report', () => {
        WHERE id = ?`,
       [acknowledgementId],
     );
-    const beforeInvalidatedBuild = persistedReportState(
+    const beforeInvalidatedBuild = persistedReportTableHashes(
       db,
       fixture.characterId,
     );
@@ -357,7 +369,7 @@ describe('deterministic read-only build report', () => {
         [acknowledgementId],
       ),
     ).toBe('2026-07-23 00:00:00');
-    expect(persistedReportState(db, fixture.characterId)).toBe(
+    expect(persistedReportTableHashes(db, fixture.characterId)).toEqual(
       beforeInvalidatedBuild,
     );
   });
@@ -376,7 +388,7 @@ describe('deterministic read-only build report', () => {
       intelligence: 16,
     });
     addClassLevel(db, singleId, 'Fighter', 7, subclassId);
-    const singleBefore = persistedReportState(db, singleId);
+    const singleBefore = persistedReportTableHashes(db, singleId);
     const single = builder.build(singleId);
     expect(single.classes).toEqual([
       {
@@ -397,7 +409,7 @@ describe('deterministic read-only build report', () => {
       ],
       pact_magic: null,
     });
-    expect(persistedReportState(db, singleId)).toBe(singleBefore);
+    expect(persistedReportTableHashes(db, singleId)).toEqual(singleBefore);
 
     const multiclassId = createCharacter(db, 'Two providers', {
       intelligence: 16,
@@ -421,7 +433,7 @@ describe('deterministic read-only build report', () => {
       { name: 'Fighter', level: 7, subclass: 'Eldritch Knight' },
       { name: 'Wizard', level: 3, subclass: null },
     ]);
-    const multiclassBefore = persistedReportState(db, multiclassId);
+    const multiclassBefore = persistedReportTableHashes(db, multiclassId);
     expect(builder.build(multiclassId).caster).toEqual({
       caster_level: 5,
       slots: [
@@ -431,7 +443,7 @@ describe('deterministic read-only build report', () => {
       ],
       pact_magic: null,
     });
-    expect(persistedReportState(db, multiclassId)).toBe(
+    expect(persistedReportTableHashes(db, multiclassId)).toEqual(
       multiclassBefore,
     );
   });
@@ -439,7 +451,7 @@ describe('deterministic read-only build report', () => {
   it('renders exact Pact-only, shared-only, and martial preparation callouts', () => {
     const pactId = createCharacter(db, 'Pact only');
     addClassLevel(db, pactId, 'Warlock', 5);
-    const pactBefore = persistedReportState(db, pactId);
+    const pactBefore = persistedReportTableHashes(db, pactId);
     const pact = builder.build(pactId);
     expect(pact.caster).toEqual({
       caster_level: 0,
@@ -449,21 +461,21 @@ describe('deterministic read-only build report', () => {
     expect(pact.preparation_callout).toBe(
       'This build possesses no shared Spellcasting slots and Pact Magic slots at 3rd level. Pact Magic can cast eligible prepared spells. Class-specific preparation limits reach 3rd-level spells; slot level does not unlock higher-level choices.',
     );
-    expect(persistedReportState(db, pactId)).toBe(pactBefore);
+    expect(persistedReportTableHashes(db, pactId)).toEqual(pactBefore);
 
     const sharedId = createCharacter(db, 'Second-level Callout');
     addClassLevel(db, sharedId, 'Bard', 1);
     addClassLevel(db, sharedId, 'Wizard', 2);
-    const sharedBefore = persistedReportState(db, sharedId);
+    const sharedBefore = persistedReportTableHashes(db, sharedId);
     expect(builder.build(sharedId).preparation_callout).toBe(
       'This build possesses 2nd-level slots, but every class can prepare only 1st-level spells. Higher-level slots can upcast those lower-level spells; they do not unlock higher-level choices.',
     );
-    expect(persistedReportState(db, sharedId)).toBe(sharedBefore);
+    expect(persistedReportTableHashes(db, sharedId)).toEqual(sharedBefore);
 
     const martialId = createCharacter(db, 'Martial only');
     addClassLevel(db, martialId, 'Fighter', 2);
     addClassLevel(db, martialId, 'Barbarian', 2);
-    const martialBefore = persistedReportState(db, martialId);
+    const martialBefore = persistedReportTableHashes(db, martialId);
     const martial = builder.build(martialId);
     expect(martial.caster).toEqual({
       caster_level: 0,
@@ -473,7 +485,7 @@ describe('deterministic read-only build report', () => {
     expect(martial.preparation_callout).toBe(
       'This build possesses no Spellcasting or Pact Magic slots.',
     );
-    expect(persistedReportState(db, martialId)).toBe(martialBefore);
+    expect(persistedReportTableHashes(db, martialId)).toEqual(martialBefore);
   });
 
   it('maps all subclass fractions and rejects unsupported or missing builds exactly', () => {
@@ -519,14 +531,14 @@ describe('deterministic read-only build report', () => {
         caster_rounding: rounding,
         level: 5,
       });
-      const before = persistedReportState(db, characterId);
+      const before = persistedReportTableHashes(db, characterId);
       const report = builder.build(characterId);
       expect(report.classes[0]?.progression_type).toBe(progression);
       expect(report.classes[0]?.spellcasting_ability).toBe(
         'intelligence',
       );
       expect(report.caster.caster_level).toBe(expectedCaster);
-      expect(persistedReportState(db, characterId)).toBe(before);
+      expect(persistedReportTableHashes(db, characterId)).toEqual(before);
     }
 
     const unsupportedSubclassId = db.exec(
@@ -547,11 +559,11 @@ describe('deterministic read-only build report', () => {
       3,
       unsupportedSubclassId,
     );
-    const unsupportedBefore = persistedReportState(db, unsupportedId);
+    const unsupportedBefore = persistedReportTableHashes(db, unsupportedId);
     expect(() => builder.build(unsupportedId)).toThrowError(
       'Unsupported caster fraction 2/3 rounded up.',
     );
-    expect(persistedReportState(db, unsupportedId)).toBe(
+    expect(persistedReportTableHashes(db, unsupportedId)).toEqual(
       unsupportedBefore,
     );
 

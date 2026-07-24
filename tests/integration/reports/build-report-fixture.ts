@@ -1,4 +1,4 @@
-import type { SqlValue } from '@sqlite.org/sqlite-wasm';
+import { createHash } from 'node:crypto';
 import { DatabaseContext } from '../../../src/db/database';
 import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
 
@@ -405,53 +405,32 @@ export function createBuildReportFixture(
   };
 }
 
-function rows(
-  db: DatabaseContext,
-  sql: string,
-  bind: readonly SqlValue[],
-): unknown[] {
-  return db.all(sql, bind);
-}
-
-export function persistedReportState(
+export function persistedReportTableHashes(
   db: DatabaseContext,
   characterId: number,
-): string {
-  return JSON.stringify({
-    character: rows(
-      db,
-      'SELECT * FROM characters WHERE id = ?',
-      [characterId],
-    ),
-    levels: rows(
-      db,
-      `SELECT * FROM character_class_levels
-       WHERE character_id = ? ORDER BY id`,
-      [characterId],
-    ),
-    sources: rows(
-      db,
-      `SELECT * FROM character_source_instances
-       WHERE character_id = ? ORDER BY id`,
-      [characterId],
-    ),
-    slots: rows(
-      db,
-      `SELECT * FROM spell_selection_slots
-       WHERE character_id = ? ORDER BY id`,
-      [characterId],
-    ),
-    spellbook: rows(
-      db,
-      `SELECT * FROM wizard_spellbook_entries
-       WHERE character_id = ? ORDER BY id`,
-      [characterId],
-    ),
-    acknowledgements: rows(
-      db,
-      `SELECT * FROM warning_acknowledgements
-       WHERE character_id = ? ORDER BY id`,
-      [characterId],
-    ),
-  });
+): Readonly<Record<string, string>> {
+  const tableHashes = Object.fromEntries(
+    db
+      .all<{ name: unknown }>(
+        `SELECT name
+         FROM sqlite_schema
+         WHERE type = 'table'
+           AND (name NOT LIKE 'sqlite_%' OR name = 'sqlite_sequence')
+         ORDER BY name`,
+      )
+      .map((table) => {
+        const name = String(table.name);
+        const quotedName = `"${name.replaceAll('"', '""')}"`;
+        const rows = db.all(`SELECT * FROM ${quotedName} ORDER BY rowid`);
+        return [
+          name,
+          createHash('sha256').update(JSON.stringify(rows)).digest('hex'),
+        ];
+      }),
+  );
+
+  return {
+    character_id: String(characterId),
+    ...tableHashes,
+  };
 }
