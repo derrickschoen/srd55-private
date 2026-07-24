@@ -241,6 +241,16 @@ describe('character command factory and executor', () => {
       Number(db.scalar('SELECT count(*) FROM character_operations')),
     ).toBe(2);
     expect(Number(db.scalar('SELECT count(*) FROM change_log'))).toBe(2);
+    expect(
+      Number(
+        db.scalar(
+          `SELECT count(DISTINCT group_id)
+           FROM change_log
+           WHERE operation_uuid IN (?, ?)`,
+          [firstOperation, undoOperation],
+        ),
+      ),
+    ).toBe(2);
   });
 
   it('assigns every row from one multi-entity command to one audit group', async () => {
