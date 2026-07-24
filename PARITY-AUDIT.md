@@ -43,7 +43,7 @@ shards, and `BUILD-PROGRESS.md`.
 | Focused schema metadata/persistence | 1 file, 4 tests passed |
 | `npm run typecheck` | Passed |
 | `npm run build` | Passed; 35 modules transformed and production assets emitted |
-| `npm run test:browser` | 39 Chromium tests passed with one worker in 3.6 minutes |
+| `npm run test:browser` | 39 Chromium tests passed with one worker in 3.7 minutes |
 | PHP Unit parity subset | 57/57 mapped cases; 2 cross-slice parity tests green |
 | Fixed feature parity subset | 28/28 browser workflows green |
 
@@ -113,7 +113,16 @@ bypass and report misrouting. Integrated Wave 8 additionally records:
   intended `allowed_spell_lists` assertion red → restored → filtered Chromium
   green.
 
-The final 314-test and 39-browser-test runs are the restored green endpoints.
-S90 added no executable test, so it introduced no unproven test. No material
-parity, durability, schema, coverage, accessibility, persistence, ownership,
-or sensitivity gap remains.
+The independent Wave 9 review also repeated two executable sensitivity checks
+against isolated production reversions in a temporary archive:
+
+- returning `UnassignedSpellSlot` for a persisted selected reference failed
+  T80 at its exact `UserSpellSelection` instance assertion; and
+- storing a null selected spell failed T81's fresh-profile workflow at its
+  exact persisted `current_spell_version_id` assertion.
+
+Both reversions were restored and the filtered tests returned green. The final
+314-test and 39-browser-test runs plus those restored filtered runs are the
+green endpoints. S90 added no executable test, so it introduced no unproven
+test. No material parity, durability, schema, coverage, accessibility,
+persistence, ownership, or sensitivity gap remains.
