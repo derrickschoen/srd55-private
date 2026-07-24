@@ -1,0 +1,536 @@
+import type { Database } from '@sqlite.org/sqlite-wasm';
+import { afterEach, describe, expect, it } from 'vitest';
+import {
+  exportCharacterBackup,
+  importCharacterBackup,
+  type CharacterBackupDocument,
+} from '../../../src/backup/character-backup';
+import {
+  exportDatabaseBackup,
+  importDatabaseBackup,
+} from '../../../src/backup/database-backup';
+import {
+  CharacterState,
+  CHARACTER_STATE_TABLES,
+} from '../../../src/character/character-state';
+import { DatabaseContext } from '../../../src/db/database';
+import { DatabaseLifecycle } from '../../../src/db/database-lifecycle';
+import schema from '../../../src/db/schema.sql?raw';
+import {
+  getSqlite3,
+  MemoryDatabaseStorage,
+  openTestDatabase,
+} from '../../helpers/open-db';
+
+const opened: Database[] = [];
+const lifecycles: DatabaseLifecycle[] = [];
+const timestamp = '2026-07-23 12:00:00';
+
+interface CatalogIds {
+  classId: number;
+  spellId: number;
+}
+
+async function database(): Promise<DatabaseContext> {
+  const connection = await openTestDatabase();
+  opened.push(connection);
+  return new DatabaseContext(connection);
+}
+
+function seedCatalog(db: DatabaseContext, withPadding = false): CatalogIds {
+  if (withPadding) {
+    const dummyIdentity = db.exec(
+      `INSERT INTO spell_identities
+         (content_key, canonical_name, normalized_name)
+       VALUES ('dummy:identity', 'Dummy', 'dummy')`,
+    ).lastInsertId;
+    db.exec(
+      `INSERT INTO spell_versions
+         (content_key, spell_identity_id, display_name, rules_edition, level, school)
+       VALUES ('dummy:spell', ?, 'Dummy', '2024', 0, 'Illusion')`,
+      [dummyIdentity],
+    );
+    db.exec(
+      `INSERT INTO class_definitions (content_key, name, rules_edition)
+       VALUES ('dummy:class', 'Dummy', '2024')`,
+    );
+  }
+  const identityId = db.exec(
+    `INSERT INTO spell_identities
+       (content_key, canonical_name, normalized_name)
+     VALUES ('spell:shield', 'Shield', 'shield')`,
+  ).lastInsertId;
+  const spellId = db.exec(
+    `INSERT INTO spell_versions
+       (content_key, spell_identity_id, display_name, rules_edition, level,
+        school, is_active)
+     VALUES ('2024:shield', ?, 'Shield', '2024', 1, 'Abjuration', 1)`,
+    [identityId],
+  ).lastInsertId;
+  const classId = db.exec(
+    `INSERT INTO class_definitions
+       (content_key, name, rules_edition, spellcasting_ability,
+        progression_type)
+     VALUES ('class:wizard', 'Wizard', '2024', 'intelligence', 'full')`,
+  ).lastInsertId;
+  return { classId, spellId };
+}
+
+function seedCompleteCharacter(
+  db: DatabaseContext,
+  catalog: CatalogIds,
+): number {
+  const characterId = db.exec(
+    `INSERT INTO characters (
+       name, strength, dexterity, constitution, intelligence, wisdom,
+       charisma, proficiency_bonus_override, rules_edition_preference,
+       allow_legacy, revision, notes, created_at, updated_at
+     ) VALUES (
+       'Backup Hero', 8, 14, 13, 18, 12, 10, 4, '2024', 1, 9,
+       'character note', ?, ?
+     )`,
+    [timestamp, timestamp],
+  ).lastInsertId;
+  db.exec(
+    `INSERT INTO character_class_levels (
+       character_id, class_definition_id, level, is_starting_class, notes,
+       created_at, updated_at
+     ) VALUES (?, ?, 4, 1, 'class note', ?, ?)`,
+    [characterId, catalog.classId, timestamp, timestamp],
+  );
+  const sourceId = db.exec(
+    `INSERT INTO character_source_instances (
+       character_id, instance_uuid, source_type, source_definition_id,
+       display_name, config, acquired_at_character_level, notes, created_at,
+       updated_at
+     ) VALUES (
+       ?, 'original-source-uuid', 'class', ?, 'Wizard 4',
+       '{"school":"abjuration"}', 1, 'source note', ?, ?
+     )`,
+    [characterId, catalog.classId, timestamp, timestamp],
+  ).lastInsertId;
+  db.exec(
+    `INSERT INTO spell_selection_slots (
+       character_id, source_instance_id, slot_key, rule_key, ordinal, bucket,
+       eligibility_kind, current_spell_version_id, label, spell_level_min,
+       spell_level_max, allowed_spell_lists, state, override_note, notes,
+       selection_collection, selection_eligibility, created_at, updated_at
+     ) VALUES (
+       ?, ?, 'original-source-uuid:prepared:1', 'prepared', 1, 'prepared',
+       'choice_from_query', ?, 'Prepared 1', 1, 2, '["Wizard"]',
+       'kept_override', 'intentional', 'slot note', 'wizard_spellbook',
+       'valid', ?, ?
+     )`,
+    [characterId, sourceId, catalog.spellId, timestamp, timestamp],
+  );
+  db.exec(
+    `INSERT INTO wizard_spellbook_entries
+       (character_id, spell_version_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?)`,
+    [characterId, catalog.spellId, timestamp, timestamp],
+  );
+  db.exec(
+    `INSERT INTO character_spell_preferences
+       (character_id, spell_version_id, favourite, notes, created_at, updated_at)
+     VALUES (?, ?, 1, 'preference note', ?, ?)`,
+    [characterId, catalog.spellId, timestamp, timestamp],
+  );
+  db.exec(
+    `INSERT INTO character_rule_overrides
+       (character_id, rule_key, value, note, created_at, updated_at)
+     VALUES (?, 'prepared_formula', '{"count":7}', 'override note', ?, ?)`,
+    [characterId, timestamp, timestamp],
+  );
+  db.exec(
+    `INSERT INTO warning_acknowledgements
+       (character_id, warning_fingerprint, note, created_at, updated_at)
+     VALUES (?, 'warning:shield', 'ack note', ?, ?)`,
+    [characterId, timestamp, timestamp],
+  );
+  const historicalSourceId = db.exec(
+    `INSERT INTO character_source_instances (
+       character_id, instance_uuid, source_type, source_definition_id,
+       display_name, notes, created_at, updated_at
+     ) VALUES (
+       ?, 'historical-source-uuid', 'class', ?, 'Historical Wizard',
+       'save-point only source', ?, ?
+     )`,
+    [characterId, catalog.classId, timestamp, timestamp],
+  ).lastInsertId;
+  db.exec(
+    `INSERT INTO spell_selection_slots (
+       character_id, source_instance_id, slot_key, rule_key, bucket,
+       eligibility_kind, current_spell_version_id, notes, created_at,
+       updated_at
+     ) VALUES (
+       ?, ?, 'historical-source-uuid:known:1', 'known', 'known',
+       'choice_from_list', ?, 'save-point only slot', ?, ?
+     )`,
+    [
+      characterId,
+      historicalSourceId,
+      catalog.spellId,
+      timestamp,
+      timestamp,
+    ],
+  );
+  const loadoutId = db.exec(
+    `INSERT INTO spell_loadouts
+       (character_id, name, notes, created_at, updated_at)
+     VALUES (?, 'Exploration', 'loadout note', ?, ?)`,
+    [characterId, timestamp, timestamp],
+  ).lastInsertId;
+  db.exec(
+    `INSERT INTO spell_loadout_entries
+       (spell_loadout_id, spell_version_id, role, created_at, updated_at)
+     VALUES (?, ?, 'emergency', ?, ?)`,
+    [loadoutId, catalog.spellId, timestamp, timestamp],
+  );
+  const snapshot = new CharacterState(db).capture(characterId);
+  db.exec(
+    `INSERT INTO character_save_points
+       (character_id, label, snapshot, schema_version, created_at, updated_at)
+     VALUES (?, 'Before experiment', ?, 'a7-v1', ?, ?)`,
+    [characterId, JSON.stringify(snapshot), timestamp, timestamp],
+  );
+  db.exec(
+    'DELETE FROM character_source_instances WHERE id = ?',
+    [historicalSourceId],
+  );
+  return characterId;
+}
+
+function persistedCharacter(db: DatabaseContext, characterId: number) {
+  return {
+    character: db.one('SELECT * FROM characters WHERE id = ?', [characterId]),
+    classLevels: db.all(
+      'SELECT * FROM character_class_levels WHERE character_id = ?',
+      [characterId],
+    ),
+    sources: db.all(
+      'SELECT * FROM character_source_instances WHERE character_id = ?',
+      [characterId],
+    ),
+    slots: db.all(
+      'SELECT * FROM spell_selection_slots WHERE character_id = ?',
+      [characterId],
+    ),
+    spellbook: db.all(
+      'SELECT * FROM wizard_spellbook_entries WHERE character_id = ?',
+      [characterId],
+    ),
+    preferences: db.all(
+      'SELECT * FROM character_spell_preferences WHERE character_id = ?',
+      [characterId],
+    ),
+    overrides: db.all(
+      'SELECT * FROM character_rule_overrides WHERE character_id = ?',
+      [characterId],
+    ),
+    acknowledgements: db.all(
+      'SELECT * FROM warning_acknowledgements WHERE character_id = ?',
+      [characterId],
+    ),
+    savePoints: db.all(
+      'SELECT * FROM character_save_points WHERE character_id = ?',
+      [characterId],
+    ),
+    loadouts: db.all(
+      'SELECT * FROM spell_loadouts WHERE character_id = ?',
+      [characterId],
+    ),
+  };
+}
+
+afterEach(() => {
+  for (const lifecycle of lifecycles.splice(0)) {
+    lifecycle.close();
+  }
+  for (const connection of opened.splice(0)) {
+    if (connection.isOpen()) {
+      connection.close();
+    }
+  }
+});
+
+describe('portable character backup', () => {
+  it('round-trips every user-authored surface using target catalog keys and restorable save points', async () => {
+    const source = await database();
+    const sourceCatalog = seedCatalog(source);
+    const sourceCharacterId = seedCompleteCharacter(source, sourceCatalog);
+    const document = exportCharacterBackup(
+      source,
+      sourceCharacterId,
+      '2026-07-23T12:00:00.000Z',
+    );
+
+    const target = await database();
+    const targetCatalog = seedCatalog(target, true);
+    target.exec("INSERT INTO characters (name) VALUES ('Existing target')");
+    const { characterId } = importCharacterBackup(target, document);
+    const persisted = persistedCharacter(target, characterId);
+
+    expect(characterId).toBe(2);
+    expect(persisted.character).toMatchObject({
+      name: 'Backup Hero',
+      intelligence: 18,
+      allow_legacy: 1,
+      revision: 9,
+      notes: 'character note',
+      created_at: timestamp,
+    });
+    expect(persisted.classLevels).toEqual([
+      expect.objectContaining({
+        character_id: characterId,
+        class_definition_id: targetCatalog.classId,
+        level: 4,
+        notes: 'class note',
+      }),
+    ]);
+    const importedSource = persisted.sources[0]!;
+    expect(importedSource).toMatchObject({
+      character_id: characterId,
+      source_definition_id: targetCatalog.classId,
+      config: '{"school":"abjuration"}',
+      notes: 'source note',
+    });
+    expect(importedSource.instance_uuid).not.toBe('original-source-uuid');
+    expect(persisted.slots).toEqual([
+      expect.objectContaining({
+        character_id: characterId,
+        source_instance_id: importedSource.id,
+        slot_key: `${String(importedSource.instance_uuid)}:prepared:1`,
+        current_spell_version_id: targetCatalog.spellId,
+        state: 'kept_override',
+        override_note: 'intentional',
+        notes: 'slot note',
+      }),
+    ]);
+    expect(persisted.spellbook).toEqual([
+      expect.objectContaining({
+        character_id: characterId,
+        spell_version_id: targetCatalog.spellId,
+      }),
+    ]);
+    expect(persisted.preferences).toEqual([
+      expect.objectContaining({
+        favourite: 1,
+        notes: 'preference note',
+        spell_version_id: targetCatalog.spellId,
+      }),
+    ]);
+    expect(persisted.overrides).toEqual([
+      expect.objectContaining({
+        rule_key: 'prepared_formula',
+        value: '{"count":7}',
+        note: 'override note',
+      }),
+    ]);
+    expect(persisted.acknowledgements).toEqual([
+      expect.objectContaining({
+        warning_fingerprint: 'warning:shield',
+        note: 'ack note',
+      }),
+    ]);
+    expect(persisted.loadouts).toEqual([
+      expect.objectContaining({
+        name: 'Exploration',
+        notes: 'loadout note',
+      }),
+    ]);
+    expect(
+      target.all(
+        `SELECT entry.role, entry.spell_version_id
+         FROM spell_loadout_entries AS entry
+         JOIN spell_loadouts AS loadout ON loadout.id = entry.spell_loadout_id
+         WHERE loadout.character_id = ?`,
+        [characterId],
+      ),
+    ).toEqual([
+      { role: 'emergency', spell_version_id: targetCatalog.spellId },
+    ]);
+
+    const saved = JSON.parse(
+      String(persisted.savePoints[0]!.snapshot),
+    ) as Record<string, any>;
+    expect(saved.character_source_instances[0]).toMatchObject({
+      character_id: characterId,
+      id: importedSource.id,
+      instance_uuid: importedSource.instance_uuid,
+      source_definition_id: targetCatalog.classId,
+    });
+    expect(saved.spell_selection_slots[0]).toMatchObject({
+      character_id: characterId,
+      source_instance_id: importedSource.id,
+      current_spell_version_id: targetCatalog.spellId,
+    });
+
+    const postImportSourceId = target.exec(
+      `INSERT INTO character_source_instances (
+         character_id, instance_uuid, source_type, source_definition_id,
+         display_name
+       ) VALUES (1, 'post-import-source', 'class', ?, 'Post import source')`,
+      [targetCatalog.classId],
+    ).lastInsertId;
+    expect(postImportSourceId).toBeGreaterThan(
+      Math.max(
+        ...saved.character_source_instances.map((row: { id: number }) => row.id),
+      ),
+    );
+
+    target.exec(
+      `UPDATE characters SET intelligence = 6 WHERE id = ?`,
+      [characterId],
+    );
+    target.exec(
+      `DELETE FROM warning_acknowledgements WHERE character_id = ?`,
+      [characterId],
+    );
+    new CharacterState(target).restore(characterId, saved);
+    expect(
+      target.one(
+        `SELECT intelligence FROM characters WHERE id = ?`,
+        [characterId],
+      ),
+    ).toEqual({ intelligence: 18 });
+    expect(
+      target.all(
+        `SELECT warning_fingerprint, note
+         FROM warning_acknowledgements WHERE character_id = ?`,
+        [characterId],
+      ),
+    ).toEqual([{ warning_fingerprint: 'warning:shield', note: 'ack note' }]);
+    expect(
+      target.all(
+        `SELECT instance_uuid, notes
+         FROM character_source_instances
+         WHERE character_id = ?
+         ORDER BY id`,
+        [characterId],
+      ),
+    ).toEqual([
+      expect.objectContaining({ notes: 'source note' }),
+      expect.objectContaining({ notes: 'save-point only source' }),
+    ]);
+    expect(
+      target.all(
+        `SELECT notes, current_spell_version_id
+         FROM spell_selection_slots
+         WHERE character_id = ?
+         ORDER BY id`,
+        [characterId],
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        notes: 'slot note',
+        current_spell_version_id: targetCatalog.spellId,
+      }),
+      expect.objectContaining({
+        notes: 'save-point only slot',
+        current_spell_version_id: targetCatalog.spellId,
+      }),
+    ]);
+  });
+
+  it('rejects cross-character, unavailable-catalog, and constraint-corrupt documents without persisted writes', async () => {
+    const source = await database();
+    const catalog = seedCatalog(source);
+    const sourceCharacterId = seedCompleteCharacter(source, catalog);
+    const document = exportCharacterBackup(source, sourceCharacterId);
+
+    const target = await database();
+    seedCatalog(target, true);
+    target.exec("INSERT INTO characters (name) VALUES ('Protected target')");
+    const before = target.all('SELECT * FROM characters ORDER BY id');
+
+    const crossed = structuredClone(document);
+    (
+      crossed.tables.character_spell_preferences[0] as Record<string, unknown>
+    ).character_id = sourceCharacterId + 1;
+    expect(() => importCharacterBackup(target, crossed)).toThrow(
+      'belongs to another character.',
+    );
+    expect(target.all('SELECT * FROM characters ORDER BY id')).toEqual(before);
+
+    const unavailable = structuredClone(document);
+    (
+      unavailable.references.spell_versions[0] as unknown as Record<
+        string,
+        unknown
+      >
+    ).content_key = '2024:not-installed';
+    expect(() => importCharacterBackup(target, unavailable)).toThrow(
+      'requires unavailable active spell_versions content_key',
+    );
+    expect(target.all('SELECT * FROM characters ORDER BY id')).toEqual(before);
+
+    const constraintCorrupt = structuredClone(document);
+    const originalOverride =
+      constraintCorrupt.tables.character_rule_overrides[0]!;
+    (
+      constraintCorrupt.tables.character_rule_overrides as unknown as Array<
+        Record<string, unknown>
+      >
+    ).push({ ...originalOverride, id: 999 });
+    expect(() => importCharacterBackup(target, constraintCorrupt)).toThrow();
+    expect(target.all('SELECT * FROM characters ORDER BY id')).toEqual(before);
+    for (const table of [
+      ...CHARACTER_STATE_TABLES,
+      'character_spell_preferences',
+      'character_rule_overrides',
+      'character_save_points',
+      'spell_loadouts',
+    ]) {
+      expect(
+        target.scalar(
+          `SELECT count(*) FROM "${table}" WHERE character_id > 1`,
+        ),
+      ).toBe(0);
+    }
+  });
+});
+
+describe('complete database backup', () => {
+  it('restores the complete image and rejects corrupt bytes without changing the live connection', async () => {
+    const sqlite3 = await getSqlite3();
+    const lifecycle = new DatabaseLifecycle(
+      sqlite3,
+      new MemoryDatabaseStorage(sqlite3),
+      schema,
+    );
+    lifecycles.push(lifecycle);
+    lifecycle.open();
+    lifecycle.database.exec(
+      "INSERT INTO characters (name, notes) VALUES ('Image Hero', 'kept')",
+    );
+    lifecycle.database.exec(
+      "INSERT INTO cache (key, value, expiration) VALUES ('user-cache', 'kept', 9)",
+    );
+    const backup = await exportDatabaseBackup(
+      lifecycle,
+      '2026-07-23T12:00:00.000Z',
+    );
+    lifecycle.database.exec('DELETE FROM characters');
+    lifecycle.database.exec('DELETE FROM cache');
+
+    await importDatabaseBackup(lifecycle, backup);
+    expect(lifecycle.database.all('SELECT name, notes FROM characters')).toEqual(
+      [{ name: 'Image Hero', notes: 'kept' }],
+    );
+    expect(lifecycle.database.all('SELECT * FROM cache')).toEqual([
+      { key: 'user-cache', value: 'kept', expiration: 9 },
+    ]);
+
+    const connection = lifecycle.database.connection;
+    await expect(
+      importDatabaseBackup(lifecycle, {
+        ...backup,
+        sqlite: new TextEncoder().encode('corrupt'),
+      }),
+    ).rejects.toThrow();
+    expect(lifecycle.database.connection).toBe(connection);
+    expect(lifecycle.database.all('SELECT name, notes FROM characters')).toEqual(
+      [{ name: 'Image Hero', notes: 'kept' }],
+    );
+  });
+});
