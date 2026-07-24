@@ -176,3 +176,38 @@ Status: done
 - Green → bypassed `CharacterState`'s restore transaction → the injected ID conflict
   left changed metadata and deleted child rows, failing the exact persisted-state
   rollback equality → restored → targeted Integration test passed.
+
+## 2026-07-23 — Integrated Wave 2 review
+
+### Review increment W2-R1
+
+- Independently reviewed
+  `a0d7fdda053508710d0a06f889208aedde02ec70..HEAD` for G20, C20, and B20 against
+  every cited PHP domain, migration, seeder, Feature test, and `BUILD-PLAN.md`.
+  The merged path inventory contains only chunk-owned files.
+- Rechecked stable grant/source reconciliation, persisted eligibility and orphan
+  history, catalog reference preservation/activity refresh, dry-run atomicity,
+  complete-image recovery, portable ownership/reference remapping, and RPC
+  discovery. No unresolved parity, persistence, assertion, or ownership finding
+  remains.
+- Fixed B20 save-point portability: cyclic historical source graphs are now
+  rejected during document validation, and valid save-point sources are
+  canonicalized parent-first before persistence. Previously, a child-first
+  document imported but its retained save point later failed foreign-key checks
+  during `CharacterState.restore()`.
+
+### Test increment W2-T1
+
+- `npm test`: 15 files, 140 Unit tests passed.
+- Programmatic Vitest Integration include: 5 owned files, 19 tests passed.
+- `npm run build`: TypeScript and production Vite build passed.
+- Owned browser verification: 2 Chromium tests passed.
+- `git diff --check` passed; generated build/test artifacts were removed.
+
+### Sensitivity increment W2-S1
+
+- Green → bypassed historical source-cycle validation → the targeted backup Unit
+  test failed at its exact `toThrow` assertion → restored → targeted test passed.
+- Green → preserved incoming child-first save-point source order → the Integration
+  test failed at the persisted snapshot assertion because row 0 was the child
+  instead of the mapped parent → restored → targeted test passed.

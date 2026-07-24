@@ -241,6 +241,18 @@ describe('portable character validation', () => {
     expect(() => validateCharacterBackup(crossed)).toThrow(
       'snapshot.wizard_spellbook_entries[0] belongs to another character.',
     );
+
+    const cyclic = richCharacterBackup();
+    const cyclicSavePoint =
+      cyclic.tables.character_save_points[0] as Record<string, unknown>;
+    const cyclicSnapshot = JSON.parse(String(cyclicSavePoint.snapshot)) as {
+      character_source_instances: Array<Record<string, unknown>>;
+    };
+    cyclicSnapshot.character_source_instances[0]!.parent_source_instance_id = 11;
+    cyclicSavePoint.snapshot = JSON.stringify(cyclicSnapshot);
+    expect(() => validateCharacterBackup(cyclic)).toThrow(
+      'Character backup source parent graph contains a cycle.',
+    );
   });
 
   it('uses a distinct validation error type for product-facing failures', () => {
