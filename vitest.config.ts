@@ -8,7 +8,9 @@ export default defineConfig({
     join(tmpdir(), 'dnd-multiclass-spells-static-vitest'),
   test: {
     environment: 'node',
-    include: ['tests/unit/**/*.test.ts'],
+    // Run BOTH unit and integration .test.ts under vitest. Browser tests are
+    // .spec.ts under tests/browser and belong to Playwright (npm run test:browser).
+    include: ['tests/**/*.test.ts'],
     clearMocks: true,
   },
 });
