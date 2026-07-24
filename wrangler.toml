@@ -1,0 +1,7 @@
+name = "dnd-multiclass-spells-static"
+pages_build_output_dir = "dist"
+compatibility_date = "2026-07-23"
+
+# Static-only Cloudflare Pages project (no Functions yet). `npm run build` (Vite)
+# emits to dist/; public/_headers and public/_redirects are copied to the deploy
+# root by Vite and interpreted by Cloudflare Pages.
