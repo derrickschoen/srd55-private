@@ -1,0 +1,224 @@
+import { CharacterCommandIntegrity } from '../../commands/integrity';
+import { EligibleSpellSearch } from '../../eligibility/eligible-spell-search';
+import { CatalogQueries } from '../../queries/catalog-queries';
+import { CharacterCrud } from '../../queries/character-crud';
+import { CharacterListBuilder } from '../../queries/character-list-builder';
+import {
+  CharacterWorkspaceBuilder,
+} from '../../queries/character-workspace-builder';
+import {
+  OperationHistoryQueries,
+} from '../../queries/operation-history';
+import { SavePointQueries } from '../../queries/save-points';
+import { BuildReportBuilder } from '../../reports/build-report-builder';
+import {
+  PrintableSpellListBuilder,
+} from '../../reports/printable-spell-list-builder';
+import { COMMAND_INTEGRITY_KEY } from './commands';
+import {
+  defineRpcHandler,
+  isEmptyParams,
+  isRecord,
+  type RpcHandler,
+} from '../handler';
+
+interface CharacterParams {
+  readonly character_id: number;
+}
+
+interface EligibleSpellParams extends CharacterParams {
+  readonly slot_id: number;
+  readonly query: string;
+}
+
+interface CreateSavePointParams extends CharacterParams {
+  readonly label: string;
+}
+
+interface SavePointCommandParams extends CharacterParams {
+  readonly save_point_id: number;
+}
+
+interface PrintableParams extends CharacterParams {
+  readonly variant: 'reference' | 'full';
+}
+
+function exactKeys(
+  value: Record<string, unknown>,
+  keys: readonly string[],
+): boolean {
+  const actual = Object.keys(value).sort();
+  const expected = [...keys].sort();
+  return (
+    actual.length === expected.length &&
+    actual.every((key, index) => key === expected[index])
+  );
+}
+
+function positiveInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && Number(value) >= 1;
+}
+
+export function isCharacterParams(
+  params: unknown,
+): params is CharacterParams {
+  return (
+    isRecord(params) &&
+    exactKeys(params, ['character_id']) &&
+    positiveInteger(params.character_id)
+  );
+}
+
+export function isCreateCharacterParams(
+  params: unknown,
+): params is { name: string } {
+  return (
+    isRecord(params) &&
+    exactKeys(params, ['name']) &&
+    typeof params.name === 'string' &&
+    params.name.trim() !== '' &&
+    [...params.name].length <= 120
+  );
+}
+
+export function isEligibleSpellParams(
+  params: unknown,
+): params is EligibleSpellParams {
+  return (
+    isRecord(params) &&
+    exactKeys(params, ['character_id', 'slot_id', 'query']) &&
+    positiveInteger(params.character_id) &&
+    positiveInteger(params.slot_id) &&
+    typeof params.query === 'string'
+  );
+}
+
+export function isCreateSavePointParams(
+  params: unknown,
+): params is CreateSavePointParams {
+  return (
+    isRecord(params) &&
+    exactKeys(params, ['character_id', 'label']) &&
+    positiveInteger(params.character_id) &&
+    typeof params.label === 'string' &&
+    params.label.trim() !== '' &&
+    [...params.label].length <= 120
+  );
+}
+
+export function isSavePointCommandParams(
+  params: unknown,
+): params is SavePointCommandParams {
+  return (
+    isRecord(params) &&
+    exactKeys(params, ['character_id', 'save_point_id']) &&
+    positiveInteger(params.character_id) &&
+    positiveInteger(params.save_point_id)
+  );
+}
+
+export function isPrintableParams(
+  params: unknown,
+): params is PrintableParams {
+  return (
+    isRecord(params) &&
+    exactKeys(params, ['character_id', 'variant']) &&
+    positiveInteger(params.character_id) &&
+    (params.variant === 'reference' || params.variant === 'full')
+  );
+}
+
+export const handlers: readonly RpcHandler[] = Object.freeze([
+  defineRpcHandler(
+    'queries.characters.list',
+    isEmptyParams,
+    (context) => new CharacterListBuilder(context.db).build(),
+  ),
+  defineRpcHandler(
+    'queries.characters.get',
+    isCharacterParams,
+    (context, params) =>
+      new CharacterCrud(context.db).get(params.character_id),
+  ),
+  defineRpcHandler(
+    'queries.characters.create',
+    isCreateCharacterParams,
+    (context, params) =>
+      new CharacterCrud(context.db).create(params),
+  ),
+  defineRpcHandler(
+    'queries.characters.delete',
+    isCharacterParams,
+    (context, params) =>
+      new CharacterCrud(context.db).delete(params.character_id),
+  ),
+  defineRpcHandler(
+    'queries.characters.workspace',
+    isCharacterParams,
+    (context, params) =>
+      new CharacterWorkspaceBuilder(context.db).build(
+        params.character_id,
+      ),
+  ),
+  defineRpcHandler(
+    'queries.catalog.read',
+    isEmptyParams,
+    (context) => new CatalogQueries(context.db).read(),
+  ),
+  defineRpcHandler(
+    'queries.eligibleSpells.search',
+    isEligibleSpellParams,
+    (context, params) =>
+      new EligibleSpellSearch(context.db).search(
+        params.character_id,
+        params.slot_id,
+        params.query.trim(),
+      ),
+  ),
+  defineRpcHandler(
+    'queries.savePoints.create',
+    isCreateSavePointParams,
+    (context, params) => {
+      new SavePointQueries(context.db).create(
+        params.character_id,
+        params.label,
+      );
+      return new CharacterWorkspaceBuilder(context.db).build(
+        params.character_id,
+      );
+    },
+  ),
+  defineRpcHandler(
+    'queries.savePoints.restoreCommand',
+    isSavePointCommandParams,
+    (context, params) =>
+      new SavePointQueries(context.db).restoreCommand(
+        params.character_id,
+        params.save_point_id,
+        new CharacterCommandIntegrity(COMMAND_INTEGRITY_KEY),
+      ),
+  ),
+  defineRpcHandler(
+    'queries.reports.build',
+    isCharacterParams,
+    (context, params) =>
+      new BuildReportBuilder(context.db).build(params.character_id),
+  ),
+  defineRpcHandler(
+    'queries.reports.printable',
+    isPrintableParams,
+    (context, params) =>
+      new PrintableSpellListBuilder(context.db).build(
+        params.character_id,
+        params.variant === 'full',
+      ),
+  ),
+  defineRpcHandler(
+    'queries.history.read',
+    isCharacterParams,
+    (context, params) =>
+      new OperationHistoryQueries(context.db).read(
+        params.character_id,
+      ),
+  ),
+]);
