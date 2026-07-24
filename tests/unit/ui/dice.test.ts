@@ -42,16 +42,19 @@ function close(actual: number, expected: number): void {
 describe('planner dice oracle', () => {
   it('composes exact d20 modes, rerolls, modifiers, and defenses', () => {
     const normal = attackProbabilities(config());
+    close(normal.normalHit, 0.5);
     close(normal.totalHit, 0.55);
     close(normal.criticalHit, 0.05);
-    close(
-      attackProbabilities(config({ rollMode: 'advantage' })).totalHit,
-      1 - 0.45 ** 2,
+    const advantage = attackProbabilities(
+      config({ rollMode: 'advantage' }),
     );
-    close(
-      attackProbabilities(config({ rollMode: 'disadvantage' })).totalHit,
-      0.55 ** 2,
+    close(advantage.totalHit, 1 - 0.45 ** 2);
+    close(advantage.criticalHit, 1 - 0.95 ** 2);
+    const disadvantage = attackProbabilities(
+      config({ rollMode: 'disadvantage' }),
     );
+    close(disadvantage.totalHit, 0.55 ** 2);
+    close(disadvantage.criticalHit, 0.05 ** 2);
     close(
       attackProbabilities(
         config({ rollMode: 'disadvantage', luckyFeat: true }),
@@ -69,8 +72,32 @@ describe('planner dice oracle', () => {
       231 / 400,
     );
     close(
+      attackProbabilities(config({ halflingLuck: true })).criticalHit,
+      21 / 400,
+    );
+    close(
       attackProbabilities(config({ bless: true })).totalHit,
       0.675,
+    );
+    const bothModifiers = attackProbabilities(
+      config({ bless: true, bane: true }),
+    );
+    close(
+      bothModifiers.miss +
+        bothModifiers.normalHit +
+        bothModifiers.criticalHit,
+      1,
+    );
+    close(bothModifiers.criticalHit, 0.05);
+    close(
+      exactResult(
+        config({
+          basicDice: 1,
+          basicDieSize: 4,
+          resistance: true,
+        }),
+      ).normalDamage,
+      1,
     );
     close(
       exactResult(
@@ -105,12 +132,20 @@ describe('planner dice oracle', () => {
       sorcerousExpectedRawDamage(1, 3, false),
       (1 + 73 / 512) * 4.5,
     );
+    close(sorcerousExpectedRawDamage(1, 0, false), 4.5);
     const criticalExtra = 15 / 64 + 11 / 256 + 29 / 4096;
+    close(sorcerousExpectedExtraDice(2, 3), criticalExtra);
+    close(
+      sorcerousExpectedRawDamage(2, 3, false),
+      (2 + criticalExtra) * 4.5,
+    );
+    close(sorcerousExpectedRawDamage(1, 0, true), 37 / 8);
     const burst = exactResult(config({ profile: 'sorcerous-burst' }));
     close(burst.normalDamage, (1 + 73 / 512) * 4.5);
     close(burst.criticalDamage, (2 + criticalExtra) * 4.5);
     close(chromaticLeapChance(3, false), 176 / 512);
     close(chromaticLeapChance(3, true), 212 / 512);
+    close(chromaticLeapChance(9, false), 1);
     const orbInput = config({
       profile: 'chromatic-orb',
       chromaticSlotLevel: 1,
@@ -160,6 +195,7 @@ describe('planner dice oracle', () => {
     );
     expect(orb.attacks).toHaveLength(2);
     expect(orb.attacks[0]?.triggeredLeap).toBe(true);
+    expect(orb.attacks[1]?.triggeredLeap).toBe(false);
     expect(orb.totalDamage).toBe(35);
   });
 });

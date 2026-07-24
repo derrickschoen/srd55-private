@@ -6,6 +6,7 @@ import type {
 } from '../../../src/domain/read-models';
 import type { OperationHistory } from '../../../src/queries/operation-history';
 import type { CharacterCommandResult } from '../../../src/commands/character-command-executor';
+import { RpcError } from '../../../src/rpc/protocol';
 import {
   defaultGridFilters,
   filterAndSortSlots,
@@ -210,5 +211,64 @@ describe('planner persisted workflow', () => {
       wisdom: 18,
       allowLegacy: false,
     });
+  });
+
+  it('marks revision conflicts stale and preserves durable state for reload', async () => {
+    const durable = {
+      revision: 4,
+      wisdom: 16,
+      allowLegacy: false,
+    };
+    const queries: PlannerQueryClient = {
+      workspace: async () =>
+        workspace(
+          durable.revision,
+          durable.wisdom,
+          durable.allowLegacy,
+        ),
+      operationHistory: async () => noHistory,
+      eligibleSpells: async () => [],
+      createSavePoint: async () =>
+        workspace(
+          durable.revision,
+          durable.wisdom,
+          durable.allowLegacy,
+        ),
+      savePointRestoreCommand: async () => ({
+        type: 'update_ability',
+        ability: 'wisdom',
+        score: 10,
+      }),
+    };
+    const commands: PlannerCommandClient = {
+      execute: async () => {
+        throw new RpcError(
+          'handler_error',
+          'This character changed in another tab. Reload before trying again.',
+          { current_revision: 5 },
+        );
+      },
+    };
+    const session = new PlannerSession(7, queries, commands);
+    await session.load();
+
+    await expect(
+      session.execute({
+        type: 'update_ability',
+        ability: 'wisdom',
+        score: 18,
+      }),
+    ).resolves.toBe(false);
+
+    expect(session.stale).toBe(true);
+    expect(session.error).toBe(
+      'This character changed in another tab. Reload before trying again.',
+    );
+    expect(durable).toEqual({
+      revision: 4,
+      wisdom: 16,
+      allowLegacy: false,
+    });
+    expect(session.workspace?.revision).toBe(4);
   });
 });

@@ -1,3 +1,6 @@
+import type { Ability } from '../../../domain/enums';
+import type { WorkspaceSlot } from '../../../domain/read-models';
+
 export type RollMode = 'normal' | 'advantage' | 'disadvantage';
 export type DamageProfile =
   | 'basic'
@@ -686,12 +689,48 @@ function labeledInput(
   return wrapper;
 }
 
-export function renderDiceHelper(characterLevel: number): HTMLElement {
+function boundedInteger(
+  value: number,
+  minimum: number,
+  maximum: number,
+): number {
+  return Math.min(
+    maximum,
+    Math.max(
+      minimum,
+      Math.trunc(Number.isFinite(value) ? value : minimum),
+    ),
+  );
+}
+
+function signedLabel(value: number): string {
+  return value >= 0 ? `+${value}` : String(value);
+}
+
+function percent(value: number): string {
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function metricNode(label: string, value: string): HTMLElement {
+  const wrapper = document.createElement('div');
+  const term = document.createElement('dt');
+  term.textContent = label;
+  const description = document.createElement('dd');
+  description.textContent = value;
+  wrapper.append(term, description);
+  return wrapper;
+}
+
+export function renderDiceHelper(
+  slots: readonly WorkspaceSlot[],
+  characterLevel: number,
+  abilities: Readonly<Record<Ability, number>>,
+): HTMLElement {
   const section = document.createElement('section');
   section.className = 'planner-panel dice-helper';
   section.setAttribute('aria-labelledby', 'dice-helper-title');
   section.innerHTML =
-    '<div class="panel-heading"><div><h2 id="dice-helper-title">At-the-table dice calculator</h2><p>Exact odds and replayable seeded rolls.</p></div><span class="badge badge-ok">No simulation</span></div>';
+    '<div class="panel-heading"><div><h2 id="dice-helper-title">At-the-table dice calculator</h2><p>Exact odds, quick live rolls, and a replay token for every result.</p></div><span class="badge badge-ok">No simulation</span></div>';
   const config = defaultDiceConfig();
   config.sorcerousBaseDice =
     characterLevel >= 17
@@ -704,8 +743,34 @@ export function renderDiceHelper(characterLevel: number): HTMLElement {
   const controls = document.createElement('div');
   controls.className = 'dice-controls';
   const profile = document.createElement('select');
-  profile.innerHTML =
-    '<option value="sorcerous-burst">Sorcerous Burst (2024)</option><option value="chromatic-orb">Chromatic Orb (2024)</option><option value="basic">Basic attack</option>';
+  profile.append(
+    new Option('Sorcerous Burst (2024)', 'manual-sorcerous-burst'),
+    new Option('Chromatic Orb (2024)', 'manual-chromatic-orb'),
+    new Option('Basic attack', 'basic'),
+  );
+  const selectedSpellOptions = slots.filter(
+    (slot) =>
+      slot.spell_edition === '2024' &&
+      slot.attack_bonus !== null &&
+      ['Sorcerous Burst', 'Chromatic Orb'].includes(
+        slot.spell_name ?? '',
+      ),
+  );
+  if (selectedSpellOptions.length > 0) {
+    const group = document.createElement('optgroup');
+    group.label = 'Selected spells — uses character bonus';
+    for (const slot of selectedSpellOptions) {
+      group.append(
+        new Option(
+          `${slot.spell_name} · ${slot.source} · ${signedLabel(
+            slot.attack_bonus ?? 0,
+          )}`,
+          `slot:${slot.id}`,
+        ),
+      );
+    }
+    profile.append(group);
+  }
   const ac = document.createElement('input');
   ac.type = 'number';
   ac.min = '1';
@@ -719,17 +784,102 @@ export function renderDiceHelper(characterLevel: number): HTMLElement {
   const mode = document.createElement('select');
   mode.innerHTML =
     '<option value="normal">Normal</option><option value="advantage">Advantage</option><option value="disadvantage">Disadvantage</option>';
+  const profileField = labeledInput('Attack profile', profile);
+  profileField.classList.add('dice-profile-field');
   controls.append(
-    labeledInput('Attack profile', profile),
+    profileField,
     labeledInput('Target AC', ac),
     labeledInput('Attack bonus', bonus),
     labeledInput('d20 mode', mode),
   );
+
+  const selectedSource = document.createElement('small');
+  selectedSource.className = 'dice-selected-source';
+  const slotLevel = document.createElement('input');
+  slotLevel.type = 'number';
+  slotLevel.min = '1';
+  slotLevel.max = '9';
+  slotLevel.value = '1';
+  const slotLevelField = labeledInput('Spell slot level', slotLevel);
+  const explosionCap = document.createElement('input');
+  explosionCap.type = 'number';
+  explosionCap.min = '0';
+  explosionCap.max = '10';
+  explosionCap.value = '3';
+  const explosionCapField = labeledInput('Added-d8 cap', explosionCap);
+  const burstBase = document.createElement('small');
+  burstBase.className = 'dice-field-note';
+  explosionCapField.append(burstBase);
+  const basicAbility = document.createElement('select');
+  for (const ability of [
+    'strength',
+    'dexterity',
+    'intelligence',
+    'wisdom',
+    'charisma',
+  ] as const) {
+    basicAbility.append(
+      new Option(
+        ability[0]!.toUpperCase() + ability.slice(1),
+        ability,
+      ),
+    );
+  }
+  basicAbility.value = 'dexterity';
+  const basicAbilityField = labeledInput('Attack ability', basicAbility);
+  const basicDice = document.createElement('input');
+  basicDice.type = 'number';
+  basicDice.min = '1';
+  basicDice.max = '20';
+  basicDice.value = '1';
+  const basicDiceField = labeledInput('Damage dice', basicDice);
+  const basicDieSize = document.createElement('select');
+  for (const size of [4, 6, 8, 10, 12, 20, 100]) {
+    basicDieSize.append(new Option(`d${size}`, String(size)));
+  }
+  basicDieSize.value = '8';
+  const basicDieSizeField = labeledInput('Die size', basicDieSize);
+  const damageModifier = document.createElement('input');
+  damageModifier.type = 'number';
+  damageModifier.min = '-20';
+  damageModifier.max = '40';
+  damageModifier.value = '0';
+  const damageModifierField = labeledInput(
+    'Damage modifier',
+    damageModifier,
+  );
+  const profileControls = document.createElement('div');
+  profileControls.className = 'dice-profile-controls';
+  profileControls.append(
+    slotLevelField,
+    explosionCapField,
+    basicAbilityField,
+    basicDiceField,
+    basicDieSizeField,
+    damageModifierField,
+  );
+  const bonusField = bonus.closest('label');
+  bonusField?.append(selectedSource);
+
   const effects = document.createElement('div');
   effects.className = 'dice-effects';
+  const effectInputs = new Map<
+    keyof Pick<
+      DiceConfig,
+      | 'halflingLuck'
+      | 'luckyFeat'
+      | 'elvenAccuracy'
+      | 'bless'
+      | 'bane'
+      | 'elementalAdept'
+      | 'resistance'
+      | 'vulnerability'
+    >,
+    HTMLInputElement
+  >();
   for (const [key, label] of [
     ['halflingLuck', 'Halfling Luck'],
-    ['luckyFeat', 'Lucky feat'],
+    ['luckyFeat', 'Lucky feat: spend point'],
     ['elvenAccuracy', 'Elven Accuracy'],
     ['bless', 'Bless +d4'],
     ['bane', 'Bane −d4'],
@@ -740,64 +890,260 @@ export function renderDiceHelper(characterLevel: number): HTMLElement {
     const input = document.createElement('input');
     input.type = 'checkbox';
     input.dataset.diceEffect = key;
+    effectInputs.set(key, input);
     const labelNode = document.createElement('label');
     labelNode.append(input, ` ${label}`);
     effects.append(labelNode);
   }
   const metrics = document.createElement('dl');
   metrics.className = 'dice-metrics';
+  const profileNote = document.createElement('p');
+  profileNote.className = 'dice-profile-note';
   const seed = document.createElement('input');
   seed.value = 'table-night';
   seed.maxLength = 80;
   seed.setAttribute('aria-label', 'Dice seed');
+  const sequenceInput = document.createElement('input');
+  sequenceInput.type = 'number';
+  sequenceInput.min = '1';
+  sequenceInput.value = '1';
+  sequenceInput.setAttribute('aria-label', 'Next roll number');
   const roll = document.createElement('button');
   roll.type = 'button';
   roll.className = 'button-primary';
   roll.textContent = 'Roll attack + damage';
-  const live = document.createElement('output');
+  const live = document.createElement('section');
   live.className = 'dice-roll-result';
   live.setAttribute('aria-live', 'polite');
-  let sequence = 1;
+  live.hidden = true;
+  const selectedSlot = (): WorkspaceSlot | null => {
+    if (!profile.value.startsWith('slot:')) return null;
+    const id = Number(profile.value.slice(5));
+    return selectedSpellOptions.find((slot) => slot.id === id) ?? null;
+  };
+  const damageProfile = (): DamageProfile => {
+    const slot = selectedSlot();
+    if (
+      slot?.spell_name === 'Sorcerous Burst' ||
+      profile.value === 'manual-sorcerous-burst'
+    ) {
+      return 'sorcerous-burst';
+    }
+    if (
+      slot?.spell_name === 'Chromatic Orb' ||
+      profile.value === 'manual-chromatic-orb'
+    ) {
+      return 'chromatic-orb';
+    }
+    return 'basic';
+  };
+  const selectedAbilityModifier = (): number | null => {
+    const ability = selectedSlot()?.ability;
+    return ability === null || ability === undefined
+      ? null
+      : Math.floor(((abilities[ability] ?? 10) - 10) / 2);
+  };
   const read = (): DiceConfig => {
-    config.profile = profile.value as DamageProfile;
-    config.armorClass = Number(ac.value);
-    config.attackBonus = Number(bonus.value);
+    config.profile = damageProfile();
+    config.armorClass = boundedInteger(Number(ac.value), 1, 40);
+    config.attackBonus =
+      selectedSlot()?.attack_bonus ??
+      boundedInteger(Number(bonus.value), -10, 30);
     config.rollMode = mode.value as RollMode;
-    for (const input of Array.from(
-      effects.querySelectorAll<HTMLInputElement>('[data-dice-effect]'),
-    )) {
-      const key = input.dataset.diceEffect as keyof Pick<
-        DiceConfig,
-        | 'halflingLuck'
-        | 'luckyFeat'
-        | 'elvenAccuracy'
-        | 'bless'
-        | 'bane'
-        | 'elementalAdept'
-        | 'resistance'
-        | 'vulnerability'
-      >;
+    for (const [key, input] of effectInputs) {
       config[key] = input.checked;
     }
+    const netAdvantage =
+      (config.rollMode === 'advantage'
+        ? 1
+        : config.rollMode === 'disadvantage'
+          ? -1
+          : 0) + (config.luckyFeat ? 1 : 0);
+    const elvenEligible =
+      config.profile !== 'basic' ||
+      ['dexterity', 'intelligence', 'wisdom', 'charisma'].includes(
+        basicAbility.value,
+      );
+    config.elvenAccuracy =
+      config.elvenAccuracy && netAdvantage > 0 && elvenEligible;
+    config.basicDice = boundedInteger(Number(basicDice.value), 1, 20);
+    config.basicDieSize = boundedInteger(
+      Number(basicDieSize.value),
+      2,
+      100,
+    );
+    config.damageModifier = boundedInteger(
+      Number(damageModifier.value),
+      -20,
+      40,
+    );
+    config.explosionCap = boundedInteger(
+      selectedAbilityModifier() ?? Number(explosionCap.value),
+      0,
+      10,
+    );
+    config.chromaticSlotLevel = boundedInteger(
+      Number(slotLevel.value),
+      1,
+      9,
+    );
     return config;
   };
   const update = (): void => {
+    const selected = selectedSlot();
+    const kind = damageProfile();
+    const modifier = selectedAbilityModifier();
+    bonus.disabled = selected !== null;
+    selectedSource.textContent =
+      selected === null ? '' : `From ${selected.source}`;
+    slotLevelField.hidden = kind !== 'chromatic-orb';
+    explosionCapField.hidden = kind !== 'sorcerous-burst';
+    for (const field of [
+      basicAbilityField,
+      basicDiceField,
+      basicDieSizeField,
+      damageModifierField,
+    ]) {
+      field.hidden = kind !== 'basic';
+    }
+    explosionCap.disabled = modifier !== null;
+    burstBase.textContent = `${config.sorcerousBaseDice} base d8${
+      modifier === null
+        ? ''
+        : ` · ${selected?.ability?.slice(0, 3).toUpperCase()} modifier`
+    }`;
+    const lucky = effectInputs.get('luckyFeat')?.checked === true;
+    const net =
+      (mode.value === 'advantage'
+        ? 1
+        : mode.value === 'disadvantage'
+          ? -1
+          : 0) + (lucky ? 1 : 0);
+    const elvenEligible =
+      kind !== 'basic' ||
+      ['dexterity', 'intelligence', 'wisdom', 'charisma'].includes(
+        basicAbility.value,
+      );
+    const elven = effectInputs.get('elvenAccuracy');
+    if (elven !== undefined) {
+      elven.disabled = net <= 0 || !elvenEligible;
+      if (elven.disabled) elven.checked = false;
+    }
     const exact = exactResult(read());
-    metrics.innerHTML = `<div><dt>Hit chance</dt><dd>${(exact.totalHit * 100).toFixed(1)}%</dd></div><div><dt>Critical</dt><dd>${(exact.criticalHit * 100).toFixed(1)}%</dd></div><div><dt>Expected damage</dt><dd>${exact.expectedDamage.toFixed(2)}</dd></div><div><dt>Damage / hit</dt><dd>${exact.expectedDamageOnAnyHit.toFixed(2)}</dd></div>`;
-    live.value = '';
+    metrics.replaceChildren(
+      metricNode('Hit chance', percent(exact.totalHit)),
+      metricNode('Critical chance', percent(exact.criticalHit)),
+      metricNode('Expected damage / cast', exact.expectedDamage.toFixed(2)),
+      metricNode(
+        kind === 'chromatic-orb'
+          ? 'Expected targets hit'
+          : 'Damage / hit',
+        (kind === 'chromatic-orb'
+          ? exact.expectedTargetsHit
+          : exact.expectedDamageOnAnyHit
+        ).toFixed(2),
+      ),
+    );
+    if (kind === 'sorcerous-burst') {
+      profileNote.textContent = `${config.sorcerousBaseDice}d8 base · ${exact.expectedSorcerousExtraDice.toFixed(2)} expected added d8s · critical doubles base dice, not the cap.`;
+    } else if (kind === 'chromatic-orb') {
+      profileNote.textContent = `${config.chromaticSlotLevel + 2}d8 · ${percent(exact.chanceToLeap)} chance the first attack both hits and leaps · at most ${config.chromaticSlotLevel} leap${config.chromaticSlotLevel === 1 ? '' : 's'}.`;
+    } else {
+      profileNote.textContent = '';
+    }
+    live.replaceChildren();
+    live.hidden = true;
   };
   controls.addEventListener('change', update);
+  profileControls.addEventListener('change', update);
   effects.addEventListener('change', update);
   roll.addEventListener('click', () => {
+    const sequence = boundedInteger(
+      Number(sequenceInput.value),
+      1,
+      Number.MAX_SAFE_INTEGER,
+    );
     const token = `${seed.value.trim() || 'table'}:${sequence}`;
-    sequence += 1;
+    sequenceInput.value = String(sequence + 1);
     const result = seededRoll(read(), token);
-    live.value = `${result.totalDamage} total damage · Replay ${result.token} · stopped: ${result.stopReason.replaceAll('-', ' ')}`;
+    const heading = document.createElement('h3');
+    const targets = result.attacks.filter(
+      (attack) => attack.outcome !== 'miss',
+    ).length;
+    heading.textContent = `${result.totalDamage} total damage · ${targets} target${targets === 1 ? '' : 's'} hit`;
+    const replay = document.createElement('code');
+    replay.textContent = `Replay ${result.token}`;
+    const list = document.createElement('ol');
+    list.className = 'dice-trace';
+    for (const [index, attack] of result.attacks.entries()) {
+      const item = document.createElement('li');
+      const attackHeading = document.createElement('strong');
+      attackHeading.textContent = `Target ${index + 1} · ${attack.outcome}`;
+      const attackMath = document.createElement('p');
+      attackMath.textContent = `d20 ${attack.d20
+        .map((die) =>
+          die.reroll === null
+            ? String(die.initial)
+            : `${die.initial}→${die.reroll}`,
+        )
+        .join(', ')} → ${attack.chosenD20} ${signedLabel(
+        read().attackBonus,
+      )}${
+        attack.bless === null ? '' : ` + ${attack.bless}`
+      }${attack.bane === null ? '' : ` − ${attack.bane}`} = ${attack.total}`;
+      item.append(attackHeading, attackMath);
+      if (attack.outcome !== 'miss') {
+        const damage = document.createElement('p');
+        damage.textContent = `Damage [${attack.damageDice
+          .map(
+            (die) =>
+              `${die.added ? '+' : ''}${
+                die.raw === die.value
+                  ? die.raw
+                  : `${die.raw}→${die.value}`
+              }`,
+          )
+          .join(', ')}]${
+          attack.damageModifier === 0
+            ? ''
+            : ` ${signedLabel(attack.damageModifier)}`
+        } = ${attack.damageBeforeDefense} → ${attack.damage}${
+          attack.triggeredLeap ? ' · leaps' : ''
+        }`;
+        item.append(damage);
+      }
+      list.append(item);
+    }
+    const stopped = document.createElement('p');
+    stopped.className = 'dice-stop';
+    stopped.textContent = `Stopped: ${result.stopReason.replaceAll(
+      '-',
+      ' ',
+    )}. To replay, enter the token’s text before the final colon as Seed and its final number as Next #.`;
+    live.append(heading, replay, list, stopped);
+    live.hidden = false;
   });
   update();
   const actions = document.createElement('div');
   actions.className = 'dice-actions';
-  actions.append(labeledInput('Seed', seed), roll);
-  section.append(controls, effects, metrics, actions, live);
+  actions.append(
+    labeledInput('Seed', seed),
+    labeledInput('Next #', sequenceInput),
+    roll,
+  );
+  const assumptions = document.createElement('details');
+  assumptions.className = 'dice-assumptions';
+  assumptions.innerHTML =
+    '<summary>Composition and table assumptions</summary><p>Order: net Advantage/Disadvantage → Halfling/Elven rerolls → Bless/Bane → critical doubles initial dice → Elemental Adept changes damage-die 1s to 2 → spell triggers → total → Resistance → Vulnerability.</p><p>Chromatic Orb uses the same AC and checked attack effects for every new target, never retargets a creature, and stops after the slot-level leap limit. Checking Lucky assumes a Luck Point is available for each attack in a chain.</p>';
+  section.append(
+    controls,
+    profileControls,
+    effects,
+    metrics,
+    profileNote,
+    actions,
+    live,
+    assumptions,
+  );
   return section;
 }

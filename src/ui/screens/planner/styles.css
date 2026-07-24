@@ -505,6 +505,35 @@ select:disabled {
   font-size: 0.8rem;
 }
 
+.pact-magic {
+  margin: 0.65rem 0 0;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.wizard-explanation {
+  color: var(--planner-ink-soft);
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.wizard-states {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.wizard-states h3 {
+  margin-bottom: 0.3rem;
+  font-size: 0.74rem;
+}
+
+.wizard-states ul {
+  padding-left: 1rem;
+  margin: 0;
+  font-size: 0.72rem;
+}
+
 .ceiling-list li,
 .invalid-list li {
   padding: 0.45rem 0;
@@ -563,6 +592,31 @@ select:disabled {
   gap: 0.55rem;
 }
 
+.dice-profile-field {
+  grid-column: span 2;
+}
+
+.dice-profile-controls {
+  display: grid;
+  margin-top: 0.55rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.dice-profile-controls [hidden] {
+  display: none !important;
+}
+
+.dice-selected-source,
+.dice-field-note {
+  display: block;
+  margin-top: 0.25rem;
+  color: var(--planner-ink-soft);
+  font-size: 0.68rem;
+  font-weight: 500;
+  text-transform: none;
+}
+
 .dice-effects {
   display: grid;
   margin-top: 0.8rem;
@@ -590,6 +644,57 @@ select:disabled {
   color: #442369;
   background: #f0e7ff;
   font-weight: 700;
+}
+
+.dice-roll-result h3 {
+  display: inline;
+  margin-right: 0.65rem;
+}
+
+.dice-roll-result code {
+  font-size: 0.72rem;
+}
+
+.dice-trace {
+  display: grid;
+  padding: 0;
+  margin: 0.65rem 0 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+  list-style: none;
+}
+
+.dice-trace li {
+  padding: 0.55rem;
+  border: 1px solid #c4a7df;
+  border-radius: 0.35rem;
+  background: var(--planner-panel);
+  font-size: 0.75rem;
+}
+
+.dice-trace p,
+.dice-stop,
+.dice-profile-note,
+.dice-assumptions p {
+  margin: 0.35rem 0 0;
+  font-size: 0.72rem;
+  font-weight: 500;
+}
+
+.dice-profile-note {
+  padding: 0.55rem;
+  border-radius: 0.35rem;
+  background: #eee9e0;
+}
+
+.dice-profile-note:empty {
+  display: none;
+}
+
+.dice-assumptions {
+  margin-top: 0.75rem;
+  color: var(--planner-ink-soft);
+  font-size: 0.75rem;
 }
 
 @media (max-width: 70rem) {
@@ -625,6 +730,7 @@ select:disabled {
   .ability-grid,
   .grid-filters,
   .dice-controls,
+  .dice-profile-controls,
   .dice-effects,
   .planner-sidebar,
   .removable-sources {
@@ -679,6 +785,7 @@ select:disabled {
   .ability-grid,
   .grid-filters,
   .dice-controls,
+  .dice-profile-controls,
   .dice-effects,
   .planner-sidebar,
   .source-add-form {
