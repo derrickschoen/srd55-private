@@ -147,9 +147,23 @@ describe('persisted spell access routes', () => {
     return classId;
   }
 
+  function subclassDefinition(
+    classId: number,
+    name: string,
+    ability: string | null,
+  ): number {
+    return db.exec(
+      `INSERT INTO subclass_definitions (
+         content_key, class_definition_id, name, rules_edition,
+         spellcasting_ability
+       ) VALUES (?, ?, ?, '2024', ?)`,
+      [`subclass:${crypto.randomUUID()}`, classId, name, ability],
+    ).lastInsertId;
+  }
+
   function source(
     characterId: number,
-    sourceType: 'class' | 'feat',
+    sourceType: 'class' | 'subclass' | 'feat',
     definitionId: number,
     name: string,
     config: Readonly<Record<string, unknown>> = {},
@@ -296,40 +310,77 @@ describe('persisted spell access routes', () => {
     const preparedId = spell('2024:e-prepared', 'E Prepared');
     const knownId = spell('2024:f-known', 'F Known');
 
-    slot(characterId, wizardSourceId, atWillId, 'wizard:cantrip:1', {
-      fixed: true,
-      bucket: 'automatic',
-      withSlots: false,
-    });
-    slot(characterId, wizardSourceId, freeOnlyId, 'wizard:free:1', {
-      fixed: true,
-      bucket: 'automatic',
-      withSlots: false,
-      freeCast: {
-        uses: 1,
-        recovery: 'long_rest',
-        pool_scope: 'per_spell',
+    const atWillSlotId = slot(
+      characterId,
+      wizardSourceId,
+      atWillId,
+      'wizard:cantrip:1',
+      {
+        fixed: true,
+        bucket: 'automatic',
+        withSlots: false,
+        freeCast: {
+          uses: 1,
+          recovery: 'long_rest',
+          pool_scope: 'per_spell',
+        },
       },
-    });
-    slot(characterId, wizardSourceId, grantedId, 'wizard:grant:1', {
-      fixed: true,
-      bucket: 'automatic',
-      withSlots: false,
-    });
-    slot(characterId, wizardSourceId, slotsAndFreeId, 'wizard:known:1', {
-      bucket: 'known',
-      freeCast: {
-        uses: 2,
-        recovery: 'short_rest',
-        pool_scope: 'shared',
+    );
+    const freeOnlySlotId = slot(
+      characterId,
+      wizardSourceId,
+      freeOnlyId,
+      'wizard:free:1',
+      {
+        fixed: true,
+        bucket: 'automatic',
+        withSlots: false,
+        freeCast: {
+          uses: 1,
+          recovery: 'long_rest',
+          pool_scope: 'per_spell',
+        },
       },
-    });
-    slot(characterId, wizardSourceId, preparedId, 'wizard:prepared:1', {
-      bucket: 'prepared',
-    });
-    slot(characterId, configuredSourceId, knownId, 'feat:known:1', {
-      bucket: 'known',
-    });
+    );
+    const grantedSlotId = slot(
+      characterId,
+      wizardSourceId,
+      grantedId,
+      'wizard:grant:1',
+      {
+        fixed: true,
+        bucket: 'automatic',
+        withSlots: false,
+      },
+    );
+    const slotsAndFreeSlotId = slot(
+      characterId,
+      wizardSourceId,
+      slotsAndFreeId,
+      'wizard:known:1',
+      {
+        bucket: 'known',
+        freeCast: {
+          uses: 2,
+          recovery: 'short_rest',
+          pool_scope: 'shared',
+        },
+      },
+    );
+    const preparedSlotId = slot(
+      characterId,
+      wizardSourceId,
+      preparedId,
+      'wizard:prepared:1',
+      { bucket: 'prepared' },
+    );
+    const knownSlotId = slot(
+      characterId,
+      configuredSourceId,
+      knownId,
+      'feat:known:1',
+      { bucket: 'known' },
+    );
     const before = persistedAccessState(characterId);
 
     const routes = builder.buildForCharacter(characterId);
@@ -348,6 +399,58 @@ describe('persisted spell access routes', () => {
       ['D Slots And Free', 'slots_and_free_cast', 'known', 'wizard:known:1'],
       ['E Prepared', 'with_slots', 'prepared', 'wizard:prepared:1'],
       ['F Known', 'with_slots', 'known', 'feat:known:1'],
+    ]);
+    expect(
+      routes.map((route) => ({
+        spellVersionId: route.spell_version_id,
+        sourceInstanceId: route.source_instance_id,
+        slotId: route.slot_id,
+        slotKey: route.slot_key,
+        selectionKey: route.selection_key,
+      })),
+    ).toEqual([
+      {
+        spellVersionId: atWillId,
+        sourceInstanceId: wizardSourceId,
+        slotId: atWillSlotId,
+        slotKey: 'wizard:cantrip:1',
+        selectionKey: 'wizard:cantrip:1',
+      },
+      {
+        spellVersionId: freeOnlyId,
+        sourceInstanceId: wizardSourceId,
+        slotId: freeOnlySlotId,
+        slotKey: 'wizard:free:1',
+        selectionKey: 'wizard:free:1',
+      },
+      {
+        spellVersionId: grantedId,
+        sourceInstanceId: wizardSourceId,
+        slotId: grantedSlotId,
+        slotKey: 'wizard:grant:1',
+        selectionKey: 'wizard:grant:1',
+      },
+      {
+        spellVersionId: slotsAndFreeId,
+        sourceInstanceId: wizardSourceId,
+        slotId: slotsAndFreeSlotId,
+        slotKey: 'wizard:known:1',
+        selectionKey: 'wizard:known:1',
+      },
+      {
+        spellVersionId: preparedId,
+        sourceInstanceId: wizardSourceId,
+        slotId: preparedSlotId,
+        slotKey: 'wizard:prepared:1',
+        selectionKey: 'wizard:prepared:1',
+      },
+      {
+        spellVersionId: knownId,
+        sourceInstanceId: configuredSourceId,
+        slotId: knownSlotId,
+        slotKey: 'feat:known:1',
+        selectionKey: 'feat:known:1',
+      },
     ]);
     expect(
       routes.slice(0, 5).map((route) => ({
@@ -378,6 +481,72 @@ describe('persisted spell access routes', () => {
       uses: 2,
       recovery: 'short_rest',
       pool_scope: 'shared',
+    });
+    expect(routes[0]!.free_cast).toEqual({
+      uses: 1,
+      recovery: 'long_rest',
+      pool_scope: 'per_spell',
+    });
+    expect(persistedAccessState(characterId)).toEqual(before);
+  });
+
+  it('resolves a persisted subclass ability and proficiency override', () => {
+    const characterId = character(
+      'Subclass Caster',
+      { intelligence: 14 },
+      5,
+    );
+    const fighterId = classDefinition('Fighter', null);
+    classLevel(characterId, fighterId, 3);
+    const subclassId = subclassDefinition(
+      fighterId,
+      'Eldritch Knight',
+      'intelligence',
+    );
+    const sourceId = source(
+      characterId,
+      'subclass',
+      subclassId,
+      'Eldritch Knight 3',
+    );
+    const versionId = spell('2024:subclass-spell', 'Subclass Spell');
+    const slotId = slot(
+      characterId,
+      sourceId,
+      versionId,
+      'eldritch-knight:known:1',
+    );
+    const before = persistedAccessState(characterId);
+
+    expect(builder.buildForCharacter(characterId)).toEqual([
+      expect.objectContaining({
+        spell_version_id: versionId,
+        source_instance_id: sourceId,
+        slot_id: slotId,
+        spellcasting_ability: 'intelligence',
+        ability_modifier: 2,
+        attack_bonus: 7,
+        save_dc: 15,
+      }),
+    ]);
+    expect(
+      db.one(
+        `SELECT source.source_type, source.source_definition_id,
+                subclass.spellcasting_ability,
+                character.proficiency_bonus_override
+         FROM character_source_instances AS source
+         INNER JOIN subclass_definitions AS subclass
+           ON subclass.id = source.source_definition_id
+         INNER JOIN characters AS character
+           ON character.id = source.character_id
+         WHERE source.id = ?`,
+        [sourceId],
+      ),
+    ).toEqual({
+      source_type: 'subclass',
+      source_definition_id: subclassId,
+      spellcasting_ability: 'intelligence',
+      proficiency_bonus_override: 5,
     });
     expect(persistedAccessState(characterId)).toEqual(before);
   });
@@ -516,6 +685,14 @@ describe('persisted spell access routes', () => {
       'Second Ritual Source',
       { spellcasting_ability: 'wisdom' },
     );
+    const clericId = classDefinition('Cleric', 'wisdom');
+    classLevel(characterId, clericId, 1);
+    const clericSourceId = source(
+      characterId,
+      'class',
+      clericId,
+      'Cleric 1',
+    );
 
     const preparedId = spell(
       '2024:prepared-ritual',
@@ -540,18 +717,27 @@ describe('persisted spell access routes', () => {
       'wizard:prepared:1',
       { bucket: 'prepared' },
     );
+    const clericSlotId = slot(
+      characterId,
+      clericSourceId,
+      taggedRitualId,
+      'cleric:prepared:1',
+      { bucket: 'prepared' },
+    );
+    const spellbookEntryIds = new Map<number, number>();
     for (const versionId of [
       preparedId,
       taggedRitualId,
       ordinaryId,
       inactiveId,
     ]) {
-      db.exec(
+      const entryId = db.exec(
         `INSERT INTO wizard_spellbook_entries
            (character_id, spell_version_id)
          VALUES (?, ?)`,
         [characterId, versionId],
-      );
+      ).lastInsertId;
+      spellbookEntryIds.set(versionId, entryId);
     }
     const before = persistedAccessState(characterId);
 
@@ -560,7 +746,7 @@ describe('persisted spell access routes', () => {
       (route) => route.casting_mode === 'ritual_only',
     );
 
-    expect(routes).toHaveLength(2);
+    expect(routes).toHaveLength(3);
     expect(routes[0]).toMatchObject({
       spell_name: 'Prepared Ritual',
       origin: 'slot',
@@ -585,13 +771,20 @@ describe('persisted spell access routes', () => {
       is_selection: false,
       counts_against_limit: false,
       free_cast: null,
-      spellbook_entry_id: expect.any(Number),
+      spellbook_entry_id: spellbookEntryIds.get(taggedRitualId),
     });
     expect(
       routes.filter(
         (route) => route.spell_version_id === taggedRitualId,
-      ),
-    ).toHaveLength(1);
+      ).map((route) => [
+        route.origin,
+        route.casting_mode,
+        route.slot_id,
+      ]),
+    ).toEqual([
+      ['capability', 'ritual_only', null],
+      ['slot', 'with_slots', clericSlotId],
+    ]);
     expect(
       routes.some((route) => route.spell_version_id === ordinaryId),
     ).toBe(false);

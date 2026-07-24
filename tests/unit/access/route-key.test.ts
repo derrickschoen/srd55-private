@@ -34,18 +34,31 @@ describe('spell access route keys', () => {
     };
 
     expect(routeKey(recomputed)).toBe(routeKey(original));
-    expect(routeKey(route({ slot_id: 12 }))).not.toBe(routeKey(original));
-    expect(
-      routeKey(
-        route({
-          origin: 'capability',
-          slot_id: null,
-          slot_key: null,
-          spellbook_entry_id: 11,
-          casting_mode: 'ritual_only',
-        }),
-      ),
-    ).not.toBe(routeKey(original));
+    const distinctPersistedRoutes: readonly [
+      label: string,
+      candidate: RouteKeyFields,
+    ][] = [
+      ['origin', route({ origin: 'capability' })],
+      ['spell version', route({ spell_version_id: 8 })],
+      ['source instance', route({ source_instance_id: 4 })],
+      ['slot ID', route({ slot_id: 12 })],
+      ['slot key', route({ slot_key: 'source:prepared:2' })],
+      ['casting mode', route({ casting_mode: 'free_cast_only' })],
+    ];
+    for (const [label, candidate] of distinctPersistedRoutes) {
+      expect(routeKey(candidate), label).not.toBe(routeKey(original));
+    }
+
+    const ritual = route({
+      origin: 'capability',
+      slot_id: null,
+      slot_key: null,
+      spellbook_entry_id: 11,
+      casting_mode: 'ritual_only',
+    });
+    expect(routeKey({ ...ritual, spellbook_entry_id: 12 })).not.toBe(
+      routeKey(ritual),
+    );
   });
 
   it('keeps the first exact route but preserves distinct persisted slots', () => {

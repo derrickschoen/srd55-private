@@ -211,3 +211,38 @@ Status: done
 - Green → preserved incoming child-first save-point source order → the Integration
   test failed at the persisted snapshot assertion because row 0 was the child
   instead of the mapped parent → restored → targeted test passed.
+
+## 2026-07-23 — Integrated Wave 3 review
+
+### Review increment W3-R1
+
+- Independently reviewed
+  `53e8f0242468dd0b193a44f9ccede11dd286afc5..HEAD` for A30 against every
+  cited PHP domain, Unit, Feature, and guard oracle. The merged path inventory
+  contains only A30-owned files.
+- Rechecked assignment exclusivity, live eligibility, active source/version
+  filters, `kept_override`, casting modes/math, source ability resolution,
+  Wizard ritual suppression, route provenance, deduplication, and read-only
+  SQLite behavior. No unresolved implementation parity finding remains.
+- Strengthened insensitive tests to isolate every route-key field and pin routes
+  to exact persisted slot, source, spell-version, and spellbook-entry IDs. Added
+  SQLite coverage for subclass ability lookup, proficiency override, cantrip
+  casting precedence, and the oracle's non-Wizard prepared-ritual overlap.
+
+### Test increment W3-T1
+
+- Focused access verification: 2 Unit files, 4 tests passed; 1 Integration file,
+  4 SQLite tests passed.
+- `npm test`: 17 files, 144 Unit tests passed.
+- Programmatic Vitest Integration include: 9 files, 106 tests passed.
+- `npm run build`: TypeScript and production Vite build passed.
+- `git diff --check` passed; no generated artifact or sensitivity mutation
+  remains in the worktree.
+
+### Sensitivity increment W3-S1
+
+- Green → omitted `source_instance_id` from route identity → the isolated
+  `source instance` assertion failed → restored → targeted Unit test passed.
+- Green → disabled subclass-definition ability lookup → the persisted subclass
+  test received null ability/modifier/attack/DC at its exact route assertion →
+  restored → targeted Integration test passed.
