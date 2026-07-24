@@ -13,6 +13,7 @@ const operationC = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 describe('command idempotency and stale-slot merge guards', () => {
   let connection: Database;
   let db: DatabaseContext;
+  let integrity: CharacterCommandIntegrity;
   let executor: CharacterCommandExecutor;
   let characterId: number;
   let otherCharacterId: number;
@@ -20,10 +21,8 @@ describe('command idempotency and stale-slot merge guards', () => {
   beforeEach(async () => {
     connection = await openTestDatabase();
     db = new DatabaseContext(connection);
-    executor = new CharacterCommandExecutor(
-      db,
-      new CharacterCommandIntegrity('X50-idempotency-key'),
-    );
+    integrity = new CharacterCommandIntegrity('X50-idempotency-key');
+    executor = new CharacterCommandExecutor(db, integrity);
     characterId = db.exec(
       "INSERT INTO characters (name, wisdom) VALUES ('Replay Hero', 13)",
     ).lastInsertId;
@@ -174,12 +173,39 @@ describe('command idempotency and stale-slot merge guards', () => {
     const firstSlotId = slotIds[0]!;
     const secondSlotId = slotIds[1]!;
 
-    await executor.execute({
+    const cleared = await executor.execute({
       character_id: characterId,
       operation_uuid: operationA,
       expected_revision: 0,
       command: { type: 'set_slot', slot_id: firstSlotId, mode: 'clear' },
     });
+    expect(cleared.inverse).toMatchObject({
+      type: 'set_slot',
+      slot_id: firstSlotId,
+      mode: 'restore',
+      state: {
+        current_spell_version_id: spellId,
+        selection_eligibility: 'valid',
+        selection_invalid_reason: null,
+        state: 'active',
+        override_note: null,
+      },
+    });
+    await expect(
+      integrity.assertValid(characterId, cleared.inverse),
+    ).resolves.toBeUndefined();
+    expect(
+      JSON.parse(
+        String(
+          db.scalar(
+            `SELECT inverse_command
+             FROM character_operations
+             WHERE operation_uuid = ?`,
+            [operationA],
+          ),
+        ),
+      ),
+    ).toEqual(cleared.inverse);
     const merged = await executor.execute({
       character_id: characterId,
       operation_uuid: operationB,

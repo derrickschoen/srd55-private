@@ -280,3 +280,39 @@ Status: done
 - Green → introduced a write to `class_definitions` during report construction →
   the expanded whole-database read-only hash assertion failed → restored →
   targeted test passed.
+
+## 2026-07-23 — Integrated Wave 5 review
+
+### Review increment W5-R1
+
+- Independently reviewed
+  `058d3f7427f6c648c15cd445dfeb30ea74d00be0..HEAD` for X50 and P50 against
+  every named PHP executor, factory, conflict, controller, printable builder,
+  Vue, Feature, guard, and abuse oracle. The merged path inventory contains only
+  chunk-owned files.
+- Rechecked all thirteen factory variants, validation/integrity boundaries,
+  synchronous transactional writes, revision/replay ordering, cross-character
+  UUID rejection, exact-slot stale merges, signed/persisted inverses, grouped
+  audit rows, RPC persistence/reload, printable grouping/facts/stats/modes,
+  Wizard splits, long-rest exclusions, text degradation, and read-only behavior.
+- No unresolved implementation parity or ownership finding remains. Strengthened
+  insensitive assertions for distinct per-operation audit groups, exact
+  persisted signed slot inverses, group-level casting stats, persisted spell
+  IDs/edition, and the complete Wizard explanation.
+
+### Test increment W5-T1
+
+- Focused Wave 5 Integration run: 3 files, 12 tests passed.
+- `npm test`: 33 files, 287 tests passed.
+- `npm run typecheck`: passed.
+- Owned Chromium RPC verification: 1 test passed.
+- `git diff --check` passed.
+
+### Sensitivity increment W5-S1
+
+- Green → forced all operations to reuse one valid audit group UUID → the new
+  persisted distinct-group assertion failed with 1 instead of 2 → restored →
+  focused and full suites passed.
+- Green → removed source-group attack bonuses while retaining spell-level stats
+  → the new persisted Cleric group assertion failed with null instead of 4 →
+  restored → focused and full suites passed.

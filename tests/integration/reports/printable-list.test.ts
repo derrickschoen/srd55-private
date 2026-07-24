@@ -135,6 +135,14 @@ describe('deterministic printable spell-list data', () => {
     ]);
     const before = persistedPrintableTableHashes(db, fixture.characterId);
     const spellList = builder.build(fixture.characterId);
+    const commandIdentityId = Number(
+      db.scalar(
+        `SELECT spell_identity_id
+         FROM spell_versions
+         WHERE id = ?`,
+        [fixture.spellIds.command],
+      ),
+    );
 
     expect(builder.build(fixture.characterId)).toEqual(spellList);
     expect(persistedPrintableTableHashes(db, fixture.characterId)).toEqual(
@@ -150,8 +158,37 @@ describe('deterministic printable spell-list data', () => {
       'Wizard 1',
     ]);
 
+    expect(source(spellList, 'Cleric 1')).toMatchObject({
+      ability: 'wisdom',
+      attack_bonus: 4,
+      save_dc: 12,
+    });
+    expect(source(spellList, 'Druid 1')).toMatchObject({
+      ability: 'wisdom',
+      attack_bonus: 4,
+      save_dc: 12,
+    });
+    expect(source(spellList, 'Gift 2')).toMatchObject({
+      ability: 'charisma',
+      attack_bonus: 6,
+      save_dc: 14,
+    });
+    expect(source(spellList, 'Gift 10')).toMatchObject({
+      ability: 'charisma',
+      attack_bonus: 6,
+      save_dc: 14,
+    });
+    expect(source(spellList, 'Wizard 1')).toMatchObject({
+      ability: 'intelligence',
+      attack_bonus: 5,
+      save_dc: 13,
+    });
+
     expect(source(spellList, 'Cleric 1').spells[0]).toMatchObject({
+      spell_version_id: fixture.spellIds.command,
+      spell_identity_id: commandIdentityId,
       name: 'Command',
+      edition: '2024',
       level: 1,
       school: 'Enchantment',
       casting_time: 'Action',
@@ -330,9 +367,11 @@ describe('deterministic printable spell-list data', () => {
     for (const phrase of [
       '“In my book” marks only the spells that Ritual Adept can expose',
       'does not constrain Wizard preparation',
+      'not the same as labeling a spell known or prepared',
       'whole Wizard spell list',
       'both in the book and as prepared',
       'ritual-only access',
+      'that route is not a selection',
       'consumes no preparation capacity',
       'ignored by duplicate-waste checks',
       'Unprepared non-ritual book spells are not castable.',
