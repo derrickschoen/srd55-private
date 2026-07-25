@@ -197,6 +197,34 @@ export class CharacterWorkspaceBuilder {
         (row) => sqlString(row, 'name'),
       ),
       slots: slots.map(({ sort_order: _sortOrder, ...slot }) => slot),
+      placeholder_spells: this.db.all(
+        `SELECT DISTINCT version.content_key, version.display_name
+         FROM spell_versions AS version
+         WHERE version.provenance = 'placeholder'
+           AND version.id IN (
+             SELECT current_spell_version_id
+             FROM spell_selection_slots
+             WHERE character_id = ?
+             UNION
+             SELECT spell_version_id FROM wizard_spellbook_entries
+             WHERE character_id = ?
+             UNION
+             SELECT spell_version_id FROM character_spell_preferences
+             WHERE character_id = ?
+             UNION
+             SELECT entry.spell_version_id
+             FROM spell_loadout_entries AS entry
+             INNER JOIN spell_loadouts AS loadout
+               ON loadout.id = entry.spell_loadout_id
+             WHERE loadout.character_id = ?
+           )
+         ORDER BY version.display_name, version.content_key`,
+        [characterId, characterId, characterId, characterId],
+        (row) => ({
+          spellKey: sqlString(row, 'content_key'),
+          name: sqlString(row, 'display_name'),
+        }),
+      ),
       save_points: new SavePointQueries(this.db).list(characterId),
     };
   }
@@ -275,6 +303,7 @@ export class CharacterWorkspaceBuilder {
               slot.ordinal, source.display_name AS source_name,
               source.source_type, source.config AS source_config,
               selected.display_name AS spell_name,
+              selected.provenance AS spell_provenance,
               selected.level AS spell_level,
               selected.rules_edition AS spell_edition,
               selected.spell_identity_id, selected.ritual,
@@ -356,6 +385,7 @@ export class CharacterWorkspaceBuilder {
         level_max: sqlInteger(row, 'spell_level_max'),
         spell_id: versionId,
         spell_name: sqlNullableString(row, 'spell_name'),
+        placeholder: row.spell_provenance === 'placeholder',
         spell_level: sqlNullableInteger(row, 'spell_level'),
         spell_edition: sqlNullableString(
           row,

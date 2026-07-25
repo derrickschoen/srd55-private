@@ -15,6 +15,10 @@ import {
   createImportBackupControls,
   type ImportBackupControls,
 } from './import-backup-controls';
+import {
+  createShareControls,
+  type ShareControls,
+} from './share-controls';
 
 export interface CharacterListQueries {
   listCharacters(): Promise<CharacterSummary[]>;
@@ -120,6 +124,7 @@ function createShell(
   readonly status: HTMLOutputElement;
   readonly list: HTMLElement;
   readonly transfer: HTMLElement;
+  readonly share: HTMLElement;
 } {
   let dark = appTheme();
   applyTheme(dark);
@@ -175,6 +180,7 @@ function createShell(
     attributes: { 'aria-busy': 'true' },
   });
   const transfer = element('div');
+  const share = element('div');
   const main = element('main', { className: 'character-list-main' });
   clear(context.root);
   context.root.append(
@@ -194,7 +200,7 @@ function createShell(
       main,
     ]),
   );
-  return { main, status, list, transfer };
+  return { main, status, list, transfer, share };
 }
 
 function createForm(
@@ -251,6 +257,9 @@ function renderCards(
   reload: () => Promise<void>,
   setError: (error: unknown | null) => void,
   cleanups: Cleanup[],
+  shareCharacter: (
+    character: Pick<CharacterSummary, 'id' | 'name'>,
+  ) => void,
 ): void {
   clear(target);
   if (characters.length === 0) {
@@ -292,6 +301,17 @@ function renderCards(
         'aria-label': `Delete ${character.name}`,
       },
     });
+    const share = element('button', {
+      className: 'button-secondary',
+      text: 'Share link',
+      attributes: {
+        type: 'button',
+        'aria-label': `Share ${character.name} by link`,
+      },
+    });
+    cleanups.push(
+      listen(share, 'click', () => shareCharacter(character)),
+    );
     cleanups.push(
       listen(remove, 'click', () => {
         remove.disabled = true;
@@ -331,7 +351,11 @@ function renderCards(
           className: 'class-summary',
           text: classSummary(character),
         }),
-        element('div', { className: 'card-actions' }, [open, remove]),
+        element('div', { className: 'card-actions' }, [
+          open,
+          share,
+          remove,
+        ]),
       ]),
     );
   }
@@ -345,6 +369,7 @@ export async function renderCharacterList(
   const cleanups: Cleanup[] = [];
   const cardCleanups: Cleanup[] = [];
   let transferControls: ImportBackupControls | undefined;
+  let shareControls: ShareControls | undefined;
   let active = true;
   const queries: QueriesClient = createQueriesClient(context.rpc);
   const controller = new CharacterListController({
@@ -368,7 +393,13 @@ export async function renderCharacterList(
     error.hidden = false;
   };
   const form = createForm(controller, setError, cleanups);
-  shell.main.append(form, error, shell.transfer, shell.list);
+  shell.main.append(
+    form,
+    error,
+    shell.share,
+    shell.transfer,
+    shell.list,
+  );
 
   const storage = navigator.storage;
   const durability = durableStorageState(storage);
@@ -399,6 +430,21 @@ export async function renderCharacterList(
     } else {
       transferControls.updateCharacters(characters);
     }
+    if (shareControls === undefined) {
+      shareControls = createShareControls({
+        rpc: context.rpc,
+        initialFragment: location.hash.slice(1),
+        onPersistedChange: async () => {
+          try {
+            setError(null);
+            await reload();
+          } catch (reloadError) {
+            setError(reloadError);
+          }
+        },
+      });
+      shell.share.replaceChildren(shareControls.element);
+    }
     renderCards(
       shell.list,
       characters,
@@ -407,6 +453,7 @@ export async function renderCharacterList(
       reload,
       setError,
       cardCleanups,
+      (character) => shareControls?.shareCharacter(character),
     );
   };
 
@@ -429,6 +476,7 @@ export async function renderCharacterList(
   return () => {
     active = false;
     transferControls?.cleanup();
+    shareControls?.cleanup();
     for (const cleanup of [...cardCleanups, ...cleanups]) {
       cleanup();
     }

@@ -63,6 +63,7 @@ export interface WorkspaceSlot {
   level_max: number;
   spell_id: number | null;
   spell_name: string | null;
+  placeholder?: boolean;
   spell_level: number | null;
   spell_edition: RulesEdition | null;
   ability: Ability | null;
@@ -208,6 +209,10 @@ export interface Workspace {
   removable_sources: RemovableSource[];
   spell_lists: string[];
   slots: WorkspaceSlot[];
+  placeholder_spells?: Array<{
+    spellKey: string;
+    name: string;
+  }>;
   save_points: SavePoint[];
 }
 

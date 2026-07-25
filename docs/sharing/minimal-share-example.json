@@ -1,0 +1,122 @@
+{
+  "format": "dnd-multiclass-spells-character-share",
+  "version": 1,
+  "character": {
+    "name": "Mira Ashdown",
+    "strength": 8,
+    "dexterity": 14,
+    "constitution": 14,
+    "intelligence": 16,
+    "wisdom": 18,
+    "charisma": 10,
+    "rules_edition_preference": "2024"
+  },
+  "classes": [
+    {
+      "id": 0,
+      "classKey": "2024:cleric",
+      "subclassKey": "2024:life-domain",
+      "level": 7,
+      "start": 1,
+      "ability": "wisdom",
+      "config": {}
+    },
+    {
+      "id": 1,
+      "classKey": "2024:wizard",
+      "subclassKey": "2024:abjurer",
+      "level": 5,
+      "start": 8,
+      "ability": "intelligence",
+      "config": {}
+    }
+  ],
+  "sources": [
+    {
+      "id": 2,
+      "type": "feat",
+      "key": "2024:magic-initiate-wizard",
+      "name": "Magic Initiate: Wizard",
+      "config": {
+        "ability": "intelligence"
+      },
+      "acquired": 1
+    }
+  ],
+  "selections": [
+    {
+      "ref": 0,
+      "ruleKey": "2024:cleric-cantrips",
+      "ordinal": 1,
+      "spellKey": "2024:guidance"
+    },
+    {
+      "ref": 0,
+      "ruleKey": "2024:cleric-prepared-spells",
+      "ordinal": 1,
+      "spellKey": "2024:bless",
+      "keep": true
+    },
+    {
+      "ref": 1,
+      "ruleKey": "2024:wizard-prepared-spells",
+      "ordinal": 1,
+      "spellKey": "2024:shield",
+      "keep": true
+    },
+    {
+      "ref": 2,
+      "ruleKey": "2024:magic-initiate-wizard-level-1-known",
+      "ordinal": 1,
+      "spellKey": "2024:com.example.spells:starward-aegis",
+      "spellName": "Starward Aegis"
+    }
+  ],
+  "spellbook": [
+    "2024:detect-magic",
+    "2024:find-familiar",
+    "2024:shield"
+  ],
+  "preferences": [
+    {
+      "spellKey": "2024:bless",
+      "favourite": true
+    }
+  ],
+  "overrides": [
+    {
+      "ruleKey": "2024:cleric-prepared-spells",
+      "value": 9
+    }
+  ],
+  "acknowledgements": [
+    {
+      "warning": "unknown-spell-placeholder"
+    }
+  ],
+  "loadouts": [
+    {
+      "name": "Hard Fight",
+      "entries": [
+        {
+          "spellKey": "2024:bless",
+          "role": "support"
+        },
+        {
+          "spellKey": "2024:shield",
+          "role": "defense"
+        },
+        {
+          "spellKey": "2024:com.example.spells:starward-aegis",
+          "role": "defense"
+        }
+      ]
+    }
+  ],
+  "placeholders": [
+    {
+      "spellKey": "2024:com.example.spells:starward-aegis",
+      "spellName": "Starward Aegis"
+    }
+  ]
+}

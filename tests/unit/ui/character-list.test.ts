@@ -8,6 +8,7 @@ import {
   durableStorageState,
   warningLabel,
 } from '../../../src/ui/screens/character-list/character-list';
+import { fragmentFromShareLink } from '../../../src/ui/screens/character-list/share-controls';
 import {
   ImportBackupController,
   catalogSummary,
@@ -64,6 +65,19 @@ function readableFile(
       ) as ArrayBuffer,
   };
 }
+
+describe('character share links', () => {
+  it('accepts full URLs and bare fragments without importing anything', () => {
+    expect(fragmentFromShareLink('https://example.test/#abc_123')).toBe(
+      'abc_123',
+    );
+    expect(fragmentFromShareLink('#abc-123')).toBe('abc-123');
+    expect(fragmentFromShareLink('abc-123')).toBe('abc-123');
+    expect(() => fragmentFromShareLink('https://example.test/')).toThrow(
+      /no character fragment/,
+    );
+  });
+});
 
 describe('character list behavior', () => {
   it('creates the trimmed character in durable data before opening it', async () => {

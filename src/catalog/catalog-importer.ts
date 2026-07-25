@@ -147,6 +147,8 @@ export class CatalogImporter {
       } else {
         versionId = sqlInteger(version, 'id');
         referenced = this.#isReferenced(versionId);
+        const upgradingPlaceholder =
+          version.provenance === 'placeholder';
         const changes: VersionAttributes = {};
         if (!sqlBoolean(version, 'is_active')) {
           changes.is_active = 1;
@@ -154,7 +156,9 @@ export class CatalogImporter {
         }
         for (const [column, value] of Object.entries(attributes)) {
           if (
-            (column === 'short_summary' || !referenced) &&
+            (column === 'short_summary' ||
+              !referenced ||
+              upgradingPlaceholder) &&
             version[column] !== value
           ) {
             changes[column] = value;
@@ -173,7 +177,10 @@ export class CatalogImporter {
         versionChanged = Object.keys(changes).length > 0;
       }
 
-      if (!referenced) {
+      if (
+        !referenced ||
+        (version !== null && version.provenance === 'placeholder')
+      ) {
         versionChanged =
           this.#syncPublications(
             versionId,
@@ -274,13 +281,13 @@ export class CatalogImporter {
   ): number {
     const normalizedName = normalizeCatalogName(record.canonicalName);
     let identity = this.db.one(
-      `SELECT id, canonical_name
+      `SELECT id, content_key, canonical_name
        FROM spell_identities
        WHERE content_key = ?`,
       [record.identityKey],
     );
     identity ??= this.db.one(
-      `SELECT id, canonical_name
+      `SELECT id, content_key, canonical_name
        FROM spell_identities
        WHERE normalized_name = ?
        ORDER BY id
@@ -288,7 +295,7 @@ export class CatalogImporter {
       [normalizedName],
     );
     identity ??= this.db.one(
-      `SELECT identity.id, identity.canonical_name
+      `SELECT identity.id, identity.content_key, identity.canonical_name
        FROM spell_identity_aliases AS alias
        INNER JOIN spell_identities AS identity
          ON identity.id = alias.spell_identity_id
@@ -318,7 +325,11 @@ export class CatalogImporter {
 
     const identityId = sqlInteger(identity, 'id');
     const currentName = sqlString(identity, 'canonical_name');
-    if (currentName !== record.canonicalName) {
+    const currentKey = sqlString(identity, 'content_key');
+    if (
+      currentName !== record.canonicalName ||
+      currentKey.startsWith('placeholder:')
+    ) {
       const now = timestamp();
       this.db.exec(
         `INSERT OR IGNORE INTO spell_identity_aliases (
@@ -335,9 +346,16 @@ export class CatalogImporter {
       );
       this.db.exec(
         `UPDATE spell_identities
-         SET canonical_name = ?, normalized_name = ?, updated_at = ?
+         SET content_key = ?, canonical_name = ?, normalized_name = ?,
+             updated_at = ?
          WHERE id = ?`,
-        [record.canonicalName, normalizedName, now, identityId],
+        [
+          record.identityKey,
+          record.canonicalName,
+          normalizedName,
+          now,
+          identityId,
+        ],
       );
       summary.identities_updated += 1;
     }

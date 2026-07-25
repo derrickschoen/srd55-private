@@ -315,6 +315,16 @@ export function renderPlannerGrid(options: {
         selection.append(clear);
       }
     }
+    if (slot.placeholder) {
+      selection.append(
+        Object.assign(document.createElement('span'), {
+          className: 'placeholder-badge',
+          textContent: 'Not imported',
+          title:
+            'This shared spell is not in your catalog. Import its catalog source to restore full details.',
+        }),
+      );
+    }
     row.insertCell().textContent =
       slot.ability?.slice(0, 3).toUpperCase() ?? '—';
     row.insertCell().textContent = castingMath(slot);
@@ -337,7 +347,9 @@ export function renderPlannerGrid(options: {
       explanation.innerHTML =
         '<strong>⚠ Selection needs attention.</strong> ';
       explanation.append(
-        slot.invalid_reason ??
+        (slot.placeholder
+          ? 'This shared spell is a safe placeholder. Its rules text was not imported; importing the matching catalog will upgrade it.'
+          : slot.invalid_reason) ??
           slot.orphan_reason ??
           'This selection is being kept as an explicit override.',
       );
