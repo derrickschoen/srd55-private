@@ -1,5 +1,8 @@
 import type { CharacterRow } from '../../../domain/models';
 import type { CharacterSummary } from '../../../domain/read-models';
+import type {
+  CompletenessCount,
+} from '../../../queries/character-completeness';
 import {
   createQueriesClient,
   type QueriesClient,
@@ -97,6 +100,29 @@ export function durableStorageLabel(state: DurableStorageState): string {
 
 export function warningLabel(count: number): string {
   return `${count} ${count === 1 ? 'warning' : 'warnings'}`;
+}
+
+export function outstandingLabel(count: number): string {
+  return count === 0
+    ? 'nothing outstanding'
+    : `${count} unfinished ${count === 1 ? 'choice' : 'choices'}`;
+}
+
+export function catalogGapLabel(count: number): string {
+  return `${count} catalog ${count === 1 ? 'gap' : 'gaps'}`;
+}
+
+// Completeness is an informational adjunct: one character it cannot be
+// computed for must not cost every card on the screen, so a failed batch
+// drops the badges rather than the list.
+export async function completenessByCharacter(
+  load: () => Promise<readonly CompletenessCount[]>,
+): Promise<ReadonlyMap<number, CompletenessCount>> {
+  try {
+    return new Map((await load()).map((count) => [count.character_id, count]));
+  } catch {
+    return new Map();
+  }
 }
 
 export function classSummary(character: CharacterSummary): string {
@@ -252,6 +278,7 @@ function createForm(
 function renderCards(
   target: HTMLElement,
   characters: readonly CharacterSummary[],
+  completeness: ReadonlyMap<number, CompletenessCount>,
   controller: CharacterListController,
   context: ScreenContext,
   reload: () => Promise<void>,
@@ -338,6 +365,27 @@ function renderCards(
         character.warning_count,
       )}`,
     });
+    const counts = completeness.get(character.id);
+    const badges = [warnings];
+    if (counts !== undefined) {
+      badges.push(
+        element('span', {
+          className:
+            counts.outstanding_count > 0
+              ? 'status-badge status-outstanding'
+              : 'status-badge status-settled',
+          text: outstandingLabel(counts.outstanding_count),
+        }),
+      );
+      if (counts.catalog_gap_count > 0) {
+        badges.push(
+          element('span', {
+            className: 'status-badge status-catalog-gap',
+            text: catalogGapLabel(counts.catalog_gap_count),
+          }),
+        );
+      }
+    }
     grid.append(
       element('article', { className: 'character-card panel' }, [
         element('div', { className: 'card-heading' }, [
@@ -345,7 +393,7 @@ function renderCards(
             element('h2', { text: character.name }),
             element('p', { text: `Level ${character.level || 0}` }),
           ]),
-          warnings,
+          element('div', { className: 'card-badges' }, badges),
         ]),
         element('p', {
           className: 'class-summary',
@@ -406,7 +454,10 @@ export async function renderCharacterList(
 
   const reload = async (): Promise<void> => {
     shell.list.setAttribute('aria-busy', 'true');
-    const characters = await controller.list();
+    const [characters, completeness] = await Promise.all([
+      controller.list(),
+      completenessByCharacter(() => queries.outstandingCounts()),
+    ]);
     if (!active) {
       return;
     }
@@ -448,6 +499,7 @@ export async function renderCharacterList(
     renderCards(
       shell.list,
       characters,
+      completeness,
       controller,
       context,
       reload,

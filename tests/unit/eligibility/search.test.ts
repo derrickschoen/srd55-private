@@ -296,3 +296,66 @@ it('rejects cross-character slot lookup and preserves persisted ownership', asyn
   ).toBe(0);
   test.db.close();
 });
+
+it('answers hasAny exactly as search does across list, school, tag, and legacy constraints', async () => {
+  const shapes: Record<string, string | number | null>[] = [
+    { spell_level_min: 0, spell_level_max: 0 },
+    { spell_level_min: 3, spell_level_max: 3 },
+    { allowed_spell_lists: '["Wizard"]' },
+    { allowed_spell_lists: '["Bard"]' },
+    { allowed_schools: '["Evocation"]' },
+    { allowed_schools: '["Necromancy"]' },
+    { allowed_tags: '["damage"]' },
+    { allowed_tags: '["damage","fire"]' },
+    { spell_level_min: 1, spell_level_max: 1, allowed_spell_lists: '["Wizard"]' },
+  ];
+  const probes: boolean[] = [];
+  const searches: boolean[] = [];
+
+  for (const allowLegacy of [0, 1]) {
+    for (const shape of shapes) {
+      const test = await fixture(shape);
+      test.context.exec(
+        'UPDATE characters SET allow_legacy = ? WHERE id = ?',
+        [allowLegacy, test.characterId],
+      );
+      spell(test.context, 'Legacy Only Bolt', {
+        edition: '2014',
+        level: 1,
+        lists: ['Wizard'],
+        tags: ['damage'],
+      });
+      spell(test.context, 'Modern Cantrip', {
+        level: 0,
+        lists: ['Wizard'],
+        tags: ['damage'],
+      });
+      spell(test.context, 'Inactive Necromancy', {
+        level: 0,
+        school: 'Necromancy',
+        active: false,
+      });
+      probes.push(test.search.hasAny(test.characterId, test.slotId));
+      searches.push(
+        test.search.search(test.characterId, test.slotId, '').length > 0,
+      );
+      test.db.close();
+    }
+  }
+
+  expect(probes).toEqual(searches);
+  expect(probes).toContain(true);
+  expect(probes).toContain(false);
+});
+
+it('rejects a cross-character hasAny probe the same way search does', async () => {
+  const test = await fixture();
+  const attackerId = test.context.exec(
+    "INSERT INTO characters (name) VALUES ('Probe Attacker')",
+  ).lastInsertId;
+
+  expect(() => test.search.hasAny(attackerId, test.slotId)).toThrow(
+    EligibleSpellSearchNotFoundError,
+  );
+  test.db.close();
+});

@@ -836,3 +836,28 @@ select:disabled {
     transition-duration: 0.01ms !important;
   }
 }
+
+.outstanding-list {
+  margin: 0.65rem 0 0;
+  padding-left: 1.25rem;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.outstanding-list h3 {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.outstanding-list p {
+  margin: 0.2rem 0 0;
+  font-size: 0.8rem;
+}
+
+.outstanding-remedy {
+  color: var(--planner-ink-soft);
+}
+
+.outstanding-panel h2 + h2 {
+  margin-top: 1rem;
+}
