@@ -332,10 +332,50 @@ function validateRestoreSnapshot(record: UnknownRecord): void {
   validateIntegrity(record);
 }
 
+/**
+ * Returns the validated record, normalized where a validator rewrites it. Every
+ * arm returns and nothing follows the switch, so omitting a command type is a
+ * compile error (TS2366) rather than a payload that ships unvalidated — the same
+ * construction the command factory and prepareInverse rely on.
+ */
+function validateByType(
+  type: (typeof commandTypes)[number],
+  record: UnknownRecord,
+): UnknownRecord {
+  switch (type) {
+    case 'update_ability':
+      validateUpdateAbility(record);
+      return record;
+    case 'set_slot':
+      validateSetSlot(record);
+      return record;
+    case 'update_character_rules':
+      validateUpdateCharacterRules(record);
+      return record;
+    case 'update_source_config':
+      validateUpdateSourceConfig(record);
+      return record;
+    case 'add_source':
+      validateAddSource(record);
+      return record;
+    case 'remove_source':
+      validateRemoveSource(record);
+      return record;
+    case 'acknowledge_warning':
+      return validateAcknowledgeWarning(record);
+    case 'update_class':
+      validateUpdateClass(record);
+      return record;
+    case 'restore_snapshot':
+      validateRestoreSnapshot(record);
+      return record;
+  }
+}
+
 export function validateCharacterCommandPayload(
   payload: unknown,
 ): CharacterCommandPayload {
-  let record = objectValue(payload, 'Character command must be an object.');
+  const record = objectValue(payload, 'Character command must be an object.');
   const type = requiredString(record, 'type', 22);
   if (hasOwn(record, 'reason')) {
     requiredString(record, 'reason', 255);
@@ -344,37 +384,7 @@ export function validateCharacterCommandPayload(
     return invalid('Unknown character command type.');
   }
 
-  switch (type) {
-    case 'update_ability':
-      validateUpdateAbility(record);
-      break;
-    case 'set_slot':
-      validateSetSlot(record);
-      break;
-    case 'update_character_rules':
-      validateUpdateCharacterRules(record);
-      break;
-    case 'update_source_config':
-      validateUpdateSourceConfig(record);
-      break;
-    case 'add_source':
-      validateAddSource(record);
-      break;
-    case 'remove_source':
-      validateRemoveSource(record);
-      break;
-    case 'acknowledge_warning':
-      record = validateAcknowledgeWarning(record);
-      break;
-    case 'update_class':
-      validateUpdateClass(record);
-      break;
-    case 'restore_snapshot':
-      validateRestoreSnapshot(record);
-      break;
-  }
-
-  return record as unknown as CharacterCommandPayload;
+  return validateByType(type, record) as unknown as CharacterCommandPayload;
 }
 
 export class CharacterCommandPayloadValidator {

@@ -3,19 +3,26 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- The licensor's wordmarks may not appear outside the attribution notice
+         (docs/srd/ATTRIBUTION.md), so this shell carries none. -->
     <meta
       name="description"
-      content="A local-first D&amp;D multiclass spell planner"
+      content="A local-first multiclass spell planner"
     />
-    <title>D&amp;D Multiclass Spell Planner</title>
+    <title>Multiclass Spell Planner</title>
   </head>
   <body>
     <div id="app" aria-busy="true">
       <main class="loading-shell">
-        <h1>D&amp;D Multiclass Spell Planner</h1>
+        <h1>Multiclass Spell Planner</h1>
         <output id="status" role="status">Starting local database…</output>
       </main>
     </div>
+    <!-- Outside #app so it survives every screen render: screens replace the
+         children of #app whenever they redraw. -->
+    <footer class="site-footer">
+      <a href="/legal" data-router-link>Licences and attribution</a>
+    </footer>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

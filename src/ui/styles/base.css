@@ -62,9 +62,35 @@ a {
   color: #8c1d18;
 }
 
+.site-footer {
+  padding: 0.9rem 1rem;
+  border-top: 1px solid #cfc6b6;
+  background: #efe9dc;
+  font-size: 0.8125rem;
+  text-align: center;
+}
+
+.dark .site-footer {
+  border-color: #403a34;
+  background: #12100e;
+}
+
+.site-footer a {
+  color: #6d28d9;
+}
+
+.dark .site-footer a {
+  color: #c4b5fd;
+}
+
 @media print {
   :root {
     color: #000;
     background: #fff;
+  }
+
+  /* Printed sheets carry the notice itself, so a link to it is noise. */
+  .site-footer {
+    display: none;
   }
 }
