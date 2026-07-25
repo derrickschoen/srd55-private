@@ -3,6 +3,8 @@ import { RpcClient } from './rpc/client';
 import type { SqlRow } from './db/codecs';
 import type { SystemInfo } from './worker/handlers/system';
 import { Application } from './ui/app';
+import { Router } from './ui/router';
+import { screen as legalScreen } from './ui/screens/legal/screen';
 
 const worker = new Worker(new URL('./db/worker.ts', import.meta.url), {
   type: 'module',
@@ -58,17 +60,62 @@ if (root === null) {
   throw new Error('Application root #app is missing.');
 }
 
+/**
+ * The site footer lives outside #app, so no screen owns its links. Routing them
+ * here keeps the attribution page a navigation rather than a full reload, which
+ * would restart the worker and reopen the database.
+ */
+function routeFooterLinks(router: Router): void {
+  for (const link of Array.from(
+    document.querySelectorAll<HTMLAnchorElement>(
+      '.site-footer a[data-router-link]',
+    ),
+  )) {
+    link.addEventListener('click', (event: MouseEvent): void => {
+      if (
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      ) {
+        return;
+      }
+      event.preventDefault();
+      router.navigate(link.href);
+    });
+  }
+}
+
 const status = document.querySelector<HTMLOutputElement>('#status');
-system
-  .info()
-  .then(() => {
-    new Application(root, rpc).start();
-  })
-  .catch((error: unknown) => {
-    if (status !== null) {
-      status.value =
-        error instanceof Error ? `Failed: ${error.message}` : `Failed: ${error}`;
-      status.dataset.ready = 'false';
-      root.setAttribute('aria-busy', 'false');
-    }
-  });
+const router = new Router();
+
+const startApplication = (): void => {
+  new Application(root, rpc, router).start();
+  routeFooterLinks(router);
+};
+
+/**
+ * The licence route reads nothing from the database, so it must not wait for
+ * one: a worker that never comes up would otherwise hide the attribution, and
+ * reloading /legal would fail the same way. Every other route keeps the boot
+ * gate, and a failed boot leaves the footer link a plain anchor so it still
+ * reaches the notice through a full navigation.
+ */
+if (legalScreen.matches(router.current)) {
+  startApplication();
+} else {
+  system
+    .info()
+    .then(startApplication)
+    .catch((error: unknown) => {
+      if (status !== null) {
+        status.value =
+          error instanceof Error
+            ? `Failed: ${error.message}`
+            : `Failed: ${error}`;
+        status.dataset.ready = 'false';
+        root.setAttribute('aria-busy', 'false');
+      }
+    });
+}

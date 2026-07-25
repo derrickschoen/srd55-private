@@ -1,5 +1,6 @@
 import { abilities } from '../../../domain/enums';
 import type { BuildReportResult } from '../../../reports/build-report-builder';
+import { SRD_ATTRIBUTION_NOTICE } from '../../../rules/srd-attribution';
 
 function escapeHtml(value: unknown): string {
   return String(value)
@@ -288,6 +289,10 @@ export function renderBuildReport(report: BuildReportResult): string {
           <h2 id="invalid-heading">Invalid or orphaned selections</h2>
           ${invalidSelections}
         </section>
+
+        <footer class="srd-attribution" data-testid="srd-attribution">
+          ${escapeHtml(SRD_ATTRIBUTION_NOTICE)}
+        </footer>
       </div>
     </main>`;
 }
