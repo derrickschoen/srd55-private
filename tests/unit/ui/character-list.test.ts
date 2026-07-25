@@ -3,9 +3,12 @@ import type { CharacterRow } from '../../../src/domain/models';
 import type { CharacterSummary } from '../../../src/domain/read-models';
 import {
   CharacterListController,
+  catalogGapLabel,
   classSummary,
+  completenessByCharacter,
   durableStorageLabel,
   durableStorageState,
+  outstandingLabel,
   warningLabel,
 } from '../../../src/ui/screens/character-list/character-list';
 import { fragmentFromShareLink } from '../../../src/ui/screens/character-list/share-controls';
@@ -161,6 +164,38 @@ describe('character list behavior', () => {
     );
     expect(warningLabel(1)).toBe('1 warning');
     expect(warningLabel(0)).toBe('0 warnings');
+  });
+
+  it('labels outstanding work in words that no reader can mistake for a warning', () => {
+    expect(outstandingLabel(0)).toBe('nothing outstanding');
+    expect(outstandingLabel(1)).toBe('1 unfinished choice');
+    expect(outstandingLabel(2)).toBe('2 unfinished choices');
+    expect(catalogGapLabel(1)).toBe('1 catalog gap');
+    expect(catalogGapLabel(3)).toBe('3 catalog gaps');
+    for (const label of [
+      outstandingLabel(0),
+      outstandingLabel(2),
+      catalogGapLabel(1),
+    ]) {
+      expect(label).not.toMatch(/warning|\u26a0|\u2713/i);
+    }
+  });
+
+  it('keeps the cards when the completeness batch fails, dropping only the badges', async () => {
+    await expect(
+      completenessByCharacter(async () => [
+        { character_id: 4, outstanding_count: 2, catalog_gap_count: 1 },
+      ]),
+    ).resolves.toEqual(
+      new Map([
+        [4, { character_id: 4, outstanding_count: 2, catalog_gap_count: 1 }],
+      ]),
+    );
+    await expect(
+      completenessByCharacter(() =>
+        Promise.reject(new Error('Character 9 does not exist.')),
+      ),
+    ).resolves.toEqual(new Map());
   });
 
   it('reports durable, best-effort, and unavailable browser storage states', async () => {

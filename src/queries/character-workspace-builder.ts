@@ -21,7 +21,6 @@ import {
 import type {
   CharacterClass,
   ClassOption,
-  OrderSource,
   RemovableSource,
   SourceDefinition,
   Workspace,
@@ -34,29 +33,12 @@ import {
 } from '../reports/build-report-builder';
 import { AbilityScores } from '../rules/ability-scores';
 import { CharacterNotFoundError } from './character-crud';
+import { orderSources } from './order-sources';
 import { SavePointQueries } from './save-points';
+import { jsonRecord, type JsonRecord } from './source-config';
 
 interface SlotWithOrder extends WorkspaceSlot {
   readonly sort_order: number;
-}
-
-interface JsonRecord {
-  readonly [key: string]: unknown;
-}
-
-function jsonRecord(value: string | null): JsonRecord {
-  if (value === null || value === '') {
-    return {};
-  }
-  const decoded: unknown = JSON.parse(value);
-  if (
-    decoded === null ||
-    Array.isArray(decoded) ||
-    typeof decoded !== 'object'
-  ) {
-    throw new TypeError('Source configuration must be a JSON object.');
-  }
-  return decoded as JsonRecord;
 }
 
 function configuredAbility(row: SqlRow): Ability | null {
@@ -181,7 +163,7 @@ export class CharacterWorkspaceBuilder {
       available_classes: this.classOptions(),
       allow_legacy: sqlBoolean(character, 'allow_legacy'),
       configurable_sources: this.configurableSources(characterId),
-      order_sources: this.orderSources(characterId),
+      order_sources: orderSources(this.db, characterId),
       source_catalog: {
         feat: this.sourceDefinitions('feat'),
         species: this.sourceDefinitions('species'),
@@ -455,56 +437,6 @@ export class CharacterWorkspaceBuilder {
           spellcasting_ability: String(
             config.spellcasting_ability ?? '',
           ) as Ability,
-        };
-      },
-    );
-  }
-
-  private orderSources(characterId: number): OrderSource[] {
-    return this.db.all(
-      `SELECT source.id, source.display_name, source.config,
-              class.name AS class_name
-       FROM character_source_instances AS source
-       INNER JOIN class_definitions AS class
-         ON class.id = source.source_definition_id
-       WHERE source.character_id = ?
-         AND source.source_type = 'class'
-         AND source.state = 'active'
-         AND class.name IN ('Cleric', 'Druid')
-       ORDER BY class.name, source.id`,
-      [characterId],
-      (row): OrderSource => {
-        const className = sqlString(row, 'class_name');
-        const config = jsonRecord(sqlNullableString(row, 'config'));
-        if (className === 'Cleric') {
-          const order = config.divine_order as JsonRecord | undefined;
-          const chosen = order?.chosen_option;
-          return {
-            id: sqlInteger(row, 'id'),
-            class_name: 'Cleric',
-            display_name: sqlString(row, 'display_name'),
-            order_name: 'Divine Order',
-            chosen_option:
-              chosen === 'Protector' || chosen === 'Thaumaturge'
-                ? chosen
-                : null,
-            options: ['Protector', 'Thaumaturge'],
-            bonus_option: 'Thaumaturge',
-          };
-        }
-        const order = config.primal_order as JsonRecord | undefined;
-        const chosen = order?.chosen_option;
-        return {
-          id: sqlInteger(row, 'id'),
-          class_name: 'Druid',
-          display_name: sqlString(row, 'display_name'),
-          order_name: 'Primal Order',
-          chosen_option:
-            chosen === 'Warden' || chosen === 'Magician'
-              ? chosen
-              : null,
-          options: ['Warden', 'Magician'],
-          bonus_option: 'Magician',
         };
       },
     );

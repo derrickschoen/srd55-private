@@ -1,6 +1,9 @@
 import { CharacterCommandIntegrity } from '../../commands/integrity';
 import { EligibleSpellSearch } from '../../eligibility/eligible-spell-search';
 import { CatalogQueries } from '../../queries/catalog-queries';
+import {
+  CharacterCompletenessQueries,
+} from '../../queries/character-completeness';
 import { CharacterCrud } from '../../queries/character-crud';
 import { CharacterListBuilder } from '../../queries/character-list-builder';
 import {
@@ -159,6 +162,19 @@ export const handlers: readonly RpcHandler[] = Object.freeze([
       new CharacterWorkspaceBuilder(context.db).build(
         params.character_id,
       ),
+  ),
+  defineRpcHandler(
+    'queries.characters.completeness',
+    isCharacterParams,
+    (context, params) =>
+      new CharacterCompletenessQueries(context.db).build(
+        params.character_id,
+      ),
+  ),
+  defineRpcHandler(
+    'queries.characters.outstanding',
+    isEmptyParams,
+    (context) => new CharacterCompletenessQueries(context.db).counts(),
   ),
   defineRpcHandler(
     'queries.catalog.read',

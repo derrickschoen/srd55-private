@@ -40,6 +40,9 @@ interface SlotOptions {
   readonly overrideNote?: string | null;
   readonly sortOrder?: number;
   readonly label?: string | null;
+  readonly required?: boolean;
+  readonly locked?: boolean;
+  readonly allowedSpellLists?: readonly string[];
 }
 
 let sequence = 0;
@@ -194,8 +197,10 @@ export function createSlot(
        current_spell_version_id, label, spell_level_min, spell_level_max,
        with_slots, counts_against_limit, state, orphan_reason_code,
        override_note, sort_order, selection_eligibility,
-       selection_invalid_reason
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       selection_invalid_reason, required, is_locked, allowed_spell_lists
+     ) VALUES (
+       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+     )`,
     [
       characterId,
       sourceId,
@@ -218,6 +223,11 @@ export function createSlot(
       options.eligibility ??
         (spellVersionId === null ? 'unselected' : 'valid'),
       options.invalidReason ?? null,
+      options.required === true ? 1 : 0,
+      options.locked === true ? 1 : 0,
+      options.allowedSpellLists === undefined
+        ? null
+        : JSON.stringify(options.allowedSpellLists),
     ],
   ).lastInsertId;
 }
