@@ -328,3 +328,52 @@ test('planner parity flows persist override, clear, selection, acknowledgement, 
     }),
   ]);
 });
+
+test('surfaces unfinished choices separately from warnings on both screens', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await expect(page.locator('#status')).toHaveAttribute(
+    'data-ready',
+    'true',
+    { timeout: 30_000 },
+  );
+  await page.evaluate(async () => {
+    await window.staticApp.reset();
+    await window.staticApp.writeCharacter('Outstanding Hero');
+  });
+  await page.reload();
+  await expect(page.locator('#status')).toHaveAttribute(
+    'data-ready',
+    'true',
+    { timeout: 30_000 },
+  );
+
+  const card = page.locator('.character-card').first();
+  await expect(card.locator('.status-outstanding')).toHaveText(
+    '1 unfinished choice',
+  );
+  await expect(card.locator('.status-warning, .status-ok')).toHaveText(
+    '✓ 0 warnings',
+  );
+
+  await page.goto('/characters/1');
+  await expect(page.locator('#planner-status')).toHaveAttribute(
+    'data-ready',
+    'true',
+    { timeout: 30_000 },
+  );
+  const panel = page.locator('.outstanding-panel');
+  await expect(panel.locator('h2').first()).toHaveText(
+    'Not chosen yet — 1 item',
+  );
+  await expect(panel.locator('ol > li > h3')).toHaveText([
+    'No class added yet',
+  ]);
+  await expect(panel.locator('ol > li > p')).toHaveText([
+    'This character has no class levels, so no class spellcasting is set up.',
+    'Use Add source in the planner to add a class and its level.',
+  ]);
+  expect(await panel.locator('[role="alert"]').count()).toBe(0);
+  expect(await panel.innerText()).not.toContain('⚠');
+});

@@ -12,6 +12,9 @@ import type {
 } from '../../../domain/read-models';
 import type { CharacterCommandResult } from '../../../commands/character-command-executor';
 import { createCommandsClient } from '../../../commands/client';
+import type {
+  CompletenessResult,
+} from '../../../queries/character-completeness';
 import {
   createQueriesClient,
   type QueriesClient,
@@ -20,6 +23,7 @@ import type { OperationHistory } from '../../../queries/operation-history';
 import { RpcError } from '../../../rpc/protocol';
 import { defineScreen } from '../../screen';
 import type { ScreenContext } from '../../screen';
+import { renderCompleteness } from './completeness';
 import { renderDiceHelper } from './dice';
 import {
   renderEditors,
@@ -49,6 +53,7 @@ export interface PlannerQueryClient
   extends Pick<
     QueriesClient,
     | 'workspace'
+    | 'completeness'
     | 'eligibleSpells'
     | 'createSavePoint'
     | 'savePointRestoreCommand'
@@ -57,6 +62,7 @@ export interface PlannerQueryClient
 
 export class PlannerSession {
   workspace: Workspace | null = null;
+  completeness: CompletenessResult | null = null;
   history: OperationHistory | null = null;
   saving = false;
   error: string | null = null;
@@ -79,12 +85,7 @@ export class PlannerSession {
   }
 
   async load(): Promise<void> {
-    const [workspace, history] = await Promise.all([
-      this.queries.workspace(this.characterId),
-      this.queries.operationHistory(this.characterId),
-    ]);
-    this.workspace = workspace;
-    this.history = history;
+    await this.#refresh();
   }
 
   async execute(command: CharacterCommandPayload): Promise<boolean> {
@@ -198,12 +199,19 @@ export class PlannerSession {
   }
 
   async #refresh(): Promise<void> {
-    const [workspace, history] = await Promise.all([
+    const [workspace, history, completeness] = await Promise.all([
       this.queries.workspace(this.characterId),
       this.queries.operationHistory(this.characterId),
+      // Completeness is an informational adjunct. Losing it must never cost
+      // the user the planner itself, so it degrades to an unavailable panel.
+      this.queries.completeness(this.characterId).then(
+        (result) => result,
+        () => null,
+      ),
     ]);
     this.workspace = workspace;
     this.history = history;
+    this.completeness = completeness;
   }
 
   #recordError(error: unknown, fallback: string): void {
@@ -325,6 +333,7 @@ function renderPlanner(
   const primary = document.createElement('div');
   primary.className = 'planner-primary';
   primary.append(
+    renderCompleteness(session.completeness),
     renderDiceHelper(
       workspace.slots,
       workspace.report.character.character_level,

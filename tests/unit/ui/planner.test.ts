@@ -4,6 +4,7 @@ import type {
   Workspace,
   WorkspaceSlot,
 } from '../../../src/domain/read-models';
+import type { CompletenessResult } from '../../../src/queries/character-completeness';
 import type { OperationHistory } from '../../../src/queries/operation-history';
 import type { CharacterCommandResult } from '../../../src/commands/character-command-executor';
 import { RpcError } from '../../../src/rpc/protocol';
@@ -11,6 +12,10 @@ import {
   defaultGridFilters,
   filterAndSortSlots,
 } from '../../../src/ui/screens/planner/planner-grid';
+import {
+  catalogGapHeading,
+  outstandingHeading,
+} from '../../../src/ui/screens/planner/completeness';
 import {
   PlannerSession,
   type PlannerCommandClient,
@@ -118,6 +123,14 @@ function workspace(
 
 const noHistory: OperationHistory = { operations: [], changes: [] };
 
+const emptyCompleteness: CompletenessResult = {
+  character_id: 7,
+  outstanding_count: 0,
+  catalog_gap_count: 0,
+  items: [],
+  catalog_gaps: [],
+};
+
 describe('planner persisted workflow', () => {
   it('filters deterministically and refreshes persisted command, undo, and redo state', async () => {
     let persisted = {
@@ -133,6 +146,7 @@ describe('planner persisted workflow', () => {
           persisted.allowLegacy,
         ),
       operationHistory: async () => noHistory,
+      completeness: async () => emptyCompleteness,
       eligibleSpells: async () => [],
       createSavePoint: async () =>
         workspace(
@@ -227,6 +241,7 @@ describe('planner persisted workflow', () => {
           durable.allowLegacy,
         ),
       operationHistory: async () => noHistory,
+      completeness: async () => emptyCompleteness,
       eligibleSpells: async () => [],
       createSavePoint: async () =>
         workspace(
@@ -270,5 +285,95 @@ describe('planner persisted workflow', () => {
       allowLegacy: false,
     });
     expect(session.workspace?.revision).toBe(4);
+  });
+});
+
+describe('completeness panel wording', () => {
+  it('states the count in words and stays free of warning vocabulary', () => {
+    expect(outstandingHeading(null)).toBe(
+      'Not chosen yet — unavailable for this character.',
+    );
+    expect(outstandingHeading(0)).toBe(
+      'Not chosen yet — nothing outstanding.',
+    );
+    expect(outstandingHeading(1)).toBe('Not chosen yet — 1 item');
+    expect(outstandingHeading(3)).toBe('Not chosen yet — 3 items');
+    expect(catalogGapHeading(1)).toBe('Catalog gaps — 1 item');
+    expect(catalogGapHeading(2)).toBe('Catalog gaps — 2 items');
+    for (const heading of [
+      outstandingHeading(0),
+      outstandingHeading(3),
+      catalogGapHeading(1),
+    ]) {
+      expect(heading).not.toMatch(/warning|⚠|✓/i);
+    }
+  });
+
+  it('loads completeness alongside the workspace and refreshes it after a command', async () => {
+    let built = 0;
+    const queries: PlannerQueryClient = {
+      workspace: async () => workspace(0, 10, false),
+      operationHistory: async () => noHistory,
+      completeness: async () => {
+        built += 1;
+        return { ...emptyCompleteness, outstanding_count: built };
+      },
+      eligibleSpells: async () => [],
+      createSavePoint: async () => workspace(0, 10, false),
+      savePointRestoreCommand: async () => ({
+        type: 'update_ability',
+        ability: 'wisdom',
+        score: 10,
+      }),
+    };
+    const commands: PlannerCommandClient = {
+      execute: async () => ({
+        inverse: { type: 'update_ability', ability: 'wisdom', score: 10 },
+        revision: 1,
+        idempotent_replay: false,
+      }),
+    };
+    const session = new PlannerSession(7, queries, commands);
+
+    await session.load();
+    expect(session.completeness?.outstanding_count).toBe(1);
+
+    await session.execute({
+      type: 'update_ability',
+      ability: 'wisdom',
+      score: 12,
+    });
+    expect(session.completeness?.outstanding_count).toBe(2);
+  });
+
+  it('still loads the planner when the completeness query fails', async () => {
+    const queries: PlannerQueryClient = {
+      workspace: async () => workspace(0, 10, false),
+      operationHistory: async () => noHistory,
+      completeness: () =>
+        Promise.reject(new Error('Character 7 does not exist.')),
+      eligibleSpells: async () => [],
+      createSavePoint: async () => workspace(0, 10, false),
+      savePointRestoreCommand: async () => ({
+        type: 'update_ability',
+        ability: 'wisdom',
+        score: 10,
+      }),
+    };
+    const commands: PlannerCommandClient = {
+      execute: async () => ({
+        inverse: { type: 'update_ability', ability: 'wisdom', score: 10 },
+        revision: 1,
+        idempotent_replay: false,
+      }),
+    };
+    const session = new PlannerSession(7, queries, commands);
+
+    await session.load();
+
+    expect(session.workspace?.revision).toBe(0);
+    expect(session.history).toEqual(noHistory);
+    expect(session.completeness).toBeNull();
+    expect(session.error).toBeNull();
   });
 });
