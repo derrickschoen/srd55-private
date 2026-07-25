@@ -310,6 +310,16 @@ function renderPlanner(
     }
     shell.append(error);
   }
+  if ((workspace.placeholder_spells?.length ?? 0) > 0) {
+    const placeholderBanner = document.createElement('div');
+    placeholderBanner.className = 'placeholder-banner';
+    placeholderBanner.setAttribute('role', 'status');
+    const names = workspace.placeholder_spells
+      ?.map((spell) => spell.name)
+      .join(', ');
+    placeholderBanner.textContent = `Shared spell data not imported: ${names}. These inactive placeholders contain no rules text. Import the matching catalog to upgrade them.`;
+    shell.append(placeholderBanner);
+  }
   const layout = document.createElement('main');
   layout.className = 'planner-layout';
   const primary = document.createElement('div');

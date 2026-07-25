@@ -296,6 +296,7 @@ test('builds the complete workspace editing contract for the seeded character', 
     'removable_sources',
     'spell_lists',
     'slots',
+    'placeholder_spells',
     'save_points',
   ]);
   expect(workspace.revision).toBe(0);

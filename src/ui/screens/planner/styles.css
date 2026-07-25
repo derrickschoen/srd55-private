@@ -184,6 +184,17 @@ select:disabled {
   background: #fff1ef;
 }
 
+.placeholder-banner {
+  max-width: 112rem;
+  margin: 1rem auto 0;
+  border: 1px solid #b7791f;
+  border-radius: 0.45rem;
+  padding: 0.8rem 1rem;
+  color: #744210;
+  background: #fff3c4;
+  font-weight: 700;
+}
+
 .checkbox-description {
   display: flex;
   align-items: flex-start;
@@ -397,6 +408,19 @@ select:disabled {
   display: inline-block;
   max-width: 15rem;
   margin: 0 0.35rem;
+}
+
+.placeholder-badge {
+  display: inline-block;
+  margin: 0.3rem 0 0 0.35rem;
+  border: 1px solid #b7791f;
+  border-radius: 999px;
+  padding: 0.12rem 0.4rem;
+  color: #744210;
+  background: #fff3c4;
+  font-size: 0.68rem;
+  font-weight: 800;
+  white-space: nowrap;
 }
 
 .spell-picker {

@@ -44,6 +44,69 @@ function timestamp(): string {
   return new Date().toISOString();
 }
 
+export function assertSourceRepeatable(
+  db: DatabaseContext,
+  characterId: number,
+  sourceType: AddableSourceType,
+  definition: Definition,
+): void {
+  const activeDuplicate = Number(
+    db.scalar(
+      `SELECT EXISTS (
+         SELECT 1 FROM character_source_instances
+         WHERE character_id = ? AND source_type = ?
+           AND source_definition_id = ? AND state = 'active'
+       )`,
+      [characterId, sourceType, Number(definition.id)],
+    ) ?? 0,
+  ) === 1;
+  if (
+    activeDuplicate &&
+    (sourceType === 'class' || Number(definition.repeatable) !== 1)
+  ) {
+    throw new TypeError(`${String(definition.name)} is not repeatable.`);
+  }
+}
+
+function validateMagicInitiate(config: MutableConfig): void {
+  const list = config.chosen_list;
+  if (
+    typeof list !== 'string' ||
+    !(MAGIC_INITIATE_LISTS as readonly string[]).includes(list)
+  ) {
+    throw new TypeError(
+      'Magic Initiate must use the Cleric, Druid, or Wizard spell list.',
+    );
+  }
+  const ability = config.spellcasting_ability;
+  if (
+    typeof ability !== 'string' ||
+    !(MAGIC_INITIATE_ABILITIES as readonly string[]).includes(ability)
+  ) {
+    throw new TypeError(
+      'Magic Initiate must use Intelligence, Wisdom, or Charisma.',
+    );
+  }
+}
+
+export function validateSourceConfiguration(
+  contentKey: string,
+  config: MutableConfig,
+): void {
+  if (contentKey === '2024:feat:magic-initiate') {
+    validateMagicInitiate(config);
+    return;
+  }
+  if (config.origin_feat_key === '2024:feat:magic-initiate') {
+    if (!isRecord(config.origin_feat_config)) {
+      throw new TypeError(
+        'Magic Initiate origin feat config must be an object.',
+      );
+    }
+    validateMagicInitiate(config.origin_feat_config);
+  }
+}
+
 export class AddSourceCommand {
   readonly actionType = 'add_source';
 
@@ -78,22 +141,12 @@ export class AddSourceCommand {
         );
       }
 
-      const activeDuplicate = Number(
-        this.db.scalar(
-          `SELECT EXISTS (
-             SELECT 1 FROM character_source_instances
-             WHERE character_id = ? AND source_type = ?
-               AND source_definition_id = ? AND state = 'active'
-           )`,
-          [characterId, sourceType, definitionId],
-        ) ?? 0,
-      ) === 1;
-      if (
-        activeDuplicate &&
-        (sourceType === 'class' || Number(definition.repeatable) !== 1)
-      ) {
-        throw new TypeError(`${String(definition.name)} is not repeatable.`);
-      }
+      assertSourceRepeatable(
+        this.db,
+        characterId,
+        sourceType,
+        definition,
+      );
 
       const config: unknown = this.payload.config;
       if (!isRecord(config)) {
@@ -105,7 +158,7 @@ export class AddSourceCommand {
         return;
       }
 
-      this.validateConfiguration(String(definition.content_key), config);
+      validateSourceConfiguration(String(definition.content_key), config);
       this.#before = this.#state.capture(characterId);
       const totalLevel = Number(
         this.db.scalar(
@@ -312,45 +365,6 @@ export class AddSourceCommand {
       normalized.chosen_list = chosenList;
     }
     return { key: definition.key, value: normalized };
-  }
-
-  private validateConfiguration(
-    contentKey: string,
-    config: MutableConfig,
-  ): void {
-    if (contentKey === '2024:feat:magic-initiate') {
-      this.validateMagicInitiate(config);
-      return;
-    }
-    if (config.origin_feat_key === '2024:feat:magic-initiate') {
-      if (!isRecord(config.origin_feat_config)) {
-        throw new TypeError(
-          'Magic Initiate origin feat config must be an object.',
-        );
-      }
-      this.validateMagicInitiate(config.origin_feat_config);
-    }
-  }
-
-  private validateMagicInitiate(config: MutableConfig): void {
-    const list = config.chosen_list;
-    if (
-      typeof list !== 'string' ||
-      !(MAGIC_INITIATE_LISTS as readonly string[]).includes(list)
-    ) {
-      throw new TypeError(
-        'Magic Initiate must use the Cleric, Druid, or Wizard spell list.',
-      );
-    }
-    const ability = config.spellcasting_ability;
-    if (
-      typeof ability !== 'string' ||
-      !(MAGIC_INITIATE_ABILITIES as readonly string[]).includes(ability)
-    ) {
-      throw new TypeError(
-        'Magic Initiate must use Intelligence, Wisdom, or Charisma.',
-      );
-    }
   }
 
   private displayName(

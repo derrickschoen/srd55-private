@@ -211,6 +211,78 @@ select:disabled {
   padding: 0.8rem 1rem;
 }
 
+.share-panel {
+  margin-block: 1rem;
+  padding: 1rem;
+}
+
+/* Author `display` rules outrank the UA stylesheet's `[hidden] { display: none }`,
+   so `.button-secondary`'s `display: inline-flex` would otherwise keep a hidden
+   share action on screen — letting a stale link stay copyable after switching
+   characters. Same fix as `.dice-profile-controls [hidden]`. */
+.share-panel [hidden] {
+  display: none !important;
+}
+
+.share-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.5rem;
+}
+
+.share-column {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.55rem;
+}
+
+.share-column h3,
+.share-column p,
+.share-status,
+.share-preview p {
+  margin: 0;
+}
+
+.share-option {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.85rem;
+}
+
+.share-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.share-link-output {
+  font-family: monospace;
+  font-size: 0.72rem;
+}
+
+.share-preview {
+  width: 100%;
+  border-left: 0.25rem solid #6d28d9;
+  padding: 0.75rem;
+  background: rgb(109 40 217 / 7%);
+}
+
+.share-preview h3 {
+  margin: 0 0 0.35rem;
+}
+
+.share-preview button {
+  margin-top: 0.75rem;
+}
+
+.share-qr {
+  max-width: 100%;
+  height: auto;
+  border: 0.5rem solid #fff;
+}
+
 .dark .transfer-panel {
   border-color: #403a34;
 }
@@ -341,7 +413,8 @@ select:disabled {
 
 @media (max-width: 56rem) {
   .character-grid,
-  .transfer-grid {
+  .transfer-grid,
+  .share-columns {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -371,7 +444,8 @@ select:disabled {
   }
 
   .character-grid,
-  .transfer-grid {
+  .transfer-grid,
+  .share-columns {
     grid-template-columns: 1fr;
   }
 }
