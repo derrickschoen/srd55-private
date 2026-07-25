@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DatabaseContext } from '../../../src/db/database';
 import { BuildReportBuilder } from '../../../src/reports/build-report-builder';
 import { PrintableSpellListBuilder } from '../../../src/reports/printable-spell-list-builder';
+import { SRD_ATTRIBUTION_NOTICE } from '../../../src/rules/srd-attribution';
 import { renderBuildReport } from '../../../src/ui/screens/build-report/build-report';
 import {
   renderPrintableList,
@@ -18,6 +19,16 @@ import {
   createPrintableListFixture,
   persistedPrintableTableHashes,
 } from '../../integration/reports/printable-list-fixture';
+
+function attributionText(markup: string): string {
+  const match = markup.match(
+    /<footer[^>]*data-testid="srd-attribution"[^>]*>([\s\S]*?)<\/footer>/,
+  );
+  if (match?.[1] === undefined) {
+    throw new Error('Missing srd-attribution notice.');
+  }
+  return match[1].replaceAll('&quot;', '"').replace(/\s+/g, ' ').trim();
+}
 
 function noticeText(markup: string, testId: string): string {
   const match = markup.match(
@@ -112,6 +123,7 @@ describe('read-only report presentation', () => {
     expect(markup.indexOf('Mage Armor')).toBeLessThan(
       markup.indexOf('Magic Missile'),
     );
+    expect(attributionText(markup)).toBe(SRD_ATTRIBUTION_NOTICE);
     expect(JSON.stringify(report)).toBe(reportBeforeRender);
     expect(persistedReportTableHashes(db, fixture.characterId)).toEqual(
       before,
@@ -172,6 +184,7 @@ describe('read-only report presentation', () => {
     expect(markup.indexOf('Cleric — not prepared')).toBeLessThan(
       markup.indexOf('Druid — not prepared'),
     );
+    expect(attributionText(markup)).toBe(SRD_ATTRIBUTION_NOTICE);
     expect(JSON.stringify(shuffled)).toBe(inputBeforeRender);
     expect(persistedPrintableTableHashes(db, fixture.characterId)).toEqual(
       before,

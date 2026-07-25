@@ -9,6 +9,7 @@ import {
   comparePrintableSourceGroups,
   comparePrintableSpells,
 } from '../../../reports/printable-ordering';
+import { SRD_ATTRIBUTION_NOTICE } from '../../../rules/srd-attribution';
 
 export const TEXT_UNAVAILABLE_WARNING =
   'Spell descriptions are not installed. This full reference includes all spell facts, but no description text. Run php artisan catalog:import --with-text where the local Tier 2 files are available, then print again.';
@@ -260,6 +261,10 @@ export function renderPrintableList(spellList: PrintableSpellList): string {
         ${wizardStates(spellList)}
         ${groups}
         ${sections}
+
+        <footer class="srd-attribution" data-testid="srd-attribution">
+          ${escapeHtml(SRD_ATTRIBUTION_NOTICE)}
+        </footer>
       </main>
     </div>`;
 }
