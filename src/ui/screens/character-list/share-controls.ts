@@ -34,6 +34,43 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+interface DisplayIssue {
+  readonly summary: string;
+  readonly remedy: string;
+}
+
+/**
+ * Recover compatibility issues from an RPC failure.
+ *
+ * The worker sends them as `data.issues`; anything else — a malformed-share
+ * error, a transport failure, a programming error — yields an empty list and
+ * falls back to the plain message. Shapes are checked rather than trusted:
+ * this crosses a postMessage boundary.
+ */
+function compatibilityIssues(error: unknown): readonly DisplayIssue[] {
+  const data = (error as { data?: unknown } | null)?.data;
+  if (data === null || typeof data !== 'object') {
+    return [];
+  }
+  const issues = (data as { issues?: unknown }).issues;
+  if (!Array.isArray(issues)) {
+    return [];
+  }
+  return issues.flatMap((entry) =>
+    entry !== null &&
+    typeof entry === 'object' &&
+    typeof (entry as DisplayIssue).summary === 'string' &&
+    typeof (entry as DisplayIssue).remedy === 'string'
+      ? [
+          {
+            summary: (entry as DisplayIssue).summary,
+            remedy: (entry as DisplayIssue).remedy,
+          },
+        ]
+      : [],
+  );
+}
+
 function defaultBrowserSharing(): BrowserSharing {
   return {
     ...(navigator.clipboard?.writeText === undefined
@@ -185,9 +222,47 @@ export function createShareControls(
   }
 
   function announce(message: string, error = false): void {
-    status.textContent = message;
+    status.replaceChildren(message);
     status.classList.toggle('transfer-error', error);
     status.setAttribute('role', error ? 'alert' : 'status');
+  }
+
+  /**
+   * Render catalog-compatibility failures as a list.
+   *
+   * A drifted or homebrew catalog usually breaks several things at once, and
+   * collapsing them into one sentence forces the user to re-import repeatedly
+   * to discover the rest. Falls back to the plain message whenever the failure
+   * is not a compatibility failure, or the worker did not send issue data.
+   */
+  function announceFailure(error: unknown): void {
+    const issues = compatibilityIssues(error);
+    if (issues.length === 0) {
+      announce(errorMessage(error), true);
+      return;
+    }
+    const heading = document.createElement('p');
+    heading.textContent =
+      issues.length === 1
+        ? 'This character cannot be imported:'
+        : `This character cannot be imported — ${issues.length} problems:`;
+    const list = document.createElement('ul');
+    list.className = 'share-issue-list';
+    for (const issue of issues) {
+      const item = document.createElement('li');
+      const what = document.createElement('span');
+      // textContent, never innerHTML: content keys and names originate in a
+      // share link a stranger may have crafted.
+      what.textContent = issue.summary;
+      const how = document.createElement('span');
+      how.className = 'share-issue-remedy';
+      how.textContent = issue.remedy;
+      item.append(what, ' ', how);
+      list.append(item);
+    }
+    status.replaceChildren(heading, list);
+    status.classList.add('transfer-error');
+    status.setAttribute('role', 'alert');
   }
 
   async function preview(value: string): Promise<void> {
@@ -206,7 +281,7 @@ export function createShareControls(
       announce('Preview ready. Nothing has been imported.');
     } catch (error) {
       activeFragment = null;
-      announce(errorMessage(error), true);
+      announceFailure(error);
     } finally {
       previewButton.disabled = false;
     }
@@ -230,7 +305,7 @@ export function createShareControls(
           addButton.hidden = true;
           activeFragment = null;
         })
-        .catch((error: unknown) => announce(errorMessage(error), true))
+        .catch((error: unknown) => announceFailure(error))
         .finally(() => {
           addButton.disabled = false;
         });
@@ -278,7 +353,7 @@ export function createShareControls(
               : 'Share link ready. It is too long for a reliable QR code.',
           );
         })
-        .catch((error: unknown) => announce(errorMessage(error), true))
+        .catch((error: unknown) => announceFailure(error))
         .finally(() => {
           exportButton.disabled = exporting === null;
         });

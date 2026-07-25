@@ -1,9 +1,6 @@
 import type { SqlValue } from '@sqlite.org/sqlite-wasm';
 import { normalizeCatalogName } from '../catalog/catalog-normalize';
-import {
-  assertSourceRepeatable,
-  validateSourceConfiguration,
-} from '../commands/add-source';
+import { assertSourceRepeatable } from '../commands/add-source';
 import type { DatabaseContext } from '../db/database';
 import type { AddableSourceType } from '../domain/enums';
 import { GrantRuleSlotGenerator } from '../grants/grant-rule-slot-generator';
@@ -17,6 +14,16 @@ import {
   type ShareSource,
   validateShareDocument,
 } from './schema';
+import {
+  missingClassIssue,
+  missingSourceIssue,
+  missingSubclassIssue,
+  notRepeatableIssue,
+  selectionSlotIssue,
+  ShareImportCompatibilityError,
+  subclassMismatchIssue,
+  type ShareImportIssue,
+} from './import-issues';
 
 export interface ShareExportOptions {
   readonly acknowledgements?: boolean;
@@ -485,6 +492,89 @@ function definition(
   return row;
 }
 
+function lookup(
+  db: DatabaseContext,
+  table: string,
+  key: string,
+): Row | null {
+  return db.one<Row>(
+    `SELECT * FROM ${table} WHERE content_key = ?`,
+    [key],
+  );
+}
+
+/**
+ * Report every catalog incompatibility that can be detected WITHOUT writing.
+ *
+ * Runs before the import transaction opens, so it can collect all independent
+ * problems instead of surfacing them one failed import at a time. Issues that
+ * only emerge once sources have been materialised — a selection whose slot no
+ * longer exists — cannot be found here; those are collected inside the
+ * transaction and reported the same way.
+ *
+ * Deliberately does NOT run `validateSourceConfiguration`. That check hardcodes
+ * the official Magic Initiate spell lists (`add-source.ts:18`) rather than
+ * reading them from the recipient's own definition, and `feat_definitions` has
+ * no column that could express an allowed-list set. Enforcing it here would
+ * reject a homebrew feat that keeps the official content key even when sender
+ * and recipient hold byte-identical definitions. It remains enforced on the
+ * authoring path, where the user is building against their own catalog.
+ */
+export function assessImportCompatibility(
+  db: DatabaseContext,
+  document: CharacterShareDocument,
+): readonly ShareImportIssue[] {
+  const issues: ShareImportIssue[] = [];
+
+  for (const item of document.classes) {
+    const classRow = lookup(db, 'class_definitions', item.classKey);
+    if (classRow === null) {
+      issues.push(missingClassIssue(item.classKey));
+    }
+    if (item.subclassKey === undefined) {
+      continue;
+    }
+    const subclassRow = lookup(
+      db,
+      'subclass_definitions',
+      item.subclassKey,
+    );
+    if (subclassRow === null) {
+      issues.push(missingSubclassIssue(item.subclassKey));
+    } else if (
+      classRow !== null &&
+      Number(subclassRow.class_definition_id) !== Number(classRow.id)
+    ) {
+      issues.push(
+        subclassMismatchIssue(item.subclassKey, item.classKey),
+      );
+    }
+  }
+
+  // Repeatability is genuinely catalog-derived: it reads `repeatable` from the
+  // recipient's own definition row, so homebrew that permits repeats imports
+  // cleanly. Counting per key here reports one issue per offending source
+  // rather than one per duplicate occurrence.
+  const sourceCounts = new Map<string, number>();
+  for (const item of document.sources) {
+    const table = SOURCE_TABLES[item.type];
+    const row = lookup(db, table, item.key);
+    if (row === null) {
+      issues.push(missingSourceIssue(item.type, item.key));
+      continue;
+    }
+    const seen = (sourceCounts.get(item.key) ?? 0) + 1;
+    sourceCounts.set(item.key, seen);
+    if (seen === 2 && Number(row.repeatable) !== 1) {
+      issues.push(
+        notRepeatableIssue(item.type, item.key, String(row.name)),
+      );
+    }
+  }
+
+  return issues;
+}
+
 function fallbackSpellName(key: string): string {
   const slug = key.split(':').at(-1) ?? 'Unknown spell';
   return slug
@@ -651,6 +741,10 @@ export function importCharacterShare(
   input: unknown,
 ): ShareImportResult {
   const document = validateShareDocument(input);
+  const preflight = assessImportCompatibility(db, document);
+  if (preflight.length > 0) {
+    throw new ShareImportCompatibilityError(preflight);
+  }
   return db.transaction(() => {
     const now = timestamp();
     const c = document.character;
@@ -765,10 +859,6 @@ export function importCharacterShare(
         item.type as AddableSourceType,
         sourceRow,
       );
-      validateSourceConfiguration(
-        String(sourceRow.content_key),
-        item.config ?? {},
-      );
       const sourceId = insertSource(
         db,
         characterId,
@@ -822,6 +912,7 @@ export function importCharacterShare(
       return id;
     };
     const eligibility = new SpellSelectionEligibility(db);
+    const selectionIssues: ShareImportIssue[] = [];
     for (const selection of document.selections) {
       const roots = rootsByRef.get(selection.ref);
       if (roots === undefined) {
@@ -843,9 +934,19 @@ export function importCharacterShare(
         ],
       );
       if (slots.length !== 1) {
-        throw new ShareValidationError(
-          `selection ${selection.ruleKey}[${selection.ordinal}] resolved to ${slots.length} slots.`,
+        // Collect rather than throw: a catalog whose grant rules drifted
+        // usually breaks several selections at once, and reporting them one
+        // failed import at a time is miserable. Assignment below is skipped
+        // for this selection; the accumulated issues abort the whole
+        // transaction once every selection has been examined.
+        selectionIssues.push(
+          selectionSlotIssue(
+            selection.ruleKey,
+            selection.ordinal,
+            slots.length,
+          ),
         );
+        continue;
       }
       const slotId = Number((slots[0] as Row).id);
       db.exec(
@@ -864,6 +965,13 @@ export function importCharacterShare(
         ],
       );
       eligibility.refresh(slotId);
+    }
+
+    // Abort before touching the spellbook, preferences, or loadouts. Throwing
+    // inside the transaction rolls the whole character back, so a partially
+    // placed set of selections is never committed.
+    if (selectionIssues.length > 0) {
+      throw new ShareImportCompatibilityError(selectionIssues);
     }
 
     for (const key of document.spellbook) {
