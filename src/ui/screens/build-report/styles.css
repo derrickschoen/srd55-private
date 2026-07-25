@@ -272,6 +272,18 @@
   font-size: 0.85rem;
 }
 
+/* Scoped: the print and legal screens style a notice of the same name, and all
+   screen stylesheets are bundled into one file. */
+.build-report-page .srd-attribution {
+  padding-top: 0.6rem;
+  margin-top: 2rem;
+  border-top: 1px solid #44403c;
+  color: #d6d3d1;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
 @media (min-width: 40rem) {
   .ability-grid {
     grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -320,6 +332,13 @@
   .empty-value,
   .invalid-list p {
     color: #333;
+  }
+
+  .build-report-page .srd-attribution {
+    color: #000;
+    border-color: #000;
+    break-inside: avoid-page;
+    page-break-inside: avoid;
   }
 
   .report-panel h2,

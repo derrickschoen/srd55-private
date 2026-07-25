@@ -80,7 +80,7 @@ export class Application {
       });
       this.root.append(
         element('main', { className: 'empty-shell' }, [
-          element('h1', { text: 'D&D Multiclass Spell Planner' }),
+          element('h1', { text: 'Multiclass Spell Planner' }),
           status,
         ]),
       );

@@ -1,0 +1,62 @@
+.legal-page {
+  min-height: 100vh;
+  color: #1c2025;
+  background: #f5f1e8;
+}
+
+.dark .legal-page {
+  color: #f5f1e8;
+  background: #181512;
+}
+
+.legal-page > main {
+  width: min(100% - 2rem, 48rem);
+  padding-block: 2rem 3rem;
+  margin-inline: auto;
+}
+
+.legal-header a {
+  color: #6d28d9;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.dark .legal-header a {
+  color: #c4b5fd;
+}
+
+.legal-header h1 {
+  margin: 0.4rem 0 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.9rem;
+}
+
+.legal-section {
+  margin-top: 2rem;
+}
+
+.legal-section h2 {
+  margin-bottom: 0.6rem;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.2rem;
+}
+
+.legal-section p {
+  line-height: 1.55;
+}
+
+/* Scoped: the print and build-report screens style a notice of the same name,
+   and all screen stylesheets are bundled into one file. */
+.legal-page .srd-attribution {
+  padding: 0.9rem 1rem;
+  border-left: 0.25rem solid #7c3a20;
+  background: rgb(255 255 255 / 70%);
+  overflow-wrap: anywhere;
+}
+
+.dark .legal-page .srd-attribution {
+  border-color: #c4b5fd;
+  background: rgb(255 255 255 / 6%);
+}

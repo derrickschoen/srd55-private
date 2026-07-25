@@ -107,6 +107,17 @@
   overflow-wrap: anywhere;
 }
 
+/* Scoped: the legal and build-report screens style a notice of the same name,
+   and all screen stylesheets are bundled into one file. */
+.print-page .srd-attribution {
+  padding-top: 0.6rem;
+  margin-top: 2rem;
+  border-top: 1px solid #78716c;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
 .print-section {
   margin-top: 1.5rem;
 }
@@ -265,6 +276,7 @@
 
   .print-header,
   .text-notice,
+  .print-page .srd-attribution,
   .wizard-states article,
   .spell-card,
   .unprepared-section > div:first-child {
