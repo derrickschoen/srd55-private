@@ -22,6 +22,7 @@ import {
   type CharacterShareDocument,
   validateShareDocument,
 } from '../../../src/sharing/schema';
+import { ShareImportCompatibilityError } from '../../../src/sharing/import-issues';
 import { getSqlite3, openTestDatabase } from '../../helpers/open-db';
 
 const connections: Database[] = [];
@@ -1642,7 +1643,14 @@ describe('adversarial character-share rejection', () => {
     },
   );
 
-  it('rejects invalid Magic Initiate semantic config', async () => {
+  it('preserves an off-list Magic Initiate config instead of enforcing the official lists', async () => {
+    // `validateSourceConfiguration` hardcodes Cleric/Druid/Wizard
+    // (`add-source.ts:18`) and fires on the literal official content key. It
+    // does NOT read the allowed lists from the recipient's definition, and
+    // `feat_definitions` has no column that could express them. Enforcing it
+    // on import would therefore reject a homebrew feat that keeps the official
+    // key even when sender and recipient hold identical definitions, so import
+    // deliberately does not run it. The authoring path still does.
     const target = await database();
     definition(
       target,
@@ -1652,25 +1660,34 @@ describe('adversarial character-share rejection', () => {
       [],
       true,
     );
-    expect(() =>
-      importCharacterShare(
-        target,
-        minimalDocument({
-          sources: [
-            {
-              id: 0,
-              type: 'feat',
-              key: '2024:feat:magic-initiate',
-              acquired: 1,
-              config: {
-                chosen_list: 'Sorcerer',
-                spellcasting_ability: 'intelligence',
-              },
+    const imported = importCharacterShare(
+      target,
+      minimalDocument({
+        sources: [
+          {
+            id: 0,
+            type: 'feat',
+            key: '2024:feat:magic-initiate',
+            acquired: 1,
+            config: {
+              chosen_list: 'Sorcerer',
+              spellcasting_ability: 'intelligence',
             },
-          ],
-        }),
+          },
+        ],
+      }),
+    );
+    expect(
+      JSON.parse(
+        String(
+          target.one<{ config: string }>(
+            `SELECT config FROM character_source_instances
+             WHERE character_id = ?`,
+            [imported.characterId],
+          )?.config,
+        ),
       ),
-    ).toThrow(/Cleric, Druid, or Wizard/);
+    ).toMatchObject({ chosen_list: 'Sorcerer' });
   });
 
   it('rejects garbage, truncated base64url, non-gzip, non-JSON, and invalid UTF-8 clearly', async () => {
@@ -2057,9 +2074,63 @@ describe('adversarial character-share rejection', () => {
         },
       ],
     );
-    expect(() => importCharacterShare(targetDb, document)).toThrow(
-      /resolved to 0 slots/,
-    );
+    // Atomicity is the load-bearing property and is unchanged. What changed is
+    // the diagnostic: catalog drift is a COMPATIBILITY failure of a well-formed
+    // document, not a malformed share, and it is reported as a structured issue
+    // the UI can render rather than an internal-sounding string.
+    let thrown: unknown;
+    try {
+      importCharacterShare(targetDb, document);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(ShareImportCompatibilityError);
+    expect(thrown).not.toBeInstanceOf(ShareValidationError);
+    const issues = (thrown as ShareImportCompatibilityError).issues;
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.code).toBe('selection_slot_missing');
+    expect(issues[0]?.ruleKey).toBe('drifting-choice');
+    expect(issues[0]?.remedy).toMatch(/Compare catalogs/);
+    expect(targetDb.scalar('SELECT count(*) FROM characters')).toBe(0);
+  });
+
+  it('reports every independent catalog gap at once instead of one per import', async () => {
+    const targetDb = await database();
+    let thrown: unknown;
+    try {
+      importCharacterShare(
+        targetDb,
+        minimalDocument({
+          classes: [
+            { id: 0, classKey: '2024:class:absent-a', level: 1, start: 1 },
+            { id: 1, classKey: '2024:class:absent-b', level: 1, start: 2 },
+          ],
+          sources: [
+            { id: 2, type: 'feat', key: '2024:feat:absent-c', acquired: 1 },
+          ],
+        } as Partial<CharacterShareDocument>),
+      );
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(ShareImportCompatibilityError);
+    const issues = (thrown as ShareImportCompatibilityError).issues;
+    expect(issues.map((row) => row.code)).toEqual([
+      'missing_class',
+      'missing_class',
+      'missing_source',
+    ]);
+    expect(issues.flatMap((row) => row.contentKeys)).toEqual([
+      '2024:class:absent-a',
+      '2024:class:absent-b',
+      '2024:feat:absent-c',
+    ]);
+    // Every issue must name a real action; none may promise an in-app
+    // operation that does not exist (there is no source-catalog importer).
+    for (const issue of issues) {
+      expect(issue.remedy.length).toBeGreaterThan(0);
+      expect(issue.remedy).not.toMatch(/click|button|press/i);
+    }
     expect(targetDb.scalar('SELECT count(*) FROM characters')).toBe(0);
   });
 });
