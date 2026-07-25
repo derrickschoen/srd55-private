@@ -80,6 +80,11 @@ function decodeCandidate(row: SqlRow): EligibleSpell {
   };
 }
 
+interface CandidatePredicate {
+  readonly clauses: readonly string[];
+  readonly bindings: ReadonlyArray<string | number>;
+}
+
 export class EligibleSpellSearch {
   readonly #eligibility: SpellSelectionEligibility;
 
@@ -96,6 +101,67 @@ export class EligibleSpellSearch {
     slotId: number,
     query: string,
   ): EligibleSpell[] {
+    const slot = this.#slot(characterId, slotId);
+    const { clauses, bindings } = this.#candidatePredicate(
+      characterId,
+      slot,
+      query,
+    );
+
+    const candidates = this.db.all(
+      `SELECT version.id, version.display_name, version.level,
+              version.school, version.ritual, version.concentration,
+              version.rules_edition
+       FROM spell_versions AS version
+       WHERE ${clauses.join('\nAND ')}
+       ORDER BY version.level, version.display_name, version.id
+       LIMIT 50`,
+      [...bindings],
+      decodeCandidate,
+    );
+
+    return candidates.filter(
+      (candidate) =>
+        this.#eligibility.evaluate(slot, candidate.id).status ===
+        'valid',
+    );
+  }
+
+  // Whether `search` could offer anything for this slot. It runs the SQL
+  // predicate alone, without the `evaluate` post-filter `search` applies;
+  // `tests/integration/eligibility/has-any.test.ts` pins the two together.
+  // The one place the post-filter can reject every candidate regardless of the
+  // catalog is a `selection_collection` this build cannot resolve — `evaluate`
+  // throws for those — so the answer there is a plain "nothing offerable".
+  hasAny(characterId: number, slotId: number): boolean {
+    const slot = this.#slot(characterId, slotId);
+    if (
+      slot.selection_collection !== null &&
+      slot.selection_collection !== undefined
+    ) {
+      return false;
+    }
+    const { clauses, bindings } = this.#candidatePredicate(
+      characterId,
+      slot,
+      '',
+    );
+    return (
+      Number(
+        this.db.scalar(
+          `SELECT EXISTS (
+             SELECT 1
+             FROM spell_versions AS version
+             WHERE ${clauses.join('\nAND ')}
+             LIMIT 1
+           )`,
+          [...bindings],
+        ) ?? 0,
+      ) === 1
+    );
+  }
+
+  #slot(characterId: number, slotId: number): EligibilitySlot {
     const slot = this.db.one(
       `SELECT character_id, fixed_spell_version_id,
               current_spell_version_id, spell_level_min, spell_level_max,
@@ -109,7 +175,14 @@ export class EligibleSpellSearch {
     if (slot === null) {
       throw new EligibleSpellSearchNotFoundError(characterId, slotId);
     }
+    return slot;
+  }
 
+  #candidatePredicate(
+    characterId: number,
+    slot: EligibilitySlot,
+    query: string,
+  ): CandidatePredicate {
     const allowLegacy =
       Number(
         this.db.scalar(
@@ -180,22 +253,6 @@ export class EligibleSpellSearch {
       bindings.push(tag);
     }
 
-    const candidates = this.db.all(
-      `SELECT version.id, version.display_name, version.level,
-              version.school, version.ritual, version.concentration,
-              version.rules_edition
-       FROM spell_versions AS version
-       WHERE ${clauses.join('\nAND ')}
-       ORDER BY version.level, version.display_name, version.id
-       LIMIT 50`,
-      bindings,
-      decodeCandidate,
-    );
-
-    return candidates.filter(
-      (candidate) =>
-        this.#eligibility.evaluate(slot, candidate.id).status ===
-        'valid',
-    );
+    return { clauses, bindings };
   }
 }

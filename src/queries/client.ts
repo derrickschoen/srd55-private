@@ -19,6 +19,10 @@ import type {
 } from '../reports/printable-spell-list-builder';
 import type { CatalogSnapshot } from './catalog-queries';
 import type {
+  CompletenessCount,
+  CompletenessResult,
+} from './character-completeness';
+import type {
   CreateCharacterInput,
   DeleteCharacterResult,
 } from './character-crud';
@@ -30,6 +34,8 @@ export interface QueriesClient extends CatalogClient {
   createCharacter(name: string): Promise<CharacterRow>;
   deleteCharacter(characterId: number): Promise<DeleteCharacterResult>;
   workspace(characterId: number): Promise<Workspace>;
+  completeness(characterId: number): Promise<CompletenessResult>;
+  outstandingCounts(): Promise<CompletenessCount[]>;
   catalog(): Promise<CatalogSnapshot>;
   eligibleSpells(
     characterId: number,
@@ -83,6 +89,16 @@ export function createQueriesClient(rpc: RpcClient): QueriesClient {
       rpc.call<{ character_id: number }, Workspace>(
         'queries.characters.workspace',
         characterParams(characterId),
+      ),
+    completeness: (characterId: number) =>
+      rpc.call<{ character_id: number }, CompletenessResult>(
+        'queries.characters.completeness',
+        characterParams(characterId),
+      ),
+    outstandingCounts: () =>
+      rpc.call<Record<string, never>, CompletenessCount[]>(
+        'queries.characters.outstanding',
+        {},
       ),
     catalog: () =>
       rpc.call<Record<string, never>, CatalogSnapshot>(

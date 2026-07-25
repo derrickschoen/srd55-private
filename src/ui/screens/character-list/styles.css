@@ -449,3 +449,29 @@ select:disabled {
     grid-template-columns: 1fr;
   }
 }
+
+.card-badges {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.25rem;
+}
+
+/* Outstanding work is not a warning, so it borrows neither the warning amber
+   nor the ok green, and a settled character shows one neutral pill rather than
+   a second green tick beside .status-ok. */
+.status-outstanding {
+  color: #1e3a8a;
+  background: #dbeafe;
+}
+
+.status-settled {
+  color: #475569;
+  background: #f1f5f9;
+}
+
+.status-catalog-gap {
+  color: #6b21a8;
+  background: #f3e8ff;
+}
