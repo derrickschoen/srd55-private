@@ -66,7 +66,11 @@ describe('completeness RPCs', () => {
       result: [
         {
           character_id: fixture.characterId,
-          outstanding_count: 0,
+          // ONE: the build-report fixture's class has seeded sheet traits, so
+          // it offers skill proficiencies, and none is recorded. Nobody but the
+          // player can say which were picked, so it is genuinely outstanding
+          // rather than a catalog gap.
+          outstanding_count: 1,
           catalog_gap_count: 0,
         },
       ],

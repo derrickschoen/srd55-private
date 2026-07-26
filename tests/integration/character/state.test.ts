@@ -144,6 +144,39 @@ function seedFixture(): void {
      ) VALUES (?, 'Soldier', 'Strength', 'Savage Attacker', ?, ?)`,
     [characterId, createdAt, updatedAt],
   );
+  // The four stored sheet inputs. Every one of the four is seeded, because the
+  // capture assertion below holds EVERY state table to having a row with these
+  // timestamps — a table left empty here would pass that loop vacuously and
+  // prove nothing about whether the snapshot carries it.
+  db.exec(
+    `INSERT INTO character_armor (
+       character_id, slot, name, category, armor_class, dex_bonus,
+       dex_bonus_max, strength_requirement, stealth_disadvantage, notes,
+       created_at, updated_at
+     ) VALUES (?, 'worn', 'Half Plate Armor', 'medium', 15, 'capped', 2, 15, 1,
+       'armour row', ?, ?)`,
+    [characterId, createdAt, updatedAt],
+  );
+  db.exec(
+    `INSERT INTO character_hit_point_rolls (
+       character_id, class_name, class_level, rolled_value,
+       created_at, updated_at
+     ) VALUES (?, 'Wizard', 2, 4, ?, ?)`,
+    [characterId, createdAt, updatedAt],
+  );
+  db.exec(
+    `INSERT INTO character_skill_proficiencies (
+       character_id, skill, created_at, updated_at
+     ) VALUES (?, 'arcana', ?, ?)`,
+    [characterId, createdAt, updatedAt],
+  );
+  db.exec(
+    `INSERT INTO character_sheet_adjustments (
+       character_id, armor_class_adjustment, armor_class_adjustment_note,
+       created_at, updated_at
+     ) VALUES (?, 3, 'Ring of Protection, house ruled.', ?, ?)`,
+    [characterId, createdAt, updatedAt],
+  );
 }
 
 function mutableCapture(): MutableSnapshot {
@@ -185,12 +218,12 @@ describe('capture and deterministic diff', () => {
       'character',
       ...CHARACTER_STATE_TABLES,
     ]);
-    // a7-v3 is the version that also captures the three origin tables. Written
-    // out
-    // rather than compared against the exported constant: a version identifier
-    // is a wire fact that other stored data is matched against, so a test that
-    // reads it from the module under test could never notice it changing.
-    expect(snapshot.schema_version).toBe('a7-v3');
+    // a7-v4 is the version that also captures the four stored sheet inputs.
+    // Written out rather than compared against the exported constant: a version
+    // identifier is a wire fact that other stored data is matched against, so a
+    // test that reads it from the module under test could never notice it
+    // changing.
+    expect(snapshot.schema_version).toBe('a7-v4');
     expect(Object.keys(snapshot.character)).toEqual(CHARACTER_STATE_COLUMNS);
     expect(snapshot.character).toEqual({
       name: 'Snapshot Hero',
@@ -233,6 +266,28 @@ describe('capture and deterministic diff', () => {
     expect(snapshot.character_background[0]).toMatchObject({
       name: 'Soldier',
     });
+    // The four stored sheet inputs travel as columns too. The armour row is the
+    // one worth naming: `slot` and `category` are separate fields and both are
+    // carried, because a crossed pair is a state the sheet warns about rather
+    // than one this format silently repairs.
+    expect(snapshot.character_armor[0]).toMatchObject({
+      slot: 'worn',
+      category: 'medium',
+      armor_class: 15,
+      dex_bonus: 'capped',
+      dex_bonus_max: 2,
+    });
+    expect(snapshot.character_hit_point_rolls[0]).toMatchObject({
+      class_name: 'Wizard',
+      class_level: 2,
+      rolled_value: 4,
+    });
+    expect(snapshot.character_skill_proficiencies[0]).toMatchObject({
+      skill: 'arcana',
+    });
+    expect(snapshot.character_sheet_adjustments[0]).toMatchObject({
+      armor_class_adjustment: 3,
+    });
     for (const table of CHARACTER_STATE_TABLES) {
       expect(snapshot[table]).toEqual(
         db.all(
@@ -257,6 +312,10 @@ describe('capture and deterministic diff', () => {
       character_species: [],
       character_species_traits: [],
       character_background: [],
+      character_armor: [],
+      character_hit_point_rolls: [],
+      character_skill_proficiencies: [],
+      character_sheet_adjustments: [],
     };
     const before = {
       character: { name: 'Before' },
@@ -284,6 +343,10 @@ describe('capture and deterministic diff', () => {
       character_species: [],
       character_species_traits: [],
       character_background: [],
+      character_armor: [],
+      character_hit_point_rolls: [],
+      character_skill_proficiencies: [],
+      character_sheet_adjustments: [],
     };
 
     expect(state.diff(before, after)).toEqual([
@@ -660,7 +723,7 @@ describe('restoring a snapshot written by an older build', () => {
     // oversight: a current snapshot DOES speak for weapons, so restoring it
     // removes one added afterwards.
     const snapshot = mutableCapture();
-    expect(snapshot.schema_version).toBe('a7-v3');
+    expect(snapshot.schema_version).toBe('a7-v4');
     db.exec(
       `INSERT INTO character_weapons (character_id, name)
        VALUES (?, 'Bought since')`,

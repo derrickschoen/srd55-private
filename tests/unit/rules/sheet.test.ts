@@ -327,6 +327,148 @@ describe('hit points', () => {
     ]);
     expect(result.maximum).toBe(62);
   });
+
+  it('assumes a die for a class whose hit die is unknown, and SAYS SO', () => {
+    // A class can arrive with no `class_sheet_traits` row — homebrew, or a
+    // catalog import — and its die is then genuinely unknown. The alternative
+    // to assuming one is to print no hit point maximum at all, which is worse;
+    // the alternative to WARNING is to publish an invented number as a fact,
+    // which is the defect this pins.
+    //
+    // Unknown die, level 3, starting class, Constitution 14 (+2), assuming d8:
+    //   level 1     : 8 + 2 = 10
+    //   levels 2..3 : (5 fixed + 2) x 2 = 14
+    //   total       : 24
+    const homebrew: SheetClass = {
+      class_name: 'Bladewright',
+      level: 3,
+      hit_die: null,
+      is_starting_class: true,
+      saving_throws: [],
+    };
+    const result = hitPointMaximum({
+      classes: [homebrew],
+      scores: scores({ constitution: 14 }),
+    });
+    expect(result.maximum).toBe(24);
+    expect(result.warnings.map((warning) => warning.code)).toEqual([
+      'assumed_hit_die',
+    ]);
+    // The warning NAMES the class, because a multiclass character may have one
+    // known die and one unknown, and "a die was assumed" would not say which.
+    expect(result.warnings[0]?.message).toContain('Bladewright');
+
+    // A KNOWN d8 CLASS REACHES THE SAME NUMBER AND WARNS ABOUT NOTHING. That is
+    // the pairing that makes the warning load-bearing rather than decorative:
+    // the arithmetic alone cannot tell the two apart.
+    const known = hitPointMaximum({
+      classes: [{ ...homebrew, hit_die: 8 }],
+      scores: scores({ constitution: 14 }),
+    });
+    expect(known.maximum).toBe(24);
+    expect(known.warnings).toEqual([]);
+  });
+
+  it('warns per unknown class, and leaves the known ones unremarked', () => {
+    // Fighter 5 (starting, d10) / a level 2 class with no die, Constitution 14:
+    //   Fighter        : 12 + 32 = 44   (as above)
+    //   unknown 1..2   : (5 fixed + 2) x 2 = 14
+    //   total          : 58
+    const result = hitPointMaximum({
+      classes: [
+        FIGHTER,
+        {
+          class_name: 'Bladewright',
+          level: 2,
+          hit_die: null,
+          is_starting_class: false,
+          saving_throws: [],
+        },
+      ],
+      scores: scores({ constitution: 14 }),
+    });
+    expect(result.maximum).toBe(58);
+    expect(result.warnings.map((warning) => warning.code)).toEqual([
+      'assumed_hit_die',
+    ]);
+    expect(result.warnings[0]?.message).not.toContain('Fighter');
+  });
+
+  it('flags a roll larger than the class’s own die, and still counts it', () => {
+    // `SHEET_ROLL_BOUNDS.maximum` can only bound at 12 — the largest printed
+    // die — because a roll is keyed on a class NAME and the die is not knowable
+    // from that table. This is the first place both are known.
+    //
+    // Wizard 3 (starting, d6), Constitution 14 (+2), an 11 recorded at level 2:
+    //   level 1 : 6 + 2 = 8
+    //   level 2 : 11 + 2 = 13     (rolled, impossible on a d6, counted anyway)
+    //   level 3 : 4 + 2 = 6       (fixed)
+    //   total   : 27
+    const result = hitPointMaximum({
+      classes: [{ ...WIZARD, is_starting_class: true }],
+      scores: scores({ constitution: 14 }),
+      rolls: new Map([['Wizard', new Map([[2, 11]])]]),
+    });
+    // COUNTED IN FULL, not clamped to 6: clamping would silently rewrite a
+    // number the player typed. Clamping would have given 8 + 8 + 6 = 22.
+    expect(result.maximum).toBe(27);
+    expect(result.maximum).not.toBe(22);
+    expect(result.warnings.map((warning) => warning.code)).toEqual([
+      'roll_exceeds_hit_die',
+    ]);
+    const message = result.warnings[0]?.message ?? '';
+    expect(message).toContain('Wizard');
+    expect(message).toContain('11');
+    expect(message).toContain('d6');
+  });
+
+  it('says nothing about a roll the die could have shown, at either boundary', () => {
+    // The negative control the previous case needs. A 6 on a d6 is the largest
+    // legal roll and must not be flagged; a 6 and a 10 on a Fighter's d10 are
+    // unremarkable twice over.
+    const exact = hitPointMaximum({
+      classes: [{ ...WIZARD, is_starting_class: true }],
+      scores: scores({ constitution: 14 }),
+      rolls: new Map([['Wizard', new Map([[2, 6]])]]),
+    });
+    expect(exact.warnings).toEqual([]);
+    const fighter = hitPointMaximum({
+      classes: [FIGHTER],
+      scores: scores({ constitution: 14 }),
+      rolls: new Map([['Fighter', new Map([[2, 6], [3, 10]])]]),
+    });
+    expect(fighter.warnings).toEqual([]);
+  });
+
+  it('does not convict a roll against a die it only ASSUMED', () => {
+    // The two degradations must not compound. An 11 recorded for a class whose
+    // die is unknown may be perfectly legal — the class could be a d12 — and
+    // flagging it against the assumed d8 would accuse the player of a typo on
+    // the strength of this application's own guess.
+    //
+    // Unknown die, level 3, starting, Constitution 14 (+2), 11 at level 2:
+    //   level 1 : 8 + 2 = 10      (assumed d8)
+    //   level 2 : 11 + 2 = 13     (rolled)
+    //   level 3 : 5 + 2 = 7       (fixed for the assumed d8)
+    //   total   : 30
+    const result = hitPointMaximum({
+      classes: [
+        {
+          class_name: 'Bladewright',
+          level: 3,
+          hit_die: null,
+          is_starting_class: true,
+          saving_throws: [],
+        },
+      ],
+      scores: scores({ constitution: 14 }),
+      rolls: new Map([['Bladewright', new Map([[2, 11]])]]),
+    });
+    expect(result.maximum).toBe(30);
+    expect(result.warnings.map((warning) => warning.code)).toEqual([
+      'assumed_hit_die',
+    ]);
+  });
 });
 
 describe('armor class', () => {

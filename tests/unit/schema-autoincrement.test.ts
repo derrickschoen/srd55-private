@@ -98,6 +98,15 @@ const nativeAutoIncrementTables = [
   // foreign key onto it would move when the content was corrected.
   'named_features',
   'subclass_features',
+  // The four STORED SHEET INPUTS. Each carries a surrogate autoincrementing key
+  // even though each has a natural one — (character, slot), (character, class,
+  // level), (character, skill), (character) — because a save-point snapshot
+  // names rows by `id` when it restores them, and `character-backup.ts` remaps
+  // those ids on import. A natural key would leave nothing to remap.
+  'character_armor',
+  'character_hit_point_rolls',
+  'character_sheet_adjustments',
+  'character_skill_proficiencies',
 ] as const;
 
 const allAutoIncrementTables = [
@@ -144,7 +153,7 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
       return db;
     }
 
-    it('declares AUTOINCREMENT on exactly the 30 Laravel and 20 native surrogate-key tables', () => {
+    it('declares AUTOINCREMENT on exactly the 30 Laravel and 24 native surrogate-key tables', () => {
       const db = openDb();
       const declared = db
         .selectValues(
@@ -158,12 +167,12 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
         .map(String);
 
       expect(declared).toEqual(allAutoIncrementTables);
-      // 30 surviving Laravel tables plus 20 native: 4 weapons, 8 sheet core,
-      // 6 origins, 2 class features. Counted in parts so one group shrinking
-      // while another grows cannot pass unnoticed.
-      expect(declared).toHaveLength(50);
+      // 30 surviving Laravel tables plus 24 native: 4 weapons, 8 sheet core,
+      // 6 origins, 2 class features, 4 stored sheet inputs. Counted in parts so
+      // one group shrinking while another grows cannot pass unnoticed.
+      expect(declared).toHaveLength(54);
       expect(autoIncrementTables).toHaveLength(30);
-      expect(nativeAutoIncrementTables).toHaveLength(20);
+      expect(nativeAutoIncrementTables).toHaveLength(24);
 
       const withoutAutoIncrement = db
         .selectValues(

@@ -33,6 +33,7 @@ import {
 import {
   slotExclusiveAssignmentError,
   uniqueRowIdError,
+  armorDexBonusPairError,
   weaponMasterySelectionError,
 } from '../domain/contracts/row-rules';
 
@@ -371,6 +372,19 @@ function validateCharacterRows(
         );
         if (mastery !== null) {
           throw new BackupValidationError(mastery);
+        }
+      }
+      if (table === 'character_armor') {
+        // Shared with the quarantined-image audit for the same reason: the
+        // live table's two CHECKs cannot see a row that is still JSON, and
+        // reaching the INSERT with a broken pair aborts the whole import with a
+        // raw SQLITE_CONSTRAINT_CHECK naming nothing.
+        const pairing = armorDexBonusPairError(
+          row,
+          `${label}.${table}[${index}]`,
+        );
+        if (pairing !== null) {
+          throw new BackupValidationError(pairing);
         }
       }
     }
@@ -1055,6 +1069,10 @@ interface CurrentImportMaps {
   readonly character_species: Map<number, number>;
   readonly character_species_traits: Map<number, number>;
   readonly character_background: Map<number, number>;
+  readonly character_armor: Map<number, number>;
+  readonly character_hit_point_rolls: Map<number, number>;
+  readonly character_skill_proficiencies: Map<number, number>;
+  readonly character_sheet_adjustments: Map<number, number>;
   readonly spell_loadouts: Map<number, number>;
   readonly sourceUuids: Map<number, string>;
   readonly sourceRows: Map<number, BackupRow>;
@@ -1076,6 +1094,10 @@ function importCurrentTables(
     character_species: new Map(),
     character_species_traits: new Map(),
     character_background: new Map(),
+    character_armor: new Map(),
+    character_hit_point_rolls: new Map(),
+    character_skill_proficiencies: new Map(),
+    character_sheet_adjustments: new Map(),
     spell_loadouts: new Map(),
     sourceUuids: new Map(),
     sourceRows: new Map(
@@ -1232,10 +1254,47 @@ function importCurrentTables(
       }),
     );
   }
+  // The four stored sheet inputs, on the same terms as the two groups above:
+  // by D1b none holds a template id, and `character_hit_point_rolls` holds no
+  // class-level id either, so every row travels exactly as written and only
+  // `character_id` is rewritten. The id maps are still kept, because a save
+  // point in the same document names these rows by their OLD ids.
   for (const row of document.tables.character_background) {
     maps.character_background.set(
       Number(row.id),
       insertPortableRow(db, 'character_background', row, {
+        character_id: characterId,
+      }),
+    );
+  }
+  for (const row of document.tables.character_armor) {
+    maps.character_armor.set(
+      Number(row.id),
+      insertPortableRow(db, 'character_armor', row, {
+        character_id: characterId,
+      }),
+    );
+  }
+  for (const row of document.tables.character_hit_point_rolls) {
+    maps.character_hit_point_rolls.set(
+      Number(row.id),
+      insertPortableRow(db, 'character_hit_point_rolls', row, {
+        character_id: characterId,
+      }),
+    );
+  }
+  for (const row of document.tables.character_skill_proficiencies) {
+    maps.character_skill_proficiencies.set(
+      Number(row.id),
+      insertPortableRow(db, 'character_skill_proficiencies', row, {
+        character_id: characterId,
+      }),
+    );
+  }
+  for (const row of document.tables.character_sheet_adjustments) {
+    maps.character_sheet_adjustments.set(
+      Number(row.id),
+      insertPortableRow(db, 'character_sheet_adjustments', row, {
         character_id: characterId,
       }),
     );
@@ -1319,6 +1378,12 @@ function portableSnapshots(
     character_species: new Map(current.character_species),
     character_species_traits: new Map(current.character_species_traits),
     character_background: new Map(current.character_background),
+    character_armor: new Map(current.character_armor),
+    character_hit_point_rolls: new Map(current.character_hit_point_rolls),
+    character_skill_proficiencies: new Map(
+      current.character_skill_proficiencies,
+    ),
+    character_sheet_adjustments: new Map(current.character_sheet_adjustments),
   };
   const next = Object.fromEntries(
     CHARACTER_STATE_TABLES.map((table) => [
@@ -1467,6 +1532,13 @@ function portableSnapshots(
         case 'character_species':
         case 'character_species_traits':
         case 'character_background':
+        // And the four sheet inputs, for the third time on the same terms:
+        // nothing in the catalog to resolve, no class-level id to remap, so
+        // only id and ownership are rewritten.
+        case 'character_armor':
+        case 'character_hit_point_rolls':
+        case 'character_skill_proficiencies':
+        case 'character_sheet_adjustments':
           return rowsOf(table).map((row) => ({
             ...row,
             id: ids[table].get(Number(row.id)),

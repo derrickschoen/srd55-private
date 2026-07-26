@@ -86,6 +86,31 @@ CREATE TABLE `change_log` (
 CREATE UNIQUE INDEX `change_log_character_id_sequence_unique` ON `change_log` (`character_id`,`sequence`);
 CREATE INDEX `change_log_character_id_group_id_index` ON `change_log` (`character_id`,`group_id`);
 CREATE INDEX `change_log_operation_uuid_index` ON `change_log` (`operation_uuid`);
+CREATE TABLE `character_armor` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`character_id` integer NOT NULL,
+	`slot` VARCHAR NOT NULL,
+	`name` VARCHAR NOT NULL,
+	`category` VARCHAR NOT NULL,
+	`armor_class` integer NOT NULL,
+	`dex_bonus` VARCHAR NOT NULL,
+	`dex_bonus_max` integer,
+	`strength_requirement` integer,
+	`stealth_disadvantage` TINYINT(1) DEFAULT '0' NOT NULL,
+	`notes` TEXT,
+	`created_at` DATETIME,
+	`updated_at` DATETIME,
+	FOREIGN KEY (`character_id`) REFERENCES `characters`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "character_armor_slot_check" CHECK(`slot` IN ('worn', 'shield')),
+	CONSTRAINT "character_armor_category_check" CHECK(`category` IN ('light', 'medium', 'heavy', 'shield')),
+	CONSTRAINT "character_armor_dex_bonus_check" CHECK(`dex_bonus` IN ('full', 'capped', 'none')),
+	CONSTRAINT "character_armor_dex_bonus_max_check" CHECK((`dex_bonus` = 'capped') = (`dex_bonus_max` IS NOT NULL) AND (`dex_bonus_max` IS NULL OR (typeof(`dex_bonus_max`) = 'integer' AND `dex_bonus_max` >= 0))),
+	CONSTRAINT "character_armor_shield_check" CHECK(`category` <> 'shield' OR `dex_bonus` = 'none'),
+	CONSTRAINT "character_armor_armor_class_check" CHECK(typeof(`armor_class`) = 'integer' AND `armor_class` >= 1),
+	CONSTRAINT "character_armor_strength_requirement_check" CHECK(`strength_requirement` IS NULL OR (typeof(`strength_requirement`) = 'integer' AND `strength_requirement` >= 1))
+);
+
+CREATE UNIQUE INDEX `character_armor_character_id_slot_unique` ON `character_armor` (`character_id`,`slot`);
 CREATE TABLE `character_background` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`character_id` integer NOT NULL,
@@ -124,6 +149,19 @@ CREATE TABLE `character_class_levels` (
 );
 
 CREATE UNIQUE INDEX `character_class_levels_character_id_class_definition_id_unique` ON `character_class_levels` (`character_id`,`class_definition_id`);
+CREATE TABLE `character_hit_point_rolls` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`character_id` integer NOT NULL,
+	`class_name` VARCHAR NOT NULL,
+	`class_level` integer NOT NULL,
+	`rolled_value` integer NOT NULL,
+	`created_at` DATETIME,
+	`updated_at` DATETIME,
+	FOREIGN KEY (`character_id`) REFERENCES `characters`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "character_hit_point_rolls_check" CHECK(`class_level` BETWEEN 1 AND 20 AND typeof(`rolled_value`) = 'integer' AND `rolled_value` >= 1 AND `rolled_value` <= 12)
+);
+
+CREATE UNIQUE INDEX `character_hit_point_rolls_character_id_class_name_class_level_unique` ON `character_hit_point_rolls` (`character_id`,`class_name`,`class_level`);
 CREATE TABLE `character_operations` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`character_id` integer NOT NULL,
@@ -161,6 +199,29 @@ CREATE TABLE `character_save_points` (
 	FOREIGN KEY (`character_id`) REFERENCES `characters`(`id`) ON UPDATE no action ON DELETE cascade
 );
 
+CREATE TABLE `character_sheet_adjustments` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`character_id` integer NOT NULL,
+	`armor_class_adjustment` integer DEFAULT '0' NOT NULL,
+	`armor_class_adjustment_note` VARCHAR,
+	`created_at` DATETIME,
+	`updated_at` DATETIME,
+	FOREIGN KEY (`character_id`) REFERENCES `characters`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "character_sheet_adjustments_armor_class_adjustment_check" CHECK(typeof(`armor_class_adjustment`) = 'integer' AND `armor_class_adjustment` BETWEEN -20 AND 20)
+);
+
+CREATE UNIQUE INDEX `character_sheet_adjustments_character_id_unique` ON `character_sheet_adjustments` (`character_id`);
+CREATE TABLE `character_skill_proficiencies` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`character_id` integer NOT NULL,
+	`skill` VARCHAR NOT NULL,
+	`created_at` DATETIME,
+	`updated_at` DATETIME,
+	FOREIGN KEY (`character_id`) REFERENCES `characters`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "character_skill_proficiencies_skill_check" CHECK(`skill` IN ('acrobatics', 'animal_handling', 'arcana', 'athletics', 'deception', 'history', 'insight', 'intimidation', 'investigation', 'medicine', 'nature', 'perception', 'performance', 'persuasion', 'religion', 'sleight_of_hand', 'stealth', 'survival'))
+);
+
+CREATE UNIQUE INDEX `character_skill_proficiencies_character_id_skill_unique` ON `character_skill_proficiencies` (`character_id`,`skill`);
 CREATE TABLE `character_source_instances` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`character_id` integer NOT NULL,

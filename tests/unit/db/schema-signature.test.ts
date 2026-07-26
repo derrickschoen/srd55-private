@@ -78,9 +78,10 @@ describe('pre-Drizzle database images', () => {
     const tableCount = (sql: string) =>
       [...sql.matchAll(/CREATE TABLE/g)].length;
     expect(tableCount(preDrizzleSchema)).toBe(38);
-    expect(tableCount(schema)).toBe(50);
-    // 30 surviving Laravel tables, 4 native weapon tables, 8 sheet core.
-    expect(tableCount(schema)).toBe(50);
+    expect(tableCount(schema)).toBe(54);
+    // 30 surviving Laravel tables, 4 native weapon tables, 8 sheet core,
+    // 6 origins, 2 class features, 4 stored sheet inputs.
+    expect(tableCount(schema)).toBe(54);
   });
 
   it('rejects a pre-Drizzle image at open instead of half-working', async () => {
@@ -97,11 +98,14 @@ describe('pre-Drizzle database images', () => {
     // actually short of. Both paths produce the same recoverable
     // `schema_mismatch` status, which is what the next test depends on.
     expect(boot.detail).toContain(
-      // All twenty native tables, in the order the check reports them: the four
-      // weapon tables, the eight of the sheet core, the six origins tables, and
-      // the two D19 class-feature tables. A pre-Drizzle image has none of them.
+      // All twenty-four native tables, in the order the check reports them: the
+      // four weapon tables, the eight of the sheet core, the six origins
+      // tables, the two D19 class-feature tables and the four stored sheet
+      // inputs. A pre-Drizzle image has none of them.
       'Database image is missing application tables: armor_templates, ' +
-        'background_templates, character_background, character_species, ' +
+        'background_templates, character_armor, character_background, ' +
+        'character_hit_point_rolls, character_sheet_adjustments, ' +
+        'character_skill_proficiencies, character_species, ' +
         'character_species_traits, character_weapons, class_armor_training, ' +
         'class_extra_attack_grants, class_martial_arts_dice, ' +
         'class_saving_throw_proficiencies, class_sheet_traits, ' +

@@ -1,7 +1,11 @@
 import type {
   Ability,
   AddableSourceType,
+  ArmorCategory,
+  ArmorDexBonus,
+  ArmorSlot,
   SelectionEligibility,
+  Skill,
   SlotState,
   WeaponMasteryProperty,
 } from './enums';
@@ -167,6 +171,61 @@ export interface SetWeaponMasteryCommand extends CommandBase {
   selected: boolean;
 }
 
+/**
+ * The editable body of one piece of armour — everything a template pre-fills and
+ * a user may then change.
+ *
+ * DELIBERATELY NOT PRESENT: any reference to the `armor_templates` row it was
+ * filled from (D1b), and `slot`. The slot is WHERE the row goes and travels on
+ * the command rather than in the body, so that "move my shield to the worn
+ * slot" cannot be spelled two different ways.
+ */
+export interface ArmorFields {
+  name: string;
+  category: ArmorCategory;
+  armor_class: number;
+  dex_bonus: ArmorDexBonus;
+  dex_bonus_max: number | null;
+  strength_requirement: number | null;
+  stealth_disadvantage: boolean;
+  notes: string | null;
+}
+
+/**
+ * Set (or clear) what the character has in one armour slot.
+ *
+ * `armor: null` CLEARS THE SLOT, and that is why there is no `remove_armor`:
+ * the slot is the identity, so setting it to nothing is the same intent as
+ * setting it to something and the two share an inverse.
+ */
+export interface SetArmorCommand extends CommandBase {
+  type: 'set_armor';
+  slot: ArmorSlot;
+  armor: ArmorFields | null;
+}
+
+/** Record (or clear) the die a player rolled for one level of one class. */
+export interface SetHitPointRollCommand extends CommandBase {
+  type: 'set_hit_point_roll';
+  class_name: string;
+  class_level: number;
+  /** `null` clears the roll, restoring the printed fixed value for that level. */
+  rolled_value: number | null;
+}
+
+export interface SetSkillProficiencyCommand extends CommandBase {
+  type: 'set_skill_proficiency';
+  skill: Skill;
+  proficient: boolean;
+}
+
+/** D12's escape hatch: a signed adjustment and the reason for it. */
+export interface SetArmorClassAdjustmentCommand extends CommandBase {
+  type: 'set_armor_class_adjustment';
+  value: number;
+  note: string | null;
+}
+
 export interface RestoreSnapshotCommand extends CommandBase {
   type: 'restore_snapshot';
   snapshot: CharacterSnapshot | JsonObject;
@@ -186,6 +245,10 @@ export type CharacterCommandPayload =
   | UpdateWeaponCommand
   | RemoveWeaponCommand
   | SetWeaponMasteryCommand
+  | SetArmorCommand
+  | SetHitPointRollCommand
+  | SetSkillProficiencyCommand
+  | SetArmorClassAdjustmentCommand
   | RestoreSnapshotCommand;
 
 export interface CharacterCommandRequest {

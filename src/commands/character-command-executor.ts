@@ -372,12 +372,21 @@ export class CharacterCommandExecutor {
       case 'update_weapon':
       case 'remove_weapon':
       case 'set_weapon_mastery':
-        // PROVISIONAL AND NEVER STORED. These four resolve their inverse after
-        // apply (see `commit`), because `character_weapons` is not a snapshot
-        // table and `add_weapon`'s inverse needs the assigned row id. Echoing
-        // the payload rather than guessing a plausible inverse means that if
-        // the resolution ever stops happening, undo visibly repeats the action
-        // instead of quietly doing something almost right.
+      // The four sheet-input writers join them: each captures the value it
+      // displaced during `apply()`, which `prepareInverse` runs too early to
+      // see. `character_armor` and the other three ARE snapshot tables, unlike
+      // `character_weapons` — the explicit inverse is kept anyway because it is
+      // strictly more precise than a whole-character snapshot, and undoing an
+      // armour change must not disturb a spell selection made in between.
+      case 'set_armor':
+      case 'set_hit_point_roll':
+      case 'set_skill_proficiency':
+      case 'set_armor_class_adjustment':
+        // PROVISIONAL AND NEVER STORED. These resolve their inverse after
+        // apply (see `commit`). Echoing the payload rather than guessing a
+        // plausible inverse means that if the resolution ever stops happening,
+        // undo visibly repeats the action instead of quietly doing something
+        // almost right.
         return payload;
       case 'update_source_config':
       case 'add_source':

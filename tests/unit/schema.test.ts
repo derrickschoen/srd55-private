@@ -294,6 +294,34 @@ const expectedNativeColumns: Record<string, string[]> = {
     'description', 'effect_kind', 'effect_attack_count', 'effect_weapon_scope',
     'created_at', 'updated_at',
   ],
+  // The four STORED SHEET INPUTS, transcribed from the declarations in
+  // `db/schema/sheet-inputs.ts` for the same reason every list here is
+  // transcribed: an expectation produced from `PRAGMA table_info` reprints our
+  // own output and cannot fail.
+  //
+  // `character_armor`'s fillable columns are deliberately the SAME NAMES as
+  // `armor_templates`' above, because picking a template is a column-wise copy
+  // (D1b) — plus `slot`, which is where the user put it rather than what it is,
+  // and `notes`.
+  character_armor: [
+    'id', 'character_id', 'slot', 'name', 'category', 'armor_class',
+    'dex_bonus', 'dex_bonus_max', 'strength_requirement',
+    'stealth_disadvantage', 'notes', 'created_at', 'updated_at',
+  ],
+  character_hit_point_rolls: [
+    'id', 'character_id', 'class_name', 'class_level', 'rolled_value',
+    'created_at', 'updated_at',
+  ],
+  // NO `proficient` COLUMN, and its absence is the assertion: presence of the
+  // row IS the value, so a `proficient = 0` row cannot exist to mean the same
+  // thing as no row.
+  character_skill_proficiencies: [
+    'id', 'character_id', 'skill', 'created_at', 'updated_at',
+  ],
+  character_sheet_adjustments: [
+    'id', 'character_id', 'armor_class_adjustment',
+    'armor_class_adjustment_note', 'created_at', 'updated_at',
+  ],
 };
 
 const expectedNativeNotNull: Record<string, string[]> = {
@@ -356,6 +384,27 @@ const expectedNativeNotNull: Record<string, string[]> = {
   ],
   class_skill_options: ['id', 'class_definition_id', 'skill'],
   class_weapon_proficiencies: ['id', 'class_definition_id', 'category'],
+  // The four stored sheet inputs. `dex_bonus_max` and `strength_requirement`
+  // are nullable on `character_armor` for exactly the reason they are nullable
+  // on `armor_templates` — D6b limb 2, the source prints no value — and
+  // `character_armor.notes` and `character_sheet_adjustments`
+  // `.armor_class_adjustment_note` are nullable because a user may record
+  // armour or an adjustment without explaining it.
+  //
+  // `character_sheet_adjustments.armor_class_adjustment` IS NOT NULL with a
+  // default of 0, and that pairing is what makes an absent ROW and a stored
+  // zero mean the same thing rather than two different things.
+  character_armor: [
+    'id', 'character_id', 'slot', 'name', 'category', 'armor_class',
+    'dex_bonus', 'stealth_disadvantage',
+  ],
+  character_hit_point_rolls: [
+    'id', 'character_id', 'class_name', 'class_level', 'rolled_value',
+  ],
+  character_skill_proficiencies: ['id', 'character_id', 'skill'],
+  character_sheet_adjustments: [
+    'id', 'character_id', 'armor_class_adjustment',
+  ],
   // D19, and the ABSENCE of the three `effect_*` columns from both lists is the
   // assertion that matters: `description` is NOT NULL on both tables and every
   // effect column is nullable on both, which IS the D12 shape — a feature is
@@ -494,6 +543,20 @@ const expectedNamedIndexes: Record<string, string> = {
     'character_species_traits:character_id',
   character_background_character_id_unique:
     'character_background:character_id:unique',
+  // --- THE FOUR STORED SHEET INPUTS ---------------------------------------
+  // Every one is UNIQUE and there is no plain index beside any of them: each
+  // unique index already serves the `WHERE character_id = ?` read, and the
+  // uniqueness is a cardinality claim the derivation depends on — one row per
+  // slot, one roll per (class, level), one row per skill, one adjustment per
+  // character.
+  character_armor_character_id_slot_unique:
+    'character_armor:character_id,slot:unique',
+  character_hit_point_rolls_character_id_class_name_class_level_unique:
+    'character_hit_point_rolls:character_id,class_name,class_level:unique',
+  character_skill_proficiencies_character_id_skill_unique:
+    'character_skill_proficiencies:character_id,skill:unique',
+  character_sheet_adjustments_character_id_unique:
+    'character_sheet_adjustments:character_id:unique',
   // --- SHEET CORE (D11/D12) -----------------------------------------------
   // The set tables are keyed on (class, member) so a class cannot be given the
   // same saving throw, skill, armour category or weapon category twice; the two
@@ -620,6 +683,10 @@ const expectedUniqueGroups: Record<string, string[]> = {
   background_templates: ['content_key', 'name,rules_edition'],
   character_species: ['character_id'],
   character_background: ['character_id'],
+  character_armor: ['character_id,slot'],
+  character_hit_point_rolls: ['character_id,class_name,class_level'],
+  character_skill_proficiencies: ['character_id,skill'],
+  character_sheet_adjustments: ['character_id'],
   // Sheet core. The set tables are keyed on (class, member) so a class cannot
   // hold the same saving throw, skill or category twice; the two progressions
   // on (class, level); and `class_sheet_traits` on the class alone, since it is
@@ -793,6 +860,14 @@ const expectedForeignKeys: Record<string, string[]> = {
   character_species: ['character_id->characters.id|CASCADE'],
   character_species_traits: ['character_id->characters.id|CASCADE'],
   character_background: ['character_id->characters.id|CASCADE'],
+  // ONE EDGE EACH, and `character_hit_point_rolls` having only this one is the
+  // assertion that matters: it holds a class NAME and deliberately NOT a
+  // foreign key to `character_class_levels`, so deleting a class cannot cascade
+  // away a die the player physically rolled.
+  character_armor: ['character_id->characters.id|CASCADE'],
+  character_hit_point_rolls: ['character_id->characters.id|CASCADE'],
+  character_skill_proficiencies: ['character_id->characters.id|CASCADE'],
+  character_sheet_adjustments: ['character_id->characters.id|CASCADE'],
   warning_acknowledgements: ['character_id->characters.id|CASCADE'],
   wizard_spellbook_entries: [
     'character_id->characters.id|CASCADE',
@@ -863,7 +938,7 @@ afterAll(() => {
 // rather than assumed.
 for (const [sourceLabel, schemaSql] of schemaSources) {
 describe(`complete final migration schema (${sourceLabel})`, () => {
-  it('creates the exact 30-table Laravel inventory plus the twenty named native tables, and every column of both', () => {
+  it('creates the exact 30-table Laravel inventory plus the twenty-four named native tables, and every column of both', () => {
     const db = openDb(schemaSql);
     const tables = db.selectValues(
       `SELECT name
@@ -878,10 +953,11 @@ describe(`complete final migration schema (${sourceLabel})`, () => {
     //
     // Both halves are counted, because a single total would let one grow while
     // the other shrank: 30 Laravel tables (38 less the eight infrastructure
-    // ones that were pruned) and 10 native — 4 weapons plus 6 origins.
+    // ones that were pruned) and 24 native — 4 weapons, 6 origins, 8 sheet
+    // core, 2 class features and the 4 stored sheet inputs.
     expect(tables).toEqual(Object.keys(allExpectedColumns).sort());
     expect(Object.keys(expectedColumns)).toHaveLength(30);
-    expect(Object.keys(expectedNativeColumns)).toHaveLength(20);
+    expect(Object.keys(expectedNativeColumns)).toHaveLength(24);
     // ones that were pruned) and 12 native — the four weapon tables plus the
     // eight of the sheet core.
     expect(tables).toEqual(Object.keys(allExpectedColumns).sort());
@@ -1080,15 +1156,17 @@ describe('the pruned column-metadata hash is derived from Laravel, not from us',
    * avoid. They are not thereby unchecked — `expectedNativeColumns` and
    * `expectedNativeNotNull` hold them to hand-written expectations transcribed
    * from the design, and the exclusion list is asserted to be exactly those
-   * ten, so an eleventh native table cannot slip past unhashed AND unexpected.
+   * twenty-four, so a twenty-fifth native table cannot slip past unhashed AND
+   * unexpected.
    */
-  it('and the generated artifact matches it, skipping only the twenty native tables', () => {
-    // 4 weapons + 8 sheet core + 6 origins + 2 class features. Excluded because
+  it('and the generated artifact matches it, skipping only the twenty-four native tables', () => {
+    // 4 weapons + 8 sheet core + 6 origins + 2 class features + 4 sheet inputs.
+    // Excluded because
     // they reproduce no Laravel migration; the constant on the right is
     // Laravel-derived, and folding them in would force it to be recomputed from
     // our own artifact.
     const nativeTables = Object.keys(expectedNativeColumns);
-    expect(nativeTables).toHaveLength(20);
+    expect(nativeTables).toHaveLength(24);
     for (const [, schemaSql] of schemaSources) {
       expect(metadataHash(schemaSql, nativeTables)).toBe(
         laravelColumnMetadataHash,
