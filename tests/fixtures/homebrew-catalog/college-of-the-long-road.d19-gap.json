@@ -1,0 +1,54 @@
+{
+  "_whatThisIs": "A hand-written homebrew Bard subclass that grants Extra Attack at subclass level 6 — the D19 shape. It is NOT in the catalog format, because the catalog format cannot express it. See README.md in this directory, and tests/integration/homebrew/homebrew-catalog-fixture.test.ts, which proves each blocking claim rather than asserting it.",
+  "_status": "NOT IMPORTABLE TODAY. Shipped to show the gap, not to hide it.",
+
+  "subclass": {
+    "parentClass": "Bard",
+    "identityKey": "longroad.homebrew:college-of-the-long-road",
+    "name": "College of the Long Road",
+    "sourceBooks": ["The Long Road Companion (homebrew)"],
+    "flavour": "Bards of the Long Road learn their trade between towns rather than in them. They are welcome at a fire because they are useful at one, and their songs are mostly about walking.",
+    "features": [
+      {
+        "classLevel": 3,
+        "name": "Marching Song",
+        "kind": "text",
+        "text": "You always have Roadmender's Cadence prepared, and it does not count against the number of spells you can prepare."
+      },
+      {
+        "classLevel": 3,
+        "name": "Road Trained",
+        "kind": "text",
+        "text": "You gain proficiency with Martial weapons and with Medium armour."
+      },
+      {
+        "classLevel": 6,
+        "name": "Extra Attack",
+        "kind": "extra_attack_grant",
+        "_theD19Datum": {
+          "grantSource": "subclass",
+          "grantSourceKey": "longroad.homebrew:college-of-the-long-road",
+          "prerequisiteLevelKind": "class_level",
+          "prerequisiteLevel": 6,
+          "attackCount": 2,
+          "weaponScope": null,
+          "stacks": false
+        },
+        "text": "Your road-worn footwork lets the Attack action carry two strikes for you rather than one."
+      },
+      {
+        "classLevel": 14,
+        "name": "Last Mile",
+        "kind": "text",
+        "text": "When you roll initiative and have no uses of Bardic Inspiration left, you regain one."
+      }
+    ]
+  },
+
+  "_whyItCannotLand": [
+    "catalog.import is the only content-import RPC in the whole surface, and its record type is a SPELL: identityKey, versionKey, name, edition, level 0-9, school, castingTime, range, components, duration, concentration, ritual, attackModes, saveAbilities, spellLists, sourceBooks. There is no field this subclass fits in.",
+    "class_definitions and subclass_definitions are written only by ensureBundledClassContent in src/rules/class-progression-lookup.ts. Nothing user-supplied reaches them.",
+    "class_extra_attack_grants is keyed on (class_definition_id, class_level) and has no column naming a subclass, an invocation or a feature. Even with an importer, the row above has nowhere to go — the grant would have to be attributed to the Bard CLASS at level 6, which is a different and wrong rule.",
+    "weaponScope is null here, but the column to hold it does not exist either. D19 records that Thirsting Blade grants Extra Attack for the pact weapon ONLY, so the field is load-bearing for the SRD content the project could legitimately bundle, not just for homebrew."
+  ]
+}
