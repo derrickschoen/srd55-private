@@ -21,6 +21,8 @@
     "vitest.config.ts",
     "playwright.config.ts",
     "src/vite-env.d.ts",
+    "db",
+    "scripts",
     "tests"
   ]
 }

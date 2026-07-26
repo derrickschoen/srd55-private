@@ -3,6 +3,11 @@ import { normalizeCatalogName } from '../catalog/catalog-normalize';
 import { assertSourceRepeatable } from '../commands/add-source';
 import type { DatabaseContext } from '../db/database';
 import type { AddableSourceType } from '../domain/enums';
+import {
+  SHARE_TABLES,
+  SOURCE_DEFINITION_TABLE,
+  type AnyTableName,
+} from '../domain/contracts/tables';
 import { GrantRuleSlotGenerator } from '../grants/grant-rule-slot-generator';
 import { SpellSelectionEligibility } from '../eligibility/spell-selection-eligibility';
 import {
@@ -51,11 +56,37 @@ export interface SharePreview {
 
 type Row = Readonly<Record<string, unknown>>;
 
-const SOURCE_TABLES: Readonly<Record<ShareSource['type'], string>> = {
-  feat: 'feat_definitions',
-  species: 'species_definitions',
-  background: 'background_definitions',
-};
+/**
+ * Kept as a MAP, because "which table does `'species'` mean" is a lookup, not
+ * a filter — a role-filtered union cannot answer it. What the derivation adds
+ * is that the map must be exhaustive over the source-type union and may only
+ * name a table the schema declares with the `catalog_source` role. It was an
+ * unconstrained `Record<..., string>` before.
+ *
+ * `satisfies` rather than a type annotation: an annotation of
+ * `Record<ShareSource['type'], string>` performs the exhaustiveness check and
+ * then WIDENS the values back to `string`, throwing away the narrowing
+ * `SOURCE_DEFINITION_TABLE` established. This keeps both.
+ */
+const SOURCE_TABLES = SOURCE_DEFINITION_TABLE satisfies Readonly<
+  Record<ShareSource['type'], AnyTableName>
+>;
+
+/**
+ * THE SHARE PAYLOAD'S TABLE NAMES COME FROM THE CLASSIFICATION.
+ *
+ * Every table name in this module's SQL is interpolated from `SHARE_TABLES`
+ * (character-owned rows) or `SOURCE_TABLES` (catalog lookups) — none is a bare
+ * literal. That is what makes `TableScopes.share` a contract rather than a
+ * comment: marking a table `share: true` without handling it here does not
+ * compile, and naming a table here that is not share-scoped does not compile
+ * either.
+ *
+ * The catalog tables this module reads (`spell_versions`, `spell_identities`,
+ * `class_definitions`, `subclass_definitions`) are NOT share-scoped and are
+ * deliberately not routed through `SHARE_TABLES`: they are the recipient's own
+ * catalog, resolved by content key, not rows that travel with the character.
+ */
 
 function timestamp(): string {
   return new Date().toISOString();
@@ -165,18 +196,18 @@ function spellRows(
      FROM spell_versions AS version
      WHERE version.id IN (
        SELECT current_spell_version_id
-       FROM spell_selection_slots
+       FROM ${SHARE_TABLES.spell_selection_slots}
        WHERE character_id = ? AND current_spell_version_id IS NOT NULL
        UNION
-       SELECT spell_version_id FROM wizard_spellbook_entries
+       SELECT spell_version_id FROM ${SHARE_TABLES.wizard_spellbook_entries}
        WHERE character_id = ?
        UNION
-       SELECT spell_version_id FROM character_spell_preferences
+       SELECT spell_version_id FROM ${SHARE_TABLES.character_spell_preferences}
        WHERE character_id = ?
        UNION
        SELECT entry.spell_version_id
-       FROM spell_loadout_entries AS entry
-       INNER JOIN spell_loadouts AS loadout
+       FROM ${SHARE_TABLES.spell_loadout_entries} AS entry
+       INNER JOIN ${SHARE_TABLES.spell_loadouts} AS loadout
          ON loadout.id = entry.spell_loadout_id
        WHERE loadout.character_id = ?
      )`,
@@ -198,7 +229,7 @@ export function exportCharacterShare(
     throw new Error(`Character ${characterId} does not exist.`);
   }
   const allSources = db.all<Row>(
-    `SELECT * FROM character_source_instances
+    `SELECT * FROM ${SHARE_TABLES.character_source_instances}
      WHERE character_id = ? AND state = 'active'
      ORDER BY acquired_at_character_level, id`,
     [characterId],
@@ -207,8 +238,8 @@ export function exportCharacterShare(
     `SELECT level.*, source.id AS source_instance_id,
             source.config AS source_config,
             source.acquired_at_character_level
-     FROM character_class_levels AS level
-     INNER JOIN character_source_instances AS source
+     FROM ${SHARE_TABLES.character_class_levels} AS level
+     INNER JOIN ${SHARE_TABLES.character_source_instances} AS source
        ON source.character_id = level.character_id
       AND source.source_type = 'class'
       AND source.source_definition_id = level.class_definition_id
@@ -302,7 +333,7 @@ export function exportCharacterShare(
 
   const selections = db
     .all<Row>(
-      `SELECT * FROM spell_selection_slots
+      `SELECT * FROM ${SHARE_TABLES.spell_selection_slots}
        WHERE character_id = ? AND current_spell_version_id IS NOT NULL
          AND state IN ('active', 'kept_override')
        ORDER BY source_instance_id, rule_key, ordinal, id`,
@@ -335,7 +366,7 @@ export function exportCharacterShare(
 
   const spellbook = db.all<Row>(
     `SELECT version.content_key
-     FROM wizard_spellbook_entries AS entry
+     FROM ${SHARE_TABLES.wizard_spellbook_entries} AS entry
      INNER JOIN spell_versions AS version
        ON version.id = entry.spell_version_id
      WHERE entry.character_id = ?
@@ -344,7 +375,7 @@ export function exportCharacterShare(
   ).map((row) => String(row.content_key));
   const preferences = db.all<Row>(
     `SELECT version.content_key, preference.favourite
-     FROM character_spell_preferences AS preference
+     FROM ${SHARE_TABLES.character_spell_preferences} AS preference
      INNER JOIN spell_versions AS version
        ON version.id = preference.spell_version_id
      WHERE preference.character_id = ?
@@ -356,7 +387,7 @@ export function exportCharacterShare(
   }));
   const overrides = db.all<Row>(
     `SELECT rule_key, value
-     FROM character_rule_overrides
+     FROM ${SHARE_TABLES.character_rule_overrides}
      WHERE character_id = ?
      ORDER BY rule_key`,
     [characterId],
@@ -374,7 +405,7 @@ export function exportCharacterShare(
     options.acknowledgements === true
       ? db.all<Row>(
           `SELECT warning_fingerprint
-           FROM warning_acknowledgements
+           FROM ${SHARE_TABLES.warning_acknowledgements}
            WHERE character_id = ? AND invalidated_at IS NULL
            ORDER BY warning_fingerprint`,
           [characterId],
@@ -383,14 +414,14 @@ export function exportCharacterShare(
   const loadouts =
     options.loadouts === true
       ? db.all<Row>(
-          `SELECT id, name FROM spell_loadouts
+          `SELECT id, name FROM ${SHARE_TABLES.spell_loadouts}
            WHERE character_id = ? ORDER BY id`,
           [characterId],
         ).map((loadout) => ({
           name: String(loadout.name),
           entries: db.all<Row>(
             `SELECT version.content_key, entry.role
-             FROM spell_loadout_entries AS entry
+             FROM ${SHARE_TABLES.spell_loadout_entries} AS entry
              INNER JOIN spell_versions AS version
                ON version.id = entry.spell_version_id
              WHERE entry.spell_loadout_id = ?
@@ -635,7 +666,7 @@ function insertSource(
 ): number {
   const now = timestamp();
   return db.exec(
-    `INSERT INTO character_source_instances (
+    `INSERT INTO ${SHARE_TABLES.character_source_instances} (
        character_id, instance_uuid, source_type, source_definition_id,
        display_name, config, acquired_at_character_level, state,
        created_at, updated_at
@@ -793,7 +824,7 @@ export function importCharacterShare(
         );
       }
       db.exec(
-        `INSERT INTO character_class_levels (
+        `INSERT INTO ${SHARE_TABLES.character_class_levels} (
            character_id, class_definition_id, subclass_definition_id,
            level, is_starting_class, spellcasting_ability_override,
            created_at, updated_at
@@ -874,7 +905,7 @@ export function importCharacterShare(
 
     const sources = db.all<Row>(
       `SELECT id, parent_source_instance_id
-       FROM character_source_instances WHERE character_id = ?`,
+       FROM ${SHARE_TABLES.character_source_instances} WHERE character_id = ?`,
       [characterId],
     );
     const children = new Map<number, number[]>();
@@ -922,7 +953,7 @@ export function importCharacterShare(
       }
       const sourceIds = [...descendants(roots)];
       const slots = db.all<Row>(
-        `SELECT id FROM spell_selection_slots
+        `SELECT id FROM ${SHARE_TABLES.spell_selection_slots}
          WHERE character_id = ? AND rule_key = ? AND ordinal = ?
            AND source_instance_id IN (${sourceIds.map(() => '?').join(', ')})
          ORDER BY id`,
@@ -950,7 +981,7 @@ export function importCharacterShare(
       }
       const slotId = Number((slots[0] as Row).id);
       db.exec(
-        `UPDATE spell_selection_slots
+        `UPDATE ${SHARE_TABLES.spell_selection_slots}
          SET current_spell_version_id = ?,
              state = ?,
              override_note = ?,
@@ -976,7 +1007,7 @@ export function importCharacterShare(
 
     for (const key of document.spellbook) {
       db.exec(
-        `INSERT OR IGNORE INTO wizard_spellbook_entries (
+        `INSERT OR IGNORE INTO ${SHARE_TABLES.wizard_spellbook_entries} (
            character_id, spell_version_id, created_at, updated_at
          ) VALUES (?, ?, ?, ?)`,
         [characterId, resolveSpell(key), now, now],
@@ -984,7 +1015,7 @@ export function importCharacterShare(
     }
     for (const preference of document.preferences) {
       db.exec(
-        `INSERT INTO character_spell_preferences (
+        `INSERT INTO ${SHARE_TABLES.character_spell_preferences} (
            character_id, spell_version_id, favourite, created_at, updated_at
          ) VALUES (?, ?, ?, ?, ?)`,
         [
@@ -998,7 +1029,7 @@ export function importCharacterShare(
     }
     for (const override of document.overrides) {
       db.exec(
-        `INSERT INTO character_rule_overrides (
+        `INSERT INTO ${SHARE_TABLES.character_rule_overrides} (
            character_id, rule_key, value, created_at, updated_at
          ) VALUES (?, ?, ?, ?, ?)`,
         [
@@ -1012,7 +1043,7 @@ export function importCharacterShare(
     }
     for (const acknowledgement of document.acknowledgements ?? []) {
       db.exec(
-        `INSERT INTO warning_acknowledgements (
+        `INSERT INTO ${SHARE_TABLES.warning_acknowledgements} (
            character_id, warning_fingerprint, created_at, updated_at
          ) VALUES (?, ?, ?, ?)`,
         [characterId, acknowledgement.warning, now, now],
@@ -1020,14 +1051,14 @@ export function importCharacterShare(
     }
     for (const loadout of document.loadouts ?? []) {
       const loadoutId = db.exec(
-        `INSERT INTO spell_loadouts (
+        `INSERT INTO ${SHARE_TABLES.spell_loadouts} (
            character_id, name, created_at, updated_at
          ) VALUES (?, ?, ?, ?)`,
         [characterId, loadout.name, now, now],
       ).lastInsertId;
       for (const entry of loadout.entries) {
         db.exec(
-          `INSERT INTO spell_loadout_entries (
+          `INSERT INTO ${SHARE_TABLES.spell_loadout_entries} (
              spell_loadout_id, spell_version_id, role,
              created_at, updated_at
            ) VALUES (?, ?, ?, ?, ?)`,

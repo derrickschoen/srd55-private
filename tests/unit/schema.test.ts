@@ -4,7 +4,7 @@ import sqlite3InitModule, {
 } from '@sqlite.org/sqlite-wasm';
 import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import schema from '../../src/db/schema.sql?raw';
+import { schemaSources } from '../helpers/schema-sources';
 
 type SqlRow = Record<string, string | number | bigint | null>;
 
@@ -455,10 +455,10 @@ const expectedForeignKeys: Record<string, string[]> = {
 let sqlite3: Sqlite3Static;
 const openDatabases: Database[] = [];
 
-function openDb(): Database {
+function openDb(schemaSql: string): Database {
   const db = new sqlite3.oo1.DB(':memory:', 'c');
   openDatabases.push(db);
-  db.exec(schema);
+  db.exec(schemaSql);
   return db;
 }
 
@@ -509,9 +509,14 @@ afterAll(() => {
   }
 });
 
-describe('complete final migration schema', () => {
+// Every expectation above is transcribed from the Laravel migrations and is
+// independent of how the artifact is produced. Running the SAME expectations
+// against each artifact is what makes the generated schema's parity provable
+// rather than assumed.
+for (const [sourceLabel, schemaSql] of schemaSources) {
+describe(`complete final migration schema (${sourceLabel})`, () => {
   it('creates the exact 38-table final inventory and every final column', () => {
-    const db = openDb();
+    const db = openDb(schemaSql);
     const tables = db.selectValues(
       `SELECT name
        FROM sqlite_schema
@@ -557,7 +562,7 @@ describe('complete final migration schema', () => {
   });
 
   it('materializes every named index, unique key, and migrated default', () => {
-    const db = openDb();
+    const db = openDb(schemaSql);
     const actualNamedIndexes: Record<string, string> = {};
     for (const index of rows(
       db,
@@ -594,7 +599,7 @@ describe('complete final migration schema', () => {
   });
 
   it('declares every migrated foreign key with its composite shape and action', () => {
-    const db = openDb();
+    const db = openDb(schemaSql);
     for (const table of Object.keys(expectedColumns)) {
       expect(foreignKeys(db, table), `foreign keys for ${table}`).toEqual(
         [...(expectedForeignKeys[table] ?? [])].sort(),
@@ -603,7 +608,7 @@ describe('complete final migration schema', () => {
   });
 
   it('persists SET NULL and CASCADE effects and rejects duplicate operations', () => {
-    const db = openDb();
+    const db = openDb(schemaSql);
     db.exec(`
       INSERT INTO characters (name) VALUES ('Schema Character');
       INSERT INTO character_source_instances
@@ -641,3 +646,4 @@ describe('complete final migration schema', () => {
     expect(db.selectValue('SELECT count(*) FROM character_operations')).toBe(0);
   });
 });
+}
