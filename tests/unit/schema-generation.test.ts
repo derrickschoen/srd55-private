@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import checkedIn from '../../src/db/schema.sql?raw';
-import { composeSchemaSql, SCHEMA_NOTES } from '../../scripts/compose-schema';
+import {
+  composePrelude,
+  composeSchemaSql,
+  SCHEMA_NOTES,
+} from '../../scripts/compose-schema';
 
 /**
  * A GENERATION-FRESHNESS DIFF — explicitly NOT a Laravel parity check.
@@ -82,6 +86,39 @@ describe('schema rationale notes', () => {
       // is followed by exactly one blank line before the first statement.
       expect(sql).toContain('PRAGMA foreign_keys = ON;\n\nCREATE TABLE');
     }
+  });
+
+  /**
+   * The test above can only exercise the branch `SCHEMA_NOTES` happens to be in,
+   * and it is empty today — so the note-EMITTING half would be dormant until the
+   * day someone adds a note, which is the day the guard needs to already work.
+   * `composePrelude` takes the list as a parameter so both branches run now.
+   */
+  it('wraps a note into comment lines that reconstruct it exactly', () => {
+    // Long enough to force several wraps; the expectation below is derived from
+    // this literal, never from the composer's output.
+    const note =
+      'A rationale that lives only inside a generated file is a rationale the ' +
+      'next regeneration silently drops, so the composer has to carry it.';
+    const lines = composePrelude([note]).split('\n');
+    const pragma = lines.indexOf('PRAGMA foreign_keys = ON;');
+    expect(pragma).toBeGreaterThan(-1);
+
+    // The blank line travels with the note, so exactly one separates them.
+    expect(lines[pragma + 1]).toBe('');
+    const commentLines = lines.slice(pragma + 2);
+    expect(commentLines.length).toBeGreaterThan(1);
+    for (const line of commentLines) {
+      expect(line.startsWith('-- ')).toBe(true);
+      expect(line.length).toBeLessThanOrEqual(78);
+    }
+    // Every word survives, in order, with nothing invented or dropped.
+    expect(commentLines.map((line) => line.slice(3)).join(' ')).toBe(note);
+  });
+
+  it('leaves no comment or blank line behind when the note list is empty', () => {
+    const prelude = composePrelude([]);
+    expect(prelude.endsWith('PRAGMA foreign_keys = ON;')).toBe(true);
   });
 
   it('marks the artifact as generated so it is not hand-edited', async () => {

@@ -20,9 +20,8 @@ The Worker RPC methods are `backup.exportDatabase` and
 
 `sqlite` is the complete SQLite file, including the catalog, every character,
 indexes, triggers, user-authored catalog rows, tombstones, history, and SQLite
-sequence state. This envelope is intended
-for application/API transport; it is not JSON because JSON has no byte-array
-type.
+sequence state. This envelope is intended for application/API transport; it is
+not JSON because JSON has no byte-array type.
 
 Before the live OPFS file is closed, import deserializes a copy in memory and
 checks SQLite integrity, foreign keys, every required table and trigger, and the
