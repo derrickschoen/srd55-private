@@ -1,5 +1,87 @@
 # Binding scope decisions
 
+## F8 — 223 columns are degraded to `z.any()` to protect a goal D7 retired (measured 2026-07-26)
+
+Investigated in response to the owner asking what a "codec" is and whether
+Drizzle and Zod should have made it unnecessary. The answer turned up the
+largest available lever in the type story.
+
+### The three layers, and where each actually runs
+
+| layer | runs | reach (measured) |
+|---|---|---|
+| Drizzle | BUILD-TIME ONLY — a vite plugin fails the build if it reaches runtime | authors `schema.sql`, provides TS types |
+| Zod row contracts (`rows.ts`) | untrusted-bytes boundaries | **6 files** — backup import/export, candidate audit, seed parsing |
+| Codecs (`codecs.ts`) | every query | **26 files** |
+
+So the codec is NOT redundant with Drizzle: Drizzle is not there at runtime.
+And it is not redundant with the Zod contracts either — different boundary.
+
+**But two of them describe the same columns twice.** `spell_versions.level` is
+described by `sqlInteger(row,'level')` in a codec AND by a Zod entry in
+`rows.ts`. Two hand-written sources of truth for one column, free to drift.
+`db/schema/columns.ts` states the intent plainly: *"Runtime decoding is INTENDED
+to become Zod's job at the query boundaries. That does not exist yet."*
+
+### Why drizzle-zod degrades 223 of 332 columns
+
+Every text-ish column is a Drizzle `customType` carrying only
+`dataType: () => 'VARCHAR'`, with `toDriver`/`fromDriver` deliberately absent.
+drizzle-zod builds a schema by inspecting the column; a customType tells it
+nothing about the data, so it emits `z.any()`.
+
+**Why those customTypes exist:** to reproduce Laravel's declared type strings —
+`VARCHAR`, `DATETIME`, `TINYINT(1)` — so the Laravel-derived metadata hash would
+not move. `db/schema/columns.ts` says so in its opening paragraph.
+
+**That goal is retired.** D7: Laravel schema fidelity is NOT a goal; keep only
+the rule fixtures. So 223 columns cannot describe themselves in order to protect
+an oracle the owner has already released. Switching them to native `text()` /
+`integer()` would let drizzle-zod produce real schemas for most.
+
+Cost, stated honestly: it moves the metadata hash. D7 sanctions dropping the
+schema-metadata parity, and D9 demonstrates how to retire such an oracle
+honestly — re-derive from the frozen fixture, never regenerate from our own
+output. 277 Laravel-style declared types remain in the generated schema today.
+
+### Did the rewrite describe the DOMAIN? Half
+
+**The schema does:** 50 relation blocks, branded ids, 25 enums, 71 CHECKs.
+
+**The types do not.** `SpellVersionRow` (`src/domain/models.ts:41`) is
+table-shaped: `school: string`, `level: number`, `provenance: string`,
+`casting_time | action_type | range | duration | upcast_type: string | null`,
+and `spell_identity_id: number` — a bare unbranded number where a
+`SpellIdentityId` brand already exists. It answers "what columns does
+`spell_versions` have", not "what is a spell". D6d prescribed the fix and it was
+applied elsewhere, not here.
+
+### Tightening, and THE TRAP that governs all of it
+
+**A closed enum is a data-loss bug for homebrew.** Making `school` a
+`z.enum([...8 SRD schools])` rejects an imported homebrew spell whose school is
+"Chronomancy" — the exact over-strictness failure D13 spent its effort avoiding.
+This project has already solved that shape twice: D12 (bounded mechanical kinds
+plus free text) and Q4 (known weapon toggles plus free text). Same answer.
+
+- **CLOSE** where the SRD closes the set and homebrew will not extend it:
+  `level` → 0..9 (the CHECK already enforces it; only the TYPE says `number`),
+  `provenance` → enum, and brand `spell_identity_id`.
+- **OPEN** — known values recognised, unknown preserved: `school`,
+  `action_type`, `upcast_type`. There is no `spellSchools` enum today; verified.
+- **VALUE OBJECTS**: `casting_time`, `range`, `duration` are free strings holding
+  structured data ("60 feet", "Concentration, up to 1 minute"). Parse with
+  fallback — structured when recognised, raw retained always. D6's "a value
+  object would absorb it", and what would let a sheet sort by range.
+- **STRUCTURAL**, still outstanding from D6d: replace the three nullable
+  `spell_*` columns with one optional relation, non-null inside.
+
+**Recommended first move:** drop the Laravel declared-type mimicry. It is the
+thing preventing 223 columns from describing themselves, and it is protecting a
+goal nobody holds.
+
+---
+
 ## D23 — Q10 closed: a subclass can be imported, and a real sweep bug was found doing it (2026-07-26)
 
 `main` a17e4e1. Verified by me: **1467 vitest / 103 files, build exit 0,
