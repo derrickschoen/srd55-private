@@ -1,8 +1,12 @@
 import type { CharacterCommandPayload } from '../domain/command-contracts';
 import {
   abilities,
+  armorCategories,
+  armorDexBonuses,
+  armorSlots,
   isEnumValue,
   selectionEligibilities,
+  skills,
   slotStates,
   weaponMasteryProperties,
 } from '../domain/enums';
@@ -10,6 +14,12 @@ import {
   WEAPON_RANGE_MAX_FEET,
   WEAPON_TEXT_LIMITS,
 } from '../domain/weapon-limits';
+import {
+  SHEET_ADJUSTMENT_BOUNDS,
+  SHEET_ARMOR_MAX,
+  SHEET_ROLL_BOUNDS,
+  SHEET_TEXT_LIMITS,
+} from '../domain/sheet-limits';
 import { canonicalizeJson } from './canonical-json';
 
 type UnknownRecord = Record<string, unknown>;
@@ -27,8 +37,25 @@ const commandTypes = [
   'update_weapon',
   'remove_weapon',
   'set_weapon_mastery',
+  'set_armor',
+  'set_hit_point_roll',
+  'set_skill_proficiency',
+  'set_armor_class_adjustment',
   'restore_snapshot',
 ] as const;
+
+/**
+ * The longest command type, DERIVED.
+ *
+ * `type` was bounded by a hand-written `22`, which is exactly the length of
+ * `update_source_config` plus slack — and `set_armor_class_adjustment` is 26,
+ * so adding it would have made every one of those commands fail validation
+ * with a message about the string being too long rather than about the command.
+ * Deriving the bound means the next command type cannot reintroduce that.
+ */
+const COMMAND_TYPE_MAX_LENGTH = Math.max(
+  ...commandTypes.map((type) => type.length),
+);
 
 const slotModes = ['select', 'clear', 'keep_override', 'restore'] as const;
 const warningModes = ['acknowledge', 'delete'] as const;
@@ -487,6 +514,145 @@ function validateSetWeaponMastery(record: UnknownRecord): void {
   requiredBoolean(record, 'selected');
 }
 
+/** A nullable signed integer inside an inclusive range, present as a key. */
+function nullableBoundedInteger(
+  record: UnknownRecord,
+  key: string,
+  minimum: number,
+  maximum: number,
+): void {
+  if (!hasOwn(record, key)) {
+    invalid(`${key} is required; use null when it does not apply.`);
+  }
+  if (record[key] === null) {
+    return;
+  }
+  boundedInteger(record, key, minimum, maximum);
+}
+
+function boundedInteger(
+  record: UnknownRecord,
+  key: string,
+  minimum: number,
+  maximum: number,
+): void {
+  const value = record[key];
+  if (
+    !Number.isSafeInteger(value) ||
+    (value as number) < minimum ||
+    (value as number) > maximum
+  ) {
+    invalid(
+      `${key} must be an integer from ${String(minimum)} to ${String(maximum)}.`,
+    );
+  }
+}
+
+const armorFieldKeys = [
+  'name',
+  'category',
+  'armor_class',
+  'dex_bonus',
+  'dex_bonus_max',
+  'strength_requirement',
+  'stealth_disadvantage',
+  'notes',
+] as const;
+
+/**
+ * The armour body, checked field by field, then as a pair.
+ *
+ * EVERY key must be present, `null` included, for the reason
+ * `validateWeaponFields` gives: `set_armor` replaces the whole slot, so "the
+ * key was missing" and "the user cleared it" must not be indistinguishable.
+ *
+ * THE PAIR CHECKS ARE THE DATABASE'S OWN, and they are made here rather than
+ * left to the INSERT so that a rejected payload names the field. Every bound
+ * comes from `src/domain/sheet-limits.ts`, which the share boundary reads too —
+ * so armour this accepts is always armour a link can carry.
+ */
+function validateArmorFields(value: unknown): void {
+  const armor = objectValue(value, 'Armor must be an object.');
+  rejectUnknown(armor, armorFieldKeys, 'armor');
+  nonEmptyString(armor, 'name', SHEET_TEXT_LIMITS.armor_name);
+  if (!isEnumValue(armorCategories, armor.category)) {
+    invalid('Unknown armor category.');
+  }
+  if (!isEnumValue(armorDexBonuses, armor.dex_bonus)) {
+    invalid('Unknown armor Dexterity bonus.');
+  }
+  boundedInteger(armor, 'armor_class', 1, SHEET_ARMOR_MAX.armor_class);
+  // Lower bound 0, not 1: a cap of zero is a coherent house rule, and it is the
+  // PAIRING below — not the magnitude — that the schema constrains.
+  nullableBoundedInteger(
+    armor,
+    'dex_bonus_max',
+    0,
+    SHEET_ARMOR_MAX.dex_bonus_max,
+  );
+  nullableBoundedInteger(
+    armor,
+    'strength_requirement',
+    1,
+    SHEET_ARMOR_MAX.strength_requirement,
+  );
+  requiredBoolean(armor, 'stealth_disadvantage');
+  nullableString(armor, 'notes', SHEET_TEXT_LIMITS.armor_notes);
+  if ((armor.dex_bonus === 'capped') !== (armor.dex_bonus_max !== null)) {
+    invalid('dex_bonus_max is present exactly when dex_bonus is capped.');
+  }
+  if (armor.category === 'shield' && armor.dex_bonus !== 'none') {
+    invalid('A shield carries no Dexterity bonus.');
+  }
+}
+
+function validateSetArmor(record: UnknownRecord): void {
+  rejectUnknown(record, ['type', 'slot', 'armor', 'reason']);
+  if (!isEnumValue(armorSlots, record.slot)) {
+    invalid('Unknown armor slot.');
+  }
+  if (!hasOwn(record, 'armor')) {
+    invalid('armor is required; use null to clear the slot.');
+  }
+  if (record.armor === null) {
+    return;
+  }
+  validateArmorFields(record.armor);
+}
+
+function validateSetHitPointRoll(record: UnknownRecord): void {
+  rejectUnknown(record, [
+    'type',
+    'class_name',
+    'class_level',
+    'rolled_value',
+    'reason',
+  ]);
+  nonEmptyString(record, 'class_name', SHEET_TEXT_LIMITS.class_name);
+  boundedInteger(record, 'class_level', 1, 20);
+  nullableBoundedInteger(
+    record,
+    'rolled_value',
+    SHEET_ROLL_BOUNDS.minimum,
+    SHEET_ROLL_BOUNDS.maximum,
+  );
+}
+
+function validateSetSkillProficiency(record: UnknownRecord): void {
+  rejectUnknown(record, ['type', 'skill', 'proficient', 'reason']);
+  if (!isEnumValue(skills, record.skill)) {
+    invalid('Unknown skill.');
+  }
+  requiredBoolean(record, 'proficient');
+}
+
+function validateSetArmorClassAdjustment(record: UnknownRecord): void {
+  rejectUnknown(record, ['type', 'value', 'note', 'reason']);
+  const magnitude = SHEET_ADJUSTMENT_BOUNDS.armorClassMagnitude;
+  boundedInteger(record, 'value', -magnitude, magnitude);
+  nullableString(record, 'note', SHEET_TEXT_LIMITS.adjustment_note);
+}
+
 function validateRestoreSnapshot(record: UnknownRecord): void {
   rejectUnknown(record, ['type', 'snapshot', 'integrity', 'reason']);
   const snapshot = objectValue(
@@ -543,6 +709,18 @@ function validateByType(
     case 'set_weapon_mastery':
       validateSetWeaponMastery(record);
       return record;
+    case 'set_armor':
+      validateSetArmor(record);
+      return record;
+    case 'set_hit_point_roll':
+      validateSetHitPointRoll(record);
+      return record;
+    case 'set_skill_proficiency':
+      validateSetSkillProficiency(record);
+      return record;
+    case 'set_armor_class_adjustment':
+      validateSetArmorClassAdjustment(record);
+      return record;
     case 'restore_snapshot':
       validateRestoreSnapshot(record);
       return record;
@@ -553,7 +731,7 @@ export function validateCharacterCommandPayload(
   payload: unknown,
 ): CharacterCommandPayload {
   const record = objectValue(payload, 'Character command must be an object.');
-  const type = requiredString(record, 'type', 22);
+  const type = requiredString(record, 'type', COMMAND_TYPE_MAX_LENGTH);
   if (hasOwn(record, 'reason')) {
     requiredString(record, 'reason', 255);
   }

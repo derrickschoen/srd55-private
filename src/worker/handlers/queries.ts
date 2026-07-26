@@ -6,6 +6,7 @@ import {
 } from '../../queries/character-completeness';
 import { CharacterCrud } from '../../queries/character-crud';
 import { CharacterListBuilder } from '../../queries/character-list-builder';
+import { CharacterSheetBuilder } from '../../queries/character-sheet-builder';
 import {
   CharacterWorkspaceBuilder,
 } from '../../queries/character-workspace-builder';
@@ -213,6 +214,12 @@ export const handlers: readonly RpcHandler[] = Object.freeze([
         params.save_point_id,
         new CharacterCommandIntegrity(COMMAND_INTEGRITY_KEY),
       ),
+  ),
+  defineRpcHandler(
+    'queries.characters.sheet',
+    isCharacterParams,
+    (context, params) =>
+      new CharacterSheetBuilder(context.db).build(params.character_id),
   ),
   defineRpcHandler(
     'queries.reports.build',

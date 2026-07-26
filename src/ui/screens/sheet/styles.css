@@ -1,0 +1,98 @@
+/*
+ * The sheet is plain and labelled on purpose (D4): one number per row, its
+ * label beside it, its formula under it. Nothing here hides anything — there is
+ * no `display: none`, no zero opacity and no off-screen positioning, because a
+ * page whose structured block says more than its visible text is the injection
+ * shape that rule exists to refuse.
+ */
+.sheet-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  max-width: 60rem;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 3rem;
+}
+
+.sheet-header h1 {
+  margin: 0.75rem 0 0.25rem;
+}
+
+.sheet-panel {
+  border: 1px solid var(--border, #c9c9c9);
+  border-radius: 0.5rem;
+  padding: 1rem;
+}
+
+.sheet-panel > h2 {
+  margin-top: 0;
+}
+
+.sheet-numbers {
+  display: grid;
+  grid-template-columns: minmax(10rem, 1fr) 2fr;
+  gap: 0.5rem 1rem;
+  margin: 0;
+}
+
+.sheet-number {
+  display: contents;
+}
+
+.sheet-numbers dt {
+  font-weight: 600;
+}
+
+.sheet-numbers dd {
+  margin: 0;
+}
+
+.sheet-figure {
+  font-variant-numeric: tabular-nums;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.sheet-formula {
+  margin: 0.15rem 0 0;
+  font-size: 0.85rem;
+  opacity: 0.8;
+}
+
+.sheet-note,
+.sheet-total {
+  font-size: 0.9rem;
+}
+
+.sheet-gaps dt {
+  font-weight: 600;
+  margin-top: 0.5rem;
+}
+
+.sheet-gaps dd {
+  margin: 0.15rem 0 0;
+  font-size: 0.9rem;
+}
+
+#character-sheet-facts {
+  display: block;
+  white-space: pre-wrap;
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+  max-height: 24rem;
+  overflow: auto;
+  border: 1px dashed var(--border, #c9c9c9);
+  padding: 0.5rem;
+}
+
+@media (max-width: 40rem) {
+  .sheet-numbers {
+    grid-template-columns: 1fr;
+  }
+
+  .sheet-number {
+    display: block;
+    border-bottom: 1px solid var(--border, #e3e3e3);
+    padding-bottom: 0.4rem;
+  }
+}

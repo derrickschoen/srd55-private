@@ -306,6 +306,58 @@ const armorTemplate =
     });
   };
 
+/**
+ * THE CHARACTER'S OWN ARMOUR, whose fillable columns are deliberately identical
+ * to `armor_templates`' (D1b: picking a template is a column-wise copy), plus
+ * `slot`.
+ */
+const characterArmor =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'character_armor', {
+      character_id: newCharacter(db),
+      slot: 'worn',
+      name: uid('Armor'),
+      category: 'medium',
+      armor_class: 14,
+      dex_bonus: 'capped',
+      dex_bonus_max: 2,
+      ...values,
+    });
+  };
+
+const hitPointRoll =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'character_hit_point_rolls', {
+      character_id: newCharacter(db),
+      class_name: 'Fighter',
+      class_level: 2,
+      rolled_value: 7,
+      ...values,
+    });
+  };
+
+const skillProficiency =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'character_skill_proficiencies', {
+      character_id: newCharacter(db),
+      skill: 'stealth',
+      ...values,
+    });
+  };
+
+const sheetAdjustment =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'character_sheet_adjustments', {
+      character_id: newCharacter(db),
+      armor_class_adjustment: 0,
+      ...values,
+    });
+  };
+
 const sheetTraits =
   (values: Values): Write =>
   (db) => {
@@ -1350,6 +1402,170 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     ],
     accepts: [
       ['Thirsting Blade, whole', namedFeature({ effect_kind: 'extra_attack', effect_attack_count: 2, effect_weapon_scope: 'one_bonded_weapon' })],
+    ],
+  },
+  // --- the four stored sheet inputs ---------------------------------------
+  {
+    constraint: 'character_armor_slot_check',
+    rejects: [
+      // The SLOT is not the category, and a value from the wrong vocabulary is
+      // the mistake that would follow from thinking it is.
+      ['a category used as a slot', characterArmor({ slot: 'medium' })],
+      ['title case', characterArmor({ slot: 'Worn' })],
+      ['the empty string', characterArmor({ slot: '' })],
+    ],
+    accepts: [
+      ['the worn slot', characterArmor({ slot: 'worn' })],
+      [
+        'the shield slot, holding a shield',
+        characterArmor({
+          slot: 'shield',
+          category: 'shield',
+          armor_class: 2,
+          dex_bonus: 'none',
+          dex_bonus_max: null,
+        }),
+      ],
+      // A SHIELD IN THE WORN SLOT IS ACCEPTED ON PURPOSE. It is a state a share
+      // link can carry, `armorClass` counts it by what it IS, and the sheet
+      // says the slots are crossed. Refusing it here would silently discard an
+      // imported character instead of importing it and stating the problem.
+      [
+        'a shield recorded in the worn slot, which the sheet warns about',
+        characterArmor({
+          slot: 'worn',
+          category: 'shield',
+          armor_class: 2,
+          dex_bonus: 'none',
+          dex_bonus_max: null,
+        }),
+      ],
+    ],
+  },
+  {
+    constraint: 'character_armor_category_check',
+    rejects: [
+      ['a category outside the four the table prints', characterArmor({ category: 'plate' })],
+      ['a slot used as a category', characterArmor({ category: 'worn' })],
+    ],
+    accepts: [
+      ['light with an uncapped Dex term', characterArmor({ category: 'light', dex_bonus: 'full', dex_bonus_max: null })],
+      ['heavy with no Dex term', characterArmor({ category: 'heavy', dex_bonus: 'none', dex_bonus_max: null })],
+    ],
+  },
+  {
+    constraint: 'character_armor_dex_bonus_check',
+    rejects: [
+      ['a Dex rule outside the three', characterArmor({ dex_bonus: 'limited' })],
+      ['the empty string', characterArmor({ dex_bonus: '' })],
+    ],
+    accepts: [
+      ['capped, with its cap', characterArmor({ dex_bonus: 'capped', dex_bonus_max: 2 })],
+      ['full, with no cap', characterArmor({ dex_bonus: 'full', dex_bonus_max: null })],
+    ],
+  },
+  {
+    constraint: 'character_armor_dex_bonus_max_check',
+    rejects: [
+      // THE ONE THAT MATTERS MOST ON THE CHARACTER'S COPY. `dexterityTerm`
+      // reads `dex_bonus_max ?? 0` on the capped arm and documents that `?? 0`
+      // as unreachable; without this constraint a share link or a hand-edited
+      // image makes it reachable, and a Light suit degrades to Heavy behaviour.
+      ['capped with no cap', characterArmor({ dex_bonus: 'capped', dex_bonus_max: null })],
+      ['full carrying a stray cap', characterArmor({ dex_bonus: 'full', dex_bonus_max: 2 })],
+      ['a negative cap', characterArmor({ dex_bonus: 'capped', dex_bonus_max: -1 })],
+      ['a text cap', characterArmor({ dex_bonus: 'capped', dex_bonus_max: 'two' })],
+    ],
+    accepts: [
+      ['the Medium armour cap of 2', characterArmor({ dex_bonus: 'capped', dex_bonus_max: 2 })],
+      ['a cap of zero, which is a house rule and not Heavy armour', characterArmor({ dex_bonus: 'capped', dex_bonus_max: 0 })],
+      ['the defended null on an uncapped row', characterArmor({ dex_bonus: 'full', dex_bonus_max: null })],
+    ],
+  },
+  {
+    constraint: 'character_armor_shield_check',
+    rejects: [
+      ['a shield that adds a Dexterity modifier', characterArmor({ slot: 'shield', category: 'shield', armor_class: 2, dex_bonus: 'full', dex_bonus_max: null })],
+      ['a shield with a capped Dexterity modifier', characterArmor({ slot: 'shield', category: 'shield', armor_class: 2, dex_bonus: 'capped', dex_bonus_max: 2 })],
+    ],
+    accepts: [
+      ['the Shield as the table prints it', characterArmor({ slot: 'shield', category: 'shield', armor_class: 2, dex_bonus: 'none', dex_bonus_max: null })],
+      ['a Medium armour, unaffected by the shield limb', characterArmor({})],
+    ],
+  },
+  {
+    constraint: 'character_armor_armor_class_check',
+    rejects: [
+      ['a zero armor class', characterArmor({ armor_class: 0 })],
+      ['a negative armor class', characterArmor({ armor_class: -1 })],
+      ['a text armor class', characterArmor({ armor_class: 'fourteen' })],
+    ],
+    accepts: [
+      ['the lowest value the table prints', characterArmor({ category: 'light', armor_class: 11, dex_bonus: 'full', dex_bonus_max: null })],
+      ['a shield bonus of 2, which is not a base', characterArmor({ slot: 'shield', category: 'shield', armor_class: 2, dex_bonus: 'none', dex_bonus_max: null })],
+    ],
+  },
+  {
+    constraint: 'character_armor_strength_requirement_check',
+    rejects: [
+      ['a zero requirement', characterArmor({ strength_requirement: 0 })],
+      ['a text requirement', characterArmor({ strength_requirement: 'thirteen' })],
+    ],
+    accepts: [
+      ['the Str 13 the table prints', characterArmor({ strength_requirement: 13 })],
+      // Ten of thirteen printed rows have an em-dash here, so the null is the
+      // source's own absence (D6b limb 2) and refusing it would refuse them.
+      ['the defended null', characterArmor({ strength_requirement: null })],
+    ],
+  },
+  {
+    constraint: 'character_hit_point_rolls_check',
+    rejects: [
+      ['a level of zero', hitPointRoll({ class_level: 0 })],
+      ['a level past twenty', hitPointRoll({ class_level: 21 })],
+      // A roll of zero is not a low roll; it is the absence of one, and absence
+      // is already spelled by having no row at all.
+      ['a roll of zero', hitPointRoll({ rolled_value: 0 })],
+      ['a negative roll', hitPointRoll({ rolled_value: -1 })],
+      // 12 is the largest hit die any class in the source uses.
+      ['a roll past the largest hit die', hitPointRoll({ rolled_value: 13 })],
+      ['a text roll', hitPointRoll({ rolled_value: 'seven' })],
+    ],
+    accepts: [
+      ['the lowest roll on any die', hitPointRoll({ class_level: 1, rolled_value: 1 })],
+      ['the highest roll on a d12', hitPointRoll({ class_level: 20, rolled_value: 12 })],
+    ],
+  },
+  {
+    constraint: 'character_skill_proficiencies_skill_check',
+    rejects: [
+      ['a skill outside the eighteen', skillProficiency({ skill: 'lockpicking' })],
+      // The display casing the source prints; the column stores snake case
+      // because a CHECK cannot hold a value with a space in it.
+      ['the printed display form', skillProficiency({ skill: 'Sleight of Hand' })],
+    ],
+    accepts: [
+      ['a one-word skill', skillProficiency({ skill: 'stealth' })],
+      ['a two-word skill in snake case', skillProficiency({ skill: 'sleight_of_hand' })],
+    ],
+  },
+  {
+    constraint: 'character_sheet_adjustments_armor_class_adjustment_check',
+    rejects: [
+      ['a magnitude past the bound', sheetAdjustment({ armor_class_adjustment: 21 })],
+      ['a negative magnitude past the bound', sheetAdjustment({ armor_class_adjustment: -21 })],
+      // The `typeof` limb: SQLite orders every TEXT value above every number,
+      // so a bare range would admit this on the upper side.
+      ['a text adjustment', sheetAdjustment({ armor_class_adjustment: 'three' })],
+    ],
+    accepts: [
+      ['the column default of zero', sheetAdjustment({})],
+      // SIGNED, on purpose: a cursed item or a house rule is a real negative
+      // adjustment, and refusing one would invent a rule the source never states.
+      ['a negative adjustment', sheetAdjustment({ armor_class_adjustment: -2 })],
+      ['the positive bound', sheetAdjustment({ armor_class_adjustment: 20 })],
+      ['the negative bound', sheetAdjustment({ armor_class_adjustment: -20 })],
+      ['a Barbarian-sized Unarmored Defense bonus', sheetAdjustment({ armor_class_adjustment: 5, armor_class_adjustment_note: 'Unarmored Defense: +Con' })],
     ],
   },
   {

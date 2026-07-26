@@ -211,7 +211,7 @@ function seedCompleteCharacter(
   db.exec(
     `INSERT INTO character_save_points
        (character_id, label, snapshot, schema_version, created_at, updated_at)
-     VALUES (?, 'Before experiment', ?, 'a7-v3', ?, ?)`,
+     VALUES (?, 'Before experiment', ?, 'a7-v4', ?, ?)`,
     [characterId, JSON.stringify(snapshot), timestamp, timestamp],
   );
   // A SECOND SAVE POINT IN THE OLD SNAPSHOT FORMAT.
@@ -230,6 +230,10 @@ function seedCompleteCharacter(
   delete legacySnapshot.character_species;
   delete legacySnapshot.character_species_traits;
   delete legacySnapshot.character_background;
+  delete legacySnapshot.character_armor;
+  delete legacySnapshot.character_hit_point_rolls;
+  delete legacySnapshot.character_skill_proficiencies;
+  delete legacySnapshot.character_sheet_adjustments;
   db.exec(
     `INSERT INTO character_save_points
        (character_id, label, snapshot, schema_version, created_at, updated_at)
@@ -452,7 +456,7 @@ describe('portable character backup', () => {
     ) as Record<string, any>;
     // The current-format save point carries the weapons, re-keyed to the rows
     // that were just written, so restoring it puts back the same two weapons.
-    expect(saved.schema_version).toBe('a7-v3');
+    expect(saved.schema_version).toBe('a7-v4');
     expect(saved.character_weapons.map((row: { name: string }) => row.name)).toEqual([
       'Weathered Longsword',
       'Half-entered club',
@@ -714,6 +718,28 @@ describe('an already-downloaded backup file', () => {
         [characterId],
       ),
     ).toBe(0);
+    // The same claim for every table added since, including the four stored
+    // sheet inputs. `[]` is the honest reading of a file that never mentioned
+    // them, and this is the assertion that fails on the day somebody makes one
+    // of them mandatory and every downloaded file stops opening.
+    for (const table of [
+      'character_species',
+      'character_species_traits',
+      'character_background',
+      'character_armor',
+      'character_hit_point_rolls',
+      'character_skill_proficiencies',
+      'character_sheet_adjustments',
+    ]) {
+      expect(Object.hasOwn(archived.tables as object, table)).toBe(false);
+      expect(
+        target.scalar(
+          `SELECT count(*) FROM "${table}" WHERE character_id = ?`,
+          [characterId],
+        ),
+        `${table} is empty after importing a file that never mentioned it`,
+      ).toBe(0);
+    }
 
     // The old save point survives unchanged and unupgraded.
     const savePoint = target.one(
@@ -731,6 +757,7 @@ describe('an already-downloaded backup file', () => {
     >;
     expect(snapshot.schema_version).toBe('a7-v1');
     expect(Object.hasOwn(snapshot, 'character_weapons')).toBe(false);
+    expect(Object.hasOwn(snapshot, 'character_armor')).toBe(false);
   });
 
   it('re-exports what it imported, still readable by this build', async () => {
@@ -750,6 +777,10 @@ describe('an already-downloaded backup file', () => {
       '2026-07-24T00:00:00.000Z',
     );
     expect(reexported.tables.character_weapons).toEqual([]);
+    expect(reexported.tables.character_armor).toEqual([]);
+    expect(reexported.tables.character_hit_point_rolls).toEqual([]);
+    expect(reexported.tables.character_skill_proficiencies).toEqual([]);
+    expect(reexported.tables.character_sheet_adjustments).toEqual([]);
     expect(reexported.tables.character_save_points).toHaveLength(1);
     expect(
       reexported.tables.character_save_points[0] as Record<string, unknown>,
@@ -793,6 +824,49 @@ describe('an already-downloaded backup file', () => {
         [characterId],
       ),
     ).toEqual([{ name: 'Bought afterwards' }]);
+  });
+
+  it('restores its old save point without deleting armour added since', async () => {
+    // The same case, one version further on, and the reason `a7-v4` was minted
+    // rather than folded into `a7-v3`: an `a7-v1` snapshot has no opinion about
+    // armour either, so a suit bought after the import must survive the
+    // rollback. Had the version not moved, every save point already on a user's
+    // disk would have started claiming to carry armour it never saw.
+    const target = await database();
+    const { characterId } = importCharacterBackup(
+      target,
+      JSON.parse(FROZEN_V1_BACKUP_JSON),
+    );
+    target.exec(
+      `INSERT INTO character_armor (
+         character_id, slot, name, category, armor_class, dex_bonus
+       ) VALUES (?, 'worn', 'Bought afterwards', 'light', 11, 'full')`,
+      [characterId],
+    );
+    target.exec(
+      `INSERT INTO character_skill_proficiencies (character_id, skill)
+       VALUES (?, 'stealth')`,
+      [characterId],
+    );
+
+    const stored = target.scalar<string>(
+      'SELECT snapshot FROM character_save_points WHERE character_id = ?',
+      [characterId],
+    );
+    new CharacterState(target).restore(characterId, JSON.parse(String(stored)));
+
+    expect(
+      target.all(
+        'SELECT name FROM character_armor WHERE character_id = ?',
+        [characterId],
+      ),
+    ).toEqual([{ name: 'Bought afterwards' }]);
+    expect(
+      target.all(
+        'SELECT skill FROM character_skill_proficiencies WHERE character_id = ?',
+        [characterId],
+      ),
+    ).toEqual([{ skill: 'stealth' }]);
   });
 });
 
