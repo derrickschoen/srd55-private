@@ -1,5 +1,5 @@
-import schema from '../../src/db/schema.sql?raw';
-import { DatabaseLifecycle } from '../../src/db/database-lifecycle';
+import { createApplicationLifecycle } from '../../src/db/bootstrap';
+import type { DatabaseLifecycle } from '../../src/db/database-lifecycle';
 import {
   rpcFailure,
   RpcError,
@@ -29,7 +29,7 @@ export async function createRpcHarness(
 ): Promise<RpcHarness> {
   const sqlite3 = await getSqlite3();
   const storage = new MemoryDatabaseStorage(sqlite3);
-  const lifecycle = new DatabaseLifecycle(sqlite3, storage, schema);
+  const lifecycle = createApplicationLifecycle(sqlite3, storage);
   lifecycle.open();
   let id = 0;
 
