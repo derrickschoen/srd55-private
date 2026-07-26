@@ -61,88 +61,125 @@ function minimalCharacterBackup(): CharacterBackupDocument {
   };
 }
 
+/**
+ * WHY THESE FIXTURES CARRY EVERY COLUMN.
+ *
+ * A backup row is produced by `SELECT *` against a schema-signature-validated
+ * database, so a real document's rows are always complete. The per-table row
+ * contracts (`src/domain/contracts/rows.ts`) hold documents to that, which is
+ * what stops a partial row from silently taking column defaults in place of the
+ * user's data. These fixtures therefore describe whole rows.
+ */
+function sourceInstanceRow(): Record<string, unknown> {
+  return {
+    id: 11,
+    character_id: 7,
+    instance_uuid: 'source-original',
+    parent_source_instance_id: null,
+    source_type: 'class',
+    source_definition_id: 31,
+    display_name: 'Wizard 1',
+    config: '{}',
+    acquired_at_character_level: 1,
+    state: 'active',
+    notes: null,
+    created_at: null,
+    updated_at: null,
+  };
+}
+
+function slotRow(): Record<string, unknown> {
+  return {
+    id: 12,
+    character_id: 7,
+    source_instance_id: 11,
+    slot_key: 'source-original:prepared:1',
+    rule_key: 'prepared',
+    ordinal: 1,
+    bucket: 'prepared',
+    eligibility_kind: 'choice_from_query',
+    fixed_spell_version_id: null,
+    current_spell_version_id: 41,
+    label: null,
+    spell_level_min: 0,
+    spell_level_max: 9,
+    allowed_spell_lists: null,
+    allowed_schools: null,
+    allowed_tags: null,
+    always_prepared: 0,
+    with_slots: 1,
+    free_cast: null,
+    counts_against_limit: 1,
+    required: 0,
+    is_locked: 0,
+    state: 'active',
+    orphan_reason_code: null,
+    orphaned_by_change_group_id: null,
+    orphaned_at: null,
+    prior_config: null,
+    override_note: null,
+    sort_order: 1,
+    notes: null,
+    created_at: null,
+    updated_at: null,
+    selection_collection: null,
+    selection_eligibility: 'valid',
+    selection_invalid_reason: null,
+  };
+}
+
+function spellbookRow(): Record<string, unknown> {
+  return {
+    id: 13,
+    character_id: 7,
+    spell_version_id: 41,
+    created_at: null,
+    updated_at: null,
+  };
+}
+
+function snapshotJson(): string {
+  return JSON.stringify({
+    schema_version: 'a7-v1',
+    character: {
+      name: 'Portable Hero',
+      strength: 10,
+      dexterity: 10,
+      constitution: 10,
+      intelligence: 10,
+      wisdom: 10,
+      charisma: 10,
+      proficiency_bonus_override: null,
+      rules_edition_preference: '2024',
+      allow_legacy: 0,
+      notes: null,
+    },
+    character_class_levels: [],
+    character_source_instances: [sourceInstanceRow()],
+    spell_selection_slots: [slotRow()],
+    wizard_spellbook_entries: [spellbookRow()],
+    warning_acknowledgements: [],
+  });
+}
+
 function richCharacterBackup(): CharacterBackupDocument {
   const document = minimalCharacterBackup();
   return {
     ...document,
     tables: {
       ...document.tables,
-      character_source_instances: [
-        {
-          id: 11,
-          character_id: 7,
-          instance_uuid: 'source-original',
-          parent_source_instance_id: null,
-          source_type: 'class',
-          source_definition_id: 31,
-        },
-      ],
-      spell_selection_slots: [
-        {
-          id: 12,
-          character_id: 7,
-          source_instance_id: 11,
-          fixed_spell_version_id: null,
-          current_spell_version_id: 41,
-        },
-      ],
-      wizard_spellbook_entries: [
-        {
-          id: 13,
-          character_id: 7,
-          spell_version_id: 41,
-        },
-      ],
+      character_source_instances: [sourceInstanceRow()],
+      spell_selection_slots: [slotRow()],
+      wizard_spellbook_entries: [spellbookRow()],
       character_save_points: [
         {
           id: 14,
           character_id: 7,
           label: 'Before experiment',
           schema_version: 'a7-v1',
-          snapshot: JSON.stringify({
-            schema_version: 'a7-v1',
-            character: {
-              name: 'Portable Hero',
-              strength: 10,
-              dexterity: 10,
-              constitution: 10,
-              intelligence: 10,
-              wisdom: 10,
-              charisma: 10,
-              proficiency_bonus_override: null,
-              rules_edition_preference: '2024',
-              allow_legacy: 0,
-              notes: null,
-            },
-            character_class_levels: [],
-            character_source_instances: [
-              {
-                id: 11,
-                character_id: 7,
-                instance_uuid: 'source-original',
-                parent_source_instance_id: null,
-                source_type: 'class',
-                source_definition_id: 31,
-              },
-            ],
-            spell_selection_slots: [
-              {
-                id: 12,
-                character_id: 7,
-                source_instance_id: 11,
-                fixed_spell_version_id: null,
-                current_spell_version_id: 41,
-              },
-            ],
-            wizard_spellbook_entries: [
-              {
-                id: 13,
-                character_id: 7,
-                spell_version_id: 41,
-              },
-            ],
-            warning_acknowledgements: [],
-          }),
+          snapshot: snapshotJson(),
+          created_at: null,
+          updated_at: null,
         },
       ],
     },
@@ -224,8 +261,22 @@ describe('portable character validation', () => {
     (
       corrupt.tables.character_save_points[0] as Record<string, unknown>
     ).snapshot = '{bad json';
+    // The row contract reaches this before `parseSnapshot` does, and names the
+    // table, the row index and the field rather than just the field.
     expect(() => validateCharacterBackup(corrupt)).toThrow(
-      'snapshot is not valid JSON.',
+      'Character backup tables.character_save_points[0].snapshot: must be a JSON object.',
+    );
+
+    // Well-formed JSON of the WRONG SHAPE, which a syntax-only check accepted.
+    // The column's contract knows its readers require an object — both
+    // `parseSnapshot` and `SavePointReader.restoreCommand` refuse anything else
+    // — so the shape is stated in the same message as the table and the row.
+    const notAnObject = richCharacterBackup();
+    (
+      notAnObject.tables.character_save_points[0] as Record<string, unknown>
+    ).snapshot = '"a bare string"';
+    expect(() => validateCharacterBackup(notAnObject)).toThrow(
+      'Character backup tables.character_save_points[0].snapshot: must be a JSON object.',
     );
 
     const crossed = richCharacterBackup();
