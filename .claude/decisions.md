@@ -1,5 +1,61 @@
 # Binding scope decisions
 
+## D21 — D19 built; and a review's over-redaction was reverted (2026-07-26)
+
+`main` 703b9fb. Verified by me: **1440 vitest / 101 files, build exit 0,
+65 Playwright, 50 tables.**
+
+Extra Attack can now be granted by a class, a SUBCLASS, or a NAMED FEATURE, and
+a grant can be scoped to one weapon. Thirsting Blade and Devouring Blade ship as
+bundled SRD content — the real proof, since they are free-licensed and the
+owner's own example is not.
+
+**The best fix in the change was structural, not local.** A review found the
+bonded-weapon guard applied at two construction sites, so a grant built anywhere
+else would be counted. The obvious repair — refuse it in the combinator — would
+have been WORSE: the grant would have vanished with no reason printed. Instead
+the reason is derived from the field, at the single place the number is
+produced, with an exhaustive switch making a third scope a compile error. Both
+hand-written branches were deleted and the helper has no importer outside that
+module, so a grant cannot arrive pre-annotated and be annotated twice. Mutating
+either half now fails seven tests across two files; before, it failed one.
+
+### A finding I REJECTED, and why
+
+The review redacted "College of Valour" from D19 — including from a verbatim
+quotation of the owner — citing D3's rule that imported rules text must not
+reach the repository. **Reverted.**
+
+The line runs between CONTENT and CITATION, not at every proper noun. Naming a
+subclass in order to say it is NOT bundleable is nominative reference, the same
+act as naming the Player's Handbook itself, which the same review kept on
+exactly that reasoning. What may not enter this repository is imported rules
+TEXT: prose, flavour text, feature descriptions, fixture content reproducing
+them. A name identifying what is excluded reproduces nothing.
+
+Two concrete harms decided it. It **rewrote the owner's own words inside
+quotation marks**, which is a worse fault than the one it avoided. And it left
+D19 unverifiable: a reader could no longer check "it is not in SRD 5.2" without
+knowing which subclass.
+
+The surface that actually matters was clean and I verified it separately — no
+PHB prose in any fixture, test or source file.
+
+**Rejected alternative:** accepting the redaction because it was the cautious
+option. Over-redaction has costs, and a decision log that cannot be checked is
+not a safer decision log.
+
+### The gap this did NOT close, and it is the one the owner asked about
+
+A subclass still **cannot be imported**. The model can express a
+subclass-granted Extra Attack; the catalog import DOCUMENT format cannot carry a
+subclass at all — `catalog.import` rejects the fixture outright, and the test
+says so in its name rather than skipping. The owner's stated goal was "we need
+to test it for if the phb gets imported", so this is the next increment: a
+catalog format that can carry subclasses and their features.
+
+---
+
 ## D20 — Attack profiles merged, and the sheet core is PARTLY wired after all (2026-07-26)
 
 `main` ce9c5f2. Verified by me: **1242 vitest / 90 files, build exit 0,
