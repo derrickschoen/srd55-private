@@ -4,7 +4,6 @@ import {
 } from 'drizzle-kit/api';
 import triggers from '../db/schema/triggers.sql?raw';
 import * as schema from '../db/schema/index';
-import { SCHEMA_NOTE_INFRASTRUCTURE } from '../db/schema/infrastructure';
 
 /**
  * Composes the complete `src/db/schema.sql` artifact.
@@ -39,9 +38,14 @@ const BANNER = [
 /**
  * Rationale comments that lived in the hand-written artifact and would
  * otherwise be lost on the first regeneration.
- * `tests/unit/schema-generation.test.ts` pins them.
+ *
+ * EMPTY, and kept rather than deleted. The one note this ever carried explained
+ * why eight Laravel-only tables nothing reads still existed; those tables are
+ * gone, and so is the note. The mechanism stays because the hazard it exists for
+ * has not gone anywhere: a rationale that lives only in the generated artifact
+ * is a rationale the next regeneration silently drops.
  */
-export const SCHEMA_NOTES: readonly string[] = [SCHEMA_NOTE_INFRASTRUCTURE];
+export const SCHEMA_NOTES: readonly string[] = [];
 
 function wrapComment(note: string): string {
   const words = note.split(' ');
@@ -76,12 +80,13 @@ export async function composeSchemaSql(): Promise<string> {
   );
   const body = (await generateSQLiteMigration(previous, current)).join('\n');
 
+  // The blank line travels WITH each note rather than sitting before the list,
+  // so an empty note list does not leave a stray blank line in the artifact.
   const prelude = [
     BANNER,
     '',
     'PRAGMA foreign_keys = ON;',
-    '',
-    ...SCHEMA_NOTES.map(wrapComment),
+    ...SCHEMA_NOTES.flatMap((note) => ['', wrapComment(note)]),
   ].join('\n');
 
   return `${prelude}\n\n${body.trim()}\n\n${triggers.trim()}\n`;

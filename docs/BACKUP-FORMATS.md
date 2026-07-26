@@ -19,8 +19,8 @@ The Worker RPC methods are `backup.exportDatabase` and
 ```
 
 `sqlite` is the complete SQLite file, including the catalog, every character,
-application infrastructure tables, indexes, triggers, user-authored catalog
-rows, tombstones, history, and SQLite sequence state. This envelope is intended
+indexes, triggers, user-authored catalog rows, tombstones, history, and SQLite
+sequence state. This envelope is intended
 for application/API transport; it is not JSON because JSON has no byte-array
 type.
 
