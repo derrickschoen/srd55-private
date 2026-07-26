@@ -9,6 +9,7 @@ import {
   prepareConnection,
 } from './database';
 import { APPLICATION_TABLES } from '../domain/contracts/tables';
+import { auditCandidateDatabase } from './candidate-audit';
 
 /**
  * Every table an application database image must contain.
@@ -257,10 +258,26 @@ export class DatabaseLifecycle {
     return (await this.storage.exportFile()).slice();
   }
 
+  /**
+   * Validates a candidate image WHILE IT IS STILL QUARANTINED.
+   *
+   * The candidate is deserialized read-only into a throwaway in-memory
+   * connection; nothing here can touch stored bytes. Two passes run, and the
+   * order is deliberate:
+   *
+   *  1. structure — the tables, triggers and schema signature this build
+   *     expects. Without it the audit's own queries would fail on a missing
+   *     table and report the wrong thing;
+   *  2. meaning — {@link auditCandidateDatabase}. A structurally perfect image
+   *     can still contain rows owned by a character that does not exist, or one
+   *     character's row parented to another's, and the schema signature says
+   *     nothing about either.
+   */
   validateBytes(bytes: Uint8Array): void {
     const candidate = openDatabaseImage(this.sqlite3, bytes.slice());
     try {
       this.#validateApplicationDatabase(candidate);
+      auditCandidateDatabase(candidate);
     } finally {
       candidate.close();
     }
