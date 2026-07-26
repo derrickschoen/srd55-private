@@ -861,3 +861,66 @@ select:disabled {
 .outstanding-panel h2 + h2 {
   margin-top: 1rem;
 }
+
+/*
+ * Free text of unverified origin (D4 / share-link boundary). The marker is a
+ * border, never colour alone, and it never hides or truncates the text — the
+ * value stays fully readable and selectable exactly as it is stored.
+ */
+.free-text {
+  border-bottom: 1px dotted var(--planner-accent);
+}
+
+.spell-picker-input[data-free-text] {
+  border-bottom-style: dotted;
+}
+
+/*
+ * The build reference. Collapsed by default, never hidden: no display:none, no
+ * off-screen positioning, no zero opacity. Expanding a section reveals exactly
+ * the facts the JSON block carries.
+ */
+.build-reference-panel .reference-section {
+  margin-top: 0.6rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--planner-border);
+  border-radius: 0.4rem;
+}
+
+.build-reference-panel summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.build-reference-panel .reference-note {
+  margin: 0.5rem 0 0;
+  color: var(--planner-ink-soft);
+  font-size: 0.8rem;
+}
+
+.build-reference-panel .reference-scroll {
+  overflow-x: auto;
+  margin-top: 0.6rem;
+}
+
+.build-reference-panel .reference-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.build-reference-panel .reference-table caption {
+  padding-bottom: 0.25rem;
+  color: var(--planner-ink-soft);
+  font-size: 0.78rem;
+  text-align: left;
+}
+
+.build-reference-panel .reference-table th,
+.build-reference-panel .reference-table td {
+  padding: 0.25rem 0.5rem;
+  border-bottom: 1px solid var(--planner-border);
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+}
