@@ -122,6 +122,10 @@ describe('catalog import persistence', () => {
       tags_created: 4,
       attack_modes_created: 2,
       save_abilities_created: 1,
+      // A spell-only document touches the subclass arm not at all.
+      subclasses_created: 0,
+      subclasses_updated: 0,
+      subclass_features_created: 0,
       text_available: false,
       descriptions_loaded: 0,
     });

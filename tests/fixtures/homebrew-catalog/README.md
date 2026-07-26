@@ -16,7 +16,7 @@ under test. Those are mechanic names from SRD 5.2, which
 **not** taken from it is the wording.
 
 That distinction was not always honoured here. Review found one feature's prose
-sitting in `college-of-the-long-road.d19-gap.json` verbatim from
+sitting in the College of the Long Road fixture verbatim from
 `docs/srd/source/attack-class-features.txt` — identical but for two commas —
 inside a file that claimed to be wholly invented. It has been rewritten, and
 `tests/integration/homebrew/homebrew-catalog-fixture.test.ts` now fails if any
@@ -44,28 +44,61 @@ Version keys use the three-part homebrew grammar
 (`expanded:longroad.homebrew:<name>`), which matters: the importer accepts any
 non-empty string, but the share/export path enforces the grammar and throws.
 
-## `college-of-the-long-road.d19-gap.json`
+## `college-of-the-long-road.subclass.tier1.json`
 
-**This one does not import, and that is the point.**
+**This one used to be the file that could not import.** It was
+`college-of-the-long-road.d19-gap.json`, and the README here listed three
+blockers with a tripwire test on each. All three are gone:
 
-The brief asked for a fixture exercising a Bard-like subclass that grants Extra
-Attack at level 6 — the D19 shape. The current model cannot express it, so this
-is the fixture that shows the gap rather than one that hides it. Three separate
-things block it, and the integration test proves each one instead of asserting
-it:
+1. ~~There is no importer.~~ `catalog.import` now carries a **subclass record
+   kind**. A Tier 1 document is still a bare JSON array; the discriminator went
+   on the element, as an optional `kind` whose absence means `spell`.
+2. ~~The grant table has no subclass limb.~~ D19 built `subclass_features`,
+   keyed on a subclass rather than a class.
+3. ~~There is no weapon scope.~~ `subclass_features.effect_weapon_scope` exists,
+   and two SRD Warlock invocations are seeded using it.
 
-1. **There is no importer.** `catalog.import` is the only content-import RPC in
-   the entire surface, and its record is a spell. `class_definitions` and
-   `subclass_definitions` are written only by `ensureBundledClassContent`
-   (`src/rules/class-progression-lookup.ts`), which is bundled-seed-only.
-2. **The grant table has no subclass limb.** `class_extra_attack_grants` is
-   keyed on `(class_definition_id, class_level)`. Attributing this grant to the
-   Bard *class* at level 6 would be a different and wrong rule — every Bard would
-   get it.
-3. **There is no weapon scope.** D19 records that Thirsting Blade grants Extra
-   Attack for the pact weapon only. That field has no column, and it is needed
-   for SRD content the project could legitimately bundle, not only for homebrew.
+The tripwire cases were **replaced**, not renamed. The suite that stands where
+they were imports this file through the real RPC, reads every stored column back
+out of SQLite, and follows the level 6 grant into `attacksPerAction` — because a
+row that is stored but never reaches the derivation would pass every other
+assertion and mean nothing.
 
-When D19 lands, the integration test's `it('...D19 has not landed yet')` cases
-go red. That is deliberate: they are a tripwire on the gap closing, not a
-permanent statement about the model.
+What the file still cannot say, stated in the file itself as well as here:
+
+- **Two of its four features are free text**, and mechanically so. "Marching
+  Song" is an always-prepared spell and "Road Trained" grants proficiencies;
+  `classFeatureEffectKinds` has exactly one member, `extra_attack`, so both land
+  with `effect_kind` NULL. That is the design `src/rules/class-feature-effects.ts`
+  states — free text is not an effect, however mechanical the English sounds —
+  and the integration test asserts it rather than letting it be assumed.
+- **No source book and no flavour paragraph.** `subclass_definitions` has neither
+  a publication table nor a description column. The earlier draft carried both;
+  they are dropped rather than written into fields that silently vanish.
+- **No spellcasting.** An imported subclass is a non-caster: the format has no
+  vocabulary for a caster fraction, a slot table or a `grant_rules` blob.
+
+An imported subclass's key is a **three-part imported key**
+(`2024:longroad.homebrew:<name>`), and that is load-bearing rather than tidy.
+`subclass_definitions` has no `provenance` column, a backup carries the subclass
+by content key and by nothing else, and a share link carries one `subclassKey` —
+so the key is the only field that crosses all three boundaries. The grammar
+(`src/catalog/catalog-key.ts`) requires a dotted owner namespace in the middle,
+which every bundled key (`2024:subclass:ek`) fails by shape. A
+document therefore cannot name a seeded row even if it tries;
+`tests/integration/catalog/subclass-provenance.test.ts` follows one imported
+subclass through the database, a backup and a share link to prove it.
+
+## `legacy-pre-subclass.tier1.json`
+
+**A frozen, hand-typed document from before subclasses existed in the format.**
+Two spells, no `kind` field anywhere, and none of the three fields the spell
+record gained after the earliest documents were written (`tags`, `healing`,
+`effectReliabilityCategory`) — plus one unknown field that must be dropped in
+silence.
+
+It is **never generated from the current encoder**, and the file says so itself.
+A fixture emitted by today's code proves only that today's code agrees with
+itself; the compatibility claim is about files users already hold. If this file
+ever stops importing, that change has broken every document in the wild, and the
+test that reads it is supposed to go red.
