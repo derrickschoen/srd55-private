@@ -41,8 +41,13 @@ rendering SRD content and therefore carry the notice too.
 ## What may be bundled
 
 Bundle content **only** under a free licence whose sole obligation is
-attribution. CC-BY-4.0 (the SRD 5.2 licence) qualifies; so do equivalents such
-as CC-BY-SA where compatible, MIT, and Apache-2.0 for code-like data.
+attribution. CC-BY-4.0 (the SRD 5.2 licence) qualifies, as do MIT and
+Apache-2.0 for code-like data.
+
+CC-BY-**SA** does *not* qualify and must not be bundled, despite being a
+Creative Commons licence: share-alike is an obligation beyond attribution, and
+it propagates to whatever it is combined with. The test is the obligation, not
+the licence family — "it's Creative Commons" is not sufficient.
 
 Every bundled source must carry its own required notice in the same place this
 one appears, and must be listed here before it ships.
