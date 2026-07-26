@@ -2,11 +2,13 @@ import type { Database, Sqlite3Static } from '@sqlite.org/sqlite-wasm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import schema from '../../../src/db/schema.sql?raw';
 import {
+  assertNoParentCycle,
   auditCandidateDatabase,
   auditCharacterOwnership,
   CandidateAuditError,
   CHARACTER_OWNED_TABLES,
   CONTAMINABLE_REFERENCES,
+  UNENFORCED_OWNERSHIP_TABLES,
 } from '../../../src/db/candidate-audit';
 import {
   DatabaseLifecycle,
@@ -66,6 +68,37 @@ function seedTwoCharacters(db: Database): void {
         display_name)
      VALUES (1, 1, 'alice-source', 'class', 1, 'Wizard'),
             (2, 2, 'bob-source', 'class', 1, 'Wizard')`,
+  );
+}
+
+/** Two catalog spells, both active, so a slot has something legal to point at. */
+function seedSpellVersions(db: Database): void {
+  db.exec(
+    `INSERT INTO spell_identities
+       (id, content_key, canonical_name, normalized_name)
+     VALUES (1, 'spell:fireball', 'Fireball', 'fireball'),
+            (2, 'spell:shield', 'Shield', 'shield')`,
+  );
+  db.exec(
+    `INSERT INTO spell_versions
+       (id, content_key, spell_identity_id, display_name, rules_edition, level,
+        school)
+     VALUES (1, 'spell:fireball:2024', 1, 'Fireball', '2024', 3, 'evocation'),
+            (2, 'spell:shield:2024', 2, 'Shield', '2024', 1, 'abjuration')`,
+  );
+}
+
+/** One slot for Alice, holding whichever single assignment the caller names. */
+function insertSlot(
+  db: Database,
+  assignment: { fixed?: number | null; current?: number | null } = {},
+): void {
+  db.exec(
+    `INSERT INTO spell_selection_slots
+       (id, character_id, source_instance_id, slot_key, rule_key, bucket,
+        eligibility_kind, fixed_spell_version_id, current_spell_version_id)
+     VALUES (1, 1, 1, 'slot-1', 'rule-1', 'prepared', 'list', ?, ?)`,
+    { bind: [assignment.fixed ?? null, assignment.current ?? null] },
   );
 }
 
@@ -171,12 +204,31 @@ describe('candidate database semantic audit', () => {
       'PRAGMA foreign_key_check in table character_source_instances',
     );
     // ...so the derived ownership pass is exercised directly, to show it is a
-    // working check and not a comment. It is the pass that would still cover a
-    // character-owned table declared without a foreign key, which this schema
-    // demonstrably permits (`source_definition_id`).
+    // working mechanism and not a comment. What it is NOT is a second line of
+    // defence that ever fires on this schema — see the test below, which pins
+    // that claim instead of leaving it to a comment.
     expect(() => auditCharacterOwnership(candidate)).toThrow(
       'character_source_instances rowid 2 owned by character 2, which does not exist.',
     );
+  });
+
+  /**
+   * WHAT THE OWNERSHIP PASS BUYS TODAY, AS AN ASSERTION RATHER THAN A COMMENT.
+   *
+   * It buys nothing: every character-owned `character_id` in this schema carries
+   * a foreign key to `characters`, so `PRAGMA foreign_key_check` — which runs in
+   * `auditIntegrity`, one pass earlier, and in `validateDatabaseConnection`
+   * before that — reaches every orphan first. Deleting the pass turns no test
+   * red except the direct call above. It is kept as future-proofing, and this is
+   * the line that stops that being a silent claim: add a character-owned table
+   * without that foreign key and this list stops being empty, which fails here
+   * and tells the next reader the pass has become load bearing.
+   */
+  it('does not currently catch anything foreign_key_check would miss', () => {
+    expect(UNENFORCED_OWNERSHIP_TABLES).toEqual([]);
+    // The emptiness is a fact about the FKs, not about the table set: the pass
+    // still scans all eleven owned tables, so a schema change is what moves it.
+    expect(CHARACTER_OWNED_TABLES.length).toBe(11);
   });
 
   it('refuses one character owning a row parented to another character', () => {
@@ -246,6 +298,53 @@ describe('candidate database semantic audit', () => {
     expect(() => auditCandidateDatabase(quarantined(bytesOf(db)))).toThrow(
       'character_source_instances parent cycle',
     );
+  });
+
+  /**
+   * THE COST OF A CHAIN, WHICH USED TO BE QUADRATIC.
+   *
+   * The previous cycle detector allocated a fresh visited set per start node and
+   * re-walked the whole ancestor chain from every key, so one long parent chain
+   * — the shape an importer controls completely — cost O(N²). Measured on the
+   * old code: 3,000 rows 116.9 ms, 6,000 rows 628.9 ms, 12,000 rows 3.35 s,
+   * 24,000 rows 16.57 s, and a single 5.6 MB image with a 50,000-long chain
+   * blocked the audit for 80.5 seconds inside the app's one worker.
+   *
+   * This counts MAP LOOKUPS rather than elapsed time on purpose: a wall-clock
+   * budget would be a flake on a loaded machine, and a lookup count is the thing
+   * the complexity claim is actually about. Linear costs about N lookups;
+   * quadratic costs about N²/2, which for N = 10,000 is 50 million — five
+   * thousand times the ceiling below, so the old implementation fails this
+   * assertion rather than merely being slower.
+   */
+  it('detects cycles in work linear in the number of rows, not quadratic', () => {
+    class CountingMap extends Map<number, number> {
+      lookups = 0;
+      override get(key: number): number | undefined {
+        this.lookups += 1;
+        return super.get(key);
+      }
+    }
+
+    const rowCount = 10_000;
+    const chain = new CountingMap();
+    for (let id = 2; id <= rowCount; id += 1) {
+      chain.set(id, id - 1);
+    }
+
+    expect(() =>
+      assertNoParentCycle(chain, () => 'unreachable: the chain has no cycle'),
+    ).not.toThrow();
+    expect(chain.lookups).toBeLessThan(4 * rowCount);
+
+    // ...and the linear walk still finds a cycle at the far end of that chain,
+    // which is the case a "stop early" optimisation would be most likely to lose.
+    const closed = new CountingMap(chain);
+    closed.set(1, rowCount);
+    expect(() =>
+      assertNoParentCycle(closed, (id) => `cycle reaching id ${String(id)}`),
+    ).toThrow('cycle reaching id');
+    expect(closed.lookups).toBeLessThan(4 * rowCount);
   });
 
   it('refuses a save-point snapshot carrying a malformed row', () => {
@@ -363,6 +462,121 @@ describe('candidate database semantic audit', () => {
     expect(() => auditCandidateDatabase(quarantined(bytesOf(db)))).toThrow(
       'snapshot.character_source_instances has a parent cycle reaching id',
     );
+  });
+
+  /**
+   * TWO ROWS, ONE PRIMARY KEY.
+   *
+   * `id` is a PRIMARY KEY, so the live table cannot hold this pair and a
+   * per-ROW contract cannot see it — it is a property of the LIST. `restore`
+   * re-inserts both rows verbatim, so undo dies on the second one. The two rows
+   * carry distinct `instance_uuid`s so the only thing wrong is the id
+   * collision.
+   */
+  it('refuses a snapshot whose rows share one id, which restore cannot insert', () => {
+    const db = freshDatabase();
+    seedTwoCharacters(db);
+    db.exec(
+      `INSERT INTO character_source_instances
+         (id, character_id, instance_uuid, source_type, source_definition_id,
+          display_name)
+       VALUES (3, 1, 'alice-second', 'class', 1, 'Wizard')`,
+    );
+    const snapshot = snapshotOf(db, 1);
+    const sources = snapshot.character_source_instances as Record<
+      string,
+      unknown
+    >[];
+    sources[1]!.id = sources[0]!.id;
+    insertSavePoint(db, 1, snapshot);
+    // SQLite has no opinion: the collision is text inside one column.
+    expect(db.selectValue('PRAGMA quick_check')).toBe('ok');
+    expect(db.selectObject('PRAGMA foreign_key_check')).toBeUndefined();
+
+    expect(() => auditCandidateDatabase(quarantined(bytesOf(db)))).toThrow(
+      'character_save_points id 1 snapshot.character_source_instances ' +
+        'contains duplicate id 1.',
+    );
+
+    // The reason the audit refuses it: undo would fail on the second INSERT.
+    const restored = freshDatabase();
+    seedTwoCharacters(restored);
+    expect(() =>
+      new CharacterState(new DatabaseContext(restored)).restore(1, snapshot),
+    ).toThrow('UNIQUE constraint failed');
+  });
+
+  /**
+   * A SLOT THE STORAGE LAYER FORBIDS, SMUGGLED IN AS TEXT.
+   *
+   * `spell_slots_exclusive_assignment_check` and the two triggers refuse a slot
+   * holding both a fixed grant and a user selection on every INSERT and UPDATE,
+   * so this pair can only exist inside a snapshot's JSON — where the per-column
+   * contract, which checks each column alone, does not see it.
+   */
+  it('refuses a snapshot slot holding both a fixed grant and a selection', () => {
+    const db = freshDatabase();
+    seedTwoCharacters(db);
+    seedSpellVersions(db);
+    insertSlot(db, { fixed: 1 });
+    const snapshot = snapshotOf(db, 1);
+    const slots = snapshot.spell_selection_slots as Record<string, unknown>[];
+    slots[0]!.current_spell_version_id = 2;
+    insertSavePoint(db, 1, snapshot);
+    expect(db.selectValue('PRAGMA quick_check')).toBe('ok');
+    expect(db.selectObject('PRAGMA foreign_key_check')).toBeUndefined();
+
+    expect(() => auditCandidateDatabase(quarantined(bytesOf(db)))).toThrow(
+      'character_save_points id 1 snapshot.spell_selection_slots[0] ' +
+        'contains both a fixed and selected spell.',
+    );
+
+    const restored = freshDatabase();
+    seedTwoCharacters(restored);
+    seedSpellVersions(restored);
+    expect(() =>
+      new CharacterState(new DatabaseContext(restored)).restore(1, snapshot),
+    ).toThrow('a spell slot cannot hold both a fixed grant and a user selection');
+  });
+
+  /**
+   * THE SECOND DELIBERATE GAP: AN INACTIVE SPELL VERSION.
+   *
+   * `CharacterState.validateSnapshot` refuses a snapshot referencing a
+   * deactivated `spell_versions` row, and the audit deliberately does NOT.
+   * Unlike a duplicate id or a double-assigned slot, this state is one a
+   * legitimate database reaches by itself: `CatalogImporter` tombstones a
+   * version (`SET is_active = 0`) whenever a re-import stops naming it, and
+   * every save point captured beforehand keeps pointing at it. Refusing the
+   * image would mean a user who took a catalog update could no longer restore
+   * their own backup.
+   *
+   * As with the schema-version skip, both halves are proved rather than
+   * asserted: the restore path really does refuse the snapshot, and it refuses
+   * it BEFORE the transaction, so the rows are still there afterwards.
+   */
+  it('accepts a snapshot referencing a tombstoned spell, and that snapshot is inert', () => {
+    const db = freshDatabase();
+    seedTwoCharacters(db);
+    seedSpellVersions(db);
+    insertSlot(db, { current: 1 });
+    const snapshot = snapshotOf(db, 1);
+    // Exactly what a catalog re-import does to a version it no longer names.
+    db.exec('UPDATE spell_versions SET is_active = 0 WHERE id = 1');
+    insertSavePoint(db, 1, snapshot);
+
+    expect(() => auditCandidateDatabase(quarantined(bytesOf(db)))).not.toThrow();
+
+    // Half two: undo declines, and declines without touching a row.
+    const state = new CharacterState(new DatabaseContext(db));
+    expect(() => state.restore(1, snapshot)).toThrow(
+      'Character snapshot references inactive spell version 1.',
+    );
+    expect(
+      db.selectObjects(
+        'SELECT id, current_spell_version_id FROM spell_selection_slots',
+      ),
+    ).toEqual([{ id: 1, current_spell_version_id: 1 }]);
   });
 
   /**

@@ -10,6 +10,10 @@ import {
 import { COLUMN_FACTS } from '../domain/contracts/generated/column-facts';
 import { rowContractError } from '../domain/contracts/rows';
 import {
+  slotExclusiveAssignmentError,
+  uniqueRowIdError,
+} from '../domain/contracts/row-rules';
+import {
   JSON_COLUMNS,
   JSON_COLUMN_KEYS,
   jsonColumnError,
@@ -178,17 +182,54 @@ function auditIntegrity(db: Database): void {
 }
 
 /**
+ * The character-owned tables whose `character_id` is NOT backed by a foreign key
+ * to `characters` — i.e. the tables for which {@link auditCharacterOwnership} is
+ * the ONLY thing standing between a candidate image and an orphan row.
+ *
+ * Derived from the generated foreign-key facts rather than asserted, and
+ * **EMPTY on the schema as it stands**. That emptiness is the honest statement
+ * of what the ownership pass buys today: NOTHING. It is not a second opinion
+ * about anything; `PRAGMA foreign_key_check` — which `auditIntegrity` runs
+ * first, and which `validateDatabaseConnection` has already run before that —
+ * reaches every orphan this pass could find, and reaches it first.
+ *
+ * `tests/unit/db/candidate-audit.test.ts` asserts this list is empty, so the
+ * claim above is checked rather than commented. The day someone adds a
+ * character-owned table without that foreign key, the list stops being empty,
+ * the test fails, and whoever reads it learns that the pass has become load
+ * bearing.
+ */
+export const UNENFORCED_OWNERSHIP_TABLES: readonly OwnedWithCharacterId[] =
+  CHARACTER_OWNED_TABLES.filter(
+    (table) =>
+      !FOREIGN_KEY_FACTS.some(
+        (fact) =>
+          fact.table === table &&
+          fact.target === 'characters' &&
+          (fact.columns as readonly string[]).includes('character_id'),
+      ),
+  );
+
+/**
  * Every character-owned row belongs to a character that exists.
  *
- * MEASURED CAVEAT, so nobody over-reads this pass: in the schema as it stands
- * every one of these `character_id` columns carries a foreign key, so
- * `PRAGMA foreign_key_check` reaches an orphan first and this pass never fires
- * on the current schema — `tests/unit/db/candidate-audit.test.ts` calls it
- * directly to prove it can. It is kept because the audit is contracted on the
- * CLASSIFICATION, not on the FKs: `character_source_instances.source_definition_id`
- * is proof that this schema does declare unenforced references, and a future
- * character-owned table without an FK on `character_id` would be covered here
- * with no edit.
+ * WHAT THIS PASS CURRENTLY BUYS, STATED SO NOBODY OVER-READS IT: nothing.
+ * {@link UNENFORCED_OWNERSHIP_TABLES} is empty, so on this schema every orphan
+ * it could report is already refused by `PRAGMA foreign_key_check` in
+ * `auditIntegrity`, one pass earlier — and by `validateDatabaseConnection`
+ * before the audit is even entered. It has never rejected an image that would
+ * otherwise have been accepted, and deleting it today would turn no test red
+ * except the one below that calls it directly.
+ *
+ * WHY IT IS KEPT ANYWAY, AS FUTURE-PROOFING AND NOT AS A GUARANTEE: the audit is
+ * contracted on the CLASSIFICATION, not on the foreign keys.
+ * `character_source_instances.source_definition_id` is proof that this schema
+ * does declare references with no FK behind them, so a character-owned table
+ * added the same way would be covered here with no edit. It is scanned over the
+ * whole of `CHARACTER_OWNED_TABLES` rather than over the (empty) unenforced
+ * subset deliberately: a pass that iterates an empty list is a pass no test can
+ * exercise, and `tests/unit/db/candidate-audit.test.ts` calls this function
+ * directly on a real orphan to prove the mechanism works.
  */
 export function auditCharacterOwnership(db: Database): void {
   for (const table of CHARACTER_OWNED_TABLES) {
@@ -309,20 +350,60 @@ function auditPolymorphicSources(db: Database): void {
  *
  * Shared by the live-table pass and the in-snapshot pass so the two cannot
  * disagree about what a cycle is.
+ *
+ * LINEAR, AND WHY IT HAD TO BECOME SO. The obvious version — a fresh visited set
+ * per start node — re-walks the whole ancestor chain from every key, which is
+ * O(N²) on the one shape an attacker controls completely: a single parent chain.
+ * Measured on this code before the change, with a chain of N source instances in
+ * one image and the identical rows with no parent as the linear control:
+ *
+ *     N       chained     control    excess
+ *     3,000   116.9 ms     3.3 ms     113.5 ms
+ *     6,000   628.9 ms     5.2 ms     623.7 ms
+ *    12,000  3,349.0 ms    9.5 ms   3,339.5 ms
+ *    24,000 16,574.1 ms   18.8 ms  16,555.4 ms
+ *
+ * — 4.96× to 5.49× per doubling, and a single 5.6 MB image with a 50,000-long
+ * chain blocked the audit for 80.5 SECONDS. `validateBytes` is synchronous and
+ * runs inside the one dedicated worker (`src/main.ts`), so that is 80 seconds
+ * during which every other RPC is queued behind it. `auditSavePointSnapshots`
+ * calls this once per save point as well, so the attacker also gets a free
+ * (1 + K) multiplier by adding save points.
+ *
+ * `settled` is the fix: a node is added to it once its whole ancestor chain has
+ * been proved to terminate, and any later walk that reaches a settled node
+ * stops. Every node is therefore pushed onto a path at most once and the total
+ * work is O(N). It cannot hide a cycle: a node only becomes settled on a walk
+ * that ENDED — a walk that reaches a cycle throws instead, so no node on a
+ * cyclic chain is ever settled, and the id reported is the same one the
+ * per-start version reported.
+ *
+ * `tests/unit/db/candidate-audit.test.ts` counts map lookups rather than
+ * measuring time, so the guard fails deterministically rather than depending on
+ * how loaded the machine is.
  */
-function assertNoParentCycle(
+export function assertNoParentCycle(
   parents: ReadonlyMap<number, number>,
   describe: (id: number) => string,
 ): void {
+  const settled = new Set<number>();
   for (const start of parents.keys()) {
-    const seen = new Set<number>([start]);
-    let current = parents.get(start);
-    while (current !== undefined) {
-      if (seen.has(current)) {
+    if (settled.has(start)) {
+      continue;
+    }
+    const path: number[] = [];
+    const onPath = new Set<number>();
+    let current: number | undefined = start;
+    while (current !== undefined && !settled.has(current)) {
+      if (onPath.has(current)) {
         throw new CandidateAuditError(describe(current));
       }
-      seen.add(current);
+      onPath.add(current);
+      path.push(current);
       current = parents.get(current);
+    }
+    for (const node of path) {
+      settled.add(node);
     }
   }
 }
@@ -449,6 +530,48 @@ function auditSnapshotSourceGraph(
  * inside a column. The portable backup already refuses this through
  * `assertOwnedRows`; this is the same rule for an image.
  *
+ * THE TWO RULES THE ROW CONTRACT CANNOT SEE, AND WHY REJECTING IS SAFE HERE.
+ * A per-row contract validates one row against one column list, so it is blind
+ * to a rule about a LIST of rows and to a rule about two columns TOGETHER. Both
+ * of those exist, both were already implemented for the portable document, and
+ * both are now imported from `../domain/contracts/row-rules.ts` rather than
+ * written twice:
+ *
+ *  1. two snapshot rows sharing one `id`. `restore` re-inserts them verbatim
+ *     into a table whose `id` is a PRIMARY KEY, so undo dies with
+ *     `SQLITE_CONSTRAINT_PRIMARYKEY`;
+ *  2. a `spell_selection_slots` row carrying BOTH `fixed_spell_version_id` and
+ *     `current_spell_version_id`. The live table cannot hold that pair — named
+ *     CHECK `spell_slots_exclusive_assignment_check` plus the triggers in
+ *     `db/schema/triggers.sql` — so the row can only exist inside the JSON, and
+ *     undo dies with `SQLITE_CONSTRAINT_TRIGGER`.
+ *
+ * These are REJECTED rather than skipped, and the D6b data-loss objection does
+ * not apply to either, because neither can occur in an image this application
+ * produced: a snapshot is `SELECT * … WHERE character_id = ? ORDER BY id` over
+ * a table with a PRIMARY KEY, and the second pair is refused by the storage
+ * layer on every INSERT and UPDATE. An image containing one was hand-made.
+ *
+ * WHAT IS DELIBERATELY NOT CHECKED: AN INACTIVE SPELL VERSION.
+ * `CharacterState.validateSnapshot` also refuses a snapshot whose slot or
+ * spellbook rows reference a `spell_versions` row with `is_active = 0`. The
+ * audit does NOT mirror that one, and the asymmetry is the point: unlike the two
+ * above, this state IS reachable in a legitimate user's own database.
+ * `CatalogImporter` tombstones a version — `SET is_active = 0`
+ * (`src/catalog/catalog-importer.ts:266`) — whenever a re-import stops naming
+ * its `content_key`, and every save point captured before that keeps referencing
+ * it. Rejecting the image would mean a user who imported a catalog update could
+ * no longer restore their own backup: the whole database refused over save
+ * points that predate a catalog change. That is exactly the destructive failure
+ * D6b names.
+ *
+ * The skip is inert, for the same reason the schema-version skip is:
+ * `CharacterState.restore` calls `validateSnapshot` BEFORE it opens the
+ * transaction, so the snapshot cannot become an INSERT — undo declines and the
+ * character's rows are untouched. `tests/unit/db/candidate-audit.test.ts` proves
+ * both halves: the audit accepts the image, and the restore refuses the snapshot
+ * without changing a row.
+ *
  * THE SCHEMA-VERSION GATE, AND WHY IT SKIPS RATHER THAN REJECTS.
  * `CharacterState.restore` refuses any snapshot whose `schema_version` is not
  * the current one, before it touches a single row, so a snapshot with any other
@@ -457,7 +580,8 @@ function auditSnapshotSourceGraph(
  * a save point the application already declines to restore — the data-loss
  * failure D6b warns about, in audit form. So a version mismatch skips the
  * snapshot, and the coverage claim is exact: every snapshot that can reach an
- * INSERT is audited. A hostile document gains nothing by setting a wrong
+ * INSERT is audited, for every rule whose violation this application could not
+ * itself have produced. A hostile document gains nothing by setting a wrong
  * version, because that is precisely the value that makes the snapshot unusable.
  */
 function auditSavePointSnapshots(db: Database): void {
@@ -499,22 +623,36 @@ function auditSavePointSnapshots(db: Database): void {
         throw new CandidateAuditError(`${label}.${table} must be a list.`);
       }
       for (const [index, row] of rows.entries()) {
-        const error = rowContractError(
-          table,
-          row,
-          `${label}.${table}[${index}]`,
-        );
+        const rowLabel = `${label}.${table}[${index}]`;
+        const error = rowContractError(table, row, rowLabel);
         if (error !== null) {
           throw new CandidateAuditError(error);
         }
         const rowOwner = (row as Record<string, unknown>).character_id;
         if (rowOwner !== owner) {
           throw new CandidateAuditError(
-            `${label}.${table}[${index}] belongs to character ` +
+            `${rowLabel} belongs to character ` +
               `${String(rowOwner)}, but the save point belongs to character ` +
               `${String(owner)}.`,
           );
         }
+        if (table === 'spell_selection_slots') {
+          const exclusivity = slotExclusiveAssignmentError(
+            row as Record<string, unknown>,
+            rowLabel,
+          );
+          if (exclusivity !== null) {
+            throw new CandidateAuditError(exclusivity);
+          }
+        }
+      }
+      const duplicateId = uniqueRowIdError(
+        rows as readonly Record<string, unknown>[],
+        `${label}.${table}`,
+        new Set<number>(),
+      );
+      if (duplicateId !== null) {
+        throw new CandidateAuditError(duplicateId);
       }
     }
     auditSnapshotSourceGraph(
