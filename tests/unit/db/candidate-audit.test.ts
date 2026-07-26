@@ -102,10 +102,25 @@ function insertSlot(
   );
 }
 
+/**
+ * The five tables an `a7-v1` snapshot carried, written out rather than derived.
+ *
+ * A historical fact about snapshots already sitting in users' databases.
+ * Deriving it from the current classification would make it follow the next
+ * change and stop describing anything real.
+ */
+const A7_V1_TABLES = [
+  'character_class_levels',
+  'character_source_instances',
+  'spell_selection_slots',
+  'wizard_spellbook_entries',
+  'warning_acknowledgements',
+] as const;
+
 /** A snapshot in exactly the shape `CharacterState.capture` produces. */
 function snapshotOf(db: Database, characterId: number): Record<string, unknown> {
   const snapshot: Record<string, unknown> = {
-    schema_version: 'a7-v1',
+    schema_version: 'a7-v2',
     character: db.selectObject(
       `SELECT ${CHARACTER_STATE_COLUMNS.join(', ')}
        FROM characters WHERE id = ?`,
@@ -121,16 +136,50 @@ function snapshotOf(db: Database, characterId: number): Record<string, unknown> 
   return snapshot;
 }
 
+/**
+ * A snapshot as `capture` produced them BEFORE weapons were captured: five
+ * table keys, no `character_weapons`.
+ */
+function legacySnapshotOf(
+  db: Database,
+  characterId: number,
+): Record<string, unknown> {
+  const snapshot: Record<string, unknown> = {
+    schema_version: 'a7-v1',
+    character: db.selectObject(
+      `SELECT ${CHARACTER_STATE_COLUMNS.join(', ')}
+       FROM characters WHERE id = ?`,
+      [characterId],
+    ),
+  };
+  for (const table of A7_V1_TABLES) {
+    snapshot[table] = db.selectObjects(
+      `SELECT * FROM "${table}" WHERE character_id = ? ORDER BY id`,
+      [characterId],
+    );
+  }
+  return snapshot;
+}
+
 function insertSavePoint(
   db: Database,
   characterId: number,
   snapshot: unknown,
 ): void {
+  // The column mirrors the snapshot's own version, as the application writes it.
+  const version = (snapshot as { schema_version?: unknown } | null)
+    ?.schema_version;
   db.exec(
     `INSERT INTO character_save_points
        (character_id, label, snapshot, schema_version)
-     VALUES (?, 'Before', ?, 'a7-v1')`,
-    { bind: [characterId, JSON.stringify(snapshot)] },
+     VALUES (?, 'Before', ?, ?)`,
+    {
+      bind: [
+        characterId,
+        JSON.stringify(snapshot),
+        typeof version === 'string' ? version : 'a7-v2',
+      ],
+    },
   );
 }
 
@@ -684,6 +733,106 @@ describe('candidate database semantic audit', () => {
     db.exec('PRAGMA foreign_keys = ON');
     expect(() => auditCandidateDatabase(quarantined(bytesOf(db)))).toThrow(
       'PRAGMA foreign_key_check in table character_source_instances',
+    );
+  });
+
+  /**
+   * WEAPONS, AND THE OLDER SNAPSHOT VERSION THEY INTRODUCED.
+   *
+   * A readable-but-older version is a different case from an unreadable one.
+   * `a7-v1` still restores, so its rows still become INSERTs and still have to
+   * be audited — but against the tables `a7-v1` actually carries.
+   */
+  it('accepts an a7-v1 save point rather than rejecting the whole image', () => {
+    const db = freshDatabase();
+    seedTwoCharacters(db);
+    db.exec(
+      `INSERT INTO character_weapons (id, character_id, name)
+       VALUES (1, 1, 'Longsword')`,
+    );
+    const legacy = legacySnapshotOf(db, 1);
+    // The fixture is the shape the claim is about: five tables, no weapons key.
+    expect(Object.hasOwn(legacy, 'character_weapons')).toBe(false);
+    insertSavePoint(db, 1, legacy);
+
+    // Refusing this would take a legitimate user's whole database away over a
+    // save point that predates weapons — the D6b failure this pass exists to
+    // avoid, and the thing that would happen if the audit held every snapshot
+    // to today's table set.
+    expect(() => auditCandidateDatabase(quarantined(bytesOf(db)))).not.toThrow();
+
+    // And it is not inert: unlike an unreadable version, this one still
+    // restores, so the audit had to actually look at it.
+    const restored = freshDatabase();
+    seedTwoCharacters(restored);
+    expect(() =>
+      new CharacterState(new DatabaseContext(restored)).restore(1, legacy),
+    ).not.toThrow();
+  });
+
+  it('still audits the rows inside an a7-v1 save point', () => {
+    // The corollary of accepting the version: the five tables it does carry get
+    // exactly the scrutiny they got before. An older version is not an escape
+    // hatch for a hand-made image.
+    const db = freshDatabase();
+    seedTwoCharacters(db);
+    const legacy = legacySnapshotOf(db, 1);
+    (
+      (legacy.character_source_instances as Record<string, unknown>[])[0] as Record<
+        string,
+        unknown
+      >
+    ).character_id = 2;
+    insertSavePoint(db, 1, legacy);
+    expect(() => auditCandidateDatabase(quarantined(bytesOf(db)))).toThrow(
+      'belongs to character 2, but the save point belongs to character 1',
+    );
+  });
+
+  it('refuses a snapshot weapon that selects a mastery it does not name', () => {
+    // The database's own CHECK, `character_weapons_mastery_requires_property_check`.
+    // A live row cannot hold this pair, so it can only exist inside snapshot
+    // JSON — and `restore` would turn it into an INSERT that dies with
+    // SQLITE_CONSTRAINT_CHECK, mid-undo, after the DELETEs have already run.
+    const db = freshDatabase();
+    seedTwoCharacters(db);
+    db.exec(
+      `INSERT INTO character_weapons (id, character_id, name)
+       VALUES (1, 1, 'Longsword')`,
+    );
+    const snapshot = snapshotOf(db, 1);
+    const weapon = (snapshot.character_weapons as Record<string, unknown>[])[0]!;
+    expect(weapon.mastery_selected).toBe(0);
+    weapon.mastery_selected = 1;
+    weapon.mastery_property = null;
+    insertSavePoint(db, 1, snapshot);
+
+    expect(() => auditCandidateDatabase(quarantined(bytesOf(db)))).toThrow(
+      'selects a weapon mastery without naming the property',
+    );
+  });
+
+  it('refuses a save point embedding another character’s weapon', () => {
+    const db = freshDatabase();
+    seedTwoCharacters(db);
+    db.exec(
+      `INSERT INTO character_weapons (id, character_id, name)
+       VALUES (1, 1, 'Longsword')`,
+    );
+    const snapshot = snapshotOf(db, 1);
+    (
+      (snapshot.character_weapons as Record<string, unknown>[])[0] as Record<
+        string,
+        unknown
+      >
+    ).character_id = 2;
+    insertSavePoint(db, 1, snapshot);
+
+    // `restore` rewrites `character_id` to the character being restored, so
+    // this would MOVE character 2's weapon on undo. Same rule the other
+    // character-owned tables already get; weapons just joined the scope.
+    expect(() => auditCandidateDatabase(quarantined(bytesOf(db)))).toThrow(
+      'belongs to character 2, but the save point belongs to character 1',
     );
   });
 });

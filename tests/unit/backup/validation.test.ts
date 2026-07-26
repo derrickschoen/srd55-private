@@ -49,6 +49,7 @@ function minimalCharacterBackup(): CharacterBackupDocument {
       character_save_points: [],
       spell_loadouts: [],
       spell_loadout_entries: [],
+      character_weapons: [],
     },
     references: {
       class_definitions: [],
@@ -190,6 +191,231 @@ function richCharacterBackup(): CharacterBackupDocument {
     },
   };
 }
+
+/**
+ * A BACKUP FILE AS IT WAS WRITTEN BEFORE WEAPONS TRAVELLED — FROZEN, BY HAND.
+ *
+ * Every byte below is typed out, not produced by any helper in this file and
+ * certainly not by `exportCharacterBackup`. That is the whole point: a fixture
+ * derived from current code follows the format wherever it goes and can never
+ * fail, so it would prove nothing about a file somebody downloaded last month.
+ * This one is a literal transcription of the shape that shipped — ten table
+ * keys, no `character_weapons`, an `a7-v1` save point with five table keys —
+ * and it must keep importing forever.
+ *
+ * If a future change makes this fail, the correct response is almost never to
+ * edit it. It is evidence about the past.
+ */
+const FROZEN_V1_BACKUP_JSON = `{
+  "format": "dnd-multiclass-spells/character",
+  "version": 1,
+  "exported_at": "2026-05-01T09:30:00.000Z",
+  "source_character_id": 3,
+  "character": {
+    "id": 3,
+    "name": "Archived Hero",
+    "strength": 11,
+    "dexterity": 16,
+    "constitution": 12,
+    "intelligence": 17,
+    "wisdom": 9,
+    "charisma": 13,
+    "proficiency_bonus_override": null,
+    "rules_edition_preference": "2024",
+    "allow_legacy": 0,
+    "notes": "written before weapons travelled",
+    "revision": 4,
+    "created_at": "2026-04-02 08:00:00",
+    "updated_at": "2026-05-01 09:00:00"
+  },
+  "tables": {
+    "character_class_levels": [],
+    "character_source_instances": [],
+    "spell_selection_slots": [],
+    "wizard_spellbook_entries": [],
+    "character_spell_preferences": [],
+    "character_rule_overrides": [],
+    "warning_acknowledgements": [],
+    "character_save_points": [
+      {
+        "id": 21,
+        "character_id": 3,
+        "label": "Archived checkpoint",
+        "schema_version": "a7-v1",
+        "snapshot": "{\\"schema_version\\":\\"a7-v1\\",\\"character\\":{\\"name\\":\\"Archived Hero\\",\\"strength\\":11,\\"dexterity\\":16,\\"constitution\\":12,\\"intelligence\\":17,\\"wisdom\\":9,\\"charisma\\":13,\\"proficiency_bonus_override\\":null,\\"rules_edition_preference\\":\\"2024\\",\\"allow_legacy\\":0,\\"notes\\":\\"written before weapons travelled\\"},\\"character_class_levels\\":[],\\"character_source_instances\\":[],\\"spell_selection_slots\\":[],\\"wizard_spellbook_entries\\":[],\\"warning_acknowledgements\\":[]}",
+        "created_at": "2026-04-10 12:00:00",
+        "updated_at": "2026-04-10 12:00:00"
+      }
+    ],
+    "spell_loadouts": [],
+    "spell_loadout_entries": []
+  },
+  "references": {
+    "class_definitions": [],
+    "subclass_definitions": [],
+    "feat_definitions": [],
+    "species_definitions": [],
+    "background_definitions": [],
+    "spell_versions": []
+  }
+}`;
+
+describe('a backup file written before weapons travelled', () => {
+  it('still imports, and reads as a character with no weapons', () => {
+    const archived = JSON.parse(FROZEN_V1_BACKUP_JSON) as Record<
+      string,
+      unknown
+    >;
+    // The fixture really is missing the key — asserted rather than assumed, so
+    // an accidental edit that adds it cannot make the rest pass vacuously.
+    const tables = archived.tables as Record<string, unknown>;
+    expect(Object.hasOwn(tables, 'character_weapons')).toBe(false);
+    expect(Object.keys(tables)).toHaveLength(10);
+
+    expect(() => validateCharacterBackup(archived)).not.toThrow();
+  });
+
+  it('accepts the current format alongside it, and still refuses an unknown table', () => {
+    // The optional key does not open the document up: an unexpected table name
+    // is still refused, so a typo cannot silently drop rows.
+    const current = minimalCharacterBackup();
+    expect(() => validateCharacterBackup(current)).not.toThrow();
+
+    const stray = structuredClone(current) as unknown as {
+      tables: Record<string, unknown>;
+    };
+    stray.tables.character_wepons = [];
+    expect(() => validateCharacterBackup(stray)).toThrow(
+      'Character backup tables must contain exactly',
+    );
+
+    // And a table that is NOT optional is still required.
+    const truncated = structuredClone(current) as unknown as {
+      tables: Record<string, unknown>;
+    };
+    delete truncated.tables.spell_loadouts;
+    expect(() => validateCharacterBackup(truncated)).toThrow(
+      'Character backup tables must contain exactly',
+    );
+  });
+
+  it('refuses a save point whose column and snapshot disagree about the version', () => {
+    const archived = JSON.parse(FROZEN_V1_BACKUP_JSON) as {
+      tables: { character_save_points: Array<Record<string, unknown>> };
+    };
+    archived.tables.character_save_points[0]!.schema_version = 'a7-v2';
+    expect(() => validateCharacterBackup(archived)).toThrow(
+      'schema_version does not match its snapshot',
+    );
+  });
+
+  it('refuses an a7-v1 snapshot that has grown a weapons key it never had', () => {
+    const archived = JSON.parse(FROZEN_V1_BACKUP_JSON) as {
+      tables: { character_save_points: Array<Record<string, unknown>> };
+    };
+    const savePoint = archived.tables.character_save_points[0]!;
+    const snapshot = JSON.parse(String(savePoint.snapshot)) as Record<
+      string,
+      unknown
+    >;
+    snapshot.character_weapons = [];
+    savePoint.snapshot = JSON.stringify(snapshot);
+    // Each version has ONE key set. Accepting a hybrid would mean the version
+    // no longer says what the snapshot contains, and the restore path decides
+    // whether to delete a character's weapons on exactly that question.
+    expect(() => validateCharacterBackup(archived)).toThrow(
+      'must contain exactly',
+    );
+  });
+});
+
+/**
+ * A JSON BOOLEAN IS NOT A SQLITE FLAG, AND THE ROW CONTRACT CANNOT TELL.
+ *
+ * `character_weapons.mastery_selected` is `base: 'degraded'` in the generated
+ * column facts — it accepts any non-null value — so `true` passes the row
+ * contract untouched, and the live table's CHECK never sees a row that is still
+ * JSON. `weaponMasterySelectionError` accepts `true` beside `1` for exactly the
+ * reason `character.allow_legacy` does: a document that has been through a
+ * codec, or written by hand, may carry either spelling. That `true` arm is the
+ * only thing between such a document and a raw SQLITE_CONSTRAINT_CHECK thrown
+ * from inside the import transaction.
+ */
+describe('a hand-written backup that spells a flag as a JSON boolean', () => {
+  const weaponRow = (
+    overrides: Record<string, unknown> = {},
+  ): Record<string, unknown> => ({
+    id: 1,
+    character_id: 7,
+    name: 'Impossible Blade',
+    damage_dice: null,
+    damage_type: null,
+    versatile_damage_dice: null,
+    finesse: 0,
+    heavy: 0,
+    light: 0,
+    loading: 0,
+    reach: 0,
+    thrown: 0,
+    two_handed: 0,
+    ammunition: 0,
+    ammunition_kind: null,
+    range_normal_feet: null,
+    range_long_feet: null,
+    mastery_property: null,
+    mastery_selected: 0,
+    other_properties: null,
+    notes: null,
+    created_at: null,
+    updated_at: null,
+    ...overrides,
+  });
+
+  const withWeapon = (row: Record<string, unknown>): unknown => {
+    const backup = structuredClone(minimalCharacterBackup()) as unknown as {
+      tables: Record<string, unknown[]>;
+    };
+    backup.tables.character_weapons = [row];
+    return backup;
+  };
+
+  it('refuses `mastery_selected: true` with no property, as it refuses `1`', () => {
+    expect(() =>
+      validateCharacterBackup(
+        withWeapon(
+          weaponRow({ mastery_selected: true, mastery_property: null }),
+        ),
+      ),
+    ).toThrow('selects a weapon mastery without naming the property');
+
+    // `1` is the same rule; asserted beside it so the boolean case cannot be
+    // read as a special case of some other check.
+    expect(() =>
+      validateCharacterBackup(
+        withWeapon(weaponRow({ mastery_selected: 1, mastery_property: null })),
+      ),
+    ).toThrow('selects a weapon mastery without naming the property');
+  });
+
+  it('accepts `mastery_selected: true` once the property is named', () => {
+    // The boolean itself is not the offence — pairing it with no property is.
+    expect(() =>
+      validateCharacterBackup(
+        withWeapon(
+          weaponRow({ mastery_selected: true, mastery_property: 'Vex' }),
+        ),
+      ),
+    ).not.toThrow();
+    // And `false` selects nothing, so it needs no property.
+    expect(() =>
+      validateCharacterBackup(
+        withWeapon(
+          weaponRow({ mastery_selected: false, mastery_property: null }),
+        ),
+      ),
+    ).not.toThrow();
+  });
+});
 
 describe('database backup validation', () => {
   it('accepts the current typed envelope and rejects version or byte corruption', () => {

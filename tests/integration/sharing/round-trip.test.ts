@@ -302,7 +302,61 @@ function seedCharacter(
      ) VALUES (?, ?, 'defense', ?, ?)`,
     [loadoutId, catalog.spellId, now, now],
   );
+  // A described weapon and a half-entered one. The second exists to prove the
+  // link does not fill in what the user has not typed: `character_weapons`
+  // treats a name-only row as a legitimate state, so the share must too (D6b).
+  db.exec(
+    `INSERT INTO character_weapons (
+       character_id, name, damage_dice, damage_type, versatile_damage_dice,
+       finesse, thrown, ammunition, ammunition_kind, range_normal_feet,
+       range_long_feet, mastery_property, mastery_selected, other_properties,
+       notes, created_at, updated_at
+     ) VALUES (
+       ?, 'Heirloom Longsword', '1d8', 'Slashing', '1d10', 0, 1, 1, 'bolt',
+       20, 60, 'Sap', 1, 'Notched near the hilt', 'from the barrow', ?, ?
+     )`,
+    [characterId, now, now],
+  );
+  db.exec(
+    `INSERT INTO character_weapons (character_id, name, created_at, updated_at)
+     VALUES (?, 'Half-entered club', ?, ?)`,
+    [characterId, now, now],
+  );
   return characterId;
+}
+
+/** The weapon columns a share is supposed to carry, in a stable order. */
+const PORTABLE_WEAPON_COLUMNS = [
+  'name',
+  'damage_dice',
+  'damage_type',
+  'versatile_damage_dice',
+  'finesse',
+  'heavy',
+  'light',
+  'loading',
+  'reach',
+  'thrown',
+  'two_handed',
+  'ammunition',
+  'ammunition_kind',
+  'range_normal_feet',
+  'range_long_feet',
+  'mastery_property',
+  'mastery_selected',
+  'other_properties',
+  'notes',
+] as const;
+
+function portableWeapons(
+  db: DatabaseContext,
+  characterId: number,
+): Record<string, unknown>[] {
+  return db.all<Record<string, unknown>>(
+    `SELECT ${PORTABLE_WEAPON_COLUMNS.join(', ')}
+     FROM character_weapons WHERE character_id = ? ORDER BY id`,
+    [characterId],
+  );
 }
 
 async function fragmentFromBytes(bytes: Uint8Array): Promise<string> {
@@ -431,6 +485,89 @@ describe('minimal character sharing', () => {
         [imported.characterId],
       ),
     ).toBe(1);
+
+    // WEAPONS SURVIVE THE LINK, COLUMN FOR COLUMN.
+    //
+    // Compared as whole rows against the sender's own, so a field silently
+    // dropped, defaulted or coerced on the way through fails here. `id`,
+    // `character_id` and the timestamps are excluded because a share carries
+    // none of them by design — they belong to the recipient's database.
+    expect(portableWeapons(target, imported.characterId)).toEqual(
+      portableWeapons(source, sourceId),
+    );
+    expect(portableWeapons(target, imported.characterId)).toEqual([
+      {
+        name: 'Heirloom Longsword',
+        damage_dice: '1d8',
+        damage_type: 'Slashing',
+        versatile_damage_dice: '1d10',
+        finesse: 0,
+        heavy: 0,
+        light: 0,
+        loading: 0,
+        reach: 0,
+        thrown: 1,
+        two_handed: 0,
+        ammunition: 1,
+        ammunition_kind: 'bolt',
+        range_normal_feet: 20,
+        range_long_feet: 60,
+        mastery_property: 'Sap',
+        mastery_selected: 1,
+        other_properties: 'Notched near the hilt',
+        notes: 'from the barrow',
+      },
+      {
+        name: 'Half-entered club',
+        damage_dice: null,
+        damage_type: null,
+        versatile_damage_dice: null,
+        finesse: 0,
+        heavy: 0,
+        light: 0,
+        loading: 0,
+        reach: 0,
+        thrown: 0,
+        two_handed: 0,
+        ammunition: 0,
+        ammunition_kind: null,
+        range_normal_feet: null,
+        range_long_feet: null,
+        mastery_property: null,
+        mastery_selected: 0,
+        other_properties: null,
+        notes: null,
+      },
+    ]);
+    // Not opt-in, unlike acknowledgements and loadouts: the document carries
+    // weapons whether or not the exporter asked for anything.
+    expect(document.weapons).toHaveLength(2);
+    expect(previewCharacterShare(target, shared).weaponCount).toBe(2);
+  });
+
+  it('leaves the weapons section out entirely for a character with none', async () => {
+    const source = await database();
+    const catalog = seedCatalog(source);
+    const characterId = seedCharacter(source, catalog);
+    source.exec('DELETE FROM character_weapons WHERE character_id = ?', [
+      characterId,
+    ]);
+
+    const document = exportCharacterShare(source, characterId);
+    // Absent rather than `[]`, so a weaponless character's link stays the shape
+    // it had before weapons travelled — and the preview says nothing about a
+    // section that is not there.
+    expect(Object.hasOwn(document, 'weapons')).toBe(false);
+
+    const target = await database();
+    seedCatalog(target, true);
+    const shared = await decodeShareFragment(
+      await encodeShareFragment(document),
+    );
+    expect(Object.hasOwn(shared, 'weapons')).toBe(false);
+    expect(previewCharacterShare(target, shared).weaponCount).toBe(0);
+    const imported = importCharacterShare(target, shared);
+    expect(portableWeapons(target, imported.characterId)).toEqual([]);
   });
 
   it('applies byte-faithful subclass config before regenerating configured slots', async () => {
@@ -1066,5 +1203,47 @@ describe('minimal character sharing', () => {
         error: { code: 'invalid_params' },
       });
     }
+  });
+});
+
+/**
+ * A SHARE LINK SOMEBODY IS STILL HOLDING.
+ *
+ * The same hand-frozen eleven-element link the codec suite pins, imported into
+ * a real database this time. It was minted once and pasted here as a literal;
+ * nothing regenerates it, so no change to the encoder can quietly move it to
+ * the current format and make this pass for the wrong reason.
+ */
+const LEGACY_FRAGMENT =
+  'H4sIAAAAAAACA12NwQrCMBBEf6XseQNNFQ_5Ag-CHxByWJqVBtcqm5SCXy-1QWovwzDMm_EQ' +
+  'x2gek5TUC-Vs8otFsukHUuoLq8kDKQNa9HCV2FzSeG_OrE_AcRLZiD3tk38J6H2L0LXd0X2_' +
+  '3JzepLEOHdDugYWwCDemAhVcvCNhLRXrftWAfu3kIbFEWKOw2fsAKTM71e0AAAA';
+
+describe('a share link that predates weapons', () => {
+  it('imports into a build that carries weapons, as a character with none', async () => {
+    const target = await database();
+    seedCatalog(target);
+    // The link names a feat the catalog must hold, or the import is refused for
+    // a reason that has nothing to do with weapons.
+    target.exec(
+      `INSERT INTO feat_definitions (content_key, name, rules_edition)
+       VALUES ('2024:feat:alert', 'Alert', '2024')`,
+    );
+
+    const shared = await decodeShareFragment(LEGACY_FRAGMENT);
+    expect(Object.hasOwn(shared, 'weapons')).toBe(false);
+    expect(previewCharacterShare(target, shared)).toMatchObject({
+      name: 'Old Link Hero',
+      weaponCount: 0,
+    });
+
+    const imported = importCharacterShare(target, shared);
+    expect(
+      target.one('SELECT name, intelligence FROM characters WHERE id = ?', [
+        imported.characterId,
+      ]),
+    ).toEqual({ name: 'Old Link Hero', intelligence: 16 });
+    // No weapons, and no error. Absence of a section is not corruption.
+    expect(portableWeapons(target, imported.characterId)).toEqual([]);
   });
 });

@@ -1,0 +1,87 @@
+This work includes material from the System Reference Document 5.2
+("SRD 5.2") by Wizards of the Coast LLC, available at
+https://www.dndbeyond.com/srd. The SRD 5.2 is licensed under the Creative
+Commons Attribution 4.0 International License, available at
+https://creativecommons.org/licenses/by/4.0/legalcode.
+
+--- Verbatim extracts: the two class features that rewrite a weapon attack
+    (D15). Read the LEFT column unless a heading says otherwise. ---
+
+=== Monk Features table — the Martial Arts die column ===
+
+     Monk Features
+              Proficiency                                                       Martial       F
+      Level     Bonus     Class Features                                         Arts         P
+        1         +2      Martial Arts, Unarmored Defense                         1d6          
+        2         +2      Monk’s Focus, Unarmored Movement,                       1d6        
+                          Uncanny Metabolism
+        3         +2      Deflect Attacks, Monk Subclass                          1d6          
+        4         +2      Ability Score Improvement, Slow Fall                    1d6          
+        5         +3      Extra Attack, Stunning Strike                           1d8          
+        6         +3      Empowered Strikes, Subclass feature                     1d8          
+        7         +3      Evasion                                                 1d8          
+        8         +3      Ability Score Improvement                               1d8          
+        9         +4      Acrobatic Movement                                      1d8          
+       10         +4      Heightened Focus, Self-Restoration                      1d8          
+       11         +4      Subclass feature                                       1d10          
+       12         +4      Ability Score Improvement                              1d10          
+       13         +5      Deflect Energy                                         1d10          
+       14         +5      Disciplined Survivor                                   1d10          
+       15         +5      Perfect Focus                                          1d10          
+       16         +5      Ability Score Improvement                              1d10          
+       17         +6      Subclass feature                                       1d12          
+       18         +6      Superior Defense                                       1d12          
+       19         +6      Epic Boon                                              1d12          
+       20         +6      Body and Mind                                          1d12          
+
+
+=== Martial Arts, all three benefits (page ~49) ===
+
+     Level 1: Martial Arts                                  
+     Your practice of martial arts gives you mastery of     
+     combat styles that use your Unarmed Strike and         
+     Monk weapons, which are the following:                 
+     • Simple Melee weapons                               
+     • Martial Melee weapons that have the Light          
+       property                                             
+     You gain the following benefits while you are un-      
+     armed or wielding only Monk weapons and you ar-        
+     en’t wearing armor or wielding a Shield.             
+       Bonus Unarmed Strike. You can make an Un-            
+     armed Strike as a Bonus Action.                        
+       Martial Arts Die. You can roll 1d6 in place of the   
+     normal damage of your Unarmed Strike or Monk           
+     weapons. This die changes as you gain Monk levels,     
+     as shown in the Martial Arts column of the Monk        
+     Features table.                                        
+       Dexterous Attacks. You can use your Dexterity        
+     modifier instead of your Strength modifier for the     
+     attack and damage rolls of your Unarmed Strikes        
+     and Monk weapons. In addition, when you use the        
+     Grapple or Shove option of your Unarmed Strike,        
+     you can use your Dexterity modifier instead of your    
+     Strength modifier to determine the save DC.            
+                                                            
+
+=== Extra Attack: the class-table rows that grant it ===
+
+         5           +3        Extra Attack, Fast Movement                                 3   
+         5             +3         Extra Attack, Tactical Shift                                 
+         11            +4         Two Extra Attacks                                            
+         20            +6         Three Extra Attacks                                          
+        5         +3      Extra Attack, Stunning Strike                           1d8          
+        5         +3        Extra Attack, Faithful Steed            2          6        4      
+        5         +3        Extra Attack                        3         6        4      2    
+
+=== Extra Attack and MULTICLASSING (page ~24, right column) ===
+
+     Extra Attack
+-    If you gain the Extra Attack feature from more than
+     one class, the features don’t stack. You can’t make
+         more than two attacks with this feature unless you
+     have a feature that says you can (such as the Fight-
+     er’s Two Extra Attacks feature).
+        Similarly, the Warlock’s Thirsting Blade invo-
+     cation, which grants you the Extra Attack feature
+     with your pact weapon, doesn’t give you additional
+     attacks if you also have Extra Attack.

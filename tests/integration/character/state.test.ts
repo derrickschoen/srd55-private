@@ -114,6 +114,14 @@ function seedFixture(): void {
      ) VALUES (?, 'warning:one', 'accepted', NULL, ?, ?)`,
     [characterId, createdAt, updatedAt],
   );
+  db.exec(
+    `INSERT INTO character_weapons (
+       character_id, name, damage_dice, damage_type, finesse, light,
+       mastery_property, mastery_selected, notes, created_at, updated_at
+     ) VALUES (?, 'Shortsword', '1d6', 'Piercing', 1, 1, 'Vex', 1,
+       'weapon row', ?, ?)`,
+    [characterId, createdAt, updatedAt],
+  );
 }
 
 function mutableCapture(): MutableSnapshot {
@@ -155,7 +163,11 @@ describe('capture and deterministic diff', () => {
       'character',
       ...CHARACTER_STATE_TABLES,
     ]);
-    expect(snapshot.schema_version).toBe('a7-v1');
+    // a7-v2 is the version that also captures character_weapons. Written out
+    // rather than compared against the exported constant: a version identifier
+    // is a wire fact that other stored data is matched against, so a test that
+    // reads it from the module under test could never notice it changing.
+    expect(snapshot.schema_version).toBe('a7-v2');
     expect(Object.keys(snapshot.character)).toEqual(CHARACTER_STATE_COLUMNS);
     expect(snapshot.character).toEqual({
       name: 'Snapshot Hero',
@@ -177,6 +189,12 @@ describe('capture and deterministic diff', () => {
     expect(snapshot.spell_selection_slots).toHaveLength(1);
     expect(snapshot.wizard_spellbook_entries).toHaveLength(1);
     expect(snapshot.warning_acknowledgements).toHaveLength(1);
+    expect(snapshot.character_weapons).toHaveLength(1);
+    expect(snapshot.character_weapons[0]).toMatchObject({
+      name: 'Shortsword',
+      mastery_property: 'Vex',
+      mastery_selected: 1,
+    });
     for (const table of CHARACTER_STATE_TABLES) {
       expect(snapshot[table]).toEqual(
         db.all(
@@ -189,10 +207,15 @@ describe('capture and deterministic diff', () => {
   });
 
   it('reports changed persisted row identities in stable table and numeric-id order', () => {
+    // These fixtures carry no `schema_version`, so `diff` holds them to the
+    // CURRENT table set — every state table must be present. That is the strict
+    // reading and the one to keep: a caller handing `diff` an object that has
+    // simply forgotten a table should hear about it.
     const emptyTables = {
       spell_selection_slots: [],
       wizard_spellbook_entries: [{ id: 8, spell_version_id: 10 }],
       warning_acknowledgements: [],
+      character_weapons: [],
     };
     const before = {
       character: { name: 'Before' },
@@ -216,6 +239,7 @@ describe('capture and deterministic diff', () => {
       ],
       wizard_spellbook_entries: [{ id: 8, spell_version_id: 10 }],
       warning_acknowledgements: [],
+      character_weapons: [],
     };
 
     expect(state.diff(before, after)).toEqual([
@@ -254,6 +278,48 @@ describe('capture and deterministic diff', () => {
         entity_id: 12,
         previous_value: null,
         new_value: { id: 12, state: 'active' },
+      },
+    ]);
+  });
+
+  it('does not invent weapon changes when only one side recorded weapons', () => {
+    // DEFENSIVE, AND DELIBERATELY SO. Nothing in the current pipeline produces
+    // a mixed pair: `CharacterAuditLog.append` is the only caller, and the
+    // executor captures both sides in one process, so both are `a7-v2`. The
+    // guard is kept because the SHAPE of the failure is silent — an `a7-v1`
+    // snapshot has no `character_weapons` key at all, so diffing it against a
+    // current one would report every weapon the character owns as newly ADDED
+    // and write change_log rows for an edit nobody made.
+    //
+    // Reached directly here, because `diff` is public and the audit log is not
+    // the only thing entitled to call it.
+    const beforeV1 = {
+      schema_version: 'a7-v1',
+      character: { name: 'Hero' },
+      character_class_levels: [{ id: 9, level: 3 }],
+      character_source_instances: [],
+      spell_selection_slots: [],
+      wizard_spellbook_entries: [],
+      warning_acknowledgements: [],
+    };
+    const afterV2 = {
+      ...beforeV1,
+      schema_version: 'a7-v2',
+      character_weapons: [{ id: 1, name: 'Longsword' }],
+    };
+
+    expect(state.diff(beforeV1, afterV2)).toEqual([]);
+    // Symmetric: the other direction must not report a REMOVAL either.
+    expect(state.diff(afterV2, beforeV1)).toEqual([]);
+    // The shared tables are still diffed — the skip is per table, not a bail.
+    expect(
+      state.diff(beforeV1, { ...afterV2, character: { name: 'Renamed' } }),
+    ).toEqual([
+      {
+        entity_type: 'character',
+        entity_id: null,
+        previous_value: { name: 'Hero' },
+        new_value: { name: 'Renamed' },
       },
     ]);
   });
@@ -492,5 +558,85 @@ describe('atomic restore', () => {
         conflictingSourceId,
       ]),
     ).toBe('Other Source');
+  });
+});
+
+describe('restoring a snapshot written by an older build', () => {
+  /**
+   * An `a7-v1` snapshot, built by REMOVING the weapons key from a live capture.
+   *
+   * Never obtained by asking current code for one — nothing can produce an
+   * `a7-v1` snapshot any more — and never written as `character_weapons: []`,
+   * because that is a different claim: "there were none" rather than "this was
+   * not recorded".
+   */
+  function legacySnapshot(): MutableSnapshot {
+    const snapshot = mutableCapture();
+    snapshot.schema_version = 'a7-v1';
+    delete snapshot.character_weapons;
+    return snapshot;
+  }
+
+  it('restores what it recorded and leaves weapons alone', () => {
+    const snapshot = legacySnapshot();
+    expect(Object.hasOwn(snapshot, 'character_weapons')).toBe(false);
+
+    db.exec('UPDATE characters SET name = ? WHERE id = ?', [
+      'Renamed since',
+      characterId,
+    ]);
+    db.exec(
+      `INSERT INTO character_weapons (character_id, name)
+       VALUES (?, 'Bought since')`,
+      [characterId],
+    );
+
+    state.restore(characterId, snapshot);
+
+    // Recorded, so rolled back.
+    expect(
+      db.scalar('SELECT name FROM characters WHERE id = ?', [characterId]),
+    ).toBe('Snapshot Hero');
+    // NOT recorded, so untouched — both the weapon that existed when the
+    // snapshot was taken and the one added afterwards are still here. Treating
+    // the absent key as an empty list would have deleted both.
+    expect(
+      db.all(
+        'SELECT name FROM character_weapons WHERE character_id = ? ORDER BY id',
+        [characterId],
+      ),
+    ).toEqual([{ name: 'Shortsword' }, { name: 'Bought since' }]);
+  });
+
+  it('still replaces weapons when the snapshot did record them', () => {
+    // The contrast that makes the case above a decision rather than an
+    // oversight: a current snapshot DOES speak for weapons, so restoring it
+    // removes one added afterwards.
+    const snapshot = mutableCapture();
+    expect(snapshot.schema_version).toBe('a7-v2');
+    db.exec(
+      `INSERT INTO character_weapons (character_id, name)
+       VALUES (?, 'Bought since')`,
+      [characterId],
+    );
+
+    state.restore(characterId, snapshot);
+
+    expect(
+      db.all(
+        'SELECT name FROM character_weapons WHERE character_id = ? ORDER BY id',
+        [characterId],
+      ),
+    ).toEqual([{ name: 'Shortsword' }]);
+  });
+
+  it('refuses a version it cannot read, before touching a row', () => {
+    const snapshot = mutableCapture();
+    snapshot.schema_version = 'a6-v0';
+    const before = persistedCharacterState();
+    expect(() => state.restore(characterId, snapshot)).toThrow(
+      'Unsupported character snapshot schema.',
+    );
+    expect(persistedCharacterState()).toEqual(before);
   });
 });

@@ -52,10 +52,12 @@ test('a weapon is added from a reference template, then edited without touching 
 
   const panel = page.getByTestId('weapons-panel');
   await expect(panel).toBeVisible();
-  // The gap is stated where the data is entered, not hidden in a help page.
-  await expect(page.getByTestId('weapon-portability-notice')).toContainText(
-    'not yet included in exported backups',
-  );
+  // The portability notice is GONE, and this asserts its absence rather than
+  // merely dropping the old assertion: weapons now travel in backups, share
+  // links and save points, so a warning that they do not would be a false
+  // statement rendered to the user.
+  await expect(page.getByTestId('weapon-portability-notice')).toHaveCount(0);
+  await expect(panel).not.toContainText('not yet included in exported backups');
   await expect(panel).toContainText('No weapons recorded');
 
   const longswordBefore = (await templateRows(page)).find(

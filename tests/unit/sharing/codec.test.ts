@@ -84,6 +84,36 @@ const complete: CharacterShareDocument = {
       spellName: 'Starward Aegis',
     },
   ],
+  // TWO WEAPONS ON PURPOSE. The first sets every optional field, so the wire
+  // pin below sees a real value in each of the nineteen slots. The second is a
+  // HALF-ENTERED weapon — a name and nothing else, which `character_weapons`
+  // permits and the planner produces the moment "Add weapon" is pressed. It is
+  // here so the round trip proves absence survives as absence rather than being
+  // filled in with empty strings or zeroes (D6b).
+  weapons: [
+    {
+      name: 'Dagger of Warning',
+      damage_dice: '1d4',
+      damage_type: 'Piercing',
+      versatile_damage_dice: '1d6',
+      ammunition_kind: 'bolt',
+      range_normal_feet: 20,
+      range_long_feet: 60,
+      mastery_property: 'Nick',
+      other_properties: 'Silvered; hums near goblins',
+      notes: 'Taken from the barrow.',
+      finesse: true,
+      heavy: true,
+      light: true,
+      loading: true,
+      reach: true,
+      thrown: true,
+      two_handed: true,
+      ammunition: true,
+      mastery_selected: true,
+    },
+    { name: 'Unfinished club' },
+  ],
 };
 
 async function arbitraryFragment(value: unknown): Promise<string> {
@@ -227,6 +257,54 @@ describe('character-share positional codec', () => {
       [['prepared', { count: 7 }]],
       [['warning:shield']],
       [['Defense', [['2024:shield', 'defense']]]],
+      // Element 11: weapons. Nineteen slots per weapon — name, the four short
+      // text columns, the two ranges, the mastery property, the two long
+      // free-text columns, then the nine flags — with `null` for every field the
+      // weapon does not set.
+      [
+        [
+          'Dagger of Warning',
+          '1d4',
+          'Piercing',
+          '1d6',
+          'bolt',
+          20,
+          60,
+          'Nick',
+          'Silvered; hums near goblins',
+          'Taken from the barrow.',
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+        ],
+        [
+          'Unfinished club',
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+        ],
+      ],
     ]);
   });
 
@@ -402,10 +480,16 @@ describe('character-share positional codec', () => {
       [],
       null,
       null,
+      // Weapons: `null`, not `[]`. A character with no weapons and a document
+      // written before weapons travelled decode to the same thing — a document
+      // with no `weapons` key at all — which is what makes an old link readable.
+      null,
     ]);
+    expect(positional).toHaveLength(12);
     expect((positional[2] as unknown[]).length).toBe(11);
     expect((positional[3] as unknown[][])[0]).toHaveLength(8);
     expect((positional[4] as unknown[][])[0]).toHaveLength(6);
+    expect(minimal).not.toHaveProperty('weapons');
     await expect(
       decodeShareFragment(await encodeShareFragment(minimal)),
     ).resolves.toEqual(minimal);
@@ -495,5 +579,86 @@ describe('character-share positional codec', () => {
     await expect(
       decodeShareFragment(await arbitraryFragment(overCount)),
     ).rejects.toThrow(/spellbook exceeds the maximum count/);
+  });
+});
+
+/**
+ * A SHARE LINK GENERATED BEFORE WEAPONS TRAVELLED.
+ *
+ * `LEGACY_FRAGMENT` is a literal base64url string — an actual link, of the kind
+ * that is sitting in somebody's chat history right now. It was minted once from
+ * the hand-written eleven-element tuple below and pasted here; it is never
+ * recomputed, so nothing in `src/` can move it. `LEGACY_WIRE` is that same
+ * document written out by hand, so a reader can see what the bytes contain
+ * without decoding them, and so the two can be checked against each other.
+ *
+ * Both must keep decoding. A link is not something a user can re-export.
+ */
+const LEGACY_FRAGMENT =
+  'H4sIAAAAAAACA12NwQrCMBBEf6XseQNNFQ_5Ag-CHxByWJqVBtcqm5SCXy-1QWovwzDMm_EQ' +
+  'x2gek5TUC-Vs8otFsukHUuoLq8kDKQNa9HCV2FzSeG_OrE_AcRLZiD3tk38J6H2L0LXd0X2_' +
+  '3JzepLEOHdDugYWwCDemAhVcvCNhLRXrftWAfu3kIbFEWKOw2fsAKTM71e0AAAA';
+
+const LEGACY_WIRE = [
+  'dnd-multiclass-spells-character-share',
+  1,
+  ['Old Link Hero', null, null, null, 16, null, null, null, null, null, null],
+  [[0, '2024:class:wizard', null, 3, 1, null, null, null]],
+  [[1, 'feat', '2024:feat:alert', null, 2, null]],
+  [],
+  ['2024:shield'],
+  [],
+  [],
+  null,
+  null,
+];
+
+describe('a share link generated before weapons travelled', () => {
+  it('is eleven elements, and the frozen fragment really contains them', async () => {
+    // Guards the fixture itself: if the literal above were ever regenerated
+    // from current code it would have twelve elements, and this fails rather
+    // than the suite quietly starting to test the new format against itself.
+    expect(LEGACY_WIRE).toHaveLength(11);
+    const decodedWire = JSON.parse(
+      new TextDecoder().decode(
+        gunzipSync(independentBase64urlDecode(LEGACY_FRAGMENT)),
+      ),
+    ) as unknown;
+    expect(decodedWire).toEqual(LEGACY_WIRE);
+  });
+
+  it('still decodes, as a document with no weapons section at all', async () => {
+    const decoded = await decodeShareFragment(LEGACY_FRAGMENT);
+    expect(decoded.character.name).toBe('Old Link Hero');
+    expect(decoded.character.intelligence).toBe(16);
+    expect(decoded.classes[0]?.classKey).toBe('2024:class:wizard');
+    expect(decoded.spellbook).toEqual(['2024:shield']);
+    // Absent, not an empty list. The link never said anything about weapons.
+    expect(Object.hasOwn(decoded, 'weapons')).toBe(false);
+    expect(decoded.weapons).toBeUndefined();
+  });
+
+  it('decodes identically whether or not the twelfth element is present', async () => {
+    // A twelve-element tuple with `null` weapons and an eleven-element tuple
+    // must mean the same thing, or a character shared today and the same
+    // character shared last month would import differently.
+    const decodedOld = await decodeShareFragment(LEGACY_FRAGMENT);
+    const decodedNew = await decodeShareFragment(
+      nodeFragment([...LEGACY_WIRE, null]),
+    );
+    expect(decodedNew).toEqual(decodedOld);
+  });
+
+  it('still refuses a length that is neither', async () => {
+    // Tolerance is exactly two lengths wide, not "any length". Ten elements and
+    // thirteen elements are both malformed and must stay refused.
+    for (const wire of [
+      LEGACY_WIRE.slice(0, 10),
+      [...LEGACY_WIRE, null, null],
+    ]) {
+      await expect(
+        decodeShareFragment(nodeFragment(wire)),
+      ).rejects.toThrow(/wire document must be a tuple of length 11 or 12/);
+    }
   });
 });
