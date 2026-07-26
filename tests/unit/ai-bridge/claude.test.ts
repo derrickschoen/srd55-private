@@ -133,11 +133,36 @@ describe('containment is asserted from the CLI’s own init event, every run', (
     ]);
   });
 
+  it('aborts on a tool_use block even if the stream is ever pretty-printed', () => {
+    // 2.1.220 emits compact JSON, so a fixed `"type":"tool_use"` substring is
+    // enough today. A release that spaced the colon would have turned this probe
+    // into a silent no-op that kept passing, so the probe tolerates whitespace.
+    const events = drain([
+      INIT,
+      '{"type": "assistant", "message": {"content": [{ "type" : "tool_use" }]}}',
+    ]);
+    expect(events).toEqual([
+      {
+        t: 'violation',
+        message: expect.stringContaining('tool_use') as unknown as string,
+      },
+    ]);
+  });
+
   it('is NOT spoofable by a fabricated tool transcript in the model’s prose', () => {
     // This CLI was measured fabricating a plausible `id` transcript while the
     // stream carried no tool_use block at all. Prose is a JSON string value, so
     // its quotes arrive escaped and cannot forge a real content block.
     const prose = 'Bash\n{"type":"tool_use"}\nuid=1000(vagrant)';
+    const events = drain([INIT, delta(prose)]);
+    expect(events).toEqual([{ t: 'delta', text: prose }]);
+  });
+
+  it('is still not spoofable now that the probe tolerates whitespace', () => {
+    // Widening the probe must not widen what prose can forge. Matching requires
+    // UNESCAPED quotes, which cannot occur inside a JSON string value, however
+    // the model spaces them.
+    const prose = 'I ran { "type" : "tool_use" , "name" : "Bash" } for you.';
     const events = drain([INIT, delta(prose)]);
     expect(events).toEqual([{ t: 'delta', text: prose }]);
   });

@@ -188,15 +188,23 @@ function emptyArray(value: unknown): boolean {
 }
 
 /**
- * A raw-substring probe for a tool-use content block.
+ * A raw-pattern probe for a tool-use content block.
  *
  * It is deliberately applied to the UNPARSED line. A model that writes
  * `"type":"tool_use"` inside its own prose cannot trip it, because prose is a
  * JSON string value and its quotes arrive escaped as `\\"`. So this catches a
  * real content block at any nesting depth without being spoofable by text —
  * which matters precisely because this CLI does fabricate tool transcripts.
+ *
+ * The `\s*` tolerance is not cosmetic. Version 2.1.220 emits compact JSON, so a
+ * fixed `"type":"tool_use"` substring matches today; a release that ever
+ * pretty-printed the stream would turn this probe into a silent no-op — the
+ * worst failure mode a guard has, since it keeps passing. Tolerating whitespace
+ * around the colon costs nothing and does not weaken the anti-spoof property:
+ * matching still requires UNESCAPED quotes, which cannot occur inside a JSON
+ * string value, so prose still cannot forge it however it is spaced.
  */
-const TOOL_USE_MARKER = '"type":"tool_use"';
+const TOOL_USE_MARKER = /"type"\s*:\s*"tool_use"/;
 
 export function createClaudeStream(): ClaudeStream {
   let initSeen = false;
@@ -218,7 +226,7 @@ export function createClaudeStream(): ClaudeStream {
       if (record === null) {
         return [];
       }
-      if (line.includes(TOOL_USE_MARKER)) {
+      if (TOOL_USE_MARKER.test(line)) {
         return halt(
           'containment failed: the CLI emitted a tool_use block, so this ' +
             'invocation was not capability-free. Run aborted.',

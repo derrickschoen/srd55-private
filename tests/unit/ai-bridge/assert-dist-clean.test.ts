@@ -102,6 +102,25 @@ describe('the dist guard FAILS on every way the bridge could leak', () => {
     });
   }
 
+  it('rejects the token meta tag the plugin injects into HTML', async () => {
+    // A regression test, not a hypothetical. The scan previously forbade only
+    // `x-ai-bridge-token`, which is NOT a substring of the meta tag below, so
+    // this exact index.html — carrying a live per-session secret — was reported
+    // "dist clean". That tag is the plugin's only build-reachable side effect,
+    // and it is HTML rather than a JS module, which is how it was missed.
+    const run = await scan(
+      distWith({
+        'index.html':
+          '<meta name="ai-bridge-token" content="' +
+          '4558de1d786d28b201324d1b8ed061fc9963fec036a91f8db1757379266d6c66">',
+        'assets/index.js': CLEAN,
+      }),
+    );
+    expect(run.code).toBe(1);
+    expect(run.stderr).toContain('ai-bridge-token');
+    expect(run.stderr).toContain('index.html');
+  });
+
   it('finds a leak in a minified single line and in a nested chunk', async () => {
     const run = await scan(
       distWith({
