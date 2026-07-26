@@ -93,6 +93,18 @@ export type TableRole =
    */
   | 'catalog_weapon'
   /**
+   * The SRD species and background TEMPLATE catalog. Its own member for the
+   * reason `catalog_weapon` is one: a species template is NOT a
+   * `species_definitions` row and labelling it one would make the role lie.
+   * The two live side by side and mean different things — the definition is a
+   * spell-grant SOURCE a character instance points at and a backup resolves by
+   * content key; the template is a bag of VALUES a character copies once and
+   * then owns. Collapsing the roles would make `TablesWithRole<'catalog_source'>`
+   * — the type `SOURCE_DEFINITION_TABLE` is checked against — start admitting
+   * tables no `source_type` can ever name.
+   */
+  | 'catalog_origin'
+  /**
    * The SRD armour catalog. Its own member for the SAME reason `catalog_weapon`
    * is one, applied consistently: armour is not a weapon, so filing
    * `armor_templates` under `catalog_weapon` to avoid a one-line union change
@@ -572,6 +584,100 @@ export const TABLE_SCOPES = {
     share: false,
     backupReference: true,
   },
+
+  // --- the origins catalog -------------------------------------------------
+  /**
+   * All five flags false, and `backupReference: false` is the load-bearing one.
+   * It is the SAME argument `weapon_templates` records, from `ReferenceKind`'s
+   * own definition: a reference kind is a catalog table backups RESOLVE
+   * CHARACTER ROWS AGAINST BY ID, and by D1b a character's species holds no
+   * template id — the picker copies values and the link is severed. There is
+   * nothing for a document to resolve. Setting it true would add a key to
+   * `CharacterBackupReferences` that no document could ever populate.
+   *
+   * `species_definitions` and `background_definitions` above stay
+   * `backupReference: true` and that is not a contradiction: those are the
+   * SPELL-GRANT sources a `character_source_instances` row genuinely points at
+   * by id, and a backup genuinely re-resolves them by content key. The two
+   * halves of picking a species have different portability rules because they
+   * are different things.
+   */
+  species_templates: {
+    role: 'catalog_origin',
+    snapshot: false,
+    backupDirect: false,
+    backup: false,
+    share: false,
+    backupReference: false,
+  },
+  species_template_traits: {
+    role: 'catalog_origin',
+    snapshot: false,
+    backupDirect: false,
+    backup: false,
+    share: false,
+    backupReference: false,
+  },
+  background_templates: {
+    role: 'catalog_origin',
+    snapshot: false,
+    backupDirect: false,
+    backup: false,
+    share: false,
+    backupReference: false,
+  },
+
+  // --- the character's own origin ------------------------------------------
+  /**
+   * The identical five flags `character_weapons` carries, and for the identical
+   * reason: a character's species is THEIR data, so it belongs in the portable
+   * backup document, in a shared link, and in the undo/redo snapshot — all four
+   * of the character-owned scopes a `character_id`-keyed table can hold — while
+   * `backupReference` stays false because the row holds no catalog id.
+   *
+   * WHAT THE THREE `true`s COST, AND WHERE IT WAS PAID. Turning a flag on here
+   * is the compile gate, not the work:
+   *
+   *  - `backup` put these tables in the document's table set, which
+   *    `assertExactKeys` makes part of the accepted shape. A file exported
+   *    before this change has no such key, so `validateDocument` treats them as
+   *    OPTIONAL and defaults each to `[]` — an old backup still imports and
+   *    yields a character with no species, which is what that file honestly
+   *    says. See `BACKUP_OPTIONAL_TABLES` below.
+   *  - `share` added `species`, `speciesTraits` and `background` sections to
+   *    the share document and three elements to the positional wire tuple. The
+   *    decoder accepts a twelve-element tuple as "no origin", so every link
+   *    already in the wild still imports.
+   *  - `snapshot` moved the snapshot schema from `a7-v2` to `a7-v3`. All three
+   *    versions are still readable: an `a7-v2` snapshot does not carry the
+   *    origin keys, and restoring one deliberately LEAVES the character's
+   *    species alone rather than deleting it, because a snapshot that never
+   *    recorded a species is not evidence that there was none.
+   */
+  character_species: {
+    role: 'character_owned',
+    snapshot: true,
+    backupDirect: true,
+    backup: true,
+    share: true,
+    backupReference: false,
+  },
+  character_species_traits: {
+    role: 'character_owned',
+    snapshot: true,
+    backupDirect: true,
+    backup: true,
+    share: true,
+    backupReference: false,
+  },
+  character_background: {
+    role: 'character_owned',
+    snapshot: true,
+    backupDirect: true,
+    backup: true,
+    share: true,
+    backupReference: false,
+  },
 } as const satisfies { [N in AnyTableName]: ScopesFor<N> };
 
 type Scopes = typeof TABLE_SCOPES;
@@ -687,12 +793,16 @@ export function order<Member extends string>() {
 export const APPLICATION_TABLES = order<AnyTableName>()([
   'armor_templates',
   'background_definitions',
+  'background_templates',
   'change_log',
+  'character_background',
   'character_class_levels',
   'character_operations',
   'character_rule_overrides',
   'character_save_points',
   'character_source_instances',
+  'character_species',
+  'character_species_traits',
   'character_spell_preferences',
   'character_weapons',
   'characters',
@@ -709,6 +819,8 @@ export const APPLICATION_TABLES = order<AnyTableName>()([
   'class_weapon_proficiencies',
   'feat_definitions',
   'species_definitions',
+  'species_template_traits',
+  'species_templates',
   'spell_identities',
   'spell_identity_aliases',
   'spell_list_memberships',
@@ -740,6 +852,11 @@ export const CHARACTER_STATE_TABLES = order<SnapshotTable>()([
   // snapshot's key order is part of what `equalValues` compares in
   // `CharacterState.diff`.
   'character_weapons',
+  // Appended for the same reason, and in this order because a species and its
+  // traits read as one thing: the species row first, its traits after it.
+  'character_species',
+  'character_species_traits',
+  'character_background',
 ]);
 
 /**
@@ -754,6 +871,13 @@ export const DELETE_ORDER = order<SnapshotTable>()([
   // No table references `character_weapons`, so it has no children and can go
   // first alongside the other leaves.
   'character_weapons',
+  // Leaves too. `character_species_traits` is keyed on `character_id` and NOT
+  // on `character_species.id` — see `db/schema/origins.ts` — so there is no
+  // parent-before-child edge between the two and the order between them is
+  // free. They are listed together because they are deleted together.
+  'character_species_traits',
+  'character_species',
+  'character_background',
   'warning_acknowledgements',
   'wizard_spellbook_entries',
   'spell_selection_slots',
@@ -773,6 +897,9 @@ export const BACKUP_DIRECT_TABLES = order<BackupDirectTable>()([
   'character_save_points',
   'spell_loadouts',
   'character_weapons',
+  'character_species',
+  'character_species_traits',
+  'character_background',
 ]);
 
 /** Every table in the portable-character backup document. */
@@ -800,6 +927,9 @@ export const BACKUP_TABLES = order<BackupTable>()([
  */
 export const BACKUP_OPTIONAL_TABLES = [
   'character_weapons',
+  'character_species',
+  'character_species_traits',
+  'character_background',
 ] as const satisfies readonly BackupTable[];
 
 /** The catalog tables a backup document resolves references against. */
@@ -848,6 +978,9 @@ export const SHARE_TABLES: { readonly [N in ShareTable]: N } = {
   spell_loadouts: 'spell_loadouts',
   spell_loadout_entries: 'spell_loadout_entries',
   character_weapons: 'character_weapons',
+  character_species: 'character_species',
+  character_species_traits: 'character_species_traits',
+  character_background: 'character_background',
 };
 
 /**
@@ -898,6 +1031,12 @@ export const AUDIT_ENTITY_TYPES = [
   // is a decision about the log's vocabulary that happens to follow the same
   // change, not a derivation.
   'character_weapons',
+  // Added for the same reason and on the same terms: `CharacterState.diff`
+  // now emits a change per origin row, and an entity type the diff can produce
+  // that the log will not accept is a write that fails at runtime.
+  'character_species',
+  'character_species_traits',
+  'character_background',
 ] as const satisfies readonly ('character' | AnyTableName)[];
 
 export type AuditEntityType = (typeof AUDIT_ENTITY_TYPES)[number];

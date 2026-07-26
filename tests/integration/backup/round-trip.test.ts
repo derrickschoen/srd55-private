@@ -211,7 +211,7 @@ function seedCompleteCharacter(
   db.exec(
     `INSERT INTO character_save_points
        (character_id, label, snapshot, schema_version, created_at, updated_at)
-     VALUES (?, 'Before experiment', ?, 'a7-v2', ?, ?)`,
+     VALUES (?, 'Before experiment', ?, 'a7-v3', ?, ?)`,
     [characterId, JSON.stringify(snapshot), timestamp, timestamp],
   );
   // A SECOND SAVE POINT IN THE OLD SNAPSHOT FORMAT.
@@ -227,6 +227,9 @@ function seedCompleteCharacter(
     schema_version: 'a7-v1',
   };
   delete legacySnapshot.character_weapons;
+  delete legacySnapshot.character_species;
+  delete legacySnapshot.character_species_traits;
+  delete legacySnapshot.character_background;
   db.exec(
     `INSERT INTO character_save_points
        (character_id, label, snapshot, schema_version, created_at, updated_at)
@@ -449,7 +452,7 @@ describe('portable character backup', () => {
     ) as Record<string, any>;
     // The current-format save point carries the weapons, re-keyed to the rows
     // that were just written, so restoring it puts back the same two weapons.
-    expect(saved.schema_version).toBe('a7-v2');
+    expect(saved.schema_version).toBe('a7-v3');
     expect(saved.character_weapons.map((row: { name: string }) => row.name)).toEqual([
       'Weathered Longsword',
       'Half-entered club',

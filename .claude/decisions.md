@@ -1,5 +1,130 @@
 # Binding scope decisions
 
+## D19 — Extra Attack is not keyed on (class, level), and the SRD already proves it (2026-07-26)
+
+Owner: *"Add to the extra attack model that some subclasses can add extra attack
+at level 6. Ie. college of valor bard (2024 phb)."*
+
+Correct, and the case is broader than the example. `class_extra_attack_grants`
+is keyed on `class_definition_id` + `class_level`, which can express only a
+class-table row. Three things break that, and two of them are in the SRD today.
+
+### 1. A SUBCLASS can grant it — the owner's case
+
+College of Valour grants Extra Attack at Bard level 6. **It is NOT in SRD 5.2**,
+which carries exactly one subclass per class — College of Lore for the Bard,
+plus Berserker, Champion, Circle of the Land, Hunter, Fiend Patron and the rest.
+
+So this is a MODEL requirement, not a content one. D3 governs: the model must be
+able to express it so imported or homebrew content can, and the bundled seed
+must not contain it, because it is not free-licensed. Building the model without
+shipping the data is exactly the right split.
+
+### 2. An INVOCATION can grant it, and the SRD has one
+
+**Thirsting Blade** — *"Prerequisite: Level 5+ Warlock, Pact of the Blade …
+You gain the Extra Attack feature FOR YOUR PACT WEAPON ONLY."* And **Devouring
+Blade** — *"Prerequisite: Level 12+ Warlock, Thirsting Blade … The Extra Attack
+of your Thirsting Blade invocation confers two extra attacks rather than one."*
+
+Both are sourced in `docs/srd/source/extra-attack-other-sources.txt`. This
+matters more than the subclass case for us, because it is content we could
+legitimately bundle today and the current model cannot hold it.
+
+### 3. It can be WEAPON-SCOPED, which the model has no notion of
+
+Thirsting Blade grants Extra Attack *for the pact weapon only*. The current
+derivation answers a single question — `attacksPerAction(classes)` — with one
+number for the character. It cannot say "two attacks, but only with this
+weapon", and a sheet that prints two attacks for every weapon a Warlock holds
+would be wrong.
+
+This lands squarely on the attack-profiles work: a profile already knows which
+weapon it belongs to, so attack COUNT belongs on the profile rather than beside
+it.
+
+### Consequences, not yet implemented
+
+- The grant needs a source that is a class, a subclass, or a named feature —
+  and a prerequisite level that is a CLASS level, not a character level.
+- Grants may be weapon-scoped; the count belongs with the attack profile.
+- The multiclass rule still governs and is the thing most likely to be got
+  wrong: Extra Attack **does not stack**, and the SRD says so about Thirsting
+  Blade explicitly — it "doesn't give you additional attacks if you also have
+  Extra Attack". A model that sums grants from class, subclass and invocation
+  would be plausible and wrong.
+- Devouring Blade shows a grant can UPGRADE another grant rather than add to it.
+
+**Deliberately not implemented in this tick.** The attack-profiles track is
+mid-revision and owns `attacksPerAction` and the profile shape. Changing the
+model underneath it would conflict for no gain. Recorded now, with the evidence
+sourced, and implemented as the next increment.
+
+---
+
+## D18 — Species and background templates merged; a two-effect gap parked (2026-07-26)
+
+`main` 14936b3. Verified by me: **1167 vitest / 86 files, build exit 0,
+62 Playwright**, schema regenerates byte-identically, and the Laravel-derived
+oracle still bites. 48 tables: 30 surviving Laravel plus 18 native — 4 weapons,
+8 sheet core, 6 origins.
+
+D12 as the owner specified it: templates in the D1b sense, most traits plain
+free text, a closed compile-checked set of effects for the ones that move a
+number. The Elf's four-hour trance is a sentence; Dwarven Toughness, Goliath
+speed and species-granted spells carry real effects.
+
+### Dwarven Toughness was off by one, and the data was the bug
+
+The trait reads "increases by 1, and it increases by 1 again whenever you gain a
+level". The opening clause IS the level-1 grant, so the total is exactly the
+character's level. It had been seeded flat=1 plus per-level=1, counting level 1
+twice. Three tests had locked the wrong value in. The formula was right; only
+the data was wrong — which is the failure mode a test written alongside the data
+cannot catch, because it agrees with it.
+
+### A gap that is pinned rather than hidden
+
+A trait carries ONE effect. The Tiefling's Fiendish Legacy grants BOTH a
+resistance and a cantrip, so modelling it as granted spells leaves the
+resistance invisible — and swapping which half is visible only moves the
+silence. The real fix is two tables plus a change to a positional share format
+deliberately pinned at version 1, which is too large to do blind and was
+mid-flight beside another track.
+
+So the gap is stated at the seed site with source line numbers and **pinned by a
+test that FAILS if someone silently "fixes" it**, with the design filed for the
+owner. That is the right shape for a known limitation: not a TODO, an assertion.
+
+### Two more corrections to my own extraction work
+
+- **The 35-foot base speed is the GOLIATH, not the Wood Elf** as an earlier
+  commit message of mine claimed.
+- **My `background-descriptions.txt` was superseded and deleted.** I had sliced
+  it at a column boundary that was too narrow on hyphenated lines, so `r-` — the
+  tail of "char-" — bled into the right column. A full-width page extract has no
+  such failure mode. The provenance test now asserts set equality over the
+  extract directory in BOTH directions, so an unlisted or stray extract fails by
+  name.
+
+### The merge was the expensive part, and my method caused most of it
+
+Two tracks added tables simultaneously, so every inventory assertion conflicted.
+I resolved the additive conflicts with a mechanical keep-both, and that was the
+wrong tool for several of them: it produced two `it(` openings with one closing,
+a duplicated `toContain` argument pair, a lost array terminator, a comment body
+without its opener, and a duplicated provenance table. Every one was a SYNTAX or
+duplication error rather than a wrong number, so the suite caught them all — but
+the lesson is that keep-both is only safe for genuinely list-shaped conflicts,
+and each conflict needs classifying before a rule is applied.
+
+Counts were derived from the two independent deltas rather than read back from
+the schema: 36 FK edges before either track, origins +4, sheet +7, so 47 across
+49 rows. Verified afterwards that the oracle still fails when a Laravel column
+changes.
+
+---
+
 ## D17 — The sheet core landed, and SIX of its numbers had no source until now (2026-07-26)
 
 D11 part 1 and D12, implemented. Eight native tables, three parsers, one pure

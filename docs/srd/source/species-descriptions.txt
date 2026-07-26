@@ -4,19 +4,47 @@ https://www.dndbeyond.com/srd. The SRD 5.2 is licensed under the Creative
 Commons Attribution 4.0 International License, available at
 https://creativecommons.org/licenses/by/4.0/legalcode.
 
---- Verbatim extract: SRD 5.2.1 Species Descriptions (pages ~83-86). ---
+--- Verbatim extract: SRD 5.2.1 printed pages 84-86, Species Descriptions. ---
 
-NINE species, and that is the complete set — not a truncated extract. Dragonborn,
-Dwarf, Elf, Gnome, Goliath, Halfling, Human, Orc, Tiefling. Aasimar is NOT in
-SRD 5.2.1 (zero occurrences in the whole document), despite appearing in the
-2024 Player's Handbook. Checked, because assuming ten and quietly shipping nine
-is the failure this directory exists to prevent.
+The body below is `srd.txt` lines 5013-5219 verbatim: everything between the
+page-83 footer and the page-86 footer, inclusive of the page-84 and page-85
+footers. Nothing is edited out and nothing is re-wrapped.
+
+NINE species, and that is the complete set. Dragonborn, Dwarf, Elf, Gnome,
+Goliath, Halfling, Human, Orc, Tiefling. Aasimar is NOT in SRD 5.2.1 (zero
+occurrences in the whole document), despite appearing in the 2024 Player's
+Handbook. Checked, because assuming ten and quietly shipping nine is the
+failure this directory exists to prevent.
+
+THIS FILE WAS ONCE TRUNCATED AND THE HEADER ABOVE DID NOT NOTICE. Until it was
+re-derived, the extract began thirteen lines late — at `Species Descriptions`
+rather than at the top of printed page 84 — and those thirteen lines carry the
+RIGHT-HAND column's continuation of Dragonborn. Two whole traits were absent:
+`Darkvision` and `Draconic Flight`. Dragonborn read as three traits instead of
+five, and any parser written against the file would have been provably correct
+against a wrong source. The PDF's SHA-256 in `SOURCE.md` matched throughout,
+because a checksum over the PDF says nothing about the range someone sliced out
+of it. `SOURCE.md` now records a SHA-256 for THIS FILE as well, which is the
+only checksum that could have caught it.
 
 LAYOUT WARNING, stronger here than elsewhere: this chapter is set in two
 columns and 'pdftotext -layout' preserves both, so TWO DIFFERENT SPECIES
 often appear on the same line — the left column is one species and the
 right column another. Read one column at a time. Nothing is edited out.
 
+     of size that you can choose whether your character            Darkvision. You have Darkvision with a range of
+     is Small or Medium.                                         60 feet.
+                                                                   Draconic Flight. When you reach character level
+     Speed                                                       5, you can channel draconic magic to give yourself
+     Your character’s species determines the character’s         temporary flight. As a Bonus Action, you sprout
+     Speed.                                                      spectral wings on your back that last for 10 minutes
+     Special Traits                                              or until you retract the wings (no action required)
+     Each species gives a character special traits—              or have the Incapacitated condition. During that
+     unique characteristics based on the species’ physi-         time, you have a Fly Speed equal to your Speed. Your
+     ology or magical nature. When you choose a species,         wings appear to be made of the same energy as your
+     your character gets all the special traits listed for it.   Breath Weapon. Once you use this trait, you can’t
+     Some traits involve making a choice from a handful          use it again until you finish a Long Rest.
+     of options.                                                 Dwarf
      Species Descriptions                                        Creature Type: Humanoid
                                                                  Size: Medium (about 4–5 feet tall)
      Dragonborn                                                  Speed: 30 feet
@@ -210,3 +238,4 @@ right column another. Read one column at a time. Nothing is edited out.
                    You also know the Fire Bolt cantrip.
 
 
+86   System Reference Document 5.2.1

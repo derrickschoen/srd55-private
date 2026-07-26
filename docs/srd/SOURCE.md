@@ -26,6 +26,7 @@ without carrying them in every clone.
 curl -sSLO https://media.dndbeyond.com/compendium-images/srd/5.2/SRD_CC_v5.2.1.pdf
 sha256sum SRD_CC_v5.2.1.pdf     # must match the table above
 pdftotext -layout SRD_CC_v5.2.1.pdf srd.txt
+sha256sum docs/srd/source/*.txt # each must match the per-extract table below
 ```
 
 Column slicing must be done by CHARACTER, not byte. The SRD uses curly quotes,
@@ -36,20 +37,68 @@ and becomes fabricated data downstream. Both mistakes were made and caught here.
 `pdftotext` is poppler-utils. `-layout` matters: without it the PDF's two-column
 pages interleave and the weapon table becomes unreadable.
 
-| Extract | Source | Page |
-|---|---|---|
-| `source/weapons-table.txt` | Weapons table, all four categories | 90 |
-| `source/weapon-mastery-progression.txt` | Barbarian and Fighter class tables (the count is a COLUMN) | 27, 47 |
-| `source/weapon-mastery-flat-classes.txt` | Paladin, Ranger, Rogue feature text (the count is PROSE) | 55, 57, 60 |
-| `source/class-core-traits.txt` | Core Traits table for all twelve classes — hit die, saving throws, skill/weapon proficiencies, armour training | 26-72 |
-| `source/armor-table.txt` | Armor table: **12 armours plus Shield — 13 rows**, with AC formula, Strength requirement and stealth penalty | 91 |
-| `source/species-descriptions.txt` | All nine species — creature type, size, speed and traits | 83-86 |
-| `source/background-descriptions.txt` | All FOUR backgrounds — ability scores, origin feat, skills, tool | 82 |
-| `source/weapon-attack-cantrips.txt` | True Strike and Shillelagh, the two cantrips that rewrite a weapon attack (D14) | 157, 163 |
-| `source/attack-class-features.txt` | Martial Arts (all three benefits, die progression) and every Extra Attack grant, plus the multiclass rule (D15) | 24, 27, 47, 49, 55, 57 |
-| `source/skills-table.txt` | The Skills table (all 18 skills and the ability each uses), the Proficiency Bonus table, and the rules that apply the bonus to a skill or a save | 10, 12, 13 |
-| `source/sheet-math.txt` | Passive Perception, Level 1 Hit Points by Class, Fixed Hit Points by Class, Initiative, unarmoured Armor Class | 21-23 |
-| `source/multiclassing.txt` | Multiclassing: Hit Points and Hit Dice, Proficiency Bonus, proficiencies, Armor Class and Extra Attack | 24-25 |
+| Extract | Source | Page | SHA-256 |
+|---|---|---|---|
+| `source/weapons-table.txt` | Weapons table, all four categories | 90 | `d78ee14dbd9bb78701a9f3cee8e871c11fe3e88e646fd5e6604c6cb30d7c8497` |
+| `source/weapon-mastery-progression.txt` | Barbarian and Fighter class tables (the count is a COLUMN) | 27, 47 | `39274ea85dbcb94ef663cf5923c53e90db4f2d51a0fa29c759128e448cce0811` |
+| `source/weapon-mastery-flat-classes.txt` | Paladin, Ranger, Rogue feature text (the count is PROSE) | 55, 57, 60 | `616493484b5b0d3b6b0ff11072ad156141fca4e90a2364f37159745715b07591` |
+| `source/class-core-traits.txt` | Core Traits table for all twelve classes — hit die, saving throws, skill/weapon proficiencies, armour training | 26-72 | `64dcc7e5e6fe26e6bb063e8f74a916d140e1cd944c192da4ace1c306ada32bbf` |
+| `source/armor-table.txt` | Armor table: **12 armours plus Shield — 13 rows**, with AC formula, Strength requirement and stealth penalty | 91 | `c8bd735199d7649f19877f6e746ce2fca40496340c48a0733eb9f0371bfaa884` |
+| `source/species-descriptions.txt` | All nine species — creature type, size, speed and traits | 84-86 | `37e05427bbe352a485d0c336cf49bc79886f186203e0497bfdaa978255e6ab3b` |
+| `source/backgrounds.txt` | All four backgrounds — the five parts each, plus the prose describing them | 83 | `9272cca5b81852bf43ddc013e5581cc3736e8c559c26a702774843e7d0fd3f8d` |
+| `source/weapon-attack-cantrips.txt` | True Strike and Shillelagh, the two cantrips that rewrite a weapon attack (D14) | 157, 163 | `067d1f684daba78391fadb639166dcbba2164683360786059fd65e313b01c50a` |
+| `source/attack-class-features.txt` | Martial Arts (all three benefits, die progression) and every Extra Attack grant, plus the multiclass rule (D15) | 24, 27, 47, 49, 55, 57 | `4d9404fe30d3e49b41168f14b9da7a70803fcaa93aa0b93bc8fd805dcae0c96b` |
+| `source/extra-attack-other-sources.txt` | Thirsting Blade and Devouring Blade — Extra Attack granted by an INVOCATION, and scoped to one weapon (D19) | 68, 69, 24 | `53073d181f004ed2bfdf94d7d54278bdaa00ced8e0f46723732278cd3e59c2cb` |
+| `source/skills-table.txt` | The Skills table (all 18 skills and the ability each uses), the Proficiency Bonus table, and the rules that apply the bonus to a skill or a save | 10, 12, 13 | `f950b9e22f6cc2162d0a04db5b019151de0c0714f52f021accc6ebaee5b1fd5f` |
+| `source/sheet-math.txt` | Passive Perception, Level 1 Hit Points by Class, Fixed Hit Points by Class, Initiative, unarmoured Armor Class | 21-23 | `69ea40b3f3ac7bd7df28868bc0d142ba4fe29163305377bba235f3f691f2ff1e` |
+| `source/multiclassing.txt` | Multiclassing: Hit Points and Hit Dice, Proficiency Bonus, proficiencies, Armor Class and Extra Attack | 24-25 | `4a6cef7329a5338f16e23fc4404d650e5d157ee7a45d99773b9ba7780909d99b` |
+
+### Why there is a checksum PER EXTRACT, and not only for the PDF
+
+Because the PDF's checksum did not catch the thing that broke.
+
+`source/species-descriptions.txt` was committed **truncated**. It began thirteen
+lines late — at the `Species Descriptions` heading rather than at the top of
+printed page 84 — and those thirteen lines carry the right-hand column's
+continuation of Dragonborn. Two whole traits were absent, `Darkvision` and
+`Draconic Flight`, so the file said Dragonborn has three traits where the source
+prints five. The file's own header claimed it existed to stop exactly that kind
+of undercount.
+
+The PDF checksum above matched throughout, and always would have: it says the
+bytes we sliced FROM are right, and says nothing about the range someone sliced
+OUT of them. A checksum per derived file is the only one that could have caught
+it, so there is now one per file and
+`tests/unit/rules/srd-extract-provenance.test.ts` fails if any of them drifts.
+
+The table and the directory must MATCH, in both directions. A file with no row
+has no provenance, and a row with no file is a claim about bytes that are not
+there; the same test asserts set equality. Adding an extract therefore means
+adding its row, which is the whole burden.
+
+### `background-descriptions.txt` is superseded by `backgrounds.txt`
+
+Two extracts of the same four backgrounds existed briefly, and this is the
+record of which one survives so a merge does not quietly keep both.
+
+`source/background-descriptions.txt` was page 82 sliced at column 59.
+`source/backgrounds.txt` is the whole of printed page 83. **Both agree on all
+four backgrounds**, so nothing derived from either was wrong — but the sliced
+file carries a slicing artifact the full-page one does not:
+
+```
+r-     Tool Proficiency: Calligrapher’s Supplies
+```
+
+That leading `r-` is the LEFT column's hyphenated `Calligrapher-` bleeding
+across the gutter into the right column's value. It is the exact failure the
+"slice by character, at the real column boundary" warning was written about,
+surviving in a committed file.
+
+So the full-page extract is kept and the sliced one is deleted. If a merge
+reintroduces `background-descriptions.txt`, `srd-extract-provenance.test.ts`
+fails by name until it is removed again — that is what the directory
+enumeration above is for.
 
 ## What these extracts settle
 

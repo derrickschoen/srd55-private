@@ -44,6 +44,27 @@ CREATE TABLE `background_definitions` (
 
 CREATE UNIQUE INDEX `background_definitions_content_key_unique` ON `background_definitions` (`content_key`);
 CREATE UNIQUE INDEX `background_definitions_name_rules_edition_unique` ON `background_definitions` (`name`,`rules_edition`);
+CREATE TABLE `background_templates` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`content_key` VARCHAR NOT NULL,
+	`rules_edition` VARCHAR DEFAULT '2024' NOT NULL,
+	`name` VARCHAR NOT NULL,
+	`ability_score_1` VARCHAR NOT NULL,
+	`ability_score_2` VARCHAR NOT NULL,
+	`ability_score_3` VARCHAR NOT NULL,
+	`feat_name` VARCHAR NOT NULL,
+	`skill_proficiency_1` VARCHAR NOT NULL,
+	`skill_proficiency_2` VARCHAR NOT NULL,
+	`tool_proficiency` VARCHAR NOT NULL,
+	`equipment_option_a` TEXT NOT NULL,
+	`equipment_option_b` TEXT NOT NULL,
+	`created_at` DATETIME,
+	`updated_at` DATETIME,
+	CONSTRAINT "background_templates_rules_edition_check" CHECK(`rules_edition` IN ('2014', '2024', 'expanded'))
+);
+
+CREATE UNIQUE INDEX `background_templates_content_key_unique` ON `background_templates` (`content_key`);
+CREATE UNIQUE INDEX `background_templates_name_rules_edition_unique` ON `background_templates` (`name`,`rules_edition`);
 CREATE TABLE `change_log` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`character_id` integer NOT NULL,
@@ -65,6 +86,26 @@ CREATE TABLE `change_log` (
 CREATE UNIQUE INDEX `change_log_character_id_sequence_unique` ON `change_log` (`character_id`,`sequence`);
 CREATE INDEX `change_log_character_id_group_id_index` ON `change_log` (`character_id`,`group_id`);
 CREATE INDEX `change_log_operation_uuid_index` ON `change_log` (`operation_uuid`);
+CREATE TABLE `character_background` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`character_id` integer NOT NULL,
+	`name` VARCHAR NOT NULL,
+	`ability_score_1` VARCHAR,
+	`ability_score_2` VARCHAR,
+	`ability_score_3` VARCHAR,
+	`feat_name` VARCHAR,
+	`skill_proficiency_1` VARCHAR,
+	`skill_proficiency_2` VARCHAR,
+	`tool_proficiency` VARCHAR,
+	`equipment_option_a` TEXT,
+	`equipment_option_b` TEXT,
+	`notes` TEXT,
+	`created_at` DATETIME,
+	`updated_at` DATETIME,
+	FOREIGN KEY (`character_id`) REFERENCES `characters`(`id`) ON UPDATE no action ON DELETE cascade
+);
+
+CREATE UNIQUE INDEX `character_background_character_id_unique` ON `character_background` (`character_id`);
 CREATE TABLE `character_class_levels` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`character_id` integer NOT NULL,
@@ -141,6 +182,46 @@ CREATE TABLE `character_source_instances` (
 CREATE UNIQUE INDEX `character_source_instances_instance_uuid_unique` ON `character_source_instances` (`instance_uuid`);
 CREATE INDEX `character_source_instances_character_id_state_index` ON `character_source_instances` (`character_id`,`state`);
 CREATE UNIQUE INDEX `character_source_instances_id_character_id_unique` ON `character_source_instances` (`id`,`character_id`);
+CREATE TABLE `character_species` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`character_id` integer NOT NULL,
+	`name` VARCHAR NOT NULL,
+	`creature_type` VARCHAR,
+	`size` VARCHAR,
+	`base_speed_feet` integer,
+	`notes` TEXT,
+	`created_at` DATETIME,
+	`updated_at` DATETIME,
+	FOREIGN KEY (`character_id`) REFERENCES `characters`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "character_species_base_speed_check" CHECK(`base_speed_feet` IS NULL OR (typeof(`base_speed_feet`) = 'integer' AND `base_speed_feet` >= 1))
+);
+
+CREATE UNIQUE INDEX `character_species_character_id_unique` ON `character_species` (`character_id`);
+CREATE TABLE `character_species_traits` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`character_id` integer NOT NULL,
+	`sort_order` integer NOT NULL,
+	`name` VARCHAR NOT NULL,
+	`description` TEXT,
+	`effect_kind` VARCHAR,
+	`effect_damage_type` VARCHAR,
+	`effect_hit_points_flat` integer,
+	`effect_hit_points_per_level` integer,
+	`effect_speed_bonus_feet` integer,
+	`notes` TEXT,
+	`created_at` DATETIME,
+	`updated_at` DATETIME,
+	FOREIGN KEY (`character_id`) REFERENCES `characters`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "character_species_traits_effect_kind_check" CHECK(`effect_kind` IS NULL OR `effect_kind` IN ('damage_resistance', 'hp_modifier', 'speed', 'granted_spells')),
+	CONSTRAINT "character_species_traits_damage_type_kind_check" CHECK(effect_damage_type IS NULL OR effect_kind IS 'damage_resistance'),
+	CONSTRAINT "character_species_traits_hit_points_kind_check" CHECK((effect_hit_points_flat IS NULL AND effect_hit_points_per_level IS NULL) OR effect_kind IS 'hp_modifier'),
+	CONSTRAINT "character_species_traits_speed_kind_check" CHECK(effect_speed_bonus_feet IS NULL OR effect_kind IS 'speed'),
+	CONSTRAINT "character_species_traits_hp_modifier_payload_check" CHECK(effect_kind IS NOT 'hp_modifier' OR effect_hit_points_flat IS NOT NULL OR effect_hit_points_per_level IS NOT NULL),
+	CONSTRAINT "character_species_traits_speed_payload_check" CHECK(effect_kind IS NOT 'speed' OR effect_speed_bonus_feet IS NOT NULL),
+	CONSTRAINT "character_species_traits_sort_order_check" CHECK(typeof(`sort_order`) = 'integer' AND `sort_order` >= 1)
+);
+
+CREATE INDEX `character_species_traits_character_id_index` ON `character_species_traits` (`character_id`);
 CREATE TABLE `character_spell_preferences` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`character_id` integer NOT NULL,
@@ -386,6 +467,48 @@ CREATE TABLE `species_definitions` (
 
 CREATE UNIQUE INDEX `species_definitions_content_key_unique` ON `species_definitions` (`content_key`);
 CREATE UNIQUE INDEX `species_definitions_name_rules_edition_unique` ON `species_definitions` (`name`,`rules_edition`);
+CREATE TABLE `species_template_traits` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`species_template_id` integer NOT NULL,
+	`sort_order` integer NOT NULL,
+	`name` VARCHAR NOT NULL,
+	`description` TEXT NOT NULL,
+	`effect_kind` VARCHAR,
+	`effect_damage_type` VARCHAR,
+	`effect_hit_points_flat` integer,
+	`effect_hit_points_per_level` integer,
+	`effect_speed_bonus_feet` integer,
+	`created_at` DATETIME,
+	`updated_at` DATETIME,
+	FOREIGN KEY (`species_template_id`) REFERENCES `species_templates`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "species_template_traits_effect_kind_check" CHECK(`effect_kind` IS NULL OR `effect_kind` IN ('damage_resistance', 'hp_modifier', 'speed', 'granted_spells')),
+	CONSTRAINT "species_template_traits_damage_type_kind_check" CHECK(effect_damage_type IS NULL OR effect_kind IS 'damage_resistance'),
+	CONSTRAINT "species_template_traits_hit_points_kind_check" CHECK((effect_hit_points_flat IS NULL AND effect_hit_points_per_level IS NULL) OR effect_kind IS 'hp_modifier'),
+	CONSTRAINT "species_template_traits_speed_kind_check" CHECK(effect_speed_bonus_feet IS NULL OR effect_kind IS 'speed'),
+	CONSTRAINT "species_template_traits_hp_modifier_payload_check" CHECK(effect_kind IS NOT 'hp_modifier' OR effect_hit_points_flat IS NOT NULL OR effect_hit_points_per_level IS NOT NULL),
+	CONSTRAINT "species_template_traits_speed_payload_check" CHECK(effect_kind IS NOT 'speed' OR effect_speed_bonus_feet IS NOT NULL),
+	CONSTRAINT "species_template_traits_sort_order_check" CHECK(typeof(`sort_order`) = 'integer' AND `sort_order` >= 1)
+);
+
+CREATE UNIQUE INDEX `species_template_traits_template_sort_unique` ON `species_template_traits` (`species_template_id`,`sort_order`);
+CREATE UNIQUE INDEX `species_template_traits_template_name_unique` ON `species_template_traits` (`species_template_id`,`name`);
+CREATE TABLE `species_templates` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`content_key` VARCHAR NOT NULL,
+	`rules_edition` VARCHAR DEFAULT '2024' NOT NULL,
+	`name` VARCHAR NOT NULL,
+	`creature_type` VARCHAR NOT NULL,
+	`size` VARCHAR NOT NULL,
+	`alternate_size` VARCHAR,
+	`base_speed_feet` integer NOT NULL,
+	`created_at` DATETIME,
+	`updated_at` DATETIME,
+	CONSTRAINT "species_templates_rules_edition_check" CHECK(`rules_edition` IN ('2014', '2024', 'expanded')),
+	CONSTRAINT "species_templates_base_speed_check" CHECK(typeof(`base_speed_feet`) = 'integer' AND `base_speed_feet` >= 1)
+);
+
+CREATE UNIQUE INDEX `species_templates_content_key_unique` ON `species_templates` (`content_key`);
+CREATE UNIQUE INDEX `species_templates_name_rules_edition_unique` ON `species_templates` (`name`,`rules_edition`);
 CREATE TABLE `spell_identities` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`content_key` VARCHAR NOT NULL,

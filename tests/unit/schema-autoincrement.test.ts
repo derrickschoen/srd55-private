@@ -74,6 +74,13 @@ const nativeAutoIncrementTables = [
   'class_weapon_mastery_counts',
   'class_weapon_mastery_grants',
   'weapon_templates',
+  // ...and these six from `db/schema/origins.ts`.
+  'background_templates',
+  'character_background',
+  'character_species',
+  'character_species_traits',
+  'species_template_traits',
+  'species_templates',
   // Sheet core (D11/D12): seven class-content tables plus the armour catalog.
   // Every one carries a surrogate autoincrementing key, so the claim below —
   // that `naturalKeyTables` is empty — still holds after they arrive.
@@ -101,7 +108,8 @@ const allAutoIncrementTables = [
  * and left with the other eight, so the "33 of 38 from both directions" framing
  * is genuinely gone and is not pretended otherwise. What the empty list still
  * says is a real, failable claim about the schema as it stands: EVERY table has
- * a surrogate autoincrementing key, the four native weapon tables included. A
+ * a surrogate autoincrementing key, the four native weapon tables and the six
+ * native origins tables included. A
  * table added with a natural primary key fails here and forces the decision to
  * be made deliberately, which is the only thing the second direction ever
  * bought.
@@ -130,7 +138,7 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
       return db;
     }
 
-    it('declares AUTOINCREMENT on exactly the 30 Laravel and 12 native surrogate-key tables', () => {
+    it('declares AUTOINCREMENT on exactly the 30 Laravel and 18 native surrogate-key tables', () => {
       const db = openDb();
       const declared = db
         .selectValues(
@@ -144,9 +152,12 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
         .map(String);
 
       expect(declared).toEqual(allAutoIncrementTables);
-      expect(declared).toHaveLength(42);
+      // 30 surviving Laravel tables plus 18 native: 4 weapons, 8 sheet core,
+      // 6 origins. Counted in parts so one group shrinking while another grows
+      // cannot pass unnoticed.
+      expect(declared).toHaveLength(48);
       expect(autoIncrementTables).toHaveLength(30);
-      expect(nativeAutoIncrementTables).toHaveLength(12);
+      expect(nativeAutoIncrementTables).toHaveLength(18);
 
       const withoutAutoIncrement = db
         .selectValues(
