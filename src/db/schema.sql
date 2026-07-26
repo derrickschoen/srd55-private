@@ -55,7 +55,8 @@ CREATE TABLE `character_class_levels` (
 	`updated_at` DATETIME,
 	FOREIGN KEY (`character_id`) REFERENCES `characters`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`class_definition_id`) REFERENCES `class_definitions`(`id`) ON UPDATE no action ON DELETE no action,
-	FOREIGN KEY (`subclass_definition_id`,`class_definition_id`) REFERENCES `subclass_definitions`(`id`,`class_definition_id`) ON UPDATE no action ON DELETE no action
+	FOREIGN KEY (`subclass_definition_id`,`class_definition_id`) REFERENCES `subclass_definitions`(`id`,`class_definition_id`) ON UPDATE no action ON DELETE no action,
+	CONSTRAINT "character_class_levels_spellcasting_ability_override_check" CHECK(`spellcasting_ability_override` IS NULL OR `spellcasting_ability_override` IN ('strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma'))
 );
 
 CREATE UNIQUE INDEX `character_class_levels_character_id_class_definition_id_unique` ON `character_class_levels` (`character_id`,`class_definition_id`);
@@ -155,7 +156,8 @@ CREATE TABLE `character_weapons` (
 	`created_at` DATETIME,
 	`updated_at` DATETIME,
 	FOREIGN KEY (`character_id`) REFERENCES `characters`(`id`) ON UPDATE no action ON DELETE cascade,
-	CONSTRAINT "character_weapons_mastery_requires_property_check" CHECK(mastery_selected = 0 OR mastery_property IS NOT NULL)
+	CONSTRAINT "character_weapons_mastery_requires_property_check" CHECK(mastery_selected = 0 OR mastery_property IS NOT NULL),
+	CONSTRAINT "character_weapons_mastery_property_check" CHECK(`mastery_property` IS NULL OR `mastery_property` IN ('Cleave', 'Graze', 'Nick', 'Push', 'Sap', 'Slow', 'Topple', 'Vex'))
 );
 
 CREATE INDEX `character_weapons_character_id_index` ON `character_weapons` (`character_id`);
@@ -174,7 +176,16 @@ CREATE TABLE `characters` (
 	`revision` integer DEFAULT '0' NOT NULL,
 	`notes` TEXT,
 	`created_at` DATETIME,
-	`updated_at` DATETIME
+	`updated_at` DATETIME,
+	CONSTRAINT "characters_ability_scores_check" CHECK(strength BETWEEN 1 AND 30
+      AND dexterity BETWEEN 1 AND 30
+      AND constitution BETWEEN 1 AND 30
+      AND intelligence BETWEEN 1 AND 30
+      AND wisdom BETWEEN 1 AND 30
+      AND charisma BETWEEN 1 AND 30),
+	CONSTRAINT "characters_rules_edition_preference_check" CHECK(`rules_edition_preference` IN ('2014', '2024', 'expanded')),
+	CONSTRAINT "characters_proficiency_bonus_override_check" CHECK(`proficiency_bonus_override` IS NULL OR (typeof(`proficiency_bonus_override`) = 'integer' AND `proficiency_bonus_override` >= 1)),
+	CONSTRAINT "characters_revision_check" CHECK(typeof(`revision`) = 'integer' AND `revision` >= 0)
 );
 
 CREATE TABLE `class_definitions` (
@@ -192,7 +203,9 @@ CREATE TABLE `class_definitions` (
 	`primary_ability_expression` TEXT,
 	`notes` TEXT,
 	`created_at` DATETIME,
-	`updated_at` DATETIME
+	`updated_at` DATETIME,
+	CONSTRAINT "class_definitions_progression_type_check" CHECK(`progression_type` IN ('full', 'half_up', 'half_down', 'third_up', 'third_down', 'pact', 'none')),
+	CONSTRAINT "class_definitions_spellcasting_ability_check" CHECK(`spellcasting_ability` IS NULL OR `spellcasting_ability` IN ('strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma'))
 );
 
 CREATE UNIQUE INDEX `class_definitions_content_key_unique` ON `class_definitions` (`content_key`);
@@ -208,7 +221,8 @@ CREATE TABLE `class_progressions` (
 	`grant_rules` TEXT,
 	`created_at` DATETIME,
 	`updated_at` DATETIME,
-	FOREIGN KEY (`class_definition_id`) REFERENCES `class_definitions`(`id`) ON UPDATE no action ON DELETE cascade
+	FOREIGN KEY (`class_definition_id`) REFERENCES `class_definitions`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "class_progressions_class_level_check" CHECK(class_level BETWEEN 1 AND 20)
 );
 
 CREATE UNIQUE INDEX `class_progressions_class_definition_id_class_level_unique` ON `class_progressions` (`class_definition_id`,`class_level`);
@@ -219,7 +233,8 @@ CREATE TABLE `class_weapon_mastery_counts` (
 	`mastery_count` integer NOT NULL,
 	`created_at` DATETIME,
 	`updated_at` DATETIME,
-	FOREIGN KEY (`class_definition_id`) REFERENCES `class_definitions`(`id`) ON UPDATE no action ON DELETE cascade
+	FOREIGN KEY (`class_definition_id`) REFERENCES `class_definitions`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "class_weapon_mastery_counts_check" CHECK(class_level BETWEEN 1 AND 20 AND typeof(`mastery_count`) = 'integer' AND `mastery_count` >= 0)
 );
 
 CREATE UNIQUE INDEX `class_weapon_mastery_counts_class_definition_id_class_level_unique` ON `class_weapon_mastery_counts` (`class_definition_id`,`class_level`);
@@ -229,7 +244,8 @@ CREATE TABLE `class_weapon_mastery_grants` (
 	`grant` VARCHAR NOT NULL,
 	`created_at` DATETIME,
 	`updated_at` DATETIME,
-	FOREIGN KEY (`class_definition_id`) REFERENCES `class_definitions`(`id`) ON UPDATE no action ON DELETE cascade
+	FOREIGN KEY (`class_definition_id`) REFERENCES `class_definitions`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "class_weapon_mastery_grants_grant_check" CHECK(`grant` IN ('not_granted', 'counts_known', 'counts_unsourced'))
 );
 
 CREATE UNIQUE INDEX `class_weapon_mastery_grants_class_definition_id_unique` ON `class_weapon_mastery_grants` (`class_definition_id`);
@@ -361,7 +377,13 @@ CREATE TABLE `spell_selection_slots` (
 	FOREIGN KEY (`fixed_spell_version_id`) REFERENCES `spell_versions`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`current_spell_version_id`) REFERENCES `spell_versions`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`source_instance_id`,`character_id`) REFERENCES `character_source_instances`(`id`,`character_id`) ON UPDATE no action ON DELETE cascade,
-	CONSTRAINT "spell_slots_exclusive_assignment_check" CHECK(fixed_spell_version_id IS NULL OR current_spell_version_id IS NULL)
+	CONSTRAINT "spell_slots_exclusive_assignment_check" CHECK(fixed_spell_version_id IS NULL OR current_spell_version_id IS NULL),
+	CONSTRAINT "spell_selection_slots_bucket_check" CHECK(`bucket` IN ('cantrip_known', 'prepared', 'known', 'spellbook', 'automatic')),
+	CONSTRAINT "spell_selection_slots_state_check" CHECK(`state` IN ('active', 'orphaned', 'discarded', 'kept_override')),
+	CONSTRAINT "spell_selection_slots_selection_eligibility_check" CHECK(`selection_eligibility` IN ('valid', 'invalid', 'unselected')),
+	CONSTRAINT "spell_selection_slots_level_window_check" CHECK(spell_level_min BETWEEN 0 AND 9
+        AND spell_level_max BETWEEN 0 AND 9
+        AND spell_level_min <= spell_level_max)
 );
 
 CREATE UNIQUE INDEX `spell_selection_slots_character_id_slot_key_unique` ON `spell_selection_slots` (`character_id`,`slot_key`);
@@ -452,7 +474,9 @@ CREATE TABLE `spell_versions` (
 	`is_active` TINYINT(1) DEFAULT '1' NOT NULL,
 	`created_at` DATETIME,
 	`updated_at` DATETIME,
-	FOREIGN KEY (`spell_identity_id`) REFERENCES `spell_identities`(`id`) ON UPDATE no action ON DELETE cascade
+	FOREIGN KEY (`spell_identity_id`) REFERENCES `spell_identities`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "spell_versions_level_check" CHECK(provenance IS 'placeholder' OR level BETWEEN 0 AND 9),
+	CONSTRAINT "spell_versions_effect_reliability_category_check" CHECK(`effect_reliability_category` IN ('attack_roll', 'saving_throw', 'fixed_effect', 'modifier_scaled', 'ritual_utility', 'mixed'))
 );
 
 CREATE UNIQUE INDEX `spell_versions_content_key_unique` ON `spell_versions` (`content_key`);
@@ -488,7 +512,9 @@ CREATE TABLE `subclass_progressions` (
 	`grant_rules` TEXT,
 	`created_at` DATETIME,
 	`updated_at` DATETIME,
-	FOREIGN KEY (`subclass_definition_id`) REFERENCES `subclass_definitions`(`id`) ON UPDATE no action ON DELETE cascade
+	FOREIGN KEY (`subclass_definition_id`) REFERENCES `subclass_definitions`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "subclass_progressions_class_level_check" CHECK(class_level BETWEEN 1 AND 20),
+	CONSTRAINT "subclass_progressions_max_spell_level_check" CHECK(max_spell_level BETWEEN 0 AND 9)
 );
 
 CREATE UNIQUE INDEX `subclass_progressions_subclass_definition_id_class_level_unique` ON `subclass_progressions` (`subclass_definition_id`,`class_level`);
@@ -527,7 +553,10 @@ CREATE TABLE `weapon_templates` (
 	`mastery_property` VARCHAR NOT NULL,
 	`other_properties` TEXT,
 	`created_at` DATETIME,
-	`updated_at` DATETIME
+	`updated_at` DATETIME,
+	CONSTRAINT "weapon_templates_mastery_property_check" CHECK(`mastery_property` IN ('Cleave', 'Graze', 'Nick', 'Push', 'Sap', 'Slow', 'Topple', 'Vex')),
+	CONSTRAINT "weapon_templates_srd_group_check" CHECK(`srd_group` IN ('simple_melee', 'simple_ranged', 'martial_melee', 'martial_ranged')),
+	CONSTRAINT "weapon_templates_rules_edition_check" CHECK(`rules_edition` IN ('2014', '2024', 'expanded'))
 );
 
 CREATE UNIQUE INDEX `weapon_templates_content_key_unique` ON `weapon_templates` (`content_key`);

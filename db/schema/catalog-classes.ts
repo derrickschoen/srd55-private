@@ -1,4 +1,10 @@
-import { integer, sqliteTable, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import {
+  check,
+  integer,
+  sqliteTable,
+  uniqueIndex,
+} from 'drizzle-orm/sqlite-core';
+import { sql } from 'drizzle-orm';
 import type {
   ClassDefinitionId,
   ContentKey,
@@ -9,9 +15,12 @@ import type {
   ProgressionType,
   RulesEdition,
 } from '../../src/domain/enums';
+import { abilities, progressionTypes } from '../../src/domain/enums';
 import {
   datetime,
   laravelDefault,
+  nullOrOneOf,
+  oneOf,
   sqlText,
   tinyint1,
   varchar,
@@ -58,6 +67,32 @@ export const class_definitions = sqliteTable(
     updated_at: datetime()('updated_at'),
   },
   (table) => [
+    /**
+     * The caster fraction, the multiclass slot table and every "is this class a
+     * caster" branch resolve off `progression_type`. A value outside the closed
+     * set falls through every one of them, producing a slot table that is
+     * quietly wrong rather than absent. The sole writer
+     * (`seedClassDefinition` in `src/rules/class-progression-lookup.ts`) binds
+     * `ClassSeed.type`, which is typed `ProgressionType`.
+     */
+    check(
+      'class_definitions_progression_type_check',
+      oneOf('progression_type', progressionTypes),
+    ),
+    /**
+     * Nullable, and the null is the sourced fact rather than a gap: a
+     * non-casting class HAS no spellcasting ability. What is refused is a
+     * non-member, which would compute a save DC off a column that does not
+     * exist.
+     *
+     * NOT CONSTRAINED HERE: `rules_edition`. See the note on
+     * `spell_versions.rules_edition`; the same argument applies to any catalog
+     * table a future import can reach.
+     */
+    check(
+      'class_definitions_spellcasting_ability_check',
+      nullOrOneOf('spellcasting_ability', abilities),
+    ),
     uniqueIndex('class_definitions_content_key_unique').on(table.content_key),
     uniqueIndex('class_definitions_name_rules_edition_unique').on(
       table.name,
@@ -88,6 +123,15 @@ export const class_progressions = sqliteTable(
     updated_at: datetime()('updated_at'),
   },
   (table) => [
+    /**
+     * A progression row is looked up by `WHERE class_level <= ?`, so a row at
+     * level 0 or 21 is a row that either always matches or never does. The
+     * seeder walks exactly 1..20.
+     */
+    check(
+      'class_progressions_class_level_check',
+      sql`class_level BETWEEN 1 AND 20`,
+    ),
     uniqueIndex('class_progressions_class_definition_id_class_level_unique').on(
       table.class_definition_id,
       table.class_level,
@@ -156,6 +200,19 @@ export const subclass_progressions = sqliteTable(
     updated_at: datetime()('updated_at'),
   },
   (table) => [
+    check(
+      'subclass_progressions_class_level_check',
+      sql`class_level BETWEEN 1 AND 20`,
+    ),
+    /**
+     * `max_spell_level` becomes the `level_max` of a minted slot, so it is
+     * bounded by the same 0..9 the slot's own window is. Zero is legitimate and
+     * is the seeded value below the level a subclass gets spells at.
+     */
+    check(
+      'subclass_progressions_max_spell_level_check',
+      sql`max_spell_level BETWEEN 0 AND 9`,
+    ),
     uniqueIndex(
       'subclass_progressions_subclass_definition_id_class_level_unique',
     ).on(table.subclass_definition_id, table.class_level),
