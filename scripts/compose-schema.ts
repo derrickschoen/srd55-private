@@ -62,6 +62,26 @@ function wrapComment(note: string): string {
   return lines.join('\n');
 }
 
+/**
+ * The banner, the pragma, and each note as wrapped SQL comments.
+ *
+ * Split out from `composeSchemaSql` and parameterised on `notes` for one
+ * reason: `SCHEMA_NOTES` is currently empty, so composing the whole artifact
+ * only ever exercises the empty case, and the note-emitting half of the
+ * mechanism would sit untested until the day someone adds a note — which is
+ * precisely the day they need the guard to already work.
+ */
+export function composePrelude(notes: readonly string[]): string {
+  // The blank line travels WITH each note rather than sitting before the list,
+  // so an empty note list does not leave a stray blank line in the artifact.
+  return [
+    BANNER,
+    '',
+    'PRAGMA foreign_keys = ON;',
+    ...notes.flatMap((note) => ['', wrapComment(note)]),
+  ].join('\n');
+}
+
 export async function composeSchemaSql(): Promise<string> {
   // An empty "previous" snapshot makes the diff a full CREATE of every object,
   // which is byte-identical to `drizzle-kit export --sql` without spawning a
@@ -80,14 +100,5 @@ export async function composeSchemaSql(): Promise<string> {
   );
   const body = (await generateSQLiteMigration(previous, current)).join('\n');
 
-  // The blank line travels WITH each note rather than sitting before the list,
-  // so an empty note list does not leave a stray blank line in the artifact.
-  const prelude = [
-    BANNER,
-    '',
-    'PRAGMA foreign_keys = ON;',
-    ...SCHEMA_NOTES.flatMap((note) => ['', wrapComment(note)]),
-  ].join('\n');
-
-  return `${prelude}\n\n${body.trim()}\n\n${triggers.trim()}\n`;
+  return `${composePrelude(SCHEMA_NOTES)}\n\n${body.trim()}\n\n${triggers.trim()}\n`;
 }

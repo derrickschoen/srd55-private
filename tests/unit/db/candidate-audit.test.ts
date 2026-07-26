@@ -226,9 +226,12 @@ describe('candidate database semantic audit', () => {
    */
   it('does not currently catch anything foreign_key_check would miss', () => {
     expect(UNENFORCED_OWNERSHIP_TABLES).toEqual([]);
-    // The emptiness is a fact about the FKs, not about the table set: the pass
-    // still scans all eleven owned tables, so a schema change is what moves it.
-    expect(CHARACTER_OWNED_TABLES.length).toBe(11);
+    // Non-vacuity: the emptiness above is a fact about the FKs, not about the
+    // table set being empty. The exact set is pinned by name in 'derives its
+    // table set from the classification' — deliberately not restated as a count
+    // here, because a second copy of the number is a second thing to update and
+    // catches nothing the by-name transcription misses.
+    expect(CHARACTER_OWNED_TABLES.length).toBeGreaterThan(0);
   });
 
   it('refuses one character owning a row parented to another character', () => {
