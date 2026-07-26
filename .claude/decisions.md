@@ -21,7 +21,7 @@ a provenance failure, and it is very hard to review after the fact.
 `8974902d109d6e63672d7c490bde9ccf052410503d9cfa768237154fbc5e3d87`,
 6,031,375 bytes. Verbatim extracts committed under `docs/srd/source/` with
 `docs/srd/SOURCE.md` recording URL, checksum, the exact `pdftotext -layout`
-command and page numbers. All 37 weapons extracted cleanly with damage,
+command and page numbers. All 38 weapons extracted cleanly with damage,
 properties, mastery, weight and cost.
 
 **Rejected alternative:** committing the 6 MB PDF. We never modify it, and a
@@ -29,6 +29,23 @@ checksum proves an identical source without carrying it in every clone. Also
 rejected: hand-transcribing the table into app seed format here — that would
 collide with the weapons track, which owns the schema. This commit deliberately
 ships raw evidence, not a parsed dataset.
+
+### Two corrections to F6 as first written, found by the weapons track
+
+Both are my errors, caught by the track reading the artefact rather than the
+claim, which is the point of committing evidence at all.
+
+1. **38 weapons, not 37.** The original F6 text and the `6bbeef2` commit message
+   both said 37. Counting the committed extract gives 38:
+   `awk 'NR>7' docs/srd/source/weapons-table.txt | grep -E '^ {6}[A-Z]' | wc -l`.
+2. **I asserted the Paladin/Ranger/Rogue counts without committing their
+   evidence.** SOURCE.md stated the flat-two, but `docs/srd/source/` held only
+   the Barbarian and Fighter tables — zero lines mentioning the other three. A
+   provenance document that asserts an unevidenced fact is exactly the failure
+   it exists to prevent. Fixed by committing
+   `source/weapon-mastery-flat-classes.txt` with the three feature-text extracts.
+
+The shape of the answer is unchanged; only its evidence was incomplete.
 
 ### D1b's parked question, answered — and the answer is awkward
 
