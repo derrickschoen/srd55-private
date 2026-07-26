@@ -326,6 +326,68 @@ Apply these at consolidation; a plan contradicting one is wrong.
 
 ---
 
+## F4 — This is a SPELL PLANNER, not a character model (proved 2026-07-26)
+
+F0's successor gate, and larger than F0 was. Seeding the twelve classes made a
+fresh install usable **as a spell planner**. It did not make it a character
+builder, and the distance is bigger than the class seeding suggested.
+
+**Evidence — `class_definitions` carries only:**
+`content_key, name, rules_edition, spellcasting_ability, progression_type,
+caster_fraction, caster_rounding, prepares_or_knows, supports_ritual_casting,
+ritual_casting_mode, primary_ability_expression, notes`.
+
+Every one of those is a *spellcasting* attribute. Grepping the whole 616-line
+schema for character-sheet concepts:
+
+| concept | occurrences in schema.sql |
+|---|---|
+| hit dice | 0 |
+| hit points | 0 |
+| armour class | 0 |
+| skills | 0 |
+| class features | 0 |
+| traits | 0 |
+| speed | 0 |
+| size | 0 |
+| languages | 0 |
+| subclass level | 0 |
+| proficiency | 1 (spellcasting proficiency bonus only) |
+
+**Subclass coverage is 2 of 12 classes, and that is not an oversight.** The only
+seeded subclasses are EK (Fighter) and AT (Rogue) —
+precisely the two third-caster subclasses. Champion, Thief and the rest were
+never modelled because they do not cast spells. A Wizard can be created and has
+no subclass options at all.
+
+Nothing enforces "a subclass is required at level 3" either; the concept does
+not exist.
+
+### What this means for the guided builder
+
+A builder over the current model can walk a user through: name, ability scores,
+class, level, and spell choices. It **cannot** produce a character sheet,
+because the data for one does not exist — no HP, no AC, no skills, no
+proficiencies, no features, and no subclass for ten of the twelve classes.
+
+Two honest options, both larger than the builder UI itself:
+
+1. **Model expansion first** (the planned track): add the sheet domain, then
+   build the guided flow over it. Correct, and substantial.
+2. **Ship a spell-focused builder now**: a guided flow for exactly what the app
+   models today, honest about being a spell planner rather than a full sheet.
+   Delivers something usable quickly; risks the owner expecting more.
+
+**Recommendation: (2) first, then (1).** The owner's stated motivation is that
+their friends miss selections in confusing tools — that pain is real for spell
+selection alone, and completeness v1 already addresses it. Shipping a working
+spell-focused builder proves the flow before the sheet domain is built.
+
+Parked as Q6 for the owner rather than decided autonomously: this changes what
+"character builder" means and is a product decision, not a technical one.
+
+---
+
 ## F3 — Two latent bugs in committed code (proved 2026-07-25, model track)
 
 Both predate this session's work and are worth fixing regardless of which
