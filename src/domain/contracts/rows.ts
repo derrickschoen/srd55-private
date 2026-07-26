@@ -128,6 +128,21 @@ const positiveInt = z.int().min(1);
 /** An ability score, matching the range the backup validator already enforced. */
 const abilityScore = z.int().min(1).max(30);
 
+/**
+ * A CLASS level, 1..20, matching the CHECK its column already carries.
+ *
+ * D13 recorded this as a divergence and said which way to close it: the schema
+ * constrains `class_weapon_mastery_counts.class_level` to 1..20, the contract
+ * accepted any positive integer, and the fix is to TIGHTEN the contract rather
+ * than loosen the constraint.
+ *
+ * Tightening cannot lose data. The CHECK has been on the table since it was
+ * created, so no database can hold a row outside the range, and a portable
+ * backup is generated from such a database — there is no legitimate document
+ * carrying a class level of 0 or 21 for this contract to reject.
+ */
+const classLevel = z.int().min(1).max(20);
+
 const nonNegativeInt = z.int().min(0);
 
 /** What an `integer()` column gets when it needs nothing narrower. */
@@ -171,6 +186,7 @@ export const COLUMN_REFINEMENTS = {
   sqlBool,
   positiveInt,
   abilityScore,
+  classLevel,
   nonNegativeInt,
   sqlInteger,
   rulesEditionEnum,
@@ -220,6 +236,12 @@ export const NARROWED_REFINEMENTS: readonly {
     rejects: 31,
     reason:
       'Pre-existing: the backup validator required 1..30, and `update-ability.ts:30` enforces the same range on every write.',
+  },
+  {
+    name: 'classLevel',
+    rejects: 21,
+    reason:
+      'Matches the `class_level BETWEEN 1 AND 20` CHECK the column has carried since the table was created, so no stored row and no backup generated from one can fall outside it (D13).',
   },
   {
     name: 'nonNegativeInt',
@@ -522,7 +544,7 @@ const REFINEMENTS = {
   'class_weapon_mastery_grants.updated_at': sqlTimestamp,
   'class_weapon_mastery_counts.id': positiveInt,
   'class_weapon_mastery_counts.class_definition_id': positiveInt,
-  'class_weapon_mastery_counts.class_level': positiveInt,
+  'class_weapon_mastery_counts.class_level': classLevel,
   // Zero is a legitimate mastery count in principle and no printed row carries
   // one, so this is `nonNegativeInt` rather than `positiveInt`: refusing 0
   // would be inventing a rule the source does not state.
