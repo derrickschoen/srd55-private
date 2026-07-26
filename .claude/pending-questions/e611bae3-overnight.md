@@ -110,3 +110,39 @@ exists.
 
 I have NOT started either. This changes what the deliverable is, which is a
 product decision rather than a technical one.
+
+---
+
+## Q6 UPDATE — the model-expansion half is now settled by your own instruction
+
+Q6 offered Option 1 "expand the model (HP, AC, skills, features) first" versus
+Option 2 "ship a spell-focused guided builder now". I have NOT chosen between
+them, because the guided-builder question is still yours.
+
+But one part is no longer open. You instructed directly: *"Include the weapons
+from the srd as templates. Let the user make custom weapons. Don't forget
+selecting weapon masteries."* That is model expansion beyond spellcasting, and
+it is authorised by you rather than inferred by me, so weapons are being built
+(D1b governs the shape).
+
+So Q6 has narrowed to: **what the guided BUILDER walks a user through** — not
+whether the model may grow past spells. It already is growing.
+
+Worth knowing when you answer: the app still has no hit points, armour class,
+skills, class features, speed, size or languages, and subclass coverage is 2 of
+12 classes. Weapons will not change that. A builder can still only guide name,
+ability scores, class, level, spells, and now weapons.
+
+---
+
+## Q7 — A browser-test flake I could not attribute (FYI, not blocking)
+
+`tests/browser/attribution.spec.ts:16` intermittently fails on
+`expect(loads).toBe(1)` with `Received: 2`. Roughly 4 failures in ~66 runs of
+current content; 0 in 36 runs of the pre-merge commit 0a28754.
+
+I merged anyway, with two full suites green on a quiet box, and recorded the
+whole experimental record as F5 in `.claude/decisions.md` — including three
+hypotheses I tested and killed. It is disclosed, not suppressed: no retry, no
+skip, no loosened assertion. Flagging it because a rare browser flake is the
+kind of thing you may want to weigh in on before it gets chased expensively.
