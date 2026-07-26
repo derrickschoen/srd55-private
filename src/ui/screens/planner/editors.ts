@@ -9,6 +9,7 @@ import type {
   Workspace,
 } from '../../../domain/read-models';
 import type { JsonObject } from '../../../domain/models';
+import { freeTextSpan } from '../../free-text';
 
 export interface PlannerEditorActions {
   updateAbility(ability: Ability, score: number): void;
@@ -296,7 +297,8 @@ function renderSources(
   for (const source of workspace.configurable_sources) {
     const editor = document.createElement('article');
     const name = document.createElement('strong');
-    name.textContent = source.display_name;
+    // A feat instance's display name can have come from an imported share link.
+    name.append(freeTextSpan(source.display_name));
     const input = document.createElement('select');
     for (const spellList of workspace.spell_lists) {
       input.append(
@@ -327,14 +329,16 @@ function renderSources(
   for (const source of workspace.removable_sources) {
     const item = document.createElement('li');
     const description = document.createElement('span');
-    description.innerHTML = '<strong></strong><small></small>';
-    description.querySelector('strong')!.textContent =
-      source.display_name;
-    description.querySelector('small')!.textContent =
+    const descriptionName = document.createElement('strong');
+    // Feat, species and background display names can come from a share link.
+    descriptionName.append(freeTextSpan(source.display_name));
+    const descriptionType = document.createElement('small');
+    descriptionType.textContent =
       source.source_type +
       (source.parent_source_instance_id === null
         ? ''
         : ' · granted by another source');
+    description.append(descriptionName, descriptionType);
     const remove = document.createElement('button');
     remove.type = 'button';
     remove.className = 'button-danger';
@@ -377,10 +381,14 @@ function renderClasses(
     level.max = '20';
     level.value = String(entry.level);
     level.disabled = disabled;
+    // Every class row repeats the captions "Level" and "Subclass", so the
+    // implicit label alone does not identify which class a control belongs to.
+    level.setAttribute('aria-label', `${entry.name} level`);
     level.addEventListener('change', () =>
       actions.updateClass(entry, { level: Number(level.value) }),
     );
     const subclass = document.createElement('select');
+    subclass.setAttribute('aria-label', `${entry.name} subclass`);
     subclass.append(
       option('', 'None', entry.subclass_definition_id === null),
       ...entry.subclasses.map((item) =>
@@ -403,6 +411,7 @@ function renderClasses(
     remove.className = 'button-danger';
     remove.textContent = 'Remove';
     remove.disabled = disabled;
+    remove.setAttribute('aria-label', `Remove ${entry.name}`);
     remove.addEventListener('click', () => actions.removeClass(entry));
     row.append(
       name,
