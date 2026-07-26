@@ -1,11 +1,11 @@
 /// <reference lib="webworker" />
 
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
-import schema from './schema.sql?raw';
 import {
   createSahPoolStorage,
-  DatabaseLifecycle,
+  type DatabaseLifecycle,
 } from './database-lifecycle';
+import { createApplicationLifecycle } from './bootstrap';
 import {
   isRpcRequest,
   rpcFailure,
@@ -25,10 +25,9 @@ async function initialize(): Promise<DatabaseLifecycle> {
     name: 'dnd-multiclass-spells-sahpool',
     directory: '/dnd-multiclass-spells-sahpool',
   });
-  const lifecycle = new DatabaseLifecycle(
+  const lifecycle = createApplicationLifecycle(
     sqlite3,
     createSahPoolStorage(pool, filename),
-    schema,
   );
   lifecycle.open();
   return lifecycle;

@@ -50,6 +50,17 @@ export const applicationTables = [
   'wizard_spellbook_entries',
 ] as const;
 
+/**
+ * Bundled content applied to an open application database. Called on every
+ * `open()`, including the opens performed by `reset()` and `replace()`, so the
+ * implementation is responsible for being a no-op when the content is already
+ * present.
+ *
+ * A seed is BEST EFFORT: `open()` reports a throwing seed and then carries on
+ * with an unseeded database. See `DatabaseLifecycle.open`.
+ */
+export type DatabaseSeed = (db: DatabaseContext) => void;
+
 export interface DatabaseStorage {
   readonly filename: string;
   open(): Database;
@@ -189,6 +200,7 @@ export class DatabaseLifecycle {
     private readonly sqlite3: Sqlite3Static,
     private readonly storage: DatabaseStorage,
     private readonly schema: string,
+    private readonly seed: DatabaseSeed = () => undefined,
   ) {}
 
   get database(): DatabaseContext {
@@ -213,11 +225,30 @@ export class DatabaseLifecycle {
         connection.exec(this.schema);
       }
       this.#validateApplicationDatabase(connection);
-      this.#context = new DatabaseContext(connection);
+      const context = new DatabaseContext(connection);
+      this.#applySeed(context);
+      this.#context = context;
       return this.#context;
     } catch (error) {
       connection.close();
       throw error;
+    }
+  }
+
+  /**
+   * Seeding is deliberately NOT allowed to fail the open. The worker resolves
+   * `initialize()` once and reuses the promise, so an exception escaping here
+   * would leave `ready` permanently rejected and every subsequent RPC —
+   * including `system.reset`, the only in-app repair — failing with it. A
+   * database that could not be seeded is still a working database with the user
+   * data intact, and it is still resettable, so the honest response is to
+   * report the failure and boot.
+   */
+  #applySeed(context: DatabaseContext): void {
+    try {
+      this.seed(context);
+    } catch (error) {
+      console.error('Bundled content could not be seeded.', error);
     }
   }
 
