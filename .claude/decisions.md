@@ -1,5 +1,85 @@
 # Binding scope decisions
 
+## D9 — Audit hardening merged; Q3 resolved by pruning EIGHT tables, not seven (2026-07-26)
+
+`main` d2960c3. Verified by me, not on the track's word: **540 vitest / 66 files,
+build exit 0, 52 Playwright, drizzle-at-runtime guard holding, and
+`src/db/schema.sql` regenerating byte-identical from `db/schema/*.ts`.**
+
+### Q3 is answered: pruned, and the brief's count was wrong
+
+Every tick's brief said SEVEN dead Laravel tables. There are **eight** — `cache`
+belongs with `cache_locks`, and Q3's list simply omitted it. The track said so
+explicitly instead of quietly matching my number, which is the correct handling
+of a brief that disagrees with the artefact. Schema is now 30 tables, was 38.
+
+**The interesting part is what it did to the schema-signature test.** That test
+compares a SHA-256 over ordered `PRAGMA table_info` metadata against a value
+produced by running the ORIGINAL LARAVEL MIGRATIONS — an independent oracle.
+Recomputing the expectation from the artefact under test would have converted it
+into a tautology, which rule 6 forbids and which is the exact failure D7 warns
+about. Instead it is re-derived from the FROZEN pre-Drizzle fixture, with all
+three links asserted: the old hash still matches the fixture at 38 tables
+(proving the fixture IS the Laravel artefact), the new hash matches the fixture
+minus the eight, and that equals the generated schema. Both links can fail — a
+column type change breaks one, editing the fixture breaks the other. The fixture
+is deliberately NOT pruned, because being the historical artefact is its entire
+job.
+
+Two schema-generation tests were DELETED rather than adapted: their whole
+subject was the rationale for tables that no longer exist. Deleting a test whose
+subject is gone is right; keeping it as a hollow shell would have been worse.
+
+### The three findings, all confirmed and fixed
+
+1. **Quadratic audit — REAL, and worse than codex estimated.** Measured against a
+   no-parent linear control: 24,000 chained sources took 16.6 s versus 18.8 ms;
+   a 5.6 MB image with a 50,000 chain blocked the worker for **80.5 seconds**.
+   `validateBytes` is synchronous inside the app's one worker, so that is 80
+   seconds with every other RPC queued behind it. Now linear via a `settled` set
+   — 0.10 s on the same image.
+
+   I verified the algorithm myself rather than trusting the prose: a node joins
+   `settled` only on a walk that TERMINATED, so no node on a cyclic chain is ever
+   settled and no cycle can be skipped. Traced a pure cycle, a cycle with a tail,
+   a self-loop, and a diamond; the diamond does not false-positive.
+
+   The regression guard counts **Map lookups, not wall-clock** — a timing budget
+   would flake on a loaded box, and lookups are what the complexity claim is
+   actually about. Verified by reverting the fix and watching it fail at exactly
+   50,004,999.
+
+2. **The audit now refuses two things restore refuses** — duplicate snapshot ids
+   and a slot carrying both `fixed_` and `current_spell_version_id`. Both rules
+   are IMPORTED from the portable-backup validator rather than reimplemented, so
+   a document and an image cannot drift apart.
+
+   **Why rejecting is correct here and skipping was correct for stale save
+   points** — the distinction matters and is easy to get backwards. A legitimate
+   backup CAN contain a stale-version save point, so rejecting the image would
+   make a real user's own backup unrestorable (D6b). A legitimate image CANNOT
+   contain either of these two, because a PRIMARY KEY and a named CHECK plus two
+   triggers forbid them on every write. And refusing an import destroys nothing:
+   the audit runs while quarantined, so the user keeps the database they have.
+
+3. **The ownership pass is honest about being future-proofing** rather than
+   counted as a current guarantee.
+
+**Rejected: a byte or row cap at the backup boundary.** The denial of service
+was the algorithm, not the size; cost is now ~10 ms per megabyte. A cap's only
+failure mode is refusing a legitimate import, and there is no honest number —
+the database grows with the catalog AND with unbounded undo history. Declining
+to add a limit you cannot justify is the better engineering answer.
+
+**One assertion was weakened and I checked it rather than assuming:**
+`CHARACTER_OWNED_TABLES.length === 11` became `> 0`. Legitimate — a test forty
+lines earlier pins the exact eleven names with `toEqual`, fixing contents and
+length together, so the count was strictly redundant. What remains is a
+non-vacuity guard so that an empty `UNENFORCED_OWNERSHIP_TABLES` is a fact about
+foreign keys rather than about an empty table set.
+
+---
+
 ## F6 — The SRD was never actually bundled, and D1b's open question is answered (2026-07-26)
 
 **Proved by inspection, then by fetching the document.**
