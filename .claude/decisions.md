@@ -38,6 +38,16 @@ own hand (48 passed each). The flake is disclosed here, not suppressed: no
 retry, no `.skip`, no loosened assertion, no `test.fixme`. If it recurs, this
 table is the starting point rather than a fresh investigation.
 
+**Addendum, same day, after both merges.** One further failure on merged
+`main` at the default port with NO neighbour dev server running, then 0/12 on
+re-measurement. Two consequences. First, "only ever with a second dev server"
+is now falsified — that was the surviving lead in the table above and it is
+dead. Second, the branch-versus-main comparison is spent: merged `main` now
+CONTAINS the branch content, so there is no longer a clean control to measure
+against. Any future attempt must compare against the pre-merge commit 0a28754
+explicitly. Total observed: roughly 4 failures in ~66 runs of content that
+includes this work, 0 in 36 runs of 0a28754.
+
 **Contributing infrastructure defect.** `playwright.config.ts` hard-codes port
 4173 in every worktree, so parallel tracks contend for it and one run can block
 or perturb another. This is what made the flake reproducible at all. Worth
