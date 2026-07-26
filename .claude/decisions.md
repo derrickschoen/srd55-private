@@ -55,6 +55,19 @@ increment once the running tracks land.
 Owner: *"Add to the extra attack model that some subclasses can add extra attack
 at level 6. Ie. college of valor bard (2024 phb)."*
 
+**A NOTE ON NAMING, because a review redacted this quote and the redaction was
+reverted.** The line runs between CONTENT and CITATION, not at every proper
+noun. Naming a subclass in order to say it is NOT bundleable is nominative
+reference — the same act as naming the Player's Handbook itself, which nobody
+proposed to redact. What may not enter this repository is imported rules TEXT:
+prose, flavour text, feature descriptions, and fixture content that reproduces
+them. A name used to identify what is excluded reproduces nothing.
+
+The redaction also rewrote the owner's own words inside quotation marks, which
+is a worse fault than the one it was avoiding, and left D19 unverifiable — a
+reader could no longer check "it is not in SRD 5.2" without knowing which
+subclass. Restored verbatim.
+
 Correct, and the case is broader than the example. `class_extra_attack_grants`
 is keyed on `class_definition_id` + `class_level`, which can express only a
 class-table row. Three things break that, and two of them are in the SRD today.

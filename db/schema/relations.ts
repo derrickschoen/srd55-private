@@ -7,7 +7,9 @@ import {
 import {
   class_definitions,
   class_progressions,
+  named_features,
   subclass_definitions,
+  subclass_features,
   subclass_progressions,
 } from './catalog-classes';
 import {
@@ -490,6 +492,10 @@ export const classDefinitionsRelations = relations(
     weapon_proficiencies: many(class_weapon_proficiencies),
     extra_attack_grants: many(class_extra_attack_grants),
     martial_arts_dice: many(class_martial_arts_dice),
+    // D19: a named feature hangs off the class whose LEVEL its prerequisite
+    // counts, which is the only relationship it has to a class at all — it is
+    // not a class table row and the character has not necessarily taken it.
+    named_features: many(named_features),
   }),
 );
 
@@ -612,6 +618,7 @@ export const subclassDefinitionsRelations = relations(
       references: [class_definitions.id],
     }),
     progressions: many(subclass_progressions),
+    features: many(subclass_features),
   }),
 );
 
@@ -624,6 +631,23 @@ export const subclassProgressionsRelations = relations(
     }),
   }),
 );
+
+export const subclassFeaturesRelations = relations(
+  subclass_features,
+  ({ one }) => ({
+    subclass_definition: one(subclass_definitions, {
+      fields: [subclass_features.subclass_definition_id],
+      references: [subclass_definitions.id],
+    }),
+  }),
+);
+
+export const namedFeaturesRelations = relations(named_features, ({ one }) => ({
+  class_definition: one(class_definitions, {
+    fields: [named_features.class_definition_id],
+    references: [class_definitions.id],
+  }),
+}));
 
 // Standalone source definitions are pointed AT polymorphically and have no
 // foreign keys of their own, in either direction.

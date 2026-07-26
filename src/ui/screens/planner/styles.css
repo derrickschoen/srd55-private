@@ -1069,7 +1069,8 @@ select:disabled {
 }
 
 .attack-profile-conditions,
-.attack-profile-notes {
+.attack-profile-notes,
+.attack-profile-unresolved {
   margin: 0.25rem 0 0;
   padding-left: 1.1rem;
   color: var(--planner-ink-soft);

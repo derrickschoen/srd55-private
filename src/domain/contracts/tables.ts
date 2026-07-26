@@ -441,6 +441,42 @@ export const TABLE_SCOPES = {
     share: false,
     backupReference: false,
   },
+  /**
+   * The two D19 class-feature tables, classified exactly as the progression
+   * tables beside them and for the same reason: they are CATALOG CONTENT, so
+   * nothing here is a character's own data, and a backup resolves nothing
+   * against them.
+   *
+   * `backupReference: false` IS THE INTERESTING ONE, AND IT IS NOT AN OVERSIGHT.
+   * A backup or a share already carries the character's SUBCLASS by content key
+   * (`subclass_definitions.backupReference: true`), and a subclass feature is
+   * reached only THROUGH that subclass. Making these reference kinds would mean
+   * a backup naming individual features, which would fail to import against a
+   * recipient whose copy of the same subclass has been revised — and would add
+   * a `ReferenceKind` member, invalidating every existing backup document,
+   * since `CharacterBackupReferences` is keyed by that union.
+   *
+   * `named_features` gets the same answer for a blunter reason: NOTHING POINTS
+   * AT IT FROM A CHARACTER. There is no invocation selection anywhere in this
+   * schema, which is precisely why a grant sourced from one of these rows is
+   * surfaced against an attack profile rather than applied to it.
+   */
+  subclass_features: {
+    role: 'catalog_class',
+    snapshot: false,
+    backupDirect: false,
+    backup: false,
+    share: false,
+    backupReference: false,
+  },
+  named_features: {
+    role: 'catalog_class',
+    snapshot: false,
+    backupDirect: false,
+    backup: false,
+    share: false,
+    backupReference: false,
+  },
 
   /**
    * `backupReference: false`, and this is the classification the design flagged
@@ -818,6 +854,7 @@ export const APPLICATION_TABLES = order<AnyTableName>()([
   'class_weapon_mastery_grants',
   'class_weapon_proficiencies',
   'feat_definitions',
+  'named_features',
   'species_definitions',
   'species_template_traits',
   'species_templates',
@@ -835,6 +872,7 @@ export const APPLICATION_TABLES = order<AnyTableName>()([
   'spell_version_tags',
   'spell_versions',
   'subclass_definitions',
+  'subclass_features',
   'subclass_progressions',
   'warning_acknowledgements',
   'weapon_templates',

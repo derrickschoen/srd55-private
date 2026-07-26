@@ -92,6 +92,12 @@ const nativeAutoIncrementTables = [
   'class_sheet_traits',
   'class_skill_options',
   'class_weapon_proficiencies',
+  // D19: the two class-feature tables. Both carry a surrogate autoincrementing
+  // key rather than a natural one — `named_features.content_key` is UNIQUE and
+  // would have served, but a catalog row's key is user-editable content and a
+  // foreign key onto it would move when the content was corrected.
+  'named_features',
+  'subclass_features',
 ] as const;
 
 const allAutoIncrementTables = [
@@ -138,7 +144,7 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
       return db;
     }
 
-    it('declares AUTOINCREMENT on exactly the 30 Laravel and 18 native surrogate-key tables', () => {
+    it('declares AUTOINCREMENT on exactly the 30 Laravel and 20 native surrogate-key tables', () => {
       const db = openDb();
       const declared = db
         .selectValues(
@@ -152,12 +158,12 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
         .map(String);
 
       expect(declared).toEqual(allAutoIncrementTables);
-      // 30 surviving Laravel tables plus 18 native: 4 weapons, 8 sheet core,
-      // 6 origins. Counted in parts so one group shrinking while another grows
-      // cannot pass unnoticed.
-      expect(declared).toHaveLength(48);
+      // 30 surviving Laravel tables plus 20 native: 4 weapons, 8 sheet core,
+      // 6 origins, 2 class features. Counted in parts so one group shrinking
+      // while another grows cannot pass unnoticed.
+      expect(declared).toHaveLength(50);
       expect(autoIncrementTables).toHaveLength(30);
-      expect(nativeAutoIncrementTables).toHaveLength(18);
+      expect(nativeAutoIncrementTables).toHaveLength(20);
 
       const withoutAutoIncrement = db
         .selectValues(

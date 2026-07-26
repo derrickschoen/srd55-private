@@ -4,9 +4,11 @@ import {
   attackProfiles,
   type AttackProfile,
   type AttackProfileResult,
+  type AttackProfileWeapon,
 } from '../../../src/rules/attack-profiles';
 import type { RecognisedAttackCantrips } from '../../../src/rules/attack-cantrips';
 import type { SheetClassLevels } from '../../../src/rules/sheet';
+import type { ExtraAttackGrant } from '../../../src/rules/extra-attack';
 import {
   attacksStatement,
   damageLabel,
@@ -53,10 +55,11 @@ function result(
     cantrips?: RecognisedAttackCantrips;
     scoreValues?: Partial<Record<string, number>>;
     proficiencyBonus?: number;
+    weapons?: readonly AttackProfileWeapon[];
   } = {},
 ): AttackProfileResult {
   return attackProfiles({
-    weapons: [
+    weapons: overrides.weapons ?? [
       {
         id: 1,
         name: 'Longsword',
@@ -66,12 +69,28 @@ function result(
       },
     ],
     classes: overrides.classes ?? [
-      { class_name: 'Fighter', level: 5, extra_attack_counts: new Map([[5, 2]]) },
+      { class_name: 'Fighter', level: 5, extra_attack_grants: [classGrant('Fighter', 5, 2)] },
     ],
     scores: scores(overrides.scoreValues ?? { strength: 18, dexterity: 14 }),
     proficiencyBonus: overrides.proficiencyBonus ?? 3,
     cantrips: overrides.cantrips ?? NO_CANTRIPS,
   });
+}
+
+/** A class-table grant, in the shape `SheetContentLookup` builds one. */
+function classGrant(
+  className: string,
+  classLevel: number,
+  attackCount: number,
+): ExtraAttackGrant {
+  return {
+    source: 'class',
+    source_name: className,
+    class_level: classLevel,
+    attack_count: attackCount,
+    weapon_scope: 'any_weapon',
+    unresolved: [],
+  };
 }
 
 function firstProfile(value: AttackProfileResult): AttackProfile {
@@ -119,15 +138,50 @@ describe('the attack-count sentence', () => {
             {
               class_name: 'Fighter',
               level: 11,
-              extra_attack_counts: new Map([
-                [5, 2],
-                [11, 3],
-              ]),
+              extra_attack_grants: [
+                classGrant('Fighter', 5, 2),
+                classGrant('Fighter', 11, 3),
+              ],
             },
           ],
         }),
       ),
     ).toBe('The Attack action gives 3 attacks.');
+  });
+
+  it('qualifies itself when a grant could not be applied, and only then', () => {
+    // A Warlock 5 whose Thirsting Blade this application cannot apply. The
+    // number is 1, and an unqualified "gives one attack" would read as the
+    // whole answer for a character who may well make two with one weapon.
+    const warlock: SheetClassLevels = {
+      class_name: 'Warlock',
+      level: 5,
+      extra_attack_grants: [
+        {
+          source: 'feature',
+          source_name: 'Thirsting Blade',
+          class_level: 5,
+          attack_count: 2,
+          weapon_scope: 'one_bonded_weapon',
+          unresolved: ['It applies to one weapon this application cannot name.'],
+        },
+      ],
+    };
+    const sentence = attacksStatement(result({ classes: [warlock] }));
+    expect(sentence).toContain('The Attack action gives one attack.');
+    expect(sentence).toContain('are listed below and are not counted in it');
+
+    // And it still qualifies itself for a character with NO weapons at all,
+    // who has no profile rows for the ignorance to be printed on.
+    expect(
+      attacksStatement(result({ classes: [warlock], weapons: [] })),
+    ).toContain('are listed below and are not counted in it');
+
+    // The ordinary character's sentence is untouched, which is what stops the
+    // qualification becoming noise on every sheet.
+    expect(attacksStatement(result())).toBe(
+      'The Attack action gives 2 attacks.',
+    );
   });
 });
 
@@ -411,7 +465,7 @@ describe('the strings carry no wordmark the licence asks to be left off', () => 
         {
           class_name: 'Monk',
           level: 5,
-          extra_attack_counts: new Map([[5, 2]]),
+          extra_attack_grants: [classGrant('Monk', 5, 2)],
           martial_arts_dice: new Map([
             [1, 6],
             [5, 8],

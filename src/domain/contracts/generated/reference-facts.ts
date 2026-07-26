@@ -172,6 +172,12 @@ export const FOREIGN_KEY_FACTS = [
     targetColumns: ['id'],
   },
   {
+    table: 'named_features',
+    columns: ['class_definition_id'],
+    target: 'class_definitions',
+    targetColumns: ['id'],
+  },
+  {
     table: 'species_template_traits',
     columns: ['species_template_id'],
     target: 'species_templates',
@@ -277,6 +283,12 @@ export const FOREIGN_KEY_FACTS = [
     table: 'subclass_definitions',
     columns: ['class_definition_id'],
     target: 'class_definitions',
+    targetColumns: ['id'],
+  },
+  {
+    table: 'subclass_features',
+    columns: ['subclass_definition_id'],
+    target: 'subclass_definitions',
     targetColumns: ['id'],
   },
   {

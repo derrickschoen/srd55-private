@@ -15,6 +15,7 @@ import {
   type SheetArmor,
   type SheetClass,
 } from '../../../src/rules/sheet';
+import type { ExtraAttackGrant } from '../../../src/rules/extra-attack';
 import { parseSkillAbilities } from '../../../src/rules/skills';
 import { parseSrdArmorTemplates } from '../../../src/rules/armor-srd';
 
@@ -44,17 +45,37 @@ function scores(values: Partial<Record<string, number>>): AbilityScores {
   });
 }
 
+/** A class-table grant, in the shape `SheetContentLookup` builds one. */
+function classGrant(
+  className: string,
+  classLevel: number,
+  attackCount: number,
+): ExtraAttackGrant {
+  return {
+    source: 'class',
+    source_name: className,
+    class_level: classLevel,
+    attack_count: attackCount,
+    weapon_scope: 'any_weapon',
+    unresolved: [],
+  };
+}
+
 const FIGHTER: SheetClass = {
   class_name: 'Fighter',
   level: 5,
   hit_die: 10,
   is_starting_class: true,
   saving_throws: ['strength', 'constitution'],
-  extra_attack_counts: new Map([
-    [5, 2],
-    [11, 3],
-    [20, 4],
-  ]),
+  // The three class-table rows the Fighter's own Features table prints, as
+  // grants rather than as a level -> count map (D19). Every one is
+  // `source: 'class'`, unscoped and resolved: a class table row applies to the
+  // character, and the character's levels in that class are recorded outright.
+  extra_attack_grants: [
+    classGrant('Fighter', 5, 2),
+    classGrant('Fighter', 11, 3),
+    classGrant('Fighter', 20, 4),
+  ],
 };
 
 const WIZARD: SheetClass = {
@@ -71,7 +92,7 @@ const RANGER: SheetClass = {
   hit_die: 10,
   is_starting_class: false,
   saving_throws: ['strength', 'dexterity'],
-  extra_attack_counts: new Map([[5, 2]]),
+  extra_attack_grants: [classGrant('Ranger', 5, 2)],
 };
 
 describe('proficiency bonus and total level', () => {
@@ -681,15 +702,15 @@ describe('skills, initiative and passive Perception', () => {
 
 describe('extra attack across a multiclass', () => {
   it('gives one attack to a character with no granting class', () => {
-    expect(attacksPerAction([WIZARD])).toBe(1);
-    expect(attacksPerAction([])).toBe(1);
+    expect(attacksPerAction([WIZARD]).count).toBe(1);
+    expect(attacksPerAction([]).count).toBe(1);
   });
 
   it('gives two attacks at level 5', () => {
-    expect(attacksPerAction([FIGHTER])).toBe(2);
-    expect(attacksPerAction([RANGER])).toBe(2);
+    expect(attacksPerAction([FIGHTER]).count).toBe(2);
+    expect(attacksPerAction([RANGER]).count).toBe(2);
     // Below the granting level, nothing.
-    expect(attacksPerAction([{ ...FIGHTER, level: 4 }])).toBe(1);
+    expect(attacksPerAction([{ ...FIGHTER, level: 4 }]).count).toBe(1);
   });
 
   it('DOES NOT STACK across classes — this is the multiclass bug', () => {
@@ -701,26 +722,26 @@ describe('extra attack across a multiclass', () => {
     // Fighter 5 / Ranger 5 makes TWO attacks. Summing the per-class grants
     // would give three, which is the plausible-looking bug in exactly the
     // multiclass case this application specialises in.
-    expect(attacksPerAction([FIGHTER, RANGER])).toBe(2);
-    expect(attacksPerAction([FIGHTER, RANGER])).not.toBe(3);
-    expect(attacksPerAction([FIGHTER, RANGER])).not.toBe(4);
+    expect(attacksPerAction([FIGHTER, RANGER]).count).toBe(2);
+    expect(attacksPerAction([FIGHTER, RANGER]).count).not.toBe(3);
+    expect(attacksPerAction([FIGHTER, RANGER]).count).not.toBe(4);
   });
 
   it("lets the Fighter's own feature exceed two, and takes the maximum", () => {
     // "…unless you have a feature that says you can (such as the Fighter's Two
     // Extra Attacks feature)." Fighter 11 / Ranger 5 makes THREE — the
     // Fighter's level 11 grant wins, and the Ranger's 2 does not add to it.
-    expect(attacksPerAction([{ ...FIGHTER, level: 11 }, RANGER])).toBe(3);
-    expect(attacksPerAction([{ ...FIGHTER, level: 20 }, RANGER])).toBe(4);
+    expect(attacksPerAction([{ ...FIGHTER, level: 11 }, RANGER]).count).toBe(3);
+    expect(attacksPerAction([{ ...FIGHTER, level: 20 }, RANGER]).count).toBe(4);
     // Order must not matter.
-    expect(attacksPerAction([RANGER, { ...FIGHTER, level: 11 }])).toBe(3);
+    expect(attacksPerAction([RANGER, { ...FIGHTER, level: 11 }]).count).toBe(3);
   });
 
   it('resolves a class to its highest grant at or below its own level', () => {
     // The rows are absolute totals resolved `class_level <= ?`, so a Fighter 15
     // is on the level 11 row, not the level 20 one.
-    expect(attacksPerAction([{ ...FIGHTER, level: 15 }])).toBe(3);
-    expect(attacksPerAction([{ ...FIGHTER, level: 10 }])).toBe(2);
-    expect(attacksPerAction([{ ...FIGHTER, level: 20 }])).toBe(4);
+    expect(attacksPerAction([{ ...FIGHTER, level: 15 }]).count).toBe(3);
+    expect(attacksPerAction([{ ...FIGHTER, level: 10 }]).count).toBe(2);
+    expect(attacksPerAction([{ ...FIGHTER, level: 20 }]).count).toBe(4);
   });
 });

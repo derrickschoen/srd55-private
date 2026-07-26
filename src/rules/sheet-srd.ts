@@ -32,6 +32,10 @@ import {
   bundledArmorTemplates,
   BUNDLED_ARMOR_RULES_EDITION,
 } from './armor-srd';
+import {
+  parseSrdNamedExtraAttackFeatures,
+  BUNDLED_FEATURE_RULES_EDITION,
+} from './extra-attack-srd';
 import { skillAbilities } from './skills';
 
 /** The class the Martial Arts progression belongs to. */
@@ -82,6 +86,10 @@ export function hasBundledSheetContent(db: DatabaseContext): boolean {
     ) ?? 0,
   );
   if (armorPresent !== armor.length) {
+    return false;
+  }
+
+  if (!hasBundledNamedFeatures(db)) {
     return false;
   }
 
@@ -138,6 +146,7 @@ export function seedSheetContent(db: DatabaseContext): void {
   db.transaction(() => {
     seedArmorTemplates(db, timestamp);
     seedClassSheetContent(db, timestamp);
+    seedNamedFeatures(db, timestamp);
   });
 }
 
@@ -188,14 +197,7 @@ function seedClassSheetContent(db: DatabaseContext, timestamp: string): void {
   // at the first skill modifier a user asks for.
   skillAbilities();
 
-  const classes = new Map(
-    db
-      .all('SELECT id, name FROM class_definitions', undefined, (row) => ({
-        id: Number(row.id),
-        name: String(row.name),
-      }))
-      .map((row) => [row.name, row.id] as const),
-  );
+  const classes = classIdsByName(db);
 
   for (const entry of traits) {
     const classId = classes.get(entry.class_name);
@@ -318,4 +320,217 @@ function seedClassSheetContent(db: DatabaseContext, timestamp: string): void {
       );
     }
   }
+}
+
+/**
+ * THE TWO BUNDLED NAMED FEATURES (D19 §2).
+ *
+ * `docs/srd/source/extra-attack-other-sources.txt` is SRD 5.2 and therefore
+ * bundleable, and these two rows are the only Extra Attack content in this
+ * repository that the old `(class, level)` model could not hold. They are the
+ * proof the D19 model works on SHIPPABLE content rather than only on a fixture:
+ * the owner's subclass example is not free-licensed (D3, D19 §1) and no
+ * subclass feature is seeded anywhere.
+ *
+ * DELETE-THEN-INSERT, BUT ONLY OVER THE CONTENT KEYS THIS SEEDER OWNS. The
+ * class-content seeder above clears six tables per class with
+ * `DELETE … WHERE class_definition_id = ?`, and that key is exactly what makes
+ * it dangerous here: it would take a user's own Warlock feature with it. Keyed
+ * on the two BUNDLED content keys instead, the clear can only ever remove rows
+ * this seeder wrote, so it is as narrow as an upsert and strictly more
+ * predictable.
+ *
+ * IT IS ALSO WHAT MAKES THE PASS ORDER-INDEPENDENT, which an upsert was not. If
+ * a half-migrated row under the Devouring Blade key were sitting on the
+ * Thirsting Blade NAME, seeding Thirsting Blade first would see an occupied
+ * slot, yield it, and then seeding Devouring Blade would move that row off the
+ * slot it had just yielded — leaving Thirsting Blade missing until a later
+ * boot. Clearing both keys before writing either removes the interaction
+ * entirely rather than reasoning about it.
+ *
+ * IT YIELDS A NAME SLOT A USER HOLDS, RATHER THAN CRASHING INTO IT.
+ * `named_features` is ALSO unique on `(class_definition_id, name,
+ * rules_edition)`, so a user who authored a 2024 Warlock feature of the same
+ * name under a different content key would make this INSERT fail — and, because
+ * the seed runs in ONE transaction, take the armour catalog and every class's
+ * sheet content down with it on every boot. `upsertThirdCaster` settled the
+ * policy for exactly this collision: the slot's holder wins. After the clear
+ * above, any holder is by definition a row this seeder does not own, so the
+ * test is simply "is the slot occupied".
+ *
+ * AND NOTHING IS LEFT PARKED WHERE THE PARSE NEVER PUT IT. Yielding used to
+ * leave a stale row standing under the bundled content key, which the reader
+ * would then have surfaced as sourced-looking content — a "would give 4
+ * attacks" that is in no extract. The clear runs first and unconditionally, so
+ * a yield removes the bundled row instead of abandoning it.
+ *
+ * THE PARENT CLASS IS RESOLVED BY `(name, rules_edition)`, NOT BY NAME ALONE.
+ * `class_definitions` is unique on that PAIR, so a 2014 Warlock and a 2024
+ * Warlock legitimately coexist, and a name-only lookup picks between them by
+ * whichever row the query happened to return last. These two features are
+ * printed under one edition; attaching them to the other one would surface an
+ * invocation on a character who cannot take it and hide it from one who can.
+ *
+ * A CLASS THIS DATABASE DOES NOT CARRY GETS NO ROW, silently, exactly as the
+ * class-content seeder treats a class with no `class_definitions` row.
+ */
+function seedNamedFeatures(db: DatabaseContext, timestamp: string): void {
+  const features = parseSrdNamedExtraAttackFeatures();
+  for (const feature of features) {
+    db.exec('DELETE FROM named_features WHERE content_key = ?', [
+      feature.content_key,
+    ]);
+  }
+
+  for (const feature of features) {
+    const classId = bundledClassId(db, feature.class_name);
+    if (classId === null || nameSlotTaken(db, classId, feature.name)) {
+      continue;
+    }
+    db.exec(
+      `INSERT INTO named_features (
+         content_key, class_definition_id, name, rules_edition, prerequisite,
+         description, class_level, effect_kind, effect_attack_count,
+         effect_weapon_scope, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, 'extra_attack', ?, ?, ?, ?)`,
+      [
+        feature.content_key,
+        classId,
+        feature.name,
+        BUNDLED_FEATURE_RULES_EDITION,
+        feature.prerequisite,
+        feature.description,
+        feature.class_level,
+        feature.attack_count,
+        feature.weapon_scope,
+        timestamp,
+        timestamp,
+      ],
+    );
+  }
+}
+
+/** The class of the bundled edition with this name, or `null`. */
+function bundledClassId(db: DatabaseContext, className: string): number | null {
+  const id = db.scalar<number>(
+    'SELECT id FROM class_definitions WHERE name = ? AND rules_edition = ?',
+    [className, BUNDLED_FEATURE_RULES_EDITION],
+  );
+  return id === null ? null : Number(id);
+}
+
+/** Whether `(class, name, edition)` is already held by some other row. */
+function nameSlotTaken(
+  db: DatabaseContext,
+  classDefinitionId: number,
+  name: string,
+): boolean {
+  return (
+    db.scalar<number>(
+      `SELECT id FROM named_features
+       WHERE class_definition_id = ? AND name = ? AND rules_edition = ?`,
+      [classDefinitionId, name, BUNDLED_FEATURE_RULES_EDITION],
+    ) !== null
+  );
+}
+
+function classIdsByName(db: DatabaseContext): Map<string, number> {
+  return new Map(
+    db
+      .all('SELECT id, name FROM class_definitions', undefined, (row) => ({
+        id: Number(row.id),
+        name: String(row.name),
+      }))
+      .map((row) => [row.name, row.id] as const),
+  );
+}
+
+/**
+ * True when every bundled named feature is exactly where the parse would have
+ * put it — or legitimately absent.
+ *
+ * CONDITIONED ON THE CLASS, WHICH THE ARMOUR CHECK ABOVE IS NOT, and the
+ * difference is not inconsistency. An armour template stands alone; a named
+ * feature has a NOT NULL foreign key to `class_definitions`, so a database with
+ * no 2024 Warlock CANNOT hold Thirsting Blade and demanding it would report
+ * such a database as broken forever, re-seeding on every boot and never
+ * succeeding. That is the same trap `class_armor_training` is excluded from the
+ * gutted-row check for.
+ *
+ * THE WHOLE ROW IS COMPARED, NOT JUST THE KEY, and that is stronger than the
+ * armour check beside it on purpose. A key-only guard reports a database as
+ * healthy when the row under that key says four attacks where the source says
+ * two — and the sheet then prints a sourced-looking number that is in no
+ * extract at all. Every column this seeder writes is compared.
+ *
+ * A YIELDED SLOT IS HEALTHY, AND ONLY WHEN THE YIELD IS COMPLETE. If a user
+ * holds `(class, name, edition)` under their own key, the bundled row cannot be
+ * placed and demanding it would loop forever — so its absence is accepted. What
+ * is NOT accepted is a row still standing under the bundled content key while
+ * the slot is yielded: that is content this application would surface as
+ * sourced, sitting somewhere the parse never put it. `seedNamedFeatures` clears
+ * it, and this is the claim that makes the clearing checkable.
+ */
+function hasBundledNamedFeatures(db: DatabaseContext): boolean {
+  for (const feature of parseSrdNamedExtraAttackFeatures()) {
+    const stored = db.all(
+      `SELECT class_definition_id, name, rules_edition, prerequisite,
+              description, class_level, effect_kind, effect_attack_count,
+              effect_weapon_scope
+       FROM named_features WHERE content_key = ?`,
+      [feature.content_key],
+      (row) => [
+        Number(row.class_definition_id),
+        String(row.name),
+        String(row.rules_edition),
+        String(row.prerequisite),
+        String(row.description),
+        Number(row.class_level),
+        row.effect_kind === null ? null : String(row.effect_kind),
+        row.effect_attack_count === null
+          ? null
+          : Number(row.effect_attack_count),
+        row.effect_weapon_scope === null
+          ? null
+          : String(row.effect_weapon_scope),
+      ],
+    );
+
+    const classId = bundledClassId(db, feature.class_name);
+    if (classId === null) {
+      // No class to hang it on. Absent is correct; anything present is not.
+      if (stored.length > 0) {
+        return false;
+      }
+      continue;
+    }
+
+    if (stored.length === 0) {
+      // Absent, which is right only if a row this seeder does not own is
+      // holding the slot the bundled row would need.
+      if (!nameSlotTaken(db, classId, feature.name)) {
+        return false;
+      }
+      continue;
+    }
+
+    const expected = [
+      classId,
+      feature.name,
+      BUNDLED_FEATURE_RULES_EDITION,
+      feature.prerequisite,
+      feature.description,
+      feature.class_level,
+      'extra_attack',
+      feature.attack_count,
+      feature.weapon_scope,
+    ];
+    if (
+      stored.length !== 1 ||
+      JSON.stringify(stored[0]) !== JSON.stringify(expected)
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
