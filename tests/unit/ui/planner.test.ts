@@ -123,6 +123,12 @@ function workspace(
       templates: [],
       allowance: { state: 'none', classes: [] },
       selected_count: 0,
+      attacks: {
+        weapons: [],
+        warnings: [],
+        attacks_per_action: 1,
+        has_extra_attack: false,
+      },
     },
   };
 }
