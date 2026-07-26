@@ -50,6 +50,90 @@ binding. Where an earlier note conflicts with this, this wins.
 ---
 
 
+## D6c — The DEFENDED nulls, and a resolved tension with codex's test (2026-07-25)
+
+Codex analysed all ~199 nullable columns. **Caveat on provenance:** its required
+independent Claude critique failed twice (`API Error: ENOTIMP`) and returned
+nothing, so this is codex's evidence-backed findings, NOT a two-agent consensus.
+Claude reviewed it afterwards; that review is what follows.
+
+### DEFEND these — do not tighten (agrees with D6b)
+
+- `character_class_levels.subclass_definition_id` — a class can validly have no
+  chosen subclass yet. **Exactly D6b criterion 1.**
+- `characters.proficiency_bonus_override`,
+  `character_class_levels.spellcasting_ability_override` — absence means "derive
+  normally", not zero.
+- `character_source_instances.parent_source_instance_id` — root source.
+- All user-facing `notes` / `note` columns.
+- `spell_version_publications.source_page`, `source_reference` — a publication
+  can be known without either locator.
+- `spell_versions.material_component_summary` — only meaningful for material
+  components.
+- `spell_versions.short_summary` — optional Tier-2 text; Tier 1 deliberately
+  does not erase it.
+- `spell_versions.action_type` — a one-minute casting time does not classify as
+  Action/Bonus/Reaction. **Exactly D6b criterion 2: the SRD cannot be
+  represented without this null.**
+- The upcast facet as a whole — many spells do not upcast; its fields should
+  move together rather than become individually required.
+- `spell_selection_slots.label`, `free_cast`, `override_note`.
+- `change_log.reason` — many valid commands need no explanation.
+- Lifecycle timestamps such as `invalidated_at` before the transition happens.
+
+### THE TENSION, and how it resolves
+
+Codex's "steady-state witness test" asks: *can a valid, FULLY CONSTRUCTED entity
+remain null indefinitely?* If not, it calls the column transient/incomplete —
+**not** optional. Its missing-pattern list even says "unknown/incomplete is not
+optional".
+
+That would classify most mid-build nulls as illegitimate, which contradicts
+D6b criterion 1.
+
+**Resolution: in this app a partially built character IS a valid, steady-state
+entity.** It persists in the character list, can be shared, imported, and left
+untouched indefinitely. Completeness v1 exists precisely to report on it. So the
+two tests agree once "fully constructed" is read as "valid persisted entity"
+rather than "every choice made".
+
+Where they still differ, **D6b wins** — it is the owner's direction and it is
+the one grounded in this domain.
+
+Practical consequence: codex's "would not yet defend" list includes
+`source_definition_id`, `config`, and `acquired_at_character_level`. Before
+tightening any of those, check D6b criterion 3 — whether a builder step must be
+able to leave it unset. Tighten only if the builder genuinely never needs it.
+
+### Restructurings codex ranks highest — all VERY HIGH cost
+
+1. Typed/versioned grant rules with slots referencing rule identity.
+2. Unified source-definition registry with a non-null FK.
+3. Separate stable spell reference from resolved spell details.
+4. `spell_slot_assignments` as a 1:0..1 relation (medium-high).
+5. Class/subclass spellcasting facet (medium-high).
+
+**Do not attempt 1–3 inside the current Drizzle rewrite.** Each touches the
+generator, seeding, eligibility, backup and sharing simultaneously. They are
+candidate follow-up units, not increments.
+
+Low-cost cleanups that ARE in scope: drop the two dead columns; make `config`,
+rule collections and slot-table JSON canonical non-null empties.
+
+### Traps codex proved — heed these
+
+- **Slot assignment is a hot join.** Access, reports, completeness and workspace
+  all resolve via `COALESCE(fixed, current)`. An assignment table adds a join to
+  hot queries — benchmark, do not assume.
+- **Grant-rule normalisation must preserve stable slot identity.** Slot keys are
+  `{source UUID}:{rule key}:{ordinal}` and regeneration REVIVES existing rows
+  rather than replacing them. A design assigning fresh rule IDs per seed/import
+  would break revival.
+- **Portable backup exports raw rows by column name.** New tables require a new
+  backup version or a compatibility adapter.
+
+---
+
 ## D6b — THE TEST for whether a null is legitimate (2026-07-25)
 
 Owner-supplied, and it GOVERNS D6. Where D6's restructuring patterns conflict
