@@ -12,11 +12,14 @@ import {
  * THE VERSION EVERY SNAPSHOT THIS BUILD WRITES CARRIES.
  *
  * `a7-v2` differs from `a7-v1` in exactly one way: it also captures
- * `character_weapons`. The bump is not cosmetic — a reader must be able to tell
- * "this snapshot recorded no weapons" from "this snapshot did not record
- * weapons at all", and the two are otherwise indistinguishable.
+ * `character_weapons`. `a7-v3` differs from `a7-v2` in exactly one way: it also
+ * captures the three origin tables. Neither bump is cosmetic — a reader must be
+ * able to tell "this snapshot recorded no species" from "this snapshot did not
+ * record a species at all", and the two are otherwise indistinguishable. The
+ * first reading restores an empty list over the character's data; the second
+ * leaves it alone, which is the only honest answer.
  */
-export const CHARACTER_SNAPSHOT_SCHEMA_VERSION = 'a7-v2' as const;
+export const CHARACTER_SNAPSHOT_SCHEMA_VERSION = 'a7-v3' as const;
 
 /**
  * WHICH TABLES EACH SNAPSHOT VERSION CARRIES.
@@ -36,9 +39,21 @@ const A7_V1_TABLES = [
   'warning_acknowledgements',
 ] as const satisfies readonly SnapshotTable[];
 
+/**
+ * `a7-v2` is a HISTORICAL FACT for the same reason `a7-v1` is, and is written
+ * out by hand for the same reason: deriving it as "the current list minus the
+ * origin tables" would make it silently follow the next classification change
+ * and start lying about snapshots already on a user's disk.
+ */
+const A7_V2_TABLES = [
+  ...A7_V1_TABLES,
+  'character_weapons',
+] as const satisfies readonly SnapshotTable[];
+
 const SNAPSHOT_TABLES_BY_VERSION = {
   'a7-v1': A7_V1_TABLES,
-  'a7-v2': CHARACTER_STATE_TABLES,
+  'a7-v2': A7_V2_TABLES,
+  'a7-v3': CHARACTER_STATE_TABLES,
 } as const satisfies Readonly<Record<string, readonly SnapshotTable[]>>;
 
 /**
@@ -55,6 +70,7 @@ const SNAPSHOT_TABLES_BY_VERSION = {
 export const CHARACTER_SNAPSHOT_SCHEMA_VERSIONS = [
   'a7-v1',
   'a7-v2',
+  'a7-v3',
 ] as const satisfies readonly (keyof typeof SNAPSHOT_TABLES_BY_VERSION)[];
 
 export type CharacterSnapshotSchemaVersion =

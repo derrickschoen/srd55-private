@@ -63,8 +63,9 @@ describe('pre-Drizzle database images', () => {
     // It has since diverged from the generated schema in BOTH directions, which
     // is why the counts are asserted rather than left as a surprise: the
     // fixture still declares the eight Laravel-only tables that were dropped,
-    // and it has never held the four native weapon tables that were added.
-    // 38 - 8 + 4 = 34. Originally only the SIGNATURE tripped, because the two
+    // and it has never held the four native weapon tables or the six native
+    // origins tables that were added. 38 - 8 + 4 + 6 = 40. Originally only the
+    // SIGNATURE tripped, because the two
     // declared the same 38 tables in a different presentation; an old image is
     // now short of `applicationTables` too, so it fails EARLIER, not less.
     //
@@ -77,8 +78,9 @@ describe('pre-Drizzle database images', () => {
     const tableCount = (sql: string) =>
       [...sql.matchAll(/CREATE TABLE/g)].length;
     expect(tableCount(preDrizzleSchema)).toBe(38);
+    expect(tableCount(schema)).toBe(48);
     // 30 surviving Laravel tables, 4 native weapon tables, 8 sheet core.
-    expect(tableCount(schema)).toBe(42);
+    expect(tableCount(schema)).toBe(48);
   });
 
   it('rejects a pre-Drizzle image at open instead of half-working', async () => {
@@ -95,12 +97,17 @@ describe('pre-Drizzle database images', () => {
     // actually short of. Both paths produce the same recoverable
     // `schema_mismatch` status, which is what the next test depends on.
     expect(boot.detail).toContain(
+      // All eighteen native tables, in the order the check reports them: the
+      // four weapon tables, the eight of the sheet core, and the six origins
+      // tables. A pre-Drizzle image has none of them.
       'Database image is missing application tables: armor_templates, ' +
-        'character_weapons, class_armor_training, class_extra_attack_grants, ' +
-        'class_martial_arts_dice, class_saving_throw_proficiencies, ' +
-        'class_sheet_traits, class_skill_options, ' +
-        'class_weapon_mastery_counts, class_weapon_mastery_grants, ' +
-        'class_weapon_proficiencies, weapon_templates.',
+        'background_templates, character_background, character_species, ' +
+        'character_species_traits, character_weapons, class_armor_training, ' +
+        'class_extra_attack_grants, class_martial_arts_dice, ' +
+        'class_saving_throw_proficiencies, class_sheet_traits, ' +
+        'class_skill_options, class_weapon_mastery_counts, ' +
+        'class_weapon_mastery_grants, class_weapon_proficiencies, ' +
+        'species_template_traits, species_templates, weapon_templates.',
     );
   });
 

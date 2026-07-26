@@ -108,14 +108,14 @@ describe('character CRUD, catalog, save points, and operation history', () => {
     expect(stored).toMatchObject({
       character_id: characterId,
       label: 'Before experiment',
-      // a7-v2: the version that also captures character_weapons. The column and
-      // the JSON inside it must agree — the backup validator now refuses a save
-      // point that disagrees with itself, so both are asserted here.
-      schema_version: 'a7-v2',
+      // a7-v3: the version that also captures the three origin tables. The
+      // column and the JSON inside it must agree — the backup validator refuses
+      // a save point that disagrees with itself, so both are asserted here.
+      schema_version: 'a7-v3',
       created_at: '2026-07-23T11:00:00.000Z',
     });
     expect(JSON.parse(String(stored?.snapshot))).toMatchObject({
-      schema_version: 'a7-v2',
+      schema_version: 'a7-v3',
       character: { name: 'Snapshot Hero', intelligence: 17 },
       character_class_levels: [],
       character_source_instances: [],

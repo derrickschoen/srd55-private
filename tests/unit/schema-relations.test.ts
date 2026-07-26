@@ -25,7 +25,7 @@ import schemaSql from '../../src/db/schema.sql?raw';
  *
  * Comparison is by CONSTRAINT SET, not row count. `PRAGMA foreign_key_list`
  * returns one row per column, so the two composite foreign keys contribute two
- * rows each: 33 constraints, 35 rows. Counting rows would let a composite key
+ * rows each: 40 constraints, 42 rows. Counting rows would let a composite key
  * degrade into two single-column keys unnoticed — which would silently drop
  * exactly the cross-character and wrong-class protections those keys exist for.
  */
@@ -133,7 +133,7 @@ afterAll(() => {
 });
 
 describe('declared relations match the foreign keys', () => {
-  it('budgets 43 constraints across 45 PRAGMA rows', () => {
+  it('budgets 47 constraints across 49 PRAGMA rows', () => {
     const tables = db
       .selectValues(
         `SELECT name FROM sqlite_schema
@@ -148,15 +148,23 @@ describe('declared relations match the foreign keys', () => {
 
     // 33 Laravel-derived constraints, plus the three the weapon tables add
     // (character_weapons -> characters, and one per mastery table into
-    // class_definitions), plus the seven of the sheet core — one per
-    // class-content table into class_definitions. `armor_templates` adds none:
-    // by D1b the catalog points at nothing and nothing points at it, exactly as
-    // for `weapon_templates`.
+    // class_definitions), plus the four the origins tables add: three
+    // character-side tables into `characters`, and `species_template_traits`
+    // into `species_templates` — the only parent/child edge in the origins
+    // catalog. There is deliberately NO edge from either character-side table
+    // into a template; that is D1b, and the reverse direction of the next test
+    // is what would catch one appearing.
     //
-    // Still only two of them composite, so the row count rises by the same
-    // seven: 43 constraints across 45 rows.
-    expect(constraintEdges(db)).toHaveLength(43);
-    expect(rowCount).toBe(45);
+    // None of the seven is composite, so the row count rises by exactly seven
+    // as well and the two composite Laravel keys are still the only ones.
+    // 36 edges across 38 rows before either native track. Origins adds 4,
+    // the sheet core 7 — one per class-content table into class_definitions.
+    // Neither catalog table adds an edge: by D1b a template points at nothing
+    // and nothing points at it, which holds for armour as it did for weapons.
+    // None of the eleven is composite, so the row count rises by eleven too and
+    // the two composite Laravel keys are still the only ones.
+    expect(constraintEdges(db)).toHaveLength(47);
+    expect(rowCount).toBe(49);
   });
 
   it('declares a relation for every foreign key, and a foreign key for every relation', () => {

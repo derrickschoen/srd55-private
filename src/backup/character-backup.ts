@@ -1052,6 +1052,9 @@ interface CurrentImportMaps {
   readonly wizard_spellbook_entries: Map<number, number>;
   readonly warning_acknowledgements: Map<number, number>;
   readonly character_weapons: Map<number, number>;
+  readonly character_species: Map<number, number>;
+  readonly character_species_traits: Map<number, number>;
+  readonly character_background: Map<number, number>;
   readonly spell_loadouts: Map<number, number>;
   readonly sourceUuids: Map<number, string>;
   readonly sourceRows: Map<number, BackupRow>;
@@ -1070,6 +1073,9 @@ function importCurrentTables(
     wizard_spellbook_entries: new Map(),
     warning_acknowledgements: new Map(),
     character_weapons: new Map(),
+    character_species: new Map(),
+    character_species_traits: new Map(),
+    character_background: new Map(),
     spell_loadouts: new Map(),
     sourceUuids: new Map(),
     sourceRows: new Map(
@@ -1206,6 +1212,34 @@ function importCurrentTables(
       }),
     );
   }
+  // The character's origin: values only, no template id by D1b, so these rows
+  // travel exactly as written like `character_weapons` above. Their id maps are
+  // kept for the same reason — a save point in the same document names these
+  // rows by their OLD ids.
+  for (const row of document.tables.character_species) {
+    maps.character_species.set(
+      Number(row.id),
+      insertPortableRow(db, 'character_species', row, {
+        character_id: characterId,
+      }),
+    );
+  }
+  for (const row of document.tables.character_species_traits) {
+    maps.character_species_traits.set(
+      Number(row.id),
+      insertPortableRow(db, 'character_species_traits', row, {
+        character_id: characterId,
+      }),
+    );
+  }
+  for (const row of document.tables.character_background) {
+    maps.character_background.set(
+      Number(row.id),
+      insertPortableRow(db, 'character_background', row, {
+        character_id: characterId,
+      }),
+    );
+  }
   for (const row of document.tables.spell_loadouts) {
     maps.spell_loadouts.set(
       Number(row.id),
@@ -1282,6 +1316,9 @@ function portableSnapshots(
     wizard_spellbook_entries: new Map(current.wizard_spellbook_entries),
     warning_acknowledgements: new Map(current.warning_acknowledgements),
     character_weapons: new Map(current.character_weapons),
+    character_species: new Map(current.character_species),
+    character_species_traits: new Map(current.character_species_traits),
+    character_background: new Map(current.character_background),
   };
   const next = Object.fromEntries(
     CHARACTER_STATE_TABLES.map((table) => [
@@ -1378,7 +1415,16 @@ function portableSnapshots(
         ),
       };
     });
-    const rewrite = (table: SnapshotTable): unknown => {
+    /**
+     * RETURNS `unknown[]`, NOT `unknown`, AND THAT IS THE EXHAUSTIVENESS GATE.
+     *
+     * Written as `=> unknown` a missing `case` fell through to an implicit
+     * `undefined` that the caller happily stored, and the failure surfaced far
+     * away as `Snapshot table <name> must be a list` on the next restore. With
+     * an array return type a missing branch is a compile error at the arrow,
+     * which is where the omission actually is.
+     */
+    const rewrite = (table: SnapshotTable): unknown[] => {
       switch (table) {
         case 'character_source_instances':
           return sources;
@@ -1415,6 +1461,12 @@ function portableSnapshots(
         // the catalog, so there is no content key to resolve.
         case 'warning_acknowledgements':
         case 'character_weapons':
+        // The origin tables join this group rather than getting their own: by
+        // D1b they hold no template id, so like a weapon there is nothing in
+        // the catalog to resolve and only id and ownership are rewritten.
+        case 'character_species':
+        case 'character_species_traits':
+        case 'character_background':
           return rowsOf(table).map((row) => ({
             ...row,
             id: ids[table].get(Number(row.id)),
