@@ -1,5 +1,64 @@
 # Binding scope decisions
 
+## F6 — The SRD was never actually bundled, and D1b's open question is answered (2026-07-26)
+
+**Proved by inspection, then by fetching the document.**
+
+`docs/srd/` contained ATTRIBUTION.md and nothing else. Grepping the whole
+repository for `longsword|greataxe|shortbow|warhammer` and for the mastery
+terms `cleave|graze|topple|vex|nick|sap` matched exactly ONE file:
+`.claude/decisions.md` — my own notes. D3 says "the SRD is bundled" and the
+owner asked to "include the SRD with the required attribution", but no SRD
+content had ever landed. Spell data reached the app through the Laravel seed
+(F1); nothing else did.
+
+That is a trap rather than a gap: a track told to build SRD weapons with no
+local source will reconstruct the table from model memory and it will look
+entirely plausible. For licensed reference data that is both a correctness and
+a provenance failure, and it is very hard to review after the fact.
+
+**Now sourced.** Official CC-BY-4.0 SRD 5.2.1 PDF, SHA-256
+`8974902d109d6e63672d7c490bde9ccf052410503d9cfa768237154fbc5e3d87`,
+6,031,375 bytes. Verbatim extracts committed under `docs/srd/source/` with
+`docs/srd/SOURCE.md` recording URL, checksum, the exact `pdftotext -layout`
+command and page numbers. All 37 weapons extracted cleanly with damage,
+properties, mastery, weight and cost.
+
+**Rejected alternative:** committing the 6 MB PDF. We never modify it, and a
+checksum proves an identical source without carrying it in every clone. Also
+rejected: hand-transcribing the table into app seed format here — that would
+collide with the weapons track, which owns the schema. This commit deliberately
+ships raw evidence, not a parsed dataset.
+
+### D1b's parked question, answered — and the answer is awkward
+
+D1b required proof, not assumption, of whether mastery count is derivable from
+existing class data. **It is not, and it has no single shape:**
+
+- **Barbarian and Fighter** carry a Weapon Mastery COLUMN in their class tables;
+  the count rises with level (Fighter 3 at levels 1-3, 4 at 4-9, 5 at 10-15,
+  6 at 16-20).
+- **Paladin, Ranger and Rogue** have NO such column. Their count is a flat two,
+  stated only in the level-1 feature text.
+
+So it is neither a constant nor a single progression column, and a design that
+assumes either will be wrong for three classes or for two. Nothing in
+`class_progressions` carries it, because that table models spellcasting alone
+(F4). Every weapon carries exactly one mastery property; the property belongs to
+the weapon, the PERMISSION belongs to the character — which is why D1b models
+mastery as a per-character choice rather than a weapon attribute.
+
+### A licence correction, from the owner's own instruction
+
+ATTRIBUTION.md listed CC-BY-SA as bundleable "where compatible". Share-alike is
+an obligation BEYOND attribution and propagates to whatever it is combined with,
+so it fails the owner's stated test — "only include Creative Commons with
+attribution or any other free legal license that only requires attribution".
+Corrected: the test is the obligation, not the licence family. "It's Creative
+Commons" is not sufficient.
+
+---
+
 ## F5 — The `attribution.spec.ts` flake: measured, unattributed, NOT masked (2026-07-26)
 
 `tests/browser/attribution.spec.ts:16` intermittently fails on `expect(loads).toBe(1)`
