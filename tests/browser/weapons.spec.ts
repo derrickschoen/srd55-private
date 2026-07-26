@@ -284,3 +284,221 @@ test('a weapon can be removed, and the panel says nothing about the licensor', a
   await page.getByRole('button', { name: 'Remove Blowgun' }).click();
   await expect.poll(() => weaponRows(page)).toEqual([]);
 });
+
+/**
+ * THE ATTACK PROFILES, DRIVEN BY ROLE AND ACCESSIBLE NAME.
+ *
+ * The vitest suite runs in the `node` environment, so this is the only place
+ * the rendered controls exist at all: the accessible names, the live
+ * recomputation when a choice changes, and D15's display rule on a real screen.
+ *
+ * Ability scores are not editable from this screen, so every score here is the
+ * schema default of 10 — modifier 0. That makes the proficiency bonus the whole
+ * of the to-hit number, which is exactly what a level change should move.
+ */
+test('the attack profiles derive from the weapon, the class and nothing stored', async ({
+  page,
+}) => {
+  await openPlanner(page, 'Weapon Bearer');
+  await addFighterLevel(page);
+
+  const profiles = page.getByTestId('attack-profiles');
+  await expect(profiles).toBeVisible();
+  // No weapons and neither cantrip: the panel says so rather than showing a
+  // blank area that could be mistaken for a bug.
+  await expect(profiles).toContainText('No attack profiles');
+
+  await page.getByRole('button', { name: 'Add weapon' }).click();
+  const form = page.getByTestId('weapon-form');
+  await form
+    .getByLabel('Start from a reference weapon')
+    .selectOption({ label: 'Longsword' });
+  await form.getByRole('button', { name: 'Add weapon' }).click();
+  await expect.poll(async () => (await weaponRows(page)).length).toBe(1);
+
+  // Fighter 1: proficiency bonus +2, every ability score 10 so every modifier
+  // is 0. To hit is therefore +2 and the damage line carries no modifier.
+  const numbers = page.getByTestId('attack-profile-numbers').first();
+  await expect(numbers).toHaveText(
+    'To hit: +2 (Strength) · Damage: 1d8 Slashing',
+  );
+  await expect(profiles).toContainText('The Attack action gives one attack.');
+
+  // The ability control is a real <select> named for its profile and weapon.
+  const ability = page.getByRole('combobox', {
+    name: 'Ability for Attack with Longsword',
+  });
+  await ability.selectOption('dexterity');
+  await expect(numbers).toHaveText(
+    'To hit: +2 (Dexterity) · Damage: 1d8 Slashing',
+  );
+
+  // The two facts the application cannot check are ON THE PAGE, not hidden.
+  await expect(profiles).toContainText(
+    'does not record whether a weapon is melee or ranged',
+  );
+  await expect(profiles).toContainText(
+    'does not record which weapons a character is proficient with',
+  );
+
+  // D15's display rule, on a real screen: Fighter 5 grants Extra Attack, and
+  // the profile's own count moves with it.
+  await page.getByRole('spinbutton', { name: 'Fighter level' }).fill('5');
+  await page.getByRole('spinbutton', { name: 'Fighter level' }).blur();
+  await expect(profiles).toContainText('The Attack action gives 2 attacks.', {
+    timeout: 15_000,
+  });
+  // Level 5 also moves the proficiency bonus to +3.
+  await expect(page.getByTestId('attack-profile-numbers').first()).toHaveText(
+    'To hit: +3 (Strength) · Damage: 1d8 Slashing',
+  );
+
+  // Nothing was written to produce any of it.
+  const rows = await weaponRows(page);
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject({ name: 'Longsword', damage_dice: '1d8' });
+
+  const body = await page.locator('body').innerText();
+  expect(body).not.toMatch(/D&D|Dungeons|Wizards/);
+});
+
+/**
+ * THE DAMAGE-TYPE CHOICE, ON A REAL `<select>`.
+ *
+ * This is the only place the second control exists at all — the vitest suite
+ * runs in the `node` environment, so nothing there can observe what a browser
+ * shows for an untouched `<select>`, which is its FIRST option. That is exactly
+ * how the two sides drifted: the number line resolved the choice to the
+ * weapon's own type while the control beside it displayed the spell's, and no
+ * test in either suite could see the two disagree.
+ *
+ * The cantrip has to be REAL for the profile to exist: neither True Strike nor
+ * Shillelagh ships with this application, so the spell is imported through the
+ * catalog RPC and selected into the character's own Wizard cantrip slot, which
+ * is the only route by which `recogniseAttackCantrips` ever sees one.
+ */
+test('the damage-type choice is undecided on both sides until it is made', async ({
+  page,
+}) => {
+  const trueStrike = JSON.stringify([
+    {
+      identityKey: 'true-strike',
+      versionKey: '2024:true-strike',
+      name: 'True Strike',
+      edition: '2024',
+      level: 0,
+      school: 'Divination',
+      castingTime: 'Action',
+      range: 'Self',
+      components: 'S, M',
+      duration: 'Instantaneous',
+      concentration: false,
+      ritual: false,
+      attackModes: [],
+      saveAbilities: [],
+      effectReliabilityCategory: 'attack_roll',
+      spellLists: ['Wizard'],
+      sourceBooks: ['Reference Book'],
+      sourcePage: 163,
+      sourceSlug: 'true-strike',
+    },
+  ]);
+
+  await page.goto('/');
+  await expect(page.locator('#status')).toHaveAttribute('data-ready', 'true', {
+    timeout: 30_000,
+  });
+  await page.evaluate(async (document) => {
+    await window.staticApp.reset();
+    await window.appRpc.call('catalog.import', { documents: [document] });
+    await window.staticApp.writeCharacter('Cantrip Bearer');
+  }, trueStrike);
+  await page.goto('/characters/1');
+  await expect(page.locator('#planner-status')).toHaveAttribute(
+    'data-ready',
+    'true',
+    { timeout: 30_000 },
+  );
+
+  await page
+    .getByRole('combobox', { name: 'Class to add' })
+    .selectOption({ label: 'Wizard' });
+  await page.getByRole('button', { name: 'Add class', exact: true }).click();
+
+  // Slot 1 is the class's first cantrip slot. Selecting the spell there is what
+  // gives the character a spell access route, which is the only input the
+  // cantrip recogniser reads.
+  const picker = page.getByLabel('Spell selection for slot 1');
+  await expect(picker).toBeVisible({ timeout: 15_000 });
+  await picker.fill('True Strike');
+  await page.getByRole('option', { name: /True Strike/ }).first().click();
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() =>
+          window.staticApp.inspectRows('spell_selection_slots', { id: 1 }),
+        ),
+      { timeout: 15_000 },
+    )
+    .toEqual([
+      expect.objectContaining({ current_spell_version_id: 1 }),
+    ]);
+
+  await page.getByRole('button', { name: 'Add weapon' }).click();
+  const form = page.getByTestId('weapon-form');
+  await form
+    .getByLabel('Start from a reference weapon')
+    .selectOption({ label: 'Longsword' });
+  await form.getByRole('button', { name: 'Add weapon' }).click();
+  await expect.poll(async () => (await weaponRows(page)).length).toBe(1);
+
+  const trueStrikeBlock = page
+    .locator('[data-testid="attack-profile"][data-kind="true_strike"]')
+    .first();
+  await expect(trueStrikeBlock).toBeVisible({ timeout: 15_000 });
+
+  const control = page.getByRole('combobox', {
+    name: 'Damage type for True Strike with Longsword',
+  });
+  const numbers = trueStrikeBlock.getByTestId('attack-profile-numbers');
+
+  // WHAT THE BROWSER SHOWS BEFORE ANYTHING IS TOUCHED. The control's value is
+  // its first option, and that option and the number line say the same thing:
+  // neither side has been picked. Wizard 1 is a +2 proficiency bonus, every
+  // ability score is the schema default of 10, and below level 5 there is no
+  // extra Radiant clause to muddy which type is on the line.
+  await expect(control).toHaveValue('');
+  await expect(numbers).toHaveText(
+    'To hit: +2 (Intelligence) · Damage: 1d8 Radiant or Slashing',
+  );
+
+  // Each side, picked in turn, recomputes the line and NOTHING ELSE claims the
+  // other type.
+  await control.selectOption('Radiant');
+  await expect(numbers).toHaveText(
+    'To hit: +2 (Intelligence) · Damage: 1d8 Radiant',
+  );
+  await expect(numbers).not.toContainText('Slashing');
+
+  await control.selectOption('Slashing');
+  await expect(numbers).toHaveText(
+    'To hit: +2 (Intelligence) · Damage: 1d8 Slashing',
+  );
+  await expect(numbers).not.toContainText('Radiant');
+
+  // And the undecided state is REACHABLE AGAIN, which is why it is a real entry
+  // in the control rather than the absence of one.
+  await control.selectOption('');
+  await expect(numbers).toHaveText(
+    'To hit: +2 (Intelligence) · Damage: 1d8 Radiant or Slashing',
+  );
+
+  // The Versatile note the plain attack carries is on the True Strike row too:
+  // the cantrip rolls the weapon's own dice.
+  await expect(trueStrikeBlock).toContainText(
+    'Versatile: 1d10 when wielded with two hands.',
+  );
+
+  const body = await page.locator('body').innerText();
+  expect(body).not.toMatch(/D&D|Dungeons|Wizards/);
+});

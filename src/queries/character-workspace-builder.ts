@@ -208,7 +208,14 @@ export class CharacterWorkspaceBuilder {
           name: sqlString(row, 'display_name'),
         }),
       ),
-      weapons: new WeaponQueries(this.db).panel(characterId),
+      // The report's own proficiency bonus and ability scores are reused rather
+      // than re-derived, so a weapon attack bonus and a spell attack bonus on
+      // the same screen cannot disagree about what level the character is.
+      weapons: new WeaponQueries(this.db).panel(characterId, {
+        routes: report.access_routes,
+        scores: AbilityScores.fromArray(report.character.abilities),
+        proficiency_bonus: report.character.proficiency_bonus,
+      }),
       save_points: new SavePointQueries(this.db).list(characterId),
     };
   }
