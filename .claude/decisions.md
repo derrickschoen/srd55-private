@@ -1,5 +1,69 @@
 # Binding scope decisions
 
+## D15 — Owner: model Extra Attack and Martial Arts; Shillelagh is a weapon row unconditionally (2026-07-26)
+
+Answers to the two questions D14 raised. Both go further than the options I
+offered, and both are right.
+
+### Extra Attack becomes MODELLED, not worked around
+
+> "Model extra attack and only show the non true strike weapon if the character
+>  actually has extra attack. Also this seems like a related area to monk dice
+>  for martial arts."
+
+I offered three ways to paper over not knowing whether a character has Extra
+Attack. The owner rejected all three and said to model it. That is the better
+answer: every option I gave was a proxy for a fact the app could simply hold,
+and the class-list proxy in particular was the kind of shortcut that rots.
+
+So the sheet's default becomes precise rather than hedged: **if the character
+has Extra Attack, show the normal weapon attack too; if they do not, True Strike
+simply replaces it.** No advisory note about a case the app can now decide.
+
+**This amends D11.** D11 deferred "class FEATURE text (Rage, Sneak Attack)".
+Extra Attack is not text — it is a number that changes what the sheet prints, so
+it belongs with the MECHANICAL set, exactly as D12 drew the line for species
+traits: free text stays text, anything that moves a derived number gets modelled.
+
+### The owner's connection: Martial Arts is the same shape
+
+Monk's Martial Arts is another class feature that rewrites a weapon attack — it
+substitutes a die, permits DEX where the weapon would demand STR, and scales by
+level. That is structurally identical to what True Strike and Shillelagh do.
+
+So there is ONE family, not two features: **things that modify a weapon attack
+profile.** Some come from cantrips (True Strike, Shillelagh), some from class
+features (Martial Arts, Extra Attack). Building them as one bounded, extensible
+set is the design; building the cantrips alone and bolting on Martial Arts later
+is how the second one ends up special-cased.
+
+### Shillelagh appears unconditionally
+
+> "Any character with shillelagh should have the stats of that on the sheet as
+>  if it was a weapon. Assume the character can make it work at the table."
+
+Not conditional on owning a Club or Quarterstaff. If the character knows the
+cantrip, the sheet shows the Shillelagh attack with its full statistics — the
+owner's judgement being that any real player can produce a stick.
+
+This overrides my recommendation, which required an owned weapon to attach to,
+and it is a defensible call: the alternative hides a real capability behind
+inventory bookkeeping the app does not otherwise do. It does mean the app
+generates a weapon row the user did not enter, which sits in tension with D1b's
+"weapons are user-defined" — resolved by DERIVING the row rather than inserting
+one. Nothing is written to `character_weapons`; the row is computed from the
+known cantrip, like any other derived sheet value.
+
+### Consequences
+
+- Extra Attack and Martial Arts need per-class, per-level content, sourced from
+  the SRD like the mastery counts (F6) — never recalled.
+- The attack-profile family is the unit of work, not four separate features.
+- All of it lands with the sheet core (D11/D12), which needs the attack and
+  damage derivation none of this can exist without.
+
+---
+
 ## D14 — Cantrips that change how a weapon attack is rolled (2026-07-26)
 
 Owner's request, verbatim in substance: a Wizard with -1 Strength should not be
