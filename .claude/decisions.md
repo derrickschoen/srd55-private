@@ -1,5 +1,78 @@
 # Binding scope decisions
 
+## D12 — Owner's answers on HP, armour, species/backgrounds, and the AI bridge (2026-07-26)
+
+Four direct answers. Three confirm the recommendation; the third changes the
+design and is the most interesting.
+
+### HP — computed average, with a per-level override
+
+Default to the SRD fixed value (hit-die average, rounded up) plus CON modifier
+per level, COMPUTED and never stored, per D11's derive-don't-store rule. A
+player who rolled instead may enter that level's actual roll, and THAT is
+stored — a die roll is real information the app cannot recompute, which is
+exactly the line D6d draws between derived and given. Rejected: storing every
+level (twenty entries, most of them the average we could compute) and a single
+manual total (derives nothing, cannot warn).
+
+### Armour — SRD templates, the weapons pattern again
+
+Bundle the SRD armour table as TEMPLATES that pre-fill editable fields, exactly
+the D1b mechanism already built and reviewed. AC derives: base + DEX capped by
+category + shield + manual adjustment. Rejected: a manual AC field, which cannot
+warn about a Strength requirement or an impossible number.
+
+### Species and backgrounds — TEMPLATES, mostly free text, with a NAMED set of mechanical traits
+
+The owner, verbatim:
+
+> "Make species and backgrounds templates like for weapons. I want most things
+>  just text boxes without mechanics like elf 4 hour sleep, we will need to add
+>  mechanical things like Certain things we have to model like dwarf resistance
+>  and hp as well as elf movement speed and spells"
+
+This is neither of the options I offered and it is better than both. The split:
+
+- **Species and backgrounds become templates**, the same D1b shape as weapons:
+  they pre-fill editable fields, the character stores VALUES, and there is no
+  live reference back to the template.
+- **Most traits are FREE TEXT with no mechanics.** An Elf's four-hour trance is
+  a sentence on the sheet. It is not modelled, not computed against, and not
+  validated. This is the majority case and must stay cheap.
+- **A BOUNDED set of traits is MECHANICAL**, because it moves a derived number
+  and a sheet that ignores it is simply wrong. Named by the owner:
+  damage resistance (Dwarven Resilience), HP modification (Dwarven Toughness,
+  +1 per level), movement speed (Elf), and granted spells.
+
+So a trait is free text PLUS an optional mechanical effect drawn from a closed,
+compile-checked set. Adding a new mechanical KIND is a deliberate change; adding
+a new trait is not. That is the same shape as the weapon property toggles plus
+free text (Q4), applied one level up — and it avoids both failure modes: no
+modelling every trait in the SRD, and no sheet quietly showing the wrong speed.
+
+Granted spells are the one mechanical kind that already has machinery: species
+and background spell grants are what `character_source_instances` and the
+grant-rule system were built for. Reuse before inventing.
+
+### Q1 ANSWERED — build the Claude-only bridge
+
+The owner chose the claude-only option after I stated the residual risk plainly.
+Q1 is no longer blocked and the standing "do not resume" instruction is
+DISCHARGED for the claude-only shape only.
+
+**Codex is dropped entirely, not gated.** F2 proved `codex --sandbox read-only`
+executes arbitrary commands and reads outside its working directory, including
+SSH keys. That is the half that failed containment, and it does not come back.
+`claude -p --tools ""` is the half verified contained: zero tool_use blocks and
+no file written under adversarial prompting.
+
+**Residual risk stated, not buried**, because the owner accepted it knowingly:
+a local endpoint a web page can reach still exists, and "no tools" is a flag
+whose meaning a future version could change. The build must therefore not rely
+on that flag alone.
+
+---
+
 ## D11 — Q6 ANSWERED BY THE OWNER: derivable sheet core first; builder blocks, import tolerates (2026-07-26)
 
 Not a consensus recommendation — the owner's own decision, asked directly and
