@@ -63,6 +63,64 @@ classes print d8 — and that is checkable against the class-traits test.
 
 ---
 
+## D25 — OWNER: pre-alpha, replace freely; and put the rules engine in the type system (2026-07-26)
+
+Two standing directions, now written into `AGENTS.md` with `CLAUDE.md` pointing
+at it. Neither file existed before.
+
+### 1. Pre-alpha: bias towards REPLACING code
+
+> "this is a pre-alpha project and to bias towards replacing existing code if we
+>  come up with a better structure or similar change to the codebase. Unlike in
+>  an established project, deleting and/or ignoring previous code is welcome if
+>  it leads to a better codebase."
+
+This inverts the default instinct, and it retroactively justifies a lot of what
+F10 found: the Laravel fidelity machinery survived because each individual
+change would have moved a test expectation, and nobody was authorised to just
+delete the expectation. Now they are.
+
+**Explicit non-licences, recorded because "replace freely" is easy to
+overread.** It does NOT permit deleting a test to reach green (a test may go
+when its SUBJECT is gone, never to make something pass), regenerating an
+expectation from our own output (the hardest rule here, no exceptions), or
+losing user data. Structure is cheap to replace; a user's character is not.
+
+### 2. As much of the rules engine as practicable stated in TYPES
+
+> "I want as much of the rules engine to be described in the type system as well."
+
+Recorded as an ordered list in AGENTS.md rather than a slogan, because a slogan
+would be applied inconsistently. In value order: absence as a type rather than a
+fallback; branded ids; closed sets closed; ranges in the type not only in a
+CHECK; exhaustive switches with no default arm; value objects for structured
+strings; relations in the type rather than a bare foreign key.
+
+**The exemplar is already in the codebase** and is why the list starts where it
+does: D24's `hit_die: number | null`. The query used to substitute `?? 8`, so a
+guess arrived downstream indistinguishable from a sourced value and the agent
+block asserted it as fact. Moving the absence into the TYPE made the assumption
+a single visible decision.
+
+**The trap is recorded with the rule, not separately**, because it is a
+data-loss bug and would otherwise be discovered the hard way: a closed enum
+REJECTS homebrew. This project settled the shape twice already — D12 (species
+traits: bounded mechanical kinds plus free text) and Q4 (weapon properties:
+known toggles plus free text). Where a user supplies content, the pattern is
+known-set-plus-passthrough, not a closed enum.
+
+### On the files themselves
+
+`CLAUDE.md` is a POINTER to `AGENTS.md`, not a copy. The project's own tooling
+demonstrated why: the consensus protocol was maintained in two files until it
+drifted and two reviews called the duplication a collision risk. One source, one
+place to change. Both files defer to this decisions file on any disagreement.
+
+**Rejected:** duplicating the guidance into both files so each tool reads its
+native one. Convenient, and exactly the failure already documented here.
+
+---
+
 ## F10 — Archaeology: what else survives only because the MVP did it that way (2026-07-26)
 
 The owner, on the VARCHAR mimicry: *"having something that renames string to
