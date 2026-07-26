@@ -203,8 +203,12 @@ export const spell_list_memberships = sqliteTable(
  *
  * `spell_version_damage_types` and `spell_version_conditions` are DORMANT:
  * they are referenced only by the application-table inventory and have no
- * reader or writer anywhere. They are declared (not pruned) for the same
- * round-trip reason as the infrastructure tables.
+ * reader or writer anywhere. They used to share the round-trip rationale of the
+ * Laravel infrastructure tables, and that rationale left with those tables.
+ * What keeps them is narrower and worth stating plainly: they are catalog
+ * pivots with real foreign keys into `spell_versions`, declared in the shape a
+ * catalog import writes, and whether they should be pruned is a separate
+ * decision nobody has made. They are NOT kept because something reads them.
  */
 export const spell_version_tags = sqliteTable(
   'spell_version_tags',

@@ -518,22 +518,35 @@ describe('complete database backup', () => {
     lifecycle.database.exec(
       "INSERT INTO characters (name, notes) VALUES ('Image Hero', 'kept')",
     );
+    // A non-character table, to prove a whole-image round trip carries more
+    // than the character graph. This used to be `cache`, one of the eight
+    // Laravel-only tables; `spell_identities` is a better stand-in anyway,
+    // because it is data the application actually reads.
     lifecycle.database.exec(
-      "INSERT INTO cache (key, value, expiration) VALUES ('user-cache', 'kept', 9)",
+      `INSERT INTO spell_identities (content_key, canonical_name, normalized_name)
+       VALUES ('spell:fireball', 'Fireball', 'fireball')`,
     );
     const backup = await exportDatabaseBackup(
       lifecycle,
       '2026-07-23T12:00:00.000Z',
     );
     lifecycle.database.exec('DELETE FROM characters');
-    lifecycle.database.exec('DELETE FROM cache');
+    lifecycle.database.exec('DELETE FROM spell_identities');
 
     await importDatabaseBackup(lifecycle, backup);
     expect(lifecycle.database.all('SELECT name, notes FROM characters')).toEqual(
       [{ name: 'Image Hero', notes: 'kept' }],
     );
-    expect(lifecycle.database.all('SELECT * FROM cache')).toEqual([
-      { key: 'user-cache', value: 'kept', expiration: 9 },
+    expect(
+      lifecycle.database.all(
+        'SELECT content_key, canonical_name, normalized_name FROM spell_identities',
+      ),
+    ).toEqual([
+      {
+        content_key: 'spell:fireball',
+        canonical_name: 'Fireball',
+        normalized_name: 'fireball',
+      },
     ]);
 
     const connection = lifecycle.database.connection;

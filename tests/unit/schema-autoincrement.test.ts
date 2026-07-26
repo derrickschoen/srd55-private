@@ -19,10 +19,12 @@ import { schemaSources } from '../helpers/schema-sources';
  * SQLite reuses the highest free rowid and a restore can silently collide with
  * ids the backup document still references.
  *
- * PROVENANCE: the 33 names below were transcribed from the hand-written,
+ * PROVENANCE: the names below were transcribed from the hand-written,
  * Laravel-derived `src/db/schema.sql` as it stood BEFORE any Drizzle
  * generation existed. They are not derived from Drizzle output and must never
- * be regenerated from it.
+ * be regenerated from it. Three of the original 33 — `failed_jobs`, `jobs` and
+ * `users` — were removed with the eight Laravel-only tables; the remaining 30
+ * are the untouched transcription.
  */
 const autoIncrementTables = [
   'background_definitions',
@@ -36,9 +38,7 @@ const autoIncrementTables = [
   'characters',
   'class_definitions',
   'class_progressions',
-  'failed_jobs',
   'feat_definitions',
-  'jobs',
   'species_definitions',
   'spell_identities',
   'spell_identity_aliases',
@@ -55,16 +55,15 @@ const autoIncrementTables = [
   'spell_versions',
   'subclass_definitions',
   'subclass_progressions',
-  'users',
   'warning_acknowledgements',
   'wizard_spellbook_entries',
 ] as const;
 
 /**
  * The NATIVE tables — no Laravel migration produced them. Kept in their own
- * list so the 33-name provenance claim above is not quietly turned into a
- * 37-name one: those 33 came from the pre-Drizzle hand-written artifact, and
- * these four come from `db/schema/weapons.ts`.
+ * list so the provenance claim above is not quietly absorbed: those names came
+ * from the pre-Drizzle hand-written artifact, and these four come from
+ * `db/schema/weapons.ts`.
  *
  * They carry AUTOINCREMENT for the same reason every other surrogate-key table
  * does — the id-reuse hazard `sqlite_sequence` exists to close does not care
@@ -83,17 +82,20 @@ const allAutoIncrementTables = [
 ].sort();
 
 /**
- * The five tables whose primary key is a natural key, not a rowid alias, and
- * which therefore cannot carry AUTOINCREMENT. Pinned explicitly so that
- * "33 of 38" is asserted from both directions.
+ * The tables whose primary key is a natural key rather than a rowid alias, and
+ * which therefore cannot carry AUTOINCREMENT.
+ *
+ * EMPTY NOW, AND STILL WORTH ASSERTING. All five — `cache`, `cache_locks`,
+ * `job_batches`, `password_reset_tokens`, `sessions` — were Laravel-only tables
+ * and left with the other eight, so the "33 of 38 from both directions" framing
+ * is genuinely gone and is not pretended otherwise. What the empty list still
+ * says is a real, failable claim about the schema as it stands: EVERY table has
+ * a surrogate autoincrementing key, the four native weapon tables included. A
+ * table added with a natural primary key fails here and forces the decision to
+ * be made deliberately, which is the only thing the second direction ever
+ * bought.
  */
-const naturalKeyTables = [
-  'cache',
-  'cache_locks',
-  'job_batches',
-  'password_reset_tokens',
-  'sessions',
-] as const;
+const naturalKeyTables = [] as const;
 
 let sqlite3: Sqlite3Static;
 const openDatabases: Database[] = [];
@@ -117,7 +119,7 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
       return db;
     }
 
-    it('declares AUTOINCREMENT on exactly the 33 Laravel and 4 native surrogate-key tables', () => {
+    it('declares AUTOINCREMENT on exactly the 30 Laravel and 4 native surrogate-key tables', () => {
       const db = openDb();
       const declared = db
         .selectValues(
@@ -131,8 +133,9 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
         .map(String);
 
       expect(declared).toEqual(allAutoIncrementTables);
-      expect(declared).toHaveLength(37);
-      expect(autoIncrementTables).toHaveLength(33);
+      expect(declared).toHaveLength(34);
+      expect(autoIncrementTables).toHaveLength(30);
+      expect(nativeAutoIncrementTables).toHaveLength(4);
 
       const withoutAutoIncrement = db
         .selectValues(
