@@ -1,5 +1,115 @@
 # Binding scope decisions
 
+## F7 — Queue item (a) is far smaller than its brief says: 122 of 122 call sites already pass a codec (measured 2026-07-26)
+
+Measured before starting the work, because the brief carries a number I put
+there and numbers age.
+
+```
+real db .all/.one call sites in src/: 122
+  WITH a codec:    122
+  WITHOUT a codec: 0
+```
+
+Codex's original ranking — and every brief since — described "about 116 call
+sites where a raw SQLite row and a decoded domain object share one API, so a
+missing codec is invisible to the type checker". Earlier in this session its AST
+scan found 116 calls, 46 with codecs and **70 without**. That was true when
+written. The Drizzle+Zod contract work and everything after it closed all 70.
+
+**So the practical problem is already solved.** No call site is silently
+returning an undecoded row today.
+
+### What actually remains, and it is a real defect
+
+`codec?: RowCodec<T>` is OPTIONAL (`src/db/database.ts:52,60`,
+`src/db/query.ts:45,58`). A NEW call site can omit it, default `T` to `SqlRow`,
+and compile. The 122 are correct by discipline, not by construction — and
+discipline is what the type system is supposed to replace.
+
+So (a) is not a 116-site refactor. It is an API-shape change: make the decoded
+path require a codec, give the genuinely-raw path its own name, and let the
+compiler refuse the third option. The existing raw helpers already exist and are
+used — `exec` 143, `scalar` 37, `selectValue` 6, `selectObjects` 5,
+`selectObject` 4, `selectValues` 2 — so the raw side needs naming, not building.
+
+### Why this matters beyond saving effort
+
+The brief said (a) "NEEDS A QUIET WINDOW: run it alone", which was sound advice
+for a 116-file sweep and is now over-cautious for what is closer to a signature
+change plus its fallout. It can share a window with an unrelated track.
+
+**And a caution against the obvious shortcut:** the fix is NOT to delete the
+optional parameter and let 122 sites keep working by inference. If a call site
+can still compile without naming its codec, nothing has been gained — the change
+must make the omission a compile ERROR, and the proof is a deliberately
+codec-less call that fails to build.
+
+---
+
+## D22 — OWNER: invert the effect model. Effects belong to the CHARACTER; the trait is provenance (2026-07-26)
+
+I offered three options for the Tiefling two-effect problem. The owner rejected
+all three and gave a fourth, which is better than any of them:
+
+> "Can we just invert it and record that a character has resistance and then the
+>  trait is that the resistance came from? Same with cantrip and others. The
+>  character sheet needs to know which resistance and cantrips it has. We only
+>  need to know the source when we check it."
+
+### Why this is the right shape and my options were not
+
+Every option I offered modelled effects as belonging to a TRAIT — one per trait,
+a set per trait, or swapping which one survives. All three optimise for the
+writer. The consumer is a character SHEET, and it never asks "what does this
+trait do"; it asks **"what resistances does this character have"** and "what
+cantrips do they know". Provenance is an audit question, answered rarely.
+
+Inverting it dissolves the original problem rather than accommodating it. A
+trait granting two effects is no longer a special case, because a trait is not
+what an effect hangs from. It also fixes a bug I had not raised: effects can
+come from a SUBCLASS, a FEAT or a background, not only a species, and the
+trait-owned model would have needed the same fix again for each.
+
+### The provenance mechanism already exists
+
+`character_source_instances` carries a polymorphic `source_type` over
+`class | subclass | feat | species | …` (`src/domain/enums.ts:78`,
+`db/schema/character.ts:163`). That IS "where it came from". So the inversion
+reuses the app's oldest machinery rather than adding a parallel one — a source
+instance answers the audit question, and the effect row answers the sheet's.
+
+### Consequences to work out when it is built
+
+- A character-level effects table keyed by effect KIND, referencing the source
+  instance. The closed compile-checked kind set and the per-kind CHECK
+  constraints survive unchanged (D12, D13).
+- The catalog side still needs to say what a template GRANTS; the character side
+  records what was granted. Those are different questions and should not share a
+  table.
+- Granted spells already flow through source instances and grant rules, so the
+  spell half may need no new storage at all — worth proving before building.
+- The `KNOWN GAP: the Tiefling's resistance is recorded nowhere` test becomes
+  the acceptance test for this work rather than a pinned defect.
+
+**NOT started.** Two tracks are mid-implementation in the same contracts files
+and D18 records what happens when three tracks contend there. Queued.
+
+### Also decided this round
+
+- **Next after the sheet and subclass import: SPLIT RAW VS DECODED QUERY APIs**
+  — the owner chose codex's last hardening item over the guided builder. It
+  touches 116 call sites, so it needs a genuinely quiet window.
+- **CHASE THE F5 FLAKE** with a dedicated track, rather than leaving it
+  recorded. The owner's reasoning is sound and I had underweighted it: `loads: 2`
+  means the SPA router did not intercept a click, and a race that fires for a
+  test can fire for a person on a slow phone.
+- **The recurring cron brief is to be rewritten** to match reality — it still
+  named three deleted worktrees and still said the AI bridge was blocked after
+  Q1 was answered and merged.
+
+---
+
 ## D21 — D19 built; and a review's over-redaction was reverted (2026-07-26)
 
 `main` 703b9fb. Verified by me: **1440 vitest / 101 files, build exit 0,
