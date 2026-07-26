@@ -86,7 +86,34 @@ described by `sqlInteger(row,'level')` in a codec AND by a Zod entry in
 `db/schema/columns.ts` states the intent plainly: *"Runtime decoding is INTENDED
 to become Zod's job at the query boundaries. That does not exist yet."*
 
-### Why drizzle-zod degrades 223 of 332 columns
+### CORRECTION (2026-07-26, same day): this entry overstated the defect
+
+As first written this entry said the degraded columns "cannot describe
+themselves". **That is false and was never checked before writing.** The
+`z.any()` schemas are NEVER SHIPPED: `src/domain/contracts/rows.ts`
+compile-forces a hand-written refinement for every degraded column —
+`REFINEMENTS satisfies Record<RequiredRefinementKey, ...>` fails the build if one
+is missing — and `.$type<Brand>()` means `InferSelectModel` still carries the
+domain type, so the over-tightening guard is not weakened either. The contracts
+are CORRECT today.
+
+Corrected counts: **353 of 526** columns degrade, not 223 of 332 — that figure
+came from the comment at `rows.ts:48`, written before ~20 tables landed, and is
+itself now stale.
+
+**The real cost, stated accurately:** 257 base schemas are written BY HAND
+rather than derived, every new column pays that tax, and an opaque `customType`
+is exactly what blocks deriving the codec and the contract from ONE description.
+That last point is this entry's two-sources-of-truth problem and is the only
+part with strategic weight.
+
+**Revised sequencing, replacing "the highest-leverage first move":** the enum
+and value-object work is the better first move — visible correctness, no
+prerequisite. Dropping the mimicry is the ENABLER for merging the codec and
+contract layers, which is a project rather than a move, and it is not urgent
+while the contracts are correct.
+
+### Why drizzle-zod degrades 353 of 526 columns
 
 Every text-ish column is a Drizzle `customType` carrying only
 `dataType: () => 'VARCHAR'`, with `toDriver`/`fromDriver` deliberately absent.
