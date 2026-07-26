@@ -12,6 +12,7 @@ import {
   type CharacterShareDocument,
   validateShareDocument,
 } from '../../../src/sharing/schema';
+import { WEAPON_RANGE_MAX_FEET } from '../../../src/domain/weapon-limits';
 
 type Random = () => number;
 type JsonObject = Record<string, unknown>;
@@ -194,6 +195,10 @@ function generateDocument(seed: number): CharacterShareDocument {
   const acknowledgementMode = integer(random, 3);
   const loadoutMode = integer(random, 3);
   const placeholderMode = integer(random, 3);
+  // Three modes for the same reason the others have three: absent, empty and
+  // populated are genuinely different documents on the wire, and the first is
+  // what a link written before weapons travelled looks like.
+  const weaponMode = integer(random, 3);
   const loadoutCount = loadoutMode === 2 ? 1 + integer(random, 4) : 0;
   let loadoutEntryIndex = 0;
   const loadouts = Array.from({ length: loadoutCount }, (_, loadoutIndex) => ({
@@ -206,6 +211,60 @@ function generateDocument(seed: number): CharacterShareDocument {
       }),
     ),
   }));
+  const weaponCount = weaponMode === 2 ? 1 + integer(random, 4) : 0;
+  const weapons = Array.from({ length: weaponCount }, (_, weaponIndex) => {
+    // Every optional field is independently present or absent, so the generator
+    // reaches the half-entered weapon — a name and nothing else — as well as the
+    // fully described one. The mastery pair is generated together because the
+    // schema (and the database CHECK behind it) refuses a selection with no
+    // property, and a generator that produced one would be testing the
+    // validator's rejection rather than the codec's fidelity.
+    const masterySelected = random() < 0.4;
+    return {
+      name: textValue(random, `-weapon-${weaponIndex}`),
+      ...(random() < 0.5 ? {} : { damage_dice: textValue(random, '-dice') }),
+      ...(random() < 0.5 ? {} : { damage_type: textValue(random, '-type') }),
+      ...(random() < 0.5
+        ? {}
+        : { versatile_damage_dice: textValue(random, '-versatile') }),
+      ...(random() < 0.5 ? {} : { ammunition_kind: textValue(random, '-ammo') }),
+      // Drawn from `WEAPON_RANGE_MAX_FEET + 1` rather than a transcribed
+      // literal. A hard-coded bound would silently stop covering the top of the
+      // range the moment the shared limit moved, which is exactly the drift
+      // that let the share and write boundaries disagree in the first place.
+      ...(random() < 0.5 ? {} : { range_normal_feet: integer(random, 601) }),
+      ...(random() < 0.5
+        ? {}
+        : { range_long_feet: integer(random, WEAPON_RANGE_MAX_FEET + 1) }),
+      ...(masterySelected || random() < 0.5
+        ? {
+            mastery_property: pick(random, [
+              'Cleave',
+              'Graze',
+              'Nick',
+              'Push',
+              'Sap',
+              'Slow',
+              'Topple',
+              'Vex',
+            ]),
+          }
+        : {}),
+      ...(masterySelected ? { mastery_selected: true as const } : {}),
+      ...(random() < 0.5
+        ? {}
+        : { other_properties: textValue(random, '-properties') }),
+      ...(random() < 0.5 ? {} : { notes: textValue(random, '-notes') }),
+      ...(random() < 0.5 ? {} : { finesse: true as const }),
+      ...(random() < 0.5 ? {} : { heavy: true as const }),
+      ...(random() < 0.5 ? {} : { light: true as const }),
+      ...(random() < 0.5 ? {} : { loading: true as const }),
+      ...(random() < 0.5 ? {} : { reach: true as const }),
+      ...(random() < 0.5 ? {} : { thrown: true as const }),
+      ...(random() < 0.5 ? {} : { two_handed: true as const }),
+      ...(random() < 0.5 ? {} : { ammunition: true as const }),
+    };
+  });
   const ability = (): number => pick(random, [1, 1, 10, 10, 30, 30]);
   const character: CharacterShareDocument['character'] = {
     name: textValue(random),
@@ -263,6 +322,7 @@ function generateDocument(seed: number): CharacterShareDocument {
                   }),
                 ),
         }),
+    ...(weaponMode === 0 ? {} : { weapons: weaponMode === 1 ? [] : weapons }),
   });
 }
 
@@ -411,7 +471,12 @@ function optionalFieldShrinks(
       );
     }
   }
-  for (const key of ['acknowledgements', 'loadouts', 'placeholders']) {
+  for (const key of [
+    'acknowledgements',
+    'loadouts',
+    'placeholders',
+    'weapons',
+  ]) {
     if (Object.hasOwn(document, key)) {
       result.push(validateShareDocument(omit(document, key)));
     }
@@ -473,6 +538,7 @@ function collectionShrinks(
     'acknowledgements',
     'loadouts',
     'placeholders',
+    'weapons',
   ] as const) {
     const collection = document[key];
     if (collection === undefined) {

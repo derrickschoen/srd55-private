@@ -12,6 +12,7 @@ import { rowContractError } from '../domain/contracts/rows';
 import {
   slotExclusiveAssignmentError,
   uniqueRowIdError,
+  weaponMasterySelectionError,
 } from '../domain/contracts/row-rules';
 import {
   JSON_COLUMNS,
@@ -20,9 +21,9 @@ import {
   jsonColumnLocation,
 } from '../domain/contracts/json-columns';
 import {
-  CHARACTER_SNAPSHOT_SCHEMA_VERSION,
   CHARACTER_STATE_COLUMNS,
-  CHARACTER_STATE_TABLES,
+  snapshotSchemaVersion,
+  snapshotTablesFor,
 } from '../character/character-state';
 import { FOREIGN_KEY_FACTS } from '../domain/contracts/generated/reference-facts';
 import { domainSourceTypes } from '../domain/enums';
@@ -530,11 +531,11 @@ function auditSnapshotSourceGraph(
  * inside a column. The portable backup already refuses this through
  * `assertOwnedRows`; this is the same rule for an image.
  *
- * THE TWO RULES THE ROW CONTRACT CANNOT SEE, AND WHY REJECTING IS SAFE HERE.
+ * THE THREE RULES THE ROW CONTRACT CANNOT SEE, AND WHY REJECTING IS SAFE HERE.
  * A per-row contract validates one row against one column list, so it is blind
- * to a rule about a LIST of rows and to a rule about two columns TOGETHER. Both
- * of those exist, both were already implemented for the portable document, and
- * both are now imported from `../domain/contracts/row-rules.ts` rather than
+ * to a rule about a LIST of rows and to a rule about two columns TOGETHER. All
+ * of those exist, all were already implemented for the portable document, and
+ * all are now imported from `../domain/contracts/row-rules.ts` rather than
  * written twice:
  *
  *  1. two snapshot rows sharing one `id`. `restore` re-inserts them verbatim
@@ -544,12 +545,17 @@ function auditSnapshotSourceGraph(
  *     `current_spell_version_id`. The live table cannot hold that pair — named
  *     CHECK `spell_slots_exclusive_assignment_check` plus the triggers in
  *     `db/schema/triggers.sql` — so the row can only exist inside the JSON, and
- *     undo dies with `SQLITE_CONSTRAINT_TRIGGER`.
+ *     undo dies with `SQLITE_CONSTRAINT_TRIGGER`;
+ *  3. a `character_weapons` row with `mastery_selected` set and no
+ *     `mastery_property`. Named CHECK
+ *     `character_weapons_mastery_requires_property_check`, so again the live
+ *     table cannot hold the pair and undo would die with
+ *     `SQLITE_CONSTRAINT_CHECK`.
  *
  * These are REJECTED rather than skipped, and the D6b data-loss objection does
- * not apply to either, because neither can occur in an image this application
+ * not apply to any of them, because none can occur in an image this application
  * produced: a snapshot is `SELECT * … WHERE character_id = ? ORDER BY id` over
- * a table with a PRIMARY KEY, and the second pair is refused by the storage
+ * a table with a PRIMARY KEY, and the other two pairs are refused by the storage
  * layer on every INSERT and UPDATE. An image containing one was hand-made.
  *
  * WHAT IS DELIBERATELY NOT CHECKED: AN INACTIVE SPELL VERSION.
@@ -574,15 +580,22 @@ function auditSnapshotSourceGraph(
  *
  * THE SCHEMA-VERSION GATE, AND WHY IT SKIPS RATHER THAN REJECTS.
  * `CharacterState.restore` refuses any snapshot whose `schema_version` is not
- * the current one, before it touches a single row, so a snapshot with any other
- * version CANNOT become an INSERT and is inert. Rejecting the whole image for
- * one stale save point would take a legitimate user's entire database away over
- * a save point the application already declines to restore — the data-loss
- * failure D6b warns about, in audit form. So a version mismatch skips the
- * snapshot, and the coverage claim is exact: every snapshot that can reach an
- * INSERT is audited, for every rule whose violation this application could not
- * itself have produced. A hostile document gains nothing by setting a wrong
- * version, because that is precisely the value that makes the snapshot unusable.
+ * one this build can READ (`CHARACTER_SNAPSHOT_SCHEMA_VERSIONS`), before it
+ * touches a single row, so a snapshot with any other version CANNOT become an
+ * INSERT and is inert. Rejecting the whole image for one unreadable save point
+ * would take a legitimate user's entire database away over a save point the
+ * application already declines to restore — the data-loss failure D6b warns
+ * about, in audit form. So an unknown version skips the snapshot, and the
+ * coverage claim is exact: every snapshot that can reach an INSERT is audited,
+ * for every rule whose violation this application could not itself have
+ * produced. A hostile document gains nothing by setting a wrong version, because
+ * that is precisely the value that makes the snapshot unusable.
+ *
+ * A READABLE-BUT-OLDER version is a different case and is NOT skipped. `a7-v1`
+ * still restores, so its rows still become INSERTs and still have to be audited
+ * — against the tables `a7-v1` carries, which is what `snapshotTablesFor`
+ * supplies. Auditing it against today's table set instead would reject the image
+ * for a `character_weapons` key that no `a7-v1` snapshot has ever had.
  */
 function auditSavePointSnapshots(db: Database): void {
   const savePoints: ReadonlyArray<Record<string, SqlValue>> = db.selectObjects(
@@ -605,9 +618,18 @@ function auditSavePointSnapshots(db: Database): void {
       throw new CandidateAuditError(`${label} is not an object.`);
     }
     const snapshot = decoded as Record<string, unknown>;
-    if (snapshot.schema_version !== CHARACTER_SNAPSHOT_SCHEMA_VERSION) {
+    const version = snapshotSchemaVersion(snapshot.schema_version);
+    if (version === null) {
       continue;
     }
+    // EVERY READABLE VERSION IS AUDITED, AT ITS OWN TABLE SET.
+    //
+    // The skip above is for versions `restore` cannot use at all. A version it
+    // CAN use must be audited, and must be audited against the tables that
+    // version carries — holding an `a7-v1` snapshot to the `a7-v2` table set
+    // would reject a legitimate user's whole database over a save point that
+    // predates weapons, which is the D6b failure this pass exists to avoid.
+    const tables = snapshotTablesFor(version);
     const characterError = rowContractError(
       'characters',
       snapshot.character,
@@ -617,7 +639,7 @@ function auditSavePointSnapshots(db: Database): void {
     if (characterError !== null) {
       throw new CandidateAuditError(characterError);
     }
-    for (const table of CHARACTER_STATE_TABLES) {
+    for (const table of tables) {
       const rows = snapshot[table];
       if (!Array.isArray(rows)) {
         throw new CandidateAuditError(`${label}.${table} must be a list.`);
@@ -643,6 +665,15 @@ function auditSavePointSnapshots(db: Database): void {
           );
           if (exclusivity !== null) {
             throw new CandidateAuditError(exclusivity);
+          }
+        }
+        if (table === 'character_weapons') {
+          const mastery = weaponMasterySelectionError(
+            row as Record<string, unknown>,
+            rowLabel,
+          );
+          if (mastery !== null) {
+            throw new CandidateAuditError(mastery);
           }
         }
       }

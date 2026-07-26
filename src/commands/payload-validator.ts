@@ -6,6 +6,10 @@ import {
   slotStates,
   weaponMasteryProperties,
 } from '../domain/enums';
+import {
+  WEAPON_RANGE_MAX_FEET,
+  WEAPON_TEXT_LIMITS,
+} from '../domain/weapon-limits';
 import { canonicalizeJson } from './canonical-json';
 
 type UnknownRecord = Record<string, unknown>;
@@ -374,6 +378,13 @@ function nullableString(
   requiredString(record, key, maximum);
 }
 
+/**
+ * A nullable distance in feet.
+ *
+ * The upper bound is shared with the share boundary rather than restated, so
+ * that a range this accepts is always a range a link can carry — see
+ * `WEAPON_RANGE_MAX_FEET`.
+ */
 function nullableRange(record: UnknownRecord, key: string): void {
   if (!hasOwn(record, key)) {
     invalid(`${key} is required; use null when the weapon has no range.`);
@@ -382,8 +393,14 @@ function nullableRange(record: UnknownRecord, key: string): void {
   if (value === null) {
     return;
   }
-  if (!Number.isSafeInteger(value) || (value as number) < 0) {
-    invalid(`${key} must be a non-negative integer or null.`);
+  if (
+    !Number.isSafeInteger(value) ||
+    (value as number) < 0 ||
+    (value as number) > WEAPON_RANGE_MAX_FEET
+  ) {
+    invalid(
+      `${key} must be a non-negative integer of at most ${WEAPON_RANGE_MAX_FEET}, or null.`,
+    );
   }
 }
 
@@ -399,16 +416,22 @@ function validateWeaponFields(value: unknown): void {
   const weapon = objectValue(value, 'Weapon must be an object.');
   rejectUnknown(weapon, weaponFieldKeys, 'weapon');
 
-  nonEmptyString(weapon, 'name', 120);
+  // Every length here comes from `WEAPON_TEXT_LIMITS` rather than a literal, so
+  // that the share boundary can accept exactly what this one lets through.
+  nonEmptyString(weapon, 'name', WEAPON_TEXT_LIMITS.name);
   // Free text, not a dice pattern: the source's own Blowgun does `1` damage and
   // a user may write whatever their table agreed on.
-  nullableString(weapon, 'damage_dice', 40);
-  nullableString(weapon, 'damage_type', 40);
-  nullableString(weapon, 'versatile_damage_dice', 40);
+  nullableString(weapon, 'damage_dice', WEAPON_TEXT_LIMITS.damage_dice);
+  nullableString(weapon, 'damage_type', WEAPON_TEXT_LIMITS.damage_type);
+  nullableString(
+    weapon,
+    'versatile_damage_dice',
+    WEAPON_TEXT_LIMITS.versatile_damage_dice,
+  );
   for (const toggle of weaponToggles) {
     requiredBoolean(weapon, toggle);
   }
-  nullableString(weapon, 'ammunition_kind', 40);
+  nullableString(weapon, 'ammunition_kind', WEAPON_TEXT_LIMITS.ammunition_kind);
   nullableRange(weapon, 'range_normal_feet');
   nullableRange(weapon, 'range_long_feet');
   if (!hasOwn(weapon, 'mastery_property')) {
@@ -420,8 +443,12 @@ function validateWeaponFields(value: unknown): void {
   ) {
     invalid('Unknown weapon mastery property.');
   }
-  nullableString(weapon, 'other_properties', 500);
-  nullableString(weapon, 'notes', 2000);
+  nullableString(
+    weapon,
+    'other_properties',
+    WEAPON_TEXT_LIMITS.other_properties,
+  );
+  nullableString(weapon, 'notes', WEAPON_TEXT_LIMITS.notes);
 }
 
 function validateAddWeapon(record: UnknownRecord): void {

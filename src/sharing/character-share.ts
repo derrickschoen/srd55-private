@@ -13,10 +13,13 @@ import { SpellSelectionEligibility } from '../eligibility/spell-selection-eligib
 import {
   CHARACTER_SHARE_FORMAT,
   CHARACTER_SHARE_VERSION,
+  SHARE_WEAPON_FLAGS,
+  SHARE_WEAPON_TEXT,
   ShareValidationError,
   type CharacterShareDocument,
   type ShareClass,
   type ShareSource,
+  type ShareWeapon,
   validateShareDocument,
 } from './schema';
 import {
@@ -50,6 +53,13 @@ export interface SharePreview {
   readonly selectionCount: number;
   readonly spellbookCount: number;
   readonly placeholderCount: number;
+  /**
+   * Counted like every other section, so an import that is about to add nine
+   * weapons says so before it happens. A silently-arriving section is exactly
+   * the failure the weapons gap was closed to avoid; a silently-MISSING one is
+   * the same failure in the other direction.
+   */
+  readonly weaponCount: number;
   readonly includesAcknowledgements: boolean;
   readonly includesLoadouts: boolean;
 }
@@ -160,6 +170,42 @@ function contentKey(
     throw new Error(`Missing ${table} reference ${String(id)}.`);
   }
   return String(key);
+}
+
+/**
+ * One stored weapon row, projected onto the share document's weapon.
+ *
+ * `null` becomes ABSENT rather than an empty string, and a `0` flag becomes
+ * absent rather than `false`. Both directions round-trip back to the column's
+ * own null/0, so a half-entered weapon stays half-entered (D6b) instead of being
+ * silently completed with placeholder values.
+ */
+function shareWeaponFromRow(row: Row): ShareWeapon {
+  const weapon: Record<string, unknown> = { name: String(row.name) };
+  for (const field of SHARE_WEAPON_TEXT) {
+    if (row[field] !== null && row[field] !== undefined) {
+      weapon[field] = String(row[field]);
+    }
+  }
+  for (const field of ['range_normal_feet', 'range_long_feet'] as const) {
+    if (row[field] !== null && row[field] !== undefined) {
+      weapon[field] = Number(row[field]);
+    }
+  }
+  if (row.mastery_property !== null && row.mastery_property !== undefined) {
+    weapon.mastery_property = String(row.mastery_property);
+  }
+  for (const field of ['other_properties', 'notes'] as const) {
+    if (row[field] !== null && row[field] !== undefined) {
+      weapon[field] = String(row[field]);
+    }
+  }
+  for (const flag of SHARE_WEAPON_FLAGS) {
+    if (Number(row[flag]) === 1) {
+      weapon[flag] = true;
+    }
+  }
+  return weapon as unknown as ShareWeapon;
 }
 
 function sourceOwners(
@@ -433,6 +479,14 @@ export function exportCharacterShare(
           })),
         }))
       : undefined;
+  // Not behind an option flag. `acknowledgements` and `loadouts` are opt-in
+  // because they are working state the recipient may not want; a weapon is part
+  // of the build being shared, like the class levels and the spellbook.
+  const weapons = db.all<Row>(
+    `SELECT * FROM ${SHARE_TABLES.character_weapons}
+     WHERE character_id = ? ORDER BY id`,
+    [characterId],
+  ).map(shareWeaponFromRow);
   const sharedSpellKeys = new Set([
     ...selections.map((selection) => selection.spellKey),
     ...spellbook,
@@ -502,6 +556,9 @@ export function exportCharacterShare(
     ...(placeholders.length === 0 ? {} : { placeholders }),
     ...(acknowledgements === undefined ? {} : { acknowledgements }),
     ...(loadouts === undefined ? {} : { loadouts }),
+    // Omitted when empty, like `placeholders`: a weaponless character's link
+    // stays exactly the shape it was before weapons travelled.
+    ...(weapons.length === 0 ? {} : { weapons }),
   };
   return validateShareDocument(document);
 }
@@ -761,6 +818,7 @@ export function previewCharacterShare(
     selectionCount: document.selections.length,
     spellbookCount: document.spellbook.length,
     placeholderCount: allKeys.filter((key) => !existing.has(key)).length,
+    weaponCount: document.weapons?.length ?? 0,
     includesAcknowledgements:
       document.acknowledgements !== undefined,
     includesLoadouts: document.loadouts !== undefined,
@@ -1047,6 +1105,35 @@ export function importCharacterShare(
            character_id, warning_fingerprint, created_at, updated_at
          ) VALUES (?, ?, ?, ?)`,
         [characterId, acknowledgement.warning, now, now],
+      );
+    }
+    // Weapons resolve nothing against the recipient's catalog — by D1b a
+    // character's weapon holds no template id — so the row is written as it
+    // arrived, with the absent optional fields taking the column's own
+    // NULL / 0 rather than a value this importer invented.
+    for (const weapon of document.weapons ?? []) {
+      db.exec(
+        `INSERT INTO ${SHARE_TABLES.character_weapons} (
+           character_id, name, ${SHARE_WEAPON_TEXT.join(', ')},
+           range_normal_feet, range_long_feet, mastery_property,
+           other_properties, notes, ${SHARE_WEAPON_FLAGS.join(', ')},
+           created_at, updated_at
+         ) VALUES (?, ?, ${SHARE_WEAPON_TEXT.map(() => '?').join(', ')},
+           ?, ?, ?, ?, ?, ${SHARE_WEAPON_FLAGS.map(() => '?').join(', ')},
+           ?, ?)`,
+        [
+          characterId,
+          weapon.name,
+          ...SHARE_WEAPON_TEXT.map((field) => weapon[field] ?? null),
+          weapon.range_normal_feet ?? null,
+          weapon.range_long_feet ?? null,
+          weapon.mastery_property ?? null,
+          weapon.other_properties ?? null,
+          weapon.notes ?? null,
+          ...SHARE_WEAPON_FLAGS.map((flag) => (weapon[flag] === true ? 1 : 0)),
+          now,
+          now,
+        ],
       );
     }
     for (const loadout of document.loadouts ?? []) {

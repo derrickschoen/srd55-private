@@ -1,5 +1,14 @@
 import { isSpellVersionKey } from '../catalog/catalog-key';
-import { abilities, rulesEditions } from '../domain/enums';
+import {
+  abilities,
+  rulesEditions,
+  weaponMasteryProperties,
+} from '../domain/enums';
+import { weaponMasterySelectionError } from '../domain/contracts/row-rules';
+import {
+  WEAPON_RANGE_MAX_FEET,
+  WEAPON_TEXT_LIMITS,
+} from '../domain/weapon-limits';
 
 export const CHARACTER_SHARE_FORMAT =
   'dnd-multiclass-spells-character-share' as const;
@@ -19,6 +28,27 @@ export const SHARE_LIMITS = Object.freeze({
   loadouts: 100,
   loadoutEntries: 1_000,
   placeholders: 1_000,
+  /**
+   * How many weapons one document may carry.
+   *
+   * `character_weapons` holds the longest free prose a share payload carries —
+   * `other_properties` and `notes` are plain `TEXT`, where `loadouts[].name` is
+   * the only other user-typed field here and is one short line. A count cap
+   * stops a hostile document spending the whole decompressed budget on a single
+   * section, and names the section when it fires. It matches the precedent set
+   * by `loadouts` and `acknowledgements`, which the app does not bound either.
+   *
+   * 100 realistic weapons cost roughly 1.4 KB of fragment; the cap exists for
+   * the pathological case, not the plausible one. It is NOT a promise that any
+   * 100 weapons fit — 100 weapons of maximum-length high-entropy prose still
+   * exceed `compressedBytes`, and honestly report that.
+   *
+   * The PER-FIELD lengths deliberately do not live here — see
+   * `WEAPON_TEXT_LIMITS`. Owning them separately was a defect: a share-only
+   * number drifted BELOW what the write boundary accepts, which made a
+   * legitimately built character refuse to export.
+   */
+  weapons: 100,
 });
 
 export interface ShareCharacter {
@@ -86,6 +116,71 @@ export interface SharePlaceholder {
   readonly spellName: string;
 }
 
+/**
+ * ONE OF A CHARACTER'S WEAPONS, AS IT TRAVELS.
+ *
+ * FIELD NAMES ARE COLUMN NAMES, deliberately. `ShareCharacter` already does
+ * this (`proficiency_bonus_override`, `rules_edition_preference`), and for the
+ * same reason: these are the character's own row, not a re-modelled projection
+ * of it. The camelCase names elsewhere in this module (`classKey`, `spellKey`)
+ * name things that are NOT columns — content keys that replace database ids.
+ * A weapon has no id to replace: by D1b it holds no template reference, so the
+ * whole row is portable as-is.
+ *
+ * WHAT IS OMITTED AND WHY. `id`, `character_id`, `created_at` and `updated_at`
+ * — the same four a share document omits everywhere else. A share carries no
+ * database identifiers and no timestamps.
+ *
+ * OPTIONALITY MIRRORS THE COLUMN, IT DOES NOT INVENT A NEW ONE (D6/D6b). Every
+ * nullable column is an optional field, so a half-entered weapon — a name and
+ * nothing else, which this schema treats as a first-class state — survives a
+ * round trip as exactly that rather than being coerced to empty strings or
+ * rejected. Every NOT NULL boolean flag is `true`-when-present, exactly as
+ * `ShareCharacter.allow_legacy` is: absent means the column's default of 0.
+ */
+export interface ShareWeapon {
+  readonly name: string;
+  readonly damage_dice?: string;
+  readonly damage_type?: string;
+  readonly versatile_damage_dice?: string;
+  readonly ammunition_kind?: string;
+  readonly range_normal_feet?: number;
+  readonly range_long_feet?: number;
+  readonly mastery_property?: string;
+  readonly other_properties?: string;
+  readonly notes?: string;
+  readonly finesse?: true;
+  readonly heavy?: true;
+  readonly light?: true;
+  readonly loading?: true;
+  readonly reach?: true;
+  readonly thrown?: true;
+  readonly two_handed?: true;
+  readonly ammunition?: true;
+  readonly mastery_selected?: true;
+}
+
+/** The `true`-when-present flags of a weapon, in wire order. */
+export const SHARE_WEAPON_FLAGS = [
+  'finesse',
+  'heavy',
+  'light',
+  'loading',
+  'reach',
+  'thrown',
+  'two_handed',
+  'ammunition',
+  'mastery_selected',
+] as const satisfies readonly (keyof ShareWeapon)[];
+
+/** The nullable text columns of a weapon, in wire order. */
+export const SHARE_WEAPON_TEXT = [
+  'damage_dice',
+  'damage_type',
+  'versatile_damage_dice',
+  'ammunition_kind',
+] as const satisfies readonly (keyof ShareWeapon)[];
+
 export interface CharacterShareDocument {
   readonly format: typeof CHARACTER_SHARE_FORMAT;
   readonly version: typeof CHARACTER_SHARE_VERSION;
@@ -99,6 +194,16 @@ export interface CharacterShareDocument {
   readonly acknowledgements?: readonly { readonly warning: string }[];
   readonly loadouts?: readonly ShareLoadout[];
   readonly placeholders?: readonly SharePlaceholder[];
+  /**
+   * OPTIONAL, AND THAT IS THE COMPATIBILITY GUARANTEE.
+   *
+   * Every share link generated before weapons travelled has no `weapons` key.
+   * Making the field required would make each of those links unreadable, which
+   * would be a far worse loss than the one this change closes. Absent means the
+   * document predates weapons or the character has none — and both import to a
+   * character with no weapons, which is correct in both cases.
+   */
+  readonly weapons?: readonly ShareWeapon[];
 }
 
 export class ShareValidationError extends TypeError {
@@ -282,6 +387,110 @@ function config(
   return result;
 }
 
+/**
+ * A non-negative distance in feet, or absent.
+ *
+ * `range_normal_feet` / `range_long_feet` are nullable integers with no CHECK,
+ * so the schema itself permits any integer. The bound is a boundary judgement,
+ * and it is the SAME judgement the write boundary makes — see
+ * `WEAPON_RANGE_MAX_FEET`. Owning a separate number here is what let this
+ * refuse a range the app had already stored.
+ */
+function weaponRange(value: unknown, label: string): number {
+  return integer(value, label, 0, WEAPON_RANGE_MAX_FEET);
+}
+
+function shareWeapon(value: unknown, label: string): ShareWeapon {
+  const row = record(value, label);
+  exactKeys(
+    row,
+    ['name'],
+    [
+      ...SHARE_WEAPON_TEXT,
+      'range_normal_feet',
+      'range_long_feet',
+      'mastery_property',
+      'other_properties',
+      'notes',
+      ...SHARE_WEAPON_FLAGS,
+    ],
+    label,
+  );
+  const weapon: Record<string, unknown> = {
+    name: text(row.name, `${label}.name`, WEAPON_TEXT_LIMITS.name),
+  };
+  for (const field of SHARE_WEAPON_TEXT) {
+    if (row[field] !== undefined) {
+      weapon[field] = text(
+        row[field],
+        `${label}.${field}`,
+        WEAPON_TEXT_LIMITS[field],
+      );
+    }
+  }
+  for (const field of ['range_normal_feet', 'range_long_feet'] as const) {
+    if (row[field] !== undefined) {
+      weapon[field] = weaponRange(row[field], `${label}.${field}`);
+    }
+  }
+  if (row.mastery_property !== undefined) {
+    const property = text(
+      row.mastery_property,
+      `${label}.mastery_property`,
+      WEAPON_TEXT_LIMITS.mastery_property,
+    );
+    if (
+      !weaponMasteryProperties.includes(
+        property as (typeof weaponMasteryProperties)[number],
+      )
+    ) {
+      throw new ShareValidationError(
+        `${label}.mastery_property is unsupported.`,
+      );
+    }
+    weapon.mastery_property = property;
+  }
+  // The two long free-text columns. The cap names the weapon and the field when
+  // a hostile document sends 400 KB of prose, instead of letting it surface far
+  // away as a compressed-byte overflow. It is the write boundary's own number,
+  // so it can never refuse text this app itself allowed the user to store.
+  for (const field of ['other_properties', 'notes'] as const) {
+    if (row[field] !== undefined) {
+      weapon[field] = text(
+        row[field],
+        `${label}.${field}`,
+        WEAPON_TEXT_LIMITS[field],
+      );
+    }
+  }
+  for (const flag of SHARE_WEAPON_FLAGS) {
+    if (row[flag] === undefined) {
+      continue;
+    }
+    if (row[flag] !== true) {
+      throw new ShareValidationError(
+        `${label}.${flag} must be true when present.`,
+      );
+    }
+    weapon[flag] = true;
+  }
+  // The database's own CHECK, applied at the boundary through the SAME rule the
+  // portable backup and the quarantined-image audit use. Reaching the INSERT
+  // with this pair would abort the whole import transaction with a raw
+  // SQLITE_CONSTRAINT_CHECK naming nothing.
+  const mastery = weaponMasterySelectionError(
+    {
+      mastery_selected: weapon.mastery_selected === true ? 1 : 0,
+      mastery_property: weapon.mastery_property ?? null,
+    },
+    label,
+  );
+  if (mastery !== null) {
+    throw new ShareValidationError(mastery);
+  }
+  return weapon as unknown as ShareWeapon;
+}
+
 function assertUnique(
   values: readonly string[],
   label: string,
@@ -308,7 +517,7 @@ export function validateShareDocument(
       'preferences',
       'overrides',
     ],
-    ['acknowledgements', 'loadouts', 'placeholders'],
+    ['acknowledgements', 'loadouts', 'placeholders', 'weapons'],
     'document',
   );
   if (source.format !== CHARACTER_SHARE_FORMAT) {
@@ -729,6 +938,17 @@ export function validateShareDocument(
     );
   }
 
+  let weapons: CharacterShareDocument['weapons'] | undefined;
+  if (source.weapons !== undefined) {
+    weapons = list(source.weapons, 'weapons', SHARE_LIMITS.weapons).map(
+      (item, index) => shareWeapon(item, `weapons[${index}]`),
+    );
+    // NOT `assertUnique`. Two identical weapons is a normal thing to own — a
+    // pair of daggers, a quiver of javelins — and each is its own row with its
+    // own mastery flag. Every other section here is keyed by something the
+    // database makes unique; weapons are not.
+  }
+
   return {
     format: CHARACTER_SHARE_FORMAT,
     version: CHARACTER_SHARE_VERSION,
@@ -742,5 +962,6 @@ export function validateShareDocument(
     ...(acknowledgements === undefined ? {} : { acknowledgements }),
     ...(loadouts === undefined ? {} : { loadouts }),
     ...(placeholders === undefined ? {} : { placeholders }),
+    ...(weapons === undefined ? {} : { weapons }),
   };
 }

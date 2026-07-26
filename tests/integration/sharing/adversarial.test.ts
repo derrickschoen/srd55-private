@@ -23,6 +23,11 @@ import {
   validateShareDocument,
 } from '../../../src/sharing/schema';
 import { ShareImportCompatibilityError } from '../../../src/sharing/import-issues';
+import { validateCharacterCommandPayload } from '../../../src/commands/payload-validator';
+import {
+  WEAPON_RANGE_MAX_FEET,
+  WEAPON_TEXT_LIMITS,
+} from '../../../src/domain/weapon-limits';
 import { getSqlite3, openTestDatabase } from '../../helpers/open-db';
 
 const connections: Database[] = [];
@@ -1868,6 +1873,18 @@ describe('adversarial character-share rejection', () => {
         },
         /loadout entries exceed/,
       ],
+      [
+        (wire) => {
+          wire[11] = Array.from(
+            { length: SHARE_LIMITS.weapons + 1 },
+            (_, index) => [
+              `Weapon ${index}`,
+              ...Array.from({ length: 18 }, () => null),
+            ],
+          );
+        },
+        /weapons exceeds/,
+      ],
     ];
     for (const [mutate, message] of cases) {
       const hostile = structuredClone(base);
@@ -1976,6 +1993,7 @@ describe('adversarial character-share rejection', () => {
       'warning_acknowledgements',
       'spell_loadouts',
       'spell_loadout_entries',
+      'character_weapons',
     ]) {
       expect(targetDb.scalar(`SELECT count(*) FROM ${table}`)).toBe(0);
     }
@@ -2132,5 +2150,214 @@ describe('adversarial character-share rejection', () => {
       expect(issue.remedy).not.toMatch(/click|button|press/i);
     }
     expect(targetDb.scalar('SELECT count(*) FROM characters')).toBe(0);
+  });
+});
+
+describe('hostile and over-long weapon sections', () => {
+  const weaponDocument = (weapon: Record<string, unknown>) =>
+    minimalDocument({
+      weapons: [weapon],
+    } as unknown as Partial<CharacterShareDocument>);
+
+  it('names the offending field rather than reporting a byte-limit overflow', async () => {
+    // WHY THE PER-FIELD CAPS EXIST. `other_properties` and `notes` are
+    // unbounded TEXT and are the longest free prose a share payload carries
+    // (`loadouts[].name` is user text too, but one short line). Without a
+    // per-field cap the only thing that stops a hostile document is the
+    // compressed-byte guard, which fires far away from the cause and says
+    // nothing a reader could act on.
+    for (const field of ['notes', 'other_properties'] as const) {
+      const overlong = weaponDocument({
+        name: 'Verbose Blade',
+        [field]: 'x'.repeat(WEAPON_TEXT_LIMITS[field] + 1),
+      });
+      expect(() => validateShareDocument(overlong)).toThrow(
+        new RegExp(`weapons\\[0\\]\\.${field} must be a string of 1-`),
+      );
+      // Thrown synchronously, before any compression happens: the encoder
+      // validates first, so the specific message is what the user actually
+      // sees rather than a byte-limit complaint from deep in the pipeline.
+      expect(() => encodeShareFragment(overlong)).toThrow(ShareValidationError);
+      // Exactly at the cap is fine: the boundary is inclusive, so a cap set to
+      // reject legitimate data would show up here rather than in the field.
+      expect(() =>
+        validateShareDocument(
+          weaponDocument({
+            name: 'Verbose Blade',
+            [field]: 'x'.repeat(WEAPON_TEXT_LIMITS[field]),
+          }),
+        ),
+      ).not.toThrow();
+    }
+  });
+
+  /**
+   * THE ORACLE THE PREVIOUS TEST IS NOT.
+   *
+   * Asserting that exactly-the-cap is accepted cannot notice a cap set BELOW
+   * what the app itself writes: it just measures the share boundary against
+   * itself. This measures it against the OTHER boundary. Every value below is
+   * first proved acceptable to `validateCharacterCommandPayload` — so a user
+   * really can build this weapon and it really can be sitting in the table —
+   * and only then handed to the share boundary.
+   *
+   * This is the test that was missing when `notes` was writable at 2000 and
+   * shareable at 1000, and when a range was writable without bound and
+   * shareable only to 100,000: both made a legitimately built character refuse
+   * to export, with no remedy but deleting text the user meant to keep.
+   */
+  it('shares every weapon the write boundary is willing to store', async () => {
+    const maximal = {
+      name: 'N'.repeat(WEAPON_TEXT_LIMITS.name),
+      damage_dice: 'd'.repeat(WEAPON_TEXT_LIMITS.damage_dice),
+      damage_type: 't'.repeat(WEAPON_TEXT_LIMITS.damage_type),
+      versatile_damage_dice: 'v'.repeat(
+        WEAPON_TEXT_LIMITS.versatile_damage_dice,
+      ),
+      finesse: true,
+      heavy: true,
+      light: true,
+      loading: true,
+      reach: true,
+      thrown: true,
+      two_handed: true,
+      ammunition: true,
+      ammunition_kind: 'a'.repeat(WEAPON_TEXT_LIMITS.ammunition_kind),
+      range_normal_feet: WEAPON_RANGE_MAX_FEET,
+      range_long_feet: WEAPON_RANGE_MAX_FEET,
+      mastery_property: 'Vex',
+      other_properties: 'o'.repeat(WEAPON_TEXT_LIMITS.other_properties),
+      notes: 'n'.repeat(WEAPON_TEXT_LIMITS.notes),
+    };
+    // The write boundary accepts it, so the table can hold it.
+    expect(() =>
+      validateCharacterCommandPayload({
+        type: 'add_weapon',
+        weapon: maximal,
+      }),
+    ).not.toThrow();
+
+    // …and so must the share boundary, field for field, through a real link.
+    // Every flag above is already `true`, which is the only value the wire
+    // accepts, so the same object is a valid share weapon as it stands.
+    const shared = await throughShareLink(
+      weaponDocument({ ...maximal, mastery_selected: true }),
+    );
+    const weapon = shared.weapons?.[0];
+    expect(weapon?.notes).toBe(maximal.notes);
+    expect(weapon?.other_properties).toBe(maximal.other_properties);
+    expect(weapon?.range_long_feet).toBe(WEAPON_RANGE_MAX_FEET);
+    expect(weapon?.name).toBe(maximal.name);
+  });
+
+  it('reports the aggregate overflow as a byte limit, which is what it is', async () => {
+    // HONEST ABOUT WHAT THE CAPS DO NOT BUY. A per-field cap names a field; a
+    // count cap names a section. Neither promises that 100 permitted weapons
+    // fit in a URL, and they do not: maximum-length high-entropy prose does not
+    // compress, so this legitimately reports the byte limit rather than
+    // pretending some single field is at fault.
+    let seed = 0x2f6e2b1;
+    const noise = (length: number): string => {
+      let out = '';
+      for (let index = 0; index < length; index += 1) {
+        // xorshift32 — enough entropy that gzip cannot erase the text, unlike a
+        // short-cycle generator whose output compresses to nothing.
+        seed ^= seed << 13;
+        seed ^= seed >>> 17;
+        seed ^= seed << 5;
+        out += String.fromCharCode(33 + (Math.abs(seed) % 94));
+      }
+      return out;
+    };
+    const heavy = minimalDocument({
+      weapons: Array.from({ length: SHARE_LIMITS.weapons }, (_, index) => ({
+        name: `Blade ${index}`,
+        notes: noise(WEAPON_TEXT_LIMITS.notes),
+        other_properties: noise(WEAPON_TEXT_LIMITS.other_properties),
+      })),
+    } as unknown as Partial<CharacterShareDocument>);
+
+    // Every weapon is inside every cap: nothing here is a validation failure.
+    expect(() => validateShareDocument(heavy)).not.toThrow();
+    await expect(encodeShareFragment(heavy)).rejects.toThrow(
+      `compressed document exceeds the ${SHARE_LIMITS.compressedBytes}-byte limit.`,
+    );
+  });
+
+  it('refuses a mastery selection with no property, before any row is written', async () => {
+    // The database's own CHECK. Reaching the INSERT with this pair aborts the
+    // whole import transaction with a raw SQLITE_CONSTRAINT_CHECK that names
+    // neither the weapon nor the field.
+    const hostile = weaponDocument({
+      name: 'Impossible Blade',
+      mastery_selected: true,
+    });
+    expect(() => validateShareDocument(hostile)).toThrow(
+      /selects a weapon mastery without naming the property/,
+    );
+
+    const targetDb = await database();
+    expect(() => importCharacterShare(targetDb, hostile)).toThrow(
+      ShareValidationError,
+    );
+    expect(targetDb.scalar('SELECT count(*) FROM character_weapons')).toBe(0);
+    expect(targetDb.scalar('SELECT count(*) FROM characters')).toBe(0);
+  });
+
+  it('refuses an unknown mastery property, an unknown field, and a non-true flag', () => {
+    expect(() =>
+      validateShareDocument(
+        weaponDocument({
+          name: 'Blade',
+          mastery_property: 'Obliterate',
+          mastery_selected: true,
+        }),
+      ),
+    ).toThrow(/weapons\[0\]\.mastery_property is unsupported/);
+
+    expect(() =>
+      validateShareDocument(
+        weaponDocument({ name: 'Blade', weapon_template_id: 4 }),
+      ),
+    ).toThrow(/weapons\[0\] contains unknown field weapon_template_id/);
+
+    // `false` is not the same as absent, and accepting it would give the wire
+    // two encodings of one state.
+    expect(() =>
+      validateShareDocument(weaponDocument({ name: 'Blade', finesse: false })),
+    ).toThrow(/weapons\[0\]\.finesse must be true when present/);
+
+    expect(() => validateShareDocument(weaponDocument({}))).toThrow(
+      /weapons\[0\] is missing name/,
+    );
+  });
+
+  it('refuses a negative or absurd weapon range', () => {
+    for (const value of [-1, 100_001, 1.5]) {
+      expect(() =>
+        validateShareDocument(
+          weaponDocument({ name: 'Blade', range_normal_feet: value }),
+        ),
+      ).toThrow(/weapons\[0\]\.range_normal_feet must be an integer/);
+    }
+  });
+
+  it('keeps duplicate weapons, which are a normal thing to own', async () => {
+    // Deliberately NOT deduplicated, unlike every other section. Two identical
+    // daggers are two daggers; each is its own row with its own mastery flag.
+    const twoDaggers = minimalDocument({
+      weapons: [{ name: 'Dagger' }, { name: 'Dagger' }],
+    } as unknown as Partial<CharacterShareDocument>);
+    const shared = await throughShareLink(twoDaggers);
+    expect(shared.weapons).toHaveLength(2);
+
+    const targetDb = await database();
+    const { characterId } = importCharacterShare(targetDb, shared);
+    expect(
+      targetDb.all(
+        'SELECT name FROM character_weapons WHERE character_id = ? ORDER BY id',
+        [characterId],
+      ),
+    ).toEqual([{ name: 'Dagger' }, { name: 'Dagger' }]);
   });
 });
