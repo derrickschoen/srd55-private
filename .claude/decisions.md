@@ -1,5 +1,57 @@
 # Binding scope decisions
 
+## D11 — Q6 ANSWERED BY THE OWNER: derivable sheet core first; builder blocks, import tolerates (2026-07-26)
+
+Not a consensus recommendation — the owner's own decision, asked directly and
+answered. It supersedes the interim Option 2 that earlier ticks were following.
+
+### Part 1 — build the derivable sheet core, then the guided flow
+
+Add the bounded per-class SRD content that everything else derives from: hit
+die, saving-throw proficiencies, skill list, armour and weapon proficiencies.
+Roughly twelve classes' worth, all sourceable from the CC-BY SRD 5.2.1 already
+committed under `docs/srd/` (F6).
+
+**Then compute rather than store.** HP, AC, save DCs, skill modifiers, passive
+scores and initiative are DERIVED from ability scores, level and proficiency.
+Storing them would create a second source of truth that drifts from the first —
+the same reasoning D6d applies to nullable columns, one level up.
+
+**What this deliberately does NOT include:** class FEATURE text (Rage, Sneak
+Attack) and the ten missing subclass sets. The sheet says what it has and stays
+silent about the rest rather than inventing — F4's rule, and the same rule the
+weapons track already follows for unsourced mastery counts (D10).
+
+**Rejected: the full SRD character model first.** Correct and complete, but
+larger than everything built this session combined, and dominated by content
+entry rather than code. **Also rejected: the guided builder over today's model.**
+It ships fastest and is honest, but cannot produce a character sheet, which is
+the owner's stated goal.
+
+### Part 2 — the builder BLOCKS, the boundary TOLERATES
+
+An SRD-illegal choice is **unavailable in the guided builder** — hidden or
+disabled at the point of choosing, with the requirement stated. But anything
+arriving by **import, share link or catalog is still accepted**, flagged with a
+warning, never rejected.
+
+**This tightens the earlier standing guidance** ("big obvious warnings, remember
+to be homebrew tolerant") for the BUILDER specifically. The tolerance was never
+about letting the app help you make an illegal choice; it was about never making
+existing data unopenable. Those are different obligations and now have different
+answers.
+
+**It also resolves Q2.** A share link MAY carry a selection the app would not
+let you make by hand — that is the tolerant half, working as intended, not a
+defect.
+
+Consequence for the completeness system (D2, v1 merged): a blocked choice is not
+a completeness WARNING, because it can no longer be reached from the builder.
+Completeness keeps reporting what is MISSING; legality is a separate concern
+enforced at a different place.
+
+---
+
 ## D10 — Weapons merged; Q4 settled; the workflow's last agent died and I finished it (2026-07-26)
 
 `main` a26b64d. Verified by me: **613 vitest / 71 files, build exit 0, 56

@@ -31,7 +31,7 @@ Options:
 
 ---
 
-## Q2 — Known-ineligible-selection policy (not a defect, needs intent)
+## Q2 — RESOLVED 2026-07-26 by D11: yes, a link may carry it
 
 Share import keeps a selection the app itself would refuse to make:
 `active/invalid` without `keep`, `kept_override/invalid` with it. The normal
@@ -84,7 +84,7 @@ when you are back; this file is only for things I would not decide alone.
 
 ---
 
-## Q6 — "Character builder" means two very different things (NEW, needs your call)
+## Q6 — ANSWERED 2026-07-26 by the owner (see D11)
 
 Finding F4 (2026-07-26): seeding the twelve classes made a fresh install usable
 as a **spell planner**. It did not make it a character builder.
