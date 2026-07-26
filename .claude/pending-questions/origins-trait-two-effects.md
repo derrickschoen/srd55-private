@@ -1,3 +1,12 @@
+# ANSWERED 2026-07-26 — see D22. The model is INVERTED, not extended.
+
+The owner's answer: effects belong to the CHARACTER and the trait is
+provenance. A trait granting two effects stops being a special case, and
+`character_source_instances` already answers 'where did it come from'.
+The question below is kept for the evidence it gathered.
+
+---
+
 # Q — A species trait can carry TWO mechanical effects; the model holds one
 
 Raised by the `feat/origins` adversarial review. It is a limit of the model D12
