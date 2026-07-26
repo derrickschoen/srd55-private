@@ -1,5 +1,264 @@
 # Binding scope decisions
 
+## D14 — Cantrips that change how a weapon attack is rolled (2026-07-26)
+
+Owner's request, verbatim in substance: a Wizard with -1 Strength should not be
+shown swinging a quarterstaff with Strength when True Strike exists; the sheet
+should replace the to-hit and damage and add the extra dice. And Shillelagh
+should appear as a weapon, assumed always active.
+
+This is right, and it is exactly the "confusing tools hide the better option"
+problem this project exists for. Rules SOURCED, not recalled — extracted to
+`docs/srd/source/weapon-attack-cantrips.txt`.
+
+### True Strike, as the SRD actually writes it
+
+Divination Cantrip — **Bard, Sorcerer, Warlock, Wizard** (not Druid, not
+Cleric). Action, Range Self. Material component: **a weapon you are proficient
+with** worth 1+ CP.
+
+> "you make one attack with the weapon used in the spell's casting. The attack
+>  uses your spellcasting ability for the attack and damage rolls instead of
+>  using Strength or Dexterity."
+
+Damage type is **a CHOICE** — Radiant *or* the weapon's normal type — not forced
+Radiant. **Cantrip Upgrade:** extra *Radiant* damage at levels 5 (1d6), 11
+(2d6), 17 (3d6), regardless of which type was chosen.
+
+Three consequences that change the implementation:
+- It replaces **Strength OR Dexterity**, so it can beat a finesse weapon's DEX
+  too, not just a bad STR.
+- It requires **proficiency with that weapon**. A Wizard qualifies with a
+  quarterstaff and does NOT with a greatsword.
+- It is **one attack as an Action**. A character with Extra Attack who uses it
+  LOSES attacks — so "always replace" is wrong for them. Extra Attack is not
+  modelled (F4), so the app cannot currently detect this case.
+
+### Shillelagh, as the SRD actually writes it
+
+Transmutation Cantrip — **Druid only**. Bonus Action, 1 minute, V/S/M
+(mistletoe). Applies to **a Club or Quarterstaff you are holding**, and only to
+**melee** attacks with it.
+
+Replaces **Strength only** (not Dexterity — moot, since neither weapon is
+Finesse). Damage die becomes **d8**, damage type Force *or* normal (choice).
+Ends early if recast or if you let go of the weapon.
+
+**It scales, which I would have got wrong from memory:** Cantrip Upgrade changes
+the die at levels 5 (d10), 11 (d12), 17 (2d6).
+
+### The model this implies
+
+A weapon gains ATTACK PROFILES — a derived, ordered set of ways to attack with
+it. Not stored: computed from the character's known cantrips, class spellcasting
+ability, proficiency, and level.
+
+- `normal` — STR, or DEX where Finesse/ranged allows; weapon die; weapon type.
+- `true_strike` — spellcasting ability; weapon die plus the level-scaled Radiant
+  dice; damage type a choice.
+- `shillelagh` — spellcasting ability; the upgraded die; Force or normal.
+
+Eligibility is derived per weapon, so a Wizard's greatsword offers no True
+Strike profile while their quarterstaff does. This generalises the D12 pattern
+of a bounded set of mechanical effects one level further: a spell that modifies
+a weapon attack, rather than a species trait that modifies a derived number.
+
+This is SHEET-CORE work (D11) and lands with it, because it needs the attack and
+damage derivation that does not exist yet.
+
+**Assumption recorded, per the owner: Shillelagh is treated as always active.**
+Its one-minute duration and Bonus Action cost are not tracked — this app has no
+combat-round model and inventing one to gate a sheet row would be worse than the
+assumption.
+
+---
+
+## D13 — Twenty-four CHECK constraints merged; two silent-no-op traps measured (2026-07-26)
+
+`main` 05c836f. Verified by me, not on the track's word: **729 vitest / 72 files,
+build exit 0, 56 Playwright**, schema regenerates byte-identically, and the
+Laravel-derived signature oracle still bites (mutating `characters.name` to
+nullable fails it).
+
+**The oracle is untouched by design, not by luck:** CHECK constraints do not
+appear in `PRAGMA table_info`, which is what the signature hashes. So this
+change could not have moved the constant even if it tried — worth knowing before
+someone "fixes" a future hash drift by regenerating it.
+
+**I verified the over-strictness risk myself** rather than accepting the report,
+because a CHECK narrower than reality turns saving into an exception: all
+thirteen enum CHECKs match their array in `src/domain/enums.ts` EXACTLY, by
+set comparison. Zero transcription drift. That was the failure mode with the
+teeth here and it did not occur.
+
+### Two traps, both found by measurement rather than reasoning
+
+1. **An unquoted reserved word is a PARSE error.** `CHECK(grant IN (…))` does
+   not fail one table — it fails schema application wholesale. Column references
+   now route through a validating helper that backtick-quotes them.
+2. **A bare `>= 0` does not fire on TEXT.** `'abc' >= 0` is TRUE in SQLite, and
+   text really can reach an INTEGER column (binding `'abc'` stores
+   `typeof=text`; binding `'7'` stores `integer` 7). Three constraints were bare
+   lower bounds and now carry a `typeof(...) = 'integer'` limb.
+
+   Deliberately NOT applied uniformly: the `BETWEEN` forms already reject text
+   and blobs on their upper limb, leaving only a non-integral REAL inside the
+   window, which no writer produces. Drawing that line and recording it beats
+   fifteen more limbs for a value class that misbehaves nowhere.
+
+3. **A CHECK evaluating to NULL is ACCEPTED by SQLite.** `spell_versions_level_check`
+   compared provenance with `=`, so a NULL would have disabled the whole
+   constraint. Changed to `IS`, identical on every reachable row and safer on the
+   unreachable one.
+
+### Deliberately unconstrained, and why that is right
+
+`character_source_instances.state` has no CHECK, because adding one BREAKS CLASS
+REMOVAL on the first write — four writers emit `'tombstoned'`
+(`remove-source.ts:53`, `update-class.ts:250` and `:337`,
+`grant-rule-slot-generator.ts:724`). The prerequisite is declaring that
+vocabulary in `enums.ts` so a constraint reads ONE source rather than a
+transcribed second copy. That is a separate change and is the right order.
+
+### One divergence handed off, not resolved
+
+`class_weapon_mastery_counts.class_level` is `BETWEEN 1 AND 20` in the schema
+but unbounded in its row contract (`src/domain/contracts/rows.ts`). The track
+REJECTED loosening the CHECK — nothing shows it rejecting legitimate data, and
+`PROGRESSION_LEVELS` is 20 — and refused to edit the backup contract module
+because another track owned it. Correct call on both counts. Reconciliation
+belongs to whoever next owns `src/domain/contracts/`, and must tighten the
+contract rather than loosen the constraint. Note `class_progressions_class_level_check`
+carries the identical bound and drew no complaint only because that table has no
+row contract at all.
+
+---
+
+## D12 — Owner's answers on HP, armour, species/backgrounds, and the AI bridge (2026-07-26)
+
+Four direct answers. Three confirm the recommendation; the third changes the
+design and is the most interesting.
+
+### HP — computed average, with a per-level override
+
+Default to the SRD fixed value (hit-die average, rounded up) plus CON modifier
+per level, COMPUTED and never stored, per D11's derive-don't-store rule. A
+player who rolled instead may enter that level's actual roll, and THAT is
+stored — a die roll is real information the app cannot recompute, which is
+exactly the line D6d draws between derived and given. Rejected: storing every
+level (twenty entries, most of them the average we could compute) and a single
+manual total (derives nothing, cannot warn).
+
+### Armour — SRD templates, the weapons pattern again
+
+Bundle the SRD armour table as TEMPLATES that pre-fill editable fields, exactly
+the D1b mechanism already built and reviewed. AC derives: base + DEX capped by
+category + shield + manual adjustment. Rejected: a manual AC field, which cannot
+warn about a Strength requirement or an impossible number.
+
+### Species and backgrounds — TEMPLATES, mostly free text, with a NAMED set of mechanical traits
+
+The owner, verbatim:
+
+> "Make species and backgrounds templates like for weapons. I want most things
+>  just text boxes without mechanics like elf 4 hour sleep, we will need to add
+>  mechanical things like Certain things we have to model like dwarf resistance
+>  and hp as well as elf movement speed and spells"
+
+This is neither of the options I offered and it is better than both. The split:
+
+- **Species and backgrounds become templates**, the same D1b shape as weapons:
+  they pre-fill editable fields, the character stores VALUES, and there is no
+  live reference back to the template.
+- **Most traits are FREE TEXT with no mechanics.** An Elf's four-hour trance is
+  a sentence on the sheet. It is not modelled, not computed against, and not
+  validated. This is the majority case and must stay cheap.
+- **A BOUNDED set of traits is MECHANICAL**, because it moves a derived number
+  and a sheet that ignores it is simply wrong. Named by the owner:
+  damage resistance (Dwarven Resilience), HP modification (Dwarven Toughness,
+  +1 per level), movement speed (Elf), and granted spells.
+
+So a trait is free text PLUS an optional mechanical effect drawn from a closed,
+compile-checked set. Adding a new mechanical KIND is a deliberate change; adding
+a new trait is not. That is the same shape as the weapon property toggles plus
+free text (Q4), applied one level up — and it avoids both failure modes: no
+modelling every trait in the SRD, and no sheet quietly showing the wrong speed.
+
+Granted spells are the one mechanical kind that already has machinery: species
+and background spell grants are what `character_source_instances` and the
+grant-rule system were built for. Reuse before inventing.
+
+### Q1 ANSWERED — build the Claude-only bridge
+
+The owner chose the claude-only option after I stated the residual risk plainly.
+Q1 is no longer blocked and the standing "do not resume" instruction is
+DISCHARGED for the claude-only shape only.
+
+**Codex is dropped entirely, not gated.** F2 proved `codex --sandbox read-only`
+executes arbitrary commands and reads outside its working directory, including
+SSH keys. That is the half that failed containment, and it does not come back.
+`claude -p --tools ""` is the half verified contained: zero tool_use blocks and
+no file written under adversarial prompting.
+
+**Residual risk stated, not buried**, because the owner accepted it knowingly:
+a local endpoint a web page can reach still exists, and "no tools" is a flag
+whose meaning a future version could change. The build must therefore not rely
+on that flag alone.
+
+---
+
+## D11 — Q6 ANSWERED BY THE OWNER: derivable sheet core first; builder blocks, import tolerates (2026-07-26)
+
+Not a consensus recommendation — the owner's own decision, asked directly and
+answered. It supersedes the interim Option 2 that earlier ticks were following.
+
+### Part 1 — build the derivable sheet core, then the guided flow
+
+Add the bounded per-class SRD content that everything else derives from: hit
+die, saving-throw proficiencies, skill list, armour and weapon proficiencies.
+Roughly twelve classes' worth, all sourceable from the CC-BY SRD 5.2.1 already
+committed under `docs/srd/` (F6).
+
+**Then compute rather than store.** HP, AC, save DCs, skill modifiers, passive
+scores and initiative are DERIVED from ability scores, level and proficiency.
+Storing them would create a second source of truth that drifts from the first —
+the same reasoning D6d applies to nullable columns, one level up.
+
+**What this deliberately does NOT include:** class FEATURE text (Rage, Sneak
+Attack) and the ten missing subclass sets. The sheet says what it has and stays
+silent about the rest rather than inventing — F4's rule, and the same rule the
+weapons track already follows for unsourced mastery counts (D10).
+
+**Rejected: the full SRD character model first.** Correct and complete, but
+larger than everything built this session combined, and dominated by content
+entry rather than code. **Also rejected: the guided builder over today's model.**
+It ships fastest and is honest, but cannot produce a character sheet, which is
+the owner's stated goal.
+
+### Part 2 — the builder BLOCKS, the boundary TOLERATES
+
+An SRD-illegal choice is **unavailable in the guided builder** — hidden or
+disabled at the point of choosing, with the requirement stated. But anything
+arriving by **import, share link or catalog is still accepted**, flagged with a
+warning, never rejected.
+
+**This tightens the earlier standing guidance** ("big obvious warnings, remember
+to be homebrew tolerant") for the BUILDER specifically. The tolerance was never
+about letting the app help you make an illegal choice; it was about never making
+existing data unopenable. Those are different obligations and now have different
+answers.
+
+**It also resolves Q2.** A share link MAY carry a selection the app would not
+let you make by hand — that is the tolerant half, working as intended, not a
+defect.
+
+Consequence for the completeness system (D2, v1 merged): a blocked choice is not
+a completeness WARNING, because it can no longer be reached from the builder.
+Completeness keeps reporting what is MISSING; legality is a separate concern
+enforced at a different place.
+
+---
+
 ## D10 — Weapons merged; Q4 settled; the workflow's last agent died and I finished it (2026-07-26)
 
 `main` a26b64d. Verified by me: **613 vitest / 71 files, build exit 0, 56

@@ -1,13 +1,22 @@
-import { index, integer, sqliteTable, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import {
+  check,
+  index,
+  integer,
+  sqliteTable,
+  uniqueIndex,
+} from 'drizzle-orm/sqlite-core';
+import { sql } from 'drizzle-orm';
 import type {
   ContentKey,
   SpellIdentityId,
   SpellVersionId,
 } from '../../src/domain/ids';
 import type { EffectReliabilityCategory } from '../../src/domain/enums';
+import { effectReliabilityCategories } from '../../src/domain/enums';
 import {
   datetime,
   laravelDefault,
+  oneOf,
   sqlText,
   tinyint1,
   varchar,
@@ -100,6 +109,16 @@ export const spell_versions = sqliteTable(
      * grammar-checked but not vocabulary-checked, so `homebrew:fireball`
      * legitimately stores `'homebrew'`. Narrowing here would make a shipped,
      * adversarially-tested import path throw.
+     *
+     * AND THEREFORE NO CHECK CONSTRAINT EITHER. The proof phase listed
+     * `rules_edition IN ('2014','2024','expanded')` as accepted because the
+     * whole vitest suite passed with it applied — but the suite never sends a
+     * share document whose spell key carries a non-edition prefix, and
+     * `isSpellVersionKey` in `src/catalog/catalog-key.ts` checks GRAMMAR ONLY.
+     * `homebrew:fireball` is a valid key, so the placeholder writer would bind
+     * `'homebrew'` here and the CHECK would abort a legitimate import. A
+     * passing suite is not proof of a writer's range when the writer's range is
+     * an unvalidated string; this one is REJECTED on inspection.
      */
     rules_edition: varchar()('rules_edition').notNull(),
     level: integer('level').notNull(),
@@ -140,6 +159,45 @@ export const spell_versions = sqliteTable(
     updated_at: datetime()('updated_at'),
   },
   (table) => [
+    /**
+     * THE GUARD IS THE WHOLE CONSTRAINT.
+     *
+     * The obvious form — `level BETWEEN 0 AND 9` — is wrong, and wrong on a
+     * shipped path: `mintPlaceholderSpellVersion` in
+     * `src/sharing/character-share.ts` inserts the literal `level = -1` for a
+     * spell the receiving catalog does not hold. That row is correct; -1 is how
+     * "no printed level, because this is not a real catalog entry" is spelled.
+     * The proof phase applied the unguarded form and it broke share import in
+     * four adversarial and round-trip tests.
+     *
+     * So `provenance` is the discriminant — exactly as
+     * `src/domain/models.ts` already treats it — and the bound applies only to
+     * rows claiming to be catalog spells. A future writer that mints a
+     * placeholder must say so in `provenance`, which is the point.
+     *
+     * `IS` AND NOT `=`, AND THE DIFFERENCE IS THE WHOLE CONSTRAINT. SQLite
+     * passes a CHECK that evaluates to NULL, not only one that evaluates to
+     * true. Under `=`, a NULL `provenance` makes the left limb NULL, `NULL OR
+     * false` is NULL, and the constraint SILENTLY DISABLES ITSELF for precisely
+     * the row that has lost the fact discriminating it. `IS` is SQLite's
+     * null-safe equality: `NULL IS 'placeholder'` is 0, so that row is refused,
+     * while `'placeholder' IS 'placeholder'` and `'import' IS 'placeholder'`
+     * answer identically to `=`. All three measured.
+     *
+     * `provenance` is `NOT NULL`, so this is unreachable today — but that
+     * notnull is then the only thing standing between the written constraint
+     * and no constraint at all, and a guard against hand-edited images should
+     * not rest on a modifier in another column's declaration. `IS` removes the
+     * dependency rather than documenting it.
+     */
+    check(
+      'spell_versions_level_check',
+      sql`provenance IS 'placeholder' OR level BETWEEN 0 AND 9`,
+    ),
+    check(
+      'spell_versions_effect_reliability_category_check',
+      oneOf('effect_reliability_category', effectReliabilityCategories),
+    ),
     uniqueIndex('spell_versions_content_key_unique').on(table.content_key),
     uniqueIndex('spell_versions_spell_identity_id_rules_edition_unique').on(
       table.spell_identity_id,
