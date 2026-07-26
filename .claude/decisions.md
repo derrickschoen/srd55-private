@@ -1,5 +1,77 @@
 # Binding scope decisions
 
+## D10 — Weapons merged; Q4 settled; the workflow's last agent died and I finished it (2026-07-26)
+
+`main` a26b64d. Verified by me: **613 vitest / 71 files, build exit 0, 56
+Playwright, drizzle-at-runtime guard holding.** Schema is 34 tables — 30
+surviving Laravel plus 4 native.
+
+**The final Revise agent died on an API 529**, so the review's findings were
+never acted on. I completed the revision myself rather than re-running the
+workflow, and dispatched no fresh review of my own edits beyond the mutation
+tests below — worth knowing when reading this entry.
+
+### What the review got right, and the one thing it got wrong
+
+**Right, and urgent:** the entire 1,409-line change was UNCOMMITTED, and the
+reviewer proved the cost accidentally — a `git checkout` during its own mutation
+testing silently skipped untracked files and reverted a tracked one to main. It
+restored by hand. Committed first, before anything else.
+
+**Right:** `content_missing` was folded in with `unsourced`, so a class with no
+grant row printed "<class> grants it, but we lack the count" — asserting a grant
+on no evidence, which is the exact error this module exists to prevent, one
+level up. Now has its own sentence claiming nothing. Mutation-verified: the old
+predicate turns the new test red.
+
+**Right:** an assertion that could not fail — `JSON.stringify(allowance)` was
+searched for a `0`, but `{"state":"content_missing"}` contains no `0` however
+the code behaves.
+
+**WRONG, and rejected with evidence.** It asked for a
+`renderWeapons(...).textContent` assertion in the scopes test, having correctly
+proved the file stays green when the render call is deleted. But vitest runs
+unit tests with `environment: 'node'`, so there is no DOM and `renderWeapons`
+cannot be called there at all. Satisfying the finding would mean changing the
+test environment to make a comment true — backwards, and a config edit rule 6
+forbids. The render IS covered by `tests/browser/weapons.spec.ts`. So the defect
+was the header claiming to pin something it never pinned; the header now states
+what it pins, what it does not, and where the real coverage lives.
+
+### The merge was the interesting part
+
+Two tracks moved the table inventory in opposite directions — main pruned eight,
+this added four — so every inventory assertion conflicted, and the two sides had
+chosen DIFFERENT mechanisms for keeping the column-metadata hash an oracle. main
+re-derives the expectation from the frozen pre-Drizzle fixture; weapons excluded
+native tables from the signature so a table with no Laravel migration could not
+move a Laravel constant. Both are right and they compose: the artifact is hashed
+with the four native tables excluded, against the value derived from the fixture
+minus the eight.
+
+Counted both halves separately rather than one total of 34, because a single
+number lets one side grow while the other shrinks unnoticed.
+
+**Verified the oracle still bites rather than assuming the merge preserved it:**
+making `characters.name` nullable fails both the inventory test and the
+Laravel-derived hash. That check is the whole point of D7's "a retained test
+must still be able to FAIL".
+
+### Q4 answered by implementation
+
+Weapon "other properties" ships as the recommendation predicted: eight known
+boolean toggles plus a free-text field, not an open key/value blob. Every toggle
+defaults to off, because "this weapon is not Finesse" is the overwhelming
+majority and a NULL there would mean nothing a user could act on — D6b applied
+to a new table rather than inherited from one.
+
+**No fabricated SRD data**, which was the risk I rated highest. All 38 templates
+parse from the committed CC-BY extract, and the reviewer checked every row
+against the source by eye including the awkward ones — Blowgun's flat 1 damage,
+Lance's conditional two-handed, Sling's absent weight.
+
+---
+
 ## D9 — Audit hardening merged; Q3 resolved by pruning EIGHT tables, not seven (2026-07-26)
 
 `main` d2960c3. Verified by me, not on the track's word: **540 vitest / 66 files,
