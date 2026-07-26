@@ -5,11 +5,6 @@
 
 PRAGMA foreign_keys = ON;
 
--- Final browser schema corresponding to the final state of every Laravel
--- migration. Laravel-only infrastructure tables remain represented so
--- database import/export can round-trip a complete project database without
--- data loss.
-
 CREATE TABLE `background_definitions` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`content_key` VARCHAR NOT NULL,
@@ -26,20 +21,6 @@ CREATE TABLE `background_definitions` (
 
 CREATE UNIQUE INDEX `background_definitions_content_key_unique` ON `background_definitions` (`content_key`);
 CREATE UNIQUE INDEX `background_definitions_name_rules_edition_unique` ON `background_definitions` (`name`,`rules_edition`);
-CREATE TABLE `cache` (
-	`key` VARCHAR PRIMARY KEY NOT NULL,
-	`value` TEXT NOT NULL,
-	`expiration` integer NOT NULL
-);
-
-CREATE INDEX `cache_expiration_index` ON `cache` (`expiration`);
-CREATE TABLE `cache_locks` (
-	`key` VARCHAR PRIMARY KEY NOT NULL,
-	`owner` VARCHAR NOT NULL,
-	`expiration` integer NOT NULL
-);
-
-CREATE INDEX `cache_locks_expiration_index` ON `cache_locks` (`expiration`);
 CREATE TABLE `change_log` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`character_id` integer NOT NULL,
@@ -202,18 +183,6 @@ CREATE TABLE `class_progressions` (
 );
 
 CREATE UNIQUE INDEX `class_progressions_class_definition_id_class_level_unique` ON `class_progressions` (`class_definition_id`,`class_level`);
-CREATE TABLE `failed_jobs` (
-	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-	`uuid` VARCHAR NOT NULL,
-	`connection` VARCHAR NOT NULL,
-	`queue` VARCHAR NOT NULL,
-	`payload` TEXT NOT NULL,
-	`exception` TEXT NOT NULL,
-	`failed_at` DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
-);
-
-CREATE UNIQUE INDEX `failed_jobs_uuid_unique` ON `failed_jobs` (`uuid`);
-CREATE INDEX `failed_jobs_connection_queue_failed_at_index` ON `failed_jobs` (`connection`,`queue`,`failed_at`);
 CREATE TABLE `feat_definitions` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`content_key` VARCHAR NOT NULL,
@@ -230,47 +199,6 @@ CREATE TABLE `feat_definitions` (
 
 CREATE UNIQUE INDEX `feat_definitions_content_key_unique` ON `feat_definitions` (`content_key`);
 CREATE UNIQUE INDEX `feat_definitions_name_rules_edition_unique` ON `feat_definitions` (`name`,`rules_edition`);
-CREATE TABLE `job_batches` (
-	`id` VARCHAR PRIMARY KEY NOT NULL,
-	`name` VARCHAR NOT NULL,
-	`total_jobs` integer NOT NULL,
-	`pending_jobs` integer NOT NULL,
-	`failed_jobs` integer NOT NULL,
-	`failed_job_ids` TEXT NOT NULL,
-	`options` TEXT,
-	`cancelled_at` integer,
-	`created_at` integer NOT NULL,
-	`finished_at` integer
-);
-
-CREATE TABLE `jobs` (
-	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-	`queue` VARCHAR NOT NULL,
-	`payload` TEXT NOT NULL,
-	`attempts` integer NOT NULL,
-	`reserved_at` integer,
-	`available_at` integer NOT NULL,
-	`created_at` integer NOT NULL
-);
-
-CREATE INDEX `jobs_queue_index` ON `jobs` (`queue`);
-CREATE TABLE `password_reset_tokens` (
-	`email` VARCHAR PRIMARY KEY NOT NULL,
-	`token` VARCHAR NOT NULL,
-	`created_at` DATETIME
-);
-
-CREATE TABLE `sessions` (
-	`id` VARCHAR PRIMARY KEY NOT NULL,
-	`user_id` integer,
-	`ip_address` VARCHAR,
-	`user_agent` TEXT,
-	`payload` TEXT NOT NULL,
-	`last_activity` integer NOT NULL
-);
-
-CREATE INDEX `sessions_user_id_index` ON `sessions` (`user_id`);
-CREATE INDEX `sessions_last_activity_index` ON `sessions` (`last_activity`);
 CREATE TABLE `species_definitions` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`content_key` VARCHAR NOT NULL,
@@ -514,18 +442,6 @@ CREATE TABLE `subclass_progressions` (
 );
 
 CREATE UNIQUE INDEX `subclass_progressions_subclass_definition_id_class_level_unique` ON `subclass_progressions` (`subclass_definition_id`,`class_level`);
-CREATE TABLE `users` (
-	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-	`name` VARCHAR NOT NULL,
-	`email` VARCHAR NOT NULL,
-	`email_verified_at` DATETIME,
-	`password` VARCHAR NOT NULL,
-	`remember_token` VARCHAR,
-	`created_at` DATETIME,
-	`updated_at` DATETIME
-);
-
-CREATE UNIQUE INDEX `users_email_unique` ON `users` (`email`);
 CREATE TABLE `warning_acknowledgements` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`character_id` integer NOT NULL,

@@ -830,3 +830,71 @@ agent** — that is injection even on one's own site.
 The guided builder covers **single-class** creation and hands off to the
 existing planner, which already handles multiclass. The builder does not
 reimplement it.
+
+---
+
+## H1 — Candidate-image hardening: the quadratic, the two new refusals, and the one cap NOT added (2026-07-26)
+
+**Finding 1 — the audit's cycle detection was O(N²) and is now O(N).**
+`assertNoParentCycle` allocated a fresh visited set per start node and re-walked
+the whole ancestor chain from every key. Measured before, on one parent chain of
+N `character_source_instances` in one image, against the identical rows with no
+parent as the linear control:
+
+| N | chained | flat control | after the fix |
+|---|---|---|---|
+| 3,000 | 116.9 ms | 3.3 ms | 9.4 ms |
+| 6,000 | 628.9 ms | 5.2 ms | 17.4 ms |
+| 12,000 | 3,349.0 ms | 9.5 ms | 31.8 ms |
+| 24,000 | 16,574.1 ms | 18.8 ms | 69.6 ms |
+| 50,000 (5.6 MB image) | **80.5 s** | — | **0.10 s** |
+| 2,000 × 20 save points (11.9 MB) | 1.15 s | — | 0.133 s |
+
+`validateBytes` is synchronous inside the app's one dedicated worker, so the
+80.5 s was 80.5 s of every other RPC queued behind it. The fix is a `settled`
+set shared across start nodes; a node joins it only on a walk that ENDED, so a
+cyclic chain can never be settled and the reported id is unchanged.
+
+**The guard is a lookup count, not a stopwatch.** A wall-clock budget would be a
+flake on a box running four worktrees. `tests/unit/db/candidate-audit.test.ts`
+counts `Map.get` calls on a 10,000-node chain and requires fewer than 40,000;
+the old implementation makes 50,004,999 — verified by reverting the fix and
+watching the assertion fail with that number.
+
+**Finding 2 — two refusals added, one gap kept deliberately.**
+REJECTED now, because neither can occur in an image this application produced,
+so there is no legitimate import to destroy: (1) two snapshot rows sharing one
+`id` — the live table has a PRIMARY KEY, and restore dies with
+`SQLITE_CONSTRAINT_PRIMARYKEY`; (2) a snapshot slot holding both
+`fixed_spell_version_id` and `current_spell_version_id` — the CHECK and the two
+triggers forbid it on every INSERT/UPDATE, and restore dies with
+`SQLITE_CONSTRAINT_TRIGGER`. Both rules are IMPORTED from the portable-backup
+validator (`src/domain/contracts/row-rules.ts`) rather than written twice.
+
+NOT REJECTED, deliberately: a snapshot referencing a `spell_versions` row with
+`is_active = 0`. `CharacterState.validateSnapshot` refuses it, but unlike the
+other two this state is reachable in a legitimate database — `CatalogImporter`
+tombstones a version on every re-import that stops naming its `content_key`
+(`src/catalog/catalog-importer.ts:266`), and save points captured earlier keep
+pointing at it. Refusing the image would mean a user who took a catalog update
+can no longer restore their own backup. The skip is inert and proved so:
+`restore` calls `validateSnapshot` BEFORE opening its transaction, so the
+snapshot cannot become an INSERT, and the test asserts the rows are unchanged
+after the refusal.
+
+**Finding 3 — the ownership pass is future-proofing, and now says so in a test.**
+`auditCharacterOwnership` catches nothing today: every character-owned
+`character_id` carries an FK, so `PRAGMA foreign_key_check` reaches every orphan
+first. `UNENFORCED_OWNERSHIP_TABLES` derives that claim from the generated FK
+facts and a test asserts it is EMPTY, so the day someone adds a character-owned
+table without that FK the claim fails loudly instead of ageing into a lie. The
+pass is kept — it costs nothing and the audit is contracted on the
+classification, not on the FKs — but it is no longer counted as a guarantee.
+
+**No byte or row cap at the backup boundary, and why.** The DoS was the
+algorithm, not the size. Post-fix cost is linear at roughly 10 ms per megabyte,
+so a 100 MB import costs about a second. A cap's only failure mode is refusing a
+real user's import (D6b), and there is no honest number to set it at: the
+database grows with the catalog AND with unbounded undo history. Recorded in
+`src/backup/database-backup.ts` with the measurements, so the next person does
+not have to re-derive it.
