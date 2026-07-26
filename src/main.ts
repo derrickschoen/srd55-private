@@ -64,36 +64,88 @@ if (root === null) {
  * The site footer lives outside #app, so no screen owns its links. Routing them
  * here keeps the attribution page a navigation rather than a full reload, which
  * would restart the worker and reopen the database.
+ *
+ * TWO THINGS MAKE THIS SAFE, AND BOTH ARE LOAD-BEARING.
+ *
+ * It is attached during module evaluation, ahead of the boot gate below, rather
+ * than from `startApplication`. The footer is static markup in index.html: it
+ * paints in tens of milliseconds, while the gate waits on the worker
+ * instantiating sqlite's wasm and provisioning the OPFS pool, measured here at
+ * ~1.5 s on the production build and 1.9–3.7 s in dev. Attaching after the gate
+ * left the link visible, live and unhandled for that whole span, and a click
+ * inside it was precisely the full reload this function exists to prevent — it
+ * destroyed the worker part way through `installOpfsSAHPoolVfs` and started the
+ * boot again from zero. Attaching first removes that window instead of
+ * narrowing it.
+ *
+ * And it delegates from `.site-footer`, which the document ships with, instead
+ * of binding each anchor. A per-anchor loop can only bind the anchors that
+ * exist when it runs, which is what tied it to application start in the first
+ * place; one listener on an element present at first paint has no such
+ * ordering requirement.
  */
-function routeFooterLinks(router: Router): void {
-  for (const link of Array.from(
-    document.querySelectorAll<HTMLAnchorElement>(
-      '.site-footer a[data-router-link]',
-    ),
-  )) {
-    link.addEventListener('click', (event: MouseEvent): void => {
-      if (
-        event.button !== 0 ||
-        event.metaKey ||
-        event.ctrlKey ||
-        event.shiftKey ||
-        event.altKey
-      ) {
-        return;
-      }
-      event.preventDefault();
-      router.navigate(link.href);
-    });
+function routeFooterLinks(router: Router, start: () => void): void {
+  const footer = document.querySelector<HTMLElement>('.site-footer');
+  if (footer === null) {
+    return;
   }
+  footer.addEventListener('click', (event: MouseEvent): void => {
+    if (
+      event.defaultPrevented ||
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    ) {
+      return;
+    }
+    const target = event.target;
+    const link =
+      target instanceof Element
+        ? target.closest<HTMLAnchorElement>('a[data-router-link]')
+        : null;
+    if (link === null || !footer.contains(link)) {
+      return;
+    }
+    event.preventDefault();
+    /**
+     * Order matters. Pushing the URL before starting means an application that
+     * has not started yet renders the route that was asked for, rather than
+     * rendering the pre-click route and replacing it a moment later.
+     */
+    router.navigate(link.href);
+    start();
+  });
 }
 
 const status = document.querySelector<HTMLOutputElement>('#status');
 const router = new Router();
 
+let application: Application | undefined;
+
+/**
+ * Idempotent, because it now has two callers that do not know about each other:
+ * the boot gate below, and a footer click that arrives before the gate fires.
+ * Starting twice would leave two applications subscribed to one router, each
+ * rendering into #app.
+ */
 const startApplication = (): void => {
-  new Application(root, rpc, router).start();
-  routeFooterLinks(router);
+  if (application !== undefined) {
+    return;
+  }
+  application = new Application(root, rpc, router);
+  application.start();
 };
+
+/**
+ * A footer click can start the application before the database is open, which
+ * is sound for the same reason the deep-link branch below is sound: the licence
+ * route is the only route the footer offers and it reads nothing from the
+ * database. It is also the only thing that reaches this early — every other
+ * route still waits for the gate.
+ */
+routeFooterLinks(router, startApplication);
 
 /**
  * DEV ONLY. The local AI bridge is a development convenience that must never
@@ -117,8 +169,10 @@ if (import.meta.env.DEV) {
  * The licence route reads nothing from the database, so it must not wait for
  * one: a worker that never comes up would otherwise hide the attribution, and
  * reloading /legal would fail the same way. Every other route keeps the boot
- * gate, and a failed boot leaves the footer link a plain anchor so it still
- * reaches the notice through a full navigation.
+ * gate. A boot that never completes — because it is slow, or because it failed
+ * outright — no longer strands the footer either: its link was routed during
+ * module evaluation above, so it reaches the notice with neither a reload nor a
+ * database.
  */
 if (legalScreen.matches(router.current)) {
   startApplication();
