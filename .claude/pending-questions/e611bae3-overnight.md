@@ -150,3 +150,30 @@ whole experimental record as F5 in `.claude/decisions.md` — including three
 hypotheses I tested and killed. It is disclosed, not suppressed: no retry, no
 skip, no loosened assertion. Flagging it because a rare browser flake is the
 kind of thing you may want to weigh in on before it gets chased expensively.
+
+---
+
+## Q8 — Weapons do NOT survive backup, sharing, or undo snapshots (NEW, product gap)
+
+`character_weapons` is deliberately excluded from all three scopes. A user can
+build a weapon list, and it will be missing from their backup file, absent from
+any share link they send, and unrestored by a save-point rollback. Undo and redo
+DO cover weapon changes.
+
+**This is disclosed in the UI**, not silent: the weapons panel renders a notice
+naming all three gaps, and a test pins the notice text to the classification so
+the two cannot drift — the day the scopes change, that test fails and points at
+a notice that would by then be false.
+
+**Why it was left:** closing it needs hand-written arms in
+`src/backup/character-backup.ts` and a format-version bump in
+`src/backup/backup-version.ts` — files another track was actively rewriting.
+Doing it concurrently would have meant two tracks editing the backup format at
+once.
+
+**Question for you:** is a disclosed gap acceptable for now, or should closing
+it jump the queue? My read is that it should be next after the current queue,
+because "my weapons vanished from my own backup" is exactly the kind of quiet
+loss this project keeps trying to prevent — but it is a scope call, not a
+technical one, and the notice makes the current state honest rather than
+dangerous.
