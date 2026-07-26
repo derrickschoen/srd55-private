@@ -55,7 +55,7 @@ describe('building the catalog documents', () => {
       now: () => '2026-07-26T00:00:00.000Z',
     });
 
-    const records = parseCatalogDocuments([output.tier1]);
+    const records = parseCatalogDocuments([output.tier1]).spells;
     const descriptions = parseDescriptionDocuments([output.tier2]);
     expect(records).toHaveLength(3);
     expect(descriptions).toHaveLength(3);
@@ -95,7 +95,7 @@ describe('building the catalog documents', () => {
     // the rest, so the stamp cannot reach the database, an export or a share
     // link. If that ever changed, the stamp would become the leak it guards
     // against — hence the assertion, and hence the same check inside the build.
-    const records = parseCatalogDocuments([output.tier1]);
+    const records = parseCatalogDocuments([output.tier1]).spells;
     expect(JSON.stringify(records)).not.toContain(SCRAPE_SENTINEL);
     const descriptions = parseDescriptionDocuments([output.tier2]);
     expect(JSON.stringify(descriptions)).not.toContain(SCRAPE_SENTINEL);
