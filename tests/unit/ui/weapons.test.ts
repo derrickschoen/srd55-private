@@ -185,6 +185,38 @@ describe('the mastery statement', () => {
     expect(statement).not.toContain('of 0');
   });
 
+  /**
+   * `unsourced` and `content_missing` both land in the `unknown` state and they
+   * are NOT the same ignorance. `unsourced` is a sourced fact — the class does
+   * grant Weapon Mastery and only the number is missing — so naming the grant
+   * is honest. `content_missing` can mean there is no grant row at all, which
+   * is what an un-seeded database looks like, and there the app does not know
+   * whether anything is granted. Claiming a grant would assert precisely the
+   * thing that is missing.
+   */
+  it('does not claim a grant it has no row for', () => {
+    const statement = masteryStatement(
+      panel({
+        selected_count: 1,
+        allowance: {
+          state: 'unknown',
+          classes: [
+            {
+              class_definition_id: 3,
+              class_name: 'Paladin',
+              class_level: 4,
+              allowance: { state: 'content_missing' },
+            },
+          ],
+        },
+      }),
+    );
+    expect(statement).toContain('Paladin');
+    expect(statement).not.toContain('grants it');
+    expect(statement).toContain('1 chosen');
+    expect(statement).not.toContain('of 0');
+  });
+
   it('lists each class separately when several grant it, and never adds them up', () => {
     const statement = masteryStatement(
       panel({

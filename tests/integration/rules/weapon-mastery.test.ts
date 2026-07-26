@@ -158,9 +158,11 @@ describe('weapon content seeding and the mastery allowance lookup', () => {
     const allowance = lookup().forClass(wizard, 5);
     expect(allowance).toEqual({ state: 'content_missing' });
     // Stated explicitly, because a zero here would make an un-seeded database
-    // indistinguishable from a class that genuinely grants nothing.
+    // indistinguishable from a class that genuinely grants nothing. Asserted as
+    // a missing PROPERTY rather than by searching the serialised object for a
+    // `0`: `{"state":"content_missing"}` contains no `0` however the code
+    // behaves, so that check could not fail and was reassurance, not a test.
     expect(allowance).not.toHaveProperty('count');
-    expect(JSON.stringify(allowance)).not.toContain('0');
   });
 
   it('says "content missing" when a counts_known class has no row at that level', () => {
