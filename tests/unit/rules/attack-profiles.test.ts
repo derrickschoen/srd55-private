@@ -16,6 +16,7 @@ import type {
   RecognisedAttackCantrips,
 } from '../../../src/rules/attack-cantrips';
 import { martialArtsDice, type SheetClassLevels } from '../../../src/rules/sheet';
+import type { ExtraAttackGrant } from '../../../src/rules/extra-attack';
 
 /**
  * EVERY NUMBER HERE IS COMPUTED BY HAND AND WRITTEN AS A LITERAL, and the
@@ -57,18 +58,34 @@ const MONK_DICE = new Map<number, number>([
   [20, 12],
 ]);
 
+/** A class-table grant, in the shape `SheetContentLookup` builds one. */
+function classGrant(
+  className: string,
+  classLevel: number,
+  attackCount: number,
+): ExtraAttackGrant {
+  return {
+    source: 'class',
+    source_name: className,
+    class_level: classLevel,
+    attack_count: attackCount,
+    weapon_scope: 'any_weapon',
+    unresolved: [],
+  };
+}
+
 /** Fighter 5 -> 2, 11 -> 3, 20 -> 4, from the Fighter Features table. */
-const FIGHTER_ATTACKS = new Map<number, number>([
-  [5, 2],
-  [11, 3],
-  [20, 4],
-]);
+const FIGHTER_ATTACKS: readonly ExtraAttackGrant[] = [
+  classGrant('Fighter', 5, 2),
+  classGrant('Fighter', 11, 3),
+  classGrant('Fighter', 20, 4),
+];
 
 function monk(level: number): SheetClassLevels {
   return {
     class_name: 'Monk',
     level,
-    extra_attack_counts: new Map([[5, 2]]),
+    extra_attack_grants: [classGrant('Monk', 5, 2)],
     martial_arts_dice: MONK_DICE,
   };
 }
@@ -77,7 +94,7 @@ function fighter(level: number): SheetClassLevels {
   return {
     class_name: 'Fighter',
     level,
-    extra_attack_counts: FIGHTER_ATTACKS,
+    extra_attack_grants: FIGHTER_ATTACKS,
   };
 }
 

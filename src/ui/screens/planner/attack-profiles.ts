@@ -65,14 +65,33 @@ export function signed(value: number): string {
 /**
  * How many attacks the Attack action gives, in a sentence.
  *
- * D15's display rule is `attacksPerAction(classes) > 1`, and this is the one
- * place it is spoken. The count is the character's; a profile that gives a
+ * D15's display rule is `attacksPerAction(classes).count > 1`, and this is the
+ * one place it is spoken. The count is the character's; a profile that gives a
  * different number says so on its own row.
+ *
+ * THE SENTENCE IS ABOUT EVERY WEAPON, AND AFTER D19 IT SAYS SO WHEN THAT
+ * MATTERS. A grant this application could not apply — a pact-weapon grant, an
+ * optional feature it cannot confirm — would make an unqualified "gives 2
+ * attacks" wrong for the crossbow beside it. The qualification is added only
+ * when there is something to qualify, so the ordinary character's sentence is
+ * unchanged.
  */
 export function attacksStatement(result: AttackProfileResult): string {
-  return result.has_extra_attack
+  // READ OFF THE WARNINGS, NOT OFF THE PROFILES, and the difference is a real
+  // case rather than a preference: a character who owns no weapons and knows
+  // neither cantrip has NO profiles at all, and the panel then prints the
+  // warning under a sentence that would otherwise still read as the whole
+  // answer. The warning is emitted once per unresolved grant either way.
+  const unresolved = result.warnings.some(
+    (warning) => warning.code === 'unresolved_extra_attack',
+  );
+  const base = result.has_extra_attack
     ? `The Attack action gives ${String(result.attacks_per_action)} attacks.`
     : 'The Attack action gives one attack.';
+  return unresolved
+    ? `${base} That is the number for every weapon; features this application ` +
+        'cannot apply are listed below and are not counted in it.'
+    : base;
 }
 
 /** `+7 to hit`, or an honest statement that there is no number. */
@@ -315,6 +334,21 @@ function renderProfile(
       'attack-profile-count',
     ),
   );
+
+  // The ignorance, ON THE ROW IT WOULD HAVE CHANGED. The panel-level warning
+  // already names the grant once; this is what tells the reader that THIS
+  // weapon is one of the ones the answer might be short for.
+  const unresolved = list(
+    profile.unresolved_attacks.map(
+      (grant) =>
+        `${grant.source_name} would give ${String(grant.attack_count)} ` +
+        `attacks. ${grant.unresolved.join(' ')}`,
+    ),
+    'attack-profile-unresolved',
+  );
+  if (unresolved !== null) {
+    block.append(unresolved);
+  }
 
   const preconditions = list(profile.preconditions, 'attack-profile-conditions');
   if (preconditions !== null) {

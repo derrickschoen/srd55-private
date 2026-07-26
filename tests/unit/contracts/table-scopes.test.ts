@@ -91,6 +91,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       'class_weapon_mastery_grants',
       'class_weapon_proficiencies',
       'feat_definitions',
+      'named_features',
       'species_definitions',
       'species_template_traits',
       'species_templates',
@@ -108,6 +109,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       'spell_version_tags',
       'spell_versions',
       'subclass_definitions',
+      'subclass_features',
       'subclass_progressions',
       'warning_acknowledgements',
       'weapon_templates',
@@ -242,15 +244,16 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
 });
 
 describe('table scope classification', () => {
-  it('classifies all 48 tables exactly once', () => {
+  it('classifies all 50 tables exactly once', () => {
     const names = Object.keys(TABLE_SCOPES);
     // 30 Laravel-derived tables — 38 until the eight Laravel-only
     // infrastructure ones were dropped — plus the four native weapon tables,
-    // the eight of the sheet core, and the six origins tables. Each group is
-    // named rather than folded into one total, so a group that vanishes while
-    // another grows cannot pass unnoticed.
-    expect(names).toHaveLength(48);
-    expect(new Set(names).size).toBe(48);
+    // the eight of the sheet core, the six origins tables, and the two D19
+    // class-feature tables. Each group is named rather than folded into one
+    // total, so a group that vanishes while another grows cannot pass
+    // unnoticed.
+    expect(names).toHaveLength(50);
+    expect(new Set(names).size).toBe(50);
     expect([...names].sort()).toEqual([...APPLICATION_TABLES].sort());
   });
 

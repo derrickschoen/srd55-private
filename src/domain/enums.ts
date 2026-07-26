@@ -314,6 +314,91 @@ export const speciesTraitEffectKinds = [
 ] as const;
 export type SpeciesTraitEffectKind = (typeof speciesTraitEffectKinds)[number];
 
+/**
+ * WHAT GRANTED AN EXTRA ATTACK — the closed set D19 says the model needs.
+ *
+ * `class_extra_attack_grants` can express only the first member, because it is
+ * keyed on `(class_definition_id, class_level)` and a class table row is the
+ * only thing that shape can hold. The other two are real and sourced:
+ *
+ *  - `subclass` — a subclass feature at a level in its own class. NOT in SRD
+ *    5.2, which carries one subclass per class and no Extra Attack among them,
+ *    so D3 governs: the MODEL ships, the CONTENT does not.
+ *  - `feature`  — a named, optional feature that is neither a class table row
+ *    nor a subclass: `docs/srd/source/extra-attack-other-sources.txt` carries
+ *    two, and they are bundled.
+ *
+ * THIS IS A DISCRIMINATOR OVER THREE TABLES, NOT A COLUMN. Each source keeps
+ * its own table with a NOT NULL foreign key — `class_extra_attack_grants`,
+ * `subclass_features`, `named_features` — which is D6's "extract a variant
+ * table" applied rather than quoted. A single table with three nullable ids
+ * would have needed correlated-null CHECKs in both directions AND would have
+ * lost its uniqueness guarantee, because SQLite treats NULLs as distinct in a
+ * UNIQUE index: `(1, 6, NULL)` can be inserted twice under
+ * `UNIQUE(class_definition_id, class_level, subclass_definition_id)`. Measured,
+ * not assumed. Keeping the tables apart also keeps a homebrew subclass grant
+ * out of the table `src/rules/sheet-srd.ts` clears with
+ * `DELETE … WHERE class_definition_id = ?` on every reseed.
+ */
+export const extraAttackGrantSources = ['class', 'subclass', 'feature'] as const;
+export type ExtraAttackGrantSource = (typeof extraAttackGrantSources)[number];
+
+/**
+ * WHICH WEAPONS AN EXTRA ATTACK GRANT REACHES.
+ *
+ * `docs/srd/source/extra-attack-other-sources.txt`: "You gain the Extra Attack
+ * feature FOR YOUR PACT WEAPON ONLY." A grant is therefore not always a fact
+ * about the character; it can be a fact about one weapon, and the model has to
+ * be able to say which.
+ *
+ * `one_bonded_weapon` IS NAMED FOR WHAT IT MEANS, NOT FOR THE SRD FEATURE THAT
+ * USES IT. The scope is "one specific weapon the character has bound to
+ * themselves", and the bundled feature that uses it calls that weapon a pact
+ * weapon. A homebrew feature scoped to an oath-blade or a familiar's talon is
+ * the same shape, and a member named after one feature would have invited a
+ * second member meaning the same thing.
+ *
+ * THIS APPLICATION CANNOT RESOLVE `one_bonded_weapon`, AND SAYS SO RATHER THAN
+ * GUESSING. `character_weapons` holds no bond, no attunement and — by D1b — no
+ * link to any catalog row; grepping `src/` and `db/` for `pact` finds only Pact
+ * Magic spell-slot machinery and not one weapon-related occurrence. So a scoped
+ * grant is SURFACED against every profile and applied to none, which is the
+ * `content_missing` posture `WeaponMasteryLookup` established: a state, never a
+ * number.
+ */
+export const extraAttackWeaponScopes = [
+  'any_weapon',
+  'one_bonded_weapon',
+] as const;
+export type ExtraAttackWeaponScope = (typeof extraAttackWeaponScopes)[number];
+
+/**
+ * A CLASS FEATURE IS FREE TEXT PLUS AN OPTIONAL MECHANICAL EFFECT — D12's
+ * species-trait shape, one level over, and closed the same way twice.
+ *
+ * `subclass_features` and `named_features` both carry `description NOT NULL`
+ * and a NULLABLE `effect_kind` from this set. Most features move no number and
+ * have no kind at all; that is the DEFAULT case here exactly as it is for
+ * species traits, where 26 of 33 printed traits carry `effect_kind IS NULL`.
+ *
+ * CLOSED IN SQLITE BY `nullOrOneOf`, AND IN TYPESCRIPT BY AN EXHAUSTIVE SWITCH
+ * in `src/rules/class-feature-effects.ts`. Adding a member here stops that file
+ * compiling until the new kind is given a meaning, which is the D12 mechanism
+ * that makes "adding a mechanical KIND is a deliberate change, adding a feature
+ * is not" true rather than aspirational.
+ *
+ * ONE EFFECT PER FEATURE, AND THE LIMIT IS STATED RATHER THAN INHERITED. D18
+ * measured that limit as a real defect on the species side — the Tiefling's
+ * Fiendish Legacy grants a resistance AND a cantrip, and one column can hold
+ * only one. It is not a defect HERE YET, and the reason is arithmetic rather
+ * than optimism: this set has exactly ONE member, so "two effects on one
+ * feature" is not expressible at all and cannot be silently lost. The day a
+ * second member is added, the child table D18 already named as the real fix is
+ * the change to make, before any content uses it.
+ */
+export const classFeatureEffectKinds = ['extra_attack'] as const;
+export type ClassFeatureEffectKind = (typeof classFeatureEffectKinds)[number];
+
 export const effectReliabilityCategories = [
   'attack_roll',
   'saving_throw',

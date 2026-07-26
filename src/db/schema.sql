@@ -451,6 +451,32 @@ CREATE TABLE `feat_definitions` (
 
 CREATE UNIQUE INDEX `feat_definitions_content_key_unique` ON `feat_definitions` (`content_key`);
 CREATE UNIQUE INDEX `feat_definitions_name_rules_edition_unique` ON `feat_definitions` (`name`,`rules_edition`);
+CREATE TABLE `named_features` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`content_key` VARCHAR NOT NULL,
+	`class_definition_id` integer NOT NULL,
+	`name` VARCHAR NOT NULL,
+	`rules_edition` VARCHAR NOT NULL,
+	`prerequisite` TEXT NOT NULL,
+	`description` TEXT NOT NULL,
+	`class_level` integer NOT NULL,
+	`effect_kind` VARCHAR,
+	`effect_attack_count` integer,
+	`effect_weapon_scope` VARCHAR,
+	`created_at` DATETIME,
+	`updated_at` DATETIME,
+	FOREIGN KEY (`class_definition_id`) REFERENCES `class_definitions`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "named_features_class_level_check" CHECK(class_level BETWEEN 1 AND 20),
+	CONSTRAINT "named_features_effect_kind_check" CHECK(`effect_kind` IS NULL OR `effect_kind` IN ('extra_attack')),
+	CONSTRAINT "named_features_effect_weapon_scope_check" CHECK(`effect_weapon_scope` IS NULL OR `effect_weapon_scope` IN ('any_weapon', 'one_bonded_weapon')),
+	CONSTRAINT "named_features_effect_attack_count_check" CHECK(`effect_attack_count` IS NULL OR (typeof(`effect_attack_count`) = 'integer' AND `effect_attack_count` >= 2)),
+	CONSTRAINT "named_features_attack_count_kind_check" CHECK(effect_attack_count IS NULL OR effect_kind IS 'extra_attack'),
+	CONSTRAINT "named_features_weapon_scope_kind_check" CHECK(effect_weapon_scope IS NULL OR effect_kind IS 'extra_attack'),
+	CONSTRAINT "named_features_extra_attack_payload_check" CHECK(effect_kind IS NOT 'extra_attack' OR (effect_attack_count IS NOT NULL AND effect_weapon_scope IS NOT NULL))
+);
+
+CREATE UNIQUE INDEX `named_features_content_key_unique` ON `named_features` (`content_key`);
+CREATE UNIQUE INDEX `named_features_class_name_rules_edition_unique` ON `named_features` (`class_definition_id`,`name`,`rules_edition`);
 CREATE TABLE `species_definitions` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`content_key` VARCHAR NOT NULL,
@@ -729,6 +755,31 @@ CREATE TABLE `subclass_definitions` (
 CREATE UNIQUE INDEX `subclass_definitions_content_key_unique` ON `subclass_definitions` (`content_key`);
 CREATE UNIQUE INDEX `subclass_definitions_class_definition_id_name_rules_edition_unique` ON `subclass_definitions` (`class_definition_id`,`name`,`rules_edition`);
 CREATE UNIQUE INDEX `subclass_definitions_id_class_definition_id_unique` ON `subclass_definitions` (`id`,`class_definition_id`);
+CREATE TABLE `subclass_features` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`subclass_definition_id` integer NOT NULL,
+	`class_level` integer NOT NULL,
+	`sort_order` integer NOT NULL,
+	`name` VARCHAR NOT NULL,
+	`description` TEXT NOT NULL,
+	`effect_kind` VARCHAR,
+	`effect_attack_count` integer,
+	`effect_weapon_scope` VARCHAR,
+	`created_at` DATETIME,
+	`updated_at` DATETIME,
+	FOREIGN KEY (`subclass_definition_id`) REFERENCES `subclass_definitions`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "subclass_features_class_level_check" CHECK(class_level BETWEEN 1 AND 20),
+	CONSTRAINT "subclass_features_sort_order_check" CHECK(typeof(`sort_order`) = 'integer' AND `sort_order` >= 1),
+	CONSTRAINT "subclass_features_effect_kind_check" CHECK(`effect_kind` IS NULL OR `effect_kind` IN ('extra_attack')),
+	CONSTRAINT "subclass_features_effect_weapon_scope_check" CHECK(`effect_weapon_scope` IS NULL OR `effect_weapon_scope` IN ('any_weapon', 'one_bonded_weapon')),
+	CONSTRAINT "subclass_features_effect_attack_count_check" CHECK(`effect_attack_count` IS NULL OR (typeof(`effect_attack_count`) = 'integer' AND `effect_attack_count` >= 2)),
+	CONSTRAINT "subclass_features_attack_count_kind_check" CHECK(effect_attack_count IS NULL OR effect_kind IS 'extra_attack'),
+	CONSTRAINT "subclass_features_weapon_scope_kind_check" CHECK(effect_weapon_scope IS NULL OR effect_kind IS 'extra_attack'),
+	CONSTRAINT "subclass_features_extra_attack_payload_check" CHECK(effect_kind IS NOT 'extra_attack' OR (effect_attack_count IS NOT NULL AND effect_weapon_scope IS NOT NULL))
+);
+
+CREATE UNIQUE INDEX `subclass_features_subclass_sort_unique` ON `subclass_features` (`subclass_definition_id`,`sort_order`);
+CREATE UNIQUE INDEX `subclass_features_subclass_name_unique` ON `subclass_features` (`subclass_definition_id`,`name`);
 CREATE TABLE `subclass_progressions` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`subclass_definition_id` integer NOT NULL,
