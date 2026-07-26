@@ -44,18 +44,35 @@ import {
  * The tables added to a scope since its literal above was transcribed, with the
  * position they were added at. Hand-written, one entry per deliberate decision.
  */
-const SNAPSHOT_ADDITIONS = ['character_weapons'] as const;
-const BACKUP_DIRECT_ADDITIONS = ['character_weapons'] as const;
+const SNAPSHOT_ADDITIONS = [
+  'character_weapons',
+  // The character's own origin. Three tables and not one, because a species,
+  // its trait list and a background are separately added and separately
+  // removed; see `db/schema/origins.ts`.
+  'character_species',
+  'character_species_traits',
+  'character_background',
+] as const;
+const BACKUP_DIRECT_ADDITIONS = [
+  'character_weapons',
+  'character_species',
+  'character_species_traits',
+  'character_background',
+] as const;
 describe('derived table scopes reproduce the hand-maintained lists', () => {
   it('reproduces applicationTables exactly (database-lifecycle.ts)', () => {
     expect([...APPLICATION_TABLES]).toEqual([
       'background_definitions',
+      'background_templates',
       'change_log',
+      'character_background',
       'character_class_levels',
       'character_operations',
       'character_rule_overrides',
       'character_save_points',
       'character_source_instances',
+      'character_species',
+      'character_species_traits',
       'character_spell_preferences',
       'character_weapons',
       'characters',
@@ -65,6 +82,8 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       'class_weapon_mastery_grants',
       'feat_definitions',
       'species_definitions',
+      'species_template_traits',
+      'species_templates',
       'spell_identities',
       'spell_identity_aliases',
       'spell_list_memberships',
@@ -100,11 +119,17 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
   });
 
   it('reproduces the snapshot DELETE_ORDER exactly, plus the declared additions', () => {
-    // Order is topological rather than capture order, so the addition goes
-    // where its foreign keys allow: `character_weapons` has no children, so it
-    // deletes first, alongside the other leaves.
+    // Order is topological rather than capture order, so the additions go where
+    // their foreign keys allow: none of the four has children, so they delete
+    // first, alongside the other leaves. Within the group the traits precede
+    // the species row purely for readability — `character_species_traits` is
+    // keyed on `character_id`, not on `character_species.id`, so there is no
+    // edge between them to respect.
     expect([...DELETE_ORDER]).toEqual([
-      ...SNAPSHOT_ADDITIONS,
+      'character_weapons',
+      'character_species_traits',
+      'character_species',
+      'character_background',
       // — transcribed, unedited —
       'warning_acknowledgements',
       'wizard_spellbook_entries',
@@ -158,7 +183,12 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
     // existed readable. It may only ever name a table that IS backed up, and it
     // must stay a strict subset — an optional table set equal to the whole
     // document would accept a file with no tables at all as valid.
-    expect([...BACKUP_OPTIONAL_TABLES]).toEqual(['character_weapons']);
+    expect([...BACKUP_OPTIONAL_TABLES]).toEqual([
+      'character_weapons',
+      'character_species',
+      'character_species_traits',
+      'character_background',
+    ]);
     for (const table of BACKUP_OPTIONAL_TABLES) {
       expect([...BACKUP_TABLES]).toContain(table);
     }
@@ -202,12 +232,13 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
 });
 
 describe('table scope classification', () => {
-  it('classifies all 34 tables exactly once', () => {
+  it('classifies all 40 tables exactly once', () => {
     const names = Object.keys(TABLE_SCOPES);
     // 30 Laravel-derived tables — 38 until the eight Laravel-only
-    // infrastructure ones were dropped — plus the four native weapon tables.
-    expect(names).toHaveLength(34);
-    expect(new Set(names).size).toBe(34);
+    // infrastructure ones were dropped — plus the four native weapon tables and
+    // the six native origins tables.
+    expect(names).toHaveLength(40);
+    expect(new Set(names).size).toBe(40);
     expect([...names].sort()).toEqual([...APPLICATION_TABLES].sort());
   });
 

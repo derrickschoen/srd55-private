@@ -114,6 +114,57 @@ const complete: CharacterShareDocument = {
     },
     { name: 'Unfinished club' },
   ],
+  // THE ORIGIN, WITH EVERY SLOT FILLED SO THE WIRE PIN SEES A REAL VALUE IN
+  // EACH. The trait list holds one of each mechanical kind plus a free-text
+  // trait, so the pin proves all four payload slots and the empty case travel.
+  species: {
+    name: 'Dwarf',
+    creature_type: 'Humanoid',
+    size: 'Medium',
+    base_speed_feet: 30,
+    notes: 'Rewritten after session four.',
+  },
+  speciesTraits: [
+    {
+      name: 'Dwarven Resilience',
+      description: 'You have Resistance to Poison damage.',
+      effect_kind: 'damage_resistance',
+      effect_damage_type: 'Poison',
+      notes: 'From the template.',
+    },
+    {
+      name: 'Dwarven Toughness',
+      description: 'Your Hit Point maximum increases by 1.',
+      effect_kind: 'hp_modifier',
+      effect_hit_points_flat: 1,
+      effect_hit_points_per_level: 1,
+    },
+    {
+      name: 'Fleet of Foot',
+      description: 'A trait this player wrote themselves.',
+      effect_kind: 'speed',
+      effect_speed_bonus_feet: 5,
+    },
+    {
+      name: 'Elven Lineage',
+      effect_kind: 'granted_spells',
+    },
+    // The free-text majority — 26 of the 33 printed traits look like this.
+    { name: 'Stonecunning' },
+  ],
+  background: {
+    name: 'Soldier',
+    ability_score_1: 'Strength',
+    ability_score_2: 'Dexterity',
+    ability_score_3: 'Constitution',
+    feat_name: 'Savage Attacker',
+    skill_proficiency_1: 'Athletics',
+    skill_proficiency_2: 'Intimidation',
+    tool_proficiency: 'Choose one kind of Gaming Set',
+    equipment_option_a: 'Spear, Shortbow, 20 Arrows, 14 GP',
+    equipment_option_b: '50 GP',
+    notes: 'Retired from the watch.',
+  },
 };
 
 async function arbitraryFragment(value: unknown): Promise<string> {
@@ -305,6 +356,70 @@ describe('character-share positional codec', () => {
           null,
         ],
       ],
+      // Element 12: the origin, as ONE grouped tuple of three independently
+      // nullable slots — species, its traits, background. The trait tuples are
+      // eight slots each: name, the four text fields, then the three signed
+      // effect payloads. Array position is the printed order; there is no
+      // sort_order on the wire.
+      [
+        ['Dwarf', 'Humanoid', 'Medium', 'Rewritten after session four.', 30],
+        [
+          [
+            'Dwarven Resilience',
+            'You have Resistance to Poison damage.',
+            'damage_resistance',
+            'Poison',
+            'From the template.',
+            null,
+            null,
+            null,
+          ],
+          [
+            'Dwarven Toughness',
+            'Your Hit Point maximum increases by 1.',
+            'hp_modifier',
+            null,
+            null,
+            1,
+            1,
+            null,
+          ],
+          [
+            'Fleet of Foot',
+            'A trait this player wrote themselves.',
+            'speed',
+            null,
+            null,
+            null,
+            null,
+            5,
+          ],
+          [
+            'Elven Lineage',
+            null,
+            'granted_spells',
+            null,
+            null,
+            null,
+            null,
+            null,
+          ],
+          ['Stonecunning', null, null, null, null, null, null, null],
+        ],
+        [
+          'Soldier',
+          'Strength',
+          'Dexterity',
+          'Constitution',
+          'Savage Attacker',
+          'Athletics',
+          'Intimidation',
+          'Choose one kind of Gaming Set',
+          'Spear, Shortbow, 20 Arrows, 14 GP',
+          '50 GP',
+          'Retired from the watch.',
+        ],
+      ],
     ]);
   });
 
@@ -484,12 +599,20 @@ describe('character-share positional codec', () => {
       // written before weapons travelled decode to the same thing — a document
       // with no `weapons` key at all — which is what makes an old link readable.
       null,
+      // The origin element is ALWAYS written, with `null` in each of its three
+      // slots, so this build's output has one shape rather than eight. Each
+      // null decodes to an ABSENT key for the same reason weapons does.
+      [null, null, null],
     ]);
-    expect(positional).toHaveLength(12);
+    expect(positional).toHaveLength(13);
     expect((positional[2] as unknown[]).length).toBe(11);
     expect((positional[3] as unknown[][])[0]).toHaveLength(8);
     expect((positional[4] as unknown[][])[0]).toHaveLength(6);
+    expect(positional[12]).toHaveLength(3);
     expect(minimal).not.toHaveProperty('weapons');
+    expect(minimal).not.toHaveProperty('species');
+    expect(minimal).not.toHaveProperty('speciesTraits');
+    expect(minimal).not.toHaveProperty('background');
     await expect(
       decodeShareFragment(await encodeShareFragment(minimal)),
     ).resolves.toEqual(minimal);
@@ -650,15 +773,29 @@ describe('a share link generated before weapons travelled', () => {
   });
 
   it('still refuses a length that is neither', async () => {
-    // Tolerance is exactly two lengths wide, not "any length". Ten elements and
-    // thirteen elements are both malformed and must stay refused.
+    // Tolerance is exactly three lengths wide, not "any length". Ten elements
+    // and fourteen elements are both malformed and must stay refused.
     for (const wire of [
       LEGACY_WIRE.slice(0, 10),
-      [...LEGACY_WIRE, null, null],
+      [...LEGACY_WIRE, null, null, null, null],
     ]) {
       await expect(
         decodeShareFragment(nodeFragment(wire)),
-      ).rejects.toThrow(/wire document must be a tuple of length 11 or 12/);
+      ).rejects.toThrow(
+        /wire document must be a tuple of length 11 or 12 or 13/,
+      );
     }
+  });
+
+  it('decodes a twelve-element link — weapons but no origin — as having none', async () => {
+    // The intermediate format, which is what every link generated between the
+    // weapons change and this one looks like. It must decode with a `weapons`
+    // key and no origin keys at all, not with three empty ones.
+    const withWeapons = [...LEGACY_WIRE, []];
+    const decoded = await decodeShareFragment(nodeFragment(withWeapons));
+    expect(decoded.weapons).toEqual([]);
+    expect(decoded).not.toHaveProperty('species');
+    expect(decoded).not.toHaveProperty('speciesTraits');
+    expect(decoded).not.toHaveProperty('background');
   });
 });

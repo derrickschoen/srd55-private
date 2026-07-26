@@ -13,12 +13,19 @@ import { SpellSelectionEligibility } from '../eligibility/spell-selection-eligib
 import {
   CHARACTER_SHARE_FORMAT,
   CHARACTER_SHARE_VERSION,
+  SHARE_BACKGROUND_TEXT,
+  SHARE_SPECIES_TEXT,
+  SHARE_SPECIES_TRAIT_NUMBERS,
+  SHARE_SPECIES_TRAIT_TEXT,
   SHARE_WEAPON_FLAGS,
   SHARE_WEAPON_TEXT,
   ShareValidationError,
   type CharacterShareDocument,
+  type ShareBackground,
   type ShareClass,
   type ShareSource,
+  type ShareSpecies,
+  type ShareSpeciesTrait,
   type ShareWeapon,
   validateShareDocument,
 } from './schema';
@@ -206,6 +213,57 @@ function shareWeaponFromRow(row: Row): ShareWeapon {
     }
   }
   return weapon as unknown as ShareWeapon;
+}
+
+/**
+ * The origin rows, projected onto the share document's sections.
+ *
+ * `null` becomes ABSENT, on exactly the terms `shareWeaponFromRow` established:
+ * a half-entered species stays half-entered rather than being completed with
+ * empty strings, and the round trip restores the column's own NULL.
+ *
+ * `sort_order` is deliberately NOT projected. The export orders by it and the
+ * import re-derives it from array position, so the printed order survives
+ * without a column on the wire that a hostile document could make sparse,
+ * duplicated or negative.
+ */
+function textFields<T>(
+  row: Row,
+  fields: readonly string[],
+  into: Record<string, unknown>,
+): T {
+  for (const field of fields) {
+    if (row[field] !== null && row[field] !== undefined) {
+      into[field] = String(row[field]);
+    }
+  }
+  return into as T;
+}
+
+function shareSpeciesFromRow(row: Row): ShareSpecies {
+  const species: Record<string, unknown> = { name: String(row.name) };
+  textFields(row, SHARE_SPECIES_TEXT, species);
+  if (row.base_speed_feet !== null && row.base_speed_feet !== undefined) {
+    species.base_speed_feet = Number(row.base_speed_feet);
+  }
+  return species as unknown as ShareSpecies;
+}
+
+function shareSpeciesTraitFromRow(row: Row): ShareSpeciesTrait {
+  const trait: Record<string, unknown> = { name: String(row.name) };
+  textFields(row, SHARE_SPECIES_TRAIT_TEXT, trait);
+  for (const field of SHARE_SPECIES_TRAIT_NUMBERS) {
+    if (row[field] !== null && row[field] !== undefined) {
+      trait[field] = Number(row[field]);
+    }
+  }
+  return trait as unknown as ShareSpeciesTrait;
+}
+
+function shareBackgroundFromRow(row: Row): ShareBackground {
+  const background: Record<string, unknown> = { name: String(row.name) };
+  textFields(row, SHARE_BACKGROUND_TEXT, background);
+  return background as unknown as ShareBackground;
 }
 
 function sourceOwners(
@@ -487,6 +545,27 @@ export function exportCharacterShare(
      WHERE character_id = ? ORDER BY id`,
     [characterId],
   ).map(shareWeaponFromRow);
+  // Not behind an option flag either, and for the same reason: a character's
+  // species and background are the build being shared, not working state.
+  const speciesRow = db.one<Row>(
+    `SELECT * FROM ${SHARE_TABLES.character_species} WHERE character_id = ?`,
+    [characterId],
+  );
+  const species =
+    speciesRow === null ? undefined : shareSpeciesFromRow(speciesRow);
+  const speciesTraits = db.all<Row>(
+    `SELECT * FROM ${SHARE_TABLES.character_species_traits}
+     WHERE character_id = ? ORDER BY sort_order, id`,
+    [characterId],
+  ).map(shareSpeciesTraitFromRow);
+  const backgroundRow = db.one<Row>(
+    `SELECT * FROM ${SHARE_TABLES.character_background} WHERE character_id = ?`,
+    [characterId],
+  );
+  const background =
+    backgroundRow === null
+      ? undefined
+      : shareBackgroundFromRow(backgroundRow);
   const sharedSpellKeys = new Set([
     ...selections.map((selection) => selection.spellKey),
     ...spellbook,
@@ -559,6 +638,13 @@ export function exportCharacterShare(
     // Omitted when empty, like `placeholders`: a weaponless character's link
     // stays exactly the shape it was before weapons travelled.
     ...(weapons.length === 0 ? {} : { weapons }),
+    // Omitted when absent, on the same terms: a character with no species and
+    // no background produces a link exactly the shape it was before origins
+    // travelled. The three are independent — a background with no species is a
+    // legitimate character and encodes as one section, not three.
+    ...(species === undefined ? {} : { species }),
+    ...(speciesTraits.length === 0 ? {} : { speciesTraits }),
+    ...(background === undefined ? {} : { background }),
   };
   return validateShareDocument(document);
 }
@@ -1131,6 +1217,65 @@ export function importCharacterShare(
           weapon.other_properties ?? null,
           weapon.notes ?? null,
           ...SHARE_WEAPON_FLAGS.map((flag) => (weapon[flag] === true ? 1 : 0)),
+          now,
+          now,
+        ],
+      );
+    }
+    // The origin resolves nothing against the recipient's catalog either — by
+    // D1b these rows hold no template id — so each is written as it arrived.
+    if (document.species !== undefined) {
+      const species = document.species;
+      db.exec(
+        `INSERT INTO ${SHARE_TABLES.character_species} (
+           character_id, name, ${SHARE_SPECIES_TEXT.join(', ')},
+           base_speed_feet, created_at, updated_at
+         ) VALUES (?, ?, ${SHARE_SPECIES_TEXT.map(() => '?').join(', ')}, ?, ?, ?)`,
+        [
+          characterId,
+          species.name,
+          ...SHARE_SPECIES_TEXT.map((field) => species[field] ?? null),
+          species.base_speed_feet ?? null,
+          now,
+          now,
+        ],
+      );
+    }
+    // `sort_order` comes from the ARRAY POSITION, one-based to match the dense
+    // printed order the template seeds. A document cannot supply it, so it
+    // cannot supply a duplicate, a gap or a zero.
+    for (const [index, trait] of (document.speciesTraits ?? []).entries()) {
+      db.exec(
+        `INSERT INTO ${SHARE_TABLES.character_species_traits} (
+           character_id, sort_order, name,
+           ${SHARE_SPECIES_TRAIT_TEXT.join(', ')},
+           ${SHARE_SPECIES_TRAIT_NUMBERS.join(', ')},
+           created_at, updated_at
+         ) VALUES (?, ?, ?,
+           ${SHARE_SPECIES_TRAIT_TEXT.map(() => '?').join(', ')},
+           ${SHARE_SPECIES_TRAIT_NUMBERS.map(() => '?').join(', ')}, ?, ?)`,
+        [
+          characterId,
+          index + 1,
+          trait.name,
+          ...SHARE_SPECIES_TRAIT_TEXT.map((field) => trait[field] ?? null),
+          ...SHARE_SPECIES_TRAIT_NUMBERS.map((field) => trait[field] ?? null),
+          now,
+          now,
+        ],
+      );
+    }
+    if (document.background !== undefined) {
+      const background = document.background;
+      db.exec(
+        `INSERT INTO ${SHARE_TABLES.character_background} (
+           character_id, name, ${SHARE_BACKGROUND_TEXT.join(', ')},
+           created_at, updated_at
+         ) VALUES (?, ?, ${SHARE_BACKGROUND_TEXT.map(() => '?').join(', ')}, ?, ?)`,
+        [
+          characterId,
+          background.name,
+          ...SHARE_BACKGROUND_TEXT.map((field) => background[field] ?? null),
           now,
           now,
         ],

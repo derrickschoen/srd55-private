@@ -50,6 +50,19 @@ export type CharacterWeaponId = Brand<number, 'CharacterWeaponId'>;
  */
 export type WeaponTemplateId = Brand<number, 'WeaponTemplateId'>;
 
+/**
+ * The origins ids, branded on both sides of the same D1b severance and for the
+ * same reason: a template id turning up where a character-row id belongs means
+ * the code is reading the CATALOG when it meant to read the CHARACTER, and by
+ * D1b the character's row holds no template id at all.
+ */
+export type SpeciesTemplateId = Brand<number, 'SpeciesTemplateId'>;
+export type SpeciesTemplateTraitId = Brand<number, 'SpeciesTemplateTraitId'>;
+export type BackgroundTemplateId = Brand<number, 'BackgroundTemplateId'>;
+export type CharacterSpeciesId = Brand<number, 'CharacterSpeciesId'>;
+export type CharacterSpeciesTraitId = Brand<number, 'CharacterSpeciesTraitId'>;
+export type CharacterBackgroundId = Brand<number, 'CharacterBackgroundId'>;
+
 /** One `*_definitions.id` brand per definition table, so they cannot cross. */
 export type ClassDefinitionId = Brand<number, 'ClassDefinitionId'>;
 export type SubclassDefinitionId = Brand<number, 'SubclassDefinitionId'>;

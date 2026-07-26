@@ -7,12 +7,14 @@ import {
 } from './database-lifecycle';
 import { ensureBundledClassContent } from '../rules/class-progression-lookup';
 import { ensureBundledWeaponContent } from '../rules/weapons-srd';
+import { ensureBundledOriginContent } from '../rules/origins-srd';
 
 /**
  * The bundled content every application database is expected to carry: the SRD
- * class and subclass progression catalog, and the SRD weapon catalog with its
- * weapon-mastery content. The spell catalog stays user-supplied through catalog
- * import and is deliberately absent here.
+ * class and subclass progression catalog, the SRD weapon catalog with its
+ * weapon-mastery content, and the SRD species and background TEMPLATE catalog.
+ * The spell catalog stays user-supplied through catalog import and is
+ * deliberately absent here.
  *
  * ORDER MATTERS. Weapon mastery writes one row per `class_definitions` row, so
  * the classes must exist first. Seeding weapons into a database with no classes
@@ -23,6 +25,9 @@ import { ensureBundledWeaponContent } from '../rules/weapons-srd';
 export const applicationSeed: DatabaseSeed = (db) => {
   ensureBundledClassContent(db);
   ensureBundledWeaponContent(db);
+  // Order-independent: the origins catalog references no other table. It is
+  // seeded last only so the two order-DEPENDENT seeds above stay adjacent.
+  ensureBundledOriginContent(db);
 };
 
 /**
