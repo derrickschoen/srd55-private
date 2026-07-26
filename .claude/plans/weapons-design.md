@@ -560,27 +560,23 @@ against by id" — and by D1b a character weapon holds no template id at all, so
 the honest value is probably **false**. Recorded here as the one classification
 the implementer must settle by reading `ReferenceKind`, not by copying this table.
 
-### 7.3 Backup and sharing — a STOP-AND-REPORT point
+### 7.3 Backup and sharing — RESOLVED, historical
 
-Setting `backup: true` and `share: true` obliges matching changes in
-`src/backup/character-backup.ts` (`directCharacterTables`, `backupTableNames`,
-a backup format version) and `src/sharing/character-share.ts`.
+*Historical. This section recorded a stop-and-report point while `src/backup/`
+belonged to another track. The gap is closed; the text is kept because the
+reasoning about what must NOT be done is still the reasoning that governs the
+result.*
 
-**`src/backup/` is off-limits to this track** per the worktree brief. This design
-therefore stops at the classification and reports rather than editing. The
-implementer must hand the backup change to the track that owns those files, or
-get the brief amended.
+`character_weapons` now ships `snapshot: true`, `backupDirect: true`,
+`backup: true`, `share: true`, with the matching arms written in
+`src/backup/character-backup.ts` and `src/sharing/character-share.ts`.
 
-`src/sharing/` is *not* on the off-limits list and exists in this worktree, so
-the share side can be done here.
-
-**What must not be done as a workaround:** shipping `character_weapons` with
-`backup: false` so the build goes green. That would silently drop a user's
-weapons from every portable export — data loss dressed as a clean typecheck, and
-D6c already warns that "portable backup exports raw rows by column name. New
-tables require a new backup version or a compatibility adapter." If the
-coordination cannot happen, the correct outcome is that weapons do not ship,
-not that weapons ship unportable.
+The workaround this section warned against — shipping `backup: false` so the
+build goes green — was not taken. Neither was the other tempting shortcut, of
+making the new table mandatory in the document and quietly breaking every backup
+file and share link a user already holds. Old payloads stay readable:
+`BACKUP_OPTIONAL_TABLES` for the document, an 11-or-12 element wire tuple for the
+link, and a readable-both-ways `a7-v1`/`a7-v2` snapshot schema for save points.
 
 ### 7.4 Commands, and a trap in the validator
 
@@ -757,8 +753,8 @@ flake (F5) is to be re-run and reported, never masked.
    `false`, and the implementer should confirm against `ReferenceKind`.
 4. **`srd_group`** — kept as a catalog-only picker grouping (§4.2), deletable at
    no cost if it reads as too close to the superseded `category` field.
-5. **Backup ownership** (§7.3) — this track cannot edit `src/backup/`, and
-   weapons should not ship unportable.
+5. ~~**Backup ownership** (§7.3)~~ — CLOSED. Weapons are portable: backup, share
+   and save-point snapshot, without breaking payloads users already hold.
 
 ---
 

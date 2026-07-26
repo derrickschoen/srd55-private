@@ -4,12 +4,15 @@ import {
   type WeaponMasteryProperty,
 } from '../../../domain/enums';
 import type { WeaponFields } from '../../../domain/command-contracts';
+import {
+  WEAPON_RANGE_MAX_FEET,
+  WEAPON_TEXT_LIMITS,
+} from '../../../domain/weapon-limits';
 import type {
   CharacterWeapon,
   WeaponsPanel,
   WeaponTemplate,
 } from '../../../domain/read-models';
-import { WEAPON_PORTABILITY_NOTICE } from '../../../rules/weapon-portability';
 import { freeTextSpan } from '../../free-text';
 
 /**
@@ -123,9 +126,21 @@ function labelled(
   return wrapper;
 }
 
-function textInput(id: string, value: string | null): HTMLInputElement {
+/**
+ * Every weapon control carries the SAME bound the command validator enforces.
+ *
+ * Without it the form happily accepts prose or a distance that
+ * `validateCharacterCommandPayload` then rejects, so the user learns the limit
+ * only by losing the save. `maxLength` also stops the browser pasting past it.
+ */
+function textInput(
+  id: string,
+  value: string | null,
+  maximum: number,
+): HTMLInputElement {
   const input = document.createElement('input');
   input.type = 'text';
+  input.maxLength = maximum;
   input.value = value ?? '';
   input.dataset.focusKey = id;
   return input;
@@ -135,6 +150,7 @@ function numberInput(id: string, value: number | null): HTMLInputElement {
   const input = document.createElement('input');
   input.type = 'number';
   input.min = '0';
+  input.max = String(WEAPON_RANGE_MAX_FEET);
   input.value = value === null ? '' : String(value);
   input.dataset.focusKey = id;
   return input;
@@ -431,20 +447,28 @@ function renderForm(
   const rebuild = (): void => {
     fields.replaceChildren();
 
-    const name = textInput('weapon-name', draft.name);
+    const name = textInput('weapon-name', draft.name, WEAPON_TEXT_LIMITS.name);
     name.required = true;
     name.addEventListener('input', () => {
       draft = { ...draft, name: name.value };
     });
     fields.append(labelled('Name', name, 'weapon-name'));
 
-    const damage = textInput('weapon-damage-dice', draft.damage_dice);
+    const damage = textInput(
+      'weapon-damage-dice',
+      draft.damage_dice,
+      WEAPON_TEXT_LIMITS.damage_dice,
+    );
     damage.addEventListener('input', () => {
       draft = { ...draft, damage_dice: trimmedOrNull(damage.value) };
     });
     fields.append(labelled('Damage dice', damage, 'weapon-damage-dice'));
 
-    const damageType = textInput('weapon-damage-type', draft.damage_type);
+    const damageType = textInput(
+      'weapon-damage-type',
+      draft.damage_type,
+      WEAPON_TEXT_LIMITS.damage_type,
+    );
     damageType.setAttribute('list', 'weapon-damage-types');
     damageType.addEventListener('input', () => {
       draft = { ...draft, damage_type: trimmedOrNull(damageType.value) };
@@ -464,6 +488,7 @@ function renderForm(
     const versatile = textInput(
       'weapon-versatile-dice',
       draft.versatile_damage_dice,
+      WEAPON_TEXT_LIMITS.versatile_damage_dice,
     );
     versatile.addEventListener('input', () => {
       draft = {
@@ -496,7 +521,11 @@ function renderForm(
     }
     fields.append(toggles);
 
-    const kind = textInput('weapon-ammunition-kind', draft.ammunition_kind);
+    const kind = textInput(
+      'weapon-ammunition-kind',
+      draft.ammunition_kind,
+      WEAPON_TEXT_LIMITS.ammunition_kind,
+    );
     kind.addEventListener('input', () => {
       draft = { ...draft, ammunition_kind: trimmedOrNull(kind.value) };
     });
@@ -545,7 +574,11 @@ function renderForm(
       labelled('Mastery property', mastery, 'weapon-mastery-property'),
     );
 
-    const other = textInput('weapon-other-properties', draft.other_properties);
+    const other = textInput(
+      'weapon-other-properties',
+      draft.other_properties,
+      WEAPON_TEXT_LIMITS.other_properties,
+    );
     other.addEventListener('input', () => {
       draft = { ...draft, other_properties: trimmedOrNull(other.value) };
     });
@@ -554,6 +587,7 @@ function renderForm(
     );
 
     const notes = document.createElement('textarea');
+    notes.maxLength = WEAPON_TEXT_LIMITS.notes;
     notes.value = draft.notes ?? '';
     notes.dataset.focusKey = 'weapon-notes';
     notes.addEventListener('input', () => {
@@ -644,13 +678,9 @@ export function renderWeapons(options: WeaponsPanelOptions): HTMLElement {
   heading.textContent = 'Weapons';
   section.append(heading);
 
-  // The gap is stated where the data is entered, not buried in a help page.
-  const portability = document.createElement('p');
-  portability.className = 'weapon-portability-notice';
-  portability.dataset.testid = 'weapon-portability-notice';
-  portability.textContent = WEAPON_PORTABILITY_NOTICE;
-  section.append(portability);
-
+  // A portability notice used to stand here, saying weapons were left out of
+  // backups, share links and save points. They are not, so it is gone: a false
+  // warning on screen is worse than the gap it described.
   section.append(renderMasteryBlock(options.panel));
 
   if (options.panel.weapons.length === 0) {

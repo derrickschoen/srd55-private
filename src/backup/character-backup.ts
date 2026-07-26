@@ -1,14 +1,17 @@
 import type { SqlValue } from '@sqlite.org/sqlite-wasm';
 import {
-  CHARACTER_SNAPSHOT_SCHEMA_VERSION,
   CHARACTER_STATE_COLUMNS,
   CHARACTER_STATE_TABLES,
+  snapshotSchemaVersion,
+  snapshotTablesFor,
+  type CharacterSnapshotSchemaVersion,
 } from '../character/character-state';
 import type { DatabaseContext } from '../db/database';
 import type { SqlRow } from '../db/codecs';
 import {
   assertBackupHeader,
   assertExactKeys,
+  assertKeysAllowingAbsent,
   backupRecord,
   BackupValidationError,
   CHARACTER_BACKUP_FORMAT,
@@ -16,6 +19,7 @@ import {
 } from './backup-version';
 import {
   BACKUP_DIRECT_TABLES,
+  BACKUP_OPTIONAL_TABLES,
   BACKUP_TABLES,
   REFERENCE_KINDS,
   SOURCE_REFERENCE_KIND,
@@ -29,6 +33,7 @@ import {
 import {
   slotExclusiveAssignmentError,
   uniqueRowIdError,
+  weaponMasterySelectionError,
 } from '../domain/contracts/row-rules';
 
 type BackupRow = Readonly<Record<string, unknown>>;
@@ -91,14 +96,25 @@ interface ValidatedDocument {
   readonly referenceMaps: Readonly<Record<ReferenceKind, Map<number, string>>>;
 }
 
+/**
+ * The rows of a state-table set, with every table allowed to be ABSENT.
+ *
+ * Absent is not the same as empty here, and the distinction is the whole reason
+ * this type is partial: an `a7-v1` save point does not carry
+ * `character_weapons`, and rewriting it with `character_weapons: []` would turn
+ * "not recorded" into "recorded as none" — a claim that deletes real weapons
+ * when the save point is restored.
+ */
+type SnapshotRowMap = Readonly<
+  Partial<Record<SnapshotStateTable, readonly BackupRow[]>>
+>;
+
 interface CharacterSnapshotData {
-  readonly schema_version: typeof CHARACTER_SNAPSHOT_SCHEMA_VERSION;
+  readonly schema_version: CharacterSnapshotSchemaVersion;
+  /** The tables this snapshot's version carries, in capture order. */
+  readonly tables: readonly SnapshotStateTable[];
   readonly character: BackupRow;
-  readonly character_class_levels: readonly BackupRow[];
-  readonly character_source_instances: readonly BackupRow[];
-  readonly spell_selection_slots: readonly BackupRow[];
-  readonly wizard_spellbook_entries: readonly BackupRow[];
-  readonly warning_acknowledgements: readonly BackupRow[];
+  readonly rows: SnapshotRowMap;
 }
 
 type ResolvedReferences = Readonly<Record<ReferenceKind, Map<number, number>>>;
@@ -156,6 +172,8 @@ function assertRowShape(
 }
 
 /** The backup tables whose shape is NOT already checked by `validateCharacterRows`. */
+const optionalBackupTables = new Set<string>(BACKUP_OPTIONAL_TABLES);
+
 const shapeOnlyTables = backupTableNames.filter(
   (table): table is Exclude<BackupTableName, SnapshotStateTable> =>
     !(CHARACTER_STATE_TABLES as readonly string[]).includes(table),
@@ -227,16 +245,21 @@ function parseSnapshot(value: unknown, label: string): CharacterSnapshotData {
     throw new BackupValidationError(`${label} is not valid JSON.`);
   }
   const snapshot = backupRecord(decoded, label);
-  assertExactKeys(
-    snapshot,
-    ['schema_version', 'character', ...CHARACTER_STATE_TABLES],
-    label,
-  );
-  if (snapshot.schema_version !== CHARACTER_SNAPSHOT_SCHEMA_VERSION) {
+  // The version is read FIRST, because it decides which table set the snapshot
+  // is required to contain. Checking the keys first would refuse every `a7-v1`
+  // save point in a backup file a user already downloaded.
+  const version = snapshotSchemaVersion(snapshot.schema_version);
+  if (version === null) {
     throw new BackupValidationError(
       `${label} uses an unsupported character snapshot schema.`,
     );
   }
+  const tables = snapshotTablesFor(version);
+  assertExactKeys(
+    snapshot,
+    ['schema_version', 'character', ...tables],
+    label,
+  );
   const character = backupRecord(snapshot.character, `${label}.character`);
   for (const column of CHARACTER_STATE_COLUMNS) {
     if (!Object.hasOwn(character, column)) {
@@ -255,28 +278,15 @@ function parseSnapshot(value: unknown, label: string): CharacterSnapshotData {
     CHARACTER_STATE_COLUMNS,
   );
   return {
-    schema_version: CHARACTER_SNAPSHOT_SCHEMA_VERSION,
+    schema_version: version,
+    tables,
     character,
-    character_class_levels: rowList(
-      snapshot.character_class_levels,
-      `${label}.character_class_levels`,
-    ),
-    character_source_instances: rowList(
-      snapshot.character_source_instances,
-      `${label}.character_source_instances`,
-    ),
-    spell_selection_slots: rowList(
-      snapshot.spell_selection_slots,
-      `${label}.spell_selection_slots`,
-    ),
-    wizard_spellbook_entries: rowList(
-      snapshot.wizard_spellbook_entries,
-      `${label}.wizard_spellbook_entries`,
-    ),
-    warning_acknowledgements: rowList(
-      snapshot.warning_acknowledgements,
-      `${label}.warning_acknowledgements`,
-    ),
+    rows: Object.fromEntries(
+      tables.map((table) => [
+        table,
+        rowList(snapshot[table], `${label}.${table}`),
+      ]),
+    ) as SnapshotRowMap,
   };
 }
 
@@ -331,28 +341,46 @@ function requireReference(
   }
 }
 
+/**
+ * The rules every state table's rows must satisfy, for a document's own tables
+ * and for each save point's snapshot alike.
+ *
+ * Takes a SPARSE map so the same function serves both. A snapshot written under
+ * an older schema version simply does not carry some tables, and skipping an
+ * absent one is correct: there are no rows to hold to a contract.
+ */
 function validateCharacterRows(
-  tables: Pick<
-    CharacterBackupTables,
-    | 'character_class_levels'
-    | 'character_source_instances'
-    | 'spell_selection_slots'
-    | 'wizard_spellbook_entries'
-    | 'warning_acknowledgements'
-  >,
+  tables: SnapshotRowMap,
   characterId: number,
   maps: Readonly<Record<ReferenceKind, Map<number, string>>>,
   label: string,
 ): void {
   for (const table of CHARACTER_STATE_TABLES) {
-    for (const [index, row] of tables[table].entries()) {
-      assertRowShape(table, row, `${label}.${table}[${index}]`);
+    const rows = tables[table];
+    if (rows === undefined) {
+      continue;
     }
-    assertOwnedRows(tables[table], characterId, `${label}.${table}`);
-    uniqueRowIds(tables[table], `${label}.${table}`);
+    for (const [index, row] of rows.entries()) {
+      assertRowShape(table, row, `${label}.${table}[${index}]`);
+      if (table === 'character_weapons') {
+        // Shared with the quarantined-image audit — see `row-rules.ts`. The
+        // live table's CHECK cannot see a row that is still JSON.
+        const mastery = weaponMasterySelectionError(
+          row,
+          `${label}.${table}[${index}]`,
+        );
+        if (mastery !== null) {
+          throw new BackupValidationError(mastery);
+        }
+      }
+    }
+    assertOwnedRows(rows, characterId, `${label}.${table}`);
+    uniqueRowIds(rows, `${label}.${table}`);
   }
 
-  for (const [index, row] of tables.character_class_levels.entries()) {
+  for (const [index, row] of (
+    tables.character_class_levels ?? []
+  ).entries()) {
     requireReference(
       maps,
       'class_definitions',
@@ -368,12 +396,13 @@ function validateCharacterRows(
     );
   }
 
+  const sourceInstances = tables.character_source_instances ?? [];
   const sourceIds = uniqueRowIds(
-    tables.character_source_instances,
+    sourceInstances,
     `${label}.character_source_instances`,
   );
   const instanceUuids = new Set<string>();
-  for (const [index, row] of tables.character_source_instances.entries()) {
+  for (const [index, row] of sourceInstances.entries()) {
     if (
       typeof row.instance_uuid !== 'string' ||
       row.instance_uuid.length === 0 ||
@@ -411,7 +440,7 @@ function validateCharacterRows(
     );
   }
 
-  for (const [index, row] of tables.spell_selection_slots.entries()) {
+  for (const [index, row] of (tables.spell_selection_slots ?? []).entries()) {
     const sourceId = positiveInteger(
       row.source_instance_id,
       `${label}.spell_selection_slots[${index}].source_instance_id`,
@@ -445,7 +474,9 @@ function validateCharacterRows(
     }
   }
 
-  for (const [index, row] of tables.wizard_spellbook_entries.entries()) {
+  for (const [index, row] of (
+    tables.wizard_spellbook_entries ?? []
+  ).entries()) {
     requireReference(
       maps,
       'spell_versions',
@@ -570,11 +601,32 @@ function validateDocument(input: unknown): ValidatedDocument {
     document.tables,
     'Character backup tables',
   );
-  assertExactKeys(tableObject, backupTableNames, 'Character backup tables');
+  // A TABLE ADDED AFTER A USER'S FILE WAS WRITTEN IS OPTIONAL, NOT MISSING.
+  //
+  // The document's table set is otherwise closed in both directions, which is
+  // what `assertExactKeys` gave and what keeps a typo'd table name from being
+  // read as "no rows". `BACKUP_OPTIONAL_TABLES` names the exceptions: tables
+  // that did not exist when `CHARACTER_BACKUP_VERSION` 1 shipped, so no file
+  // already on a user's disk can contain them.
+  //
+  // Defaulting an absent one to `[]` is the honest reading and NOT a
+  // convenience: that document genuinely carries no weapons, so the character
+  // it restores has none. This is the only place in this module where "absent"
+  // becomes "empty" — inside a save-point snapshot it deliberately does not,
+  // because there restoring an empty list would DELETE weapons rather than
+  // decline to mention them.
+  assertKeysAllowingAbsent(
+    tableObject,
+    backupTableNames.filter((table) => !optionalBackupTables.has(table)),
+    [...BACKUP_OPTIONAL_TABLES],
+    'Character backup tables',
+  );
   const tables = Object.fromEntries(
     backupTableNames.map((table) => [
       table,
-      rowList(tableObject[table], `Character backup tables.${table}`),
+      tableObject[table] === undefined && optionalBackupTables.has(table)
+        ? []
+        : rowList(tableObject[table], `Character backup tables.${table}`),
     ]),
   ) as unknown as CharacterBackupTables;
 
@@ -655,9 +707,7 @@ function validateDocument(input: unknown): ValidatedDocument {
   }
 
   const snapshots = tables.character_save_points.map((row, index) => {
-    if (
-      row.schema_version !== CHARACTER_SNAPSHOT_SCHEMA_VERSION
-    ) {
+    if (snapshotSchemaVersion(row.schema_version) === null) {
       throw new BackupValidationError(
         `Character backup tables.character_save_points[${index}] uses an unsupported schema_version.`,
       );
@@ -666,13 +716,21 @@ function validateDocument(input: unknown): ValidatedDocument {
       row.snapshot,
       `Character backup tables.character_save_points[${index}].snapshot`,
     );
+    // The column and the JSON inside it are two statements of the same fact,
+    // and they are re-emitted separately on import. A document that disagrees
+    // with itself would decide which one wins by accident.
+    if (row.schema_version !== snapshot.schema_version) {
+      throw new BackupValidationError(
+        `Character backup tables.character_save_points[${index}].schema_version does not match its snapshot.`,
+      );
+    }
     validateCharacterRows(
-      snapshot,
+      snapshot.rows,
       characterId,
       referenceMaps,
       `Character backup tables.character_save_points[${index}].snapshot`,
     );
-    topologicalSources(snapshot.character_source_instances);
+    topologicalSources(snapshot.rows.character_source_instances ?? []);
     return snapshot;
   });
 
@@ -719,20 +777,14 @@ function addPositiveReference(
 }
 
 function collectReferences(
-  tables: Pick<
-    CharacterBackupTables,
-    | 'character_class_levels'
-    | 'character_source_instances'
-    | 'spell_selection_slots'
-    | 'wizard_spellbook_entries'
-  >,
+  tables: SnapshotRowMap,
   ids: Record<ReferenceKind, Set<number>>,
 ): void {
-  for (const row of tables.character_class_levels) {
+  for (const row of tables.character_class_levels ?? []) {
     addPositiveReference(ids.class_definitions, row.class_definition_id);
     addPositiveReference(ids.subclass_definitions, row.subclass_definition_id);
   }
-  for (const row of tables.character_source_instances) {
+  for (const row of tables.character_source_instances ?? []) {
     if (typeof row.source_type === 'string') {
       const kind = sourceReferenceKinds[row.source_type];
       if (kind !== undefined) {
@@ -740,11 +792,11 @@ function collectReferences(
       }
     }
   }
-  for (const row of tables.spell_selection_slots) {
+  for (const row of tables.spell_selection_slots ?? []) {
     addPositiveReference(ids.spell_versions, row.fixed_spell_version_id);
     addPositiveReference(ids.spell_versions, row.current_spell_version_id);
   }
-  for (const row of tables.wizard_spellbook_entries) {
+  for (const row of tables.wizard_spellbook_entries ?? []) {
     addPositiveReference(ids.spell_versions, row.spell_version_id);
   }
 }
@@ -827,7 +879,7 @@ export function exportCharacterBackup(
       savePoint.snapshot,
       `Stored save point ${index + 1}`,
     );
-    collectReferences(snapshot, referenceIds);
+    collectReferences(snapshot.rows, referenceIds);
   }
 
   const references = Object.fromEntries(
@@ -999,6 +1051,7 @@ interface CurrentImportMaps {
   readonly spell_selection_slots: Map<number, number>;
   readonly wizard_spellbook_entries: Map<number, number>;
   readonly warning_acknowledgements: Map<number, number>;
+  readonly character_weapons: Map<number, number>;
   readonly spell_loadouts: Map<number, number>;
   readonly sourceUuids: Map<number, string>;
   readonly sourceRows: Map<number, BackupRow>;
@@ -1016,6 +1069,7 @@ function importCurrentTables(
     spell_selection_slots: new Map(),
     wizard_spellbook_entries: new Map(),
     warning_acknowledgements: new Map(),
+    character_weapons: new Map(),
     spell_loadouts: new Map(),
     sourceUuids: new Map(),
     sourceRows: new Map(
@@ -1140,6 +1194,18 @@ function importCurrentTables(
       }),
     );
   }
+  // No reference to resolve and no foreign key but `character_id`: a weapon
+  // holds no template id by D1b, so the row travels exactly as written. The id
+  // map is still kept, because a save-point snapshot in the same document
+  // refers to these rows by their OLD ids.
+  for (const row of document.tables.character_weapons) {
+    maps.character_weapons.set(
+      Number(row.id),
+      insertPortableRow(db, 'character_weapons', row, {
+        character_id: characterId,
+      }),
+    );
+  }
   for (const row of document.tables.spell_loadouts) {
     maps.spell_loadouts.set(
       Number(row.id),
@@ -1215,6 +1281,7 @@ function portableSnapshots(
     spell_selection_slots: new Map(current.spell_selection_slots),
     wizard_spellbook_entries: new Map(current.wizard_spellbook_entries),
     warning_acknowledgements: new Map(current.warning_acknowledgements),
+    character_weapons: new Map(current.character_weapons),
   };
   const next = Object.fromEntries(
     CHARACTER_STATE_TABLES.map((table) => [
@@ -1230,8 +1297,10 @@ function portableSnapshots(
   const sourceRows = new Map(current.sourceRows);
 
   const transformed = snapshots.map((snapshot) => {
+    const rowsOf = (table: SnapshotTable): readonly BackupRow[] =>
+      snapshot.rows[table] ?? [];
     const orderedSources = topologicalSources(
-      snapshot.character_source_instances,
+      rowsOf('character_source_instances'),
     );
     for (const row of orderedSources) {
       const oldId = Number(row.id);
@@ -1245,13 +1314,13 @@ function portableSnapshots(
       }
       sourceRows.set(oldId, row);
     }
-    for (const table of [
-      'character_class_levels',
-      'spell_selection_slots',
-      'wizard_spellbook_entries',
-      'warning_acknowledgements',
-    ] as const) {
-      for (const row of snapshot[table]) {
+    // Sources are reserved above, in topological order; everything else the
+    // snapshot's own version says it carries is reserved here.
+    for (const table of snapshot.tables) {
+      if (table === 'character_source_instances') {
+        continue;
+      }
+      for (const row of rowsOf(table)) {
         reserveSnapshotId(ids[table], row.id, next[table]);
       }
     }
@@ -1277,7 +1346,7 @@ function portableSnapshots(
         ),
       };
     });
-    const slots = snapshot.spell_selection_slots.map((row) => {
+    const slots = rowsOf('spell_selection_slots').map((row) => {
       const oldSourceId = Number(row.source_instance_id);
       const source = sourceRows.get(oldSourceId);
       const uuid = sourceUuids.get(oldSourceId);
@@ -1309,46 +1378,64 @@ function portableSnapshots(
         ),
       };
     });
-    return JSON.stringify({
-      schema_version: CHARACTER_SNAPSHOT_SCHEMA_VERSION,
+    const rewrite = (table: SnapshotTable): unknown => {
+      switch (table) {
+        case 'character_source_instances':
+          return sources;
+        case 'spell_selection_slots':
+          return slots;
+        case 'character_class_levels':
+          return rowsOf(table).map((row) => ({
+            ...row,
+            id: ids.character_class_levels.get(Number(row.id)),
+            character_id: characterId,
+            class_definition_id: resolvedId(
+              references,
+              'class_definitions',
+              row.class_definition_id,
+            ),
+            subclass_definition_id: resolvedId(
+              references,
+              'subclass_definitions',
+              row.subclass_definition_id,
+            ),
+          }));
+        case 'wizard_spellbook_entries':
+          return rowsOf(table).map((row) => ({
+            ...row,
+            id: ids.wizard_spellbook_entries.get(Number(row.id)),
+            character_id: characterId,
+            spell_version_id: resolvedId(
+              references,
+              'spell_versions',
+              row.spell_version_id,
+            ),
+          }));
+        // Only id and ownership are rewritten: a weapon references nothing in
+        // the catalog, so there is no content key to resolve.
+        case 'warning_acknowledgements':
+        case 'character_weapons':
+          return rowsOf(table).map((row) => ({
+            ...row,
+            id: ids[table].get(Number(row.id)),
+            character_id: characterId,
+          }));
+      }
+    };
+    // THE VERSION AND THE KEY SET ARE THE SNAPSHOT'S OWN, NOT THIS BUILD'S.
+    //
+    // Re-emitting an `a7-v1` save point as `a7-v2` would mean adding a
+    // `character_weapons: []` key, which asserts the character had no weapons at
+    // that moment. Nobody knows that; the snapshot simply predates the question.
+    // So an old save point survives a round trip as an old save point.
+    const rewritten: Record<string, unknown> = {
+      schema_version: snapshot.schema_version,
       character: snapshot.character,
-      character_class_levels: snapshot.character_class_levels.map((row) => ({
-        ...row,
-        id: ids.character_class_levels.get(Number(row.id)),
-        character_id: characterId,
-        class_definition_id: resolvedId(
-          references,
-          'class_definitions',
-          row.class_definition_id,
-        ),
-        subclass_definition_id: resolvedId(
-          references,
-          'subclass_definitions',
-          row.subclass_definition_id,
-        ),
-      })),
-      character_source_instances: sources,
-      spell_selection_slots: slots,
-      wizard_spellbook_entries: snapshot.wizard_spellbook_entries.map(
-        (row) => ({
-          ...row,
-          id: ids.wizard_spellbook_entries.get(Number(row.id)),
-          character_id: characterId,
-          spell_version_id: resolvedId(
-            references,
-            'spell_versions',
-            row.spell_version_id,
-          ),
-        }),
-      ),
-      warning_acknowledgements: snapshot.warning_acknowledgements.map(
-        (row) => ({
-          ...row,
-          id: ids.warning_acknowledgements.get(Number(row.id)),
-          character_id: characterId,
-        }),
-      ),
-    });
+    };
+    for (const table of snapshot.tables) {
+      rewritten[table] = rewrite(table);
+    }
+    return JSON.stringify(rewritten);
   });
 
   for (const table of CHARACTER_STATE_TABLES) {
