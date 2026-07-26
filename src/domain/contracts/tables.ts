@@ -255,41 +255,45 @@ export const TABLE_SCOPES = {
   },
 
   /**
-   * WEAPONS, AND A DELIBERATE, DOCUMENTED GAP — read this before "fixing" it.
+   * WEAPONS TRAVEL. The gap this entry used to record is closed.
    *
-   * `backup` and `share` are FALSE, and that is not the classification this
-   * table deserves. A character's weapons are their own data and belong in a
-   * portable export; the honest value is `true` on both.
+   * A character's weapons are their own data, so they are in the portable
+   * backup document, in a shared character link, and in the undo/redo snapshot
+   * — all four of the character-owned scopes a `character_id`-keyed table can
+   * hold. `backupReference` stays false for the reason `weapon_templates`
+   * records below: by D1b a character's weapon holds NO template id, so a
+   * document has nothing to resolve against the catalog and a reference kind
+   * for it could never be populated.
    *
-   * They are false because turning either on cannot be done from here.
-   * `backup: true` requires hand-written arms in `src/backup/character-backup.ts`
-   * (`importCharacterTables` writes each table with its own `insertPortableRow`
-   * call and its own reference resolution) and a format-version bump in
-   * `src/backup/backup-version.ts`, since `assertExactKeys` makes the table set
-   * part of the accepted document shape. Both files are owned by another track
-   * and were off-limits to the one that added weapons, so the change was
-   * reported rather than smuggled in.
+   * WHAT THE THREE `true`s COST, AND WHERE THE COST WAS PAID. Turning a flag on
+   * here is the compile gate, not the work:
    *
-   * WHAT MAKES THIS SAFE RATHER THAN SILENT. The gap is not left for a user to
-   * discover: the notice in `src/rules/weapon-portability.ts` is rendered in
-   * the weapons panel and emitted in the agent reference, and
-   * `tests/unit/contracts/weapon-scopes.test.ts` pins the exclusion so that the
-   * day someone sets these to `true` they must also delete the notice. Data a
-   * user was TOLD is not exported is a limitation; data silently dropped from
-   * an export is the bug.
+   *  - `backup` added `character_weapons` to the document's table set, which
+   *    `assertExactKeys` made part of the accepted shape. A file exported before
+   *    this change has no such key, so `validateDocument` treats the table as
+   *    OPTIONAL and defaults it to `[]` — an old backup still imports, and
+   *    yields a character with no weapons, which is what that file honestly
+   *    says. See `BACKUP_OPTIONAL_TABLES` below.
+   *  - `share` added a `weapons` section to the share document and a twelfth
+   *    element to the positional wire tuple. The decoder accepts an
+   *    eleven-element tuple as "no weapons", so every link already in the wild
+   *    still imports.
+   *  - `snapshot` moved the snapshot schema from `a7-v1` to `a7-v2`. Both
+   *    versions are still accepted: an `a7-v1` snapshot does not carry the
+   *    weapons key, and restoring one deliberately LEAVES the character's
+   *    weapons alone rather than deleting them, because a snapshot that never
+   *    recorded weapons is not evidence that there were none.
    *
-   * `snapshot` follows from `backup` and is not an independent judgement:
-   * `_SnapshotSubsetOfBackup` below makes `snapshot: true` un-typeable while
-   * `backup` is false. Undo/redo still covers every weapon change, through
-   * EXPLICIT INVERSE COMMANDS rather than snapshot restore — see
-   * `src/commands/weapons.ts`.
+   * Undo/redo covered weapon changes before this through the explicit inverse
+   * commands in `src/commands/weapons.ts`, and still does; the snapshot scope
+   * adds save-point restore on top of that, not in place of it.
    */
   character_weapons: {
     role: 'character_owned',
-    snapshot: false,
-    backupDirect: false,
-    backup: false,
-    share: false,
+    snapshot: true,
+    backupDirect: true,
+    backup: true,
+    share: true,
     backupReference: false,
   },
 
@@ -631,6 +635,10 @@ export const CHARACTER_STATE_TABLES = order<SnapshotTable>()([
   'spell_selection_slots',
   'wizard_spellbook_entries',
   'warning_acknowledgements',
+  // Appended, not inserted: capture order is stable output, and an existing
+  // snapshot's key order is part of what `equalValues` compares in
+  // `CharacterState.diff`.
+  'character_weapons',
 ]);
 
 /**
@@ -642,6 +650,9 @@ export const CHARACTER_STATE_TABLES = order<SnapshotTable>()([
  * an integration test that deletes a fully-populated character.
  */
 export const DELETE_ORDER = order<SnapshotTable>()([
+  // No table references `character_weapons`, so it has no children and can go
+  // first alongside the other leaves.
+  'character_weapons',
   'warning_acknowledgements',
   'wizard_spellbook_entries',
   'spell_selection_slots',
@@ -660,6 +671,7 @@ export const BACKUP_DIRECT_TABLES = order<BackupDirectTable>()([
   'warning_acknowledgements',
   'character_save_points',
   'spell_loadouts',
+  'character_weapons',
 ]);
 
 /** Every table in the portable-character backup document. */
@@ -667,6 +679,27 @@ export const BACKUP_TABLES = order<BackupTable>()([
   ...BACKUP_DIRECT_TABLES,
   'spell_loadout_entries',
 ]);
+
+/**
+ * The backup tables a document exported by an OLDER BUILD cannot contain.
+ *
+ * `assertExactKeys` makes the table set part of the accepted document shape, so
+ * every table added after `CHARACTER_BACKUP_VERSION` 1 shipped would otherwise
+ * make every file a user already holds unreadable. Naming them here lets
+ * `validateDocument` require the rest and default these to `[]`.
+ *
+ * This is NOT a licence to treat the table as optional data. An export written
+ * by THIS build always contains the key; the default only ever applies to a
+ * file written before the table existed, where `[]` is the honest reading —
+ * that document carries no weapons, so the character it restores has none.
+ *
+ * The list is hand-maintained and append-only by nature: which tables predate a
+ * given format version is a historical fact, and nothing in the schema records
+ * it. `satisfies` at least keeps a renamed or unbacked-up table from lingering.
+ */
+export const BACKUP_OPTIONAL_TABLES = [
+  'character_weapons',
+] as const satisfies readonly BackupTable[];
 
 /** The catalog tables a backup document resolves references against. */
 export const REFERENCE_KINDS = order<ReferenceKind>()([
@@ -713,6 +746,7 @@ export const SHARE_TABLES: { readonly [N in ShareTable]: N } = {
   character_rule_overrides: 'character_rule_overrides',
   spell_loadouts: 'spell_loadouts',
   spell_loadout_entries: 'spell_loadout_entries',
+  character_weapons: 'character_weapons',
 };
 
 /**
@@ -757,6 +791,12 @@ export const AUDIT_ENTITY_TYPES = [
   'spell_selection_slots',
   'wizard_spellbook_entries',
   'warning_acknowledgements',
+  // Added because `CharacterState.diff` now emits a change per weapon row, and
+  // an entity type the diff can produce that the log will not accept is a write
+  // that fails at runtime. The tuple stays INDEPENDENT of `SnapshotTable` — this
+  // is a decision about the log's vocabulary that happens to follow the same
+  // change, not a derivation.
+  'character_weapons',
 ] as const satisfies readonly ('character' | AnyTableName)[];
 
 export type AuditEntityType = (typeof AUDIT_ENTITY_TYPES)[number];

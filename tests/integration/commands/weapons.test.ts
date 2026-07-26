@@ -7,6 +7,7 @@ import type {
   CharacterCommandPayload,
   WeaponFields,
 } from '../../../src/domain/command-contracts';
+import { WEAPON_RANGE_MAX_FEET } from '../../../src/domain/weapon-limits';
 import { WeaponQueries } from '../../../src/queries/weapons';
 import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
 import { seedWeaponContent } from '../../../src/rules/weapons-srd';
@@ -388,6 +389,24 @@ describe('weapon commands', () => {
         weapon: custom({ range_normal_feet: -5 }),
       }),
     ).rejects.toThrow(/range_normal_feet must be a non-negative integer/);
+
+    // The UPPER bound, which the column does not have. It exists so that the
+    // share boundary — which must refuse an absurd distance from an untrusted
+    // document — can refuse it at the same number rather than a lower one, and
+    // so leave no range this app will store but not share. See
+    // `WEAPON_RANGE_MAX_FEET`.
+    await expect(
+      run({
+        type: 'add_weapon',
+        weapon: custom({ range_long_feet: WEAPON_RANGE_MAX_FEET + 1 }),
+      }),
+    ).rejects.toThrow(/range_long_feet must be a non-negative integer/);
+    await expect(
+      run({
+        type: 'add_weapon',
+        weapon: custom({ range_long_feet: WEAPON_RANGE_MAX_FEET }),
+      }),
+    ).resolves.toBeDefined();
 
     await expect(
       run({

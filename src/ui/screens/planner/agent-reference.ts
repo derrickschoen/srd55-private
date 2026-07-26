@@ -69,7 +69,6 @@ import type {
   CharacterMasteryAllowance,
   MasteryAllowance,
 } from '../../../rules/weapon-mastery-lookup';
-import { WEAPON_PORTABILITY_NOTICE } from '../../../rules/weapon-portability';
 import type { CompletenessResult } from '../../../queries/character-completeness';
 import { AbilityScore } from '../../../rules/ability-score';
 import { SRD_ATTRIBUTION_NOTICE } from '../../../rules/srd-attribution';
@@ -353,7 +352,6 @@ export interface ReferenceWeaponMastery {
     readonly allowance_state: MasteryAllowance['state'];
     readonly count: number | null;
   }[];
-  readonly portability_notice: string;
 }
 
 export interface AgentReference {
@@ -795,7 +793,6 @@ export function buildAgentReference(
       count:
         entry.allowance.state === 'known' ? entry.allowance.count : null,
     })),
-    portability_notice: WEAPON_PORTABILITY_NOTICE,
   };
 
   const sourceNames = registry.withheldNames();
@@ -1352,7 +1349,6 @@ export function agentReferenceSections(
     heading: `Weapons — ${String(reference.weapons.length)}`,
     notes: [
       weaponMasterySentence(reference.weapon_mastery),
-      reference.weapon_mastery.portability_notice,
       'No attack bonus, damage roll, weapon proficiency or inventory is ' +
         'derived from these rows. They are a record of what the character ' +
         'carries and which masteries were chosen, nothing more.',

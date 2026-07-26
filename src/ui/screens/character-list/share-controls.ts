@@ -116,9 +116,14 @@ function previewText(preview: SharePreview): string {
               } ${item.level}`,
           )
           .join(', ');
+  // Weapons are named only when there are some. Nought weapons is the common
+  // case and a permanent "0 weapons" would be noise; a non-zero count is a
+  // section the recipient is about to receive and should be told about.
   return `${classes}. ${preview.selectionCount} selections, ${
     preview.spellbookCount
-  } spellbook spells, ${preview.sourceCount} other sources.${
+  } spellbook spells, ${preview.sourceCount} other sources${
+    preview.weaponCount === 0 ? '' : `, ${preview.weaponCount} weapons`
+  }.${
     preview.placeholderCount === 0
       ? ''
       : ` ${preview.placeholderCount} unavailable spells will be added as safe placeholders.`
