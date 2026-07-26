@@ -8,6 +8,19 @@ to the browser's SQLite database. It is not uploaded to a server.
 Each selected Tier 1 document must contain a JSON array. A browser may pass one
 or several documents; records with the same `versionKey` are merged.
 
+An element's optional `kind` field says what kind of record it is. It may be
+`spell` or `subclass`. **An element with no `kind` — or with `kind: null` — is a
+spell**, which is the meaning every document written before subclasses existed
+already has, so those documents keep importing unchanged. A `kind` that is
+present but unrecognized is refused outright rather than skipped: the record is
+content this build cannot store, and skipping it would report the document as
+fully imported while dropping a record the user can see in the file.
+
+Kinds may be mixed freely, both across documents in one call and within a single
+document.
+
+### Spell records
+
 ```json
 [
   {
@@ -53,6 +66,75 @@ string or `null`. `sourcePage` may be a non-negative integer or `null`.
 `attack_roll`, `saving_throw`, `fixed_effect`, `modifier_scaled`,
 `ritual_utility`, or `mixed`.
 
+### Subclass records
+
+```json
+[
+  {
+    "kind": "subclass",
+    "contentKey": "2024:longroad.homebrew:college-of-the-long-road",
+    "parentClassKey": "2024:class:bard",
+    "name": "College of the Long Road",
+    "edition": "2024",
+    "features": [
+      {
+        "classLevel": 3,
+        "name": "Marching Song",
+        "description": "Printed text of the feature."
+      },
+      {
+        "classLevel": 6,
+        "name": "Extra Attack",
+        "description": "Printed text of the feature.",
+        "effect": {
+          "kind": "extra_attack",
+          "attackCount": 2,
+          "weaponScope": "any_weapon"
+        }
+      }
+    ]
+  }
+]
+```
+
+`contentKey` **must be an imported key** of the form
+`<edition>:<owner.namespace>:<name>` — three colon-separated parts whose middle
+segment contains a dot. Every bundled key puts a dotless record-kind literal
+there (`2024:subclass:ek`), so this shape is what stops a document
+overwriting bundled content, and it is what keeps the subclass identifiable as
+imported inside a backup or a share link.
+
+`parentClassKey` names the parent class **by content key, never by display
+name**, so a user-authored class that happens to share a name cannot adopt the
+subclass. A parent class this database does not have is refused rather than
+invented.
+
+`features` must be a non-empty list, and **its array order is the printed
+order** — `sort_order` is the index and is deliberately not authorable, because
+an authored order beside an array is a second source of truth for the same fact.
+Each feature requires `classLevel` (an integer from 1 through 20, in the
+subclass's own class), a non-empty `name`, and a non-empty `description`.
+Feature names must be unique within a subclass.
+
+`effect` is optional and defaults to `null`. **`null` is the common case**: a
+feature with no effect is a printed paragraph. The only effect kind currently
+accepted is `extra_attack`, which requires `attackCount` (an integer of 2 or
+more — the **total** attacks the Attack action grants, never an increment) and
+`weaponScope` (`any_weapon` or `one_bonded_weapon`). `weaponScope` has no
+default on purpose: defaulting it would widen a one-weapon grant to every weapon
+the character holds.
+
+An imported subclass is a **non-caster with printed features**. The format has
+no vocabulary for spellcasting (`spellcasting_ability`, caster fraction and
+rounding, grant rules, progressions), for a source book, or for a flavour
+paragraph, and those columns stay `NULL`. Fields naming them are dropped like
+any other unknown field rather than half-stored.
+
+Two documents in one call may not disagree about the same subclass. Spell
+records merge on `versionKey`; a subclass carries an ordered feature list and
+there is no defensible merge of two orderings, so a conflict is refused.
+Identical repeats of the same subclass are accepted.
+
 ## Merge and persistence rules
 
 `identityKey` identifies a spell concept across editions. `versionKey`
@@ -71,6 +153,28 @@ by the PHP catalog.
 Imported versions absent from a later complete import are tombstoned
 (`is_active = 0`), not deleted. Reappearing versions are reactivated with the
 same database ID. User-provenance versions are never tombstoned.
+
+**That sweep runs only when the documents declared spells.** An import never
+removes a kind the documents did not carry, so importing subclasses alone does
+not tombstone a single spell. An empty document (`[]`) declares spells while
+carrying none, which is how you empty the spell catalog — and it declares that
+per document, so `['[]', <a subclass file>]` still sweeps the spell catalog and
+imports the subclass in the same call.
+
+**An import never removes a subclass, in any circumstance.** There is no
+tombstone or delete path for one, and therefore no `subclasses_tombstoned`
+counter. `subclass_definitions` has neither a `provenance` column to scope a
+sweep by (bundled SRD subclasses live in the same table) nor an `is_active`
+column to make removal reversible, so removal would have to be a hard `DELETE`
+against a table `character_class_levels` holds a foreign key into. Removing an
+imported subclass is a manual operation.
+
+Within a single subclass, the document's `features` array **is** a full
+replacement: a feature that vanishes from a revised document is deleted, because
+nothing references a feature row. Re-importing an unchanged subclass is a no-op.
+An import cannot move a subclass to a different parent class, and cannot claim a
+`(class, name, edition)` name slot another key already holds; both are refused
+by name rather than left to raise an opaque constraint error mid-transaction.
 
 If a version is referenced by a selection, Wizard spellbook entry, loadout, or
 preference, its imported rules and pivots are preserved byte-for-byte.
@@ -118,9 +222,20 @@ const result = await catalog.importCatalog(tier1Documents, {
 });
 ```
 
-The summary reports created, updated, and tombstoned versions; identity
-changes; created publication/pivot rows; and Tier 2 availability/count.
-A dry run computes the same diff and then rolls back. Every normal import is a
-single transaction: a malformed record, uniqueness conflict, or selection
-refresh error rolls back identities, versions, pivots, aliases, activity, and
-selection status together.
+The summary reports created, updated, and tombstoned spell versions; identity
+changes; created publication/pivot rows; `subclasses_created`,
+`subclasses_updated`, and `subclass_features_created`; and Tier 2
+availability/count.
+
+The subclass counters are **separate from `created`/`updated` rather than folded
+into them**, because those are the spell numbers the character-list screen
+prints: a user who imported five spells and one subclass reading "6 created"
+would be reading a spell count that is wrong. There is no
+`subclasses_tombstoned`, and the absence is the statement — see above.
+
+A dry run computes the same diff, across both kinds, and then rolls back. Every
+normal import is a single transaction spanning both arms: a malformed record,
+uniqueness conflict, refused subclass, or selection refresh error rolls back
+identities, versions, pivots, aliases, activity, selection status, and every
+imported subclass together. A document is one edit, and half of one applied is
+worse than none of it.
