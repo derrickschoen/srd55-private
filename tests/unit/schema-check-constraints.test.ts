@@ -1,0 +1,712 @@
+import sqlite3InitModule, {
+  type Database,
+  type Sqlite3Static,
+} from '@sqlite.org/sqlite-wasm';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { schemaSources } from '../helpers/schema-sources';
+
+/**
+ * BEHAVIOURAL PROOF OF EVERY CHECK CONSTRAINT.
+ *
+ * This is a deliberate extension of the pattern at the foot of
+ * `tests/unit/invariants.test.ts`, which proves the exclusive-assignment CHECK
+ * by attempting the illegal write and asserting SQLite's exact refusal. Every
+ * case here does the same, against a real schema applied to a real database.
+ *
+ * WHAT THIS SUITE IS NOT, AND WHY THAT MATTERS.
+ *
+ *  - It does NOT compare the CHECK EXPRESSIONS to hand-copied expected text.
+ *    That would be an echo of the artifact under test: it would fail on a typo
+ *    and pass on a semantically wrong but well-formed constraint. Only
+ *    behaviour is asserted.
+ *  - It does NOT touch `laravelColumnMetadataHash` in `tests/unit/schema.test.ts`,
+ *    and nothing here could require it to move. That constant hashes, per
+ *    column, `PRAGMA table_info`'s (name, type, notnull, dflt_value, pk) — and a
+ *    CHECK constraint appears in NONE of those five fields, so `table_info` is
+ *    byte-identical with and without one. Anyone "updating the hash for the new
+ *    CHECKs" would be changing a Laravel-derived constant for a reason that does
+ *    not exist and destroying the oracle for nothing.
+ *
+ * THE ACCEPT SIDE IS NOT DECORATION. A constraint that rejects too much is
+ * every bit as much a defect as one that rejects nothing, and it is the harder
+ * one to notice — it surfaces as an import that fails on a user's machine. Each
+ * case therefore states the legitimate values it must let through: the interior
+ * of the range, BOTH boundaries, the defended nulls, the column default, and —
+ * for `spell_versions_level_check` — the placeholder row whose `level = -1` is
+ * exactly what the obvious form of that constraint would have broken.
+ *
+ * ON EXISTING DATABASES: see the block comment in `db/schema/columns.ts`. These
+ * constraints bind rows written into a schema created from this artifact; they
+ * do not reach back into an image that already exists.
+ *
+ * ONE THING HERE IS DELIBERATELY NOT ASSERTED, AND SAYING SO IS THE HONEST
+ * ALTERNATIVE TO FAKING IT. `spell_versions_level_check` reads
+ * `provenance IS 'placeholder'` rather than `=` so that a NULL `provenance`
+ * cannot make the whole constraint evaluate to NULL — which SQLite PASSES. No
+ * case below covers that, because `provenance` is `NOT NULL` and SQL therefore
+ * offers no way to reach the row: any test of it would have to construct a
+ * different schema and would be measuring SQLite's operators, not ours. It is
+ * defence against a future nullability change, and it is written down here
+ * instead of being asserted by a test that could not fail.
+ */
+
+type SqlValue = number | string | null;
+type Values = Readonly<Record<string, SqlValue>>;
+type Write = (db: Database) => void;
+
+let sqlite3: Sqlite3Static;
+const openDatabases: Database[] = [];
+let sequence = 0;
+
+/** Unique enough for every UNIQUE index these fixtures pass through. */
+function uid(prefix: string): string {
+  sequence += 1;
+  return `${prefix}-${sequence}`;
+}
+
+function checkError(constraint: string): string {
+  return (
+    'SQLITE_CONSTRAINT_CHECK: sqlite3 result code 275: ' +
+    `CHECK constraint failed: ${constraint}`
+  );
+}
+
+function caughtErrorMessage(action: () => void): string {
+  try {
+    action();
+  } catch (error) {
+    if (error instanceof Error) {
+      return error.message;
+    }
+    throw error;
+  }
+  throw new Error('Expected SQLite operation to throw');
+}
+
+function insert(db: Database, table: string, values: Values): number {
+  const columns = Object.keys(values);
+  db.exec({
+    sql: `INSERT INTO "${table}" (${columns
+      .map((column) => `"${column}"`)
+      .join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`,
+    bind: Object.values(values),
+  });
+  return Number(db.selectValue('SELECT last_insert_rowid()'));
+}
+
+/**
+ * SQLite applies a CHECK to UPDATE exactly as it does to INSERT, so the writers
+ * below that go through this function are not testing a second SQLite feature —
+ * they are testing the path where the app's own risk actually lives. Three of
+ * these constraints are realistically violated only by an edit to an existing
+ * row: `spell_selection_slots.state` transitions, the `characters.revision`
+ * counter, and the catalog importer's `UPDATE spell_versions`. And a
+ * multi-column constraint under a SINGLE-column update is the one shape whose
+ * behaviour is not obvious from the INSERT cases at all — SQLite re-evaluates
+ * the whole expression against the merged row, so a legal `spell_level_max`
+ * write can be refused because of a `spell_level_min` nobody touched. That is
+ * asserted rather than assumed.
+ */
+function update(db: Database, table: string, id: number, values: Values): void {
+  const columns = Object.keys(values);
+  db.exec({
+    sql: `UPDATE "${table}" SET ${columns
+      .map((column) => `"${column}" = ?`)
+      .join(', ')} WHERE "id" = ?`,
+    bind: [...Object.values(values), id],
+  });
+}
+
+// --- parent minters --------------------------------------------------------
+// Every case mints its own parents so that no UNIQUE index makes one case's
+// success depend on another case's ordering.
+
+function newCharacter(db: Database, values: Values = {}): number {
+  return insert(db, 'characters', { name: uid('character'), ...values });
+}
+
+function newClass(db: Database, values: Values = {}): number {
+  return insert(db, 'class_definitions', {
+    content_key: uid('class'),
+    name: uid('Class'),
+    rules_edition: '2024',
+    ...values,
+  });
+}
+
+function newSubclass(db: Database, classDefinitionId: number): number {
+  return insert(db, 'subclass_definitions', {
+    content_key: uid('subclass'),
+    class_definition_id: classDefinitionId,
+    name: uid('Subclass'),
+    rules_edition: '2024',
+  });
+}
+
+function newSpellIdentity(db: Database): number {
+  const key = uid('identity');
+  return insert(db, 'spell_identities', {
+    content_key: key,
+    canonical_name: key,
+    normalized_name: key,
+  });
+}
+
+function newSource(db: Database, characterId: number): number {
+  return insert(db, 'character_source_instances', {
+    character_id: characterId,
+    instance_uuid: uid('source'),
+    source_type: 'feat',
+    display_name: uid('Feat'),
+  });
+}
+
+// --- row writers -----------------------------------------------------------
+// Each takes only the columns the case is about; everything else is a valid
+// default, so a failure can only be caused by the value under test.
+
+const character =
+  (values: Values): Write =>
+  (db) => {
+    newCharacter(db, values);
+  };
+
+const classLevel =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'character_class_levels', {
+      character_id: newCharacter(db),
+      class_definition_id: newClass(db),
+      level: 3,
+      ...values,
+    });
+  };
+
+function newSlot(db: Database, values: Values = {}): number {
+  const characterId = newCharacter(db);
+  return insert(db, 'spell_selection_slots', {
+    character_id: characterId,
+    source_instance_id: newSource(db, characterId),
+    slot_key: uid('slot'),
+    rule_key: 'fixture-rule',
+    bucket: 'known',
+    eligibility_kind: 'choice_from_list',
+    ...values,
+  });
+}
+
+const slot =
+  (values: Values): Write =>
+  (db) => {
+    newSlot(db, values);
+  };
+
+const classDefinition =
+  (values: Values): Write =>
+  (db) => {
+    newClass(db, values);
+  };
+
+const classProgression =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'class_progressions', {
+      class_definition_id: newClass(db),
+      class_level: 5,
+      ...values,
+    });
+  };
+
+const subclassProgression =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'subclass_progressions', {
+      subclass_definition_id: newSubclass(db, newClass(db)),
+      class_level: 5,
+      ...values,
+    });
+  };
+
+function newSpellVersion(db: Database, values: Values = {}): number {
+  return insert(db, 'spell_versions', {
+    content_key: uid('2024:spell'),
+    spell_identity_id: newSpellIdentity(db),
+    display_name: uid('Spell'),
+    rules_edition: '2024',
+    level: 3,
+    school: 'Evocation',
+    ...values,
+  });
+}
+
+const spellVersion =
+  (values: Values): Write =>
+  (db) => {
+    newSpellVersion(db, values);
+  };
+
+const weapon =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'character_weapons', {
+      character_id: newCharacter(db),
+      name: uid('Weapon'),
+      ...values,
+    });
+  };
+
+const weaponTemplate =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'weapon_templates', {
+      content_key: uid('weapon'),
+      name: uid('Weapon'),
+      srd_group: 'simple_melee',
+      damage_dice: '1d6',
+      damage_type: 'Slashing',
+      mastery_property: 'Sap',
+      ...values,
+    });
+  };
+
+const masteryGrant =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'class_weapon_mastery_grants', {
+      class_definition_id: newClass(db),
+      grant: 'not_granted',
+      ...values,
+    });
+  };
+
+const masteryCount =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'class_weapon_mastery_counts', {
+      class_definition_id: newClass(db),
+      class_level: 5,
+      mastery_count: 2,
+      ...values,
+    });
+  };
+
+// --- edit writers ----------------------------------------------------------
+// Each inserts a row that is legal on every constraint, then changes it. The
+// insert MUST succeed for the case to mean anything: if a fixture's starting
+// row were itself refused, the reject cases would pass for the wrong reason and
+// the accept cases would fail loudly — which is why every starting row here is
+// one an accept case elsewhere already proves legal.
+
+const characterEdit =
+  (initial: Values, patch: Values): Write =>
+  (db) => {
+    update(db, 'characters', newCharacter(db, initial), patch);
+  };
+
+const slotEdit =
+  (initial: Values, patch: Values): Write =>
+  (db) => {
+    update(db, 'spell_selection_slots', newSlot(db, initial), patch);
+  };
+
+const spellVersionEdit =
+  (initial: Values, patch: Values): Write =>
+  (db) => {
+    update(db, 'spell_versions', newSpellVersion(db, initial), patch);
+  };
+
+interface ConstraintCase {
+  readonly constraint: string;
+  /** Writes that MUST be refused, each with the corruption it would have made. */
+  readonly rejects: ReadonlyArray<readonly [string, Write]>;
+  /** Legitimate writes that MUST get through — the over-strictness guard. */
+  readonly accepts: ReadonlyArray<readonly [string, Write]>;
+}
+
+const CONSTRAINT_CASES: readonly ConstraintCase[] = [
+  {
+    constraint: 'characters_ability_scores_check',
+    // One reject per column, so dropping a column from the six-way expression
+    // is a failing test rather than a silent hole.
+    rejects: [
+      ['strength below 1', character({ strength: 0 })],
+      ['dexterity below 1', character({ dexterity: 0 })],
+      ['constitution below 1', character({ constitution: 0 })],
+      ['intelligence below 1', character({ intelligence: 0 })],
+      ['wisdom below 1', character({ wisdom: 0 })],
+      ['charisma below 1', character({ charisma: 0 })],
+      ['a score above 30', character({ strength: 31 })],
+      ['a negative score', character({ wisdom: -4 })],
+    ],
+    accepts: [
+      ['the column defaults of 10', character({})],
+      ['the lower bound of 1', character({ strength: 1, charisma: 1 })],
+      ['the upper bound of 30', character({ strength: 30, charisma: 30 })],
+    ],
+  },
+  {
+    constraint: 'characters_rules_edition_preference_check',
+    rejects: [
+      ['an edition no catalog row uses', character({ rules_edition_preference: '2025' })],
+      ['an empty edition', character({ rules_edition_preference: '' })],
+    ],
+    accepts: [
+      ['the 2024 default', character({})],
+      ['2014', character({ rules_edition_preference: '2014' })],
+      ['expanded', character({ rules_edition_preference: 'expanded' })],
+    ],
+  },
+  {
+    constraint: 'characters_proficiency_bonus_override_check',
+    rejects: [
+      ['a zero override, which is a lost bonus rather than an override', character({ proficiency_bonus_override: 0 })],
+      ['a negative override', character({ proficiency_bonus_override: -2 })],
+      // Written as a bare `>= 1` this passed: SQLite orders TEXT above every
+      // number, so `'three' >= 1` is TRUE. The `typeof` limb is what refuses it.
+      ['a text override, which a bare lower bound would have admitted', character({ proficiency_bonus_override: 'three' })],
+      ['a fractional override', character({ proficiency_bonus_override: 2.5 })],
+    ],
+    accepts: [
+      // The defended null: "derive from total level" is the ordinary case.
+      ['the null that means derive from total level', character({ proficiency_bonus_override: null })],
+      ['the lowest real override', character({ proficiency_bonus_override: 1 })],
+      // INTEGER affinity converts this losslessly, so `typeof` sees an integer
+      // and the limb does not reject a value the column would have stored fine.
+      ['a numeric string the column stores as an integer', character({ proficiency_bonus_override: '4' })],
+    ],
+  },
+  {
+    constraint: 'characters_revision_check',
+    rejects: [
+      ['a negative revision counter', character({ revision: -1 })],
+      // The counter every optimistic-concurrency comparison reads. A TEXT value
+      // here does not merely mis-count, it defeats the comparison — and a bare
+      // `revision >= 0` accepted it.
+      ['a text revision, which a bare lower bound would have admitted', character({ revision: 'zero' })],
+      // The path that actually matters: revision is written by UPDATE, not by
+      // INSERT, on every command a character ever runs.
+      ['a decrement below zero on UPDATE', characterEdit({}, { revision: -1 })],
+    ],
+    accepts: [
+      ['the zero a fresh character starts at', character({ revision: 0 })],
+      ['the increment every command performs', characterEdit({ revision: 3 }, { revision: 4 })],
+    ],
+  },
+  {
+    constraint: 'character_class_levels_spellcasting_ability_override_check',
+    rejects: [
+      ['an ability that does not exist', classLevel({ spellcasting_ability_override: 'luck' })],
+      ['a capitalised ability, which no column is keyed by', classLevel({ spellcasting_ability_override: 'Intelligence' })],
+    ],
+    accepts: [
+      ['the null that means no override', classLevel({ spellcasting_ability_override: null })],
+      ['a real ability', classLevel({ spellcasting_ability_override: 'intelligence' })],
+    ],
+  },
+  {
+    constraint: 'spell_selection_slots_bucket_check',
+    rejects: [
+      ['a misspelled bucket no count would ever see', slot({ bucket: 'preprared' })],
+      ['an empty bucket', slot({ bucket: '' })],
+    ],
+    accepts: [
+      ['cantrip_known', slot({ bucket: 'cantrip_known' })],
+      ['automatic', slot({ bucket: 'automatic' })],
+      ['spellbook', slot({ bucket: 'spellbook' })],
+    ],
+  },
+  {
+    constraint: 'spell_selection_slots_state_check',
+    rejects: [
+      ['a state isUsableSlotState would silently call unusable', slot({ state: 'archived' })],
+      // A slot is minted `active` and moved by UPDATE thereafter, so a bad
+      // state realistically arrives as a transition, never as an insert.
+      //
+      // `tombstoned` is deliberately the value used: it is a REAL state, but of
+      // `character_source_instances.state`, written by `update-class.ts` and
+      // `grant-rule-slot-generator.ts`. The two `state` columns are different
+      // vocabularies that merely share a name, and this asserts that the slot
+      // one does not quietly accept its neighbour's members. It is also why
+      // `character_source_instances.state` is left unconstrained — see the note
+      // in `db/schema/character.ts`.
+      ['a transition to a state belonging to another table', slotEdit({}, { state: 'tombstoned' })],
+    ],
+    accepts: [
+      ['the active default', slot({})],
+      ['kept_override', slot({ state: 'kept_override' })],
+      ['orphaned', slot({ state: 'orphaned' })],
+      ['discarded', slot({ state: 'discarded' })],
+      ['the orphaning transition a removed class performs', slotEdit({}, { state: 'orphaned' })],
+    ],
+  },
+  {
+    constraint: 'spell_selection_slots_selection_eligibility_check',
+    rejects: [['an unclassifiable eligibility', slot({ selection_eligibility: 'maybe' })]],
+    accepts: [
+      ['the unselected default', slot({})],
+      ['valid', slot({ selection_eligibility: 'valid' })],
+      ['invalid', slot({ selection_eligibility: 'invalid' })],
+    ],
+  },
+  {
+    constraint: 'spell_selection_slots_level_window_check',
+    rejects: [
+      ['a minimum below cantrip level', slot({ spell_level_min: -1 })],
+      ['a maximum above 9', slot({ spell_level_max: 10 })],
+      ['an inverted window, which matches no spell at all', slot({ spell_level_min: 5, spell_level_max: 4 })],
+      // THE SHAPE NO INSERT CASE COVERS. Every value in this UPDATE is legal on
+      // its own — 4 is a fine `spell_level_max` — and the statement names only
+      // that one column. It must still be refused, because SQLite re-evaluates
+      // the constraint against the MERGED row and the untouched
+      // `spell_level_min` of 5 now exceeds it. A writer that narrows a window
+      // one column at a time can invert it without ever writing a bad value.
+      ['a legal maximum that inverts the window against an untouched minimum', slotEdit({ spell_level_min: 5, spell_level_max: 9 }, { spell_level_max: 4 })],
+    ],
+    accepts: [
+      ['the 0..9 column defaults', slot({})],
+      ['a cantrip-only window of 0..0', slot({ spell_level_min: 0, spell_level_max: 0 })],
+      ['a ninth-level-only window of 9..9', slot({ spell_level_min: 9, spell_level_max: 9 })],
+      ['a single-level window in the interior', slot({ spell_level_min: 3, spell_level_max: 3 })],
+      // The same one-column narrowing, in the direction that stays well-formed.
+      ['a one-column narrowing that leaves the window well-formed', slotEdit({ spell_level_min: 0, spell_level_max: 9 }, { spell_level_min: 9 })],
+    ],
+  },
+  {
+    constraint: 'class_definitions_progression_type_check',
+    rejects: [
+      ['a progression every caster-fraction branch would fall through', classDefinition({ progression_type: 'half' })],
+      ['an empty progression type', classDefinition({ progression_type: '' })],
+    ],
+    accepts: [
+      ['the none default', classDefinition({})],
+      ['pact', classDefinition({ progression_type: 'pact' })],
+      ['third_down', classDefinition({ progression_type: 'third_down' })],
+    ],
+  },
+  {
+    constraint: 'class_definitions_spellcasting_ability_check',
+    rejects: [['an ability with no column behind it', classDefinition({ spellcasting_ability: 'sorcery' })]],
+    accepts: [
+      ['the null a non-casting class genuinely has', classDefinition({ spellcasting_ability: null })],
+      ['a real ability', classDefinition({ spellcasting_ability: 'charisma' })],
+    ],
+  },
+  {
+    constraint: 'class_progressions_class_level_check',
+    rejects: [
+      ['level 0, which every `class_level <= ?` lookup would always match', classProgression({ class_level: 0 })],
+      ['level 21, which none would ever match', classProgression({ class_level: 21 })],
+    ],
+    accepts: [
+      ['level 1', classProgression({ class_level: 1 })],
+      ['level 20', classProgression({ class_level: 20 })],
+    ],
+  },
+  {
+    constraint: 'subclass_progressions_class_level_check',
+    rejects: [
+      ['level 0', subclassProgression({ class_level: 0 })],
+      ['level 21', subclassProgression({ class_level: 21 })],
+    ],
+    accepts: [
+      ['level 1', subclassProgression({ class_level: 1 })],
+      ['level 20', subclassProgression({ class_level: 20 })],
+    ],
+  },
+  {
+    constraint: 'subclass_progressions_max_spell_level_check',
+    rejects: [
+      ['a negative maximum spell level', subclassProgression({ max_spell_level: -1 })],
+      ['a maximum above 9', subclassProgression({ max_spell_level: 10 })],
+    ],
+    accepts: [
+      ['the zero default a pre-spellcasting level carries', subclassProgression({})],
+      ['the ninth-level maximum', subclassProgression({ max_spell_level: 9 })],
+    ],
+  },
+  {
+    constraint: 'spell_versions_level_check',
+    rejects: [
+      ['a catalog spell below cantrip level', spellVersion({ level: -1 })],
+      ['a catalog spell above ninth level', spellVersion({ level: 10 })],
+      ['a catalog spell at -1 even when it says so in provenance', spellVersion({ level: -1, provenance: 'import' })],
+      // WHY THE CATALOG IMPORTER MUST UPGRADE A PLACEHOLDER IN ONE STATEMENT.
+      // `catalog-importer.ts` accumulates every changed column into a single
+      // `changes` object and emits ONE `UPDATE spell_versions`, so `level` and
+      // `provenance` move together. Split into two statements, the provenance
+      // half would land first and leave `level = -1` on a row no longer
+      // claiming to be a placeholder — refused here, which is what makes the
+      // single-statement upgrade a requirement rather than a coincidence.
+      ['dropping placeholder provenance while the level is still -1', spellVersionEdit({ level: -1, provenance: 'placeholder' }, { provenance: 'import' })],
+    ],
+    accepts: [
+      // THE CASE THIS CONSTRAINT EXISTS FOR. The unguarded form `level BETWEEN
+      // 0 AND 9` breaks share import: `mintPlaceholderSpellVersion` writes -1
+      // for an uncatalogued spell. If this ever fails, the guard was dropped.
+      ['the share-import placeholder at level -1', spellVersion({ level: -1, provenance: 'placeholder' })],
+      ['a cantrip at level 0', spellVersion({ level: 0 })],
+      ['a ninth-level spell', spellVersion({ level: 9 })],
+      // The importer's real upgrade path: both columns in one statement. This
+      // is the accept whose absence would make the reject above a demand the
+      // application cannot satisfy.
+      ['the placeholder upgrade the importer performs, level and provenance together', spellVersionEdit({ level: -1, provenance: 'placeholder' }, { level: 3, provenance: 'import' })],
+    ],
+  },
+  {
+    constraint: 'spell_versions_effect_reliability_category_check',
+    rejects: [['a category no report branch knows', spellVersion({ effect_reliability_category: 'unknown' })]],
+    accepts: [
+      ['the fixed_effect default', spellVersion({})],
+      ['attack_roll', spellVersion({ effect_reliability_category: 'attack_roll' })],
+      ['mixed', spellVersion({ effect_reliability_category: 'mixed' })],
+    ],
+  },
+  {
+    constraint: 'character_weapons_mastery_property_check',
+    rejects: [
+      ['a lowercased property, which no display or lookup matches', weapon({ mastery_property: 'cleave' })],
+      ['a property that is not one of the eight', weapon({ mastery_property: 'Vorpal' })],
+    ],
+    accepts: [
+      ['the null a user-invented weapon legitimately has', weapon({ mastery_property: null })],
+      ['a real property', weapon({ mastery_property: 'Cleave' })],
+      ['a real property that is actually selected', weapon({ mastery_property: 'Vex', mastery_selected: 1 })],
+    ],
+  },
+  {
+    constraint: 'weapon_templates_mastery_property_check',
+    rejects: [['a mis-parsed property from the SRD table', weaponTemplate({ mastery_property: 'cleave' })]],
+    accepts: [['a real property', weaponTemplate({ mastery_property: 'Vex' })]],
+  },
+  {
+    constraint: 'weapon_templates_srd_group_check',
+    rejects: [['the struck-down simple/martial category', weaponTemplate({ srd_group: 'simple' })]],
+    accepts: [
+      ['simple_melee', weaponTemplate({ srd_group: 'simple_melee' })],
+      ['martial_ranged', weaponTemplate({ srd_group: 'martial_ranged' })],
+    ],
+  },
+  {
+    constraint: 'weapon_templates_rules_edition_check',
+    rejects: [['an edition the seeder never writes', weaponTemplate({ rules_edition: '2025' })]],
+    accepts: [
+      ['the 2024 default the seeder binds', weaponTemplate({})],
+      ['2014', weaponTemplate({ rules_edition: '2014' })],
+    ],
+  },
+  {
+    constraint: 'class_weapon_mastery_grants_grant_check',
+    rejects: [
+      ['a grant that would read as not_granted to every non-exhaustive branch', masteryGrant({ grant: 'granted' })],
+      ['an empty grant', masteryGrant({ grant: '' })],
+    ],
+    accepts: [
+      ['not_granted', masteryGrant({ grant: 'not_granted' })],
+      ['counts_known', masteryGrant({ grant: 'counts_known' })],
+      // The load-bearing member: the class grants the feature and we do not
+      // hold its numbers. Collapsing it costs the character an entitlement.
+      ['counts_unsourced', masteryGrant({ grant: 'counts_unsourced' })],
+    ],
+  },
+  {
+    constraint: 'class_weapon_mastery_counts_check',
+    rejects: [
+      ['level 0, which the `class_level <= ?` resolution would always win', masteryCount({ class_level: 0 })],
+      ['level 21', masteryCount({ class_level: 21 })],
+      ['a negative mastery count', masteryCount({ mastery_count: -1 })],
+      // A bare `mastery_count >= 0` admitted this; the `typeof` limb refuses
+      // it. `class_level` needs no such limb — its `BETWEEN` upper bound
+      // already rejects text, which is the asymmetry `columns.ts` measures.
+      ['a text mastery count, which a bare lower bound would have admitted', masteryCount({ mastery_count: 'two' })],
+      ['a text class level, already refused by the BETWEEN upper bound', masteryCount({ class_level: 'five' })],
+    ],
+    accepts: [
+      ['level 1', masteryCount({ class_level: 1 })],
+      ['level 20', masteryCount({ class_level: 20 })],
+      // Zero is legitimate in principle even though no printed row carries one;
+      // refusing it would invent a rule the source does not state.
+      ['a zero count', masteryCount({ mastery_count: 0 })],
+    ],
+  },
+];
+
+/**
+ * The two CHECKs that predate this suite. Both are already proved
+ * behaviourally in `tests/unit/invariants.test.ts` — the exclusive-assignment
+ * one by dropping its triggers first so the CHECK is what answers — so they are
+ * listed rather than duplicated. They are named here only so the coverage test
+ * below can account for every constraint in the artifact.
+ */
+const COVERED_ELSEWHERE = [
+  'spell_slots_exclusive_assignment_check',
+  'character_weapons_mastery_requires_property_check',
+];
+
+for (const [sourceLabel, schemaSql] of schemaSources) {
+  describe(`CHECK constraints (${sourceLabel})`, () => {
+    let db: Database;
+
+    beforeAll(async () => {
+      sqlite3 = await sqlite3InitModule();
+      db = new sqlite3.oo1.DB(':memory:', 'c');
+      openDatabases.push(db);
+      db.exec(schemaSql);
+    });
+
+    afterAll(() => {
+      for (const open of openDatabases.splice(0)) {
+        open.close();
+      }
+    });
+
+    for (const testCase of CONSTRAINT_CASES) {
+      describe(testCase.constraint, () => {
+        for (const [why, write] of testCase.rejects) {
+          it(`rejects ${why}`, () => {
+            expect(caughtErrorMessage(() => write(db))).toBe(
+              checkError(testCase.constraint),
+            );
+          });
+        }
+        for (const [why, write] of testCase.accepts) {
+          it(`accepts ${why}`, () => {
+            expect(() => write(db)).not.toThrow();
+          });
+        }
+      });
+    }
+
+    /**
+     * A COVERAGE GUARD, NOT A TRANSCRIPTION.
+     *
+     * It reads the constraint NAMES out of the live schema and asserts each one
+     * is exercised above or accounted for in `COVERED_ELSEWHERE`. It says
+     * nothing about what any constraint MEANS — that is what the behavioural
+     * cases are for — so it cannot become the "compare our own artifact to a
+     * hand-copied string" test that passes on a well-formed wrong constraint.
+     * What it catches is the real hazard: a CHECK added to `db/schema/*.ts`
+     * with no test, which is decoration.
+     */
+    it('leaves no CHECK constraint in the schema untested', () => {
+      const declared = db
+        .selectValues(
+          `SELECT sql FROM sqlite_schema
+           WHERE type = 'table' AND sql IS NOT NULL`,
+        )
+        .flatMap((statement) =>
+          [...String(statement).matchAll(/CONSTRAINT\s+"([^"]+)"\s+CHECK/g)].map(
+            (match) => match[1] as string,
+          ),
+        )
+        .sort();
+
+      expect(declared.length).toBeGreaterThan(0);
+      expect(declared).toEqual(
+        [
+          ...CONSTRAINT_CASES.map((testCase) => testCase.constraint),
+          ...COVERED_ELSEWHERE,
+        ].sort(),
+      );
+    });
+  });
+}
