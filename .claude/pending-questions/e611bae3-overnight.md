@@ -6,7 +6,7 @@ Nothing here has stopped other work.
 
 ---
 
-## Q1 — ANSWERED 2026-07-26: build it claude-only (see D12). No longer blocked.
+## Q1 — RESOLVED 2026-07-26: claude-only bridge built and merged (D12, D16)
 
 **State:** 23 files of unreviewed implementation parked in
 `../dnd-wt-bridge` on `feat/local-ai-bridge`. NOT merged, NOT resumed.
