@@ -1,5 +1,66 @@
 # Binding scope decisions
 
+## D13 — Twenty-four CHECK constraints merged; two silent-no-op traps measured (2026-07-26)
+
+`main` 05c836f. Verified by me, not on the track's word: **729 vitest / 72 files,
+build exit 0, 56 Playwright**, schema regenerates byte-identically, and the
+Laravel-derived signature oracle still bites (mutating `characters.name` to
+nullable fails it).
+
+**The oracle is untouched by design, not by luck:** CHECK constraints do not
+appear in `PRAGMA table_info`, which is what the signature hashes. So this
+change could not have moved the constant even if it tried — worth knowing before
+someone "fixes" a future hash drift by regenerating it.
+
+**I verified the over-strictness risk myself** rather than accepting the report,
+because a CHECK narrower than reality turns saving into an exception: all
+thirteen enum CHECKs match their array in `src/domain/enums.ts` EXACTLY, by
+set comparison. Zero transcription drift. That was the failure mode with the
+teeth here and it did not occur.
+
+### Two traps, both found by measurement rather than reasoning
+
+1. **An unquoted reserved word is a PARSE error.** `CHECK(grant IN (…))` does
+   not fail one table — it fails schema application wholesale. Column references
+   now route through a validating helper that backtick-quotes them.
+2. **A bare `>= 0` does not fire on TEXT.** `'abc' >= 0` is TRUE in SQLite, and
+   text really can reach an INTEGER column (binding `'abc'` stores
+   `typeof=text`; binding `'7'` stores `integer` 7). Three constraints were bare
+   lower bounds and now carry a `typeof(...) = 'integer'` limb.
+
+   Deliberately NOT applied uniformly: the `BETWEEN` forms already reject text
+   and blobs on their upper limb, leaving only a non-integral REAL inside the
+   window, which no writer produces. Drawing that line and recording it beats
+   fifteen more limbs for a value class that misbehaves nowhere.
+
+3. **A CHECK evaluating to NULL is ACCEPTED by SQLite.** `spell_versions_level_check`
+   compared provenance with `=`, so a NULL would have disabled the whole
+   constraint. Changed to `IS`, identical on every reachable row and safer on the
+   unreachable one.
+
+### Deliberately unconstrained, and why that is right
+
+`character_source_instances.state` has no CHECK, because adding one BREAKS CLASS
+REMOVAL on the first write — four writers emit `'tombstoned'`
+(`remove-source.ts:53`, `update-class.ts:250` and `:337`,
+`grant-rule-slot-generator.ts:724`). The prerequisite is declaring that
+vocabulary in `enums.ts` so a constraint reads ONE source rather than a
+transcribed second copy. That is a separate change and is the right order.
+
+### One divergence handed off, not resolved
+
+`class_weapon_mastery_counts.class_level` is `BETWEEN 1 AND 20` in the schema
+but unbounded in its row contract (`src/domain/contracts/rows.ts`). The track
+REJECTED loosening the CHECK — nothing shows it rejecting legitimate data, and
+`PROGRESSION_LEVELS` is 20 — and refused to edit the backup contract module
+because another track owned it. Correct call on both counts. Reconciliation
+belongs to whoever next owns `src/domain/contracts/`, and must tighten the
+contract rather than loosen the constraint. Note `class_progressions_class_level_check`
+carries the identical bound and drew no complaint only because that table has no
+row contract at all.
+
+---
+
 ## D12 — Owner's answers on HP, armour, species/backgrounds, and the AI bridge (2026-07-26)
 
 Four direct answers. Three confirm the recommendation; the third changes the
