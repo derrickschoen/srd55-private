@@ -1,5 +1,74 @@
 # Binding scope decisions
 
+## D16 — The claude-only bridge is merged, dev-only and provably unshipped (2026-07-26)
+
+`main` c2f8ac3. Verified by me: **850 vitest / 77 files, build exit 0, 62
+Playwright**, and a clean rebuild of `dist/` grepped by hand for `ai-bridge`,
+`tool_use`, `claude`, the port and `spawn` — zero hits across nine files. The
+production bundle contains no bridge code at all, which is the strongest form of
+"the page works without it": there is nothing there to fail.
+
+D12 said the build "must not rely on that flag alone". It does not.
+
+### What I verified rather than accepted
+
+- **Prompt on stdin, argv a frozen constant.** No request-derived value reaches
+  argv, and `spawn` is called with an array and `shell: false`.
+- **`server.cors: false` is really set** (`vite.config.ts:71`) — barrier 2
+  depends on it.
+- **The production bundle is clean**, rebuilt from scratch by me.
+
+### The measurement that justifies the argv discipline
+
+`--tools` is VARIADIC and an empty string is an ENTRY, not a reset. The track
+measured `--tools "" Bash` starting the CLI with `tools: ['Bash']`. One stray
+argv token after that flag therefore grants a tool. That is why keeping
+request-derived data off argv is a mitigation rather than a style preference —
+and why the stream parser ASSERTS containment from the CLI's own init event
+instead of trusting the flag.
+
+### The finding I would have missed
+
+Slash commands SURVIVE `--setting-sources ""` — 45 of them, `update-config`
+included. Containment is PROMPT POSITION: text at offset 0 is intercepted by the
+CLI; the same text on line 2 reaches the model as prose. Established by
+experiment, not argument — the intercepted run reports model `<synthetic>`,
+`num_turns: 0` and zero cost, while the un-intercepted one calls the model and
+costs money. Seven unit tests now assert offset 0 is never request-derived for
+any message shape.
+
+The live assertions read the stream's `<synthetic>`/`num_turns` signals rather
+than rendered text, because the un-intercepted run asks a language model about
+`/context` and could quote the table's wording back. Asserting on prose would
+have flaked.
+
+### The guard that was silently a no-op
+
+The dist-cleanliness scanner searched for `x-ai-bridge-token` while the injected
+meta tag is `ai-bridge-token`. A build carrying a live session secret in
+`index.html` scanned clean and exited 0 — reproduced before fixing. The tests
+now DERIVE the forbidden literal from `protocol.ts` rather than restating it, so
+renaming the tag re-opens the hole and fails.
+
+### The honest gap, recorded because it is real
+
+Any local process running as this user can call the bridge with a forged Origin
+and a secret scraped from the dev server's own HTML. That is no escalation —
+such a process could run the `claude` CLI directly. The guard's own comments say
+this rather than overselling four barriers as a sandbox.
+
+### Codex remains dropped
+
+Not gated, not re-added. F2 proved `codex --sandbox read-only` executes
+arbitrary commands and reads outside its working directory. The archived
+codex+claude attempt stays on `feat/local-ai-bridge`, committed for preservation
+and never merged.
+
+**Rejected alternative:** merging the archived branch. Fifteen commits behind,
+unreviewed, and built around the half that failed containment.
+
+---
+
 ## D15 — Owner: model Extra Attack and Martial Arts; Shillelagh is a weapon row unconditionally (2026-07-26)
 
 Answers to the two questions D14 raised. Both go further than the options I
