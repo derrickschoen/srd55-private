@@ -1,5 +1,100 @@
 # Binding scope decisions
 
+## F5 — The `attribution.spec.ts` flake: measured, unattributed, NOT masked (2026-07-26)
+
+`tests/browser/attribution.spec.ts:16` intermittently fails on `expect(loads).toBe(1)`
+with `Received: 2` — a real second page load, so the footer link navigated
+instead of being routed. I could neither attribute it to the validation branch
+nor exonerate that branch. Recording the measurements rather than a verdict.
+
+| condition | branch | main |
+|---|---|---|
+| quiet box, single spec | 0 / 20 | 0 / 20 |
+| quiet box, single spec (2nd batch) | — | 0 / 6 |
+| synthetic CPU load, all 24 cores | 0 / 8 | not run |
+| concurrent vite dev server (neighbour worktree) | **1 / 10** | 0 / 10 |
+| full suite, box loaded by another worktree | **1 failure** | not run |
+| full suite, quiet box | 0 / 2 (48 passed each) | — |
+
+Plus the implementing track's own 6 full runs: 4 green, 2 failed, both while
+another worktree's dev server was live; its stashed baseline was 3/3 green.
+
+Tally: the branch has failed roughly 3 times in ~53 runs, main 0 times in 36.
+That is NOT significant (p is around 0.25) — but the branch is the only side
+that has ever failed, so "pre-existing" is unproven too.
+
+**Hypotheses tested and killed.** (1) Playwright reusing a neighbour's dev
+server — killed: `playwright.config.ts:20` sets `reuseExistingServer: false`,
+and a collision errors out rather than silently reusing. (2) Vite discovering
+`zod` as a new dependency and reloading the page — killed: main already imports
+zod at `src/domain/ids.ts`, so it is not new. (3) CPU starvation widening a
+handler-attachment race — killed: 0/8 with all 24 cores saturated.
+
+Every failure so far has coincided with a second **vite dev server**, not merely
+a loaded box. That is the surviving lead and it is not yet a mechanism.
+
+**Merged anyway, deliberately.** Two full suites green on a quiet box under my
+own hand (48 passed each). The flake is disclosed here, not suppressed: no
+retry, no `.skip`, no loosened assertion, no `test.fixme`. If it recurs, this
+table is the starting point rather than a fresh investigation.
+
+**Contributing infrastructure defect.** `playwright.config.ts` hard-codes port
+4173 in every worktree, so parallel tracks contend for it and one run can block
+or perturb another. This is what made the flake reproducible at all. Worth
+fixing as a separate attributable change — a per-worktree port — but NOT as a
+path to green, and not while it is the only lever that reproduces F5.
+
+---
+
+## D8 — Both parallel tracks merged; codex's three audit findings queued, not fixed (2026-07-26)
+
+`main` moved 0a28754 → b7992e7. Independently verified by me, not taken on a
+subagent's word: **530 vitest / 66 files, build exit 0, drizzle-at-runtime guard
+holding (grep exit 1), 52 Playwright**.
+
+Merged: per-table backup row contracts + quarantined candidate-image audit
+(`feat/import-validation`), and the agent-readable reference
+(`feat/agent-reference`). The tracks were genuinely disjoint — backup/db versus
+planner UI — and integrated with no conflict and no test loss (507 + 23 = 530).
+
+**What codex verified as clean** (the questions that mattered most): no
+app-written value is rejected by the row contracts — empty non-key strings,
+unicode and long text, ordinal `0`, `0/1` booleans, both timestamp formats and
+absent optional JSON keys all still pass; nullability is genuinely derived from
+`column.notNull` (`scripts/compose-row-contracts.ts:91`) rather than
+hand-asserted; the audit provably cannot mutate stored bytes; and the generated
+facts have a real byte-for-byte freshness check. Over-strictness was the
+highest-severity failure mode available here — a contract narrower than its
+column makes a user's own backup unrestorable — and it did not materialise.
+
+**Three findings accepted as real and queued rather than fixed**, because none
+is a regression against main (main had no semantic audit at all) and each wants
+its own attributable change:
+
+1. **Medium — quadratic audit work.** `candidate-audit.ts:313`
+   `assertNoParentCycle()` walks the ancestor chain from every node, so a valid
+   chain of N sources costs about N²/2 lookups, and the backup boundary
+   (`database-backup.ts:33`) caps neither bytes nor rows. A hostile image can
+   monopolise the worker. Cheap fix: one shared visited set makes it O(N).
+   This is genuinely NEW risk in NEW code, so it is first in the queue.
+2. **Medium — the audit accepts snapshots the restore path cannot restore:**
+   duplicate positive `id`s, a slot with both `fixed_` and
+   `current_spell_version_id`, and references to inactive spells. The image
+   installs and the undo history is unusable. The portable-backup validator
+   already checks the first two, so the fix is largely reuse.
+3. **Low — `auditCharacterOwnership` is currently theatre on the production
+   path.** `PRAGMA foreign_key_check` runs first (`database-lifecycle.ts:276`),
+   so an orphan can never reach it; deleting the pass would fail no
+   production-path test. Defensible as future-proofing, but it must not be
+   counted as a current guarantee.
+
+**Rejected alternative:** hold both branches unmerged until 1-3 were fixed.
+Rejected because they are hardening gaps in work that strictly improves on main,
+and leaving ~4,000 verified lines unmerged would make every later tick re-derive
+this analysis.
+
+---
+
 ## D7 — Neither the Laravel app nor this code is worth preserving (2026-07-25)
 
 Owner direction:
