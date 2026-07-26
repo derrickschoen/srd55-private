@@ -39,6 +39,8 @@ pages interleave and the weapon table becomes unreadable.
 | `source/class-core-traits.txt` | Core Traits table for all twelve classes — hit die, saving throws, skill/weapon proficiencies, armour training | 26-72 |
 | `source/armor-table.txt` | Armor table: 13 armours plus Shield, with AC formula, Strength requirement and stealth penalty | 91 |
 | `source/species-descriptions.txt` | All nine species — creature type, size, speed and traits | 83-86 |
+| `source/weapon-attack-cantrips.txt` | True Strike and Shillelagh, the two cantrips that rewrite a weapon attack (D14) | 157, 163 |
+| `source/attack-class-features.txt` | Martial Arts (all three benefits, die progression) and every Extra Attack grant, plus the multiclass rule (D15) | 24, 27, 47, 49, 55, 57 |
 
 ## What these extracts settle
 
