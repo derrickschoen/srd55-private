@@ -96,6 +96,24 @@ const startApplication = (): void => {
 };
 
 /**
+ * DEV ONLY. The local AI bridge is a development convenience that must never
+ * reach a deployed bundle, so this is the single entry point to its browser half
+ * and it sits behind `import.meta.env.DEV`, which the production build replaces
+ * with `false` — dead-code elimination then drops the dynamic import and every
+ * module behind it. `npm run build` afterwards runs
+ * `tools/assert-dist-clean.mjs`, which fails if any bridge literal reached
+ * `dist/`, because a branch believed to be eliminated is not a proof that it was.
+ *
+ * With no bridge running, `mountAiChat` returns null having done nothing: no
+ * panel, no request, no console output.
+ */
+if (import.meta.env.DEV) {
+  void import('./ui/ai-chat/mount').then(({ mountAiChat }) =>
+    mountAiChat(document.body),
+  );
+}
+
+/**
  * The licence route reads nothing from the database, so it must not wait for
  * one: a worker that never comes up would otherwise hide the attribution, and
  * reloading /legal would fail the same way. Every other route keeps the boot

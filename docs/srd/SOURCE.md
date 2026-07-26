@@ -28,6 +28,11 @@ sha256sum SRD_CC_v5.2.1.pdf     # must match the table above
 pdftotext -layout SRD_CC_v5.2.1.pdf srd.txt
 ```
 
+Column slicing must be done by CHARACTER, not byte. The SRD uses curly quotes,
+and a byte-wise `cut -c` splits one, producing a file that is not valid UTF-8.
+It must also stop at the real column boundary, or a value is truncated mid-word
+and becomes fabricated data downstream. Both mistakes were made and caught here.
+
 `pdftotext` is poppler-utils. `-layout` matters: without it the PDF's two-column
 pages interleave and the weapon table becomes unreadable.
 
@@ -39,6 +44,7 @@ pages interleave and the weapon table becomes unreadable.
 | `source/class-core-traits.txt` | Core Traits table for all twelve classes — hit die, saving throws, skill/weapon proficiencies, armour training | 26-72 |
 | `source/armor-table.txt` | Armor table: **12 armours plus Shield — 13 rows**, with AC formula, Strength requirement and stealth penalty | 91 |
 | `source/species-descriptions.txt` | All nine species — creature type, size, speed and traits | 83-86 |
+| `source/background-descriptions.txt` | All FOUR backgrounds — ability scores, origin feat, skills, tool | 82 |
 | `source/weapon-attack-cantrips.txt` | True Strike and Shillelagh, the two cantrips that rewrite a weapon attack (D14) | 157, 163 |
 | `source/attack-class-features.txt` | Martial Arts (all three benefits, die progression) and every Extra Attack grant, plus the multiclass rule (D15) | 24, 27, 47, 49, 55, 57 |
 | `source/skills-table.txt` | The Skills table (all 18 skills and the ability each uses), the Proficiency Bonus table, and the rules that apply the bonus to a skill or a save | 10, 12, 13 |
