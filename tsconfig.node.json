@@ -23,6 +23,7 @@
     "src/vite-env.d.ts",
     "db",
     "scripts",
-    "tests"
+    "tests",
+    "tools"
   ]
 }
