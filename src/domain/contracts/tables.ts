@@ -321,6 +321,78 @@ export const TABLE_SCOPES = {
     backupReference: false,
   },
 
+  /**
+   * THE FOUR STORED SHEET INPUTS TRAVEL, AND ALL FOUR FLAGS ARE SET HERE IN THE
+   * SAME CHANGE THAT CREATED THE TABLES. That sentence is the whole point of
+   * this block.
+   *
+   * Leaving these at `false` produces NO COMPILE ERROR ANYWHERE. "Not portable"
+   * is a legal classification — `change_log` and `character_operations` are
+   * legitimately all-false above — so the type system cannot tell a deliberate
+   * omission from a forgotten one. `character_weapons` sat that way, and the
+   * symptom was a user's weapons missing from their own backup, missing from
+   * every link they sent, and untouched by a save-point restore, with nothing
+   * anywhere objecting. It is the ONLY failure mode in this file that ships.
+   *
+   * A character's armour vanishing from their own backup is that same defect
+   * aimed at the data this project exists to protect, so the four flags are set
+   * before the tables have a single writer.
+   *
+   * WHAT THE THREE PORTABILITY FLAGS COST, AND WHERE THE COST WAS PAID:
+   *
+   *  - `backup` put four names into the document's table set, which
+   *    `assertExactKeys` makes part of the accepted shape. A file exported
+   *    yesterday has none of them, so all four are named in
+   *    `BACKUP_OPTIONAL_TABLES` and default to `[]` — an old backup still
+   *    imports, and yields a character with nothing recorded, which is what that
+   *    file honestly says.
+   *  - `share` added ONE grouped element to the positional wire tuple, not four.
+   *    The root grows one element per FEATURE (see `src/sharing/codec.ts`), and
+   *    the decoder accepts a thirteen-element tuple as "no sheet inputs", so
+   *    every link already in the wild still imports.
+   *  - `snapshot` moved the snapshot schema from `a7-v3` to `a7-v4`. All four
+   *    versions are still readable, and restoring an older one deliberately
+   *    LEAVES these tables alone rather than emptying them: a snapshot that
+   *    never recorded armour is not evidence that there was none.
+   *
+   * `backupReference` is false for the D1b reason `character_weapons` records:
+   * a character's armour holds no `armor_templates` id, so a document has
+   * nothing to resolve against the catalog and a reference kind for it could
+   * never be populated.
+   */
+  character_armor: {
+    role: 'character_owned',
+    snapshot: true,
+    backupDirect: true,
+    backup: true,
+    share: true,
+    backupReference: false,
+  },
+  character_hit_point_rolls: {
+    role: 'character_owned',
+    snapshot: true,
+    backupDirect: true,
+    backup: true,
+    share: true,
+    backupReference: false,
+  },
+  character_skill_proficiencies: {
+    role: 'character_owned',
+    snapshot: true,
+    backupDirect: true,
+    backup: true,
+    share: true,
+    backupReference: false,
+  },
+  character_sheet_adjustments: {
+    role: 'character_owned',
+    snapshot: true,
+    backupDirect: true,
+    backup: true,
+    share: true,
+    backupReference: false,
+  },
+
   // --- the spell catalog -------------------------------------------------
   spell_identities: {
     role: 'catalog_spell',
@@ -831,11 +903,15 @@ export const APPLICATION_TABLES = order<AnyTableName>()([
   'background_definitions',
   'background_templates',
   'change_log',
+  'character_armor',
   'character_background',
   'character_class_levels',
+  'character_hit_point_rolls',
   'character_operations',
   'character_rule_overrides',
   'character_save_points',
+  'character_sheet_adjustments',
+  'character_skill_proficiencies',
   'character_source_instances',
   'character_species',
   'character_species_traits',
@@ -895,6 +971,15 @@ export const CHARACTER_STATE_TABLES = order<SnapshotTable>()([
   'character_species',
   'character_species_traits',
   'character_background',
+  // Appended for the third time and for the third time never inserted: capture
+  // order is stable output, and an existing snapshot's key order is part of
+  // what `equalValues` compares in `CharacterState.diff`. The armour row comes
+  // before the rolls, the rolls before the skills and the adjustment last,
+  // which is the order the sheet itself prints them in.
+  'character_armor',
+  'character_hit_point_rolls',
+  'character_skill_proficiencies',
+  'character_sheet_adjustments',
 ]);
 
 /**
@@ -909,6 +994,14 @@ export const DELETE_ORDER = order<SnapshotTable>()([
   // No table references `character_weapons`, so it has no children and can go
   // first alongside the other leaves.
   'character_weapons',
+  // Leaves too, and nothing references any of them — `character_hit_point_rolls`
+  // deliberately has no foreign key to `character_class_levels` (see
+  // `db/schema/sheet-inputs.ts`), so there is no edge here to respect and the
+  // order within this group is free.
+  'character_armor',
+  'character_hit_point_rolls',
+  'character_skill_proficiencies',
+  'character_sheet_adjustments',
   // Leaves too. `character_species_traits` is keyed on `character_id` and NOT
   // on `character_species.id` — see `db/schema/origins.ts` — so there is no
   // parent-before-child edge between the two and the order between them is
@@ -938,6 +1031,10 @@ export const BACKUP_DIRECT_TABLES = order<BackupDirectTable>()([
   'character_species',
   'character_species_traits',
   'character_background',
+  'character_armor',
+  'character_hit_point_rolls',
+  'character_skill_proficiencies',
+  'character_sheet_adjustments',
 ]);
 
 /** Every table in the portable-character backup document. */
@@ -968,6 +1065,15 @@ export const BACKUP_OPTIONAL_TABLES = [
   'character_species',
   'character_species_traits',
   'character_background',
+  // The four stored sheet inputs. Every backup file a user already holds
+  // predates all four, and without these entries `assertExactKeys` would make
+  // each of those files UNOPENABLE — loud, and inflicted on exactly the data
+  // this format exists to protect. `[]` is the honest reading: that document
+  // records no armour, no rolls, no skill choices and no adjustment.
+  'character_armor',
+  'character_hit_point_rolls',
+  'character_skill_proficiencies',
+  'character_sheet_adjustments',
 ] as const satisfies readonly BackupTable[];
 
 /** The catalog tables a backup document resolves references against. */
@@ -1019,6 +1125,10 @@ export const SHARE_TABLES: { readonly [N in ShareTable]: N } = {
   character_species: 'character_species',
   character_species_traits: 'character_species_traits',
   character_background: 'character_background',
+  character_armor: 'character_armor',
+  character_hit_point_rolls: 'character_hit_point_rolls',
+  character_skill_proficiencies: 'character_skill_proficiencies',
+  character_sheet_adjustments: 'character_sheet_adjustments',
 };
 
 /**
@@ -1075,6 +1185,13 @@ export const AUDIT_ENTITY_TYPES = [
   'character_species',
   'character_species_traits',
   'character_background',
+  // Added on the same terms again: `CharacterState.diff` now emits a change per
+  // row of each sheet-input table, and an entity type the diff can produce that
+  // the log will not accept is a write that fails at runtime, mid-command.
+  'character_armor',
+  'character_hit_point_rolls',
+  'character_skill_proficiencies',
+  'character_sheet_adjustments',
 ] as const satisfies readonly ('character' | AnyTableName)[];
 
 export type AuditEntityType = (typeof AUDIT_ENTITY_TYPES)[number];

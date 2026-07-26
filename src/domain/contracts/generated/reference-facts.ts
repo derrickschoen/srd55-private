@@ -28,6 +28,12 @@ export const FOREIGN_KEY_FACTS = [
     targetColumns: ['id'],
   },
   {
+    table: 'character_armor',
+    columns: ['character_id'],
+    target: 'characters',
+    targetColumns: ['id'],
+  },
+  {
     table: 'character_background',
     columns: ['character_id'],
     target: 'characters',
@@ -52,6 +58,12 @@ export const FOREIGN_KEY_FACTS = [
     targetColumns: ['id', 'class_definition_id'],
   },
   {
+    table: 'character_hit_point_rolls',
+    columns: ['character_id'],
+    target: 'characters',
+    targetColumns: ['id'],
+  },
+  {
     table: 'character_operations',
     columns: ['character_id'],
     target: 'characters',
@@ -65,6 +77,18 @@ export const FOREIGN_KEY_FACTS = [
   },
   {
     table: 'character_save_points',
+    columns: ['character_id'],
+    target: 'characters',
+    targetColumns: ['id'],
+  },
+  {
+    table: 'character_sheet_adjustments',
+    columns: ['character_id'],
+    target: 'characters',
+    targetColumns: ['id'],
+  },
+  {
+    table: 'character_skill_proficiencies',
     columns: ['character_id'],
     target: 'characters',
     targetColumns: ['id'],

@@ -1,5 +1,254 @@
 # Binding scope decisions
 
+## D24 — Q9 closed: the character sheet exists, and an assumption is never printed as a fact (2026-07-26)
+
+`main` be5188c. Verified by me: **1582 vitest / 107 files, build exit 0,
+70 Playwright, 54 tables.**
+
+The app finally shows a character sheet. HP, AC, saving throws, skill
+modifiers, initiative and passive Perception were computed and tested since D17
+but reached nothing; they reach a screen now, and the four things a player
+supplies — armour, recorded hit-point rolls, skill proficiencies, a manual AC
+adjustment — are stored.
+
+### The Q8 lesson was applied rather than repeated
+
+I checked this myself rather than reading the report, because it is the failure
+this project keeps having. All four new tables are `character_owned` with
+`snapshot`, `backup` and `share` all true — and classification is not the same
+as working, which was exactly Q8's bug. Each arm has its own test: a
+column-for-column backup round trip, a share round trip through the compressed
+fragment, and a save-point restore.
+
+Old payloads still import. A link minted before these inputs decodes with no
+sheet section, and its guard asserts the frozen fragment is THIRTEEN elements —
+so regenerating it from current code, which would make it fourteen, fails loudly
+instead of quietly testing the new format against itself. A save point that
+predates the inputs leaves them alone rather than clearing them. The test says
+"absent, not empty", because an empty list would be this build putting words in
+the link's mouth.
+
+### The finding worth keeping
+
+A homebrew class has no seeded traits and therefore no hit die. The query was
+substituting `?? 8` — so a guess arrived downstream indistinguishable from a
+sourced value, and the D4 agent block asserted `hit_die: 8` as fact about a
+class nobody had recorded one for.
+
+The absence now lives in the TYPE (`hit_die: number | null`), the assumption is
+made at the single place the number is produced, and it emits a warning naming
+the class. This is the D21 shape again: derive the reason where the value is
+computed, rather than annotating it at call sites.
+
+**Its test is the part I would keep.** It pairs the assumed-die case with a
+known-d8 twin that reaches the IDENTICAL total and warns about nothing — so the
+arithmetic alone cannot distinguish them and the warning is proved load-bearing.
+That is how to test a degradation that does not change a number.
+
+A recorded roll larger than the class's die is counted IN FULL and flagged.
+Clamping would silently rewrite a number the player typed; refusing it would
+make an imported character unopenable (D11). And it fires only where the die is
+KNOWN — an assumed d8 must not convict a roll of 11 that a homebrew d12 would
+allow. That non-compounding has its own test.
+
+**Rejected, with reasoning I agree with:** routing the missing-hit-die case
+through the completeness registry. `character-completeness.ts` draws the line at
+"an outstanding item is something the USER must decide"; a missing catalog row
+is not that. The comment promising a completeness item was deleted rather than
+left to imply a mechanism that does not exist.
+
+It also corrected an inherited falsehood: 8 is not "the median of the four hit
+die sizes" (the median of 6/8/10/12 is 9). It is the MODE — six of twelve
+classes print d8 — and that is checkable against the class-traits test.
+
+---
+
+## F8 — 223 columns are degraded to `z.any()` to protect a goal D7 retired (measured 2026-07-26)
+
+Investigated in response to the owner asking what a "codec" is and whether
+Drizzle and Zod should have made it unnecessary. The answer turned up the
+largest available lever in the type story.
+
+### The three layers, and where each actually runs
+
+| layer | runs | reach (measured) |
+|---|---|---|
+| Drizzle | BUILD-TIME ONLY — a vite plugin fails the build if it reaches runtime | authors `schema.sql`, provides TS types |
+| Zod row contracts (`rows.ts`) | untrusted-bytes boundaries | **6 files** — backup import/export, candidate audit, seed parsing |
+| Codecs (`codecs.ts`) | every query | **26 files** |
+
+So the codec is NOT redundant with Drizzle: Drizzle is not there at runtime.
+And it is not redundant with the Zod contracts either — different boundary.
+
+**But two of them describe the same columns twice.** `spell_versions.level` is
+described by `sqlInteger(row,'level')` in a codec AND by a Zod entry in
+`rows.ts`. Two hand-written sources of truth for one column, free to drift.
+`db/schema/columns.ts` states the intent plainly: *"Runtime decoding is INTENDED
+to become Zod's job at the query boundaries. That does not exist yet."*
+
+### Why drizzle-zod degrades 223 of 332 columns
+
+Every text-ish column is a Drizzle `customType` carrying only
+`dataType: () => 'VARCHAR'`, with `toDriver`/`fromDriver` deliberately absent.
+drizzle-zod builds a schema by inspecting the column; a customType tells it
+nothing about the data, so it emits `z.any()`.
+
+**Why those customTypes exist:** to reproduce Laravel's declared type strings —
+`VARCHAR`, `DATETIME`, `TINYINT(1)` — so the Laravel-derived metadata hash would
+not move. `db/schema/columns.ts` says so in its opening paragraph.
+
+**That goal is retired.** D7: Laravel schema fidelity is NOT a goal; keep only
+the rule fixtures. So 223 columns cannot describe themselves in order to protect
+an oracle the owner has already released. Switching them to native `text()` /
+`integer()` would let drizzle-zod produce real schemas for most.
+
+Cost, stated honestly: it moves the metadata hash. D7 sanctions dropping the
+schema-metadata parity, and D9 demonstrates how to retire such an oracle
+honestly — re-derive from the frozen fixture, never regenerate from our own
+output. 277 Laravel-style declared types remain in the generated schema today.
+
+### Did the rewrite describe the DOMAIN? Half
+
+**The schema does:** 50 relation blocks, branded ids, 25 enums, 71 CHECKs.
+
+**The types do not.** `SpellVersionRow` (`src/domain/models.ts:41`) is
+table-shaped: `school: string`, `level: number`, `provenance: string`,
+`casting_time | action_type | range | duration | upcast_type: string | null`,
+and `spell_identity_id: number` — a bare unbranded number where a
+`SpellIdentityId` brand already exists. It answers "what columns does
+`spell_versions` have", not "what is a spell". D6d prescribed the fix and it was
+applied elsewhere, not here.
+
+### Tightening, and THE TRAP that governs all of it
+
+**A closed enum is a data-loss bug for homebrew.** Making `school` a
+`z.enum([...8 SRD schools])` rejects an imported homebrew spell whose school is
+"Chronomancy" — the exact over-strictness failure D13 spent its effort avoiding.
+This project has already solved that shape twice: D12 (bounded mechanical kinds
+plus free text) and Q4 (known weapon toggles plus free text). Same answer.
+
+- **CLOSE** where the SRD closes the set and homebrew will not extend it:
+  `level` → 0..9 (the CHECK already enforces it; only the TYPE says `number`),
+  `provenance` → enum, and brand `spell_identity_id`.
+- **OPEN** — known values recognised, unknown preserved: `school`,
+  `action_type`, `upcast_type`. There is no `spellSchools` enum today; verified.
+- **VALUE OBJECTS**: `casting_time`, `range`, `duration` are free strings holding
+  structured data ("60 feet", "Concentration, up to 1 minute"). Parse with
+  fallback — structured when recognised, raw retained always. D6's "a value
+  object would absorb it", and what would let a sheet sort by range.
+- **STRUCTURAL**, still outstanding from D6d: replace the three nullable
+  `spell_*` columns with one optional relation, non-null inside.
+
+**Recommended first move:** drop the Laravel declared-type mimicry. It is the
+thing preventing 223 columns from describing themselves, and it is protecting a
+goal nobody holds.
+
+---
+
+## D23 — Q10 closed: a subclass can be imported, and a real sweep bug was found doing it (2026-07-26)
+
+`main` a17e4e1. Verified by me: **1467 vitest / 103 files, build exit 0,
+66 Playwright.**
+
+The owner's goal — "we need to test it for if the phb gets imported" — is now
+met end to end. Their own legally obtained content travels through catalog
+import; nothing is bundled that is not SRD 5.2.
+
+**The test that existed to name the gap became the test that proves it closed.**
+`is not in the catalog format, and catalog.import rejects it outright` is gone,
+replaced by assertions that the fixture imports, lands every field, and **raises
+the attack count at Bard 6 and not at Bard 5** — the D19 grant reaching the
+derivation. Renaming a failing-by-design test to keep it green was the specific
+failure mode here, and the brief called it out in advance.
+
+### The bug it found, which nobody asked it to look for
+
+Importing an EMPTY spell document alongside a subclass document swept nothing,
+while the same empty document ALONE swept correctly. Emptiness was inferred from
+the whole parse (`records.kinds.size === 0`), so an empty file's meaning survived
+only when it was the only file — and the multi-file picker makes the mixed
+selection ordinary.
+
+A user clearing their spell catalog while importing a subclass would have been
+told nothing happened, and it would have looked like the empty file was ignored.
+The fix moves the declaration to where it belongs: a document declares its own
+kind. The special case collapsed and the now-unreachable branch was deleted
+rather than left as uncovered dead code. The regression test was written FIRST
+and confirmed red before the fix.
+
+### Cross-kind safety, tested rather than assumed
+
+Import is a full replacement, which makes silent deletion the obvious hazard.
+Spells survive a subclass import; subclasses survive a spell import; both are
+tested by name. A bundled SRD subclass cannot be targeted by an imported
+document, by key or by name — so a user's import cannot overwrite free-licensed
+content it did not supply.
+
+### A finding it REJECTED, correctly
+
+The review claimed the tests coupled to another track's in-flight files. Wrong,
+and disproved rather than argued: all five symbols resolve at HEAD via
+`git show`, and the `?? src/sharing/` the reviewer had seen was the OTHER
+worktree's untracked files. Depending on committed shared API is normal.
+Rejecting a wrong finding with evidence is the behaviour the protocol wants.
+
+### Left open, and named
+
+Subclass REMOVAL is still impossible: there is no way to retire an imported
+subclass. It needs `provenance` and `is_active` columns on
+`subclass_definitions`, which are `db/schema/` changes this track was scoped
+away from. Now stated in the user-facing `docs/CATALOG-IMPORT.md` rather than
+only in a source comment.
+
+---
+
+## F7 — Queue item (a) is far smaller than its brief says: 122 of 122 call sites already pass a codec (measured 2026-07-26)
+
+Measured before starting the work, because the brief carries a number I put
+there and numbers age.
+
+```
+real db .all/.one call sites in src/: 122
+  WITH a codec:    122
+  WITHOUT a codec: 0
+```
+
+Codex's original ranking — and every brief since — described "about 116 call
+sites where a raw SQLite row and a decoded domain object share one API, so a
+missing codec is invisible to the type checker". Earlier in this session its AST
+scan found 116 calls, 46 with codecs and **70 without**. That was true when
+written. The Drizzle+Zod contract work and everything after it closed all 70.
+
+**So the practical problem is already solved.** No call site is silently
+returning an undecoded row today.
+
+### What actually remains, and it is a real defect
+
+`codec?: RowCodec<T>` is OPTIONAL (`src/db/database.ts:52,60`,
+`src/db/query.ts:45,58`). A NEW call site can omit it, default `T` to `SqlRow`,
+and compile. The 122 are correct by discipline, not by construction — and
+discipline is what the type system is supposed to replace.
+
+So (a) is not a 116-site refactor. It is an API-shape change: make the decoded
+path require a codec, give the genuinely-raw path its own name, and let the
+compiler refuse the third option. The existing raw helpers already exist and are
+used — `exec` 143, `scalar` 37, `selectValue` 6, `selectObjects` 5,
+`selectObject` 4, `selectValues` 2 — so the raw side needs naming, not building.
+
+### Why this matters beyond saving effort
+
+The brief said (a) "NEEDS A QUIET WINDOW: run it alone", which was sound advice
+for a 116-file sweep and is now over-cautious for what is closer to a signature
+change plus its fallout. It can share a window with an unrelated track.
+
+**And a caution against the obvious shortcut:** the fix is NOT to delete the
+optional parameter and let 122 sites keep working by inference. If a call site
+can still compile without naming its codec, nothing has been gained — the change
+must make the omission a compile ERROR, and the proof is a deliberately
+codec-less call that fails to build.
+
+---
+
 ## D22 — OWNER: invert the effect model. Effects belong to the CHARACTER; the trait is provenance (2026-07-26)
 
 I offered three options for the Tiefling two-effect problem. The owner rejected

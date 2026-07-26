@@ -13,13 +13,23 @@ import {
  *
  * `a7-v2` differs from `a7-v1` in exactly one way: it also captures
  * `character_weapons`. `a7-v3` differs from `a7-v2` in exactly one way: it also
- * captures the three origin tables. Neither bump is cosmetic — a reader must be
- * able to tell "this snapshot recorded no species" from "this snapshot did not
- * record a species at all", and the two are otherwise indistinguishable. The
- * first reading restores an empty list over the character's data; the second
- * leaves it alone, which is the only honest answer.
+ * captures the three origin tables. `a7-v4` differs from `a7-v3` in exactly one
+ * way: it also captures the four stored sheet inputs. No bump is cosmetic — a
+ * reader must be able to tell "this snapshot recorded no armour" from "this
+ * snapshot did not record armour at all", and the two are otherwise
+ * indistinguishable. The first reading restores an empty list over the
+ * character's data; the second leaves it alone, which is the only honest answer.
+ *
+ * NOT BUMPING WOULD HAVE BEEN THE LOUDEST FAILURE IN THIS CHANGE.
+ * `SNAPSHOT_TABLES_BY_VERSION` aliases the CURRENT version to the live
+ * `CHARACTER_STATE_TABLES`, so adding four tables without minting `a7-v4` would
+ * retroactively change what `a7-v3` claims to carry: every save point already on
+ * a user's disk would throw `Snapshot table character_armor must be a list.`,
+ * and `src/db/candidate-audit.ts` would refuse to import any database image
+ * containing one. Undo, save-point restore and `exportCharacterBackup` — which
+ * re-parses its own stored save points on the way out — would break together.
  */
-export const CHARACTER_SNAPSHOT_SCHEMA_VERSION = 'a7-v3' as const;
+export const CHARACTER_SNAPSHOT_SCHEMA_VERSION = 'a7-v4' as const;
 
 /**
  * WHICH TABLES EACH SNAPSHOT VERSION CARRIES.
@@ -50,10 +60,26 @@ const A7_V2_TABLES = [
   'character_weapons',
 ] as const satisfies readonly SnapshotTable[];
 
+/**
+ * `a7-v3` is a HISTORICAL FACT for the same reason `a7-v1` and `a7-v2` are, and
+ * this is the moment it becomes one: until this change it was an ALIAS for the
+ * live list, which is correct only while it is the current version. Freezing it
+ * by hand — rather than deriving it as "the current list minus the four sheet
+ * tables" — is what stops it silently following the next classification change
+ * and lying about snapshots already on a user's disk.
+ */
+const A7_V3_TABLES = [
+  ...A7_V2_TABLES,
+  'character_species',
+  'character_species_traits',
+  'character_background',
+] as const satisfies readonly SnapshotTable[];
+
 const SNAPSHOT_TABLES_BY_VERSION = {
   'a7-v1': A7_V1_TABLES,
   'a7-v2': A7_V2_TABLES,
-  'a7-v3': CHARACTER_STATE_TABLES,
+  'a7-v3': A7_V3_TABLES,
+  'a7-v4': CHARACTER_STATE_TABLES,
 } as const satisfies Readonly<Record<string, readonly SnapshotTable[]>>;
 
 /**
@@ -71,6 +97,7 @@ export const CHARACTER_SNAPSHOT_SCHEMA_VERSIONS = [
   'a7-v1',
   'a7-v2',
   'a7-v3',
+  'a7-v4',
 ] as const satisfies readonly (keyof typeof SNAPSHOT_TABLES_BY_VERSION)[];
 
 export type CharacterSnapshotSchemaVersion =
@@ -342,11 +369,11 @@ export class CharacterState {
    * Rewrite the character's state to what the snapshot holds.
    *
    * TABLES THE SNAPSHOT DOES NOT CARRY ARE NOT TOUCHED — not deleted, not
-   * re-inserted. That matters for exactly one case today: an `a7-v1` snapshot
-   * predates weapons, so restoring one leaves the character's current weapons
+   * re-inserted. An `a7-v1` snapshot predates weapons and an `a7-v3` snapshot
+   * predates the four sheet inputs, so restoring either leaves that data
    * standing. The alternative, treating the absent key as an empty list, would
-   * assert "this character had no weapons at that moment" — a claim the
-   * snapshot never made, and one that would silently delete real data on undo.
+   * assert "this character had no armour at that moment" — a claim the snapshot
+   * never made, and one that would silently delete real data on undo.
    */
   restore(characterId: number, snapshot: unknown): void {
     const { character, rows, tables } = this.validateSnapshot(

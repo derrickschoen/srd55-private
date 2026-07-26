@@ -234,7 +234,7 @@ describe('a character’s origin survives every portability path', () => {
   it('restores a save point that recorded the origin', () => {
     const state = new CharacterState(db);
     const snapshot = state.capture(characterId);
-    expect(snapshot.schema_version).toBe('a7-v3');
+    expect(snapshot.schema_version).toBe('a7-v4');
     expect(snapshot.character_species_traits).toHaveLength(5);
 
     db.exec('DELETE FROM character_species_traits WHERE character_id = ?', [
