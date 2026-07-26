@@ -14,39 +14,41 @@ import {
   CHARACTER_BACKUP_FORMAT,
   CHARACTER_BACKUP_VERSION,
 } from './backup-version';
+import {
+  BACKUP_DIRECT_TABLES,
+  BACKUP_TABLES,
+  REFERENCE_KINDS,
+  SOURCE_REFERENCE_KIND,
+  type BackupTable,
+  type ReferenceKind as DerivedReferenceKind,
+} from '../domain/contracts/tables';
 
 type BackupRow = Readonly<Record<string, unknown>>;
 type MutableRow = Record<string, unknown>;
 
-const directCharacterTables = [
-  'character_class_levels',
-  'character_source_instances',
-  'spell_selection_slots',
-  'wizard_spellbook_entries',
-  'character_spell_preferences',
-  'character_rule_overrides',
-  'warning_acknowledgements',
-  'character_save_points',
-  'spell_loadouts',
-] as const;
+/**
+ * The backup scopes, derived from the schema.
+ *
+ * `directCharacterTables` is the `character_id`-keyed pass;
+ * `spell_loadout_entries` is backed up but cannot join it because it has no
+ * `character_id` column — a fact now enforced by the type system rather than
+ * by a comment.
+ *
+ * `referenceKinds` is derived from a DEDICATED flag, not from a role filter.
+ * A role filter over the class catalog would have swept in
+ * `class_progressions` and `subclass_progressions`, and since
+ * `CharacterBackupReferences` is `Record<ReferenceKind, …>` that would have
+ * made every existing backup document structurally invalid with no type error.
+ */
+const directCharacterTables = BACKUP_DIRECT_TABLES;
 
-const backupTableNames = [
-  ...directCharacterTables,
-  'spell_loadout_entries',
-] as const;
+const backupTableNames = BACKUP_TABLES;
 
-type BackupTableName = (typeof backupTableNames)[number];
+type BackupTableName = BackupTable;
 
-const referenceKinds = [
-  'class_definitions',
-  'subclass_definitions',
-  'feat_definitions',
-  'species_definitions',
-  'background_definitions',
-  'spell_versions',
-] as const;
+const referenceKinds = REFERENCE_KINDS;
 
-type ReferenceKind = (typeof referenceKinds)[number];
+type ReferenceKind = DerivedReferenceKind;
 
 export interface BackupReference {
   readonly id: number;
@@ -93,13 +95,19 @@ interface CharacterSnapshotData {
 
 type ResolvedReferences = Readonly<Record<ReferenceKind, Map<number, number>>>;
 
-const sourceReferenceKinds: Readonly<Record<string, ReferenceKind>> = {
-  class: 'class_definitions',
-  subclass: 'subclass_definitions',
-  feat: 'feat_definitions',
-  species: 'species_definitions',
-  background: 'background_definitions',
-};
+/**
+ * The exhaustiveness and value checks live at the DEFINITION site:
+ * `SOURCE_REFERENCE_KIND satisfies Record<DomainSourceType, ReferenceKind>` is
+ * what forces every source type to be mapped and forbids naming a table that
+ * is not a reference kind. It was an unchecked `Record<string, string>` before.
+ *
+ * The `Record<string, …>` annotation HERE is deliberate and is NOT a
+ * re-widening of that: the key arrives as an untrusted `string` off a backup
+ * document, so the lookup must be allowed to miss — which is exactly what
+ * `sourceReferenceKind` below turns into a `BackupValidationError`.
+ */
+const sourceReferenceKinds: Readonly<Record<string, ReferenceKind>> =
+  SOURCE_REFERENCE_KIND;
 
 function sourceReferenceKind(sourceType: unknown): ReferenceKind {
   const kind =

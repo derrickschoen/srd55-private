@@ -1,6 +1,12 @@
 import type { SqlValue } from '@sqlite.org/sqlite-wasm';
 import type { DatabaseContext } from '../db/database';
 import type { SqlRow } from '../db/codecs';
+import {
+  CHARACTER_STATE_TABLES,
+  DELETE_ORDER,
+  type AuditEntityType,
+  type SnapshotTable,
+} from '../domain/contracts/tables';
 
 export const CHARACTER_SNAPSHOT_SCHEMA_VERSION = 'a7-v1' as const;
 
@@ -18,15 +24,18 @@ export const CHARACTER_STATE_COLUMNS = [
   'notes',
 ] as const;
 
-export const CHARACTER_STATE_TABLES = [
-  'character_class_levels',
-  'character_source_instances',
-  'spell_selection_slots',
-  'wizard_spellbook_entries',
-  'warning_acknowledgements',
-] as const;
+/**
+ * The tables an undo/redo snapshot captures.
+ *
+ * Derived from the schema rather than hand-listed. Adding a table to
+ * `db/schema/` is now a compile error until it is classified as in or out of
+ * this scope, which is exactly the guarantee the old five-element string tuple
+ * could not give: it had no connection to the schema at all, and a second,
+ * different list lived in `src/backup/`.
+ */
+export { CHARACTER_STATE_TABLES, DELETE_ORDER as CHARACTER_STATE_DELETE_ORDER };
 
-export type CharacterStateTable = (typeof CHARACTER_STATE_TABLES)[number];
+export type CharacterStateTable = SnapshotTable;
 
 type CharacterSnapshotTables = {
   readonly [Table in CharacterStateTable]: readonly SqlRow[];
@@ -38,7 +47,12 @@ export type CharacterStateSnapshot = {
 } & CharacterSnapshotTables;
 
 export interface CharacterStateDiff {
-  readonly entity_type: 'character' | CharacterStateTable;
+  /**
+   * The audit-log write vocabulary. Independent of the snapshot scope by
+   * design: reclassifying a table for backup reasons must not silently change
+   * what the append-only audit log accepts.
+   */
+  readonly entity_type: AuditEntityType;
   readonly entity_id: number | null;
   readonly previous_value: unknown;
   readonly new_value: unknown;
@@ -46,14 +60,6 @@ export interface CharacterStateDiff {
 
 type SnapshotObject = Record<string, unknown>;
 type SnapshotRow = Record<string, unknown>;
-
-const DELETE_ORDER: readonly CharacterStateTable[] = [
-  'warning_acknowledgements',
-  'wizard_spellbook_entries',
-  'spell_selection_slots',
-  'character_source_instances',
-  'character_class_levels',
-];
 
 function isObject(value: unknown): value is SnapshotObject {
   return value !== null && typeof value === 'object' && !Array.isArray(value);

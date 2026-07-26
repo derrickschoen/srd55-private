@@ -1,0 +1,529 @@
+import {
+  check,
+  foreignKey,
+  index,
+  integer,
+  sqliteTable,
+  uniqueIndex,
+  type AnySQLiteColumn,
+} from 'drizzle-orm/sqlite-core';
+import { sql } from 'drizzle-orm';
+import type {
+  CharacterId,
+  ClassDefinitionId,
+  SlotId,
+  SourceInstanceId,
+  SpellVersionId,
+  SubclassDefinitionId,
+} from '../../src/domain/ids';
+import type {
+  Ability,
+  DomainSourceType,
+  RulesEdition,
+  SelectionEligibility,
+  SlotBucket,
+  SlotState,
+} from '../../src/domain/enums';
+import {
+  datetime,
+  laravelDefault,
+  sqlText,
+  tinyint1,
+  varchar,
+} from './columns';
+import { class_definitions, subclass_definitions } from './catalog-classes';
+import { spell_versions } from './catalog-spells';
+
+/**
+ * THE CHARACTER AGGREGATE.
+ *
+ * `characters` is the aggregate root. Every other table here cascades from it,
+ * directly or through `character_source_instances`, which is what makes
+ * "delete a character" a single statement and what the snapshot / backup /
+ * share scopes in `src/domain/contracts/tables.ts` are derived over.
+ */
+
+export const characters = sqliteTable('characters', {
+  id: integer('id')
+    .primaryKey({ autoIncrement: true })
+    .notNull()
+    .$type<CharacterId>(),
+  name: varchar()('name').notNull(),
+  strength: integer('strength').notNull().default(laravelDefault('10')),
+  dexterity: integer('dexterity').notNull().default(laravelDefault('10')),
+  constitution: integer('constitution').notNull().default(laravelDefault('10')),
+  intelligence: integer('intelligence').notNull().default(laravelDefault('10')),
+  wisdom: integer('wisdom').notNull().default(laravelDefault('10')),
+  charisma: integer('charisma').notNull().default(laravelDefault('10')),
+  /** Null means "derive from total level"; it is a genuine override slot. */
+  proficiency_bonus_override: integer('proficiency_bonus_override'),
+  rules_edition_preference: varchar<RulesEdition>()('rules_edition_preference')
+    .notNull()
+    .default(laravelDefault('2024')),
+  allow_legacy: tinyint1('allow_legacy').notNull().default(laravelDefault('0')),
+  revision: integer('revision').notNull().default(laravelDefault('0')),
+  notes: sqlText()('notes'),
+  created_at: datetime()('created_at'),
+  updated_at: datetime()('updated_at'),
+});
+
+/**
+ * A source a character has taken: a class, subclass, feat, species or
+ * background.
+ *
+ * `source_definition_id` is a POLYMORPHIC reference: which `*_definitions`
+ * table it points into is decided at runtime by `source_type`. SQL cannot
+ * express that, so there is no foreign key on it and it stays nullable — the
+ * backup format's `requireReference(..., nullable = true)` accepts and
+ * re-inserts a null, so tightening it would reject legitimately-produced
+ * backups.
+ *
+ * `parent_source_instance_id` is the schema's ONLY `ON DELETE SET NULL`: a
+ * subclass instance survives the deletion of the class instance that granted
+ * it, orphaned rather than removed.
+ */
+export const character_source_instances = sqliteTable(
+  'character_source_instances',
+  {
+    id: integer('id')
+      .primaryKey({ autoIncrement: true })
+      .notNull()
+      .$type<SourceInstanceId>(),
+    character_id: integer('character_id')
+      .notNull()
+      .$type<CharacterId>()
+      .references(() => characters.id, { onDelete: 'cascade' }),
+    instance_uuid: varchar()('instance_uuid').notNull(),
+    parent_source_instance_id: integer('parent_source_instance_id')
+      .$type<SourceInstanceId>()
+      .references((): AnySQLiteColumn => character_source_instances.id, {
+        onDelete: 'set null',
+      }),
+    source_type: varchar<DomainSourceType>()('source_type').notNull(),
+    source_definition_id: integer('source_definition_id'),
+    display_name: varchar()('display_name').notNull(),
+    config: sqlText()('config'),
+    acquired_at_character_level: integer('acquired_at_character_level'),
+    state: varchar()('state').notNull().default(laravelDefault('active')),
+    notes: sqlText()('notes'),
+    created_at: datetime()('created_at'),
+    updated_at: datetime()('updated_at'),
+  },
+  (table) => [
+    uniqueIndex('character_source_instances_instance_uuid_unique').on(
+      table.instance_uuid,
+    ),
+    index('character_source_instances_character_id_state_index').on(
+      table.character_id,
+      table.state,
+    ),
+    // Composite-FK companion: the target of spell_selection_slots'
+    // (source_instance_id, character_id) reference, which is what stops a slot
+    // from being attached to another character's source instance.
+    uniqueIndex('character_source_instances_id_character_id_unique').on(
+      table.id,
+      table.character_id,
+    ),
+  ],
+);
+
+/**
+ * `subclass_definition_id` stays nullable: a class is taken before its
+ * subclass is chosen.
+ *
+ * CAUTION for contract authors: SQLite foreign keys are MATCH SIMPLE, so while
+ * this column is NULL the composite reference to
+ * `subclass_definitions (id, class_definition_id)` is NOT ENFORCED AT ALL. The
+ * contract must not present the pairing as total.
+ */
+export const character_class_levels = sqliteTable(
+  'character_class_levels',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }).notNull(),
+    character_id: integer('character_id')
+      .notNull()
+      .$type<CharacterId>()
+      .references(() => characters.id, { onDelete: 'cascade' }),
+    class_definition_id: integer('class_definition_id')
+      .notNull()
+      .$type<ClassDefinitionId>()
+      .references(() => class_definitions.id),
+    subclass_definition_id: integer(
+      'subclass_definition_id',
+    ).$type<SubclassDefinitionId>(),
+    level: integer('level').notNull().default(laravelDefault('1')),
+    is_starting_class: tinyint1('is_starting_class')
+      .notNull()
+      .default(laravelDefault('0')),
+    spellcasting_ability_override: varchar<Ability>()(
+      'spellcasting_ability_override',
+    ),
+    notes: sqlText()('notes'),
+    created_at: datetime()('created_at'),
+    updated_at: datetime()('updated_at'),
+  },
+  (table) => [
+    uniqueIndex(
+      'character_class_levels_character_id_class_definition_id_unique',
+    ).on(table.character_id, table.class_definition_id),
+    foreignKey({
+      columns: [table.subclass_definition_id, table.class_definition_id],
+      foreignColumns: [
+        subclass_definitions.id,
+        subclass_definitions.class_definition_id,
+      ],
+    }),
+  ],
+);
+
+/**
+ * A spell slot in the planner sense: one place a character can put (or has
+ * been given) a spell.
+ *
+ * THREE correlated-null groups live in this table:
+ *
+ *  1. ASSIGNMENT — `fixed_spell_version_id` (a grant) XOR
+ *     `current_spell_version_id` (a user selection) XOR neither (empty).
+ *     Enforced three ways: the named CHECK below and both BEFORE triggers.
+ *  2. LIFECYCLE — `state = 'orphaned'` travels with `orphan_reason_code`,
+ *     `orphaned_at` and `prior_config`.
+ *  3. ELIGIBILITY — `selection_eligibility = 'invalid'` travels with
+ *     `selection_invalid_reason`.
+ *
+ * NOT YET MODELLED. Each group is still declared as independently nullable
+ * columns here and in `src/domain/models.ts`, so the type system permits
+ * combinations the database rejects — an `orphan_reason_code` on an active
+ * slot, or both assignment columns set. Turning these into discriminated
+ * unions is the whole point of the contracts work and has NOT been done; this
+ * comment records the target, not the state.
+ *
+ * `orphaned_by_change_group_id` is DORMANT and type-incoherent: it is an
+ * INTEGER with no foreign key, while `change_log.group_id` — the thing it
+ * names — is a VARCHAR uuid. It has zero writers AND zero readers. It deserves
+ * to be dropped, but not in this change: dropping a column moves the Laravel
+ * parity hash and would confuse the cutover.
+ */
+export const spell_selection_slots = sqliteTable(
+  'spell_selection_slots',
+  {
+    id: integer('id')
+      .primaryKey({ autoIncrement: true })
+      .notNull()
+      .$type<SlotId>(),
+    character_id: integer('character_id')
+      .notNull()
+      .$type<CharacterId>()
+      .references(() => characters.id, { onDelete: 'cascade' }),
+    source_instance_id: integer('source_instance_id')
+      .notNull()
+      .$type<SourceInstanceId>(),
+    slot_key: varchar()('slot_key').notNull(),
+    rule_key: varchar()('rule_key').notNull(),
+    ordinal: integer('ordinal').notNull().default(laravelDefault('0')),
+    bucket: varchar<SlotBucket>()('bucket').notNull(),
+    eligibility_kind: varchar()('eligibility_kind').notNull(),
+    fixed_spell_version_id: integer('fixed_spell_version_id')
+      .$type<SpellVersionId>()
+      .references(() => spell_versions.id),
+    current_spell_version_id: integer('current_spell_version_id')
+      .$type<SpellVersionId>()
+      .references(() => spell_versions.id),
+    label: varchar()('label'),
+    spell_level_min: integer('spell_level_min')
+      .notNull()
+      .default(laravelDefault('0')),
+    spell_level_max: integer('spell_level_max')
+      .notNull()
+      .default(laravelDefault('9')),
+    allowed_spell_lists: sqlText()('allowed_spell_lists'),
+    allowed_schools: sqlText()('allowed_schools'),
+    allowed_tags: sqlText()('allowed_tags'),
+    always_prepared: tinyint1('always_prepared')
+      .notNull()
+      .default(laravelDefault('0')),
+    with_slots: tinyint1('with_slots').notNull().default(laravelDefault('1')),
+    free_cast: sqlText()('free_cast'),
+    counts_against_limit: tinyint1('counts_against_limit')
+      .notNull()
+      .default(laravelDefault('1')),
+    required: tinyint1('required').notNull().default(laravelDefault('0')),
+    is_locked: tinyint1('is_locked').notNull().default(laravelDefault('0')),
+    state: varchar<SlotState>()('state')
+      .notNull()
+      .default(laravelDefault('active')),
+    orphan_reason_code: varchar()('orphan_reason_code'),
+    orphaned_by_change_group_id: integer('orphaned_by_change_group_id'),
+    orphaned_at: datetime()('orphaned_at'),
+    prior_config: sqlText()('prior_config'),
+    override_note: sqlText()('override_note'),
+    sort_order: integer('sort_order').notNull().default(laravelDefault('0')),
+    notes: sqlText()('notes'),
+    created_at: datetime()('created_at'),
+    updated_at: datetime()('updated_at'),
+    selection_collection: varchar()('selection_collection'),
+    selection_eligibility: varchar<SelectionEligibility>()(
+      'selection_eligibility',
+    )
+      .notNull()
+      .default(laravelDefault('unselected')),
+    selection_invalid_reason: sqlText()('selection_invalid_reason'),
+  },
+  (table) => [
+    check(
+      'spell_slots_exclusive_assignment_check',
+      sql`fixed_spell_version_id IS NULL OR current_spell_version_id IS NULL`,
+    ),
+    foreignKey({
+      columns: [table.source_instance_id, table.character_id],
+      foreignColumns: [
+        character_source_instances.id,
+        character_source_instances.character_id,
+      ],
+    }).onDelete('cascade'),
+    uniqueIndex('spell_selection_slots_character_id_slot_key_unique').on(
+      table.character_id,
+      table.slot_key,
+    ),
+    index('spell_selection_slots_character_id_state_index').on(
+      table.character_id,
+      table.state,
+    ),
+    index('spell_selection_slots_character_id_bucket_index').on(
+      table.character_id,
+      table.bucket,
+    ),
+    index('slots_character_collection_index').on(
+      table.character_id,
+      table.selection_collection,
+    ),
+  ],
+);
+
+/**
+ * The final migration removed the provenance/cost/source columns: the
+ * spellbook is now only a per-character set of acquired spell versions.
+ */
+export const wizard_spellbook_entries = sqliteTable(
+  'wizard_spellbook_entries',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }).notNull(),
+    character_id: integer('character_id')
+      .notNull()
+      .$type<CharacterId>()
+      .references(() => characters.id, { onDelete: 'cascade' }),
+    spell_version_id: integer('spell_version_id')
+      .notNull()
+      .$type<SpellVersionId>()
+      .references(() => spell_versions.id),
+    created_at: datetime()('created_at'),
+    updated_at: datetime()('updated_at'),
+  },
+  (table) => [
+    uniqueIndex(
+      'wizard_spellbook_entries_character_id_spell_version_id_unique',
+    ).on(table.character_id, table.spell_version_id),
+  ],
+);
+
+/**
+ * The append-only audit log.
+ *
+ * `entity_type` is deliberately NOT narrowed to a table union on the read
+ * side: historical rows written under an older vocabulary must stay parseable
+ * forever. The WRITE side is typed (see `AUDIT_ENTITY_TYPES` in the
+ * contracts), which is where a typo can still be caught.
+ *
+ * `group_id` and `operation_uuid` are nullable in the DDL but have a single
+ * writer that always binds them, and no restore path reaches this table — it
+ * is in no snapshot, backup or share list. They are therefore CANDIDATES for
+ * tightening. Nothing tightens them today: both remain nullable in the DDL and
+ * in the read models, because narrowing them means either an evidenced
+ * backfill of existing rows or a decode boundary that rejects a null, and
+ * neither exists yet.
+ */
+export const change_log = sqliteTable(
+  'change_log',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }).notNull(),
+    character_id: integer('character_id')
+      .notNull()
+      .$type<CharacterId>()
+      .references(() => characters.id, { onDelete: 'cascade' }),
+    sequence: integer('sequence').notNull(),
+    group_id: varchar()('group_id'),
+    operation_uuid: varchar()('operation_uuid'),
+    entity_type: varchar()('entity_type').notNull(),
+    entity_id: integer('entity_id'),
+    previous_value: sqlText()('previous_value'),
+    new_value: sqlText()('new_value'),
+    reason: varchar()('reason'),
+    action_type: varchar()('action_type').notNull(),
+    reversible: tinyint1('reversible').notNull().default(laravelDefault('1')),
+    created_at: datetime()('created_at'),
+    updated_at: datetime()('updated_at'),
+  },
+  (table) => [
+    uniqueIndex('change_log_character_id_sequence_unique').on(
+      table.character_id,
+      table.sequence,
+    ),
+    index('change_log_character_id_group_id_index').on(
+      table.character_id,
+      table.group_id,
+    ),
+    index('change_log_operation_uuid_index').on(table.operation_uuid),
+  ],
+);
+
+export const character_save_points = sqliteTable('character_save_points', {
+  id: integer('id').primaryKey({ autoIncrement: true }).notNull(),
+  character_id: integer('character_id')
+    .notNull()
+    .$type<CharacterId>()
+    .references(() => characters.id, { onDelete: 'cascade' }),
+  label: varchar()('label').notNull(),
+  snapshot: sqlText()('snapshot').notNull(),
+  schema_version: varchar()('schema_version').notNull(),
+  created_at: datetime()('created_at'),
+  updated_at: datetime()('updated_at'),
+});
+
+export const warning_acknowledgements = sqliteTable(
+  'warning_acknowledgements',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }).notNull(),
+    character_id: integer('character_id')
+      .notNull()
+      .$type<CharacterId>()
+      .references(() => characters.id, { onDelete: 'cascade' }),
+    warning_fingerprint: varchar()('warning_fingerprint').notNull(),
+    note: sqlText()('note'),
+    /** Set when a build change invalidates a previous acknowledgement. */
+    invalidated_at: datetime()('invalidated_at'),
+    created_at: datetime()('created_at'),
+    updated_at: datetime()('updated_at'),
+  },
+  (table) => [
+    uniqueIndex(
+      'warning_acknowledgements_character_id_warning_fingerprint_unique',
+    ).on(table.character_id, table.warning_fingerprint),
+  ],
+);
+
+export const spell_loadouts = sqliteTable('spell_loadouts', {
+  id: integer('id').primaryKey({ autoIncrement: true }).notNull(),
+  character_id: integer('character_id')
+    .notNull()
+    .$type<CharacterId>()
+    .references(() => characters.id, { onDelete: 'cascade' }),
+  name: varchar()('name').notNull(),
+  notes: sqlText()('notes'),
+  created_at: datetime()('created_at'),
+  updated_at: datetime()('updated_at'),
+});
+
+/**
+ * The one character-owned table with NO `character_id` column: it reaches the
+ * character only through `spell_loadouts`. That is exactly why it cannot
+ * participate in the `character_id`-keyed direct-backup pass, and the scope
+ * table in the contracts makes that a compile-time fact rather than a
+ * convention.
+ */
+export const spell_loadout_entries = sqliteTable(
+  'spell_loadout_entries',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }).notNull(),
+    spell_loadout_id: integer('spell_loadout_id')
+      .notNull()
+      .references(() => spell_loadouts.id, { onDelete: 'cascade' }),
+    spell_version_id: integer('spell_version_id')
+      .notNull()
+      .$type<SpellVersionId>()
+      .references(() => spell_versions.id),
+    role: varchar()('role').notNull(),
+    created_at: datetime()('created_at'),
+    updated_at: datetime()('updated_at'),
+  },
+  (table) => [
+    uniqueIndex(
+      'spell_loadout_entries_spell_loadout_id_spell_version_id_role_unique',
+    ).on(table.spell_loadout_id, table.spell_version_id, table.role),
+  ],
+);
+
+export const character_spell_preferences = sqliteTable(
+  'character_spell_preferences',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }).notNull(),
+    character_id: integer('character_id')
+      .notNull()
+      .$type<CharacterId>()
+      .references(() => characters.id, { onDelete: 'cascade' }),
+    spell_version_id: integer('spell_version_id')
+      .notNull()
+      .$type<SpellVersionId>()
+      .references(() => spell_versions.id),
+    favourite: tinyint1('favourite').notNull().default(laravelDefault('0')),
+    notes: sqlText()('notes'),
+    created_at: datetime()('created_at'),
+    updated_at: datetime()('updated_at'),
+  },
+  (table) => [
+    uniqueIndex(
+      'character_spell_preferences_character_id_spell_version_id_unique',
+    ).on(table.character_id, table.spell_version_id),
+  ],
+);
+
+export const character_rule_overrides = sqliteTable(
+  'character_rule_overrides',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }).notNull(),
+    character_id: integer('character_id')
+      .notNull()
+      .$type<CharacterId>()
+      .references(() => characters.id, { onDelete: 'cascade' }),
+    rule_key: varchar()('rule_key').notNull(),
+    /** Opaque JSON text. Validating its shape is a separate, flagged concern. */
+    value: sqlText()('value').notNull(),
+    note: sqlText()('note'),
+    created_at: datetime()('created_at'),
+    updated_at: datetime()('updated_at'),
+  },
+  (table) => [
+    uniqueIndex('character_rule_overrides_character_id_rule_key_unique').on(
+      table.character_id,
+      table.rule_key,
+    ),
+  ],
+);
+
+/**
+ * The optimistic-concurrency journal. Like `change_log`, no restore path
+ * reaches it, so its timestamps are safe to tighten in the contract.
+ */
+export const character_operations = sqliteTable(
+  'character_operations',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }).notNull(),
+    character_id: integer('character_id')
+      .notNull()
+      .$type<CharacterId>()
+      .references(() => characters.id, { onDelete: 'cascade' }),
+    operation_uuid: varchar()('operation_uuid').notNull(),
+    expected_revision: integer('expected_revision').notNull(),
+    resulting_revision: integer('resulting_revision').notNull(),
+    inverse_command: sqlText()('inverse_command').notNull(),
+    created_at: datetime()('created_at'),
+    updated_at: datetime()('updated_at'),
+  },
+  (table) => [
+    uniqueIndex('character_operations_operation_uuid_unique').on(
+      table.operation_uuid,
+    ),
+    index('character_operations_character_id_resulting_revision_index').on(
+      table.character_id,
+      table.resulting_revision,
+    ),
+  ],
+);

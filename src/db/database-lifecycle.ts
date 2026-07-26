@@ -8,47 +8,18 @@ import {
   hasApplicationSchema,
   prepareConnection,
 } from './database';
+import { APPLICATION_TABLES } from '../domain/contracts/tables';
 
-export const applicationTables = [
-  'background_definitions',
-  'cache',
-  'cache_locks',
-  'change_log',
-  'character_class_levels',
-  'character_operations',
-  'character_rule_overrides',
-  'character_save_points',
-  'character_source_instances',
-  'character_spell_preferences',
-  'characters',
-  'class_definitions',
-  'class_progressions',
-  'failed_jobs',
-  'feat_definitions',
-  'job_batches',
-  'jobs',
-  'password_reset_tokens',
-  'sessions',
-  'species_definitions',
-  'spell_identities',
-  'spell_identity_aliases',
-  'spell_list_memberships',
-  'spell_loadout_entries',
-  'spell_loadouts',
-  'spell_selection_slots',
-  'spell_version_attack_modes',
-  'spell_version_conditions',
-  'spell_version_damage_types',
-  'spell_version_publications',
-  'spell_version_save_abilities',
-  'spell_version_tags',
-  'spell_versions',
-  'subclass_definitions',
-  'subclass_progressions',
-  'users',
-  'warning_acknowledgements',
-  'wizard_spellbook_entries',
-] as const;
+/**
+ * Every table an application database image must contain.
+ *
+ * This was a 38-name transcription maintained by hand IN THE FILE THAT
+ * VALIDATES DATABASE IMAGES — the worst place for a list to drift, because a
+ * forgotten entry means the validator silently stops checking for a table.
+ * It is now derived from the Drizzle schema, so adding a table is a compile
+ * error until it is classified (`src/domain/contracts/tables.ts`).
+ */
+export const applicationTables = APPLICATION_TABLES;
 
 /**
  * Bundled content applied to an open application database. Called on every
@@ -214,6 +185,15 @@ export class DatabaseLifecycle {
     return this.storage.filename;
   }
 
+  /**
+   * True once {@link open} has succeeded and the connection is still live.
+   * False both before the first open and after an open that threw — the state
+   * the degraded-boot recovery path operates in.
+   */
+  get isOpen(): boolean {
+    return this.#context?.isOpen === true;
+  }
+
   open(): DatabaseContext {
     if (this.#context?.isOpen) {
       return this.#context;
@@ -262,8 +242,18 @@ export class DatabaseLifecycle {
     return this.open();
   }
 
+  /**
+   * Reads the stored image. When the lifecycle is open this first runs
+   * `PRAGMA optimize`, exactly as before. When it is NOT open — the degraded
+   * boot state, where the stored image failed schema validation — the raw
+   * storage handle is read directly, so a user can rescue their bytes before
+   * `reset()` overwrites them. Reading the file never requires the image to be
+   * one this build can interpret.
+   */
   async exportBytes(): Promise<Uint8Array> {
-    this.database.connection.exec('PRAGMA optimize');
+    if (this.isOpen) {
+      this.database.connection.exec('PRAGMA optimize');
+    }
     return (await this.storage.exportFile()).slice();
   }
 
