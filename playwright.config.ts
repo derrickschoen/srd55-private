@@ -2,6 +2,22 @@ import { defineConfig } from '@playwright/test';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+/**
+ * The dev-server port, overridable per checkout.
+ *
+ * Every git worktree of this repository ran its browser suite on the same
+ * hard-coded 4173, so two checkouts testing at once either collided outright
+ * — `reuseExistingServer: false` makes that a hard error, not a silent reuse —
+ * or perturbed each other. That contention is the only condition under which
+ * the flake recorded as F5 has ever reproduced.
+ *
+ * The default is unchanged, so a lone checkout behaves exactly as before and
+ * F5 stays reproducible on demand by starting a second dev server by hand.
+ * This only gives concurrent checkouts a way to stop sharing one port.
+ */
+const port = Number(process.env.PLAYWRIGHT_PORT ?? 4173);
+const origin = `http://127.0.0.1:${port}`;
+
 export default defineConfig({
   testDir: './tests/browser',
   fullyParallel: false,
@@ -10,13 +26,13 @@ export default defineConfig({
     process.env.PLAYWRIGHT_OUTPUT_DIR ??
     join(tmpdir(), 'dnd-multiclass-spells-static-playwright'),
   use: {
-    baseURL: 'http://127.0.0.1:4173',
+    baseURL: origin,
     headless: true,
     trace: 'retain-on-failure',
   },
   webServer: {
-    command: 'npm run dev -- --host 127.0.0.1 --port 4173',
-    url: 'http://127.0.0.1:4173',
+    command: `npm run dev -- --host 127.0.0.1 --port ${port}`,
+    url: origin,
     reuseExistingServer: false,
   },
   projects: [
