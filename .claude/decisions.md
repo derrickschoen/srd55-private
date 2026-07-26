@@ -1,5 +1,55 @@
 # Binding scope decisions
 
+## D20 — Attack profiles merged, and the sheet core is PARTLY wired after all (2026-07-26)
+
+`main` ce9c5f2. Verified by me: **1242 vitest / 90 files, build exit 0,
+64 Playwright, 48 tables.** The merge with the origins branch was conflict-free,
+which is what the file-ownership split between concurrent tracks was for — worth
+noting against D18, where a badly-scoped split cost an hour of seam repair.
+
+D14 and D15 delivered: every weapon carries the ordered ways this character can
+attack with it, each with its own bonus, dice, damage type and the ability used.
+Shillelagh appears for anyone who knows the cantrip and is DERIVED, so nothing
+is written to `character_weapons` and D1b still holds.
+
+**The defect worth remembering.** The panel built its damage-type sentence and
+its `<select>` from two independently-constructed lists, so the text read
+"Slashing" while the control read "Radiant" — a CHOICE the SRD grants, silently
+resolved two different ways on one screen. Both now come from one function, and
+"not chosen" is a real first option, because a `<select>` has no empty state and
+without it the undecided case became unreachable after any pick.
+
+**And the test covering it could not fail.** Mutation proved it: deleting the
+resolution left 1087 of 1087 passing. It was written at level 5, where True
+Strike's extra clause supplies "Radiant" and the weapon supplies "Slashing"
+whatever the code does — the expectation was true for reasons unrelated to the
+behaviour. Rewritten at level 4, where no extra clause exists, so each
+expectation names one type and denies the other. Four mutants now die.
+
+The track also read D19 mid-flight and **declined to implement it**, because the
+decisions file said that increment was not its. Correct.
+
+### Q9 was overstated, and the correction matters
+
+Q9 said `src/rules/sheet.ts` "has no production caller". Measured today, that is
+no longer true and the shape is more useful than the summary:
+
+- **LIVE:** `attacksPerAction` and `sheetProficiencyBonus`, reached from the
+  planner through the attack-profile path.
+- **NOT REACHED FROM ANYWHERE:** `hitPointMaximum`, `armorClass`,
+  `savingThrowModifier`, `skillModifier`, `initiative`, `passivePerception` —
+  zero callers outside `src/rules/`.
+- **No HP, AC or passive-perception surface exists in the UI at all** — nothing
+  in `src/ui/` so much as names them.
+
+So the wiring gap is not "the sheet core is dead code". It is: the derivations
+another feature happened to need got wired by that feature, and the six that
+only a character SHEET would use are still waiting for a sheet to exist. That is
+a smaller and better-defined piece of work than Q9 implied, and it is the next
+increment once the running tracks land.
+
+---
+
 ## D19 — Extra Attack is not keyed on (class, level), and the SRD already proves it (2026-07-26)
 
 Owner: *"Add to the extra attack model that some subclasses can add extra attack
