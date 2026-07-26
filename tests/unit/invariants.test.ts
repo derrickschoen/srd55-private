@@ -3,7 +3,7 @@ import sqlite3InitModule, {
   type Sqlite3Static,
 } from '@sqlite.org/sqlite-wasm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import schema from '../../src/db/schema.sql?raw';
+import { schemaSources } from '../helpers/schema-sources';
 import { DatabaseContext } from '../../src/db/database';
 import {
   encodeBoolean,
@@ -25,11 +25,11 @@ const checkError = `SQLITE_CONSTRAINT_CHECK: sqlite3 result code 275: CHECK cons
 let sqlite3: Sqlite3Static;
 const openDatabases: Database[] = [];
 
-function openDb(applySchema = true): Database {
+function openDb(schemaSql: string, applySchema = true): Database {
   const db = new sqlite3.oo1.DB(':memory:', 'c');
   openDatabases.push(db);
   if (applySchema) {
-    db.exec(schema);
+    db.exec(schemaSql);
   }
   return db;
 }
@@ -109,20 +109,24 @@ afterAll(() => {
   }
 });
 
-describe('connection prerequisites', () => {
+// The browser-product invariants (both named triggers, the named CHECK, the
+// composite foreign keys, PRAGMA state) are NOT Laravel parity — they are
+// product guarantees. Each schema artifact must satisfy all of them.
+for (const [sourceLabel, schemaSql] of schemaSources) {
+describe(`connection prerequisites (${sourceLabel})`, () => {
   it('observes foreign keys OFF by default and enables them through schema bootstrap', () => {
-    const db = openDb(false);
+    const db = openDb(schemaSql, false);
     expect(db.selectValue('PRAGMA foreign_keys')).toBe(0);
 
-    db.exec(schema);
+    db.exec(schemaSql);
 
     expect(db.selectValue('PRAGMA foreign_keys')).toBe(1);
   });
 });
 
-describe('typed synchronous persistence primitives', () => {
+describe(`typed synchronous persistence primitives (${sourceLabel})`, () => {
   it('decodes persisted scalar, boolean, and JSON values without leaking SQLite rows', () => {
-    const context = new DatabaseContext(openDb());
+    const context = new DatabaseContext(openDb(schemaSql));
     const id = context.exec(
       `INSERT INTO characters (name, allow_legacy, notes)
        VALUES (?, ?, ?)`,
@@ -154,7 +158,7 @@ describe('typed synchronous persistence primitives', () => {
   });
 
   it('uses savepoints for nested work and persists only the successful writes', () => {
-    const context = new DatabaseContext(openDb());
+    const context = new DatabaseContext(openDb(schemaSql));
 
     context.transaction((outer) => {
       outer.exec("INSERT INTO characters (name) VALUES ('Outer before')");
@@ -177,7 +181,7 @@ describe('typed synchronous persistence primitives', () => {
   });
 
   it('rolls back the complete outer transaction when its callback fails', () => {
-    const context = new DatabaseContext(openDb());
+    const context = new DatabaseContext(openDb(schemaSql));
     expect(() =>
       context.transaction((db) => {
         db.exec("INSERT INTO characters (name) VALUES ('Never persisted')");
@@ -189,9 +193,9 @@ describe('typed synchronous persistence primitives', () => {
   });
 });
 
-describe('ported persistence invariants', () => {
+describe(`ported persistence invariants (${sourceLabel})`, () => {
   it('rejects fixed-grant plus user-selection through both exact ABORT triggers', () => {
-    const db = openDb();
+    const db = openDb(schemaSql);
     const spellId = seedSpell(db);
     const characterId = seedCharacter(db, 'Trigger Test');
     const sourceId = seedSource(db, characterId, 'trigger');
@@ -241,7 +245,7 @@ describe('ported persistence invariants', () => {
   });
 
   it('rejects both cross-character source and wrong-class subclass composite FKs', () => {
-    const db = openDb();
+    const db = openDb(schemaSql);
     const aliceId = seedCharacter(db, 'Alice');
     const bobId = seedCharacter(db, 'Bob');
     const bobSourceId = seedSource(db, bobId, 'bob');
@@ -277,7 +281,7 @@ describe('ported persistence invariants', () => {
   });
 
   it('rejects the exclusive-assignment CHECK when triggers are absent', () => {
-    const db = openDb();
+    const db = openDb(schemaSql);
     const spellId = seedSpell(db);
     const characterId = seedCharacter(db, 'Check Test');
     const sourceId = seedSource(db, characterId, 'check');
@@ -302,3 +306,4 @@ describe('ported persistence invariants', () => {
     ).toBe(checkError);
   });
 });
+}

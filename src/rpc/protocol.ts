@@ -13,7 +13,13 @@ export type RpcErrorCode =
   | 'unknown_method'
   | 'invalid_params'
   | 'handler_error'
-  | 'transport_error';
+  | 'transport_error'
+  /**
+   * The stored database image does not match the application schema, so the
+   * worker booted degraded. Only the recovery methods
+   * (`system.exportDatabase`, `system.reset`) are dispatchable.
+   */
+  | 'schema_mismatch';
 
 export interface RpcErrorPayload {
   code: RpcErrorCode;
