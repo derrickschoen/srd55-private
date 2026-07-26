@@ -1,5 +1,62 @@
 # Binding scope decisions
 
+## D23 — Q10 closed: a subclass can be imported, and a real sweep bug was found doing it (2026-07-26)
+
+`main` a17e4e1. Verified by me: **1467 vitest / 103 files, build exit 0,
+66 Playwright.**
+
+The owner's goal — "we need to test it for if the phb gets imported" — is now
+met end to end. Their own legally obtained content travels through catalog
+import; nothing is bundled that is not SRD 5.2.
+
+**The test that existed to name the gap became the test that proves it closed.**
+`is not in the catalog format, and catalog.import rejects it outright` is gone,
+replaced by assertions that the fixture imports, lands every field, and **raises
+the attack count at Bard 6 and not at Bard 5** — the D19 grant reaching the
+derivation. Renaming a failing-by-design test to keep it green was the specific
+failure mode here, and the brief called it out in advance.
+
+### The bug it found, which nobody asked it to look for
+
+Importing an EMPTY spell document alongside a subclass document swept nothing,
+while the same empty document ALONE swept correctly. Emptiness was inferred from
+the whole parse (`records.kinds.size === 0`), so an empty file's meaning survived
+only when it was the only file — and the multi-file picker makes the mixed
+selection ordinary.
+
+A user clearing their spell catalog while importing a subclass would have been
+told nothing happened, and it would have looked like the empty file was ignored.
+The fix moves the declaration to where it belongs: a document declares its own
+kind. The special case collapsed and the now-unreachable branch was deleted
+rather than left as uncovered dead code. The regression test was written FIRST
+and confirmed red before the fix.
+
+### Cross-kind safety, tested rather than assumed
+
+Import is a full replacement, which makes silent deletion the obvious hazard.
+Spells survive a subclass import; subclasses survive a spell import; both are
+tested by name. A bundled SRD subclass cannot be targeted by an imported
+document, by key or by name — so a user's import cannot overwrite free-licensed
+content it did not supply.
+
+### A finding it REJECTED, correctly
+
+The review claimed the tests coupled to another track's in-flight files. Wrong,
+and disproved rather than argued: all five symbols resolve at HEAD via
+`git show`, and the `?? src/sharing/` the reviewer had seen was the OTHER
+worktree's untracked files. Depending on committed shared API is normal.
+Rejecting a wrong finding with evidence is the behaviour the protocol wants.
+
+### Left open, and named
+
+Subclass REMOVAL is still impossible: there is no way to retire an imported
+subclass. It needs `provenance` and `is_active` columns on
+`subclass_definitions`, which are `db/schema/` changes this track was scoped
+away from. Now stated in the user-facing `docs/CATALOG-IMPORT.md` rather than
+only in a source comment.
+
+---
+
 ## F7 — Queue item (a) is far smaller than its brief says: 122 of 122 call sites already pass a codec (measured 2026-07-26)
 
 Measured before starting the work, because the brief carries a number I put
