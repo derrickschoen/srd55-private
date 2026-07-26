@@ -25,8 +25,19 @@ import type {
   SlotState,
 } from '../../src/domain/enums';
 import {
+  abilities,
+  rulesEditions,
+  selectionEligibilities,
+  slotBuckets,
+  slotStates,
+} from '../../src/domain/enums';
+import {
   datetime,
+  integerAtLeast,
   laravelDefault,
+  nullOrIntegerAtLeast,
+  nullOrOneOf,
+  oneOf,
   sqlText,
   tinyint1,
   varchar,
@@ -65,7 +76,57 @@ export const characters = sqliteTable('characters', {
   notes: sqlText()('notes'),
   created_at: datetime()('created_at'),
   updated_at: datetime()('updated_at'),
-});
+}, () => [
+  /**
+   * 1..30 is not a house rule: it is the range `UpdateAbilityCommand` refuses
+   * outside of ("Ability scores must be between 1 and 30."), the range the
+   * portable-backup validator refuses outside of, the range share import
+   * refuses outside of, and the range `abilityScore` in the row contracts
+   * already declares. All six columns are named so that omitting one from this
+   * expression is a failing test rather than a silent gap.
+   */
+  check(
+    'characters_ability_scores_check',
+    sql`strength BETWEEN 1 AND 30
+      AND dexterity BETWEEN 1 AND 30
+      AND constitution BETWEEN 1 AND 30
+      AND intelligence BETWEEN 1 AND 30
+      AND wisdom BETWEEN 1 AND 30
+      AND charisma BETWEEN 1 AND 30`,
+  ),
+  /**
+   * An edition outside this set matches no catalog row, so the character's
+   * spell lists come back empty with no error anywhere — the silent-wrong this
+   * constraint exists to make impossible. Both restore paths already refuse it
+   * in a document (`character-backup.ts`, `sharing/schema.ts`).
+   */
+  check(
+    'characters_rules_edition_preference_check',
+    oneOf('rules_edition_preference', rulesEditions),
+  ),
+  /**
+   * A DEFENDED NULL: null means "derive the bonus from total level" and is the
+   * normal case, so the null limb is the constraint's most important half. What
+   * is refused is 0 and below — a proficiency bonus of zero is not an override,
+   * it is a lost one. The backup validator already requires a positive integer.
+   *
+   * `nullOrIntegerAtLeast` rather than a bare `>= 1` — see its comment in
+   * `columns.ts`. Written bare, `'abc' >= 1` is TRUE in SQLite, so the
+   * constraint would wave through the one value class it is here to stop.
+   */
+  check(
+    'characters_proficiency_bonus_override_check',
+    nullOrIntegerAtLeast('proficiency_bonus_override', 1),
+  ),
+  /**
+   * `revision` is the optimistic-concurrency counter every command compares
+   * against; a negative one cannot be reached by incrementing from the
+   * default 0. A TEXT revision would not merely be wrong, it would defeat the
+   * comparison outright, which is why the integer limb is load-bearing here
+   * rather than decorative.
+   */
+  check('characters_revision_check', integerAtLeast('revision', 0)),
+]);
 
 /**
  * A source a character has taken: a class, subclass, feat, species or
@@ -104,6 +165,29 @@ export const character_source_instances = sqliteTable(
     display_name: varchar()('display_name').notNull(),
     config: sqlText()('config'),
     acquired_at_character_level: integer('acquired_at_character_level'),
+    /**
+     * NO CHECK CONSTRAINT, AND THE REASON IS STRONGER THAN "THE PROOF PHASE
+     * WAS UNSURE". This looks like the most obvious enum column in the schema —
+     * it is a `state`, it is `NOT NULL`, it defaults to `'active'` — and
+     * constraining it to `slotStates` would have broken class removal on its
+     * FIRST WRITE. `'tombstoned'` is not a member of `slotStates`, yet four
+     * shipped writers set it here: `remove-source.ts:53`, `update-class.ts:250`
+     * and `:337`, and `grant-rule-slot-generator.ts:724`.
+     *
+     * `spell_selection_slots.state` a few tables down IS constrained, to a
+     * vocabulary this column does not share. Two columns named `state`, two
+     * different closed sets, and only one of them is declared — which is
+     * exactly the trap. This column's real vocabulary has never been written
+     * down anywhere: it is `varchar()` with no type parameter, and
+     * `src/domain/contracts/rows.ts` types it `sqlText` on purpose, because
+     * "inventing a constraint the schema does not declare is exactly the
+     * over-tightening D6b forbids".
+     *
+     * Declaring the enum first, in `src/domain/enums.ts`, and typing the column
+     * with it is the prerequisite. A CHECK transcribed here from a grep of the
+     * writers would be a second, unowned copy of a vocabulary — the precise
+     * duplication `oneOf` exists to prevent.
+     */
     state: varchar()('state').notNull().default(laravelDefault('active')),
     notes: sqlText()('notes'),
     created_at: datetime()('created_at'),
@@ -163,6 +247,22 @@ export const character_class_levels = sqliteTable(
     updated_at: datetime()('updated_at'),
   },
   (table) => [
+    /**
+     * Nullable because most classes never override their spellcasting ability;
+     * the null limb is the ordinary case. A non-member here would feed a save
+     * DC and an attack bonus computed off an ability score column that does not
+     * exist. `UpdateAbilityCommand` and share import both already refuse one.
+     *
+     * NOT CONSTRAINED HERE: `level`. Production bounds it to 1..20 in three
+     * places, but `tests/integration/rules/class-progression.test.ts` inserts
+     * level 21 on purpose to force a missing progression row, so the proof
+     * phase classified the bound BLOCKED rather than accepted. Unblocking it
+     * means rewriting that fixture, which is a separate decision.
+     */
+    check(
+      'character_class_levels_spellcasting_ability_override_check',
+      nullOrOneOf('spellcasting_ability_override', abilities),
+    ),
     uniqueIndex(
       'character_class_levels_character_id_class_definition_id_unique',
     ).on(table.character_id, table.class_definition_id),
@@ -272,6 +372,40 @@ export const spell_selection_slots = sqliteTable(
     check(
       'spell_slots_exclusive_assignment_check',
       sql`fixed_spell_version_id IS NULL OR current_spell_version_id IS NULL`,
+    ),
+    /**
+     * A slot in a bucket nobody knows is invisible to every prepared/known
+     * count in the planner — it simply stops being counted, with no warning.
+     * `GrantRule` already refuses a non-member before the sole writer
+     * (`grant-rule-slot-generator.ts`) ever binds it.
+     */
+    check('spell_selection_slots_bucket_check', oneOf('bucket', slotBuckets)),
+    /**
+     * `isUsableSlotState` returns false for anything outside this set, so an
+     * unknown state silently disables the slot rather than erroring.
+     */
+    check('spell_selection_slots_state_check', oneOf('state', slotStates)),
+    check(
+      'spell_selection_slots_selection_eligibility_check',
+      oneOf('selection_eligibility', selectionEligibilities),
+    ),
+    /**
+     * ONE constraint, because it is one fact: the slot's level window is
+     * well-formed. `GrantRule.level()` already refuses a bound outside 0..9 and
+     * `GrantRule` already refuses `level_min > level_max` with an explicit
+     * RangeError. An inverted window is worse than an out-of-range one: it
+     * matches no spell at all, so the slot renders as an empty picker.
+     *
+     * NOT CONSTRAINED HERE: `eligibility_kind`. Its vocabulary is
+     * `grantRuleKinds`, but the column is a plain `varchar()` whose row
+     * contract deliberately declines to enum it, and a unit fixture writes the
+     * shorthand `'list'`. Proof phase: BLOCKED.
+     */
+    check(
+      'spell_selection_slots_level_window_check',
+      sql`spell_level_min BETWEEN 0 AND 9
+        AND spell_level_max BETWEEN 0 AND 9
+        AND spell_level_min <= spell_level_max`,
     ),
     foreignKey({
       columns: [table.source_instance_id, table.character_id],
