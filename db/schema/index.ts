@@ -20,4 +20,5 @@ export * from './character';
 export * from './origins';
 export * from './relations';
 export * from './columns';
+export * from './sheet';
 export * from './weapons';

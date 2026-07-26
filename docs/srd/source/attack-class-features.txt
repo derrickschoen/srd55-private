@@ -63,15 +63,59 @@ https://creativecommons.org/licenses/by/4.0/legalcode.
      Strength modifier to determine the save DC.            
                                                             
 
-=== Extra Attack: the class-table rows that grant it ===
+=== Extra Attack: the granting rows, EACH UNDER ITS OWN CLASS TABLE ===
 
-         5           +3        Extra Attack, Fast Movement                                 3   
-         5             +3         Extra Attack, Tactical Shift                                 
-         11            +4         Two Extra Attacks                                            
-         20            +6         Three Extra Attacks                                          
-        5         +3      Extra Attack, Stunning Strike                           1d8          
-        5         +3        Extra Attack, Faithful Steed            2          6        4      
-        5         +3        Extra Attack                        3         6        4      2    
+    Re-extracted with the class table titles and column headers included.
+    An earlier extract of this section carried the rows WITHOUT their class
+    names, which made attribution impossible from the file alone. Each block
+    below is the class Features table title, its column headers, and every
+    row of that table whose Class Features cell names Extra Attack.
+
+--- Barbarian Features table (page ~28) ---
+     Barbarian Features
+                Proficiency                                                                          Rage       Weapon
+       Level      Bonus        Class Features                                            Rages      Damage      Mastery
+         5           +3        Extra Attack, Fast Movement                                 3          +2           3
+
+--- Fighter Features table (page ~47) ---
+     Fighter Features
+                  Proficiency                                                                     Second        Weapon
+       Level        Bonus          Class Features                                                  Wind         Mastery
+         5             +3         Extra Attack, Tactical Shift                                       3              4
+         11            +4         Two Extra Attacks                                                  4              5
+         20            +6         Three Extra Attacks                                                4              6
+
+--- Monk Features table (page ~49) ---
+     Monk Features
+              Proficiency                                                       Martial       Focus     Unarmored
+      Level     Bonus     Class Features                                         Arts         Points    Movement
+        5         +3      Extra Attack, Stunning Strike                           1d8           5          +10 ft.
+
+--- Paladin Features table (page ~55) ---
+     Paladin Features
+              Proficiency                                        Channel    Prepared    —Spell Slots per Spell Level—
+      Level     Bonus       Class Features                       Divinity    Spells     1      2      3      4       5
+        5         +3        Extra Attack, Faithful Steed            2          6        4      2     —      —        —
+
+--- Ranger Features table (page ~57) ---
+     Ranger Features
+              Proficiency                                    Favored   Prepared    —Spell Slots per Spell Level—
+      Level     Bonus       Class Features                    Enemy     Spells     1      2      3      4      5
+        5         +3        Extra Attack                        3         6        4      2     —      —      —
+
+--- Fighter, Level 5: Extra Attack — what the feature does (right column) ---
+     expended use when you finish a Short Rest, and you          Level 5: Extra Attack
+     regain all expended uses when you finish a Long             You can attack twice instead of once whenever you
+     Rest.                                                       take the Attack action on your turn.
+
+--- Fighter, Levels 11 and 20 — THE ATTACK COUNTS, STATED (right column) ---
+       Once you use this feature, you can’t do so again          Level 11: Two Extra Attacks
+     until you finish a Short or Long Rest. Starting at          You can attack three times instead of once when-
+     level 17, you can use it twice before a rest but only       ever you take the Attack action on your turn.
+
+     Champion subclass is detailed after this class’s de-        Level 20: Three Extra Attacks
+     scription. A subclass is a specialization that grants       You can attack four times instead of once whenever
+     you features at certain Fighter levels. For the rest        you take the Attack action on your turn.
 
 === Extra Attack and MULTICLASSING (page ~24, right column) ===
 

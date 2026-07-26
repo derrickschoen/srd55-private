@@ -5,6 +5,29 @@
 
 PRAGMA foreign_keys = ON;
 
+CREATE TABLE `armor_templates` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`content_key` VARCHAR NOT NULL,
+	`rules_edition` VARCHAR DEFAULT '2024' NOT NULL,
+	`name` VARCHAR NOT NULL,
+	`category` VARCHAR NOT NULL,
+	`armor_class` integer NOT NULL,
+	`dex_bonus` VARCHAR NOT NULL,
+	`dex_bonus_max` integer,
+	`strength_requirement` integer,
+	`stealth_disadvantage` TINYINT(1) DEFAULT '0' NOT NULL,
+	`created_at` DATETIME,
+	`updated_at` DATETIME,
+	CONSTRAINT "armor_templates_category_check" CHECK(`category` IN ('light', 'medium', 'heavy', 'shield')),
+	CONSTRAINT "armor_templates_dex_bonus_check" CHECK(`dex_bonus` IN ('full', 'capped', 'none')),
+	CONSTRAINT "armor_templates_dex_bonus_max_check" CHECK((`dex_bonus` = 'capped') = (`dex_bonus_max` IS NOT NULL) AND (`dex_bonus_max` IS NULL OR (typeof(`dex_bonus_max`) = 'integer' AND `dex_bonus_max` >= 0))),
+	CONSTRAINT "armor_templates_shield_check" CHECK(`category` <> 'shield' OR `dex_bonus` = 'none'),
+	CONSTRAINT "armor_templates_armor_class_check" CHECK(typeof(`armor_class`) = 'integer' AND `armor_class` >= 1),
+	CONSTRAINT "armor_templates_strength_requirement_check" CHECK(`strength_requirement` IS NULL OR (typeof(`strength_requirement`) = 'integer' AND `strength_requirement` >= 1)),
+	CONSTRAINT "armor_templates_rules_edition_check" CHECK(`rules_edition` IN ('2014', '2024', 'expanded'))
+);
+
+CREATE UNIQUE INDEX `armor_templates_content_key_unique` ON `armor_templates` (`content_key`);
 CREATE TABLE `background_definitions` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`content_key` VARCHAR NOT NULL,
@@ -269,6 +292,17 @@ CREATE TABLE `characters` (
 	CONSTRAINT "characters_revision_check" CHECK(typeof(`revision`) = 'integer' AND `revision` >= 0)
 );
 
+CREATE TABLE `class_armor_training` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`class_definition_id` integer NOT NULL,
+	`category` VARCHAR NOT NULL,
+	`created_at` DATETIME,
+	`updated_at` DATETIME,
+	FOREIGN KEY (`class_definition_id`) REFERENCES `class_definitions`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "class_armor_training_category_check" CHECK(`category` IN ('light', 'medium', 'heavy', 'shield'))
+);
+
+CREATE UNIQUE INDEX `class_armor_training_class_definition_id_category_unique` ON `class_armor_training` (`class_definition_id`,`category`);
 CREATE TABLE `class_definitions` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`content_key` VARCHAR NOT NULL,
@@ -291,6 +325,30 @@ CREATE TABLE `class_definitions` (
 
 CREATE UNIQUE INDEX `class_definitions_content_key_unique` ON `class_definitions` (`content_key`);
 CREATE UNIQUE INDEX `class_definitions_name_rules_edition_unique` ON `class_definitions` (`name`,`rules_edition`);
+CREATE TABLE `class_extra_attack_grants` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`class_definition_id` integer NOT NULL,
+	`class_level` integer NOT NULL,
+	`attack_count` integer NOT NULL,
+	`created_at` DATETIME,
+	`updated_at` DATETIME,
+	FOREIGN KEY (`class_definition_id`) REFERENCES `class_definitions`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "class_extra_attack_grants_check" CHECK(class_level BETWEEN 1 AND 20 AND typeof(`attack_count`) = 'integer' AND `attack_count` >= 2)
+);
+
+CREATE UNIQUE INDEX `class_extra_attack_grants_class_definition_id_class_level_unique` ON `class_extra_attack_grants` (`class_definition_id`,`class_level`);
+CREATE TABLE `class_martial_arts_dice` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`class_definition_id` integer NOT NULL,
+	`class_level` integer NOT NULL,
+	`martial_arts_die` integer NOT NULL,
+	`created_at` DATETIME,
+	`updated_at` DATETIME,
+	FOREIGN KEY (`class_definition_id`) REFERENCES `class_definitions`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "class_martial_arts_dice_check" CHECK(class_level BETWEEN 1 AND 20 AND typeof(`martial_arts_die`) = 'integer' AND `martial_arts_die` IN (4, 6, 8, 10, 12))
+);
+
+CREATE UNIQUE INDEX `class_martial_arts_dice_class_definition_id_class_level_unique` ON `class_martial_arts_dice` (`class_definition_id`,`class_level`);
 CREATE TABLE `class_progressions` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`class_definition_id` integer NOT NULL,
@@ -307,6 +365,41 @@ CREATE TABLE `class_progressions` (
 );
 
 CREATE UNIQUE INDEX `class_progressions_class_definition_id_class_level_unique` ON `class_progressions` (`class_definition_id`,`class_level`);
+CREATE TABLE `class_saving_throw_proficiencies` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`class_definition_id` integer NOT NULL,
+	`ability` VARCHAR NOT NULL,
+	`created_at` DATETIME,
+	`updated_at` DATETIME,
+	FOREIGN KEY (`class_definition_id`) REFERENCES `class_definitions`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "class_saving_throw_proficiencies_ability_check" CHECK(`ability` IN ('strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma'))
+);
+
+CREATE UNIQUE INDEX `class_saving_throw_proficiencies_class_definition_id_ability_unique` ON `class_saving_throw_proficiencies` (`class_definition_id`,`ability`);
+CREATE TABLE `class_sheet_traits` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`class_definition_id` integer NOT NULL,
+	`hit_die` integer NOT NULL,
+	`skill_choice_count` integer NOT NULL,
+	`skill_choice_from_any` TINYINT(1) DEFAULT '0' NOT NULL,
+	`created_at` DATETIME,
+	`updated_at` DATETIME,
+	FOREIGN KEY (`class_definition_id`) REFERENCES `class_definitions`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "class_sheet_traits_check" CHECK(typeof(`hit_die`) = 'integer' AND `hit_die` IN (6, 8, 10, 12) AND typeof(`skill_choice_count`) = 'integer' AND `skill_choice_count` >= 1)
+);
+
+CREATE UNIQUE INDEX `class_sheet_traits_class_definition_id_unique` ON `class_sheet_traits` (`class_definition_id`);
+CREATE TABLE `class_skill_options` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`class_definition_id` integer NOT NULL,
+	`skill` VARCHAR NOT NULL,
+	`created_at` DATETIME,
+	`updated_at` DATETIME,
+	FOREIGN KEY (`class_definition_id`) REFERENCES `class_definitions`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "class_skill_options_skill_check" CHECK(`skill` IN ('acrobatics', 'animal_handling', 'arcana', 'athletics', 'deception', 'history', 'insight', 'intimidation', 'investigation', 'medicine', 'nature', 'perception', 'performance', 'persuasion', 'religion', 'sleight_of_hand', 'stealth', 'survival'))
+);
+
+CREATE UNIQUE INDEX `class_skill_options_class_definition_id_skill_unique` ON `class_skill_options` (`class_definition_id`,`skill`);
 CREATE TABLE `class_weapon_mastery_counts` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`class_definition_id` integer NOT NULL,
@@ -330,6 +423,18 @@ CREATE TABLE `class_weapon_mastery_grants` (
 );
 
 CREATE UNIQUE INDEX `class_weapon_mastery_grants_class_definition_id_unique` ON `class_weapon_mastery_grants` (`class_definition_id`);
+CREATE TABLE `class_weapon_proficiencies` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`class_definition_id` integer NOT NULL,
+	`category` VARCHAR NOT NULL,
+	`property_qualifier` VARCHAR,
+	`created_at` DATETIME,
+	`updated_at` DATETIME,
+	FOREIGN KEY (`class_definition_id`) REFERENCES `class_definitions`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "class_weapon_proficiencies_category_check" CHECK(`category` IN ('simple', 'martial'))
+);
+
+CREATE UNIQUE INDEX `class_weapon_proficiencies_class_definition_id_category_unique` ON `class_weapon_proficiencies` (`class_definition_id`,`category`);
 CREATE TABLE `feat_definitions` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`content_key` VARCHAR NOT NULL,

@@ -5,10 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite --configLoader runner",
-    "build": "tsc -b && vite build --configLoader runner",
+    "build": "tsc -b && vite build --configLoader runner && node tools/assert-dist-clean.mjs",
     "typecheck": "tsc -b",
     "test": "vitest run --configLoader runner",
     "test:unit": "vitest run --configLoader runner tests/unit",
+    "test:live": "AI_BRIDGE_LIVE=1 vitest run --configLoader runner tests/live",
     "test:browser": "playwright test",
     "test:all": "npm run test && npm run build && npm run test:browser",
     "db:schema": "vite-node scripts/build-schema.ts",

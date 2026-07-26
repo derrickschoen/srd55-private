@@ -34,6 +34,14 @@ export default defineConfig({
     command: `npm run dev -- --host 127.0.0.1 --port ${port}`,
     url: origin,
     reuseExistingServer: false,
+    /**
+     * The dev-only AI bridge spawns a deterministic offline stand-in instead of
+     * the real `claude` CLI. The stand-in speaks the genuine stream-json shape,
+     * init event included, so the browser suite exercises the real spawn,
+     * containment-assertion, parse, stream and kill paths without needing the
+     * network, an authenticated login, or a paid API call.
+     */
+    env: { AI_BRIDGE_FAKE: '1' },
   },
   projects: [
     {

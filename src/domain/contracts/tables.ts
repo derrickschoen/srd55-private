@@ -103,7 +103,19 @@ export type TableRole =
    * — the type `SOURCE_DEFINITION_TABLE` is checked against — start admitting
    * tables no `source_type` can ever name.
    */
-  | 'catalog_origin';
+  | 'catalog_origin'
+  /**
+   * The SRD armour catalog. Its own member for the SAME reason `catalog_weapon`
+   * is one, applied consistently: armour is not a weapon, so filing
+   * `armor_templates` under `catalog_weapon` to avoid a one-line union change
+   * would make the role field lie in exactly the way the line above refuses.
+   *
+   * The two are not merged into a `catalog_equipment` either. They share their
+   * scope booleans today, but so do the seven `catalog_class` tables and the
+   * three `catalog_source` ones; the role names what a table HOLDS, and no
+   * consumer wants "weapons or armour" as one set.
+   */
+  | 'catalog_armor';
 
 /**
  * The scopes a table can participate in.
@@ -466,6 +478,87 @@ export const TABLE_SCOPES = {
     backupReference: false,
   },
 
+  /**
+   * SHEET CORE (D11 part 1, D12). Seven class-content tables and the armour
+   * catalog.
+   *
+   * All `catalog_class` except `armor_templates`, which is `catalog_armor` — its
+   * own role, because armour is not a weapon and `catalog_weapon`'s own comment
+   * is the argument for not reusing it. Its SCOPES are identical to
+   * `weapon_templates`: by D1b a character stores VALUES and holds no template
+   * id, so there is no id for a backup to resolve. NONE of these eight are
+   * reference kinds, for exactly the reason the progression and mastery tables
+   * are not.
+   *
+   * `snapshot: false` throughout because none of these is character state.
+   * When the character-side armour and hit-point-roll tables land, THOSE will be
+   * snapshot/backup/share tables; these stay catalog.
+   */
+  class_sheet_traits: {
+    role: 'catalog_class',
+    snapshot: false,
+    backupDirect: false,
+    backup: false,
+    share: false,
+    backupReference: false,
+  },
+  class_saving_throw_proficiencies: {
+    role: 'catalog_class',
+    snapshot: false,
+    backupDirect: false,
+    backup: false,
+    share: false,
+    backupReference: false,
+  },
+  class_skill_options: {
+    role: 'catalog_class',
+    snapshot: false,
+    backupDirect: false,
+    backup: false,
+    share: false,
+    backupReference: false,
+  },
+  class_armor_training: {
+    role: 'catalog_class',
+    snapshot: false,
+    backupDirect: false,
+    backup: false,
+    share: false,
+    backupReference: false,
+  },
+  class_weapon_proficiencies: {
+    role: 'catalog_class',
+    snapshot: false,
+    backupDirect: false,
+    backup: false,
+    share: false,
+    backupReference: false,
+  },
+  class_extra_attack_grants: {
+    role: 'catalog_class',
+    snapshot: false,
+    backupDirect: false,
+    backup: false,
+    share: false,
+    backupReference: false,
+  },
+  class_martial_arts_dice: {
+    role: 'catalog_class',
+    snapshot: false,
+    backupDirect: false,
+    backup: false,
+    share: false,
+    backupReference: false,
+  },
+  armor_templates: {
+    role: 'catalog_armor',
+    snapshot: false,
+    backupDirect: false,
+    backup: false,
+    share: false,
+    backupReference: false,
+  },
+
   // --- standalone sources -------------------------------------------------
   feat_definitions: {
     role: 'catalog_source',
@@ -698,6 +791,7 @@ export function order<Member extends string>() {
  * independently rather than reading it from here.
  */
 export const APPLICATION_TABLES = order<AnyTableName>()([
+  'armor_templates',
   'background_definitions',
   'background_templates',
   'change_log',
@@ -712,10 +806,17 @@ export const APPLICATION_TABLES = order<AnyTableName>()([
   'character_spell_preferences',
   'character_weapons',
   'characters',
+  'class_armor_training',
   'class_definitions',
+  'class_extra_attack_grants',
+  'class_martial_arts_dice',
   'class_progressions',
+  'class_saving_throw_proficiencies',
+  'class_sheet_traits',
+  'class_skill_options',
   'class_weapon_mastery_counts',
   'class_weapon_mastery_grants',
+  'class_weapon_proficiencies',
   'feat_definitions',
   'species_definitions',
   'species_template_traits',

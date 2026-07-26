@@ -1,0 +1,726 @@
+import { describe, expect, it } from 'vitest';
+import { AbilityScores } from '../../../src/rules/ability-scores';
+import {
+  armorClass,
+  attacksPerAction,
+  fixedHitPointsPerLevel,
+  hitPointMaximum,
+  initiative,
+  passivePerception,
+  savingThrowModifier,
+  savingThrowProficiencies,
+  sheetProficiencyBonus,
+  skillModifier,
+  totalCharacterLevel,
+  type SheetArmor,
+  type SheetClass,
+} from '../../../src/rules/sheet';
+import { parseSkillAbilities } from '../../../src/rules/skills';
+import { parseSrdArmorTemplates } from '../../../src/rules/armor-srd';
+
+/**
+ * EVERY NUMBER HERE IS COMPUTED BY HAND AND WRITTEN AS A LITERAL.
+ *
+ * Not one expectation was produced by running the function and pasting its
+ * output — that is the tautology D7 forbids, and it is especially tempting for
+ * arithmetic, where the wrong answer looks exactly as plausible as the right
+ * one. The working is written out beside each assertion so a reviewer can check
+ * the sum without running anything.
+ *
+ * The SRD numbers the formulas are checked against are transcribed from
+ * `docs/srd/source/sheet-math.txt` and `docs/srd/source/multiclassing.txt` by
+ * eye, and the multiclass cases are the ones a naive implementation gets wrong.
+ */
+
+function scores(values: Partial<Record<string, number>>): AbilityScores {
+  return AbilityScores.fromArray({
+    strength: 10,
+    dexterity: 10,
+    constitution: 10,
+    intelligence: 10,
+    wisdom: 10,
+    charisma: 10,
+    ...values,
+  });
+}
+
+const FIGHTER: SheetClass = {
+  class_name: 'Fighter',
+  level: 5,
+  hit_die: 10,
+  is_starting_class: true,
+  saving_throws: ['strength', 'constitution'],
+  extra_attack_counts: new Map([
+    [5, 2],
+    [11, 3],
+    [20, 4],
+  ]),
+};
+
+const WIZARD: SheetClass = {
+  class_name: 'Wizard',
+  level: 3,
+  hit_die: 6,
+  is_starting_class: false,
+  saving_throws: ['intelligence', 'wisdom'],
+};
+
+const RANGER: SheetClass = {
+  class_name: 'Ranger',
+  level: 5,
+  hit_die: 10,
+  is_starting_class: false,
+  saving_throws: ['strength', 'dexterity'],
+  extra_attack_counts: new Map([[5, 2]]),
+};
+
+describe('proficiency bonus and total level', () => {
+  it('sums levels across classes rather than taking the highest', () => {
+    // Fighter 5 + Wizard 3 = 8.
+    expect(totalCharacterLevel([FIGHTER, WIZARD])).toBe(8);
+    // `multiclassing.txt`: "if you are a level 3 Fighter / level 2 Rogue, you
+    // have the Proficiency Bonus of a level 5 character, which is +3." That
+    // worked example is transcribed here as its own case.
+    const fighter3: SheetClass = { ...FIGHTER, level: 3 };
+    const rogue2: SheetClass = { ...WIZARD, class_name: 'Rogue', level: 2 };
+    expect(totalCharacterLevel([fighter3, rogue2])).toBe(5);
+    expect(sheetProficiencyBonus([fighter3, rogue2])).toBe(3);
+    // Taking the maximum per class would give a level 3 character, +2 — the
+    // bug this asserts against.
+    expect(sheetProficiencyBonus([fighter3, rogue2])).not.toBe(2);
+  });
+
+  it('walks the whole printed Proficiency Bonus table', () => {
+    // `skills-table.txt`: Up to 4 -> +2, 5-8 -> +3, 9-12 -> +4, 13-16 -> +5,
+    // 17-20 -> +6. Both sides of every boundary.
+    const at = (level: number) =>
+      sheetProficiencyBonus([{ ...FIGHTER, level }]);
+    expect([at(1), at(4)]).toEqual([2, 2]);
+    expect([at(5), at(8)]).toEqual([3, 3]);
+    expect([at(9), at(12)]).toEqual([4, 4]);
+    expect([at(13), at(16)]).toEqual([5, 5]);
+    expect([at(17), at(20)]).toEqual([6, 6]);
+  });
+
+  it('honours the stored override, as the planner already does', () => {
+    // Fighter 5 / Wizard 3 is +3 by the table; the override wins so that the
+    // sheet and the spell planner cannot print two different numbers.
+    expect(sheetProficiencyBonus([FIGHTER, WIZARD], 7)).toBe(7);
+    expect(sheetProficiencyBonus([FIGHTER, WIZARD], null)).toBe(3);
+  });
+});
+
+describe('hit points', () => {
+  it('matches the printed Fixed Hit Points table for every die size', () => {
+    // `sheet-math.txt`, Fixed Hit Points by Class — transcribed by eye:
+    //   Barbarian                        7 + Con. modifier   (d12)
+    //   Fighter, Paladin, or Ranger      6 + Con. modifier   (d10)
+    //   Bard, Cleric, Druid, Monk,
+    //     Rogue, or Warlock              5 + Con. modifier   (d8)
+    //   Sorcerer or Wizard               4 + Con. modifier   (d6)
+    //
+    // The code uses `die / 2 + 1` rather than a per-class table. That
+    // equivalence is NOT assumed anywhere — it is asserted here against all
+    // four printed values, which is the only reason the formula is allowed to
+    // stand in for the table.
+    expect(fixedHitPointsPerLevel(12)).toBe(7);
+    expect(fixedHitPointsPerLevel(10)).toBe(6);
+    expect(fixedHitPointsPerLevel(8)).toBe(5);
+    expect(fixedHitPointsPerLevel(6)).toBe(4);
+  });
+
+  it('gives level 1 the printed maximum, not the average', () => {
+    // `sheet-math.txt`, Level 1 Hit Points by Class: Barbarian 12 + Con.
+    // A level 1 Barbarian with Constitution 14 (+2): 12 + 2 = 14.
+    const barbarian: SheetClass = {
+      class_name: 'Barbarian',
+      level: 1,
+      hit_die: 12,
+      is_starting_class: true,
+      saving_throws: ['strength', 'constitution'],
+    };
+    expect(
+      hitPointMaximum({ classes: [barbarian], scores: scores({ constitution: 14 }) })
+        .maximum,
+    ).toBe(14);
+    // The average would be 7 + 2 = 9. Asserting the wrong answer is excluded
+    // makes the "level 1 is special" branch load-bearing.
+    expect(
+      hitPointMaximum({ classes: [barbarian], scores: scores({ constitution: 14 }) })
+        .maximum,
+    ).not.toBe(9);
+  });
+
+  it('adds the fixed value for every level after the first', () => {
+    // Fighter 5, Constitution 14 (+2), no rolls:
+    //   level 1      : 10 + 2 = 12
+    //   levels 2..5  : (6 + 2) x 4 = 32
+    //   total        : 44
+    const result = hitPointMaximum({
+      classes: [FIGHTER],
+      scores: scores({ constitution: 14 }),
+    });
+    expect(result.maximum).toBe(44);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it('uses PER-CLASS hit dice across a multiclass, and only ONE level 1 maximum', () => {
+    // `multiclassing.txt`: "You gain the level 1 Hit Points for a class only
+    // when your total character level is 1", and "If your classes give you Hit
+    // Dice of different types, track them separately."
+    //
+    // Fighter 5 (starting) / Wizard 3, Constitution 14 (+2):
+    //   Fighter level 1     : 10 + 2 = 12
+    //   Fighter levels 2..5 : (6 + 2) x 4 = 32
+    //   Wizard levels 1..3  : (4 + 2) x 3 = 18     <- NO level 1 maximum
+    //   total               : 62
+    const result = hitPointMaximum({
+      classes: [FIGHTER, WIZARD],
+      scores: scores({ constitution: 14 }),
+    });
+    expect(result.maximum).toBe(62);
+    // Giving the Wizard its own level 1 maximum too would be 12 + 32 + (6+2) +
+    // (4+2)x2 = 64 — the plausible-looking bug.
+    expect(result.maximum).not.toBe(64);
+  });
+
+  it('puts the level 1 maximum on the STARTING class, whichever order they arrive in', () => {
+    // Same two classes, Wizard listed first but Fighter flagged as the starting
+    // class. The answer must not depend on list order: still 62.
+    expect(
+      hitPointMaximum({
+        classes: [WIZARD, FIGHTER],
+        scores: scores({ constitution: 14 }),
+      }).maximum,
+    ).toBe(62);
+    // And if the WIZARD were the starting class instead:
+    //   Wizard level 1      : 6 + 2 = 8
+    //   Wizard levels 2..3  : (4 + 2) x 2 = 12
+    //   Fighter levels 1..5 : (6 + 2) x 5 = 40
+    //   total               : 60
+    expect(
+      hitPointMaximum({
+        classes: [
+          { ...WIZARD, is_starting_class: true },
+          { ...FIGHTER, is_starting_class: false },
+        ],
+        scores: scores({ constitution: 14 }),
+      }).maximum,
+    ).toBe(60);
+  });
+
+  it('substitutes a stored roll for the fixed value, at the level it was rolled for', () => {
+    // THE ROLLS ARE CHOSEN SO THEY DO NOT AVERAGE TO THE FIXED VALUE. Rolling
+    // 9 and 3 would sum to the same 12 as two fixed 6s, and the assertion would
+    // hold with the roll handling deleted entirely — a test that cannot fail.
+    //
+    // Fighter 5, Constitution 14 (+2), rolled 9 at level 2 and 4 at level 3:
+    //   level 1 : 10 + 2 = 12
+    //   level 2 : 9 + 2  = 11   (rolled)
+    //   level 3 : 4 + 2  = 6    (rolled)
+    //   level 4 : 6 + 2  = 8    (fixed)
+    //   level 5 : 6 + 2  = 8    (fixed)
+    //   total   : 45
+    const result = hitPointMaximum({
+      classes: [FIGHTER],
+      scores: scores({ constitution: 14 }),
+      rolls: new Map([['Fighter', new Map([[2, 9], [3, 4]])]]),
+    });
+    expect(result.maximum).toBe(45);
+    // Ignoring the rolls and taking the fixed value everywhere gives 44, which
+    // is what the previous choice of rolls could not tell apart.
+    expect(result.maximum).not.toBe(44);
+  });
+
+  it('keys rolls by CLASS as well as level, so one class\'s rolls cannot reach another', () => {
+    // `multiclassing.txt`: "If your classes give you Hit Dice of different
+    // types, track them separately." A d6 rolled for a Wizard level must not be
+    // spent on a Fighter level, and nothing else in this file would notice if it
+    // were — every other rolls case has exactly one class.
+    //
+    // Fighter 5 (starting) / Wizard 3, Constitution 14 (+2). The rolls are
+    // recorded under WIZARD only, at Wizard levels 2 and 3:
+    //   Fighter level 1     : 10 + 2 = 12
+    //   Fighter levels 2..5 : (6 + 2) x 4 = 32      (fixed, untouched)
+    //   Wizard level 1      : 4 + 2 = 6             (fixed, no roll stored)
+    //   Wizard level 2      : 2 + 2 = 4             (rolled)
+    //   Wizard level 3      : 1 + 2 = 3             (rolled)
+    //   total               : 57
+    const result = hitPointMaximum({
+      classes: [FIGHTER, WIZARD],
+      scores: scores({ constitution: 14 }),
+      rolls: new Map([['Wizard', new Map([[2, 2], [3, 1]])]]),
+    });
+    expect(result.maximum).toBe(57);
+    // Keying on level alone — dropping the class name from the lookup — would
+    // spend the Wizard's 2 and 1 on Fighter levels 2 and 3 as well:
+    //   12 + 4 + 3 + 8 + 8 + 6 + 4 + 3 = 48. That is the bug this pins.
+    expect(result.maximum).not.toBe(48);
+  });
+
+  it('never lets a level after the first contribute less than 1', () => {
+    // `sheet-math.txt`: "add the total (minimum of 1) to your Hit Point
+    // maximum." Constitution 6 is a −2 modifier; a Wizard rolling a 1 gives
+    // 1 + (−2) = −1, which floors to 1.
+    //   Wizard level 1 : 6 + (−2) = 4      (no floor is printed for level 1)
+    //   level 2 rolled : max(1, 1 − 2) = 1
+    //   level 3 fixed  : max(1, 4 − 2) = 2
+    //   total          : 7
+    const result = hitPointMaximum({
+      classes: [{ ...WIZARD, is_starting_class: true }],
+      scores: scores({ constitution: 6 }),
+      rolls: new Map([['Wizard', new Map([[2, 1]])]]),
+    });
+    expect(result.maximum).toBe(7);
+  });
+
+  it('degrades with a STATED warning when no class is the starting class', () => {
+    // Reachable today: `update-class.ts` deletes a class row without promoting
+    // a replacement, so removing the starting class of a multiclass character
+    // leaves none. D11 part 2 says tolerate and flag rather than throw.
+    const result = hitPointMaximum({
+      classes: [
+        { ...FIGHTER, is_starting_class: false },
+        { ...WIZARD, is_starting_class: false },
+      ],
+      scores: scores({ constitution: 14 }),
+    });
+    expect(result.warnings.map((warning) => warning.code)).toEqual([
+      'no_starting_class',
+    ]);
+    expect(result.warnings[0]?.message).toContain('Fighter');
+    // Still a real number rather than a throw: the first class is used, so the
+    // answer is the same 62 as when the Fighter is flagged.
+    expect(result.maximum).toBe(62);
+  });
+
+  it('degrades with a STATED warning when several classes claim to be first', () => {
+    // Reachable by share import, which writes the flag per row with no
+    // cross-row check — and per D11 part 2 that tolerance is correct.
+    const result = hitPointMaximum({
+      classes: [FIGHTER, { ...WIZARD, is_starting_class: true }],
+      scores: scores({ constitution: 14 }),
+    });
+    expect(result.warnings.map((warning) => warning.code)).toEqual([
+      'several_starting_classes',
+    ]);
+    expect(result.maximum).toBe(62);
+  });
+});
+
+describe('armor class', () => {
+  const templates = parseSrdArmorTemplates();
+  const template = (name: string): SheetArmor => {
+    const found = templates.find((entry) => entry.name === name);
+    if (found === undefined) {
+      throw new Error(`No armour named ${name}.`);
+    }
+    return found;
+  };
+
+  it('is 10 + Dexterity with no armour', () => {
+    // `sheet-math.txt`: "Without armor or a shield, your base Armor Class is 10
+    // plus your Dexterity modifier." Dexterity 16 is +3, so 13.
+    expect(armorClass({ scores: scores({ dexterity: 16 }) }).value).toBe(13);
+    // Dexterity 8 is −1, so 9 — the negative modifier really does subtract when
+    // unarmoured, which is exactly what Heavy armour must NOT do.
+    expect(armorClass({ scores: scores({ dexterity: 8 }) }).value).toBe(9);
+  });
+
+  it('adds the full Dexterity modifier in Light armour', () => {
+    // Leather Armor 11 + Dex, Dexterity 18 (+4): 11 + 4 = 15.
+    expect(
+      armorClass({
+        armor: template('Leather Armor'),
+        scores: scores({ dexterity: 18 }),
+      }).value,
+    ).toBe(15);
+  });
+
+  it('caps the Dexterity modifier at 2 in Medium armour', () => {
+    // Half Plate 15 + Dex (max 2), Dexterity 18 (+4): 15 + min(4, 2) = 17.
+    expect(
+      armorClass({
+        armor: template('Half Plate Armor'),
+        scores: scores({ dexterity: 18 }),
+      }).value,
+    ).toBe(17);
+    // Uncapped would be 19 — the bug a missing cap produces.
+    expect(
+      armorClass({
+        armor: template('Half Plate Armor'),
+        scores: scores({ dexterity: 18 }),
+      }).value,
+    ).not.toBe(19);
+    // Below the cap the real modifier applies: Dexterity 12 (+1) gives 16.
+    expect(
+      armorClass({
+        armor: template('Half Plate Armor'),
+        scores: scores({ dexterity: 12 }),
+      }).value,
+    ).toBe(16);
+  });
+
+  it('IGNORES Dexterity entirely in Heavy armour, including a NEGATIVE modifier', () => {
+    // THE CASE THAT PROVES `none` IS NOT A CAP OF ZERO. Chain Mail is a flat 16.
+    // Dexterity 6 is a −2 modifier; `min(−2, 0)` would give 14.
+    expect(
+      armorClass({
+        armor: template('Chain Mail'),
+        scores: scores({ dexterity: 6, strength: 16 }),
+      }).value,
+    ).toBe(16);
+    // And a high Dexterity adds nothing either.
+    expect(
+      armorClass({
+        armor: template('Chain Mail'),
+        scores: scores({ dexterity: 20, strength: 16 }),
+      }).value,
+    ).toBe(16);
+  });
+
+  it('adds the Shield as the +2 BONUS the table prints', () => {
+    // Studded Leather 12 + Dex, Dexterity 14 (+2), plus a Shield: 12 + 2 + 2 = 16.
+    expect(
+      armorClass({
+        armor: template('Studded Leather Armor'),
+        shield: template('Shield'),
+        scores: scores({ dexterity: 14 }),
+      }).value,
+    ).toBe(16);
+    // A shield with no armour at all: 10 + 2 + 2 = 14.
+    expect(
+      armorClass({
+        shield: template('Shield'),
+        scores: scores({ dexterity: 14 }),
+      }).value,
+    ).toBe(14);
+  });
+
+  it('applies the manual adjustment last', () => {
+    // Plate Armor 18, flat, plus a +1 shield-of-something the app does not
+    // model: 18 + 2 + 1 = 21.
+    expect(
+      armorClass({
+        armor: template('Plate Armor'),
+        shield: template('Shield'),
+        scores: scores({ dexterity: 10, strength: 15 }),
+        adjustment: 1,
+      }).value,
+    ).toBe(21);
+    // Negative adjustments work too — the field is an adjustment, not a bonus.
+    expect(
+      armorClass({ scores: scores({ dexterity: 10 }), adjustment: -2 }).value,
+    ).toBe(8);
+  });
+
+  it('WARNS about an unmet Strength requirement without changing the AC', () => {
+    // Plate Armor requires Str 15. A Strength 10 character still gets AC 18 —
+    // the SRD's consequence is a speed reduction, not a lower AC — but the
+    // sheet says so, which is the thing D12 said a manual AC field could never
+    // do.
+    const result = armorClass({
+      armor: template('Plate Armor'),
+      scores: scores({ strength: 10 }),
+    });
+    expect(result.value).toBe(18);
+    expect(result.warnings.map((warning) => warning.code)).toEqual([
+      'strength_requirement_unmet',
+    ]);
+    expect(result.warnings[0]?.message).toContain('Strength 15');
+    // Exactly meeting it is not a warning — the boundary, both sides.
+    expect(
+      armorClass({
+        armor: template('Plate Armor'),
+        scores: scores({ strength: 15 }),
+      }).warnings,
+    ).toEqual([]);
+    expect(
+      armorClass({
+        armor: template('Plate Armor'),
+        scores: scores({ strength: 14 }),
+      }).warnings,
+    ).toHaveLength(1);
+  });
+
+  it('reads a Shield as a BONUS even when it arrives in the worn-armour slot', () => {
+    // `armor_templates.armor_class` means base AC for body armour and the `+2`
+    // BONUS for the Shield row, and the schema justifies that overload on the
+    // promise that consumers dispatch on `category`. This is the case that
+    // proves they do.
+    //
+    // A Shield row passed as `armor`, Dexterity 10: the character is UNARMOURED
+    // and holding a shield, so 10 + 0 + 2 = 12. Reading the `+2` as a base
+    // Armor Class would give 2 — a silent halving of somebody's defence, and
+    // exactly the mis-parse the schema's `armor_templates_shield_check` exists
+    // to catch on the way in.
+    const crossed = armorClass({
+      armor: template('Shield'),
+      scores: scores({ dexterity: 10 }),
+    });
+    expect(crossed.value).toBe(12);
+    expect(crossed.value).not.toBe(2);
+    // And it SAYS the slots are crossed rather than silently correcting them.
+    expect(crossed.warnings.map((warning) => warning.code)).toEqual([
+      'armor_slot_mismatch',
+    ]);
+    expect(crossed.warnings[0]?.message).toContain('Shield');
+  });
+
+  it('refuses to add body armour as if it were a shield bonus', () => {
+    // Plate Armor in the shield slot. Its 18 is a BASE, so it cannot be added
+    // on top of anything: the character is wearing Plate, AC 18.
+    const crossed = armorClass({
+      shield: template('Plate Armor'),
+      scores: scores({ dexterity: 10, strength: 15 }),
+    });
+    expect(crossed.value).toBe(18);
+    // Adding it as a bonus over the unarmoured 10 would give 28.
+    expect(crossed.value).not.toBe(28);
+    expect(crossed.warnings.map((warning) => warning.code)).toEqual([
+      'armor_slot_mismatch',
+    ]);
+
+    // Both slots holding Plate: still one suit of armour, still 18. Summing two
+    // bases would give 36.
+    const doubled = armorClass({
+      armor: template('Plate Armor'),
+      shield: template('Plate Armor'),
+      scores: scores({ dexterity: 10, strength: 15 }),
+    });
+    expect(doubled.value).toBe(18);
+    expect(doubled.value).not.toBe(36);
+    expect(doubled.warnings.map((warning) => warning.code)).toEqual([
+      'armor_slot_mismatch',
+    ]);
+  });
+
+  it('warns about the Strength requirement of whichever row carries one', () => {
+    // The requirement belongs to the ROW, not to the slot it was put in. Plate
+    // requires Str 15; a Strength 10 character gets both warnings, and the AC
+    // is still the honest 18.
+    const result = armorClass({
+      shield: template('Plate Armor'),
+      scores: scores({ strength: 10, dexterity: 10 }),
+    });
+    expect(result.value).toBe(18);
+    expect(result.warnings.map((warning) => warning.code).sort()).toEqual([
+      'armor_slot_mismatch',
+      'strength_requirement_unmet',
+    ]);
+  });
+
+  it('leaves the correctly-slotted cases with no warning at all', () => {
+    // The negative control for the three cases above: every SRD row, worn in
+    // the slot its category calls for, is silent. Without this a dispatch that
+    // warned unconditionally would pass all of them.
+    for (const entry of templates) {
+      const worn = scores({ strength: 20, dexterity: 10 });
+      const result =
+        entry.category === 'shield'
+          ? armorClass({ shield: entry, scores: worn })
+          : armorClass({ armor: entry, scores: worn });
+      expect(result.warnings).toEqual([]);
+    }
+  });
+});
+
+describe('saving throws', () => {
+  it('takes proficiencies from the FIRST class only', () => {
+    // `multiclassing.txt`: a multiclass character gains "only some of the new
+    // class's starting proficiencies", and no class's "As a Multiclass
+    // Character" bullet lists saving throws.
+    //
+    // Fighter 5 (starting) / Wizard 3 is proficient in Strength and
+    // Constitution saves — NOT in Intelligence and Wisdom.
+    const { abilities, warnings } = savingThrowProficiencies([FIGHTER, WIZARD]);
+    expect([...abilities].sort()).toEqual(['constitution', 'strength']);
+    expect(abilities.has('intelligence')).toBe(false);
+    expect(abilities.has('wisdom')).toBe(false);
+    expect(warnings).toEqual([]);
+  });
+
+  it('adds the proficiency bonus only where proficient', () => {
+    // Fighter 5 / Wizard 3: total level 8, so +3.
+    // Constitution 14 (+2), proficient   : 2 + 3 = 5
+    // Intelligence 16 (+3), NOT proficient: 3     = 3
+    const bonus = sheetProficiencyBonus([FIGHTER, WIZARD]);
+    expect(bonus).toBe(3);
+    const abilityScores = scores({ constitution: 14, intelligence: 16 });
+    expect(
+      savingThrowModifier({
+        ability: 'constitution',
+        scores: abilityScores,
+        proficiencyBonus: bonus,
+        proficient: true,
+      }),
+    ).toBe(5);
+    expect(
+      savingThrowModifier({
+        ability: 'intelligence',
+        scores: abilityScores,
+        proficiencyBonus: bonus,
+        proficient: false,
+      }),
+    ).toBe(3);
+  });
+
+  it('produces a NEGATIVE modifier for a low score, rather than refusing it', () => {
+    // Strength 6 is −2, not proficient. `SaveDC.from` could not express this —
+    // it refuses a value below 1 — which is why the skill and save path uses
+    // `AttackBonus` instead.
+    expect(
+      savingThrowModifier({
+        ability: 'strength',
+        scores: scores({ strength: 6 }),
+        proficiencyBonus: 3,
+        proficient: false,
+      }),
+    ).toBe(-2);
+    // Strength 1 is −5; proficient at +2 still leaves −3.
+    expect(
+      savingThrowModifier({
+        ability: 'strength',
+        scores: scores({ strength: 1 }),
+        proficiencyBonus: 2,
+        proficient: true,
+      }),
+    ).toBe(-3);
+  });
+});
+
+describe('skills, initiative and passive Perception', () => {
+  it('uses the governing ability the Skills table prints', () => {
+    // Athletics is Strength; Arcana is Intelligence; Sleight of Hand is
+    // Dexterity. Strength 18 (+4), proficient at +3: 4 + 3 = 7.
+    expect(
+      skillModifier({
+        skill: 'athletics',
+        scores: scores({ strength: 18 }),
+        proficiencyBonus: 3,
+        proficient: true,
+      }),
+    ).toBe(7);
+    // The same character's Arcana off Intelligence 8 (−1), not proficient: −1.
+    expect(
+      skillModifier({
+        skill: 'arcana',
+        scores: scores({ strength: 18, intelligence: 8 }),
+        proficiencyBonus: 3,
+        proficient: false,
+      }),
+    ).toBe(-1);
+    // Sleight of Hand off Dexterity 15 (+2), proficient at +2: 4.
+    expect(
+      skillModifier({
+        skill: 'sleight_of_hand',
+        scores: scores({ dexterity: 15 }),
+        proficiencyBonus: 2,
+        proficient: true,
+      }),
+    ).toBe(4);
+  });
+
+  it('is the Dexterity modifier for initiative', () => {
+    // `sheet-math.txt`: "Write your Dexterity modifier in the space for
+    // Initiative." Dexterity 15 is +2; Dexterity 9 is −1.
+    expect(initiative(scores({ dexterity: 15 }))).toBe(2);
+    expect(initiative(scores({ dexterity: 9 }))).toBe(-1);
+  });
+
+  it("reproduces the SRD's own worked Passive Perception example", () => {
+    // `sheet-math.txt`, verbatim: "if your character has a Wisdom of 15 and
+    // proficiency in the Perception skill, you have a Passive Perception of 14
+    // (10 + 2 for your Wisdom modifier + 2 for proficiency)."
+    //
+    // The strongest expectation in this file: the source states both the inputs
+    // and the answer, so it is not this project's arithmetic being checked
+    // against itself.
+    expect(
+      passivePerception({
+        scores: scores({ wisdom: 15 }),
+        proficiencyBonus: 2,
+        proficient: true,
+      }),
+    ).toBe(14);
+    // The same character without proficiency: 10 + 2 = 12.
+    expect(
+      passivePerception({
+        scores: scores({ wisdom: 15 }),
+        proficiencyBonus: 2,
+        proficient: false,
+      }),
+    ).toBe(12);
+    // A low Wisdom subtracts: Wisdom 7 is −2, so 10 − 2 = 8.
+    expect(
+      passivePerception({
+        scores: scores({ wisdom: 7 }),
+        proficiencyBonus: 3,
+        proficient: false,
+      }),
+    ).toBe(8);
+  });
+
+  it('maps every one of the eighteen skills to an ability', () => {
+    const map = parseSkillAbilities();
+    expect(map.size).toBe(18);
+    // Spot checks transcribed from the Skills table, one per ability, plus the
+    // skill no class list contains.
+    expect(map.get('athletics')).toBe('strength');
+    expect(map.get('acrobatics')).toBe('dexterity');
+    expect(map.get('arcana')).toBe('intelligence');
+    expect(map.get('perception')).toBe('wisdom');
+    expect(map.get('performance')).toBe('charisma');
+    expect(map.get('sleight_of_hand')).toBe('dexterity');
+    expect(map.get('animal_handling')).toBe('wisdom');
+    expect(map.get('intimidation')).toBe('charisma');
+    // Constitution governs NO skill — a real, failable claim about the table.
+    expect([...map.values()]).not.toContain('constitution');
+  });
+});
+
+describe('extra attack across a multiclass', () => {
+  it('gives one attack to a character with no granting class', () => {
+    expect(attacksPerAction([WIZARD])).toBe(1);
+    expect(attacksPerAction([])).toBe(1);
+  });
+
+  it('gives two attacks at level 5', () => {
+    expect(attacksPerAction([FIGHTER])).toBe(2);
+    expect(attacksPerAction([RANGER])).toBe(2);
+    // Below the granting level, nothing.
+    expect(attacksPerAction([{ ...FIGHTER, level: 4 }])).toBe(1);
+  });
+
+  it('DOES NOT STACK across classes — this is the multiclass bug', () => {
+    // `multiclassing.txt`, verbatim: "If you gain the Extra Attack feature from
+    // more than one class, the features don't stack. You can't make more than
+    // two attacks with this feature unless you have a feature that says you
+    // can."
+    //
+    // Fighter 5 / Ranger 5 makes TWO attacks. Summing the per-class grants
+    // would give three, which is the plausible-looking bug in exactly the
+    // multiclass case this application specialises in.
+    expect(attacksPerAction([FIGHTER, RANGER])).toBe(2);
+    expect(attacksPerAction([FIGHTER, RANGER])).not.toBe(3);
+    expect(attacksPerAction([FIGHTER, RANGER])).not.toBe(4);
+  });
+
+  it("lets the Fighter's own feature exceed two, and takes the maximum", () => {
+    // "…unless you have a feature that says you can (such as the Fighter's Two
+    // Extra Attacks feature)." Fighter 11 / Ranger 5 makes THREE — the
+    // Fighter's level 11 grant wins, and the Ranger's 2 does not add to it.
+    expect(attacksPerAction([{ ...FIGHTER, level: 11 }, RANGER])).toBe(3);
+    expect(attacksPerAction([{ ...FIGHTER, level: 20 }, RANGER])).toBe(4);
+    // Order must not matter.
+    expect(attacksPerAction([RANGER, { ...FIGHTER, level: 11 }])).toBe(3);
+  });
+
+  it('resolves a class to its highest grant at or below its own level', () => {
+    // The rows are absolute totals resolved `class_level <= ?`, so a Fighter 15
+    // is on the level 11 row, not the level 20 one.
+    expect(attacksPerAction([{ ...FIGHTER, level: 15 }])).toBe(3);
+    expect(attacksPerAction([{ ...FIGHTER, level: 10 }])).toBe(2);
+    expect(attacksPerAction([{ ...FIGHTER, level: 20 }])).toBe(4);
+  });
+});

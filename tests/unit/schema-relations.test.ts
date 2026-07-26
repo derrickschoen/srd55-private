@@ -133,7 +133,7 @@ afterAll(() => {
 });
 
 describe('declared relations match the foreign keys', () => {
-  it('budgets 40 constraints across 42 PRAGMA rows', () => {
+  it('budgets 47 constraints across 49 PRAGMA rows', () => {
     const tables = db
       .selectValues(
         `SELECT name FROM sqlite_schema
@@ -157,8 +157,14 @@ describe('declared relations match the foreign keys', () => {
     //
     // None of the seven is composite, so the row count rises by exactly seven
     // as well and the two composite Laravel keys are still the only ones.
-    expect(constraintEdges(db)).toHaveLength(40);
-    expect(rowCount).toBe(42);
+    // 36 edges across 38 rows before either native track. Origins adds 4,
+    // the sheet core 7 — one per class-content table into class_definitions.
+    // Neither catalog table adds an edge: by D1b a template points at nothing
+    // and nothing points at it, which holds for armour as it did for weapons.
+    // None of the eleven is composite, so the row count rises by eleven too and
+    // the two composite Laravel keys are still the only ones.
+    expect(constraintEdges(db)).toHaveLength(47);
+    expect(rowCount).toBe(49);
   });
 
   it('declares a relation for every foreign key, and a foreign key for every relation', () => {
