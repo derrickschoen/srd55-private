@@ -232,6 +232,7 @@ test('the build reference sections are collapsed, present in the DOM, and never 
     'spell-choices',
     'access-routes',
     'wizard-spellbook',
+    'weapons',
     'outstanding',
     'free-text',
   ]);

@@ -28,6 +28,10 @@ import {
   CharacterCommandPayloadValidator,
 } from './payload-validator';
 import { RevisionConflict } from './revision-conflict';
+import {
+  resolvesInverseAfterApply,
+  type ResolvesInverseAfterApply,
+} from './weapons';
 
 export interface CharacterCommandResult {
   readonly inverse: CharacterCommandPayload;
@@ -81,6 +85,26 @@ function slotRestoreState(row: SnapshotRow) {
     override_note:
       row.override_note === null ? null : String(row.override_note),
   } as Extract<SetSlotCommand, { mode: 'restore' }>['state'];
+}
+
+/**
+ * The inverse actually stored: what the command resolved after applying, when
+ * it resolves one, and otherwise the inverse prepared before the transaction.
+ *
+ * The local annotation is load-bearing. Narrowing `command` gives the
+ * INTERSECTION of both interfaces, whose `inverse` is an overload set returning
+ * `payload | Promise<payload>`; assigning through the single-signature
+ * interface is what recovers the synchronous return type without a cast.
+ */
+function resolveInverse(
+  command: ConstructedCharacterCommand,
+  prepared: CharacterCommandPayload,
+): CharacterCommandPayload {
+  if (!resolvesInverseAfterApply(command)) {
+    return prepared;
+  }
+  const resolver: ResolvesInverseAfterApply = command;
+  return resolver.inverse();
 }
 
 function snapshotJson(snapshot: CharacterStateSnapshot): JsonObject {
@@ -171,6 +195,11 @@ export class CharacterCommandExecutor {
     }
 
     this.applySynchronously(request.character_id, payload, command);
+    // SOME INVERSES ARE ONLY KNOWABLE AFTER THE WRITE. `add_weapon` must name
+    // the row id SQLite assigned, and `prepareInverse` ran before this
+    // transaction opened. Commands in that position publish the real inverse
+    // here; everything else keeps the one prepared up front, unchanged.
+    const storedInverse = resolveInverse(command, inverse);
     const nextRevision = currentRevision + 1;
     const timestamp = this.#clock();
     this.db.exec(
@@ -198,14 +227,14 @@ export class CharacterCommandExecutor {
         request.operation_uuid,
         request.expected_revision,
         nextRevision,
-        JSON.stringify(inverse),
+        JSON.stringify(storedInverse),
         timestamp,
         timestamp,
       ],
     );
 
     return {
-      inverse,
+      inverse: storedInverse,
       revision: nextRevision,
       idempotent_replay: false,
     };
@@ -339,6 +368,17 @@ export class CharacterCommandExecutor {
         };
       case 'acknowledge_warning':
         return this.warningInverse(characterId, payload, before);
+      case 'add_weapon':
+      case 'update_weapon':
+      case 'remove_weapon':
+      case 'set_weapon_mastery':
+        // PROVISIONAL AND NEVER STORED. These four resolve their inverse after
+        // apply (see `commit`), because `character_weapons` is not a snapshot
+        // table and `add_weapon`'s inverse needs the assigned row id. Echoing
+        // the payload rather than guessing a plausible inverse means that if
+        // the resolution ever stops happening, undo visibly repeats the action
+        // instead of quietly doing something almost right.
+        return payload;
       case 'update_source_config':
       case 'add_source':
       case 'remove_source':

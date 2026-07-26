@@ -9,8 +9,10 @@
  *
  * Everything here is DERIVED from `Workspace` (which the workspace builder
  * assembles from `BuildReportBuilder`) plus the completeness query. No SQL and
- * no second projection of the database, and nothing is added to the `Workspace`
- * read-model itself, so its top-level key list is untouched.
+ * no second projection of the database: this module still adds nothing to the
+ * `Workspace` read-model of its own. (`Workspace.weapons` is there for the
+ * weapons PANEL, which needs it regardless; the reference reads it like every
+ * other field rather than causing it.)
  *
  * This module is deliberately DOM-free so it can be unit tested under the node
  * environment; `agent-reference-panel.ts` renders it.
@@ -44,6 +46,7 @@ import type {
   SelectionEligibility,
   SlotBucket,
   SlotState,
+  WeaponMasteryProperty,
 } from '../../../domain/enums';
 import {
   abilities,
@@ -56,8 +59,17 @@ import {
   selectionEligibilities,
   slotBuckets,
   slotStates,
+  weaponMasteryProperties,
 } from '../../../domain/enums';
-import type { Workspace } from '../../../domain/read-models';
+import type {
+  CharacterWeapon,
+  Workspace,
+} from '../../../domain/read-models';
+import type {
+  CharacterMasteryAllowance,
+  MasteryAllowance,
+} from '../../../rules/weapon-mastery-lookup';
+import { WEAPON_PORTABILITY_NOTICE } from '../../../rules/weapon-portability';
 import type { CompletenessResult } from '../../../queries/character-completeness';
 import { AbilityScore } from '../../../rules/ability-score';
 import { SRD_ATTRIBUTION_NOTICE } from '../../../rules/srd-attribution';
@@ -161,7 +173,16 @@ export const COVERAGE: readonly CoverageFact[] = [
   { concept: 'speed', state: 'not_modelled' },
   { concept: 'size', state: 'not_modelled' },
   { concept: 'languages', state: 'not_modelled' },
-  { concept: 'equipment and weapons', state: 'not_modelled' },
+  {
+    concept: 'equipment and weapons',
+    state: 'partial',
+    note:
+      'A character\u2019s weapons are recorded — name, damage, properties, ' +
+      'range, mastery property, and which of them the user has chosen their ' +
+      'weapon mastery on. NOTHING is derived from them: no attack bonus, no ' +
+      'damage roll, no weapon proficiency, no encumbrance, and no inventory. ' +
+      'Equipment other than weapons is not modelled at all.',
+  },
   { concept: 'background features', state: 'not_modelled' },
 ];
 
@@ -293,6 +314,48 @@ export interface ReferenceCatalogGap {
   readonly source_refs: readonly number[];
 }
 
+/**
+ * One weapon, with its NAME WITHHELD like every other free text on this page.
+ *
+ * Weapon names are user-authored — "Grandfather's sword" — and by D4 the JSON
+ * block carries reference data, never a string an agent might act on. The name
+ * travels in the free-text ledger with its provenance instead.
+ */
+export interface ReferenceWeapon {
+  readonly index: number;
+  readonly name_withheld: true;
+  readonly damage_dice: string | null;
+  readonly damage_type: string | null;
+  readonly versatile_damage_dice: string | null;
+  readonly properties: readonly string[];
+  readonly range_normal_feet: number | null;
+  readonly range_long_feet: number | null;
+  readonly mastery_property: WeaponMasteryProperty | Unrecognised | null;
+  readonly mastery_selected: boolean;
+}
+
+/**
+ * The mastery allowance, as a STATE rather than a number.
+ *
+ * `unknown` and `unresolved` are carried through deliberately: an agent reading
+ * this must be able to tell "the allowance is four" from "we do not have the
+ * number" and from "two classes grant it and we do not know how they combine".
+ * Collapsing any of those to a number would be this application asserting a
+ * rule it cannot source.
+ */
+export interface ReferenceWeaponMastery {
+  readonly state: CharacterMasteryAllowance['state'];
+  readonly count: number | null;
+  readonly selected_count: number;
+  readonly by_class: readonly {
+    readonly class_name: string;
+    readonly class_level: number;
+    readonly allowance_state: MasteryAllowance['state'];
+    readonly count: number | null;
+  }[];
+  readonly portability_notice: string;
+}
+
 export interface AgentReference {
   readonly format: typeof AGENT_REFERENCE_FORMAT;
   readonly version: typeof AGENT_REFERENCE_VERSION;
@@ -345,6 +408,8 @@ export interface AgentReference {
   readonly spell_choices: readonly ReferenceSpellChoice[];
   readonly access_routes: readonly ReferenceAccessRoute[];
   readonly wizard_spellbook: readonly ReferenceSpellbookEntry[];
+  readonly weapons: readonly ReferenceWeapon[];
+  readonly weapon_mastery: ReferenceWeaponMastery;
   readonly summary: {
     readonly unique_spells: number;
     readonly access_routes: number;
@@ -369,6 +434,7 @@ export interface WithheldText {
   readonly slot_spell_names: ReadonlyMap<number, string>;
   readonly access_route_spell_names: ReadonlyMap<number, string>;
   readonly spellbook_spell_names: ReadonlyMap<number, string>;
+  readonly weapon_names: ReadonlyMap<number, string>;
 }
 
 export interface AgentReferenceProjection {
@@ -677,6 +743,61 @@ export function buildAgentReference(
     },
   );
 
+  // Weapon property text is BUILT FROM THE BOOLEANS, never from a stored
+  // sentence, so nothing user-authored reaches this list — except
+  // `other_properties`, which is free text and is therefore withheld along with
+  // the name rather than printed here.
+  const weaponProperties = (weapon: CharacterWeapon): string[] => {
+    const parts: string[] = [];
+    if (weapon.finesse) parts.push('Finesse');
+    if (weapon.heavy) parts.push('Heavy');
+    if (weapon.light) parts.push('Light');
+    if (weapon.loading) parts.push('Loading');
+    if (weapon.reach) parts.push('Reach');
+    if (weapon.thrown) parts.push('Thrown');
+    if (weapon.two_handed) parts.push('Two-Handed');
+    if (weapon.ammunition) parts.push('Ammunition');
+    return parts;
+  };
+
+  const weaponNames = new Map<number, string>();
+  const weapons = workspace.weapons.weapons.map(
+    (weapon, index): ReferenceWeapon => {
+      weaponNames.set(index, weapon.name);
+      return {
+        index,
+        name_withheld: true,
+        damage_dice: weapon.damage_dice,
+        damage_type: weapon.damage_type,
+        versatile_damage_dice: weapon.versatile_damage_dice,
+        properties: weaponProperties(weapon),
+        range_normal_feet: weapon.range_normal_feet,
+        range_long_feet: weapon.range_long_feet,
+        mastery_property: knownOrNull(
+          weaponMasteryProperties,
+          weapon.mastery_property,
+        ),
+        mastery_selected: weapon.mastery_selected,
+      };
+    },
+  );
+
+  const allowance = workspace.weapons.allowance;
+  const weaponMastery: ReferenceWeaponMastery = {
+    state: allowance.state,
+    // A number ONLY in the one state where the application is entitled to one.
+    count: allowance.state === 'known' ? allowance.count : null,
+    selected_count: workspace.weapons.selected_count,
+    by_class: allowance.classes.map((entry) => ({
+      class_name: entry.class_name,
+      class_level: entry.class_level,
+      allowance_state: entry.allowance.state,
+      count:
+        entry.allowance.state === 'known' ? entry.allowance.count : null,
+    })),
+    portability_notice: WEAPON_PORTABILITY_NOTICE,
+  };
+
   const sourceNames = registry.withheldNames();
   const freeText: FreeTextEntry[] = [
     {
@@ -699,6 +820,23 @@ export function buildAgentReference(
       value: spell.name,
       origin: FREE_TEXT_ORIGIN,
     })),
+    // Indexed for the same reason placeholder spells are: a weapon's name is
+    // the user's own text and must not become a field name.
+    ...[...weaponNames.entries()]
+      .sort(([left], [right]) => left - right)
+      .map(([index, value]) => ({
+        field: `weapons[${String(index)}].name`,
+        value,
+        origin: FREE_TEXT_ORIGIN,
+      })),
+    ...workspace.weapons.weapons
+      .map((weapon, index) => ({ weapon, index }))
+      .filter(({ weapon }) => weapon.other_properties !== null)
+      .map(({ weapon, index }) => ({
+        field: `weapons[${String(index)}].other_properties`,
+        value: weapon.other_properties as string,
+        origin: FREE_TEXT_ORIGIN,
+      })),
     ...withheldListNames,
   ];
 
@@ -759,6 +897,8 @@ export function buildAgentReference(
     spell_choices: spellChoices,
     access_routes: accessRoutes,
     wizard_spellbook: spellbook,
+    weapons,
+    weapon_mastery: weaponMastery,
     summary: {
       unique_spells: report.summary.unique_spells,
       access_routes: report.summary.access_routes,
@@ -784,6 +924,7 @@ export function buildAgentReference(
       slot_spell_names: slotSpellNames,
       access_route_spell_names: routeSpellNames,
       spellbook_spell_names: spellbookNames,
+      weapon_names: weaponNames,
     },
     free_text: freeText,
   };
@@ -820,6 +961,32 @@ export interface ReferenceSection {
   readonly heading: string;
   readonly notes: readonly string[];
   readonly tables: readonly ReferenceTable[];
+}
+
+/**
+ * The allowance in one sentence, matching what the weapons panel shows.
+ *
+ * Never a bare number for the `unknown` and `unresolved` states: a reader who
+ * sees only a number cannot tell a sourced allowance from a guess.
+ */
+function weaponMasterySentence(mastery: ReferenceWeaponMastery): string {
+  const chosen = `${String(mastery.selected_count)} selected`;
+  switch (mastery.state) {
+    case 'none':
+      return 'Weapon Mastery is not granted by any of this character\u2019s classes.';
+    case 'known':
+      return `Weapon Mastery allowance is ${String(mastery.count)}; ${chosen}.`;
+    case 'unknown':
+      return (
+        'Weapon Mastery is granted, but this application does not hold the ' +
+        `count for the granting class; ${chosen}.`
+      );
+    case 'unresolved':
+      return (
+        'More than one class grants Weapon Mastery. This application has no ' +
+        `sourced rule for how the allowances combine and does not add them; ${chosen}.`
+      );
+  }
 }
 
 function cell(text: string): ReferenceCell {
@@ -1179,6 +1346,66 @@ export function agentReferenceSections(
       ],
     });
   }
+
+  sections.push({
+    id: 'weapons',
+    heading: `Weapons — ${String(reference.weapons.length)}`,
+    notes: [
+      weaponMasterySentence(reference.weapon_mastery),
+      reference.weapon_mastery.portability_notice,
+      'No attack bonus, damage roll, weapon proficiency or inventory is ' +
+        'derived from these rows. They are a record of what the character ' +
+        'carries and which masteries were chosen, nothing more.',
+    ],
+    tables: [
+      {
+        caption: 'Weapons',
+        columns: [
+          'Weapon',
+          'Damage',
+          'Versatile',
+          'Properties',
+          'Range (normal/long ft)',
+          'Mastery property',
+          'Mastery selected',
+        ],
+        rows: reference.weapons.map((weapon) => [
+          freeCell(
+            projection.withheld.weapon_names.get(weapon.index) ?? 'unnamed',
+          ),
+          cell(
+            [weapon.damage_dice, weapon.damage_type]
+              .filter((part): part is string => part !== null)
+              .join(' ') || 'not recorded',
+          ),
+          cell(weapon.versatile_damage_dice ?? 'not applicable'),
+          cell(weapon.properties.join(', ') || 'none'),
+          cell(
+            weapon.range_normal_feet === null && weapon.range_long_feet === null
+              ? 'not applicable'
+              : `${optionalNumber(weapon.range_normal_feet)}/${optionalNumber(
+                  weapon.range_long_feet,
+                )}`,
+          ),
+          cell(weapon.mastery_property ?? 'none'),
+          cell(yesNo(weapon.mastery_selected)),
+        ]),
+      },
+      {
+        caption: 'Weapon mastery allowance by class',
+        columns: ['Class', 'Class level', 'Allowance', 'Count'],
+        rows: reference.weapon_mastery.by_class.map((entry) => [
+          cell(entry.class_name),
+          cell(String(entry.class_level)),
+          cell(entry.allowance_state),
+          // `content_missing` and `unsourced` print as words, never as 0. The
+          // difference between "none allowed" and "we do not know" is the whole
+          // reason this table has a state column at all.
+          cell(entry.count === null ? 'not available' : String(entry.count)),
+        ]),
+      },
+    ],
+  });
 
   sections.push({
     id: 'outstanding',

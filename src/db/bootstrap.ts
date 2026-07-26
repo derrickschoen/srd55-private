@@ -6,14 +6,23 @@ import {
   type DatabaseStorage,
 } from './database-lifecycle';
 import { ensureBundledClassContent } from '../rules/class-progression-lookup';
+import { ensureBundledWeaponContent } from '../rules/weapons-srd';
 
 /**
- * The bundled content every application database is expected to carry. Today
- * that is the SRD class and subclass progression catalog; the spell catalog
- * stays user-supplied through catalog import and is deliberately absent here.
+ * The bundled content every application database is expected to carry: the SRD
+ * class and subclass progression catalog, and the SRD weapon catalog with its
+ * weapon-mastery content. The spell catalog stays user-supplied through catalog
+ * import and is deliberately absent here.
+ *
+ * ORDER MATTERS. Weapon mastery writes one row per `class_definitions` row, so
+ * the classes must exist first. Seeding weapons into a database with no classes
+ * would silently write no grant rows, and every mastery lookup on it would then
+ * resolve to `content_missing` — which surfaces rather than lying, but is still
+ * a repair the boot path should not need.
  */
 export const applicationSeed: DatabaseSeed = (db) => {
   ensureBundledClassContent(db);
+  ensureBundledWeaponContent(db);
 };
 
 /**

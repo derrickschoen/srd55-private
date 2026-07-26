@@ -35,20 +35,38 @@ describe('pre-Drizzle database images', () => {
     const storage = new MemoryDatabaseStorage(sqlite3);
     // Build an image with the OLD artifact by handing the old SQL to a
     // lifecycle, then hand the SAME storage to a lifecycle using the new one.
-    const legacy = new DatabaseLifecycle(sqlite3, storage, preDrizzleSchema);
-    legacy.open();
-    legacy.database.exec("INSERT INTO characters (name) VALUES ('Legacy')");
-    legacy.close();
+    //
+    // Written WITHOUT `DatabaseLifecycle`, deliberately. The pre-Drizzle
+    // artifact predates the native weapon tables, so `applicationTables` — now
+    // derived from the current schema — rejects it at open. Building the
+    // fixture through the lifecycle would mean asserting that an old image
+    // opens cleanly, which is the opposite of what this file claims.
+    const legacy = new sqlite3.oo1.DB(':memory:', 'c');
+    try {
+      legacy.exec(preDrizzleSchema);
+      legacy.exec("INSERT INTO characters (name) VALUES ('Legacy')");
+      await storage.replaceFile(
+        sqlite3.capi.sqlite3_js_db_export(legacy).slice(),
+      );
+    } finally {
+      legacy.close();
+    }
     return storage;
   }
 
-  it('is byte-different from the generated artifact, and now declares more tables', () => {
+  it('is byte-different from the generated artifact, and the counts have parted both ways', () => {
     expect(preDrizzleSchema).not.toBe(schema);
     // The fixture is a HISTORICAL artifact and is deliberately left frozen: its
     // whole purpose is to be the thing the signature check trips on, and
-    // pruning it to match would destroy that. So it still declares the eight
-    // Laravel-only tables the generated schema has dropped, and the counts no
-    // longer match — asserted here rather than left as a surprise.
+    // pruning it to match would destroy that.
+    //
+    // It has since diverged from the generated schema in BOTH directions, which
+    // is why the counts are asserted rather than left as a surprise: the
+    // fixture still declares the eight Laravel-only tables that were dropped,
+    // and it has never held the four native weapon tables that were added.
+    // 38 - 8 + 4 = 34. Originally only the SIGNATURE tripped, because the two
+    // declared the same 38 tables in a different presentation; an old image is
+    // now short of `applicationTables` too, so it fails EARLIER, not less.
     //
     // These are COUNTS, not an equivalence proof, and do not claim to be one.
     // The Laravel-derived oracle in `tests/unit/schema.test.ts` runs against
@@ -59,7 +77,7 @@ describe('pre-Drizzle database images', () => {
     const tableCount = (sql: string) =>
       [...sql.matchAll(/CREATE TABLE/g)].length;
     expect(tableCount(preDrizzleSchema)).toBe(38);
-    expect(tableCount(schema)).toBe(30);
+    expect(tableCount(schema)).toBe(34);
   });
 
   it('rejects a pre-Drizzle image at open instead of half-working', async () => {
@@ -71,8 +89,12 @@ describe('pre-Drizzle database images', () => {
     if (boot.status !== 'schema_mismatch') {
       throw new Error('unreachable');
     }
+    // The missing-tables check runs before the signature comparison, so an
+    // image predating the native weapon tables is now named for what it is
+    // actually short of. Both paths produce the same recoverable
+    // `schema_mismatch` status, which is what the next test depends on.
     expect(boot.detail).toContain(
-      'Database image schema does not match the application schema.',
+      'Database image is missing application tables: character_weapons, class_weapon_mastery_counts, class_weapon_mastery_grants, weapon_templates.',
     );
   });
 

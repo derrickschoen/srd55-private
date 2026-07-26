@@ -36,9 +36,12 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       'character_save_points',
       'character_source_instances',
       'character_spell_preferences',
+      'character_weapons',
       'characters',
       'class_definitions',
       'class_progressions',
+      'class_weapon_mastery_counts',
+      'class_weapon_mastery_grants',
       'feat_definitions',
       'species_definitions',
       'spell_identities',
@@ -57,6 +60,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       'subclass_definitions',
       'subclass_progressions',
       'warning_acknowledgements',
+      'weapon_templates',
       'wizard_spellbook_entries',
     ]);
   });
@@ -147,11 +151,12 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
 });
 
 describe('table scope classification', () => {
-  it('classifies all 30 tables exactly once', () => {
+  it('classifies all 34 tables exactly once', () => {
     const names = Object.keys(TABLE_SCOPES);
-    // 38 until the eight Laravel-only infrastructure tables were dropped.
-    expect(names).toHaveLength(30);
-    expect(new Set(names).size).toBe(30);
+    // 30 Laravel-derived tables — 38 until the eight Laravel-only
+    // infrastructure ones were dropped — plus the four native weapon tables.
+    expect(names).toHaveLength(34);
+    expect(new Set(names).size).toBe(34);
     expect([...names].sort()).toEqual([...APPLICATION_TABLES].sort());
   });
 

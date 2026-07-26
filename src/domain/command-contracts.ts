@@ -3,6 +3,7 @@ import type {
   AddableSourceType,
   SelectionEligibility,
   SlotState,
+  WeaponMasteryProperty,
 } from './enums';
 import type { CharacterSnapshot, JsonObject } from './models';
 
@@ -102,6 +103,70 @@ export interface UpdateClassCommand extends CommandBase {
   subclass_definition_id?: number | null;
 }
 
+/**
+ * The editable body of one weapon — the fields a template pre-fills and a user
+ * may then change, all of them.
+ *
+ * DELIBERATELY NOT PRESENT: any reference to the template it was filled from.
+ * By D1b a character's weapon stores VALUES; the link is severed at the moment
+ * of the copy, which is what makes "edit a weapon" incapable of mutating the
+ * catalog and "delete a template" incapable of damaging a character.
+ *
+ * `mastery_selected` is also absent, and that is not an oversight: selecting
+ * mastery is a different user intent with a different warning attached, so it
+ * travels as `set_weapon_mastery` and the change log reads accordingly.
+ */
+export interface WeaponFields {
+  name: string;
+  damage_dice: string | null;
+  damage_type: string | null;
+  versatile_damage_dice: string | null;
+  finesse: boolean;
+  heavy: boolean;
+  light: boolean;
+  loading: boolean;
+  reach: boolean;
+  thrown: boolean;
+  two_handed: boolean;
+  ammunition: boolean;
+  ammunition_kind: string | null;
+  range_normal_feet: number | null;
+  range_long_feet: number | null;
+  mastery_property: WeaponMasteryProperty | null;
+  other_properties: string | null;
+  notes: string | null;
+}
+
+export interface AddWeaponCommand extends CommandBase {
+  type: 'add_weapon';
+  weapon: WeaponFields;
+  /**
+   * Present ONLY on the inverse of a `remove_weapon`, where it restores the row
+   * at the id it had. Undo that renumbered a weapon would leave any earlier
+   * inverse in the same undo stack pointing at nothing.
+   */
+  weapon_id?: number;
+  /** Likewise: carries a removed weapon's mastery selection back. */
+  mastery_selected?: boolean;
+}
+
+export interface UpdateWeaponCommand extends CommandBase {
+  type: 'update_weapon';
+  weapon_id: number;
+  weapon: WeaponFields;
+}
+
+export interface RemoveWeaponCommand extends CommandBase {
+  type: 'remove_weapon';
+  weapon_id: number;
+}
+
+export interface SetWeaponMasteryCommand extends CommandBase {
+  type: 'set_weapon_mastery';
+  weapon_id: number;
+  selected: boolean;
+}
+
 export interface RestoreSnapshotCommand extends CommandBase {
   type: 'restore_snapshot';
   snapshot: CharacterSnapshot | JsonObject;
@@ -117,6 +182,10 @@ export type CharacterCommandPayload =
   | RemoveSourceCommand
   | AcknowledgeWarningCommand
   | UpdateClassCommand
+  | AddWeaponCommand
+  | UpdateWeaponCommand
+  | RemoveWeaponCommand
+  | SetWeaponMasteryCommand
   | RestoreSnapshotCommand;
 
 export interface CharacterCommandRequest {
