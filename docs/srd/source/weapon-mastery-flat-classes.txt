@@ -1,0 +1,37 @@
+This work includes material from the System Reference Document 5.2
+("SRD 5.2") by Wizards of the Coast LLC, available at
+https://www.dndbeyond.com/srd. The SRD 5.2 is licensed under the Creative
+Commons Attribution 4.0 International License, available at
+https://creativecommons.org/licenses/by/4.0/legalcode.
+
+--- Verbatim extracts: the Weapon Mastery feature text of the three classes
+    whose count is FLAT and stated in prose, with no table column. ---
+
+=== Paladin, Level 1: Weapon Mastery (page ~55) ===
+
+     Level 1: Weapon Mastery                                    and adopt another one.
+     Your training with weapons allows you to use the
+     mastery properties of two kinds of weapons of your
+     choice with which you have proficiency, such as
+     Longswords and Javelins.
+
+
+=== Ranger, Level 1: Weapon Mastery (page ~57) ===
+
+     this feature, but those spells otherwise count as       Level 1: Weapon Mastery
+     Ranger spells for you.                                  Your training with weapons allows you to use the
+                                                             mastery properties of two kinds of weapons of your
+
+
+
+=== Rogue, Level 1: Weapon Mastery (page ~60) ===
+
+     Level 1: Weapon Mastery
+     Your training with weapons allows you to use the            Level 3: Steady Aim
+     mastery properties of two kinds of weapons of your          As a Bonus Action, you give yourself Advantage on
+     choice with which you have proficiency, such as             your next attack roll on the current turn. You can
+     Daggers and Shortbows.                                      use this feature only if you haven’t moved during
+
+NOTE ON LAYOUT: the SRD is set in two columns and 'pdftotext -layout'
+preserves both, so unrelated text from the neighbouring column appears on
+the right of some lines. Nothing has been edited out; read the left column.
