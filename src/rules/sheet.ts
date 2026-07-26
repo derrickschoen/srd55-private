@@ -34,6 +34,8 @@ import { AttackBonus } from './attack-bonus';
 import { proficiencyBonus } from './proficiency';
 import { abilityForSkill } from './skills';
 import type { ArmorCategory, ArmorDexBonus } from '../domain/enums';
+import type { AttacksPerAction, ExtraAttackGrant } from './extra-attack';
+import { resolveAttacksPerAction } from './extra-attack';
 
 /**
  * A class NAME, a LEVEL in it, and the per-level content keyed on that level.
@@ -44,18 +46,22 @@ import type { ArmorCategory, ArmorDexBonus } from '../domain/enums';
  * levels and their level-keyed content and has no business knowing a hit die or
  * a saving throw list; requiring them would have made that caller invent both.
  *
- * `extra_attack_counts` is level -> TOTAL attacks, absolute, exactly as
- * `class_extra_attack_grants` stores it. `martial_arts_dice` is level -> die
- * SIZE, exactly as `class_martial_arts_dice` stores it.
+ * `extra_attack_grants` IS A LIST AND NOT A `level -> count` MAP, AND D19 IS
+ * WHY. A map could only express a class-table row: a grant now also carries the
+ * SOURCE that gave it, and the WEAPON SCOPE it reaches, and neither fits in a
+ * key or a value. The list still hangs off ONE class, because a grant's
+ * prerequisite level is always a level in one class. `martial_arts_dice` stays
+ * a map, because a Martial Arts die genuinely is level -> die SIZE, exactly as
+ * `class_martial_arts_dice` stores it.
  *
- * BOTH MAPS ARE KEYED ON THE LEVEL IN *THIS* CLASS, never on total character
- * level, because that is what both tables store and what both features say.
- * See `martialArtsDice` for why the distinction is load-bearing.
+ * BOTH ARE KEYED ON THE LEVEL IN *THIS* CLASS, never on total character level,
+ * because that is what the tables store and what the features say. See
+ * `martialArtsDice` for why the distinction is load-bearing.
  */
 export interface SheetClassLevels {
   readonly class_name: string;
   readonly level: number;
-  readonly extra_attack_counts?: ReadonlyMap<number, number>;
+  readonly extra_attack_grants?: readonly ExtraAttackGrant[];
   readonly martial_arts_dice?: ReadonlyMap<number, number>;
 }
 
@@ -537,7 +543,7 @@ export function passivePerception(input: {
 }
 
 /**
- * How many attacks the Attack action gives.
+ * How many attacks the Attack action gives, and what could not be counted.
  *
  * THE FEATURES DO NOT STACK, AND THIS IS THE MULTICLASS CASE THIS APPLICATION
  * SPECIALISES IN. `docs/srd/source/multiclassing.txt`: "If you gain the Extra
@@ -550,26 +556,18 @@ export function passivePerception(input: {
  * this function exists to not have. A Fighter 11 / Ranger 5 makes three,
  * because the Fighter's own feature is the one that says it can.
  *
- * Per class the count is resolved as the highest granting level at or below the
- * character's level in THAT class, matching how the rows are stored (absolute
- * totals, never increments).
+ * THE RULE ITSELF, AND EVERYTHING D19 ADDED TO IT, LIVES IN
+ * `src/rules/extra-attack.ts` — sources, weapon scopes and the grants this
+ * application cannot resolve. This function is the sheet's door onto it, kept
+ * here because `SheetClassLevels` is the sheet's type and every caller already
+ * holds one. It RETURNS A RESULT AND NOT A BARE NUMBER: a Warlock's pact-weapon
+ * grant is real and unappliable at once, and a function that could only return
+ * a number would have had to choose between hiding it and inventing it.
  */
 export function attacksPerAction(
   classes: readonly SheetClassLevels[],
-): number {
-  let best = 1;
-  for (const entry of classes) {
-    const counts = entry.extra_attack_counts;
-    if (counts === undefined) {
-      continue;
-    }
-    for (const [level, attacks] of counts) {
-      if (level <= entry.level && attacks > best) {
-        best = attacks;
-      }
-    }
-  }
-  return best;
+): AttacksPerAction {
+  return resolveAttacksPerAction(classes);
 }
 
 /** One class's Martial Arts die, resolved at that class's level. */

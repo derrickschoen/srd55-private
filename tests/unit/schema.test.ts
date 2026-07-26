@@ -280,6 +280,20 @@ const expectedNativeColumns: Record<string, string[]> = {
     'id', 'class_definition_id', 'category', 'property_qualifier', 'created_at',
     'updated_at',
   ],
+  // D19's two class-feature tables, transcribed from the declarations in
+  // `db/schema/catalog-classes.ts` for the same reason every list here is
+  // transcribed: an expectation produced from `PRAGMA table_info` reprints our
+  // own output and cannot fail.
+  named_features: [
+    'id', 'content_key', 'class_definition_id', 'name', 'rules_edition',
+    'prerequisite', 'description', 'class_level', 'effect_kind',
+    'effect_attack_count', 'effect_weapon_scope', 'created_at', 'updated_at',
+  ],
+  subclass_features: [
+    'id', 'subclass_definition_id', 'class_level', 'sort_order', 'name',
+    'description', 'effect_kind', 'effect_attack_count', 'effect_weapon_scope',
+    'created_at', 'updated_at',
+  ],
 };
 
 const expectedNativeNotNull: Record<string, string[]> = {
@@ -342,6 +356,21 @@ const expectedNativeNotNull: Record<string, string[]> = {
   ],
   class_skill_options: ['id', 'class_definition_id', 'skill'],
   class_weapon_proficiencies: ['id', 'class_definition_id', 'category'],
+  // D19, and the ABSENCE of the three `effect_*` columns from both lists is the
+  // assertion that matters: `description` is NOT NULL on both tables and every
+  // effect column is nullable on both, which IS the D12 shape — a feature is
+  // free text plus an OPTIONAL mechanical effect, and most features have none.
+  // `named_features.prerequisite` is NOT NULL for the reason spelled out on the
+  // column: a row exists in that table only because it is conditional, so an
+  // absent condition is a parse that missed a line.
+  named_features: [
+    'id', 'content_key', 'class_definition_id', 'name', 'rules_edition',
+    'prerequisite', 'description', 'class_level',
+  ],
+  subclass_features: [
+    'id', 'subclass_definition_id', 'class_level', 'sort_order', 'name',
+    'description',
+  ],
 };
 
 const laravelTableNames = new Set(Object.keys(expectedColumns));
@@ -448,6 +477,13 @@ const expectedNamedIndexes: Record<string, string> = {
     'species_template_traits:species_template_id,sort_order:unique',
   species_template_traits_template_name_unique:
     'species_template_traits:species_template_id,name:unique',
+  named_features_content_key_unique: 'named_features:content_key:unique',
+  named_features_class_name_rules_edition_unique:
+    'named_features:class_definition_id,name,rules_edition:unique',
+  subclass_features_subclass_sort_unique:
+    'subclass_features:subclass_definition_id,sort_order:unique',
+  subclass_features_subclass_name_unique:
+    'subclass_features:subclass_definition_id,name:unique',
   background_templates_content_key_unique:
     'background_templates:content_key:unique',
   background_templates_name_rules_edition_unique:
@@ -596,6 +632,15 @@ const expectedUniqueGroups: Record<string, string[]> = {
   class_weapon_proficiencies: ['class_definition_id,category'],
   class_extra_attack_grants: ['class_definition_id,class_level'],
   class_martial_arts_dice: ['class_definition_id,class_level'],
+  // D19. `named_features` repeats the `(owner, name, edition)` triple
+  // `subclass_definitions` uses, so the seeder's upsert can yield a slot it
+  // does not own rather than overwrite it; `subclass_features` is unique on
+  // sort order AND on name, so neither the printed order nor the feature list
+  // can carry a duplicate.
+  named_features: ['class_definition_id,name,rules_edition', 'content_key'],
+  subclass_features: [
+    'subclass_definition_id,name', 'subclass_definition_id,sort_order',
+  ],
   feat_definitions: ['content_key', 'name,rules_edition'],
   species_definitions: ['content_key', 'name,rules_edition'],
   spell_identities: ['content_key'],
@@ -737,6 +782,11 @@ const expectedForeignKeys: Record<string, string[]> = {
   subclass_progressions: [
     'subclass_definition_id->subclass_definitions.id|CASCADE',
   ],
+  // D19. A subclass feature cascades from its subclass; a named feature
+  // cascades from the class whose LEVEL its prerequisite counts. Both are
+  // meaningless without their parent, so both go with it.
+  subclass_features: ['subclass_definition_id->subclass_definitions.id|CASCADE'],
+  named_features: ['class_definition_id->class_definitions.id|CASCADE'],
   species_template_traits: [
     'species_template_id->species_templates.id|CASCADE',
   ],
@@ -813,7 +863,7 @@ afterAll(() => {
 // rather than assumed.
 for (const [sourceLabel, schemaSql] of schemaSources) {
 describe(`complete final migration schema (${sourceLabel})`, () => {
-  it('creates the exact 30-table Laravel inventory plus the eighteen named native tables, and every column of both', () => {
+  it('creates the exact 30-table Laravel inventory plus the twenty named native tables, and every column of both', () => {
     const db = openDb(schemaSql);
     const tables = db.selectValues(
       `SELECT name
@@ -831,7 +881,7 @@ describe(`complete final migration schema (${sourceLabel})`, () => {
     // ones that were pruned) and 10 native — 4 weapons plus 6 origins.
     expect(tables).toEqual(Object.keys(allExpectedColumns).sort());
     expect(Object.keys(expectedColumns)).toHaveLength(30);
-    expect(Object.keys(expectedNativeColumns)).toHaveLength(18);
+    expect(Object.keys(expectedNativeColumns)).toHaveLength(20);
     // ones that were pruned) and 12 native — the four weapon tables plus the
     // eight of the sheet core.
     expect(tables).toEqual(Object.keys(allExpectedColumns).sort());
@@ -1032,12 +1082,13 @@ describe('the pruned column-metadata hash is derived from Laravel, not from us',
    * from the design, and the exclusion list is asserted to be exactly those
    * ten, so an eleventh native table cannot slip past unhashed AND unexpected.
    */
-  it('and the generated artifact matches it, skipping only the eighteen native tables', () => {
-    // 4 weapons + 8 sheet core + 6 origins. Excluded because they reproduce no
-    // Laravel migration; the constant on the right is Laravel-derived, and
-    // folding them in would force it to be recomputed from our own artifact.
+  it('and the generated artifact matches it, skipping only the twenty native tables', () => {
+    // 4 weapons + 8 sheet core + 6 origins + 2 class features. Excluded because
+    // they reproduce no Laravel migration; the constant on the right is
+    // Laravel-derived, and folding them in would force it to be recomputed from
+    // our own artifact.
     const nativeTables = Object.keys(expectedNativeColumns);
-    expect(nativeTables).toHaveLength(18);
+    expect(nativeTables).toHaveLength(20);
     for (const [, schemaSql] of schemaSources) {
       expect(metadataHash(schemaSql, nativeTables)).toBe(
         laravelColumnMetadataHash,
