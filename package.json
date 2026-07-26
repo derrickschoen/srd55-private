@@ -12,6 +12,7 @@
     "test:live": "AI_BRIDGE_LIVE=1 vitest run --configLoader runner tests/live",
     "test:browser": "playwright test",
     "test:all": "npm run test && npm run build && npm run test:browser",
+    "scrape": "vite-node tools/scrape/cli.ts --",
     "db:schema": "vite-node scripts/build-schema.ts",
     "db:contracts": "vite-node scripts/build-row-contracts.ts"
   },
