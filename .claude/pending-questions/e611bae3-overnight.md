@@ -6,7 +6,7 @@ Nothing here has stopped other work.
 
 ---
 
-## Q1 — The local AI chat bridge (BLOCKED, needs your decision)
+## Q1 — ANSWERED 2026-07-26: build it claude-only (see D12). No longer blocked.
 
 **State:** 23 files of unreviewed implementation parked in
 `../dnd-wt-bridge` on `feat/local-ai-bridge`. NOT merged, NOT resumed.
