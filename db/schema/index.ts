@@ -19,4 +19,5 @@ export * from './catalog-spells';
 export * from './character';
 export * from './relations';
 export * from './columns';
+export * from './sheet';
 export * from './weapons';

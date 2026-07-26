@@ -49,6 +49,9 @@ const BACKUP_DIRECT_ADDITIONS = ['character_weapons'] as const;
 describe('derived table scopes reproduce the hand-maintained lists', () => {
   it('reproduces applicationTables exactly (database-lifecycle.ts)', () => {
     expect([...APPLICATION_TABLES]).toEqual([
+      // Sheet core (D11/D12), inserted in sorted position: the armour catalog
+      // and the seven class-content tables.
+      'armor_templates',
       'background_definitions',
       'change_log',
       'character_class_levels',
@@ -59,10 +62,17 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       'character_spell_preferences',
       'character_weapons',
       'characters',
+      'class_armor_training',
       'class_definitions',
+      'class_extra_attack_grants',
+      'class_martial_arts_dice',
       'class_progressions',
+      'class_saving_throw_proficiencies',
+      'class_sheet_traits',
+      'class_skill_options',
       'class_weapon_mastery_counts',
       'class_weapon_mastery_grants',
+      'class_weapon_proficiencies',
       'feat_definitions',
       'species_definitions',
       'spell_identities',
@@ -202,12 +212,13 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
 });
 
 describe('table scope classification', () => {
-  it('classifies all 34 tables exactly once', () => {
+  it('classifies all 42 tables exactly once', () => {
     const names = Object.keys(TABLE_SCOPES);
     // 30 Laravel-derived tables — 38 until the eight Laravel-only
-    // infrastructure ones were dropped — plus the four native weapon tables.
-    expect(names).toHaveLength(34);
-    expect(new Set(names).size).toBe(34);
+    // infrastructure ones were dropped — plus the four native weapon tables and
+    // the eight of the sheet core.
+    expect(names).toHaveLength(42);
+    expect(new Set(names).size).toBe(42);
     expect([...names].sort()).toEqual([...APPLICATION_TABLES].sort());
   });
 
@@ -300,6 +311,24 @@ describe('table scope classification', () => {
     expect([...REFERENCE_KINDS]).not.toContain('weapon_templates');
     expect(TABLE_SCOPES.weapon_templates.backupReference).toBe(false);
     expect(TABLE_SCOPES.weapon_templates.role).toBe('catalog_weapon');
+  });
+
+  it('files the armour catalog under its OWN role, not the weapon one', () => {
+    // `catalog_weapon` exists because a weapon template is not a feat, species
+    // or background, and labelling it one "would make the role field lie". The
+    // identical argument applies to armour, which is not a weapon — so it gets
+    // `catalog_armor` rather than being filed as a weapon to save a one-line
+    // union change.
+    expect(TABLE_SCOPES.armor_templates.role).toBe('catalog_armor');
+    expect(TABLE_SCOPES.armor_templates.role).not.toBe('catalog_weapon');
+    // Its SCOPES are the ones `weapon_templates` has, and for D1b's reason: a
+    // character stores VALUES, so there is no template id for a backup to
+    // resolve. Role and scopes are independent, and this pins both facts.
+    expect([...REFERENCE_KINDS]).not.toContain('armor_templates');
+    const { role: weaponRole, ...weaponScopes } = TABLE_SCOPES.weapon_templates;
+    const { role: armorRole, ...armorScopes } = TABLE_SCOPES.armor_templates;
+    expect(armorScopes).toEqual(weaponScopes);
+    expect(armorRole).not.toBe(weaponRole);
   });
 
   it('still requires every weapon table in a valid database image', () => {

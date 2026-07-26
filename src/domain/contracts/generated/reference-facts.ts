@@ -94,7 +94,43 @@ export const FOREIGN_KEY_FACTS = [
     targetColumns: ['id'],
   },
   {
+    table: 'class_armor_training',
+    columns: ['class_definition_id'],
+    target: 'class_definitions',
+    targetColumns: ['id'],
+  },
+  {
+    table: 'class_extra_attack_grants',
+    columns: ['class_definition_id'],
+    target: 'class_definitions',
+    targetColumns: ['id'],
+  },
+  {
+    table: 'class_martial_arts_dice',
+    columns: ['class_definition_id'],
+    target: 'class_definitions',
+    targetColumns: ['id'],
+  },
+  {
     table: 'class_progressions',
+    columns: ['class_definition_id'],
+    target: 'class_definitions',
+    targetColumns: ['id'],
+  },
+  {
+    table: 'class_saving_throw_proficiencies',
+    columns: ['class_definition_id'],
+    target: 'class_definitions',
+    targetColumns: ['id'],
+  },
+  {
+    table: 'class_sheet_traits',
+    columns: ['class_definition_id'],
+    target: 'class_definitions',
+    targetColumns: ['id'],
+  },
+  {
+    table: 'class_skill_options',
     columns: ['class_definition_id'],
     target: 'class_definitions',
     targetColumns: ['id'],
@@ -107,6 +143,12 @@ export const FOREIGN_KEY_FACTS = [
   },
   {
     table: 'class_weapon_mastery_grants',
+    columns: ['class_definition_id'],
+    target: 'class_definitions',
+    targetColumns: ['id'],
+  },
+  {
+    table: 'class_weapon_proficiencies',
     columns: ['class_definition_id'],
     target: 'class_definitions',
     targetColumns: ['id'],

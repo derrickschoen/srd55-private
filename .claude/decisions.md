@@ -1,5 +1,156 @@
 # Binding scope decisions
 
+## D17 — The sheet core landed, and SIX of its numbers had no source until now (2026-07-26)
+
+D11 part 1 and D12, implemented. Eight native tables, three parsers, one pure
+derivation module. 42 tables (34 + 8). Verified by me after review:
+**925 vitest / 75 files, build exit 0, 56 Playwright.**
+
+### Review corrections (2026-07-26)
+
+Three findings, all fixed. No content value was wrong — the parse, the SRD
+transcription and the multiclass arithmetic were all checked by hand and held.
+
+- **A schema comment described a safety mechanism that did not exist.**
+  `armor_templates.armor_class` justified meaning "base AC" for armour and
+  "+2 bonus" for the Shield on the promise that `armorClassFrom` dispatched on
+  `category` with an exhaustive switch. That function did not exist, `SheetArmor`
+  had no `category` field at all, and a Shield passed as worn armour computed
+  AC **2**. The dispatch is now real: `category` is a REQUIRED field on
+  `SheetArmor`, `armorClassFrom` switches on it with no `default` arm, and the
+  role of a row is decided by WHAT IT IS rather than which argument it arrived
+  in — crossed slots give the right number and a stated `armor_slot_mismatch`
+  warning, per D11 part 2. **The comment was made true rather than deleted**,
+  because its argument against a second `shield_bonus` column is sound.
+- **The one test named for hit-point roll substitution could not fail.** Rolls of
+  9 and 3 at Fighter levels 2 and 3 average to the fixed 6, so its expected total
+  matched the no-rolls case asserted nine lines earlier. Rolls that do not
+  average to the fixed value now discriminate, and the per-CLASS keying — which
+  nothing covered, since every rolls case used one class — has its own multiclass
+  case with the leak value (48) pinned as a negative control.
+- **`armor_templates` was filed as `catalog_weapon`.** That role's own comment
+  says labelling a table with a role it does not have "would make the role field
+  lie"; armour is not a weapon. Added `catalog_armor` — additive, one union
+  member — rather than merging both into `catalog_equipment`, since the role
+  names what a table HOLDS and no consumer wants "weapons or armour" as one set.
+
+Also strengthened, raised as a consistency note rather than a defect:
+`hasBundledSheetContent` counted armour keys and traits rows only, so a database
+with all twelve traits rows and an emptied `class_skill_options` reported healthy
+and was never repaired. It now also requires the set tables to be non-empty per
+class — **measured, not assumed**: saving throws (2 for all twelve) and weapon
+proficiencies (1–2 for all twelve) unconditionally, skill options only where
+`skill_choice_from_any` is false, because the **Bard's zero rows are correct
+content** ("Choose any 3 skills", no list). `class_armor_training` is excluded
+for the same reason: Monk, Sorcerer and Wizard print "Armor Training: None".
+
+### The finding that changed the work: the extracts did not cover the sheet
+
+A review of what a sheet actually needs against what `docs/srd/source/` held
+found **six numbers with no source in this repository at all**:
+
+- the skill-to-ability map (the only pairing anywhere was one incidental
+  `Strength (Athletics)` inside a Champion feature);
+- the level-1 and per-level Hit Point arithmetic;
+- unarmoured Armor Class;
+- Initiative;
+- Passive Perception;
+- the multiclass rules for Proficiency Bonus and for which proficiencies carry.
+
+Every one was recallable from memory and none was written down. Writing the code
+first would have produced values that look right and cannot be checked — F6's
+exact failure. **Three extracts were added before any production code**:
+`skills-table.txt`, `sheet-math.txt`, `multiclassing.txt`, re-derived from the
+same PDF whose SHA-256 `SOURCE.md` records (verified matching before use).
+
+Two measured corrections fell out of it:
+
+- **`Performance` is in the Skills table and in NO class's skill list.** The
+  twelve Core Traits tables name only seventeen skills between them. A vocabulary
+  "closed on evidence" the way `weaponMasteryProperties` is would have been
+  seventeen and silently wrong. `skills` is closed on the printed Skills table
+  instead, and a negative-control test pins the measurement.
+- **The Armor table is TWELVE armours plus Shield — 13 rows.** `SOURCE.md:40`
+  said "13 armours plus Shield". Fixed, and the count is asserted as 12 + 1 so
+  the off-by-one cannot return.
+
+### Extra Attack could not be attributed, and was re-extracted rather than guessed
+
+The committed Extra Attack section carried its seven granting rows with **no
+class names**. Deciding that "Extra Attack, Tactical Shift" is a Fighter row
+means recognising the feature from memory, and one row carried no distinguishing
+feature name at all. The section was re-extracted with each class's Features
+table title and column headers above its own rows; the parser keys on that title
+and on nothing else.
+
+The attack COUNTS are sourced too, not inferred from feature names: the Fighter's
+own text says "attack twice", "attack three times", "attack four times". Reading
+3 out of the words "Two Extra Attacks" would have been arithmetic on a name.
+
+### Shape decisions worth keeping
+
+- **`class_sheet_traits` is a separate 1:0..1 table, and its ROW'S EXISTENCE is
+  the record that a class was parsed.** That is what distinguishes "Armor
+  Training: None" — which Monk, Sorcerer and Wizard print in that word — from
+  "we never parsed this class". Both are zero rows in `class_armor_training`.
+  One table disambiguates all four set tables at once, and it buys a null-free
+  `hit_die NOT NULL` where a column on `class_definitions` would have needed a
+  null standing for OUR TRANSCRIPTION STATE (the D6-forbidden kind).
+- **Sets are rows, not sibling columns.** N is exactly 2 for every class's saving
+  throws today; a `saving_throw_1`/`saving_throw_2` pair would still be the
+  correlated-null smell, order-dependent for something with no order.
+- **Heavy armour is `dex_bonus = 'none'`, NOT a cap of zero.** `min(dexMod, 0)`
+  SUBTRACTS for a negative modifier, so a Dexterity 6 character in Chain Mail
+  would come out at 14 where the table prints a flat 16. This is a real bug the
+  vocabulary prevents, and it has its own test.
+- **Weapon proficiency carries a qualifier.** A bare `simple | martial` set is a
+  lie about two of twelve classes — the Monk's "Martial weapons that have the
+  Light property" and the Rogue's "Finesse or Light". It is displayed, never
+  interpreted.
+- **Extra Attack combines with `max`, never `sum`.** Fighter 5 / Ranger 5 makes
+  TWO attacks. Summing per-class grants is the plausible-looking bug in exactly
+  the multiclass case this app specialises in, and it is asserted against.
+
+### The parse hazard that the file's own instructions get wrong
+
+`class-core-traits.txt` says to "read the left column". **That is wrong for five
+of twelve classes** — Monk, Ranger, Rogue, Sorcerer and Warlock have their table
+in the RIGHT column. Measured, with three more hazards from the same layout:
+`Hit Point Die` occurs 17 times for 12 classes (multiclass bullets bleeding in),
+the Warlock's left column is the SORCERER's Draconic Spells table, and
+`Tool Proficiencies` exists for only four classes and sits mid-table.
+
+The answer is a column WINDOW taken from each block's own title line, bounded on
+the right by the facing column. The bound's threshold is measured rather than
+chosen: intra-table value offsets are 24..29, page-column offsets are 61..67, so
+anything in 30..60 separates them and 45 is the midpoint.
+
+### The starting-class defects are handled, not assumed away
+
+`is_starting_class` has no uniqueness or existence constraint; `update-class.ts`
+deletes a class without promoting a replacement, so a character can end up with
+NO starting class; and share import writes the flag per row with no cross-row
+check, so it can have several. Per D11 part 2 the import tolerance is CORRECT, so
+the derivation degrades to a deterministic pick with a STATED warning rather than
+throwing. Both cases have tests.
+
+### What was deliberately NOT built, and why
+
+**Persistence of the three stored inputs** — worn armour, shield, manual AC
+adjustment, per-level HP rolls. A character-scoped table has a **36-file surface**
+here (backup, share, snapshot, delete order, row contracts, candidate audit,
+commands, browser tests), and a character's armour that did not survive a backup
+would be a data-loss bug rather than a partial feature. The derivation functions
+take all four as PARAMETERS already, so the next change adds persistence without
+reshaping anything. Also excluded and said rather than half-built: class feature
+text, the ten missing subclass sets, Unarmored Defense (feature text not in
+`docs/srd/source/`), Expertise, and the D14/D15 attack profiles.
+**Numbering note:** written as D16 in its own worktree, which branched before
+the bridge decision existed. Renumbered to D17 at merge; the two are unrelated
+and both are kept in full.
+
+---
+
 ## D16 — The claude-only bridge is merged, dev-only and provably unshipped (2026-07-26)
 
 `main` c2f8ac3. Verified by me: **850 vitest / 77 files, build exit 0, 62
