@@ -1,6 +1,7 @@
 import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DatabaseContext } from '../../../src/db/database';
+import { slotIdentity } from '../../helpers/row-codecs';
 import { SpellSelectionService } from '../../../src/eligibility/spell-selection-service';
 import { GrantRuleSlotGenerator } from '../../../src/grants/grant-rule-slot-generator';
 import { openTestDatabase } from '../../helpers/open-db';
@@ -157,7 +158,7 @@ describe('grant-rule slot generation', () => {
     generator.generateForSource(sourceId);
 
     expect(
-      db.all(
+      db.allRaw(
         `SELECT slot_key, rule_key, ordinal, bucket, eligibility_kind,
                 fixed_spell_version_id, current_spell_version_id,
                 spell_level_min, spell_level_max, allowed_spell_lists,
@@ -242,12 +243,12 @@ describe('grant-rule slot generation', () => {
          WHERE eligibility_kind = 'capability'`,
       ),
     ).toBe(0);
-    const persisted = db.all(
+    const persisted = db.allRaw(
       'SELECT * FROM spell_selection_slots ORDER BY id',
     );
     generator.generateForSource(sourceId);
     expect(
-      db.all('SELECT * FROM spell_selection_slots ORDER BY id'),
+      db.allRaw('SELECT * FROM spell_selection_slots ORDER BY id'),
     ).toEqual(persisted);
   });
 
@@ -271,8 +272,10 @@ describe('grant-rule slot generation', () => {
       chosen_list: 'Wizard',
     });
     generator.generateForSource(sourceId);
-    const before = db.all<{ id: number; slot_key: string }>(
+    const before = db.all(
       `SELECT id, slot_key FROM spell_selection_slots ORDER BY ordinal`,
+      undefined,
+      slotIdentity,
     );
     new SpellSelectionService(db).select(before[0]!.id, selectedId);
     db.exec(
@@ -290,7 +293,7 @@ describe('grant-rule slot generation', () => {
     generator.generateForSource(sourceId);
 
     expect(
-      db.all(
+      db.allRaw(
         `SELECT id, slot_key, current_spell_version_id, allowed_spell_lists,
                 state, selection_eligibility, selection_invalid_reason
          FROM spell_selection_slots ORDER BY ordinal`,
@@ -322,7 +325,7 @@ describe('grant-rule slot generation', () => {
     );
     generator.generateForSource(sourceId);
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT id, slot_key, current_spell_version_id, state,
                 selection_eligibility, selection_invalid_reason
          FROM spell_selection_slots WHERE ordinal = 1`,
@@ -409,7 +412,7 @@ describe('grant-rule slot generation', () => {
     );
     generator.generateForSource(sourceId);
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT id, current_spell_version_id, state, orphan_reason_code,
                 prior_config, selection_eligibility,
                 selection_invalid_reason
@@ -497,13 +500,15 @@ describe('grant-rule slot generation', () => {
       ],
     ).lastInsertId;
     generator.generateForSource(sourceId);
-    const stable = db.one(
+    const stable = db.oneRaw(
       `SELECT id, spell_level_max FROM spell_selection_slots
        WHERE rule_key = 'stable-prepared'`,
     )!;
-    const levelFour = db.one<{ id: number; slot_key: string }>(
+    const levelFour = db.one(
       `SELECT id, slot_key FROM spell_selection_slots
        WHERE rule_key = 'level-four-only'`,
+      undefined,
+      slotIdentity,
     )!;
     new SpellSelectionService(db).select(levelFour.id, selectedId);
     expect(stable.spell_level_max).toBe(2);
@@ -514,7 +519,7 @@ describe('grant-rule slot generation', () => {
       [characterId, classId],
     );
     generator.generateForSource(sourceId);
-    const orphan = db.one(
+    const orphan = db.oneRaw(
       `SELECT id, slot_key, current_spell_version_id, state,
               orphan_reason_code, orphaned_at, prior_config,
               selection_eligibility, selection_invalid_reason
@@ -548,7 +553,7 @@ describe('grant-rule slot generation', () => {
     );
     generator.generateForSource(sourceId);
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT id, slot_key, current_spell_version_id, state,
                 orphan_reason_code, orphaned_at, prior_config,
                 selection_eligibility, selection_invalid_reason
@@ -628,7 +633,7 @@ describe('grant-rule slot generation', () => {
     generator.generateForSource(sourceId);
 
     expect(
-      db.all(
+      db.allRaw(
         `SELECT rule_key, eligibility_kind, fixed_spell_version_id
          FROM spell_selection_slots
          WHERE source_instance_id = ?
@@ -672,7 +677,7 @@ describe('grant-rule slot generation', () => {
       fixedId,
     ]);
     generator.generateForSource(sourceId);
-    const before = db.one(
+    const before = db.oneRaw(
       `SELECT id, slot_key, fixed_spell_version_id
        FROM spell_selection_slots`,
     );
@@ -682,7 +687,7 @@ describe('grant-rule slot generation', () => {
     generator.generateForSource(sourceId);
 
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT id, slot_key, fixed_spell_version_id, state,
                 selection_eligibility, selection_invalid_reason
          FROM spell_selection_slots`,

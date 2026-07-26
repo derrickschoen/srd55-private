@@ -64,7 +64,7 @@ describe('read-only report presentation', () => {
       [fixture.characterId],
     );
     expect(
-      db.one(
+      db.oneRaw(
         'SELECT id, name, revision FROM characters WHERE id = ?',
         [fixture.characterId],
       ),
@@ -74,7 +74,7 @@ describe('read-only report presentation', () => {
       revision: 0,
     });
     expect(
-      db.all(
+      db.allRaw(
         `SELECT id, state, selection_eligibility
          FROM spell_selection_slots
          WHERE id IN (?, ?, ?)
@@ -133,7 +133,7 @@ describe('read-only report presentation', () => {
   it('renders the reference sheet in deterministic natural source order with route facts and no text', () => {
     const fixture = createPrintableListFixture(db);
     expect(
-      db.all(
+      db.allRaw(
         `SELECT source.display_name, slot.with_slots, slot.free_cast
          FROM spell_selection_slots AS slot
          INNER JOIN character_source_instances AS source
@@ -194,7 +194,7 @@ describe('read-only report presentation', () => {
   it('renders the exact partial and unavailable full-reference warnings from persisted text completeness', () => {
     const fixture = createPrintableListFixture(db);
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT display_name, short_summary
          FROM spell_versions
          WHERE id = ?`,

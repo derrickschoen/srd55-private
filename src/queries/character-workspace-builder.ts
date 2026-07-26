@@ -4,7 +4,7 @@ import {
   sqlNullableInteger,
   sqlNullableString,
   sqlString,
-  type SqlRow,
+  type RowCodec,
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import {
@@ -42,10 +42,101 @@ interface SlotWithOrder extends WorkspaceSlot {
   readonly sort_order: number;
 }
 
-function configuredAbility(row: SqlRow): Ability | null {
-  const ability = jsonRecord(
-    sqlNullableString(row, 'source_config'),
-  ).spellcasting_ability;
+/**
+ * The character columns the workspace needs, decoded once.
+ *
+ * The six ability columns become an `AbilityScores` HERE rather than being
+ * carried as a raw row into `#slots` and assembled there: the query selects them
+ * for exactly one reason, and building the value at the read is what stops a
+ * half-decoded row travelling between two methods.
+ */
+interface WorkspaceCharacter {
+  readonly revision: number;
+  readonly allow_legacy: boolean;
+  readonly scores: AbilityScores;
+}
+
+const workspaceCharacter: RowCodec<WorkspaceCharacter> = (row) => ({
+  revision: sqlInteger(row, 'revision'),
+  allow_legacy: sqlBoolean(row, 'allow_legacy'),
+  scores: AbilityScores.fromArray(row),
+});
+
+/**
+ * One row of the slot query, decoded.
+ *
+ * `spell_version_id` COLLAPSES `fixed_spell_version_id` and
+ * `current_spell_version_id` in the codec, in that order, because every caller
+ * did the same `??` and the two columns are never both meaningful: a fixed grant
+ * and a user selection are mutually exclusive by trigger
+ * (`spell_slots_exclusive_assignment_check`).
+ *
+ * `ritual` and `concentration` are `boolean | null` and not `boolean`: NULL is
+ * what the LEFT JOIN yields for an EMPTY slot, and that is a different fact from
+ * a spell that is not a ritual. The caller turns it into `false` for display —
+ * but it does so knowing which of the two it has.
+ */
+interface WorkspaceSlotRow {
+  readonly id: number;
+  readonly slot_key: string;
+  readonly label: string | null;
+  readonly bucket: SlotBucket;
+  readonly spell_level_min: number;
+  readonly spell_level_max: number;
+  readonly spell_version_id: number | null;
+  readonly state: SlotState;
+  readonly eligibility: SelectionEligibility;
+  readonly invalid_reason: string | null;
+  readonly orphan_reason: string | null;
+  readonly override_note: string | null;
+  readonly locked: boolean;
+  readonly sort_order: number;
+  readonly ordinal: number;
+  readonly source_name: string;
+  readonly source_type: DomainSourceType;
+  readonly source_config: string | null;
+  readonly spell_name: string | null;
+  readonly spell_provenance: string | null;
+  readonly spell_level: number | null;
+  readonly spell_edition: RulesEdition | null;
+  readonly spell_identity_id: number | null;
+  readonly ritual: boolean | null;
+  readonly concentration: boolean | null;
+}
+
+const workspaceSlotRow: RowCodec<WorkspaceSlotRow> = (row) => ({
+  id: sqlInteger(row, 'id'),
+  slot_key: sqlString(row, 'slot_key'),
+  label: sqlNullableString(row, 'label'),
+  bucket: sqlString(row, 'bucket') as SlotBucket,
+  spell_level_min: sqlInteger(row, 'spell_level_min'),
+  spell_level_max: sqlInteger(row, 'spell_level_max'),
+  spell_version_id:
+    sqlNullableInteger(row, 'fixed_spell_version_id') ??
+    sqlNullableInteger(row, 'current_spell_version_id'),
+  state: sqlString(row, 'state') as SlotState,
+  eligibility: sqlString(row, 'selection_eligibility') as SelectionEligibility,
+  invalid_reason: sqlNullableString(row, 'selection_invalid_reason'),
+  orphan_reason: sqlNullableString(row, 'orphan_reason_code'),
+  override_note: sqlNullableString(row, 'override_note'),
+  locked: sqlBoolean(row, 'is_locked'),
+  sort_order: sqlInteger(row, 'sort_order'),
+  ordinal: sqlInteger(row, 'ordinal'),
+  source_name: sqlString(row, 'source_name'),
+  source_type: sqlString(row, 'source_type') as DomainSourceType,
+  source_config: sqlNullableString(row, 'source_config'),
+  spell_name: sqlNullableString(row, 'spell_name'),
+  spell_provenance: sqlNullableString(row, 'spell_provenance'),
+  spell_level: sqlNullableInteger(row, 'spell_level'),
+  spell_edition: sqlNullableString(row, 'spell_edition') as RulesEdition | null,
+  spell_identity_id: sqlNullableInteger(row, 'spell_identity_id'),
+  ritual: row.ritual === null ? null : sqlBoolean(row, 'ritual'),
+  concentration:
+    row.concentration === null ? null : sqlBoolean(row, 'concentration'),
+});
+
+function configuredAbility(sourceConfig: string | null): Ability | null {
+  const ability = jsonRecord(sourceConfig).spellcasting_ability;
   if (ability === undefined || ability === null || ability === '') {
     return null;
   }
@@ -129,6 +220,7 @@ export class CharacterWorkspaceBuilder {
        FROM characters
        WHERE id = ?`,
       [characterId],
+      workspaceCharacter,
     );
     if (character === null) {
       throw new CharacterNotFoundError(characterId);
@@ -158,11 +250,11 @@ export class CharacterWorkspaceBuilder {
     } as WorkspaceBuildReport;
 
     return {
-      revision: sqlInteger(character, 'revision'),
+      revision: character.revision,
       report: workspaceReport,
       classes: this.classes(characterId),
       available_classes: this.classOptions(),
-      allow_legacy: sqlBoolean(character, 'allow_legacy'),
+      allow_legacy: character.allow_legacy,
       configurable_sources: this.configurableSources(characterId),
       order_sources: orderSources(this.db, characterId),
       source_catalog: {
@@ -281,7 +373,7 @@ export class CharacterWorkspaceBuilder {
 
   private slots(
     characterId: number,
-    character: SqlRow,
+    character: WorkspaceCharacter,
     report: BuildReportResult,
   ): SlotWithOrder[] {
     const rows = this.db.all(
@@ -311,13 +403,11 @@ export class CharacterWorkspaceBuilder {
          AND slot.state IN ('active', 'orphaned', 'kept_override')
        ORDER BY source.display_name, slot.sort_order, slot.id`,
       [characterId],
+      workspaceSlotRow,
     );
-    const selectedVersionIds = rows.flatMap((row) => {
-      const id =
-        sqlNullableInteger(row, 'fixed_spell_version_id') ??
-        sqlNullableInteger(row, 'current_spell_version_id');
-      return id === null ? [] : [id];
-    });
+    const selectedVersionIds = rows.flatMap((row) =>
+      row.spell_version_id === null ? [] : [row.spell_version_id],
+    );
     const attackIds = mechanicVersionIds(
       this.db,
       'spell_version_attack_modes',
@@ -339,49 +429,34 @@ export class CharacterWorkspaceBuilder {
         assessment.category,
       ]),
     );
-    const scores = AbilityScores.fromArray({
-      strength: sqlInteger(character, 'strength'),
-      dexterity: sqlInteger(character, 'dexterity'),
-      constitution: sqlInteger(character, 'constitution'),
-      intelligence: sqlInteger(character, 'intelligence'),
-      wisdom: sqlInteger(character, 'wisdom'),
-      charisma: sqlInteger(character, 'charisma'),
-    });
+    const scores = character.scores;
     const proficiency = report.character.proficiency_bonus;
 
     return rows.map((row): SlotWithOrder => {
-      const id = sqlInteger(row, 'id');
-      const versionId =
-        sqlNullableInteger(row, 'fixed_spell_version_id') ??
-        sqlNullableInteger(row, 'current_spell_version_id');
+      const versionId = row.spell_version_id;
       const ability =
-        routeBySlot.get(id)?.spellcasting_ability ??
-        configuredAbility(row);
+        routeBySlot.get(row.id)?.spellcasting_ability ??
+        configuredAbility(row.source_config);
       const score = ability === null ? null : scores.score(ability);
-      const identityId = sqlNullableInteger(row, 'spell_identity_id');
-      const bucket = sqlString(row, 'bucket') as SlotBucket;
-      const label = sqlNullableString(row, 'label');
+      const identityId = row.spell_identity_id;
 
       return {
-        id,
-        slot_key: sqlString(row, 'slot_key'),
-        source: sqlString(row, 'source_name'),
-        source_type: sqlString(row, 'source_type') as DomainSourceType,
+        id: row.id,
+        slot_key: row.slot_key,
+        source: row.source_name,
+        source_type: row.source_type,
         label:
-          label === null || label === ''
-            ? `${titleBucket(bucket)} ${sqlInteger(row, 'ordinal')}`
-            : label,
-        bucket,
-        level_min: sqlInteger(row, 'spell_level_min'),
-        level_max: sqlInteger(row, 'spell_level_max'),
+          row.label === null || row.label === ''
+            ? `${titleBucket(row.bucket)} ${String(row.ordinal)}`
+            : row.label,
+        bucket: row.bucket,
+        level_min: row.spell_level_min,
+        level_max: row.spell_level_max,
         spell_id: versionId,
-        spell_name: sqlNullableString(row, 'spell_name'),
+        spell_name: row.spell_name,
         placeholder: row.spell_provenance === 'placeholder',
-        spell_level: sqlNullableInteger(row, 'spell_level'),
-        spell_edition: sqlNullableString(
-          row,
-          'spell_edition',
-        ) as RulesEdition | null,
+        spell_level: row.spell_level,
+        spell_edition: row.spell_edition,
         ability,
         attack_bonus:
           score === null ||
@@ -395,30 +470,20 @@ export class CharacterWorkspaceBuilder {
           !saveIds.has(versionId)
             ? null
             : score.spellSaveDC(proficiency).value,
-        ritual:
-          row.ritual === null ? false : sqlBoolean(row, 'ritual'),
-        concentration:
-          row.concentration === null
-            ? false
-            : sqlBoolean(row, 'concentration'),
+        ritual: row.ritual ?? false,
+        concentration: row.concentration ?? false,
         duplicate_status:
           identityId === null
             ? 'none'
             : (duplicateByIdentity.get(identityId) ??
               'none') as DuplicateCategory,
-        state: sqlString(row, 'state') as SlotState,
-        eligibility: sqlString(
-          row,
-          'selection_eligibility',
-        ) as SelectionEligibility,
-        invalid_reason: sqlNullableString(
-          row,
-          'selection_invalid_reason',
-        ),
-        orphan_reason: sqlNullableString(row, 'orphan_reason_code'),
-        override_note: sqlNullableString(row, 'override_note'),
-        locked: sqlBoolean(row, 'is_locked'),
-        sort_order: sqlInteger(row, 'sort_order'),
+        state: row.state,
+        eligibility: row.eligibility,
+        invalid_reason: row.invalid_reason,
+        orphan_reason: row.orphan_reason,
+        override_note: row.override_note,
+        locked: row.locked,
+        sort_order: row.sort_order,
       };
     });
   }

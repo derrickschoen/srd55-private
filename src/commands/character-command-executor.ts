@@ -3,6 +3,12 @@ import {
   CharacterState,
   type CharacterStateSnapshot,
 } from '../character/character-state';
+import {
+  rowId,
+  sqlInteger,
+  sqlNullableString,
+  type RowCodec,
+} from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import {
   DuplicateWarningDetector,
@@ -47,9 +53,20 @@ export interface CharacterCommandExecutorOptions {
 }
 
 interface OperationRow {
-  readonly character_id: unknown;
-  readonly inverse_command: unknown;
+  readonly character_id: number;
+  readonly inverse_command: string | null;
 }
+
+/**
+ * `inverse_command` is nullable TEXT: a command with no inverse stores NULL, and
+ * `parseInverse` is the one place that turns the absence into a refusal. The
+ * columns were `unknown` before, which named them without saying anything about
+ * what they hold.
+ */
+const operationRow: RowCodec<OperationRow> = (row) => ({
+  character_id: sqlInteger(row, 'character_id'),
+  inverse_command: sqlNullableString(row, 'inverse_command'),
+});
 
 type SnapshotRow = Readonly<Record<string, unknown>>;
 
@@ -244,16 +261,17 @@ export class CharacterCommandExecutor {
     characterId: number,
     operationUuid: string,
   ): CharacterCommandResult | null {
-    const operation = this.db.one<OperationRow>(
+    const operation = this.db.one(
       `SELECT character_id, inverse_command
        FROM character_operations
        WHERE operation_uuid = ?`,
       [operationUuid],
+      operationRow,
     );
     if (operation === null) {
       return null;
     }
-    if (Number(operation.character_id) !== characterId) {
+    if (operation.character_id !== characterId) {
       throw new RevisionConflict(this.currentRevisionOrZero(characterId));
     }
     return {
@@ -455,6 +473,7 @@ export class CharacterCommandExecutor {
          FROM warning_acknowledgements
          WHERE character_id = ? AND warning_fingerprint = ?`,
         [characterId, fingerprint],
+        rowId,
       );
       if (previous === null) {
         throw new TypeError(

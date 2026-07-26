@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { sqlString } from '../../../src/db/codecs';
 import { DatabaseContext } from '../../../src/db/database';
 import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
 
@@ -421,17 +422,18 @@ export function persistedReportTableHashes(
 ): Readonly<Record<string, string>> {
   const tableHashes = Object.fromEntries(
     db
-      .all<{ name: unknown }>(
+      .all(
         `SELECT name
          FROM sqlite_schema
          WHERE type = 'table'
            AND (name NOT LIKE 'sqlite_%' OR name = 'sqlite_sequence')
          ORDER BY name`,
+        undefined,
+        (row) => sqlString(row, 'name'),
       )
-      .map((table) => {
-        const name = String(table.name);
+      .map((name) => {
         const quotedName = `"${name.replaceAll('"', '""')}"`;
-        const rows = db.all(`SELECT * FROM ${quotedName} ORDER BY rowid`);
+        const rows = db.allRaw(`SELECT * FROM ${quotedName} ORDER BY rowid`);
         return [
           name,
           createHash('sha256').update(JSON.stringify(rows)).digest('hex'),

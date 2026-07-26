@@ -1,4 +1,13 @@
 import type { SqlValue } from '@sqlite.org/sqlite-wasm';
+import {
+  sqlBoolean,
+  sqlInteger,
+  sqlNullableInteger,
+  sqlNullableString,
+  sqlString,
+  rowId,
+  type RowCodec,
+} from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import {
   SpellSelectionEligibility,
@@ -14,6 +23,58 @@ import {
 
 type Attributes = Record<string, SqlValue>;
 type JsonContainer = Record<string, unknown> | unknown[];
+
+/**
+ * The codecs this generator reads through.
+ *
+ * Two reads in this file DELIBERATELY stay raw (`oneRaw`): the ones feeding
+ * `updateChangedRow`, which diffs a stored row against an attribute map whose
+ * KEYS are decided at runtime. A codec there would have to fix the column set
+ * that the diff exists to keep open.
+ */
+
+/** `is_active` is stored as SQLite 0/1; `sqlBoolean` refuses anything else. */
+const spellVersionActivity: RowCodec<{
+  readonly id: number;
+  readonly is_active: boolean;
+}> = (row) => ({
+  id: sqlInteger(row, 'id'),
+  is_active: sqlBoolean(row, 'is_active'),
+});
+
+const namedDefinition: RowCodec<{
+  readonly id: number;
+  readonly name: string;
+}> = (row) => ({
+  id: sqlInteger(row, 'id'),
+  name: sqlString(row, 'name'),
+});
+
+const slotReferences: RowCodec<{
+  readonly id: number;
+  readonly slot_key: string;
+  readonly fixed_spell_version_id: number | null;
+  readonly current_spell_version_id: number | null;
+}> = (row) => ({
+  id: sqlInteger(row, 'id'),
+  slot_key: sqlString(row, 'slot_key'),
+  fixed_spell_version_id: sqlNullableInteger(row, 'fixed_spell_version_id'),
+  current_spell_version_id: sqlNullableInteger(row, 'current_spell_version_id'),
+});
+
+const slotAssignment: RowCodec<{
+  readonly id: number;
+  readonly fixed_spell_version_id: number | null;
+  readonly current_spell_version_id: number | null;
+}> = (row) => ({
+  id: sqlInteger(row, 'id'),
+  fixed_spell_version_id: sqlNullableInteger(row, 'fixed_spell_version_id'),
+  current_spell_version_id: sqlNullableInteger(row, 'current_spell_version_id'),
+});
+
+const rowName: RowCodec<string> = (row) => sqlString(row, 'name');
+const nullableConfig: RowCodec<string | null> = (row) =>
+  sqlNullableString(row, 'config');
 
 const RULE_REMOVED_SELECTION_REASON =
   'Selection preserved because its grant rule is no longer active.';
@@ -173,6 +234,7 @@ export class GrantRuleSlotGenerator {
         : this.db.one(
             'SELECT id, is_active FROM spell_versions WHERE id = ?',
             [Number(spellVersionId)],
+            spellVersionActivity,
           );
     if (version === null) {
       throw new Error(
@@ -191,7 +253,7 @@ export class GrantRuleSlotGenerator {
         [source.characterId, key, Number(spellVersionId)],
       ) ?? 0,
     ) === 1;
-    if (Number(version.is_active) !== 1 && !existingReference) {
+    if (!version.is_active && !existingReference) {
       throw new Error(
         `Grant rule '${rule.ruleKey}' references an inactive spell version.`,
       );
@@ -304,6 +366,7 @@ export class GrantRuleSlotGenerator {
         : this.db.one(
             `SELECT id, name FROM ${definitionTable} WHERE id = ?`,
             [Number(definitionId)],
+            namedDefinition,
           );
     if (definition === null) {
       throw new Error(
@@ -332,7 +395,10 @@ export class GrantRuleSlotGenerator {
     for (let ordinal = 1; ordinal <= (rule.count ?? 0); ordinal += 1) {
       const marker = `grant_rule:${rule.ruleKey}:${ordinal}`;
       markers.push(marker);
-      const child = this.db.one(
+      // RAW on purpose: `child` is handed to `updateChangedRow`, which diffs it
+      // against `attributes` whose keys are chosen at runtime. Decoding it here
+      // would fix the column set that the diff is written to keep open.
+      const child = this.db.oneRaw(
         `SELECT id, instance_uuid, character_id, parent_source_instance_id,
                 source_type, source_definition_id, display_name, config,
                 acquired_at_character_level, state, notes
@@ -343,7 +409,7 @@ export class GrantRuleSlotGenerator {
       );
       const childConfigJson = JSON.stringify(childConfig);
       const chosenList = valueAtPath(childConfig, 'chosen_list');
-      const definitionName = String(definition.name);
+      const definitionName = definition.name;
       const displayName =
         typeof chosenList === 'string' && chosenList !== ''
           ? `${definitionName}: ${chosenList}`
@@ -352,7 +418,7 @@ export class GrantRuleSlotGenerator {
         character_id: source.characterId,
         parent_source_instance_id: source.id,
         source_type: sourceType,
-        source_definition_id: Number(definition.id),
+        source_definition_id: definition.id,
         display_name: displayName,
         config: childConfigJson,
         acquired_at_character_level: source.acquiredAtCharacterLevel,
@@ -448,6 +514,7 @@ export class GrantRuleSlotGenerator {
       const version = this.db.one(
         'SELECT id, is_active FROM spell_versions WHERE id = ?',
         [Number(spellVersionId)],
+        spellVersionActivity,
       );
       if (version === null) {
         throw new Error(
@@ -532,7 +599,9 @@ export class GrantRuleSlotGenerator {
       sort_order: ordinal,
       ...eligibility,
     };
-    const existing = this.db.one(
+    // RAW on purpose, for the same reason as `child` above: `updateChangedRow`
+    // compares this row column-by-column against a runtime-keyed attribute map.
+    const existing = this.db.oneRaw(
       `SELECT * FROM spell_selection_slots
        WHERE character_id = ? AND slot_key = ?`,
       [source.characterId, slotKey],
@@ -620,9 +689,10 @@ export class GrantRuleSlotGenerator {
        WHERE source_instance_id = ?
          AND state IN ('active', 'kept_override')`,
       [source.id],
+      slotReferences,
     );
     for (const slot of existing) {
-      if (desired.has(String(slot.slot_key))) {
+      if (desired.has(slot.slot_key)) {
         continue;
       }
       const hasReference =
@@ -645,7 +715,7 @@ export class GrantRuleSlotGenerator {
           hasReference ? 'invalid' : 'unselected',
           hasReference ? RULE_REMOVED_SELECTION_REASON : null,
           timestamp,
-          Number(slot.id),
+          slot.id,
         ],
       );
     }
@@ -662,12 +732,16 @@ export class GrantRuleSlotGenerator {
        WHERE parent_source_instance_id = ?
          AND notes LIKE 'grant_rule:%'`,
       [source.id],
+      (row) => ({
+        id: sqlInteger(row, 'id'),
+        notes: sqlNullableString(row, 'notes'),
+      }),
     );
     for (const child of children) {
-      if (desired.has(String(child.notes))) {
+      if (child.notes !== null && desired.has(child.notes)) {
         continue;
       }
-      this.deactivateSourceTree(Number(child.id));
+      this.deactivateSourceTree(child.id);
     }
   }
 
@@ -680,9 +754,10 @@ export class GrantRuleSlotGenerator {
       `SELECT id FROM character_source_instances
        WHERE parent_source_instance_id = ?`,
       [sourceInstanceId],
+      rowId,
     );
-    for (const child of children) {
-      this.deactivateSourceTree(Number(child.id));
+    for (const childId of children) {
+      this.deactivateSourceTree(childId);
     }
 
     const slots = this.db.all(
@@ -691,6 +766,7 @@ export class GrantRuleSlotGenerator {
        WHERE source_instance_id = ?
          AND state IN ('active', 'kept_override')`,
       [sourceInstanceId],
+      slotAssignment,
     );
     for (const slot of slots) {
       const hasReference =
@@ -759,12 +835,11 @@ export class GrantRuleSlotGenerator {
         source.sourceDefinitionId,
         source.id,
       ],
+      nullableConfig,
     );
-    for (const other of others) {
+    for (const otherConfig of others) {
       const otherValue = valueAtPath(
-        decodeGrantJson(
-          other.config === null ? null : String(other.config),
-        ),
+        decodeGrantJson(otherConfig),
         rule.distinctConfigBy,
       );
       if (!sameValue(otherValue, value)) {
@@ -775,11 +850,9 @@ export class GrantRuleSlotGenerator {
         `SELECT name FROM ${sourceDefinitionTable(source.sourceType)}
          WHERE id = ?`,
         [source.sourceDefinitionId ?? 0],
+        rowName,
       );
-      const name =
-        definition === null
-          ? source.displayName
-          : String(definition.name);
+      const name = definition ?? source.displayName;
       throw new TypeError(
         `${name} already uses ${rule.distinctConfigBy} '${scalarString(value)}' for this character.`,
       );
