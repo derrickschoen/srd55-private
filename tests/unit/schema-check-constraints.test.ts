@@ -290,6 +290,95 @@ const masteryCount =
     });
   };
 
+// --- sheet core (D11/D12) --------------------------------------------------
+
+const armorTemplate =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'armor_templates', {
+      content_key: uid('armor'),
+      name: uid('Armor'),
+      category: 'medium',
+      armor_class: 14,
+      dex_bonus: 'capped',
+      dex_bonus_max: 2,
+      ...values,
+    });
+  };
+
+const sheetTraits =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'class_sheet_traits', {
+      class_definition_id: newClass(db),
+      hit_die: 8,
+      skill_choice_count: 2,
+      ...values,
+    });
+  };
+
+const savingThrowProficiency =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'class_saving_throw_proficiencies', {
+      class_definition_id: newClass(db),
+      ability: 'dexterity',
+      ...values,
+    });
+  };
+
+const skillOption =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'class_skill_options', {
+      class_definition_id: newClass(db),
+      skill: 'stealth',
+      ...values,
+    });
+  };
+
+const armorTraining =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'class_armor_training', {
+      class_definition_id: newClass(db),
+      category: 'light',
+      ...values,
+    });
+  };
+
+const weaponProficiency =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'class_weapon_proficiencies', {
+      class_definition_id: newClass(db),
+      category: 'martial',
+      ...values,
+    });
+  };
+
+const extraAttackGrant =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'class_extra_attack_grants', {
+      class_definition_id: newClass(db),
+      class_level: 5,
+      attack_count: 2,
+      ...values,
+    });
+  };
+
+const martialArtsDie =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'class_martial_arts_dice', {
+      class_definition_id: newClass(db),
+      class_level: 5,
+      martial_arts_die: 8,
+      ...values,
+    });
+  };
+
 // --- edit writers ----------------------------------------------------------
 // Each inserts a row that is legal on every constraint, then changes it. The
 // insert MUST succeed for the case to mean anything: if a fixture's starting
@@ -935,6 +1024,224 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     accepts: [
       ['the first printed trait', characterSpeciesTrait({ sort_order: 1 })],
       ["the fifth, which is the Dragonborn's Draconic Flight", characterSpeciesTrait({ sort_order: 5 })],
+    ],
+  },
+  // --- sheet core (D11 part 1, D12) ----------------------------------------
+  {
+    constraint: 'class_sheet_traits_check',
+    rejects: [
+      // A D7 or a D20 is a mis-parse of `D12 per Barbarian level`, and the
+      // point of constraining catalog content is that a mis-parse fails the
+      // seed rather than writing twelve plausible-looking wrong rows.
+      ['a hit die the SRD never prints', sheetTraits({ hit_die: 7 })],
+      ['a d4 hit die', sheetTraits({ hit_die: 4 })],
+      ['a d20 hit die', sheetTraits({ hit_die: 20 })],
+      // A NON-NUMERIC text hit die. `'8'` is deliberately NOT tested as a
+      // rejection and is in the accept list instead: INTEGER affinity converts
+      // it losslessly to the integer 8, exactly as `db/schema/columns.ts`
+      // records. What `typeof` refuses is text that does not convert.
+      ['a text hit die', sheetTraits({ hit_die: 'eight' })],
+      ['a zero skill choice count', sheetTraits({ skill_choice_count: 0 })],
+      ['a negative skill choice count', sheetTraits({ skill_choice_count: -2 })],
+      // A bare `>= 1` admits every text value, since SQLite orders TEXT above
+      // every number. The `typeof` limb is what refuses this.
+      ['a text skill choice count', sheetTraits({ skill_choice_count: 'two' })],
+    ],
+    accepts: [
+      ['the Sorcerer and Wizard d6', sheetTraits({ hit_die: 6 })],
+      ['the Barbarian d12', sheetTraits({ hit_die: 12 })],
+      ['the Rogue choosing 4 skills', sheetTraits({ skill_choice_count: 4 })],
+      // MEASURED, not assumed: INTEGER affinity stores this as the integer 8,
+      // so `typeof` sees `integer` and the row is legal. Asserting it here is
+      // what stops someone "fixing" the constraint to reject a value SQLite has
+      // already converted.
+      ['a digit string, which affinity converts to an integer', sheetTraits({ hit_die: '8' })],
+      ['the column default for choose-any', sheetTraits({ skill_choice_from_any: 1 })],
+    ],
+  },
+  {
+    constraint: 'class_saving_throw_proficiencies_ability_check',
+    rejects: [
+      // An unrecognised ability reads as "not proficient" to every lookup that
+      // is not an exhaustive switch, silently costing the character their
+      // proficiency bonus on that save.
+      ['an ability that is not one of the six', savingThrowProficiency({ ability: 'luck' })],
+      ['title case, which no writer produces', savingThrowProficiency({ ability: 'Dexterity' })],
+      ['an empty ability', savingThrowProficiency({ ability: '' })],
+    ],
+    accepts: [
+      ['strength', savingThrowProficiency({ ability: 'strength' })],
+      ['charisma', savingThrowProficiency({ ability: 'charisma' })],
+    ],
+  },
+  {
+    constraint: 'class_skill_options_skill_check',
+    rejects: [
+      ['a skill outside the Skills table', skillOption({ skill: 'lockpicking' })],
+      // The display spelling, which is what a hand-edit would most plausibly
+      // write. The column holds the snake-case enum member.
+      ['the display spelling of a real skill', skillOption({ skill: 'Sleight of Hand' })],
+    ],
+    accepts: [
+      ['sleight_of_hand', skillOption({ skill: 'sleight_of_hand' })],
+      // In the Skills table and in NO class's list. If the vocabulary had been
+      // closed on the class lists it would be missing, and this would fail.
+      ['performance, which no class offers', skillOption({ skill: 'performance' })],
+    ],
+  },
+  {
+    constraint: 'class_armor_training_category_check',
+    rejects: [
+      ['a category outside the source table', armorTraining({ category: 'plate' })],
+      ['the plural the Core Traits tables print', armorTraining({ category: 'shields' })],
+    ],
+    accepts: [
+      ['light', armorTraining({ category: 'light' })],
+      ['heavy', armorTraining({ category: 'heavy' })],
+      // A category of the source's own Armor table, not a separate concept.
+      ['shield', armorTraining({ category: 'shield' })],
+    ],
+  },
+  {
+    constraint: 'class_weapon_proficiencies_category_check',
+    rejects: [
+      ['a category that is neither Simple nor Martial', weaponProficiency({ category: 'exotic' })],
+      ['title case', weaponProficiency({ category: 'Martial' })],
+    ],
+    accepts: [
+      ['simple', weaponProficiency({ category: 'simple' })],
+      // The Monk and Rogue shape: the category is plain `martial` and the
+      // qualifier carries what a bare category would lie about.
+      ['martial with a property qualifier', weaponProficiency({ property_qualifier: 'Finesse or Light' })],
+      // Null for the ten classes whose proficiency carries no qualification.
+      ['martial with no qualifier at all', weaponProficiency({ property_qualifier: null })],
+    ],
+  },
+  {
+    constraint: 'class_extra_attack_grants_check',
+    rejects: [
+      ['level 0, which the `class_level <= ?` resolution would always win', extraAttackGrant({ class_level: 0 })],
+      ['level 21', extraAttackGrant({ class_level: 21 })],
+      // A row exists here BECAUSE a class granted Extra Attack, and the least
+      // that feature can mean is two attacks. A 1 is a parse that found the
+      // wrong line.
+      ['a single attack, which is the absence of the feature', extraAttackGrant({ attack_count: 1 })],
+      ['zero attacks', extraAttackGrant({ attack_count: 0 })],
+      ['a text attack count', extraAttackGrant({ attack_count: 'two' })],
+    ],
+    accepts: [
+      ['the level 5 grant every one of the five classes has', extraAttackGrant({ class_level: 5, attack_count: 2 })],
+      ["the Fighter's level 11 three attacks", extraAttackGrant({ class_level: 11, attack_count: 3 })],
+      ["the Fighter's level 20 four attacks", extraAttackGrant({ class_level: 20, attack_count: 4 })],
+    ],
+  },
+  {
+    constraint: 'class_martial_arts_dice_check',
+    rejects: [
+      ['level 0', martialArtsDie({ class_level: 0 })],
+      ['level 21', martialArtsDie({ class_level: 21 })],
+      ['a die size that is not a die', martialArtsDie({ martial_arts_die: 7 })],
+      ['a d20', martialArtsDie({ martial_arts_die: 20 })],
+      // Non-numeric: `'8'` would be converted by INTEGER affinity and stored
+      // as the integer 8, which is legitimate.
+      ['a text die size', martialArtsDie({ martial_arts_die: 'eight' })],
+    ],
+    accepts: [
+      ['the level 1 d6', martialArtsDie({ class_level: 1, martial_arts_die: 6 })],
+      ['the level 17 d12', martialArtsDie({ class_level: 17, martial_arts_die: 12 })],
+    ],
+  },
+  {
+    constraint: 'armor_templates_category_check',
+    rejects: [
+      ['a category outside the four the table prints', armorTemplate({ category: 'plate' })],
+      ['title case', armorTemplate({ category: 'Medium' })],
+    ],
+    accepts: [
+      ['light with an uncapped Dex term', armorTemplate({ category: 'light', dex_bonus: 'full', dex_bonus_max: null })],
+      ['heavy with no Dex term', armorTemplate({ category: 'heavy', dex_bonus: 'none', dex_bonus_max: null })],
+    ],
+  },
+  {
+    constraint: 'armor_templates_dex_bonus_check',
+    rejects: [
+      ['a Dex rule outside the three', armorTemplate({ dex_bonus: 'limited' })],
+      // "cap of zero" is the shape this vocabulary exists to prevent, because
+      // `min(dexMod, 0)` SUBTRACTS for a negative modifier.
+      ['the empty string', armorTemplate({ dex_bonus: '' })],
+    ],
+    accepts: [
+      ['capped, with its cap', armorTemplate({ dex_bonus: 'capped', dex_bonus_max: 2 })],
+      ['full, with no cap', armorTemplate({ dex_bonus: 'full', dex_bonus_max: null })],
+      ['none, with no cap', armorTemplate({ dex_bonus: 'none', dex_bonus_max: null })],
+    ],
+  },
+  {
+    constraint: 'armor_templates_dex_bonus_max_check',
+    rejects: [
+      // The pair must agree in BOTH directions, which is what turns a
+      // correlated-null smell into a discriminated union the database enforces.
+      ['capped with no cap', armorTemplate({ dex_bonus: 'capped', dex_bonus_max: null })],
+      ['full carrying a stray cap', armorTemplate({ dex_bonus: 'full', dex_bonus_max: 2 })],
+      ['none carrying a stray cap', armorTemplate({ dex_bonus: 'none', dex_bonus_max: 0 })],
+      ['a negative cap', armorTemplate({ dex_bonus: 'capped', dex_bonus_max: -1 })],
+      ['a text cap', armorTemplate({ dex_bonus: 'capped', dex_bonus_max: 'two' })],
+    ],
+    accepts: [
+      ['the Medium armour cap of 2', armorTemplate({ dex_bonus: 'capped', dex_bonus_max: 2 })],
+      // Zero is not a value the table prints, but a CHECK that refused it would
+      // be inventing a rule; the vocabulary is what keeps it from MEANING
+      // "Heavy armour".
+      ['a cap of zero', armorTemplate({ dex_bonus: 'capped', dex_bonus_max: 0 })],
+      ['the defended null on an uncapped row', armorTemplate({ dex_bonus: 'full', dex_bonus_max: null })],
+    ],
+  },
+  {
+    constraint: 'armor_templates_shield_check',
+    rejects: [
+      // A mis-parse filing the Shield's `+2` as a base AC with a Dex term is
+      // exactly what this refuses: it would quietly halve somebody's armour.
+      ['a Shield that adds a Dexterity modifier', armorTemplate({ category: 'shield', armor_class: 2, dex_bonus: 'full', dex_bonus_max: null })],
+      ['a Shield with a capped Dexterity modifier', armorTemplate({ category: 'shield', armor_class: 2, dex_bonus: 'capped', dex_bonus_max: 2 })],
+    ],
+    accepts: [
+      ['the Shield row as the table prints it', armorTemplate({ category: 'shield', armor_class: 2, dex_bonus: 'none', dex_bonus_max: null })],
+      ['a Medium armour, unaffected by the shield limb', armorTemplate({})],
+    ],
+  },
+  {
+    constraint: 'armor_templates_armor_class_check',
+    rejects: [
+      ['a zero armor class', armorTemplate({ armor_class: 0 })],
+      ['a negative armor class', armorTemplate({ armor_class: -1 })],
+      ['a text armor class', armorTemplate({ armor_class: 'fourteen' })],
+    ],
+    accepts: [
+      ["the Shield's +2, which is a BONUS rather than a base", armorTemplate({ category: 'shield', armor_class: 2, dex_bonus: 'none', dex_bonus_max: null })],
+      ['Plate Armor at 18', armorTemplate({ category: 'heavy', armor_class: 18, dex_bonus: 'none', dex_bonus_max: null })],
+    ],
+  },
+  {
+    constraint: 'armor_templates_strength_requirement_check',
+    rejects: [
+      ['a zero requirement, which is the em-dash written wrong', armorTemplate({ strength_requirement: 0 })],
+      ['a negative requirement', armorTemplate({ strength_requirement: -13 })],
+      ['a text requirement', armorTemplate({ strength_requirement: 'Str 13' })],
+    ],
+    accepts: [
+      ["Chain Mail's Str 13", armorTemplate({ strength_requirement: 13 })],
+      ["Plate Armor's Str 15", armorTemplate({ strength_requirement: 15 })],
+      // The defended null: ten of thirteen rows print an em-dash here, which is
+      // the source's own "no requirement" (D6b limb 2).
+      ['the em-dash, as a null', armorTemplate({ strength_requirement: null })],
+    ],
+  },
+  {
+    constraint: 'armor_templates_rules_edition_check',
+    rejects: [['an edition the seeder never writes', armorTemplate({ rules_edition: '2025' })]],
+    accepts: [
+      ['the 2024 default the seeder binds', armorTemplate({})],
+      ['2014', armorTemplate({ rules_edition: '2014' })],
     ],
   },
 ];

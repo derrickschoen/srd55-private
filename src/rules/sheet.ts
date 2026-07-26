@@ -1,0 +1,569 @@
+/**
+ * THE DERIVED SHEET. Nothing in this module is stored.
+ *
+ * D11 part 1: hit points, armor class, saving throw and skill modifiers,
+ * initiative and passive Perception are COMPUTED from ability scores, class
+ * levels and the sourced content in `db/schema/sheet.ts`. Storing any of them
+ * would create a second source of truth that drifts from the first the moment a
+ * Constitution score changes — the reasoning D6d applies to nullable columns,
+ * one level up.
+ *
+ * WHAT IS GENUINELY STORED, AND WHY EACH IS NOT DERIVABLE:
+ *
+ *  - a per-level HIT POINT ROLL. A die roll is information this application
+ *    cannot recompute. Absence of a roll means "use the printed fixed value",
+ *    which is a legitimate steady state for a character who never rolled — D6b
+ *    limb 1 — so it is modelled as an ABSENT ENTRY rather than a nullable
+ *    column, and there is no `| null` to propagate.
+ *  - which ARMOUR is worn and whether a SHIELD is held. Given, not derived.
+ *  - the MANUAL AC ADJUSTMENT. Given, and D12 keeps it deliberately.
+ *
+ * Those three are INPUTS to the functions below. This module is pure: it reads
+ * no database and holds no state, so every number here can be checked against a
+ * hand computation in a test. Persisting them is a separate change with its own
+ * backup, share and snapshot surface; see the note at the end of this file.
+ *
+ * EVERY FORMULA HERE IS SOURCED. The provenance is cited per function against a
+ * file in `docs/srd/source/`, because six of these numbers had no source in this
+ * repository at all until `skills-table.txt`, `sheet-math.txt` and
+ * `multiclassing.txt` were extracted for them.
+ */
+import type { Ability, Skill } from '../domain/enums';
+import type { AbilityScores } from './ability-scores';
+import { AttackBonus } from './attack-bonus';
+import { proficiencyBonus } from './proficiency';
+import { abilityForSkill } from './skills';
+import type { ArmorCategory, ArmorDexBonus } from '../domain/enums';
+
+/**
+ * One class a character has levels in, joined to that class's sheet content.
+ *
+ * `extra_attack_counts` is level -> TOTAL attacks, absolute, exactly as
+ * `class_extra_attack_grants` stores it.
+ */
+export interface SheetClass {
+  readonly class_name: string;
+  readonly level: number;
+  readonly hit_die: number;
+  readonly is_starting_class: boolean;
+  readonly saving_throws: readonly Ability[];
+  readonly extra_attack_counts?: ReadonlyMap<number, number>;
+}
+
+/**
+ * A character's armour or shield, as VALUES — never a template reference (D1b).
+ *
+ * `category` IS REQUIRED, and it is the field that gives `armor_class` its
+ * meaning: for `light`, `medium` and `heavy` that column is a BASE Armor Class,
+ * for `shield` it is an ADDITIVE BONUS. The schema comment on
+ * `armor_templates.armor_class` justifies overloading one column on the promise
+ * that consumers dispatch on `category`; omitting it here would make that
+ * promise unkeepable, because a Shield and a suit of Plate would be structurally
+ * identical types and could be swapped without a compile error.
+ */
+export interface SheetArmor {
+  readonly name: string;
+  readonly category: ArmorCategory;
+  readonly armor_class: number;
+  readonly dex_bonus: ArmorDexBonus;
+  readonly dex_bonus_max: number | null;
+  readonly strength_requirement: number | null;
+  readonly stealth_disadvantage: boolean;
+}
+
+/**
+ * A warning the sheet states rather than hides.
+ *
+ * D11 part 2: the builder BLOCKS an illegal choice, but anything already
+ * persisted — an import, a share link, a character whose starting class was
+ * deleted — is ACCEPTED and flagged. These functions therefore never throw on
+ * incoherent input; they degrade to a stated approximation.
+ */
+export interface SheetWarning {
+  readonly code:
+    | 'no_starting_class'
+    | 'several_starting_classes'
+    | 'strength_requirement_unmet'
+    | 'armor_slot_mismatch';
+  readonly message: string;
+}
+
+export interface HitPointResult {
+  readonly maximum: number;
+  readonly warnings: readonly SheetWarning[];
+}
+
+export interface ArmorClassResult {
+  readonly value: number;
+  readonly warnings: readonly SheetWarning[];
+}
+
+/**
+ * Total character level — the SUM across classes, floored at 1.
+ *
+ * Matches what `spell-access-builder.ts` and `build-report-builder.ts` already
+ * compute, deliberately: a sheet that derived a different total would print a
+ * save DC disagreeing with the planner on the same screen.
+ */
+export function totalCharacterLevel(classes: readonly SheetClass[]): number {
+  return Math.max(
+    1,
+    classes.reduce((sum, entry) => sum + entry.level, 0),
+  );
+}
+
+/**
+ * The character's proficiency bonus.
+ *
+ * FROM TOTAL LEVEL, NOT PER CLASS. `docs/srd/source/multiclassing.txt`: "Your
+ * Proficiency Bonus is based on your total character level, not your level in a
+ * particular class… if you are a level 3 Fighter / level 2 Rogue, you have the
+ * Proficiency Bonus of a level 5 character, which is +3."
+ *
+ * The override is resolved the way the two existing call sites resolve it, and
+ * for the same reason as `totalCharacterLevel`: one number on the screen.
+ */
+export function sheetProficiencyBonus(
+  classes: readonly SheetClass[],
+  override: number | null = null,
+): number {
+  return override ?? proficiencyBonus(totalCharacterLevel(classes));
+}
+
+/**
+ * The class that gets the level-1 Hit Point maximum, plus any warning.
+ *
+ * `docs/srd/source/multiclassing.txt`: "You gain the level 1 Hit Points for a
+ * class only when your total character level is 1." So exactly one class — the
+ * one the character started as — contributes the maximum, and every other level
+ * of every class contributes the per-level value.
+ *
+ * THREE DEFECTS IN `is_starting_class` MAKE THIS NON-TRIVIAL, and all three are
+ * reachable today rather than hypothetical:
+ *
+ *  1. the column has no uniqueness or existence constraint;
+ *  2. `update-class.ts` deletes a class row without promoting a replacement, so
+ *     deleting the starting class of a multiclass character leaves NO starting
+ *     class at all;
+ *  3. share import writes the flag per row with no cross-row check, so an
+ *     imported character may have several.
+ *
+ * Per D11 part 2 the import behaviour is CORRECT — the boundary tolerates — so
+ * it is this function's job to degrade rather than throw. It picks
+ * deterministically and says what it did.
+ */
+function startingClass(classes: readonly SheetClass[]): {
+  readonly chosen: SheetClass | null;
+  readonly warnings: readonly SheetWarning[];
+} {
+  const flagged = classes.filter((entry) => entry.is_starting_class);
+  if (flagged.length === 1) {
+    return { chosen: flagged[0] as SheetClass, warnings: [] };
+  }
+  if (classes.length === 0) {
+    return { chosen: null, warnings: [] };
+  }
+  if (flagged.length === 0) {
+    return {
+      chosen: classes[0] as SheetClass,
+      warnings: [
+        {
+          code: 'no_starting_class',
+          message:
+            'No class is marked as this character\'s starting class, so the ' +
+            `level 1 Hit Point maximum has been applied to ${String(classes[0]?.class_name)}. ` +
+            'Set a starting class to make this exact.',
+        },
+      ],
+    };
+  }
+  return {
+    chosen: flagged[0] as SheetClass,
+    warnings: [
+      {
+        code: 'several_starting_classes',
+        message:
+          `${String(flagged.length)} classes are marked as the starting class, which is not a ` +
+          `state the builder can produce. ${String(flagged[0]?.class_name)} has been used for ` +
+          'the level 1 Hit Point maximum.',
+      },
+    ],
+  };
+}
+
+/**
+ * The per-level Hit Point value taken when a die is NOT rolled.
+ *
+ * `docs/srd/source/sheet-math.txt` prints these per class in the Fixed Hit
+ * Points by Class table: Barbarian 7, Fighter/Paladin/Ranger 6,
+ * Bard/Cleric/Druid/Monk/Rogue/Warlock 5, Sorcerer/Wizard 4 — which is exactly
+ * `die / 2 + 1` for d12, d10, d8 and d6 respectively.
+ *
+ * The FORMULA is used rather than a per-class table because the hit die is
+ * already sourced per class from the Core Traits tables and a second per-class
+ * table would be a second thing to keep in step. The equivalence is not
+ * assumed: `tests/unit/rules/sheet.test.ts` asserts this function against all
+ * four printed values, transcribed by hand from that table.
+ */
+export function fixedHitPointsPerLevel(hitDie: number): number {
+  if (!Number.isSafeInteger(hitDie) || hitDie < 2) {
+    throw new RangeError(`Hit die must be an integer of at least 2, got ${String(hitDie)}.`);
+  }
+  return hitDie / 2 + 1;
+}
+
+/**
+ * A hit point roll the player entered, keyed by the level it was rolled for.
+ *
+ * Keyed by CLASS NAME and CLASS LEVEL because hit dice are per class: a level 5
+ * Fighter / level 3 Wizard rolls d10s for Fighter levels and d6s for Wizard
+ * levels, and `docs/srd/source/multiclassing.txt` says to track dice of
+ * different types separately.
+ */
+export type HitPointRolls = ReadonlyMap<string, ReadonlyMap<number, number>>;
+
+/**
+ * Hit point maximum.
+ *
+ * Level 1 of the starting class is the MAXIMUM of that class's die plus the
+ * Constitution modifier — `docs/srd/source/sheet-math.txt`, Level 1 Hit Points
+ * by Class: Barbarian "12 + Con. modifier", Fighter/Paladin/Ranger 10, the six
+ * d8 classes 8, Sorcerer/Wizard 6. Every other level adds the rolled value, or
+ * the fixed value when nothing was rolled, plus the Constitution modifier.
+ *
+ * THE MINIMUM OF 1 APPLIES ONLY TO LEVELS AFTER THE FIRST, because that is
+ * where the source states it: "Roll that die, add your Constitution modifier to
+ * the roll, and add the total (minimum of 1) to your Hit Point maximum." The
+ * Level 1 table prints no such floor, so none is invented here.
+ *
+ * CONSTITUTION IS READ LIVE. A character whose Constitution changes sees every
+ * level's contribution move with it, which is the whole reason this is computed
+ * rather than stored.
+ */
+export function hitPointMaximum(input: {
+  readonly classes: readonly SheetClass[];
+  readonly scores: AbilityScores;
+  readonly rolls?: HitPointRolls;
+}): HitPointResult {
+  const conModifier = input.scores.score('constitution').modifier();
+  const { chosen, warnings } = startingClass(input.classes);
+
+  let maximum = 0;
+  for (const entry of input.classes) {
+    const rolled = input.rolls?.get(entry.class_name);
+    for (let level = 1; level <= entry.level; level += 1) {
+      const isFirstLevelOfCharacter = chosen === entry && level === 1;
+      if (isFirstLevelOfCharacter) {
+        maximum += entry.hit_die + conModifier;
+        continue;
+      }
+      const roll = rolled?.get(level);
+      const base = roll ?? fixedHitPointsPerLevel(entry.hit_die);
+      maximum += Math.max(1, base + conModifier);
+    }
+  }
+  return { maximum, warnings };
+}
+
+/**
+ * Armor Class.
+ *
+ * UNARMOURED: `10 + Dexterity modifier`. `docs/srd/source/sheet-math.txt`:
+ * "Without armor or a shield, your base Armor Class is 10 plus your Dexterity
+ * modifier", and `skills-table.txt` prints the same as "Base AC = 10 + the
+ * creature's Dexterity modifier".
+ *
+ * ARMOURED: the base the Armor table prints, plus the Dexterity term that row
+ * allows — `docs/srd/source/armor-table.txt`. Light armour adds the modifier
+ * uncapped, Medium adds it capped at 2, Heavy adds NOTHING.
+ *
+ * HEAVY ARMOUR IS `none`, NOT A CAP OF ZERO, and the difference is a real bug
+ * avoided: `Math.min(dexModifier, 0)` SUBTRACTS for a negative modifier, so a
+ * Dexterity 6 character in Chain Mail would come out at 14 where the table says
+ * a flat 16.
+ *
+ * WHAT THIS DOES NOT MODEL, and says so rather than guessing: Unarmored Defense
+ * (Barbarian, Monk) and any other class feature offering an alternative
+ * calculation. `docs/srd/source/multiclassing.txt` is explicit that a character
+ * with several such features picks ONE, and the feature text for neither class
+ * is in `docs/srd/source/`. The manual adjustment is the honest escape hatch
+ * until it is.
+ *
+ * THE ROLE OF A ROW IS DECIDED BY `category`, NOT BY WHICH ARGUMENT IT ARRIVES
+ * IN. `armorClassFrom` below is the exhaustive dispatch the schema comment on
+ * `armor_templates.armor_class` promises. Passing a Shield as `armor` is a real
+ * reachable mistake once persistence lands — the two are the same TypeScript
+ * shape — and reading its `+2` as a base Armor Class would silently halve
+ * somebody's defence. Here it contributes its bonus over the unarmoured base and
+ * the sheet SAYS the slots are crossed, which is D11 part 2 applied to a value
+ * this module was already given.
+ */
+export function armorClass(input: {
+  readonly armor?: SheetArmor | null;
+  readonly shield?: SheetArmor | null;
+  readonly scores: AbilityScores;
+  readonly adjustment?: number;
+}): ArmorClassResult {
+  const dexModifier = input.scores.score('dexterity').modifier();
+  const warnings: SheetWarning[] = [];
+
+  let base: number | null = null;
+  let bonus = 0;
+
+  for (const slot of ['armor', 'shield'] as const) {
+    const row = input[slot] ?? null;
+    if (row === null) {
+      continue;
+    }
+    const contribution = armorClassFrom(row, dexModifier);
+    if (contribution.base === null) {
+      bonus += contribution.bonus;
+    } else {
+      // Two rows both claiming to be worn armour cannot both apply; the SRD has
+      // no rule for layering, so the better of the two is used and stated.
+      base = base === null ? contribution.base : Math.max(base, contribution.base);
+    }
+    if ((contribution.base === null) !== (slot === 'shield')) {
+      warnings.push({
+        code: 'armor_slot_mismatch',
+        message:
+          `${row.name} is ${row.category === 'shield' ? 'a Shield' : `${row.category} armor`}, ` +
+          `but it is recorded in the ${slot === 'shield' ? 'shield' : 'worn armor'} slot. ` +
+          'It has been counted according to what it is, not where it was put.',
+      });
+    }
+    const required = row.strength_requirement;
+    if (required !== null && input.scores.score('strength').value < required) {
+      warnings.push({
+        code: 'strength_requirement_unmet',
+        message:
+          `${row.name} requires Strength ${String(required)}; this character has ` +
+          `${String(input.scores.score('strength').value)}, so their speed is reduced by 10 feet.`,
+      });
+    }
+  }
+
+  const value = (base ?? 10 + dexModifier) + bonus;
+  return { value: value + (input.adjustment ?? 0), warnings };
+}
+
+/**
+ * What one row contributes, decided by `category` and by nothing else.
+ *
+ * `base` is the Armor Class the row SETS, replacing the unarmoured `10 + Dex`;
+ * `bonus` is what it ADDS on top of whatever base applies. Exactly one of the
+ * two is meaningful per category, which is why `base` is nullable here and
+ * nowhere else: `null` means "this row is not worn armour", a fact about the
+ * category rather than missing data (D6b limb 1).
+ *
+ * THE SWITCH IS EXHAUSTIVE OVER `ArmorCategory` with no `default`, so adding a
+ * category to the vocabulary is a compile error here rather than a silent
+ * miscalculation — which is the guarantee `armor_templates.armor_class` is
+ * documented as relying on.
+ */
+function armorClassFrom(
+  row: SheetArmor,
+  dexModifier: number,
+): { readonly base: number | null; readonly bonus: number } {
+  switch (row.category) {
+    case 'light':
+    case 'medium':
+    case 'heavy':
+      return { base: row.armor_class + dexterityTerm(row, dexModifier), bonus: 0 };
+    case 'shield':
+      // The Shield row's `armor_class` is the `+2` BONUS the table prints, not
+      // a base — the one place the column changes meaning.
+      return { base: null, bonus: row.armor_class };
+  }
+}
+
+/** The Dexterity contribution of one armour row. Exhaustive over the vocabulary. */
+function dexterityTerm(armor: SheetArmor, dexModifier: number): number {
+  switch (armor.dex_bonus) {
+    case 'full':
+      return dexModifier;
+    case 'capped':
+      // `dex_bonus_max` is non-null exactly when `dex_bonus` is `capped`, tied
+      // by a CHECK on the table. The `?? 0` is unreachable for a seeded row and
+      // is here so a hand-edited image degrades to Heavy-like behaviour rather
+      // than to NaN.
+      return Math.min(dexModifier, armor.dex_bonus_max ?? 0);
+    case 'none':
+      return 0;
+  }
+}
+
+/**
+ * A saving throw modifier: ability modifier, plus the proficiency bonus when
+ * the character is proficient.
+ *
+ * `docs/srd/source/skills-table.txt`: "You add your Proficiency Bonus to your
+ * saving throw if you have proficiency in that kind of save."
+ *
+ * PROFICIENCIES COME FROM THE FIRST CLASS ONLY. `multiclassing.txt`: "When you
+ * gain your first level in a class other than your initial class, you gain only
+ * some of the new class's starting proficiencies, as detailed in each class's
+ * description" — and no class's "As a Multiclass Character" bullet in
+ * `class-core-traits.txt` lists saving throws. A Fighter 5 / Wizard 3 is
+ * therefore proficient in Strength and Constitution saves, NOT in Intelligence
+ * and Wisdom as well.
+ */
+export function savingThrowProficiencies(
+  classes: readonly SheetClass[],
+): { readonly abilities: ReadonlySet<Ability>; readonly warnings: readonly SheetWarning[] } {
+  const { chosen, warnings } = startingClass(classes);
+  return {
+    abilities: new Set(chosen?.saving_throws ?? []),
+    warnings,
+  };
+}
+
+/**
+ * `abilityModifier + (proficient ? proficiencyBonus : 0)`.
+ *
+ * The proficient branch goes through `AttackBonus.from`, which is already
+ * exactly this arithmetic and is already reviewed — it is named for spell
+ * attacks but computes `modifier + proficiencyBonus` and permits a negative
+ * result. Reusing it rather than writing a third copy is the point.
+ *
+ * NOT `SaveDC.from`, which cannot serve here: it refuses a value below 1, and a
+ * legitimate skill modifier is negative — Strength 1 and no proficiency is −5.
+ */
+function proficientModifier(
+  scores: AbilityScores,
+  ability: Ability,
+  bonus: number,
+  proficient: boolean,
+): number {
+  const score = scores.score(ability);
+  return proficient
+    ? AttackBonus.from(score, bonus).value
+    : score.modifier();
+}
+
+export function savingThrowModifier(input: {
+  readonly ability: Ability;
+  readonly scores: AbilityScores;
+  readonly proficiencyBonus: number;
+  readonly proficient: boolean;
+}): number {
+  return proficientModifier(
+    input.scores,
+    input.ability,
+    input.proficiencyBonus,
+    input.proficient,
+  );
+}
+
+/**
+ * A skill modifier.
+ *
+ * `docs/srd/source/skills-table.txt`: "If a creature is proficient in a skill,
+ * the creature applies its Proficiency Bonus to ability checks involving that
+ * skill", and the Skills table supplies which ability each skill uses.
+ *
+ * EXPERTISE IS NOT MODELLED. Rogue and Bard Expertise doubles the bonus for
+ * chosen skills; that feature's text is not in `docs/srd/source/` and this
+ * application says nothing about it rather than inventing it (F4's rule).
+ */
+export function skillModifier(input: {
+  readonly skill: Skill;
+  readonly scores: AbilityScores;
+  readonly proficiencyBonus: number;
+  readonly proficient: boolean;
+}): number {
+  return proficientModifier(
+    input.scores,
+    abilityForSkill(input.skill),
+    input.proficiencyBonus,
+    input.proficient,
+  );
+}
+
+/**
+ * Initiative — the Dexterity modifier.
+ *
+ * `docs/srd/source/sheet-math.txt`: "Initiative. Write your Dexterity modifier
+ * in the space for Initiative on your character sheet."
+ *
+ * Advantage on Initiative (the Champion's Remarkable Athlete) is not a modifier
+ * and is not represented here.
+ */
+export function initiative(scores: AbilityScores): number {
+  return scores.score('dexterity').modifier();
+}
+
+/**
+ * Passive Perception — `10 + the Wisdom (Perception) check modifier`.
+ *
+ * `docs/srd/source/sheet-math.txt` prints both the formula and a worked example
+ * that this is checked against in the test: Wisdom 15 with Perception
+ * proficiency and a +2 bonus gives 14.
+ */
+export function passivePerception(input: {
+  readonly scores: AbilityScores;
+  readonly proficiencyBonus: number;
+  readonly proficient: boolean;
+}): number {
+  return (
+    10 +
+    skillModifier({
+      skill: 'perception',
+      scores: input.scores,
+      proficiencyBonus: input.proficiencyBonus,
+      proficient: input.proficient,
+    })
+  );
+}
+
+/**
+ * How many attacks the Attack action gives.
+ *
+ * THE FEATURES DO NOT STACK, AND THIS IS THE MULTICLASS CASE THIS APPLICATION
+ * SPECIALISES IN. `docs/srd/source/multiclassing.txt`: "If you gain the Extra
+ * Attack feature from more than one class, the features don't stack. You can't
+ * make more than two attacks with this feature unless you have a feature that
+ * says you can (such as the Fighter's Two Extra Attacks feature)."
+ *
+ * So the combinator is `max`, never `sum`. A Fighter 5 / Ranger 5 makes TWO
+ * attacks, not three — summing per-class grants is the plausible-looking bug
+ * this function exists to not have. A Fighter 11 / Ranger 5 makes three,
+ * because the Fighter's own feature is the one that says it can.
+ *
+ * Per class the count is resolved as the highest granting level at or below the
+ * character's level in THAT class, matching how the rows are stored (absolute
+ * totals, never increments).
+ */
+export function attacksPerAction(classes: readonly SheetClass[]): number {
+  let best = 1;
+  for (const entry of classes) {
+    const counts = entry.extra_attack_counts;
+    if (counts === undefined) {
+      continue;
+    }
+    for (const [level, attacks] of counts) {
+      if (level <= entry.level && attacks > best) {
+        best = attacks;
+      }
+    }
+  }
+  return best;
+}
+
+/**
+ * NOT IN THIS MODULE, DELIBERATELY, AND NOT HALF-BUILT:
+ *
+ *  - PERSISTENCE of the three stored inputs (worn armour, shield, manual
+ *    adjustment, per-level rolls). A character-scoped table has a 36-file
+ *    surface here — backup, share, snapshot, delete order, row contracts,
+ *    candidate audit, commands and the browser tests — and a character's armour
+ *    that did not survive a backup would be a data-loss bug rather than a
+ *    partial feature. It is the next change, and these functions already take
+ *    those values as parameters so it needs no reshaping of this module.
+ *  - CLASS FEATURE TEXT and the ten missing subclass sets (D11 part 1 excludes
+ *    both).
+ *  - UNARMORED DEFENSE for Barbarian and Monk: the feature text is not in
+ *    `docs/srd/source/`, so the sheet stays silent instead of guessing.
+ *  - EXPERTISE, and the attack profiles of D14/D15, which need this foundation
+ *    first.
+ */

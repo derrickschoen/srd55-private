@@ -6,7 +6,7 @@ Nothing here has stopped other work.
 
 ---
 
-## Q1 — ANSWERED 2026-07-26: build it claude-only (see D12). No longer blocked.
+## Q1 — RESOLVED 2026-07-26: claude-only bridge built and merged (D12, D16)
 
 **State:** 23 files of unreviewed implementation parked in
 `../dnd-wt-bridge` on `feat/local-ai-bridge`. NOT merged, NOT resumed.
@@ -205,3 +205,26 @@ a fixture produced by the code under test proves nothing.
 If you would rather have kept the disclosed notice instead, say so and it
 reverts cleanly.
 >>>>>>> main
+
+---
+
+## Q9 — The sheet core is BUILT but NOT WIRED IN (FYI, not blocking)
+
+The per-class SRD content, the parsers and the whole derivation module are
+merged and tested — 42 tables, HP, AC, saving throws, skill modifiers,
+initiative and passive Perception all computed and checked against hand-worked
+numbers, multiclass included.
+
+**None of it is visible in the app yet.** `src/rules/sheet.ts` has no production
+caller. Persisting the four inputs a player actually supplies — armour choice,
+recorded HP rolls, skill selections, the manual AC adjustment — is a 36-file
+surface touching backup, sharing and snapshots, and armour that failed to
+survive a backup would be data loss rather than a partial feature. Q8 was
+exactly that bug for weapons and it took a full track to close.
+
+So the increment boundary is deliberate: the content and the arithmetic are
+proven first, the persistence and UI come next as one piece.
+
+**No decision needed** unless you would rather see a rough sheet sooner and
+accept that its inputs do not survive a backup yet. Say so and I will reorder;
+otherwise the next track wires it up properly.

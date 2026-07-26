@@ -1,0 +1,103 @@
+This work includes material from the System Reference Document 5.2
+("SRD 5.2") by Wizards of the Coast LLC, available at
+https://www.dndbeyond.com/srd. The SRD 5.2 is licensed under the Creative
+Commons Attribution 4.0 International License, available at
+https://creativecommons.org/licenses/by/4.0/legalcode.
+
+--- Verbatim extracts: the Skills table (skill -> governing ability) and the
+    rules that apply a Proficiency Bonus to a skill or a save.
+
+    LAYOUT: the SRD is set in two columns and 'pdftotext -layout' preserves
+    both, so unrelated text from the neighbouring column appears beside some
+    lines. THE SKILLS TABLE ITSELF IS FULL WIDTH and carries no bleed; the
+    surrounding prose does. Nothing has been edited out. ---
+
+=== Saving throws, Base AC and weapon proficiency (page ~10) ===
+
+    the Saving Throw Examples table.                          when you attack using a weapon you have profi-
+                                                              ciency with, as well as when you attack with a spell.
+    Saving Throw Examples                                     See “Proficiency” later in “Playing the Game” for
+    Ability         Make a Save To …                          more information about weapon proficiencies.
+    Strength        Physically resist direct force            Armor Class
+    Dexterity       Dodge out of harm’s way                   A creature’s Armor Class represents how well the
+    Constitution    Endure a toxic hazard                     creature avoids being wounded in combat. The AC
+                                                              of a character is determined at character creation
+    Intelligence    Recognize an illusion as fake
+                                                              (see “Character Creation”), whereas the AC of a
+    Wisdom          Resist a mental assault                   monster appears in its stat block.
+    Charisma        Assert your identity                        Calculating AC. All creatures start with the same
+                                                              base AC calculation:
+    Proficiency Bonus
+    You add your Proficiency Bonus to your saving               Base AC = 10 + the creature’s Dexterity modifier
+    throw if you have proficiency in that kind of save.       A creature’s AC can then be modified by armor,
+    See “Proficiency” later in “Playing the Game.”            magic items, spells, and more.
+                                                                Only One Base AC. Some spells and class features
+    Difficulty Class
+                                                              give characters a different way to calculate their AC.
+    The Difficulty Class for a saving throw is deter-
+                                                              A character with multiple features that give differ-
+
+=== Proficiency Bonus: what it applies to, and by level (page ~12) ===
+
+      playing.                                                  ture has proficiency in a skill, in a saving throw, or
+        Other rules might allow your character to gain          with an item that the creature uses to make the D20
+      Heroic Inspiration independent of the GM’s decision.      Test. The bonus is also used for spell attacks and for
+      For example, Human characters start each day with         calculating the DC of saving throws for spells.
+      Heroic Inspiration.
+                                                                Proficiency Bonus
+    GM can also decide that circumstances grant Ad-             Level or CR      Bonus       Level or CR     Bonus
+    vantage or impose Disadvantage.                                Up to 4         +2           17–20          +6
+    Roll Two D20s                                                   5–8            +3           21–24          +7
+    When a roll has either Advantage or Disadvantage,               9–12           +4           25–28          +8
+    roll a second d20 when you make the roll. Use the               13–16          +5           29–30          +9
+    higher of the two rolls if you have Advantage, and
+    use the lower roll if you have Disadvantage. For ex-        The Bonus Doesn’t Stack
+    ample, if you have Disadvantage and roll an 18 and a
+    3, use the 3. If you instead have Advantage and roll        Your Proficiency Bonus can’t be added to a die roll
+
+=== Skill Proficiencies: proficiency adds the bonus (page ~12, right column) ===
+
+    something in the game lets you reroll or replace the        an ability check. The descriptions of the actions
+    d20, you can reroll or replace only one die, not both.      you take (see “Actions” later in “Playing the Game”)
+    You choose which one.                                       specify which skill applies if you make an ability
+      For example, if you have Heroic Inspiration (see          check for that action, and many other rules note
+    the sidebar below) and roll a 3 and an 18 on an abil-       when a skill is relevant. The GM has the ultimate say
+    ity check that has Advantage or Disadvantage, you           on whether a skill is relevant in a situation.
+    could expend your Heroic Inspiration to reroll one            If a creature is proficient in a skill, the creature
+    of those dice, not both of them.                            applies its Proficiency Bonus to ability checks in-
+                                                                volving that skill. Without proficiency in a skill, a
+                                                                creature can still make ability checks involving
+
+
+=== The Skills table (page ~13, FULL WIDTH — no column bleed) ===
+
+    Skills
+    Skill               Ability             Example Uses
+    Acrobatics          Dexterity           Stay on your feet in a tricky situation, or perform an acrobatic stunt.
+    Animal Handling     Wisdom              Calm or train an animal, or get an animal to behave in a certain way.
+    Arcana              Intelligence        Recall lore about spells, magic items, and the planes of existence.
+    Athletics           Strength            Jump farther than normal, stay afloat in rough water, or break something.
+    Deception           Charisma            Tell a convincing lie, or wear a disguise convincingly.
+    History             Intelligence        Recall lore about historical events, people, nations, and cultures.
+    Insight             Wisdom              Discern a person’s mood and intentions.
+    Intimidation        Charisma            Awe or threaten someone into doing what you want.
+    Investigation       Intelligence        Find obscure information in books, or deduce how something works.
+    Medicine            Wisdom              Diagnose an illness, or determine what killed the recently slain.
+    Nature              Intelligence        Recall lore about terrain, plants, animals, and weather.
+    Perception          Wisdom              Using a combination of senses, notice something that’s easy to miss.
+    Performance         Charisma            Act, tell a story, perform music, or dance.
+    Persuasion          Charisma            Honestly and graciously convince someone of something.
+    Religion            Intelligence        Recall lore about gods, religious rituals, and holy symbols.
+    Sleight of Hand     Dexterity           Pick a pocket, conceal a handheld object, or perform legerdemain.
+    Stealth             Dexterity           Escape notice by moving quietly and hiding behind things.
+    Survival            Wisdom              Follow tracks, forage, find a trail, or avoid natural hazards.
+
+=== Proficiency applied to a skill check, continued (page ~13, left column) ===
+
+
+    that skill but doesn’t add its Proficiency Bonus. For         Equipment Proficiencies
+    example, if a character tries to climb a cliff, the GM
+    might ask for a Strength (Athletics) check. If the            A character gains proficiency with various weapons
+    character has Athletics proficiency, the character            and tools from their class and background. There
+    adds their Proficiency Bonus to the Strength check.           are two categories of equipment proficiency:
+    If the character lacks that proficiency, they make            Weapons. Anyone can wield a weapon, but profi-
