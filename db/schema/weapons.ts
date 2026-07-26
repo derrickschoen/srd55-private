@@ -20,8 +20,17 @@ import type {
   WeaponMasteryProperty,
 } from '../../src/domain/enums';
 import {
+  rulesEditions,
+  srdWeaponGroups,
+  weaponMasteryGrants,
+  weaponMasteryProperties,
+} from '../../src/domain/enums';
+import {
   datetime,
+  integerAtLeast,
   laravelDefault,
+  nullOrOneOf,
+  oneOf,
   sqlText,
   tinyint1,
   varchar,
@@ -149,6 +158,24 @@ export const character_weapons = sqliteTable(
       'character_weapons_mastery_requires_property_check',
       sql`mastery_selected = 0 OR mastery_property IS NOT NULL`,
     ),
+    /**
+     * The companion to the constraint above: that one says mastery cannot be
+     * SELECTED without a property, this one says the property must be one of
+     * the eight that exist. Together the mastery invariant is closed.
+     *
+     * The null limb is the sourced fact D6b protects — all 38 SRD weapons have
+     * exactly one mastery property and a weapon the user invented need not.
+     * `AddWeaponCommand`/`UpdateWeaponCommand` already coerce a non-member to
+     * null through `isEnumValue(weaponMasteryProperties, …)`.
+     *
+     * NOT CONSTRAINED: `damage_type`, which is deliberately an open vocabulary
+     * (see its column comment) — a user's weapon may do whatever damage their
+     * table agreed on.
+     */
+    check(
+      'character_weapons_mastery_property_check',
+      nullOrOneOf('mastery_property', weaponMasteryProperties),
+    ),
     index('character_weapons_character_id_index').on(table.character_id),
   ],
 );
@@ -200,6 +227,27 @@ export const weapon_templates = sqliteTable(
     updated_at: datetime()('updated_at'),
   },
   (table) => [
+    /**
+     * NOT NULL here where the character's copy is nullable, so no null limb:
+     * every row comes from a table in which every weapon has a property, and a
+     * mis-parse of `docs/srd/source/weapons-table.txt` writing 38 wrong rows is
+     * exactly what this refuses.
+     */
+    check(
+      'weapon_templates_mastery_property_check',
+      oneOf('mastery_property', weaponMasteryProperties),
+    ),
+    /** The four headings the source's own table uses; the picker groups on it. */
+    check('weapon_templates_srd_group_check', oneOf('srd_group', srdWeaponGroups)),
+    /**
+     * Safe here where it is not safe on `spell_versions`: this table is NATIVE,
+     * its only writer is the SRD seeder in `src/rules/weapons-srd.ts` binding
+     * the `'2024'` constant, and no import path can reach it.
+     */
+    check(
+      'weapon_templates_rules_edition_check',
+      oneOf('rules_edition', rulesEditions),
+    ),
     uniqueIndex('weapon_templates_content_key_unique').on(table.content_key),
   ],
 );
@@ -226,6 +274,17 @@ export const class_weapon_mastery_grants = sqliteTable(
     updated_at: datetime()('updated_at'),
   },
   (table) => [
+    /**
+     * The one that matters most in this file. An unrecognised `grant` reads as
+     * "not granted" to every branch that is not an exhaustive switch, which
+     * COLLAPSES `counts_unsourced` into `not_granted` — the precise silent-wrong
+     * this three-member vocabulary was invented to prevent, and one that costs
+     * the character an entitlement without a single error anywhere.
+     */
+    check(
+      'class_weapon_mastery_grants_grant_check',
+      oneOf('grant', weaponMasteryGrants),
+    ),
     uniqueIndex('class_weapon_mastery_grants_class_definition_id_unique').on(
       table.class_definition_id,
     ),
@@ -256,6 +315,37 @@ export const class_weapon_mastery_counts = sqliteTable(
     updated_at: datetime()('updated_at'),
   },
   (table) => [
+    /**
+     * Resolved by `WHERE class_level <= ? ORDER BY class_level DESC LIMIT 1`,
+     * so a row outside 1..20 either always wins or never does. Every row here
+     * is transcribed from a printed line covering levels 1..20.
+     *
+     * `mastery_count >= 0` and not `> 0`: zero is a legitimate count in
+     * principle even though no printed row carries one, and refusing it would
+     * invent a rule the source does not state (the row contract makes the same
+     * call).
+     *
+     * The count limb goes through `integerAtLeast` while the level limb stays a
+     * plain `BETWEEN` — not an inconsistency, the measured difference in
+     * `columns.ts`: `BETWEEN` already rejects text on its upper limb, a bare
+     * `>= 0` does not reject it at all.
+     *
+     * ON `class_level` BEING TIGHTER THAN ITS ROW CONTRACT — deliberate, and
+     * NOT to be reconciled by loosening this. `ROW_CONTRACTS` types
+     * `class_weapon_mastery_counts.class_level` as `positiveInt` (unbounded
+     * above), so 21 clears the contract and dies here instead. The bound is
+     * right: `class-progression-lookup.ts` resolves these rows with
+     * `class_level <= ?` and its own queries say `BETWEEN 1 AND 20`,
+     * `PROGRESSION_LEVELS` is 20, and the parsed SRD tables cover 1..20 — the
+     * identical bound on `class_progressions_class_level_check` has no contract
+     * to disagree with only because that table has no row contract at all.
+     * Tightening the contract to match belongs in `src/domain/contracts/`,
+     * which this change does not own.
+     */
+    check(
+      'class_weapon_mastery_counts_check',
+      sql`class_level BETWEEN 1 AND 20 AND ${integerAtLeast('mastery_count', 0)}`,
+    ),
     uniqueIndex(
       'class_weapon_mastery_counts_class_definition_id_class_level_unique',
     ).on(table.class_definition_id, table.class_level),
