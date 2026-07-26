@@ -11,6 +11,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { SCRAPE_SENTINEL } from '../../../tools/scrape/provenance';
+
 const scanner = fileURLToPath(
   new URL('../../../tools/assert-dist-clean.mjs', import.meta.url),
 );
@@ -130,6 +132,47 @@ describe('the dist guard FAILS on every way the bridge could leak', () => {
     );
     expect(run.code).toBe(1);
     expect(run.stderr).toContain('/__ai/');
+  });
+
+  it('catches scraped content whose ONLY stamp is its filename', async () => {
+    // The leak this closes was real and measured: copying one cached page into
+    // public/ and running `npm run build` printed "dist clean: 10 files scanned,
+    // control OK" and exited 0 while shipping real scraped rules text in dist/.
+    // The scan matched contents only, and cached HTML — 84 of the 88 files the
+    // scraper writes — carries the sentinel nowhere but its name, because
+    // provenance.ts states it has nowhere else to put it without corrupting the
+    // bytes the parser reads. The file body here is deliberately innocuous: if
+    // the guard only reads contents, this passes.
+    //
+    // The sentinel is IMPORTED rather than written out, so this file stays off
+    // the two-file allowlist in
+    // tests/unit/tools/scraped-output-is-never-committed.test.ts. Spelling it
+    // literally here made that guard fail — correctly; it exists to make any
+    // widening of the allowlist a visible diff, and it caught this one.
+    const run = await scan(
+      distWith({
+        'index.html': CLEAN,
+        [`a1b2c3.${SCRAPE_SENTINEL}.html`]:
+          '<html><body><p>Casting Time: Action</p></body></html>',
+      }),
+    );
+    expect(run.code).toBe(1);
+    expect(run.stderr).toContain('FILENAME');
+    expect(run.stderr).toContain(SCRAPE_SENTINEL);
+  });
+
+  it('still distinguishes a contents leak from a filename leak when it reports', async () => {
+    // Guards against "fix" the filename check by simply always claiming the
+    // filename: a body-only leak must still be reported as a contents leak.
+    const run = await scan(
+      distWith({
+        'index.html': CLEAN,
+        'assets/data.json': `{"_provenance":"${SCRAPE_SENTINEL}"}`,
+      }),
+    );
+    expect(run.code).toBe(1);
+    expect(run.stderr).toContain('the contents of');
+    expect(run.stderr).not.toContain('FILENAME');
   });
 });
 

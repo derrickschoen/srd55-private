@@ -1,0 +1,22 @@
+[
+  {
+    "versionKey": "expanded:longroad.homebrew:roadmenders-cadence",
+    "_description": "You set a walking rhythm that the road seems to agree with. For the duration, you and up to five willing creatures within range ignore the first hour of exhaustion-inducing travel each day, and difficult terrain made of loose stone, mud or scree costs no extra movement.\n\nThe cadence is stubborn rather than magical-feeling: creatures under its effect find themselves humming it hours after the spell ends."
+  },
+  {
+    "versionKey": "expanded:longroad.homebrew:coinbite",
+    "_description": "You flip a coin toward a creature you can see. It must succeed on a Wisdom saving throw or spend its Reaction catching the coin, and it cannot willingly drop the coin until the end of its next turn.\n\nThe coin is not consumed, and a creature that has already been bitten by this spell today succeeds automatically."
+  },
+  {
+    "versionKey": "expanded:longroad.homebrew:milepost-vigil",
+    "_description": "You name a place you can see and set the crossroads stone down. For the duration, you know the direction and rough distance back to that place, and you wake if anything larger than a badger crosses within 60 feet of it.\n\nCast as a Ritual, the vigil lasts until you next finish a Long Rest instead."
+  },
+  {
+    "versionKey": "expanded:longroad.homebrew:fiddlers-poultice",
+    "_description": "You bind a rag around a wound with practised, unsentimental speed. The target regains hit points equal to 1d6 plus your spellcasting ability modifier, and the wound stops bleeding whether or not the hit points help.\n\nA creature can benefit from this spell only once between rests; the second rag is just a rag."
+  },
+  {
+    "versionKey": "expanded:longroad.homebrew:crossroads-bargain",
+    "_description": "You offer a bargain to something that is not there, and a figure steps out of the dust to accept it. The figure is an illusion under your control, and a creature that can see it must make a Charisma saving throw at the start of your turn or treat the figure as the most interesting thing in the world.\n\nIf you instead direct the figure to strike, make a ranged spell attack; the illusion's touch is cold and briefly real."
+  }
+]
