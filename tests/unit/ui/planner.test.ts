@@ -118,6 +118,12 @@ function workspace(
       }),
     ],
     save_points: [],
+    weapons: {
+      weapons: [],
+      templates: [],
+      allowance: { state: 'none', classes: [] },
+      selected_count: 0,
+    },
   };
 }
 

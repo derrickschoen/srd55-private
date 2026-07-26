@@ -38,6 +38,17 @@ export type CharacterId = Brand<number, 'CharacterId'>;
 export type SlotId = Brand<number, 'SlotId'>;
 /** `character_source_instances.id`. */
 export type SourceInstanceId = Brand<number, 'SourceInstanceId'>;
+/** `character_weapons.id` — a weapon a character owns, values and all. */
+export type CharacterWeaponId = Brand<number, 'CharacterWeaponId'>;
+/**
+ * `weapon_templates.id` — a catalog row a weapon may be COPIED from.
+ *
+ * Branded separately from `CharacterWeaponId` precisely because the two must
+ * never be interchanged: by D1b a character's weapon holds no template id at
+ * all, so a template id turning up where a weapon id belongs would mean the
+ * code is reading the catalog when it meant to read the character.
+ */
+export type WeaponTemplateId = Brand<number, 'WeaponTemplateId'>;
 
 /** One `*_definitions.id` brand per definition table, so they cannot cross. */
 export type ClassDefinitionId = Brand<number, 'ClassDefinitionId'>;

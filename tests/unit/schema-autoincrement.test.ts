@@ -60,6 +60,28 @@ const autoIncrementTables = [
 ] as const;
 
 /**
+ * The NATIVE tables — no Laravel migration produced them. Kept in their own
+ * list so the provenance claim above is not quietly absorbed: those names came
+ * from the pre-Drizzle hand-written artifact, and these four come from
+ * `db/schema/weapons.ts`.
+ *
+ * They carry AUTOINCREMENT for the same reason every other surrogate-key table
+ * does — the id-reuse hazard `sqlite_sequence` exists to close does not care
+ * which migration a table came from.
+ */
+const nativeAutoIncrementTables = [
+  'character_weapons',
+  'class_weapon_mastery_counts',
+  'class_weapon_mastery_grants',
+  'weapon_templates',
+] as const;
+
+const allAutoIncrementTables = [
+  ...autoIncrementTables,
+  ...nativeAutoIncrementTables,
+].sort();
+
+/**
  * The tables whose primary key is a natural key rather than a rowid alias, and
  * which therefore cannot carry AUTOINCREMENT.
  *
@@ -68,9 +90,10 @@ const autoIncrementTables = [
  * and left with the other eight, so the "33 of 38 from both directions" framing
  * is genuinely gone and is not pretended otherwise. What the empty list still
  * says is a real, failable claim about the schema as it stands: EVERY table has
- * a surrogate autoincrementing key. A table added with a natural primary key
- * fails here and forces the decision to be made deliberately, which is the only
- * thing the second direction ever bought.
+ * a surrogate autoincrementing key, the four native weapon tables included. A
+ * table added with a natural primary key fails here and forces the decision to
+ * be made deliberately, which is the only thing the second direction ever
+ * bought.
  */
 const naturalKeyTables = [] as const;
 
@@ -96,7 +119,7 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
       return db;
     }
 
-    it('declares AUTOINCREMENT on exactly the 30 surrogate-key tables', () => {
+    it('declares AUTOINCREMENT on exactly the 30 Laravel and 4 native surrogate-key tables', () => {
       const db = openDb();
       const declared = db
         .selectValues(
@@ -109,8 +132,10 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
         )
         .map(String);
 
-      expect(declared).toEqual([...autoIncrementTables]);
-      expect(declared).toHaveLength(30);
+      expect(declared).toEqual(allAutoIncrementTables);
+      expect(declared).toHaveLength(34);
+      expect(autoIncrementTables).toHaveLength(30);
+      expect(nativeAutoIncrementTables).toHaveLength(4);
 
       const withoutAutoIncrement = db
         .selectValues(

@@ -88,7 +88,25 @@ export const FOREIGN_KEY_FACTS = [
     targetColumns: ['id'],
   },
   {
+    table: 'character_weapons',
+    columns: ['character_id'],
+    target: 'characters',
+    targetColumns: ['id'],
+  },
+  {
     table: 'class_progressions',
+    columns: ['class_definition_id'],
+    target: 'class_definitions',
+    targetColumns: ['id'],
+  },
+  {
+    table: 'class_weapon_mastery_counts',
+    columns: ['class_definition_id'],
+    target: 'class_definitions',
+    targetColumns: ['id'],
+  },
+  {
+    table: 'class_weapon_mastery_grants',
     columns: ['class_definition_id'],
     target: 'class_definitions',
     targetColumns: ['id'],

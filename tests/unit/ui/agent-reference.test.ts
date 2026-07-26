@@ -219,6 +219,12 @@ function workspace(): Workspace {
       { spellKey: HOSTILE_SPELL_KEY, name: HOSTILE_SPELL_NAME },
     ],
     save_points: [],
+    weapons: {
+      weapons: [],
+      templates: [],
+      allowance: { state: 'none', classes: [] },
+      selected_count: 0,
+    },
   };
 }
 
@@ -599,13 +605,22 @@ describe('planner build reference JSON block', () => {
       'class features',
       'speed',
       'languages',
-      'equipment and weapons',
     ]) {
       expect(stateOf(concept)).toBe('not_modelled');
     }
     // Subclass is neither absent nor complete: there are subclass tables and a
     // Subclass column on the page, covering 2 of 12 classes.
     expect(stateOf('subclass')).toBe('partial');
+    // Weapons moved from not_modelled to partial when `character_weapons`
+    // landed. `partial` and not `modelled`: the weapons themselves are
+    // recorded, nothing is derived from them, and equipment other than weapons
+    // still has no columns anywhere. The note must keep saying so.
+    expect(stateOf('equipment and weapons')).toBe('partial');
+    const equipment = reference.scope.coverage.find(
+      (fact) => fact.concept === 'equipment and weapons',
+    );
+    expect(equipment?.note).toContain('no attack bonus');
+    expect(equipment?.note).toContain('no weapon proficiency');
     const subclass = reference.scope.coverage.find(
       (fact) => fact.concept === 'subclass',
     );
@@ -627,6 +642,7 @@ describe('planner build reference text sections', () => {
       'spell-choices',
       'access-routes',
       'wizard-spellbook',
+      'weapons',
       'outstanding',
       'free-text',
     ]);
@@ -728,6 +744,8 @@ describe('planner build reference — the two forms hold the same content', () =
       spell_choices: 'spell-choices',
       access_routes: 'access-routes',
       wizard_spellbook: 'wizard-spellbook',
+      weapons: 'weapons',
+      weapon_mastery: 'weapons',
       summary: 'character',
       outstanding: 'outstanding',
     };
