@@ -14,6 +14,7 @@ import type {
   WeaponTemplate,
 } from '../../../domain/read-models';
 import { freeTextSpan } from '../../free-text';
+import { renderAttackProfiles } from './attack-profiles';
 
 /**
  * THE WEAPONS PANEL.
@@ -706,6 +707,7 @@ export function renderWeapons(options: WeaponsPanelOptions): HTMLElement {
     add.disabled = options.disabled;
     add.addEventListener('click', () => options.onEditingChanged('new'));
     section.append(add);
+    section.append(renderAttackProfiles(options.panel.attacks));
     return section;
   }
 
@@ -725,6 +727,7 @@ export function renderWeapons(options: WeaponsPanelOptions): HTMLElement {
     add.disabled = options.disabled;
     add.addEventListener('click', () => options.onEditingChanged('new'));
     section.append(add);
+    section.append(renderAttackProfiles(options.panel.attacks));
     return section;
   }
 
@@ -733,5 +736,8 @@ export function renderWeapons(options: WeaponsPanelOptions): HTMLElement {
   section.append(
     renderForm(options, initial, editingWeapon === null ? null : editingWeapon.id),
   );
+  // The profiles stay on the page under the open form: they are what the user
+  // is editing the weapon to change, and hiding them would make the edit blind.
+  section.append(renderAttackProfiles(options.panel.attacks));
   return section;
 }

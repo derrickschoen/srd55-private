@@ -8,7 +8,12 @@ import type {
   WeaponFields,
 } from '../../../src/domain/command-contracts';
 import { WEAPON_RANGE_MAX_FEET } from '../../../src/domain/weapon-limits';
-import { WeaponQueries } from '../../../src/queries/weapons';
+import { BuildReportBuilder } from '../../../src/reports/build-report-builder';
+import { AbilityScores } from '../../../src/rules/ability-scores';
+import {
+  WeaponQueries,
+  type WeaponPanelContext,
+} from '../../../src/queries/weapons';
 import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
 import { seedWeaponContent } from '../../../src/rules/weapons-srd';
 import { openTestDatabase } from '../../helpers/open-db';
@@ -59,6 +64,22 @@ describe('weapon commands', () => {
 
   function queries(): WeaponQueries {
     return new WeaponQueries(db);
+  }
+
+  /**
+   * The panel's non-weapon inputs, resolved the way the planner resolves them.
+   *
+   * Built from a real `BuildReportBuilder` run rather than from literals, so
+   * these tests read the same proficiency bonus and the same spell access
+   * routes the screen does.
+   */
+  function panelContext(): WeaponPanelContext {
+    const report = new BuildReportBuilder(db).build(characterId);
+    return {
+      routes: report.access_routes,
+      scores: AbilityScores.fromArray(report.character.abilities),
+      proficiency_bonus: report.character.proficiency_bonus,
+    };
   }
 
   function templateNamed(name: string) {
@@ -464,7 +485,7 @@ describe('weapon commands', () => {
     for (const id of ids.slice(0, 3)) {
       await run({ type: 'set_weapon_mastery', weapon_id: id, selected: true });
     }
-    let panel = queries().panel(characterId);
+    let panel = queries().panel(characterId, panelContext());
     expect(panel.allowance).toMatchObject({ state: 'known', count: 3 });
     expect(panel.selected_count).toBe(3);
 
@@ -474,7 +495,7 @@ describe('weapon commands', () => {
       weapon_id: ids[3]!,
       selected: true,
     });
-    panel = queries().panel(characterId);
+    panel = queries().panel(characterId, panelContext());
     expect(panel.selected_count).toBe(4);
     expect(panel.allowance).toMatchObject({ state: 'known', count: 3 });
   });
