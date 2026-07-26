@@ -130,6 +130,7 @@ describe('candidate database semantic audit', () => {
       'character_save_points',
       'character_source_instances',
       'character_spell_preferences',
+      'character_weapons',
       'spell_loadouts',
       'spell_selection_slots',
       'warning_acknowledgements',

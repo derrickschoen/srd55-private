@@ -18,6 +18,9 @@ import {
   selectionEligibilities,
   slotBuckets,
   slotStates,
+  srdWeaponGroups,
+  weaponMasteryGrants,
+  weaponMasteryProperties,
 } from '../enums';
 
 /**
@@ -135,6 +138,9 @@ const sourceTypeEnum = z.enum(domainSourceTypes);
 const slotBucketEnum = z.enum(slotBuckets);
 const slotStateEnum = z.enum(slotStates);
 const selectionEligibilityEnum = z.enum(selectionEligibilities);
+const weaponMasteryPropertyEnum = z.enum(weaponMasteryProperties);
+const weaponMasteryGrantEnum = z.enum(weaponMasteryGrants);
+const srdWeaponGroupEnum = z.enum(srdWeaponGroups);
 
 /**
  * THE CLOSED SET of shared refinements.
@@ -159,6 +165,9 @@ export const COLUMN_REFINEMENTS = {
   slotBucketEnum,
   slotStateEnum,
   selectionEligibilityEnum,
+  weaponMasteryPropertyEnum,
+  weaponMasteryGrantEnum,
+  srdWeaponGroupEnum,
 } as const;
 
 /**
@@ -223,7 +232,37 @@ export const NARROWED_REFINEMENTS: readonly {
  * is deliberately all-false in the scope table: it travels in the document's
  * own `character` field, not through the table loop.
  */
-export type RowContractTable = 'characters' | BackupTable;
+export type RowContractTable =
+  | 'characters'
+  | BackupTable
+  | NativeContractTable;
+
+/**
+ * Tables that get a row contract WITHOUT being backup-scoped.
+ *
+ * `BackupTable` is the reason most contracts exist — a backup document is a
+ * foreign artifact written into SQLite verbatim by column name — but it is not
+ * the only reason a row can be untrusted or worth checking before it is
+ * written:
+ *
+ *  - `weapon_templates` rows are PARSED out of `docs/srd/source/weapons-table.txt`
+ *    by `src/rules/weapons-srd.ts`. A parser is exactly the kind of writer that
+ *    can produce a plausible-looking wrong row, and the contract is what stands
+ *    between a mis-parse and 38 quietly wrong catalog entries.
+ *  - `character_weapons` rows are assembled from a user-authored command
+ *    payload in `src/commands/weapons.ts`.
+ *  - the two mastery tables are seeded from the progression extract by the same
+ *    parser.
+ *
+ * Listing them here is what makes their nullability DERIVED rather than
+ * restated: `columnSchema` reads `COLUMN_FACTS`, and `_NoOverTightening` below
+ * fails to compile if any of these contracts refuses a value the column allows.
+ */
+type NativeContractTable =
+  | 'character_weapons'
+  | 'weapon_templates'
+  | 'class_weapon_mastery_grants'
+  | 'class_weapon_mastery_counts';
 
 type Facts = typeof COLUMN_FACTS;
 
@@ -394,6 +433,78 @@ const REFINEMENTS = {
   'spell_loadout_entries.role': sqlText,
   'spell_loadout_entries.created_at': sqlTimestamp,
   'spell_loadout_entries.updated_at': sqlTimestamp,
+
+  // --- character_weapons ---------------------------------------------------
+  // NOTE THE NULLABLE COLUMNS ARE NOT LISTED AS NULLABLE HERE. `columnSchema`
+  // adds `| null` from `COLUMN_FACTS[table][column].notNull`, so a contract can
+  // never be stricter than its column by accident — which is the whole D6b
+  // point, and the reason `damage_dice` below reads exactly like
+  // `weapon_templates.damage_dice` although one is nullable and one is not.
+  'character_weapons.id': positiveInt,
+  'character_weapons.character_id': positiveInt,
+  // Non-empty: a weapon with no name cannot be picked out of a list, and the
+  // add/update commands already refuse one.
+  'character_weapons.name': nonEmptyText,
+  // Free text, NOT a dice-expression pattern. The source's own Blowgun row is
+  // `1 Piercing` — a flat number — and a user may write anything their table
+  // agreed on. Pinning a `NdM` shape here would reject rows the schema permits.
+  'character_weapons.damage_dice': sqlText,
+  'character_weapons.damage_type': sqlText,
+  'character_weapons.versatile_damage_dice': sqlText,
+  'character_weapons.finesse': sqlBool,
+  'character_weapons.heavy': sqlBool,
+  'character_weapons.light': sqlBool,
+  'character_weapons.loading': sqlBool,
+  'character_weapons.reach': sqlBool,
+  'character_weapons.thrown': sqlBool,
+  'character_weapons.two_handed': sqlBool,
+  'character_weapons.ammunition': sqlBool,
+  'character_weapons.ammunition_kind': sqlText,
+  'character_weapons.mastery_property': weaponMasteryPropertyEnum,
+  'character_weapons.mastery_selected': sqlBool,
+  'character_weapons.other_properties': sqlText,
+  'character_weapons.notes': sqlText,
+  'character_weapons.created_at': sqlTimestamp,
+  'character_weapons.updated_at': sqlTimestamp,
+
+  // --- weapon_templates ----------------------------------------------------
+  'weapon_templates.id': positiveInt,
+  'weapon_templates.content_key': nonEmptyText,
+  'weapon_templates.rules_edition': rulesEditionEnum,
+  'weapon_templates.name': nonEmptyText,
+  'weapon_templates.srd_group': srdWeaponGroupEnum,
+  'weapon_templates.damage_dice': nonEmptyText,
+  'weapon_templates.damage_type': nonEmptyText,
+  'weapon_templates.versatile_damage_dice': sqlText,
+  'weapon_templates.finesse': sqlBool,
+  'weapon_templates.heavy': sqlBool,
+  'weapon_templates.light': sqlBool,
+  'weapon_templates.loading': sqlBool,
+  'weapon_templates.reach': sqlBool,
+  'weapon_templates.thrown': sqlBool,
+  'weapon_templates.two_handed': sqlBool,
+  'weapon_templates.ammunition': sqlBool,
+  'weapon_templates.ammunition_kind': sqlText,
+  'weapon_templates.mastery_property': weaponMasteryPropertyEnum,
+  'weapon_templates.other_properties': sqlText,
+  'weapon_templates.created_at': sqlTimestamp,
+  'weapon_templates.updated_at': sqlTimestamp,
+
+  // --- class weapon mastery content ---------------------------------------
+  'class_weapon_mastery_grants.id': positiveInt,
+  'class_weapon_mastery_grants.class_definition_id': positiveInt,
+  'class_weapon_mastery_grants.grant': weaponMasteryGrantEnum,
+  'class_weapon_mastery_grants.created_at': sqlTimestamp,
+  'class_weapon_mastery_grants.updated_at': sqlTimestamp,
+  'class_weapon_mastery_counts.id': positiveInt,
+  'class_weapon_mastery_counts.class_definition_id': positiveInt,
+  'class_weapon_mastery_counts.class_level': positiveInt,
+  // Zero is a legitimate mastery count in principle and no printed row carries
+  // one, so this is `nonNegativeInt` rather than `positiveInt`: refusing 0
+  // would be inventing a rule the source does not state.
+  'class_weapon_mastery_counts.mastery_count': nonNegativeInt,
+  'class_weapon_mastery_counts.created_at': sqlTimestamp,
+  'class_weapon_mastery_counts.updated_at': sqlTimestamp,
 } as const satisfies Record<RequiredRefinementKey, z.ZodType> &
   Partial<Record<OptionalRefinementKey, z.ZodType>>;
 

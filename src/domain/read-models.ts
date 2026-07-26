@@ -1,3 +1,5 @@
+import type { WeaponFields } from './command-contracts';
+import type { CharacterMasteryAllowance } from '../rules/weapon-mastery-lookup';
 import type {
   Ability,
   CastingMode,
@@ -8,8 +10,48 @@ import type {
   SelectionEligibility,
   SlotBucket,
   SlotState,
+  SrdWeaponGroup,
   StandaloneSourceType,
 } from './enums';
+
+/**
+ * THE FILLABLE BODY OF A WEAPON, SHARED BY THE CATALOG AND THE CHARACTER.
+ *
+ * `WeaponProfile` is what a template can fill and `WeaponFields` is what a
+ * character's weapon holds; the only difference is `notes`, which is the user's
+ * and which no catalog row has. Deriving one from the other rather than writing
+ * two field lists is how the "pre-fill is a column-wise copy" invariant stays
+ * true: a field added to one and forgotten in the other stops compiling at the
+ * pre-fill site instead of silently arriving blank.
+ */
+export type WeaponProfile = Omit<WeaponFields, 'notes'>;
+
+export interface WeaponTemplate extends WeaponProfile {
+  id: number;
+  content_key: string;
+  srd_group: SrdWeaponGroup;
+}
+
+export interface CharacterWeapon extends WeaponFields {
+  id: number;
+  /** The per-character choice. Never a property of the weapon itself. */
+  mastery_selected: boolean;
+}
+
+/**
+ * Everything the weapons panel needs, in one object.
+ *
+ * `allowance` is a STATE and not a number — see `CharacterMasteryAllowance`.
+ * `selected_count` is what the user has actually ticked; comparing the two is
+ * only meaningful when the allowance is `known`, which is why the comparison
+ * lives in the renderer and not here.
+ */
+export interface WeaponsPanel {
+  weapons: CharacterWeapon[];
+  templates: WeaponTemplate[];
+  allowance: CharacterMasteryAllowance;
+  selected_count: number;
+}
 
 export interface FreeCast {
   uses: number;
@@ -214,6 +256,7 @@ export interface Workspace {
     name: string;
   }>;
   save_points: SavePoint[];
+  weapons: WeaponsPanel;
 }
 
 export interface EligibleSpell {

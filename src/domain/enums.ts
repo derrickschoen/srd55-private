@@ -89,6 +89,54 @@ export type StandaloneSourceType = Extract<
   'feat' | 'species' | 'background'
 >;
 
+/**
+ * The eight weapon mastery properties, taken from the mastery column of
+ * `docs/srd/source/weapons-table.txt` rather than from anyone's memory. All
+ * eight appear there, so the list is closed on evidence.
+ *
+ * The NAME is modelled and displayed. What each property DOES is rules text
+ * this application deliberately does not import (D3): recording a choice does
+ * not require rendering its effect.
+ */
+export const weaponMasteryProperties = [
+  'Cleave',
+  'Graze',
+  'Nick',
+  'Push',
+  'Sap',
+  'Slow',
+  'Topple',
+  'Vex',
+] as const;
+export type WeaponMasteryProperty = (typeof weaponMasteryProperties)[number];
+
+/**
+ * What this application knows about one class's Weapon Mastery allowance.
+ *
+ * `counts_unsourced` is the load-bearing member: the class grants the feature
+ * and we do NOT hold its numbers. Collapsing it into `not_granted`, or seeding
+ * a plausible number in its place, is the silent-wrong this vocabulary exists
+ * to prevent.
+ */
+export const weaponMasteryGrants = [
+  'not_granted',
+  'counts_known',
+  'counts_unsourced',
+] as const;
+export type WeaponMasteryGrant = (typeof weaponMasteryGrants)[number];
+
+/**
+ * The four headings the source's own weapons table uses. A picker grouping on
+ * the catalog row only; never copied onto a character's weapon.
+ */
+export const srdWeaponGroups = [
+  'simple_melee',
+  'simple_ranged',
+  'martial_melee',
+  'martial_ranged',
+] as const;
+export type SrdWeaponGroup = (typeof srdWeaponGroups)[number];
+
 export const freeCastRecoveries = [
   'long_rest',
   'short_rest',

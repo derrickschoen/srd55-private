@@ -924,3 +924,85 @@ select:disabled {
   vertical-align: top;
   white-space: nowrap;
 }
+
+/* --- weapons ------------------------------------------------------------- */
+
+.weapon-portability-notice {
+  margin: 0 0 0.6rem;
+  padding: 0.5rem 0.65rem;
+  border-left: 3px solid var(--planner-accent);
+  background: rgb(111 47 31 / 6%);
+  color: var(--planner-ink-soft);
+  font-size: 0.82rem;
+}
+
+.weapon-mastery-status p {
+  margin: 0 0 0.4rem;
+}
+
+.weapon-mastery-warning {
+  color: var(--planner-accent);
+  font-weight: 600;
+}
+
+.weapon-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 0.75rem;
+  font-size: 0.86rem;
+}
+
+.weapon-table caption {
+  margin-bottom: 0.35rem;
+  color: var(--planner-ink-soft);
+  font-size: 0.78rem;
+  text-align: left;
+}
+
+.weapon-table th,
+.weapon-table td {
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--planner-border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.weapon-table td button + button {
+  margin-left: 0.35rem;
+}
+
+.weapon-form fieldset {
+  padding: 0.75rem;
+  border: 1px solid var(--planner-border);
+  border-radius: 0.35rem;
+}
+
+.weapon-form-fields {
+  display: grid;
+  gap: 0.5rem 0.9rem;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+}
+
+.weapon-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.9rem;
+  grid-column: 1 / -1;
+}
+
+.weapon-toggles label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.weapon-form-controls {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.weapon-form-error {
+  margin: 0.5rem 0 0;
+  color: var(--planner-accent);
+}
