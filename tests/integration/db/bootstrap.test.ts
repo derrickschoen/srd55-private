@@ -133,7 +133,23 @@ describe('application database bootstrap', () => {
     // user can do, while the Divine Order choice is catalog-independent and is
     // still outstanding. That pair is the honest description of a fresh
     // install: classes present, no spell catalog.
+    //
+    // The Cleric's two skill proficiencies join it: they are catalog-
+    // independent too, and nobody but the player can say which two were
+    // picked. NOT here, deliberately: a level whose hit die was never rolled.
+    // Not rolling is a legitimate steady state — the printed fixed value is a
+    // complete answer — so reporting it would nag every character forever.
     expect(result.items).toEqual([
+      {
+        kind: 'no_skill_proficiencies',
+        title: 'No skill proficiencies chosen',
+        detail:
+          "This character's classes offer 2 skill proficiencies and none is " +
+          'recorded, so every skill modifier on the sheet is the bare ability ' +
+          'modifier.',
+        remedy: 'Tick the skills on the character sheet.',
+        choice_count: 2,
+      },
       {
         kind: 'unchosen_option',
         title: 'Cleric 1 — Divine Order not chosen',
@@ -147,7 +163,7 @@ describe('application database bootstrap', () => {
         options: ['Protector', 'Thaumaturge'],
       },
     ]);
-    expect(result.outstanding_count).toBe(1);
+    expect(result.outstanding_count).toBe(2);
     expect(result.catalog_gap_count).toBe(2);
     expect(result.catalog_gaps.map((gap) => gap.title)).toEqual([
       'No eligible Cleric cantrips in your catalog',

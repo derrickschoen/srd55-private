@@ -53,6 +53,10 @@ function minimalCharacterBackup(): CharacterBackupDocument {
       character_species: [],
       character_species_traits: [],
       character_background: [],
+      character_armor: [],
+      character_hit_point_rolls: [],
+      character_skill_proficiencies: [],
+      character_sheet_adjustments: [],
     },
     references: {
       class_definitions: [],
@@ -274,6 +278,20 @@ describe('a backup file written before weapons travelled', () => {
     const tables = archived.tables as Record<string, unknown>;
     expect(Object.hasOwn(tables, 'character_weapons')).toBe(false);
     expect(Object.keys(tables)).toHaveLength(10);
+    // ...and every table added since is missing too, including the four stored
+    // sheet inputs. This is the assertion that fails on the day somebody makes
+    // one of them mandatory and every downloaded file stops opening.
+    for (const table of [
+      'character_species',
+      'character_species_traits',
+      'character_background',
+      'character_armor',
+      'character_hit_point_rolls',
+      'character_skill_proficiencies',
+      'character_sheet_adjustments',
+    ]) {
+      expect(Object.hasOwn(tables, table), `${table} is absent`).toBe(false);
+    }
 
     expect(() => validateCharacterBackup(archived)).not.toThrow();
   });
@@ -309,6 +327,25 @@ describe('a backup file written before weapons travelled', () => {
     archived.tables.character_save_points[0]!.schema_version = 'a7-v2';
     expect(() => validateCharacterBackup(archived)).toThrow(
       'schema_version does not match its snapshot',
+    );
+  });
+
+  it('refuses an a7-v1 snapshot that has grown an armour key it never had', () => {
+    const archived = JSON.parse(FROZEN_V1_BACKUP_JSON) as {
+      tables: { character_save_points: Array<Record<string, unknown>> };
+    };
+    const savePoint = archived.tables.character_save_points[0]!;
+    const snapshot = JSON.parse(String(savePoint.snapshot)) as Record<
+      string,
+      unknown
+    >;
+    snapshot.character_armor = [];
+    savePoint.snapshot = JSON.stringify(snapshot);
+    // The same claim, carried forward to `a7-v4`: each version has ONE key set,
+    // and a hybrid would mean the version identifier no longer says what the
+    // snapshot carries — which is the entire job it has.
+    expect(() => validateCharacterBackup(archived)).toThrow(
+      'must contain exactly',
     );
   });
 

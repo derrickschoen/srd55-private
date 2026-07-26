@@ -35,6 +35,33 @@ export interface UnchosenOptionItem {
   readonly options: readonly string[];
 }
 
+/**
+ * A hit point roll recorded against a class the character does not have.
+ *
+ * THE COST OF KEYING A ROLL ON A CLASS NAME, MADE VISIBLE. A roll survives the
+ * deletion of its class row deliberately — a die the player physically rolled
+ * must not be destroyed by an edit fixing a typo — but a roll that matches no
+ * class is not read by `hitPointMaximum`, so the character's hit points are
+ * quietly lower than the player expects. Naming the class here is what turns a
+ * silent subtraction into something the user can act on.
+ */
+export interface OrphanHitPointRollItem {
+  readonly kind: 'orphan_hit_point_roll';
+  readonly title: string;
+  readonly detail: string;
+  readonly remedy: string;
+  readonly class_name: string;
+  readonly levels: readonly number[];
+}
+
+export interface NoSkillProficienciesItem {
+  readonly kind: 'no_skill_proficiencies';
+  readonly title: string;
+  readonly detail: string;
+  readonly remedy: string;
+  readonly choice_count: number;
+}
+
 export interface NoClassItem {
   readonly kind: 'no_class';
   readonly title: string;
@@ -58,7 +85,9 @@ export interface CatalogGapItem {
 export type CompletenessItem =
   | UnfilledChoicesItem
   | UnchosenOptionItem
-  | NoClassItem;
+  | NoClassItem
+  | OrphanHitPointRollItem
+  | NoSkillProficienciesItem;
 
 export type CompletenessFinding = CompletenessItem | CatalogGapItem;
 
@@ -494,21 +523,140 @@ export const noClass: CompletenessCheck = {
   },
 };
 
+/**
+ * THE SHEET CHECKS. Two registry entries and one object each — the mechanism
+ * completeness v1 already has, reused rather than reinvented.
+ *
+ * BOTH ARE `outstanding`, NOT `catalog_gap`, and the line is the one
+ * `character-completeness.ts` already draws: an outstanding item is something
+ * the USER must decide, a catalog gap is something their CATALOG lacks. Nobody
+ * but the player knows what they rolled, which skills they picked, or which
+ * class a stale roll belonged to. What the application itself does not hold —
+ * class feature text, subclass coverage, Expertise — is stated by `SHEET_GAPS`
+ * in `src/queries/character-sheet-builder.ts` and printed on the sheet, because
+ * it is true of every character equally and would otherwise put six permanent
+ * entries in everybody's outstanding list forever.
+ */
+export const orphanHitPointRolls: CompletenessCheck = {
+  id: 'orphan_hit_point_roll',
+  run(context) {
+    const rows = context.db.all<SqlRow>(
+      `SELECT roll.class_name AS class_name, roll.class_level AS class_level
+       FROM character_hit_point_rolls AS roll
+       WHERE roll.character_id = ?
+         AND NOT EXISTS (
+           SELECT 1
+           FROM character_class_levels AS level
+           JOIN class_definitions AS definition
+             ON definition.id = level.class_definition_id
+           WHERE level.character_id = roll.character_id
+             AND definition.name = roll.class_name
+         )
+       ORDER BY roll.class_name, roll.class_level`,
+      [context.characterId],
+    );
+    const byClass = new Map<string, number[]>();
+    for (const row of rows) {
+      const name = sqlString(row, 'class_name');
+      const levels = byClass.get(name) ?? [];
+      levels.push(sqlInteger(row, 'class_level'));
+      byClass.set(name, levels);
+    }
+    return [...byClass].map(([className, levels]): OrphanHitPointRollItem => ({
+      kind: 'orphan_hit_point_roll',
+      title: `Hit point rolls recorded for ${className}, which this character does not have`,
+      detail:
+        `${String(levels.length)} recorded roll${levels.length === 1 ? '' : 's'} ` +
+        `for ${className} at level${levels.length === 1 ? '' : 's'} ` +
+        `${levels.join(', ')}. They are not counted in the hit point maximum, ` +
+        'so it is lower than those rolls would give.',
+      remedy:
+        `Add ${className} back, or clear those rolls on the sheet if the ` +
+        'class was removed on purpose.',
+      class_name: className,
+      levels,
+    }));
+  },
+};
+
+export const noSkillProficiencies: CompletenessCheck = {
+  id: 'no_skill_proficiencies',
+  run(context) {
+    const chosen = Number(
+      context.db.scalar(
+        `SELECT count(*) FROM character_skill_proficiencies WHERE character_id = ?`,
+        [context.characterId],
+      ) ?? 0,
+    );
+    if (chosen > 0) {
+      return [];
+    }
+    // How many the character's classes ENTITLE them to. Zero classes, or
+    // classes with no seeded traits row, means there is nothing to say.
+    const entitled = Number(
+      context.db.scalar(
+        `SELECT coalesce(sum(traits.skill_choice_count), 0)
+         FROM character_class_levels AS level
+         JOIN class_sheet_traits AS traits
+           ON traits.class_definition_id = level.class_definition_id
+         WHERE level.character_id = ?`,
+        [context.characterId],
+      ) ?? 0,
+    );
+    if (entitled === 0) {
+      return [];
+    }
+    return [
+      {
+        kind: 'no_skill_proficiencies',
+        title: 'No skill proficiencies chosen',
+        detail:
+          `This character's classes offer ${String(entitled)} skill ` +
+          'proficiencies and none is recorded, so every skill modifier on ' +
+          'the sheet is the bare ability modifier.',
+        remedy: 'Tick the skills on the character sheet.',
+        choice_count: entitled,
+      },
+    ];
+  },
+};
+
 export const completenessChecks: readonly CompletenessCheck[] = Object.freeze([
   unfilledChoices,
   unchosenOrder,
   noClass,
+  orphanHitPointRolls,
+  noSkillProficiencies,
 ]);
 
 const kindRank: Readonly<Record<CompletenessItem['kind'], number>> = {
   no_class: 0,
   unchosen_option: 1,
   unfilled_choices: 2,
+  // The two sheet items sort after the build items and among themselves in the
+  // order a player would act on them: a stale roll is a mistake to correct, an
+  // unticked skill list is a decision not yet made.
+  //
+  // A LEVEL WITH NO RECORDED ROLL IS DELIBERATELY NOT HERE. Not rolling is a
+  // legitimate steady state, not an unfinished decision: no roll means "use the
+  // printed fixed value", which is a complete answer. Reporting it would nag
+  // every character with a second class level forever and would contradict the
+  // reasoning that made the roll an absent ROW rather than a nullable column.
+  // The sheet still states which levels use the fixed value, beside the number
+  // it changed.
+  orphan_hit_point_roll: 3,
+  no_skill_proficiencies: 4,
 };
 
 function sortKey(item: CompletenessItem): readonly [string, number, string] {
   if (item.kind === 'no_class') {
     return ['', kindRank.no_class, ''];
+  }
+  if (item.kind === 'no_skill_proficiencies') {
+    return ['', kindRank.no_skill_proficiencies, ''];
+  }
+  if (item.kind === 'orphan_hit_point_roll') {
+    return [item.class_name, kindRank.orphan_hit_point_roll, ''];
   }
   if (item.kind === 'unchosen_option') {
     return [item.source_name, kindRank.unchosen_option, item.order_name];

@@ -133,7 +133,7 @@ afterAll(() => {
 });
 
 describe('declared relations match the foreign keys', () => {
-  it('budgets 49 constraints across 51 PRAGMA rows', () => {
+  it('budgets 53 constraints across 55 PRAGMA rows', () => {
     const tables = db
       .selectValues(
         `SELECT name FROM sqlite_schema
@@ -171,8 +171,15 @@ describe('declared relations match the foreign keys', () => {
     // rather than at any character, because nothing in this schema records a
     // character taking one, which is exactly why its grants are surfaced rather
     // than applied.
-    expect(constraintEdges(db)).toHaveLength(49);
-    expect(rowCount).toBe(51);
+    //
+    // The four stored sheet inputs add four more, one per table into
+    // `characters`, none composite. `character_hit_point_rolls` adds exactly
+    // ONE and not two: it is keyed on a class NAME and has no foreign key to
+    // `character_class_levels`, deliberately, so that deleting a class cannot
+    // cascade away a die the player physically rolled. An edge appearing there
+    // is what the reverse direction of the next test would catch.
+    expect(constraintEdges(db)).toHaveLength(53);
+    expect(rowCount).toBe(55);
   });
 
   it('declares a relation for every foreign key, and a foreign key for every relation', () => {

@@ -200,6 +200,20 @@ export const armorDexBonuses = ['full', 'capped', 'none'] as const;
 export type ArmorDexBonus = (typeof armorDexBonuses)[number];
 
 /**
+ * WHERE A CHARACTER PUT A PIECE OF ARMOUR — not what it is.
+ *
+ * Two members because a body wears one thing and holds one thing, which is the
+ * cardinality `character_armor`'s unique index encodes. This is DELIBERATELY
+ * NOT `ArmorCategory`: `armorClass` in `src/rules/sheet.ts` decides what a row
+ * contributes from its `category` alone, and emits `armor_slot_mismatch` when
+ * the slot disagrees. Deriving one from the other would make a crossed pair
+ * unrepresentable and so silently discard an imported character that carried
+ * one, instead of accepting it and saying so (D11 part 2).
+ */
+export const armorSlots = ['worn', 'shield'] as const;
+export type ArmorSlot = (typeof armorSlots)[number];
+
+/**
  * The two weapon-proficiency categories the Core Traits tables name.
  *
  * NOT the whole story on its own, and `class_weapon_proficiencies` carries a

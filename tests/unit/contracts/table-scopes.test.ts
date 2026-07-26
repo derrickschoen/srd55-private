@@ -52,12 +52,23 @@ const SNAPSHOT_ADDITIONS = [
   'character_species',
   'character_species_traits',
   'character_background',
+  // The four stored sheet inputs. Four tables and not one for the same reason:
+  // each has its own cardinality and its own key, and merging any two would
+  // need a nullable column meaning "this row is the other kind".
+  'character_armor',
+  'character_hit_point_rolls',
+  'character_skill_proficiencies',
+  'character_sheet_adjustments',
 ] as const;
 const BACKUP_DIRECT_ADDITIONS = [
   'character_weapons',
   'character_species',
   'character_species_traits',
   'character_background',
+  'character_armor',
+  'character_hit_point_rolls',
+  'character_skill_proficiencies',
+  'character_sheet_adjustments',
 ] as const;
 describe('derived table scopes reproduce the hand-maintained lists', () => {
   it('reproduces applicationTables exactly (database-lifecycle.ts)', () => {
@@ -68,11 +79,15 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       'background_definitions',
       'background_templates',
       'change_log',
+      'character_armor',
       'character_background',
       'character_class_levels',
+      'character_hit_point_rolls',
       'character_operations',
       'character_rule_overrides',
       'character_save_points',
+      'character_sheet_adjustments',
+      'character_skill_proficiencies',
       'character_source_instances',
       'character_species',
       'character_species_traits',
@@ -139,6 +154,13 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
     // edge between them to respect.
     expect([...DELETE_ORDER]).toEqual([
       'character_weapons',
+      // The four sheet inputs are leaves too: `character_hit_point_rolls` has
+      // no foreign key to `character_class_levels` by design, so there is no
+      // edge among these four and their order here is free.
+      'character_armor',
+      'character_hit_point_rolls',
+      'character_skill_proficiencies',
+      'character_sheet_adjustments',
       'character_species_traits',
       'character_species',
       'character_background',
@@ -200,6 +222,10 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       'character_species',
       'character_species_traits',
       'character_background',
+      'character_armor',
+      'character_hit_point_rolls',
+      'character_skill_proficiencies',
+      'character_sheet_adjustments',
     ]);
     for (const table of BACKUP_OPTIONAL_TABLES) {
       expect([...BACKUP_TABLES]).toContain(table);
@@ -244,16 +270,16 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
 });
 
 describe('table scope classification', () => {
-  it('classifies all 50 tables exactly once', () => {
+  it('classifies all 54 tables exactly once', () => {
     const names = Object.keys(TABLE_SCOPES);
     // 30 Laravel-derived tables — 38 until the eight Laravel-only
     // infrastructure ones were dropped — plus the four native weapon tables,
-    // the eight of the sheet core, the six origins tables, and the two D19
-    // class-feature tables. Each group is named rather than folded into one
-    // total, so a group that vanishes while another grows cannot pass
-    // unnoticed.
-    expect(names).toHaveLength(50);
-    expect(new Set(names).size).toBe(50);
+    // the eight of the sheet core, the six origins tables, the two D19
+    // class-feature tables, and the four stored sheet inputs. Each group is
+    // named rather than folded into one total, so a group that vanishes while
+    // another grows cannot pass unnoticed.
+    expect(names).toHaveLength(54);
+    expect(new Set(names).size).toBe(54);
     expect([...names].sort()).toEqual([...APPLICATION_TABLES].sort());
   });
 

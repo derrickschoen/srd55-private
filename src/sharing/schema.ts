@@ -1,7 +1,11 @@
 import { isSpellVersionKey } from '../catalog/catalog-key';
 import {
   abilities,
+  armorCategories,
+  armorDexBonuses,
+  armorSlots,
   rulesEditions,
+  skills,
   speciesTraitEffectKinds,
   weaponMasteryProperties,
 } from '../domain/enums';
@@ -15,6 +19,13 @@ import {
   ORIGIN_SPEED_MAX_FEET,
   ORIGIN_TEXT_LIMITS,
 } from '../domain/origin-limits';
+import {
+  SHEET_ADJUSTMENT_BOUNDS,
+  SHEET_ARMOR_MAX,
+  SHEET_ROLL_BOUNDS,
+  SHEET_SHARE_COUNTS,
+  SHEET_TEXT_LIMITS,
+} from '../domain/sheet-limits';
 
 export const CHARACTER_SHARE_FORMAT =
   'dnd-multiclass-spells-character-share' as const;
@@ -67,6 +78,21 @@ export const SHARE_LIMITS = Object.freeze({
    * most ONE row per character, and the schema's UNIQUE index says so.
    */
   speciesTraits: 100,
+  /**
+   * The two unbounded-by-cardinality sheet sections.
+   *
+   * DERIVED, NOT RE-TYPED. `SHEET_SHARE_COUNTS` is the same module the write
+   * boundary and the schema read, which is the whole discipline
+   * `src/domain/weapon-limits.ts` was created to enforce after a share cap
+   * drifted below a write cap and made a legitimately built character
+   * unshareable.
+   *
+   * `armor` and `sheetAdjustment` need no count here: the schema's UNIQUE
+   * indexes bound them at two rows and one row per character, and the validator
+   * refuses a duplicate slot outright rather than counting.
+   */
+  hitPointRolls: SHEET_SHARE_COUNTS.hitPointRolls,
+  skillProficiencies: SHEET_SHARE_COUNTS.skillProficiencies,
 });
 
 export interface ShareCharacter {
@@ -198,6 +224,86 @@ export const SHARE_WEAPON_TEXT = [
   'versatile_damage_dice',
   'ammunition_kind',
 ] as const satisfies readonly (keyof ShareWeapon)[];
+
+/**
+ * ONE PIECE OF ARMOUR A CHARACTER RECORDED — worn or held.
+ *
+ * FIELD NAMES ARE COLUMN NAMES, for the reason `ShareWeapon` gives: by D1b the
+ * whole row is portable as-is, holding no `armor_templates` id to translate.
+ *
+ * `slot` AND `category` BOTH TRAVEL AND NEITHER IS DERIVED FROM THE OTHER. The
+ * pair can legitimately disagree — a Shield recorded in the worn slot — and
+ * `armorClass` accepts that, counts the row by what it IS, and says the slots
+ * are crossed. Dropping `slot` on the wire and re-deriving it from `category`
+ * would silently repair an imported character instead of importing it (D11
+ * part 2), and the recipient would never learn their sender had made the
+ * mistake.
+ *
+ * `dex_bonus_max` is optional because it is meaningful only when
+ * `dex_bonus = 'capped'` — and this validator enforces the pairing in BOTH
+ * directions, exactly as `character_armor_dex_bonus_max_check` does, so a
+ * document cannot reach the INSERT and abort the whole import with a raw
+ * SQLITE_CONSTRAINT_CHECK naming nothing.
+ */
+export interface ShareArmor {
+  readonly slot: string;
+  readonly name: string;
+  readonly category: string;
+  readonly armor_class: number;
+  readonly dex_bonus: string;
+  readonly dex_bonus_max?: number;
+  readonly strength_requirement?: number;
+  readonly stealth_disadvantage?: true;
+  readonly notes?: string;
+}
+
+/**
+ * ONE RECORDED HIT POINT ROLL — the one number on a sheet that cannot be
+ * recomputed from anything else in the document.
+ *
+ * `className` IS CAMEL CASE AND THE OTHER TWO ARE NOT, and the split is the one
+ * `ShareWeapon` documents: a camelCase name marks something that is NOT a
+ * column but a key standing in for a database id. Here it is the reverse
+ * direction of the same idea — `class_name` IS the column, but on the wire it
+ * is also the only thing joining this row to the recipient's own class rows,
+ * which have entirely different ids. Naming it as a key says so.
+ */
+export interface ShareHitPointRoll {
+  readonly className: string;
+  readonly classLevel: number;
+  readonly value: number;
+}
+
+/**
+ * The manual Armor Class adjustment, D12's escape hatch, as at most one object.
+ *
+ * A bare number would have been smaller on the wire and wrong: the note is what
+ * makes an unexplained `+3` readable six months later, and an object leaves room
+ * for it. `value` is REQUIRED inside the object — a present section with no
+ * value would be a third way to spell zero.
+ */
+export interface ShareSheetAdjustment {
+  readonly value: number;
+  readonly note?: string;
+}
+
+/** The `true`-when-present flags of a shared armour row, in wire order. */
+export const SHARE_ARMOR_FLAGS = [
+  'stealth_disadvantage',
+] as const satisfies readonly (keyof ShareArmor)[];
+
+/** The enum-valued fields of a shared armour row, in wire order. */
+export const SHARE_ARMOR_ENUMS = [
+  'slot',
+  'category',
+  'dex_bonus',
+] as const satisfies readonly (keyof ShareArmor)[];
+
+/** The optional integer fields of a shared armour row, in wire order. */
+export const SHARE_ARMOR_NUMBERS = [
+  'dex_bonus_max',
+  'strength_requirement',
+] as const satisfies readonly (keyof ShareArmor)[];
 
 export interface ShareSpecies {
   readonly name: string;
@@ -343,6 +449,24 @@ export interface CharacterShareDocument {
   readonly species?: ShareSpecies;
   readonly speciesTraits?: readonly ShareSpeciesTrait[];
   readonly background?: ShareBackground;
+  /**
+   * THE FOUR STORED SHEET INPUTS. Optional for the third time and for the same
+   * compatibility guarantee: every link generated before this change carries
+   * none of these keys, and making any of them required would make each of
+   * those links unreadable — a far larger loss than the one this change closes.
+   *
+   * Four keys rather than one nested object, because they are independently
+   * absent: a character may have chosen skills and rolled no dice. A nested
+   * object would need a fifth "present but empty" state to say so.
+   *
+   * `skillProficiencies` is a bare string list and NOT a list of objects: the
+   * row has exactly one meaningful column, presence IS the value, and an object
+   * wrapper would invite a `proficient: false` member that means nothing.
+   */
+  readonly armor?: readonly ShareArmor[];
+  readonly hitPointRolls?: readonly ShareHitPointRoll[];
+  readonly skillProficiencies?: readonly string[];
+  readonly sheetAdjustment?: ShareSheetAdjustment;
 }
 
 export class ShareValidationError extends TypeError {
@@ -647,6 +771,143 @@ function originInteger(
   return value;
 }
 
+/**
+ * One armour row, held to EXACTLY the constraints `character_armor` declares.
+ *
+ * Applying the database's own CHECKs here rather than letting the INSERT do it
+ * is the same call `shareWeapon` and `shareSpeciesTrait` already make: a
+ * constraint violation inside the import transaction aborts the whole import
+ * with a raw SQLITE_CONSTRAINT_CHECK naming nothing the recipient could act on,
+ * and the transaction has by then already written unrelated rows.
+ */
+function shareArmor(value: unknown, label: string): ShareArmor {
+  const row = record(value, label);
+  exactKeys(
+    row,
+    ['slot', 'name', 'category', 'armor_class', 'dex_bonus'],
+    [...SHARE_ARMOR_NUMBERS, ...SHARE_ARMOR_FLAGS, 'notes'],
+    label,
+  );
+  const armor: Record<string, unknown> = {
+    name: text(row.name, `${label}.name`, SHEET_TEXT_LIMITS.armor_name),
+  };
+  const vocabularies: Readonly<
+    Record<(typeof SHARE_ARMOR_ENUMS)[number], readonly string[]>
+  > = {
+    slot: armorSlots,
+    category: armorCategories,
+    dex_bonus: armorDexBonuses,
+  };
+  for (const field of SHARE_ARMOR_ENUMS) {
+    const member = text(row[field], `${label}.${field}`, 40);
+    if (!vocabularies[field].includes(member)) {
+      throw new ShareValidationError(`${label}.${field} is unsupported.`);
+    }
+    armor[field] = member;
+  }
+  armor.armor_class = integer(
+    row.armor_class,
+    `${label}.armor_class`,
+    1,
+    SHEET_ARMOR_MAX.armor_class,
+  );
+  if (row.dex_bonus_max !== undefined) {
+    // Lower bound 0, not 1: a cap of zero is a coherent house rule, and it is
+    // the pairing with `capped` — not the magnitude — that the schema enforces.
+    armor.dex_bonus_max = integer(
+      row.dex_bonus_max,
+      `${label}.dex_bonus_max`,
+      0,
+      SHEET_ARMOR_MAX.dex_bonus_max,
+    );
+  }
+  if (row.strength_requirement !== undefined) {
+    armor.strength_requirement = integer(
+      row.strength_requirement,
+      `${label}.strength_requirement`,
+      1,
+      SHEET_ARMOR_MAX.strength_requirement,
+    );
+  }
+  for (const flag of SHARE_ARMOR_FLAGS) {
+    if (row[flag] === undefined) {
+      continue;
+    }
+    if (row[flag] !== true) {
+      throw new ShareValidationError(
+        `${label}.${flag} must be true when present.`,
+      );
+    }
+    armor[flag] = true;
+  }
+  if (row.notes !== undefined) {
+    armor.notes = text(
+      row.notes,
+      `${label}.notes`,
+      SHEET_TEXT_LIMITS.armor_notes,
+    );
+  }
+  // `character_armor_dex_bonus_max_check`, in both directions.
+  if ((armor.dex_bonus === 'capped') !== (armor.dex_bonus_max !== undefined)) {
+    throw new ShareValidationError(
+      `${label}.dex_bonus_max is present exactly when dex_bonus is capped.`,
+    );
+  }
+  // `character_armor_shield_check`. A Shield contributes a bonus and never a
+  // Dexterity term, so a shield carrying one would be a field that reads as
+  // meaningful and is ignored.
+  if (armor.category === 'shield' && armor.dex_bonus !== 'none') {
+    throw new ShareValidationError(
+      `${label}.dex_bonus must be none for a shield.`,
+    );
+  }
+  return armor as unknown as ShareArmor;
+}
+
+function shareHitPointRoll(
+  value: unknown,
+  label: string,
+): ShareHitPointRoll {
+  const row = record(value, label);
+  exactKeys(row, ['className', 'classLevel', 'value'], [], label);
+  return {
+    className: text(
+      row.className,
+      `${label}.className`,
+      SHEET_TEXT_LIMITS.class_name,
+    ),
+    classLevel: integer(row.classLevel, `${label}.classLevel`, 1, 20),
+    // The bounds are the schema's own and the write boundary's own, from one
+    // module — see `SHEET_ROLL_BOUNDS`.
+    value: integer(
+      row.value,
+      `${label}.value`,
+      SHEET_ROLL_BOUNDS.minimum,
+      SHEET_ROLL_BOUNDS.maximum,
+    ),
+  };
+}
+
+function shareSheetAdjustment(
+  value: unknown,
+  label: string,
+): ShareSheetAdjustment {
+  const row = record(value, label);
+  exactKeys(row, ['value'], ['note'], label);
+  const magnitude = SHEET_ADJUSTMENT_BOUNDS.armorClassMagnitude;
+  const adjustment: Record<string, unknown> = {
+    value: integer(row.value, `${label}.value`, -magnitude, magnitude),
+  };
+  if (row.note !== undefined) {
+    adjustment.note = text(
+      row.note,
+      `${label}.note`,
+      SHEET_TEXT_LIMITS.adjustment_note,
+    );
+  }
+  return adjustment as unknown as ShareSheetAdjustment;
+}
+
 function shareSpecies(value: unknown, label: string): ShareSpecies {
   const row = record(value, label);
   exactKeys(row, ['name'], [...SHARE_SPECIES_TEXT, 'base_speed_feet'], label);
@@ -801,6 +1062,10 @@ export function validateShareDocument(
       'species',
       'speciesTraits',
       'background',
+      'armor',
+      'hitPointRolls',
+      'skillProficiencies',
+      'sheetAdjustment',
     ],
     'document',
   );
@@ -1253,6 +1518,61 @@ export function validateShareDocument(
       ? undefined
       : shareBackground(source.background, 'background');
 
+  let armor: CharacterShareDocument['armor'] | undefined;
+  if (source.armor !== undefined) {
+    // The count cap is 2 and not a `SHARE_LIMITS` entry, because the cap here
+    // IS the cardinality: `character_armor_character_id_slot_unique` permits one
+    // row per slot and there are two slots.
+    armor = list(source.armor, 'armor', armorSlots.length).map((item, index) =>
+      shareArmor(item, `armor[${index}]`),
+    );
+    // UNLIKE weapons, this one IS unique-checked: the database makes it so, and
+    // two rows claiming the worn slot would abort the import transaction on the
+    // second INSERT rather than here where the field can be named.
+    assertUnique(armor.map((item) => item.slot), 'armor');
+  }
+
+  let hitPointRolls: CharacterShareDocument['hitPointRolls'] | undefined;
+  if (source.hitPointRolls !== undefined) {
+    hitPointRolls = list(
+      source.hitPointRolls,
+      'hitPointRolls',
+      SHARE_LIMITS.hitPointRolls,
+    ).map((item, index) => shareHitPointRoll(item, `hitPointRolls[${index}]`));
+    // Unique on the pair the schema's unique index is on, for the same reason.
+    assertUnique(
+      hitPointRolls.map(
+        (item) => `${item.className}:${String(item.classLevel)}`,
+      ),
+      'hitPointRolls',
+    );
+  }
+
+  let skillProficiencies:
+    | CharacterShareDocument['skillProficiencies']
+    | undefined;
+  if (source.skillProficiencies !== undefined) {
+    skillProficiencies = list(
+      source.skillProficiencies,
+      'skillProficiencies',
+      SHARE_LIMITS.skillProficiencies,
+    ).map((item, index) => {
+      const skill = text(item, `skillProficiencies[${index}]`, 40);
+      if (!skills.includes(skill as (typeof skills)[number])) {
+        throw new ShareValidationError(
+          `skillProficiencies[${index}] is unsupported.`,
+        );
+      }
+      return skill;
+    });
+    assertUnique(skillProficiencies, 'skillProficiencies');
+  }
+
+  const sheetAdjustment =
+    source.sheetAdjustment === undefined
+      ? undefined
+      : shareSheetAdjustment(source.sheetAdjustment, 'sheetAdjustment');
+
   return {
     format: CHARACTER_SHARE_FORMAT,
     version: CHARACTER_SHARE_VERSION,
@@ -1270,5 +1590,9 @@ export function validateShareDocument(
     ...(species === undefined ? {} : { species }),
     ...(speciesTraits === undefined ? {} : { speciesTraits }),
     ...(background === undefined ? {} : { background }),
+    ...(armor === undefined ? {} : { armor }),
+    ...(hitPointRolls === undefined ? {} : { hitPointRolls }),
+    ...(skillProficiencies === undefined ? {} : { skillProficiencies }),
+    ...(sheetAdjustment === undefined ? {} : { sheetAdjustment }),
   };
 }

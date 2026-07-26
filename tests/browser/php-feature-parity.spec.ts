@@ -173,6 +173,25 @@ async function portableTableCounts(
       await rows(page, 'character_species_traits'),
       characterId,
     ).length,
+    // And the four stored sheet inputs, on the same terms again: a document
+    // that does not carry them is a document that silently loses a player's
+    // armour, their rolled hit points and the skills they chose.
+    character_armor: forCharacter(
+      await rows(page, 'character_armor'),
+      characterId,
+    ).length,
+    character_hit_point_rolls: forCharacter(
+      await rows(page, 'character_hit_point_rolls'),
+      characterId,
+    ).length,
+    character_skill_proficiencies: forCharacter(
+      await rows(page, 'character_skill_proficiencies'),
+      characterId,
+    ).length,
+    character_sheet_adjustments: forCharacter(
+      await rows(page, 'character_sheet_adjustments'),
+      characterId,
+    ).length,
     character_background: forCharacter(
       await rows(page, 'character_background'),
       characterId,
@@ -488,18 +507,29 @@ test('captures every restorable character table and reports exact state differen
     'character_species',
     'character_species_traits',
     'character_background',
+    'character_armor',
+    'character_hit_point_rolls',
+    'character_skill_proficiencies',
+    'character_sheet_adjustments',
   ]) {
     expect(document.tables[table]).toEqual(
       forCharacter(await rows(page, table), workspaceImage.ids.character),
     );
   }
   expect(Object.keys(document.tables).sort()).toEqual([
+    // Added when the four stored sheet inputs became portable, for exactly the
+    // reason the weapons and origin keys were added: a backup without them
+    // silently loses the player's armour, rolls and skill choices.
+    'character_armor',
     // Added when the character's origin became portable, for the same reason
     // the weapons key was: a backup without it silently loses the species.
     'character_background',
     'character_class_levels',
+    'character_hit_point_rolls',
     'character_rule_overrides',
     'character_save_points',
+    'character_sheet_adjustments',
+    'character_skill_proficiencies',
     'character_source_instances',
     'character_species',
     'character_species_traits',
@@ -523,6 +553,10 @@ test('captures every restorable character table and reports exact state differen
     'character_species',
     'character_species_traits',
     'character_background',
+    'character_armor',
+    'character_hit_point_rolls',
+    'character_skill_proficiencies',
+    'character_sheet_adjustments',
   ]) {
     expect(document.tables[table], `${table} is captured exactly`).toEqual([]);
   }
@@ -801,8 +835,9 @@ test('round-trips a named save point through the mutation path', async ({
   )[0]!;
   expect(point).toMatchObject({
     label: 'Before experiment',
-    // a7-v3 is the snapshot version that also captures the three origin tables.
-    schema_version: 'a7-v3',
+    // a7-v4 is the snapshot version that also captures the four stored sheet
+    // inputs.
+    schema_version: 'a7-v4',
   });
   await execute(
     page,
@@ -1062,7 +1097,7 @@ test('undoes a structural class change through its snapshot inverse', async ({
   );
   expect(changed.inverse).toMatchObject({
     type: 'restore_snapshot',
-    snapshot: { schema_version: 'a7-v3' },
+    snapshot: { schema_version: 'a7-v4' },
     integrity: expect.any(String),
   });
   await execute(

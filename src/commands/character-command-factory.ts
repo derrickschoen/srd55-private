@@ -19,6 +19,12 @@ import { UpdateCharacterRulesCommand } from './update-character-rules';
 import { UpdateClassCommand } from './update-class';
 import { UpdateSourceConfigCommand } from './update-source-config';
 import {
+  SetArmorClassAdjustmentCommand,
+  SetArmorCommand,
+  SetHitPointRollCommand,
+  SetSkillProficiencyCommand,
+} from './sheet-inputs';
+import {
   AddWeaponCommand,
   RemoveWeaponCommand,
   SetWeaponMasteryCommand,
@@ -126,6 +132,14 @@ export class CharacterCommandFactory {
         return new RemoveWeaponCommand(this.db, payload);
       case 'set_weapon_mastery':
         return new SetWeaponMasteryCommand(this.db, payload);
+      case 'set_armor':
+        return new SetArmorCommand(this.db, payload);
+      case 'set_hit_point_roll':
+        return new SetHitPointRollCommand(this.db, payload);
+      case 'set_skill_proficiency':
+        return new SetSkillProficiencyCommand(this.db, payload);
+      case 'set_armor_class_adjustment':
+        return new SetArmorClassAdjustmentCommand(this.db, payload);
       case 'restore_snapshot':
         return new RestoreSnapshotCommand(
           this.db,
