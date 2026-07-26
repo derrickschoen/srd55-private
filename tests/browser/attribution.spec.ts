@@ -36,6 +36,67 @@ test('the footer reaches the SRD notice without reloading the application', asyn
   expect(loads).toBe(1);
 });
 
+/**
+ * The footer is static markup in index.html, so it paints and becomes clickable
+ * long before the worker has finished opening the database. Every other test
+ * here waits for the application to announce itself ready first, which waits
+ * the whole vulnerable window out; this one clicks inside it deliberately.
+ *
+ * The window is held open by a barrier, not by a guessed delay: the sqlite wasm
+ * response is stalled, so the database provably cannot open, and it is released
+ * only once the assertions that depend on it have run.
+ */
+test('a footer click made before the database opens is routed, not reloaded', async ({
+  page,
+}) => {
+  let loads = 0;
+  page.on('load', () => {
+    loads += 1;
+  });
+
+  let releaseWasm = (): void => {};
+  const wasmHeld = new Promise<void>((resolve) => {
+    releaseWasm = resolve;
+  });
+  await page.route('**/*.wasm', async (route) => {
+    await wasmHeld;
+    await route.continue();
+  });
+
+  try {
+    await page.goto('/');
+
+    // Proof that the click below lands before the boot gate fires: #app still
+    // carries the served pre-boot shell, which the application replaces the
+    // moment it starts.
+    await expect(page.locator('#status')).toHaveText('Starting local database…');
+    await expect(page.locator('#app')).toHaveAttribute('aria-busy', 'true');
+    await expect(attributionLink(page)).toBeVisible();
+
+    await page.evaluate(() => {
+      (window as unknown as Record<string, unknown>).preBootDocument = true;
+    });
+
+    await attributionLink(page).click();
+
+    await expect(page).toHaveURL(/\/legal$/);
+    await expect(page.locator('[data-testid="srd-attribution"]')).toHaveText(
+      NOTICE,
+    );
+
+    // A full navigation would have thrown this document away, and with it the
+    // worker that was part way through opening the database.
+    const sameDocument = await page.evaluate(
+      () =>
+        (window as unknown as Record<string, unknown>).preBootDocument === true,
+    );
+    expect(sameDocument).toBe(true);
+    expect(loads).toBe(1);
+  } finally {
+    releaseWasm();
+  }
+});
+
 test('the SRD notice is real text served on a deep link', async ({ page }) => {
   await page.goto('/legal');
 
@@ -83,6 +144,11 @@ test('no licensor wordmark appears outside the notice', async ({ page }) => {
 test('the notice stays reachable when the database never starts', async ({
   page,
 }) => {
+  let loads = 0;
+  page.on('load', () => {
+    loads += 1;
+  });
+
   await page.route('**/*.wasm', (route) => route.abort());
 
   await page.goto('/');
@@ -90,12 +156,14 @@ test('the notice stays reachable when the database never starts', async ({
     timeout: 30_000,
   });
 
-  // The boot failure leaves the footer link a plain anchor, so this is a full
-  // navigation: the licence route must render without asking for a database.
+  // The boot failure means the gate never starts the application, so this
+  // exercises the footer's own routing in isolation: the licence route must
+  // render without asking for a database.
   await attributionLink(page).click();
 
   await expect(page).toHaveURL(/\/legal$/);
   await expect(page.locator('[data-testid="srd-attribution"]')).toHaveText(
     NOTICE,
   );
+  expect(loads).toBe(1);
 });
