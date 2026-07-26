@@ -1,10 +1,41 @@
 import {
+  classFeatureEffectKinds,
   effectReliabilityCategories,
+  extraAttackWeaponScopes,
+  isEnumValue,
   rulesEditions,
   type EffectReliabilityCategory,
   type RulesEdition,
 } from '../domain/enums';
+import type { ClassFeatureEffect } from '../rules/class-feature-effects';
 import { isRecord } from '../worker/handler';
+import { isImportedContentKey } from './catalog-key';
+
+/**
+ * THE RECORD KINDS A TIER 1 DOCUMENT MAY CARRY, AND HOW A DOCUMENT SAYS WHICH.
+ *
+ * A TIER 1 DOCUMENT IS STILL A BARE JSON ARRAY, AND THAT IS THE WHOLE
+ * COMPATIBILITY STORY. Every document this project has ever emitted — every
+ * file `tools/scrape/build-catalog.ts` has written, every file a user already
+ * holds — is an array of spell records with no discriminator on them at all.
+ * Wrapping the format in an object envelope (`{spells: […], subclasses: […]}`)
+ * would have bought a version number and broken all of them on the same day, so
+ * the discriminator went on the ELEMENT instead: `kind` is optional, and an
+ * element without one IS A SPELL. That is not a default chosen for convenience;
+ * it is the meaning every existing document already has, restated so that it
+ * keeps holding. `tests/fixtures/homebrew-catalog/legacy-pre-subclass.tier1.json`
+ * is a frozen hand-built document from before this change and is the proof.
+ *
+ * AN UNKNOWN `kind` IS REFUSED RATHER THAN SKIPPED. Unknown FIELDS are dropped
+ * silently — that is deliberate, and `tools/scrape/provenance.ts` depends on it
+ * — but an unknown RECORD KIND is a whole record this build cannot store, and
+ * skipping it would import a document as if it were complete while dropping
+ * content the user can see in the file. Worse, a spell import is a full
+ * replacement, so a silently skipped kind would read as "these records are
+ * gone" and be tombstoned against.
+ */
+export const catalogRecordKinds = ['spell', 'subclass'] as const;
+export type CatalogRecordKind = (typeof catalogRecordKinds)[number];
 
 export interface CatalogRecord {
   identityKey: string;
@@ -30,9 +61,98 @@ export interface CatalogRecord {
   healing: boolean;
 }
 
+/**
+ * ONE PRINTED FEATURE OF AN IMPORTED SUBCLASS, PARSED.
+ *
+ * `effect` IS THE BOUNDED, COMPILE-CHECKED HALF AND IT IS THE SAME TYPE THE
+ * DERIVATION CONSUMES. `ClassFeatureEffect` is `src/rules/class-feature-effects.ts`'s
+ * own union, so the parser cannot mint an effect the sheet cannot read, and
+ * adding a member to `classFeatureEffectKinds` is a compile error in BOTH files
+ * rather than a silently unparsed kind here.
+ *
+ * `null` IS THE COMMON CASE AND NOT AN OMISSION. A feature with no effect is a
+ * printed paragraph — the owner's "most things are just a text box", and 26 of
+ * 33 rows on the species side D12 measured. D6b limb 2 is the justification the
+ * `subclass_features.effect_kind` column already carries: the content cannot be
+ * represented without the null, because most features genuinely move no number.
+ *
+ * NO `sortOrder` FIELD. Printed order is the ARRAY's order and is derived from
+ * the index, because an authored `sortOrder` beside an array is a second source
+ * of truth for the same fact and the two can disagree.
+ */
+export interface CatalogSubclassFeature {
+  classLevel: number;
+  name: string;
+  description: string;
+  effect: ClassFeatureEffect | null;
+}
+
+/**
+ * A SUBCLASS, AS A TIER 1 DOCUMENT CARRIES IT.
+ *
+ * WHAT IS DELIBERATELY ABSENT, STATED RATHER THAN IMPLIED. A subclass can be a
+ * spellcaster (`subclass_definitions.spellcasting_ability`, `caster_fraction`,
+ * `caster_rounding`, `grant_rules`, and the whole of `subclass_progressions`),
+ * and this format has no vocabulary for any of it. `grant_rules` in particular
+ * is a JSON blob with an internal `rule_key` grammar minted only by
+ * `src/rules/class-progression-lookup.ts`, and an import that could write one
+ * could mint spell slots. That is a second increment; this one is the RECORD
+ * KIND and its round trip. An imported subclass is therefore a NON-CASTER with
+ * printed features, and the columns it does not fill stay NULL.
+ *
+ * A SOURCE BOOK AND A FLAVOUR PARAGRAPH ARE ABSENT FOR A BLUNTER REASON: there
+ * is no column. Spells get `spell_version_publications`; `subclass_definitions`
+ * has neither a publication table nor a description field. Fields naming them
+ * are dropped like any other unknown field rather than silently half-stored.
+ */
+export interface CatalogSubclassRecord {
+  kind: 'subclass';
+  /**
+   * The subclass's own content key, and it MUST be an imported key — three
+   * parts with a dotted owner namespace in the middle. See
+   * `importedContentKeyOwner`: this is what stops a document naming
+   * `2024:subclass:eldritch-knight` and rewriting a bundled row, and it is what
+   * keeps the subclass identifiable as imported inside a backup and a share
+   * link, neither of which carries any other field of it.
+   */
+  contentKey: string;
+  /**
+   * The parent class BY CONTENT KEY, never by display name.
+   *
+   * Every resolver in this application already works this way and
+   * `upsertThirdCaster` says why at length: a user-authored class that happens
+   * to be called "Fighter" must not be able to adopt Eldritch Knight, and the
+   * same argument runs in reverse here — a document naming "Bard" would attach
+   * a homebrew subclass to whichever row won the name, which is a different
+   * class from the one the author meant.
+   */
+  parentClassKey: string;
+  name: string;
+  edition: RulesEdition;
+  /** In printed order. `sort_order` is the index, one-based. */
+  features: CatalogSubclassFeature[];
+}
+
 export interface CatalogDescription {
   versionKey: string;
   description: string;
+}
+
+/**
+ * A whole Tier 1 parse: the records, split by kind, and the kinds actually
+ * DECLARED by the documents.
+ *
+ * `kinds` IS NOT DERIVABLE FROM THE TWO ARRAYS AND THAT IS THE POINT. An empty
+ * `spells` can mean two different things — "a document declared spells and
+ * listed none", which is the existing and tested way to empty the spell catalog,
+ * or "no document mentioned spells at all", which must leave it alone. See
+ * `CatalogImporter.import`, which is where the difference decides whether a
+ * sweep runs.
+ */
+export interface CatalogDocumentRecords {
+  spells: CatalogRecord[];
+  subclasses: CatalogSubclassRecord[];
+  kinds: ReadonlySet<CatalogRecordKind>;
 }
 
 export interface CatalogImportParams {
@@ -177,13 +297,191 @@ function catalogRecord(value: unknown): CatalogRecord {
   };
 }
 
+function boundedInteger(
+  value: unknown,
+  field: string,
+  low: number,
+  high: number,
+): number {
+  if (
+    !Number.isInteger(value) ||
+    Number(value) < low ||
+    Number(value) > high
+  ) {
+    throw new TypeError(
+      `Catalog field '${field}' must be an integer from ${low} through ${high}.`,
+    );
+  }
+  return Number(value);
+}
+
+/**
+ * A FEATURE'S MECHANICAL EFFECT, OR `null`.
+ *
+ * THE SWITCH IS EXHAUSTIVE OVER `classFeatureEffectKinds`, so a second kind is a
+ * COMPILE ERROR here rather than a document field this build quietly ignores.
+ *
+ * `weaponScope` IS REQUIRED AND HAS NO DEFAULT, WHICH IS THE FORMAT DECISION
+ * THIS FUNCTION EXISTS TO MAKE. `subclass_features_extra_attack_payload_check`
+ * refuses a scope-less `extra_attack` row outright, and the column's own comment
+ * says why the obvious repair is wrong: defaulting to `any_weapon` WIDENS a
+ * one-weapon grant to every weapon the character holds, which is the specific
+ * wrong answer D19 §3 describes. So the DOCUMENT states the scope; the importer
+ * never invents one. (The D19-era fixture wrote `weaponScope: null` and this is
+ * the field that had to change to make it importable.)
+ */
+function catalogFeatureEffect(
+  value: unknown,
+  label: string,
+): ClassFeatureEffect | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (!isRecord(value)) {
+    throw new TypeError(
+      `Catalog field '${label}.effect' must be an object or null.`,
+    );
+  }
+  const kind = value.kind;
+  if (!isEnumValue(classFeatureEffectKinds, kind)) {
+    throw new TypeError(
+      `Catalog field '${label}.effect.kind' must be one of ${classFeatureEffectKinds.join(', ')}.`,
+    );
+  }
+  switch (kind) {
+    case 'extra_attack': {
+      const attackCount = value.attackCount;
+      if (!Number.isInteger(attackCount) || Number(attackCount) < 2) {
+        throw new TypeError(
+          `Catalog field '${label}.effect.attackCount' must be an integer of 2 or more; it is the TOTAL attacks the Attack action gives, never an increment.`,
+        );
+      }
+      const weaponScope = value.weaponScope;
+      if (!isEnumValue(extraAttackWeaponScopes, weaponScope)) {
+        throw new TypeError(
+          `Catalog field '${label}.effect.weaponScope' must be one of ${extraAttackWeaponScopes.join(', ')}; it has no default, because defaulting it would widen a one-weapon grant to every weapon.`,
+        );
+      }
+      return {
+        kind,
+        attack_count: Number(attackCount),
+        weapon_scope: weaponScope,
+      };
+    }
+    /* c8 ignore next 6 -- unreachable while the switch is exhaustive; kept so a
+       new effect kind is a compile error here rather than a silently unparsed
+       document field. */
+    default: {
+      const unreachable: never = kind;
+      throw new Error(
+        `Unhandled class feature effect kind ${String(unreachable)}.`,
+      );
+    }
+  }
+}
+
+function catalogSubclassFeature(
+  value: unknown,
+  label: string,
+): CatalogSubclassFeature {
+  if (!isRecord(value)) {
+    throw new TypeError(`Catalog field '${label}' must be an object.`);
+  }
+  return {
+    // 1..20 is `subclass_features_class_level_check`, retyped rather than
+    // imported: the level IN THE SUBCLASS'S OWN CLASS, never a character level.
+    classLevel: boundedInteger(value.classLevel, `${label}.classLevel`, 1, 20),
+    name: nonEmptyString(value.name, `${label}.name`),
+    // NOT NULL in the table, and an empty one is a parse bug at the far end of
+    // whatever produced the document.
+    description: nonEmptyString(value.description, `${label}.description`),
+    effect: catalogFeatureEffect(value.effect, label),
+  };
+}
+
+function catalogSubclassRecord(value: Record<string, unknown>): CatalogSubclassRecord {
+  const contentKey = nonEmptyString(value.contentKey, 'contentKey');
+  if (!isImportedContentKey(contentKey)) {
+    throw new TypeError(
+      `Catalog field 'contentKey' must be an imported content key of the form <edition>:<owner.namespace>:<name>; '${contentKey}' is not, and bundled keys such as '2024:subclass:eldritch-knight' are refused by that shape on purpose.`,
+    );
+  }
+  const edition = nonEmptyString(value.edition, 'edition');
+  if (!isEnumValue(rulesEditions, edition)) {
+    throw new TypeError(
+      `Catalog field 'edition' must be one of ${rulesEditions.join(', ')}.`,
+    );
+  }
+  const features = value.features;
+  if (!Array.isArray(features) || features.length === 0) {
+    throw new TypeError(
+      `Catalog field 'features' must be a non-empty list for subclass '${contentKey}'.`,
+    );
+  }
+  const parsed = features.map((feature, index) =>
+    catalogSubclassFeature(feature, `features[${index}]`),
+  );
+  // `subclass_features_subclass_name_unique` would refuse the second row with
+  // an opaque SQLITE_CONSTRAINT halfway through the transaction. Named here
+  // instead, before anything is written.
+  const names = new Set<string>();
+  for (const feature of parsed) {
+    if (names.has(feature.name)) {
+      throw new TypeError(
+        `Subclass '${contentKey}' lists the feature '${feature.name}' twice; feature names are unique within a subclass.`,
+      );
+    }
+    names.add(feature.name);
+  }
+  return {
+    kind: 'subclass',
+    contentKey,
+    parentClassKey: nonEmptyString(value.parentClassKey, 'parentClassKey'),
+    name: nonEmptyString(value.name, 'name'),
+    edition,
+    features: parsed,
+  };
+}
+
+/**
+ * Reads one element's `kind`, defaulting to `spell`. See `catalogRecordKinds`.
+ *
+ * ABSENT AND EXPLICITLY NULL ARE THE SAME ANSWER. Every other nullable field in
+ * this file collapses the two — `nullableString`, `sourcePage`, and
+ * `catalogFeatureEffect` all treat `undefined` and `null` identically — because
+ * a JSON encoder that writes every key of a record it holds emits `null` where
+ * a hand-written document simply omits the key, and neither says anything about
+ * the record's kind. Refusing `null` here would have made the field the one
+ * place in the format where "I have no value for this" aborts the whole
+ * document set, which is the opposite of what `catalogRecordKinds` promises. A
+ * kind that is present and UNRECOGNIZED is still refused, and that distinction
+ * is the point: no value is a spell, a wrong value is a record this build
+ * cannot store.
+ */
+function catalogRecordKind(value: unknown): CatalogRecordKind {
+  if (!isRecord(value)) {
+    throw new TypeError('Catalog document contains a non-object record.');
+  }
+  if (value.kind === undefined || value.kind === null) {
+    return 'spell';
+  }
+  if (!isEnumValue(catalogRecordKinds, value.kind)) {
+    throw new TypeError(
+      `Catalog field 'kind' must be one of ${catalogRecordKinds.join(', ')} when present.`,
+    );
+  }
+  return value.kind;
+}
+
 export function parseCatalogDocuments(
   documents: readonly string[],
-): CatalogRecord[] {
+): CatalogDocumentRecords {
   if (documents.length === 0) {
     throw new TypeError('At least one Tier 1 catalog document is required.');
   }
-  const records: CatalogRecord[] = [];
+  const spells: CatalogRecord[] = [];
+  const subclasses: CatalogSubclassRecord[] = [];
+  const kinds = new Set<CatalogRecordKind>();
   documents.forEach((document, index) => {
     const decoded = parseJsonDocument(
       document,
@@ -194,9 +492,74 @@ export function parseCatalogDocuments(
         `Tier 1 catalog document ${index + 1} must contain a JSON list.`,
       );
     }
-    decoded.forEach((value) => records.push(catalogRecord(value)));
+    /**
+     * AN EMPTY DOCUMENT DECLARES `spell`, AND IT DECLARES IT PER DOCUMENT.
+     *
+     * `[]` has exactly one historical meaning — "a spell document listing
+     * nothing", the shipped way to empty the spell catalog — and it has that
+     * meaning because the format had no kinds to declare when it was minted.
+     * Reading that meaning off the WHOLE parse instead ("no records anywhere")
+     * loses it the moment a second file is selected: `['[]', <subclasses>]`
+     * would declare only `subclass` and skip the sweep, so the empty file the
+     * user picked would do nothing and say nothing. `documents` is a union of
+     * FILES and the multi-file picker makes that a normal selection, so the
+     * declaration belongs to the document that carries it.
+     */
+    if (decoded.length === 0) {
+      kinds.add('spell');
+    }
+    for (const value of decoded) {
+      const kind = catalogRecordKind(value);
+      kinds.add(kind);
+      switch (kind) {
+        case 'spell':
+          spells.push(catalogRecord(value));
+          break;
+        case 'subclass':
+          subclasses.push(
+            catalogSubclassRecord(value as Record<string, unknown>),
+          );
+          break;
+        /* c8 ignore next 6 -- unreachable while the switch is exhaustive; kept
+           so a new record kind is a compile error here rather than a record
+           this parser drops on the floor. */
+        default: {
+          const unreachable: never = kind;
+          throw new Error(
+            `Unhandled catalog record kind ${String(unreachable)}.`,
+          );
+        }
+      }
+    }
   });
-  return records;
+
+  // Two documents in one call may not disagree about the same subclass. Spell
+  // records MERGE on `versionKey` (`normalizeCatalogRecords`) because a spell is
+  // split across source books by design; a subclass carries an ORDERED FEATURE
+  // LIST, and there is no defensible merge of two orderings — one would silently
+  // win. Named here rather than resolved.
+  const seen = new Map<string, string>();
+  for (const record of subclasses) {
+    const encoded = JSON.stringify(record);
+    const previous = seen.get(record.contentKey);
+    if (previous !== undefined && previous !== encoded) {
+      throw new TypeError(
+        `Tier 1 carries two different subclasses under the key '${record.contentKey}'.`,
+      );
+    }
+    seen.set(record.contentKey, encoded);
+  }
+
+  return {
+    spells,
+    subclasses: subclasses.filter(
+      (record, index) =>
+        subclasses.findIndex(
+          (other) => other.contentKey === record.contentKey,
+        ) === index,
+    ),
+    kinds,
+  };
 }
 
 export function parseDescriptionDocuments(

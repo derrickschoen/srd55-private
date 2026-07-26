@@ -94,7 +94,11 @@ describe('spell page parser', () => {
       (page) => expectOk(page).record,
     );
     // The real importer parser, not a copy of it.
-    expect(parseCatalogDocuments([JSON.stringify(records)])).toHaveLength(3);
+    // Three SPELLS and no subclasses: the scraper emits legacy-shaped records
+    // with no `kind` field, which the parser still reads as spells.
+    const parsed = parseCatalogDocuments([JSON.stringify(records)]);
+    expect(parsed.spells).toHaveLength(3);
+    expect(parsed.subclasses).toEqual([]);
     // The importer never checks key grammar; the share/export path does, and
     // throws. A key that imports and then breaks sharing is the failure this
     // assertion exists to prevent.

@@ -157,12 +157,39 @@ export class ImportBackupController {
   }
 }
 
+/**
+ * THE THREE SPELL NUMBERS ALWAYS, AND THE SUBCLASS NUMBERS ONLY WHEN THERE ARE
+ * ANY.
+ *
+ * Adding "0 subclasses" to every spell import would be noise on the overwhelming
+ * majority of imports, and folding subclasses into `created` would make the
+ * spell count wrong — see `CatalogImportSummary`. The clause is appended rather
+ * than interleaved so the sentence a user has read for every previous import is
+ * unchanged when nothing new happened.
+ */
+/**
+ * `1 subclass`, `0 subclasses`, `2 subclasses`. The three spell numbers carry no
+ * noun and so need none of this; the subclass clauses do, and "1 subclasses
+ * created" is the string a user actually sees on the common case of importing
+ * one homebrew subclass.
+ */
+function subclasses(count: number): string {
+  return `${count} subclass${count === 1 ? '' : 'es'}`;
+}
+
 export function catalogSummary(summary: CatalogImportSummary): string {
-  return [
+  const parts = [
     `${summary.created} created`,
     `${summary.updated} updated`,
     `${summary.tombstoned} tombstoned`,
-  ].join(', ');
+  ];
+  if (summary.subclasses_created > 0 || summary.subclasses_updated > 0) {
+    parts.push(
+      `${subclasses(summary.subclasses_created)} created`,
+      `${subclasses(summary.subclasses_updated)} updated`,
+    );
+  }
+  return parts.join(', ');
 }
 
 function files(input: HTMLInputElement): File[] {
