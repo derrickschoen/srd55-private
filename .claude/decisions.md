@@ -63,6 +63,88 @@ classes print d8 — and that is checkable against the class-traits test.
 
 ---
 
+## F9 — Codex on the customType migration: worth doing, and it corrected me three more times (2026-07-26)
+
+Read-only consult, session `019fa08b`. I gave it my framing and asked to be
+refuted rather than agreed with. It refuted three parts, and one of the
+corrections is a landmine I would have walked into.
+
+### Corrections to MY framing — all verified against the code
+
+1. **"The contracts are correct" is still too strong.** The compile guard covers
+   degraded columns in `RowContractTable` only — backup tables, `characters`, and
+   seven native tables (`rows.ts:291,341`). **Uncontracted catalog and
+   query-only tables can and do remain degraded.** So "no contracted degraded
+   column reaches Zod as `z.any()`" is the true statement; mine was broader.
+2. **The 257 entries are not "257 base schemas."** They are column-to-shared-schema
+   MAPPINGS, and many carry genuine domain narrowing — positive ids, ranges,
+   enums, non-empty. Native columns would delete only the ones that merely
+   restate string / timestamp-string / integer / boolean. Most must remain. My
+   "delete 257 hand-written lines" framing oversold the prize.
+3. **There are 23 JSON classifications, not 8** (`json-columns.ts:64`). The prose
+   at `rows.ts:47` is stale in three separate numbers now.
+
+### The trap neither of us had seen
+
+Native `integer({ mode: 'boolean' })` describes the value **after Drizzle
+decodes it** — a boolean. But **Drizzle never runs here**, so the app sees raw
+sqlite-wasm `0`/`1`. Native boolean's drizzle-zod schema therefore CANNOT be used
+directly as the raw-row contract; the generator must map it to `0 | 1`
+explicitly. A naive search-and-replace of `tinyint1` would produce contracts that
+reject every row the database actually holds — the data-loss failure mode, from
+the one direction we had not considered.
+
+### Verdict: worth doing, but not as advertised
+
+**Yes**, as a focused foundational migration. NOT sold as "delete 257 lines",
+and NOT combined with the codec-generator rewrite.
+
+For: 353 of 526 degraded is a permanent maintenance smell protecting a retired
+goal; every ordinary new text column needs redundant manual registration before
+contracts will build; and it is the precondition for generated runtime codecs.
+
+Against: contracts are already guarded and tested; the real deletion is much
+smaller than 257; boolean storage semantics make it more than mechanical.
+
+### Migration, by family — codex's order, which I endorse
+
+1. Teach the facts generator to represent `string`, `integer`,
+   `boolean-storage` and `degraded`.
+2. `datetime` first (lowest risk).
+3. `varchar` and `sqlText`.
+4. `tinyint1` LAST, with explicit raw `0|1` handling.
+5. Delete only refinements PROVEN equivalent to the newly derived base. Keep
+   enums, ranges, brands, non-empty, JSON policy.
+6. `laravelDefault` separately — default quoting is its own change.
+
+**Two different guards per increment, and the distinction matters:** a frozen
+column-facts diff proves SCOPE, not correctness. Correctness needs the existing
+hand-written accept/reject cases run against the newly derived schemas BEFORE
+any mapping is deleted.
+
+**And the rule that governs it:** do NOT compute a replacement metadata hash
+from the new SQL. RETIRE the generated-schema-to-Laravel assertions
+(`schema.test.ts:987`, `:1162`). The frozen fixture and its two historical
+derivations (`:1138`, `:1144`) stay untouched — D9 records why that fixture can
+never be rewritten.
+
+### The prize is reachable
+
+One description CAN generate both the Zod contract and the runtime codec.
+Drizzle being build-time-only is not the blocker — the project already crosses
+that boundary by emitting plain generated facts. A descriptor
+(`sqliteBoolean()`, `integer({min:0})`, `brandedInteger<SpellVersionId>()`,
+`json({shape:'array'})`) would emit two views: a strict storage schema, and a
+decoder returning the domain value including `0|1 → boolean`, JSON parsing and
+brands. Native Drizzle columns supply the structural base; the descriptor
+supplies what Drizzle cannot know — raw sqlite-wasm representation, JSON
+semantics, domain narrowing, projection shape.
+
+Joins and computed expressions would still need a small per-query projection
+description. That is the honest limit.
+
+---
+
 ## F8 — 223 columns are degraded to `z.any()` to protect a goal D7 retired (measured 2026-07-26)
 
 Investigated in response to the owner asking what a "codec" is and whether
