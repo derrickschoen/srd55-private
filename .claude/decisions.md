@@ -1,5 +1,78 @@
 # Binding scope decisions
 
+## D14 — Cantrips that change how a weapon attack is rolled (2026-07-26)
+
+Owner's request, verbatim in substance: a Wizard with -1 Strength should not be
+shown swinging a quarterstaff with Strength when True Strike exists; the sheet
+should replace the to-hit and damage and add the extra dice. And Shillelagh
+should appear as a weapon, assumed always active.
+
+This is right, and it is exactly the "confusing tools hide the better option"
+problem this project exists for. Rules SOURCED, not recalled — extracted to
+`docs/srd/source/weapon-attack-cantrips.txt`.
+
+### True Strike, as the SRD actually writes it
+
+Divination Cantrip — **Bard, Sorcerer, Warlock, Wizard** (not Druid, not
+Cleric). Action, Range Self. Material component: **a weapon you are proficient
+with** worth 1+ CP.
+
+> "you make one attack with the weapon used in the spell's casting. The attack
+>  uses your spellcasting ability for the attack and damage rolls instead of
+>  using Strength or Dexterity."
+
+Damage type is **a CHOICE** — Radiant *or* the weapon's normal type — not forced
+Radiant. **Cantrip Upgrade:** extra *Radiant* damage at levels 5 (1d6), 11
+(2d6), 17 (3d6), regardless of which type was chosen.
+
+Three consequences that change the implementation:
+- It replaces **Strength OR Dexterity**, so it can beat a finesse weapon's DEX
+  too, not just a bad STR.
+- It requires **proficiency with that weapon**. A Wizard qualifies with a
+  quarterstaff and does NOT with a greatsword.
+- It is **one attack as an Action**. A character with Extra Attack who uses it
+  LOSES attacks — so "always replace" is wrong for them. Extra Attack is not
+  modelled (F4), so the app cannot currently detect this case.
+
+### Shillelagh, as the SRD actually writes it
+
+Transmutation Cantrip — **Druid only**. Bonus Action, 1 minute, V/S/M
+(mistletoe). Applies to **a Club or Quarterstaff you are holding**, and only to
+**melee** attacks with it.
+
+Replaces **Strength only** (not Dexterity — moot, since neither weapon is
+Finesse). Damage die becomes **d8**, damage type Force *or* normal (choice).
+Ends early if recast or if you let go of the weapon.
+
+**It scales, which I would have got wrong from memory:** Cantrip Upgrade changes
+the die at levels 5 (d10), 11 (d12), 17 (2d6).
+
+### The model this implies
+
+A weapon gains ATTACK PROFILES — a derived, ordered set of ways to attack with
+it. Not stored: computed from the character's known cantrips, class spellcasting
+ability, proficiency, and level.
+
+- `normal` — STR, or DEX where Finesse/ranged allows; weapon die; weapon type.
+- `true_strike` — spellcasting ability; weapon die plus the level-scaled Radiant
+  dice; damage type a choice.
+- `shillelagh` — spellcasting ability; the upgraded die; Force or normal.
+
+Eligibility is derived per weapon, so a Wizard's greatsword offers no True
+Strike profile while their quarterstaff does. This generalises the D12 pattern
+of a bounded set of mechanical effects one level further: a spell that modifies
+a weapon attack, rather than a species trait that modifies a derived number.
+
+This is SHEET-CORE work (D11) and lands with it, because it needs the attack and
+damage derivation that does not exist yet.
+
+**Assumption recorded, per the owner: Shillelagh is treated as always active.**
+Its one-minute duration and Bonus Action cost are not tracked — this app has no
+combat-round model and inventing one to gate a sheet row would be worse than the
+assumption.
+
+---
+
 ## D13 — Twenty-four CHECK constraints merged; two silent-no-op traps measured (2026-07-26)
 
 `main` 05c836f. Verified by me, not on the track's word: **729 vitest / 72 files,

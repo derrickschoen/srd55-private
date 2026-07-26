@@ -1,0 +1,55 @@
+This work includes material from the System Reference Document 5.2
+("SRD 5.2") by Wizards of the Coast LLC, available at
+https://www.dndbeyond.com/srd. The SRD 5.2 is licensed under the Creative
+Commons Attribution 4.0 International License, available at
+https://creativecommons.org/licenses/by/4.0/legalcode.
+
+--- Verbatim extracts: the two cantrips that change how a WEAPON attack is
+    rolled. Read the LEFT column; the right column is a different spell. ---
+
+=== True Strike (page ~163) ===
+
+      True Strike                                             
+      Divination Cantrip (Bard, Sorcerer, Warlock, Wizard)    
+      Casting Time: Action                                    
+      Range: Self                                             
+      Components: S, M (a weapon with which you have profi-   
+       ciency and that is worth 1+ CP)                        
+      Duration: Instantaneous                                 
+      Guided by a flash of magical insight, you make one      
+      attack with the weapon used in the spell’s casting.   
+      The attack uses your spellcasting ability for the at-   
+      tack and damage rolls instead of using Strength or      
+      Dexterity. If the attack deals damage, it can be Ra-    
+      diant damage or the weapon’s normal damage type       
+      (your choice).                                          
+        Cantrip Upgrade. Whether you deal Radiant dam-        
+      age or the weapon’s normal damage type, the attack    
+      deals extra Radiant damage when you reach levels 5      
+      (1d6), 11 (2d6), and 17 (3d6).                          
+
+=== Shillelagh (page ~157) ===
+
+      Shillelagh                                              
+      Transmutation Cantrip (Druid)                           
+      Casting Time: Bonus Action                              
+      Range: Self                                             
+      Components: V, S, M (mistletoe)                         
+      Duration: 1 minute                                      
+      A Club or Quarterstaff you are holding is imbued        
+      with nature’s power. For the duration, you can use    
+      your spellcasting ability instead of Strength for the   
+      attack and damage rolls of melee attacks using that     
+      weapon, and the weapon’s damage die becomes
+                                                              
+      a d8. If the attack deals damage, it can be Force
+                                                              
+      damage or the weapon’s normal damage type (your
+                                                              
+      choice).
+                                                              
+        The spell ends early if you cast it again or if you le
+      go of the weapon.                                       
+        Cantrip Upgrade. The damage die changes when          
+      you reach levels 5 (d10), 11 (d12), and 17 (2d6).       
+                                                              
