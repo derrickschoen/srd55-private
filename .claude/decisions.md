@@ -63,6 +63,90 @@ classes print d8 — and that is checkable against the class-traits test.
 
 ---
 
+## F10 — Archaeology: what else survives only because the MVP did it that way (2026-07-26)
+
+The owner, on the VARCHAR mimicry: *"having something that renames string to
+varchar seems really dumb and useless"* — and asked what else is like that.
+Codex scan, read-only, plus my own verification of the concrete items.
+
+### 1. The Laravel inventory-and-hash machinery — HIGHEST ongoing cost
+
+`tests/unit/schema.test.ts:12-179`, `:941-1001`, `:1100-1175`.
+
+It freezes the Laravel table and column inventory, column ORDER, declared types,
+nullability, quoted defaults, and a SHA-256 derived from the old migrations. Its
+own header calls the value "still Laravel-derived".
+
+**D7 retires precisely this goal**, and the machinery has since spread BEYOND
+Laravel: new native tables were forced into a parallel `expectedNativeColumns`
+inventory (`:181-213`) to fit the inherited structure.
+
+**This is the thing that has been taxing every change all session, and I can
+name the receipts.** D18 records an hour of merge repair that was almost
+entirely hand-updating inventories and counts across two branches; D23 and D24
+each had to move table counts again. Every table, column, reorder, nullability
+or default change means updating hand-maintained lists.
+
+Deleting it breaks NO runtime behaviour. But the same file also tests real
+indexes, foreign keys, cascades and uniqueness — those are behavioural and must
+survive. The parity scaffolding is what goes, not the file.
+
+### 2. `laravelDefault` — every ordinary default routed through a Laravel escape hatch
+
+`db/schema/columns.ts:76-82`, called throughout six schema modules.
+
+Its comment gives its only reason: Laravel emitted `DEFAULT '0'` with quotes and
+the parity oracle pins the quotes verbatim. It enforces no domain rule. So a
+plain default cannot be written plainly — `tinyint1('finesse').notNull()
+.default(laravelDefault('0'))` is the shape of every boolean in the schema.
+
+Replacing it changes generated SQL, moves the hash, and changes stored images —
+all of which D7 sanctions. Codex INFERRED, but did not execute, that SQLite
+affinity makes the runtime values equivalent; that must be proved before the
+change, not assumed.
+
+### 3. A dormant, type-incoherent column whose own comment says to drop it
+
+`db/schema/character.ts:300-304`. `spell_selection_slots.orphaned_by_change_group_id`
+is an INTEGER with no foreign key, naming `change_log.group_id`, which is a
+VARCHAR uuid. **I verified it myself: zero readers and zero writers** — the only
+occurrences outside generated files are a type declaration and a test fixture
+setting it to null.
+
+Its own comment: *"It deserves to be dropped, but not in this change: dropping a
+column moves the Laravel parity hash and would confuse the cutover."* The cutover
+is long finished and D7 retired the hash. It is inert, so low cost — but it
+misrepresents a relationship that does not exist.
+
+### What codex flagged as UNSURE, and was right to
+
+- **The frozen `tests/fixtures/schema-pre-drizzle.sql`** — do NOT delete or
+  regenerate. D9 records why: it is the independent artifact the historical
+  hashes derive from. The COMPARISON against current schema is vestigial; the
+  fixture is not.
+- **The pre-Drizzle rejection tests** — their backward-compat subject is retired,
+  but they also exercise untrusted-image rejection, degraded boot and recovery.
+  Replace that coverage with a non-Laravel malformed fixture before touching them.
+- **`spell_version_damage_types` / `spell_version_conditions`** — dormant, but
+  they have real foreign keys in the shape a catalog import could write. D23
+  already noted subclass removal needs similar columns. Not safe to call dead.
+- **The `tests/parity/` PHP maps** — inherited NAMES, but D7 expressly preserves
+  the behavioural D&D-rule fixtures. Renaming is not the same as deleting.
+
+### The shape worth naming
+
+Every item here follows one pattern: **a constraint adopted to prove fidelity to
+the thing being replaced, which then outlived the replacement.** The tell is a
+comment that justifies the code by what it protects rather than by what it does.
+When the protected thing is retired, nothing goes looking for its protectors.
+
+**Sequencing:** item 1 is the expensive one and should lead, because it is what
+makes every other schema change cost more than it should. Item 2 rides along
+with it (same tests move). Item 3 is a one-line deletion that can wait for
+either.
+
+---
+
 ## F9 — Codex on the customType migration: worth doing, and it corrected me three more times (2026-07-26)
 
 Read-only consult, session `019fa08b`. I gave it my framing and asked to be
