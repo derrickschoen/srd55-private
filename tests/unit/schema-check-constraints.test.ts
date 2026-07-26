@@ -379,6 +379,37 @@ const martialArtsDie =
     });
   };
 
+// D19's two class-feature tables. Both start from a FREE-TEXT row — no
+// `effect_kind`, no payload — because that is the common case and because it is
+// the row every payload-without-a-kind case has to start from.
+const subclassFeature =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'subclass_features', {
+      subclass_definition_id: newSubclass(db, newClass(db)),
+      class_level: 6,
+      sort_order: 1,
+      name: uid('Feature'),
+      description: 'Printed feature text.',
+      ...values,
+    });
+  };
+
+const namedFeature =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'named_features', {
+      content_key: uid('feature'),
+      class_definition_id: newClass(db),
+      name: uid('Feature'),
+      rules_edition: '2024',
+      prerequisite: 'Level 5+ Someclass',
+      description: 'Printed feature text.',
+      class_level: 5,
+      ...values,
+    });
+  };
+
 // --- edit writers ----------------------------------------------------------
 // Each inserts a row that is legal on every constraint, then changes it. The
 // insert MUST succeed for the case to mean anything: if a fixture's starting
@@ -1149,6 +1180,176 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     accepts: [
       ['the level 1 d6', martialArtsDie({ class_level: 1, martial_arts_die: 6 })],
       ['the level 17 d12', martialArtsDie({ class_level: 17, martial_arts_die: 12 })],
+    ],
+  },
+  // --- D19: subclass features ---------------------------------------------
+  {
+    constraint: 'subclass_features_class_level_check',
+    rejects: [
+      ['level 0, which a `class_level <= ?` resolution would always win', subclassFeature({ class_level: 0 })],
+      ['level 21', subclassFeature({ class_level: 21 })],
+    ],
+    accepts: [
+      // The owner's own case: a subclass that grants Extra Attack at level 6.
+      ['the level 6 grant D19 was raised about', subclassFeature({ class_level: 6 })],
+      ['level 3, where a 2024 subclass is taken', subclassFeature({ class_level: 3 })],
+      ['level 20', subclassFeature({ class_level: 20 })],
+    ],
+  },
+  {
+    constraint: 'subclass_features_sort_order_check',
+    rejects: [
+      ['a zero order, which printed order never starts at', subclassFeature({ sort_order: 0 })],
+      ['a negative order', subclassFeature({ sort_order: -1 })],
+      ['a text order', subclassFeature({ sort_order: 'first' })],
+    ],
+    accepts: [['the first printed feature', subclassFeature({ sort_order: 1 })]],
+  },
+  {
+    constraint: 'subclass_features_effect_kind_check',
+    rejects: [
+      ['a kind outside the closed set', subclassFeature({ effect_kind: 'extra_attacks' })],
+      ['an empty kind', subclassFeature({ effect_kind: '' })],
+      // The species vocabulary is a different closed set on a different table,
+      // and a member of one is not a member of the other.
+      ['a member of the species trait vocabulary', subclassFeature({ effect_kind: 'hp_modifier' })],
+    ],
+    accepts: [
+      // THE DEFAULT CASE, NOT AN EDGE: most subclass features are text.
+      ['the NULL a text-only feature carries', subclassFeature({ effect_kind: null })],
+      ['extra_attack, with both halves of its payload', subclassFeature({ effect_kind: 'extra_attack', effect_attack_count: 2, effect_weapon_scope: 'any_weapon' })],
+    ],
+  },
+  {
+    constraint: 'subclass_features_effect_weapon_scope_check',
+    rejects: [
+      ['a scope outside the closed set', subclassFeature({ effect_kind: 'extra_attack', effect_attack_count: 2, effect_weapon_scope: 'pact_weapon' })],
+      ['an empty scope', subclassFeature({ effect_kind: 'extra_attack', effect_attack_count: 2, effect_weapon_scope: '' })],
+    ],
+    accepts: [
+      ['any_weapon', subclassFeature({ effect_kind: 'extra_attack', effect_attack_count: 2, effect_weapon_scope: 'any_weapon' })],
+      ['one_bonded_weapon', subclassFeature({ effect_kind: 'extra_attack', effect_attack_count: 2, effect_weapon_scope: 'one_bonded_weapon' })],
+    ],
+  },
+  {
+    constraint: 'subclass_features_effect_attack_count_check',
+    rejects: [
+      // A row carries this effect BECAUSE the feature granted Extra Attack, and
+      // the least that can mean is two attacks.
+      ['a single attack, which is the absence of the feature', subclassFeature({ effect_kind: 'extra_attack', effect_attack_count: 1, effect_weapon_scope: 'any_weapon' })],
+      ['zero attacks', subclassFeature({ effect_kind: 'extra_attack', effect_attack_count: 0, effect_weapon_scope: 'any_weapon' })],
+      ['a text attack count', subclassFeature({ effect_kind: 'extra_attack', effect_attack_count: 'two', effect_weapon_scope: 'any_weapon' })],
+    ],
+    accepts: [
+      ['the NULL a text-only feature carries', subclassFeature({ effect_attack_count: null })],
+      ['two attacks', subclassFeature({ effect_kind: 'extra_attack', effect_attack_count: 2, effect_weapon_scope: 'any_weapon' })],
+    ],
+  },
+  {
+    constraint: 'subclass_features_attack_count_kind_check',
+    rejects: [
+      // The `IS` limb doing its work: written with `=`, this CHECK would
+      // evaluate to NULL for a text-only feature and SQLite would PASS it,
+      // admitting exactly the orphaned payload it exists to refuse.
+      ['an attack count on a free-text feature', subclassFeature({ effect_kind: null, effect_attack_count: 2 })],
+    ],
+    accepts: [
+      ['a free-text feature with no count', subclassFeature({ effect_kind: null, effect_attack_count: null })],
+    ],
+  },
+  {
+    constraint: 'subclass_features_weapon_scope_kind_check',
+    rejects: [
+      ['a weapon scope on a free-text feature', subclassFeature({ effect_kind: null, effect_weapon_scope: 'any_weapon' })],
+    ],
+    accepts: [
+      ['a free-text feature with no scope', subclassFeature({ effect_kind: null, effect_weapon_scope: null })],
+    ],
+  },
+  {
+    constraint: 'subclass_features_extra_attack_payload_check',
+    rejects: [
+      ['an extra_attack effect with no count at all', subclassFeature({ effect_kind: 'extra_attack', effect_weapon_scope: 'any_weapon' })],
+      // A scope-less grant would have to be defaulted to `any_weapon` by every
+      // reader, which silently WIDENS a one-weapon grant to all of them.
+      ['an extra_attack effect with no weapon scope', subclassFeature({ effect_kind: 'extra_attack', effect_attack_count: 2 })],
+      ['an extra_attack effect with neither', subclassFeature({ effect_kind: 'extra_attack' })],
+    ],
+    accepts: [
+      ['an extra_attack effect carrying both', subclassFeature({ effect_kind: 'extra_attack', effect_attack_count: 3, effect_weapon_scope: 'one_bonded_weapon' })],
+    ],
+  },
+  // --- D19: named features -------------------------------------------------
+  {
+    constraint: 'named_features_class_level_check',
+    rejects: [
+      ['level 0', namedFeature({ class_level: 0 })],
+      ['level 21', namedFeature({ class_level: 21 })],
+    ],
+    accepts: [
+      // The two bundled rows: Thirsting Blade at 5, Devouring Blade at 12.
+      ['the level 5 prerequisite', namedFeature({ class_level: 5 })],
+      ['the level 12 prerequisite', namedFeature({ class_level: 12 })],
+    ],
+  },
+  {
+    constraint: 'named_features_effect_kind_check',
+    rejects: [
+      ['a kind outside the closed set', namedFeature({ effect_kind: 'invocation' })],
+      ['an empty kind', namedFeature({ effect_kind: '' })],
+    ],
+    accepts: [
+      ['the NULL a text-only feature carries', namedFeature({ effect_kind: null })],
+      ['extra_attack, with both halves of its payload', namedFeature({ effect_kind: 'extra_attack', effect_attack_count: 2, effect_weapon_scope: 'one_bonded_weapon' })],
+    ],
+  },
+  {
+    constraint: 'named_features_effect_weapon_scope_check',
+    rejects: [
+      ['a scope outside the closed set', namedFeature({ effect_kind: 'extra_attack', effect_attack_count: 2, effect_weapon_scope: 'pact' })],
+    ],
+    accepts: [
+      ["Thirsting Blade's own scope", namedFeature({ effect_kind: 'extra_attack', effect_attack_count: 2, effect_weapon_scope: 'one_bonded_weapon' })],
+      ['an unscoped named feature', namedFeature({ effect_kind: 'extra_attack', effect_attack_count: 2, effect_weapon_scope: 'any_weapon' })],
+    ],
+  },
+  {
+    constraint: 'named_features_effect_attack_count_check',
+    rejects: [
+      ['a single attack, which is the absence of the feature', namedFeature({ effect_kind: 'extra_attack', effect_attack_count: 1, effect_weapon_scope: 'one_bonded_weapon' })],
+      ['a text attack count', namedFeature({ effect_kind: 'extra_attack', effect_attack_count: 'three', effect_weapon_scope: 'one_bonded_weapon' })],
+    ],
+    accepts: [
+      ['the NULL a text-only feature carries', namedFeature({ effect_attack_count: null })],
+      ["Devouring Blade's three", namedFeature({ effect_kind: 'extra_attack', effect_attack_count: 3, effect_weapon_scope: 'one_bonded_weapon' })],
+    ],
+  },
+  {
+    constraint: 'named_features_attack_count_kind_check',
+    rejects: [
+      ['an attack count on a free-text feature', namedFeature({ effect_kind: null, effect_attack_count: 2 })],
+    ],
+    accepts: [
+      ['a free-text feature with no count', namedFeature({ effect_kind: null, effect_attack_count: null })],
+    ],
+  },
+  {
+    constraint: 'named_features_weapon_scope_kind_check',
+    rejects: [
+      ['a weapon scope on a free-text feature', namedFeature({ effect_kind: null, effect_weapon_scope: 'one_bonded_weapon' })],
+    ],
+    accepts: [
+      ['a free-text feature with no scope', namedFeature({ effect_kind: null, effect_weapon_scope: null })],
+    ],
+  },
+  {
+    constraint: 'named_features_extra_attack_payload_check',
+    rejects: [
+      ['an extra_attack effect with no count at all', namedFeature({ effect_kind: 'extra_attack', effect_weapon_scope: 'one_bonded_weapon' })],
+      ['an extra_attack effect with no weapon scope', namedFeature({ effect_kind: 'extra_attack', effect_attack_count: 2 })],
+    ],
+    accepts: [
+      ['Thirsting Blade, whole', namedFeature({ effect_kind: 'extra_attack', effect_attack_count: 2, effect_weapon_scope: 'one_bonded_weapon' })],
     ],
   },
   {

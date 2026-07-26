@@ -133,7 +133,7 @@ afterAll(() => {
 });
 
 describe('declared relations match the foreign keys', () => {
-  it('budgets 47 constraints across 49 PRAGMA rows', () => {
+  it('budgets 49 constraints across 51 PRAGMA rows', () => {
     const tables = db
       .selectValues(
         `SELECT name FROM sqlite_schema
@@ -163,8 +163,16 @@ describe('declared relations match the foreign keys', () => {
     // and nothing points at it, which holds for armour as it did for weapons.
     // None of the eleven is composite, so the row count rises by eleven too and
     // the two composite Laravel keys are still the only ones.
-    expect(constraintEdges(db)).toHaveLength(47);
-    expect(rowCount).toBe(49);
+    //
+    // D19 adds two more, one per class-feature table: `subclass_features` into
+    // `subclass_definitions` and `named_features` into `class_definitions`.
+    // Neither is composite either. A feature is meaningless without the thing
+    // it belongs to, so both cascade — and `named_features` points at the CLASS
+    // rather than at any character, because nothing in this schema records a
+    // character taking one, which is exactly why its grants are surfaced rather
+    // than applied.
+    expect(constraintEdges(db)).toHaveLength(49);
+    expect(rowCount).toBe(51);
   });
 
   it('declares a relation for every foreign key, and a foreign key for every relation', () => {

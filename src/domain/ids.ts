@@ -79,6 +79,19 @@ export type SpeciesDefinitionId = Brand<number, 'SpeciesDefinitionId'>;
 export type BackgroundDefinitionId = Brand<number, 'BackgroundDefinitionId'>;
 
 /**
+ * The two class-feature catalog ids (D19).
+ *
+ * Branded apart because both are `number`, both are read by
+ * `src/rules/sheet-content-lookup.ts` in the same pass, and the two tables
+ * answer different questions: a `SubclassFeatureId` belongs to a subclass the
+ * character HAS chosen, a `NamedFeatureId` to an optional feature this
+ * application cannot confirm they have taken. Swapping them swaps "applied" for
+ * "surfaced", which is the whole distinction the grant model exists to keep.
+ */
+export type SubclassFeatureId = Brand<number, 'SubclassFeatureId'>;
+export type NamedFeatureId = Brand<number, 'NamedFeatureId'>;
+
+/**
  * A catalog content key: `<edition>:<slug>` (see `src/catalog/catalog-key.ts`).
  * Branded because a content key and a display name are both `string` and are
  * genuinely confusable.

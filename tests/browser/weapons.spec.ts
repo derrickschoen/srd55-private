@@ -502,3 +502,79 @@ test('the damage-type choice is undecided on both sides until it is made', async
   const body = await page.locator('body').innerText();
   expect(body).not.toMatch(/D&D|Dungeons|Wizards/);
 });
+
+/**
+ * THE IGNORANCE, ON A REAL SCREEN.
+ *
+ * D19's weapon-scoped grant is the one number this application refuses to give:
+ * a Warlock 5 may have taken Thirsting Blade and may be holding their pact
+ * weapon, and this schema records neither. The derivation therefore answers ONE
+ * attack and states what it could not count — and both halves of that statement
+ * are rendered here and nowhere else, because the vitest suite runs in the
+ * `node` environment and has no DOM at all.
+ *
+ * Two places say it, and they say different things: the panel-level warning
+ * names the feature and prints every reason; the per-profile list says WHICH
+ * WEAPON ROW the missing attack would have belonged to.
+ */
+test('a grant it cannot apply is stated on the page, not folded into the number', async ({
+  page,
+}) => {
+  await openPlanner(page, 'Blade Pact');
+
+  await page
+    .getByRole('combobox', { name: 'Class to add' })
+    .selectOption({ label: 'Warlock' });
+  await page.getByRole('button', { name: 'Add class', exact: true }).click();
+  // Waited on the class's own level control rather than on the mastery status:
+  // no Warlock row grants Weapon Mastery, so that panel correctly keeps saying
+  // none of this character's classes do.
+  await expect(
+    page.getByRole('spinbutton', { name: 'Warlock level' }),
+  ).toBeVisible({ timeout: 15_000 });
+  await page.getByRole('spinbutton', { name: 'Warlock level' }).fill('5');
+  await page.getByRole('spinbutton', { name: 'Warlock level' }).blur();
+
+  await page.getByRole('button', { name: 'Add weapon' }).click();
+  const form = page.getByTestId('weapon-form');
+  await form
+    .getByLabel('Start from a reference weapon')
+    .selectOption({ label: 'Heavy Crossbow' });
+  await form.getByRole('button', { name: 'Add weapon' }).click();
+  await expect.poll(async () => (await weaponRows(page)).length).toBe(1);
+
+  const profiles = page.getByTestId('attack-profiles');
+  // ONE attack for the crossbow. A character-wide 2 is the new wrong answer the
+  // scoped model exists to avoid, and this is the row it would have been wrong
+  // on.
+  await expect(profiles).toContainText('The Attack action gives one attack.', {
+    timeout: 15_000,
+  });
+  await expect(profiles).toContainText(
+    'features this application cannot apply are listed below',
+  );
+
+  // The panel-level statement: named, and with both reasons.
+  const warning = page
+    .getByTestId('attack-profile-warning')
+    .filter({ hasText: 'Thirsting Blade' });
+  await expect(warning).toHaveAttribute('data-code', 'unresolved_extra_attack');
+  await expect(warning).toContainText('would give 2 attacks');
+  await expect(warning).toContainText(
+    'does not record which optional class features',
+  );
+  await expect(warning).toContainText('one bonded weapon only');
+  await expect(warning).toContainText('never the sum');
+
+  // The per-profile statement, on the weapon row itself.
+  const weapon = page.getByTestId('attack-weapon').first();
+  await expect(weapon).toContainText('One attack.');
+  await expect(weapon).toContainText('Thirsting Blade would give 2 attacks.');
+
+  // Nothing was written to produce any of it, and the licensor is unnamed.
+  expect(
+    await page.evaluate(() => window.staticApp.inspectRows('named_features')),
+  ).toHaveLength(2);
+  const body = await page.locator('body').innerText();
+  expect(body).not.toMatch(/D&D|Dungeons|Wizards/);
+});

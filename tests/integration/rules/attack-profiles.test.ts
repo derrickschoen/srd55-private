@@ -62,21 +62,32 @@ describe('reading the sheet content a character actually has', () => {
   it('reads the seeded Extra Attack grants back as absolute totals', () => {
     addLevels('Fighter', 20, true);
     const [fighter] = lookup().forCharacter(characterId);
-    expect([...(fighter?.extra_attack_counts ?? [])]).toEqual([
-      [5, 2],
-      [11, 3],
-      [20, 4],
+    // Every one is `source: 'class'`, unscoped and fully resolved: the level is
+    // recorded on `character_class_levels` and a class table row names no
+    // weapon. The three totals are read off the Fighter Features table by eye.
+    expect(
+      (fighter?.extra_attack_grants ?? []).map((grant) => [
+        grant.source,
+        grant.class_level,
+        grant.attack_count,
+        grant.weapon_scope,
+        grant.unresolved.length,
+      ]),
+    ).toEqual([
+      ['class', 5, 2, 'any_weapon', 0],
+      ['class', 11, 3, 'any_weapon', 0],
+      ['class', 20, 4, 'any_weapon', 0],
     ]);
   });
 
   it('reads no grant for a class the source grants none to', () => {
     addLevels('Wizard', 20, true);
     const [wizard] = lookup().forCharacter(characterId);
-    // An empty map is the sourced answer, not a missing one: the class table
+    // An empty list is the sourced answer, not a missing one: the class table
     // prints no Extra Attack row, so `attacksPerAction` answering 1 is right.
-    expect(wizard?.extra_attack_counts?.size).toBe(0);
+    expect(wizard?.extra_attack_grants).toEqual([]);
     expect(wizard?.martial_arts_dice?.size).toBe(0);
-    expect(attacksPerAction(lookup().forCharacter(characterId))).toBe(1);
+    expect(attacksPerAction(lookup().forCharacter(characterId)).count).toBe(1);
   });
 
   it('reads the Martial Arts column for the one class that has it', () => {
@@ -99,7 +110,7 @@ describe('reading the sheet content a character actually has', () => {
 
     // Fighter 10 is on the level 5 row (2), Monk 3 grants nothing yet. They do
     // not stack, and 2 is the max.
-    expect(attacksPerAction(classes)).toBe(2);
+    expect(attacksPerAction(classes).count).toBe(2);
     // The Martial Arts die is MONK 3 -> d6. Reading it off the total of 13
     // would give d10.
     expect(martialArtsDice(classes)).toEqual([
@@ -110,8 +121,10 @@ describe('reading the sheet content a character actually has', () => {
   it('does not stack Extra Attack read out of the database either', () => {
     addLevels('Fighter', 5, true);
     addLevels('Ranger', 5);
-    expect(attacksPerAction(lookup().forCharacter(characterId))).toBe(2);
-    expect(attacksPerAction(lookup().forCharacter(characterId))).not.toBe(3);
+    expect(attacksPerAction(lookup().forCharacter(characterId)).count).toBe(2);
+    expect(
+      attacksPerAction(lookup().forCharacter(characterId)).count,
+    ).not.toBe(3);
   });
 });
 

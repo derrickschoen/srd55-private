@@ -51,6 +51,10 @@ import {
   totalCharacterLevel,
   type SheetClassLevels,
 } from './sheet';
+import type {
+  AttacksPerAction,
+  ResolvedExtraAttackGrant,
+} from './extra-attack';
 
 export const attackProfileKinds = [
   'normal',
@@ -145,8 +149,34 @@ export interface AttackProfile {
    * attack as an Action however many the Attack action would give. Printing the
    * character-wide number beside a True Strike row would be wrong, and D15's
    * display rule turns on the two being comparable.
+   *
+   * D19 MADE THAT PLACEMENT LOAD-BEARING FOR A SECOND REASON: a grant may reach
+   * ONE WEAPON ONLY, and a profile is the only thing in this derivation that
+   * belongs to a weapon. This number is the count over grants that reach EVERY
+   * weapon; a grant that does not is in `unresolved_attacks` and has not been
+   * added to it.
    */
   readonly attacks_per_action: number;
+  /**
+   * Grants that would give MORE attacks than `attacks_per_action` if this
+   * application could tell they applied — and the sentences saying why it
+   * cannot.
+   *
+   * NEVER FOLDED INTO THE NUMBER, in either direction. Adding them would print
+   * two attacks for a Warlock's Heavy Crossbow, which is a NEW wrong answer
+   * invented by the fix for the old one; dropping them would hide a real
+   * entitlement the character has at the table. So the number stays a number
+   * this application stands behind and the ignorance is stated beside it, which
+   * is the shape `WeaponMasteryLookup` established with `content_missing`.
+   *
+   * A grant that cannot beat `attacks_per_action` is not here at all — that is
+   * the SRD's own "doesn't give you additional attacks if you also have Extra
+   * Attack", applied rather than quoted. Nothing else is filtered: two grants
+   * that both name one weapon need not name the SAME weapon, so keeping only
+   * the larger would hide an entitlement. They do not add, and the number
+   * beside them is what says so.
+   */
+  readonly unresolved_attacks: readonly ResolvedExtraAttackGrant[];
   /** What must be true at the table for this profile to be legal. */
   readonly preconditions: readonly string[];
   readonly notes: readonly string[];
@@ -163,7 +193,13 @@ export interface WeaponAttackProfiles {
 export type AttackProfileWarningCode =
   | 'unrecognised_cantrip'
   | 'no_spellcasting_ability'
-  | 'ambiguous_spellcasting_ability';
+  | 'ambiguous_spellcasting_ability'
+  /**
+   * An Extra Attack grant this character may well have and this application
+   * cannot apply. Reported once per grant, at the panel level, because the
+   * reason is a fact about this application rather than about any one weapon.
+   */
+  | 'unresolved_extra_attack';
 
 export interface AttackProfileWarning {
   readonly code: AttackProfileWarningCode;
@@ -173,9 +209,16 @@ export interface AttackProfileWarning {
 export interface AttackProfileResult {
   readonly weapons: readonly WeaponAttackProfiles[];
   readonly warnings: readonly AttackProfileWarning[];
-  /** `attacksPerAction`, for the sheet's own heading. */
+  /**
+   * The character-wide count, for the sheet's own heading.
+   *
+   * THE UNSCOPED GRANTS ONLY, and after D19 that qualification is the whole
+   * meaning of the field. One number cannot answer for a character whose
+   * pact-weapon grant beats their class grant, so this is the number that is
+   * true of EVERY weapon they hold, and the rest is on the profiles.
+   */
   readonly attacks_per_action: number;
-  /** D15's predicate, stated once: `attacksPerAction(classes) > 1`. */
+  /** D15's predicate, stated once: `attacksPerAction(classes).count > 1`. */
   readonly has_extra_attack: boolean;
 }
 
@@ -244,6 +287,7 @@ function versatileNote(weapon: AttackProfileWeapon): string | null {
 function normalProfile(
   input: AttackProfileInput,
   weapon: AttackProfileWeapon,
+  attacks: AttacksPerAction,
 ): AttackProfile {
   return {
     kind: 'normal',
@@ -275,7 +319,8 @@ function normalProfile(
       damage_type: weaponDamageType(weapon),
       extra: [],
     },
-    attacks_per_action: attacksPerAction(input.classes),
+    attacks_per_action: attacks.count,
+    unresolved_attacks: attacks.unresolved,
     preconditions: [PROFICIENCY_PRECONDITION],
     notes: [],
   };
@@ -454,15 +499,15 @@ function trueStrikeProfile(
   input: AttackProfileInput,
   weapon: AttackProfileWeapon,
   sources: readonly CantripSource[],
+  attacks: AttacksPerAction,
 ): AttackProfile {
   const totalLevel = totalCharacterLevel(input.classes);
   const extraDice = trueStrikeExtraDice(totalLevel);
-  const attacks = attacksPerAction(input.classes);
   const notes: string[] = [];
-  if (attacks > 1) {
+  if (attacks.count > 1) {
     notes.push(
       `Casting this takes your Action and gives one attack, where the Attack ` +
-        `action would give ${String(attacks)}.`,
+        `action would give ${String(attacks.count)}.`,
     );
   }
 
@@ -498,6 +543,12 @@ function trueStrikeProfile(
             ],
     },
     attacks_per_action: 1,
+    // EMPTY EVEN FOR A CHARACTER WHO HAS UNRESOLVED GRANTS, and the reason is
+    // the cantrip's own: it grants ONE attack as an Action, so no Extra Attack
+    // grant of any source or scope could raise this row. Carrying the
+    // character's unresolved grants here would invite the reader to apply them
+    // to the one profile they provably do not touch.
+    unresolved_attacks: [],
     preconditions: [
       'Requires a weapon you have proficiency with that is worth 1+ CP. ' +
         'This application does not record which weapons a character is ' +
@@ -535,6 +586,7 @@ function trueStrikeProfile(
 function shillelaghProfile(
   input: AttackProfileInput,
   sources: readonly CantripSource[],
+  attacks: AttacksPerAction,
 ): WeaponAttackProfiles {
   const totalLevel = totalCharacterLevel(input.classes);
   const strength = option(
@@ -579,7 +631,8 @@ function shillelaghProfile(
           },
           extra: [],
         },
-        attacks_per_action: attacksPerAction(input.classes),
+        attacks_per_action: attacks.count,
+        unresolved_attacks: attacks.unresolved,
         preconditions: [
           'Applies to a Club or a Quarterstaff you are holding, and to melee ' +
             'attacks with it. This row is derived: no weapon has been added to ' +
@@ -622,6 +675,7 @@ function martialArtsProfile(
   input: AttackProfileInput,
   weapon: AttackProfileWeapon,
   granted: { readonly class_name: string; readonly class_level: number; readonly die: number },
+  attacks: AttacksPerAction,
 ): AttackProfile {
   return {
     kind: 'martial_arts',
@@ -648,7 +702,8 @@ function martialArtsProfile(
       damage_type: weaponDamageType(weapon),
       extra: [],
     },
-    attacks_per_action: attacksPerAction(input.classes),
+    attacks_per_action: attacks.count,
+    unresolved_attacks: attacks.unresolved,
     preconditions: [
       'Monk weapons are Simple Melee weapons and Martial Melee weapons that ' +
         'have the Light property. This application does not record which group ' +
@@ -736,12 +791,12 @@ export function attackProfiles(
   const attacks = attacksPerAction(input.classes);
 
   const weapons: WeaponAttackProfiles[] = input.weapons.map((weapon) => {
-    const profiles: AttackProfile[] = [normalProfile(input, weapon)];
+    const profiles: AttackProfile[] = [normalProfile(input, weapon, attacks)];
     if (trueStrike !== null) {
-      profiles.push(trueStrikeProfile(input, weapon, trueStrike));
+      profiles.push(trueStrikeProfile(input, weapon, trueStrike, attacks));
     }
     for (const granted of martialArts) {
-      profiles.push(martialArtsProfile(input, weapon, granted));
+      profiles.push(martialArtsProfile(input, weapon, granted, attacks));
     }
     return {
       weapon_id: weapon.id,
@@ -752,13 +807,44 @@ export function attackProfiles(
   });
 
   if (shillelagh !== null) {
-    weapons.push(shillelaghProfile(input, shillelagh));
+    weapons.push(shillelaghProfile(input, shillelagh, attacks));
   }
 
   return {
     weapons,
-    warnings: cantripWarnings(input.cantrips),
-    attacks_per_action: attacks,
-    has_extra_attack: attacks > 1,
+    warnings: [
+      ...cantripWarnings(input.cantrips),
+      ...unresolvedAttackWarnings(attacks),
+    ],
+    attacks_per_action: attacks.count,
+    has_extra_attack: attacks.count > 1,
   };
+}
+
+/**
+ * One warning per Extra Attack grant this application could not apply.
+ *
+ * SAID TWICE ON PURPOSE, AND THE TWO SAY DIFFERENT THINGS. The panel-level
+ * warning names the grant and prints every reason, because the reasons are
+ * facts about this application's schema and belong beside the character-wide
+ * sentence that would otherwise read as the whole answer. The profile-level
+ * `unresolved_attacks` says WHICH ROWS the grant would have changed, which a
+ * panel-level warning cannot.
+ */
+function unresolvedAttackWarnings(
+  attacks: AttacksPerAction,
+): AttackProfileWarning[] {
+  return attacks.unresolved.map((grant) => ({
+    code: 'unresolved_extra_attack' as const,
+    message:
+      `${grant.source_name} (${grant.class_name} ${String(grant.class_level)}) ` +
+      `would give ${String(grant.attack_count)} attacks on the Attack action, ` +
+      `where ${String(attacks.count)} ` +
+      `${attacks.count === 1 ? 'is' : 'are'} shown. ` +
+      grant.unresolved.join(' ') +
+      // SAID ON EVERY ONE, because more than one may be listed and the source's
+      // own rule is the thing a reader is most likely to get wrong.
+      ' Features that grant Extra Attack do not stack: the number is the ' +
+      'largest of them, never the sum.',
+  }));
 }
