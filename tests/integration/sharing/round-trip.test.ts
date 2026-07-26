@@ -4,6 +4,7 @@ import { SpellAccessBuilder } from '../../../src/access/spell-access-builder';
 import { CatalogImporter } from '../../../src/catalog/catalog-importer';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import { UpdateClassCommand } from '../../../src/commands/update-class';
+import type { SqlRow } from '../../../src/db/codecs';
 import { DatabaseContext } from '../../../src/db/database';
 import { GrantRuleSlotGenerator } from '../../../src/grants/grant-rule-slot-generator';
 import { CharacterWorkspaceBuilder } from '../../../src/queries/character-workspace-builder';
@@ -351,8 +352,12 @@ const PORTABLE_WEAPON_COLUMNS = [
 function portableWeapons(
   db: DatabaseContext,
   characterId: number,
-): Record<string, unknown>[] {
-  return db.all<Record<string, unknown>>(
+): SqlRow[] {
+  // RAW, deliberately: this is a column-for-column comparison of what the share
+  // round trip put back into storage, over a column list held in
+  // `PORTABLE_WEAPON_COLUMNS`. Reading it through a codec would compare the
+  // decoder to itself.
+  return db.allRaw(
     `SELECT ${PORTABLE_WEAPON_COLUMNS.join(', ')}
      FROM character_weapons WHERE character_id = ? ORDER BY id`,
     [characterId],
@@ -379,14 +384,14 @@ async function fragmentFromBytes(bytes: Uint8Array): Promise<string> {
 
 function choices(db: DatabaseContext, characterId: number) {
   return {
-    character: db.one(
+    character: db.oneRaw(
       `SELECT name, strength, dexterity, constitution, intelligence,
               wisdom, charisma, proficiency_bonus_override,
               rules_edition_preference, allow_legacy
        FROM characters WHERE id = ?`,
       [characterId],
     ),
-    classes: db.all(
+    classes: db.allRaw(
       `SELECT definition.content_key, level.level,
               level.is_starting_class,
               level.spellcasting_ability_override
@@ -396,14 +401,14 @@ function choices(db: DatabaseContext, characterId: number) {
        WHERE level.character_id = ?`,
       [characterId],
     ),
-    sources: db.all(
+    sources: db.allRaw(
       `SELECT source_type, display_name, config
        FROM character_source_instances
        WHERE character_id = ?
        ORDER BY source_type, display_name`,
       [characterId],
     ),
-    selections: db.all(
+    selections: db.allRaw(
       `SELECT slot.rule_key, slot.ordinal, version.content_key,
               slot.state
        FROM spell_selection_slots AS slot
@@ -412,7 +417,7 @@ function choices(db: DatabaseContext, characterId: number) {
        WHERE slot.character_id = ?`,
       [characterId],
     ),
-    spellbook: db.all(
+    spellbook: db.allRaw(
       `SELECT version.content_key
        FROM wizard_spellbook_entries AS entry
        INNER JOIN spell_versions AS version
@@ -420,7 +425,7 @@ function choices(db: DatabaseContext, characterId: number) {
        WHERE entry.character_id = ?`,
       [characterId],
     ),
-    preferences: db.all(
+    preferences: db.allRaw(
       `SELECT version.content_key, preference.favourite
        FROM character_spell_preferences AS preference
        INNER JOIN spell_versions AS version
@@ -428,17 +433,17 @@ function choices(db: DatabaseContext, characterId: number) {
        WHERE preference.character_id = ?`,
       [characterId],
     ),
-    overrides: db.all(
+    overrides: db.allRaw(
       `SELECT rule_key, value FROM character_rule_overrides
        WHERE character_id = ?`,
       [characterId],
     ),
-    acknowledgements: db.all(
+    acknowledgements: db.allRaw(
       `SELECT warning_fingerprint FROM warning_acknowledgements
        WHERE character_id = ?`,
       [characterId],
     ),
-    loadouts: db.all(
+    loadouts: db.allRaw(
       `SELECT loadout.name, version.content_key, entry.role
        FROM spell_loadouts AS loadout
        INNER JOIN spell_loadout_entries AS entry
@@ -634,7 +639,7 @@ describe('minimal character sharing', () => {
     seedSubclass(target, targetCatalog.classId);
     const imported = importCharacterShare(target, shared);
     expect(
-      target.one(
+      target.oneRaw(
         `SELECT source.config, slot.rule_key, slot.ordinal,
                 version.content_key
          FROM character_source_instances AS source
@@ -865,7 +870,7 @@ describe('minimal character sharing', () => {
       ),
     );
     const timing = (db: DatabaseContext, id: number) =>
-      db.all(
+      db.allRaw(
         `SELECT source.source_type,
                 COALESCE(
                   subclass.content_key,
@@ -922,7 +927,7 @@ describe('minimal character sharing', () => {
       await encodeShareFragment(document),
     );
     const imported = importCharacterShare(target, shared);
-    const placeholder = target.one(
+    const placeholder = target.oneRaw(
       `SELECT id, display_name, level, school, is_active, provenance,
               short_summary, casting_time, material_component_summary
        FROM spell_versions WHERE content_key = ?`,
@@ -985,7 +990,7 @@ describe('minimal character sharing', () => {
     });
     expect(summary).toMatchObject({ updated: 1, created: 0 });
     expect(
-      target.one(
+      target.oneRaw(
         `SELECT id, display_name, level, school, is_active, provenance
          FROM spell_versions WHERE content_key = ?`,
         [unknownKey],
@@ -1239,7 +1244,7 @@ describe('a share link that predates weapons', () => {
 
     const imported = importCharacterShare(target, shared);
     expect(
-      target.one('SELECT name, intelligence FROM characters WHERE id = ?', [
+      target.oneRaw('SELECT name, intelligence FROM characters WHERE id = ?', [
         imported.characterId,
       ]),
     ).toEqual({ name: 'Old Link Hero', intelligence: 16 });

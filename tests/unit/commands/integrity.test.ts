@@ -129,7 +129,7 @@ describe('destructive inverse integrity', () => {
     ).rejects.toThrow(invalidMessage);
 
     expect(
-      database.all(
+      database.allRaw(
         `SELECT character_id, operation_uuid, expected_revision,
                 resulting_revision, inverse_command
          FROM character_operations`,

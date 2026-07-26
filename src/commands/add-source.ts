@@ -3,6 +3,7 @@ import {
   type CharacterStateSnapshot,
 } from '../character/character-state';
 import { CharacterCommandIntegrity } from './integrity';
+import type { SqlRow } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import type {
   AddSourceCommand as AddSourcePayload,
@@ -24,7 +25,16 @@ const MAGIC_INITIATE_ABILITIES = [
 const SOURCE_TYPES = ['class', 'feat', 'species', 'background'] as const;
 
 type MutableConfig = Record<string, unknown>;
-type Definition = Readonly<Record<string, unknown>>;
+/**
+ * A catalog definition row, RAW.
+ *
+ * The table is chosen at runtime by `definitionTableForSourceType`, so there is
+ * no fixed column set to write a codec against: a class definition, a feat and a
+ * background share almost nothing but `id` and `content_key`. This is the case
+ * `oneRaw` exists for. `SqlRow` rather than `Record<string, unknown>` because
+ * SQLite cannot hand back anything but a `SqlValue`.
+ */
+type Definition = SqlRow;
 
 interface OrderDefinition {
   readonly key: 'divine_order' | 'primal_order';
@@ -131,7 +141,7 @@ export class AddSourceCommand {
       const sourceType = this.sourceType();
       const definitionId = this.payload.source_definition_id;
       const table = definitionTableForSourceType(sourceType);
-      const definition = this.db.one(
+      const definition = this.db.oneRaw(
         `SELECT * FROM ${table} WHERE id = ?`,
         [definitionId],
       );

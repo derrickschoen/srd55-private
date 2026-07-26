@@ -4,6 +4,7 @@ import {
   sqlNullableInteger,
   sqlNullableString,
   sqlString,
+  type RowCodec,
   type SqlRow,
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
@@ -303,6 +304,78 @@ function preparationCallout(
   return `This build possesses ${ordinal(sharedLevel)}-level slots, but every class can prepare only ${ordinal(maxClassSpellLevel)}-level spells. Higher-level slots can upcast those lower-level spells; they do not unlock higher-level choices.`;
 }
 
+/**
+ * One row of the invalid-selection query, decoded.
+ *
+ * The twin of `workspaceSlotRow` in `src/queries/character-workspace-builder.ts`
+ * — the two queries are the same join read for two screens, and they are
+ * deliberately NOT sharing a codec: this one also selects
+ * `source_definition_id`, and merging them would mean one of the two screens
+ * silently selecting a column it does not use.
+ *
+ * `ritual`/`concentration` stay `boolean | null` because NULL here means the
+ * LEFT JOIN found no spell — an EMPTY slot — which is a different fact from a
+ * spell that is not a ritual.
+ */
+interface ReportSlotRow {
+  readonly id: number;
+  readonly slot_key: string;
+  readonly label: string | null;
+  readonly bucket: SlotBucket;
+  readonly spell_level_min: number;
+  readonly spell_level_max: number;
+  readonly spell_version_id: number | null;
+  readonly state: SlotState;
+  readonly eligibility: SelectionEligibility;
+  readonly invalid_reason: string | null;
+  readonly orphan_reason: string | null;
+  readonly override_note: string | null;
+  readonly locked: boolean;
+  readonly sort_order: number;
+  readonly ordinal: number;
+  readonly source_name: string;
+  readonly source_type: DomainSourceType;
+  readonly source_definition_id: number | null;
+  readonly source_config: string | null;
+  readonly spell_name: string | null;
+  readonly spell_level: number | null;
+  readonly spell_edition: RulesEdition | null;
+  readonly spell_identity_id: number | null;
+  readonly ritual: boolean | null;
+  readonly concentration: boolean | null;
+}
+
+const reportSlotRow: RowCodec<ReportSlotRow> = (row) => ({
+  id: sqlInteger(row, 'id'),
+  slot_key: sqlString(row, 'slot_key'),
+  label: sqlNullableString(row, 'label'),
+  bucket: sqlString(row, 'bucket') as SlotBucket,
+  spell_level_min: sqlInteger(row, 'spell_level_min'),
+  spell_level_max: sqlInteger(row, 'spell_level_max'),
+  spell_version_id:
+    sqlNullableInteger(row, 'fixed_spell_version_id') ??
+    sqlNullableInteger(row, 'current_spell_version_id'),
+  state: sqlString(row, 'state') as SlotState,
+  eligibility: sqlString(row, 'selection_eligibility') as SelectionEligibility,
+  invalid_reason: sqlNullableString(row, 'selection_invalid_reason'),
+  orphan_reason: sqlNullableString(row, 'orphan_reason_code'),
+  override_note: sqlNullableString(row, 'override_note'),
+  locked: sqlBoolean(row, 'is_locked'),
+  sort_order: sqlInteger(row, 'sort_order'),
+  ordinal: sqlInteger(row, 'ordinal'),
+  source_name: sqlString(row, 'source_name'),
+  source_type: sqlString(row, 'source_type') as DomainSourceType,
+  source_definition_id: sqlNullableInteger(row, 'source_definition_id'),
+  source_config: sqlNullableString(row, 'source_config'),
+  spell_name: sqlNullableString(row, 'spell_name'),
+  spell_level: sqlNullableInteger(row, 'spell_level'),
+  spell_edition: sqlNullableString(row, 'spell_edition') as RulesEdition | null,
+  spell_identity_id: sqlNullableInteger(row, 'spell_identity_id'),
+  ritual: row.ritual === null ? null : sqlBoolean(row, 'ritual'),
+  concentration:
+    row.concentration === null ? null : sqlBoolean(row, 'concentration'),
+});
+
 function titleBucket(bucket: string): string {
   return bucket
     .split('_')
@@ -498,12 +571,16 @@ export class BuildReportBuilder {
        WHERE character_id = ? AND invalidated_at IS NULL
        ORDER BY id`,
       [characterId],
+      (stored) => ({
+        warning_fingerprint: sqlString(stored, 'warning_fingerprint'),
+        acknowledgement: {
+          id: sqlInteger(stored, 'id'),
+          note: sqlNullableString(stored, 'note') ?? '',
+          created_at: sqlNullableString(stored, 'created_at') ?? '',
+        },
+      }),
     )) {
-      acknowledgements.set(sqlString(row, 'warning_fingerprint'), {
-        id: sqlInteger(row, 'id'),
-        note: sqlNullableString(row, 'note') ?? '',
-        created_at: sqlNullableString(row, 'created_at') ?? '',
-      });
+      acknowledgements.set(row.warning_fingerprint, row.acknowledgement);
     }
 
     return assessments
@@ -651,23 +728,18 @@ export class BuildReportBuilder {
        WHERE slot.character_id = ?
          AND slot.state IN ('active', 'orphaned', 'kept_override')`,
       [character.id],
+      reportSlotRow,
     );
 
-    const invalid = rows.filter((row) => {
-      const eligibility = sqlString(row, 'selection_eligibility');
-      const state = sqlString(row, 'state');
-      return (
-        eligibility === 'invalid' ||
-        state === 'orphaned' ||
-        state === 'kept_override'
-      );
-    });
-    const versionIds = invalid.flatMap((row) => {
-      const fixed = sqlNullableInteger(row, 'fixed_spell_version_id');
-      const selected = sqlNullableInteger(row, 'current_spell_version_id');
-      const versionId = fixed ?? selected;
-      return versionId === null ? [] : [versionId];
-    });
+    const invalid = rows.filter(
+      (row) =>
+        row.eligibility === 'invalid' ||
+        row.state === 'orphaned' ||
+        row.state === 'kept_override',
+    );
+    const versionIds = invalid.flatMap((row) =>
+      row.spell_version_id === null ? [] : [row.spell_version_id],
+    );
     const attackVersionIds = this.mechanicVersionIds(
       'spell_version_attack_modes',
       versionIds,
@@ -679,40 +751,32 @@ export class BuildReportBuilder {
 
     return invalid
       .map((row): InvalidSelection => {
-        const id = sqlInteger(row, 'id');
+        const id = row.id;
         const route = routeBySlot.get(id);
-        const spellIdentityId = sqlNullableInteger(
-          row,
-          'spell_identity_id',
-        );
+        const spellIdentityId = row.spell_identity_id;
         const ability =
-          route?.spellcasting_ability ?? this.sourceAbility(row);
-        const versionId =
-          sqlNullableInteger(row, 'fixed_spell_version_id') ??
-          sqlNullableInteger(row, 'current_spell_version_id');
+          route?.spellcasting_ability ?? this.sourceAbility(row.source_config);
+        const versionId = row.spell_version_id;
         const score = ability === null ? null : scores.score(ability);
-        const bucket = sqlString(row, 'bucket') as SlotBucket;
-        const persistedLabel = sqlNullableString(row, 'label');
+        const bucket = row.bucket;
+        const persistedLabel = row.label;
 
         return {
           id,
-          slot_key: sqlString(row, 'slot_key'),
-          source: sqlString(row, 'source_name'),
-          source_type: sqlString(row, 'source_type') as DomainSourceType,
+          slot_key: row.slot_key,
+          source: row.source_name,
+          source_type: row.source_type,
           label:
             persistedLabel === null || persistedLabel === ''
-              ? `${titleBucket(bucket)} ${sqlInteger(row, 'ordinal')}`
+              ? `${titleBucket(bucket)} ${String(row.ordinal)}`
               : persistedLabel,
           bucket,
-          level_min: sqlInteger(row, 'spell_level_min'),
-          level_max: sqlInteger(row, 'spell_level_max'),
+          level_min: row.spell_level_min,
+          level_max: row.spell_level_max,
           spell_id: versionId,
-          spell_name: sqlNullableString(row, 'spell_name'),
-          spell_level: sqlNullableInteger(row, 'spell_level'),
-          spell_edition: sqlNullableString(
-            row,
-            'spell_edition',
-          ) as RulesEdition | null,
+          spell_name: row.spell_name,
+          spell_level: row.spell_level,
+          spell_edition: row.spell_edition,
           ability,
           attack_bonus:
             score === null ||
@@ -726,37 +790,26 @@ export class BuildReportBuilder {
             !saveVersionIds.has(versionId)
               ? null
               : score.spellSaveDC(proficiency).value,
-          ritual:
-            row.ritual === null ? false : sqlBoolean(row, 'ritual'),
-          concentration:
-            row.concentration === null
-              ? false
-              : sqlBoolean(row, 'concentration'),
+          ritual: row.ritual ?? false,
+          concentration: row.concentration ?? false,
           duplicate_status:
             spellIdentityId === null
               ? 'none'
               : duplicateByIdentity.get(spellIdentityId)?.category ?? 'none',
-          state: sqlString(row, 'state') as SlotState,
-          eligibility: sqlString(
-            row,
-            'selection_eligibility',
-          ) as SelectionEligibility,
-          invalid_reason: sqlNullableString(
-            row,
-            'selection_invalid_reason',
-          ),
-          orphan_reason: sqlNullableString(row, 'orphan_reason_code'),
-          override_note: sqlNullableString(row, 'override_note'),
-          locked: sqlBoolean(row, 'is_locked'),
-          sort_order: sqlInteger(row, 'sort_order'),
+          state: row.state,
+          eligibility: row.eligibility,
+          invalid_reason: row.invalid_reason,
+          orphan_reason: row.orphan_reason,
+          override_note: row.override_note,
+          locked: row.locked,
+          sort_order: row.sort_order,
         };
       })
       .sort(compareInvalidSelections)
       .map(({ sort_order: _sortOrder, ...selection }) => selection);
   }
 
-  private sourceAbility(row: SqlRow): Ability | null {
-    const configJson = sqlNullableString(row, 'source_config');
+  private sourceAbility(configJson: string | null): Ability | null {
     if (configJson !== null && configJson !== '') {
       const config: unknown = JSON.parse(configJson);
       if (

@@ -191,22 +191,22 @@ describe('portable backup row contracts at the import boundary', () => {
         characterId,
         JSON.stringify({
           schema_version: 'a7-v1',
-          character: source.one(
+          character: source.oneRaw(
             `SELECT name, strength, dexterity, constitution, intelligence,
                     wisdom, charisma, proficiency_bonus_override,
                     rules_edition_preference, allow_legacy, notes
              FROM characters WHERE id = ?`,
             [characterId],
           ),
-          character_class_levels: source.all(
+          character_class_levels: source.allRaw(
             'SELECT * FROM character_class_levels WHERE character_id = ?',
             [characterId],
           ),
-          character_source_instances: source.all(
+          character_source_instances: source.allRaw(
             'SELECT * FROM character_source_instances WHERE character_id = ?',
             [characterId],
           ),
-          spell_selection_slots: source.all(
+          spell_selection_slots: source.allRaw(
             'SELECT * FROM spell_selection_slots WHERE character_id = ?',
             [characterId],
           ),
@@ -267,22 +267,22 @@ describe('the same contracts on the way out', () => {
     const characterId = seedCharacter(db, catalog);
     const snapshot = {
       schema_version: 'a7-v1',
-      character: db.one(
+      character: db.oneRaw(
         `SELECT name, strength, dexterity, constitution, intelligence, wisdom,
                 charisma, proficiency_bonus_override, rules_edition_preference,
                 allow_legacy, notes
          FROM characters WHERE id = ?`,
         [characterId],
       ),
-      character_class_levels: db.all(
+      character_class_levels: db.allRaw(
         'SELECT * FROM character_class_levels WHERE character_id = ?',
         [characterId],
       ),
-      character_source_instances: db.all(
+      character_source_instances: db.allRaw(
         'SELECT * FROM character_source_instances WHERE character_id = ?',
         [characterId],
       ),
-      spell_selection_slots: db.all(
+      spell_selection_slots: db.allRaw(
         'SELECT * FROM spell_selection_slots WHERE character_id = ?',
         [characterId],
       ),

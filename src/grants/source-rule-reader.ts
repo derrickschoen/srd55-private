@@ -3,6 +3,7 @@ import {
   sqlNullableInteger,
   sqlNullableString,
   sqlString,
+  type RowCodec,
   type SqlRow,
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
@@ -14,6 +15,23 @@ import {
 import { GrantRule } from './grant-rule';
 
 type JsonContainer = Record<string, unknown> | unknown[];
+
+/**
+ * `grant_rules` is a nullable JSON TEXT column on five different tables. One
+ * codec covers all of them because the column is the only thing being read;
+ * `decodeGrantJson` then turns the text into a container, and a NULL column and
+ * an absent row both mean "no rules" here.
+ */
+const grantRulesText: RowCodec<string | null> = (row) =>
+  sqlNullableString(row, 'grant_rules');
+
+const identifiedGrantRulesText: RowCodec<{
+  readonly id: number;
+  readonly grant_rules: string | null;
+}> = (row) => ({
+  id: sqlInteger(row, 'id'),
+  grant_rules: sqlNullableString(row, 'grant_rules'),
+});
 
 export interface GrantSourceInstance {
   readonly id: number;
@@ -165,17 +183,14 @@ export class SourceRuleReader {
     const definition = this.db.one(
       `SELECT id, grant_rules FROM ${table} WHERE id = ?`,
       [source.sourceDefinitionId ?? 0],
+      identifiedGrantRulesText,
     );
     if (definition === null) {
       throw new Error(
         `Definition for source instance ${source.id} does not exist.`,
       );
     }
-    const rules = decodeGrantJson(
-      definition.grant_rules === null
-        ? null
-        : String(definition.grant_rules),
-    );
+    const rules = decodeGrantJson(definition.grant_rules);
     if (!Array.isArray(rules)) {
       throw new TypeError(
         `Grant rules for source instance ${source.id} must be a list.`,
@@ -264,13 +279,10 @@ export class SourceRuleReader {
        WHERE class_definition_id = ? AND class_level <= ?
        ORDER BY class_level`,
       [source.sourceDefinitionId ?? 0, classLevel],
+      grantRulesText,
     );
     for (const progression of progressions) {
-      const rules = decodeGrantJson(
-        progression.grant_rules === null
-          ? null
-          : String(progression.grant_rules),
-      );
+      const rules = decodeGrantJson(progression);
       for (const ruleData of containerValues(rules)) {
         const rule = parseRule(
           ruleData,
@@ -291,6 +303,7 @@ export class SourceRuleReader {
        FROM subclass_definitions
        WHERE id = ?`,
       [source.sourceDefinitionId ?? 0],
+      identifiedGrantRulesText,
     );
     if (definition === null) {
       throw new Error(
@@ -299,11 +312,7 @@ export class SourceRuleReader {
     }
 
     const byRuleKey = new Map<string, GrantRule>();
-    const staticRules = decodeGrantJson(
-      definition.grant_rules === null
-        ? null
-        : String(definition.grant_rules),
-    );
+    const staticRules = decodeGrantJson(definition.grant_rules);
     for (const ruleData of containerValues(staticRules)) {
       const rule = parseRule(
         ruleData,
@@ -318,13 +327,10 @@ export class SourceRuleReader {
        WHERE subclass_definition_id = ? AND class_level <= ?
        ORDER BY class_level`,
       [source.sourceDefinitionId ?? 0, classLevel],
+      grantRulesText,
     );
     for (const progression of progressions) {
-      const rules = decodeGrantJson(
-        progression.grant_rules === null
-          ? null
-          : String(progression.grant_rules),
-      );
+      const rules = decodeGrantJson(progression);
       for (const ruleData of containerValues(rules)) {
         const rule = parseRule(
           ruleData,

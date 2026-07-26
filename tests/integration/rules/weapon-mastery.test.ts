@@ -53,7 +53,7 @@ describe('weapon content seeding and the mastery allowance lookup', () => {
 
   it('seeds all 38 templates with their reference values intact', () => {
     expect(db.scalar('SELECT count(*) FROM weapon_templates')).toBe(38);
-    const longsword = db.one(
+    const longsword = db.oneRaw(
       "SELECT * FROM weapon_templates WHERE content_key = '2024:weapon:longsword'",
     );
     expect(longsword).toMatchObject({

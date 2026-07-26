@@ -40,7 +40,7 @@ describe('origins content seeding and the D1b copy', () => {
   }
 
   function speciesTemplate(name: string): SpeciesTemplateRow {
-    const row = db.one('SELECT * FROM species_templates WHERE name = ?', [name]);
+    const row = db.oneRaw('SELECT * FROM species_templates WHERE name = ?', [name]);
     if (row === null) {
       throw new Error(`No seeded species template named ${name}.`);
     }
@@ -48,7 +48,7 @@ describe('origins content seeding and the D1b copy', () => {
   }
 
   function templateTraits(templateId: number): SpeciesTemplateTraitRow[] {
-    return db.all(
+    return db.allRaw(
       `SELECT * FROM species_template_traits
         WHERE species_template_id = ? ORDER BY sort_order`,
       [templateId],
@@ -56,7 +56,7 @@ describe('origins content seeding and the D1b copy', () => {
   }
 
   function backgroundTemplate(name: string): BackgroundTemplateRow {
-    const row = db.one('SELECT * FROM background_templates WHERE name = ?', [
+    const row = db.oneRaw('SELECT * FROM background_templates WHERE name = ?', [
       name,
     ]);
     if (row === null) {
@@ -118,7 +118,7 @@ describe('origins content seeding and the D1b copy', () => {
     ).toBe(4);
     // Printed order is dense and one-based, per species.
     expect(
-      db.all(
+      db.allRaw(
         `SELECT s.name, group_concat(t.sort_order) AS orders
            FROM species_templates s
            JOIN species_template_traits t ON t.species_template_id = s.id
@@ -197,7 +197,7 @@ describe('origins content seeding and the D1b copy', () => {
     pickSpecies(characterId, 'Dwarf');
 
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT name, creature_type, size, base_speed_feet, notes
            FROM character_species WHERE character_id = ?`,
         [characterId],
@@ -212,7 +212,7 @@ describe('origins content seeding and the D1b copy', () => {
     // THE CENTRAL D1b ASSERTION: there is no column on either character table
     // that could hold a template id, so there is nothing to reach back with.
     const columns = (table: string) =>
-      db.all(`PRAGMA table_info("${table}")`).map((row) => String(row.name));
+      db.allRaw(`PRAGMA table_info("${table}")`).map((row) => String(row.name));
     for (const table of ['character_species', 'character_species_traits']) {
       expect(columns(table), table).not.toContain('species_template_id');
       expect(columns(table), table).not.toContain('content_key');
@@ -228,12 +228,12 @@ describe('origins content seeding and the D1b copy', () => {
     pickSpecies(characterId, 'Human');
     expect(speciesTemplate('Human').alternate_size).toBe('Small');
     expect(
-      db.all('PRAGMA table_info("character_species")').map((row) =>
+      db.allRaw('PRAGMA table_info("character_species")').map((row) =>
         String(row.name),
       ),
     ).not.toContain('alternate_size');
     expect(
-      db.one('SELECT size FROM character_species WHERE character_id = ?', [
+      db.oneRaw('SELECT size FROM character_species WHERE character_id = ?', [
         characterId,
       ]),
     ).toEqual({ size: 'Medium' });
@@ -270,7 +270,7 @@ describe('origins content seeding and the D1b copy', () => {
     // ...and re-seeding the catalog does not touch the character.
     seedOriginContent(db);
     expect(
-      db.one(
+      db.oneRaw(
         'SELECT name, base_speed_feet FROM character_species WHERE character_id = ?',
         [characterId],
       ),
@@ -288,7 +288,7 @@ describe('origins content seeding and the D1b copy', () => {
     const characterId = character();
     pickSpecies(characterId, 'Dwarf');
     expect(
-      db.all(
+      db.allRaw(
         `SELECT name, effect_kind, effect_damage_type, effect_hit_points_flat,
                 effect_hit_points_per_level, effect_speed_bonus_feet
            FROM character_species_traits
@@ -473,7 +473,7 @@ describe('origins content seeding and the D1b copy', () => {
       ],
     );
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT name, ability_score_1, feat_name, skill_proficiency_1,
                 tool_proficiency, equipment_option_b
            FROM character_background WHERE character_id = ?`,
@@ -490,7 +490,7 @@ describe('origins content seeding and the D1b copy', () => {
     // THE TEMPLATE SUGGESTS AND THE CHARACTER OWNS THE VALUE. Nothing wrote an
     // ability score, so the character still has the defaults they started with.
     expect(
-      db.one(
+      db.oneRaw(
         'SELECT strength, dexterity, constitution FROM characters WHERE id = ?',
         [characterId],
       ),

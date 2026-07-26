@@ -186,13 +186,13 @@ describe('character rule and source commands', () => {
     enabled.apply(characterId);
 
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT allow_legacy FROM characters WHERE id = ?`,
         [characterId],
       ),
     ).toEqual({ allow_legacy: 1 });
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT current_spell_version_id, selection_eligibility,
                 selection_invalid_reason
          FROM spell_selection_slots WHERE id = ?`,
@@ -207,13 +207,13 @@ describe('character rule and source commands', () => {
     const disabled = new UpdateCharacterRulesCommand(db, enabled.inverse());
     disabled.apply(characterId);
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT allow_legacy FROM characters WHERE id = ?`,
         [characterId],
       ),
     ).toEqual({ allow_legacy: 0 });
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT selection_eligibility, selection_invalid_reason
          FROM spell_selection_slots WHERE id = ?`,
         [slotId],
@@ -271,12 +271,12 @@ describe('character rule and source commands', () => {
         },
       },
     });
-    const root = db.one(
+    const root = db.oneRaw(
       `SELECT id FROM character_source_instances
        WHERE character_id = ? AND source_type = 'species'`,
       [characterId],
     )!;
-    const child = db.one(
+    const child = db.oneRaw(
       `SELECT id FROM character_source_instances
        WHERE parent_source_instance_id = ?`,
       [Number(root.id)],
@@ -290,7 +290,7 @@ describe('character rule and source commands', () => {
     });
 
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT display_name, config FROM character_source_instances
          WHERE id = ?`,
         [Number(child.id)],
@@ -315,7 +315,7 @@ describe('character rule and source commands', () => {
       },
     });
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT source_instance_id, allowed_spell_lists, state
          FROM spell_selection_slots WHERE source_instance_id = ?`,
         [Number(child.id)],
@@ -391,7 +391,7 @@ describe('character rule and source commands', () => {
       source_instance_id: sourceId,
       chosen_option: 'Thaumaturge',
     });
-    const slot = db.one(
+    const slot = db.oneRaw(
       `SELECT id, slot_key FROM spell_selection_slots
        WHERE source_instance_id = ?`,
       [sourceId],
@@ -409,7 +409,7 @@ describe('character rule and source commands', () => {
       chosen_option: 'Protector',
     });
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT id, slot_key, current_spell_version_id, state,
                 orphan_reason_code, selection_eligibility,
                 selection_invalid_reason
@@ -446,7 +446,7 @@ describe('character rule and source commands', () => {
       chosen_option: 'Thaumaturge',
     });
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT id, slot_key, current_spell_version_id, state,
                 orphan_reason_code, orphaned_at, selection_eligibility,
                 selection_invalid_reason
@@ -509,7 +509,7 @@ describe('character rule and source commands', () => {
     );
     expect(state.capture(characterId)).toEqual(empty);
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT
            (SELECT count(*) FROM character_class_levels
              WHERE character_id = ?) AS levels,
@@ -533,7 +533,7 @@ describe('character rule and source commands', () => {
       },
     });
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT class_definition_id, level, is_starting_class
          FROM character_class_levels WHERE character_id = ?`,
         [characterId],
@@ -544,7 +544,7 @@ describe('character rule and source commands', () => {
       is_starting_class: 1,
     });
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT display_name, config, acquired_at_character_level, state
          FROM character_source_instances WHERE character_id = ?`,
         [characterId],
@@ -558,7 +558,7 @@ describe('character rule and source commands', () => {
       state: 'active',
     });
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT
            (SELECT count(*) FROM spell_selection_slots
              WHERE character_id = ?) AS slots,
@@ -640,13 +640,13 @@ describe('character rule and source commands', () => {
       source_definition_id: humanId,
       config,
     });
-    const root = db.one(
+    const root = db.oneRaw(
       `SELECT id, display_name, config, state
        FROM character_source_instances
        WHERE character_id = ? AND parent_source_instance_id IS NULL`,
       [characterId],
     )!;
-    const child = db.one(
+    const child = db.oneRaw(
       `SELECT id, parent_source_instance_id, display_name, config, state
        FROM character_source_instances
        WHERE parent_source_instance_id = ?`,
@@ -667,7 +667,7 @@ describe('character rule and source commands', () => {
       state: 'active',
     });
     expect(
-      db.all(
+      db.allRaw(
         `SELECT ordinal, allowed_spell_lists, state
          FROM spell_selection_slots WHERE source_instance_id = ?
          ORDER BY ordinal`,
@@ -747,7 +747,7 @@ describe('character rule and source commands', () => {
         [rootId],
       ),
     );
-    const slot = db.one(
+    const slot = db.oneRaw(
       `SELECT id, slot_key FROM spell_selection_slots
        WHERE source_instance_id = ?`,
       [childId],
@@ -771,7 +771,7 @@ describe('character rule and source commands', () => {
     removed.apply(characterId);
 
     expect(
-      db.all(
+      db.allRaw(
         `SELECT id, state FROM character_source_instances
          WHERE id IN (?, ?) ORDER BY id`,
         [rootId, childId],
@@ -781,7 +781,7 @@ describe('character rule and source commands', () => {
       { id: childId, state: 'tombstoned' },
     ]);
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT id, slot_key, current_spell_version_id, state,
                 orphan_reason_code, selection_eligibility,
                 selection_invalid_reason
