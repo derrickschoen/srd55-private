@@ -42,11 +42,14 @@ pages interleave and the weapon table becomes unreadable.
 | `source/weapon-mastery-progression.txt` | Barbarian and Fighter class tables (the count is a COLUMN) | 27, 47 |
 | `source/weapon-mastery-flat-classes.txt` | Paladin, Ranger, Rogue feature text (the count is PROSE) | 55, 57, 60 |
 | `source/class-core-traits.txt` | Core Traits table for all twelve classes — hit die, saving throws, skill/weapon proficiencies, armour training | 26-72 |
-| `source/armor-table.txt` | Armor table: 13 armours plus Shield, with AC formula, Strength requirement and stealth penalty | 91 |
+| `source/armor-table.txt` | Armor table: **12 armours plus Shield — 13 rows**, with AC formula, Strength requirement and stealth penalty | 91 |
 | `source/species-descriptions.txt` | All nine species — creature type, size, speed and traits | 83-86 |
 | `source/background-descriptions.txt` | All FOUR backgrounds — ability scores, origin feat, skills, tool | 82 |
 | `source/weapon-attack-cantrips.txt` | True Strike and Shillelagh, the two cantrips that rewrite a weapon attack (D14) | 157, 163 |
 | `source/attack-class-features.txt` | Martial Arts (all three benefits, die progression) and every Extra Attack grant, plus the multiclass rule (D15) | 24, 27, 47, 49, 55, 57 |
+| `source/skills-table.txt` | The Skills table (all 18 skills and the ability each uses), the Proficiency Bonus table, and the rules that apply the bonus to a skill or a save | 10, 12, 13 |
+| `source/sheet-math.txt` | Passive Perception, Level 1 Hit Points by Class, Fixed Hit Points by Class, Initiative, unarmoured Armor Class | 21-23 |
+| `source/multiclassing.txt` | Multiclassing: Hit Points and Hit Dice, Proficiency Bonus, proficiencies, Armor Class and Extra Attack | 24-25 |
 
 ## What these extracts settle
 
@@ -69,6 +72,32 @@ Weapon mastery is a 2024-rules concept: every weapon has exactly one mastery
 property, and a character unlocks it only through a feature such as Weapon
 Mastery. The property is attached to the weapon; the *permission* is attached
 to the character.
+
+## The three extracts added for the sheet core, and why
+
+`skills-table.txt`, `sheet-math.txt` and `multiclassing.txt` were added because
+a review of what the sheet needs found that **six of its numbers had no source
+in this directory at all**: the skill-to-ability mapping, the level-1 and
+per-level Hit Point arithmetic, unarmoured Armor Class, Initiative, Passive
+Perception, and the multiclass rules for Proficiency Bonus and proficiencies.
+
+Every one of those was recallable from memory and none of it was written down,
+which is the exact failure F6 exists to prevent. Writing the code first and the
+provenance later would have produced values that look right and cannot be
+checked. The extraction cost an hour and removed the whole fabrication surface.
+
+Two measured facts worth recording, because both contradict something that was
+previously believed here:
+
+- **The Skills table has 18 rows and `Performance` is one of them.** The twelve
+  class Core Traits tables between them name only 17 skills — `Performance`
+  appears in no class's list. A skills vocabulary "closed on evidence" the way
+  `weaponMasteryProperties` is would have been 17 skills and silently wrong.
+  The Skills table is the source that closes it, not the class lists.
+- **The Extra Attack extract could not be attributed to classes as first
+  written.** Its seven rows carried no class names, so deciding which class each
+  belonged to would have come from memory. The section has been re-extracted
+  with each class's Features table title and column headers above its own rows.
 
 ## Attribution
 
