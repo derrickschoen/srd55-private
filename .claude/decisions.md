@@ -50,6 +50,77 @@ binding. Where an earlier note conflicts with this, this wins.
 ---
 
 
+## D6d — Scrutinise nulls in ALL types, not only database columns (2026-07-25)
+
+Owner direction: the six restructurings in D6 are confirmed as the tests for
+whether an incomplete thing can be represented without a null column — AND
+> "Remember to also scrutinize nulls in all types, not just db columns."
+
+This is a scope expansion, and the non-column layer is arguably the more
+important one: a `| null` in a TypeScript type is not forced by storage, it
+propagates to every consumer, and it is where the contract incoherence the owner
+originally complained about actually lives.
+
+Apply D6 and D6b to every `| null` and every `?:` in:
+
+- `src/domain/read-models.ts` and all DTOs / read models
+- Zod contracts and their inferred types
+- function and query return types
+- domain value objects and command payloads
+- RPC request/response shapes
+
+### The highest-value instance, and the fix
+
+`spell_name: string | null`, `spell_level: number | null`, `spell_id: number |
+null` appear as three INDEPENDENT nullables on a workspace slot. They are not
+three optional facts. They are ONE optional relationship — the `LEFT JOIN` to
+the selected spell either matched or did not — smeared across sibling columns.
+
+That is D6's "a value object would absorb it", applied to a projection:
+
+```ts
+// today: three nullables, and nothing links them
+spell_id: number | null
+spell_name: string | null
+spell_level: number | null
+
+// better: one optional relation, non-null inside
+spell?: { id: SpellVersionId; name: string; level: SpellLevel }
+```
+
+The guarantee becomes *"if there is a spell, it has an id AND a name AND a
+level"* — which is precisely the owner's question, "what is guaranteed to be in
+a spell". It also makes the illegal states unrepresentable: today
+`spell_name` populated with `spell_level` null is expressible and meaningless.
+
+**Apply this pattern wherever a group of sibling nullables share one cause.**
+The nullability belongs on the relationship, once, not on each field.
+
+### Other non-column null sources to check
+
+- **Outer-join projections** — as above. The null means "no matching row", a
+  relationship fact, not a property fact.
+- **Query-result nulls.** `db.one<T>(): T | null` pushes a null into every
+  caller. Where the caller treats absence as impossible, a throwing
+  `oneOrThrow` removes the null at the boundary instead of propagating it.
+- **`?:` versus `| null` versus `?: T | null`.** Three different statements,
+  currently used inconsistently. Pick one convention: `?:` for "the field may be
+  absent", `| null` for "the field is present and explicitly empty", and avoid
+  the third form unless both genuinely differ.
+- **Nullable in the DB does not mean nullable in the domain type.** A column can
+  be legitimately nullable while a resolved domain object is not — e.g.
+  `subclass_definition_id` is correctly nullable in storage, but a *resolved*
+  subclass type should never be `Subclass | null`; the character simply has no
+  subclass relation.
+
+### The reverse also holds
+
+Do not push storage nullability into a domain type just because the column
+allows it. Resolve it once, at the boundary, and let the domain type express the
+real guarantee.
+
+---
+
 ## D6c — The DEFENDED nulls, and a resolved tension with codex's test (2026-07-25)
 
 Codex analysed all ~199 nullable columns. **Caveat on provenance:** its required
