@@ -77,7 +77,8 @@ describe('pre-Drizzle database images', () => {
     const tableCount = (sql: string) =>
       [...sql.matchAll(/CREATE TABLE/g)].length;
     expect(tableCount(preDrizzleSchema)).toBe(38);
-    expect(tableCount(schema)).toBe(34);
+    // 30 surviving Laravel tables, 4 native weapon tables, 8 sheet core.
+    expect(tableCount(schema)).toBe(42);
   });
 
   it('rejects a pre-Drizzle image at open instead of half-working', async () => {
@@ -94,7 +95,12 @@ describe('pre-Drizzle database images', () => {
     // actually short of. Both paths produce the same recoverable
     // `schema_mismatch` status, which is what the next test depends on.
     expect(boot.detail).toContain(
-      'Database image is missing application tables: character_weapons, class_weapon_mastery_counts, class_weapon_mastery_grants, weapon_templates.',
+      'Database image is missing application tables: armor_templates, ' +
+        'character_weapons, class_armor_training, class_extra_attack_grants, ' +
+        'class_martial_arts_dice, class_saving_throw_proficiencies, ' +
+        'class_sheet_traits, class_skill_options, ' +
+        'class_weapon_mastery_counts, class_weapon_mastery_grants, ' +
+        'class_weapon_proficiencies, weapon_templates.',
     );
   });
 

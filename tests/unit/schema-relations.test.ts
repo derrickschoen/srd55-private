@@ -133,7 +133,7 @@ afterAll(() => {
 });
 
 describe('declared relations match the foreign keys', () => {
-  it('budgets 36 constraints across 38 PRAGMA rows', () => {
+  it('budgets 43 constraints across 45 PRAGMA rows', () => {
     const tables = db
       .selectValues(
         `SELECT name FROM sqlite_schema
@@ -146,12 +146,17 @@ describe('declared relations match the foreign keys', () => {
       0,
     );
 
-    // 33 Laravel-derived constraints plus the three the weapon tables add:
-    // character_weapons -> characters, and one per mastery table into
-    // class_definitions. Still only two of them composite, so the row count
-    // rises by exactly three as well.
-    expect(constraintEdges(db)).toHaveLength(36);
-    expect(rowCount).toBe(38);
+    // 33 Laravel-derived constraints, plus the three the weapon tables add
+    // (character_weapons -> characters, and one per mastery table into
+    // class_definitions), plus the seven of the sheet core — one per
+    // class-content table into class_definitions. `armor_templates` adds none:
+    // by D1b the catalog points at nothing and nothing points at it, exactly as
+    // for `weapon_templates`.
+    //
+    // Still only two of them composite, so the row count rises by the same
+    // seven: 43 constraints across 45 rows.
+    expect(constraintEdges(db)).toHaveLength(43);
+    expect(rowCount).toBe(45);
   });
 
   it('declares a relation for every foreign key, and a foreign key for every relation', () => {

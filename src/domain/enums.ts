@@ -137,6 +137,81 @@ export const srdWeaponGroups = [
 ] as const;
 export type SrdWeaponGroup = (typeof srdWeaponGroups)[number];
 
+/**
+ * The eighteen skills, from the Skills table in
+ * `docs/srd/source/skills-table.txt`. That table is the source that CLOSES this
+ * vocabulary, and it had to be extracted for the purpose.
+ *
+ * DO NOT CLOSE THIS SET FROM THE CLASS LISTS. The twelve Core Traits tables
+ * between them name only seventeen of these — `performance` appears in no
+ * class's skill list at all. A set "closed on evidence" the way
+ * `weaponMasteryProperties` is closed would have been seventeen skills and
+ * silently wrong, and nothing would have failed. It is closed on the printed
+ * SKILLS TABLE instead, which is the list the rules actually define.
+ *
+ * Snake case rather than the source's display casing, unlike
+ * `weaponMasteryProperties`: `Sleight of Hand` and `Animal Handling` contain
+ * spaces, and `enumLiteral` in `db/schema/columns.ts` refuses a value that is
+ * not a bare identifier — a CHECK constraint cannot hold it. `SKILL_LABELS` in
+ * `src/rules/skills.ts` carries the display strings.
+ */
+export const skills = [
+  'acrobatics',
+  'animal_handling',
+  'arcana',
+  'athletics',
+  'deception',
+  'history',
+  'insight',
+  'intimidation',
+  'investigation',
+  'medicine',
+  'nature',
+  'perception',
+  'performance',
+  'persuasion',
+  'religion',
+  'sleight_of_hand',
+  'stealth',
+  'survival',
+] as const;
+export type Skill = (typeof skills)[number];
+
+/**
+ * The four headings of the source's own Armor table
+ * (`docs/srd/source/armor-table.txt`). `shield` is a category there, not a
+ * separate concept, and keeping it one makes `armor_templates` a faithful
+ * image of the extract's thirteen rows.
+ */
+export const armorCategories = ['light', 'medium', 'heavy', 'shield'] as const;
+export type ArmorCategory = (typeof armorCategories)[number];
+
+/**
+ * How a piece of armour combines the wearer's Dexterity modifier.
+ *
+ * THREE MEMBERS, NOT A NUMERIC CAP, AND THE THIRD IS WHY. Modelling Heavy
+ * armour as "cap of 0" is wrong and quietly costs a character AC: `min(dexMod,
+ * 0)` SUBTRACTS for a negative modifier, so a Dexterity 6 character in Chain
+ * Mail would come out at 14 when the table says a flat 16. `none` means the
+ * Dexterity modifier is not part of the calculation at all, which is what the
+ * Heavy rows of the table actually print.
+ */
+export const armorDexBonuses = ['full', 'capped', 'none'] as const;
+export type ArmorDexBonus = (typeof armorDexBonuses)[number];
+
+/**
+ * The two weapon-proficiency categories the Core Traits tables name.
+ *
+ * NOT the whole story on its own, and `class_weapon_proficiencies` carries a
+ * qualifier column for that reason: the Monk has "Martial weapons that have the
+ * Light property" and the Rogue "Martial weapons that have the Finesse or Light
+ * property". A bare `simple | martial` pair is a lie about two of twelve
+ * classes.
+ */
+export const weaponProficiencyCategories = ['simple', 'martial'] as const;
+export type WeaponProficiencyCategory =
+  (typeof weaponProficiencyCategories)[number];
+
 export const freeCastRecoveries = [
   'long_rest',
   'short_rest',
