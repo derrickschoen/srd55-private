@@ -997,3 +997,81 @@ select:disabled {
   margin: 0.5rem 0 0;
   color: var(--planner-accent);
 }
+
+/* --- attack profiles ------------------------------------------------------ */
+
+.attack-profiles {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--planner-border);
+}
+
+.attack-profiles h3 {
+  margin: 0 0 0.35rem;
+  font-size: 0.95rem;
+}
+
+.attack-profiles > p {
+  margin: 0 0 0.6rem;
+  color: var(--planner-ink-soft);
+  font-size: 0.84rem;
+}
+
+.attack-profile-warning {
+  color: var(--planner-accent);
+  font-weight: 600;
+}
+
+.attack-weapon {
+  margin-bottom: 0.85rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--planner-border);
+  border-radius: 0.35rem;
+}
+
+.attack-weapon h4 {
+  margin: 0 0 0.3rem;
+  font-size: 0.9rem;
+}
+
+.attack-weapon-derived {
+  margin: 0 0 0.5rem;
+  color: var(--planner-ink-soft);
+  font-size: 0.78rem;
+}
+
+.attack-profile + .attack-profile {
+  margin-top: 0.7rem;
+  padding-top: 0.7rem;
+  border-top: 1px dashed var(--planner-border);
+}
+
+.attack-profile h5 {
+  margin: 0 0 0.3rem;
+  font-size: 0.84rem;
+}
+
+.attack-profile select {
+  margin-bottom: 0.35rem;
+}
+
+.attack-profile-numbers {
+  margin: 0 0 0.3rem;
+  font-weight: 600;
+  font-size: 0.88rem;
+}
+
+.attack-profile-reason,
+.attack-profile-count {
+  margin: 0 0 0.25rem;
+  color: var(--planner-ink-soft);
+  font-size: 0.78rem;
+}
+
+.attack-profile-conditions,
+.attack-profile-notes {
+  margin: 0.25rem 0 0;
+  padding-left: 1.1rem;
+  color: var(--planner-ink-soft);
+  font-size: 0.76rem;
+}
