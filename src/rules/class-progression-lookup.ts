@@ -168,6 +168,107 @@ function classSeeds(): Readonly<Record<string, ClassSeed>> {
   };
 }
 
+const BUNDLED_RULES_EDITION = '2024';
+
+/** Every bundled progression table covers character levels 1 through 20. */
+const PROGRESSION_LEVELS = 20;
+
+function classContentKey(name: string): string {
+  return `${BUNDLED_RULES_EDITION}:class:${name.toLowerCase()}`;
+}
+
+const EK_CONTENT_KEY = '2024:subclass:ek';
+const AT_CONTENT_KEY = '2024:subclass:at';
+
+/**
+ * Content keys of every class and subclass this module bundles. The seeder
+ * writes exactly these; `hasBundledClassContent` reads exactly these.
+ */
+export function bundledClassContentKeys(): {
+  readonly classes: readonly string[];
+  readonly subclasses: readonly string[];
+} {
+  return {
+    classes: Object.keys(classSeeds()).map(classContentKey),
+    subclasses: [EK_CONTENT_KEY, AT_CONTENT_KEY],
+  };
+}
+
+function placeholders(count: number): string {
+  return Array.from({ length: count }, () => '?').join(', ');
+}
+
+function countRows(
+  db: DatabaseContext,
+  sql: string,
+  bind: readonly string[],
+): number {
+  return Number(db.scalar<number>(sql, [...bind]) ?? 0);
+}
+
+/**
+ * True when every bundled class and subclass is present AND carries its full
+ * twenty levels of progression rows. Used as the boot-time guard so a database
+ * that already carries the content is not rewritten on every open.
+ *
+ * Counting the progression rows rather than only the definition keys matters:
+ * a database holding the fourteen definition keys with missing progression rows
+ * is broken — every level lookup on it throws — and a definitions-only guard
+ * would declare it healthy and never repair it.
+ */
+export function hasBundledClassContent(db: DatabaseContext): boolean {
+  const keys = bundledClassContentKeys();
+  const classKeys = placeholders(keys.classes.length);
+  const subclassKeys = placeholders(keys.subclasses.length);
+  return (
+    countRows(
+      db,
+      `SELECT count(*) FROM class_definitions
+       WHERE content_key IN (${classKeys})`,
+      keys.classes,
+    ) === keys.classes.length &&
+    countRows(
+      db,
+      `SELECT count(*) FROM class_progressions AS progression
+       JOIN class_definitions AS definition
+         ON definition.id = progression.class_definition_id
+       WHERE definition.content_key IN (${classKeys})
+         AND progression.class_level BETWEEN 1 AND ${PROGRESSION_LEVELS}`,
+      keys.classes,
+    ) ===
+      keys.classes.length * PROGRESSION_LEVELS &&
+    countRows(
+      db,
+      `SELECT count(*) FROM subclass_definitions
+       WHERE content_key IN (${subclassKeys})`,
+      keys.subclasses,
+    ) === keys.subclasses.length &&
+    countRows(
+      db,
+      `SELECT count(*) FROM subclass_progressions AS progression
+       JOIN subclass_definitions AS definition
+         ON definition.id = progression.subclass_definition_id
+       WHERE definition.content_key IN (${subclassKeys})
+         AND progression.class_level BETWEEN 1 AND ${PROGRESSION_LEVELS}`,
+      keys.subclasses,
+    ) ===
+      keys.subclasses.length * PROGRESSION_LEVELS
+  );
+}
+
+/**
+ * Boot-time entry point: seeds the bundled class content when it is missing or
+ * incomplete, and does nothing when it is already whole. Returns whether it
+ * wrote anything.
+ */
+export function ensureBundledClassContent(db: DatabaseContext): boolean {
+  if (hasBundledClassContent(db)) {
+    return false;
+  }
+  seedClassProgressions(db);
+  return true;
+}
+
 function jsonSlotCounts(value: SpellSlotCounts): string {
   return JSON.stringify(Object.keys(value).length === 0 ? [] : value);
 }
@@ -176,13 +277,31 @@ function jsonPactSlots(value: PactMagicSlots | null): string {
   return JSON.stringify(value ?? []);
 }
 
+/**
+ * Upserts one bundled class, or returns `null` when the `(name, rules_edition)`
+ * slot is already held by a DIFFERENT content key — a user-authored "Wizard",
+ * say. `class_definitions` is unique on both `content_key` and
+ * `(name, rules_edition)`, so the two rows cannot coexist and the bundled row
+ * has no claim to win: overwriting would silently replace content the user
+ * authored, and inserting would abort the whole seed. Yielding the name and
+ * seeding the other eleven classes is the only non-destructive option.
+ */
 function upsertClass(
   db: DatabaseContext,
   name: string,
   seed: ClassSeed,
   timestamp: string,
-): number {
-  const contentKey = `2024:class:${name.toLowerCase()}`;
+): number | null {
+  const contentKey = classContentKey(name);
+  const holder = db.scalar<string>(
+    `SELECT content_key FROM class_definitions
+     WHERE name = ? AND rules_edition = ?`,
+    [name, BUNDLED_RULES_EDITION],
+  );
+  if (holder !== null && holder !== contentKey) {
+    return null;
+  }
+
   db.exec(
     `INSERT INTO class_definitions (
        content_key, name, rules_edition, spellcasting_ability, progression_type,
@@ -385,19 +504,34 @@ function upsertClassProgression(
   );
 }
 
+/**
+ * Upserts one bundled third-caster subclass. Returns `null` when its parent
+ * class was not seeded, or when the `(class, name, rules_edition)` slot is held
+ * by a different content key — the same yield-to-the-user rule as `upsertClass`.
+ * The parent is resolved by CONTENT KEY, never by name, so a user-authored
+ * class that happens to be called "Fighter" can never adopt EK.
+ */
 function upsertThirdCaster(
   db: DatabaseContext,
   className: string,
   subclassName: string,
   contentKey: string,
   timestamp: string,
-): number {
+): number | null {
   const classId = db.scalar<number>(
-    'SELECT id FROM class_definitions WHERE name = ?',
-    [className],
+    'SELECT id FROM class_definitions WHERE content_key = ?',
+    [classContentKey(className)],
   );
   if (classId === null) {
-    throw new Error(`Cannot seed ${subclassName} without ${className}.`);
+    return null;
+  }
+  const holder = db.scalar<string>(
+    `SELECT content_key FROM subclass_definitions
+     WHERE class_definition_id = ? AND name = ? AND rules_edition = ?`,
+    [classId, subclassName, BUNDLED_RULES_EDITION],
+  );
+  if (holder !== null && holder !== contentKey) {
+    return null;
   }
 
   db.exec(
@@ -478,7 +612,7 @@ function seedThirdCasterProgression(
   levelTenCantrips: number,
   timestamp: string,
 ): void {
-  for (let classLevel = 1; classLevel <= 20; classLevel++) {
+  for (let classLevel = 1; classLevel <= PROGRESSION_LEVELS; classLevel++) {
     const cantripCount =
       classLevel < 3
         ? 0
@@ -546,13 +680,20 @@ function seedThirdCasterProgression(
 /**
  * Reconciles the PHP oracle's complete 2024 class and third-caster progression
  * catalog. Stable unique keys make reruns update rows without replacing IDs.
+ *
+ * A class or subclass whose name is already claimed by user-authored content is
+ * skipped rather than overwritten, so this seeds as much of the bundle as the
+ * database has room for instead of failing whole.
  */
 export function seedClassProgressions(db: DatabaseContext): void {
   db.transaction(() => {
     const timestamp = new Date().toISOString();
     for (const [name, seed] of Object.entries(classSeeds())) {
       const classId = upsertClass(db, name, seed, timestamp);
-      for (let classLevel = 1; classLevel <= 20; classLevel++) {
+      if (classId === null) {
+        continue;
+      }
+      for (let classLevel = 1; classLevel <= PROGRESSION_LEVELS; classLevel++) {
         const contribution = new CasterContribution(
           name,
           classLevel,
@@ -583,37 +724,41 @@ export function seedClassProgressions(db: DatabaseContext): void {
       db,
       'Fighter',
       'EK',
-      '2024:subclass:ek',
+      EK_CONTENT_KEY,
       timestamp,
     );
     const atId = upsertThirdCaster(
       db,
       'Rogue',
       'AT',
-      '2024:subclass:at',
+      AT_CONTENT_KEY,
       timestamp,
     );
     const thirdCasterPrepared = [
       0, 0, 3, 4, 4, 4, 5, 6, 6, 7, 8, 8, 9, 10, 10, 11, 11, 11, 12, 13,
     ] as const;
-    seedThirdCasterProgression(
-      db,
-      ekId,
-      'ek',
-      thirdCasterPrepared,
-      2,
-      3,
-      timestamp,
-    );
-    seedThirdCasterProgression(
-      db,
-      atId,
-      'at',
-      thirdCasterPrepared,
-      3,
-      4,
-      timestamp,
-    );
+    if (ekId !== null) {
+      seedThirdCasterProgression(
+        db,
+        ekId,
+        'ek',
+        thirdCasterPrepared,
+        2,
+        3,
+        timestamp,
+      );
+    }
+    if (atId !== null) {
+      seedThirdCasterProgression(
+        db,
+        atId,
+        'at',
+        thirdCasterPrepared,
+        3,
+        4,
+        timestamp,
+      );
+    }
   });
 }
 

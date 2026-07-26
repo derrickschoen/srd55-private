@@ -156,18 +156,63 @@ function seedCatalog(db: DatabaseContext, padding = false) {
      ) VALUES ('2024:shield', ?, 'Shield', '2024', 1, 'Abjuration', 1)`,
     [identityId],
   ).lastInsertId;
-  const classId = db.exec(
+  // `2024:class:wizard` is bundled content, so on a real application database
+  // (the RPC harness) the SRD Wizard is already there, while on a bare
+  // `database()` nothing is. The upsert below writes EVERY column of the
+  // definition and of the level-1 progression, so both rows are byte-for-byte
+  // the fixture's own either way and no bundled value can leak into an
+  // assertion.
+  //
+  // What it does NOT equalise: on a seeded database the bundled Wizard levels
+  // 2-20 survive alongside the pinned level 1, and `seedCharacter` builds a
+  // level-4 Wizard, so the harness-backed tests generate the bundled level 2-4
+  // grant rules that the bare-database tests do not. Nothing here asserts the
+  // generated slot set, so that difference is inert — but it is a difference,
+  // and any future assertion on slot counts must seed its own levels rather
+  // than trust this fixture to be identical on both paths.
+  db.exec(
     `INSERT INTO class_definitions (
        content_key, name, rules_edition, spellcasting_ability,
-       progression_type
+       progression_type, caster_fraction, caster_rounding, prepares_or_knows,
+       supports_ritual_casting, ritual_casting_mode,
+       primary_ability_expression, notes, created_at, updated_at
      ) VALUES (
-       '2024:class:wizard', 'Wizard', '2024', 'intelligence', 'full'
-     )`,
-  ).lastInsertId;
+       '2024:class:wizard', 'Wizard', '2024', 'intelligence', 'full',
+       NULL, NULL, NULL, 0, NULL, NULL, NULL, NULL, NULL
+     )
+     ON CONFLICT(content_key) DO UPDATE SET
+       name = excluded.name,
+       rules_edition = excluded.rules_edition,
+       spellcasting_ability = excluded.spellcasting_ability,
+       progression_type = excluded.progression_type,
+       caster_fraction = excluded.caster_fraction,
+       caster_rounding = excluded.caster_rounding,
+       prepares_or_knows = excluded.prepares_or_knows,
+       supports_ritual_casting = excluded.supports_ritual_casting,
+       ritual_casting_mode = excluded.ritual_casting_mode,
+       primary_ability_expression = excluded.primary_ability_expression,
+       notes = excluded.notes,
+       created_at = excluded.created_at,
+       updated_at = excluded.updated_at`,
+  );
+  const classId = Number(
+    db.scalar<number>(
+      "SELECT id FROM class_definitions WHERE content_key = '2024:class:wizard'",
+    ),
+  );
   db.exec(
     `INSERT INTO class_progressions (
-       class_definition_id, class_level, prepared_count, grant_rules
-     ) VALUES (?, 1, 1, ?)`,
+       class_definition_id, class_level, cantrips_known, prepared_count,
+       slots, pact_slots, grant_rules, created_at, updated_at
+     ) VALUES (?, 1, 0, 1, NULL, NULL, ?, NULL, NULL)
+     ON CONFLICT(class_definition_id, class_level) DO UPDATE SET
+       cantrips_known = excluded.cantrips_known,
+       prepared_count = excluded.prepared_count,
+       slots = excluded.slots,
+       pact_slots = excluded.pact_slots,
+       grant_rules = excluded.grant_rules,
+       created_at = excluded.created_at,
+       updated_at = excluded.updated_at`,
     [
       classId,
       JSON.stringify([
