@@ -1,5 +1,67 @@
 # Binding scope decisions
 
+## D19 — Extra Attack is not keyed on (class, level), and the SRD already proves it (2026-07-26)
+
+Owner: *"Add to the extra attack model that some subclasses can add extra attack
+at level 6. Ie. college of valor bard (2024 phb)."*
+
+Correct, and the case is broader than the example. `class_extra_attack_grants`
+is keyed on `class_definition_id` + `class_level`, which can express only a
+class-table row. Three things break that, and two of them are in the SRD today.
+
+### 1. A SUBCLASS can grant it — the owner's case
+
+College of Valour grants Extra Attack at Bard level 6. **It is NOT in SRD 5.2**,
+which carries exactly one subclass per class — College of Lore for the Bard,
+plus Berserker, Champion, Circle of the Land, Hunter, Fiend Patron and the rest.
+
+So this is a MODEL requirement, not a content one. D3 governs: the model must be
+able to express it so imported or homebrew content can, and the bundled seed
+must not contain it, because it is not free-licensed. Building the model without
+shipping the data is exactly the right split.
+
+### 2. An INVOCATION can grant it, and the SRD has one
+
+**Thirsting Blade** — *"Prerequisite: Level 5+ Warlock, Pact of the Blade …
+You gain the Extra Attack feature FOR YOUR PACT WEAPON ONLY."* And **Devouring
+Blade** — *"Prerequisite: Level 12+ Warlock, Thirsting Blade … The Extra Attack
+of your Thirsting Blade invocation confers two extra attacks rather than one."*
+
+Both are sourced in `docs/srd/source/extra-attack-other-sources.txt`. This
+matters more than the subclass case for us, because it is content we could
+legitimately bundle today and the current model cannot hold it.
+
+### 3. It can be WEAPON-SCOPED, which the model has no notion of
+
+Thirsting Blade grants Extra Attack *for the pact weapon only*. The current
+derivation answers a single question — `attacksPerAction(classes)` — with one
+number for the character. It cannot say "two attacks, but only with this
+weapon", and a sheet that prints two attacks for every weapon a Warlock holds
+would be wrong.
+
+This lands squarely on the attack-profiles work: a profile already knows which
+weapon it belongs to, so attack COUNT belongs on the profile rather than beside
+it.
+
+### Consequences, not yet implemented
+
+- The grant needs a source that is a class, a subclass, or a named feature —
+  and a prerequisite level that is a CLASS level, not a character level.
+- Grants may be weapon-scoped; the count belongs with the attack profile.
+- The multiclass rule still governs and is the thing most likely to be got
+  wrong: Extra Attack **does not stack**, and the SRD says so about Thirsting
+  Blade explicitly — it "doesn't give you additional attacks if you also have
+  Extra Attack". A model that sums grants from class, subclass and invocation
+  would be plausible and wrong.
+- Devouring Blade shows a grant can UPGRADE another grant rather than add to it.
+
+**Deliberately not implemented in this tick.** The attack-profiles track is
+mid-revision and owns `attacksPerAction` and the profile shape. Changing the
+model underneath it would conflict for no gain. Recorded now, with the evidence
+sourced, and implemented as the next increment.
+
+---
+
 ## D18 — Species and background templates merged; a two-effect gap parked (2026-07-26)
 
 `main` 14936b3. Verified by me: **1167 vitest / 86 files, build exit 0,
