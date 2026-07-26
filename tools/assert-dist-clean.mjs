@@ -12,7 +12,17 @@
 //                        point of the browser-side subgraph (protocol.ts is
 //                        reachable only through it)
 //   /__ai/               the route prefix — protocol.ts, guard.ts, plugin.ts
-//   x-ai-bridge-token    the admission header — protocol.ts, guard.ts, mount.ts
+//   ai-bridge-token      BOTH token spellings at once, deliberately. It is the
+//                        meta NAME the plugin's `transformIndexHtml` hook injects
+//                        into the served HTML, and — as a substring — the
+//                        `x-ai-bridge-token` admission header in protocol.ts,
+//                        guard.ts and mount.ts. Scanning for the header alone
+//                        left a blind spot exactly where the plugin's only
+//                        build-reachable side effect is: the header spelling
+//                        does NOT occur in `<meta name="ai-bridge-token"
+//                        content="…">`, so a build that shipped a live session
+//                        secret in index.html was reported clean. Measured, not
+//                        theorised. The shorter literal subsumes both.
 //   child_process        the spawn import — plugin.ts
 // String literals survive minification, which is what makes the scan meaningful.
 // Files are read as latin1 rather than utf8: it is a byte-faithful 1:1 mapping,
@@ -29,7 +39,7 @@ import { join, relative, resolve } from 'node:path';
 const FORBIDDEN = [
   'AI_BRIDGE_SENTINEL',
   '/__ai/',
-  'x-ai-bridge-token',
+  'ai-bridge-token',
   'child_process',
 ];
 const CONTROL = 'staticApp';

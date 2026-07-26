@@ -30,6 +30,25 @@
  * the trust line. It is placed LAST in the prompt so that even a message which
  * spells out a fence marker has nothing after it to escape into.
  *
+ * ## Why block ORDER is containment, not formatting
+ *
+ * `--setting-sources ""` removes hooks, but it does NOT remove slash commands:
+ * the real init event under the bridge's exact argv still advertises 45 of them
+ * (`update-config`, `deep-research`, …), measured on 2.1.220. Some are backed by
+ * skills that can run shell commands, so they are the same CLASS of gap as hooks
+ * — a capability the empty tool list does not cover.
+ *
+ * What closes it is position. Measured, not assumed: a prompt of exactly
+ * `/context` was INTERCEPTED by the CLI and returned a token-usage table, while
+ * the same `/context` on the second line of a prompt reached the model as
+ * ordinary text — it said so itself, that it "reached me as a plain message
+ * instead of being intercepted". Expansion happens only at offset 0.
+ *
+ * `PREAMBLE` is a module constant and `assemblePrompt` always emits it first, so
+ * offset 0 is never request-derived and no caller-supplied byte can land there.
+ * That is the whole defence, which is why prompt.test.ts pins it explicitly
+ * rather than leaving it as an accident of how the blocks happen to be ordered.
+ *
  * ## Shell safety
  *
  * Nothing in this file is ever interpolated into a command string. The assembled
@@ -175,6 +194,8 @@ const PREAMBLE = [
 ].join('\n');
 
 export function assemblePrompt(request: AiChatRequest): string {
+  // FIRST, always, and never anything request-derived: offset 0 is the only
+  // place the CLI expands a slash command. See the note on block order above.
   const blocks = [PREAMBLE];
   if (request.reference !== null) {
     blocks.push(

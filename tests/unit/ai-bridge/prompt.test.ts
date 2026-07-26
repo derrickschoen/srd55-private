@@ -194,3 +194,65 @@ describe('prompt assembly', () => {
     expect(prompt).toContain(message);
   });
 });
+
+describe('offset 0 is never request-derived, which is what closes slash commands', () => {
+  // `--setting-sources ""` strips hooks but NOT slash commands: the real init
+  // event under the bridge's argv still advertises 45 of them, some backed by
+  // skills that can run shell commands. Measured on 2.1.220: a prompt of exactly
+  // `/context` was intercepted by the CLI and answered with a token-usage table,
+  // while the same text on the second line arrived at the model as ordinary
+  // prose. Expansion happens at offset 0 and nowhere else, so keeping offset 0
+  // node-authored is the containment layer — and an accident that nothing pins
+  // is not a layer, which is what these assertions are for.
+  const slashes = [
+    '/context',
+    '/update-config set something',
+    '/deep-research',
+    '  /context', // leading whitespace must not be trimmed into an expansion
+    '/context\nand also, which slots are empty?',
+  ];
+
+  for (const message of slashes) {
+    it(`does not let ${JSON.stringify(message)} reach the front of the prompt`, () => {
+      for (const reference of [null, referenceText()]) {
+        const prompt = assemblePrompt({ id: 1, message, reference });
+        expect(prompt.startsWith('/')).toBe(false);
+        expect(prompt.indexOf(message)).toBeGreaterThan(0);
+        // Not merely "not first" — the whole node-authored preamble precedes it.
+        expect(prompt.indexOf(QUESTION_OPEN)).toBeGreaterThan(0);
+        expect(prompt.indexOf(message)).toBeGreaterThan(
+          prompt.indexOf(QUESTION_OPEN),
+        );
+      }
+    });
+  }
+
+  it('starts with the node-authored preamble for every shape of request', () => {
+    const first = assemblePrompt({ id: 1, message: 'x', reference: null }).split(
+      '\n',
+    )[0];
+    expect(first).toBe(
+      'You are answering a question about a D&D 5e multiclass spell planner build.',
+    );
+    for (const reference of [null, referenceText()]) {
+      for (const message of ['x', '/context', '<<<', ' ']) {
+        expect(
+          assemblePrompt({ id: 1, message, reference }).startsWith(
+            String(first),
+          ),
+        ).toBe(true);
+      }
+    }
+  });
+
+  it('keeps the reference out of offset 0 as well', () => {
+    // The reference is the audited D4 projection, but it is still not
+    // node-authored on this side of the boundary, so it may not lead either.
+    const prompt = assemblePrompt({
+      id: 1,
+      message: 'q',
+      reference: referenceText(),
+    });
+    expect(prompt.indexOf(REFERENCE_OPEN)).toBeGreaterThan(0);
+  });
+});

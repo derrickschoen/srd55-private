@@ -20,6 +20,13 @@ function read(relative: string): Promise<string> {
   return readFile(join(repoRoot, relative), 'utf8');
 }
 
+/** The literal list the dist scan actually runs with, read out of the scanner. */
+async function forbiddenLiterals(): Promise<string[]> {
+  const scanner = await read('tools/assert-dist-clean.mjs');
+  const list = /const FORBIDDEN = \[([^\]]*)\]/.exec(scanner)?.[1] ?? '';
+  return [...list.matchAll(/'([^']+)'/g)].map((match) => match[1] ?? '');
+}
+
 async function typeScriptFilesUnder(directory: string): Promise<string[]> {
   const entries = await readdir(directory, { withFileTypes: true });
   const files: string[] = [];
@@ -102,13 +109,11 @@ describe('gate 4: the dist scan is chained onto the build and can actually fire'
   });
 
   it('looks for literals that really do occur in the bridge sources', async () => {
-    const scanner = await read('tools/assert-dist-clean.mjs');
-    const list = /const FORBIDDEN = \[([^\]]*)\]/.exec(scanner)?.[1] ?? '';
-    const forbidden = [...list.matchAll(/'([^']+)'/g)].map((match) => match[1]);
+    const forbidden = await forbiddenLiterals();
     expect(forbidden).toEqual([
       'AI_BRIDGE_SENTINEL',
       '/__ai/',
-      'x-ai-bridge-token',
+      'ai-bridge-token',
       'child_process',
     ]);
 
@@ -128,6 +133,30 @@ describe('gate 4: the dist scan is chained onto the build and can actually fire'
         literal ?? '',
       );
     }
+  });
+
+  it('covers the plugin’s HTML injection, not only its JS modules', async () => {
+    // The regression this pins, found by review and reproduced before fixing:
+    // the scan once forbade only the HEADER spelling `x-ai-bridge-token`, while
+    // the plugin's ONLY build-reachable side effect — `transformIndexHtml` —
+    // emits `<meta name="ai-bridge-token" content="…">`, a string in which that
+    // spelling does not occur. A dist carrying a live session secret in
+    // index.html therefore scanned clean. Every other forbidden literal lives in
+    // a JS module, so this hook was the one shape nothing covered.
+    //
+    // Built from the sources rather than restated, so renaming the meta name or
+    // narrowing the literal re-opens the hole and fails here.
+    const protocol = await read('src/ui/ai-chat/protocol.ts');
+    const metaName = /AI_BRIDGE_TOKEN_META = '([^']+)'/.exec(protocol)?.[1];
+    expect(metaName).toBeTruthy();
+    expect(await read('tools/ai-bridge/plugin.ts')).toContain(
+      'attrs: { name: AI_BRIDGE_TOKEN_META, content: token }',
+    );
+
+    const injected = `<meta name="${String(metaName)}" content="deadbeef">`;
+    const forbidden = await forbiddenLiterals();
+    const catches = forbidden.filter((literal) => injected.includes(literal));
+    expect(catches, `nothing in FORBIDDEN matches ${injected}`).not.toEqual([]);
   });
 
   it('keeps a negative control that proves the scan read shipped bytes', async () => {
