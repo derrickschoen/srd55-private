@@ -4,6 +4,7 @@ import {
   isEnumValue,
   selectionEligibilities,
   slotStates,
+  weaponMasteryProperties,
 } from '../domain/enums';
 import { canonicalizeJson } from './canonical-json';
 
@@ -18,6 +19,10 @@ const commandTypes = [
   'remove_source',
   'acknowledge_warning',
   'update_class',
+  'add_weapon',
+  'update_weapon',
+  'remove_weapon',
+  'set_weapon_mastery',
   'restore_snapshot',
 ] as const;
 
@@ -322,6 +327,139 @@ function validateUpdateClass(record: UnknownRecord): void {
   }
 }
 
+const weaponToggles = [
+  'finesse',
+  'heavy',
+  'light',
+  'loading',
+  'reach',
+  'thrown',
+  'two_handed',
+  'ammunition',
+] as const;
+
+const weaponFieldKeys = [
+  'name',
+  'damage_dice',
+  'damage_type',
+  'versatile_damage_dice',
+  ...weaponToggles,
+  'ammunition_kind',
+  'range_normal_feet',
+  'range_long_feet',
+  'mastery_property',
+  'other_properties',
+  'notes',
+] as const;
+
+function requiredBoolean(record: UnknownRecord, key: string): boolean {
+  if (!hasOwn(record, key) || typeof record[key] !== 'boolean') {
+    return invalid(`${key} must be a boolean.`);
+  }
+  return record[key] as boolean;
+}
+
+/** A nullable string, present as a key: `undefined` is not the same as `null`. */
+function nullableString(
+  record: UnknownRecord,
+  key: string,
+  maximum: number,
+): void {
+  if (!hasOwn(record, key)) {
+    invalid(`${key} is required; use null when it is not known.`);
+  }
+  if (record[key] === null) {
+    return;
+  }
+  requiredString(record, key, maximum);
+}
+
+function nullableRange(record: UnknownRecord, key: string): void {
+  if (!hasOwn(record, key)) {
+    invalid(`${key} is required; use null when the weapon has no range.`);
+  }
+  const value = record[key];
+  if (value === null) {
+    return;
+  }
+  if (!Number.isSafeInteger(value) || (value as number) < 0) {
+    invalid(`${key} must be a non-negative integer or null.`);
+  }
+}
+
+/**
+ * The weapon body, checked field by field.
+ *
+ * EVERY key must be present, `null` included. A partial body would let a
+ * caller blank a field it never meant to touch, because `update_weapon`
+ * replaces the whole row — and "the key was missing" and "the user cleared it"
+ * would then be indistinguishable.
+ */
+function validateWeaponFields(value: unknown): void {
+  const weapon = objectValue(value, 'Weapon must be an object.');
+  rejectUnknown(weapon, weaponFieldKeys, 'weapon');
+
+  nonEmptyString(weapon, 'name', 120);
+  // Free text, not a dice pattern: the source's own Blowgun does `1` damage and
+  // a user may write whatever their table agreed on.
+  nullableString(weapon, 'damage_dice', 40);
+  nullableString(weapon, 'damage_type', 40);
+  nullableString(weapon, 'versatile_damage_dice', 40);
+  for (const toggle of weaponToggles) {
+    requiredBoolean(weapon, toggle);
+  }
+  nullableString(weapon, 'ammunition_kind', 40);
+  nullableRange(weapon, 'range_normal_feet');
+  nullableRange(weapon, 'range_long_feet');
+  if (!hasOwn(weapon, 'mastery_property')) {
+    invalid('mastery_property is required; use null for none.');
+  }
+  if (
+    weapon.mastery_property !== null &&
+    !isEnumValue(weaponMasteryProperties, weapon.mastery_property)
+  ) {
+    invalid('Unknown weapon mastery property.');
+  }
+  nullableString(weapon, 'other_properties', 500);
+  nullableString(weapon, 'notes', 2000);
+}
+
+function validateAddWeapon(record: UnknownRecord): void {
+  rejectUnknown(record, [
+    'type',
+    'weapon',
+    'weapon_id',
+    'mastery_selected',
+    'reason',
+  ]);
+  validateWeaponFields(record.weapon);
+  // Both optional keys exist only on the inverse of a `remove_weapon`, so they
+  // are checked when present and never required.
+  if (hasOwn(record, 'weapon_id')) {
+    positiveInteger(record, 'weapon_id');
+  }
+  if (hasOwn(record, 'mastery_selected')) {
+    requiredBoolean(record, 'mastery_selected');
+  }
+}
+
+function validateUpdateWeapon(record: UnknownRecord): void {
+  rejectUnknown(record, ['type', 'weapon_id', 'weapon', 'reason']);
+  positiveInteger(record, 'weapon_id');
+  validateWeaponFields(record.weapon);
+}
+
+function validateRemoveWeapon(record: UnknownRecord): void {
+  rejectUnknown(record, ['type', 'weapon_id', 'reason']);
+  positiveInteger(record, 'weapon_id');
+}
+
+function validateSetWeaponMastery(record: UnknownRecord): void {
+  rejectUnknown(record, ['type', 'weapon_id', 'selected', 'reason']);
+  positiveInteger(record, 'weapon_id');
+  requiredBoolean(record, 'selected');
+}
+
 function validateRestoreSnapshot(record: UnknownRecord): void {
   rejectUnknown(record, ['type', 'snapshot', 'integrity', 'reason']);
   const snapshot = objectValue(
@@ -365,6 +503,18 @@ function validateByType(
       return validateAcknowledgeWarning(record);
     case 'update_class':
       validateUpdateClass(record);
+      return record;
+    case 'add_weapon':
+      validateAddWeapon(record);
+      return record;
+    case 'update_weapon':
+      validateUpdateWeapon(record);
+      return record;
+    case 'remove_weapon':
+      validateRemoveWeapon(record);
+      return record;
+    case 'set_weapon_mastery':
+      validateSetWeaponMastery(record);
       return record;
     case 'restore_snapshot':
       validateRestoreSnapshot(record);

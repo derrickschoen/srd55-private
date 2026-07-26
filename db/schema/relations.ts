@@ -37,6 +37,12 @@ import {
   warning_acknowledgements,
   wizard_spellbook_entries,
 } from './character';
+import {
+  character_weapons,
+  class_weapon_mastery_counts,
+  class_weapon_mastery_grants,
+  weapon_templates,
+} from './weapons';
 
 /**
  * THE OBJECT GRAPH, DECLARED.
@@ -69,7 +75,29 @@ export const charactersRelations = relations(characters, ({ many }) => ({
   rule_overrides: many(character_rule_overrides),
   change_log_entries: many(change_log),
   operations: many(character_operations),
+  weapons: many(character_weapons),
 }));
+
+export const characterWeaponsRelations = relations(
+  character_weapons,
+  ({ one }) => ({
+    character: one(characters, {
+      fields: [character_weapons.character_id],
+      references: [characters.id],
+    }),
+    // NO `template` edge, and its absence is the point: by D1b a character's
+    // weapon holds VALUES copied from a template, never a reference to one.
+    // There is no `weapon_template_id` column for a relation to sit on, and
+    // declaring one would fail the reverse direction of the relations test —
+    // which is exactly the protection working.
+  }),
+);
+
+/**
+ * The weapon catalog points at nothing and nothing points at it. It is reached
+ * by name from the picker and copied from; that is the whole of its coupling.
+ */
+export const weaponTemplatesRelations = relations(weapon_templates, () => ({}));
 
 export const characterSourceInstancesRelations = relations(
   character_source_instances,
@@ -364,6 +392,28 @@ export const classDefinitionsRelations = relations(
     progressions: many(class_progressions),
     subclasses: many(subclass_definitions),
     class_levels: many(character_class_levels),
+    weapon_mastery_grant: many(class_weapon_mastery_grants),
+    weapon_mastery_counts: many(class_weapon_mastery_counts),
+  }),
+);
+
+export const classWeaponMasteryGrantsRelations = relations(
+  class_weapon_mastery_grants,
+  ({ one }) => ({
+    class_definition: one(class_definitions, {
+      fields: [class_weapon_mastery_grants.class_definition_id],
+      references: [class_definitions.id],
+    }),
+  }),
+);
+
+export const classWeaponMasteryCountsRelations = relations(
+  class_weapon_mastery_counts,
+  ({ one }) => ({
+    class_definition: one(class_definitions, {
+      fields: [class_weapon_mastery_counts.class_definition_id],
+      references: [class_definitions.id],
+    }),
   }),
 );
 

@@ -8,6 +8,13 @@ import { schemaSources } from '../helpers/schema-sources';
 
 type SqlRow = Record<string, string | number | bigint | null>;
 
+/**
+ * THE LARAVEL 38. Transcribed from the Laravel migrations, frozen, and NEVER
+ * regenerated from this project's own output. `laravelColumnMetadataHash` below
+ * is computed over exactly these tables and no others, so the parity claim
+ * survives the arrival of native tables undiluted: any drift in a Laravel
+ * table's columns, types, nullability, defaults or order still moves the hash.
+ */
 const expectedColumns: Record<string, string[]> = {
   background_definitions: [
     'id', 'content_key', 'name', 'rules_edition', 'category', 'repeatable',
@@ -159,8 +166,70 @@ const expectedColumns: Record<string, string[]> = {
 // SHA-256 of the ordered PRAGMA table_info metadata produced by running the
 // Laravel migrations against an in-memory SQLite database. It covers declared
 // types, nullability, defaults, primary keys, column order, and all 38 tables.
+//
+// UNCHANGED by the native tables below, and that is proved rather than assumed:
+// the signature is computed over `tables.filter(isLaravelTable)`, so a native
+// table sorting before, between or after the Laravel names contributes nothing
+// to it. Regenerating this constant is forbidden — if it moves, a Laravel table
+// changed and THAT is the bug.
 const laravelColumnMetadataHash =
   'fa0e4e9f2af9531e8b66b296660b5db7e28a5c6c2ceda00859c904fe6a4d1b11';
+
+/**
+ * THE NATIVE TABLES — everything this project added that reproduces no Laravel
+ * migration.
+ *
+ * Held to the same standard as the Laravel 38 and by the same means: these
+ * lists are hand-transcribed from `.claude/plans/weapons-design.md` §4, which
+ * was written before `db/schema/weapons.ts` existed. They are an expectation,
+ * not an echo, and they must not be regenerated from `PRAGMA table_info`
+ * either — a test that reprints our own output cannot fail.
+ */
+const expectedNativeColumns: Record<string, string[]> = {
+  character_weapons: [
+    'id', 'character_id', 'name', 'damage_dice', 'damage_type',
+    'versatile_damage_dice', 'finesse', 'heavy', 'light', 'loading', 'reach',
+    'thrown', 'two_handed', 'ammunition', 'ammunition_kind',
+    'range_normal_feet', 'range_long_feet', 'mastery_property',
+    'mastery_selected', 'other_properties', 'notes', 'created_at',
+    'updated_at',
+  ],
+  class_weapon_mastery_counts: [
+    'id', 'class_definition_id', 'class_level', 'mastery_count', 'created_at',
+    'updated_at',
+  ],
+  class_weapon_mastery_grants: [
+    'id', 'class_definition_id', 'grant', 'created_at', 'updated_at',
+  ],
+  weapon_templates: [
+    'id', 'content_key', 'rules_edition', 'name', 'srd_group', 'damage_dice',
+    'damage_type', 'versatile_damage_dice', 'finesse', 'heavy', 'light',
+    'loading', 'reach', 'thrown', 'two_handed', 'ammunition',
+    'ammunition_kind', 'range_normal_feet', 'range_long_feet',
+    'mastery_property', 'other_properties', 'created_at', 'updated_at',
+  ],
+};
+
+const expectedNativeNotNull: Record<string, string[]> = {
+  // `damage_dice`, `damage_type` and `mastery_property` are NULLABLE here and
+  // NOT NULL on the template: a half-entered user weapon is a first-class
+  // state, and an invented weapon need not have a mastery property at all.
+  character_weapons: [
+    'id', 'character_id', 'name', 'finesse', 'heavy', 'light', 'loading',
+    'reach', 'thrown', 'two_handed', 'ammunition', 'mastery_selected',
+  ],
+  class_weapon_mastery_counts: [
+    'id', 'class_definition_id', 'class_level', 'mastery_count',
+  ],
+  class_weapon_mastery_grants: ['id', 'class_definition_id', 'grant'],
+  weapon_templates: [
+    'id', 'content_key', 'rules_edition', 'name', 'srd_group', 'damage_dice',
+    'damage_type', 'finesse', 'heavy', 'light', 'loading', 'reach', 'thrown',
+    'two_handed', 'ammunition', 'mastery_property',
+  ],
+};
+
+const laravelTableNames = new Set(Object.keys(expectedColumns));
 
 const expectedNotNull: Record<string, string[]> = {
   background_definitions: ['id', 'content_key', 'name', 'rules_edition', 'repeatable'],
@@ -223,6 +292,17 @@ const expectedNotNull: Record<string, string[]> = {
   wizard_spellbook_entries: ['id', 'character_id', 'spell_version_id'],
 };
 
+/** Every table in the database, Laravel and native alike. */
+const allExpectedColumns: Record<string, string[]> = {
+  ...expectedColumns,
+  ...expectedNativeColumns,
+};
+
+const allExpectedNotNull: Record<string, string[]> = {
+  ...expectedNotNull,
+  ...expectedNativeNotNull,
+};
+
 const expectedNamedIndexes: Record<string, string> = {
   background_definitions_content_key_unique:
     'background_definitions:content_key:unique',
@@ -238,6 +318,12 @@ const expectedNamedIndexes: Record<string, string> = {
     'character_operations:character_id,resulting_revision',
   character_operations_operation_uuid_unique:
     'character_operations:operation_uuid:unique',
+  character_weapons_character_id_index: 'character_weapons:character_id',
+  class_weapon_mastery_counts_class_definition_id_class_level_unique:
+    'class_weapon_mastery_counts:class_definition_id,class_level:unique',
+  class_weapon_mastery_grants_class_definition_id_unique:
+    'class_weapon_mastery_grants:class_definition_id:unique',
+  weapon_templates_content_key_unique: 'weapon_templates:content_key:unique',
   character_rule_overrides_character_id_rule_key_unique:
     'character_rule_overrides:character_id,rule_key:unique',
   character_class_levels_character_id_class_definition_id_unique:
@@ -340,6 +426,9 @@ const expectedUniqueGroups: Record<string, string[]> = {
   character_spell_preferences: ['character_id,spell_version_id'],
   class_definitions: ['content_key', 'name,rules_edition'],
   class_progressions: ['class_definition_id,class_level'],
+  class_weapon_mastery_counts: ['class_definition_id,class_level'],
+  class_weapon_mastery_grants: ['class_definition_id'],
+  weapon_templates: ['content_key'],
   failed_jobs: ['uuid'],
   feat_definitions: ['content_key', 'name,rules_edition'],
   species_definitions: ['content_key', 'name,rules_edition'],
@@ -379,6 +468,19 @@ const expectedDefaults: Record<string, Record<string, string>> = {
     progression_type: "'none'", supports_ritual_casting: "'0'",
   },
   class_progressions: { cantrips_known: "'0'", prepared_count: "'0'" },
+  // The eight property toggles plus the mastery flag. Every one of them
+  // defaults to off, because "this weapon is not Finesse" is the overwhelming
+  // majority case and a NULL there would mean nothing a user could act on.
+  character_weapons: {
+    ammunition: "'0'", finesse: "'0'", heavy: "'0'", light: "'0'",
+    loading: "'0'", mastery_selected: "'0'", reach: "'0'", thrown: "'0'",
+    two_handed: "'0'",
+  },
+  weapon_templates: {
+    ammunition: "'0'", finesse: "'0'", heavy: "'0'", light: "'0'",
+    loading: "'0'", reach: "'0'", rules_edition: "'2024'", thrown: "'0'",
+    two_handed: "'0'",
+  },
   failed_jobs: { failed_at: 'CURRENT_TIMESTAMP' },
   feat_definitions: { repeatable: "'0'" },
   species_definitions: { repeatable: "'0'" },
@@ -408,6 +510,13 @@ const expectedForeignKeys: Record<string, string[]> = {
     'subclass_definition_id,class_definition_id->subclass_definitions.id,class_definition_id|NO ACTION',
   ],
   character_operations: ['character_id->characters.id|CASCADE'],
+  character_weapons: ['character_id->characters.id|CASCADE'],
+  class_weapon_mastery_counts: [
+    'class_definition_id->class_definitions.id|CASCADE',
+  ],
+  class_weapon_mastery_grants: [
+    'class_definition_id->class_definitions.id|CASCADE',
+  ],
   character_rule_overrides: ['character_id->characters.id|CASCADE'],
   character_save_points: ['character_id->characters.id|CASCADE'],
   character_source_instances: [
@@ -515,7 +624,7 @@ afterAll(() => {
 // rather than assumed.
 for (const [sourceLabel, schemaSql] of schemaSources) {
 describe(`complete final migration schema (${sourceLabel})`, () => {
-  it('creates the exact 38-table final inventory and every final column', () => {
+  it('creates the exact 38-table Laravel inventory plus the named native tables, and every column of both', () => {
     const db = openDb(schemaSql);
     const tables = db.selectValues(
       `SELECT name
@@ -524,8 +633,12 @@ describe(`complete final migration schema (${sourceLabel})`, () => {
        ORDER BY name`,
     );
 
-    expect(tables).toEqual(Object.keys(expectedColumns).sort());
-    for (const [table, columns] of Object.entries(expectedColumns)) {
+    // The claim is no longer "exactly the Laravel migrations" but "exactly the
+    // Laravel migrations PLUS these named native tables". A table that is in
+    // neither list still fails, which is the property that mattered.
+    expect(tables).toEqual(Object.keys(allExpectedColumns).sort());
+    expect(Object.keys(expectedColumns)).toHaveLength(38);
+    for (const [table, columns] of Object.entries(allExpectedColumns)) {
       const metadata = rows(db, `PRAGMA table_info("${table}")`);
       expect(
         metadata.map((row) => row.name),
@@ -536,9 +649,17 @@ describe(`complete final migration schema (${sourceLabel})`, () => {
           .filter((row) => Number(row.notnull) === 1)
           .map((row) => String(row.name)),
         `NOT NULL columns for ${table}`,
-      ).toEqual(expectedNotNull[table]);
+      ).toEqual(allExpectedNotNull[table]);
     }
-    const metadataSignature = tables.map((table) => [
+    // Computed over the Laravel subset ONLY. Filtering rather than rehashing is
+    // what lets the frozen constant stay frozen: the native tables are held to
+    // the hand-written expectations above instead, and no Laravel table's
+    // metadata can drift without moving this.
+    const laravelTables = tables.filter((table) =>
+      laravelTableNames.has(String(table)),
+    );
+    expect(laravelTables).toHaveLength(38);
+    const metadataSignature = laravelTables.map((table) => [
       table,
       rows(db, `PRAGMA table_info("${String(table)}")`).map((column) => [
         column.name,
@@ -582,7 +703,7 @@ describe(`complete final migration schema (${sourceLabel})`, () => {
     }
     expect(actualNamedIndexes).toEqual(expectedNamedIndexes);
 
-    for (const table of Object.keys(expectedColumns)) {
+    for (const table of Object.keys(allExpectedColumns)) {
       expect(uniqueGroups(db, table), `unique keys for ${table}`).toEqual(
         [...(expectedUniqueGroups[table] ?? [])].sort(),
       );
@@ -600,7 +721,7 @@ describe(`complete final migration schema (${sourceLabel})`, () => {
 
   it('declares every migrated foreign key with its composite shape and action', () => {
     const db = openDb(schemaSql);
-    for (const table of Object.keys(expectedColumns)) {
+    for (const table of Object.keys(allExpectedColumns)) {
       expect(foreignKeys(db, table), `foreign keys for ${table}`).toEqual(
         [...(expectedForeignKeys[table] ?? [])].sort(),
       );

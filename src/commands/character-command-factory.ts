@@ -18,11 +18,25 @@ import { UpdateAbilityCommand } from './update-ability';
 import { UpdateCharacterRulesCommand } from './update-character-rules';
 import { UpdateClassCommand } from './update-class';
 import { UpdateSourceConfigCommand } from './update-source-config';
+import {
+  AddWeaponCommand,
+  RemoveWeaponCommand,
+  SetWeaponMasteryCommand,
+  UpdateWeaponCommand,
+} from './weapons';
 
 export interface ConstructedCharacterCommand {
   readonly actionType: string;
   apply(characterId: number): void | Promise<void>;
   inverse(): CharacterCommandPayload | Promise<CharacterCommandPayload>;
+  /**
+   * Opt-in marker: this command's inverse is only knowable AFTER `apply()`, so
+   * the executor stores `inverse()` rather than what `prepareInverse` built.
+   *
+   * Optional and absent on every pre-existing command, whose `inverse()` is
+   * async and unused. See `ResolvesInverseAfterApply` in `./weapons.ts`.
+   */
+  readonly invertsAfterApply?: true;
 }
 
 function requiresIntegrity(payload: CharacterCommandPayload): boolean {
@@ -104,6 +118,14 @@ export class CharacterCommandFactory {
         );
       case 'update_class':
         return new UpdateClassCommand(this.db, payload, this.integrity);
+      case 'add_weapon':
+        return new AddWeaponCommand(this.db, payload);
+      case 'update_weapon':
+        return new UpdateWeaponCommand(this.db, payload);
+      case 'remove_weapon':
+        return new RemoveWeaponCommand(this.db, payload);
+      case 'set_weapon_mastery':
+        return new SetWeaponMasteryCommand(this.db, payload);
       case 'restore_snapshot':
         return new RestoreSnapshotCommand(
           this.db,

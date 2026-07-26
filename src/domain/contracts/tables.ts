@@ -86,6 +86,12 @@ export type TableRole =
   | 'catalog_class'
   /** Feats, species, backgrounds. */
   | 'catalog_source'
+  /**
+   * The SRD weapon catalog. Its own member rather than `catalog_source`: a
+   * weapon template is not a feat, species or background, and labelling it one
+   * to avoid a one-line union change would make the role field lie.
+   */
+  | 'catalog_weapon'
   /** Laravel-only, nothing reads or writes it. */
   | 'infrastructure';
 
@@ -250,6 +256,45 @@ export const TABLE_SCOPES = {
     backupReference: false,
   },
 
+  /**
+   * WEAPONS, AND A DELIBERATE, DOCUMENTED GAP — read this before "fixing" it.
+   *
+   * `backup` and `share` are FALSE, and that is not the classification this
+   * table deserves. A character's weapons are their own data and belong in a
+   * portable export; the honest value is `true` on both.
+   *
+   * They are false because turning either on cannot be done from here.
+   * `backup: true` requires hand-written arms in `src/backup/character-backup.ts`
+   * (`importCharacterTables` writes each table with its own `insertPortableRow`
+   * call and its own reference resolution) and a format-version bump in
+   * `src/backup/backup-version.ts`, since `assertExactKeys` makes the table set
+   * part of the accepted document shape. Both files are owned by another track
+   * and were off-limits to the one that added weapons, so the change was
+   * reported rather than smuggled in.
+   *
+   * WHAT MAKES THIS SAFE RATHER THAN SILENT. The gap is not left for a user to
+   * discover: the notice in `src/rules/weapon-portability.ts` is rendered in
+   * the weapons panel and emitted in the agent reference, and
+   * `tests/unit/contracts/weapon-scopes.test.ts` pins the exclusion so that the
+   * day someone sets these to `true` they must also delete the notice. Data a
+   * user was TOLD is not exported is a limitation; data silently dropped from
+   * an export is the bug.
+   *
+   * `snapshot` follows from `backup` and is not an independent judgement:
+   * `_SnapshotSubsetOfBackup` below makes `snapshot: true` un-typeable while
+   * `backup` is false. Undo/redo still covers every weapon change, through
+   * EXPLICIT INVERSE COMMANDS rather than snapshot restore — see
+   * `src/commands/weapons.ts`.
+   */
+  character_weapons: {
+    role: 'character_owned',
+    snapshot: false,
+    backupDirect: false,
+    backup: false,
+    share: false,
+    backupReference: false,
+  },
+
   // --- the spell catalog -------------------------------------------------
   spell_identities: {
     role: 'catalog_spell',
@@ -363,6 +408,42 @@ export const TABLE_SCOPES = {
     backupReference: false,
   },
   subclass_progressions: {
+    role: 'catalog_class',
+    snapshot: false,
+    backupDirect: false,
+    backup: false,
+    share: false,
+    backupReference: false,
+  },
+
+  /**
+   * `backupReference: false`, and this is the classification the design flagged
+   * as uncertain. Settled by reading `ReferenceKind`'s own definition: a
+   * reference kind is "a catalog table backups RESOLVE CHARACTER ROWS AGAINST
+   * BY ID". By D1b a character's weapon holds no template id — the picker
+   * copies values and the link is severed — so there is no id for a backup to
+   * resolve and nothing for the kind to do. Setting it true would add a key to
+   * `CharacterBackupReferences` that no document could ever populate.
+   */
+  weapon_templates: {
+    role: 'catalog_weapon',
+    snapshot: false,
+    backupDirect: false,
+    backup: false,
+    share: false,
+    backupReference: false,
+  },
+  // Mastery content is class catalog: same role as the progression tables, and
+  // not reference kinds for the same reason they are not.
+  class_weapon_mastery_grants: {
+    role: 'catalog_class',
+    snapshot: false,
+    backupDirect: false,
+    backup: false,
+    share: false,
+    backupReference: false,
+  },
+  class_weapon_mastery_counts: {
     role: 'catalog_class',
     snapshot: false,
     backupDirect: false,
@@ -581,9 +662,12 @@ export const APPLICATION_TABLES = order<AnyTableName>()([
   'character_save_points',
   'character_source_instances',
   'character_spell_preferences',
+  'character_weapons',
   'characters',
   'class_definitions',
   'class_progressions',
+  'class_weapon_mastery_counts',
+  'class_weapon_mastery_grants',
   'failed_jobs',
   'feat_definitions',
   'job_batches',
@@ -608,6 +692,7 @@ export const APPLICATION_TABLES = order<AnyTableName>()([
   'subclass_progressions',
   'users',
   'warning_acknowledgements',
+  'weapon_templates',
   'wizard_spellbook_entries',
 ]);
 

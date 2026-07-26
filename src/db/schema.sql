@@ -149,6 +149,35 @@ CREATE TABLE `character_spell_preferences` (
 );
 
 CREATE UNIQUE INDEX `character_spell_preferences_character_id_spell_version_id_unique` ON `character_spell_preferences` (`character_id`,`spell_version_id`);
+CREATE TABLE `character_weapons` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`character_id` integer NOT NULL,
+	`name` VARCHAR NOT NULL,
+	`damage_dice` VARCHAR,
+	`damage_type` VARCHAR,
+	`versatile_damage_dice` VARCHAR,
+	`finesse` TINYINT(1) DEFAULT '0' NOT NULL,
+	`heavy` TINYINT(1) DEFAULT '0' NOT NULL,
+	`light` TINYINT(1) DEFAULT '0' NOT NULL,
+	`loading` TINYINT(1) DEFAULT '0' NOT NULL,
+	`reach` TINYINT(1) DEFAULT '0' NOT NULL,
+	`thrown` TINYINT(1) DEFAULT '0' NOT NULL,
+	`two_handed` TINYINT(1) DEFAULT '0' NOT NULL,
+	`ammunition` TINYINT(1) DEFAULT '0' NOT NULL,
+	`ammunition_kind` VARCHAR,
+	`range_normal_feet` integer,
+	`range_long_feet` integer,
+	`mastery_property` VARCHAR,
+	`mastery_selected` TINYINT(1) DEFAULT '0' NOT NULL,
+	`other_properties` TEXT,
+	`notes` TEXT,
+	`created_at` DATETIME,
+	`updated_at` DATETIME,
+	FOREIGN KEY (`character_id`) REFERENCES `characters`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "character_weapons_mastery_requires_property_check" CHECK(mastery_selected = 0 OR mastery_property IS NOT NULL)
+);
+
+CREATE INDEX `character_weapons_character_id_index` ON `character_weapons` (`character_id`);
 CREATE TABLE `characters` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`name` VARCHAR NOT NULL,
@@ -202,6 +231,27 @@ CREATE TABLE `class_progressions` (
 );
 
 CREATE UNIQUE INDEX `class_progressions_class_definition_id_class_level_unique` ON `class_progressions` (`class_definition_id`,`class_level`);
+CREATE TABLE `class_weapon_mastery_counts` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`class_definition_id` integer NOT NULL,
+	`class_level` integer NOT NULL,
+	`mastery_count` integer NOT NULL,
+	`created_at` DATETIME,
+	`updated_at` DATETIME,
+	FOREIGN KEY (`class_definition_id`) REFERENCES `class_definitions`(`id`) ON UPDATE no action ON DELETE cascade
+);
+
+CREATE UNIQUE INDEX `class_weapon_mastery_counts_class_definition_id_class_level_unique` ON `class_weapon_mastery_counts` (`class_definition_id`,`class_level`);
+CREATE TABLE `class_weapon_mastery_grants` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`class_definition_id` integer NOT NULL,
+	`grant` VARCHAR NOT NULL,
+	`created_at` DATETIME,
+	`updated_at` DATETIME,
+	FOREIGN KEY (`class_definition_id`) REFERENCES `class_definitions`(`id`) ON UPDATE no action ON DELETE cascade
+);
+
+CREATE UNIQUE INDEX `class_weapon_mastery_grants_class_definition_id_unique` ON `class_weapon_mastery_grants` (`class_definition_id`);
 CREATE TABLE `failed_jobs` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`uuid` VARCHAR NOT NULL,
@@ -538,6 +588,33 @@ CREATE TABLE `warning_acknowledgements` (
 );
 
 CREATE UNIQUE INDEX `warning_acknowledgements_character_id_warning_fingerprint_unique` ON `warning_acknowledgements` (`character_id`,`warning_fingerprint`);
+CREATE TABLE `weapon_templates` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`content_key` VARCHAR NOT NULL,
+	`rules_edition` VARCHAR DEFAULT '2024' NOT NULL,
+	`name` VARCHAR NOT NULL,
+	`srd_group` VARCHAR NOT NULL,
+	`damage_dice` VARCHAR NOT NULL,
+	`damage_type` VARCHAR NOT NULL,
+	`versatile_damage_dice` VARCHAR,
+	`finesse` TINYINT(1) DEFAULT '0' NOT NULL,
+	`heavy` TINYINT(1) DEFAULT '0' NOT NULL,
+	`light` TINYINT(1) DEFAULT '0' NOT NULL,
+	`loading` TINYINT(1) DEFAULT '0' NOT NULL,
+	`reach` TINYINT(1) DEFAULT '0' NOT NULL,
+	`thrown` TINYINT(1) DEFAULT '0' NOT NULL,
+	`two_handed` TINYINT(1) DEFAULT '0' NOT NULL,
+	`ammunition` TINYINT(1) DEFAULT '0' NOT NULL,
+	`ammunition_kind` VARCHAR,
+	`range_normal_feet` integer,
+	`range_long_feet` integer,
+	`mastery_property` VARCHAR NOT NULL,
+	`other_properties` TEXT,
+	`created_at` DATETIME,
+	`updated_at` DATETIME
+);
+
+CREATE UNIQUE INDEX `weapon_templates_content_key_unique` ON `weapon_templates` (`content_key`);
 CREATE TABLE `wizard_spellbook_entries` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`character_id` integer NOT NULL,

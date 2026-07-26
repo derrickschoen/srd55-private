@@ -133,7 +133,7 @@ afterAll(() => {
 });
 
 describe('declared relations match the foreign keys', () => {
-  it('budgets 33 constraints across 35 PRAGMA rows', () => {
+  it('budgets 36 constraints across 38 PRAGMA rows', () => {
     const tables = db
       .selectValues(
         `SELECT name FROM sqlite_schema
@@ -146,8 +146,12 @@ describe('declared relations match the foreign keys', () => {
       0,
     );
 
-    expect(constraintEdges(db)).toHaveLength(33);
-    expect(rowCount).toBe(35);
+    // 33 Laravel-derived constraints plus the three the weapon tables add:
+    // character_weapons -> characters, and one per mastery table into
+    // class_definitions. Still only two of them composite, so the row count
+    // rises by exactly three as well.
+    expect(constraintEdges(db)).toHaveLength(36);
+    expect(rowCount).toBe(38);
   });
 
   it('declares a relation for every foreign key, and a foreign key for every relation', () => {

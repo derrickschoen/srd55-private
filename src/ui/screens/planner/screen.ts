@@ -42,6 +42,11 @@ import {
   type PlannerHistoryActions,
 } from './history';
 import { renderWarnings } from './warnings';
+import {
+  renderWeapons,
+  type PlannerWeaponActions,
+} from './weapons';
+import type { WeaponFields } from '../../../domain/command-contracts';
 
 export interface PlannerCommandClient {
   execute(
@@ -262,12 +267,27 @@ function restoreFocus(root: HTMLElement, focusKey: string): void {
   }
 }
 
+/**
+ * Which weapon form is open, if any.
+ *
+ * Held next to the grid filters rather than in the session, for the same reason
+ * they are: it is view state, it must survive a re-render, and it must NOT
+ * survive navigating away.
+ */
+export type WeaponEditing = number | 'new' | null;
+
+interface PlannerViewState {
+  readonly filters: GridFilters;
+  weaponEditing: WeaponEditing;
+}
+
 function renderPlanner(
   context: ScreenContext,
   session: PlannerSession,
-  filters: GridFilters,
+  view: PlannerViewState,
   rerender: () => void,
 ): () => void {
+  const filters = view.filters;
   const workspace = session.workspace;
   if (workspace === null) throw new Error('Planner workspace is not loaded.');
   const priorFocus = (
@@ -474,6 +494,44 @@ function renderPlanner(
       disabled: session.saving,
     }),
   );
+  const weaponActions: PlannerWeaponActions = {
+    addWeapon: (weapon: WeaponFields) =>
+      void mutate(() => session.execute({ type: 'add_weapon', weapon })),
+    updateWeapon: (weaponId: number, weapon: WeaponFields) =>
+      void mutate(() =>
+        session.execute({
+          type: 'update_weapon',
+          weapon_id: weaponId,
+          weapon,
+        }),
+      ),
+    removeWeapon: (weaponId: number, name: string) =>
+      confirmAction(`Remove ${name} from this character?`, () =>
+        void mutate(() =>
+          session.execute({ type: 'remove_weapon', weapon_id: weaponId }),
+        ),
+      ),
+    setWeaponMastery: (weaponId: number, selected: boolean) =>
+      void mutate(() =>
+        session.execute({
+          type: 'set_weapon_mastery',
+          weapon_id: weaponId,
+          selected,
+        }),
+      ),
+  };
+  primary.append(
+    renderWeapons({
+      panel: workspace.weapons,
+      actions: weaponActions,
+      disabled: session.saving,
+      editing: view.weaponEditing,
+      onEditingChanged: (editing) => {
+        view.weaponEditing = editing;
+        rerender();
+      },
+    }),
+  );
   const grid = renderPlannerGrid({
     workspace,
     filters,
@@ -570,13 +628,16 @@ export const screen = defineScreen({
       createCommandsClient(context.rpc),
     );
     await session.load();
-    const filters: GridFilters = { ...defaultGridFilters };
+    const view: PlannerViewState = {
+      filters: { ...defaultGridFilters },
+      weaponEditing: null,
+    };
     let destroyGrid: (() => void) | undefined;
     let active = true;
     const rerender = (): void => {
       if (!active) return;
       destroyGrid?.();
-      destroyGrid = renderPlanner(context, session, filters, rerender);
+      destroyGrid = renderPlanner(context, session, view, rerender);
     };
     rerender();
     const keyboard = (event: KeyboardEvent): void => {

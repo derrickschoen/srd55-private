@@ -61,6 +61,28 @@ const autoIncrementTables = [
 ] as const;
 
 /**
+ * The NATIVE tables — no Laravel migration produced them. Kept in their own
+ * list so the 33-name provenance claim above is not quietly turned into a
+ * 37-name one: those 33 came from the pre-Drizzle hand-written artifact, and
+ * these four come from `db/schema/weapons.ts`.
+ *
+ * They carry AUTOINCREMENT for the same reason every other surrogate-key table
+ * does — the id-reuse hazard `sqlite_sequence` exists to close does not care
+ * which migration a table came from.
+ */
+const nativeAutoIncrementTables = [
+  'character_weapons',
+  'class_weapon_mastery_counts',
+  'class_weapon_mastery_grants',
+  'weapon_templates',
+] as const;
+
+const allAutoIncrementTables = [
+  ...autoIncrementTables,
+  ...nativeAutoIncrementTables,
+].sort();
+
+/**
  * The five tables whose primary key is a natural key, not a rowid alias, and
  * which therefore cannot carry AUTOINCREMENT. Pinned explicitly so that
  * "33 of 38" is asserted from both directions.
@@ -95,7 +117,7 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
       return db;
     }
 
-    it('declares AUTOINCREMENT on exactly the 33 surrogate-key tables', () => {
+    it('declares AUTOINCREMENT on exactly the 33 Laravel and 4 native surrogate-key tables', () => {
       const db = openDb();
       const declared = db
         .selectValues(
@@ -108,8 +130,9 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
         )
         .map(String);
 
-      expect(declared).toEqual([...autoIncrementTables]);
-      expect(declared).toHaveLength(33);
+      expect(declared).toEqual(allAutoIncrementTables);
+      expect(declared).toHaveLength(37);
+      expect(autoIncrementTables).toHaveLength(33);
 
       const withoutAutoIncrement = db
         .selectValues(

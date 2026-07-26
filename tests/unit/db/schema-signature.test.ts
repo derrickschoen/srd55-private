@@ -35,17 +35,31 @@ describe('pre-Drizzle database images', () => {
     const storage = new MemoryDatabaseStorage(sqlite3);
     // Build an image with the OLD artifact by handing the old SQL to a
     // lifecycle, then hand the SAME storage to a lifecycle using the new one.
-    const legacy = new DatabaseLifecycle(sqlite3, storage, preDrizzleSchema);
-    legacy.open();
-    legacy.database.exec("INSERT INTO characters (name) VALUES ('Legacy')");
-    legacy.close();
+    //
+    // Written WITHOUT `DatabaseLifecycle`, deliberately. The pre-Drizzle
+    // artifact predates the native weapon tables, so `applicationTables` — now
+    // derived from the current schema — rejects it at open. Building the
+    // fixture through the lifecycle would mean asserting that an old image
+    // opens cleanly, which is the opposite of what this file claims.
+    const legacy = new sqlite3.oo1.DB(':memory:', 'c');
+    try {
+      legacy.exec(preDrizzleSchema);
+      legacy.exec("INSERT INTO characters (name) VALUES ('Legacy')");
+      await storage.replaceFile(
+        sqlite3.capi.sqlite3_js_db_export(legacy).slice(),
+      );
+    } finally {
+      legacy.close();
+    }
     return storage;
   }
 
-  it('is byte-different from the generated artifact yet declares the same table count', () => {
+  it('is byte-different from the generated artifact and now declares four fewer tables', () => {
     expect(preDrizzleSchema).not.toBe(schema);
-    // Both still declare 38 tables — the difference is presentation, which is
-    // precisely why the signature check is the thing that trips.
+    // The old artifact declared the same 38 tables in a different presentation,
+    // which is why the SIGNATURE was the thing that tripped. The generated
+    // artifact has since gained the four native weapon tables, so an old image
+    // is now short of `applicationTables` as well — it fails EARLIER, not less.
     //
     // This is a COUNT, not an equivalence proof, and does not claim to be one.
     // The Laravel-derived oracle in `tests/unit/schema.test.ts` runs against
@@ -53,8 +67,8 @@ describe('pre-Drizzle database images', () => {
     // defaults and foreign keys.
     const tableCount = (sql: string) =>
       [...sql.matchAll(/CREATE TABLE/g)].length;
-    expect(tableCount(preDrizzleSchema)).toBe(tableCount(schema));
-    expect(tableCount(schema)).toBe(38);
+    expect(tableCount(preDrizzleSchema)).toBe(38);
+    expect(tableCount(schema)).toBe(42);
   });
 
   it('rejects a pre-Drizzle image at open instead of half-working', async () => {
@@ -66,8 +80,12 @@ describe('pre-Drizzle database images', () => {
     if (boot.status !== 'schema_mismatch') {
       throw new Error('unreachable');
     }
+    // The missing-tables check runs before the signature comparison, so an
+    // image predating the native weapon tables is now named for what it is
+    // actually short of. Both paths produce the same recoverable
+    // `schema_mismatch` status, which is what the next test depends on.
     expect(boot.detail).toContain(
-      'Database image schema does not match the application schema.',
+      'Database image is missing application tables: character_weapons, class_weapon_mastery_counts, class_weapon_mastery_grants, weapon_templates.',
     );
   });
 
