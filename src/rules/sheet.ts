@@ -36,18 +36,36 @@ import { abilityForSkill } from './skills';
 import type { ArmorCategory, ArmorDexBonus } from '../domain/enums';
 
 /**
- * One class a character has levels in, joined to that class's sheet content.
+ * A class NAME, a LEVEL in it, and the per-level content keyed on that level.
+ *
+ * Split out of `SheetClass` so the functions that need nothing else —
+ * `totalCharacterLevel`, `attacksPerAction`, `martialArtsDice` — can be handed
+ * the classes a caller actually has. The attack-profile derivation reads class
+ * levels and their level-keyed content and has no business knowing a hit die or
+ * a saving throw list; requiring them would have made that caller invent both.
  *
  * `extra_attack_counts` is level -> TOTAL attacks, absolute, exactly as
- * `class_extra_attack_grants` stores it.
+ * `class_extra_attack_grants` stores it. `martial_arts_dice` is level -> die
+ * SIZE, exactly as `class_martial_arts_dice` stores it.
+ *
+ * BOTH MAPS ARE KEYED ON THE LEVEL IN *THIS* CLASS, never on total character
+ * level, because that is what both tables store and what both features say.
+ * See `martialArtsDice` for why the distinction is load-bearing.
  */
-export interface SheetClass {
+export interface SheetClassLevels {
   readonly class_name: string;
   readonly level: number;
+  readonly extra_attack_counts?: ReadonlyMap<number, number>;
+  readonly martial_arts_dice?: ReadonlyMap<number, number>;
+}
+
+/**
+ * One class a character has levels in, joined to that class's sheet content.
+ */
+export interface SheetClass extends SheetClassLevels {
   readonly hit_die: number;
   readonly is_starting_class: boolean;
   readonly saving_throws: readonly Ability[];
-  readonly extra_attack_counts?: ReadonlyMap<number, number>;
 }
 
 /**
@@ -105,7 +123,9 @@ export interface ArmorClassResult {
  * compute, deliberately: a sheet that derived a different total would print a
  * save DC disagreeing with the planner on the same screen.
  */
-export function totalCharacterLevel(classes: readonly SheetClass[]): number {
+export function totalCharacterLevel(
+  classes: readonly SheetClassLevels[],
+): number {
   return Math.max(
     1,
     classes.reduce((sum, entry) => sum + entry.level, 0),
@@ -534,7 +554,9 @@ export function passivePerception(input: {
  * character's level in THAT class, matching how the rows are stored (absolute
  * totals, never increments).
  */
-export function attacksPerAction(classes: readonly SheetClass[]): number {
+export function attacksPerAction(
+  classes: readonly SheetClassLevels[],
+): number {
   let best = 1;
   for (const entry of classes) {
     const counts = entry.extra_attack_counts;
@@ -548,6 +570,65 @@ export function attacksPerAction(classes: readonly SheetClass[]): number {
     }
   }
   return best;
+}
+
+/** One class's Martial Arts die, resolved at that class's level. */
+export interface MartialArtsDie {
+  readonly class_name: string;
+  readonly class_level: number;
+  /** The die SIZE — `8` for `1d8`, matching `class_martial_arts_dice`. */
+  readonly die: number;
+}
+
+/**
+ * The Martial Arts die, resolved PER CLASS AT THE LEVEL IN THAT CLASS.
+ *
+ * `docs/srd/source/attack-class-features.txt`: "You can roll 1d6 in place of
+ * the normal damage of your Unarmed Strike or Monk weapons. This die changes as
+ * you gain MONK LEVELS, as shown in the Martial Arts column of the Monk
+ * Features table" — and that table is keyed on the Monk's own level.
+ *
+ * THIS IS THE LEVEL THE CANTRIP UPGRADES DO NOT USE, and the difference is a
+ * real number on a real sheet rather than a pedantic distinction. A Monk 3 /
+ * Fighter 10 has a d6 here — Monk level 3 — while a cantrip of theirs upgrades
+ * on `totalCharacterLevel`, which is 13. One `level` variable serving both is
+ * the bug this pair of functions exists to make impossible.
+ *
+ * RETURNS ONE ENTRY PER GRANTING CLASS, never a single combined die. Only the
+ * Monk has this feature in `docs/srd/source/`, so in practice the list is empty
+ * or holds one entry; combining two with `max` (or anything else) would be this
+ * application inventing a multiclass rule the source does not state, which is
+ * exactly what `attacksPerAction` has a sourced answer for and this does not.
+ *
+ * Resolved as the greatest row at or below the class level, matching how the
+ * rows are stored: one absolute die per level, never an increment.
+ */
+export function martialArtsDice(
+  classes: readonly SheetClassLevels[],
+): readonly MartialArtsDie[] {
+  const resolved: MartialArtsDie[] = [];
+  for (const entry of classes) {
+    const dice = entry.martial_arts_dice;
+    if (dice === undefined) {
+      continue;
+    }
+    let bestLevel: number | null = null;
+    let bestDie = 0;
+    for (const [level, die] of dice) {
+      if (level <= entry.level && (bestLevel === null || level > bestLevel)) {
+        bestLevel = level;
+        bestDie = die;
+      }
+    }
+    if (bestLevel !== null) {
+      resolved.push({
+        class_name: entry.class_name,
+        class_level: entry.level,
+        die: bestDie,
+      });
+    }
+  }
+  return resolved;
 }
 
 /**

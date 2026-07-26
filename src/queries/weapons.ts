@@ -20,7 +20,29 @@ import type {
   WeaponsPanel,
   WeaponTemplate,
 } from '../domain/read-models';
+import type { SpellAccessRoute } from '../access/spell-access-builder';
+import type { AbilityScores } from '../rules/ability-scores';
+import { attackProfiles } from '../rules/attack-profiles';
+import { recogniseAttackCantrips } from '../rules/attack-cantrips';
+import { SheetContentLookup } from '../rules/sheet-content-lookup';
 import { WeaponMasteryLookup } from '../rules/weapon-mastery-lookup';
+
+/**
+ * The three things the attack derivation needs that are NOT weapon rows.
+ *
+ * They are passed IN rather than read here, and the reason is one number on one
+ * screen: `proficiency_bonus` and `scores` are already resolved by
+ * `BuildReportBuilder` for the spell math, and a second resolution here could
+ * differ from it — `proficiencyBonus(0)` and `sheetProficiencyBonus([])`
+ * genuinely disagree for a character with no classes. A sheet printing +1 for a
+ * spell attack and +2 for a weapon attack would be this application arguing
+ * with itself in front of the user.
+ */
+export interface WeaponPanelContext {
+  readonly routes: readonly SpellAccessRoute[];
+  readonly scores: AbilityScores;
+  readonly proficiency_bonus: number;
+}
 
 /**
  * Reads for the weapons panel.
@@ -88,9 +110,11 @@ function weaponProfile(row: SqlRow): WeaponProfile {
 
 export class WeaponQueries {
   readonly #mastery: WeaponMasteryLookup;
+  readonly #content: SheetContentLookup;
 
   constructor(private readonly db: DatabaseContext) {
     this.#mastery = new WeaponMasteryLookup(db);
+    this.#content = new SheetContentLookup(db);
   }
 
   /** A character's weapons, ordered by id — the order they were added. */
@@ -147,7 +171,7 @@ export class WeaponQueries {
     );
   }
 
-  panel(characterId: number): WeaponsPanel {
+  panel(characterId: number, context: WeaponPanelContext): WeaponsPanel {
     const weapons = this.characterWeapons(characterId);
     return {
       weapons,
@@ -155,6 +179,34 @@ export class WeaponQueries {
       allowance: this.#mastery.forCharacter(characterId),
       selected_count: weapons.filter((weapon) => weapon.mastery_selected)
         .length,
+      attacks: this.attacks(characterId, weapons, context),
     };
+  }
+
+  /**
+   * The attack profiles, derived and thrown away with the rest of the read.
+   *
+   * The weapon rows are handed in rather than re-read so the profiles and the
+   * list they sit under cannot describe two different sets of weapons within
+   * one panel.
+   */
+  attacks(
+    characterId: number,
+    weapons: readonly CharacterWeapon[],
+    context: WeaponPanelContext,
+  ): WeaponsPanel['attacks'] {
+    return attackProfiles({
+      weapons: weapons.map((weapon) => ({
+        id: weapon.id,
+        name: weapon.name,
+        damage_dice: weapon.damage_dice,
+        damage_type: weapon.damage_type,
+        versatile_damage_dice: weapon.versatile_damage_dice,
+      })),
+      classes: this.#content.forCharacter(characterId),
+      scores: context.scores,
+      proficiencyBonus: context.proficiency_bonus,
+      cantrips: recogniseAttackCantrips(context.routes),
+    });
   }
 }

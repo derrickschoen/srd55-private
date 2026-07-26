@@ -1,4 +1,5 @@
 import type { WeaponFields } from './command-contracts';
+import type { AttackProfileResult } from '../rules/attack-profiles';
 import type { CharacterMasteryAllowance } from '../rules/weapon-mastery-lookup';
 import type {
   Ability,
@@ -45,12 +46,19 @@ export interface CharacterWeapon extends WeaponFields {
  * `selected_count` is what the user has actually ticked; comparing the two is
  * only meaningful when the allowance is `known`, which is why the comparison
  * lives in the renderer and not here.
+ *
+ * `attacks` is COMPUTED and never stored (D11). Its rows are keyed on
+ * `weapon_id`, which is `null` for the one row this application derives rather
+ * than reads — the Shillelagh row, which exists whether or not the character
+ * owns a Club or a Quarterstaff and which writes nothing to `character_weapons`
+ * to say so.
  */
 export interface WeaponsPanel {
   weapons: CharacterWeapon[];
   templates: WeaponTemplate[];
   allowance: CharacterMasteryAllowance;
   selected_count: number;
+  attacks: AttackProfileResult;
 }
 
 export interface FreeCast {
