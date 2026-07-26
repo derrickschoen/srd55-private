@@ -208,7 +208,7 @@ reverts cleanly.
 
 ---
 
-## Q9 — CORRECTED 2026-07-26: PARTLY wired (see D20). Still not blocking.
+## Q9 — RESOLVED 2026-07-26: the sheet exists and its inputs persist (see D24)
 
 The per-class SRD content, the parsers and the whole derivation module are
 merged and tested — 42 tables, HP, AC, saving throws, skill modifiers,
