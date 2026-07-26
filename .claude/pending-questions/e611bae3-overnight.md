@@ -77,3 +77,36 @@ rather than an open key/value blob that neither can.
 Recorded as it happens in `.claude/decisions.md`. Each entry says what was
 decided, on what evidence, and what the alternative was. Read that file first
 when you are back; this file is only for things I would not decide alone.
+
+---
+
+## Q6 — "Character builder" means two very different things (NEW, needs your call)
+
+Finding F4 (2026-07-26): seeding the twelve classes made a fresh install usable
+as a **spell planner**. It did not make it a character builder.
+
+`class_definitions` carries only spellcasting attributes. The whole 616-line
+schema has ZERO occurrences of hit dice, hit points, armour class, skills, class
+features, traits, speed, size, languages, or subclass level. Subclass coverage
+is 2 of 12 classes — Eldritch Knight and Arcane Trickster, the two third-casters
+— because non-casting subclasses were never modelled. A Wizard has no subclass
+options at all.
+
+So a builder over today's model can guide: name, ability scores, class, level,
+spells. It cannot produce a character sheet, because that data does not exist.
+
+**Option 1 — model expansion first.** Add the sheet domain (HP, AC, skills,
+proficiencies, features, all subclasses), then build the guided flow over it.
+Correct, and much larger than the builder UI itself.
+
+**Option 2 (recommended, being followed meanwhile) — ship a spell-focused
+guided builder now.** A walkthrough for exactly what the app models today,
+honest about being a spell planner. Your stated motivation was friends missing
+selections in confusing tools; that pain is real for spell selection alone, and
+completeness v1 already targets it. Proves the flow before the sheet domain
+exists.
+
+**Option 3** — something else.
+
+I have NOT started either. This changes what the deliverable is, which is a
+product decision rather than a technical one.
