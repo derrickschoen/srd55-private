@@ -13,6 +13,9 @@
  *    `db/schema/triggers.sql` that produce the product's own message). That is a
  *    property of two columns TOGETHER, and `strictObject` checks each column
  *    alone.
+ *  - `character_weapons` may not record a selected mastery without naming which
+ *    property was selected (named CHECK
+ *    `character_weapons_mastery_requires_property_check`). Two columns again.
  *
  * WHY THIS MODULE EXISTS RATHER THAN TWO COPIES OF THE RULES.
  * Both rules were already implemented in `src/backup/character-backup.ts`, for
@@ -80,6 +83,38 @@ export function slotExclusiveAssignmentError(
     row.current_spell_version_id !== null
   ) {
     return `${label} contains both a fixed and selected spell.`;
+  }
+  return null;
+}
+
+/**
+ * A weapon that records a SELECTED mastery must name the property selected.
+ *
+ * The database says so itself — CHECK
+ * `character_weapons_mastery_requires_property_check` — so a live row can never
+ * violate it. The pair only becomes reachable when weapon rows arrive as JSON:
+ * inside a portable backup document, inside a save-point snapshot, or as the
+ * `weapons` section of a share document. All three end as an INSERT, and
+ * without this the failure is a raw `SQLITE_CONSTRAINT_CHECK` from inside a
+ * transaction rather than a sentence naming the offending weapon.
+ *
+ * `mastery_selected` is a NOT NULL integer flag and `mastery_property` is
+ * nullable text, so the truthiness test below matches the CHECK exactly
+ * (`mastery_selected = 0 OR mastery_property IS NOT NULL`) rather than
+ * inventing a second opinion about what "selected" means. Boolean `true` is
+ * accepted alongside `1` for the same reason `character.allow_legacy` is: JSON
+ * that has been through a codec may carry either.
+ */
+export function weaponMasterySelectionError(
+  row: UntrustedRow,
+  label: string,
+): string | null {
+  const selected = row.mastery_selected;
+  if (
+    (selected === 1 || selected === true) &&
+    (row.mastery_property === null || row.mastery_property === undefined)
+  ) {
+    return `${label} selects a weapon mastery without naming the property.`;
   }
   return null;
 }

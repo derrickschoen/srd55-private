@@ -2,12 +2,36 @@ import {
   CHARACTER_SHARE_FORMAT,
   CHARACTER_SHARE_VERSION,
   SHARE_LIMITS,
+  SHARE_WEAPON_FLAGS,
+  SHARE_WEAPON_TEXT,
   ShareValidationError,
   type CharacterShareDocument,
+  type ShareWeapon,
   validateShareDocument,
 } from './schema';
 
 type Tuple = readonly unknown[];
+
+/**
+ * THE ROOT TUPLE HAS TWO ACCEPTED LENGTHS, AND THAT IS ON PURPOSE.
+ *
+ * A share link is a URL fragment somebody has already pasted into a chat, a
+ * wiki or a bookmark. Appending a twelfth element for weapons while demanding
+ * an exact length would make every one of those links a decode error — the exact
+ * data loss this change exists to prevent, inflicted on a larger set of people.
+ *
+ * So eleven elements is still a valid document; it simply carries no weapons,
+ * which is the truth about a link written before weapons travelled. Twelve is
+ * what this build writes. `CHARACTER_SHARE_VERSION` deliberately stays at 1: a
+ * version bump buys nothing here and would reject every old link on the way in.
+ */
+const ROOT_TUPLE_LENGTHS = [11, 12] as const;
+
+const LEGACY_ROOT_LENGTH = 11;
+
+/** How many elements one weapon occupies on the wire. */
+const WEAPON_TUPLE_LENGTH =
+  1 + SHARE_WEAPON_TEXT.length + 3 + 2 + SHARE_WEAPON_FLAGS.length;
 
 function tuple(
   value: unknown,
@@ -20,6 +44,61 @@ function tuple(
     );
   }
   return value;
+}
+
+function variableTuple(
+  value: unknown,
+  lengths: readonly number[],
+  label: string,
+): Tuple {
+  if (!Array.isArray(value) || !lengths.includes(value.length)) {
+    throw new ShareValidationError(
+      `${label} must be a tuple of length ${lengths.join(' or ')}.`,
+    );
+  }
+  return value;
+}
+
+/**
+ * A weapon's wire order, frozen.
+ *
+ * Positional encoding trades self-description for size, so the order is part of
+ * the format: name, the four short text columns, the two ranges, the mastery
+ * property, the two long free-text columns, then the nine flags. Reordering
+ * this silently reinterprets every link ever generated.
+ */
+function weaponToPositional(weapon: ShareWeapon): unknown[] {
+  return [
+    weapon.name,
+    ...SHARE_WEAPON_TEXT.map((field) => weapon[field] ?? null),
+    weapon.range_normal_feet ?? null,
+    weapon.range_long_feet ?? null,
+    weapon.mastery_property ?? null,
+    weapon.other_properties ?? null,
+    weapon.notes ?? null,
+    ...SHARE_WEAPON_FLAGS.map((flag) => weapon[flag] ?? null),
+  ];
+}
+
+function weaponFromPositional(value: unknown, label: string): unknown {
+  const row = tuple(value, WEAPON_TUPLE_LENGTH, label);
+  const weapon: Record<string, unknown> = { name: row[0] };
+  const fields = [
+    ...SHARE_WEAPON_TEXT,
+    'range_normal_feet',
+    'range_long_feet',
+    'mastery_property',
+    'other_properties',
+    'notes',
+    ...SHARE_WEAPON_FLAGS,
+  ] as const;
+  fields.forEach((field, index) => {
+    const item = row[index + 1];
+    if (item !== null) {
+      weapon[field] = item;
+    }
+  });
+  return weapon;
 }
 
 function assertListLimit(
@@ -99,13 +178,20 @@ export function shareDocumentToPositional(
       row.name,
       row.entries.map((entry) => [entry.spellKey, entry.role]),
     ]) ?? null,
+    // Element 11. Always written, `null` when the character has no weapons, so
+    // this build's output has one shape rather than two.
+    document.weapons?.map(weaponToPositional) ?? null,
   ];
 }
 
 export function positionalToShareDocument(
   input: unknown,
 ): CharacterShareDocument {
-  const root = tuple(input, 11, 'wire document');
+  const root = variableTuple(input, ROOT_TUPLE_LENGTHS, 'wire document');
+  // An eleven-element document predates weapons. `undefined`, not `null`: the
+  // section is genuinely absent, and the object validator distinguishes the two.
+  const wireWeapons =
+    root.length === LEGACY_ROOT_LENGTH ? null : root[11];
   if (root[0] !== CHARACTER_SHARE_FORMAT) {
     throw new ShareValidationError('format is unsupported.');
   }
@@ -139,6 +225,9 @@ export function positionalToShareDocument(
   if (root[10] !== null && !Array.isArray(root[10])) {
     throw new ShareValidationError('wire loadouts must be null or a list.');
   }
+  if (wireWeapons !== null && !Array.isArray(wireWeapons)) {
+    throw new ShareValidationError('wire weapons must be null or a list.');
+  }
   assertListLimit(root[3], SHARE_LIMITS.classes, 'classes');
   assertListLimit(root[4], SHARE_LIMITS.sources, 'sources');
   assertListLimit(root[5], SHARE_LIMITS.selections, 'selections');
@@ -154,6 +243,9 @@ export function positionalToShareDocument(
   }
   if (root[10] !== null) {
     assertListLimit(root[10], SHARE_LIMITS.loadouts, 'loadouts');
+  }
+  if (wireWeapons !== null) {
+    assertListLimit(wireWeapons, SHARE_LIMITS.weapons, 'weapons');
   }
   if (character[10] !== null) {
     if (!Array.isArray(character[10])) {
@@ -284,6 +376,11 @@ export function positionalToShareDocument(
       const row = tuple(value, 2, `wire placeholders[${index}]`);
       return { spellKey: row[0], spellName: row[1] };
     });
+  }
+  if (wireWeapons !== null) {
+    raw.weapons = wireWeapons.map((value, index) =>
+      weaponFromPositional(value, `wire weapons[${index}]`),
+    );
   }
   return validateShareDocument(raw);
 }

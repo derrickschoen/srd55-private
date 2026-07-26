@@ -8,7 +8,90 @@ import {
   type SnapshotTable,
 } from '../domain/contracts/tables';
 
-export const CHARACTER_SNAPSHOT_SCHEMA_VERSION = 'a7-v1' as const;
+/**
+ * THE VERSION EVERY SNAPSHOT THIS BUILD WRITES CARRIES.
+ *
+ * `a7-v2` differs from `a7-v1` in exactly one way: it also captures
+ * `character_weapons`. The bump is not cosmetic — a reader must be able to tell
+ * "this snapshot recorded no weapons" from "this snapshot did not record
+ * weapons at all", and the two are otherwise indistinguishable.
+ */
+export const CHARACTER_SNAPSHOT_SCHEMA_VERSION = 'a7-v2' as const;
+
+/**
+ * WHICH TABLES EACH SNAPSHOT VERSION CARRIES.
+ *
+ * `a7-v1` is a HISTORICAL FACT and is written out by hand, never derived. It is
+ * the list as it stood when `a7-v1` was the current version; deriving it (say,
+ * as "the current list minus weapons") would make it silently follow the next
+ * classification change and start lying about snapshots already on disk.
+ *
+ * `a7-v2` is the live list, because that is what `capture` writes today.
+ */
+const A7_V1_TABLES = [
+  'character_class_levels',
+  'character_source_instances',
+  'spell_selection_slots',
+  'wizard_spellbook_entries',
+  'warning_acknowledgements',
+] as const satisfies readonly SnapshotTable[];
+
+const SNAPSHOT_TABLES_BY_VERSION = {
+  'a7-v1': A7_V1_TABLES,
+  'a7-v2': CHARACTER_STATE_TABLES,
+} as const satisfies Readonly<Record<string, readonly SnapshotTable[]>>;
+
+/**
+ * Every snapshot version this build can still READ, oldest first.
+ *
+ * Accepting more than one is not compatibility theatre. Snapshots live in three
+ * places a user cannot regenerate: `character_save_points` rows in their own
+ * database, `restore_snapshot` inverse payloads in `character_operations`, and
+ * save points inside a portable backup file they already downloaded. Refusing
+ * `a7-v1` would make a character holding a single old save point impossible to
+ * restore AND impossible to export, since `exportCharacterBackup` re-parses its
+ * own stored save points on the way out.
+ */
+export const CHARACTER_SNAPSHOT_SCHEMA_VERSIONS = [
+  'a7-v1',
+  'a7-v2',
+] as const satisfies readonly (keyof typeof SNAPSHOT_TABLES_BY_VERSION)[];
+
+export type CharacterSnapshotSchemaVersion =
+  (typeof CHARACTER_SNAPSHOT_SCHEMA_VERSIONS)[number];
+
+/** The version of a snapshot, or `null` when it is one this build cannot read. */
+export function snapshotSchemaVersion(
+  value: unknown,
+): CharacterSnapshotSchemaVersion | null {
+  return (
+    CHARACTER_SNAPSHOT_SCHEMA_VERSIONS.find((version) => version === value) ??
+    null
+  );
+}
+
+/** The tables a snapshot of the given version carries, in capture order. */
+export function snapshotTablesFor(
+  version: CharacterSnapshotSchemaVersion,
+): readonly SnapshotTable[] {
+  return SNAPSHOT_TABLES_BY_VERSION[version];
+}
+
+/**
+ * Every accepted version carries a SUBSET of the current tables.
+ *
+ * A version naming a table the schema no longer classifies as snapshot-scoped
+ * would make `restore` build an INSERT against a table it must not touch, so
+ * this is a compile error rather than a comment.
+ */
+export type _SnapshotVersionsAreSubsets = [
+  Exclude<
+    (typeof SNAPSHOT_TABLES_BY_VERSION)[CharacterSnapshotSchemaVersion][number],
+    SnapshotTable
+  >,
+] extends [never]
+  ? true
+  : never;
 
 export const CHARACTER_STATE_COLUMNS = [
   'name',
@@ -154,6 +237,22 @@ function snapshotRows(
   return rows;
 }
 
+/**
+ * The tables a given snapshot value can be asked about.
+ *
+ * An unreadable or absent version falls back to the CURRENT list, so a
+ * malformed snapshot still fails on the missing table rather than being quietly
+ * treated as carrying nothing.
+ */
+function carriedSnapshotTables(
+  snapshot: unknown,
+): readonly CharacterStateTable[] {
+  const version = snapshotSchemaVersion(
+    snapshotObject(snapshot).schema_version,
+  );
+  return version === null ? CHARACTER_STATE_TABLES : snapshotTablesFor(version);
+}
+
 function numericEntityId(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return Math.trunc(value);
@@ -223,8 +322,22 @@ export class CharacterState {
     return snapshot as CharacterStateSnapshot;
   }
 
+  /**
+   * Rewrite the character's state to what the snapshot holds.
+   *
+   * TABLES THE SNAPSHOT DOES NOT CARRY ARE NOT TOUCHED — not deleted, not
+   * re-inserted. That matters for exactly one case today: an `a7-v1` snapshot
+   * predates weapons, so restoring one leaves the character's current weapons
+   * standing. The alternative, treating the absent key as an empty list, would
+   * assert "this character had no weapons at that moment" — a claim the
+   * snapshot never made, and one that would silently delete real data on undo.
+   */
   restore(characterId: number, snapshot: unknown): void {
-    const { character, rows } = this.validateSnapshot(characterId, snapshot);
+    const { character, rows, tables } = this.validateSnapshot(
+      characterId,
+      snapshot,
+    );
+    const carried = new Set<string>(tables);
 
     const restoreRows = (db: DatabaseContext): void => {
       db.exec(
@@ -243,14 +356,17 @@ export class CharacterState {
       );
 
       for (const table of DELETE_ORDER) {
+        if (!carried.has(table)) {
+          continue;
+        }
         db.exec(
           `DELETE FROM ${quoteIdentifier(table)} WHERE character_id = ?`,
           [characterId],
         );
       }
 
-      for (const table of CHARACTER_STATE_TABLES) {
-        for (const sourceRow of rows[table]) {
+      for (const table of tables) {
+        for (const sourceRow of rows[table] ?? []) {
           insertRow(db, table, {
             ...sourceRow,
             character_id: characterId,
@@ -274,7 +390,15 @@ export class CharacterState {
       });
     }
 
+    // A table only one side recorded cannot be diffed: every row would look
+    // added or removed purely because the older snapshot never captured them.
+    const beforeTables = new Set<string>(carriedSnapshotTables(before));
+    const afterTables = new Set<string>(carriedSnapshotTables(after));
+
     for (const table of CHARACTER_STATE_TABLES) {
+      if (!beforeTables.has(table) || !afterTables.has(table)) {
+        continue;
+      }
       const oldRows = new Map(
         snapshotRows(before, table).map((row) => [diffKey(row), row]),
       );
@@ -316,12 +440,15 @@ export class CharacterState {
     snapshot: unknown,
   ): {
     character: SnapshotObject;
-    rows: Record<CharacterStateTable, SnapshotRow[]>;
+    rows: Partial<Record<CharacterStateTable, SnapshotRow[]>>;
+    tables: readonly CharacterStateTable[];
   } {
     const root = snapshotObject(snapshot);
-    if (root.schema_version !== CHARACTER_SNAPSHOT_SCHEMA_VERSION) {
+    const version = snapshotSchemaVersion(root.schema_version);
+    if (version === null) {
       throw new Error('Unsupported character snapshot schema.');
     }
+    const tables = snapshotTablesFor(version);
 
     const character = root.character;
     if (!isObject(character)) {
@@ -333,11 +460,12 @@ export class CharacterState {
       }
     }
 
-    const rows = {} as Record<CharacterStateTable, SnapshotRow[]>;
+    const rows: Partial<Record<CharacterStateTable, SnapshotRow[]>> = {};
     const spellVersionIds: number[] = [];
-    for (const table of CHARACTER_STATE_TABLES) {
-      rows[table] = snapshotRows(root, table);
-      for (const row of rows[table]) {
+    for (const table of tables) {
+      const tableRows = snapshotRows(root, table);
+      rows[table] = tableRows;
+      for (const row of tableRows) {
         if (
           !Object.hasOwn(row, 'character_id') ||
           !Number.isSafeInteger(row.character_id) ||
@@ -399,6 +527,6 @@ export class CharacterState {
       }
     }
 
-    return { character, rows };
+    return { character, rows, tables };
   }
 }
