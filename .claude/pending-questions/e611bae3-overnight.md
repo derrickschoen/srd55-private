@@ -45,7 +45,7 @@ Proceeding meanwhile: current behaviour retained.
 
 ---
 
-## Q3 — Seven dead Laravel infrastructure tables
+## Q3 — RESOLVED 2026-07-26: pruned, and there were EIGHT (see D9)
 
 `users`, `password_reset_tokens`, `sessions`, `cache_locks`, `jobs`,
 `job_batches`, `failed_jobs` have no application usage; they exist only for
@@ -56,7 +56,11 @@ rewrite (combining makes failures ambiguous) — that is being followed.
 38-table assertion to 31, invalidate existing images, and lose Laravel
 whole-database round-trip fidelity for those tables.
 
-Proceeding meanwhile: retained, declared in Drizzle like the rest.
+**Resolved.** Pruned as its own commit under D7. There were eight, not seven —
+`cache` was missing from the list above. The schema is now 30 tables. The
+Laravel-derived schema signature survives as a real oracle by being re-derived
+from the frozen pre-Drizzle fixture rather than from our own output. Nothing
+read or wrote any of the eight.
 
 ---
 

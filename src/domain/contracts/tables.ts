@@ -91,9 +91,7 @@ export type TableRole =
    * weapon template is not a feat, species or background, and labelling it one
    * to avoid a one-line union change would make the role field lie.
    */
-  | 'catalog_weapon'
-  /** Laravel-only, nothing reads or writes it. */
-  | 'infrastructure';
+  | 'catalog_weapon';
 
 /**
  * The scopes a table can participate in.
@@ -477,72 +475,6 @@ export const TABLE_SCOPES = {
     share: false,
     backupReference: true,
   },
-
-  // --- Laravel infrastructure --------------------------------------------
-  users: {
-    role: 'infrastructure',
-    snapshot: false,
-    backupDirect: false,
-    backup: false,
-    share: false,
-    backupReference: false,
-  },
-  password_reset_tokens: {
-    role: 'infrastructure',
-    snapshot: false,
-    backupDirect: false,
-    backup: false,
-    share: false,
-    backupReference: false,
-  },
-  sessions: {
-    role: 'infrastructure',
-    snapshot: false,
-    backupDirect: false,
-    backup: false,
-    share: false,
-    backupReference: false,
-  },
-  cache: {
-    role: 'infrastructure',
-    snapshot: false,
-    backupDirect: false,
-    backup: false,
-    share: false,
-    backupReference: false,
-  },
-  cache_locks: {
-    role: 'infrastructure',
-    snapshot: false,
-    backupDirect: false,
-    backup: false,
-    share: false,
-    backupReference: false,
-  },
-  jobs: {
-    role: 'infrastructure',
-    snapshot: false,
-    backupDirect: false,
-    backup: false,
-    share: false,
-    backupReference: false,
-  },
-  job_batches: {
-    role: 'infrastructure',
-    snapshot: false,
-    backupDirect: false,
-    backup: false,
-    share: false,
-    backupReference: false,
-  },
-  failed_jobs: {
-    role: 'infrastructure',
-    snapshot: false,
-    backupDirect: false,
-    backup: false,
-    share: false,
-    backupReference: false,
-  },
 } as const satisfies { [N in AnyTableName]: ScopesFor<N> };
 
 type Scopes = typeof TABLE_SCOPES;
@@ -647,14 +579,16 @@ export function order<Member extends string>() {
 
 /**
  * Every table in the database, in the order `PRAGMA`-level validation reports
- * them. Replaces the 38-name hand-typed transcription that lived in
+ * them. Replaces the hand-typed transcription that lived in
  * `database-lifecycle.ts` — the file that validates database images, which is
  * the worst possible place for a list to silently fall behind the schema.
+ *
+ * Thirty tables since the eight Laravel-only ones were dropped;
+ * `tests/unit/contracts/table-scopes.test.ts` transcribes the intended list
+ * independently rather than reading it from here.
  */
 export const APPLICATION_TABLES = order<AnyTableName>()([
   'background_definitions',
-  'cache',
-  'cache_locks',
   'change_log',
   'character_class_levels',
   'character_operations',
@@ -668,12 +602,7 @@ export const APPLICATION_TABLES = order<AnyTableName>()([
   'class_progressions',
   'class_weapon_mastery_counts',
   'class_weapon_mastery_grants',
-  'failed_jobs',
   'feat_definitions',
-  'job_batches',
-  'jobs',
-  'password_reset_tokens',
-  'sessions',
   'species_definitions',
   'spell_identities',
   'spell_identity_aliases',
@@ -690,7 +619,6 @@ export const APPLICATION_TABLES = order<AnyTableName>()([
   'spell_versions',
   'subclass_definitions',
   'subclass_progressions',
-  'users',
   'warning_acknowledgements',
   'weapon_templates',
   'wizard_spellbook_entries',

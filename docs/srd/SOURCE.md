@@ -34,7 +34,8 @@ pages interleave and the weapon table becomes unreadable.
 | Extract | Source | Page |
 |---|---|---|
 | `source/weapons-table.txt` | Weapons table, all four categories | 90 |
-| `source/weapon-mastery-progression.txt` | Barbarian and Fighter class tables | 27, 47 |
+| `source/weapon-mastery-progression.txt` | Barbarian and Fighter class tables (the count is a COLUMN) | 27, 47 |
+| `source/weapon-mastery-flat-classes.txt` | Paladin, Ranger, Rogue feature text (the count is PROSE) | 55, 57, 60 |
 
 ## What these extracts settle
 

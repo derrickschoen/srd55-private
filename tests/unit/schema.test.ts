@@ -5,6 +5,7 @@ import sqlite3InitModule, {
 import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { schemaSources } from '../helpers/schema-sources';
+import preDrizzleSchema from '../fixtures/schema-pre-drizzle.sql?raw';
 
 type SqlRow = Record<string, string | number | bigint | null>;
 
@@ -20,8 +21,6 @@ const expectedColumns: Record<string, string[]> = {
     'id', 'content_key', 'name', 'rules_edition', 'category', 'repeatable',
     'prerequisites', 'grant_rules', 'notes', 'created_at', 'updated_at',
   ],
-  cache: ['key', 'value', 'expiration'],
-  cache_locks: ['key', 'owner', 'expiration'],
   change_log: [
     'id', 'character_id', 'sequence', 'group_id', 'operation_uuid',
     'entity_type', 'entity_id', 'previous_value', 'new_value', 'reason',
@@ -70,24 +69,9 @@ const expectedColumns: Record<string, string[]> = {
     'prepared_count', 'slots', 'pact_slots', 'grant_rules', 'created_at',
     'updated_at',
   ],
-  failed_jobs: [
-    'id', 'uuid', 'connection', 'queue', 'payload', 'exception', 'failed_at',
-  ],
   feat_definitions: [
     'id', 'content_key', 'name', 'rules_edition', 'category', 'repeatable',
     'prerequisites', 'grant_rules', 'notes', 'created_at', 'updated_at',
-  ],
-  job_batches: [
-    'id', 'name', 'total_jobs', 'pending_jobs', 'failed_jobs',
-    'failed_job_ids', 'options', 'cancelled_at', 'created_at', 'finished_at',
-  ],
-  jobs: [
-    'id', 'queue', 'payload', 'attempts', 'reserved_at', 'available_at',
-    'created_at',
-  ],
-  password_reset_tokens: ['email', 'token', 'created_at'],
-  sessions: [
-    'id', 'user_id', 'ip_address', 'user_agent', 'payload', 'last_activity',
   ],
   species_definitions: [
     'id', 'content_key', 'name', 'rules_edition', 'category', 'repeatable',
@@ -150,10 +134,6 @@ const expectedColumns: Record<string, string[]> = {
     'prepared_count', 'max_spell_level', 'slots', 'grant_rules', 'created_at',
     'updated_at',
   ],
-  users: [
-    'id', 'name', 'email', 'email_verified_at', 'password', 'remember_token',
-    'created_at', 'updated_at',
-  ],
   warning_acknowledgements: [
     'id', 'character_id', 'warning_fingerprint', 'note', 'invalidated_at',
     'created_at', 'updated_at',
@@ -163,16 +143,39 @@ const expectedColumns: Record<string, string[]> = {
   ],
 };
 
-// SHA-256 of the ordered PRAGMA table_info metadata produced by running the
-// Laravel migrations against an in-memory SQLite database. It covers declared
-// types, nullability, defaults, primary keys, column order, and all 38 tables.
-//
-// UNCHANGED by the native tables below, and that is proved rather than assumed:
-// the signature is computed over `tables.filter(isLaravelTable)`, so a native
-// table sorting before, between or after the Laravel names contributes nothing
-// to it. Regenerating this constant is forbidden — if it moves, a Laravel table
-// changed and THAT is the bug.
+/**
+ * SHA-256 of the ordered `PRAGMA table_info` metadata — declared types,
+ * nullability, defaults, primary keys and column order — over every table.
+ *
+ * THE DERIVATION CHAIN, WHICH IS WHAT KEEPS THIS AN INDEPENDENT ORACLE.
+ * The 38-table value was recorded by running the LARAVEL MIGRATIONS against an
+ * in-memory SQLite database, before any of this existed. Dropping the eight
+ * Laravel-only tables invalidates it, and recomputing it from our own generated
+ * artifact would turn the assertion into a tautology — the one thing a parity
+ * oracle may never become. So it is re-derived from the FROZEN pre-Drizzle
+ * artifact instead (`tests/fixtures/schema-pre-drizzle.sql`, the hand-written
+ * file transcribed from those migrations, untouched by this change), and the
+ * test below proves all three links:
+ *
+ *   fa0e4e9f… = signature(pre-Drizzle fixture, all 38 tables)
+ *               → the fixture really is the artifact the Laravel value came from
+ *   d83f8a8d… = signature(pre-Drizzle fixture, minus the eight)
+ *               → the new expectation, still Laravel-derived
+ *             = signature(schema.sql)
+ *               → what is actually under test
+ *
+ * THE FOUR NATIVE WEAPON TABLES ARE EXCLUDED, NOT REHASHED. They reproduce no
+ * Laravel migration, so folding them in would move a constant whose whole
+ * value is that it came from somewhere else. They are held to hand-written
+ * expectations instead, and filtering rather than regenerating is what lets
+ * this constant stay frozen: no Laravel table's metadata can drift without
+ * moving it.
+ */
 const laravelColumnMetadataHash =
+  'd83f8a8d32c1ccef3317e8935b634268ff9adb575724bedd2370f6cfc5716329';
+
+/** The same value before the eight Laravel-only tables were dropped. */
+const laravelColumnMetadataHashWithInfrastructure =
   'fa0e4e9f2af9531e8b66b296660b5db7e28a5c6c2ceda00859c904fe6a4d1b11';
 
 /**
@@ -231,10 +234,20 @@ const expectedNativeNotNull: Record<string, string[]> = {
 
 const laravelTableNames = new Set(Object.keys(expectedColumns));
 
+/** The eight tables this schema no longer declares, named rather than derived. */
+const droppedInfrastructureTables = [
+  'cache',
+  'cache_locks',
+  'failed_jobs',
+  'job_batches',
+  'jobs',
+  'password_reset_tokens',
+  'sessions',
+  'users',
+];
+
 const expectedNotNull: Record<string, string[]> = {
   background_definitions: ['id', 'content_key', 'name', 'rules_edition', 'repeatable'],
-  cache: ['key', 'value', 'expiration'],
-  cache_locks: ['key', 'owner', 'expiration'],
   change_log: ['id', 'character_id', 'sequence', 'entity_type', 'action_type', 'reversible'],
   character_class_levels: ['id', 'character_id', 'class_definition_id', 'level', 'is_starting_class'],
   character_operations: ['id', 'character_id', 'operation_uuid', 'expected_revision', 'resulting_revision', 'inverse_command'],
@@ -251,12 +264,7 @@ const expectedNotNull: Record<string, string[]> = {
     'supports_ritual_casting',
   ],
   class_progressions: ['id', 'class_definition_id', 'class_level', 'cantrips_known', 'prepared_count'],
-  failed_jobs: ['id', 'uuid', 'connection', 'queue', 'payload', 'exception', 'failed_at'],
   feat_definitions: ['id', 'content_key', 'name', 'rules_edition', 'repeatable'],
-  job_batches: ['id', 'name', 'total_jobs', 'pending_jobs', 'failed_jobs', 'failed_job_ids', 'created_at'],
-  jobs: ['id', 'queue', 'payload', 'attempts', 'available_at', 'created_at'],
-  password_reset_tokens: ['email', 'token'],
-  sessions: ['id', 'payload', 'last_activity'],
   species_definitions: ['id', 'content_key', 'name', 'rules_edition', 'repeatable'],
   spell_identities: ['id', 'content_key', 'canonical_name', 'normalized_name'],
   spell_identity_aliases: ['id', 'spell_identity_id', 'alias', 'normalized_alias'],
@@ -287,7 +295,6 @@ const expectedNotNull: Record<string, string[]> = {
     'id', 'subclass_definition_id', 'class_level', 'cantrips_known',
     'prepared_count', 'max_spell_level',
   ],
-  users: ['id', 'name', 'email', 'password'],
   warning_acknowledgements: ['id', 'character_id', 'warning_fingerprint'],
   wizard_spellbook_entries: ['id', 'character_id', 'spell_version_id'],
 };
@@ -308,8 +315,6 @@ const expectedNamedIndexes: Record<string, string> = {
     'background_definitions:content_key:unique',
   background_definitions_name_rules_edition_unique:
     'background_definitions:name,rules_edition:unique',
-  cache_expiration_index: 'cache:expiration',
-  cache_locks_expiration_index: 'cache_locks:expiration',
   change_log_character_id_group_id_index: 'change_log:character_id,group_id',
   change_log_character_id_sequence_unique:
     'change_log:character_id,sequence:unique',
@@ -342,15 +347,9 @@ const expectedNamedIndexes: Record<string, string> = {
     'class_definitions:name,rules_edition:unique',
   class_progressions_class_definition_id_class_level_unique:
     'class_progressions:class_definition_id,class_level:unique',
-  failed_jobs_connection_queue_failed_at_index:
-    'failed_jobs:connection,queue,failed_at',
-  failed_jobs_uuid_unique: 'failed_jobs:uuid:unique',
   feat_definitions_content_key_unique: 'feat_definitions:content_key:unique',
   feat_definitions_name_rules_edition_unique:
     'feat_definitions:name,rules_edition:unique',
-  jobs_queue_index: 'jobs:queue',
-  sessions_last_activity_index: 'sessions:last_activity',
-  sessions_user_id_index: 'sessions:user_id',
   slots_character_collection_index:
     'spell_selection_slots:character_id,selection_collection',
   species_definitions_content_key_unique:
@@ -409,7 +408,6 @@ const expectedNamedIndexes: Record<string, string> = {
     'subclass_definitions:id,class_definition_id:unique',
   subclass_progressions_subclass_definition_id_class_level_unique:
     'subclass_progressions:subclass_definition_id,class_level:unique',
-  users_email_unique: 'users:email:unique',
   warning_acknowledgements_character_id_warning_fingerprint_unique:
     'warning_acknowledgements:character_id,warning_fingerprint:unique',
   wizard_spellbook_entries_character_id_spell_version_id_unique:
@@ -429,7 +427,6 @@ const expectedUniqueGroups: Record<string, string[]> = {
   class_weapon_mastery_counts: ['class_definition_id,class_level'],
   class_weapon_mastery_grants: ['class_definition_id'],
   weapon_templates: ['content_key'],
-  failed_jobs: ['uuid'],
   feat_definitions: ['content_key', 'name,rules_edition'],
   species_definitions: ['content_key', 'name,rules_edition'],
   spell_identities: ['content_key'],
@@ -449,7 +446,6 @@ const expectedUniqueGroups: Record<string, string[]> = {
     'id,class_definition_id',
   ],
   subclass_progressions: ['subclass_definition_id,class_level'],
-  users: ['email'],
   warning_acknowledgements: ['character_id,warning_fingerprint'],
   wizard_spellbook_entries: ['character_id,spell_version_id'],
 };
@@ -481,7 +477,6 @@ const expectedDefaults: Record<string, Record<string, string>> = {
     loading: "'0'", reach: "'0'", rules_edition: "'2024'", thrown: "'0'",
     two_handed: "'0'",
   },
-  failed_jobs: { failed_at: 'CURRENT_TIMESTAMP' },
   feat_definitions: { repeatable: "'0'" },
   species_definitions: { repeatable: "'0'" },
   background_definitions: { repeatable: "'0'" },
@@ -624,7 +619,7 @@ afterAll(() => {
 // rather than assumed.
 for (const [sourceLabel, schemaSql] of schemaSources) {
 describe(`complete final migration schema (${sourceLabel})`, () => {
-  it('creates the exact 38-table Laravel inventory plus the named native tables, and every column of both', () => {
+  it('creates the exact 30-table Laravel inventory plus the four named native tables, and every column of both', () => {
     const db = openDb(schemaSql);
     const tables = db.selectValues(
       `SELECT name
@@ -634,10 +629,15 @@ describe(`complete final migration schema (${sourceLabel})`, () => {
     );
 
     // The claim is no longer "exactly the Laravel migrations" but "exactly the
-    // Laravel migrations PLUS these named native tables". A table that is in
+    // SURVIVING Laravel migrations PLUS these named native tables". A table in
     // neither list still fails, which is the property that mattered.
+    //
+    // Both halves are counted, because a single total would let one grow while
+    // the other shrank: 30 Laravel tables (38 less the eight infrastructure
+    // ones that were pruned) and 4 native.
     expect(tables).toEqual(Object.keys(allExpectedColumns).sort());
-    expect(Object.keys(expectedColumns)).toHaveLength(38);
+    expect(Object.keys(expectedColumns)).toHaveLength(30);
+    expect(Object.keys(expectedNativeColumns)).toHaveLength(4);
     for (const [table, columns] of Object.entries(allExpectedColumns)) {
       const metadata = rows(db, `PRAGMA table_info("${table}")`);
       expect(
@@ -658,7 +658,7 @@ describe(`complete final migration schema (${sourceLabel})`, () => {
     const laravelTables = tables.filter((table) =>
       laravelTableNames.has(String(table)),
     );
-    expect(laravelTables).toHaveLength(38);
+    expect(laravelTables).toHaveLength(30);
     const metadataSignature = laravelTables.map((table) => [
       table,
       rows(db, `PRAGMA table_info("${String(table)}")`).map((column) => [
@@ -675,6 +675,9 @@ describe(`complete final migration schema (${sourceLabel})`, () => {
         .digest('hex'),
     ).toBe(laravelColumnMetadataHash);
 
+    for (const dropped of droppedInfrastructureTables) {
+      expect(tables).not.toContain(dropped);
+    }
     expect(tables).not.toContain('wizard_prepared_entries');
     expect(expectedColumns.wizard_spellbook_entries).not.toContain('acquisition');
     expect(expectedColumns.spell_selection_slots).toContain(
@@ -768,3 +771,74 @@ describe(`complete final migration schema (${sourceLabel})`, () => {
   });
 });
 }
+
+/**
+ * THE PROOF THAT THE PRUNED HASH IS STILL LARAVEL-DERIVED.
+ *
+ * Dropping the eight Laravel-only tables invalidated a constant that came from
+ * running the Laravel migrations. The replacement is NOT recomputed from the
+ * artifact it judges — that would be an expectation regenerated from our own
+ * output, which is exactly what a parity oracle must never be. It is recomputed
+ * from the frozen hand-written artifact, which this change does not touch, and
+ * the link back to the original Laravel value is asserted rather than assumed.
+ *
+ * Both links can fail: change a column type in `db/schema/*.ts` and the third
+ * assertion breaks; edit the fixture and the first one does.
+ */
+describe('the pruned column-metadata hash is derived from Laravel, not from us', () => {
+  function metadataHash(schemaSql: string, skip: readonly string[]): string {
+    const db = openDb(schemaSql);
+    const tables = db
+      .selectValues(
+        `SELECT name
+         FROM sqlite_schema
+         WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+         ORDER BY name`,
+      )
+      .map(String)
+      .filter((table) => !skip.includes(table));
+    const signature = tables.map((table) => [
+      table,
+      rows(db, `PRAGMA table_info("${table}")`).map((column) => [
+        column.name,
+        String(column.type).toLowerCase(),
+        Number(column.notnull),
+        column.dflt_value,
+        Number(column.pk),
+      ]),
+    ]);
+    return createHash('sha256').update(JSON.stringify(signature)).digest('hex');
+  }
+
+  it('reproduces the original 38-table Laravel value from the frozen fixture', () => {
+    expect(metadataHash(preDrizzleSchema, [])).toBe(
+      laravelColumnMetadataHashWithInfrastructure,
+    );
+  });
+
+  it('yields the pruned value from that same fixture, minus the eight tables', () => {
+    expect(metadataHash(preDrizzleSchema, droppedInfrastructureTables)).toBe(
+      laravelColumnMetadataHash,
+    );
+  });
+
+  /*
+   * The third link. The four native weapon tables are excluded because they
+   * reproduce no Laravel migration and the constant on the right is
+   * Laravel-derived; including them would force the constant to be recomputed
+   * from our own artifact, which is the tautology this whole chain exists to
+   * avoid. They are not thereby unchecked — `expectedNativeColumns` and
+   * `expectedNativeNotNull` hold them to hand-written expectations transcribed
+   * from the design, and the exclusion list is asserted to be exactly those
+   * four, so a fifth native table cannot slip past unhashed AND unexpected.
+   */
+  it('and the generated artifact matches it, skipping only the four native tables', () => {
+    const nativeTables = Object.keys(expectedNativeColumns);
+    expect(nativeTables).toHaveLength(4);
+    for (const [, schemaSql] of schemaSources) {
+      expect(metadataHash(schemaSql, nativeTables)).toBe(
+        laravelColumnMetadataHash,
+      );
+    }
+  });
+});

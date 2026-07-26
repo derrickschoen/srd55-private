@@ -54,9 +54,6 @@ import {
  * too. Without the second direction this would be documentation that silently
  * falls behind.
  *
- * The eight Laravel infrastructure tables have no foreign keys and no domain
- * relationships, so they declare none.
- *
  * `character_source_instances.source_definition_id` is deliberately ABSENT:
  * it is a polymorphic reference resolved at runtime by `source_type`, has no
  * foreign key, and modelling it as one relation would be a lie about which

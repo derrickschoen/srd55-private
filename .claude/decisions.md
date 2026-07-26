@@ -1,5 +1,85 @@
 # Binding scope decisions
 
+## D9 — Audit hardening merged; Q3 resolved by pruning EIGHT tables, not seven (2026-07-26)
+
+`main` d2960c3. Verified by me, not on the track's word: **540 vitest / 66 files,
+build exit 0, 52 Playwright, drizzle-at-runtime guard holding, and
+`src/db/schema.sql` regenerating byte-identical from `db/schema/*.ts`.**
+
+### Q3 is answered: pruned, and the brief's count was wrong
+
+Every tick's brief said SEVEN dead Laravel tables. There are **eight** — `cache`
+belongs with `cache_locks`, and Q3's list simply omitted it. The track said so
+explicitly instead of quietly matching my number, which is the correct handling
+of a brief that disagrees with the artefact. Schema is now 30 tables, was 38.
+
+**The interesting part is what it did to the schema-signature test.** That test
+compares a SHA-256 over ordered `PRAGMA table_info` metadata against a value
+produced by running the ORIGINAL LARAVEL MIGRATIONS — an independent oracle.
+Recomputing the expectation from the artefact under test would have converted it
+into a tautology, which rule 6 forbids and which is the exact failure D7 warns
+about. Instead it is re-derived from the FROZEN pre-Drizzle fixture, with all
+three links asserted: the old hash still matches the fixture at 38 tables
+(proving the fixture IS the Laravel artefact), the new hash matches the fixture
+minus the eight, and that equals the generated schema. Both links can fail — a
+column type change breaks one, editing the fixture breaks the other. The fixture
+is deliberately NOT pruned, because being the historical artefact is its entire
+job.
+
+Two schema-generation tests were DELETED rather than adapted: their whole
+subject was the rationale for tables that no longer exist. Deleting a test whose
+subject is gone is right; keeping it as a hollow shell would have been worse.
+
+### The three findings, all confirmed and fixed
+
+1. **Quadratic audit — REAL, and worse than codex estimated.** Measured against a
+   no-parent linear control: 24,000 chained sources took 16.6 s versus 18.8 ms;
+   a 5.6 MB image with a 50,000 chain blocked the worker for **80.5 seconds**.
+   `validateBytes` is synchronous inside the app's one worker, so that is 80
+   seconds with every other RPC queued behind it. Now linear via a `settled` set
+   — 0.10 s on the same image.
+
+   I verified the algorithm myself rather than trusting the prose: a node joins
+   `settled` only on a walk that TERMINATED, so no node on a cyclic chain is ever
+   settled and no cycle can be skipped. Traced a pure cycle, a cycle with a tail,
+   a self-loop, and a diamond; the diamond does not false-positive.
+
+   The regression guard counts **Map lookups, not wall-clock** — a timing budget
+   would flake on a loaded box, and lookups are what the complexity claim is
+   actually about. Verified by reverting the fix and watching it fail at exactly
+   50,004,999.
+
+2. **The audit now refuses two things restore refuses** — duplicate snapshot ids
+   and a slot carrying both `fixed_` and `current_spell_version_id`. Both rules
+   are IMPORTED from the portable-backup validator rather than reimplemented, so
+   a document and an image cannot drift apart.
+
+   **Why rejecting is correct here and skipping was correct for stale save
+   points** — the distinction matters and is easy to get backwards. A legitimate
+   backup CAN contain a stale-version save point, so rejecting the image would
+   make a real user's own backup unrestorable (D6b). A legitimate image CANNOT
+   contain either of these two, because a PRIMARY KEY and a named CHECK plus two
+   triggers forbid them on every write. And refusing an import destroys nothing:
+   the audit runs while quarantined, so the user keeps the database they have.
+
+3. **The ownership pass is honest about being future-proofing** rather than
+   counted as a current guarantee.
+
+**Rejected: a byte or row cap at the backup boundary.** The denial of service
+was the algorithm, not the size; cost is now ~10 ms per megabyte. A cap's only
+failure mode is refusing a legitimate import, and there is no honest number —
+the database grows with the catalog AND with unbounded undo history. Declining
+to add a limit you cannot justify is the better engineering answer.
+
+**One assertion was weakened and I checked it rather than assuming:**
+`CHARACTER_OWNED_TABLES.length === 11` became `> 0`. Legitimate — a test forty
+lines earlier pins the exact eleven names with `toEqual`, fixing contents and
+length together, so the count was strictly redundant. What remains is a
+non-vacuity guard so that an empty `UNENFORCED_OWNERSHIP_TABLES` is a fact about
+foreign keys rather than about an empty table set.
+
+---
+
 ## F6 — The SRD was never actually bundled, and D1b's open question is answered (2026-07-26)
 
 **Proved by inspection, then by fetching the document.**
@@ -21,7 +101,7 @@ a provenance failure, and it is very hard to review after the fact.
 `8974902d109d6e63672d7c490bde9ccf052410503d9cfa768237154fbc5e3d87`,
 6,031,375 bytes. Verbatim extracts committed under `docs/srd/source/` with
 `docs/srd/SOURCE.md` recording URL, checksum, the exact `pdftotext -layout`
-command and page numbers. All 37 weapons extracted cleanly with damage,
+command and page numbers. All 38 weapons extracted cleanly with damage,
 properties, mastery, weight and cost.
 
 **Rejected alternative:** committing the 6 MB PDF. We never modify it, and a
@@ -29,6 +109,23 @@ checksum proves an identical source without carrying it in every clone. Also
 rejected: hand-transcribing the table into app seed format here — that would
 collide with the weapons track, which owns the schema. This commit deliberately
 ships raw evidence, not a parsed dataset.
+
+### Two corrections to F6 as first written, found by the weapons track
+
+Both are my errors, caught by the track reading the artefact rather than the
+claim, which is the point of committing evidence at all.
+
+1. **38 weapons, not 37.** The original F6 text and the `6bbeef2` commit message
+   both said 37. Counting the committed extract gives 38:
+   `awk 'NR>7' docs/srd/source/weapons-table.txt | grep -E '^ {6}[A-Z]' | wc -l`.
+2. **I asserted the Paladin/Ranger/Rogue counts without committing their
+   evidence.** SOURCE.md stated the flat-two, but `docs/srd/source/` held only
+   the Barbarian and Fighter tables — zero lines mentioning the other three. A
+   provenance document that asserts an unevidenced fact is exactly the failure
+   it exists to prevent. Fixed by committing
+   `source/weapon-mastery-flat-classes.txt` with the three feature-text extracts.
+
+The shape of the answer is unchanged; only its evidence was incomplete.
 
 ### D1b's parked question, answered — and the answer is awkward
 
@@ -813,3 +910,71 @@ agent** — that is injection even on one's own site.
 The guided builder covers **single-class** creation and hands off to the
 existing planner, which already handles multiclass. The builder does not
 reimplement it.
+
+---
+
+## H1 — Candidate-image hardening: the quadratic, the two new refusals, and the one cap NOT added (2026-07-26)
+
+**Finding 1 — the audit's cycle detection was O(N²) and is now O(N).**
+`assertNoParentCycle` allocated a fresh visited set per start node and re-walked
+the whole ancestor chain from every key. Measured before, on one parent chain of
+N `character_source_instances` in one image, against the identical rows with no
+parent as the linear control:
+
+| N | chained | flat control | after the fix |
+|---|---|---|---|
+| 3,000 | 116.9 ms | 3.3 ms | 9.4 ms |
+| 6,000 | 628.9 ms | 5.2 ms | 17.4 ms |
+| 12,000 | 3,349.0 ms | 9.5 ms | 31.8 ms |
+| 24,000 | 16,574.1 ms | 18.8 ms | 69.6 ms |
+| 50,000 (5.6 MB image) | **80.5 s** | — | **0.10 s** |
+| 2,000 × 20 save points (11.9 MB) | 1.15 s | — | 0.133 s |
+
+`validateBytes` is synchronous inside the app's one dedicated worker, so the
+80.5 s was 80.5 s of every other RPC queued behind it. The fix is a `settled`
+set shared across start nodes; a node joins it only on a walk that ENDED, so a
+cyclic chain can never be settled and the reported id is unchanged.
+
+**The guard is a lookup count, not a stopwatch.** A wall-clock budget would be a
+flake on a box running four worktrees. `tests/unit/db/candidate-audit.test.ts`
+counts `Map.get` calls on a 10,000-node chain and requires fewer than 40,000;
+the old implementation makes 50,004,999 — verified by reverting the fix and
+watching the assertion fail with that number.
+
+**Finding 2 — two refusals added, one gap kept deliberately.**
+REJECTED now, because neither can occur in an image this application produced,
+so there is no legitimate import to destroy: (1) two snapshot rows sharing one
+`id` — the live table has a PRIMARY KEY, and restore dies with
+`SQLITE_CONSTRAINT_PRIMARYKEY`; (2) a snapshot slot holding both
+`fixed_spell_version_id` and `current_spell_version_id` — the CHECK and the two
+triggers forbid it on every INSERT/UPDATE, and restore dies with
+`SQLITE_CONSTRAINT_TRIGGER`. Both rules are IMPORTED from the portable-backup
+validator (`src/domain/contracts/row-rules.ts`) rather than written twice.
+
+NOT REJECTED, deliberately: a snapshot referencing a `spell_versions` row with
+`is_active = 0`. `CharacterState.validateSnapshot` refuses it, but unlike the
+other two this state is reachable in a legitimate database — `CatalogImporter`
+tombstones a version on every re-import that stops naming its `content_key`
+(`src/catalog/catalog-importer.ts:266`), and save points captured earlier keep
+pointing at it. Refusing the image would mean a user who took a catalog update
+can no longer restore their own backup. The skip is inert and proved so:
+`restore` calls `validateSnapshot` BEFORE opening its transaction, so the
+snapshot cannot become an INSERT, and the test asserts the rows are unchanged
+after the refusal.
+
+**Finding 3 — the ownership pass is future-proofing, and now says so in a test.**
+`auditCharacterOwnership` catches nothing today: every character-owned
+`character_id` carries an FK, so `PRAGMA foreign_key_check` reaches every orphan
+first. `UNENFORCED_OWNERSHIP_TABLES` derives that claim from the generated FK
+facts and a test asserts it is EMPTY, so the day someone adds a character-owned
+table without that FK the claim fails loudly instead of ageing into a lie. The
+pass is kept — it costs nothing and the audit is contracted on the
+classification, not on the FKs — but it is no longer counted as a guarantee.
+
+**No byte or row cap at the backup boundary, and why.** The DoS was the
+algorithm, not the size. Post-fix cost is linear at roughly 10 ms per megabyte,
+so a 100 MB import costs about a second. A cap's only failure mode is refusing a
+real user's import (D6b), and there is no honest number to set it at: the
+database grows with the catalog AND with unbounded undo history. Recorded in
+`src/backup/database-backup.ts` with the measurements, so the next person does
+not have to re-derive it.

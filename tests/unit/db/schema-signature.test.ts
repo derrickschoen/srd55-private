@@ -54,21 +54,30 @@ describe('pre-Drizzle database images', () => {
     return storage;
   }
 
-  it('is byte-different from the generated artifact and now declares four fewer tables', () => {
+  it('is byte-different from the generated artifact, and the counts have parted both ways', () => {
     expect(preDrizzleSchema).not.toBe(schema);
-    // The old artifact declared the same 38 tables in a different presentation,
-    // which is why the SIGNATURE was the thing that tripped. The generated
-    // artifact has since gained the four native weapon tables, so an old image
-    // is now short of `applicationTables` as well — it fails EARLIER, not less.
+    // The fixture is a HISTORICAL artifact and is deliberately left frozen: its
+    // whole purpose is to be the thing the signature check trips on, and
+    // pruning it to match would destroy that.
     //
-    // This is a COUNT, not an equivalence proof, and does not claim to be one.
+    // It has since diverged from the generated schema in BOTH directions, which
+    // is why the counts are asserted rather than left as a surprise: the
+    // fixture still declares the eight Laravel-only tables that were dropped,
+    // and it has never held the four native weapon tables that were added.
+    // 38 - 8 + 4 = 34. Originally only the SIGNATURE tripped, because the two
+    // declared the same 38 tables in a different presentation; an old image is
+    // now short of `applicationTables` too, so it fails EARLIER, not less.
+    //
+    // These are COUNTS, not an equivalence proof, and do not claim to be one.
     // The Laravel-derived oracle in `tests/unit/schema.test.ts` runs against
     // the generated artifact and is what actually pins column types, indexes,
-    // defaults and foreign keys.
+    // defaults and foreign keys — including, since the prune, the proof that
+    // its column-metadata hash is still derived from THIS fixture rather than
+    // from our own output.
     const tableCount = (sql: string) =>
       [...sql.matchAll(/CREATE TABLE/g)].length;
     expect(tableCount(preDrizzleSchema)).toBe(38);
-    expect(tableCount(schema)).toBe(42);
+    expect(tableCount(schema)).toBe(34);
   });
 
   it('rejects a pre-Drizzle image at open instead of half-working', async () => {
