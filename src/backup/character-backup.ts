@@ -26,6 +26,10 @@ import {
   rowContractError,
   type RowContractTable,
 } from '../domain/contracts/rows';
+import {
+  slotExclusiveAssignmentError,
+  uniqueRowIdError,
+} from '../domain/contracts/row-rules';
 
 type BackupRow = Readonly<Record<string, unknown>>;
 type MutableRow = Record<string, unknown>;
@@ -182,14 +186,18 @@ function rowList(value: unknown, label: string): BackupRow[] {
   );
 }
 
+/**
+ * The rule itself lives in `../domain/contracts/row-rules.ts` so the
+ * quarantined-image audit enforces the SAME one on the save-point snapshots it
+ * finds inside a database image. This wrapper is what turns the shared verdict
+ * into a `BackupValidationError` and hands back the id set the reference checks
+ * below need.
+ */
 function uniqueRowIds(rows: readonly BackupRow[], label: string): Set<number> {
   const ids = new Set<number>();
-  for (const [index, row] of rows.entries()) {
-    const id = positiveInteger(row.id, `${label}[${index}].id`);
-    if (ids.has(id)) {
-      throw new BackupValidationError(`${label} contains duplicate id ${id}.`);
-    }
-    ids.add(id);
+  const error = uniqueRowIdError(rows, label, ids);
+  if (error !== null) {
+    throw new BackupValidationError(error);
   }
   return ids;
 }
@@ -427,13 +435,13 @@ function validateCharacterRows(
       `${label}.spell_selection_slots[${index}].current_spell_version_id`,
       true,
     );
-    if (
-      row.fixed_spell_version_id !== null &&
-      row.current_spell_version_id !== null
-    ) {
-      throw new BackupValidationError(
-        `${label}.spell_selection_slots[${index}] contains both a fixed and selected spell.`,
-      );
+    // Shared with the quarantined-image audit — see `row-rules.ts`.
+    const exclusivity = slotExclusiveAssignmentError(
+      row,
+      `${label}.spell_selection_slots[${index}]`,
+    );
+    if (exclusivity !== null) {
+      throw new BackupValidationError(exclusivity);
     }
   }
 

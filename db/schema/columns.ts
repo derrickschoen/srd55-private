@@ -47,8 +47,8 @@ export const datetime = <T extends string = string>() =>
  * Integer columns use Drizzle's built-in `integer()`, which emits the declared
  * type in lowercase (`integer`) where Laravel emitted `INTEGER`. A
  * `customType` cannot be used here: `primaryKey({ autoIncrement: true })` is
- * only available on `SQLiteIntegerBuilder`, and 33 of the 38 tables have an
- * AUTOINCREMENT primary key that `sqlite_sequence` depends on
+ * only available on `SQLiteIntegerBuilder`, and every one of the 30 tables has
+ * an AUTOINCREMENT primary key that `sqlite_sequence` depends on
  * (`src/backup/character-backup.ts` reserves save-point ids through it). The
  * alternative — `customType` for plain integers and `integer()` for PKs —
  * would produce an artifact that is inconsistent with itself for no gain.
@@ -80,6 +80,3 @@ export const tinyint1 = customType<{ data: boolean; driverData: number }>({
  * parity oracle pins those exact strings, so the quoting is load-bearing.
  */
 export const laravelDefault = (literal: string) => sql.raw(`'${literal}'`);
-
-/** The one unquoted default in the schema (`failed_jobs.failed_at`). */
-export const currentTimestamp = sql`CURRENT_TIMESTAMP`;

@@ -19,10 +19,12 @@ import { schemaSources } from '../helpers/schema-sources';
  * SQLite reuses the highest free rowid and a restore can silently collide with
  * ids the backup document still references.
  *
- * PROVENANCE: the 33 names below were transcribed from the hand-written,
+ * PROVENANCE: the names below were transcribed from the hand-written,
  * Laravel-derived `src/db/schema.sql` as it stood BEFORE any Drizzle
  * generation existed. They are not derived from Drizzle output and must never
- * be regenerated from it.
+ * be regenerated from it. Three of the original 33 — `failed_jobs`, `jobs` and
+ * `users` — were removed with the eight Laravel-only tables; the remaining 30
+ * are the untouched transcription.
  */
 const autoIncrementTables = [
   'background_definitions',
@@ -36,9 +38,7 @@ const autoIncrementTables = [
   'characters',
   'class_definitions',
   'class_progressions',
-  'failed_jobs',
   'feat_definitions',
-  'jobs',
   'species_definitions',
   'spell_identities',
   'spell_identity_aliases',
@@ -55,23 +55,24 @@ const autoIncrementTables = [
   'spell_versions',
   'subclass_definitions',
   'subclass_progressions',
-  'users',
   'warning_acknowledgements',
   'wizard_spellbook_entries',
 ] as const;
 
 /**
- * The five tables whose primary key is a natural key, not a rowid alias, and
- * which therefore cannot carry AUTOINCREMENT. Pinned explicitly so that
- * "33 of 38" is asserted from both directions.
+ * The tables whose primary key is a natural key rather than a rowid alias, and
+ * which therefore cannot carry AUTOINCREMENT.
+ *
+ * EMPTY NOW, AND STILL WORTH ASSERTING. All five — `cache`, `cache_locks`,
+ * `job_batches`, `password_reset_tokens`, `sessions` — were Laravel-only tables
+ * and left with the other eight, so the "33 of 38 from both directions" framing
+ * is genuinely gone and is not pretended otherwise. What the empty list still
+ * says is a real, failable claim about the schema as it stands: EVERY table has
+ * a surrogate autoincrementing key. A table added with a natural primary key
+ * fails here and forces the decision to be made deliberately, which is the only
+ * thing the second direction ever bought.
  */
-const naturalKeyTables = [
-  'cache',
-  'cache_locks',
-  'job_batches',
-  'password_reset_tokens',
-  'sessions',
-] as const;
+const naturalKeyTables = [] as const;
 
 let sqlite3: Sqlite3Static;
 const openDatabases: Database[] = [];
@@ -95,7 +96,7 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
       return db;
     }
 
-    it('declares AUTOINCREMENT on exactly the 33 surrogate-key tables', () => {
+    it('declares AUTOINCREMENT on exactly the 30 surrogate-key tables', () => {
       const db = openDb();
       const declared = db
         .selectValues(
@@ -109,7 +110,7 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
         .map(String);
 
       expect(declared).toEqual([...autoIncrementTables]);
-      expect(declared).toHaveLength(33);
+      expect(declared).toHaveLength(30);
 
       const withoutAutoIncrement = db
         .selectValues(

@@ -42,19 +42,24 @@ describe('pre-Drizzle database images', () => {
     return storage;
   }
 
-  it('is byte-different from the generated artifact yet declares the same table count', () => {
+  it('is byte-different from the generated artifact, and now declares more tables', () => {
     expect(preDrizzleSchema).not.toBe(schema);
-    // Both still declare 38 tables — the difference is presentation, which is
-    // precisely why the signature check is the thing that trips.
+    // The fixture is a HISTORICAL artifact and is deliberately left frozen: its
+    // whole purpose is to be the thing the signature check trips on, and
+    // pruning it to match would destroy that. So it still declares the eight
+    // Laravel-only tables the generated schema has dropped, and the counts no
+    // longer match — asserted here rather than left as a surprise.
     //
-    // This is a COUNT, not an equivalence proof, and does not claim to be one.
+    // These are COUNTS, not an equivalence proof, and do not claim to be one.
     // The Laravel-derived oracle in `tests/unit/schema.test.ts` runs against
     // the generated artifact and is what actually pins column types, indexes,
-    // defaults and foreign keys.
+    // defaults and foreign keys — including, since the prune, the proof that
+    // its column-metadata hash is still derived from THIS fixture rather than
+    // from our own output.
     const tableCount = (sql: string) =>
       [...sql.matchAll(/CREATE TABLE/g)].length;
-    expect(tableCount(preDrizzleSchema)).toBe(tableCount(schema));
-    expect(tableCount(schema)).toBe(38);
+    expect(tableCount(preDrizzleSchema)).toBe(38);
+    expect(tableCount(schema)).toBe(30);
   });
 
   it('rejects a pre-Drizzle image at open instead of half-working', async () => {

@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import checkedIn from '../../src/db/schema.sql?raw';
-import { composeSchemaSql, SCHEMA_NOTES } from '../../scripts/compose-schema';
+import {
+  composePrelude,
+  composeSchemaSql,
+  SCHEMA_NOTES,
+} from '../../scripts/compose-schema';
 
 /**
  * A GENERATION-FRESHNESS DIFF — explicitly NOT a Laravel parity check.
@@ -50,30 +54,71 @@ describe('schema generation freshness', () => {
 });
 
 /**
- * The hand-written artifact carried rationale comments that a naive
- * regeneration would silently drop — in particular the explanation of why
- * eight tables nothing reads still exist. Losing that would leave a future
- * reader with no reason not to delete them.
+ * THE RATIONALE-NOTE MECHANISM, NOW CARRYING NOTHING.
+ *
+ * Two tests used to live here: one asserting the artifact preserved the
+ * explanation of why eight tables nothing reads still existed, and one
+ * asserting it named the round-trip reason for them. Those eight tables are
+ * gone, so both tests are gone too — a test whose entire subject has been
+ * deleted is not a test worth keeping green.
+ *
+ * The MECHANISM stays, and so does a test of it, because the hazard it exists
+ * for has not gone anywhere: a rationale that lives only inside a generated
+ * file is a rationale the next regeneration silently drops. This proves the
+ * composer still emits whatever `SCHEMA_NOTES` holds — including that an empty
+ * list leaves no stray comment or blank line behind — so the next note added
+ * arrives with its guard already working.
  */
 describe('schema rationale notes', () => {
-  it('preserves the dead-infrastructure-tables rationale in the artifact', async () => {
+  it('emits exactly the notes SCHEMA_NOTES declares, and nothing when it is empty', async () => {
     const sql = await composeSchemaSql();
-    expect(SCHEMA_NOTES.length).toBeGreaterThan(0);
+    const commentBlock = sql
+      .split('\n')
+      .filter((line) => line.startsWith('--'))
+      .map((line) => line.slice(2).trim())
+      .join(' ');
     for (const note of SCHEMA_NOTES) {
       // The note is emitted as wrapped SQL comments, so compare on words.
-      const commentBlock = sql
-        .split('\n')
-        .filter((line) => line.startsWith('--'))
-        .map((line) => line.slice(2).trim())
-        .join(' ');
       expect(commentBlock).toContain(note);
+    }
+    if (SCHEMA_NOTES.length === 0) {
+      // Only the generated-file banner may precede the pragma, and the pragma
+      // is followed by exactly one blank line before the first statement.
+      expect(sql).toContain('PRAGMA foreign_keys = ON;\n\nCREATE TABLE');
     }
   });
 
-  it('names the round-trip reason the infrastructure tables exist', async () => {
-    const sql = await composeSchemaSql();
-    expect(sql).toContain('round-trip');
-    expect(sql).toContain('without');
+  /**
+   * The test above can only exercise the branch `SCHEMA_NOTES` happens to be in,
+   * and it is empty today — so the note-EMITTING half would be dormant until the
+   * day someone adds a note, which is the day the guard needs to already work.
+   * `composePrelude` takes the list as a parameter so both branches run now.
+   */
+  it('wraps a note into comment lines that reconstruct it exactly', () => {
+    // Long enough to force several wraps; the expectation below is derived from
+    // this literal, never from the composer's output.
+    const note =
+      'A rationale that lives only inside a generated file is a rationale the ' +
+      'next regeneration silently drops, so the composer has to carry it.';
+    const lines = composePrelude([note]).split('\n');
+    const pragma = lines.indexOf('PRAGMA foreign_keys = ON;');
+    expect(pragma).toBeGreaterThan(-1);
+
+    // The blank line travels with the note, so exactly one separates them.
+    expect(lines[pragma + 1]).toBe('');
+    const commentLines = lines.slice(pragma + 2);
+    expect(commentLines.length).toBeGreaterThan(1);
+    for (const line of commentLines) {
+      expect(line.startsWith('-- ')).toBe(true);
+      expect(line.length).toBeLessThanOrEqual(78);
+    }
+    // Every word survives, in order, with nothing invented or dropped.
+    expect(commentLines.map((line) => line.slice(3)).join(' ')).toBe(note);
+  });
+
+  it('leaves no comment or blank line behind when the note list is empty', () => {
+    const prelude = composePrelude([]);
+    expect(prelude.endsWith('PRAGMA foreign_keys = ON;')).toBe(true);
   });
 
   it('marks the artifact as generated so it is not hand-edited', async () => {
