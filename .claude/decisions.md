@@ -1,5 +1,125 @@
 # Binding scope decisions
 
+## D7 — Neither the Laravel app nor this code is worth preserving (2026-07-25)
+
+Owner direction:
+> "Don't worry about preserving Laravel version. That was an mvp. Don't worry
+>  about preserving this code either. It is only a 2nd draft."
+
+This LOOSENS several constraints that earlier decisions and plans treated as
+binding. Where an earlier note conflicts with this, this wins.
+
+**No longer goals:**
+
+- Laravel SCHEMA fidelity. The 38-table inventory, the Laravel-derived metadata
+  hash, `VARCHAR`/`DATETIME`/`TINYINT(1)` declared types, Laravel column order,
+  and the seven dead infrastructure tables are all inherited MVP artifacts, not
+  requirements. Prune, rename, retype and reorder freely where the domain is
+  better for it.
+- Backward compatibility with existing OPFS images or backups. There are no
+  users. A schema-signature break is a non-event.
+- Preserving the current TypeScript structure. Read-models, table lists, query
+  shapes and module layout are all second-draft and may be restructured.
+
+**Still goals — do not over-read this:**
+
+- **Behavioural correctness.** The parity FIXTURES encode D&D rules — multiclass
+  slot tables, caster progression, preparation ceilings. Those expected values
+  remain valid regardless of where they came from, and they are the best
+  regression suite this project has. Keep them as correctness tests; drop only
+  the SCHEMA-METADATA parity that asserts we still look like Laravel.
+- **A test must still be able to fail.** If a check is retained, it must remain
+  a real oracle. Regenerating expectations from our own output produces a
+  measurement that cannot come out wrong — that stays forbidden, not because of
+  Laravel, but because a tautological test is worse than no test.
+- The untrusted-input boundary (share links, backup/catalog import). Nothing
+  here relaxes that.
+
+**Consequences to apply:**
+
+- D6's restructurings become much more viable — variant tables, 1:0..1
+  extraction, explicit state columns — since schema shape is no longer pinned to
+  Laravel's.
+- Nullability tightening is freer: a column nullable only because a Laravel
+  migration made it so has no claim to stay nullable.
+- Q3 (the seven dead tables) resolves toward pruning. Still do it as a SEPARATE
+  change from the Drizzle rewrite so failures stay attributable.
+- The Drizzle rewrite already in flight was scoped under the old constraints. Its
+  choices remain defensible; later increments may go further.
+
+---
+
+
+## D6b — THE TEST for whether a null is legitimate (2026-07-25)
+
+Owner-supplied, and it GOVERNS D6. Where D6's restructuring patterns conflict
+with this test, this test wins. Apply it first; reach for restructuring only
+when all three say the null is not real.
+
+> 1. "If nobody decided option X while building a character, and that being
+>     undecided is a state that needs to be allowed in order for someone to
+>     build or import a character, then that is a truly optional thing."
+>
+> 2. "If the SRD can't be represented fully without the null, then that is a
+>     good sign."
+>
+> 3. "If something needs to be nullable for the purposes of going through the
+>     steps of the character builder, I want it nullable if the only alternative
+>     is to mangle the structure of the codebase to get it there."
+
+### Why this is the right test for THIS app
+
+**"Undecided" is a first-class domain state here, not an accident.** The guided
+builder is progressive: a character exists, and is persisted, before every
+choice is made. A share link can arrive mid-build. So a column that looks like
+it "obviously should be non-null" is often correctly nullable, because the
+alternative is forbidding a legitimate half-built character.
+
+This is the same concept completeness v1 already models. Completeness detection
+answers "what has not been decided yet" — and nullability is *how that is
+stored*. **A nullable column that completeness reports on is correctly
+nullable.** The two features are two views of one idea, and they should agree:
+if the detector can meaningfully warn about a column being unset, that column
+must be allowed to be unset.
+
+### Applying it
+
+For each nullable column, ask in order:
+
+1. **Can a character legitimately exist, be saved, or be imported with this
+   unset?** If yes → truly optional. Keep the null. Stop; do not restructure.
+2. **Does the SRD require the absence?** A rule that genuinely has no value for
+   some cases (no subclass before level 3; no spellcasting ability for a
+   non-caster) is real optionality, and the SRD failing to fit without a null is
+   evidence FOR the null, not against it.
+3. **Does the builder flow need it?** If a step must be able to leave this
+   unset to function, keep it nullable.
+4. **Only if all three are no** — then it is a candidate for D6's
+   restructurings, or for plain tightening.
+
+### The explicit anti-over-engineering clause
+
+Point 3 is a guard, and it overrides D6's patterns. **Do not extract a 1:0..1
+table, invent a variant type, or reshape a module merely to delete a null the
+builder genuinely needs.** Contorting the structure to win a type argument is a
+worse outcome than the null. If the restructuring is not independently better
+for the domain, do not do it.
+
+### What this changes about the audit
+
+The audit's output is no longer mainly "which columns can we tighten". It is:
+
+- columns representing an **undecided state** → stay nullable, and should be
+  reported by completeness;
+- columns nullable only because a **Laravel migration** made them so (D7) → real
+  candidates;
+- columns nullable only **transiently during construction** → the persisted
+  contract may still be non-null;
+- columns where a restructuring is **independently better for the domain** → do
+  it for that reason, not to remove the null.
+
+---
+
 ## D6 — Treat nullability as a design smell to be investigated, not a type to declare (2026-07-25)
 
 Owner direction:
