@@ -442,6 +442,9 @@ describe('typed query RPC integration', () => {
       tags_created: 0,
       attack_modes_created: 1,
       save_abilities_created: 0,
+      subclasses_created: 0,
+      subclasses_updated: 0,
+      subclass_features_created: 0,
       text_available: false,
       descriptions_loaded: 0,
     });
