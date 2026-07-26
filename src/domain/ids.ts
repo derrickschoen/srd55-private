@@ -49,6 +49,14 @@ export type CharacterWeaponId = Brand<number, 'CharacterWeaponId'>;
  * code is reading the catalog when it meant to read the character.
  */
 export type WeaponTemplateId = Brand<number, 'WeaponTemplateId'>;
+/**
+ * `armor_templates.id` — a catalog row a character's armour may be COPIED from.
+ *
+ * Branded for the same reason `WeaponTemplateId` is, and it is not hypothetical
+ * here either: by D1b a character holds VALUES, so a template id appearing where
+ * a character's own armour is expected means the code is reading the catalog.
+ */
+export type ArmorTemplateId = Brand<number, 'ArmorTemplateId'>;
 
 /** One `*_definitions.id` brand per definition table, so they cannot cross. */
 export type ClassDefinitionId = Brand<number, 'ClassDefinitionId'>;

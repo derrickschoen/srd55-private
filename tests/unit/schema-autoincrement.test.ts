@@ -74,6 +74,17 @@ const nativeAutoIncrementTables = [
   'class_weapon_mastery_counts',
   'class_weapon_mastery_grants',
   'weapon_templates',
+  // Sheet core (D11/D12): seven class-content tables plus the armour catalog.
+  // Every one carries a surrogate autoincrementing key, so the claim below —
+  // that `naturalKeyTables` is empty — still holds after they arrive.
+  'armor_templates',
+  'class_armor_training',
+  'class_extra_attack_grants',
+  'class_martial_arts_dice',
+  'class_saving_throw_proficiencies',
+  'class_sheet_traits',
+  'class_skill_options',
+  'class_weapon_proficiencies',
 ] as const;
 
 const allAutoIncrementTables = [
@@ -119,7 +130,7 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
       return db;
     }
 
-    it('declares AUTOINCREMENT on exactly the 30 Laravel and 4 native surrogate-key tables', () => {
+    it('declares AUTOINCREMENT on exactly the 30 Laravel and 12 native surrogate-key tables', () => {
       const db = openDb();
       const declared = db
         .selectValues(
@@ -133,9 +144,9 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
         .map(String);
 
       expect(declared).toEqual(allAutoIncrementTables);
-      expect(declared).toHaveLength(34);
+      expect(declared).toHaveLength(42);
       expect(autoIncrementTables).toHaveLength(30);
-      expect(nativeAutoIncrementTables).toHaveLength(4);
+      expect(nativeAutoIncrementTables).toHaveLength(12);
 
       const withoutAutoIncrement = db
         .selectValues(

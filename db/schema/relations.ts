@@ -43,6 +43,16 @@ import {
   class_weapon_mastery_grants,
   weapon_templates,
 } from './weapons';
+import {
+  armor_templates,
+  class_armor_training,
+  class_extra_attack_grants,
+  class_martial_arts_dice,
+  class_saving_throw_proficiencies,
+  class_sheet_traits,
+  class_skill_options,
+  class_weapon_proficiencies,
+} from './sheet';
 
 /**
  * THE OBJECT GRAPH, DECLARED.
@@ -391,8 +401,100 @@ export const classDefinitionsRelations = relations(
     class_levels: many(character_class_levels),
     weapon_mastery_grant: many(class_weapon_mastery_grants),
     weapon_mastery_counts: many(class_weapon_mastery_counts),
+    // Sheet core. `sheet_traits` is `many` and not `one` even though a unique
+    // index makes it 1:0..1, matching how `weapon_mastery_grant` is declared
+    // beside it: the reverse side of these is uniformly `many` in this file, and
+    // the uniqueness is expressed by the index rather than by the relation.
+    sheet_traits: many(class_sheet_traits),
+    saving_throw_proficiencies: many(class_saving_throw_proficiencies),
+    skill_options: many(class_skill_options),
+    armor_training: many(class_armor_training),
+    weapon_proficiencies: many(class_weapon_proficiencies),
+    extra_attack_grants: many(class_extra_attack_grants),
+    martial_arts_dice: many(class_martial_arts_dice),
   }),
 );
+
+/**
+ * The seven sheet-core class tables all hang off `class_definitions` by the same
+ * cascading foreign key, so their relations are identical in shape.
+ */
+export const classSheetTraitsRelations = relations(
+  class_sheet_traits,
+  ({ one }) => ({
+    class_definition: one(class_definitions, {
+      fields: [class_sheet_traits.class_definition_id],
+      references: [class_definitions.id],
+    }),
+  }),
+);
+
+export const classSavingThrowProficienciesRelations = relations(
+  class_saving_throw_proficiencies,
+  ({ one }) => ({
+    class_definition: one(class_definitions, {
+      fields: [class_saving_throw_proficiencies.class_definition_id],
+      references: [class_definitions.id],
+    }),
+  }),
+);
+
+export const classSkillOptionsRelations = relations(
+  class_skill_options,
+  ({ one }) => ({
+    class_definition: one(class_definitions, {
+      fields: [class_skill_options.class_definition_id],
+      references: [class_definitions.id],
+    }),
+  }),
+);
+
+export const classArmorTrainingRelations = relations(
+  class_armor_training,
+  ({ one }) => ({
+    class_definition: one(class_definitions, {
+      fields: [class_armor_training.class_definition_id],
+      references: [class_definitions.id],
+    }),
+  }),
+);
+
+export const classWeaponProficienciesRelations = relations(
+  class_weapon_proficiencies,
+  ({ one }) => ({
+    class_definition: one(class_definitions, {
+      fields: [class_weapon_proficiencies.class_definition_id],
+      references: [class_definitions.id],
+    }),
+  }),
+);
+
+export const classExtraAttackGrantsRelations = relations(
+  class_extra_attack_grants,
+  ({ one }) => ({
+    class_definition: one(class_definitions, {
+      fields: [class_extra_attack_grants.class_definition_id],
+      references: [class_definitions.id],
+    }),
+  }),
+);
+
+export const classMartialArtsDiceRelations = relations(
+  class_martial_arts_dice,
+  ({ one }) => ({
+    class_definition: one(class_definitions, {
+      fields: [class_martial_arts_dice.class_definition_id],
+      references: [class_definitions.id],
+    }),
+  }),
+);
+
+/**
+ * The armour catalog points at nothing and nothing points at it — identical to
+ * `weapon_templates`, and for the identical D1b reason: a character stores
+ * VALUES copied from a template, so there is no column for an edge to sit on.
+ */
+export const armorTemplatesRelations = relations(armor_templates, () => ({}));
 
 export const classWeaponMasteryGrantsRelations = relations(
   class_weapon_mastery_grants,
