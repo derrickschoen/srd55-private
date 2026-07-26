@@ -1,5 +1,68 @@
 # Binding scope decisions
 
+## D24 — Q9 closed: the character sheet exists, and an assumption is never printed as a fact (2026-07-26)
+
+`main` be5188c. Verified by me: **1582 vitest / 107 files, build exit 0,
+70 Playwright, 54 tables.**
+
+The app finally shows a character sheet. HP, AC, saving throws, skill
+modifiers, initiative and passive Perception were computed and tested since D17
+but reached nothing; they reach a screen now, and the four things a player
+supplies — armour, recorded hit-point rolls, skill proficiencies, a manual AC
+adjustment — are stored.
+
+### The Q8 lesson was applied rather than repeated
+
+I checked this myself rather than reading the report, because it is the failure
+this project keeps having. All four new tables are `character_owned` with
+`snapshot`, `backup` and `share` all true — and classification is not the same
+as working, which was exactly Q8's bug. Each arm has its own test: a
+column-for-column backup round trip, a share round trip through the compressed
+fragment, and a save-point restore.
+
+Old payloads still import. A link minted before these inputs decodes with no
+sheet section, and its guard asserts the frozen fragment is THIRTEEN elements —
+so regenerating it from current code, which would make it fourteen, fails loudly
+instead of quietly testing the new format against itself. A save point that
+predates the inputs leaves them alone rather than clearing them. The test says
+"absent, not empty", because an empty list would be this build putting words in
+the link's mouth.
+
+### The finding worth keeping
+
+A homebrew class has no seeded traits and therefore no hit die. The query was
+substituting `?? 8` — so a guess arrived downstream indistinguishable from a
+sourced value, and the D4 agent block asserted `hit_die: 8` as fact about a
+class nobody had recorded one for.
+
+The absence now lives in the TYPE (`hit_die: number | null`), the assumption is
+made at the single place the number is produced, and it emits a warning naming
+the class. This is the D21 shape again: derive the reason where the value is
+computed, rather than annotating it at call sites.
+
+**Its test is the part I would keep.** It pairs the assumed-die case with a
+known-d8 twin that reaches the IDENTICAL total and warns about nothing — so the
+arithmetic alone cannot distinguish them and the warning is proved load-bearing.
+That is how to test a degradation that does not change a number.
+
+A recorded roll larger than the class's die is counted IN FULL and flagged.
+Clamping would silently rewrite a number the player typed; refusing it would
+make an imported character unopenable (D11). And it fires only where the die is
+KNOWN — an assumed d8 must not convict a roll of 11 that a homebrew d12 would
+allow. That non-compounding has its own test.
+
+**Rejected, with reasoning I agree with:** routing the missing-hit-die case
+through the completeness registry. `character-completeness.ts` draws the line at
+"an outstanding item is something the USER must decide"; a missing catalog row
+is not that. The comment promising a completeness item was deleted rather than
+left to imply a mechanism that does not exist.
+
+It also corrected an inherited falsehood: 8 is not "the median of the four hit
+die sizes" (the median of 6/8/10/12 is 9). It is the MODE — six of twelve
+classes print d8 — and that is checkable against the class-traits test.
+
+---
+
 ## F8 — 223 columns are degraded to `z.any()` to protect a goal D7 retired (measured 2026-07-26)
 
 Investigated in response to the owner asking what a "codec" is and whether
