@@ -215,16 +215,43 @@ export function masteryStatement(panel: WeaponsPanel): string {
       return `Weapon Mastery: ${chosen} of ${allowance.count} chosen${where}.`;
     }
     case 'unknown': {
-      const granting = allowance.classes.find(
-        (entry) =>
-          entry.allowance.state === 'unsourced' ||
-          entry.allowance.state === 'content_missing',
+      /*
+       * Two different ignorances, and only one of them may claim a grant.
+       *
+       * `unsourced` is a SOURCED fact: the class grants Weapon Mastery and the
+       * count is not in `docs/srd/source/`. Naming the grant is honest.
+       *
+       * `content_missing` means there is no grant row at all, or a
+       * `counts_known` class whose counts table is short. The first case is an
+       * unseeded database, where we do not know whether the class grants
+       * anything — so "grants it" would assert exactly what we are missing.
+       * This module's rule is that absent content is a state and never a
+       * number; saying "grants it" on no evidence is the same mistake one
+       * level up, a missing row rendered as a fact.
+       *
+       * One sentence covers both `content_missing` causes because it claims
+       * nothing: for a short counts table it under-claims, which is the safe
+       * direction to be wrong in.
+       */
+      const sourced = allowance.classes.find(
+        (entry) => entry.allowance.state === 'unsourced',
       );
-      const name = granting?.class_name ?? 'that class';
+      if (sourced !== undefined) {
+        const name = sourced.class_name;
+        return (
+          `Weapon Mastery: ${name} grants it, but this application does not ` +
+          `have the count for ${name}. ${chosen} chosen. Choose what your ` +
+          'table agrees on.'
+        );
+      }
+      const missing = allowance.classes.find(
+        (entry) => entry.allowance.state === 'content_missing',
+      );
+      const name = missing?.class_name ?? 'that class';
       return (
-        `Weapon Mastery: ${name} grants it, but this application does not ` +
-        `have the count for ${name}. ${chosen} chosen. Choose what your ` +
-        'table agrees on.'
+        `Weapon Mastery: this application does not have the Weapon Mastery ` +
+        `data for ${name}, so it cannot say whether it is granted or how ` +
+        `many. ${chosen} chosen. Choose what your table agrees on.`
       );
     }
     case 'unresolved': {

@@ -23,10 +23,19 @@ import {
  * `WEAPON_PORTABILITY_NOTICE`, which the weapons panel renders and the agent
  * reference emits.
  *
- * THIS TEST IS THE LINK BETWEEN THE TWO. The day the classification changes,
- * these assertions fail and point at the notice, which by then would be a
- * false statement in the product. That is the intended failure: a green suite
- * must not be reachable with the scopes flipped and the notice still on screen.
+ * WHAT THIS FILE PINS, EXACTLY: that the classification and the NOTICE TEXT
+ * agree. The day the scopes change, these assertions fail and point at the
+ * notice, which by then would be a false statement in the product.
+ *
+ * WHAT IT DOES NOT PIN — said plainly, because an earlier version of this
+ * comment claimed it did, and a review proved otherwise by deleting the render
+ * call and watching all thirteen tests stay green: that anything actually
+ * RENDERS the notice. Vitest runs these with `environment: 'node'`
+ * (`vitest.config.ts`), so there is no DOM here and `renderWeapons` cannot be
+ * called at all. The render is covered by `tests/browser/weapons.spec.ts` —
+ * a slower gate than one would choose for it, but a real one. Moving it here
+ * would mean changing the test environment to make a comment true, which is
+ * the wrong way round.
  *
  * IT IS NOT A WEAKENED ASSERTION. It asserts the CURRENT truth exactly. To make
  * it pass again after the gap closes, you delete the notice, delete this file,
