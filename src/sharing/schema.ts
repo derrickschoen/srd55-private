@@ -2,6 +2,7 @@ import { isSpellVersionKey } from '../catalog/catalog-key';
 import {
   abilities,
   rulesEditions,
+  speciesTraitEffectKinds,
   weaponMasteryProperties,
 } from '../domain/enums';
 import { weaponMasterySelectionError } from '../domain/contracts/row-rules';
@@ -9,6 +10,11 @@ import {
   WEAPON_RANGE_MAX_FEET,
   WEAPON_TEXT_LIMITS,
 } from '../domain/weapon-limits';
+import {
+  ORIGIN_EFFECT_MAGNITUDE_MAX,
+  ORIGIN_SPEED_MAX_FEET,
+  ORIGIN_TEXT_LIMITS,
+} from '../domain/origin-limits';
 
 export const CHARACTER_SHARE_FORMAT =
   'dnd-multiclass-spells-character-share' as const;
@@ -49,6 +55,18 @@ export const SHARE_LIMITS = Object.freeze({
    * legitimately built character refuse to export.
    */
   weapons: 100,
+  /**
+   * How many species traits one document may carry.
+   *
+   * The nine printed species have between three and five. A hundred is far past
+   * any hand-written list and exists for the same reason the `weapons` cap does:
+   * to stop a hostile document spending the whole decompressed budget on one
+   * section, and to name that section when it fires.
+   *
+   * There is no cap for the species or the background themselves — each is at
+   * most ONE row per character, and the schema's UNIQUE index says so.
+   */
+  speciesTraits: 100,
 });
 
 export interface ShareCharacter {
@@ -181,6 +199,110 @@ export const SHARE_WEAPON_TEXT = [
   'ammunition_kind',
 ] as const satisfies readonly (keyof ShareWeapon)[];
 
+export interface ShareSpecies {
+  readonly name: string;
+  readonly creature_type?: string;
+  readonly size?: string;
+  readonly base_speed_feet?: number;
+  readonly notes?: string;
+}
+
+export interface ShareSpeciesTrait {
+  readonly name: string;
+  readonly description?: string;
+  readonly effect_kind?: string;
+  readonly effect_damage_type?: string;
+  readonly effect_hit_points_flat?: number;
+  readonly effect_hit_points_per_level?: number;
+  readonly effect_speed_bonus_feet?: number;
+  readonly notes?: string;
+}
+
+export interface ShareBackground {
+  readonly name: string;
+  readonly ability_score_1?: string;
+  readonly ability_score_2?: string;
+  readonly ability_score_3?: string;
+  readonly feat_name?: string;
+  readonly skill_proficiency_1?: string;
+  readonly skill_proficiency_2?: string;
+  readonly tool_proficiency?: string;
+  readonly equipment_option_a?: string;
+  readonly equipment_option_b?: string;
+  readonly notes?: string;
+}
+
+/** The nullable text fields of a shared species, in wire order. */
+export const SHARE_SPECIES_TEXT = [
+  'creature_type',
+  'size',
+  'notes',
+] as const satisfies readonly (keyof ShareSpecies)[];
+
+/** The nullable text fields of a shared species trait, in wire order. */
+export const SHARE_SPECIES_TRAIT_TEXT = [
+  'description',
+  'effect_kind',
+  'effect_damage_type',
+  'notes',
+] as const satisfies readonly (keyof ShareSpeciesTrait)[];
+
+/** The signed integer effect payloads of a trait, in wire order. */
+export const SHARE_SPECIES_TRAIT_NUMBERS = [
+  'effect_hit_points_flat',
+  'effect_hit_points_per_level',
+  'effect_speed_bonus_feet',
+] as const satisfies readonly (keyof ShareSpeciesTrait)[];
+
+/** The nullable text fields of a shared background, in wire order. */
+export const SHARE_BACKGROUND_TEXT = [
+  'ability_score_1',
+  'ability_score_2',
+  'ability_score_3',
+  'feat_name',
+  'skill_proficiency_1',
+  'skill_proficiency_2',
+  'tool_proficiency',
+  'equipment_option_a',
+  'equipment_option_b',
+  'notes',
+] as const satisfies readonly (keyof ShareBackground)[];
+
+const SHARE_BACKGROUND_TEXT_LIMITS: Readonly<
+  Record<(typeof SHARE_BACKGROUND_TEXT)[number], number>
+> = {
+  ability_score_1: ORIGIN_TEXT_LIMITS.ability_score,
+  ability_score_2: ORIGIN_TEXT_LIMITS.ability_score,
+  ability_score_3: ORIGIN_TEXT_LIMITS.ability_score,
+  feat_name: ORIGIN_TEXT_LIMITS.feat_name,
+  skill_proficiency_1: ORIGIN_TEXT_LIMITS.skill_proficiency,
+  skill_proficiency_2: ORIGIN_TEXT_LIMITS.skill_proficiency,
+  tool_proficiency: ORIGIN_TEXT_LIMITS.tool_proficiency,
+  equipment_option_a: ORIGIN_TEXT_LIMITS.equipment_option,
+  equipment_option_b: ORIGIN_TEXT_LIMITS.equipment_option,
+  notes: ORIGIN_TEXT_LIMITS.notes,
+};
+
+const SHARE_SPECIES_TEXT_LIMITS: Readonly<
+  Record<(typeof SHARE_SPECIES_TEXT)[number], number>
+> = {
+  creature_type: ORIGIN_TEXT_LIMITS.creature_type,
+  size: ORIGIN_TEXT_LIMITS.size,
+  notes: ORIGIN_TEXT_LIMITS.notes,
+};
+
+const SHARE_SPECIES_TRAIT_TEXT_LIMITS: Readonly<
+  Record<(typeof SHARE_SPECIES_TRAIT_TEXT)[number], number>
+> = {
+  description: ORIGIN_TEXT_LIMITS.description,
+  // Bounded like any other string even though the value must then be one of
+  // four enum members: the length check names the field, the enum check names
+  // the vocabulary, and a 400 KB `effect_kind` should fail on the first.
+  effect_kind: ORIGIN_TEXT_LIMITS.name,
+  effect_damage_type: ORIGIN_TEXT_LIMITS.name,
+  notes: ORIGIN_TEXT_LIMITS.notes,
+};
+
 export interface CharacterShareDocument {
   readonly format: typeof CHARACTER_SHARE_FORMAT;
   readonly version: typeof CHARACTER_SHARE_VERSION;
@@ -204,6 +326,23 @@ export interface CharacterShareDocument {
    * character with no weapons, which is correct in both cases.
    */
   readonly weapons?: readonly ShareWeapon[];
+  /**
+   * THE CHARACTER'S ORIGIN. Three optional sections for the same compatibility
+   * reason `weapons` is optional: every link generated before origins travelled
+   * has none of these keys, and making any of them required would make each of
+   * those links unreadable.
+   *
+   * Three sections and not one nested object, because they are independently
+   * absent — a character may have a background and no species — and a nested
+   * object would need a fourth "present but empty" state to say so.
+   *
+   * `speciesTraits` carries no `sort_order`: the ARRAY POSITION is the printed
+   * order, which is the one place a positional format is unambiguously the
+   * right encoding of an ordering.
+   */
+  readonly species?: ShareSpecies;
+  readonly speciesTraits?: readonly ShareSpeciesTrait[];
+  readonly background?: ShareBackground;
 }
 
 export class ShareValidationError extends TypeError {
@@ -491,6 +630,143 @@ function shareWeapon(value: unknown, label: string): ShareWeapon {
   return weapon as unknown as ShareWeapon;
 }
 
+function originInteger(
+  value: unknown,
+  label: string,
+  maximum: number,
+  minimum: number,
+): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value)) {
+    throw new ShareValidationError(`${label} must be an integer.`);
+  }
+  if (value < minimum || value > maximum) {
+    throw new ShareValidationError(
+      `${label} must be between ${minimum} and ${maximum}.`,
+    );
+  }
+  return value;
+}
+
+function shareSpecies(value: unknown, label: string): ShareSpecies {
+  const row = record(value, label);
+  exactKeys(row, ['name'], [...SHARE_SPECIES_TEXT, 'base_speed_feet'], label);
+  const species: Record<string, unknown> = {
+    name: text(row.name, `${label}.name`, ORIGIN_TEXT_LIMITS.name),
+  };
+  for (const field of SHARE_SPECIES_TEXT) {
+    if (row[field] !== undefined) {
+      species[field] = text(
+        row[field],
+        `${label}.${field}`,
+        SHARE_SPECIES_TEXT_LIMITS[field],
+      );
+    }
+  }
+  if (row.base_speed_feet !== undefined) {
+    // Lower bound 1, not 0 — the same call `character_species_base_speed_check`
+    // makes. A Speed of 0 is not "not decided yet"; the absent key is.
+    species.base_speed_feet = originInteger(
+      row.base_speed_feet,
+      `${label}.base_speed_feet`,
+      ORIGIN_SPEED_MAX_FEET,
+      1,
+    );
+  }
+  return species as unknown as ShareSpecies;
+}
+
+function shareSpeciesTrait(value: unknown, label: string): ShareSpeciesTrait {
+  const row = record(value, label);
+  exactKeys(
+    row,
+    ['name'],
+    [...SHARE_SPECIES_TRAIT_TEXT, ...SHARE_SPECIES_TRAIT_NUMBERS],
+    label,
+  );
+  const trait: Record<string, unknown> = {
+    name: text(row.name, `${label}.name`, ORIGIN_TEXT_LIMITS.trait_name),
+  };
+  for (const field of SHARE_SPECIES_TRAIT_TEXT) {
+    if (row[field] !== undefined) {
+      trait[field] = text(
+        row[field],
+        `${label}.${field}`,
+        SHARE_SPECIES_TRAIT_TEXT_LIMITS[field],
+      );
+    }
+  }
+  for (const field of SHARE_SPECIES_TRAIT_NUMBERS) {
+    if (row[field] !== undefined) {
+      trait[field] = originInteger(
+        row[field],
+        `${label}.${field}`,
+        ORIGIN_EFFECT_MAGNITUDE_MAX,
+        -ORIGIN_EFFECT_MAGNITUDE_MAX,
+      );
+    }
+  }
+  // THE DATABASE'S OWN CHECKS, APPLIED AT THE BOUNDARY. Reaching the INSERT
+  // with an unknown kind, or with a payload belonging to a different kind,
+  // aborts the whole import transaction with a raw SQLITE_CONSTRAINT_CHECK
+  // naming nothing the user could act on.
+  const kind = trait.effect_kind;
+  if (
+    kind !== undefined &&
+    !speciesTraitEffectKinds.includes(
+      kind as (typeof speciesTraitEffectKinds)[number],
+    )
+  ) {
+    throw new ShareValidationError(`${label}.effect_kind is unsupported.`);
+  }
+  if (trait.effect_damage_type !== undefined && kind !== 'damage_resistance') {
+    throw new ShareValidationError(
+      `${label}.effect_damage_type requires effect_kind damage_resistance.`,
+    );
+  }
+  const hasHitPoints =
+    trait.effect_hit_points_flat !== undefined ||
+    trait.effect_hit_points_per_level !== undefined;
+  if (hasHitPoints && kind !== 'hp_modifier') {
+    throw new ShareValidationError(
+      `${label} hit point effects require effect_kind hp_modifier.`,
+    );
+  }
+  if (kind === 'hp_modifier' && !hasHitPoints) {
+    throw new ShareValidationError(
+      `${label} effect_kind hp_modifier requires a hit point value.`,
+    );
+  }
+  if (trait.effect_speed_bonus_feet !== undefined && kind !== 'speed') {
+    throw new ShareValidationError(
+      `${label}.effect_speed_bonus_feet requires effect_kind speed.`,
+    );
+  }
+  if (kind === 'speed' && trait.effect_speed_bonus_feet === undefined) {
+    throw new ShareValidationError(
+      `${label} effect_kind speed requires effect_speed_bonus_feet.`,
+    );
+  }
+  return trait as unknown as ShareSpeciesTrait;
+}
+
+function shareBackground(value: unknown, label: string): ShareBackground {
+  const row = record(value, label);
+  exactKeys(row, ['name'], [...SHARE_BACKGROUND_TEXT], label);
+  const background: Record<string, unknown> = {
+    name: text(row.name, `${label}.name`, ORIGIN_TEXT_LIMITS.name),
+  };
+  for (const field of SHARE_BACKGROUND_TEXT) {
+    if (row[field] !== undefined) {
+      background[field] = text(
+        row[field],
+        `${label}.${field}`,
+        SHARE_BACKGROUND_TEXT_LIMITS[field],
+      );
+    }
+  }
+  return background as unknown as ShareBackground;
+}
+
 function assertUnique(
   values: readonly string[],
   label: string,
@@ -517,7 +793,15 @@ export function validateShareDocument(
       'preferences',
       'overrides',
     ],
-    ['acknowledgements', 'loadouts', 'placeholders', 'weapons'],
+    [
+      'acknowledgements',
+      'loadouts',
+      'placeholders',
+      'weapons',
+      'species',
+      'speciesTraits',
+      'background',
+    ],
     'document',
   );
   if (source.format !== CHARACTER_SHARE_FORMAT) {
@@ -949,6 +1233,26 @@ export function validateShareDocument(
     // database makes unique; weapons are not.
   }
 
+  const species =
+    source.species === undefined
+      ? undefined
+      : shareSpecies(source.species, 'species');
+  let speciesTraits: CharacterShareDocument['speciesTraits'] | undefined;
+  if (source.speciesTraits !== undefined) {
+    speciesTraits = list(
+      source.speciesTraits,
+      'speciesTraits',
+      SHARE_LIMITS.speciesTraits,
+    ).map((item, index) => shareSpeciesTrait(item, `speciesTraits[${index}]`));
+    // NOT `assertUnique`. Six of the nine species print a trait called
+    // `Darkvision`, and a user's own list may legitimately repeat a name; the
+    // schema's uniqueness is per-species on the CATALOG side only.
+  }
+  const background =
+    source.background === undefined
+      ? undefined
+      : shareBackground(source.background, 'background');
+
   return {
     format: CHARACTER_SHARE_FORMAT,
     version: CHARACTER_SHARE_VERSION,
@@ -963,5 +1267,8 @@ export function validateShareDocument(
     ...(loadouts === undefined ? {} : { loadouts }),
     ...(placeholders === undefined ? {} : { placeholders }),
     ...(weapons === undefined ? {} : { weapons }),
+    ...(species === undefined ? {} : { species }),
+    ...(speciesTraits === undefined ? {} : { speciesTraits }),
+    ...(background === undefined ? {} : { background }),
   };
 }

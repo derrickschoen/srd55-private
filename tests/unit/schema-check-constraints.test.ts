@@ -404,6 +404,75 @@ const spellVersionEdit =
     update(db, 'spell_versions', newSpellVersion(db, initial), patch);
   };
 
+function newSpeciesTemplate(db: Database, values: Values = {}): number {
+  return insert(db, 'species_templates', {
+    content_key: uid('species'),
+    name: uid('Species'),
+    creature_type: 'Humanoid',
+    size: 'Medium',
+    base_speed_feet: 30,
+    ...values,
+  });
+}
+
+const speciesTemplate =
+  (values: Values): Write =>
+  (db) => {
+    newSpeciesTemplate(db, values);
+  };
+
+const backgroundTemplate =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'background_templates', {
+      content_key: uid('background'),
+      name: uid('Background'),
+      ability_score_1: 'Strength',
+      ability_score_2: 'Dexterity',
+      ability_score_3: 'Constitution',
+      feat_name: 'Savage Attacker',
+      skill_proficiency_1: 'Athletics',
+      skill_proficiency_2: 'Intimidation',
+      tool_proficiency: "Thieves' Tools",
+      equipment_option_a: 'Spear, Shortbow, 14 GP',
+      equipment_option_b: '50 GP',
+      ...values,
+    });
+  };
+
+const speciesTemplateTrait =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'species_template_traits', {
+      species_template_id: newSpeciesTemplate(db),
+      sort_order: 1,
+      name: uid('Trait'),
+      description: 'Printed trait text.',
+      ...values,
+    });
+  };
+
+const characterSpecies =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'character_species', {
+      character_id: newCharacter(db),
+      name: uid('Species'),
+      ...values,
+    });
+  };
+
+const characterSpeciesTrait =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'character_species_traits', {
+      character_id: newCharacter(db),
+      sort_order: 1,
+      name: uid('Trait'),
+      ...values,
+    });
+  };
+
 interface ConstraintCase {
   readonly constraint: string;
   /** Writes that MUST be refused, each with the corruption it would have made. */
@@ -718,6 +787,245 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     ],
   },
 
+  // --- origins ------------------------------------------------------------
+  // The trait cases below are declared TWICE, once per trait table, and that
+  // duplication is deliberate: the template's constraints and the character
+  // copy's are identical because the copy is column-wise, and a rule that held
+  // on only one side would let the copy itself produce a row the schema
+  // refuses. Proving them separately is what makes that claim checkable.
+  {
+    constraint: 'species_templates_rules_edition_check',
+    rejects: [
+      ['an edition no catalog row uses', speciesTemplate({ rules_edition: '5e' })],
+    ],
+    accepts: [
+      ['the 2024 default', speciesTemplate({})],
+      ['2014', speciesTemplate({ rules_edition: '2014' })],
+    ],
+  },
+  {
+    constraint: 'species_templates_base_speed_check',
+    rejects: [
+      // Eight of the nine print 30 and the Goliath prints 35. A zero here is a
+      // mis-parse of the `Speed: NN feet` line, not a species.
+      ['a zero Speed, which is a mis-parse rather than a species', speciesTemplate({ base_speed_feet: 0 })],
+      ['a negative Speed', speciesTemplate({ base_speed_feet: -30 })],
+      ['a text Speed, which a bare lower bound would have admitted', speciesTemplate({ base_speed_feet: 'thirty' })],
+    ],
+    accepts: [
+      ['the 30 eight of the nine species print', speciesTemplate({ base_speed_feet: 30 })],
+      // The one species that would ship silently wrong if Speed were defaulted.
+      ["the Goliath's 35", speciesTemplate({ base_speed_feet: 35 })],
+    ],
+  },
+  {
+    constraint: 'background_templates_rules_edition_check',
+    rejects: [
+      ['an edition no catalog row uses', backgroundTemplate({ rules_edition: '5e' })],
+    ],
+    accepts: [
+      ['the 2024 default', backgroundTemplate({})],
+      ['2014', backgroundTemplate({ rules_edition: '2014' })],
+    ],
+  },
+  {
+    constraint: 'character_species_base_speed_check',
+    rejects: [
+      ['a zero Speed, which is a decision the rules do not make', characterSpecies({ base_speed_feet: 0 })],
+      ['a negative Speed', characterSpecies({ base_speed_feet: -5 })],
+      ['a text Speed', characterSpecies({ base_speed_feet: 'fast' })],
+    ],
+    accepts: [
+      // The null limb is load-bearing HERE and absent on the template: a user
+      // may name their own species before deciding how fast it walks.
+      ['the NULL that means half-entered', characterSpecies({ base_speed_feet: null })],
+      ['a copied 35', characterSpecies({ base_speed_feet: 35 })],
+    ],
+  },
+  {
+    constraint: 'species_template_traits_effect_kind_check',
+    rejects: [
+      // An unrecognised kind reads as "no effect" to the derivation, which
+      // costs the character a trait's mechanics with no error anywhere.
+      ['a kind outside the closed set', speciesTemplateTrait({ effect_kind: 'ability_score_increase' })],
+      ['an empty kind', speciesTemplateTrait({ effect_kind: '' })],
+      ['a near-miss of a real member', speciesTemplateTrait({ effect_kind: 'damage_resistances' })],
+    ],
+    accepts: [
+      // The DEFAULT, not an edge: 26 of the 33 printed traits are free text.
+      ['the NULL that 26 of the 33 printed traits carry', speciesTemplateTrait({ effect_kind: null })],
+      ['damage_resistance', speciesTemplateTrait({ effect_kind: 'damage_resistance', effect_damage_type: 'Poison' })],
+      ['hp_modifier', speciesTemplateTrait({ effect_kind: 'hp_modifier', effect_hit_points_flat: 1 })],
+      ['speed', speciesTemplateTrait({ effect_kind: 'speed', effect_speed_bonus_feet: 5 })],
+      ['granted_spells, which carries no payload by design', speciesTemplateTrait({ effect_kind: 'granted_spells' })],
+    ],
+  },
+  {
+    constraint: 'species_template_traits_damage_type_kind_check',
+    rejects: [
+      ['a damage type on a free-text trait', speciesTemplateTrait({ effect_kind: null, effect_damage_type: 'Fire' })],
+      ['a damage type on a granted_spells trait', speciesTemplateTrait({ effect_kind: 'granted_spells', effect_damage_type: 'Fire' })],
+    ],
+    accepts: [
+      ['a typed resistance', speciesTemplateTrait({ effect_kind: 'damage_resistance', effect_damage_type: 'Poison' })],
+      // The Dragonborn: the trait grants A resistance and the TYPE is the
+      // Draconic Ancestry choice, so a null here is a real state.
+      ['an untyped resistance, which is the Dragonborn', speciesTemplateTrait({ effect_kind: 'damage_resistance', effect_damage_type: null })],
+    ],
+  },
+  {
+    constraint: 'species_template_traits_hit_points_kind_check',
+    rejects: [
+      ['a flat HP bonus on a free-text trait', speciesTemplateTrait({ effect_kind: null, effect_hit_points_flat: 1 })],
+      ['a per-level HP bonus on a speed trait', speciesTemplateTrait({ effect_kind: 'speed', effect_speed_bonus_feet: 5, effect_hit_points_per_level: 1 })],
+    ],
+    accepts: [
+      // BOTH halves at once. Not the seeded Dwarven Toughness, which is
+      // per-level only (`flat = 0`) — this is the shape a user's own trait may
+      // take, and the constraint must permit it.
+      ['both halves on one trait', speciesTemplateTrait({ effect_kind: 'hp_modifier', effect_hit_points_flat: 1, effect_hit_points_per_level: 1 })],
+      ['a flat-only HP bonus', speciesTemplateTrait({ effect_kind: 'hp_modifier', effect_hit_points_flat: 2 })],
+    ],
+  },
+  {
+    constraint: 'species_template_traits_speed_kind_check',
+    rejects: [
+      ['a speed bonus on a free-text trait', speciesTemplateTrait({ effect_kind: null, effect_speed_bonus_feet: 10 })],
+      ['a speed bonus on an hp_modifier trait', speciesTemplateTrait({ effect_kind: 'hp_modifier', effect_hit_points_flat: 1, effect_speed_bonus_feet: 10 })],
+    ],
+    accepts: [
+      ['a speed trait carrying its bonus', speciesTemplateTrait({ effect_kind: 'speed', effect_speed_bonus_feet: 5 })],
+    ],
+  },
+  {
+    constraint: 'species_template_traits_hp_modifier_payload_check',
+    rejects: [
+      // Without this the derivation returns 0, which is indistinguishable from
+      // a trait that was never mechanical.
+      ['an hp_modifier trait promising a number and carrying none', speciesTemplateTrait({ effect_kind: 'hp_modifier' })],
+    ],
+    accepts: [
+      ['a flat-only bonus', speciesTemplateTrait({ effect_kind: 'hp_modifier', effect_hit_points_flat: 1 })],
+      ['a per-level-only bonus', speciesTemplateTrait({ effect_kind: 'hp_modifier', effect_hit_points_per_level: 1 })],
+      // The other three kinds are deliberately outside this constraint:
+      // granted_spells is a marker and damage_resistance may be untyped.
+      ['a granted_spells trait with no payload at all', speciesTemplateTrait({ effect_kind: 'granted_spells' })],
+    ],
+  },
+  {
+    constraint: 'species_template_traits_speed_payload_check',
+    rejects: [
+      ['a speed trait promising a number and carrying none', speciesTemplateTrait({ effect_kind: 'speed' })],
+    ],
+    accepts: [
+      ['a speed trait carrying its bonus', speciesTemplateTrait({ effect_kind: 'speed', effect_speed_bonus_feet: 10 })],
+      ['a free-text trait, which promises nothing', speciesTemplateTrait({ effect_kind: null })],
+    ],
+  },
+  {
+    constraint: 'species_template_traits_sort_order_check',
+    rejects: [
+      ['sort order 0, below the dense 1-based printed order', speciesTemplateTrait({ sort_order: 0 })],
+      ['a negative sort order', speciesTemplateTrait({ sort_order: -1 })],
+      ['a text sort order, which a bare lower bound would have admitted', speciesTemplateTrait({ sort_order: 'first' })],
+    ],
+    accepts: [
+      ['the first printed trait', speciesTemplateTrait({ sort_order: 1 })],
+      ["the fifth, which is the Dragonborn's Draconic Flight", speciesTemplateTrait({ sort_order: 5 })],
+    ],
+  },
+  {
+    constraint: 'character_species_traits_effect_kind_check',
+    rejects: [
+      // An unrecognised kind reads as "no effect" to the derivation, which
+      // costs the character a trait's mechanics with no error anywhere.
+      ['a kind outside the closed set', characterSpeciesTrait({ effect_kind: 'ability_score_increase' })],
+      ['an empty kind', characterSpeciesTrait({ effect_kind: '' })],
+      ['a near-miss of a real member', characterSpeciesTrait({ effect_kind: 'damage_resistances' })],
+    ],
+    accepts: [
+      // The DEFAULT, not an edge: 26 of the 33 printed traits are free text.
+      ['the NULL that 26 of the 33 printed traits carry', characterSpeciesTrait({ effect_kind: null })],
+      ['damage_resistance', characterSpeciesTrait({ effect_kind: 'damage_resistance', effect_damage_type: 'Poison' })],
+      ['hp_modifier', characterSpeciesTrait({ effect_kind: 'hp_modifier', effect_hit_points_flat: 1 })],
+      ['speed', characterSpeciesTrait({ effect_kind: 'speed', effect_speed_bonus_feet: 5 })],
+      ['granted_spells, which carries no payload by design', characterSpeciesTrait({ effect_kind: 'granted_spells' })],
+    ],
+  },
+  {
+    constraint: 'character_species_traits_damage_type_kind_check',
+    rejects: [
+      ['a damage type on a free-text trait', characterSpeciesTrait({ effect_kind: null, effect_damage_type: 'Fire' })],
+      ['a damage type on a granted_spells trait', characterSpeciesTrait({ effect_kind: 'granted_spells', effect_damage_type: 'Fire' })],
+    ],
+    accepts: [
+      ['a typed resistance', characterSpeciesTrait({ effect_kind: 'damage_resistance', effect_damage_type: 'Poison' })],
+      // The Dragonborn: the trait grants A resistance and the TYPE is the
+      // Draconic Ancestry choice, so a null here is a real state.
+      ['an untyped resistance, which is the Dragonborn', characterSpeciesTrait({ effect_kind: 'damage_resistance', effect_damage_type: null })],
+    ],
+  },
+  {
+    constraint: 'character_species_traits_hit_points_kind_check',
+    rejects: [
+      ['a flat HP bonus on a free-text trait', characterSpeciesTrait({ effect_kind: null, effect_hit_points_flat: 1 })],
+      ['a per-level HP bonus on a speed trait', characterSpeciesTrait({ effect_kind: 'speed', effect_speed_bonus_feet: 5, effect_hit_points_per_level: 1 })],
+    ],
+    accepts: [
+      // BOTH halves at once. Not the seeded Dwarven Toughness, which is
+      // per-level only (`flat = 0`) — this is the shape a user's own trait may
+      // take, and the constraint must permit it.
+      ['both halves on one trait', characterSpeciesTrait({ effect_kind: 'hp_modifier', effect_hit_points_flat: 1, effect_hit_points_per_level: 1 })],
+      ['a flat-only HP bonus', characterSpeciesTrait({ effect_kind: 'hp_modifier', effect_hit_points_flat: 2 })],
+    ],
+  },
+  {
+    constraint: 'character_species_traits_speed_kind_check',
+    rejects: [
+      ['a speed bonus on a free-text trait', characterSpeciesTrait({ effect_kind: null, effect_speed_bonus_feet: 10 })],
+      ['a speed bonus on an hp_modifier trait', characterSpeciesTrait({ effect_kind: 'hp_modifier', effect_hit_points_flat: 1, effect_speed_bonus_feet: 10 })],
+    ],
+    accepts: [
+      ['a speed trait carrying its bonus', characterSpeciesTrait({ effect_kind: 'speed', effect_speed_bonus_feet: 5 })],
+    ],
+  },
+  {
+    constraint: 'character_species_traits_hp_modifier_payload_check',
+    rejects: [
+      // Without this the derivation returns 0, which is indistinguishable from
+      // a trait that was never mechanical.
+      ['an hp_modifier trait promising a number and carrying none', characterSpeciesTrait({ effect_kind: 'hp_modifier' })],
+    ],
+    accepts: [
+      ['a flat-only bonus', characterSpeciesTrait({ effect_kind: 'hp_modifier', effect_hit_points_flat: 1 })],
+      ['a per-level-only bonus', characterSpeciesTrait({ effect_kind: 'hp_modifier', effect_hit_points_per_level: 1 })],
+      // The other three kinds are deliberately outside this constraint:
+      // granted_spells is a marker and damage_resistance may be untyped.
+      ['a granted_spells trait with no payload at all', characterSpeciesTrait({ effect_kind: 'granted_spells' })],
+    ],
+  },
+  {
+    constraint: 'character_species_traits_speed_payload_check',
+    rejects: [
+      ['a speed trait promising a number and carrying none', characterSpeciesTrait({ effect_kind: 'speed' })],
+    ],
+    accepts: [
+      ['a speed trait carrying its bonus', characterSpeciesTrait({ effect_kind: 'speed', effect_speed_bonus_feet: 10 })],
+      ['a free-text trait, which promises nothing', characterSpeciesTrait({ effect_kind: null })],
+    ],
+  },
+  {
+    constraint: 'character_species_traits_sort_order_check',
+    rejects: [
+      ['sort order 0, below the dense 1-based printed order', characterSpeciesTrait({ sort_order: 0 })],
+      ['a negative sort order', characterSpeciesTrait({ sort_order: -1 })],
+      ['a text sort order, which a bare lower bound would have admitted', characterSpeciesTrait({ sort_order: 'first' })],
+    ],
+    accepts: [
+      ['the first printed trait', characterSpeciesTrait({ sort_order: 1 })],
+      ["the fifth, which is the Dragonborn's Draconic Flight", characterSpeciesTrait({ sort_order: 5 })],
+    ],
+  },
   // --- sheet core (D11 part 1, D12) ----------------------------------------
   {
     constraint: 'class_sheet_traits_check',

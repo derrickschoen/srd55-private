@@ -211,6 +211,40 @@ const expectedNativeColumns: Record<string, string[]> = {
     'ammunition_kind', 'range_normal_feet', 'range_long_feet',
     'mastery_property', 'other_properties', 'created_at', 'updated_at',
   ],
+  // The six origins tables, transcribed the same way from the origins design
+  // rather than read back out of `PRAGMA table_info`.
+  species_templates: [
+    'id', 'content_key', 'rules_edition', 'name', 'creature_type', 'size',
+    'alternate_size', 'base_speed_feet', 'created_at', 'updated_at',
+  ],
+  species_template_traits: [
+    'id', 'species_template_id', 'sort_order', 'name', 'description',
+    'effect_kind', 'effect_damage_type', 'effect_hit_points_flat',
+    'effect_hit_points_per_level', 'effect_speed_bonus_feet', 'created_at',
+    'updated_at',
+  ],
+  character_species: [
+    'id', 'character_id', 'name', 'creature_type', 'size', 'base_speed_feet',
+    'notes', 'created_at', 'updated_at',
+  ],
+  character_species_traits: [
+    'id', 'character_id', 'sort_order', 'name', 'description', 'effect_kind',
+    'effect_damage_type', 'effect_hit_points_flat',
+    'effect_hit_points_per_level', 'effect_speed_bonus_feet', 'notes',
+    'created_at', 'updated_at',
+  ],
+  background_templates: [
+    'id', 'content_key', 'rules_edition', 'name', 'ability_score_1',
+    'ability_score_2', 'ability_score_3', 'feat_name', 'skill_proficiency_1',
+    'skill_proficiency_2', 'tool_proficiency', 'equipment_option_a',
+    'equipment_option_b', 'created_at', 'updated_at',
+  ],
+  character_background: [
+    'id', 'character_id', 'name', 'ability_score_1', 'ability_score_2',
+    'ability_score_3', 'feat_name', 'skill_proficiency_1',
+    'skill_proficiency_2', 'tool_proficiency', 'equipment_option_a',
+    'equipment_option_b', 'notes', 'created_at', 'updated_at',
+  ],
   // --- SHEET CORE (D11 part 1, D12) ---------------------------------------
   // Seven class-content tables plus the armour catalog. Transcribed by reading
   // the declarations in `db/schema/sheet.ts`, for the same reason the weapon
@@ -265,6 +299,25 @@ const expectedNativeNotNull: Record<string, string[]> = {
     'damage_type', 'finesse', 'heavy', 'light', 'loading', 'reach', 'thrown',
     'two_handed', 'ammunition', 'mastery_property',
   ],
+  // Same asymmetry as the weapon pair, and for the same reason: the TEMPLATE
+  // is NOT NULL where every printed species states a value, the CHARACTER'S
+  // copy is nullable because half-entered is a first-class state.
+  species_templates: [
+    'id', 'content_key', 'rules_edition', 'name', 'creature_type', 'size',
+    'base_speed_feet',
+  ],
+  species_template_traits: [
+    'id', 'species_template_id', 'sort_order', 'name', 'description',
+  ],
+  character_species: ['id', 'character_id', 'name'],
+  character_species_traits: ['id', 'character_id', 'sort_order', 'name'],
+  background_templates: [
+    'id', 'content_key', 'rules_edition', 'name', 'ability_score_1',
+    'ability_score_2', 'ability_score_3', 'feat_name', 'skill_proficiency_1',
+    'skill_proficiency_2', 'tool_proficiency', 'equipment_option_a',
+    'equipment_option_b',
+  ],
+  character_background: ['id', 'character_id', 'name'],
   // Sheet core. `dex_bonus_max` and `strength_requirement` are the only
   // nullable columns across all eight, and both are D6b limb 2 — the source
   // genuinely prints no value (Light armour has no Dex cap, Heavy has no Dex
@@ -388,6 +441,23 @@ const expectedNamedIndexes: Record<string, string> = {
   class_weapon_mastery_grants_class_definition_id_unique:
     'class_weapon_mastery_grants:class_definition_id:unique',
   weapon_templates_content_key_unique: 'weapon_templates:content_key:unique',
+  species_templates_content_key_unique: 'species_templates:content_key:unique',
+  species_templates_name_rules_edition_unique:
+    'species_templates:name,rules_edition:unique',
+  species_template_traits_template_sort_unique:
+    'species_template_traits:species_template_id,sort_order:unique',
+  species_template_traits_template_name_unique:
+    'species_template_traits:species_template_id,name:unique',
+  background_templates_content_key_unique:
+    'background_templates:content_key:unique',
+  background_templates_name_rules_edition_unique:
+    'background_templates:name,rules_edition:unique',
+  character_species_character_id_unique:
+    'character_species:character_id:unique',
+  character_species_traits_character_id_index:
+    'character_species_traits:character_id',
+  character_background_character_id_unique:
+    'character_background:character_id:unique',
   // --- SHEET CORE (D11/D12) -----------------------------------------------
   // The set tables are keyed on (class, member) so a class cannot be given the
   // same saving throw, skill, armour category or weapon category twice; the two
@@ -507,6 +577,13 @@ const expectedUniqueGroups: Record<string, string[]> = {
   class_weapon_mastery_counts: ['class_definition_id,class_level'],
   class_weapon_mastery_grants: ['class_definition_id'],
   weapon_templates: ['content_key'],
+  species_templates: ['content_key', 'name,rules_edition'],
+  species_template_traits: [
+    'species_template_id,name', 'species_template_id,sort_order',
+  ],
+  background_templates: ['content_key', 'name,rules_edition'],
+  character_species: ['character_id'],
+  character_background: ['character_id'],
   // Sheet core. The set tables are keyed on (class, member) so a class cannot
   // hold the same saving throw, skill or category twice; the two progressions
   // on (class, level); and `class_sheet_traits` on the class alone, since it is
@@ -660,6 +737,12 @@ const expectedForeignKeys: Record<string, string[]> = {
   subclass_progressions: [
     'subclass_definition_id->subclass_definitions.id|CASCADE',
   ],
+  species_template_traits: [
+    'species_template_id->species_templates.id|CASCADE',
+  ],
+  character_species: ['character_id->characters.id|CASCADE'],
+  character_species_traits: ['character_id->characters.id|CASCADE'],
+  character_background: ['character_id->characters.id|CASCADE'],
   warning_acknowledgements: ['character_id->characters.id|CASCADE'],
   wizard_spellbook_entries: [
     'character_id->characters.id|CASCADE',
@@ -730,7 +813,7 @@ afterAll(() => {
 // rather than assumed.
 for (const [sourceLabel, schemaSql] of schemaSources) {
 describe(`complete final migration schema (${sourceLabel})`, () => {
-  it('creates the exact 30-table Laravel inventory plus the twelve named native tables, and every column of both', () => {
+  it('creates the exact 30-table Laravel inventory plus the eighteen named native tables, and every column of both', () => {
     const db = openDb(schemaSql);
     const tables = db.selectValues(
       `SELECT name
@@ -745,11 +828,15 @@ describe(`complete final migration schema (${sourceLabel})`, () => {
     //
     // Both halves are counted, because a single total would let one grow while
     // the other shrank: 30 Laravel tables (38 less the eight infrastructure
+    // ones that were pruned) and 10 native — 4 weapons plus 6 origins.
+    expect(tables).toEqual(Object.keys(allExpectedColumns).sort());
+    expect(Object.keys(expectedColumns)).toHaveLength(30);
+    expect(Object.keys(expectedNativeColumns)).toHaveLength(18);
     // ones that were pruned) and 12 native — the four weapon tables plus the
     // eight of the sheet core.
     expect(tables).toEqual(Object.keys(allExpectedColumns).sort());
     expect(Object.keys(expectedColumns)).toHaveLength(30);
-    expect(Object.keys(expectedNativeColumns)).toHaveLength(12);
+
     for (const [table, columns] of Object.entries(allExpectedColumns)) {
       const metadata = rows(db, `PRAGMA table_info("${table}")`);
       expect(
@@ -935,18 +1022,22 @@ describe('the pruned column-metadata hash is derived from Laravel, not from us',
   });
 
   /*
-   * The third link. The four native weapon tables are excluded because they
+   * The third link. The ten native tables — four weapons, six origins — are
+   * excluded because they
    * reproduce no Laravel migration and the constant on the right is
    * Laravel-derived; including them would force the constant to be recomputed
    * from our own artifact, which is the tautology this whole chain exists to
    * avoid. They are not thereby unchecked — `expectedNativeColumns` and
    * `expectedNativeNotNull` hold them to hand-written expectations transcribed
    * from the design, and the exclusion list is asserted to be exactly those
-   * four, so a fifth native table cannot slip past unhashed AND unexpected.
+   * ten, so an eleventh native table cannot slip past unhashed AND unexpected.
    */
-  it('and the generated artifact matches it, skipping only the twelve native tables', () => {
+  it('and the generated artifact matches it, skipping only the eighteen native tables', () => {
+    // 4 weapons + 8 sheet core + 6 origins. Excluded because they reproduce no
+    // Laravel migration; the constant on the right is Laravel-derived, and
+    // folding them in would force it to be recomputed from our own artifact.
     const nativeTables = Object.keys(expectedNativeColumns);
-    expect(nativeTables).toHaveLength(12);
+    expect(nativeTables).toHaveLength(18);
     for (const [, schemaSql] of schemaSources) {
       expect(metadataHash(schemaSql, nativeTables)).toBe(
         laravelColumnMetadataHash,

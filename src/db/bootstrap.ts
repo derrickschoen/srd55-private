@@ -7,11 +7,15 @@ import {
 } from './database-lifecycle';
 import { ensureBundledClassContent } from '../rules/class-progression-lookup';
 import { ensureBundledWeaponContent } from '../rules/weapons-srd';
+import { ensureBundledOriginContent } from '../rules/origins-srd';
 import { ensureBundledSheetContent } from '../rules/sheet-srd';
 
 /**
  * The bundled content every application database is expected to carry: the SRD
  * class and subclass progression catalog, the SRD weapon catalog with its
+ * weapon-mastery content, and the SRD species and background TEMPLATE catalog.
+ * The spell catalog stays user-supplied through catalog import and is
+ * deliberately absent here.
  * weapon-mastery content, and the sheet core — per-class hit dice, saving
  * throws, skill and proficiency lists, plus the armour templates. The spell
  * catalog stays user-supplied through catalog import and is deliberately absent
@@ -29,6 +33,9 @@ import { ensureBundledSheetContent } from '../rules/sheet-srd';
 export const applicationSeed: DatabaseSeed = (db) => {
   ensureBundledClassContent(db);
   ensureBundledWeaponContent(db);
+  // Order-independent: the origins catalog references no other table. It is
+  // seeded last only so the two order-DEPENDENT seeds above stay adjacent.
+  ensureBundledOriginContent(db);
   ensureBundledSheetContent(db);
 };
 

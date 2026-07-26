@@ -44,6 +44,14 @@ import {
   weapon_templates,
 } from './weapons';
 import {
+  background_templates,
+  character_background,
+  character_species,
+  character_species_traits,
+  species_template_traits,
+  species_templates,
+} from './origins';
+import {
   armor_templates,
   class_armor_training,
   class_extra_attack_grants,
@@ -83,6 +91,9 @@ export const charactersRelations = relations(characters, ({ many }) => ({
   change_log_entries: many(change_log),
   operations: many(character_operations),
   weapons: many(character_weapons),
+  species: many(character_species),
+  species_traits: many(character_species_traits),
+  background: many(character_background),
 }));
 
 export const characterWeaponsRelations = relations(
@@ -105,6 +116,73 @@ export const characterWeaponsRelations = relations(
  * by name from the picker and copied from; that is the whole of its coupling.
  */
 export const weaponTemplatesRelations = relations(weapon_templates, () => ({}));
+
+/**
+ * ORIGINS. The same D1b shape as the weapon pair, one level richer: the
+ * CATALOG has an internal parent/child edge (a species template owns its
+ * traits), and the CHARACTER side deliberately has none.
+ *
+ * NO `template` EDGE anywhere on the character side, in either direction, and
+ * that absence is the design: a character's species holds VALUES copied once,
+ * there is no `species_template_id` column for a relation to sit on, and
+ * declaring one would fail the reverse direction of the relations test.
+ *
+ * `character_species_traits` hangs off `characters` and NOT off
+ * `character_species`, matching the foreign key it actually has — see
+ * `db/schema/origins.ts` for why the key is on `character_id`.
+ */
+export const speciesTemplatesRelations = relations(
+  species_templates,
+  ({ many }) => ({
+    traits: many(species_template_traits),
+  }),
+);
+
+export const speciesTemplateTraitsRelations = relations(
+  species_template_traits,
+  ({ one }) => ({
+    species_template: one(species_templates, {
+      fields: [species_template_traits.species_template_id],
+      references: [species_templates.id],
+    }),
+  }),
+);
+
+/** Four flat columns and no children; nothing points at it either. */
+export const backgroundTemplatesRelations = relations(
+  background_templates,
+  () => ({}),
+);
+
+export const characterSpeciesRelations = relations(
+  character_species,
+  ({ one }) => ({
+    character: one(characters, {
+      fields: [character_species.character_id],
+      references: [characters.id],
+    }),
+  }),
+);
+
+export const characterSpeciesTraitsRelations = relations(
+  character_species_traits,
+  ({ one }) => ({
+    character: one(characters, {
+      fields: [character_species_traits.character_id],
+      references: [characters.id],
+    }),
+  }),
+);
+
+export const characterBackgroundRelations = relations(
+  character_background,
+  ({ one }) => ({
+    character: one(characters, {
+      fields: [character_background.character_id],
+      references: [characters.id],
+    }),
+  }),
+);
 
 export const characterSourceInstancesRelations = relations(
   character_source_instances,
