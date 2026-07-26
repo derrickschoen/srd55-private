@@ -14,11 +14,17 @@ import {
 } from '../rpc/protocol';
 import { rpcRegistry } from '../worker/registry';
 import type { RuntimeEnvironment } from '../worker/handler';
+import {
+  bootDatabase,
+  bootHandlerContext,
+  degradedRejection,
+  type DatabaseBoot,
+} from '../worker/boot';
 
 const scope = self as DedicatedWorkerGlobalScope;
 const filename = '/dnd-multiclass-spells.sqlite3';
 
-async function initialize(): Promise<DatabaseLifecycle> {
+async function initialize(): Promise<DatabaseBoot> {
   const sqlite3 = await sqlite3InitModule();
   const pool = await sqlite3.installOpfsSAHPoolVfs({
     initialCapacity: 6,
@@ -30,8 +36,10 @@ async function initialize(): Promise<DatabaseLifecycle> {
     createSahPoolStorage(pool, filename),
     schema,
   );
-  lifecycle.open();
-  return lifecycle;
+  // A failed open resolves to a degraded boot rather than rejecting, so the
+  // recovery methods stay reachable. Failures BEFORE this point (wasm init,
+  // VFS install) still reject: there is no database to recover from.
+  return bootDatabase(lifecycle);
 }
 
 const ready = initialize();
@@ -55,12 +63,18 @@ async function respond(value: unknown): Promise<void> {
     );
   } else {
     try {
-      const lifecycle = await ready;
-      response = await rpcRegistry.dispatch(value, {
-        db: lifecycle.database,
-        lifecycle,
-        environment: import.meta.env.MODE as RuntimeEnvironment,
-      });
+      const boot = await ready;
+      const rejection = degradedRejection(boot, value.method);
+      response =
+        rejection === null
+          ? await rpcRegistry.dispatch(
+              value,
+              bootHandlerContext(
+                boot,
+                import.meta.env.MODE as RuntimeEnvironment,
+              ),
+            )
+          : rpcFailure(value.id, rejection.toPayload());
     } catch (error) {
       response = rpcFailure(
         value.id,
