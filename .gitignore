@@ -15,3 +15,10 @@ orchestration/wave-state
 orchestration/*.verdict
 orchestration/logs/
 .wave-lock/
+# Scraped pages and everything derived from them. This line is the DEFAULT, not
+# the guard: `git add -f` defeats it, and once a file is tracked `git
+# check-ignore` stops reporting it at all, because a tracked file is never
+# "ignored". The guard is
+# tests/unit/tools/scraped-output-is-never-committed.test.ts, which asks
+# `git ls-files` what is actually tracked.
+scraped/

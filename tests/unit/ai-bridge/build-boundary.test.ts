@@ -10,6 +10,7 @@
  * looking for literals that genuinely exist.
  */
 import { describe, expect, it } from 'vitest';
+import { SCRAPE_SENTINEL } from '../../../tools/scrape/provenance';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -108,16 +109,27 @@ describe('gate 4: the dist scan is chained onto the build and can actually fire'
     expect(pkg.scripts['build']).toContain('node tools/assert-dist-clean.mjs');
   });
 
-  it('looks for literals that really do occur in the bridge sources', async () => {
+  it('looks for literals that really do occur in the sources they guard', async () => {
     const forbidden = await forbiddenLiterals();
-    expect(forbidden).toEqual([
+    // The scanner now guards TWO dev-only subgraphs: the AI bridge, and the
+    // local-only scraper under tools/scrape, whose output is not free-licensed
+    // and must never reach dist/. The list is asserted whole so neither half can
+    // be dropped silently, and each literal is then checked against the sources
+    // it is meant to catch — a pattern nothing emits would make the scan a no-op
+    // that always passes.
+    const bridgeLiterals = [
       'AI_BRIDGE_SENTINEL',
       '/__ai/',
       'ai-bridge-token',
       'child_process',
-    ]);
+    ];
+    // Taken from the module that DEFINES it rather than restated, so this also
+    // catches drift between that definition and the hand-kept copy in
+    // assert-dist-clean.mjs (which is plain .mjs and cannot import the .ts).
+    const scrapeLiterals = [SCRAPE_SENTINEL];
+    expect(forbidden).toEqual([...bridgeLiterals, ...scrapeLiterals]);
 
-    const sources = (
+    const bridgeSources = (
       await Promise.all(
         [
           'src/ui/ai-chat/mount.ts',
@@ -127,11 +139,16 @@ describe('gate 4: the dist scan is chained onto the build and can actually fire'
         ].map(read),
       )
     ).join('\n');
-    for (const literal of forbidden) {
-      // A pattern nothing emits would make the scan a no-op that always passes.
-      expect(sources, `forbidden literal ${String(literal)}`).toContain(
-        literal ?? '',
-      );
+    for (const literal of bridgeLiterals) {
+      expect(bridgeSources, `forbidden literal ${literal}`).toContain(literal);
+    }
+
+    // The scrape sentinel is defined in one module that every other module under
+    // tools/scrape imports for its output naming, so its presence in a bundle
+    // means some part of the scraper was reachable from an entry graph.
+    const scrapeSource = await read('tools/scrape/provenance.ts');
+    for (const literal of scrapeLiterals) {
+      expect(scrapeSource, `forbidden literal ${literal}`).toContain(literal);
     }
   });
 
