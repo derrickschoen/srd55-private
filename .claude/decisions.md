@@ -1,5 +1,52 @@
 # Binding scope decisions
 
+## F7 — Queue item (a) is far smaller than its brief says: 122 of 122 call sites already pass a codec (measured 2026-07-26)
+
+Measured before starting the work, because the brief carries a number I put
+there and numbers age.
+
+```
+real db .all/.one call sites in src/: 122
+  WITH a codec:    122
+  WITHOUT a codec: 0
+```
+
+Codex's original ranking — and every brief since — described "about 116 call
+sites where a raw SQLite row and a decoded domain object share one API, so a
+missing codec is invisible to the type checker". Earlier in this session its AST
+scan found 116 calls, 46 with codecs and **70 without**. That was true when
+written. The Drizzle+Zod contract work and everything after it closed all 70.
+
+**So the practical problem is already solved.** No call site is silently
+returning an undecoded row today.
+
+### What actually remains, and it is a real defect
+
+`codec?: RowCodec<T>` is OPTIONAL (`src/db/database.ts:52,60`,
+`src/db/query.ts:45,58`). A NEW call site can omit it, default `T` to `SqlRow`,
+and compile. The 122 are correct by discipline, not by construction — and
+discipline is what the type system is supposed to replace.
+
+So (a) is not a 116-site refactor. It is an API-shape change: make the decoded
+path require a codec, give the genuinely-raw path its own name, and let the
+compiler refuse the third option. The existing raw helpers already exist and are
+used — `exec` 143, `scalar` 37, `selectValue` 6, `selectObjects` 5,
+`selectObject` 4, `selectValues` 2 — so the raw side needs naming, not building.
+
+### Why this matters beyond saving effort
+
+The brief said (a) "NEEDS A QUIET WINDOW: run it alone", which was sound advice
+for a 116-file sweep and is now over-cautious for what is closer to a signature
+change plus its fallout. It can share a window with an unrelated track.
+
+**And a caution against the obvious shortcut:** the fix is NOT to delete the
+optional parameter and let 122 sites keep working by inference. If a call site
+can still compile without naming its codec, nothing has been gained — the change
+must make the omission a compile ERROR, and the proof is a deliberately
+codec-less call that fails to build.
+
+---
+
 ## D22 — OWNER: invert the effect model. Effects belong to the CHARACTER; the trait is provenance (2026-07-26)
 
 I offered three options for the Tiefling two-effect problem. The owner rejected
