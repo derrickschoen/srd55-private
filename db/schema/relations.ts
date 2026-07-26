@@ -63,6 +63,12 @@ import {
   class_skill_options,
   class_weapon_proficiencies,
 } from './sheet';
+import {
+  character_armor,
+  character_hit_point_rolls,
+  character_sheet_adjustments,
+  character_skill_proficiencies,
+} from './sheet-inputs';
 
 /**
  * THE OBJECT GRAPH, DECLARED.
@@ -96,7 +102,65 @@ export const charactersRelations = relations(characters, ({ many }) => ({
   species: many(character_species),
   species_traits: many(character_species_traits),
   background: many(character_background),
+  armor: many(character_armor),
+  hit_point_rolls: many(character_hit_point_rolls),
+  skill_proficiencies: many(character_skill_proficiencies),
+  sheet_adjustments: many(character_sheet_adjustments),
 }));
+
+/**
+ * THE FOUR STORED SHEET INPUTS. Every one hangs off `characters` and off
+ * NOTHING ELSE, and the four absences are as deliberate as the four edges:
+ *
+ *  - no `armor_template` edge from `character_armor`, for the D1b reason the
+ *    weapon and origin pairs already record — there is no `armor_template_id`
+ *    column for a relation to sit on, and declaring one would fail the reverse
+ *    direction of the relations test.
+ *  - no `class_level` edge from `character_hit_point_rolls`. It is keyed on a
+ *    class NAME rather than on `character_class_levels.id`, so that deleting a
+ *    class row cannot cascade away a die the player physically rolled. The
+ *    price is an orphan roll, which `src/queries/character-completeness.ts`
+ *    reports by name rather than hides.
+ */
+export const characterArmorRelations = relations(
+  character_armor,
+  ({ one }) => ({
+    character: one(characters, {
+      fields: [character_armor.character_id],
+      references: [characters.id],
+    }),
+  }),
+);
+
+export const characterHitPointRollsRelations = relations(
+  character_hit_point_rolls,
+  ({ one }) => ({
+    character: one(characters, {
+      fields: [character_hit_point_rolls.character_id],
+      references: [characters.id],
+    }),
+  }),
+);
+
+export const characterSkillProficienciesRelations = relations(
+  character_skill_proficiencies,
+  ({ one }) => ({
+    character: one(characters, {
+      fields: [character_skill_proficiencies.character_id],
+      references: [characters.id],
+    }),
+  }),
+);
+
+export const characterSheetAdjustmentsRelations = relations(
+  character_sheet_adjustments,
+  ({ one }) => ({
+    character: one(characters, {
+      fields: [character_sheet_adjustments.character_id],
+      references: [characters.id],
+    }),
+  }),
+);
 
 export const characterWeaponsRelations = relations(
   character_weapons,

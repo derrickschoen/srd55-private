@@ -19,6 +19,10 @@ import {
   parseDescriptionDocuments,
   type CatalogImportParams,
 } from './catalog-schema';
+import {
+  importSubclassRecords,
+  type SubclassImportCounters,
+} from './subclass-importer';
 
 export interface CatalogImportSummary {
   created: number;
@@ -31,13 +35,26 @@ export interface CatalogImportSummary {
   tags_created: number;
   attack_modes_created: number;
   save_abilities_created: number;
+  /**
+   * The subclass arm's counters. SEPARATE FROM `created`/`updated` rather than
+   * folded into them: those three numbers are what the character-list screen
+   * prints, and a user who imported five spells and one subclass reading
+   * "6 created" would be reading a spell count that is wrong.
+   *
+   * THERE IS NO `subclasses_tombstoned`, AND THE ABSENCE IS THE STATEMENT: an
+   * import never removes a subclass. `src/catalog/subclass-importer.ts` says
+   * why, and what the next increment would have to add first.
+   */
+  subclasses_created: number;
+  subclasses_updated: number;
+  subclass_features_created: number;
   text_available: boolean;
   descriptions_loaded: number;
 }
 
 type CounterSummary = Omit<
   CatalogImportSummary,
-  'text_available' | 'descriptions_loaded'
+  'text_available' | 'descriptions_loaded' | keyof SubclassImportCounters
 >;
 
 type VersionAttributes = Record<
@@ -76,17 +93,49 @@ export class CatalogImporter {
     this.#eligibility = new SpellSelectionEligibility(db);
   }
 
+  /**
+   * ONE CALL IMPORTS EVERY KIND, AND A KIND IT DID NOT CARRY IS LEFT ALONE.
+   *
+   * THIS IS THE RULE THAT STOPS AN IMPORT DESTROYING CONTENT IT NEVER MENTIONED.
+   * A spell import is a full replacement — everything `provenance = 'import'`
+   * and absent from the document is tombstoned — and that sweep used to run
+   * unconditionally. Once a document can carry a SUBCLASS, an unconditional
+   * sweep means "here are my subclasses" also means "and I have no spells", and
+   * a user who imported their homebrew subclasses after their spell catalog
+   * would have watched the whole catalog go inactive with no error anywhere.
+   * That is silent data loss, so the sweep is now scoped to the kinds the
+   * documents DECLARED.
+   *
+   * AN EMPTY DOCUMENT STILL MEANS "NO SPELLS", AND IT MEANS THAT PER DOCUMENT.
+   * `catalog.import` with `documents: ['[]']` is the shipped and tested way to
+   * empty the spell catalog (`tests/browser/catalog-import.spec.ts`), so
+   * `parseCatalogDocuments` has an EMPTY DOCUMENT declare `spell` itself rather
+   * than this condition inferring it from an empty parse. The difference is
+   * `['[]', <subclasses>]`, which the multi-file picker makes an ordinary
+   * selection: inferring emptiness from the whole parse would see only
+   * `subclass` there and silently skip the sweep the user asked for. A parse
+   * that saw only subclasses still does not touch spells at all.
+   *
+   * The reverse direction needs no condition: the subclass arm removes nothing,
+   * ever, so a spell-only import cannot reach a subclass. See
+   * `src/catalog/subclass-importer.ts`.
+   */
   import(params: CatalogImportParams): CatalogImportSummary {
     const records = parseCatalogDocuments(params.documents);
     const descriptions = parseDescriptionDocuments(params.textDocuments);
-    const normalized = normalizeCatalogRecords(records, descriptions);
+    const normalized = normalizeCatalogRecords(records.spells, descriptions);
     const textAvailable = descriptions !== null;
+    // `kinds` is never empty: at least one document is required, and every
+    // document declares at least one kind — an empty one declares `spell`.
+    const sweepSpells = records.kinds.has('spell');
 
     try {
       return this.db.transaction(() => {
-        const counters = this.#importRecords(normalized);
+        const counters = this.#importRecords(normalized, sweepSpells);
+        const subclasses = importSubclassRecords(this.db, records.subclasses);
         const summary: CatalogImportSummary = {
           ...counters,
+          ...subclasses,
           text_available: textAvailable,
           descriptions_loaded: descriptions?.length ?? 0,
         };
@@ -105,6 +154,7 @@ export class CatalogImporter {
 
   #importRecords(
     records: readonly NormalizedCatalogRecord[],
+    sweepSpells: boolean,
   ): CounterSummary {
     const summary: CounterSummary = {
       created: 0,
@@ -247,8 +297,12 @@ export class CatalogImporter {
       }
     }
 
-    const tombstones = this.db.all(
-      `SELECT id
+    // See `import` for why this is conditional and why an empty parse still
+    // sweeps.
+    const tombstones = !sweepSpells
+      ? []
+      : this.db.all(
+          `SELECT id
        FROM spell_versions
        WHERE provenance = 'import'
          AND is_active = 1
@@ -257,8 +311,8 @@ export class CatalogImporter {
              ? ''
              : `AND content_key NOT IN (${placeholders(seenVersionKeys)})`
          }`,
-      seenVersionKeys.length === 0 ? undefined : seenVersionKeys,
-    );
+          seenVersionKeys.length === 0 ? undefined : seenVersionKeys,
+        );
     for (const version of tombstones) {
       const versionId = sqlInteger(version, 'id');
       this.db.exec(

@@ -13,6 +13,9 @@ import { SpellSelectionEligibility } from '../eligibility/spell-selection-eligib
 import {
   CHARACTER_SHARE_FORMAT,
   CHARACTER_SHARE_VERSION,
+  SHARE_ARMOR_ENUMS,
+  SHARE_ARMOR_FLAGS,
+  SHARE_ARMOR_NUMBERS,
   SHARE_BACKGROUND_TEXT,
   SHARE_SPECIES_TEXT,
   SHARE_SPECIES_TRAIT_NUMBERS,
@@ -21,8 +24,11 @@ import {
   SHARE_WEAPON_TEXT,
   ShareValidationError,
   type CharacterShareDocument,
+  type ShareArmor,
   type ShareBackground,
   type ShareClass,
+  type ShareHitPointRoll,
+  type ShareSheetAdjustment,
   type ShareSource,
   type ShareSpecies,
   type ShareSpeciesTrait,
@@ -67,6 +73,19 @@ export interface SharePreview {
    * the same failure in the other direction.
    */
   readonly weaponCount: number;
+  /**
+   * The four stored sheet inputs, counted for the reason `weaponCount` is: an
+   * import about to add a suit of Plate, nine hit point rolls and six skill
+   * proficiencies says so before it happens. A silently-arriving section is the
+   * failure the weapons gap was closed to avoid; a silently-MISSING one is the
+   * same failure in the other direction, and it is the one that matters here —
+   * a recipient who is not told the link carried no armour will assume their
+   * own was kept.
+   */
+  readonly armorCount: number;
+  readonly hitPointRollCount: number;
+  readonly skillProficiencyCount: number;
+  readonly includesArmorClassAdjustment: boolean;
   readonly includesAcknowledgements: boolean;
   readonly includesLoadouts: boolean;
 }
@@ -238,6 +257,55 @@ function textFields<T>(
     }
   }
   return into as T;
+}
+
+/**
+ * `null` becomes ABSENT, on the terms `shareWeaponFromRow` established: an
+ * optional field the sender never filled must arrive absent rather than as an
+ * explicit null, so that the recipient's row carries the column's own default
+ * instead of a value the sender never chose.
+ */
+function shareArmorFromRow(row: Row): ShareArmor {
+  const armor: Record<string, unknown> = { name: String(row.name) };
+  for (const field of SHARE_ARMOR_ENUMS) {
+    armor[field] = String(row[field]);
+  }
+  armor.armor_class = Number(row.armor_class);
+  for (const field of SHARE_ARMOR_NUMBERS) {
+    if (row[field] !== null && row[field] !== undefined) {
+      armor[field] = Number(row[field]);
+    }
+  }
+  for (const flag of SHARE_ARMOR_FLAGS) {
+    if (Number(row[flag]) === 1) {
+      armor[flag] = true;
+    }
+  }
+  if (row.notes !== null && row.notes !== undefined) {
+    armor.notes = String(row.notes);
+  }
+  return armor as unknown as ShareArmor;
+}
+
+function shareHitPointRollFromRow(row: Row): ShareHitPointRoll {
+  return {
+    className: String(row.class_name),
+    classLevel: Number(row.class_level),
+    value: Number(row.rolled_value),
+  };
+}
+
+function shareSheetAdjustmentFromRow(row: Row): ShareSheetAdjustment {
+  const adjustment: Record<string, unknown> = {
+    value: Number(row.armor_class_adjustment),
+  };
+  if (
+    row.armor_class_adjustment_note !== null &&
+    row.armor_class_adjustment_note !== undefined
+  ) {
+    adjustment.note = String(row.armor_class_adjustment_note);
+  }
+  return adjustment as unknown as ShareSheetAdjustment;
 }
 
 function shareSpeciesFromRow(row: Row): ShareSpecies {
@@ -566,6 +634,42 @@ export function exportCharacterShare(
     backgroundRow === null
       ? undefined
       : shareBackgroundFromRow(backgroundRow);
+  // Not behind an option flag either. The four stored sheet inputs are the
+  // build being shared — an Armor Class that changes when the link is opened
+  // would be a different character, not a tidier one.
+  //
+  // AN EMPTY SECTION IS OMITTED RATHER THAN SENT AS `[]`, matching what the
+  // weapons and origin sections do and what the decoder's absent/empty
+  // distinction is for: a document that never mentions armour and a document
+  // that mentions having none import identically, and the smaller one is the
+  // one every character without armour produces.
+  const armorRows = db.all<Row>(
+    `SELECT * FROM ${SHARE_TABLES.character_armor}
+     WHERE character_id = ? ORDER BY slot`,
+    [characterId],
+  ).map(shareArmorFromRow);
+  const armor = armorRows.length === 0 ? undefined : armorRows;
+  const rollRows = db.all<Row>(
+    `SELECT * FROM ${SHARE_TABLES.character_hit_point_rolls}
+     WHERE character_id = ? ORDER BY class_name, class_level`,
+    [characterId],
+  ).map(shareHitPointRollFromRow);
+  const hitPointRolls = rollRows.length === 0 ? undefined : rollRows;
+  const skillRows = db.all<Row>(
+    `SELECT skill FROM ${SHARE_TABLES.character_skill_proficiencies}
+     WHERE character_id = ? ORDER BY skill`,
+    [characterId],
+  ).map((row) => String(row.skill));
+  const skillProficiencies = skillRows.length === 0 ? undefined : skillRows;
+  const adjustmentRow = db.one<Row>(
+    `SELECT * FROM ${SHARE_TABLES.character_sheet_adjustments}
+     WHERE character_id = ?`,
+    [characterId],
+  );
+  const sheetAdjustment =
+    adjustmentRow === null
+      ? undefined
+      : shareSheetAdjustmentFromRow(adjustmentRow);
   const sharedSpellKeys = new Set([
     ...selections.map((selection) => selection.spellKey),
     ...spellbook,
@@ -645,6 +749,13 @@ export function exportCharacterShare(
     ...(species === undefined ? {} : { species }),
     ...(speciesTraits.length === 0 ? {} : { speciesTraits }),
     ...(background === undefined ? {} : { background }),
+    // And the four sheet inputs, each omitted when the character recorded
+    // nothing of that kind, so a character who has recorded none of the four
+    // produces a link exactly the shape it was before this change.
+    ...(armor === undefined ? {} : { armor }),
+    ...(hitPointRolls === undefined ? {} : { hitPointRolls }),
+    ...(skillProficiencies === undefined ? {} : { skillProficiencies }),
+    ...(sheetAdjustment === undefined ? {} : { sheetAdjustment }),
   };
   return validateShareDocument(document);
 }
@@ -905,6 +1016,10 @@ export function previewCharacterShare(
     spellbookCount: document.spellbook.length,
     placeholderCount: allKeys.filter((key) => !existing.has(key)).length,
     weaponCount: document.weapons?.length ?? 0,
+    armorCount: document.armor?.length ?? 0,
+    hitPointRollCount: document.hitPointRolls?.length ?? 0,
+    skillProficiencyCount: document.skillProficiencies?.length ?? 0,
+    includesArmorClassAdjustment: document.sheetAdjustment !== undefined,
     includesAcknowledgements:
       document.acknowledgements !== undefined,
     includesLoadouts: document.loadouts !== undefined,
@@ -1279,6 +1394,59 @@ export function importCharacterShare(
           now,
           now,
         ],
+      );
+    }
+    // The four sheet inputs resolve nothing against the recipient's catalog
+    // either: by D1b armour holds no template id, and a hit point roll is filed
+    // under a class NAME rather than a class-level id precisely so that it needs
+    // no remapping and survives the class rows being rebuilt with new ids here.
+    for (const armor of document.armor ?? []) {
+      db.exec(
+        `INSERT INTO ${SHARE_TABLES.character_armor} (
+           character_id, ${SHARE_ARMOR_ENUMS.join(', ')}, name, armor_class,
+           ${SHARE_ARMOR_NUMBERS.join(', ')}, ${SHARE_ARMOR_FLAGS.join(', ')},
+           notes, created_at, updated_at
+         ) VALUES (?, ${SHARE_ARMOR_ENUMS.map(() => '?').join(', ')}, ?, ?,
+           ${SHARE_ARMOR_NUMBERS.map(() => '?').join(', ')},
+           ${SHARE_ARMOR_FLAGS.map(() => '?').join(', ')}, ?, ?, ?)`,
+        [
+          characterId,
+          ...SHARE_ARMOR_ENUMS.map((field) => armor[field]),
+          armor.name,
+          armor.armor_class,
+          ...SHARE_ARMOR_NUMBERS.map((field) => armor[field] ?? null),
+          ...SHARE_ARMOR_FLAGS.map((flag) => (armor[flag] === true ? 1 : 0)),
+          armor.notes ?? null,
+          now,
+          now,
+        ],
+      );
+    }
+    for (const roll of document.hitPointRolls ?? []) {
+      db.exec(
+        `INSERT INTO ${SHARE_TABLES.character_hit_point_rolls} (
+           character_id, class_name, class_level, rolled_value,
+           created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?)`,
+        [characterId, roll.className, roll.classLevel, roll.value, now, now],
+      );
+    }
+    for (const skill of document.skillProficiencies ?? []) {
+      db.exec(
+        `INSERT INTO ${SHARE_TABLES.character_skill_proficiencies} (
+           character_id, skill, created_at, updated_at
+         ) VALUES (?, ?, ?, ?)`,
+        [characterId, skill, now, now],
+      );
+    }
+    if (document.sheetAdjustment !== undefined) {
+      const adjustment = document.sheetAdjustment;
+      db.exec(
+        `INSERT INTO ${SHARE_TABLES.character_sheet_adjustments} (
+           character_id, armor_class_adjustment,
+           armor_class_adjustment_note, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?)`,
+        [characterId, adjustment.value, adjustment.note ?? null, now, now],
       );
     }
     for (const loadout of document.loadouts ?? []) {

@@ -13,10 +13,14 @@ import {
 import type { BackupTable, TableFor } from './tables';
 import {
   abilities,
+  armorCategories,
+  armorDexBonuses,
+  armorSlots,
   domainSourceTypes,
   rulesEditions,
   selectionEligibilities,
   slotBuckets,
+  skills,
   slotStates,
   speciesTraitEffectKinds,
   srdWeaponGroups,
@@ -170,6 +174,17 @@ const srdWeaponGroupEnum = z.enum(srdWeaponGroups);
  * vanish with no error anywhere.
  */
 const speciesTraitEffectKindEnum = z.enum(speciesTraitEffectKinds);
+const armorSlotEnum = z.enum(armorSlots);
+const armorCategoryEnum = z.enum(armorCategories);
+const armorDexBonusEnum = z.enum(armorDexBonuses);
+/**
+ * The eighteen skills, closed. An enum rather than `sqlText` for the reason
+ * `character_skill_proficiencies_skill_check` gives: `abilityForSkill` is an
+ * exhaustive map over exactly this vocabulary, so a nineteenth value has no
+ * ability to be checked with and reads as "no modifier" to any non-exhaustive
+ * branch — a proficiency that vanishes with no error anywhere.
+ */
+const skillEnum = z.enum(skills);
 
 /**
  * THE CLOSED SET of shared refinements.
@@ -199,6 +214,10 @@ export const COLUMN_REFINEMENTS = {
   weaponMasteryGrantEnum,
   srdWeaponGroupEnum,
   speciesTraitEffectKindEnum,
+  armorSlotEnum,
+  armorCategoryEnum,
+  armorDexBonusEnum,
+  skillEnum,
 } as const;
 
 /**
@@ -512,6 +531,64 @@ const REFINEMENTS = {
   'character_weapons.notes': sqlText,
   'character_weapons.created_at': sqlTimestamp,
   'character_weapons.updated_at': sqlTimestamp,
+
+  // --- the four stored sheet inputs ----------------------------------------
+  // Nullability is DERIVED, not restated: `columnSchema` adds `| null` from
+  // `COLUMN_FACTS[table][column].notNull`, so none of these can be stricter
+  // than its column by accident.
+  'character_armor.id': positiveInt,
+  'character_armor.character_id': positiveInt,
+  'character_armor.slot': armorSlotEnum,
+  // Non-empty: armour with no name cannot be told apart from the unarmoured
+  // case on the sheet, and the write command already refuses one.
+  'character_armor.name': nonEmptyText,
+  'character_armor.category': armorCategoryEnum,
+  // At least 1 for every category. For `light`/`medium`/`heavy` this is a base
+  // Armor Class and for `shield` it is the printed `+2` bonus — a distinction
+  // `category` carries, not this contract.
+  'character_armor.armor_class': positiveInt,
+  'character_armor.dex_bonus': armorDexBonusEnum,
+  // ZERO IS LEGITIMATE and `positiveInt` would be wrong: a cap of 0 is a
+  // coherent house rule, and the pairing with `dex_bonus = 'capped'` is what
+  // the CHECK enforces, not the magnitude.
+  'character_armor.dex_bonus_max': nonNegativeInt,
+  'character_armor.strength_requirement': positiveInt,
+  'character_armor.stealth_disadvantage': sqlBool,
+  'character_armor.notes': sqlText,
+  'character_armor.created_at': sqlTimestamp,
+  'character_armor.updated_at': sqlTimestamp,
+
+  'character_hit_point_rolls.id': positiveInt,
+  'character_hit_point_rolls.character_id': positiveInt,
+  // The class this roll is filed under, by NAME. Non-empty because an empty
+  // name matches no class and the roll would be permanently unreadable.
+  'character_hit_point_rolls.class_name': nonEmptyText,
+  'character_hit_point_rolls.class_level': classLevel,
+  // `positiveInt` and not the tighter 1..12 the CHECK declares, deliberately
+  // and in the same direction as `class_weapon_mastery_counts.class_level`: the
+  // contract may not be STRICTER than the column, and the upper bound belongs
+  // to the database and to the two boundaries, which all read
+  // `SHEET_ROLL_BOUNDS`. A 13 clears this contract and dies at the CHECK.
+  'character_hit_point_rolls.rolled_value': positiveInt,
+  'character_hit_point_rolls.created_at': sqlTimestamp,
+  'character_hit_point_rolls.updated_at': sqlTimestamp,
+
+  'character_skill_proficiencies.id': positiveInt,
+  'character_skill_proficiencies.character_id': positiveInt,
+  'character_skill_proficiencies.skill': skillEnum,
+  'character_skill_proficiencies.created_at': sqlTimestamp,
+  'character_skill_proficiencies.updated_at': sqlTimestamp,
+
+  'character_sheet_adjustments.id': positiveInt,
+  'character_sheet_adjustments.character_id': positiveInt,
+  // SIGNED — `sqlInteger`, never `nonNegativeInt`. A negative adjustment is a
+  // cursed item or a house rule, and refusing it would invent a rule the source
+  // does not state. The symmetric magnitude bound is the CHECK's and the two
+  // boundaries', all from `SHEET_ADJUSTMENT_BOUNDS`.
+  'character_sheet_adjustments.armor_class_adjustment': sqlInteger,
+  'character_sheet_adjustments.armor_class_adjustment_note': sqlText,
+  'character_sheet_adjustments.created_at': sqlTimestamp,
+  'character_sheet_adjustments.updated_at': sqlTimestamp,
 
   // --- weapon_templates ----------------------------------------------------
   'weapon_templates.id': positiveInt,

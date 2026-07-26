@@ -1,6 +1,9 @@
 import {
   CHARACTER_SHARE_FORMAT,
   CHARACTER_SHARE_VERSION,
+  SHARE_ARMOR_ENUMS,
+  SHARE_ARMOR_FLAGS,
+  SHARE_ARMOR_NUMBERS,
   SHARE_BACKGROUND_TEXT,
   SHARE_LIMITS,
   SHARE_SPECIES_TEXT,
@@ -10,7 +13,10 @@ import {
   SHARE_WEAPON_TEXT,
   ShareValidationError,
   type CharacterShareDocument,
+  type ShareArmor,
   type ShareBackground,
+  type ShareHitPointRoll,
+  type ShareSheetAdjustment,
   type ShareSpecies,
   type ShareSpeciesTrait,
   type ShareWeapon,
@@ -27,20 +33,32 @@ type Tuple = readonly unknown[];
  * make every one of those links a decode error — the exact data loss this
  * arrangement exists to prevent, inflicted on a larger set of people.
  *
- * So eleven elements is still a valid document carrying no weapons and no
- * origin; twelve carries weapons and no origin; thirteen is what this build
- * writes. `CHARACTER_SHARE_VERSION` deliberately stays at 1: a version bump buys
- * nothing here and would reject every old link on the way in.
+ * So eleven elements is still a valid document carrying no weapons, no origin
+ * and no sheet inputs; twelve carries weapons and neither of the other two;
+ * thirteen adds the origin; fourteen is what this build writes.
+ * `CHARACTER_SHARE_VERSION` deliberately stays at 1: a version bump buys nothing
+ * here and would reject every old link on the way in.
  *
- * THE ORIGIN IS ONE ELEMENT, NOT THREE. Three sections travel — species, its
- * traits, background — but they are grouped into a single nested tuple so the
- * root grows by one per FEATURE rather than one per table. The three are
- * independently nullable inside it, which is what the document type needs.
+ * THE ORIGIN IS ONE ELEMENT, NOT THREE, AND THE SHEET IS ONE ELEMENT, NOT FOUR.
+ * Three sections travel in the first and four in the second, but each group is a
+ * single nested tuple so the root grows by one per FEATURE rather than one per
+ * table. The members are independently nullable inside their group, which is
+ * what the document type needs.
  */
-const ROOT_TUPLE_LENGTHS = [11, 12, 13] as const;
+const ROOT_TUPLE_LENGTHS = [11, 12, 13, 14] as const;
 
 const LEGACY_ROOT_LENGTH = 11;
 const PRE_ORIGIN_ROOT_LENGTH = 12;
+const PRE_SHEET_ROOT_LENGTH = 13;
+
+/**
+ * How many elements the grouped sheet element holds: armour, hit point rolls,
+ * skill proficiencies, the manual adjustment.
+ */
+const SHEET_TUPLE_LENGTH = 4;
+
+/** One worn item and one held item — `character_armor`'s own cardinality. */
+const ARMOR_SLOT_COUNT = 2;
 
 /** How many elements the grouped origin element holds. */
 const ORIGIN_TUPLE_LENGTH = 3;
@@ -50,6 +68,13 @@ const SPECIES_TUPLE_LENGTH = 1 + SHARE_SPECIES_TEXT.length + 1;
 const SPECIES_TRAIT_TUPLE_LENGTH =
   1 + SHARE_SPECIES_TRAIT_TEXT.length + SHARE_SPECIES_TRAIT_NUMBERS.length;
 const BACKGROUND_TUPLE_LENGTH = 1 + SHARE_BACKGROUND_TEXT.length;
+
+/** How many elements one armour row, one roll and the adjustment occupy. */
+const ARMOR_TUPLE_LENGTH =
+  1 + SHARE_ARMOR_ENUMS.length + 1 + SHARE_ARMOR_NUMBERS.length +
+  SHARE_ARMOR_FLAGS.length + 1;
+const HIT_POINT_ROLL_TUPLE_LENGTH = 3;
+const SHEET_ADJUSTMENT_TUPLE_LENGTH = 2;
 
 /** How many elements one weapon occupies on the wire. */
 const WEAPON_TUPLE_LENGTH =
@@ -150,6 +175,71 @@ function backgroundToPositional(background: ShareBackground): unknown[] {
     background.name,
     ...SHARE_BACKGROUND_TEXT.map((field) => background[field] ?? null),
   ];
+}
+
+/**
+ * The sheet inputs' wire order, frozen. Reordering any of these silently
+ * reinterprets every link generated after this build.
+ *
+ * `name` leads an armour row the way it leads a weapon and a species, so the
+ * three read the same way; the enums follow because they are what decide how
+ * the numbers are read.
+ */
+function armorToPositional(armor: ShareArmor): unknown[] {
+  return [
+    armor.name,
+    ...SHARE_ARMOR_ENUMS.map((field) => armor[field]),
+    armor.armor_class,
+    ...SHARE_ARMOR_NUMBERS.map((field) => armor[field] ?? null),
+    ...SHARE_ARMOR_FLAGS.map((flag) => armor[flag] ?? null),
+    armor.notes ?? null,
+  ];
+}
+
+function armorFromPositional(value: unknown, label: string): unknown {
+  const row = tuple(value, ARMOR_TUPLE_LENGTH, label);
+  const armor: Record<string, unknown> = { name: row[0] };
+  const fields = [
+    ...SHARE_ARMOR_ENUMS,
+    'armor_class',
+    ...SHARE_ARMOR_NUMBERS,
+    ...SHARE_ARMOR_FLAGS,
+    'notes',
+  ] as const;
+  fields.forEach((field, index) => {
+    const item = row[index + 1];
+    if (item !== null) {
+      armor[field] = item;
+    }
+  });
+  return armor;
+}
+
+function hitPointRollToPositional(roll: ShareHitPointRoll): unknown[] {
+  return [roll.className, roll.classLevel, roll.value];
+}
+
+function hitPointRollFromPositional(value: unknown, label: string): unknown {
+  const row = tuple(value, HIT_POINT_ROLL_TUPLE_LENGTH, label);
+  return { className: row[0], classLevel: row[1], value: row[2] };
+}
+
+function sheetAdjustmentToPositional(
+  adjustment: ShareSheetAdjustment,
+): unknown[] {
+  return [adjustment.value, adjustment.note ?? null];
+}
+
+function sheetAdjustmentFromPositional(
+  value: unknown,
+  label: string,
+): unknown {
+  const row = tuple(value, SHEET_ADJUSTMENT_TUPLE_LENGTH, label);
+  const adjustment: Record<string, unknown> = { value: row[0] };
+  if (row[1] !== null) {
+    adjustment.note = row[1];
+  }
+  return adjustment;
 }
 
 function fromPositional(
@@ -260,6 +350,19 @@ export function shareDocumentToPositional(
         ? null
         : backgroundToPositional(document.background),
     ],
+    // Element 13, the SHEET group, on the same terms as the origin group:
+    // always written, and `null` in each of its four slots when the character
+    // recorded nothing of that kind.
+    [
+      document.armor?.map(armorToPositional) ?? null,
+      document.hitPointRolls?.map(hitPointRollToPositional) ?? null,
+      document.skillProficiencies === undefined
+        ? null
+        : [...document.skillProficiencies],
+      document.sheetAdjustment === undefined
+        ? null
+        : sheetAdjustmentToPositional(document.sheetAdjustment),
+    ],
   ];
 }
 
@@ -279,6 +382,17 @@ export function positionalToShareDocument(
     root.length === PRE_ORIGIN_ROOT_LENGTH
       ? null
       : tuple(root[12], ORIGIN_TUPLE_LENGTH, 'wire origin');
+  // Eleven, twelve and thirteen elements all predate the sheet inputs. `null`
+  // rather than a four-element tuple of nulls, so the four sections stay
+  // genuinely ABSENT and the object validator can tell "recorded none" from
+  // "never carried any" — the difference between importing a character with no
+  // armour and importing a link that never mentioned armour.
+  const wireSheet =
+    root.length === LEGACY_ROOT_LENGTH ||
+    root.length === PRE_ORIGIN_ROOT_LENGTH ||
+    root.length === PRE_SHEET_ROOT_LENGTH
+      ? null
+      : tuple(root[13], SHEET_TUPLE_LENGTH, 'wire sheet');
   if (root[0] !== CHARACTER_SHARE_FORMAT) {
     throw new ShareValidationError('format is unsupported.');
   }
@@ -333,6 +447,27 @@ export function positionalToShareDocument(
   }
   if (wireWeapons !== null) {
     assertListLimit(wireWeapons, SHARE_LIMITS.weapons, 'weapons');
+  }
+  if (wireSheet !== null) {
+    const lists = [
+      // Two, because there are two slots and the schema's unique index says so.
+      // The object validator then names the duplicate slot; this only stops a
+      // hostile document spending the decompressed budget before it gets there.
+      ['armor', wireSheet[0], ARMOR_SLOT_COUNT],
+      ['hitPointRolls', wireSheet[1], SHARE_LIMITS.hitPointRolls],
+      ['skillProficiencies', wireSheet[2], SHARE_LIMITS.skillProficiencies],
+    ] as const;
+    for (const [name, value, maximum] of lists) {
+      if (value === null) {
+        continue;
+      }
+      if (!Array.isArray(value)) {
+        throw new ShareValidationError(
+          `wire ${name} must be null or a list.`,
+        );
+      }
+      assertListLimit(value, maximum, name);
+    }
   }
   if (wireOrigin !== null) {
     if (wireOrigin[1] !== null && !Array.isArray(wireOrigin[1])) {
@@ -508,6 +643,27 @@ export function positionalToShareDocument(
         BACKGROUND_TUPLE_LENGTH,
         [...SHARE_BACKGROUND_TEXT],
         'wire background',
+      );
+    }
+  }
+  if (wireSheet !== null) {
+    if (Array.isArray(wireSheet[0])) {
+      raw.armor = wireSheet[0].map((value, index) =>
+        armorFromPositional(value, `wire armor[${index}]`),
+      );
+    }
+    if (Array.isArray(wireSheet[1])) {
+      raw.hitPointRolls = wireSheet[1].map((value, index) =>
+        hitPointRollFromPositional(value, `wire hitPointRolls[${index}]`),
+      );
+    }
+    if (Array.isArray(wireSheet[2])) {
+      raw.skillProficiencies = [...wireSheet[2]];
+    }
+    if (wireSheet[3] !== null) {
+      raw.sheetAdjustment = sheetAdjustmentFromPositional(
+        wireSheet[3],
+        'wire sheetAdjustment',
       );
     }
   }

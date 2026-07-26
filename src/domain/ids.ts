@@ -59,6 +59,26 @@ export type WeaponTemplateId = Brand<number, 'WeaponTemplateId'>;
 export type ArmorTemplateId = Brand<number, 'ArmorTemplateId'>;
 
 /**
+ * The four stored sheet inputs, branded apart from each other and from
+ * `ArmorTemplateId`.
+ *
+ * `CharacterArmorId` versus `ArmorTemplateId` is the same D1b severance the
+ * weapon pair records: by D1b the character's row holds no template id at all,
+ * so a template id turning up where a character's own armour is expected means
+ * the code is reading the CATALOG when it meant to read the CHARACTER.
+ */
+export type CharacterArmorId = Brand<number, 'CharacterArmorId'>;
+export type CharacterHitPointRollId = Brand<number, 'CharacterHitPointRollId'>;
+export type CharacterSkillProficiencyId = Brand<
+  number,
+  'CharacterSkillProficiencyId'
+>;
+export type CharacterSheetAdjustmentId = Brand<
+  number,
+  'CharacterSheetAdjustmentId'
+>;
+
+/**
  * The origins ids, branded on both sides of the same D1b severance and for the
  * same reason: a template id turning up where a character-row id belongs means
  * the code is reading the CATALOG when it meant to read the CHARACTER, and by

@@ -16,6 +16,10 @@
  *  - `character_weapons` may not record a selected mastery without naming which
  *    property was selected (named CHECK
  *    `character_weapons_mastery_requires_property_check`). Two columns again.
+ *  - `character_armor` ties `dex_bonus_max` to `dex_bonus = 'capped'` in BOTH
+ *    directions, and forbids a shield carrying a Dexterity term at all (named
+ *    CHECKs `character_armor_dex_bonus_max_check` and
+ *    `character_armor_shield_check`). Two columns again, twice.
  *
  * WHY THIS MODULE EXISTS RATHER THAN TWO COPIES OF THE RULES.
  * Both rules were already implemented in `src/backup/character-backup.ts`, for
@@ -115,6 +119,43 @@ export function weaponMasterySelectionError(
     (row.mastery_property === null || row.mastery_property === undefined)
   ) {
     return `${label} selects a weapon mastery without naming the property.`;
+  }
+  return null;
+}
+
+/**
+ * An armour row's two correlated pairs, checked the way the database checks them.
+ *
+ * `dex_bonus_max` IS MEANINGFUL EXACTLY WHEN `dex_bonus` IS `'capped'`, and the
+ * pairing runs in both directions: a capped row without its cap and an uncapped
+ * row carrying a stray one are both refused. Without the first,
+ * `dexterityTerm`'s documented-unreachable `?? 0` becomes reachable and a suit
+ * of Light armour silently degrades to Heavy behaviour — a character quietly
+ * losing Armor Class with no error anywhere. Without the second, a Heavy row
+ * would carry a number nothing reads.
+ *
+ * A SHIELD CARRIES NO DEXTERITY TERM. `armorClassFrom` returns a shield's
+ * contribution as a bonus and never consults `dex_bonus`, so a shield row with
+ * `dex_bonus = 'full'` holds a field that reads as meaningful and is ignored.
+ *
+ * Reachable only when armour rows arrive as JSON — a portable backup document, a
+ * save-point snapshot, or the `armor` section of a share document. All three end
+ * as an INSERT, and without this the failure is a raw `SQLITE_CONSTRAINT_CHECK`
+ * from inside a transaction rather than a sentence naming the offending row.
+ */
+export function armorDexBonusPairError(
+  row: UntrustedRow,
+  label: string,
+): string | null {
+  const capped = row.dex_bonus === 'capped';
+  const hasMaximum = row.dex_bonus_max !== null && row.dex_bonus_max !== undefined;
+  if (capped !== hasMaximum) {
+    return capped
+      ? `${label} caps the Dexterity bonus without saying at what.`
+      : `${label} carries a Dexterity cap without a capped Dexterity bonus.`;
+  }
+  if (row.category === 'shield' && row.dex_bonus !== 'none') {
+    return `${label} is a shield, which carries no Dexterity bonus.`;
   }
   return null;
 }

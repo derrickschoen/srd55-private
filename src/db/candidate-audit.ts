@@ -10,6 +10,7 @@ import {
 import { COLUMN_FACTS } from '../domain/contracts/generated/column-facts';
 import { rowContractError } from '../domain/contracts/rows';
 import {
+  armorDexBonusPairError,
   slotExclusiveAssignmentError,
   uniqueRowIdError,
   weaponMasterySelectionError,
@@ -674,6 +675,15 @@ function auditSavePointSnapshots(db: Database): void {
           );
           if (mastery !== null) {
             throw new CandidateAuditError(mastery);
+          }
+        }
+        if (table === 'character_armor') {
+          const pairing = armorDexBonusPairError(
+            row as Record<string, unknown>,
+            rowLabel,
+          );
+          if (pairing !== null) {
+            throw new CandidateAuditError(pairing);
           }
         }
       }
