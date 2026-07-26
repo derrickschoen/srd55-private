@@ -239,3 +239,21 @@ surface names any of them.
 The remaining work is therefore narrower than Q9 implied: a sheet view plus
 persistence for the four inputs a player supplies. The derivations are done and
 some are already proven in production use.
+
+---
+
+## Q10 — A subclass cannot be IMPORTED yet (next increment, not blocking)
+
+D21 built the model: a subclass or named feature can grant Extra Attack, scoped
+to a weapon, and `College of the Long Road` exercises the shape.
+
+But the catalog import DOCUMENT format cannot carry a subclass. `catalog.import`
+rejects the homebrew fixture outright, and the test that proves it is named
+`is not in the catalog format, and catalog.import rejects it outright` rather
+than being skipped or softened.
+
+So your stated goal — "we need to test it for if the phb gets imported" — is
+half met: the model would hold the content, the import path cannot deliver it.
+Extending the catalog format to carry subclasses and their features is the next
+increment. No decision needed unless you want it reordered behind the character
+sheet (Q9).
