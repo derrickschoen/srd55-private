@@ -1,0 +1,49 @@
+[
+  {
+    "kind": "subclass",
+    "contentKey": "2024:longroad.homebrew:college-of-the-long-road",
+    "parentClassKey": "2024:class:bard",
+    "name": "College of the Long Road",
+    "edition": "2024",
+    "features": [
+      {
+        "classLevel": 3,
+        "name": "Marching Song",
+        "description": "You always have Roadmender's Cadence prepared, and it does not count against the number of spells you can prepare."
+      },
+      {
+        "classLevel": 3,
+        "name": "Road Trained",
+        "description": "You gain proficiency with Martial weapons and with Medium armour."
+      },
+      {
+        "classLevel": 6,
+        "name": "Extra Attack",
+        "description": "Your road-worn footwork lets the Attack action carry two strikes for you rather than one.",
+        "effect": {
+          "kind": "extra_attack",
+          "attackCount": 2,
+          "weaponScope": "any_weapon"
+        }
+      },
+      {
+        "classLevel": 14,
+        "name": "Last Mile",
+        "description": "When you roll initiative and have no uses of Bardic Inspiration left, you regain one."
+      }
+    ],
+
+    "_whatThisIs": "A hand-written homebrew Bard subclass that grants Extra Attack at subclass level 6 — the D19 shape, in the Tier 1 catalog format. Every name and sentence here was written for this repository. This key and every one below it is an UNKNOWN FIELD to the parser and is dropped, exactly as the _provenance stamp in tools/scrape/provenance.ts is; the notes live here because this is where a reader will look.",
+
+    "_whatTheImporterKeeps": "contentKey, parentClassKey, name, edition, and the ordered features list — each feature's classLevel, name, description, and its optional bounded effect. sort_order is the ARRAY INDEX and is deliberately not authored here, because an authored order beside an array is a second source of truth for the same fact.",
+
+    "_whatIsStillFreeTextAndWhy": {
+      "Marching Song": "An always-prepared spell that does not count against the prepared count. The machinery exists (subclass_definitions.grant_rules, character_source_instances) but classFeatureEffectKinds has exactly one member and it is extra_attack, so this lands with effect_kind NULL. src/rules/class-feature-effects.ts states the posture: free text is not an effect, however mechanical the English sounds.",
+      "Road Trained": "Martial weapons and Medium armour. class_weapon_proficiencies and class_armor_training exist but are keyed on class_definition_id and are wiped wholesale on every reseed by src/rules/sheet-srd.ts, so there is no subclass limb to write to. Free text, stated rather than half-stored."
+    },
+
+    "_whatTheFormatHasNoColumnFor": "A source book (spells get spell_version_publications; subclass_definitions has no publication table) and a flavour paragraph (subclass_definitions has no description column). Both were carried by the earlier draft of this fixture and are dropped here rather than written into fields that would silently vanish. Spellcasting — a caster fraction, cantrips, slots — is a whole second increment; an imported subclass is a non-caster.",
+
+    "_whatChangedToMakeThisImportable": "The earlier draft was a top-level OBJECT with a subclass wrapper, its features carried a kind of text or extra_attack_grant beside a _theD19Datum blob, and its weaponScope was null. A Tier 1 document is a bare JSON array; the effect is a tagged union whose tag IS the effect kind; and weaponScope has no null limb at all, because subclass_features_extra_attack_payload_check refuses a scope-less extra_attack row and defaulting it to any_weapon would widen a one-weapon grant to every weapon."
+  }
+]

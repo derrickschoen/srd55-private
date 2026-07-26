@@ -237,6 +237,9 @@ describe('catalog and backup entry points', () => {
             tags_created: 0,
             attack_modes_created: 0,
             save_abilities_created: 0,
+            subclasses_created: 0,
+            subclasses_updated: 0,
+            subclass_features_created: 0,
             text_available: false,
             descriptions_loaded: 0,
           };
@@ -313,10 +316,62 @@ describe('catalog and backup entry points', () => {
         tags_created: 0,
         attack_modes_created: 0,
         save_abilities_created: 0,
+        subclasses_created: 0,
+        subclasses_updated: 0,
+        subclass_features_created: 0,
         text_available: false,
         descriptions_loaded: 0,
       }),
     ).toBe('2 created, 3 updated, 4 tombstoned');
+
+    // A document that carried subclasses says so, and the spell numbers stay
+    // spell numbers — folding a subclass into `created` would print a spell
+    // count that is wrong. There is no "tombstoned" clause for subclasses
+    // because an import never removes one.
+    expect(
+      catalogSummary({
+        created: 2,
+        updated: 3,
+        tombstoned: 4,
+        identities_created: 0,
+        identities_updated: 0,
+        publications_created: 0,
+        memberships_created: 0,
+        tags_created: 0,
+        attack_modes_created: 0,
+        save_abilities_created: 0,
+        subclasses_created: 1,
+        subclasses_updated: 5,
+        subclass_features_created: 9,
+        text_available: false,
+        descriptions_loaded: 0,
+      }),
+    ).toBe(
+      '2 created, 3 updated, 4 tombstoned, 1 subclass created, 5 subclasses updated',
+    );
+
+    // The singular is the COMMON case — one homebrew subclass in one document —
+    // and both clauses inflect independently, so a lone created subclass reads
+    // beside a plural updated count without either being wrong.
+    expect(
+      catalogSummary({
+        created: 0,
+        updated: 0,
+        tombstoned: 0,
+        identities_created: 0,
+        identities_updated: 0,
+        publications_created: 0,
+        memberships_created: 0,
+        tags_created: 0,
+        attack_modes_created: 0,
+        save_abilities_created: 0,
+        subclasses_created: 0,
+        subclasses_updated: 1,
+        subclass_features_created: 4,
+        text_available: false,
+        descriptions_loaded: 0,
+      }),
+    ).toBe('0 created, 0 updated, 0 tombstoned, 0 subclasses created, 1 subclass updated');
   });
 
   it('confirms database replacement and persists the selected SQLite bytes', async () => {

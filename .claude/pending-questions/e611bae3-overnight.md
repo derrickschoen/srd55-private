@@ -242,7 +242,7 @@ some are already proven in production use.
 
 ---
 
-## Q10 — A subclass cannot be IMPORTED yet (next increment, not blocking)
+## Q10 — RESOLVED 2026-07-26: subclasses import (see D23)
 
 D21 built the model: a subclass or named feature can grant Extra Attack, scoped
 to a weapon, and `College of the Long Road` exercises the shape.
