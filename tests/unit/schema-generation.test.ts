@@ -50,30 +50,38 @@ describe('schema generation freshness', () => {
 });
 
 /**
- * The hand-written artifact carried rationale comments that a naive
- * regeneration would silently drop — in particular the explanation of why
- * eight tables nothing reads still exist. Losing that would leave a future
- * reader with no reason not to delete them.
+ * THE RATIONALE-NOTE MECHANISM, NOW CARRYING NOTHING.
+ *
+ * Two tests used to live here: one asserting the artifact preserved the
+ * explanation of why eight tables nothing reads still existed, and one
+ * asserting it named the round-trip reason for them. Those eight tables are
+ * gone, so both tests are gone too — a test whose entire subject has been
+ * deleted is not a test worth keeping green.
+ *
+ * The MECHANISM stays, and so does a test of it, because the hazard it exists
+ * for has not gone anywhere: a rationale that lives only inside a generated
+ * file is a rationale the next regeneration silently drops. This proves the
+ * composer still emits whatever `SCHEMA_NOTES` holds — including that an empty
+ * list leaves no stray comment or blank line behind — so the next note added
+ * arrives with its guard already working.
  */
 describe('schema rationale notes', () => {
-  it('preserves the dead-infrastructure-tables rationale in the artifact', async () => {
+  it('emits exactly the notes SCHEMA_NOTES declares, and nothing when it is empty', async () => {
     const sql = await composeSchemaSql();
-    expect(SCHEMA_NOTES.length).toBeGreaterThan(0);
+    const commentBlock = sql
+      .split('\n')
+      .filter((line) => line.startsWith('--'))
+      .map((line) => line.slice(2).trim())
+      .join(' ');
     for (const note of SCHEMA_NOTES) {
       // The note is emitted as wrapped SQL comments, so compare on words.
-      const commentBlock = sql
-        .split('\n')
-        .filter((line) => line.startsWith('--'))
-        .map((line) => line.slice(2).trim())
-        .join(' ');
       expect(commentBlock).toContain(note);
     }
-  });
-
-  it('names the round-trip reason the infrastructure tables exist', async () => {
-    const sql = await composeSchemaSql();
-    expect(sql).toContain('round-trip');
-    expect(sql).toContain('without');
+    if (SCHEMA_NOTES.length === 0) {
+      // Only the generated-file banner may precede the pragma, and the pragma
+      // is followed by exactly one blank line before the first statement.
+      expect(sql).toContain('PRAGMA foreign_keys = ON;\n\nCREATE TABLE');
+    }
   });
 
   it('marks the artifact as generated so it is not hand-edited', async () => {

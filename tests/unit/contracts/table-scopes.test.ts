@@ -29,8 +29,6 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
   it('reproduces applicationTables exactly (database-lifecycle.ts)', () => {
     expect([...APPLICATION_TABLES]).toEqual([
       'background_definitions',
-      'cache',
-      'cache_locks',
       'change_log',
       'character_class_levels',
       'character_operations',
@@ -41,12 +39,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       'characters',
       'class_definitions',
       'class_progressions',
-      'failed_jobs',
       'feat_definitions',
-      'job_batches',
-      'jobs',
-      'password_reset_tokens',
-      'sessions',
       'species_definitions',
       'spell_identities',
       'spell_identity_aliases',
@@ -63,7 +56,6 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       'spell_versions',
       'subclass_definitions',
       'subclass_progressions',
-      'users',
       'warning_acknowledgements',
       'wizard_spellbook_entries',
     ]);
@@ -155,11 +147,31 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
 });
 
 describe('table scope classification', () => {
-  it('classifies all 38 tables exactly once', () => {
+  it('classifies all 30 tables exactly once', () => {
     const names = Object.keys(TABLE_SCOPES);
-    expect(names).toHaveLength(38);
-    expect(new Set(names).size).toBe(38);
+    // 38 until the eight Laravel-only infrastructure tables were dropped.
+    expect(names).toHaveLength(30);
+    expect(new Set(names).size).toBe(30);
     expect([...names].sort()).toEqual([...APPLICATION_TABLES].sort());
+  });
+
+  it('carries no Laravel infrastructure table', () => {
+    // The eight are named here, not derived, so this fails if one comes back —
+    // which the count assertion above would not catch on its own if a domain
+    // table were dropped in the same change.
+    for (const removed of [
+      'cache',
+      'cache_locks',
+      'failed_jobs',
+      'job_batches',
+      'jobs',
+      'password_reset_tokens',
+      'sessions',
+      'users',
+    ]) {
+      expect(Object.keys(TABLE_SCOPES)).not.toContain(removed);
+      expect([...APPLICATION_TABLES]).not.toContain(removed);
+    }
   });
 
   it('emits no duplicate members in any derived tuple', () => {
