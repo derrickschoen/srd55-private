@@ -1,8 +1,42 @@
 import { defineConfig, type Plugin } from 'vite';
+import { createHash } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { aiBridge } from './tools/ai-bridge/plugin';
+
+/**
+ * ONE DEPENDENCY CACHE PER CHECKOUT.
+ *
+ * This default used to be a single machine-global path that every git worktree
+ * of this repository shared, and two checkouts cannot co-exist in it. Vite's
+ * optimizer records the absolute paths of the checkout that last wrote the
+ * cache, so the next checkout to start a dev server finds a mismatch and
+ * re-optimizes — and a re-optimization changes `browserHash`, which makes Vite
+ * tell the connected browser to perform a full reload.
+ *
+ * That reload is a genuine page load, and it is what made the attribution
+ * spec's `expect(loads).toBe(1)` fail intermittently. The assertion was right
+ * and the click it guards was fine; the second load was real and had nothing to
+ * do with the click. Confirmed A/B/A by replaying a foreign checkout's
+ * `_metadata.json` into an otherwise warm cache: consistent cache passes,
+ * foreign cache fails with two loads, and Vite rewrites the file back to the
+ * running checkout's identity — which is what steals it from the other worktree
+ * in turn.
+ *
+ * playwright.config.ts already gave concurrent checkouts their own PORT for
+ * precisely this reason; the cache was the unfixed half of the same problem.
+ * Hashing the checkout directory keeps the path stable from run to run, so the
+ * cache still stays warm, while making it unique per worktree.
+ * `STATIC_APP_CACHE_DIR` still overrides it, as PARALLEL-PLAN.md requires.
+ */
+const checkoutCacheDir = join(
+  tmpdir(),
+  `dnd-multiclass-spells-static-vite-${createHash('sha256')
+    .update(realpathSync(process.cwd()))
+    .digest('hex')
+    .slice(0, 12)}`,
+);
 
 /**
  * Drizzle is a BUILD-TIME-ONLY dependency: it authors `src/db/schema.sql` and
@@ -47,9 +81,7 @@ function forbidDrizzleAtRuntime(): Plugin {
 
 const shared = {
   base: './',
-  cacheDir:
-    process.env.STATIC_APP_CACHE_DIR ??
-    join(tmpdir(), 'dnd-multiclass-spells-static-vite'),
+  cacheDir: process.env.STATIC_APP_CACHE_DIR ?? checkoutCacheDir,
   plugins: [forbidDrizzleAtRuntime()],
   worker: {
     plugins: () => [forbidDrizzleAtRuntime()],
@@ -72,6 +104,30 @@ const shared = {
   },
   optimizeDeps: {
     exclude: ['@sqlite.org/sqlite-wasm'],
+    /**
+     * `zod` reaches the browser ONLY through the worker's module graph
+     * (src/db/worker.ts → handlers → src/domain/contracts/rows.ts), and the
+     * worker is referenced as `new Worker(new URL('./db/worker.ts', …))`, not
+     * as a static import. Vite's startup dependency scanner crawls index.html
+     * and the modules statically reachable from it, so it does not see that
+     * graph: `zod` was instead discovered when the worker actually loaded,
+     * which is after the browser has connected. The dev server then logged
+     *
+     *     ✨ new dependencies optimized: zod
+     *     ✨ optimized dependencies changed. reloading
+     *
+     * and reloaded the page. That is a second, real page load on every cold
+     * cache — the other half of the attribution spec's intermittent
+     * `expect(loads).toBe(1)` failure, and the half a per-checkout cache does
+     * not address, because a fresh clone or a cleared temp directory is cold by
+     * definition.
+     *
+     * Naming it here makes the optimizer process it during startup, before the
+     * first request is served, so there is nothing left to discover late and
+     * nothing to reload for. This is Vite's documented remedy for deps a static
+     * crawl cannot reach; it is not a timing adjustment.
+     */
+    include: ['zod'],
   },
 };
 

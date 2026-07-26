@@ -1132,6 +1132,127 @@ or perturb another. This is what made the flake reproducible at all. Worth
 fixing as a separate attributable change — a per-worktree port — but NOT as a
 path to green, and not while it is the only lever that reproduces F5.
 
+### RESOLVED (2026-07-26, dedicated flake track + independent verification)
+
+Root cause found, reproduced on demand at **100%**, and fixed. The mechanism is
+a Vite dev-server page reload. It has nothing to do with the footer click, the
+router, or the validation branch this was originally suspected of.
+
+**The mechanism.** `zod` is invisible to Vite's startup dependency scan. The
+scanner crawls `index.html` and what is statically reachable from it; the only
+runtime `import { z } from 'zod'` is `src/domain/contracts/rows.ts`, reachable
+only through `src/db/worker.ts`, which is referenced as
+`new Worker(new URL('./db/worker.ts', import.meta.url))` and therefore never
+crawled. So whenever the dep cache does not already contain `zod`, the browser
+connects, the worker loads, Vite discovers `zod` late and logs
+
+    ✨ new dependencies optimized: zod
+    ✨ optimized dependencies changed. reloading
+
+and reloads the page. That reload is the second `load` event. `loads` becomes 2
+and `expect(loads).toBe(1)` fails. The assertion was always right.
+
+**Hypothesis (2) above was killed on a false premise, and was in fact correct.**
+It was dismissed because "main already imports zod at `src/domain/ids.ts`". That
+line is `import type { core } from 'zod'` — a *type-only* import, erased at
+compile time. It creates no runtime dependency and does not make `zod`
+scannable. The one hypothesis that was right is the one that got struck out.
+
+**Why it looked like 1-in-10, and why it correlated with a neighbour dev
+server.** `vite.config.ts` defaulted `cacheDir` to a single machine-global path
+shared by every worktree. When another checkout runs against it, Vite finds the
+recorded absolute paths foreign, performs a **full** re-optimize, and in doing
+so discards the cached `zod` entry — re-arming the late discovery for exactly
+one run. The next run is self-consistent again and passes. Hence: rare,
+correlated with a second dev server, and self-healing — precisely the signature
+the table above recorded. The addendum's neighbour-free failure fits the same
+rule, because *any* cold cache (fresh clone, cleared `/tmp`, a config change)
+does it too.
+
+**Measured, with a strict-port harness** (an earlier harness let killed servers
+survive, so the probe hit stale warm servers; those readings were discarded):
+
+| vite config | dep-cache state | trials | `loads != 1` |
+|---|---|---|---|
+| pre-fix | cold | 6 | **6 / 6** |
+| pre-fix | warm, self-consistent | 5 | 0 / 5 |
+| pre-fix | just stomped by a neighbour worktree | 4 | **1 / 4** (first run only, then self-heals) |
+| fixed | cold | 4 | 0 / 4 |
+| fixed | just stomped by a neighbour worktree | 4 | 0 / 4 |
+
+At the spec level, running the real `attribution.spec.ts`:
+
+| condition | runs | failed |
+|---|---|---|
+| pre-fix `vite.config.ts`, cache cold each run | 10 | **10 / 10** — always `attribution.spec.ts:16`, `Received: 2` |
+| fixed, cache cold each run | 40 | **0 / 40** |
+| fixed, warm cache, neighbour dev server restarting throughout | 20 | **0 / 20** |
+
+So the rate went from a historical 1-in-10 — and 10-in-10 once the real
+condition was identified — to **0 in 60**. Not narrowed. Closed.
+
+**The fix.** `optimizeDeps.include: ['zod']` in `vite.config.ts` makes the
+optimizer handle it during startup, so nothing is discovered late and there is
+nothing to reload for. This alone is sufficient: proved by the fixed/stomped row
+above, where the re-optimize still happens at startup but no reload follows.
+`cacheDir` was additionally made per-checkout (hashed realpath,
+`STATIC_APP_CACHE_DIR` still overrides), removing the trigger rather than the
+symptom. Note PARALLEL-PLAN.md rule 7 *already* required per-chunk cache
+isolation via that env var; this flake is what happens when tracks run dev
+servers and Playwright without it. The change makes the safe behaviour the
+default instead of relying on every runner remembering.
+
+**A SECOND, GENUINELY SEPARATE APP DEFECT was found — and it is NOT what made
+this test flake.** `routeFooterLinks` only ran from `startApplication()`, behind
+the `system.info()` boot gate, while the footer is static markup in
+`index.html`. For the 1.5–3.7 s the worker takes to instantiate wasm and
+provision OPFS, the attribution link was visible, live and unhandled: clicking
+it was a full navigation that destroyed the half-booted worker. Fixed by
+attaching a delegated listener on `.site-footer` during module evaluation, ahead
+of the gate, with `startApplication` made idempotent.
+
+Being explicit, because it would be easy to over-claim: **this defect cannot
+have caused any recorded F5 failure.** `attribution.spec.ts:16` waits for
+`#status[data-ready=true]` (30 s) before clicking, so it waits the vulnerable
+window out entirely. Verified directly — with `src/main.ts` already fixed and
+only `vite.config.ts` reverted, the flake still reproduced 10/10. The app defect
+is real and worth fixing on its own merits; it is not the flake.
+
+**Real-user impact of that defect:** a user on a cold cache, a slow disk, or a
+first visit who clicked "Licences and attribution" while the app was still
+starting got a full page reload. They still reached the notice, so nothing was
+unreachable — the cost was a discarded worker mid-`installOpfsSAHPoolVfs` and a
+boot restarted from zero, i.e. a slow page made slower. Low severity, real.
+
+**The SPA guarantee the fix protects still holds.** Verified with two throwaway
+probes (run, then deleted): after a pre-boot footer click, the database still
+opens on the same worker — `staticApp.countCharacters()` resolves, the marker
+set on `window` survives, `loads` is 1, and exactly one screen is rendered into
+`#app`, so the idempotence guard is doing its job. A boot failure arriving
+*after* a pre-boot click also does not clobber the already-rendered notice.
+
+**Nothing was suppressed.** No retry, no `test.describe.configure`, no `.skip`,
+no `.fixme`, no loosened assertion, no added wait. `retries` is unset in
+`playwright.config.ts` (default 0), so every result above is a first attempt.
+The only assertion change was *strengthening*: `expect(loads).toBe(1)` added to
+the boot-failure test. Both new/changed tests were proved sensitive by reverting
+`src/main.ts` and watching them fail (`Expected: true / Received: false` at
+`attribution.spec.ts:93`; `Expected: 1 / Received: 2` at line 168).
+
+**Gates:** 1440 vitest / 101 files, build exit 0, 66 Playwright (65 baseline + 1
+new), all green.
+
+**Residual, honestly.** (1) `vitest.config.ts` still defaults to a
+machine-global cache dir. Harmless for *this* flake — vitest performs no HMR
+page reload — but it is the same latent cross-worktree sharing, and two
+concurrent vitest runs will still thrash it. Left for the B00 owner. (2)
+`vite.config.ts` is a B00-owned config file under rules 5–6; this track edited
+it because that is where the flake actually lives. It is the change most worth a
+second look. (3) `qrcode` is the other optimized dep and *is* statically
+reachable, so it needs no entry today — but any future runtime dependency
+reachable only through the worker graph will reintroduce this exact flake, and
+nothing currently guards against that.
+
 ---
 
 ## D8 — Both parallel tracks merged; codex's three audit findings queued, not fixed (2026-07-26)
