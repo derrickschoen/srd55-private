@@ -1,0 +1,326 @@
+This work includes material from the System Reference Document 5.2
+("SRD 5.2") by Wizards of the Coast LLC, available at
+https://www.dndbeyond.com/srd. The SRD 5.2 is licensed under the Creative
+Commons Attribution 4.0 International License, available at
+https://creativecommons.org/licenses/by/4.0/legalcode.
+
+--- Verbatim extracts: the Core Traits table of each of the twelve classes.
+    These carry the sheet core: Hit Point Die, Saving Throw Proficiencies,
+    Skill Proficiencies, Weapon Proficiencies and Armor Training. ---
+
+LAYOUT: the SRD is set in two columns and 'pdftotext -layout' preserves
+both, so unrelated text from the neighbouring column appears to the right
+of some lines. Nothing has been edited out; read the left column.
+
+=== Core Barbarian Traits ===
+
+     Core Barbarian Traits                                            Traits table: Hit Point Die, proficiency with Mar-
+                                                                      tial weapons, and training with Shields.
+     Primary Ability          Strength
+                                                                    • Gain the Barbarian’s level 1 features, which are
+     Hit Point Die            D12 per Barbarian level                 listed in the Barbarian Features table.
+     Saving Throw             Strength and Constitution
+     Proficiencies                                                  Barbarian Class Features
+     Skill Proficiencies      Choose 2: Animal Handling,            As a Barbarian, you gain the following class features
+                              Athletics, Intimidation, Na-          when you reach the specified Barbarian levels.
+                              ture, Perception, or Survival         These features are listed in the Barbarian Features
+                                                                    table.
+     Weapon Proficiencies Simple and Martial weapons
+     Armor Training           Light and Medium armor and            Level 1: Rage
+                              Shields                               You can imbue yourself with a primal power called
+     Starting Equipment       Choose A or B: (A) Greataxe,          Rage, a force that grants you extraordinary might
+                                                                    and resilience. You can enter it as a Bonus Action if
+                              4 Handaxes, Explorer’s Pack,
+                                                                    you aren’t wearing Heavy armor.
+                              and 15 GP; or (B) 75 GP
+                                                                      You can enter your Rage the number of times
+     Becoming a Barbarian …                                         shown for your Barbarian level in the Rages column
+                                                                    of the Barbarian Features table. You regain one ex-
+     As a Level 1 Character                                         pended use when you finish a Short Rest, and you
+
+=== Core Bard Traits ===
+
+     Core Bard Traits
+                                                                     As a Multiclass Character
+      Primary Ability           Charisma                             • Gain the following traits from the Core Bard
+      Hit Point Die             D8 per Bard level                      Traits table: Hit Point Die, proficiency in one skill
+      Saving Throw              Dexterity and Charisma                 of your choice, proficiency with one Musical In-
+      Proficiencies                                                    strument of your choice, and training with Light
+      Skill Proficiencies       Choose any 3 skills (see “Playing      armor.
+                                the Game”)
+                                                                     • Gain the Bard’s level 1 features, which are listed
+                                                                       in the Bard Features table. See the multiclassing
+      Weapon Proficiencies Simple weapons                              rules in “Character Creation” to determine your
+      Tool Proficiencies        Choose 3 Musical Instruments           available spell slots.
+                                (see “Equipment”)
+                                                                     Bard Class Features
+      Armor Training            Light armor
+                                                                     As a Bard, you gain the following class features
+      Starting Equipment        Choose A or B: (A) Leather
+                                                                     when you reach the specified Bard levels. These fea-
+                                Armor, 2 Daggers, Musical
+                                                                     tures are listed in the Bard Features table.
+                                Instrument of your choice, En-
+                                tertainer’s Pack, and 19 GP; or      Level 1: Bardic Inspiration
+                                (B) 90 GP                            You can supernaturally inspire others through
+
+=== Core Cleric Traits ===
+
+       Core Cleric Traits                                                   Traits table: Hit Point Die and training with Light
+        Primary Ability             Wisdom                                  and Medium armor and Shields.
+                                                                          • Gain the Cleric’s level 1 features, which are listed
+        Hit Point Die               D8 per Cleric level
+                                                                            in the Cleric Features table. See the multiclassing
+        Saving Throw                Wisdom and Charisma                     rules in “Character Creation” to determine your
+        Proficiencies
+                                                                            available spell slots.
+        Skill Proficiencies         Choose 2: History, Insight,
+                                    Medicine, Persuasion, or              Cleric Class Features
+                                    Religion                              As a Cleric, you gain the following class features
+        Weapon Proficiencies Simple weapons                               when you reach the specified Cleric levels. These
+        Armor Training              Light and Medium armor and
+                                                                          features are listed in the Cleric Features table.
+                                    Shields                               Level 1: Spellcasting
+        Starting Equipment          Choose A or B: (A) Chain Shirt,       You have learned to cast spells through prayer and
+                                    Shield, Mace, Holy Symbol,            meditation. See “Spells” for the rules on spellcast-
+                                    Priest’s Pack, and 7 GP; or (B)       ing. The information below details how you use
+                                    110 GP                                those rules with Cleric spells, which appear on the
+                                                                          Cleric spell list later in the class’s description.
+       Becoming a Cleric …                                                  Cantrips. You know three cantrips of your choice
+                                                                          from the Cleric spell list. Guidance, Sacred Flame,
+       As a Level 1 Character                                             and Thaumaturgy are recommended.
+
+=== Core Druid Traits ===
+
+      Core Druid Traits                                                As a Level 1 Character
+                                                                       • Gain all the traits in the Core Druid Traits table.
+      Primary Ability            Wisdom
+                                                                       • Gain the Druid’s level 1 features, which are listed
+      Hit Point Die              D8 per Druid level                      in the Druid Features table.
+      Saving Throw               Intelligence and Wisdom
+      Proficiencies                                                    As a Multiclass Character
+                                                                       • Gain the following traits from the Core Druid
+      Skill Proficiencies        Choose 2: Animal Handling,
+                                                                         Traits table: Hit Point Die and training with Light
+                                 Arcana, Insight, Medicine, Na-
+                                                                         armor and Shields.
+                                 ture, Perception, Religion, or        • Gain the Druid’s level 1 features, which are listed
+                                 Survival                                in the Druid Features table. See the multiclassing
+      Weapon Proficiencies Simple weapons                                rules in “Character Creation” to determine your
+      Tool Proficiencies         Herbalism Kit                           available spell slots.
+      Armor Training             Light armor and Shields               Druid Class Features
+      Starting Equipment         Choose A or B: (A) Leather Ar-        As a Druid, you gain the following class features
+                                 mor, Shield, Sickle, Druidic Fo-      when you reach the specified Druid levels. These
+                                 cus (Quarterstaff), Explorer’s        features are listed in the Druid Features table.
+                                 Pack, Herbalism Kit, and 9 GP;
+                                 or (B) 50 GP                          Level 1: Spellcasting
+                                                                       You have learned to cast spells through studying
+
+=== Core Fighter Traits ===
+
+     Core Fighter Traits                                             As a Level 1 Character
+                                                                     • Gain all the traits in the Core Fighter Traits table.
+     Primary Ability            Strength or Dexterity
+                                                                     • Gain the Fighter’s level 1 features, which are
+     Hit Point Die              D10 per Fighter level                  listed in the Fighter Features table.
+     Saving Throw               Strength and Constitution
+     Proficiencies                                                   As a Multiclass Character
+                                                                     • Gain the following traits from the Core Fighter
+     Skill Proficiencies        Choose 2: Acrobatics, Animal
+                                                                       Traits table: Hit Point Die, proficiency with Mar-
+                                Handling, Athletics, History,
+                                                                       tial weapons, and training with Light and Medium
+                                Insight, Intimidation, Persua-         armor and Shields.
+                                sion, Perception, or Survival        • Gain the Fighter’s level 1 features, which are
+     Weapon Proficiencies Simple and Martial weapons                   listed in the Fighter Features table.
+     Armor Training             Light, Medium, and Heavy ar-
+                                mor and Shields
+                                                                     Fighter Class Features
+     Starting Equipment
+                                                                     As a Fighter, you gain the following class features
+                                Choose A, B, or C: (A) Chain
+                                                                     when you reach the specified Fighter levels. These
+                                Mail, Greatsword, Flail, 8 Jav-
+
+=== Core Monk Traits ===
+
+                                                               Core Monk Traits
+     A Champion focuses on the development of martial
+                                                               Primary Ability        Dexterity and Wisdom
+     prowess in a relentless pursuit of victory. Champi-
+     ons combine rigorous training with physical excel-        Hit Point Die          D8 per Monk level
+     lence to deal devastating blows, withstand peril,         Saving Throw           Strength and Dexterity
+     and garner glory. Whether in athletic contests or         Proficiencies
+     bloody battle, Champions strive for the crown of the      Skill Proficiencies    Choose 2: Acrobatics, Athlet-
+     victor.                                                                          ics, History, Insight, Religion,
+     Level 3: Improved Critical                                                       or Stealth
+     Your attack rolls with weapons and Unarmed                Weapon Proficiencies Simple weapons and Martial
+     Strikes can score a Critical Hit on a roll of 19 or 20                         weapons that have the Light
+     on the d20.                                                                    property
+                                                               Tool Proficiencies     Choose one type of Artisan’s
+     Level 3: Remarkable Athlete
+                                                                                      Tools or Musical Instrument (see
+     Thanks to your athleticism, you have Advantage on
+                                                                                      “Equipment”)
+     Initiative rolls and Strength (Athletics) checks.
+       In addition, immediately after you score a Critical     Armor Training         None
+     Hit, you can move up to half your Speed without           Starting Equipment     Choose A or B: (A) Spear, 5
+     provoking Opportunity Attacks.                                                   Daggers, Artisan’s Tools or
+                                                                                      Musical Instrument chosen
+
+=== Core Paladin Traits ===
+
+     Core Paladin Traits
+                                                                  As a Multiclass Character
+     Primary Ability          Strength and Charisma               • Gain the following traits from the Core Paladin
+     Hit Point Die            D10 per Paladin level                 Traits table: Hit Point Die, proficiency with Mar-
+     Saving Throw             Wisdom and Charisma                   tial weapons, and training with Light and Medium
+     Proficiencies                                                  armor and Shields.
+     Skill Proficiencies      Choose 2: Athletics, Insight,       • Gain the Paladin’s level 1 features, which are
+                              Intimidation, Medicine,
+                                                                    listed in the Paladin Features table. See the multi-
+                                                                    classing rules in “Character Creation” to deter-
+                              Persuasion, or Religion
+                                                                    mine your available spell slots.
+     Weapon Proficiencies Simple and Martial weapons
+     Armor Training           Light, Medium, and Heavy ar-        Paladin Class Features
+                              mor and Shields                     As a Paladin, you gain the following class features
+     Starting Equipment       Choose A or B: (A) Chain Mail,      when you reach the specified Paladin levels. These
+                              Shield, Longsword, 6 Javelins,      features are listed in the Paladin Features table.
+                              Holy Symbol, Priest’s Pack,         Level 1: Lay On Hands
+                              and 9 GP; or (B) 150 GP             Your blessed touch can heal wounds. You have a
+                                                                  pool of healing power that replenishes when you
+                                                                  finish a Long Rest. With that pool, you can restore a
+     Becoming a Paladin …                                         total number of Hit Points equal to five times your
+                                                                  Paladin level.
+
+=== Core Ranger Traits ===
+
+     Whenever you cast Divine Smite, you and your allies      Core Ranger Traits
+     have Half Cover while in your Aura of Protection.        Primary Ability         Dexterity and Wisdom
+     The aura has this benefit until the start of your next
+                                                              Hit Point Die           D10 per Ranger level
+     turn.
+                                                              Saving Throw            Strength and Dexterity
+     Level 20: Holy Nimbus                                    Proficiencies
+     As a Bonus Action, you can imbue your Aura of Pro-       Skill Proficiencies     Choose 3: Animal Handling,
+     tection with holy power, granting the benefits be-                               Athletics, Insight, Investigation,
+     low for 10 minutes or until you end them (no action                              Nature, Perception, Stealth, or
+     required). Once you use this feature, you can’t use it                           Survival
+     again until you finish a Long Rest. You can also re-
+                                                              Weapon Proficiencies Simple and Martial weapons
+     store your use of it by expending a level 5 spell slot
+     (no action required).                                    Armor Training          Light and Medium armor and
+       Holy Ward. You have Advantage on any saving                                    Shields
+     throw you are forced to make by a Fiend or an            Starting Equipment      Choose A or B: (A) Studded
+     Undead.                                                                          Leather Armor, Scimitar,
+       Radiant Damage. Whenever an enemy starts its                                   Shortsword, Longbow, 20 Ar-
+     turn in the aura, that creature takes Radiant dam-                               rows, Quiver, Druidic Focus
+     age equal to your Charisma modifier plus your Pro-                               (sprig of mistletoe), Explorer’s
+     ficiency Bonus.                                                                  Pack, and 7 GP; or (B) 150 GP
+       Sunlight. The aura is filled with Bright Light that
+
+=== Core Rogue Traits ===
+
+                                                              Core Rogue Traits
+     You stalk prey in the wilds and elsewhere, using
+                                                              Primary Ability         Dexterity
+     your abilities as a Hunter to protect nature and
+     people everywhere from forces that would destroy         Hit Point Die           D8 per Rogue level
+     them.                                                    Saving Throw            Dexterity and Intelligence
+                                                              Proficiencies
+     Level 3: Hunter’s Lore                                   Skill Proficiencies     Choose 4: Acrobatics, Ath-
+     You can call on the forces of nature to reveal certain
+                                                                                      letics, Deception, Insight,
+     strengths and weaknesses of your prey. While a
+                                                                                      Intimidation, Investigation,
+     creature is marked by your Hunter’s Mark, you know
+                                                                                      Perception, Persuasion, Sleight
+     whether that creature has any Immunities, Resis-
+     tances, or Vulnerabilities, and if the creature has                              of Hand, or Stealth
+     any, you know what they are.                             Weapon Proficiencies Simple weapons and Martial
+                                                                                   weapons that have the Finesse
+     Level 3: Hunter’s Prey                                                        or Light property
+     You gain one of the following feature options of your
+                                                              Tool Proficiencies      Thieves’ Tools
+     choice. Whenever you finish a Short or Long Rest,
+     you can replace the chosen option with the other         Armor Training          Light armor
+
+=== Core Sorcerer Traits ===
+
+                                                                  Core Sorcerer Traits
+     A mix of burglar, treasure hunter, and explorer, you
+                                                                  Primary Ability         Charisma
+     are the epitome of an adventurer. In addition to im-
+     proving your agility and stealth, you gain abilities         Hit Point Die           D6 per Sorcerer level
+     useful for delving into ruins and getting maximum            Saving Throw            Constitution and Charisma
+     benefit from the magic items you find there.                 Proficiencies
+                                                                  Skill Proficiencies     Choose 2: Arcana, Deception,
+     Level 3: Fast Hands
+                                                                                          Insight, Intimidation, Persua-
+     As a Bonus Action, you can do one of the following.
+                                                                                          sion, or Religion
+       Sleight of Hand. Make a Dexterity (Sleight of
+     Hand) check to pick a lock or disarm a trap with             Weapon Proficiencies Simple weapons
+     Thieves’ Tools or to pick a pocket.                          Armor Training          None
+       Use an Object. Take the Utilize action, or take the        Starting Equipment      Choose A or B: (A) Spear,
+     Magic action to use a magic item that requires that                                  2 Daggers, Arcane Focus
+     action.                                                                              (crystal), Dungeoneer’s Pack,
+     Level 3: Second-Story Work                                                           and 28 GP; or (B) 50 GP
+     You’ve trained to get into especially hard-to-reach
+     places, granting you these benefits.                         Becoming a Sorcerer …
+       Climber. You gain a Climb Speed equal to your
+     Speed.                                                       As a Level 1 Character
+
+=== Core Warlock Traits ===
+
+     Draconic Spells table, you thereafter always have         Core Warlock Traits
+     the listed spells prepared.                               Primary Ability         Charisma
+                                                               Hit Point Die           D8 per Warlock level
+     Draconic Spells
+                                                               Saving Throw            Wisdom and Charisma
+        Sorcerer
+                                                               Proficiencies
+         Level        Spells
+                                                               Skill Proficiencies     Choose 2: Arcana, Deception,
+            3         Alter Self, Chromatic Orb, Command,
+                      Dragon’s Breath                                                  History, Intimidation, Investi-
+                                                                                       gation, Nature, or Religion
+            5         Fear, Fly
+                                                               Weapon Proficiencies Simple weapons
+            7         Arcane Eye, Charm Monster
+                                                               Armor Training          Light armor
+            9         Legend Lore, Summon Dragon
+                                                               Starting Equipment      Choose A or B: (A) Leather
+     Level 6: Elemental Affinity                                                       Armor, Sickle, 2 Daggers, Ar-
+                                                                                       cane Focus (orb), Book (occult
+     Your draconic magic has an affinity with a damage
+     type associated with dragons. Choose one of those                                 lore), Scholar’s Pack, and 15
+     types: Acid, Cold, Fire, Lightning, or Poison.                                    GP; or (B) 100 GP
+
+=== Core Wizard Traits ===
+
+     Core Wizard Traits                                                   table.
+     Primary Ability           Intelligence                             • Gain the Wizard’s level 1 features, which are
+                                                                          listed in the Wizard Features table. See the mul-
+     Hit Point Die             D6 per Wizard level
+                                                                          ticlassing rules in “Character Creation” to deter-
+     Saving Throw              Intelligence and Wisdom                    mine your available spell slots.
+     Proficiencies
+     Skill Proficiencies       Choose 2: Arcana, History, In-           Wizard Class Features
+                               sight, Investigation, Medicine,          As a Wizard, you gain the following class features
+                               Nature, or Religion                      when you reach the specified Wizard levels. These
+     Weapon Proficiencies Simple weapons                                features are listed in the Wizard Features table.
+     Armor Training            None                                     Level 1: Spellcasting
+     Starting Equipment        Choose A or B: (A) 2 Daggers,            As a student of arcane magic, you have learned to
+                               Arcane Focus (Quarterstaff),             cast spells. See “Spells” for the rules on spellcasting.
+                               Robe, Spellbook, Scholar’s               The information below details how you use those
+                               Pack, and 5 GP; or (B) 55 GP             rules with Wizard spells, which appear in the Wiz-
+                                                                        ard spell list later in the class’s description.
+                                                                          Cantrips. You know three Wizard cantrips of your
+     Becoming a Wizard …                                                choice. Light, Mage Hand, and Ray of Frost are rec-
+     As a Level 1 Character                                             ommended. Whenever you finish a Long Rest, you
+     • Gain all the traits in the Core Wizard Traits table.             can replace one of your cantrips from this feature
+     • Gain the Wizard’s level 1 features, which are                    with another Wizard cantrip of your choice.
+       listed in the Wizard Features table.
+
