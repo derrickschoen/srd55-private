@@ -27,6 +27,7 @@ import type {
   DeleteCharacterResult,
 } from './character-crud';
 import type { OperationHistory } from './operation-history';
+import type { CharacterSheet } from './character-sheet-builder';
 
 export interface QueriesClient extends CatalogClient {
   listCharacters(): Promise<CharacterSummary[]>;
@@ -51,6 +52,7 @@ export interface QueriesClient extends CatalogClient {
     savePointId: number,
   ): Promise<CharacterCommandPayload>;
   buildReport(characterId: number): Promise<BuildReportResult>;
+  sheet(characterId: number): Promise<CharacterSheet>;
   printable(
     characterId: number,
     variant?: PrintableVariant,
@@ -140,6 +142,11 @@ export function createQueriesClient(rpc: RpcClient): QueriesClient {
     buildReport: (characterId: number) =>
       rpc.call<{ character_id: number }, BuildReportResult>(
         'queries.reports.build',
+        characterParams(characterId),
+      ),
+    sheet: (characterId: number) =>
+      rpc.call<{ character_id: number }, CharacterSheet>(
+        'queries.characters.sheet',
         characterParams(characterId),
       ),
     printable: (

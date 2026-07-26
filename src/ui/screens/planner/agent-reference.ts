@@ -294,7 +294,22 @@ export type ReferenceOutstandingItem =
       readonly order_name: string;
       readonly options: readonly string[];
     }
-  | { readonly kind: 'no_class' };
+  | { readonly kind: 'no_class' }
+  /**
+   * The two SHEET items. They carry no `source_ref` because they hang off no
+   * source instance: a class NAME and a level list is the whole of what
+   * identifies them, and a name registered in the free-text registry would
+   * claim a provenance it does not have.
+   */
+  | {
+      readonly kind: 'orphan_hit_point_roll';
+      readonly class_name: string;
+      readonly levels: readonly number[];
+    }
+  | {
+      readonly kind: 'no_skill_proficiencies';
+      readonly choice_count: number;
+    };
 
 export interface ReferenceCatalogGap {
   /**
@@ -609,7 +624,9 @@ export function buildAgentReference(
     registry.register(route.source_name, null);
   }
   for (const item of completeness?.items ?? []) {
-    if (item.kind !== 'no_class') registry.register(item.source_name, null);
+    if (item.kind === 'unfilled_choices' || item.kind === 'unchosen_option') {
+      registry.register(item.source_name, null);
+    }
   }
   for (const gap of completeness?.catalog_gaps ?? []) {
     for (const name of gap.sources) registry.register(name, null);
@@ -698,6 +715,19 @@ export function buildAgentReference(
           source_ref: registry.register(item.source_name, null),
           order_name: item.order_name,
           options: [...item.options],
+        };
+      }
+      if (item.kind === 'orphan_hit_point_roll') {
+        return {
+          kind: 'orphan_hit_point_roll',
+          class_name: item.class_name,
+          levels: [...item.levels],
+        };
+      }
+      if (item.kind === 'no_skill_proficiencies') {
+        return {
+          kind: 'no_skill_proficiencies',
+          choice_count: item.choice_count,
         };
       }
       return {
@@ -1435,6 +1465,32 @@ export function agentReferenceSections(
                 `${item.order_name} not chosen; options are ${item.options.join(
                   ' or ',
                 )}`,
+              ),
+            ];
+          }
+          // The two sheet items name a class rather than a source instance, so
+          // the middle cell says which class and the detail says which levels —
+          // the same two facts the JSON block carries, in the same order, so
+          // neither form can state more than the other.
+          if (item.kind === 'orphan_hit_point_roll') {
+            return [
+              cell('orphan_hit_point_roll'),
+              cell(item.class_name),
+              cell(
+                `hit point rolls recorded at level ${item.levels.join(
+                  ', ',
+                )} for a class this character does not have; they are not counted`,
+              ),
+            ];
+          }
+          if (item.kind === 'no_skill_proficiencies') {
+            return [
+              cell('no_skill_proficiencies'),
+              cell('not applicable'),
+              cell(
+                `${String(
+                  item.choice_count,
+                )} skill proficiencies are offered and none is recorded`,
               ),
             ];
           }

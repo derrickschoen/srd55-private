@@ -119,11 +119,29 @@ function previewText(preview: SharePreview): string {
   // Weapons are named only when there are some. Nought weapons is the common
   // case and a permanent "0 weapons" would be noise; a non-zero count is a
   // section the recipient is about to receive and should be told about.
+  // The sheet inputs are named on the same terms as weapons: a section the
+  // recipient is about to receive, listed only when there is one. Their absence
+  // is the honest reading of a link that carried none, and printing a permanent
+  // row of zeroes would bury the counts that matter.
+  const sheet = [
+    preview.armorCount === 0
+      ? null
+      : `${String(preview.armorCount)} armour`,
+    preview.hitPointRollCount === 0
+      ? null
+      : `${String(preview.hitPointRollCount)} hit point rolls`,
+    preview.skillProficiencyCount === 0
+      ? null
+      : `${String(preview.skillProficiencyCount)} skill proficiencies`,
+    preview.includesArmorClassAdjustment
+      ? 'a manual Armor Class adjustment'
+      : null,
+  ].filter((item): item is string => item !== null);
   return `${classes}. ${preview.selectionCount} selections, ${
     preview.spellbookCount
   } spellbook spells, ${preview.sourceCount} other sources${
     preview.weaponCount === 0 ? '' : `, ${preview.weaponCount} weapons`
-  }.${
+  }${sheet.length === 0 ? '' : `, ${sheet.join(', ')}`}.${
     preview.placeholderCount === 0
       ? ''
       : ` ${preview.placeholderCount} unavailable spells will be added as safe placeholders.`

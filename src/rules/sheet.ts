@@ -69,10 +69,36 @@ export interface SheetClassLevels {
  * One class a character has levels in, joined to that class's sheet content.
  */
 export interface SheetClass extends SheetClassLevels {
-  readonly hit_die: number;
+  /**
+   * The class's hit die, or `null` when this application does not hold one.
+   *
+   * NULL HERE IS NOT A DEFAULT IN DISGUISE (D6b). `class_sheet_traits` is seeded
+   * for every printed class, but a homebrew or imported class can arrive without
+   * that row, and the die is then genuinely UNKNOWN. `hitPointMaximum`
+   * substitutes `ASSUMED_HIT_DIE` and emits an `assumed_hit_die` warning naming
+   * the class; it does not quietly produce a number indistinguishable from a
+   * sourced one. Keeping the absence in the TYPE is what forces every reader —
+   * including the D4 machine-readable projection — to decide what to say for it,
+   * rather than one construction site choosing 8 on everyone's behalf.
+   */
+  readonly hit_die: number | null;
   readonly is_starting_class: boolean;
   readonly saving_throws: readonly Ability[];
 }
+
+/**
+ * The die assumed for a class whose hit die this application does not hold.
+ *
+ * 8 is the MODE of the twelve printed classes, not the median of the four sizes
+ * — `class-core-traits.txt` uses d6, d8, d10 and d12, whose median is 9, and
+ * Bard, Cleric, Druid, Monk, Rogue and Warlock all print d8. Six of twelve is
+ * the best available guess and the arithmetic is checkable.
+ *
+ * It remains a GUESS. Every number derived from it carries an `assumed_hit_die`
+ * warning naming the class, because a hit point maximum computed from an
+ * invented die is not a fact about the character.
+ */
+export const ASSUMED_HIT_DIE = 8;
 
 /**
  * A character's armour or shield, as VALUES — never a template reference (D1b).
@@ -108,7 +134,13 @@ export interface SheetWarning {
     | 'no_starting_class'
     | 'several_starting_classes'
     | 'strength_requirement_unmet'
-    | 'armor_slot_mismatch';
+    | 'armor_slot_mismatch'
+    /** A class whose hit die is not held; `ASSUMED_HIT_DIE` was used. */
+    | 'assumed_hit_die'
+    /** A recorded roll larger than the class's own die, counted in full. */
+    | 'roll_exceeds_hit_die'
+    /** A stored armour column holding a value its own vocabulary excludes. */
+    | 'armor_value_out_of_vocabulary';
   readonly message: string;
 }
 
@@ -265,6 +297,20 @@ export type HitPointRolls = ReadonlyMap<string, ReadonlyMap<number, number>>;
  * CONSTITUTION IS READ LIVE. A character whose Constitution changes sees every
  * level's contribution move with it, which is the whole reason this is computed
  * rather than stored.
+ *
+ * TWO DEGRADATIONS ARE STATED HERE RATHER THAN HIDDEN, both D11 part 2:
+ *
+ *  - a class with NO HIT DIE (`hit_die === null`) contributes `ASSUMED_HIT_DIE`,
+ *    and says so. Returning a maximum with no warning would put an invented
+ *    number into the sheet AND into the D4 machine-readable block, which is the
+ *    one place meant to be trusted without reading the prose.
+ *  - a ROLL LARGER THAN THE CLASS'S OWN DIE is counted IN FULL and flagged.
+ *    Counting it is deliberate: `character_hit_point_rolls` is keyed on a class
+ *    NAME, so `SHEET_ROLL_BOUNDS.maximum` can only bound at 12 (the largest die
+ *    printed) and this is the first place the die is actually known. Clamping it
+ *    would silently rewrite a number the player typed; refusing it would make an
+ *    imported character unopenable. It is flagged only where the die is KNOWN —
+ *    an assumed d8 cannot convict a roll of 11 of anything.
  */
 export function hitPointMaximum(input: {
   readonly classes: readonly SheetClass[];
@@ -272,19 +318,40 @@ export function hitPointMaximum(input: {
   readonly rolls?: HitPointRolls;
 }): HitPointResult {
   const conModifier = input.scores.score('constitution').modifier();
-  const { chosen, warnings } = startingClass(input.classes);
+  const starting = startingClass(input.classes);
+  const chosen = starting.chosen;
+  const warnings: SheetWarning[] = [...starting.warnings];
 
   let maximum = 0;
   for (const entry of input.classes) {
     const rolled = input.rolls?.get(entry.class_name);
+    const die = entry.hit_die ?? ASSUMED_HIT_DIE;
+    if (entry.hit_die === null) {
+      warnings.push({
+        code: 'assumed_hit_die',
+        message:
+          `No hit die is recorded for ${entry.class_name}, so d${String(ASSUMED_HIT_DIE)} ` +
+          'was assumed for its levels. The hit point maximum below is an ' +
+          'estimate, not this class’s printed value.',
+      });
+    }
     for (let level = 1; level <= entry.level; level += 1) {
       const isFirstLevelOfCharacter = chosen === entry && level === 1;
       if (isFirstLevelOfCharacter) {
-        maximum += entry.hit_die + conModifier;
+        maximum += die + conModifier;
         continue;
       }
       const roll = rolled?.get(level);
-      const base = roll ?? fixedHitPointsPerLevel(entry.hit_die);
+      if (roll !== undefined && entry.hit_die !== null && roll > entry.hit_die) {
+        warnings.push({
+          code: 'roll_exceeds_hit_die',
+          message:
+            `A roll of ${String(roll)} is recorded for ${entry.class_name} level ` +
+            `${String(level)}, which a d${String(entry.hit_die)} cannot show. It has been ` +
+            'counted in full — correct it on the sheet if it was a typo.',
+        });
+      }
+      const base = roll ?? fixedHitPointsPerLevel(die);
       maximum += Math.max(1, base + conModifier);
     }
   }
