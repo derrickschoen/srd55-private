@@ -22,6 +22,10 @@ import {
   type BackupTable,
   type ReferenceKind as DerivedReferenceKind,
 } from '../domain/contracts/tables';
+import {
+  rowContractError,
+  type RowContractTable,
+} from '../domain/contracts/rows';
 
 type BackupRow = Readonly<Record<string, unknown>>;
 type MutableRow = Record<string, unknown>;
@@ -122,6 +126,39 @@ function sourceReferenceKind(sourceType: unknown): ReferenceKind {
   return kind;
 }
 
+/**
+ * SHAPE VALIDATION FOR A ROW THAT IS ABOUT TO BE WRITTEN VERBATIM.
+ *
+ * `insertPortableRow` builds its column list from `Object.keys(row)`, so before
+ * this every key in a hostile document became an identifier in a generated
+ * `INSERT`, and every value went to the driver unexamined. The contracts in
+ * `src/domain/contracts/rows.ts` are derived from the Drizzle schema, so they
+ * cannot fall behind it.
+ *
+ * Every call site here runs BEFORE `importCharacterBackup` opens its
+ * transaction: `validateDocument` is called first and throws, so a rejected
+ * document performs no writes at all and atomicity is unchanged.
+ */
+function assertRowShape(
+  table: RowContractTable,
+  row: unknown,
+  label: string,
+  only?: readonly string[],
+): void {
+  const error = rowContractError(table, row, label, only);
+  if (error !== null) {
+    throw new BackupValidationError(error);
+  }
+}
+
+/** The backup tables whose shape is NOT already checked by `validateCharacterRows`. */
+const shapeOnlyTables = backupTableNames.filter(
+  (table): table is Exclude<BackupTableName, SnapshotStateTable> =>
+    !(CHARACTER_STATE_TABLES as readonly string[]).includes(table),
+);
+
+type SnapshotStateTable = (typeof CHARACTER_STATE_TABLES)[number];
+
 function positiveInteger(value: unknown, label: string): number {
   if (!Number.isSafeInteger(value) || Number(value) < 1) {
     throw new BackupValidationError(`${label} must be a positive integer.`);
@@ -200,6 +237,15 @@ function parseSnapshot(value: unknown, label: string): CharacterSnapshotData {
       );
     }
   }
+  // A snapshot's `character` is a PROJECTION of `characters` onto the state
+  // columns (`CharacterState.capture`), not a whole row, so the contract is
+  // restricted to those columns rather than the full table.
+  assertRowShape(
+    'characters',
+    character,
+    `${label}.character`,
+    CHARACTER_STATE_COLUMNS,
+  );
   return {
     schema_version: CHARACTER_SNAPSHOT_SCHEMA_VERSION,
     character,
@@ -291,6 +337,9 @@ function validateCharacterRows(
   label: string,
 ): void {
   for (const table of CHARACTER_STATE_TABLES) {
+    for (const [index, row] of tables[table].entries()) {
+      assertRowShape(table, row, `${label}.${table}[${index}]`);
+    }
     assertOwnedRows(tables[table], characterId, `${label}.${table}`);
     uniqueRowIds(tables[table], `${label}.${table}`);
   }
@@ -503,6 +552,12 @@ function validateDocument(input: unknown): ValidatedDocument {
     );
   }
 
+  assertRowShape(
+    'characters',
+    character,
+    'Character backup character',
+  );
+
   const tableObject = backupRecord(
     document.tables,
     'Character backup tables',
@@ -530,6 +585,15 @@ function validateDocument(input: unknown): ValidatedDocument {
       referenceMap(referenceObject[kind], kind),
     ]),
   ) as Record<ReferenceKind, Map<number, string>>;
+
+  // The five snapshot tables get their shape checked inside
+  // `validateCharacterRows`, which also runs for every save point; the rest are
+  // checked here so each row is contract-validated exactly once.
+  for (const table of shapeOnlyTables) {
+    for (const [index, row] of tables[table].entries()) {
+      assertRowShape(table, row, `Character backup tables.${table}[${index}]`);
+    }
+  }
 
   for (const table of directCharacterTables) {
     assertOwnedRows(
@@ -734,6 +798,22 @@ export function exportCharacterBackup(
   for (const row of allTables.spell_loadout_entries) {
     addPositiveReference(referenceIds.spell_versions, row.spell_version_id);
   }
+  // THE CONTRACTS GATE THE EXPORT PATH, WHICH IS DELIBERATE.
+  //
+  // `parseSnapshot` here, and `validateCharacterBackup(result)` at the end of
+  // this function, both apply the row contracts to the user's OWN STORED DATA.
+  // That means stored corruption is reported on the way OUT, where there is no
+  // attacker — a real behaviour change, since the contracts made a pre-existing
+  // check stricter (`validateCharacterBackup(result)` has closed this function
+  // since long before they existed).
+  //
+  // It is kept, because the alternative is worse: an export that silently
+  // carries a row the importer will refuse is a backup the user only discovers
+  // is useless when they need it. The label below says `Stored save point N` so
+  // the message points at the database rather than at the caller's input, and
+  // `tests/integration/backup/row-contracts.test.ts` pins the behaviour so a
+  // change to the contract set shows its effect on existing databases instead of
+  // surprising someone mid-export.
   for (const [index, savePoint] of allTables.character_save_points.entries()) {
     const snapshot = parseSnapshot(
       savePoint.snapshot,
