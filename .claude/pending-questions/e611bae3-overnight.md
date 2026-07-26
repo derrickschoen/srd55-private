@@ -208,7 +208,7 @@ reverts cleanly.
 
 ---
 
-## Q9 — The sheet core is BUILT but NOT WIRED IN (FYI, not blocking)
+## Q9 — CORRECTED 2026-07-26: PARTLY wired (see D20). Still not blocking.
 
 The per-class SRD content, the parsers and the whole derivation module are
 merged and tested — 42 tables, HP, AC, saving throws, skill modifiers,
@@ -228,3 +228,14 @@ proven first, the persistence and UI come next as one piece.
 **No decision needed** unless you would rather see a rough sheet sooner and
 accept that its inputs do not survive a backup yet. Say so and I will reorder;
 otherwise the next track wires it up properly.
+
+**Correction, same day.** Q9 said `src/rules/sheet.ts` had no production caller.
+Measured after the attack-profiles merge, that is wrong. `attacksPerAction` and
+`sheetProficiencyBonus` are live, reached from the planner. What is genuinely
+unreached is the six a character sheet would use — hit points, armour class,
+saving throws, skill modifiers, initiative and passive Perception — and no UI
+surface names any of them.
+
+The remaining work is therefore narrower than Q9 implied: a sheet view plus
+persistence for the four inputs a player supplies. The derivations are done and
+some are already proven in production use.
