@@ -17,6 +17,7 @@ export * from './catalog-classes';
 export * from './catalog-sources';
 export * from './catalog-spells';
 export * from './character';
+export * from './origins';
 export * from './relations';
 export * from './columns';
 export * from './weapons';

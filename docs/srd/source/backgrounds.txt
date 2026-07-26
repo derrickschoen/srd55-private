@@ -1,0 +1,99 @@
+This work includes material from the System Reference Document 5.2
+("SRD 5.2") by Wizards of the Coast LLC, available at
+https://www.dndbeyond.com/srd. The SRD 5.2 is licensed under the Creative
+Commons Attribution 4.0 International License, available at
+https://creativecommons.org/licenses/by/4.0/legalcode.
+
+--- Verbatim extract: SRD 5.2.1 printed page 83, Character Backgrounds. ---
+
+The body below is `srd.txt` lines 4947-5012 verbatim: printed page 83 in full,
+including its footer. Nothing is edited out and nothing is re-wrapped.
+
+FOUR backgrounds, and that is the complete set: Acolyte, Criminal, Sage,
+Soldier. The 2024 Player's Handbook prints sixteen; SRD 5.2.1 licenses four.
+Three independent checks agree, and all three are in this document rather than
+in anybody's memory:
+
+  - `grep -c 'Ability Scores:'` over the whole 24,074-line extraction returns
+    exactly 4, and so does `grep -cE '^ *Feat: '`;
+  - the table of contents lists Acolyte, Criminal, Sage and Soldier under
+    `Character Backgrounds ... 83` and nothing else;
+  - chapter 1's own Ability Scores and Backgrounds table names only Soldier
+    and Acolyte, and no fifth background appears anywhere.
+
+Hand-typing the other twelve would be inventing content the licence does not
+cover, which is a worse failure than shipping four.
+
+LAYOUT WARNING: this page is set in two columns. The LEFT column is
+`Character Backgrounds` — the prose describing the five parts a background has
+— and then `Background Descriptions` with Acolyte and Criminal. The RIGHT
+column continues with Sage and Soldier and then begins `Character Species`,
+which is a DIFFERENT chapter section and belongs to `species-descriptions.txt`,
+not here. Two different sections appear on the same line throughout.
+
+      Character Origins                                       Sage
+                                                              Ability Scores: Constitution, Intelligence, Wisdom
+                                                              Feat: Magic Initiate (Wizard) (see “Feats”)
+     Character Backgrounds                                    Skill Proficiencies: Arcana and History
+     Your character’s background is a collection of char-     Tool Proficiency: Calligrapher’s Supplies
+     acteristics that represent the place and occupation      Equipment: Choose A or B: (A) Quarterstaff, Callig-
+     that were most formative before your character em-        rapher’s Supplies, Book (history), Parchment (8
+     barked on a life of adventure.                            sheets), Robe, 8 GP; or (B) 50 GP
+     Parts of a Background                                    Soldier
+     A background includes the following parts.               Ability Scores: Strength, Dexterity, Constitution
+                                                              Feat: Savage Attacker (see “Feats”)
+     Ability Scores                                           Skill Proficiencies: Athletics and Intimidation
+     A background lists three of your character’s ability
+                                                              Tool Proficiency: Choose one kind of Gaming Set (see
+     scores. Increase one by 2 and another one by 1, or
+                                                               “Equipment”)
+     increase all three by 1. None of these increases can
+     raise a score above 20.                                  Equipment: Choose A or B: (A) Spear, Shortbow, 20
+                                                               Arrows, Gaming Set (same as above), Healer’s Kit,
+     Feat                                                      Quiver, Traveler’s Clothes, 14 GP; or (B) 50 GP
+     A background gives your character a specified Ori-
+     gin feat (described in “Feats”).                         Character Species
+     Skill Proficiencies                                      When you choose your character’s species, you
+     A background gives your character proficiency in         determine whether your character is a human or a
+     two specified skills.                                    member of a fantastical species, such as dragonborn
+                                                              or gnome.
+     Tool Proficiency                                            The peoples of the multiverse hail from different
+     Each background gives a character proficiency with       worlds and include many kinds of sapient life forms.
+     one tool—either a specific tool or one chosen from       A player character’s species is the set of game traits
+     the Artisan’s Tools category. Tools are detailed in      that an adventurer gains from being one of those
+     “Equipment.”                                             life forms.
+                                                                 Some species can trace their origin to a single
+     Equipment
+                                                              world, plane of existence, or god, while other spe-
+     Each background offers a choice between a package
+                                                              cies first appeared in multiple realms at once.
+     of equipment and 50 GP.
+                                                              Whatever a species’ genesis, its members have
+     Background Descriptions                                  spread across the multiverse and contribute to
+                                                              many different cultures.
+     Acolyte                                                     Members of most species live for about 80 years,
+     Ability Scores: Intelligence, Wisdom, Charisma           with exceptions noted in the text about the spe-
+     Feat: Magic Initiate (Cleric) (see “Feats”)              cies in “Character Origins.” Regardless of life span,
+     Skill Proficiencies: Insight and Religion                members of all species reach physical maturity at
+     Tool Proficiency: Calligrapher’s Supplies                about the same age. Your character can be any age
+     Equipment: Choose A or B: (A) Calligrapher’s Supplies,   that isn’t beyond their species’ normal life span.
+      Book (prayers), Holy Symbol, Parchment (10 sheets),     Parts of a Species
+      Robe, 8 GP; or (B) 50 GP
+                                                              A species includes the following parts.
+     Criminal
+     Ability Scores: Dexterity, Constitution, Intelligence
+                                                              Creature Type
+                                                              A character’s species determines the character’s
+     Feat: Alert (see “Feats”)
+                                                              creature type, which is described in “Rules Glos-
+     Skill Proficiencies: Sleight of Hand and Stealth         sary.” Every species in “Character Origins” is Hu-
+     Tool Proficiency: Thieves’ Tools                         manoid; playable non-Humanoid species appear in
+     Equipment: Choose A or B: (A) 2 Daggers, Thieves’        other books.
+      Tools, Crowbar, 2 Pouches, Traveler’s Clothes,
+      16 GP; or (B) 50 GP                                     Size
+                                                              Your character’s species determines the character’s
+                                                              size. Individuals within a species cover a wide range
+                                                              of heights, and some species include such diversity
+
+
+83   System Reference Document 5.2.1

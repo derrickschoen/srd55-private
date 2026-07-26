@@ -25,7 +25,7 @@ import schemaSql from '../../src/db/schema.sql?raw';
  *
  * Comparison is by CONSTRAINT SET, not row count. `PRAGMA foreign_key_list`
  * returns one row per column, so the two composite foreign keys contribute two
- * rows each: 33 constraints, 35 rows. Counting rows would let a composite key
+ * rows each: 40 constraints, 42 rows. Counting rows would let a composite key
  * degrade into two single-column keys unnoticed — which would silently drop
  * exactly the cross-character and wrong-class protections those keys exist for.
  */
@@ -133,7 +133,7 @@ afterAll(() => {
 });
 
 describe('declared relations match the foreign keys', () => {
-  it('budgets 36 constraints across 38 PRAGMA rows', () => {
+  it('budgets 40 constraints across 42 PRAGMA rows', () => {
     const tables = db
       .selectValues(
         `SELECT name FROM sqlite_schema
@@ -146,12 +146,19 @@ describe('declared relations match the foreign keys', () => {
       0,
     );
 
-    // 33 Laravel-derived constraints plus the three the weapon tables add:
-    // character_weapons -> characters, and one per mastery table into
-    // class_definitions. Still only two of them composite, so the row count
-    // rises by exactly three as well.
-    expect(constraintEdges(db)).toHaveLength(36);
-    expect(rowCount).toBe(38);
+    // 33 Laravel-derived constraints, plus the three the weapon tables add
+    // (character_weapons -> characters, and one per mastery table into
+    // class_definitions), plus the four the origins tables add: three
+    // character-side tables into `characters`, and `species_template_traits`
+    // into `species_templates` — the only parent/child edge in the origins
+    // catalog. There is deliberately NO edge from either character-side table
+    // into a template; that is D1b, and the reverse direction of the next test
+    // is what would catch one appearing.
+    //
+    // None of the seven is composite, so the row count rises by exactly seven
+    // as well and the two composite Laravel keys are still the only ones.
+    expect(constraintEdges(db)).toHaveLength(40);
+    expect(rowCount).toBe(42);
   });
 
   it('declares a relation for every foreign key, and a foreign key for every relation', () => {

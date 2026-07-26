@@ -63,8 +63,9 @@ describe('pre-Drizzle database images', () => {
     // It has since diverged from the generated schema in BOTH directions, which
     // is why the counts are asserted rather than left as a surprise: the
     // fixture still declares the eight Laravel-only tables that were dropped,
-    // and it has never held the four native weapon tables that were added.
-    // 38 - 8 + 4 = 34. Originally only the SIGNATURE tripped, because the two
+    // and it has never held the four native weapon tables or the six native
+    // origins tables that were added. 38 - 8 + 4 + 6 = 40. Originally only the
+    // SIGNATURE tripped, because the two
     // declared the same 38 tables in a different presentation; an old image is
     // now short of `applicationTables` too, so it fails EARLIER, not less.
     //
@@ -77,7 +78,7 @@ describe('pre-Drizzle database images', () => {
     const tableCount = (sql: string) =>
       [...sql.matchAll(/CREATE TABLE/g)].length;
     expect(tableCount(preDrizzleSchema)).toBe(38);
-    expect(tableCount(schema)).toBe(34);
+    expect(tableCount(schema)).toBe(40);
   });
 
   it('rejects a pre-Drizzle image at open instead of half-working', async () => {
@@ -94,7 +95,11 @@ describe('pre-Drizzle database images', () => {
     // actually short of. Both paths produce the same recoverable
     // `schema_mismatch` status, which is what the next test depends on.
     expect(boot.detail).toContain(
-      'Database image is missing application tables: character_weapons, class_weapon_mastery_counts, class_weapon_mastery_grants, weapon_templates.',
+      'Database image is missing application tables: background_templates, ' +
+        'character_background, character_species, character_species_traits, ' +
+        'character_weapons, class_weapon_mastery_counts, ' +
+        'class_weapon_mastery_grants, species_template_traits, ' +
+        'species_templates, weapon_templates.',
     );
   });
 

@@ -1,11 +1,18 @@
 import {
   CHARACTER_SHARE_FORMAT,
   CHARACTER_SHARE_VERSION,
+  SHARE_BACKGROUND_TEXT,
   SHARE_LIMITS,
+  SHARE_SPECIES_TEXT,
+  SHARE_SPECIES_TRAIT_NUMBERS,
+  SHARE_SPECIES_TRAIT_TEXT,
   SHARE_WEAPON_FLAGS,
   SHARE_WEAPON_TEXT,
   ShareValidationError,
   type CharacterShareDocument,
+  type ShareBackground,
+  type ShareSpecies,
+  type ShareSpeciesTrait,
   type ShareWeapon,
   validateShareDocument,
 } from './schema';
@@ -13,21 +20,36 @@ import {
 type Tuple = readonly unknown[];
 
 /**
- * THE ROOT TUPLE HAS TWO ACCEPTED LENGTHS, AND THAT IS ON PURPOSE.
+ * THE ROOT TUPLE HAS THREE ACCEPTED LENGTHS, AND THAT IS ON PURPOSE.
  *
  * A share link is a URL fragment somebody has already pasted into a chat, a
- * wiki or a bookmark. Appending a twelfth element for weapons while demanding
- * an exact length would make every one of those links a decode error — the exact
- * data loss this change exists to prevent, inflicted on a larger set of people.
+ * wiki or a bookmark. Appending an element while demanding an exact length would
+ * make every one of those links a decode error — the exact data loss this
+ * arrangement exists to prevent, inflicted on a larger set of people.
  *
- * So eleven elements is still a valid document; it simply carries no weapons,
- * which is the truth about a link written before weapons travelled. Twelve is
- * what this build writes. `CHARACTER_SHARE_VERSION` deliberately stays at 1: a
- * version bump buys nothing here and would reject every old link on the way in.
+ * So eleven elements is still a valid document carrying no weapons and no
+ * origin; twelve carries weapons and no origin; thirteen is what this build
+ * writes. `CHARACTER_SHARE_VERSION` deliberately stays at 1: a version bump buys
+ * nothing here and would reject every old link on the way in.
+ *
+ * THE ORIGIN IS ONE ELEMENT, NOT THREE. Three sections travel — species, its
+ * traits, background — but they are grouped into a single nested tuple so the
+ * root grows by one per FEATURE rather than one per table. The three are
+ * independently nullable inside it, which is what the document type needs.
  */
-const ROOT_TUPLE_LENGTHS = [11, 12] as const;
+const ROOT_TUPLE_LENGTHS = [11, 12, 13] as const;
 
 const LEGACY_ROOT_LENGTH = 11;
+const PRE_ORIGIN_ROOT_LENGTH = 12;
+
+/** How many elements the grouped origin element holds. */
+const ORIGIN_TUPLE_LENGTH = 3;
+
+/** How many elements one species, trait and background occupy on the wire. */
+const SPECIES_TUPLE_LENGTH = 1 + SHARE_SPECIES_TEXT.length + 1;
+const SPECIES_TRAIT_TUPLE_LENGTH =
+  1 + SHARE_SPECIES_TRAIT_TEXT.length + SHARE_SPECIES_TRAIT_NUMBERS.length;
+const BACKGROUND_TUPLE_LENGTH = 1 + SHARE_BACKGROUND_TEXT.length;
 
 /** How many elements one weapon occupies on the wire. */
 const WEAPON_TUPLE_LENGTH =
@@ -99,6 +121,52 @@ function weaponFromPositional(value: unknown, label: string): unknown {
     }
   });
   return weapon;
+}
+
+/**
+ * The origin's wire order, frozen. Reordering any of these three silently
+ * reinterprets every link generated after this build.
+ *
+ * `speciesTraits` carries no sort order: ARRAY POSITION is the printed order.
+ */
+function speciesToPositional(species: ShareSpecies): unknown[] {
+  return [
+    species.name,
+    ...SHARE_SPECIES_TEXT.map((field) => species[field] ?? null),
+    species.base_speed_feet ?? null,
+  ];
+}
+
+function speciesTraitToPositional(trait: ShareSpeciesTrait): unknown[] {
+  return [
+    trait.name,
+    ...SHARE_SPECIES_TRAIT_TEXT.map((field) => trait[field] ?? null),
+    ...SHARE_SPECIES_TRAIT_NUMBERS.map((field) => trait[field] ?? null),
+  ];
+}
+
+function backgroundToPositional(background: ShareBackground): unknown[] {
+  return [
+    background.name,
+    ...SHARE_BACKGROUND_TEXT.map((field) => background[field] ?? null),
+  ];
+}
+
+function fromPositional(
+  value: unknown,
+  length: number,
+  fields: readonly string[],
+  label: string,
+): Record<string, unknown> {
+  const row = tuple(value, length, label);
+  const result: Record<string, unknown> = { name: row[0] };
+  fields.forEach((field, index) => {
+    const item = row[index + 1];
+    if (item !== null) {
+      result[field] = item;
+    }
+  });
+  return result;
 }
 
 function assertListLimit(
@@ -181,6 +249,17 @@ export function shareDocumentToPositional(
     // Element 11. Always written, `null` when the character has no weapons, so
     // this build's output has one shape rather than two.
     document.weapons?.map(weaponToPositional) ?? null,
+    // Element 12, on the same terms: always written, and `null` in each of its
+    // three slots when the character has no species, no traits or no background.
+    [
+      document.species === undefined
+        ? null
+        : speciesToPositional(document.species),
+      document.speciesTraits?.map(speciesTraitToPositional) ?? null,
+      document.background === undefined
+        ? null
+        : backgroundToPositional(document.background),
+    ],
   ];
 }
 
@@ -192,6 +271,14 @@ export function positionalToShareDocument(
   // section is genuinely absent, and the object validator distinguishes the two.
   const wireWeapons =
     root.length === LEGACY_ROOT_LENGTH ? null : root[11];
+  // Eleven or twelve elements both predate the origin. `null` rather than a
+  // three-element tuple of nulls, so the three sections stay genuinely ABSENT
+  // and the object validator can tell "carried none" from "never carried".
+  const wireOrigin =
+    root.length === LEGACY_ROOT_LENGTH ||
+    root.length === PRE_ORIGIN_ROOT_LENGTH
+      ? null
+      : tuple(root[12], ORIGIN_TUPLE_LENGTH, 'wire origin');
   if (root[0] !== CHARACTER_SHARE_FORMAT) {
     throw new ShareValidationError('format is unsupported.');
   }
@@ -246,6 +333,20 @@ export function positionalToShareDocument(
   }
   if (wireWeapons !== null) {
     assertListLimit(wireWeapons, SHARE_LIMITS.weapons, 'weapons');
+  }
+  if (wireOrigin !== null) {
+    if (wireOrigin[1] !== null && !Array.isArray(wireOrigin[1])) {
+      throw new ShareValidationError(
+        'wire speciesTraits must be null or a list.',
+      );
+    }
+    if (Array.isArray(wireOrigin[1])) {
+      assertListLimit(
+        wireOrigin[1],
+        SHARE_LIMITS.speciesTraits,
+        'speciesTraits',
+      );
+    }
   }
   if (character[10] !== null) {
     if (!Array.isArray(character[10])) {
@@ -381,6 +482,34 @@ export function positionalToShareDocument(
     raw.weapons = wireWeapons.map((value, index) =>
       weaponFromPositional(value, `wire weapons[${index}]`),
     );
+  }
+  if (wireOrigin !== null) {
+    if (wireOrigin[0] !== null) {
+      raw.species = fromPositional(
+        wireOrigin[0],
+        SPECIES_TUPLE_LENGTH,
+        [...SHARE_SPECIES_TEXT, 'base_speed_feet'],
+        'wire species',
+      );
+    }
+    if (Array.isArray(wireOrigin[1])) {
+      raw.speciesTraits = wireOrigin[1].map((value, index) =>
+        fromPositional(
+          value,
+          SPECIES_TRAIT_TUPLE_LENGTH,
+          [...SHARE_SPECIES_TRAIT_TEXT, ...SHARE_SPECIES_TRAIT_NUMBERS],
+          `wire speciesTraits[${index}]`,
+        ),
+      );
+    }
+    if (wireOrigin[2] !== null) {
+      raw.background = fromPositional(
+        wireOrigin[2],
+        BACKGROUND_TUPLE_LENGTH,
+        [...SHARE_BACKGROUND_TEXT],
+        'wire background',
+      );
+    }
   }
   return validateShareDocument(raw);
 }

@@ -50,6 +50,9 @@ function minimalCharacterBackup(): CharacterBackupDocument {
       spell_loadouts: [],
       spell_loadout_entries: [],
       character_weapons: [],
+      character_species: [],
+      character_species_traits: [],
+      character_background: [],
     },
     references: {
       class_definitions: [],

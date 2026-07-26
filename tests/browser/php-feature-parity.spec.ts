@@ -164,6 +164,19 @@ async function portableTableCounts(
       await rows(page, 'character_weapons'),
       characterId,
     ).length,
+    // The character's origin joined it on the same terms.
+    character_species: forCharacter(
+      await rows(page, 'character_species'),
+      characterId,
+    ).length,
+    character_species_traits: forCharacter(
+      await rows(page, 'character_species_traits'),
+      characterId,
+    ).length,
+    character_background: forCharacter(
+      await rows(page, 'character_background'),
+      characterId,
+    ).length,
     spell_loadouts: loadouts.length,
     spell_selection_slots: forCharacter(
       await rows(page, 'spell_selection_slots'),
@@ -472,16 +485,24 @@ test('captures every restorable character table and reports exact state differen
     'wizard_spellbook_entries',
     'warning_acknowledgements',
     'character_weapons',
+    'character_species',
+    'character_species_traits',
+    'character_background',
   ]) {
     expect(document.tables[table]).toEqual(
       forCharacter(await rows(page, table), workspaceImage.ids.character),
     );
   }
   expect(Object.keys(document.tables).sort()).toEqual([
+    // Added when the character's origin became portable, for the same reason
+    // the weapons key was: a backup without it silently loses the species.
+    'character_background',
     'character_class_levels',
     'character_rule_overrides',
     'character_save_points',
     'character_source_instances',
+    'character_species',
+    'character_species_traits',
     'character_spell_preferences',
     // Added when weapons became portable. A backup that does not carry this key
     // is a backup that silently loses the user's weapons.
@@ -499,6 +520,9 @@ test('captures every restorable character table and reports exact state differen
     'spell_loadout_entries',
     'spell_loadouts',
     'character_weapons',
+    'character_species',
+    'character_species_traits',
+    'character_background',
   ]) {
     expect(document.tables[table], `${table} is captured exactly`).toEqual([]);
   }
@@ -777,8 +801,8 @@ test('round-trips a named save point through the mutation path', async ({
   )[0]!;
   expect(point).toMatchObject({
     label: 'Before experiment',
-    // a7-v2 is the snapshot version that also captures character_weapons.
-    schema_version: 'a7-v2',
+    // a7-v3 is the snapshot version that also captures the three origin tables.
+    schema_version: 'a7-v3',
   });
   await execute(
     page,
@@ -1038,7 +1062,7 @@ test('undoes a structural class change through its snapshot inverse', async ({
   );
   expect(changed.inverse).toMatchObject({
     type: 'restore_snapshot',
-    snapshot: { schema_version: 'a7-v2' },
+    snapshot: { schema_version: 'a7-v3' },
     integrity: expect.any(String),
   });
   await execute(
