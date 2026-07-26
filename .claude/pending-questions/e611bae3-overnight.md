@@ -153,24 +153,36 @@ kind of thing you may want to weigh in on before it gets chased expensively.
 
 ---
 
-## Q8 — Weapons do NOT survive backup, sharing, or undo snapshots — BEING CLOSED 2026-07-26
+## Q8 — RESOLVED 2026-07-26: weapons now survive all three
 
-`character_weapons` is deliberately excluded from all three scopes. A user can
-build a weapon list, and it will be missing from their backup file, absent from
-any share link they send, and unrestored by a save-point rollback. Undo and redo
-DO cover weapon changes.
+**Resolved by implementation on `feat/portability`.** `character_weapons` is now
+`snapshot: true`, `backupDirect: true`, `backup: true`, `share: true`. A
+character's weapons travel in the portable backup document, in a share link, and
+in a save-point snapshot.
 
-**This is disclosed in the UI**, not silent: the weapons panel renders a notice
-naming all three gaps, and a test pins the notice text to the classification so
-the two cannot drift — the day the scopes change, that test fails and points at
-a notice that would by then be false.
+Backward compatibility was the hard half, and it holds in all three directions:
 
-**Why it was left:** closing it needs hand-written arms in
-`src/backup/character-backup.ts` and a format-version bump in
-`src/backup/backup-version.ts` — files another track was actively rewriting.
-Doing it concurrently would have meant two tracks editing the backup format at
-once.
+- **Backup file.** `character_weapons` is in `BACKUP_OPTIONAL_TABLES`, so a
+  document exported before this change validates and imports, yielding a
+  character with no weapons. `CHARACTER_BACKUP_VERSION` stays 1.
+- **Share link.** The wire tuple accepts length 11 (legacy, no weapons) or 12.
+  `CHARACTER_SHARE_VERSION` stays 1, so every link already in the wild imports.
+- **Save point.** `CHARACTER_SNAPSHOT_SCHEMA_VERSION` moved `a7-v1` → `a7-v2`,
+  and BOTH are still readable. Restoring an `a7-v1` snapshot deliberately leaves
+  the character's weapons untouched rather than deleting them: that snapshot
+  never recorded weapons, and treating its silence as "there were none" would
+  destroy real data.
 
+**Resolved.** Weapons are carried through backup, share links and save points.
+Old payloads still import: a backup file or link predating weapons yields a
+character with no weapons rather than an error, proved against hand-frozen
+fixtures that the current encoder never produced.
+
+The UI notice, `src/rules/weapon-portability.ts`, its stylesheet rule, its agent
+reference field and `tests/unit/contracts/weapon-scopes.test.ts` are all deleted;
+the two assertions in that file that were never about the gap were relocated to
+`tests/unit/contracts/table-scopes.test.ts`.
+=======
 **Question for you:** is a disclosed gap acceptable for now, or should closing
 it jump the queue? My read is that it should be next after the current queue,
 because "my weapons vanished from my own backup" is exactly the kind of quiet
@@ -192,3 +204,4 @@ a fixture produced by the code under test proves nothing.
 
 If you would rather have kept the disclosed notice instead, say so and it
 reverts cleanly.
+>>>>>>> main

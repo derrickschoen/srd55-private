@@ -158,6 +158,12 @@ async function portableTableCounts(
     ).length,
     spell_loadout_entries: (await rows(page, 'spell_loadout_entries'))
       .filter((row) => loadoutIds.has(row.spell_loadout_id)).length,
+    // Weapons joined the portable document when they stopped being dropped from
+    // backups; a document that does not carry them fails the comparison below.
+    character_weapons: forCharacter(
+      await rows(page, 'character_weapons'),
+      characterId,
+    ).length,
     spell_loadouts: loadouts.length,
     spell_selection_slots: forCharacter(
       await rows(page, 'spell_selection_slots'),
@@ -465,6 +471,7 @@ test('captures every restorable character table and reports exact state differen
     'spell_selection_slots',
     'wizard_spellbook_entries',
     'warning_acknowledgements',
+    'character_weapons',
   ]) {
     expect(document.tables[table]).toEqual(
       forCharacter(await rows(page, table), workspaceImage.ids.character),
@@ -476,6 +483,9 @@ test('captures every restorable character table and reports exact state differen
     'character_save_points',
     'character_source_instances',
     'character_spell_preferences',
+    // Added when weapons became portable. A backup that does not carry this key
+    // is a backup that silently loses the user's weapons.
+    'character_weapons',
     'spell_loadout_entries',
     'spell_loadouts',
     'spell_selection_slots',
@@ -488,6 +498,7 @@ test('captures every restorable character table and reports exact state differen
     'character_spell_preferences',
     'spell_loadout_entries',
     'spell_loadouts',
+    'character_weapons',
   ]) {
     expect(document.tables[table], `${table} is captured exactly`).toEqual([]);
   }
@@ -766,7 +777,8 @@ test('round-trips a named save point through the mutation path', async ({
   )[0]!;
   expect(point).toMatchObject({
     label: 'Before experiment',
-    schema_version: 'a7-v1',
+    // a7-v2 is the snapshot version that also captures character_weapons.
+    schema_version: 'a7-v2',
   });
   await execute(
     page,
@@ -1026,7 +1038,7 @@ test('undoes a structural class change through its snapshot inverse', async ({
   );
   expect(changed.inverse).toMatchObject({
     type: 'restore_snapshot',
-    snapshot: { schema_version: 'a7-v1' },
+    snapshot: { schema_version: 'a7-v2' },
     integrity: expect.any(String),
   });
   await execute(

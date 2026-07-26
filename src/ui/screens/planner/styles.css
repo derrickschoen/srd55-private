@@ -927,15 +927,6 @@ select:disabled {
 
 /* --- weapons ------------------------------------------------------------- */
 
-.weapon-portability-notice {
-  margin: 0 0 0.6rem;
-  padding: 0.5rem 0.65rem;
-  border-left: 3px solid var(--planner-accent);
-  background: rgb(111 47 31 / 6%);
-  color: var(--planner-ink-soft);
-  font-size: 0.82rem;
-}
-
 .weapon-mastery-status p {
   margin: 0 0 0.4rem;
 }

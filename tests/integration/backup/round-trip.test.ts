@@ -147,6 +147,27 @@ function seedCompleteCharacter(
      VALUES (?, 'warning:shield', 'ack note', ?, ?)`,
     [characterId, timestamp, timestamp],
   );
+  // Two weapons: one fully described with a selected mastery, one half-entered
+  // (a name and nothing else, which the schema permits and the planner creates
+  // the moment "Add weapon" is pressed). The second is the one that catches an
+  // importer quietly substituting '' or 0 for a null column.
+  db.exec(
+    `INSERT INTO character_weapons (
+       character_id, name, damage_dice, damage_type, versatile_damage_dice,
+       finesse, light, thrown, ammunition_kind, range_normal_feet,
+       range_long_feet, mastery_property, mastery_selected, other_properties,
+       notes, created_at, updated_at
+     ) VALUES (
+       ?, 'Weathered Longsword', '1d8', 'Slashing', '1d10', 0, 0, 1, 'bolt',
+       20, 60, 'Sap', 1, 'Notched near the hilt', 'weapon note', ?, ?
+     )`,
+    [characterId, timestamp, timestamp],
+  );
+  db.exec(
+    `INSERT INTO character_weapons (character_id, name, created_at, updated_at)
+     VALUES (?, 'Half-entered club', ?, ?)`,
+    [characterId, timestamp, timestamp],
+  );
   const historicalSourceId = db.exec(
     `INSERT INTO character_source_instances (
        character_id, instance_uuid, parent_source_instance_id, source_type,
@@ -190,8 +211,27 @@ function seedCompleteCharacter(
   db.exec(
     `INSERT INTO character_save_points
        (character_id, label, snapshot, schema_version, created_at, updated_at)
-     VALUES (?, 'Before experiment', ?, 'a7-v1', ?, ?)`,
+     VALUES (?, 'Before experiment', ?, 'a7-v2', ?, ?)`,
     [characterId, JSON.stringify(snapshot), timestamp, timestamp],
+  );
+  // A SECOND SAVE POINT IN THE OLD SNAPSHOT FORMAT.
+  //
+  // Built by REMOVING the weapons key from a live capture and relabelling it,
+  // which is exactly the shape `a7-v1` had — never by asking current code for an
+  // `a7-v1` snapshot, because nothing can produce one any more. It exists so the
+  // export → import round trip below runs over a database that holds a save
+  // point predating weapons, which is what every real user upgrading to this
+  // build will have.
+  const legacySnapshot: Record<string, unknown> = {
+    ...(snapshot as unknown as Record<string, unknown>),
+    schema_version: 'a7-v1',
+  };
+  delete legacySnapshot.character_weapons;
+  db.exec(
+    `INSERT INTO character_save_points
+       (character_id, label, snapshot, schema_version, created_at, updated_at)
+     VALUES (?, 'Older format', ?, 'a7-v1', ?, ?)`,
+    [characterId, JSON.stringify(legacySnapshot), timestamp, timestamp],
   );
   db.exec(
     'DELETE FROM character_source_instances WHERE id = ?',
@@ -360,9 +400,79 @@ describe('portable character backup', () => {
       { role: 'emergency', spell_version_id: targetCatalog.spellId },
     ]);
 
+    // WEAPONS SURVIVE THE DOCUMENT.
+    //
+    // Column by column rather than `toMatchObject`, because the interesting
+    // failure is a field quietly LOST or DEFAULTED, which a partial match would
+    // not see. The half-entered weapon keeps every null as a null: nothing on
+    // the way through is entitled to decide what its damage die was.
+    const importedWeapons = target.all(
+      'SELECT * FROM character_weapons WHERE character_id = ? ORDER BY id',
+      [characterId],
+    );
+    expect(importedWeapons).toHaveLength(2);
+    expect(importedWeapons[0]).toMatchObject({
+      character_id: characterId,
+      name: 'Weathered Longsword',
+      damage_dice: '1d8',
+      damage_type: 'Slashing',
+      versatile_damage_dice: '1d10',
+      finesse: 0,
+      light: 0,
+      thrown: 1,
+      ammunition_kind: 'bolt',
+      range_normal_feet: 20,
+      range_long_feet: 60,
+      mastery_property: 'Sap',
+      mastery_selected: 1,
+      other_properties: 'Notched near the hilt',
+      notes: 'weapon note',
+      created_at: timestamp,
+    });
+    expect(importedWeapons[1]).toMatchObject({
+      character_id: characterId,
+      name: 'Half-entered club',
+      damage_dice: null,
+      damage_type: null,
+      versatile_damage_dice: null,
+      ammunition_kind: null,
+      range_normal_feet: null,
+      range_long_feet: null,
+      mastery_property: null,
+      mastery_selected: 0,
+      other_properties: null,
+      notes: null,
+    });
+
     const saved = JSON.parse(
       String(persisted.savePoints[0]!.snapshot),
     ) as Record<string, any>;
+    // The current-format save point carries the weapons, re-keyed to the rows
+    // that were just written, so restoring it puts back the same two weapons.
+    expect(saved.schema_version).toBe('a7-v2');
+    expect(saved.character_weapons.map((row: { name: string }) => row.name)).toEqual([
+      'Weathered Longsword',
+      'Half-entered club',
+    ]);
+    expect(saved.character_weapons.map((row: { id: number }) => row.id)).toEqual(
+      importedWeapons.map((row) => row.id),
+    );
+    for (const row of saved.character_weapons) {
+      expect(row.character_id).toBe(characterId);
+    }
+
+    // THE OLD-FORMAT SAVE POINT COMES OUT AS AN OLD-FORMAT SAVE POINT.
+    //
+    // Not upgraded, not backfilled with `character_weapons: []`. Backfilling
+    // would claim the character owned no weapons at that moment — which is not
+    // what an `a7-v1` snapshot says, and restoring the claim would delete two
+    // real weapons.
+    const legacySaved = JSON.parse(
+      String(persisted.savePoints[1]!.snapshot),
+    ) as Record<string, unknown>;
+    expect(persisted.savePoints[1]!.schema_version).toBe('a7-v1');
+    expect(legacySaved.schema_version).toBe('a7-v1');
+    expect(Object.hasOwn(legacySaved, 'character_weapons')).toBe(false);
     expect(saved.character_source_instances[0]).toMatchObject({
       character_id: characterId,
       id: importedSource.id,
@@ -502,6 +612,184 @@ describe('portable character backup', () => {
         ),
       ).toBe(0);
     }
+  });
+});
+
+/**
+ * A BACKUP FILE WRITTEN BEFORE WEAPONS TRAVELLED, IMPORTED FOR REAL.
+ *
+ * Hand-frozen, byte for byte: ten table keys with no `character_weapons`, and a
+ * save point whose snapshot is an `a7-v1` object with five table keys. Nothing
+ * here is produced by `exportCharacterBackup` — a fixture generated from current
+ * code tracks the format wherever it goes and could never catch the regression
+ * this guards against, which is precisely the day somebody makes the new table
+ * mandatory and every downloaded file stops opening.
+ *
+ * The unit suite proves this validates; this proves it lands in a database.
+ */
+const FROZEN_V1_BACKUP_JSON = `{
+  "format": "dnd-multiclass-spells/character",
+  "version": 1,
+  "exported_at": "2026-05-01T09:30:00.000Z",
+  "source_character_id": 3,
+  "character": {
+    "id": 3,
+    "name": "Archived Hero",
+    "strength": 11,
+    "dexterity": 16,
+    "constitution": 12,
+    "intelligence": 17,
+    "wisdom": 9,
+    "charisma": 13,
+    "proficiency_bonus_override": null,
+    "rules_edition_preference": "2024",
+    "allow_legacy": 0,
+    "notes": "written before weapons travelled",
+    "revision": 4,
+    "created_at": "2026-04-02 08:00:00",
+    "updated_at": "2026-05-01 09:00:00"
+  },
+  "tables": {
+    "character_class_levels": [],
+    "character_source_instances": [],
+    "spell_selection_slots": [],
+    "wizard_spellbook_entries": [],
+    "character_spell_preferences": [],
+    "character_rule_overrides": [],
+    "warning_acknowledgements": [],
+    "character_save_points": [
+      {
+        "id": 21,
+        "character_id": 3,
+        "label": "Archived checkpoint",
+        "schema_version": "a7-v1",
+        "snapshot": "{\\"schema_version\\":\\"a7-v1\\",\\"character\\":{\\"name\\":\\"Archived Hero\\",\\"strength\\":11,\\"dexterity\\":16,\\"constitution\\":12,\\"intelligence\\":17,\\"wisdom\\":9,\\"charisma\\":13,\\"proficiency_bonus_override\\":null,\\"rules_edition_preference\\":\\"2024\\",\\"allow_legacy\\":0,\\"notes\\":\\"written before weapons travelled\\"},\\"character_class_levels\\":[],\\"character_source_instances\\":[],\\"spell_selection_slots\\":[],\\"wizard_spellbook_entries\\":[],\\"warning_acknowledgements\\":[]}",
+        "created_at": "2026-04-10 12:00:00",
+        "updated_at": "2026-04-10 12:00:00"
+      }
+    ],
+    "spell_loadouts": [],
+    "spell_loadout_entries": []
+  },
+  "references": {
+    "class_definitions": [],
+    "subclass_definitions": [],
+    "feat_definitions": [],
+    "species_definitions": [],
+    "background_definitions": [],
+    "spell_versions": []
+  }
+}`;
+
+describe('an already-downloaded backup file', () => {
+  it('imports into a build that carries weapons, as a character with none', async () => {
+    const target = await database();
+    const archived = JSON.parse(FROZEN_V1_BACKUP_JSON) as Record<
+      string,
+      unknown
+    >;
+    expect(
+      Object.hasOwn(archived.tables as object, 'character_weapons'),
+    ).toBe(false);
+
+    const { characterId } = importCharacterBackup(target, archived);
+
+    expect(
+      target.one('SELECT name, notes, revision FROM characters WHERE id = ?', [
+        characterId,
+      ]),
+    ).toEqual({
+      name: 'Archived Hero',
+      notes: 'written before weapons travelled',
+      revision: 4,
+    });
+    // Absence of weapons is not corruption: the file says nothing about
+    // weapons, and a character with no weapons is exactly what it describes.
+    expect(
+      target.scalar(
+        'SELECT count(*) FROM character_weapons WHERE character_id = ?',
+        [characterId],
+      ),
+    ).toBe(0);
+
+    // The old save point survives unchanged and unupgraded.
+    const savePoint = target.one(
+      `SELECT label, schema_version, snapshot
+       FROM character_save_points WHERE character_id = ?`,
+      [characterId],
+    );
+    expect(savePoint).toMatchObject({
+      label: 'Archived checkpoint',
+      schema_version: 'a7-v1',
+    });
+    const snapshot = JSON.parse(String(savePoint?.snapshot)) as Record<
+      string,
+      unknown
+    >;
+    expect(snapshot.schema_version).toBe('a7-v1');
+    expect(Object.hasOwn(snapshot, 'character_weapons')).toBe(false);
+  });
+
+  it('re-exports what it imported, still readable by this build', async () => {
+    // The export path re-parses its own stored save points, so an `a7-v1` one
+    // must survive going back OUT as well as coming in. Getting this wrong
+    // makes a character that holds an old save point impossible to export at
+    // all — a worse failure than the import one, because it is silent until the
+    // user needs the file.
+    const target = await database();
+    const { characterId } = importCharacterBackup(
+      target,
+      JSON.parse(FROZEN_V1_BACKUP_JSON),
+    );
+    const reexported = exportCharacterBackup(
+      target,
+      characterId,
+      '2026-07-24T00:00:00.000Z',
+    );
+    expect(reexported.tables.character_weapons).toEqual([]);
+    expect(reexported.tables.character_save_points).toHaveLength(1);
+    expect(
+      reexported.tables.character_save_points[0] as Record<string, unknown>,
+    ).toMatchObject({ schema_version: 'a7-v1' });
+  });
+
+  it('restores its old save point without deleting weapons added since', async () => {
+    // The case the version bump exists for. The user imports an old backup,
+    // then adds a weapon, then rolls back to the old save point. An `a7-v1`
+    // snapshot never recorded weapons, so it has no opinion about them —
+    // treating its silence as "there were none" would destroy the new weapon.
+    const target = await database();
+    const { characterId } = importCharacterBackup(
+      target,
+      JSON.parse(FROZEN_V1_BACKUP_JSON),
+    );
+    target.exec(
+      `INSERT INTO character_weapons (character_id, name, damage_dice)
+       VALUES (?, 'Bought afterwards', '1d6')`,
+      [characterId],
+    );
+    target.exec('UPDATE characters SET name = ? WHERE id = ?', [
+      'Renamed since',
+      characterId,
+    ]);
+
+    const stored = target.scalar<string>(
+      'SELECT snapshot FROM character_save_points WHERE character_id = ?',
+      [characterId],
+    );
+    new CharacterState(target).restore(characterId, JSON.parse(String(stored)));
+
+    // The snapshot DID record the name, so the name is rolled back.
+    expect(
+      target.scalar('SELECT name FROM characters WHERE id = ?', [characterId]),
+    ).toBe('Archived Hero');
+    // It did not record weapons, so the weapon is still there.
+    expect(
+      target.all(
+        'SELECT name FROM character_weapons WHERE character_id = ?',
+        [characterId],
+      ),
+    ).toEqual([{ name: 'Bought afterwards' }]);
   });
 });
 

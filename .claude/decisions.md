@@ -1,5 +1,203 @@
 # Binding scope decisions
 
+## D15 — Owner: model Extra Attack and Martial Arts; Shillelagh is a weapon row unconditionally (2026-07-26)
+
+Answers to the two questions D14 raised. Both go further than the options I
+offered, and both are right.
+
+### Extra Attack becomes MODELLED, not worked around
+
+> "Model extra attack and only show the non true strike weapon if the character
+>  actually has extra attack. Also this seems like a related area to monk dice
+>  for martial arts."
+
+I offered three ways to paper over not knowing whether a character has Extra
+Attack. The owner rejected all three and said to model it. That is the better
+answer: every option I gave was a proxy for a fact the app could simply hold,
+and the class-list proxy in particular was the kind of shortcut that rots.
+
+So the sheet's default becomes precise rather than hedged: **if the character
+has Extra Attack, show the normal weapon attack too; if they do not, True Strike
+simply replaces it.** No advisory note about a case the app can now decide.
+
+**This amends D11.** D11 deferred "class FEATURE text (Rage, Sneak Attack)".
+Extra Attack is not text — it is a number that changes what the sheet prints, so
+it belongs with the MECHANICAL set, exactly as D12 drew the line for species
+traits: free text stays text, anything that moves a derived number gets modelled.
+
+### The owner's connection: Martial Arts is the same shape
+
+Monk's Martial Arts is another class feature that rewrites a weapon attack — it
+substitutes a die, permits DEX where the weapon would demand STR, and scales by
+level. That is structurally identical to what True Strike and Shillelagh do.
+
+So there is ONE family, not two features: **things that modify a weapon attack
+profile.** Some come from cantrips (True Strike, Shillelagh), some from class
+features (Martial Arts, Extra Attack). Building them as one bounded, extensible
+set is the design; building the cantrips alone and bolting on Martial Arts later
+is how the second one ends up special-cased.
+
+### Shillelagh appears unconditionally
+
+> "Any character with shillelagh should have the stats of that on the sheet as
+>  if it was a weapon. Assume the character can make it work at the table."
+
+Not conditional on owning a Club or Quarterstaff. If the character knows the
+cantrip, the sheet shows the Shillelagh attack with its full statistics — the
+owner's judgement being that any real player can produce a stick.
+
+This overrides my recommendation, which required an owned weapon to attach to,
+and it is a defensible call: the alternative hides a real capability behind
+inventory bookkeeping the app does not otherwise do. It does mean the app
+generates a weapon row the user did not enter, which sits in tension with D1b's
+"weapons are user-defined" — resolved by DERIVING the row rather than inserting
+one. Nothing is written to `character_weapons`; the row is computed from the
+known cantrip, like any other derived sheet value.
+
+### Consequences
+
+- Extra Attack and Martial Arts need per-class, per-level content, sourced from
+  the SRD like the mastery counts (F6) — never recalled.
+- The attack-profile family is the unit of work, not four separate features.
+- All of it lands with the sheet core (D11/D12), which needs the attack and
+  damage derivation none of this can exist without.
+
+---
+
+## D14 — Cantrips that change how a weapon attack is rolled (2026-07-26)
+
+Owner's request, verbatim in substance: a Wizard with -1 Strength should not be
+shown swinging a quarterstaff with Strength when True Strike exists; the sheet
+should replace the to-hit and damage and add the extra dice. And Shillelagh
+should appear as a weapon, assumed always active.
+
+This is right, and it is exactly the "confusing tools hide the better option"
+problem this project exists for. Rules SOURCED, not recalled — extracted to
+`docs/srd/source/weapon-attack-cantrips.txt`.
+
+### True Strike, as the SRD actually writes it
+
+Divination Cantrip — **Bard, Sorcerer, Warlock, Wizard** (not Druid, not
+Cleric). Action, Range Self. Material component: **a weapon you are proficient
+with** worth 1+ CP.
+
+> "you make one attack with the weapon used in the spell's casting. The attack
+>  uses your spellcasting ability for the attack and damage rolls instead of
+>  using Strength or Dexterity."
+
+Damage type is **a CHOICE** — Radiant *or* the weapon's normal type — not forced
+Radiant. **Cantrip Upgrade:** extra *Radiant* damage at levels 5 (1d6), 11
+(2d6), 17 (3d6), regardless of which type was chosen.
+
+Three consequences that change the implementation:
+- It replaces **Strength OR Dexterity**, so it can beat a finesse weapon's DEX
+  too, not just a bad STR.
+- It requires **proficiency with that weapon**. A Wizard qualifies with a
+  quarterstaff and does NOT with a greatsword.
+- It is **one attack as an Action**. A character with Extra Attack who uses it
+  LOSES attacks — so "always replace" is wrong for them. Extra Attack is not
+  modelled (F4), so the app cannot currently detect this case.
+
+### Shillelagh, as the SRD actually writes it
+
+Transmutation Cantrip — **Druid only**. Bonus Action, 1 minute, V/S/M
+(mistletoe). Applies to **a Club or Quarterstaff you are holding**, and only to
+**melee** attacks with it.
+
+Replaces **Strength only** (not Dexterity — moot, since neither weapon is
+Finesse). Damage die becomes **d8**, damage type Force *or* normal (choice).
+Ends early if recast or if you let go of the weapon.
+
+**It scales, which I would have got wrong from memory:** Cantrip Upgrade changes
+the die at levels 5 (d10), 11 (d12), 17 (2d6).
+
+### The model this implies
+
+A weapon gains ATTACK PROFILES — a derived, ordered set of ways to attack with
+it. Not stored: computed from the character's known cantrips, class spellcasting
+ability, proficiency, and level.
+
+- `normal` — STR, or DEX where Finesse/ranged allows; weapon die; weapon type.
+- `true_strike` — spellcasting ability; weapon die plus the level-scaled Radiant
+  dice; damage type a choice.
+- `shillelagh` — spellcasting ability; the upgraded die; Force or normal.
+
+Eligibility is derived per weapon, so a Wizard's greatsword offers no True
+Strike profile while their quarterstaff does. This generalises the D12 pattern
+of a bounded set of mechanical effects one level further: a spell that modifies
+a weapon attack, rather than a species trait that modifies a derived number.
+
+This is SHEET-CORE work (D11) and lands with it, because it needs the attack and
+damage derivation that does not exist yet.
+
+**Assumption recorded, per the owner: Shillelagh is treated as always active.**
+Its one-minute duration and Bonus Action cost are not tracked — this app has no
+combat-round model and inventing one to gate a sheet row would be worse than the
+assumption.
+
+---
+
+## D13 — Twenty-four CHECK constraints merged; two silent-no-op traps measured (2026-07-26)
+
+`main` 05c836f. Verified by me, not on the track's word: **729 vitest / 72 files,
+build exit 0, 56 Playwright**, schema regenerates byte-identically, and the
+Laravel-derived signature oracle still bites (mutating `characters.name` to
+nullable fails it).
+
+**The oracle is untouched by design, not by luck:** CHECK constraints do not
+appear in `PRAGMA table_info`, which is what the signature hashes. So this
+change could not have moved the constant even if it tried — worth knowing before
+someone "fixes" a future hash drift by regenerating it.
+
+**I verified the over-strictness risk myself** rather than accepting the report,
+because a CHECK narrower than reality turns saving into an exception: all
+thirteen enum CHECKs match their array in `src/domain/enums.ts` EXACTLY, by
+set comparison. Zero transcription drift. That was the failure mode with the
+teeth here and it did not occur.
+
+### Two traps, both found by measurement rather than reasoning
+
+1. **An unquoted reserved word is a PARSE error.** `CHECK(grant IN (…))` does
+   not fail one table — it fails schema application wholesale. Column references
+   now route through a validating helper that backtick-quotes them.
+2. **A bare `>= 0` does not fire on TEXT.** `'abc' >= 0` is TRUE in SQLite, and
+   text really can reach an INTEGER column (binding `'abc'` stores
+   `typeof=text`; binding `'7'` stores `integer` 7). Three constraints were bare
+   lower bounds and now carry a `typeof(...) = 'integer'` limb.
+
+   Deliberately NOT applied uniformly: the `BETWEEN` forms already reject text
+   and blobs on their upper limb, leaving only a non-integral REAL inside the
+   window, which no writer produces. Drawing that line and recording it beats
+   fifteen more limbs for a value class that misbehaves nowhere.
+
+3. **A CHECK evaluating to NULL is ACCEPTED by SQLite.** `spell_versions_level_check`
+   compared provenance with `=`, so a NULL would have disabled the whole
+   constraint. Changed to `IS`, identical on every reachable row and safer on the
+   unreachable one.
+
+### Deliberately unconstrained, and why that is right
+
+`character_source_instances.state` has no CHECK, because adding one BREAKS CLASS
+REMOVAL on the first write — four writers emit `'tombstoned'`
+(`remove-source.ts:53`, `update-class.ts:250` and `:337`,
+`grant-rule-slot-generator.ts:724`). The prerequisite is declaring that
+vocabulary in `enums.ts` so a constraint reads ONE source rather than a
+transcribed second copy. That is a separate change and is the right order.
+
+### One divergence handed off, not resolved
+
+`class_weapon_mastery_counts.class_level` is `BETWEEN 1 AND 20` in the schema
+but unbounded in its row contract (`src/domain/contracts/rows.ts`). The track
+REJECTED loosening the CHECK — nothing shows it rejecting legitimate data, and
+`PROGRESSION_LEVELS` is 20 — and refused to edit the backup contract module
+because another track owned it. Correct call on both counts. Reconciliation
+belongs to whoever next owns `src/domain/contracts/`, and must tighten the
+contract rather than loosen the constraint. Note `class_progressions_class_level_check`
+carries the identical bound and drew no complaint only because that table has no
+row contract at all.
+
+---
+
 ## D12 — Owner's answers on HP, armour, species/backgrounds, and the AI bridge (2026-07-26)
 
 Four direct answers. Three confirm the recommendation; the third changes the
