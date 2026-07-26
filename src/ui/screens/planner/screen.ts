@@ -21,8 +21,11 @@ import {
 } from '../../../queries/client';
 import type { OperationHistory } from '../../../queries/operation-history';
 import { RpcError } from '../../../rpc/protocol';
+import { freeTextSpan } from '../../free-text';
 import { defineScreen } from '../../screen';
 import type { ScreenContext } from '../../screen';
+import { buildAgentReference } from './agent-reference';
+import { renderAgentReference } from './agent-reference-panel';
 import { renderCompleteness } from './completeness';
 import { renderDiceHelper } from './dice';
 import {
@@ -287,7 +290,9 @@ function renderPlanner(
     context.router.navigate('/');
   });
   const heading = document.createElement('h1');
-  heading.textContent = workspace.report.character.name;
+  // The name can have arrived in a share link somebody else wrote, and nothing
+  // records which. Mark it where it is rendered rather than filtering it.
+  heading.append(freeTextSpan(workspace.report.character.name));
   const subtitle = document.createElement('p');
   subtitle.textContent = `Level ${workspace.report.character.character_level} · revision ${workspace.revision}`;
   identity.append(home, heading, subtitle);
@@ -322,10 +327,15 @@ function renderPlanner(
     const placeholderBanner = document.createElement('div');
     placeholderBanner.className = 'placeholder-banner';
     placeholderBanner.setAttribute('role', 'status');
-    const names = workspace.placeholder_spells
-      ?.map((spell) => spell.name)
-      .join(', ');
-    placeholderBanner.textContent = `Shared spell data not imported: ${names}. These inactive placeholders contain no rules text. Import the matching catalog to upgrade them.`;
+    // These names came from the share link itself, so they are marked in place.
+    placeholderBanner.append('Shared spell data not imported: ');
+    (workspace.placeholder_spells ?? []).forEach((spell, index) => {
+      if (index > 0) placeholderBanner.append(', ');
+      placeholderBanner.append(freeTextSpan(spell.name));
+    });
+    placeholderBanner.append(
+      '. These inactive placeholders contain no rules text. Import the matching catalog to upgrade them.',
+    );
     shell.append(placeholderBanner);
   }
   const layout = document.createElement('main');
@@ -334,6 +344,9 @@ function renderPlanner(
   primary.className = 'planner-primary';
   primary.append(
     renderCompleteness(session.completeness),
+    renderAgentReference(
+      buildAgentReference(workspace, session.completeness),
+    ),
     renderDiceHelper(
       workspace.slots,
       workspace.report.character.character_level,

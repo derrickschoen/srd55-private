@@ -1,4 +1,5 @@
 import type { EligibleSpell } from '../../../domain/read-models';
+import { FREE_TEXT_MARKER } from '../../free-text';
 
 export interface EligibleSpellClient {
   eligibleSpells(
@@ -18,6 +19,8 @@ export function createSpellPicker(options: {
   characterId: number;
   slotId: number;
   value: string | null;
+  /** The current value is a share-link name of unverified origin. */
+  freeTextValue: boolean;
   invalid: boolean;
   disabled: boolean;
   queries: EligibleSpellClient;
@@ -37,6 +40,9 @@ export function createSpellPicker(options: {
     'aria-label',
     `Spell selection for slot ${options.slotId}`,
   );
+  // An input's value cannot be wrapped, so the marker goes on the control. The
+  // adjacent "Not imported" badge states the same thing in words.
+  if (options.freeTextValue) input.dataset.freeText = FREE_TEXT_MARKER;
   input.setAttribute('aria-autocomplete', 'list');
   input.setAttribute('aria-expanded', 'false');
   input.setAttribute('aria-invalid', String(options.invalid));
