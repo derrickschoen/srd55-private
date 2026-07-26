@@ -18,6 +18,7 @@ import {
   selectionEligibilities,
   slotBuckets,
   slotStates,
+  speciesTraitEffectKinds,
   srdWeaponGroups,
   weaponMasteryGrants,
   weaponMasteryProperties,
@@ -127,6 +128,21 @@ const positiveInt = z.int().min(1);
 /** An ability score, matching the range the backup validator already enforced. */
 const abilityScore = z.int().min(1).max(30);
 
+/**
+ * A CLASS level, 1..20, matching the CHECK its column already carries.
+ *
+ * D13 recorded this as a divergence and said which way to close it: the schema
+ * constrains `class_weapon_mastery_counts.class_level` to 1..20, the contract
+ * accepted any positive integer, and the fix is to TIGHTEN the contract rather
+ * than loosen the constraint.
+ *
+ * Tightening cannot lose data. The CHECK has been on the table since it was
+ * created, so no database can hold a row outside the range, and a portable
+ * backup is generated from such a database — there is no legitimate document
+ * carrying a class level of 0 or 21 for this contract to reject.
+ */
+const classLevel = z.int().min(1).max(20);
+
 const nonNegativeInt = z.int().min(0);
 
 /** What an `integer()` column gets when it needs nothing narrower. */
@@ -141,6 +157,19 @@ const selectionEligibilityEnum = z.enum(selectionEligibilities);
 const weaponMasteryPropertyEnum = z.enum(weaponMasteryProperties);
 const weaponMasteryGrantEnum = z.enum(weaponMasteryGrants);
 const srdWeaponGroupEnum = z.enum(srdWeaponGroups);
+/**
+ * The closed set of mechanical effects a species trait may carry.
+ *
+ * An enum and not `sqlText`, unlike `creature_type` / `size` /
+ * `effect_damage_type` beside it — the difference is not tidiness. Those three
+ * are OPEN vocabularies by decision (see `db/schema/origins.ts`), so a
+ * contract narrowing them would reject rows the schema permits. `effect_kind`
+ * is closed in the schema too, by
+ * `species_template_traits_effect_kind_check`, and a value outside it reads as
+ * "no effect" to `src/rules/species-effects.ts` — a trait whose mechanics
+ * vanish with no error anywhere.
+ */
+const speciesTraitEffectKindEnum = z.enum(speciesTraitEffectKinds);
 
 /**
  * THE CLOSED SET of shared refinements.
@@ -157,6 +186,7 @@ export const COLUMN_REFINEMENTS = {
   sqlBool,
   positiveInt,
   abilityScore,
+  classLevel,
   nonNegativeInt,
   sqlInteger,
   rulesEditionEnum,
@@ -168,6 +198,7 @@ export const COLUMN_REFINEMENTS = {
   weaponMasteryPropertyEnum,
   weaponMasteryGrantEnum,
   srdWeaponGroupEnum,
+  speciesTraitEffectKindEnum,
 } as const;
 
 /**
@@ -205,6 +236,12 @@ export const NARROWED_REFINEMENTS: readonly {
     rejects: 31,
     reason:
       'Pre-existing: the backup validator required 1..30, and `update-ability.ts:30` enforces the same range on every write.',
+  },
+  {
+    name: 'classLevel',
+    rejects: 21,
+    reason:
+      'Matches the `class_level BETWEEN 1 AND 20` CHECK the column has carried since the table was created, so no stored row and no backup generated from one can fall outside it (D13).',
   },
   {
     name: 'nonNegativeInt',
@@ -262,7 +299,16 @@ type NativeContractTable =
   | 'character_weapons'
   | 'weapon_templates'
   | 'class_weapon_mastery_grants'
-  | 'class_weapon_mastery_counts';
+  | 'class_weapon_mastery_counts'
+  // The origins TEMPLATE tables. Same reason `weapon_templates` is here: their
+  // rows are PARSED out of `docs/srd/source/species-descriptions.txt` and
+  // `docs/srd/source/backgrounds.txt` by `src/rules/origins-srd.ts`, and a
+  // parser is exactly the writer that can produce a plausible-looking wrong
+  // row. The three CHARACTER-side origin tables are not listed: they are
+  // `backup: true` and arrive through `BackupTable` already.
+  | 'species_templates'
+  | 'species_template_traits'
+  | 'background_templates';
 
 type Facts = typeof COLUMN_FACTS;
 
@@ -498,13 +544,109 @@ const REFINEMENTS = {
   'class_weapon_mastery_grants.updated_at': sqlTimestamp,
   'class_weapon_mastery_counts.id': positiveInt,
   'class_weapon_mastery_counts.class_definition_id': positiveInt,
-  'class_weapon_mastery_counts.class_level': positiveInt,
+  'class_weapon_mastery_counts.class_level': classLevel,
   // Zero is a legitimate mastery count in principle and no printed row carries
   // one, so this is `nonNegativeInt` rather than `positiveInt`: refusing 0
   // would be inventing a rule the source does not state.
   'class_weapon_mastery_counts.mastery_count': nonNegativeInt,
   'class_weapon_mastery_counts.created_at': sqlTimestamp,
   'class_weapon_mastery_counts.updated_at': sqlTimestamp,
+
+  // --- species_templates ---------------------------------------------------
+  'species_templates.id': positiveInt,
+  'species_templates.content_key': nonEmptyText,
+  'species_templates.rules_edition': rulesEditionEnum,
+  'species_templates.name': nonEmptyText,
+  // `sqlText` and NOT an enum: both are deliberately OPEN vocabularies in the
+  // schema, and a contract tighter than its column rejects rows the schema
+  // permits — the D6b failure this module exists to avoid.
+  'species_templates.creature_type': sqlText,
+  'species_templates.size': sqlText,
+  'species_templates.alternate_size': sqlText,
+  'species_templates.base_speed_feet': positiveInt,
+  'species_templates.created_at': sqlTimestamp,
+  'species_templates.updated_at': sqlTimestamp,
+
+  // --- species_template_traits ---------------------------------------------
+  'species_template_traits.id': positiveInt,
+  'species_template_traits.species_template_id': positiveInt,
+  'species_template_traits.sort_order': positiveInt,
+  'species_template_traits.name': nonEmptyText,
+  // Non-empty: every printed trait has text, and an empty description here is a
+  // two-column mis-join rather than a trait.
+  'species_template_traits.description': nonEmptyText,
+  'species_template_traits.effect_kind': speciesTraitEffectKindEnum,
+  'species_template_traits.effect_damage_type': sqlText,
+  'species_template_traits.created_at': sqlTimestamp,
+  'species_template_traits.updated_at': sqlTimestamp,
+
+  // --- background_templates ------------------------------------------------
+  'background_templates.id': positiveInt,
+  'background_templates.content_key': nonEmptyText,
+  'background_templates.rules_edition': rulesEditionEnum,
+  'background_templates.name': nonEmptyText,
+  // The printed WORDS, not the lowercase `abilities` members — see the column
+  // comments in `db/schema/origins.ts`. `abilityEnum` here would reject every
+  // row the seeder writes.
+  'background_templates.ability_score_1': nonEmptyText,
+  'background_templates.ability_score_2': nonEmptyText,
+  'background_templates.ability_score_3': nonEmptyText,
+  'background_templates.feat_name': nonEmptyText,
+  'background_templates.skill_proficiency_1': nonEmptyText,
+  'background_templates.skill_proficiency_2': nonEmptyText,
+  'background_templates.tool_proficiency': nonEmptyText,
+  'background_templates.equipment_option_a': nonEmptyText,
+  'background_templates.equipment_option_b': nonEmptyText,
+  'background_templates.created_at': sqlTimestamp,
+  'background_templates.updated_at': sqlTimestamp,
+
+  // --- character_species ---------------------------------------------------
+  // As with `character_weapons`, the nullable columns are NOT written as
+  // nullable here: `columnSchema` adds `| null` from `COLUMN_FACTS`, so a
+  // contract can never be tighter than its column by accident.
+  'character_species.id': positiveInt,
+  'character_species.character_id': positiveInt,
+  // Non-empty: the absence of a species is the absence of the ROW, so a row
+  // with no name could not be shown or told apart from having none.
+  'character_species.name': nonEmptyText,
+  'character_species.creature_type': sqlText,
+  'character_species.size': sqlText,
+  'character_species.base_speed_feet': positiveInt,
+  'character_species.notes': sqlText,
+  'character_species.created_at': sqlTimestamp,
+  'character_species.updated_at': sqlTimestamp,
+
+  // --- character_species_traits --------------------------------------------
+  'character_species_traits.id': positiveInt,
+  'character_species_traits.character_id': positiveInt,
+  'character_species_traits.sort_order': positiveInt,
+  'character_species_traits.name': nonEmptyText,
+  // `sqlText` and not `nonEmptyText`, unlike the template's: a user may name a
+  // trait before writing what it does, and the column is nullable for exactly
+  // that reason (D6b limb 3).
+  'character_species_traits.description': sqlText,
+  'character_species_traits.effect_kind': speciesTraitEffectKindEnum,
+  'character_species_traits.effect_damage_type': sqlText,
+  'character_species_traits.notes': sqlText,
+  'character_species_traits.created_at': sqlTimestamp,
+  'character_species_traits.updated_at': sqlTimestamp,
+
+  // --- character_background ------------------------------------------------
+  'character_background.id': positiveInt,
+  'character_background.character_id': positiveInt,
+  'character_background.name': nonEmptyText,
+  'character_background.ability_score_1': sqlText,
+  'character_background.ability_score_2': sqlText,
+  'character_background.ability_score_3': sqlText,
+  'character_background.feat_name': sqlText,
+  'character_background.skill_proficiency_1': sqlText,
+  'character_background.skill_proficiency_2': sqlText,
+  'character_background.tool_proficiency': sqlText,
+  'character_background.equipment_option_a': sqlText,
+  'character_background.equipment_option_b': sqlText,
+  'character_background.notes': sqlText,
+  'character_background.created_at': sqlTimestamp,
+  'character_background.updated_at': sqlTimestamp,
 } as const satisfies Record<RequiredRefinementKey, z.ZodType> &
   Partial<Record<OptionalRefinementKey, z.ZodType>>;
 

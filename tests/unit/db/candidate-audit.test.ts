@@ -206,11 +206,14 @@ describe('candidate database semantic audit', () => {
     // one left unclassified, shows up here.
     expect([...CHARACTER_OWNED_TABLES].sort()).toEqual([
       'change_log',
+      'character_background',
       'character_class_levels',
       'character_operations',
       'character_rule_overrides',
       'character_save_points',
       'character_source_instances',
+      'character_species',
+      'character_species_traits',
       'character_spell_preferences',
       'character_weapons',
       'spell_loadouts',

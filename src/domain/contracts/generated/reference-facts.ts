@@ -28,6 +28,12 @@ export const FOREIGN_KEY_FACTS = [
     targetColumns: ['id'],
   },
   {
+    table: 'character_background',
+    columns: ['character_id'],
+    target: 'characters',
+    targetColumns: ['id'],
+  },
+  {
     table: 'character_class_levels',
     columns: ['character_id'],
     target: 'characters',
@@ -73,6 +79,18 @@ export const FOREIGN_KEY_FACTS = [
     table: 'character_source_instances',
     columns: ['parent_source_instance_id'],
     target: 'character_source_instances',
+    targetColumns: ['id'],
+  },
+  {
+    table: 'character_species',
+    columns: ['character_id'],
+    target: 'characters',
+    targetColumns: ['id'],
+  },
+  {
+    table: 'character_species_traits',
+    columns: ['character_id'],
+    target: 'characters',
     targetColumns: ['id'],
   },
   {
@@ -151,6 +169,12 @@ export const FOREIGN_KEY_FACTS = [
     table: 'class_weapon_proficiencies',
     columns: ['class_definition_id'],
     target: 'class_definitions',
+    targetColumns: ['id'],
+  },
+  {
+    table: 'species_template_traits',
+    columns: ['species_template_id'],
+    target: 'species_templates',
     targetColumns: ['id'],
   },
   {

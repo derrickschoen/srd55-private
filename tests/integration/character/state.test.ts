@@ -122,6 +122,28 @@ function seedFixture(): void {
        'weapon row', ?, ?)`,
     [characterId, createdAt, updatedAt],
   );
+  db.exec(
+    `INSERT INTO character_species (
+       character_id, name, creature_type, size, base_speed_feet, notes,
+       created_at, updated_at
+     ) VALUES (?, 'Dwarf', 'Humanoid', 'Medium', 30, 'species row', ?, ?)`,
+    [characterId, createdAt, updatedAt],
+  );
+  db.exec(
+    `INSERT INTO character_species_traits (
+       character_id, sort_order, name, description, effect_kind,
+       effect_hit_points_flat, effect_hit_points_per_level,
+       created_at, updated_at
+     ) VALUES (?, 1, 'Dwarven Toughness',
+       'Your Hit Point maximum increases by 1.', 'hp_modifier', 1, 1, ?, ?)`,
+    [characterId, createdAt, updatedAt],
+  );
+  db.exec(
+    `INSERT INTO character_background (
+       character_id, name, ability_score_1, feat_name, created_at, updated_at
+     ) VALUES (?, 'Soldier', 'Strength', 'Savage Attacker', ?, ?)`,
+    [characterId, createdAt, updatedAt],
+  );
 }
 
 function mutableCapture(): MutableSnapshot {
@@ -163,11 +185,12 @@ describe('capture and deterministic diff', () => {
       'character',
       ...CHARACTER_STATE_TABLES,
     ]);
-    // a7-v2 is the version that also captures character_weapons. Written out
+    // a7-v3 is the version that also captures the three origin tables. Written
+    // out
     // rather than compared against the exported constant: a version identifier
     // is a wire fact that other stored data is matched against, so a test that
     // reads it from the module under test could never notice it changing.
-    expect(snapshot.schema_version).toBe('a7-v2');
+    expect(snapshot.schema_version).toBe('a7-v3');
     expect(Object.keys(snapshot.character)).toEqual(CHARACTER_STATE_COLUMNS);
     expect(snapshot.character).toEqual({
       name: 'Snapshot Hero',
@@ -195,6 +218,21 @@ describe('capture and deterministic diff', () => {
       mastery_property: 'Vex',
       mastery_selected: 1,
     });
+    expect(snapshot.character_species).toHaveLength(1);
+    expect(snapshot.character_species[0]).toMatchObject({
+      name: 'Dwarf',
+      base_speed_feet: 30,
+    });
+    // The mechanical payload travels as columns, not as prose to re-parse.
+    expect(snapshot.character_species_traits[0]).toMatchObject({
+      name: 'Dwarven Toughness',
+      effect_kind: 'hp_modifier',
+      effect_hit_points_flat: 1,
+      effect_hit_points_per_level: 1,
+    });
+    expect(snapshot.character_background[0]).toMatchObject({
+      name: 'Soldier',
+    });
     for (const table of CHARACTER_STATE_TABLES) {
       expect(snapshot[table]).toEqual(
         db.all(
@@ -216,6 +254,9 @@ describe('capture and deterministic diff', () => {
       wizard_spellbook_entries: [{ id: 8, spell_version_id: 10 }],
       warning_acknowledgements: [],
       character_weapons: [],
+      character_species: [],
+      character_species_traits: [],
+      character_background: [],
     };
     const before = {
       character: { name: 'Before' },
@@ -240,6 +281,9 @@ describe('capture and deterministic diff', () => {
       wizard_spellbook_entries: [{ id: 8, spell_version_id: 10 }],
       warning_acknowledgements: [],
       character_weapons: [],
+      character_species: [],
+      character_species_traits: [],
+      character_background: [],
     };
 
     expect(state.diff(before, after)).toEqual([
@@ -285,7 +329,7 @@ describe('capture and deterministic diff', () => {
   it('does not invent weapon changes when only one side recorded weapons', () => {
     // DEFENSIVE, AND DELIBERATELY SO. Nothing in the current pipeline produces
     // a mixed pair: `CharacterAuditLog.append` is the only caller, and the
-    // executor captures both sides in one process, so both are `a7-v2`. The
+    // executor captures both sides in one process, so both are `a7-v3`. The
     // guard is kept because the SHAPE of the failure is silent — an `a7-v1`
     // snapshot has no `character_weapons` key at all, so diffing it against a
     // current one would report every weapon the character owns as newly ADDED
@@ -304,8 +348,11 @@ describe('capture and deterministic diff', () => {
     };
     const afterV2 = {
       ...beforeV1,
-      schema_version: 'a7-v2',
+      schema_version: 'a7-v3',
       character_weapons: [{ id: 1, name: 'Longsword' }],
+      character_species: [{ id: 1, name: 'Dwarf' }],
+      character_species_traits: [],
+      character_background: [],
     };
 
     expect(state.diff(beforeV1, afterV2)).toEqual([]);
@@ -613,7 +660,7 @@ describe('restoring a snapshot written by an older build', () => {
     // oversight: a current snapshot DOES speak for weapons, so restoring it
     // removes one added afterwards.
     const snapshot = mutableCapture();
-    expect(snapshot.schema_version).toBe('a7-v2');
+    expect(snapshot.schema_version).toBe('a7-v3');
     db.exec(
       `INSERT INTO character_weapons (character_id, name)
        VALUES (?, 'Bought since')`,

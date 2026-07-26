@@ -1,0 +1,52 @@
+This work includes material from the System Reference Document 5.2
+("SRD 5.2") by Wizards of the Coast LLC, available at
+https://www.dndbeyond.com/srd. The SRD 5.2 is licensed under the Creative
+Commons Attribution 4.0 International License, available at
+https://creativecommons.org/licenses/by/4.0/legalcode.
+
+--- Verbatim extract: Extra Attack granted by something OTHER than a class
+    table row. Sliced by character at the column boundary. ---
+
+These two invocations are why the Extra Attack model cannot be keyed on
+(class, level) alone. Thirsting Blade grants the feature from an INVOCATION,
+not a class table, and grants it FOR ONE WEAPON ONLY. Devouring Blade then
+upgrades that same grant to two extra attacks.
+
+=== Thirsting Blade (Eldritch Invocation) ===
+
+       Thirsting Blade
+
+       Prerequisite: Level 5+ Warlock, Pact of the Blade
+
+       Invocation
+
+       You gain the Extra Attack feature for your pact
+       weapon only. With that feature, you can attack
+       twice with the weapon instead of once when you
+       take the Attack action on your turn.
+
+
+=== Devouring Blade (Eldritch Invocation) ===
+
+
+an’t    Devouring Blade
+st.     Prerequisite: Level 12+ Warlock, Thirsting Blade
+        Invocation
+
+        The Extra Attack of your Thirsting Blade invocation
+        confers two extra attacks rather than one.
+        Eldritch Mind
+        You have Advantage on Constitution saving throws
+
+=== The multiclassing rule these interact with (page ~24) ===
+
+         Extra Attack
+rtic-    If you gain the Extra Attack feature from more than
+         one class, the features don’t stack. You can’t make
+         more than two attacks with this feature unless you
+ain      have a feature that says you can (such as the Fight-
+r        er’s Two Extra Attacks feature).
+ a          Similarly, the Warlock’s Thirsting Blade invo-
+         cation, which grants you the Extra Attack feature
+         with your pact weapon, doesn’t give you additional
+         attacks if you also have Extra Attack.
