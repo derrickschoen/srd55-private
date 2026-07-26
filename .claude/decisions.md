@@ -1,5 +1,68 @@
 # Binding scope decisions
 
+## D18 — Species and background templates merged; a two-effect gap parked (2026-07-26)
+
+`main` 14936b3. Verified by me: **1167 vitest / 86 files, build exit 0,
+62 Playwright**, schema regenerates byte-identically, and the Laravel-derived
+oracle still bites. 48 tables: 30 surviving Laravel plus 18 native — 4 weapons,
+8 sheet core, 6 origins.
+
+D12 as the owner specified it: templates in the D1b sense, most traits plain
+free text, a closed compile-checked set of effects for the ones that move a
+number. The Elf's four-hour trance is a sentence; Dwarven Toughness, Goliath
+speed and species-granted spells carry real effects.
+
+### Dwarven Toughness was off by one, and the data was the bug
+
+The trait reads "increases by 1, and it increases by 1 again whenever you gain a
+level". The opening clause IS the level-1 grant, so the total is exactly the
+character's level. It had been seeded flat=1 plus per-level=1, counting level 1
+twice. Three tests had locked the wrong value in. The formula was right; only
+the data was wrong — which is the failure mode a test written alongside the data
+cannot catch, because it agrees with it.
+
+### A gap that is pinned rather than hidden
+
+A trait carries ONE effect. The Tiefling's Fiendish Legacy grants BOTH a
+resistance and a cantrip, so modelling it as granted spells leaves the
+resistance invisible — and swapping which half is visible only moves the
+silence. The real fix is two tables plus a change to a positional share format
+deliberately pinned at version 1, which is too large to do blind and was
+mid-flight beside another track.
+
+So the gap is stated at the seed site with source line numbers and **pinned by a
+test that FAILS if someone silently "fixes" it**, with the design filed for the
+owner. That is the right shape for a known limitation: not a TODO, an assertion.
+
+### Two more corrections to my own extraction work
+
+- **The 35-foot base speed is the GOLIATH, not the Wood Elf** as an earlier
+  commit message of mine claimed.
+- **My `background-descriptions.txt` was superseded and deleted.** I had sliced
+  it at a column boundary that was too narrow on hyphenated lines, so `r-` — the
+  tail of "char-" — bled into the right column. A full-width page extract has no
+  such failure mode. The provenance test now asserts set equality over the
+  extract directory in BOTH directions, so an unlisted or stray extract fails by
+  name.
+
+### The merge was the expensive part, and my method caused most of it
+
+Two tracks added tables simultaneously, so every inventory assertion conflicted.
+I resolved the additive conflicts with a mechanical keep-both, and that was the
+wrong tool for several of them: it produced two `it(` openings with one closing,
+a duplicated `toContain` argument pair, a lost array terminator, a comment body
+without its opener, and a duplicated provenance table. Every one was a SYNTAX or
+duplication error rather than a wrong number, so the suite caught them all — but
+the lesson is that keep-both is only safe for genuinely list-shaped conflicts,
+and each conflict needs classifying before a rule is applied.
+
+Counts were derived from the two independent deltas rather than read back from
+the schema: 36 FK edges before either track, origins +4, sheet +7, so 47 across
+49 rows. Verified afterwards that the oracle still fails when a Laravel column
+changes.
+
+---
+
 ## D17 — The sheet core landed, and SIX of its numbers had no source until now (2026-07-26)
 
 D11 part 1 and D12, implemented. Eight native tables, three parsers, one pure
