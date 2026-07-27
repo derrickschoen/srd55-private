@@ -1,5 +1,72 @@
 # Binding scope decisions
 
+## F12 — Queue item (c) is not the shape the brief describes, and the die vocabulary the owner asked for does not exist as a type (2026-07-27)
+
+The cron brief says four competing die definitions exist, including "two
+disagreeing CHECKs". **The two CHECKs do not disagree**, and acting on that
+framing would have collapsed a correct distinction:
+
+```
+class_martial_arts_dice.martial_arts_die  IN (4, 6, 8, 10, 12)
+class_sheet_traits.hit_die                IN (6, 8, 10, 12)
+```
+
+Those are different DOMAINS, not two answers to one question. No class has a d4
+hit die, so excluding 4 from `hit_die` is correct, and merging them would widen
+a constraint to match a different constraint's subject. The brief was written
+from a count, not from a reading.
+
+### What is actually true
+
+1. **The die vocabulary the owner asked for exists exactly once, in a UI file,
+   as a loop literal**: `src/ui/screens/planner/dice.ts:837`,
+   `for (const size of [4, 6, 8, 10, 12, 20, 100])`. The owner's words were "Do
+   we have an enum for dice type? We only should have 4,6,8,10,12,20,100." The
+   answer is no — the set exists as a `<select>` populator and nowhere in the
+   domain.
+2. **A fourth literal** at `src/rules/class-traits-srd.ts:650` re-states
+   `[4, 6, 8, 10, 12]` as a runtime guard.
+3. **`fixedHitPointsPerLevel` guards `hitDie >= 2`**, so it returns fractional
+   hit points for any even-adjacent integer. Proven by running it:
+
+```
+d2     -> 2 HP/level          d7     -> 4.5 HP/level
+d3     -> 2.5 HP/level        d13    -> 7.5 HP/level
+d6     -> 4 HP/level          d100   -> 51 HP/level
+d8     -> 5 HP/level          d1001  -> 501.5 HP/level
+```
+
+### Is it reachable? NO — and that is the point, not the defence
+
+`class_sheet_traits.hit_die` carries `IN (6, 8, 10, 12)`, so no database can
+hold a 7 and no live path produces 4.5. The defect is that the only thing
+standing between a character sheet and a fractional Hit Point maximum is a CHECK
+in one table, while the FUNCTION's parameter is `number`. D25 asks for the
+opposite: close the set in the type so a wrong program fails to compile. A
+`DieSize` type would make `fixedHitPointsPerLevel(7)` a compile error instead of
+4.5, and the two CHECKs above would become subsets OF that type rather than
+independent literals that happen to be right.
+
+**So item (c) is one addition, not a reconciliation**: introduce the die type,
+express the existing subsets in terms of it, and keep them different — because
+they are different.
+
+### The audit that found nothing, recorded because a zero is a result
+
+Two systematic sweeps over contract-vs-CHECK agreement returned zero
+divergences, and the instrument was validated before the zeros were believed
+(6 `BETWEEN` and 12 `IN(...)` columns are contract-covered, so the parser was
+finding things):
+
+- no column whose CHECK range disagrees with its contract's range;
+- no column whose CHECK enumerates values while its contract accepts any string.
+
+All 23 refinement helpers in `rows.ts` are applied at least once; none is dead.
+That makes **F11 the single exception in the whole layer**, and it is the
+exception precisely because its column has no CHECK to agree with.
+
+---
+
 ## D30 — A column's portability is now a DECISION made in the diff that adds it, not an oversight found later (2026-07-27)
 
 Merged as `c8c3395`. Baseline moves to **1667 vitest / 110 files**, build exit 0,
