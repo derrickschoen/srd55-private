@@ -1216,6 +1216,7 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
       ['a hit die the SRD never prints', sheetTraits({ hit_die: 7 })],
       ['a d4 hit die', sheetTraits({ hit_die: 4 })],
       ['a d20 hit die', sheetTraits({ hit_die: 20 })],
+      ['a d100 hit die', sheetTraits({ hit_die: 100 })],
       // A NON-NUMERIC text hit die. `'8'` is deliberately NOT tested as a
       // rejection and is in the accept list instead: INTEGER affinity converts
       // it losslessly to the integer 8, exactly as `db/schema/columns.ts`
@@ -1229,6 +1230,8 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     ],
     accepts: [
       ['the Sorcerer and Wizard d6', sheetTraits({ hit_die: 6 })],
+      ['the six d8 classes', sheetTraits({ hit_die: 8 })],
+      ['the Fighter, Paladin and Ranger d10', sheetTraits({ hit_die: 10 })],
       ['the Barbarian d12', sheetTraits({ hit_die: 12 })],
       ['the Rogue choosing 4 skills', sheetTraits({ skill_choice_count: 4 })],
       // MEASURED, not assumed: INTEGER affinity stores this as the integer 8,
@@ -1347,12 +1350,23 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
       ['level 21', martialArtsDie({ class_level: 21 })],
       ['a die size that is not a die', martialArtsDie({ martial_arts_die: 7 })],
       ['a d20', martialArtsDie({ martial_arts_die: 20 })],
+      // THE d4, AND IT WAS ACCEPTED HERE UNTIL THIS CHANGE. Nothing pinned it
+      // in either direction, while the mirror case for `hit_die` above HAS been
+      // pinned since D13 ("a d4 hit die"). The extract prints no 1d4 at all
+      // (`attack-class-features.txt` contains the string zero times), so the 4
+      // was a 2014-edition memory sitting in a CHECK whose stated purpose is
+      // that a mis-parse fails the seed. It is refused now, and the refusal is
+      // pinned so it cannot drift back in unnoticed.
+      ['a d4, which is the 2014 Monk and is not in the bundled extract', martialArtsDie({ martial_arts_die: 4 })],
+      ['a d100', martialArtsDie({ martial_arts_die: 100 })],
       // Non-numeric: `'8'` would be converted by INTEGER affinity and stored
       // as the integer 8, which is legitimate.
       ['a text die size', martialArtsDie({ martial_arts_die: 'eight' })],
     ],
     accepts: [
       ['the level 1 d6', martialArtsDie({ class_level: 1, martial_arts_die: 6 })],
+      ['the levels 5-10 d8', martialArtsDie({ class_level: 5, martial_arts_die: 8 })],
+      ['the levels 11-16 d10', martialArtsDie({ class_level: 11, martial_arts_die: 10 })],
       ['the level 17 d12', martialArtsDie({ class_level: 17, martial_arts_die: 12 })],
     ],
   },

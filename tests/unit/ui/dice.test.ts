@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DEFAULT_BASIC_DIE_SIZE,
   attackProbabilities,
   chromaticLeapChance,
   exactResult,
   seededRoll,
+  selectedDieSize,
   sorcerousExpectedExtraDice,
   sorcerousExpectedRawDamage,
   type DiceConfig,
 } from '../../../src/ui/screens/planner/dice';
+import { dieSizes, isDieSize } from '../../../src/domain/enums';
 
 function config(
   changes: Partial<DiceConfig> = {},
@@ -197,5 +200,56 @@ describe('planner dice oracle', () => {
     expect(orb.attacks[0]?.triggeredLeap).toBe(true);
     expect(orb.attacks[1]?.triggeredLeap).toBe(false);
     expect(orb.totalDamage).toBe(35);
+  });
+});
+
+/**
+ * THE ONE FIELD IN THIS FILE THAT HAD TWO ANSWERS.
+ *
+ * `basicDieSize` was offered by a `<select>` populated with
+ * `[4, 6, 8, 10, 12, 20, 100]` and read back through
+ * `boundedInteger(Number(value), 2, 100)` — an integer RANGE that admits 2, 3,
+ * 5, 7, 13 and 99. It was the only place in the repository where two statements
+ * about ONE subject gave different value sets.
+ *
+ * It was not reachable through the browser, because the select is the only
+ * writer of `.value`. It was reachable HERE: `DiceConfig` is exported and this
+ * file builds one directly, and `ordinaryDamage` loops `face = 1..size` over
+ * whatever arrives. The regression below shows what that produced.
+ */
+describe('the die-size field states one set, not two', () => {
+  it('round-trips every size the control offers', () => {
+    for (const size of dieSizes) {
+      expect(selectedDieSize(String(size)), `d${String(size)}`).toBe(size);
+    }
+  });
+
+  it('falls back to the control’s own default for anything else', () => {
+    // The clamp accepted all of these and returned a different number for each.
+    for (const outside of ['7', '2', '3', '13', '99', '1', '0', '-8', '8.5']) {
+      expect(selectedDieSize(outside), outside).toBe(DEFAULT_BASIC_DIE_SIZE);
+    }
+    // And the shapes a `<select>` can genuinely produce when nothing matches.
+    for (const unreadable of ['', 'd8', 'eight', 'NaN']) {
+      expect(selectedDieSize(unreadable), unreadable).toBe(DEFAULT_BASIC_DIE_SIZE);
+    }
+    expect(isDieSize(DEFAULT_BASIC_DIE_SIZE)).toBe(true);
+  });
+
+  it('computes a real, plausible, wrong number for a die that is not a die', () => {
+    // COMPUTED BY HAND. A d7 has mean (1+2+3+4+5+6+7)/7 = 4, versus 4.5 for the
+    // d8 the field defaults to and 3.5 for the d6 beside it. Nothing about 4
+    // looks wrong on a screen — which is why the clamp that produced it was the
+    // defect and not merely untidy. The call is written through
+    // `selectedDieSize` because `basicDieSize: 7` no longer compiles.
+    const sevenAsRead = selectedDieSize('7');
+    expect(sevenAsRead).toBe(8);
+    const expected = exactResult(
+      config({ basicDice: 1, basicDieSize: sevenAsRead, armorClass: 1, attackBonus: 100 }),
+    );
+    // Guaranteed hit, no critical range beyond the natural 20: 19/20 of the
+    // rolls deal 4.5 and 1/20 deal 9 (two dice on a critical).
+    close(expected.normalDamage, 4.5);
+    close(expected.criticalDamage, 9);
   });
 });

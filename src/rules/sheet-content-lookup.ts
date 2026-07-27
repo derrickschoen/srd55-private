@@ -39,6 +39,8 @@ import {
   sqlString,
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
+import { isMartialArtsDieSize } from '../domain/enums';
+import type { MartialArtsDieSize } from '../domain/enums';
 import type { ClassFeatureEffect } from './class-feature-effects';
 import { classFeatureEffect } from './class-feature-effects';
 import type { ExtraAttackGrant } from './extra-attack';
@@ -144,8 +146,25 @@ export class SheetContentLookup {
     );
   }
 
-  /** Level -> Martial Arts die SIZE, for one class. `8` means `1d8`. */
-  martialArtsDice(classDefinitionId: number): ReadonlyMap<number, number> {
+  /**
+   * Level -> Martial Arts die SIZE, for one class. `8` means `1d8`.
+   *
+   * A LEVEL WHOSE STORED DIE IS NOT A MARTIAL ARTS DIE IS DROPPED, not carried
+   * as a bare integer. `martialArtsDice` in `src/rules/sheet.ts` resolves the
+   * greatest row at or below the character's level, so a dropped level falls
+   * back to the last GOOD one below it and the sheet under-states the die
+   * rather than printing `1d7`; if every row is bad the class contributes no
+   * entry and the sheet shows no Martial Arts die, which is what it already
+   * shows for the eleven classes that have no rows at all.
+   *
+   * The set is re-established here for `hitDieOrAbsent`'s reason (see
+   * `src/queries/character-sheet-builder.ts`): the CHECK on
+   * `class_martial_arts_dice` is not present in an image created before it, and
+   * F11 is the finding that trusting one is not a contract.
+   */
+  martialArtsDice(
+    classDefinitionId: number,
+  ): ReadonlyMap<number, MartialArtsDieSize> {
     const rows = this.db.all(
       `SELECT class_level, martial_arts_die AS value
        FROM class_martial_arts_dice
@@ -157,7 +176,14 @@ export class SheetContentLookup {
         value: sqlInteger(row, 'value'),
       }),
     );
-    return new Map(rows.map((row) => [row.level, row.value]));
+    return new Map(
+      rows
+        .filter(
+          (row): row is { level: number; value: MartialArtsDieSize } =>
+            isMartialArtsDieSize(row.value),
+        )
+        .map((row) => [row.level, row.value]),
+    );
   }
 
   /**

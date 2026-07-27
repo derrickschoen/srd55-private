@@ -1,4 +1,5 @@
-import type { Ability } from '../../../domain/enums';
+import type { Ability, DieSize } from '../../../domain/enums';
+import { dieSizes, isDieSize } from '../../../domain/enums';
 import type { WorkspaceSlot } from '../../../domain/read-models';
 
 export type RollMode = 'normal' | 'advantage' | 'disadvantage';
@@ -21,7 +22,18 @@ export interface DiceConfig {
   resistance: boolean;
   vulnerability: boolean;
   basicDice: number;
-  basicDieSize: number;
+  /**
+   * THE DIE THE USER PICKED, AS A `DieSize` AND NOT A `number`.
+   *
+   * This field had TWO answers in this one file. The `<select>` below offers
+   * `dieSizes`; the read-back clamped `boundedInteger(…, 2, 100)`, an integer
+   * RANGE that accepts 3, 7, 13 and 99. The browser could not reach the
+   * disagreement — the select is the only writer of `.value` — but this
+   * interface is EXPORTED and the unit tests build it directly, and
+   * `ordinaryDamage` loops `face = 1..size` over whatever arrives. A 7 produced
+   * a real, plausible, wrong expected-damage figure with nothing to catch it.
+   */
+  basicDieSize: DieSize;
   damageModifier: number;
   sorcerousBaseDice: number;
   explosionCap: number;
@@ -216,7 +228,7 @@ function adjustedDamage(total: number, config: DiceConfig): number {
 
 function ordinaryDamage(
   count: number,
-  size: number,
+  size: DieSize,
   modifier: number,
   config: DiceConfig,
 ): number {
@@ -669,7 +681,7 @@ export function defaultDiceConfig(): DiceConfig {
     resistance: false,
     vulnerability: false,
     basicDice: 1,
-    basicDieSize: 8,
+    basicDieSize: DEFAULT_BASIC_DIE_SIZE,
     damageModifier: 0,
     sorcerousBaseDice: 1,
     explosionCap: 3,
@@ -701,6 +713,28 @@ function boundedInteger(
       Math.trunc(Number.isFinite(value) ? value : minimum),
     ),
   );
+}
+
+/**
+ * The die the calculator opens on, and the one it falls back to.
+ *
+ * d8 for no deeper reason than that it is the middle of the printed weapon
+ * dice; this is a calculator input tied to no SRD content and to no character,
+ * so there is nothing to cite and nothing is claimed.
+ */
+export const DEFAULT_BASIC_DIE_SIZE: DieSize = 8;
+
+/**
+ * Reads the die-size `<select>` back as a member of the vocabulary it renders.
+ *
+ * A non-member cannot come from the control — the user picks, and cannot type —
+ * so this is not tolerating bad input; it is refusing to state a `number` where
+ * the only reachable values are seven. The fallback is the same constant the
+ * control opens on, so an unreadable value and a fresh page agree.
+ */
+export function selectedDieSize(raw: string): DieSize {
+  const parsed = Number(raw);
+  return isDieSize(parsed) ? parsed : DEFAULT_BASIC_DIE_SIZE;
 }
 
 function signedLabel(value: number): string {
@@ -834,10 +868,13 @@ export function renderDiceHelper(
   basicDice.value = '1';
   const basicDiceField = labeledInput('Damage dice', basicDice);
   const basicDieSize = document.createElement('select');
-  for (const size of [4, 6, 8, 10, 12, 20, 100]) {
-    basicDieSize.append(new Option(`d${size}`, String(size)));
+  // THE OPTIONS ARE THE TYPE. Adding a size to `dieSizes` adds it here, and
+  // there is no literal to forget: this loop WAS the only statement of the die
+  // vocabulary anywhere in the application.
+  for (const size of dieSizes) {
+    basicDieSize.append(new Option(`d${String(size)}`, String(size)));
   }
-  basicDieSize.value = '8';
+  basicDieSize.value = String(DEFAULT_BASIC_DIE_SIZE);
   const basicDieSizeField = labeledInput('Die size', basicDieSize);
   const damageModifier = document.createElement('input');
   damageModifier.type = 'number';
@@ -967,11 +1004,12 @@ export function renderDiceHelper(
     config.elvenAccuracy =
       config.elvenAccuracy && netAdvantage > 0 && elvenEligible;
     config.basicDice = boundedInteger(Number(basicDice.value), 1, 20);
-    config.basicDieSize = boundedInteger(
-      Number(basicDieSize.value),
-      2,
-      100,
-    );
+    // NOT `boundedInteger(…, 2, 100)`. A clamp answers "how big may this be";
+    // the question here is "which die is it", and the two gave different
+    // answers about the same field. `basicDice` above IS a count and keeps its
+    // clamp — the neighbours in this block are separate subjects and are not
+    // folded in.
+    config.basicDieSize = selectedDieSize(basicDieSize.value);
     config.damageModifier = boundedInteger(
       Number(damageModifier.value),
       -20,

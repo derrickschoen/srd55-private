@@ -4,6 +4,7 @@ import {
   armorClass,
   attacksPerAction,
   fixedHitPointsPerLevel,
+  hitDieOrAbsent,
   hitPointMaximum,
   initiative,
   passivePerception,
@@ -16,6 +17,7 @@ import {
   type SheetClass,
 } from '../../../src/rules/sheet';
 import type { ExtraAttackGrant } from '../../../src/rules/extra-attack';
+import { hitDieSizes } from '../../../src/domain/enums';
 import { parseSkillAbilities } from '../../../src/rules/skills';
 import { parseSrdArmorTemplates } from '../../../src/rules/armor-srd';
 
@@ -166,6 +168,66 @@ describe('hit points', () => {
     expect(fixedHitPointsPerLevel(10)).toBe(6);
     expect(fixedHitPointsPerLevel(8)).toBe(5);
     expect(fixedHitPointsPerLevel(6)).toBe(4);
+    // Every member of the type is covered, so the function is TOTAL over its
+    // domain: there is no fifth input a test could have missed, which is what
+    // closing the parameter type bought.
+    for (const die of hitDieSizes) {
+      expect(Number.isInteger(fixedHitPointsPerLevel(die)), `d${String(die)}`).toBe(true);
+    }
+  });
+
+  /**
+   * THE GUARD THAT USED TO LIVE IN `fixedHitPointsPerLevel`, AT THE BOUNDARY IT
+   * BELONGS AT.
+   *
+   * That function guarded `hitDie >= 2`, which admits every integer above it —
+   * F12 measured `d7 -> 4.5`, `d13 -> 7.5`, `d1001 -> 501.5` hit points per
+   * level. It now takes a `HitDieSize`, so those calls do not compile
+   * (`docs/type-probes/die-size.probe.ts`), and the runtime question moved here:
+   * an integer arriving off the disk is untrusted, because a CHECK constrains no
+   * image created before it existed and no hand-edited one (F11).
+   */
+  it('reads an integer that is not a hit die as NO hit die', () => {
+    for (const die of hitDieSizes) {
+      expect(hitDieOrAbsent(die), `d${String(die)}`).toBe(die);
+    }
+    // The four F12 values, plus the two sizes that are real dice and are not
+    // hit dice, plus the absence that was always legal.
+    for (const rejected of [7, 13, 1001, 2, 3, 4, 20, 100, 0, -8, 8.5]) {
+      expect(hitDieOrAbsent(rejected), String(rejected)).toBeNull();
+    }
+    expect(hitDieOrAbsent(null)).toBeNull();
+  });
+
+  it('degrades a stored d7 to the stated assumption, never to 4.5 per level', () => {
+    // A hand-edited image holding `hit_die = 7` for a level 3 starting class,
+    // Constitution 14 (+2). BEFORE this change the 7 flowed through and gave
+    //   level 1     : 7 + 2 = 9
+    //   levels 2..3 : (4.5 fixed + 2) x 2 = 13
+    //   total       : 22, a fractional per-level value hidden inside a whole
+    //                 number nobody would question.
+    // Now the 7 is read as an absence, so the sheet uses ASSUMED_HIT_DIE (8)
+    // and SAYS SO:
+    //   level 1     : 8 + 2 = 10
+    //   levels 2..3 : (5 fixed + 2) x 2 = 14
+    //   total       : 24
+    const stored: SheetClass = {
+      proficiencies: NO_PROFICIENCIES,
+      class_name: 'Hand-edited',
+      level: 3,
+      hit_die: hitDieOrAbsent(7),
+      is_starting_class: true,
+      saving_throws: [],
+    };
+    const result = hitPointMaximum({
+      classes: [stored],
+      scores: scores({ constitution: 14 }),
+    });
+    expect(result.maximum).toBe(24);
+    expect(result.maximum).not.toBe(22);
+    expect(result.warnings.map((warning) => warning.code)).toEqual([
+      'assumed_hit_die',
+    ]);
   });
 
   it('gives level 1 the printed maximum, not the average', () => {
