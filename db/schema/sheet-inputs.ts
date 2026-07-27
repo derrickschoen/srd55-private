@@ -28,7 +28,6 @@ import { SHEET_ADJUSTMENT_BOUNDS, SHEET_ROLL_BOUNDS } from '../../src/domain/she
 import {
   datetime,
   integerAtLeast,
-  laravelDefault,
   nullOrIntegerAtLeast,
   oneOf,
   sqlText,
@@ -137,7 +136,7 @@ export const character_armor = sqliteTable(
     strength_requirement: integer('strength_requirement'),
     stealth_disadvantage: tinyint1('stealth_disadvantage')
       .notNull()
-      .default(laravelDefault('0')),
+      .default(false),
     notes: sqlText()('notes'),
     created_at: datetime()('created_at'),
     updated_at: datetime()('updated_at'),
@@ -346,7 +345,7 @@ export const character_sheet_adjustments = sqliteTable(
       .references(() => characters.id, { onDelete: 'cascade' }),
     armor_class_adjustment: integer('armor_class_adjustment')
       .notNull()
-      .default(laravelDefault('0')),
+      .default(0),
     armor_class_adjustment_note: varchar()('armor_class_adjustment_note'),
     created_at: datetime()('created_at'),
     updated_at: datetime()('updated_at'),

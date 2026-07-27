@@ -28,7 +28,6 @@ import {
 import {
   datetime,
   integerAtLeast,
-  laravelDefault,
   nullOrIntegerAtLeast,
   nullOrOneOf,
   oneOf,
@@ -64,13 +63,13 @@ export const class_definitions = sqliteTable(
     spellcasting_ability: varchar<Ability>()('spellcasting_ability'),
     progression_type: varchar<ProgressionType>()('progression_type')
       .notNull()
-      .default(laravelDefault('none')),
+      .default('none'),
     caster_fraction: varchar()('caster_fraction'),
     caster_rounding: varchar()('caster_rounding'),
     prepares_or_knows: varchar()('prepares_or_knows'),
     supports_ritual_casting: tinyint1('supports_ritual_casting')
       .notNull()
-      .default(laravelDefault('0')),
+      .default(false),
     ritual_casting_mode: varchar()('ritual_casting_mode'),
     primary_ability_expression: sqlText()('primary_ability_expression'),
     notes: sqlText()('notes'),
@@ -123,10 +122,10 @@ export const class_progressions = sqliteTable(
     class_level: integer('class_level').notNull(),
     cantrips_known: integer('cantrips_known')
       .notNull()
-      .default(laravelDefault('0')),
+      .default(0),
     prepared_count: integer('prepared_count')
       .notNull()
-      .default(laravelDefault('0')),
+      .default(0),
     slots: sqlText()('slots'),
     pact_slots: sqlText()('pact_slots'),
     grant_rules: sqlText()('grant_rules'),
@@ -198,13 +197,13 @@ export const subclass_progressions = sqliteTable(
     class_level: integer('class_level').notNull(),
     cantrips_known: integer('cantrips_known')
       .notNull()
-      .default(laravelDefault('0')),
+      .default(0),
     prepared_count: integer('prepared_count')
       .notNull()
-      .default(laravelDefault('0')),
+      .default(0),
     max_spell_level: integer('max_spell_level')
       .notNull()
-      .default(laravelDefault('0')),
+      .default(0),
     slots: sqlText()('slots'),
     grant_rules: sqlText()('grant_rules'),
     created_at: datetime()('created_at'),

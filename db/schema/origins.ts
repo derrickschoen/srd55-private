@@ -25,7 +25,6 @@ import { effectKinds, rulesEditions } from '../../src/domain/enums';
 import {
   datetime,
   integerAtLeast,
-  laravelDefault,
   nullOrIntegerAtLeast,
   oneOf,
   sqlText,
@@ -111,7 +110,7 @@ export const species_templates = sqliteTable(
     content_key: varchar<ContentKey>()('content_key').notNull(),
     rules_edition: varchar<RulesEdition>()('rules_edition')
       .notNull()
-      .default(laravelDefault('2024')),
+      .default('2024'),
     name: varchar()('name').notNull(),
     /**
      * NOT an enum, for the same reason `weapon_templates.damage_type` is not.
@@ -749,7 +748,7 @@ export const background_templates = sqliteTable(
     content_key: varchar<ContentKey>()('content_key').notNull(),
     rules_edition: varchar<RulesEdition>()('rules_edition')
       .notNull()
-      .default(laravelDefault('2024')),
+      .default('2024'),
     name: varchar()('name').notNull(),
     /**
      * Three separate columns rather than a list, because the source prints
