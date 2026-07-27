@@ -1,5 +1,75 @@
 # Binding scope decisions
 
+## D28 — OWNER: warn rather than refuse; the Rogue qualifier is a union; multiclass proficiency is a UNION across classes (2026-07-26)
+
+> "I think it is fine to just warn when a monk adds a non light martial weapon.
+>  Rogue finesse or light property could be treated as a union of all weapons
+>  with light and all weapons with finesse."
+> "Remember for multiclass that a character only needs proficiency in a type of
+>  weapon from one of its classes to be proficient."
+
+### 1. WARN, do not refuse — and this is more correct D&D than D27 read
+
+D27 said the builder BLOCKS an SRD-illegal choice, and the owner's Wizard/Heavy
+Crossbow example sat behind it. This narrows that, and the narrowing is right:
+**anyone may CARRY any weapon.** Owning a Heavy Crossbow as a Wizard is legal;
+what a Wizard does not get is the PROFICIENCY BONUS on the attack.
+
+So the app never refuses to record a weapon. It withholds the proficiency bonus
+and says why. "Block the wizard from using a heavy crossbow" means "stop
+printing a proficiency bonus they do not have", not "refuse the row".
+
+**Reading recorded rather than assumed:** the guided BUILDER may still steer —
+not offering a non-proficient weapon as a suggested choice — while the weapons
+PANEL accepts anything and warns. That keeps D11's shape (builder guides, import
+tolerates) without inventing a refusal the rules do not support. If the owner
+meant something stronger for the builder specifically, this is the line to
+correct.
+
+### 2. The Rogue qualifier is a set union, not a predicate language
+
+"Martial weapons that have the Finesse or Light property" is exactly: martial
+AND (finesse OR light). Both flags are already stored as booleans on the weapon.
+No expression parser, no AST — codex proposed a small predicate AST and the
+owner's simpler reading is sufficient for the only two qualifiers the SRD prints
+(Rogue: Finesse or Light; Monk: Light).
+
+### 3. MULTICLASS PROFICIENCY IS A UNION — and there is a wrinkle we do not have content for
+
+The owner's rule: proficiency in a weapon type from ANY one class makes the
+character proficient. A Wizard/Fighter is proficient with martial weapons
+because Fighter grants it. A naive implementation checking only the first class,
+or intersecting across classes, would be wrong — and the app already keys
+saving throws off the FIRST class only, so the two rules differ and must not be
+copied from each other.
+
+**THE WRINKLE, sourced and verified rather than assumed** —
+`docs/srd/source/multiclassing.txt:78-82`:
+
+> "When you gain your first level in a class other than your initial class, you
+>  gain only SOME of the new class's starting proficiencies, as detailed in each
+>  class's description."
+
+Each class has an "As a Multiclass Character" clause naming a SUBSET. The
+Barbarian's, verbatim from the SRD: *"Gain the following traits from the Core
+Barbarian Traits table: Hit Point Die, proficiency with Martial weapons, and
+training with Shields."* — note it grants martial weapons but NOT the class's
+skill proficiencies or saving throws.
+
+So the union is over **what each class actually granted THIS character**, which
+depends on whether that class was the initial one or a multiclass entry. That
+per-class subset is content `docs/srd/source/` does not yet hold, and the twelve
+"As a Multiclass Character" clauses would need extracting before the union can
+be computed correctly.
+
+**Until that content exists**, computing the union over each class's FULL
+proficiency list would over-grant — a Barbarian dip would wrongly confer the
+Barbarian's skill proficiencies. The honest interim is to compute the union over
+weapon proficiencies only (which the Barbarian clause does grant) and state that
+skills and saving throws from a multiclass entry are not modelled.
+
+---
+
 ## D27 — OWNER: a character's weapon carries simple/martial. This AMENDS D1b. (2026-07-26)
 
 > "We need to have simple/martial in order to build a character. Need to block
