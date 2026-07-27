@@ -36,13 +36,13 @@ describe('database lifecycle', () => {
     await lifecycle.replace(exported);
 
     expect(
-      lifecycle.database.all('SELECT id, name FROM characters ORDER BY id'),
+      lifecycle.database.allRaw('SELECT id, name FROM characters ORDER BY id'),
     ).toEqual([{ id: 1, name: 'Exported character' }]);
     expect(lifecycle.database.scalar('PRAGMA foreign_keys')).toBe(1);
 
     lifecycle.reopen();
     expect(
-      lifecycle.database.all('SELECT id, name FROM characters ORDER BY id'),
+      lifecycle.database.allRaw('SELECT id, name FROM characters ORDER BY id'),
     ).toEqual([{ id: 1, name: 'Exported character' }]);
     expect(lifecycle.database.scalar('PRAGMA foreign_keys')).toBe(1);
   });
@@ -60,7 +60,7 @@ describe('database lifecycle', () => {
     expect(lifecycle.database.connection).toBe(originalConnection);
     expect(lifecycle.database.connection.isOpen()).toBe(true);
     expect(
-      lifecycle.database.all('SELECT id, name FROM characters'),
+      lifecycle.database.allRaw('SELECT id, name FROM characters'),
     ).toEqual([{ id: 1, name: 'Protected character' }]);
   });
 
@@ -90,7 +90,7 @@ describe('database lifecycle', () => {
     expect(lifecycle.database.connection).toBe(originalConnection);
     expect(lifecycle.database.connection.isOpen()).toBe(true);
     expect(
-      lifecycle.database.all('SELECT id, name FROM characters'),
+      lifecycle.database.allRaw('SELECT id, name FROM characters'),
     ).toEqual([{ id: 1, name: 'Schema-protected character' }]);
   });
 
@@ -109,7 +109,7 @@ describe('database lifecycle', () => {
     );
 
     expect(
-      lifecycle.database.all('SELECT id, name FROM characters'),
+      lifecycle.database.allRaw('SELECT id, name FROM characters'),
     ).toEqual([{ id: 1, name: 'State before failed replacement' }]);
     expect(lifecycle.database.scalar('PRAGMA foreign_keys')).toBe(1);
   });

@@ -101,7 +101,7 @@ describe('an imported subclass stays distinguishable from a bundled one', () => 
 
     expect(
       db
-        .all(
+        .allRaw(
           'SELECT content_key FROM subclass_definitions ORDER BY content_key',
         )
         .map((row) => [

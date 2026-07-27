@@ -1,3 +1,9 @@
+import {
+  rowId,
+  sqlInteger,
+  sqlNullableString,
+  type RowCodec,
+} from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import type { SqlValue } from '@sqlite.org/sqlite-wasm';
 import type {
@@ -86,7 +92,13 @@ function armorValues(armor: ArmorFields): Record<string, SqlValue> {
   };
 }
 
-function fieldsFromRow(row: Record<string, unknown>): ArmorFields {
+/**
+ * The stored armour row, decoded — and already written as a codec before this
+ * was one: it takes a row and returns a domain value, which is the whole of
+ * `RowCodec`. It now sits in the codec slot of the read instead of being applied
+ * to a raw row the caller had to hold first.
+ */
+const fieldsFromRow: RowCodec<ArmorFields> = (row) => {
   const category = row.category;
   const dexBonus = row.dex_bonus;
   return {
@@ -124,7 +136,7 @@ function fieldsFromRow(row: Record<string, unknown>): ArmorFields {
       ? null
       : String(row.notes),
   };
-}
+};
 
 /**
  * Checks an assembled row against its contract AND its cross-column rules
@@ -174,16 +186,13 @@ export class SetArmorCommand implements ResolvesInverseAfterApply {
   ) {}
 
   apply(characterId: number): void {
-    const existing = this.db.one(
+    this.#previous = this.db.one(
       `SELECT ${ARMOR_COLUMNS.join(', ')}
        FROM character_armor
        WHERE character_id = ? AND slot = ?`,
       [characterId, this.payload.slot],
+      fieldsFromRow,
     );
-    this.#previous =
-      existing === null
-        ? null
-        : fieldsFromRow(existing as Record<string, unknown>);
 
     // DELETE THEN INSERT rather than UPSERT, because "set to nothing" and "set
     // to this" then travel the same path and there is one place where the
@@ -251,15 +260,12 @@ export class SetHitPointRollCommand implements ResolvesInverseAfterApply {
       this.payload.class_name,
       this.payload.class_level,
     ];
-    const existing = this.db.one(
+    this.#previous = this.db.one(
       `SELECT rolled_value FROM character_hit_point_rolls
        WHERE character_id = ? AND class_name = ? AND class_level = ?`,
       key,
+      (row) => sqlInteger(row, 'rolled_value'),
     );
-    this.#previous =
-      existing === null
-        ? null
-        : Number((existing as Record<string, unknown>).rolled_value);
 
     this.db.exec(
       `DELETE FROM character_hit_point_rolls
@@ -325,6 +331,7 @@ export class SetSkillProficiencyCommand implements ResolvesInverseAfterApply {
         `SELECT id FROM character_skill_proficiencies
          WHERE character_id = ? AND skill = ?`,
         key,
+        rowId,
       ) !== null;
 
     if (!this.payload.proficient) {
@@ -383,23 +390,18 @@ export class SetArmorClassAdjustmentCommand
   ) {}
 
   apply(characterId: number): void {
-    const existing = this.db.one(
+    this.#previous = this.db.one(
       `SELECT armor_class_adjustment, armor_class_adjustment_note
        FROM character_sheet_adjustments
        WHERE character_id = ?`,
       [characterId],
-    ) as Record<string, unknown> | null;
-    this.#previous =
-      existing === null
-        ? { value: 0, note: null }
-        : {
-            value: Number(existing.armor_class_adjustment),
-            note:
-              existing.armor_class_adjustment_note === null ||
-              existing.armor_class_adjustment_note === undefined
-                ? null
-                : String(existing.armor_class_adjustment_note),
-          };
+      (row) => ({
+        value: sqlInteger(row, 'armor_class_adjustment'),
+        note: sqlNullableString(row, 'armor_class_adjustment_note'),
+      }),
+      // NO ROW MEANS ZERO WITH NO NOTE, which is what the write command stores
+      // by deleting the row — so there is one representation, not two.
+    ) ?? { value: 0, note: null };
 
     this.db.exec(
       'DELETE FROM character_sheet_adjustments WHERE character_id = ?',

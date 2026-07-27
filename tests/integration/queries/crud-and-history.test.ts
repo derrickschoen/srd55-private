@@ -16,7 +16,7 @@ import { openTestDatabase } from '../../helpers/open-db';
 
 function digest(db: DatabaseContext, tables: readonly string[]): string {
   const rows = tables.map((table) =>
-    db.all(`SELECT * FROM ${table} ORDER BY id`),
+    db.allRaw(`SELECT * FROM ${table} ORDER BY id`),
   );
   return createHash('sha256').update(JSON.stringify(rows)).digest('hex');
 }
@@ -60,7 +60,7 @@ describe('character CRUD, catalog, save points, and operation history', () => {
       [character.id],
     );
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT name, strength, revision
          FROM characters WHERE id = ?`,
         [character.id],
@@ -72,7 +72,7 @@ describe('character CRUD, catalog, save points, and operation history', () => {
       deleted: true,
     });
     expect(
-      db.one('SELECT id FROM characters WHERE id = ?', [character.id]),
+      db.oneRaw('SELECT id FROM characters WHERE id = ?', [character.id]),
     ).toBeNull();
     expect(
       Number(
@@ -100,7 +100,7 @@ describe('character CRUD, catalog, save points, and operation history', () => {
     );
 
     const point = savePoints.create(characterId, 'Before experiment');
-    const stored = db.one(
+    const stored = db.oneRaw(
       `SELECT character_id, label, snapshot, schema_version, created_at
        FROM character_save_points WHERE id = ?`,
       [point.id],
@@ -198,14 +198,14 @@ describe('character CRUD, catalog, save points, and operation history', () => {
       }),
     ]);
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT wisdom, revision
          FROM characters WHERE id = ?`,
         [characterId],
       ),
     ).toEqual({ wisdom: 18, revision: 1 });
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT inverse_command, resulting_revision
          FROM character_operations WHERE character_id = ?`,
         [characterId],
@@ -292,7 +292,7 @@ describe('character CRUD, catalog, save points, and operation history', () => {
       }),
     ]);
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT content_key, is_active
          FROM spell_versions WHERE id = ?`,
         [spellId],

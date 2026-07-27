@@ -177,13 +177,13 @@ it('returns exact DTOs, treats wildcard text literally, and follows the persiste
     { id: legacyId, edition: '2014' },
   ]);
   expect(
-    test.context.one(
+    test.context.oneRaw(
       `SELECT allow_legacy FROM characters WHERE id = ?`,
       [test.characterId],
     ),
   ).toEqual({ allow_legacy: 1 });
   expect(
-    test.context.one(
+    test.context.oneRaw(
       `SELECT current_spell_version_id, selection_eligibility
        FROM spell_selection_slots WHERE id = ?`,
       [test.slotId],
@@ -249,7 +249,7 @@ it('applies level, list, school, and every tag before the stable fifty-result ca
     ),
   );
   expect(
-    test.context.one(
+    test.context.oneRaw(
       `SELECT spell_level_min, spell_level_max, allowed_spell_lists,
               allowed_schools, allowed_tags
        FROM spell_selection_slots WHERE id = ?`,
@@ -276,7 +276,7 @@ it('rejects cross-character slot lookup and preserves persisted ownership', asyn
     test.search.search(attackerId, test.slotId, 'Probe'),
   ).toThrow(EligibleSpellSearchNotFoundError);
   expect(
-    test.context.one(
+    test.context.oneRaw(
       `SELECT slot.character_id, source.character_id AS source_character_id
        FROM spell_selection_slots AS slot
        INNER JOIN character_source_instances AS source

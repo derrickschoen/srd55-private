@@ -384,8 +384,10 @@ export class PrintableSpellListBuilder {
        WHERE id IN (${inList})
        ORDER BY id`,
       bindings,
+      // `decodeFacts` was already a `RowCodec` in everything but its position.
+      decodeFacts,
     )) {
-      const base = decodeFacts(row);
+      const base = row;
       const versionTags = tags.get(base.spell_version_id) ?? [];
       facts.set(base.spell_version_id, {
         ...base,
@@ -414,14 +416,16 @@ export class PrintableSpellListBuilder {
        WHERE spell_version_id IN (${placeholders(versionIds)})
        ORDER BY spell_version_id, ${column}`,
       [...versionIds],
+      (stored) => ({
+        spell_version_id: sqlInteger(stored, 'spell_version_id'),
+        value: sqlString(stored, 'value'),
+      }),
     )) {
-      const id = sqlInteger(row, 'spell_version_id');
-      const values = grouped.get(id);
-      const value = sqlString(row, 'value');
+      const values = grouped.get(row.spell_version_id);
       if (values === undefined) {
-        grouped.set(id, [value]);
+        grouped.set(row.spell_version_id, [row.value]);
       } else {
-        values.push(value);
+        values.push(row.value);
       }
     }
     return grouped;

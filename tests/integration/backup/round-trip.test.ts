@@ -249,40 +249,40 @@ function seedCompleteCharacter(
 
 function persistedCharacter(db: DatabaseContext, characterId: number) {
   return {
-    character: db.one('SELECT * FROM characters WHERE id = ?', [characterId]),
-    classLevels: db.all(
+    character: db.oneRaw('SELECT * FROM characters WHERE id = ?', [characterId]),
+    classLevels: db.allRaw(
       'SELECT * FROM character_class_levels WHERE character_id = ?',
       [characterId],
     ),
-    sources: db.all(
+    sources: db.allRaw(
       'SELECT * FROM character_source_instances WHERE character_id = ?',
       [characterId],
     ),
-    slots: db.all(
+    slots: db.allRaw(
       'SELECT * FROM spell_selection_slots WHERE character_id = ?',
       [characterId],
     ),
-    spellbook: db.all(
+    spellbook: db.allRaw(
       'SELECT * FROM wizard_spellbook_entries WHERE character_id = ?',
       [characterId],
     ),
-    preferences: db.all(
+    preferences: db.allRaw(
       'SELECT * FROM character_spell_preferences WHERE character_id = ?',
       [characterId],
     ),
-    overrides: db.all(
+    overrides: db.allRaw(
       'SELECT * FROM character_rule_overrides WHERE character_id = ?',
       [characterId],
     ),
-    acknowledgements: db.all(
+    acknowledgements: db.allRaw(
       'SELECT * FROM warning_acknowledgements WHERE character_id = ?',
       [characterId],
     ),
-    savePoints: db.all(
+    savePoints: db.allRaw(
       'SELECT * FROM character_save_points WHERE character_id = ?',
       [characterId],
     ),
-    loadouts: db.all(
+    loadouts: db.allRaw(
       'SELECT * FROM spell_loadouts WHERE character_id = ?',
       [characterId],
     ),
@@ -396,7 +396,7 @@ describe('portable character backup', () => {
       }),
     ]);
     expect(
-      target.all(
+      target.allRaw(
         `SELECT entry.role, entry.spell_version_id
          FROM spell_loadout_entries AS entry
          JOIN spell_loadouts AS loadout ON loadout.id = entry.spell_loadout_id
@@ -413,7 +413,7 @@ describe('portable character backup', () => {
     // failure is a field quietly LOST or DEFAULTED, which a partial match would
     // not see. The half-entered weapon keeps every null as a null: nothing on
     // the way through is entitled to decide what its damage die was.
-    const importedWeapons = target.all(
+    const importedWeapons = target.allRaw(
       'SELECT * FROM character_weapons WHERE character_id = ? ORDER BY id',
       [characterId],
     );
@@ -520,20 +520,20 @@ describe('portable character backup', () => {
     );
     new CharacterState(target).restore(characterId, saved);
     expect(
-      target.one(
+      target.oneRaw(
         `SELECT intelligence FROM characters WHERE id = ?`,
         [characterId],
       ),
     ).toEqual({ intelligence: 18 });
     expect(
-      target.all(
+      target.allRaw(
         `SELECT warning_fingerprint, note
          FROM warning_acknowledgements WHERE character_id = ?`,
         [characterId],
       ),
     ).toEqual([{ warning_fingerprint: 'warning:shield', note: 'ack note' }]);
     expect(
-      target.all(
+      target.allRaw(
         `SELECT instance_uuid, notes
          FROM character_source_instances
          WHERE character_id = ?
@@ -545,7 +545,7 @@ describe('portable character backup', () => {
       expect.objectContaining({ notes: 'save-point only source' }),
     ]);
     expect(
-      target.all(
+      target.allRaw(
         `SELECT notes, current_spell_version_id
          FROM spell_selection_slots
          WHERE character_id = ?
@@ -573,7 +573,7 @@ describe('portable character backup', () => {
     const target = await database();
     seedCatalog(target, true);
     target.exec("INSERT INTO characters (name) VALUES ('Protected target')");
-    const before = target.all('SELECT * FROM characters ORDER BY id');
+    const before = target.allRaw('SELECT * FROM characters ORDER BY id');
 
     const crossed = structuredClone(document);
     (
@@ -582,7 +582,7 @@ describe('portable character backup', () => {
     expect(() => importCharacterBackup(target, crossed)).toThrow(
       'belongs to another character.',
     );
-    expect(target.all('SELECT * FROM characters ORDER BY id')).toEqual(before);
+    expect(target.allRaw('SELECT * FROM characters ORDER BY id')).toEqual(before);
 
     const unavailable = structuredClone(document);
     (
@@ -594,7 +594,7 @@ describe('portable character backup', () => {
     expect(() => importCharacterBackup(target, unavailable)).toThrow(
       'requires unavailable active spell_versions content_key',
     );
-    expect(target.all('SELECT * FROM characters ORDER BY id')).toEqual(before);
+    expect(target.allRaw('SELECT * FROM characters ORDER BY id')).toEqual(before);
 
     const constraintCorrupt = structuredClone(document);
     const originalOverride =
@@ -605,7 +605,7 @@ describe('portable character backup', () => {
       >
     ).push({ ...originalOverride, id: 999 });
     expect(() => importCharacterBackup(target, constraintCorrupt)).toThrow();
-    expect(target.all('SELECT * FROM characters ORDER BY id')).toEqual(before);
+    expect(target.allRaw('SELECT * FROM characters ORDER BY id')).toEqual(before);
     for (const table of [
       ...CHARACTER_STATE_TABLES,
       'character_spell_preferences',
@@ -702,7 +702,7 @@ describe('an already-downloaded backup file', () => {
     const { characterId } = importCharacterBackup(target, archived);
 
     expect(
-      target.one('SELECT name, notes, revision FROM characters WHERE id = ?', [
+      target.oneRaw('SELECT name, notes, revision FROM characters WHERE id = ?', [
         characterId,
       ]),
     ).toEqual({
@@ -742,7 +742,7 @@ describe('an already-downloaded backup file', () => {
     }
 
     // The old save point survives unchanged and unupgraded.
-    const savePoint = target.one(
+    const savePoint = target.oneRaw(
       `SELECT label, schema_version, snapshot
        FROM character_save_points WHERE character_id = ?`,
       [characterId],
@@ -819,7 +819,7 @@ describe('an already-downloaded backup file', () => {
     ).toBe('Archived Hero');
     // It did not record weapons, so the weapon is still there.
     expect(
-      target.all(
+      target.allRaw(
         'SELECT name FROM character_weapons WHERE character_id = ?',
         [characterId],
       ),
@@ -856,13 +856,13 @@ describe('an already-downloaded backup file', () => {
     new CharacterState(target).restore(characterId, JSON.parse(String(stored)));
 
     expect(
-      target.all(
+      target.allRaw(
         'SELECT name FROM character_armor WHERE character_id = ?',
         [characterId],
       ),
     ).toEqual([{ name: 'Bought afterwards' }]);
     expect(
-      target.all(
+      target.allRaw(
         'SELECT skill FROM character_skill_proficiencies WHERE character_id = ?',
         [characterId],
       ),
@@ -899,11 +899,11 @@ describe('complete database backup', () => {
     lifecycle.database.exec('DELETE FROM spell_identities');
 
     await importDatabaseBackup(lifecycle, backup);
-    expect(lifecycle.database.all('SELECT name, notes FROM characters')).toEqual(
+    expect(lifecycle.database.allRaw('SELECT name, notes FROM characters')).toEqual(
       [{ name: 'Image Hero', notes: 'kept' }],
     );
     expect(
-      lifecycle.database.all(
+      lifecycle.database.allRaw(
         'SELECT content_key, canonical_name, normalized_name FROM spell_identities',
       ),
     ).toEqual([
@@ -922,7 +922,7 @@ describe('complete database backup', () => {
       }),
     ).rejects.toThrow();
     expect(lifecycle.database.connection).toBe(connection);
-    expect(lifecycle.database.all('SELECT name, notes FROM characters')).toEqual(
+    expect(lifecycle.database.allRaw('SELECT name, notes FROM characters')).toEqual(
       [{ name: 'Image Hero', notes: 'kept' }],
     );
   });

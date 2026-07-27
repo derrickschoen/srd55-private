@@ -2,7 +2,23 @@ import type { SqlValue } from '@sqlite.org/sqlite-wasm';
 import type { JsonObject, JsonValue } from '../domain/models';
 
 export type SqlRow = Readonly<Record<string, SqlValue>>;
+
+/**
+ * How a row becomes a value this application is willing to reason about.
+ *
+ * REQUIRED at every `db.all` / `db.one`. Not optional, not defaulted, not
+ * inferrable — see `src/db/database.ts` and the compile-time proof in
+ * `tests/types/codec-required.type-test.ts`. When the row genuinely has no fixed
+ * column set, the answer is `allRaw`/`oneRaw`, which say so by name, and NOT an
+ * identity codec: `(row) => row` type-checks and guarantees nothing.
+ */
 export type RowCodec<T> = (row: SqlRow) => T;
+
+/**
+ * `SELECT id` — the commonest one-column read in the repository, hoisted so
+ * that it is written once and refuses a non-integer `id` in every caller.
+ */
+export const rowId: RowCodec<number> = (row) => sqlInteger(row, 'id');
 
 function codecError(column: string, expected: string, value: unknown): never {
   throw new TypeError(

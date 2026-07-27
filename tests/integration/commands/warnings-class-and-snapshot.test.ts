@@ -196,7 +196,7 @@ describe('warning, class, and snapshot commands', () => {
     await acknowledge.apply(characterId);
 
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT warning_fingerprint, note, invalidated_at
          FROM warning_acknowledgements
          WHERE character_id = ?`,
@@ -260,7 +260,7 @@ describe('warning, class, and snapshot commands', () => {
     );
     await update.apply(characterId);
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT note, invalidated_at
          FROM warning_acknowledgements
          WHERE character_id = ?`,
@@ -299,7 +299,7 @@ describe('warning, class, and snapshot commands', () => {
       'Warning acknowledgement does not belong to this character.',
     );
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT character_id, note
          FROM warning_acknowledgements
          WHERE warning_fingerprint = ?`,
@@ -366,7 +366,7 @@ describe('warning, class, and snapshot commands', () => {
       db.scalar('SELECT id FROM spell_selection_slots'),
     );
     new SpellSelectionService(db).select(slotId, spellId);
-    const original = db.one(
+    const original = db.oneRaw(
       `SELECT id, slot_key, current_spell_version_id
        FROM spell_selection_slots WHERE id = ?`,
       [slotId],
@@ -378,7 +378,7 @@ describe('warning, class, and snapshot commands', () => {
       subclass_definition_id: null,
     });
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT id, slot_key, current_spell_version_id, state,
                 selection_eligibility, selection_invalid_reason
          FROM spell_selection_slots WHERE id = ?`,
@@ -398,7 +398,7 @@ describe('warning, class, and snapshot commands', () => {
       subclass_definition_id: null,
     });
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT id, slot_key, current_spell_version_id, state,
                 selection_eligibility, selection_invalid_reason
          FROM spell_selection_slots WHERE id = ?`,
@@ -411,7 +411,7 @@ describe('warning, class, and snapshot commands', () => {
       selection_invalid_reason: null,
     });
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT level, subclass_definition_id, is_starting_class
          FROM character_class_levels
          WHERE character_id = ? AND class_definition_id = ?`,
@@ -441,7 +441,7 @@ describe('warning, class, and snapshot commands', () => {
       ),
     ).toBe(0);
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT source.state AS source_state, slot.id, slot.slot_key,
                 slot.current_spell_version_id, slot.state AS slot_state
          FROM character_source_instances AS source
@@ -525,7 +525,7 @@ describe('warning, class, and snapshot commands', () => {
     });
 
     expect(
-      db.all(
+      db.allRaw(
         `SELECT source_definition_id, state, config
          FROM character_source_instances
          WHERE character_id = ? AND source_type = 'subclass'

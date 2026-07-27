@@ -2,6 +2,7 @@ import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CharacterCommandExecutor } from '../../../src/commands/character-command-executor';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
+import { sqlString } from '../../../src/db/codecs';
 import { DatabaseContext } from '../../../src/db/database';
 import type {
   ArmorFields,
@@ -79,7 +80,7 @@ describe('sheet input commands', () => {
   }
 
   function armorRows() {
-    return db.all(
+    return db.allRaw(
       `SELECT slot, name, category, armor_class, dex_bonus, dex_bonus_max,
               strength_requirement, stealth_disadvantage, notes
          FROM character_armor WHERE character_id = ? ORDER BY slot`,
@@ -334,7 +335,7 @@ describe('sheet input commands', () => {
       proficient: true,
     });
     expect(
-      db.all(
+      db.allRaw(
         'SELECT skill FROM character_skill_proficiencies WHERE character_id = ?',
         [characterId],
       ),
@@ -388,7 +389,7 @@ describe('sheet input commands', () => {
       note: 'Cursed helm, house ruled.',
     });
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT armor_class_adjustment, armor_class_adjustment_note
            FROM character_sheet_adjustments WHERE character_id = ?`,
         [characterId],
@@ -469,11 +470,11 @@ describe('sheet input commands', () => {
     // an entity type the diff can produce that the log will not accept is a
     // write that fails at runtime, mid-command. These four are in
     // `AUDIT_ENTITY_TYPES` for that reason.
-    const types = db
-      .all<{ entity_type: string }>(
-        'SELECT DISTINCT entity_type FROM change_log ORDER BY entity_type',
-      )
-      .map((row) => String(row.entity_type));
+    const types = db.all(
+      'SELECT DISTINCT entity_type FROM change_log ORDER BY entity_type',
+      undefined,
+      (row) => sqlString(row, 'entity_type'),
+    );
     expect(types).toContain('character_armor');
     expect(types).toContain('character_skill_proficiencies');
   });
