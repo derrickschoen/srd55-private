@@ -1,5 +1,94 @@
 # Binding scope decisions
 
+## F17 — `.ai/` anchors into `.claude/decisions.md` BY LINE NUMBER, and the newest-first convention invalidates every one of them by construction (2026-07-27)
+
+Found by measuring the candidate audit parked last tick instead of asserting it
+— and the assertion I was going to make was already wrong, twice over.
+
+### What I was going to claim, and why it was wrong
+
+The parked note said "`.ai` docs use line-number anchors; symbol-name anchors
+would be stable". `tests/unit/docs/ai-reference-anchors-resolve.test.ts` already
+says that, in its own header: it defines three anchor classes, calls the
+symbol-verified one "the strong one", and states the guidance *"Where an anchor
+matters and can be written as class 3, prefer class 3."* Writing it up as a
+finding would have re-reported the test's own docstring as news.
+
+### What is actually true, measured
+
+53 anchors in `.ai/`: **20 symbol-verified** (strong — line N must CONTAIN the
+named symbol) and **33 line-only** (weak — the test can only bound the line
+number). The strong ones are concentrated in two files; six of eight have none.
+
+Of the 33 weak anchors, **9 point at a declaration** and could be upgraded to
+the verified form today. 19 point at prose or a comment and genuinely cannot be.
+
+**A weak anchor can be wrong with the suite green — proven by mutation, not
+argued.** `.ai/DEEP_REF_TESTING.md` cites `playwright.config.ts:5`, the port
+docstring. Rewritten to `:44` — inside the `env` block, a different subject
+entirely — the anchors test still passes 5/5, because the file has 54 lines.
+Reverted.
+
+### THE LIVE DEFECT, and this session caused it
+
+Four `.ai/` anchors point into `.claude/decisions.md` by line:
+
+| anchor | what the doc says it shows | what is there NOW |
+|---|---|---|
+| `:375` | "the opposite outcome when a split was badly scoped" | a blank line |
+| `:390` | "a test that covered a real defect and could not fail" | a TypeScript error string from D34's die-size probe |
+| `:490` | cited as evidence in `CODEBASE_GUIDE.md` | a sentence from D32 |
+
+`decisions.md` was **untracked at session start** and is **3914 lines** now.
+Every entry this session was inserted NEWEST FIRST, at the TOP. So every line
+anchor into that file was invalidated the first time an entry was added above
+its target, and has drifted further with each one since.
+
+The anchors test cannot catch this and was never going to: it bounds the line
+number, and a file that only grows is always long enough.
+
+### The collision is between two conventions, both of which are right
+
+The decisions file is append-at-top by design — highest number is newest, and
+`AGENTS.md` says so. Line anchors are stable only in a file that grows at the
+BOTTOM. Nothing was done wrong; two correct conventions were composed without
+anyone noticing that one destroys the other. That is F10's shape exactly:
+machinery that silently taxes every change made elsewhere.
+
+The anchors test's header reasons carefully about why `.claude/` must NOT be
+held to the tree — it is a chronological record, and rewriting its anchors to
+satisfy a lint "would be falsifying the log". Correct, and it does not consider
+the reverse direction: `.ai/` anchoring INTO that chronological file.
+
+### Decision: anchor into the decisions log by D/F NUMBER, never by line
+
+`D29` names an entry for as long as the entry exists. `:390` names a position
+that the next insertion moves. The log already has stable identifiers, designed
+for exactly this, used everywhere else in the project's prose.
+
+The anchors test can then verify a `decisions.md#D29`-style reference resolves
+to a real heading — which is class-3 strength (the target must CONTAIN the
+identifier) rather than class-2 bounding, so it becomes a stronger check than
+the one it replaces, not a weaker one.
+
+**Rejected: stop anchoring from `.ai/` into `.claude/` entirely.** It severs a
+genuinely useful link — the deep references cite decisions to explain WHY a rule
+exists, and that is the reference library working as intended.
+
+**Rejected: renumber the anchors whenever the log grows.** That is the F10 tax
+made explicit and permanent, on a file that grew 3914 lines in one session.
+
+**Rejected: append the decisions log at the BOTTOM instead.** It would fix the
+anchors and break the thing the convention exists for — a reader opening the
+file sees the newest binding decision first, and `AGENTS.md` promises that.
+
+NOT YET IMPLEMENTED — `feat/structured-values` is in flight; this touches
+`.ai/**` and the anchors test. The 9 upgradable weak anchors are worth doing in
+the same change, and the 19 prose anchors should be left alone with a note
+saying why, rather than pretended into class 3.
+
+---
+
 ## F16 — I verified the SHAPE of a thing instead of the thing, three times in one night, and each time it reached the binding record (2026-07-27)
 
 Not a defect in the code. A defect in how findings were produced, written down
