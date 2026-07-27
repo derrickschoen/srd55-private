@@ -233,6 +233,17 @@ function seedCatalog(db: DatabaseContext, padding = false) {
   return { classId, spellId };
 }
 
+/**
+ * THE SENDER'S OWN NOTE ABOUT THEIR CHARACTER — `characters.notes`, Q12.
+ *
+ * Deliberately the shape of something a person would not want sent by accident,
+ * and deliberately full of the characters a transport gets wrong: a newline, a
+ * tab, an emoji, a double quote and a backslash. A note that round-trips is a
+ * claim about bytes, not about strings that happen to be ASCII.
+ */
+const SENDER_NOTE =
+  'Table politics 🎲\tdo NOT share:\nAsked "why?" about Rhea\'s arc \\ unresolved.';
+
 function seedCharacter(
   db: DatabaseContext,
   catalog: ReturnType<typeof seedCatalog>,
@@ -241,8 +252,9 @@ function seedCharacter(
   const characterId = db.exec(
     `INSERT INTO characters (
        name, strength, dexterity, constitution, intelligence, wisdom,
-       charisma, proficiency_bonus_override, allow_legacy
-     ) VALUES ('Share Hero', 8, 14, 13, 18, 12, 10, 4, 1)`,
+       charisma, proficiency_bonus_override, allow_legacy, notes
+     ) VALUES ('Share Hero', 8, 14, 13, 18, 12, 10, 4, 1, ?)`,
+    [SENDER_NOTE],
   ).lastInsertId;
   db.exec(
     `INSERT INTO character_class_levels (
@@ -1076,12 +1088,14 @@ describe('minimal character sharing', () => {
         characterId: number;
         acknowledgements: boolean;
         loadouts: boolean;
+        notes: boolean;
       },
       ReturnType<typeof exportCharacterShare>
     >('share.exportCharacter', {
       characterId,
       acknowledgements: false,
       loadouts: true,
+      notes: false,
     });
     if (!exported.ok) {
       throw new Error(exported.error.message);
@@ -1133,10 +1147,16 @@ describe('minimal character sharing', () => {
     const defaults = await client.exportDebug(characterId);
     expect(defaults.acknowledgements).toBeUndefined();
     expect(defaults.loadouts).toBeUndefined();
+    // All THREE opt-ins are off when the caller passes nothing — the client
+    // sends `false` for each rather than omitting the key, which is what makes
+    // the handler's strict key count a contract rather than an obstacle.
+    expect(defaults.character.notes).toBeUndefined();
     const optedIn = await client.exportDebug(characterId, {
       acknowledgements: true,
       loadouts: true,
+      notes: true,
     });
+    expect(optedIn.character.notes).toBe(SENDER_NOTE);
     expect(optedIn.acknowledgements).toEqual([
       { warning: 'warning:shield' },
     ]);
@@ -1150,12 +1170,14 @@ describe('minimal character sharing', () => {
     const fragment = await client.createFragment(characterId, {
       acknowledgements: true,
       loadouts: true,
+      notes: true,
     });
     await expect(decodeShareFragment(fragment)).resolves.toEqual(optedIn);
     await expect(client.preview(fragment)).resolves.toMatchObject({
       name: 'Share Hero',
       includesAcknowledgements: true,
       includesLoadouts: true,
+      includesNotes: true,
     });
     expect(harness.context.db.scalar('SELECT count(*) FROM characters')).toBe(
       1,
@@ -1181,6 +1203,29 @@ describe('minimal character sharing', () => {
           characterId: 0,
           acknowledgements: false,
           loadouts: false,
+          notes: false,
+        },
+      },
+      // THE THIRD FLAG IS REQUIRED, NOT DEFAULTED. A caller that omits it is
+      // refused rather than silently treated as opting out — which is the same
+      // strictness the other two have always had, and the reason is that a
+      // params shape this handler merely tolerates is one nobody can reason
+      // about later.
+      {
+        method: 'share.exportCharacter',
+        params: {
+          characterId,
+          acknowledgements: false,
+          loadouts: false,
+        },
+      },
+      {
+        method: 'share.exportCharacter',
+        params: {
+          characterId,
+          acknowledgements: false,
+          loadouts: false,
+          notes: 'yes',
         },
       },
       { method: 'share.preview', params: { fragment: 42 } },
@@ -1252,6 +1297,179 @@ describe('a share link that predates weapons', () => {
     ).toEqual({ name: 'Old Link Hero', intelligence: 16 });
     // No weapons, and no error. Absence of a section is not corruption.
     expect(portableWeapons(target, imported.characterId)).toEqual([]);
+  });
+
+  it('imports into a build that carries notes, as a character with none', async () => {
+    // THE SAME QUESTION FOR Q12, and it is the one that matters most here: this
+    // link's CHARACTER element has eleven slots, and the reader now accepts
+    // twelve. A build that demanded twelve would refuse the link outright.
+    const target = await database();
+    seedCatalog(target);
+    target.exec(
+      `INSERT INTO feat_definitions (content_key, name, rules_edition)
+       VALUES ('2024:feat:alert', 'Alert', '2024')`,
+    );
+
+    const shared = await decodeShareFragment(LEGACY_FRAGMENT);
+    expect(Object.hasOwn(shared.character, 'notes')).toBe(false);
+    expect(previewCharacterShare(target, shared)).toMatchObject({
+      name: 'Old Link Hero',
+      includesNotes: false,
+    });
+
+    const imported = importCharacterShare(target, shared);
+    // NULL, not an empty string. The recipient's column is left at exactly what
+    // it holds for every character created any other way.
+    expect(
+      target.scalar('SELECT notes FROM characters WHERE id = ?', [
+        imported.characterId,
+      ]),
+    ).toBeNull();
+  });
+});
+
+/**
+ * A CHARACTER'S OWN NOTES, WHICH TRAVEL ONLY WHEN THE SHARER ASKS (Q12).
+ *
+ * The owner's ruling was "opt-in, like loadouts", and these are the two halves
+ * that ruling has to mean: with the option off — which is the default, and what
+ * every link minted before this change already does — the note stays in the
+ * sender's database and reaches the recipient's nowhere; with it on, the note
+ * arrives byte for byte.
+ *
+ * Both halves go THROUGH THE FRAGMENT into a SECOND DATABASE, because a value
+ * dropped by the encoder and a value dropped by the INSERT are equally lost and
+ * only the recipient's table can tell you which happened.
+ */
+describe('a character note travels only when the sharer opts in', () => {
+  async function recipient(): Promise<DatabaseContext> {
+    const db = await database();
+    seedCatalog(db);
+    return db;
+  }
+
+  async function through(
+    source: DatabaseContext,
+    characterId: number,
+    options?: Parameters<typeof exportCharacterShare>[2],
+  ): Promise<{
+    readonly document: CharacterShareDocument;
+    readonly stored: unknown;
+  }> {
+    const document = await decodeShareFragment(
+      await encodeShareFragment(
+        options === undefined
+          ? exportCharacterShare(source, characterId)
+          : exportCharacterShare(source, characterId, options),
+      ),
+    );
+    const target = await recipient();
+    const imported = importCharacterShare(target, document);
+    return {
+      document,
+      stored: target.scalar('SELECT notes FROM characters WHERE id = ?', [
+        imported.characterId,
+      ]),
+    };
+  }
+
+  it('carries nothing when nobody asks, and the sender still has the note', async () => {
+    const source = await database();
+    const catalog = seedCatalog(source);
+    const characterId = seedCharacter(source, catalog);
+    // The premise, checked rather than assumed: there IS a note to lose.
+    expect(
+      source.scalar('SELECT notes FROM characters WHERE id = ?', [characterId]),
+    ).toBe(SENDER_NOTE);
+
+    const { document, stored } = await through(source, characterId);
+    expect(Object.hasOwn(document.character, 'notes')).toBe(false);
+    expect(stored).toBeNull();
+    // Sharing is not moving. The sender keeps what they wrote.
+    expect(
+      source.scalar('SELECT notes FROM characters WHERE id = ?', [characterId]),
+    ).toBe(SENDER_NOTE);
+  });
+
+  it('carries nothing when the option is explicitly false or the other two are on', async () => {
+    const source = await database();
+    const catalog = seedCatalog(source);
+    const characterId = seedCharacter(source, catalog);
+
+    for (const options of [
+      { notes: false },
+      { acknowledgements: true, loadouts: true },
+    ] as const) {
+      const { document, stored } = await through(source, characterId, options);
+      expect(Object.hasOwn(document.character, 'notes')).toBe(false);
+      expect(stored).toBeNull();
+    }
+  });
+
+  it('round-trips the note byte for byte when the sharer asks', async () => {
+    const source = await database();
+    const catalog = seedCatalog(source);
+    const characterId = seedCharacter(source, catalog);
+
+    const { document, stored } = await through(source, characterId, {
+      notes: true,
+    });
+    expect(document.character.notes).toBe(SENDER_NOTE);
+    expect(stored).toBe(SENDER_NOTE);
+    // Byte for byte, not merely equal-looking: the newline, tab, emoji, quote
+    // and backslash all have to survive gzip, base64url and JSON escaping.
+    expect(stored).toContain('\n');
+    expect(stored).toContain('\t');
+    expect(stored).toContain('🎲');
+    expect(stored).toContain('"');
+    expect(stored).toContain('\\');
+  });
+
+  it('tells the recipient which links carry one, before anything is written', async () => {
+    const source = await database();
+    const catalog = seedCatalog(source);
+    const characterId = seedCharacter(source, catalog);
+    const target = await recipient();
+
+    for (const [options, expected] of [
+      [undefined, false],
+      [{ notes: true }, true],
+    ] as const) {
+      const document = await decodeShareFragment(
+        await encodeShareFragment(
+          options === undefined
+            ? exportCharacterShare(source, characterId)
+            : exportCharacterShare(source, characterId, options),
+        ),
+      );
+      expect(previewCharacterShare(target, document)).toMatchObject({
+        includesNotes: expected,
+      });
+    }
+    // Preview writes nothing, here as everywhere else.
+    expect(target.scalar('SELECT count(*) FROM characters')).toBe(0);
+  });
+
+  it('sends nothing for a character whose note is empty or absent', async () => {
+    // `''` and NULL are ONE STATE on the wire, because the recipient's column
+    // cannot show the difference — and because `text()` refuses a zero-length
+    // string, so an exported `''` would refuse to build the link at all over a
+    // note nobody wrote.
+    const source = await database();
+    const catalog = seedCatalog(source);
+    const characterId = seedCharacter(source, catalog);
+
+    for (const value of ['', null]) {
+      source.exec('UPDATE characters SET notes = ? WHERE id = ?', [
+        value,
+        characterId,
+      ]);
+      const { document, stored } = await through(source, characterId, {
+        notes: true,
+      });
+      expect(Object.hasOwn(document.character, 'notes')).toBe(false);
+      expect(stored).toBeNull();
+    }
   });
 });
 

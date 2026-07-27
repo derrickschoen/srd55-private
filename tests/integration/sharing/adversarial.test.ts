@@ -29,6 +29,7 @@ import {
 } from '../../../src/sharing/schema';
 import { ShareImportCompatibilityError } from '../../../src/sharing/import-issues';
 import { validateCharacterCommandPayload } from '../../../src/commands/payload-validator';
+import { CHARACTER_TEXT_LIMITS } from '../../../src/domain/character-limits';
 import {
   WEAPON_RANGE_MAX_FEET,
   WEAPON_TEXT_LIMITS,
@@ -2155,6 +2156,68 @@ describe('adversarial character-share rejection', () => {
       expect(issue.remedy).not.toMatch(/click|button|press/i);
     }
     expect(targetDb.scalar('SELECT count(*) FROM characters')).toBe(0);
+  });
+});
+
+/**
+ * THE ONE FIELD A SHARER CHOOSES TO SEND, VALIDATED LIKE EVERY OTHER (Q12).
+ *
+ * `character.notes` is optional free text on the character root, and the whole
+ * risk of a NEW optional string on an attacker-controlled document is that the
+ * validator treats it more loosely than its siblings because it arrived later.
+ * These cases are the sibling cases, asked of it.
+ */
+describe('a hostile or over-long character note', () => {
+  const withNote = (notes: unknown) =>
+    minimalDocument({
+      character: { name: 'Adversary', notes },
+    } as unknown as Partial<CharacterShareDocument>);
+
+  it('names the field rather than reporting a byte-limit overflow', () => {
+    expect(() =>
+      validateShareDocument(
+        withNote('x'.repeat(CHARACTER_TEXT_LIMITS.notes + 1)),
+      ),
+    ).toThrow(/character\.notes must be a string of 1-2000/);
+    // Thrown synchronously, before any compression happens, exactly as the
+    // weapon fields are: the message a user sees names the field.
+    expect(() =>
+      encodeShareFragment(
+        withNote('x'.repeat(CHARACTER_TEXT_LIMITS.notes + 1)),
+      ),
+    ).toThrow(ShareValidationError);
+    // Exactly at the cap is fine — the boundary is inclusive, so a cap set to
+    // reject legitimate data would show up here rather than in the field.
+    expect(() =>
+      validateShareDocument(withNote('x'.repeat(CHARACTER_TEXT_LIMITS.notes))),
+    ).not.toThrow();
+  });
+
+  it('refuses a non-string, an empty string, and an unknown neighbour', () => {
+    for (const value of [42, true, null, [], { note: 'x' }, '']) {
+      expect(() => validateShareDocument(withNote(value))).toThrow(
+        ShareValidationError,
+      );
+    }
+    expect(() =>
+      validateShareDocument(
+        minimalDocument({
+          character: { name: 'Adversary', note: 'singular' },
+        } as unknown as Partial<CharacterShareDocument>),
+      ),
+    ).toThrow(/character contains unknown field note/);
+  });
+
+  it('preserves an adversarial note through the wire without interpreting it', async () => {
+    // A note is free text a stranger wrote. It must arrive as bytes, not as
+    // markup, a path, or a prototype key.
+    // The NUL is written as `\u0000` rather than as a literal byte: F14,
+    // and a note is exactly the kind of user text that can contain one.
+    const hostile =
+      '__proto__ </script>\\n\t"; DROP TABLE characters; --\u0000\u202e\u{1f3b2}';
+    const decoded = await throughShareLink(withNote(hostile));
+    expect(decoded.character.notes).toBe(hostile);
+    expect(Object.getPrototypeOf(decoded.character)).toBe(Object.prototype);
   });
 });
 

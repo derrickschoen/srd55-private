@@ -77,6 +77,20 @@ test('creates, independently verifies, previews, and explicitly imports a durabl
   await page
     .getByRole('button', { name: 'Share Journey Hero 🧙 by link' })
     .click();
+
+  // ALL THREE OPT-INS ARE PRESENT AND ALL THREE START OFF. The default is not
+  // cosmetic: a link minted before any of them existed carries none of them, so
+  // the box a user never touches has to produce that same link. The notes box
+  // is the one this asserts hardest, because it is the only option guarding
+  // text a person wrote about themselves.
+  for (const label of [
+    'Include warning acknowledgements',
+    'Include loadouts',
+    'Include my notes about this character',
+  ]) {
+    await expect(page.getByLabel(label)).not.toBeChecked();
+  }
+
   await page.getByRole('button', { name: 'Create share link' }).click();
   const output = page.getByLabel('Generated character share link');
   await expect(output).toBeVisible();
@@ -88,6 +102,11 @@ test('creates, independently verifies, previews, and explicitly imports a durabl
   expect(positional[0]).toBe('dnd-multiclass-spells-character-share');
   expect(positional[1]).toBe(1);
   expect((positional[2] as unknown[])[0]).toBe('Journey Hero 🧙');
+  // TWELVE, and the last one NULL. That is the shape a link gets when nobody
+  // ticks the notes box — the twelfth slot is written (this build has one
+  // output shape, not two) and carries nothing.
+  expect(positional[2]).toHaveLength(12);
+  expect((positional[2] as unknown[])[11]).toBeNull();
   expect(positional.slice(3, 9)).toEqual([[], [], [], [], [], []]);
 
   const freshProfile = await browser.newContext();
