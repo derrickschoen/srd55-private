@@ -476,9 +476,9 @@ export const TABLE_SCOPES = {
     backupReference: false,
   },
   /**
-   * The levels at which a spell can be upcast. Catalog content on the same five
-   * flags as every other `spell_versions` pivot, and the reasoning is the same
-   * one `spell_versions` itself records: the catalog is REBUILT by the
+   * The SLOT levels at which a spell can be upcast. Catalog content on the same
+   * five flags as every other `spell_versions` pivot, and the reasoning is the
+   * same one `spell_versions` itself records: the catalog is REBUILT by the
    * recipient's own import, so nothing about it belongs in a portable document.
    *
    * `backupReference` STAYS FALSE, and it is worth saying why it is not
@@ -488,6 +488,27 @@ export const TABLE_SCOPES = {
    * points at an upcast level, so there is nothing to resolve.
    */
   spell_version_upcast_levels: {
+    role: 'catalog_spell',
+    snapshot: false,
+    backupDirect: false,
+    backup: false,
+    share: false,
+    backupReference: false,
+  },
+  /**
+   * The CHARACTER levels at which a cantrip's effect changes — the SRD's
+   * Cantrip Upgrade. A sibling of `spell_version_upcast_levels` and classified
+   * identically for identical reasons: catalog content, rebuilt by the
+   * recipient's own import, referenced by nothing a character owns.
+   *
+   * `share: false` IS WHY D30's COLUMN-PORTABILITY GUARD DOES NOT APPLY HERE.
+   * That test's `PROBES` map is keyed by `ShareTable | 'characters'`, and
+   * neither this table nor `spell_versions` is a `ShareTable`, so the new
+   * columns in this change have nothing to classify there. Said out loud rather
+   * than left as an absence, because "no classification was needed" and
+   * "somebody forgot to classify it" look identical in a diff.
+   */
+  spell_version_cantrip_upgrade_levels: {
     role: 'catalog_spell',
     snapshot: false,
     backupDirect: false,
@@ -1032,6 +1053,7 @@ export const APPLICATION_TABLES = order<AnyTableName>()([
   'spell_loadouts',
   'spell_selection_slots',
   'spell_version_attack_modes',
+  'spell_version_cantrip_upgrade_levels',
   'spell_version_conditions',
   'spell_version_damage_types',
   'spell_version_publications',

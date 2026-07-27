@@ -10,7 +10,6 @@ import type {
   SlotState,
   SpellAreaShape,
   SpellRangeKind,
-  UpcastScale,
 } from './enums';
 
 export type JsonPrimitive = string | number | boolean | null;
@@ -79,8 +78,15 @@ export interface SpellVersionRow extends TimestampedRow {
   area_feet: number | null;
   healing: boolean;
   short_summary: string | null;
-  upcast_scale: UpcastScale | null;
+  /** Text for the SLOT-level progression. See `spell_version_upcast_levels`. */
   upcast_summary: string | null;
+  /**
+   * Text for the CHARACTER-level Cantrip Upgrade. See
+   * `spell_version_cantrip_upgrade_levels`. A separate field from
+   * `upcast_summary` because it describes a separate mechanic, and the two
+   * columns exist so that neither has to be read as the other.
+   */
+  cantrip_upgrade_summary: string | null;
   requires_mod_for_effect: boolean;
   effect_reliability_category: EffectReliabilityCategory;
   provenance: string;

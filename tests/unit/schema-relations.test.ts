@@ -133,7 +133,7 @@ afterAll(() => {
 });
 
 describe('declared relations match the foreign keys', () => {
-  it('budgets 56 constraints across 59 PRAGMA rows', () => {
+  it('budgets 61 constraints across 64 PRAGMA rows', () => {
     const tables = db
       .selectValues(
         `SELECT name FROM sqlite_schema
@@ -189,13 +189,15 @@ describe('declared relations match the foreign keys', () => {
     // `character_source_instances` carries its `(id, character_id)` unique
     // index; without it an effect could be attached to another character's
     // source instance and still pass `PRAGMA foreign_key_check`.
-    // Four more constraints and four more PRAGMA rows: one from
-    // `spell_version_upcast_levels` into `spell_versions`, and three from
-    // `background_equipment_items` — into `background_templates`,
+    // FIVE more constraints and five more PRAGMA rows: one each from
+    // `spell_version_upcast_levels` and `spell_version_cantrip_upgrade_levels`
+    // into `spell_versions` — two tables because upcasting and the Cantrip
+    // Upgrade are two mechanics counted in two different kinds of level — and
+    // three from `background_equipment_items`, into `background_templates`,
     // `weapon_templates` and `armor_templates`. The last two are what make the
     // owner's *"unless weapon or armor"* a reference rather than a spelling.
-    expect(constraintEdges(db)).toHaveLength(60);
-    expect(rowCount).toBe(63);
+    expect(constraintEdges(db)).toHaveLength(61);
+    expect(rowCount).toBe(64);
   });
 
   it('declares a relation for every foreign key, and a foreign key for every relation', () => {

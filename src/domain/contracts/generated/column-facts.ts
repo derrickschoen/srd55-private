@@ -546,6 +546,11 @@ export const COLUMN_FACTS = {
     spell_version_id: { base: 'integer', notNull: true },
     attack_mode: { base: 'degraded', notNull: true },
   },
+  spell_version_cantrip_upgrade_levels: {
+    id: { base: 'integer', notNull: true },
+    spell_version_id: { base: 'integer', notNull: true },
+    level: { base: 'integer', notNull: true },
+  },
   spell_version_conditions: {
     id: { base: 'integer', notNull: true },
     spell_version_id: { base: 'integer', notNull: true },
@@ -604,8 +609,8 @@ export const COLUMN_FACTS = {
     material_cost_kind: { base: 'degraded', notNull: false },
     healing: { base: 'degraded', notNull: true },
     short_summary: { base: 'degraded', notNull: false },
-    upcast_scale: { base: 'degraded', notNull: false },
     upcast_summary: { base: 'degraded', notNull: false },
+    cantrip_upgrade_summary: { base: 'degraded', notNull: false },
     requires_mod_for_effect: { base: 'degraded', notNull: true },
     effect_reliability_category: { base: 'degraded', notNull: true },
     provenance: { base: 'degraded', notNull: true },

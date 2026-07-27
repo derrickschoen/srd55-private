@@ -639,6 +639,16 @@ const upcastLevel =
     });
   };
 
+const cantripUpgradeLevel =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'spell_version_cantrip_upgrade_levels', {
+      spell_version_id: newSpellVersion(db),
+      level: 5,
+      ...values,
+    });
+  };
+
 const speciesTemplateTrait =
   (values: Values): Write =>
   (db) => {
@@ -1050,33 +1060,57 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
       ['300 GP in copper', spellVersion({ material_cost_copper: 30_000, material_cost_kind: 'minimum' })],
     ],
   },
-  {
-    constraint: 'spell_versions_upcast_scale_check',
-    rejects: [
-      ['a scale nothing counts in', spellVersion({ upcast_scale: 'spell_level' })],
-      ['an empty scale, which is a null in costume', spellVersion({ upcast_scale: '' })],
-    ],
-    accepts: [
-      ['no upcast progression, which every spell has today', spellVersion({})],
-      ['slot levels, a levelled spell', spellVersion({ upcast_scale: 'slot_level' })],
-      ['character levels, the bundled cantrip upgrades', spellVersion({ upcast_scale: 'character_level' })],
-    ],
-  },
+  /* ======================================================================
+   * THE TWO PROGRESSION LADDERS, AND THE WHOLE POINT IS THAT THEIR BOUNDS
+   * DIFFER.
+   *
+   * `spell_versions_upcast_scale_check` USED TO SIT HERE and is deleted with
+   * its subject: there is no `upcast_scale` column for it to constrain. Its
+   * five cases are not re-homed, because each named a value of a vocabulary
+   * that no longer exists — `'spell_level'`, `''`, `'slot_level'`,
+   * `'character_level'` — and the question they asked ("which levels is this
+   * list counted in?") is now answered by which TABLE the row is in.
+   *
+   * The bound each table carries used to be one loose 1..20 shared by both
+   * meanings, because a column CHECK could not see the parent's scale. Two
+   * tables can each state their own, so the database now refuses a 20 in a slot
+   * list rather than deferring to a contract one layer up.
+   * ====================================================================== */
   {
     constraint: 'spell_version_upcast_levels_level_check',
     rejects: [
-      ['level 0, which is a cantrip and not an upcast', upcastLevel({ level: 0 })],
-      // 20 AND NOT 9: the bound here is the LOOSER of the two scales, because
-      // a column CHECK cannot see the parent's `upcast_scale`. The exact,
-      // scale-aware bound is enforced in `src/catalog/catalog-schema.ts`.
-      ['level 21, above every character level', upcastLevel({ level: 21 })],
+      ['level 0, which is a cantrip and not a slot', upcastLevel({ level: 0 })],
+      // THE VALUES THAT USED TO BE ACCEPTED HERE. 17 and 20 are Cantrip
+      // Upgrade character levels and they belong in the sibling table; storing
+      // one here would print "slot levels 5, 11, 17", a ladder no spell has.
+      ['level 10, above every spell slot level', upcastLevel({ level: 10 })],
+      ['level 17, a Cantrip Upgrade step and not a slot level', upcastLevel({ level: 17 })],
+      ['level 20, the highest character level', upcastLevel({ level: 20 })],
+      ['level 21, above every level of anything', upcastLevel({ level: 21 })],
       ['a fractional level', upcastLevel({ level: 2.5 })],
     ],
     accepts: [
       ['level 1', upcastLevel({ level: 1 })],
       ['level 9, the highest slot level', upcastLevel({ level: 9 })],
-      ['level 17, a bundled cantrip upgrade step', upcastLevel({ level: 17 })],
-      ['level 20, the highest character level', upcastLevel({ level: 20 })],
+    ],
+  },
+  {
+    constraint: 'spell_version_cantrip_upgrade_levels_level_check',
+    rejects: [
+      ['level 0, which is no character level at all', cantripUpgradeLevel({ level: 0 })],
+      ['level 21, above every character level', cantripUpgradeLevel({ level: 21 })],
+      ['a fractional level', cantripUpgradeLevel({ level: 5.5 })],
+    ],
+    accepts: [
+      ['level 1', cantripUpgradeLevel({ level: 1 })],
+      // The bundled ladder, verbatim: "when you reach levels 5 …, 11 …, and 17"
+      // (`docs/srd/source/weapon-attack-cantrips.txt:26-29`). Every one of the
+      // three is now unstorable in the OTHER table, which is the asymmetry this
+      // pair of constraints exists to hold.
+      ['level 5, the first bundled Cantrip Upgrade step', cantripUpgradeLevel({ level: 5 })],
+      ['level 11, the second', cantripUpgradeLevel({ level: 11 })],
+      ['level 17, the third', cantripUpgradeLevel({ level: 17 })],
+      ['level 20, the highest character level', cantripUpgradeLevel({ level: 20 })],
     ],
   },
   /* ======================================================================

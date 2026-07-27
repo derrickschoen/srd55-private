@@ -451,19 +451,21 @@ describe('catalog import persistence', () => {
   });
 
   /**
-   * THE ONE EXEMPTION FROM THE FREEZE THAT IS A FILL RATHER THAN A CHANGE.
+   * THE EXEMPTIONS FROM THE FREEZE THAT ARE A FILL RATHER THAN A CHANGE.
    *
    * A referenced version is frozen so a spell cannot change under a character
-   * who already chose it. The upcast progression is NET-NEW — no document
-   * written before it existed carries it — so every version that predates it
-   * has the fact ABSENT, and a version is referenced exactly when a character
+   * who already chose it. Both progressions are NET-NEW — no document written
+   * before they existed carries either — so every version that predates them
+   * has both facts ABSENT, and a version is referenced exactly when a character
    * uses it, which is exactly when the printable card renders it. Frozen
-   * unconditionally, the only spells that can ever print an upcast line are the
+   * unconditionally, the only spells that can ever print a progression are the
    * ones nobody plays.
    *
-   * The fill is all-or-nothing and never an overwrite; the second half of this
-   * test is the half that matters, because a per-column fill would let a stored
-   * `slot_level` describe a document's CHARACTER-level ladder.
+   * THREE CLAIMS, AND THE SECOND AND THIRD ARE THE ONES THAT MATTER. The fill
+   * is all-or-nothing within a fact, so a stored summary can never end up
+   * describing a document's levels; and the two facts are gated SEPARATELY, so
+   * a version frozen on its slot-level upcasting can still be given the Cantrip
+   * Upgrade it has never had.
    */
   it('fills a referenced version’s ABSENT upcast progression, and refuses to change one it has', async () => {
     const test = await database();
@@ -479,7 +481,6 @@ describe('catalog import persistence', () => {
     );
 
     const upcast = {
-      upcastScale: 'slot_level',
       upcastLevels: [2, 3],
       upcastSummary: 'One additional creature per slot level above 1.',
     };
@@ -491,13 +492,12 @@ describe('catalog import persistence', () => {
     expect(filled.updated).toBe(1);
     expect(
       test.db.oneRaw(
-        `SELECT display_name, upcast_scale, upcast_summary
+        `SELECT display_name, upcast_summary
          FROM spell_versions WHERE id = ?`,
         [versionId],
       ),
     ).toEqual({
       display_name: 'Test Spell',
-      upcast_scale: 'slot_level',
       upcast_summary: 'One additional creature per slot level above 1.',
     });
     expect(
@@ -509,16 +509,16 @@ describe('catalog import persistence', () => {
       test.importer.import({ documents: [document(record(upcast))] }).updated,
     ).toBe(0);
 
-    // A DIFFERENT progression on the now-non-absent version is REFUSED whole.
-    // Filling column by column would leave `slot_level` describing `5, 11, 17`.
+    // A DIFFERENT progression on the now-non-absent version is REFUSED WHOLE.
+    // Filling column by column would leave the stored summary — which says
+    // "per slot level above 1" — describing the levels `4, 6, 8`.
     expect(
       test.importer.import({
         documents: [
           document(
             record({
-              upcastScale: 'character_level',
-              upcastLevels: [5, 11, 17],
-              upcastSummary: 'The cantrip ladder.',
+              upcastLevels: [4, 6, 8],
+              upcastSummary: 'Every other slot level.',
             }),
           ),
         ],
@@ -526,13 +526,50 @@ describe('catalog import persistence', () => {
     ).toBe(0);
     expect(
       test.db.oneRaw(
-        'SELECT upcast_scale, upcast_summary FROM spell_versions WHERE id = ?',
+        'SELECT upcast_summary FROM spell_versions WHERE id = ?',
         [versionId],
       ),
     ).toEqual({
-      upcast_scale: 'slot_level',
       upcast_summary: 'One additional creature per slot level above 1.',
     });
+    expect(
+      values(test.db, 'spell_version_upcast_levels', 'level', versionId),
+    ).toEqual(['2', '3']);
+
+    // AND THE CANTRIP UPGRADE IS STILL FILLABLE, because it is a different
+    // fact. One gate for both would have frozen a progression nobody stored.
+    expect(
+      test.importer.import({
+        documents: [
+          document(
+            record({
+              ...upcast,
+              cantripUpgradeLevels: [5, 11, 17],
+              cantripUpgradeSummary: 'The cantrip ladder.',
+            }),
+          ),
+        ],
+      }).updated,
+    ).toBe(1);
+    expect(
+      test.db.oneRaw(
+        `SELECT upcast_summary, cantrip_upgrade_summary
+         FROM spell_versions WHERE id = ?`,
+        [versionId],
+      ),
+    ).toEqual({
+      upcast_summary: 'One additional creature per slot level above 1.',
+      cantrip_upgrade_summary: 'The cantrip ladder.',
+    });
+    expect(
+      values(
+        test.db,
+        'spell_version_cantrip_upgrade_levels',
+        'level',
+        versionId,
+      ),
+    ).toEqual(['5', '11', '17']);
+    // The slot ladder is untouched by the cantrip fill.
     expect(
       values(test.db, 'spell_version_upcast_levels', 'level', versionId),
     ).toEqual(['2', '3']);

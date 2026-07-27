@@ -45,9 +45,10 @@ document.
     "sourceSlug": "chill-touch",
     "tags": [],
     "healing": false,
-    "upcastScale": null,
     "upcastLevels": [],
-    "upcastSummary": null
+    "upcastSummary": null,
+    "cantripUpgradeLevels": [],
+    "cantripUpgradeSummary": null
   }
 ]
 ```
@@ -62,32 +63,52 @@ Required fields are:
 - Lists of non-empty strings: `attackModes`, `saveAbilities`, `spellLists`,
   and `sourceBooks`.
 
-`castingTime`, `range`, `components`, `duration`, `upcastSummary`, and
-`sourceSlug` may be a string or `null`. `sourcePage` may be a non-negative
+`castingTime`, `range`, `components`, `duration`, `upcastSummary`,
+`cantripUpgradeSummary`, and `sourceSlug` may be a string or `null`. `sourcePage` may be a non-negative
 integer or `null`. `tags` defaults to `[]`, and `healing` defaults to `false`.
 `effectReliabilityCategory` defaults to `fixed_effect` and accepts
 `attack_roll`, `saving_throw`, `fixed_effect`, `modifier_scaled`,
 `ritual_utility`, or `mixed`.
 
-#### The upcast progression
+#### The upcast progression, and the Cantrip Upgrade
 
-`upcastScale` and `upcastLevels` are optional and default to `null` and `[]`.
-Every document written before they existed omits them, and omitting them is not
-a claim that the spell cannot be upcast — it is a document that does not say.
+These are TWO DIFFERENT MECHANICS with two pairs of fields. All four are
+optional and default to `[]` and `null`. Every document written before they
+existed omits them, and omitting them is not a claim that the spell has no such
+progression — it is a document that does not say.
 
-They must be supplied TOGETHER or not at all, and the import is refused if only
-one is present. The reason is that the levels alone are ambiguous:
+**`upcastLevels` is SPELL SLOT LEVELS, 1 through 9.** It is the "Using a
+Higher-Level Spell Slot" paragraph of a levelled spell, and it is a LIST rather
+than a starting level because the cadence varies: a spell that improves at every
+slot level above its base lists every one of them, and a spell that improves at
+every *other* slot level lists only those.
 
-- `"upcastScale": "slot_level"` means the levels are SPELL SLOT LEVELS, 1
-  through 9 — the "Using a Higher-Level Spell Slot" paragraph of a levelled
-  spell.
-- `"upcastScale": "character_level"` means they are CHARACTER LEVELS, 1 through
-  20 — a cantrip's damage ladder, e.g. `[5, 11, 17]`.
+```json
+"upcastLevels": [2, 3, 4, 5, 6, 7, 8, 9]
+"upcastLevels": [3, 5, 7, 9]
+```
 
-`[5, 11, 17]` is a plausible list under either reading and means two completely
-different things, so a list with no scale is refused rather than stored.
-Duplicated levels and levels outside the scale's range are refused too.
-`upcastSummary` is free text and is printed verbatim.
+Both are legal and they describe different spells. A "from level N upwards"
+field could not tell them apart.
+
+**`cantripUpgradeLevels` is CHARACTER LEVELS, 1 through 20.** It is the SRD's
+Cantrip Upgrade — *"when you reach levels 5 …, 11 …, and 17"* — which is not
+upcasting at all: no slot is spent, and a cantrip has none to spend.
+
+```json
+"cantripUpgradeLevels": [5, 11, 17]
+```
+
+Duplicated levels, non-integers, and levels outside each field's range are
+refused. Both summaries are free text and are printed verbatim, each on its own
+line of the printable card, and each may be supplied with or without its list.
+
+**`upcastScale` is refused.** It used to select between the two readings of a
+single `upcastLevels` list. A document that still sets it is refused by name
+rather than silently reinterpreted, because `{"upcastScale":
+"character_level", "upcastLevels": [5]}` would otherwise import as slot level 5
+— a number the document never stated. An explicit `"upcastScale": null` is
+accepted and ignored; it asserts nothing.
 
 #### What the importer reads OUT of `range` and `components`
 
@@ -223,13 +244,16 @@ by name rather than left to raise an opaque constraint error mid-transaction.
 
 If a version is referenced by a selection, Wizard spellbook entry, loadout, or
 preference, its imported rules and pivots are preserved byte-for-byte.
-Activity can still change, and optional text can still be filled in. The upcast
-progression — `upcastScale`, `upcastLevels` and `upcastSummary` — is also filled
-in, but ONLY on a version that carries none of it: no stored scale and no stored
-levels. That is a fill and never an overwrite, and it is all three fields
-together or none, so a stored scale can never end up describing a document's
-levels. A referenced version that already states an upcast progression keeps the
-one it has. Any
+Activity can still change, and optional text can still be filled in. The two
+progressions are also filled in — `upcastLevels` with `upcastSummary`, and
+`cantripUpgradeLevels` with `cantripUpgradeSummary` — but each ONLY on a version
+that carries none of that progression: no stored summary and no stored levels.
+That is a fill and never an overwrite, and it is both fields of one progression
+together or neither, so a stored summary can never end up describing a
+document's levels. The two are gated INDEPENDENTLY: a referenced version that
+states its slot-level upcasting can still be given a Cantrip Upgrade it has
+never had. A referenced version that already states a progression keeps the one
+it has. Any
 selection affected by tombstoning or reactivation is refreshed in place, so
 the reference is retained with persisted `invalid` or `valid` status.
 

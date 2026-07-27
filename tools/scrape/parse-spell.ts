@@ -308,16 +308,17 @@ export function parseSpellPage(
     sourceSlug: options.slug,
     tags: [],
     healing: false,
-    // LEFT ABSENT, for the same reason `attackModes` and `saveAbilities` above
-    // are empty. A page's "Using a Higher-Level Spell Slot" paragraph is prose,
-    // and reading a list of levels out of it would be the plausible-and-wrong
-    // fabrication this parser is arranged to refuse — with the extra hazard
-    // that the two upcast SCALES are indistinguishable once the integers have
-    // been extracted, so a mis-read would not merely be wrong, it would be
-    // wrong about which question it was answering.
-    upcastScale: null,
+    // BOTH LADDERS LEFT ABSENT, for the same reason `attackModes` and
+    // `saveAbilities` above are empty. A page's "Using a Higher-Level Spell
+    // Slot" and "Cantrip Upgrade" paragraphs are prose, and reading a list of
+    // levels out of either would be the plausible-and-wrong fabrication this
+    // parser is arranged to refuse. The hazard is now smaller than it was —
+    // the two are separate fields, so a mis-read can no longer be wrong about
+    // WHICH question it answered — and it is still a fabrication.
     upcastLevels: [],
     upcastSummary: null,
+    cantripUpgradeLevels: [],
+    cantripUpgradeSummary: null,
   };
 
   return { ok: true, value: { record, description } };

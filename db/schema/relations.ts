@@ -17,6 +17,7 @@ import {
   spell_identity_aliases,
   spell_list_memberships,
   spell_version_attack_modes,
+  spell_version_cantrip_upgrade_levels,
   spell_version_conditions,
   spell_version_damage_types,
   spell_version_publications,
@@ -577,6 +578,16 @@ export const spellVersionUpcastLevelsRelations = relations(
   ({ one }) => ({
     spell_version: one(spell_versions, {
       fields: [spell_version_upcast_levels.spell_version_id],
+      references: [spell_versions.id],
+    }),
+  }),
+);
+
+export const spellVersionCantripUpgradeLevelsRelations = relations(
+  spell_version_cantrip_upgrade_levels,
+  ({ one }) => ({
+    spell_version: one(spell_versions, {
+      fields: [spell_version_cantrip_upgrade_levels.spell_version_id],
       references: [spell_versions.id],
     }),
   }),

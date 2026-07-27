@@ -58,14 +58,15 @@ describe('spell page parser', () => {
       sourceSlug: 'spell:lanternfall',
       tags: [],
       healing: false,
-      // ABSENT, NOT EMPTY-BECAUSE-THE-PAGE-SAID-SO. The scraper does not read
-      // an upcast progression out of prose (see `tools/scrape/parse-spell.ts`),
-      // so every scraped record carries the same three values whatever the page
-      // printed. Asserted here rather than left off the `toEqual` so that a
-      // future parser that DID start inferring one could not do it silently.
-      upcastScale: null,
+      // ABSENT, NOT EMPTY-BECAUSE-THE-PAGE-SAID-SO. The scraper reads neither
+      // ladder out of prose (see `tools/scrape/parse-spell.ts`), so every
+      // scraped record carries the same four values whatever the page printed.
+      // Asserted here rather than left off the `toEqual` so that a future
+      // parser that DID start inferring one could not do it silently.
       upcastLevels: [],
       upcastSummary: null,
+      cantripUpgradeLevels: [],
+      cantripUpgradeSummary: null,
     });
     // Body text is Tier 2 and never rides along in the Tier 1 record.
     expect(description).toContain('A hanging lantern of pale light');
