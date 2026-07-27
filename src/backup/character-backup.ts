@@ -224,13 +224,28 @@ function nullablePositiveInteger(
  * THIS MAP IS APPEND-ONLY BY NATURE. Each entry is a HISTORICAL FACT about
  * documents already on disk. Removing one makes those documents unopenable
  * again.
+ *
+ * THE KEY IS A CHARACTER-SCOPED TABLE NAME AND THE TYPE SAYS SO. Not a
+ * decoration: `rowList` also parses the REFERENCE lists, whose kinds
+ * (`class_definitions`, `spell_versions`, …) are themselves real table names,
+ * so a bare `string` key would put two unrelated name spaces in one map and
+ * leave "no reference kind collides with a retired column" as a fact about
+ * today enforced by nothing. `RetiredColumnTable` excludes the reference kinds
+ * by construction, and `rowList` takes `null` for the lists that have none.
  */
-const RETIRED_ROW_COLUMNS: Readonly<Record<string, readonly string[]>> = {
+type RetiredColumnTable = BackupTable | SnapshotTable;
+
+const RETIRED_ROW_COLUMNS: Readonly<
+  Partial<Record<RetiredColumnTable, readonly string[]>>
+> = {
   spell_selection_slots: ['orphaned_by_change_group_id'],
 };
 
-function withoutRetiredColumns(table: string, row: BackupRow): BackupRow {
-  const retired = RETIRED_ROW_COLUMNS[table];
+function withoutRetiredColumns(
+  table: RetiredColumnTable | null,
+  row: BackupRow,
+): BackupRow {
+  const retired = table === null ? undefined : RETIRED_ROW_COLUMNS[table];
   if (retired === undefined || !retired.some((key) => Object.hasOwn(row, key))) {
     return row;
   }
@@ -241,7 +256,11 @@ function withoutRetiredColumns(table: string, row: BackupRow): BackupRow {
   return stripped;
 }
 
-function rowList(value: unknown, label: string, table: string): BackupRow[] {
+function rowList(
+  value: unknown,
+  label: string,
+  table: RetiredColumnTable | null,
+): BackupRow[] {
   if (!Array.isArray(value)) {
     throw new BackupValidationError(`${label} must be a list.`);
   }
@@ -341,8 +360,11 @@ function referenceMap(
   kind: ReferenceKind,
 ): Map<number, string> {
   // A reference list is not a table row list; it has no retired columns and
-  // its keys are pinned by `assertExactKeys` below.
-  const rows = rowList(value, `Character backup references.${kind}`, kind);
+  // its keys are pinned by `assertExactKeys` below. Passing `null` rather than
+  // `kind` is what keeps the reference name space out of
+  // `RETIRED_ROW_COLUMNS`, and the parameter's type makes passing `kind` here
+  // a compile error rather than a convention.
+  const rows = rowList(value, `Character backup references.${kind}`, null);
   const result = new Map<number, string>();
   const keys = new Set<string>();
   for (const [index, row] of rows.entries()) {

@@ -10,8 +10,30 @@ import preDrizzleSchema from '../fixtures/schema-pre-drizzle.sql?raw';
 type SqlRow = Record<string, string | number | bigint | null>;
 
 /**
+ * THE STORAGE CLASS A COLUMN IMPOSES ON WHAT IS WRITTEN TO IT.
+ *
+ * SQLite has no column types, only AFFINITIES, and the affinity is what
+ * actually changes stored data: writing the string `'2024'` to a TEXT-affinity
+ * column stores the three characters, and writing it to an INTEGER-affinity
+ * column stores the number 2024. `expectedColumns` below groups every column by
+ * the affinity its declaration produces, so that a retype which moves a column
+ * between these groups has to be a deliberate edit here.
+ *
+ * `numeric` is the affinity of `DATETIME`, which every timestamp in this schema
+ * is declared as. It holds ISO-8601 text because that text converts to no
+ * number, but it is a distinct affinity from `text` and is recorded as one
+ * rather than being quietly folded in.
+ *
+ * `real` and `blob` are absent because no column has them; the classifier still
+ * returns them, so a column that acquired one would fail to match any group.
+ */
+type ColumnAffinity = 'integer' | 'text' | 'numeric' | 'real' | 'blob';
+
+type ColumnsByAffinity = Partial<Record<ColumnAffinity, string[]>>;
+
+/**
  * THE COLUMN INVENTORY — every table this schema declares, one hand-written
- * entry each.
+ * entry each, with every column filed under the affinity it must have.
  *
  * This is NOT a parity record and no longer splits Laravel-inherited tables
  * from native ones; D7 retired that goal and F10 measured what the split was
@@ -20,6 +42,17 @@ type SqlRow = Record<string, string | number | bigint | null>;
  * integration test or a row contract, but 29 of the 56 tables have no row
  * contract at all, so a column that appears and is read by nothing is invisible
  * everywhere else.
+ *
+ * WHAT THE GROUPING PINS, AND WHAT IT DELIBERATELY DOES NOT. The DECLARED TYPE
+ * KEYWORD is not pinned anywhere and must not be: D7 names
+ * `VARCHAR`/`DATETIME`/`TINYINT(1)` as inherited MVP spellings and licenses
+ * renaming them freely. What is pinned is the AFFINITY those keywords resolve
+ * to, which is behaviour rather than inheritance. So `VARCHAR` -> `TEXT` costs
+ * nothing here, and `VARCHAR` -> `integer` — which silently converts every
+ * numeric-looking string ever written to that column — costs one deliberate
+ * line. The distinction is the whole point: the third hash link F10 deleted was
+ * the only thing left reading a declared type, and deleting it left the
+ * affinity of all 535 columns with no oracle at all.
  *
  * Column ORDER is deliberately NOT pinned — both sides are sorted before
  * comparison. Measured: nothing in this codebase can observe it. There is no
@@ -32,131 +65,209 @@ type SqlRow = Record<string, string | number | bigint | null>;
  * `PRAGMA table_info`: an expectation reprinted from the artifact under test
  * cannot fail.
  */
-const expectedColumns: Record<string, string[]> = {
-  background_definitions: [
-    'id', 'content_key', 'name', 'rules_edition', 'category', 'repeatable',
-    'prerequisites', 'grant_rules', 'notes', 'created_at', 'updated_at',
-  ],
-  change_log: [
-    'id', 'character_id', 'sequence', 'group_id', 'operation_uuid',
-    'entity_type', 'entity_id', 'previous_value', 'new_value', 'reason',
-    'action_type', 'reversible', 'created_at', 'updated_at',
-  ],
-  character_class_levels: [
-    'id', 'character_id', 'class_definition_id', 'subclass_definition_id',
-    'level', 'is_starting_class', 'spellcasting_ability_override', 'notes',
-    'created_at', 'updated_at',
-  ],
-  character_operations: [
-    'id', 'character_id', 'operation_uuid', 'expected_revision',
-    'resulting_revision', 'inverse_command', 'created_at', 'updated_at',
-  ],
-  character_rule_overrides: [
-    'id', 'character_id', 'rule_key', 'value', 'note', 'created_at',
-    'updated_at',
-  ],
-  character_save_points: [
-    'id', 'character_id', 'label', 'snapshot', 'schema_version', 'created_at',
-    'updated_at',
-  ],
-  character_source_instances: [
-    'id', 'character_id', 'instance_uuid', 'parent_source_instance_id',
-    'source_type', 'source_definition_id', 'display_name', 'config',
-    'acquired_at_character_level', 'state', 'notes', 'created_at', 'updated_at',
-  ],
-  character_spell_preferences: [
-    'id', 'character_id', 'spell_version_id', 'favourite', 'notes',
-    'created_at', 'updated_at',
-  ],
-  characters: [
-    'id', 'name', 'strength', 'dexterity', 'constitution', 'intelligence',
-    'wisdom', 'charisma', 'proficiency_bonus_override',
-    'rules_edition_preference', 'allow_legacy', 'revision', 'notes',
-    'created_at', 'updated_at',
-  ],
-  class_definitions: [
-    'id', 'content_key', 'name', 'rules_edition', 'spellcasting_ability',
-    'progression_type', 'caster_fraction', 'caster_rounding',
-    'prepares_or_knows', 'supports_ritual_casting', 'ritual_casting_mode',
-    'primary_ability_expression', 'notes', 'created_at', 'updated_at',
-  ],
-  class_progressions: [
-    'id', 'class_definition_id', 'class_level', 'cantrips_known',
-    'prepared_count', 'slots', 'pact_slots', 'grant_rules', 'created_at',
-    'updated_at',
-  ],
-  feat_definitions: [
-    'id', 'content_key', 'name', 'rules_edition', 'category', 'repeatable',
-    'prerequisites', 'grant_rules', 'notes', 'created_at', 'updated_at',
-  ],
-  species_definitions: [
-    'id', 'content_key', 'name', 'rules_edition', 'category', 'repeatable',
-    'prerequisites', 'grant_rules', 'notes', 'created_at', 'updated_at',
-  ],
-  spell_identities: [
-    'id', 'content_key', 'canonical_name', 'normalized_name', 'notes',
-    'created_at', 'updated_at',
-  ],
-  spell_identity_aliases: [
-    'id', 'spell_identity_id', 'alias', 'normalized_alias', 'created_at',
-    'updated_at',
-  ],
-  spell_list_memberships: [
-    'id', 'spell_version_id', 'spell_list_key', 'created_at', 'updated_at',
-  ],
-  spell_loadout_entries: [
-    'id', 'spell_loadout_id', 'spell_version_id', 'role', 'created_at',
-    'updated_at',
-  ],
-  spell_loadouts: [
-    'id', 'character_id', 'name', 'notes', 'created_at', 'updated_at',
-  ],
-  spell_selection_slots: [
-    'id', 'character_id', 'source_instance_id', 'slot_key', 'rule_key',
-    'ordinal', 'bucket', 'eligibility_kind', 'fixed_spell_version_id',
-    'current_spell_version_id', 'label', 'spell_level_min', 'spell_level_max',
-    'allowed_spell_lists', 'allowed_schools', 'allowed_tags',
-    'always_prepared', 'with_slots', 'free_cast', 'counts_against_limit',
-    'required', 'is_locked', 'state',
-    'orphan_reason_code', 'orphaned_at',
-    'prior_config', 'override_note', 'sort_order', 'notes', 'created_at',
-    'updated_at', 'selection_collection', 'selection_eligibility',
-    'selection_invalid_reason',
-  ],
-  spell_version_attack_modes: ['id', 'spell_version_id', 'attack_mode'],
-  spell_version_conditions: ['id', 'spell_version_id', 'condition_type'],
-  spell_version_damage_types: ['id', 'spell_version_id', 'damage_type'],
-  spell_version_publications: [
-    'id', 'spell_version_id', 'source_book', 'source_page',
-    'source_reference', 'created_at', 'updated_at',
-  ],
-  spell_version_save_abilities: ['id', 'spell_version_id', 'save_ability'],
-  spell_version_tags: ['id', 'spell_version_id', 'tag'],
-  spell_versions: [
-    'id', 'content_key', 'spell_identity_id', 'display_name', 'rules_edition',
-    'level', 'school', 'ritual', 'concentration', 'casting_time', 'action_type',
-    'range', 'duration', 'components', 'material_component_summary', 'healing',
-    'short_summary', 'upcast_type', 'upcast_summary',
-    'requires_mod_for_effect', 'effect_reliability_category', 'provenance',
-    'seed_version', 'is_active', 'created_at', 'updated_at',
-  ],
-  subclass_definitions: [
-    'id', 'content_key', 'class_definition_id', 'name', 'rules_edition',
-    'spellcasting_ability', 'caster_fraction', 'caster_rounding', 'grant_rules',
-    'created_at', 'updated_at',
-  ],
-  subclass_progressions: [
-    'id', 'subclass_definition_id', 'class_level', 'cantrips_known',
-    'prepared_count', 'max_spell_level', 'slots', 'grant_rules', 'created_at',
-    'updated_at',
-  ],
-  warning_acknowledgements: [
-    'id', 'character_id', 'warning_fingerprint', 'note', 'invalidated_at',
-    'created_at', 'updated_at',
-  ],
-  wizard_spellbook_entries: [
-    'id', 'character_id', 'spell_version_id', 'created_at', 'updated_at',
-  ],
+const expectedColumns: Record<string, ColumnsByAffinity> = {
+  background_definitions: {
+    integer: ['id', 'repeatable'],
+    text: [
+      'content_key', 'name', 'rules_edition', 'category', 'prerequisites',
+      'grant_rules', 'notes',
+    ],
+    numeric: ['created_at', 'updated_at'],
+  },
+  change_log: {
+    integer: ['id', 'character_id', 'sequence', 'entity_id', 'reversible'],
+    text: [
+      'group_id', 'operation_uuid', 'entity_type', 'previous_value',
+      'new_value', 'reason', 'action_type',
+    ],
+    numeric: ['created_at', 'updated_at'],
+  },
+  character_class_levels: {
+    integer: [
+      'id', 'character_id', 'class_definition_id', 'subclass_definition_id',
+      'level', 'is_starting_class',
+    ],
+    text: ['spellcasting_ability_override', 'notes'],
+    numeric: ['created_at', 'updated_at'],
+  },
+  character_operations: {
+    integer: ['id', 'character_id', 'expected_revision', 'resulting_revision'],
+    text: ['operation_uuid', 'inverse_command'],
+    numeric: ['created_at', 'updated_at'],
+  },
+  character_rule_overrides: {
+    integer: ['id', 'character_id'],
+    text: ['rule_key', 'value', 'note'],
+    numeric: ['created_at', 'updated_at'],
+  },
+  character_save_points: {
+    integer: ['id', 'character_id'],
+    text: ['label', 'snapshot', 'schema_version'],
+    numeric: ['created_at', 'updated_at'],
+  },
+  character_source_instances: {
+    integer: [
+      'id', 'character_id', 'parent_source_instance_id',
+      'source_definition_id', 'acquired_at_character_level',
+    ],
+    text: [
+      'instance_uuid', 'source_type', 'display_name', 'config', 'state',
+      'notes',
+    ],
+    numeric: ['created_at', 'updated_at'],
+  },
+  character_spell_preferences: {
+    integer: ['id', 'character_id', 'spell_version_id', 'favourite'],
+    text: ['notes'],
+    numeric: ['created_at', 'updated_at'],
+  },
+  characters: {
+    integer: [
+      'id', 'strength', 'dexterity', 'constitution', 'intelligence', 'wisdom',
+      'charisma', 'proficiency_bonus_override', 'allow_legacy', 'revision',
+    ],
+    text: ['name', 'rules_edition_preference', 'notes'],
+    numeric: ['created_at', 'updated_at'],
+  },
+  class_definitions: {
+    integer: ['id', 'supports_ritual_casting'],
+    text: [
+      'content_key', 'name', 'rules_edition', 'spellcasting_ability',
+      'progression_type', 'caster_fraction', 'caster_rounding',
+      'prepares_or_knows', 'ritual_casting_mode',
+      'primary_ability_expression', 'notes',
+    ],
+    numeric: ['created_at', 'updated_at'],
+  },
+  class_progressions: {
+    integer: [
+      'id', 'class_definition_id', 'class_level', 'cantrips_known',
+      'prepared_count',
+    ],
+    text: ['slots', 'pact_slots', 'grant_rules'],
+    numeric: ['created_at', 'updated_at'],
+  },
+  feat_definitions: {
+    integer: ['id', 'repeatable'],
+    text: [
+      'content_key', 'name', 'rules_edition', 'category', 'prerequisites',
+      'grant_rules', 'notes',
+    ],
+    numeric: ['created_at', 'updated_at'],
+  },
+  species_definitions: {
+    integer: ['id', 'repeatable'],
+    text: [
+      'content_key', 'name', 'rules_edition', 'category', 'prerequisites',
+      'grant_rules', 'notes',
+    ],
+    numeric: ['created_at', 'updated_at'],
+  },
+  spell_identities: {
+    integer: ['id'],
+    text: ['content_key', 'canonical_name', 'normalized_name', 'notes'],
+    numeric: ['created_at', 'updated_at'],
+  },
+  spell_identity_aliases: {
+    integer: ['id', 'spell_identity_id'],
+    text: ['alias', 'normalized_alias'],
+    numeric: ['created_at', 'updated_at'],
+  },
+  spell_list_memberships: {
+    integer: ['id', 'spell_version_id'],
+    text: ['spell_list_key'],
+    numeric: ['created_at', 'updated_at'],
+  },
+  spell_loadout_entries: {
+    integer: ['id', 'spell_loadout_id', 'spell_version_id'],
+    text: ['role'],
+    numeric: ['created_at', 'updated_at'],
+  },
+  spell_loadouts: {
+    integer: ['id', 'character_id'],
+    text: ['name', 'notes'],
+    numeric: ['created_at', 'updated_at'],
+  },
+  spell_selection_slots: {
+    integer: [
+      'id', 'character_id', 'source_instance_id', 'ordinal',
+      'fixed_spell_version_id', 'current_spell_version_id', 'spell_level_min',
+      'spell_level_max', 'always_prepared', 'with_slots',
+      'counts_against_limit', 'required', 'is_locked', 'sort_order',
+    ],
+    text: [
+      'slot_key', 'rule_key', 'bucket', 'eligibility_kind', 'label',
+      'allowed_spell_lists', 'allowed_schools', 'allowed_tags', 'free_cast',
+      'state', 'orphan_reason_code', 'prior_config', 'override_note', 'notes',
+      'selection_collection', 'selection_eligibility',
+      'selection_invalid_reason',
+    ],
+    numeric: ['orphaned_at', 'created_at', 'updated_at'],
+  },
+  spell_version_attack_modes: {
+    integer: ['id', 'spell_version_id'],
+    text: ['attack_mode'],
+  },
+  spell_version_conditions: {
+    integer: ['id', 'spell_version_id'],
+    text: ['condition_type'],
+  },
+  spell_version_damage_types: {
+    integer: ['id', 'spell_version_id'],
+    text: ['damage_type'],
+  },
+  spell_version_publications: {
+    integer: ['id', 'spell_version_id', 'source_page'],
+    text: ['source_book', 'source_reference'],
+    numeric: ['created_at', 'updated_at'],
+  },
+  spell_version_save_abilities: {
+    integer: ['id', 'spell_version_id'],
+    text: ['save_ability'],
+  },
+  spell_version_tags: {
+    integer: ['id', 'spell_version_id'],
+    text: ['tag'],
+  },
+  spell_versions: {
+    integer: [
+      'id', 'spell_identity_id', 'level', 'ritual', 'concentration',
+      'healing', 'requires_mod_for_effect', 'is_active',
+    ],
+    text: [
+      'content_key', 'display_name', 'rules_edition', 'school',
+      'casting_time', 'action_type', 'range', 'duration', 'components',
+      'material_component_summary', 'short_summary', 'upcast_type',
+      'upcast_summary', 'effect_reliability_category', 'provenance',
+      'seed_version',
+    ],
+    numeric: ['created_at', 'updated_at'],
+  },
+  subclass_definitions: {
+    integer: ['id', 'class_definition_id'],
+    text: [
+      'content_key', 'name', 'rules_edition', 'spellcasting_ability',
+      'caster_fraction', 'caster_rounding', 'grant_rules',
+    ],
+    numeric: ['created_at', 'updated_at'],
+  },
+  subclass_progressions: {
+    integer: [
+      'id', 'subclass_definition_id', 'class_level', 'cantrips_known',
+      'prepared_count', 'max_spell_level',
+    ],
+    text: ['slots', 'grant_rules'],
+    numeric: ['created_at', 'updated_at'],
+  },
+  warning_acknowledgements: {
+    integer: ['id', 'character_id'],
+    text: ['warning_fingerprint', 'note'],
+    numeric: ['invalidated_at', 'created_at', 'updated_at'],
+  },
+  wizard_spellbook_entries: {
+    integer: ['id', 'character_id', 'spell_version_id'],
+    numeric: ['created_at', 'updated_at'],
+  },
 
   // --- TABLES THIS PROJECT ADDED -------------------------------------------
   // These used to live in a separate `expectedNativeColumns` object for one
@@ -171,123 +282,175 @@ const expectedColumns: Record<string, string[]> = {
   // hand-copy of the code under test catches a change made in one place and not
   // the other but not a change made in both. It is recorded here rather than
   // dressed up.
-  character_weapons: [
-    'id', 'character_id', 'name', 'damage_dice', 'damage_type',
-    'versatile_damage_dice', 'finesse', 'heavy', 'light', 'loading', 'reach',
-    'thrown', 'two_handed', 'ammunition', 'ammunition_kind',
-    'range_normal_feet', 'range_long_feet', 'mastery_property',
-    'mastery_selected', 'other_properties', 'notes', 'created_at',
-    'updated_at',
-  ],
-  class_weapon_mastery_counts: [
-    'id', 'class_definition_id', 'class_level', 'mastery_count', 'created_at',
-    'updated_at',
-  ],
-  class_weapon_mastery_grants: [
-    'id', 'class_definition_id', 'grant', 'created_at', 'updated_at',
-  ],
-  weapon_templates: [
-    'id', 'content_key', 'rules_edition', 'name', 'srd_group', 'damage_dice',
-    'damage_type', 'versatile_damage_dice', 'finesse', 'heavy', 'light',
-    'loading', 'reach', 'thrown', 'two_handed', 'ammunition',
-    'ammunition_kind', 'range_normal_feet', 'range_long_feet',
-    'mastery_property', 'other_properties', 'created_at', 'updated_at',
-  ],
+  character_weapons: {
+    integer: [
+      'id', 'character_id', 'finesse', 'heavy', 'light', 'loading', 'reach',
+      'thrown', 'two_handed', 'ammunition', 'range_normal_feet',
+      'range_long_feet', 'mastery_selected',
+    ],
+    text: [
+      'name', 'damage_dice', 'damage_type', 'versatile_damage_dice',
+      'ammunition_kind', 'mastery_property', 'other_properties', 'notes',
+    ],
+    numeric: ['created_at', 'updated_at'],
+  },
+  class_weapon_mastery_counts: {
+    integer: ['id', 'class_definition_id', 'class_level', 'mastery_count'],
+    numeric: ['created_at', 'updated_at'],
+  },
+  class_weapon_mastery_grants: {
+    integer: ['id', 'class_definition_id'],
+    text: ['grant'],
+    numeric: ['created_at', 'updated_at'],
+  },
+  weapon_templates: {
+    integer: [
+      'id', 'finesse', 'heavy', 'light', 'loading', 'reach', 'thrown',
+      'two_handed', 'ammunition', 'range_normal_feet', 'range_long_feet',
+    ],
+    text: [
+      'content_key', 'rules_edition', 'name', 'srd_group', 'damage_dice',
+      'damage_type', 'versatile_damage_dice', 'ammunition_kind',
+      'mastery_property', 'other_properties',
+    ],
+    numeric: ['created_at', 'updated_at'],
+  },
   // The six origins tables, transcribed the same way from the origins design
   // rather than read back out of `PRAGMA table_info`.
-  species_templates: [
-    'id', 'content_key', 'rules_edition', 'name', 'creature_type', 'size',
-    'alternate_size', 'base_speed_feet', 'created_at', 'updated_at',
-  ],
-  species_template_traits: [
-    'id', 'species_template_id', 'sort_order', 'name', 'description',
-    'created_at', 'updated_at',
-  ],
+  species_templates: {
+    integer: ['id', 'base_speed_feet'],
+    text: [
+      'content_key', 'rules_edition', 'name', 'creature_type', 'size',
+      'alternate_size',
+    ],
+    numeric: ['created_at', 'updated_at'],
+  },
+  species_template_traits: {
+    integer: ['id', 'species_template_id', 'sort_order'],
+    text: ['name', 'description'],
+    numeric: ['created_at', 'updated_at'],
+  },
   // The CATALOG half of the inverted effect model: what a printed trait GRANTS.
   // The five `effect_*` columns that used to sit on the trait row above are
   // here, one row per effect, so a trait granting two is two rows.
-  species_template_trait_effects: [
-    'id', 'species_template_trait_id', 'sort_order', 'effect_kind',
-    'damage_type', 'hit_points_flat', 'hit_points_per_level',
-    'speed_bonus_feet', 'created_at', 'updated_at',
-  ],
-  character_species: [
-    'id', 'character_id', 'name', 'creature_type', 'size', 'base_speed_feet',
-    'notes', 'created_at', 'updated_at',
-  ],
-  character_species_traits: [
-    'id', 'character_id', 'sort_order', 'name', 'description', 'notes',
-    'created_at', 'updated_at',
-  ],
+  species_template_trait_effects: {
+    integer: [
+      'id', 'species_template_trait_id', 'sort_order', 'hit_points_flat',
+      'hit_points_per_level', 'speed_bonus_feet',
+    ],
+    text: ['effect_kind', 'damage_type'],
+    numeric: ['created_at', 'updated_at'],
+  },
+  character_species: {
+    integer: ['id', 'character_id', 'base_speed_feet'],
+    text: ['name', 'creature_type', 'size', 'notes'],
+    numeric: ['created_at', 'updated_at'],
+  },
+  character_species_traits: {
+    integer: ['id', 'character_id', 'sort_order'],
+    text: ['name', 'description', 'notes'],
+    numeric: ['created_at', 'updated_at'],
+  },
   // The CHARACTER half: what this character HAS. Keyed on `character_id` and
   // not on the trait, which is what lets a feat or a subclass grant one and
   // what stops a trait being the thing an effect hangs from.
-  character_effects: [
-    'id', 'character_id', 'sort_order', 'effect_kind', 'damage_type',
-    'hit_points_flat', 'hit_points_per_level', 'speed_bonus_feet',
-    'source_instance_id', 'label', 'notes', 'created_at', 'updated_at',
-  ],
-  background_templates: [
-    'id', 'content_key', 'rules_edition', 'name', 'ability_score_1',
-    'ability_score_2', 'ability_score_3', 'feat_name', 'skill_proficiency_1',
-    'skill_proficiency_2', 'tool_proficiency', 'equipment_option_a',
-    'equipment_option_b', 'created_at', 'updated_at',
-  ],
-  character_background: [
-    'id', 'character_id', 'name', 'ability_score_1', 'ability_score_2',
-    'ability_score_3', 'feat_name', 'skill_proficiency_1',
-    'skill_proficiency_2', 'tool_proficiency', 'equipment_option_a',
-    'equipment_option_b', 'notes', 'created_at', 'updated_at',
-  ],
+  character_effects: {
+    integer: [
+      'id', 'character_id', 'sort_order', 'hit_points_flat',
+      'hit_points_per_level', 'speed_bonus_feet', 'source_instance_id',
+    ],
+    text: ['effect_kind', 'damage_type', 'label', 'notes'],
+    numeric: ['created_at', 'updated_at'],
+  },
+  background_templates: {
+    integer: ['id'],
+    text: [
+      'content_key', 'rules_edition', 'name', 'ability_score_1',
+      'ability_score_2', 'ability_score_3', 'feat_name',
+      'skill_proficiency_1', 'skill_proficiency_2', 'tool_proficiency',
+      'equipment_option_a', 'equipment_option_b',
+    ],
+    numeric: ['created_at', 'updated_at'],
+  },
+  character_background: {
+    integer: ['id', 'character_id'],
+    text: [
+      'name', 'ability_score_1', 'ability_score_2', 'ability_score_3',
+      'feat_name', 'skill_proficiency_1', 'skill_proficiency_2',
+      'tool_proficiency', 'equipment_option_a', 'equipment_option_b', 'notes',
+    ],
+    numeric: ['created_at', 'updated_at'],
+  },
   // --- SHEET CORE (D11 part 1, D12) ---------------------------------------
   // Seven class-content tables plus the armour catalog. Transcribed by reading
   // the declarations in `db/schema/sheet.ts`, for the same reason the weapon
   // lists above are transcribed rather than generated: an expectation produced
   // from `PRAGMA table_info` reprints our own output and cannot fail.
-  armor_templates: [
-    'id', 'content_key', 'rules_edition', 'name', 'category', 'armor_class',
-    'dex_bonus', 'dex_bonus_max', 'strength_requirement',
-    'stealth_disadvantage', 'created_at', 'updated_at',
-  ],
-  class_armor_training: [
-    'id', 'class_definition_id', 'category', 'created_at', 'updated_at',
-  ],
-  class_extra_attack_grants: [
-    'id', 'class_definition_id', 'class_level', 'attack_count', 'created_at',
-    'updated_at',
-  ],
-  class_martial_arts_dice: [
-    'id', 'class_definition_id', 'class_level', 'martial_arts_die',
-    'created_at', 'updated_at',
-  ],
-  class_saving_throw_proficiencies: [
-    'id', 'class_definition_id', 'ability', 'created_at', 'updated_at',
-  ],
-  class_sheet_traits: [
-    'id', 'class_definition_id', 'hit_die', 'skill_choice_count',
-    'skill_choice_from_any', 'created_at', 'updated_at',
-  ],
-  class_skill_options: [
-    'id', 'class_definition_id', 'skill', 'created_at', 'updated_at',
-  ],
-  class_weapon_proficiencies: [
-    'id', 'class_definition_id', 'category', 'property_qualifier', 'created_at',
-    'updated_at',
-  ],
+  armor_templates: {
+    integer: [
+      'id', 'armor_class', 'dex_bonus_max', 'strength_requirement',
+      'stealth_disadvantage',
+    ],
+    text: ['content_key', 'rules_edition', 'name', 'category', 'dex_bonus'],
+    numeric: ['created_at', 'updated_at'],
+  },
+  class_armor_training: {
+    integer: ['id', 'class_definition_id'],
+    text: ['category'],
+    numeric: ['created_at', 'updated_at'],
+  },
+  class_extra_attack_grants: {
+    integer: ['id', 'class_definition_id', 'class_level', 'attack_count'],
+    numeric: ['created_at', 'updated_at'],
+  },
+  class_martial_arts_dice: {
+    integer: ['id', 'class_definition_id', 'class_level', 'martial_arts_die'],
+    numeric: ['created_at', 'updated_at'],
+  },
+  class_saving_throw_proficiencies: {
+    integer: ['id', 'class_definition_id'],
+    text: ['ability'],
+    numeric: ['created_at', 'updated_at'],
+  },
+  class_sheet_traits: {
+    integer: [
+      'id', 'class_definition_id', 'hit_die', 'skill_choice_count',
+      'skill_choice_from_any',
+    ],
+    numeric: ['created_at', 'updated_at'],
+  },
+  class_skill_options: {
+    integer: ['id', 'class_definition_id'],
+    text: ['skill'],
+    numeric: ['created_at', 'updated_at'],
+  },
+  class_weapon_proficiencies: {
+    integer: ['id', 'class_definition_id'],
+    text: ['category', 'property_qualifier'],
+    numeric: ['created_at', 'updated_at'],
+  },
   // D19's two class-feature tables, transcribed from the declarations in
   // `db/schema/catalog-classes.ts` for the same reason every list here is
   // transcribed: an expectation produced from `PRAGMA table_info` reprints our
   // own output and cannot fail.
-  named_features: [
-    'id', 'content_key', 'class_definition_id', 'name', 'rules_edition',
-    'prerequisite', 'description', 'class_level', 'effect_kind',
-    'effect_attack_count', 'effect_weapon_scope', 'created_at', 'updated_at',
-  ],
-  subclass_features: [
-    'id', 'subclass_definition_id', 'class_level', 'sort_order', 'name',
-    'description', 'effect_kind', 'effect_attack_count', 'effect_weapon_scope',
-    'created_at', 'updated_at',
-  ],
+  named_features: {
+    integer: [
+      'id', 'class_definition_id', 'class_level', 'effect_attack_count',
+    ],
+    text: [
+      'content_key', 'name', 'rules_edition', 'prerequisite', 'description',
+      'effect_kind', 'effect_weapon_scope',
+    ],
+    numeric: ['created_at', 'updated_at'],
+  },
+  subclass_features: {
+    integer: [
+      'id', 'subclass_definition_id', 'class_level', 'sort_order',
+      'effect_attack_count',
+    ],
+    text: ['name', 'description', 'effect_kind', 'effect_weapon_scope'],
+    numeric: ['created_at', 'updated_at'],
+  },
   // The four STORED SHEET INPUTS, transcribed from the declarations in
   // `db/schema/sheet-inputs.ts` for the same reason every list here is
   // transcribed: an expectation produced from `PRAGMA table_info` reprints our
@@ -297,25 +460,32 @@ const expectedColumns: Record<string, string[]> = {
   // `armor_templates`' above, because picking a template is a column-wise copy
   // (D1b) — plus `slot`, which is where the user put it rather than what it is,
   // and `notes`.
-  character_armor: [
-    'id', 'character_id', 'slot', 'name', 'category', 'armor_class',
-    'dex_bonus', 'dex_bonus_max', 'strength_requirement',
-    'stealth_disadvantage', 'notes', 'created_at', 'updated_at',
-  ],
-  character_hit_point_rolls: [
-    'id', 'character_id', 'class_name', 'class_level', 'rolled_value',
-    'created_at', 'updated_at',
-  ],
+  character_armor: {
+    integer: [
+      'id', 'character_id', 'armor_class', 'dex_bonus_max',
+      'strength_requirement', 'stealth_disadvantage',
+    ],
+    text: ['slot', 'name', 'category', 'dex_bonus', 'notes'],
+    numeric: ['created_at', 'updated_at'],
+  },
+  character_hit_point_rolls: {
+    integer: ['id', 'character_id', 'class_level', 'rolled_value'],
+    text: ['class_name'],
+    numeric: ['created_at', 'updated_at'],
+  },
   // NO `proficient` COLUMN, and its absence is the assertion: presence of the
   // row IS the value, so a `proficient = 0` row cannot exist to mean the same
   // thing as no row.
-  character_skill_proficiencies: [
-    'id', 'character_id', 'skill', 'created_at', 'updated_at',
-  ],
-  character_sheet_adjustments: [
-    'id', 'character_id', 'armor_class_adjustment',
-    'armor_class_adjustment_note', 'created_at', 'updated_at',
-  ],
+  character_skill_proficiencies: {
+    integer: ['id', 'character_id'],
+    text: ['skill'],
+    numeric: ['created_at', 'updated_at'],
+  },
+  character_sheet_adjustments: {
+    integer: ['id', 'character_id', 'armor_class_adjustment'],
+    text: ['armor_class_adjustment_note'],
+    numeric: ['created_at', 'updated_at'],
+  },
 };
 
 /**
@@ -954,6 +1124,54 @@ function rows(db: Database, sql: string): SqlRow[] {
   return db.selectObjects(sql) as SqlRow[];
 }
 
+/**
+ * SQLite's five affinity-determination rules, applied in order, transcribed
+ * from the published algorithm (datatype3.html §3.1) rather than from anything
+ * this project generates.
+ *
+ * Reading this off a keyword is only trustworthy if the keyword really does
+ * decide how a value is stored, so it is not left as a reading of the
+ * documentation: `proves the affinity classifier against the engine` below
+ * EXECUTES every declared type this schema uses and checks the storage class
+ * that comes back.
+ */
+function affinityOf(declaredType: string): ColumnAffinity {
+  const upper = declaredType.toUpperCase();
+  if (upper.includes('INT')) {
+    return 'integer';
+  }
+  if (
+    upper.includes('CHAR') ||
+    upper.includes('CLOB') ||
+    upper.includes('TEXT')
+  ) {
+    return 'text';
+  }
+  if (upper.includes('BLOB') || upper === '') {
+    return 'blob';
+  }
+  if (
+    upper.includes('REAL') ||
+    upper.includes('FLOA') ||
+    upper.includes('DOUB')
+  ) {
+    return 'real';
+  }
+  return 'numeric';
+}
+
+const AFFINITIES: readonly ColumnAffinity[] = [
+  'integer',
+  'text',
+  'numeric',
+  'real',
+  'blob',
+];
+
+function inventoriedColumns(groups: ColumnsByAffinity): string[] {
+  return AFFINITIES.flatMap((affinity) => groups[affinity] ?? []);
+}
+
 function indexColumns(db: Database, indexName: string): string {
   return rows(db, `PRAGMA index_info("${indexName}")`)
     .sort((left, right) => Number(left.seqno) - Number(right.seqno))
@@ -1022,12 +1240,12 @@ describe(`schema (${sourceLabel})`, () => {
       Object.keys(expectedColumns).sort(),
     );
 
-    for (const [table, columns] of Object.entries(expectedColumns)) {
+    for (const [table, groups] of Object.entries(expectedColumns)) {
       const metadata = rows(db, `PRAGMA table_info("${table}")`);
       expect(
         metadata.map((row) => String(row.name)).sort(),
         `columns for ${table}`,
-      ).toEqual([...columns].sort());
+      ).toEqual(inventoriedColumns(groups).sort());
       expect(
         metadata
           .filter((row) => Number(row.notnull) === 1)
@@ -1035,6 +1253,18 @@ describe(`schema (${sourceLabel})`, () => {
           .sort(),
         `NOT NULL columns for ${table}`,
       ).toEqual([...(expectedNotNull[table] ?? [])].sort());
+      // The affinity each column imposes on what is written to it. Every
+      // group is compared, including the ones the table has none of, so a
+      // column cannot move between groups unnoticed in either direction.
+      for (const affinity of AFFINITIES) {
+        expect(
+          metadata
+            .filter((row) => affinityOf(String(row.type)) === affinity)
+            .map((row) => String(row.name))
+            .sort(),
+          `${affinity}-affinity columns for ${table}`,
+        ).toEqual([...(groups[affinity] ?? [])].sort());
+      }
     }
 
     // Three specific absences and one presence, each asserted against the
@@ -1049,6 +1279,53 @@ describe(`schema (${sourceLabel})`, () => {
     expect(columnsOf('spell_selection_slots')).toContain(
       'selection_eligibility',
     );
+  });
+
+  it('proves the affinity classifier against the engine, not against its docs', () => {
+    const db = openDb(schemaSql);
+    const declaredTypes = new Set<string>();
+    for (const table of Object.keys(expectedColumns)) {
+      for (const row of rows(db, `PRAGMA table_info("${table}")`)) {
+        declaredTypes.add(String(row.type));
+      }
+    }
+    // Non-vacuity: this loop is worth nothing if the schema stops declaring
+    // types, and the count is deliberately a floor rather than a number to
+    // maintain — a new declared type spelling is welcome, an unclassifiable
+    // one is not.
+    expect(declaredTypes.size).toBeGreaterThanOrEqual(4);
+
+    for (const declared of [...declaredTypes].sort()) {
+      const affinity = affinityOf(declared);
+      // No column in this schema has REAL or BLOB affinity, and the grouping
+      // above says so by having no such group. Assert it here rather than
+      // leaving the next two lines to quietly assume it.
+      expect(['integer', 'text', 'numeric'], `affinity of ${declared}`).toContain(
+        affinity,
+      );
+
+      db.exec(`CREATE TABLE affinity_probe ("value" ${declared})`);
+      db.exec(`INSERT INTO affinity_probe VALUES ('2024'), ('x')`);
+      const stored = rows(
+        db,
+        'SELECT typeof("value") AS storage_class FROM affinity_probe',
+      ).map((row) => String(row.storage_class));
+      db.exec('DROP TABLE affinity_probe');
+
+      // THE LINE THAT MATTERS IS TEXT VERSUS EVERYTHING ELSE, and this is what
+      // draws it: a numeric-looking string survives as a string only under TEXT
+      // affinity. `'x'` converts under no affinity at all and is here to show
+      // that the first value's fate is conversion rather than coincidence.
+      //
+      // INTEGER and NUMERIC affinity are NOT distinguished by this probe
+      // because SQLite does not distinguish them when storing — they differ
+      // only inside a CAST. They are kept as separate groups above because they
+      // are separate declarations, so moving a column between those two is a
+      // one-line re-filing rather than a defect.
+      expect(stored, `storage classes for a column declared ${declared}`).toEqual(
+        affinity === 'text' ? ['text', 'text'] : ['integer', 'text'],
+      );
+    }
   });
 
   it('materializes every named index, unique key, and declared default', () => {
