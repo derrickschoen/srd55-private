@@ -216,8 +216,9 @@ describe('the weapons panel derives attacks without storing them', () => {
       [characterId],
     );
     db.exec(
-      `INSERT INTO character_weapons (character_id, name, damage_dice, damage_type)
-       VALUES (?, 'Longsword', '1d8', 'Slashing')`,
+      `INSERT INTO character_weapons (
+         character_id, name, damage_kind, damage_dice, damage_type
+       ) VALUES (?, 'Longsword', 'dice', '1d8', 'Slashing')`,
       [characterId],
     );
   });

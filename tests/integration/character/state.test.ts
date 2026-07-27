@@ -116,9 +116,9 @@ function seedFixture(): void {
   );
   db.exec(
     `INSERT INTO character_weapons (
-       character_id, name, damage_dice, damage_type, finesse, light,
+       character_id, name, damage_kind, damage_dice, damage_type, finesse, light,
        mastery_property, mastery_selected, notes, created_at, updated_at
-     ) VALUES (?, 'Shortsword', '1d6', 'Piercing', 1, 1, 'Vex', 1,
+     ) VALUES (?, 'Shortsword', 'dice', '1d6', 'Piercing', 1, 1, 'Vex', 1,
        'weapon row', ?, ?)`,
     [characterId, createdAt, updatedAt],
   );
@@ -227,14 +227,12 @@ describe('capture and deterministic diff', () => {
       'character',
       ...CHARACTER_STATE_TABLES,
     ]);
-    // a7-v5 is the version that also captures `character_effects` — and whose
-    // `character_species_traits` rows no longer carry the five `effect_*`
-    // columns, because the table no longer has them.
+    // a7-v6 is the version whose weapon rows carry discriminated damage.
     // Written out rather than compared against the exported constant: a version
     // identifier is a wire fact that other stored data is matched against, so a
     // test that reads it from the module under test could never notice it
     // changing.
-    expect(snapshot.schema_version).toBe('a7-v5');
+    expect(snapshot.schema_version).toBe('a7-v6');
     expect(Object.keys(snapshot.character)).toEqual(CHARACTER_STATE_COLUMNS);
     expect(snapshot.character).toEqual({
       name: 'Snapshot Hero',
@@ -746,7 +744,7 @@ describe('restoring a snapshot written by an older build', () => {
     // oversight: a current snapshot DOES speak for weapons, so restoring it
     // removes one added afterwards.
     const snapshot = mutableCapture();
-    expect(snapshot.schema_version).toBe('a7-v5');
+    expect(snapshot.schema_version).toBe('a7-v6');
     db.exec(
       `INSERT INTO character_weapons (character_id, name)
        VALUES (?, 'Bought since')`,
@@ -761,6 +759,47 @@ describe('restoring a snapshot written by an older build', () => {
         [characterId],
       ),
     ).toEqual([{ name: 'Shortsword' }]);
+  });
+
+  it('restores a v5 free-text weapon row through the damage migration', () => {
+    const snapshot = mutableCapture();
+    snapshot.schema_version = 'a7-v5';
+    const weapon = snapshot.character_weapons[0] as Record<string, unknown>;
+    for (const column of [
+      'damage_kind',
+      'damage_flat',
+      'damage_custom',
+      'versatile_damage_kind',
+      'versatile_damage_flat',
+      'versatile_damage_custom',
+    ]) {
+      delete weapon[column];
+    }
+    const custom = '  campaign table result  ';
+    weapon.damage_dice = custom;
+    weapon.versatile_damage_dice = null;
+
+    state.restore(characterId, snapshot);
+
+    expect(
+      db.oneRaw(
+        `SELECT damage_kind, damage_dice, damage_flat, damage_custom,
+                versatile_damage_kind, versatile_damage_dice,
+                versatile_damage_flat, versatile_damage_custom
+         FROM character_weapons
+         WHERE character_id = ?`,
+        [characterId],
+      ),
+    ).toEqual({
+      damage_kind: 'custom',
+      damage_dice: null,
+      damage_flat: null,
+      damage_custom: custom,
+      versatile_damage_kind: 'not_applicable',
+      versatile_damage_dice: null,
+      versatile_damage_flat: null,
+      versatile_damage_custom: null,
+    });
   });
 
   /**

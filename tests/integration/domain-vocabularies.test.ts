@@ -215,9 +215,9 @@ describe('open and closed domain vocabularies', () => {
     expect(() =>
       db.exec(
         `INSERT INTO weapon_templates
-           (content_key, name, srd_group, damage_dice, damage_type,
+           (content_key, name, srd_group, damage_kind, damage_dice, damage_type,
             mastery_property)
-         VALUES ('weapon:steam', 'Steam Blade', 'simple_melee', '1d6',
+         VALUES ('weapon:steam', 'Steam Blade', 'simple_melee', 'dice', '1d6',
                  'Steam', 'Sap')`,
       ),
     ).toThrow(/CHECK constraint failed: weapon_templates_damage_type_check/u);

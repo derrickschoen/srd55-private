@@ -25,6 +25,12 @@ import {
   type ShareWeapon,
   validateShareDocument,
 } from './schema';
+import {
+  versatileWeaponDamageFromLegacy,
+  weaponDamageFromLegacy,
+  type VersatileWeaponDamage,
+  type WeaponDamage,
+} from '../domain/weapon-damage';
 
 type Tuple = readonly unknown[];
 
@@ -150,10 +156,13 @@ const SHEET_ADJUSTMENT_TUPLE_LENGTH = 2;
  * an old link's every index still means what it meant.
  */
 const WEAPON_TUPLE_LENGTH_LEGACY =
-  1 + SHARE_WEAPON_TEXT.length + 3 + 2 + SHARE_WEAPON_FLAGS.length;
-const WEAPON_TUPLE_LENGTH = WEAPON_TUPLE_LENGTH_LEGACY + 1;
+  1 + 4 + 3 + 2 + SHARE_WEAPON_FLAGS.length;
+const WEAPON_TUPLE_LENGTH_PRE_DAMAGE_UNION =
+  WEAPON_TUPLE_LENGTH_LEGACY + 1;
+const WEAPON_TUPLE_LENGTH = WEAPON_TUPLE_LENGTH_PRE_DAMAGE_UNION + 2;
 const WEAPON_TUPLE_LENGTHS: readonly number[] = [
   WEAPON_TUPLE_LENGTH_LEGACY,
+  WEAPON_TUPLE_LENGTH_PRE_DAMAGE_UNION,
   WEAPON_TUPLE_LENGTH,
 ];
 
@@ -192,8 +201,11 @@ function variableTuple(
  * D27 — the proficiency category. Reordering this silently reinterprets every
  * link ever generated.
  */
-const WEAPON_WIRE_FIELDS = [
-  ...SHARE_WEAPON_TEXT,
+const WEAPON_LEGACY_WIRE_FIELDS = [
+  'damage_dice',
+  'damage_type',
+  'versatile_damage_dice',
+  'ammunition_kind',
   'range_normal_feet',
   'range_long_feet',
   'mastery_property',
@@ -204,28 +216,128 @@ const WEAPON_WIRE_FIELDS = [
   // pre-D27 link was written in; an appended field is invisible to a decoder
   // that stops one element earlier.
   'proficiency_category',
-] as const satisfies readonly (keyof ShareWeapon)[];
+] as const;
+
+function damageToPositional(
+  damage: WeaponDamage | VersatileWeaponDamage,
+): unknown[] {
+  switch (damage.kind) {
+    case 'dice':
+      return ['dice', damage.dice];
+    case 'flat':
+      return ['flat', damage.amount];
+    case 'custom':
+      return ['custom', damage.text];
+    case 'not_recorded':
+      return ['not_recorded'];
+    case 'not_applicable':
+      return ['not_applicable'];
+  }
+}
+
+function damageFromPositional(value: unknown, label: string): unknown {
+  if (!Array.isArray(value) || (value.length !== 1 && value.length !== 2)) {
+    throw new ShareValidationError(
+      `${label} must be a damage tuple of length 1 or 2.`,
+    );
+  }
+  const [kind, payload] = value;
+  if (kind === 'not_recorded' || kind === 'not_applicable') {
+    if (value.length !== 1) {
+      throw new ShareValidationError(`${label} absence has no payload.`);
+    }
+    return { kind };
+  }
+  if (value.length !== 2) {
+    throw new ShareValidationError(`${label} payload is required.`);
+  }
+  if (kind === 'dice') return { kind, dice: payload };
+  if (kind === 'flat') return { kind, amount: payload };
+  if (kind === 'custom') return { kind, text: payload };
+  throw new ShareValidationError(`${label} kind is unsupported.`);
+}
+
+function legacyWireValue(weapon: ShareWeapon, field: string): unknown {
+  switch (field) {
+    case 'damage_dice':
+    case 'versatile_damage_dice':
+      return null;
+    case 'damage_type':
+      return weapon.damage_type ?? null;
+    case 'ammunition_kind':
+      return weapon.ammunition_kind ?? null;
+    case 'range_normal_feet':
+      return weapon.range_normal_feet ?? null;
+    case 'range_long_feet':
+      return weapon.range_long_feet ?? null;
+    case 'mastery_property':
+      return weapon.mastery_property ?? null;
+    case 'other_properties':
+      return weapon.other_properties ?? null;
+    case 'notes':
+      return weapon.notes ?? null;
+    case 'finesse':
+    case 'heavy':
+    case 'light':
+    case 'loading':
+    case 'reach':
+    case 'thrown':
+    case 'two_handed':
+    case 'ammunition':
+    case 'mastery_selected':
+      return weapon[field] ?? null;
+    case 'proficiency_category':
+      return weapon.proficiency_category ?? null;
+    default:
+      throw new Error(`Unknown weapon wire field ${field}.`);
+  }
+}
 
 function weaponToPositional(weapon: ShareWeapon): unknown[] {
   return [
     weapon.name,
-    ...WEAPON_WIRE_FIELDS.map((field) => weapon[field] ?? null),
+    ...WEAPON_LEGACY_WIRE_FIELDS.map((field) =>
+      legacyWireValue(weapon, field),
+    ),
+    damageToPositional(weapon.damage),
+    damageToPositional(weapon.versatile_damage),
   ];
 }
 
 function weaponFromPositional(value: unknown, label: string): unknown {
   const row = variableTuple(value, WEAPON_TUPLE_LENGTHS, label);
+  let legacyDamage: string | null = null;
+  let legacyVersatile: string | null = null;
   const weapon: Record<string, unknown> = { name: row[0] };
-  WEAPON_WIRE_FIELDS.forEach((field, index) => {
+  WEAPON_LEGACY_WIRE_FIELDS.forEach((field, index) => {
     const item = row[index + 1];
     // `undefined` is a SHORT TUPLE — a link minted before D27 — and `null` is a
     // column this weapon genuinely has nothing in. Both leave the key absent,
     // which is what `ShareWeapon` optionality means, so the two cases need no
     // separate branch and neither can invent a value.
-    if (item !== null && item !== undefined) {
+    if (field === 'damage_dice') {
+      legacyDamage = item === null || item === undefined ? null : String(item);
+    } else if (field === 'versatile_damage_dice') {
+      legacyVersatile =
+        item === null || item === undefined ? null : String(item);
+    } else if (item !== null && item !== undefined) {
       weapon[field] = item;
     }
   });
+  if (row.length === WEAPON_TUPLE_LENGTH) {
+    weapon.damage = damageFromPositional(
+      row[WEAPON_TUPLE_LENGTH - 2],
+      `${label}.damage`,
+    );
+    weapon.versatile_damage = damageFromPositional(
+      row[WEAPON_TUPLE_LENGTH - 1],
+      `${label}.versatile_damage`,
+    );
+  } else {
+    weapon.damage = weaponDamageFromLegacy(legacyDamage);
+    weapon.versatile_damage =
+      versatileWeaponDamageFromLegacy(legacyVersatile);
+  }
   return weapon;
 }
 

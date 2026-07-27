@@ -373,9 +373,9 @@ const weaponToggles = [
 const weaponFieldKeys = [
   'name',
   'proficiency_category',
-  'damage_dice',
+  'damage',
   'damage_type',
-  'versatile_damage_dice',
+  'versatile_damage',
   ...weaponToggles,
   'ammunition_kind',
   'range_normal_feet',
@@ -433,6 +433,50 @@ function nullableRange(record: UnknownRecord, key: string): void {
   }
 }
 
+function validateDamage(
+  value: unknown,
+  label: 'damage' | 'versatile_damage',
+): void {
+  const damage = objectValue(value, `${label} must be an object.`);
+  if (!hasOwn(damage, 'kind') || typeof damage.kind !== 'string') {
+    invalid(`${label}.kind is required.`);
+  }
+  switch (damage.kind) {
+    case 'dice':
+      rejectUnknown(damage, ['kind', 'dice'], label);
+      nonEmptyString(damage, 'dice', WEAPON_TEXT_LIMITS.damage_dice);
+      return;
+    case 'flat':
+      rejectUnknown(damage, ['kind', 'amount'], label);
+      if (
+        !hasOwn(damage, 'amount') ||
+        !Number.isSafeInteger(damage.amount) ||
+        (damage.amount as number) < 0
+      ) {
+        invalid(`${label}.amount must be a non-negative integer.`);
+      }
+      return;
+    case 'custom':
+      rejectUnknown(damage, ['kind', 'text'], label);
+      nonEmptyString(damage, 'text', WEAPON_TEXT_LIMITS.damage_custom);
+      return;
+    case 'not_recorded':
+      if (label !== 'damage') {
+        invalid('versatile_damage cannot be not_recorded.');
+      }
+      rejectUnknown(damage, ['kind'], label);
+      return;
+    case 'not_applicable':
+      if (label !== 'versatile_damage') {
+        invalid('damage cannot be not_applicable.');
+      }
+      rejectUnknown(damage, ['kind'], label);
+      return;
+    default:
+      invalid(`${label}.kind is unsupported.`);
+  }
+}
+
 /**
  * The weapon body, checked field by field.
  *
@@ -448,15 +492,15 @@ function validateWeaponFields(value: unknown): void {
   // Every length here comes from `WEAPON_TEXT_LIMITS` rather than a literal, so
   // that the share boundary can accept exactly what this one lets through.
   nonEmptyString(weapon, 'name', WEAPON_TEXT_LIMITS.name);
-  // Free text, not a dice pattern: the source's own Blowgun does `1` damage and
-  // a user may write whatever their table agreed on.
-  nullableString(weapon, 'damage_dice', WEAPON_TEXT_LIMITS.damage_dice);
+  if (!hasOwn(weapon, 'damage')) {
+    invalid('damage is required.');
+  }
+  validateDamage(weapon.damage, 'damage');
   nullableString(weapon, 'damage_type', WEAPON_TEXT_LIMITS.damage_type);
-  nullableString(
-    weapon,
-    'versatile_damage_dice',
-    WEAPON_TEXT_LIMITS.versatile_damage_dice,
-  );
+  if (!hasOwn(weapon, 'versatile_damage')) {
+    invalid('versatile_damage is required.');
+  }
+  validateDamage(weapon.versatile_damage, 'versatile_damage');
   for (const toggle of weaponToggles) {
     requiredBoolean(weapon, toggle);
   }

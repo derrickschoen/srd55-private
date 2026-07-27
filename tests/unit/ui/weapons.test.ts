@@ -32,9 +32,9 @@ function template(changes: Partial<WeaponTemplate> = {}): WeaponTemplate {
     srd_group: 'martial_melee',
     ...profile,
     name: 'Longsword',
-    damage_dice: '1d8',
+    damage: { kind: 'dice', dice: '1d8' },
     damage_type: 'Slashing',
-    versatile_damage_dice: '1d10',
+    versatile_damage: { kind: 'dice', dice: '1d10' },
     mastery_property: 'Sap',
     ...changes,
   };
@@ -71,9 +71,9 @@ describe('pre-filling a weapon from a template', () => {
     );
     expect(filled).toMatchObject({
       name: 'Longsword',
-      damage_dice: '1d8',
+      damage: { kind: 'dice', dice: '1d8' },
       damage_type: 'Slashing',
-      versatile_damage_dice: '1d10',
+      versatile_damage: { kind: 'dice', dice: '1d10' },
       mastery_property: 'Sap',
       notes: null,
     });
@@ -84,7 +84,7 @@ describe('pre-filling a weapon from a template', () => {
     const snapshot = { ...source };
     const filled: WeaponFields = weaponFromTemplate(source);
     filled.name = 'Something else';
-    filled.damage_dice = '1d2';
+    filled.damage = { kind: 'dice', dice: '1d2' };
     filled.mastery_property = null;
     expect(source).toEqual(snapshot);
   });
@@ -95,9 +95,9 @@ describe('reading a weapon back as a sentence', () => {
     expect(
       damageSummary(
         weapon({
-          damage_dice: '1d8',
+          damage: { kind: 'dice', dice: '1d8' },
           damage_type: 'Slashing',
-          versatile_damage_dice: '1d10',
+          versatile_damage: { kind: 'dice', dice: '1d10' },
         }),
       ),
     ).toBe('1d8 Slashing (Versatile 1d10)');
@@ -105,7 +105,9 @@ describe('reading a weapon back as a sentence', () => {
 
   it('says a half-entered weapon is not recorded rather than inventing one', () => {
     expect(damageSummary(weapon())).toBe('not recorded');
-    expect(damageSummary(weapon({ damage_dice: '1d6' }))).toBe('1d6');
+    expect(
+      damageSummary(weapon({ damage: { kind: 'dice', dice: '1d6' } })),
+    ).toBe('1d6');
   });
 
   it('lists properties as words, with the ammunition kind and the range', () => {

@@ -13,6 +13,10 @@ import {
   validateShareDocument,
 } from '../../../src/sharing/schema';
 import { WEAPON_RANGE_MAX_FEET } from '../../../src/domain/weapon-limits';
+import type {
+  VersatileWeaponDamage,
+  WeaponDamage,
+} from '../../../src/domain/weapon-damage';
 
 type Random = () => number;
 type JsonObject = Record<string, unknown>;
@@ -51,6 +55,29 @@ function mulberry32(seed: number): Random {
     value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
     return ((value ^ (value >>> 14)) >>> 0) / 4_294_967_296;
   };
+}
+
+function weaponDamage(random: Random, suffix: string): WeaponDamage {
+  switch (integer(random, 4)) {
+    case 0:
+      return { kind: 'dice', dice: textValue(random, `${suffix}-dice`) };
+    case 1:
+      return { kind: 'flat', amount: integer(random, 1_000) };
+    case 2:
+      return { kind: 'custom', text: textValue(random, `${suffix}-custom`) };
+    default:
+      return { kind: 'not_recorded' };
+  }
+}
+
+function versatileDamage(
+  random: Random,
+  suffix: string,
+): VersatileWeaponDamage {
+  const damage = weaponDamage(random, suffix);
+  return damage.kind === 'not_recorded'
+    ? { kind: 'not_applicable' }
+    : damage;
 }
 
 function integer(random: Random, maximum: number): number {
@@ -222,11 +249,9 @@ function generateDocument(seed: number): CharacterShareDocument {
     const masterySelected = random() < 0.4;
     return {
       name: textValue(random, `-weapon-${weaponIndex}`),
-      ...(random() < 0.5 ? {} : { damage_dice: textValue(random, '-dice') }),
+      damage: weaponDamage(random, `-weapon-${weaponIndex}`),
       ...(random() < 0.5 ? {} : { damage_type: textValue(random, '-type') }),
-      ...(random() < 0.5
-        ? {}
-        : { versatile_damage_dice: textValue(random, '-versatile') }),
+      versatile_damage: versatileDamage(random, `-weapon-${weaponIndex}`),
       ...(random() < 0.5 ? {} : { ammunition_kind: textValue(random, '-ammo') }),
       // Drawn from `WEAPON_RANGE_MAX_FEET + 1` rather than a transcribed
       // literal. A hard-coded bound would silently stop covering the top of the

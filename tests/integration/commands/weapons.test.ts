@@ -110,9 +110,9 @@ describe('weapon commands', () => {
       // NOT STATED — the state a weapon someone typed in is genuinely in, and
       // the one D27 makes the column nullable for.
       proficiency_category: null,
-      damage_dice: null,
+      damage: { kind: 'not_recorded' },
       damage_type: null,
-      versatile_damage_dice: null,
+      versatile_damage: { kind: 'not_applicable' },
       finesse: false,
       heavy: false,
       light: false,
@@ -142,9 +142,9 @@ describe('weapon commands', () => {
     const [added] = weapons();
     expect(added).toMatchObject({
       name: 'Longsword',
-      damage_dice: '1d8',
+      damage: { kind: 'dice', dice: '1d8' },
       damage_type: 'Slashing',
-      versatile_damage_dice: '1d10',
+      versatile_damage: { kind: 'dice', dice: '1d10' },
       mastery_property: 'Sap',
       mastery_selected: false,
       // D27's FOLD, on the round trip through the column. The Longsword's
@@ -171,9 +171,9 @@ describe('weapon commands', () => {
         // able to take it back to NOT STATED. Without an option for that the
         // undecided state would be unreachable after any pick.
         proficiency_category: null,
-        damage_dice: '1d10',
+        damage: { kind: 'dice', dice: '1d10' },
         damage_type: 'Radiant',
-        versatile_damage_dice: '2d6',
+        versatile_damage: { kind: 'dice', dice: '2d6' },
         finesse: true,
         heavy: true,
         light: true,
@@ -193,9 +193,9 @@ describe('weapon commands', () => {
     expect(weapons()[0]).toMatchObject({
       name: 'Heirloom blade',
       proficiency_category: null,
-      damage_dice: '1d10',
+      damage: { kind: 'dice', dice: '1d10' },
       damage_type: 'Radiant',
-      versatile_damage_dice: '2d6',
+      versatile_damage: { kind: 'dice', dice: '2d6' },
       finesse: true,
       heavy: true,
       light: true,
@@ -219,7 +219,11 @@ describe('weapon commands', () => {
     await run({
       type: 'update_weapon',
       weapon_id: weapons()[0]!.id,
-      weapon: { ...fromTemplate('Longsword'), damage_dice: '1d4', name: 'Stub' },
+      weapon: {
+        ...fromTemplate('Longsword'),
+        damage: { kind: 'dice', dice: '1d4' },
+        name: 'Stub',
+      },
     });
     // The catalog row is byte-identical. There is no template id on the weapon
     // for a write to travel back along, and this is the observable proof.
@@ -232,7 +236,7 @@ describe('weapon commands', () => {
     expect(weapons()[0]).toMatchObject({
       name: 'Grandfather’s sword',
       // Half-entered is a first-class state: no damage, no type, no mastery.
-      damage_dice: null,
+      damage: { kind: 'not_recorded' },
       damage_type: null,
       mastery_property: null,
     });
@@ -317,7 +321,10 @@ describe('weapon commands', () => {
     const edited = await run({
       type: 'update_weapon',
       weapon_id: id,
-      weapon: custom({ name: 'Something else', damage_dice: '1d2' }),
+      weapon: custom({
+        name: 'Something else',
+        damage: { kind: 'dice', dice: '1d2' },
+      }),
     });
     expect(weapons()[0]).toMatchObject({ name: 'Something else' });
 
@@ -481,13 +488,13 @@ describe('weapon commands', () => {
   });
 
   it('refuses a weapon body that omits a nullable field instead of nulling it', async () => {
-    const { damage_dice: _omitted, ...partial } = custom();
+    const { damage: _omitted, ...partial } = custom();
     await expect(
       run({
         type: 'add_weapon',
         weapon: partial as unknown as WeaponFields,
       }),
-    ).rejects.toThrow(/damage_dice is required; use null/);
+    ).rejects.toThrow(/damage is required/);
   });
 
   // --- the mastery allowance is advisory, and the count is derived ----------

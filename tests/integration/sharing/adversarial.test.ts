@@ -2224,7 +2224,13 @@ describe('a hostile or over-long character note', () => {
 describe('hostile and over-long weapon sections', () => {
   const weaponDocument = (weapon: Record<string, unknown>) =>
     minimalDocument({
-      weapons: [weapon],
+      weapons: [
+        {
+          damage: { kind: 'not_recorded' },
+          versatile_damage: { kind: 'not_applicable' },
+          ...weapon,
+        },
+      ],
     } as unknown as Partial<CharacterShareDocument>);
 
   it('names the offending field rather than reporting a byte-limit overflow', async () => {
@@ -2281,11 +2287,15 @@ describe('hostile and over-long weapon sections', () => {
       // value has to SURVIVE the link rather than the case where its absence is
       // tolerated — the second is covered by the pre-D27 arity tests.
       proficiency_category: 'martial' as const,
-      damage_dice: 'd'.repeat(WEAPON_TEXT_LIMITS.damage_dice),
+      damage: {
+        kind: 'dice' as const,
+        dice: 'd'.repeat(WEAPON_TEXT_LIMITS.damage_dice),
+      },
       damage_type: 't'.repeat(WEAPON_TEXT_LIMITS.damage_type),
-      versatile_damage_dice: 'v'.repeat(
-        WEAPON_TEXT_LIMITS.versatile_damage_dice,
-      ),
+      versatile_damage: {
+        kind: 'dice' as const,
+        dice: 'v'.repeat(WEAPON_TEXT_LIMITS.versatile_damage_dice),
+      },
       finesse: true,
       heavy: true,
       light: true,
@@ -2344,6 +2354,8 @@ describe('hostile and over-long weapon sections', () => {
     const heavy = minimalDocument({
       weapons: Array.from({ length: SHARE_LIMITS.weapons }, (_, index) => ({
         name: `Blade ${index}`,
+        damage: { kind: 'not_recorded' as const },
+        versatile_damage: { kind: 'not_applicable' as const },
         notes: noise(WEAPON_TEXT_LIMITS.notes),
         other_properties: noise(WEAPON_TEXT_LIMITS.other_properties),
       })),
@@ -2418,7 +2430,18 @@ describe('hostile and over-long weapon sections', () => {
     // Deliberately NOT deduplicated, unlike every other section. Two identical
     // daggers are two daggers; each is its own row with its own mastery flag.
     const twoDaggers = minimalDocument({
-      weapons: [{ name: 'Dagger' }, { name: 'Dagger' }],
+      weapons: [
+        {
+          name: 'Dagger',
+          damage: { kind: 'not_recorded' },
+          versatile_damage: { kind: 'not_applicable' },
+        },
+        {
+          name: 'Dagger',
+          damage: { kind: 'not_recorded' },
+          versatile_damage: { kind: 'not_applicable' },
+        },
+      ],
     } as unknown as Partial<CharacterShareDocument>);
     const shared = await throughShareLink(twoDaggers);
     expect(shared.weapons).toHaveLength(2);

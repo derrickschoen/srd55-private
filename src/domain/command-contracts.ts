@@ -11,6 +11,10 @@ import type {
   WeaponMasteryProperty,
   WeaponProficiencyCategory,
 } from './enums';
+import type {
+  VersatileWeaponDamage,
+  WeaponDamage,
+} from './weapon-damage';
 import type { CharacterSnapshot, JsonObject } from './models';
 
 interface CommandBase {
@@ -134,9 +138,9 @@ export interface WeaponFields {
    * profile would make `templates()` select a column that does not exist.
    */
   proficiency_category: WeaponProficiencyCategory | null;
-  damage_dice: string | null;
+  damage: WeaponDamage;
   damage_type: DamageType | null;
-  versatile_damage_dice: string | null;
+  versatile_damage: VersatileWeaponDamage;
   finesse: boolean;
   heavy: boolean;
   light: boolean;

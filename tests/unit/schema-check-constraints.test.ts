@@ -261,6 +261,7 @@ const weaponTemplate =
       content_key: uid('weapon'),
       name: uid('Weapon'),
       srd_group: 'simple_melee',
+      damage_kind: 'dice',
       damage_dice: '1d6',
       damage_type: 'Slashing',
       mastery_property: 'Sap',
@@ -578,6 +579,7 @@ function newWeaponTemplate(db: Database, values: Values = {}): number {
     content_key: uid('weapon'),
     name: uid('Weapon'),
     srd_group: 'simple_melee',
+    damage_kind: 'dice',
     damage_dice: '1d6',
     damage_type: 'Slashing',
     mastery_property: 'Sap',
@@ -1208,6 +1210,42 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     ],
   },
   {
+    constraint: 'character_weapons_damage_check',
+    rejects: [
+      ['dice with a NULL payload', weapon({ damage_kind: 'dice' })],
+      ['flat with a NULL payload', weapon({ damage_kind: 'flat' })],
+      ['custom with a NULL payload', weapon({ damage_kind: 'custom' })],
+      ['not_recorded carrying dice', weapon({ damage_kind: 'not_recorded', damage_dice: '1d6' })],
+      ['flat carrying a dice payload too', weapon({ damage_kind: 'flat', damage_flat: 0, damage_dice: '1d6' })],
+      ['negative flat damage', weapon({ damage_kind: 'flat', damage_flat: -1 })],
+      ['an unknown discriminator', weapon({ damage_kind: 'unknown' })],
+    ],
+    accepts: [
+      ['dice with only dice', weapon({ damage_kind: 'dice', damage_dice: '2d6' })],
+      ['flat zero, which is real damage', weapon({ damage_kind: 'flat', damage_flat: 0 })],
+      ['custom text with only custom text', weapon({ damage_kind: 'custom', damage_custom: 'ability modifier' })],
+      ['not_recorded with no payload', weapon({ damage_kind: 'not_recorded' })],
+    ],
+  },
+  {
+    constraint: 'character_weapons_versatile_damage_check',
+    rejects: [
+      ['dice with a NULL payload', weapon({ versatile_damage_kind: 'dice' })],
+      ['flat with a NULL payload', weapon({ versatile_damage_kind: 'flat' })],
+      ['custom with a NULL payload', weapon({ versatile_damage_kind: 'custom' })],
+      ['not_applicable carrying dice', weapon({ versatile_damage_kind: 'not_applicable', versatile_damage_dice: '1d8' })],
+      ['flat carrying custom text too', weapon({ versatile_damage_kind: 'flat', versatile_damage_flat: 0, versatile_damage_custom: 'two hands' })],
+      ['negative flat damage', weapon({ versatile_damage_kind: 'flat', versatile_damage_flat: -1 })],
+      ['not_recorded, which belongs only to primary damage', weapon({ versatile_damage_kind: 'not_recorded' })],
+    ],
+    accepts: [
+      ['dice with only dice', weapon({ versatile_damage_kind: 'dice', versatile_damage_dice: '1d8' })],
+      ['flat zero', weapon({ versatile_damage_kind: 'flat', versatile_damage_flat: 0 })],
+      ['custom text', weapon({ versatile_damage_kind: 'custom', versatile_damage_custom: 'twice the level' })],
+      ['not_applicable with no payload', weapon({ versatile_damage_kind: 'not_applicable' })],
+    ],
+  },
+  {
     constraint: 'character_weapons_mastery_property_check',
     rejects: [
       ['a lowercased property, which no display or lookup matches', weapon({ mastery_property: 'cleave' })],
@@ -1242,6 +1280,38 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
       // this column's is the two categories a class grants.
       ['the bare simple the template refuses', weapon({ proficiency_category: 'simple' })],
       ['martial', weapon({ proficiency_category: 'martial' })],
+    ],
+  },
+  {
+    constraint: 'weapon_templates_damage_check',
+    rejects: [
+      ['dice with a NULL payload', weaponTemplate({ damage_kind: 'dice', damage_dice: null })],
+      ['flat with a NULL payload', weaponTemplate({ damage_kind: 'flat', damage_dice: null })],
+      ['custom with a NULL payload', weaponTemplate({ damage_kind: 'custom', damage_dice: null })],
+      ['not_recorded carrying custom text', weaponTemplate({ damage_kind: 'not_recorded', damage_dice: null, damage_custom: 'unknown' })],
+      ['negative flat damage', weaponTemplate({ damage_kind: 'flat', damage_dice: null, damage_flat: -1 })],
+    ],
+    accepts: [
+      ['dice', weaponTemplate({ damage_kind: 'dice', damage_dice: '1d6' })],
+      ['flat zero', weaponTemplate({ damage_kind: 'flat', damage_dice: null, damage_flat: 0 })],
+      ['custom text', weaponTemplate({ damage_kind: 'custom', damage_dice: null, damage_custom: 'special table' })],
+      ['not_recorded', weaponTemplate({ damage_kind: 'not_recorded', damage_dice: null })],
+    ],
+  },
+  {
+    constraint: 'weapon_templates_versatile_damage_check',
+    rejects: [
+      ['dice with a NULL payload', weaponTemplate({ versatile_damage_kind: 'dice' })],
+      ['flat with a NULL payload', weaponTemplate({ versatile_damage_kind: 'flat' })],
+      ['custom with a NULL payload', weaponTemplate({ versatile_damage_kind: 'custom' })],
+      ['not_applicable carrying a flat amount', weaponTemplate({ versatile_damage_kind: 'not_applicable', versatile_damage_flat: 1 })],
+      ['negative flat damage', weaponTemplate({ versatile_damage_kind: 'flat', versatile_damage_flat: -1 })],
+    ],
+    accepts: [
+      ['dice', weaponTemplate({ versatile_damage_kind: 'dice', versatile_damage_dice: '1d8' })],
+      ['flat zero', weaponTemplate({ versatile_damage_kind: 'flat', versatile_damage_flat: 0 })],
+      ['custom text', weaponTemplate({ versatile_damage_kind: 'custom', versatile_damage_custom: 'special table' })],
+      ['not_applicable', weaponTemplate({ versatile_damage_kind: 'not_applicable' })],
     ],
   },
   {

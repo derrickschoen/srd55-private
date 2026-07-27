@@ -11,6 +11,7 @@ import {
   type JsonColumnKey,
 } from './json-columns';
 import type { BackupTable, TableFor } from './tables';
+import { weaponDamagePayloadError } from './row-rules';
 import {
   abilities,
   armorCategories,
@@ -229,6 +230,18 @@ const srdWeaponGroupEnum = z.enum(srdWeaponGroups);
  * proficient".
  */
 const weaponProficiencyCategoryEnum = z.enum(weaponProficiencyCategories);
+const weaponDamageKindEnum = z.enum([
+  'dice',
+  'flat',
+  'custom',
+  'not_recorded',
+]);
+const versatileWeaponDamageKindEnum = z.enum([
+  'dice',
+  'flat',
+  'custom',
+  'not_applicable',
+]);
 /**
  * The closed set of mechanical effects a character or a template can carry.
  *
@@ -310,6 +323,8 @@ export const COLUMN_REFINEMENTS = {
   weaponMasteryGrantEnum,
   srdWeaponGroupEnum,
   weaponProficiencyCategoryEnum,
+  weaponDamageKindEnum,
+  versatileWeaponDamageKindEnum,
   effectKindEnum,
   armorSlotEnum,
   armorCategoryEnum,
@@ -665,19 +680,23 @@ const REFINEMENTS = {
   // NOTE THE NULLABLE COLUMNS ARE NOT LISTED AS NULLABLE HERE. `columnSchema`
   // adds `| null` from `COLUMN_FACTS[table][column].notNull`, so a contract can
   // never be stricter than its column by accident — which is the whole D6b
-  // point, and the reason `damage_dice` below reads exactly like
-  // `weapon_templates.damage_dice` although one is nullable and one is not.
+  // point. The cross-column refinement below then proves the discriminator owns
+  // exactly one payload without pretending any nullable payload is always set.
   'character_weapons.id': positiveInt,
   'character_weapons.character_id': positiveInt,
   // Non-empty: a weapon with no name cannot be picked out of a list, and the
   // add/update commands already refuse one.
   'character_weapons.name': nonEmptyText,
-  // Free text, NOT a dice-expression pattern. The source's own Blowgun row is
-  // `1 Piercing` — a flat number — and a user may write anything their table
-  // agreed on. Pinning a `NdM` shape here would reject rows the schema permits.
+  // Dice and custom payloads remain open strings at this row-contract layer.
+  // The discriminator and cross-column rule decide which payload is applicable;
+  // custom preserves anything a user's table agreed on.
+  'character_weapons.damage_kind': weaponDamageKindEnum,
   'character_weapons.damage_dice': sqlText,
+  'character_weapons.damage_custom': sqlText,
   'character_weapons.damage_type': damageTypeVocabulary,
+  'character_weapons.versatile_damage_kind': versatileWeaponDamageKindEnum,
   'character_weapons.versatile_damage_dice': sqlText,
+  'character_weapons.versatile_damage_custom': sqlText,
   'character_weapons.finesse': sqlBool,
   'character_weapons.heavy': sqlBool,
   'character_weapons.light': sqlBool,
@@ -763,9 +782,13 @@ const REFINEMENTS = {
   'weapon_templates.rules_edition': rulesEditionEnum,
   'weapon_templates.name': nonEmptyText,
   'weapon_templates.srd_group': srdWeaponGroupEnum,
-  'weapon_templates.damage_dice': nonEmptyText,
+  'weapon_templates.damage_kind': weaponDamageKindEnum,
+  'weapon_templates.damage_dice': sqlText,
+  'weapon_templates.damage_custom': sqlText,
   'weapon_templates.damage_type': damageTypeEnum,
+  'weapon_templates.versatile_damage_kind': versatileWeaponDamageKindEnum,
   'weapon_templates.versatile_damage_dice': sqlText,
+  'weapon_templates.versatile_damage_custom': sqlText,
   'weapon_templates.finesse': sqlBool,
   'weapon_templates.heavy': sqlBool,
   'weapon_templates.light': sqlBool,
@@ -1049,6 +1072,16 @@ export function rowContractError(
 ): string | null {
   const result = contractFor(table, only).safeParse(row);
   if (result.success) {
+    if (
+      only === undefined &&
+      (table === 'character_weapons' || table === 'weapon_templates')
+    ) {
+      const stored = result.data as Readonly<Record<string, unknown>>;
+      return (
+        weaponDamagePayloadError(stored, label, 'damage') ??
+        weaponDamagePayloadError(stored, label, 'versatile_damage')
+      );
+    }
     return null;
   }
   const issue = result.error.issues[0];

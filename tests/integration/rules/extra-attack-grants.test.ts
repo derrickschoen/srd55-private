@@ -587,9 +587,9 @@ describe('the grants a character actually has, read from the database', () => {
         {
           id: 1,
           name: 'Heavy Crossbow',
-          damage_dice: '1d10',
+          damage: { kind: 'dice', dice: '1d10' },
           damage_type: 'Piercing',
-          versatile_damage_dice: null,
+          versatile_damage: { kind: 'not_applicable' },
           proficiency: { kind: 'proficient', via: ['Warlock'] },
         },
       ],
@@ -635,9 +635,9 @@ describe('the grants a character actually has, read from the database', () => {
         {
           id: 1,
           name: 'Longsword',
-          damage_dice: '1d8',
+          damage: { kind: 'dice', dice: '1d8' },
           damage_type: 'Slashing',
-          versatile_damage_dice: '1d10',
+          versatile_damage: { kind: 'dice', dice: '1d10' },
           proficiency: { kind: 'proficient', via: ['Fighter'] },
         },
       ],

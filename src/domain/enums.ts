@@ -409,12 +409,12 @@ export type MulticlassSkillPool = (typeof multiclassSkillPools)[number];
  * NOT A SIZE, AND SO NOT THIS TYPE — three things that look like they belong
  * here and do not:
  *
- *  - A DAMAGE EXPRESSION. `character_weapons.damage_dice` is free text and must
- *    stay so: the source's own Blowgun does `1` damage with no die at all
- *    (`docs/srd/source/weapons-table.txt:46`), Shillelagh's level-17 step is
- *    `2d6` (`weapon-attack-cantrips.txt:53-54`) and True Strike varies the
- *    COUNT at a fixed d6 (`:29`). A size cannot hold any of the three. This is
- *    the D12/Q4 site and it is already decided the D12/Q4 way.
+ *  - A DAMAGE VALUE. `WeaponDamage` distinguishes rolled dice, a flat number,
+ *    custom text, and an unrecorded value. The source's own Blowgun does `1`
+ *    damage with no die at all (`docs/srd/source/weapons-table.txt:46`),
+ *    Shillelagh's level-17 step is `2d6`
+ *    (`weapon-attack-cantrips.txt:53-54`) and True Strike varies the COUNT at a
+ *    fixed d6 (`:29`). A size cannot hold any of the three.
  *  - A ROLLED FACE. `character_hit_point_rolls.rolled_value` is 1..12 from
  *    `SHEET_ROLL_BOUNDS`; its ceiling merely HAPPENS to equal a die size.
  *  - A COUNT of dice. `DiceConfig.basicDice` is 1..20 and is not a vocabulary.

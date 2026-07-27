@@ -5,6 +5,8 @@ import {
   sqlNullableInteger,
   sqlNullableString,
   sqlString,
+  sqlVersatileWeaponDamage,
+  sqlWeaponDamage,
   type SqlRow,
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
@@ -60,9 +62,15 @@ export interface WeaponPanelContext {
 
 const PROFILE_COLUMNS = [
   'name',
+  'damage_kind',
   'damage_dice',
+  'damage_flat',
+  'damage_custom',
   'damage_type',
+  'versatile_damage_kind',
   'versatile_damage_dice',
+  'versatile_damage_flat',
+  'versatile_damage_custom',
   'finesse',
   'heavy',
   'light',
@@ -107,9 +115,9 @@ function proficiencyCategory(row: SqlRow): WeaponProficiencyCategory | null {
 function weaponProfile(row: SqlRow): WeaponProfile {
   return {
     name: sqlString(row, 'name'),
-    damage_dice: sqlNullableString(row, 'damage_dice'),
+    damage: sqlWeaponDamage(row),
     damage_type: sqlNullableDamageType(row, 'damage_type'),
-    versatile_damage_dice: sqlNullableString(row, 'versatile_damage_dice'),
+    versatile_damage: sqlVersatileWeaponDamage(row),
     finesse: sqlBoolean(row, 'finesse'),
     heavy: sqlBoolean(row, 'heavy'),
     light: sqlBoolean(row, 'light'),
@@ -231,9 +239,9 @@ export class WeaponQueries {
       weapons: weapons.map((weapon) => ({
         id: weapon.id,
         name: weapon.name,
-        damage_dice: weapon.damage_dice,
+        damage: weapon.damage,
         damage_type: weapon.damage_type,
-        versatile_damage_dice: weapon.versatile_damage_dice,
+        versatile_damage: weapon.versatile_damage,
         // The three columns a proficiency question reads and nothing else: the
         // narrow `ProficiencyWeapon` shape is what stops this path guessing a
         // category from a damage die or a name.
