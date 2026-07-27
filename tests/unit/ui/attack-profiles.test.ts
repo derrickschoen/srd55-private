@@ -63,9 +63,9 @@ function result(
       {
         id: 1,
         name: 'Longsword',
-        damage_dice: '1d8',
+        damage: { kind: 'dice', dice: '1d8' },
         damage_type: 'Slashing',
-        versatile_damage_dice: '1d10',
+        versatile_damage: { kind: 'dice', dice: '1d10' },
         proficiency: { kind: 'proficient', via: ['Fighter'] },
       },
     ],
@@ -245,9 +245,9 @@ describe('the damage line', () => {
         {
           id: 2,
           name: 'Grandfather’s sword',
-          damage_dice: null,
+          damage: { kind: 'not_recorded' },
           damage_type: null,
-          versatile_damage_dice: null,
+          versatile_damage: { kind: 'not_applicable' },
           proficiency: { kind: 'proficient', via: ['Fighter'] },
         },
       ],
@@ -258,7 +258,7 @@ describe('the damage line', () => {
     });
     const profile = firstProfile(value);
     expect(damageLabel(profile, optionOf(profile, 'strength'), null)).toBe(
-      'Damage: damage dice not recorded +4 damage type not recorded',
+      'Damage: damage not recorded +4 damage type not recorded',
     );
   });
 
@@ -507,7 +507,7 @@ describe('the strings carry no wordmark the licence asks to be left off', () => 
           profile.label,
           toHitLabel(profile, optionOf(profile, 'strength')),
           damageLabel(profile, optionOf(profile, 'strength'), null),
-          profile.damage.dice_note ?? '',
+          profile.damage.versatile_note ?? '',
           ...profile.preconditions,
           ...profile.notes,
         ]),

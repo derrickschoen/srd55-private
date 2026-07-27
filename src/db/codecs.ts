@@ -12,6 +12,10 @@ import {
   type DamageType,
   type SpellSchool,
 } from '../domain/enums';
+import type {
+  VersatileWeaponDamage,
+  WeaponDamage,
+} from '../domain/weapon-damage';
 
 export type SqlRow = Readonly<Record<string, SqlValue>>;
 
@@ -74,6 +78,44 @@ export function sqlNullableString(
   column: string,
 ): string | null {
   return row[column] === null ? null : sqlString(row, column);
+}
+
+export function sqlWeaponDamage(
+  row: SqlRow,
+  prefix = 'damage',
+): WeaponDamage {
+  const kind = sqlString(row, `${prefix}_kind`);
+  switch (kind) {
+    case 'dice':
+      return { kind, dice: sqlString(row, `${prefix}_dice`) };
+    case 'flat':
+      return { kind, amount: sqlInteger(row, `${prefix}_flat`) };
+    case 'custom':
+      return { kind, text: sqlString(row, `${prefix}_custom`) };
+    case 'not_recorded':
+      return { kind };
+    default:
+      return codecError(`${prefix}_kind`, 'a weapon damage kind', kind);
+  }
+}
+
+export function sqlVersatileWeaponDamage(
+  row: SqlRow,
+): VersatileWeaponDamage {
+  const prefix = 'versatile_damage';
+  const kind = sqlString(row, `${prefix}_kind`);
+  switch (kind) {
+    case 'dice':
+      return { kind, dice: sqlString(row, `${prefix}_dice`) };
+    case 'flat':
+      return { kind, amount: sqlInteger(row, `${prefix}_flat`) };
+    case 'custom':
+      return { kind, text: sqlString(row, `${prefix}_custom`) };
+    case 'not_applicable':
+      return { kind };
+    default:
+      return codecError(`${prefix}_kind`, 'a versatile damage kind', kind);
+  }
 }
 
 /**

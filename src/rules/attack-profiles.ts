@@ -67,6 +67,11 @@ import type {
   ResolvedExtraAttackGrant,
 } from './extra-attack';
 import type { WeaponProficiencyVerdict } from './multiclass-proficiency';
+import {
+  formatWeaponDamage,
+  type VersatileWeaponDamage,
+  type WeaponDamage,
+} from '../domain/weapon-damage';
 
 export const attackProfileKinds = [
   'normal',
@@ -142,9 +147,8 @@ export interface ExtraDamage {
 }
 
 export interface ProfileDamage {
-  /** The dice rolled, as text. `null` when the weapon records none. */
-  readonly dice: string | null;
-  readonly dice_note: string | null;
+  readonly amount: WeaponDamage;
+  readonly versatile_note: string | null;
   readonly damage_type: ProfileDamageType;
   readonly extra: readonly ExtraDamage[];
 }
@@ -238,9 +242,9 @@ export interface AttackProfileResult {
 export interface AttackProfileWeapon {
   readonly id: number;
   readonly name: string;
-  readonly damage_dice: string | null;
+  readonly damage: WeaponDamage;
   readonly damage_type: string | null;
-  readonly versatile_damage_dice: string | null;
+  readonly versatile_damage: VersatileWeaponDamage;
   /**
    * Whether this character is proficient with this weapon — REQUIRED, and not
    * optional with a generous default.
@@ -396,9 +400,9 @@ function weaponDamageType(weapon: AttackProfileWeapon): ProfileDamageType {
 }
 
 function versatileNote(weapon: AttackProfileWeapon): string | null {
-  return weapon.versatile_damage_dice === null
+  return weapon.versatile_damage.kind === 'not_applicable'
     ? null
-    : `Versatile: ${weapon.versatile_damage_dice} when wielded with two hands.`;
+    : `Versatile: ${formatWeaponDamage(weapon.versatile_damage)} when wielded with two hands.`;
 }
 
 /**
@@ -448,8 +452,8 @@ function normalProfile(
       ],
     },
     damage: {
-      dice: weapon.damage_dice,
-      dice_note: versatileNote(weapon),
+      amount: weapon.damage,
+      versatile_note: versatileNote(weapon),
       damage_type: weaponDamageType(weapon),
       extra: [],
     },
@@ -623,10 +627,9 @@ function cantripAbilities(
  * rule exists to make possible.
  *
  * THE VERSATILE NOTE CARRIES OVER, because the attack is made "with the weapon
- * used in the spell's casting" and this profile rolls that weapon's OWN dice —
- * `dice` is `weapon.damage_dice`, the same field the plain attack reads. A
- * two-handed Longsword still rolls 1d10 here, so dropping the note would print
- * 1d8 one row below the row that qualified it. Martial Arts is silent on
+ * used in the spell's casting" and this profile uses that weapon's OWN damage
+ * value. A two-handed Longsword still rolls 1d10 here, so dropping the note
+ * would print 1d8 one row below the row that qualified it. Martial Arts is silent on
  * purpose: its die REPLACES the weapon's, which makes Versatile irrelevant
  * there. The note restates a value `character_weapons` records; it does not
  * apply the Versatile rule text, which is not in `docs/srd/source/`.
@@ -660,8 +663,8 @@ function trueStrikeProfile(
       proficiency,
     ),
     damage: {
-      dice: weapon.damage_dice,
-      dice_note: versatileNote(weapon),
+      amount: weapon.damage,
+      versatile_note: versatileNote(weapon),
       damage_type: {
         state: 'choice',
         spell_type: 'Radiant',
@@ -764,8 +767,8 @@ function shillelaghProfile(
           },
         ),
         damage: {
-          dice: shillelaghDamageDice(totalLevel),
-          dice_note:
+          amount: { kind: 'dice', dice: shillelaghDamageDice(totalLevel) },
+          versatile_note:
             "The weapon's own damage die is replaced. The die changes at " +
             `levels 5, 11 and 17, read against your total character level of ${String(totalLevel)}.`,
           damage_type: {
@@ -848,8 +851,8 @@ function martialArtsProfile(
       ],
     },
     damage: {
-      dice: `1d${String(granted.die)}`,
-      dice_note:
+      amount: { kind: 'dice', dice: `1d${String(granted.die)}` },
+      versatile_note:
         "You can roll this in place of the weapon's normal damage. It is the " +
         `die for ${granted.class_name} level ${String(granted.class_level)}, not for your total character level.`,
       damage_type: weaponDamageType(weapon),

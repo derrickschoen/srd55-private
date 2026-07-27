@@ -220,7 +220,7 @@ describe('the four stored sheet inputs survive every portability path', () => {
   it('restores a save point that recorded the sheet inputs', () => {
     const state = new CharacterState(db);
     const snapshot = state.capture(characterId);
-    expect(snapshot.schema_version).toBe('a7-v5');
+    expect(snapshot.schema_version).toBe('a7-v6');
     expect(snapshot.character_armor).toHaveLength(2);
 
     db.exec('DELETE FROM character_armor WHERE character_id = ?', [

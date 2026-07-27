@@ -11,6 +11,10 @@ import {
   weaponProficiencyCategories,
 } from '../domain/enums';
 import { weaponMasterySelectionError } from '../domain/contracts/row-rules';
+import type {
+  VersatileWeaponDamage,
+  WeaponDamage,
+} from '../domain/weapon-damage';
 import { CHARACTER_TEXT_LIMITS } from '../domain/character-limits';
 import {
   WEAPON_RANGE_MAX_FEET,
@@ -226,9 +230,9 @@ export interface ShareWeapon {
    * `WEAPON_TUPLE_LENGTHS` in `codec.ts` for why that position is load-bearing.
    */
   readonly proficiency_category?: string;
-  readonly damage_dice?: string;
+  readonly damage: WeaponDamage;
   readonly damage_type?: string;
-  readonly versatile_damage_dice?: string;
+  readonly versatile_damage: VersatileWeaponDamage;
   readonly ammunition_kind?: string;
   readonly range_normal_feet?: number;
   readonly range_long_feet?: number;
@@ -261,9 +265,7 @@ export const SHARE_WEAPON_FLAGS = [
 
 /** The nullable text columns of a weapon, in wire order. */
 export const SHARE_WEAPON_TEXT = [
-  'damage_dice',
   'damage_type',
-  'versatile_damage_dice',
   'ammunition_kind',
 ] as const satisfies readonly (keyof ShareWeapon)[];
 
@@ -794,11 +796,72 @@ function weaponRange(value: unknown, label: string): number {
   return integer(value, label, 0, WEAPON_RANGE_MAX_FEET);
 }
 
+function shareDamage(value: unknown, label: string): WeaponDamage {
+  const damage = record(value, label);
+  if (typeof damage.kind !== 'string') {
+    throw new ShareValidationError(`${label}.kind must be a string.`);
+  }
+  switch (damage.kind) {
+    case 'dice':
+      exactKeys(damage, ['kind', 'dice'], [], label);
+      return {
+        kind: 'dice',
+        dice: text(
+          damage.dice,
+          `${label}.dice`,
+          WEAPON_TEXT_LIMITS.damage_dice,
+        ),
+      };
+    case 'flat':
+      exactKeys(damage, ['kind', 'amount'], [], label);
+      return {
+        kind: 'flat',
+        amount: integer(
+          damage.amount,
+          `${label}.amount`,
+          0,
+          Number.MAX_SAFE_INTEGER,
+        ),
+      };
+    case 'custom':
+      exactKeys(damage, ['kind', 'text'], [], label);
+      return {
+        kind: 'custom',
+        text: text(
+          damage.text,
+          `${label}.text`,
+          WEAPON_TEXT_LIMITS.damage_custom,
+        ),
+      };
+    case 'not_recorded':
+      exactKeys(damage, ['kind'], [], label);
+      return { kind: 'not_recorded' };
+    default:
+      throw new ShareValidationError(`${label}.kind is unsupported.`);
+  }
+}
+
+function shareVersatileDamage(
+  value: unknown,
+  label: string,
+): VersatileWeaponDamage {
+  const row = record(value, label);
+  if (row.kind === 'not_applicable') {
+    exactKeys(row, ['kind'], [], label);
+    return { kind: 'not_applicable' };
+  }
+  const damage = shareDamage(value, label);
+  if (damage.kind === 'not_recorded') {
+    throw new ShareValidationError(`${label}.kind is unsupported.`);
+  }
+  return damage;
+}
+
 function shareWeapon(value: unknown, label: string): ShareWeapon {
   const row = record(value, label);
   exactKeys(
     row,
-    ['name'],
+    ['name', 'damage', 'versatile_damage'],
     [
       'proficiency_category',
       ...SHARE_WEAPON_TEXT,
@@ -813,6 +876,11 @@ function shareWeapon(value: unknown, label: string): ShareWeapon {
   );
   const weapon: Record<string, unknown> = {
     name: text(row.name, `${label}.name`, WEAPON_TEXT_LIMITS.name),
+    damage: shareDamage(row.damage, `${label}.damage`),
+    versatile_damage: shareVersatileDamage(
+      row.versatile_damage,
+      `${label}.versatile_damage`,
+    ),
   };
   // D27. Checked against the enum here rather than passed through as text, for
   // the same reason `mastery_property` is: `character_weapons` has a CHECK on

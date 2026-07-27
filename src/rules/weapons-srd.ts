@@ -45,6 +45,12 @@ import {
   type WeaponMasteryProperty,
 } from '../domain/enums';
 import { rowContractError } from '../domain/contracts/rows';
+import {
+  versatileWeaponDamageFromLegacy,
+  weaponDamageFromLegacy,
+  type VersatileWeaponDamage,
+  type WeaponDamageAmount,
+} from '../domain/weapon-damage';
 
 /** The rules edition every bundled weapon belongs to. */
 export const BUNDLED_WEAPON_RULES_EDITION = '2024';
@@ -61,9 +67,9 @@ export interface SrdWeaponTemplate {
   readonly content_key: string;
   readonly name: string;
   readonly srd_group: SrdWeaponGroup;
-  readonly damage_dice: string;
+  readonly damage: WeaponDamageAmount;
   readonly damage_type: KnownDamageType;
-  readonly versatile_damage_dice: string | null;
+  readonly versatile_damage: VersatileWeaponDamage;
   readonly finesse: boolean;
   readonly heavy: boolean;
   readonly light: boolean;
@@ -255,9 +261,9 @@ function applyProperties(
   return {
     name: weapon.name,
     srd_group: weapon.srd_group,
-    damage_dice: weapon.damage_dice,
+    damage: recordedDamageFromLegacy(weapon.damage_dice),
     damage_type: weapon.damage_type,
-    versatile_damage_dice: versatile,
+    versatile_damage: versatileWeaponDamageFromLegacy(versatile),
     ...flags,
     ammunition_kind: ammunitionKind,
     range_normal_feet: rangeNormal,
@@ -265,6 +271,14 @@ function applyProperties(
     mastery_property: weapon.mastery_property,
     other_properties: qualifications.length === 0 ? null : qualifications.join(', '),
   };
+}
+
+function recordedDamageFromLegacy(value: string): WeaponDamageAmount {
+  const damage = weaponDamageFromLegacy(value);
+  if (damage.kind === 'not_recorded') {
+    throw new SrdExtractError('a weapon table row has no damage.');
+  }
+  return damage;
 }
 
 /**
@@ -591,14 +605,22 @@ export function seedWeaponContent(db: DatabaseContext): void {
 
 function seedWeaponTemplates(db: DatabaseContext, timestamp: string): void {
   for (const template of bundledWeaponTemplates()) {
+    const damage = damageColumnValues(template.damage);
+    const versatile = damageColumnValues(template.versatile_damage);
     const row = {
       content_key: template.content_key,
       rules_edition: BUNDLED_WEAPON_RULES_EDITION,
       name: template.name,
       srd_group: template.srd_group,
-      damage_dice: template.damage_dice,
+      damage_kind: damage.kind,
+      damage_dice: damage.dice,
+      damage_flat: damage.flat,
+      damage_custom: damage.custom,
       damage_type: template.damage_type,
-      versatile_damage_dice: template.versatile_damage_dice,
+      versatile_damage_kind: versatile.kind,
+      versatile_damage_dice: versatile.dice,
+      versatile_damage_flat: versatile.flat,
+      versatile_damage_custom: versatile.custom,
       finesse: sqlBool(template.finesse),
       heavy: sqlBool(template.heavy),
       light: sqlBool(template.light),
@@ -622,19 +644,27 @@ function seedWeaponTemplates(db: DatabaseContext, timestamp: string): void {
 
     db.exec(
       `INSERT INTO weapon_templates (
-         content_key, rules_edition, name, srd_group, damage_dice, damage_type,
-         versatile_damage_dice, finesse, heavy, light, loading, reach, thrown,
+         content_key, rules_edition, name, srd_group,
+         damage_kind, damage_dice, damage_flat, damage_custom, damage_type,
+         versatile_damage_kind, versatile_damage_dice, versatile_damage_flat,
+         versatile_damage_custom, finesse, heavy, light, loading, reach, thrown,
          two_handed, ammunition, ammunition_kind, range_normal_feet,
          range_long_feet, mastery_property, other_properties,
          created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(content_key) DO UPDATE SET
          rules_edition = excluded.rules_edition,
          name = excluded.name,
          srd_group = excluded.srd_group,
+         damage_kind = excluded.damage_kind,
          damage_dice = excluded.damage_dice,
+         damage_flat = excluded.damage_flat,
+         damage_custom = excluded.damage_custom,
          damage_type = excluded.damage_type,
+         versatile_damage_kind = excluded.versatile_damage_kind,
          versatile_damage_dice = excluded.versatile_damage_dice,
+         versatile_damage_flat = excluded.versatile_damage_flat,
+         versatile_damage_custom = excluded.versatile_damage_custom,
          finesse = excluded.finesse,
          heavy = excluded.heavy,
          light = excluded.light,
@@ -654,9 +684,15 @@ function seedWeaponTemplates(db: DatabaseContext, timestamp: string): void {
         row.rules_edition,
         row.name,
         row.srd_group,
+        row.damage_kind,
         row.damage_dice,
+        row.damage_flat,
+        row.damage_custom,
         row.damage_type,
+        row.versatile_damage_kind,
         row.versatile_damage_dice,
+        row.versatile_damage_flat,
+        row.versatile_damage_custom,
         row.finesse,
         row.heavy,
         row.light,
@@ -674,6 +710,26 @@ function seedWeaponTemplates(db: DatabaseContext, timestamp: string): void {
         row.updated_at,
       ],
     );
+  }
+}
+
+function damageColumnValues(
+  damage: WeaponDamageAmount | VersatileWeaponDamage,
+): {
+  readonly kind: WeaponDamageAmount['kind'] | 'not_applicable';
+  readonly dice: string | null;
+  readonly flat: number | null;
+  readonly custom: string | null;
+} {
+  switch (damage.kind) {
+    case 'dice':
+      return { kind: damage.kind, dice: damage.dice, flat: null, custom: null };
+    case 'flat':
+      return { kind: damage.kind, dice: null, flat: damage.amount, custom: null };
+    case 'custom':
+      return { kind: damage.kind, dice: null, flat: null, custom: damage.text };
+    case 'not_applicable':
+      return { kind: damage.kind, dice: null, flat: null, custom: null };
   }
 }
 

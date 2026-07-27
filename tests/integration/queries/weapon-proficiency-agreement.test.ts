@@ -55,9 +55,10 @@ describe('the sheet and the weapons panel agree about one weapon', () => {
   ): void {
     db.exec(
       `INSERT INTO character_weapons
-         (character_id, name, damage_dice, damage_type, proficiency_category,
+         (character_id, name, damage_kind, damage_dice, damage_type,
+          proficiency_category,
           finesse, light, mastery_selected)
-       VALUES (?, ?, '1d8', 'Slashing', ?, ?, ?, 0)`,
+       VALUES (?, ?, 'dice', '1d8', 'Slashing', ?, ?, ?, 0)`,
       [
         characterId,
         name,

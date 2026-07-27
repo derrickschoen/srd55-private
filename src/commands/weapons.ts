@@ -17,6 +17,10 @@ import {
   type WeaponProficiencyCategory,
 } from '../domain/enums';
 import { rowContractError } from '../domain/contracts/rows';
+import type {
+  VersatileWeaponDamage,
+  WeaponDamage,
+} from '../domain/weapon-damage';
 
 /**
  * WEAPON COMMANDS.
@@ -76,9 +80,15 @@ export function resolvesInverseAfterApply(
 const WEAPON_COLUMNS = [
   'name',
   'proficiency_category',
+  'damage_kind',
   'damage_dice',
+  'damage_flat',
+  'damage_custom',
   'damage_type',
+  'versatile_damage_kind',
   'versatile_damage_dice',
+  'versatile_damage_flat',
+  'versatile_damage_custom',
   'finesse',
   'heavy',
   'light',
@@ -105,6 +115,32 @@ function nullableText(value: string | null): string | null {
   return trimmed === '' ? null : trimmed;
 }
 
+function damageValues(
+  prefix: 'damage' | 'versatile_damage',
+  damage: WeaponDamage | VersatileWeaponDamage,
+): Record<string, SqlValue> {
+  const values: Record<string, SqlValue> = {
+    [`${prefix}_kind`]: damage.kind,
+    [`${prefix}_dice`]: null,
+    [`${prefix}_flat`]: null,
+    [`${prefix}_custom`]: null,
+  };
+  switch (damage.kind) {
+    case 'dice':
+      values[`${prefix}_dice`] = damage.dice;
+      return values;
+    case 'flat':
+      values[`${prefix}_flat`] = damage.amount;
+      return values;
+    case 'custom':
+      values[`${prefix}_custom`] = damage.text;
+      return values;
+    case 'not_recorded':
+    case 'not_applicable':
+      return values;
+  }
+}
+
 /** The row body as SQL values, with `''` normalised to NULL and booleans to 0/1. */
 function weaponValues(weapon: WeaponFields): Record<string, SqlValue> {
   return {
@@ -113,9 +149,9 @@ function weaponValues(weapon: WeaponFields): Record<string, SqlValue> {
     // text, and `''` cannot reach here — the payload validator already refuses
     // anything that is neither null nor a member.
     proficiency_category: weapon.proficiency_category,
-    damage_dice: nullableText(weapon.damage_dice),
+    ...damageValues('damage', weapon.damage),
     damage_type: nullableText(weapon.damage_type),
-    versatile_damage_dice: nullableText(weapon.versatile_damage_dice),
+    ...damageValues('versatile_damage', weapon.versatile_damage),
     finesse: weapon.finesse ? 1 : 0,
     heavy: weapon.heavy ? 1 : 0,
     light: weapon.light ? 1 : 0,
@@ -175,13 +211,27 @@ function fieldsFromRow(row: WeaponRow): WeaponFields {
     proficiency_category: isEnumValue(weaponProficiencyCategories, category)
       ? (category as WeaponProficiencyCategory)
       : null,
-    damage_dice: row.damage_dice === null ? null : String(row.damage_dice),
+    damage:
+      row.damage_kind === 'dice'
+        ? { kind: 'dice', dice: String(row.damage_dice) }
+        : row.damage_kind === 'flat'
+          ? { kind: 'flat', amount: Number(row.damage_flat) }
+          : row.damage_kind === 'custom'
+            ? { kind: 'custom', text: String(row.damage_custom) }
+            : { kind: 'not_recorded' },
     damage_type:
       row.damage_type === null ? null : damageType(String(row.damage_type)),
-    versatile_damage_dice:
-      row.versatile_damage_dice === null
-        ? null
-        : String(row.versatile_damage_dice),
+    versatile_damage:
+      row.versatile_damage_kind === 'dice'
+        ? { kind: 'dice', dice: String(row.versatile_damage_dice) }
+        : row.versatile_damage_kind === 'flat'
+          ? { kind: 'flat', amount: Number(row.versatile_damage_flat) }
+          : row.versatile_damage_kind === 'custom'
+            ? {
+                kind: 'custom',
+                text: String(row.versatile_damage_custom),
+              }
+            : { kind: 'not_applicable' },
     finesse: Number(row.finesse) === 1,
     heavy: Number(row.heavy) === 1,
     light: Number(row.light) === 1,

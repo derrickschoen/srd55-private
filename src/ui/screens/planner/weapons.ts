@@ -8,6 +8,11 @@ import {
 } from '../../../domain/enums';
 import type { WeaponFields } from '../../../domain/command-contracts';
 import {
+  formatWeaponDamage,
+  type VersatileWeaponDamage,
+  type WeaponDamage,
+} from '../../../domain/weapon-damage';
+import {
   WEAPON_RANGE_MAX_FEET,
   WEAPON_TEXT_LIMITS,
 } from '../../../domain/weapon-limits';
@@ -81,9 +86,9 @@ export function blankWeapon(): WeaponFields {
     // weapon is simple or martial, and guessing `simple` would hand them a
     // proficiency bonus nobody sourced.
     proficiency_category: null,
-    damage_dice: null,
+    damage: { kind: 'not_recorded' },
     damage_type: null,
-    versatile_damage_dice: null,
+    versatile_damage: { kind: 'not_applicable' },
     finesse: false,
     heavy: false,
     light: false,
@@ -214,13 +219,17 @@ function integerOrNull(value: string): number | null {
 
 /** `1d8 Slashing (Versatile 1d10)`, or an honest blank. */
 export function damageSummary(weapon: CharacterWeapon): string {
-  const base = [weapon.damage_dice, weapon.damage_type]
+  const amount =
+    weapon.damage.kind === 'not_recorded'
+      ? null
+      : formatWeaponDamage(weapon.damage);
+  const base = [amount, weapon.damage_type]
     .filter((part): part is string => part !== null)
     .join(' ');
   const versatile =
-    weapon.versatile_damage_dice === null
+    weapon.versatile_damage.kind === 'not_applicable'
       ? ''
-      : ` (Versatile ${weapon.versatile_damage_dice})`;
+      : ` (Versatile ${formatWeaponDamage(weapon.versatile_damage)})`;
   return base === '' && versatile === ''
     ? 'not recorded'
     : `${base}${versatile}`.trim();
@@ -536,15 +545,65 @@ function renderForm(
       ),
     );
 
-    const damage = textInput(
-      'weapon-damage-dice',
-      draft.damage_dice,
-      WEAPON_TEXT_LIMITS.damage_dice,
-    );
-    damage.addEventListener('input', () => {
-      draft = { ...draft, damage_dice: trimmedOrNull(damage.value) };
+    const damageKind = document.createElement('select');
+    for (const [value, label] of [
+      ['not_recorded', 'Not recorded'],
+      ['dice', 'Dice'],
+      ['flat', 'Flat'],
+      ['custom', 'Custom'],
+    ] as const) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = label;
+      option.selected = draft.damage.kind === value;
+      damageKind.append(option);
+    }
+    damageKind.addEventListener('change', () => {
+      const kind = damageKind.value;
+      draft = {
+        ...draft,
+        damage:
+          kind === 'dice'
+            ? { kind, dice: '' }
+            : kind === 'flat'
+              ? { kind, amount: 0 }
+              : kind === 'custom'
+                ? { kind, text: '' }
+                : { kind: 'not_recorded' },
+      };
+      rebuild();
     });
-    fields.append(labelled('Damage dice', damage, 'weapon-damage-dice'));
+    fields.append(labelled('Damage kind', damageKind, 'weapon-damage-kind'));
+    if (draft.damage.kind === 'dice') {
+      const damage = textInput(
+        'weapon-damage-dice',
+        draft.damage.dice,
+        WEAPON_TEXT_LIMITS.damage_dice,
+      );
+      damage.addEventListener('input', () => {
+        draft = { ...draft, damage: { kind: 'dice', dice: damage.value } };
+      });
+      fields.append(labelled('Damage dice', damage, 'weapon-damage-dice'));
+    } else if (draft.damage.kind === 'flat') {
+      const damage = numberInput('weapon-damage-flat', draft.damage.amount);
+      damage.addEventListener('input', () => {
+        draft = {
+          ...draft,
+          damage: { kind: 'flat', amount: integerOrNull(damage.value) ?? 0 },
+        };
+      });
+      fields.append(labelled('Flat damage', damage, 'weapon-damage-flat'));
+    } else if (draft.damage.kind === 'custom') {
+      const damage = textInput(
+        'weapon-damage-custom',
+        draft.damage.text,
+        WEAPON_TEXT_LIMITS.damage_custom,
+      );
+      damage.addEventListener('input', () => {
+        draft = { ...draft, damage: { kind: 'custom', text: damage.value } };
+      });
+      fields.append(labelled('Custom damage', damage, 'weapon-damage-custom'));
+    }
 
     const damageType = textInput(
       'weapon-damage-type',
@@ -571,20 +630,92 @@ function renderForm(
       datalist,
     );
 
-    const versatile = textInput(
-      'weapon-versatile-dice',
-      draft.versatile_damage_dice,
-      WEAPON_TEXT_LIMITS.versatile_damage_dice,
-    );
-    versatile.addEventListener('input', () => {
-      draft = {
-        ...draft,
-        versatile_damage_dice: trimmedOrNull(versatile.value),
-      };
+    const versatileKind = document.createElement('select');
+    for (const [value, label] of [
+      ['not_applicable', 'Not applicable'],
+      ['dice', 'Dice'],
+      ['flat', 'Flat'],
+      ['custom', 'Custom'],
+    ] as const) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = label;
+      option.selected = draft.versatile_damage.kind === value;
+      versatileKind.append(option);
+    }
+    versatileKind.addEventListener('change', () => {
+      const kind = versatileKind.value;
+      let versatileDamage: VersatileWeaponDamage;
+      if (kind === 'dice') versatileDamage = { kind, dice: '' };
+      else if (kind === 'flat') versatileDamage = { kind, amount: 0 };
+      else if (kind === 'custom') versatileDamage = { kind, text: '' };
+      else versatileDamage = { kind: 'not_applicable' };
+      draft = { ...draft, versatile_damage: versatileDamage };
+      rebuild();
     });
     fields.append(
-      labelled('Versatile damage dice', versatile, 'weapon-versatile-dice'),
+      labelled(
+        'Versatile damage kind',
+        versatileKind,
+        'weapon-versatile-damage-kind',
+      ),
     );
+    if (draft.versatile_damage.kind === 'dice') {
+      const versatile = textInput(
+        'weapon-versatile-dice',
+        draft.versatile_damage.dice,
+        WEAPON_TEXT_LIMITS.versatile_damage_dice,
+      );
+      versatile.addEventListener('input', () => {
+        draft = {
+          ...draft,
+          versatile_damage: { kind: 'dice', dice: versatile.value },
+        };
+      });
+      fields.append(
+        labelled('Versatile damage dice', versatile, 'weapon-versatile-dice'),
+      );
+    } else if (draft.versatile_damage.kind === 'flat') {
+      const versatile = numberInput(
+        'weapon-versatile-flat',
+        draft.versatile_damage.amount,
+      );
+      versatile.addEventListener('input', () => {
+        draft = {
+          ...draft,
+          versatile_damage: {
+            kind: 'flat',
+            amount: integerOrNull(versatile.value) ?? 0,
+          },
+        };
+      });
+      fields.append(
+        labelled(
+          'Versatile flat damage',
+          versatile,
+          'weapon-versatile-flat',
+        ),
+      );
+    } else if (draft.versatile_damage.kind === 'custom') {
+      const versatile = textInput(
+        'weapon-versatile-custom',
+        draft.versatile_damage.text,
+        WEAPON_TEXT_LIMITS.versatile_damage_custom,
+      );
+      versatile.addEventListener('input', () => {
+        draft = {
+          ...draft,
+          versatile_damage: { kind: 'custom', text: versatile.value },
+        };
+      });
+      fields.append(
+        labelled(
+          'Versatile custom damage',
+          versatile,
+          'weapon-versatile-custom',
+        ),
+      );
+    }
 
     const toggles = document.createElement('fieldset');
     toggles.className = 'weapon-toggles';

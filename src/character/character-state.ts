@@ -7,6 +7,7 @@ import {
   type AuditEntityType,
   type SnapshotTable,
 } from '../domain/contracts/tables';
+import { migrateLegacyWeaponDamageRow } from '../domain/weapon-damage';
 import { migrateLegacyTraitRows } from '../rules/legacy-trait-effects';
 
 /**
@@ -27,6 +28,12 @@ import { migrateLegacyTraitRows } from '../rules/legacy-trait-effects';
  * indistinguishable. The first reading restores an empty list over the
  * character's data; the second leaves it alone, which is the only honest answer.
  *
+ * `a7-v6` changes no table list. It changes the shape of each
+ * `character_weapons` row from two free-text damage columns to two
+ * discriminated damage values. Versions 2 through 5 remain readable through
+ * `migrateLegacyWeaponDamageRow`; minting v6 keeps an already-stored v5
+ * snapshot identifiable as legacy instead of retroactively changing its claim.
+ *
  * NOT BUMPING WOULD HAVE BEEN THE LOUDEST FAILURE IN THIS CHANGE.
  * `SNAPSHOT_TABLES_BY_VERSION` aliases the CURRENT version to the live
  * `CHARACTER_STATE_TABLES`, so adding four tables without minting `a7-v4` would
@@ -36,7 +43,7 @@ import { migrateLegacyTraitRows } from '../rules/legacy-trait-effects';
  * containing one. Undo, save-point restore and `exportCharacterBackup` — which
  * re-parses its own stored save points on the way out — would break together.
  */
-export const CHARACTER_SNAPSHOT_SCHEMA_VERSION = 'a7-v5' as const;
+export const CHARACTER_SNAPSHOT_SCHEMA_VERSION = 'a7-v6' as const;
 
 /**
  * WHICH TABLES EACH SNAPSHOT VERSION CARRIES.
@@ -105,12 +112,23 @@ const A7_V4_TABLES = [
   'character_sheet_adjustments',
 ] as const satisfies readonly SnapshotTable[];
 
+/**
+ * `a7-v5` added the effect table. Its weapon rows still use the legacy
+ * free-text damage columns, so it remains a historical version even though its
+ * table list happens to equal the current one.
+ */
+const A7_V5_TABLES = [
+  ...A7_V4_TABLES,
+  'character_effects',
+] as const satisfies readonly SnapshotTable[];
+
 const SNAPSHOT_TABLES_BY_VERSION = {
   'a7-v1': A7_V1_TABLES,
   'a7-v2': A7_V2_TABLES,
   'a7-v3': A7_V3_TABLES,
   'a7-v4': A7_V4_TABLES,
-  'a7-v5': CHARACTER_STATE_TABLES,
+  'a7-v5': A7_V5_TABLES,
+  'a7-v6': CHARACTER_STATE_TABLES,
 } as const satisfies Readonly<Record<string, readonly SnapshotTable[]>>;
 
 /**
@@ -130,6 +148,7 @@ export const CHARACTER_SNAPSHOT_SCHEMA_VERSIONS = [
   'a7-v3',
   'a7-v4',
   'a7-v5',
+  'a7-v6',
 ] as const satisfies readonly (keyof typeof SNAPSHOT_TABLES_BY_VERSION)[];
 
 export type CharacterSnapshotSchemaVersion =
@@ -309,7 +328,9 @@ function snapshotRows(
       throw new Error(`Snapshot table ${table} contains an invalid row.`);
     }
   }
-  return rows;
+  return table === 'character_weapons'
+    ? rows.map(migrateLegacyWeaponDamageRow)
+    : rows;
 }
 
 /**
