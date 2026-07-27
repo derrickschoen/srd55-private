@@ -848,9 +848,8 @@ test('round-trips a named save point through the mutation path', async ({
   )[0]!;
   expect(point).toMatchObject({
     label: 'Before experiment',
-    // a7-v6 is the snapshot version whose weapon rows carry discriminated
-    // damage.
-    schema_version: 'a7-v6',
+    // a7-v7 is the snapshot version whose weapon rows carry tagged ranges.
+    schema_version: 'a7-v7',
   });
   await execute(
     page,
@@ -1110,7 +1109,7 @@ test('undoes a structural class change through its snapshot inverse', async ({
   );
   expect(changed.inverse).toMatchObject({
     type: 'restore_snapshot',
-    snapshot: { schema_version: 'a7-v6' },
+    snapshot: { schema_version: 'a7-v7' },
     integrity: expect.any(String),
   });
   await execute(

@@ -552,8 +552,9 @@ const PROBES: { readonly [N in ProbedTable]: Probe<N> } = {
       two_handed: { kind: 'verbatim' },
       ammunition: { kind: 'verbatim' },
       ammunition_kind: { kind: 'verbatim' },
-      range_normal_feet: { kind: 'verbatim' },
-      range_long_feet: { kind: 'verbatim' },
+      range_kind: { kind: 'verbatim' },
+      range_near_feet: { kind: 'verbatim' },
+      range_far_feet: { kind: 'verbatim' },
       mastery_property: { kind: 'verbatim' },
       mastery_selected: { kind: 'verbatim' },
       other_properties: { kind: 'verbatim' },
@@ -1007,7 +1008,8 @@ function seedSender(db: DatabaseContext, catalog: Catalog): number {
        versatile_damage_kind, versatile_damage_dice, versatile_damage_flat,
        versatile_damage_custom,
        finesse, heavy, light, loading, reach, thrown, two_handed, ammunition,
-       ammunition_kind, range_normal_feet, range_long_feet, mastery_property,
+       ammunition_kind, range_kind, range_near_feet, range_far_feet,
+       mastery_property,
        mastery_selected, other_properties, notes, proficiency_category,
        created_at, updated_at
      ) VALUES (
@@ -1015,7 +1017,7 @@ function seedSender(db: DatabaseContext, catalog: Catalog): number {
        'custom', NULL, NULL, 'weapon damage by table', 'Slashing',
        'custom', NULL, NULL, 'two-handed damage by table',
        1, 1, 1, 1, 1, 1, 1, 1,
-       'bolt', 25, 65, 'Vex', 1, 'sender other properties',
+       'bolt', 'legacy', 65, 25, 'Vex', 1, 'sender other properties',
        'sender weapon note', 'martial', ?, ?
      )`,
     [characterId, SENDER_TIME, SENDER_TIME],

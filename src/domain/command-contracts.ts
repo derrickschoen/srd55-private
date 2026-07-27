@@ -15,6 +15,7 @@ import type {
   VersatileWeaponDamage,
   WeaponDamage,
 } from './weapon-damage';
+import type { WeaponRange } from './weapon-range';
 import type { CharacterSnapshot, JsonObject } from './models';
 
 interface CommandBase {
@@ -150,8 +151,7 @@ export interface WeaponFields {
   two_handed: boolean;
   ammunition: boolean;
   ammunition_kind: string | null;
-  range_normal_feet: number | null;
-  range_long_feet: number | null;
+  range: WeaponRange;
   mastery_property: WeaponMasteryProperty | null;
   other_properties: string | null;
   notes: string | null;

@@ -160,13 +160,13 @@ function seedCompleteCharacter(
     `INSERT INTO character_weapons (
        character_id, name, damage_kind, damage_dice, damage_type,
        versatile_damage_kind, versatile_damage_dice,
-       finesse, light, thrown, ammunition_kind, range_normal_feet,
-       range_long_feet, mastery_property, mastery_selected, other_properties,
+       finesse, light, thrown, ammunition_kind, range_kind, range_near_feet,
+       range_far_feet, mastery_property, mastery_selected, other_properties,
        notes, created_at, updated_at
      ) VALUES (
        ?, 'Weathered Longsword', 'dice', '1d8', 'Slashing', 'dice', '1d10',
        0, 0, 1, 'bolt',
-       20, 60, 'Sap', 1, 'Notched near the hilt', 'weapon note', ?, ?
+       'ranged', 20, 60, 'Sap', 1, 'Notched near the hilt', 'weapon note', ?, ?
      )`,
     [characterId, timestamp, timestamp],
   );
@@ -240,7 +240,7 @@ function seedCompleteCharacter(
   db.exec(
     `INSERT INTO character_save_points
        (character_id, label, snapshot, schema_version, created_at, updated_at)
-     VALUES (?, 'Before experiment', ?, 'a7-v6', ?, ?)`,
+     VALUES (?, 'Before experiment', ?, 'a7-v7', ?, ?)`,
     [characterId, JSON.stringify(snapshot), timestamp, timestamp],
   );
   // A SECOND SAVE POINT IN THE OLD SNAPSHOT FORMAT.
@@ -464,8 +464,9 @@ describe('portable character backup', () => {
       light: 0,
       thrown: 1,
       ammunition_kind: 'bolt',
-      range_normal_feet: 20,
-      range_long_feet: 60,
+      range_kind: 'ranged',
+      range_near_feet: 20,
+      range_far_feet: 60,
       mastery_property: 'Sap',
       mastery_selected: 1,
       other_properties: 'Notched near the hilt',
@@ -485,8 +486,9 @@ describe('portable character backup', () => {
       versatile_damage_flat: null,
       versatile_damage_custom: null,
       ammunition_kind: null,
-      range_normal_feet: null,
-      range_long_feet: null,
+      range_kind: 'none',
+      range_near_feet: null,
+      range_far_feet: null,
       mastery_property: null,
       mastery_selected: 0,
       other_properties: null,
@@ -498,7 +500,7 @@ describe('portable character backup', () => {
     ) as Record<string, any>;
     // The current-format save point carries the weapons, re-keyed to the rows
     // that were just written, so restoring it puts back the same two weapons.
-    expect(saved.schema_version).toBe('a7-v6');
+    expect(saved.schema_version).toBe('a7-v7');
     expect(saved.character_weapons.map((row: { name: string }) => row.name)).toEqual([
       'Weathered Longsword',
       'Half-entered club',
@@ -623,7 +625,59 @@ describe('portable character backup', () => {
     ]);
   });
 
-  it('imports a pre-discriminator weapon row without losing custom damage text', async () => {
+  it('preserves both exceptional legacy ranges through backup and snapshot round trips', async () => {
+    const source = await database();
+    const sourceCharacterId = source.exec(
+      "INSERT INTO characters (name) VALUES ('Legacy range backup')",
+    ).lastInsertId;
+    source.exec(
+      `INSERT INTO character_weapons
+         (character_id, name, range_kind, range_near_feet, range_far_feet)
+       VALUES
+         (?, 'Long only', 'legacy', NULL, 60),
+         (?, 'Inverted', 'legacy', 60, 20)`,
+      [sourceCharacterId, sourceCharacterId],
+    );
+    const document = exportCharacterBackup(
+      source,
+      sourceCharacterId,
+      '2026-07-27T12:00:00.000Z',
+    );
+
+    const target = await database();
+    const { characterId } = importCharacterBackup(target, document);
+    const ranges = () =>
+      target.allRaw(
+        `SELECT name, range_kind, range_near_feet, range_far_feet
+         FROM character_weapons WHERE character_id = ? ORDER BY id`,
+        [characterId],
+      );
+    const expected = [
+      {
+        name: 'Long only',
+        range_kind: 'legacy',
+        range_near_feet: null,
+        range_far_feet: 60,
+      },
+      {
+        name: 'Inverted',
+        range_kind: 'legacy',
+        range_near_feet: 60,
+        range_far_feet: 20,
+      },
+    ];
+    expect(ranges()).toEqual(expected);
+
+    const state = new CharacterState(target);
+    const snapshot = state.capture(characterId);
+    target.exec('DELETE FROM character_weapons WHERE character_id = ?', [
+      characterId,
+    ]);
+    state.restore(characterId, snapshot);
+    expect(ranges()).toEqual(expected);
+  });
+
+  it('migrates a pre-discriminator weapon row without losing damage or range values', async () => {
     const source = await database();
     const sourceCatalog = seedCatalog(source);
     const sourceCharacterId = seedCompleteCharacter(source, sourceCatalog);
@@ -651,6 +705,11 @@ describe('portable character backup', () => {
     const custom = '  damage from a saved campaign table  ';
     weapon.damage_dice = custom;
     weapon.versatile_damage_dice = null;
+    delete weapon.range_kind;
+    delete weapon.range_near_feet;
+    delete weapon.range_far_feet;
+    weapon.range_normal_feet = 60;
+    weapon.range_long_feet = 20;
 
     const target = await database();
     seedCatalog(target, true);
@@ -660,7 +719,8 @@ describe('portable character backup', () => {
       target.oneRaw(
         `SELECT damage_kind, damage_dice, damage_flat, damage_custom,
                 versatile_damage_kind, versatile_damage_dice,
-                versatile_damage_flat, versatile_damage_custom
+                versatile_damage_flat, versatile_damage_custom,
+                range_kind, range_near_feet, range_far_feet
          FROM character_weapons
          WHERE character_id = ?
          ORDER BY id
@@ -676,6 +736,9 @@ describe('portable character backup', () => {
       versatile_damage_dice: null,
       versatile_damage_flat: null,
       versatile_damage_custom: null,
+      range_kind: 'legacy',
+      range_near_feet: 60,
+      range_far_feet: 20,
     });
   });
 

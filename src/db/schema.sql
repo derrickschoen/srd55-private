@@ -369,8 +369,9 @@ CREATE TABLE `character_weapons` (
 	`two_handed` TINYINT(1) DEFAULT false NOT NULL,
 	`ammunition` TINYINT(1) DEFAULT false NOT NULL,
 	`ammunition_kind` VARCHAR,
-	`range_normal_feet` integer,
-	`range_long_feet` integer,
+	`range_kind` VARCHAR DEFAULT 'none' NOT NULL,
+	`range_near_feet` integer,
+	`range_far_feet` integer,
 	`mastery_property` VARCHAR,
 	`mastery_selected` TINYINT(1) DEFAULT false NOT NULL,
 	`other_properties` TEXT,
@@ -389,6 +390,15 @@ CREATE TABLE `character_weapons` (
         OR (versatile_damage_kind = 'flat' AND versatile_damage_dice IS NULL AND versatile_damage_flat IS NOT NULL AND versatile_damage_flat >= 0 AND versatile_damage_custom IS NULL)
         OR (versatile_damage_kind = 'custom' AND versatile_damage_dice IS NULL AND versatile_damage_flat IS NULL AND versatile_damage_custom IS NOT NULL)
         OR (versatile_damage_kind = 'not_applicable' AND versatile_damage_dice IS NULL AND versatile_damage_flat IS NULL AND versatile_damage_custom IS NULL)
+      )),
+	CONSTRAINT "character_weapons_range_check" CHECK((
+        (range_near_feet IS NULL OR (typeof(range_near_feet) = 'integer' AND range_near_feet BETWEEN 0 AND 100000))
+        AND (range_far_feet IS NULL OR (typeof(range_far_feet) = 'integer' AND range_far_feet BETWEEN 0 AND 100000))
+        AND (
+          (range_kind = 'none' AND range_near_feet IS NULL AND range_far_feet IS NULL)
+          OR (range_kind = 'ranged' AND range_near_feet IS NOT NULL AND (range_far_feet IS NULL OR range_far_feet >= range_near_feet))
+          OR (range_kind = 'legacy' AND range_far_feet IS NOT NULL AND (range_near_feet IS NULL OR range_far_feet < range_near_feet))
+        )
       )),
 	CONSTRAINT "character_weapons_mastery_requires_property_check" CHECK(mastery_selected = 0 OR mastery_property IS NOT NULL),
 	CONSTRAINT "character_weapons_mastery_property_check" CHECK((`mastery_property` IS NULL OR `mastery_property` IN ('Cleave', 'Graze', 'Nick', 'Push', 'Sap', 'Slow', 'Topple', 'Vex'))),
@@ -1016,8 +1026,9 @@ CREATE TABLE `weapon_templates` (
 	`two_handed` TINYINT(1) DEFAULT false NOT NULL,
 	`ammunition` TINYINT(1) DEFAULT false NOT NULL,
 	`ammunition_kind` VARCHAR,
-	`range_normal_feet` integer,
-	`range_long_feet` integer,
+	`range_kind` VARCHAR DEFAULT 'none' NOT NULL,
+	`range_near_feet` integer,
+	`range_far_feet` integer,
 	`mastery_property` VARCHAR NOT NULL,
 	`other_properties` TEXT,
 	`created_at` DATETIME,
@@ -1033,6 +1044,14 @@ CREATE TABLE `weapon_templates` (
         OR (versatile_damage_kind = 'flat' AND versatile_damage_dice IS NULL AND versatile_damage_flat IS NOT NULL AND versatile_damage_flat >= 0 AND versatile_damage_custom IS NULL)
         OR (versatile_damage_kind = 'custom' AND versatile_damage_dice IS NULL AND versatile_damage_flat IS NULL AND versatile_damage_custom IS NOT NULL)
         OR (versatile_damage_kind = 'not_applicable' AND versatile_damage_dice IS NULL AND versatile_damage_flat IS NULL AND versatile_damage_custom IS NULL)
+      )),
+	CONSTRAINT "weapon_templates_range_check" CHECK((
+        (range_near_feet IS NULL OR (typeof(range_near_feet) = 'integer' AND range_near_feet BETWEEN 0 AND 100000))
+        AND (range_far_feet IS NULL OR (typeof(range_far_feet) = 'integer' AND range_far_feet BETWEEN 0 AND 100000))
+        AND (
+          (range_kind = 'none' AND range_near_feet IS NULL AND range_far_feet IS NULL)
+          OR (range_kind = 'ranged' AND range_near_feet IS NOT NULL AND (range_far_feet IS NULL OR range_far_feet >= range_near_feet))
+        )
       )),
 	CONSTRAINT "weapon_templates_mastery_property_check" CHECK(`mastery_property` IN ('Cleave', 'Graze', 'Nick', 'Push', 'Sap', 'Slow', 'Topple', 'Vex')),
 	CONSTRAINT "weapon_templates_damage_type_check" CHECK(`damage_type` IN ('Acid', 'Bludgeoning', 'Cold', 'Fire', 'Force', 'Lightning', 'Necrotic', 'Piercing', 'Poison', 'Psychic', 'Radiant', 'Slashing', 'Thunder')),

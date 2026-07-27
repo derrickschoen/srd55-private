@@ -110,7 +110,7 @@ test('the planner emits a JSON build reference that matches the workspace read-m
   const completeness = await completenessOf(page, characterId);
 
   expect(value.format).toBe('dnd-multiclass-spells.planner-reference');
-  expect(value.version).toBe(1);
+  expect(value.version).toBe(2);
   expect(value.character.id).toBe(workspace.report.character.id);
   expect(value.character.character_level).toBe(
     workspace.report.character.character_level,

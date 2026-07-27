@@ -41,5 +41,5 @@ export const WEAPON_TEXT_LIMITS = Object.freeze({
 
 export type WeaponTextField = keyof typeof WEAPON_TEXT_LIMITS;
 
-/** The largest `range_normal_feet` / `range_long_feet` either boundary allows. */
+/** The largest near/far weapon distance either boundary or column allows. */
 export const WEAPON_RANGE_MAX_FEET = 100_000;

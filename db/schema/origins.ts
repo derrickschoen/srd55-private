@@ -351,7 +351,7 @@ export const species_template_trait_effects = sqliteTable(
      * `src/rules/origins-srd.ts`, where that bug lived.
      *
      * Both nullable, D6b LIMB 2 — the absence is real and not an unset value,
-     * the same call `weapon_templates.range_normal_feet` makes ("a Longsword
+     * the same call `weapon_templates.range_near_feet` makes ("a Longsword
      * has no range. Not 'unset' — it does not have one"). A
      * `damage_resistance` effect does not HAVE a hit point number; there is
      * nothing to fill in later. The CHECKs below make an `hp_modifier` row with

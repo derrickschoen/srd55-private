@@ -2305,8 +2305,11 @@ describe('hostile and over-long weapon sections', () => {
       two_handed: true,
       ammunition: true,
       ammunition_kind: 'a'.repeat(WEAPON_TEXT_LIMITS.ammunition_kind),
-      range_normal_feet: WEAPON_RANGE_MAX_FEET,
-      range_long_feet: WEAPON_RANGE_MAX_FEET,
+      range: {
+        kind: 'ranged' as const,
+        near_feet: WEAPON_RANGE_MAX_FEET,
+        far_feet: WEAPON_RANGE_MAX_FEET,
+      },
       mastery_property: 'Vex',
       other_properties: 'o'.repeat(WEAPON_TEXT_LIMITS.other_properties),
       notes: 'n'.repeat(WEAPON_TEXT_LIMITS.notes),
@@ -2322,8 +2325,14 @@ describe('hostile and over-long weapon sections', () => {
     // …and so must the share boundary, field for field, through a real link.
     // Every flag above is already `true`, which is the only value the wire
     // accepts, so the same object is a valid share weapon as it stands.
+    const { range: _storageRange, ...wireFields } = maximal;
     const shared = await throughShareLink(
-      weaponDocument({ ...maximal, mastery_selected: true }),
+      weaponDocument({
+        ...wireFields,
+        range_normal_feet: maximal.range.near_feet,
+        range_long_feet: maximal.range.far_feet,
+        mastery_selected: true,
+      }),
     );
     const weapon = shared.weapons?.[0];
     expect(weapon?.notes).toBe(maximal.notes);

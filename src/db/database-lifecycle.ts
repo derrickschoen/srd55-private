@@ -166,7 +166,15 @@ export function databaseSchemaSignature(db: Database): string {
         table: String(entry.tbl_name),
         sql:
           typeof entry.sql === 'string'
-            ? entry.sql.replace(/\s+/g, ' ').trim()
+            ? entry.sql
+                // SQLite rewrites only the table-name token to double quotes
+                // after ALTER TABLE ... RENAME. Drizzle's fresh schema uses
+                // backticks for the same identifier; canonicalising that one
+                // engine-authored spelling keeps a generated rebuild equal to
+                // the fresh schema without weakening any constraint text.
+                .replace(/^CREATE TABLE "([A-Za-z_][A-Za-z0-9_]*)"/, 'CREATE TABLE `$1`')
+                .replace(/\s+/g, ' ')
+                .trim()
             : null,
       })),
   );
