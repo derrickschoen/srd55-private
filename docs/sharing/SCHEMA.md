@@ -6,14 +6,18 @@ instances and selection slots by running the grant-rule slot generator. It is
 not intended to preserve database identifiers, timestamps, derived rows, or
 every piece of application state.
 
-The implementation is the source of truth:
+The versioned registry is the source of truth for the wire contract:
 
 - `validateShareDocument()` in `src/sharing/schema.ts` defines the logical
   object contract.
-- `shareDocumentToPositional()` and `positionalToShareDocument()` in
-  `src/sharing/codec.ts` define the wire contract.
+- `SHARE_SCHEMAS` in `src/sharing/wire-schemas/index.ts` selects the current
+  schema and preserves every historical schema as a literal, deeply frozen
+  tuple inventory.
+- `shareDocumentToPositional()` and the version-dispatched decoder in
+  `src/sharing/codec.ts` interpret that inventory.
 - the golden assertions in `tests/unit/sharing/codec.test.ts` pin the exact
-  version-1 layout and its fixed record lengths.
+  version-1 bytes, while the registry fingerprint and independent frozen
+  fragments guard its field meanings and accepted arities.
 
 This guide records the design intent and invariants without duplicating those
 contracts field by field.
@@ -76,18 +80,17 @@ entries, preferences, or loadouts.
 
 ## Wire transport
 
-Version 1 serializes the validated object as positional JSON. An absent optional
-record field occupies its assigned `null` position, and the codec rejects
-malformed tuples. The golden codec tests are the readable reference for every
-position.
+Version 1 serializes the validated object as positional JSON. Its shipped root
+arities 11/12/13/14/15, character arities 11/12, and weapon arities 19/20/22
+are all frozen parts of v1. A shorter accepted tuple reads as the historical
+shape that originally produced it; anything outside those exact variants is
+refused. An absent optional record field occupies its assigned `null` position.
 
-Record lengths are fixed per record TYPE, not for all time: the root document,
-the character element and a weapon each accept more than one arity, because
-this format grows by APPENDING and a link already pasted into somebody's chat
-must keep decoding. A shorter tuple is a link minted before the appended field
-existed and reads as that field being absent; anything that is not an accepted
-arity is still refused. Nothing may be inserted before an existing position —
-that would silently reinterpret every link ever generated.
+Any subsequent change to tuple order, meaning, membership, or accepted value
+domain increments the root version, adds an adjacent migration, and adds an
+independently hand-frozen fragment fixture. Version 1 is never extended or
+edited to make room for that change. One root version governs the complete
+export; nested tuples carry no separate versions.
 
 The UTF-8 JSON bytes are compressed with `CompressionStream("gzip")`, encoded
 as unpadded base64url, and stored after the URL fragment marker (`#`). Fragment

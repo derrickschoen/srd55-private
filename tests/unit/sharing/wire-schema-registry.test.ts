@@ -1,0 +1,104 @@
+import { createHash } from 'node:crypto';
+import { describe, expect, it } from 'vitest';
+import { decodeShareFragment } from '../../../src/sharing/codec';
+import {
+  SHARE_SCHEMAS,
+  type SupportedShareVersion,
+} from '../../../src/sharing/wire-schemas';
+import {
+  CHARACTER_SHARE_FORMAT,
+  CHARACTER_SHARE_VERSION,
+  type CharacterShareDocument,
+} from '../../../src/sharing/schema';
+
+interface FrozenFixture {
+  readonly fragment: string;
+  readonly expected: CharacterShareDocument;
+}
+
+const VERSION_FIXTURES = {
+  1: {
+    fragment:
+      'H4sIAAAAAAACA12NwQrCMBBEf6XseQNNFQ_5Ag-CHxByWJqVBtcqm5SCXy-1QWovwzDMm_EQ' +
+      'x2gek5TUC-Vs8otFsukHUuoLq8kDKQNa9HCV2FzSeG_OrE_AcRLZiD3tk38J6H2L0LXd0X2_' +
+      '3JzepLEOHdDugYWwCDemAhVcvCNhLRXrftWAfu3kIbFEWKOw2fsAKTM71e0AAAA',
+    expected: {
+      format: CHARACTER_SHARE_FORMAT,
+      version: CHARACTER_SHARE_VERSION,
+      character: {
+        name: 'Old Link Hero',
+        intelligence: 16,
+      },
+      classes: [{
+        id: 0,
+        classKey: '2024:class:wizard',
+        level: 3,
+        start: 1,
+      }],
+      sources: [{
+        id: 1,
+        type: 'feat',
+        key: '2024:feat:alert',
+        acquired: 2,
+      }],
+      selections: [],
+      spellbook: ['2024:shield'],
+      preferences: [],
+      overrides: [],
+    },
+  },
+} satisfies Record<SupportedShareVersion, FrozenFixture>;
+
+function allObjects(root: object): object[] {
+  const seen = new Set<object>();
+  const pending: object[] = [root];
+  while (pending.length > 0) {
+    const value = pending.pop();
+    if (value === undefined || seen.has(value)) {
+      continue;
+    }
+    seen.add(value);
+    for (const child of Object.values(value)) {
+      if (child !== null && typeof child === 'object') {
+        pending.push(child);
+      }
+    }
+  }
+  return [...seen];
+}
+
+describe('the share-link wire schema registry', () => {
+  it('has exactly the frozen-fixture keys and every schema is deeply frozen at runtime', () => {
+    expect(Object.keys(SHARE_SCHEMAS)).toEqual(Object.keys(VERSION_FIXTURES));
+
+    for (const schema of Object.values(SHARE_SCHEMAS)) {
+      for (const value of allObjects(schema)) {
+        expect(Object.isFrozen(value)).toBe(true);
+        const mutationKey = '__wire_schema_mutation_probe__';
+        try {
+          Reflect.set(value, mutationKey, true);
+        } catch {
+          // A strict runtime may throw; a non-throwing runtime must still refuse.
+        }
+        expect(Object.hasOwn(value, mutationKey)).toBe(false);
+      }
+    }
+  });
+
+  it('decodes every independently frozen version fixture', async () => {
+    for (const fixture of Object.values(VERSION_FIXTURES)) {
+      await expect(decodeShareFragment(fixture.fragment)).resolves.toEqual(
+        fixture.expected,
+      );
+    }
+  });
+
+  it('keeps the hand-pinned v1 schema fingerprint unchanged', () => {
+    const fingerprint = createHash('sha256')
+      .update(JSON.stringify(SHARE_SCHEMAS[1]))
+      .digest('hex');
+    expect(fingerprint).toBe(
+      'ee4ebe02ba55326246287745e2b72010ffc0ebd982a651406a0ad350c951f0fb',
+    );
+  });
+});
