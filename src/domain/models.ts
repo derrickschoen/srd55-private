@@ -159,7 +159,6 @@ export interface SpellSelectionSlotRow extends TimestampedRow {
   is_locked: boolean;
   state: SlotState;
   orphan_reason_code: string | null;
-  orphaned_by_change_group_id: number | null;
   orphaned_at: string | null;
   prior_config: JsonObject | null;
   override_note: string | null;

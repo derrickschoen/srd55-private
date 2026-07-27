@@ -3,8 +3,13 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   exportCharacterBackup,
   importCharacterBackup,
+  validateCharacterBackup,
   type CharacterBackupDocument,
 } from '../../../src/backup/character-backup';
+import {
+  CHARACTER_BACKUP_FORMAT,
+  CHARACTER_BACKUP_VERSION,
+} from '../../../src/backup/backup-version';
 import {
   exportDatabaseBackup,
   importDatabaseBackup,
@@ -908,6 +913,252 @@ describe('an already-downloaded backup file', () => {
         [characterId],
       ),
     ).toEqual([{ skill: 'stealth' }]);
+  });
+});
+
+/**
+ * THE COLUMN THAT WAS DROPPED, AND EVERY FILE THAT STILL NAMES IT.
+ *
+ * `spell_selection_slots.orphaned_by_change_group_id` was dormant — zero
+ * readers, zero writers, an INTEGER naming a VARCHAR uuid — and F10 removed it.
+ * But backup export is `SELECT *`, so EVERY document this project has ever
+ * written carries the key with a `null` value, and the row contracts are
+ * `z.strictObject`. Without `RETIRED_ROW_COLUMNS` in `character-backup.ts` the
+ * import of a user's own file fails outright with
+ * `Unrecognized key: "orphaned_by_change_group_id"`.
+ *
+ * The fixture is built by RE-ADDING the key to a document this build exported,
+ * which is exactly what the previous build's export produced. Both places it
+ * appeared are covered — the document's own `spell_selection_slots` rows and
+ * the `spell_selection_slots` rows inside a save-point snapshot — because they
+ * take different code paths (`validateDocument` and `parseSnapshot`) and
+ * fixing one and not the other is the mistake this guards.
+ */
+describe('a backup file written while the dormant orphan column existed', () => {
+  function documentNamingTheRetiredColumn(): CharacterBackupDocument {
+    return {
+      format: CHARACTER_BACKUP_FORMAT,
+      version: CHARACTER_BACKUP_VERSION,
+      exported_at: '2026-07-23T12:00:00.000Z',
+      source_character_id: 7,
+      character: {
+        id: 7,
+        name: 'Orphan Column Hero',
+        strength: 10,
+        dexterity: 10,
+        constitution: 10,
+        intelligence: 10,
+        wisdom: 10,
+        charisma: 10,
+        proficiency_bonus_override: null,
+        rules_edition_preference: '2024',
+        allow_legacy: 0,
+        revision: 0,
+        notes: null,
+        created_at: null,
+        updated_at: null,
+      },
+      tables: {
+        character_class_levels: [],
+        character_source_instances: [legacySourceRow()],
+        spell_selection_slots: [legacySlotRow()],
+        wizard_spellbook_entries: [],
+        character_spell_preferences: [],
+        character_rule_overrides: [],
+        warning_acknowledgements: [],
+        character_save_points: [
+          {
+            id: 14,
+            character_id: 7,
+            label: 'Before the column went',
+            schema_version: 'a7-v1',
+            snapshot: JSON.stringify({
+              schema_version: 'a7-v1',
+              character: {
+                name: 'Orphan Column Hero',
+                strength: 10,
+                dexterity: 10,
+                constitution: 10,
+                intelligence: 10,
+                wisdom: 10,
+                charisma: 10,
+                proficiency_bonus_override: null,
+                rules_edition_preference: '2024',
+                allow_legacy: 0,
+                notes: null,
+              },
+              character_class_levels: [],
+              character_source_instances: [legacySourceRow()],
+              spell_selection_slots: [legacySlotRow()],
+              wizard_spellbook_entries: [],
+              warning_acknowledgements: [],
+            }),
+            created_at: null,
+            updated_at: null,
+          },
+        ],
+        spell_loadouts: [],
+        spell_loadout_entries: [],
+        character_weapons: [],
+        character_species: [],
+        character_species_traits: [],
+        character_background: [],
+        character_armor: [],
+        character_hit_point_rolls: [],
+        character_skill_proficiencies: [],
+        character_sheet_adjustments: [],
+        character_effects: [],
+      },
+      references: {
+        class_definitions: [{ id: 31, content_key: 'class:wizard' }],
+        subclass_definitions: [],
+        feat_definitions: [],
+        species_definitions: [],
+        background_definitions: [],
+        spell_versions: [],
+      },
+    };
+  }
+
+  function legacySourceRow(): Record<string, unknown> {
+    return {
+      id: 11,
+      character_id: 7,
+      instance_uuid: 'legacy-source',
+      parent_source_instance_id: null,
+      source_type: 'class',
+      source_definition_id: 31,
+      display_name: 'Wizard 1',
+      config: '{}',
+      acquired_at_character_level: 1,
+      state: 'active',
+      notes: null,
+      created_at: null,
+      updated_at: null,
+    };
+  }
+
+  function legacySlotRow(): Record<string, unknown> {
+    return {
+      id: 12,
+      character_id: 7,
+      source_instance_id: 11,
+      slot_key: 'legacy-source:prepared:1',
+      rule_key: 'prepared',
+      ordinal: 1,
+      bucket: 'prepared',
+      eligibility_kind: 'choice_from_query',
+      fixed_spell_version_id: null,
+      current_spell_version_id: null,
+      label: null,
+      spell_level_min: 0,
+      spell_level_max: 9,
+      allowed_spell_lists: null,
+      allowed_schools: null,
+      allowed_tags: null,
+      always_prepared: 0,
+      with_slots: 1,
+      free_cast: null,
+      counts_against_limit: 1,
+      required: 0,
+      is_locked: 0,
+      state: 'active',
+      orphan_reason_code: null,
+      // THE RETIRED KEY. Every document written before F10 has it, and it is
+      // always null: nothing ever wrote it.
+      orphaned_by_change_group_id: null,
+      orphaned_at: null,
+      prior_config: null,
+      override_note: null,
+      sort_order: 1,
+      notes: 'slot from the old build',
+      created_at: null,
+      updated_at: null,
+      selection_collection: null,
+      selection_eligibility: 'valid',
+      selection_invalid_reason: null,
+    };
+  }
+
+  it('still imports, and the slot lands with the key simply gone', async () => {
+    const archived = documentNamingTheRetiredColumn();
+    // The fixture really does carry the key — asserted rather than assumed, so
+    // an edit that removes it cannot make the rest of this pass vacuously.
+    const archivedSlot = archived.tables
+      .spell_selection_slots[0] as Record<string, unknown>;
+    expect(Object.hasOwn(archivedSlot, 'orphaned_by_change_group_id')).toBe(
+      true,
+    );
+    // ...and the table it is about to be written to really does NOT have it.
+    const target = await database();
+    seedCatalog(target);
+    expect(
+      target
+        .allRaw('SELECT name FROM pragma_table_info(?)', [
+          'spell_selection_slots',
+        ])
+        .map((row) => row.name),
+    ).not.toContain('orphaned_by_change_group_id');
+
+    const { characterId } = importCharacterBackup(target, archived);
+    const persisted = persistedCharacter(target, characterId);
+
+    expect(persisted.character).toMatchObject({ name: 'Orphan Column Hero' });
+    expect(persisted.slots).toHaveLength(1);
+    expect(persisted.slots[0]).toMatchObject({
+      character_id: characterId,
+      rule_key: 'prepared',
+      notes: 'slot from the old build',
+    });
+    expect(
+      Object.hasOwn(persisted.slots[0]!, 'orphaned_by_change_group_id'),
+    ).toBe(false);
+  });
+
+  it('restores its save point, whose snapshot names the column too', async () => {
+    const target = await database();
+    seedCatalog(target);
+    const { characterId } = importCharacterBackup(
+      target,
+      documentNamingTheRetiredColumn(),
+    );
+
+    const stored = target.scalar(
+      'SELECT snapshot FROM character_save_points WHERE character_id = ?',
+      [characterId],
+    );
+    // The re-emitted snapshot must not carry it either, or the restore below
+    // would build an INSERT naming a column the table no longer has.
+    const snapshot = JSON.parse(String(stored)) as {
+      spell_selection_slots: Array<Record<string, unknown>>;
+    };
+    expect(
+      Object.hasOwn(
+        snapshot.spell_selection_slots[0]!,
+        'orphaned_by_change_group_id',
+      ),
+    ).toBe(false);
+
+    new CharacterState(target).restore(characterId, JSON.parse(String(stored)));
+    expect(
+      target.allRaw(
+        'SELECT rule_key FROM spell_selection_slots WHERE character_id = ?',
+        [characterId],
+      ),
+    ).toEqual([{ rule_key: 'prepared' }]);
+  });
+
+  it('still refuses a key that was never a column, so the strip is narrow', () => {
+    const invented = documentNamingTheRetiredColumn();
+    const slot = invented.tables.spell_selection_slots[0] as Record<
+      string,
+      unknown
+    >;
+    slot.orphaned_by_something_else = null;
+
+    expect(() => {
+      validateCharacterBackup(invented);
+    }).toThrow(/Unrecognized key: "orphaned_by_something_else"/);
   });
 });
 
