@@ -71,6 +71,7 @@ const FORBIDDEN = [
   'NOT-FREE-LICENSED-DO-NOT-COMMIT',
 ];
 const CONTROL = 'staticApp';
+const MIGRATION_CONTROL = 'migration-bundle-control:0000';
 
 function walk(dir) {
   const found = [];
@@ -108,6 +109,7 @@ if (files.length === 0) {
 }
 
 let controlSeen = false;
+let migrationControlSeen = false;
 for (const path of files) {
   const text = readFileSync(path, 'latin1');
   const name = basename(path);
@@ -133,6 +135,9 @@ for (const path of files) {
   if (text.includes(CONTROL)) {
     controlSeen = true;
   }
+  if (text.includes(MIGRATION_CONTROL)) {
+    migrationControlSeen = true;
+  }
 }
 
 if (!controlSeen) {
@@ -142,4 +147,14 @@ if (!controlSeen) {
   );
 }
 
-process.stdout.write(`dist clean: ${files.length} files scanned, control OK\n`);
+if (!migrationControlSeen) {
+  fail(
+    `migration control failed: "${MIGRATION_CONTROL}" was not found in any ` +
+      `of ${files.length} scanned files, so the migration SQL was not bundled.`,
+  );
+}
+
+process.stdout.write(
+  `dist clean: ${files.length} files scanned, ` +
+    'control OK, migration control OK\n',
+);

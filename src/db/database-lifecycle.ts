@@ -10,6 +10,14 @@ import {
 } from './database';
 import { APPLICATION_TABLES } from '../domain/contracts/tables';
 import { auditCandidateDatabase } from './candidate-audit';
+import {
+  appliedMigrationCount,
+  applyMigrationSuffix,
+  DATABASE_MIGRATIONS,
+  databaseSchemaChecksum,
+  type DatabaseMigration,
+  validateMigrationRegistry,
+} from './migrations';
 
 /**
  * Every table an application database image must contain.
@@ -142,7 +150,7 @@ export function validateDatabaseConnection(db: Database): void {
   }
 }
 
-function databaseSchemaSignature(db: Database): string {
+export function databaseSchemaSignature(db: Database): string {
   return JSON.stringify(
     db
       .selectObjects(
@@ -173,6 +181,8 @@ export class DatabaseLifecycle {
     private readonly storage: DatabaseStorage,
     private readonly schema: string,
     private readonly seed: DatabaseSeed = () => undefined,
+    private readonly migrations: readonly DatabaseMigration[] =
+      DATABASE_MIGRATIONS,
   ) {}
 
   get database(): DatabaseContext {
@@ -202,8 +212,12 @@ export class DatabaseLifecycle {
     const connection = this.storage.open();
     try {
       prepareConnection(connection);
-      if (!hasApplicationSchema(connection)) {
+      validateMigrationRegistry(this.migrations);
+      const isNewImage = !hasApplicationSchema(connection);
+      if (isNewImage) {
         connection.exec(this.schema);
+      } else {
+        this.#migrateKnownSchema(connection);
       }
       this.#validateApplicationDatabase(connection);
       const context = new DatabaseContext(connection);
@@ -261,9 +275,10 @@ export class DatabaseLifecycle {
   /**
    * Validates a candidate image WHILE IT IS STILL QUARANTINED.
    *
-   * The candidate is deserialized read-only into a throwaway in-memory
-   * connection; nothing here can touch stored bytes. Two passes run, and the
-   * order is deliberate:
+   * The candidate is deserialized into a throwaway in-memory connection;
+   * nothing here can touch stored bytes. A known-old image is migrated while
+   * it is still quarantined, then two validation passes run in deliberate
+   * order:
    *
    *  1. structure — the tables, triggers and schema signature this build
    *     expects. Without it the audit's own queries would fail on a missing
@@ -274,8 +289,13 @@ export class DatabaseLifecycle {
    *     nothing about either.
    */
   validateBytes(bytes: Uint8Array): void {
-    const candidate = openDatabaseImage(this.sqlite3, bytes.slice());
+    const candidate = openDatabaseImage(this.sqlite3, bytes.slice(), {
+      readonly: false,
+    });
     try {
+      prepareConnection(candidate);
+      validateMigrationRegistry(this.migrations);
+      this.#migrateKnownSchema(candidate);
       this.#validateApplicationDatabase(candidate);
       auditCandidateDatabase(candidate);
     } finally {
@@ -284,8 +304,7 @@ export class DatabaseLifecycle {
   }
 
   async replace(bytes: Uint8Array): Promise<DatabaseContext> {
-    const candidate = bytes.slice();
-    this.validateBytes(candidate);
+    const candidate = this.#validatedCandidateBytes(bytes);
     const previous = await this.exportBytes();
 
     this.close();
@@ -327,6 +346,63 @@ export class DatabaseLifecycle {
         'Database image schema does not match the application schema.',
       );
     }
+  }
+
+  #validatedCandidateBytes(bytes: Uint8Array): Uint8Array {
+    const candidate = openDatabaseImage(this.sqlite3, bytes.slice(), {
+      readonly: false,
+    });
+    try {
+      prepareConnection(candidate);
+      validateMigrationRegistry(this.migrations);
+      this.#migrateKnownSchema(candidate);
+      this.#validateApplicationDatabase(candidate);
+      auditCandidateDatabase(candidate);
+      return this.sqlite3.capi.sqlite3_js_db_export(candidate).slice();
+    } finally {
+      candidate.close();
+    }
+  }
+
+  #migrateKnownSchema(db: Database): void {
+    const expectedSignature = this.#applicationSchemaSignature();
+    const expectedChecksum = databaseSchemaChecksum(expectedSignature);
+    const target = this.migrations.at(-1);
+    if (
+      target === undefined ||
+      target.resultSchemaChecksum !== expectedChecksum
+    ) {
+      throw new Error(
+        'Database migration registry does not target the application schema.',
+      );
+    }
+
+    const actualSignature = databaseSchemaSignature(db);
+    if (actualSignature === expectedSignature) {
+      return;
+    }
+
+    const appliedCount = appliedMigrationCount(
+      databaseSchemaChecksum(actualSignature),
+      this.migrations,
+    );
+    if (appliedCount === null) {
+      // Preserve the more actionable structural diagnosis for an unknown
+      // image. Known-old images intentionally skip this current-schema check:
+      // a legitimate migration may add one of today's required tables.
+      validateDatabaseConnection(db);
+      throw new Error(
+        'Database image schema does not match the application schema.',
+      );
+    }
+
+    applyMigrationSuffix(
+      db,
+      this.migrations,
+      appliedCount,
+      expectedSignature,
+      databaseSchemaSignature,
+    );
   }
 
   #applicationSchemaSignature(): string {

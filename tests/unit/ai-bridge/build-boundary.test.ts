@@ -179,6 +179,9 @@ describe('gate 4: the dist scan is chained onto the build and can actually fire'
   it('keeps a negative control that proves the scan read shipped bytes', async () => {
     const scanner = await read('tools/assert-dist-clean.mjs');
     expect(scanner).toContain("const CONTROL = 'staticApp'");
+    expect(scanner).toContain(
+      "const MIGRATION_CONTROL = 'migration-bundle-control:0000'",
+    );
     // A runtime property assignment, so minification cannot remove it.
     expect(await read('src/main.ts')).toContain('window.staticApp = system;');
   });

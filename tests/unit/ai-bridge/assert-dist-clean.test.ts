@@ -65,7 +65,10 @@ function scan(root: string): Promise<Run> {
 
 // A minimal stand-in for a real bundle: it contains the negative control and
 // nothing forbidden.
-const CLEAN = 'window.staticApp = {};\nconsole.log("hello");\n';
+const CLEAN =
+  'window.staticApp = {};\n' +
+  'const migration="migration-bundle-control:0000";\n' +
+  'console.log("hello");\n';
 
 describe('the dist guard passes only a genuinely clean build', () => {
   it('passes and says how much it read', async () => {
@@ -181,6 +184,14 @@ describe('the dist guard refuses to pass vacuously', () => {
     const run = await scan(distWith({ 'assets/index.js': 'nothing at all' }));
     expect(run.code).toBe(1);
     expect(run.stderr).toContain('proves nothing');
+  });
+
+  it('fails when the embedded migration SQL control is absent', async () => {
+    const run = await scan(
+      distWith({ 'assets/index.js': 'window.staticApp = {};' }),
+    );
+    expect(run.code).toBe(1);
+    expect(run.stderr).toContain('migration SQL was not bundled');
   });
 
   it('fails on a missing directory and on an empty one', async () => {
