@@ -1,5 +1,98 @@
 # Binding scope decisions
 
+## F11 — The character's OWN level is the least-constrained level in the database, and two untrusted boundaries disagree about it (2026-07-27)
+
+Found by an audit of my own choosing during an autonomous tick, not from the
+queue. Proven by execution on both sides; nothing here is argued.
+
+### The measurement
+
+Ten columns in this schema hold a level. **Nine carry `CHECK (class_level
+BETWEEN 1 AND 20)`.** The tenth is `character_class_levels.level` — the number
+every sheet computation runs off — and it carries no CHECK at all. That is
+deliberate and its reason is recorded in `db/schema/character.ts`: a test inserts
+level 21 on purpose to force a missing progression row, so the proof phase
+classified the bound BLOCKED rather than accepted.
+
+The CHECK is not the only place a bound could live, and this is where the two
+boundaries part company:
+
+| Boundary | What it does with `level` | Proven by |
+|---|---|---|
+| Share import | refuses 21 and 9999, AND refuses a combined total over 20 | `validateShareDocument`, run |
+| Backup import | accepts 21, 9999, and 1,099,511,627,776 | `rowContractError`, run |
+
+```
+level=0              refused: probe.level: Too small: expected number to be >=1.
+level=1              ACCEPTED by row contract
+level=20             ACCEPTED by row contract
+level=21             ACCEPTED by row contract
+level=9999           ACCEPTED by row contract
+level=1099511627776  ACCEPTED by row contract
+```
+
+```
+level=21     refused: Invalid character share: classes[0].level must be an integer from 1 to 20.
+level=9999   refused: Invalid character share: classes[0].level must be an integer from 1 to 20.
+```
+
+The contract for that column is `positiveInt` (`z.int().min(1)`, no maximum),
+while a `classLevel` refinement — `z.int().min(1).max(20)` — already exists in
+the same file and is applied to the two other contract-covered level columns.
+The tight one was written and then not used on the column that matters most.
+
+### Why it matters, stated exactly
+
+`src/backup/character-backup.ts` says in its own header that a backup document is
+"a foreign artifact written into SQLite verbatim by column name" — that is the
+whole reason the contracts exist there. A hand-edited backup therefore lands an
+unbounded level, and no CHECK stops it. It does not error; it flows into the
+proficiency bonus, the Hit Point total and the multiclass slot table and
+produces plausible wrong numbers. That is the failure this project keeps naming.
+
+### SIX FINDINGS I ALMOST REPORTED AND DID NOT
+
+`class_extra_attack_grants`, `class_martial_arts_dice`, `class_progressions`,
+`named_features`, `subclass_features` and `subclass_progressions` all have a
+1..20 CHECK and no contract refinement. That looks like the same gap six more
+times. It is not: none of them is in `RowContractTable`, so having no refinement
+is correct, and reporting them would have been F7 and F8's mistake a third time
+— claiming a gap without first checking whether the thing was ever in scope.
+Checking scope before counting is the habit; it cost one command here and would
+have cost the credibility of the one real finding.
+
+### The decision, taken under the overnight autonomy grant
+
+**The per-row bound belongs in the contract; the combined-total rule does not.**
+
+- `character_class_levels.level` moves from `positiveInt` to `classLevel`. It
+  matches all nine other level columns, no production writer can emit a value
+  outside it (three writers bound it), and a document carrying level 21 is not a
+  document any version of this app produced.
+- The combined `total <= 20` rule stays OUT of backup import, becoming a sheet
+  warning instead. D11 says the boundary tolerates and the builder blocks; a
+  multiclass total is exactly the kind of thing an import must accept and the
+  sheet must surface. Refusing the whole document would lose a character over a
+  number the sheet can simply state.
+
+**Rejected: adding the CHECK to the column.** It is the obvious fix and it is
+blocked for a recorded reason — `tests/integration/rules/class-progression.test.ts`
+inserts level 21 deliberately. Unblocking it means rewriting that fixture, which
+is a separate decision and a bigger one; the contract gets the same value at the
+boundary that actually receives foreign documents.
+
+**Rejected: leaving it, on the argument that only a hand-edited file reaches it.**
+That argument would retire the entire contract layer, which exists for precisely
+that input.
+
+NOT YET IMPLEMENTED — recorded now because two tracks are in flight and this
+touches `src/domain/contracts/rows.ts`. The `classLevel` comment's own safety
+argument ("no database can hold a row outside the range, so tightening cannot
+lose data") does NOT transfer to this column, since it has no CHECK; whoever
+implements it must say so rather than reusing that sentence.
+
+---
+
 ## D29 — The Laravel parity scaffolding is gone, and the review found ONE real residue in it (2026-07-26)
 
 NUMBERING: `main` gained D27 and D28 while this branch was in flight, so this
