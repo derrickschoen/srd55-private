@@ -1,5 +1,86 @@
 # Binding scope decisions
 
+## D38 — the five remaining domain vocabularies are typed PER TABLE, not per vocabulary: a CHECK where only our seeder writes, passthrough where a user can reach (2026-07-27)
+
+School, damage type, condition, creature type and size were bare `varchar`.
+Merged as `541883d`. Gates on the merged tree: **2012 vitest / 124 files** (from
+1992/123), build exit 0, **72 Playwright**, 59 tables.
+
+### The decision the task did not anticipate
+
+The queue item said "remaining approved enums", which sounds like five closed
+sets. D12/Q4 forbids exactly that: a closed enum a user can reach is a DATA-LOSS
+bug. But the naive reading — make all five passthrough — throws away a real
+constraint on tables a user CANNOT reach.
+
+The unit of the decision is therefore the **table**, not the vocabulary. The same
+word is CHECK-constrained on an SRD-seeded template table and passthrough on the
+user-editable character copy:
+
+| vocabulary | closed where | open where |
+|---|---|---|
+| size, creature type | `species_templates` | the character's own copy |
+| damage type | SRD-only weapon and species templates | spell pivots, character weapons and effects |
+| school, condition | — | user-importable catalog throughout |
+
+**The premise was verified, not assumed.** A CHECK on a table a user can reach
+is precisely the data-loss bug, so the closed side stands or falls on
+unreachability: `species_templates` is written only by `src/rules/origins-srd.ts`
+(the seeder), and nothing in `src/catalog/` touches it.
+
+### Passthrough is branded per vocabulary, which is the part worth keeping
+
+There was no existing scalar passthrough type in the repo — only paired
+raw/recognised columns — so one pattern now serves all five:
+`string & { readonly [sym]: 'SpellSchool' }`. Two consequences, both wanted. A
+bare `string` cannot flow into the column without going through the named
+conversion function, so every widening is a visible call site. And a custom
+damage type cannot be passed where a custom school belongs merely because both
+are strings. The brand changes no stored value; the passthrough is byte-for-byte.
+
+### Values came from the SRD, and this was checked rather than trusted
+
+`docs/srd/source/domain-vocabularies.txt`, pages 104, 179-180 and 188, verbatim
+extract with a per-extract checksum in `docs/srd/SOURCE.md` (`ef5e8cce...`,
+confirmed by the supervisor). 8 schools, 13 damage types, 15 conditions, 14
+creature types, 6 sizes — each list compared MEMBER BY MEMBER against the
+extract, not merely confirmed to exist. This is the D34 failure mode: that entry
+shipped an unsourced Martial Arts `d4` because the list's shape looked right.
+
+### Both directions mutation-proved, and the instrument checked first
+
+Passthrough — making `spellSchool()` reject an unknown value:
+
+```
+× round-trips an unknown spell school through catalog, codec, slot list and Zod rows
+```
+
+Closed — deleting `species_templates_size_check` from the Drizzle schema and
+regenerating, with the constraint counted **1 -> 0 -> 1** across mutate, regen and
+revert so the edit could not be the silent no-op that made a green run
+meaningless earlier the same day:
+
+```
+× species_templates_size_check > rejects a homebrew size in the SRD-only catalog
+× leaves no CHECK constraint in the schema untested
+× keeps a character size open while template size and nullable alternate size stay closed
+```
+
+That second failure is a pre-existing meta-guard in
+`tests/unit/schema-check-constraints.test.ts` — a CHECK cannot be added to this
+schema without a test naming it. It caught the deletion without being asked to.
+
+**Rejected: close all five.** It reads the queue item literally and reintroduces
+the D12 bug on every column a homebrew document can reach.
+**Rejected: open all five.** It is safe and it discards a constraint that holds
+on the tables where our own seeder is the only writer — the one place a closed
+set costs nothing.
+**Rejected: a single shared passthrough type.** It compiles, and it lets a
+custom condition be assigned to a school column, which is the class of bug the
+branded IDs exist to prevent.
+
+---
+
 ## D37 — OWNER: a character's own notes travel opt-in, and the portability map gains an honest third state (2026-07-27)
 
 Q12 answered: *"Opt-in, like loadouts."* Merged as `6078058`.
