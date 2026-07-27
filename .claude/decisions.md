@@ -1,5 +1,64 @@
 # Binding scope decisions
 
+## D35 — OWNER: D26 is AMENDED. A value earns structure if it changes a number on the sheet OR makes the catalog searchable. (2026-07-27)
+
+Owner ruling, given on waking, in answer to a question this project raised
+against its own rule.
+
+### The question that forced it
+
+D26 says a value earns structure ONLY if it changes a number on the sheet. The
+structured-values track built spell RANGE as an integer plus a shape enum, per
+the owner's own earlier ruling — and then noticed that range **fails D26's
+test**. Measured, not argued: all three readers of `spell_versions.range` echo
+it verbatim, and the only rendering is the printable spell card. Structuring it
+changes no number anywhere.
+
+So the project had a ruling and a rule that contradicted each other, and the
+contradiction was surfaced rather than resolved quietly in either direction.
+
+### The amendment
+
+> **A value earns structure if it changes a number on the sheet, OR if it makes
+> the catalog searchable.**
+
+The owner chose to widen the rule rather than revert the range work, and
+explicitly so that "the next case is decided in advance" instead of being
+re-argued each time.
+
+### What this does and does not license
+
+**DOES**: sorting, filtering and searching the catalog are now first-class
+reasons to give a value structure. A player looking for "every spell with a
+range of 60 feet or less" is a use this application exists to serve, and range
+being text made that impossible.
+
+**DOES NOT**: it is still not a simulator. D26's core stands — the table
+adjudicates, and nothing here licenses inventory, gold, session state, or
+modelling a value because it appears in the source. The second limb asks a
+specific question: **would a player plausibly search or sort by this?** A
+duration of "Concentration, up to 1 minute" arguably yes; a spell's flavour
+paragraph no.
+
+### Why the amendment is better than the alternatives, recorded
+
+**Rejected: revert range to text.** It applies D26 strictly and undoes work that
+is already correct and already handles "Self" and "Touch". The rule was the
+thing that was too narrow, not the code.
+
+**Rejected: keep both and treat range as an exception.** An unexplained
+exception in a binding rule is how a rule stops being followed. The next value
+in the same position would be argued from scratch, which is exactly what the
+owner said they wanted to avoid.
+
+D26 is not superseded; it is widened. Every earlier decision that cited D26 to
+REFUSE structure — concentration conflict, gold, inventory, session state,
+casting time and duration as text — still holds, because none of those was
+refused for being unsearchable. They were refused for being adjudication, and
+adjudication is still the table's.
+
+---
+
 > **NUMBERING.** Two entries were written as F17 concurrently: this one on
 > `main` (the `.ai/` anchor drift) and the structured-values track's own
 > (the NUL byte and the two unreachable values). The track's is renumbered
@@ -1613,6 +1672,13 @@ premise is the same failure as F7 and F8.
 ---
 
 ## D26 — OWNER: the sheet is a REFERENCE, not a simulator. Most candidates become text. (2026-07-26)
+
+> **AMENDED BY D35 (2026-07-27) — read that before applying the rule below.**
+> The test is now "changes a number on the sheet **OR** makes the catalog
+> searchable". The core of this entry stands: the sheet is a reference, the
+> table adjudicates, and every value refused below was refused for being
+> ADJUDICATION rather than for being unsearchable — so none of those refusals
+> is reopened by the amendment.
 
 > "'Concentration conflict' this is really beyond the scope of a character
 >  sheet. Sheet just needs the info that lets the player play at the table."
