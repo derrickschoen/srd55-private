@@ -30,12 +30,14 @@ export function createShareClient(rpc: RpcClient): ShareClient {
         characterId: number;
         acknowledgements: boolean;
         loadouts: boolean;
+        notes: boolean;
       },
       CharacterShareDocument
     >('share.exportCharacter', {
       characterId,
       acknowledgements: options.acknowledgements === true,
       loadouts: options.loadouts === true,
+      notes: options.notes === true,
     });
   return Object.freeze({
     exportDebug,

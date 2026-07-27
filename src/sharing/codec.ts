@@ -67,6 +67,35 @@ const PRE_SHEET_ROOT_LENGTH = 13;
 const PRE_EFFECTS_ROOT_LENGTH = 14;
 
 /**
+ * How many elements the CHARACTER ROOT occupies on the wire — BOTH LENGTHS.
+ *
+ * THE CHARACTER TUPLE WAS EXACT-LENGTH AND APPENDING TO IT WOULD HAVE BROKEN
+ * EVERY LINK EVER MINTED. This is the weapon tuple's defect (D33/F18) one level
+ * up: `tuple(root[2], 11, …)` accepts eleven elements and nothing else, so a
+ * twelfth element for Q12's opt-in notes would have made every link in the wild
+ * — all of which carry an eleven-element character — a decode error. Checked
+ * BEFORE the field was added, which is the only useful time to check it.
+ *
+ * THE ANSWER IS THE ONE THE DOCUMENT AND THE WEAPON ALREADY USE: accept both
+ * arities and read the new element only when it is there. `LEGACY` is the arity
+ * every pre-Q12 link has; `CURRENT` is one longer.
+ *
+ * THE NEW ELEMENT IS APPENDED, NOT INSERTED. `placeholders` has occupied index
+ * 10 since links existed; putting the note anywhere before it would shift that
+ * list by one and decode an old link's placeholder array as its notes string.
+ * Appended, every index an old link wrote still means what it meant.
+ */
+const CHARACTER_TUPLE_LENGTH_LEGACY = 11;
+const CHARACTER_TUPLE_LENGTH = CHARACTER_TUPLE_LENGTH_LEGACY + 1;
+const CHARACTER_TUPLE_LENGTHS: readonly number[] = [
+  CHARACTER_TUPLE_LENGTH_LEGACY,
+  CHARACTER_TUPLE_LENGTH,
+];
+
+/** Where the opt-in note sits in the character tuple: last, and it stays last. */
+const CHARACTER_NOTES_INDEX = CHARACTER_TUPLE_LENGTH_LEGACY;
+
+/**
  * How many elements the grouped sheet element holds: armour, hit point rolls,
  * skill proficiencies, the manual adjustment.
  */
@@ -391,6 +420,10 @@ export function shareDocumentToPositional(
         row.spellKey,
         row.spellName,
       ]) ?? null,
+      // The opt-in note. ALWAYS WRITTEN, `null` when the sharer did not opt in
+      // or the character has no note, so this build's output has one shape
+      // rather than two — the same terms every section above is written on.
+      character.notes ?? null,
     ],
     document.classes.map((row) => [
       row.id,
@@ -508,7 +541,11 @@ export function positionalToShareDocument(
   if (root[1] !== CHARACTER_SHARE_VERSION) {
     throw new ShareValidationError('version is unsupported.');
   }
-  const character = tuple(root[2], 11, 'wire character');
+  const character = variableTuple(
+    root[2],
+    CHARACTER_TUPLE_LENGTHS,
+    'wire character',
+  );
   if (!Array.isArray(root[3])) {
     throw new ShareValidationError('wire classes must be a list.');
   }
@@ -643,6 +680,14 @@ export function positionalToShareDocument(
       ...(nullable(character[9]) === undefined
         ? {}
         : { allow_legacy: character[9] }),
+      // `undefined` is a SHORT TUPLE — a link minted before Q12 — and `null` is
+      // a sharer who did not opt in or a character with no note. Both leave the
+      // key absent, which is what `ShareCharacter.notes` optionality means, so
+      // the two need no separate branch and neither can invent a value.
+      ...(character[CHARACTER_NOTES_INDEX] === null ||
+      character[CHARACTER_NOTES_INDEX] === undefined
+        ? {}
+        : { notes: character[CHARACTER_NOTES_INDEX] }),
     },
     classes: root[3].map((value, index) => {
       const row = tuple(value, 8, `wire classes[${index}]`);
