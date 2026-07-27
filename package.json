@@ -15,6 +15,7 @@
     "test:all": "npm run test && npm run build && npm run test:browser",
     "scrape": "vite-node tools/scrape/cli.ts --",
     "db:schema": "vite-node scripts/build-schema.ts",
+    "db:migrations": "vitest run --configLoader runner tests/unit/db/migrations.test.ts",
     "db:contracts": "vite-node scripts/build-row-contracts.ts"
   },
   "dependencies": {
