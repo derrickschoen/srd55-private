@@ -152,7 +152,7 @@ save-point restore. [RECIPES.md](RECIPES.md) §3 is that checklist.
 ## 4. The character root is NOT covered by the table loop
 
 `characters` is classified all-false. The root is serialized through its own
-path: `CHARACTER_STATE_COLUMNS` (`src/character/character-state.ts:139`) for
+path in `src/character/character-state.ts`: `CHARACTER_STATE_COLUMNS` (`:171`) for
 snapshots, and `document.character` for backups. **A new column on `characters`
 therefore does NOT get picked up by any of the table-scope machinery.** It has to
 be added to `CHARACTER_STATE_COLUMNS` by hand, and to the backup and share paths
@@ -169,6 +169,6 @@ exercises them against a real in-memory SQLite by asserting on the exact SQLite
 error strings — including the trigger's own message, which is why the trigger
 text and the test are coupled on purpose.
 
-Foreign-key enforcement is asserted at connection time:
-`prepareConnection` (`src/db/database.ts:21`) runs the pragmas and THROWS if
+Foreign-key enforcement is asserted at connection time. In
+`src/db/database.ts`, `prepareConnection` (`:21`) runs the pragmas and THROWS if
 `PRAGMA foreign_keys` does not come back `1`. It is not assumed to have worked.

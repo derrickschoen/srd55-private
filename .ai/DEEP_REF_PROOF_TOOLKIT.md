@@ -217,9 +217,10 @@ The obvious repair does not work, which is the more useful lesson:
 grep -rono '\.all(\|\.one(' --include=*.ts src/ | grep -v 'Promise\.all' | wc -l
 ```
 
-still returns the inflated count, because `-o` already threw the word away — the
-line it emits is `src/ui/screens/planner/screen.ts:210:.all(`, and `Promise` is
-not in it to
+still returns the inflated count, because `-o` already threw the word away. In
+`src/ui/screens/planner/screen.ts`, the `workspace` (`:210`) declaration is
+initialized with `Promise.all`, but the line emitted by grep is only `.all(` and
+`Promise` is not in it to
 filter. A post-filter cannot recover context the first command discarded, so the
 exclusion has to happen inside the match, as a lookbehind, which is why the
 pattern needs `-P` rather than the default BRE. The same lookbehind appears in
@@ -238,7 +239,7 @@ count.
 Passing is not evidence. Delete the behaviour the test protects and check it goes
 red.
 
-`decisions.md:390` is the case that made this policy: a test covering a real
+`decisions.md D20` is the case that made this policy: a test covering a real
 defect could not fail — deleting the resolution left 1087 of 1087 passing,
 because the case was written at a level where the expectation was true for
 reasons unrelated to the behaviour. Rewritten one level down, four mutants died.
@@ -263,7 +264,7 @@ and its worked examples are in
   asserts the old hash against the frozen fixture, the new hash against the
   fixture adjusted for tables dropped and added, and that against the generated
   schema.
-- **Freeze the OLD format and COUNT it.** `tests/unit/sharing/codec.test.ts:866`
-  asserts a pre-sheet-inputs share fragment is thirteen elements. Regenerating
-  that literal from current code would make it fourteen, and the count fails
-  first.
+- **Freeze the OLD format and COUNT it.** In
+  `tests/unit/sharing/codec.test.ts`, `PRE_SHEET_WIRE` (`:968`)
+  asserts a pre-sheet-inputs wire tuple is thirteen elements. Regenerating that
+  literal from current code would make it fourteen, and the count fails first.

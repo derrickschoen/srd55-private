@@ -95,8 +95,9 @@ than copying it from here — it moves every time a table does. `decisions.md`
 `:107`, `:1188` and D9 are the record.
 
 The same rule with the share format:
-`tests/unit/sharing/codec.test.ts:866` asserts a frozen pre-sheet-inputs
-fragment is THIRTEEN elements. Regenerating that literal from current code would
+In `tests/unit/sharing/codec.test.ts`, the frozen pre-sheet-inputs wire tuple is
+declared as `PRE_SHEET_WIRE` (`:968`) and is THIRTEEN elements. Regenerating
+that literal from current code would
 make it fourteen, and this guard fails rather than letting the suite quietly
 start testing the new format against itself. (There is an eleven-element suite
 below it doing the same for an older format, and the round-trip test imports the
@@ -164,7 +165,7 @@ Two properties every guard here has, and yours should too:
 
 ## 6. Mutation is the coverage oracle
 
-Passing is not evidence. `decisions.md:390` records a test that covered a real
+Passing is not evidence. `decisions.md D20` records a test that covered a real
 defect and **could not fail**: deleting the resolution left 1087 of 1087 passing,
 because the case was written at a level where the expectation was true for
 reasons unrelated to the behaviour. Rewritten one level down, four mutants died.
