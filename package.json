@@ -11,6 +11,7 @@
     "test:unit": "vitest run --configLoader runner tests/unit",
     "test:live": "AI_BRIDGE_LIVE=1 vitest run --configLoader runner tests/live",
     "test:browser": "playwright test",
+    "test:mutation": "stryker run",
     "test:all": "npm run test && npm run build && npm run test:browser",
     "scrape": "vite-node tools/scrape/cli.ts --",
     "db:schema": "vite-node scripts/build-schema.ts",
@@ -23,6 +24,9 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",
+    "@stryker-mutator/core": "9.6.1",
+    "@stryker-mutator/typescript-checker": "9.6.1",
+    "@stryker-mutator/vitest-runner": "9.6.1",
     "@types/node": "^24.0.0",
     "@types/qrcode": "^1.5.6",
     "drizzle-kit": "^0.31.10",
