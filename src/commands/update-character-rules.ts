@@ -1,5 +1,5 @@
 import type { DatabaseContext } from '../db/database';
-import { encodeBoolean } from '../db/codecs';
+import { encodeBoolean, rowId } from '../db/codecs';
 import type {
   UpdateCharacterRulesCommand as UpdateCharacterRulesPayload,
 } from '../domain/command-contracts';
@@ -42,12 +42,17 @@ export class UpdateCharacterRulesCommand {
         [encodeBoolean(this.payload.allow_legacy), new Date().toISOString(), characterId],
       );
 
-      const slots = this.db.all<{ id: number }>(
+      // This was `all<{ id: number }>(…)` — the ONE unchecked primitive cast
+      // in `src/`, asserting a column type nothing had checked, and then
+      // re-coercing with `Number(slot.id)` two lines later because the assertion
+      // was not trusted. `rowId` checks it once, for real.
+      const slots = this.db.all(
         'SELECT id FROM spell_selection_slots WHERE character_id = ? ORDER BY id',
         [characterId],
+        rowId,
       );
-      for (const slot of slots) {
-        this.#eligibility.refresh(Number(slot.id));
+      for (const slotId of slots) {
+        this.#eligibility.refresh(slotId);
       }
     });
   }

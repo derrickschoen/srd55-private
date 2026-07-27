@@ -93,7 +93,7 @@ function spell(
 }
 
 function stored(context: DatabaseContext, slotId: number) {
-  return context.one(
+  return context.oneRaw(
     `SELECT current_spell_version_id, selection_eligibility,
             selection_invalid_reason
      FROM spell_selection_slots WHERE id = ?`,
@@ -177,7 +177,7 @@ it('direct selection enforces locked slot, active slot, and active owning source
     `Active spell selection slot ${test.slotId} does not exist.`,
   );
   expect(
-    test.context.one(
+    test.context.oneRaw(
       `SELECT slot.current_spell_version_id, slot.state AS slot_state,
               source.state AS source_state
        FROM spell_selection_slots AS slot

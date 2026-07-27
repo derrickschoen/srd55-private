@@ -7,7 +7,6 @@ import {
 } from '../../../src/rules/class-progression-lookup';
 import { openTestDatabase } from '../../helpers/open-db';
 
-type Row = Record<string, string | number | null>;
 
 describe('persisted class progression catalog', () => {
   let connection: Database;
@@ -29,7 +28,7 @@ describe('persisted class progression catalog', () => {
     expect(db.scalar('SELECT count(*) FROM subclass_definitions')).toBe(2);
     expect(db.scalar('SELECT count(*) FROM subclass_progressions')).toBe(40);
 
-    const classCoverage = db.all<Row>(`
+    const classCoverage = db.allRaw(`
       SELECT class.name, count(*) AS rows, min(class_level) AS first_level,
         max(class_level) AS last_level
       FROM class_progressions progression
@@ -45,7 +44,7 @@ describe('persisted class progression catalog', () => {
 
   it('persists base-class metadata with third-caster rules only on subclasses', () => {
     expect(
-      db.all<Row>(`
+      db.allRaw(`
         SELECT name, spellcasting_ability, progression_type, caster_fraction,
           caster_rounding
         FROM class_definitions
@@ -67,7 +66,7 @@ describe('persisted class progression catalog', () => {
     ]);
 
     expect(
-      db.all<Row>(`
+      db.allRaw(`
         SELECT subclass.name, class.name AS class_name, subclass.spellcasting_ability,
           subclass.caster_fraction, subclass.caster_rounding
         FROM subclass_definitions subclass
@@ -136,7 +135,7 @@ describe('persisted class progression catalog', () => {
   ])(
     'persists %s level %i caster breakpoints',
     (name, level, cantrips, prepared, slots, pact) => {
-      const row = db.one<Row>(`
+      const row = db.oneRaw(`
         SELECT progression.cantrips_known, progression.prepared_count,
           progression.slots, progression.pact_slots
         FROM class_progressions progression
@@ -224,7 +223,7 @@ describe('persisted class progression catalog', () => {
 
   it('persists all third-caster preparation and slot breakpoints', () => {
     expect(
-      db.all<Row>(`
+      db.allRaw(`
         SELECT subclass.name, progression.class_level, progression.prepared_count,
           progression.max_spell_level, progression.slots
         FROM subclass_progressions progression
@@ -321,7 +320,7 @@ describe('persisted class progression catalog', () => {
   });
 
   it('upserts idempotently while retaining persisted row identities', () => {
-    const before = db.all<Row>(`
+    const before = db.allRaw(`
       SELECT class.content_key, progression.class_level, progression.id
       FROM class_progressions progression
       JOIN class_definitions class ON class.id = progression.class_definition_id
@@ -332,7 +331,7 @@ describe('persisted class progression catalog', () => {
 
     expect(db.scalar('SELECT count(*) FROM class_progressions')).toBe(240);
     expect(
-      db.all<Row>(`
+      db.allRaw(`
         SELECT class.content_key, progression.class_level, progression.id
         FROM class_progressions progression
         JOIN class_definitions class ON class.id = progression.class_definition_id

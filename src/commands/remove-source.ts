@@ -3,6 +3,7 @@ import {
   type CharacterStateSnapshot,
 } from '../character/character-state';
 import { CharacterCommandIntegrity } from './integrity';
+import { rowId } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import type {
   RemoveSourceCommand as RemoveSourcePayload,
@@ -32,15 +33,16 @@ export class RemoveSourceCommand {
 
   apply(characterId: number): void {
     this.db.transaction(() => {
-      const source = this.db.one(
+      const sourceId = this.db.one(
         `SELECT id
          FROM character_source_instances
          WHERE character_id = ? AND id = ?
            AND source_type IN ('feat', 'species', 'background')
            AND state = 'active'`,
         [characterId, this.payload.source_instance_id],
+        rowId,
       );
-      if (source === null) {
+      if (sourceId === null) {
         throw new TypeError(
           'Removable source does not belong to this character.',
         );
@@ -52,9 +54,9 @@ export class RemoveSourceCommand {
         `UPDATE character_source_instances
          SET state = 'tombstoned', updated_at = ?
          WHERE id = ?`,
-        [new Date().toISOString(), Number(source.id)],
+        [new Date().toISOString(), sourceId],
       );
-      this.#generator.generateForSource(Number(source.id));
+      this.#generator.generateForSource(sourceId);
     });
   }
 

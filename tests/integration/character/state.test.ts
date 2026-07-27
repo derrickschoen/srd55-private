@@ -194,11 +194,11 @@ function mutableCapture(): MutableSnapshot {
 
 function persistedCharacterState(id = characterId): Record<string, unknown> {
   return {
-    character: db.one('SELECT * FROM characters WHERE id = ?', [id]),
+    character: db.oneRaw('SELECT * FROM characters WHERE id = ?', [id]),
     ...Object.fromEntries(
       CHARACTER_STATE_TABLES.map((table) => [
         table,
-        db.all(
+        db.allRaw(
           `SELECT * FROM "${table}" WHERE character_id = ? ORDER BY id`,
           [id],
         ),
@@ -311,7 +311,7 @@ describe('capture and deterministic diff', () => {
     });
     for (const table of CHARACTER_STATE_TABLES) {
       expect(snapshot[table]).toEqual(
-        db.all(
+        db.allRaw(
           `SELECT * FROM "${table}" WHERE character_id = ? ORDER BY id`,
           [characterId],
         ),
@@ -734,7 +734,7 @@ describe('restoring a snapshot written by an older build', () => {
     // snapshot was taken and the one added afterwards are still here. Treating
     // the absent key as an empty list would have deleted both.
     expect(
-      db.all(
+      db.allRaw(
         'SELECT name FROM character_weapons WHERE character_id = ? ORDER BY id',
         [characterId],
       ),
@@ -756,7 +756,7 @@ describe('restoring a snapshot written by an older build', () => {
     state.restore(characterId, snapshot);
 
     expect(
-      db.all(
+      db.allRaw(
         'SELECT name FROM character_weapons WHERE character_id = ? ORDER BY id',
         [characterId],
       ),
@@ -889,7 +889,7 @@ describe('restoring a snapshot written by an older build', () => {
 
     // The trait rows land WITHOUT the retired columns...
     expect(
-      db.all(
+      db.allRaw(
         `SELECT name, description FROM character_species_traits
          WHERE character_id = ? ORDER BY sort_order`,
         [characterId],
@@ -910,7 +910,7 @@ describe('restoring a snapshot written by an older build', () => {
     // and `granted_spells` is retired — its spells come from `src/grants/` and
     // never lived here, so dropping the marker loses the character nothing.
     expect(
-      db.all(
+      db.allRaw(
         `SELECT sort_order, effect_kind, hit_points_flat, hit_points_per_level,
                 source_instance_id, label
          FROM character_effects WHERE character_id = ? ORDER BY sort_order`,
@@ -946,7 +946,7 @@ describe('restoring a snapshot written by an older build', () => {
     ).toBe(1);
     state.restore(characterId, preEffectsSnapshot());
     expect(
-      db.all(
+      db.allRaw(
         'SELECT label FROM character_effects WHERE character_id = ? ORDER BY id',
         [characterId],
       ),

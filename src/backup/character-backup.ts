@@ -866,7 +866,11 @@ function selectCharacterRows(
   table: string,
   characterId: number,
 ): SqlRow[] {
-  return db.all(
+  // Raw by definition: `table` comes from `directCharacterTables` at runtime, so
+  // a backup row has no fixed column set. A backup is a column-for-column copy
+  // of storage — decoding it here would make the round trip assert through the
+  // decoder instead of against the database.
+  return db.allRaw(
     `SELECT * FROM "${table}" WHERE character_id = ? ORDER BY id`,
     [characterId],
   );
@@ -878,7 +882,7 @@ export function exportCharacterBackup(
   exportedAt = new Date().toISOString(),
 ): CharacterBackupDocument {
   positiveInteger(characterId, 'Character id');
-  const character = db.one(
+  const character = db.oneRaw(
     'SELECT * FROM characters WHERE id = ?',
     [characterId],
   );
@@ -896,7 +900,7 @@ export function exportCharacterBackup(
   const entries =
     loadoutIds.length === 0
       ? []
-      : db.all(
+      : db.allRaw(
           `SELECT *
            FROM spell_loadout_entries
            WHERE spell_loadout_id IN (${loadoutIds.map(() => '?').join(', ')})

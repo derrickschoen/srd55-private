@@ -2,6 +2,7 @@ import type { Sqlite3Static } from '@sqlite.org/sqlite-wasm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import schema from '../../../src/db/schema.sql?raw';
 import { createApplicationLifecycle } from '../../../src/db/bootstrap';
+import { sqlString } from '../../../src/db/codecs';
 import { DatabaseLifecycle } from '../../../src/db/database-lifecycle';
 import { AddSourceCommand } from '../../../src/commands/add-source';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
@@ -69,10 +70,11 @@ function bareLifecycle(sqlite3: Sqlite3Static): DatabaseLifecycle {
 
 function classNames(lifecycle: DatabaseLifecycle): string[] {
   return lifecycle.database
-    .all<{ name: string }>(
+    .all(
       'SELECT name FROM class_definitions ORDER BY name',
-    )
-    .map((row) => row.name);
+      undefined,
+      (row) => sqlString(row, 'name'),
+    );
 }
 
 describe('application database bootstrap', () => {
@@ -82,10 +84,11 @@ describe('application database bootstrap', () => {
     expect(classNames(lifecycle)).toEqual([...SRD_CLASSES]);
     expect(
       lifecycle.database
-        .all<{ name: string }>(
+        .all(
           'SELECT name FROM subclass_definitions ORDER BY name',
-        )
-        .map((row) => row.name),
+          undefined,
+          (row) => sqlString(row, 'name'),
+        ),
     ).toEqual([...SRD_SUBCLASSES]);
     expect(
       lifecycle.database.scalar('SELECT count(*) FROM class_progressions'),
@@ -197,7 +200,7 @@ describe('application database bootstrap', () => {
     ).toBe(0);
     expect(classNames(lifecycle)).toEqual([...SRD_CLASSES]);
     expect(
-      lifecycle.database.all('SELECT name FROM characters'),
+      lifecycle.database.allRaw('SELECT name FROM characters'),
     ).toEqual([{ name: 'Returning User' }]);
   });
 
@@ -233,7 +236,7 @@ describe('application database bootstrap', () => {
 
     expect(classNames(lifecycle)).toEqual([...SRD_CLASSES]);
     expect(
-      lifecycle.database.all('SELECT name FROM characters'),
+      lifecycle.database.allRaw('SELECT name FROM characters'),
     ).toEqual([{ name: 'Imported Hero' }]);
 
     const seededBytes = await lifecycle.exportBytes();
@@ -270,7 +273,7 @@ describe('application database bootstrap', () => {
     ).toBe(SRD_SUBCLASSES.length * 20);
     expect(classNames(lifecycle)).toEqual([...SRD_CLASSES]);
     expect(
-      lifecycle.database.all('SELECT name FROM characters'),
+      lifecycle.database.allRaw('SELECT name FROM characters'),
     ).toEqual([{ name: 'Survivor' }]);
   });
 
@@ -291,7 +294,7 @@ describe('application database bootstrap', () => {
     await lifecycle.replace(homebrewBytes);
 
     expect(
-      lifecycle.database.all(
+      lifecycle.database.allRaw(
         'SELECT content_key, name FROM class_definitions ORDER BY name',
       ),
     ).toContainEqual({ content_key: 'homebrew:wizard', name: 'Wizard' });
@@ -309,10 +312,11 @@ describe('application database bootstrap', () => {
     // they are resolved by content key rather than by name.
     expect(
       lifecycle.database
-        .all<{ name: string }>(
+        .all(
           'SELECT name FROM subclass_definitions ORDER BY name',
-        )
-        .map((row) => row.name),
+          undefined,
+          (row) => sqlString(row, 'name'),
+        ),
     ).toEqual([...SRD_SUBCLASSES]);
 
     // The bundle stays incomplete, so the guard keeps re-running the seed. It

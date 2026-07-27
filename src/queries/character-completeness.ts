@@ -540,7 +540,7 @@ export const noClass: CompletenessCheck = {
 export const orphanHitPointRolls: CompletenessCheck = {
   id: 'orphan_hit_point_roll',
   run(context) {
-    const rows = context.db.all<SqlRow>(
+    const rows = context.db.all(
       `SELECT roll.class_name AS class_name, roll.class_level AS class_level
        FROM character_hit_point_rolls AS roll
        WHERE roll.character_id = ?
@@ -554,13 +554,16 @@ export const orphanHitPointRolls: CompletenessCheck = {
          )
        ORDER BY roll.class_name, roll.class_level`,
       [context.characterId],
+      (row) => ({
+        class_name: sqlString(row, 'class_name'),
+        class_level: sqlInteger(row, 'class_level'),
+      }),
     );
     const byClass = new Map<string, number[]>();
     for (const row of rows) {
-      const name = sqlString(row, 'class_name');
-      const levels = byClass.get(name) ?? [];
-      levels.push(sqlInteger(row, 'class_level'));
-      byClass.set(name, levels);
+      const levels = byClass.get(row.class_name) ?? [];
+      levels.push(row.class_level);
+      byClass.set(row.class_name, levels);
     }
     return [...byClass].map(([className, levels]): OrphanHitPointRollItem => ({
       kind: 'orphan_hit_point_roll',

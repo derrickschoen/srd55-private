@@ -4,7 +4,7 @@ import {
   sqlNullableInteger,
   sqlNullableString,
   sqlString,
-  type SqlRow,
+  type RowCodec,
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import type {
@@ -206,7 +206,69 @@ export interface CharacterSheet {
   readonly gaps: readonly SheetGap[];
 }
 
-type Row = SqlRow;
+/**
+ * The codecs this builder reads through.
+ *
+ * They are named and hoisted rather than written inline at the call site for the
+ * ones used more than once, and because a codec with a name is a place to say
+ * what a column MEANS — see `hit_die` below, which is the whole D24 finding in
+ * one nullable field.
+ */
+
+interface SheetCharacterRow {
+  readonly id: number;
+  readonly name: string;
+  readonly scores: AbilityScores;
+  readonly proficiency_bonus_override: number | null;
+}
+
+const sheetCharacter: RowCodec<SheetCharacterRow> = (row) => ({
+  id: sqlInteger(row, 'id'),
+  name: sqlString(row, 'name'),
+  // Built HERE rather than handed the row to build itself later: the six
+  // ability columns are the reason this query selects them, and decoding them
+  // at the read is what stops a caller receiving an undecoded row that merely
+  // looks decoded.
+  scores: AbilityScores.fromArray(row),
+  proficiency_bonus_override: sqlNullableInteger(
+    row,
+    'proficiency_bonus_override',
+  ),
+});
+
+interface SheetClassJoinRow {
+  readonly class_definition_id: number;
+  readonly class_level: number;
+  readonly is_starting_class: boolean;
+  readonly class_name: string;
+  /**
+   * NULL when the class has no `class_sheet_traits` row — a homebrew or
+   * imported class. The absence lives in the type so it cannot be filled in by
+   * accident downstream; `hitPointMaximum` substitutes `ASSUMED_HIT_DIE` and
+   * says so in a warning. See D24.
+   */
+  readonly hit_die: number | null;
+}
+
+const sheetClassRow: RowCodec<SheetClassJoinRow> = (row) => ({
+  class_definition_id: sqlInteger(row, 'class_definition_id'),
+  class_level: sqlInteger(row, 'class_level'),
+  is_starting_class: sqlBoolean(row, 'is_starting_class'),
+  class_name: sqlString(row, 'class_name'),
+  hit_die: sqlNullableInteger(row, 'hit_die'),
+});
+
+const namedSpeciesTraitEffect: RowCodec<NamedSpeciesTraitEffect> = (row) => ({
+  name: sqlString(row, 'name'),
+  effect_kind: sqlNullableString(row, 'effect_kind'),
+  effect_damage_type: sqlNullableString(row, 'effect_damage_type'),
+  effect_hit_points_flat: sqlNullableInteger(row, 'effect_hit_points_flat'),
+  effect_hit_points_per_level: sqlNullableInteger(
+    row,
+    'effect_hit_points_per_level',
+  ),
+  effect_speed_bonus_feet: sqlNullableInteger(row, 'effect_speed_bonus_feet'),
+});
 
 /**
  * The gaps, stated once.
@@ -308,16 +370,17 @@ export class CharacterSheetBuilder {
   }
 
   build(characterId: number): CharacterSheet {
-    const character = this.db.one<Row>(
+    const character = this.db.one(
       `SELECT id, name, strength, dexterity, constitution, intelligence,
               wisdom, charisma, proficiency_bonus_override
        FROM characters WHERE id = ?`,
       [characterId],
+      sheetCharacter,
     );
     if (character === null) {
       throw new CharacterNotFoundError(characterId);
     }
-    const scores = AbilityScores.fromArray(character);
+    const scores = character.scores;
     const content = this.#content.forCharacter(characterId);
     const classes = this.#classes(characterId, content);
     const rolls = this.#rolls(characterId);
@@ -328,7 +391,7 @@ export class CharacterSheetBuilder {
 
     const bonus = sheetProficiencyBonus(
       classes,
-      sqlNullableInteger(character, 'proficiency_bonus_override'),
+      character.proficiency_bonus_override,
     );
     const totalLevel = totalCharacterLevel(classes);
 
@@ -355,31 +418,40 @@ export class CharacterSheetBuilder {
     // that puts it beside `hitPointMaximum`. A sheet printing the maximum alone
     // shows a Dwarf's hit points short by their level, so the two are shown as
     // two numbers and the page adds them where a reader can see both.
-    const effectRows = this.db.all<Row>(
+    // Reads `character_effects` rather than the trait table: D22 inverted the
+    // model so an effect belongs to the CHARACTER and names its source, which
+    // is what lets one trait carry both a resistance and a cantrip.
+    const effectRows = this.db.all(
       `SELECT effect_kind, damage_type, hit_points_flat, hit_points_per_level,
               speed_bonus_feet, label
        FROM character_effects
        WHERE character_id = ?
        ORDER BY sort_order, id`,
       [characterId],
-    ).map((row): EffectRow => ({
-      effect_kind: sqlString(row, 'effect_kind'),
-      damage_type: sqlNullableString(row, 'damage_type'),
-      hit_points_flat: sqlNullableInteger(row, 'hit_points_flat'),
-      hit_points_per_level: sqlNullableInteger(row, 'hit_points_per_level'),
-      speed_bonus_feet: sqlNullableInteger(row, 'speed_bonus_feet'),
-      label: sqlString(row, 'label'),
-    }));
+      (row): EffectRow => ({
+        effect_kind: sqlString(row, 'effect_kind'),
+        damage_type: sqlNullableString(row, 'damage_type'),
+        hit_points_flat: sqlNullableInteger(row, 'hit_points_flat'),
+        hit_points_per_level: sqlNullableInteger(row, 'hit_points_per_level'),
+        speed_bonus_feet: sqlNullableInteger(row, 'speed_bonus_feet'),
+        label: sqlString(row, 'label'),
+      }),
+    );
     const effects = summariseEffects(effectRows);
     const speciesHp = effectHitPoints(effectRows, totalLevel);
-    const baseSpeed = this.db.one<Row>(
+    const baseSpeed = this.db.one(
       `SELECT base_speed_feet FROM character_species WHERE character_id = ?`,
       [characterId],
+      // Wrapped rather than returned bare, because `one` already uses `null`
+      // for NO ROW and `base_speed_feet` is itself nullable. Collapsing the two
+      // would make "this character has no species" indistinguishable from "the
+      // species records no speed", and only the first should read as absent.
+      (row) => ({ feet: sqlNullableInteger(row, 'base_speed_feet') }),
     );
 
     return {
       character_id: characterId,
-      name: sqlString(character, 'name'),
+      name: character.name,
       total_level: totalLevel,
       proficiency_bonus: {
         id: 'proficiency_bonus',
@@ -483,10 +555,7 @@ export class CharacterSheetBuilder {
       walking_speed_feet:
         baseSpeed === null
           ? null
-          : walkingSpeedFeet(
-              sqlNullableInteger(baseSpeed, 'base_speed_feet'),
-              effectRows,
-            ),
+          : walkingSpeedFeet(baseSpeed.feet, effectRows),
       damage_resistances: effects.damageResistances,
       unchosen_damage_resistances: effects.unchosenDamageResistances,
       classes: classes.map((entry): SheetClassLine => ({
@@ -522,7 +591,7 @@ export class CharacterSheetBuilder {
     characterId: number,
     content: readonly { readonly class_definition_id: number }[],
   ): readonly SheetClass[] {
-    const rows = this.db.all<Row>(
+    const rows = this.db.all(
       `SELECT level.class_definition_id AS class_definition_id,
               level.level AS class_level,
               level.is_starting_class AS is_starting_class,
@@ -536,18 +605,19 @@ export class CharacterSheetBuilder {
        WHERE level.character_id = ?
        ORDER BY definition.name, level.id`,
       [characterId],
+      sheetClassRow,
     );
     return rows.map((row): SheetClass => {
-      const classDefinitionId = sqlInteger(row, 'class_definition_id');
+      const classDefinitionId = row.class_definition_id;
       const contentRow = content.find(
         (entry) => entry.class_definition_id === classDefinitionId,
       ) as
         | { readonly extra_attack_grants?: never; readonly martial_arts_dice?: never }
         | undefined;
       return {
-        class_name: sqlString(row, 'class_name'),
-        level: sqlInteger(row, 'class_level'),
-        is_starting_class: sqlBoolean(row, 'is_starting_class'),
+        class_name: row.class_name,
+        level: row.class_level,
+        is_starting_class: row.is_starting_class,
         // A CLASS WITH NO SHEET TRAITS ROW HAS NO HIT DIE, AND THAT ABSENCE IS
         // CARRIED RATHER THAN FILLED IN HERE. `class_sheet_traits` is seeded for
         // every printed class; a homebrew or imported class can arrive without
@@ -557,14 +627,14 @@ export class CharacterSheetBuilder {
         // is produced. `hitPointMaximum` substitutes `ASSUMED_HIT_DIE` and
         // returns an `assumed_hit_die` warning; the class line below prints
         // `null` and the page says the die is not recorded.
-        hit_die: sqlNullableInteger(row, 'hit_die'),
+        hit_die: row.hit_die,
         saving_throws: this.db
-          .all<Row>(
+          .all(
             `SELECT ability FROM class_saving_throw_proficiencies
              WHERE class_definition_id = ? ORDER BY ability`,
             [classDefinitionId],
+            (entry) => sqlString(entry, 'ability'),
           )
-          .map((entry) => sqlString(entry, 'ability'))
           .filter((ability): ability is Ability =>
             isEnumValue(abilities, ability),
           ),
@@ -578,30 +648,34 @@ export class CharacterSheetBuilder {
     readonly list: readonly SheetHitPointRoll[];
   } {
     const owned = new Set(
-      this.db
-        .all<Row>(
-          `SELECT definition.name AS class_name
-           FROM character_class_levels AS level
-           JOIN class_definitions AS definition
-             ON definition.id = level.class_definition_id
-           WHERE level.character_id = ?`,
-          [characterId],
-        )
-        .map((row) => sqlString(row, 'class_name')),
+      this.db.all(
+        `SELECT definition.name AS class_name
+         FROM character_class_levels AS level
+         JOIN class_definitions AS definition
+           ON definition.id = level.class_definition_id
+         WHERE level.character_id = ?`,
+        [characterId],
+        (row) => sqlString(row, 'class_name'),
+      ),
     );
-    const rows = this.db.all<Row>(
+    const rows = this.db.all(
       `SELECT class_name, class_level, rolled_value
        FROM character_hit_point_rolls
        WHERE character_id = ?
        ORDER BY class_name, class_level`,
       [characterId],
+      (row) => ({
+        class_name: sqlString(row, 'class_name'),
+        class_level: sqlInteger(row, 'class_level'),
+        rolled_value: sqlInteger(row, 'rolled_value'),
+      }),
     );
     const map = new Map<string, Map<number, number>>();
     const list: SheetHitPointRoll[] = [];
     for (const row of rows) {
-      const className = sqlString(row, 'class_name');
-      const level = sqlInteger(row, 'class_level');
-      const value = sqlInteger(row, 'rolled_value');
+      const className = row.class_name;
+      const level = row.class_level;
+      const value = row.rolled_value;
       let perClass = map.get(className);
       if (perClass === undefined) {
         perClass = new Map<number, number>();
@@ -621,12 +695,12 @@ export class CharacterSheetBuilder {
   #skillProficiencies(characterId: number): ReadonlySet<Skill> {
     return new Set(
       this.db
-        .all<Row>(
+        .all(
           `SELECT skill FROM character_skill_proficiencies
            WHERE character_id = ? ORDER BY skill`,
           [characterId],
+          (row) => sqlString(row, 'skill'),
         )
-        .map((row) => sqlString(row, 'skill'))
         .filter((skill): skill is Skill => isEnumValue(skills, skill)),
     );
   }
@@ -636,12 +710,14 @@ export class CharacterSheetBuilder {
     readonly warnings: readonly SheetWarning[];
   } {
     const warnings: SheetWarning[] = [];
-    const rows = this.db
-      .all<Row>(
-        `SELECT * FROM character_armor WHERE character_id = ? ORDER BY slot`,
-        [characterId],
-      )
-      .map((row): SheetArmorRow => {
+    const rows = this.db.all(
+      `SELECT * FROM character_armor WHERE character_id = ? ORDER BY slot`,
+      [characterId],
+      // The decoder was already written — it was just standing one method call
+      // to the right, as `.map`. In the codec slot it runs on the same rows and
+      // the same closure still collects `warnings`, but the raw row now has no
+      // name outside it.
+      (row): SheetArmorRow => {
         const name = sqlString(row, 'name');
         const note = (column: string) =>
           (rejected: string, substituted: string) => {
@@ -674,7 +750,8 @@ export class CharacterSheetBuilder {
           stealth_disadvantage: sqlBoolean(row, 'stealth_disadvantage'),
           notes: sqlNullableString(row, 'notes'),
         };
-      });
+      },
+    );
     return { rows, warnings };
   }
 
@@ -682,20 +759,19 @@ export class CharacterSheetBuilder {
     readonly value: number;
     readonly note: string | null;
   } {
-    const row = this.db.one<Row>(
+    const row = this.db.one(
       `SELECT armor_class_adjustment, armor_class_adjustment_note
        FROM character_sheet_adjustments WHERE character_id = ?`,
       [characterId],
+      (stored) => ({
+        value: sqlInteger(stored, 'armor_class_adjustment'),
+        note: sqlNullableString(stored, 'armor_class_adjustment_note'),
+      }),
     );
     // NO ROW MEANS ZERO, which is the same thing a stored 0 with no note would
     // mean — and the write command deletes the row in that case precisely so
     // there is only one representation to read.
-    return row === null
-      ? { value: 0, note: null }
-      : {
-          value: sqlInteger(row, 'armor_class_adjustment'),
-          note: sqlNullableString(row, 'armor_class_adjustment_note'),
-        };
+    return row ?? { value: 0, note: null };
   }
 }
 

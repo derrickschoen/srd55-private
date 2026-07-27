@@ -3,7 +3,9 @@ import type { RowCodec, SqlRow } from './codecs';
 import {
   execute,
   queryAll,
+  queryAllRaw,
   queryOne,
+  queryOneRaw,
   queryScalar,
   type ExecuteResult,
   type QueryBindings,
@@ -46,20 +48,37 @@ export class DatabaseContext {
     return execute(this.connection, sql, bind);
   }
 
-  all<T = SqlRow>(
+  /**
+   * Read rows THROUGH a codec. All three parameters are required: pass
+   * `undefined` for `bind` when there is nothing to bind. Dropping the codec is
+   * a compile error (`TS2554`), never a silent `SqlRow` — proved from the type
+   * side by `tests/types/codec-required.type-test.ts`.
+   *
+   * For a genuinely raw read, use `allRaw`, which says so in its name.
+   */
+  all<T>(
     sql: string,
-    bind?: QueryBindings,
-    codec?: RowCodec<T>,
+    bind: QueryBindings | undefined,
+    codec: RowCodec<T>,
   ): T[] {
     return queryAll(this.connection, sql, bind, codec);
   }
 
-  one<T = SqlRow>(
+  one<T>(
     sql: string,
-    bind?: QueryBindings,
-    codec?: RowCodec<T>,
+    bind: QueryBindings | undefined,
+    codec: RowCodec<T>,
   ): T | null {
     return queryOne(this.connection, sql, bind, codec);
+  }
+
+  /** Undecoded rows, for runtime-shaped queries and storage-level assertions. */
+  allRaw(sql: string, bind?: QueryBindings): SqlRow[] {
+    return queryAllRaw(this.connection, sql, bind);
+  }
+
+  oneRaw(sql: string, bind?: QueryBindings): SqlRow | null {
+    return queryOneRaw(this.connection, sql, bind);
   }
 
   scalar<T extends SqlValue = SqlValue>(

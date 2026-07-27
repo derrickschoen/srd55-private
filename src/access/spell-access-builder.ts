@@ -509,10 +509,17 @@ export class SpellAccessBuilder {
        WHERE character_id = ? AND state = 'active'
        ORDER BY id`,
       [characterId],
+      (row) => ({
+        id: sqlInteger(row, 'id'),
+        display_name: sqlString(row, 'display_name'),
+        source_type: sqlString(row, 'source_type'),
+        source_definition_id: sqlNullableInteger(row, 'source_definition_id'),
+        config: sqlNullableString(row, 'config'),
+      }),
     );
     const capabilities: RitualCapability[] = [];
     for (const source of sources) {
-      const sourceId = sqlInteger(source, 'id');
+      const sourceId = source.id;
       for (const rule of this.#rules.activeRulesForSource(sourceId)) {
         const data = rule.toObject();
         if (
@@ -526,14 +533,11 @@ export class SpellAccessBuilder {
         }
         capabilities.push({
           source_instance_id: sourceId,
-          source_name: sqlString(source, 'display_name'),
+          source_name: source.display_name,
           spellcasting_ability: this.spellcastingAbility({
-            sourceType: sqlString(source, 'source_type'),
-            sourceDefinitionId: sqlNullableInteger(
-              source,
-              'source_definition_id',
-            ),
-            config: sqlNullableString(source, 'config'),
+            sourceType: source.source_type,
+            sourceDefinitionId: source.source_definition_id,
+            config: source.config,
           }),
         });
       }

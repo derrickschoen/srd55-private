@@ -6,6 +6,7 @@ import {
   UnassignedSpellSlot,
   UserSpellSelection,
 } from '../../src/access/spell-slot-assignment';
+import { sqlNullableInteger, sqlString } from '../../src/db/codecs';
 import { DatabaseContext } from '../../src/db/database';
 import { BuildReportBuilder } from '../../src/reports/build-report-builder';
 import { seedClassProgressions } from '../../src/rules/class-progression-lookup';
@@ -69,19 +70,31 @@ describe('PHP Unit cross-slice parity', () => {
       );
     }
 
-    const stored = db.all<{
-      slot_key: string;
-      bucket: string;
-      eligibility_kind: string;
-      fixed_spell_version_id: number | null;
-      current_spell_version_id: number | null;
-    }>(
+    // The five columns were asserted as a type param before, which claimed the
+    // shape without checking a single value. The codec CHECKS it — and it is the
+    // assertion below that then means something, because a stored TEXT `'1'` in
+    // `fixed_spell_version_id` would now be refused at the read rather than
+    // compared to a number and quietly passing.
+    const stored = db.all(
       `SELECT slot_key, bucket, eligibility_kind,
               fixed_spell_version_id, current_spell_version_id
        FROM spell_selection_slots
        WHERE character_id = ?
        ORDER BY slot_key`,
       [characterId],
+      (row) => ({
+        slot_key: sqlString(row, 'slot_key'),
+        bucket: sqlString(row, 'bucket'),
+        eligibility_kind: sqlString(row, 'eligibility_kind'),
+        fixed_spell_version_id: sqlNullableInteger(
+          row,
+          'fixed_spell_version_id',
+        ),
+        current_spell_version_id: sqlNullableInteger(
+          row,
+          'current_spell_version_id',
+        ),
+      }),
     );
     expect(stored).toEqual([
       {
@@ -121,7 +134,7 @@ describe('PHP Unit cross-slice parity', () => {
       [null, spellIds[0], spellIds[1]],
     );
     expect(
-      db.all(
+      db.allRaw(
         `SELECT slot_key, bucket, eligibility_kind,
                 fixed_spell_version_id, current_spell_version_id
          FROM spell_selection_slots
@@ -160,7 +173,7 @@ describe('PHP Unit cross-slice parity', () => {
       );
     }
 
-    const stored = db.all(
+    const stored = db.allRaw(
       `SELECT class.name, level.level, class.progression_type
        FROM character_class_levels AS level
        INNER JOIN class_definitions AS class
@@ -217,7 +230,7 @@ describe('PHP Unit cross-slice parity', () => {
       { name: 'Wizard', maximum: 1 },
     ]);
     expect(
-      db.all(
+      db.allRaw(
         `SELECT class.name, level.level, class.progression_type
          FROM character_class_levels AS level
          INNER JOIN class_definitions AS class

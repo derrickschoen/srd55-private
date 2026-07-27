@@ -114,7 +114,7 @@ describe('the homebrew catalog fixture imports through the existing path', () =>
     await importCatalog(rpc, { documents: [TIER1], textDocuments: [TIER2] });
 
     expect(
-      rpc.context.db.all(
+      rpc.context.db.allRaw(
         `SELECT content_key, display_name, level, school, action_type,
                 concentration, ritual, healing, effect_reliability_category
          FROM spell_versions ORDER BY content_key`,
@@ -189,7 +189,7 @@ describe('the homebrew catalog fixture imports through the existing path', () =>
 
     expect(
       rpc.context.db
-        .all(
+        .allRaw(
           `SELECT DISTINCT spell_list_key FROM spell_list_memberships
            ORDER BY spell_list_key`,
         )
@@ -199,7 +199,7 @@ describe('the homebrew catalog fixture imports through the existing path', () =>
     // The importer adds implicit tags of its own on top of the fixture's.
     expect(
       rpc.context.db
-        .all('SELECT DISTINCT tag FROM spell_version_tags ORDER BY tag')
+        .allRaw('SELECT DISTINCT tag FROM spell_version_tags ORDER BY tag')
         .map((row) => row.tag),
     ).toEqual(['concentration', 'ritual', 'travel']);
   });
@@ -301,7 +301,7 @@ describe('the College of the Long Road imports and reaches the sheet', () => {
 
     const db = rpc.context.db;
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT content_key, name, rules_edition, class_definition_id,
                 spellcasting_ability, caster_fraction, caster_rounding,
                 grant_rules
@@ -327,7 +327,7 @@ describe('the College of the Long Road imports and reaches the sheet', () => {
     // Every feature column, in printed order. `sort_order` is the ARRAY INDEX
     // and is not authored in the document at all — this is where that is proved.
     expect(
-      db.all(
+      db.allRaw(
         `SELECT sort_order, class_level, name, description,
                 effect_kind, effect_attack_count, effect_weapon_scope
          FROM subclass_features
@@ -395,7 +395,7 @@ describe('the College of the Long Road imports and reaches the sheet', () => {
       .toHaveLength(5);
 
     const dumped = JSON.stringify(
-      rpc.context.db.all('SELECT * FROM subclass_definitions'),
+      rpc.context.db.allRaw('SELECT * FROM subclass_definitions'),
     );
     expect(dumped).not.toContain('_whatThisIs');
     expect(dumped).not.toContain('The Long Road Companion');
@@ -432,7 +432,7 @@ describe('the College of the Long Road imports and reaches the sheet', () => {
     });
     expect(
       rpc.context.db
-        .all(
+        .allRaw(
           `SELECT name FROM subclass_features
            WHERE subclass_definition_id = ?
            ORDER BY sort_order`,
@@ -519,7 +519,7 @@ describe('the College of the Long Road imports and reaches the sheet', () => {
     // written down. Read straight out of the database, over the seed and the
     // import together.
     const owners = rpc.context.db
-      .all('SELECT content_key FROM subclass_definitions ORDER BY content_key')
+      .allRaw('SELECT content_key FROM subclass_definitions ORDER BY content_key')
       .map((row) => [
         String(row.content_key),
         importedContentKeyOwner(String(row.content_key)),
@@ -573,7 +573,7 @@ describe('the College of the Long Road imports and reaches the sheet', () => {
 
     // Neither attempt touched the seeded row.
     expect(
-      rpc.context.db.one(
+      rpc.context.db.oneRaw(
         `SELECT name, spellcasting_ability FROM subclass_definitions
          WHERE content_key = '2024:subclass:eldritch-knight'`,
       ),
@@ -754,7 +754,7 @@ describe('the frozen pre-subclass document still imports unchanged', () => {
     });
 
     expect(
-      rpc.context.db.all(
+      rpc.context.db.allRaw(
         `SELECT content_key, healing, effect_reliability_category
          FROM spell_versions ORDER BY content_key`,
       ),
@@ -776,7 +776,7 @@ describe('the frozen pre-subclass document still imports unchanged', () => {
     // scraper's `_provenance` stamp is. That tolerance is what makes an OLD
     // document survive a NEW build, and it runs in both directions.
     expect(
-      JSON.stringify(rpc.context.db.all('SELECT * FROM spell_versions')),
+      JSON.stringify(rpc.context.db.allRaw('SELECT * FROM spell_versions')),
     ).not.toContain('_writtenBy');
   });
 

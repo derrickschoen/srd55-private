@@ -108,7 +108,7 @@ describe('typed query RPC integration', () => {
     }
     const characterId = created.result.id;
     expect(
-      harness.context.db.one(
+      harness.context.db.oneRaw(
         `SELECT name, strength, revision
          FROM characters WHERE id = ?`,
         [characterId],
@@ -142,7 +142,7 @@ describe('typed query RPC integration', () => {
       result: { id: characterId, deleted: true },
     });
     expect(
-      harness.context.db.one(
+      harness.context.db.oneRaw(
         'SELECT id FROM characters WHERE id = ?',
         [characterId],
       ),
@@ -314,7 +314,7 @@ describe('typed query RPC integration', () => {
       expect(() => JSON.stringify(response)).not.toThrow();
     }
     expect(
-      harness.context.db.one(
+      harness.context.db.oneRaw(
         `SELECT current_spell_version_id, selection_eligibility
          FROM spell_selection_slots WHERE id = ?`,
         [slotId],
@@ -358,7 +358,7 @@ describe('typed query RPC integration', () => {
       },
     });
     expect(
-      harness.context.db.one(
+      harness.context.db.oneRaw(
         `SELECT character_id, label, schema_version
          FROM character_save_points WHERE character_id = ?`,
         [characterId],
@@ -449,7 +449,7 @@ describe('typed query RPC integration', () => {
       descriptions_loaded: 0,
     });
     expect(
-      harness.context.db.one(
+      harness.context.db.oneRaw(
         `SELECT content_key, display_name, is_active
          FROM spell_versions
          WHERE content_key = '2024:q60-client-spell'`,
@@ -483,7 +483,7 @@ describe('typed query RPC integration', () => {
       },
     ]);
     expect(
-      harness.context.db.one(
+      harness.context.db.oneRaw(
         `SELECT name, strength, revision
          FROM characters
          WHERE id = ?`,
@@ -499,7 +499,7 @@ describe('typed query RPC integration', () => {
       deleted: true,
     });
     expect(
-      harness.context.db.one(
+      harness.context.db.oneRaw(
         'SELECT id FROM characters WHERE id = ?',
         [character.id],
       ),

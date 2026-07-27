@@ -244,22 +244,22 @@ describe('persisted spell access routes', () => {
     versions: unknown[];
   } {
     return {
-      slots: db.all(
+      slots: db.allRaw(
         `SELECT * FROM spell_selection_slots
          WHERE character_id = ? ORDER BY id`,
         [characterId],
       ),
-      sources: db.all(
+      sources: db.allRaw(
         `SELECT * FROM character_source_instances
          WHERE character_id = ? ORDER BY id`,
         [characterId],
       ),
-      entries: db.all(
+      entries: db.allRaw(
         `SELECT * FROM wizard_spellbook_entries
          WHERE character_id = ? ORDER BY id`,
         [characterId],
       ),
-      versions: db.all(
+      versions: db.allRaw(
         `SELECT version.*
          FROM spell_versions AS version
          WHERE version.id IN (
@@ -530,7 +530,7 @@ describe('persisted spell access routes', () => {
       }),
     ]);
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT source.source_type, source.source_definition_id,
                 subclass.spellcasting_ability,
                 character.proficiency_bonus_override
@@ -605,7 +605,7 @@ describe('persisted spell access routes', () => {
       builder.buildForCharacter(characterId).map((route) => route.slot_id),
     ).toEqual([overrideId]);
     expect(
-      db.all(
+      db.allRaw(
         `SELECT id, state, selection_eligibility
          FROM spell_selection_slots
          WHERE character_id = ? ORDER BY id`,
@@ -635,13 +635,13 @@ describe('persisted spell access routes', () => {
 
     expect(builder.buildForCharacter(characterId)).toEqual([]);
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT is_active FROM spell_versions WHERE id = ?`,
         [versionId],
       ),
     ).toEqual({ is_active: 0 });
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT current_spell_version_id, state, selection_eligibility
          FROM spell_selection_slots WHERE id = ?`,
         [overrideId],

@@ -106,7 +106,7 @@ function spell(
 }
 
 function storedEligibility(context: DatabaseContext, slotId: number) {
-  return context.one(
+  return context.oneRaw(
     `SELECT current_spell_version_id, selection_eligibility,
             selection_invalid_reason
      FROM spell_selection_slots

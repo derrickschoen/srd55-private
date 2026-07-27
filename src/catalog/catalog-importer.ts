@@ -3,8 +3,11 @@ import {
   encodeBoolean,
   sqlBoolean,
   sqlInteger,
+  sqlNullableInteger,
+  sqlNullableString,
   sqlString,
-  type SqlRow,
+  rowId,
+  type RowCodec,
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import { SpellSelectionEligibility } from '../eligibility/spell-selection-eligibility';
@@ -23,6 +26,43 @@ import {
   importSubclassRecords,
   type SubclassImportCounters,
 } from './subclass-importer';
+
+/** The identity a spell version hangs off, in the three ways it is found. */
+const spellIdentity: RowCodec<{
+  readonly id: number;
+  readonly content_key: string;
+  readonly canonical_name: string;
+}> = (row) => ({
+  id: sqlInteger(row, 'id'),
+  content_key: sqlString(row, 'content_key'),
+  canonical_name: sqlString(row, 'canonical_name'),
+});
+
+/**
+ * `source_page` is a NULLABLE INTEGER and `source_reference` a NULLABLE TEXT —
+ * `db/schema/catalog-spells.ts:223-224`, and `CatalogPublication.sourcePage` is
+ * `number | null` to match. A book with no page number is a normal record, not a
+ * broken one.
+ *
+ * Worth recording: the first draft of this codec typed `source_page` as a
+ * string, and three integration tests failed with
+ * `Column "source_page" must be a string; received 14.` The old codec-less read
+ * would have carried the number through untouched and compared it to a number
+ * anyway — so nothing would have broken, and nothing would have been checked
+ * either. The codec is the only reason the wrong assumption was ever said out
+ * loud.
+ */
+const spellPublication: RowCodec<{
+  readonly id: number;
+  readonly source_book: string;
+  readonly source_page: number | null;
+  readonly source_reference: string | null;
+}> = (row) => ({
+  id: sqlInteger(row, 'id'),
+  source_book: sqlString(row, 'source_book'),
+  source_page: sqlNullableInteger(row, 'source_page'),
+  source_reference: sqlNullableString(row, 'source_reference'),
+});
 
 export interface CatalogImportSummary {
   created: number;
@@ -174,7 +214,11 @@ export class CatalogImporter {
     for (const record of records) {
       const identityId = this.#resolveIdentity(record, summary);
       seenVersionKeys.push(record.versionKey);
-      const version = this.db.one(
+      // RAW on purpose: the loop below compares `version[column]` against
+      // `attributes`, whose keys are whatever `#versionAttributes` produced for
+      // THIS record. Decoding to a fixed shape would close the column set that
+      // the comparison exists to keep open.
+      const version = this.db.oneRaw(
         'SELECT * FROM spell_versions WHERE content_key = ?',
         [record.versionKey],
       );
@@ -312,9 +356,9 @@ export class CatalogImporter {
              : `AND content_key NOT IN (${placeholders(seenVersionKeys)})`
          }`,
           seenVersionKeys.length === 0 ? undefined : seenVersionKeys,
+          rowId,
         );
-    for (const version of tombstones) {
-      const versionId = sqlInteger(version, 'id');
+    for (const versionId of tombstones) {
       this.db.exec(
         `UPDATE spell_versions
          SET is_active = 0, updated_at = ?
@@ -339,6 +383,7 @@ export class CatalogImporter {
        FROM spell_identities
        WHERE content_key = ?`,
       [record.identityKey],
+      spellIdentity,
     );
     identity ??= this.db.one(
       `SELECT id, content_key, canonical_name
@@ -347,6 +392,7 @@ export class CatalogImporter {
        ORDER BY id
        LIMIT 1`,
       [normalizedName],
+      spellIdentity,
     );
     identity ??= this.db.one(
       `SELECT identity.id, identity.content_key, identity.canonical_name
@@ -356,6 +402,7 @@ export class CatalogImporter {
        WHERE alias.normalized_alias = ?
        LIMIT 1`,
       [normalizedName],
+      spellIdentity,
     );
 
     if (identity === null) {
@@ -377,9 +424,9 @@ export class CatalogImporter {
       return identityId;
     }
 
-    const identityId = sqlInteger(identity, 'id');
-    const currentName = sqlString(identity, 'canonical_name');
-    const currentKey = sqlString(identity, 'content_key');
+    const identityId = identity.id;
+    const currentName = identity.canonical_name;
+    const currentKey = identity.content_key;
     if (
       currentName !== record.canonicalName ||
       currentKey.startsWith('placeholder:')
@@ -495,10 +542,9 @@ export class CatalogImporter {
        FROM spell_version_publications
        WHERE spell_version_id = ?`,
       [versionId],
+      spellPublication,
     );
-    const byBook = new Map(
-      existing.map((row) => [sqlString(row, 'source_book'), row]),
-    );
+    const byBook = new Map(existing.map((row) => [row.source_book, row]));
     let changed = false;
     for (const publication of desired) {
       const row = byBook.get(publication.sourceBook);
@@ -534,7 +580,7 @@ export class CatalogImporter {
             publication.sourcePage,
             publication.sourceReference,
             timestamp(),
-            sqlInteger(row, 'id'),
+            row.id,
           ],
         );
         changed = true;
@@ -573,14 +619,16 @@ export class CatalogImporter {
     timestamps = false,
   ): boolean {
     const desired = [...new Set(desiredValues)].sort();
+    // The COLUMN is chosen at runtime, but the codec still decodes: it closes
+    // over `column` rather than handing the caller a raw row to index.
     const existing = this.db
       .all(
         `SELECT ${column}
          FROM ${table}
          WHERE spell_version_id = ?`,
         [versionId],
+        (row) => sqlString(row, column),
       )
-      .map((row) => sqlString(row, column))
       .sort();
     if (sameValues(existing, desired)) {
       return false;
@@ -621,16 +669,17 @@ export class CatalogImporter {
     if (uniqueIds.length === 0) {
       return;
     }
-    const slots = this.db.all<SqlRow>(
+    const slots = this.db.all(
       `SELECT id
        FROM spell_selection_slots
        WHERE fixed_spell_version_id IN (${placeholders(uniqueIds)})
           OR current_spell_version_id IN (${placeholders(uniqueIds)})
        ORDER BY id`,
       [...uniqueIds, ...uniqueIds],
+      rowId,
     );
-    for (const slot of slots) {
-      this.#eligibility.refresh(sqlInteger(slot, 'id'));
+    for (const slotId of slots) {
+      this.#eligibility.refresh(slotId);
     }
   }
 }
