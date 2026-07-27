@@ -59,6 +59,9 @@ interface PrintableSpellOptions {
   readonly saveAbilities?: readonly string[];
   readonly tags?: readonly string[];
   readonly lists?: readonly string[];
+  readonly upcastScale?: 'slot_level' | 'character_level';
+  readonly upcastLevels?: readonly number[];
+  readonly upcastSummary?: string | null;
 }
 
 let fixtureSequence = 0;
@@ -122,6 +125,23 @@ function createPrintableSpell(
       `INSERT INTO spell_version_tags (spell_version_id, tag)
        VALUES (?, ?)`,
       [spellId, tag],
+    );
+  }
+  if (options.upcastScale !== undefined || options.upcastSummary !== undefined) {
+    db.exec(
+      'UPDATE spell_versions SET upcast_scale = ?, upcast_summary = ? WHERE id = ?',
+      [
+        options.upcastScale ?? null,
+        options.upcastSummary ?? null,
+        spellId,
+      ],
+    );
+  }
+  for (const level of options.upcastLevels ?? []) {
+    db.exec(
+      `INSERT INTO spell_version_upcast_levels (spell_version_id, level)
+       VALUES (?, ?)`,
+      [spellId, level],
     );
   }
   for (const list of options.lists ?? []) {
@@ -226,6 +246,14 @@ export function createPrintableListFixture(
     summary: 'Bolster three creatures.',
     tags: ['concentration'],
     lists: ['Cleric'],
+    // THE UPCAST PROGRESSION, on ONE spell of the five. The other four carry
+    // none, which is what makes the printable card's "print no line at all"
+    // behaviour observable rather than merely stated: a card that printed
+    // `Upcast: —` for a spell whose document said nothing would be asserting
+    // that it cannot be upcast.
+    upcastScale: 'slot_level',
+    upcastLevels: [3, 2, 4],
+    upcastSummary: 'One additional creature per slot level above 2.',
   });
   const guidance = createPrintableSpell(db, 'Guidance', {
     level: 0,

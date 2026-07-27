@@ -656,10 +656,10 @@ export const armor_templates = sqliteTable(
      */
     check(
       'armor_templates_dex_bonus_max_check',
-      sql`(\`dex_bonus\` = 'capped') = (\`dex_bonus_max\` IS NOT NULL) AND (${nullOrIntegerAtLeast(
+      sql`(\`dex_bonus\` = 'capped') = (\`dex_bonus_max\` IS NOT NULL) AND ${nullOrIntegerAtLeast(
         'dex_bonus_max',
         0,
-      )})`,
+      )}`,
     ),
     /**
      * A Shield contributes a bonus and never a Dexterity term; the source's

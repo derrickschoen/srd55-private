@@ -6,10 +6,13 @@ import {
   type SqlRow,
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
-import type {
-  Ability,
-  CastingMode,
-  RulesEdition,
+import {
+  isEnumValue,
+  upcastScales,
+  type Ability,
+  type CastingMode,
+  type RulesEdition,
+  type UpcastScale,
 } from '../domain/enums';
 import { SpellAccessBuilder, type SpellAccessRoute } from '../access/spell-access-builder';
 import {
@@ -43,6 +46,23 @@ export interface PrintableSpell {
   readonly concentration: boolean;
   readonly ritual: boolean;
   readonly components: string | null;
+  /**
+   * THE UPCAST PROGRESSION — the one structured value in this change that puts
+   * information on the card a player did not already have.
+   *
+   * The parsed range and material cost deliberately do NOT appear beside their
+   * printed lines: those lines already say the same thing in the words the
+   * author chose, and a second rendering of them would be D26 structure for its
+   * own sake. Nothing has ever printed an upcast progression, because until now
+   * nothing has ever STORED one.
+   *
+   * `upcast_levels` is EMPTY when the catalog document did not say, which is
+   * not the same as "this spell cannot be upcast" — the card prints nothing at
+   * all in that case rather than asserting either.
+   */
+  readonly upcast_scale: UpcastScale | null;
+  readonly upcast_levels: number[];
+  readonly upcast_summary: string | null;
   readonly attack_modes: string[];
   readonly save_abilities: string[];
   readonly casting_mode: CastingMode;
@@ -92,6 +112,9 @@ interface SpellFacts {
   readonly ritual: boolean;
   readonly components: string | null;
   readonly description: string | null;
+  readonly upcast_scale: UpcastScale | null;
+  readonly upcast_levels: number[];
+  readonly upcast_summary: string | null;
   readonly attack_modes: string[];
   readonly save_abilities: string[];
 }
@@ -130,9 +153,30 @@ function actionType(castingTime: string | null): string | null {
   return null;
 }
 
+/**
+ * THE STORED SCALE, VALIDATED RATHER THAN CAST.
+ *
+ * `scaleWord` in `src/ui/screens/print/printable-list.ts` is an exhaustive
+ * switch with NO `default` arm, so a value outside the vocabulary falls through
+ * it and returns `undefined` — which `upcastLine` interpolates, putting the
+ * literal word `undefined` on a player's printed card. A cast cannot fail, so
+ * casting here is what routes a corrupt value into that hole.
+ *
+ * IT IS REACHABLE FOR THE REASON F11 GAVE: `spell_versions.upcast_scale` has a
+ * CHECK, and a CHECK constrains no image created before it existed and no
+ * hand-edited one. `decodeSpellRange` and `decodeSpellComponents` are tolerant
+ * on exactly that argument; this is the same boundary and it now answers the
+ * same way — an unreadable scale is NO scale, which prints the bare word
+ * `levels` and claims neither ladder.
+ */
+function decodeUpcastScale(row: SqlRow): UpcastScale | null {
+  const stored = sqlNullableString(row, 'upcast_scale');
+  return stored !== null && isEnumValue(upcastScales, stored) ? stored : null;
+}
+
 function decodeFacts(row: SqlRow): Omit<
   SpellFacts,
-  'attack_modes' | 'save_abilities'
+  'attack_modes' | 'save_abilities' | 'upcast_levels'
 > {
   const castingTime = sqlNullableString(row, 'casting_time');
   return {
@@ -150,6 +194,8 @@ function decodeFacts(row: SqlRow): Omit<
     ritual: sqlBoolean(row, 'ritual'),
     components: sqlNullableString(row, 'components'),
     description: sqlNullableString(row, 'short_summary'),
+    upcast_scale: decodeUpcastScale(row),
+    upcast_summary: sqlNullableString(row, 'upcast_summary'),
   };
 }
 
@@ -374,12 +420,13 @@ export class PrintableSpellListBuilder {
       'tag',
       bindings,
     );
+    const upcastLevels = this.groupedUpcastLevels(bindings);
     const facts = new Map<number, SpellFacts>();
 
     for (const row of this.db.all(
       `SELECT id, display_name, rules_edition, level, school,
               casting_time, action_type, range, duration, concentration,
-              ritual, components, short_summary
+              ritual, components, short_summary, upcast_scale, upcast_summary
        FROM spell_versions
        WHERE id IN (${inList})
        ORDER BY id`,
@@ -396,9 +443,44 @@ export class PrintableSpellListBuilder {
         ritual: base.ritual || versionTags.includes('ritual'),
         attack_modes: attackModes.get(base.spell_version_id) ?? [],
         save_abilities: saveAbilities.get(base.spell_version_id) ?? [],
+        upcast_levels: upcastLevels.get(base.spell_version_id) ?? [],
       });
     }
     return facts;
+  }
+
+  /**
+   * The upcast levels for every spell in one query, ASCENDING.
+   *
+   * SEPARATE FROM `groupedStrings` FOR THE REASON `#syncUpcastLevels` IS
+   * SEPARATE FROM `#syncSimplePivot` ONE MODULE OVER: that helper's `ORDER BY`
+   * is over a TEXT column, and ordering levels as text puts `11` before `2`. A
+   * list of levels printed `2, 11, 17` and one printed `11, 17, 2` are the same
+   * set and only one of them is readable.
+   */
+  private groupedUpcastLevels(
+    versionIds: readonly number[],
+  ): Map<number, number[]> {
+    const grouped = new Map<number, number[]>();
+    for (const row of this.db.all(
+      `SELECT spell_version_id, level
+       FROM spell_version_upcast_levels
+       WHERE spell_version_id IN (${placeholders(versionIds)})
+       ORDER BY spell_version_id, level`,
+      [...versionIds],
+      (stored) => ({
+        spell_version_id: sqlInteger(stored, 'spell_version_id'),
+        level: sqlInteger(stored, 'level'),
+      }),
+    )) {
+      const levels = grouped.get(row.spell_version_id);
+      if (levels === undefined) {
+        grouped.set(row.spell_version_id, [row.level]);
+      } else {
+        levels.push(row.level);
+      }
+    }
+    return grouped;
   }
 
   private groupedStrings(

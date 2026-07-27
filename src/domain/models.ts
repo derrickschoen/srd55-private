@@ -2,11 +2,15 @@ import type {
   Ability,
   DomainSourceType,
   EffectReliabilityCategory,
+  MaterialCostKind,
   ProgressionType,
   RulesEdition,
   SelectionEligibility,
   SlotBucket,
   SlotState,
+  SpellAreaShape,
+  SpellRangeKind,
+  UpcastScale,
 } from './enums';
 
 export type JsonPrimitive = string | number | boolean | null;
@@ -50,13 +54,32 @@ export interface SpellVersionRow extends TimestampedRow {
   concentration: boolean;
   casting_time: string | null;
   action_type: string | null;
+  /** The printed Range line, verbatim. See `src/domain/spell-range.ts`. */
   range: string | null;
   duration: string | null;
-  components: JsonValue | null;
+  /**
+   * The printed Components line, verbatim.
+   *
+   * `string | null` AND NOT `JsonValue | null`. This field said `JsonValue`
+   * while the column was declared `VARCHAR` and the importer wrote an opaque
+   * string into it, and the contradiction was live for long enough that
+   * `src/queries/catalog-queries.ts` carried an `Omit<SpellVersionRow,
+   * 'components'>` whose only job was to say `string | null` again. The DDL and
+   * the writer agreed with each other and this type disagreed with both; it now
+   * follows the writer, and the `Omit` is gone.
+   */
+  components: string | null;
+  /** What is inside `M (…)`. See `src/domain/spell-components.ts`. */
   material_component_summary: string | null;
+  material_cost_copper: number | null;
+  material_cost_kind: MaterialCostKind | null;
+  range_kind: SpellRangeKind | null;
+  range_feet: number | null;
+  area_shape: SpellAreaShape | null;
+  area_feet: number | null;
   healing: boolean;
   short_summary: string | null;
-  upcast_type: string | null;
+  upcast_scale: UpcastScale | null;
   upcast_summary: string | null;
   requires_mod_for_effect: boolean;
   effect_reliability_category: EffectReliabilityCategory;

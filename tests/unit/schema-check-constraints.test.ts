@@ -556,6 +556,89 @@ const backgroundTemplate =
     });
   };
 
+function newBackgroundTemplate(db: Database, values: Values = {}): number {
+  return insert(db, 'background_templates', {
+    content_key: uid('background'),
+    name: uid('Background'),
+    ability_score_1: 'Strength',
+    ability_score_2: 'Dexterity',
+    ability_score_3: 'Constitution',
+    feat_name: 'Savage Attacker',
+    skill_proficiency_1: 'Athletics',
+    skill_proficiency_2: 'Intimidation',
+    tool_proficiency: "Thieves' Tools",
+    equipment_option_a: 'Spear, Shortbow, 14 GP',
+    equipment_option_b: '50 GP',
+    ...values,
+  });
+}
+
+function newWeaponTemplate(db: Database, values: Values = {}): number {
+  return insert(db, 'weapon_templates', {
+    content_key: uid('weapon'),
+    name: uid('Weapon'),
+    srd_group: 'simple_melee',
+    damage_dice: '1d6',
+    damage_type: 'Slashing',
+    mastery_property: 'Sap',
+    ...values,
+  });
+}
+
+function newArmorTemplate(db: Database, values: Values = {}): number {
+  return insert(db, 'armor_templates', {
+    content_key: uid('armor'),
+    name: uid('Armor'),
+    category: 'medium',
+    armor_class: 14,
+    dex_bonus: 'capped',
+    dex_bonus_max: 2,
+    ...values,
+  });
+}
+
+/**
+ * ONE EQUIPMENT LINE. The default is a `gear` line, because that is the
+ * majority case in all four licensed packages and because it carries NO
+ * payload — so a case about the payload CHECK can only fail on the value it
+ * puts there.
+ *
+ * `weapon_template_id` and `armor_template_id` are given as the STRING
+ * sentinels `'@weapon'` and `'@armor'`, substituted here for a freshly-minted
+ * row's id. A literal id cannot be written into the table below, because these
+ * writers run before any database exists.
+ */
+const equipmentItem =
+  (values: Values): Write =>
+  (db) => {
+    const resolved: Record<string, SqlValue> = { ...values };
+    if (resolved.weapon_template_id === '@weapon') {
+      resolved.weapon_template_id = newWeaponTemplate(db);
+    }
+    if (resolved.armor_template_id === '@armor') {
+      resolved.armor_template_id = newArmorTemplate(db);
+    }
+    insert(db, 'background_equipment_items', {
+      background_template_id: newBackgroundTemplate(db),
+      option: 'a',
+      sort_order: 1,
+      quantity: 1,
+      item_name: uid('Item'),
+      item_kind: 'gear',
+      ...resolved,
+    });
+  };
+
+const upcastLevel =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'spell_version_upcast_levels', {
+      spell_version_id: newSpellVersion(db),
+      level: 3,
+      ...values,
+    });
+  };
+
 const speciesTemplateTrait =
   (values: Values): Write =>
   (db) => {
@@ -863,6 +946,222 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
       // is the accept whose absence would make the reject above a demand the
       // application cannot satisfy.
       ['the placeholder upgrade the importer performs, level and provenance together', spellVersionEdit({ level: -1, provenance: 'placeholder' }, { level: 3, provenance: 'import' })],
+    ],
+  },
+  /* ======================================================================
+   * THE STRUCTURED SPELL VALUES.
+   *
+   * The four range constraints are the ones worth reading carefully, because
+   * the first version of them was WRONG in a way that parsed, generated and
+   * looked right. `nullOrIntegerAtLeast` emits a top-level `OR`, SQL binds
+   * `AND` tighter than `OR`, and composing the two un-parenthesised turned
+   * `spell_versions_area_check` into "true whenever `area_feet` is NULL" — so
+   * a shape with no size, the exact thing it exists to refuse, would have
+   * passed. The helper now parenthesises itself (`db/schema/columns.ts`) and
+   * the cases below are what would have caught it.
+   * ====================================================================== */
+  {
+    constraint: 'spell_versions_range_kind_check',
+    rejects: [
+      ['a kind no reader recognises', spellVersion({ range_kind: 'planar' })],
+      // The printed word rather than the stored member. `decodeSpellRange`
+      // matches exactly, so a capitalised value reads as NO structured range —
+      // silently, and with the raw text still printing correctly beside it.
+      ['the printed capitalisation', spellVersion({ range_kind: 'Touch' })],
+      ['an empty kind, which is a null in costume', spellVersion({ range_kind: '' })],
+    ],
+    accepts: [
+      // THE COMMON CASE BY FAR: a spell whose range line this build could not
+      // read. Every column this change adds is NULL and the text still prints.
+      ['a range line nothing parsed', spellVersion({})],
+      ['Touch, which is not a distance', spellVersion({ range_kind: 'touch' })],
+      ['Self, which the bundled SRD prints twice', spellVersion({ range_kind: 'self' })],
+    ],
+  },
+  {
+    constraint: 'spell_versions_range_feet_check',
+    rejects: [
+      ['a negative distance', spellVersion({ range_kind: 'ranged', range_feet: -1 })],
+      ['a fractional distance', spellVersion({ range_kind: 'ranged', range_feet: 2.5 })],
+      // THE CROSS-COLUMN HALF. A distance on a Touch spell would print a range
+      // the source never gave, and it is exactly what a writer that set the
+      // feet without the kind would produce.
+      ['a distance attached to Touch', spellVersion({ range_kind: 'touch', range_feet: 30 })],
+      ['a distance with no kind at all', spellVersion({ range_feet: 60 })],
+    ],
+    accepts: [
+      ['no distance recorded, which is not zero', spellVersion({ range_kind: 'touch' })],
+      // ZERO IS A REAL VALUE AND NOT AN ABSENCE. D24: a 0-foot range and an
+      // unrecorded range are different facts, so the bound is 0 and not 1.
+      ['a zero-foot ranged spell', spellVersion({ range_kind: 'ranged', range_feet: 0 })],
+      ['sixty feet', spellVersion({ range_kind: 'ranged', range_feet: 60 })],
+    ],
+  },
+  {
+    constraint: 'spell_versions_area_shape_check',
+    rejects: [
+      ['a shape outside the owner\u2019s four', spellVersion({ range_kind: 'self', area_shape: 'cube', area_feet: 15 })],
+      ['the printed capitalisation', spellVersion({ range_kind: 'self', area_shape: 'Cone', area_feet: 15 })],
+    ],
+    accepts: [
+      ['no area at all', spellVersion({ range_kind: 'self' })],
+      ['a cone, the shape the bundled SRD names', spellVersion({ range_kind: 'self', area_shape: 'cone', area_feet: 15 })],
+      ['a line, the owner\u2019s lightning-bolt case', spellVersion({ range_kind: 'self', area_shape: 'line', area_feet: 100 })],
+    ],
+  },
+  {
+    constraint: 'spell_versions_area_check',
+    rejects: [
+      // BOTH DIRECTIONS OF THE CORRELATION. Half an area is worse than none: a
+      // reader would have to invent the missing half.
+      ['a shape with no size', spellVersion({ range_kind: 'self', area_shape: 'cone' })],
+      ['a size with no shape', spellVersion({ range_kind: 'self', area_feet: 15 })],
+      // A zero-foot cone is not an area. Unlike `range_feet`, where zero is a
+      // real printed value, an area of zero has no referent.
+      ['a zero-foot area', spellVersion({ range_kind: 'self', area_shape: 'cone', area_feet: 0 })],
+      ['a fractional area', spellVersion({ range_kind: 'self', area_shape: 'sphere', area_feet: 7.5 })],
+    ],
+    accepts: [
+      ['neither half, which is most spells', spellVersion({})],
+      ['both halves', spellVersion({ range_kind: 'self', area_shape: 'cone', area_feet: 30 })],
+      // The two numbers are INDEPENDENT, which is the whole reason `area_feet`
+      // is not `range_feet`: a 30-foot cone is not a 30-foot range.
+      ['an area on a ranged spell, with two different numbers', spellVersion({ range_kind: 'ranged', range_feet: 150, area_shape: 'sphere', area_feet: 20 })],
+    ],
+  },
+  {
+    constraint: 'spell_versions_material_cost_check',
+    rejects: [
+      // BOTH DIRECTIONS AGAIN. A price with no `exact`/`minimum` cannot be
+      // printed without inventing which one it is, and inventing `exact` for
+      // the SRD's `worth 1+ CP` is the D24 failure this pair exists to stop.
+      ['a price with no exact/minimum', spellVersion({ material_cost_copper: 100 })],
+      ['an exact/minimum with no price', spellVersion({ material_cost_kind: 'minimum' })],
+      ['a negative price', spellVersion({ material_cost_copper: -1, material_cost_kind: 'exact' })],
+      ['a fractional copper price', spellVersion({ material_cost_copper: 0.5, material_cost_kind: 'exact' })],
+      ['a kind no reader recognises', spellVersion({ material_cost_copper: 100, material_cost_kind: 'about' })],
+    ],
+    accepts: [
+      ['no material price, which is most spells', spellVersion({})],
+      // THE BUNDLED TRUE STRIKE COMPONENT: "worth 1+ CP". One copper, and a
+      // FLOOR — the `+` that an integer column alone would have dropped.
+      ['the bundled 1+ CP floor', spellVersion({ material_cost_copper: 1, material_cost_kind: 'minimum' })],
+      ['a free component priced at nothing', spellVersion({ material_cost_copper: 0, material_cost_kind: 'exact' })],
+      ['300 GP in copper', spellVersion({ material_cost_copper: 30_000, material_cost_kind: 'minimum' })],
+    ],
+  },
+  {
+    constraint: 'spell_versions_upcast_scale_check',
+    rejects: [
+      ['a scale nothing counts in', spellVersion({ upcast_scale: 'spell_level' })],
+      ['an empty scale, which is a null in costume', spellVersion({ upcast_scale: '' })],
+    ],
+    accepts: [
+      ['no upcast progression, which every spell has today', spellVersion({})],
+      ['slot levels, a levelled spell', spellVersion({ upcast_scale: 'slot_level' })],
+      ['character levels, the bundled cantrip upgrades', spellVersion({ upcast_scale: 'character_level' })],
+    ],
+  },
+  {
+    constraint: 'spell_version_upcast_levels_level_check',
+    rejects: [
+      ['level 0, which is a cantrip and not an upcast', upcastLevel({ level: 0 })],
+      // 20 AND NOT 9: the bound here is the LOOSER of the two scales, because
+      // a column CHECK cannot see the parent's `upcast_scale`. The exact,
+      // scale-aware bound is enforced in `src/catalog/catalog-schema.ts`.
+      ['level 21, above every character level', upcastLevel({ level: 21 })],
+      ['a fractional level', upcastLevel({ level: 2.5 })],
+    ],
+    accepts: [
+      ['level 1', upcastLevel({ level: 1 })],
+      ['level 9, the highest slot level', upcastLevel({ level: 9 })],
+      ['level 17, a bundled cantrip upgrade step', upcastLevel({ level: 17 })],
+      ['level 20, the highest character level', upcastLevel({ level: 20 })],
+    ],
+  },
+  /* ======================================================================
+   * BACKGROUND EQUIPMENT.
+   * ====================================================================== */
+  {
+    constraint: 'background_equipment_items_option_check',
+    rejects: [
+      ['a third package the printed line cannot express', equipmentItem({ option: 'c' })],
+      ['the printed capitalisation', equipmentItem({ option: 'A' })],
+    ],
+    accepts: [
+      ['package A', equipmentItem({ option: 'a' })],
+      ['package B, which is coin alone for all four backgrounds', equipmentItem({ option: 'b' })],
+    ],
+  },
+  {
+    constraint: 'background_equipment_items_item_kind_check',
+    rejects: [
+      ['a kind the exhaustive switch has no arm for', equipmentItem({ item_kind: 'tool' })],
+      ['an empty kind', equipmentItem({ item_kind: '' })],
+    ],
+    accepts: [
+      ['gear, the majority case', equipmentItem({ item_kind: 'gear' })],
+      ['a weapon line', equipmentItem({ item_kind: 'weapon', weapon_template_id: '@weapon' })],
+      // NO LICENSED BACKGROUND PACKAGE CONTAINS ARMOUR — `Robe` and
+      // `Traveler's Clothes` are clothing. This is the case that keeps the
+      // owner's "unless weapon or ARMOR" limb from shipping unexercised.
+      ['an armour line, which no bundled package reaches', equipmentItem({ item_kind: 'armor', armor_template_id: '@armor' })],
+      ['a coin line', equipmentItem({ item_kind: 'coin', coin_copper: 5000 })],
+    ],
+  },
+  {
+    constraint: 'background_equipment_items_sort_order_check',
+    rejects: [
+      ['a zero-based order', equipmentItem({ sort_order: 0 })],
+      ['a fractional order', equipmentItem({ sort_order: 1.5 })],
+    ],
+    accepts: [['the first printed line', equipmentItem({ sort_order: 1 })]],
+  },
+  {
+    constraint: 'background_equipment_items_quantity_check',
+    rejects: [
+      // A LINE WITH NO ITEMS IS NOT A LINE. Zero here is the "absence printed
+      // as a fact" D24 forbids, on a column where absence is not a state.
+      ['a quantity of nothing', equipmentItem({ quantity: 0 })],
+      ['a fractional quantity', equipmentItem({ quantity: 1.5 })],
+    ],
+    accepts: [
+      ['the implicit one an unnumbered line carries', equipmentItem({ quantity: 1 })],
+      ['the Soldier\u2019s twenty arrows', equipmentItem({ quantity: 20 })],
+    ],
+  },
+  {
+    constraint: 'background_equipment_items_payload_check',
+    rejects: [
+      ['a weapon line with no weapon', equipmentItem({ item_kind: 'weapon' })],
+      ['an armour line with no armour', equipmentItem({ item_kind: 'armor' })],
+      ['a coin line with no amount', equipmentItem({ item_kind: 'coin' })],
+      // THE NEGATIVE HALF, and it is what makes `item_kind` mean something
+      // rather than merely be recorded: without it a reader would have two
+      // answers to "what is this line" and no way to break the tie.
+      ['gear carrying a weapon anyway', equipmentItem({ item_kind: 'gear', weapon_template_id: '@weapon' })],
+      ['gear carrying coin anyway', equipmentItem({ item_kind: 'gear', coin_copper: 100 })],
+      ['a weapon line that is also armour', equipmentItem({ item_kind: 'weapon', weapon_template_id: '@weapon', armor_template_id: '@armor' })],
+      ['a coin line that is also a weapon', equipmentItem({ item_kind: 'coin', coin_copper: 100, weapon_template_id: '@weapon' })],
+    ],
+    accepts: [
+      ['gear carrying nothing', equipmentItem({ item_kind: 'gear' })],
+      ['a weapon line with its weapon', equipmentItem({ item_kind: 'weapon', weapon_template_id: '@weapon' })],
+      ['an armour line with its armour', equipmentItem({ item_kind: 'armor', armor_template_id: '@armor' })],
+      ['a coin line with its amount', equipmentItem({ item_kind: 'coin', coin_copper: 1400 })],
+    ],
+  },
+  {
+    constraint: 'background_equipment_items_coin_copper_check',
+    rejects: [
+      ['a coin line worth nothing', equipmentItem({ item_kind: 'coin', coin_copper: 0 })],
+      ['a negative sum', equipmentItem({ item_kind: 'coin', coin_copper: -1 })],
+      ['a fractional copper piece', equipmentItem({ item_kind: 'coin', coin_copper: 0.5 })],
+    ],
+    accepts: [
+      ['the null every non-coin line carries', equipmentItem({ item_kind: 'gear' })],
+      ['one copper piece', equipmentItem({ item_kind: 'coin', coin_copper: 1 })],
+      ['the fifty gold of every option B', equipmentItem({ item_kind: 'coin', coin_copper: 5000 })],
     ],
   },
   {

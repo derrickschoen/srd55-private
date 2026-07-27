@@ -4,8 +4,10 @@ import {
   extraAttackWeaponScopes,
   isEnumValue,
   rulesEditions,
+  upcastScales,
   type EffectReliabilityCategory,
   type RulesEdition,
+  type UpcastScale,
 } from '../domain/enums';
 import type { ClassFeatureEffect } from '../rules/class-feature-effects';
 import { isRecord } from '../worker/handler';
@@ -59,6 +61,27 @@ export interface CatalogRecord {
   sourceSlug: string | null;
   tags: string[];
   healing: boolean;
+  /**
+   * THE UPCAST PROGRESSION — the owner's *"a list of levels that can upcast and
+   * a text description"*.
+   *
+   * NET-NEW DOCUMENT FIELDS, NOT A MIGRATION. `spell_versions.upcast_type` and
+   * `upcast_summary` have existed since the Laravel schema and NOTHING HAS EVER
+   * WRITTEN EITHER — the format had no field for them, the importer never
+   * mentioned them, and no database this application can produce has ever held
+   * a non-NULL value in either. So this is a capability being added to the
+   * DOCUMENT FORMAT first and to the schema second, which is the opposite of
+   * how the other three structured values in this change went.
+   *
+   * ALL THREE ARE OPTIONAL AND DEFAULT TO ABSENT. Every catalog document
+   * already in a user's hands omits them, and `stringList`'s `optional` limb
+   * exists for exactly this reason on `tags`. An omitted upcast is not "this
+   * spell does not upcast" — it is "this document does not say", which is what
+   * an empty list and a NULL scale mean together.
+   */
+  upcastScale: UpcastScale | null;
+  upcastLevels: number[];
+  upcastSummary: string | null;
 }
 
 /**
@@ -294,6 +317,106 @@ function catalogRecord(value: unknown): CatalogRecord {
     sourceSlug: nullableString(value.sourceSlug, 'sourceSlug'),
     tags: stringList(value.tags, 'tags', true),
     healing: value.healing === true,
+    ...upcast(value),
+  };
+}
+
+/**
+ * THE HIGHEST SLOT LEVEL THAT EXISTS. Spell slots run 1..9 and there is no
+ * tenth; `spell_versions.level` is already bounded 0..9 by its own CHECK for
+ * the same reason.
+ */
+const HIGHEST_SLOT_LEVEL = 9;
+/** The highest character level, matching every other level bound in the schema. */
+const HIGHEST_CHARACTER_LEVEL = 20;
+
+/**
+ * READ THE THREE UPCAST FIELDS, OR REFUSE THE DOCUMENT.
+ *
+ * THE SCALE AND THE LIST ARE VALIDATED AGAINST EACH OTHER, IN BOTH DIRECTIONS,
+ * and that mutual requirement is the whole reason a discriminant was added
+ * rather than one bare list of integers:
+ *
+ *  - LEVELS WITH NO SCALE ARE REFUSED. `[5, 11, 17]` is a cantrip's character
+ *    levels and `[5, 6, 7]` is a levelled spell's slot levels, and there is no
+ *    way to tell them apart from the integers. Storing them anyway would put a
+ *    number on the sheet that means one of two different things.
+ *  - A SCALE WITH NO LEVELS IS REFUSED for the mirror reason: it asserts a
+ *    shape for a list that is not there, and an importer that accepted it would
+ *    write a scale no row is counted in.
+ *
+ * THE BOUND DEPENDS ON THE SCALE, which is the check the column's own CHECK
+ * cannot make — a CHECK on `spell_version_upcast_levels.level` cannot see the
+ * parent's `upcast_scale`, so it enforces the LOOSER 1..20 and this enforces
+ * the exact one. Two guards at two levels of knowledge, which is the division
+ * `db/schema/columns.ts` already describes between a CHECK and a contract.
+ *
+ * WHAT IS DELIBERATELY *NOT* CHECKED: that an upcast slot level exceeds the
+ * spell's own level. It is a true rule about content and it is a REFUSAL that
+ * would lose a whole document over one debatable row, which D11 part 2 says an
+ * import must not do. The structural facts — integer, in range, no duplicates —
+ * are the ones a document cannot legitimately violate.
+ */
+function upcast(value: Record<string, unknown>): {
+  upcastScale: UpcastScale | null;
+  upcastLevels: number[];
+  upcastSummary: string | null;
+} {
+  const rawScale = value.upcastScale;
+  let scale: UpcastScale | null = null;
+  if (rawScale !== undefined && rawScale !== null) {
+    if (!isEnumValue(upcastScales, rawScale)) {
+      throw new TypeError(
+        `Catalog field 'upcastScale' must be one of ${upcastScales.join(', ')}.`,
+      );
+    }
+    scale = rawScale;
+  }
+
+  const rawLevels = value.upcastLevels;
+  const levels: number[] = [];
+  if (rawLevels !== undefined && rawLevels !== null) {
+    if (!Array.isArray(rawLevels)) {
+      throw new TypeError("Catalog field 'upcastLevels' must be a list.");
+    }
+    const highest =
+      scale === 'slot_level' ? HIGHEST_SLOT_LEVEL : HIGHEST_CHARACTER_LEVEL;
+    for (const level of rawLevels as unknown[]) {
+      if (
+        !Number.isInteger(level) ||
+        Number(level) < 1 ||
+        Number(level) > highest
+      ) {
+        throw new TypeError(
+          `Catalog field 'upcastLevels' must contain integers from 1 through ${String(highest)}.`,
+        );
+      }
+      if (levels.includes(Number(level))) {
+        throw new TypeError(
+          `Catalog field 'upcastLevels' repeats level ${String(level)}.`,
+        );
+      }
+      levels.push(Number(level));
+    }
+  }
+
+  if (levels.length > 0 && scale === null) {
+    throw new TypeError(
+      "Catalog field 'upcastScale' is required when 'upcastLevels' is not empty.",
+    );
+  }
+  if (levels.length === 0 && scale !== null) {
+    throw new TypeError(
+      "Catalog field 'upcastLevels' must not be empty when 'upcastScale' is set.",
+    );
+  }
+
+  return {
+    upcastScale: scale,
+    // Sorted here rather than by every reader: "a list of levels" has one
+    // meaningful order and an author's file should not decide it.
+    upcastLevels: [...levels].sort((left, right) => left - right),
+    upcastSummary: nullableString(value.upcastSummary, 'upcastSummary'),
   };
 }
 

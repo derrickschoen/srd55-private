@@ -96,8 +96,8 @@ Over-strictness at a boundary is not safety.
 | Verdict | When | How |
 |---|---|---|
 | **CLOSE** | The SRD closes the set and homebrew will not extend it — spell `level` 0..9, `provenance` | A real `as const` tuple in `src/domain/enums.ts` plus a CHECK in the schema |
-| **OPEN** | Known values recognised, unknown ones PRESERVED — `school`, `action_type`, `upcast_type` | Keep the storage type wide; recognise known values at the point of use |
-| **VALUE OBJECT** | A free string holding structured data — `casting_time`, `range`, `duration` | Parse with fallback: structured when recognised, raw retained ALWAYS |
+| **OPEN** | Known values recognised, unknown ones PRESERVED — `school`, `action_type` | Keep the storage type wide; recognise known values at the point of use |
+| **VALUE OBJECT** | A free string holding structured data — `range`, `components`, `casting_time` | Parse with fallback into SEPARATE columns; the raw column is untouched and still prints. `src/domain/spell-range.ts` is the worked example |
 
 **If you close it:**
 

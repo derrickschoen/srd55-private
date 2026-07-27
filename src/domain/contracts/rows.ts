@@ -16,6 +16,8 @@ import {
   armorCategories,
   armorDexBonuses,
   armorSlots,
+  backgroundEquipmentItemKinds,
+  backgroundEquipmentOptions,
   domainSourceTypes,
   rulesEditions,
   selectionEligibilities,
@@ -238,6 +240,17 @@ const armorDexBonusEnum = z.enum(armorDexBonuses);
  * branch — a proficiency that vanishes with no error anywhere.
  */
 const skillEnum = z.enum(skills);
+/**
+ * The two printed equipment packages, and the four kinds of line one may hold.
+ *
+ * Enums rather than `sqlText` for the reason `effectKindEnum` gives one screen
+ * up: both are closed in the schema too, and a value outside `item_kind` reads
+ * as no payload at all to
+ * `describeBackgroundEquipmentItem`'s exhaustive switch — an item that vanishes
+ * with no error anywhere.
+ */
+const backgroundEquipmentOptionEnum = z.enum(backgroundEquipmentOptions);
+const backgroundEquipmentItemKindEnum = z.enum(backgroundEquipmentItemKinds);
 
 /**
  * THE CLOSED SET of shared refinements.
@@ -272,6 +285,8 @@ export const COLUMN_REFINEMENTS = {
   armorCategoryEnum,
   armorDexBonusEnum,
   skillEnum,
+  backgroundEquipmentOptionEnum,
+  backgroundEquipmentItemKindEnum,
 } as const;
 
 /**
@@ -382,7 +397,8 @@ type NativeContractTable =
   | 'species_templates'
   | 'species_template_traits'
   | 'species_template_trait_effects'
-  | 'background_templates';
+  | 'background_templates'
+  | 'background_equipment_items';
 
 type Facts = typeof COLUMN_FACTS;
 
@@ -755,6 +771,25 @@ const REFINEMENTS = {
   'background_templates.equipment_option_b': nonEmptyText,
   'background_templates.created_at': sqlTimestamp,
   'background_templates.updated_at': sqlTimestamp,
+
+  // --- background_equipment_items ------------------------------------------
+  // Contracted for the reason `background_templates` is: every row is PARSED
+  // out of `docs/srd/source/backgrounds.txt`, and a parser is exactly the writer
+  // that can produce a plausible-looking wrong row. This one has more room to be
+  // wrong than its parent — it splits one printed string into a list and reads a
+  // leading numeral off each entry — so the seeder asserts every row against
+  // this contract before it is written.
+  'background_equipment_items.id': positiveInt,
+  'background_equipment_items.background_template_id': positiveInt,
+  'background_equipment_items.option': backgroundEquipmentOptionEnum,
+  'background_equipment_items.sort_order': positiveInt,
+  // `positiveInt` and NOT `nonNegativeInt`: a line with a quantity of zero is
+  // not a line, and the CHECK on the column says the same thing.
+  'background_equipment_items.quantity': positiveInt,
+  'background_equipment_items.item_name': nonEmptyText,
+  'background_equipment_items.item_kind': backgroundEquipmentItemKindEnum,
+  'background_equipment_items.created_at': sqlTimestamp,
+  'background_equipment_items.updated_at': sqlTimestamp,
 
   // --- character_species ---------------------------------------------------
   // As with `character_weapons`, the nullable columns are NOT written as

@@ -87,6 +87,16 @@ export type CharacterSheetAdjustmentId = Brand<
 export type SpeciesTemplateId = Brand<number, 'SpeciesTemplateId'>;
 export type SpeciesTemplateTraitId = Brand<number, 'SpeciesTemplateTraitId'>;
 export type BackgroundTemplateId = Brand<number, 'BackgroundTemplateId'>;
+/**
+ * One printed line of one background's equipment package. A CATALOG id, on the
+ * same side of the D1b severance as `BackgroundTemplateId`: nothing a character
+ * owns carries one, and when the copy-to-character path is built it must read
+ * THROUGH this row and write VALUES, never store this id.
+ */
+export type BackgroundEquipmentItemId = Brand<
+  number,
+  'BackgroundEquipmentItemId'
+>;
 export type CharacterSpeciesId = Brand<number, 'CharacterSpeciesId'>;
 export type CharacterSpeciesTraitId = Brand<number, 'CharacterSpeciesTraitId'>;
 export type CharacterBackgroundId = Brand<number, 'CharacterBackgroundId'>;

@@ -15,6 +15,7 @@ import {
 } from '../../../src/sharing/codec';
 import { CharacterState } from '../../../src/character/character-state';
 import { seedOriginContent } from '../../../src/rules/origins-srd';
+import { seedWeaponContent } from '../../../src/rules/weapons-srd';
 import { characterEffects } from '../../../src/rules/origins';
 import {
   effectHitPoints,
@@ -143,6 +144,13 @@ describe('a character’s origin survives every portability path', () => {
   beforeEach(async () => {
     connection = await openTestDatabase();
     db = new DatabaseContext(connection);
+    // THE WEAPON CATALOG FIRST, AND IT IS A REAL PRECONDITION RATHER THAN
+    // TIDINESS. `background_equipment_items` links a background's Spear to the
+    // weapon catalog's Spear by content key, and `resolveTemplateId` throws by
+    // name when the key is absent. `src/db/bootstrap.ts` orders the two seeds
+    // for the same reason, and
+    // `tests/integration/rules/background-equipment.test.ts` asserts the throw.
+    seedWeaponContent(db);
     seedOriginContent(db);
     characterId = db.exec('INSERT INTO characters (name) VALUES (?)', [
       'Portable Origin',

@@ -178,6 +178,18 @@ describe('read-only report presentation', () => {
     expect(markup).toContain('Free Cast Only · CHA');
     expect(markup).toContain('DC 12 · WIS');
     expect(markup).toContain('Melee Spell, Ranged Spell');
+    // THE UPCAST PROGRESSION, ASCENDING AND NAMING ITS SCALE. The fixture
+    // stores `[3, 2, 4]`; printing them in that order would be a list a reader
+    // has to re-sort, and printing `2, 3, 4` with no scale word would leave a
+    // player unable to tell slot levels from character levels.
+    expect(markup).toContain(
+      'Upcast: </dt><dd>slot levels 2, 3, 4 · One additional creature per ' +
+        'slot level above 2.',
+    );
+    // ...AND NO LINE AT ALL for the four spells whose document said nothing.
+    // `Upcast: —` would assert that they cannot be upcast, which no document
+    // claimed. Exactly one `Upcast:` in the whole sheet.
+    expect(markup.match(/Upcast: /gu)).toHaveLength(1);
     expect(markup.indexOf('Gift 2</h2>')).toBeLessThan(
       markup.indexOf('Gift 10</h2>'),
     );
@@ -188,6 +200,50 @@ describe('read-only report presentation', () => {
     expect(JSON.stringify(shuffled)).toBe(inputBeforeRender);
     expect(persistedPrintableTableHashes(db, fixture.characterId)).toEqual(
       before,
+    );
+  });
+
+  /**
+   * A SCALE THE VOCABULARY DOES NOT CONTAIN MUST NOT REACH THE CARD.
+   *
+   * `scaleWord` is an exhaustive switch with NO `default` arm, so a value
+   * outside `upcastScales` falls through it and returns `undefined`, which
+   * `upcastLine` interpolates — the literal word `undefined` printed to a
+   * player. The builder used to CAST the column instead of validating it, and a
+   * cast cannot fail.
+   *
+   * THE STATE IS REACHABLE FOR F11'S REASON, and the pragma is how this test
+   * reaches it: `spell_versions.upcast_scale` carries a CHECK, and a CHECK
+   * constrains no image created before it existed and no hand-edited one. The
+   * docblock on `scaleWord` claims the fallback prints the bare word `levels`,
+   * which claims neither ladder; this is that claim, executed.
+   */
+  it('prints the scale-less word rather than "undefined" for a stored scale outside the vocabulary', () => {
+    const fixture = createPrintableListFixture(db);
+    db.exec('PRAGMA ignore_check_constraints = ON');
+    const written = db.exec(
+      'UPDATE spell_versions SET upcast_scale = ? WHERE id = ?',
+      ['planar_level', fixture.spellIds.bless],
+    );
+    db.exec('PRAGMA ignore_check_constraints = OFF');
+    // The corrupt value really is stored — otherwise this measures nothing.
+    expect(written.changes).toBe(1);
+    expect(
+      db.scalar('SELECT upcast_scale FROM spell_versions WHERE id = ?', [
+        fixture.spellIds.bless,
+      ]),
+    ).toBe('planar_level');
+
+    const markup = renderPrintableList(
+      new PrintableSpellListBuilder(db).build(fixture.characterId),
+    );
+    expect(markup).not.toContain('undefined');
+    expect(markup).not.toContain('planar_level');
+    // The levels themselves are still true and still print; only the scale is
+    // withheld, because that is the part we no longer know.
+    expect(markup).toContain(
+      'Upcast: </dt><dd>levels 2, 3, 4 · One additional creature per ' +
+        'slot level above 2.',
     );
   });
 

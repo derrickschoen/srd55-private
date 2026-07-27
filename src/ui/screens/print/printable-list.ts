@@ -44,6 +44,64 @@ function abbreviatedAbilities(values: readonly string[]): string {
   return values.map((value) => value.slice(0, 3).toUpperCase()).join('/');
 }
 
+/**
+ * THE SCALE AS THE WORD A PLAYER READS.
+ *
+ * EXHAUSTIVE WITH NO `default` ARM, so a third `UpcastScale` is a compile error
+ * here rather than a ladder that silently prints as slot levels. The `null` arm
+ * is REACHED ONLY OFF AN IMAGE THIS BUILD DID NOT WRITE — the importer refuses
+ * levels with no scale and the schema CHECK bounds the column — and it prints
+ * the bare word `levels`, which claims neither scale. Substituting the more
+ * common one would be exactly the "print an assumption as a fact" D24 forbids,
+ * on the one row where we know we do not know.
+ */
+function scaleWord(scale: PrintableSpell['upcast_scale']): string | null {
+  switch (scale) {
+    case 'slot_level':
+      return 'slot levels';
+    case 'character_level':
+      return 'character levels';
+    case null:
+      return null;
+  }
+}
+
+/**
+ * THE UPCAST LINE, OR NOTHING AT ALL.
+ *
+ * THREE STATES AND ONLY TWO OF THEM PRINT, which is D24 applied to a brand-new
+ * field. A spell whose catalog document said nothing about upcasting prints NO
+ * LINE — not "Upcast: —", which would read as "this spell cannot be upcast" and
+ * assert something no document said. The em-dash placeholder every other row in
+ * this list uses is right for `Range` and `Duration`, where the field is part
+ * of every printed spell; it is wrong here, where the field is a fact the
+ * document may simply not carry.
+ *
+ * THE SCALE IS NAMED IN THE SENTENCE rather than left to the reader. `2, 3, 4`
+ * means slot levels for a levelled spell and character levels for a cantrip
+ * upgrade, and a player reading "Upcast at 5, 11, 17" with no scale word would
+ * have to know which spell they were looking at to know which it meant.
+ */
+function upcastLine(spell: PrintableSpell): string {
+  const summary =
+    spell.upcast_summary === null || spell.upcast_summary.trim() === ''
+      ? ''
+      : escapeHtml(spell.upcast_summary.trim());
+  if (spell.upcast_levels.length === 0) {
+    return summary === ''
+      ? ''
+      : `<div><dt>Upcast: </dt><dd>${summary}</dd></div>`;
+  }
+  const scale = scaleWord(spell.upcast_scale);
+  const levels =
+    scale === null
+      ? `levels ${spell.upcast_levels.join(', ')}`
+      : `${scale} ${spell.upcast_levels.join(', ')}`;
+  return `<div><dt>Upcast: </dt><dd>${escapeHtml(levels)}${
+    summary === '' ? '' : ` · ${summary}`
+  }</dd></div>`;
+}
+
 function spellFacts(spell: PrintableSpell): string {
   const action =
     spell.action_type !== null &&
@@ -70,6 +128,7 @@ function spellFacts(spell: PrintableSpell): string {
       <div><dt>Components: </dt><dd>${escapeHtml(spell.components ?? '—')}</dd></div>
       <div><dt>Concentration: </dt><dd>${spell.concentration ? 'Yes' : 'No'}</dd></div>
       <div><dt>Ritual: </dt><dd>${spell.ritual ? 'Yes' : 'No'}</dd></div>
+      ${upcastLine(spell)}
       ${attack}
       ${savingThrow}
     </dl>`;

@@ -21,22 +21,33 @@ import { ensureBundledSheetContent } from '../rules/sheet-srd';
  * catalog stays user-supplied through catalog import and is deliberately absent
  * here.
  *
- * ORDER MATTERS. Weapon mastery writes one row per `class_definitions` row, so
- * the classes must exist first. Seeding weapons into a database with no classes
- * would silently write no grant rows, and every mastery lookup on it would then
- * resolve to `content_missing` — which surfaces rather than lying, but is still
- * a repair the boot path should not need.
+ * ORDER MATTERS, AND IT NOW MATTERS IN THREE PLACES RATHER THAN TWO.
  *
- * The sheet core has the same dependency and for the same reason: it joins its
- * parsed class names to `class_definitions.name`, so it goes last.
+ * 1. Weapon mastery writes one row per `class_definitions` row, so the classes
+ *    must exist first. Seeding weapons into a database with no classes would
+ *    silently write no grant rows, and every mastery lookup on it would then
+ *    resolve to `content_missing` — which surfaces rather than lying, but is
+ *    still a repair the boot path should not need.
+ * 2. The sheet core has the same dependency and for the same reason: it joins
+ *    its parsed class names to `class_definitions.name`.
+ * 3. THE ORIGINS CATALOG IS NO LONGER ORDER-INDEPENDENT. Its comment here used
+ *    to read "the origins catalog references no other table", and that stopped
+ *    being true when `background_equipment_items` gained real foreign keys into
+ *    `weapon_templates` and `armor_templates`: a background's Spear is a
+ *    reference to the weapon catalog's Spear. So it moves AFTER both, and
+ *    `ensureBundledSheetContent` — which seeds `armor_templates` — moves ahead
+ *    of it.
+ *
+ * Getting this wrong is not silent: `resolveTemplateId` in
+ * `src/rules/origins-srd.ts` throws by name, and
+ * `tests/integration/rules/background-equipment.test.ts` seeds origins into a
+ * database with no weapon catalog on purpose to prove it.
  */
 export const applicationSeed: DatabaseSeed = (db) => {
   ensureBundledClassContent(db);
   ensureBundledWeaponContent(db);
-  // Order-independent: the origins catalog references no other table. It is
-  // seeded last only so the two order-DEPENDENT seeds above stay adjacent.
-  ensureBundledOriginContent(db);
   ensureBundledSheetContent(db);
+  ensureBundledOriginContent(db);
 };
 
 /**
