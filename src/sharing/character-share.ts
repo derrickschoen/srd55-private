@@ -1,6 +1,7 @@
 import type { SqlValue } from '@sqlite.org/sqlite-wasm';
 import { normalizeCatalogName } from '../catalog/catalog-normalize';
 import { assertSourceRepeatable } from '../commands/add-source';
+import type { SqlRow } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import type { AddableSourceType } from '../domain/enums';
 import {
@@ -90,7 +91,19 @@ export interface SharePreview {
   readonly includesLoadouts: boolean;
 }
 
-type Row = Readonly<Record<string, unknown>>;
+/**
+ * Share export/import is a GENERIC TABLE WALK: every read here is
+ * `SELECT *` — or `SELECT *` over a table name drawn from `SHARE_TABLES` /
+ * `SOURCE_TABLES` at runtime — and the columns are re-shaped by the share
+ * schema, not by a per-query row type. That is what `allRaw`/`oneRaw` are for,
+ * and why this file has no codecs: there is no fixed column set to write one
+ * against. The decode that does happen is `SHARE_*` field-by-field, in
+ * `shareWeaponFromRow` and its siblings.
+ *
+ * `SqlRow` rather than the old `Record<string, unknown>`: SQLite cannot return
+ * anything but a `SqlValue`, so the wider alias was claiming less than is known.
+ */
+type Row = SqlRow;
 
 /**
  * Kept as a MAP, because "which table does `'species'` mean" is a lookup, not
@@ -362,7 +375,7 @@ function spellRows(
   db: DatabaseContext,
   characterId: number,
 ): Map<number, Row> {
-  const rows = db.all<Row>(
+  const rows = db.allRaw(
     `SELECT DISTINCT version.id, version.content_key, version.display_name,
             version.provenance
      FROM spell_versions AS version
@@ -393,20 +406,20 @@ export function exportCharacterShare(
   characterId: number,
   options: ShareExportOptions = {},
 ): CharacterShareDocument {
-  const character = db.one<Row>(
+  const character = db.oneRaw(
     'SELECT * FROM characters WHERE id = ?',
     [characterId],
   );
   if (character === null) {
     throw new Error(`Character ${characterId} does not exist.`);
   }
-  const allSources = db.all<Row>(
+  const allSources = db.allRaw(
     `SELECT * FROM ${SHARE_TABLES.character_source_instances}
      WHERE character_id = ? AND state = 'active'
      ORDER BY acquired_at_character_level, id`,
     [characterId],
   );
-  const classLevels = db.all<Row>(
+  const classLevels = db.allRaw(
     `SELECT level.*, source.id AS source_instance_id,
             source.config AS source_config,
             source.acquired_at_character_level
@@ -504,7 +517,7 @@ export function exportCharacterShare(
   const versions = spellRows(db, characterId);
 
   const selections = db
-    .all<Row>(
+    .allRaw(
       `SELECT * FROM ${SHARE_TABLES.spell_selection_slots}
        WHERE character_id = ? AND current_spell_version_id IS NOT NULL
          AND state IN ('active', 'kept_override')
@@ -536,7 +549,7 @@ export function exportCharacterShare(
       ];
     });
 
-  const spellbook = db.all<Row>(
+  const spellbook = db.allRaw(
     `SELECT version.content_key
      FROM ${SHARE_TABLES.wizard_spellbook_entries} AS entry
      INNER JOIN spell_versions AS version
@@ -545,7 +558,7 @@ export function exportCharacterShare(
      ORDER BY version.content_key`,
     [characterId],
   ).map((row) => String(row.content_key));
-  const preferences = db.all<Row>(
+  const preferences = db.allRaw(
     `SELECT version.content_key, preference.favourite
      FROM ${SHARE_TABLES.character_spell_preferences} AS preference
      INNER JOIN spell_versions AS version
@@ -557,7 +570,7 @@ export function exportCharacterShare(
     spellKey: String(row.content_key),
     favourite: Number(row.favourite) === 1,
   }));
-  const overrides = db.all<Row>(
+  const overrides = db.allRaw(
     `SELECT rule_key, value
      FROM ${SHARE_TABLES.character_rule_overrides}
      WHERE character_id = ?
@@ -575,7 +588,7 @@ export function exportCharacterShare(
 
   const acknowledgements =
     options.acknowledgements === true
-      ? db.all<Row>(
+      ? db.allRaw(
           `SELECT warning_fingerprint
            FROM ${SHARE_TABLES.warning_acknowledgements}
            WHERE character_id = ? AND invalidated_at IS NULL
@@ -585,13 +598,13 @@ export function exportCharacterShare(
       : undefined;
   const loadouts =
     options.loadouts === true
-      ? db.all<Row>(
+      ? db.allRaw(
           `SELECT id, name FROM ${SHARE_TABLES.spell_loadouts}
            WHERE character_id = ? ORDER BY id`,
           [characterId],
         ).map((loadout) => ({
           name: String(loadout.name),
-          entries: db.all<Row>(
+          entries: db.allRaw(
             `SELECT version.content_key, entry.role
              FROM ${SHARE_TABLES.spell_loadout_entries} AS entry
              INNER JOIN spell_versions AS version
@@ -608,25 +621,25 @@ export function exportCharacterShare(
   // Not behind an option flag. `acknowledgements` and `loadouts` are opt-in
   // because they are working state the recipient may not want; a weapon is part
   // of the build being shared, like the class levels and the spellbook.
-  const weapons = db.all<Row>(
+  const weapons = db.allRaw(
     `SELECT * FROM ${SHARE_TABLES.character_weapons}
      WHERE character_id = ? ORDER BY id`,
     [characterId],
   ).map(shareWeaponFromRow);
   // Not behind an option flag either, and for the same reason: a character's
   // species and background are the build being shared, not working state.
-  const speciesRow = db.one<Row>(
+  const speciesRow = db.oneRaw(
     `SELECT * FROM ${SHARE_TABLES.character_species} WHERE character_id = ?`,
     [characterId],
   );
   const species =
     speciesRow === null ? undefined : shareSpeciesFromRow(speciesRow);
-  const speciesTraits = db.all<Row>(
+  const speciesTraits = db.allRaw(
     `SELECT * FROM ${SHARE_TABLES.character_species_traits}
      WHERE character_id = ? ORDER BY sort_order, id`,
     [characterId],
   ).map(shareSpeciesTraitFromRow);
-  const backgroundRow = db.one<Row>(
+  const backgroundRow = db.oneRaw(
     `SELECT * FROM ${SHARE_TABLES.character_background} WHERE character_id = ?`,
     [characterId],
   );
@@ -643,25 +656,25 @@ export function exportCharacterShare(
   // distinction is for: a document that never mentions armour and a document
   // that mentions having none import identically, and the smaller one is the
   // one every character without armour produces.
-  const armorRows = db.all<Row>(
+  const armorRows = db.allRaw(
     `SELECT * FROM ${SHARE_TABLES.character_armor}
      WHERE character_id = ? ORDER BY slot`,
     [characterId],
   ).map(shareArmorFromRow);
   const armor = armorRows.length === 0 ? undefined : armorRows;
-  const rollRows = db.all<Row>(
+  const rollRows = db.allRaw(
     `SELECT * FROM ${SHARE_TABLES.character_hit_point_rolls}
      WHERE character_id = ? ORDER BY class_name, class_level`,
     [characterId],
   ).map(shareHitPointRollFromRow);
   const hitPointRolls = rollRows.length === 0 ? undefined : rollRows;
-  const skillRows = db.all<Row>(
+  const skillRows = db.allRaw(
     `SELECT skill FROM ${SHARE_TABLES.character_skill_proficiencies}
      WHERE character_id = ? ORDER BY skill`,
     [characterId],
   ).map((row) => String(row.skill));
   const skillProficiencies = skillRows.length === 0 ? undefined : skillRows;
-  const adjustmentRow = db.one<Row>(
+  const adjustmentRow = db.oneRaw(
     `SELECT * FROM ${SHARE_TABLES.character_sheet_adjustments}
      WHERE character_id = ?`,
     [characterId],
@@ -765,7 +778,7 @@ function definition(
   table: string,
   key: string,
 ): Row {
-  const row = db.one<Row>(
+  const row = db.oneRaw(
     `SELECT * FROM ${table} WHERE content_key = ?`,
     [key],
   );
@@ -782,7 +795,7 @@ function lookup(
   table: string,
   key: string,
 ): Row | null {
-  return db.one<Row>(
+  return db.oneRaw(
     `SELECT * FROM ${table} WHERE content_key = ?`,
     [key],
   );
@@ -874,7 +887,7 @@ export function ensureSharedSpell(
   key: string,
   displayName?: string,
 ): number {
-  const existing = db.one<Row>(
+  const existing = db.oneRaw(
     'SELECT id FROM spell_versions WHERE content_key = ?',
     [key],
   );
@@ -994,7 +1007,7 @@ export function previewCharacterShare(
   const allKeys = [...keys];
   for (let offset = 0; offset < allKeys.length; offset += 500) {
     const chunk = allKeys.slice(offset, offset + 500);
-    for (const row of db.all<Row>(
+    for (const row of db.allRaw(
       `SELECT content_key FROM spell_versions
        WHERE content_key IN (${chunk.map(() => '?').join(', ')})`,
       chunk,
@@ -1162,7 +1175,7 @@ export function importCharacterShare(
       generator.generateForSource(sourceId);
     }
 
-    const sources = db.all<Row>(
+    const sources = db.allRaw(
       `SELECT id, parent_source_instance_id
        FROM ${SHARE_TABLES.character_source_instances} WHERE character_id = ?`,
       [characterId],
@@ -1211,7 +1224,7 @@ export function importCharacterShare(
         );
       }
       const sourceIds = [...descendants(roots)];
-      const slots = db.all<Row>(
+      const slots = db.allRaw(
         `SELECT id FROM ${SHARE_TABLES.spell_selection_slots}
          WHERE character_id = ? AND rule_key = ? AND ordinal = ?
            AND source_instance_id IN (${sourceIds.map(() => '?').join(', ')})

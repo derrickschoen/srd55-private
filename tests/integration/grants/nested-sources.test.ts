@@ -1,6 +1,8 @@
 import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { sqlInteger, sqlString } from '../../../src/db/codecs';
 import { DatabaseContext } from '../../../src/db/database';
+import { slotIdentity } from '../../helpers/row-codecs';
 import { GrantRuleSlotGenerator } from '../../../src/grants/grant-rule-slot-generator';
 import { openTestDatabase } from '../../helpers/open-db';
 
@@ -100,7 +102,7 @@ describe('nested granted sources', () => {
 
     generator.generateForSource(rootId);
 
-    const child = db.one(
+    const child = db.oneRaw(
       `SELECT id, character_id, parent_source_instance_id, source_type,
               source_definition_id, display_name, config,
               acquired_at_character_level, state, notes
@@ -121,7 +123,7 @@ describe('nested granted sources', () => {
       notes: 'grant_rule:human-origin-feat:1',
     });
     expect(
-      db.all(
+      db.allRaw(
         `SELECT source_instance_id, ordinal, allowed_spell_lists, state
          FROM spell_selection_slots ORDER BY ordinal`,
       ),
@@ -204,15 +206,20 @@ describe('nested granted sources', () => {
       history: 'parent-config',
     });
     generator.generateForSource(parentId);
-    const child = db.one<{ id: number; instance_uuid: string }>(
+    const child = db.one(
       `SELECT id, instance_uuid FROM character_source_instances
        WHERE parent_source_instance_id = ?`,
       [parentId],
+      (row) => ({
+        id: sqlInteger(row, 'id'),
+        instance_uuid: sqlString(row, 'instance_uuid'),
+      }),
     )!;
-    const slot = db.one<{ id: number; slot_key: string }>(
+    const slot = db.one(
       `SELECT id, slot_key FROM spell_selection_slots
        WHERE source_instance_id = ?`,
       [child.id],
+      slotIdentity,
     )!;
     db.exec(
       `UPDATE spell_selection_slots
@@ -231,7 +238,7 @@ describe('nested granted sources', () => {
     generator.generateForSource(parentId);
 
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT id, instance_uuid, state
          FROM character_source_instances WHERE id = ?`,
         [child.id],
@@ -242,7 +249,7 @@ describe('nested granted sources', () => {
       state: 'tombstoned',
     });
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT id, slot_key, current_spell_version_id, state,
                 orphan_reason_code, prior_config, selection_eligibility,
                 selection_invalid_reason
@@ -268,7 +275,7 @@ describe('nested granted sources', () => {
     );
     generator.generateForSource(parentId);
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT source.id AS source_id, source.instance_uuid, source.state AS source_state,
                 slot.id AS slot_id, slot.slot_key, slot.current_spell_version_id,
                 slot.state AS slot_state, slot.orphan_reason_code,
@@ -328,7 +335,7 @@ describe('nested granted sources', () => {
       "Magic Initiate already uses chosen_list 'Wizard' for this character.",
     );
     expect(
-      db.all(
+      db.allRaw(
         `SELECT source_instance_id, count(*) AS slots
          FROM spell_selection_slots
          GROUP BY source_instance_id`,
@@ -342,7 +349,7 @@ describe('nested granted sources', () => {
     );
     generator.generateForSource(duplicateId);
     expect(
-      db.all(
+      db.allRaw(
         `SELECT source_instance_id, allowed_spell_lists
          FROM spell_selection_slots
          WHERE source_instance_id = ?

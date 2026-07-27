@@ -96,24 +96,24 @@ describe('the four stored sheet inputs survive every portability path', () => {
 
   function sheetInputsOf(id: number) {
     return {
-      armor: db.all(
+      armor: db.allRaw(
         `SELECT slot, name, category, armor_class, dex_bonus, dex_bonus_max,
                 strength_requirement, stealth_disadvantage, notes
            FROM character_armor WHERE character_id = ? ORDER BY slot`,
         [id],
       ),
-      rolls: db.all(
+      rolls: db.allRaw(
         `SELECT class_name, class_level, rolled_value
            FROM character_hit_point_rolls
           WHERE character_id = ? ORDER BY class_name, class_level`,
         [id],
       ),
-      skills: db.all(
+      skills: db.allRaw(
         `SELECT skill FROM character_skill_proficiencies
           WHERE character_id = ? ORDER BY skill`,
         [id],
       ),
-      adjustment: db.one(
+      adjustment: db.oneRaw(
         `SELECT armor_class_adjustment, armor_class_adjustment_note
            FROM character_sheet_adjustments WHERE character_id = ?`,
         [id],

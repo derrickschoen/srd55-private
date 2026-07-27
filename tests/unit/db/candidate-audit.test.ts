@@ -868,7 +868,7 @@ describe('whole-image restore runs the audit while quarantined', () => {
       // Not merely "the promise rejected": the live connection and its rows are
       // the ones that were there before.
       expect(lifecycle.database.connection).toBe(liveConnection);
-      expect(lifecycle.database.all('SELECT id, name FROM characters')).toEqual([
+      expect(lifecycle.database.allRaw('SELECT id, name FROM characters')).toEqual([
         { id: 1, name: 'Live character' },
       ]);
     } finally {
@@ -885,7 +885,7 @@ describe('whole-image restore runs the audit while quarantined', () => {
       seedTwoCharacters(candidate);
       await lifecycle.replace(bytesOf(candidate));
       expect(
-        lifecycle.database.all('SELECT id, name FROM characters ORDER BY id'),
+        lifecycle.database.allRaw('SELECT id, name FROM characters ORDER BY id'),
       ).toEqual([
         { id: 1, name: 'Alice' },
         { id: 2, name: 'Bob' },

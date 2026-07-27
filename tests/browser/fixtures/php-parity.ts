@@ -2,6 +2,7 @@ import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
 import { readFileSync } from 'node:fs';
 import { AddSourceCommand } from '../../../src/commands/add-source';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
+import { sqlInteger, sqlNullableInteger } from '../../../src/db/codecs';
 import { DatabaseContext } from '../../../src/db/database';
 import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
 import {
@@ -391,15 +392,37 @@ export async function workspaceFixtureImage(): Promise<
         [backgroundRoot],
       ),
     );
-    const wizardSlots = db.all<{ id: number; current_spell_version_id: number }>(
+    const wizardSlots = db.all(
       `SELECT id, current_spell_version_id
        FROM spell_selection_slots
        WHERE character_id = ? AND source_instance_id = ?
          AND rule_key = 'wizard-cantrip'
        ORDER BY id`,
       [fixture.characterId, fixture.wizardSourceId],
+      (row) => ({
+        id: sqlInteger(row, 'id'),
+        // NULLABLE, and the old `number` type param said otherwise: an unassigned
+        // cantrip slot stores NULL here, and this fixture picks the first slot
+        // whether or not it holds a spell.
+        current_spell_version_id: sqlNullableInteger(
+          row,
+          'current_spell_version_id',
+        ),
+      }),
     );
     const targetSlot = wizardSlots[0]!;
+    // The fixture's whole point is a slot that ALREADY HOLDS a spell — every
+    // parity assertion downstream compares against `originalSpell` as a real
+    // version id. The old `db.all<{ current_spell_version_id: number }>` type
+    // param asserted that without checking it, so a fixture that silently
+    // stopped assigning the cantrip would have travelled all the way to a
+    // browser assertion comparing `null` to a rendered name. Checked here, once.
+    if (targetSlot.current_spell_version_id === null) {
+      throw new Error(
+        'The parity fixture expects the first wizard cantrip slot to hold a spell.',
+      );
+    }
+    const originalSpell = targetSlot.current_spell_version_id;
     const secondSlot = Number(
       db.scalar(
         `SELECT id FROM spell_selection_slots
@@ -422,7 +445,7 @@ export async function workspaceFixtureImage(): Promise<
       secondSlot,
       attackSlot,
       saveSlot,
-      originalSpell: targetSlot.current_spell_version_id,
+      originalSpell,
       replacementSpell,
       alternateSpell,
       attackSpell,

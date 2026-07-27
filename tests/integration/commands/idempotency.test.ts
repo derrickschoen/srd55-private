@@ -51,11 +51,11 @@ describe('command idempotency and stale-slot merge guards', () => {
       },
     });
     const persistedBefore = {
-      character: db.one('SELECT * FROM characters WHERE id = ?', [
+      character: db.oneRaw('SELECT * FROM characters WHERE id = ?', [
         characterId,
       ]),
-      operations: db.all('SELECT * FROM character_operations ORDER BY id'),
-      audit: db.all('SELECT * FROM change_log ORDER BY id'),
+      operations: db.allRaw('SELECT * FROM character_operations ORDER BY id'),
+      audit: db.allRaw('SELECT * FROM change_log ORDER BY id'),
     };
 
     const replay = await executor.execute({
@@ -74,14 +74,14 @@ describe('command idempotency and stale-slot merge guards', () => {
       idempotent_replay: true,
     });
     expect({
-      character: db.one('SELECT * FROM characters WHERE id = ?', [
+      character: db.oneRaw('SELECT * FROM characters WHERE id = ?', [
         characterId,
       ]),
-      operations: db.all('SELECT * FROM character_operations ORDER BY id'),
-      audit: db.all('SELECT * FROM change_log ORDER BY id'),
+      operations: db.allRaw('SELECT * FROM character_operations ORDER BY id'),
+      audit: db.allRaw('SELECT * FROM change_log ORDER BY id'),
     }).toEqual(persistedBefore);
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT wisdom, intelligence, allow_legacy, revision
          FROM characters WHERE id = ?`,
         [characterId],
@@ -130,7 +130,7 @@ describe('command idempotency and stale-slot merge guards', () => {
       currentRevision: 0,
     }));
     expect(
-      db.one(
+      db.oneRaw(
         'SELECT wisdom, revision FROM characters WHERE id = ?',
         [otherCharacterId],
       ),
@@ -224,7 +224,7 @@ describe('command idempotency and stale-slot merge guards', () => {
     ).rejects.toBeInstanceOf(RevisionConflict);
 
     expect(
-      db.all(
+      db.allRaw(
         `SELECT id, current_spell_version_id, selection_eligibility
          FROM spell_selection_slots ORDER BY id`,
       ),
@@ -241,7 +241,7 @@ describe('command idempotency and stale-slot merge guards', () => {
       },
     ]);
     expect(
-      db.one(
+      db.oneRaw(
         'SELECT revision FROM characters WHERE id = ?',
         [characterId],
       ),
@@ -250,7 +250,7 @@ describe('command idempotency and stale-slot merge guards', () => {
       Number(db.scalar('SELECT count(*) FROM character_operations')),
     ).toBe(2);
     expect(
-      db.all(
+      db.allRaw(
         `SELECT operation_uuid, entity_id
          FROM change_log
          WHERE entity_type = 'spell_selection_slots'

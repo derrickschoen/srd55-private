@@ -176,6 +176,12 @@ function importSubclass(
      FROM subclass_definitions
      WHERE content_key = ?`,
     [record.contentKey],
+    (row) => ({
+      id: sqlInteger(row, 'id'),
+      class_definition_id: sqlInteger(row, 'class_definition_id'),
+      name: sqlString(row, 'name'),
+      rules_edition: sqlString(row, 'rules_edition'),
+    }),
   );
 
   /**
@@ -191,7 +197,7 @@ function importSubclass(
    */
   if (
     existing !== null &&
-    sqlInteger(existing, 'class_definition_id') !== classId
+    existing.class_definition_id !== classId
   ) {
     throw new TypeError(
       `Subclass '${record.contentKey}' is already stored under a different parent class; an import cannot move a subclass between classes, because a character may already hold it.`,
@@ -240,10 +246,10 @@ function importSubclass(
     counters.subclasses_created += 1;
     changed = false;
   } else {
-    subclassId = sqlInteger(existing, 'id');
+    subclassId = existing.id;
     changed =
-      sqlString(existing, 'name') !== record.name ||
-      sqlString(existing, 'rules_edition') !== record.edition;
+      existing.name !== record.name ||
+      existing.rules_edition !== record.edition;
     if (changed) {
       db.exec(
         `UPDATE subclass_definitions

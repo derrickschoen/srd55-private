@@ -150,7 +150,7 @@ async function fixture(): Promise<Fixture> {
 }
 
 function storedSlot(db: DatabaseContext, slotId: number) {
-  return db.one(
+  return db.oneRaw(
     `SELECT current_spell_version_id, selection_eligibility,
             selection_invalid_reason, state, override_note, updated_at
      FROM spell_selection_slots
@@ -198,7 +198,7 @@ describe('update_ability command', () => {
     const after = state.capture(test.characterId);
 
     expect(
-      test.db.one(
+      test.db.oneRaw(
         `SELECT wisdom, intelligence, updated_at
          FROM characters WHERE id = ?`,
         [test.characterId],
@@ -229,13 +229,13 @@ describe('update_ability command', () => {
     );
     inverse.apply(test.characterId);
     expect(
-      test.db.one(
+      test.db.oneRaw(
         'SELECT wisdom, updated_at FROM characters WHERE id = ?',
         [test.characterId],
       ),
     ).toEqual({ wisdom: 13, updated_at: restoredTimestamp });
 
-    const persistedBeforeRejection = test.db.one(
+    const persistedBeforeRejection = test.db.oneRaw(
       'SELECT * FROM characters WHERE id = ?',
       [test.characterId],
     );
@@ -250,7 +250,7 @@ describe('update_ability command', () => {
       ).apply(test.characterId),
     ).toThrow('Ability scores must be between 1 and 30.');
     expect(
-      test.db.one('SELECT * FROM characters WHERE id = ?', [
+      test.db.oneRaw('SELECT * FROM characters WHERE id = ?', [
         test.characterId,
       ]),
     ).toEqual(persistedBeforeRejection);
@@ -340,7 +340,7 @@ describe('set_slot select and inverse', () => {
 
   it('rejects inactive and ineligible candidates without changing persisted slot bytes', async () => {
     const test = await fixture();
-    const before = test.db.one(
+    const before = test.db.oneRaw(
       'SELECT * FROM spell_selection_slots WHERE id = ?',
       [test.slotId],
     );
@@ -361,7 +361,7 @@ describe('set_slot select and inverse', () => {
       );
       expect(() => command.apply(test.characterId)).toThrow(message);
       expect(
-        test.db.one(
+        test.db.oneRaw(
           'SELECT * FROM spell_selection_slots WHERE id = ?',
           [test.slotId],
         ),
@@ -390,7 +390,7 @@ describe('set_slot clear and keep_override', () => {
       updated_at: changedTimestamp,
     });
 
-    const clearedRow = test.db.one(
+    const clearedRow = test.db.oneRaw(
       'SELECT * FROM spell_selection_slots WHERE id = ?',
       [test.slotId],
     );
@@ -407,7 +407,7 @@ describe('set_slot clear and keep_override', () => {
       ).apply(test.characterId),
     ).toThrow('Choose a spell before keeping an override.');
     expect(
-      test.db.one('SELECT * FROM spell_selection_slots WHERE id = ?', [
+      test.db.oneRaw('SELECT * FROM spell_selection_slots WHERE id = ?', [
         test.slotId,
       ]),
     ).toEqual(clearedRow);
@@ -456,7 +456,7 @@ describe('set_slot clear and keep_override', () => {
     );
     discard.apply(test.characterId);
     expect(
-      test.db.one(
+      test.db.oneRaw(
         `SELECT current_spell_version_id, state, selection_eligibility
          FROM spell_selection_slots WHERE id = ?`,
         [test.slotId],
@@ -564,7 +564,7 @@ describe('set_slot restore revalidation', () => {
 describe('set_slot ownership, lock, and inactive inverse guards', () => {
   it('rejects cross-character, locked, and inactive restore writes byte-for-byte', async () => {
     const test = await fixture();
-    const before = test.db.one(
+    const before = test.db.oneRaw(
       'SELECT * FROM spell_selection_slots WHERE id = ?',
       [test.slotId],
     );
@@ -577,7 +577,7 @@ describe('set_slot ownership, lock, and inactive inverse guards', () => {
       otherCharacterClear.apply(test.otherCharacterId),
     ).toThrow('Spell slot does not belong to this character.');
     expect(
-      test.db.one('SELECT * FROM spell_selection_slots WHERE id = ?', [
+      test.db.oneRaw('SELECT * FROM spell_selection_slots WHERE id = ?', [
         test.slotId,
       ]),
     ).toEqual(before);
@@ -586,7 +586,7 @@ describe('set_slot ownership, lock, and inactive inverse guards', () => {
       'UPDATE spell_selection_slots SET is_locked = 1 WHERE id = ?',
       [test.slotId],
     );
-    const lockedBefore = test.db.one(
+    const lockedBefore = test.db.oneRaw(
       'SELECT * FROM spell_selection_slots WHERE id = ?',
       [test.slotId],
     );
@@ -598,7 +598,7 @@ describe('set_slot ownership, lock, and inactive inverse guards', () => {
       ).apply(test.characterId),
     ).toThrow('This spell slot is locked.');
     expect(
-      test.db.one('SELECT * FROM spell_selection_slots WHERE id = ?', [
+      test.db.oneRaw('SELECT * FROM spell_selection_slots WHERE id = ?', [
         test.slotId,
       ]),
     ).toEqual(lockedBefore);
@@ -622,7 +622,7 @@ describe('set_slot ownership, lock, and inactive inverse guards', () => {
         },
       } as const,
     );
-    const inactiveBefore = test.db.one(
+    const inactiveBefore = test.db.oneRaw(
       'SELECT * FROM spell_selection_slots WHERE id = ?',
       [test.slotId],
     );
@@ -632,7 +632,7 @@ describe('set_slot ownership, lock, and inactive inverse guards', () => {
       `Slot restore references inactive spell version ${test.inactiveSpellId}.`,
     );
     expect(
-      test.db.one('SELECT * FROM spell_selection_slots WHERE id = ?', [
+      test.db.oneRaw('SELECT * FROM spell_selection_slots WHERE id = ?', [
         test.slotId,
       ]),
     ).toEqual(inactiveBefore);

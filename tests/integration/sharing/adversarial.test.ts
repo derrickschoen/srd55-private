@@ -1,5 +1,10 @@
 import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, describe, expect, it } from 'vitest';
+import {
+  rowId,
+  sqlNullableString,
+  sqlString,
+} from '../../../src/db/codecs';
 import { DatabaseContext } from '../../../src/db/database';
 import { GrantRuleSlotGenerator } from '../../../src/grants/grant-rule-slot-generator';
 import {
@@ -211,7 +216,7 @@ function select(
 }
 
 function selectedChoices(db: DatabaseContext, characterId: number) {
-  return db.all(
+  return db.allRaw(
     `SELECT source.source_type, source.display_name, source.config,
             slot.rule_key, slot.ordinal, version.content_key, slot.state
      FROM spell_selection_slots AS slot
@@ -441,7 +446,7 @@ function stableRows(rows: readonly Record<string, unknown>[]): string[] {
 }
 
 function semanticProjection(db: DatabaseContext, characterId: number) {
-  const characterRow = db.one<Record<string, unknown>>(
+  const characterRow = db.oneRaw(
     `SELECT name, strength, dexterity, constitution, intelligence,
             wisdom, charisma, proficiency_bonus_override,
             rules_edition_preference, allow_legacy
@@ -451,7 +456,7 @@ function semanticProjection(db: DatabaseContext, characterId: number) {
   if (characterRow === null) {
     throw new Error(`Character ${characterId} is missing.`);
   }
-  const sources = db.all<Record<string, unknown>>(
+  const sources = db.allRaw(
     `SELECT source.source_type,
             COALESCE(class.content_key, subclass.content_key,
                      feat.content_key, species.content_key,
@@ -477,7 +482,7 @@ function semanticProjection(db: DatabaseContext, characterId: number) {
      WHERE source.character_id = ?`,
     [characterId],
   );
-  const slots = db.all<Record<string, unknown>>(
+  const slots = db.allRaw(
     `SELECT source.source_type,
             COALESCE(class.content_key, subclass.content_key,
                      feat.content_key, species.content_key,
@@ -507,7 +512,7 @@ function semanticProjection(db: DatabaseContext, characterId: number) {
      WHERE slot.character_id = ?`,
     [characterId],
   );
-  const spellbook = db.all<Record<string, unknown>>(
+  const spellbook = db.allRaw(
     `SELECT version.content_key
      FROM wizard_spellbook_entries AS entry
      INNER JOIN spell_versions AS version
@@ -515,7 +520,7 @@ function semanticProjection(db: DatabaseContext, characterId: number) {
      WHERE entry.character_id = ?`,
     [characterId],
   );
-  const preferences = db.all<Record<string, unknown>>(
+  const preferences = db.allRaw(
     `SELECT version.content_key, preference.favourite
      FROM character_spell_preferences AS preference
      INNER JOIN spell_versions AS version
@@ -523,17 +528,17 @@ function semanticProjection(db: DatabaseContext, characterId: number) {
      WHERE preference.character_id = ?`,
     [characterId],
   );
-  const overrides = db.all<Record<string, unknown>>(
+  const overrides = db.allRaw(
     `SELECT rule_key, value FROM character_rule_overrides
      WHERE character_id = ?`,
     [characterId],
   );
-  const acknowledgements = db.all<Record<string, unknown>>(
+  const acknowledgements = db.allRaw(
     `SELECT warning_fingerprint FROM warning_acknowledgements
      WHERE character_id = ?`,
     [characterId],
   );
-  const loadouts = db.all<Record<string, unknown>>(
+  const loadouts = db.allRaw(
     `SELECT loadout.name, version.content_key, entry.role
      FROM spell_loadouts AS loadout
      LEFT JOIN spell_loadout_entries AS entry
@@ -559,13 +564,12 @@ function sourceIdentityRows(
   db: DatabaseContext,
   characterId: number,
 ): number[] {
-  return db
-    .all<{ id: number }>(
-      `SELECT id FROM character_source_instances
-       WHERE character_id = ? ORDER BY id`,
-      [characterId],
-    )
-    .map((row) => Number(row.id));
+  return db.all(
+    `SELECT id FROM character_source_instances
+     WHERE character_id = ? ORDER BY id`,
+    [characterId],
+    rowId,
+  );
 }
 
 async function exportedDatabaseImage(
@@ -576,13 +580,13 @@ async function exportedDatabaseImage(
 }
 
 function dumpApplicationDatabase(db: DatabaseContext): void {
-  const names = db
-    .all<{ name: string }>(
-      `SELECT name FROM sqlite_schema
-       WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
-       ORDER BY name`,
-    )
-    .map((row) => String(row.name));
+  const names = db.all(
+    `SELECT name FROM sqlite_schema
+     WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+     ORDER BY name`,
+    undefined,
+    (row) => sqlString(row, 'name'),
+  );
   if (
     Number(
       db.scalar(
@@ -595,7 +599,7 @@ function dumpApplicationDatabase(db: DatabaseContext): void {
   }
   for (const name of names) {
     const quoted = `"${name.replaceAll('"', '""')}"`;
-    console.error(`${name}:`, db.all(`SELECT * FROM ${quoted}`));
+    console.error(`${name}:`, db.allRaw(`SELECT * FROM ${quoted}`));
   }
 }
 
@@ -617,7 +621,7 @@ async function expectImageUnchanged(
 
 function expectDatabaseIntegrity(db: DatabaseContext): void {
   expect(db.scalar('PRAGMA quick_check')).toBe('ok');
-  expect(db.all('PRAGMA foreign_key_check')).toEqual([]);
+  expect(db.allRaw('PRAGMA foreign_key_check')).toEqual([]);
 }
 
 describe('adversarial character-share fidelity', () => {
@@ -779,7 +783,7 @@ describe('adversarial character-share fidelity', () => {
     );
     const imported = importCharacterShare(targetDb, document);
     const spellbookKeys = (db: DatabaseContext, id: number) =>
-      db.all(
+      db.allRaw(
         `SELECT version.content_key
          FROM wizard_spellbook_entries AS entry
          INNER JOIN spell_versions AS version
@@ -1237,13 +1241,13 @@ describe('adversarial character-share fidelity', () => {
       }),
     ).toEqual(document);
     expect(
-      targetDb.one(
+      targetDb.oneRaw(
         `SELECT display_name FROM spell_versions WHERE content_key = ?`,
         [placeholderKey],
       ),
     ).toEqual({ display_name: 'Custom Loadout-Only Name 🧪' });
     expect(
-      targetDb.one(
+      targetDb.oneRaw(
         `SELECT favourite FROM character_spell_preferences
          WHERE character_id = ?`,
         [imported.characterId],
@@ -1361,7 +1365,7 @@ describe('adversarial character-share fidelity', () => {
       });
       const imported = importCharacterShare(target, document);
       states.push(
-        target.one(
+        target.oneRaw(
           `SELECT current_spell_version_id, state,
                   selection_eligibility, selection_invalid_reason
            FROM spell_selection_slots WHERE character_id = ?`,
@@ -1685,11 +1689,12 @@ describe('adversarial character-share rejection', () => {
     expect(
       JSON.parse(
         String(
-          target.one<{ config: string }>(
+          target.one(
             `SELECT config FROM character_source_instances
              WHERE character_id = ?`,
             [imported.characterId],
-          )?.config,
+            (row) => sqlNullableString(row, 'config'),
+          ),
         ),
       ),
     ).toMatchObject({ chosen_list: 'Sorcerer' });
@@ -2354,7 +2359,7 @@ describe('hostile and over-long weapon sections', () => {
     const targetDb = await database();
     const { characterId } = importCharacterShare(targetDb, shared);
     expect(
-      targetDb.all(
+      targetDb.allRaw(
         'SELECT name FROM character_weapons WHERE character_id = ? ORDER BY id',
         [characterId],
       ),

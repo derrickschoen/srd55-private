@@ -31,7 +31,7 @@ describe('deterministic read-only build report', () => {
 
   it('builds the complete ordered report from persisted source state without writes', () => {
     expect(
-      db.all(
+      db.allRaw(
         `SELECT class.name, level.level
          FROM character_class_levels AS level
          INNER JOIN class_definitions AS class
@@ -47,7 +47,7 @@ describe('deterministic read-only build report', () => {
       { name: 'Wizard', level: 1 },
     ]);
     expect(
-      db.all(
+      db.allRaw(
         `SELECT id, state, selection_eligibility,
                 selection_invalid_reason, orphan_reason_code, override_note
          FROM spell_selection_slots
@@ -314,7 +314,7 @@ describe('deterministic read-only build report', () => {
       ],
     ).lastInsertId;
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT id, note, invalidated_at, created_at
          FROM warning_acknowledgements
          WHERE id = ?`,
@@ -418,7 +418,7 @@ describe('deterministic read-only build report', () => {
     addClassLevel(db, multiclassId, 'Fighter', 7, subclassId);
     addClassLevel(db, multiclassId, 'Wizard', 3);
     expect(
-      db.all(
+      db.allRaw(
         `SELECT class.name, level.level, subclass.name AS subclass
          FROM character_class_levels AS level
          INNER JOIN class_definitions AS class
@@ -517,7 +517,7 @@ describe('deterministic read-only build report', () => {
       );
       addClassLevel(db, characterId, 'Fighter', 5, subclassId);
       expect(
-        db.one(
+        db.oneRaw(
           `SELECT subclass.caster_fraction, subclass.caster_rounding,
                   level.level
            FROM character_class_levels AS level
