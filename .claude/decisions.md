@@ -166,6 +166,37 @@ option is a text line item, not a currency value.
 
 Nothing named here exists yet: there is no `class_equipment` table.
 
+### 5. Equipment comes near the END of the wizard (added by the owner after the four rulings above, same session)
+
+*"The wizard should put the weapon and armor selection near the end because a
+dex fighter will use medium armor and finesse and ranged weapons vs a str
+fighter will use a heavy or versatile weapon and heavy armor."*
+
+This is a dependency, not a preference. Ability scores must be chosen before
+equipment, because the same class produces opposite correct kits: a Dexterity
+Fighter wants medium armour, finesse and ranged weapons; a Strength Fighter
+wants heavy armour and a heavy or versatile weapon. Offering the SRD's
+`Choose A or B` package before the scores exist asks the player to decide
+without the input the decision depends on.
+
+So the level-1 step order is constrained: species and background, then class,
+then ability scores, then equipment. Only the last edge is newly binding — the
+earlier ones remain free — and it also removes the case where re-rolling ability
+scores silently invalidates an already-chosen kit.
+
+**LEGALITY AND SUITABILITY ARE DIFFERENT FILTERS and the builder must not
+conflate them.** What a character MAY take comes from the class's armour and
+weapon proficiencies — that is the D11 rule, and an SRD-illegal choice stays
+unavailable. What a character SHOULD take comes from the ability scores, and it
+is a suggestion. A Strength Fighter picking a rapier is making a legal, merely
+suboptimal choice; the builder surfaces the better fit, and does not block it.
+Blocking on suitability would be the builder inventing a rule the SRD does not
+contain, which is the failure F4 and D33 both guard against.
+
+Practical consequence for the level-up wizard promised in ruling 3: the same
+ordering applies at every level where an ability score changes, since an ASI can
+move a character from one kit to the other.
+
 ## F20 — drizzle-kit DOES emit the SQLite table rebuild, and the two things that would still have broken the migration are the TTY prompt and `PRAGMA foreign_keys=OFF` inside a transaction (2026-07-27)
 
 The load-bearing unknown before implementing the weapon-range storage change was
