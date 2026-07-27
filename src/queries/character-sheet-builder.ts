@@ -12,6 +12,7 @@ import type {
   ArmorCategory,
   ArmorDexBonus,
   ArmorSlot,
+  HitDieSize,
   Skill,
   WeaponProficiencyCategory,
 } from '../domain/enums';
@@ -30,6 +31,7 @@ import { SKILL_LABELS, abilityForSkill } from '../rules/skills';
 import {
   armorClass,
   attacksPerAction,
+  hitDieOrAbsent,
   hitPointMaximum,
   initiative,
   martialArtsDice,
@@ -141,7 +143,7 @@ export interface SheetClassLine {
    * `SheetClass.hit_die`. The page prints the absence; it does not print the
    * assumption as though it were the class's own die.
    */
-  readonly hit_die: number | null;
+  readonly hit_die: HitDieSize | null;
   readonly is_starting_class: boolean;
   readonly subclass_name: string | null;
   readonly saving_throws: readonly Ability[];
@@ -286,8 +288,15 @@ interface SheetClassJoinRow {
    * imported class. The absence lives in the type so it cannot be filled in by
    * accident downstream; `hitPointMaximum` substitutes `ASSUMED_HIT_DIE` and
    * says so in a warning. See D24.
+   *
+   * `HitDieSize | null` AND NOT `number | null`, WHICH MAKES THE CODEC BELOW
+   * THE PLACE THE SET IS RE-ESTABLISHED. The column carries `IN (6, 8, 10, 12)`
+   * — and F11 is the finding that a contract which merely trusts a CHECK is not
+   * a contract, because the CHECK is absent from any image created before it
+   * and from any hand-edited one. So the value is TESTED here rather than
+   * assumed here.
    */
-  readonly hit_die: number | null;
+  readonly hit_die: HitDieSize | null;
 }
 
 /**
@@ -314,12 +323,21 @@ function distinctWarnings(
   });
 }
 
+/**
+ * AN INTEGER THAT IS NOT A HIT DIE IS READ AS NO HIT DIE, AND THE SHEET SAYS SO.
+ *
+ * The rule and its reasons live with the domain, on `hitDieOrAbsent` in
+ * `src/rules/sheet.ts`, beside the `ASSUMED_HIT_DIE` substitution it feeds. It
+ * is applied HERE because this is the boundary an untrusted integer crosses —
+ * the same shape as `saving_throws` below, which has filtered unknown abilities
+ * out at this codec since the sheet existed.
+ */
 const sheetClassRow: RowCodec<SheetClassJoinRow> = (row) => ({
   class_definition_id: sqlInteger(row, 'class_definition_id'),
   class_level: sqlInteger(row, 'class_level'),
   is_starting_class: sqlBoolean(row, 'is_starting_class'),
   class_name: sqlString(row, 'class_name'),
-  hit_die: sqlNullableInteger(row, 'hit_die'),
+  hit_die: hitDieOrAbsent(sqlNullableInteger(row, 'hit_die')),
 });
 
 /**

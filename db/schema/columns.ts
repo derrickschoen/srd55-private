@@ -167,6 +167,33 @@ export const oneOf = (column: string, values: readonly string[]) =>
   sql.raw(`${columnRef(column)} IN (${values.map(enumLiteral).join(', ')})`);
 
 /**
+ * `typeof(column) = 'integer' AND column IN (…)` over a closed INTEGER
+ * vocabulary.
+ *
+ * {@link oneOf} CANNOT DO THIS JOB, and the reason is the one
+ * `class_sheet_traits` stated in a comment above a hand-written literal until
+ * this helper existed: `enumLiteral` single-quotes its members, so `oneOf` over
+ * die sizes would emit `hit_die IN ('6', '8', …)`. That parses — and given
+ * SQLite's cross-type ordering it means something else entirely, because a
+ * stored INTEGER 6 does not compare equal to the TEXT `'6'`. The CHECK would
+ * then reject every row this application writes.
+ *
+ * The `typeof` limb is here for {@link integerAtLeast}'s reason, and it is not
+ * made redundant by the `IN` list: INTEGER affinity converts `'8'` to 8 on the
+ * way in, so a bare list does refuse ordinary text, but a REAL `8.0` compares
+ * equal to 8 and would otherwise pass.
+ *
+ * The vocabulary is passed as the VALUE array from `src/domain/enums.ts`, so
+ * there is no second transcription to keep in step: narrowing
+ * `martialArtsDieSizes` narrows this CHECK at the next `npm run db:schema`.
+ */
+export const integerOneOf = (column: string, values: readonly number[]) =>
+  sql.raw(
+    `typeof(${columnRef(column)}) = 'integer' AND ` +
+      `${columnRef(column)} IN (${values.map(bound).join(', ')})`,
+  );
+
+/**
  * `column IS NULL OR column IN (…)`.
  *
  * The null limb is deliberate and load-bearing: these columns are nullable

@@ -250,6 +250,134 @@ export type WeaponProficiencyCategory =
 export const multiclassSkillPools = ['none', 'class_list', 'any'] as const;
 export type MulticlassSkillPool = (typeof multiclassSkillPools)[number];
 
+/* ==========================================================================
+ * DICE
+ * ========================================================================== */
+
+/**
+ * THE DIE VOCABULARY. The owner's own list, verbatim: *"Do we have an enum for
+ * dice type? We only should have 4,6,8,10,12,20,100."*
+ *
+ * Until this existed the set lived ONCE, as a loop literal in a UI file
+ * (`src/ui/screens/planner/dice.ts`), and four other places re-stated a
+ * different subset of it by hand. F12 named that; this is the type it asked
+ * for.
+ *
+ * NO SRD FILE CLOSES THIS SET AND NONE COULD. `docs/srd/source/` is class,
+ * weapon and species content — it prints the dice that particular rules USE, so
+ * it can close `hitDieSizes` and `martialArtsDieSizes` below but never the
+ * vocabulary itself. This list is therefore the OWNER'S, and is recorded as
+ * such rather than dressed up with a citation it does not have. `d2` and `d3`
+ * are absent because the owner left them out; that is a judgement, not a
+ * sourcing claim.
+ *
+ * NOT A SIZE, AND SO NOT THIS TYPE — three things that look like they belong
+ * here and do not:
+ *
+ *  - A DAMAGE EXPRESSION. `character_weapons.damage_dice` is free text and must
+ *    stay so: the source's own Blowgun does `1` damage with no die at all
+ *    (`docs/srd/source/weapons-table.txt:46`), Shillelagh's level-17 step is
+ *    `2d6` (`weapon-attack-cantrips.txt:53-54`) and True Strike varies the
+ *    COUNT at a fixed d6 (`:29`). A size cannot hold any of the three. This is
+ *    the D12/Q4 site and it is already decided the D12/Q4 way.
+ *  - A ROLLED FACE. `character_hit_point_rolls.rolled_value` is 1..12 from
+ *    `SHEET_ROLL_BOUNDS`; its ceiling merely HAPPENS to equal a die size.
+ *  - A COUNT of dice. `DiceConfig.basicDice` is 1..20 and is not a vocabulary.
+ *
+ * @see hitDieSizes for the sourced subset a class's Hit Point Die may take.
+ */
+export const dieSizes = [4, 6, 8, 10, 12, 20, 100] as const;
+export type DieSize = (typeof dieSizes)[number];
+
+/**
+ * THE HIT DIE — the size printed in a class's Core Traits row.
+ *
+ * `docs/srd/source/class-core-traits.txt` prints twelve classes and four sizes:
+ * D12 Barbarian (L21); D10 Fighter, Paladin, Ranger (L125, L176, L202); D8
+ * Bard, Cleric, Druid, Monk, Rogue, Warlock (L46, L72, L99, L151, L229, L279);
+ * D6 Sorcerer, Wizard (L255, L306). No class has a d4 and none has a d20, so
+ * this is CLOSED ON EVIDENCE the way `weaponMasteryProperties` is — not on a
+ * memory of the game.
+ *
+ * `satisfies readonly DieSize[]` IS THE SUBSET RELATION, STATED. Writing `7`
+ * here does not compile, and neither does a size the vocabulary above does not
+ * contain. That is the whole reason the two lists are declared in one file.
+ */
+export const hitDieSizes = [6, 8, 10, 12] as const satisfies readonly DieSize[];
+export type HitDieSize = (typeof hitDieSizes)[number];
+
+/**
+ * THE MONK'S MARTIAL ARTS DIE — a DIFFERENT SUBJECT with, as it happens, the
+ * same four members.
+ *
+ * `docs/srd/source/attack-class-features.txt:15-35` is the whole twenty-row
+ * Martial Arts column: 1d6 at levels 1-4, 1d8 at 5-10, 1d10 at 11-16, 1d12 at
+ * 17-20. Counted from the extract rather than recalled — those twenty rows hold
+ * four `1d6`, six `1d8`, six `1d10` and four `1d12`, and the string `1d4` does
+ * not occur ANYWHERE in the file. L52 states the feature's floor in prose as
+ * well: "You can roll 1d6 in place of the normal damage".
+ *
+ * **THE 4 THAT WAS HERE UNTIL NOW WAS UNSOURCED.** Both the CHECK on
+ * `class_martial_arts_dice` and the parse guard in `class-traits-srd.ts`
+ * admitted `4`, which is the 2014 edition's level-1 Monk die and is not in the
+ * bundled 5.2 extract. F12 read the two CHECKs as differing legitimately by
+ * that value; measured against the source they do not — they differ by exactly
+ * the one value neither subject has. The CHECK's own stated purpose is that "a
+ * mis-parse fails the seed instead of writing twelve plausible-looking wrong
+ * rows", and an extra rung at the bottom of the ladder defeats it at the first
+ * row of the table.
+ *
+ * **STILL A SEPARATE DECLARATION FROM `hitDieSizes`, AND F12 IS RIGHT ABOUT
+ * THAT.** Two lists with equal members are not one list. A d20 hit die and a
+ * d20 Martial Arts die would be wrong for different reasons, they are sourced
+ * from different tables, and if 2014-edition content is ever bundled this one
+ * gains a `4` while the other does not. Merging them would make that a shared
+ * edit.
+ *
+ * **THE LIMIT OF THIS, SAID PLAINLY.** TypeScript is structural, so
+ * `HitDieSize` and `MartialArtsDieSize` are the same type today and mixing them
+ * up compiles. What `satisfies` buys is real and narrower: each list is checked
+ * to be a subset of `DieSize`, and a typo in either fails to compile. Making
+ * them nominally distinct needs a phantom brand on a numeric literal, which was
+ * rejected — every construction site would need a cast, `$type<>()` would carry
+ * a non-primitive into drizzle-zod's contract derivation, and the mix-up it
+ * would catch cannot currently produce a wrong number, because the two sets are
+ * member-for-member equal.
+ */
+export const martialArtsDieSizes = [
+  6, 8, 10, 12,
+] as const satisfies readonly DieSize[];
+export type MartialArtsDieSize = (typeof martialArtsDieSizes)[number];
+
+/**
+ * Membership tests for the three lists above.
+ *
+ * Separate from {@link isEnumValue} because that one takes `readonly string[]`
+ * and these vocabularies are integers — the same reason `oneOf` in
+ * `db/schema/columns.ts` cannot build these CHECKs and `integerOneOf` exists
+ * beside it.
+ *
+ * THESE ARE THE RUNTIME HALF OF THE TYPE, AND THEY ARE WHERE THE GUARD MOVED
+ * TO. `fixedHitPointsPerLevel` used to test `hitDie >= 2` at the point of USE,
+ * which admitted every integer and returned 4.5 hit points per level for a d7.
+ * A closed parameter type makes that call a compile error, and the runtime
+ * question — "is this integer off the disk actually a hit die?" — belongs at
+ * the boundary where the untrusted integer arrives instead.
+ */
+export function isDieSize(candidate: number): candidate is DieSize {
+  return (dieSizes as readonly number[]).includes(candidate);
+}
+
+export function isHitDieSize(candidate: number): candidate is HitDieSize {
+  return (hitDieSizes as readonly number[]).includes(candidate);
+}
+
+export function isMartialArtsDieSize(
+  candidate: number,
+): candidate is MartialArtsDieSize {
+  return (martialArtsDieSizes as readonly number[]).includes(candidate);
+}
+
 export const freeCastRecoveries = [
   'long_rest',
   'short_rest',
