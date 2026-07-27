@@ -18,6 +18,7 @@ import { getSqlite3, MemoryDatabaseStorage } from '../../helpers/open-db';
 import { DatabaseContext } from '../../../src/db/database';
 import {
   CharacterState,
+  CHARACTER_SNAPSHOT_SCHEMA_VERSION,
   CHARACTER_STATE_COLUMNS,
   CHARACTER_STATE_TABLES,
 } from '../../../src/character/character-state';
@@ -209,6 +210,7 @@ describe('candidate database semantic audit', () => {
       'character_armor',
       'character_background',
       'character_class_levels',
+      'character_effects',
       'character_hit_point_rolls',
       'character_operations',
       'character_rule_overrides',
@@ -816,6 +818,68 @@ describe('candidate database semantic audit', () => {
 
     expect(() => auditCandidateDatabase(quarantined(bytesOf(db)))).toThrow(
       'selects a weapon mastery without naming the property',
+    );
+  });
+
+  it('refuses a snapshot effect whose payload contradicts its kind', () => {
+    // Five more CHECKs a live row cannot break and snapshot JSON can, on the
+    // newest character-owned table. `restore` would turn this into an INSERT
+    // that dies with SQLITE_CONSTRAINT_CHECK mid-undo, after the DELETEs — the
+    // same failure the weapon case above exists to prevent, reached the same
+    // way.
+    const db = freshDatabase();
+    seedTwoCharacters(db);
+    db.exec(
+      `INSERT INTO character_effects (
+         id, character_id, sort_order, effect_kind, damage_type, label
+       ) VALUES (1, 1, 1, 'damage_resistance', 'Poison', 'Dwarven Resilience')`,
+    );
+    const snapshot = snapshotOf(db, 1);
+    // `snapshotOf` labels its output `a7-v2`, and each version is audited at
+    // ITS OWN table set — so an effect only comes under scrutiny in a snapshot
+    // that claims to carry effects at all. That is the version this build
+    // writes.
+    snapshot.schema_version = CHARACTER_SNAPSHOT_SCHEMA_VERSION;
+    const effect = (snapshot.character_effects as Record<string, unknown>[])[0]!;
+    expect(effect.hit_points_flat).toBeNull();
+    effect.hit_points_flat = 5;
+    insertSavePoint(db, 1, snapshot);
+
+    expect(() => auditCandidateDatabase(quarantined(bytesOf(db)))).toThrow(
+      'carries hit points without effect_kind hp_modifier',
+    );
+  });
+
+  it('refuses the same contradiction inside a legacy trait row', () => {
+    // The pre-inversion shape of the identical payload: five `effect_*` columns
+    // ON the trait, which `splitLegacyTraitEffect` migrates into an effect at
+    // restore. The stripped row passes every contract, so this is the only
+    // thing that looks at the payload at all.
+    const db = freshDatabase();
+    seedTwoCharacters(db);
+    db.exec(
+      `INSERT INTO character_species_traits (
+         id, character_id, sort_order, name
+       ) VALUES (1, 1, 1, 'Dwarven Resilience')`,
+    );
+    const snapshot = snapshotOf(db, 1);
+    // `a7-v4` AND NOT THE CURRENT VERSION, because that is the last version
+    // whose trait rows carried the payload — a save point on a real user's disk
+    // rather than a shape this build could write.
+    snapshot.schema_version = 'a7-v4';
+    const trait = (
+      snapshot.character_species_traits as Record<string, unknown>[]
+    )[0]!;
+    expect(Object.hasOwn(trait, 'effect_kind')).toBe(false);
+    trait.effect_kind = 'damage_resistance';
+    trait.effect_damage_type = 'Poison';
+    trait.effect_hit_points_flat = 5;
+    trait.effect_hit_points_per_level = null;
+    trait.effect_speed_bonus_feet = null;
+    insertSavePoint(db, 1, snapshot);
+
+    expect(() => auditCandidateDatabase(quarantined(bytesOf(db)))).toThrow(
+      'carries hit points without effect_kind hp_modifier',
     );
   });
 

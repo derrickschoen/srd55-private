@@ -7,6 +7,7 @@ import {
   type AuditEntityType,
   type SnapshotTable,
 } from '../domain/contracts/tables';
+import { migrateLegacyTraitRows } from '../rules/legacy-trait-effects';
 
 /**
  * THE VERSION EVERY SNAPSHOT THIS BUILD WRITES CARRIES.
@@ -14,7 +15,13 @@ import {
  * `a7-v2` differs from `a7-v1` in exactly one way: it also captures
  * `character_weapons`. `a7-v3` differs from `a7-v2` in exactly one way: it also
  * captures the three origin tables. `a7-v4` differs from `a7-v3` in exactly one
- * way: it also captures the four stored sheet inputs. No bump is cosmetic — a
+ * way: it also captures the four stored sheet inputs. `a7-v5` differs from
+ * `a7-v4` in TWO ways, and the second is why the bump was unavoidable rather
+ * than merely correct: it captures `character_effects`, AND its
+ * `character_species_traits` rows no longer carry the five `effect_*` columns,
+ * because the table no longer has them. A pre-v5 snapshot's trait rows DO carry
+ * them, so `restore` would build an `INSERT` naming columns that do not exist —
+ * see `restore` itself, which migrates them instead. No bump is cosmetic — a
  * reader must be able to tell "this snapshot recorded no armour" from "this
  * snapshot did not record armour at all", and the two are otherwise
  * indistinguishable. The first reading restores an empty list over the
@@ -29,7 +36,7 @@ import {
  * containing one. Undo, save-point restore and `exportCharacterBackup` — which
  * re-parses its own stored save points on the way out — would break together.
  */
-export const CHARACTER_SNAPSHOT_SCHEMA_VERSION = 'a7-v4' as const;
+export const CHARACTER_SNAPSHOT_SCHEMA_VERSION = 'a7-v5' as const;
 
 /**
  * WHICH TABLES EACH SNAPSHOT VERSION CARRIES.
@@ -75,11 +82,35 @@ const A7_V3_TABLES = [
   'character_background',
 ] as const satisfies readonly SnapshotTable[];
 
+/**
+ * `a7-v4` is a HISTORICAL FACT for the same reason `a7-v1`..`a7-v3` are, and
+ * THIS IS THE MOMENT IT BECOMES ONE: until this change it was an ALIAS for the
+ * live list, which is correct only while it is the current version. Freezing it
+ * by hand — rather than deriving it as "the current list minus
+ * `character_effects`" — is what stops it silently following the next
+ * classification change and lying about save points already on a user's disk.
+ *
+ * Getting this wrong is the most expensive mistake available in this change:
+ * every `a7-v4` snapshot would start throwing `Snapshot table character_effects
+ * must be a list.`, `src/db/candidate-audit.ts` would refuse to import any
+ * database image containing one, and undo, save-point restore and
+ * `exportCharacterBackup` — which re-parses its own stored save points on the
+ * way out — would break together.
+ */
+const A7_V4_TABLES = [
+  ...A7_V3_TABLES,
+  'character_armor',
+  'character_hit_point_rolls',
+  'character_skill_proficiencies',
+  'character_sheet_adjustments',
+] as const satisfies readonly SnapshotTable[];
+
 const SNAPSHOT_TABLES_BY_VERSION = {
   'a7-v1': A7_V1_TABLES,
   'a7-v2': A7_V2_TABLES,
   'a7-v3': A7_V3_TABLES,
-  'a7-v4': CHARACTER_STATE_TABLES,
+  'a7-v4': A7_V4_TABLES,
+  'a7-v5': CHARACTER_STATE_TABLES,
 } as const satisfies Readonly<Record<string, readonly SnapshotTable[]>>;
 
 /**
@@ -98,6 +129,7 @@ export const CHARACTER_SNAPSHOT_SCHEMA_VERSIONS = [
   'a7-v2',
   'a7-v3',
   'a7-v4',
+  'a7-v5',
 ] as const satisfies readonly (keyof typeof SNAPSHOT_TABLES_BY_VERSION)[];
 
 export type CharacterSnapshotSchemaVersion =
@@ -380,6 +412,20 @@ export class CharacterState {
    * standing. The alternative, treating the absent key as an empty list, would
    * assert "this character had no armour at that moment" — a claim the snapshot
    * never made, and one that would silently delete real data on undo.
+   *
+   * `character_effects` IS THE ONE EXCEPTION, AND IT IS NOT A HOLE IN THAT
+   * RULE — it is the rule applied to a table that changed shape rather than
+   * appeared. An `a7-v3` or `a7-v4` snapshot DOES record this character's
+   * effects; it records them as five columns on each `character_species_traits`
+   * row, because that is where they lived when it was written. So the snapshot
+   * genuinely made the claim, and honouring it means clearing the table and
+   * writing the migrated rows rather than leaving whatever is there now.
+   *
+   * Doing nothing instead would be worse in both directions: the legacy columns
+   * would reach `INSERT` and fail on a table that no longer has them, and if
+   * they were merely dropped the character would come back from undo with their
+   * resistances silently gone. `a7-v1` and `a7-v2` carry no trait rows at all,
+   * so they make no claim about effects and this leaves the table alone.
    */
   restore(characterId: number, snapshot: unknown): void {
     const { character, rows, tables } = this.validateSnapshot(
@@ -387,6 +433,15 @@ export class CharacterState {
       snapshot,
     );
     const carried = new Set<string>(tables);
+    const legacyTraits =
+      carried.has('character_species_traits') && !carried.has('character_effects')
+        ? migrateLegacyTraitRows(rows.character_species_traits ?? [])
+        : null;
+    if (legacyTraits !== null) {
+      // Join the DELETE pass, so the migrated rows replace what is there rather
+      // than piling on top of it. `DELETE_ORDER` already lists the table.
+      carried.add('character_effects');
+    }
 
     const restoreRows = (db: DatabaseContext): void => {
       db.exec(
@@ -415,12 +470,26 @@ export class CharacterState {
       }
 
       for (const table of tables) {
-        for (const sourceRow of rows[table] ?? []) {
+        const tableRows =
+          table === 'character_species_traits' && legacyTraits !== null
+            ? legacyTraits.rows
+            : rows[table] ?? [];
+        for (const sourceRow of tableRows) {
           insertRow(db, table, {
             ...sourceRow,
             character_id: characterId,
           });
         }
+      }
+      // `sort_order` is the position in the migrated list, one-based — the same
+      // rule the share import uses for a trait's order, and the only one
+      // available: the old model had no order of its own for an effect.
+      for (const [index, effect] of (legacyTraits?.effects ?? []).entries()) {
+        insertRow(db, 'character_effects', {
+          ...effect,
+          sort_order: index + 1,
+          character_id: characterId,
+        });
       }
     };
     this.db.transaction(restoreRows);

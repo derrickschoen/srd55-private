@@ -9,6 +9,10 @@ import {
 import type { DatabaseContext } from '../db/database';
 import type { SqlRow } from '../db/codecs';
 import {
+  migrateLegacyTraitRows,
+  splitLegacyTraitEffect,
+} from '../rules/legacy-trait-effects';
+import {
   assertBackupHeader,
   assertExactKeys,
   assertKeysAllowingAbsent,
@@ -31,6 +35,7 @@ import {
   type RowContractTable,
 } from '../domain/contracts/rows';
 import {
+  effectPayloadKindError,
   slotExclusiveAssignmentError,
   uniqueRowIdError,
   armorDexBonusPairError,
@@ -362,7 +367,48 @@ function validateCharacterRows(
       continue;
     }
     for (const [index, row] of rows.entries()) {
-      assertRowShape(table, row, `${label}.${table}[${index}]`);
+      // A FILE WRITTEN BEFORE THE EFFECT MODEL WAS INVERTED CARRIES FIVE EXTRA
+      // KEYS ON EVERY TRAIT ROW, and the row contracts are `z.strictObject` —
+      // an unknown key is rejected. Validating the STRIPPED row is what keeps
+      // every backup a user already holds openable; the payload itself is
+      // migrated into `character_effects` at import (see `importCurrentTables`
+      // and `CharacterState.restore`), so nothing is silently dropped by
+      // ignoring it here. `splitLegacyTraitEffect` is a no-op on a modern row.
+      const legacy =
+        table === 'character_species_traits'
+          ? splitLegacyTraitEffect(row)
+          : null;
+      assertRowShape(
+        table,
+        legacy === null ? row : legacy.row,
+        `${label}.${table}[${index}]`,
+      );
+      if (legacy?.effect != null) {
+        // THE MIGRATED PAYLOAD IS HELD TO THE NEW TABLE'S RULES, because that
+        // is the table it is about to be inserted into. Validating only the
+        // stripped row would let a hand-edited trait — `damage_resistance`
+        // carrying hit points — pass every contract here and then abort the
+        // transaction at the INSERT with a raw SQLITE_CONSTRAINT_CHECK. The
+        // share arm already refuses the same document with a sentence
+        // (`src/sharing/schema.ts`); this is what stops a file and a link being
+        // held to different standards.
+        const payload = effectPayloadKindError(
+          legacy.effect,
+          `${label}.${table}[${index}] effect`,
+        );
+        if (payload !== null) {
+          throw new BackupValidationError(payload);
+        }
+      }
+      if (table === 'character_effects') {
+        const payload = effectPayloadKindError(
+          row,
+          `${label}.${table}[${index}]`,
+        );
+        if (payload !== null) {
+          throw new BackupValidationError(payload);
+        }
+      }
       if (table === 'character_weapons') {
         // Shared with the quarantined-image audit — see `row-rules.ts`. The
         // live table's CHECK cannot see a row that is still JSON.
@@ -1077,6 +1123,7 @@ interface CurrentImportMaps {
   readonly character_hit_point_rolls: Map<number, number>;
   readonly character_skill_proficiencies: Map<number, number>;
   readonly character_sheet_adjustments: Map<number, number>;
+  readonly character_effects: Map<number, number>;
   readonly spell_loadouts: Map<number, number>;
   readonly sourceUuids: Map<number, string>;
   readonly sourceRows: Map<number, BackupRow>;
@@ -1102,6 +1149,7 @@ function importCurrentTables(
     character_hit_point_rolls: new Map(),
     character_skill_proficiencies: new Map(),
     character_sheet_adjustments: new Map(),
+    character_effects: new Map(),
     spell_loadouts: new Map(),
     sourceUuids: new Map(),
     sourceRows: new Map(
@@ -1250,9 +1298,34 @@ function importCurrentTables(
       }),
     );
   }
-  for (const row of document.tables.character_species_traits) {
+  // THE ONE PLACE A LEGACY FILE IS ACTUALLY MIGRATED. `migrateLegacyTraitRows`
+  // strips the five retired `effect_*` keys — which would otherwise become
+  // column names in the generated INSERT — and hands back the effects they
+  // encoded. A file written by THIS build has no such keys, so the migrated
+  // effect list is empty and this loop is the old one. A file written before
+  // the inversion
+  // has no `character_effects` key at all (`BACKUP_OPTIONAL_TABLES` defaults it
+  // to `[]`), so the migrated rows are the only effects the character gets and
+  // there is nothing for them to collide with.
+  const legacyTraits = migrateLegacyTraitRows(
+    document.tables.character_species_traits,
+  );
+  // The id map is keyed on the ORIGINAL row's id, taken from the document
+  // rather than from the stripped copy: a save point in the same document names
+  // these rows by their old ids, and `migrateLegacyTraitRows` preserves order
+  // and length so the two lists stay aligned by index.
+  for (const [index, row] of legacyTraits.rows.entries()) {
+    const original = document.tables.character_species_traits[index];
+    /* c8 ignore next 5 -- unreachable: the migrated list is built from this one
+       and has the same length. Kept so a future change to the helper that
+       dropped or reordered a row fails loudly instead of writing NaN keys. */
+    if (original === undefined) {
+      throw new BackupValidationError(
+        'Character backup trait migration lost a row.',
+      );
+    }
     maps.character_species_traits.set(
-      Number(row.id),
+      Number(original.id),
       insertPortableRow(db, 'character_species_traits', row, {
         character_id: characterId,
       }),
@@ -1293,6 +1366,49 @@ function importCurrentTables(
       insertPortableRow(db, 'character_skill_proficiencies', row, {
         character_id: characterId,
       }),
+    );
+  }
+  // The character's own effects. `source_instance_id` is the ONLY column here
+  // that needs rewriting, and it is remapped rather than resolved: it points at
+  // another CHARACTER-OWNED row whose id this import has just minted, exactly
+  // like `spell_selection_slots.source_instance_id` above. A null stays null —
+  // an effect with no source instance is the common case, not an error — and a
+  // non-null id the document does not describe is refused rather than silently
+  // nulled, because that document is internally inconsistent.
+  for (const row of document.tables.character_effects) {
+    const oldSourceId =
+      row.source_instance_id === null ? null : Number(row.source_instance_id);
+    let sourceId: number | null = null;
+    if (oldSourceId !== null) {
+      const mapped = maps.character_source_instances.get(oldSourceId);
+      if (mapped === undefined) {
+        throw new BackupValidationError(
+          'Character backup effect source is missing.',
+        );
+      }
+      sourceId = mapped;
+    }
+    maps.character_effects.set(
+      Number(row.id),
+      insertPortableRow(db, 'character_effects', row, {
+        character_id: characterId,
+        source_instance_id: sourceId,
+      }),
+    );
+  }
+  // The migrated legacy effects go in LAST and with a fresh `sort_order`, so a
+  // document that carries both (which no writer produces, but a hand-edited
+  // file could) keeps its explicit rows in front of the derived ones.
+  for (const [index, effect] of legacyTraits.effects.entries()) {
+    insertPortableRow(
+      db,
+      'character_effects',
+      { ...effect },
+      {
+        character_id: characterId,
+        sort_order: document.tables.character_effects.length + index + 1,
+      },
+      new Set(),
     );
   }
   for (const row of document.tables.character_sheet_adjustments) {
@@ -1388,6 +1504,7 @@ function portableSnapshots(
       current.character_skill_proficiencies,
     ),
     character_sheet_adjustments: new Map(current.character_sheet_adjustments),
+    character_effects: new Map(current.character_effects),
   };
   const next = Object.fromEntries(
     CHARACTER_STATE_TABLES.map((table) => [
@@ -1547,6 +1664,24 @@ function portableSnapshots(
             ...row,
             id: ids[table].get(Number(row.id)),
             character_id: characterId,
+          }));
+        // `character_effects` needs its OWN branch and cannot join the group
+        // above: it is the first character-owned table to reference another
+        // one, so its `source_instance_id` must be remapped to the id this
+        // import minted. Leaving it in the group would write a snapshot
+        // pointing at another character's source instance — which the composite
+        // foreign key would then refuse on the next restore, mid-undo.
+        case 'character_effects':
+          return rowsOf(table).map((row) => ({
+            ...row,
+            id: ids[table].get(Number(row.id)),
+            character_id: characterId,
+            source_instance_id:
+              row.source_instance_id === null
+                ? null
+                : ids.character_source_instances.get(
+                    Number(row.source_instance_id),
+                  ) ?? null,
           }));
       }
     };

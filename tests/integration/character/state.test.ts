@@ -131,11 +131,20 @@ function seedFixture(): void {
   );
   db.exec(
     `INSERT INTO character_species_traits (
-       character_id, sort_order, name, description, effect_kind,
-       effect_hit_points_flat, effect_hit_points_per_level,
-       created_at, updated_at
+       character_id, sort_order, name, description, created_at, updated_at
      ) VALUES (?, 1, 'Dwarven Toughness',
-       'Your Hit Point maximum increases by 1.', 'hp_modifier', 1, 1, ?, ?)`,
+       'Your Hit Point maximum increases by 1.', ?, ?)`,
+    [characterId, createdAt, updatedAt],
+  );
+  // The effect the trait used to carry in its own columns. Its
+  // `source_instance_id` points at the character's own feat source, so the
+  // capture and restore assertions exercise the composite reference rather
+  // than only the null limb.
+  db.exec(
+    `INSERT INTO character_effects (
+       character_id, sort_order, effect_kind, hit_points_flat,
+       hit_points_per_level, source_instance_id, label, created_at, updated_at
+     ) VALUES (?, 1, 'hp_modifier', 1, 1, 2, 'Dwarven Toughness', ?, ?)`,
     [characterId, createdAt, updatedAt],
   );
   db.exec(
@@ -218,12 +227,14 @@ describe('capture and deterministic diff', () => {
       'character',
       ...CHARACTER_STATE_TABLES,
     ]);
-    // a7-v4 is the version that also captures the four stored sheet inputs.
+    // a7-v5 is the version that also captures `character_effects` — and whose
+    // `character_species_traits` rows no longer carry the five `effect_*`
+    // columns, because the table no longer has them.
     // Written out rather than compared against the exported constant: a version
     // identifier is a wire fact that other stored data is matched against, so a
     // test that reads it from the module under test could never notice it
     // changing.
-    expect(snapshot.schema_version).toBe('a7-v4');
+    expect(snapshot.schema_version).toBe('a7-v5');
     expect(Object.keys(snapshot.character)).toEqual(CHARACTER_STATE_COLUMNS);
     expect(snapshot.character).toEqual({
       name: 'Snapshot Hero',
@@ -256,12 +267,22 @@ describe('capture and deterministic diff', () => {
       name: 'Dwarf',
       base_speed_feet: 30,
     });
-    // The mechanical payload travels as columns, not as prose to re-parse.
+    // The trait carries TEXT ONLY now...
     expect(snapshot.character_species_traits[0]).toMatchObject({
       name: 'Dwarven Toughness',
+    });
+    expect(snapshot.character_species_traits[0]).not.toHaveProperty(
+      'effect_kind',
+    );
+    // ...and the mechanical payload travels in its own table, as columns and
+    // not as prose to re-parse, with the source that granted it.
+    expect(snapshot.character_effects).toHaveLength(1);
+    expect(snapshot.character_effects[0]).toMatchObject({
       effect_kind: 'hp_modifier',
-      effect_hit_points_flat: 1,
-      effect_hit_points_per_level: 1,
+      hit_points_flat: 1,
+      hit_points_per_level: 1,
+      label: 'Dwarven Toughness',
+      source_instance_id: 2,
     });
     expect(snapshot.character_background[0]).toMatchObject({
       name: 'Soldier',
@@ -316,6 +337,7 @@ describe('capture and deterministic diff', () => {
       character_hit_point_rolls: [],
       character_skill_proficiencies: [],
       character_sheet_adjustments: [],
+      character_effects: [],
     };
     const before = {
       character: { name: 'Before' },
@@ -347,6 +369,7 @@ describe('capture and deterministic diff', () => {
       character_hit_point_rolls: [],
       character_skill_proficiencies: [],
       character_sheet_adjustments: [],
+      character_effects: [],
     };
 
     expect(state.diff(before, after)).toEqual([
@@ -723,7 +746,7 @@ describe('restoring a snapshot written by an older build', () => {
     // oversight: a current snapshot DOES speak for weapons, so restoring it
     // removes one added afterwards.
     const snapshot = mutableCapture();
-    expect(snapshot.schema_version).toBe('a7-v4');
+    expect(snapshot.schema_version).toBe('a7-v5');
     db.exec(
       `INSERT INTO character_weapons (character_id, name)
        VALUES (?, 'Bought since')`,
@@ -738,6 +761,196 @@ describe('restoring a snapshot written by an older build', () => {
         [characterId],
       ),
     ).toEqual([{ name: 'Shortsword' }]);
+  });
+
+  /**
+   * AN `a7-v4` SAVE POINT, HAND-BUILT, EXACTLY AS THE BUILD BEFORE THE EFFECT
+   * MODEL WAS INVERTED WROTE ONE.
+   *
+   * WRITTEN OUT AS A LITERAL AND NEVER DERIVED FROM `capture()`. A fixture
+   * produced by the code under test would carry today's shape — no `effect_*`
+   * keys on the trait row and a `character_effects` array beside it — and the
+   * suite would test the new format against itself while the regression it
+   * exists to catch went past. This one carries the payload where that build
+   * put it: FIVE COLUMNS ON THE TRAIT ROW, on a table that no longer has them.
+   *
+   * Without the migration in `CharacterState.restore` this snapshot cannot be
+   * restored at all: `insertRow` builds its column list from the row's own
+   * keys, so it would emit `INSERT INTO character_species_traits (…,
+   * effect_kind, …)` and fail on a column that does not exist. Every save point
+   * on a user's disk is one of these.
+   */
+  function preEffectsSnapshot(): MutableSnapshot {
+    return {
+      schema_version: 'a7-v4',
+      character: {
+        name: 'Pre-Effects Hero',
+        strength: 15,
+        dexterity: 14,
+        constitution: 13,
+        intelligence: 12,
+        wisdom: 11,
+        charisma: 10,
+        proficiency_bonus_override: 4,
+        rules_edition_preference: '2024',
+        allow_legacy: 1,
+        notes: 'preserve this note',
+      },
+      character_class_levels: [],
+      character_source_instances: [],
+      spell_selection_slots: [],
+      wizard_spellbook_entries: [],
+      warning_acknowledgements: [],
+      character_weapons: [],
+      character_species: [
+        {
+          id: 40,
+          character_id: characterId,
+          name: 'Tiefling',
+          creature_type: 'Humanoid',
+          size: 'Medium',
+          base_speed_feet: 30,
+          notes: null,
+          created_at: null,
+          updated_at: null,
+        },
+      ],
+      character_species_traits: [
+        {
+          id: 41,
+          character_id: characterId,
+          sort_order: 1,
+          name: 'Fiendish Legacy',
+          description: 'You gain the level 1 benefit of the chosen legacy.',
+          // THE RETIRED MEMBER, on a save point that was legal when written.
+          effect_kind: 'granted_spells',
+          effect_damage_type: null,
+          effect_hit_points_flat: null,
+          effect_hit_points_per_level: null,
+          effect_speed_bonus_feet: null,
+          notes: null,
+          created_at: null,
+          updated_at: null,
+        },
+        {
+          id: 42,
+          character_id: characterId,
+          sort_order: 2,
+          name: 'Dwarven Toughness',
+          description: 'Your Hit Point maximum increases by 1.',
+          effect_kind: 'hp_modifier',
+          effect_damage_type: null,
+          effect_hit_points_flat: 0,
+          effect_hit_points_per_level: 1,
+          effect_speed_bonus_feet: null,
+          notes: null,
+          created_at: null,
+          updated_at: null,
+        },
+        {
+          id: 43,
+          character_id: characterId,
+          sort_order: 3,
+          name: 'Stonecunning',
+          description: 'Prose, and nothing else.',
+          effect_kind: null,
+          effect_damage_type: null,
+          effect_hit_points_flat: null,
+          effect_hit_points_per_level: null,
+          effect_speed_bonus_feet: null,
+          notes: null,
+          created_at: null,
+          updated_at: null,
+        },
+      ],
+      character_background: [],
+      character_armor: [],
+      character_hit_point_rolls: [],
+      character_skill_proficiencies: [],
+      character_sheet_adjustments: [],
+    } as unknown as MutableSnapshot;
+  }
+
+  it('restores a pre-inversion save point, migrating its trait payload', () => {
+    const snapshot = preEffectsSnapshot();
+    // Guards the fixture itself: if it were ever regenerated from current code
+    // it would have no `effect_kind` key, and this fails rather than the suite
+    // quietly testing the new format against itself.
+    expect(snapshot.schema_version).toBe('a7-v4');
+    expect(
+      Object.hasOwn(
+        (snapshot.character_species_traits as Record<string, unknown>[])[0] ?? {},
+        'effect_kind',
+      ),
+    ).toBe(true);
+    expect(Object.hasOwn(snapshot, 'character_effects')).toBe(false);
+
+    state.restore(characterId, snapshot);
+
+    // The trait rows land WITHOUT the retired columns...
+    expect(
+      db.allRaw(
+        `SELECT name, description FROM character_species_traits
+         WHERE character_id = ? ORDER BY sort_order`,
+        [characterId],
+      ),
+    ).toEqual([
+      {
+        name: 'Fiendish Legacy',
+        description: 'You gain the level 1 benefit of the chosen legacy.',
+      },
+      {
+        name: 'Dwarven Toughness',
+        description: 'Your Hit Point maximum increases by 1.',
+      },
+      { name: 'Stonecunning', description: 'Prose, and nothing else.' },
+    ]);
+    // ...and their payload becomes effect rows, labelled with the trait that
+    // carried it. ONE row from three traits: `Stonecunning` was always prose,
+    // and `granted_spells` is retired — its spells come from `src/grants/` and
+    // never lived here, so dropping the marker loses the character nothing.
+    expect(
+      db.allRaw(
+        `SELECT sort_order, effect_kind, hit_points_flat, hit_points_per_level,
+                source_instance_id, label
+         FROM character_effects WHERE character_id = ? ORDER BY sort_order`,
+        [characterId],
+      ),
+    ).toEqual([
+      {
+        sort_order: 1,
+        effect_kind: 'hp_modifier',
+        hit_points_flat: 0,
+        hit_points_per_level: 1,
+        // A pre-inversion save point predates the provenance column entirely,
+        // so nothing is invented for it.
+        source_instance_id: null,
+        label: 'Dwarven Toughness',
+      },
+    ]);
+  });
+
+  it('replaces the effects a pre-inversion save point speaks for', () => {
+    // The `a7-v1` case above leaves weapons alone because that snapshot never
+    // MENTIONED them. This is the opposite call, and the difference is what the
+    // snapshot claims: an `a7-v4` save point DOES record this character's
+    // effects — it records them on the trait rows — so restoring it must clear
+    // what is there now rather than pile the migrated rows on top.
+    expect(
+      Number(
+        db.scalar(
+          'SELECT count(*) FROM character_effects WHERE character_id = ?',
+          [characterId],
+        ),
+      ),
+    ).toBe(1);
+    state.restore(characterId, preEffectsSnapshot());
+    expect(
+      db.allRaw(
+        'SELECT label FROM character_effects WHERE character_id = ? ORDER BY id',
+        [characterId],
+      ),
+    ).toEqual([{ label: 'Dwarven Toughness' }]);
   });
 
   it('refuses a version it cannot read, before touching a row', () => {

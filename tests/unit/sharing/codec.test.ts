@@ -152,6 +152,47 @@ const complete: CharacterShareDocument = {
     // The free-text majority — 26 of the 33 printed traits look like this.
     { name: 'Stonecunning' },
   ],
+  // THE CHARACTER'S OWN EFFECTS, one of each kind plus the untyped resistance,
+  // so the pin sees a real value in every payload slot and in the reference.
+  // The FIRST is the case the whole inversion exists for: a resistance whose
+  // type the player has not chosen, NAMED by the grant that gave it, which the
+  // old model could only count.
+  effects: [
+    {
+      kind: 'damage_resistance',
+      label: 'Fiendish Legacy',
+      // The SAME reference space `selections[].ref` uses, so an effect and the
+      // spells from one feat name the same source instance.
+      sourceRef: 1,
+    },
+    {
+      kind: 'damage_resistance',
+      label: 'Dwarven Resilience',
+      damage_type: 'Poison',
+      notes: 'From the template.',
+    },
+    {
+      kind: 'hp_modifier',
+      label: 'Dwarven Toughness',
+      hit_points_flat: 1,
+      hit_points_per_level: 1,
+    },
+    {
+      kind: 'speed',
+      label: 'Fleet of Foot',
+      speed_bonus_feet: 5,
+    },
+    // GRANTED BY THE SUBCLASS, NOT THE CLASS. `classes[0]` names a subclass, so
+    // ref 0 mints TWO source instances on import; without the flag this effect
+    // would come back attached to `Wizard 5` — a real row, and the wrong one.
+    {
+      kind: 'hp_modifier',
+      label: 'Arcane Ward',
+      hit_points_per_level: 2,
+      sourceRef: 0,
+      sourceSubclass: true,
+    },
+  ],
   background: {
     name: 'Soldier',
     ability_score_1: 'Strength',
@@ -487,6 +528,64 @@ describe('character-share positional codec', () => {
         ['arcana', 'perception'],
         [3, 'Ring of Protection, house ruled.'],
       ],
+      // Element 14: the character's own EFFECTS, as a flat list and NOT a
+      // fourth slot in the origin group above. Effects are no longer
+      // species-scoped, so nesting them under the origin would re-create the
+      // coupling this model was inverted to remove — and would change what
+      // element 12 means for every link already in the wild.
+      //
+      // Nine slots each: kind, label, the two text fields, the three signed
+      // integers, then the two provenance slots — the source reference, and the
+      // flag that says WHICH of the two roots that reference mints. The last
+      // row is the only one that sets it, and it is why the slot exists: ref 0
+      // is a class carrying a subclass, so the number alone names two rows.
+      [
+        [
+          'damage_resistance',
+          'Fiendish Legacy',
+          null,
+          null,
+          null,
+          null,
+          null,
+          1,
+          null,
+        ],
+        [
+          'damage_resistance',
+          'Dwarven Resilience',
+          'Poison',
+          'From the template.',
+          null,
+          null,
+          null,
+          null,
+          null,
+        ],
+        [
+          'hp_modifier',
+          'Dwarven Toughness',
+          null,
+          null,
+          1,
+          1,
+          null,
+          null,
+          null,
+        ],
+        ['speed', 'Fleet of Foot', null, null, null, null, 5, null, null],
+        [
+          'hp_modifier',
+          'Arcane Ward',
+          null,
+          null,
+          null,
+          2,
+          null,
+          0,
+          true,
+        ],
+      ],
     ]);
   });
 
@@ -673,8 +772,13 @@ describe('character-share positional codec', () => {
       // The sheet element, on identical terms: always written, four nulls, each
       // decoding to an absent key.
       [null, null, null, null],
+      // Element 14, the character's own effects: always written, `null` when
+      // there are none, decoding to an absent key like every section above.
+      // NOT a group — effects are one section, and a nested tuple here would
+      // suggest a structure they do not have.
+      null,
     ]);
-    expect(positional).toHaveLength(14);
+    expect(positional).toHaveLength(15);
     expect((positional[2] as unknown[]).length).toBe(11);
     expect((positional[3] as unknown[][])[0]).toHaveLength(8);
     expect((positional[4] as unknown[][])[0]).toHaveLength(6);
@@ -688,6 +792,7 @@ describe('character-share positional codec', () => {
     expect(minimal).not.toHaveProperty('hitPointRolls');
     expect(minimal).not.toHaveProperty('skillProficiencies');
     expect(minimal).not.toHaveProperty('sheetAdjustment');
+    expect(minimal).not.toHaveProperty('effects');
     await expect(
       decodeShareFragment(await encodeShareFragment(minimal)),
     ).resolves.toEqual(minimal);
@@ -900,6 +1005,127 @@ describe('a share link generated before the sheet inputs travelled', () => {
     const decodedOld = await decodeShareFragment(PRE_SHEET_FRAGMENT);
     const decodedNew = await decodeShareFragment(
       nodeFragment([...PRE_SHEET_WIRE, [null, null, null, null]]),
+    );
+    expect(decodedNew).toEqual(decodedOld);
+  });
+});
+
+/**
+ * A REAL LINK FROM THE BUILD BEFORE THE EFFECT MODEL WAS INVERTED.
+ *
+ * FOURTEEN elements, and its mechanical payload is written where that build
+ * wrote it: on the TRAIT ROWS, five slots into each trait tuple. This build
+ * writes `null` in those five slots and puts the effects in element 14 instead,
+ * so this fixture is the only thing standing between a user's pasted link and
+ * silent data loss.
+ *
+ * HAND-BUILT, AND NOT PRODUCED BY `shareDocumentToPositional`. A fixture
+ * generated by the code under test tracks the format wherever it goes: it would
+ * have fifteen elements and empty effect slots the moment this build ran, and
+ * the suite would quietly start testing the new format against itself while the
+ * regression it exists to catch sailed past. The fragment below is the gzip of
+ * the literal, produced by Node's zlib rather than by the encoder.
+ *
+ * THE THREE TRAITS ARE CHOSEN, NOT ARBITRARY:
+ *
+ *  - `Fiendish Legacy` carries `granted_spells`, RETIRED from the vocabulary.
+ *    It must decode (rejecting would make this link unreadable) and must NOT
+ *    become an effect (there is no such kind, and the spells it marked come
+ *    from the grant system);
+ *  - `Dwarven Toughness` carries the two-column HP payload, which must survive
+ *    as an `hp_modifier` effect;
+ *  - `Ancestral Guard` carries a typed resistance, which must survive as one.
+ */
+const PRE_EFFECTS_FRAGMENT =
+  'H4sIAAAAAAAAA3WRW2scMQyF_4rQs6aMN1so-1Zo2n1IILR5KUNZFFszY_DIwZdt8-_L' +
+  'XLq0yxaMEPY5-tBxh05dM9VQvA2cc5NfJYTc2JET2yKpySMnQTLU4VOS5r7vxZYMR0kR' +
+  'yezIvCezJ9OSuaMPpDWEq_KDuq4l3LW7_WFhHHo_jEUSrpo9mWvHbDGEvXDBzTn3Bw6S' +
+  'ymbbXaR_nSt81-Gzlz54HZDwWCfW6B0SPorzddom3bUzDz97UefzCA8ysH1Dwu-xwsBe' +
+  'oYwCQc4SwMCLqPS-QOyXazvGLAph8bxDwiGxFnGnNUi8lcifWPDTT05nUXiOdRhVcl6h' +
+  'CY6-wFP0WmDiX36qE3i1SThLhpc3MDNofD1N0fneX5JcSrvFOc__qFZySRzgS-XktpVG' +
+  'Pgt8lexzYbUCJc6sHBUcTzzIPHztTumiQsJVdHOjGfatRBVbVZe0_7f2P7-8WW8-_gaX' +
+  'JLFOmgIAAA';
+
+const PRE_EFFECTS_WIRE = [
+  'dnd-multiclass-spells-character-share',
+  1,
+  ['Pre-Effects Hero', 12, 15, 14, 10, 13, 8, null, null, null, null],
+  [[0, '2024:class:fighter', null, 4, 1, null, null, null]],
+  [[1, 'feat', '2024:feat:alert', null, 2, null]],
+  [],
+  [],
+  [],
+  [],
+  null,
+  null,
+  null,
+  [
+    ['Tiefling', 'Humanoid', 'Medium', null, 30],
+    [
+      ['Fiendish Legacy', 'You gain the level 1 benefit of the chosen legacy.',
+        'granted_spells', null, null, null, null, null],
+      ['Dwarven Toughness', 'Your Hit Point maximum increases by 1.',
+        'hp_modifier', null, null, 0, 1, null],
+      ['Ancestral Guard', 'You have Resistance to Poison damage.',
+        'damage_resistance', 'Poison', null, null, null, null],
+      ['Stonecunning', null, null, null, null, null, null, null],
+    ],
+    null,
+  ],
+  [null, null, null, null],
+];
+
+describe('a share link generated before the effect model was inverted', () => {
+  it('is fourteen elements, and the frozen fragment really contains them', () => {
+    // THE LOAD-BEARING GUARD. If the literal above were ever regenerated from
+    // current code it would have fifteen elements and no trait payload, and
+    // this fails rather than the suite quietly testing the new format against
+    // itself.
+    expect(PRE_EFFECTS_WIRE).toHaveLength(14);
+    const decodedWire = JSON.parse(
+      new TextDecoder().decode(
+        gunzipSync(independentBase64urlDecode(PRE_EFFECTS_FRAGMENT)),
+      ),
+    ) as unknown;
+    expect(decodedWire).toEqual(PRE_EFFECTS_WIRE);
+  });
+
+  it('still decodes, keeping the retired vocabulary readable', async () => {
+    const decoded = await decodeShareFragment(PRE_EFFECTS_FRAGMENT);
+    expect(decoded.character.name).toBe('Pre-Effects Hero');
+    expect(decoded.species?.name).toBe('Tiefling');
+    // THE PAYLOAD ARRIVES INTACT, on the trait rows where this link put it.
+    // The decoder does not migrate — `importCharacterShare` does — so what the
+    // document says is exactly what it said when it was minted.
+    expect(decoded.speciesTraits?.[0]).toMatchObject({
+      name: 'Fiendish Legacy',
+      // ACCEPTED, not rejected, even though `effectKinds` no longer has this
+      // member. Validating a link minted last week against this week's
+      // vocabulary is how you make somebody's pasted URL undecodable.
+      effect_kind: 'granted_spells',
+    });
+    expect(decoded.speciesTraits?.[1]).toMatchObject({
+      effect_kind: 'hp_modifier',
+      effect_hit_points_flat: 0,
+      effect_hit_points_per_level: 1,
+    });
+    expect(decoded.speciesTraits?.[2]).toMatchObject({
+      effect_kind: 'damage_resistance',
+      effect_damage_type: 'Poison',
+    });
+    // ABSENT, NOT EMPTY. The link never mentioned effects, and an empty list
+    // would be this build claiming the character had none — which is exactly
+    // wrong, since three of its traits carry one.
+    expect(Object.hasOwn(decoded, 'effects')).toBe(false);
+  });
+
+  it('decodes identically whether or not the fifteenth element is present', async () => {
+    // A fifteen-element tuple with a null effects slot and a fourteen-element
+    // tuple must mean the same thing, or a character shared today and the same
+    // character shared last month would import differently.
+    const decodedOld = await decodeShareFragment(PRE_EFFECTS_FRAGMENT);
+    const decodedNew = await decodeShareFragment(
+      nodeFragment([...PRE_EFFECTS_WIRE, null]),
     );
     expect(decodedNew).toEqual(decodedOld);
   });

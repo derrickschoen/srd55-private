@@ -57,6 +57,7 @@ function minimalCharacterBackup(): CharacterBackupDocument {
       character_hit_point_rolls: [],
       character_skill_proficiencies: [],
       character_sheet_adjustments: [],
+      character_effects: [],
     },
     references: {
       class_definitions: [],
@@ -452,6 +453,176 @@ describe('a hand-written backup that spells a flag as a JSON boolean', () => {
         withWeapon(
           weaponRow({ mastery_selected: false, mastery_property: null }),
         ),
+      ),
+    ).not.toThrow();
+  });
+});
+
+/**
+ * AN EFFECT'S PAYLOAD BELONGS TO ITS KIND, AND A FILE IS HELD TO THAT TOO.
+ *
+ * `character_effects` declares five kind/payload CHECKs, and a per-column
+ * contract cannot see any of them — each is about two columns together. Before
+ * `effectPayloadKindError` the only thing that noticed was the INSERT, which
+ * aborts the import with `SQLITE_CONSTRAINT_CHECK
+ * character_effects_hit_points_kind_check`: a constraint name, inside a rolled
+ * back transaction, naming neither the effect nor the file it came from. The
+ * SHARE arm has always refused the same document with a sentence, so this is a
+ * file and a link being held to one standard rather than two.
+ *
+ * BOTH DOORS ARE TESTED, because a file can carry the payload in two shapes: as
+ * a `character_effects` row, and as the five retired `effect_*` columns on a
+ * trait row written before the model was inverted — which
+ * `splitLegacyTraitEffect` turns into exactly the same INSERT.
+ */
+describe('a hand-edited backup whose effect payload contradicts its kind', () => {
+  const effectRow = (
+    overrides: Record<string, unknown> = {},
+  ): Record<string, unknown> => ({
+    id: 1,
+    character_id: 7,
+    sort_order: 1,
+    effect_kind: 'damage_resistance',
+    damage_type: 'Poison',
+    hit_points_flat: null,
+    hit_points_per_level: null,
+    speed_bonus_feet: null,
+    source_instance_id: null,
+    label: 'Dwarven Resilience',
+    notes: null,
+    created_at: null,
+    updated_at: null,
+    ...overrides,
+  });
+
+  const legacyTraitRow = (
+    overrides: Record<string, unknown> = {},
+  ): Record<string, unknown> => ({
+    id: 1,
+    character_id: 7,
+    sort_order: 1,
+    name: 'Dwarven Resilience',
+    description: null,
+    notes: null,
+    effect_kind: 'damage_resistance',
+    effect_damage_type: 'Poison',
+    effect_hit_points_flat: null,
+    effect_hit_points_per_level: null,
+    effect_speed_bonus_feet: null,
+    created_at: null,
+    updated_at: null,
+    ...overrides,
+  });
+
+  const withRows = (
+    table: 'character_effects' | 'character_species_traits',
+    rows: readonly Record<string, unknown>[],
+  ): unknown => {
+    const backup = structuredClone(minimalCharacterBackup()) as unknown as {
+      tables: Record<string, unknown[]>;
+    };
+    backup.tables[table] = [...rows];
+    return backup;
+  };
+
+  it('names the offending effect instead of a CHECK constraint', () => {
+    expect(() =>
+      validateCharacterBackup(
+        withRows('character_effects', [effectRow({ hit_points_flat: 5 })]),
+      ),
+    ).toThrow('carries hit points without effect_kind hp_modifier');
+    expect(() =>
+      validateCharacterBackup(
+        withRows('character_effects', [
+          effectRow({ effect_kind: 'hp_modifier', damage_type: null }),
+        ]),
+      ),
+    ).toThrow('has effect_kind hp_modifier and no hit point value');
+    expect(() =>
+      validateCharacterBackup(
+        withRows('character_effects', [
+          effectRow({ effect_kind: 'speed', damage_type: null }),
+        ]),
+      ),
+    ).toThrow('has effect_kind speed and no speed bonus');
+    expect(() =>
+      validateCharacterBackup(
+        withRows('character_effects', [effectRow({ speed_bonus_feet: 5 })]),
+      ),
+    ).toThrow('carries a speed bonus without effect_kind speed');
+    expect(() =>
+      validateCharacterBackup(
+        withRows('character_effects', [
+          effectRow({ effect_kind: 'speed', speed_bonus_feet: 5 }),
+        ]),
+      ),
+    ).toThrow('carries a damage type without effect_kind damage_resistance');
+  });
+
+  it('applies the same rule to the payload a legacy trait row still carries', () => {
+    // The trait's own columns are stripped before the contract sees them, so
+    // without this nothing in this file would look at the payload at all.
+    expect(() =>
+      validateCharacterBackup(
+        withRows('character_species_traits', [
+          legacyTraitRow({ effect_hit_points_flat: 5 }),
+        ]),
+      ),
+    ).toThrow('carries hit points without effect_kind hp_modifier');
+    expect(() =>
+      validateCharacterBackup(
+        withRows('character_species_traits', [
+          legacyTraitRow({ effect_kind: 'speed', effect_damage_type: null }),
+        ]),
+      ),
+    ).toThrow('has effect_kind speed and no speed bonus');
+  });
+
+  it('accepts every coherent shape, including the ones a kind may omit', () => {
+    // A resistance with NO damage type is the Tiefling's unchosen legacy and is
+    // legal: the CHECK ties a payload to its kind, it does not demand one.
+    expect(() =>
+      validateCharacterBackup(
+        withRows('character_effects', [
+          effectRow(),
+          effectRow({ id: 2, sort_order: 2, damage_type: null }),
+          effectRow({
+            id: 3,
+            sort_order: 3,
+            effect_kind: 'hp_modifier',
+            damage_type: null,
+            hit_points_per_level: 1,
+          }),
+          effectRow({
+            id: 4,
+            sort_order: 4,
+            effect_kind: 'speed',
+            damage_type: null,
+            speed_bonus_feet: 5,
+          }),
+        ]),
+      ),
+    ).not.toThrow();
+    // And the legacy shapes that migrate cleanly, including the two that yield
+    // no effect at all and therefore have no payload to contradict: the retired
+    // `granted_spells`, and the null kind 26 of the 33 printed traits carry.
+    expect(() =>
+      validateCharacterBackup(
+        withRows('character_species_traits', [
+          legacyTraitRow(),
+          legacyTraitRow({
+            id: 2,
+            sort_order: 2,
+            effect_kind: 'granted_spells',
+            effect_damage_type: null,
+          }),
+          legacyTraitRow({
+            id: 3,
+            sort_order: 3,
+            effect_kind: null,
+            effect_damage_type: null,
+          }),
+        ]),
       ),
     ).not.toThrow();
   });

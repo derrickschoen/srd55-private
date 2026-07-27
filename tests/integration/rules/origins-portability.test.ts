@@ -15,8 +15,11 @@ import {
 } from '../../../src/sharing/codec';
 import { CharacterState } from '../../../src/character/character-state';
 import { seedOriginContent } from '../../../src/rules/origins-srd';
-import { characterSpeciesTraits } from '../../../src/rules/origins';
-import { speciesHitPoints } from '../../../src/rules/species-effects';
+import { characterEffects } from '../../../src/rules/origins';
+import {
+  effectHitPoints,
+  summariseEffects,
+} from '../../../src/rules/species-effects';
 import { openTestDatabase } from '../../helpers/open-db';
 
 /**
@@ -28,9 +31,14 @@ import { openTestDatabase } from '../../helpers/open-db';
  * INSERT statements that carry the rows are hand-written and a hand-written
  * statement can name nine of ten columns. This is the test that would notice.
  *
- * The fixture deliberately holds one trait of EVERY mechanical kind plus a
- * free-text one, because a payload column dropped from a statement is invisible
- * in a row count and shows up only as an effect that quietly stops applying.
+ * The fixture deliberately holds one EFFECT of every mechanical kind plus
+ * free-text traits that grant none, because a payload column dropped from a
+ * statement is invisible in a row count and shows up only as an effect that
+ * quietly stops applying.
+ *
+ * IT ALSO HOLDS TWO EFFECTS FROM ONE TRAIT, which is the shape the old model
+ * could not represent at all and therefore the one most likely to be lost by a
+ * portability path that still assumes one effect per trait.
  *
  * THE VALUES ARE A CHARACTER'S OWN, NOT THE SRD'S, and are chosen to be
  * awkward rather than accurate. `Dwarven Toughness` carries BOTH hit point
@@ -50,53 +58,86 @@ describe('a character’s origin survives every portability path', () => {
       sort_order: 1,
       name: 'Dwarven Resilience',
       description: 'You have Resistance to Poison damage.',
-      effect_kind: 'damage_resistance',
-      effect_damage_type: 'Poison',
-      effect_hit_points_flat: null,
-      effect_hit_points_per_level: null,
-      effect_speed_bonus_feet: null,
       notes: 'copied from the template',
     },
     {
       sort_order: 2,
       name: 'Dwarven Toughness',
       description: 'Your Hit Point maximum increases by 1.',
-      effect_kind: 'hp_modifier',
-      effect_damage_type: null,
-      effect_hit_points_flat: 1,
-      effect_hit_points_per_level: 1,
-      effect_speed_bonus_feet: null,
       notes: null,
     },
     {
       sort_order: 3,
       name: 'Fleet of Foot',
       description: 'A trait this player wrote themselves.',
-      effect_kind: 'speed',
-      effect_damage_type: null,
-      effect_hit_points_flat: null,
-      effect_hit_points_per_level: null,
-      effect_speed_bonus_feet: 5,
       notes: null,
     },
     {
       sort_order: 4,
-      name: 'Elven Lineage',
-      description: null,
-      effect_kind: 'granted_spells',
-      effect_damage_type: null,
-      effect_hit_points_flat: null,
-      effect_hit_points_per_level: null,
-      effect_speed_bonus_feet: null,
+      name: 'Fiendish Legacy',
+      description: 'You gain the level 1 benefit of the chosen legacy.',
       notes: null,
     },
     // The free-text majority, and half-entered on purpose: no description at
     // all, which the column permits (D6b limb 3) and which must survive as an
     // absence rather than being completed with an empty string.
-    { sort_order: 5, name: 'Stonecunning', description: null, effect_kind: null,
-      effect_damage_type: null, effect_hit_points_flat: null,
-      effect_hit_points_per_level: null, effect_speed_bonus_feet: null,
-      notes: null },
+    { sort_order: 5, name: 'Stonecunning', description: null, notes: null },
+  ];
+
+  const effects = [
+    {
+      sort_order: 1,
+      effect_kind: 'damage_resistance',
+      damage_type: 'Poison',
+      hit_points_flat: null,
+      hit_points_per_level: null,
+      speed_bonus_feet: null,
+      label: 'Dwarven Resilience',
+      notes: 'copied from the template',
+    },
+    {
+      sort_order: 2,
+      effect_kind: 'hp_modifier',
+      damage_type: null,
+      hit_points_flat: 1,
+      hit_points_per_level: 1,
+      speed_bonus_feet: null,
+      label: 'Dwarven Toughness',
+      notes: null,
+    },
+    {
+      sort_order: 3,
+      effect_kind: 'speed',
+      damage_type: null,
+      hit_points_flat: null,
+      hit_points_per_level: null,
+      speed_bonus_feet: 5,
+      label: 'Fleet of Foot',
+      notes: null,
+    },
+    // TWO EFFECTS FROM ONE TRAIT — the case the old model could not hold, and
+    // therefore the one a portability path is most likely to lose. The
+    // resistance is the Tiefling's, with its type unchosen.
+    {
+      sort_order: 4,
+      effect_kind: 'damage_resistance',
+      damage_type: null,
+      hit_points_flat: null,
+      hit_points_per_level: null,
+      speed_bonus_feet: null,
+      label: 'Fiendish Legacy',
+      notes: null,
+    },
+    {
+      sort_order: 5,
+      effect_kind: 'hp_modifier',
+      damage_type: null,
+      hit_points_flat: 2,
+      hit_points_per_level: null,
+      speed_bonus_feet: null,
+      label: 'Fiendish Legacy',
+      notes: 'the second effect of one trait',
+    },
   ];
 
   beforeEach(async () => {
@@ -115,21 +156,34 @@ describe('a character’s origin survives every portability path', () => {
     for (const trait of traits) {
       db.exec(
         `INSERT INTO character_species_traits (
-           character_id, sort_order, name, description, effect_kind,
-           effect_damage_type, effect_hit_points_flat,
-           effect_hit_points_per_level, effect_speed_bonus_feet, notes
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           character_id, sort_order, name, description, notes
+         ) VALUES (?, ?, ?, ?, ?)`,
         [
           characterId,
           trait.sort_order,
           trait.name,
           trait.description,
-          trait.effect_kind,
-          trait.effect_damage_type,
-          trait.effect_hit_points_flat,
-          trait.effect_hit_points_per_level,
-          trait.effect_speed_bonus_feet,
           trait.notes,
+        ],
+      );
+    }
+    for (const effect of effects) {
+      db.exec(
+        `INSERT INTO character_effects (
+           character_id, sort_order, effect_kind, damage_type,
+           hit_points_flat, hit_points_per_level, speed_bonus_feet,
+           source_instance_id, label, notes
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
+        [
+          characterId,
+          effect.sort_order,
+          effect.effect_kind,
+          effect.damage_type,
+          effect.hit_points_flat,
+          effect.hit_points_per_level,
+          effect.speed_bonus_feet,
+          effect.label,
+          effect.notes,
         ],
       );
     }
@@ -156,10 +210,16 @@ describe('a character’s origin survives every portability path', () => {
         [id],
       ),
       traits: db.allRaw(
-        `SELECT sort_order, name, description, effect_kind, effect_damage_type,
-                effect_hit_points_flat, effect_hit_points_per_level,
-                effect_speed_bonus_feet, notes
+        `SELECT sort_order, name, description, notes
            FROM character_species_traits
+          WHERE character_id = ? ORDER BY sort_order`,
+        [id],
+      ),
+      effects: db.allRaw(
+        `SELECT sort_order, effect_kind, damage_type, hit_points_flat,
+                hit_points_per_level, speed_bonus_feet, source_instance_id,
+                label, notes
+           FROM character_effects
           WHERE character_id = ? ORDER BY sort_order`,
         [id],
       ),
@@ -177,6 +237,7 @@ describe('a character’s origin survives every portability path', () => {
     const document = exportCharacterBackup(db, characterId);
     expect(document.tables.character_species).toHaveLength(1);
     expect(document.tables.character_species_traits).toHaveLength(5);
+    expect(document.tables.character_effects).toHaveLength(5);
     expect(document.tables.character_background).toHaveLength(1);
 
     const before = originOf(characterId);
@@ -184,10 +245,12 @@ describe('a character’s origin survives every portability path', () => {
     expect(imported.characterId).not.toBe(characterId);
     expect(originOf(imported.characterId)).toEqual(before);
     // The derivation agrees on both, which is the point of carrying the payload
-    // columns rather than only the prose.
-    expect(
-      speciesHitPoints(characterSpeciesTraits(db, imported.characterId), 5),
-    ).toBe(6);
+    // columns rather than only the prose. 1 + 1*5 from Dwarven Toughness, plus
+    // the 2 from Fiendish Legacy's SECOND effect — the one the old model could
+    // not have carried at all.
+    expect(effectHitPoints(characterEffects(db, imported.characterId), 5)).toBe(
+      8,
+    );
   });
 
   it('round-trips through a share link, including the compressed fragment', async () => {
@@ -198,6 +261,10 @@ describe('a character’s origin survives every portability path', () => {
       notes: 'renamed at the table',
     });
     expect(document.speciesTraits).toHaveLength(5);
+    expect(document.effects).toHaveLength(5);
+    // The trait tuples this build writes carry NO payload — the five retired
+    // wire slots are always null now — so a trait arrives as text alone.
+    expect(document.speciesTraits?.[0]).not.toHaveProperty('effect_kind');
     expect(document.background).toMatchObject({ name: 'Soldier' });
     // A trait with no description must arrive with the key ABSENT, not with an
     // empty string — the column is nullable and half-entered is a real state.
@@ -223,10 +290,12 @@ describe('a character’s origin survives every portability path', () => {
     expect(document).not.toHaveProperty('species');
     expect(document).not.toHaveProperty('speciesTraits');
     expect(document).not.toHaveProperty('background');
+    expect(document).not.toHaveProperty('effects');
     const imported = importCharacterShare(db, document);
     expect(originOf(imported.characterId)).toEqual({
       species: null,
       traits: [],
+      effects: [],
       background: null,
     });
   });
@@ -234,10 +303,14 @@ describe('a character’s origin survives every portability path', () => {
   it('restores a save point that recorded the origin', () => {
     const state = new CharacterState(db);
     const snapshot = state.capture(characterId);
-    expect(snapshot.schema_version).toBe('a7-v4');
+    expect(snapshot.schema_version).toBe('a7-v5');
     expect(snapshot.character_species_traits).toHaveLength(5);
+    expect(snapshot.character_effects).toHaveLength(5);
 
     db.exec('DELETE FROM character_species_traits WHERE character_id = ?', [
+      characterId,
+    ]);
+    db.exec('DELETE FROM character_effects WHERE character_id = ?', [
       characterId,
     ]);
     db.exec(
@@ -251,7 +324,9 @@ describe('a character’s origin survives every portability path', () => {
         characterId,
       ]),
     ).toBe('Deep Dwarf');
-    expect(speciesHitPoints(characterSpeciesTraits(db, characterId), 3)).toBe(4);
+    // 1 + 1*3 from Dwarven Toughness plus 2 from Fiendish Legacy's second
+    // effect.
+    expect(effectHitPoints(characterEffects(db, characterId), 3)).toBe(6);
   });
 
   it('leaves the origin alone when the save point predates it', () => {
@@ -272,10 +347,16 @@ describe('a character’s origin survives every portability path', () => {
     delete legacy.character_species;
     delete legacy.character_species_traits;
     delete legacy.character_background;
+    delete legacy.character_effects;
 
     state.restore(characterId, legacy);
 
     expect(originOf(characterId).traits).toHaveLength(5);
+    // An `a7-v2` snapshot has no trait rows at all, so it makes no claim about
+    // effects either — not even the implicit one a v3/v4 snapshot makes by
+    // carrying the payload on its traits. Leaving the table alone is the only
+    // honest reading.
+    expect(originOf(characterId).effects).toHaveLength(5);
     expect(
       db.scalar('SELECT name FROM character_species WHERE character_id = ?', [
         characterId,
@@ -283,10 +364,51 @@ describe('a character’s origin survives every portability path', () => {
     ).toBe('Deep Dwarf');
   });
 
-  it('refuses a share document whose trait payload contradicts its kind', () => {
-    // The database's CHECK, applied at the boundary, so a hostile document gets
-    // a message naming the field instead of aborting the whole import with a
-    // raw SQLITE_CONSTRAINT_CHECK.
+  it('refuses a share document whose EFFECT payload contradicts its kind', () => {
+    // The database's CHECKs, applied at the boundary, so a hostile document
+    // gets a message naming the field instead of aborting the whole import with
+    // a raw SQLITE_CONSTRAINT_CHECK.
+    const document = exportCharacterShare(db, characterId);
+    for (const [patch, message] of [
+      [
+        { kind: 'damage_resistance', label: 'Bad', hit_points_flat: 3 },
+        /hit point payloads require kind hp_modifier/,
+      ],
+      [
+        { kind: 'hp_modifier', label: 'Bad' },
+        /kind hp_modifier requires a hit point value/,
+      ],
+      [
+        { kind: 'ability_score_increase', label: 'Bad' },
+        /kind is unsupported/,
+      ],
+      // THE RETIRED MEMBER, refused HERE and accepted on a legacy trait row —
+      // and the difference is not an inconsistency. No link in the wild can
+      // carry a `granted_spells` EFFECT, because this section did not exist
+      // before the member was retired; every link in the wild CAN carry one on
+      // a trait. Tolerating it here would be inventing compatibility for an
+      // artifact that cannot exist.
+      [{ kind: 'granted_spells', label: 'Bad' }, /kind is unsupported/],
+      [
+        { kind: 'hp_modifier', label: 'Bad', hit_points_flat: 1, damage_type: 'Fire' },
+        /damage_type requires kind damage_resistance/,
+      ],
+      [{ kind: 'speed', label: 'Bad' }, /kind speed requires speed_bonus_feet/],
+      [
+        { kind: 'damage_resistance', label: '' },
+        /effects\[0\]\.label/,
+      ],
+    ] as const) {
+      expect(() =>
+        importCharacterShare(db, { ...document, effects: [patch] }),
+      ).toThrow(message);
+    }
+  });
+
+  it('refuses a LEGACY trait payload that contradicts its kind', () => {
+    // The same checks on the retired trait fields, which a link minted before
+    // the inversion still carries. They are validated rather than ignored: a
+    // legacy payload that is internally incoherent must not reach an INSERT.
     const document = exportCharacterShare(db, characterId);
     for (const [patch, message] of [
       [
@@ -314,5 +436,145 @@ describe('a character’s origin survives every portability path', () => {
         importCharacterShare(db, { ...document, speciesTraits: [patch] }),
       ).toThrow(message);
     }
+  });
+
+  /**
+   * A SHARE DOCUMENT FROM THE BUILD BEFORE THE INVERSION, HAND-BUILT.
+   *
+   * Written as a literal and never obtained from `exportCharacterShare`, which
+   * cannot produce one any more: this build writes `null` in the five retired
+   * trait slots and puts the effects in their own section. The payload here is
+   * where that build put it, and there is NO `effects` key at all — which is
+   * the difference between "this character has no effects" and "this document
+   * predates the question".
+   */
+  const PRE_INVERSION_SHARE = {
+    format: 'dnd-multiclass-spells-character-share',
+    version: 1,
+    character: { name: 'Pre-Inversion Hero' },
+    classes: [],
+    sources: [],
+    selections: [],
+    spellbook: [],
+    preferences: [],
+    overrides: [],
+    species: { name: 'Tiefling', creature_type: 'Humanoid', size: 'Medium' },
+    speciesTraits: [
+      {
+        name: 'Fiendish Legacy',
+        description: 'You gain the level 1 benefit of the chosen legacy.',
+        effect_kind: 'granted_spells',
+      },
+      {
+        name: 'Dwarven Toughness',
+        description: 'Your Hit Point maximum increases by 1.',
+        effect_kind: 'hp_modifier',
+        effect_hit_points_flat: 0,
+        effect_hit_points_per_level: 1,
+      },
+      {
+        name: 'Ancestral Guard',
+        description: 'You have Resistance to Poison damage.',
+        effect_kind: 'damage_resistance',
+        effect_damage_type: 'Poison',
+      },
+      { name: 'Stonecunning' },
+    ],
+  } as const;
+
+  it('imports a pre-inversion share document, migrating its trait payload', () => {
+    // Guards the fixture: if it were ever regenerated from current code it
+    // would carry an `effects` key and no trait payload, and this fails rather
+    // than the suite quietly testing the new format against itself.
+    expect(Object.hasOwn(PRE_INVERSION_SHARE, 'effects')).toBe(false);
+    expect(PRE_INVERSION_SHARE.speciesTraits[0].effect_kind).toBe(
+      'granted_spells',
+    );
+
+    const imported = importCharacterShare(db, PRE_INVERSION_SHARE);
+    const origin = originOf(imported.characterId);
+    // All four traits arrive, as text.
+    expect(origin.traits.map((row) => row.name)).toEqual([
+      'Fiendish Legacy',
+      'Dwarven Toughness',
+      'Ancestral Guard',
+      'Stonecunning',
+    ]);
+    // TWO effects from four traits. `Stonecunning` was always prose, and
+    // `granted_spells` is retired — accepted on the way in so the link stays
+    // readable, then dropped, which costs the character nothing because its
+    // spells were never stored here in the first place.
+    expect(origin.effects).toEqual([
+      {
+        sort_order: 1,
+        effect_kind: 'hp_modifier',
+        damage_type: null,
+        hit_points_flat: 0,
+        hit_points_per_level: 1,
+        speed_bonus_feet: null,
+        source_instance_id: null,
+        label: 'Dwarven Toughness',
+        notes: null,
+      },
+      {
+        sort_order: 2,
+        effect_kind: 'damage_resistance',
+        damage_type: 'Poison',
+        hit_points_flat: null,
+        hit_points_per_level: null,
+        speed_bonus_feet: null,
+        source_instance_id: null,
+        label: 'Ancestral Guard',
+        notes: null,
+      },
+    ]);
+    expect(effectHitPoints(characterEffects(db, imported.characterId), 5)).toBe(
+      5,
+    );
+  });
+
+  it('imports a pre-inversion BACKUP document, migrating its trait payload', () => {
+    // The same proof for the second mechanism. The document is built from a
+    // live export and then REGRESSED to the old shape by hand — dropping the
+    // `character_effects` key entirely and writing the payload back onto the
+    // trait rows — because no code path can produce one any more.
+    const document = exportCharacterBackup(db, characterId) as unknown as {
+      tables: Record<string, unknown[]>;
+    };
+    const legacyTraits = (
+      document.tables.character_species_traits as Record<string, unknown>[]
+    ).map((row, index) => ({
+      ...row,
+      effect_kind: index === 0 ? 'damage_resistance' : null,
+      effect_damage_type: index === 0 ? 'Poison' : null,
+      effect_hit_points_flat: null,
+      effect_hit_points_per_level: null,
+      effect_speed_bonus_feet: null,
+    }));
+    const legacyDocument = {
+      ...document,
+      tables: {
+        ...document.tables,
+        character_species_traits: legacyTraits,
+      },
+    } as unknown as Record<string, unknown>;
+    delete (legacyDocument.tables as Record<string, unknown>).character_effects;
+
+    const imported = importCharacterBackup(db, legacyDocument);
+    // The five retired keys did NOT become column names in the generated
+    // INSERT, and the payload became an effect row labelled with its trait.
+    expect(originOf(imported.characterId).effects).toEqual([
+      {
+        sort_order: 1,
+        effect_kind: 'damage_resistance',
+        damage_type: 'Poison',
+        hit_points_flat: null,
+        hit_points_per_level: null,
+        speed_bonus_feet: null,
+        source_instance_id: null,
+        label: 'Dwarven Resilience',
+        notes: null,
+      },
+    ]);
   });
 });

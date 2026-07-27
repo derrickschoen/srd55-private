@@ -20,6 +20,9 @@
  *    directions, and forbids a shield carrying a Dexterity term at all (named
  *    CHECKs `character_armor_dex_bonus_max_check` and
  *    `character_armor_shield_check`). Two columns again, twice.
+ *  - `character_effects` ties each payload column to the `effect_kind` that
+ *    gives it meaning, in both directions (five named CHECKs, listed on
+ *    `effectPayloadKindError`). Two columns again, five times.
  *
  * WHY THIS MODULE EXISTS RATHER THAN TWO COPIES OF THE RULES.
  * Both rules were already implemented in `src/backup/character-backup.ts`, for
@@ -143,6 +146,59 @@ export function weaponMasterySelectionError(
  * as an INSERT, and without this the failure is a raw `SQLITE_CONSTRAINT_CHECK`
  * from inside a transaction rather than a sentence naming the offending row.
  */
+/**
+ * AN EFFECT'S PAYLOAD BELONGS TO ITS KIND, AND ITS KIND REQUIRES ITS PAYLOAD.
+ *
+ * `character_effects` declares five CHECKs saying so — `damage_type_kind`,
+ * `hit_points_kind`, `speed_kind`, `hp_modifier_payload`, `speed_payload` — and
+ * a per-column contract cannot see any of them: each is a statement about two
+ * columns together. Reaching the INSERT with `effect_kind: 'damage_resistance'`
+ * and a hit point value aborts the whole import with a raw
+ * `SQLITE_CONSTRAINT_CHECK` naming a constraint, not an effect.
+ *
+ * REACHABLE FROM MORE DIRECTIONS THAN THE OTHER RULES HERE, which is why it is
+ * worth the file. Effect columns arrive as JSON in a portable backup document,
+ * in a save-point snapshot inside one, and in a save point inside a quarantined
+ * image — and they arrive TWICE OVER in each: as `character_effects` rows, and
+ * as the five retired `effect_*` columns on a `character_species_traits` row
+ * written before the model was inverted, which
+ * `src/rules/legacy-trait-effects.ts` migrates into exactly this shape. Both
+ * end as the same INSERT. The share arm applies the identical rules in
+ * `src/sharing/schema.ts`; this is what stops the other two arms from being
+ * held to a lower standard than a link.
+ *
+ * `null` and `undefined` are both "absent", because the two callers differ: a
+ * JSON row carries `null` for an empty column, and a migrated legacy payload is
+ * built by a function that writes `null` too — but a hand-written document may
+ * simply omit the key, and the CHECK it is about to meet treats that as NULL.
+ */
+export function effectPayloadKindError(
+  row: UntrustedRow,
+  label: string,
+): string | null {
+  const kind = row.effect_kind;
+  const present = (value: unknown): boolean =>
+    value !== null && value !== undefined;
+  if (present(row.damage_type) && kind !== 'damage_resistance') {
+    return `${label} carries a damage type without effect_kind damage_resistance.`;
+  }
+  const hasHitPoints =
+    present(row.hit_points_flat) || present(row.hit_points_per_level);
+  if (hasHitPoints && kind !== 'hp_modifier') {
+    return `${label} carries hit points without effect_kind hp_modifier.`;
+  }
+  if (kind === 'hp_modifier' && !hasHitPoints) {
+    return `${label} has effect_kind hp_modifier and no hit point value.`;
+  }
+  if (present(row.speed_bonus_feet) && kind !== 'speed') {
+    return `${label} carries a speed bonus without effect_kind speed.`;
+  }
+  if (kind === 'speed' && !present(row.speed_bonus_feet)) {
+    return `${label} has effect_kind speed and no speed bonus.`;
+  }
+  return null;
+}
+
 export function armorDexBonusPairError(
   row: UntrustedRow,
   label: string,
