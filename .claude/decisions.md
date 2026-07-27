@@ -63,6 +63,65 @@ classes print d8 — and that is checkable against the class-traits test.
 
 ---
 
+## D26 — OWNER: the sheet is a REFERENCE, not a simulator. Most candidates become text. (2026-07-26)
+
+> "'Concentration conflict' this is really beyond the scope of a character
+>  sheet. Sheet just needs the info that lets the player play at the table."
+
+This is the sharpest scope line drawn so far and it invalidates work I was about
+to recommend. **The table adjudicates.** The sheet's job is to hand a player the
+information they need in front of them — not to simulate play, track session
+state, or decide rules interactions two people would just settle.
+
+What the sheet owes: numbers a player would otherwise compute by hand and get
+wrong; what they HAVE; what they are MISSING or have not chosen (the
+missed-selection problem this project exists for); and honesty about what it
+does not know.
+
+What it does not owe: anything needing situational knowledge the app cannot
+have — who is mounted, what else is concentrating, what the DM ruled.
+
+### Rulings on the twelve value-object candidates
+
+| # | candidate | ruling |
+|---|---|---|
+| 1 | spell range | **STRUCTURED**: integer feet, plus a SEPARATE nullable shape enum — sphere, cylinder, cone, straight line |
+| 2 | spell duration | **TEXT** |
+| 3 | weapon proficiency qualifier | not yet ruled |
+| 4 | casting time | **TEXT** |
+| 5 | spell components | **cost in COPPER PIECES + text** |
+| 6 | material cost / consumption | folded into 5; no inventory model |
+| 7 | background equipment | **template list of quantity + item**, name only unless weapon or armour |
+| 8 | background tools | **TEXT-only templates** |
+| 9 | primary ability expression | not yet ruled |
+| 10 | upcast progression | **list of levels that can upcast + text description** |
+| 11 | feature prerequisites | not yet ruled |
+| 12 | exceptional weapon properties | **TEXT for now.** "Let the lance be one handed and they can figure it out at the table" |
+
+### The general rule underneath them
+
+> "We don't need to keep track of costs outside spell components. We don't track
+>  user gold or inventory outside of what affects numbers on the character sheet."
+
+**A value only earns structure if it changes a number on the sheet.** Copper
+pieces for a spell component qualify, because a component you cannot afford
+changes whether you can cast. Gold, inventory and equipment valuation do not.
+That is a cleaner test than my payoff/cost ranking, and it disqualifies most of
+what I ranked highly.
+
+Range survives because it is a NUMBER a player compares. Duration does not,
+because tracking it is the table's job — and I had ranked it second largely on a
+concentration-conflict warning that this decision removes outright.
+
+**Rejected: my own ranking.** I ordered by what each unlocked technically. The
+owner's test is narrower and better — does it move a number the sheet prints?
+
+**Note on 12:** treating the Lance as one-handed is a deliberate, stated
+simplification, not an oversight. The printed text still travels, so the table
+has what it needs.
+
+---
+
 ## D25 — OWNER: pre-alpha, replace freely; and put the rules engine in the type system (2026-07-26)
 
 Two standing directions, now written into `AGENTS.md` with `CLAUDE.md` pointing
