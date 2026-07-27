@@ -64,7 +64,7 @@ read or wrote any of the eight.
 
 ---
 
-## Q4 — Weapon "other properties" representation
+## Q4 — RESOLVED: known toggles + free text, shipped (D10); text-only for conditional clauses (D26)
 
 D1b settled that weapons are user-defined with SRD templates plus mastery
 selection. Open: how "other properties" is stored.
@@ -139,7 +139,7 @@ ability scores, class, level, spells, and now weapons.
 
 ---
 
-## Q7 — A browser-test flake I could not attribute (FYI, not blocking)
+## Q7 — RESOLVED 2026-07-26: it was late zod discovery, fixed (see F5). A real product defect was found beside it.
 
 `tests/browser/attribution.spec.ts:16` intermittently fails on
 `expect(loads).toBe(1)` with `Received: 2`. Roughly 4 failures in ~66 runs of
@@ -257,3 +257,28 @@ half met: the model would hold the content, the import path cannot deliver it.
 Extending the catalog format to carry subclasses and their features is the next
 increment. No decision needed unless you want it reordered behind the character
 sheet (Q9).
+
+
+---
+
+## Q11 — Multiclass entry grants a SKILL CHOICE, which nobody has made (NEW)
+
+Found while extracting the twelve "As a Multiclass Character" clauses. Two of
+them do not grant a fixed proficiency — they grant a CHOICE:
+
+- **Ranger**: "proficiency in one skill of your choice from the Ranger's skill
+  list"
+- **Rogue**: "proficiency in one skill of your choice from the Rogue's skill
+  list"
+
+That is exactly the missed-selection this product exists to surface: a character
+who multiclassed into Ranger has an unmade choice, and nothing currently asks
+them for it or warns that it is outstanding.
+
+**Recommendation, not yet acted on:** treat it as a completeness item — the
+registry already draws the line at "something the USER must decide", and this is
+squarely that. It is not a rules-adjudication question, so D26 does not exclude
+it.
+
+**Question for you:** should the multiclass work include this selection, or land
+the proficiency union first and add the choice with the guided builder?
