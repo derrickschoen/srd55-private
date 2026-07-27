@@ -22,18 +22,23 @@ const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
  * It is deliberately a check on the DOCS, not on the code — the code is free to
  * move, and when it does this test names the anchors that have to move with it.
  *
- * THREE CLASSES OF ANCHOR, checked as strongly as each admits:
+ * FOUR CLASSES OF ANCHOR, checked as strongly as each admits:
  *
  *   1. `[text](path)` links          → the target exists.
  *   2. `path/to/file.ts:N` (or :N-M) → the file exists and has ≥ N lines.
  *   3. `` `Symbol` (`:N`) ``         → line N of the file that heads the list
  *                                      actually CONTAINS `Symbol`.
+ *   4. `decisions.md D29`            → that file contains a `## D29` heading.
  *
- * Class 3 is the strong one, and it is the shape most of the volatile anchors
- * use. Class 2 can only bound the line number: a doc that says
+ * Classes 3 and 4 are containment checks. Class 2 can only bound the line
+ * number: a doc that says
  * `src/db/query.ts:41-51` names a comment, not a symbol, so there is nothing to
  * match against — an off-by-a-few there survives this test. Where an anchor
  * matters and can be written as class 3, prefer class 3.
+ *
+ * Some class-2 anchors deliberately remain: prose and comments have no declared
+ * symbol for class 3 to contain. Their line bounds are weaker, but inventing a
+ * symbol would verify a different subject rather than strengthen the anchor.
  */
 
 /**
@@ -137,12 +142,76 @@ describe('.ai reference anchors resolve', () => {
     expect(broken).toEqual([]);
   });
 
+  it('resolves every decisions.md D/F reference to a real heading', () => {
+    const broken: Anchor[] = [];
+    for (const doc of docs) {
+      const source = readFileSync(join(repoRoot, doc), 'utf8');
+      const reference =
+        /(?<![\w/.-])((?:\.claude\/)?decisions\.md)`?(?:#|\s+)`?([DF]\d+[a-z]?)(?![\w])/gu;
+      let match = reference.exec(source);
+      while (match !== null) {
+        const cited = match[1]!;
+        const identifier = match[2]!;
+        const resolved = resolvePath(cited, files);
+        if (resolved === null) {
+          broken.push({
+            doc,
+            docLine: lineOf(source, match.index),
+            raw: match[0]!,
+            detail: 'no unique tracked file matches that decisions path',
+          });
+        } else {
+          const heading = `## ${identifier}`;
+          const hasHeading = readFileSync(join(repoRoot, resolved), 'utf8')
+            .split('\n')
+            .some(
+              (line) => line === heading || line.startsWith(`${heading} `),
+            );
+          if (!hasHeading) {
+            broken.push({
+              doc,
+              docLine: lineOf(source, match.index),
+              raw: match[0]!,
+              detail: `${resolved} has no ${heading} heading`,
+            });
+          }
+        }
+        match = reference.exec(source);
+      }
+    }
+    expect(broken).toEqual([]);
+  });
+
+  it('forbids file:line anchors into the append-at-top decisions log', () => {
+    const broken: Anchor[] = [];
+    for (const doc of docs) {
+      const source = readFileSync(join(repoRoot, doc), 'utf8');
+      const anchor =
+        /(?<![\w/.-])(\.?[A-Za-z0-9_][A-Za-z0-9_./-]*\.(?:ts|tsx|md|sql|json|css|html)):(\d+)(?:-(\d+))?/gu;
+      let match = anchor.exec(source);
+      while (match !== null) {
+        const cited = match[1]!;
+        const resolved = resolvePath(cited, files);
+        if (resolved === '.claude/decisions.md') {
+          broken.push({
+            doc,
+            docLine: lineOf(source, match.index),
+            raw: match[0]!,
+            detail: 'use a stable decisions.md D/F reference instead',
+          });
+        }
+        match = anchor.exec(source);
+      }
+    }
+    expect(broken).toEqual([]);
+  });
+
   it('points every file:line anchor at a line that exists', () => {
     const broken: Anchor[] = [];
     for (const doc of docs) {
       const source = readFileSync(join(repoRoot, doc), 'utf8');
       const anchor =
-        /(?<![\w/.-])([A-Za-z0-9_][A-Za-z0-9_./-]*\.(?:ts|tsx|md|sql|json|css|html)):(\d+)(?:-(\d+))?/gu;
+        /(?<![\w/.-])(\.?[A-Za-z0-9_][A-Za-z0-9_./-]*\.(?:ts|tsx|md|sql|json|css|html)):(\d+)(?:-(\d+))?/gu;
       let match = anchor.exec(source);
       while (match !== null) {
         const cited = match[1]!;

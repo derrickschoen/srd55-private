@@ -39,7 +39,7 @@ asked for.
    `src/domain/contracts/tables.ts` derives `AnyTableName` from it.
    `tests/unit/schema-modules.test.ts` fails if a file is not re-exported.
 
-3. **Classify it** in `TABLE_SCOPES` (`src/domain/contracts/tables.ts:165`). You
+3. **Classify it** in `src/domain/contracts/tables.ts`: `TABLE_SCOPES` (`:165`). You
    do not get to skip this — verified by probe on this tree:
 
    ```
@@ -132,7 +132,7 @@ test:
 | Arm | Where the column has to be added | Its test |
 |---|---|---|
 | **Storage** | `db/schema/*.ts`, then `npm run db:schema` + `npm run db:contracts` | `tests/unit/schema-generation.test.ts`, `tests/unit/contracts/column-facts-generation.test.ts` |
-| **Snapshot** (undo/redo) | Covered by `TABLE_SCOPES` for an owned TABLE. For a column on `characters`, `CHARACTER_STATE_COLUMNS` (`src/character/character-state.ts:139`) — BY HAND | a save-point restore test |
+| **Snapshot** (undo/redo) | Covered by `TABLE_SCOPES` for an owned TABLE. For a column on `characters`, `src/character/character-state.ts`: `CHARACTER_STATE_COLUMNS` (`:171`) — BY HAND | a save-point restore test |
 | **Backup** (portable character) | `src/backup/character-backup.ts`, and `docs/BACKUP-FORMATS.md` | a **column-for-column** round trip |
 | **Share** (compressed URL fragment) | `src/sharing/schema.ts` + `src/sharing/character-share.ts`, and `docs/sharing/SCHEMA.md` | a round trip **through the fragment**, plus an OLD-payload test |
 
@@ -146,11 +146,11 @@ Nothing will tell you. Add it to each path by hand.
 ### The old-payload test is the one people skip
 
 A link or backup minted before your column must still import. The mechanism is
-at `tests/unit/sharing/codec.test.ts:866` — the frozen pre-sheet-inputs fragment
-is asserted to be THIRTEEN elements, so regenerating that literal from current
-code (which would make it fourteen) fails loudly instead of letting the suite
-quietly test the new format against itself. And a save point that predates the
-column **leaves it alone** rather than clearing it.
+in `tests/unit/sharing/codec.test.ts`: `PRE_SHEET_WIRE` (`:968`) — the frozen
+pre-sheet-inputs wire tuple is asserted to be THIRTEEN elements, so regenerating
+that literal from current code (which would make it fourteen) fails loudly
+instead of letting the suite quietly test the new format against itself. And a
+save point that predates the column **leaves it alone** rather than clearing it.
 
 The assertion to write is *"absent, not empty"*. An empty list would be this
 build putting words in an old payload's mouth.
