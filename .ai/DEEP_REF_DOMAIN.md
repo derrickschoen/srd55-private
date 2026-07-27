@@ -115,11 +115,36 @@ enforced somewhere else.
 
 **F4**, and the rule the sheet follows. `SHEET_GAPS`
 (`src/queries/character-sheet-builder.ts`) names, in prose a person reads, every
-thing the application does not hold — no class feature text, partial subclass
-catalog, no unarmoured defence, no Expertise, no weapon proficiency, background
-skills as text. They are stated unconditionally because each is true of every
-character equally, and a check that happened to pass on a Fighter would hide that
-it fails on the other eleven classes.
+thing the application does not hold. They are stated unconditionally because each
+is true of every character equally, and a check that happened to pass on a
+Fighter would hide that it fails on the other eleven classes.
+
+The gaps, by their stable `kind` keys:
+
+<!-- SHEET_GAPS -->
+
+- `no_class_feature_text` — no class or subclass feature prose is seeded beyond
+  two Warlock invocations.
+- `partial_subclass_catalog` — two subclasses are bundled, so a character of any
+  other class has none to choose.
+- `no_unarmored_defense` — the Barbarian and Monk Armor Class formulas are not
+  applied; the manual adjustment is what covers them.
+- `no_expertise` — Rogue and Bard Expertise does not double the proficiency
+  bonus on a chosen skill.
+- `weapon_reach_not_recorded` — whether a weapon is MELEE or RANGED is not
+  recorded, so an attack profile offers both formulas. Its simple/martial
+  category IS recorded and its proficiency verdict IS derived — see D27, D28 and
+  D33 — so the renamed gap is about reach alone.
+- `background_skills_are_text` — a background's two skill proficiencies are
+  stored as words and are not counted towards a skill modifier.
+
+That list is not prose a reader has to take on trust: it is bound to the constant
+by `tests/unit/docs/ai-reference-claims-agree.test.ts`, which fails when a gap is
+added, removed or renamed without this list moving in the same diff. It was wrong
+in exactly that way once — see F15, which found this file naming a gap that did
+not exist ("no weapon proficiency") and missing one that did
+(`weapon_reach_not_recorded`), with both lists six items long, so a reader
+checking the COUNT saw agreement.
 
 The same rule one level down, from **D24**: an ASSUMPTION is never printed as a
 fact. A homebrew class has no seeded hit die, so `hit_die` is `number | null` in
