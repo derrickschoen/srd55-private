@@ -9,6 +9,7 @@ import type {
   WeaponFields,
 } from '../domain/command-contracts';
 import {
+  damageType,
   isEnumValue,
   weaponMasteryProperties,
   weaponProficiencyCategories,
@@ -175,7 +176,8 @@ function fieldsFromRow(row: WeaponRow): WeaponFields {
       ? (category as WeaponProficiencyCategory)
       : null,
     damage_dice: row.damage_dice === null ? null : String(row.damage_dice),
-    damage_type: row.damage_type === null ? null : String(row.damage_type),
+    damage_type:
+      row.damage_type === null ? null : damageType(String(row.damage_type)),
     versatile_damage_dice:
       row.versatile_damage_dice === null
         ? null

@@ -1,4 +1,4 @@
-import type { EffectKind } from '../domain/enums';
+import type { DamageType, EffectKind } from '../domain/enums';
 import { effectKinds, isEnumValue } from '../domain/enums';
 
 /**
@@ -68,7 +68,7 @@ import { effectKinds, isEnumValue } from '../domain/enums';
  */
 export interface EffectRow {
   readonly effect_kind: string;
-  readonly damage_type: string | null;
+  readonly damage_type: DamageType | null;
   readonly hit_points_flat: number | null;
   readonly hit_points_per_level: number | null;
   readonly speed_bonus_feet: number | null;
@@ -78,7 +78,7 @@ export interface EffectRow {
 
 export interface EffectSummary {
   /** Damage types the character resists, in the order the effects are stored. */
-  readonly damageResistances: readonly string[];
+  readonly damageResistances: readonly DamageType[];
   /**
    * The LABELS of resistances whose type the character has yet to choose.
    *
@@ -123,7 +123,7 @@ export function effectKind(effect: EffectRow): EffectKind | null {
 export function summariseEffects(
   effects: readonly EffectRow[],
 ): EffectSummary {
-  const damageResistances: string[] = [];
+  const damageResistances: DamageType[] = [];
   const unchosenDamageResistances: string[] = [];
   let hitPointsFlat = 0;
   let hitPointsPerLevel = 0;

@@ -26,12 +26,21 @@ import type {
 import type {
   BackgroundEquipmentItemKind,
   BackgroundEquipmentOption,
+  CreatureSize,
+  CreatureType,
+  DamageType,
   EffectKind,
   RulesEdition,
+  KnownCreatureSize,
+  KnownCreatureType,
+  KnownDamageType,
 } from '../../src/domain/enums';
 import {
   backgroundEquipmentItemKinds,
   backgroundEquipmentOptions,
+  creatureSizes,
+  creatureTypes,
+  damageTypes,
   effectKinds,
   rulesEditions,
 } from '../../src/domain/enums';
@@ -39,6 +48,7 @@ import {
   datetime,
   integerAtLeast,
   nullOrIntegerAtLeast,
+  nullOrOneOf,
   oneOf,
   sqlText,
   varchar,
@@ -128,25 +138,20 @@ export const species_templates = sqliteTable(
       .default('2024'),
     name: varchar()('name').notNull(),
     /**
-     * NOT an enum, for the same reason `weapon_templates.damage_type` is not.
-     * All nine SRD species are `Humanoid` and the document says so explicitly
-     * ("Every species in Character Origins is Humanoid; playable non-Humanoid
-     * species appear in other books"), so closing the vocabulary on one member
-     * would encode a fact about THIS EXTRACT as a fact about the rules.
+     * Closed HERE: this catalog is written only by the bundled SRD seeder.
+     * The character copy below uses the open `CreatureType`, so editing the
+     * copied species to a homebrew type still preserves the user's value.
      */
-    creature_type: varchar()('creature_type').notNull(),
+    creature_type: varchar<KnownCreatureType>()('creature_type').notNull(),
     /**
      * The size word only — `Medium`, `Small` — never the printed height range.
      * The heights are flavour and are deliberately not modelled.
      *
-     * Open vocabulary rather than a two-member enum. The extract prints only
-     * Small and Medium because those are the only sizes NINE SPECIES use; the
-     * other four sizes are real and live in the Rules Glossary, which is not in
-     * this extract. A CHECK of `IN ('Small','Medium')` would state a rule the
-     * source does not, and would refuse a homebrew species on the character's
-     * own row (F6: a short sourced set, not an invented closed one).
+     * Closed over all SIX SRD sizes, not only the two used by the nine bundled
+     * species. This table is seeder-only; the editable character copy below
+     * uses the open `CreatureSize` and has no CHECK.
      */
-    size: varchar()('size').notNull(),
+    size: varchar<KnownCreatureSize>()('size').notNull(),
     /**
      * The SECOND size, when the species lets the player choose between two.
      *
@@ -160,7 +165,7 @@ export const species_templates = sqliteTable(
      * `size_is_choice = 1, alternate_size = NULL`. That is the same call
      * `character_weapons.versatile_damage_dice` already made.
      */
-    alternate_size: varchar()('alternate_size'),
+    alternate_size: varchar<KnownCreatureSize>()('alternate_size'),
     /**
      * NOT NULL here where the character's copy is nullable: every one of the
      * nine prints a `Speed: NN feet` line, and eight of them print 30. The
@@ -179,6 +184,15 @@ export const species_templates = sqliteTable(
     check(
       'species_templates_rules_edition_check',
       oneOf('rules_edition', rulesEditions),
+    ),
+    check(
+      'species_templates_creature_type_check',
+      oneOf('creature_type', creatureTypes),
+    ),
+    check('species_templates_size_check', oneOf('size', creatureSizes)),
+    check(
+      'species_templates_alternate_size_check',
+      nullOrOneOf('alternate_size', creatureSizes),
     ),
     /**
      * A species with no Speed cannot be copied onto a character usefully, and a
@@ -319,10 +333,10 @@ export const species_template_trait_effects = sqliteTable(
      * unconditionally grants A resistance; which one is not a property of the
      * species, and there is no default that would not be an invention.
      *
-     * Open vocabulary, not an enum, following
-     * `spell_version_damage_types.damage_type`.
+     * Closed HERE because this row is parsed solely from the bundled SRD
+     * extract. The copied `character_effects.damage_type` remains open.
      */
-    damage_type: varchar()('damage_type'),
+    damage_type: varchar<KnownDamageType>()('damage_type'),
     /**
      * `hp_modifier`: the flat Hit Point maximum bonus, and the per-level one.
      * Two columns rather than one because an effect may carry either shape, and
@@ -370,6 +384,10 @@ export const species_template_trait_effects = sqliteTable(
     check(
       'species_template_trait_effects_kind_check',
       oneOf('effect_kind', effectKinds),
+    ),
+    check(
+      'species_template_trait_effects_damage_type_check',
+      nullOrOneOf('damage_type', damageTypes),
     ),
     /**
      * Every payload column belongs to exactly one kind, and none may be set
@@ -473,8 +491,8 @@ export const character_species = sqliteTable(
      * rest. Forbidding that turns adding a species into an all-or-nothing
      * modal. There is no sensible default and `''` would be a null in costume.
      */
-    creature_type: varchar()('creature_type'),
-    size: varchar()('size'),
+    creature_type: varchar<CreatureType>()('creature_type'),
+    size: varchar<CreatureSize>()('size'),
     /**
      * No `alternate_size` on the character's row, deliberately. The template's
      * second size is an OFFER; the character has chosen, and recording the
@@ -613,7 +631,7 @@ export const character_effects = sqliteTable(
      * count it (`unchosenDamageResistances` was an integer, because a trait
      * carrying an anonymous resistance had nothing else to offer).
      */
-    damage_type: varchar()('damage_type'),
+    damage_type: varchar<DamageType>()('damage_type'),
     /**
      * The `hp_modifier` payload. Both nullable on D6b LIMB 2 — a resistance
      * does not HAVE a hit point number, so the absence is real rather than
