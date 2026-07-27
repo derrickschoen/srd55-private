@@ -26,8 +26,10 @@ import type { SpellAccessRoute } from '../access/spell-access-builder';
 import type { AbilityScores } from '../rules/ability-scores';
 import { attackProfiles } from '../rules/attack-profiles';
 import { recogniseAttackCantrips } from '../rules/attack-cantrips';
+import { weaponProficiency } from '../rules/multiclass-proficiency';
 import { SheetContentLookup } from '../rules/sheet-content-lookup';
 import { WeaponMasteryLookup } from '../rules/weapon-mastery-lookup';
+import { ClassProficiencyLookup } from './class-proficiency-lookup';
 
 /**
  * The three things the attack derivation needs that are NOT weapon rows.
@@ -216,6 +218,14 @@ export class WeaponQueries {
     weapons: readonly CharacterWeapon[],
     context: WeaponPanelContext,
   ): WeaponsPanel['attacks'] {
+    // THE PROFICIENCY UNION, THROUGH THE SAME LOOKUP THE CHARACTER SHEET USES.
+    // D28 §1: what a non-proficient weapon loses is the BONUS, and it is lost
+    // HERE, on the number, rather than only described on the other screen. Until
+    // this line existed the two screens printed opposite things about one
+    // weapon — the sheet said "not proficient" and this profile added the bonus.
+    const { grants } = new ClassProficiencyLookup(this.db).grantsFor(
+      characterId,
+    );
     return attackProfiles({
       weapons: weapons.map((weapon) => ({
         id: weapon.id,
@@ -223,6 +233,18 @@ export class WeaponQueries {
         damage_dice: weapon.damage_dice,
         damage_type: weapon.damage_type,
         versatile_damage_dice: weapon.versatile_damage_dice,
+        // The three columns a proficiency question reads and nothing else: the
+        // narrow `ProficiencyWeapon` shape is what stops this path guessing a
+        // category from a damage die or a name.
+        proficiency: weaponProficiency(
+          {
+            name: weapon.name,
+            proficiency_category: weapon.proficiency_category,
+            finesse: weapon.finesse,
+            light: weapon.light,
+          },
+          grants,
+        ),
       })),
       classes: this.#content.forCharacter(characterId),
       scores: context.scores,

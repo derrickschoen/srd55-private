@@ -141,6 +141,33 @@ describe('the multiclass skill choice as an outstanding item', () => {
     expect(skillItem()).toBeUndefined();
   });
 
+  it('counts EVERY tick, whatever granted it, and prints that limitation', () => {
+    // A review measured this, and it is a stated limit rather than an error in
+    // the arithmetic. `character_skill_proficiencies` has no provenance column,
+    // so a skill ticked for a BACKGROUND — which this application does not model
+    // at all — is indistinguishable from one ticked for a class grant, and pays
+    // off a class grant here.
+    //
+    // The direction is SAFE: the item can only UNDER-report, never invent an
+    // outstanding choice. What it must not do is print the ticked count as
+    // though it were the class-sourced count without saying otherwise.
+    addClass('Fighter', 5, true);
+    addClass('Bard', 1, false);
+    tickSkills('athletics', 'perception');
+    const item = skillItem();
+    expect(item?.entitled).toBe(3);
+    expect(item?.chosen).toBe(2);
+    expect(item?.detail).toContain(
+      'including any ticked for a background or a species',
+    );
+
+    // A third tick silences the item whatever granted it. Pinned rather than
+    // left implicit, so a future provenance column has to come back through
+    // this test and change it deliberately.
+    tickSkills('history');
+    expect(skillItem()).toBeUndefined();
+  });
+
   it('says nothing for a single-class character, however many they owe', () => {
     // Nine of twelve classes grant no entry skill, and a character who never
     // multiclassed has no entry at all. This item must not become a second

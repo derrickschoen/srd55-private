@@ -13,34 +13,33 @@
  * its output rather than filling the gap, in the shape `WeaponMasteryLookup`
  * already established: a state, never a number.
  *
- * THREE THINGS THIS APPLICATION CANNOT DECIDE, AND STATES INSTEAD:
+ * TWO THINGS THIS APPLICATION CANNOT DECIDE, AND STATES INSTEAD:
  *
  *  1. WHETHER A WEAPON IS MELEE OR RANGED. `character_weapons` stores VALUES
  *     and holds no melee/ranged fact. The source's own attack formula branches
  *     on exactly that, so BOTH branches are offered and the reason is printed.
  *     Guessing from `thrown`/`ammunition` would be this application inventing a
  *     classifier.
- *  2. WHETHER THE CHARACTER IS PROFICIENT WITH A WEAPON — AND THIS ENTRY IS NOW
- *     A DEFERRAL RATHER THAN AN IMPOSSIBILITY. It used to say the app held
- *     neither the weapon's category nor an interpretation of the class
- *     qualifier. Both of those are false as of D27 and D28:
- *     `character_weapons.proficiency_category` holds `simple | martial`, and
- *     `src/rules/multiclass-proficiency.ts` computes the union across a
- *     character's classes and evaluates the Rogue's and Monk's qualifier from
- *     the weapon's own boolean columns. The SHEET prints that verdict per
- *     weapon and warns.
- *
- *     WHAT HAS NOT CHANGED IS THE NUMBER ON THIS PROFILE: the bonus is still
- *     included unconditionally, and the precondition below still says so. D28
- *     §1 wants it WITHHELD from a non-proficient weapon, which means threading
- *     the verdict into every profile builder here and revising the printed
- *     formulas — a change with its own surface, deliberately not made in the
- *     same commit as the model it depends on. Until it is, the sheet and this
- *     profile disagree, and the profile is the one that is generous.
- *  3. WHAT A WEAPON'S PROPERTIES DO. The Finesse, Thrown and Versatile rule
+ *  2. WHAT A WEAPON'S PROPERTIES DO. The Finesse, Thrown and Versatile rule
  *     texts are not in `docs/srd/source/`; only the weapons table's use of the
  *     words is. The source's "unless a weapon's property says otherwise" is
  *     therefore quoted and left unapplied.
+ *
+ * AND ONE IT CAN DECIDE NOW, WHICH IT COULD NOT WHEN THIS FILE WAS WRITTEN:
+ * WHETHER THE CHARACTER IS PROFICIENT. That entry used to sit in the list above
+ * as an impossibility, then briefly as a deferral, and it is neither now. D27
+ * gave `character_weapons` a `simple | martial` category and D28 gave
+ * `src/rules/multiclass-proficiency.ts` the union across a character's classes.
+ * So the verdict arrives ON THE WEAPON and `profileProficiency` turns it into
+ * the one thing that changes a number here: whether the Proficiency Bonus is in
+ * the attack bonus. D28 §1 is what it implements — anyone may CARRY any weapon,
+ * and what a Wizard does not get for their Greatsword is the BONUS.
+ *
+ * The sheet's Proficiencies section and these profiles therefore now agree about
+ * the same weapon. They did not before, and the sheet was the one telling the
+ * truth: it printed "not proficient" beside a profile that added the bonus
+ * anyway. `tests/integration/queries/weapon-proficiency-agreement.test.ts`
+ * exists to keep them agreeing.
  *
  * AND ONE THING IT DOES NOT MODEL AT ALL: the Unarmed Strike. Martial Arts
  * covers it, but an Unarmed Strike's own damage is not in `docs/srd/source/`
@@ -67,6 +66,7 @@ import type {
   AttacksPerAction,
   ResolvedExtraAttackGrant,
 } from './extra-attack';
+import type { WeaponProficiencyVerdict } from './multiclass-proficiency';
 
 export const attackProfileKinds = [
   'normal',
@@ -241,6 +241,17 @@ export interface AttackProfileWeapon {
   readonly damage_dice: string | null;
   readonly damage_type: string | null;
   readonly versatile_damage_dice: string | null;
+  /**
+   * Whether this character is proficient with this weapon — REQUIRED, and not
+   * optional with a generous default.
+   *
+   * An optional field would let a new call site omit it and silently get the
+   * bonus, which is the defect this replaced: every attack a Wizard made with a
+   * Greatsword printed a proficiency bonus they do not have. The verdict is
+   * computed once, by `weaponProficiency`, from the same union the character
+   * sheet prints — so the two screens cannot answer differently.
+   */
+  readonly proficiency: WeaponProficiencyVerdict;
 }
 
 export interface AttackProfileInput {
@@ -251,22 +262,130 @@ export interface AttackProfileInput {
   readonly cantrips: RecognisedAttackCantrips;
 }
 
-const PROFICIENCY_PRECONDITION =
-  'The proficiency bonus is included, whatever the Proficiencies section of ' +
-  'the character sheet says. That section now checks a weapon against every ' +
-  'class this character has; this number does not yet read it.';
+/**
+ * WHETHER THIS PROFILE'S ATTACK BONUS INCLUDES THE PROFICIENCY BONUS, AND WHY.
+ *
+ * TWO STATES AND NOT FOUR, deliberately: the verdict has four kinds and this has
+ * two, because the only question a NUMBER can answer is whether the bonus is in
+ * it. The four kinds do not map onto the two by tidiness — each mapping below is
+ * a decision, and two of them are decisions this application could get wrong in
+ * a way nobody would see. The `reason` is what carries the difference the number
+ * cannot.
+ */
+export type ProfileProficiency =
+  | { readonly state: 'included'; readonly reason: string }
+  | { readonly state: 'withheld'; readonly reason: string };
 
+/**
+ * The four verdicts, mapped onto the two states. EXHAUSTIVE, NO `default` ARM.
+ *
+ *  - `proficient` -> INCLUDED. The plain case.
+ *  - `not_proficient` -> WITHHELD. D28 §1 exactly: the row is never refused and
+ *    the bonus is the thing that goes.
+ *  - `category_not_stated` -> INCLUDED, AND SAID OUT LOUD, which is the one
+ *    place this file prints a number it cannot source. D27 decided it: *"the
+ *    column is NULLABLE, and null means NOT STATED. Where it is null the sheet
+ *    keeps its current stated assumption; where it is set the sheet is right."*
+ *    Withholding instead would take the bonus off every weapon on every
+ *    character imported before that column existed, and off every hand-typed
+ *    one — a new wrong number, invented by the fix for the old one, and one
+ *    nobody asked for. The assumption travels in the reason instead (D24: an
+ *    assumption is never printed as a fact).
+ *  - `qualifier_not_evaluated` -> WITHHELD, matching what the sheet already
+ *    says it assumed. Only an IMPORTED class can reach this arm — the SRD's two
+ *    qualifiers are both evaluated — and the two screens agreeing on the
+ *    assumption matters more than which way the assumption falls, since the
+ *    reason tells the player to adjudicate either way.
+ */
+export function profileProficiency(
+  verdict: WeaponProficiencyVerdict,
+): ProfileProficiency {
+  switch (verdict.kind) {
+    case 'proficient':
+      return {
+        state: 'included',
+        reason:
+          'The Proficiency Bonus is included: a class this character has ' +
+          'grants this weapon’s category. One class is enough — proficiency is ' +
+          'a union across a character’s classes, and the Proficiencies section ' +
+          'of the character sheet names which.',
+      };
+    case 'not_proficient':
+      return {
+        state: 'withheld',
+        reason:
+          'The Proficiency Bonus is NOT included: no class this character has ' +
+          'grants this weapon’s category. Carrying and using it is still ' +
+          'allowed — nothing here refuses the weapon — and what is withheld is ' +
+          'the bonus alone.',
+      };
+    case 'category_not_stated':
+      return {
+        state: 'included',
+        reason:
+          'No simple/martial category is recorded for this weapon, so whether ' +
+          'this character is proficient cannot be checked. The Proficiency ' +
+          'Bonus is included, which is an ASSUMPTION and not a fact about this ' +
+          'character: set the category on the weapon to find out.',
+      };
+    case 'qualifier_not_evaluated':
+      return {
+        state: 'withheld',
+        reason:
+          'A class of this character’s grants this weapon’s category only ' +
+          'under a qualifier this application does not read, so the ' +
+          'Proficiency Bonus is NOT included — the same assumption the ' +
+          'Proficiencies section of the character sheet states. That section ' +
+          'prints the qualifier verbatim; if the weapon does qualify, add the ' +
+          'bonus at the table.',
+      };
+  }
+}
+
+/**
+ * The proficiency state of the DERIVED Shillelagh row.
+ *
+ * It is not a weapon this character owns, so there is no
+ * `character_weapons.proficiency_category` to check and no verdict to read. The
+ * bonus is INCLUDED and the row says why it was not checked — the same posture
+ * `category_not_stated` takes, for a different reason. Synthesising a `simple`
+ * weapon to check against would be this application deciding which weapon the
+ * player picked up, which is exactly the name-matching D15 refused.
+ */
+const DERIVED_ROW_PROFICIENCY: ProfileProficiency = {
+  state: 'included',
+  reason:
+    'This row is derived rather than owned, so there is no weapon record to ' +
+    'check a proficiency category against and the Proficiency Bonus is ' +
+    'included. The Proficiencies section of the character sheet checks the ' +
+    'weapons this character actually holds.',
+};
+
+/**
+ * One ability's two numbers, with the proficiency decision applied to the first.
+ *
+ * `damage_modifier` NEVER MOVES. `docs/srd/source/sheet-math.txt` puts the
+ * Proficiency Bonus in the attack roll and only the ability MODIFIER in the
+ * damage roll, so withholding it changes exactly one of the two numbers. A fix
+ * that took it off both would be a second wrong number.
+ */
 function option(
   input: AttackProfileInput,
   ability: Ability,
   reason: string,
+  proficiency: ProfileProficiency,
 ): AbilityOption {
   const score = input.scores.score(ability);
+  const applied =
+    proficiency.state === 'included' ? input.proficiencyBonus : 0;
   return {
     ability,
-    attack_bonus: AttackBonus.from(score, input.proficiencyBonus).value,
+    attack_bonus: AttackBonus.from(score, applied).value,
     damage_modifier: score.modifier(),
-    reason,
+    reason:
+      proficiency.state === 'included'
+        ? reason
+        : `${reason} ${proficiency.reason}`,
   };
 }
 
@@ -302,6 +421,16 @@ function normalProfile(
   weapon: AttackProfileWeapon,
   attacks: AttacksPerAction,
 ): AttackProfile {
+  const proficiency = profileProficiency(weapon.proficiency);
+  // THE PRINTED FORMULA IS QUOTED WHERE IT APPLIES AND NAMED WHERE IT DOES NOT.
+  // The source's sentence is about "a weapon with which you have proficiency";
+  // printing it verbatim beside a number that deliberately omits its last term
+  // would be this application quoting a formula it did not follow.
+  const formula = (ability: 'Strength' | 'Dexterity', kind: string): string =>
+    proficiency.state === 'included'
+      ? `${kind} attack bonus = ${ability} modifier + Proficiency Bonus.`
+      : `The printed ${kind.toLowerCase()} formula is ${ability} modifier + ` +
+        `Proficiency Bonus; this row is the ${ability} modifier alone.`;
   return {
     kind: 'normal',
     label: 'Attack',
@@ -314,16 +443,8 @@ function normalProfile(
         'the property rules that would override the formula are not among its ' +
         'sources, so both are shown.',
       options: [
-        option(
-          input,
-          'strength',
-          'Melee attack bonus = Strength modifier + Proficiency Bonus.',
-        ),
-        option(
-          input,
-          'dexterity',
-          'Ranged attack bonus = Dexterity modifier + Proficiency Bonus.',
-        ),
+        option(input, 'strength', formula('Strength', 'Melee'), proficiency),
+        option(input, 'dexterity', formula('Dexterity', 'Ranged'), proficiency),
       ],
     },
     damage: {
@@ -334,7 +455,7 @@ function normalProfile(
     },
     attacks_per_action: attacks.count,
     unresolved_attacks: attacks.unresolved,
-    preconditions: [PROFICIENCY_PRECONDITION],
+    preconditions: [proficiency.reason],
     notes: [],
   };
 }
@@ -423,6 +544,7 @@ function cantripAbilities(
   sources: readonly CantripSource[],
   cantripName: string,
   fixedPhrasing: string,
+  proficiency: ProfileProficiency,
   extra: {
     readonly options: readonly AbilityOption[];
     readonly reason: string;
@@ -454,6 +576,7 @@ function cantripAbilities(
       input,
       source.spellcasting_ability,
       `${fixedPhrasing} (${source.source_name}).`,
+      proficiency,
     ),
   );
   const distinct = new Set(options.map((entry) => entry.ability));
@@ -516,6 +639,7 @@ function trueStrikeProfile(
 ): AttackProfile {
   const totalLevel = totalCharacterLevel(input.classes);
   const extraDice = trueStrikeExtraDice(totalLevel);
+  const proficiency = profileProficiency(weapon.proficiency);
   const notes: string[] = [];
   if (attacks.count > 1) {
     notes.push(
@@ -533,6 +657,7 @@ function trueStrikeProfile(
       CANTRIP_NAMES.true_strike,
       'The attack uses your spellcasting ability for the attack and damage ' +
         'rolls instead of Strength or Dexterity',
+      proficiency,
     ),
     damage: {
       dice: weapon.damage_dice,
@@ -563,9 +688,13 @@ function trueStrikeProfile(
     // to the one profile they provably do not touch.
     unresolved_attacks: [],
     preconditions: [
-      'Requires a weapon you have proficiency with that is worth 1+ CP. The ' +
-        'Proficiencies section of the character sheet answers the first half; ' +
-        'this application records no coin value, so it cannot check the second.',
+      // THE CANTRIP'S OWN PRECONDITION IS PROFICIENCY, WHICH IS NOW ANSWERED
+      // RATHER THAN DEFERRED. The coin value is not: no column holds one, and
+      // the two halves are kept in one sentence so a reader cannot take the
+      // answered half as an answer to both.
+      'Requires a weapon you have proficiency with that is worth 1+ CP. ' +
+        `${proficiency.reason} This application records no coin value, so it ` +
+        'cannot check the second half at all.',
     ],
     notes,
   };
@@ -606,6 +735,7 @@ function shillelaghProfile(
     input,
     'strength',
     'Strength, which a melee weapon attack uses when the cantrip is not applied.',
+    DERIVED_ROW_PROFICIENCY,
   );
 
   return {
@@ -622,6 +752,7 @@ function shillelaghProfile(
           CANTRIP_NAMES.shillelagh,
           'You can use your spellcasting ability instead of Strength for the ' +
             'attack and damage rolls of melee attacks with that weapon',
+          DERIVED_ROW_PROFICIENCY,
           {
             options: [strength],
             reason:
@@ -650,7 +781,7 @@ function shillelaghProfile(
           'Applies to a Club or a Quarterstaff you are holding, and to melee ' +
             'attacks with it. This row is derived: no weapon has been added to ' +
             'this character to produce it.',
-          PROFICIENCY_PRECONDITION,
+          DERIVED_ROW_PROFICIENCY.reason,
         ],
         notes: [
           'Cast as a Bonus Action and lasts 1 minute. It ends early if you ' +
@@ -692,6 +823,7 @@ function martialArtsProfile(
   granted: { readonly class_name: string; readonly class_level: number; readonly die: number },
   attacks: AttacksPerAction,
 ): AttackProfile {
+  const proficiency = profileProficiency(weapon.proficiency);
   return {
     kind: 'martial_arts',
     label: `Martial Arts (${granted.class_name})`,
@@ -701,11 +833,17 @@ function martialArtsProfile(
         'You can use your Dexterity modifier instead of your Strength ' +
         'modifier for the attack and damage rolls of your Monk weapons.',
       options: [
-        option(input, 'dexterity', 'Dexterity, by Dexterous Attacks.'),
+        option(
+          input,
+          'dexterity',
+          'Dexterity, by Dexterous Attacks.',
+          proficiency,
+        ),
         option(
           input,
           'strength',
           'Strength, which a melee weapon attack uses without the feature.',
+          proficiency,
         ),
       ],
     },
@@ -726,7 +864,7 @@ function martialArtsProfile(
       'You must be unarmed or wielding only Monk weapons, and not wearing ' +
         'armor or wielding a Shield. This application does not record worn ' +
         'armor or a held Shield.',
-      PROFICIENCY_PRECONDITION,
+      proficiency.reason,
     ],
     notes: [],
   };

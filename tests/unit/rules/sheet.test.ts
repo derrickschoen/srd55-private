@@ -72,8 +72,8 @@ function classGrant(
  * The proficiency union has its own file, with its own transcribed grants.
  */
 const NO_PROFICIENCIES: SheetClass['proficiencies'] = {
-  initial: { armor_training: [], weapon_proficiencies: [] },
-  on_entry: { armor_training: [], weapon_proficiencies: [] },
+  armor_training: [],
+  weapon_proficiencies: [],
 };
 
 const FIGHTER: SheetClass = {

@@ -89,11 +89,22 @@ type ProficiencyProperties = Pick<ProficiencyWeapon, 'finesse' | 'light'>;
  * application inventing a qualifier no class has; the `unevaluated` arm is what
  * a real third one gets until someone sources it. The map is over COLUMN NAMES
  * rather than free strings so a word with no column cannot be added by accident.
+ *
+ * A `Map` AND NOT AN OBJECT LITERAL, AND A REVIEW IS WHY. Indexed as an object,
+ * `QUALIFIER_WORDS['constructor']` is a FUNCTION rather than `undefined`, so an
+ * imported class qualified "constructor" — or "__proto__", the only other
+ * reachable one, since the words are lowercased and `\s+or\s+`-split first —
+ * walked straight past the `unevaluated` arm and was silently dropped instead of
+ * printed. That is the exact failure this module's contract forbids: a qualifier
+ * this application cannot read must be STATED, never guessed at. A `Map` has no
+ * inherited keys, so the hazard is gone by construction rather than by a guard
+ * someone must remember to keep.
  */
-const QUALIFIER_WORDS: Readonly<Record<string, keyof ProficiencyProperties>> = {
-  finesse: 'finesse',
-  light: 'light',
-};
+const QUALIFIER_WORDS: ReadonlyMap<string, keyof ProficiencyProperties> =
+  new Map([
+    ['finesse', 'finesse'],
+    ['light', 'light'],
+  ]);
 
 /**
  * `"Finesse or Light"` -> the two columns; `"Light"` -> one.
@@ -118,7 +129,7 @@ export function parseWeaponQualifier(
   const parts = text.split(/\s+or\s+/i).map((part) => part.trim().toLowerCase());
   const properties: (keyof ProficiencyProperties)[] = [];
   for (const part of parts) {
-    const column = QUALIFIER_WORDS[part];
+    const column = QUALIFIER_WORDS.get(part);
     if (column === undefined) {
       return { kind: 'unevaluated', text };
     }

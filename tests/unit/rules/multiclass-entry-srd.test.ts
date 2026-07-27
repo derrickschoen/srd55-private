@@ -44,7 +44,7 @@ interface ExpectedRow {
 const EXPECTED: Readonly<Record<string, ExpectedRow>> = {
   // L24-25: "Hit Point Die, proficiency with Mar-/tial weapons, and training
   // with Shields." NO Light and NO Medium, though the Core Traits row has both.
-  Barbarian: { weapons: ['martial'], armor: ['shield'], skill: 'any:0', tools: [] },
+  Barbarian: { weapons: ['martial'], armor: ['shield'], skill: 'none:0', tools: [] },
   // L37-40: "proficiency in one skill of your choice" — no class-list
   // qualifier at all — plus a Musical Instrument and Light armour.
   Bard: {
@@ -57,27 +57,27 @@ const EXPECTED: Readonly<Record<string, ExpectedRow>> = {
   Cleric: {
     weapons: [],
     armor: ['light', 'medium', 'shield'],
-    skill: 'any:0',
+    skill: 'none:0',
     tools: [],
   },
   // L62-66, a sentence spanning five lines with two blank lines inside it.
-  Druid: { weapons: [], armor: ['light', 'shield'], skill: 'any:0', tools: [] },
+  Druid: { weapons: [], armor: ['light', 'shield'], skill: 'none:0', tools: [] },
   // L75-80.
   Fighter: {
     weapons: ['martial'],
     armor: ['light', 'medium', 'shield'],
-    skill: 'any:0',
+    skill: 'none:0',
     tools: [],
   },
   // L88-89: "Gain the Hit Point Die trait from the Core Monk Traits table." The
   // Monk's Core Traits row grants Simple weapons and Martial-with-a-qualifier;
   // NONE of it survives into the entry grant.
-  Monk: { weapons: [], armor: [], skill: 'any:0', tools: [] },
+  Monk: { weapons: [], armor: [], skill: 'none:0', tools: [] },
   // L101-104.
   Paladin: {
     weapons: ['martial'],
     armor: ['light', 'medium', 'shield'],
-    skill: 'any:0',
+    skill: 'none:0',
     tools: [],
   },
   // L114-118: the only class granting BOTH a weapon category and a skill.
@@ -96,18 +96,28 @@ const EXPECTED: Readonly<Record<string, ExpectedRow>> = {
     tools: ["Thieves' Tools"],
   },
   // L140-141.
-  Sorcerer: { weapons: [], armor: [], skill: 'any:0', tools: [] },
+  Sorcerer: { weapons: [], armor: [], skill: 'none:0', tools: [] },
   // L153-155.
-  Warlock: { weapons: [], armor: ['light'], skill: 'any:0', tools: [] },
+  Warlock: { weapons: [], armor: ['light'], skill: 'none:0', tools: [] },
   // L166-167, the other bullet-clipped block, and the one whose next line reads
   // `izard Class Features` with the W sliced off.
-  Wizard: { weapons: [], armor: [], skill: 'any:0', tools: [] },
+  Wizard: { weapons: [], armor: [], skill: 'none:0', tools: [] },
 };
 
-/** `class_list:1` / `any:1` / `any:0` for none — one string per printed shape. */
+/**
+ * `class_list:1` / `any:1` / `none:0` — one string per printed shape.
+ *
+ * THE `none` POOL IS PRINTED AS ITSELF AND IS NOT FOLDED ONTO `any`. It was
+ * folded once and a review caught it: the nine no-skill rows then read `any:0`,
+ * which is a different claim about the extract — "zero skills drawn from every
+ * skill there is" rather than "no skill clause at all" — and this table is the
+ * by-eye oracle, so it is the one file that must be able to tell them apart.
+ * That the pair `any`/0 is unstorable elsewhere is not a reason for the oracle
+ * to be unable to see it.
+ */
 function skillKey(grant: SrdMulticlassEntryGrant): string {
   const columns = multiclassSkillColumns(grant.skill_choice);
-  return `${columns.pool === 'none' ? 'any' : columns.pool}:${String(columns.count)}`;
+  return `${columns.pool}:${String(columns.count)}`;
 }
 
 function traitsFor(overrides: Partial<SrdClassTraits> = {}): SrdClassTraits[] {
@@ -244,6 +254,44 @@ describe('the parse refuses content the storage shape cannot hold', () => {
         traitsFor({ class_name: 'Ranger', skill_options: [] }),
       ),
     ).toThrow(/prints no skill list to draw from/);
+  });
+
+  it('throws on a count word that names an Object member', () => {
+    // A review found this. While the number words lived in an OBJECT literal,
+    // `SKILL_COUNT_WORDS['constructor']` was a FUNCTION rather than `undefined`,
+    // so the unknown-word throw below was walked straight past and a FUNCTION
+    // travelled on as the skill `count` towards an integer column. Both
+    // reachable names are asserted: the capture is `\w+`, which `__proto__`
+    // satisfies as readily as `constructor`.
+    for (const word of ['constructor', '__proto__']) {
+      const injected =
+        `=== Bard (page line 1, column 1) ===\n` +
+        'As a Multiclass Character\n' +
+        `* Gain the following traits from the Core Bard Traits table: Hit Point Die, proficiency in ${word} skills of your choice.\n` +
+        [
+          'Barbarian',
+          'Cleric',
+          'Druid',
+          'Fighter',
+          'Monk',
+          'Paladin',
+          'Ranger',
+          'Rogue',
+          'Sorcerer',
+          'Warlock',
+          'Wizard',
+        ]
+          .map(
+            (name) =>
+              `=== ${name} (page line 1, column 1) ===\n` +
+              'As a Multiclass Character\n' +
+              `* Gain the following traits from the Core ${name} Traits table: Hit Point Die.\n`,
+          )
+          .join('');
+      expect(() => parseSrdMulticlassEntryGrants(injected)).toThrow(
+        /is not a number word this parser holds/,
+      );
+    }
   });
 
   it('throws on a class count other than twelve', () => {

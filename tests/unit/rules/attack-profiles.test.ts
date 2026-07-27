@@ -17,6 +17,7 @@ import type {
 } from '../../../src/rules/attack-cantrips';
 import { martialArtsDice, type SheetClassLevels } from '../../../src/rules/sheet';
 import type { ExtraAttackGrant } from '../../../src/rules/extra-attack';
+import type { WeaponProficiencyVerdict } from '../../../src/rules/multiclass-proficiency';
 
 /**
  * EVERY NUMBER HERE IS COMPUTED BY HAND AND WRITTEN AS A LITERAL, and the
@@ -106,12 +107,26 @@ function wizardClass(level: number): SheetClassLevels {
   return { class_name: 'Arcane scholar', level };
 }
 
+/**
+ * PROFICIENT, NAMED RATHER THAN SPELLED OUT AT EVERY FIXTURE.
+ *
+ * The default for every weapon below, so that the tests about dice, damage types
+ * and Extra Attack keep printing the numbers they were written against. The
+ * three other verdicts each have their own tests, beside the arithmetic they
+ * change.
+ */
+const PROFICIENT: WeaponProficiencyVerdict = {
+  kind: 'proficient',
+  via: ['Fighter'],
+};
+
 const LONGSWORD: AttackProfileWeapon = {
   id: 1,
   name: 'Longsword',
   damage_dice: '1d8',
   damage_type: 'Slashing',
   versatile_damage_dice: '1d10',
+  proficiency: PROFICIENT,
 };
 
 const NO_CANTRIPS: RecognisedAttackCantrips = {
@@ -238,21 +253,137 @@ describe('the plain weapon attack', () => {
     expect(normal.abilities.state).not.toBe('fixed');
   });
 
-  it('states the proficiency assumption instead of hiding it', () => {
-    // THE ASSUMPTION SURVIVED D27/D28, AND THE SENTENCE CHANGED BECAUSE ITS
-    // REASON DID. The application now DOES record which weapons a character is
-    // proficient with — `character_weapons.proficiency_category` plus the union
-    // in `src/rules/multiclass-proficiency.ts`, which the character sheet's
-    // Proficiencies section prints per weapon. This number does not yet read
-    // it, so the bonus is still included unconditionally; what the precondition
-    // must say is that the two disagree and which one is generous.
-    const stated = profileOf(build(), 'normal').preconditions.join(' ');
-    expect(stated).toContain('The proficiency bonus is included');
-    expect(stated).toContain('this number does not yet read it');
-    // And it must NOT go back to claiming the fact is unheld, which is now
-    // false and would send a reader looking for a column that exists.
-    expect(stated).not.toContain(
-      'does not record which weapons a character is proficient with',
+  /**
+   * THE PROFICIENCY BONUS, PER VERDICT — the four arms, against the SAME
+   * character and the SAME weapon, so nothing but the verdict can move.
+   *
+   * THIS TEST REPLACES ONE THAT PINNED A DEFERRAL. It used to assert the
+   * precondition sentence "the proficiency bonus is included, whatever the
+   * Proficiencies section says… this number does not yet read it" — the honest
+   * record of a gap. The gap is closed, so the SUBJECT of that assertion is
+   * gone; what survives, and is asserted far harder here, is that the profile
+   * states what it did rather than hiding it.
+   *
+   * Strength 18 (+4), proficiency bonus 3. Proficient is +7; withheld is +4.
+   * The two numbers differ, which is the whole point: an implementation that
+   * ignored the verdict would print +7 four times.
+   */
+  const withVerdict = (proficiency: WeaponProficiencyVerdict): AttackProfile =>
+    profileOf(
+      build({
+        scores: scores({ strength: 18 }),
+        proficiencyBonus: 3,
+        weapons: [{ ...LONGSWORD, proficiency }],
+      }),
+      'normal',
+    );
+
+  it('withholds the proficiency bonus from a weapon no class grants (D28 §1)', () => {
+    const profile = withVerdict({ kind: 'not_proficient' });
+    expect(bonusFor(profile, 'strength')).toBe(4);
+    // THE DAMAGE MODIFIER DOES NOT MOVE. The source puts the Proficiency Bonus
+    // in the attack roll and only the ability modifier in the damage roll, so a
+    // fix that took it off both would be a second wrong number.
+    const strength =
+      profile.abilities.state === 'unavailable'
+        ? undefined
+        : profile.abilities.options.find(
+            (entry) => entry.ability === 'strength',
+          );
+    expect(strength?.damage_modifier).toBe(4);
+    // …and it says so, in the option's own reason and in the precondition. The
+    // printed formula is NOT quoted verbatim here, because this row did not
+    // follow it.
+    expect(strength?.reason).toContain('is the Strength modifier alone');
+    expect(strength?.reason).toContain('The Proficiency Bonus is NOT included');
+    expect(profile.preconditions.join(' ')).toContain(
+      'no class this character has grants this weapon’s category',
+    );
+  });
+
+  it('includes it where a class does grant the category', () => {
+    const profile = withVerdict({ kind: 'proficient', via: ['Fighter'] });
+    expect(bonusFor(profile, 'strength')).toBe(7);
+    expect(profile.preconditions.join(' ')).toContain(
+      'The Proficiency Bonus is included',
+    );
+  });
+
+  it('includes it where no category is recorded, and calls that an assumption', () => {
+    // D27: "where it is null the sheet keeps its current stated assumption".
+    // Withholding here would take the bonus off every weapon on every character
+    // imported before that column existed — a new wrong number, invented by the
+    // fix for the old one.
+    const profile = withVerdict({ kind: 'category_not_stated' });
+    expect(bonusFor(profile, 'strength')).toBe(7);
+    const stated = profile.preconditions.join(' ');
+    expect(stated).toContain('No simple/martial category is recorded');
+    expect(stated).toContain('an ASSUMPTION and not a fact');
+  });
+
+  it('withholds it where the qualifier is one this application cannot read', () => {
+    // The same assumption the sheet already states for this arm. The two
+    // screens agreeing about an assumption matters more than which way it
+    // falls, because the reason tells the player to adjudicate either way.
+    const profile = withVerdict({
+      kind: 'qualifier_not_evaluated',
+      via: ['Runeblade'],
+      qualifiers: ['inscribed with a rune'],
+    });
+    expect(bonusFor(profile, 'strength')).toBe(4);
+    expect(profile.preconditions.join(' ')).toContain(
+      'add the bonus at the table',
+    );
+  });
+
+  it('applies the verdict to EVERY profile of the weapon, not just the plain one', () => {
+    // True Strike and Martial Arts are weapon attacks too. A fix applied to the
+    // plain attack alone would leave a Monk's Martial Arts row printing a bonus
+    // the row above it withholds — the same two-screens disagreement, one row
+    // apart.
+    const result = attackProfiles({
+      weapons: [{ ...LONGSWORD, proficiency: { kind: 'not_proficient' } }],
+      classes: [
+        { class_name: 'Monk', level: 5, martial_arts_dice: new Map([[5, 6]]) },
+      ],
+      scores: scores({ strength: 18, dexterity: 18, wisdom: 18 }),
+      proficiencyBonus: 3,
+      cantrips: knows('true_strike', [
+        { source_name: 'Monk', spellcasting_ability: 'wisdom' },
+      ]),
+    });
+    for (const kind of ['normal', 'true_strike', 'martial_arts'] as const) {
+      const profile = profileOf(result, kind);
+      const bonuses =
+        profile.abilities.state === 'unavailable'
+          ? []
+          : profile.abilities.options.map((entry) => entry.attack_bonus);
+      expect(bonuses, `${kind} withholds the bonus`).not.toHaveLength(0);
+      // Every option is the bare modifier: +4 for Strength, Dexterity and
+      // Wisdom alike, since all three scores are 18 here.
+      expect(new Set(bonuses), `${kind} withholds the bonus`).toEqual(
+        new Set([4]),
+      );
+    }
+  });
+
+  it('includes the bonus on the DERIVED Shillelagh row, and says it was not checked', () => {
+    // There is no weapon record behind that row, so there is no category to
+    // check. Synthesising one would be this application deciding which weapon
+    // the player picked up.
+    const result = attackProfiles({
+      weapons: [],
+      classes: [{ class_name: 'Druid', level: 5 }],
+      scores: scores({ strength: 18, wisdom: 18 }),
+      proficiencyBonus: 3,
+      cantrips: knows('shillelagh', [
+        { source_name: 'Druid', spellcasting_ability: 'wisdom' },
+      ]),
+    });
+    const profile = profileOf(result, 'shillelagh');
+    expect(bonusFor(profile, 'wisdom')).toBe(7);
+    expect(profile.preconditions.join(' ')).toContain(
+      'no weapon record to check a proficiency category against',
     );
   });
 
@@ -276,6 +407,7 @@ describe('the plain weapon attack', () => {
             damage_dice: null,
             damage_type: null,
             versatile_damage_dice: null,
+            proficiency: PROFICIENT,
           },
         ],
       }),
@@ -384,6 +516,7 @@ describe('True Strike', () => {
           damage_dice: '1d4',
           damage_type: 'Piercing',
           versatile_damage_dice: null,
+          proficiency: PROFICIENT,
         },
       ],
       cantrips: wizardKnows,
@@ -462,6 +595,7 @@ describe('True Strike', () => {
       damage_dice: '1d4',
       damage_type: 'Piercing',
       versatile_damage_dice: null,
+      proficiency: PROFICIENT,
     };
     const result = build({
       weapons: [LONGSWORD, dagger],

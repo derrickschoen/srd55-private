@@ -416,8 +416,18 @@ export const class_weapon_proficiencies = sqliteTable(
      * NOTE that neither of the two qualified rows is ever flagged: the Monk's
      * entry clause grants no weapons at all (L88-89) and the Rogue's grants
      * none either (L126-131). So no entry grant in the SRD carries a qualifier
-     * today. The column still travels with the flag, because the model must
-     * hold an imported class whose entry grant does.
+     * today.
+     *
+     * AND THE LIMIT OF THIS SHAPE, CORRECTING A CLAIM THAT OVERSTATED IT. The
+     * qualifier travels WITH the flag on ONE row, so an entry grant necessarily
+     * INHERITS the initial grant's qualifier: a class whose entry clause
+     * qualified a category differently from its Core Traits row cannot be
+     * expressed here at all, because the unique index on (class_definition_id,
+     * category) rules out a second row. This comment used to say the column
+     * travels with the flag "because the model must hold an imported class whose
+     * entry grant does" — true only where the two qualifiers agree.
+     * `ClassProficiencySources` in `src/rules/sheet.ts` states the same limit in
+     * the type, where a reader building a value will meet it.
      */
     granted_on_multiclass_entry: tinyint1('granted_on_multiclass_entry')
       .notNull()

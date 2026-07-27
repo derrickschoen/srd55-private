@@ -422,6 +422,115 @@ describe('planner build reference projection', () => {
     ]);
   });
 
+  /**
+   * THE THREE SHEET ITEMS, IN BOTH FORMS.
+   *
+   * A review measured that neither of the `unmade_multiclass_skill_choice`
+   * branches — the JSON projection and the readable row — was executed by any
+   * test: replacing all four numbers with 999 and both cells with a literal
+   * left the whole suite green. Its two siblings, `orphan_hit_point_roll` and
+   * `no_skill_proficiencies`, were in the same state and are covered here too,
+   * because the gap was the FAMILY and not the newest member of it.
+   *
+   * All three carry no `source_ref` — they hang off no source instance — so the
+   * projection cannot reuse the registry the other items go through, and that
+   * is exactly the branch nothing was running.
+   */
+  const sheetItems: CompletenessResult = {
+    ...completeness,
+    outstanding_count: 3,
+    items: [
+      {
+        kind: 'orphan_hit_point_roll',
+        title: 'A hit point roll is filed under a class this character lacks',
+        detail: 'detail',
+        remedy: 'remedy',
+        class_name: 'Barbarian',
+        levels: [2, 3],
+      },
+      {
+        kind: 'no_skill_proficiencies',
+        title: 'No skill proficiencies chosen',
+        detail: 'detail',
+        remedy: 'remedy',
+        choice_count: 3,
+      },
+      {
+        kind: 'unmade_multiclass_skill_choice',
+        title: 'A skill from multiclassing has not been chosen',
+        detail: 'detail',
+        remedy: 'remedy',
+        entitled: 4,
+        chosen: 2,
+        outstanding: 2,
+        entries: [
+          { class_name: 'Bard', count: 1, pool: 'any' },
+          { class_name: 'Ranger', count: 1, pool: 'class_list' },
+        ],
+      },
+    ],
+  };
+
+  it('projects the three sheet items with their own numbers, not a shared shape', () => {
+    const { reference } = buildAgentReference(workspace(), sheetItems);
+    expect(reference.outstanding.items).toEqual([
+      {
+        kind: 'orphan_hit_point_roll',
+        class_name: 'Barbarian',
+        levels: [2, 3],
+      },
+      { kind: 'no_skill_proficiencies', choice_count: 3 },
+      {
+        kind: 'unmade_multiclass_skill_choice',
+        entitled: 4,
+        chosen: 2,
+        outstanding: 2,
+        entries: [
+          { class_name: 'Bard', count: 1, pool: 'any' },
+          { class_name: 'Ranger', count: 1, pool: 'class_list' },
+        ],
+      },
+    ]);
+    // A CLASS NAME TRAVELS IN THE JSON HERE, deliberately: it comes from the
+    // recipient's OWN catalog by way of a content key, so it is not
+    // importer-authored text and does not belong in the withheld ledger. The
+    // hostile strings this fixture carries elsewhere must still be absent.
+    const json = JSON.stringify(reference);
+    for (const hostile of IMPORTER_AUTHORED) {
+      expect(json).not.toContain(hostile);
+    }
+  });
+
+  it('renders each sheet item as a row a person can read', () => {
+    const projection = buildAgentReference(workspace(), sheetItems);
+    const table = tableIn(
+      sectionById(agentReferenceSections(projection), 'outstanding'),
+      'Outstanding items',
+    );
+    // THE MIDDLE CELL IS THE SUBJECT AND THE THIRD IS THE NUMBERS, in the same
+    // order the JSON carries them, so neither form can state more than the
+    // other. Every value asserted below is one the mutation replaced.
+    expect(table.rows.map((row) => row.map((cell) => cell.text))).toEqual([
+      [
+        'orphan_hit_point_roll',
+        'Barbarian',
+        'hit point rolls recorded at level 2, 3 for a class this character does ' +
+          'not have; they are not counted',
+      ],
+      [
+        'no_skill_proficiencies',
+        'not applicable',
+        '3 skill proficiencies are offered and none is recorded',
+      ],
+      [
+        'unmade_multiclass_skill_choice',
+        'Bard, Ranger',
+        '2 of 4 skill proficiencies recorded; 2 still owed, including 1 from ' +
+          'Bard (any), 1 from Ranger (class_list)',
+      ],
+    ]);
+  });
+
   it('keeps an imported source that copies a class source name separate', () => {
     // An importer names a feat exactly what the application names the class
     // source. Merging them would hand importer-granted slots the provenance of

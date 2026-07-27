@@ -583,11 +583,19 @@ function weaponVerdictDetail(
       ];
     case 'not_proficient':
       // WARN, NEVER REFUSE (D28 §1). Carrying it is legal; what is missing is
-      // the bonus, and even that is still printed on the attack profiles today.
+      // the bonus.
+      //
+      // THIS SENTENCE USED TO BE A BARE ASSERTION AND IS NOW A DESCRIPTION OF A
+      // NUMBER THE READER CAN GO AND SEE. When it was written the planner's
+      // attack profile for the same weapon still added the proficiency bonus, so
+      // the two screens said opposite things; the profile withholds it now, and
+      // `tests/integration/queries/weapon-proficiency-agreement.test.ts` is what
+      // keeps them answering the same way.
       return plain(
         'No class this character has grants this weapon’s category. They may ' +
           'still carry and use it — nothing here refuses the row — but they add ' +
-          'no proficiency bonus to the attack.',
+          'no proficiency bonus to the attack, and the attack profiles in the ' +
+          'planner leave it out.',
       );
     case 'category_not_stated':
       return plain(
