@@ -213,6 +213,141 @@ export type ArmorDexBonus = (typeof armorDexBonuses)[number];
 export const armorSlots = ['worn', 'shield'] as const;
 export type ArmorSlot = (typeof armorSlots)[number];
 
+/* ==========================================================================
+ * OPEN SRD VOCABULARIES
+ * ========================================================================== */
+
+/**
+ * A KNOWN SET WITH A PASSTHROUGH LIMB.
+ *
+ * This repository already used the D12/Q4 shape for structured text, but only
+ * as TWO COLUMNS: the raw spell `range` survives beside the recognised
+ * `range_kind`. There was no scalar open-vocabulary type to reuse. This is the
+ * one scalar pattern for all five vocabularies below.
+ *
+ * Known literals remain literals, so switches and pickers can reason about the
+ * SRD set. An unknown string must cross an explicit decoder and receives a
+ * vocabulary-specific brand, so a custom damage type cannot be passed where a
+ * custom school belongs merely because both are strings. The brand changes no
+ * stored value; the passthrough is byte-for-byte.
+ */
+declare const passthroughVocabulary: unique symbol;
+type PassthroughVocabulary<Name extends string> = string & {
+  readonly [passthroughVocabulary]: Name;
+};
+
+/**
+ * The eight schools in the SRD 5.2.1 Schools of Magic table.
+ *
+ * OPEN because `CatalogRecord.school` comes from a user-imported catalog
+ * document (`src/catalog/catalog-schema.ts`), including the committed homebrew
+ * fixtures. Closing the database column would reject a homebrew school.
+ */
+export const spellSchools = [
+  'Abjuration',
+  'Conjuration',
+  'Divination',
+  'Enchantment',
+  'Evocation',
+  'Illusion',
+  'Necromancy',
+  'Transmutation',
+] as const;
+export type KnownSpellSchool = (typeof spellSchools)[number];
+export type SpellSchool =
+  | KnownSpellSchool
+  | PassthroughVocabulary<'SpellSchool'>;
+export const spellSchool = (value: string): SpellSchool =>
+  value as SpellSchool;
+
+/** The thirteen entries in the SRD 5.2.1 Damage Types table. */
+export const damageTypes = [
+  'Acid',
+  'Bludgeoning',
+  'Cold',
+  'Fire',
+  'Force',
+  'Lightning',
+  'Necrotic',
+  'Piercing',
+  'Poison',
+  'Psychic',
+  'Radiant',
+  'Slashing',
+  'Thunder',
+] as const;
+export type KnownDamageType = (typeof damageTypes)[number];
+export type DamageType =
+  | KnownDamageType
+  | PassthroughVocabulary<'DamageType'>;
+export const damageType = (value: string): DamageType =>
+  value as DamageType;
+
+/** The fifteen conditions named by the SRD 5.2.1 Condition glossary entry. */
+export const conditionTypes = [
+  'Blinded',
+  'Charmed',
+  'Deafened',
+  'Exhaustion',
+  'Frightened',
+  'Grappled',
+  'Incapacitated',
+  'Invisible',
+  'Paralyzed',
+  'Petrified',
+  'Poisoned',
+  'Prone',
+  'Restrained',
+  'Stunned',
+  'Unconscious',
+] as const;
+export type KnownConditionType = (typeof conditionTypes)[number];
+export type ConditionType =
+  | KnownConditionType
+  | PassthroughVocabulary<'ConditionType'>;
+export const conditionType = (value: string): ConditionType =>
+  value as ConditionType;
+
+/** The fourteen entries in the SRD 5.2.1 Creature Type glossary entry. */
+export const creatureTypes = [
+  'Aberration',
+  'Beast',
+  'Celestial',
+  'Construct',
+  'Dragon',
+  'Elemental',
+  'Fey',
+  'Fiend',
+  'Giant',
+  'Humanoid',
+  'Monstrosity',
+  'Ooze',
+  'Plant',
+  'Undead',
+] as const;
+export type KnownCreatureType = (typeof creatureTypes)[number];
+export type CreatureType =
+  | KnownCreatureType
+  | PassthroughVocabulary<'CreatureType'>;
+export const creatureType = (value: string): CreatureType =>
+  value as CreatureType;
+
+/** The six categories in the SRD 5.2.1 Size glossary entry. */
+export const creatureSizes = [
+  'Tiny',
+  'Small',
+  'Medium',
+  'Large',
+  'Huge',
+  'Gargantuan',
+] as const;
+export type KnownCreatureSize = (typeof creatureSizes)[number];
+export type CreatureSize =
+  | KnownCreatureSize
+  | PassthroughVocabulary<'CreatureSize'>;
+export const creatureSize = (value: string): CreatureSize =>
+  value as CreatureSize;
+
 /**
  * The two weapon-proficiency categories the Core Traits tables name.
  *

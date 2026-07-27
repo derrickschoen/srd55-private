@@ -4,8 +4,10 @@ import {
   extraAttackWeaponScopes,
   isEnumValue,
   rulesEditions,
+  spellSchool,
   type EffectReliabilityCategory,
   type RulesEdition,
+  type SpellSchool,
 } from '../domain/enums';
 import type { ClassFeatureEffect } from '../rules/class-feature-effects';
 import { isRecord } from '../worker/handler';
@@ -43,7 +45,7 @@ export interface CatalogRecord {
   name: string;
   edition: RulesEdition;
   level: number;
-  school: string;
+  school: SpellSchool;
   castingTime: string | null;
   range: string | null;
   components: string | null;
@@ -304,7 +306,7 @@ function catalogRecord(value: unknown): CatalogRecord {
     name: nonEmptyString(value.name, 'name'),
     edition: edition as RulesEdition,
     level: Number(level),
-    school: nonEmptyString(value.school, 'school'),
+    school: spellSchool(nonEmptyString(value.school, 'school')),
     castingTime: nullableString(value.castingTime, 'castingTime'),
     range: nullableString(value.range, 'range'),
     components: nullableString(value.components, 'components'),

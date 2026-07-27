@@ -36,8 +36,10 @@ import weaponsTableExtract from '../../docs/srd/source/weapons-table.txt?raw';
 import masteryProgressionExtract from '../../docs/srd/source/weapon-mastery-progression.txt?raw';
 import type { DatabaseContext } from '../db/database';
 import {
+  damageTypes,
   isEnumValue,
   weaponMasteryProperties,
+  type KnownDamageType,
   type SrdWeaponGroup,
   type WeaponMasteryGrant,
   type WeaponMasteryProperty,
@@ -60,7 +62,7 @@ export interface SrdWeaponTemplate {
   readonly name: string;
   readonly srd_group: SrdWeaponGroup;
   readonly damage_dice: string;
-  readonly damage_type: string;
+  readonly damage_type: KnownDamageType;
   readonly versatile_damage_dice: string | null;
   readonly finesse: boolean;
   readonly heavy: boolean;
@@ -146,7 +148,7 @@ interface MutableTemplate {
   name: string;
   srd_group: SrdWeaponGroup;
   damage_dice: string;
-  damage_type: string;
+  damage_type: KnownDamageType;
   mastery_property: WeaponMasteryProperty;
   /** Accumulated property text; continuation lines append to it. */
   properties: string;
@@ -344,12 +346,18 @@ export function parseSrdWeaponTemplates(
         `no recognised mastery property on ${String(row.name)}.`,
       );
     }
+    const parsedDamageType = row.damageType as string;
+    if (!isEnumValue(damageTypes, parsedDamageType)) {
+      throw new SrdExtractError(
+        `unknown damage type ${JSON.stringify(parsedDamageType)} on ${String(row.name)}.`,
+      );
+    }
 
     pending = {
       name: (row.name as string).trim(),
       srd_group: group,
       damage_dice: row.dice as string,
-      damage_type: row.damageType as string,
+      damage_type: parsedDamageType,
       mastery_property: mastery,
       properties: rest.replace(TRAILING_MASTERY, ''),
     };

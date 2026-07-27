@@ -1,6 +1,7 @@
 import {
   sqlBoolean,
   sqlInteger,
+  sqlNullableDamageType,
   sqlNullableInteger,
   sqlNullableString,
   sqlString,
@@ -521,7 +522,7 @@ export class CharacterSheetBuilder {
       [characterId],
       (row): EffectRow => ({
         effect_kind: sqlString(row, 'effect_kind'),
-        damage_type: sqlNullableString(row, 'damage_type'),
+        damage_type: sqlNullableDamageType(row, 'damage_type'),
         hit_points_flat: sqlNullableInteger(row, 'hit_points_flat'),
         hit_points_per_level: sqlNullableInteger(row, 'hit_points_per_level'),
         speed_bonus_feet: sqlNullableInteger(row, 'speed_bonus_feet'),

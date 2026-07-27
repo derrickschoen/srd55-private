@@ -18,11 +18,23 @@ import {
   armorSlots,
   backgroundEquipmentItemKinds,
   backgroundEquipmentOptions,
+  conditionType,
+  creatureSizes,
+  creatureTypes,
+  creatureSize,
+  creatureType,
+  damageTypes,
+  damageType,
   domainSourceTypes,
+  effectReliabilityCategories,
+  materialCostKinds,
   rulesEditions,
   selectionEligibilities,
   slotBuckets,
   skills,
+  spellAreaShapes,
+  spellRangeKinds,
+  spellSchool,
   slotStates,
   effectKinds,
   srdWeaponGroups,
@@ -251,6 +263,24 @@ const skillEnum = z.enum(skills);
  */
 const backgroundEquipmentOptionEnum = z.enum(backgroundEquipmentOptions);
 const backgroundEquipmentItemKindEnum = z.enum(backgroundEquipmentItemKinds);
+const spellRangeKindEnum = z.enum(spellRangeKinds);
+const spellAreaShapeEnum = z.enum(spellAreaShapes);
+const materialCostKindEnum = z.enum(materialCostKinds);
+const effectReliabilityCategoryEnum = z.enum(effectReliabilityCategories);
+
+/**
+ * Open-vocabulary schemas transform the storage string to the domain union
+ * without rejecting unknown members. The transformation is identity at
+ * runtime; its output type carries the vocabulary-specific passthrough brand.
+ */
+const spellSchoolVocabulary = z.string().transform(spellSchool);
+const damageTypeVocabulary = z.string().transform(damageType);
+const conditionTypeVocabulary = z.string().transform(conditionType);
+const creatureTypeVocabulary = z.string().transform(creatureType);
+const creatureSizeVocabulary = z.string().transform(creatureSize);
+const damageTypeEnum = z.enum(damageTypes);
+const creatureTypeEnum = z.enum(creatureTypes);
+const creatureSizeEnum = z.enum(creatureSizes);
 
 /**
  * THE CLOSED SET of shared refinements.
@@ -287,6 +317,18 @@ export const COLUMN_REFINEMENTS = {
   skillEnum,
   backgroundEquipmentOptionEnum,
   backgroundEquipmentItemKindEnum,
+  spellRangeKindEnum,
+  spellAreaShapeEnum,
+  materialCostKindEnum,
+  effectReliabilityCategoryEnum,
+  spellSchoolVocabulary,
+  damageTypeVocabulary,
+  conditionTypeVocabulary,
+  creatureTypeVocabulary,
+  creatureSizeVocabulary,
+  damageTypeEnum,
+  creatureTypeEnum,
+  creatureSizeEnum,
 } as const;
 
 /**
@@ -398,7 +440,12 @@ type NativeContractTable =
   | 'species_template_traits'
   | 'species_template_trait_effects'
   | 'background_templates'
-  | 'background_equipment_items';
+  | 'background_equipment_items'
+  // User-imported catalog rows. These contracts are the Zod half of the open
+  // school/damage/condition types; unknown strings must survive, not narrow.
+  | 'spell_versions'
+  | 'spell_version_damage_types'
+  | 'spell_version_conditions';
 
 type Facts = typeof COLUMN_FACTS;
 
@@ -439,6 +486,46 @@ type OptionalRefinementKey = Exclude<
  * forbids.
  */
 const REFINEMENTS = {
+  // --- user-imported spell catalog ----------------------------------------
+  'spell_versions.id': positiveInt,
+  'spell_versions.content_key': nonEmptyText,
+  'spell_versions.spell_identity_id': positiveInt,
+  'spell_versions.display_name': nonEmptyText,
+  // Deliberately open: placeholder import writes an arbitrary key prefix.
+  'spell_versions.rules_edition': sqlText,
+  'spell_versions.school': spellSchoolVocabulary,
+  'spell_versions.ritual': sqlBool,
+  'spell_versions.concentration': sqlBool,
+  'spell_versions.casting_time': sqlText,
+  'spell_versions.action_type': sqlText,
+  'spell_versions.range': sqlText,
+  'spell_versions.range_kind': spellRangeKindEnum,
+  'spell_versions.area_shape': spellAreaShapeEnum,
+  'spell_versions.duration': sqlText,
+  'spell_versions.components': sqlText,
+  'spell_versions.material_component_summary': sqlText,
+  'spell_versions.material_cost_kind': materialCostKindEnum,
+  'spell_versions.healing': sqlBool,
+  'spell_versions.short_summary': sqlText,
+  'spell_versions.upcast_summary': sqlText,
+  'spell_versions.cantrip_upgrade_summary': sqlText,
+  'spell_versions.requires_mod_for_effect': sqlBool,
+  'spell_versions.effect_reliability_category':
+    effectReliabilityCategoryEnum,
+  'spell_versions.provenance': nonEmptyText,
+  'spell_versions.seed_version': sqlText,
+  'spell_versions.is_active': sqlBool,
+  'spell_versions.created_at': sqlTimestamp,
+  'spell_versions.updated_at': sqlTimestamp,
+
+  'spell_version_damage_types.id': positiveInt,
+  'spell_version_damage_types.spell_version_id': positiveInt,
+  'spell_version_damage_types.damage_type': damageTypeVocabulary,
+
+  'spell_version_conditions.id': positiveInt,
+  'spell_version_conditions.spell_version_id': positiveInt,
+  'spell_version_conditions.condition_type': conditionTypeVocabulary,
+
   // --- characters ---------------------------------------------------------
   'characters.id': positiveInt,
   'characters.name': nonEmptyText,
@@ -589,7 +676,7 @@ const REFINEMENTS = {
   // `1 Piercing` — a flat number — and a user may write anything their table
   // agreed on. Pinning a `NdM` shape here would reject rows the schema permits.
   'character_weapons.damage_dice': sqlText,
-  'character_weapons.damage_type': sqlText,
+  'character_weapons.damage_type': damageTypeVocabulary,
   'character_weapons.versatile_damage_dice': sqlText,
   'character_weapons.finesse': sqlBool,
   'character_weapons.heavy': sqlBool,
@@ -677,7 +764,7 @@ const REFINEMENTS = {
   'weapon_templates.name': nonEmptyText,
   'weapon_templates.srd_group': srdWeaponGroupEnum,
   'weapon_templates.damage_dice': nonEmptyText,
-  'weapon_templates.damage_type': nonEmptyText,
+  'weapon_templates.damage_type': damageTypeEnum,
   'weapon_templates.versatile_damage_dice': sqlText,
   'weapon_templates.finesse': sqlBool,
   'weapon_templates.heavy': sqlBool,
@@ -714,12 +801,11 @@ const REFINEMENTS = {
   'species_templates.content_key': nonEmptyText,
   'species_templates.rules_edition': rulesEditionEnum,
   'species_templates.name': nonEmptyText,
-  // `sqlText` and NOT an enum: both are deliberately OPEN vocabularies in the
-  // schema, and a contract tighter than its column rejects rows the schema
-  // permits — the D6b failure this module exists to avoid.
-  'species_templates.creature_type': sqlText,
-  'species_templates.size': sqlText,
-  'species_templates.alternate_size': sqlText,
+  // Closed on the catalog side: only the bundled SRD seeder writes these rows.
+  // The corresponding character columns use the open vocabulary schemas.
+  'species_templates.creature_type': creatureTypeEnum,
+  'species_templates.size': creatureSizeEnum,
+  'species_templates.alternate_size': creatureSizeEnum,
   'species_templates.base_speed_feet': positiveInt,
   'species_templates.created_at': sqlTimestamp,
   'species_templates.updated_at': sqlTimestamp,
@@ -738,14 +824,13 @@ const REFINEMENTS = {
   // --- species_template_trait_effects --------------------------------------
   // Contracted for the reason `species_template_traits` is: the rows are
   // PARSED out of the SRD extract, and a parser is exactly the writer that can
-  // produce a plausible-looking wrong row. `damage_type` stays `sqlText` — it
-  // is an OPEN vocabulary in the schema and narrowing it here would reject
-  // rows the column permits (D6b over-tightening).
+  // produce a plausible-looking wrong row. `damage_type` is closed here because
+  // this table is written only by that parser; the character copy stays open.
   'species_template_trait_effects.id': positiveInt,
   'species_template_trait_effects.species_template_trait_id': positiveInt,
   'species_template_trait_effects.sort_order': positiveInt,
   'species_template_trait_effects.effect_kind': effectKindEnum,
-  'species_template_trait_effects.damage_type': sqlText,
+  'species_template_trait_effects.damage_type': damageTypeEnum,
   // `sqlInteger` by omission would accept 1.5; these are explicitly the signed
   // integers the schema allows, and NOT `positiveInt` — Dwarven Toughness is
   // seeded `hit_points_flat = 0`, and a user's own trait may carry a penalty.
@@ -800,8 +885,8 @@ const REFINEMENTS = {
   // Non-empty: the absence of a species is the absence of the ROW, so a row
   // with no name could not be shown or told apart from having none.
   'character_species.name': nonEmptyText,
-  'character_species.creature_type': sqlText,
-  'character_species.size': sqlText,
+  'character_species.creature_type': creatureTypeVocabulary,
+  'character_species.size': creatureSizeVocabulary,
   'character_species.base_speed_feet': positiveInt,
   'character_species.notes': sqlText,
   'character_species.created_at': sqlTimestamp,
@@ -844,7 +929,7 @@ const REFINEMENTS = {
   'character_effects.effect_kind': effectKindEnum,
   // Open vocabulary in the schema, so open here — the same call
   // `spell_version_damage_types.damage_type` makes.
-  'character_effects.damage_type': sqlText,
+  'character_effects.damage_type': damageTypeVocabulary,
   // The three payload columns are deliberately absent: `sqlInteger` is what
   // `columnSchema` falls back to for an integer column, and a signed integer is
   // exactly what the schema permits. `positiveInt` would reject Dwarven
