@@ -1,5 +1,118 @@
 # Binding scope decisions
 
+## F15 — The agent reference tells an AI that this app derives no attack bonus and no weapon proficiency. Both are false, and a test PINS the false claim (2026-07-27)
+
+`src/ui/screens/planner/agent-reference.ts:176-183` ships this to an AI consumer
+as ground truth about what the application models:
+
+> A character's weapons are recorded — name, damage, properties, range, mastery
+> property, and which of them the user has chosen their weapon mastery on.
+> **NOTHING is derived from them: no attack bonus, no damage roll, no weapon
+> proficiency**, no encumbrance, and no inventory.
+
+Three of those clauses are now wrong:
+
+- **"no attack bonus"** — `src/rules/attack-profiles.ts` computes one. The
+  browser suite asserts the rendered string
+  `To hit: +0 (Strength) · Damage: 2d6 Slashing`.
+- **"no damage roll"** — the same line carries the damage.
+- **"no weapon proficiency"** — D32/D33 built it tonight, including WITHHOLDING
+  the bonus, and the sheet now has a Proficiencies section.
+
+And `tests/unit/ui/agent-reference.test.ts:738` asserts
+`expect(equipment?.note).toContain('no weapon proficiency')`, so the false
+statement is pinned by a passing test. The comment above it reads "The note must
+keep saying so" — true when written, false now.
+
+### Why this is worse than an ordinary stale comment
+
+D4 built this surface so an AI assistant could state facts about a build without
+inventing them. A coverage note that UNDER-claims tells the assistant a
+capability does not exist, so it will either decline to use it or recompute it
+badly. It is a fabrication surface pointed at the exact consumer the feature
+exists to serve.
+
+D29's shape — a statement outliving its subject. Note the first clause was
+ALREADY false before tonight: attack profiles predate this session. Tonight only
+added the third.
+
+NOT YET FIXED — `src/ui/screens/planner/agent-reference.ts` and
+`tests/unit/ui/**` are owned by the in-flight `feat/die-size-type` track. The
+fix must rewrite the note AND the assertion together; changing only the
+assertion to match new prose would be regenerating an expectation from our own
+output.
+
+---
+
+## F14 — Three source files are INVISIBLE to plain `grep`, and it cost two false negatives in one tick (2026-07-27)
+
+```
+src/queries/character-sheet-builder.ts     1 NUL byte    file(1): data
+src/rules/attack-cantrips.ts               3 NUL bytes   file(1): data
+src/ui/screens/planner/agent-reference.ts  6 NUL bytes   file(1): data
+```
+
+Plain `grep` finds nothing in them and does not say why — no "Binary file
+matches" warning, just exit 1:
+
+```
+$ grep -c "equipment and weapons" src/ui/screens/planner/agent-reference.ts
+exit=1
+$ grep -ac "equipment and weapons" src/ui/screens/planner/agent-reference.ts
+1
+```
+
+This was hit TWICE in one tick — searching for `SHEET_GAPS` in
+`character-sheet-builder.ts`, and for the coverage array in
+`agent-reference.ts`. Both returned empty; both strings were there. It was one
+step from being recorded as "this string does not exist in src".
+
+### The bytes are DELIBERATE, and the technique is sound
+
+They are composite-key separators — `${warning.code}\u0000${warning.message}`,
+`typed\u0000${sourceType}\u0000${name}` — chosen because a NUL is the one byte a
+user-supplied string cannot contain, so two different pairs cannot collide into
+one key. That is careful work. The finding is NOT that the separator is wrong.
+
+### The finding is that it is written as a LITERAL byte rather than an ESCAPE
+
+Writing `\u0000` in the source produces the identical runtime string while
+leaving the file plain text. Measured:
+
+```
+"x\u0000y"   charCodeAt(1) = 0      <- identical string
+file type:    ASCII text
+NUL bytes:    0
+greppable for the separator?  1
+```
+
+against the current form, which `file(1)` reports as `data`.
+
+**Decision: rewrite the six sites as `\u0000` escapes.** Zero behaviour
+change, the separator and its collision-resistance untouched, and three files
+stop being invisible to the primary discovery tool of the agents this repository
+is explicitly built to be worked on by (`.ai/`, `AGENTS.md`, and the agent
+reference itself).
+
+**Rejected: change the separator to a printable sentinel** such as `|` or `::`.
+That would make the files greppable AND destroy the property the NUL was chosen
+for — a user's warning message may contain any printable string, so keys could
+collide. The separator is right; only its spelling is wrong.
+
+**Rejected: document the hazard and move on.** A note in `.ai/` telling agents
+to pass `-a` relies on every future agent reading it BEFORE their first grep.
+The failure is silent, so those who have not read it never discover the mistake.
+That happened twice tonight to the agent that wrote the guidance files.
+
+### A second-order note worth keeping
+
+The Bash tool itself refused a command containing a literal control character
+("command contains control characters that would be hidden in the approval
+dialog"). The tooling already treats a literal NUL in a command as a hazard; the
+repository should treat it the same way in a source file.
+
+---
+
 > **NUMBERING.** These two entries were written as D30 and D31 on
 > `feat/multiclass-grants` while `main` independently recorded a different
 > D30 (the column-portability guard). They are renumbered D32 and D33 here;
