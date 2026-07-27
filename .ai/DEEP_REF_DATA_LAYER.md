@@ -125,14 +125,14 @@ returning exactly what the codec-less version returned. There is a guard:
 
 `src/db/codecs.ts`:
 
-- `SqlRow` (`:16`) — `Readonly<Record<string, SqlValue>>`
-- `RowCodec<T>` (`:27`) — `(row: SqlRow) => T`
-- `rowId` (`:33`) — the shared `SELECT id` codec, the commonest one-column read
+- `SqlRow` (`:20`) — `Readonly<Record<string, SqlValue>>`
+- `RowCodec<T>` (`:31`) — `(row: SqlRow) => T`
+- `rowId` (`:37`) — the shared `SELECT id` codec, the commonest one-column read
 - field helpers, each of which THROWS a `TypeError` naming the column when the
-  stored value is not what it claims: `sqlNumber` (`:41`), `sqlInteger` (`:49`),
-  `sqlNullableInteger` (`:57`), `sqlString` (`:64`), `sqlNullableString` (`:72`),
-  `sqlBoolean` (`:153`, SQLite 0/1 only), `sqlJson` (`:182`),
-  `sqlNullableJson` (`:189`)
+  stored value is not what it claims: `sqlNumber` (`:45`), `sqlInteger` (`:53`),
+  `sqlNullableInteger` (`:61`), `sqlString` (`:68`), `sqlNullableString` (`:76`),
+  `sqlBoolean` (`:153`, SQLite 0/1 only), `sqlJson` (`:224`),
+  `sqlNullableJson` (`:231`)
 - encoders for the write direction: `encodeBoolean`, `encodeJson`
 
 Where a codec is used more than once, hoist and name it — a named codec is a

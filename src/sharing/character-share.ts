@@ -1,7 +1,11 @@
 import type { SqlValue } from '@sqlite.org/sqlite-wasm';
 import { normalizeCatalogName } from '../catalog/catalog-normalize';
 import { assertSourceRepeatable } from '../commands/add-source';
-import type { SqlRow } from '../db/codecs';
+import {
+  sqlVersatileWeaponDamage,
+  sqlWeaponDamage,
+  type SqlRow,
+} from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import type { AddableSourceType } from '../domain/enums';
 import { splitLegacyTraitEffect } from '../rules/legacy-trait-effects';
@@ -50,6 +54,10 @@ import {
   subclassMismatchIssue,
   type ShareImportIssue,
 } from './import-issues';
+import type {
+  VersatileWeaponDamage,
+  WeaponDamage,
+} from '../domain/weapon-damage';
 
 /**
  * WHAT THE SHARER CHOOSES TO SEND. Every flag is OPT-IN and every default is
@@ -249,7 +257,11 @@ function contentKey(
  * silently completed with placeholder values.
  */
 function shareWeaponFromRow(row: Row): ShareWeapon {
-  const weapon: Record<string, unknown> = { name: String(row.name) };
+  const weapon: Record<string, unknown> = {
+    name: String(row.name),
+    damage: sqlWeaponDamage(row),
+    versatile_damage: sqlVersatileWeaponDamage(row),
+  };
   if (
     row.proficiency_category !== null &&
     row.proficiency_category !== undefined
@@ -280,6 +292,22 @@ function shareWeaponFromRow(row: Row): ShareWeapon {
     }
   }
   return weapon as unknown as ShareWeapon;
+}
+
+function sharedDamageValues(
+  damage: WeaponDamage | VersatileWeaponDamage,
+): readonly SqlValue[] {
+  switch (damage.kind) {
+    case 'dice':
+      return [damage.kind, damage.dice, null, null];
+    case 'flat':
+      return [damage.kind, null, damage.amount, null];
+    case 'custom':
+      return [damage.kind, null, null, damage.text];
+    case 'not_recorded':
+    case 'not_applicable':
+      return [damage.kind, null, null, null];
+  }
 }
 
 /**
@@ -1494,11 +1522,15 @@ export function importCharacterShare(
       db.exec(
         `INSERT INTO ${SHARE_TABLES.character_weapons} (
            character_id, name, proficiency_category,
+           damage_kind, damage_dice, damage_flat, damage_custom,
            ${SHARE_WEAPON_TEXT.join(', ')},
+           versatile_damage_kind, versatile_damage_dice,
+           versatile_damage_flat, versatile_damage_custom,
            range_normal_feet, range_long_feet, mastery_property,
            other_properties, notes, ${SHARE_WEAPON_FLAGS.join(', ')},
            created_at, updated_at
-         ) VALUES (?, ?, ?, ${SHARE_WEAPON_TEXT.map(() => '?').join(', ')},
+         ) VALUES (?, ?, ?, ?, ?, ?, ?,
+           ${SHARE_WEAPON_TEXT.map(() => '?').join(', ')}, ?, ?, ?, ?,
            ?, ?, ?, ?, ?, ${SHARE_WEAPON_FLAGS.map(() => '?').join(', ')},
            ?, ?)`,
         [
@@ -1508,7 +1540,9 @@ export function importCharacterShare(
           // what a link minted before D27 means and exactly what the sheet then
           // says out loud. The importer invents nothing.
           weapon.proficiency_category ?? null,
+          ...sharedDamageValues(weapon.damage),
           ...SHARE_WEAPON_TEXT.map((field) => weapon[field] ?? null),
+          ...sharedDamageValues(weapon.versatile_damage),
           weapon.range_normal_feet ?? null,
           weapon.range_long_feet ?? null,
           weapon.mastery_property ?? null,

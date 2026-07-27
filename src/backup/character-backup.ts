@@ -12,6 +12,7 @@ import {
   migrateLegacyTraitRows,
   splitLegacyTraitEffect,
 } from '../rules/legacy-trait-effects';
+import { migrateLegacyWeaponDamageRow } from '../domain/weapon-damage';
 import {
   assertBackupHeader,
   assertExactKeys,
@@ -280,14 +281,18 @@ function reconciledColumns(
   table: RetiredColumnTable | null,
   row: BackupRow,
 ): BackupRow {
+  const damageMigrated =
+    table === 'character_weapons'
+      ? migrateLegacyWeaponDamageRow(row)
+      : row;
   const retired = (table === null ? undefined : RETIRED_ROW_COLUMNS[table]) ?? [];
   const added = (table === null ? undefined : ADDED_ROW_COLUMNS[table]) ?? [];
-  const drops = retired.filter((key) => Object.hasOwn(row, key));
-  const fills = added.filter((key) => !Object.hasOwn(row, key));
+  const drops = retired.filter((key) => Object.hasOwn(damageMigrated, key));
+  const fills = added.filter((key) => !Object.hasOwn(damageMigrated, key));
   if (drops.length === 0 && fills.length === 0) {
-    return row;
+    return damageMigrated;
   }
-  const reconciled: MutableRow = { ...row };
+  const reconciled: MutableRow = { ...damageMigrated };
   for (const key of drops) {
     delete reconciled[key];
   }

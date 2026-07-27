@@ -322,12 +322,14 @@ function seedCharacter(
   // treats a name-only row as a legitimate state, so the share must too (D6b).
   db.exec(
     `INSERT INTO character_weapons (
-       character_id, name, damage_dice, damage_type, versatile_damage_dice,
+       character_id, name, damage_kind, damage_dice, damage_type,
+       versatile_damage_kind, versatile_damage_dice,
        finesse, thrown, ammunition, ammunition_kind, range_normal_feet,
        range_long_feet, mastery_property, mastery_selected, other_properties,
        notes, created_at, updated_at
      ) VALUES (
-       ?, 'Heirloom Longsword', '1d8', 'Slashing', '1d10', 0, 1, 1, 'bolt',
+       ?, 'Heirloom Longsword', 'dice', '1d8', 'Slashing', 'dice', '1d10',
+       0, 1, 1, 'bolt',
        20, 60, 'Sap', 1, 'Notched near the hilt', 'from the barrow', ?, ?
      )`,
     [characterId, now, now],
@@ -343,9 +345,15 @@ function seedCharacter(
 /** The weapon columns a share is supposed to carry, in a stable order. */
 const PORTABLE_WEAPON_COLUMNS = [
   'name',
+  'damage_kind',
   'damage_dice',
+  'damage_flat',
+  'damage_custom',
   'damage_type',
+  'versatile_damage_kind',
   'versatile_damage_dice',
+  'versatile_damage_flat',
+  'versatile_damage_custom',
   'finesse',
   'heavy',
   'light',
@@ -517,9 +525,15 @@ describe('minimal character sharing', () => {
     expect(portableWeapons(target, imported.characterId)).toEqual([
       {
         name: 'Heirloom Longsword',
+        damage_kind: 'dice',
         damage_dice: '1d8',
+        damage_flat: null,
+        damage_custom: null,
         damage_type: 'Slashing',
+        versatile_damage_kind: 'dice',
         versatile_damage_dice: '1d10',
+        versatile_damage_flat: null,
+        versatile_damage_custom: null,
         finesse: 0,
         heavy: 0,
         light: 0,
@@ -538,9 +552,15 @@ describe('minimal character sharing', () => {
       },
       {
         name: 'Half-entered club',
+        damage_kind: 'not_recorded',
         damage_dice: null,
+        damage_flat: null,
+        damage_custom: null,
         damage_type: null,
+        versatile_damage_kind: 'not_applicable',
         versatile_damage_dice: null,
+        versatile_damage_flat: null,
+        versatile_damage_custom: null,
         finesse: 0,
         heavy: 0,
         light: 0,

@@ -351,9 +351,15 @@ CREATE TABLE `character_weapons` (
 	`character_id` integer NOT NULL,
 	`name` VARCHAR NOT NULL,
 	`proficiency_category` VARCHAR,
+	`damage_kind` VARCHAR DEFAULT 'not_recorded' NOT NULL,
 	`damage_dice` VARCHAR,
+	`damage_flat` integer,
+	`damage_custom` VARCHAR,
 	`damage_type` VARCHAR,
+	`versatile_damage_kind` VARCHAR DEFAULT 'not_applicable' NOT NULL,
 	`versatile_damage_dice` VARCHAR,
+	`versatile_damage_flat` integer,
+	`versatile_damage_custom` VARCHAR,
 	`finesse` TINYINT(1) DEFAULT false NOT NULL,
 	`heavy` TINYINT(1) DEFAULT false NOT NULL,
 	`light` TINYINT(1) DEFAULT false NOT NULL,
@@ -372,6 +378,18 @@ CREATE TABLE `character_weapons` (
 	`created_at` DATETIME,
 	`updated_at` DATETIME,
 	FOREIGN KEY (`character_id`) REFERENCES `characters`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "character_weapons_damage_check" CHECK((
+        (damage_kind = 'dice' AND damage_dice IS NOT NULL AND damage_flat IS NULL AND damage_custom IS NULL)
+        OR (damage_kind = 'flat' AND damage_dice IS NULL AND damage_flat IS NOT NULL AND damage_flat >= 0 AND damage_custom IS NULL)
+        OR (damage_kind = 'custom' AND damage_dice IS NULL AND damage_flat IS NULL AND damage_custom IS NOT NULL)
+        OR (damage_kind = 'not_recorded' AND damage_dice IS NULL AND damage_flat IS NULL AND damage_custom IS NULL)
+      )),
+	CONSTRAINT "character_weapons_versatile_damage_check" CHECK((
+        (versatile_damage_kind = 'dice' AND versatile_damage_dice IS NOT NULL AND versatile_damage_flat IS NULL AND versatile_damage_custom IS NULL)
+        OR (versatile_damage_kind = 'flat' AND versatile_damage_dice IS NULL AND versatile_damage_flat IS NOT NULL AND versatile_damage_flat >= 0 AND versatile_damage_custom IS NULL)
+        OR (versatile_damage_kind = 'custom' AND versatile_damage_dice IS NULL AND versatile_damage_flat IS NULL AND versatile_damage_custom IS NOT NULL)
+        OR (versatile_damage_kind = 'not_applicable' AND versatile_damage_dice IS NULL AND versatile_damage_flat IS NULL AND versatile_damage_custom IS NULL)
+      )),
 	CONSTRAINT "character_weapons_mastery_requires_property_check" CHECK(mastery_selected = 0 OR mastery_property IS NOT NULL),
 	CONSTRAINT "character_weapons_mastery_property_check" CHECK((`mastery_property` IS NULL OR `mastery_property` IN ('Cleave', 'Graze', 'Nick', 'Push', 'Sap', 'Slow', 'Topple', 'Vex'))),
 	CONSTRAINT "character_weapons_proficiency_category_check" CHECK((`proficiency_category` IS NULL OR `proficiency_category` IN ('simple', 'martial')))
@@ -980,9 +998,15 @@ CREATE TABLE `weapon_templates` (
 	`rules_edition` VARCHAR DEFAULT '2024' NOT NULL,
 	`name` VARCHAR NOT NULL,
 	`srd_group` VARCHAR NOT NULL,
-	`damage_dice` VARCHAR NOT NULL,
+	`damage_kind` VARCHAR NOT NULL,
+	`damage_dice` VARCHAR,
+	`damage_flat` integer,
+	`damage_custom` VARCHAR,
 	`damage_type` VARCHAR NOT NULL,
+	`versatile_damage_kind` VARCHAR DEFAULT 'not_applicable' NOT NULL,
 	`versatile_damage_dice` VARCHAR,
+	`versatile_damage_flat` integer,
+	`versatile_damage_custom` VARCHAR,
 	`finesse` TINYINT(1) DEFAULT false NOT NULL,
 	`heavy` TINYINT(1) DEFAULT false NOT NULL,
 	`light` TINYINT(1) DEFAULT false NOT NULL,
@@ -998,6 +1022,18 @@ CREATE TABLE `weapon_templates` (
 	`other_properties` TEXT,
 	`created_at` DATETIME,
 	`updated_at` DATETIME,
+	CONSTRAINT "weapon_templates_damage_check" CHECK((
+        (damage_kind = 'dice' AND damage_dice IS NOT NULL AND damage_flat IS NULL AND damage_custom IS NULL)
+        OR (damage_kind = 'flat' AND damage_dice IS NULL AND damage_flat IS NOT NULL AND damage_flat >= 0 AND damage_custom IS NULL)
+        OR (damage_kind = 'custom' AND damage_dice IS NULL AND damage_flat IS NULL AND damage_custom IS NOT NULL)
+        OR (damage_kind = 'not_recorded' AND damage_dice IS NULL AND damage_flat IS NULL AND damage_custom IS NULL)
+      )),
+	CONSTRAINT "weapon_templates_versatile_damage_check" CHECK((
+        (versatile_damage_kind = 'dice' AND versatile_damage_dice IS NOT NULL AND versatile_damage_flat IS NULL AND versatile_damage_custom IS NULL)
+        OR (versatile_damage_kind = 'flat' AND versatile_damage_dice IS NULL AND versatile_damage_flat IS NOT NULL AND versatile_damage_flat >= 0 AND versatile_damage_custom IS NULL)
+        OR (versatile_damage_kind = 'custom' AND versatile_damage_dice IS NULL AND versatile_damage_flat IS NULL AND versatile_damage_custom IS NOT NULL)
+        OR (versatile_damage_kind = 'not_applicable' AND versatile_damage_dice IS NULL AND versatile_damage_flat IS NULL AND versatile_damage_custom IS NULL)
+      )),
 	CONSTRAINT "weapon_templates_mastery_property_check" CHECK(`mastery_property` IN ('Cleave', 'Graze', 'Nick', 'Push', 'Sap', 'Slow', 'Topple', 'Vex')),
 	CONSTRAINT "weapon_templates_damage_type_check" CHECK(`damage_type` IN ('Acid', 'Bludgeoning', 'Cold', 'Fire', 'Force', 'Lightning', 'Necrotic', 'Piercing', 'Poison', 'Psychic', 'Radiant', 'Slashing', 'Thunder')),
 	CONSTRAINT "weapon_templates_srd_group_check" CHECK(`srd_group` IN ('simple_melee', 'simple_ranged', 'martial_melee', 'martial_ranged')),

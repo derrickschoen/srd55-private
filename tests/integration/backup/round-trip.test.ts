@@ -158,12 +158,14 @@ function seedCompleteCharacter(
   // importer quietly substituting '' or 0 for a null column.
   db.exec(
     `INSERT INTO character_weapons (
-       character_id, name, damage_dice, damage_type, versatile_damage_dice,
+       character_id, name, damage_kind, damage_dice, damage_type,
+       versatile_damage_kind, versatile_damage_dice,
        finesse, light, thrown, ammunition_kind, range_normal_feet,
        range_long_feet, mastery_property, mastery_selected, other_properties,
        notes, created_at, updated_at
      ) VALUES (
-       ?, 'Weathered Longsword', '1d8', 'Slashing', '1d10', 0, 0, 1, 'bolt',
+       ?, 'Weathered Longsword', 'dice', '1d8', 'Slashing', 'dice', '1d10',
+       0, 0, 1, 'bolt',
        20, 60, 'Sap', 1, 'Notched near the hilt', 'weapon note', ?, ?
      )`,
     [characterId, timestamp, timestamp],
@@ -238,7 +240,7 @@ function seedCompleteCharacter(
   db.exec(
     `INSERT INTO character_save_points
        (character_id, label, snapshot, schema_version, created_at, updated_at)
-     VALUES (?, 'Before experiment', ?, 'a7-v5', ?, ?)`,
+     VALUES (?, 'Before experiment', ?, 'a7-v6', ?, ?)`,
     [characterId, JSON.stringify(snapshot), timestamp, timestamp],
   );
   // A SECOND SAVE POINT IN THE OLD SNAPSHOT FORMAT.
@@ -449,9 +451,15 @@ describe('portable character backup', () => {
     expect(importedWeapons[0]).toMatchObject({
       character_id: characterId,
       name: 'Weathered Longsword',
+      damage_kind: 'dice',
       damage_dice: '1d8',
+      damage_flat: null,
+      damage_custom: null,
       damage_type: 'Slashing',
+      versatile_damage_kind: 'dice',
       versatile_damage_dice: '1d10',
+      versatile_damage_flat: null,
+      versatile_damage_custom: null,
       finesse: 0,
       light: 0,
       thrown: 1,
@@ -467,9 +475,15 @@ describe('portable character backup', () => {
     expect(importedWeapons[1]).toMatchObject({
       character_id: characterId,
       name: 'Half-entered club',
+      damage_kind: 'not_recorded',
       damage_dice: null,
+      damage_flat: null,
+      damage_custom: null,
       damage_type: null,
+      versatile_damage_kind: 'not_applicable',
       versatile_damage_dice: null,
+      versatile_damage_flat: null,
+      versatile_damage_custom: null,
       ammunition_kind: null,
       range_normal_feet: null,
       range_long_feet: null,
@@ -484,7 +498,7 @@ describe('portable character backup', () => {
     ) as Record<string, any>;
     // The current-format save point carries the weapons, re-keyed to the rows
     // that were just written, so restoring it puts back the same two weapons.
-    expect(saved.schema_version).toBe('a7-v5');
+    expect(saved.schema_version).toBe('a7-v6');
     expect(saved.character_weapons.map((row: { name: string }) => row.name)).toEqual([
       'Weathered Longsword',
       'Half-entered club',
@@ -607,6 +621,62 @@ describe('portable character backup', () => {
         current_spell_version_id: targetCatalog.spellId,
       }),
     ]);
+  });
+
+  it('imports a pre-discriminator weapon row without losing custom damage text', async () => {
+    const source = await database();
+    const sourceCatalog = seedCatalog(source);
+    const sourceCharacterId = seedCompleteCharacter(source, sourceCatalog);
+    const document = structuredClone(
+      exportCharacterBackup(
+        source,
+        sourceCharacterId,
+        '2026-07-23T12:00:00.000Z',
+      ),
+    );
+    const weapon = document.tables.character_weapons[0] as Record<
+      string,
+      unknown
+    >;
+    for (const column of [
+      'damage_kind',
+      'damage_flat',
+      'damage_custom',
+      'versatile_damage_kind',
+      'versatile_damage_flat',
+      'versatile_damage_custom',
+    ]) {
+      delete weapon[column];
+    }
+    const custom = '  damage from a saved campaign table  ';
+    weapon.damage_dice = custom;
+    weapon.versatile_damage_dice = null;
+
+    const target = await database();
+    seedCatalog(target, true);
+    const imported = importCharacterBackup(target, document);
+
+    expect(
+      target.oneRaw(
+        `SELECT damage_kind, damage_dice, damage_flat, damage_custom,
+                versatile_damage_kind, versatile_damage_dice,
+                versatile_damage_flat, versatile_damage_custom
+         FROM character_weapons
+         WHERE character_id = ?
+         ORDER BY id
+         LIMIT 1`,
+        [imported.characterId],
+      ),
+    ).toEqual({
+      damage_kind: 'custom',
+      damage_dice: null,
+      damage_flat: null,
+      damage_custom: custom,
+      versatile_damage_kind: 'not_applicable',
+      versatile_damage_dice: null,
+      versatile_damage_flat: null,
+      versatile_damage_custom: null,
+    });
   });
 
   it('rejects cross-character, unavailable-catalog, and constraint-corrupt documents without persisted writes', async () => {
@@ -844,8 +914,9 @@ describe('an already-downloaded backup file', () => {
       JSON.parse(FROZEN_V1_BACKUP_JSON),
     );
     target.exec(
-      `INSERT INTO character_weapons (character_id, name, damage_dice)
-       VALUES (?, 'Bought afterwards', '1d6')`,
+      `INSERT INTO character_weapons (
+         character_id, name, damage_kind, damage_dice
+       ) VALUES (?, 'Bought afterwards', 'dice', '1d6')`,
       [characterId],
     );
     target.exec('UPDATE characters SET name = ? WHERE id = ?', [

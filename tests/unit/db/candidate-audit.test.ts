@@ -779,6 +779,53 @@ describe('candidate database semantic audit', () => {
     ).not.toThrow();
   });
 
+  it('accepts and can restore a v5 save point with legacy weapon damage', () => {
+    const db = freshDatabase();
+    seedTwoCharacters(db);
+    db.exec(
+      `INSERT INTO character_weapons (
+         id, character_id, name, damage_kind, damage_dice
+       ) VALUES (1, 1, 'Table Blade', 'dice', '1d8')`,
+    );
+    const snapshot = snapshotOf(db, 1);
+    snapshot.schema_version = 'a7-v5';
+    const weapon = (snapshot.character_weapons as Record<
+      string,
+      unknown
+    >[])[0]!;
+    for (const column of [
+      'damage_kind',
+      'damage_flat',
+      'damage_custom',
+      'versatile_damage_kind',
+      'versatile_damage_flat',
+      'versatile_damage_custom',
+    ]) {
+      delete weapon[column];
+    }
+    const custom = '  old campaign table  ';
+    weapon.damage_dice = custom;
+    weapon.versatile_damage_dice = null;
+    insertSavePoint(db, 1, snapshot);
+
+    expect(() => auditCandidateDatabase(quarantined(bytesOf(db)))).not.toThrow();
+
+    const state = new CharacterState(new DatabaseContext(db));
+    expect(() => state.restore(1, snapshot)).not.toThrow();
+    expect(
+      db.selectObject(
+        `SELECT damage_kind, damage_dice, damage_flat, damage_custom
+         FROM character_weapons
+         WHERE id = 1`,
+      ),
+    ).toEqual({
+      damage_kind: 'custom',
+      damage_dice: null,
+      damage_flat: null,
+      damage_custom: custom,
+    });
+  });
+
   it('still audits the rows inside an a7-v1 save point', () => {
     // The corollary of accepting the version: the five tables it does carry get
     // exactly the scrutiny they got before. An older version is not an escape

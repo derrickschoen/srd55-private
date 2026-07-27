@@ -58,9 +58,9 @@ describe('SRD weapons table', () => {
     expect(template('Longsword')).toMatchObject({
       content_key: '2024:weapon:longsword',
       srd_group: 'martial_melee',
-      damage_dice: '1d8',
+      damage: { kind: 'dice', dice: '1d8' },
       damage_type: 'Slashing',
-      versatile_damage_dice: '1d10',
+      versatile_damage: { kind: 'dice', dice: '1d10' },
       mastery_property: 'Sap',
       two_handed: false,
       heavy: false,
@@ -71,11 +71,11 @@ describe('SRD weapons table', () => {
   it('reads a two-handed heavy weapon with multi-die damage', () => {
     // Greatsword  2d6 Slashing  Heavy, Two-Handed  Graze  6 lb.  50 GP
     expect(template('Greatsword')).toMatchObject({
-      damage_dice: '2d6',
+      damage: { kind: 'dice', dice: '2d6' },
       damage_type: 'Slashing',
       heavy: true,
       two_handed: true,
-      versatile_damage_dice: null,
+      versatile_damage: { kind: 'not_applicable' },
       mastery_property: 'Graze',
     });
   });
@@ -83,10 +83,10 @@ describe('SRD weapons table', () => {
   it('reads the one weapon whose damage is a flat number, not dice', () => {
     // Blowgun  1 Piercing  Ammunition (Range 25/100; Needle), Loading  Vex
     //
-    // This is why `damage_dice` is a string column and why no `NdM` pattern is
-    // enforced anywhere: the source itself has a counter-example.
+    // This is the canonical flat-damage row: it must not be represented as
+    // either dice or an unknown/custom string.
     expect(template('Blowgun')).toMatchObject({
-      damage_dice: '1',
+      damage: { kind: 'flat', amount: 1 },
       damage_type: 'Piercing',
       ammunition: true,
       ammunition_kind: 'Needle',
@@ -103,7 +103,7 @@ describe('SRD weapons table', () => {
     // The boolean alone would be a lie about this weapon, which is the whole
     // argument for `other_properties` existing.
     expect(template('Lance')).toMatchObject({
-      damage_dice: '1d10',
+      damage: { kind: 'dice', dice: '1d10' },
       heavy: true,
       reach: true,
       two_handed: true,
@@ -123,7 +123,7 @@ describe('SRD weapons table', () => {
     // "Heavy Crossbow 1d10". Two-word names are the other half of the trap.
     expect(template('Heavy Crossbow')).toMatchObject({
       srd_group: 'martial_ranged',
-      damage_dice: '1d10',
+      damage: { kind: 'dice', dice: '1d10' },
       damage_type: 'Piercing',
       ammunition: true,
       ammunition_kind: 'Bolt',
@@ -136,7 +136,10 @@ describe('SRD weapons table', () => {
       range_long_feet: 400,
       mastery_property: 'Push',
     });
-    expect(template('War Pick').damage_dice).toBe('1d8');
+    expect(template('War Pick').damage).toEqual({
+      kind: 'dice',
+      dice: '1d8',
+    });
     expect(template('Light Hammer').light).toBe(true);
   });
 
@@ -148,7 +151,7 @@ describe('SRD weapons table', () => {
       thrown: true,
       range_normal_feet: 20,
       range_long_feet: 60,
-      versatile_damage_dice: '1d10',
+      versatile_damage: { kind: 'dice', dice: '1d10' },
     });
   });
 
@@ -163,7 +166,7 @@ describe('SRD weapons table', () => {
       thrown: false,
       two_handed: false,
       ammunition: false,
-      versatile_damage_dice: null,
+      versatile_damage: { kind: 'not_applicable' },
       range_normal_feet: null,
       range_long_feet: null,
       other_properties: null,

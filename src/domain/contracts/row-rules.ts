@@ -126,6 +126,52 @@ export function weaponMasterySelectionError(
   return null;
 }
 
+export function weaponDamagePayloadError(
+  row: UntrustedRow,
+  label: string,
+  prefix: 'damage' | 'versatile_damage',
+): string | null {
+  const kind = row[`${prefix}_kind`];
+  const dice = row[`${prefix}_dice`];
+  const flat = row[`${prefix}_flat`];
+  const custom = row[`${prefix}_custom`];
+  const emptyPayload = dice === null && flat === null && custom === null;
+
+  if (
+    kind === 'dice' &&
+    typeof dice === 'string' &&
+    flat === null &&
+    custom === null
+  ) {
+    return null;
+  }
+  if (
+    kind === 'flat' &&
+    Number.isSafeInteger(flat) &&
+    Number(flat) >= 0 &&
+    dice === null &&
+    custom === null
+  ) {
+    return null;
+  }
+  if (
+    kind === 'custom' &&
+    typeof custom === 'string' &&
+    dice === null &&
+    flat === null
+  ) {
+    return null;
+  }
+  if (
+    emptyPayload &&
+    ((prefix === 'damage' && kind === 'not_recorded') ||
+      (prefix === 'versatile_damage' && kind === 'not_applicable'))
+  ) {
+    return null;
+  }
+  return `${label} has an invalid ${prefix} discriminator/payload combination.`;
+}
+
 /**
  * An armour row's two correlated pairs, checked the way the database checks them.
  *

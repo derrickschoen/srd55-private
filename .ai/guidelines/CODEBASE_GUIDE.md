@@ -32,7 +32,7 @@ Three rules follow, and every file here obeys them:
    ambiguity.
 
 Rule 2 bans copied MEASUREMENTS. It does not ban line ANCHORS —
-`src/db/codecs.ts`: `RowCodec` (`:27`)
+`src/db/codecs.ts`: `RowCodec` (`:31`)
 is navigation, not a claim about the world, and stripping them would make this
 library much harder to use. Anchors are held to their own standard instead:
 `tests/unit/docs/ai-reference-anchors-resolve.test.ts` re-checks every one of

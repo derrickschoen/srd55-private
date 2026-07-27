@@ -29,8 +29,10 @@
 export const WEAPON_TEXT_LIMITS = Object.freeze({
   name: 120,
   damage_dice: 40,
+  damage_custom: 40,
   damage_type: 40,
   versatile_damage_dice: 40,
+  versatile_damage_custom: 40,
   ammunition_kind: 40,
   mastery_property: 40,
   other_properties: 500,

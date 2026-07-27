@@ -9,6 +9,7 @@ import {
   type AttackProfileResult,
   type AttackProfileWeapon,
 } from '../../../src/rules/attack-profiles';
+import { formatWeaponDamage } from '../../../src/domain/weapon-damage';
 import type {
   AttackCantrip,
   CantripAccess,
@@ -130,9 +131,9 @@ const PROFICIENT: WeaponProficiencyVerdict = {
 const LONGSWORD: AttackProfileWeapon = {
   id: 1,
   name: 'Longsword',
-  damage_dice: '1d8',
+  damage: { kind: 'dice', dice: '1d8' },
   damage_type: 'Slashing',
-  versatile_damage_dice: '1d10',
+  versatile_damage: { kind: 'dice', dice: '1d10' },
   proficiency: PROFICIENT,
 };
 
@@ -190,6 +191,12 @@ function profileOf(
     throw new Error(`No ${kind} profile was derived.`);
   }
   return found;
+}
+
+function damageText(profile: AttackProfile): string | null {
+  return profile.damage.amount.kind === 'not_recorded'
+    ? null
+    : formatWeaponDamage(profile.damage.amount);
 }
 
 function bonusFor(profile: AttackProfile, ability: string): number {
@@ -396,12 +403,12 @@ describe('the plain weapon attack', () => {
 
   it('reports the weapon damage as recorded, and the Versatile die as a note', () => {
     const normal = profileOf(build(), 'normal');
-    expect(normal.damage.dice).toBe('1d8');
+    expect(normal.damage.amount).toEqual({ kind: 'dice', dice: '1d8' });
     expect(normal.damage.damage_type).toEqual({
       state: 'weapon',
       damage_type: 'Slashing',
     });
-    expect(normal.damage.dice_note).toContain('1d10');
+    expect(normal.damage.versatile_note).toContain('1d10');
   });
 
   it('reports an unrecorded damage type as unrecorded, not as a default', () => {
@@ -411,16 +418,16 @@ describe('the plain weapon attack', () => {
           {
             id: 9,
             name: "Grandfather's sword",
-            damage_dice: null,
+            damage: { kind: 'not_recorded' },
             damage_type: null,
-            versatile_damage_dice: null,
+            versatile_damage: { kind: 'not_applicable' },
             proficiency: PROFICIENT,
           },
         ],
       }),
       'normal',
     );
-    expect(normal.damage.dice).toBeNull();
+    expect(normal.damage.amount).toEqual({ kind: 'not_recorded' });
     expect(normal.damage.damage_type).toEqual({ state: 'not_recorded' });
   });
 });
@@ -501,15 +508,15 @@ describe('True Strike', () => {
       classes: [monk(5)],
       cantrips: wizardKnows,
     });
-    const normalNote = profileOf(result, 'normal').damage.dice_note;
+    const normalNote = profileOf(result, 'normal').damage.versatile_note;
     expect(normalNote).toBe('Versatile: 1d10 when wielded with two hands.');
-    expect(profileOf(result, 'true_strike').damage.dice).toBe('1d8');
-    expect(profileOf(result, 'true_strike').damage.dice_note).toBe(normalNote);
+    expect(damageText(profileOf(result, 'true_strike'))).toBe('1d8');
+    expect(profileOf(result, 'true_strike').damage.versatile_note).toBe(normalNote);
 
     // Martial Arts substitutes the die, so the weapon's two-handed die is not
     // its die and the note must NOT appear.
-    expect(profileOf(result, 'martial_arts').damage.dice).toBe('1d8');
-    expect(profileOf(result, 'martial_arts').damage.dice_note).not.toContain(
+    expect(damageText(profileOf(result, 'martial_arts'))).toBe('1d8');
+    expect(profileOf(result, 'martial_arts').damage.versatile_note).not.toContain(
       'Versatile',
     );
   });
@@ -520,15 +527,15 @@ describe('True Strike', () => {
         {
           id: 4,
           name: 'Dagger',
-          damage_dice: '1d4',
+          damage: { kind: 'dice', dice: '1d4' },
           damage_type: 'Piercing',
-          versatile_damage_dice: null,
+          versatile_damage: { kind: 'not_applicable' },
           proficiency: PROFICIENT,
         },
       ],
       cantrips: wizardKnows,
     });
-    expect(profileOf(result, 'true_strike').damage.dice_note).toBeNull();
+    expect(profileOf(result, 'true_strike').damage.versatile_note).toBeNull();
   });
 
   it('uses the spellcasting ability, and it is FIXED, not a choice', () => {
@@ -599,9 +606,9 @@ describe('True Strike', () => {
     const dagger: AttackProfileWeapon = {
       id: 2,
       name: 'Dagger',
-      damage_dice: '1d4',
+      damage: { kind: 'dice', dice: '1d4' },
       damage_type: 'Piercing',
-      versatile_damage_dice: null,
+      versatile_damage: { kind: 'not_applicable' },
       proficiency: PROFICIENT,
     };
     const result = build({
@@ -680,8 +687,9 @@ describe('Shillelagh', () => {
     // "the weapon's damage die becomes a d8", then "levels 5 (d10), 11 (d12),
     // and 17 (2d6)".
     const dice = (classes: readonly SheetClassLevels[]): string | null =>
-      profileOf(build({ classes, cantrips: druidKnows }), 'shillelagh').damage
-        .dice;
+      damageText(
+        profileOf(build({ classes, cantrips: druidKnows }), 'shillelagh'),
+      );
     expect(dice([druid(1)])).toBe('1d8');
     expect(dice([druid(4)])).toBe('1d8');
     expect(dice([druid(5)])).toBe('1d10');
@@ -830,7 +838,9 @@ describe('Martial Arts', () => {
 
   it('takes the die from the Monk Features table at every step', () => {
     const die = (level: number): string | null =>
-      profileOf(build({ classes: [monk(level)] }), 'martial_arts').damage.dice;
+      damageText(
+        profileOf(build({ classes: [monk(level)] }), 'martial_arts'),
+      );
     expect(die(1)).toBe('1d6');
     expect(die(4)).toBe('1d6');
     expect(die(5)).toBe('1d8');
@@ -892,11 +902,11 @@ describe('the two levels are DIFFERENT numbers on the same character', () => {
       },
     });
 
-    expect(profileOf(result, 'martial_arts').damage.dice).toBe('1d6');
-    expect(profileOf(result, 'martial_arts').damage.dice).not.toBe('1d10');
+    expect(damageText(profileOf(result, 'martial_arts'))).toBe('1d6');
+    expect(damageText(profileOf(result, 'martial_arts'))).not.toBe('1d10');
 
-    expect(profileOf(result, 'shillelagh').damage.dice).toBe('1d12');
-    expect(profileOf(result, 'shillelagh').damage.dice).not.toBe('1d8');
+    expect(damageText(profileOf(result, 'shillelagh'))).toBe('1d12');
+    expect(damageText(profileOf(result, 'shillelagh'))).not.toBe('1d8');
 
     expect(
       profileOf(result, 'true_strike').damage.extra.map((e) => e.dice),
@@ -911,8 +921,8 @@ describe('the two levels are DIFFERENT numbers on the same character', () => {
         { source_name: 'Druid', spellcasting_ability: 'wisdom' },
       ]),
     });
-    expect(profileOf(result, 'shillelagh').damage.dice).toBe('1d12');
-    expect(profileOf(result, 'shillelagh').damage.dice).not.toBe('1d8');
+    expect(damageText(profileOf(result, 'shillelagh'))).toBe('1d12');
+    expect(damageText(profileOf(result, 'shillelagh'))).not.toBe('1d8');
   });
 
   it('pins the two ladders as standalone functions too', () => {

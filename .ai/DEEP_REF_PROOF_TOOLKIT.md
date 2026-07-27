@@ -265,6 +265,6 @@ and its worked examples are in
   fixture adjusted for tables dropped and added, and that against the generated
   schema.
 - **Freeze the OLD format and COUNT it.** In
-  `tests/unit/sharing/codec.test.ts`, `PRE_SHEET_WIRE` (`:968`)
+  `tests/unit/sharing/codec.test.ts`, `PRE_SHEET_WIRE` (`:1138`)
   asserts a pre-sheet-inputs wire tuple is thirteen elements. Regenerating that
   literal from current code would make it fourteen, and the count fails first.
