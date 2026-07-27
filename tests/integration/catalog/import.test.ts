@@ -56,7 +56,7 @@ function values(
   versionId: number,
 ): string[] {
   return db
-    .all(
+    .allRaw(
       `SELECT ${column} FROM ${table}
        WHERE spell_version_id = ?
        ORDER BY ${column}`,
@@ -130,7 +130,7 @@ describe('catalog import persistence', () => {
       descriptions_loaded: 0,
     });
     expect(
-      test.db.one(
+      test.db.oneRaw(
         `SELECT canonical_name, normalized_name
          FROM spell_identities`,
       ),
@@ -139,7 +139,7 @@ describe('catalog import persistence', () => {
       normalized_name: 'test spell',
     });
     expect(
-      test.db.all(
+      test.db.allRaw(
         `SELECT content_key, rules_edition, spell_identity_id
          FROM spell_versions ORDER BY content_key`,
       ),
@@ -156,7 +156,7 @@ describe('catalog import persistence', () => {
       },
     ]);
     expect(
-      test.db.all(
+      test.db.allRaw(
         `SELECT source_book, source_page
          FROM spell_version_publications
          WHERE spell_version_id = ?
@@ -206,7 +206,7 @@ describe('catalog import persistence', () => {
       save_abilities_created: 0,
     });
     expect(
-      test.db.all(
+      test.db.allRaw(
         'SELECT id, content_key FROM spell_versions ORDER BY id',
       ),
     ).toEqual([
@@ -274,7 +274,7 @@ describe('catalog import persistence', () => {
       descriptions_loaded: 1,
     });
     expect(
-      test.db.one(
+      test.db.oneRaw(
         `SELECT display_name, school, short_summary, is_active
          FROM spell_versions WHERE id = ?`,
         [versionId],
@@ -294,7 +294,7 @@ describe('catalog import persistence', () => {
       ),
     ).toEqual(['Wizard']);
     expect(
-      test.db.all(
+      test.db.allRaw(
         'SELECT alias, normalized_alias FROM spell_identity_aliases',
       ),
     ).toEqual([
@@ -315,7 +315,7 @@ describe('catalog import persistence', () => {
 
     expect(test.importer.import({ documents: ['[]'] }).tombstoned).toBe(1);
     expect(
-      test.db.one(
+      test.db.oneRaw(
         `SELECT fixed_spell_version_id, selection_eligibility,
                 selection_invalid_reason
          FROM spell_selection_slots WHERE id = ?`,
@@ -328,7 +328,7 @@ describe('catalog import persistence', () => {
         'Selected spell version is not active in the catalog.',
     });
     expect(
-      test.db.one(
+      test.db.oneRaw(
         `SELECT spell_version_id
          FROM wizard_spellbook_entries
          WHERE character_id = ?`,
@@ -342,13 +342,13 @@ describe('catalog import persistence', () => {
       }).updated,
     ).toBe(1);
     expect(
-      test.db.one(
+      test.db.oneRaw(
         `SELECT is_active FROM spell_versions WHERE id = ?`,
         [versionId],
       ),
     ).toEqual({ is_active: 1 });
     expect(
-      test.db.one(
+      test.db.oneRaw(
         `SELECT fixed_spell_version_id, selection_eligibility,
                 selection_invalid_reason
          FROM spell_selection_slots WHERE id = ?`,
@@ -383,7 +383,7 @@ describe('catalog import persistence', () => {
       test.importer.import({ documents: ['[]'], dryRun: true }),
     ).toMatchObject({ tombstoned: 1 });
     expect(
-      test.db.all(
+      test.db.allRaw(
         `SELECT content_key, is_active, provenance
          FROM spell_versions ORDER BY content_key`,
       ),
@@ -408,7 +408,7 @@ describe('catalog import persistence', () => {
       }),
     ).toMatchObject({ updated: 1 });
     expect(
-      test.db.all(
+      test.db.allRaw(
         `SELECT content_key, is_active
          FROM spell_versions ORDER BY content_key`,
       ),
@@ -438,7 +438,7 @@ describe('catalog import persistence', () => {
       test.importer.import({ documents: [conflicting] }),
     ).toThrow();
     expect(
-      test.db.one(
+      test.db.oneRaw(
         `SELECT
            (SELECT count(*) FROM spell_identities) AS identities,
            (SELECT count(*) FROM spell_versions) AS versions`,
@@ -456,7 +456,7 @@ describe('catalog import persistence', () => {
       result: { created: 1, identities_created: 1 },
     });
     expect(
-      rpcHarness.context.db.one(
+      rpcHarness.context.db.oneRaw(
         `SELECT content_key, display_name, is_active
          FROM spell_versions`,
       ),

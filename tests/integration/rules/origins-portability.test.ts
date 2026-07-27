@@ -204,18 +204,18 @@ describe('a character’s origin survives every portability path', () => {
 
   function originOf(id: number) {
     return {
-      species: db.one(
+      species: db.oneRaw(
         `SELECT name, creature_type, size, base_speed_feet, notes
            FROM character_species WHERE character_id = ?`,
         [id],
       ),
-      traits: db.all(
+      traits: db.allRaw(
         `SELECT sort_order, name, description, notes
            FROM character_species_traits
           WHERE character_id = ? ORDER BY sort_order`,
         [id],
       ),
-      effects: db.all(
+      effects: db.allRaw(
         `SELECT sort_order, effect_kind, damage_type, hit_points_flat,
                 hit_points_per_level, speed_bonus_feet, source_instance_id,
                 label, notes
@@ -223,7 +223,7 @@ describe('a character’s origin survives every portability path', () => {
           WHERE character_id = ? ORDER BY sort_order`,
         [id],
       ),
-      background: db.one(
+      background: db.oneRaw(
         `SELECT name, ability_score_1, ability_score_2, ability_score_3,
                 feat_name, skill_proficiency_1, skill_proficiency_2,
                 tool_proficiency, equipment_option_a, equipment_option_b, notes

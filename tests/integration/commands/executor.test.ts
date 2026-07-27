@@ -177,7 +177,7 @@ describe('character command factory and executor', () => {
       idempotent_replay: false,
     });
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT wisdom, revision, updated_at
          FROM characters WHERE id = ?`,
         [characterId],
@@ -187,7 +187,7 @@ describe('character command factory and executor', () => {
       revision: 1,
       updated_at: '2026-07-23T12:00:00.000Z',
     });
-    const operation = db.one(
+    const operation = db.oneRaw(
       `SELECT character_id, operation_uuid, expected_revision,
               resulting_revision, inverse_command
        FROM character_operations`,
@@ -199,7 +199,7 @@ describe('character command factory and executor', () => {
       resulting_revision: 1,
       inverse_command: JSON.stringify(result.inverse),
     });
-    const audit = db.all(
+    const audit = db.allRaw(
       `SELECT sequence, group_id, operation_uuid, entity_type, entity_id,
               previous_value, new_value, reason, action_type, reversible
        FROM change_log`,
@@ -232,7 +232,7 @@ describe('character command factory and executor', () => {
       command: result.inverse,
     });
     expect(
-      db.one(
+      db.oneRaw(
         'SELECT wisdom, revision FROM characters WHERE id = ?',
         [characterId],
       ),
@@ -303,14 +303,14 @@ describe('character command factory and executor', () => {
     });
 
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT allow_legacy, revision
          FROM characters WHERE id = ?`,
         [characterId],
       ),
     ).toEqual({ allow_legacy: 1, revision: 1 });
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT selection_eligibility, selection_invalid_reason
          FROM spell_selection_slots WHERE id = ?`,
         [slotId],
@@ -319,7 +319,7 @@ describe('character command factory and executor', () => {
       selection_eligibility: 'valid',
       selection_invalid_reason: null,
     });
-    const audit = db.all(
+    const audit = db.allRaw(
       `SELECT sequence, group_id, operation_uuid, entity_type, entity_id
        FROM change_log ORDER BY sequence`,
     );
@@ -360,7 +360,7 @@ describe('character command factory and executor', () => {
     ).rejects.toThrow('Injected audit failure.');
 
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT wisdom, revision, updated_at
          FROM characters WHERE id = ?`,
         [characterId],

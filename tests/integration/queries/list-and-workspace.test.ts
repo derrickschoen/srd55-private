@@ -39,7 +39,7 @@ describe('character list and workspace query builders', () => {
       },
     ]);
     expect(
-      db.all(
+      db.allRaw(
         `SELECT character_id, state, selection_eligibility,
                 selection_invalid_reason, orphan_reason_code, override_note
          FROM spell_selection_slots
@@ -193,7 +193,7 @@ describe('character list and workspace query builders', () => {
       },
     ]);
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT subclass_definition_id
          FROM character_class_levels
          WHERE character_id = ? AND class_definition_id = ?`,

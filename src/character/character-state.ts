@@ -372,7 +372,13 @@ export class CharacterState {
   constructor(private readonly db: DatabaseContext) {}
 
   capture(characterId: number): CharacterStateSnapshot {
-    const character = this.db.one(
+    // RAW on purpose, both here and in the table loop below. A snapshot is a
+    // column-for-column copy of storage over a table list decided at runtime
+    // (`CHARACTER_STATE_TABLES`), and `CharacterStateSnapshot` is typed
+    // `SqlRow` for that reason: restoring it writes the same columns back. A
+    // codec here would be a second, silent definition of what a character IS,
+    // and a save point would restore whatever that definition happened to omit.
+    const character = this.db.oneRaw(
       `SELECT ${CHARACTER_STATE_COLUMNS.map(quoteIdentifier).join(', ')}
        FROM characters
        WHERE id = ?`,
@@ -387,7 +393,7 @@ export class CharacterState {
       character,
     };
     for (const table of CHARACTER_STATE_TABLES) {
-      snapshot[table] = this.db.all(
+      snapshot[table] = this.db.allRaw(
         `SELECT * FROM ${quoteIdentifier(table)}
          WHERE character_id = ?
          ORDER BY id`,

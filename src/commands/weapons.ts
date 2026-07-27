@@ -135,7 +135,11 @@ function readWeapon(
   characterId: number,
   weaponId: number,
 ): WeaponRow {
-  const row = db.one(
+  // RAW: `WEAPON_COLUMNS` is the column list this module writes, and
+  // `fieldsFromRow` below reads the same row by the same names. The row is a
+  // storage-shaped value passed straight back to `weaponValues` for the inverse
+  // command, not a decoded domain value.
+  const row = db.oneRaw(
     `SELECT ${['id', ...WEAPON_COLUMNS, 'mastery_selected'].join(', ')}
      FROM character_weapons
      WHERE character_id = ? AND id = ?`,

@@ -3,6 +3,13 @@ import {
   type CharacterStateSnapshot,
 } from '../character/character-state';
 import { CharacterCommandIntegrity } from './integrity';
+import {
+  sqlInteger,
+  sqlNullableInteger,
+  sqlNullableString,
+  sqlString,
+  type RowCodec,
+} from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import type {
   RestoreSnapshotCommand,
@@ -12,6 +19,37 @@ import type { JsonObject } from '../domain/models';
 import { GrantRuleSlotGenerator } from '../grants/grant-rule-slot-generator';
 
 const MAGIC_INITIATE_LISTS = ['Cleric', 'Druid', 'Wizard'] as const;
+
+/**
+ * The configurable source instance, decoded once at the read.
+ *
+ * `parent_source_instance_id` and `config` are nullable and stay nullable: a
+ * top-level source has no parent, and a source with no configuration stores
+ * NULL rather than `'{}'`. `decodeConfig` already treats NULL and `''` as "no
+ * configuration", so the codec does not have to invent one.
+ */
+interface ConfigurableSource {
+  readonly id: number;
+  readonly parent_source_instance_id: number | null;
+  readonly source_type: string;
+  readonly source_definition_id: number | null;
+  readonly config: string | null;
+}
+
+const configurableSource: RowCodec<ConfigurableSource> = (row) => ({
+  id: sqlInteger(row, 'id'),
+  parent_source_instance_id: sqlNullableInteger(
+    row,
+    'parent_source_instance_id',
+  ),
+  source_type: sqlString(row, 'source_type'),
+  source_definition_id: sqlNullableInteger(row, 'source_definition_id'),
+  config: sqlNullableString(row, 'config'),
+});
+
+const contentKey: RowCodec<string> = (row) => sqlString(row, 'content_key');
+const configText: RowCodec<string | null> = (row) =>
+  sqlNullableString(row, 'config');
 
 const ORDER_DEFINITIONS = {
   Cleric: {
@@ -73,6 +111,7 @@ export class UpdateSourceConfigCommand {
          FROM character_source_instances
          WHERE character_id = ? AND id = ? AND state = 'active'`,
         [characterId, this.payload.source_instance_id],
+        configurableSource,
       );
       if (source === null) {
         throw new TypeError(
@@ -91,13 +130,11 @@ export class UpdateSourceConfigCommand {
         source.source_type === 'feat'
           ? this.db.one(
               'SELECT content_key FROM feat_definitions WHERE id = ?',
-              [Number(source.source_definition_id)],
+              [source.source_definition_id ?? 0],
+              contentKey,
             )
           : null;
-      if (
-        definition === null ||
-        definition.content_key !== '2024:feat:magic-initiate'
-      ) {
+      if (definition !== '2024:feat:magic-initiate') {
         throw new TypeError(
           'Only Magic Initiate list configuration is editable here.',
         );
@@ -108,7 +145,7 @@ export class UpdateSourceConfigCommand {
 
   private updateMagicInitiate(
     characterId: number,
-    source: Readonly<Record<string, unknown>>,
+    source: ConfigurableSource,
     config: MutableConfig,
   ): void {
     const chosenList =
@@ -139,7 +176,7 @@ export class UpdateSourceConfigCommand {
     config.chosen_list = chosenList;
     config.spellcasting_ability = ability.toLowerCase();
     const timestamp = new Date().toISOString();
-    const sourceId = Number(source.id);
+    const sourceId = source.id;
     this.db.exec(
       `UPDATE character_source_instances
        SET display_name = ?, config = ?, updated_at = ?
@@ -153,14 +190,15 @@ export class UpdateSourceConfigCommand {
     );
 
     if (source.parent_source_instance_id !== null) {
-      const parentId = Number(source.parent_source_instance_id);
+      const parentId = source.parent_source_instance_id;
       const parent = this.db.one(
         'SELECT config FROM character_source_instances WHERE id = ?',
         [parentId],
+        configText,
       );
       let parentConfig: MutableConfig | null = null;
-      if (parent !== null && typeof parent.config === 'string') {
-        const decoded: unknown = JSON.parse(parent.config);
+      if (parent !== null && parent !== undefined) {
+        const decoded: unknown = JSON.parse(parent);
         parentConfig = isRecord(decoded) ? decoded : null;
       }
       if (
@@ -187,13 +225,13 @@ export class UpdateSourceConfigCommand {
 
   private updateClassOrder(
     characterId: number,
-    source: Readonly<Record<string, unknown>>,
+    source: ConfigurableSource,
     config: MutableConfig,
   ): void {
     const className =
       this.db.scalar<string>(
         'SELECT name FROM class_definitions WHERE id = ?',
-        [Number(source.source_definition_id)],
+        [source.source_definition_id ?? 0],
       ) ?? '';
     if (className !== 'Cleric' && className !== 'Druid') {
       throw new TypeError(
@@ -221,9 +259,9 @@ export class UpdateSourceConfigCommand {
       `UPDATE character_source_instances
        SET config = ?, updated_at = ?
        WHERE id = ?`,
-      [JSON.stringify(config), new Date().toISOString(), Number(source.id)],
+      [JSON.stringify(config), new Date().toISOString(), source.id],
     );
-    this.#generator.generateForSource(Number(source.id));
+    this.#generator.generateForSource(source.id);
   }
 
   async inverse(): Promise<RestoreSnapshotCommand> {

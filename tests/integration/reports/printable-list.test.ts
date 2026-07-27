@@ -72,7 +72,7 @@ describe('deterministic printable spell-list data', () => {
 
   it('groups persisted routes naturally with complete facts, relevant stats, and free-cast modes', () => {
     expect(
-      db.all(
+      db.allRaw(
         `SELECT source.display_name, slot.with_slots, slot.free_cast,
                 slot.current_spell_version_id, slot.fixed_spell_version_id
          FROM spell_selection_slots AS slot
@@ -243,7 +243,7 @@ describe('deterministic printable spell-list data', () => {
 
   it('builds exact persisted Cleric, Druid, and Wizard long-rest swaps without cantrips', () => {
     expect(
-      db.all(
+      db.allRaw(
         `SELECT version.display_name, version.level, version.rules_edition,
                 version.is_active, membership.spell_list_key
          FROM spell_list_memberships AS membership
@@ -311,7 +311,7 @@ describe('deterministic printable spell-list data', () => {
 
   it('preserves persisted Wizard book, prepared, and ritual-only states and explanation', () => {
     expect(
-      db.all(
+      db.allRaw(
         `SELECT entry.id, version.display_name, version.ritual
          FROM wizard_spellbook_entries AS entry
          INNER JOIN spell_versions AS version
@@ -338,7 +338,7 @@ describe('deterministic printable spell-list data', () => {
       },
     ]);
     expect(
-      db.all(
+      db.allRaw(
         `SELECT tag
          FROM spell_version_tags
          WHERE spell_version_id = ?
@@ -382,7 +382,7 @@ describe('deterministic printable spell-list data', () => {
 
   it('degrades full mode to partial or unavailable from persisted description completeness', () => {
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT short_summary
          FROM spell_versions
          WHERE id = ?`,

@@ -137,7 +137,7 @@ export function createSystemHandlers(options: {
     defineRpcHandler('system.info', isEmptyParams, (context) => ({
       sqliteVersion: String(context.db.scalar('SELECT sqlite_version()')),
       compileOptions: context.db
-        .all<SqlRow>('PRAGMA compile_options')
+        .allRaw('PRAGMA compile_options')
         .map((row) => String(Object.values(row)[0])),
       foreignKeys: Number(context.db.scalar('PRAGMA foreign_keys')),
       journalMode: String(context.db.scalar('PRAGMA journal_mode')),
@@ -235,7 +235,7 @@ export function createSystemHandlers(options: {
       (context, params) => {
         const columns = new Set(
           context.db
-            .all<SqlRow>(`PRAGMA table_info("${params.table}")`)
+            .allRaw(`PRAGMA table_info("${params.table}")`)
             .map((row) => String(row.name)),
         );
         const filters = Object.entries(params.where ?? {});
@@ -253,7 +253,12 @@ export function createSystemHandlers(options: {
                 .map(([column]) => `"${column}" IS ?`)
                 .join(' AND ')}`;
         const bind = filters.map(([, value]) => value as BindableValue);
-        return context.db.all(
+        // Raw by definition: `system.inspectRows` reads an ARBITRARY table
+        // named by the caller, so there is no column set to write a codec
+        // against. The table name is checked against the schema by
+        // `isInspectRowsParams`; the filter columns are checked against
+        // `PRAGMA table_info` above.
+        return context.db.allRaw(
           `SELECT * FROM "${params.table}"${where} ORDER BY rowid LIMIT 500`,
           bind,
         );

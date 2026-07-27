@@ -105,7 +105,7 @@ describe('simplified Wizard acquisitions', () => {
     ]);
 
     generator.generateForSource(fixture.sourceId);
-    const before = db.all(
+    const before = db.allRaw(
       `SELECT id, character_id, spell_version_id
        FROM wizard_spellbook_entries ORDER BY id`,
     );
@@ -138,7 +138,7 @@ describe('simplified Wizard acquisitions', () => {
     );
     generator.generateForSource(fixture.sourceId);
     expect(
-      db.all(
+      db.allRaw(
         `SELECT id, character_id, spell_version_id
          FROM wizard_spellbook_entries ORDER BY id`,
       ),
@@ -153,7 +153,7 @@ describe('simplified Wizard acquisitions', () => {
       { spell_version_id: existingId },
     ]);
     generator.generateForSource(fixture.sourceId);
-    const existingEntry = db.one(
+    const existingEntry = db.oneRaw(
       `SELECT id, spell_version_id FROM wizard_spellbook_entries`,
     );
 
@@ -182,7 +182,7 @@ describe('simplified Wizard acquisitions', () => {
       "Spellbook rule 'wizard-spellbook' acquisition 2 contains unsupported bookkeeping fields: acquisition, copy_cost_gp, copy_time_hours, notes.",
     );
     expect(
-      db.all(
+      db.allRaw(
         `SELECT id, spell_version_id
          FROM wizard_spellbook_entries ORDER BY id`,
       ),
@@ -217,7 +217,7 @@ describe('simplified Wizard acquisitions', () => {
       inactiveId,
     ]);
     generator.generateForSource(fixture.sourceId);
-    const entry = db.one(
+    const entry = db.oneRaw(
       `SELECT id, character_id, spell_version_id
        FROM wizard_spellbook_entries`,
     );
@@ -226,7 +226,7 @@ describe('simplified Wizard acquisitions', () => {
     ]);
     generator.generateForSource(fixture.sourceId);
     expect(
-      db.one(
+      db.oneRaw(
         `SELECT id, character_id, spell_version_id
          FROM wizard_spellbook_entries`,
       ),
@@ -249,7 +249,7 @@ describe('simplified Wizard acquisitions', () => {
       "Spellbook rule 'wizard-spellbook' acquisition 1 is not on the Wizard list.",
     );
     expect(
-      db.all(
+      db.allRaw(
         `SELECT id, character_id, spell_version_id
          FROM wizard_spellbook_entries`,
       ),

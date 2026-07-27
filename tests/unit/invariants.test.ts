@@ -172,7 +172,7 @@ describe(`typed synchronous persistence primitives (${sourceLabel})`, () => {
     });
 
     expect(
-      context.all('SELECT name FROM characters ORDER BY id'),
+      context.allRaw('SELECT name FROM characters ORDER BY id'),
     ).toEqual([
       { name: 'Outer before' },
       { name: 'Outer after' },

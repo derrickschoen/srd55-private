@@ -2,6 +2,14 @@ import {
   CharacterState,
   type CharacterStateSnapshot,
 } from '../character/character-state';
+import {
+  rowId,
+  sqlInteger,
+  sqlNullableInteger,
+  sqlNullableString,
+  sqlString,
+  type RowCodec,
+} from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import type {
   RestoreSnapshotCommand as RestoreSnapshotPayload,
@@ -10,17 +18,38 @@ import type {
 import { GrantRuleSlotGenerator } from '../grants/grant-rule-slot-generator';
 import type { CharacterCommandIntegrity } from './integrity';
 
+/**
+ * Both rows below were declared with `unknown` fields: honest about the column
+ * NAMES and silent about the values, so every reader re-coerced with
+ * `String(…)` / `Number(…)` at the point of use. The codecs say it once.
+ *
+ * `spellcasting_ability` and `config` stay NULLABLE, because they genuinely are:
+ * a Fighter has no spellcasting ability, and a source instance can be stored
+ * before it has any config. `configWithAbility` is written to accept both.
+ */
 interface DefinitionRow {
-  readonly id: unknown;
-  readonly name: unknown;
-  readonly spellcasting_ability: unknown;
+  readonly id: number;
+  readonly name: string;
+  readonly spellcasting_ability: string | null;
 }
 
+const definitionRow: RowCodec<DefinitionRow> = (row) => ({
+  id: sqlInteger(row, 'id'),
+  name: sqlString(row, 'name'),
+  spellcasting_ability: sqlNullableString(row, 'spellcasting_ability'),
+});
+
 interface SourceRow {
-  readonly id: unknown;
-  readonly source_definition_id: unknown;
-  readonly config: unknown;
+  readonly id: number;
+  readonly source_definition_id: number | null;
+  readonly config: string | null;
 }
+
+const sourceRow: RowCodec<SourceRow> = (row) => ({
+  id: sqlInteger(row, 'id'),
+  source_definition_id: sqlNullableInteger(row, 'source_definition_id'),
+  config: sqlNullableString(row, 'config'),
+});
 
 function configWithAbility(
   configJson: unknown,
@@ -62,9 +91,10 @@ export class UpdateClassCommand {
     this.db.transaction(() => {
       const before = this.#state.capture(characterId);
       const classId = this.payload.class_definition_id;
-      const definition = this.db.one<DefinitionRow>(
-        'SELECT * FROM class_definitions WHERE id = ?',
+      const definition = this.db.one(
+        'SELECT id, name, spellcasting_ability FROM class_definitions WHERE id = ?',
         [classId],
+        definitionRow,
       );
       if (definition === null) {
         throw new TypeError('Unknown class.');
@@ -152,12 +182,14 @@ export class UpdateClassCommand {
         );
       }
 
-      const source = this.db.one<SourceRow>(
-        `SELECT * FROM character_source_instances
+      const source = this.db.one(
+        `SELECT id, source_definition_id, config
+         FROM character_source_instances
          WHERE character_id = ? AND source_type = 'class'
            AND source_definition_id = ?
          LIMIT 1`,
         [characterId, classId],
+        sourceRow,
       );
       const config = configWithAbility(
         source?.config,
@@ -175,7 +207,7 @@ export class UpdateClassCommand {
             characterId,
             crypto.randomUUID(),
             classId,
-            `${String(definition.name)} ${level}`,
+            `${definition.name} ${level}`,
             config,
             Math.max(1, otherLevels + 1),
             timestamp,
@@ -183,14 +215,14 @@ export class UpdateClassCommand {
           ],
         ).lastInsertId;
       } else {
-        sourceId = Number(source.id);
+        sourceId = source.id;
         this.db.exec(
           `UPDATE character_source_instances
            SET display_name = ?, config = ?, state = 'active',
                updated_at = ?
            WHERE id = ?`,
           [
-            `${String(definition.name)} ${level}`,
+            `${definition.name} ${level}`,
             config,
             timestamp,
             sourceId,
@@ -226,8 +258,10 @@ export class UpdateClassCommand {
     subclassId: number | null,
     level: number,
   ): void {
-    const sources = this.db.all<SourceRow>(
-      `SELECT source.*
+    const sources = this.db.all(
+      `SELECT source.id AS id,
+              source.source_definition_id AS source_definition_id,
+              source.config AS config
        FROM character_source_instances AS source
        INNER JOIN subclass_definitions AS subclass
          ON subclass.id = source.source_definition_id
@@ -235,16 +269,17 @@ export class UpdateClassCommand {
          AND source.source_type = 'subclass'
          AND subclass.class_definition_id = ?`,
       [characterId, classId],
+      sourceRow,
     );
     const timestamp = new Date().toISOString();
     for (const source of sources) {
       if (
         subclassId !== null &&
-        Number(source.source_definition_id) === subclassId
+        source.source_definition_id === subclassId
       ) {
         continue;
       }
-      const sourceId = Number(source.id);
+      const sourceId = source.id;
       this.db.exec(
         `UPDATE character_source_instances
          SET state = 'tombstoned', updated_at = ?
@@ -257,9 +292,10 @@ export class UpdateClassCommand {
       return;
     }
 
-    const definition = this.db.one<DefinitionRow>(
-      'SELECT * FROM subclass_definitions WHERE id = ?',
+    const definition = this.db.one(
+      'SELECT id, name, spellcasting_ability FROM subclass_definitions WHERE id = ?',
       [subclassId],
+      definitionRow,
     );
     if (definition === null) {
       throw new TypeError(
@@ -269,7 +305,7 @@ export class UpdateClassCommand {
     const source =
       sources.find(
         (candidate) =>
-          Number(candidate.source_definition_id) === subclassId,
+          candidate.source_definition_id === subclassId,
       ) ?? null;
     const config = configWithAbility(
       source?.config,
@@ -287,7 +323,7 @@ export class UpdateClassCommand {
           characterId,
           crypto.randomUUID(),
           subclassId,
-          String(definition.name),
+          definition.name,
           config,
           level,
           timestamp,
@@ -295,14 +331,14 @@ export class UpdateClassCommand {
         ],
       ).lastInsertId;
     } else {
-      sourceId = Number(source.id);
+      sourceId = source.id;
       this.db.exec(
         `UPDATE character_source_instances
          SET display_name = ?, config = ?, state = 'active',
              updated_at = ?
          WHERE id = ?`,
         [
-          String(definition.name),
+          definition.name,
           config,
           timestamp,
           sourceId,
@@ -313,7 +349,7 @@ export class UpdateClassCommand {
   }
 
   private remove(characterId: number, classId: number): void {
-    const sources = this.db.all<{ id: unknown }>(
+    const sourceIds = this.db.all(
       `SELECT id
        FROM character_source_instances
        WHERE character_id = ?
@@ -328,10 +364,10 @@ export class UpdateClassCommand {
            )
          )`,
       [characterId, classId, classId],
+      rowId,
     );
     const timestamp = new Date().toISOString();
-    for (const source of sources) {
-      const sourceId = Number(source.id);
+    for (const sourceId of sourceIds) {
       this.db.exec(
         `UPDATE character_source_instances
          SET state = 'tombstoned', updated_at = ?
