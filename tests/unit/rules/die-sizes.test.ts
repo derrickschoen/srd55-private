@@ -208,6 +208,7 @@ describe('the type refuses a wrong die size at compile time', () => {
     expect(expectedLines.length).toBeGreaterThanOrEqual(13);
 
     let output = '';
+    let diagnostics = '';
     try {
       // The compiler is invoked through `node` on the resolved binary rather
       // than through `npx`, which spends longer resolving the package than the
@@ -239,25 +240,68 @@ describe('the type refuses a wrong die size at compile time', () => {
         { cwd: PROJECT_ROOT, encoding: 'utf8', stdio: 'pipe' },
       );
     } catch (error) {
-      output = String((error as { stdout?: string }).stdout ?? '');
+      const failure = error as {
+        stdout?: string;
+        stderr?: string;
+        status?: number | null;
+        signal?: string | null;
+      };
+      output = String(failure.stdout ?? '');
+      // EVERYTHING THE OPERATOR WOULD OTHERWISE HAVE TO RE-RUN THE COMPILER TO
+      // SEE. `stderr` was discarded before, so a tsc that ran out of memory or
+      // was killed under a fully parallel suite produced a truncated `stdout`
+      // and no clue that anything had gone wrong with the TOOL.
+      diagnostics =
+        `\n--- tsc exit ${String(failure.status)} signal ${String(failure.signal)}` +
+        `\n--- stdout ---\n${output}` +
+        `\n--- stderr ---\n${String(failure.stderr ?? '')}`;
     }
     // An empty `output` means tsc exited 0 — the probe compiled, which is the
     // failure this test exists to catch.
     expect(output, 'tsc accepted the probe').not.toBe('');
 
-    const erroredLines = new Set(
-      [...output.matchAll(/die-size\.probe\.ts\((?<line>\d+),\d+\): error/gu)].map(
-        (match) => Number(match.groups?.line),
-      ),
-    );
-    expect([...erroredLines].sort((a, b) => a - b)).toEqual(expectedLines);
+    // ---------------------------------------------------------------------
+    // TOOL FAILURES ARE CHECKED FIRST, AND THE ORDER IS THE POINT.
+    //
+    // A review saw this test fail once in fifteen full-suite runs with lines
+    // 29, 31, 33 and 35 missing — the four `fixedHitPointsPerLevel` probes,
+    // which are the ONLY statements whose error depends on `../../src/rules/
+    // sheet` resolving. If that import does not resolve, `fixedHitPointsPerLevel`
+    // is `any`, those four calls compile, and the failure is INDISTINGUISHABLE
+    // from someone widening the parameter back to `number` — the exact
+    // regression this file exists to catch. The root cause was not reproduced
+    // in fourteen further runs, so what is fixed here is the SIGNAL: a compiler
+    // that could not read its inputs now says so, instead of being reported as
+    // a type regression.
+    // ---------------------------------------------------------------------
 
     // No OTHER file may error: an unrelated compile break in `src/` would
     // otherwise let this test pass while proving nothing.
     const otherFiles = output
       .split('\n')
       .filter((line) => /error TS/u.test(line) && !line.includes('die-size.probe.ts'));
-    expect(otherFiles).toEqual([]);
+    expect(otherFiles, `an unrelated file failed to compile${diagnostics}`).toEqual([]);
+
+    // TS2307 is "Cannot find module …". It lands ON the probe, so `otherFiles`
+    // cannot see it, and it silently turns every imported symbol into `any`.
+    const unresolved = output
+      .split('\n')
+      .filter((line) => /error TS2307/u.test(line));
+    expect(
+      unresolved,
+      'the probe could not resolve its imports, so it measured NOTHING — ' +
+        `this is a tool failure, not a type regression${diagnostics}`,
+    ).toEqual([]);
+
+    const erroredLines = new Set(
+      [...output.matchAll(/die-size\.probe\.ts\((?<line>\d+),\d+\): error/gu)].map(
+        (match) => Number(match.groups?.line),
+      ),
+    );
+    expect(
+      [...erroredLines].sort((a, b) => a - b),
+      `a probe statement COMPILED that must not${diagnostics}`,
+    ).toEqual(expectedLines);
 
     // The four messages that carry the actual claim.
     expect(output).toContain(
