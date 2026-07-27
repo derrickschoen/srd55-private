@@ -788,6 +788,17 @@ hit die, so excluding 4 from `hit_die` is correct, and merging them would widen
 a constraint to match a different constraint's subject. The brief was written
 from a count, not from a reading.
 
+> **CORRECTED BY D34 — read that before acting on the paragraph above.** The
+> DOMAINS claim holds. The implied claim that both value sets are therefore
+> CORRECT does not: `1d4` appears **zero times** in
+> `docs/srd/source/attack-class-features.txt`, so the `4` in
+> `class_martial_arts_dice` was unsourced and has been dropped. This entry made
+> the same mistake it accuses the brief of — it reasoned about the two sets
+> being different instead of checking either against the source. Two further
+> corrections in D34: a FIFTH literal exists at `class-traits-srd.ts:325`, and
+> two occurrences of ONE subject genuinely do disagree
+> (`dice.ts:837` versus `dice.ts:970`), which the section below denies.
+
 ### What is actually true
 
 1. **The die vocabulary the owner asked for exists exactly once, in a UI file,
