@@ -48,6 +48,13 @@ describe('browser catalog schema', () => {
       [[record({ school: '\t' })], "'school'"],
       [[record({ concentration: 0 })], "'concentration'"],
       [[record({ ritual: 'false' })], "'ritual'"],
+      // OMISSION, not merely the wrong type — `JSON.stringify` drops an
+      // `undefined` value, so these two documents carry no such key at all.
+      // This is the premise F13's removal of the prose fallback rests on: the
+      // importer never sees an ABSENT boolean to infer from, because a document
+      // missing one is refused before it gets there.
+      [[record({ concentration: undefined })], "'concentration'"],
+      [[record({ ritual: undefined })], "'ritual'"],
       [[record({ attackModes: 'ranged_spell' })], "'attackModes'"],
       [[record({ saveAbilities: [1] })], "'saveAbilities'"],
       [[record({ spellLists: null })], "'spellLists'"],

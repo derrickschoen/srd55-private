@@ -84,17 +84,27 @@ describe('catalog import persistence', () => {
           attackModes: [],
           sourceBooks: ['Legacy Book'],
         }),
+        // The modern version is a ritual AND a concentration spell, and it says
+        // so in the two fields that decide it. It used to say so only in its
+        // prose — `castingTime: 'Action or R'`, `duration: 'C, up to 1 minute'`
+        // — and get the tags from a regex over that text while DECLARING both
+        // booleans false. F13 retired that inference, so the declaration now
+        // carries the intent the assertions below already had.
         record({
-          castingTime: 'Action or R',
-          duration: 'C, up to 1 minute',
+          castingTime: 'Action or Ritual',
+          duration: 'Concentration, up to 1 minute',
+          concentration: true,
+          ritual: true,
           tags: ['alpha'],
           sourceBooks: ['Modern A'],
         }),
       ),
       document(
         record({
-          castingTime: 'Action or R',
-          duration: 'C, up to 1 minute',
+          castingTime: 'Action or Ritual',
+          duration: 'Concentration, up to 1 minute',
+          concentration: true,
+          ritual: true,
           tags: ['beta'],
           sourceBooks: ['Modern B'],
           sourcePage: 77,
@@ -213,6 +223,84 @@ describe('catalog import persistence', () => {
       { id: 1, content_key: '2014:test-spell' },
       { id: 2, content_key: '2024:test-spell' },
     ]);
+    test.connection.close();
+  });
+
+  /**
+   * THE DECLARED BOOLEAN IS THE WHOLE ANSWER, IN BOTH DIRECTIONS.
+   *
+   * F13: the importer used to OR the booleans with a regex over the casting
+   * time and duration text. Because `catalogRecord` makes both booleans
+   * required (`tests/unit/catalog/schema.test.ts` pins the omission cases), that
+   * regex could never fill an absence — it could only overrule an author who had
+   * written `false`, and only for the abbreviated spelling. The four records
+   * below are the two halves of that:
+   *
+   * - two declare `false` beside prose shaped exactly like the retired patterns
+   *   (`'Concentration, up to 1 minute'` matched neither regex; `'C, up to 1
+   *   minute'` and `'Action or R'` matched both), and get NO tag;
+   * - one declares `true` beside prose that mentions neither word, and gets both.
+   */
+  it('tags ritual and concentration from the declared booleans and never from the prose', async () => {
+    const test = await database();
+    const spell = (
+      key: string,
+      overrides: Record<string, unknown>,
+    ) =>
+      record({
+        identityKey: key,
+        versionKey: `2024:${key}`,
+        name: key,
+        sourceSlug: key,
+        tags: ['base'],
+        ...overrides,
+      });
+    const summary = test.importer.import({
+      documents: [
+        document(
+          spell('declared-false-spelled-out', {
+            castingTime: 'Action or Ritual',
+            duration: 'Concentration, up to 1 minute',
+            concentration: false,
+            ritual: false,
+          }),
+          spell('declared-false-abbreviated', {
+            castingTime: 'Action or R',
+            duration: 'C, up to 1 minute',
+            concentration: false,
+            ritual: false,
+          }),
+          spell('declared-true-silent-prose', {
+            castingTime: 'Action',
+            duration: 'Instantaneous',
+            concentration: true,
+            ritual: true,
+          }),
+        ),
+      ],
+    });
+
+    const tagsOf = (key: string): string[] =>
+      values(
+        test.db,
+        'spell_version_tags',
+        'tag',
+        Number(
+          test.db.scalar(
+            'SELECT id FROM spell_versions WHERE content_key = ?',
+            [`2024:${key}`],
+          ),
+        ),
+      );
+    expect(tagsOf('declared-false-spelled-out')).toEqual(['base']);
+    expect(tagsOf('declared-false-abbreviated')).toEqual(['base']);
+    expect(tagsOf('declared-true-silent-prose')).toEqual([
+      'base',
+      'concentration',
+      'ritual',
+    ]);
+    // Three `base` tags plus the two the third record earns.
+    expect(summary.tags_created).toBe(5);
     test.connection.close();
   });
 
