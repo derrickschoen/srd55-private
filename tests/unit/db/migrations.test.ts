@@ -125,7 +125,7 @@ class ProbedStorage extends MemoryDatabaseStorage {
 
 function probedRegistry(targetSchema: string): readonly DatabaseMigration[] {
   return Object.freeze([
-    DATABASE_MIGRATIONS[0]!,
+    migration('0000_test_current', schema, schemaChecksum(schema)),
     migration(
       '0001_test_probe',
       `SELECT migration_probe();\n${FIRST_INDEX}`,
@@ -141,6 +141,65 @@ describe('database migration chain', () => {
     expect(result.migrationCount).toBe(DATABASE_MIGRATIONS.length);
     expect(result.signature).toBe(schemaSignature(schema));
   });
+
+  it('maps all five historical weapon range pairs without losing a value', async () => {
+    const storage = await storageHolding(
+      `${DATABASE_MIGRATIONS[0]!.sql}
+       INSERT INTO characters (id, name) VALUES (1, 'Range migration');
+       INSERT INTO character_weapons
+         (id, character_id, name, range_normal_feet, range_long_feet)
+       VALUES
+         (1, 1, 'None', NULL, NULL),
+         (2, 1, 'Near only', 20, NULL),
+         (3, 1, 'Ordinary', 20, 60),
+         (4, 1, 'Long only', NULL, 60),
+         (5, 1, 'Inverted', 60, 20);`,
+    );
+    const lifecycle = new DatabaseLifecycle(sqlite3, storage, schema);
+
+    lifecycle.open();
+
+    expect(
+      lifecycle.database.allRaw(
+        `SELECT id, range_kind, range_near_feet, range_far_feet
+         FROM character_weapons ORDER BY id`,
+      ),
+    ).toEqual([
+      { id: 1, range_kind: 'none', range_near_feet: null, range_far_feet: null },
+      { id: 2, range_kind: 'ranged', range_near_feet: 20, range_far_feet: null },
+      { id: 3, range_kind: 'ranged', range_near_feet: 20, range_far_feet: 60 },
+      { id: 4, range_kind: 'legacy', range_near_feet: null, range_far_feet: 60 },
+      { id: 5, range_kind: 'legacy', range_near_feet: 60, range_far_feet: 20 },
+    ]);
+    lifecycle.close();
+  });
+
+  it.each([
+    ['range_normal_feet', '100001'],
+    ['range_normal_feet', '-1'],
+    ['range_normal_feet', '1.5'],
+    ['range_long_feet', '100001'],
+    ['range_long_feet', '-1'],
+    ['range_long_feet', '1.5'],
+  ] as const)(
+    'refuses historical %s=%s and leaves the image byte-identical',
+    async (column, value) => {
+      const storage = await storageHolding(
+        `${DATABASE_MIGRATIONS[0]!.sql}
+         INSERT INTO characters (id, name) VALUES (1, 'Range preflight');
+         INSERT INTO character_weapons (id, character_id, name, ${column})
+         VALUES (37, 1, 'Outlier', ${value});`,
+      );
+      const before = await storage.exportFile();
+      const lifecycle = new DatabaseLifecycle(sqlite3, storage, schema);
+
+      expect(() => lifecycle.open()).toThrow(
+        `character_weapons id 37 ${column}=${value}`,
+      );
+
+      expect(await storage.exportFile()).toEqual(before);
+    },
+  );
 
   it('does not execute migrations for a current image, after proving the probe is live', async () => {
     const targetSchema = `${schema}\n${FIRST_INDEX}\n`;
@@ -261,7 +320,7 @@ describe('database migration chain', () => {
   it('rolls a mid-chain failure back to the original signature and bytes', async () => {
     const targetSchema = `${schema}\n${FIRST_INDEX}\n${SECOND_INDEX}\n`;
     const registry = Object.freeze([
-      DATABASE_MIGRATIONS[0]!,
+      migration('0000_test_current', schema, schemaChecksum(schema)),
       migration(
         '0001_test_first',
         FIRST_INDEX,
@@ -326,7 +385,7 @@ describe('database migration chain', () => {
   it('migrates a known-old import while quarantined and exports it stably', async () => {
     const targetSchema = `${schema}\n${FIRST_INDEX}\n`;
     const registry = Object.freeze([
-      DATABASE_MIGRATIONS[0]!,
+      migration('0000_test_current', schema, schemaChecksum(schema)),
       migration(
         '0001_test_import',
         FIRST_INDEX,

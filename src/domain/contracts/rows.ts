@@ -11,7 +11,10 @@ import {
   type JsonColumnKey,
 } from './json-columns';
 import type { BackupTable, TableFor } from './tables';
-import { weaponDamagePayloadError } from './row-rules';
+import {
+  weaponDamagePayloadError,
+  weaponRangePayloadError,
+} from './row-rules';
 import {
   abilities,
   armorCategories,
@@ -43,6 +46,7 @@ import {
   weaponMasteryProperties,
   weaponProficiencyCategories,
 } from '../enums';
+import { weaponRangeKinds } from '../weapon-range';
 
 /**
  * PER-TABLE ROW CONTRACTS FOR UNTRUSTED ROWS.
@@ -242,6 +246,7 @@ const versatileWeaponDamageKindEnum = z.enum([
   'custom',
   'not_applicable',
 ]);
+const weaponRangeKindEnum = z.enum(weaponRangeKinds);
 /**
  * The closed set of mechanical effects a character or a template can carry.
  *
@@ -325,6 +330,7 @@ export const COLUMN_REFINEMENTS = {
   weaponProficiencyCategoryEnum,
   weaponDamageKindEnum,
   versatileWeaponDamageKindEnum,
+  weaponRangeKindEnum,
   effectKindEnum,
   armorSlotEnum,
   armorCategoryEnum,
@@ -706,6 +712,7 @@ const REFINEMENTS = {
   'character_weapons.two_handed': sqlBool,
   'character_weapons.ammunition': sqlBool,
   'character_weapons.ammunition_kind': sqlText,
+  'character_weapons.range_kind': weaponRangeKindEnum,
   // D27. Nullability is DERIVED from the column facts, so this cannot be
   // stricter than the column: a weapon that arrived with no category — an older
   // share link, or one someone typed in — still passes, and the sheet says it
@@ -798,6 +805,7 @@ const REFINEMENTS = {
   'weapon_templates.two_handed': sqlBool,
   'weapon_templates.ammunition': sqlBool,
   'weapon_templates.ammunition_kind': sqlText,
+  'weapon_templates.range_kind': weaponRangeKindEnum,
   'weapon_templates.mastery_property': weaponMasteryPropertyEnum,
   'weapon_templates.other_properties': sqlText,
   'weapon_templates.created_at': sqlTimestamp,
@@ -1079,7 +1087,12 @@ export function rowContractError(
       const stored = result.data as Readonly<Record<string, unknown>>;
       return (
         weaponDamagePayloadError(stored, label, 'damage') ??
-        weaponDamagePayloadError(stored, label, 'versatile_damage')
+        weaponDamagePayloadError(stored, label, 'versatile_damage') ??
+        weaponRangePayloadError(
+          stored,
+          label,
+          table === 'character_weapons',
+        )
       );
     }
     return null;

@@ -77,10 +77,11 @@ import {
   type VersatileWeaponDamage,
   type WeaponDamage,
 } from '../../../domain/weapon-damage';
+import type { WeaponRange } from '../../../domain/weapon-range';
 
 export const AGENT_REFERENCE_FORMAT =
   'dnd-multiclass-spells.planner-reference' as const;
-export const AGENT_REFERENCE_VERSION = 1 as const;
+export const AGENT_REFERENCE_VERSION = 2 as const;
 export const AGENT_REFERENCE_SCRIPT_ID = 'planner-build-reference';
 
 /**
@@ -491,8 +492,7 @@ export interface ReferenceWeapon {
   readonly damage_type: string | null;
   readonly versatile_damage: VersatileWeaponDamage;
   readonly properties: readonly string[];
-  readonly range_normal_feet: number | null;
-  readonly range_long_feet: number | null;
+  readonly range: WeaponRange;
   readonly mastery_property: WeaponMasteryProperty | Unrecognised | null;
   readonly mastery_selected: boolean;
 }
@@ -957,8 +957,7 @@ export function buildAgentReference(
         damage_type: weapon.damage_type,
         versatile_damage: weapon.versatile_damage,
         properties: weaponProperties(weapon),
-        range_normal_feet: weapon.range_normal_feet,
-        range_long_feet: weapon.range_long_feet,
+        range: weapon.range,
         mastery_property: knownOrNull(
           weaponMasteryProperties,
           weapon.mastery_property,
@@ -1184,6 +1183,19 @@ function freeCell(text: string): ReferenceCell {
 
 function optionalNumber(value: number | null): string {
   return value === null ? 'not applicable' : String(value);
+}
+
+function referenceWeaponRange(range: WeaponRange): string {
+  switch (range.kind) {
+    case 'none':
+      return 'not applicable';
+    case 'ranged':
+      return range.far_feet === null
+        ? `${range.near_feet}/not recorded`
+        : `${range.near_feet}/${range.far_feet}`;
+    case 'legacy':
+      return `legacy ${range.near_feet ?? 'not recorded'}/${range.far_feet}`;
+  }
 }
 
 function yesNo(value: boolean): string {
@@ -1576,13 +1588,7 @@ export function agentReferenceSections(
               : formatWeaponDamage(weapon.versatile_damage),
           ),
           cell(weapon.properties.join(', ') || 'none'),
-          cell(
-            weapon.range_normal_feet === null && weapon.range_long_feet === null
-              ? 'not applicable'
-              : `${optionalNumber(weapon.range_normal_feet)}/${optionalNumber(
-                  weapon.range_long_feet,
-                )}`,
-          ),
+          cell(referenceWeaponRange(weapon.range)),
           cell(weapon.mastery_property ?? 'none'),
           cell(yesNo(weapon.mastery_selected)),
         ]),

@@ -779,7 +779,7 @@ describe('candidate database semantic audit', () => {
     ).not.toThrow();
   });
 
-  it('accepts and can restore a v5 save point with legacy weapon damage', () => {
+  it('accepts and restores a v5 save point with legacy damage and range', () => {
     const db = freshDatabase();
     seedTwoCharacters(db);
     db.exec(
@@ -806,6 +806,11 @@ describe('candidate database semantic audit', () => {
     const custom = '  old campaign table  ';
     weapon.damage_dice = custom;
     weapon.versatile_damage_dice = null;
+    delete weapon.range_kind;
+    delete weapon.range_near_feet;
+    delete weapon.range_far_feet;
+    weapon.range_normal_feet = null;
+    weapon.range_long_feet = 60;
     insertSavePoint(db, 1, snapshot);
 
     expect(() => auditCandidateDatabase(quarantined(bytesOf(db)))).not.toThrow();
@@ -814,7 +819,8 @@ describe('candidate database semantic audit', () => {
     expect(() => state.restore(1, snapshot)).not.toThrow();
     expect(
       db.selectObject(
-        `SELECT damage_kind, damage_dice, damage_flat, damage_custom
+        `SELECT damage_kind, damage_dice, damage_flat, damage_custom,
+                range_kind, range_near_feet, range_far_feet
          FROM character_weapons
          WHERE id = 1`,
       ),
@@ -823,6 +829,9 @@ describe('candidate database semantic audit', () => {
       damage_dice: null,
       damage_flat: null,
       damage_custom: custom,
+      range_kind: 'legacy',
+      range_near_feet: null,
+      range_far_feet: 60,
     });
   });
 

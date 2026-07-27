@@ -378,8 +378,7 @@ const weaponFieldKeys = [
   'versatile_damage',
   ...weaponToggles,
   'ammunition_kind',
-  'range_normal_feet',
-  'range_long_feet',
+  'range',
   'mastery_property',
   'other_properties',
   'notes',
@@ -414,7 +413,7 @@ function nullableString(
  * that a range this accepts is always a range a link can carry — see
  * `WEAPON_RANGE_MAX_FEET`.
  */
-function nullableRange(record: UnknownRecord, key: string): void {
+function nullableRangeDistance(record: UnknownRecord, key: string): void {
   if (!hasOwn(record, key)) {
     invalid(`${key} is required; use null when the weapon has no range.`);
   }
@@ -430,6 +429,51 @@ function nullableRange(record: UnknownRecord, key: string): void {
     invalid(
       `${key} must be a non-negative integer of at most ${WEAPON_RANGE_MAX_FEET}, or null.`,
     );
+  }
+}
+
+function validateWeaponRange(value: unknown, allowLegacy: boolean): void {
+  const range = objectValue(value, 'range must be an object.');
+  if (!hasOwn(range, 'kind') || typeof range.kind !== 'string') {
+    invalid('range.kind is required.');
+  }
+  switch (range.kind) {
+    case 'none':
+      rejectUnknown(range, ['kind'], 'range');
+      return;
+    case 'ranged':
+      rejectUnknown(range, ['kind', 'near_feet', 'far_feet'], 'range');
+      nullableRangeDistance(range, 'near_feet');
+      nullableRangeDistance(range, 'far_feet');
+      if (range.near_feet === null) {
+        invalid('range.near_feet is required for a ranged weapon.');
+      }
+      if (
+        range.far_feet !== null &&
+        Number(range.far_feet) < Number(range.near_feet)
+      ) {
+        invalid('range.far_feet must be at least range.near_feet.');
+      }
+      return;
+    case 'legacy':
+      if (!allowLegacy) {
+        invalid('A new weapon cannot use a legacy range.');
+      }
+      rejectUnknown(range, ['kind', 'near_feet', 'far_feet'], 'range');
+      nullableRangeDistance(range, 'near_feet');
+      nullableRangeDistance(range, 'far_feet');
+      if (range.far_feet === null) {
+        invalid('range.far_feet is required for a legacy weapon range.');
+      }
+      if (
+        range.near_feet !== null &&
+        Number(range.far_feet) >= Number(range.near_feet)
+      ) {
+        invalid('A legacy weapon range must be long-only or inverted.');
+      }
+      return;
+    default:
+      invalid('range.kind is unsupported.');
   }
 }
 
@@ -485,7 +529,7 @@ function validateDamage(
  * replaces the whole row — and "the key was missing" and "the user cleared it"
  * would then be indistinguishable.
  */
-function validateWeaponFields(value: unknown): void {
+function validateWeaponFields(value: unknown, allowLegacy = false): void {
   const weapon = objectValue(value, 'Weapon must be an object.');
   rejectUnknown(weapon, weaponFieldKeys, 'weapon');
 
@@ -505,8 +549,10 @@ function validateWeaponFields(value: unknown): void {
     requiredBoolean(weapon, toggle);
   }
   nullableString(weapon, 'ammunition_kind', WEAPON_TEXT_LIMITS.ammunition_kind);
-  nullableRange(weapon, 'range_normal_feet');
-  nullableRange(weapon, 'range_long_feet');
+  if (!hasOwn(weapon, 'range')) {
+    invalid('range is required.');
+  }
+  validateWeaponRange(weapon.range, allowLegacy);
   // D27. Present-and-null is the NOT STATED state a template pre-fill never
   // produces and an older payload always does; a MISSING key is refused with the
   // rest, because `update_weapon` replaces the whole row and "the key was
@@ -545,7 +591,7 @@ function validateAddWeapon(record: UnknownRecord): void {
     'mastery_selected',
     'reason',
   ]);
-  validateWeaponFields(record.weapon);
+  validateWeaponFields(record.weapon, hasOwn(record, 'weapon_id'));
   // Both optional keys exist only on the inverse of a `remove_weapon`, so they
   // are checked when present and never required.
   if (hasOwn(record, 'weapon_id')) {
@@ -559,7 +605,7 @@ function validateAddWeapon(record: UnknownRecord): void {
 function validateUpdateWeapon(record: UnknownRecord): void {
   rejectUnknown(record, ['type', 'weapon_id', 'weapon', 'reason']);
   positiveInteger(record, 'weapon_id');
-  validateWeaponFields(record.weapon);
+  validateWeaponFields(record.weapon, true);
 }
 
 function validateRemoveWeapon(record: UnknownRecord): void {
