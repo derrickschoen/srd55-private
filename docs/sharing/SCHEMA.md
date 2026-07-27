@@ -3,8 +3,8 @@
 A character share is deliberately smaller than a full backup. It carries the
 user's choices, creates a new character on import, and rebuilds derived source
 instances and selection slots by running the grant-rule slot generator. It is
-not intended to preserve database identifiers, timestamps, notes, derived
-rows, or every piece of application state.
+not intended to preserve database identifiers, timestamps, derived rows, or
+every piece of application state.
 
 The implementation is the source of truth:
 
@@ -22,7 +22,20 @@ contracts field by field.
 
 The readable object form uses the format marker
 `dnd-multiclass-spells-character-share` and version `1`. Unknown fields are
-rejected, and every `note` or `notes` field is intentionally excluded.
+rejected.
+
+Notes are not one policy, and the line between them is which side of the
+character a note is attached to. A note on the BUILD travels unconditionally —
+a weapon, a species, a species trait, a background, a suit of armour, an
+effect. A note on WORKING STATE never travels — a spell preference, a rule
+override, a warning acknowledgement, a loadout, a class level, a selection
+slot, a source instance. A character's own `notes` sits on the build side and
+is the one field the SHARER chooses: it travels only when the `notes` export
+option is set, and that option is off by default (Q12).
+
+`tests/integration/sharing/column-portability.test.ts` is the authority on
+which of the three every column is; it classifies all of them and fails when
+one changes side.
 
 Explicit classes and standalone sources receive contiguous share-local
 identifiers in export order. Selections refer to those identifiers, not
@@ -63,10 +76,18 @@ entries, preferences, or loadouts.
 
 ## Wire transport
 
-Version 1 serializes the validated object as positional JSON. Record lengths are
-fixed, and an absent optional record field occupies its assigned `null`
-position. The codec rejects shorter, longer, or otherwise malformed tuples.
-The golden codec tests are the readable reference for every position.
+Version 1 serializes the validated object as positional JSON. An absent optional
+record field occupies its assigned `null` position, and the codec rejects
+malformed tuples. The golden codec tests are the readable reference for every
+position.
+
+Record lengths are fixed per record TYPE, not for all time: the root document,
+the character element and a weapon each accept more than one arity, because
+this format grows by APPENDING and a link already pasted into somebody's chat
+must keep decoding. A shorter tuple is a link minted before the appended field
+existed and reads as that field being absent; anything that is not an accepted
+arity is still refused. Nothing may be inserted before an existing position —
+that would silently reinterpret every link ever generated.
 
 The UTF-8 JSON bytes are compressed with `CompressionStream("gzip")`, encoded
 as unpadded base64url, and stored after the URL fragment marker (`#`). Fragment

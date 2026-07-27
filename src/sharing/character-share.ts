@@ -51,9 +51,28 @@ import {
   type ShareImportIssue,
 } from './import-issues';
 
+/**
+ * WHAT THE SHARER CHOOSES TO SEND. Every flag is OPT-IN and every default is
+ * OFF, which is not a style choice: a link minted before any of these existed
+ * carries none of them, so `undefined` has to mean what those links already
+ * mean. `=== true` at each read site rather than `?? false`, so nothing but the
+ * boolean itself turns the option on.
+ */
 export interface ShareExportOptions {
   readonly acknowledgements?: boolean;
   readonly loadouts?: boolean;
+  /**
+   * `characters.notes` — Q12, ruled OPT-IN by the owner ("Opt-in, like
+   * loadouts").
+   *
+   * The other two flags guard WORKING STATE. This one guards the build: a
+   * character's own notes sit on the same side of that line as the note on
+   * their armour, which travels unconditionally. What makes it different is not
+   * where it sits but what it is likely to CONTAIN — a character's own notes
+   * are the likeliest place in this application for genuinely private text, so
+   * the sharer decides rather than the format.
+   */
+  readonly notes?: boolean;
 }
 
 export interface ShareImportResult {
@@ -93,6 +112,12 @@ export interface SharePreview {
   readonly includesArmorClassAdjustment: boolean;
   readonly includesAcknowledgements: boolean;
   readonly includesLoadouts: boolean;
+  /**
+   * Whether the sharer opted their own notes in. Declared on the same terms as
+   * its two siblings: the recipient is told which optional sections a link
+   * carries before anything is written.
+   */
+  readonly includesNotes: boolean;
 }
 
 /**
@@ -728,6 +753,20 @@ export function exportCharacterShare(
           })),
         }))
       : undefined;
+  // THE THIRD OPT-IN, and the only one that is a single column (Q12).
+  //
+  // An EMPTY note is no note. `''` and NULL become the same absent field
+  // because the recipient's column cannot hold the difference in any way a
+  // reader could see, and because `text()` refuses a zero-length string — so
+  // exporting `''` would refuse to build the link at all over a note nobody
+  // wrote.
+  const notes =
+    options.notes === true &&
+    character.notes !== null &&
+    character.notes !== undefined &&
+    String(character.notes) !== ''
+      ? String(character.notes)
+      : undefined;
   // Not behind an option flag. `acknowledgements` and `loadouts` are opt-in
   // because they are working state the recipient may not want; a weapon is part
   // of the build being shared, like the class levels and the spellbook.
@@ -859,6 +898,7 @@ export function exportCharacterShare(
       ...(Number(character.allow_legacy) === 1
         ? { allow_legacy: true as const }
         : {}),
+      ...(notes === undefined ? {} : { notes }),
     },
     classes,
     sources,
@@ -1157,6 +1197,7 @@ export function previewCharacterShare(
     includesAcknowledgements:
       document.acknowledgements !== undefined,
     includesLoadouts: document.loadouts !== undefined,
+    includesNotes: document.character.notes !== undefined,
   };
 }
 
@@ -1176,8 +1217,8 @@ export function importCharacterShare(
       `INSERT INTO characters (
          name, strength, dexterity, constitution, intelligence, wisdom,
          charisma, proficiency_bonus_override, rules_edition_preference,
-         allow_legacy, revision, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+         allow_legacy, revision, notes, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
       [
         c.name,
         c.strength ?? 10,
@@ -1189,6 +1230,9 @@ export function importCharacterShare(
         c.proficiency_bonus_override ?? null,
         c.rules_edition_preference ?? '2024',
         c.allow_legacy === true ? 1 : 0,
+        // A document that carries no note leaves the recipient's column at its
+        // own NULL, which is what a link minted before Q12 has always produced.
+        c.notes ?? null,
         now,
         now,
       ],

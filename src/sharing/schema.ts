@@ -11,6 +11,7 @@ import {
   weaponProficiencyCategories,
 } from '../domain/enums';
 import { weaponMasterySelectionError } from '../domain/contracts/row-rules';
+import { CHARACTER_TEXT_LIMITS } from '../domain/character-limits';
 import {
   WEAPON_RANGE_MAX_FEET,
   WEAPON_TEXT_LIMITS,
@@ -118,6 +119,21 @@ export interface ShareCharacter {
   readonly proficiency_bonus_override?: number;
   readonly rules_edition_preference?: string;
   readonly allow_legacy?: true;
+  /**
+   * `characters.notes` — THE ONLY FIELD IN THIS DOCUMENT THE SHARER CHOOSES
+   * WHETHER TO SEND (Q12, ruled opt-in by the owner).
+   *
+   * Absent means the sharer did not opt in, OR the character has no note. The
+   * two are deliberately the same on the wire: a document that distinguished
+   * them would tell the recipient that a note exists and is being withheld,
+   * which is a fact about private text and not one a link should carry.
+   *
+   * OPTIONAL, and the optionality mirrors the column exactly as every other
+   * nullable column here does (D6/D6b). An EMPTY note does not travel either —
+   * see `exportCharacterShare`, where the empty string and NULL are one state
+   * because the recipient's column has no way to hold the difference.
+   */
+  readonly notes?: string;
 }
 
 export interface ShareClass {
@@ -1368,6 +1384,7 @@ export function validateShareDocument(
       'proficiency_bonus_override',
       'rules_edition_preference',
       'allow_legacy',
+      'notes',
     ],
     'character',
   );
@@ -1419,6 +1436,16 @@ export function validateShareDocument(
       );
     }
     character.allow_legacy = true;
+  }
+  // Validated exactly as every other optional free-text field in this document
+  // is — `text()` with a bound owned outside this module, so the share boundary
+  // cannot drift below whatever write boundary the column eventually gets.
+  if (rawCharacter.notes !== undefined) {
+    character.notes = text(
+      rawCharacter.notes,
+      'character.notes',
+      CHARACTER_TEXT_LIMITS.notes,
+    );
   }
 
   const rawClasses = list(

@@ -226,6 +226,12 @@ export function createShareControls(
   const includeLoadouts = element('input', {
     attributes: { type: 'checkbox' },
   });
+  // Q12's opt-in, exposed exactly like the two above it: an unchecked box, so
+  // the default the UI produces is the default a link minted before this
+  // existed already carries.
+  const includeNotes = element('input', {
+    attributes: { type: 'checkbox' },
+  });
   const exportButton = element('button', {
     className: 'button-primary',
     text: 'Create share link',
@@ -346,6 +352,7 @@ export function createShareControls(
         .createFragment(requestedCharacter.id, {
           acknowledgements: includeAcks.checked,
           loadouts: includeLoadouts.checked,
+          notes: includeNotes.checked,
         })
         .then(async (fragment) => {
           if (
@@ -429,6 +436,10 @@ export function createShareControls(
         element('label', { className: 'share-option' }, [
           includeLoadouts,
           element('span', { text: 'Include loadouts' }),
+        ]),
+        element('label', { className: 'share-option' }, [
+          includeNotes,
+          element('span', { text: 'Include my notes about this character' }),
         ]),
         exportButton,
         linkOutput,

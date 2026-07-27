@@ -29,6 +29,10 @@ const complete: CharacterShareDocument = {
     proficiency_bonus_override: 4,
     rules_edition_preference: '2014',
     allow_legacy: true,
+    // The opt-in note (Q12). A REAL value rather than an absence, so the layout
+    // below pins the position AND what occupies it — a `null` here would pin
+    // only the arity, and the arity is the half that was never in doubt.
+    notes: 'Retired the staff after Waterdeep.',
   },
   classes: [
     {
@@ -339,6 +343,11 @@ describe('character-share positional codec', () => {
             'Starward Aegis',
           ],
         ],
+        // LAST, AND IT MUST STAY LAST. Everything before it is the frozen order
+        // every pre-Q12 link was written in; an appended element is invisible to
+        // a decoder that stops one earlier, and inserting it anywhere before
+        // `placeholders` would decode an old link's placeholder list as a note.
+        'Retired the staff after Waterdeep.',
       ],
       [
         [
@@ -750,6 +759,10 @@ describe('character-share positional codec', () => {
         null,
         null,
         null,
+        // The opt-in note, on the same terms as every section below: ALWAYS
+        // written, `null` when the sharer did not opt in or there is nothing to
+        // send, decoding to an absent key.
+        null,
       ],
       [
         [
@@ -788,7 +801,7 @@ describe('character-share positional codec', () => {
       null,
     ]);
     expect(positional).toHaveLength(15);
-    expect((positional[2] as unknown[]).length).toBe(11);
+    expect((positional[2] as unknown[]).length).toBe(12);
     expect((positional[3] as unknown[][])[0]).toHaveLength(8);
     expect((positional[4] as unknown[][])[0]).toHaveLength(6);
     expect(positional[12]).toHaveLength(3);
@@ -810,8 +823,12 @@ describe('character-share positional codec', () => {
   it('rejects every non-version-1 character, class, and source arity', () => {
     const positional = shareDocumentToPositional(complete);
     const cases: Array<[number, number, RegExp]> = [
-      [2, 10, /wire character must be a tuple of length 11/],
-      [2, 12, /wire character must be a tuple of length 11/],
+      // TEN AND THIRTEEN, not ten and twelve. Twelve is the arity this build
+      // writes and eleven is the one every pre-Q12 link has, so the refusal
+      // moved out by one on the high side — the accepted SET grew, and the
+      // subject of this case grew with it.
+      [2, 10, /wire character must be a tuple of length 11 or 12/],
+      [2, 13, /wire character must be a tuple of length 11 or 12/],
       [3, 7, /wire classes\[0\] must be a tuple of length 8/],
       [3, 9, /wire classes\[0\] must be a tuple of length 8/],
       [4, 5, /wire sources\[0\] must be a tuple of length 6/],
@@ -1230,5 +1247,94 @@ describe('a share link generated before weapons travelled', () => {
     expect(decoded).not.toHaveProperty('species');
     expect(decoded).not.toHaveProperty('speciesTraits');
     expect(decoded).not.toHaveProperty('background');
+  });
+});
+
+/**
+ * A SHARE LINK GENERATED BEFORE A CHARACTER'S OWN NOTES COULD TRAVEL (Q12).
+ *
+ * THE ROOT TUPLE IS NOT WHERE THIS GREW. Every previous section of this format
+ * appended to the ROOT, which has tolerated a short tuple since links existed.
+ * The character's note appends to the CHARACTER element, which was `tuple(…,
+ * 11, …)` — EXACT — right up until this change. That is the weapon tuple's
+ * defect exactly (D33/F18): an exact-length reader plus an appended field means
+ * every link already in somebody's chat history stops decoding.
+ *
+ * So the fixtures below are the three frozen links this file already holds,
+ * asked a question none of them was minted to answer: is their character
+ * element still readable now that a longer one exists? All three are literal
+ * base64url strings that nothing regenerates, which is what makes the answer
+ * mean anything.
+ */
+describe('a share link generated before a character note could travel', () => {
+  const frozen = [
+    ['pre-weapons', LEGACY_FRAGMENT, LEGACY_WIRE],
+    ['pre-sheet', PRE_SHEET_FRAGMENT, PRE_SHEET_WIRE],
+    ['pre-effects', PRE_EFFECTS_FRAGMENT, PRE_EFFECTS_WIRE],
+  ] as const;
+
+  it.each(frozen)(
+    'the %s fixture really carries the pre-Q12 eleven-element character',
+    (_name, _fragment, wire) => {
+      // THE LOAD-BEARING GUARD, on the same terms as its siblings above: if any
+      // of these literals were ever regenerated from current code its character
+      // element would have twelve elements, and this fails rather than the file
+      // quietly testing the new arity against itself.
+      expect(wire[2]).toHaveLength(11);
+    },
+  );
+
+  it.each(frozen)('the %s link still decodes, with no note', async (
+    _name,
+    fragment,
+  ) => {
+    const decoded = await decodeShareFragment(fragment);
+    // ABSENT, NOT EMPTY AND NOT NULL. The link never said anything about a
+    // note, and any present value would be this build inventing one.
+    expect(Object.hasOwn(decoded.character, 'notes')).toBe(false);
+    expect(decoded.character.notes).toBeUndefined();
+  });
+
+  it('decodes identically whether or not the twelfth CHARACTER element is present', async () => {
+    // A twelve-element character with a `null` note and an eleven-element one
+    // must mean the same thing, or a character shared today and the same
+    // character shared last month would import differently.
+    const decodedOld = await decodeShareFragment(LEGACY_FRAGMENT);
+    const padded: unknown[] = [...LEGACY_WIRE];
+    padded[2] = [...(LEGACY_WIRE[2] as unknown[]), null];
+    expect(await decodeShareFragment(nodeFragment(padded))).toEqual(decodedOld);
+  });
+
+  it('reads the twelfth CHARACTER element when a link actually carries one', async () => {
+    // The other direction, and the reason the padding test above is not enough
+    // on its own: an element that is accepted and then ignored would pass it.
+    const withNote: unknown[] = [...LEGACY_WIRE];
+    withNote[2] = [
+      ...(LEGACY_WIRE[2] as unknown[]),
+      'Sent on purpose, by a sharer who opted in.',
+    ];
+    const decoded = await decodeShareFragment(nodeFragment(withNote));
+    expect(decoded.character.notes).toBe(
+      'Sent on purpose, by a sharer who opted in.',
+    );
+    // ...and nothing before it moved. `placeholders` sits at index 10 and is
+    // the element an inserted — rather than appended — note would have shifted.
+    expect(decoded.character.name).toBe('Old Link Hero');
+    expect(decoded.character.intelligence).toBe(16);
+    expect(Object.hasOwn(decoded, 'placeholders')).toBe(false);
+  });
+
+  it('refuses a character arity that is neither eleven nor twelve', async () => {
+    // Tolerance is exactly two lengths wide, not "any length".
+    for (const character of [
+      (LEGACY_WIRE[2] as unknown[]).slice(0, 10),
+      [...(LEGACY_WIRE[2] as unknown[]), null, null],
+    ]) {
+      const wire: unknown[] = [...LEGACY_WIRE];
+      wire[2] = character;
+      await expect(
+        decodeShareFragment(nodeFragment(wire)),
+      ).rejects.toThrow(/wire character must be a tuple of length 11 or 12/);
+    }
   });
 });

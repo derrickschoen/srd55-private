@@ -283,6 +283,10 @@ function generateDocument(seed: number): CharacterShareDocument {
           rules_edition_preference: pick(random, ['2014', '2024']),
         }),
     ...(random() < 0.5 ? {} : { allow_legacy: true }),
+    // The opt-in note (Q12). Generated like every other optional character
+    // field, so the property covers a wire whose character element is twelve
+    // long as often as one that is eleven.
+    ...(random() < 0.5 ? {} : { notes: textValue(random, '-notes') }),
   };
   return validateShareDocument({
     format: CHARACTER_SHARE_FORMAT,
@@ -461,6 +465,7 @@ function optionalFieldShrinks(
     'proficiency_bonus_override',
     'rules_edition_preference',
     'allow_legacy',
+    'notes',
   ]) {
     if (Object.hasOwn(document.character, key)) {
       result.push(
