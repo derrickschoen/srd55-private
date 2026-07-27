@@ -84,10 +84,19 @@ for the reasoning:
   spell `level` 0..9, which a CHECK already enforces and only the TYPE says
   `number`.
 - **OPEN** — recognise known values, preserve unknown ones — `school`,
-  `action_type`, `upcast_type`.
-- **VALUE OBJECT** where a free string holds structured data — `casting_time`,
-  `range`, `duration` ("60 feet", "Concentration, up to 1 minute"). Parse with
-  fallback: structured when recognised, raw retained always.
+  `action_type`. (`upcast_type` was named here too and the column NO LONGER
+  EXISTS: nothing ever wrote it, so it had no known values to recognise and the
+  claim described an intent as though it were the state of the code. The
+  progression is now `spell_versions.upcast_scale` plus
+  `spell_version_upcast_levels`, and both are CLOSED.)
+- **VALUE OBJECT** where a free string holds structured data — `range` and
+  `casting_time`. `range` is the worked example: `spell_versions.range` still
+  holds the printed line VERBATIM and `range_kind` / `range_feet` /
+  `area_shape` / `area_feet` carry what `src/domain/spell-range.ts` could read,
+  four NULLs when it could read nothing. `components` is the same shape with
+  `material_cost_copper` / `material_cost_kind` /
+  `material_component_summary`. `duration` stays plain text by ruling (D26).
+  Parse with fallback: structured when recognised, raw retained ALWAYS.
 
 [RECIPES.md](RECIPES.md) §2 is the procedure.
 

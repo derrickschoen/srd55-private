@@ -11,10 +11,24 @@ import type {
   SpellIdentityId,
   SpellVersionId,
 } from '../../src/domain/ids';
-import type { EffectReliabilityCategory } from '../../src/domain/enums';
-import { effectReliabilityCategories } from '../../src/domain/enums';
+import type {
+  EffectReliabilityCategory,
+  MaterialCostKind,
+  SpellAreaShape,
+  SpellRangeKind,
+  UpcastScale,
+} from '../../src/domain/enums';
+import {
+  effectReliabilityCategories,
+  materialCostKinds,
+  spellAreaShapes,
+  spellRangeKinds,
+  upcastScales,
+} from '../../src/domain/enums';
 import {
   datetime,
+  nullOrIntegerAtLeast,
+  nullOrOneOf,
   oneOf,
   sqlText,
   tinyint1,
@@ -128,18 +142,110 @@ export const spell_versions = sqliteTable(
       .default(false),
     casting_time: varchar()('casting_time'),
     action_type: varchar()('action_type'),
+    /**
+     * THE PRINTED RANGE LINE, VERBATIM, AND IT REMAINS THE AUTHORITY FOR
+     * DISPLAY. The four structured columns below are DERIVED from it and are
+     * NULL wherever the parse could not read it whole — see
+     * `src/domain/spell-range.ts`. This column is the D12/Q4 passthrough limb
+     * and it was already here, which is why closing the range vocabulary costs
+     * no data: `Range: Anywhere on this plane` is stored, printed and never
+     * refused.
+     */
     range: varchar()('range'),
+    /**
+     * WHERE THE SPELL'S EFFECT ORIGINATES — `self`, `touch`, `ranged`, and the
+     * three non-distance forms. NULL means the range line was not recognised,
+     * which is DIFFERENT from `Touch` and different again from a blank line.
+     * Those were one storage state until this column existed.
+     */
+    range_kind: varchar<SpellRangeKind>()('range_kind'),
+    /**
+     * THE DISTANCE, IN FEET, AND ONLY FOR `range_kind = 'ranged'`.
+     *
+     * NULLABLE BECAUSE ABSENCE IS A FACT AND NOT A ZERO (D24). A `0` here means
+     * a spell whose printed range is zero feet; "we do not know the range" is
+     * NULL, and the CHECK below refuses a distance that is not attached to a
+     * `ranged` kind so the two can never be confused by a future writer.
+     */
+    range_feet: integer('range_feet'),
+    /**
+     * THE AREA'S SHAPE — the owner's *"spheres, cylinders, cones, straight
+     * line"*, as a separate nullable enum exactly as ruled.
+     *
+     * SEPARATE FROM `range_feet` BECAUSE `Self (30-foot Cone)` HAS TWO NUMBERS
+     * IN IT and only one of them is a range. The 30 is the cone's length; the
+     * distance to the target point is zero-ish and unprinted. Folding them into
+     * one column would have made a 30-foot cone indistinguishable from a
+     * 30-foot range.
+     */
+    area_shape: varchar<SpellAreaShape>()('area_shape'),
+    /** The area's one printed dimension. See `src/domain/spell-range.ts`. */
+    area_feet: integer('area_feet'),
+    /**
+     * TEXT, AND DELIBERATELY SO. The owner ruled it: *"On second thought, spell
+     * duration can just be text."* Under D26 the table adjudicates how long a
+     * spell lasts, so nothing here counts it down.
+     */
     duration: varchar()('duration'),
     /**
+     * THE PRINTED COMPONENTS LINE, VERBATIM — `V, S, M (a sprig of mistletoe)`.
+     * The passthrough limb again, and the reason structuring the cost loses no
+     * V/S/M: this column is untouched and is still what the printable card
+     * renders.
+     *
      * Declared `VARCHAR` and written as an opaque string by the importer.
      * `src/domain/models.ts` typed this `JsonValue | null`, which contradicted
      * both the DDL and the writer; the contract follows the writer.
      */
     components: varchar()('components'),
+    /**
+     * WHAT IS INSIDE `M (…)`, VERBATIM. This column has existed since the
+     * Laravel schema and NOTHING HAS EVER WRITTEN IT — it was declared, decoded
+     * and left empty. It is the "plus text" half of the owner's components
+     * ruling and needed no schema change, so it is now written rather than
+     * replaced.
+     */
     material_component_summary: sqlText()('material_component_summary'),
+    /**
+     * THE MATERIAL COMPONENT'S PRICE IN COPPER PIECES.
+     *
+     * COPPER RATHER THAN THE PRINTED DENOMINATION because the owner ruled the
+     * unit, and one unit is what makes two prices comparable. `src/domain/coin.ts`
+     * holds the conversion and states plainly that the exchange rates are NOT in
+     * any bundled extract.
+     *
+     * NOT AN INVENTORY. The owner's rule beside this one: *"We don't track user
+     * gold or inventory outside of what affects numbers on the character
+     * sheet."* This states a spell's requirement; nothing debits it.
+     */
+    material_cost_copper: integer('material_cost_copper'),
+    /**
+     * IS THAT PRICE A FLOOR OR AN EXACT AMOUNT? The SRD prints `worth 1+ CP`,
+     * and an integer alone drops the `+`. See `materialCostKinds`.
+     */
+    material_cost_kind: varchar<MaterialCostKind>()('material_cost_kind'),
     healing: tinyint1('healing').notNull().default(false),
     short_summary: sqlText()('short_summary'),
-    upcast_type: varchar()('upcast_type'),
+    /**
+     * WHICH LEVEL `spell_version_upcast_levels` COUNTS IN — slot levels for a
+     * levelled spell, character levels for a cantrip upgrade.
+     *
+     * THIS REPLACES `upcast_type`, WHICH WAS DELETED RATHER THAN REUSED. That
+     * column had ZERO writers anywhere in the repository, the Tier 1 document
+     * format had no field for it, and no code ever compared it against
+     * anything — so no database this application can produce ever held a
+     * non-NULL value in it. Two agent-facing docs classified it as an OPEN
+     * vocabulary with "known values recognised"; there were no known values.
+     * D25 says replace rather than accommodate, and keeping a column because it
+     * was there is exactly the accommodation it names.
+     */
+    upcast_scale: varchar<UpcastScale>()('upcast_scale'),
+    /**
+     * The owner's *"text description"* half of the upcast ruling. Declared
+     * since the Laravel schema, never written until now, and kept for the same
+     * reason `material_component_summary` is: it already means what the ruling
+     * asks for.
+     */
     upcast_summary: sqlText()('upcast_summary'),
     requires_mod_for_effect: tinyint1('requires_mod_for_effect')
       .notNull()
@@ -197,6 +303,58 @@ export const spell_versions = sqliteTable(
       'spell_versions_effect_reliability_category_check',
       oneOf('effect_reliability_category', effectReliabilityCategories),
     ),
+    /* ------------------------------------------------------------------ *
+     * THE STRUCTURED RANGE.
+     *
+     * FOUR CONSTRAINTS, AND THE THIRD IS THE ONE THAT EARNS ITS KEEP. Closing
+     * the two vocabularies is the easy half; what actually prevents a wrong
+     * number is refusing the COMBINATIONS that mean nothing:
+     *
+     *  - a `range_feet` on a row whose kind is not `ranged` — a distance
+     *    attached to `Touch` would print as a range the source never gave;
+     *  - a shape with no size, or a size with no shape — half an area, which a
+     *    reader would have to invent the other half of.
+     *
+     * `IS NOT 'ranged'` RATHER THAN `<> 'ranged'`, for the reason the level
+     * CHECK above spells out at length: SQLite passes a CHECK that evaluates to
+     * NULL, so under `<>` a row with a NULL `range_kind` and a non-NULL
+     * `range_feet` would make the limb NULL and the whole constraint would
+     * silently disable itself for exactly the row that has lost the fact
+     * discriminating it. `IS NOT` is null-safe.
+     * ------------------------------------------------------------------ */
+    check(
+      'spell_versions_range_kind_check',
+      nullOrOneOf('range_kind', spellRangeKinds),
+    ),
+    check(
+      'spell_versions_range_feet_check',
+      sql`${nullOrIntegerAtLeast('range_feet', 0)}
+        AND (\`range_feet\` IS NULL OR \`range_kind\` IS 'ranged')`,
+    ),
+    check(
+      'spell_versions_area_shape_check',
+      nullOrOneOf('area_shape', spellAreaShapes),
+    ),
+    check(
+      'spell_versions_area_check',
+      sql`${nullOrIntegerAtLeast('area_feet', 1)}
+        AND ((\`area_shape\` IS NULL) = (\`area_feet\` IS NULL))`,
+    ),
+    /* ------------------------------------------------------------------ *
+     * THE MATERIAL COST. Both columns or neither: a copper amount with no
+     * `exact`/`minimum` cannot be printed without inventing which one it is,
+     * and a kind with no amount says nothing at all.
+     * ------------------------------------------------------------------ */
+    check(
+      'spell_versions_material_cost_check',
+      sql`${nullOrIntegerAtLeast('material_cost_copper', 0)}
+        AND ${nullOrOneOf('material_cost_kind', materialCostKinds)}
+        AND ((\`material_cost_copper\` IS NULL) = (\`material_cost_kind\` IS NULL))`,
+    ),
+    check(
+      'spell_versions_upcast_scale_check',
+      nullOrOneOf('upcast_scale', upcastScales),
+    ),
     uniqueIndex('spell_versions_content_key_unique').on(table.content_key),
     uniqueIndex('spell_versions_spell_identity_id_rules_edition_unique').on(
       table.spell_identity_id,
@@ -250,6 +408,59 @@ export const spell_list_memberships = sqliteTable(
     index('spell_list_memberships_spell_list_key_index').on(
       table.spell_list_key,
     ),
+  ],
+);
+
+/**
+ * THE LEVELS AT WHICH A SPELL CAN BE UPCAST — the owner's *"list of levels that
+ * can upcast"*, as a list.
+ *
+ * A CHILD TABLE AND NOT A COLUMN, because the ruling says LIST and the three
+ * column-shaped alternatives all lose something the list has:
+ *
+ *  - a BOOLEAN (`can_upcast`) drops which levels;
+ *  - a RANGE (`upcast_from`, `upcast_to`) cannot express the bundled cantrip
+ *    upgrades at all — `5, 11, 17` is not an interval, and neither is any
+ *    other cantrip's ladder;
+ *  - a JSON array makes the contract a shape check rather than a row, and
+ *    `src/domain/contracts/json-columns.ts` exists precisely to keep that
+ *    decision deliberate.
+ *
+ * WHICH LEVEL THESE ARE COUNTED IN LIVES ON THE PARENT, in
+ * `spell_versions.upcast_scale`, and NOT on this row. The scale is a fact about
+ * the spell — a cantrip's ladder is character levels, a levelled spell's is
+ * slot levels — so putting it here would let one spell hold two answers, and a
+ * reader would have no way to say which was right.
+ *
+ * `BETWEEN 1 AND 20` COVERS BOTH SCALES AND IS DELIBERATELY THE LOOSER OF THE
+ * TWO. Slot levels run 1..9 and character levels 1..20, so a tighter bound
+ * would have to be conditional on the parent's scale, which a column CHECK
+ * cannot see. The bound that IS enforceable here is enforced; the scale-aware
+ * one is enforced where the scale is known, in
+ * `src/catalog/catalog-schema.ts`.
+ *
+ * `typeof(…) = 'integer'` for the reason `db/schema/columns.ts` measured: a
+ * bare `BETWEEN` already rejects text on its upper limb, but a REAL `2.5` slips
+ * through one and not the other, and a level is not a fraction.
+ */
+export const spell_version_upcast_levels = sqliteTable(
+  'spell_version_upcast_levels',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }).notNull(),
+    spell_version_id: integer('spell_version_id')
+      .notNull()
+      .$type<SpellVersionId>()
+      .references(() => spell_versions.id, { onDelete: 'cascade' }),
+    level: integer('level').notNull(),
+  },
+  (table) => [
+    check(
+      'spell_version_upcast_levels_level_check',
+      sql`typeof(\`level\`) = 'integer' AND \`level\` BETWEEN 1 AND 20`,
+    ),
+    uniqueIndex(
+      'spell_version_upcast_levels_spell_version_id_level_unique',
+    ).on(table.spell_version_id, table.level),
   ],
 );
 

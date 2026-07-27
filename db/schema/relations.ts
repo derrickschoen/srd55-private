@@ -22,6 +22,7 @@ import {
   spell_version_publications,
   spell_version_save_abilities,
   spell_version_tags,
+  spell_version_upcast_levels,
   spell_versions,
 } from './catalog-spells';
 import {
@@ -46,6 +47,7 @@ import {
   weapon_templates,
 } from './weapons';
 import {
+  background_equipment_items,
   background_templates,
   character_background,
   character_species,
@@ -221,6 +223,31 @@ export const speciesTemplateTraitsRelations = relations(
 export const backgroundTemplatesRelations = relations(
   background_templates,
   () => ({}),
+);
+
+/**
+ * THE THREE EDGES THAT MAKE "NAME ONLY UNLESS WEAPON OR ARMOR" STRUCTURAL.
+ *
+ * Two of them point OUT of the origins catalog into the weapon and armour
+ * catalogs, which is the first time any origins table has referenced another
+ * catalog at all — and the reason `src/db/bootstrap.ts` had to be reordered.
+ */
+export const backgroundEquipmentItemsRelations = relations(
+  background_equipment_items,
+  ({ one }) => ({
+    background_template: one(background_templates, {
+      fields: [background_equipment_items.background_template_id],
+      references: [background_templates.id],
+    }),
+    weapon_template: one(weapon_templates, {
+      fields: [background_equipment_items.weapon_template_id],
+      references: [weapon_templates.id],
+    }),
+    armor_template: one(armor_templates, {
+      fields: [background_equipment_items.armor_template_id],
+      references: [armor_templates.id],
+    }),
+  }),
 );
 
 export const characterSpeciesRelations = relations(
@@ -540,6 +567,16 @@ export const spellVersionTagsRelations = relations(
   ({ one }) => ({
     spell_version: one(spell_versions, {
       fields: [spell_version_tags.spell_version_id],
+      references: [spell_versions.id],
+    }),
+  }),
+);
+
+export const spellVersionUpcastLevelsRelations = relations(
+  spell_version_upcast_levels,
+  ({ one }) => ({
+    spell_version: one(spell_versions, {
+      fields: [spell_version_upcast_levels.spell_version_id],
       references: [spell_versions.id],
     }),
   }),

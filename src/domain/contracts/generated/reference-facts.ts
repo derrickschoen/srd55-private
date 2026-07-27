@@ -22,6 +22,24 @@
  */
 export const FOREIGN_KEY_FACTS = [
   {
+    table: 'background_equipment_items',
+    columns: ['background_template_id'],
+    target: 'background_templates',
+    targetColumns: ['id'],
+  },
+  {
+    table: 'background_equipment_items',
+    columns: ['weapon_template_id'],
+    target: 'weapon_templates',
+    targetColumns: ['id'],
+  },
+  {
+    table: 'background_equipment_items',
+    columns: ['armor_template_id'],
+    target: 'armor_templates',
+    targetColumns: ['id'],
+  },
+  {
     table: 'change_log',
     columns: ['character_id'],
     target: 'characters',
@@ -311,6 +329,12 @@ export const FOREIGN_KEY_FACTS = [
   },
   {
     table: 'spell_version_tags',
+    columns: ['spell_version_id'],
+    target: 'spell_versions',
+    targetColumns: ['id'],
+  },
+  {
+    table: 'spell_version_upcast_levels',
     columns: ['spell_version_id'],
     target: 'spell_versions',
     targetColumns: ['id'],

@@ -1,6 +1,7 @@
 import {
   sqlBoolean,
   sqlInteger,
+  sqlNullableInteger,
   sqlNullableJson,
   sqlNullableString,
   sqlString,
@@ -13,19 +14,41 @@ import type {
   SpellVersionRow,
   SubclassDefinitionRow,
 } from '../domain/models';
-import type {
-  Ability,
-  EffectReliabilityCategory,
-  ProgressionType,
-  RulesEdition,
-  StandaloneSourceType,
+import {
+  isEnumValue,
+  materialCostKinds,
+  spellAreaShapes,
+  spellRangeKinds,
+  upcastScales,
+  type Ability,
+  type EffectReliabilityCategory,
+  type MaterialCostKind,
+  type ProgressionType,
+  type RulesEdition,
+  type SpellAreaShape,
+  type SpellRangeKind,
+  type StandaloneSourceType,
+  type UpcastScale,
 } from '../domain/enums';
 
-export interface CatalogSpell
-  extends Omit<SpellVersionRow, 'components'> {
-  readonly components: string | null;
+/**
+ * A spell version plus its aggregated list and tag memberships.
+ *
+ * NO LONGER `Omit<SpellVersionRow, 'components'>`. That omission existed solely
+ * to re-declare `components` as `string | null` against a model type that said
+ * `JsonValue | null` while the column was `VARCHAR` and the importer wrote a
+ * string. `SpellVersionRow` now agrees with its writer, so there is nothing to
+ * omit and nothing to restate.
+ *
+ * `upcastLevels` IS THE ONE FIELD THAT IS NOT A COLUMN. The levels a spell can
+ * be upcast at are rows in `spell_version_upcast_levels`, aggregated in the
+ * same way `lists` and `tags` are, and sorted ASCENDING so a consumer never has
+ * to sort a "list of levels" itself.
+ */
+export interface CatalogSpell extends SpellVersionRow {
   readonly lists: string[];
   readonly tags: string[];
+  readonly upcastLevels: number[];
 }
 
 export interface CatalogSnapshot {
@@ -114,6 +137,44 @@ function stringAggregate(value: string | null): string[] {
     : value.split('\u001f');
 }
 
+/**
+ * The upcast levels, aggregated by the query and split back into integers.
+ *
+ * ANY MEMBER THAT IS NOT AN INTEGER DROPS THE WHOLE LIST rather than yielding a
+ * partial one. A half-read "list of levels that can upcast" is worse than none:
+ * a consumer cannot tell it apart from a spell that upcasts at fewer levels
+ * than it does, so it would print a shorter ladder as though it were complete.
+ * The column's CHECK makes this unreachable on any image this build created,
+ * which is precisely why it is written for the images it did not (F11).
+ */
+function numberAggregate(value: string | null): number[] {
+  const parts = stringAggregate(value);
+  const levels = parts.map(Number);
+  return levels.every((level) => Number.isSafeInteger(level) && level >= 1)
+    ? levels
+    : [];
+}
+
+/**
+ * A STORED MEMBER OF A CLOSED VOCABULARY, VALIDATED RATHER THAN CAST.
+ *
+ * A cast cannot fail: `sqlNullableString(row, 'range_kind') as SpellRangeKind`
+ * hands a consumer a value it is entitled to switch on exhaustively, and every
+ * one of these four columns can hold something else — a CHECK constrains no
+ * image created before it existed and no hand-edited one, which is F11's point
+ * and the same argument `decodeSpellRange` and `decodeSpellComponents` are
+ * tolerant on. An unreadable member reads as ABSENT here, which is a state each
+ * of these columns already has and every consumer already handles.
+ */
+function enumMember<T extends string>(
+  row: SqlRow,
+  column: string,
+  vocabulary: readonly T[],
+): T | null {
+  const stored = sqlNullableString(row, column);
+  return stored !== null && isEnumValue(vocabulary, stored) ? stored : null;
+}
+
 function decodeSpell(row: SqlRow): CatalogSpell {
   return {
     id: sqlInteger(row, 'id'),
@@ -136,8 +197,15 @@ function decodeSpell(row: SqlRow): CatalogSpell {
     ),
     healing: sqlBoolean(row, 'healing'),
     short_summary: sqlNullableString(row, 'short_summary'),
-    upcast_type: sqlNullableString(row, 'upcast_type'),
+    material_cost_copper: sqlNullableInteger(row, 'material_cost_copper'),
+    material_cost_kind: enumMember(row, 'material_cost_kind', materialCostKinds),
+    range_kind: enumMember(row, 'range_kind', spellRangeKinds),
+    range_feet: sqlNullableInteger(row, 'range_feet'),
+    area_shape: enumMember(row, 'area_shape', spellAreaShapes),
+    area_feet: sqlNullableInteger(row, 'area_feet'),
+    upcast_scale: enumMember(row, 'upcast_scale', upcastScales),
     upcast_summary: sqlNullableString(row, 'upcast_summary'),
+    upcastLevels: numberAggregate(sqlNullableString(row, 'upcast_levels')),
     requires_mod_for_effect: sqlBoolean(row, 'requires_mod_for_effect'),
     effect_reliability_category: sqlString(
       row,
@@ -193,7 +261,16 @@ export class CatalogQueries {
                     WHERE tagged.spell_version_id = version.id
                     ORDER BY tagged.tag
                   )
-                ) AS tags
+                ) AS tags,
+                (
+                  SELECT group_concat(value, char(31))
+                  FROM (
+                    SELECT upcast.level AS value
+                    FROM spell_version_upcast_levels AS upcast
+                    WHERE upcast.spell_version_id = version.id
+                    ORDER BY upcast.level
+                  )
+                ) AS upcast_levels
          FROM spell_versions AS version
          ORDER BY version.level, version.display_name,
                   version.rules_edition, version.id`,

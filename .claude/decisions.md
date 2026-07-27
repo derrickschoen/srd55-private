@@ -1,5 +1,196 @@
 # Binding scope decisions
 
+> **NUMBERING.** Two entries were written as F17 concurrently: this one on
+> `main` (the `.ai/` anchor drift) and the structured-values track's own
+> (the NUL byte and the two unreachable values). The track's is renumbered
+> **F18** below. One code comment cited it —
+> `src/queries/background-equipment.ts` — and was updated with it; checked
+> before renumbering, per the standing rule.
+
+
+## F18 — `feat/structured-values` revised against review: a NUL byte made a new file invisible AND red, and two of the four structured values could not reach a player (2026-07-27)
+
+Eleven findings against `079ef20`. **Nine fixed, two rejected with the reason
+recorded.** Re-verified by me on the revised tree: **1966 vitest / 123 files,
+build exit 0, 72 Playwright.** The reported `1960/1960` for `079ef20` was NOT
+reproducible — that tree is red, and the reason is item 1.
+
+### 1. F14 REGRESSED IN A BRAND-NEW FILE, and `git add` is what turned the suite red
+
+`src/queries/background-equipment.ts:130` wrote its composite-key separator as a
+LITERAL 0x00 instead of the `\u0000` escape F14 mandated. `file(1)` reported the
+new file as `data`, plain `grep` could not see any of its 154 lines, and
+`git diff --stat` showed `Bin 0 -> 5840 bytes` — **so the file never appeared in
+the review diff at all.** `tests/unit/source-is-greppable.test.ts` exists for
+exactly this and it fires; the implementer's green run must have happened while
+the file was still untracked, since the guard reads `git ls-files`.
+
+**`npm run build` was GREEN throughout, and could not have caught it**: the
+module has zero production importers, so nothing from it reaches `dist` and the
+dist-clean gate has nothing to scan. That is the general lesson worth keeping —
+**a file written ahead of its caller is outside the build gate's reach, so the
+source-level guards are the only ones covering it.** One-character fix.
+
+### 2. THE COLLAPSE `range_kind` WAS ADDED TO PREVENT, HAPPENING TO REAL 5.2 SPELLS
+
+`src/domain/enums.ts` states this column's purpose as keeping `Self`, `Touch`
+and "the author left Range blank" from being one storage state. Measured through
+the importer, that claim was FALSE for every self-origin spell whose area word
+is outside the four-member shape list:
+
+```
+"Self (15-foot Emanation)" => {range_kind: null, area_shape: null, area_feet: null}
+"Self (15-foot Cube)"      => {range_kind: null, area_shape: null, area_feet: null}
+""                         => {range_kind: null, area_shape: null, area_feet: null}
+```
+
+Emanation and Cube are two of SRD 5.2's six areas of effect and
+`Self (N-foot Emanation)` is the printed Range form of a large family of spells.
+`parseSpellRange` matched `Self` unambiguously and then **threw the whole line
+away** because the PARENTHETICAL was unreadable, while the bare-word path one
+branch above yields the kind quite happily.
+
+**The parse is now PARTIAL where it reads part.** `Self (…)` keeps its `self`
+kind and stores no area; the unread area survives in the verbatim `range` text
+that prints. Partial is not a guess — every field written was read. The old
+behaviour was pinned by `tests/unit/domain/spell-range.test.ts:167`, so it would
+never have been found by accident; that assertion moved to a new test that
+enumerates six such lines. **The four-member shape list itself is NOT widened**:
+it is the owner's ruling, the repo bundles no spell text to check a fifth member
+against, and D26 says an unmodelled area changes no number on the sheet.
+
+### 3. THE ONE STRUCTURED VALUE THAT REACHES A SCREEN COULD NOT REACH ANY SPELL A CHARACTER USES
+
+A referenced spell version is frozen — `docs/CATALOG-IMPORT.md`: *"its imported
+rules and pivots are preserved byte-for-byte"* — and the upcast progression was
+inside that freeze. **Upcast is NET-NEW**, so no existing version carries it; a
+version is referenced exactly when a character uses it; and the printable card
+renders only spells attached to a character. The three facts compose into: the
+only spells that could ever print an upcast line are the ones nobody plays, and
+a user re-importing an improved document is told `updated: 0`.
+
+**Fixed as a FILL, never an overwrite, and ALL-OR-NOTHING.** The exemption
+requires `upcast_scale IS NULL` **and** zero `spell_version_upcast_levels` rows.
+Per-column filling was rejected and the rejection is the load-bearing part: a
+stored `slot_level` would have kept its scale while accepting a document's
+CHARACTER-level ladder and printed `slot levels 5, 11, 17` — a new wrong number
+invented by the fix for an absence. This is the same distinction `short_summary`
+has always been exempt on: supplying a fact that was never stored is not
+changing one. Mutation-verified both ways — as an overwrite, 1 fails; frozen
+again, 1 fails.
+
+### 4. THE PRINTABLE CARD PRINTED THE LITERAL WORD `undefined`
+
+`scaleWord` is an exhaustive switch with no `default` arm, and
+`printable-spell-list-builder.ts` CAST `upcast_scale` instead of validating it.
+A cast cannot fail, so an out-of-vocabulary value fell through the switch to
+`undefined` and `upcastLine` interpolated it. Reproduced on the pre-CHECK image
+(F11's state, reached with `PRAGMA ignore_check_constraints`):
+
+```
+STORED  upcast_scale = "planar_level"
+PRINTED Upcast line   = "undefined 2, 3, 4 · One additional creature per slot level above 2."
+```
+
+The docblock claiming the fallback prints the bare word `levels` was true for
+NULL and false for the case a corrupt image actually produces. Now validated
+with `isEnumValue`, so the docblock's claim is true — and it is executed by a
+test rather than asserted. The four sibling casts in `catalog-queries.ts`
+(`material_cost_kind`, `range_kind`, `area_shape`, `upcast_scale`) were closed
+the same way, with a test that corrupts all four and proves the NUMBERS and the
+printed text beside them are untouched.
+
+**Stated fairly:** unchecked enum casts at the SQL boundary are pre-existing
+house style, 18+ sites at merge-base. What was new here is that one of them fed
+a no-default switch whose fall-through reached the player.
+
+### 5. THE QUANTITY WAS STORED TWICE, so the only renderer said it twice
+
+`2 Daggers` parsed to `{item_name: '2 Daggers', quantity: 2}` — the count in two
+columns — and `describeBackgroundEquipmentItem` printed
+`2 Daggers (×2) — weapon`, with a test pinning that string.
+
+**Fixed in the STORAGE, not the renderer**, which is the opposite of what the
+finding proposed, and the reason is that the renderer fix loses information: a
+row with `quantity: 3` and a name carrying no numeral would print no count at
+all. The owner's ruling is *"a list of quantity + item"* — two fields, one
+count. The printed line is not lost (`background_templates.equipment_option_a`
+holds the whole package verbatim, already pinned), and the PLURAL is kept
+(`Daggers`, not `Dagger`), which is what makes the weapon link a declaration
+rather than a name match (D15). Coin is untouched: `50 GP` keeps its numeral
+because that number is money, not a count of items.
+
+### 6. THE TOLERANT DROP WAS D34 §1's DEFECT, ONE FILE OVER
+
+`backgroundEquipmentPackages` promised in its docblock that a row outside its
+vocabulary is DROPPED. The reviewer neutered the guard and **64 tests across
+four files stayed green** — verbatim the correction D34 had to make to itself:
+*"The section above STATES the degradation as though stating it were pinning
+it."* Pinned now by D34's own remedy: the table is rebuilt WITHOUT its CHECKs
+(the pre-CHECK image is the only state the guard is reachable in — F11), an
+`item_kind = 'tool'` row and an `option = 'c'` row are inserted, and both are
+asserted dropped AND asserted not to mint a package heading. Re-run under the
+reviewer's mutation: it fails.
+
+### 7. TWO PARSERS READING ONE AUTHOR DISAGREED ABOUT A COMMA
+
+`parseSpellComponents` read `worth 1,000+ GP`; `parseSpellRange` stored nothing
+for `1,000 feet`. Closed with a shared `AMOUNT` fragment. **The grouping is
+STRICT** — `1,00 feet` is still refused rather than read as 100, because
+guessing where the author meant the comma to go is the shape of guess this
+parser exists to refuse — and the six-digit ceiling is unchanged.
+
+### 8. A CORRECTION TO THE `079ef20` COMMIT MESSAGE, which claimed the opposite
+
+That message says *"the generated text for the existing constraints is
+unchanged"* after the `columns.ts` parenthesisation fix. **FOURTEEN pre-existing
+CHECK bodies changed** — eight `nullOrOneOf`, six `nullOrIntegerAtLeast`,
+enumerated in the helper's docblock. The reviewer said fifteen; the fifteenth is
+`spell_versions_effect_reliability_category_check`, whose CHECK body is
+byte-identical and which merely stopped being the last constraint and gained a
+comma. **Measured, not counted from the diff's line count** — which is the F16
+discipline, and it moved the number.
+
+The added parens are semantically inert, but `databaseSchemaSignature()` compares
+this exact text, so "unchanged" is a claim about which stored images still
+validate. It costs nothing here ONLY because the same change adds seven columns
+to `spell_versions` and moves the signature regardless; the docblock now says so
+in the place a future reader will be standing.
+
+### 9. A docblock cited a test file that does not exist
+
+`src/domain/coin.ts` cited `tests/unit/domain/coin.test.ts`. The five exchange
+rates ARE pinned — at `tests/unit/domain/spell-components.test.ts:24-29` — so
+the substance held and the pointer did not. Worth fixing because the paragraph's
+whole argument is that unsourced constants are safe BECAUSE a named test guards
+them, and a reader who checked the name would conclude nothing does.
+
+### REJECTED, with the reasons
+
+**`src/queries/background-equipment.ts` has zero production importers — NOT a
+defect, and the module STAYS.** True as measured, and now stated in the file's
+own header rather than left to be discovered. Deleting it was considered and
+refused: it is the only reader of `background_equipment_items` anywhere, so
+deleting it leaves a new table with no reader at all, and it carries the
+compile-time exhaustiveness guard that makes adding a fifth `item_kind` a
+deliberate change. The "no second line of defence" objection was real and is
+answered by item 6 rather than by deletion. The copy path onto a character
+remains the named gap it was declared as.
+
+**Widening `spellAreaShapes` to admit Emanation, Cube and Radius.** The
+four-member list is the owner's ruling verbatim, the repository ships no spell
+catalog to check a fifth member against, and under D26 an area a player measures
+on the table changes no number on the sheet. Item 2 keeps the ORIGIN, which is
+the part that was being lost; the area word survives in the printed text.
+
+### WHAT A SUPERVISOR SHOULD CHECK FIRST
+
+`file src/queries/background-equipment.ts` — it must not say `data` — and then
+`npm test` on a tree with everything `git add`ed, because that is the exact
+combination under which the original report's numbers were not reproducible.
+
+---
+
 ## F17 — `.ai/` anchors into `.claude/decisions.md` BY LINE NUMBER, and the newest-first convention invalidates every one of them by construction (2026-07-27)
 
 Found by measuring the candidate audit parked last tick instead of asserting it

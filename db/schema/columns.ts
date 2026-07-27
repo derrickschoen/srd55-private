@@ -215,19 +215,65 @@ export const integerOneOf = (column: string, values: readonly number[]) =>
   );
 
 /**
- * `column IS NULL OR column IN (…)`.
+ * `(column IS NULL OR column IN (…))`.
  *
  * The null limb is deliberate and load-bearing: these columns are nullable
  * because the absence is a real domain state (no subclass ability override
  * chosen; a user-invented weapon with no mastery property), and a CHECK that
  * forgot the null limb would turn a defended null into a rejected row.
+ *
+ * THE OUTER PARENTHESES ARE THE FIX FOR A TRAP THIS HELPER LAID AND SOMEBODY
+ * FELL INTO, and they are not cosmetic. SQL binds `AND` tighter than `OR`, so
+ * composing an un-parenthesised `A IS NULL OR A IN (…)` into a larger
+ * constraint —
+ *
+ *     CHECK(a IS NULL OR a IN ('x') AND b IS NOT NULL)
+ *
+ * — parses as `a IS NULL OR (a IN ('x') AND b IS NOT NULL)`, so the whole
+ * constraint becomes TRUE for every row with a NULL `a` and the second clause
+ * never runs. That is a constraint that reads correctly, parses, and enforces
+ * NOTHING for exactly the rows a nullable column is full of. It was written
+ * while adding the structured spell-range constraints, generated, and caught by
+ * reading the emitted DDL rather than by any test.
+ *
+ * {@link oneOf}, {@link integerOneOf} and {@link integerAtLeast} do NOT need
+ * this: their output is a chain of `AND`s with no `OR` in it, so composition
+ * cannot re-associate them. The two helpers with a top-level `OR` are the two
+ * that carry the hazard, and both now close it at the source rather than
+ * relying on every caller to remember.
+ *
+ * THE EMITTED DDL OF FOURTEEN PRE-EXISTING CONSTRAINTS CHANGED WHEN THESE
+ * PARENTHESES WERE ADDED, and it is recorded here because the commit that added
+ * them said the opposite. Measured against `d4d2871` by diffing
+ * `src/db/schema.sql`: fourteen CHECK bodies gained a wrapping pair. EIGHT are
+ * this helper's — `character_class_levels_spellcasting_ability_override`,
+ * `character_weapons_mastery_property`,
+ * `character_weapons_proficiency_category`,
+ * `class_definitions_spellcasting_ability`, and the `effect_kind` and
+ * `effect_weapon_scope` pair on both `named_features` and `subclass_features`.
+ * SIX are {@link nullOrIntegerAtLeast}'s —
+ * `armor_templates_strength_requirement`,
+ * `character_armor_strength_requirement`, `character_species_base_speed`,
+ * `characters_proficiency_bonus_override`, and `effect_attack_count` on both
+ * `named_features` and `subclass_features`. A fifteenth line moved in the diff
+ * without its CHECK
+ * body changing at all — `spell_versions_effect_reliability_category_check`
+ * merely stopped being the last constraint and gained a comma.
+ *
+ * The added parentheses are semantically inert, but
+ * `databaseSchemaSignature()` in `src/db/database-lifecycle.ts` compares this
+ * exact text, so "unchanged" is a claim about which stored images still
+ * validate — and it was wrong. It costs nothing here only because the same
+ * change adds seven columns to `spell_versions`, which moves the signature
+ * regardless; a reader must not carry the "unchanged" reasoning into a future
+ * change that does not.
  */
 export const nullOrOneOf = (column: string, values: readonly string[]) => {
   const reference = columnRef(column);
   return sql.raw(
-    `${reference} IS NULL OR ${reference} IN (${values
+    `(${reference} IS NULL OR ${reference} IN (${values
       .map(enumLiteral)
-      .join(', ')})`,
+      .join(', ')}))`,
   );
 };
 
@@ -266,11 +312,17 @@ export const integerAtLeast = (column: string, minimum: number) =>
       `AND ${columnRef(column)} >= ${bound(minimum)}`,
   );
 
-/** `column IS NULL OR` {@link integerAtLeast} — for a defended-null column. */
+/**
+ * `(column IS NULL OR` {@link integerAtLeast}`)` — for a defended-null column.
+ *
+ * Parenthesised as a whole for the reason {@link nullOrOneOf} spells out: a
+ * top-level `OR` composed into a larger `AND` re-associates and silently stops
+ * enforcing the rest of the constraint.
+ */
 export const nullOrIntegerAtLeast = (column: string, minimum: number) =>
   sql.raw(
-    `${columnRef(column)} IS NULL OR (typeof(${columnRef(column)}) = 'integer' ` +
-      `AND ${columnRef(column)} >= ${bound(minimum)})`,
+    `(${columnRef(column)} IS NULL OR (typeof(${columnRef(column)}) = 'integer' ` +
+      `AND ${columnRef(column)} >= ${bound(minimum)}))`,
   );
 
 /**

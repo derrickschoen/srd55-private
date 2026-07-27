@@ -487,6 +487,87 @@ describe('SRD character backgrounds', () => {
       equipment_option_a:
         '2 Daggers, Thieves’ Tools, Crowbar, 2 Pouches, Traveler’s Clothes, 16 GP',
       equipment_option_b: '50 GP',
+      // The printed line above, SPLIT — transcribed from
+      // `docs/srd/source/backgrounds.txt:91` by reading it, not by running the
+      // parser and copying what came out. Three facts here are each a decision
+      // the parse could have got wrong in a plausible-looking way: `2 Daggers`
+      // is a quantity of 2 and the name `Daggers` — the plural is KEPT and the
+      // count is NOT repeated in the name, and it links to the singular
+      // `Dagger` template; `2 Pouches` is a quantity and NOT a weapon; and
+      // `16 GP` is quantity 1 rather than quantity 16, so its printed numeral
+      // stays in the name because it is money and not a count of items.
+      equipment_items: [
+        {
+          option: 'a',
+          sort_order: 1,
+          quantity: 2,
+          item_name: 'Daggers',
+          item_kind: 'weapon',
+          weapon_content_key: '2024:weapon:dagger',
+          armor_content_key: null,
+          coin_copper: null,
+        },
+        {
+          option: 'a',
+          sort_order: 2,
+          quantity: 1,
+          item_name: 'Thieves’ Tools',
+          item_kind: 'gear',
+          weapon_content_key: null,
+          armor_content_key: null,
+          coin_copper: null,
+        },
+        {
+          option: 'a',
+          sort_order: 3,
+          quantity: 1,
+          item_name: 'Crowbar',
+          item_kind: 'gear',
+          weapon_content_key: null,
+          armor_content_key: null,
+          coin_copper: null,
+        },
+        {
+          option: 'a',
+          sort_order: 4,
+          quantity: 2,
+          item_name: 'Pouches',
+          item_kind: 'gear',
+          weapon_content_key: null,
+          armor_content_key: null,
+          coin_copper: null,
+        },
+        {
+          option: 'a',
+          sort_order: 5,
+          quantity: 1,
+          item_name: 'Traveler’s Clothes',
+          item_kind: 'gear',
+          weapon_content_key: null,
+          armor_content_key: null,
+          coin_copper: null,
+        },
+        {
+          option: 'a',
+          sort_order: 6,
+          quantity: 1,
+          item_name: '16 GP',
+          item_kind: 'coin',
+          weapon_content_key: null,
+          armor_content_key: null,
+          coin_copper: 1600,
+        },
+        {
+          option: 'b',
+          sort_order: 1,
+          quantity: 1,
+          item_name: '50 GP',
+          item_kind: 'coin',
+          weapon_content_key: null,
+          armor_content_key: null,
+          coin_copper: 5000,
+        },
+      ],
     });
   });
 
