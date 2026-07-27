@@ -197,6 +197,66 @@ Practical consequence for the level-up wizard promised in ruling 3: the same
 ordering applies at every level where an ability score changes, since an ASI can
 move a character from one kit to the other.
 
+### 6. A new class re-opens the kit (owner, same session)
+
+*"The level up wizard also needs to change the recommended kit if a new class is
+added. Ie, a sorcerer adding a cleric level."*
+
+The trigger for re-recommending is therefore not only an ability score change
+(§5) but any level-up that adds a CLASS. The example is exact: a Sorcerer has no
+armour proficiency worth the name and a Sorcerer/Cleric has medium armour and
+shields, so the same character with the same ability scores has a different
+correct kit the moment the second class lands.
+
+The domain foundation already exists — **D28 ruled that multiclass proficiency
+is a UNION across classes**. That union is what the recommendation must read
+from. Nothing new is needed to compute what is now LEGAL; what is new is
+noticing that the legal set grew and saying so.
+
+**It ADDS a suggestion; it never rewrites a choice.** The character's existing
+weapons and armour stay exactly as they are. The wizard surfaces what the new
+class makes available and lets the player act on it. Silently swapping a
+player's chosen gear because a better option appeared would be the app inventing
+a decision, and at worst losing one the player made deliberately — the failure
+AGENTS.md names as the one thing "replace freely" never licenses.
+
+### 7. Flag a weapon that only makes sense with an attack cantrip or a pact weapon (owner, same session)
+
+*"For weapons, have the wizard point out weapons that would only work well with
+true strike, shillelagh, or pact of the blade are selected when building a
+warlock or any other class that can select one of these."*
+
+This is the suitability filter of §5 applied to a case the ability scores alone
+get wrong. A Sorcerer with Strength 8 taking a quarterstaff looks like a
+mistake, and is not one if Shillelagh is in play — the cantrip rewrites which
+ability the attack uses. Without the note the wizard would steer a player away
+from a combination the rules explicitly support.
+
+It stays a NOTE. §5 binds: legality comes from proficiencies and blocks,
+suitability only speaks.
+
+**What exists.** `src/rules/attack-cantrips.ts` already models exactly this
+mechanic — `attackCantrips = ['true_strike', 'shillelagh']`, matched on
+`content_key` rather than display name, with the three failure modes written out
+(recognised; plainly-the-right-spell under an unknown key, which is REPORTED;
+unrelated spell renamed, which is not). D14 and D15 are its rulings.
+
+**What does not exist: Pact of the Blade.** Grep finds it only as an unresolved
+prerequisite STRING — `"Level 5+ Warlock, Pact of the Blade"` stored as a
+qualifier for Thirsting Blade (`src/rules/extra-attack.ts:54`,
+`db/schema/catalog-classes.ts:480`). There is no invocation model, nothing a
+character can select, and so nothing the wizard can currently test. This ruling
+requires it to be modelled; treat that as new work, not a lookup.
+
+**A dependency this creates.** The note is conditional on the character actually
+having access to the cantrip, which is spell-access data. So the equipment step
+depends on the spell step as well as the ability-score step, extending §5's
+ordering. And it depends on the catalogue: `attack-cantrips.ts` opens by saying
+"True Strike and Shillelagh are NOT IN THIS APPLICATION" because the catalogue
+was user-supplied. **D43 changes that premise** — once the SRD catalogue ships,
+the key stops being a guess for bundled rows, and that comment plus its
+guess-handling need revisiting rather than being read as still-current.
+
 ## F20 — drizzle-kit DOES emit the SQLite table rebuild, and the two things that would still have broken the migration are the TTY prompt and `PRAGMA foreign_keys=OFF` inside a transaction (2026-07-27)
 
 The load-bearing unknown before implementing the weapon-range storage change was
