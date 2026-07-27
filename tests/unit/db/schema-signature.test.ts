@@ -2,7 +2,10 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { Sqlite3Static } from '@sqlite.org/sqlite-wasm';
 import schema from '../../../src/db/schema.sql?raw';
 import preDrizzleSchema from '../../fixtures/schema-pre-drizzle.sql?raw';
-import { DatabaseLifecycle } from '../../../src/db/database-lifecycle';
+import {
+  DatabaseLifecycle,
+  openDatabaseImage,
+} from '../../../src/db/database-lifecycle';
 import { bootDatabase, degradedRejection } from '../../../src/worker/boot';
 import { getSqlite3, MemoryDatabaseStorage } from '../../helpers/open-db';
 
@@ -70,17 +73,13 @@ describe('pre-Drizzle database images', () => {
     // now short of `applicationTables` too, so it fails EARLIER, not less.
     //
     // These are COUNTS, not an equivalence proof, and do not claim to be one.
-    // The Laravel-derived oracle in `tests/unit/schema.test.ts` runs against
-    // the generated artifact and is what actually pins column types, indexes,
-    // defaults and foreign keys — including, since the prune, the proof that
-    // its column-metadata hash is still derived from THIS fixture rather than
-    // from our own output.
+    // `tests/unit/schema.test.ts` runs against the generated artifact and is
+    // what actually pins columns, nullability, indexes, defaults and foreign
+    // key actions; it also holds THIS fixture to its two recorded hashes, so
+    // the fixture cannot be quietly edited to make this file pass.
     const tableCount = (sql: string) =>
       [...sql.matchAll(/CREATE TABLE/g)].length;
     expect(tableCount(preDrizzleSchema)).toBe(38);
-    expect(tableCount(schema)).toBe(56);
-    // 30 surviving Laravel tables, 4 native weapon tables, 8 sheet core,
-    // 6 origins, 2 class features, 4 stored sheet inputs.
     expect(tableCount(schema)).toBe(56);
   });
 
@@ -135,6 +134,100 @@ describe('pre-Drizzle database images', () => {
     expect(boot.lifecycle.database.scalar('SELECT count(*) FROM characters')).toBe(
       0,
     );
+    boot.lifecycle.close();
+  });
+});
+
+/**
+ * THE SIGNATURE LIMB, EXERCISED ON ITS OWN.
+ *
+ * The pre-Drizzle image above no longer reaches the signature comparison: it
+ * predates 26 tables, so the missing-tables check refuses it first. That is
+ * correct behaviour and the test says so — but it means nothing was left
+ * proving what happens to an image that has EVERY table and merely disagrees
+ * about the DDL text.
+ *
+ * That is exactly the image this change produces. Retiring `laravelDefault`
+ * rewrote 56 `DEFAULT` clauses — `DEFAULT '0'` became `DEFAULT false`,
+ * `DEFAULT '10'` became `DEFAULT 10` — so every database written by the
+ * previous build now differs from this one in DDL text and in nothing else.
+ * D7 accepts the break (pre-alpha, no users). What it does not accept is the
+ * break being a crash rather than a recoverable refusal, so that is asserted
+ * here rather than assumed.
+ *
+ * The fixture is built by transforming the CURRENT artifact, which is exactly
+ * the reconstruction the previous build emitted and is not an expectation
+ * regenerated from our own output: nothing here asserts a value read back out
+ * of the schema. What is asserted is the boot outcome.
+ */
+describe('an image from a build whose defaults were quoted', () => {
+  const previouslyEmittedSchema = schema
+    .replace(/DEFAULT false/g, "DEFAULT '0'")
+    .replace(/DEFAULT true/g, "DEFAULT '1'")
+    .replace(/DEFAULT (\d+)/g, "DEFAULT '$1'");
+
+  async function storageHoldingQuotedDefaultImage(): Promise<MemoryDatabaseStorage> {
+    const storage = new MemoryDatabaseStorage(sqlite3);
+    const previous = new sqlite3.oo1.DB(':memory:', 'c');
+    try {
+      previous.exec(previouslyEmittedSchema);
+      previous.exec("INSERT INTO characters (name) VALUES ('Quoted')");
+      await storage.replaceFile(
+        sqlite3.capi.sqlite3_js_db_export(previous).slice(),
+      );
+    } finally {
+      previous.close();
+    }
+    return storage;
+  }
+
+  it('differs from the current artifact in DEFAULT text and nothing else', () => {
+    expect(previouslyEmittedSchema).not.toBe(schema);
+    // Same tables, same columns, same everything the missing-tables check reads
+    // — so this image gets past it and the SIGNATURE is what refuses it.
+    const withoutDefaults = (sql: string) =>
+      sql.replace(/ DEFAULT (?:'[^']*'|[^ ,\n]+)/g, '');
+    expect(withoutDefaults(previouslyEmittedSchema)).toBe(
+      withoutDefaults(schema),
+    );
+  });
+
+  it('is refused by the signature, naming the schema rather than a missing table', async () => {
+    const storage = await storageHoldingQuotedDefaultImage();
+    const boot = bootDatabase(new DatabaseLifecycle(sqlite3, storage, schema));
+
+    expect(boot.status).toBe('schema_mismatch');
+    if (boot.status !== 'schema_mismatch') {
+      throw new Error('unreachable');
+    }
+    expect(boot.detail).toBe(
+      'Database image schema does not match the application schema.',
+    );
+  });
+
+  it('leaves export and reset reachable, and loses no bytes on the way', async () => {
+    const storage = await storageHoldingQuotedDefaultImage();
+    const boot = bootDatabase(new DatabaseLifecycle(sqlite3, storage, schema));
+
+    expect(degradedRejection(boot, 'queries.characterWorkspace')).not.toBeNull();
+    expect(degradedRejection(boot, 'system.exportDatabase')).toBeNull();
+    expect(degradedRejection(boot, 'system.reset')).toBeNull();
+
+    // THE BYTES ARE THE POINT, not merely that they are non-empty: the user's
+    // own row has to still be in them, or "recoverable" means nothing.
+    const rescued = await boot.lifecycle.exportBytes();
+    const inspect = openDatabaseImage(sqlite3, rescued, { readonly: true });
+    try {
+      expect(inspect.selectValue('SELECT name FROM characters')).toBe('Quoted');
+    } finally {
+      inspect.close();
+    }
+
+    await boot.lifecycle.reset();
+    expect(boot.lifecycle.isOpen).toBe(true);
+    expect(
+      boot.lifecycle.database.scalar('SELECT count(*) FROM characters'),
+    ).toBe(0);
     boot.lifecycle.close();
   });
 });

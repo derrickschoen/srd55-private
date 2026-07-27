@@ -1,5 +1,91 @@
 # Binding scope decisions
 
+## D29 — The Laravel parity scaffolding is gone, and the review found ONE real residue in it (2026-07-26)
+
+NUMBERING: `main` gained D27 and D28 while this branch was in flight, so this
+entry is D29. It belongs ABOVE both on merge — it is the newest — and the
+conflict at the top of this file is expected.
+
+`feat/retire-parity`, implementing F10 items 1-3. Verified by me on a clean
+tree: **1625 vitest / 109 files, build exit 0, 71 Playwright.**
+
+### What went, and why each was pile (a)
+
+- **The Laravel column-metadata hash over the live schema**, its
+  `laravelTableNames` filter, and the third hash link (one `it`). Subject:
+  fidelity to the Laravel migrations. Retired by D7.
+- **Column ORDER**, the Laravel/native inventory SPLIT, two inventory COUNTS,
+  and a duplicated merge fragment that `main` had carried since D18.
+- **`laravelDefault`** — 67 defaults now written plainly. Proved by execution
+  rather than inferred, which is what F10 said this needed: every one of the 67
+  defaulted columns was probed with `INSERT … DEFAULT VALUES` before and after,
+  and both `typeof(c)` and the value are identical in 67 of 67.
+- **`spell_selection_slots.orphaned_by_change_group_id`**, dormant since it was
+  written, with accept-and-drop on the way in so no existing backup file stops
+  opening.
+
+Nothing in pile (b) was deleted. Exactly one `it` was removed across the branch.
+
+### THE RESIDUE, and it is the entry worth keeping
+
+The deleted hash covered `(name, type, notnull, dflt_value, pk)`. Four of those
+five were re-homed and WIDENED — `notnull` and `dflt_value` to all 56 tables,
+`pk` to `schema-autoincrement`, all with the parallel native inventory gone. The
+fifth, **declared TYPE, was re-homed nowhere**, and `main`'s own comment in
+`db/schema/columns.ts` had said out loud that no other expectation read one.
+
+Measured, both directions, not argued: retyping `change_log.reason` from
+`VARCHAR` to `integer` passed **all 1624 tests and the build**; on `main` the
+deleted `it` caught it. That is a real change — the string `'2024'` stops being
+stored as a string.
+
+**Restored as AFFINITY, not as the declared keyword, and the distinction is the
+whole decision.** D7 names `VARCHAR`/`DATETIME`/`TINYINT(1)` as inherited
+spellings and licenses renaming them freely; pinning the keyword would rebuild
+exactly the tax F10 measured. What is behaviour is the affinity the keyword
+resolves to. So `expectedColumns` now files every column under its affinity:
+`VARCHAR` -> `TEXT` costs nothing, `VARCHAR` -> `integer` costs one deliberate
+line. Both directions verified by mutation (`VARCHAR` -> `integer`, and
+`DATETIME` -> `VARCHAR`), and the classifier is proved against the ENGINE — every
+declared type the schema uses is executed and its storage class checked — rather
+than against a reading of the documentation.
+
+**One of the review's two probes is NOT a defect, and the difference is worth
+recording.** `invalidated_at` `DATETIME` -> `integer` changes NOTHING that is
+stored: INTEGER and NUMERIC affinity are identical on write and differ only
+inside a `CAST`. Measured — `'2024'`, `'2024.5'`, `'x'` and `5.0` produce
+identical storage classes in both, and differ from `VARCHAR` in three of the
+four. The grouping still separates them, because they are separate
+declarations; a column moving between those two groups is a one-line re-filing
+rather than a bug, and the test says so.
+
+### Two corrections
+
+- The deletion of the dropped-table absence loop was justified by a link that
+  does not exist: `tests/unit/contracts/table-scopes.test.ts` asserts over
+  `Object.keys(TABLE_SCOPES)` and `APPLICATION_TABLES` — TypeScript literals —
+  and never reads `sqlite_master`. The coverage does survive, by a longer chain:
+  `column-facts-generation.test.ts` pins `COLUMN_FACTS` to `APPLICATION_TABLES`
+  under a byte-for-byte freshness check, and `schema.test.ts` still compares live
+  `sqlite_master` against the inventory. The deletion stands; the reason was
+  wrong and the commit message is corrected.
+- `RETIRED_ROW_COLUMNS` was keyed by a parameter that also received a
+  `ReferenceKind` — and every reference kind IS a real table name, so two name
+  spaces shared one key space with nothing enforcing that they never collide.
+  Now `BackupTable | SnapshotTable | null`, which makes passing a reference kind
+  a COMPILE ERROR (verified: `Type '"class_definitions"' is not assignable`).
+
+### The shape to carry forward
+
+F10 named the pattern — a constraint adopted to prove fidelity, outliving the
+thing it proved. This adds the counterpart: **when that machinery is removed,
+enumerate what it happened to cover and re-home each piece deliberately.** Four
+of five were re-homed here by accident of where they already fitted; the fifth
+was not, and nothing in the suite noticed for three commits. The audit is the
+work, not the deletion.
+
+---
+
 ## D28 — OWNER: warn rather than refuse; the Rogue qualifier is a union; multiclass proficiency is a UNION across classes (2026-07-26)
 
 > "I think it is fine to just warn when a monk adds a non light martial weapon.

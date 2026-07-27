@@ -511,7 +511,6 @@ export const COLUMN_FACTS = {
     is_locked: { base: 'degraded', notNull: true },
     state: { base: 'degraded', notNull: true },
     orphan_reason_code: { base: 'degraded', notNull: false },
-    orphaned_by_change_group_id: { base: 'integer', notNull: false },
     orphaned_at: { base: 'degraded', notNull: false },
     prior_config: { base: 'degraded', notNull: false },
     override_note: { base: 'degraded', notNull: false },

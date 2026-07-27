@@ -28,7 +28,6 @@ import {
 import {
   datetime,
   integerAtLeast,
-  laravelDefault,
   nullOrOneOf,
   oneOf,
   sqlText,
@@ -39,10 +38,10 @@ import { characters } from './character';
 import { class_definitions } from './catalog-classes';
 
 /**
- * WEAPONS. Four NATIVE tables — the first tables in this schema that reproduce
- * no Laravel migration. `tests/unit/schema.test.ts` keeps them in a separate,
- * hand-transcribed inventory for exactly that reason: the Laravel parity claim
- * is still made over the original 38 and is not diluted by them.
+ * WEAPONS. Four tables, hand-inventoried in `tests/unit/schema.test.ts` from
+ * `.claude/plans/weapons-design.md` §4 — which was written before this file
+ * existed, and is why these four are the only entries in that inventory that
+ * are not a transcription of the declarations they judge.
  *
  * WHAT THIS DOES NOT MODEL. No proficiency, no attack bonus, no damage roll, no
  * inventory, no weight, no cost, no equipped state and no ammunition count. A
@@ -111,14 +110,14 @@ export const character_weapons = sqliteTable(
      * versatile die, so the absence is the source's own (D6b limb 2).
      */
     versatile_damage_dice: varchar()('versatile_damage_dice'),
-    finesse: tinyint1('finesse').notNull().default(laravelDefault('0')),
-    heavy: tinyint1('heavy').notNull().default(laravelDefault('0')),
-    light: tinyint1('light').notNull().default(laravelDefault('0')),
-    loading: tinyint1('loading').notNull().default(laravelDefault('0')),
-    reach: tinyint1('reach').notNull().default(laravelDefault('0')),
-    thrown: tinyint1('thrown').notNull().default(laravelDefault('0')),
-    two_handed: tinyint1('two_handed').notNull().default(laravelDefault('0')),
-    ammunition: tinyint1('ammunition').notNull().default(laravelDefault('0')),
+    finesse: tinyint1('finesse').notNull().default(false),
+    heavy: tinyint1('heavy').notNull().default(false),
+    light: tinyint1('light').notNull().default(false),
+    loading: tinyint1('loading').notNull().default(false),
+    reach: tinyint1('reach').notNull().default(false),
+    thrown: tinyint1('thrown').notNull().default(false),
+    two_handed: tinyint1('two_handed').notNull().default(false),
+    ammunition: tinyint1('ammunition').notNull().default(false),
     ammunition_kind: varchar()('ammunition_kind'),
     /**
      * No both-or-neither CHECK on the range pair, deliberately. A user typing a
@@ -136,7 +135,7 @@ export const character_weapons = sqliteTable(
     mastery_property: varchar<WeaponMasteryProperty>()('mastery_property'),
     mastery_selected: tinyint1('mastery_selected')
       .notNull()
-      .default(laravelDefault('0')),
+      .default(false),
     /**
      * Q4's free-text escape hatch, and the Lance is what proves it is needed:
      * its property is `Two-Handed (unless mounted)`, so the boolean alone is a
@@ -200,7 +199,7 @@ export const weapon_templates = sqliteTable(
     content_key: varchar<ContentKey>()('content_key').notNull(),
     rules_edition: varchar<RulesEdition>()('rules_edition')
       .notNull()
-      .default(laravelDefault('2024')),
+      .default('2024'),
     name: varchar()('name').notNull(),
     srd_group: varchar<SrdWeaponGroup>()('srd_group').notNull(),
     // NOT NULL where the character's copy is nullable: every row here comes
@@ -208,14 +207,14 @@ export const weapon_templates = sqliteTable(
     damage_dice: varchar()('damage_dice').notNull(),
     damage_type: varchar()('damage_type').notNull(),
     versatile_damage_dice: varchar()('versatile_damage_dice'),
-    finesse: tinyint1('finesse').notNull().default(laravelDefault('0')),
-    heavy: tinyint1('heavy').notNull().default(laravelDefault('0')),
-    light: tinyint1('light').notNull().default(laravelDefault('0')),
-    loading: tinyint1('loading').notNull().default(laravelDefault('0')),
-    reach: tinyint1('reach').notNull().default(laravelDefault('0')),
-    thrown: tinyint1('thrown').notNull().default(laravelDefault('0')),
-    two_handed: tinyint1('two_handed').notNull().default(laravelDefault('0')),
-    ammunition: tinyint1('ammunition').notNull().default(laravelDefault('0')),
+    finesse: tinyint1('finesse').notNull().default(false),
+    heavy: tinyint1('heavy').notNull().default(false),
+    light: tinyint1('light').notNull().default(false),
+    loading: tinyint1('loading').notNull().default(false),
+    reach: tinyint1('reach').notNull().default(false),
+    thrown: tinyint1('thrown').notNull().default(false),
+    two_handed: tinyint1('two_handed').notNull().default(false),
+    ammunition: tinyint1('ammunition').notNull().default(false),
     ammunition_kind: varchar()('ammunition_kind'),
     range_normal_feet: integer('range_normal_feet'),
     range_long_feet: integer('range_long_feet'),

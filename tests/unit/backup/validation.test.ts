@@ -123,7 +123,6 @@ function slotRow(): Record<string, unknown> {
     is_locked: 0,
     state: 'active',
     orphan_reason_code: null,
-    orphaned_by_change_group_id: null,
     orphaned_at: null,
     prior_config: null,
     override_note: null,
