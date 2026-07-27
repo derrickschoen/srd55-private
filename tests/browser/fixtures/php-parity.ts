@@ -504,6 +504,15 @@ export async function catalogBaseFixtureImage(): Promise<
   });
 }
 
+/**
+ * The abbreviated `'Action or R'` and `'C, up to 1 minute'` below are the PHP
+ * catalog's notation, and they are KEPT ON PURPOSE now that they decide nothing.
+ * Until F13 the importer read them with a regex and OR-ed the result into the
+ * `ritual`/`concentration` tags; both flags here are declared `true`, so the
+ * tags this fixture's assertions expect come from the declaration either way.
+ * An override that sets both to `false` — `php-feature-parity.spec.ts`'s Journey
+ * Spell — inherits this prose and is now correctly left untagged.
+ */
 export function catalogRecord(
   overrides: Record<string, unknown> = {},
 ): Record<string, unknown> {
