@@ -78,7 +78,7 @@ export function renderAgentReference(
     'projection: a JSON block in the page source, and the collapsed sections ' +
     'below. Every field of the JSON has a column or a labelled row in those ' +
     'sections. What the reference leaves out is listed under “What this ' +
-    'planner models”, and free text whose author is unverified is listed ' +
+    'application models”, and free text whose author is unverified is listed ' +
     'under “Free text on this page” rather than placed in the JSON.';
   section.append(heading, intro);
 

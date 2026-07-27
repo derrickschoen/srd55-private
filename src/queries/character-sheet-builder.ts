@@ -314,7 +314,7 @@ function distinctWarnings(
 ): readonly SheetWarning[] {
   const seen = new Set<string>();
   return warnings.filter((warning) => {
-    const key = `${warning.code} ${warning.message}`;
+    const key = `${warning.code}\u0000${warning.message}`;
     if (seen.has(key)) {
       return false;
     }
@@ -399,8 +399,9 @@ export const SHEET_GAPS: readonly SheetGap[] = Object.freeze([
       'section can say whether a class of this character’s grants it. What is ' +
       'still not recorded is whether the weapon is MELEE or RANGED, and the ' +
       'attack formula branches on exactly that — so attack profiles show both ' +
-      'formulas. They also include the proficiency bonus in both, whatever the ' +
-      'Proficiencies section says: withholding it there is a separate change.',
+      'formulas. Both agree with the Proficiencies section about the ' +
+      'proficiency bonus: a weapon no class of this character grants does not ' +
+      'get it, and the profile says why.',
   },
   {
     kind: 'background_skills_are_text',
