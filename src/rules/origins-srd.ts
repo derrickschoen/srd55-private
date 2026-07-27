@@ -868,7 +868,8 @@ const COIN_LINE = /^(?<amount>\d{1,9})\s*(?<coin>CP|SP|EP|GP|PP)$/iu;
  * D15 REFUSED DECIDING A MECHANICAL FACT BY MATCHING TEXT, and this is that
  * refusal applied to the owner's *"name only unless weapon or armor"*. A
  * name-matching resolver against `weapon_templates.name` would miss `2 Daggers`
- * outright (the template is `Dagger`, singular) and would have to decide what to
+ * outright — the count comes off, but the name that remains is `Daggers` and
+ * the template is `Dagger`, singular — and would have to decide what to
  * do with `Gaming Set (same as above)`, which is not an item name at all — it is
  * a back-reference to a choice made on the SAME ROW'S Tool Proficiency line.
  *
@@ -937,7 +938,6 @@ function parseEquipmentEntry(
   const base = {
     option,
     sort_order: sortOrder,
-    item_name: entry,
     weapon_content_key: null,
     armor_content_key: null,
   } as const;
@@ -956,13 +956,30 @@ function parseEquipmentEntry(
     }
     // QUANTITY 1 AND THE WHOLE PRINTED TEXT AS THE NAME. Fifty gold pieces are
     // one sum of money, not fifty items — reading `50 GP` as quantity 50 of an
-    // item called `GP` is what would turn currency into inventory.
-    return { ...base, quantity: 1, item_kind: 'coin', coin_copper: copper };
+    // item called `GP` is what would turn currency into inventory. The `50` is
+    // not a count here, so it is not stripped: it is part of what the line is.
+    return {
+      ...base,
+      item_name: entry,
+      quantity: 1,
+      item_kind: 'coin',
+      coin_copper: copper,
+    };
   }
 
   const quantified = LEADING_QUANTITY.exec(entry)?.groups;
   const quantity =
     quantified?.quantity === undefined ? 1 : Number(quantified.quantity);
+  // THE COUNT COMES OUT OF THE NAME, AND IT IS SAID ONCE. `2 Daggers` is
+  // `quantity: 2` of `Daggers` — keeping the printed numeral in `item_name`
+  // too states the same fact in two columns, and any renderer that trusts both
+  // prints it twice (`2 Daggers (×2)`). The owner's ruling is *"a list of
+  // quantity + item"*: two fields, one count.
+  //
+  // THE PRINTED LINE IS NOT LOST — `background_templates.equipment_option_a`
+  // and `_b` hold the whole package verbatim and are what a reader prints, and
+  // the PLURAL survives here (`Daggers`, not `Dagger`), which is what makes
+  // the weapon link a declaration rather than a name match (D15).
   const name = quantified?.name ?? entry;
   if (quantity < 1) {
     throw new OriginExtractError(
@@ -974,13 +991,20 @@ function parseEquipmentEntry(
   if (weapon !== undefined) {
     return {
       ...base,
+      item_name: name,
       quantity,
       item_kind: 'weapon',
       weapon_content_key: weaponContentKey(weapon),
       coin_copper: null,
     };
   }
-  return { ...base, quantity, item_kind: 'gear', coin_copper: null };
+  return {
+    ...base,
+    item_name: name,
+    quantity,
+    item_kind: 'gear',
+    coin_copper: null,
+  };
 }
 
 /**

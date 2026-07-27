@@ -107,6 +107,43 @@ type VersionAttributes = Record<
   string | number | null
 >;
 
+/**
+ * THE UPCAST FACT, AND THE ONE EXEMPTION FROM THE REFERENCED-VERSION FREEZE
+ * THAT IS NOT A CHANGE TO A RULE.
+ *
+ * A version a character REFERENCES is frozen: `docs/CATALOG-IMPORT.md` states
+ * it as *"its imported rules and pivots are preserved byte-for-byte"*, and the
+ * reason is that a spell must not change under a character who has already
+ * chosen it. `short_summary` has always been exempt for the reason the same
+ * paragraph gives — *"optional text can still be filled in"* — and that
+ * exemption is not a hole in the freeze, it is the freeze's own distinction
+ * between CHANGING a stored fact and SUPPLYING one that was never stored.
+ *
+ * THE UPCAST PROGRESSION IS NET-NEW, WHICH MAKES THAT DISTINCTION DECISIVE
+ * RATHER THAN ACADEMIC. No catalog document written before this change carries
+ * `upcastScale`/`upcastLevels`, so EVERY existing version has the fact absent —
+ * and a version is referenced precisely when a character uses it, which is
+ * precisely when the printable card renders it. Frozen unconditionally, the
+ * only spells that print an upcast line are the ones no character has, and a
+ * user re-importing an improved document to get it is told `updated: 0`.
+ *
+ * SO THE EXEMPTION IS A FILL, NEVER AN OVERWRITE, AND IT IS ALL-OR-NOTHING.
+ * `upcastFillable` requires `upcast_scale IS NULL` **and** zero
+ * `spell_version_upcast_levels` rows — the state "this version says nothing
+ * about upcasting". Filling column by column would allow a stored
+ * `slot_level` to keep its scale while accepting a document's
+ * `character_level` LEVELS, and print `slot levels 5, 11, 17` for a cantrip
+ * ladder: a new wrong number invented by the fix for an absence. A version that
+ * already carries either half stays frozen whole.
+ *
+ * `upcast_summary` is in the set because it is the third field of the same
+ * fact; like the other two it is only ever written where it is NULL.
+ */
+const UPCAST_COLUMNS = new Set([
+  'upcast_scale',
+  'upcast_summary',
+]);
+
 class DryRunRollback extends Error {
   constructor(readonly summary: CatalogImportSummary) {
     super('Catalog dry run rollback.');
@@ -258,6 +295,9 @@ export class CatalogImporter {
       let versionId: number;
       let referenced: boolean;
       let versionChanged: boolean;
+      // See {@link UPCAST_COLUMNS}. `false` for a version this import CREATED,
+      // which needs no exemption because nothing is frozen on it.
+      let upcastFillable = false;
       const attributes = this.#versionAttributes(record, identityId);
 
       if (version === null) {
@@ -276,18 +316,25 @@ export class CatalogImporter {
         referenced = this.#isReferenced(versionId);
         const upgradingPlaceholder =
           version.provenance === 'placeholder';
+        upcastFillable =
+          referenced &&
+          !upgradingPlaceholder &&
+          version.upcast_scale === null &&
+          this.#upcastLevelCount(versionId) === 0;
         const changes: VersionAttributes = {};
         if (!sqlBoolean(version, 'is_active')) {
           changes.is_active = 1;
           activityChangedVersionIds.push(versionId);
         }
         for (const [column, value] of Object.entries(attributes)) {
-          if (
-            (column === 'short_summary' ||
-              !referenced ||
-              upgradingPlaceholder) &&
-            version[column] !== value
-          ) {
+          const writable =
+            !referenced ||
+            upgradingPlaceholder ||
+            column === 'short_summary' ||
+            (upcastFillable &&
+              UPCAST_COLUMNS.has(column) &&
+              version[column] === null);
+          if (writable && version[column] !== value) {
             changes[column] = value;
           }
         }
@@ -353,6 +400,16 @@ export class CatalogImporter {
             'save_abilities_created',
             summary,
           ) || versionChanged;
+      }
+
+      // OUTSIDE the freeze block, and {@link UPCAST_COLUMNS} says why. The
+      // levels are the third field of the same fact as `upcast_scale`, so they
+      // move on exactly the condition those two columns move on.
+      if (
+        !referenced ||
+        (version !== null && version.provenance === 'placeholder') ||
+        upcastFillable
+      ) {
         versionChanged =
           this.#syncUpcastLevels(versionId, record.upcastLevels) ||
           versionChanged;
@@ -537,6 +594,17 @@ export class CatalogImporter {
    * truth about the record it describes, so a level the document dropped is a
    * level the spell no longer upcasts at.
    */
+  /** How many levels this version currently upcasts at. See {@link UPCAST_COLUMNS}. */
+  #upcastLevelCount(versionId: number): number {
+    return Number(
+      this.db.scalar(
+        `SELECT COUNT(*) FROM spell_version_upcast_levels
+          WHERE spell_version_id = ?`,
+        [versionId],
+      ) ?? 0,
+    );
+  }
+
   #syncUpcastLevels(
     versionId: number,
     desiredLevels: readonly number[],

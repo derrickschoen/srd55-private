@@ -450,6 +450,95 @@ describe('catalog import persistence', () => {
     test.connection.close();
   });
 
+  /**
+   * THE ONE EXEMPTION FROM THE FREEZE THAT IS A FILL RATHER THAN A CHANGE.
+   *
+   * A referenced version is frozen so a spell cannot change under a character
+   * who already chose it. The upcast progression is NET-NEW — no document
+   * written before it existed carries it — so every version that predates it
+   * has the fact ABSENT, and a version is referenced exactly when a character
+   * uses it, which is exactly when the printable card renders it. Frozen
+   * unconditionally, the only spells that can ever print an upcast line are the
+   * ones nobody plays.
+   *
+   * The fill is all-or-nothing and never an overwrite; the second half of this
+   * test is the half that matters, because a per-column fill would let a stored
+   * `slot_level` describe a document's CHARACTER-level ladder.
+   */
+  it('fills a referenced version’s ABSENT upcast progression, and refuses to change one it has', async () => {
+    const test = await database();
+    test.importer.import({ documents: [document(record())] });
+    const versionId = Number(test.db.scalar('SELECT id FROM spell_versions'));
+    const characterId = test.db.exec(
+      "INSERT INTO characters (name) VALUES ('Upcast Reference')",
+    ).lastInsertId;
+    test.db.exec(
+      `INSERT INTO wizard_spellbook_entries (character_id, spell_version_id)
+       VALUES (?, ?)`,
+      [characterId, versionId],
+    );
+
+    const upcast = {
+      upcastScale: 'slot_level',
+      upcastLevels: [2, 3],
+      upcastSummary: 'One additional creature per slot level above 1.',
+    };
+    // A referenced version: the rules stay frozen (the rename is refused) and
+    // the absent upcast progression is supplied.
+    const filled = test.importer.import({
+      documents: [document(record({ name: 'Renamed Spell', ...upcast }))],
+    });
+    expect(filled.updated).toBe(1);
+    expect(
+      test.db.oneRaw(
+        `SELECT display_name, upcast_scale, upcast_summary
+         FROM spell_versions WHERE id = ?`,
+        [versionId],
+      ),
+    ).toEqual({
+      display_name: 'Test Spell',
+      upcast_scale: 'slot_level',
+      upcast_summary: 'One additional creature per slot level above 1.',
+    });
+    expect(
+      values(test.db, 'spell_version_upcast_levels', 'level', versionId),
+    ).toEqual(['2', '3']);
+
+    // Re-importing the same progression changes nothing.
+    expect(
+      test.importer.import({ documents: [document(record(upcast))] }).updated,
+    ).toBe(0);
+
+    // A DIFFERENT progression on the now-non-absent version is REFUSED whole.
+    // Filling column by column would leave `slot_level` describing `5, 11, 17`.
+    expect(
+      test.importer.import({
+        documents: [
+          document(
+            record({
+              upcastScale: 'character_level',
+              upcastLevels: [5, 11, 17],
+              upcastSummary: 'The cantrip ladder.',
+            }),
+          ),
+        ],
+      }).updated,
+    ).toBe(0);
+    expect(
+      test.db.oneRaw(
+        'SELECT upcast_scale, upcast_summary FROM spell_versions WHERE id = ?',
+        [versionId],
+      ),
+    ).toEqual({
+      upcast_scale: 'slot_level',
+      upcast_summary: 'One additional creature per slot level above 1.',
+    });
+    expect(
+      values(test.db, 'spell_version_upcast_levels', 'level', versionId),
+    ).toEqual(['2', '3']);
+    test.connection.close();
+  });
+
   it('returns an accurate dry-run diff while rolling back every persisted change', async () => {
     const test = await database();
     test.importer.import({ documents: [document(record())] });

@@ -14,16 +14,21 @@ import type {
   SpellVersionRow,
   SubclassDefinitionRow,
 } from '../domain/models';
-import type {
-  Ability,
-  EffectReliabilityCategory,
-  MaterialCostKind,
-  ProgressionType,
-  RulesEdition,
-  SpellAreaShape,
-  SpellRangeKind,
-  StandaloneSourceType,
-  UpcastScale,
+import {
+  isEnumValue,
+  materialCostKinds,
+  spellAreaShapes,
+  spellRangeKinds,
+  upcastScales,
+  type Ability,
+  type EffectReliabilityCategory,
+  type MaterialCostKind,
+  type ProgressionType,
+  type RulesEdition,
+  type SpellAreaShape,
+  type SpellRangeKind,
+  type StandaloneSourceType,
+  type UpcastScale,
 } from '../domain/enums';
 
 /**
@@ -150,6 +155,26 @@ function numberAggregate(value: string | null): number[] {
     : [];
 }
 
+/**
+ * A STORED MEMBER OF A CLOSED VOCABULARY, VALIDATED RATHER THAN CAST.
+ *
+ * A cast cannot fail: `sqlNullableString(row, 'range_kind') as SpellRangeKind`
+ * hands a consumer a value it is entitled to switch on exhaustively, and every
+ * one of these four columns can hold something else — a CHECK constrains no
+ * image created before it existed and no hand-edited one, which is F11's point
+ * and the same argument `decodeSpellRange` and `decodeSpellComponents` are
+ * tolerant on. An unreadable member reads as ABSENT here, which is a state each
+ * of these columns already has and every consumer already handles.
+ */
+function enumMember<T extends string>(
+  row: SqlRow,
+  column: string,
+  vocabulary: readonly T[],
+): T | null {
+  const stored = sqlNullableString(row, column);
+  return stored !== null && isEnumValue(vocabulary, stored) ? stored : null;
+}
+
 function decodeSpell(row: SqlRow): CatalogSpell {
   return {
     id: sqlInteger(row, 'id'),
@@ -173,15 +198,12 @@ function decodeSpell(row: SqlRow): CatalogSpell {
     healing: sqlBoolean(row, 'healing'),
     short_summary: sqlNullableString(row, 'short_summary'),
     material_cost_copper: sqlNullableInteger(row, 'material_cost_copper'),
-    material_cost_kind: sqlNullableString(
-      row,
-      'material_cost_kind',
-    ) as MaterialCostKind | null,
-    range_kind: sqlNullableString(row, 'range_kind') as SpellRangeKind | null,
+    material_cost_kind: enumMember(row, 'material_cost_kind', materialCostKinds),
+    range_kind: enumMember(row, 'range_kind', spellRangeKinds),
     range_feet: sqlNullableInteger(row, 'range_feet'),
-    area_shape: sqlNullableString(row, 'area_shape') as SpellAreaShape | null,
+    area_shape: enumMember(row, 'area_shape', spellAreaShapes),
     area_feet: sqlNullableInteger(row, 'area_feet'),
-    upcast_scale: sqlNullableString(row, 'upcast_scale') as UpcastScale | null,
+    upcast_scale: enumMember(row, 'upcast_scale', upcastScales),
     upcast_summary: sqlNullableString(row, 'upcast_summary'),
     upcastLevels: numberAggregate(sqlNullableString(row, 'upcast_levels')),
     requires_mod_for_effect: sqlBoolean(row, 'requires_mod_for_effect'),

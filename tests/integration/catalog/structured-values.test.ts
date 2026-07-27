@@ -207,6 +207,66 @@ describe('the catalog importer stores the structured spell values', () => {
       expect(spell?.upcastLevels).toEqual([]);
     });
   });
+
+  /**
+   * THE READ MODEL VALIDATES THE FOUR CLOSED VOCABULARIES RATHER THAN CASTING
+   * THEM.
+   *
+   * `CatalogSpell` hands a consumer `range_kind: SpellRangeKind | null`, which
+   * entitles that consumer to switch on it exhaustively with no `default` arm —
+   * and the printable card already has one such switch, which returned the
+   * literal string `undefined` while the column was cast rather than checked.
+   * A cast cannot fail; only a check can.
+   *
+   * REACHABLE FOR F11'S REASON: every one of these columns carries a CHECK, and
+   * a CHECK constrains no image created before it existed and no hand-edited
+   * one. The pragma is how a test reaches that image.
+   */
+  it('reads a stored member outside a closed vocabulary as ABSENT, not as itself', () => {
+    return importOne({
+      range: 'Self (30-foot Cone)',
+      components: 'V, S, M (a weapon worth 1+ CP)',
+      upcastScale: 'slot_level',
+      upcastLevels: [2],
+      upcastSummary: 'More dice.',
+    }).then(({ db }) => {
+      db.exec('PRAGMA ignore_check_constraints = ON');
+      const written = db.exec(
+        `UPDATE spell_versions
+            SET range_kind = 'planar', area_shape = 'tesseract',
+                material_cost_kind = 'haggled', upcast_scale = 'planar_level'
+          WHERE content_key = ?`,
+        ['2024:sv-spell'],
+      );
+      db.exec('PRAGMA ignore_check_constraints = OFF');
+      // The corrupt values really are stored — otherwise this measures nothing.
+      expect(written.changes).toBe(1);
+      expect(
+        db.oneRaw(
+          `SELECT range_kind, area_shape, material_cost_kind, upcast_scale
+             FROM spell_versions WHERE content_key = ?`,
+          ['2024:sv-spell'],
+        ),
+      ).toEqual({
+        range_kind: 'planar',
+        area_shape: 'tesseract',
+        material_cost_kind: 'haggled',
+        upcast_scale: 'planar_level',
+      });
+
+      const spell = new CatalogQueries(db).read().spells[0];
+      expect(spell?.range_kind).toBeNull();
+      expect(spell?.area_shape).toBeNull();
+      expect(spell?.material_cost_kind).toBeNull();
+      expect(spell?.upcast_scale).toBeNull();
+      // THE NUMBERS AND THE PRINTED TEXT BESIDE THEM ARE UNAFFECTED. Only the
+      // word we cannot read is withheld; nothing else is thrown away with it.
+      expect(spell?.area_feet).toBe(30);
+      expect(spell?.material_cost_copper).toBe(1);
+      expect(spell?.range).toBe('Self (30-foot Cone)');
+      expect(spell?.upcastLevels).toEqual([2]);
+    });
+  });
 });
 
 describe('the Tier 1 document format refuses an upcast it cannot mean', () => {

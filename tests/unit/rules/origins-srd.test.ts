@@ -491,15 +491,17 @@ describe('SRD character backgrounds', () => {
       // `docs/srd/source/backgrounds.txt:91` by reading it, not by running the
       // parser and copying what came out. Three facts here are each a decision
       // the parse could have got wrong in a plausible-looking way: `2 Daggers`
-      // keeps its printed plural as the NAME while carrying a quantity of 2 and
-      // a link to the singular `Dagger` template; `2 Pouches` is a quantity and
-      // NOT a weapon; and `16 GP` is quantity 1 rather than quantity 16.
+      // is a quantity of 2 and the name `Daggers` — the plural is KEPT and the
+      // count is NOT repeated in the name, and it links to the singular
+      // `Dagger` template; `2 Pouches` is a quantity and NOT a weapon; and
+      // `16 GP` is quantity 1 rather than quantity 16, so its printed numeral
+      // stays in the name because it is money and not a count of items.
       equipment_items: [
         {
           option: 'a',
           sort_order: 1,
           quantity: 2,
-          item_name: '2 Daggers',
+          item_name: 'Daggers',
           item_kind: 'weapon',
           weapon_content_key: '2024:weapon:dagger',
           armor_content_key: null,
@@ -529,7 +531,7 @@ describe('SRD character backgrounds', () => {
           option: 'a',
           sort_order: 4,
           quantity: 2,
-          item_name: '2 Pouches',
+          item_name: 'Pouches',
           item_kind: 'gear',
           weapon_content_key: null,
           armor_content_key: null,

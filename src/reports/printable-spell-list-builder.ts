@@ -6,11 +6,13 @@ import {
   type SqlRow,
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
-import type {
-  Ability,
-  CastingMode,
-  RulesEdition,
-  UpcastScale,
+import {
+  isEnumValue,
+  upcastScales,
+  type Ability,
+  type CastingMode,
+  type RulesEdition,
+  type UpcastScale,
 } from '../domain/enums';
 import { SpellAccessBuilder, type SpellAccessRoute } from '../access/spell-access-builder';
 import {
@@ -151,6 +153,27 @@ function actionType(castingTime: string | null): string | null {
   return null;
 }
 
+/**
+ * THE STORED SCALE, VALIDATED RATHER THAN CAST.
+ *
+ * `scaleWord` in `src/ui/screens/print/printable-list.ts` is an exhaustive
+ * switch with NO `default` arm, so a value outside the vocabulary falls through
+ * it and returns `undefined` — which `upcastLine` interpolates, putting the
+ * literal word `undefined` on a player's printed card. A cast cannot fail, so
+ * casting here is what routes a corrupt value into that hole.
+ *
+ * IT IS REACHABLE FOR THE REASON F11 GAVE: `spell_versions.upcast_scale` has a
+ * CHECK, and a CHECK constrains no image created before it existed and no
+ * hand-edited one. `decodeSpellRange` and `decodeSpellComponents` are tolerant
+ * on exactly that argument; this is the same boundary and it now answers the
+ * same way — an unreadable scale is NO scale, which prints the bare word
+ * `levels` and claims neither ladder.
+ */
+function decodeUpcastScale(row: SqlRow): UpcastScale | null {
+  const stored = sqlNullableString(row, 'upcast_scale');
+  return stored !== null && isEnumValue(upcastScales, stored) ? stored : null;
+}
+
 function decodeFacts(row: SqlRow): Omit<
   SpellFacts,
   'attack_modes' | 'save_abilities' | 'upcast_levels'
@@ -171,7 +194,7 @@ function decodeFacts(row: SqlRow): Omit<
     ritual: sqlBoolean(row, 'ritual'),
     components: sqlNullableString(row, 'components'),
     description: sqlNullableString(row, 'short_summary'),
-    upcast_scale: sqlNullableString(row, 'upcast_scale') as UpcastScale | null,
+    upcast_scale: decodeUpcastScale(row),
     upcast_summary: sqlNullableString(row, 'upcast_summary'),
   };
 }
