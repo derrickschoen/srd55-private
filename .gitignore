@@ -6,6 +6,8 @@ tmp/
 dist/
 test-results/
 playwright-report/
+reports/
+.stryker-tmp/
 *.tsbuildinfo
 .build-lock/
 .plan-lock/
