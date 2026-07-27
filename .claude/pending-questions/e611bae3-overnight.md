@@ -312,11 +312,17 @@ not exist yet, so making it a builder step would park the finding until the
 builder lands. Reversible: it is one registry entry.
 
 **Scope of that, after the correction:** the SKILL choice for all three classes
-becomes a completeness item. The Bard's MUSICAL INSTRUMENT choice does not —
-there is no tool or instrument vocabulary in this app, D26 says a value earns
-structure only if it changes a number on the sheet, and an instrument
-proficiency changes none. It is recorded here so the omission is deliberate
-rather than overlooked.
+becomes a completeness item. The TOOL grants do not — D26 says a value earns
+structure only if it changes a number on the sheet, this app has no tool
+vocabulary at all, and neither tool proficiency changes a number. There are two
+of them, not one:
+
+- **Bard** — "proficiency with one Musical Instrument of your choice" (a CHOICE)
+- **Rogue** — "proficiency with Thieves' Tools" (FIXED, no choice to make)
+
+Recorded so both omissions are deliberate rather than overlooked. Note the
+asymmetry: only the Bard's is an unmade decision, so only it would ever have
+been a completeness candidate even if tools were modelled.
 
 
 ---
