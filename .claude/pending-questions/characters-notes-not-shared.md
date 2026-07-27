@@ -1,7 +1,18 @@
 # Q12 — A character's own notes do not travel across a share link. Should they?
 
-**Status: OPEN, and deliberately not decided overnight.** This changes what a
-shared character IS, which is one of the things the autonomy grant stops for.
+**Status: ANSWERED by the owner and IMPLEMENTED on `feat/share-notes-optin`.**
+The ruling was the third option this file names: *"Opt-in, like loadouts."* A
+`notes` flag on `ShareExportOptions`, default OFF, a `notes` field on
+`ShareCharacter`, and the portability map's classification moved — to a new
+`opt_in` kind, because the map had two states and this is a third. The binding
+entry for it is the supervisor's to write; this file is left in place because
+the reasoning below is what the ruling was made against.
+
+The paragraph that most needs keeping is the last one under *Why it was not just
+fixed*: nothing recorded the original reason, so this could not be settled by
+archaeology. It is recorded now.
+
+Everything below is the question as it stood, unedited.
 
 Found while building the column-portability guard (D30), which forced every one
 of the 209 columns in the share scope to be classified as carried or not, with a
