@@ -1,5 +1,67 @@
 # Binding scope decisions
 
+## D27 — OWNER: a character's weapon carries simple/martial. This AMENDS D1b. (2026-07-26)
+
+> "We need to have simple/martial in order to build a character. Need to block
+>  wizards from using heavy crossbows."
+
+### Why this overrides D1b, and why the owner's reason is better than mine
+
+D1b deliberately gave a character's weapon NO category — `db/schema/weapons.ts`
+says "A character's weapon has no category, before or after" — because a
+character stores VALUES, not a reference to the template it was filled from.
+That reasoning was sound for its purpose and is now outweighed.
+
+I raised this as a wrong NUMBER: every printed attack adds the proficiency bonus,
+so a Rogue holding a Greatsword reads too high. The owner's reason is the
+BUILDER (D11): a Wizard is proficient with Simple weapons only, and the builder
+must be able to BLOCK a Heavy Crossbow rather than print a wrong bonus for it.
+Blocking an illegal choice is the product's stated job; correcting a bonus after
+the fact is a consolation.
+
+**Group is a VALUE, not a reference.** `simple | martial` copied onto the
+character's weapon keeps D1b's actual principle — no live link back to a
+template, nothing to upgrade in place. Only the claim that a character's weapon
+needs no category falls.
+
+### The shape, following D11 exactly
+
+- **The builder BLOCKS.** A class's weapon proficiencies are known content;
+  choosing a weapon outside them is refused at the point of choosing, with the
+  requirement stated.
+- **Import TOLERATES.** An imported or older character with no group recorded
+  keeps working. Absence is a real state, not a defect — a custom weapon someone
+  typed may genuinely have no group.
+- So the column is NULLABLE, and null means NOT STATED. Where it is null the
+  sheet keeps its current stated assumption; where it is set the sheet is right.
+  That is D24's rule again: an assumption is never printed as a fact.
+
+### What it unlocks beyond the Wizard case
+
+The Rogue and Monk qualifier becomes evaluable. Sourced from the Core Traits
+extract: Rogue is proficient with "Simple weapons and Martial weapons that have
+the Finesse or Light property"; Monk the same with Light. The weapon already
+stores `finesse` and `light` as booleans, so the only missing fact was the group.
+Every other class is unconditional — Barbarian simple and martial, Bard simple —
+so only two classes need the qualifier at all.
+
+**My error, recorded:** I called this candidate low-cost on codex's ranking
+without checking whether the app held the fact it needed. It did not, and D1b
+had removed it on purpose. Repeating a cost estimate without verifying its
+premise is the same failure as F7 and F8.
+
+### Also decided this round
+
+- **Primary ability expression: TEXT ONLY.** It changes no number on the sheet;
+  under D26 it is out. Class recommendation is builder guidance, not a sheet fact.
+- **Feature prerequisites: add INVOCATION SELECTION FIRST, then parse.** The
+  owner chose the path that makes the number right rather than the one that
+  defers. Thirsting Blade's Extra Attack stays conditional-and-stated until a
+  character can record whether they took Pact of the Blade — there is no
+  invocation selection anywhere in the app today (`tables.ts:532`).
+
+---
+
 ## D26 — OWNER: the sheet is a REFERENCE, not a simulator. Most candidates become text. (2026-07-26)
 
 > "'Concentration conflict' this is really beyond the scope of a character
