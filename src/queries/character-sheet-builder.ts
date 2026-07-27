@@ -258,18 +258,6 @@ const sheetClassRow: RowCodec<SheetClassJoinRow> = (row) => ({
   hit_die: sqlNullableInteger(row, 'hit_die'),
 });
 
-const namedSpeciesTraitEffect: RowCodec<NamedSpeciesTraitEffect> = (row) => ({
-  name: sqlString(row, 'name'),
-  effect_kind: sqlNullableString(row, 'effect_kind'),
-  effect_damage_type: sqlNullableString(row, 'effect_damage_type'),
-  effect_hit_points_flat: sqlNullableInteger(row, 'effect_hit_points_flat'),
-  effect_hit_points_per_level: sqlNullableInteger(
-    row,
-    'effect_hit_points_per_level',
-  ),
-  effect_speed_bonus_feet: sqlNullableInteger(row, 'effect_speed_bonus_feet'),
-});
-
 /**
  * The gaps, stated once.
  *
