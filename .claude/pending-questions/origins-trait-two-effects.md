@@ -37,6 +37,34 @@ character's level for a non-class source, and neither was in scope here.
 
 # Q — A species trait can carry TWO mechanical effects; the model holds one
 
+> ## RESOLVED 2026-07-27, and NOT the way this question assumed. No owner decision was needed.
+>
+> D22 inverted the effect model, and `species_template_trait_effects` is now a
+> separate row-per-effect table keyed `(trait, sort_order)` — so a trait CAN
+> carry two. But the Tiefling never needed two, and that is the real answer.
+>
+> `tests/unit/rules/origins-srd.test.ts:227-232` asserts the whole mechanical
+> effect list, and the Tiefling appears once:
+> `'Tiefling: Fiendish Legacy (damage_resistance)'`. The resistance this
+> question said was "recorded nowhere" is now recorded.
+>
+> The spells are NOT a second effect. `granted_spells` was retired as an effect
+> kind, because the spells reach the character through
+> `species_definitions.grant_rules` and `src/grants/`, surfaced with provenance
+> by `SpellAccessBuilder`. Recording them again on the trait would have been the
+> parallel storage this design forbids — the test says so in its own comment:
+> three `granted_spells` markers went and one resistance arrived.
+>
+> So the question's premise — "the column records `granted_spells`, and the
+> resistance is recorded nowhere" — was exactly inverted by the fix: the marker
+> went, the resistance stayed. Verified by reading the assertion and the schema,
+> not by reading the headline.
+>
+> Kept rather than deleted: the reasoning below is why the two-effect capacity
+> exists at all, and a future trait that genuinely grants two mechanical effects
+> will need it.
+
+
 Raised by the `feat/origins` adversarial review. It is a limit of the model D12
 defined, so it is an owner call rather than something to patch under review.
 
