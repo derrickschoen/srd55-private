@@ -16,15 +16,27 @@
  * THREE THINGS THIS APPLICATION CANNOT DECIDE, AND STATES INSTEAD:
  *
  *  1. WHETHER A WEAPON IS MELEE OR RANGED. `character_weapons` stores VALUES
- *     and deliberately holds no group (D1b; `db/schema/weapons.ts`: "A
- *     character's weapon has no category, before or after"). The source's own
- *     attack formula branches on exactly that, so BOTH branches are offered and
- *     the reason is printed. Guessing from `thrown`/`ammunition` would be this
- *     application inventing a classifier.
- *  2. WHETHER THE CHARACTER IS PROFICIENT WITH A WEAPON. Same missing fact,
- *     plus `class_weapon_proficiencies.property_qualifier` being "DISPLAYED,
- *     not interpreted". The proficiency bonus IS included — every printed
- *     formula includes it — and the assumption is stated on every profile.
+ *     and holds no melee/ranged fact. The source's own attack formula branches
+ *     on exactly that, so BOTH branches are offered and the reason is printed.
+ *     Guessing from `thrown`/`ammunition` would be this application inventing a
+ *     classifier.
+ *  2. WHETHER THE CHARACTER IS PROFICIENT WITH A WEAPON — AND THIS ENTRY IS NOW
+ *     A DEFERRAL RATHER THAN AN IMPOSSIBILITY. It used to say the app held
+ *     neither the weapon's category nor an interpretation of the class
+ *     qualifier. Both of those are false as of D27 and D28:
+ *     `character_weapons.proficiency_category` holds `simple | martial`, and
+ *     `src/rules/multiclass-proficiency.ts` computes the union across a
+ *     character's classes and evaluates the Rogue's and Monk's qualifier from
+ *     the weapon's own boolean columns. The SHEET prints that verdict per
+ *     weapon and warns.
+ *
+ *     WHAT HAS NOT CHANGED IS THE NUMBER ON THIS PROFILE: the bonus is still
+ *     included unconditionally, and the precondition below still says so. D28
+ *     §1 wants it WITHHELD from a non-proficient weapon, which means threading
+ *     the verdict into every profile builder here and revising the printed
+ *     formulas — a change with its own surface, deliberately not made in the
+ *     same commit as the model it depends on. Until it is, the sheet and this
+ *     profile disagree, and the profile is the one that is generous.
  *  3. WHAT A WEAPON'S PROPERTIES DO. The Finesse, Thrown and Versatile rule
  *     texts are not in `docs/srd/source/`; only the weapons table's use of the
  *     words is. The source's "unless a weapon's property says otherwise" is
@@ -240,8 +252,9 @@ export interface AttackProfileInput {
 }
 
 const PROFICIENCY_PRECONDITION =
-  'The proficiency bonus is included. This application does not record which ' +
-  'weapons a character is proficient with, so it cannot check that.';
+  'The proficiency bonus is included, whatever the Proficiencies section of ' +
+  'the character sheet says. That section now checks a weapon against every ' +
+  'class this character has; this number does not yet read it.';
 
 function option(
   input: AttackProfileInput,
@@ -550,9 +563,9 @@ function trueStrikeProfile(
     // to the one profile they provably do not touch.
     unresolved_attacks: [],
     preconditions: [
-      'Requires a weapon you have proficiency with that is worth 1+ CP. ' +
-        'This application does not record which weapons a character is ' +
-        'proficient with, so it cannot check that.',
+      'Requires a weapon you have proficiency with that is worth 1+ CP. The ' +
+        'Proficiencies section of the character sheet answers the first half; ' +
+        'this application records no coin value, so it cannot check the second.',
     ],
     notes,
   };
@@ -664,12 +677,14 @@ function shillelaghProfile(
  * it per class, and the die on this row is the one number here that does NOT
  * move with total character level — the opposite of the two cantrips above.
  *
- * WHICH WEAPONS QUALIFY IS NOT DECIDED. Monk weapons are "Simple Melee weapons"
- * and "Martial Melee weapons that have the Light property", and
- * `character_weapons` holds neither the simple/martial fact nor the
- * melee/ranged one. Nor is worn armour or a held Shield persisted anywhere in
- * this schema. Both are stated as preconditions on every weapon rather than
- * used to filter, which is the same posture D15 took for Shillelagh.
+ * WHICH WEAPONS QUALIFY IS STILL NOT DECIDED, BUT FOR ONE REASON NOW RATHER
+ * THAN TWO. Monk weapons are "Simple Melee weapons" and "Martial Melee weapons
+ * that have the Light property". D27 gave `character_weapons` the
+ * simple/martial half; the MELEE/RANGED half is still absent, and it is exactly
+ * what separates a Monk weapon from a Light Crossbow. Worn armour and a held
+ * Shield are persisted (`character_armor`) but are not read here either. All of
+ * it is stated as preconditions on every weapon rather than used to filter,
+ * which is the same posture D15 took for Shillelagh.
  */
 function martialArtsProfile(
   input: AttackProfileInput,
