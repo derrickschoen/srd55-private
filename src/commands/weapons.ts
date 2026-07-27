@@ -21,6 +21,11 @@ import type {
   VersatileWeaponDamage,
   WeaponDamage,
 } from '../domain/weapon-damage';
+import {
+  isWeaponRangeKind,
+  weaponRangeFromStorage,
+  type WeaponRange,
+} from '../domain/weapon-range';
 
 /**
  * WEAPON COMMANDS.
@@ -98,8 +103,9 @@ const WEAPON_COLUMNS = [
   'two_handed',
   'ammunition',
   'ammunition_kind',
-  'range_normal_feet',
-  'range_long_feet',
+  'range_kind',
+  'range_near_feet',
+  'range_far_feet',
   'mastery_property',
   'other_properties',
   'notes',
@@ -143,6 +149,7 @@ function damageValues(
 
 /** The row body as SQL values, with `''` normalised to NULL and booleans to 0/1. */
 function weaponValues(weapon: WeaponFields): Record<string, SqlValue> {
+  const rangeValues = weaponRangeValues(weapon.range);
   return {
     name: weapon.name.trim(),
     // NOT normalised through `nullableText`: it is a closed enum, never free
@@ -161,12 +168,29 @@ function weaponValues(weapon: WeaponFields): Record<string, SqlValue> {
     two_handed: weapon.two_handed ? 1 : 0,
     ammunition: weapon.ammunition ? 1 : 0,
     ammunition_kind: nullableText(weapon.ammunition_kind),
-    range_normal_feet: weapon.range_normal_feet,
-    range_long_feet: weapon.range_long_feet,
+    ...rangeValues,
     mastery_property: weapon.mastery_property,
     other_properties: nullableText(weapon.other_properties),
     notes: nullableText(weapon.notes),
   };
+}
+
+function weaponRangeValues(range: WeaponRange): Record<string, SqlValue> {
+  switch (range.kind) {
+    case 'none':
+      return {
+        range_kind: range.kind,
+        range_near_feet: null,
+        range_far_feet: null,
+      };
+    case 'ranged':
+    case 'legacy':
+      return {
+        range_kind: range.kind,
+        range_near_feet: range.near_feet,
+        range_far_feet: range.far_feet,
+      };
+  }
 }
 
 interface WeaponRow extends Record<string, unknown> {
@@ -201,6 +225,10 @@ function readWeapon(
 function fieldsFromRow(row: WeaponRow): WeaponFields {
   const mastery = row.mastery_property;
   const category = row.proficiency_category;
+  const storedRangeKind = row.range_kind;
+  if (!isWeaponRangeKind(storedRangeKind)) {
+    throw new TypeError(`Unknown weapon range kind "${String(storedRangeKind)}".`);
+  }
   return {
     name: String(row.name),
     // An unrecognised stored category reads as NOT STATED, exactly as an
@@ -242,10 +270,11 @@ function fieldsFromRow(row: WeaponRow): WeaponFields {
     ammunition: Number(row.ammunition) === 1,
     ammunition_kind:
       row.ammunition_kind === null ? null : String(row.ammunition_kind),
-    range_normal_feet:
-      row.range_normal_feet === null ? null : Number(row.range_normal_feet),
-    range_long_feet:
-      row.range_long_feet === null ? null : Number(row.range_long_feet),
+    range: weaponRangeFromStorage(
+      storedRangeKind,
+      row.range_near_feet === null ? null : Number(row.range_near_feet),
+      row.range_far_feet === null ? null : Number(row.range_far_feet),
+    ),
     mastery_property: isEnumValue(weaponMasteryProperties, mastery)
       ? (mastery as WeaponMasteryProperty)
       : null,
@@ -368,6 +397,17 @@ export class UpdateWeaponCommand implements ResolvesInverseAfterApply {
 
   apply(characterId: number): void {
     const existing = readWeapon(this.db, characterId, this.payload.weapon_id);
+    const previous = fieldsFromRow(existing);
+    if (
+      this.payload.weapon.range.kind === 'legacy' &&
+      (previous.range.kind !== 'legacy' ||
+        previous.range.near_feet !== this.payload.weapon.range.near_feet ||
+        previous.range.far_feet !== this.payload.weapon.range.far_feet)
+    ) {
+      throw new TypeError(
+        'An imported legacy range must be preserved exactly or explicitly repaired.',
+      );
+    }
     const timestamp = new Date().toISOString();
     const values = weaponValues(this.payload.weapon);
     // The row the UPDATE will produce, mastery flag included — the flag is not
@@ -392,7 +432,7 @@ export class UpdateWeaponCommand implements ResolvesInverseAfterApply {
       );
     }
 
-    this.#previous = fieldsFromRow(existing);
+    this.#previous = previous;
     this.db.exec(
       `UPDATE character_weapons
        SET ${WEAPON_COLUMNS.map((column) => `${column} = ?`).join(', ')},

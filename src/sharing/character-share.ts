@@ -58,6 +58,13 @@ import type {
   VersatileWeaponDamage,
   WeaponDamage,
 } from '../domain/weapon-damage';
+import {
+  isWeaponRangeKind,
+  weaponRangeFromStorage,
+  weaponRangeFromV1Pair,
+  weaponRangeToV1Pair,
+  type WeaponRange,
+} from '../domain/weapon-range';
 
 /**
  * WHAT THE SHARER CHOOSES TO SEND. Every flag is OPT-IN and every default is
@@ -273,10 +280,24 @@ function shareWeaponFromRow(row: Row): ShareWeapon {
       weapon[field] = String(row[field]);
     }
   }
-  for (const field of ['range_normal_feet', 'range_long_feet'] as const) {
-    if (row[field] !== null && row[field] !== undefined) {
-      weapon[field] = Number(row[field]);
-    }
+  const storedRangeKind = row.range_kind;
+  if (!isWeaponRangeKind(storedRangeKind)) {
+    throw new TypeError(
+      `Unknown weapon range kind "${String(storedRangeKind)}".`,
+    );
+  }
+  const pair = weaponRangeToV1Pair(
+    weaponRangeFromStorage(
+      storedRangeKind,
+      row.range_near_feet === null ? null : Number(row.range_near_feet),
+      row.range_far_feet === null ? null : Number(row.range_far_feet),
+    ),
+  );
+  if (pair.range_normal_feet !== null) {
+    weapon.range_normal_feet = pair.range_normal_feet;
+  }
+  if (pair.range_long_feet !== null) {
+    weapon.range_long_feet = pair.range_long_feet;
   }
   if (row.mastery_property !== null && row.mastery_property !== undefined) {
     weapon.mastery_property = String(row.mastery_property);
@@ -307,6 +328,16 @@ function sharedDamageValues(
     case 'not_recorded':
     case 'not_applicable':
       return [damage.kind, null, null, null];
+  }
+}
+
+function sharedRangeValues(range: WeaponRange): readonly SqlValue[] {
+  switch (range.kind) {
+    case 'none':
+      return [range.kind, null, null];
+    case 'ranged':
+    case 'legacy':
+      return [range.kind, range.near_feet, range.far_feet];
   }
 }
 
@@ -1519,6 +1550,10 @@ export function importCharacterShare(
     // arrived, with the absent optional fields taking the column's own
     // NULL / 0 rather than a value this importer invented.
     for (const weapon of document.weapons ?? []) {
+      const range = weaponRangeFromV1Pair(
+        weapon.range_normal_feet ?? null,
+        weapon.range_long_feet ?? null,
+      );
       db.exec(
         `INSERT INTO ${SHARE_TABLES.character_weapons} (
            character_id, name, proficiency_category,
@@ -1526,12 +1561,12 @@ export function importCharacterShare(
            ${SHARE_WEAPON_TEXT.join(', ')},
            versatile_damage_kind, versatile_damage_dice,
            versatile_damage_flat, versatile_damage_custom,
-           range_normal_feet, range_long_feet, mastery_property,
+           range_kind, range_near_feet, range_far_feet, mastery_property,
            other_properties, notes, ${SHARE_WEAPON_FLAGS.join(', ')},
            created_at, updated_at
          ) VALUES (?, ?, ?, ?, ?, ?, ?,
            ${SHARE_WEAPON_TEXT.map(() => '?').join(', ')}, ?, ?, ?, ?,
-           ?, ?, ?, ?, ?, ${SHARE_WEAPON_FLAGS.map(() => '?').join(', ')},
+           ?, ?, ?, ?, ?, ?, ${SHARE_WEAPON_FLAGS.map(() => '?').join(', ')},
            ?, ?)`,
         [
           characterId,
@@ -1543,8 +1578,7 @@ export function importCharacterShare(
           ...sharedDamageValues(weapon.damage),
           ...SHARE_WEAPON_TEXT.map((field) => weapon[field] ?? null),
           ...sharedDamageValues(weapon.versatile_damage),
-          weapon.range_normal_feet ?? null,
-          weapon.range_long_feet ?? null,
+          ...sharedRangeValues(range),
           weapon.mastery_property ?? null,
           weapon.other_properties ?? null,
           weapon.notes ?? null,

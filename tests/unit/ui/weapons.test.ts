@@ -117,8 +117,7 @@ describe('reading a weapon back as a sentence', () => {
           loading: true,
           ammunition: true,
           ammunition_kind: 'Needle',
-          range_normal_feet: 25,
-          range_long_feet: 100,
+          range: { kind: 'ranged', near_feet: 25, far_feet: 100 },
         }),
       ),
     ).toBe('Loading, Ammunition (Needle), Range 25/100 ft');
@@ -139,6 +138,16 @@ describe('reading a weapon back as a sentence', () => {
 
   it('says "none" rather than showing an empty cell', () => {
     expect(propertySummary(weapon())).toBe('none');
+  });
+
+  it('labels an imported legacy range as requiring repair', () => {
+    expect(
+      propertySummary(
+        weapon({
+          range: { kind: 'legacy', near_feet: null, far_feet: 60 },
+        }),
+      ),
+    ).toBe('Legacy range —/60 ft (repair required)');
   });
 });
 

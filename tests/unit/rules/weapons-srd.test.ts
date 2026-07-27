@@ -91,8 +91,7 @@ describe('SRD weapons table', () => {
       ammunition: true,
       ammunition_kind: 'Needle',
       loading: true,
-      range_normal_feet: 25,
-      range_long_feet: 100,
+      range: { kind: 'ranged', near_feet: 25, far_feet: 100 },
       mastery_property: 'Vex',
     });
   });
@@ -132,8 +131,7 @@ describe('SRD weapons table', () => {
       // Two-Handed arrives on a CONTINUATION line, so a parser that ignored
       // wrapped rows would report this weapon as one-handed.
       two_handed: true,
-      range_normal_feet: 100,
-      range_long_feet: 400,
+      range: { kind: 'ranged', near_feet: 100, far_feet: 400 },
       mastery_property: 'Push',
     });
     expect(template('War Pick').damage).toEqual({
@@ -149,8 +147,7 @@ describe('SRD weapons table', () => {
     expect(template('Trident')).toMatchObject({
       srd_group: 'martial_melee',
       thrown: true,
-      range_normal_feet: 20,
-      range_long_feet: 60,
+      range: { kind: 'ranged', near_feet: 20, far_feet: 60 },
       versatile_damage: { kind: 'dice', dice: '1d10' },
     });
   });
@@ -167,8 +164,7 @@ describe('SRD weapons table', () => {
       two_handed: false,
       ammunition: false,
       versatile_damage: { kind: 'not_applicable' },
-      range_normal_feet: null,
-      range_long_feet: null,
+      range: { kind: 'none' },
       other_properties: null,
       mastery_property: 'Sap',
     });

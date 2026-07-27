@@ -1,6 +1,8 @@
 import type { Database } from '@sqlite.org/sqlite-wasm';
 import baseline from '../../drizzle/0000_skinny_lionheart.sql?raw';
 import baselineTriggers from '../../drizzle/0000_skinny_lionheart.triggers.sql?raw';
+import weaponRangeAdd from '../../drizzle/0001_weapon_range_add.sql?raw';
+import weaponRangeDrop from '../../drizzle/0002_weapon_range_drop.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -34,6 +36,22 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
       'cfd5b76e09514b890f20990df5cf743c32aeb3a1d41b80cea2370900eed74cfb',
     resultSchemaChecksum:
       'fa9627e3cdef381b97d24aee249867ebee9866941e3fd65e9b739111989da1d9',
+  }),
+  Object.freeze({
+    id: '0001_weapon_range_add',
+    sql: weaponRangeAdd,
+    checksum:
+      'e34aeb2658f3ab88e4cfeb94bfbbeae98530d7e56d1a83e544e7cc4f55679d52',
+    resultSchemaChecksum:
+      'ef0b8e30f0bade51d3c2784bae9e4b4cebe328ab369cdb584a2bf22e252a228c',
+  }),
+  Object.freeze({
+    id: '0002_weapon_range_drop',
+    sql: weaponRangeDrop,
+    checksum:
+      '9053cce25b59ffc2c22f3f2cd441236219bdfb57c4c3ab195545f39a3bfa0bdf',
+    resultSchemaChecksum:
+      '6f3b23a58a73cd5daff97044aa31be963b429ac9ed9afe5ec60445f6a12910a0',
   }),
 ]);
 

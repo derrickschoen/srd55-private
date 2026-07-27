@@ -1246,6 +1246,26 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     ],
   },
   {
+    constraint: 'character_weapons_range_check',
+    rejects: [
+      ['none carrying a near distance', weapon({ range_kind: 'none', range_near_feet: 20 })],
+      ['ranged with no near distance', weapon({ range_kind: 'ranged', range_far_feet: 60 })],
+      ['ranged with an inverted pair', weapon({ range_kind: 'ranged', range_near_feet: 60, range_far_feet: 20 })],
+      ['legacy with no far distance', weapon({ range_kind: 'legacy', range_near_feet: 60 })],
+      ['legacy with an ordinary pair', weapon({ range_kind: 'legacy', range_near_feet: 20, range_far_feet: 60 })],
+      ['a near distance below zero', weapon({ range_kind: 'ranged', range_near_feet: -1 })],
+      ['a far distance above the bound', weapon({ range_kind: 'ranged', range_near_feet: 0, range_far_feet: 100001 })],
+      ['a fractional distance', weapon({ range_kind: 'ranged', range_near_feet: 1.5 })],
+    ],
+    accepts: [
+      ['none with no payload', weapon({ range_kind: 'none' })],
+      ['ranged at the lower bound with no far band', weapon({ range_kind: 'ranged', range_near_feet: 0 })],
+      ['ranged at both upper bounds', weapon({ range_kind: 'ranged', range_near_feet: 100000, range_far_feet: 100000 })],
+      ['legacy long-only', weapon({ range_kind: 'legacy', range_far_feet: 60 })],
+      ['legacy inverted', weapon({ range_kind: 'legacy', range_near_feet: 60, range_far_feet: 20 })],
+    ],
+  },
+  {
     constraint: 'character_weapons_mastery_property_check',
     rejects: [
       ['a lowercased property, which no display or lookup matches', weapon({ mastery_property: 'cleave' })],
@@ -1312,6 +1332,22 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
       ['flat zero', weaponTemplate({ versatile_damage_kind: 'flat', versatile_damage_flat: 0 })],
       ['custom text', weaponTemplate({ versatile_damage_kind: 'custom', versatile_damage_custom: 'special table' })],
       ['not_applicable', weaponTemplate({ versatile_damage_kind: 'not_applicable' })],
+    ],
+  },
+  {
+    constraint: 'weapon_templates_range_check',
+    rejects: [
+      ['ranged with no near distance', weaponTemplate({ range_kind: 'ranged', range_far_feet: 60 })],
+      ['ranged with an inverted pair', weaponTemplate({ range_kind: 'ranged', range_near_feet: 60, range_far_feet: 20 })],
+      ['legacy long-only', weaponTemplate({ range_kind: 'legacy', range_far_feet: 60 })],
+      ['legacy inverted', weaponTemplate({ range_kind: 'legacy', range_near_feet: 60, range_far_feet: 20 })],
+      ['a negative distance', weaponTemplate({ range_kind: 'ranged', range_near_feet: -1 })],
+      ['a distance above the bound', weaponTemplate({ range_kind: 'ranged', range_near_feet: 100001 })],
+    ],
+    accepts: [
+      ['none with no payload', weaponTemplate({ range_kind: 'none' })],
+      ['ranged with no far band', weaponTemplate({ range_kind: 'ranged', range_near_feet: 20 })],
+      ['ranged at both upper bounds', weaponTemplate({ range_kind: 'ranged', range_near_feet: 100000, range_far_feet: 100000 })],
     ],
   },
   {

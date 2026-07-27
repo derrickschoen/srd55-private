@@ -8,6 +8,7 @@ import {
   type SnapshotTable,
 } from '../domain/contracts/tables';
 import { migrateLegacyWeaponDamageRow } from '../domain/weapon-damage';
+import { migrateLegacyWeaponRangeRow } from '../domain/weapon-range';
 import { migrateLegacyTraitRows } from '../rules/legacy-trait-effects';
 
 /**
@@ -34,6 +35,10 @@ import { migrateLegacyTraitRows } from '../rules/legacy-trait-effects';
  * `migrateLegacyWeaponDamageRow`; minting v6 keeps an already-stored v5
  * snapshot identifiable as legacy instead of retroactively changing its claim.
  *
+ * `a7-v7` also changes no table list. It replaces the two legacy weapon-range
+ * columns with the tagged range triplet. Versions 2 through 6 remain readable
+ * through `migrateLegacyWeaponRangeRow`.
+ *
  * NOT BUMPING WOULD HAVE BEEN THE LOUDEST FAILURE IN THIS CHANGE.
  * `SNAPSHOT_TABLES_BY_VERSION` aliases the CURRENT version to the live
  * `CHARACTER_STATE_TABLES`, so adding four tables without minting `a7-v4` would
@@ -43,7 +48,7 @@ import { migrateLegacyTraitRows } from '../rules/legacy-trait-effects';
  * containing one. Undo, save-point restore and `exportCharacterBackup` — which
  * re-parses its own stored save points on the way out — would break together.
  */
-export const CHARACTER_SNAPSHOT_SCHEMA_VERSION = 'a7-v6' as const;
+export const CHARACTER_SNAPSHOT_SCHEMA_VERSION = 'a7-v7' as const;
 
 /**
  * WHICH TABLES EACH SNAPSHOT VERSION CARRIES.
@@ -122,13 +127,17 @@ const A7_V5_TABLES = [
   'character_effects',
 ] as const satisfies readonly SnapshotTable[];
 
+/** `a7-v6` weapon rows still carry the retired normal/long range columns. */
+const A7_V6_TABLES = [...A7_V5_TABLES] as const satisfies readonly SnapshotTable[];
+
 const SNAPSHOT_TABLES_BY_VERSION = {
   'a7-v1': A7_V1_TABLES,
   'a7-v2': A7_V2_TABLES,
   'a7-v3': A7_V3_TABLES,
   'a7-v4': A7_V4_TABLES,
   'a7-v5': A7_V5_TABLES,
-  'a7-v6': CHARACTER_STATE_TABLES,
+  'a7-v6': A7_V6_TABLES,
+  'a7-v7': CHARACTER_STATE_TABLES,
 } as const satisfies Readonly<Record<string, readonly SnapshotTable[]>>;
 
 /**
@@ -149,6 +158,7 @@ export const CHARACTER_SNAPSHOT_SCHEMA_VERSIONS = [
   'a7-v4',
   'a7-v5',
   'a7-v6',
+  'a7-v7',
 ] as const satisfies readonly (keyof typeof SNAPSHOT_TABLES_BY_VERSION)[];
 
 export type CharacterSnapshotSchemaVersion =
@@ -329,7 +339,9 @@ function snapshotRows(
     }
   }
   return table === 'character_weapons'
-    ? rows.map(migrateLegacyWeaponDamageRow)
+    ? rows.map((row) =>
+        migrateLegacyWeaponRangeRow(migrateLegacyWeaponDamageRow(row)),
+      )
     : rows;
 }
 

@@ -298,14 +298,15 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
   character_weapons: {
     integer: [
       'id', 'character_id', 'finesse', 'heavy', 'light', 'loading', 'reach',
-      'thrown', 'two_handed', 'ammunition', 'range_normal_feet',
-      'range_long_feet', 'mastery_selected', 'damage_flat',
+      'thrown', 'two_handed', 'ammunition', 'range_near_feet',
+      'range_far_feet', 'mastery_selected', 'damage_flat',
       'versatile_damage_flat',
     ],
     text: [
       'name', 'proficiency_category', 'damage_kind', 'damage_dice',
       'damage_custom', 'damage_type', 'versatile_damage_kind',
       'versatile_damage_dice', 'versatile_damage_custom', 'ammunition_kind',
+      'range_kind',
       'mastery_property', 'other_properties', 'notes',
     ],
     numeric: ['created_at', 'updated_at'],
@@ -322,14 +323,14 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
   weapon_templates: {
     integer: [
       'id', 'finesse', 'heavy', 'light', 'loading', 'reach', 'thrown',
-      'two_handed', 'ammunition', 'range_normal_feet', 'range_long_feet',
+      'two_handed', 'ammunition', 'range_near_feet', 'range_far_feet',
       'damage_flat', 'versatile_damage_flat',
     ],
     text: [
       'content_key', 'rules_edition', 'name', 'srd_group', 'damage_kind',
       'damage_dice', 'damage_custom', 'damage_type',
       'versatile_damage_kind', 'versatile_damage_dice',
-      'versatile_damage_custom', 'ammunition_kind', 'mastery_property',
+      'versatile_damage_custom', 'ammunition_kind', 'range_kind', 'mastery_property',
       'other_properties',
     ],
     numeric: ['created_at', 'updated_at'],
@@ -534,7 +535,7 @@ const expectedNotNull: Record<string, string[]> = {
   character_weapons: [
     'id', 'character_id', 'name', 'damage_kind', 'versatile_damage_kind',
     'finesse', 'heavy', 'light', 'loading', 'reach', 'thrown', 'two_handed',
-    'ammunition', 'mastery_selected',
+    'ammunition', 'range_kind', 'mastery_selected',
   ],
   class_weapon_mastery_counts: [
     'id', 'class_definition_id', 'class_level', 'mastery_count',
@@ -544,7 +545,7 @@ const expectedNotNull: Record<string, string[]> = {
     'id', 'content_key', 'rules_edition', 'name', 'srd_group', 'damage_kind',
     'damage_type', 'versatile_damage_kind', 'finesse', 'heavy', 'light',
     'loading', 'reach', 'thrown', 'two_handed', 'ammunition',
-    'mastery_property',
+    'range_kind', 'mastery_property',
   ],
   // Same asymmetry as the weapon pair, and for the same reason: the TEMPLATE
   // is NOT NULL where every printed species states a value, the CHARACTER'S
@@ -994,13 +995,13 @@ const expectedDefaults: Record<string, Record<string, string>> = {
     ammunition: 'false', finesse: 'false', heavy: 'false', light: 'false',
     loading: 'false', mastery_selected: 'false', reach: 'false',
     thrown: 'false', two_handed: 'false', damage_kind: "'not_recorded'",
-    versatile_damage_kind: "'not_applicable'",
+    versatile_damage_kind: "'not_applicable'", range_kind: "'none'",
   },
   weapon_templates: {
     ammunition: 'false', finesse: 'false', heavy: 'false', light: 'false',
     loading: 'false', reach: 'false', rules_edition: "'2024'",
     thrown: 'false', two_handed: 'false',
-    versatile_damage_kind: "'not_applicable'",
+    versatile_damage_kind: "'not_applicable'", range_kind: "'none'",
   },
   feat_definitions: { repeatable: 'false' },
   species_definitions: { repeatable: 'false' },
@@ -1365,6 +1366,48 @@ describe(`schema (${sourceLabel})`, () => {
     expect(columnsOf('spell_selection_slots')).toContain(
       'selection_eligibility',
     );
+  });
+
+  it('accepts decode-only character legacy ranges and forbids invalid template pairs', () => {
+    const db = openDb(schemaSql);
+    db.exec("INSERT INTO characters (id, name) VALUES (1, 'Range checks')");
+
+    expect(() =>
+      db.exec(
+        `INSERT INTO character_weapons
+           (character_id, name, range_kind, range_near_feet, range_far_feet)
+         VALUES
+           (1, 'Long only', 'legacy', NULL, 60),
+           (1, 'Inverted', 'legacy', 60, 20)`,
+      ),
+    ).not.toThrow();
+    expect(() =>
+      db.exec(
+        `INSERT INTO character_weapons
+           (character_id, name, range_kind, range_near_feet, range_far_feet)
+         VALUES (1, 'Not legacy', 'legacy', 20, 60)`,
+      ),
+    ).toThrow(/character_weapons_range_check/);
+
+    const templatePrefix = `
+      INSERT INTO weapon_templates
+        (content_key, name, srd_group, damage_kind, damage_type,
+         range_kind, range_near_feet, range_far_feet, mastery_property)
+      VALUES`;
+    expect(() =>
+      db.exec(
+        `${templatePrefix}
+         ('missing-near', 'Missing near', 'simple_ranged', 'not_recorded',
+          'Piercing', 'ranged', NULL, 60, 'Vex')`,
+      ),
+    ).toThrow(/weapon_templates_range_check/);
+    expect(() =>
+      db.exec(
+        `${templatePrefix}
+         ('inverted', 'Inverted', 'simple_ranged', 'not_recorded',
+          'Piercing', 'ranged', 60, 20, 'Vex')`,
+      ),
+    ).toThrow(/weapon_templates_range_check/);
   });
 
   it('proves the affinity classifier against the engine, not against its docs', () => {
