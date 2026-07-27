@@ -173,7 +173,7 @@ sites (the D21 shape).
 | Storage-shaped row models | `src/domain/models.ts` |
 | Read models the UI consumes | `src/domain/read-models.ts` |
 | Command payloads | `src/domain/command-contracts.ts` |
-| Bounds (`origin-limits.ts`, `sheet-limits.ts`, `weapon-limits.ts`) | `src/domain/` |
+| Bounds (`character-limits.ts`, `origin-limits.ts`, `sheet-limits.ts`, `weapon-limits.ts`) | `src/domain/` |
 | Derived rules — sheet maths, multiclass slots, attacks, species effects | `src/rules/` |
 
 F8's standing observation about `src/domain/models.ts`: the types are

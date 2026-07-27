@@ -24,6 +24,7 @@ import { GrantRuleSlotGenerator } from '../../../src/grants/grant-rule-slot-gene
 import {
   exportCharacterShare,
   importCharacterShare,
+  type ShareExportOptions,
 } from '../../../src/sharing/character-share';
 import {
   decodeShareFragment,
@@ -93,6 +94,27 @@ import { openTestDatabase } from '../../helpers/open-db';
  *    it must carry a reason, and it lands in a diff at the moment the column is
  *    added. That is the whole difference from today, where nothing is written
  *    and nothing asks.
+ *
+ * THERE ARE THREE STATES, NOT TWO, AND THE THIRD ARRIVED WITH Q12.
+ *
+ * `characters.notes` travels only when the sharer asks for it. Neither of the
+ * original two classifications can say that without lying: `verbatim` claims a
+ * column every link carries, and `omitted` claims one no link carries. So
+ * `opt_in` was added, and it is deliberately the SMALLEST extension that can be
+ * checked — it names the `ShareExportOptions` flag that turns the column on, and
+ * the engine proves BOTH halves against two real round trips of the same
+ * character: one exported with the flag, one exported with the DEFAULTS.
+ *
+ * IT IS NOT A THIRD WAY TO SAY "OMITTED". An `opt_in` column that never travels
+ * fails the opted-IN trip, and one that always travels fails the opted-OUT trip.
+ * Neither failure can be silenced by moving the column to another kind, because
+ * `verbatim` and `omitted` each fail in one of those two directions too.
+ *
+ * WHOLE-TABLE OPT-INS ARE A DIFFERENT SHAPE AND ARE NOT CLASSIFIED THIS WAY.
+ * `warning_acknowledgements` and `spell_loadouts` are opt-in as ROWS: with the
+ * flag off, no row of theirs reaches the wire at all, so their columns are
+ * `verbatim` and the fixture's export asks for both tables. `opt_in` is for a
+ * column whose ROW travels regardless and whose VALUE is the sharer's choice.
  */
 
 /** How one column of one shared table behaves on the way through a link. */
@@ -108,6 +130,20 @@ type Portability =
    * while the raw integer must NOT, since the recipient allocates its own.
    */
   | { readonly kind: 'translated'; readonly key: string; readonly why: string }
+  /**
+   * TRAVELS ONLY WHEN THE SHARER ASKS. The value reaches the recipient
+   * unchanged when `option` is set on the export, and reaches them not at all
+   * when the export runs on its defaults.
+   *
+   * `option` is keyed by `ShareExportOptions`, so a flag that does not exist —
+   * or one that is renamed — is a compile error here rather than a test that
+   * quietly proves nothing.
+   */
+  | {
+      readonly kind: 'opt_in';
+      readonly option: keyof ShareExportOptions;
+      readonly why: string;
+    }
   /**
    * Does not travel. The sender holds a value the recipient's own derivation
    * would not produce, and the recipient must not be holding it — which is
@@ -183,8 +219,9 @@ const PROBES: { readonly [N in ProbedTable]: Probe<N> } = {
         why: 'The edit counter of the SENDER\'s database. The recipient\'s copy has been edited zero times and the import writes a literal 0.',
       },
       notes: {
-        kind: 'omitted',
-        why: "NOT CARRIED, and this one is a judgement call rather than a structural impossibility. `ShareCharacter` has no notes field, so the sender's own notes about the character stay in the sender's database. Every other private note this format drops is WORKING STATE (a preference, an override, an acknowledgement, a loadout), while notes on the BUILD (a weapon, a species, a background, a suit of armour, an effect) all travel — and a character's own notes sit on the build side of that line. Recorded here so the next person decides it on purpose.",
+        kind: 'opt_in',
+        option: 'notes',
+        why: "THE SHARER DECIDES, and the default is not to send it (Q12, ruled by the owner: 'Opt-in, like loadouts'). Every other note this format drops is WORKING STATE (a preference, an override, an acknowledgement, a loadout) and every note on the BUILD travels (a weapon, a species, a background, a suit of armour, an effect) — a character's own notes sit on the build side of that line, which is why they CAN travel, and they are the likeliest place in this application for genuinely private text, which is why they do not travel unasked. Off by default because a link minted before this existed carries no note, so the default has to mean what those links already mean.",
       },
       created_at: OWNED_TIMESTAMP,
       updated_at: OWNED_TIMESTAMP,
@@ -1197,6 +1234,17 @@ interface RoundTrip {
   readonly recipient: DatabaseContext;
   readonly senderCharacterId: number;
   readonly recipientCharacterId: number;
+  /**
+   * THE SAME CHARACTER, SENT ON THE EXPORT'S DEFAULTS — no options at all.
+   *
+   * This is where an `opt_in` column's other half is proved, and it has to be a
+   * SECOND real round trip rather than an assertion about the document: a
+   * column dropped from the wire and a column dropped by the INSERT look
+   * identical from here, and only a value that fails to arrive in a database
+   * proves either.
+   */
+  readonly optedOut: DatabaseContext;
+  readonly optedOutCharacterId: number;
 }
 
 const connections: Database[] = [];
@@ -1218,9 +1266,15 @@ beforeAll(async () => {
 
   // Through the real fragment, not straight from the object: a value dropped
   // by the encoder is as lost as one dropped by the INSERT.
+  //
+  // EVERY OPT-IN IS ASKED FOR HERE, which is what makes the `verbatim`
+  // classifications on `warning_acknowledgements` and `spell_loadouts` mean
+  // what they say — with the flags off those tables send no rows at all, and
+  // the row-count check below would fail before any column was compared.
   const document = exportCharacterShare(sender, senderCharacterId, {
     acknowledgements: true,
     loadouts: true,
+    notes: true,
   });
   const decoded = await decodeShareFragment(
     await encodeShareFragment(document),
@@ -1229,7 +1283,29 @@ beforeAll(async () => {
     recipient,
     decoded,
   );
-  trip = { sender, recipient, senderCharacterId, recipientCharacterId };
+
+  // AND THE SAME CHARACTER AGAIN, ON THE DEFAULTS. No options object at all,
+  // so this is what the export does when nobody asks it for anything — which
+  // is also what every link minted before the flags existed carries.
+  const optedOut = await context();
+  offsetSequences(optedOut);
+  seedCatalog(optedOut);
+  const plain = await decodeShareFragment(
+    await encodeShareFragment(exportCharacterShare(sender, senderCharacterId)),
+  );
+  const { characterId: optedOutCharacterId } = importCharacterShare(
+    optedOut,
+    plain,
+  );
+
+  trip = {
+    sender,
+    recipient,
+    senderCharacterId,
+    recipientCharacterId,
+    optedOut,
+    optedOutCharacterId,
+  };
 });
 
 afterAll(() => {
@@ -1320,6 +1396,44 @@ describe('a share link carries every column it claims to', () => {
           value !== defaults.get(column)
         );
       };
+
+      if (disposition.kind === 'opt_in') {
+        // Half one: it really is the sender's own value that arrives, and the
+        // sender really is holding something worth proving. A column sitting at
+        // its default would make the comparison pass while proving nothing —
+        // the failure mode this whole file is built to avoid.
+        expect(
+          sent.filter(distinctive).length,
+          `${table}.${column} is declared as travelling when ${disposition.option} is asked for, but every sent row holds its default, so nothing was proved`,
+        ).toBeGreaterThan(0);
+        expect(
+          received.map((row) => row[column]),
+          `${table}.${column} did not survive the link with ${disposition.option} asked for`,
+        ).toEqual(sent.map((row) => row[column]));
+
+        // Half two: with nobody asking, it does not arrive. The row must still
+        // be there — an `opt_in` COLUMN on a table whose rows vanish with the
+        // flag is a whole-table opt-in, which is a different shape and is not
+        // classified this way.
+        const withoutOption = readRows(
+          trip.optedOut,
+          table,
+          probe,
+          trip.optedOutCharacterId,
+          'all',
+        );
+        expect(
+          withoutOption.length,
+          `${table}.${column} is declared opt-in, but with ${disposition.option} unasked the table carries a different number of rows — that is a whole-table opt-in, not a column one`,
+        ).toBe(sent.length);
+        expect(
+          sent.some(
+            (row, index) => withoutOption[index]?.[column] !== row[column],
+          ),
+          `${table}.${column} is declared as travelling ONLY when ${disposition.option} is asked for, and it arrived in a link that never asked`,
+        ).toBe(true);
+        continue;
+      }
 
       if (disposition.kind === 'omitted') {
         // BOTH DIRECTIONS MEET HERE. The sender holds a value the recipient's
