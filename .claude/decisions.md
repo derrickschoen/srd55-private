@@ -36,6 +36,47 @@ D29's shape — a statement outliving its subject. Note the first clause was
 ALREADY false before tonight: attack profiles predate this session. Tonight only
 added the third.
 
+### SECOND INSTANCE, found the next tick: `.ai/DEEP_REF_DOMAIN.md` says it too
+
+`.ai/DEEP_REF_DOMAIN.md:116-120` enumerates what `SHEET_GAPS` contains. Compared
+against the live list (read with `grep -a` — this is one of F14's three
+invisible files, so a plain grep returns nothing):
+
+| live `SHEET_GAPS` | the doc's claim |
+|---|---|
+| `no_class_feature_text` | no class feature text |
+| `partial_subclass_catalog` | partial subclass catalog |
+| `no_unarmored_defense` | no unarmoured defence |
+| `no_expertise` | no Expertise |
+| **`weapon_reach_not_recorded`** | **"no weapon proficiency"** |
+| `background_skills_are_text` | background skills as text |
+
+**The doc names one gap that does not exist and misses one that does.** And note
+why it survived review: BOTH LISTS HAVE SIX ITEMS. A reader checking the count
+sees agreement; only an item-by-item comparison catches it.
+
+### The user-facing surface is CORRECT — only the agent-facing ones are stale
+
+`SHEET_GAPS` itself carries no weapon-proficiency entry, so the character sheet
+does not contradict its own Proficiencies section. The false claim lives only in
+the two places built FOR AI CONSUMERS: the agent reference and the `.ai/` deep
+reference. That is the opposite of the usual staleness pattern, where docs rot
+and code is right — here the code was corrected and both of its descriptions
+were not, because nothing links them.
+
+### Why `tests/unit/docs/ai-reference-anchors-resolve.test.ts` cannot catch this
+
+That test proves every anchor RESOLVES — that a doc's reference points at
+something real. It says nothing about whether the CLAIM is true. A doc can cite
+a live symbol and describe it wrongly and stay green forever. This is the same
+distinction D30 drew for columns: existence is not agreement.
+
+**The guard this wants** is the D30 shape: derive the gap list from
+`SHEET_GAPS` and fail when a doc's enumeration disagrees with it, so a gap added
+or removed forces both descriptions to move in the same diff. Not built yet —
+scoped with the F15 fix, since fixing the prose without the guard just resets
+the clock.
+
 NOT YET FIXED — `src/ui/screens/planner/agent-reference.ts` and
 `tests/unit/ui/**` are owned by the in-flight `feat/die-size-type` track. The
 fix must rewrite the note AND the assertion together; changing only the
