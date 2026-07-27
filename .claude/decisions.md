@@ -1,5 +1,133 @@
 # Binding scope decisions
 
+## D37 — OWNER: a character's own notes travel opt-in, and the portability map gains an honest third state (2026-07-27)
+
+Q12 answered: *"Opt-in, like loadouts."* Merged as `6078058`.
+Baseline **1990 vitest / 123 files**, build exit 0, 72 Playwright, 59 tables.
+
+### The question, and why it was one
+
+The share format drops private notes consistently, EXCEPT here. Every dropped
+note is WORKING STATE — a preference, an override, an acknowledgement, a
+loadout. Every note on the BUILD travels — weapon, species, background, armour,
+effect. `characters.notes` sits on the build side and behaved like the other
+side, and **nothing in this log recorded whether that was deliberate**, so it
+could not be settled by archaeology.
+
+Opt-in resolves it without forcing either reading: a character's own notes are
+the likeliest place for genuinely private text, and the sharer decides.
+**Default OFF**, because a link minted before this change carries no notes and
+the default must mean what those links already mean.
+
+### The part worth keeping: the map gained a third state, not a fudge
+
+`verbatim` claims every link carries a column. `omitted` claims none does.
+Neither can say "only when asked" without lying, and a wrong classification here
+PASSES the guard while being false — which is the one failure mode D30's whole
+design is aimed at.
+
+`opt_in` is keyed by the `ShareExportOptions` flag name, so a non-existent flag
+is a compile error, and the engine runs **two real round trips of the same
+character** — one with the flag, one on the defaults. It cannot decay into a
+synonym for `omitted`: a column that never travels fails the opted-in trip, and
+one that always travels fails the opted-out trip.
+
+**A distinction the implementation drew that the question had not.**
+`warning_acknowledgements` and `spell_loadouts` are opt-in as ROWS — with the
+flag off, no row of theirs reaches the wire at all. This is a column whose ROW
+travels regardless and whose VALUE is the sharer's choice. Those stay
+`verbatim`, and the file now says why, so the next reader does not "fix" them.
+
+### The live hazard, caught before it shipped
+
+The character tuple was `tuple(root[2], 11, …)` — EXACT LENGTH. That is D33/F18's
+weapon defect one level up: a twelfth element would have made every link already
+pasted into a chat decode an old link's placeholder array AS ITS NOTES STRING.
+Now variable arity with notes appended last. Reverting to exact length fails
+**19 tests**, including all three frozen link fixtures and a real database
+import.
+
+**Rejected: carry notes unconditionally.** Consistent with the other build-side
+notes, and it publishes the field most likely to hold something private.
+**Rejected: leave them behind permanently.** Consistent with privacy, and it
+silently loses part of the build with no way for the sharer to say otherwise.
+
+---
+
+## D36 — OWNER: upcasting is SLOT levels and the list is the point; the Cantrip Upgrade is a different mechanic with its own table (2026-07-27)
+
+Owner ruling, given on waking, correcting the model shipped hours earlier:
+
+> *"Some spells can be upcast every spell slot level, others only upcast every
+> other spell slot level (ex. Spiritual weapon)"*
+
+Merged as `6078058`.
+
+### What the ruling settles
+
+**The LIST is right, and this is why.** A spell that gains an effect at every
+slot level above its base stores every level; one that gains an effect every
+OTHER slot level stores only those. A threshold-plus-boolean cannot express the
+second. The list was already built; the ruling explains what it is FOR.
+
+**Upcasting is measured in SLOT levels, so the bound is 1..9.** It had shipped as
+`BETWEEN 1 AND 20`, which existed only to let one column also hold character
+levels. Every other spell or slot level in this schema is bounded `0..9`.
+
+**Cantrip scaling is NOT upcasting.** The SRD calls it Cantrip Upgrade and
+measures it in CHARACTER level. It gets its own table, bounded 1..20. Folding it
+into "upcast" behind a discriminator is what made the shipped model ambiguous,
+and `upcast_scale` is deleted.
+
+### The mutation that isolates the ruling, and it is the best one this session
+
+Replacing the list with a threshold leaves the every-slot-level spell
+round-tripping **fine** — that assertion still passes — and fails ONLY the
+every-other-level case:
+
+```
+× round-trips a spell that upcasts at EVERY slot level and one that upcasts at every OTHER slot level
+  → expected [ 3, 4, 5, 6, 7, 8, 9 ] to deeply equal [ 3, 5, 7, 9 ]
+```
+
+The whole argument for a list, isolated into one failing assertion.
+
+Both bounds probed by the supervisor against the generated schema, where the
+failure MODE is the evidence — a row the CHECK admits is stopped only by the
+foreign key:
+
+```
+slot    level  9  FK only (CHECK passed)      cantrip level 17  FK only (CHECK passed)
+slot    level 17  CHECK constraint failed     cantrip level 20  FK only (CHECK passed)
+slot    level 20  CHECK constraint failed     cantrip level 21  CHECK constraint failed
+```
+
+### `upcastScale` is REFUSED BY NAME, not silently dropped
+
+Unknown fields are dropped everywhere else in this document format. Dropping
+this one would import `{"upcastScale":"character_level","upcastLevels":[5]}` as
+**slot level 5** — a number the document never stated. This is not the D12 case:
+both meanings remain modelled, under names that say which. An explicit
+`"upcastScale": null` is accepted and ignored, because the project's own scraper
+emits one.
+
+### What the ruling still cannot hold, stated rather than papered over
+
+- **The list says THAT something changes at a level, never WHAT.** `[3,5,7,9]`
+  plus free text. Under D26-as-amended (D35) that is fine — the structure buys
+  ordering and completeness, and the table adjudicates the effect.
+- **Nothing forbids a level-0 spell carrying upcast levels, or one spell
+  carrying both ladders.** A child CHECK cannot see the parent's level, and a
+  cross-table rule was deliberately not added — D11 part 2: the boundary
+  tolerates rather than losing a whole document over one debatable row. The
+  both-ladders case is TESTED AS WORKING rather than forbidden, because the
+  schema genuinely does not make them exclusive.
+- **Neither ladder has bundled content.** The repo ships no spell catalog. The
+  two SRD Cantrip Upgrade ladders cited are already modelled elsewhere under D14
+  and are NOT wired to the new table; they justify the bound, they are not seeds.
+
+---
+
 ## D35 — OWNER: D26 is AMENDED. A value earns structure if it changes a number on the sheet OR makes the catalog searchable. (2026-07-27)
 
 Owner ruling, given on waking, in answer to a question this project raised
