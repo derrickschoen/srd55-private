@@ -263,13 +263,35 @@ sheet (Q9).
 
 ## Q11 — Multiclass entry grants a SKILL CHOICE, which nobody has made (NEW)
 
-Found while extracting the twelve "As a Multiclass Character" clauses. Two of
-them do not grant a fixed proficiency — they grant a CHOICE:
+Found while extracting the twelve "As a Multiclass Character" clauses. THREE of
+them do not grant a fixed proficiency — they grant a CHOICE, and the three are
+not the same shape:
 
 - **Ranger**: "proficiency in one skill of your choice from the Ranger's skill
-  list"
+  list" — a choice BOUNDED by the class's own list.
 - **Rogue**: "proficiency in one skill of your choice from the Rogue's skill
-  list"
+  list" — likewise bounded.
+- **Bard**: "proficiency in one skill of your choice" — UNBOUNDED, any of the 18
+  skills; plus "proficiency with one Musical Instrument of your choice", which
+  is a choice over a set this app does not model at all.
+
+**CORRECTION (2026-07-26).** This entry originally said "two of them" and named
+only Ranger and Rogue. Bard was missed on the first read. Verified by scanning
+every occurrence of "choice" in the extract, which is the check that should have
+been run first:
+
+```
+$ awk '/^=== /{cls=$2} /choice/{print cls": "$0}' docs/srd/source/multiclass-entry-grants.txt
+Bard:   of your choice, proficiency with one Musical In-
+Bard:   strument of your choice, and training with Light
+Ranger:   choice from the Ranger's skill list, and training
+Rogue:   of your choice from the Rogue's skill list, pro-
+```
+
+The correction matters because the two shapes need different modelling: a
+bounded choice can offer the user a list, an unbounded one cannot be
+distinguished from "any skill", and the instrument is a fourth kind of thing
+entirely.
 
 That is exactly the missed-selection this product exists to surface: a character
 who multiclassed into Ranger has an unmade choice, and nothing currently asks
@@ -288,6 +310,13 @@ ITEM now. The completeness system is already merged and its stated line is
 "something the USER must decide", which this is exactly. The guided builder does
 not exist yet, so making it a builder step would park the finding until the
 builder lands. Reversible: it is one registry entry.
+
+**Scope of that, after the correction:** the SKILL choice for all three classes
+becomes a completeness item. The Bard's MUSICAL INSTRUMENT choice does not —
+there is no tool or instrument vocabulary in this app, D26 says a value earns
+structure only if it changes a number on the sheet, and an instrument
+proficiency changes none. It is recorded here so the omission is deliberate
+rather than overlooked.
 
 
 ---
