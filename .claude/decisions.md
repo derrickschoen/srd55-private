@@ -460,10 +460,47 @@ made explicit and permanent, on a file that grew 3914 lines in one session.
 anchors and break the thing the convention exists for — a reader opening the
 file sees the newest binding decision first, and `AGENTS.md` promises that.
 
-NOT YET IMPLEMENTED — `feat/structured-values` is in flight; this touches
-`.ai/**` and the anchors test. The 9 upgradable weak anchors are worth doing in
-the same change, and the 19 prose anchors should be left alone with a note
-saying why, rather than pretended into class 3.
+### IMPLEMENTED — merged as `243ac01`, and this was the first task codex authored
+
+Gates run by the supervisor on the merged tree: **1992 vitest / 123 files**,
+build exit 0, **72 Playwright**. Footprint 7 files; this file and the frozen
+fixture untouched; no forbidden path.
+
+Counts moved: weak line anchors **33 → 17**, symbol-contained **20 → 34**,
+decisions-number references **2 → 6**. Twelve declaration anchors were upgraded,
+not the nine this entry predicted — the estimate was made by sampling, the
+implementation by enumerating. F16 again, in the harmless direction.
+
+**The risk was converting blind, and it was real.** All four line anchors were
+ALREADY wrong when the work started. Converting each to whatever entry now sits
+at its line would have laundered a broken anchor into a confident correct-looking
+one — strictly worse than leaving it visibly stale, because the new form asserts
+containment and would have passed. The instruction given was therefore to read
+the sentence the doc is MAKING and find the entry that supports it. Three
+resolved to `D20`, one to `D19`, and the supervisor read D20's body to confirm it
+genuinely contains both claims cited against it: *"the test covering it could not
+fail. Mutation proved it: deleting the resolution left 1087 of 1087 passing"* and
+*"against D18, where a badly-scoped split cost an hour of seam repair."*
+
+**Both new guards mutation-proved by the supervisor**, and the FIRST attempt
+proved nothing — the edit silently did not apply, so the green run was
+meaningless. Redone with an append; both then failed correctly:
+
+```
+× resolves every decisions.md D/F reference to a real heading
+    detail: ".claude/decisions.md has no ## D999999 heading"
+× forbids file:line anchors into the append-at-top decisions log
+    detail: "use a stable decisions.md D/F reference instead"
+```
+
+The replacement is stronger than what it replaced, as predicted: a line anchor
+only had to be ≤ the file's length; a D/F reference must exist as a heading.
+
+**A defect in this finding, left visible rather than edited away.** The table
+above says "Four `.ai/` anchors" and then lists THREE. The count was right and
+the enumeration was short — precisely the F16 failure, committed inside the
+entry that sits two headings below F16. It is corrected here rather than in
+place, because the wrong version is the evidence.
 
 ---
 
