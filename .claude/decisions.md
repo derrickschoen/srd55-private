@@ -1,5 +1,71 @@
 # Binding scope decisions
 
+## F13 — The concentration and ritual regexes override an EXPLICIT false, and only for the spelling the SRD does not use (2026-07-27)
+
+Found while measuring queue item (b) rather than trusting the brief's account of
+it. The brief says the spell text fields need no parsing work because they are
+already text. They are — with one exception nobody listed.
+
+`src/catalog/catalog-importer.ts:296-308` derives two tags from free text:
+
+```ts
+if (record.ritual || /(?:^|\s)(?:or\s+)?R(?:$|\s)/iu.test(record.castingTime ?? '')) tags.push('ritual');
+if (record.concentration || /^C(?:,|\s)/iu.test(record.duration ?? '')) tags.push('concentration');
+```
+
+### Both regexes read only the ABBREVIATION, and miss the spelled-out form
+
+Run, not reasoned about:
+
+```
+"Concentration, up to 1 minute"  ->  .              <-- the SRD's own format
+"C, up to 1 minute"              ->  CONCENTRATION
+"C"                              ->  .
+"Conc., 1 hour"                  ->  .
+
+"1 action or Ritual"             ->  .
+"1 action or R"                  ->  RITUAL
+```
+
+`^C(?:,|\s)` requires a comma or space immediately after the `C`, so
+`Concentration,` fails on the `o`. The safety net has a hole exactly where the
+most likely input sits.
+
+### The real defect is not the hole — it is that the net exists at all
+
+`src/catalog/catalog-schema.ts:229` makes BOTH booleans **required**: a catalog
+document that omits `concentration` or `ritual` is refused with
+`Catalog field 'concentration' must be boolean.` So the regex never fills an
+absence. The only case it can change is a document that says `false` and whose
+text says otherwise — and there it OVERRIDES THE AUTHOR'S EXPLICIT DECLARATION,
+for one spelling and not the other.
+
+### Decision, under the autonomy grant: the boolean is authoritative; the regexes go
+
+- The field is required, so there is nothing to infer.
+- D12/Q4: where a user supplies content, the user's content wins. A homebrew
+  variant that deliberately says `concentration: false` should get `false`, not
+  our reading of its prose.
+- D15 refused exactly this shape — deciding a mechanical fact by matching text.
+- And an inference that fires for `C,` but not for `Concentration,` is not a
+  safety net; it is a coin flip that depends on the author's abbreviation habit.
+
+**Rejected: fix the regexes to match both spellings.** It makes the override
+consistent rather than removing it, and a consistent override of an explicit
+declaration is worse — it would silently correct every catalog author who
+disagreed with us, where today it only catches the ones who abbreviate.
+
+**Rejected: keep them as a warning rather than a tag.** There is no absence to
+warn about. A document that sets the flag has answered the question.
+
+NOT YET IMPLEMENTED — the multiclass track's merge is pending and this changes
+imported tag data. Reversible by re-import, and pre-alpha per D25. Whoever does
+it must check whether any bundled catalog relies on the fallback: if one sets
+`concentration: false` beside a concentration duration, removing the regex
+CHANGES that spell's tags, and that is a data change, not a refactor.
+
+---
+
 ## F12 — Queue item (c) is not the shape the brief describes, and the die vocabulary the owner asked for does not exist as a type (2026-07-27)
 
 The cron brief says four competing die definitions exist, including "two
