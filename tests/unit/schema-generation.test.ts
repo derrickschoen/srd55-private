@@ -7,14 +7,14 @@ import {
 } from '../../scripts/compose-schema';
 
 /**
- * A GENERATION-FRESHNESS DIFF — explicitly NOT a Laravel parity check.
+ * A GENERATION-FRESHNESS DIFF — explicitly NOT a correctness check.
  *
  * All this proves is that the artifact committed to git is what the current
  * `db/schema/*.ts` declarations produce, i.e. that nobody edited the generated
  * file by hand or changed a declaration without regenerating. Whether the
- * artifact is CORRECT is settled elsewhere, by the independent
- * Laravel-derived expectations in `tests/unit/schema.test.ts` and the product
- * invariants in `tests/unit/invariants.test.ts`.
+ * artifact is CORRECT is settled elsewhere, by the hand-written expectations in
+ * `tests/unit/schema.test.ts` and the product invariants in
+ * `tests/unit/invariants.test.ts`.
  *
  * The test imports `composeSchemaSql` (pure) and never `build-schema.ts` (the
  * writer), so it cannot make itself pass.

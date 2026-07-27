@@ -10,11 +10,27 @@ import preDrizzleSchema from '../fixtures/schema-pre-drizzle.sql?raw';
 type SqlRow = Record<string, string | number | bigint | null>;
 
 /**
- * THE LARAVEL 38. Transcribed from the Laravel migrations, frozen, and NEVER
- * regenerated from this project's own output. `laravelColumnMetadataHash` below
- * is computed over exactly these tables and no others, so the parity claim
- * survives the arrival of native tables undiluted: any drift in a Laravel
- * table's columns, types, nullability, defaults or order still moves the hash.
+ * THE COLUMN INVENTORY — every table this schema declares, one hand-written
+ * entry each.
+ *
+ * This is NOT a parity record and no longer splits Laravel-inherited tables
+ * from native ones; D7 retired that goal and F10 measured what the split was
+ * costing. What survives is the one thing this inventory catches that nothing
+ * else in the suite does: a SURPLUS column. A MISSING column breaks an
+ * integration test or a row contract, but 29 of the 56 tables have no row
+ * contract at all, so a column that appears and is read by nothing is invisible
+ * everywhere else.
+ *
+ * Column ORDER is deliberately NOT pinned — both sides are sorted before
+ * comparison. Measured: nothing in this codebase can observe it. There is no
+ * positional `INSERT INTO t VALUES (…)` anywhere in `src/`, backup export is
+ * `SELECT *` into keyed JSON validated by `z.strictObject`, and the only hash
+ * over row data hashes content keys rather than column positions. Freezing the
+ * order was Laravel's requirement, not this project's.
+ *
+ * These lists are transcribed by hand and must NEVER be regenerated from
+ * `PRAGMA table_info`: an expectation reprinted from the artifact under test
+ * cannot fail.
  */
 const expectedColumns: Record<string, string[]> = {
   background_definitions: [
@@ -141,54 +157,20 @@ const expectedColumns: Record<string, string[]> = {
   wizard_spellbook_entries: [
     'id', 'character_id', 'spell_version_id', 'created_at', 'updated_at',
   ],
-};
 
-/**
- * SHA-256 of the ordered `PRAGMA table_info` metadata — declared types,
- * nullability, defaults, primary keys and column order — over every table.
- *
- * THE DERIVATION CHAIN, WHICH IS WHAT KEEPS THIS AN INDEPENDENT ORACLE.
- * The 38-table value was recorded by running the LARAVEL MIGRATIONS against an
- * in-memory SQLite database, before any of this existed. Dropping the eight
- * Laravel-only tables invalidates it, and recomputing it from our own generated
- * artifact would turn the assertion into a tautology — the one thing a parity
- * oracle may never become. So it is re-derived from the FROZEN pre-Drizzle
- * artifact instead (`tests/fixtures/schema-pre-drizzle.sql`, the hand-written
- * file transcribed from those migrations, untouched by this change), and the
- * test below proves all three links:
- *
- *   fa0e4e9f… = signature(pre-Drizzle fixture, all 38 tables)
- *               → the fixture really is the artifact the Laravel value came from
- *   d83f8a8d… = signature(pre-Drizzle fixture, minus the eight)
- *               → the new expectation, still Laravel-derived
- *             = signature(schema.sql)
- *               → what is actually under test
- *
- * THE FOUR NATIVE WEAPON TABLES ARE EXCLUDED, NOT REHASHED. They reproduce no
- * Laravel migration, so folding them in would move a constant whose whole
- * value is that it came from somewhere else. They are held to hand-written
- * expectations instead, and filtering rather than regenerating is what lets
- * this constant stay frozen: no Laravel table's metadata can drift without
- * moving it.
- */
-const laravelColumnMetadataHash =
-  'd83f8a8d32c1ccef3317e8935b634268ff9adb575724bedd2370f6cfc5716329';
-
-/** The same value before the eight Laravel-only tables were dropped. */
-const laravelColumnMetadataHashWithInfrastructure =
-  'fa0e4e9f2af9531e8b66b296660b5db7e28a5c6c2ceda00859c904fe6a4d1b11';
-
-/**
- * THE NATIVE TABLES — everything this project added that reproduces no Laravel
- * migration.
- *
- * Held to the same standard as the Laravel 38 and by the same means: these
- * lists are hand-transcribed from `.claude/plans/weapons-design.md` §4, which
- * was written before `db/schema/weapons.ts` existed. They are an expectation,
- * not an echo, and they must not be regenerated from `PRAGMA table_info`
- * either — a test that reprints our own output cannot fail.
- */
-const expectedNativeColumns: Record<string, string[]> = {
+  // --- TABLES THIS PROJECT ADDED -------------------------------------------
+  // These used to live in a separate `expectedNativeColumns` object for one
+  // reason only: the Laravel column-metadata hash was computed over the tables
+  // above and these had to be filtered out of its input. That hash no longer
+  // judges the generated schema, so the split has nothing left to mean and
+  // there is one inventory.
+  //
+  // The four weapon lists are transcribed from `.claude/plans/weapons-design.md`
+  // §4, written before `db/schema/weapons.ts` existed. The rest are transcribed
+  // from the declarations in `db/schema/*.ts` — an honest weakness, since a
+  // hand-copy of the code under test catches a change made in one place and not
+  // the other but not a change made in both. It is recorded here rather than
+  // dressed up.
   character_weapons: [
     'id', 'character_id', 'name', 'damage_dice', 'damage_type',
     'versatile_damage_dice', 'finesse', 'heavy', 'light', 'loading', 'reach',
@@ -336,7 +318,15 @@ const expectedNativeColumns: Record<string, string[]> = {
   ],
 };
 
-const expectedNativeNotNull: Record<string, string[]> = {
+/**
+ * WHICH COLUMNS REJECT A NULL WRITE. Behaviour, not inventory: NOT NULL is the
+ * only property here that refuses a statement outright, and it is recorded
+ * nowhere else that is not generated from these same declarations.
+ *
+ * Compared as a SET, for the same reason the column inventory is: the position
+ * a NOT NULL column occupies in the table is not something any caller can see.
+ */
+const expectedNotNull: Record<string, string[]> = {
   // `damage_dice`, `damage_type` and `mastery_property` are NULLABLE here and
   // NOT NULL on the template: a half-entered user weapon is a first-class
   // state, and an invented weapon need not have a mastery property at all.
@@ -441,23 +431,10 @@ const expectedNativeNotNull: Record<string, string[]> = {
     'id', 'subclass_definition_id', 'class_level', 'sort_order', 'name',
     'description',
   ],
-};
 
-const laravelTableNames = new Set(Object.keys(expectedColumns));
-
-/** The eight tables this schema no longer declares, named rather than derived. */
-const droppedInfrastructureTables = [
-  'cache',
-  'cache_locks',
-  'failed_jobs',
-  'job_batches',
-  'jobs',
-  'password_reset_tokens',
-  'sessions',
-  'users',
-];
-
-const expectedNotNull: Record<string, string[]> = {
+  // --- THE TABLES INHERITED FROM THE ORIGINAL MIGRATIONS -------------------
+  // Merged into the list above for the same reason the column inventory was:
+  // the two halves were kept apart to feed a hash that no longer runs.
   background_definitions: ['id', 'content_key', 'name', 'rules_edition', 'repeatable'],
   change_log: ['id', 'character_id', 'sequence', 'entity_type', 'action_type', 'reversible'],
   character_class_levels: ['id', 'character_id', 'class_definition_id', 'level', 'is_starting_class'],
@@ -508,17 +485,6 @@ const expectedNotNull: Record<string, string[]> = {
   ],
   warning_acknowledgements: ['id', 'character_id', 'warning_fingerprint'],
   wizard_spellbook_entries: ['id', 'character_id', 'spell_version_id'],
-};
-
-/** Every table in the database, Laravel and native alike. */
-const allExpectedColumns: Record<string, string[]> = {
-  ...expectedColumns,
-  ...expectedNativeColumns,
-};
-
-const allExpectedNotNull: Record<string, string[]> = {
-  ...expectedNotNull,
-  ...expectedNativeNotNull,
 };
 
 const expectedNamedIndexes: Record<string, string> = {
@@ -974,13 +940,12 @@ afterAll(() => {
   }
 });
 
-// Every expectation above is transcribed from the Laravel migrations and is
-// independent of how the artifact is produced. Running the SAME expectations
-// against each artifact is what makes the generated schema's parity provable
-// rather than assumed.
+// The expectations above are hand-written and independent of how the artifact
+// is produced, which is what lets the same ones be run against any candidate
+// artifact. The parameterisation is one entry today.
 for (const [sourceLabel, schemaSql] of schemaSources) {
-describe(`complete final migration schema (${sourceLabel})`, () => {
-  it('creates the exact 30-table Laravel inventory plus the twenty-six named native tables, and every column of both', () => {
+describe(`schema (${sourceLabel})`, () => {
+  it('declares exactly the inventoried tables and exactly their columns', () => {
     const db = openDb(schemaSql);
     const tables = db.selectValues(
       `SELECT name
@@ -989,70 +954,47 @@ describe(`complete final migration schema (${sourceLabel})`, () => {
        ORDER BY name`,
     );
 
-    // The claim is no longer "exactly the Laravel migrations" but "exactly the
-    // SURVIVING Laravel migrations PLUS these named native tables". A table in
-    // neither list still fails, which is the property that mattered.
-    //
-    // Both halves are counted, because a single total would let one grow while
-    // the other shrank: 30 Laravel tables (38 less the eight infrastructure
-    // ones that were pruned) and 24 native — 4 weapons, 6 origins, 8 sheet
-    // core, 2 class features and the 4 stored sheet inputs.
-    expect(tables).toEqual(Object.keys(allExpectedColumns).sort());
-    expect(Object.keys(expectedColumns)).toHaveLength(30);
-    expect(Object.keys(expectedNativeColumns)).toHaveLength(26);
-    // ones that were pruned) and 12 native — the four weapon tables plus the
-    // eight of the sheet core.
-    expect(tables).toEqual(Object.keys(allExpectedColumns).sort());
-    expect(Object.keys(expectedColumns)).toHaveLength(30);
+    // A table in neither half of the inventory fails, which was always the
+    // property that mattered. What is gone is the table COUNT that used to sit
+    // beside this: a hand-maintained number that could only ever restate what
+    // the set equality already fixes.
+    expect(tables).toEqual(Object.keys(expectedColumns).sort());
+    // Non-vacuity: every inventoried table must also carry a NOT NULL
+    // expectation, so a new table cannot get its nullability check for free.
+    expect(Object.keys(expectedNotNull).sort()).toEqual(
+      Object.keys(expectedColumns).sort(),
+    );
 
-    for (const [table, columns] of Object.entries(allExpectedColumns)) {
+    for (const [table, columns] of Object.entries(expectedColumns)) {
       const metadata = rows(db, `PRAGMA table_info("${table}")`);
       expect(
-        metadata.map((row) => row.name),
+        metadata.map((row) => String(row.name)).sort(),
         `columns for ${table}`,
-      ).toEqual(columns);
+      ).toEqual([...columns].sort());
       expect(
         metadata
           .filter((row) => Number(row.notnull) === 1)
-          .map((row) => String(row.name)),
+          .map((row) => String(row.name))
+          .sort(),
         `NOT NULL columns for ${table}`,
-      ).toEqual(allExpectedNotNull[table]);
+      ).toEqual([...(expectedNotNull[table] ?? [])].sort());
     }
-    // Computed over the Laravel subset ONLY. Filtering rather than rehashing is
-    // what lets the frozen constant stay frozen: the native tables are held to
-    // the hand-written expectations above instead, and no Laravel table's
-    // metadata can drift without moving this.
-    const laravelTables = tables.filter((table) =>
-      laravelTableNames.has(String(table)),
-    );
-    expect(laravelTables).toHaveLength(30);
-    const metadataSignature = laravelTables.map((table) => [
-      table,
-      rows(db, `PRAGMA table_info("${String(table)}")`).map((column) => [
-        column.name,
-        String(column.type).toLowerCase(),
-        Number(column.notnull),
-        column.dflt_value,
-        Number(column.pk),
-      ]),
-    ]);
-    expect(
-      createHash('sha256')
-        .update(JSON.stringify(metadataSignature))
-        .digest('hex'),
-    ).toBe(laravelColumnMetadataHash);
 
-    for (const dropped of droppedInfrastructureTables) {
-      expect(tables).not.toContain(dropped);
-    }
+    // Three specific absences and one presence, each asserted against the
+    // DATABASE. Two of them used to be asserted against the `expectedColumns`
+    // literal a few hundred lines above in this same file, so only editing that
+    // literal could break them — they could not fail for the reason they were
+    // written.
+    const columnsOf = (table: string) =>
+      rows(db, `PRAGMA table_info("${table}")`).map((row) => String(row.name));
     expect(tables).not.toContain('wizard_prepared_entries');
-    expect(expectedColumns.wizard_spellbook_entries).not.toContain('acquisition');
-    expect(expectedColumns.spell_selection_slots).toContain(
+    expect(columnsOf('wizard_spellbook_entries')).not.toContain('acquisition');
+    expect(columnsOf('spell_selection_slots')).toContain(
       'selection_eligibility',
     );
   });
 
-  it('materializes every named index, unique key, and migrated default', () => {
+  it('materializes every named index, unique key, and declared default', () => {
     const db = openDb(schemaSql);
     const actualNamedIndexes: Record<string, string> = {};
     for (const index of rows(
@@ -1073,7 +1015,7 @@ describe(`complete final migration schema (${sourceLabel})`, () => {
     }
     expect(actualNamedIndexes).toEqual(expectedNamedIndexes);
 
-    for (const table of Object.keys(allExpectedColumns)) {
+    for (const table of Object.keys(expectedColumns)) {
       expect(uniqueGroups(db, table), `unique keys for ${table}`).toEqual(
         [...(expectedUniqueGroups[table] ?? [])].sort(),
       );
@@ -1091,7 +1033,7 @@ describe(`complete final migration schema (${sourceLabel})`, () => {
 
   it('declares every migrated foreign key with its composite shape and action', () => {
     const db = openDb(schemaSql);
-    for (const table of Object.keys(allExpectedColumns)) {
+    for (const table of Object.keys(expectedColumns)) {
       expect(foreignKeys(db, table), `foreign keys for ${table}`).toEqual(
         [...(expectedForeignKeys[table] ?? [])].sort(),
       );
@@ -1140,19 +1082,51 @@ describe(`complete final migration schema (${sourceLabel})`, () => {
 }
 
 /**
- * THE PROOF THAT THE PRUNED HASH IS STILL LARAVEL-DERIVED.
+ * THE FROZEN HISTORICAL FIXTURE IS UNEDITED — and that is now the whole claim.
  *
- * Dropping the eight Laravel-only tables invalidated a constant that came from
- * running the Laravel migrations. The replacement is NOT recomputed from the
- * artifact it judges — that would be an expectation regenerated from our own
- * output, which is exactly what a parity oracle must never be. It is recomputed
- * from the frozen hand-written artifact, which this change does not touch, and
- * the link back to the original Laravel value is asserted rather than assumed.
+ * These two hashes were derived by running the ORIGINAL MIGRATIONS against an
+ * in-memory SQLite database, before any of this existed. They no longer judge
+ * the generated schema: D7 retired fidelity to the app this replaced, and the
+ * third link — `metadataHash(schema.sql, nativeTables)` against the same
+ * constant — went with the rest of that machinery (F10). It was the assertion
+ * that made every column, type, default and reorder in `db/schema/*.ts` a
+ * hash-moving event.
  *
- * Both links can fail: change a column type in `db/schema/*.ts` and the third
- * assertion breaks; edit the fixture and the first one does.
+ * What remains is a guard on `tests/fixtures/schema-pre-drizzle.sql`, which is
+ * NOT retired. D9 records why it stays, and `tests/unit/db/schema-signature.test.ts`
+ * is why it matters: that suite builds a real database image out of this
+ * fixture to prove such an image is REJECTED cleanly, with the export-and-reset
+ * recovery path still reachable. A fixture quietly edited to make something
+ * pass would hollow that test out from underneath. These assertions are what
+ * make editing it loud.
+ *
+ * Both can fail: change one byte of the fixture's DDL and one or both move.
  */
-describe('the pruned column-metadata hash is derived from Laravel, not from us', () => {
+describe('the frozen pre-Drizzle fixture still hashes to its recorded values', () => {
+  const preDrizzleMetadataHashWithInfrastructure =
+    'fa0e4e9f2af9531e8b66b296660b5db7e28a5c6c2ceda00859c904fe6a4d1b11';
+
+  /** The same fixture, minus the eight tables this schema never declared. */
+  const preDrizzleMetadataHashWithoutInfrastructure =
+    'd83f8a8d32c1ccef3317e8935b634268ff9adb575724bedd2370f6cfc5716329';
+
+  /**
+   * Named rather than derived, so the second hash cannot be made to pass by a
+   * skip list that quietly grew. That these eight are ABSENT from the live
+   * schema is asserted independently, and against the database rather than
+   * against a literal, in `tests/unit/contracts/table-scopes.test.ts`.
+   */
+  const droppedInfrastructureTables = [
+    'cache',
+    'cache_locks',
+    'failed_jobs',
+    'job_batches',
+    'jobs',
+    'password_reset_tokens',
+    'sessions',
+    'users',
+  ];
+
   function metadataHash(schemaSql: string, skip: readonly string[]): string {
     const db = openDb(schemaSql);
     const tables = db
@@ -1177,42 +1151,15 @@ describe('the pruned column-metadata hash is derived from Laravel, not from us',
     return createHash('sha256').update(JSON.stringify(signature)).digest('hex');
   }
 
-  it('reproduces the original 38-table Laravel value from the frozen fixture', () => {
+  it('reproduces the recorded 38-table value from the frozen fixture', () => {
     expect(metadataHash(preDrizzleSchema, [])).toBe(
-      laravelColumnMetadataHashWithInfrastructure,
+      preDrizzleMetadataHashWithInfrastructure,
     );
   });
 
   it('yields the pruned value from that same fixture, minus the eight tables', () => {
     expect(metadataHash(preDrizzleSchema, droppedInfrastructureTables)).toBe(
-      laravelColumnMetadataHash,
+      preDrizzleMetadataHashWithoutInfrastructure,
     );
-  });
-
-  /*
-   * The third link. The ten native tables — four weapons, six origins — are
-   * excluded because they
-   * reproduce no Laravel migration and the constant on the right is
-   * Laravel-derived; including them would force the constant to be recomputed
-   * from our own artifact, which is the tautology this whole chain exists to
-   * avoid. They are not thereby unchecked — `expectedNativeColumns` and
-   * `expectedNativeNotNull` hold them to hand-written expectations transcribed
-   * from the design, and the exclusion list is asserted to be exactly those
-   * twenty-six, so a twenty-seventh native table cannot slip past unhashed AND
-   * unexpected.
-   */
-  it('and the generated artifact matches it, skipping only the twenty-six native tables', () => {
-    // 4 weapons + 8 sheet core + 6 origins + 2 class features + 4 sheet inputs.
-    // Excluded because
-    // they reproduce no Laravel migration; the constant on the right is
-    // Laravel-derived, and folding them in would force it to be recomputed from
-    // our own artifact.
-    const nativeTables = Object.keys(expectedNativeColumns);
-    expect(nativeTables).toHaveLength(26);
-    for (const [, schemaSql] of schemaSources) {
-      expect(metadataHash(schemaSql, nativeTables)).toBe(
-        laravelColumnMetadataHash,
-      );
-    }
   });
 });
