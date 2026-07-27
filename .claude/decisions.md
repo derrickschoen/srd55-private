@@ -1,5 +1,93 @@
 # Binding scope decisions
 
+## F20 — drizzle-kit DOES emit the SQLite table rebuild, and the two things that would still have broken the migration are the TTY prompt and `PRAGMA foreign_keys=OFF` inside a transaction (2026-07-27)
+
+The load-bearing unknown before implementing the weapon-range storage change was
+whether `drizzle-kit` emits SQLite's table-rebuild dance itself, or whether the
+migration has to be hand-authored SQL with Drizzle demoted to schema definition.
+Claude measured it rather than reasoning about it, with a throwaway probe built
+on the same `drizzle-kit/api` entry points `scripts/compose-schema.ts` already
+uses. Every statement below is pasted from a run, not recalled.
+
+**It emits the rebuild.** drizzle-kit 0.31.10 puts CHECK constraints in
+`CREATE TABLE`, and for ANY column change on a table that carries a CHECK it
+emits the full dance rather than `ALTER TABLE … DROP COLUMN`:
+
+```sql
+PRAGMA foreign_keys=OFF;
+CREATE TABLE `__new_weapons` ( … CONSTRAINT "weapons_range_check" CHECK(…) );
+INSERT INTO `__new_weapons`("id", …) SELECT "id", … FROM `weapons`;
+DROP TABLE `weapons`;
+ALTER TABLE `__new_weapons` RENAME TO `weapons`;
+PRAGMA foreign_keys=ON;
+CREATE INDEX `weapons_owner_index` ON `weapons` (`owner_id`);
+```
+
+That closes the question the design was blocked on. Three further facts came out
+of the same probe, and each of them would have produced a broken migration.
+
+**1. The diff we actually want cannot be generated without a TTY.** Dropping
+`range_normal_feet`/`range_long_feet` and adding `range_kind`/`range_near_feet`/
+`range_far_feet` in one step is a drop-plus-add on one table, which is exactly
+the shape drizzle-kit resolves by asking a human whether it is a rename:
+
+```
+THREW: Interactive prompts require a TTY terminal (process.stdin.isTTY or
+process.stdout.isTTY is false).
+    at promptColumnsConflicts (drizzle-kit/api.mjs:20971)
+```
+
+Add-only and drop-only diffs both generate silently. So the migration is two
+generated steps, not one — and the gap between them is the natural home for the
+data transform, which drizzle cannot express anyway: its `INSERT … SELECT` is a
+straight same-name column copy and can never carry the
+`CASE WHEN normal IS NULL AND long IS NULL THEN 'none' …` mapping.
+
+**2. `PRAGMA foreign_keys=OFF` is a silent no-op inside a transaction.**
+Measured on SQLite 3.50.4: `BEGIN EXCLUSIVE; PRAGMA foreign_keys=OFF;` then
+reading the pragma back returns `{ foreign_keys: 1 }`. It does not error. It
+just does not take. Wrapping drizzle's emitted script in `BEGIN EXCLUSIVE` for
+atomicity — which is what the design proposed — therefore runs the whole rebuild
+with foreign keys still ON, and `DROP TABLE weapon_templates` dies:
+
+```
+2. drizzle script INSIDE a transaction (pragma inert)
+  THREW FOREIGN KEY constraint failed
+```
+
+because `background_equipment_items.weapon_template_id` references it
+`ON DELETE restrict` (`src/db/schema.sql:61`).
+
+**3. `PRAGMA defer_foreign_keys=ON` does not rescue it.** It is the pragma that
+DOES take inside a transaction, so it is the obvious fix, and it is the wrong
+one — RESTRICT is enforced even when the constraint is deferred:
+
+```
+3. INSIDE a transaction with defer_foreign_keys=ON
+  THREW FOREIGN KEY constraint failed
+```
+
+**What works is SQLite's documented ordering**: `foreign_keys=OFF` BEFORE
+`BEGIN`, rebuild, `PRAGMA foreign_key_check`, `COMMIT`, `foreign_keys=ON`. That
+keeps atomicity and keeps the child row. Verified both ways — on success the
+child survives and `foreign_key_check` is empty; on a failure injected after the
+rebuild, `ROLLBACK` puts the old columns back:
+
+```
+4. SQLite documented order: foreign_keys=OFF BEFORE begin
+  OK  child=[{"id":1,"weapon_template_id":7}]
+      parent=[{"id":7,"name":"Longbow","range_kind":"ranged",
+               "range_near_feet":150,"range_far_feet":600}]
+      foreign_key_check=[]
+  rolled back on: injected failure after rebuild
+  columns now: id, name, range_normal_feet, range_long_feet
+```
+
+BINDING for the migration runner: the pragma is set outside the transaction, not
+inside it; `PRAGMA foreign_key_check` runs before `COMMIT` and a non-empty
+result aborts; and no migration step may assume drizzle's `INSERT … SELECT`
+carried a value transform. The probe was deleted; this entry is the record.
+
 ## D41 — OWNER: the share wire is versioned by a frozen registry; v1 freezes exactly as shipped, and v2 is weapon range plus the placeholders move (2026-07-27)
 
 The owner's ruling, verbatim in two parts: *"With the ordered tuples, do we ship
