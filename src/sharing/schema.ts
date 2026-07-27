@@ -33,10 +33,11 @@ import {
   SHEET_SHARE_COUNTS,
   SHEET_TEXT_LIMITS,
 } from '../domain/sheet-limits';
+import { CURRENT_CHARACTER_SHARE_VERSION } from './wire-schemas';
 
 export const CHARACTER_SHARE_FORMAT =
   'dnd-multiclass-spells-character-share' as const;
-export const CHARACTER_SHARE_VERSION = 1 as const;
+export const CHARACTER_SHARE_VERSION = CURRENT_CHARACTER_SHARE_VERSION;
 
 export const SHARE_LIMITS = Object.freeze({
   encodedCharacters: 131_072,
@@ -227,7 +228,8 @@ export interface ShareWeapon {
    * on a link somebody has already sent.
    *
    * It is APPENDED to the wire tuple rather than inserted in the middle; see
-   * `WEAPON_TUPLE_LENGTHS` in `codec.ts` for why that position is load-bearing.
+   * the v1 weapon variants in `wire-schemas/v1.ts` for why that position is
+   * load-bearing.
    */
   readonly proficiency_category?: string;
   readonly damage: WeaponDamage;
@@ -393,9 +395,8 @@ export interface ShareSpeciesTrait {
  * Effects are no longer species-scoped — that severance is the whole point of
  * the inversion — so nesting them under the origin would re-create the coupling
  * being removed, and would change the meaning of element 13 for links already in
- * the wild. The root has grown 11 -> 12 -> 13 -> 14 with
- * `CHARACTER_SHARE_VERSION` pinned at 1 every time; this is the established
- * move, not a format break.
+ * the wild. Version 1 freezes every arity it shipped; any subsequent wire
+ * change uses a new root version and an explicit migration.
  *
  * `sourceRef` names a `sources[].id` — the SAME reference space
  * `selections[].ref` uses — and is optional because `source_instance_id` is
