@@ -368,3 +368,135 @@ describe('the same contracts on the way out', () => {
     ).toBe('');
   });
 });
+
+/**
+ * F11 AT THE BOUNDARY THAT ACTUALLY RECEIVES FOREIGN DOCUMENTS.
+ *
+ * `character_class_levels.level` is the number every sheet computation runs off
+ * and, until F11 was implemented, the least-constrained level in the schema: no
+ * CHECK (deliberately — see `db/schema/character.ts`) and a `positiveInt`
+ * contract with no maximum. F11 measured 21, 9999 and 1,099,511,627,776 all
+ * accepted here while share import refused every one of them.
+ *
+ * THE EXPORT CASE IS THE ONE WORTH HAVING. These contracts gate BOTH directions,
+ * so the question a tightening has to answer is whether an existing database can
+ * be stranded — whether export can produce a document its own importer refuses.
+ * It cannot, and the case below is what proves it rather than asserting it: the
+ * refusal happens on the way OUT, naming the row, so the user is told at the
+ * moment they make the backup rather than at the moment they need it.
+ */
+describe('F11: the per-class level bound, in both directions', () => {
+  async function characterAtLevel(level: number): Promise<{
+    db: DatabaseContext;
+    characterId: number;
+  }> {
+    const db = await database();
+    const catalog = seedCatalog(db);
+    const characterId = db.exec(
+      "INSERT INTO characters (name) VALUES ('Epic Wizard')",
+    ).lastInsertId;
+    // RAW SQL, and it has to be: no writer in this application will store this
+    // level (`add-source.ts` and `update-class.ts` both throw), and the column
+    // carries no CHECK to refuse it either. That combination is precisely the
+    // state a hand-edited backup would have produced before this bound existed.
+    db.exec(
+      `INSERT INTO character_class_levels
+         (character_id, class_definition_id, level, is_starting_class)
+       VALUES (?, ?, ?, 1)`,
+      [characterId, catalog.classId, level],
+    );
+    return { db, characterId };
+  }
+
+  it('exports a character at the boundary itself', async () => {
+    const { db, characterId } = await characterAtLevel(20);
+    const document = exportCharacterBackup(
+      db,
+      characterId,
+      '2026-07-23T12:00:00.000Z',
+    );
+    expect(document.tables.character_class_levels[0]?.level).toBe(20);
+    const target = await targetDatabase();
+    expect(() => importCharacterBackup(target, document)).not.toThrow();
+    expect(
+      target.scalar('SELECT level FROM character_class_levels LIMIT 1'),
+    ).toBe(20);
+  });
+
+  it.each([21, 9999, 1_099_511_627_776])(
+    'refuses an imported document carrying level %i and writes nothing',
+    async (level) => {
+      const { db, characterId } = await characterAtLevel(3);
+      const document = exportCharacterBackup(
+        db,
+        characterId,
+        '2026-07-23T12:00:00.000Z',
+      );
+      const corrupt = structuredClone(document);
+      (corrupt.tables.character_class_levels[0] as Record<string, unknown>).level =
+        level;
+
+      const target = await targetDatabase();
+      const before = rowCounts(target);
+      expect(() => importCharacterBackup(target, corrupt)).toThrow(
+        BackupValidationError,
+      );
+      expect(() => importCharacterBackup(target, corrupt)).toThrow(
+        'Character backup tables.character_class_levels[0].level:',
+      );
+      expect(rowCounts(target)).toEqual(before);
+    },
+  );
+
+  it('refuses to EXPORT a stored level above 20, so no unopenable backup is made', async () => {
+    const { db, characterId } = await characterAtLevel(21);
+    expect(() =>
+      exportCharacterBackup(db, characterId, '2026-07-23T12:00:00.000Z'),
+    ).toThrow(
+      'Character backup tables.character_class_levels[0].level: Too big: expected number to be <=20.',
+    );
+  });
+
+  it('accepts a COMBINED total over 20, which is a sheet warning and not a refusal', async () => {
+    // D11 part 2 and the half of F11 that stayed out of the contracts. Wizard 20
+    // plus a second class at 5 is 25 total: illegal by the SRD, refused by the
+    // guided builder and by share import, and ACCEPTED here on purpose. Losing
+    // the whole character would be a worse answer than stating the number, which
+    // `total_level_exceeds_maximum` in `src/rules/sheet.ts` does.
+    const { db, characterId } = await characterAtLevel(20);
+    const secondClassId = db.exec(
+      `INSERT INTO class_definitions
+         (content_key, name, rules_edition, spellcasting_ability, progression_type)
+       VALUES ('class:fighter', 'Fighter', '2024', 'strength', 'none')`,
+    ).lastInsertId;
+    db.exec(
+      `INSERT INTO character_class_levels
+         (character_id, class_definition_id, level, is_starting_class)
+       VALUES (?, ?, 5, 0)`,
+      [characterId, secondClassId],
+    );
+    const document = exportCharacterBackup(
+      db,
+      characterId,
+      '2026-07-23T12:00:00.000Z',
+    );
+    expect(
+      document.tables.character_class_levels
+        .map((row) => Number(row.level))
+        .reduce((sum, level) => sum + level, 0),
+    ).toBe(25);
+
+    const target = await targetDatabase();
+    target.exec(
+      `INSERT INTO class_definitions
+         (content_key, name, rules_edition, spellcasting_ability, progression_type)
+       VALUES ('class:fighter', 'Fighter', '2024', 'strength', 'none')`,
+    );
+    expect(() => importCharacterBackup(target, document)).not.toThrow();
+    expect(
+      Number(
+        target.scalar('SELECT SUM(level) FROM character_class_levels') ?? 0,
+      ),
+    ).toBe(25);
+  });
+});

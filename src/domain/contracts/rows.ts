@@ -134,17 +134,59 @@ const positiveInt = z.int().min(1);
 const abilityScore = z.int().min(1).max(30);
 
 /**
- * A CLASS level, 1..20, matching the CHECK its column already carries.
+ * A CLASS level, 1..20.
+ *
+ * THREE COLUMNS USE THIS AND THEY DO NOT ALL HAVE THE SAME SAFETY ARGUMENT.
+ * Two of them are backed by a CHECK; the third is not, and pretending otherwise
+ * was the whole of F11.
+ *
+ * ── The two CHECK-backed columns (`character_hit_point_rolls.class_level`,
+ * `class_weapon_mastery_counts.class_level`) ──
  *
  * D13 recorded this as a divergence and said which way to close it: the schema
  * constrains `class_weapon_mastery_counts.class_level` to 1..20, the contract
  * accepted any positive integer, and the fix is to TIGHTEN the contract rather
- * than loosen the constraint.
+ * than loosen the constraint. Tightening cannot lose data there. The CHECK has
+ * been on the table since it was created, so no database can hold a row outside
+ * the range, and a portable backup is generated from such a database — there is
+ * no legitimate document carrying a class level of 0 or 21 for this contract to
+ * reject.
  *
- * Tightening cannot lose data. The CHECK has been on the table since it was
- * created, so no database can hold a row outside the range, and a portable
- * backup is generated from such a database — there is no legitimate document
- * carrying a class level of 0 or 21 for this contract to reject.
+ * ── `character_class_levels.level`, which HAS NO CHECK — F11, implemented ──
+ *
+ * THE PARAGRAPH ABOVE DOES NOT TRANSFER, and F11 said so explicitly: the
+ * argument there rests on the CHECK, and this column deliberately has none
+ * (`db/schema/character.ts` records why —
+ * `tests/integration/rules/class-progression.test.ts` writes level 21 through
+ * RAW SQL to force a missing progression row, which no contract sees). So the
+ * database CAN hold a 21 and the safety argument has to be made from the
+ * WRITERS instead of from the storage:
+ *
+ *  1. **No writer in this application can emit one.** All three bound the value
+ *     before it is stored — `add-source.ts:220` and `update-class.ts:111` throw
+ *     "Class level must be between 1 and 20", and share import refuses
+ *     `classes[i].level` outside 1..20 in `src/sharing/schema.ts`. So no
+ *     document any version of this app has ever produced carries a level
+ *     outside the range, and the contract rejects nothing a user could own.
+ *  2. **The one path that could deliver a 21 is the one the contracts exist
+ *     for.** `src/backup/character-backup.ts` calls a backup document "a
+ *     foreign artifact written into SQLite verbatim by column name". An
+ *     unbounded level arriving that way reaches the proficiency bonus, the hit
+ *     point maximum and the multiclass slot table and produces plausible wrong
+ *     numbers with no error anywhere — which is the failure the whole layer
+ *     exists to stop, not an edge case it may waive.
+ *  3. **It is symmetric, so it cannot strand a database.** These contracts gate
+ *     the EXPORT path too. A stored 21 therefore fails on the way OUT, naming
+ *     the row, rather than producing a document this application's own importer
+ *     would refuse. That is the outcome to want: the alternative — export
+ *     succeeds, import fails — is a backup whose uselessness is only discovered
+ *     when it is needed. Pinned by `tests/integration/backup/row-contracts.ts`.
+ *
+ * WHAT THIS DELIBERATELY DOES NOT DO is bound the COMBINED total across
+ * classes. That rule is real and the guided builder enforces it, but D11 part 2
+ * puts it on the sheet, not at the boundary: refusing a whole document over a
+ * multiclass total would lose a character to state a number. See
+ * `total_level_exceeds_maximum` in `src/rules/sheet.ts`.
  */
 const classLevel = z.int().min(1).max(20);
 
@@ -272,7 +314,7 @@ export const NARROWED_REFINEMENTS: readonly {
     name: 'classLevel',
     rejects: 21,
     reason:
-      'Matches the `class_level BETWEEN 1 AND 20` CHECK the column has carried since the table was created, so no stored row and no backup generated from one can fall outside it (D13).',
+      'Two of the three columns match a `class_level BETWEEN 1 AND 20` CHECK carried since their table was created, so no stored row and no backup generated from one can fall outside it (D13). The third, `character_class_levels.level`, has NO CHECK and rests on a different argument: all three of its writers refuse a level outside 1..20, so no document this application has produced carries one (F11).',
   },
   {
     name: 'nonNegativeInt',
@@ -403,7 +445,11 @@ const REFINEMENTS = {
   'character_class_levels.character_id': positiveInt,
   'character_class_levels.class_definition_id': positiveInt,
   'character_class_levels.subclass_definition_id': positiveInt,
-  'character_class_levels.level': positiveInt,
+  // F11: the ONLY level column in the schema with neither a CHECK nor a bounded
+  // contract, and the number every sheet computation runs off. See `classLevel`
+  // above for why the CHECK-backed columns' safety argument does not apply here
+  // and what replaces it.
+  'character_class_levels.level': classLevel,
   'character_class_levels.is_starting_class': sqlBool,
   'character_class_levels.spellcasting_ability_override': abilityEnum,
   'character_class_levels.notes': sqlText,
