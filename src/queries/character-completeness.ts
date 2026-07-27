@@ -83,6 +83,22 @@ export interface NoSkillProficienciesItem {
  * pretending: `character_skill_proficiencies` is a flat set with no provenance,
  * so all this can compare is the TOTAL owed against the TOTAL ticked. That is
  * why `outstanding` is a number and not a list of grants.
+ *
+ * AND `chosen` COUNTS EVERY TICK, NOT ONLY THE CLASS-SOURCED ONES. A review
+ * measured what that costs and the printed sentence now states it: the
+ * entitlement is class-only, but a skill ticked because of a BACKGROUND or a
+ * SPECIES lands in the same flat table, so such a tick pays off a class grant
+ * here and can silence the item. THE ERROR DIRECTION IS SAFE — it can only
+ * UNDER-report an outstanding choice, never invent one — so nobody is sent to
+ * pick a skill they do not owe.
+ *
+ * FIXING IT PROPERLY IS A PROVENANCE COLUMN on `character_skill_proficiencies`,
+ * a `db/schema/` change with its own backup, share and snapshot arms (D24) and
+ * its own decision about what an imported tick with no provenance means. That is
+ * not in this item's reach. Guessing the provenance from the skill's name —
+ * "Arcana looks like a Wizard tick" — is the name matching this application
+ * refuses. The sheet's `background_skills_are_text` gap already tells a reader
+ * that background skills are unmodelled; this says what that costs HERE.
  */
 export interface UnmadeMulticlassSkillChoiceItem {
   readonly kind: 'unmade_multiclass_skill_choice';
@@ -792,7 +808,9 @@ export const unmadeMulticlassSkillChoice: CompletenessCheck = {
           `${chosen === 1 ? 'is' : 'are'} ticked, so ` +
           `${String(outstanding)} remain${outstanding === 1 ? 's' : ''}. ` +
           'Which tick pays for which grant is not recorded, so this compares ' +
-          'the totals.',
+          'the totals — and the ticked count is every skill on the sheet, ' +
+          'including any ticked for a background or a species, which this ' +
+          'application does not tell apart from a class one.',
         remedy:
           'Tick the outstanding skills on the character sheet, choosing them ' +
           'from the list named above.',

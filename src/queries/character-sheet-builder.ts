@@ -39,8 +39,6 @@ import {
   sheetProficiencyBonus,
   skillModifier,
   totalCharacterLevel,
-  type ClassProficiencySources,
-  type ClassWeaponProficiency,
   type HitPointRolls,
   type SheetArmor,
   type SheetClass,
@@ -59,6 +57,10 @@ import {
 } from '../rules/species-effects';
 import type { AttacksPerAction } from '../rules/extra-attack';
 import { CharacterNotFoundError } from './character-crud';
+import {
+  ClassProficiencyLookup,
+  EMPTY_CLASS_PROFICIENCIES,
+} from './class-proficiency-lookup';
 
 /**
  * THE CHARACTER SHEET, ASSEMBLED AND THROWN AWAY.
@@ -289,25 +291,28 @@ interface SheetClassJoinRow {
 }
 
 /**
- * What a class with no seeded sheet content grants: NOTHING, in both roles.
+ * The same sentence about the same subject, said once.
  *
- * NOT a guess and not a placeholder. A homebrew or imported class has no
- * `class_armor_training` and no `class_weapon_proficiencies` rows, so it grants
- * no proficiency — and the honest consequence is that a character whose only
- * class is that one is told every weapon is unchecked. Substituting "simple
- * weapons, like most classes" here would be the `?? 8` failure D24 records, in a
- * place where the invented value silently adds a proficiency bonus.
+ * The KEY IS THE WHOLE WARNING — code and message — because the code alone is
+ * not a subject: `weapon_not_proficient` is one code and a character may have
+ * three weapons it is true of, and collapsing those to one would hide two of
+ * them. Two warnings whose message is byte-for-byte identical are the same
+ * fact, and the only way to produce a pair of those is for two derivations to
+ * have gone through one resolver.
  */
-const EMPTY_CLASS_PROFICIENCIES: ClassProficiencySources = Object.freeze({
-  initial: Object.freeze({
-    armor_training: Object.freeze([]),
-    weapon_proficiencies: Object.freeze([]),
-  }),
-  on_entry: Object.freeze({
-    armor_training: Object.freeze([]),
-    weapon_proficiencies: Object.freeze([]),
-  }),
-});
+function distinctWarnings(
+  warnings: readonly SheetWarning[],
+): readonly SheetWarning[] {
+  const seen = new Set<string>();
+  return warnings.filter((warning) => {
+    const key = `${warning.code} ${warning.message}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
 
 const sheetClassRow: RowCodec<SheetClassJoinRow> = (row) => ({
   class_definition_id: sqlInteger(row, 'class_definition_id'),
@@ -655,25 +660,28 @@ export class CharacterSheetBuilder {
       // slots, an unmet Strength requirement, no or several starting classes, an
       // assumed hit die, a roll no such die could show, a stored value outside
       // its own vocabulary), and belong beside the number they changed.
-      warnings: [
+      // THREE OF THE FIVE ARMS CARRY `startingClass`'S DEGRADATION WARNINGS,
+      // because three of them go through it: `hitPointMaximum`,
+      // `savingThrowProficiencies` and `classProficiencyGrants`. The filter here
+      // used to compare `proficiencies` against `saves` ALONE, so a character
+      // with no starting class flagged read "No class is marked as this
+      // character's starting class" TWICE — once from hit points and once from
+      // saves — which is the very thing the filter was written to prevent and a
+      // review measured it still happening.
+      //
+      // Deduplicated across the WHOLE list rather than between two named arms,
+      // on `code`+`message` and not on `code`: two weapons that are both not
+      // proficient are two facts and print twice; the same sentence about the
+      // same subject is one fact, and a page saying it twice reads as two
+      // different problems. Order is preserved, so each survivor still sits
+      // where the arm that produced it put it.
+      warnings: distinctWarnings([
         ...stored.warnings,
         ...hitPoints.warnings,
         ...ac.warnings,
         ...saves.warnings,
-        // `saves` and `proficiencies` BOTH carry `startingClass`'s degradation
-        // warnings, because both go through it. Deduplicated on `code`+`message`
-        // rather than by dropping one arm's warnings wholesale: the two sets
-        // overlap today and need not tomorrow, and a page that printed
-        // "no starting class" twice would read as two different problems.
-        ...proficiencies.warnings.filter(
-          (warning) =>
-            !saves.warnings.some(
-              (existing) =>
-                existing.code === warning.code &&
-                existing.message === warning.message,
-            ),
-        ),
-      ],
+        ...proficiencies.warnings,
+      ]),
       gaps: SHEET_GAPS,
     };
   }
@@ -702,7 +710,13 @@ export class CharacterSheetBuilder {
     // is an N+1 already; three more of the same shape would make it 4xN on every
     // sheet read. Both of these are scoped to the character's own classes, so
     // they read the same rows the loop would have.
-    const proficiencies = this.#classProficiencies(characterId);
+    //
+    // AND THE READER LIVES OUTSIDE THIS CLASS NOW, because the weapons panel
+    // asks the same question and a second copy of these two queries would be a
+    // second answer. See `ClassProficiencyLookup`.
+    const proficiencies = new ClassProficiencyLookup(this.db).sources(
+      characterId,
+    );
     return rows.map((row): SheetClass => {
       const classDefinitionId = row.class_definition_id;
       const contentRow = content.find(
@@ -744,127 +758,6 @@ export class CharacterSheetBuilder {
         ...(contentRow ?? {}),
       };
     });
-  }
-
-  /**
-   * Every class's armour training and weapon proficiency, BOTH GRANTS, keyed by
-   * class definition id.
-   *
-   * THE ENTRY SUBSET IS READ OFF THE SAME ROWS AS THE INITIAL SET, filtered by
-   * `granted_on_multiclass_entry`. That is what makes "the entry set is a subset
-   * of the initial set" STRUCTURAL rather than promised: there is one row per
-   * (class, category), and the flag decides whether it appears in the second
-   * list as well as the first. A category not trained at all has no row, so it
-   * can appear in neither.
-   *
-   * A CLASS WITH NO SEEDED CONTENT GETS EMPTY LISTS AND NOT A GUESS, matching
-   * how `hit_die` carries its own absence: an imported class this application
-   * holds no Core Traits row for grants nothing here, and the sheet says every
-   * weapon is unchecked rather than inventing simple-weapon proficiency for it.
-   */
-  #classProficiencies(
-    characterId: number,
-  ): ReadonlyMap<number, ClassProficiencySources> {
-    const found = new Map<number, {
-      initialArmor: ArmorCategory[];
-      entryArmor: ArmorCategory[];
-      initialWeapons: ClassWeaponProficiency[];
-      entryWeapons: ClassWeaponProficiency[];
-    }>();
-    const bucket = (classDefinitionId: number) => {
-      const existing = found.get(classDefinitionId);
-      if (existing !== undefined) {
-        return existing;
-      }
-      const fresh = {
-        initialArmor: [] as ArmorCategory[],
-        entryArmor: [] as ArmorCategory[],
-        initialWeapons: [] as ClassWeaponProficiency[],
-        entryWeapons: [] as ClassWeaponProficiency[],
-      };
-      found.set(classDefinitionId, fresh);
-      return fresh;
-    };
-
-    for (const row of this.db.all(
-      `SELECT training.class_definition_id AS class_definition_id,
-              training.category AS category,
-              training.granted_on_multiclass_entry AS on_entry
-       FROM class_armor_training AS training
-       WHERE training.class_definition_id IN (
-               SELECT class_definition_id FROM character_class_levels
-                WHERE character_id = ?)
-       ORDER BY training.category`,
-      [characterId],
-      (entry) => ({
-        class_definition_id: sqlInteger(entry, 'class_definition_id'),
-        category: sqlString(entry, 'category'),
-        on_entry: sqlBoolean(entry, 'on_entry'),
-      }),
-    )) {
-      // A stored category outside the vocabulary is DROPPED rather than
-      // substituted, and the difference from `enumOr` above is deliberate: an
-      // armour ROW the character wears must still produce a number, so its enum
-      // degrades to a stated approximation. A catalog GRANT that is not a
-      // category grants nothing, and inventing `light` for it would hand
-      // somebody a training they were never given.
-      if (!isEnumValue(armorCategories, row.category)) {
-        continue;
-      }
-      const target = bucket(row.class_definition_id);
-      target.initialArmor.push(row.category);
-      if (row.on_entry) {
-        target.entryArmor.push(row.category);
-      }
-    }
-
-    for (const row of this.db.all(
-      `SELECT proficiency.class_definition_id AS class_definition_id,
-              proficiency.category AS category,
-              proficiency.property_qualifier AS property_qualifier,
-              proficiency.granted_on_multiclass_entry AS on_entry
-       FROM class_weapon_proficiencies AS proficiency
-       WHERE proficiency.class_definition_id IN (
-               SELECT class_definition_id FROM character_class_levels
-                WHERE character_id = ?)
-       ORDER BY proficiency.category`,
-      [characterId],
-      (entry) => ({
-        class_definition_id: sqlInteger(entry, 'class_definition_id'),
-        category: sqlString(entry, 'category'),
-        property_qualifier: sqlNullableString(entry, 'property_qualifier'),
-        on_entry: sqlBoolean(entry, 'on_entry'),
-      }),
-    )) {
-      if (!isEnumValue(weaponProficiencyCategories, row.category)) {
-        continue;
-      }
-      const grant: ClassWeaponProficiency = {
-        category: row.category,
-        property_qualifier: row.property_qualifier,
-      };
-      const target = bucket(row.class_definition_id);
-      target.initialWeapons.push(grant);
-      if (row.on_entry) {
-        target.entryWeapons.push(grant);
-      }
-    }
-
-    return new Map(
-      [...found].map(([classDefinitionId, entry]) => [
-        classDefinitionId,
-        {
-          initial: {
-            armor_training: entry.initialArmor,
-            weapon_proficiencies: entry.initialWeapons,
-          },
-          on_entry: {
-            armor_training: entry.entryArmor,
-            weapon_proficiencies: entry.entryWeapons,
-          },
-        } satisfies ClassProficiencySources,
-      ]),
-    );
   }
 
   /**

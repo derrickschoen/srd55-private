@@ -7,7 +7,7 @@ import {
 } from '../../../src/rules/multiclass-proficiency';
 import {
   classProficiencyGrants,
-  type ClassProficiencies,
+  type ClassProficiencySources,
   type SheetClass,
 } from '../../../src/rules/sheet';
 
@@ -33,69 +33,101 @@ import {
  *    second class has different saves shows it.
  */
 
-/** The Fighter's Core Traits row: `class-core-traits.txt`, Fighter block. */
-const FIGHTER_INITIAL: ClassProficiencies = {
-  armor_training: ['light', 'medium', 'heavy', 'shield'],
+/**
+ * THE FIXTURES ARE ROW LISTS WITH A FLAG, EXACTLY AS THE TABLES STORE THEM.
+ *
+ * They used to be two independent `ClassProficiencies` — a Core Traits set and
+ * an entry set, written out separately — and a review pointed out what that
+ * allowed: nothing stopped a fixture granting on ENTRY something the class's own
+ * row never granted, which is a character no seeded database can produce. One
+ * row list per class with `on_entry` per row makes that unwritable here for the
+ * same reason it is unwritable in `class_armor_training`: a category with no row
+ * has nothing to flag.
+ *
+ * Every flag below is transcribed from `multiclass-entry-grants.txt` and every
+ * row from `class-core-traits.txt`, with the source beside each class.
+ */
+
+/**
+ * Fighter — Core Traits: Light/Medium/Heavy/Shields, Simple and Martial.
+ * Entry (`multiclass-entry-grants.txt:77-80`): Light/Medium/Shields, Martial.
+ * HEAVY IS THE ROW THAT IS NOT FLAGGED, and Simple is the weapon that is not.
+ */
+const FIGHTER_ROWS: ClassProficiencySources = {
+  armor_training: [
+    { grant: 'light', on_entry: true },
+    { grant: 'medium', on_entry: true },
+    { grant: 'heavy', on_entry: false },
+    { grant: 'shield', on_entry: true },
+  ],
   weapon_proficiencies: [
-    { category: 'simple', property_qualifier: null },
-    { category: 'martial', property_qualifier: null },
+    { grant: { category: 'simple', property_qualifier: null }, on_entry: false },
+    { grant: { category: 'martial', property_qualifier: null }, on_entry: true },
   ],
 };
 
-/** The Fighter's entry clause: `multiclass-entry-grants.txt:77-80`. */
-const FIGHTER_ENTRY: ClassProficiencies = {
-  armor_training: ['light', 'medium', 'shield'],
-  weapon_proficiencies: [{ category: 'martial', property_qualifier: null }],
-};
-
-/** The Barbarian's Core Traits row. */
-const BARBARIAN_INITIAL: ClassProficiencies = {
-  armor_training: ['light', 'medium', 'shield'],
+/**
+ * Barbarian — Core Traits: Light/Medium/Shields, Simple and Martial.
+ * Entry (`:24-25`): Shields ALONE and Martial alone. The subset is not "drop the
+ * top tier": Light and Medium are trained and are NOT flagged.
+ */
+const BARBARIAN_ROWS: ClassProficiencySources = {
+  armor_training: [
+    { grant: 'light', on_entry: false },
+    { grant: 'medium', on_entry: false },
+    { grant: 'shield', on_entry: true },
+  ],
   weapon_proficiencies: [
-    { category: 'simple', property_qualifier: null },
-    { category: 'martial', property_qualifier: null },
+    { grant: { category: 'simple', property_qualifier: null }, on_entry: false },
+    { grant: { category: 'martial', property_qualifier: null }, on_entry: true },
   ],
 };
 
-/** The Barbarian's entry clause: `:24-25`. Shields alone, and Martial alone. */
-const BARBARIAN_ENTRY: ClassProficiencies = {
-  armor_training: ['shield'],
-  weapon_proficiencies: [{ category: 'martial', property_qualifier: null }],
-};
-
-/** The Wizard's Core Traits row: Simple weapons, Armor Training None. */
-const WIZARD_INITIAL: ClassProficiencies = {
+/**
+ * Wizard — Core Traits: Simple weapons, Armor Training None.
+ * Entry (`:166-167`): the hit die and nothing else, so nothing is flagged.
+ */
+const WIZARD_ROWS: ClassProficiencySources = {
   armor_training: [],
-  weapon_proficiencies: [{ category: 'simple', property_qualifier: null }],
+  weapon_proficiencies: [
+    { grant: { category: 'simple', property_qualifier: null }, on_entry: false },
+  ],
 };
 
-/** The Wizard's entry clause: `:166-167`. The hit die and nothing else. */
-const EMPTY: ClassProficiencies = {
+/** A class that grants nothing in either role — a homebrew import, say. */
+const NO_ROWS: ClassProficiencySources = {
   armor_training: [],
   weapon_proficiencies: [],
 };
 
-/** The Rogue's Core Traits row, qualifier verbatim. */
-const ROGUE_INITIAL: ClassProficiencies = {
-  armor_training: ['light'],
+/**
+ * Rogue — Core Traits: Light armour, Simple, and Martial qualified by
+ * "Finesse or Light" verbatim.
+ * Entry (`:127-131`): Light armour, and NO weapons at all.
+ */
+const ROGUE_ROWS: ClassProficiencySources = {
+  armor_training: [{ grant: 'light', on_entry: true }],
   weapon_proficiencies: [
-    { category: 'simple', property_qualifier: null },
-    { category: 'martial', property_qualifier: 'Finesse or Light' },
+    { grant: { category: 'simple', property_qualifier: null }, on_entry: false },
+    {
+      grant: { category: 'martial', property_qualifier: 'Finesse or Light' },
+      on_entry: false,
+    },
   ],
 };
 
-/** The Rogue's entry clause: `:127-131`. Light armour, and NO weapons. */
-const ROGUE_ENTRY: ClassProficiencies = {
-  armor_training: ['light'],
-  weapon_proficiencies: [],
-};
-
-/** The Monk's Core Traits row: Simple, plus Martial qualified by Light. */
-const MONK_INITIAL: ClassProficiencies = {
+/**
+ * Monk — Core Traits: no armour, Simple, and Martial qualified by "Light".
+ * Entry (`:88-89`): the hit die alone.
+ */
+const MONK_ROWS: ClassProficiencySources = {
   armor_training: [],
   weapon_proficiencies: [
-    { category: 'simple', property_qualifier: null },
-    { category: 'martial', property_qualifier: 'Light' },
+    { grant: { category: 'simple', property_qualifier: null }, on_entry: false },
+    {
+      grant: { category: 'martial', property_qualifier: 'Light' },
+      on_entry: false,
+    },
   ],
 };
 
@@ -105,8 +137,7 @@ function sheetClass(
     readonly starting?: boolean;
     readonly level?: number;
     readonly saves?: readonly ('strength' | 'constitution' | 'intelligence' | 'wisdom' | 'dexterity' | 'charisma')[];
-    readonly initial: ClassProficiencies;
-    readonly onEntry: ClassProficiencies;
+    readonly rows: ClassProficiencySources;
   },
 ): SheetClass {
   return {
@@ -115,7 +146,7 @@ function sheetClass(
     hit_die: 8,
     is_starting_class: options.starting === true,
     saving_throws: options.saves ?? [],
-    proficiencies: { initial: options.initial, on_entry: options.onEntry },
+    proficiencies: options.rows,
   };
 }
 
@@ -124,16 +155,14 @@ const FIGHTER = (starting: boolean): SheetClass =>
     starting,
     level: 5,
     saves: ['strength', 'constitution'],
-    initial: FIGHTER_INITIAL,
-    onEntry: FIGHTER_ENTRY,
+    rows: FIGHTER_ROWS,
   });
 
 const BARBARIAN = (starting: boolean): SheetClass =>
   sheetClass('Barbarian', {
     starting,
     saves: ['strength', 'constitution'],
-    initial: BARBARIAN_INITIAL,
-    onEntry: BARBARIAN_ENTRY,
+    rows: BARBARIAN_ROWS,
   });
 
 const WIZARD = (starting: boolean): SheetClass =>
@@ -141,24 +170,21 @@ const WIZARD = (starting: boolean): SheetClass =>
     starting,
     level: 3,
     saves: ['intelligence', 'wisdom'],
-    initial: WIZARD_INITIAL,
-    onEntry: EMPTY,
+    rows: WIZARD_ROWS,
   });
 
 const MONK = (starting: boolean): SheetClass =>
   sheetClass('Monk', {
     starting,
     saves: ['strength', 'dexterity'],
-    initial: MONK_INITIAL,
-    onEntry: EMPTY,
+    rows: MONK_ROWS,
   });
 
 const ROGUE = (starting: boolean): SheetClass =>
   sheetClass('Rogue', {
     starting,
     saves: ['dexterity', 'intelligence'],
-    initial: ROGUE_INITIAL,
-    onEntry: ROGUE_ENTRY,
+    rows: ROGUE_ROWS,
   });
 
 function weapon(
@@ -466,13 +492,18 @@ describe('the Rogue and Monk qualifier, evaluated as a set union (D28 §2)', () 
     const imported = classProficiencyGrants([
       sheetClass('Runeblade', {
         starting: true,
-        initial: {
+        rows: {
           armor_training: [],
           weapon_proficiencies: [
-            { category: 'martial', property_qualifier: 'inscribed with a rune' },
+            {
+              grant: {
+                category: 'martial',
+                property_qualifier: 'inscribed with a rune',
+              },
+              on_entry: false,
+            },
           ],
         },
-        onEntry: EMPTY,
       }),
     ]).grants;
     const verdict = weaponProficiency(weapon('Greatsword'), imported);
@@ -481,6 +512,58 @@ describe('the Rogue and Monk qualifier, evaluated as a set union (D28 §2)', () 
     expect(
       verdict.kind === 'qualifier_not_evaluated' ? verdict.qualifiers : [],
     ).toEqual(['inscribed with a rune']);
+  });
+
+  it('does not let a word that names an Object member through the lookup', () => {
+    // A review found this. While the recognised words lived in an OBJECT
+    // literal, `QUALIFIER_WORDS['constructor']` was a FUNCTION rather than
+    // `undefined`, so a qualifier of "constructor" walked past the `unevaluated`
+    // arm entirely: the weapon came back a plain `not_proficient` and the words
+    // this application could not read were never printed. That is the one
+    // outcome this module's contract forbids.
+    //
+    // Only `constructor` and `__proto__` are reachable — the parts are
+    // lowercased before the lookup, so `toString` and `valueOf` never match a
+    // real member — but all four are asserted, because the fix is "no inherited
+    // keys at all" rather than a guard against the two that happen to collide.
+    for (const word of ['constructor', '__proto__', 'toString', 'valueOf']) {
+      const parsed = parseWeaponQualifier(word);
+      expect(parsed.kind, `${word} must not resolve to a column`).toBe(
+        'unevaluated',
+      );
+      expect(parsed.kind === 'unevaluated' ? parsed.text : '').toBe(word);
+    }
+    // And beside a word that IS recognised, which is how it would arrive: the
+    // whole qualifier is unevaluated rather than half-applied.
+    expect(parseWeaponQualifier('Finesse or constructor')).toEqual({
+      kind: 'unevaluated',
+      text: 'Finesse or constructor',
+    });
+  });
+
+  it('prints an Object-member qualifier in the verdict rather than dropping it', () => {
+    // The end of the same defect, at the surface a reader sees: before the fix
+    // this Greatsword was `not_proficient` with nothing naming the qualifier,
+    // and the player had no way to know a condition had been skipped.
+    const imported = classProficiencyGrants([
+      sheetClass('Runeblade', {
+        starting: true,
+        rows: {
+          armor_training: [],
+          weapon_proficiencies: [
+            {
+              grant: { category: 'martial', property_qualifier: 'constructor' },
+              on_entry: false,
+            },
+          ],
+        },
+      }),
+    ]).grants;
+    const verdict = weaponProficiency(weapon('Greatsword'), imported);
+    expect(verdict.kind).toBe('qualifier_not_evaluated');
+    expect(
+      verdict.kind === 'qualifier_not_evaluated' ? verdict.qualifiers : [],
+    ).toEqual(['constructor']);
   });
 
   it('unions the qualified grant with an unqualified one from another class', () => {

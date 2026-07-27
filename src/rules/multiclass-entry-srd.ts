@@ -314,13 +314,20 @@ function weaponProficiencies(sentence: string): WeaponProficiencyCategory[] {
  * THE COUNT IS READ FROM THE WORD, not defaulted to 1. All three print "one",
  * but a `count` that was always 1 would be this parser asserting a number the
  * source did not have to print.
+ *
+ * A `Map` AND NOT AN OBJECT LITERAL. The count word comes out of a `\w+` capture
+ * and `__proto__` and `constructor` are both `\w+`, so an object lookup returns
+ * an inherited MEMBER rather than `undefined` for either — and the unknown-word
+ * throw below, which is what stops an unparsed number reaching an integer
+ * column, would be walked straight past with a function as the `count`. A `Map`
+ * has no inherited keys.
  */
-const SKILL_COUNT_WORDS: Readonly<Record<string, number>> = {
-  one: 1,
-  two: 2,
-  three: 3,
-  four: 4,
-};
+const SKILL_COUNT_WORDS: ReadonlyMap<string, number> = new Map([
+  ['one', 1],
+  ['two', 2],
+  ['three', 3],
+  ['four', 4],
+]);
 
 function skillChoice(
   className: string,
@@ -339,7 +346,7 @@ function skillChoice(
     return { pool: 'none' };
   }
   const word = (match.count as string).toLowerCase();
-  const count = SKILL_COUNT_WORDS[word];
+  const count = SKILL_COUNT_WORDS.get(word);
   if (count === undefined) {
     throw new SrdMulticlassEntryError(
       `${className} grants "${word}" skills, which is not a number word this parser holds.`,
