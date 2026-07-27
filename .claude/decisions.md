@@ -1,5 +1,171 @@
 # Binding scope decisions
 
+## F21 — the migration runner's foreign-key ordering is correct and completely unprotected: the exact defect F20 documents survives every test (2026-07-27)
+
+The runner landed on `chunk/MIGRATE-RUNNER` with the F20 ordering implemented
+properly, and better than asked — `src/db/migrations.ts:101` sets
+`PRAGMA foreign_keys = OFF` before `BEGIN EXCLUSIVE` and then READS IT BACK,
+throwing if it did not take, rather than trusting a comment. The gates were
+green: 2086 tests / 128 files, build exit 0 with both dist controls.
+
+I mutated it anyway, because the ordering is exactly the kind of correctness a
+green suite cannot see. Moved the pragma inside the transaction and deleted the
+readback guard — the precise defect F20 exists to prevent:
+
+```
+tests/unit/db/migrations.test.ts    8 passed
+tests/unit/db + tests/integration   52 files, 613 tests passed
+```
+
+Nothing failed. Restored, re-ran, green.
+
+**Why it survives**, and this is the part worth keeping: every migration in the
+test registry only ADDS AN INDEX. No test migration drops or rebuilds a table
+that another table references. So foreign-key enforcement is never load-bearing
+in any test, and disabling it correctly or not makes no observable difference to
+any assertion. The instrument could not have caught it.
+
+That matters immediately rather than theoretically: the very next migration
+drops `weapon_templates`, which `background_equipment_items.weapon_template_id`
+references `ON DELETE restrict` (`src/db/schema.sql:61`). The first real use of
+this runner is the case none of its tests exercise.
+
+Merge refused pending a fixture migration that rebuilds a RESTRICT parent, so
+the ordering becomes load-bearing and the mutation fails.
+
+**Two changes were not in codex's summary.** `src/duplicates/duplicate-warning-detector.ts`
+lost 124 lines and `src/crypto/sha256.ts` is new — a hand-rolled SHA-256
+extracted so the migration checksum could reuse it. The refactor is right and
+the report should have said so. I proved the extraction behaviour-identical to
+`node:crypto` across 11 inputs including the 55/56/63/64/65-byte padding
+boundaries and multibyte UTF-8, with a negative control confirming the
+comparison can fail. It now has two consumers — duplicate fingerprints and
+migration checksums — and no test of its own; that is queued with the fixture.
+
+Credit where it is due: `does not execute migrations for a current image, after
+proving the probe is live` asserts `migrationExecutions === 1` on an old image
+before asserting `0` on a current one. That is RULE 8 built into the test rather
+than performed once by the reviewer, and it is the pattern to copy.
+
+## D43 — OWNER: the app ships an SRD spell catalogue. This overturns "repo ships NO spell catalog" (2026-07-27)
+
+The owner's instruction, verbatim: *"You should be able to build a spell
+catalogue from the srd spells."*
+
+This supersedes a constraint that has been absolute in every cron brief since
+the project began — `LICENSING ABSOLUTE: only SRD 5.2 (CC-BY). No PHB prose.
+Repo ships NO spell catalog.` The first two clauses stand. The third does not.
+
+**The constraint was over-broad, not wrong.** SRD 5.2.1 is CC-BY-4.0 and its
+spell descriptions are inside it, under the same licence as the weapon and
+armour tables this repo already bundles and seeds (F1, F6, D10). There was never
+a licensing reason to exclude spells specifically; the rule protected against
+PHB prose and then swept up the SRD spells with it. `docs/srd/ATTRIBUTION.md`
+already carries the verbatim notice that makes bundling lawful, and the
+no-other-attribution constraint (no logos, no wordmarks, no claim of
+endorsement) is unchanged.
+
+**What changes for the product.** Until now the headline feature — multiclass
+spell planning — required the user to import their own catalogue JSON
+(increment 18, `src/catalog/catalog-importer.ts`). A character could be built,
+sheeted and shared with an empty spell list. That is why F4's "this is a spell
+planner, not a character model" and the sheet work that followed could both be
+true at once. A bundled catalogue makes the app usable on first open.
+
+**What does not exist yet.** No spell text, and no class spell lists. The 15
+extracts under `docs/srd/source/` are weapons, armour, backgrounds, species,
+skills, mastery, multiclassing and sheet math. Nothing spell-related.
+
+**Cost, stated honestly rather than discovered later.** This is the largest
+content-extraction job in the project by a wide margin: several hundred spells
+with full descriptions plus per-class lists, out of a two-column PDF. The
+pipeline is documented and reproducible — `docs/srd/SOURCE.md` pins the PDF by
+SHA-256, records `pdftotext -layout`, and warns that column slicing must be done
+by CHARACTER not byte because the SRD uses curly quotes and a byte-wise `cut -c`
+produces invalid UTF-8. Both of those mistakes were already made once on much
+smaller tables. Expect them again at this scale.
+
+The homebrew import path stays. D12/Q4's known-set-plus-passthrough is what lets
+a bundled catalogue and a user's Chronomancy spell coexist, and a bundled
+catalogue must never make an imported one unopenable.
+
+## D42 — OWNER: the wizard is the front door, class is a precondition, and the builder equips the character (2026-07-27)
+
+Four rulings, asked as blocking questions and answered directly. Together they
+settle D11 Part 2, which has been the largest unbuilt thing in the project.
+
+### 1. A class-less character is not a state to render. It is a state to prevent.
+
+The question was what the build report and printable list should print for a
+character with no class rows, which today read `character_level = 0` and
+`proficiency_bonus = +1` — both illegal in 5e, both user-visible
+(`build-report.ts:221`, `printable-list.ts:321`), and both caused by a real
+divergence: `spell-access-builder.ts:565` wraps the sum in `Math.max(1, …)`
+while `build-report-builder.ts:414` uses a bare `reduce`.
+
+The ruling: *"Use undetermined. It should only be a temporary state until a user
+has picked a class. I think we can require selecting a class first before
+anything else happens. That simplifies the domain."*
+
+So the answer is **not** a display rule, and that is the point. Flooring to
+level 1 would have invented a fact (D33: a disclosed wrong number is still a
+wrong number). Printing a placeholder would have made a transient wizard state
+into a permanent concept every reader must handle. Making class a PRECONDITION
+removes the case instead of describing it: outside the wizard there is no
+class-less character, and 'undetermined' is only ever seen mid-flow.
+
+Consequences: both call sites still collapse into one `characterLevel()` so they
+cannot drift again; the level floor stops being a defensive guess and becomes an
+invariant with an enforcement point; and D41's refusal to put character level on
+the wire is reinforced, since level remains derived from the class rows.
+
+The tolerant half of D11 is untouched. An IMPORTED or SHARED character with no
+class is still accepted and flagged — the precondition binds the builder, not
+the boundary. That is the same asymmetry D11 Part 2 already established, applied
+to a new field.
+
+### 2. The wizard REPLACES "New character".
+
+Not a second button beside the existing name field. Every new character starts
+in the guided flow. That is the stronger of the options offered and it follows
+from ruling 1 — if class is a precondition, a creation path that produces a
+class-less row contradicts it.
+
+An escape to a blank row still needs to exist for import, share and test
+fixtures, but it is no longer the front door.
+
+### 3. Level 1 first; a comprehensive per-level-up wizard is committed, not optional.
+
+*"Level 1 to start. Want a comprehensive wizard to help with each level up."*
+
+First shipment is species, background, class, ability scores and equipment at
+level 1. The level-up flow is the committed second half of the same build, not a
+maybe — which means the level-1 wizard must be structured so each level's
+choices are a repeatable step rather than a one-off form. It also means the
+per-level SRD content D11 explicitly deferred (subclass sets, feature text) is
+now on the path rather than off it.
+
+### 4. The builder equips the character. Focus and packs are the player's problem.
+
+*"The wizard should help pick out appropriate weapons and armor for a character.
+Most classes wear some sort of armor and all classes normally take some sort of
+weapon. I want to just assume the player will figure out any needed spell focus
+and sort it out at the table."*
+
+This closes Q13's last open item, the A/B option column, and it closes it by
+narrowing what gets modelled: the mechanical items — weapons and armour, the
+things that change AC and an attack roll — are structured and offered by the
+wizard. Spell focus, packs and the rest are not stored.
+
+One fact that kills the obvious design, found while forming the question:
+`class-core-traits.txt:141` is `Choose A, B, or C` (Fighter). Class starting
+equipment is NOT binary, so any option column copied from
+`background_equipment_items` must carry a label that accepts a third value
+rather than a boolean. D40 already dropped the `coin` item kind, so a gold-only
+option is a text line item, not a currency value.
+
+Nothing named here exists yet: there is no `class_equipment` table.
+
 ## F20 — drizzle-kit DOES emit the SQLite table rebuild, and the two things that would still have broken the migration are the TTY prompt and `PRAGMA foreign_keys=OFF` inside a transaction (2026-07-27)
 
 The load-bearing unknown before implementing the weapon-range storage change was
