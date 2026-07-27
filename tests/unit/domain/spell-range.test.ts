@@ -162,9 +162,6 @@ describe('a printed spell range, parsed', () => {
       '60 metres',
       'constructor',
       '__proto__',
-      'Self (a big cone)',
-      'Self (0-foot cone)',
-      'Self (30-foot cube)',
       'Touch (30-foot cone)',
     ]) {
       expect(parseSpellRange(raw), raw).toBeNull();
@@ -172,6 +169,60 @@ describe('a printed spell range, parsed', () => {
         ABSENT_SPELL_RANGE,
       );
     }
+  });
+
+  it('KEEPS the self origin when the area word is outside the four-shape list', () => {
+    // THE COLLAPSE `range_kind` EXISTS TO PREVENT, MEASURED ON THE FORM THAT
+    // ACTUALLY PRINTS IT. Emanation and Cube are two of SRD 5.2's six areas of
+    // effect and neither is a member of `spellAreaShapes`, so
+    // `Self (15-foot Emanation)` — the printed Range line of a whole family of
+    // self-origin spells — used to store four NULLs: the SAME storage state as
+    // an author who left the Range line blank. `Self` was read unambiguously
+    // and is now kept; only the unmodelled area is dropped, and it survives in
+    // the verbatim `spell_versions.range` text that prints.
+    for (const raw of [
+      'Self (15-foot Emanation)',
+      'Self (15-foot Cube)',
+      'Self (10-foot Radius)',
+      'Self (a big cone)',
+      'Self (0-foot cone)',
+      'Self (30-foot cube)',
+    ]) {
+      expect(parseSpellRange(raw), raw).toEqual({ kind: 'self', area: null });
+      expect(encodeSpellRange(parseSpellRange(raw)), raw).toEqual({
+        ...ABSENT_SPELL_RANGE,
+        range_kind: 'self',
+      });
+      expect(
+        encodeSpellRange(parseSpellRange(raw)),
+        raw,
+      ).not.toEqual(ABSENT_SPELL_RANGE);
+    }
+  });
+
+  it('reads a thousands separator, which the components parser beside it already does', () => {
+    // `parseSpellComponents` reads `worth 1,000+ GP`. Two parsers reading the
+    // same author's printed text disagreeing about a comma is an inconsistency
+    // that author cannot see.
+    expect(parseSpellRange('1,000 feet')).toEqual({
+      kind: 'ranged',
+      feet: 1000,
+      area: null,
+    });
+    expect(parseSpellRange('1,000 miles')).toEqual({
+      kind: 'ranged',
+      feet: 5_280_000,
+      area: null,
+    });
+    expect(parseSpellRange('Self (1,000-foot Line)')).toEqual({
+      kind: 'self',
+      area: { shape: 'line', feet: 1000 },
+    });
+    // STRICT GROUPING. `1,00` is not 100 — a malformed separator means the line
+    // was not understood, and guessing where the comma belongs is the shape of
+    // guess this parser refuses.
+    expect(parseSpellRange('1,00 feet')).toBeNull();
+    expect(parseSpellRange('1,0000 feet')).toBeNull();
   });
 
   it('is not fooled by a prototype-named range, which a Map is what prevents', () => {

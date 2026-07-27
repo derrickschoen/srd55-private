@@ -70,13 +70,41 @@ export const ABSENT_SPELL_RANGE: SpellRangeColumns = {
   area_feet: null,
 };
 
-const DISTANCE = /^(?<amount>\d{1,6})[ -]?(?:feet|foot|ft\.?)$/iu;
-const AREA =
-  /^(?<amount>\d{1,6})[ -]?(?:feet|foot|ft\.?)[ -]?(?:radius[ -]?)?(?<shape>sphere|cylinder|cone|line)$/iu;
+/**
+ * UP TO SIX DIGITS, WRITTEN WITH OR WITHOUT A THOUSANDS SEPARATOR.
+ *
+ * `1,000 feet` is a printed form and `parseSpellComponents` in this same
+ * directory already reads one (`worth 1,000+ GP`, `WORTH` in
+ * `./spell-components.ts`). Both parsers read printed text typed by the same
+ * author, and the two disagreeing about a comma is an inconsistency the author
+ * cannot see: one field structures and the neighbouring one silently does not.
+ *
+ * THE GROUPING IS STRICT — exactly three digits after the comma — so `1,00` is
+ * NOT read as 100. A malformed separator means the line was not understood, and
+ * the honest answer to "not understood" is no structure, not a guess at where
+ * the author meant the comma to go. The six-digit ceiling is unchanged: one
+ * group of three behind at most three leading digits is the same 999,999 the
+ * bare form allows.
+ */
+const AMOUNT = String.raw`\d{1,3},\d{3}|\d{1,6}`;
+
+const DISTANCE = new RegExp(
+  String.raw`^(?<amount>${AMOUNT})[ -]?(?:feet|foot|ft\.?)$`,
+  'iu',
+);
+const AREA = new RegExp(
+  String.raw`^(?<amount>${AMOUNT})[ -]?(?:feet|foot|ft\.?)[ -]?(?:radius[ -]?)?(?<shape>sphere|cylinder|cone|line)$`,
+  'iu',
+);
 const SELF_WITH_AREA = /^self\s*\((?<area>[^()]+)\)$/iu;
-const MILES = /^(?<amount>\d{1,6})[ -]?miles?$/iu;
+const MILES = new RegExp(String.raw`^(?<amount>${AMOUNT})[ -]?miles?$`, 'iu');
 
 const FEET_PER_MILE = 5280;
+
+/** A matched {@link AMOUNT} as the integer it spells. */
+function amountValue(amount: string): number {
+  return Number(amount.replaceAll(',', ''));
+}
 
 /**
  * THE BARE WORDS THIS RECOGNISES, and the reason the map is a `Map` rather than
@@ -129,7 +157,7 @@ function parseArea(text: string): SpellArea | null {
   if (groups?.amount === undefined || groups.shape === undefined) {
     return null;
   }
-  const feet = Number(groups.amount);
+  const feet = amountValue(groups.amount);
   const shape = groups.shape.toLowerCase();
   if (feet <= 0 || !isEnumValue(spellAreaShapes, shape)) {
     return null;
@@ -141,8 +169,13 @@ function parseArea(text: string): SpellArea | null {
  * READ A PRINTED RANGE LINE. `null` MEANS "NOT RECOGNISED", NOT "NO RANGE".
  *
  * THE PARSE IS DELIBERATELY CONSERVATIVE AND NEVER GUESSES. Anything it cannot
- * read whole returns `null`, which stores four NULLs and leaves the author's
- * text untouched and displayed. That is what makes this safe on a column whose
+ * read AT ALL returns `null`, which stores four NULLs and leaves the author's
+ * text untouched and displayed. What it reads PARTLY it stores partly: a
+ * `Self (…)` line whose parenthetical is outside the shape vocabulary keeps its
+ * `self` kind and stores no area, because the origin was recognised and
+ * discarding it would put a real SRD spell into the same storage state as a
+ * blank Range line. Partial is not a guess — every field it writes was read.
+ * That is what makes this safe on a column whose
  * writers admit any string at all: `tools/scrape/parse-spell.ts` assigns
  * whatever text follows `Range:` on a scraped page, and the importer stores it
  * unexamined. `Sight`, `Unlimited`, `500 miles`, `Self (30-foot Cone)`,
@@ -178,23 +211,33 @@ export function parseSpellRange(raw: string | null): SpellRange | null {
     return { kind: bare, area: null };
   }
 
+  // THE ORIGIN SURVIVES AN AREA WE CANNOT READ, AND THAT IS THE WHOLE POINT OF
+  // `range_kind`. `Self (15-foot Emanation)` and `Self (15-foot Cube)` are
+  // printed SRD 5.2 Range lines — Emanation and Cube are two of that document's
+  // six areas of effect and neither is a member of the owner's four-shape list
+  // (see {@link SpellAreaShape}). Returning `null` for the whole line because
+  // the PARENTHETICAL is outside our vocabulary would store the same four NULLs
+  // as a blank Range line, collapsing "self-origin, area not modelled" into
+  // "the author said nothing" — the exact collapse `range_kind` was added to
+  // prevent. `Self` was matched unambiguously, so `Self` is what is stored; the
+  // unread area survives verbatim in `spell_versions.range`, as the bare-word
+  // path above already does for a plain `Self`.
   const selfArea = SELF_WITH_AREA.exec(text)?.groups?.area;
   if (selfArea !== undefined) {
-    const area = parseArea(selfArea);
-    return area === null ? null : { kind: 'self', area };
+    return { kind: 'self', area: parseArea(selfArea) };
   }
 
   const compact = text.replaceAll(' ', '');
   const distance = DISTANCE.exec(compact)?.groups?.amount;
   if (distance !== undefined) {
-    return { kind: 'ranged', feet: Number(distance), area: null };
+    return { kind: 'ranged', feet: amountValue(distance), area: null };
   }
 
   const miles = MILES.exec(compact)?.groups?.amount;
   if (miles !== undefined) {
     return {
       kind: 'ranged',
-      feet: Number(miles) * FEET_PER_MILE,
+      feet: amountValue(miles) * FEET_PER_MILE,
       area: null,
     };
   }

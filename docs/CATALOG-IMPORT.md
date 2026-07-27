@@ -223,7 +223,13 @@ by name rather than left to raise an opaque constraint error mid-transaction.
 
 If a version is referenced by a selection, Wizard spellbook entry, loadout, or
 preference, its imported rules and pivots are preserved byte-for-byte.
-Activity can still change, and optional text can still be filled in. Any
+Activity can still change, and optional text can still be filled in. The upcast
+progression — `upcastScale`, `upcastLevels` and `upcastSummary` — is also filled
+in, but ONLY on a version that carries none of it: no stored scale and no stored
+levels. That is a fill and never an overwrite, and it is all three fields
+together or none, so a stored scale can never end up describing a document's
+levels. A referenced version that already states an upcast progression keeps the
+one it has. Any
 selection affected by tombstoning or reactivation is refreshed in place, so
 the reference is retained with persisted `invalid` or `valid` status.
 

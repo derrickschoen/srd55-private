@@ -71,10 +71,14 @@ describe('the bundled background equipment packages, structured', () => {
     const soldier = packageFor('Soldier', 'a').items;
     const acolyte = packageFor('Acolyte', 'a').items;
 
-    // A leading numeral IS the count of the named item.
-    expect(criminal[0]).toMatchObject({ item_name: '2 Daggers', quantity: 2 });
-    expect(criminal[3]).toMatchObject({ item_name: '2 Pouches', quantity: 2 });
-    expect(soldier[2]).toMatchObject({ item_name: '20 Arrows', quantity: 20 });
+    // A leading numeral IS the count of the named item, AND IT IS STORED ONCE.
+    // `2 Daggers` is two of `Daggers`, not two of `2 Daggers` — a name that
+    // keeps the printed numeral states the count in both columns, and a
+    // renderer trusting both prints `2 Daggers (×2)`. The printed line is
+    // not lost: `background_templates.equipment_option_a` holds it verbatim.
+    expect(criminal[0]).toMatchObject({ item_name: 'Daggers', quantity: 2 });
+    expect(criminal[3]).toMatchObject({ item_name: 'Pouches', quantity: 2 });
+    expect(soldier[2]).toMatchObject({ item_name: 'Arrows', quantity: 20 });
 
     // `Parchment (10 sheets)` counts a SUB-UNIT. Reading the 10 as a quantity
     // would say the package contains ten parchments; it contains one, of ten
@@ -92,13 +96,14 @@ describe('the bundled background equipment packages, structured', () => {
 
   it('links the four weapon entries to real weapon_templates rows, plural and all', () => {
     // "NAME ONLY UNLESS WEAPON OR ARMOR", made structural. `2 Daggers` keeps
-    // its printed plural as the NAME and resolves to the singular `Dagger`
-    // template — which is why the link is DECLARED and not name-matched (D15).
+    // its printed PLURAL as the name — only the count moves to `quantity` —
+    // and `Daggers` resolves to the singular `Dagger` template, which is why
+    // the link is DECLARED and not name-matched (D15).
     const linked = backgroundEquipmentPackages(db)
       .flatMap((entry) => entry.items)
       .filter((item) => item.item_kind === 'weapon');
     expect(linked.map((item) => item.item_name).sort()).toEqual([
-      '2 Daggers',
+      'Daggers',
       'Quarterstaff',
       'Shortbow',
       'Spear',
@@ -114,7 +119,7 @@ describe('the bundled background equipment packages, structured', () => {
     }
     expect(
       db.scalar('SELECT name FROM weapon_templates WHERE id = ?', [
-        linked.find((item) => item.item_name === '2 Daggers')
+        linked.find((item) => item.item_name === 'Daggers')
           ?.weapon_template_id ?? -1,
       ]),
     ).toBe('Dagger');
@@ -189,9 +194,11 @@ describe('the bundled background equipment packages, structured', () => {
     expect(
       describeBackgroundEquipmentItem(packageFor('Acolyte', 'a').items[4]!),
     ).toBe('Robe');
+    // ONE COUNT, NOT TWO. This read `2 Daggers (×2) — weapon` while the
+    // parser kept the printed numeral in the name as well as in `quantity`.
     expect(
       describeBackgroundEquipmentItem(packageFor('Criminal', 'a').items[0]!),
-    ).toBe('2 Daggers (×2) — weapon');
+    ).toBe('Daggers (×2) — weapon');
     expect(
       describeBackgroundEquipmentItem(packageFor('Sage', 'b').items[0]!),
     ).toBe('50 GP (5000 cp)');
@@ -274,6 +281,82 @@ describe('the armour limb, which no licensed package reaches', () => {
         [templateId as number],
       ),
     ).toThrow(/background_equipment_items_payload_check/u);
+  });
+
+  /**
+   * THE TOLERANT DROP, PINNED RATHER THAN MERELY STATED.
+   *
+   * `backgroundEquipmentPackages` promises in its own docblock that a row whose
+   * `option` or `item_kind` is outside its vocabulary is DROPPED rather than
+   * carried into a typed result. D34 §1 is the record of exactly this shape
+   * going wrong one method over: a docblock that STATES a degradation reads
+   * like a guarantee, and the guard was neutered with the whole suite green.
+   *
+   * WHY THE TABLE IS REBUILT INSTEAD OF JUST WRITING A `tool`. The CHECK refuses
+   * one, which is F11's point — a CHECK constrains no image created before it
+   * existed and no hand-edited one, and this table's CHECKs are younger than
+   * every database a user might still be carrying. The rebuilt table IS that
+   * pre-CHECK image, and it is the only state in which the reader's guard is
+   * reachable at all. Only what this test reads is recreated.
+   */
+  it('DROPS a row whose kind or option is outside the vocabulary, on a pre-CHECK image', () => {
+    const templateId = db.scalar(
+      "SELECT id FROM background_templates WHERE name = 'Acolyte'",
+    ) as number;
+    const before = backgroundEquipmentPackages(db).flatMap(
+      (entry) => entry.items,
+    ).length;
+    db.exec(
+      `ALTER TABLE background_equipment_items RENAME TO background_equipment_items_checked;
+       CREATE TABLE background_equipment_items (
+         id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+         background_template_id integer NOT NULL,
+         option VARCHAR NOT NULL,
+         sort_order integer NOT NULL,
+         quantity integer NOT NULL,
+         item_name VARCHAR NOT NULL,
+         item_kind VARCHAR NOT NULL,
+         weapon_template_id integer,
+         armor_template_id integer,
+         coin_copper integer,
+         created_at DATETIME,
+         updated_at DATETIME
+       );
+       INSERT INTO background_equipment_items
+         SELECT * FROM background_equipment_items_checked;
+       DROP TABLE background_equipment_items_checked;`,
+    );
+    db.exec(
+      `INSERT INTO background_equipment_items (
+         background_template_id, option, sort_order, quantity, item_name, item_kind
+       ) VALUES (?, 'a', 90, 1, 'Thieves’ Tools', 'tool'),
+               (?, 'c', 91, 1, 'Signal Whistle', 'gear')`,
+      [templateId, templateId],
+    );
+    // Both corrupt rows really are there — otherwise this test would pass by
+    // measuring nothing.
+    expect(
+      db.scalar(
+        `SELECT COUNT(*) FROM background_equipment_items
+          WHERE item_kind = 'tool' OR option = 'c'`,
+      ),
+    ).toBe(2);
+
+    const items = backgroundEquipmentPackages(db).flatMap(
+      (entry) => entry.items,
+    );
+    expect(items).toHaveLength(before);
+    expect(items.map((item) => item.item_name)).not.toContain(
+      'Signal Whistle',
+    );
+    expect(
+      items.filter((item) => item.item_name === 'Thieves’ Tools'),
+    ).toHaveLength(1);
+    // The dropped `c` row does not mint a package of its own either — an
+    // option outside the vocabulary must not become a third package heading.
+    expect(
+      backgroundEquipmentPackages(db).map((entry) => entry.option),
+    ).not.toContain('c');
   });
 });
 

@@ -203,6 +203,50 @@ describe('read-only report presentation', () => {
     );
   });
 
+  /**
+   * A SCALE THE VOCABULARY DOES NOT CONTAIN MUST NOT REACH THE CARD.
+   *
+   * `scaleWord` is an exhaustive switch with NO `default` arm, so a value
+   * outside `upcastScales` falls through it and returns `undefined`, which
+   * `upcastLine` interpolates — the literal word `undefined` printed to a
+   * player. The builder used to CAST the column instead of validating it, and a
+   * cast cannot fail.
+   *
+   * THE STATE IS REACHABLE FOR F11'S REASON, and the pragma is how this test
+   * reaches it: `spell_versions.upcast_scale` carries a CHECK, and a CHECK
+   * constrains no image created before it existed and no hand-edited one. The
+   * docblock on `scaleWord` claims the fallback prints the bare word `levels`,
+   * which claims neither ladder; this is that claim, executed.
+   */
+  it('prints the scale-less word rather than "undefined" for a stored scale outside the vocabulary', () => {
+    const fixture = createPrintableListFixture(db);
+    db.exec('PRAGMA ignore_check_constraints = ON');
+    const written = db.exec(
+      'UPDATE spell_versions SET upcast_scale = ? WHERE id = ?',
+      ['planar_level', fixture.spellIds.bless],
+    );
+    db.exec('PRAGMA ignore_check_constraints = OFF');
+    // The corrupt value really is stored — otherwise this measures nothing.
+    expect(written.changes).toBe(1);
+    expect(
+      db.scalar('SELECT upcast_scale FROM spell_versions WHERE id = ?', [
+        fixture.spellIds.bless,
+      ]),
+    ).toBe('planar_level');
+
+    const markup = renderPrintableList(
+      new PrintableSpellListBuilder(db).build(fixture.characterId),
+    );
+    expect(markup).not.toContain('undefined');
+    expect(markup).not.toContain('planar_level');
+    // The levels themselves are still true and still print; only the scale is
+    // withheld, because that is the part we no longer know.
+    expect(markup).toContain(
+      'Upcast: </dt><dd>levels 2, 3, 4 · One additional creature per ' +
+        'slot level above 2.',
+    );
+  });
+
   it('renders the exact partial and unavailable full-reference warnings from persisted text completeness', () => {
     const fixture = createPrintableListFixture(db);
     expect(

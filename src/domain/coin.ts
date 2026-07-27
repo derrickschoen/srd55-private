@@ -16,8 +16,13 @@
  * carried as a DECLARED CONSTANT, in the same posture `dieSizes` takes towards
  * the owner's die list — recorded as unsourced rather than dressed up with a
  * citation it does not have. If a rate is wrong, one edit here corrects every
- * derived value, and `tests/unit/domain/coin.test.ts` pins all five so the edit
- * cannot be silent.
+ * derived value, and the `coin, in copper pieces` suite in
+ * `tests/unit/domain/spell-components.test.ts` pins all five by name and rate,
+ * so the edit cannot be silent. THE FILE NAME IS PART OF THE CLAIM: this
+ * paragraph's whole argument is that unsourced constants are safe BECAUSE a
+ * named test guards them, and it previously cited a `tests/unit/domain/
+ * coin.test.ts` that does not exist — a reader who checked would have concluded
+ * nothing guards them at all.
  *
  * `ep` AND `pp` OCCUR NOWHERE IN THIS REPOSITORY. They are here because this is
  * a DENOMINATION vocabulary rather than a census of the strings we hold, and
