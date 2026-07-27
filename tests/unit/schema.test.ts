@@ -726,51 +726,108 @@ const expectedUniqueGroups: Record<string, string[]> = {
   wizard_spellbook_entries: ['character_id,spell_version_id'],
 };
 
+/**
+ * EVERY DECLARED DEFAULT, AS `PRAGMA table_info.dflt_value` REPORTS IT.
+ *
+ * THE FORMS CHANGED AND THAT IS THE POINT, not something to be normalised away.
+ * `laravelDefault` used to wrap every literal in quotes — `DEFAULT '0'`,
+ * `DEFAULT '10'` — because the retired parity oracle pinned Laravel's emitted
+ * text verbatim. Its own comment gave that as its only reason. So a boolean now
+ * reads `false`, an integer reads `10`, and a VARCHAR is unchanged because it
+ * was always genuinely quoted.
+ *
+ * The VALUE each column defaults to is unchanged and is what these entries are
+ * about. That the three forms are runtime-equivalent is not asserted here by
+ * inspection — the test below EXECUTES an insert that omits every one of these
+ * columns and reads back what SQLite actually stored.
+ *
+ * Six tables are named here that were not before — `armor_templates`,
+ * `background_templates`, `character_armor`, `character_sheet_adjustments`,
+ * `class_sheet_traits`, `species_templates`. They always had defaults; the loop
+ * below only visited tables that appeared in this map, so theirs were checked
+ * by nothing. It now visits every table, so a default appearing on any column
+ * anywhere fails until it is written down.
+ */
 const expectedDefaults: Record<string, Record<string, string>> = {
-  change_log: { reversible: "'1'" },
-  character_class_levels: { is_starting_class: "'0'", level: "'1'" },
+  change_log: { reversible: 'true' },
+  character_class_levels: { is_starting_class: 'false', level: '1' },
   character_source_instances: { state: "'active'" },
-  character_spell_preferences: { favourite: "'0'" },
+  character_spell_preferences: { favourite: 'false' },
   characters: {
-    allow_legacy: "'0'", charisma: "'10'", constitution: "'10'",
-    dexterity: "'10'", intelligence: "'10'", revision: "'0'",
-    rules_edition_preference: "'2024'", strength: "'10'", wisdom: "'10'",
+    allow_legacy: 'false', charisma: '10', constitution: '10',
+    dexterity: '10', intelligence: '10', revision: '0',
+    rules_edition_preference: "'2024'", strength: '10', wisdom: '10',
   },
   class_definitions: {
-    progression_type: "'none'", supports_ritual_casting: "'0'",
+    progression_type: "'none'", supports_ritual_casting: 'false',
   },
-  class_progressions: { cantrips_known: "'0'", prepared_count: "'0'" },
+  class_progressions: { cantrips_known: '0', prepared_count: '0' },
   // The eight property toggles plus the mastery flag. Every one of them
   // defaults to off, because "this weapon is not Finesse" is the overwhelming
   // majority case and a NULL there would mean nothing a user could act on.
   character_weapons: {
-    ammunition: "'0'", finesse: "'0'", heavy: "'0'", light: "'0'",
-    loading: "'0'", mastery_selected: "'0'", reach: "'0'", thrown: "'0'",
-    two_handed: "'0'",
+    ammunition: 'false', finesse: 'false', heavy: 'false', light: 'false',
+    loading: 'false', mastery_selected: 'false', reach: 'false',
+    thrown: 'false', two_handed: 'false',
   },
   weapon_templates: {
-    ammunition: "'0'", finesse: "'0'", heavy: "'0'", light: "'0'",
-    loading: "'0'", reach: "'0'", rules_edition: "'2024'", thrown: "'0'",
-    two_handed: "'0'",
+    ammunition: 'false', finesse: 'false', heavy: 'false', light: 'false',
+    loading: 'false', reach: 'false', rules_edition: "'2024'",
+    thrown: 'false', two_handed: 'false',
   },
-  feat_definitions: { repeatable: "'0'" },
-  species_definitions: { repeatable: "'0'" },
-  background_definitions: { repeatable: "'0'" },
+  feat_definitions: { repeatable: 'false' },
+  species_definitions: { repeatable: 'false' },
+  background_definitions: { repeatable: 'false' },
   spell_selection_slots: {
-    always_prepared: "'0'", counts_against_limit: "'1'",
-    is_locked: "'0'", ordinal: "'0'", required: "'0'",
-    selection_eligibility: "'unselected'", sort_order: "'0'",
-    spell_level_max: "'9'", spell_level_min: "'0'", state: "'active'",
-    with_slots: "'1'",
+    always_prepared: 'false', counts_against_limit: 'true',
+    is_locked: 'false', ordinal: '0', required: 'false',
+    selection_eligibility: "'unselected'", sort_order: '0',
+    spell_level_max: '9', spell_level_min: '0', state: "'active'",
+    with_slots: 'true',
   },
   spell_versions: {
-    concentration: "'0'", effect_reliability_category: "'fixed_effect'",
-    healing: "'0'", is_active: "'1'", provenance: "'import'",
-    requires_mod_for_effect: "'0'", ritual: "'0'",
+    concentration: 'false', effect_reliability_category: "'fixed_effect'",
+    healing: 'false', is_active: 'true', provenance: "'import'",
+    requires_mod_for_effect: 'false', ritual: 'false',
   },
   subclass_progressions: {
-    cantrips_known: "'0'", max_spell_level: "'0'", prepared_count: "'0'",
+    cantrips_known: '0', max_spell_level: '0', prepared_count: '0',
   },
+  // The six that were previously unvisited. `character_armor` and
+  // `armor_templates` carry the SAME `stealth_disadvantage` default for the
+  // same reason their fillable columns are name-identical: picking a template
+  // is a column-wise copy (D1b).
+  armor_templates: { rules_edition: "'2024'", stealth_disadvantage: 'false' },
+  background_templates: { rules_edition: "'2024'" },
+  species_templates: { rules_edition: "'2024'" },
+  character_armor: { stealth_disadvantage: 'false' },
+  class_sheet_traits: { skill_choice_from_any: 'false' },
+  // NOT NULL with a default of 0 — the pairing that makes an absent ROW and a
+  // stored zero mean the same thing rather than two different things.
+  character_sheet_adjustments: { armor_class_adjustment: '0' },
+};
+
+/**
+ * What a row that names NONE of the defaulted columns must end up holding.
+ *
+ * Booleans are `0`/`1` INTEGERS, not the keyword they are declared with: that
+ * is what `db/schema/columns.ts`'s `integerAtLeast` depends on, since its
+ * `typeof(col) = 'integer'` limb would reject a defaulted row that stored the
+ * text `'false'`. Asserting the stored value rather than the DDL spelling is
+ * what makes this a behavioural check rather than a second transcription.
+ */
+const expectedDefaultedRow: Record<string, unknown> = {
+  ordinal: 0,
+  spell_level_min: 0,
+  spell_level_max: 9,
+  always_prepared: 0,
+  with_slots: 1,
+  counts_against_limit: 1,
+  required: 0,
+  is_locked: 0,
+  state: 'active',
+  sort_order: 0,
+  selection_eligibility: 'unselected',
 };
 
 const expectedForeignKeys: Record<string, string[]> = {
@@ -1021,14 +1078,65 @@ describe(`schema (${sourceLabel})`, () => {
       );
     }
 
-    for (const [table, expected] of Object.entries(expectedDefaults)) {
+    // EVERY table, not only the ones named in `expectedDefaults`. Six tables
+    // carried defaults that this loop never visited because it iterated the
+    // expectation rather than the schema, which is the shape of check that
+    // cannot report what it was never told about.
+    for (const table of Object.keys(expectedColumns)) {
       const actual = Object.fromEntries(
         rows(db, `PRAGMA table_info("${table}")`)
           .filter((row) => row.dflt_value !== null)
           .map((row) => [String(row.name), String(row.dflt_value)]),
       );
-      expect(actual, `defaults for ${table}`).toEqual(expected);
+      expect(actual, `defaults for ${table}`).toEqual(
+        expectedDefaults[table] ?? {},
+      );
     }
+  });
+
+  it('stores the documented value, as an integer, for a row that names no defaulted column', () => {
+    const db = openDb(schemaSql);
+    // `spell_selection_slots` because it carries the widest mix: five integers,
+    // four booleans and two VARCHARs, i.e. every form the declaration changed
+    // and the one form it did not.
+    db.exec(`
+      INSERT INTO characters (name) VALUES ('Defaults Character');
+      INSERT INTO character_source_instances
+        (character_id, instance_uuid, source_type, display_name)
+      VALUES (1, 'source', 'species', 'Human');
+      INSERT INTO spell_selection_slots
+        (character_id, source_instance_id, slot_key, rule_key, bucket,
+         eligibility_kind)
+      VALUES (1, 1, 'source:1', 'rule', 'known', 'list');
+    `);
+
+    const stored = rows(
+      db,
+      `SELECT ${Object.keys(expectedDefaultedRow).join(', ')}
+       FROM spell_selection_slots`,
+    );
+    expect(stored).toEqual([expectedDefaultedRow]);
+
+    // AND THE TYPES, which is the part a value comparison alone would miss:
+    // `false` and `'0'` and `0` all read back as 0 under `==`, but only an
+    // INTEGER satisfies the `typeof(col) = 'integer'` limb that every
+    // `integerAtLeast` CHECK in `db/schema/columns.ts` is built on.
+    expect(
+      rows(
+        db,
+        `SELECT ${Object.keys(expectedDefaultedRow)
+          .map((column) => `typeof(${column}) AS ${column}`)
+          .join(', ')}
+         FROM spell_selection_slots`,
+      ),
+    ).toEqual([
+      Object.fromEntries(
+        Object.entries(expectedDefaultedRow).map(([column, value]) => [
+          column,
+          typeof value === 'number' ? 'integer' : 'text',
+        ]),
+      ),
+    ]);
   });
 
   it('declares every migrated foreign key with its composite shape and action', () => {
