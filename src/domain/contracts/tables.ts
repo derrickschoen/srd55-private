@@ -726,6 +726,22 @@ export const TABLE_SCOPES = {
     share: false,
     backupReference: false,
   },
+  /**
+   * The CATALOG half of the effect model, and it carries `species_template_traits`'
+   * flags unchanged for the identical reason: it declares what a TEMPLATE
+   * GRANTS, a character's own effect row holds no template effect id, and there
+   * is nothing for a backup document to resolve. The CHARACTER half —
+   * `character_effects` below — is all-true for the same three scopes
+   * `character_species_traits` is, because it is the character's data.
+   */
+  species_template_trait_effects: {
+    role: 'catalog_origin',
+    snapshot: false,
+    backupDirect: false,
+    backup: false,
+    share: false,
+    backupReference: false,
+  },
   background_templates: {
     role: 'catalog_origin',
     snapshot: false,
@@ -779,6 +795,34 @@ export const TABLE_SCOPES = {
     backupReference: false,
   },
   character_background: {
+    role: 'character_owned',
+    snapshot: true,
+    backupDirect: true,
+    backup: true,
+    share: true,
+    backupReference: false,
+  },
+  /**
+   * The character's own effects, on the same three-true terms and with the same
+   * costs paid in the same four places:
+   *
+   *  - `backup` puts it in the document's table set and therefore in
+   *    `BACKUP_OPTIONAL_TABLES`, so a file exported before this table existed
+   *    still imports;
+   *  - `share` adds a FIFTEENTH root element to the positional wire tuple. The
+   *    root already accepts 11, 12, 13 and 14 elements and grows by one per
+   *    feature, so this is the established move rather than a format break, and
+   *    `CHARACTER_SHARE_VERSION` stays pinned at 1;
+   *  - `snapshot` moves the snapshot schema from `a7-v4` to `a7-v5` and freezes
+   *    `A7_V4_TABLES` by hand. Not bumping would retroactively change what
+   *    `a7-v4` claims to carry and break every save point already on disk.
+   *
+   * `backupReference` stays false: the row holds no catalog id. Its
+   * `source_instance_id` points at another CHARACTER-OWNED row, which a backup
+   * remaps rather than resolves — the same treatment `spell_selection_slots`
+   * gets.
+   */
+  character_effects: {
     role: 'character_owned',
     snapshot: true,
     backupDirect: true,
@@ -906,6 +950,7 @@ export const APPLICATION_TABLES = order<AnyTableName>()([
   'character_armor',
   'character_background',
   'character_class_levels',
+  'character_effects',
   'character_hit_point_rolls',
   'character_operations',
   'character_rule_overrides',
@@ -932,6 +977,7 @@ export const APPLICATION_TABLES = order<AnyTableName>()([
   'feat_definitions',
   'named_features',
   'species_definitions',
+  'species_template_trait_effects',
   'species_template_traits',
   'species_templates',
   'spell_identities',
@@ -980,6 +1026,15 @@ export const CHARACTER_STATE_TABLES = order<SnapshotTable>()([
   'character_hit_point_rolls',
   'character_skill_proficiencies',
   'character_sheet_adjustments',
+  // Appended for the fourth time and for the fourth time never inserted:
+  // capture order is stable output, and an existing snapshot's key order is
+  // part of what `equalValues` compares in `CharacterState.diff`.
+  //
+  // It sits AFTER the origin tables rather than beside them because an effect
+  // is no longer part of the species — that severance is the whole change —
+  // and the restore pass must insert `character_source_instances` before this,
+  // which the existing order already guarantees.
+  'character_effects',
 ]);
 
 /**
@@ -1002,6 +1057,13 @@ export const DELETE_ORDER = order<SnapshotTable>()([
   'character_hit_point_rolls',
   'character_skill_proficiencies',
   'character_sheet_adjustments',
+  // A leaf as well, but NOT for the same reason: `character_effects` has no
+  // children, yet it is the first character-owned table to REFERENCE another
+  // one (`character_source_instances`, through a composite key). It must
+  // therefore be deleted before that table, which is what putting it up here
+  // with the other leaves achieves. The integration test that deletes a fully
+  // populated character is what proves the order rather than this comment.
+  'character_effects',
   // Leaves too. `character_species_traits` is keyed on `character_id` and NOT
   // on `character_species.id` — see `db/schema/origins.ts` — so there is no
   // parent-before-child edge between the two and the order between them is
@@ -1035,6 +1097,7 @@ export const BACKUP_DIRECT_TABLES = order<BackupDirectTable>()([
   'character_hit_point_rolls',
   'character_skill_proficiencies',
   'character_sheet_adjustments',
+  'character_effects',
 ]);
 
 /** Every table in the portable-character backup document. */
@@ -1074,6 +1137,12 @@ export const BACKUP_OPTIONAL_TABLES = [
   'character_hit_point_rolls',
   'character_skill_proficiencies',
   'character_sheet_adjustments',
+  // The character's own effects. Every backup file a user already holds
+  // predates the table, and `[]` is the honest reading of one — those files
+  // carry their effects on the `character_species_traits` rows instead, which
+  // `src/rules/legacy-trait-effects.ts` migrates on the way in, so nothing is
+  // lost by defaulting this key to empty.
+  'character_effects',
 ] as const satisfies readonly BackupTable[];
 
 /** The catalog tables a backup document resolves references against. */
@@ -1129,6 +1198,7 @@ export const SHARE_TABLES: { readonly [N in ShareTable]: N } = {
   character_hit_point_rolls: 'character_hit_point_rolls',
   character_skill_proficiencies: 'character_skill_proficiencies',
   character_sheet_adjustments: 'character_sheet_adjustments',
+  character_effects: 'character_effects',
 };
 
 /**
@@ -1192,6 +1262,10 @@ export const AUDIT_ENTITY_TYPES = [
   'character_hit_point_rolls',
   'character_skill_proficiencies',
   'character_sheet_adjustments',
+  // Added on the same terms again: `CharacterState.diff` now emits a change per
+  // effect row, and an entity type the diff can produce that the log will not
+  // accept is a write that fails at runtime, mid-command.
+  'character_effects',
 ] as const satisfies readonly ('character' | AnyTableName)[];
 
 export type AuditEntityType = (typeof AUDIT_ENTITY_TYPES)[number];

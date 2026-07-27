@@ -298,17 +298,28 @@ describe('the derived character sheet', () => {
        VALUES (?, 'Dwarf', 25)`,
       [characterId],
     );
+    // ONE READ OF ONE TABLE feeds all three numbers below. The effects are
+    // rows of their own now, labelled with whatever granted them, and the sheet
+    // never touches the trait rows at all.
     db.exec(
-      `INSERT INTO character_species_traits
-         (character_id, sort_order, name, effect_kind,
-          effect_hit_points_flat, effect_hit_points_per_level)
-       VALUES (?, 1, 'Dwarven Toughness', 'hp_modifier', 0, 1)`,
+      `INSERT INTO character_effects
+         (character_id, sort_order, effect_kind, hit_points_flat,
+          hit_points_per_level, label)
+       VALUES (?, 1, 'hp_modifier', 0, 1, 'Dwarven Toughness')`,
       [characterId],
     );
     db.exec(
-      `INSERT INTO character_species_traits
-         (character_id, sort_order, name, effect_kind, effect_speed_bonus_feet)
-       VALUES (?, 2, 'Fleet of Foot', 'speed', 5)`,
+      `INSERT INTO character_effects
+         (character_id, sort_order, effect_kind, speed_bonus_feet, label)
+       VALUES (?, 2, 'speed', 5, 'Fleet of Foot')`,
+      [characterId],
+    );
+    // An unchosen resistance, so the sheet's own projection of it is exercised
+    // as a NAME rather than as the count it used to be.
+    db.exec(
+      `INSERT INTO character_effects
+         (character_id, sort_order, effect_kind, label)
+       VALUES (?, 3, 'damage_resistance', 'Fiendish Legacy')`,
       [characterId],
     );
     const sheet = builder.build(characterId);
@@ -320,6 +331,10 @@ describe('the derived character sheet', () => {
     expect(sheet.species_hit_points?.value).toBe(8);
     // Base 25 + 5 = 30.
     expect(sheet.walking_speed_feet).toBe(30);
+    // NAMED, not counted. The old sheet could only report how MANY resistances
+    // were waiting on a decision, because an effect had no identity of its own.
+    expect(sheet.damage_resistances).toEqual([]);
+    expect(sheet.unchosen_damage_resistances).toEqual(['Fiendish Legacy']);
   });
 
   it('says the speed is not recorded rather than inventing 30', () => {

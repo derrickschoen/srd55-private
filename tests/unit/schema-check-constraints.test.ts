@@ -556,6 +556,45 @@ const characterSpeciesTrait =
     });
   };
 
+/**
+ * The two effect tables' fixtures.
+ *
+ * `effect_kind` DEFAULTS TO A REAL MEMBER on both, where the trait fixtures it
+ * replaced defaulted to nothing: the column is NOT NULL now, because a trait
+ * with no effect is the absence of a row rather than a row of nulls, so there
+ * is no "free text" default to fall back on. That is why every case below that
+ * used to pass `effect_kind: null` passes an unrelated KIND instead — the
+ * mis-paired payload is still the thing being refused.
+ */
+const speciesTemplateTraitEffect =
+  (values: Values): Write =>
+  (db) => {
+    const traitId = insert(db, 'species_template_traits', {
+      species_template_id: newSpeciesTemplate(db),
+      sort_order: 1,
+      name: uid('Trait'),
+      description: 'Printed trait text.',
+    });
+    insert(db, 'species_template_trait_effects', {
+      species_template_trait_id: traitId,
+      sort_order: 1,
+      effect_kind: 'damage_resistance',
+      ...values,
+    });
+  };
+
+const characterEffect =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'character_effects', {
+      character_id: newCharacter(db),
+      sort_order: 1,
+      effect_kind: 'damage_resistance',
+      label: uid('Grant'),
+      ...values,
+    });
+  };
+
 interface ConstraintCase {
   readonly constraint: string;
   /** Writes that MUST be refused, each with the corruption it would have made. */
@@ -925,84 +964,112 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
       ['a copied 35', characterSpecies({ base_speed_feet: 35 })],
     ],
   },
+  // --- the inverted effect model -------------------------------------------
+  //
+  // THE SAME SEVEN CONSTRAINTS AS BEFORE, ON TWO NEW TABLES, and the ONE that
+  // changed shape is the `effect_kind` check: it was `nullOrOneOf` on a trait
+  // row and is `oneOf` here, because a trait with no mechanical effect is now
+  // the ABSENCE of a row. Everything else is deliberately identical on both
+  // sides — the catalog-to-character copy is column-wise, so a rule that held
+  // for one and not the other would let the copy itself produce a row the
+  // schema refuses.
   {
-    constraint: 'species_template_traits_effect_kind_check',
+    constraint: 'species_template_trait_effects_kind_check',
     rejects: [
       // An unrecognised kind reads as "no effect" to the derivation, which
       // costs the character a trait's mechanics with no error anywhere.
-      ['a kind outside the closed set', speciesTemplateTrait({ effect_kind: 'ability_score_increase' })],
-      ['an empty kind', speciesTemplateTrait({ effect_kind: '' })],
-      ['a near-miss of a real member', speciesTemplateTrait({ effect_kind: 'damage_resistances' })],
+      ['a kind outside the closed set', speciesTemplateTraitEffect({ effect_kind: 'ability_score_increase' })],
+      ['an empty kind', speciesTemplateTraitEffect({ effect_kind: '' })],
+      ['a near-miss of a real member', speciesTemplateTraitEffect({ effect_kind: 'damage_resistances' })],
+      // THE RETIRED MEMBER. A share link minted before this build may still
+      // SAY `granted_spells`, and the boundary accepts and drops it; what must
+      // never happen is one reaching a stored row, because nothing downstream
+      // has a meaning for it.
+      ['granted_spells, retired from the vocabulary', speciesTemplateTraitEffect({ effect_kind: 'granted_spells' })],
+      // The NULL that used to be the DEFAULT is refused too, by NOT NULL rather
+      // than by this CHECK — see the dedicated case at the end of this file,
+      // which asserts the error code rather than assuming which rule fired.
     ],
     accepts: [
-      // The DEFAULT, not an edge: 26 of the 33 printed traits are free text.
-      ['the NULL that 26 of the 33 printed traits carry', speciesTemplateTrait({ effect_kind: null })],
-      ['damage_resistance', speciesTemplateTrait({ effect_kind: 'damage_resistance', effect_damage_type: 'Poison' })],
-      ['hp_modifier', speciesTemplateTrait({ effect_kind: 'hp_modifier', effect_hit_points_flat: 1 })],
-      ['speed', speciesTemplateTrait({ effect_kind: 'speed', effect_speed_bonus_feet: 5 })],
-      ['granted_spells, which carries no payload by design', speciesTemplateTrait({ effect_kind: 'granted_spells' })],
+      ['damage_resistance', speciesTemplateTraitEffect({ effect_kind: 'damage_resistance', damage_type: 'Poison' })],
+      ['hp_modifier', speciesTemplateTraitEffect({ effect_kind: 'hp_modifier', hit_points_flat: 1 })],
+      ['speed', speciesTemplateTraitEffect({ effect_kind: 'speed', speed_bonus_feet: 5 })],
     ],
   },
   {
-    constraint: 'species_template_traits_damage_type_kind_check',
+    constraint: 'species_template_trait_effects_damage_type_kind_check',
     rejects: [
-      ['a damage type on a free-text trait', speciesTemplateTrait({ effect_kind: null, effect_damage_type: 'Fire' })],
-      ['a damage type on a granted_spells trait', speciesTemplateTrait({ effect_kind: 'granted_spells', effect_damage_type: 'Fire' })],
+      ['a damage type on an hp_modifier effect', speciesTemplateTraitEffect({ effect_kind: 'hp_modifier', hit_points_flat: 1, damage_type: 'Fire' })],
+      ['a damage type on a speed effect', speciesTemplateTraitEffect({ effect_kind: 'speed', speed_bonus_feet: 5, damage_type: 'Fire' })],
     ],
     accepts: [
-      ['a typed resistance', speciesTemplateTrait({ effect_kind: 'damage_resistance', effect_damage_type: 'Poison' })],
-      // The Dragonborn: the trait grants A resistance and the TYPE is the
-      // Draconic Ancestry choice, so a null here is a real state.
-      ['an untyped resistance, which is the Dragonborn', speciesTemplateTrait({ effect_kind: 'damage_resistance', effect_damage_type: null })],
+      ['a typed resistance', speciesTemplateTraitEffect({ effect_kind: 'damage_resistance', damage_type: 'Poison' })],
+      // The Dragonborn AND the Tiefling: each grants A resistance and the TYPE
+      // is a choice the source declines to make, so a null here is a real
+      // state. Recording that for the Tiefling is the whole point of this
+      // change — it used to be recorded nowhere.
+      ['an untyped resistance, which is the Dragonborn and the Tiefling', speciesTemplateTraitEffect({ effect_kind: 'damage_resistance', damage_type: null })],
     ],
   },
   {
-    constraint: 'species_template_traits_hit_points_kind_check',
+    constraint: 'species_template_trait_effects_hit_points_kind_check',
     rejects: [
-      ['a flat HP bonus on a free-text trait', speciesTemplateTrait({ effect_kind: null, effect_hit_points_flat: 1 })],
-      ['a per-level HP bonus on a speed trait', speciesTemplateTrait({ effect_kind: 'speed', effect_speed_bonus_feet: 5, effect_hit_points_per_level: 1 })],
+      ['a flat HP bonus on a resistance', speciesTemplateTraitEffect({ effect_kind: 'damage_resistance', hit_points_flat: 1 })],
+      ['a per-level HP bonus on a speed effect', speciesTemplateTraitEffect({ effect_kind: 'speed', speed_bonus_feet: 5, hit_points_per_level: 1 })],
     ],
     accepts: [
       // BOTH halves at once. Not the seeded Dwarven Toughness, which is
-      // per-level only (`flat = 0`) — this is the shape a user's own trait may
+      // per-level only (`flat = 0`) — this is the shape a user's own effect may
       // take, and the constraint must permit it.
-      ['both halves on one trait', speciesTemplateTrait({ effect_kind: 'hp_modifier', effect_hit_points_flat: 1, effect_hit_points_per_level: 1 })],
-      ['a flat-only HP bonus', speciesTemplateTrait({ effect_kind: 'hp_modifier', effect_hit_points_flat: 2 })],
+      ['both halves on one effect', speciesTemplateTraitEffect({ effect_kind: 'hp_modifier', hit_points_flat: 1, hit_points_per_level: 1 })],
+      ['a flat-only HP bonus', speciesTemplateTraitEffect({ effect_kind: 'hp_modifier', hit_points_flat: 2 })],
     ],
   },
   {
-    constraint: 'species_template_traits_speed_kind_check',
+    constraint: 'species_template_trait_effects_speed_kind_check',
     rejects: [
-      ['a speed bonus on a free-text trait', speciesTemplateTrait({ effect_kind: null, effect_speed_bonus_feet: 10 })],
-      ['a speed bonus on an hp_modifier trait', speciesTemplateTrait({ effect_kind: 'hp_modifier', effect_hit_points_flat: 1, effect_speed_bonus_feet: 10 })],
+      ['a speed bonus on a resistance', speciesTemplateTraitEffect({ effect_kind: 'damage_resistance', speed_bonus_feet: 10 })],
+      ['a speed bonus on an hp_modifier effect', speciesTemplateTraitEffect({ effect_kind: 'hp_modifier', hit_points_flat: 1, speed_bonus_feet: 10 })],
     ],
     accepts: [
-      ['a speed trait carrying its bonus', speciesTemplateTrait({ effect_kind: 'speed', effect_speed_bonus_feet: 5 })],
+      ['a speed effect carrying its bonus', speciesTemplateTraitEffect({ effect_kind: 'speed', speed_bonus_feet: 5 })],
     ],
   },
   {
-    constraint: 'species_template_traits_hp_modifier_payload_check',
+    constraint: 'species_template_trait_effects_hp_modifier_payload_check',
     rejects: [
       // Without this the derivation returns 0, which is indistinguishable from
-      // a trait that was never mechanical.
-      ['an hp_modifier trait promising a number and carrying none', speciesTemplateTrait({ effect_kind: 'hp_modifier' })],
+      // an effect that was never mechanical.
+      ['an hp_modifier effect promising a number and carrying none', speciesTemplateTraitEffect({ effect_kind: 'hp_modifier' })],
     ],
     accepts: [
-      ['a flat-only bonus', speciesTemplateTrait({ effect_kind: 'hp_modifier', effect_hit_points_flat: 1 })],
-      ['a per-level-only bonus', speciesTemplateTrait({ effect_kind: 'hp_modifier', effect_hit_points_per_level: 1 })],
-      // The other three kinds are deliberately outside this constraint:
-      // granted_spells is a marker and damage_resistance may be untyped.
-      ['a granted_spells trait with no payload at all', speciesTemplateTrait({ effect_kind: 'granted_spells' })],
+      ['a flat-only bonus', speciesTemplateTraitEffect({ effect_kind: 'hp_modifier', hit_points_flat: 1 })],
+      ['a per-level-only bonus', speciesTemplateTraitEffect({ effect_kind: 'hp_modifier', hit_points_per_level: 1 })],
+      // `damage_resistance` is deliberately outside this constraint: an
+      // untyped resistance is a real state, not an incomplete one.
+      ['an untyped resistance with no payload at all', speciesTemplateTraitEffect({ effect_kind: 'damage_resistance' })],
     ],
   },
   {
-    constraint: 'species_template_traits_speed_payload_check',
+    constraint: 'species_template_trait_effects_speed_payload_check',
     rejects: [
-      ['a speed trait promising a number and carrying none', speciesTemplateTrait({ effect_kind: 'speed' })],
+      ['a speed effect promising a number and carrying none', speciesTemplateTraitEffect({ effect_kind: 'speed' })],
     ],
     accepts: [
-      ['a speed trait carrying its bonus', speciesTemplateTrait({ effect_kind: 'speed', effect_speed_bonus_feet: 10 })],
-      ['a free-text trait, which promises nothing', speciesTemplateTrait({ effect_kind: null })],
+      ['a speed effect carrying its bonus', speciesTemplateTraitEffect({ effect_kind: 'speed', speed_bonus_feet: 10 })],
+      ['a resistance, which promises no number', speciesTemplateTraitEffect({ effect_kind: 'damage_resistance' })],
+    ],
+  },
+  {
+    constraint: 'species_template_trait_effects_sort_order_check',
+    rejects: [
+      ['sort order 0, below the dense 1-based declared order', speciesTemplateTraitEffect({ sort_order: 0 })],
+      ['a negative sort order', speciesTemplateTraitEffect({ sort_order: -1 })],
+      ['a text sort order, which a bare lower bound would have admitted', speciesTemplateTraitEffect({ sort_order: 'first' })],
+    ],
+    accepts: [
+      ['the first declared effect', speciesTemplateTraitEffect({ sort_order: 1 })],
+      ['the second, which is what a two-effect trait needs', speciesTemplateTraitEffect({ sort_order: 2 })],
     ],
   },
   {
@@ -1018,83 +1085,89 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     ],
   },
   {
-    constraint: 'character_species_traits_effect_kind_check',
+    constraint: 'character_effects_kind_check',
     rejects: [
-      // An unrecognised kind reads as "no effect" to the derivation, which
-      // costs the character a trait's mechanics with no error anywhere.
-      ['a kind outside the closed set', characterSpeciesTrait({ effect_kind: 'ability_score_increase' })],
-      ['an empty kind', characterSpeciesTrait({ effect_kind: '' })],
-      ['a near-miss of a real member', characterSpeciesTrait({ effect_kind: 'damage_resistances' })],
+      ['a kind outside the closed set', characterEffect({ effect_kind: 'ability_score_increase' })],
+      ['an empty kind', characterEffect({ effect_kind: '' })],
+      ['a near-miss of a real member', characterEffect({ effect_kind: 'damage_resistances' })],
+      ['granted_spells, retired from the vocabulary', characterEffect({ effect_kind: 'granted_spells' })],
     ],
     accepts: [
-      // The DEFAULT, not an edge: 26 of the 33 printed traits are free text.
-      ['the NULL that 26 of the 33 printed traits carry', characterSpeciesTrait({ effect_kind: null })],
-      ['damage_resistance', characterSpeciesTrait({ effect_kind: 'damage_resistance', effect_damage_type: 'Poison' })],
-      ['hp_modifier', characterSpeciesTrait({ effect_kind: 'hp_modifier', effect_hit_points_flat: 1 })],
-      ['speed', characterSpeciesTrait({ effect_kind: 'speed', effect_speed_bonus_feet: 5 })],
-      ['granted_spells, which carries no payload by design', characterSpeciesTrait({ effect_kind: 'granted_spells' })],
+      ['damage_resistance', characterEffect({ effect_kind: 'damage_resistance', damage_type: 'Poison' })],
+      ['hp_modifier', characterEffect({ effect_kind: 'hp_modifier', hit_points_flat: 1 })],
+      ['speed', characterEffect({ effect_kind: 'speed', speed_bonus_feet: 5 })],
     ],
   },
   {
-    constraint: 'character_species_traits_damage_type_kind_check',
+    constraint: 'character_effects_damage_type_kind_check',
     rejects: [
-      ['a damage type on a free-text trait', characterSpeciesTrait({ effect_kind: null, effect_damage_type: 'Fire' })],
-      ['a damage type on a granted_spells trait', characterSpeciesTrait({ effect_kind: 'granted_spells', effect_damage_type: 'Fire' })],
+      ['a damage type on an hp_modifier effect', characterEffect({ effect_kind: 'hp_modifier', hit_points_flat: 1, damage_type: 'Fire' })],
+      ['a damage type on a speed effect', characterEffect({ effect_kind: 'speed', speed_bonus_feet: 5, damage_type: 'Fire' })],
     ],
     accepts: [
-      ['a typed resistance', characterSpeciesTrait({ effect_kind: 'damage_resistance', effect_damage_type: 'Poison' })],
-      // The Dragonborn: the trait grants A resistance and the TYPE is the
-      // Draconic Ancestry choice, so a null here is a real state.
-      ['an untyped resistance, which is the Dragonborn', characterSpeciesTrait({ effect_kind: 'damage_resistance', effect_damage_type: null })],
+      ['a typed resistance', characterEffect({ effect_kind: 'damage_resistance', damage_type: 'Poison' })],
+      // On THIS side the null means something different from the template's:
+      // there it is "the source declines to say", here it is "this player has
+      // not decided yet". Same column, same constraint, different fact — which
+      // is why the two tables are two tables.
+      ['an untyped resistance, which is a decision the player has not made', characterEffect({ effect_kind: 'damage_resistance', damage_type: null })],
     ],
   },
   {
-    constraint: 'character_species_traits_hit_points_kind_check',
+    constraint: 'character_effects_hit_points_kind_check',
     rejects: [
-      ['a flat HP bonus on a free-text trait', characterSpeciesTrait({ effect_kind: null, effect_hit_points_flat: 1 })],
-      ['a per-level HP bonus on a speed trait', characterSpeciesTrait({ effect_kind: 'speed', effect_speed_bonus_feet: 5, effect_hit_points_per_level: 1 })],
+      ['a flat HP bonus on a resistance', characterEffect({ effect_kind: 'damage_resistance', hit_points_flat: 1 })],
+      ['a per-level HP bonus on a speed effect', characterEffect({ effect_kind: 'speed', speed_bonus_feet: 5, hit_points_per_level: 1 })],
     ],
     accepts: [
-      // BOTH halves at once. Not the seeded Dwarven Toughness, which is
-      // per-level only (`flat = 0`) — this is the shape a user's own trait may
-      // take, and the constraint must permit it.
-      ['both halves on one trait', characterSpeciesTrait({ effect_kind: 'hp_modifier', effect_hit_points_flat: 1, effect_hit_points_per_level: 1 })],
-      ['a flat-only HP bonus', characterSpeciesTrait({ effect_kind: 'hp_modifier', effect_hit_points_flat: 2 })],
+      ['both halves on one effect', characterEffect({ effect_kind: 'hp_modifier', hit_points_flat: 1, hit_points_per_level: 1 })],
+      ['a flat-only HP bonus', characterEffect({ effect_kind: 'hp_modifier', hit_points_flat: 2 })],
     ],
   },
   {
-    constraint: 'character_species_traits_speed_kind_check',
+    constraint: 'character_effects_speed_kind_check',
     rejects: [
-      ['a speed bonus on a free-text trait', characterSpeciesTrait({ effect_kind: null, effect_speed_bonus_feet: 10 })],
-      ['a speed bonus on an hp_modifier trait', characterSpeciesTrait({ effect_kind: 'hp_modifier', effect_hit_points_flat: 1, effect_speed_bonus_feet: 10 })],
+      ['a speed bonus on a resistance', characterEffect({ effect_kind: 'damage_resistance', speed_bonus_feet: 10 })],
+      ['a speed bonus on an hp_modifier effect', characterEffect({ effect_kind: 'hp_modifier', hit_points_flat: 1, speed_bonus_feet: 10 })],
     ],
     accepts: [
-      ['a speed trait carrying its bonus', characterSpeciesTrait({ effect_kind: 'speed', effect_speed_bonus_feet: 5 })],
+      ['a speed effect carrying its bonus', characterEffect({ effect_kind: 'speed', speed_bonus_feet: 5 })],
     ],
   },
   {
-    constraint: 'character_species_traits_hp_modifier_payload_check',
+    constraint: 'character_effects_hp_modifier_payload_check',
     rejects: [
-      // Without this the derivation returns 0, which is indistinguishable from
-      // a trait that was never mechanical.
-      ['an hp_modifier trait promising a number and carrying none', characterSpeciesTrait({ effect_kind: 'hp_modifier' })],
+      ['an hp_modifier effect promising a number and carrying none', characterEffect({ effect_kind: 'hp_modifier' })],
     ],
     accepts: [
-      ['a flat-only bonus', characterSpeciesTrait({ effect_kind: 'hp_modifier', effect_hit_points_flat: 1 })],
-      ['a per-level-only bonus', characterSpeciesTrait({ effect_kind: 'hp_modifier', effect_hit_points_per_level: 1 })],
-      // The other three kinds are deliberately outside this constraint:
-      // granted_spells is a marker and damage_resistance may be untyped.
-      ['a granted_spells trait with no payload at all', characterSpeciesTrait({ effect_kind: 'granted_spells' })],
+      ['a flat-only bonus', characterEffect({ effect_kind: 'hp_modifier', hit_points_flat: 1 })],
+      ['a per-level-only bonus', characterEffect({ effect_kind: 'hp_modifier', hit_points_per_level: 1 })],
+      ['an untyped resistance with no payload at all', characterEffect({ effect_kind: 'damage_resistance' })],
     ],
   },
   {
-    constraint: 'character_species_traits_speed_payload_check',
+    constraint: 'character_effects_speed_payload_check',
     rejects: [
-      ['a speed trait promising a number and carrying none', characterSpeciesTrait({ effect_kind: 'speed' })],
+      ['a speed effect promising a number and carrying none', characterEffect({ effect_kind: 'speed' })],
     ],
     accepts: [
-      ['a speed trait carrying its bonus', characterSpeciesTrait({ effect_kind: 'speed', effect_speed_bonus_feet: 10 })],
-      ['a free-text trait, which promises nothing', characterSpeciesTrait({ effect_kind: null })],
+      ['a speed effect carrying its bonus', characterEffect({ effect_kind: 'speed', speed_bonus_feet: 10 })],
+      ['a resistance, which promises no number', characterEffect({ effect_kind: 'damage_resistance' })],
+    ],
+  },
+  {
+    constraint: 'character_effects_sort_order_check',
+    rejects: [
+      ['sort order 0, below the dense 1-based order', characterEffect({ sort_order: 0 })],
+      ['a negative sort order', characterEffect({ sort_order: -1 })],
+      ['a text sort order, which a bare lower bound would have admitted', characterEffect({ sort_order: 'first' })],
+    ],
+    accepts: [
+      ['the first effect', characterEffect({ sort_order: 1 })],
+      // Two effects sharing a sort order is deliberately ALLOWED — the index is
+      // not unique — so this pair is the over-strictness guard for a user
+      // reordering their own list mid-edit.
+      ['the fifth', characterEffect({ sort_order: 5 })],
     ],
   },
   {
@@ -1708,6 +1781,31 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
         }
       });
     }
+
+    /**
+     * THE NULL LIMB THAT WENT AWAY, ASSERTED RATHER THAN ASSUMED.
+     *
+     * `effect_kind` was NULLABLE on both trait tables and NULL was the DEFAULT
+     * — twenty-six of the thirty-three printed traits carried it. On both
+     * effect tables it is NOT NULL, because a trait with no mechanical effect
+     * is now the ABSENCE OF A ROW. This pins the consequence: the null is
+     * refused, and it is refused by NOT NULL rather than by the kind CHECK, so
+     * a later change that made the column nullable again would have to delete
+     * this test rather than merely watch it keep passing.
+     */
+    it('refuses a NULL effect_kind on both effect tables, by NOT NULL', () => {
+      for (const [table, write] of [
+        [
+          'species_template_trait_effects',
+          speciesTemplateTraitEffect({ effect_kind: null }),
+        ],
+        ['character_effects', characterEffect({ effect_kind: null })],
+      ] as const) {
+        expect(caughtErrorMessage(() => write(db)), table).toContain(
+          'SQLITE_CONSTRAINT_NOTNULL',
+        );
+      }
+    });
 
     /**
      * A COVERAGE GUARD, NOT A TRANSCRIPTION.

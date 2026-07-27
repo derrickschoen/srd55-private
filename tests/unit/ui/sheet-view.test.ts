@@ -117,7 +117,11 @@ function sheet(changes: Partial<CharacterSheet> = {}): CharacterSheet {
     martial_arts: [],
     walking_speed_feet: 30,
     damage_resistances: ['Poison'],
-    unchosen_damage_resistances: 1,
+    // A LIST OF LABELS, not a count. The old sheet could only say "plus 1
+    // whose type this application does not record"; naming the grant is what
+    // turns a limitation the reader is told about into a decision they can act
+    // on, and it is only possible because an effect is a row of its own.
+    unchosen_damage_resistances: ['Fiendish Legacy'],
     classes: [
       {
         class_name: HOSTILE_CLASS_NAME,
@@ -254,7 +258,7 @@ describe('the character sheet is projected twice from one value', () => {
       walking_speed_feet: () => ids.has('walking_speed_feet'),
       damage_resistances: () => ids.has('damage_resistances'),
       unchosen_damage_resistances: () =>
-        readable.includes('whose type this application does not record'),
+        readable.includes('plus one from Fiendish Legacy whose type is not yet chosen'),
       classes: () => [...ids].some((id) => id.startsWith('class:')),
       armor: () => ids.has('armor:worn'),
       hit_point_rolls: () =>

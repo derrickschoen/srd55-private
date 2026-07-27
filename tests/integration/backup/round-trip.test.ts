@@ -195,6 +195,28 @@ function seedCompleteCharacter(
       timestamp,
     ],
   );
+  // AN EFFECT WITH PROVENANCE. `source_instance_id` is the only column on
+  // `character_effects` that must be REWRITTEN on import — it points at another
+  // character-owned row whose id the import mints — so a fixture whose effects
+  // all carried NULL would leave the remap untested in both the document and
+  // the save-point rewrite.
+  db.exec(
+    `INSERT INTO character_effects (
+       character_id, sort_order, effect_kind, damage_type, source_instance_id,
+       label, notes, created_at, updated_at
+     ) VALUES (
+       ?, 1, 'damage_resistance', 'Poison', ?, 'Dwarven Resilience',
+       'effect note', ?, ?
+     )`,
+    [characterId, sourceId, timestamp, timestamp],
+  );
+  db.exec(
+    `INSERT INTO character_effects (
+       character_id, sort_order, effect_kind, hit_points_per_level,
+       label, created_at, updated_at
+     ) VALUES (?, 2, 'hp_modifier', 1, 'Dwarven Toughness', ?, ?)`,
+    [characterId, timestamp, timestamp],
+  );
   const loadoutId = db.exec(
     `INSERT INTO spell_loadouts
        (character_id, name, notes, created_at, updated_at)
@@ -211,7 +233,7 @@ function seedCompleteCharacter(
   db.exec(
     `INSERT INTO character_save_points
        (character_id, label, snapshot, schema_version, created_at, updated_at)
-     VALUES (?, 'Before experiment', ?, 'a7-v4', ?, ?)`,
+     VALUES (?, 'Before experiment', ?, 'a7-v5', ?, ?)`,
     [characterId, JSON.stringify(snapshot), timestamp, timestamp],
   );
   // A SECOND SAVE POINT IN THE OLD SNAPSHOT FORMAT.
@@ -234,6 +256,7 @@ function seedCompleteCharacter(
   delete legacySnapshot.character_hit_point_rolls;
   delete legacySnapshot.character_skill_proficiencies;
   delete legacySnapshot.character_sheet_adjustments;
+  delete legacySnapshot.character_effects;
   db.exec(
     `INSERT INTO character_save_points
        (character_id, label, snapshot, schema_version, created_at, updated_at)
@@ -456,7 +479,7 @@ describe('portable character backup', () => {
     ) as Record<string, any>;
     // The current-format save point carries the weapons, re-keyed to the rows
     // that were just written, so restoring it puts back the same two weapons.
-    expect(saved.schema_version).toBe('a7-v4');
+    expect(saved.schema_version).toBe('a7-v5');
     expect(saved.character_weapons.map((row: { name: string }) => row.name)).toEqual([
       'Weathered Longsword',
       'Half-entered club',
@@ -495,6 +518,23 @@ describe('portable character backup', () => {
       character_id: characterId,
       source_instance_id: importedSource.id,
       current_spell_version_id: targetCatalog.spellId,
+    });
+    // The effect's provenance is REMAPPED, not resolved: it points at the
+    // source instance this import just minted, both in the live table and
+    // inside the re-emitted save point. Left unrewritten it would name the
+    // EXPORTING character's row — which the composite foreign key would then
+    // refuse, mid-undo, long after the import looked successful.
+    expect(saved.character_effects[0]).toMatchObject({
+      character_id: characterId,
+      source_instance_id: importedSource.id,
+      damage_type: 'Poison',
+      label: 'Dwarven Resilience',
+    });
+    expect(saved.character_effects[1]).toMatchObject({
+      character_id: characterId,
+      source_instance_id: null,
+      effect_kind: 'hp_modifier',
+      label: 'Dwarven Toughness',
     });
 
     const postImportSourceId = target.exec(
@@ -730,6 +770,7 @@ describe('an already-downloaded backup file', () => {
       'character_hit_point_rolls',
       'character_skill_proficiencies',
       'character_sheet_adjustments',
+      'character_effects',
     ]) {
       expect(Object.hasOwn(archived.tables as object, table)).toBe(false);
       expect(

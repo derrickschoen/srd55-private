@@ -58,6 +58,18 @@ export const FOREIGN_KEY_FACTS = [
     targetColumns: ['id', 'class_definition_id'],
   },
   {
+    table: 'character_effects',
+    columns: ['character_id'],
+    target: 'characters',
+    targetColumns: ['id'],
+  },
+  {
+    table: 'character_effects',
+    columns: ['source_instance_id', 'character_id'],
+    target: 'character_source_instances',
+    targetColumns: ['id', 'character_id'],
+  },
+  {
     table: 'character_hit_point_rolls',
     columns: ['character_id'],
     target: 'characters',
@@ -199,6 +211,12 @@ export const FOREIGN_KEY_FACTS = [
     table: 'named_features',
     columns: ['class_definition_id'],
     target: 'class_definitions',
+    targetColumns: ['id'],
+  },
+  {
+    table: 'species_template_trait_effects',
+    columns: ['species_template_trait_id'],
+    target: 'species_template_traits',
     targetColumns: ['id'],
   },
   {

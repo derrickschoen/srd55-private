@@ -1,5 +1,5 @@
 import type { DatabaseContext } from '../db/database';
-import type { NamedSpeciesTraitEffect } from './species-effects';
+import type { EffectRow } from './species-effects';
 
 /**
  * PICKING A TEMPLATE IS A COPY, AND THE COPY IS THE WHOLE MECHANISM (D1b).
@@ -46,12 +46,33 @@ export interface SpeciesTemplateRow {
   readonly updated_at: string | null;
 }
 
-export interface SpeciesTemplateTraitRow extends NamedSpeciesTraitEffect {
+export interface SpeciesTemplateTraitRow {
   readonly id: number;
   readonly species_template_id: number;
   readonly sort_order: number;
   readonly name: string;
   readonly description: string;
+  readonly created_at: string | null;
+  readonly updated_at: string | null;
+}
+
+/**
+ * One row of `species_template_trait_effects` — what a catalog trait GRANTS.
+ *
+ * It carries no `label`: on the catalog side the granting trait IS the parent
+ * row, so there is nothing to name. The label appears at the moment of the
+ * copy, taken from the trait's own name, which is why `effectsFromTemplate`
+ * takes both.
+ */
+export interface SpeciesTemplateTraitEffectRow {
+  readonly id: number;
+  readonly species_template_trait_id: number;
+  readonly sort_order: number;
+  readonly effect_kind: string;
+  readonly damage_type: string | null;
+  readonly hit_points_flat: number | null;
+  readonly hit_points_per_level: number | null;
+  readonly speed_bonus_feet: number | null;
   readonly created_at: string | null;
   readonly updated_at: string | null;
 }
@@ -84,12 +105,46 @@ export interface CharacterSpeciesFields {
 }
 
 /** The fillable columns of `character_species_traits`, values only. */
-export interface CharacterSpeciesTraitFields extends NamedSpeciesTraitEffect {
+export interface CharacterSpeciesTraitFields {
   readonly sort_order: number;
   readonly name: string;
   readonly description: string | null;
   readonly notes: string | null;
 }
+
+/**
+ * The fillable columns of `character_effects`, values only.
+ *
+ * `source_instance_id` is NOT here and is not an oversight. The copy has no
+ * source instance to point at: nothing in `src/` writes `species_definitions`,
+ * so a character who picked a bundled SRD species has no species
+ * `character_source_instances` row, and one who typed their own species never
+ * will. The column is nullable exactly so this copy can leave it alone, and an
+ * effect minted later can be given one without this function changing.
+ */
+export interface CharacterEffectFields {
+  readonly sort_order: number;
+  readonly effect_kind: string;
+  readonly damage_type: string | null;
+  readonly hit_points_flat: number | null;
+  readonly hit_points_per_level: number | null;
+  readonly speed_bonus_feet: number | null;
+  readonly label: string;
+  readonly notes: string | null;
+}
+
+/**
+ * An effect copied from a template, BEFORE it has a place in the character's
+ * list.
+ *
+ * `sort_order` is missing on purpose and is the whole reason this type exists.
+ * `character_effects` is a flat per-character list, so the position of an effect
+ * inside ONE trait's declaration is not its position in that list: two traits
+ * each declaring one effect would both offer `1`. Returning the template's
+ * number and documenting that callers must ignore it invites a caller to
+ * believe it; leaving it out makes the compiler ask for the real one.
+ */
+export type CharacterEffectProfile = Omit<CharacterEffectFields, 'sort_order'>;
 
 /** The fillable columns of `character_background`, values only. */
 export interface CharacterBackgroundFields
@@ -136,6 +191,50 @@ export function speciesTraitFromTemplate(
   return { ...profile, notes: null };
 }
 
+/**
+ * The second half of copying a trait: its EFFECTS become the character's own.
+ *
+ * A SEPARATE FUNCTION FROM `speciesTraitFromTemplate`, AND THAT IS THE WHOLE
+ * INVERSION RESTATED IN CODE. The trait copy used to carry the effect payload
+ * along inside the same spread, which is what made a trait the thing an effect
+ * hung from and capped it at one. The two copies are now independent: a trait
+ * with no effects produces no rows here, a trait with two produces two, and an
+ * effect that no trait granted (a feat's, a user's own) never goes through this
+ * function at all.
+ *
+ * `label` is the TRAIT'S NAME, and this is the only place that binding is made.
+ * After it, the effect row stands alone: renaming the trait does not rename the
+ * effect, which is the same severance D1b already applies to every other copied
+ * value. The alternative — leaving the sheet to join back to the trait row —
+ * is the coupling being removed.
+ *
+ * `sort_order` IS NOT RETURNED, and the template's own is dropped here with the
+ * catalog keys. `character_effects` is a flat per-character list — two traits
+ * each declaring one effect would both claim `1`, which the schema permits
+ * deliberately (it is an `index`, not a `uniqueIndex`, exactly as
+ * `character_species_traits` is) — so the only correct number is the one the
+ * caller assigns while writing the whole species. The template's ordering is
+ * still honoured: it is the ORDER OF THIS ARRAY, which is the same way
+ * `speciesTraits` on the wire carries its order. See
+ * `tests/integration/rules/origins.test.ts` for the renumbering caller.
+ */
+export function effectsFromTemplate(
+  traitName: string,
+  effects: readonly SpeciesTemplateTraitEffectRow[],
+): CharacterEffectProfile[] {
+  return effects.map((effect) => {
+    const {
+      id: _id,
+      species_template_trait_id: _trait,
+      sort_order: _order,
+      created_at: _created,
+      updated_at: _updated,
+      ...profile
+    } = effect;
+    return { ...profile, label: traitName, notes: null };
+  });
+}
+
 export function backgroundFromTemplate(
   template: BackgroundTemplateRow,
 ): CharacterBackgroundFields {
@@ -151,42 +250,42 @@ export function backgroundFromTemplate(
 }
 
 /**
- * Reads a character's own trait rows, in printed order, for the derivations in
- * `./species-effects.ts`.
+ * Reads a character's own EFFECT rows, in their own order, for the derivations
+ * in `./species-effects.ts`.
+ *
+ * ONE TABLE, NO JOIN, AND THAT IS WHAT THE INVERSION BOUGHT. This used to read
+ * six columns off `character_species_traits` and hand them to a summary that
+ * ignored the trait's name, its description and every free-text row. The sheet
+ * asks "what does this character have", and that is now literally the query.
  *
  * `sort_order, id` and not `id` alone: the order is the character's, a share
- * import writes it from array position, and two traits may legitimately end up
+ * import writes it from array position, and two effects may legitimately end up
  * sharing a `sort_order` while a user is reordering their list — the schema
  * does not make it unique on this side, deliberately.
  */
-export function characterSpeciesTraits(
+export function characterEffects(
   db: DatabaseContext,
   characterId: number,
-): NamedSpeciesTraitEffect[] {
+): EffectRow[] {
   return db.all(
-    `SELECT name, effect_kind, effect_damage_type, effect_hit_points_flat,
-            effect_hit_points_per_level, effect_speed_bonus_feet
-       FROM character_species_traits
+    `SELECT effect_kind, damage_type, hit_points_flat, hit_points_per_level,
+            speed_bonus_feet, label
+       FROM character_effects
       WHERE character_id = ?
       ORDER BY sort_order, id`,
     [characterId],
-    (row): NamedSpeciesTraitEffect => ({
-      name: String(row.name),
-      effect_kind: row.effect_kind === null ? null : String(row.effect_kind),
-      effect_damage_type:
-        row.effect_damage_type === null ? null : String(row.effect_damage_type),
-      effect_hit_points_flat:
-        row.effect_hit_points_flat === null
+    (row): EffectRow => ({
+      effect_kind: String(row.effect_kind),
+      damage_type: row.damage_type === null ? null : String(row.damage_type),
+      hit_points_flat:
+        row.hit_points_flat === null ? null : Number(row.hit_points_flat),
+      hit_points_per_level:
+        row.hit_points_per_level === null
           ? null
-          : Number(row.effect_hit_points_flat),
-      effect_hit_points_per_level:
-        row.effect_hit_points_per_level === null
-          ? null
-          : Number(row.effect_hit_points_per_level),
-      effect_speed_bonus_feet:
-        row.effect_speed_bonus_feet === null
-          ? null
-          : Number(row.effect_speed_bonus_feet),
+          : Number(row.hit_points_per_level),
+      speed_bonus_feet:
+        row.speed_bonus_feet === null ? null : Number(row.speed_bonus_feet),
+      label: String(row.label),
     }),
   );
 }

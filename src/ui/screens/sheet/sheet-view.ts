@@ -145,7 +145,7 @@ export function sheetSections(sheet: CharacterSheet): readonly SheetSection[] {
   if (sheet.species_hit_points !== null) {
     core.push(numberRow(sheet.species_hit_points, true));
     // THE SEAM THAT HAD NO CALLER BEFORE THIS SHEET. `hitPointMaximum` does not
-    // include the species contribution and `speciesHitPoints` returns it
+    // include the species contribution and `effectHitPoints` returns it
     // separately by design, so a page printing only the first shows a Dwarf
     // short by their level. Both are printed, and so is their sum.
     core.push({
@@ -260,6 +260,12 @@ export function sheetSections(sheet: CharacterSheet): readonly SheetSection[] {
         : 'The species base speed plus every standing bonus.',
     ),
   });
+  // THE UNCHOSEN HALF NAMES ITSELF NOW. It used to read "plus 2 whose type this
+  // application does not record" — a count, because an effect lived on a trait
+  // row and two anonymous resistances were indistinguishable. Each is a row
+  // with a `label`, so the page says WHICH grant is waiting on the user, which
+  // is the difference between a limitation the reader is told about and a
+  // decision they can act on.
   combat.push({
     id: 'damage_resistances',
     label: plain('Damage resistances'),
@@ -270,11 +276,11 @@ export function sheetSections(sheet: CharacterSheet): readonly SheetSection[] {
           ? 'None chosen'
           : sheet.damage_resistances.join(', ')
       }${
-        sheet.unchosen_damage_resistances === 0
+        sheet.unchosen_damage_resistances.length === 0
           ? '.'
-          : `, plus ${String(
-              sheet.unchosen_damage_resistances,
-            )} whose type this application does not record.`
+          : `, plus one from ${sheet.unchosen_damage_resistances.join(
+              ' and one from ',
+            )} whose type is not yet chosen.`
       }`,
     ),
   });
@@ -402,7 +408,7 @@ export function sheetFacts(sheet: CharacterSheet): Record<string, unknown> {
     })),
     walking_speed_feet: sheet.walking_speed_feet,
     damage_resistances: [...sheet.damage_resistances],
-    unchosen_damage_resistances: sheet.unchosen_damage_resistances,
+    unchosen_damage_resistances: [...sheet.unchosen_damage_resistances],
     classes: sheet.classes.map((entry) => ({
       level: entry.level,
       hit_die: entry.hit_die,
