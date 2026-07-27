@@ -1,18 +1,7 @@
 import {
   CHARACTER_SHARE_FORMAT,
   CHARACTER_SHARE_VERSION,
-  SHARE_ARMOR_ENUMS,
-  SHARE_ARMOR_FLAGS,
-  SHARE_ARMOR_NUMBERS,
-  SHARE_BACKGROUND_TEXT,
-  SHARE_EFFECT_NUMBERS,
-  SHARE_EFFECT_TEXT,
   SHARE_LIMITS,
-  SHARE_SPECIES_TEXT,
-  SHARE_SPECIES_TRAIT_NUMBERS,
-  SHARE_SPECIES_TRAIT_TEXT,
-  SHARE_WEAPON_FLAGS,
-  SHARE_WEAPON_TEXT,
   ShareValidationError,
   type CharacterShareDocument,
   type ShareArmor,
@@ -31,140 +20,141 @@ import {
   type VersatileWeaponDamage,
   type WeaponDamage,
 } from '../domain/weapon-damage';
+import {
+  CURRENT_CHARACTER_SHARE_VERSION,
+  SHARE_SCHEMAS,
+  type WireField,
+} from './wire-schemas';
 
 type Tuple = readonly unknown[];
 
-/**
- * THE ROOT TUPLE HAS FIVE ACCEPTED LENGTHS, AND THAT IS ON PURPOSE.
- *
- * A share link is a URL fragment somebody has already pasted into a chat, a
- * wiki or a bookmark. Appending an element while demanding an exact length would
- * make every one of those links a decode error — the exact data loss this
- * arrangement exists to prevent, inflicted on a larger set of people.
- *
- * So eleven elements is still a valid document carrying no weapons, no origin
- * and no sheet inputs; twelve carries weapons and neither of the other two;
- * thirteen adds the origin; fourteen adds the sheet inputs; fifteen is what
- * this build writes. `CHARACTER_SHARE_VERSION` deliberately stays at 1: a
- * version bump buys nothing here and would reject every old link on the way in.
- *
- * THE FIFTEENTH ELEMENT IS THE CHARACTER'S EFFECTS, AND IT IS A ROOT ELEMENT
- * RATHER THAN A FOURTH SLOT IN THE ORIGIN GROUP. Effects are no longer
- * species-scoped — that severance is the whole point of the inversion — so
- * nesting them under the origin would re-create the coupling being removed, and
- * it would change what element 13 means for links already in the wild.
- *
- * The growth is the ESTABLISHED move here, not a format break: this format has
- * already grown 11 -> 12 -> 13 -> 14 with the version pinned, and the frozen
- * hand-built fixtures in `tests/unit/sharing/codec.test.ts` are what prove each
- * older length still decodes rather than merely asserting it.
- *
- * THE ORIGIN IS ONE ELEMENT, NOT THREE, AND THE SHEET IS ONE ELEMENT, NOT FOUR.
- * Three sections travel in the first and four in the second, but each group is a
- * single nested tuple so the root grows by one per FEATURE rather than one per
- * table. The members are independently nullable inside their group, which is
- * what the document type needs. Effects need no group: they are one section.
- */
-const ROOT_TUPLE_LENGTHS = [11, 12, 13, 14, 15] as const;
+const WIRE_SCHEMA = SHARE_SCHEMAS[CURRENT_CHARACTER_SHARE_VERSION];
 
-const LEGACY_ROOT_LENGTH = 11;
-const PRE_ORIGIN_ROOT_LENGTH = 12;
-const PRE_SHEET_ROOT_LENGTH = 13;
-const PRE_EFFECTS_ROOT_LENGTH = 14;
+function fieldKeys<Key extends string>(
+  fields: readonly WireField<Key>[],
+): readonly Key[] {
+  return fields.map((field) => field.key);
+}
 
-/**
- * How many elements the CHARACTER ROOT occupies on the wire — BOTH LENGTHS.
- *
- * THE CHARACTER TUPLE WAS EXACT-LENGTH AND APPENDING TO IT WOULD HAVE BROKEN
- * EVERY LINK EVER MINTED. This is the weapon tuple's defect (D33/F18) one level
- * up: `tuple(root[2], 11, …)` accepts eleven elements and nothing else, so a
- * twelfth element for Q12's opt-in notes would have made every link in the wild
- * — all of which carry an eleven-element character — a decode error. Checked
- * BEFORE the field was added, which is the only useful time to check it.
- *
- * THE ANSWER IS THE ONE THE DOCUMENT AND THE WEAPON ALREADY USE: accept both
- * arities and read the new element only when it is there. `LEGACY` is the arity
- * every pre-Q12 link has; `CURRENT` is one longer.
- *
- * THE NEW ELEMENT IS APPENDED, NOT INSERTED. `placeholders` has occupied index
- * 10 since links existed; putting the note anywhere before it would shift that
- * list by one and decode an old link's placeholder array as its notes string.
- * Appended, every index an old link wrote still means what it meant.
- */
-const CHARACTER_TUPLE_LENGTH_LEGACY = 11;
-const CHARACTER_TUPLE_LENGTH = CHARACTER_TUPLE_LENGTH_LEGACY + 1;
-const CHARACTER_TUPLE_LENGTHS: readonly number[] = [
-  CHARACTER_TUPLE_LENGTH_LEGACY,
-  CHARACTER_TUPLE_LENGTH,
-];
+function fieldIndex<Key extends string>(
+  fields: readonly WireField<Key>[],
+  key: Key,
+): number {
+  const index = fields.findIndex((field) => field.key === key);
+  if (index < 0) {
+    throw new Error(`Wire schema has no ${key} field.`);
+  }
+  return index;
+}
 
-/** Where the opt-in note sits in the character tuple: last, and it stays last. */
-const CHARACTER_NOTES_INDEX = CHARACTER_TUPLE_LENGTH_LEGACY;
+function objectToPositional<T, Key extends keyof T & string>(
+  value: T,
+  fields: readonly WireField<Key>[],
+): unknown[] {
+  return fields.map((field) => value[field.key] ?? null);
+}
 
-/**
- * How many elements the grouped sheet element holds: armour, hit point rolls,
- * skill proficiencies, the manual adjustment.
- */
-const SHEET_TUPLE_LENGTH = 4;
+const ROOT_TUPLE_LENGTHS = WIRE_SCHEMA.tuples.root.arities;
+const ROOT_FORMAT_INDEX = fieldIndex(WIRE_SCHEMA.tuples.root.fields, 'format');
+const ROOT_VERSION_INDEX = fieldIndex(WIRE_SCHEMA.tuples.root.fields, 'version');
+const ROOT_CHARACTER_INDEX = fieldIndex(
+  WIRE_SCHEMA.tuples.root.fields,
+  'character',
+);
+const ROOT_CLASSES_INDEX = fieldIndex(WIRE_SCHEMA.tuples.root.fields, 'classes');
+const ROOT_SOURCES_INDEX = fieldIndex(WIRE_SCHEMA.tuples.root.fields, 'sources');
+const ROOT_SELECTIONS_INDEX = fieldIndex(
+  WIRE_SCHEMA.tuples.root.fields,
+  'selections',
+);
+const ROOT_SPELLBOOK_INDEX = fieldIndex(
+  WIRE_SCHEMA.tuples.root.fields,
+  'spellbook',
+);
+const ROOT_PREFERENCES_INDEX = fieldIndex(
+  WIRE_SCHEMA.tuples.root.fields,
+  'preferences',
+);
+const ROOT_OVERRIDES_INDEX = fieldIndex(
+  WIRE_SCHEMA.tuples.root.fields,
+  'overrides',
+);
+const ROOT_ACKNOWLEDGEMENTS_INDEX = fieldIndex(
+  WIRE_SCHEMA.tuples.root.fields,
+  'acknowledgements',
+);
+const ROOT_LOADOUTS_INDEX = fieldIndex(
+  WIRE_SCHEMA.tuples.root.fields,
+  'loadouts',
+);
+const ROOT_WEAPONS_INDEX = fieldIndex(
+  WIRE_SCHEMA.tuples.root.fields,
+  'weapons',
+);
+const ROOT_ORIGIN_INDEX = fieldIndex(WIRE_SCHEMA.tuples.root.fields, 'origin');
+const ROOT_SHEET_INDEX = fieldIndex(WIRE_SCHEMA.tuples.root.fields, 'sheet');
+const ROOT_EFFECTS_INDEX = fieldIndex(WIRE_SCHEMA.tuples.root.fields, 'effects');
+const [
+  LEGACY_ROOT_LENGTH,
+  PRE_ORIGIN_ROOT_LENGTH,
+  PRE_SHEET_ROOT_LENGTH,
+  PRE_EFFECTS_ROOT_LENGTH,
+] = ROOT_TUPLE_LENGTHS;
+
+const CHARACTER_TUPLE_LENGTHS = WIRE_SCHEMA.tuples.character.arities;
+const CHARACTER_PLACEHOLDERS_INDEX = fieldIndex(
+  WIRE_SCHEMA.tuples.character.fields,
+  'placeholders',
+);
+const SHEET_TUPLE_LENGTH = WIRE_SCHEMA.tuples.sheet.arities[0];
+const SHEET_ARMOR_INDEX = fieldIndex(WIRE_SCHEMA.tuples.sheet.fields, 'armor');
+const SHEET_HIT_POINT_ROLLS_INDEX = fieldIndex(
+  WIRE_SCHEMA.tuples.sheet.fields,
+  'hitPointRolls',
+);
+const SHEET_SKILL_PROFICIENCIES_INDEX = fieldIndex(
+  WIRE_SCHEMA.tuples.sheet.fields,
+  'skillProficiencies',
+);
+const SHEET_ADJUSTMENT_INDEX = fieldIndex(
+  WIRE_SCHEMA.tuples.sheet.fields,
+  'sheetAdjustment',
+);
 
 /** One worn item and one held item — `character_armor`'s own cardinality. */
 const ARMOR_SLOT_COUNT = 2;
 
-/** How many elements the grouped origin element holds. */
-const ORIGIN_TUPLE_LENGTH = 3;
-
-/** How many elements one species, trait and background occupy on the wire. */
-const SPECIES_TUPLE_LENGTH = 1 + SHARE_SPECIES_TEXT.length + 1;
+const ORIGIN_TUPLE_LENGTH = WIRE_SCHEMA.tuples.origin.arities[0];
+const ORIGIN_SPECIES_INDEX = fieldIndex(
+  WIRE_SCHEMA.tuples.origin.fields,
+  'species',
+);
+const ORIGIN_SPECIES_TRAITS_INDEX = fieldIndex(
+  WIRE_SCHEMA.tuples.origin.fields,
+  'speciesTraits',
+);
+const ORIGIN_BACKGROUND_INDEX = fieldIndex(
+  WIRE_SCHEMA.tuples.origin.fields,
+  'background',
+);
+const SPECIES_TUPLE_LENGTH = WIRE_SCHEMA.tuples.species.arities[0];
 const SPECIES_TRAIT_TUPLE_LENGTH =
-  1 + SHARE_SPECIES_TRAIT_TEXT.length + SHARE_SPECIES_TRAIT_NUMBERS.length;
-const BACKGROUND_TUPLE_LENGTH = 1 + SHARE_BACKGROUND_TEXT.length;
+  WIRE_SCHEMA.tuples.speciesTrait.arities[0];
+const BACKGROUND_TUPLE_LENGTH = WIRE_SCHEMA.tuples.background.arities[0];
+const EFFECT_TUPLE_LENGTH = WIRE_SCHEMA.tuples.effect.arities[0];
+const ARMOR_TUPLE_LENGTH = WIRE_SCHEMA.tuples.armor.arities[0];
+const HIT_POINT_ROLL_TUPLE_LENGTH =
+  WIRE_SCHEMA.tuples.hitPointRoll.arities[0];
+const SHEET_ADJUSTMENT_TUPLE_LENGTH =
+  WIRE_SCHEMA.tuples.sheetAdjustment.arities[0];
 
-/**
- * How many elements one effect occupies on the wire: kind, label, payload, then
- * the two provenance slots — the ref and the flag that says which of the two
- * roots that ref minted.
- */
-const EFFECT_TUPLE_LENGTH =
-  2 + SHARE_EFFECT_TEXT.length + SHARE_EFFECT_NUMBERS.length + 2;
-
-/** How many elements one armour row, one roll and the adjustment occupy. */
-const ARMOR_TUPLE_LENGTH =
-  1 + SHARE_ARMOR_ENUMS.length + 1 + SHARE_ARMOR_NUMBERS.length +
-  SHARE_ARMOR_FLAGS.length + 1;
-const HIT_POINT_ROLL_TUPLE_LENGTH = 3;
-const SHEET_ADJUSTMENT_TUPLE_LENGTH = 2;
-
-/**
- * How many elements one weapon occupies on the wire — BOTH LENGTHS.
- *
- * THE WEAPON TUPLE HAD NO BACKWARD TOLERANCE AND NEEDED IT. `weaponFromPositional`
- * used the exact-length `tuple()`, unlike the document level, which has used
- * `variableTuple()` since links existed. So adding D27's `proficiency_category`
- * to `ShareWeapon` would have made EVERY EXISTING LINK CONTAINING A WEAPON fail
- * to decode — the data-loss failure AGENTS.md names, on links already sent, and
- * nothing in the suite covered it because the frozen-fragment guards D24
- * describes cover the DOCUMENT tuple and not this one.
- *
- * THE ANSWER IS THE ONE THE DOCUMENT ALREADY USES: accept both arities and read
- * the new field only when it is there. `LEGACY` is the arity every link minted
- * before D27 has; `CURRENT` is one longer.
- *
- * THE NEW FIELD IS APPENDED, NOT INSERTED, and that is not cosmetic. The wire
- * order IS the format: putting the category after `name` would shift all
- * eighteen fields that follow it, so an old link would decode its damage dice
- * into its damage type and import a plausible, silently wrong weapon. Appended,
- * an old link's every index still means what it meant.
- */
-const WEAPON_TUPLE_LENGTH_LEGACY =
-  1 + 4 + 3 + 2 + SHARE_WEAPON_FLAGS.length;
-const WEAPON_TUPLE_LENGTH_PRE_DAMAGE_UNION =
-  WEAPON_TUPLE_LENGTH_LEGACY + 1;
-const WEAPON_TUPLE_LENGTH = WEAPON_TUPLE_LENGTH_PRE_DAMAGE_UNION + 2;
-const WEAPON_TUPLE_LENGTHS: readonly number[] = [
-  WEAPON_TUPLE_LENGTH_LEGACY,
-  WEAPON_TUPLE_LENGTH_PRE_DAMAGE_UNION,
-  WEAPON_TUPLE_LENGTH,
-];
+const WEAPON_TUPLE_LENGTHS =
+  WIRE_SCHEMA.tuples.weapon.variants.map((variant) => variant.arity);
+const WEAPON_TUPLE_LENGTH =
+  WIRE_SCHEMA.tuples.weapon.variants.at(-1)?.arity;
+if (WEAPON_TUPLE_LENGTH === undefined) {
+  throw new Error('Wire schema v1 must define a current weapon variant.');
+}
 
 function tuple(
   value: unknown,
@@ -201,22 +191,32 @@ function variableTuple(
  * D27 — the proficiency category. Reordering this silently reinterprets every
  * link ever generated.
  */
-const WEAPON_LEGACY_WIRE_FIELDS = [
-  'damage_dice',
-  'damage_type',
-  'versatile_damage_dice',
-  'ammunition_kind',
-  'range_normal_feet',
-  'range_long_feet',
-  'mastery_property',
-  'other_properties',
-  'notes',
-  ...SHARE_WEAPON_FLAGS,
-  // LAST, AND IT MUST STAY LAST. Everything before it is the frozen order every
-  // pre-D27 link was written in; an appended field is invisible to a decoder
-  // that stops one element earlier.
-  'proficiency_category',
-] as const;
+const WEAPON_LEGACY_WIRE_FIELDS = fieldKeys(
+  WIRE_SCHEMA.tuples.weapon.variants[1].fields,
+).slice(1);
+const SPECIES_WIRE_FIELDS = fieldKeys(
+  WIRE_SCHEMA.tuples.species.fields,
+).slice(1);
+const SPECIES_TRAIT_WIRE_FIELDS = fieldKeys(
+  WIRE_SCHEMA.tuples.speciesTrait.fields,
+).slice(1);
+const BACKGROUND_WIRE_FIELDS = fieldKeys(
+  WIRE_SCHEMA.tuples.background.fields,
+).slice(1);
+const EFFECT_WIRE_FIELDS = fieldKeys(
+  WIRE_SCHEMA.tuples.effect.fields,
+).slice(2);
+const ARMOR_WIRE_FIELDS = fieldKeys(
+  WIRE_SCHEMA.tuples.armor.fields,
+).slice(1);
+const OVERRIDE_RULE_KEY_INDEX = fieldIndex(
+  WIRE_SCHEMA.tuples.override.fields,
+  'ruleKey',
+);
+const OVERRIDE_VALUE_INDEX = fieldIndex(
+  WIRE_SCHEMA.tuples.override.fields,
+  'value',
+);
 
 function damageToPositional(
   damage: WeaponDamage | VersatileWeaponDamage,
@@ -350,16 +350,14 @@ function weaponFromPositional(value: unknown, label: string): unknown {
 function speciesToPositional(species: ShareSpecies): unknown[] {
   return [
     species.name,
-    ...SHARE_SPECIES_TEXT.map((field) => species[field] ?? null),
-    species.base_speed_feet ?? null,
+    ...SPECIES_WIRE_FIELDS.map((field) => species[field] ?? null),
   ];
 }
 
 function speciesTraitToPositional(trait: ShareSpeciesTrait): unknown[] {
   return [
     trait.name,
-    ...SHARE_SPECIES_TRAIT_TEXT.map((field) => trait[field] ?? null),
-    ...SHARE_SPECIES_TRAIT_NUMBERS.map((field) => trait[field] ?? null),
+    ...SPECIES_TRAIT_WIRE_FIELDS.map((field) => trait[field] ?? null),
   ];
 }
 
@@ -367,9 +365,8 @@ function speciesTraitToPositional(trait: ShareSpeciesTrait): unknown[] {
  * An effect's wire order, frozen. `kind` leads because it is what decides how
  * the payload is read, and `label` follows it because every other section in
  * this format leads with the thing a reader would call the row. The two
- * PROVENANCE slots go last, ref then flag: they are the only references here,
- * and keeping them at the end means a future payload column appends in front of
- * them rather than displacing them.
+ * PROVENANCE slots go last, ref then flag: they are the only references here.
+ * Their v1 positions never move; a future payload shape belongs to v2.
  *
  * `sourceSubclass` rides in its own slot rather than being folded into the ref
  * (a negative ref, a second numbering) because the ref space is shared with
@@ -379,23 +376,14 @@ function effectToPositional(effect: ShareEffect): unknown[] {
   return [
     effect.kind,
     effect.label,
-    ...SHARE_EFFECT_TEXT.map((field) => effect[field] ?? null),
-    ...SHARE_EFFECT_NUMBERS.map((field) => effect[field] ?? null),
-    effect.sourceRef ?? null,
-    effect.sourceSubclass ?? null,
+    ...EFFECT_WIRE_FIELDS.map((field) => effect[field] ?? null),
   ];
 }
 
 function effectFromPositional(value: unknown, label: string): unknown {
   const row = tuple(value, EFFECT_TUPLE_LENGTH, label);
   const effect: Record<string, unknown> = { kind: row[0], label: row[1] };
-  const fields = [
-    ...SHARE_EFFECT_TEXT,
-    ...SHARE_EFFECT_NUMBERS,
-    'sourceRef',
-    'sourceSubclass',
-  ] as const;
-  fields.forEach((field, index) => {
+  EFFECT_WIRE_FIELDS.forEach((field, index) => {
     const item = row[index + 2];
     if (item !== null) {
       effect[field] = item;
@@ -407,7 +395,7 @@ function effectFromPositional(value: unknown, label: string): unknown {
 function backgroundToPositional(background: ShareBackground): unknown[] {
   return [
     background.name,
-    ...SHARE_BACKGROUND_TEXT.map((field) => background[field] ?? null),
+    ...BACKGROUND_WIRE_FIELDS.map((field) => background[field] ?? null),
   ];
 }
 
@@ -422,31 +410,17 @@ function backgroundToPositional(background: ShareBackground): unknown[] {
 function armorToPositional(armor: ShareArmor): unknown[] {
   return [
     armor.name,
-    ...SHARE_ARMOR_ENUMS.map((field) => armor[field]),
-    armor.armor_class,
-    ...SHARE_ARMOR_NUMBERS.map((field) => armor[field] ?? null),
-    ...SHARE_ARMOR_FLAGS.map((flag) => armor[flag] ?? null),
-    armor.notes ?? null,
+    ...ARMOR_WIRE_FIELDS.map((field) => armor[field] ?? null),
   ];
 }
 
 function armorFromPositional(value: unknown, label: string): unknown {
-  const row = tuple(value, ARMOR_TUPLE_LENGTH, label);
-  const armor: Record<string, unknown> = { name: row[0] };
-  const fields = [
-    ...SHARE_ARMOR_ENUMS,
-    'armor_class',
-    ...SHARE_ARMOR_NUMBERS,
-    ...SHARE_ARMOR_FLAGS,
-    'notes',
-  ] as const;
-  fields.forEach((field, index) => {
-    const item = row[index + 1];
-    if (item !== null) {
-      armor[field] = item;
-    }
-  });
-  return armor;
+  return fromPositional(
+    value,
+    ARMOR_TUPLE_LENGTH,
+    fieldKeys(WIRE_SCHEMA.tuples.armor.fields),
+    label,
+  );
 }
 
 function hitPointRollToPositional(roll: ShareHitPointRoll): unknown[] {
@@ -454,8 +428,12 @@ function hitPointRollToPositional(roll: ShareHitPointRoll): unknown[] {
 }
 
 function hitPointRollFromPositional(value: unknown, label: string): unknown {
-  const row = tuple(value, HIT_POINT_ROLL_TUPLE_LENGTH, label);
-  return { className: row[0], classLevel: row[1], value: row[2] };
+  return fromPositional(
+    value,
+    HIT_POINT_ROLL_TUPLE_LENGTH,
+    fieldKeys(WIRE_SCHEMA.tuples.hitPointRoll.fields),
+    label,
+  );
 }
 
 function sheetAdjustmentToPositional(
@@ -468,12 +446,12 @@ function sheetAdjustmentFromPositional(
   value: unknown,
   label: string,
 ): unknown {
-  const row = tuple(value, SHEET_ADJUSTMENT_TUPLE_LENGTH, label);
-  const adjustment: Record<string, unknown> = { value: row[0] };
-  if (row[1] !== null) {
-    adjustment.note = row[1];
-  }
-  return adjustment;
+  return fromPositional(
+    value,
+    SHEET_ADJUSTMENT_TUPLE_LENGTH,
+    fieldKeys(WIRE_SCHEMA.tuples.sheetAdjustment.fields),
+    label,
+  );
 }
 
 function fromPositional(
@@ -483,9 +461,9 @@ function fromPositional(
   label: string,
 ): Record<string, unknown> {
   const row = tuple(value, length, label);
-  const result: Record<string, unknown> = { name: row[0] };
+  const result: Record<string, unknown> = {};
   fields.forEach((field, index) => {
-    const item = row[index + 1];
+    const item = row[index];
     if (item !== null) {
       result[field] = item;
     }
@@ -505,116 +483,98 @@ function assertListLimit(
   }
 }
 
-function nullable<T>(value: T | null): T | undefined {
-  return value === null ? undefined : value;
-}
-
 export function shareDocumentToPositional(
   input: CharacterShareDocument,
 ): unknown[] {
   const document = validateShareDocument(input);
   const character = document.character;
-  return [
-    CHARACTER_SHARE_FORMAT,
-    CHARACTER_SHARE_VERSION,
-    [
-      character.name,
-      character.strength ?? null,
-      character.dexterity ?? null,
-      character.constitution ?? null,
-      character.intelligence ?? null,
-      character.wisdom ?? null,
-      character.charisma ?? null,
-      character.proficiency_bonus_override ?? null,
-      character.rules_edition_preference ?? null,
-      character.allow_legacy ?? null,
-      document.placeholders?.map((row) => [
-        row.spellKey,
-        row.spellName,
-      ]) ?? null,
-      // The opt-in note. ALWAYS WRITTEN, `null` when the sharer did not opt in
-      // or the character has no note, so this build's output has one shape
-      // rather than two — the same terms every section above is written on.
-      character.notes ?? null,
-    ],
-    document.classes.map((row) => [
-      row.id,
-      row.classKey,
-      row.subclassKey ?? null,
-      row.level,
-      row.start,
-      row.ability ?? null,
-      row.config ?? null,
-      row.subclassConfig ?? null,
-    ]),
-    document.sources.map((row) => [
-      row.id,
-      row.type,
-      row.key,
-      row.config ?? null,
-      row.acquired,
-      row.name ?? null,
-    ]),
-    document.selections.map((row) => [
-      row.ref,
-      row.ruleKey,
-      row.ordinal,
-      row.spellKey,
-      row.spellName ?? null,
-      row.keep ?? null,
-    ]),
-    [...document.spellbook],
-    document.preferences.map((row) => [
-      row.spellKey,
-      row.favourite,
-    ]),
-    document.overrides.map((row) => [row.ruleKey, row.value]),
-    document.acknowledgements?.map((row) => [row.warning]) ?? null,
-    document.loadouts?.map((row) => [
-      row.name,
-      row.entries.map((entry) => [entry.spellKey, entry.role]),
-    ]) ?? null,
-    // Element 11. Always written, `null` when the character has no weapons, so
-    // this build's output has one shape rather than two.
-    document.weapons?.map(weaponToPositional) ?? null,
-    // Element 12, on the same terms: always written, and `null` in each of its
-    // three slots when the character has no species, no traits or no background.
-    [
-      document.species === undefined
+  const characterWire = objectToPositional(
+    {
+      ...character,
+      placeholders: document.placeholders?.map((row) =>
+        objectToPositional(row, WIRE_SCHEMA.tuples.placeholder.fields)
+      ),
+    },
+    WIRE_SCHEMA.tuples.character.fields,
+  );
+  const originWire = objectToPositional(
+    {
+      species: document.species === undefined
         ? null
         : speciesToPositional(document.species),
-      document.speciesTraits?.map(speciesTraitToPositional) ?? null,
-      document.background === undefined
+      speciesTraits: document.speciesTraits?.map(speciesTraitToPositional),
+      background: document.background === undefined
         ? null
         : backgroundToPositional(document.background),
-    ],
-    // Element 13, the SHEET group, on the same terms as the origin group:
-    // always written, and `null` in each of its four slots when the character
-    // recorded nothing of that kind.
-    [
-      document.armor?.map(armorToPositional) ?? null,
-      document.hitPointRolls?.map(hitPointRollToPositional) ?? null,
-      document.skillProficiencies === undefined
+    },
+    WIRE_SCHEMA.tuples.origin.fields,
+  );
+  const sheetWire = objectToPositional(
+    {
+      armor: document.armor?.map(armorToPositional),
+      hitPointRolls: document.hitPointRolls?.map(hitPointRollToPositional),
+      skillProficiencies: document.skillProficiencies === undefined
         ? null
         : [...document.skillProficiencies],
-      document.sheetAdjustment === undefined
+      sheetAdjustment: document.sheetAdjustment === undefined
         ? null
         : sheetAdjustmentToPositional(document.sheetAdjustment),
-    ],
-    // Element 14, the character's own EFFECTS. Always written, `null` when the
-    // character has none, so this build's output has one shape rather than two.
-    document.effects?.map(effectToPositional) ?? null,
-  ];
+    },
+    WIRE_SCHEMA.tuples.sheet.fields,
+  );
+  return objectToPositional(
+    {
+      format: CHARACTER_SHARE_FORMAT,
+      version: CHARACTER_SHARE_VERSION,
+      character: characterWire,
+      classes: document.classes.map((row) =>
+        objectToPositional(row, WIRE_SCHEMA.tuples.class.fields)
+      ),
+      sources: document.sources.map((row) =>
+        objectToPositional(row, WIRE_SCHEMA.tuples.source.fields)
+      ),
+      selections: document.selections.map((row) =>
+        objectToPositional(row, WIRE_SCHEMA.tuples.selection.fields)
+      ),
+      spellbook: [...document.spellbook],
+      preferences: document.preferences.map((row) =>
+        objectToPositional(row, WIRE_SCHEMA.tuples.preference.fields)
+      ),
+      overrides: document.overrides.map((row) =>
+        objectToPositional(row, WIRE_SCHEMA.tuples.override.fields)
+      ),
+      acknowledgements: document.acknowledgements?.map((row) =>
+        objectToPositional(row, WIRE_SCHEMA.tuples.acknowledgement.fields)
+      ),
+      loadouts: document.loadouts?.map((row) =>
+        objectToPositional(
+          {
+            name: row.name,
+            entries: row.entries.map((entry) =>
+              objectToPositional(
+                entry,
+                WIRE_SCHEMA.tuples.loadoutEntry.fields,
+              )
+            ),
+          },
+          WIRE_SCHEMA.tuples.loadout.fields,
+        )
+      ),
+      weapons: document.weapons?.map(weaponToPositional),
+      origin: originWire,
+      sheet: sheetWire,
+      effects: document.effects?.map(effectToPositional),
+    },
+    WIRE_SCHEMA.tuples.root.fields,
+  );
 }
 
-export function positionalToShareDocument(
-  input: unknown,
-): CharacterShareDocument {
+function decodeWireV1(input: unknown): CharacterShareDocument {
   const root = variableTuple(input, ROOT_TUPLE_LENGTHS, 'wire document');
   // An eleven-element document predates weapons. `undefined`, not `null`: the
   // section is genuinely absent, and the object validator distinguishes the two.
   const wireWeapons =
-    root.length === LEGACY_ROOT_LENGTH ? null : root[11];
+    root.length === LEGACY_ROOT_LENGTH ? null : root[ROOT_WEAPONS_INDEX];
   // Eleven or twelve elements both predate the origin. `null` rather than a
   // three-element tuple of nulls, so the three sections stay genuinely ABSENT
   // and the object validator can tell "carried none" from "never carried".
@@ -622,7 +582,7 @@ export function positionalToShareDocument(
     root.length === LEGACY_ROOT_LENGTH ||
     root.length === PRE_ORIGIN_ROOT_LENGTH
       ? null
-      : tuple(root[12], ORIGIN_TUPLE_LENGTH, 'wire origin');
+      : tuple(root[ROOT_ORIGIN_INDEX], ORIGIN_TUPLE_LENGTH, 'wire origin');
   // Eleven, twelve and thirteen elements all predate the sheet inputs. `null`
   // rather than a four-element tuple of nulls, so the four sections stay
   // genuinely ABSENT and the object validator can tell "recorded none" from
@@ -633,7 +593,7 @@ export function positionalToShareDocument(
     root.length === PRE_ORIGIN_ROOT_LENGTH ||
     root.length === PRE_SHEET_ROOT_LENGTH
       ? null
-      : tuple(root[13], SHEET_TUPLE_LENGTH, 'wire sheet');
+      : tuple(root[ROOT_SHEET_INDEX], SHEET_TUPLE_LENGTH, 'wire sheet');
   // Eleven through fourteen elements all predate the effect model. `null`
   // rather than an empty list, so the section stays genuinely ABSENT and the
   // object validator can tell "carried none" from "never carried any" — the
@@ -646,62 +606,82 @@ export function positionalToShareDocument(
     root.length === PRE_SHEET_ROOT_LENGTH ||
     root.length === PRE_EFFECTS_ROOT_LENGTH
       ? null
-      : root[14];
-  if (root[0] !== CHARACTER_SHARE_FORMAT) {
-    throw new ShareValidationError('format is unsupported.');
-  }
-  if (root[1] !== CHARACTER_SHARE_VERSION) {
-    throw new ShareValidationError('version is unsupported.');
-  }
+      : root[ROOT_EFFECTS_INDEX];
   const character = variableTuple(
-    root[2],
+    root[ROOT_CHARACTER_INDEX],
     CHARACTER_TUPLE_LENGTHS,
     'wire character',
   );
-  if (!Array.isArray(root[3])) {
+  if (!Array.isArray(root[ROOT_CLASSES_INDEX])) {
     throw new ShareValidationError('wire classes must be a list.');
   }
-  if (!Array.isArray(root[4])) {
+  if (!Array.isArray(root[ROOT_SOURCES_INDEX])) {
     throw new ShareValidationError('wire sources must be a list.');
   }
-  if (!Array.isArray(root[5])) {
+  if (!Array.isArray(root[ROOT_SELECTIONS_INDEX])) {
     throw new ShareValidationError('wire selections must be a list.');
   }
-  if (!Array.isArray(root[6])) {
+  if (!Array.isArray(root[ROOT_SPELLBOOK_INDEX])) {
     throw new ShareValidationError('wire spellbook must be a list.');
   }
-  if (!Array.isArray(root[7])) {
+  if (!Array.isArray(root[ROOT_PREFERENCES_INDEX])) {
     throw new ShareValidationError('wire preferences must be a list.');
   }
-  if (!Array.isArray(root[8])) {
+  if (!Array.isArray(root[ROOT_OVERRIDES_INDEX])) {
     throw new ShareValidationError('wire overrides must be a list.');
   }
-  if (root[9] !== null && !Array.isArray(root[9])) {
+  if (
+    root[ROOT_ACKNOWLEDGEMENTS_INDEX] !== null &&
+    !Array.isArray(root[ROOT_ACKNOWLEDGEMENTS_INDEX])
+  ) {
     throw new ShareValidationError(
       'wire acknowledgements must be null or a list.',
     );
   }
-  if (root[10] !== null && !Array.isArray(root[10])) {
+  if (
+    root[ROOT_LOADOUTS_INDEX] !== null &&
+    !Array.isArray(root[ROOT_LOADOUTS_INDEX])
+  ) {
     throw new ShareValidationError('wire loadouts must be null or a list.');
   }
   if (wireWeapons !== null && !Array.isArray(wireWeapons)) {
     throw new ShareValidationError('wire weapons must be null or a list.');
   }
-  assertListLimit(root[3], SHARE_LIMITS.classes, 'classes');
-  assertListLimit(root[4], SHARE_LIMITS.sources, 'sources');
-  assertListLimit(root[5], SHARE_LIMITS.selections, 'selections');
-  assertListLimit(root[6], SHARE_LIMITS.spellbook, 'spellbook');
-  assertListLimit(root[7], SHARE_LIMITS.preferences, 'preferences');
-  assertListLimit(root[8], SHARE_LIMITS.overrides, 'overrides');
-  if (root[9] !== null) {
+  assertListLimit(root[ROOT_CLASSES_INDEX], SHARE_LIMITS.classes, 'classes');
+  assertListLimit(root[ROOT_SOURCES_INDEX], SHARE_LIMITS.sources, 'sources');
+  assertListLimit(
+    root[ROOT_SELECTIONS_INDEX],
+    SHARE_LIMITS.selections,
+    'selections',
+  );
+  assertListLimit(
+    root[ROOT_SPELLBOOK_INDEX],
+    SHARE_LIMITS.spellbook,
+    'spellbook',
+  );
+  assertListLimit(
+    root[ROOT_PREFERENCES_INDEX],
+    SHARE_LIMITS.preferences,
+    'preferences',
+  );
+  assertListLimit(
+    root[ROOT_OVERRIDES_INDEX],
+    SHARE_LIMITS.overrides,
+    'overrides',
+  );
+  if (root[ROOT_ACKNOWLEDGEMENTS_INDEX] !== null) {
     assertListLimit(
-      root[9],
+      root[ROOT_ACKNOWLEDGEMENTS_INDEX],
       SHARE_LIMITS.acknowledgements,
       'acknowledgements',
     );
   }
-  if (root[10] !== null) {
-    assertListLimit(root[10], SHARE_LIMITS.loadouts, 'loadouts');
+  if (root[ROOT_LOADOUTS_INDEX] !== null) {
+    assertListLimit(
+      root[ROOT_LOADOUTS_INDEX],
+      SHARE_LIMITS.loadouts,
+      'loadouts',
+    );
   }
   if (wireWeapons !== null) {
     assertListLimit(wireWeapons, SHARE_LIMITS.weapons, 'weapons');
@@ -717,9 +697,17 @@ export function positionalToShareDocument(
       // Two, because there are two slots and the schema's unique index says so.
       // The object validator then names the duplicate slot; this only stops a
       // hostile document spending the decompressed budget before it gets there.
-      ['armor', wireSheet[0], ARMOR_SLOT_COUNT],
-      ['hitPointRolls', wireSheet[1], SHARE_LIMITS.hitPointRolls],
-      ['skillProficiencies', wireSheet[2], SHARE_LIMITS.skillProficiencies],
+      ['armor', wireSheet[SHEET_ARMOR_INDEX], ARMOR_SLOT_COUNT],
+      [
+        'hitPointRolls',
+        wireSheet[SHEET_HIT_POINT_ROLLS_INDEX],
+        SHARE_LIMITS.hitPointRolls,
+      ],
+      [
+        'skillProficiencies',
+        wireSheet[SHEET_SKILL_PROFICIENCIES_INDEX],
+        SHARE_LIMITS.skillProficiencies,
+      ],
     ] as const;
     for (const [name, value, maximum] of lists) {
       if (value === null) {
@@ -734,133 +722,110 @@ export function positionalToShareDocument(
     }
   }
   if (wireOrigin !== null) {
-    if (wireOrigin[1] !== null && !Array.isArray(wireOrigin[1])) {
+    if (
+      wireOrigin[ORIGIN_SPECIES_TRAITS_INDEX] !== null &&
+      !Array.isArray(wireOrigin[ORIGIN_SPECIES_TRAITS_INDEX])
+    ) {
       throw new ShareValidationError(
         'wire speciesTraits must be null or a list.',
       );
     }
-    if (Array.isArray(wireOrigin[1])) {
+    if (Array.isArray(wireOrigin[ORIGIN_SPECIES_TRAITS_INDEX])) {
       assertListLimit(
-        wireOrigin[1],
+        wireOrigin[ORIGIN_SPECIES_TRAITS_INDEX],
         SHARE_LIMITS.speciesTraits,
         'speciesTraits',
       );
     }
   }
-  if (character[10] !== null) {
-    if (!Array.isArray(character[10])) {
+  if (character[CHARACTER_PLACEHOLDERS_INDEX] !== null) {
+    if (!Array.isArray(character[CHARACTER_PLACEHOLDERS_INDEX])) {
       throw new ShareValidationError(
         'wire placeholders must be a list.',
       );
     }
     assertListLimit(
-      character[10],
+      character[CHARACTER_PLACEHOLDERS_INDEX],
       SHARE_LIMITS.placeholders,
       'placeholders',
     );
   }
 
+  const rawCharacter = fromPositional(
+    character,
+    character.length,
+    fieldKeys(WIRE_SCHEMA.tuples.character.fields).slice(0, character.length),
+    'wire character',
+  );
+  delete rawCharacter.placeholders;
+
   const raw: Record<string, unknown> = {
-    format: root[0],
-    version: root[1],
-    character: {
-      name: character[0],
-      ...(nullable(character[1]) === undefined
-        ? {}
-        : { strength: character[1] }),
-      ...(nullable(character[2]) === undefined
-        ? {}
-        : { dexterity: character[2] }),
-      ...(nullable(character[3]) === undefined
-        ? {}
-        : { constitution: character[3] }),
-      ...(nullable(character[4]) === undefined
-        ? {}
-        : { intelligence: character[4] }),
-      ...(nullable(character[5]) === undefined
-        ? {}
-        : { wisdom: character[5] }),
-      ...(nullable(character[6]) === undefined
-        ? {}
-        : { charisma: character[6] }),
-      ...(nullable(character[7]) === undefined
-        ? {}
-        : { proficiency_bonus_override: character[7] }),
-      ...(nullable(character[8]) === undefined
-        ? {}
-        : { rules_edition_preference: character[8] }),
-      ...(nullable(character[9]) === undefined
-        ? {}
-        : { allow_legacy: character[9] }),
-      // `undefined` is a SHORT TUPLE — a link minted before Q12 — and `null` is
-      // a sharer who did not opt in or a character with no note. Both leave the
-      // key absent, which is what `ShareCharacter.notes` optionality means, so
-      // the two need no separate branch and neither can invent a value.
-      ...(character[CHARACTER_NOTES_INDEX] === null ||
-      character[CHARACTER_NOTES_INDEX] === undefined
-        ? {}
-        : { notes: character[CHARACTER_NOTES_INDEX] }),
-    },
-    classes: root[3].map((value, index) => {
-      const row = tuple(value, 8, `wire classes[${index}]`);
-      return {
-        id: row[0],
-        classKey: row[1],
-        ...(row[2] === null ? {} : { subclassKey: row[2] }),
-        level: row[3],
-        start: row[4],
-        ...(row[5] === null ? {} : { ability: row[5] }),
-        ...(row[6] === null ? {} : { config: row[6] }),
-        ...(row[7] === null
-          ? {}
-          : { subclassConfig: row[7] }),
-      };
-    }),
-    sources: root[4].map((value, index) => {
-      const row = tuple(value, 6, `wire sources[${index}]`);
-      return {
-        id: row[0],
-        type: row[1],
-        key: row[2],
-        ...(row[3] === null ? {} : { config: row[3] }),
-        acquired: row[4],
-        ...(row[5] === null ? {} : { name: row[5] }),
-      };
-    }),
-    selections: root[5].map((value, index) => {
-      const row = tuple(value, 6, `wire selections[${index}]`);
-      return {
-        ref: row[0],
-        ruleKey: row[1],
-        ordinal: row[2],
-        spellKey: row[3],
-        ...(row[4] === null ? {} : { spellName: row[4] }),
-        ...(row[5] === null ? {} : { keep: row[5] }),
-      };
-    }),
-    spellbook: [...root[6]],
-    preferences: root[7].map((value, index) => {
-      const row = tuple(value, 2, `wire preferences[${index}]`);
-      return { spellKey: row[0], favourite: row[1] };
-    }),
-    overrides: root[8].map((value, index) => {
-      const row = tuple(value, 2, `wire overrides[${index}]`);
-      return { ruleKey: row[0], value: row[1] };
-    }),
-  };
-  if (root[9] !== null) {
-    raw.acknowledgements = root[9].map((value, index) => {
+    format: root[ROOT_FORMAT_INDEX],
+    version: root[ROOT_VERSION_INDEX],
+    character: rawCharacter,
+    classes: root[ROOT_CLASSES_INDEX].map((value, index) =>
+      fromPositional(
+        value,
+        WIRE_SCHEMA.tuples.class.arities[0],
+        fieldKeys(WIRE_SCHEMA.tuples.class.fields),
+        `wire classes[${index}]`,
+      )
+    ),
+    sources: root[ROOT_SOURCES_INDEX].map((value, index) =>
+      fromPositional(
+        value,
+        WIRE_SCHEMA.tuples.source.arities[0],
+        fieldKeys(WIRE_SCHEMA.tuples.source.fields),
+        `wire sources[${index}]`,
+      )
+    ),
+    selections: root[ROOT_SELECTIONS_INDEX].map((value, index) =>
+      fromPositional(
+        value,
+        WIRE_SCHEMA.tuples.selection.arities[0],
+        fieldKeys(WIRE_SCHEMA.tuples.selection.fields),
+        `wire selections[${index}]`,
+      )
+    ),
+    spellbook: [...root[ROOT_SPELLBOOK_INDEX]],
+    preferences: root[ROOT_PREFERENCES_INDEX].map((value, index) =>
+      fromPositional(
+        value,
+        WIRE_SCHEMA.tuples.preference.arities[0],
+        fieldKeys(WIRE_SCHEMA.tuples.preference.fields),
+        `wire preferences[${index}]`,
+      )
+    ),
+    overrides: root[ROOT_OVERRIDES_INDEX].map((value, index) => {
       const row = tuple(
         value,
-        1,
-        `wire acknowledgements[${index}]`,
+        WIRE_SCHEMA.tuples.override.arities[0],
+        `wire overrides[${index}]`,
       );
-      return { warning: row[0] };
-    });
+      return {
+        ruleKey: row[OVERRIDE_RULE_KEY_INDEX],
+        value: row[OVERRIDE_VALUE_INDEX],
+      };
+    }),
+  };
+  if (root[ROOT_ACKNOWLEDGEMENTS_INDEX] !== null) {
+    raw.acknowledgements = root[ROOT_ACKNOWLEDGEMENTS_INDEX].map(
+      (value, index) =>
+        fromPositional(
+          value,
+          WIRE_SCHEMA.tuples.acknowledgement.arities[0],
+          fieldKeys(WIRE_SCHEMA.tuples.acknowledgement.fields),
+          `wire acknowledgements[${index}]`,
+        ),
+    );
   }
-  if (root[10] !== null) {
-    raw.loadouts = root[10].map((value, index) => {
-      const row = tuple(value, 2, `wire loadouts[${index}]`);
+  if (root[ROOT_LOADOUTS_INDEX] !== null) {
+    raw.loadouts = root[ROOT_LOADOUTS_INDEX].map((value, index) => {
+      const row = tuple(
+        value,
+        WIRE_SCHEMA.tuples.loadout.arities[0],
+        `wire loadouts[${index}]`,
+      );
       if (!Array.isArray(row[1])) {
         throw new ShareValidationError(
           `wire loadouts[${index}].entries must be a list.`,
@@ -869,21 +834,26 @@ export function positionalToShareDocument(
       return {
         name: row[0],
         entries: row[1].map((entry, entryIndex) => {
-          const entryRow = tuple(
+          return fromPositional(
             entry,
-            2,
+            WIRE_SCHEMA.tuples.loadoutEntry.arities[0],
+            fieldKeys(WIRE_SCHEMA.tuples.loadoutEntry.fields),
             `wire loadouts[${index}].entries[${entryIndex}]`,
           );
-          return { spellKey: entryRow[0], role: entryRow[1] };
         }),
       };
     });
   }
-  if (character[10] !== null) {
-    raw.placeholders = character[10].map((value, index) => {
-      const row = tuple(value, 2, `wire placeholders[${index}]`);
-      return { spellKey: row[0], spellName: row[1] };
-    });
+  if (character[CHARACTER_PLACEHOLDERS_INDEX] !== null) {
+    raw.placeholders = character[CHARACTER_PLACEHOLDERS_INDEX].map(
+      (value, index) =>
+        fromPositional(
+          value,
+          WIRE_SCHEMA.tuples.placeholder.arities[0],
+          fieldKeys(WIRE_SCHEMA.tuples.placeholder.fields),
+          `wire placeholders[${index}]`,
+        ),
+    );
   }
   if (wireWeapons !== null) {
     raw.weapons = wireWeapons.map((value, index) =>
@@ -891,50 +861,54 @@ export function positionalToShareDocument(
     );
   }
   if (wireOrigin !== null) {
-    if (wireOrigin[0] !== null) {
+    if (wireOrigin[ORIGIN_SPECIES_INDEX] !== null) {
       raw.species = fromPositional(
-        wireOrigin[0],
+        wireOrigin[ORIGIN_SPECIES_INDEX],
         SPECIES_TUPLE_LENGTH,
-        [...SHARE_SPECIES_TEXT, 'base_speed_feet'],
+        fieldKeys(WIRE_SCHEMA.tuples.species.fields),
         'wire species',
       );
     }
-    if (Array.isArray(wireOrigin[1])) {
-      raw.speciesTraits = wireOrigin[1].map((value, index) =>
+    if (Array.isArray(wireOrigin[ORIGIN_SPECIES_TRAITS_INDEX])) {
+      raw.speciesTraits = wireOrigin[ORIGIN_SPECIES_TRAITS_INDEX].map(
+        (value, index) =>
         fromPositional(
           value,
           SPECIES_TRAIT_TUPLE_LENGTH,
-          [...SHARE_SPECIES_TRAIT_TEXT, ...SHARE_SPECIES_TRAIT_NUMBERS],
+          fieldKeys(WIRE_SCHEMA.tuples.speciesTrait.fields),
           `wire speciesTraits[${index}]`,
         ),
       );
     }
-    if (wireOrigin[2] !== null) {
+    if (wireOrigin[ORIGIN_BACKGROUND_INDEX] !== null) {
       raw.background = fromPositional(
-        wireOrigin[2],
+        wireOrigin[ORIGIN_BACKGROUND_INDEX],
         BACKGROUND_TUPLE_LENGTH,
-        [...SHARE_BACKGROUND_TEXT],
+        fieldKeys(WIRE_SCHEMA.tuples.background.fields),
         'wire background',
       );
     }
   }
   if (wireSheet !== null) {
-    if (Array.isArray(wireSheet[0])) {
-      raw.armor = wireSheet[0].map((value, index) =>
+    if (Array.isArray(wireSheet[SHEET_ARMOR_INDEX])) {
+      raw.armor = wireSheet[SHEET_ARMOR_INDEX].map((value, index) =>
         armorFromPositional(value, `wire armor[${index}]`),
       );
     }
-    if (Array.isArray(wireSheet[1])) {
-      raw.hitPointRolls = wireSheet[1].map((value, index) =>
+    if (Array.isArray(wireSheet[SHEET_HIT_POINT_ROLLS_INDEX])) {
+      raw.hitPointRolls = wireSheet[SHEET_HIT_POINT_ROLLS_INDEX].map(
+        (value, index) =>
         hitPointRollFromPositional(value, `wire hitPointRolls[${index}]`),
       );
     }
-    if (Array.isArray(wireSheet[2])) {
-      raw.skillProficiencies = [...wireSheet[2]];
+    if (Array.isArray(wireSheet[SHEET_SKILL_PROFICIENCIES_INDEX])) {
+      raw.skillProficiencies = [
+        ...wireSheet[SHEET_SKILL_PROFICIENCIES_INDEX],
+      ];
     }
-    if (wireSheet[3] !== null) {
+    if (wireSheet[SHEET_ADJUSTMENT_INDEX] !== null) {
       raw.sheetAdjustment = sheetAdjustmentFromPositional(
-        wireSheet[3],
+        wireSheet[SHEET_ADJUSTMENT_INDEX],
         'wire sheetAdjustment',
       );
     }
@@ -945,6 +919,21 @@ export function positionalToShareDocument(
     );
   }
   return validateShareDocument(raw);
+}
+
+export function positionalToShareDocument(
+  input: unknown,
+): CharacterShareDocument {
+  const root = variableTuple(input, ROOT_TUPLE_LENGTHS, 'wire document');
+  if (root[ROOT_FORMAT_INDEX] !== CHARACTER_SHARE_FORMAT) {
+    throw new ShareValidationError('format is unsupported.');
+  }
+  switch (root[ROOT_VERSION_INDEX]) {
+    case 1:
+      return decodeWireV1(root);
+    default:
+      throw new ShareValidationError('version is unsupported.');
+  }
 }
 
 function bytesToBase64(bytes: Uint8Array): string {
