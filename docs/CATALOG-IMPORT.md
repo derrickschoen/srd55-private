@@ -146,9 +146,12 @@ whitespace/case-normalized names and aliases can join renamed records.
 Duplicate `versionKey` records union spell lists, tags, attack modes, save
 abilities, and publications. A publication is unique by source-book name and
 keeps its record's page and reference. Reimport synchronizes additions,
-updates, and removals for every one of those pivots. Ritual and concentration
-tags are also inferred from the explicit booleans and the source notation used
-by the PHP catalog.
+updates, and removals for every one of those pivots. The `ritual` and
+`concentration` booleans each add the matching tag, and they are its ONLY
+source: `castingTime` and `duration` are text the importer stores and never
+reads. A record declaring `concentration: false` beside a duration of
+`"Concentration, up to 1 minute"` gets no concentration tag — the declaration
+wins, and since both fields are required there is never an absence to guess at.
 
 Imported versions absent from a later complete import are tombstoned
 (`is_active = 0`), not deleted. Reappearing versions are reactivated with the
