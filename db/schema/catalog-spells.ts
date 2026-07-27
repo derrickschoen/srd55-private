@@ -12,10 +12,13 @@ import type {
   SpellVersionId,
 } from '../../src/domain/ids';
 import type {
+  ConditionType,
+  DamageType,
   EffectReliabilityCategory,
   MaterialCostKind,
   SpellAreaShape,
   SpellRangeKind,
+  SpellSchool,
 } from '../../src/domain/enums';
 import {
   effectReliabilityCategories,
@@ -133,7 +136,11 @@ export const spell_versions = sqliteTable(
      */
     rules_edition: varchar()('rules_edition').notNull(),
     level: integer('level').notNull(),
-    school: varchar()('school').notNull(),
+    /**
+     * Known SRD schools plus passthrough. Catalog documents are user-imported
+     * and may contain homebrew, so there is deliberately no `oneOf` CHECK.
+     */
+    school: varchar<SpellSchool>()('school').notNull(),
     ritual: tinyint1('ritual').notNull().default(false),
     concentration: tinyint1('concentration')
       .notNull()
@@ -556,7 +563,7 @@ export const spell_version_damage_types = sqliteTable(
       .notNull()
       .$type<SpellVersionId>()
       .references(() => spell_versions.id, { onDelete: 'cascade' }),
-    damage_type: varchar()('damage_type').notNull(),
+    damage_type: varchar<DamageType>()('damage_type').notNull(),
   },
   (table) => [
     uniqueIndex(
@@ -574,7 +581,7 @@ export const spell_version_conditions = sqliteTable(
       .notNull()
       .$type<SpellVersionId>()
       .references(() => spell_versions.id, { onDelete: 'cascade' }),
-    condition_type: varchar()('condition_type').notNull(),
+    condition_type: varchar<ConditionType>()('condition_type').notNull(),
   },
   (table) => [
     uniqueIndex(

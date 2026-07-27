@@ -9,6 +9,7 @@ import type {
   ProgressionType,
   RulesEdition,
   SelectionEligibility,
+  SpellSchool,
   SlotBucket,
   SlotState,
   SrdWeaponGroup,
@@ -283,7 +284,7 @@ export interface EligibleSpell {
   id: number;
   name: string;
   level: number;
-  school: string;
+  school: SpellSchool;
   ritual: boolean;
   concentration: boolean;
   edition: RulesEdition;

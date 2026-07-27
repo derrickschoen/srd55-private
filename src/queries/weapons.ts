@@ -1,5 +1,6 @@
 import {
   sqlBoolean,
+  sqlNullableDamageType,
   sqlInteger,
   sqlNullableInteger,
   sqlNullableString,
@@ -107,7 +108,7 @@ function weaponProfile(row: SqlRow): WeaponProfile {
   return {
     name: sqlString(row, 'name'),
     damage_dice: sqlNullableString(row, 'damage_dice'),
-    damage_type: sqlNullableString(row, 'damage_type'),
+    damage_type: sqlNullableDamageType(row, 'damage_type'),
     versatile_damage_dice: sqlNullableString(row, 'versatile_damage_dice'),
     finesse: sqlBoolean(row, 'finesse'),
     heavy: sqlBoolean(row, 'heavy'),

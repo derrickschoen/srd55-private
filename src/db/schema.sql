@@ -624,6 +624,7 @@ CREATE TABLE `species_template_trait_effects` (
 	`updated_at` DATETIME,
 	FOREIGN KEY (`species_template_trait_id`) REFERENCES `species_template_traits`(`id`) ON UPDATE no action ON DELETE cascade,
 	CONSTRAINT "species_template_trait_effects_kind_check" CHECK(`effect_kind` IN ('damage_resistance', 'hp_modifier', 'speed')),
+	CONSTRAINT "species_template_trait_effects_damage_type_check" CHECK((`damage_type` IS NULL OR `damage_type` IN ('Acid', 'Bludgeoning', 'Cold', 'Fire', 'Force', 'Lightning', 'Necrotic', 'Piercing', 'Poison', 'Psychic', 'Radiant', 'Slashing', 'Thunder'))),
 	CONSTRAINT "species_template_trait_effects_damage_type_kind_check" CHECK(damage_type IS NULL OR effect_kind IS 'damage_resistance'),
 	CONSTRAINT "species_template_trait_effects_hit_points_kind_check" CHECK((hit_points_flat IS NULL AND hit_points_per_level IS NULL) OR effect_kind IS 'hp_modifier'),
 	CONSTRAINT "species_template_trait_effects_speed_kind_check" CHECK(speed_bonus_feet IS NULL OR effect_kind IS 'speed'),
@@ -659,6 +660,9 @@ CREATE TABLE `species_templates` (
 	`created_at` DATETIME,
 	`updated_at` DATETIME,
 	CONSTRAINT "species_templates_rules_edition_check" CHECK(`rules_edition` IN ('2014', '2024', 'expanded')),
+	CONSTRAINT "species_templates_creature_type_check" CHECK(`creature_type` IN ('Aberration', 'Beast', 'Celestial', 'Construct', 'Dragon', 'Elemental', 'Fey', 'Fiend', 'Giant', 'Humanoid', 'Monstrosity', 'Ooze', 'Plant', 'Undead')),
+	CONSTRAINT "species_templates_size_check" CHECK(`size` IN ('Tiny', 'Small', 'Medium', 'Large', 'Huge', 'Gargantuan')),
+	CONSTRAINT "species_templates_alternate_size_check" CHECK((`alternate_size` IS NULL OR `alternate_size` IN ('Tiny', 'Small', 'Medium', 'Large', 'Huge', 'Gargantuan'))),
 	CONSTRAINT "species_templates_base_speed_check" CHECK(typeof(`base_speed_feet`) = 'integer' AND `base_speed_feet` >= 1)
 );
 
@@ -995,6 +999,7 @@ CREATE TABLE `weapon_templates` (
 	`created_at` DATETIME,
 	`updated_at` DATETIME,
 	CONSTRAINT "weapon_templates_mastery_property_check" CHECK(`mastery_property` IN ('Cleave', 'Graze', 'Nick', 'Push', 'Sap', 'Slow', 'Topple', 'Vex')),
+	CONSTRAINT "weapon_templates_damage_type_check" CHECK(`damage_type` IN ('Acid', 'Bludgeoning', 'Cold', 'Fire', 'Force', 'Lightning', 'Necrotic', 'Piercing', 'Poison', 'Psychic', 'Radiant', 'Slashing', 'Thunder')),
 	CONSTRAINT "weapon_templates_srd_group_check" CHECK(`srd_group` IN ('simple_melee', 'simple_ranged', 'martial_melee', 'martial_ranged')),
 	CONSTRAINT "weapon_templates_rules_edition_check" CHECK(`rules_edition` IN ('2014', '2024', 'expanded'))
 );

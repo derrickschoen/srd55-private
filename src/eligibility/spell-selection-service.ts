@@ -2,6 +2,7 @@ import {
   sqlBoolean,
   sqlInteger,
   sqlNullableInteger,
+  sqlNullableSpellSchoolList,
   sqlNullableString,
   type SqlRow,
 } from '../db/codecs';
@@ -32,7 +33,7 @@ function decodeSlot(row: SqlRow): SelectableSlot {
       row,
       'allowed_spell_lists',
     ),
-    allowed_schools: sqlNullableString(row, 'allowed_schools'),
+    allowed_schools: sqlNullableSpellSchoolList(row, 'allowed_schools'),
     allowed_tags: sqlNullableString(row, 'allowed_tags'),
     selection_collection: sqlNullableString(
       row,

@@ -10,6 +10,7 @@ import type {
   SlotState,
   SpellAreaShape,
   SpellRangeKind,
+  SpellSchool,
 } from './enums';
 
 export type JsonPrimitive = string | number | boolean | null;
@@ -48,7 +49,7 @@ export interface SpellVersionRow extends TimestampedRow {
   display_name: string;
   rules_edition: RulesEdition;
   level: number;
-  school: string;
+  school: SpellSchool;
   ritual: boolean;
   concentration: boolean;
   casting_time: string | null;
@@ -178,7 +179,7 @@ export interface SpellSelectionSlotRow extends TimestampedRow {
   spell_level_min: number;
   spell_level_max: number;
   allowed_spell_lists: string[] | null;
-  allowed_schools: string[] | null;
+  allowed_schools: SpellSchool[] | null;
   allowed_tags: string[] | null;
   always_prepared: boolean;
   with_slots: boolean;

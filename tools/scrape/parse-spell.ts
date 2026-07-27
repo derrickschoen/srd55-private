@@ -27,7 +27,12 @@ import {
   normalizeCatalogKeyComponent,
 } from '../../src/catalog/catalog-key';
 import { SCRAPED_OWNER_NAMESPACE } from './provenance';
-import type { RulesEdition } from '../../src/domain/enums';
+import {
+  isEnumValue,
+  spellSchools,
+  type KnownSpellSchool,
+  type RulesEdition,
+} from '../../src/domain/enums';
 import {
   emphasisedTexts,
   extractByClass,
@@ -39,16 +44,7 @@ import {
 } from './html';
 
 /** The eight schools. A closed set is what makes the descriptor parse strict. */
-export const SCHOOLS: readonly string[] = Object.freeze([
-  'Abjuration',
-  'Conjuration',
-  'Divination',
-  'Enchantment',
-  'Evocation',
-  'Illusion',
-  'Necromancy',
-  'Transmutation',
-]);
+export const SCHOOLS = spellSchools;
 
 export interface ParsedSpell {
   readonly record: CatalogRecord;
@@ -88,7 +84,7 @@ function readDefinitionBlock(
 
 interface Descriptor {
   readonly level: number;
-  readonly school: string;
+  readonly school: KnownSpellSchool;
   readonly spellLists: string[];
 }
 
@@ -114,7 +110,7 @@ function readDescriptor(text: string): Descriptor | string {
   const levelled = /^Level\s+([1-9])\s+([A-Za-z]+)$/u.exec(head);
   if (levelled !== null) {
     const school = levelled[2] as string;
-    if (!SCHOOLS.includes(school)) {
+    if (!isEnumValue(SCHOOLS, school)) {
       return `unknown school "${school}" in descriptor "${text}"`;
     }
     return { level: Number(levelled[1]), school, spellLists };
@@ -123,7 +119,7 @@ function readDescriptor(text: string): Descriptor | string {
   const cantrip = /^([A-Za-z]+)\s+Cantrip$/u.exec(head);
   if (cantrip !== null) {
     const school = cantrip[1] as string;
-    if (!SCHOOLS.includes(school)) {
+    if (!isEnumValue(SCHOOLS, school)) {
       return `unknown school "${school}" in descriptor "${text}"`;
     }
     return { level: 0, school, spellLists };

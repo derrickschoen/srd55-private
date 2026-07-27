@@ -57,6 +57,8 @@ export interface JsonColumnFact {
   readonly allowEmpty: boolean;
   /** The reader this contract mirrors. Provenance, so the entry can be checked. */
   readonly reader: string;
+  /** Optional element contract for array readers that require scalar strings. */
+  readonly items?: 'string';
 }
 
 type EveryColumnKey = { [T in FactTable]: AnyColumnKey<T> }[FactTable];
@@ -76,6 +78,7 @@ export const JSON_COLUMNS = {
   'spell_selection_slots.allowed_schools': {
     shape: 'array',
     allowEmpty: true,
+    items: 'string',
     reader: 'decodeStringList (src/eligibility/spell-selection-eligibility.ts)',
   },
   'spell_selection_slots.allowed_tags': {
@@ -250,5 +253,15 @@ export function jsonColumnError(
   } catch {
     return SHAPE_MESSAGE[fact.shape];
   }
-  return matchesShape(fact.shape, decoded) ? null : SHAPE_MESSAGE[fact.shape];
+  if (!matchesShape(fact.shape, decoded)) {
+    return SHAPE_MESSAGE[fact.shape];
+  }
+  if (
+    fact.items === 'string' &&
+    Array.isArray(decoded) &&
+    decoded.some((item) => typeof item !== 'string')
+  ) {
+    return 'must be a JSON array of strings';
+  }
+  return null;
 }

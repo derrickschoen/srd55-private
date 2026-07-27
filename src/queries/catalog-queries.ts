@@ -4,6 +4,7 @@ import {
   sqlNullableInteger,
   sqlNullableJson,
   sqlNullableString,
+  sqlSpellSchool,
   sqlString,
   type SqlRow,
 } from '../db/codecs';
@@ -190,7 +191,7 @@ function decodeSpell(row: SqlRow): CatalogSpell {
     display_name: sqlString(row, 'display_name'),
     rules_edition: sqlString(row, 'rules_edition') as RulesEdition,
     level: sqlInteger(row, 'level'),
-    school: sqlString(row, 'school'),
+    school: sqlSpellSchool(row, 'school'),
     ritual: sqlBoolean(row, 'ritual'),
     concentration: sqlBoolean(row, 'concentration'),
     casting_time: sqlNullableString(row, 'casting_time'),

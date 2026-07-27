@@ -14,6 +14,8 @@ import type {
   WeaponTemplateId,
 } from '../../src/domain/ids';
 import type {
+  DamageType,
+  KnownDamageType,
   RulesEdition,
   SrdWeaponGroup,
   WeaponMasteryGrant,
@@ -21,6 +23,7 @@ import type {
   WeaponProficiencyCategory,
 } from '../../src/domain/enums';
 import {
+  damageTypes,
   rulesEditions,
   srdWeaponGroups,
   weaponMasteryGrants,
@@ -128,12 +131,14 @@ export const character_weapons = sqliteTable(
      */
     damage_dice: varchar()('damage_dice'),
     /**
-     * Open vocabulary, not an enum. Precedent:
-     * `spell_version_damage_types.damage_type` is a bare `varchar()`. A weapon
-     * the user invented may do whatever damage the user says; the UI offers the
-     * three types the SRD weapons table uses as suggestions and accepts more.
+     * Open vocabulary, now typed as the SRD known set plus passthrough.
+     *
+     * The earlier argument for a bare `varchar()` was RIGHT about storage and
+     * WRONG that plain `string` was the only way to preserve it: a weapon the
+     * user invented may do whatever damage the user says, so there is still no
+     * CHECK, while `DamageType` keeps known values visible in the type system.
      */
-    damage_type: varchar()('damage_type'),
+    damage_type: varchar<DamageType>()('damage_type'),
     /**
      * The Versatile property's die, and the ONLY record that the property is
      * present. A companion `versatile` boolean was rejected: it is derivable
@@ -272,7 +277,7 @@ export const weapon_templates = sqliteTable(
     // NOT NULL where the character's copy is nullable: every row here comes
     // from a table in which every weapon has both.
     damage_dice: varchar()('damage_dice').notNull(),
-    damage_type: varchar()('damage_type').notNull(),
+    damage_type: varchar<KnownDamageType>()('damage_type').notNull(),
     versatile_damage_dice: varchar()('versatile_damage_dice'),
     finesse: tinyint1('finesse').notNull().default(false),
     heavy: tinyint1('heavy').notNull().default(false),
@@ -302,6 +307,10 @@ export const weapon_templates = sqliteTable(
     check(
       'weapon_templates_mastery_property_check',
       oneOf('mastery_property', weaponMasteryProperties),
+    ),
+    check(
+      'weapon_templates_damage_type_check',
+      oneOf('damage_type', damageTypes),
     ),
     /** The four headings the source's own table uses; the picker groups on it. */
     check('weapon_templates_srd_group_check', oneOf('srd_group', srdWeaponGroups)),

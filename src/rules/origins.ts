@@ -1,4 +1,13 @@
 import type { DatabaseContext } from '../db/database';
+import { sqlNullableDamageType } from '../db/codecs';
+import type {
+  CreatureSize,
+  CreatureType,
+  DamageType,
+  KnownCreatureSize,
+  KnownCreatureType,
+  KnownDamageType,
+} from '../domain/enums';
 import type { EffectRow } from './species-effects';
 
 /**
@@ -38,9 +47,9 @@ export interface SpeciesTemplateRow {
   readonly content_key: string;
   readonly rules_edition: string;
   readonly name: string;
-  readonly creature_type: string;
-  readonly size: string;
-  readonly alternate_size: string | null;
+  readonly creature_type: KnownCreatureType;
+  readonly size: KnownCreatureSize;
+  readonly alternate_size: KnownCreatureSize | null;
   readonly base_speed_feet: number;
   readonly created_at: string | null;
   readonly updated_at: string | null;
@@ -69,7 +78,7 @@ export interface SpeciesTemplateTraitEffectRow {
   readonly species_template_trait_id: number;
   readonly sort_order: number;
   readonly effect_kind: string;
-  readonly damage_type: string | null;
+  readonly damage_type: KnownDamageType | null;
   readonly hit_points_flat: number | null;
   readonly hit_points_per_level: number | null;
   readonly speed_bonus_feet: number | null;
@@ -98,8 +107,8 @@ export interface BackgroundTemplateRow {
 /** The fillable columns of `character_species`, values only. */
 export interface CharacterSpeciesFields {
   readonly name: string;
-  readonly creature_type: string | null;
-  readonly size: string | null;
+  readonly creature_type: CreatureType | null;
+  readonly size: CreatureSize | null;
   readonly base_speed_feet: number | null;
   readonly notes: string | null;
 }
@@ -125,7 +134,7 @@ export interface CharacterSpeciesTraitFields {
 export interface CharacterEffectFields {
   readonly sort_order: number;
   readonly effect_kind: string;
-  readonly damage_type: string | null;
+  readonly damage_type: DamageType | null;
   readonly hit_points_flat: number | null;
   readonly hit_points_per_level: number | null;
   readonly speed_bonus_feet: number | null;
@@ -276,7 +285,7 @@ export function characterEffects(
     [characterId],
     (row): EffectRow => ({
       effect_kind: String(row.effect_kind),
-      damage_type: row.damage_type === null ? null : String(row.damage_type),
+      damage_type: sqlNullableDamageType(row, 'damage_type'),
       hit_points_flat:
         row.hit_points_flat === null ? null : Number(row.hit_points_flat),
       hit_points_per_level:

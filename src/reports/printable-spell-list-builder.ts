@@ -2,6 +2,7 @@ import {
   sqlBoolean,
   sqlInteger,
   sqlNullableString,
+  sqlSpellSchool,
   sqlString,
   type SqlRow,
 } from '../db/codecs';
@@ -10,6 +11,7 @@ import {
   type Ability,
   type CastingMode,
   type RulesEdition,
+  type SpellSchool,
 } from '../domain/enums';
 import { SpellAccessBuilder, type SpellAccessRoute } from '../access/spell-access-builder';
 import {
@@ -35,7 +37,7 @@ export interface PrintableSpell {
   readonly name: string;
   readonly edition: RulesEdition;
   readonly level: number;
-  readonly school: string;
+  readonly school: SpellSchool;
   readonly casting_time: string | null;
   readonly action_type: string | null;
   readonly range: string | null;
@@ -105,7 +107,7 @@ interface SpellFacts {
   readonly name: string;
   readonly edition: RulesEdition;
   readonly level: number;
-  readonly school: string;
+  readonly school: SpellSchool;
   readonly casting_time: string | null;
   readonly action_type: string | null;
   readonly range: string | null;
@@ -179,7 +181,7 @@ function decodeFacts(row: SqlRow): Omit<
     name: sqlString(row, 'display_name'),
     edition: sqlString(row, 'rules_edition') as RulesEdition,
     level: sqlInteger(row, 'level'),
-    school: sqlString(row, 'school'),
+    school: sqlSpellSchool(row, 'school'),
     casting_time: castingTime,
     action_type:
       sqlNullableString(row, 'action_type') ?? actionType(castingTime),

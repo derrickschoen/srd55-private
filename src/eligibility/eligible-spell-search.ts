@@ -1,11 +1,13 @@
 import {
   sqlBoolean,
   sqlInteger,
+  sqlNullableSpellSchoolList,
+  sqlSpellSchool,
   sqlString,
   type SqlRow,
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
-import type { RulesEdition } from '../domain/enums';
+import type { RulesEdition, SpellSchool } from '../domain/enums';
 import {
   SpellSelectionEligibility,
   type EligibilityList,
@@ -16,7 +18,7 @@ export interface EligibleSpell {
   id: number;
   name: string;
   level: number;
-  school: string;
+  school: SpellSchool;
   ritual: boolean;
   concentration: boolean;
   edition: RulesEdition;
@@ -62,7 +64,7 @@ function decodeSlot(row: SqlRow): EligibilitySlot {
     spell_level_min: sqlInteger(row, 'spell_level_min'),
     spell_level_max: sqlInteger(row, 'spell_level_max'),
     allowed_spell_lists: nullableString('allowed_spell_lists'),
-    allowed_schools: nullableString('allowed_schools'),
+    allowed_schools: sqlNullableSpellSchoolList(row, 'allowed_schools'),
     allowed_tags: nullableString('allowed_tags'),
     selection_collection: nullableString('selection_collection'),
   };
@@ -73,7 +75,7 @@ function decodeCandidate(row: SqlRow): EligibleSpell {
     id: sqlInteger(row, 'id'),
     name: sqlString(row, 'display_name'),
     level: sqlInteger(row, 'level'),
-    school: sqlString(row, 'school'),
+    school: sqlSpellSchool(row, 'school'),
     ritual: sqlBoolean(row, 'ritual'),
     concentration: sqlBoolean(row, 'concentration'),
     edition: sqlString(row, 'rules_edition') as RulesEdition,

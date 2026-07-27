@@ -329,6 +329,11 @@ export const spell_selection_slots = sqliteTable(
       .notNull()
       .default(9),
     allowed_spell_lists: sqlText()('allowed_spell_lists'),
+    /**
+     * Serialized JSON, not one school scalar. The column therefore remains
+     * TEXT; its logical type is `SpellSchool[]` at the row/read boundary and
+     * its Zod contract proves the JSON contains strings without closing them.
+     */
     allowed_schools: sqlText()('allowed_schools'),
     allowed_tags: sqlText()('allowed_tags'),
     always_prepared: tinyint1('always_prepared')

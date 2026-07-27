@@ -73,10 +73,16 @@ import speciesExtract from '../../docs/srd/source/species-descriptions.txt?raw';
 import backgroundsExtract from '../../docs/srd/source/backgrounds.txt?raw';
 import type { BindableValue } from '@sqlite.org/sqlite-wasm';
 import type { DatabaseContext } from '../db/database';
-import type {
-  BackgroundEquipmentItemKind,
-  BackgroundEquipmentOption,
-  EffectKind,
+import {
+  creatureSizes,
+  creatureTypes,
+  isEnumValue,
+  type KnownCreatureSize,
+  type KnownCreatureType,
+  type KnownDamageType,
+  type BackgroundEquipmentItemKind,
+  type BackgroundEquipmentOption,
+  type EffectKind,
 } from '../domain/enums';
 import { coinDenominationOf, copperValue } from '../domain/coin';
 import { rowContractError } from '../domain/contracts/rows';
@@ -100,7 +106,7 @@ export class OriginExtractError extends Error {
  */
 export interface SrdTraitEffect {
   readonly effect_kind: EffectKind;
-  readonly damage_type: string | null;
+  readonly damage_type: KnownDamageType | null;
   readonly hit_points_flat: number | null;
   readonly hit_points_per_level: number | null;
   readonly speed_bonus_feet: number | null;
@@ -125,9 +131,9 @@ export interface SrdSpeciesTrait {
 export interface SrdSpeciesTemplate {
   readonly content_key: string;
   readonly name: string;
-  readonly creature_type: string;
-  readonly size: string;
-  readonly alternate_size: string | null;
+  readonly creature_type: KnownCreatureType;
+  readonly size: KnownCreatureSize;
+  readonly alternate_size: KnownCreatureSize | null;
   readonly base_speed_feet: number;
   readonly traits: readonly SrdSpeciesTrait[];
 }
@@ -701,13 +707,23 @@ function parseSpecies(section: readonly StreamLine[]): SrdSpeciesTemplate {
   if (!SIZE_LINE.test(`Size: ${sizeText}`)) {
     throw new OriginExtractError(`${name} has an unreadable Size line.`);
   }
+  if (!isEnumValue(creatureTypes, creatureType)) {
+    throw new OriginExtractError(
+      `${name} has unknown Creature Type ${JSON.stringify(creatureType)}.`,
+    );
+  }
+  if (!sizes.every((size) => isEnumValue(creatureSizes, size))) {
+    throw new OriginExtractError(
+      `${name} has an unknown size in: ${sizeText}`,
+    );
+  }
 
   return {
     content_key: `${BUNDLED_ORIGIN_RULES_EDITION}:species:${slug(name)}`,
     name,
     creature_type: creatureType,
-    size: sizes[0] as string,
-    alternate_size: sizes[1] ?? null,
+    size: sizes[0] as KnownCreatureSize,
+    alternate_size: (sizes[1] as KnownCreatureSize | undefined) ?? null,
     base_speed_feet: Number(speed),
     traits: parseTraits(name, section.slice(sentinel + 1)),
   };
@@ -1535,4 +1551,3 @@ function resolveTemplateId(
   }
   return id;
 }
-
