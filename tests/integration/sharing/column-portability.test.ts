@@ -534,9 +534,15 @@ const PROBES: { readonly [N in ProbedTable]: Probe<N> } = {
       // classification is the one the guard was built to force: the column
       // arrived hours after the guard did, and both of its loops fired on it.
       proficiency_category: { kind: 'verbatim' },
+      damage_kind: { kind: 'verbatim' },
       damage_dice: { kind: 'verbatim' },
+      damage_flat: { kind: 'verbatim' },
+      damage_custom: { kind: 'verbatim' },
       damage_type: { kind: 'verbatim' },
+      versatile_damage_kind: { kind: 'verbatim' },
       versatile_damage_dice: { kind: 'verbatim' },
+      versatile_damage_flat: { kind: 'verbatim' },
+      versatile_damage_custom: { kind: 'verbatim' },
       finesse: { kind: 'verbatim' },
       heavy: { kind: 'verbatim' },
       light: { kind: 'verbatim' },
@@ -996,18 +1002,49 @@ function seedSender(db: DatabaseContext, catalog: Catalog): number {
   );
   db.exec(
     `INSERT INTO character_weapons (
-       character_id, name, damage_dice, damage_type, versatile_damage_dice,
+       character_id, name,
+       damage_kind, damage_dice, damage_flat, damage_custom, damage_type,
+       versatile_damage_kind, versatile_damage_dice, versatile_damage_flat,
+       versatile_damage_custom,
        finesse, heavy, light, loading, reach, thrown, two_handed, ammunition,
        ammunition_kind, range_normal_feet, range_long_feet, mastery_property,
        mastery_selected, other_properties, notes, proficiency_category,
        created_at, updated_at
      ) VALUES (
-       ?, 'Sender Halberd', '1d10', 'Slashing', '1d12',
+       ?, 'Sender Custom Halberd',
+       'custom', NULL, NULL, 'weapon damage by table', 'Slashing',
+       'custom', NULL, NULL, 'two-handed damage by table',
        1, 1, 1, 1, 1, 1, 1, 1,
        'bolt', 25, 65, 'Vex', 1, 'sender other properties',
        'sender weapon note', 'martial', ?, ?
      )`,
     [characterId, SENDER_TIME, SENDER_TIME],
+  );
+  db.exec(
+    `INSERT INTO character_weapons (
+       character_id, name,
+       damage_kind, damage_dice, damage_flat, damage_custom,
+       versatile_damage_kind, versatile_damage_dice, versatile_damage_flat,
+       versatile_damage_custom
+     ) VALUES (
+       ?, 'Sender Dice Weapon',
+       'dice', '2d6', NULL, NULL,
+       'dice', '2d8', NULL, NULL
+     )`,
+    [characterId],
+  );
+  db.exec(
+    `INSERT INTO character_weapons (
+       character_id, name,
+       damage_kind, damage_dice, damage_flat, damage_custom,
+       versatile_damage_kind, versatile_damage_dice, versatile_damage_flat,
+       versatile_damage_custom
+     ) VALUES (
+       ?, 'Sender Flat Zero Weapon',
+       'flat', NULL, 0, NULL,
+       'flat', NULL, 1, NULL
+     )`,
+    [characterId],
   );
   db.exec(
     `INSERT INTO character_species (

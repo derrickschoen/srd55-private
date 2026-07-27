@@ -42,6 +42,7 @@ import type {
   ProfileDamageType,
   WeaponAttackProfiles,
 } from '../../../rules/attack-profiles';
+import { formatWeaponDamage } from '../../../domain/weapon-damage';
 import { freeTextSpan } from '../../free-text';
 
 const ABILITY_LABELS: Readonly<Record<string, string>> = {
@@ -172,10 +173,10 @@ export function damageLabel(
   chosenType: string | null,
 ): string {
   const parts: string[] = [];
-  if (profile.damage.dice === null) {
-    parts.push('damage dice not recorded');
+  if (profile.damage.amount.kind === 'not_recorded') {
+    parts.push('damage not recorded');
   } else {
-    parts.push(profile.damage.dice);
+    parts.push(formatWeaponDamage(profile.damage.amount));
   }
   if (option !== null && option.damage_modifier !== 0) {
     parts.push(signed(option.damage_modifier));
@@ -322,8 +323,10 @@ function renderProfile(
   }
   block.append(optionReason);
 
-  if (profile.damage.dice_note !== null) {
-    block.append(paragraph(profile.damage.dice_note, 'attack-profile-reason'));
+  if (profile.damage.versatile_note !== null) {
+    block.append(
+      paragraph(profile.damage.versatile_note, 'attack-profile-reason'),
+    );
   }
 
   block.append(

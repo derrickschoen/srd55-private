@@ -30,6 +30,7 @@ import {
 import { FOREIGN_KEY_FACTS } from '../domain/contracts/generated/reference-facts';
 import { domainSourceTypes } from '../domain/enums';
 import { splitLegacyTraitEffect } from '../rules/legacy-trait-effects';
+import { migrateLegacyWeaponDamageRow } from '../domain/weapon-damage';
 
 /**
  * THE SEMANTIC AUDIT OF A QUARANTINED CANDIDATE DATABASE.
@@ -660,9 +661,15 @@ function auditSavePointSnapshots(db: Database): void {
           table === 'character_species_traits'
             ? splitLegacyTraitEffect(row as Record<string, unknown>)
             : null;
+        const migratedWeapon =
+          table === 'character_weapons'
+            ? migrateLegacyWeaponDamageRow(
+                row as Record<string, unknown>,
+              )
+            : null;
         const error = rowContractError(
           table,
-          legacy === null ? row : legacy.row,
+          legacy?.row ?? migratedWeapon ?? row,
           rowLabel,
         );
         if (error !== null) {

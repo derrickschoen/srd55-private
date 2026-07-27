@@ -22,6 +22,10 @@ import type {
   WeaponMasteryProperty,
   WeaponProficiencyCategory,
 } from '../../src/domain/enums';
+import type {
+  VersatileWeaponDamage,
+  WeaponDamage,
+} from '../../src/domain/weapon-damage';
 import {
   damageTypes,
   rulesEditions,
@@ -121,15 +125,12 @@ export const character_weapons = sqliteTable(
     proficiency_category: varchar<WeaponProficiencyCategory>()(
       'proficiency_category',
     ),
-    /**
-     * Nullable, and a completeness observation rather than a defect: a user may
-     * add "Grandfather's sword" before looking its damage up, and forbidding
-     * that turns weapon creation into an all-or-nothing modal (D6b limbs 1
-     * and 3). There is no sensible default and `''` would be a null in costume.
-     *
-     * A string, not a dice struct: the Blowgun's damage is `1`, not `NdX`.
-     */
+    damage_kind: varchar<WeaponDamage['kind']>()('damage_kind')
+      .notNull()
+      .default('not_recorded'),
     damage_dice: varchar()('damage_dice'),
+    damage_flat: integer('damage_flat'),
+    damage_custom: varchar()('damage_custom'),
     /**
      * Open vocabulary, now typed as the SRD known set plus passthrough.
      *
@@ -139,14 +140,14 @@ export const character_weapons = sqliteTable(
      * CHECK, while `DamageType` keeps known values visible in the type system.
      */
     damage_type: varchar<DamageType>()('damage_type'),
-    /**
-     * The Versatile property's die, and the ONLY record that the property is
-     * present. A companion `versatile` boolean was rejected: it is derivable
-     * from the die and keeping both admits the impossible row
-     * `versatile = 1, die = NULL`. 31 of the 38 SRD weapons genuinely have no
-     * versatile die, so the absence is the source's own (D6b limb 2).
-     */
+    versatile_damage_kind: varchar<VersatileWeaponDamage['kind']>()(
+      'versatile_damage_kind',
+    )
+      .notNull()
+      .default('not_applicable'),
     versatile_damage_dice: varchar()('versatile_damage_dice'),
+    versatile_damage_flat: integer('versatile_damage_flat'),
+    versatile_damage_custom: varchar()('versatile_damage_custom'),
     finesse: tinyint1('finesse').notNull().default(false),
     heavy: tinyint1('heavy').notNull().default(false),
     light: tinyint1('light').notNull().default(false),
@@ -184,6 +185,24 @@ export const character_weapons = sqliteTable(
     updated_at: datetime()('updated_at'),
   },
   (table) => [
+    check(
+      'character_weapons_damage_check',
+      sql`(
+        (damage_kind = 'dice' AND damage_dice IS NOT NULL AND damage_flat IS NULL AND damage_custom IS NULL)
+        OR (damage_kind = 'flat' AND damage_dice IS NULL AND damage_flat IS NOT NULL AND damage_flat >= 0 AND damage_custom IS NULL)
+        OR (damage_kind = 'custom' AND damage_dice IS NULL AND damage_flat IS NULL AND damage_custom IS NOT NULL)
+        OR (damage_kind = 'not_recorded' AND damage_dice IS NULL AND damage_flat IS NULL AND damage_custom IS NULL)
+      )`,
+    ),
+    check(
+      'character_weapons_versatile_damage_check',
+      sql`(
+        (versatile_damage_kind = 'dice' AND versatile_damage_dice IS NOT NULL AND versatile_damage_flat IS NULL AND versatile_damage_custom IS NULL)
+        OR (versatile_damage_kind = 'flat' AND versatile_damage_dice IS NULL AND versatile_damage_flat IS NOT NULL AND versatile_damage_flat >= 0 AND versatile_damage_custom IS NULL)
+        OR (versatile_damage_kind = 'custom' AND versatile_damage_dice IS NULL AND versatile_damage_flat IS NULL AND versatile_damage_custom IS NOT NULL)
+        OR (versatile_damage_kind = 'not_applicable' AND versatile_damage_dice IS NULL AND versatile_damage_flat IS NULL AND versatile_damage_custom IS NULL)
+      )`,
+    ),
     /**
      * Following the `spell_slots_exclusive_assignment_check` precedent: mastery
      * cannot be selected on a weapon that has no mastery property to select.
@@ -274,11 +293,19 @@ export const weapon_templates = sqliteTable(
       .default('2024'),
     name: varchar()('name').notNull(),
     srd_group: varchar<SrdWeaponGroup>()('srd_group').notNull(),
-    // NOT NULL where the character's copy is nullable: every row here comes
-    // from a table in which every weapon has both.
-    damage_dice: varchar()('damage_dice').notNull(),
+    damage_kind: varchar<WeaponDamage['kind']>()('damage_kind').notNull(),
+    damage_dice: varchar()('damage_dice'),
+    damage_flat: integer('damage_flat'),
+    damage_custom: varchar()('damage_custom'),
     damage_type: varchar<KnownDamageType>()('damage_type').notNull(),
+    versatile_damage_kind: varchar<VersatileWeaponDamage['kind']>()(
+      'versatile_damage_kind',
+    )
+      .notNull()
+      .default('not_applicable'),
     versatile_damage_dice: varchar()('versatile_damage_dice'),
+    versatile_damage_flat: integer('versatile_damage_flat'),
+    versatile_damage_custom: varchar()('versatile_damage_custom'),
     finesse: tinyint1('finesse').notNull().default(false),
     heavy: tinyint1('heavy').notNull().default(false),
     light: tinyint1('light').notNull().default(false),
@@ -298,6 +325,24 @@ export const weapon_templates = sqliteTable(
     updated_at: datetime()('updated_at'),
   },
   (table) => [
+    check(
+      'weapon_templates_damage_check',
+      sql`(
+        (damage_kind = 'dice' AND damage_dice IS NOT NULL AND damage_flat IS NULL AND damage_custom IS NULL)
+        OR (damage_kind = 'flat' AND damage_dice IS NULL AND damage_flat IS NOT NULL AND damage_flat >= 0 AND damage_custom IS NULL)
+        OR (damage_kind = 'custom' AND damage_dice IS NULL AND damage_flat IS NULL AND damage_custom IS NOT NULL)
+        OR (damage_kind = 'not_recorded' AND damage_dice IS NULL AND damage_flat IS NULL AND damage_custom IS NULL)
+      )`,
+    ),
+    check(
+      'weapon_templates_versatile_damage_check',
+      sql`(
+        (versatile_damage_kind = 'dice' AND versatile_damage_dice IS NOT NULL AND versatile_damage_flat IS NULL AND versatile_damage_custom IS NULL)
+        OR (versatile_damage_kind = 'flat' AND versatile_damage_dice IS NULL AND versatile_damage_flat IS NOT NULL AND versatile_damage_flat >= 0 AND versatile_damage_custom IS NULL)
+        OR (versatile_damage_kind = 'custom' AND versatile_damage_dice IS NULL AND versatile_damage_flat IS NULL AND versatile_damage_custom IS NOT NULL)
+        OR (versatile_damage_kind = 'not_applicable' AND versatile_damage_dice IS NULL AND versatile_damage_flat IS NULL AND versatile_damage_custom IS NULL)
+      )`,
+    ),
     /**
      * NOT NULL here where the character's copy is nullable, so no null limb:
      * every row comes from a table in which every weapon has a property, and a

@@ -72,6 +72,11 @@ import type {
 import type { CompletenessResult } from '../../../queries/character-completeness';
 import { AbilityScore } from '../../../rules/ability-score';
 import { SRD_ATTRIBUTION_NOTICE } from '../../../rules/srd-attribution';
+import {
+  formatWeaponDamage,
+  type VersatileWeaponDamage,
+  type WeaponDamage,
+} from '../../../domain/weapon-damage';
 
 export const AGENT_REFERENCE_FORMAT =
   'dnd-multiclass-spells.planner-reference' as const;
@@ -482,9 +487,9 @@ export interface ReferenceCatalogGap {
 export interface ReferenceWeapon {
   readonly index: number;
   readonly name_withheld: true;
-  readonly damage_dice: string | null;
+  readonly damage: WeaponDamage;
   readonly damage_type: string | null;
-  readonly versatile_damage_dice: string | null;
+  readonly versatile_damage: VersatileWeaponDamage;
   readonly properties: readonly string[];
   readonly range_normal_feet: number | null;
   readonly range_long_feet: number | null;
@@ -948,9 +953,9 @@ export function buildAgentReference(
       return {
         index,
         name_withheld: true,
-        damage_dice: weapon.damage_dice,
+        damage: weapon.damage,
         damage_type: weapon.damage_type,
-        versatile_damage_dice: weapon.versatile_damage_dice,
+        versatile_damage: weapon.versatile_damage,
         properties: weaponProperties(weapon),
         range_normal_feet: weapon.range_normal_feet,
         range_long_feet: weapon.range_long_feet,
@@ -1556,11 +1561,20 @@ export function agentReferenceSections(
             projection.withheld.weapon_names.get(weapon.index) ?? 'unnamed',
           ),
           cell(
-            [weapon.damage_dice, weapon.damage_type]
+            [
+              weapon.damage.kind === 'not_recorded'
+                ? null
+                : formatWeaponDamage(weapon.damage),
+              weapon.damage_type,
+            ]
               .filter((part): part is string => part !== null)
               .join(' ') || 'not recorded',
           ),
-          cell(weapon.versatile_damage_dice ?? 'not applicable'),
+          cell(
+            weapon.versatile_damage.kind === 'not_applicable'
+              ? 'not applicable'
+              : formatWeaponDamage(weapon.versatile_damage),
+          ),
           cell(weapon.properties.join(', ') || 'none'),
           cell(
             weapon.range_normal_feet === null && weapon.range_long_feet === null
