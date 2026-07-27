@@ -231,8 +231,8 @@ export type ArmorSlot = (typeof armorSlots)[number];
  * custom school belongs merely because both are strings. The brand changes no
  * stored value; the passthrough is byte-for-byte.
  */
-declare const passthroughVocabulary: unique symbol;
-type PassthroughVocabulary<Name extends string> = string & {
+export declare const passthroughVocabulary: unique symbol;
+export type PassthroughVocabulary<Name extends string> = string & {
   readonly [passthroughVocabulary]: Name;
 };
 
