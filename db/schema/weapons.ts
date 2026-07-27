@@ -39,10 +39,10 @@ import { characters } from './character';
 import { class_definitions } from './catalog-classes';
 
 /**
- * WEAPONS. Four NATIVE tables — the first tables in this schema that reproduce
- * no Laravel migration. `tests/unit/schema.test.ts` keeps them in a separate,
- * hand-transcribed inventory for exactly that reason: the Laravel parity claim
- * is still made over the original 38 and is not diluted by them.
+ * WEAPONS. Four tables, hand-inventoried in `tests/unit/schema.test.ts` from
+ * `.claude/plans/weapons-design.md` §4 — which was written before this file
+ * existed, and is why these four are the only entries in that inventory that
+ * are not a transcription of the declarations they judge.
  *
  * WHAT THIS DOES NOT MODEL. No proficiency, no attack bonus, no damage roll, no
  * inventory, no weight, no cost, no equipped state and no ammunition count. A

@@ -19,13 +19,12 @@ import { schemaSources } from '../helpers/schema-sources';
  *    That would be an echo of the artifact under test: it would fail on a typo
  *    and pass on a semantically wrong but well-formed constraint. Only
  *    behaviour is asserted.
- *  - It does NOT touch `laravelColumnMetadataHash` in `tests/unit/schema.test.ts`,
- *    and nothing here could require it to move. That constant hashes, per
- *    column, `PRAGMA table_info`'s (name, type, notnull, dflt_value, pk) — and a
- *    CHECK constraint appears in NONE of those five fields, so `table_info` is
- *    byte-identical with and without one. Anyone "updating the hash for the new
- *    CHECKs" would be changing a Laravel-derived constant for a reason that does
- *    not exist and destroying the oracle for nothing.
+ *  - It does NOT move anything in `tests/unit/schema.test.ts`, and nothing here
+ *    could. That suite reads `PRAGMA table_info` — (name, type, notnull,
+ *    dflt_value, pk) — and a CHECK constraint appears in NONE of those five
+ *    fields, so `table_info` is byte-identical with and without one. A CHECK
+ *    lives only in the DDL text, which is why its effect has to be EXECUTED
+ *    rather than inspected, and why this file exists at all.
  *
  * THE ACCEPT SIDE IS NOT DECORATION. A constraint that rejects too much is
  * every bit as much a defect as one that rejects nothing, and it is the harder

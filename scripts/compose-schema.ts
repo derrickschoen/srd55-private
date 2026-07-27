@@ -23,9 +23,9 @@ import * as schema from '../db/schema/index';
  * imports the composer, never the writer, and compares against the artifact
  * checked into git.
  *
- * This is a GENERATION-FRESHNESS check, NOT a Laravel parity check. Laravel
- * parity is `tests/unit/schema.test.ts`, whose expectations are transcribed
- * from the Laravel migrations and must never be regenerated from this output.
+ * This is a GENERATION-FRESHNESS check, not a correctness one. Whether the
+ * artifact is RIGHT is settled in `tests/unit/schema.test.ts`, whose
+ * expectations are hand-written and must never be regenerated from this output.
  */
 
 const BANNER = [

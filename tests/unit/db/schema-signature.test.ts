@@ -70,17 +70,13 @@ describe('pre-Drizzle database images', () => {
     // now short of `applicationTables` too, so it fails EARLIER, not less.
     //
     // These are COUNTS, not an equivalence proof, and do not claim to be one.
-    // The Laravel-derived oracle in `tests/unit/schema.test.ts` runs against
-    // the generated artifact and is what actually pins column types, indexes,
-    // defaults and foreign keys — including, since the prune, the proof that
-    // its column-metadata hash is still derived from THIS fixture rather than
-    // from our own output.
+    // `tests/unit/schema.test.ts` runs against the generated artifact and is
+    // what actually pins columns, nullability, indexes, defaults and foreign
+    // key actions; it also holds THIS fixture to its two recorded hashes, so
+    // the fixture cannot be quietly edited to make this file pass.
     const tableCount = (sql: string) =>
       [...sql.matchAll(/CREATE TABLE/g)].length;
     expect(tableCount(preDrizzleSchema)).toBe(38);
-    expect(tableCount(schema)).toBe(56);
-    // 30 surviving Laravel tables, 4 native weapon tables, 8 sheet core,
-    // 6 origins, 2 class features, 4 stored sheet inputs.
     expect(tableCount(schema)).toBe(56);
   });
 
