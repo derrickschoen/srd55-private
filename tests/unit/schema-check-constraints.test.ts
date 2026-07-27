@@ -430,6 +430,40 @@ const martialArtsDie =
     });
   };
 
+/**
+ * A REAL DIE SIZE, WHICH `insert` PHYSICALLY CANNOT PRODUCE.
+ *
+ * JavaScript has one number type and sqlite-wasm binds an integral one as an
+ * SQLite INTEGER, so `{ hit_die: 8.0 }` arrives as 8 and proves nothing. The
+ * only way to hand the engine a REAL is to write the literal into the SQL text,
+ * which is why these two writers exist instead of another `Values` case.
+ *
+ * They cover the gap a review found in this file: the `typeof(…) = 'integer'`
+ * limb on both die CHECKs was justified in `db/schema/columns.ts` by a REAL
+ * `8.0` that no case here had ever tried. It is tried now, in both directions —
+ * `8.0` is ACCEPTED (INTEGER affinity converts it before the CHECK sees it) and
+ * `8.5` is REFUSED (affinity cannot convert it losslessly, so it stays a REAL).
+ */
+const sheetTraitsRealHitDie =
+  (literal: string): Write =>
+  (db) => {
+    db.exec(
+      `INSERT INTO "class_sheet_traits"
+         ("class_definition_id", "hit_die", "skill_choice_count")
+       VALUES (${String(newClass(db))}, ${literal}, 2)`,
+    );
+  };
+
+const martialArtsRealDie =
+  (literal: string): Write =>
+  (db) => {
+    db.exec(
+      `INSERT INTO "class_martial_arts_dice"
+         ("class_definition_id", "class_level", "martial_arts_die")
+       VALUES (${String(newClass(db))}, 5, ${literal})`,
+    );
+  };
+
 // D19's two class-feature tables. Both start from a FREE-TEXT row — no
 // `effect_kind`, no payload — because that is the common case and because it is
 // the row every payload-without-a-kind case has to start from.
@@ -1222,6 +1256,10 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
       // it losslessly to the integer 8, exactly as `db/schema/columns.ts`
       // records. What `typeof` refuses is text that does not convert.
       ['a text hit die', sheetTraits({ hit_die: 'eight' })],
+      // A REAL that affinity CANNOT convert losslessly, so it stays a REAL and
+      // is refused. Note which limb does the refusing: `8.5 IN (6, 8, 10, 12)`
+      // is already false, so this is refused with or without `typeof`.
+      ['a fractional hit die', sheetTraitsRealHitDie('8.5')],
       ['a zero skill choice count', sheetTraits({ skill_choice_count: 0 })],
       ['a negative skill choice count', sheetTraits({ skill_choice_count: -2 })],
       // A bare `>= 1` admits every text value, since SQLite orders TEXT above
@@ -1239,6 +1277,14 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
       // what stops someone "fixing" the constraint to reject a value SQLite has
       // already converted.
       ['a digit string, which affinity converts to an integer', sheetTraits({ hit_die: '8' })],
+      // THE VALUE `db/schema/columns.ts` USED TO CLAIM ONLY `typeof` COULD
+      // REFUSE. It is accepted, and it SHOULD be: INTEGER affinity converts the
+      // REAL 8.0 to the integer 8 before the CHECK is evaluated, so the limb
+      // never sees a REAL on this column at all. Asserting the acceptance is
+      // what stops someone "hardening" the CHECK against a value the engine has
+      // already converted — and it is why that comment now says the limb is
+      // inert here rather than load-bearing.
+      ['a REAL 8.0, which affinity converts before the CHECK runs', sheetTraitsRealHitDie('8.0')],
       ['the column default for choose-any', sheetTraits({ skill_choice_from_any: 1 })],
     ],
   },
@@ -1362,12 +1408,16 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
       // Non-numeric: `'8'` would be converted by INTEGER affinity and stored
       // as the integer 8, which is legitimate.
       ['a text die size', martialArtsDie({ martial_arts_die: 'eight' })],
+      ['a fractional die size', martialArtsRealDie('8.5')],
     ],
     accepts: [
       ['the level 1 d6', martialArtsDie({ class_level: 1, martial_arts_die: 6 })],
       ['the levels 5-10 d8', martialArtsDie({ class_level: 5, martial_arts_die: 8 })],
       ['the levels 11-16 d10', martialArtsDie({ class_level: 11, martial_arts_die: 10 })],
       ['the level 17 d12', martialArtsDie({ class_level: 17, martial_arts_die: 12 })],
+      // The mirror of the `hit_die` case above: affinity converts, so the
+      // `typeof` limb is inert on this column too.
+      ['a REAL 8.0, which affinity converts before the CHECK runs', martialArtsRealDie('8.0')],
     ],
   },
   // --- D19: subclass features ---------------------------------------------
@@ -1868,6 +1918,77 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
           'SQLITE_CONSTRAINT_NOTNULL',
         );
       }
+    });
+
+    /**
+     * THE `typeof` LIMB'S OWN JUSTIFICATION, EXECUTED.
+     *
+     * `db/schema/columns.ts` used to say that a bare `c IN (…)` would let a REAL
+     * `8.0` through and that the `typeof` limb was what refused it. A review
+     * measured that and it is FALSE for both columns the limb actually guards:
+     * they are declared `integer`, so affinity converts the REAL before the
+     * CHECK is evaluated. The claim is true only where nothing converts.
+     *
+     * Both halves are run here, against the ENGINE and against the SHIPPED
+     * expression — the guarded form is cut out of the live DDL and the bare form
+     * is derived from it by deleting the limb, so neither side is a hand-copy
+     * that could drift from what the schema emits. This is the same shape as the
+     * affinity classifier in `tests/unit/schema.test.ts`: a comment claiming
+     * something about SQLite is worth exactly as much as the run that shows it.
+     */
+    it('shows the `typeof` limb is inert on an integer column and load-bearing without affinity', () => {
+      const ddl = String(
+        db.selectValue(
+          `SELECT sql FROM sqlite_schema
+           WHERE type = 'table' AND name = 'class_martial_arts_dice'`,
+        ),
+      );
+      const found =
+        /typeof\(`martial_arts_die`\) = 'integer' AND (?<bare>`martial_arts_die` IN \([\d, ]+\))/u.exec(
+          ddl,
+        );
+      const bare = found?.groups?.bare;
+      // If the CHECK is ever rewritten this must fail LOUDLY rather than quietly
+      // probe an empty string — and throwing narrows both values, so neither
+      // probe below needs a cast.
+      if (found === null || bare === undefined) {
+        throw new Error(
+          `class_martial_arts_dice no longer carries a guarded IN list:\n${ddl}`,
+        );
+      }
+      const guarded = found[0];
+      expect(guarded).not.toBe(bare);
+
+      /** What the engine does with a REAL `8.0` under one CHECK and one type. */
+      function storedTypeOf(declared: string, expression: string): string {
+        sequence += 1;
+        const table = `limb_probe_${String(sequence)}`;
+        db.exec(
+          `CREATE TABLE "${table}" (\`martial_arts_die\` ${declared} NOT NULL, ` +
+            `CHECK(${expression}))`,
+        );
+        let outcome: string;
+        try {
+          db.exec(`INSERT INTO "${table}" VALUES (8.0)`);
+          outcome = String(
+            db.selectValue(`SELECT typeof(martial_arts_die) FROM "${table}"`),
+          );
+        } catch {
+          outcome = 'refused';
+        }
+        db.exec(`DROP TABLE "${table}"`);
+        return outcome;
+      }
+
+      // INTEGER affinity: identical either way, so the limb changes nothing on
+      // `hit_die` and `martial_arts_die` as they are declared today.
+      expect(storedTypeOf('integer', guarded)).toBe('integer');
+      expect(storedTypeOf('integer', bare)).toBe('integer');
+      // NO affinity: the bare list stores a REAL in a column whose vocabulary is
+      // four integers, and only the limb refuses it. This is the case the
+      // comment describes, and the reason the limb stays.
+      expect(storedTypeOf('BLOB', guarded)).toBe('refused');
+      expect(storedTypeOf('BLOB', bare)).toBe('real');
     });
 
     /**

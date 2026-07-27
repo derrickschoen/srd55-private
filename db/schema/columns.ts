@@ -178,10 +178,31 @@ export const oneOf = (column: string, values: readonly string[]) =>
  * stored INTEGER 6 does not compare equal to the TEXT `'6'`. The CHECK would
  * then reject every row this application writes.
  *
- * The `typeof` limb is here for {@link integerAtLeast}'s reason, and it is not
- * made redundant by the `IN` list: INTEGER affinity converts `'8'` to 8 on the
- * way in, so a bare list does refuse ordinary text, but a REAL `8.0` compares
- * equal to 8 and would otherwise pass.
+ * THE `typeof` LIMB IS INERT ON BOTH COLUMNS THIS GUARDS TODAY, AND THIS
+ * COMMENT SAID THE OPPOSITE UNTIL A REVIEW MEASURED IT. It claimed a REAL `8.0`
+ * "compares equal to 8 and would otherwise pass" a bare `IN` list. It does not:
+ * `hit_die` and `martial_arts_die` are both declared `integer`, so INTEGER
+ * AFFINITY CONVERTS THE REAL TO AN INTEGER BEFORE THE CHECK IS EVALUATED, and
+ * `typeof` then sees `integer` either way. Run over 24 values — 8, 8.0, 8.5,
+ * 6.0, `'8'`, `'8.0'`, `' 8 '`, `'8e0'`, `'eight'`, `x'38'`, 2^53, NaN,
+ * Infinity, 1e19 and the rest — `typeof(c) = 'integer' AND c IN (…)` and a bare
+ * `c IN (…)` accept and reject IDENTICALLY in every case, as bound parameters
+ * and as literals. 8.5 and `x'38'` are refused by the bare list too.
+ *
+ * WHERE IT IS LOAD-BEARING, AND WHY IT STAYS. The mechanism the old comment
+ * described is real; it just does not apply to a column with INTEGER affinity.
+ * On a column with BLOB or NO affinity nothing converts, `8.0` stays a REAL, and
+ * `8.0 IN (6, 8, 10, 12)` is TRUE — the bare list stores a REAL where the type
+ * says integer, and the `typeof` limb is the only thing that refuses it. So the
+ * limb is what makes THIS HELPER'S guarantee — "an INTEGER equal to one of these"
+ * — a property of the helper rather than of its two current call sites' declared
+ * types. `tests/unit/schema-check-constraints.test.ts` executes both halves of
+ * that claim against the engine, so it cannot rot back into a plausible story.
+ *
+ * (It is emphatically NOT redundant in {@link integerAtLeast}, whose reason it
+ * was originally borrowed from: there a bare `>= 1` admits every text value on
+ * an INTEGER column, because affinity leaves `'two'` as TEXT and SQLite orders
+ * TEXT above every number.)
  *
  * The vocabulary is passed as the VALUE array from `src/domain/enums.ts`, so
  * there is no second transcription to keep in step: narrowing

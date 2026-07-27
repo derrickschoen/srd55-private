@@ -190,6 +190,64 @@ That last one is the SUBSET clause itself, probed rather than assumed.
   deliberately: it is a FACE, and tying it to `max(hitDieSizes)` would state a
   relation the source does not.
 
+### REVISED AFTER REVIEW — three findings, two of them corrections to what is written above
+
+Re-verified on a clean tree after the revision: **1803 vitest / 116 files, build
+exit 0, 72 Playwright.**
+
+**1. "It is pinned now, in three places" was true of the VALUE and false of the
+GUARD.** The removal of the unsourced 4 is pinned three ways, as claimed. The
+RUNTIME half of the same rule was not: `SheetContentLookup.martialArtsDice`
+filters every stored value through `isMartialArtsDieSize`, and the reviewer
+neutered that filter to `isMartialArtsDieSize(row.value) || true` with the whole
+suite still green — 1797/1797 — while the mirror `hitDieOrAbsent` fails two tests
+under the identical mutation. The section above STATES the degradation
+("`SheetContentLookup.martialArtsDice` degrades the same way, by dropping the
+level") as though stating it were pinning it. **That is the asymmetry this entry
+claims to have closed, reappearing one method over.** Pinned now by
+`tests/integration/rules/attack-profiles.test.ts`, which rebuilds
+`class_martial_arts_dice` WITHOUT its CHECK — the pre-CHECK image is the only
+state in which the guard is reachable, which is F11's point applied to this
+table — writes a `1d7` at Monk level 5 and asserts the level is DROPPED and that
+a Monk 5 falls back to the level 4 d6. Re-run under the reviewer's own mutation:
+it fails.
+
+**2. The `integerOneOf` comment's justification was FACTUALLY WRONG, and the
+CHECKs were right anyway.** `db/schema/columns.ts` said the `typeof` limb was
+needed because "a REAL `8.0` compares equal to 8 and would otherwise pass" a bare
+`IN` list. It does not: `hit_die` and `martial_arts_die` are declared `integer`,
+so INTEGER AFFINITY CONVERTS THE REAL BEFORE THE CHECK RUNS. Measured over 24
+values, as bound parameters and as literals — 8, 8.0, 8.5, 6.0, `'8'`, `'8.0'`,
+`' 8 '`, `'8e0'`, `'eight'`, `x'38'`, 2^53, NaN, Infinity, 1e19 and the rest —
+`typeof(c) = 'integer' AND c IN (…)` and a bare `c IN (…)` agree in **every**
+case. Zero behavioural defect; a stated reason that would not survive being run.
+
+**The limb STAYS, and the corrected reason is EXECUTED rather than asserted.**
+The mechanism is real where nothing converts: on a BLOB or affinity-less column
+`8.0` stays a REAL and `8.0 IN (6, 8, 10, 12)` is TRUE, so the bare list stores a
+REAL in a column whose vocabulary is four integers. The limb is what makes the
+HELPER's guarantee — "an INTEGER equal to one of these" — independent of its
+callers' declared types. `tests/unit/schema-check-constraints.test.ts` cuts the
+guarded expression out of the live DDL, derives the bare form by deleting the
+limb, and runs both against an `integer` column and a `BLOB` column: inert on the
+first, load-bearing on the second. It also probes a REAL on both die columns for
+the first time (8.0 accepted, 8.5 refused), which is the gap that let the wrong
+reason stand — and which `insert` could not have covered, since JavaScript has
+one number type and sqlite-wasm binds an integral one as an INTEGER.
+
+**3. The compile-time proof reported a TOOL failure as a TYPE regression.** In
+one full-suite run out of fifteen, the probe test failed with lines 29, 31, 33
+and 35 missing — the four `fixedHitPointsPerLevel` statements, the only ones
+whose error depends on `../../src/rules/sheet` RESOLVING. Not reproduced in
+fourteen further runs or twelve direct invocations, so the root cause is not
+established and is not claimed here. What IS established is the signal: with that
+import made unresolvable on purpose, tsc emits `TS2307` and exactly those four
+lines stop erroring, which is byte-for-byte what widening the parameter back to
+`number` would look like. The test now checks the tool-level causes FIRST —
+errors in other files, then `TS2307` — before comparing the line set, and every
+failure message carries tsc's exit status, signal, stdout and stderr instead of
+discarding stderr.
+
 ---
 
 ## D33 — A disclosed wrong number is still a wrong number: the attack profile withholds the proficiency bonus (2026-07-27)
