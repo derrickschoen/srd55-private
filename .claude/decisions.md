@@ -1,5 +1,262 @@
 # Binding scope decisions
 
+## D41 — OWNER: the share wire is versioned by a frozen registry; v1 freezes exactly as shipped, and v2 is weapon range plus the placeholders move (2026-07-27)
+
+The owner's ruling, verbatim in two parts: *"With the ordered tuples, do we ship
+the schema with each so that if the order changes between versions, that we need
+to be able to migrate. Store the triple schemas in the code under a version
+number. Make a comment somewhere that each time we change the schema, to store it
+under an incremented version number"* and *"We need to version the schema for the
+tuples so we just need to ship the schema version number with each export"*.
+
+### What that settles
+
+**One version per export, carried on `root[1]`.** Not one per nested tuple. The
+root version governs the whole schema atomically; per-tuple versions would
+enlarge every link and admit incoherent combinations such as root-v2 with
+weapon-v1.
+
+**Version 1 freezes exactly as shipped.** Its root arities (11 -> 12 -> 13 -> 14
+-> 15) and its weapon tuple lengths (19, 20, 22) are *part of v1*, not debt to be
+tidied on the way past. Every link already in the wild must still decode
+byte-identically.
+
+This SUPERSEDES the reasoning block at `src/sharing/codec.ts:40-60`, which argued
+the opposite and had been followed four times:
+
+> *"eleven elements is still a valid document carrying no weapons...
+> `CHARACTER_SHARE_VERSION` deliberately stays at 1: a version bump buys nothing
+> here and would reject every old link on the way in... this format has already
+> grown 11 -> 12 -> 13 -> 14 with the version pinned."*
+
+That argument was not wrong about its own case — appending a nullable element
+genuinely is compatible. It was wrong about where it ended. Growing arity while
+pinning the version means the version number describes nothing, and the only
+record of what v1 ever meant is whichever decoder happens to be checked out.
+**The next schema change bumps to 2 and gets a migration; it does not append.**
+
+### The structural landing
+
+Registry infrastructure lands FIRST and alone, changing no wire bytes:
+literal, deeply-frozen `src/sharing/wire-schemas/v1.ts` built from `as const`
+field lists rather than spreads of live constants (spreading a live constant
+means editing that constant silently rewrites history), a hand-written SHA-256
+fingerprint per historical schema, a `VERSION_FIXTURES` table whose keys are
+compared against the registry's at runtime so a `satisfies` cast cannot hide a
+missing fixture, and an empty `MIGRATIONS` table typed so that adding v2 makes
+`1: migrateV1ToV2` mandatory at compile time.
+
+`WEAPON_TUPLE_LENGTHS` stops being a standalone constant and survives as the
+three explicit field lists inside v1; accepted lengths are derived from them.
+
+The binding comment lives immediately above `CURRENT_CHARACTER_SHARE_VERSION` in
+`src/sharing/wire-schemas/index.ts` — the point every format change must touch.
+Not `.ai/` (too optional) and not `AGENTS.md` (too far from the edit).
+
+### v2, chosen for migration coverage rather than convenience
+
+A migration that only copies fields forward proves nothing. v2 was picked to
+force every edge at once — add, remove, meaning-change, cross-tuple move,
+narrowing, and legal-but-nonsense v1 states:
+
+- **Weapon range** becomes one structured value instead of the two independent
+  nullable integers `range_normal_feet` / `range_long_feet`. This is the owner's
+  own queued ask: *"For ranged weapons, attach 2 separate distances to each.
+  (Near vs far with disadvantage)."* `reach` is ALREADY a boolean in
+  `SHARE_WEAPON_FLAGS`, so v2 does NOT get a melee-reach distance variant — that
+  would duplicate a shipped field. Melee weapons carry no range.
+- **`placeholders` moves out of the character tuple.** `document.placeholders` is
+  document-level data encoded at index 10 *inside* the character tuple
+  (`codec.ts:526`). It becomes its own root element; the character tuple goes
+  12 -> 11. This is the only genuine cross-tuple move the format offers.
+
+Rejected for v2: explicit character level on the wire. It is derived (sum of
+class levels), and the unresolved divergence between `Math.max(1, SUM(level))` at
+`spell-access-builder.ts:565` and the unfloored `reduce` at
+`build-report-builder.ts:414` would be frozen into a format we have just promised
+never to edit. Also rejected: class starting equipment (needs a table, catalog
+and UI first) and a synthetic throwaway v2 (burns a version number on nothing and
+skips the hard edges).
+
+### The nonsense states are the point
+
+`schema.sql:372-373` declares both range columns as bare nullable integers with
+**no CHECK and no cross-field validation** — verified by reading the schema, not
+inferred. So v1 already permits, and may already have shipped, pairs that the v2
+domain cannot express. Per D12/Q4 and the narrowing rule, those are carried, not
+coerced and not rejected:
+
+| v1 `(normal, long)` | v2 | why |
+| --- | --- | --- |
+| `(null, null)` | `none` | no range recorded |
+| `(n, null)` | `ranged { near: n, far: null }` | meaningful: no disadvantage band |
+| `(n, f)`, `f >= n` | `ranged { near: n, far: f }` | clean |
+| `(null, f)` | `legacy { normal: null, long: f }` | long with no normal — nonsense, but user data |
+| `(n, f)`, `f < n` | `legacy { normal: n, long: f }` | inverted — nonsense, but user data |
+
+The `legacy` variant must be unconstructible by a fresh v2 encode. v2 may only
+EMIT it while migrating v1 data, never mint it.
+
+**Rejecting an old link is not an acceptable migration.** Neither is dropping a
+field: a removed field is still read by the old decoder, and its migrator must
+either map it to a replacement or discard it through a dedicated assertion and
+fixture proving the intended result.
+
+---
+
+## F19 — a green suite and a green build BOTH certified a build that `tsc --declaration` rejects, and the mutation pilot found the class of defect neither gate can see (2026-07-27)
+
+`chore/stryker-pilot` merged as `9b7473c`. Gates on the merged tree, run by the
+supervisor: **2074 vitest / 126 files** (from 2073/125), build exit 0, dist clean
+9 files.
+
+StrykerJS 9.6.1, vitest runner, typescript checker, scoped to
+`src/{access,eligibility,grants,rules}/**` minus `*-srd.ts`. `thresholds.break`
+stays `null` and nothing runs it in CI. It is a tool you point at code you
+distrust, not a gate.
+
+### The finding the pilot was not looking for
+
+`passthroughVocabulary` and `PassthroughVocabulary` — the brand D38 introduced —
+were module-private while an exported inferred type referenced them. So
+`tsc --declaration` failed TS4023 on both `COLUMN_REFINEMENTS`
+(`rows.ts:293`) and `REFINEMENTS` (`rows.ts:488`).
+
+Neither `npm test` nor `npm run build` emits declarations. **Both were green over
+this for as long as D38 has been merged.** Only Stryker's typescript checker,
+which does emit, saw it.
+
+I did not take that on report. I reproduced it on plain `tsc` myself — and my
+first two attempts returned exit 0 with no output, which I nearly recorded as a
+refutation. The third check showed the reason: **0 `.d.ts` files emitted**.
+`tsconfig.json` is a solution file with `"files": []`, so it compiles nothing,
+and a compilation of nothing reports zero errors. Probing `tsconfig.app.json`
+emitted 179 declarations and produced exactly the two TS4023 errors.
+
+That is RULE 8 with the instrument nearly winning: a zero from an instrument
+pointed at nothing looks identical to a zero from a clean build. The guard now in
+the default suite (`tests/unit/declaration-emit.test.ts`) therefore asserts BOTH
+that the emit produced no diagnostics AND that it produced more than 100 `.d.ts`
+files. The second assertion exists because of this specific near-miss.
+
+I mutation-checked that guard rather than trusting it: removing the two `export`
+keywords fails it with the exact TS4023 pair, and restoring them returns green.
+
+### The gap the pilot was looking for
+
+Scoped baseline: 4,011 mutants, **76.99%** total / **81.03%** covered, 2,062
+killed, 6 timed out, **484 survived**, 134 no-coverage, 1,325 compile errors,
+28m35s at concurrency 4. Codex classified the top survivors as seven genuine gaps
+and three equivalent mutants.
+
+I independently confirmed one rather than accepting the list. At
+`class-progression-lookup.ts:575`, `classLevel < 10` -> `<= 10` gives third-casters
+the wrong level-10 slots. I applied it and ran the full suite: **2013 passed**.
+It survives because the breakpoint test samples 3, 7, 13 and 19 and steps over
+10 — the tests check the shape of the progression, not the boundary that defines
+it. F16 again, in test design rather than in a finding.
+
+### My own error, recorded because it nearly produced a false result
+
+Between the two mutations I ran `git checkout src/domain/enums.ts` to "restore"
+the file. The export fix was UNSTAGED, so checkout discarded it and reinstated
+the defect. The next run failed — and the failure looked exactly like the
+progression mutation being killed, which would have been reported as codex
+overclaiming a gap. It was my restore that broke it.
+
+The lesson is narrow and mechanical: **`git checkout <path>` restores to HEAD,
+not to the state you were holding.** When the working tree carries uncommitted
+work under test, restore a mutation by inverting the exact edit, never by
+checkout. Read which test failed before concluding what the failure means.
+
+---
+
+## D40 — OWNER: the structured-values ruling collisions (Q13), answered (2026-07-27)
+
+Parked in `.claude/pending-questions/structured-values-ruling-collisions.md`.
+Answered in question mode, one at a time, at the owner's request.
+
+| collision | ruling |
+| --- | --- |
+| `range_text` original wording | **Leave as is.** The raw string survives in `spell_versions.range` (`schema.sql:866`) alongside the structured columns. |
+| area of effect dimensions | **Add a nullable secondary dimension.** A cylinder needs radius and height; one number cannot carry both. |
+| area shapes | **Six, not four.** `spellAreaShapes` at `enums.ts:766` lists sphere, cylinder, cone and line. Emanation and Cube are missing and are printed SRD 5.2 Range lines — `Self (15-foot Emanation)` and `Self (15-foot Cube)`. |
+| material component cost | **Boolean plus text.** Drop the cp integer and the exact/minimum distinction. Rationale from the owner: *"A lot of material costs are gte. Not just true strike. Revivify requires a diamond value gte 50000cp."* A boolean "has a material cost" plus the verbatim material text carries every case without modelling comparison operators. |
+| `coin` equipment kind | **Dropped.** *"I don't want to keep track of coins. Just make a 50gp package with 50gp as a line item text the same as a bedroll."* |
+| `armor` equipment kind | **Kept.** *"We need armor in the domain to calculate ac. Make leather armor as an example of light armor, scale for medium, chain mail for heavy."* Already seeded in `armor_templates` with `src/rules/armor-srd.ts` and `docs/srd/source/armor-table.txt` (Leather 11+Dex, Scale Mail 14+Dex max 2, Chain Mail 16 / Str 13). |
+| parenthetical qualifiers | **Keep verbatim** — exactly what shipped. |
+| ranged weapon distances | **Two per weapon, near and far with disadvantage.** Now the substance of D41's v2. |
+
+**Still unasked:** the A/B option column, which turned out to be entangled with
+class starting equipment. That is unmodelled — there is no `starting_equipment`
+or `class_equipment` table, despite `class-core-traits.txt:59` printing
+`Choose A or B: (A) Leather`. Do not treat this table as the complete set of Q13
+answers; it is the answered ones.
+
+### Two things flagged and deliberately NOT asserted
+
+- The `armor_templates` row count. A comment says thirteen; my own count of the
+  extract found ten items plus three category headers. I have not proven which
+  reading the seeder implements, so I am not recording either as fact.
+- The total-level divergence between `Math.max(1, SUM(level))` at
+  `spell-access-builder.ts:565` and the unfloored `reduce` at
+  `build-report-builder.ts:414`. Real, unresolved, and the reason D41 refuses to
+  put character level on the wire.
+
+---
+
+## D39 — weapon damage is a discriminated union, and the arity that describes every link already in the wild was untested (2026-07-27)
+
+Merged as `9fc00fa`. Gates on the merged tree, run by the supervisor:
+**2073 vitest / 125 files** (from 2012/124), build exit 0, **72 Playwright
+passed** in 8.2m, 59 tables.
+
+Weapon damage stops being a nullable string and becomes
+`dice | flat | custom | not_recorded`. `not_recorded` is a distinct member, not a
+synonym for null: a weapon whose damage nobody has entered is a different fact
+from a weapon that deals no damage, and the versatile slot needs a third answer
+again — `not_applicable`, for a weapon that is not versatile at all. Free text
+that parses as neither dice nor a flat number survives verbatim under `custom`
+rather than being coerced or dropped, which is D12/Q4 applied to a value instead
+of a vocabulary.
+
+### The merge I refused
+
+The branch added `WEAPON_TUPLE_LENGTH_PRE_DAMAGE_UNION` and reported green. I
+mutation-checked it before merging: **deleting that constant passed all 2,071
+tests.**
+
+It is not a spare. It is the arity `main` was emitting at the time — 
+`WEAPON_TUPLE_LENGTH = LEGACY + 1` — which is to say **every share link already in
+the wild**. A suite that cannot tell whether the current production wire format
+is still accepted is not testing the thing it exists to test. The gap was
+invisible precisely because the constant was new: nothing had been written
+against it yet, and green looked like coverage.
+
+I sent it back rather than merging on the report. The revise added a frozen
+20-element fixture at `tests/unit/sharing/codec.test.ts:1040`, minted from
+`main`'s own encoder at `d31468b` and pinned as a literal base64url string — not
+generated by the encoder under test. After the revise my same mutation fails
+exactly one test, with the honest message:
+
+> `Invalid character share: wire weapons[0] must be a tuple of length 19 or 22.`
+
+Three accepted arities now, each meaning something specific: **19** legacy,
+**20** pre-damage-union (production at the time), **22** with the damage and
+versatile-damage unions. D41 supersedes the practice that produced that list —
+under the frozen registry those three become the explicit field lists inside
+schema v1, and the next change bumps the version instead of adding a fourth
+number.
+
+### What this is evidence for
+
+Twice in one day a constant or an export was added, reported green, and was
+load-bearing for something no test touched — this, and the TS4023 brand in F19.
+Both were caught by mutating the new thing rather than by reading the report.
+A new symbol arriving with a green suite is the case where green means least.
+
+---
+
 ## D38 — the five remaining domain vocabularies are typed PER TABLE, not per vocabulary: a CHECK where only our seeder writes, passthrough where a user can reach (2026-07-27)
 
 School, damage type, condition, creature type and size were bare `varchar`.
