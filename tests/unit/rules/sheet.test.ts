@@ -7,12 +7,14 @@ import {
   hitDieOrAbsent,
   hitPointMaximum,
   initiative,
+  MAXIMUM_CHARACTER_LEVEL,
   passivePerception,
   savingThrowModifier,
   savingThrowProficiencies,
   sheetProficiencyBonus,
   skillModifier,
   totalCharacterLevel,
+  totalLevelWarnings,
   type SheetArmor,
   type SheetClass,
 } from '../../../src/rules/sheet';
@@ -148,6 +150,81 @@ describe('proficiency bonus and total level', () => {
     // sheet and the spell planner cannot print two different numbers.
     expect(sheetProficiencyBonus([FIGHTER, WIZARD], 7)).toBe(7);
     expect(sheetProficiencyBonus([FIGHTER, WIZARD], null)).toBe(3);
+  });
+});
+
+/**
+ * F11'S SECOND HALF: THE COMBINED TOTAL IS A SHEET WARNING, NOT A REFUSAL.
+ *
+ * `multiclassing.txt`: "you can't take a level in a class if that would cause
+ * your total character level to exceed 20." The guided builder enforces that by
+ * throwing (`add-source.ts`, `update-class.ts`); the backup boundary does not,
+ * deliberately, because refusing a whole document over a multiclass total would
+ * lose the character to state a number (D11 part 2). So the sheet has to say it.
+ */
+describe('a character whose class levels add up to more than 20', () => {
+  const FIGHTER_20: SheetClass = { ...FIGHTER, level: 20 };
+  const WIZARD_5: SheetClass = { ...WIZARD, level: 5 };
+
+  it('says nothing at or below 20', () => {
+    expect(totalLevelWarnings([{ ...FIGHTER, level: 20 }])).toEqual([]);
+    // Fighter 17 + Wizard 3 = 20, the boundary itself.
+    expect(
+      totalLevelWarnings([{ ...FIGHTER, level: 17 }, { ...WIZARD, level: 3 }]),
+    ).toEqual([]);
+    expect(totalLevelWarnings([])).toEqual([]);
+  });
+
+  it('warns once at 21 and names the total it actually used', () => {
+    // Fighter 20 + Wizard 5 = 25.
+    const warnings = totalLevelWarnings([FIGHTER_20, WIZARD_5]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.code).toBe('total_level_exceeds_maximum');
+    expect(warnings[0]?.message).toContain('25 levels across 2 classes');
+    expect(warnings[0]?.message).toContain('cannot exceed level 20');
+    // One over the line is enough — Fighter 20 + Wizard 1 = 21.
+    expect(
+      totalLevelWarnings([FIGHTER_20, { ...WIZARD, level: 1 }]),
+    ).toHaveLength(1);
+  });
+
+  it('reaches the sheet through the hit point arm, which is what spends the excess', () => {
+    // The warning has no meaning unless a consumer sees it, and
+    // `CharacterSheetBuilder` reads it off `hitPointMaximum`. Asserted here
+    // rather than only on `totalLevelWarnings`, because a warning that is
+    // computed and then never concatenated is invisible on the page.
+    const result = hitPointMaximum({
+      classes: [FIGHTER_20, WIZARD_5],
+      scores: scores({ constitution: 10 }),
+    });
+    expect(result.warnings.map((warning) => warning.code)).toContain(
+      'total_level_exceeds_maximum',
+    );
+  });
+
+  it('does NOT clamp: the maximum is computed from the levels as recorded', () => {
+    // Fighter 20 starting: 10 + 0 at level 1, then 19 levels of d10 fixed (6)
+    // = 10 + 114 = 124. Wizard 5 adds 5 levels of d6 fixed (4) = 20.
+    // 124 + 20 = 144. Clamping the character to 20 total levels would drop the
+    // five Wizard levels and give 124, which is the bug this asserts against.
+    const result = hitPointMaximum({
+      classes: [FIGHTER_20, WIZARD_5],
+      scores: scores({ constitution: 10 }),
+    });
+    expect(result.maximum).toBe(144);
+    expect(result.maximum).not.toBe(124);
+    // And the derived bonus follows the recorded total too, rather than being
+    // silently capped at the level-20 value.
+    expect(totalCharacterLevel([FIGHTER_20, WIZARD_5])).toBe(25);
+  });
+
+  it('states the maximum as one constant rather than a literal in the message', () => {
+    expect(MAXIMUM_CHARACTER_LEVEL).toBe(20);
+    expect(totalLevelWarnings([{ ...FIGHTER, level: MAXIMUM_CHARACTER_LEVEL }]))
+      .toEqual([]);
+    expect(
+      totalLevelWarnings([{ ...FIGHTER, level: MAXIMUM_CHARACTER_LEVEL + 1 }]),
+    ).toHaveLength(1);
   });
 });
 
