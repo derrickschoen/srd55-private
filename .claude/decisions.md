@@ -1,5 +1,275 @@
 # Binding scope decisions
 
+> **NUMBERING.** These two entries were written as D30 and D31 on
+> `feat/multiclass-grants` while `main` independently recorded a different
+> D30 (the column-portability guard). They are renumbered D32 and D33 here;
+> their bodies' self-references were updated with them. No code referenced
+> either number — checked before renumbering.
+
+## D33 — A disclosed wrong number is still a wrong number: the attack profile withholds the proficiency bonus (2026-07-27)
+
+`feat/multiclass-grants`, revising D32 against a review. Verified by me on a
+clean tree: **1730 vitest / 114 files, build exit 0, 72 Playwright.**
+
+### The finding that changed the most, and why the deferral was wrong
+
+D32 shipped a live contradiction and SAID SO: the sheet's Proficiencies section
+printed "Not proficient" for a Wizard's Greatsword while the attack profile
+beside it added the proficiency bonus. The reasoning was that threading the
+verdict through every profile builder was its own change.
+
+**Disclosure is not a substitute for not shipping it.** The contradiction was
+NEW on this branch — before it, no screen claimed non-proficiency at all — so
+the branch created the disagreement and then documented it. The bonus is now
+withheld, which is D28 §1 applied rather than quoted, and both screens answer
+from ONE union.
+
+**FOUR VERDICTS, TWO STATES, AND TWO OF THE MAPPINGS ARE DECISIONS.**
+`profileProficiency` is exhaustive with no `default` arm.
+
+- `not_proficient` -> WITHHELD. The plain case, and the one D28 §1 names.
+- `category_not_stated` -> INCLUDED, with the assumption printed. D27 governs:
+  *"where it is null the sheet keeps its current stated assumption."* Withholding
+  would have taken the bonus off every weapon on every character imported before
+  that column existed — a NEW wrong number, invented by the fix for the old one.
+- `qualifier_not_evaluated` -> WITHHELD, matching the assumption the sheet
+  already states. Only an imported class reaches this arm.
+- The DERIVED Shillelagh row has no weapon record and therefore no verdict. It
+  keeps the bonus and says it was not checked; synthesising a `simple` weapon to
+  check against would be the name-matching D15 refused.
+
+`damage_modifier` does not move in any of them — the source puts the bonus in
+the attack roll only, and taking it off both would be a second wrong number.
+
+### ONE READER, AND THE ORDER IS PART OF THE ANSWER
+
+`ClassProficiencyLookup` is the single reader of `class_armor_training` and
+`class_weapon_proficiencies`, used by the sheet builder AND the weapons panel.
+Its class query repeats `ORDER BY definition.name, level.id` deliberately:
+`startingClass` degrades by PICKING, so two readers that ordered differently
+would give a character with no starting class a bonus on one screen and withhold
+it on the other. `weapon-proficiency-agreement.test.ts` asserts the degraded case
+for exactly that reason.
+
+### The subset invariant is in the TYPE now, not only in the query
+
+`ClassProficiencySources` was two independent `ClassProficiencies`. The review
+was right that the invariant held only because one query happened to filter both
+lists out of the same rows — a test helper or a homebrew importer could build an
+`on_entry` naming a category `initial` does not, and it compiled. It is now ONE
+row list with `on_entry` per row, read only through `classProficienciesFor`.
+That is the same argument the branch used to reject a parallel TABLE, applied to
+the type. Its price is stated in both places: an entry grant inherits the initial
+row's qualifier and cannot differ from it.
+
+### Two lookups that were object literals are Maps, and the reason is a real bug
+
+`QUALIFIER_WORDS['constructor']` was a FUNCTION, not `undefined`. An imported
+class qualified "constructor" walked past the `unevaluated` arm and was silently
+DROPPED — the one outcome that module's contract forbids. `SKILL_COUNT_WORDS`
+had the same shape with a worse end: a function carried as a skill `count`
+towards an integer column. `__proto__` reaches both (`\w+` matches it). Fixed by
+construction with `Map`, not by a guard someone must remember.
+
+### What the review measured that no test could see
+
+The sheet's whole Proficiencies section could be INVERTED — a not-proficient
+weapon labelled "Proficient", the armour list emptied, "Full" swapped with
+"Multiclass entry", every qualifier dropped — with the entire suite green,
+because the only assertions were row-ID existence checks. Both
+`unmade_multiclass_skill_choice` branches in `agent-reference.ts` were equally
+unexecuted, along with both of their siblings.
+
+Re-run against the reviewer's own mutations: the sheet-view inversion now fails
+**4** tests, the agent-reference one **2**. There is browser coverage of the
+section for the first time, and it asserts the number and the word together.
+
+### Corrections to D32 itself
+
+- **A manufactured correction was WITHDRAWN.** D32 claimed the brief said
+  Barbarian's initial traits are "Light and Medium". The brief says "*include*
+  Light and Medium", which is not exhaustive and is true. The SRD fact D32 stated
+  was right; the attribution was invented, and it sat in a binding file. The
+  other two corrections were re-verified and hold.
+- **`no_starting_class` printed TWICE.** THREE derivations go through
+  `startingClass` and the dedup filter compared only two of them. It now
+  deduplicates the whole list on code+message — never on code alone, because two
+  weapons that are both not proficient are two facts.
+
+### Rejected, with the reason recorded
+
+**Filtering `unmade_multiclass_skill_choice`'s ticked count to class-sourced
+ticks.** `character_skill_proficiencies` has no provenance column, so a
+background-sourced tick can silence the item. Fixing it means a schema change
+with its own backup, share and snapshot arms (D24) and a decision about what an
+imported tick with no provenance means; guessing provenance from a skill's name
+is the name-matching this application refuses. The error direction is safe — it
+under-reports and never invents — and the printed sentence now names the
+limitation instead of leaving it in a doc comment.
+
+---
+
+## D32 — The multiclass entry grants are content now, and D28's "honest interim" is superseded (2026-07-27)
+
+`feat/multiclass-grants`. Verified by me on a clean tree: **1707 vitest / 113
+files, build exit 0, 71 Playwright.**
+
+`docs/srd/source/multiclass-entry-grants.txt` had been committed and checksummed
+since 3737f1c and read by NOTHING — no `?raw` import, no parser, no seed. It is
+now parsed, seeded, and applied to the sheet, which closes the gap D28 §3 named
+as the reason its own rule could not be computed correctly.
+
+### The grant table was re-derived before anything was seeded, and it held
+
+Twelve rows, six columns, checked against the extract by me and independently by
+a proof agent: ZERO cell-level disagreements with the track brief. Four cells
+each contradict a plausible guess and each is now pinned by its own test:
+Barbarian gets Shields and NOT Light (L24-25); no class grants Simple on entry
+(four grant Martial, and the word "Simple" does not occur in the file); Monk,
+Sorcerer and Wizard grant the hit die alone; Bard and Ranger both grant exactly
+one skill and differ only in the pool.
+
+**TWO claims in the brief's supporting PROSE were wrong and are corrected
+here**, because both were stated evidence for the design. A THIRD correction was
+recorded here and has been WITHDRAWN — see the note under the two.
+
+- The brief justified the per-row flag partly by "a parallel table would
+  duplicate every qualifier (including the Monk's and Rogue's)". **No entry grant
+  carries a qualifier at all** — the Monk's clause grants no weapons and the
+  Rogue's grants none either. That argument is empty. The flag is still right,
+  for the other two reasons: the unique indexes already exist, and the subset
+  invariant becomes structural.
+- "The entry grant is a PROPER subset of the initial grant" is false for six of
+  twelve. Bard, Cleric, Druid, Ranger, Rogue and Warlock grant on entry exactly
+  the armour training their Core Traits row grants. Harmless for the flag; not an
+  invariant to assert.
+
+**WITHDRAWN, 2026-07-27, and the withdrawal is the entry worth keeping.** This
+paragraph also said: *"The brief said Barbarian's initial traits are 'Light and
+Medium'. They are Light, Medium and Shields."* **The brief said no such thing.**
+Its words (`.claude/TRACK-BRIEF.md:33-34`) are "**Barbarian gets Shields but NOT
+Light armour** on entry, though its initial traits *include* Light and Medium" —
+`include`, which is not exhaustive and is true. Barbarian's Core Traits row is
+Light, Medium and Shields (`class-core-traits.txt:29-30`), and nothing in that
+sentence contradicts it.
+
+So a correction was manufactured against a claim nobody made, and it sat in a
+BINDING file where a later reader would take it as a fact about the brief. The
+fact it asserts about the SRD is right; the attribution is not, and a decisions
+file that misquotes its own source is worse than one that says less. The other
+two corrections above were verified again on the same pass and both hold.
+
+### The invariant is structural, and that decided the shape
+
+Armour and weapons: a per-row boolean on the EXISTING set tables. Both lists are
+read off the SAME rows, `on_entry` taking only the flagged ones — so a category
+the class does not train in has no row to flag and can appear in NEITHER list. A
+parallel table could have held the Barbarian entering with Heavy armour and
+nothing would have refused it.
+
+Skills CANNOT use a flag and the Bard is why: "one skill of your choice"
+(L37-38) is unbounded, and the Bard has no `class_skill_options` rows for a flag
+to sit on. So two scalars on `class_sheet_traits`, with a CHECK tying them in
+both directions — `pool='none', count=1` and `pool='any', count=0` are both
+UNSTORABLE. In TypeScript the parse returns a discriminated union where `none`
+carries no count at all, so the meaningless pair does not typecheck either.
+
+**A mis-parse fails the seed.** `parseSrdMulticlassEntryGrants` checks every
+entry grant against the class's own Core Traits parse and throws on a non-subset;
+the seeder calls it inside the transaction. The boot health check compares the
+flagged SETS member for member rather than counting rows — a database in which
+every flag defaulted to 0 would pass any existence check while telling a
+Fighter/Barbarian they have no shield training.
+
+### What the extract does to a naive parser, measured
+
+Four hazards, none of which `class-traits-srd.ts` had to handle. Every Martial
+grant is hyphenated across a line break (`Mar-`/`tial`), so a line-oriented
+reader extracts the category `Mar`. Five blocks break a sentence across a BLANK
+LINE. Cleric and Wizard have NO bullet glyphs — their slices are taken at the
+file's two highest column offsets and the cut lands right of the bullet column —
+so "count the bullets" is not a safe parse. And the file's own header claim
+"Nothing is edited out" is not literally true: L174 reads `izard Class Features`.
+The answer is to read one SENTENCE, not one line; every hazard is a line-level
+artifact and none survives the join.
+
+### D27 landed, and the share wire needed fixing before it could
+
+`character_weapons` has a nullable `simple | martial`, folded once from
+`weapon_templates.srd_group` by an exhaustive switch with no default arm. The
+comment asserting "A character's weapon has no category, before or after" was
+CORRECTED rather than left standing beside a schema that contradicts it.
+
+**The weapon share tuple had no backward tolerance and nobody had noticed.**
+`weaponFromPositional` used the exact-length `tuple()`, unlike the document
+level, which has used `variableTuple()` since links existed — so appending a
+field would have made EVERY existing link containing a weapon fail to decode. It
+now accepts both arities, and the new field is APPENDED: inserting it beside
+`name` would have shifted the eighteen fields after it and decoded an old link's
+damage dice into its damage type.
+
+**The symmetric backup case had no mechanism either.** `RETIRED_ROW_COLUMNS`
+accepts-and-drops a column a document carries and the schema no longer has;
+nothing handled a column the schema has and an older document does not, and
+`rows.ts` rejects a missing key by design. `ADDED_ROW_COLUMNS` is the mirror,
+and the distinction that makes it safe is the same historical one: when the
+document was written the column did not exist, so absence is not a partial row.
+
+### Q11, and a live wrong number it replaced
+
+The multiclass skill choice is a completeness item naming the class AND its
+pool. Building it turned up a defect nobody was looking for:
+`noSkillProficiencies` computed entitlement as `sum(skill_choice_count)` across
+every class with no reference to `is_starting_class`, so a Fighter 5 / Bard 1 was
+told they owed **5** skills where the SRD grants 3. It also fired only at zero,
+so ticking one skill silenced it forever.
+
+The fix reuses `startingClass` rather than reading the flag — the brief's
+instruction, and the resolver was made GENERIC in place rather than copied, since
+the completeness check holds no hit die and no proficiency set. Its query needed
+a LEFT JOIN, and the outer-ness is load-bearing: an inner join drops a homebrew
+class before the resolver sees it, promotes the Bard to starting class, and
+credits it with its full "Choose any 3" — turning an unknown into a wrong number
+about a different class.
+
+### Tool proficiencies are parsed and dropped at the SEED, not at the parse
+
+D26 excludes them: no tool vocabulary exists and neither changes a number. But
+dropping them at the PARSE would have made the omission invisible, and a later
+reader could not tell "the source grants no tool" from "we chose not to model
+it". The parser reads them; the seeder discards them with the reason written
+there. The two are also different SHAPES — the Bard's is a choice, the Rogue's a
+fixed item — which a single nullable string would have flattened.
+
+### What was NOT done here, and was CLOSED in the review round — see D33
+
+**The attack profile still added the proficiency bonus unconditionally.** D28 §1
+wants it WITHHELD from a weapon no class grants; the character sheet's new
+Proficiencies section said "not proficient" while the attack profile beside it
+printed a bonus. Threading the verdict into every profile builder and revising the
+printed formulas was deferred as its own change with its own surface.
+
+**The deferral did not survive review, and the reviewer was right.** Disclosing a
+live wrong number is not the same as not shipping one, and the contradiction was
+NEW on this branch: before it, no screen claimed non-proficiency at all. D33
+records the fix.
+
+**Also left:** `SheetWarning` has no subject field, so the four new codes name
+their weapon in prose only; a consumer cannot group them without parsing English.
+Widening the type for one family would make the other seven carry a field they
+have no subject for.
+
+### Mutation-tested, three ways
+
+- `classProficiencyGrants` giving every class its FULL row: **6 tests fail**
+  across both new files.
+- The seeder flagging every armour row: **11 fail**, including three in
+  `sheet-content.test.ts` that nobody wrote for this.
+- The Rogue qualifier read as `every` instead of `some` — "Finesse AND Light":
+  **2 fail**, one unit and one integration.
+
+---
+
 ## F13 — The concentration and ritual regexes override an EXPLICIT false, and only for the spelling the SRD does not use (2026-07-27)
 
 Found while measuring queue item (b) rather than trusting the brief's account of

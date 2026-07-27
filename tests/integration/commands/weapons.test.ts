@@ -8,6 +8,7 @@ import type {
   WeaponFields,
 } from '../../../src/domain/command-contracts';
 import { WEAPON_RANGE_MAX_FEET } from '../../../src/domain/weapon-limits';
+import { weaponFromTemplate } from '../../../src/ui/screens/planner/weapons';
 import { BuildReportBuilder } from '../../../src/reports/build-report-builder';
 import { AbilityScores } from '../../../src/rules/ability-scores';
 import {
@@ -90,16 +91,25 @@ describe('weapon commands', () => {
     return found;
   }
 
-  /** The pre-fill the picker performs: a column-wise copy plus empty notes. */
+  /**
+   * The pre-fill the picker performs, THROUGH THE PRODUCTION FUNCTION.
+   *
+   * This used to re-implement the copy inline. That was fine while the copy was
+   * a spread, and stopped being fine the moment D27 made it a spread PLUS a
+   * fold: a re-implementation would have kept passing while `weaponFromTemplate`
+   * folded `srd_group` wrongly, which is the one thing these tests exist to
+   * catch.
+   */
   function fromTemplate(name: string): WeaponFields {
-    const { id: _id, content_key: _key, srd_group: _group, ...profile } =
-      templateNamed(name);
-    return { ...profile, notes: null };
+    return weaponFromTemplate(templateNamed(name));
   }
 
   function custom(overrides: Partial<WeaponFields> = {}): WeaponFields {
     return {
       name: 'Grandfather’s sword',
+      // NOT STATED — the state a weapon someone typed in is genuinely in, and
+      // the one D27 makes the column nullable for.
+      proficiency_category: null,
       damage_dice: null,
       damage_type: null,
       versatile_damage_dice: null,
@@ -137,7 +147,17 @@ describe('weapon commands', () => {
       versatile_damage_dice: '1d10',
       mastery_property: 'Sap',
       mastery_selected: false,
+      // D27's FOLD, on the round trip through the column. The Longsword's
+      // template row is `martial_melee`; the character's copy is `martial`,
+      // because the four source table headings are not the two categories a
+      // class grants proficiency in. Copying the group across verbatim would
+      // store a value `character_weapons_proficiency_category_check` refuses.
+      proficiency_category: 'martial',
     });
+    // The other half of the fold, so a switch that returned `martial` for
+    // everything cannot pass. A Club is `simple_melee`.
+    await run({ type: 'add_weapon', weapon: fromTemplate('Club') });
+    expect(weapons()[1]).toMatchObject({ proficiency_category: 'simple' });
 
     // Now change EVERY field the template filled, one command, and confirm each
     // one took. "Pre-filled" must not mean "locked".
@@ -146,6 +166,11 @@ describe('weapon commands', () => {
       weapon_id: added!.id,
       weapon: {
         name: 'Heirloom blade',
+        // Changed too, and DOWNWARDS to a state the picker never produces: a
+        // template-filled weapon always has a category, and the user must be
+        // able to take it back to NOT STATED. Without an option for that the
+        // undecided state would be unreachable after any pick.
+        proficiency_category: null,
         damage_dice: '1d10',
         damage_type: 'Radiant',
         versatile_damage_dice: '2d6',
@@ -167,6 +192,7 @@ describe('weapon commands', () => {
     });
     expect(weapons()[0]).toMatchObject({
       name: 'Heirloom blade',
+      proficiency_category: null,
       damage_dice: '1d10',
       damage_type: 'Radiant',
       versatile_damage_dice: '2d6',

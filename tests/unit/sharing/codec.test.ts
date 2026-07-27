@@ -85,7 +85,7 @@ const complete: CharacterShareDocument = {
     },
   ],
   // TWO WEAPONS ON PURPOSE. The first sets every optional field, so the wire
-  // pin below sees a real value in each of the nineteen slots. The second is a
+  // pin below sees a real value in each of the twenty slots. The second is a
   // HALF-ENTERED weapon — a name and nothing else, which `character_weapons`
   // permits and the planner produces the moment "Add weapon" is pressed. It is
   // here so the round trip proves absence survives as absence rather than being
@@ -93,6 +93,7 @@ const complete: CharacterShareDocument = {
   weapons: [
     {
       name: 'Dagger of Warning',
+      proficiency_category: 'simple',
       damage_dice: '1d4',
       damage_type: 'Piercing',
       versatile_damage_dice: '1d6',
@@ -377,10 +378,16 @@ describe('character-share positional codec', () => {
       [['prepared', { count: 7 }]],
       [['warning:shield']],
       [['Defense', [['2024:shield', 'defense']]]],
-      // Element 11: weapons. Nineteen slots per weapon — name, the four short
+      // Element 11: weapons. TWENTY slots per weapon — name, the four short
       // text columns, the two ranges, the mastery property, the two long
-      // free-text columns, then the nine flags — with `null` for every field the
-      // weapon does not set.
+      // free-text columns, the nine flags, and LAST the D27 proficiency
+      // category — with `null` for every field the weapon does not set.
+      //
+      // THE CATEGORY IS LAST AND THAT POSITION IS THE FORMAT. It was appended
+      // rather than put beside `name` so that a link minted before D27, which
+      // is nineteen slots long, still has every index meaning what it meant.
+      // Inserting it anywhere earlier would shift the eighteen fields after it
+      // and decode an old link's damage dice into its damage type.
       [
         [
           'Dagger of Warning',
@@ -402,9 +409,11 @@ describe('character-share positional codec', () => {
           true,
           true,
           true,
+          'simple',
         ],
         [
           'Unfinished club',
+          null,
           null,
           null,
           null,

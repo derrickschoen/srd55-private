@@ -853,6 +853,31 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     ],
   },
   {
+    constraint: 'character_weapons_proficiency_category_check',
+    rejects: [
+      // The FOUR-member vocabulary of `weapon_templates.srd_group` is not this
+      // column's vocabulary, and copying a group across verbatim instead of
+      // FOLDING it is the mistake this refuses. `martial_ranged` matches no
+      // class's proficiency grant, so it would read as "not proficient" for a
+      // Fighter holding a Longbow — the silent-wrong these CHECKs exist for.
+      ['an srd_group copied across without the fold', weapon({ proficiency_category: 'martial_ranged' })],
+      ['a category nobody grants', weapon({ proficiency_category: 'exotic' })],
+      ['an empty category, which is a null in costume', weapon({ proficiency_category: '' })],
+    ],
+    accepts: [
+      // THE NULL LIMB IS THE ONE THAT MATTERS. A share link minted before D27
+      // carries no category, and refusing it would make somebody's character
+      // unopenable to close a gap that costs a warning (D11 part 2).
+      ['the null a pre-D27 share link and a hand-typed weapon both have', weapon({ proficiency_category: null })],
+      // The bare `simple` that `weapon_templates_srd_group_check` REJECTS. It
+      // is legal here and illegal there, and that asymmetry is the whole of
+      // D27: the template's vocabulary is the source's four table headings, and
+      // this column's is the two categories a class grants.
+      ['the bare simple the template refuses', weapon({ proficiency_category: 'simple' })],
+      ['martial', weapon({ proficiency_category: 'martial' })],
+    ],
+  },
+  {
     constraint: 'weapon_templates_mastery_property_check',
     rejects: [['a mis-parsed property from the SRD table', weaponTemplate({ mastery_property: 'cleave' })]],
     accepts: [['a real property', weaponTemplate({ mastery_property: 'Vex' })]],
@@ -1212,6 +1237,31 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
       // already converted.
       ['a digit string, which affinity converts to an integer', sheetTraits({ hit_die: '8' })],
       ['the column default for choose-any', sheetTraits({ skill_choice_from_any: 1 })],
+    ],
+  },
+  {
+    constraint: 'class_sheet_traits_multiclass_skill_choice_check',
+    rejects: [
+      // THE TWO INCOHERENT PAIRS, AND THEY ARE THE POINT. Either one alone
+      // would let the same fact be spelled two ways, and a completeness check
+      // reading only one of the columns would then give two different answers
+      // for two rows that mean the same thing.
+      ['a pool that grants nothing carrying a count', sheetTraits({ multiclass_skill_choice_pool: 'none', multiclass_skill_choice_count: 1 })],
+      ['a granting pool with nothing to grant', sheetTraits({ multiclass_skill_choice_pool: 'any', multiclass_skill_choice_count: 0 })],
+      ["the Ranger's pool with nothing to grant", sheetTraits({ multiclass_skill_choice_pool: 'class_list', multiclass_skill_choice_count: 0 })],
+      ['a pool no reader knows', sheetTraits({ multiclass_skill_choice_pool: 'class_and_background', multiclass_skill_choice_count: 1 })],
+      // A bare `>= 1` admits every text value, since SQLite orders TEXT above
+      // every number — the same D13 finding the traits check above records.
+      ['a text count', sheetTraits({ multiclass_skill_choice_pool: 'any', multiclass_skill_choice_count: 'one' })],
+      ['a negative count', sheetTraits({ multiclass_skill_choice_pool: 'any', multiclass_skill_choice_count: -1 })],
+    ],
+    accepts: [
+      ['the none/0 default nine of twelve classes carry', sheetTraits({})],
+      ["the Bard's one skill from anywhere", sheetTraits({ multiclass_skill_choice_pool: 'any', multiclass_skill_choice_count: 1 })],
+      ["the Ranger's one skill from its own list", sheetTraits({ multiclass_skill_choice_pool: 'class_list', multiclass_skill_choice_count: 1 })],
+      // NOT a value any SRD class has, and accepted deliberately: an imported
+      // class granting two on entry is content this model must be able to hold.
+      ['an imported class granting two', sheetTraits({ multiclass_skill_choice_pool: 'class_list', multiclass_skill_choice_count: 2 })],
     ],
   },
   {

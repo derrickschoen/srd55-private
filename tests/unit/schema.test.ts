@@ -289,8 +289,9 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
       'range_long_feet', 'mastery_selected',
     ],
     text: [
-      'name', 'damage_dice', 'damage_type', 'versatile_damage_dice',
-      'ammunition_kind', 'mastery_property', 'other_properties', 'notes',
+      'name', 'proficiency_category', 'damage_dice', 'damage_type',
+      'versatile_damage_dice', 'ammunition_kind', 'mastery_property',
+      'other_properties', 'notes',
     ],
     numeric: ['created_at', 'updated_at'],
   },
@@ -395,7 +396,7 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
     numeric: ['created_at', 'updated_at'],
   },
   class_armor_training: {
-    integer: ['id', 'class_definition_id'],
+    integer: ['id', 'class_definition_id', 'granted_on_multiclass_entry'],
     text: ['category'],
     numeric: ['created_at', 'updated_at'],
   },
@@ -415,8 +416,9 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
   class_sheet_traits: {
     integer: [
       'id', 'class_definition_id', 'hit_die', 'skill_choice_count',
-      'skill_choice_from_any',
+      'skill_choice_from_any', 'multiclass_skill_choice_count',
     ],
+    text: ['multiclass_skill_choice_pool'],
     numeric: ['created_at', 'updated_at'],
   },
   class_skill_options: {
@@ -425,7 +427,7 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
     numeric: ['created_at', 'updated_at'],
   },
   class_weapon_proficiencies: {
-    integer: ['id', 'class_definition_id'],
+    integer: ['id', 'class_definition_id', 'granted_on_multiclass_entry'],
     text: ['category', 'property_qualifier'],
     numeric: ['created_at', 'updated_at'],
   },
@@ -500,6 +502,9 @@ const expectedNotNull: Record<string, string[]> = {
   // `damage_dice`, `damage_type` and `mastery_property` are NULLABLE here and
   // NOT NULL on the template: a half-entered user weapon is a first-class
   // state, and an invented weapon need not have a mastery property at all.
+  // `proficiency_category` is NOT in this list, and D27 says why: null means
+  // NOT STATED. A weapon someone typed in, or one that arrived on a share link
+  // minted before the column existed, genuinely has no category.
   character_weapons: [
     'id', 'character_id', 'name', 'finesse', 'heavy', 'light', 'loading',
     'reach', 'thrown', 'two_handed', 'ammunition', 'mastery_selected',
@@ -551,7 +556,9 @@ const expectedNotNull: Record<string, string[]> = {
     'id', 'content_key', 'rules_edition', 'name', 'category', 'armor_class',
     'dex_bonus', 'stealth_disadvantage',
   ],
-  class_armor_training: ['id', 'class_definition_id', 'category'],
+  class_armor_training: [
+    'id', 'class_definition_id', 'category', 'granted_on_multiclass_entry',
+  ],
   class_extra_attack_grants: [
     'id', 'class_definition_id', 'class_level', 'attack_count',
   ],
@@ -561,10 +568,13 @@ const expectedNotNull: Record<string, string[]> = {
   class_saving_throw_proficiencies: ['id', 'class_definition_id', 'ability'],
   class_sheet_traits: [
     'id', 'class_definition_id', 'hit_die', 'skill_choice_count',
-    'skill_choice_from_any',
+    'skill_choice_from_any', 'multiclass_skill_choice_count',
+    'multiclass_skill_choice_pool',
   ],
   class_skill_options: ['id', 'class_definition_id', 'skill'],
-  class_weapon_proficiencies: ['id', 'class_definition_id', 'category'],
+  class_weapon_proficiencies: [
+    'id', 'class_definition_id', 'category', 'granted_on_multiclass_entry',
+  ],
   // The four stored sheet inputs. `dex_bonus_max` and `strength_requirement`
   // are nullable on `character_armor` for exactly the reason they are nullable
   // on `armor_templates` — D6b limb 2, the source prints no value — and
@@ -971,7 +981,20 @@ const expectedDefaults: Record<string, Record<string, string>> = {
   background_templates: { rules_edition: "'2024'" },
   species_templates: { rules_edition: "'2024'" },
   character_armor: { stealth_disadvantage: 'false' },
-  class_sheet_traits: { skill_choice_from_any: 'false' },
+  class_sheet_traits: {
+    skill_choice_from_any: 'false',
+    // The `none`/0 pair nine of twelve classes carry — and it is a DEFAULT
+    // rather than a nullable column so that "grants no entry skill" and "we
+    // have not parsed this class" stay different facts: the second is the
+    // absence of the whole row.
+    multiclass_skill_choice_count: '0',
+    multiclass_skill_choice_pool: "'none'",
+  },
+  // The per-row entry-grant flags. Off by default because the SUBSET is the
+  // exception, not the rule: a Barbarian trains in Light, Medium and Shields
+  // and grants only Shields on entry.
+  class_armor_training: { granted_on_multiclass_entry: 'false' },
+  class_weapon_proficiencies: { granted_on_multiclass_entry: 'false' },
   // NOT NULL with a default of 0 — the pairing that makes an absent ROW and a
   // stored zero mean the same thing rather than two different things.
   character_sheet_adjustments: { armor_class_adjustment: '0' },

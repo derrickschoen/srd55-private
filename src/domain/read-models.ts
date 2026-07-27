@@ -13,19 +13,31 @@ import type {
   SlotState,
   SrdWeaponGroup,
   StandaloneSourceType,
+  WeaponProficiencyCategory,
 } from './enums';
 
 /**
  * THE FILLABLE BODY OF A WEAPON, SHARED BY THE CATALOG AND THE CHARACTER.
  *
  * `WeaponProfile` is what a template can fill and `WeaponFields` is what a
- * character's weapon holds; the only difference is `notes`, which is the user's
- * and which no catalog row has. Deriving one from the other rather than writing
- * two field lists is how the "pre-fill is a column-wise copy" invariant stays
- * true: a field added to one and forgotten in the other stops compiling at the
+ * character's weapon holds. Deriving one from the other rather than writing two
+ * field lists is how the "pre-fill is a column-wise copy" invariant stays true:
+ * a field added to one and forgotten in the other stops compiling at the
  * pre-fill site instead of silently arriving blank.
+ *
+ * TWO EXCLUSIONS, AND THEY ARE EXCLUDED FOR DIFFERENT REASONS.
+ *
+ *  - `notes` is the USER'S, and no catalog row has one.
+ *  - `proficiency_category` (D27) is not a COPY at all — it is DERIVED, folding
+ *    `weapon_templates.srd_group`'s four source headings down to the two
+ *    categories a class grants proficiency in. There is no such column on the
+ *    template to select, so leaving it in this type would break `templates()`,
+ *    and the fold has to happen somewhere a switch can be exhaustive.
+ *
+ * The fold lives in `weaponFromTemplate`, which is the one place a template
+ * becomes a character's weapon.
  */
-export type WeaponProfile = Omit<WeaponFields, 'notes'>;
+export type WeaponProfile = Omit<WeaponFields, 'notes' | 'proficiency_category'>;
 
 export interface WeaponTemplate extends WeaponProfile {
   id: number;

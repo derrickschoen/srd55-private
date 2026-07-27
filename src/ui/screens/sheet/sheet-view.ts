@@ -1,5 +1,6 @@
 import { freeTextSpan } from '../../free-text';
 import type { CharacterSheet } from '../../../queries/character-sheet-builder';
+import type { WeaponProficiencyVerdict } from '../../../rules/multiclass-proficiency';
 
 /**
  * THE CHARACTER SHEET, PROJECTED ONCE AND RENDERED TWICE.
@@ -206,6 +207,82 @@ export function sheetSections(sheet: CharacterSheet): readonly SheetSection[] {
       detail: plain(skill.formula),
     })),
   });
+
+  // THE PROFICIENCIES SECTION (D28). It sits after Skills and before Combat
+  // because it is the answer to "can I use this", which a player asks with the
+  // weapon in front of them.
+  const proficiencies: SheetRow[] = [
+    {
+      id: 'armor_training',
+      label: plain('Armor training'),
+      value:
+        sheet.proficiencies.armor_training.length === 0
+          ? 'None'
+          : sheet.proficiencies.armor_training.join(', '),
+      detail: plain(
+        'The UNION across every class: a character is trained if ANY of their ' +
+          'classes trains them. The class they started in contributes its full ' +
+          'Core Traits row; every class they multiclassed into contributes only ' +
+          'the smaller set its "As a Multiclass Character" clause grants.',
+      ),
+    },
+  ];
+  for (const entry of sheet.proficiencies.classes) {
+    proficiencies.push({
+      id: `proficiency_source:${entry.class_name}`,
+      label: [
+        { text: 'Granted by — ' },
+        { text: entry.class_name, free_text: true },
+      ],
+      value: entry.via === 'initial' ? 'Full' : 'Multiclass entry',
+      detail: plain(
+        entry.via === 'initial'
+          ? 'The starting class, so it grants everything its Core Traits table ' +
+              'lists — including the saving throws, which no multiclass entry ' +
+              'ever grants.'
+          : 'Entered by multiclassing, so it grants only what its "As a ' +
+              'Multiclass Character" clause lists: never its saving throws, and ' +
+              'not necessarily all of its armour training or weapons.',
+      ),
+    });
+  }
+  for (const grant of sheet.proficiencies.weapon_proficiencies) {
+    proficiencies.push({
+      id: `weapon_proficiency:${grant.class_name}:${grant.category}`,
+      label: [
+        { text: `Weapons — ${grant.category} from ` },
+        { text: grant.class_name, free_text: true },
+      ],
+      value: grant.property_qualifier ?? 'all',
+      // THE QUALIFIER IS PRINTED WHETHER OR NOT IT WAS EVALUATED, because the
+      // player is the one who adjudicates (D26). Where this application CAN
+      // read it — "Finesse or Light" is `finesse OR light` over columns the
+      // weapon already stores — the per-weapon verdicts below have applied it.
+      detail:
+        grant.property_qualifier === null
+          ? plain('Every weapon of that category, with no qualification.')
+          : [
+              { text: 'Only weapons with the ' },
+              { text: grant.property_qualifier, free_text: true },
+              {
+                text:
+                  ' property. Where those words name properties this ' +
+                  'application stores, the weapons below have been checked ' +
+                  'against them; where they do not, the sheet says so instead ' +
+                  'of guessing.',
+              },
+            ],
+    });
+  }
+  for (const weapon of sheet.proficiencies.weapons) {
+    proficiencies.push({
+      id: `weapon_verdict:${weapon.name}`,
+      label: [{ text: weapon.name, free_text: true }],
+      value: weaponVerdictValue(weapon.verdict),
+      detail: weaponVerdictDetail(weapon.verdict),
+    });
+  }
+  sections.push({ caption: 'Proficiencies', rows: proficiencies });
 
   const combat: SheetRow[] = [
     {
@@ -429,9 +506,121 @@ export function sheetFacts(sheet: CharacterSheet): Record<string, unknown> {
       rolled_value: roll.rolled_value,
       applies: roll.applies,
     })),
+    // D4's machine block gets the union and the per-weapon verdict KINDS, not
+    // the prose. A verdict kind is a stable key; the sentence beside it is not.
+    armor_training: [...sheet.proficiencies.armor_training],
+    weapon_proficiencies: sheet.proficiencies.weapon_proficiencies.map(
+      (grant) => ({
+        category: grant.category,
+        qualified: grant.property_qualifier !== null,
+      }),
+    ),
+    weapon_proficiency_verdicts: sheet.proficiencies.weapons.map(
+      (weapon) => weapon.verdict.kind,
+    ),
     warnings: sheet.warnings.map((warning) => warning.code),
     gaps: sheet.gaps.map((gap) => gap.kind),
   };
+}
+
+/**
+ * The four proficiency verdicts, as the word in the value column.
+ *
+ * EXHAUSTIVE, NO `default` ARM. A fifth verdict is a compile error here rather
+ * than a weapon that renders with a blank cell, which is the whole reason
+ * `WeaponProficiencyVerdict` is a closed union.
+ */
+function weaponVerdictValue(verdict: WeaponProficiencyVerdict): string {
+  switch (verdict.kind) {
+    case 'proficient':
+      return 'Proficient';
+    case 'not_proficient':
+      return 'Not proficient';
+    case 'category_not_stated':
+      return 'Unknown';
+    case 'qualifier_not_evaluated':
+      return 'Undecided';
+  }
+}
+
+/**
+ * A list of CLASS NAMES as free-text cells, joined by plain separators.
+ *
+ * A CLASS NAME IS FREE TEXT ON THIS PAGE and concatenating it into a sentence is
+ * the defect this exists to not have. A share link resolves its classes against
+ * the recipient's own catalog, but that catalog can itself hold an IMPORTED
+ * class whose name a stranger chose — so the same rule the character name, the
+ * armour name and the adjustment note already follow applies here, and the test
+ * that asserts it caught this being written the other way.
+ */
+function classNameCells(
+  names: readonly string[],
+  separator = ' and ',
+): SheetCell[] {
+  const parts: SheetCell[] = [];
+  names.forEach((name, index) => {
+    if (index > 0) {
+      parts.push({ text: separator });
+    }
+    parts.push({ text: name, free_text: true });
+  });
+  return parts;
+}
+
+function weaponVerdictDetail(
+  verdict: WeaponProficiencyVerdict,
+): readonly SheetCell[] {
+  switch (verdict.kind) {
+    case 'proficient':
+      return [
+        { text: 'Granted by ' },
+        ...classNameCells(verdict.via),
+        {
+          text:
+            '. One class is enough — proficiency is a union across a ' +
+            'character’s classes.',
+        },
+      ];
+    case 'not_proficient':
+      // WARN, NEVER REFUSE (D28 §1). Carrying it is legal; what is missing is
+      // the bonus.
+      //
+      // THIS SENTENCE USED TO BE A BARE ASSERTION AND IS NOW A DESCRIPTION OF A
+      // NUMBER THE READER CAN GO AND SEE. When it was written the planner's
+      // attack profile for the same weapon still added the proficiency bonus, so
+      // the two screens said opposite things; the profile withholds it now, and
+      // `tests/integration/queries/weapon-proficiency-agreement.test.ts` is what
+      // keeps them answering the same way.
+      return plain(
+        'No class this character has grants this weapon’s category. They may ' +
+          'still carry and use it — nothing here refuses the row — but they add ' +
+          'no proficiency bonus to the attack, and the attack profiles in the ' +
+          'planner leave it out.',
+      );
+    case 'category_not_stated':
+      return plain(
+        'This weapon records no simple/martial category, so nothing can be ' +
+          'checked. Set it on the weapon in the planner. A weapon that arrived ' +
+          'on an older share link, or one typed in by hand, is normally in this ' +
+          'state.',
+      );
+    case 'qualifier_not_evaluated':
+      return [
+        ...classNameCells(verdict.via),
+        { text: ' grants this category only ' },
+        // THE QUALIFIER IS FREE TEXT TOO. Ten of twelve SRD classes print none
+        // and the two that do are ours, but an IMPORTED class's qualifier is a
+        // string a stranger wrote — and this arm is the one that only ever fires
+        // for a qualifier this application did not recognise, which makes an
+        // imported one its most likely source.
+        ...classNameCells(verdict.qualifiers, ', '),
+        {
+          text:
+            ', and this application does not read those words. It has assumed ' +
+            'NOT proficient rather than guessing either way; decide at the table.',
+        },
+      ];
+  }
 }
 
 function cells(parts: readonly SheetCell[], into: HTMLElement): void {

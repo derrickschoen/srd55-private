@@ -241,19 +241,60 @@ const RETIRED_ROW_COLUMNS: Readonly<
   spell_selection_slots: ['orphaned_by_change_group_id'],
 };
 
-function withoutRetiredColumns(
+/**
+ * NULLABLE COLUMNS ADDED TO THE SCHEMA THAT AN EXISTING DOCUMENT PREDATES.
+ *
+ * THE MIRROR OF `RETIRED_ROW_COLUMNS`, AND IT HAD NO MECHANISM UNTIL D27 NEEDED
+ * ONE. That map exists because backup export is `SELECT *`, so every document
+ * carries the columns of the build that wrote it and a DROPPED one arrives as
+ * an unknown key. The symmetric case is an ADDED one, which arrives as a MISSING
+ * key — and `src/domain/contracts/rows.ts` rejects a missing key by design,
+ * because a partial row otherwise substitutes column defaults for a user's data.
+ *
+ * That reasoning is right for a partial row and wrong for this one, and the
+ * difference is a HISTORICAL FACT rather than a judgement: when the document was
+ * written the column DID NOT EXIST, so there is no user data being substituted
+ * for. Absent means the column's own NULL, which is what the value would have
+ * been had the column existed and nobody filled it.
+ *
+ * ONLY NULLABLE COLUMNS MAY BE LISTED HERE. Filling a NOT NULL column with null
+ * would move the failure from a message naming the table and field to a driver
+ * error naming neither. Nothing enforces that mechanically; the entry below is
+ * `character_weapons.proficiency_category`, which is nullable precisely because
+ * D27 says NOT STATED is a real state.
+ *
+ * APPEND-ONLY, for the same reason as the map above: each entry is a fact about
+ * documents already on disk, and removing one makes them unopenable again.
+ */
+const ADDED_ROW_COLUMNS: Readonly<
+  Partial<Record<RetiredColumnTable, readonly string[]>>
+> = {
+  character_weapons: ['proficiency_category'],
+};
+
+/**
+ * One row, reconciled with the columns this build has and the document does not
+ * — in both directions.
+ */
+function reconciledColumns(
   table: RetiredColumnTable | null,
   row: BackupRow,
 ): BackupRow {
-  const retired = table === null ? undefined : RETIRED_ROW_COLUMNS[table];
-  if (retired === undefined || !retired.some((key) => Object.hasOwn(row, key))) {
+  const retired = (table === null ? undefined : RETIRED_ROW_COLUMNS[table]) ?? [];
+  const added = (table === null ? undefined : ADDED_ROW_COLUMNS[table]) ?? [];
+  const drops = retired.filter((key) => Object.hasOwn(row, key));
+  const fills = added.filter((key) => !Object.hasOwn(row, key));
+  if (drops.length === 0 && fills.length === 0) {
     return row;
   }
-  const stripped: MutableRow = { ...row };
-  for (const key of retired) {
-    delete stripped[key];
+  const reconciled: MutableRow = { ...row };
+  for (const key of drops) {
+    delete reconciled[key];
   }
-  return stripped;
+  for (const key of fills) {
+    reconciled[key] = null;
+  }
+  return reconciled;
 }
 
 function rowList(
@@ -265,7 +306,7 @@ function rowList(
     throw new BackupValidationError(`${label} must be a list.`);
   }
   return value.map((row, index) =>
-    withoutRetiredColumns(table, backupRecord(row, `${label}[${index}]`)),
+    reconciledColumns(table, backupRecord(row, `${label}[${index}]`)),
   );
 }
 

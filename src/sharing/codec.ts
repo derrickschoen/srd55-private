@@ -99,9 +99,34 @@ const ARMOR_TUPLE_LENGTH =
 const HIT_POINT_ROLL_TUPLE_LENGTH = 3;
 const SHEET_ADJUSTMENT_TUPLE_LENGTH = 2;
 
-/** How many elements one weapon occupies on the wire. */
-const WEAPON_TUPLE_LENGTH =
+/**
+ * How many elements one weapon occupies on the wire — BOTH LENGTHS.
+ *
+ * THE WEAPON TUPLE HAD NO BACKWARD TOLERANCE AND NEEDED IT. `weaponFromPositional`
+ * used the exact-length `tuple()`, unlike the document level, which has used
+ * `variableTuple()` since links existed. So adding D27's `proficiency_category`
+ * to `ShareWeapon` would have made EVERY EXISTING LINK CONTAINING A WEAPON fail
+ * to decode — the data-loss failure AGENTS.md names, on links already sent, and
+ * nothing in the suite covered it because the frozen-fragment guards D24
+ * describes cover the DOCUMENT tuple and not this one.
+ *
+ * THE ANSWER IS THE ONE THE DOCUMENT ALREADY USES: accept both arities and read
+ * the new field only when it is there. `LEGACY` is the arity every link minted
+ * before D27 has; `CURRENT` is one longer.
+ *
+ * THE NEW FIELD IS APPENDED, NOT INSERTED, and that is not cosmetic. The wire
+ * order IS the format: putting the category after `name` would shift all
+ * eighteen fields that follow it, so an old link would decode its damage dice
+ * into its damage type and import a plausible, silently wrong weapon. Appended,
+ * an old link's every index still means what it meant.
+ */
+const WEAPON_TUPLE_LENGTH_LEGACY =
   1 + SHARE_WEAPON_TEXT.length + 3 + 2 + SHARE_WEAPON_FLAGS.length;
+const WEAPON_TUPLE_LENGTH = WEAPON_TUPLE_LENGTH_LEGACY + 1;
+const WEAPON_TUPLE_LENGTHS: readonly number[] = [
+  WEAPON_TUPLE_LENGTH_LEGACY,
+  WEAPON_TUPLE_LENGTH,
+];
 
 function tuple(
   value: unknown,
@@ -134,37 +159,41 @@ function variableTuple(
  *
  * Positional encoding trades self-description for size, so the order is part of
  * the format: name, the four short text columns, the two ranges, the mastery
- * property, the two long free-text columns, then the nine flags. Reordering
- * this silently reinterprets every link ever generated.
+ * property, the two long free-text columns, the nine flags, and — appended by
+ * D27 — the proficiency category. Reordering this silently reinterprets every
+ * link ever generated.
  */
+const WEAPON_WIRE_FIELDS = [
+  ...SHARE_WEAPON_TEXT,
+  'range_normal_feet',
+  'range_long_feet',
+  'mastery_property',
+  'other_properties',
+  'notes',
+  ...SHARE_WEAPON_FLAGS,
+  // LAST, AND IT MUST STAY LAST. Everything before it is the frozen order every
+  // pre-D27 link was written in; an appended field is invisible to a decoder
+  // that stops one element earlier.
+  'proficiency_category',
+] as const satisfies readonly (keyof ShareWeapon)[];
+
 function weaponToPositional(weapon: ShareWeapon): unknown[] {
   return [
     weapon.name,
-    ...SHARE_WEAPON_TEXT.map((field) => weapon[field] ?? null),
-    weapon.range_normal_feet ?? null,
-    weapon.range_long_feet ?? null,
-    weapon.mastery_property ?? null,
-    weapon.other_properties ?? null,
-    weapon.notes ?? null,
-    ...SHARE_WEAPON_FLAGS.map((flag) => weapon[flag] ?? null),
+    ...WEAPON_WIRE_FIELDS.map((field) => weapon[field] ?? null),
   ];
 }
 
 function weaponFromPositional(value: unknown, label: string): unknown {
-  const row = tuple(value, WEAPON_TUPLE_LENGTH, label);
+  const row = variableTuple(value, WEAPON_TUPLE_LENGTHS, label);
   const weapon: Record<string, unknown> = { name: row[0] };
-  const fields = [
-    ...SHARE_WEAPON_TEXT,
-    'range_normal_feet',
-    'range_long_feet',
-    'mastery_property',
-    'other_properties',
-    'notes',
-    ...SHARE_WEAPON_FLAGS,
-  ] as const;
-  fields.forEach((field, index) => {
+  WEAPON_WIRE_FIELDS.forEach((field, index) => {
     const item = row[index + 1];
-    if (item !== null) {
+    // `undefined` is a SHORT TUPLE — a link minted before D27 — and `null` is a
+    // column this weapon genuinely has nothing in. Both leave the key absent,
+    // which is what `ShareWeapon` optionality means, so the two cases need no
+    // separate branch and neither can invent a value.
+    if (item !== null && item !== undefined) {
       weapon[field] = item;
     }
   });

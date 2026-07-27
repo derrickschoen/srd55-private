@@ -14,6 +14,7 @@ import type {
   Ability,
   ArmorCategory,
   ArmorDexBonus,
+  MulticlassSkillPool,
   RulesEdition,
   Skill,
   WeaponProficiencyCategory,
@@ -22,6 +23,7 @@ import {
   abilities,
   armorCategories,
   armorDexBonuses,
+  multiclassSkillPools,
   rulesEditions,
   skills,
   weaponProficiencyCategories,
@@ -83,6 +85,19 @@ import { class_definitions } from './catalog-classes';
  */
 
 /**
+ * The pool member meaning "this class grants no skill on multiclass entry", and
+ * the ones that do, DERIVED from the enum rather than restated.
+ *
+ * Splitting the vocabulary here rather than writing two literal lists into the
+ * CHECK is what makes a new pool member widen the constraint on the next
+ * `npm run db:schema` instead of quietly falling outside both limbs and being
+ * refused by a constraint nobody remembered to update.
+ */
+const NO_MULTICLASS_SKILL_POOL = 'none' satisfies MulticlassSkillPool;
+const GRANTING_MULTICLASS_SKILL_POOLS: readonly MulticlassSkillPool[] =
+  multiclassSkillPools.filter((pool) => pool !== NO_MULTICLASS_SKILL_POOL);
+
+/**
  * One row per class whose Core Traits table has been parsed.
  *
  * PRESENCE IS MEANINGFUL. A class with no row here is one this application holds
@@ -125,6 +140,37 @@ export const class_sheet_traits = sqliteTable(
     skill_choice_from_any: tinyint1('skill_choice_from_any')
       .notNull()
       .default(false),
+    /**
+     * THE MULTICLASS ENTRY SKILL GRANT — how many skills this class grants to a
+     * character who ENTERS it as a second or later class, and from where.
+     *
+     * TWO SCALARS AND NOT A FLAG ON `class_skill_options`, and the Bard is the
+     * whole reason. Armour training and weapon proficiency use a per-row flag
+     * because in both cases the entry grant is a SUBSET of the initial grant,
+     * and a boolean per row expresses a subset exactly. The Bard's entry grant
+     * — "proficiency in one skill of your choice"
+     * (`docs/srd/source/multiclass-entry-grants.txt:37-38`) — is not a subset of
+     * the Bard's own options rows, because the Bard HAS none: its Core Traits
+     * table prints "Choose any 3 skills" with no list. A flag over zero rows
+     * cannot say "any of the eighteen".
+     *
+     * THREE OF TWELVE CLASSES GRANT ONE. Bard (any), Ranger (its own list,
+     * L116-117) and Rogue (its own list, L128-129). Every other class's clause
+     * names no skill at all, so both columns default to the `none`/0 pair.
+     *
+     * `multiclass_skill_choice_pool` IS WHAT MAKES BARD AND RANGER DIFFERENT
+     * ROWS rather than the same row with a lie in it. Both grant exactly one
+     * skill; they differ only in what they may pick it from, and the count
+     * alone cannot record that difference.
+     */
+    multiclass_skill_choice_count: integer('multiclass_skill_choice_count')
+      .notNull()
+      .default(0),
+    multiclass_skill_choice_pool: varchar<MulticlassSkillPool>()(
+      'multiclass_skill_choice_pool',
+    )
+      .notNull()
+      .default('none'),
     created_at: datetime()('created_at'),
     updated_at: datetime()('updated_at'),
   },
@@ -145,6 +191,36 @@ export const class_sheet_traits = sqliteTable(
         'skill_choice_count',
         1,
       )}`,
+    ),
+    /**
+     * THE PAIR IS TIED IN BOTH DIRECTIONS, so neither half can be written
+     * without the other and the incoherent combinations are UNSTORABLE rather
+     * than merely unwritten:
+     *
+     *  - `none` forces a count of exactly 0 — a class that grants no entry skill
+     *    cannot also owe the character one;
+     *  - `class_list` and `any` force a count of at least 1 — a pool with
+     *    nothing to draw is the same fact as `none` said twice, and two ways to
+     *    spell one fact is what makes a completeness check ambiguous.
+     *
+     * The `typeof` limb is the D13 finding again: without it the text `'2'`
+     * satisfies `>= 1`, because every TEXT value compares greater than every
+     * number in SQLite.
+     *
+     * WHAT THIS CANNOT ENFORCE, stated rather than implied: that a
+     * `class_list` class actually HAS `class_skill_options` rows. SQLite has no
+     * cross-table CHECK. `seedClassSheetContent` refuses the parse instead, and
+     * `tests/unit/rules/multiclass-entry-srd.test.ts` pins it.
+     */
+    check(
+      'class_sheet_traits_multiclass_skill_choice_check',
+      sql`typeof(\`multiclass_skill_choice_count\`) = 'integer' AND ((${oneOf(
+        'multiclass_skill_choice_pool',
+        [NO_MULTICLASS_SKILL_POOL],
+      )} AND \`multiclass_skill_choice_count\` = 0) OR (${oneOf(
+        'multiclass_skill_choice_pool',
+        GRANTING_MULTICLASS_SKILL_POOLS,
+      )} AND \`multiclass_skill_choice_count\` >= 1))`,
     ),
     uniqueIndex('class_sheet_traits_class_definition_id_unique').on(
       table.class_definition_id,
@@ -252,6 +328,30 @@ export const class_armor_training = sqliteTable(
       .$type<ClassDefinitionId>()
       .references(() => class_definitions.id, { onDelete: 'cascade' }),
     category: varchar<ArmorCategory>()('category').notNull(),
+    /**
+     * Does a character who ENTERS this class by multiclassing get this row?
+     *
+     * A FLAG ON THE EXISTING ROW, NOT A PARALLEL TABLE, AND THE INVARIANT IS
+     * WHY. `docs/srd/source/multiclass-entry-grants.txt` grants on entry a
+     * SUBSET of what the Core Traits table grants a character who started in
+     * the class, and a boolean per row is exactly what a subset is. A second
+     * table could hold a category the class does not train in at all — the
+     * Barbarian entering with Heavy armour — and nothing would refuse it. Here
+     * that row simply does not exist to be flagged.
+     *
+     * BARBARIAN IS THE ROW THAT PROVES THE SUBSET IS NOT "DROP THE TOP TIER":
+     * its Core Traits row is Light, Medium and Shields, and its entry clause
+     * (L24-25) grants Shields ALONE. Shields is therefore flagged and Light and
+     * Medium are not, which a hierarchy of tiers could not express.
+     *
+     * SIX CLASSES FLAG EVERY ROW THEY HAVE, so the subset is not a PROPER
+     * subset: Bard, Cleric, Druid, Ranger, Rogue and Warlock grant on entry
+     * exactly the armour training their Core Traits table grants. That is a
+     * fact about the source, not a defect in this model.
+     */
+    granted_on_multiclass_entry: tinyint1('granted_on_multiclass_entry')
+      .notNull()
+      .default(false),
     created_at: datetime()('created_at'),
     updated_at: datetime()('updated_at'),
   },
@@ -297,6 +397,41 @@ export const class_weapon_proficiencies = sqliteTable(
      * `qualified = 1, qualifier = NULL`.
      */
     property_qualifier: varchar()('property_qualifier'),
+    /**
+     * Does a character who ENTERS this class by multiclassing get this row?
+     *
+     * The companion of `class_armor_training.granted_on_multiclass_entry`, and
+     * the flag carries the qualifier with it for free — which is the second
+     * reason a parallel entry-grants table was rejected. A copy of the Monk's
+     * "Light" or the Rogue's "Finesse or Light" living in two tables is two
+     * strings free to drift, with nothing keeping them in step.
+     *
+     * FOUR CLASSES SET IT, ALL FOR `martial` AND NEVER FOR `simple`. Barbarian
+     * (L24-25), Fighter (L77-79), Paladin (L102-103) and Ranger (L115-116) each
+     * grant "proficiency with Martial weapons" on entry; the word "Simple" does
+     * not occur anywhere in the entry extract. A reader who assumed Martial
+     * implies Simple would over-grant all four — the Barbarian's `simple` row
+     * exists in this table and is deliberately left unflagged.
+     *
+     * NOTE that neither of the two qualified rows is ever flagged: the Monk's
+     * entry clause grants no weapons at all (L88-89) and the Rogue's grants
+     * none either (L126-131). So no entry grant in the SRD carries a qualifier
+     * today.
+     *
+     * AND THE LIMIT OF THIS SHAPE, CORRECTING A CLAIM THAT OVERSTATED IT. The
+     * qualifier travels WITH the flag on ONE row, so an entry grant necessarily
+     * INHERITS the initial grant's qualifier: a class whose entry clause
+     * qualified a category differently from its Core Traits row cannot be
+     * expressed here at all, because the unique index on (class_definition_id,
+     * category) rules out a second row. This comment used to say the column
+     * travels with the flag "because the model must hold an imported class whose
+     * entry grant does" — true only where the two qualifiers agree.
+     * `ClassProficiencySources` in `src/rules/sheet.ts` states the same limit in
+     * the type, where a reader building a value will meet it.
+     */
+    granted_on_multiclass_entry: tinyint1('granted_on_multiclass_entry')
+      .notNull()
+      .default(false),
     created_at: datetime()('created_at'),
     updated_at: datetime()('updated_at'),
   },

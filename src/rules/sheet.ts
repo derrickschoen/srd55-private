@@ -28,7 +28,11 @@
  * repository at all until `skills-table.txt`, `sheet-math.txt` and
  * `multiclassing.txt` were extracted for them.
  */
-import type { Ability, Skill } from '../domain/enums';
+import type {
+  Ability,
+  Skill,
+  WeaponProficiencyCategory,
+} from '../domain/enums';
 import type { AbilityScores } from './ability-scores';
 import { AttackBonus } from './attack-bonus';
 import { proficiencyBonus } from './proficiency';
@@ -84,6 +88,132 @@ export interface SheetClass extends SheetClassLevels {
   readonly hit_die: number | null;
   readonly is_starting_class: boolean;
   readonly saving_throws: readonly Ability[];
+  /**
+   * What this class grants, UNRESOLVED — the rows plus the flag that says which
+   * of them a multiclass entry gets (D28 §3).
+   *
+   * NOT a single resolved set. "What does this class grant a character who
+   * started in it" and "what does it grant a character who dipped into it" have
+   * different answers for nine of twelve classes, and the class row cannot know
+   * which applies — that depends on the CHARACTER's `is_starting_class`.
+   * Carrying the rows and resolving once, in `classProficiencyGrants`, is what
+   * keeps the choice from being made independently at each consumer.
+   *
+   * IT IS ONE ROW LIST AND NOT TWO SETS, which is a correction: it WAS two, and
+   * the two could disagree. See `ClassProficiencySources`.
+   */
+  readonly proficiencies: ClassProficiencySources;
+}
+
+/**
+ * One weapon-proficiency grant, with the qualifier the SRD prints for two of
+ * the twelve classes.
+ *
+ * The qualifier is carried VERBATIM from `class_weapon_proficiencies
+ * .property_qualifier` and is interpreted by exactly one function —
+ * `weaponProficiency` in `src/rules/multiclass-proficiency.ts` — which reads it
+ * as the SET UNION D28 §2 says it is. Nothing else may parse it.
+ */
+export interface ClassWeaponProficiency {
+  readonly category: WeaponProficiencyCategory;
+  readonly property_qualifier: string | null;
+}
+
+/** What one class grants, in one of its two roles. */
+export interface ClassProficiencies {
+  readonly armor_training: readonly ArmorCategory[];
+  readonly weapon_proficiencies: readonly ClassWeaponProficiency[];
+}
+
+/** Which of the two roles a class is filling for a character. */
+export type ProficiencyVia = 'initial' | 'multiclass_entry';
+
+/**
+ * One row of a class's grant tables, carrying the flag that decides whether a
+ * character who MULTICLASSED into the class gets it too.
+ *
+ * The shape `class_armor_training` and `class_weapon_proficiencies` are actually
+ * stored in: one row per (class, category), plus `granted_on_multiclass_entry`.
+ */
+export interface ClassGrantRow<TGrant> {
+  readonly grant: TGrant;
+  readonly on_entry: boolean;
+}
+
+/**
+ * BOTH of a class's grants, unresolved — ONE ROW LIST WITH A FLAG, which is what
+ * makes the subset invariant STRUCTURAL rather than promised.
+ *
+ * IT WAS TWO INDEPENDENT `ClassProficiencies`, AND A REVIEW WAS RIGHT ABOUT WHAT
+ * THAT COST. The invariant held only because
+ * `CharacterSheetBuilder#classProficiencies` happened to filter both lists out
+ * of the same rows; a second constructor — a test helper, a homebrew-class
+ * importer — could build an `on_entry` naming a category `initial` does not, and
+ * it would compile. That is precisely the D25 question. The answer the branch
+ * already gave for the DATABASE — the entry set is read off the SAME rows, so a
+ * category the class does not train in has no row to flag and can appear in
+ * neither list — is now the answer the TYPE gives: there is one list, and
+ * `on_entry` selects a sub-list of it.
+ *
+ * THE PRICE, STATED RATHER THAN DISCOVERED: one row carries one
+ * `property_qualifier`, so an entry grant cannot be qualified differently from
+ * the initial grant of the same category. Unreachable in SRD 5.2 — the two
+ * qualified rows (Monk `Light`, Rogue `Finesse or Light`) are not entry grants,
+ * and the four flagged Martial rows carry no qualifier — but a real limit on an
+ * imported class. `db/schema/sheet.ts` says the same beside the column.
+ */
+export interface ClassProficiencySources {
+  readonly armor_training: readonly ClassGrantRow<ArmorCategory>[];
+  readonly weapon_proficiencies: readonly ClassGrantRow<ClassWeaponProficiency>[];
+}
+
+function grantsFor<TGrant>(
+  rows: readonly ClassGrantRow<TGrant>[],
+  via: ProficiencyVia,
+): readonly TGrant[] {
+  switch (via) {
+    case 'initial':
+      return rows.map((row) => row.grant);
+    case 'multiclass_entry':
+      return rows.filter((row) => row.on_entry).map((row) => row.grant);
+  }
+}
+
+/**
+ * The rows one role actually gets — THE ONLY WAY TO READ a
+ * `ClassProficiencySources`.
+ *
+ * `initial` takes every row; `multiclass_entry` takes the flagged ones.
+ * Exhaustive, no `default` arm, and written once so the two roles cannot be
+ * resolved differently in two places.
+ */
+export function classProficienciesFor(
+  rows: ClassProficiencySources,
+  via: ProficiencyVia,
+): ClassProficiencies {
+  return {
+    armor_training: grantsFor(rows.armor_training, via),
+    weapon_proficiencies: grantsFor(rows.weapon_proficiencies, via),
+  };
+}
+
+/**
+ * WHAT ONE CLASS ACTUALLY GAVE *THIS* CHARACTER — the resolved grant.
+ *
+ * A DIFFERENT TYPE FROM `ClassProficiencySources`, DELIBERATELY, and this is the
+ * D25 point of the whole partition. It has no `initial` and no `on_entry`, so a
+ * consumer holding one PHYSICALLY CANNOT read the full Core Traits row off a
+ * class the character merely dipped into. The resolution happens once, in
+ * `classProficiencyGrants`, and a second resolver would not typecheck against
+ * anything that consumes this.
+ *
+ * `via` is carried so a warning can say WHY a class contributed what it did,
+ * rather than a consumer re-deriving it from `is_starting_class` and getting a
+ * different answer when `startingClass` has degraded.
+ */
+export interface ClassProficiencyGrant extends ClassProficiencies {
+  readonly class_name: string;
+  readonly via: ProficiencyVia;
 }
 
 /**
@@ -140,7 +270,28 @@ export interface SheetWarning {
     /** A recorded roll larger than the class's own die, counted in full. */
     | 'roll_exceeds_hit_die'
     /** A stored armour column holding a value its own vocabulary excludes. */
-    | 'armor_value_out_of_vocabulary';
+    | 'armor_value_out_of_vocabulary'
+    /*
+     * THE FOUR D28 CODES. All four WARN and none refuses: anyone may carry any
+     * weapon and record any armour, and what is withheld is the proficiency
+     * BONUS, never the row. The set is CLOSED and has no `default` reader, so a
+     * fifth is a deliberate edit here rather than a string appearing in a
+     * message somewhere.
+     *
+     * THE SUBJECT IS IN THE PROSE AND NOT IN A FIELD, matching all seven codes
+     * above. That is a real limitation — a consumer cannot group these by weapon
+     * without parsing English — and it is left as it is because widening
+     * `SheetWarning` for one family would make the other seven carry a field
+     * they have no subject for.
+     */
+    /** A weapon whose category no class of this character's grants. */
+    | 'weapon_not_proficient'
+    /** A weapon with no `simple | martial` recorded, so nothing can be checked. */
+    | 'weapon_category_not_stated'
+    /** A grant qualified by words this application does not evaluate. */
+    | 'weapon_proficiency_qualifier_unread'
+    /** Armour recorded that no class of this character's trains them in. */
+    | 'armor_not_trained';
   readonly message: string;
 }
 
@@ -189,6 +340,26 @@ export function sheetProficiencyBonus(
 }
 
 /**
+ * The LEAST a row must carry to be resolved against.
+ *
+ * WIDENED IN PLACE RATHER THAN COPIED, which is the brief's own instruction and
+ * the reason `startingClass` is generic. Three consumers now need the answer —
+ * hit points, saving throws and the proficiency union in `src/rules/` — and a
+ * FOURTH lives in the query layer, where `character-completeness.ts` must know
+ * which class's full skill count applies. That fourth caller holds neither a hit
+ * die nor a proficiency set and should not have to invent them to ask the
+ * question; giving it a second resolver instead is exactly what produces two
+ * disagreeing answers to "which class did this character start as".
+ *
+ * The generic PRESERVES the caller's own row type, so `hitPointMaximum` still
+ * gets a `SheetClass` back and can compare it by identity.
+ */
+export interface StartingClassCandidate {
+  readonly class_name: string;
+  readonly is_starting_class: boolean;
+}
+
+/**
  * The class that gets the level-1 Hit Point maximum, plus any warning.
  *
  * `docs/srd/source/multiclassing.txt`: "You gain the level 1 Hit Points for a
@@ -210,20 +381,22 @@ export function sheetProficiencyBonus(
  * it is this function's job to degrade rather than throw. It picks
  * deterministically and says what it did.
  */
-function startingClass(classes: readonly SheetClass[]): {
-  readonly chosen: SheetClass | null;
+export function startingClass<T extends StartingClassCandidate>(
+  classes: readonly T[],
+): {
+  readonly chosen: T | null;
   readonly warnings: readonly SheetWarning[];
 } {
   const flagged = classes.filter((entry) => entry.is_starting_class);
   if (flagged.length === 1) {
-    return { chosen: flagged[0] as SheetClass, warnings: [] };
+    return { chosen: flagged[0] as T, warnings: [] };
   }
   if (classes.length === 0) {
     return { chosen: null, warnings: [] };
   }
   if (flagged.length === 0) {
     return {
-      chosen: classes[0] as SheetClass,
+      chosen: classes[0] as T,
       warnings: [
         {
           code: 'no_starting_class',
@@ -236,7 +409,7 @@ function startingClass(classes: readonly SheetClass[]): {
     };
   }
   return {
-    chosen: flagged[0] as SheetClass,
+    chosen: flagged[0] as T,
     warnings: [
       {
         code: 'several_starting_classes',
@@ -247,6 +420,67 @@ function startingClass(classes: readonly SheetClass[]): {
       },
     ],
   };
+}
+
+/**
+ * THE LEAST A ROW MUST CARRY to be resolved into a grant.
+ *
+ * Narrower than `SheetClass`, for the same reason `startingClass` is generic:
+ * the weapons panel resolves this question too, and it holds no hit die and no
+ * saving-throw list. Requiring a whole `SheetClass` there would have made that
+ * caller invent both — or, worse, write a second resolver.
+ */
+export interface ProficiencyClassCandidate extends StartingClassCandidate {
+  readonly proficiencies: ClassProficiencySources;
+}
+
+/**
+ * WHAT EACH OF A CHARACTER'S CLASSES ACTUALLY GRANTED THEM — D28 §3.
+ *
+ * The class the character STARTED in contributes its FULL Core Traits row; every
+ * later class contributes only its multiclass ENTRY subset. That asymmetry is
+ * the whole rule, and it is the reason the sheet's saving throws and its weapon
+ * proficiencies must not be copied from one another: saving throws come from the
+ * starting class ALONE, while proficiencies are a UNION in which the starting
+ * class merely contributes more.
+ *
+ * IT REUSES `startingClass` AND DOES NOT RE-RESOLVE. Two independent answers to
+ * "which class did this character start as" that disagree is worse than either,
+ * and this application already has that resolver — including the three reachable
+ * defects its own comment enumerates. Widened in place rather than duplicated.
+ *
+ * WHEN THAT RESOLVER DEGRADES, THE UNION IS STILL A UNION. `startingClass` never
+ * returns nothing when there are classes: it picks, and says it picked. So a
+ * character with no starting class flagged still gets a full grant from exactly
+ * one class and an entry grant from the rest — the same SHAPE as a coherent
+ * character, with a warning recording that WHICH class got the full row was
+ * arbitrary. Refusing to compute a union here would cost such a character every
+ * proficiency they have in order to punish a flag they cannot see.
+ *
+ * THE RETURN TYPE IS `ClassProficiencyGrant`, WHICH HAS NO ROWS AND NO FLAG, so
+ * no caller can look past this decision and read the wrong half.
+ */
+export function classProficiencyGrants(
+  classes: readonly ProficiencyClassCandidate[],
+): {
+  readonly grants: readonly ClassProficiencyGrant[];
+  readonly warnings: readonly SheetWarning[];
+} {
+  const { chosen, warnings } = startingClass(classes);
+  const grants = classes.map((entry): ClassProficiencyGrant => {
+    // IDENTITY, not `is_starting_class`, exactly as `hitPointMaximum` compares
+    // it. When several rows are flagged, `startingClass` picks ONE; comparing
+    // the flag instead would hand the full Core Traits row to every flagged
+    // class and over-grant precisely the character the warning is about.
+    const via: ProficiencyVia =
+      chosen === entry ? 'initial' : 'multiclass_entry';
+    return {
+      class_name: entry.class_name,
+      via,
+      ...classProficienciesFor(entry.proficiencies, via),
+    };
+  });
+  return { grants, warnings };
 }
 
 /**

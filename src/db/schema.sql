@@ -315,6 +315,7 @@ CREATE TABLE `character_weapons` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`character_id` integer NOT NULL,
 	`name` VARCHAR NOT NULL,
+	`proficiency_category` VARCHAR,
 	`damage_dice` VARCHAR,
 	`damage_type` VARCHAR,
 	`versatile_damage_dice` VARCHAR,
@@ -337,7 +338,8 @@ CREATE TABLE `character_weapons` (
 	`updated_at` DATETIME,
 	FOREIGN KEY (`character_id`) REFERENCES `characters`(`id`) ON UPDATE no action ON DELETE cascade,
 	CONSTRAINT "character_weapons_mastery_requires_property_check" CHECK(mastery_selected = 0 OR mastery_property IS NOT NULL),
-	CONSTRAINT "character_weapons_mastery_property_check" CHECK(`mastery_property` IS NULL OR `mastery_property` IN ('Cleave', 'Graze', 'Nick', 'Push', 'Sap', 'Slow', 'Topple', 'Vex'))
+	CONSTRAINT "character_weapons_mastery_property_check" CHECK(`mastery_property` IS NULL OR `mastery_property` IN ('Cleave', 'Graze', 'Nick', 'Push', 'Sap', 'Slow', 'Topple', 'Vex')),
+	CONSTRAINT "character_weapons_proficiency_category_check" CHECK(`proficiency_category` IS NULL OR `proficiency_category` IN ('simple', 'martial'))
 );
 
 CREATE INDEX `character_weapons_character_id_index` ON `character_weapons` (`character_id`);
@@ -372,6 +374,7 @@ CREATE TABLE `class_armor_training` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`class_definition_id` integer NOT NULL,
 	`category` VARCHAR NOT NULL,
+	`granted_on_multiclass_entry` TINYINT(1) DEFAULT false NOT NULL,
 	`created_at` DATETIME,
 	`updated_at` DATETIME,
 	FOREIGN KEY (`class_definition_id`) REFERENCES `class_definitions`(`id`) ON UPDATE no action ON DELETE cascade,
@@ -458,10 +461,13 @@ CREATE TABLE `class_sheet_traits` (
 	`hit_die` integer NOT NULL,
 	`skill_choice_count` integer NOT NULL,
 	`skill_choice_from_any` TINYINT(1) DEFAULT false NOT NULL,
+	`multiclass_skill_choice_count` integer DEFAULT 0 NOT NULL,
+	`multiclass_skill_choice_pool` VARCHAR DEFAULT 'none' NOT NULL,
 	`created_at` DATETIME,
 	`updated_at` DATETIME,
 	FOREIGN KEY (`class_definition_id`) REFERENCES `class_definitions`(`id`) ON UPDATE no action ON DELETE cascade,
-	CONSTRAINT "class_sheet_traits_check" CHECK(typeof(`hit_die`) = 'integer' AND `hit_die` IN (6, 8, 10, 12) AND typeof(`skill_choice_count`) = 'integer' AND `skill_choice_count` >= 1)
+	CONSTRAINT "class_sheet_traits_check" CHECK(typeof(`hit_die`) = 'integer' AND `hit_die` IN (6, 8, 10, 12) AND typeof(`skill_choice_count`) = 'integer' AND `skill_choice_count` >= 1),
+	CONSTRAINT "class_sheet_traits_multiclass_skill_choice_check" CHECK(typeof(`multiclass_skill_choice_count`) = 'integer' AND ((`multiclass_skill_choice_pool` IN ('none') AND `multiclass_skill_choice_count` = 0) OR (`multiclass_skill_choice_pool` IN ('class_list', 'any') AND `multiclass_skill_choice_count` >= 1)))
 );
 
 CREATE UNIQUE INDEX `class_sheet_traits_class_definition_id_unique` ON `class_sheet_traits` (`class_definition_id`);
@@ -504,6 +510,7 @@ CREATE TABLE `class_weapon_proficiencies` (
 	`class_definition_id` integer NOT NULL,
 	`category` VARCHAR NOT NULL,
 	`property_qualifier` VARCHAR,
+	`granted_on_multiclass_entry` TINYINT(1) DEFAULT false NOT NULL,
 	`created_at` DATETIME,
 	`updated_at` DATETIME,
 	FOREIGN KEY (`class_definition_id`) REFERENCES `class_definitions`(`id`) ON UPDATE no action ON DELETE cascade,

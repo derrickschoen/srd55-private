@@ -9,6 +9,7 @@ import {
   skills,
   slotStates,
   weaponMasteryProperties,
+  weaponProficiencyCategories,
 } from '../domain/enums';
 import {
   WEAPON_RANGE_MAX_FEET,
@@ -371,6 +372,7 @@ const weaponToggles = [
 
 const weaponFieldKeys = [
   'name',
+  'proficiency_category',
   'damage_dice',
   'damage_type',
   'versatile_damage_dice',
@@ -461,6 +463,19 @@ function validateWeaponFields(value: unknown): void {
   nullableString(weapon, 'ammunition_kind', WEAPON_TEXT_LIMITS.ammunition_kind);
   nullableRange(weapon, 'range_normal_feet');
   nullableRange(weapon, 'range_long_feet');
+  // D27. Present-and-null is the NOT STATED state a template pre-fill never
+  // produces and an older payload always does; a MISSING key is refused with the
+  // rest, because `update_weapon` replaces the whole row and "the key was
+  // absent" would then be indistinguishable from "the user cleared it".
+  if (!hasOwn(weapon, 'proficiency_category')) {
+    invalid('proficiency_category is required; use null when it is not stated.');
+  }
+  if (
+    weapon.proficiency_category !== null &&
+    !isEnumValue(weaponProficiencyCategories, weapon.proficiency_category)
+  ) {
+    invalid('Weapon proficiency category must be simple, martial or null.');
+  }
   if (!hasOwn(weapon, 'mastery_property')) {
     invalid('mastery_property is required; use null for none.');
   }
