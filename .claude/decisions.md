@@ -328,11 +328,49 @@ disagreed with us, where today it only catches the ones who abbreviate.
 **Rejected: keep them as a warning rather than a tag.** There is no absence to
 warn about. A document that sets the flag has answered the question.
 
-NOT YET IMPLEMENTED — the multiclass track's merge is pending and this changes
-imported tag data. Reversible by re-import, and pre-alpha per D25. Whoever does
-it must check whether any bundled catalog relies on the fallback: if one sets
-`concentration: false` beside a concentration duration, removing the regex
-CHANGES that spell's tags, and that is a data change, not a refactor.
+### IMPLEMENTED as `faf0bab`. The pre-check found the defect LIVE.
+
+The check this entry demanded first — does anything rely on the fallback? — was
+run, and the answer was better than "no":
+
+- **The repo ships no spell catalog at all.** `docs/srd/source/` holds thirteen
+  extracts and none of them is spells; the only catalog documents in the tree
+  are test fixtures. All 7 spell-shaped fixture records were scanned
+  independently by the supervisor: **0 rely on the fallback.**
+- **The project's own scraper could never produce a reliant record.**
+  `tools/scrape/parse-spell.ts` derives both booleans from the SPELLED-OUT
+  words, which is exactly the spelling the importer's regexes could not see. The
+  two inference layers were disjoint, and the importer's only ever fired on
+  hand-written abbreviations.
+- **But one fixture was being mis-tagged in exactly the way this entry
+  predicted.** `tests/browser/fixtures/php-parity.ts` `catalogRecord()` defaults
+  `castingTime: 'Action or R'` and `duration: 'C, up to 1 minute'` with both
+  booleans `true`. The Journey Spell overrode both to `false` and inherited that
+  prose — so it carried `ritual` and `concentration` tags AGAINST ITS OWN
+  EXPLICIT DECLARATION. Nothing asserted those tags, so nothing caught it. It is
+  now correctly untagged.
+
+So the failure mode was not hypothetical: it was live in the tree, in the one
+place where a record disagreed with its own prose. That is the entire case this
+decision rests on, found rather than argued.
+
+### The test pins the DECISION, not the code
+
+Verified by the supervisor: mutating the importer with the **fixed** regex — the
+alternative this entry rejected, matching both spellings — still fails.
+
+```
+AssertionError: expected [ 'base', 'concentration', 'ritual' ] to deeply equal [ 'base' ]
+  295|  expect(tagsOf('declared-false-spelled-out')).toEqual(['base']);
+```
+
+Re-adding either the original regex or a corrected one is caught. A future
+reader who thinks the hole was the problem will fail the test that says it was
+not.
+
+No test was deleted — none existed whose subject was the regex. The paragraph in
+`docs/CATALOG-IMPORT.md` claiming tags are also inferred from source notation
+was corrected; it became false the moment the regexes went.
 
 ---
 
