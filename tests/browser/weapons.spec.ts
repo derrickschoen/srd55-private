@@ -337,7 +337,16 @@ test('the attack profiles derive from the weapon, the class and nothing stored',
   await expect(profiles).toContainText(
     'does not record whether a weapon is melee or ranged',
   );
+  // THE PROFICIENCY ASSUMPTION IS STILL STATED, AND ITS REASON CHANGED WITH
+  // D27/D28. The application now DOES record which weapons a character is
+  // proficient with, and the character sheet's Proficiencies section prints a
+  // verdict per weapon. This number does not yet read it, so the two screens
+  // disagree — and the page must say so rather than repeating a limitation that
+  // no longer exists.
   await expect(profiles).toContainText(
+    'this number does not yet read it',
+  );
+  await expect(profiles).not.toContainText(
     'does not record which weapons a character is proficient with',
   );
 
