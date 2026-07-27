@@ -279,7 +279,7 @@ export function sheetSections(sheet: CharacterSheet): readonly SheetSection[] {
       id: `weapon_verdict:${weapon.name}`,
       label: [{ text: weapon.name, free_text: true }],
       value: weaponVerdictValue(weapon.verdict),
-      detail: plain(weaponVerdictDetail(weapon.verdict)),
+      detail: weaponVerdictDetail(weapon.verdict),
     });
   }
   sections.push({ caption: 'Proficiencies', rows: proficiencies });
@@ -543,35 +543,75 @@ function weaponVerdictValue(verdict: WeaponProficiencyVerdict): string {
   }
 }
 
-function weaponVerdictDetail(verdict: WeaponProficiencyVerdict): string {
+/**
+ * A list of CLASS NAMES as free-text cells, joined by plain separators.
+ *
+ * A CLASS NAME IS FREE TEXT ON THIS PAGE and concatenating it into a sentence is
+ * the defect this exists to not have. A share link resolves its classes against
+ * the recipient's own catalog, but that catalog can itself hold an IMPORTED
+ * class whose name a stranger chose — so the same rule the character name, the
+ * armour name and the adjustment note already follow applies here, and the test
+ * that asserts it caught this being written the other way.
+ */
+function classNameCells(
+  names: readonly string[],
+  separator = ' and ',
+): SheetCell[] {
+  const parts: SheetCell[] = [];
+  names.forEach((name, index) => {
+    if (index > 0) {
+      parts.push({ text: separator });
+    }
+    parts.push({ text: name, free_text: true });
+  });
+  return parts;
+}
+
+function weaponVerdictDetail(
+  verdict: WeaponProficiencyVerdict,
+): readonly SheetCell[] {
   switch (verdict.kind) {
     case 'proficient':
-      return (
-        `Granted by ${verdict.via.join(' and ')}. One class is enough — ` +
-        'proficiency is a union across a character’s classes.'
-      );
+      return [
+        { text: 'Granted by ' },
+        ...classNameCells(verdict.via),
+        {
+          text:
+            '. One class is enough — proficiency is a union across a ' +
+            'character’s classes.',
+        },
+      ];
     case 'not_proficient':
       // WARN, NEVER REFUSE (D28 §1). Carrying it is legal; what is missing is
       // the bonus, and even that is still printed on the attack profiles today.
-      return (
+      return plain(
         'No class this character has grants this weapon’s category. They may ' +
-        'still carry and use it — nothing here refuses the row — but they add ' +
-        'no proficiency bonus to the attack.'
+          'still carry and use it — nothing here refuses the row — but they add ' +
+          'no proficiency bonus to the attack.',
       );
     case 'category_not_stated':
-      return (
+      return plain(
         'This weapon records no simple/martial category, so nothing can be ' +
-        'checked. Set it on the weapon in the planner. A weapon that arrived ' +
-        'on an older share link, or one typed in by hand, is normally in this ' +
-        'state.'
+          'checked. Set it on the weapon in the planner. A weapon that arrived ' +
+          'on an older share link, or one typed in by hand, is normally in this ' +
+          'state.',
       );
     case 'qualifier_not_evaluated':
-      return (
-        `${verdict.via.join(' and ')} grants this category only "` +
-        `${verdict.qualifiers.join('", "')}", and this application does not ` +
-        'read those words. It has assumed NOT proficient rather than guessing ' +
-        'either way; decide at the table.'
-      );
+      return [
+        ...classNameCells(verdict.via),
+        { text: ' grants this category only ' },
+        // THE QUALIFIER IS FREE TEXT TOO. Ten of twelve SRD classes print none
+        // and the two that do are ours, but an IMPORTED class's qualifier is a
+        // string a stranger wrote — and this arm is the one that only ever fires
+        // for a qualifier this application did not recognise, which makes an
+        // imported one its most likely source.
+        ...classNameCells(verdict.qualifiers, ', '),
+        {
+          text:
+            ', and this application does not read those words. It has assumed ' +
+            'NOT proficient rather than guessing either way; decide at the table.',
+        },
+      ];
   }
 }
 

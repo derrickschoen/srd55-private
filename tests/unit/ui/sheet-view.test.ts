@@ -132,6 +132,27 @@ function sheet(changes: Partial<CharacterSheet> = {}): CharacterSheet {
         saving_throws: ['strength', 'constitution'],
       },
     ],
+    // D28's union, with a HOSTILE class name in it too: the class names in this
+    // section come from the recipient's own catalog by way of a content key, but
+    // the projection must still route them through the free-text path rather
+    // than concatenating them into a sentence.
+    proficiencies: {
+      armor_training: ['light', 'medium', 'shield'],
+      weapon_proficiencies: [
+        {
+          class_name: HOSTILE_CLASS_NAME,
+          category: 'martial',
+          property_qualifier: null,
+        },
+      ],
+      classes: [{ class_name: HOSTILE_CLASS_NAME, via: 'initial' }],
+      weapons: [
+        {
+          name: 'Greatsword',
+          verdict: { kind: 'proficient', via: [HOSTILE_CLASS_NAME] },
+        },
+      ],
+    },
     armor: [
       {
         slot: 'worn',
@@ -263,6 +284,14 @@ describe('the character sheet is projected twice from one value', () => {
       armor: () => ids.has('armor:worn'),
       hit_point_rolls: () =>
         [...ids].some((id) => id.startsWith('hit_point_roll:')),
+      // D28's three. Each has a row of its own, and the per-weapon verdict has
+      // one row per weapon so a reader can see WHICH weapon is undecided
+      // rather than only how many are.
+      armor_training: () => ids.has('armor_training'),
+      weapon_proficiencies: () =>
+        [...ids].some((id) => id.startsWith('weapon_proficiency:')),
+      weapon_proficiency_verdicts: () =>
+        [...ids].some((id) => id.startsWith('weapon_verdict:')),
       // Warnings are rendered as their own alert region rather than as rows,
       // because they must not be reachable only by scrolling past the number
       // they degrade. The browser spec asserts the region; here the claim is

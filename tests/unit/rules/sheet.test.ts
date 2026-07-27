@@ -61,7 +61,23 @@ function classGrant(
   };
 }
 
+/**
+ * NO PROFICIENCY GRANTS, for every fixture in this file.
+ *
+ * These tests are about hit points, armour class, saving throws and the two
+ * derivations that read class LEVELS. None of them reads a proficiency grant,
+ * and writing the Fighter's real armour training into them would put twelve
+ * lines of content beside every fixture that nothing here asserts — which is
+ * how a fixture starts disagreeing with the seed without anything noticing.
+ * The proficiency union has its own file, with its own transcribed grants.
+ */
+const NO_PROFICIENCIES: SheetClass['proficiencies'] = {
+  initial: { armor_training: [], weapon_proficiencies: [] },
+  on_entry: { armor_training: [], weapon_proficiencies: [] },
+};
+
 const FIGHTER: SheetClass = {
+  proficiencies: NO_PROFICIENCIES,
   class_name: 'Fighter',
   level: 5,
   hit_die: 10,
@@ -79,6 +95,7 @@ const FIGHTER: SheetClass = {
 };
 
 const WIZARD: SheetClass = {
+  proficiencies: NO_PROFICIENCIES,
   class_name: 'Wizard',
   level: 3,
   hit_die: 6,
@@ -87,6 +104,7 @@ const WIZARD: SheetClass = {
 };
 
 const RANGER: SheetClass = {
+  proficiencies: NO_PROFICIENCIES,
   class_name: 'Ranger',
   level: 5,
   hit_die: 10,
@@ -154,6 +172,7 @@ describe('hit points', () => {
     // `sheet-math.txt`, Level 1 Hit Points by Class: Barbarian 12 + Con.
     // A level 1 Barbarian with Constitution 14 (+2): 12 + 2 = 14.
     const barbarian: SheetClass = {
+      proficiencies: NO_PROFICIENCIES,
       class_name: 'Barbarian',
       level: 1,
       hit_die: 12,
@@ -340,6 +359,7 @@ describe('hit points', () => {
     //   levels 2..3 : (5 fixed + 2) x 2 = 14
     //   total       : 24
     const homebrew: SheetClass = {
+      proficiencies: NO_PROFICIENCIES,
       class_name: 'Bladewright',
       level: 3,
       hit_die: null,
@@ -378,6 +398,7 @@ describe('hit points', () => {
       classes: [
         FIGHTER,
         {
+          proficiencies: NO_PROFICIENCIES,
           class_name: 'Bladewright',
           level: 2,
           hit_die: null,
@@ -454,6 +475,7 @@ describe('hit points', () => {
     const result = hitPointMaximum({
       classes: [
         {
+          proficiencies: NO_PROFICIENCIES,
           class_name: 'Bladewright',
           level: 3,
           hit_die: null,
