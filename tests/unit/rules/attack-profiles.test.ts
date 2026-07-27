@@ -239,7 +239,19 @@ describe('the plain weapon attack', () => {
   });
 
   it('states the proficiency assumption instead of hiding it', () => {
-    expect(profileOf(build(), 'normal').preconditions.join(' ')).toContain(
+    // THE ASSUMPTION SURVIVED D27/D28, AND THE SENTENCE CHANGED BECAUSE ITS
+    // REASON DID. The application now DOES record which weapons a character is
+    // proficient with — `character_weapons.proficiency_category` plus the union
+    // in `src/rules/multiclass-proficiency.ts`, which the character sheet's
+    // Proficiencies section prints per weapon. This number does not yet read
+    // it, so the bonus is still included unconditionally; what the precondition
+    // must say is that the two disagree and which one is generous.
+    const stated = profileOf(build(), 'normal').preconditions.join(' ');
+    expect(stated).toContain('The proficiency bonus is included');
+    expect(stated).toContain('this number does not yet read it');
+    // And it must NOT go back to claiming the fact is unheld, which is now
+    // false and would send a reader looking for a column that exists.
+    expect(stated).not.toContain(
       'does not record which weapons a character is proficient with',
     );
   });
