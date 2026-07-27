@@ -149,6 +149,32 @@ CREATE TABLE `character_class_levels` (
 );
 
 CREATE UNIQUE INDEX `character_class_levels_character_id_class_definition_id_unique` ON `character_class_levels` (`character_id`,`class_definition_id`);
+CREATE TABLE `character_effects` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`character_id` integer NOT NULL,
+	`sort_order` integer NOT NULL,
+	`effect_kind` VARCHAR NOT NULL,
+	`damage_type` VARCHAR,
+	`hit_points_flat` integer,
+	`hit_points_per_level` integer,
+	`speed_bonus_feet` integer,
+	`source_instance_id` integer,
+	`label` VARCHAR NOT NULL,
+	`notes` TEXT,
+	`created_at` DATETIME,
+	`updated_at` DATETIME,
+	FOREIGN KEY (`character_id`) REFERENCES `characters`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`source_instance_id`,`character_id`) REFERENCES `character_source_instances`(`id`,`character_id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "character_effects_kind_check" CHECK(`effect_kind` IN ('damage_resistance', 'hp_modifier', 'speed')),
+	CONSTRAINT "character_effects_damage_type_kind_check" CHECK(damage_type IS NULL OR effect_kind IS 'damage_resistance'),
+	CONSTRAINT "character_effects_hit_points_kind_check" CHECK((hit_points_flat IS NULL AND hit_points_per_level IS NULL) OR effect_kind IS 'hp_modifier'),
+	CONSTRAINT "character_effects_speed_kind_check" CHECK(speed_bonus_feet IS NULL OR effect_kind IS 'speed'),
+	CONSTRAINT "character_effects_hp_modifier_payload_check" CHECK(effect_kind IS NOT 'hp_modifier' OR hit_points_flat IS NOT NULL OR hit_points_per_level IS NOT NULL),
+	CONSTRAINT "character_effects_speed_payload_check" CHECK(effect_kind IS NOT 'speed' OR speed_bonus_feet IS NOT NULL),
+	CONSTRAINT "character_effects_sort_order_check" CHECK(typeof(`sort_order`) = 'integer' AND `sort_order` >= 1)
+);
+
+CREATE INDEX `character_effects_character_id_index` ON `character_effects` (`character_id`);
 CREATE TABLE `character_hit_point_rolls` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`character_id` integer NOT NULL,
@@ -264,21 +290,10 @@ CREATE TABLE `character_species_traits` (
 	`sort_order` integer NOT NULL,
 	`name` VARCHAR NOT NULL,
 	`description` TEXT,
-	`effect_kind` VARCHAR,
-	`effect_damage_type` VARCHAR,
-	`effect_hit_points_flat` integer,
-	`effect_hit_points_per_level` integer,
-	`effect_speed_bonus_feet` integer,
 	`notes` TEXT,
 	`created_at` DATETIME,
 	`updated_at` DATETIME,
 	FOREIGN KEY (`character_id`) REFERENCES `characters`(`id`) ON UPDATE no action ON DELETE cascade,
-	CONSTRAINT "character_species_traits_effect_kind_check" CHECK(`effect_kind` IS NULL OR `effect_kind` IN ('damage_resistance', 'hp_modifier', 'speed', 'granted_spells')),
-	CONSTRAINT "character_species_traits_damage_type_kind_check" CHECK(effect_damage_type IS NULL OR effect_kind IS 'damage_resistance'),
-	CONSTRAINT "character_species_traits_hit_points_kind_check" CHECK((effect_hit_points_flat IS NULL AND effect_hit_points_per_level IS NULL) OR effect_kind IS 'hp_modifier'),
-	CONSTRAINT "character_species_traits_speed_kind_check" CHECK(effect_speed_bonus_feet IS NULL OR effect_kind IS 'speed'),
-	CONSTRAINT "character_species_traits_hp_modifier_payload_check" CHECK(effect_kind IS NOT 'hp_modifier' OR effect_hit_points_flat IS NOT NULL OR effect_hit_points_per_level IS NOT NULL),
-	CONSTRAINT "character_species_traits_speed_payload_check" CHECK(effect_kind IS NOT 'speed' OR effect_speed_bonus_feet IS NOT NULL),
 	CONSTRAINT "character_species_traits_sort_order_check" CHECK(typeof(`sort_order`) = 'integer' AND `sort_order` >= 1)
 );
 
@@ -554,26 +569,37 @@ CREATE TABLE `species_definitions` (
 
 CREATE UNIQUE INDEX `species_definitions_content_key_unique` ON `species_definitions` (`content_key`);
 CREATE UNIQUE INDEX `species_definitions_name_rules_edition_unique` ON `species_definitions` (`name`,`rules_edition`);
+CREATE TABLE `species_template_trait_effects` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`species_template_trait_id` integer NOT NULL,
+	`sort_order` integer NOT NULL,
+	`effect_kind` VARCHAR NOT NULL,
+	`damage_type` VARCHAR,
+	`hit_points_flat` integer,
+	`hit_points_per_level` integer,
+	`speed_bonus_feet` integer,
+	`created_at` DATETIME,
+	`updated_at` DATETIME,
+	FOREIGN KEY (`species_template_trait_id`) REFERENCES `species_template_traits`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "species_template_trait_effects_kind_check" CHECK(`effect_kind` IN ('damage_resistance', 'hp_modifier', 'speed')),
+	CONSTRAINT "species_template_trait_effects_damage_type_kind_check" CHECK(damage_type IS NULL OR effect_kind IS 'damage_resistance'),
+	CONSTRAINT "species_template_trait_effects_hit_points_kind_check" CHECK((hit_points_flat IS NULL AND hit_points_per_level IS NULL) OR effect_kind IS 'hp_modifier'),
+	CONSTRAINT "species_template_trait_effects_speed_kind_check" CHECK(speed_bonus_feet IS NULL OR effect_kind IS 'speed'),
+	CONSTRAINT "species_template_trait_effects_hp_modifier_payload_check" CHECK(effect_kind IS NOT 'hp_modifier' OR hit_points_flat IS NOT NULL OR hit_points_per_level IS NOT NULL),
+	CONSTRAINT "species_template_trait_effects_speed_payload_check" CHECK(effect_kind IS NOT 'speed' OR speed_bonus_feet IS NOT NULL),
+	CONSTRAINT "species_template_trait_effects_sort_order_check" CHECK(typeof(`sort_order`) = 'integer' AND `sort_order` >= 1)
+);
+
+CREATE UNIQUE INDEX `species_template_trait_effects_trait_sort_unique` ON `species_template_trait_effects` (`species_template_trait_id`,`sort_order`);
 CREATE TABLE `species_template_traits` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`species_template_id` integer NOT NULL,
 	`sort_order` integer NOT NULL,
 	`name` VARCHAR NOT NULL,
 	`description` TEXT NOT NULL,
-	`effect_kind` VARCHAR,
-	`effect_damage_type` VARCHAR,
-	`effect_hit_points_flat` integer,
-	`effect_hit_points_per_level` integer,
-	`effect_speed_bonus_feet` integer,
 	`created_at` DATETIME,
 	`updated_at` DATETIME,
 	FOREIGN KEY (`species_template_id`) REFERENCES `species_templates`(`id`) ON UPDATE no action ON DELETE cascade,
-	CONSTRAINT "species_template_traits_effect_kind_check" CHECK(`effect_kind` IS NULL OR `effect_kind` IN ('damage_resistance', 'hp_modifier', 'speed', 'granted_spells')),
-	CONSTRAINT "species_template_traits_damage_type_kind_check" CHECK(effect_damage_type IS NULL OR effect_kind IS 'damage_resistance'),
-	CONSTRAINT "species_template_traits_hit_points_kind_check" CHECK((effect_hit_points_flat IS NULL AND effect_hit_points_per_level IS NULL) OR effect_kind IS 'hp_modifier'),
-	CONSTRAINT "species_template_traits_speed_kind_check" CHECK(effect_speed_bonus_feet IS NULL OR effect_kind IS 'speed'),
-	CONSTRAINT "species_template_traits_hp_modifier_payload_check" CHECK(effect_kind IS NOT 'hp_modifier' OR effect_hit_points_flat IS NOT NULL OR effect_hit_points_per_level IS NOT NULL),
-	CONSTRAINT "species_template_traits_speed_payload_check" CHECK(effect_kind IS NOT 'speed' OR effect_speed_bonus_feet IS NOT NULL),
 	CONSTRAINT "species_template_traits_sort_order_check" CHECK(typeof(`sort_order`) = 'integer' AND `sort_order` >= 1)
 );
 

@@ -2,7 +2,9 @@ import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { SpellAccessBuilder } from '../../../src/access/spell-access-builder';
 import { CatalogImporter } from '../../../src/catalog/catalog-importer';
+import { AddSourceCommand } from '../../../src/commands/add-source';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
+import { RemoveSourceCommand } from '../../../src/commands/remove-source';
 import { UpdateClassCommand } from '../../../src/commands/update-class';
 import type { SqlRow } from '../../../src/db/codecs';
 import { DatabaseContext } from '../../../src/db/database';
@@ -1250,5 +1252,359 @@ describe('a share link that predates weapons', () => {
     ).toEqual({ name: 'Old Link Hero', intelligence: 16 });
     // No weapons, and no error. Absence of a section is not corruption.
     expect(portableWeapons(target, imported.characterId)).toEqual([]);
+  });
+});
+
+/**
+ * WHICH SOURCE AN EFFECT CAME FROM, THROUGH A LINK.
+ *
+ * `character_effects.source_instance_id` is the audit answer D22 kept when it
+ * inverted the model: the sheet asks what resistances a character has, and this
+ * asks where one came from. A share document carries a REFERENCE rather than
+ * the id, because the id belongs to a database the recipient does not have.
+ *
+ * The four cases below are the four things that reference can mean, and three
+ * of them were wrong or absent before this test existed:
+ *
+ *  1. a CLASS's own effect — the ordinary case;
+ *  2. a SUBCLASS's — and a class entry mints TWO source instances from ONE ref,
+ *     so without a flag saying which, the effect arrives on the class. That is
+ *     a real row and the wrong one, which is worse than no provenance at all;
+ *  3. an effect whose grantor was DEACTIVATED but whose root is still there —
+ *     the shape `GrantRuleSlotGenerator.deactivateSourceTree` makes every time
+ *     a grant stops applying. It keeps its provenance, coarsened to the root
+ *     exactly as an active non-root's is;
+ *  4. an effect whose grantor was REMOVED OUTRIGHT. This one CANNOT keep it: a
+ *     share document carries the build as it stands, a removed feat is not in
+ *     it, and a ref naming nothing would be worse than none. The effect still
+ *     travels — that is the part that must not regress.
+ */
+describe('an effect knows which source granted it, across a link', () => {
+  const seedProvenanceCatalog = (db: DatabaseContext) => {
+    const classId = db.exec(
+      `INSERT INTO class_definitions (
+         content_key, name, rules_edition, spellcasting_ability,
+         progression_type
+       ) VALUES (
+         '2024:class:provenance', 'Provenance', '2024', 'intelligence', 'full'
+       )`,
+    ).lastInsertId;
+    db.exec(
+      `INSERT INTO class_progressions (
+         class_definition_id, class_level, grant_rules
+       ) VALUES (?, 1, '[]')`,
+      [classId],
+    );
+    db.exec(
+      `INSERT INTO feat_definitions (
+         content_key, name, rules_edition, repeatable, grant_rules
+       ) VALUES ('2024:feat:provenance-grant', 'Granted Feat', '2024', 1, '[]')`,
+    );
+    // THE GRANT LIVES AT LEVEL 5 ONLY, which is what makes case 3 reachable
+    // through the real code path: dropping the class to 3 makes the rule stop
+    // applying, and the generator tombstones the source it minted.
+    db.exec(
+      `INSERT INTO class_progressions (
+         class_definition_id, class_level, grant_rules
+       ) VALUES (?, 5, ?)`,
+      [
+        classId,
+        JSON.stringify([
+          {
+            kind: 'grant_source',
+            rule_key: 'provenance-grant',
+            count: 1,
+            source_type: 'feat',
+            source_definition_key: '2024:feat:provenance-grant',
+          },
+        ]),
+      ],
+    );
+    const subclassId = db.exec(
+      `INSERT INTO subclass_definitions (
+         content_key, class_definition_id, name, rules_edition,
+         spellcasting_ability, grant_rules
+       ) VALUES (
+         '2024:subclass:provenance-path', ?, 'Provenance Path', '2024',
+         'intelligence', '[]'
+       )`,
+      [classId],
+    ).lastInsertId;
+    const featId = db.exec(
+      `INSERT INTO feat_definitions (
+         content_key, name, rules_edition, repeatable, grant_rules
+       ) VALUES ('2024:feat:provenance-taken', 'Taken Feat', '2024', 1, '[]')`,
+    ).lastInsertId;
+    return { classId, subclassId, featId };
+  };
+
+  const provenance = (db: DatabaseContext, characterId: number) =>
+    db.allRaw(
+      `SELECT effect.label, effect.effect_kind, effect.damage_type,
+              effect.hit_points_per_level, effect.speed_bonus_feet,
+              source.source_type,
+              COALESCE(
+                class.content_key,
+                subclass.content_key,
+                feat.content_key
+              ) AS source_key
+       FROM character_effects AS effect
+       LEFT JOIN character_source_instances AS source
+         ON source.id = effect.source_instance_id
+       LEFT JOIN class_definitions AS class
+         ON source.source_type = 'class'
+        AND class.id = source.source_definition_id
+       LEFT JOIN subclass_definitions AS subclass
+         ON source.source_type = 'subclass'
+        AND subclass.id = source.source_definition_id
+       LEFT JOIN feat_definitions AS feat
+         ON source.source_type = 'feat'
+        AND feat.id = source.source_definition_id
+       WHERE effect.character_id = ?
+       ORDER BY effect.sort_order`,
+      [characterId],
+    );
+
+  it('keeps a subclass effect on the subclass, and a faded grant on its root', async () => {
+    const origin = await database();
+    const catalog = seedProvenanceCatalog(origin);
+    const characterId = origin.exec(
+      "INSERT INTO characters (name) VALUES ('Provenance Hero')",
+    ).lastInsertId;
+    const integrity = new CharacterCommandIntegrity('sharing-provenance-key');
+    new UpdateClassCommand(
+      origin,
+      {
+        type: 'update_class',
+        class_definition_id: catalog.classId,
+        level: 5,
+        subclass_definition_id: catalog.subclassId,
+      },
+      integrity,
+    ).apply(characterId);
+    new AddSourceCommand(
+      origin,
+      {
+        type: 'add_source',
+        source_type: 'feat',
+        source_definition_id: catalog.featId,
+        config: {},
+      },
+      integrity,
+    ).apply(characterId);
+
+    const sourceId = (type: string, definitionId: number): number =>
+      Number(
+        origin.scalar(
+          `SELECT id FROM character_source_instances
+           WHERE character_id = ? AND source_type = ?
+             AND source_definition_id = ?`,
+          [characterId, type, definitionId],
+        ),
+      );
+    // Written by hand because nothing in `src/` writes an effect yet — the
+    // picker that will is not built. Every column an INSERT could drop is a
+    // different value, so a dropped one shows up as a changed effect rather
+    // than as a matching pair of nulls.
+    const attach = (
+      order: number,
+      label: string,
+      instanceId: number | null,
+      payload: readonly [string, string | null, number | null, number | null],
+    ) => {
+      origin.exec(
+        `INSERT INTO character_effects (
+           character_id, sort_order, effect_kind, damage_type,
+           hit_points_flat, hit_points_per_level, speed_bonus_feet,
+           source_instance_id, label, notes
+         ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, NULL)`,
+        [
+          characterId,
+          order,
+          payload[0],
+          payload[1],
+          payload[2],
+          payload[3],
+          instanceId,
+          label,
+        ],
+      );
+    };
+    attach(1, 'Class Feature', sourceId('class', catalog.classId), [
+      'speed',
+      null,
+      null,
+      10,
+    ]);
+    attach(2, 'Subclass Feature', sourceId('subclass', catalog.subclassId), [
+      'hp_modifier',
+      null,
+      1,
+      null,
+    ]);
+    attach(
+      3,
+      'Faded Grant',
+      sourceId('feat', Number(origin.scalar(
+        "SELECT id FROM feat_definitions WHERE content_key = '2024:feat:provenance-grant'",
+      ))),
+      ['damage_resistance', 'Fire', null, null],
+    );
+    const takenFeatSource = sourceId('feat', catalog.featId);
+    attach(4, 'Removed Feat', takenFeatSource, [
+      'damage_resistance',
+      'Cold',
+      null,
+      null,
+    ]);
+
+    // Case 3: the grant stops applying, through the generator rather than by
+    // hand. Its source is tombstoned; the class it hangs from is not.
+    new UpdateClassCommand(
+      origin,
+      {
+        type: 'update_class',
+        class_definition_id: catalog.classId,
+        level: 3,
+        subclass_definition_id: catalog.subclassId,
+      },
+      integrity,
+    ).apply(characterId);
+    // Case 4: the feat is removed outright, so nothing in the document can name
+    // it.
+    new RemoveSourceCommand(
+      origin,
+      { type: 'remove_source', source_instance_id: takenFeatSource },
+      integrity,
+    ).apply(characterId);
+    expect(
+      origin.scalar(
+        'SELECT state FROM character_source_instances WHERE id = ?',
+        [takenFeatSource],
+      ),
+    ).toBe('tombstoned');
+
+    const document = exportCharacterShare(origin, characterId);
+    expect(document.effects).toEqual([
+      { kind: 'speed', label: 'Class Feature', speed_bonus_feet: 10, sourceRef: 0 },
+      {
+        kind: 'hp_modifier',
+        label: 'Subclass Feature',
+        hit_points_per_level: 1,
+        sourceRef: 0,
+        // THE FLAG. Same ref as the line above it, different root.
+        sourceSubclass: true,
+      },
+      {
+        kind: 'damage_resistance',
+        label: 'Faded Grant',
+        damage_type: 'Fire',
+        // Coarsened to the root that still exists, NOT dropped.
+        sourceRef: 0,
+      },
+      {
+        kind: 'damage_resistance',
+        label: 'Removed Feat',
+        damage_type: 'Cold',
+      },
+    ]);
+
+    const target = await database();
+    seedProvenanceCatalog(target);
+    const imported = importCharacterShare(
+      target,
+      await decodeShareFragment(await encodeShareFragment(document)),
+    );
+    expect(provenance(target, imported.characterId)).toEqual([
+      {
+        label: 'Class Feature',
+        effect_kind: 'speed',
+        damage_type: null,
+        hit_points_per_level: null,
+        speed_bonus_feet: 10,
+        source_type: 'class',
+        source_key: '2024:class:provenance',
+      },
+      {
+        label: 'Subclass Feature',
+        effect_kind: 'hp_modifier',
+        damage_type: null,
+        hit_points_per_level: 1,
+        speed_bonus_feet: null,
+        source_type: 'subclass',
+        source_key: '2024:subclass:provenance-path',
+      },
+      {
+        label: 'Faded Grant',
+        effect_kind: 'damage_resistance',
+        damage_type: 'Fire',
+        hit_points_per_level: null,
+        speed_bonus_feet: null,
+        source_type: 'class',
+        source_key: '2024:class:provenance',
+      },
+      // The effect survived; only the pointer did not, and it arrives NULL
+      // rather than naming somebody else's row.
+      {
+        label: 'Removed Feat',
+        effect_kind: 'damage_resistance',
+        damage_type: 'Cold',
+        hit_points_per_level: null,
+        speed_bonus_feet: null,
+        source_type: null,
+        source_key: null,
+      },
+    ]);
+  });
+
+  it('refuses a subclass flag that names a class carrying no subclass', async () => {
+    const origin = await database();
+    const catalog = seedProvenanceCatalog(origin);
+    const characterId = origin.exec(
+      "INSERT INTO characters (name) VALUES ('No Subclass')",
+    ).lastInsertId;
+    new UpdateClassCommand(
+      origin,
+      {
+        type: 'update_class',
+        class_definition_id: catalog.classId,
+        level: 3,
+        subclass_definition_id: null,
+      },
+      new CharacterCommandIntegrity('sharing-provenance-key'),
+    ).apply(characterId);
+    const document = exportCharacterShare(origin, characterId);
+    // Hand-written, because the exporter cannot produce it: the flag is set
+    // from the row's own source instance. A pasted link can carry anything, and
+    // resolving this one would read the second root of a ref that has one — an
+    // effect silently written with no provenance at all.
+    const forged: CharacterShareDocument = {
+      ...document,
+      effects: [
+        {
+          kind: 'speed',
+          label: 'Impossible',
+          speed_bonus_feet: 5,
+          sourceRef: 0,
+          sourceSubclass: true,
+        },
+      ],
+    };
+    expect(() => importCharacterShare(origin, forged)).toThrow(
+      /effects\[0\]\.sourceSubclass names a ref with no subclass/,
+    );
+    expect(() =>
+      importCharacterShare(origin, {
+        ...document,
+        effects: [
+          {
+            kind: 'speed',
+            label: 'Impossible',
+            speed_bonus_feet: 5,
+            sourceSubclass: true,
+          },
+        ],
+      }),
+    ).toThrow(/effects\[0\]\.sourceSubclass requires a sourceRef/);
   });
 });

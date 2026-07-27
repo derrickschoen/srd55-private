@@ -53,7 +53,7 @@
  *    text they belong to, verbatim, because modelling a sub-choice is a
  *    cardinality the origins schema deliberately does not have. The Wood Elf's
  *    35-foot Speed and each legacy's damage resistance live there and are NOT
- *    promoted onto the species — see `speciesTraitEffectKinds`.
+ *    promoted onto the species — see `effectKinds`.
  *  - PARAGRAPH STRUCTURE within a trait. A trait's prose is joined into one
  *    paragraph. The source's paragraph breaks are expressed only as a +2 indent
  *    that the Gnome's sub-options invert, so no rule reproduces them without
@@ -72,7 +72,7 @@
 import speciesExtract from '../../docs/srd/source/species-descriptions.txt?raw';
 import backgroundsExtract from '../../docs/srd/source/backgrounds.txt?raw';
 import type { DatabaseContext } from '../db/database';
-import type { SpeciesTraitEffectKind } from '../domain/enums';
+import type { EffectKind } from '../domain/enums';
 import { rowContractError } from '../domain/contracts/rows';
 
 /** The rules edition every bundled species and background belongs to. */
@@ -86,20 +86,33 @@ export class OriginExtractError extends Error {
 }
 
 /**
- * One parsed species trait. The field names are the `species_template_traits`
- * column names, and that is not laziness: the seeder inserts this object
- * column-wise, and `speciesTraitFromTemplate` copies the same names onto the
- * character's row. Keeping the lists identical is what makes the copy need no
- * mapping table.
+ * One mechanical effect a parsed trait declares. The field names are the
+ * `species_template_trait_effects` column names, and that is not laziness: the
+ * seeder inserts this object column-wise and the character-side copy reuses the
+ * same names, so the copy needs no mapping table.
+ */
+export interface SrdTraitEffect {
+  readonly effect_kind: EffectKind;
+  readonly damage_type: string | null;
+  readonly hit_points_flat: number | null;
+  readonly hit_points_per_level: number | null;
+  readonly speed_bonus_feet: number | null;
+}
+
+/**
+ * One parsed species trait: free text, plus a LIST of effects.
+ *
+ * A LIST, WHERE THIS USED TO BE FIVE FIELDS. The old shape could hold exactly
+ * one effect per trait, which is a limit of the model and not a reading of the
+ * source — Fiendish Legacy's own paragraph grants a Resistance and a cantrip,
+ * and one column could record only one of them. `effects` is empty for the
+ * twenty-six free-text traits, which is the same fact the old `effect_kind:
+ * null` stated with one fewer null in it.
  */
 export interface SrdSpeciesTrait {
   readonly name: string;
   readonly description: string;
-  readonly effect_kind: SpeciesTraitEffectKind | null;
-  readonly effect_damage_type: string | null;
-  readonly effect_hit_points_flat: number | null;
-  readonly effect_hit_points_per_level: number | null;
-  readonly effect_speed_bonus_feet: number | null;
+  readonly effects: readonly SrdTraitEffect[];
 }
 
 export interface SrdSpeciesTemplate {
@@ -180,7 +193,7 @@ const SPECIES_NAMES = [
 const BACKGROUND_NAMES = ['Acolyte', 'Criminal', 'Sage', 'Soldier'];
 
 /**
- * WHICH PRINTED TRAITS CARRY A MECHANICAL EFFECT — a human's reading of the
+ * WHICH PRINTED TRAITS CARRY MECHANICAL EFFECTS — a human's reading of the
  * source, declared here and CHECKED against the parse.
  *
  * This is deliberately NOT a regular expression over the trait prose. Deciding
@@ -195,19 +208,35 @@ const BACKGROUND_NAMES = ['Acolyte', 'Criminal', 'Sage', 'Soldier'];
  * extract that renames or drops a trait fails the seed instead of quietly
  * dropping its mechanics.
  *
- * SEVEN ENTRIES ACROSS THIRTY-THREE TRAITS. The other twenty-six are free text
- * and are meant to stay that way — see `speciesTraitEffectKinds` for the rule
- * that decides, and for why the Orc's Temporary Hit Points, every Darkvision
- * range, the Goliath's Large Form and the Elf's Trance are not here.
+ * FOUR ENTRIES ACROSS THIRTY-THREE TRAITS, WHERE THERE USED TO BE SEVEN, AND
+ * THE THREE THAT WENT ARE NOT A LOSS. `Elven Lineage`, `Gnomish Lineage` and
+ * `Otherworldly Presence` were declared `granted_spells` — a marker with no
+ * payload, whose only output no production code read. The spells they name come
+ * from `species_definitions.grant_rules` through `src/grants/`, and
+ * `src/access/spell-access-builder.ts` already reports them WITH their
+ * provenance and marks a cantrip `casting_mode: 'at_will'`. Declaring them here
+ * as well would be a second record of the same fact; see `effectKinds`.
+ *
+ * THE FOURTH ENTRY IS THE POINT OF THE WHOLE CHANGE. `Fiendish Legacy` is now
+ * a `damage_resistance` with a null type, exactly like the Dragonborn's
+ * `Damage Resistance`, because its paragraph grants exactly that:
+ * `species-descriptions.txt:202-206` reads "Choose a legacy from the Fiendish
+ * Legacies table. You gain the level 1 benefit of the chosen legacy", and every
+ * legacy's level-1 benefit (`:233-238`) is a Resistance plus a cantrip. Under
+ * the old model that trait could carry ONE effect and carried the spell marker,
+ * so every Tiefling's resistance was recorded nowhere while the Dragonborn's
+ * identically-unnamed one was. The list shape makes both recordable; retiring
+ * the spell marker means only one of them needs recording.
  */
-type EffectDeclaration = Omit<SrdSpeciesTrait, 'name' | 'description'>;
+type EffectDeclaration = readonly SrdTraitEffect[];
 
-const NO_EFFECT: EffectDeclaration = {
-  effect_kind: null,
-  effect_damage_type: null,
-  effect_hit_points_flat: null,
-  effect_hit_points_per_level: null,
-  effect_speed_bonus_feet: null,
+/** A resistance the source declines to name the type of. */
+const UNCHOSEN_RESISTANCE: SrdTraitEffect = {
+  effect_kind: 'damage_resistance',
+  damage_type: null,
+  hit_points_flat: null,
+  hit_points_per_level: null,
+  speed_bonus_feet: null,
 };
 
 const TRAIT_EFFECTS: Readonly<
@@ -217,19 +246,14 @@ const TRAIT_EFFECTS: Readonly<
     // "You have Resistance to the damage type determined by your Draconic
     // Ancestry trait." The resistance is unconditional; the TYPE is one of ten
     // the character chooses, so the column stays null.
-    'Damage Resistance': {
-      ...NO_EFFECT,
-      effect_kind: 'damage_resistance',
-    },
+    'Damage Resistance': [UNCHOSEN_RESISTANCE],
   },
   Dwarf: {
     // "You have Resistance to Poison damage." Named in the trait's own
     // paragraph, so the type is known.
-    'Dwarven Resilience': {
-      ...NO_EFFECT,
-      effect_kind: 'damage_resistance',
-      effect_damage_type: 'Poison',
-    },
+    'Dwarven Resilience': [
+      { ...UNCHOSEN_RESISTANCE, damage_type: 'Poison' },
+    ],
     // "Your Hit Point maximum increases by 1, and it increases by 1 again
     // whenever you gain a level."
     //
@@ -243,35 +267,21 @@ const TRAIT_EFFECTS: Readonly<
     //
     // The split survives the correction rather than collapsing into one
     // column, because it is the CONTRACT the class-sheet track consumes and a
-    // user's own trait may legitimately carry a flat part this one does not.
-    'Dwarven Toughness': {
-      ...NO_EFFECT,
-      effect_kind: 'hp_modifier',
-      effect_hit_points_flat: 0,
-      effect_hit_points_per_level: 1,
-    },
-  },
-  Elf: {
-    // "You gain the level 1 benefit of that lineage... When you reach character
-    // levels 3 and 5, you learn a higher-level spell." A MARKER: the spells
-    // themselves are grant rules on `species_definitions`, never a payload here.
-    'Elven Lineage': { ...NO_EFFECT, effect_kind: 'granted_spells' },
-  },
-  Gnome: {
-    'Gnomish Lineage': { ...NO_EFFECT, effect_kind: 'granted_spells' },
+    // user's own effect may legitimately carry a flat part this one does not.
+    'Dwarven Toughness': [
+      {
+        effect_kind: 'hp_modifier',
+        damage_type: null,
+        hit_points_flat: 0,
+        hit_points_per_level: 1,
+        speed_bonus_feet: null,
+      },
+    ],
   },
   Tiefling: {
-    // THIS TRAIT HAS TWO EFFECTS AND THE COLUMN HOLDS ONE. Its paragraph grants
-    // "the level 1 benefit of the chosen legacy", and every legacy's level-1
-    // benefit is a Resistance AND a cantrip; the level 3/5 spells follow. So a
-    // Tiefling's damage resistance is recorded NOWHERE, while the Dragonborn's
-    // — identically unnamed in its own paragraph — is. `granted_spells` is kept
-    // rather than swapped because swapping only moves which half is invisible.
-    // The reasoning, and why this is an owner-level call rather than a patch,
-    // is stated once in `speciesTraitEffectKinds`.
-    'Fiendish Legacy': { ...NO_EFFECT, effect_kind: 'granted_spells' },
-    // "You know the Thaumaturgy cantrip."
-    'Otherworldly Presence': { ...NO_EFFECT, effect_kind: 'granted_spells' },
+    // See the block comment above. One effect today, and the list is what makes
+    // a second one — should a later reading find it — an ordinary addition.
+    'Fiendish Legacy': [UNCHOSEN_RESISTANCE],
   },
 };
 
@@ -758,8 +768,8 @@ function parseTraits(
       prose.get(draft.name) ?? '',
       ...(attached.get(draft.name) ?? []),
     ].join('\n\n');
-    const effect = TRAIT_EFFECTS[species]?.[draft.name] ?? NO_EFFECT;
-    return { name: draft.name, description, ...effect };
+    const effects = TRAIT_EFFECTS[species]?.[draft.name] ?? [];
+    return { name: draft.name, description, effects };
   });
 }
 
@@ -933,6 +943,7 @@ function assertRow(
   table:
     | 'species_templates'
     | 'species_template_traits'
+    | 'species_template_trait_effects'
     | 'background_templates',
   row: Record<string, unknown>,
 ): void {
@@ -1088,36 +1099,62 @@ function seedSpecies(db: DatabaseContext, timestamp: string): void {
         sort_order: index + 1,
         name: trait.name,
         description: trait.description,
-        effect_kind: trait.effect_kind,
-        effect_damage_type: trait.effect_damage_type,
-        effect_hit_points_flat: trait.effect_hit_points_flat,
-        effect_hit_points_per_level: trait.effect_hit_points_per_level,
-        effect_speed_bonus_feet: trait.effect_speed_bonus_feet,
         created_at: timestamp,
         updated_at: timestamp,
       };
       assertRow('species_template_traits', { id: 1, ...traitRow });
-      db.exec(
-        `INSERT INTO species_template_traits (
-           species_template_id, sort_order, name, description, effect_kind,
-           effect_damage_type, effect_hit_points_flat,
-           effect_hit_points_per_level, effect_speed_bonus_feet,
-           created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          traitRow.species_template_id,
-          traitRow.sort_order,
-          traitRow.name,
-          traitRow.description,
-          traitRow.effect_kind,
-          traitRow.effect_damage_type,
-          traitRow.effect_hit_points_flat,
-          traitRow.effect_hit_points_per_level,
-          traitRow.effect_speed_bonus_feet,
-          traitRow.created_at,
-          traitRow.updated_at,
-        ],
+      // The trait's own id is needed to parent its effects, and the child rows
+      // go in the same loop iteration so a trait can never be written without
+      // the effects the extract says it grants. The DELETE above cascades to
+      // them, so a re-seed replaces both halves together.
+      const traitId = Number(
+        db.exec(
+          `INSERT INTO species_template_traits (
+             species_template_id, sort_order, name, description,
+             created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?)`,
+          [
+            traitRow.species_template_id,
+            traitRow.sort_order,
+            traitRow.name,
+            traitRow.description,
+            traitRow.created_at,
+            traitRow.updated_at,
+          ],
+        ).lastInsertId,
       );
+      for (const [effectIndex, effect] of trait.effects.entries()) {
+        const effectRow = {
+          species_template_trait_id: traitId,
+          sort_order: effectIndex + 1,
+          effect_kind: effect.effect_kind,
+          damage_type: effect.damage_type,
+          hit_points_flat: effect.hit_points_flat,
+          hit_points_per_level: effect.hit_points_per_level,
+          speed_bonus_feet: effect.speed_bonus_feet,
+          created_at: timestamp,
+          updated_at: timestamp,
+        };
+        assertRow('species_template_trait_effects', { id: 1, ...effectRow });
+        db.exec(
+          `INSERT INTO species_template_trait_effects (
+             species_template_trait_id, sort_order, effect_kind, damage_type,
+             hit_points_flat, hit_points_per_level, speed_bonus_feet,
+             created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            effectRow.species_template_trait_id,
+            effectRow.sort_order,
+            effectRow.effect_kind,
+            effectRow.damage_type,
+            effectRow.hit_points_flat,
+            effectRow.hit_points_per_level,
+            effectRow.speed_bonus_feet,
+            effectRow.created_at,
+            effectRow.updated_at,
+          ],
+        );
+      }
     }
   }
 }

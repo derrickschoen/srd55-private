@@ -149,7 +149,7 @@ describe('SRD species descriptions', () => {
     expect(traitNamed('Elf', 'Elven Lineage').description).toContain(
       'Your Speed increases to 35 feet',
     );
-    expect(traitNamed('Elf', 'Elven Lineage').effect_speed_bonus_feet).toBeNull();
+    expect(traitNamed('Elf', 'Elven Lineage').effects).toEqual([]);
   });
 
   it('reads a chosen size as two options, and a fixed one as one', () => {
@@ -194,45 +194,70 @@ describe('SRD species descriptions', () => {
       'Luck',
       'Naturally Stealthy',
     ]);
+    // NO ROWS, where this used to assert five nulls per trait. The inversion
+    // turned "this trait grants nothing" from a row of nulls into the absence
+    // of a row, which is the same fact with nothing to misread.
     for (const trait of halfling.traits) {
-      expect(trait.effect_kind, trait.name).toBeNull();
-      expect(trait.effect_damage_type, trait.name).toBeNull();
-      expect(trait.effect_hit_points_flat, trait.name).toBeNull();
-      expect(trait.effect_speed_bonus_feet, trait.name).toBeNull();
+      expect(trait.effects, trait.name).toEqual([]);
     }
   });
 
-  it('leaves 26 of the 33 traits free text', () => {
+  it('leaves 30 of the 33 traits free text, and declares four effects across three', () => {
     const mechanical = species.flatMap((entry) =>
-      entry.traits
-        .filter((trait) => trait.effect_kind !== null)
-        .map((trait) => `${entry.name}: ${trait.name} (${String(trait.effect_kind)})`),
+      entry.traits.flatMap((trait) =>
+        trait.effects.map(
+          (effect) =>
+            `${entry.name}: ${trait.name} (${effect.effect_kind})`,
+        ),
+      ),
     );
     // Transcribed from the reading of the source, not from the parse. Every
     // other trait is prose and is meant to stay prose.
+    //
+    // THREE ENTRIES WENT AND ONE ARRIVED, and both movements are the point.
+    // `Elven Lineage`, `Gnomish Lineage` and `Otherworldly Presence` declared
+    // `granted_spells` — a marker with no payload whose only consumer no
+    // production code read; the spells come from
+    // `species_definitions.grant_rules` through `src/grants/` and are surfaced
+    // with their provenance by `SpellAccessBuilder`, so a second record here
+    // was the parallel storage the design forbids. `Fiendish Legacy` arrived as
+    // what its paragraph actually grants: a Resistance whose type the chosen
+    // legacy names. That resistance was recorded NOWHERE before, because the
+    // trait carried the spell marker in the one column it had.
     expect(mechanical).toEqual([
       'Dragonborn: Damage Resistance (damage_resistance)',
       'Dwarf: Dwarven Resilience (damage_resistance)',
       'Dwarf: Dwarven Toughness (hp_modifier)',
-      'Elf: Elven Lineage (granted_spells)',
-      'Gnome: Gnomish Lineage (granted_spells)',
-      'Tiefling: Fiendish Legacy (granted_spells)',
-      'Tiefling: Otherworldly Presence (granted_spells)',
+      'Tiefling: Fiendish Legacy (damage_resistance)',
     ]);
-    expect(33 - mechanical.length).toBe(26);
+    const mechanicalTraits = species.flatMap((entry) =>
+      entry.traits.filter((trait) => trait.effects.length > 0),
+    );
+    expect(mechanicalTraits).toHaveLength(4);
+    expect(33 - mechanicalTraits.length).toBe(29);
   });
 
   it('types the Dwarf resistance and leaves the Dragonborn one unchosen', () => {
     // "You have Resistance to Poison damage" names its type; "the damage type
     // determined by your Draconic Ancestry trait" does not, and a null there is
     // a real state rather than a gap.
-    expect(traitNamed('Dwarf', 'Dwarven Resilience')).toMatchObject({
+    expect(traitNamed('Dwarf', 'Dwarven Resilience').effects).toEqual([
+      {
+        effect_kind: 'damage_resistance',
+        damage_type: 'Poison',
+        hit_points_flat: null,
+        hit_points_per_level: null,
+        speed_bonus_feet: null,
+      },
+    ]);
+    expect(traitNamed('Dragonborn', 'Damage Resistance').effects[0]).toMatchObject(
+      { effect_kind: 'damage_resistance', damage_type: null },
+    );
+    // ...and the Tiefling's, which is structurally identical and used to be
+    // recorded nowhere at all.
+    expect(traitNamed('Tiefling', 'Fiendish Legacy').effects[0]).toMatchObject({
       effect_kind: 'damage_resistance',
-      effect_damage_type: 'Poison',
-    });
-    expect(traitNamed('Dragonborn', 'Damage Resistance')).toMatchObject({
-      effect_kind: 'damage_resistance',
-      effect_damage_type: null,
+      damage_type: null,
     });
   });
 
@@ -242,10 +267,10 @@ describe('SRD species descriptions', () => {
     // the total is the character's level and the flat half is ZERO. This was
     // seeded 1 and 1 until the review caught it, which gave a level-1 Dwarf +2
     // from a trait whose printed text says +1.
-    expect(traitNamed('Dwarf', 'Dwarven Toughness')).toMatchObject({
+    expect(traitNamed('Dwarf', 'Dwarven Toughness').effects[0]).toMatchObject({
       effect_kind: 'hp_modifier',
-      effect_hit_points_flat: 0,
-      effect_hit_points_per_level: 1,
+      hit_points_flat: 0,
+      hit_points_per_level: 1,
     });
   });
 
@@ -254,7 +279,7 @@ describe('SRD species descriptions', () => {
     // into `hp_modifier` would be wrong in a way nobody notices on a sheet.
     const trait = traitNamed('Orc', 'Adrenaline Rush');
     expect(trait.description).toContain('Temporary Hit Points');
-    expect(trait.effect_kind).toBeNull();
+    expect(trait.effects).toEqual([]);
   });
 
   it("leaves the Goliath's Large Form and the Dragonborn's flight free text", () => {
@@ -263,13 +288,13 @@ describe('SRD species descriptions', () => {
     expect(traitNamed('Goliath', 'Large Form').description).toContain(
       'your Speed increases by 10 feet',
     );
-    expect(traitNamed('Goliath', 'Large Form').effect_kind).toBeNull();
-    expect(traitNamed('Dragonborn', 'Draconic Flight').effect_kind).toBeNull();
+    expect(traitNamed('Goliath', 'Large Form').effects).toEqual([]);
+    expect(traitNamed('Dragonborn', 'Draconic Flight').effects).toEqual([]);
   });
 
   it('leaves the four-hour Trance exactly as prose', () => {
     const trance = traitNamed('Elf', 'Trance');
-    expect(trance.effect_kind).toBeNull();
+    expect(trance.effects).toEqual([]);
     expect(trance.description).toContain('You can finish a Long Rest in 4 hours');
   });
 

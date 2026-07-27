@@ -1,5 +1,6 @@
 import {
   check,
+  foreignKey,
   index,
   integer,
   sqliteTable,
@@ -9,38 +10,42 @@ import { sql } from 'drizzle-orm';
 import type {
   BackgroundTemplateId,
   CharacterBackgroundId,
+  CharacterEffectId,
   CharacterId,
   CharacterSpeciesId,
   CharacterSpeciesTraitId,
   ContentKey,
+  SourceInstanceId,
   SpeciesTemplateId,
+  SpeciesTemplateTraitEffectId,
   SpeciesTemplateTraitId,
 } from '../../src/domain/ids';
-import type {
-  RulesEdition,
-  SpeciesTraitEffectKind,
-} from '../../src/domain/enums';
-import {
-  rulesEditions,
-  speciesTraitEffectKinds,
-} from '../../src/domain/enums';
+import type { EffectKind, RulesEdition } from '../../src/domain/enums';
+import { effectKinds, rulesEditions } from '../../src/domain/enums';
 import {
   datetime,
   integerAtLeast,
   laravelDefault,
   nullOrIntegerAtLeast,
-  nullOrOneOf,
   oneOf,
   sqlText,
   varchar,
 } from './columns';
-import { characters } from './character';
+import { character_source_instances, characters } from './character';
 
 /**
- * ORIGINS: species and backgrounds. Six NATIVE tables, in the same separate
- * inventory `db/schema/weapons.ts` established — the Laravel parity claim in
+ * ORIGINS: species and backgrounds, and the character's own EFFECTS. Eight
+ * NATIVE tables, in the same separate inventory `db/schema/weapons.ts`
+ * established — the Laravel parity claim in
  * `tests/unit/schema.test.ts` is still made over the original 38 and is not
  * diluted by them.
+ *
+ * TWO OF THE EIGHT ARE THE EFFECT MODEL, AND THEY ARE TWO ON PURPOSE.
+ * `species_template_trait_effects` declares what a CATALOG TEMPLATE GRANTS;
+ * `character_effects` records what a CHARACTER HAS. Those are different
+ * questions with different lifetimes, different portability rules and — the
+ * decisive one — different meanings for the same null. Each table says so at
+ * its own declaration.
  *
  * WHY THESE ARE NEW TABLES AND NOT COLUMNS ON `species_definitions`. That table
  * is one of THE LARAVEL 38. `laravelColumnMetadataHash` is computed over
@@ -184,15 +189,20 @@ export const species_templates = sqliteTable(
  * One printed Special Trait of one catalog species. Thirty-three rows across
  * the nine species: 5/4/5/3/3/4/3/3/3.
  *
- * A TRAIT IS FREE TEXT PLUS AN OPTIONAL MECHANICAL EFFECT. `description` always
- * carries the trait's printed paragraphs — including the choice table the
- * paragraph names, where there is one — and `effect_kind` is NULL for
- * twenty-six of the thirty-three. The shape is the weapon-property shape one
- * level up: booleans plus `other_properties` free text there, a closed
- * `effect_kind` plus `description` free text here.
+ * A TRAIT IS FREE TEXT, AND NOTHING ELSE. `description` carries the trait's
+ * printed paragraphs, including the choice table the paragraph names where
+ * there is one.
  *
- * The payload columns are per-KIND and mutually exclusive, enforced below, so
- * the closed set is closed in SQLite and not only in TypeScript.
+ * THE FIVE `effect_*` COLUMNS THAT USED TO BE HERE ARE GONE, AND THAT IS THE
+ * INVERSION. They made a trait the thing an effect hung from, which forced
+ * exactly one effect per trait — a limit of the model that the source does not
+ * have. Fiendish Legacy's own paragraph grants a Resistance AND a cantrip; the
+ * single `effect_kind` column could hold one of them, so whichever was chosen
+ * the other became invisible, and the app ended up recording the Dragonborn's
+ * unnamed resistance while dropping the Tiefling's identical one.
+ *
+ * A catalog trait now DECLARES A LIST (`species_template_trait_effects` below),
+ * and two effects is an ordinary row count rather than a special case.
  */
 export const species_template_traits = sqliteTable(
   'species_template_traits',
@@ -219,115 +229,10 @@ export const species_template_traits = sqliteTable(
      * refuses.
      */
     description: sqlText()('description').notNull(),
-    effect_kind: varchar<SpeciesTraitEffectKind>()('effect_kind'),
-    /**
-     * The resisted damage type, for `damage_resistance` only.
-     *
-     * NULL WITH `effect_kind = 'damage_resistance'` IS A REAL STATE, NOT A GAP:
-     * the Dragonborn's Damage Resistance is "the damage type determined by your
-     * Draconic Ancestry trait", a choice among ten the character makes. The
-     * trait unconditionally grants A resistance; which one is not a property of
-     * the species. D6b limb 2 — the absence is the source's own.
-     *
-     * Open vocabulary, not an enum, following
-     * `spell_version_damage_types.damage_type`.
-     */
-    effect_damage_type: varchar()('effect_damage_type'),
-    /**
-     * `hp_modifier`: the flat Hit Point maximum bonus, and the per-level one.
-     * Two columns rather than one because a trait may carry either shape, and
-     * splitting them is what lets the other track's derivation consume this
-     * without parsing English.
-     *
-     * Dwarven Toughness — the ONLY printed trait that writes them — is
-     * `flat = 0, perLevel = 1`, NOT one of each. "Your Hit Point maximum
-     * increases by 1, and it increases by 1 again whenever you gain a level"
-     * makes the opening clause the level-1 grant, so the total is the
-     * character's level. `flat = 1` alongside it counts level 1 twice; see
-     * `src/rules/origins-srd.ts`, where that bug lived.
-     *
-     * Both nullable because both are meaningless for the other three kinds; the
-     * CHECKs below make an `hp_modifier` row with neither, or a non-`hp_modifier`
-     * row with either, unrepresentable.
-     */
-    effect_hit_points_flat: integer('effect_hit_points_flat'),
-    effect_hit_points_per_level: integer('effect_hit_points_per_level'),
-    /**
-     * `speed`: a standing bonus to walking Speed in FEET, as a delta.
-     *
-     * A delta and not an absolute, because base Speed is already a column on
-     * `species_templates` and an absolute here would be a second source for the
-     * same number. No SRD species trait writes this column — see
-     * `speciesTraitEffectKinds` for why, at length — so today it exists for a
-     * character's own hand-written trait.
-     */
-    effect_speed_bonus_feet: integer('effect_speed_bonus_feet'),
     created_at: datetime()('created_at'),
     updated_at: datetime()('updated_at'),
   },
   (table) => [
-    /**
-     * The one that matters most in this file. An unrecognised `effect_kind`
-     * reads as "some effect" to every branch that is not an exhaustive switch,
-     * and as NOTHING to `src/rules/species-effects.ts`, which returns no effect
-     * for a value it does not know. Either way the character quietly loses a
-     * trait's mechanics with no error anywhere — the same silent-wrong
-     * `class_weapon_mastery_grants_grant_check` was written against.
-     *
-     * The null limb is the DEFAULT case, not an edge: twenty-six of the
-     * thirty-three printed traits are free text and have no kind at all.
-     */
-    check(
-      'species_template_traits_effect_kind_check',
-      nullOrOneOf('effect_kind', speciesTraitEffectKinds),
-    ),
-    /**
-     * Every payload column belongs to exactly one kind, and none may be set
-     * without it. Separate constraints rather than one compound: SQLite names
-     * the constraint it rejected, and "which column was wrong" is the whole
-     * diagnostic value.
-     *
-     * `IS` AND `IS NOT`, NOT `=` AND `<>`, AND THIS WAS MEASURED RATHER THAN
-     * PREFERRED. Written as `effect_kind = 'damage_resistance'`, the whole
-     * expression evaluates to NULL for the 27 free-text traits whose
-     * `effect_kind` is NULL — and SQLite PASSES a CHECK that evaluates to NULL.
-     * The constraint would then admit exactly the row it exists to refuse: a
-     * free-text trait carrying an orphaned mechanical payload. The behavioural
-     * cases in `tests/unit/schema-check-constraints.test.ts` caught it, and
-     * every one of them is a `rejects` case on an `effect_kind: null` row.
-     * SQLite's `IS` compares NULLs, so the null branch is decided rather than
-     * unknown. Same trap `spell_versions_level_check` documents.
-     */
-    check(
-      'species_template_traits_damage_type_kind_check',
-      sql`effect_damage_type IS NULL OR effect_kind IS 'damage_resistance'`,
-    ),
-    check(
-      'species_template_traits_hit_points_kind_check',
-      sql`(effect_hit_points_flat IS NULL AND effect_hit_points_per_level IS NULL) OR effect_kind IS 'hp_modifier'`,
-    ),
-    check(
-      'species_template_traits_speed_kind_check',
-      sql`effect_speed_bonus_feet IS NULL OR effect_kind IS 'speed'`,
-    ),
-    /**
-     * The other direction: a kind that promises a number must carry one.
-     * Without this an `hp_modifier` trait with both HP columns null derives a
-     * zero, which is indistinguishable from a trait that was never mechanical
-     * and costs the character an entitlement.
-     *
-     * `granted_spells` and `damage_resistance` are deliberately absent from
-     * this list. `granted_spells` is a marker with no payload by design, and
-     * `damage_resistance` with a null type is the Dragonborn.
-     */
-    check(
-      'species_template_traits_hp_modifier_payload_check',
-      sql`effect_kind IS NOT 'hp_modifier' OR effect_hit_points_flat IS NOT NULL OR effect_hit_points_per_level IS NOT NULL`,
-    ),
-    check(
-      'species_template_traits_speed_payload_check',
-      sql`effect_kind IS NOT 'speed' OR effect_speed_bonus_feet IS NOT NULL`,
-    ),
     /** Printed order starts at 1 and is dense; 0 or a negative is a mis-parse. */
     check(
       'species_template_traits_sort_order_check',
@@ -345,6 +250,171 @@ export const species_template_traits = sqliteTable(
     uniqueIndex('species_template_traits_template_name_unique').on(
       table.species_template_id,
       table.name,
+    ),
+  ],
+);
+
+/**
+ * WHAT A CATALOG TRAIT GRANTS. Zero, one or several rows per printed trait.
+ *
+ * THIS IS THE CATALOG HALF AND IT IS DELIBERATELY NOT THE SAME TABLE AS
+ * `character_effects`. The two answer different questions and the difference is
+ * not stylistic:
+ *
+ *  - a row here belongs to a CONTENT KEY, is replaced wholesale by a re-seed,
+ *    never travels in a backup or a share link, and IS the provenance;
+ *  - a row in `character_effects` belongs to a CHARACTER, is edited by the user
+ *    and never re-synced (D1b), travels in all three portability arms, and
+ *    POINTS AT its provenance.
+ *
+ * The decisive asymmetry is what a null `damage_type` MEANS. Here it means "the
+ * source declines to name the type" — the Dragonborn's Damage Resistance is
+ * "the damage type determined by your Draconic Ancestry trait", and Fiendish
+ * Legacy's is whichever legacy the player picks. On the character's row it
+ * means "this player has not decided yet", which is a completeness item. One
+ * table holding both would make those two facts read identically, and telling
+ * them apart is the whole point of keeping them separate.
+ *
+ * `effect_kind` IS `NOT NULL` HERE, where it was nullable on the trait row it
+ * replaced, and that is the direct consequence of the inversion: a trait with
+ * no mechanical effect is now the ABSENCE OF A ROW rather than a row with five
+ * nulls in it. Twenty-six of the thirty-three printed traits have no row at
+ * all, which is the same fact stated without a null.
+ */
+export const species_template_trait_effects = sqliteTable(
+  'species_template_trait_effects',
+  {
+    id: integer('id')
+      .primaryKey({ autoIncrement: true })
+      .notNull()
+      .$type<SpeciesTemplateTraitEffectId>(),
+    species_template_trait_id: integer('species_template_trait_id')
+      .notNull()
+      .$type<SpeciesTemplateTraitId>()
+      .references(() => species_template_traits.id, { onDelete: 'cascade' }),
+    /**
+     * Declared order within the trait. Load-bearing for the same reason the
+     * trait's own `sort_order` is: the copy onto a character preserves it, and
+     * a sheet that reshuffled a trait's two effects would read differently.
+     */
+    sort_order: integer('sort_order').notNull(),
+    effect_kind: varchar<EffectKind>()('effect_kind').notNull(),
+    /**
+     * The resisted damage type, for `damage_resistance` only.
+     *
+     * NULLABLE, D6b LIMB 2 — THE ABSENCE IS THE SOURCE'S OWN. Two of the three
+     * printed resistances decline to name a type: the Dragonborn's is "the
+     * damage type determined by your Draconic Ancestry trait" (one of ten) and
+     * the Tiefling's is the chosen legacy's (one of three). The trait
+     * unconditionally grants A resistance; which one is not a property of the
+     * species, and there is no default that would not be an invention.
+     *
+     * Open vocabulary, not an enum, following
+     * `spell_version_damage_types.damage_type`.
+     */
+    damage_type: varchar()('damage_type'),
+    /**
+     * `hp_modifier`: the flat Hit Point maximum bonus, and the per-level one.
+     * Two columns rather than one because an effect may carry either shape, and
+     * splitting them is what lets the class-sheet track's derivation consume
+     * this without parsing English.
+     *
+     * Dwarven Toughness — the ONLY printed trait that writes them — is
+     * `flat = 0, perLevel = 1`, NOT one of each. "Your Hit Point maximum
+     * increases by 1, and it increases by 1 again whenever you gain a level"
+     * makes the opening clause the level-1 grant, so the total is the
+     * character's level. `flat = 1` alongside it counts level 1 twice; see
+     * `src/rules/origins-srd.ts`, where that bug lived.
+     *
+     * Both nullable, D6b LIMB 2 — the absence is real and not an unset value,
+     * the same call `weapon_templates.range_normal_feet` makes ("a Longsword
+     * has no range. Not 'unset' — it does not have one"). A
+     * `damage_resistance` effect does not HAVE a hit point number; there is
+     * nothing to fill in later. The CHECKs below make an `hp_modifier` row with
+     * neither, and a non-`hp_modifier` row with either, unrepresentable, so the
+     * null is never ambiguous between "not applicable" and "not decided".
+     */
+    hit_points_flat: integer('hit_points_flat'),
+    hit_points_per_level: integer('hit_points_per_level'),
+    /**
+     * `speed`: a standing bonus to walking Speed in FEET, as a delta.
+     *
+     * Nullable on the same limb 2 terms. A delta and not an absolute, because
+     * base Speed is already a column on `species_templates` and an absolute
+     * here would be a second source for the same number. No SRD species trait
+     * writes this column — see `effectKinds` for why, at length — so today it
+     * exists for a character's own hand-written trait.
+     */
+    speed_bonus_feet: integer('speed_bonus_feet'),
+    created_at: datetime()('created_at'),
+    updated_at: datetime()('updated_at'),
+  },
+  (table) => [
+    /**
+     * `oneOf` rather than `nullOrOneOf`, because the column is NOT NULL here.
+     * An unrecognised kind reads as "some effect" to every branch that is not
+     * an exhaustive switch, and as NOTHING to `src/rules/species-effects.ts`,
+     * which returns no effect for a value it does not know — the character
+     * quietly loses a trait's mechanics with no error anywhere.
+     */
+    check(
+      'species_template_trait_effects_kind_check',
+      oneOf('effect_kind', effectKinds),
+    ),
+    /**
+     * Every payload column belongs to exactly one kind, and none may be set
+     * without it. Separate constraints rather than one compound: SQLite names
+     * the constraint it rejected, and "which column was wrong" is the whole
+     * diagnostic value.
+     *
+     * `IS` AND `IS NOT`, NOT `=` AND `<>`, AND THIS WAS MEASURED RATHER THAN
+     * PREFERRED. Written as `effect_kind = 'damage_resistance'`, the whole
+     * expression evaluates to NULL whenever `effect_kind` is NULL — and SQLite
+     * PASSES a CHECK that evaluates to NULL, so the constraint would admit
+     * exactly the orphaned payload it exists to refuse. `effect_kind` is NOT
+     * NULL on this table so the trap cannot spring here TODAY, but the
+     * character-side table below carries the identical constraints and the
+     * copy between them is column-wise; writing the two differently is how the
+     * pair drifts. Same trap `spell_versions_level_check` documents.
+     */
+    check(
+      'species_template_trait_effects_damage_type_kind_check',
+      sql`damage_type IS NULL OR effect_kind IS 'damage_resistance'`,
+    ),
+    check(
+      'species_template_trait_effects_hit_points_kind_check',
+      sql`(hit_points_flat IS NULL AND hit_points_per_level IS NULL) OR effect_kind IS 'hp_modifier'`,
+    ),
+    check(
+      'species_template_trait_effects_speed_kind_check',
+      sql`speed_bonus_feet IS NULL OR effect_kind IS 'speed'`,
+    ),
+    /**
+     * The other direction: a kind that promises a number must carry one.
+     * Without this an `hp_modifier` effect with both HP columns null derives a
+     * zero, which is indistinguishable from an effect that was never mechanical
+     * and costs the character an entitlement.
+     *
+     * `damage_resistance` is deliberately absent from this list — a resistance
+     * with a null type is the Dragonborn and the Tiefling, and it is a REAL
+     * state rather than an incomplete one.
+     */
+    check(
+      'species_template_trait_effects_hp_modifier_payload_check',
+      sql`effect_kind IS NOT 'hp_modifier' OR hit_points_flat IS NOT NULL OR hit_points_per_level IS NOT NULL`,
+    ),
+    check(
+      'species_template_trait_effects_speed_payload_check',
+      sql`effect_kind IS NOT 'speed' OR speed_bonus_feet IS NOT NULL`,
+    ),
+    /** Declared order starts at 1 and is dense; 0 or a negative is a mis-parse. */
+    check(
+      'species_template_trait_effects_sort_order_check',
+      integerAtLeast('sort_order', 1),
+    ),
+    uniqueIndex('species_template_trait_effects_trait_sort_unique').on(
+      table.species_template_trait_id,
+      table.sort_order,
     ),
   ],
 );
@@ -455,46 +525,11 @@ export const character_species_traits = sqliteTable(
      * does is half-decided rather than invalid.
      */
     description: sqlText()('description'),
-    effect_kind: varchar<SpeciesTraitEffectKind>()('effect_kind'),
-    effect_damage_type: varchar()('effect_damage_type'),
-    effect_hit_points_flat: integer('effect_hit_points_flat'),
-    effect_hit_points_per_level: integer('effect_hit_points_per_level'),
-    effect_speed_bonus_feet: integer('effect_speed_bonus_feet'),
     notes: sqlText()('notes'),
     created_at: datetime()('created_at'),
     updated_at: datetime()('updated_at'),
   },
   (table) => [
-    /**
-     * The identical seven constraints the template carries, and identical on
-     * purpose: the copy is column-wise, so a rule that holds for the catalog
-     * row and not for the character's would let the copy itself produce a row
-     * the schema refuses.
-     */
-    check(
-      'character_species_traits_effect_kind_check',
-      nullOrOneOf('effect_kind', speciesTraitEffectKinds),
-    ),
-    check(
-      'character_species_traits_damage_type_kind_check',
-      sql`effect_damage_type IS NULL OR effect_kind IS 'damage_resistance'`,
-    ),
-    check(
-      'character_species_traits_hit_points_kind_check',
-      sql`(effect_hit_points_flat IS NULL AND effect_hit_points_per_level IS NULL) OR effect_kind IS 'hp_modifier'`,
-    ),
-    check(
-      'character_species_traits_speed_kind_check',
-      sql`effect_speed_bonus_feet IS NULL OR effect_kind IS 'speed'`,
-    ),
-    check(
-      'character_species_traits_hp_modifier_payload_check',
-      sql`effect_kind IS NOT 'hp_modifier' OR effect_hit_points_flat IS NOT NULL OR effect_hit_points_per_level IS NOT NULL`,
-    ),
-    check(
-      'character_species_traits_speed_payload_check',
-      sql`effect_kind IS NOT 'speed' OR effect_speed_bonus_feet IS NOT NULL`,
-    ),
     check(
       'character_species_traits_sort_order_check',
       integerAtLeast('sort_order', 1),
@@ -507,6 +542,176 @@ export const character_species_traits = sqliteTable(
      * value.
      */
     index('character_species_traits_character_id_index').on(table.character_id),
+  ],
+);
+
+/* ==========================================================================
+ * EFFECTS — THE CHARACTER'S OWN
+ * ========================================================================== */
+
+/**
+ * WHAT THE CHARACTER HAS. One row per mechanical effect they carry.
+ *
+ * THE INVERSION, IN ONE TABLE. An effect used to be five columns on a species
+ * trait row, which made "a trait with two effects" unrepresentable and made
+ * every effect a SPECIES effect by construction. An effect now belongs to the
+ * CHARACTER and carries a reference to whatever granted it, so:
+ *
+ *  - a trait granting two effects is two rows and no longer a special case;
+ *  - a feat, a subclass or a background can grant one without a second model —
+ *    `character_source_instances.source_type` already names all five kinds;
+ *  - the sheet asks ONE question of ONE table with no join.
+ *
+ * KEYED ON `character_id` AND NOT ON `character_species_traits.id`, and that is
+ * deliberate for the two reasons the trait table's own comment gives: it keeps
+ * this table in the flat `character_id`-filtered backup and snapshot passes
+ * instead of needing the child-of-child handling `spell_loadout_entries`
+ * requires, and it lets an effect from a feat exist on a character with no
+ * species at all. The trait a species effect came from is recorded in `label`,
+ * which is text — see below for why that is not a severed foreign key.
+ */
+export const character_effects = sqliteTable(
+  'character_effects',
+  {
+    id: integer('id')
+      .primaryKey({ autoIncrement: true })
+      .notNull()
+      .$type<CharacterEffectId>(),
+    character_id: integer('character_id')
+      .notNull()
+      .$type<CharacterId>()
+      .references(() => characters.id, { onDelete: 'cascade' }),
+    /**
+     * The character's own order. An `index` and not a `uniqueIndex` on
+     * `(character_id, sort_order)`, for the reason `character_species_traits`
+     * records: a user reordering their own list mid-edit is not a corrupt row,
+     * and uniqueness would make an ordinary two-step swap impossible.
+     */
+    sort_order: integer('sort_order').notNull(),
+    effect_kind: varchar<EffectKind>()('effect_kind').notNull(),
+    /**
+     * The resisted damage type, for `damage_resistance` only.
+     *
+     * NULLABLE, AND THE LIMB IS DIFFERENT FROM THE TEMPLATE'S. On
+     * `species_template_trait_effects` a null type is D6b limb 2 — the SOURCE
+     * declines to name it. Here it is D6b limb 1: UNDECIDED IS A REAL STATE.
+     * The Dragonborn's resistance type is the Draconic Ancestry choice and the
+     * Tiefling's is the legacy choice, and until the player makes it the
+     * character genuinely has "a resistance, type not yet chosen". That is a
+     * completeness item — something the USER must decide — and it is now
+     * ADDRESSABLE: it is a row with a `label`, where the old model could only
+     * count it (`unchosenDamageResistances` was an integer, because a trait
+     * carrying an anonymous resistance had nothing else to offer).
+     */
+    damage_type: varchar()('damage_type'),
+    /**
+     * The `hp_modifier` payload. Both nullable on D6b LIMB 2 — a resistance
+     * does not HAVE a hit point number, so the absence is real rather than
+     * unset — with the CHECKs below making an `hp_modifier` row with neither,
+     * and a non-`hp_modifier` row with either, unrepresentable.
+     */
+    hit_points_flat: integer('hit_points_flat'),
+    hit_points_per_level: integer('hit_points_per_level'),
+    /** The `speed` payload, nullable on the same limb 2 terms. */
+    speed_bonus_feet: integer('speed_bonus_feet'),
+    /**
+     * WHAT GRANTED THIS, AS A LIVE REFERENCE. Nullable, D6b LIMB 2 — THE
+     * ABSENCE IS REAL AND NOT AN UNSET VALUE — and today it is the COMMON state
+     * rather than an edge. (Limb 1 joins it on the day the other half of
+     * picking a species is built: an effect from a species the app COULD link
+     * and has not yet is undecided rather than absent, and this column holds
+     * both without changing.)
+     *
+     * Nothing in `src/` writes `species_definitions`: the table is empty after
+     * a full application seed, `AddSourceCommand` looks a definition up by id
+     * and throws when it is absent, and the planner's species picker is fed
+     * from it and offers an empty list. So a character who picked a BUNDLED SRD
+     * species has no species `character_source_instances` row to point at, and
+     * a character who typed their own species by hand never will have one. A
+     * NOT NULL column here would make the whole model unusable until the other
+     * half of "picking a species" — which was designed and never built — is
+     * finished, and would still refuse the hand-typed case forever.
+     *
+     * `label` below is NOT a substitute for this and is not a denormalised
+     * copy of it: the two answer different questions, and an effect may
+     * legitimately have both.
+     *
+     * THE REFERENCE IS COMPOSITE, `(source_instance_id, character_id)`, copying
+     * `spell_selection_slots` exactly. A bare `source_instance_id` passes
+     * `PRAGMA foreign_key_check` while pointing at ANOTHER CHARACTER'S source
+     * instance; including `character_id` in the tuple is what makes the
+     * database refuse that, and it is why `character_source_instances` carries
+     * a `(id, character_id)` unique index that is otherwise redundant. With a
+     * NULL in the tuple SQLite's default MATCH SIMPLE satisfies the constraint,
+     * which is exactly the "no source instance" case above.
+     *
+     * ON DELETE cascade: removing the feat removes what the feat granted. An
+     * effect outliving its own source is a mechanic the character no longer
+     * has, showing on the sheet with nothing to explain it.
+     */
+    source_instance_id: integer('source_instance_id').$type<SourceInstanceId>(),
+    /**
+     * WHAT TO CALL THIS ON A SHEET — the granting trait's name, the feat's
+     * name, whatever the user typed. NOT NULL.
+     *
+     * This is not provenance and does not pretend to be. It cannot survive a
+     * rename of the thing it names and it resolves to nothing; that is why
+     * `source_instance_id` exists beside it rather than instead of it. What it
+     * IS is the only way to say "the resistance from Fiendish Legacy whose type
+     * you have not chosen" to a user, and the sheet has no other way to name an
+     * effect at all — the old model borrowed the trait row's `name`, which is
+     * precisely the coupling being removed here.
+     *
+     * NOT NULL rather than nullable, because an effect nobody can name is an
+     * effect nobody can find to edit or delete. `''` would be a null in
+     * costume, which is what `nonEmptyText` in the row contract refuses.
+     */
+    label: varchar()('label').notNull(),
+    notes: sqlText()('notes'),
+    created_at: datetime()('created_at'),
+    updated_at: datetime()('updated_at'),
+  },
+  (table) => [
+    /**
+     * The identical per-kind constraints `species_template_trait_effects`
+     * carries, and identical ON PURPOSE: the copy from catalog to character is
+     * column-wise, so a rule that held for the catalog row and not for the
+     * character's would let the copy itself produce a row the schema refuses.
+     * `IS`/`IS NOT` rather than `=`/`<>` for the reason stated at length there.
+     */
+    check('character_effects_kind_check', oneOf('effect_kind', effectKinds)),
+    check(
+      'character_effects_damage_type_kind_check',
+      sql`damage_type IS NULL OR effect_kind IS 'damage_resistance'`,
+    ),
+    check(
+      'character_effects_hit_points_kind_check',
+      sql`(hit_points_flat IS NULL AND hit_points_per_level IS NULL) OR effect_kind IS 'hp_modifier'`,
+    ),
+    check(
+      'character_effects_speed_kind_check',
+      sql`speed_bonus_feet IS NULL OR effect_kind IS 'speed'`,
+    ),
+    check(
+      'character_effects_hp_modifier_payload_check',
+      sql`effect_kind IS NOT 'hp_modifier' OR hit_points_flat IS NOT NULL OR hit_points_per_level IS NOT NULL`,
+    ),
+    check(
+      'character_effects_speed_payload_check',
+      sql`effect_kind IS NOT 'speed' OR speed_bonus_feet IS NOT NULL`,
+    ),
+    check(
+      'character_effects_sort_order_check',
+      integerAtLeast('sort_order', 1),
+    ),
+    index('character_effects_character_id_index').on(table.character_id),
+    foreignKey({
+      columns: [table.source_instance_id, table.character_id],
+      foreignColumns: [
+        character_source_instances.id,
+        character_source_instances.character_id,
+      ],
+    }).onDelete('cascade'),
   ],
 );
 

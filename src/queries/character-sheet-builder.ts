@@ -43,10 +43,10 @@ import {
   type SheetWarning,
 } from '../rules/sheet';
 import {
-  speciesHitPoints,
-  speciesWalkingSpeedFeet,
-  summariseSpeciesEffects,
-  type NamedSpeciesTraitEffect,
+  effectHitPoints,
+  summariseEffects,
+  walkingSpeedFeet,
+  type EffectRow,
 } from '../rules/species-effects';
 import type { AttacksPerAction } from '../rules/extra-attack';
 import { CharacterNotFoundError } from './character-crud';
@@ -183,13 +183,19 @@ export interface CharacterSheet {
   readonly walking_speed_feet: number | null;
   readonly damage_resistances: readonly string[];
   /**
-   * How many resistance traits grant one whose TYPE the character chooses.
+   * The LABELS of resistances whose TYPE the character has yet to choose.
    *
-   * Counted rather than folded into the list above, because a Dragonborn
-   * genuinely resists something and a sheet showing nothing would be wrong in
-   * the other direction. The choice lives in the trait's own text.
+   * Kept out of the list above, because a Dragonborn genuinely resists
+   * something and a sheet showing nothing would be wrong in the other
+   * direction.
+   *
+   * A LIST OF NAMES WHERE THIS WAS A COUNT. The old model stored an effect on a
+   * trait row, so two traits each granting an unnamed resistance were
+   * indistinguishable and the sheet could only say "plus 2 whose type this
+   * application does not record". An effect row carries its own label, so the
+   * page can now name the grant the user has to go and decide.
    */
-  readonly unchosen_damage_resistances: number;
+  readonly unchosen_damage_resistances: readonly string[];
   readonly classes: readonly SheetClassLine[];
   readonly armor: readonly SheetArmorRow[];
   readonly hit_point_rolls: readonly SheetHitPointRoll[];
@@ -250,18 +256,6 @@ const sheetClassRow: RowCodec<SheetClassJoinRow> = (row) => ({
   is_starting_class: sqlBoolean(row, 'is_starting_class'),
   class_name: sqlString(row, 'class_name'),
   hit_die: sqlNullableInteger(row, 'hit_die'),
-});
-
-const namedSpeciesTraitEffect: RowCodec<NamedSpeciesTraitEffect> = (row) => ({
-  name: sqlString(row, 'name'),
-  effect_kind: sqlNullableString(row, 'effect_kind'),
-  effect_damage_type: sqlNullableString(row, 'effect_damage_type'),
-  effect_hit_points_flat: sqlNullableInteger(row, 'effect_hit_points_flat'),
-  effect_hit_points_per_level: sqlNullableInteger(
-    row,
-    'effect_hit_points_per_level',
-  ),
-  effect_speed_bonus_feet: sqlNullableInteger(row, 'effect_speed_bonus_feet'),
 });
 
 /**
@@ -400,22 +394,39 @@ export class CharacterSheetBuilder {
     });
     const saves = savingThrowProficiencies(classes);
 
-    // The species contribution is a SEPARATE number by design
+    // ONE READ OF ONE TABLE, WITH NO JOIN, which is what the effect model was
+    // inverted for. This used to select six columns off
+    // `character_species_traits` and hand the whole trait list — free text and
+    // all — to a summary that ignored most of it. The sheet asks "what does
+    // this character have"; that is now literally the query, and an effect from
+    // a feat or a subclass would arrive here with no change at all.
+    //
+    // The effect contribution to Hit Points is a SEPARATE number by design
     // (`src/rules/species-effects.ts`), and this is the only caller in `src/`
     // that puts it beside `hitPointMaximum`. A sheet printing the maximum alone
     // shows a Dwarf's hit points short by their level, so the two are shown as
     // two numbers and the page adds them where a reader can see both.
-    const traits = this.db.all(
-      `SELECT name, effect_kind, effect_damage_type, effect_hit_points_flat,
-              effect_hit_points_per_level, effect_speed_bonus_feet
-       FROM character_species_traits
+    // Reads `character_effects` rather than the trait table: D22 inverted the
+    // model so an effect belongs to the CHARACTER and names its source, which
+    // is what lets one trait carry both a resistance and a cantrip.
+    const effectRows = this.db.all(
+      `SELECT effect_kind, damage_type, hit_points_flat, hit_points_per_level,
+              speed_bonus_feet, label
+       FROM character_effects
        WHERE character_id = ?
        ORDER BY sort_order, id`,
       [characterId],
-      namedSpeciesTraitEffect,
+      (row): EffectRow => ({
+        effect_kind: sqlString(row, 'effect_kind'),
+        damage_type: sqlNullableString(row, 'damage_type'),
+        hit_points_flat: sqlNullableInteger(row, 'hit_points_flat'),
+        hit_points_per_level: sqlNullableInteger(row, 'hit_points_per_level'),
+        speed_bonus_feet: sqlNullableInteger(row, 'speed_bonus_feet'),
+        label: sqlString(row, 'label'),
+      }),
     );
-    const effects = summariseSpeciesEffects(traits);
-    const speciesHp = speciesHitPoints(traits, totalLevel);
+    const effects = summariseEffects(effectRows);
+    const speciesHp = effectHitPoints(effectRows, totalLevel);
     const baseSpeed = this.db.one(
       `SELECT base_speed_feet FROM character_species WHERE character_id = ?`,
       [characterId],
@@ -532,7 +543,7 @@ export class CharacterSheetBuilder {
       walking_speed_feet:
         baseSpeed === null
           ? null
-          : speciesWalkingSpeedFeet(baseSpeed.feet, traits),
+          : walkingSpeedFeet(baseSpeed.feet, effectRows),
       damage_resistances: effects.damageResistances,
       unchosen_damage_resistances: effects.unchosenDamageResistances,
       classes: classes.map((entry): SheetClassLine => ({

@@ -173,6 +173,13 @@ async function portableTableCounts(
       await rows(page, 'character_species_traits'),
       characterId,
     ).length,
+    // ...and the character's own EFFECTS, which used to be five columns on the
+    // trait rows above. A document that does not carry them silently loses
+    // every resistance and hit point bonus the player has.
+    character_effects: forCharacter(
+      await rows(page, 'character_effects'),
+      characterId,
+    ).length,
     // And the four stored sheet inputs, on the same terms again: a document
     // that does not carry them is a document that silently loses a player's
     // armour, their rolled hit points and the skills they chose.
@@ -511,6 +518,7 @@ test('captures every restorable character table and reports exact state differen
     'character_hit_point_rolls',
     'character_skill_proficiencies',
     'character_sheet_adjustments',
+    'character_effects',
   ]) {
     expect(document.tables[table]).toEqual(
       forCharacter(await rows(page, table), workspaceImage.ids.character),
@@ -525,6 +533,10 @@ test('captures every restorable character table and reports exact state differen
     // the weapons key was: a backup without it silently loses the species.
     'character_background',
     'character_class_levels',
+    // Added when the effect model was inverted: an effect is a row of the
+    // character's own now, and a backup without this key silently loses every
+    // resistance and hit point bonus they have.
+    'character_effects',
     'character_hit_point_rolls',
     'character_rule_overrides',
     'character_save_points',
@@ -557,6 +569,7 @@ test('captures every restorable character table and reports exact state differen
     'character_hit_point_rolls',
     'character_skill_proficiencies',
     'character_sheet_adjustments',
+    'character_effects',
   ]) {
     expect(document.tables[table], `${table} is captured exactly`).toEqual([]);
   }
@@ -835,9 +848,10 @@ test('round-trips a named save point through the mutation path', async ({
   )[0]!;
   expect(point).toMatchObject({
     label: 'Before experiment',
-    // a7-v4 is the snapshot version that also captures the four stored sheet
-    // inputs.
-    schema_version: 'a7-v4',
+    // a7-v5 is the snapshot version that also captures `character_effects`,
+    // and whose `character_species_traits` rows no longer carry the five
+    // retired `effect_*` columns.
+    schema_version: 'a7-v5',
   });
   await execute(
     page,
@@ -1097,7 +1111,7 @@ test('undoes a structural class change through its snapshot inverse', async ({
   );
   expect(changed.inverse).toMatchObject({
     type: 'restore_snapshot',
-    snapshot: { schema_version: 'a7-v4' },
+    snapshot: { schema_version: 'a7-v5' },
     integrity: expect.any(String),
   });
   await execute(

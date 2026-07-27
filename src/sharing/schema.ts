@@ -6,7 +6,7 @@ import {
   armorSlots,
   rulesEditions,
   skills,
-  speciesTraitEffectKinds,
+  effectKinds,
   weaponMasteryProperties,
 } from '../domain/enums';
 import { weaponMasterySelectionError } from '../domain/contracts/row-rules';
@@ -14,6 +14,7 @@ import {
   WEAPON_RANGE_MAX_FEET,
   WEAPON_TEXT_LIMITS,
 } from '../domain/weapon-limits';
+import { LEGACY_TRAIT_EFFECT_KINDS } from '../rules/legacy-trait-effects';
 import {
   ORIGIN_EFFECT_MAGNITUDE_MAX,
   ORIGIN_SPEED_MAX_FEET,
@@ -78,6 +79,16 @@ export const SHARE_LIMITS = Object.freeze({
    * most ONE row per character, and the schema's UNIQUE index says so.
    */
   speciesTraits: 100,
+  /**
+   * How many effects one document may carry.
+   *
+   * Higher than `speciesTraits` because one trait may now grant several and a
+   * feat, a subclass or a background may grant more; 200 is far past any
+   * hand-built character and exists for the same reason every other cap does —
+   * to stop a hostile document spending the whole decompressed budget on one
+   * section, and to name that section when it fires.
+   */
+  effects: 200,
   /**
    * The two unbounded-by-cardinality sheet sections.
    *
@@ -313,6 +324,24 @@ export interface ShareSpecies {
   readonly notes?: string;
 }
 
+/**
+ * A shared species trait.
+ *
+ * THE FIVE `effect_*` FIELDS ARE LEGACY AND DECODE-ONLY. The columns they came
+ * from no longer exist, so this build never WRITES one; every link generated
+ * from today on carries `null` in those five wire slots. They stay in the type,
+ * in the frozen wire order and in the validator because a link somebody pasted
+ * into a chat last week carries real values there, and dropping the fields
+ * would either make that link fail to decode or silently discard the character's
+ * resistances. `shareSpeciesTrait` accepts them against the HISTORICAL
+ * vocabulary — including the retired `granted_spells` — and
+ * `importCharacterShare` migrates them into `character_effects`.
+ *
+ * The wire order is NOT rewritten to reclaim the slots. Reordering or shrinking
+ * the trait tuple would silently reinterpret element 13 of every link already in
+ * the wild, which is the exact failure the positional format's version pinning
+ * exists to avoid.
+ */
 export interface ShareSpeciesTrait {
   readonly name: string;
   readonly description?: string;
@@ -321,6 +350,46 @@ export interface ShareSpeciesTrait {
   readonly effect_hit_points_flat?: number;
   readonly effect_hit_points_per_level?: number;
   readonly effect_speed_bonus_feet?: number;
+  readonly notes?: string;
+}
+
+/**
+ * ONE OF THE CHARACTER'S OWN EFFECTS — the fifteenth root element.
+ *
+ * A NEW ROOT ELEMENT AND NOT A FOURTH MEMBER OF THE ORIGIN GROUP, deliberately.
+ * Effects are no longer species-scoped — that severance is the whole point of
+ * the inversion — so nesting them under the origin would re-create the coupling
+ * being removed, and would change the meaning of element 13 for links already in
+ * the wild. The root has grown 11 -> 12 -> 13 -> 14 with
+ * `CHARACTER_SHARE_VERSION` pinned at 1 every time; this is the established
+ * move, not a format break.
+ *
+ * `sourceRef` names a `sources[].id` — the SAME reference space
+ * `selections[].ref` uses — and is optional because `source_instance_id` is
+ * nullable for the reason that column records at length: no bundled species can
+ * have a source instance today, and a hand-typed one never will.
+ *
+ * `sourceSubclass` EXISTS BECAUSE ONE REF CAN MINT TWO SOURCE INSTANCES. A
+ * `classes[]` entry carrying a `subclassKey` imports as a class source AND a
+ * subclass source, and both are roots the document cannot tell apart with a ref
+ * alone. `selections[].ref` does not care — it searches the descendants of both
+ * — but an effect names exactly one row, and a Fighter's subclass feature
+ * arriving attached to `Fighter 3` is a silently WRONG provenance rather than an
+ * absent one. The flag says "the subclass root of that ref", is only ever
+ * `true`, and is refused unless its ref really is a class carrying a subclass.
+ *
+ * There is no `sort_order`: ARRAY POSITION is the order, exactly as it is for
+ * `speciesTraits`.
+ */
+export interface ShareEffect {
+  readonly kind: string;
+  readonly label: string;
+  readonly damage_type?: string;
+  readonly hit_points_flat?: number;
+  readonly hit_points_per_level?: number;
+  readonly speed_bonus_feet?: number;
+  readonly sourceRef?: number;
+  readonly sourceSubclass?: true;
   readonly notes?: string;
 }
 
@@ -360,6 +429,19 @@ export const SHARE_SPECIES_TRAIT_NUMBERS = [
   'effect_speed_bonus_feet',
 ] as const satisfies readonly (keyof ShareSpeciesTrait)[];
 
+/** The nullable text fields of a shared effect, in wire order. */
+export const SHARE_EFFECT_TEXT = [
+  'damage_type',
+  'notes',
+] as const satisfies readonly (keyof ShareEffect)[];
+
+/** The signed integer payloads of a shared effect, in wire order. */
+export const SHARE_EFFECT_NUMBERS = [
+  'hit_points_flat',
+  'hit_points_per_level',
+  'speed_bonus_feet',
+] as const satisfies readonly (keyof ShareEffect)[];
+
 /** The nullable text fields of a shared background, in wire order. */
 export const SHARE_BACKGROUND_TEXT = [
   'ability_score_1',
@@ -394,6 +476,13 @@ const SHARE_SPECIES_TEXT_LIMITS: Readonly<
 > = {
   creature_type: ORIGIN_TEXT_LIMITS.creature_type,
   size: ORIGIN_TEXT_LIMITS.size,
+  notes: ORIGIN_TEXT_LIMITS.notes,
+};
+
+const SHARE_EFFECT_TEXT_LIMITS: Readonly<
+  Record<(typeof SHARE_EFFECT_TEXT)[number], number>
+> = {
+  damage_type: ORIGIN_TEXT_LIMITS.name,
   notes: ORIGIN_TEXT_LIMITS.notes,
 };
 
@@ -449,6 +538,17 @@ export interface CharacterShareDocument {
   readonly species?: ShareSpecies;
   readonly speciesTraits?: readonly ShareSpeciesTrait[];
   readonly background?: ShareBackground;
+  /**
+   * THE CHARACTER'S OWN EFFECTS. Optional for the fourth time and on the same
+   * compatibility guarantee: every link generated before this change carries no
+   * `effects` key, and making it required would make each of those links
+   * unreadable.
+   *
+   * Absent means one of two things and both import correctly: the link predates
+   * the effect model, in which case any effects it carries are on its trait
+   * rows and are migrated from there; or the character genuinely has none.
+   */
+  readonly effects?: readonly ShareEffect[];
   /**
    * THE FOUR STORED SHEET INPUTS. Optional for the third time and for the same
    * compatibility guarantee: every link generated before this change carries
@@ -966,15 +1066,25 @@ function shareSpeciesTrait(value: unknown, label: string): ShareSpeciesTrait {
       );
     }
   }
-  // THE DATABASE'S OWN CHECKS, APPLIED AT THE BOUNDARY. Reaching the INSERT
-  // with an unknown kind, or with a payload belonging to a different kind,
-  // aborts the whole import transaction with a raw SQLITE_CONSTRAINT_CHECK
-  // naming nothing the user could act on.
+  // THE CHECKS THE TRAIT TABLE USED TO CARRY, APPLIED AT THE BOUNDARY AGAINST
+  // THE HISTORICAL VOCABULARY.
+  //
+  // `LEGACY_TRAIT_EFFECT_KINDS` and NOT `effectKinds`, and the difference is the
+  // whole compatibility story. A link minted before this build can legitimately
+  // say `granted_spells`; validating against the CURRENT three-member set would
+  // reject it, which makes a link somebody already pasted into a chat
+  // undecodable — the exact data loss this format exists to prevent. It is
+  // accepted here and DROPPED at import (`splitLegacyTraitEffect`), which
+  // leaves the character with precisely the spells they had, because the spell
+  // half never lived here in the first place.
+  //
+  // The per-kind pairing checks below still run, so a legacy payload that is
+  // internally incoherent is still refused rather than reaching an INSERT.
   const kind = trait.effect_kind;
   if (
     kind !== undefined &&
-    !speciesTraitEffectKinds.includes(
-      kind as (typeof speciesTraitEffectKinds)[number],
+    !LEGACY_TRAIT_EFFECT_KINDS.includes(
+      kind as (typeof LEGACY_TRAIT_EFFECT_KINDS)[number],
     )
   ) {
     throw new ShareValidationError(`${label}.effect_kind is unsupported.`);
@@ -1008,6 +1118,135 @@ function shareSpeciesTrait(value: unknown, label: string): ShareSpeciesTrait {
     );
   }
   return trait as unknown as ShareSpeciesTrait;
+}
+
+/**
+ * One effect, held to EXACTLY the constraints `character_effects` declares.
+ *
+ * Applying the database's own CHECKs here rather than letting the INSERT do it
+ * is the same call `shareWeapon`, `shareArmor` and `shareSpeciesTrait` already
+ * make: reaching the INSERT with an unknown kind, or a payload belonging to a
+ * different kind, aborts the whole import transaction with a raw
+ * SQLITE_CONSTRAINT_CHECK naming nothing the user could act on.
+ *
+ * `effectKinds` and not the legacy list, because this section did not exist
+ * before this build: no link in the wild can carry a `granted_spells` effect
+ * HERE, and accepting one would be inventing tolerance for an artifact that
+ * cannot exist.
+ */
+function shareEffect(
+  value: unknown,
+  label: string,
+  knownSourceIds: ReadonlySet<number>,
+  subclassRefs: ReadonlySet<number>,
+): ShareEffect {
+  const row = record(value, label);
+  exactKeys(
+    row,
+    ['kind', 'label'],
+    [
+      ...SHARE_EFFECT_TEXT,
+      ...SHARE_EFFECT_NUMBERS,
+      'sourceRef',
+      'sourceSubclass',
+    ],
+    label,
+  );
+  const kind = row.kind;
+  if (
+    typeof kind !== 'string' ||
+    !effectKinds.includes(kind as (typeof effectKinds)[number])
+  ) {
+    throw new ShareValidationError(`${label}.kind is unsupported.`);
+  }
+  const effect: Record<string, unknown> = {
+    kind,
+    // Non-empty, matching `character_effects.label`: an effect nobody can name
+    // is an effect nobody can find to edit or delete.
+    label: text(row.label, `${label}.label`, ORIGIN_TEXT_LIMITS.trait_name),
+  };
+  for (const field of SHARE_EFFECT_TEXT) {
+    if (row[field] !== undefined) {
+      effect[field] = text(
+        row[field],
+        `${label}.${field}`,
+        SHARE_EFFECT_TEXT_LIMITS[field],
+      );
+    }
+  }
+  for (const field of SHARE_EFFECT_NUMBERS) {
+    if (row[field] !== undefined) {
+      effect[field] = originInteger(
+        row[field],
+        `${label}.${field}`,
+        ORIGIN_EFFECT_MAGNITUDE_MAX,
+        -ORIGIN_EFFECT_MAGNITUDE_MAX,
+      );
+    }
+  }
+  if (row.sourceRef !== undefined) {
+    const ref = integer(row.sourceRef, `${label}.sourceRef`, 0, 119);
+    // The SAME reference space `selections[].ref` uses, and checked the same
+    // way: a ref naming no source in this document would import as an effect
+    // pointing at nothing, which the composite foreign key would then refuse
+    // mid-transaction with a message naming neither the effect nor the source.
+    if (!knownSourceIds.has(ref)) {
+      throw new ShareValidationError(`${label}.sourceRef is unknown.`);
+    }
+    effect.sourceRef = ref;
+  }
+  if (row.sourceSubclass !== undefined) {
+    // Checked here rather than at import for the reason `sourceRef` is: the
+    // import resolves a flagged ref to the SECOND root that ref minted, and a
+    // flag naming a ref that mints only one would read `roots[1]` — `undefined`
+    // — and quietly write the effect with no provenance at all. Refusing the
+    // document says which effect is wrong; the silent version says nothing.
+    if (row.sourceSubclass !== true) {
+      throw new ShareValidationError(
+        `${label}.sourceSubclass must be true when present.`,
+      );
+    }
+    if (effect.sourceRef === undefined) {
+      throw new ShareValidationError(
+        `${label}.sourceSubclass requires a sourceRef.`,
+      );
+    }
+    if (!subclassRefs.has(effect.sourceRef as number)) {
+      throw new ShareValidationError(
+        `${label}.sourceSubclass names a ref with no subclass.`,
+      );
+    }
+    effect.sourceSubclass = true;
+  }
+  if (effect.damage_type !== undefined && kind !== 'damage_resistance') {
+    throw new ShareValidationError(
+      `${label}.damage_type requires kind damage_resistance.`,
+    );
+  }
+  const hasHitPoints =
+    effect.hit_points_flat !== undefined ||
+    effect.hit_points_per_level !== undefined;
+  if (hasHitPoints && kind !== 'hp_modifier') {
+    throw new ShareValidationError(
+      `${label} hit point payloads require kind hp_modifier.`,
+    );
+  }
+  if (kind === 'hp_modifier' && !hasHitPoints) {
+    throw new ShareValidationError(
+      `${label} kind hp_modifier requires a hit point value.`,
+    );
+  }
+  if (effect.speed_bonus_feet !== undefined && kind !== 'speed') {
+    throw new ShareValidationError(
+      `${label}.speed_bonus_feet requires kind speed.`,
+    );
+  }
+  if (kind === 'speed' && effect.speed_bonus_feet === undefined) {
+    throw new ShareValidationError(
+      `${label} kind speed requires speed_bonus_feet.`,
+    );
+  }
+  return effect as unknown as ShareEffect;
 }
 
 function shareBackground(value: unknown, label: string): ShareBackground {
@@ -1066,6 +1305,7 @@ export function validateShareDocument(
       'hitPointRolls',
       'skillProficiencies',
       'sheetAdjustment',
+      'effects',
     ],
     'document',
   );
@@ -1257,6 +1497,14 @@ export function validateShareDocument(
     );
   }
   const knownIds = new Set(ids);
+  // The refs that mint TWO source instances rather than one. Only a class entry
+  // can, and only when it names a subclass; `sources[]` entries are always a
+  // single root, so none of them is ever in here.
+  const subclassRefs = new Set(
+    classes
+      .filter((item) => item.subclassKey !== undefined)
+      .map((item) => item.id),
+  );
 
   const selections = list(
     source.selections,
@@ -1518,6 +1766,18 @@ export function validateShareDocument(
       ? undefined
       : shareBackground(source.background, 'background');
 
+  let effects: CharacterShareDocument['effects'] | undefined;
+  if (source.effects !== undefined) {
+    effects = list(source.effects, 'effects', SHARE_LIMITS.effects).map(
+      (item, index) =>
+        shareEffect(item, `effects[${index}]`, knownIds, subclassRefs),
+    );
+    // NOT `assertUnique`, for the reason `speciesTraits` gives one line up and
+    // one more besides: a character may legitimately carry two identical
+    // effects — two feats each granting Fire resistance is a real build — and
+    // the schema's index on `(character_id)` is deliberately not unique.
+  }
+
   let armor: CharacterShareDocument['armor'] | undefined;
   if (source.armor !== undefined) {
     // The count cap is 2 and not a `SHARE_LIMITS` entry, because the cap here
@@ -1594,5 +1854,6 @@ export function validateShareDocument(
     ...(hitPointRolls === undefined ? {} : { hitPointRolls }),
     ...(skillProficiencies === undefined ? {} : { skillProficiencies }),
     ...(sheetAdjustment === undefined ? {} : { sheetAdjustment }),
+    ...(effects === undefined ? {} : { effects }),
   };
 }
