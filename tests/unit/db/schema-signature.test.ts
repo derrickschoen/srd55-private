@@ -80,7 +80,7 @@ describe('pre-Drizzle database images', () => {
     const tableCount = (sql: string) =>
       [...sql.matchAll(/CREATE TABLE/g)].length;
     expect(tableCount(preDrizzleSchema)).toBe(38);
-    expect(tableCount(schema)).toBe(56);
+    expect(tableCount(schema)).toBe(58);
   });
 
   it('rejects a pre-Drizzle image at open instead of half-working', async () => {
@@ -97,11 +97,13 @@ describe('pre-Drizzle database images', () => {
     // actually short of. Both paths produce the same recoverable
     // `schema_mismatch` status, which is what the next test depends on.
     expect(boot.detail).toContain(
-      // All twenty-six native tables, in the order the check reports them: the
-      // four weapon tables, the eight of the sheet core, the six origins
-      // tables, the two effect tables, the two D19 class-feature tables and the
-      // four stored sheet inputs. A pre-Drizzle image has none of them.
+      // All twenty-EIGHT native tables, in the order the check reports them:
+      // the four weapon tables, the eight of the sheet core, the SEVEN origins
+      // tables, the two effect tables, the two D19 class-feature tables, the
+      // four stored sheet inputs, and `spell_version_upcast_levels`. A
+      // pre-Drizzle image has none of them.
       'Database image is missing application tables: armor_templates, ' +
+        'background_equipment_items, ' +
         'background_templates, character_armor, character_background, ' +
         'character_effects, character_hit_point_rolls, ' +
         'character_sheet_adjustments, ' +
@@ -113,6 +115,7 @@ describe('pre-Drizzle database images', () => {
         'class_weapon_mastery_grants, class_weapon_proficiencies, ' +
         'named_features, species_template_trait_effects, ' +
         'species_template_traits, species_templates, ' +
+        'spell_version_upcast_levels, ' +
         'subclass_features, weapon_templates.',
     );
   });

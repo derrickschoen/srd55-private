@@ -178,6 +178,18 @@ describe('read-only report presentation', () => {
     expect(markup).toContain('Free Cast Only · CHA');
     expect(markup).toContain('DC 12 · WIS');
     expect(markup).toContain('Melee Spell, Ranged Spell');
+    // THE UPCAST PROGRESSION, ASCENDING AND NAMING ITS SCALE. The fixture
+    // stores `[3, 2, 4]`; printing them in that order would be a list a reader
+    // has to re-sort, and printing `2, 3, 4` with no scale word would leave a
+    // player unable to tell slot levels from character levels.
+    expect(markup).toContain(
+      'Upcast: </dt><dd>slot levels 2, 3, 4 · One additional creature per ' +
+        'slot level above 2.',
+    );
+    // ...AND NO LINE AT ALL for the four spells whose document said nothing.
+    // `Upcast: —` would assert that they cannot be upcast, which no document
+    // claimed. Exactly one `Upcast:` in the whole sheet.
+    expect(markup.match(/Upcast: /gu)).toHaveLength(1);
     expect(markup.indexOf('Gift 2</h2>')).toBeLessThan(
       markup.indexOf('Gift 10</h2>'),
     );

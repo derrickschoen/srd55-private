@@ -75,7 +75,13 @@ const nativeAutoIncrementTables = [
   'class_weapon_mastery_counts',
   'class_weapon_mastery_grants',
   'weapon_templates',
-  // ...and these six from `db/schema/origins.ts`.
+  // ...and these SEVEN from `db/schema/origins.ts`. The seventh,
+  // `background_equipment_items`, carries a surrogate key even though
+  // (template, option, sort_order) is a perfectly good natural one: an
+  // equipment LINE has no identity across a re-cut of the extract, so the
+  // seeder deletes and re-inserts rather than upserting, and a natural key
+  // would invite the upsert that leaves a shortened package carrying its tail.
+  'background_equipment_items',
   'background_templates',
   'character_background',
   'character_species',
@@ -112,6 +118,10 @@ const nativeAutoIncrementTables = [
   'character_hit_point_rolls',
   'character_sheet_adjustments',
   'character_skill_proficiencies',
+  // The structured upcast progression. A surrogate key for the reason
+  // `spell_version_tags` and the other spell pivots have one: the importer
+  // replaces the whole list per spell rather than reconciling rows.
+  'spell_version_upcast_levels',
 ] as const;
 
 const allAutoIncrementTables = [
@@ -172,13 +182,14 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
         .map(String);
 
       expect(declared).toEqual(allAutoIncrementTables);
-      // 30 surviving Laravel tables plus 26 native: 4 weapons, 8 sheet core,
-      // 6 origins, 2 effects, 2 class features, 4 stored sheet inputs. Counted
-      // in parts so one group shrinking while another grows cannot pass
-      // unnoticed.
-      expect(declared).toHaveLength(56);
+      // 30 surviving Laravel tables plus 28 native: 4 weapons, 8 sheet core,
+      // 7 origins (the seventh is `background_equipment_items`), 2 effects,
+      // 2 class features, 4 stored sheet inputs, plus the one structured-value
+      // table on the catalog side, `spell_version_upcast_levels`. Counted in
+      // parts so one group shrinking while another grows cannot pass unnoticed.
+      expect(declared).toHaveLength(58);
       expect(autoIncrementTables).toHaveLength(30);
-      expect(nativeAutoIncrementTables).toHaveLength(26);
+      expect(nativeAutoIncrementTables).toHaveLength(28);
 
       const withoutAutoIncrement = db
         .selectValues(

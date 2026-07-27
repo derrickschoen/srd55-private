@@ -2284,6 +2284,14 @@ test('builds Mutt printable sources with complete facts and only the mechanicall
     casting_mode: 'with_slots',
     save_abilities: ['wisdom'],
     description: null,
+    // The upcast progression, ABSENT rather than empty-because-we-checked. The
+    // parity fixture's catalog record carries no `upcastScale`/`upcastLevels`,
+    // which is what every catalog document already in the wild looks like — and
+    // the printable card prints no Upcast line at all for it, rather than an
+    // em-dash that would claim the spell cannot be upcast.
+    upcast_scale: null,
+    upcast_levels: [],
+    upcast_summary: null,
   });
   const thornWhip = printable.source_groups
     .flatMap((group: Row) => group.spells)

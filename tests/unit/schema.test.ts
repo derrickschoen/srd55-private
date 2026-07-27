@@ -232,16 +232,24 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
   spell_versions: {
     integer: [
       'id', 'spell_identity_id', 'level', 'ritual', 'concentration',
+      'range_feet', 'area_feet', 'material_cost_copper',
       'healing', 'requires_mod_for_effect', 'is_active',
     ],
     text: [
       'content_key', 'display_name', 'rules_edition', 'school',
-      'casting_time', 'action_type', 'range', 'duration', 'components',
-      'material_component_summary', 'short_summary', 'upcast_type',
+      'casting_time', 'action_type', 'range', 'range_kind', 'area_shape',
+      'duration', 'components',
+      'material_component_summary', 'material_cost_kind', 'short_summary',
+      'upcast_scale',
       'upcast_summary', 'effect_reliability_category', 'provenance',
       'seed_version',
     ],
     numeric: ['created_at', 'updated_at'],
+  },
+  spell_version_upcast_levels: {
+    integer: ['id', 'spell_version_id', 'level'],
+    text: [],
+    numeric: [],
   },
   subclass_definitions: {
     integer: ['id', 'class_definition_id'],
@@ -371,6 +379,14 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
       'skill_proficiency_1', 'skill_proficiency_2', 'tool_proficiency',
       'equipment_option_a', 'equipment_option_b',
     ],
+    numeric: ['created_at', 'updated_at'],
+  },
+  background_equipment_items: {
+    integer: [
+      'id', 'background_template_id', 'sort_order', 'quantity',
+      'weapon_template_id', 'armor_template_id', 'coin_copper',
+    ],
+    text: ['option', 'item_name', 'item_kind'],
     numeric: ['created_at', 'updated_at'],
   },
   character_background: {
@@ -545,6 +561,10 @@ const expectedNotNull: Record<string, string[]> = {
     'skill_proficiency_2', 'tool_proficiency', 'equipment_option_a',
     'equipment_option_b',
   ],
+  background_equipment_items: [
+    'id', 'background_template_id', 'option', 'sort_order', 'quantity',
+    'item_name', 'item_kind',
+  ],
   character_background: ['id', 'character_id', 'name'],
   // Sheet core. `dex_bonus_max` and `strength_requirement` are the only
   // nullable columns across all eight, and both are D6b limb 2 — the source
@@ -652,6 +672,7 @@ const expectedNotNull: Record<string, string[]> = {
   spell_version_publications: ['id', 'spell_version_id', 'source_book'],
   spell_version_save_abilities: ['id', 'spell_version_id', 'save_ability'],
   spell_version_tags: ['id', 'spell_version_id', 'tag'],
+  spell_version_upcast_levels: ['id', 'spell_version_id', 'level'],
   spell_versions: [
     'id', 'content_key', 'spell_identity_id', 'display_name', 'rules_edition',
     'level', 'school', 'ritual', 'concentration', 'healing',
@@ -710,6 +731,10 @@ const expectedNamedIndexes: Record<string, string> = {
     'background_templates:content_key:unique',
   background_templates_name_rules_edition_unique:
     'background_templates:name,rules_edition:unique',
+  background_equipment_items_template_option_sort_order_unique:
+    'background_equipment_items:background_template_id,option,sort_order:unique',
+  background_equipment_items_background_template_id_index:
+    'background_equipment_items:background_template_id',
   character_species_character_id_unique:
     'character_species:character_id:unique',
   character_species_traits_character_id_index:
@@ -817,6 +842,8 @@ const expectedNamedIndexes: Record<string, string> = {
   spell_version_tags_spell_version_id_tag_unique:
     'spell_version_tags:spell_version_id,tag:unique',
   spell_version_tags_tag_index: 'spell_version_tags:tag',
+  spell_version_upcast_levels_spell_version_id_level_unique:
+    'spell_version_upcast_levels:spell_version_id,level:unique',
   spell_versions_is_active_index: 'spell_versions:is_active',
   spell_versions_content_key_unique: 'spell_versions:content_key:unique',
   spell_versions_rules_edition_level_index:
@@ -856,6 +883,7 @@ const expectedUniqueGroups: Record<string, string[]> = {
   ],
   species_template_trait_effects: ['species_template_trait_id,sort_order'],
   background_templates: ['content_key', 'name,rules_edition'],
+  background_equipment_items: ['background_template_id,option,sort_order'],
   character_species: ['character_id'],
   character_background: ['character_id'],
   character_armor: ['character_id,slot'],
@@ -896,6 +924,7 @@ const expectedUniqueGroups: Record<string, string[]> = {
   spell_version_publications: ['spell_version_id,source_book'],
   spell_version_save_abilities: ['spell_version_id,save_ability'],
   spell_version_tags: ['spell_version_id,tag'],
+  spell_version_upcast_levels: ['spell_version_id,level'],
   spell_versions: ['content_key', 'spell_identity_id,rules_edition'],
   subclass_definitions: [
     'class_definition_id,name,rules_edition', 'content_key',
@@ -1024,6 +1053,16 @@ const expectedDefaultedRow: Record<string, unknown> = {
 };
 
 const expectedForeignKeys: Record<string, string[]> = {
+  // RESTRICT rather than CASCADE on the two template links, and the asymmetry
+  // is deliberate: deleting a background template should take its equipment
+  // lines with it, but deleting a WEAPON template must not silently shorten
+  // four background packages. Nothing deletes a weapon template today, so this
+  // is a guard against a future writer rather than a live path.
+  background_equipment_items: [
+    'armor_template_id->armor_templates.id|RESTRICT',
+    'background_template_id->background_templates.id|CASCADE',
+    'weapon_template_id->weapon_templates.id|RESTRICT',
+  ],
   change_log: ['character_id->characters.id|CASCADE'],
   character_class_levels: [
     'character_id->characters.id|CASCADE',
@@ -1089,6 +1128,9 @@ const expectedForeignKeys: Record<string, string[]> = {
   spell_version_publications: ['spell_version_id->spell_versions.id|CASCADE'],
   spell_version_save_abilities: ['spell_version_id->spell_versions.id|CASCADE'],
   spell_version_tags: ['spell_version_id->spell_versions.id|CASCADE'],
+  spell_version_upcast_levels: [
+    'spell_version_id->spell_versions.id|CASCADE',
+  ],
   spell_versions: ['spell_identity_id->spell_identities.id|CASCADE'],
   subclass_definitions: ['class_definition_id->class_definitions.id|CASCADE'],
   subclass_progressions: [

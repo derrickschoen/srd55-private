@@ -475,6 +475,26 @@ export const TABLE_SCOPES = {
     share: false,
     backupReference: false,
   },
+  /**
+   * The levels at which a spell can be upcast. Catalog content on the same five
+   * flags as every other `spell_versions` pivot, and the reasoning is the same
+   * one `spell_versions` itself records: the catalog is REBUILT by the
+   * recipient's own import, so nothing about it belongs in a portable document.
+   *
+   * `backupReference` STAYS FALSE, and it is worth saying why it is not
+   * inherited from the parent. `spell_versions` carries it because a backup
+   * resolves a character's spell rows against that table BY CONTENT KEY
+   * (`SELECT id, content_key FROM "spell_versions" …`). Nothing a character owns
+   * points at an upcast level, so there is nothing to resolve.
+   */
+  spell_version_upcast_levels: {
+    role: 'catalog_spell',
+    snapshot: false,
+    backupDirect: false,
+    backup: false,
+    share: false,
+    backupReference: false,
+  },
 
   // --- classes -----------------------------------------------------------
   class_definitions: {
@@ -750,6 +770,30 @@ export const TABLE_SCOPES = {
     share: false,
     backupReference: false,
   },
+  /**
+   * The structured equipment lines of a background TEMPLATE. All five flags
+   * false, exactly as its parent — this is bundled SRD catalog content, seeded
+   * from `docs/srd/source/backgrounds.txt` on every boot, and a portable
+   * document that carried it would be shipping the recipient a copy of content
+   * they already have.
+   *
+   * THE CHARACTER SIDE IS UNTOUCHED BY THIS TRACK AND THAT IS THE OWNER'S WORD:
+   * the ruling says *"templates"*. `character_background.equipment_option_a`
+   * and `_b` are still two free-text columns and still `verbatim` in the D30
+   * portability map. NOTHING COPIES A TEMPLATE INTO A CHARACTER TODAY — the
+   * species side has `speciesFromTemplate` and the background side has no
+   * equivalent — so structuring the template changes nothing a user can see
+   * yet. That gap is named rather than quietly closed with a schema change the
+   * ruling did not ask for.
+   */
+  background_equipment_items: {
+    role: 'catalog_origin',
+    snapshot: false,
+    backupDirect: false,
+    backup: false,
+    share: false,
+    backupReference: false,
+  },
 
   // --- the character's own origin ------------------------------------------
   /**
@@ -945,6 +989,7 @@ export function order<Member extends string>() {
 export const APPLICATION_TABLES = order<AnyTableName>()([
   'armor_templates',
   'background_definitions',
+  'background_equipment_items',
   'background_templates',
   'change_log',
   'character_armor',
@@ -992,6 +1037,7 @@ export const APPLICATION_TABLES = order<AnyTableName>()([
   'spell_version_publications',
   'spell_version_save_abilities',
   'spell_version_tags',
+  'spell_version_upcast_levels',
   'spell_versions',
   'subclass_definitions',
   'subclass_features',

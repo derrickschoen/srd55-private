@@ -558,6 +558,184 @@ export const effectReliabilityCategories = [
 export type EffectReliabilityCategory =
   (typeof effectReliabilityCategories)[number];
 
+/* ==========================================================================
+ * STRUCTURED SPELL VALUES
+ * ========================================================================== */
+
+/**
+ * WHERE A SPELL'S EFFECT ORIGINATES — the half of a printed Range line that is
+ * NOT a distance.
+ *
+ * THE OWNER RULED "store distance as a number of feet", AND THIS EXISTS BECAUSE
+ * THE RULING HAS NOWHERE TO PUT TWO VALUES THAT ARE NOT DISTANCES. Both are in
+ * this repository already, and neither is a fixture:
+ *
+ *  - `Self` is printed in the BUNDLED SRD extract twice —
+ *    `docs/srd/source/weapon-attack-cantrips.txt:15` (True Strike) and `:36`
+ *    (Shillelagh). Those two blocks are the only verbatim spell text this repo
+ *    ships, and both of them would have stored NULL feet.
+ *  - `Touch` is the value in this project's OWN documented example record,
+ *    `docs/CATALOG-IMPORT.md:34`, which a user is told to copy.
+ *
+ * Without this column `Self`, `Touch` and "the author left Range blank" all
+ * collapse into one nullable integer holding NULL — three different facts, one
+ * storage state. That is the data-loss shape D12/Q4 names, on a column whose
+ * only writers accept any string at all.
+ *
+ * THE OPEN LIMB IS `spell_versions.range` ITSELF, WHICH IS UNTOUCHED AND STILL
+ * HOLDS THE AUTHOR'S TEXT VERBATIM. This is known-set-plus-passthrough with the
+ * passthrough already in place: an unrecognised Range line leaves all four
+ * structured columns NULL and loses nothing, because the printed card renders
+ * the raw string and always has. So a homebrew `Range: Anywhere on this plane`
+ * is stored, displayed and never rejected.
+ *
+ * `sight` and `unlimited` are the SRD's two other standard non-distance forms
+ * and `special` is its escape hatch; none of the three occurs in this
+ * repository today, which is stated rather than hidden. They are here because
+ * the vocabulary is a reading of the printed Range line's grammar, not a
+ * census of the strings we happen to hold — and a member this application never
+ * writes costs nothing, where a MISSING member silently degrades to NULL.
+ */
+export const spellRangeKinds = [
+  'self',
+  'touch',
+  'ranged',
+  'sight',
+  'unlimited',
+  'special',
+] as const;
+export type SpellRangeKind = (typeof spellRangeKinds)[number];
+
+/**
+ * THE OWNER'S SHAPE LIST, VERBATIM: *"there are spheres, cylinders, cones,
+ * straight line (like lightning bolt)"*.
+ *
+ * `line` IS SPELLED FOR THE SHAPE, NOT FOR THE OWNER'S EXAMPLE — the same rule
+ * `extraAttackWeaponScopes` applies to `one_bonded_weapon`. A member named
+ * `lightning_bolt` would have invited a second member meaning the same thing.
+ *
+ * WHAT A SINGLE `area_feet` CANNOT HOLD, MEASURED RATHER THAN WAVED AT. The
+ * only SRD 5.2 text in this repository that names an area shape is
+ * `docs/srd/source/species-descriptions.txt:78`, the Dragonborn's Breath
+ * Weapon: *"either a 15-foot Cone or a 30-foot Line that is 5 feet wide"*. A
+ * LINE therefore carries a length AND a width, and a CYLINDER a radius AND a
+ * height. This model stores ONE dimension per area and the second is left in
+ * the verbatim `range` text, where it is displayed and not lost.
+ *
+ * That is a deliberate stop, not an oversight: under D26 the sheet is a
+ * reference, and the number a player compares is the one they measure on the
+ * table. A width column would be NULL for every sphere and every cone this
+ * application can ever hold, and no number on the sheet moves when it is
+ * filled in.
+ */
+export const spellAreaShapes = ['sphere', 'cylinder', 'cone', 'line'] as const;
+export type SpellAreaShape = (typeof spellAreaShapes)[number];
+
+/**
+ * IS A MATERIAL COMPONENT'S PRINTED PRICE A FLOOR OR AN EXACT AMOUNT?
+ *
+ * TWO MEMBERS BECAUSE THE SRD PRINTS A `+` AND AN INTEGER COLUMN DROPS IT. The
+ * bundled True Strike component reads *"a weapon with which you have
+ * proficiency and that is worth 1+ CP"*
+ * (`docs/srd/source/weapon-attack-cantrips.txt:16-17`). Storing `1` alone and
+ * printing "1 cp" states as a fact ("this component costs one copper piece")
+ * something the source does not say ("at least one copper piece"), which is
+ * exactly what D24 forbids.
+ *
+ * `exact` is the member no bundled row reaches — every SRD material price is a
+ * `+` form. It exists for a homebrew author who writes `worth 25 GP` with no
+ * plus, which the parser reads as exact, and for the same reason `sight` is in
+ * `spellRangeKinds`: the alternative is not "one fewer member", it is silently
+ * calling a homebrew exact price a minimum.
+ */
+export const materialCostKinds = ['exact', 'minimum'] as const;
+export type MaterialCostKind = (typeof materialCostKinds)[number];
+
+/**
+ * WHICH LEVEL A SPELL'S UPCAST LIST IS COUNTED IN.
+ *
+ * TWO MEMBERS AND THE DISCRIMINANT IS LOAD-BEARING, because "a list of levels
+ * that can upcast" is ambiguous between two different levels and the ONLY
+ * upcast text this repository ships uses the one that is easy to miss:
+ *
+ *  - `character_level` — both bundled cantrips scale by it. *"Cantrip Upgrade.
+ *    … when you reach levels 5 (1d6), 11 (2d6), and 17 (3d6)"*
+ *    (`docs/srd/source/weapon-attack-cantrips.txt:26-29`) and *"The damage die
+ *    changes when you reach levels 5 (d10), 11 (d12), and 17 (2d6)"* (`:53-54`).
+ *  - `slot_level` — a levelled spell's *"Using a Higher-Level Spell Slot"*,
+ *    which is 2..9. NO EXAMPLE OF THIS FORM EXISTS ANYWHERE IN THIS REPOSITORY,
+ *    because the repo ships no spell catalog at all.
+ *
+ * A single list with no discriminant would mix `5, 11, 17` with `2..9` in one
+ * integer set, and a reader could not tell a cantrip's character levels from a
+ * fireball's slot levels. `spell_version_upcast_levels` carries no scale of its
+ * own: the scale is a fact about the SPELL, so it sits on `spell_versions` and
+ * one row cannot hold two answers.
+ */
+export const upcastScales = ['slot_level', 'character_level'] as const;
+export type UpcastScale = (typeof upcastScales)[number];
+
+/* ==========================================================================
+ * BACKGROUND EQUIPMENT
+ * ========================================================================== */
+
+/**
+ * WHICH OF THE TWO PRINTED PACKAGES AN EQUIPMENT LINE BELONGS TO.
+ *
+ * The source prints *"Choose A or B"* and `background_templates` already holds
+ * the two halves as two NOT NULL columns. This is that same choice, expressed
+ * as a discriminant on the LINE, because a list cannot be split across two
+ * columns. Two members, not an open string: the extract's own grammar
+ * (`EQUIPMENT_CHOICE` in `src/rules/origins-srd.ts`) admits exactly `(A)` and
+ * `(B)`, and a third would fail the parse before it could reach a row.
+ */
+export const backgroundEquipmentOptions = ['a', 'b'] as const;
+export type BackgroundEquipmentOption =
+  (typeof backgroundEquipmentOptions)[number];
+
+/**
+ * THE OWNER'S RULING, MADE STRUCTURAL: *"a list of quantity + item (name only
+ * unless weapon or armor)"*.
+ *
+ * `gear` IS "NAME ONLY" AND IS THE MAJORITY. Robe, Crowbar, Healer's Kit,
+ * Parchment (10 sheets) — all name, no mechanics, exactly as D26 wants.
+ *
+ * `weapon` AND `armor` ARE THE RULING'S "UNLESS", AND THEY CARRY A CATALOG
+ * REFERENCE RATHER THAN COPIED STATISTICS. `weapon_templates` and
+ * `armor_templates` already exist and this is a TEMPLATE table, so a real
+ * foreign key is available and correct. D1b is not violated and is not even
+ * engaged: its rule is that a CHARACTER stores values with no live link back to
+ * a template, and nothing here is a character. When the copy-to-character path
+ * is built it must read through this reference and write VALUES, the way
+ * `speciesFromTemplate` already does.
+ *
+ * `coin` EXISTS BECAUSE EVERY PRINTED PACKAGE ENDS IN MONEY AND ONE OF THEM IS
+ * MONEY ALONE. Option B for all four backgrounds is exactly `50 GP`
+ * (`tests/unit/rules/origins-srd.test.ts:519` asserts it for every row), and
+ * every option A ends in `8 GP`, `16 GP` or `14 GP`. Under a strict
+ * quantity-plus-name reading, option B is either a package with zero items or
+ * an item literally named "GP" with a quantity of 50 — currency as an inventory
+ * entry, which is the thing the owner's *"we don't track user gold or inventory"*
+ * rules out. A `coin` line stores the printed text as its name and the amount
+ * in copper beside it, so the money is typed without becoming stock.
+ *
+ * NO BUNDLED ROW REACHES `armor`, AND THAT IS STATED RATHER THAN DISCOVERED.
+ * The four licensed packages hold four weapon entries (Quarterstaff, 2 Daggers,
+ * Spear, Shortbow), ammunition, clothing and coin, and NO ARMOUR — `Robe` and
+ * `Traveler's Clothes` are clothing, which `armor_templates` does not carry.
+ * The member and its CHECK arm are exercised by direct insertion in
+ * `tests/integration/rules/background-equipment.test.ts`, both the accepting
+ * and the refusing case, so the branch is not merely unreached-and-unproven.
+ */
+export const backgroundEquipmentItemKinds = [
+  'gear',
+  'weapon',
+  'armor',
+  'coin',
+] as const;
+export type BackgroundEquipmentItemKind =
+  (typeof backgroundEquipmentItemKinds)[number];
+
 export function isUsableSlotState(state: SlotState): boolean {
   return state === 'active' || state === 'kept_override';
 }
