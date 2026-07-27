@@ -6,12 +6,13 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { schemaSources } from '../helpers/schema-sources';
 
 /**
- * AUTOINCREMENT is invisible to the existing parity oracle.
+ * AUTOINCREMENT is invisible to every other structural suite.
  *
  * `PRAGMA table_info` cannot distinguish `INTEGER PRIMARY KEY NOT NULL` from
  * `INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL` — both report
- * `type=INTEGER, notnull=1, pk=1` — so `laravelColumnMetadataHash` would not
- * move if AUTOINCREMENT were dropped from every table.
+ * `type=INTEGER, notnull=1, pk=1` — so nothing in `tests/unit/schema.test.ts`
+ * would move if AUTOINCREMENT were dropped from every table. This file reads
+ * the DDL TEXT instead, which is the only place the keyword survives.
  *
  * It is nevertheless load-bearing. Only an AUTOINCREMENT table gets a
  * `sqlite_sequence` row, and `src/backup/character-backup.ts` reads and writes

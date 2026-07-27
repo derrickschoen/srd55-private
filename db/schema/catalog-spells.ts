@@ -15,7 +15,6 @@ import type { EffectReliabilityCategory } from '../../src/domain/enums';
 import { effectReliabilityCategories } from '../../src/domain/enums';
 import {
   datetime,
-  laravelDefault,
   oneOf,
   sqlText,
   tinyint1,
@@ -123,10 +122,10 @@ export const spell_versions = sqliteTable(
     rules_edition: varchar()('rules_edition').notNull(),
     level: integer('level').notNull(),
     school: varchar()('school').notNull(),
-    ritual: tinyint1('ritual').notNull().default(laravelDefault('0')),
+    ritual: tinyint1('ritual').notNull().default(false),
     concentration: tinyint1('concentration')
       .notNull()
-      .default(laravelDefault('0')),
+      .default(false),
     casting_time: varchar()('casting_time'),
     action_type: varchar()('action_type'),
     range: varchar()('range'),
@@ -138,23 +137,23 @@ export const spell_versions = sqliteTable(
      */
     components: varchar()('components'),
     material_component_summary: sqlText()('material_component_summary'),
-    healing: tinyint1('healing').notNull().default(laravelDefault('0')),
+    healing: tinyint1('healing').notNull().default(false),
     short_summary: sqlText()('short_summary'),
     upcast_type: varchar()('upcast_type'),
     upcast_summary: sqlText()('upcast_summary'),
     requires_mod_for_effect: tinyint1('requires_mod_for_effect')
       .notNull()
-      .default(laravelDefault('0')),
+      .default(false),
     effect_reliability_category: varchar<EffectReliabilityCategory>()(
       'effect_reliability_category',
     )
       .notNull()
-      .default(laravelDefault('fixed_effect')),
+      .default('fixed_effect'),
     provenance: varchar()('provenance')
       .notNull()
-      .default(laravelDefault('import')),
+      .default('import'),
     seed_version: varchar()('seed_version'),
-    is_active: tinyint1('is_active').notNull().default(laravelDefault('1')),
+    is_active: tinyint1('is_active').notNull().default(true),
     created_at: datetime()('created_at'),
     updated_at: datetime()('updated_at'),
   },

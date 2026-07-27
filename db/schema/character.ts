@@ -34,7 +34,6 @@ import {
 import {
   datetime,
   integerAtLeast,
-  laravelDefault,
   nullOrIntegerAtLeast,
   nullOrOneOf,
   oneOf,
@@ -60,19 +59,19 @@ export const characters = sqliteTable('characters', {
     .notNull()
     .$type<CharacterId>(),
   name: varchar()('name').notNull(),
-  strength: integer('strength').notNull().default(laravelDefault('10')),
-  dexterity: integer('dexterity').notNull().default(laravelDefault('10')),
-  constitution: integer('constitution').notNull().default(laravelDefault('10')),
-  intelligence: integer('intelligence').notNull().default(laravelDefault('10')),
-  wisdom: integer('wisdom').notNull().default(laravelDefault('10')),
-  charisma: integer('charisma').notNull().default(laravelDefault('10')),
+  strength: integer('strength').notNull().default(10),
+  dexterity: integer('dexterity').notNull().default(10),
+  constitution: integer('constitution').notNull().default(10),
+  intelligence: integer('intelligence').notNull().default(10),
+  wisdom: integer('wisdom').notNull().default(10),
+  charisma: integer('charisma').notNull().default(10),
   /** Null means "derive from total level"; it is a genuine override slot. */
   proficiency_bonus_override: integer('proficiency_bonus_override'),
   rules_edition_preference: varchar<RulesEdition>()('rules_edition_preference')
     .notNull()
-    .default(laravelDefault('2024')),
-  allow_legacy: tinyint1('allow_legacy').notNull().default(laravelDefault('0')),
-  revision: integer('revision').notNull().default(laravelDefault('0')),
+    .default('2024'),
+  allow_legacy: tinyint1('allow_legacy').notNull().default(false),
+  revision: integer('revision').notNull().default(0),
   notes: sqlText()('notes'),
   created_at: datetime()('created_at'),
   updated_at: datetime()('updated_at'),
@@ -188,7 +187,7 @@ export const character_source_instances = sqliteTable(
      * writers would be a second, unowned copy of a vocabulary — the precise
      * duplication `oneOf` exists to prevent.
      */
-    state: varchar()('state').notNull().default(laravelDefault('active')),
+    state: varchar()('state').notNull().default('active'),
     notes: sqlText()('notes'),
     created_at: datetime()('created_at'),
     updated_at: datetime()('updated_at'),
@@ -235,10 +234,10 @@ export const character_class_levels = sqliteTable(
     subclass_definition_id: integer(
       'subclass_definition_id',
     ).$type<SubclassDefinitionId>(),
-    level: integer('level').notNull().default(laravelDefault('1')),
+    level: integer('level').notNull().default(1),
     is_starting_class: tinyint1('is_starting_class')
       .notNull()
-      .default(laravelDefault('0')),
+      .default(false),
     spellcasting_ability_override: varchar<Ability>()(
       'spellcasting_ability_override',
     ),
@@ -296,12 +295,6 @@ export const character_class_levels = sqliteTable(
  * slot, or both assignment columns set. Turning these into discriminated
  * unions is the whole point of the contracts work and has NOT been done; this
  * comment records the target, not the state.
- *
- * `orphaned_by_change_group_id` is DORMANT and type-incoherent: it is an
- * INTEGER with no foreign key, while `change_log.group_id` — the thing it
- * names — is a VARCHAR uuid. It has zero writers AND zero readers. It deserves
- * to be dropped, but not in this change: dropping a column moves the Laravel
- * parity hash and would confuse the cutover.
  */
 export const spell_selection_slots = sqliteTable(
   'spell_selection_slots',
@@ -319,7 +312,7 @@ export const spell_selection_slots = sqliteTable(
       .$type<SourceInstanceId>(),
     slot_key: varchar()('slot_key').notNull(),
     rule_key: varchar()('rule_key').notNull(),
-    ordinal: integer('ordinal').notNull().default(laravelDefault('0')),
+    ordinal: integer('ordinal').notNull().default(0),
     bucket: varchar<SlotBucket>()('bucket').notNull(),
     eligibility_kind: varchar()('eligibility_kind').notNull(),
     fixed_spell_version_id: integer('fixed_spell_version_id')
@@ -331,32 +324,31 @@ export const spell_selection_slots = sqliteTable(
     label: varchar()('label'),
     spell_level_min: integer('spell_level_min')
       .notNull()
-      .default(laravelDefault('0')),
+      .default(0),
     spell_level_max: integer('spell_level_max')
       .notNull()
-      .default(laravelDefault('9')),
+      .default(9),
     allowed_spell_lists: sqlText()('allowed_spell_lists'),
     allowed_schools: sqlText()('allowed_schools'),
     allowed_tags: sqlText()('allowed_tags'),
     always_prepared: tinyint1('always_prepared')
       .notNull()
-      .default(laravelDefault('0')),
-    with_slots: tinyint1('with_slots').notNull().default(laravelDefault('1')),
+      .default(false),
+    with_slots: tinyint1('with_slots').notNull().default(true),
     free_cast: sqlText()('free_cast'),
     counts_against_limit: tinyint1('counts_against_limit')
       .notNull()
-      .default(laravelDefault('1')),
-    required: tinyint1('required').notNull().default(laravelDefault('0')),
-    is_locked: tinyint1('is_locked').notNull().default(laravelDefault('0')),
+      .default(true),
+    required: tinyint1('required').notNull().default(false),
+    is_locked: tinyint1('is_locked').notNull().default(false),
     state: varchar<SlotState>()('state')
       .notNull()
-      .default(laravelDefault('active')),
+      .default('active'),
     orphan_reason_code: varchar()('orphan_reason_code'),
-    orphaned_by_change_group_id: integer('orphaned_by_change_group_id'),
     orphaned_at: datetime()('orphaned_at'),
     prior_config: sqlText()('prior_config'),
     override_note: sqlText()('override_note'),
-    sort_order: integer('sort_order').notNull().default(laravelDefault('0')),
+    sort_order: integer('sort_order').notNull().default(0),
     notes: sqlText()('notes'),
     created_at: datetime()('created_at'),
     updated_at: datetime()('updated_at'),
@@ -365,7 +357,7 @@ export const spell_selection_slots = sqliteTable(
       'selection_eligibility',
     )
       .notNull()
-      .default(laravelDefault('unselected')),
+      .default('unselected'),
     selection_invalid_reason: sqlText()('selection_invalid_reason'),
   },
   (table) => [
@@ -492,7 +484,7 @@ export const change_log = sqliteTable(
     new_value: sqlText()('new_value'),
     reason: varchar()('reason'),
     action_type: varchar()('action_type').notNull(),
-    reversible: tinyint1('reversible').notNull().default(laravelDefault('1')),
+    reversible: tinyint1('reversible').notNull().default(true),
     created_at: datetime()('created_at'),
     updated_at: datetime()('updated_at'),
   },
@@ -597,7 +589,7 @@ export const character_spell_preferences = sqliteTable(
       .notNull()
       .$type<SpellVersionId>()
       .references(() => spell_versions.id),
-    favourite: tinyint1('favourite').notNull().default(laravelDefault('0')),
+    favourite: tinyint1('favourite').notNull().default(false),
     notes: sqlText()('notes'),
     created_at: datetime()('created_at'),
     updated_at: datetime()('updated_at'),

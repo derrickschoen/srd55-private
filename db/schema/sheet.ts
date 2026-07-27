@@ -29,7 +29,6 @@ import {
 import {
   datetime,
   integerAtLeast,
-  laravelDefault,
   nullOrIntegerAtLeast,
   oneOf,
   tinyint1,
@@ -125,7 +124,7 @@ export const class_sheet_traits = sqliteTable(
      */
     skill_choice_from_any: tinyint1('skill_choice_from_any')
       .notNull()
-      .default(laravelDefault('0')),
+      .default(false),
     created_at: datetime()('created_at'),
     updated_at: datetime()('updated_at'),
   },
@@ -426,7 +425,7 @@ export const armor_templates = sqliteTable(
     content_key: varchar<ContentKey>()('content_key').notNull(),
     rules_edition: varchar<RulesEdition>()('rules_edition')
       .notNull()
-      .default(laravelDefault('2024')),
+      .default('2024'),
     name: varchar()('name').notNull(),
     category: varchar<ArmorCategory>()('category').notNull(),
     /**
@@ -470,7 +469,7 @@ export const armor_templates = sqliteTable(
     strength_requirement: integer('strength_requirement'),
     stealth_disadvantage: tinyint1('stealth_disadvantage')
       .notNull()
-      .default(laravelDefault('0')),
+      .default(false),
     created_at: datetime()('created_at'),
     updated_at: datetime()('updated_at'),
   },

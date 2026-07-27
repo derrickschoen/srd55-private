@@ -25,7 +25,6 @@ import { effectKinds, rulesEditions } from '../../src/domain/enums';
 import {
   datetime,
   integerAtLeast,
-  laravelDefault,
   nullOrIntegerAtLeast,
   oneOf,
   sqlText,
@@ -35,10 +34,8 @@ import { character_source_instances, characters } from './character';
 
 /**
  * ORIGINS: species and backgrounds, and the character's own EFFECTS. Eight
- * NATIVE tables, in the same separate inventory `db/schema/weapons.ts`
- * established — the Laravel parity claim in
- * `tests/unit/schema.test.ts` is still made over the original 38 and is not
- * diluted by them.
+ * tables, inventoried alongside every other table in
+ * `tests/unit/schema.test.ts`.
  *
  * TWO OF THE EIGHT ARE THE EFFECT MODEL, AND THEY ARE TWO ON PURPOSE.
  * `species_template_trait_effects` declares what a CATALOG TEMPLATE GRANTS;
@@ -47,13 +44,11 @@ import { character_source_instances, characters } from './character';
  * decisive one — different meanings for the same null. Each table says so at
  * its own declaration.
  *
- * WHY THESE ARE NEW TABLES AND NOT COLUMNS ON `species_definitions`. That table
- * is one of THE LARAVEL 38. `laravelColumnMetadataHash` is computed over
- * exactly those tables' columns, types, nullability, defaults and order, so
- * adding one column to it moves the hash and breaks the parity claim BY DESIGN.
- * The only way through would be editing the frozen constant, which is the
- * weakened assertion this project does not do. Two further reasons stand on
- * their own: `species_definitions`, `background_definitions` and
+ * WHY THESE ARE NEW TABLES AND NOT COLUMNS ON `species_definitions`. The
+ * original reason was that widening it moved the frozen parity hash; that hash
+ * is retired (D7, F10) and is no longer a reason for anything. The two reasons
+ * that never depended on it are the ones that decide it:
+ * `species_definitions`, `background_definitions` and
  * `feat_definitions` are deliberately column-identical (the same migration
  * repeated), so widening one breaks a documented invariant and widening all
  * three drags feats into a change they have no part in; and both definition
@@ -115,7 +110,7 @@ export const species_templates = sqliteTable(
     content_key: varchar<ContentKey>()('content_key').notNull(),
     rules_edition: varchar<RulesEdition>()('rules_edition')
       .notNull()
-      .default(laravelDefault('2024')),
+      .default('2024'),
     name: varchar()('name').notNull(),
     /**
      * NOT an enum, for the same reason `weapon_templates.damage_type` is not.
@@ -753,7 +748,7 @@ export const background_templates = sqliteTable(
     content_key: varchar<ContentKey>()('content_key').notNull(),
     rules_edition: varchar<RulesEdition>()('rules_edition')
       .notNull()
-      .default(laravelDefault('2024')),
+      .default('2024'),
     name: varchar()('name').notNull(),
     /**
      * Three separate columns rather than a list, because the source prints

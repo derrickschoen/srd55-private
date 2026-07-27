@@ -201,12 +201,71 @@ function nullablePositiveInteger(
   return value === null ? null : positiveInteger(value, label);
 }
 
-function rowList(value: unknown, label: string): BackupRow[] {
+/**
+ * COLUMNS DROPPED FROM THE SCHEMA THAT AN EXISTING DOCUMENT MAY STILL CARRY.
+ *
+ * The rule is ACCEPT-AND-DROP, never reject — the same rule
+ * `splitLegacyTraitEffect` follows for the five retired trait-effect columns,
+ * and for the same reason. Backup export is `SELECT *`
+ * (`characterBackupDocument`), so EVERY document this project has ever written
+ * carries these keys; the row contracts are `z.strictObject`, so an unknown key
+ * is a hard refusal. Without this a user's own backup file stops opening, which
+ * is the one thing D25's "replace freely" explicitly does not license.
+ *
+ * DROPPING LOSES NOTHING HERE, and that is what separates this from the trait
+ * effects, which are MIGRATED rather than dropped.
+ * `spell_selection_slots.orphaned_by_change_group_id` had zero readers and zero
+ * writers in every build that declared it: it appears in no `SELECT` list in
+ * `src/`, `src/domain/contracts/rows.ts` named its two siblings
+ * (`orphan_reason_code`, `orphaned_at`) and not it, and
+ * `grant-rule-slot-generator.ts` writes both siblings and never it. So the
+ * value in every existing document is `null`, and there is nothing to migrate.
+ *
+ * THIS MAP IS APPEND-ONLY BY NATURE. Each entry is a HISTORICAL FACT about
+ * documents already on disk. Removing one makes those documents unopenable
+ * again.
+ *
+ * THE KEY IS A CHARACTER-SCOPED TABLE NAME AND THE TYPE SAYS SO. Not a
+ * decoration: `rowList` also parses the REFERENCE lists, whose kinds
+ * (`class_definitions`, `spell_versions`, …) are themselves real table names,
+ * so a bare `string` key would put two unrelated name spaces in one map and
+ * leave "no reference kind collides with a retired column" as a fact about
+ * today enforced by nothing. `RetiredColumnTable` excludes the reference kinds
+ * by construction, and `rowList` takes `null` for the lists that have none.
+ */
+type RetiredColumnTable = BackupTable | SnapshotTable;
+
+const RETIRED_ROW_COLUMNS: Readonly<
+  Partial<Record<RetiredColumnTable, readonly string[]>>
+> = {
+  spell_selection_slots: ['orphaned_by_change_group_id'],
+};
+
+function withoutRetiredColumns(
+  table: RetiredColumnTable | null,
+  row: BackupRow,
+): BackupRow {
+  const retired = table === null ? undefined : RETIRED_ROW_COLUMNS[table];
+  if (retired === undefined || !retired.some((key) => Object.hasOwn(row, key))) {
+    return row;
+  }
+  const stripped: MutableRow = { ...row };
+  for (const key of retired) {
+    delete stripped[key];
+  }
+  return stripped;
+}
+
+function rowList(
+  value: unknown,
+  label: string,
+  table: RetiredColumnTable | null,
+): BackupRow[] {
   if (!Array.isArray(value)) {
     throw new BackupValidationError(`${label} must be a list.`);
   }
   return value.map((row, index) =>
-    backupRecord(row, `${label}[${index}]`),
+    withoutRetiredColumns(table, backupRecord(row, `${label}[${index}]`)),
   );
 }
 
@@ -290,7 +349,7 @@ function parseSnapshot(value: unknown, label: string): CharacterSnapshotData {
     rows: Object.fromEntries(
       tables.map((table) => [
         table,
-        rowList(snapshot[table], `${label}.${table}`),
+        rowList(snapshot[table], `${label}.${table}`, table),
       ]),
     ) as SnapshotRowMap,
   };
@@ -300,7 +359,12 @@ function referenceMap(
   value: unknown,
   kind: ReferenceKind,
 ): Map<number, string> {
-  const rows = rowList(value, `Character backup references.${kind}`);
+  // A reference list is not a table row list; it has no retired columns and
+  // its keys are pinned by `assertExactKeys` below. Passing `null` rather than
+  // `kind` is what keeps the reference name space out of
+  // `RETIRED_ROW_COLUMNS`, and the parameter's type makes passing `kind` here
+  // a compile error rather than a convention.
+  const rows = rowList(value, `Character backup references.${kind}`, null);
   const result = new Map<number, string>();
   const keys = new Set<string>();
   for (const [index, row] of rows.entries()) {
@@ -686,7 +750,7 @@ function validateDocument(input: unknown): ValidatedDocument {
       table,
       tableObject[table] === undefined && optionalBackupTables.has(table)
         ? []
-        : rowList(tableObject[table], `Character backup tables.${table}`),
+        : rowList(tableObject[table], `Character backup tables.${table}`, table),
     ]),
   ) as unknown as CharacterBackupTables;
 

@@ -2,12 +2,18 @@ import { sql } from 'drizzle-orm';
 import { customType } from 'drizzle-orm/sqlite-core';
 
 /**
- * Column primitives that reproduce the declared types Laravel's SQLite grammar
- * emitted, so regenerating `src/db/schema.sql` from these declarations does not
- * move the Laravel-derived parity oracle in `tests/unit/schema.test.ts`.
+ * Column primitives for the declared types this schema uses: `VARCHAR`, `TEXT`,
+ * `DATETIME` and `TINYINT(1)`.
  *
- * Drizzle's own `text()` would emit `text` and its `integer({mode:'boolean'})`
- * would emit `integer`; Laravel emitted `VARCHAR`, `DATETIME` and `TINYINT(1)`.
+ * THEIR ORIGIN IS THE LARAVEL SQLITE GRAMMAR AND THAT IS NO LONGER A REASON.
+ * D7 retired schema fidelity to the app this replaced, and F10 removed the
+ * oracle that pinned these spellings. What keeps them is narrower and worth
+ * saying plainly, because it is the only thing left holding them up: they carry
+ * a DOMAIN TYPE through `customType`, so `varchar<SlotState>()` states in the
+ * type system what a bare `text()` would not, and renaming the emitted keyword
+ * would move `databaseSchemaSignature` for every existing image without
+ * changing a single stored value. Retyping them is a defensible change to make
+ * deliberately; it is not one to make as a side effect.
  *
  * NOTE ON `toDriver`/`fromDriver`: deliberately absent. Drizzle NEVER RUNS in
  * this project — it is a build-time schema authoring tool whose types the Zod
@@ -23,47 +29,38 @@ import { customType } from 'drizzle-orm/sqlite-core';
  * primitives once those bindings are written.
  */
 
-/** Laravel `string()` → `VARCHAR`. */
+/** `VARCHAR`, carrying a domain string type. */
 export const varchar = <T extends string = string>() =>
   customType<{ data: T; driverData: string }>({
     dataType: () => 'VARCHAR',
   });
 
-/** Laravel `text()` → `TEXT`. */
+/** `TEXT`, carrying a domain string type. */
 export const sqlText = <T extends string = string>() =>
   customType<{ data: T; driverData: string }>({
     dataType: () => 'TEXT',
   });
 
-/** Laravel `timestamp()`/`dateTime()` → `DATETIME`. */
+/** `DATETIME`, held as ISO text. */
 export const datetime = <T extends string = string>() =>
   customType<{ data: T; driverData: string }>({
     dataType: () => 'DATETIME',
   });
 
 /**
- * DELIBERATE, RECORDED DIVERGENCE FROM LARAVEL'S EMITTED TEXT.
+ * THERE IS NO `int` HELPER HERE, AND THAT IS FORCED RATHER THAN CHOSEN.
  *
- * Integer columns use Drizzle's built-in `integer()`, which emits the declared
- * type in lowercase (`integer`) where Laravel emitted `INTEGER`. A
- * `customType` cannot be used here: `primaryKey({ autoIncrement: true })` is
- * only available on `SQLiteIntegerBuilder`, and every one of the 30 tables has
- * an AUTOINCREMENT primary key that `sqlite_sequence` depends on
+ * Integer columns use Drizzle's built-in `integer()`, which emits `integer` in
+ * lowercase. A `customType` cannot be used: `primaryKey({ autoIncrement: true })`
+ * is only available on `SQLiteIntegerBuilder`, and every table has an
+ * AUTOINCREMENT primary key that `sqlite_sequence` depends on
  * (`src/backup/character-backup.ts` reserves save-point ids through it). The
  * alternative — `customType` for plain integers and `integer()` for PKs —
  * would produce an artifact that is inconsistent with itself for no gain.
- *
- * Why this does not move the Laravel parity oracle: `laravelColumnMetadataHash`
- * in `tests/unit/schema.test.ts` normalises the declared type with
- * `String(column.type).toLowerCase()`, and no other expectation there
- * (`expectedColumns`, `expectedNotNull`, `expectedDefaults`,
- * `expectedNamedIndexes`, `expectedUniqueGroups`, `expectedForeignKeys`) reads
- * a declared type at all. Behaviour is unchanged because SQLite resolves type
- * affinity case-insensitively.
  */
 
 /**
- * Laravel `boolean()` → `TINYINT(1)`.
+ * `TINYINT(1)`, a boolean.
  *
  * The TS type is `boolean` because that is what the row contract guarantees;
  * SQLite stores 0/1 and enforces nothing. Zod's `sqlBool` is what actually
@@ -72,14 +69,6 @@ export const datetime = <T extends string = string>() =>
 export const tinyint1 = customType<{ data: boolean; driverData: number }>({
   dataType: () => 'TINYINT(1)',
 });
-
-/**
- * Laravel quoted every scalar default literal, including numeric ones:
- * `DEFAULT '0'`, `DEFAULT '10'`, `DEFAULT '2024'`. `PRAGMA table_info` reports
- * `dflt_value` verbatim including the quotes, and `expectedDefaults` in the
- * parity oracle pins those exact strings, so the quoting is load-bearing.
- */
-export const laravelDefault = (literal: string) => sql.raw(`'${literal}'`);
 
 /* ==========================================================================
  * CHECK CONSTRAINT HELPERS
