@@ -160,6 +160,250 @@ repository should treat it the same way in a source file.
 > their bodies' self-references were updated with them. No code referenced
 > either number — checked before renumbering.
 
+## D34 — `DieSize` exists; the two subsets stay two; and F12 was right about the subjects and wrong about the values (2026-07-27)
+
+`feat/die-size-type`, implementing F12 item (c). Verified by me on the tree:
+**1797 vitest / 116 files, build exit 0, 72 Playwright.**
+
+### What was built
+
+`dieSizes = [4, 6, 8, 10, 12, 20, 100]` in `src/domain/enums.ts`, with
+`hitDieSizes` and `martialArtsDieSizes` declared beside it `as const satisfies
+readonly DieSize[]`. Six enumerated sets were authored in this repository and
+they are now three declarations and their consumers:
+
+| was | now |
+|---|---|
+| `dice.ts:837` `[4, 6, 8, 10, 12, 20, 100]` loop literal | `for (const size of dieSizes)` |
+| `dice.ts:970` `boundedInteger(…, 2, 100)` | `selectedDieSize`, over `dieSizes` |
+| `sheet.ts:190` `hit_die IN (6, 8, 10, 12)` | `integerOneOf('hit_die', hitDieSizes)` |
+| `sheet.ts:530` `martial_arts_die IN (4, 6, 8, 10, 12)` | `integerOneOf(…, martialArtsDieSizes)` |
+| `class-traits-srd.ts:325` `![6, 8, 10, 12].includes` | `isHitDieSize` |
+| `class-traits-srd.ts:650` `![4, 6, 8, 10, 12].includes` | `isMartialArtsDieSize` |
+
+`integerOneOf` had to be written because `oneOf` quotes its members, and
+`hit_die IN ('6', …)` is a CHECK that parses and rejects every row we write. It
+regenerated the `hit_die` constraint BYTE-IDENTICAL, which is the evidence that
+the helper replaced the transcription rather than changing it.
+
+### THE ONE VALUE THAT CHANGED, AND IT CORRECTS F12
+
+**`martial_arts_die` no longer admits 4.** `docs/srd/source/attack-class-features
+.txt:15-35` is the whole twenty-row Martial Arts column — four `1d6`, six `1d8`,
+six `1d10`, four `1d12` — and the string `1d4` **does not occur anywhere in the
+file** (`grep -c '1d4'` -> 0). The 4 is the 2014 edition's Monk, not a fact about
+the bundled 5.2 extract.
+
+F12 wrote of the two CHECKs: *"Those are different DOMAINS, not two answers to
+one question. No class has a d4 hit die, so excluding 4 from `hit_die` is
+correct."* That is RIGHT about the subjects and RIGHT about the direction of the
+risk. It is WRONG about which constraint carried the defect: measured against the
+source, the two subjects have the SAME four members, and the CHECKs differed by
+exactly the one value neither of them has. Acting on F12 as written would have
+frozen an unsourced 4 into the type system on the grounds that it was a
+legitimate distinction — which is why this entry exists in a binding file rather
+than in a commit message.
+
+**AND NOTHING PINNED IT IN EITHER DIRECTION.** The mirror case for `hit_die` HAS
+been pinned since D13 (`schema-check-constraints.test.ts`, "a d4 hit die"), so
+the asymmetry was visible and had never been looked at. Removing the 4 broke no
+test. It is pinned now, in three places, and restoring it fails six.
+
+### The subsets stay SUBSETS, and TypeScript only half expresses that
+
+`as const satisfies readonly DieSize[]` states the relation and makes a typo in
+either list a compile error — verified: `[6, 8, 7, 12]` gives `TS2322: Type '7'
+is not assignable to type '6 | 4 | 8 | 10 | 12 | 20 | 100'`.
+
+**WHAT IT DOES NOT BUY, SAID PLAINLY: TypeScript is structural, so `HitDieSize`
+and `MartialArtsDieSize` are the same type today and mixing them up compiles.**
+A phantom brand would fix that and was rejected: every construction site would
+need a cast, `$type<>()` would carry a non-primitive into drizzle-zod's contract
+derivation, and the mix-up it would catch cannot produce a wrong number while the
+two sets are member-for-member equal. The two remain SEPARATE DECLARATIONS
+anyway, which is F12's surviving point — they are sourced from different tables
+and a widening of one is not a widening of the other.
+
+### `fixedHitPointsPerLevel`: the guard did not stay, it MOVED
+
+The old guard was `hitDie >= 2`, which admits every integer above it — F12
+measured d7 -> 4.5, d13 -> 7.5, d1001 -> 501.5 hit points per level. The function
+now takes a `HitDieSize` and has NO runtime check, and that is a decision:
+
+- a guard there could only fire for a value TypeScript never let through, which
+  is "code justified by what it protects", the shape `AGENTS.md` says to remove;
+- but the thing it reached for is real, and **F11 is the finding that a contract
+  which merely trusts a CHECK is not a contract** — a CHECK constrains no image
+  created before it existed and no hand-edited one.
+
+So the runtime test moved to the boundary an untrusted integer actually crosses.
+`hitDieOrAbsent` in `src/rules/sheet.ts` reads a stored value that is not a hit
+die as **NO hit die**, which routes it into machinery that already tells the
+truth: `ASSUMED_HIT_DIE` plus an `assumed_hit_die` warning. A stored 7 now gives
+24 hit points and says a die was assumed, where it used to give 22 with a
+fractional per-level value hidden inside a whole number. Throwing was rejected
+(D11 part 2 — the reader tolerates and states); passing through is the defect.
+
+**THE PRICE, STATED: the sheet cannot distinguish "no `class_sheet_traits` row"
+from "a row holding a value the CHECK forbids".** Both read as absent. Separating
+them needs a warning code carrying the rejected value, through a codec with no
+channel for one. `SheetContentLookup.martialArtsDice` degrades the same way, by
+dropping the level.
+
+### D12 DECIDED: no user path supplies a die SIZE, so the closed type is safe — and the trap lands one field over, where it is already respected
+
+The question is not whether a user supplies DICE. They do. It is whether any of
+those inputs is a SIZE that a closed set could reject. Checked rather than
+assumed, four inputs at a time:
+
+1. **`character_weapons.damage_dice` / `versatile_damage_dice` — FULLY OPEN, and
+   `DieSize` must never touch it.** It is not a size, it is a whole expression:
+   the source's own Blowgun does `1` damage with no die (`weapons-table.txt:46`),
+   Shillelagh's level-17 step is `2d6` (`weapon-attack-cantrips.txt:53-54`) and
+   True Strike varies the COUNT at a fixed d6 (`:29`). Free `textInput`,
+   length-only validation whose comment already states the policy, travels on the
+   share wire, nothing in the repo splits it. **This is the D12/Q4 site and it
+   was already decided the D12/Q4 way.** Closing it is the data-loss bug.
+2. **`character_hit_point_rolls.rolled_value` — user-TYPED, and not a size.** It
+   is a FACE, 1..12 from `SHEET_ROLL_BOUNDS`, whose ceiling merely HAPPENS to
+   equal a die size. Unified with `hitDieSizes` it would have become a set of
+   four legal rolls.
+3. **`DiceConfig.basicDieSize` — user-chosen FROM OUR LIST.** A `<select>`: the
+   user picks and cannot type, so closing the set loses nothing a user could have
+   entered. This is the one die size a user supplies and the one place the
+   closure costs zero.
+4. **`class_sheet_traits.hit_die` and `class_martial_arts_dice.martial_arts_die`
+   — OURS, and I checked the scopes rather than assuming them.** Both are scoped
+   `catalog_class` with snapshot, backup, backupDirect, share and backupReference
+   ALL false (`tables.ts:605-611`, `:653-659`), so no backup, share or snapshot
+   document can carry them and **the F11 hand-edited-document path does not reach
+   these columns**. Neither table is in `RowContractTable`. The only writers are
+   the bundled seeders. `src/catalog/**` never writes either.
+
+**THE HOMEBREW CASE IS ALREADY MODELLED, AND NOT AS A STRANGE DIE.** A
+user-authored class arrives with NO `class_sheet_traits` row at all — which is
+why `hit_die` is `number | null` and why D24 made that absence a type. Homebrew
+expresses itself here as a MISSING ROW, which the type already carries, not as a
+d7 a closed set would reject and lose. That is the whole reason the D12 trap does
+not land on these two columns.
+
+**Rejected: known-set-plus-passthrough for the die size.** There is no user path
+to pass anything through on. A passthrough limb would be an untestable branch
+whose only reachable input is a corrupt image, and it would re-open exactly the
+hole `fixedHitPointsPerLevel` had.
+
+**The residual risk, named so a reviewer does not have to find it:** if 2014
+content is ever bundled, `martialArtsDieSizes` gains a 4 and `hitDieSizes` does
+not. That is a one-line deliberate edit with a failing test to prompt it, which
+is the D12 mechanism working rather than failing.
+
+### The compile-time proof is a FILE THAT MUST NOT COMPILE
+
+`docs/type-probes/die-size.probe.ts` holds thirteen statements that are each
+expected to be rejected, and `tests/unit/rules/die-sizes.test.ts` runs `tsc` over
+it and asserts an error on every `export const` line, no error on any other file,
+and four specific messages. It lives under `docs/` because a file whose purpose
+is to be rejected cannot sit inside a compiled project — `tsconfig.node.json`
+includes `db`, `scripts`, `tests` and `tools`, and excluding it from a tsconfig
+instead would have been a config edit made to reach green.
+
+```
+die-size.probe.ts(29,42): error TS2345: Argument of type '7' is not assignable to parameter of type '6 | 8 | 10 | 12'.
+die-size.probe.ts(31,45): error TS2345: Argument of type '1001' is not assignable to parameter of type '6 | 8 | 10 | 12'.
+die-size.probe.ts(38,14): error TS2322: Type '4' is not assignable to type '6 | 8 | 10 | 12'.
+die-size.probe.ts(43,14): error TS2322: Type '7' is not assignable to type '6 | 4 | 8 | 10 | 12 | 20 | 100'.
+die-size.probe.ts(47,59): error TS2322: Type '7' is not assignable to type '6 | 4 | 8 | 10 | 12 | 20 | 100'.
+die-size.probe.ts(51,14): error TS2322: Type 'number' is not assignable to type '6 | 8 | 10 | 12'.
+die-size.probe.ts(58,28): error TS2322: Type '7' is not assignable to type '6 | 4 | 8 | 10 | 12 | 20 | 100'.
+```
+
+That last one is the SUBSET clause itself, probed rather than assumed.
+
+### Mutation-tested, six ways, run by me and reverted
+
+- the unsourced `4` back in `martialArtsDieSizes`: **6 tests fail** across three
+  files, including one nobody wrote for it;
+- `7` added to `dieSizes`: **5 fail**;
+- `fixedHitPointsPerLevel` widened back to `number`: **1 fails** — the probe, and
+  nothing else, which is the honest measure of what a type buys;
+- `hitDieOrAbsent` passing a stored 7 through: **2 fail**;
+- the `boundedInteger(…, 2, 100)` clamp restored on the die-size read: **2 fail**;
+- the `<select>` populated from a literal missing `d100`: the browser spec fails.
+
+### What was NOT done
+
+- **`dice.ts` still hardcodes the d20, the Bless/Bane d4 and the Sorcerous Burst
+  d8 ten different ways**, including `9/2` written as a constant rather than
+  derived from the size. Those are one specific die each, not a vocabulary, and
+  neither Bless nor Bane nor Sorcerous Burst appears in `docs/srd/source/` at
+  all — so there is nothing to cite them against and nothing to close.
+- **`'1d' + size` is still formatted in two places** (`attack-profiles.ts:851`,
+  `sheet-view.ts:315`). A `MartialArtsDie` value object would collapse them; it
+  is not a die-size question.
+- **`SHEET_ROLL_BOUNDS.maximum = 12` is still an independent constant**, and
+  deliberately: it is a FACE, and tying it to `max(hitDieSizes)` would state a
+  relation the source does not.
+
+### REVISED AFTER REVIEW — three findings, two of them corrections to what is written above
+
+Re-verified on a clean tree after the revision: **1803 vitest / 116 files, build
+exit 0, 72 Playwright.**
+
+**1. "It is pinned now, in three places" was true of the VALUE and false of the
+GUARD.** The removal of the unsourced 4 is pinned three ways, as claimed. The
+RUNTIME half of the same rule was not: `SheetContentLookup.martialArtsDice`
+filters every stored value through `isMartialArtsDieSize`, and the reviewer
+neutered that filter to `isMartialArtsDieSize(row.value) || true` with the whole
+suite still green — 1797/1797 — while the mirror `hitDieOrAbsent` fails two tests
+under the identical mutation. The section above STATES the degradation
+("`SheetContentLookup.martialArtsDice` degrades the same way, by dropping the
+level") as though stating it were pinning it. **That is the asymmetry this entry
+claims to have closed, reappearing one method over.** Pinned now by
+`tests/integration/rules/attack-profiles.test.ts`, which rebuilds
+`class_martial_arts_dice` WITHOUT its CHECK — the pre-CHECK image is the only
+state in which the guard is reachable, which is F11's point applied to this
+table — writes a `1d7` at Monk level 5 and asserts the level is DROPPED and that
+a Monk 5 falls back to the level 4 d6. Re-run under the reviewer's own mutation:
+it fails.
+
+**2. The `integerOneOf` comment's justification was FACTUALLY WRONG, and the
+CHECKs were right anyway.** `db/schema/columns.ts` said the `typeof` limb was
+needed because "a REAL `8.0` compares equal to 8 and would otherwise pass" a bare
+`IN` list. It does not: `hit_die` and `martial_arts_die` are declared `integer`,
+so INTEGER AFFINITY CONVERTS THE REAL BEFORE THE CHECK RUNS. Measured over 24
+values, as bound parameters and as literals — 8, 8.0, 8.5, 6.0, `'8'`, `'8.0'`,
+`' 8 '`, `'8e0'`, `'eight'`, `x'38'`, 2^53, NaN, Infinity, 1e19 and the rest —
+`typeof(c) = 'integer' AND c IN (…)` and a bare `c IN (…)` agree in **every**
+case. Zero behavioural defect; a stated reason that would not survive being run.
+
+**The limb STAYS, and the corrected reason is EXECUTED rather than asserted.**
+The mechanism is real where nothing converts: on a BLOB or affinity-less column
+`8.0` stays a REAL and `8.0 IN (6, 8, 10, 12)` is TRUE, so the bare list stores a
+REAL in a column whose vocabulary is four integers. The limb is what makes the
+HELPER's guarantee — "an INTEGER equal to one of these" — independent of its
+callers' declared types. `tests/unit/schema-check-constraints.test.ts` cuts the
+guarded expression out of the live DDL, derives the bare form by deleting the
+limb, and runs both against an `integer` column and a `BLOB` column: inert on the
+first, load-bearing on the second. It also probes a REAL on both die columns for
+the first time (8.0 accepted, 8.5 refused), which is the gap that let the wrong
+reason stand — and which `insert` could not have covered, since JavaScript has
+one number type and sqlite-wasm binds an integral one as an INTEGER.
+
+**3. The compile-time proof reported a TOOL failure as a TYPE regression.** In
+one full-suite run out of fifteen, the probe test failed with lines 29, 31, 33
+and 35 missing — the four `fixedHitPointsPerLevel` statements, the only ones
+whose error depends on `../../src/rules/sheet` RESOLVING. Not reproduced in
+fourteen further runs or twelve direct invocations, so the root cause is not
+established and is not claimed here. What IS established is the signal: with that
+import made unresolvable on purpose, tsc emits `TS2307` and exactly those four
+lines stop erroring, which is byte-for-byte what widening the parameter back to
+`number` would look like. The test now checks the tool-level causes FIRST —
+errors in other files, then `TS2307` — before comparing the line set, and every
+failure message carries tsc's exit status, signal, stdout and stderr instead of
+discarding stderr.
+
+---
+
 ## D33 — A disclosed wrong number is still a wrong number: the attack profile withholds the proficiency bonus (2026-07-27)
 
 `feat/multiclass-grants`, revising D32 against a review. Verified by me on a

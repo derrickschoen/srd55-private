@@ -424,7 +424,7 @@ CREATE TABLE `class_martial_arts_dice` (
 	`created_at` DATETIME,
 	`updated_at` DATETIME,
 	FOREIGN KEY (`class_definition_id`) REFERENCES `class_definitions`(`id`) ON UPDATE no action ON DELETE cascade,
-	CONSTRAINT "class_martial_arts_dice_check" CHECK(class_level BETWEEN 1 AND 20 AND typeof(`martial_arts_die`) = 'integer' AND `martial_arts_die` IN (4, 6, 8, 10, 12))
+	CONSTRAINT "class_martial_arts_dice_check" CHECK(class_level BETWEEN 1 AND 20 AND typeof(`martial_arts_die`) = 'integer' AND `martial_arts_die` IN (6, 8, 10, 12))
 );
 
 CREATE UNIQUE INDEX `class_martial_arts_dice_class_definition_id_class_level_unique` ON `class_martial_arts_dice` (`class_definition_id`,`class_level`);

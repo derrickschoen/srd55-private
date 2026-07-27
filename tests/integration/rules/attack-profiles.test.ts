@@ -118,6 +118,72 @@ describe('reading the sheet content a character actually has', () => {
     ]);
   });
 
+  /**
+   * THE MARTIAL ARTS HALF OF THE DEGRADE-TO-ABSENT RULE, WHICH NOTHING PINNED.
+   *
+   * `SheetContentLookup.martialArtsDice` filters every stored value through
+   * `isMartialArtsDieSize` and DROPS the level if it fails. That filter had no
+   * test at all: a review neutered it to `isMartialArtsDieSize(row.value) || true`
+   * and the whole suite stayed green, while the mirror guard `hitDieOrAbsent`
+   * fails two tests under the same mutation. So the branch that introduced the
+   * rule pinned one half of it and left the other free to be deleted.
+   *
+   * WHY THE TABLE IS REBUILT INSTEAD OF JUST WRITING A 7. The CHECK refuses one,
+   * which is exactly F11's point: a CHECK constrains no image created before it
+   * existed, and this table's CHECK is younger than the application. Recreating
+   * the table without it IS the pre-CHECK image — the same shape the schema
+   * carried until `class_martial_arts_dice_check` was added — and it is the only
+   * state in which the runtime guard can be reached at all. The UNIQUE index and
+   * the foreign key are not recreated because this test only reads.
+   */
+  it('drops a level whose stored die is not a Martial Arts die, rather than printing 1d7', () => {
+    addLevels('Monk', 5, true);
+    db.exec(
+      `ALTER TABLE class_martial_arts_dice RENAME TO class_martial_arts_dice_checked;
+       CREATE TABLE class_martial_arts_dice (
+         id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+         class_definition_id integer NOT NULL,
+         class_level integer NOT NULL,
+         martial_arts_die integer NOT NULL,
+         created_at DATETIME,
+         updated_at DATETIME
+       );
+       INSERT INTO class_martial_arts_dice
+         SELECT * FROM class_martial_arts_dice_checked;
+       DROP TABLE class_martial_arts_dice_checked;`,
+    );
+    const rewritten = db.exec(
+      `UPDATE class_martial_arts_dice SET martial_arts_die = 7
+       WHERE class_definition_id = ? AND class_level = 5`,
+      [classId('Monk')],
+    );
+    // The corrupt row really is there — otherwise this test would pass by
+    // measuring nothing.
+    expect(rewritten.changes).toBe(1);
+    expect(
+      db.scalar(
+        `SELECT martial_arts_die FROM class_martial_arts_dice
+         WHERE class_definition_id = ? AND class_level = 5`,
+        [classId('Monk')],
+      ),
+    ).toBe(7);
+
+    const classes = lookup().forCharacter(characterId);
+    // Nineteen of twenty levels survive; the d7 row is not carried as a bare
+    // integer and there is no level 5 entry to read.
+    expect(classes[0]?.martial_arts_dice?.size).toBe(19);
+    expect(classes[0]?.martial_arts_dice?.get(5)).toBeUndefined();
+    // The character IS the affected level — one row per level means a dropped
+    // level 5 changes the answer only for a Monk 5. The resolver falls back to
+    // the greatest GOOD row at or below 5, which is the level 4 d6, so the sheet
+    // under-states the die by one rung and never prints a die the source does
+    // not have.
+    expect(martialArtsDice(classes)).toEqual([
+      { class_name: 'Monk', class_level: 5, die: 6 },
+    ]);
+    expect(martialArtsDice(classes)[0]?.die).not.toBe(7);
+  });
+
   it('does not stack Extra Attack read out of the database either', () => {
     addLevels('Fighter', 5, true);
     addLevels('Ranger', 5);
