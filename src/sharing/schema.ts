@@ -787,11 +787,10 @@ function config(
 /**
  * A non-negative distance in feet, or absent.
  *
- * `range_normal_feet` / `range_long_feet` are nullable integers with no CHECK,
- * so the schema itself permits any integer. The bound is a boundary judgement,
- * and it is the SAME judgement the write boundary makes — see
- * `WEAPON_RANGE_MAX_FEET`. Owning a separate number here is what let this
- * refuse a range the app had already stored.
+ * These are the frozen v1 wire fields, not current storage columns. The bound
+ * is the SAME judgement the storage and write boundaries make — see
+ * `WEAPON_RANGE_MAX_FEET`. Owning a separate number here would let the wire
+ * validator refuse a range the app had already stored.
  */
 function weaponRange(value: unknown, label: string): number {
   return integer(value, label, 0, WEAPON_RANGE_MAX_FEET);

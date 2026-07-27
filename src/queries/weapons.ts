@@ -25,6 +25,10 @@ import type {
   WeaponsPanel,
   WeaponTemplate,
 } from '../domain/read-models';
+import {
+  isWeaponRangeKind,
+  weaponRangeFromStorage,
+} from '../domain/weapon-range';
 import type { SpellAccessRoute } from '../access/spell-access-builder';
 import type { AbilityScores } from '../rules/ability-scores';
 import { attackProfiles } from '../rules/attack-profiles';
@@ -80,8 +84,9 @@ const PROFILE_COLUMNS = [
   'two_handed',
   'ammunition',
   'ammunition_kind',
-  'range_normal_feet',
-  'range_long_feet',
+  'range_kind',
+  'range_near_feet',
+  'range_far_feet',
   'mastery_property',
   'other_properties',
 ] as const;
@@ -113,6 +118,10 @@ function proficiencyCategory(row: SqlRow): WeaponProficiencyCategory | null {
 }
 
 function weaponProfile(row: SqlRow): WeaponProfile {
+  const rangeKind = sqlString(row, 'range_kind');
+  if (!isWeaponRangeKind(rangeKind)) {
+    throw new TypeError(`Unknown weapon range kind "${rangeKind}".`);
+  }
   return {
     name: sqlString(row, 'name'),
     damage: sqlWeaponDamage(row),
@@ -127,8 +136,11 @@ function weaponProfile(row: SqlRow): WeaponProfile {
     two_handed: sqlBoolean(row, 'two_handed'),
     ammunition: sqlBoolean(row, 'ammunition'),
     ammunition_kind: sqlNullableString(row, 'ammunition_kind'),
-    range_normal_feet: sqlNullableInteger(row, 'range_normal_feet'),
-    range_long_feet: sqlNullableInteger(row, 'range_long_feet'),
+    range: weaponRangeFromStorage(
+      rangeKind,
+      sqlNullableInteger(row, 'range_near_feet'),
+      sqlNullableInteger(row, 'range_far_feet'),
+    ),
     mastery_property: masteryProperty(row),
     other_properties: sqlNullableString(row, 'other_properties'),
   };

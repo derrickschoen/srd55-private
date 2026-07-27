@@ -324,13 +324,14 @@ function seedCharacter(
     `INSERT INTO character_weapons (
        character_id, name, damage_kind, damage_dice, damage_type,
        versatile_damage_kind, versatile_damage_dice,
-       finesse, thrown, ammunition, ammunition_kind, range_normal_feet,
-       range_long_feet, mastery_property, mastery_selected, other_properties,
+       finesse, thrown, ammunition, ammunition_kind, range_kind,
+       range_near_feet, range_far_feet, mastery_property, mastery_selected,
+       other_properties,
        notes, created_at, updated_at
      ) VALUES (
        ?, 'Heirloom Longsword', 'dice', '1d8', 'Slashing', 'dice', '1d10',
        0, 1, 1, 'bolt',
-       20, 60, 'Sap', 1, 'Notched near the hilt', 'from the barrow', ?, ?
+       'ranged', 20, 60, 'Sap', 1, 'Notched near the hilt', 'from the barrow', ?, ?
      )`,
     [characterId, now, now],
   );
@@ -363,8 +364,9 @@ const PORTABLE_WEAPON_COLUMNS = [
   'two_handed',
   'ammunition',
   'ammunition_kind',
-  'range_normal_feet',
-  'range_long_feet',
+  'range_kind',
+  'range_near_feet',
+  'range_far_feet',
   'mastery_property',
   'mastery_selected',
   'other_properties',
@@ -543,8 +545,9 @@ describe('minimal character sharing', () => {
         two_handed: 0,
         ammunition: 1,
         ammunition_kind: 'bolt',
-        range_normal_feet: 20,
-        range_long_feet: 60,
+        range_kind: 'ranged',
+        range_near_feet: 20,
+        range_far_feet: 60,
         mastery_property: 'Sap',
         mastery_selected: 1,
         other_properties: 'Notched near the hilt',
@@ -570,8 +573,9 @@ describe('minimal character sharing', () => {
         two_handed: 0,
         ammunition: 0,
         ammunition_kind: null,
-        range_normal_feet: null,
-        range_long_feet: null,
+        range_kind: 'none',
+        range_near_feet: null,
+        range_far_feet: null,
         mastery_property: null,
         mastery_selected: 0,
         other_properties: null,
@@ -582,6 +586,57 @@ describe('minimal character sharing', () => {
     // weapons whether or not the exporter asked for anything.
     expect(document.weapons).toHaveLength(2);
     expect(previewCharacterShare(target, shared).weaponCount).toBe(2);
+  });
+
+  it('round-trips both exceptional legacy range pairs through frozen v1 fields', async () => {
+    const source = await database();
+    const characterId = source.exec(
+      "INSERT INTO characters (name) VALUES ('Legacy ranges')",
+    ).lastInsertId;
+    source.exec(
+      `INSERT INTO character_weapons
+         (character_id, name, range_kind, range_near_feet, range_far_feet)
+       VALUES
+         (?, 'Long only', 'legacy', NULL, 60),
+         (?, 'Inverted', 'legacy', 60, 20)`,
+      [characterId, characterId],
+    );
+
+    const document = exportCharacterShare(source, characterId);
+    expect(document.weapons).toMatchObject([
+      { name: 'Long only', range_long_feet: 60 },
+      {
+        name: 'Inverted',
+        range_normal_feet: 60,
+        range_long_feet: 20,
+      },
+    ]);
+
+    const target = await database();
+    const decoded = await decodeShareFragment(
+      await encodeShareFragment(document),
+    );
+    const imported = importCharacterShare(target, decoded);
+    expect(
+      target.allRaw(
+        `SELECT name, range_kind, range_near_feet, range_far_feet
+         FROM character_weapons WHERE character_id = ? ORDER BY id`,
+        [imported.characterId],
+      ),
+    ).toEqual([
+      {
+        name: 'Long only',
+        range_kind: 'legacy',
+        range_near_feet: null,
+        range_far_feet: 60,
+      },
+      {
+        name: 'Inverted',
+        range_kind: 'legacy',
+        range_near_feet: 60,
+        range_far_feet: 20,
+      },
+    ]);
   });
 
   it('leaves the weapons section out entirely for a character with none', async () => {

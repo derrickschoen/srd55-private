@@ -21,6 +21,7 @@ import type {
   WeaponsPanel,
   WeaponTemplate,
 } from '../../../domain/read-models';
+import type { WeaponRange } from '../../../domain/weapon-range';
 import { freeTextSpan } from '../../free-text';
 import { renderAttackProfiles } from './attack-profiles';
 
@@ -98,8 +99,7 @@ export function blankWeapon(): WeaponFields {
     two_handed: false,
     ammunition: false,
     ammunition_kind: null,
-    range_normal_feet: null,
-    range_long_feet: null,
+    range: { kind: 'none' },
     mastery_property: null,
     other_properties: null,
     notes: null,
@@ -246,15 +246,27 @@ export function propertySummary(weapon: CharacterWeapon): string {
   if (weapon.ammunition && weapon.ammunition_kind !== null) {
     parts[parts.length - 1] = `Ammunition (${weapon.ammunition_kind})`;
   }
-  if (weapon.range_normal_feet !== null || weapon.range_long_feet !== null) {
-    parts.push(
-      `Range ${weapon.range_normal_feet ?? '—'}/${weapon.range_long_feet ?? '—'} ft`,
-    );
+  const range = weaponRangeSummary(weapon.range);
+  if (range !== null) {
+    parts.push(range);
   }
   if (weapon.other_properties !== null) {
     parts.push(weapon.other_properties);
   }
   return parts.length === 0 ? 'none' : parts.join(', ');
+}
+
+function weaponRangeSummary(range: WeaponRange): string | null {
+  switch (range.kind) {
+    case 'none':
+      return null;
+    case 'ranged':
+      return range.far_feet === null
+        ? `Range ${range.near_feet} ft`
+        : `Range ${range.near_feet}/${range.far_feet} ft`;
+    case 'legacy':
+      return `Legacy range ${range.near_feet ?? '—'}/${range.far_feet} ft (repair required)`;
+  }
 }
 
 /**
@@ -479,6 +491,7 @@ function renderForm(
   form.className = 'weapon-form';
   form.dataset.testid = 'weapon-form';
   form.noValidate = true;
+  let rangeError: string | null = null;
   const legendText =
     weaponId === null ? 'Add a weapon' : `Edit ${initial.name}`;
   const fieldset = document.createElement('fieldset');
@@ -750,19 +763,48 @@ function renderForm(
       labelled('Ammunition kind', kind, 'weapon-ammunition-kind'),
     );
 
-    const normal = numberInput('weapon-range-normal', draft.range_normal_feet);
-    normal.addEventListener('input', () => {
-      draft = { ...draft, range_normal_feet: integerOrNull(normal.value) };
-    });
+    if (draft.range.kind === 'legacy') {
+      const warning = document.createElement('p');
+      warning.setAttribute('role', 'status');
+      warning.textContent =
+        'Imported legacy range: preserve it unchanged, or enter a valid near/far pair to repair it.';
+      fields.append(warning);
+    }
+    const nearValue =
+      draft.range.kind === 'none' ? null : draft.range.near_feet;
+    const farValue =
+      draft.range.kind === 'none' ? null : draft.range.far_feet;
+    const normal = numberInput('weapon-range-normal', nearValue);
     fields.append(
-      labelled('Normal range (feet)', normal, 'weapon-range-normal'),
+      labelled('Near range (feet)', normal, 'weapon-range-normal'),
     );
 
-    const long = numberInput('weapon-range-long', draft.range_long_feet);
-    long.addEventListener('input', () => {
-      draft = { ...draft, range_long_feet: integerOrNull(long.value) };
-    });
-    fields.append(labelled('Long range (feet)', long, 'weapon-range-long'));
+    const far = numberInput('weapon-range-long', farValue);
+    fields.append(labelled('Far range (feet)', far, 'weapon-range-long'));
+    const updateRange = (): void => {
+      const nearFeet = integerOrNull(normal.value);
+      const farFeet = integerOrNull(far.value);
+      if (nearFeet === null && farFeet === null) {
+        rangeError = null;
+        draft = { ...draft, range: { kind: 'none' } };
+        return;
+      }
+      if (nearFeet === null) {
+        rangeError = 'A far range requires a near range.';
+        return;
+      }
+      if (farFeet !== null && farFeet < nearFeet) {
+        rangeError = 'Far range must be at least near range.';
+        return;
+      }
+      rangeError = null;
+      draft = {
+        ...draft,
+        range: { kind: 'ranged', near_feet: nearFeet, far_feet: farFeet },
+      };
+    };
+    normal.addEventListener('input', updateRange);
+    far.addEventListener('input', updateRange);
 
     const mastery = document.createElement('select');
     mastery.dataset.focusKey = 'weapon-mastery-property';
@@ -872,6 +914,11 @@ function renderForm(
     event.preventDefault();
     if (draft.name.trim() === '') {
       error.textContent = 'A weapon needs a name.';
+      form.append(error);
+      return;
+    }
+    if (rangeError !== null) {
+      error.textContent = rangeError;
       form.append(error);
       return;
     }

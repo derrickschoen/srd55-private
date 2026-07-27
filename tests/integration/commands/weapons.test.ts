@@ -122,8 +122,7 @@ describe('weapon commands', () => {
       two_handed: false,
       ammunition: false,
       ammunition_kind: null,
-      range_normal_feet: null,
-      range_long_feet: null,
+      range: { kind: 'none' },
       mastery_property: null,
       other_properties: null,
       notes: null,
@@ -183,8 +182,7 @@ describe('weapon commands', () => {
         two_handed: true,
         ammunition: true,
         ammunition_kind: 'Bolt',
-        range_normal_feet: 15,
-        range_long_feet: 45,
+        range: { kind: 'ranged', near_feet: 15, far_feet: 45 },
         mastery_property: 'Vex',
         other_properties: 'glows faintly',
         notes: 'from the vault',
@@ -205,8 +203,7 @@ describe('weapon commands', () => {
       two_handed: true,
       ammunition: true,
       ammunition_kind: 'Bolt',
-      range_normal_feet: 15,
-      range_long_feet: 45,
+      range: { kind: 'ranged', near_feet: 15, far_feet: 45 },
       mastery_property: 'Vex',
       other_properties: 'glows faintly',
       notes: 'from the vault',
@@ -440,9 +437,11 @@ describe('weapon commands', () => {
     await expect(
       run({
         type: 'add_weapon',
-        weapon: custom({ range_normal_feet: -5 }),
+        weapon: custom({
+          range: { kind: 'ranged', near_feet: -5, far_feet: null },
+        }),
       }),
-    ).rejects.toThrow(/range_normal_feet must be a non-negative integer/);
+    ).rejects.toThrow(/near_feet must be a non-negative integer/);
 
     // The UPPER bound, which the column does not have. It exists so that the
     // share boundary — which must refuse an absurd distance from an untrusted
@@ -452,13 +451,25 @@ describe('weapon commands', () => {
     await expect(
       run({
         type: 'add_weapon',
-        weapon: custom({ range_long_feet: WEAPON_RANGE_MAX_FEET + 1 }),
+        weapon: custom({
+          range: {
+            kind: 'ranged',
+            near_feet: 1,
+            far_feet: WEAPON_RANGE_MAX_FEET + 1,
+          },
+        }),
       }),
-    ).rejects.toThrow(/range_long_feet must be a non-negative integer/);
+    ).rejects.toThrow(/far_feet must be a non-negative integer/);
     await expect(
       run({
         type: 'add_weapon',
-        weapon: custom({ range_long_feet: WEAPON_RANGE_MAX_FEET }),
+        weapon: custom({
+          range: {
+            kind: 'ranged',
+            near_feet: 1,
+            far_feet: WEAPON_RANGE_MAX_FEET,
+          },
+        }),
       }),
     ).resolves.toBeDefined();
 
@@ -485,6 +496,95 @@ describe('weapon commands', () => {
         sneaky: true,
       } as unknown as CharacterCommandPayload),
     ).rejects.toThrow(/Unknown command field: sneaky/);
+  });
+
+  it('requires an exact, coherent ranged payload', async () => {
+    await expect(
+      run({
+        type: 'add_weapon',
+        weapon: custom({
+          range: {
+            kind: 'ranged',
+            near_feet: null,
+            far_feet: 60,
+          } as unknown as WeaponFields['range'],
+        }),
+      }),
+    ).rejects.toThrow(/range\.near_feet is required/);
+
+    await expect(
+      run({
+        type: 'add_weapon',
+        weapon: custom({
+          range: { kind: 'ranged', near_feet: 60, far_feet: 20 },
+        }),
+      }),
+    ).rejects.toThrow(/range\.far_feet must be at least range\.near_feet/);
+
+    await expect(
+      run({
+        type: 'add_weapon',
+        weapon: custom({
+          range: {
+            kind: 'ranged',
+            near_feet: 20,
+            far_feet: 60,
+            unit: 'feet',
+          } as unknown as WeaponFields['range'],
+        }),
+      }),
+    ).rejects.toThrow(/Unknown range field: unit/);
+  });
+
+  it('never mints legacy, but preserves or explicitly repairs an imported legacy range', async () => {
+    await expect(
+      run({
+        type: 'add_weapon',
+        weapon: custom({
+          range: { kind: 'legacy', near_feet: 60, far_feet: 20 },
+        }),
+      }),
+    ).rejects.toThrow(/new weapon cannot use a legacy range/i);
+
+    const weaponId = db.exec(
+      `INSERT INTO character_weapons
+         (character_id, name, range_kind, range_near_feet, range_far_feet)
+       VALUES (?, 'Imported', 'legacy', 60, 20)`,
+      [characterId],
+    ).lastInsertId;
+    await expect(
+      run({
+        type: 'update_weapon',
+        weapon_id: weaponId,
+        weapon: custom({
+          name: 'Imported, annotated',
+          range: { kind: 'legacy', near_feet: 60, far_feet: 20 },
+        }),
+      }),
+    ).resolves.toBeDefined();
+    await expect(
+      run({
+        type: 'update_weapon',
+        weapon_id: weaponId,
+        weapon: custom({
+          range: { kind: 'legacy', near_feet: 60, far_feet: 15 },
+        }),
+      }),
+    ).rejects.toThrow(/preserved exactly or explicitly repaired/);
+    await expect(
+      run({
+        type: 'update_weapon',
+        weapon_id: weaponId,
+        weapon: custom({
+          range: { kind: 'ranged', near_feet: 20, far_feet: 60 },
+        }),
+      }),
+    ).resolves.toBeDefined();
+    expect(weapons().find((weapon) => weapon.id === weaponId)?.range).toEqual({
+      kind: 'ranged',
+      near_feet: 20,
+      far_feet: 60,
+    });
   });
 
   it('refuses a weapon body that omits a nullable field instead of nulling it', async () => {

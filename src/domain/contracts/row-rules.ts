@@ -40,6 +40,7 @@
  * this module free of either dependency — the convention `rowContractError`
  * already established.
  */
+import { WEAPON_RANGE_MAX_FEET } from '../weapon-limits';
 
 /** A row as it arrives from JSON: keys are strings, values are not yet trusted. */
 type UntrustedRow = Readonly<Record<string, unknown>>;
@@ -170,6 +171,51 @@ export function weaponDamagePayloadError(
     return null;
   }
   return `${label} has an invalid ${prefix} discriminator/payload combination.`;
+}
+
+/**
+ * Validates the three correlated weapon-range columns for backups, snapshots,
+ * share imports, command writes, and SRD template rows.
+ */
+export function weaponRangePayloadError(
+  row: UntrustedRow,
+  label: string,
+  allowLegacy: boolean,
+): string | null {
+  const kind = row.range_kind;
+  const near = row.range_near_feet;
+  const far = row.range_far_feet;
+  const validDistance = (value: unknown): boolean =>
+    value === null ||
+    (Number.isSafeInteger(value) &&
+      Number(value) >= 0 &&
+      Number(value) <= WEAPON_RANGE_MAX_FEET);
+
+  if (!validDistance(near)) {
+    return `${label}.range_near_feet must be an integer from 0 to ${WEAPON_RANGE_MAX_FEET}, or null.`;
+  }
+  if (!validDistance(far)) {
+    return `${label}.range_far_feet must be an integer from 0 to ${WEAPON_RANGE_MAX_FEET}, or null.`;
+  }
+  if (kind === 'none' && near === null && far === null) {
+    return null;
+  }
+  if (
+    kind === 'ranged' &&
+    near !== null &&
+    (far === null || Number(far) >= Number(near))
+  ) {
+    return null;
+  }
+  if (
+    allowLegacy &&
+    kind === 'legacy' &&
+    far !== null &&
+    (near === null || Number(far) < Number(near))
+  ) {
+    return null;
+  }
+  return `${label} has an invalid weapon range discriminator/payload combination.`;
 }
 
 /**

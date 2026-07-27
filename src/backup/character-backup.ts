@@ -13,6 +13,7 @@ import {
   splitLegacyTraitEffect,
 } from '../rules/legacy-trait-effects';
 import { migrateLegacyWeaponDamageRow } from '../domain/weapon-damage';
+import { migrateLegacyWeaponRangeRow } from '../domain/weapon-range';
 import {
   assertBackupHeader,
   assertExactKeys,
@@ -281,18 +282,18 @@ function reconciledColumns(
   table: RetiredColumnTable | null,
   row: BackupRow,
 ): BackupRow {
-  const damageMigrated =
+  const weaponMigrated =
     table === 'character_weapons'
-      ? migrateLegacyWeaponDamageRow(row)
+      ? migrateLegacyWeaponRangeRow(migrateLegacyWeaponDamageRow(row))
       : row;
   const retired = (table === null ? undefined : RETIRED_ROW_COLUMNS[table]) ?? [];
   const added = (table === null ? undefined : ADDED_ROW_COLUMNS[table]) ?? [];
-  const drops = retired.filter((key) => Object.hasOwn(damageMigrated, key));
-  const fills = added.filter((key) => !Object.hasOwn(damageMigrated, key));
+  const drops = retired.filter((key) => Object.hasOwn(weaponMigrated, key));
+  const fills = added.filter((key) => !Object.hasOwn(weaponMigrated, key));
   if (drops.length === 0 && fills.length === 0) {
-    return damageMigrated;
+    return weaponMigrated;
   }
-  const reconciled: MutableRow = { ...damageMigrated };
+  const reconciled: MutableRow = { ...weaponMigrated };
   for (const key of drops) {
     delete reconciled[key];
   }

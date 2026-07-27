@@ -51,6 +51,7 @@ import {
   type VersatileWeaponDamage,
   type WeaponDamageAmount,
 } from '../domain/weapon-damage';
+import type { WritableWeaponRange } from '../domain/weapon-range';
 
 /** The rules edition every bundled weapon belongs to. */
 export const BUNDLED_WEAPON_RULES_EDITION = '2024';
@@ -79,8 +80,7 @@ export interface SrdWeaponTemplate {
   readonly two_handed: boolean;
   readonly ammunition: boolean;
   readonly ammunition_kind: string | null;
-  readonly range_normal_feet: number | null;
-  readonly range_long_feet: number | null;
+  readonly range: WritableWeaponRange;
   readonly mastery_property: WeaponMasteryProperty;
   readonly other_properties: string | null;
 }
@@ -266,8 +266,14 @@ function applyProperties(
     versatile_damage: versatileWeaponDamageFromLegacy(versatile),
     ...flags,
     ammunition_kind: ammunitionKind,
-    range_normal_feet: rangeNormal,
-    range_long_feet: rangeLong,
+    range:
+      rangeNormal === null
+        ? { kind: 'none' }
+        : {
+            kind: 'ranged',
+            near_feet: rangeNormal,
+            far_feet: rangeLong,
+          },
     mastery_property: weapon.mastery_property,
     other_properties: qualifications.length === 0 ? null : qualifications.join(', '),
   };
@@ -630,8 +636,11 @@ function seedWeaponTemplates(db: DatabaseContext, timestamp: string): void {
       two_handed: sqlBool(template.two_handed),
       ammunition: sqlBool(template.ammunition),
       ammunition_kind: template.ammunition_kind,
-      range_normal_feet: template.range_normal_feet,
-      range_long_feet: template.range_long_feet,
+      range_kind: template.range.kind,
+      range_near_feet:
+        template.range.kind === 'ranged' ? template.range.near_feet : null,
+      range_far_feet:
+        template.range.kind === 'ranged' ? template.range.far_feet : null,
       mastery_property: template.mastery_property,
       other_properties: template.other_properties,
       created_at: timestamp,
@@ -648,10 +657,10 @@ function seedWeaponTemplates(db: DatabaseContext, timestamp: string): void {
          damage_kind, damage_dice, damage_flat, damage_custom, damage_type,
          versatile_damage_kind, versatile_damage_dice, versatile_damage_flat,
          versatile_damage_custom, finesse, heavy, light, loading, reach, thrown,
-         two_handed, ammunition, ammunition_kind, range_normal_feet,
-         range_long_feet, mastery_property, other_properties,
+         two_handed, ammunition, ammunition_kind, range_kind,
+         range_near_feet, range_far_feet, mastery_property, other_properties,
          created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(content_key) DO UPDATE SET
          rules_edition = excluded.rules_edition,
          name = excluded.name,
@@ -674,8 +683,9 @@ function seedWeaponTemplates(db: DatabaseContext, timestamp: string): void {
          two_handed = excluded.two_handed,
          ammunition = excluded.ammunition,
          ammunition_kind = excluded.ammunition_kind,
-         range_normal_feet = excluded.range_normal_feet,
-         range_long_feet = excluded.range_long_feet,
+         range_kind = excluded.range_kind,
+         range_near_feet = excluded.range_near_feet,
+         range_far_feet = excluded.range_far_feet,
          mastery_property = excluded.mastery_property,
          other_properties = excluded.other_properties,
          updated_at = excluded.updated_at`,
@@ -702,8 +712,9 @@ function seedWeaponTemplates(db: DatabaseContext, timestamp: string): void {
         row.two_handed,
         row.ammunition,
         row.ammunition_kind,
-        row.range_normal_feet,
-        row.range_long_feet,
+        row.range_kind,
+        row.range_near_feet,
+        row.range_far_feet,
         row.mastery_property,
         row.other_properties,
         row.created_at,

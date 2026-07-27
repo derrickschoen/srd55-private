@@ -26,6 +26,7 @@ import type {
   VersatileWeaponDamage,
   WeaponDamage,
 } from '../../src/domain/weapon-damage';
+import type { WeaponRangeKind } from '../../src/domain/weapon-range';
 import {
   damageTypes,
   rulesEditions,
@@ -157,14 +158,11 @@ export const character_weapons = sqliteTable(
     two_handed: tinyint1('two_handed').notNull().default(false),
     ammunition: tinyint1('ammunition').notNull().default(false),
     ammunition_kind: varchar()('ammunition_kind'),
-    /**
-     * No both-or-neither CHECK on the range pair, deliberately. A user typing a
-     * normal range and tabbing away before typing the long one would trip it,
-     * and D6b makes half-decided a first-class state. A half-filled range is a
-     * completeness observation, not a constraint violation.
-     */
-    range_normal_feet: integer('range_normal_feet'),
-    range_long_feet: integer('range_long_feet'),
+    range_kind: varchar<WeaponRangeKind>()('range_kind')
+      .notNull()
+      .default('none'),
+    range_near_feet: integer('range_near_feet'),
+    range_far_feet: integer('range_far_feet'),
     /**
      * Nullable HERE and NOT NULL on the template, and the difference is the
      * sourced fact rather than an inconsistency: all 38 SRD weapons have
@@ -201,6 +199,18 @@ export const character_weapons = sqliteTable(
         OR (versatile_damage_kind = 'flat' AND versatile_damage_dice IS NULL AND versatile_damage_flat IS NOT NULL AND versatile_damage_flat >= 0 AND versatile_damage_custom IS NULL)
         OR (versatile_damage_kind = 'custom' AND versatile_damage_dice IS NULL AND versatile_damage_flat IS NULL AND versatile_damage_custom IS NOT NULL)
         OR (versatile_damage_kind = 'not_applicable' AND versatile_damage_dice IS NULL AND versatile_damage_flat IS NULL AND versatile_damage_custom IS NULL)
+      )`,
+    ),
+    check(
+      'character_weapons_range_check',
+      sql`(
+        (range_near_feet IS NULL OR (typeof(range_near_feet) = 'integer' AND range_near_feet BETWEEN 0 AND 100000))
+        AND (range_far_feet IS NULL OR (typeof(range_far_feet) = 'integer' AND range_far_feet BETWEEN 0 AND 100000))
+        AND (
+          (range_kind = 'none' AND range_near_feet IS NULL AND range_far_feet IS NULL)
+          OR (range_kind = 'ranged' AND range_near_feet IS NOT NULL AND (range_far_feet IS NULL OR range_far_feet >= range_near_feet))
+          OR (range_kind = 'legacy' AND range_far_feet IS NOT NULL AND (range_near_feet IS NULL OR range_far_feet < range_near_feet))
+        )
       )`,
     ),
     /**
@@ -315,8 +325,11 @@ export const weapon_templates = sqliteTable(
     two_handed: tinyint1('two_handed').notNull().default(false),
     ammunition: tinyint1('ammunition').notNull().default(false),
     ammunition_kind: varchar()('ammunition_kind'),
-    range_normal_feet: integer('range_normal_feet'),
-    range_long_feet: integer('range_long_feet'),
+    range_kind: varchar<WeaponRangeKind>()('range_kind')
+      .notNull()
+      .default('none'),
+    range_near_feet: integer('range_near_feet'),
+    range_far_feet: integer('range_far_feet'),
     mastery_property: varchar<WeaponMasteryProperty>()(
       'mastery_property',
     ).notNull(),
@@ -341,6 +354,17 @@ export const weapon_templates = sqliteTable(
         OR (versatile_damage_kind = 'flat' AND versatile_damage_dice IS NULL AND versatile_damage_flat IS NOT NULL AND versatile_damage_flat >= 0 AND versatile_damage_custom IS NULL)
         OR (versatile_damage_kind = 'custom' AND versatile_damage_dice IS NULL AND versatile_damage_flat IS NULL AND versatile_damage_custom IS NOT NULL)
         OR (versatile_damage_kind = 'not_applicable' AND versatile_damage_dice IS NULL AND versatile_damage_flat IS NULL AND versatile_damage_custom IS NULL)
+      )`,
+    ),
+    check(
+      'weapon_templates_range_check',
+      sql`(
+        (range_near_feet IS NULL OR (typeof(range_near_feet) = 'integer' AND range_near_feet BETWEEN 0 AND 100000))
+        AND (range_far_feet IS NULL OR (typeof(range_far_feet) = 'integer' AND range_far_feet BETWEEN 0 AND 100000))
+        AND (
+          (range_kind = 'none' AND range_near_feet IS NULL AND range_far_feet IS NULL)
+          OR (range_kind = 'ranged' AND range_near_feet IS NOT NULL AND (range_far_feet IS NULL OR range_far_feet >= range_near_feet))
+        )
       )`,
     ),
     /**
