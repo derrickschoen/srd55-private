@@ -703,7 +703,6 @@ CREATE TABLE `spell_selection_slots` (
 	`is_locked` TINYINT(1) DEFAULT false NOT NULL,
 	`state` VARCHAR DEFAULT 'active' NOT NULL,
 	`orphan_reason_code` VARCHAR,
-	`orphaned_by_change_group_id` integer,
 	`orphaned_at` DATETIME,
 	`prior_config` TEXT,
 	`override_note` TEXT,

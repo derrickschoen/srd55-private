@@ -118,7 +118,7 @@ const expectedColumns: Record<string, string[]> = {
     'allowed_spell_lists', 'allowed_schools', 'allowed_tags',
     'always_prepared', 'with_slots', 'free_cast', 'counts_against_limit',
     'required', 'is_locked', 'state',
-    'orphan_reason_code', 'orphaned_by_change_group_id', 'orphaned_at',
+    'orphan_reason_code', 'orphaned_at',
     'prior_config', 'override_note', 'sort_order', 'notes', 'created_at',
     'updated_at', 'selection_collection', 'selection_eligibility',
     'selection_invalid_reason',

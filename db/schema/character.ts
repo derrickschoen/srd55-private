@@ -295,12 +295,6 @@ export const character_class_levels = sqliteTable(
  * slot, or both assignment columns set. Turning these into discriminated
  * unions is the whole point of the contracts work and has NOT been done; this
  * comment records the target, not the state.
- *
- * `orphaned_by_change_group_id` is DORMANT and type-incoherent: it is an
- * INTEGER with no foreign key, while `change_log.group_id` — the thing it
- * names — is a VARCHAR uuid. It has zero writers AND zero readers. It deserves
- * to be dropped, but not in this change: dropping a column moves the Laravel
- * parity hash and would confuse the cutover.
  */
 export const spell_selection_slots = sqliteTable(
   'spell_selection_slots',
@@ -351,7 +345,6 @@ export const spell_selection_slots = sqliteTable(
       .notNull()
       .default('active'),
     orphan_reason_code: varchar()('orphan_reason_code'),
-    orphaned_by_change_group_id: integer('orphaned_by_change_group_id'),
     orphaned_at: datetime()('orphaned_at'),
     prior_config: sqlText()('prior_config'),
     override_note: sqlText()('override_note'),
