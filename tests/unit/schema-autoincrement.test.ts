@@ -118,10 +118,12 @@ const nativeAutoIncrementTables = [
   'character_hit_point_rolls',
   'character_sheet_adjustments',
   'character_skill_proficiencies',
-  // The structured upcast progression. A surrogate key for the reason
+  // The two progression ladders — SLOT levels and the Cantrip Upgrade's
+  // CHARACTER levels. A surrogate key each, for the reason
   // `spell_version_tags` and the other spell pivots have one: the importer
   // replaces the whole list per spell rather than reconciling rows.
   'spell_version_upcast_levels',
+  'spell_version_cantrip_upgrade_levels',
 ] as const;
 
 const allAutoIncrementTables = [
@@ -168,7 +170,7 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
       return db;
     }
 
-    it('declares AUTOINCREMENT on exactly the 30 Laravel and 26 native surrogate-key tables', () => {
+    it('declares AUTOINCREMENT on exactly the 30 Laravel and 29 native surrogate-key tables', () => {
       const db = openDb();
       const declared = db
         .selectValues(
@@ -182,14 +184,15 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
         .map(String);
 
       expect(declared).toEqual(allAutoIncrementTables);
-      // 30 surviving Laravel tables plus 28 native: 4 weapons, 8 sheet core,
+      // 30 surviving Laravel tables plus 29 native: 4 weapons, 8 sheet core,
       // 7 origins (the seventh is `background_equipment_items`), 2 effects,
-      // 2 class features, 4 stored sheet inputs, plus the one structured-value
-      // table on the catalog side, `spell_version_upcast_levels`. Counted in
-      // parts so one group shrinking while another grows cannot pass unnoticed.
-      expect(declared).toHaveLength(58);
+      // 2 class features, 4 stored sheet inputs, plus the TWO progression
+      // ladders on the catalog side, `spell_version_upcast_levels` and
+      // `spell_version_cantrip_upgrade_levels`. Counted in parts so one group
+      // shrinking while another grows cannot pass unnoticed.
+      expect(declared).toHaveLength(59);
       expect(autoIncrementTables).toHaveLength(30);
-      expect(nativeAutoIncrementTables).toHaveLength(28);
+      expect(nativeAutoIncrementTables).toHaveLength(29);
 
       const withoutAutoIncrement = db
         .selectValues(

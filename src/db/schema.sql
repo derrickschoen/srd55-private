@@ -781,6 +781,15 @@ CREATE TABLE `spell_version_attack_modes` (
 
 CREATE UNIQUE INDEX `spell_version_attack_modes_spell_version_id_attack_mode_unique` ON `spell_version_attack_modes` (`spell_version_id`,`attack_mode`);
 CREATE INDEX `spell_version_attack_modes_attack_mode_index` ON `spell_version_attack_modes` (`attack_mode`);
+CREATE TABLE `spell_version_cantrip_upgrade_levels` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`spell_version_id` integer NOT NULL,
+	`level` integer NOT NULL,
+	FOREIGN KEY (`spell_version_id`) REFERENCES `spell_versions`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "spell_version_cantrip_upgrade_levels_level_check" CHECK(typeof(`level`) = 'integer' AND `level` BETWEEN 1 AND 20)
+);
+
+CREATE UNIQUE INDEX `spell_version_cantrip_upgrade_levels_spell_version_id_level_unique` ON `spell_version_cantrip_upgrade_levels` (`spell_version_id`,`level`);
 CREATE TABLE `spell_version_conditions` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`spell_version_id` integer NOT NULL,
@@ -834,7 +843,7 @@ CREATE TABLE `spell_version_upcast_levels` (
 	`spell_version_id` integer NOT NULL,
 	`level` integer NOT NULL,
 	FOREIGN KEY (`spell_version_id`) REFERENCES `spell_versions`(`id`) ON UPDATE no action ON DELETE cascade,
-	CONSTRAINT "spell_version_upcast_levels_level_check" CHECK(typeof(`level`) = 'integer' AND `level` BETWEEN 1 AND 20)
+	CONSTRAINT "spell_version_upcast_levels_level_check" CHECK(typeof(`level`) = 'integer' AND `level` BETWEEN 1 AND 9)
 );
 
 CREATE UNIQUE INDEX `spell_version_upcast_levels_spell_version_id_level_unique` ON `spell_version_upcast_levels` (`spell_version_id`,`level`);
@@ -862,8 +871,8 @@ CREATE TABLE `spell_versions` (
 	`material_cost_kind` VARCHAR,
 	`healing` TINYINT(1) DEFAULT false NOT NULL,
 	`short_summary` TEXT,
-	`upcast_scale` VARCHAR,
 	`upcast_summary` TEXT,
+	`cantrip_upgrade_summary` TEXT,
 	`requires_mod_for_effect` TINYINT(1) DEFAULT false NOT NULL,
 	`effect_reliability_category` VARCHAR DEFAULT 'fixed_effect' NOT NULL,
 	`provenance` VARCHAR DEFAULT 'import' NOT NULL,
@@ -882,8 +891,7 @@ CREATE TABLE `spell_versions` (
         AND ((`area_shape` IS NULL) = (`area_feet` IS NULL))),
 	CONSTRAINT "spell_versions_material_cost_check" CHECK((`material_cost_copper` IS NULL OR (typeof(`material_cost_copper`) = 'integer' AND `material_cost_copper` >= 0))
         AND (`material_cost_kind` IS NULL OR `material_cost_kind` IN ('exact', 'minimum'))
-        AND ((`material_cost_copper` IS NULL) = (`material_cost_kind` IS NULL))),
-	CONSTRAINT "spell_versions_upcast_scale_check" CHECK((`upcast_scale` IS NULL OR `upcast_scale` IN ('slot_level', 'character_level')))
+        AND ((`material_cost_copper` IS NULL) = (`material_cost_kind` IS NULL)))
 );
 
 CREATE UNIQUE INDEX `spell_versions_content_key_unique` ON `spell_versions` (`content_key`);

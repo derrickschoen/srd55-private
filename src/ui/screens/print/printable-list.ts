@@ -45,61 +45,66 @@ function abbreviatedAbilities(values: readonly string[]): string {
 }
 
 /**
- * THE SCALE AS THE WORD A PLAYER READS.
+ * A PROGRESSION LINE, OR NOTHING AT ALL.
  *
- * EXHAUSTIVE WITH NO `default` ARM, so a third `UpcastScale` is a compile error
- * here rather than a ladder that silently prints as slot levels. The `null` arm
- * is REACHED ONLY OFF AN IMAGE THIS BUILD DID NOT WRITE — the importer refuses
- * levels with no scale and the schema CHECK bounds the column — and it prints
- * the bare word `levels`, which claims neither scale. Substituting the more
- * common one would be exactly the "print an assumption as a fact" D24 forbids,
- * on the one row where we know we do not know.
+ * THREE STATES AND ONLY TWO OF THEM PRINT, which is D24 applied to a new field.
+ * A spell whose catalog document said nothing prints NO LINE — not
+ * "Upcast: —", which would read as "this spell cannot be upcast" and assert
+ * something no document said. The em-dash placeholder every other row in this
+ * list uses is right for `Range` and `Duration`, where the field is part of
+ * every printed spell; it is wrong here, where the field is a fact the document
+ * may simply not carry.
+ *
+ * THE UNIT IS NAMED IN THE SENTENCE rather than left to the reader. `5, 11, 17`
+ * is a plausible list of slot levels AND a plausible list of character levels,
+ * and a player reading "Upcast at 5, 11, 17" with no unit word would have to
+ * know which spell they were looking at to know which it meant. The unit used
+ * to be read off a stored `upcast_scale` and could be missing; it is now a
+ * constant per line, because the line is chosen by which TABLE the levels came
+ * out of and there is no third answer.
  */
-function scaleWord(scale: PrintableSpell['upcast_scale']): string | null {
-  switch (scale) {
-    case 'slot_level':
-      return 'slot levels';
-    case 'character_level':
-      return 'character levels';
-    case null:
-      return null;
+function progressionLine(
+  label: string,
+  unit: string,
+  levels: readonly number[],
+  storedSummary: string | null,
+): string {
+  const summary =
+    storedSummary === null || storedSummary.trim() === ''
+      ? ''
+      : escapeHtml(storedSummary.trim());
+  if (levels.length === 0) {
+    return summary === ''
+      ? ''
+      : `<div><dt>${label}: </dt><dd>${summary}</dd></div>`;
   }
+  return `<div><dt>${label}: </dt><dd>${escapeHtml(
+    `${unit} ${levels.join(', ')}`,
+  )}${summary === '' ? '' : ` · ${summary}`}</dd></div>`;
 }
 
 /**
- * THE UPCAST LINE, OR NOTHING AT ALL.
+ * TWO LINES AND NOT ONE, because they are two mechanics.
  *
- * THREE STATES AND ONLY TWO OF THEM PRINT, which is D24 applied to a brand-new
- * field. A spell whose catalog document said nothing about upcasting prints NO
- * LINE — not "Upcast: —", which would read as "this spell cannot be upcast" and
- * assert something no document said. The em-dash placeholder every other row in
- * this list uses is right for `Range` and `Duration`, where the field is part
- * of every printed spell; it is wrong here, where the field is a fact the
- * document may simply not carry.
- *
- * THE SCALE IS NAMED IN THE SENTENCE rather than left to the reader. `2, 3, 4`
- * means slot levels for a levelled spell and character levels for a cantrip
- * upgrade, and a player reading "Upcast at 5, 11, 17" with no scale word would
- * have to know which spell they were looking at to know which it meant.
+ * A bigger SLOT is what "Upcast" costs; a Cantrip Upgrade costs nothing and
+ * happens because the CHARACTER levelled. Printing both under one heading would
+ * put a slot level and a character level in one comma-separated list, which is
+ * the exact confusion `upcast_scale` was invented to resolve and then caused.
+ * Nothing forbids a spell carrying both, so both are rendered independently.
  */
 function upcastLine(spell: PrintableSpell): string {
-  const summary =
-    spell.upcast_summary === null || spell.upcast_summary.trim() === ''
-      ? ''
-      : escapeHtml(spell.upcast_summary.trim());
-  if (spell.upcast_levels.length === 0) {
-    return summary === ''
-      ? ''
-      : `<div><dt>Upcast: </dt><dd>${summary}</dd></div>`;
-  }
-  const scale = scaleWord(spell.upcast_scale);
-  const levels =
-    scale === null
-      ? `levels ${spell.upcast_levels.join(', ')}`
-      : `${scale} ${spell.upcast_levels.join(', ')}`;
-  return `<div><dt>Upcast: </dt><dd>${escapeHtml(levels)}${
-    summary === '' ? '' : ` · ${summary}`
-  }</dd></div>`;
+  return `${progressionLine(
+    'Upcast',
+    'slot levels',
+    spell.upcast_levels,
+    spell.upcast_summary,
+  )}
+      ${progressionLine(
+        'Cantrip upgrade',
+        'character levels',
+        spell.cantrip_upgrade_levels,
+        spell.cantrip_upgrade_summary,
+      )}`;
 }
 
 function spellFacts(spell: PrintableSpell): string {

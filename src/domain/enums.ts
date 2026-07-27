@@ -651,29 +651,22 @@ export type SpellAreaShape = (typeof spellAreaShapes)[number];
 export const materialCostKinds = ['exact', 'minimum'] as const;
 export type MaterialCostKind = (typeof materialCostKinds)[number];
 
-/**
- * WHICH LEVEL A SPELL'S UPCAST LIST IS COUNTED IN.
+/*
+ * `upcastScales` USED TO LIVE HERE AND ITS SUBJECT IS GONE — recorded rather
+ * than silently removed, because the removal is a ruling and not a tidy-up.
  *
- * TWO MEMBERS AND THE DISCRIMINANT IS LOAD-BEARING, because "a list of levels
- * that can upcast" is ambiguous between two different levels and the ONLY
- * upcast text this repository ships uses the one that is easy to miss:
- *
- *  - `character_level` — both bundled cantrips scale by it. *"Cantrip Upgrade.
- *    … when you reach levels 5 (1d6), 11 (2d6), and 17 (3d6)"*
- *    (`docs/srd/source/weapon-attack-cantrips.txt:26-29`) and *"The damage die
- *    changes when you reach levels 5 (d10), 11 (d12), and 17 (2d6)"* (`:53-54`).
- *  - `slot_level` — a levelled spell's *"Using a Higher-Level Spell Slot"*,
- *    which is 2..9. NO EXAMPLE OF THIS FORM EXISTS ANYWHERE IN THIS REPOSITORY,
- *    because the repo ships no spell catalog at all.
- *
- * A single list with no discriminant would mix `5, 11, 17` with `2..9` in one
- * integer set, and a reader could not tell a cantrip's character levels from a
- * fireball's slot levels. `spell_version_upcast_levels` carries no scale of its
- * own: the scale is a fact about the SPELL, so it sits on `spell_versions` and
- * one row cannot hold two answers.
+ * It was `['slot_level', 'character_level']`, a discriminant on
+ * `spell_versions` saying which kind of level `spell_version_upcast_levels`
+ * counted in. The owner has since ruled that upcasting is measured in SLOT
+ * levels only, and that a cantrip's ladder is a different mechanic —
+ * *"Separate concept, own table"*. So the two meanings are two tables
+ * (`spell_version_upcast_levels`, bounded 1..9, and
+ * `spell_version_cantrip_upgrade_levels`, bounded 1..20), each with its own
+ * text column, and there is no longer one column for a discriminant to select
+ * the meaning of. The SRD citations this comment carried moved to the new
+ * table's docblock in `db/schema/catalog-spells.ts`, which is where a reader
+ * now needs them.
  */
-export const upcastScales = ['slot_level', 'character_level'] as const;
-export type UpcastScale = (typeof upcastScales)[number];
 
 /* ==========================================================================
  * BACKGROUND EQUIPMENT

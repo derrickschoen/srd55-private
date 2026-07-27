@@ -7,12 +7,9 @@ import {
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import {
-  isEnumValue,
-  upcastScales,
   type Ability,
   type CastingMode,
   type RulesEdition,
-  type UpcastScale,
 } from '../domain/enums';
 import { SpellAccessBuilder, type SpellAccessRoute } from '../access/spell-access-builder';
 import {
@@ -47,22 +44,27 @@ export interface PrintableSpell {
   readonly ritual: boolean;
   readonly components: string | null;
   /**
-   * THE UPCAST PROGRESSION — the one structured value in this change that puts
+   * THE TWO PROGRESSIONS — the structured values in this area that put
    * information on the card a player did not already have.
+   *
+   * `upcast_levels` is SPELL SLOT LEVELS: what a bigger slot buys.
+   * `cantrip_upgrade_levels` is CHARACTER LEVELS: the SRD's Cantrip Upgrade,
+   * which spends no slot. They are two fields because they are two mechanics,
+   * and the card prints them as two lines for the same reason.
    *
    * The parsed range and material cost deliberately do NOT appear beside their
    * printed lines: those lines already say the same thing in the words the
    * author chose, and a second rendering of them would be D26 structure for its
-   * own sake. Nothing has ever printed an upcast progression, because until now
-   * nothing has ever STORED one.
+   * own sake.
    *
-   * `upcast_levels` is EMPTY when the catalog document did not say, which is
-   * not the same as "this spell cannot be upcast" — the card prints nothing at
-   * all in that case rather than asserting either.
+   * Either list is EMPTY when the catalog document did not say, which is not
+   * the same as "this spell has no such progression" — the card prints nothing
+   * at all in that case rather than asserting either.
    */
-  readonly upcast_scale: UpcastScale | null;
   readonly upcast_levels: number[];
   readonly upcast_summary: string | null;
+  readonly cantrip_upgrade_levels: number[];
+  readonly cantrip_upgrade_summary: string | null;
   readonly attack_modes: string[];
   readonly save_abilities: string[];
   readonly casting_mode: CastingMode;
@@ -112,9 +114,10 @@ interface SpellFacts {
   readonly ritual: boolean;
   readonly components: string | null;
   readonly description: string | null;
-  readonly upcast_scale: UpcastScale | null;
   readonly upcast_levels: number[];
   readonly upcast_summary: string | null;
+  readonly cantrip_upgrade_levels: number[];
+  readonly cantrip_upgrade_summary: string | null;
   readonly attack_modes: string[];
   readonly save_abilities: string[];
 }
@@ -153,30 +156,22 @@ function actionType(castingTime: string | null): string | null {
   return null;
 }
 
-/**
- * THE STORED SCALE, VALIDATED RATHER THAN CAST.
- *
- * `scaleWord` in `src/ui/screens/print/printable-list.ts` is an exhaustive
- * switch with NO `default` arm, so a value outside the vocabulary falls through
- * it and returns `undefined` — which `upcastLine` interpolates, putting the
- * literal word `undefined` on a player's printed card. A cast cannot fail, so
- * casting here is what routes a corrupt value into that hole.
- *
- * IT IS REACHABLE FOR THE REASON F11 GAVE: `spell_versions.upcast_scale` has a
- * CHECK, and a CHECK constrains no image created before it existed and no
- * hand-edited one. `decodeSpellRange` and `decodeSpellComponents` are tolerant
- * on exactly that argument; this is the same boundary and it now answers the
- * same way — an unreadable scale is NO scale, which prints the bare word
- * `levels` and claims neither ladder.
+/*
+ * `decodeUpcastScale` USED TO SIT HERE and its subject is gone with
+ * `spell_versions.upcast_scale`. It validated the stored scale rather than
+ * casting it, because `scaleWord` one module over was an exhaustive switch with
+ * no `default` arm and an out-of-vocabulary value fell through it to print the
+ * literal word `undefined` on a player's card. There is no vocabulary left to
+ * fall out of: which levels a list holds is now the table it is stored in, and
+ * a table name cannot be corrupted into a third value.
  */
-function decodeUpcastScale(row: SqlRow): UpcastScale | null {
-  const stored = sqlNullableString(row, 'upcast_scale');
-  return stored !== null && isEnumValue(upcastScales, stored) ? stored : null;
-}
 
 function decodeFacts(row: SqlRow): Omit<
   SpellFacts,
-  'attack_modes' | 'save_abilities' | 'upcast_levels'
+  | 'attack_modes'
+  | 'save_abilities'
+  | 'upcast_levels'
+  | 'cantrip_upgrade_levels'
 > {
   const castingTime = sqlNullableString(row, 'casting_time');
   return {
@@ -194,8 +189,8 @@ function decodeFacts(row: SqlRow): Omit<
     ritual: sqlBoolean(row, 'ritual'),
     components: sqlNullableString(row, 'components'),
     description: sqlNullableString(row, 'short_summary'),
-    upcast_scale: decodeUpcastScale(row),
     upcast_summary: sqlNullableString(row, 'upcast_summary'),
+    cantrip_upgrade_summary: sqlNullableString(row, 'cantrip_upgrade_summary'),
   };
 }
 
@@ -420,13 +415,21 @@ export class PrintableSpellListBuilder {
       'tag',
       bindings,
     );
-    const upcastLevels = this.groupedUpcastLevels(bindings);
+    const upcastLevels = this.groupedLevels(
+      'spell_version_upcast_levels',
+      bindings,
+    );
+    const cantripUpgradeLevels = this.groupedLevels(
+      'spell_version_cantrip_upgrade_levels',
+      bindings,
+    );
     const facts = new Map<number, SpellFacts>();
 
     for (const row of this.db.all(
       `SELECT id, display_name, rules_edition, level, school,
               casting_time, action_type, range, duration, concentration,
-              ritual, components, short_summary, upcast_scale, upcast_summary
+              ritual, components, short_summary, upcast_summary,
+              cantrip_upgrade_summary
        FROM spell_versions
        WHERE id IN (${inList})
        ORDER BY id`,
@@ -444,27 +447,33 @@ export class PrintableSpellListBuilder {
         attack_modes: attackModes.get(base.spell_version_id) ?? [],
         save_abilities: saveAbilities.get(base.spell_version_id) ?? [],
         upcast_levels: upcastLevels.get(base.spell_version_id) ?? [],
+        cantrip_upgrade_levels:
+          cantripUpgradeLevels.get(base.spell_version_id) ?? [],
       });
     }
     return facts;
   }
 
   /**
-   * The upcast levels for every spell in one query, ASCENDING.
+   * One of the two level ladders for every spell in one query, ASCENDING.
    *
-   * SEPARATE FROM `groupedStrings` FOR THE REASON `#syncUpcastLevels` IS
-   * SEPARATE FROM `#syncSimplePivot` ONE MODULE OVER: that helper's `ORDER BY`
-   * is over a TEXT column, and ordering levels as text puts `11` before `2`. A
-   * list of levels printed `2, 11, 17` and one printed `11, 17, 2` are the same
-   * set and only one of them is readable.
+   * SEPARATE FROM `groupedStrings` FOR THE REASON `#syncLevels` IS SEPARATE
+   * FROM `#syncSimplePivot` ONE MODULE OVER: that helper's `ORDER BY` is over a
+   * TEXT column, and ordering levels as text puts `11` before `2`. A list of
+   * levels printed `2, 11, 17` and one printed `11, 17, 2` are the same set and
+   * only one of them is readable — and `11` is a real Cantrip Upgrade step, so
+   * this is not a hypothetical.
    */
-  private groupedUpcastLevels(
+  private groupedLevels(
+    table:
+      | 'spell_version_upcast_levels'
+      | 'spell_version_cantrip_upgrade_levels',
     versionIds: readonly number[],
   ): Map<number, number[]> {
     const grouped = new Map<number, number[]>();
     for (const row of this.db.all(
       `SELECT spell_version_id, level
-       FROM spell_version_upcast_levels
+       FROM ${table}
        WHERE spell_version_id IN (${placeholders(versionIds)})
        ORDER BY spell_version_id, level`,
       [...versionIds],

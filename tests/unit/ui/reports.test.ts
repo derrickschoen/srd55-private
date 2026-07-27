@@ -178,18 +178,28 @@ describe('read-only report presentation', () => {
     expect(markup).toContain('Free Cast Only · CHA');
     expect(markup).toContain('DC 12 · WIS');
     expect(markup).toContain('Melee Spell, Ranged Spell');
-    // THE UPCAST PROGRESSION, ASCENDING AND NAMING ITS SCALE. The fixture
+    // THE UPCAST PROGRESSION, ASCENDING AND NAMING ITS UNIT. The fixture
     // stores `[3, 2, 4]`; printing them in that order would be a list a reader
-    // has to re-sort, and printing `2, 3, 4` with no scale word would leave a
+    // has to re-sort, and printing `2, 3, 4` with no unit word would leave a
     // player unable to tell slot levels from character levels.
     expect(markup).toContain(
       'Upcast: </dt><dd>slot levels 2, 3, 4 · One additional creature per ' +
         'slot level above 2.',
     );
-    // ...AND NO LINE AT ALL for the four spells whose document said nothing.
+    // THE CANTRIP UPGRADE, ON ITS OWN LINE, IN ITS OWN UNIT, ON A DIFFERENT
+    // SPELL. The fixture stores `[17, 5, 11]` on Thorn Whip. Two of those three
+    // are values the SLOT table's CHECK refuses, so this line can only have
+    // come from the sibling table — and it says `character levels`, which is
+    // the whole reason the two mechanics were split.
+    expect(markup).toContain(
+      'Cantrip upgrade: </dt><dd>character levels 5, 11, 17 · The damage ' +
+        'die changes at higher character levels.',
+    );
+    // ...AND NO LINE AT ALL for the spells whose document said nothing.
     // `Upcast: —` would assert that they cannot be upcast, which no document
-    // claimed. Exactly one `Upcast:` in the whole sheet.
-    expect(markup.match(/Upcast: /gu)).toHaveLength(1);
+    // claimed. Exactly one of each heading in the whole sheet.
+    expect(markup.match(/>Upcast: /gu)).toHaveLength(1);
+    expect(markup.match(/>Cantrip upgrade: /gu)).toHaveLength(1);
     expect(markup.indexOf('Gift 2</h2>')).toBeLessThan(
       markup.indexOf('Gift 10</h2>'),
     );
@@ -203,49 +213,23 @@ describe('read-only report presentation', () => {
     );
   });
 
-  /**
-   * A SCALE THE VOCABULARY DOES NOT CONTAIN MUST NOT REACH THE CARD.
+  /*
+   * `prints the scale-less word rather than "undefined" for a stored scale
+   * outside the vocabulary` STOOD HERE AND ITS SUBJECT IS GONE.
    *
-   * `scaleWord` is an exhaustive switch with NO `default` arm, so a value
-   * outside `upcastScales` falls through it and returns `undefined`, which
-   * `upcastLine` interpolates — the literal word `undefined` printed to a
-   * player. The builder used to CAST the column instead of validating it, and a
-   * cast cannot fail.
+   * It corrupted `spell_versions.upcast_scale` to `'planar_level'` behind
+   * `PRAGMA ignore_check_constraints` and proved the card printed neither the
+   * literal word `undefined` nor the corrupt value. There is no `upcast_scale`
+   * column to corrupt and no `scaleWord` switch to fall through: which kind of
+   * level a list holds is now the TABLE it is stored in, and a table name is
+   * not a stored value that can hold a third answer. The hazard it guarded is
+   * removed rather than re-guarded, so the test goes with it.
    *
-   * THE STATE IS REACHABLE FOR F11'S REASON, and the pragma is how this test
-   * reaches it: `spell_versions.upcast_scale` carries a CHECK, and a CHECK
-   * constrains no image created before it existed and no hand-edited one. The
-   * docblock on `scaleWord` claims the fallback prints the bare word `levels`,
-   * which claims neither ladder; this is that claim, executed.
+   * The three sibling enum columns it was written alongside — `range_kind`,
+   * `area_shape`, `material_cost_kind` — still have their corruption test in
+   * `tests/integration/catalog/structured-values.test.ts`, and it is unchanged
+   * apart from dropping the fourth column from its sweep.
    */
-  it('prints the scale-less word rather than "undefined" for a stored scale outside the vocabulary', () => {
-    const fixture = createPrintableListFixture(db);
-    db.exec('PRAGMA ignore_check_constraints = ON');
-    const written = db.exec(
-      'UPDATE spell_versions SET upcast_scale = ? WHERE id = ?',
-      ['planar_level', fixture.spellIds.bless],
-    );
-    db.exec('PRAGMA ignore_check_constraints = OFF');
-    // The corrupt value really is stored — otherwise this measures nothing.
-    expect(written.changes).toBe(1);
-    expect(
-      db.scalar('SELECT upcast_scale FROM spell_versions WHERE id = ?', [
-        fixture.spellIds.bless,
-      ]),
-    ).toBe('planar_level');
-
-    const markup = renderPrintableList(
-      new PrintableSpellListBuilder(db).build(fixture.characterId),
-    );
-    expect(markup).not.toContain('undefined');
-    expect(markup).not.toContain('planar_level');
-    // The levels themselves are still true and still print; only the scale is
-    // withheld, because that is the part we no longer know.
-    expect(markup).toContain(
-      'Upcast: </dt><dd>levels 2, 3, 4 · One additional creature per ' +
-        'slot level above 2.',
-    );
-  });
 
   it('renders the exact partial and unavailable full-reference warnings from persisted text completeness', () => {
     const fixture = createPrintableListFixture(db);

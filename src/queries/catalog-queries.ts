@@ -19,7 +19,6 @@ import {
   materialCostKinds,
   spellAreaShapes,
   spellRangeKinds,
-  upcastScales,
   type Ability,
   type EffectReliabilityCategory,
   type MaterialCostKind,
@@ -28,7 +27,6 @@ import {
   type SpellAreaShape,
   type SpellRangeKind,
   type StandaloneSourceType,
-  type UpcastScale,
 } from '../domain/enums';
 
 /**
@@ -40,15 +38,23 @@ import {
  * string. `SpellVersionRow` now agrees with its writer, so there is nothing to
  * omit and nothing to restate.
  *
- * `upcastLevels` IS THE ONE FIELD THAT IS NOT A COLUMN. The levels a spell can
- * be upcast at are rows in `spell_version_upcast_levels`, aggregated in the
- * same way `lists` and `tags` are, and sorted ASCENDING so a consumer never has
- * to sort a "list of levels" itself.
+ * `upcastLevels` AND `cantripUpgradeLevels` ARE THE TWO FIELDS THAT ARE NOT
+ * COLUMNS. The SLOT levels a spell can be upcast at are rows in
+ * `spell_version_upcast_levels`; the CHARACTER levels at which a cantrip's
+ * effect changes are rows in `spell_version_cantrip_upgrade_levels`. Both are
+ * aggregated in the same way `lists` and `tags` are, and sorted ASCENDING so a
+ * consumer never has to sort a "list of levels" itself.
+ *
+ * TWO FIELDS AND NOT ONE PLUS A SCALE. `upcast_scale` used to say which kind of
+ * level a single list held; the owner ruled the Cantrip Upgrade a separate
+ * mechanic, so the two lists are separate and the field name carries what the
+ * discriminant used to.
  */
 export interface CatalogSpell extends SpellVersionRow {
   readonly lists: string[];
   readonly tags: string[];
   readonly upcastLevels: number[];
+  readonly cantripUpgradeLevels: number[];
 }
 
 export interface CatalogSnapshot {
@@ -138,7 +144,8 @@ function stringAggregate(value: string | null): string[] {
 }
 
 /**
- * The upcast levels, aggregated by the query and split back into integers.
+ * One of the two level ladders, aggregated by the query and split back into
+ * integers.
  *
  * ANY MEMBER THAT IS NOT AN INTEGER DROPS THE WHOLE LIST rather than yielding a
  * partial one. A half-read "list of levels that can upcast" is worse than none:
@@ -160,7 +167,7 @@ function numberAggregate(value: string | null): number[] {
  *
  * A cast cannot fail: `sqlNullableString(row, 'range_kind') as SpellRangeKind`
  * hands a consumer a value it is entitled to switch on exhaustively, and every
- * one of these four columns can hold something else — a CHECK constrains no
+ * one of these three columns can hold something else — a CHECK constrains no
  * image created before it existed and no hand-edited one, which is F11's point
  * and the same argument `decodeSpellRange` and `decodeSpellComponents` are
  * tolerant on. An unreadable member reads as ABSENT here, which is a state each
@@ -203,9 +210,12 @@ function decodeSpell(row: SqlRow): CatalogSpell {
     range_feet: sqlNullableInteger(row, 'range_feet'),
     area_shape: enumMember(row, 'area_shape', spellAreaShapes),
     area_feet: sqlNullableInteger(row, 'area_feet'),
-    upcast_scale: enumMember(row, 'upcast_scale', upcastScales),
     upcast_summary: sqlNullableString(row, 'upcast_summary'),
+    cantrip_upgrade_summary: sqlNullableString(row, 'cantrip_upgrade_summary'),
     upcastLevels: numberAggregate(sqlNullableString(row, 'upcast_levels')),
+    cantripUpgradeLevels: numberAggregate(
+      sqlNullableString(row, 'cantrip_upgrade_levels'),
+    ),
     requires_mod_for_effect: sqlBoolean(row, 'requires_mod_for_effect'),
     effect_reliability_category: sqlString(
       row,
@@ -270,7 +280,16 @@ export class CatalogQueries {
                     WHERE upcast.spell_version_id = version.id
                     ORDER BY upcast.level
                   )
-                ) AS upcast_levels
+                ) AS upcast_levels,
+                (
+                  SELECT group_concat(value, char(31))
+                  FROM (
+                    SELECT upgrade.level AS value
+                    FROM spell_version_cantrip_upgrade_levels AS upgrade
+                    WHERE upgrade.spell_version_id = version.id
+                    ORDER BY upgrade.level
+                  )
+                ) AS cantrip_upgrade_levels
          FROM spell_versions AS version
          ORDER BY version.level, version.display_name,
                   version.rules_edition, version.id`,
