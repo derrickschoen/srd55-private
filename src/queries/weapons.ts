@@ -11,8 +11,10 @@ import {
   isEnumValue,
   srdWeaponGroups,
   weaponMasteryProperties,
+  weaponProficiencyCategories,
   type SrdWeaponGroup,
   type WeaponMasteryProperty,
+  type WeaponProficiencyCategory,
 } from '../domain/enums';
 import type {
   CharacterWeapon,
@@ -86,6 +88,19 @@ function masteryProperty(row: SqlRow): WeaponMasteryProperty | null {
   return isEnumValue(weaponMasteryProperties, value) ? value : null;
 }
 
+/**
+ * An unrecognised stored proficiency category reads as NOT STATED.
+ *
+ * The same argument `masteryProperty` above makes, with a sharper consequence:
+ * substituting `simple` would tell a Wizard they are proficient with a weapon
+ * nobody recorded a category for, which is precisely the wrong number D27 exists
+ * to stop. Null is the state the sheet already knows how to say out loud.
+ */
+function proficiencyCategory(row: SqlRow): WeaponProficiencyCategory | null {
+  const value = sqlNullableString(row, 'proficiency_category');
+  return isEnumValue(weaponProficiencyCategories, value) ? value : null;
+}
+
 function weaponProfile(row: SqlRow): WeaponProfile {
   return {
     name: sqlString(row, 'name'),
@@ -120,7 +135,8 @@ export class WeaponQueries {
   /** A character's weapons, ordered by id — the order they were added. */
   characterWeapons(characterId: number): CharacterWeapon[] {
     return this.db.all(
-      `SELECT id, ${PROFILE_COLUMNS.join(', ')}, notes, mastery_selected
+      `SELECT id, ${PROFILE_COLUMNS.join(', ')}, proficiency_category, notes,
+              mastery_selected
        FROM character_weapons
        WHERE character_id = ?
        ORDER BY id`,
@@ -128,6 +144,11 @@ export class WeaponQueries {
       (row): CharacterWeapon => ({
         id: sqlInteger(row, 'id'),
         ...weaponProfile(row),
+        // D27's column, read HERE and not in `weaponProfile`: the profile is the
+        // set of columns the catalog and the character share, and this one is
+        // the character's alone. `weapon_templates` has no such column, so
+        // reading it there would be a SELECT of a column that does not exist.
+        proficiency_category: proficiencyCategory(row),
         notes: sqlNullableString(row, 'notes'),
         mastery_selected: sqlBoolean(row, 'mastery_selected'),
       }),

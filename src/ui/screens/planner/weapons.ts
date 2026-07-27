@@ -1,7 +1,9 @@
 import {
   weaponMasteryProperties,
+  weaponProficiencyCategories,
   type SrdWeaponGroup,
   type WeaponMasteryProperty,
+  type WeaponProficiencyCategory,
 } from '../../../domain/enums';
 import type { WeaponFields } from '../../../domain/command-contracts';
 import {
@@ -73,6 +75,11 @@ export interface WeaponsPanelOptions {
 export function blankWeapon(): WeaponFields {
   return {
     name: '',
+    // NOT STATED, which is the correct starting value for a weapon someone is
+    // typing in by hand: this application does not know whether their invented
+    // weapon is simple or martial, and guessing `simple` would hand them a
+    // proficiency bonus nobody sourced.
+    proficiency_category: null,
     damage_dice: null,
     damage_type: null,
     versatile_damage_dice: null,
@@ -107,8 +114,41 @@ export function blankWeapon(): WeaponFields {
  * promised.
  */
 export function weaponFromTemplate(template: WeaponTemplate): WeaponFields {
-  const { id: _id, content_key: _key, srd_group: _group, ...profile } = template;
-  return { ...profile, notes: null };
+  const { id: _id, content_key: _key, srd_group: group, ...profile } = template;
+  return {
+    ...profile,
+    notes: null,
+    proficiency_category: weaponProficiencyCategoryOf(group),
+  };
+}
+
+/**
+ * The source's four table headings folded onto the two categories a class can
+ * grant proficiency in — D27, and THE ONE PLACE THE FOLD HAPPENS.
+ *
+ * This line used to read `srd_group: _group` and throw the group away, on D1b's
+ * rule that a character's weapon has no category. D27 amends that rule, and this
+ * is the moment it applies: the template is being copied onto a character, and
+ * the category has to be a VALUE on the copy rather than a lookup back into the
+ * catalog, or D1b's real principle would fall too.
+ *
+ * NO `default` ARM, deliberately. A fifth `srd_group` — an imported catalog
+ * heading, a future edition — is a COMPILE ERROR here rather than a weapon that
+ * silently arrives with no category and reads as "we cannot check this one".
+ * That is the difference between a gap the type system made someone decide about
+ * and a gap nobody noticed.
+ */
+export function weaponProficiencyCategoryOf(
+  group: SrdWeaponGroup,
+): WeaponProficiencyCategory {
+  switch (group) {
+    case 'simple_melee':
+    case 'simple_ranged':
+      return 'simple';
+    case 'martial_melee':
+    case 'martial_ranged':
+      return 'martial';
+  }
 }
 
 function labelled(
@@ -454,6 +494,46 @@ function renderForm(
       draft = { ...draft, name: name.value };
     });
     fields.append(labelled('Name', name, 'weapon-name'));
+
+    // D27. A pre-filled weapon already carries the category folded out of its
+    // template, so this control mostly confirms it; it exists for the weapon
+    // someone typed in, which the picker never touched.
+    //
+    // "NOT STATED" IS A REAL FIRST OPTION AND NOT A PLACEHOLDER, for the reason
+    // D20 records about the damage-type select: a `<select>` has no empty state,
+    // so without an option for it the undecided case becomes unreachable after
+    // any pick, and a user who set `martial` by mistake could never take it back
+    // to "I do not know".
+    const category = document.createElement('select');
+    category.dataset.focusKey = 'weapon-proficiency-category';
+    const unstated = document.createElement('option');
+    unstated.value = '';
+    unstated.textContent = 'Not stated';
+    unstated.selected = draft.proficiency_category === null;
+    category.append(unstated);
+    for (const member of weaponProficiencyCategories) {
+      const entry = document.createElement('option');
+      entry.value = member;
+      entry.textContent = member === 'simple' ? 'Simple' : 'Martial';
+      entry.selected = draft.proficiency_category === member;
+      category.append(entry);
+    }
+    category.addEventListener('change', () => {
+      draft = {
+        ...draft,
+        proficiency_category:
+          category.value === ''
+            ? null
+            : (category.value as WeaponProficiencyCategory),
+      };
+    });
+    fields.append(
+      labelled(
+        'Simple or martial',
+        category,
+        'weapon-proficiency-category',
+      ),
+    );
 
     const damage = textInput(
       'weapon-damage-dice',

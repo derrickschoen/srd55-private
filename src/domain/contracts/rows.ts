@@ -26,6 +26,7 @@ import {
   srdWeaponGroups,
   weaponMasteryGrants,
   weaponMasteryProperties,
+  weaponProficiencyCategories,
 } from '../enums';
 
 /**
@@ -162,6 +163,17 @@ const weaponMasteryPropertyEnum = z.enum(weaponMasteryProperties);
 const weaponMasteryGrantEnum = z.enum(weaponMasteryGrants);
 const srdWeaponGroupEnum = z.enum(srdWeaponGroups);
 /**
+ * D27's `simple | martial` on a character's weapon.
+ *
+ * SEPARATE FROM `srdWeaponGroupEnum` and not a widening of it. That one is the
+ * source's four table HEADINGS and lives only on `weapon_templates`; this is the
+ * two categories the Core Traits tables grant proficiency in. A single enum over
+ * all six would let `martial_ranged` be stored on a character's weapon, where it
+ * would match no class's proficiency grant and silently read as "not
+ * proficient".
+ */
+const weaponProficiencyCategoryEnum = z.enum(weaponProficiencyCategories);
+/**
  * The closed set of mechanical effects a character or a template can carry.
  *
  * An enum and not `sqlText`, unlike `creature_type` / `size` / `damage_type`
@@ -212,6 +224,7 @@ export const COLUMN_REFINEMENTS = {
   weaponMasteryPropertyEnum,
   weaponMasteryGrantEnum,
   srdWeaponGroupEnum,
+  weaponProficiencyCategoryEnum,
   effectKindEnum,
   armorSlotEnum,
   armorCategoryEnum,
@@ -525,6 +538,11 @@ const REFINEMENTS = {
   'character_weapons.two_handed': sqlBool,
   'character_weapons.ammunition': sqlBool,
   'character_weapons.ammunition_kind': sqlText,
+  // D27. Nullability is DERIVED from the column facts, so this cannot be
+  // stricter than the column: a weapon that arrived with no category — an older
+  // share link, or one someone typed in — still passes, and the sheet says it
+  // cannot check that weapon rather than refusing the row.
+  'character_weapons.proficiency_category': weaponProficiencyCategoryEnum,
   'character_weapons.mastery_property': weaponMasteryPropertyEnum,
   'character_weapons.mastery_selected': sqlBool,
   'character_weapons.other_properties': sqlText,

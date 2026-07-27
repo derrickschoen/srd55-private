@@ -8,6 +8,7 @@ import {
   skills,
   effectKinds,
   weaponMasteryProperties,
+  weaponProficiencyCategories,
 } from '../domain/enums';
 import { weaponMasterySelectionError } from '../domain/contracts/row-rules';
 import {
@@ -195,6 +196,20 @@ export interface SharePlaceholder {
  */
 export interface ShareWeapon {
   readonly name: string;
+  /**
+   * D27's `simple | martial`. Optional, and the absence is the whole point.
+   *
+   * EVERY LINK MINTED BEFORE THIS COLUMN EXISTED CARRIES NO CATEGORY, and by
+   * D11 part 2 the boundary tolerates: such a weapon imports as NOT STATED,
+   * which is the same state a user's hand-typed weapon is in, and the sheet says
+   * it cannot check that weapon. Rejecting the older payload — or, worse,
+   * inventing `simple` for it — would be the data-loss failure AGENTS.md names,
+   * on a link somebody has already sent.
+   *
+   * It is APPENDED to the wire tuple rather than inserted in the middle; see
+   * `WEAPON_TUPLE_LENGTHS` in `codec.ts` for why that position is load-bearing.
+   */
+  readonly proficiency_category?: string;
   readonly damage_dice?: string;
   readonly damage_type?: string;
   readonly versatile_damage_dice?: string;
@@ -769,6 +784,7 @@ function shareWeapon(value: unknown, label: string): ShareWeapon {
     row,
     ['name'],
     [
+      'proficiency_category',
       ...SHARE_WEAPON_TEXT,
       'range_normal_feet',
       'range_long_feet',
@@ -782,6 +798,28 @@ function shareWeapon(value: unknown, label: string): ShareWeapon {
   const weapon: Record<string, unknown> = {
     name: text(row.name, `${label}.name`, WEAPON_TEXT_LIMITS.name),
   };
+  // D27. Checked against the enum here rather than passed through as text, for
+  // the same reason `mastery_property` is: `character_weapons` has a CHECK on
+  // this column, so a document carrying `martial_ranged` would otherwise reach
+  // the INSERT and abort the whole import with a raw SQLITE_CONSTRAINT_CHECK
+  // naming nothing.
+  if (row.proficiency_category !== undefined) {
+    const category = text(
+      row.proficiency_category,
+      `${label}.proficiency_category`,
+      WEAPON_TEXT_LIMITS.name,
+    );
+    if (
+      !weaponProficiencyCategories.includes(
+        category as (typeof weaponProficiencyCategories)[number],
+      )
+    ) {
+      throw new ShareValidationError(
+        `${label}.proficiency_category is unsupported.`,
+      );
+    }
+    weapon.proficiency_category = category;
+  }
   for (const field of SHARE_WEAPON_TEXT) {
     if (row[field] !== undefined) {
       weapon[field] = text(

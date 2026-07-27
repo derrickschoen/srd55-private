@@ -225,6 +225,12 @@ function contentKey(
  */
 function shareWeaponFromRow(row: Row): ShareWeapon {
   const weapon: Record<string, unknown> = { name: String(row.name) };
+  if (
+    row.proficiency_category !== null &&
+    row.proficiency_category !== undefined
+  ) {
+    weapon.proficiency_category = String(row.proficiency_category);
+  }
   for (const field of SHARE_WEAPON_TEXT) {
     if (row[field] !== null && row[field] !== undefined) {
       weapon[field] = String(row[field]);
@@ -1443,16 +1449,21 @@ export function importCharacterShare(
     for (const weapon of document.weapons ?? []) {
       db.exec(
         `INSERT INTO ${SHARE_TABLES.character_weapons} (
-           character_id, name, ${SHARE_WEAPON_TEXT.join(', ')},
+           character_id, name, proficiency_category,
+           ${SHARE_WEAPON_TEXT.join(', ')},
            range_normal_feet, range_long_feet, mastery_property,
            other_properties, notes, ${SHARE_WEAPON_FLAGS.join(', ')},
            created_at, updated_at
-         ) VALUES (?, ?, ${SHARE_WEAPON_TEXT.map(() => '?').join(', ')},
+         ) VALUES (?, ?, ?, ${SHARE_WEAPON_TEXT.map(() => '?').join(', ')},
            ?, ?, ?, ?, ?, ${SHARE_WEAPON_FLAGS.map(() => '?').join(', ')},
            ?, ?)`,
         [
           characterId,
           weapon.name,
+          // Absent means the column's own NULL — NOT STATED — which is exactly
+          // what a link minted before D27 means and exactly what the sheet then
+          // says out loud. The importer invents nothing.
+          weapon.proficiency_category ?? null,
           ...SHARE_WEAPON_TEXT.map((field) => weapon[field] ?? null),
           weapon.range_normal_feet ?? null,
           weapon.range_long_feet ?? null,

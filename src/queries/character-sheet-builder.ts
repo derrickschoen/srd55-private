@@ -13,6 +13,7 @@ import type {
   ArmorDexBonus,
   ArmorSlot,
   Skill,
+  WeaponProficiencyCategory,
 } from '../domain/enums';
 import {
   abilities,
@@ -21,6 +22,7 @@ import {
   armorSlots,
   isEnumValue,
   skills,
+  weaponProficiencyCategories,
 } from '../domain/enums';
 import { AbilityScores } from '../rules/ability-scores';
 import { SheetContentLookup } from '../rules/sheet-content-lookup';
@@ -37,11 +39,18 @@ import {
   sheetProficiencyBonus,
   skillModifier,
   totalCharacterLevel,
+  type ClassProficiencySources,
+  type ClassWeaponProficiency,
   type HitPointRolls,
   type SheetArmor,
   type SheetClass,
   type SheetWarning,
 } from '../rules/sheet';
+import {
+  characterProficiencies,
+  type ProficiencyWeapon,
+  type WeaponProficiencyVerdict,
+} from '../rules/multiclass-proficiency';
 import {
   effectHitPoints,
   summariseEffects,
@@ -145,13 +154,41 @@ export interface SheetClassLine {
  * USER has left undone. These report what the APPLICATION does not hold, and
  * they are true of every character equally.
  */
+/**
+ * WHAT THIS CHARACTER IS PROFICIENT WITH, and what could not be decided (D28).
+ *
+ * `armor_training` and `weapon_proficiencies` are the UNION across every class:
+ * the class they STARTED in contributed its full Core Traits row, every later
+ * class only its multiclass entry subset. `classes` names which class
+ * contributed which, and `via` says which of the two roles it played — so the
+ * asymmetry is visible on the page rather than only in the code.
+ */
+export interface SheetProficiencies {
+  readonly armor_training: readonly ArmorCategory[];
+  readonly weapon_proficiencies: readonly {
+    readonly class_name: string;
+    readonly category: WeaponProficiencyCategory;
+    /** Printed verbatim. Evaluated only as the set union D28 §2 describes. */
+    readonly property_qualifier: string | null;
+  }[];
+  readonly classes: readonly {
+    readonly class_name: string;
+    readonly via: 'initial' | 'multiclass_entry';
+  }[];
+  /** One per weapon the character owns, in the order they were added. */
+  readonly weapons: readonly {
+    readonly name: string;
+    readonly verdict: WeaponProficiencyVerdict;
+  }[];
+}
+
 export interface SheetGap {
   readonly kind:
     | 'no_class_feature_text'
     | 'partial_subclass_catalog'
     | 'no_unarmored_defense'
     | 'no_expertise'
-    | 'no_weapon_proficiency'
+    | 'weapon_reach_not_recorded'
     | 'background_skills_are_text';
   readonly title: string;
   readonly detail: string;
@@ -197,6 +234,7 @@ export interface CharacterSheet {
    */
   readonly unchosen_damage_resistances: readonly string[];
   readonly classes: readonly SheetClassLine[];
+  readonly proficiencies: SheetProficiencies;
   readonly armor: readonly SheetArmorRow[];
   readonly hit_point_rolls: readonly SheetHitPointRoll[];
   readonly armor_class_adjustment: number;
@@ -249,6 +287,27 @@ interface SheetClassJoinRow {
    */
   readonly hit_die: number | null;
 }
+
+/**
+ * What a class with no seeded sheet content grants: NOTHING, in both roles.
+ *
+ * NOT a guess and not a placeholder. A homebrew or imported class has no
+ * `class_armor_training` and no `class_weapon_proficiencies` rows, so it grants
+ * no proficiency — and the honest consequence is that a character whose only
+ * class is that one is told every weapon is unchecked. Substituting "simple
+ * weapons, like most classes" here would be the `?? 8` failure D24 records, in a
+ * place where the invented value silently adds a proficiency bonus.
+ */
+const EMPTY_CLASS_PROFICIENCIES: ClassProficiencySources = Object.freeze({
+  initial: Object.freeze({
+    armor_training: Object.freeze([]),
+    weapon_proficiencies: Object.freeze([]),
+  }),
+  on_entry: Object.freeze({
+    armor_training: Object.freeze([]),
+    weapon_proficiencies: Object.freeze([]),
+  }),
+});
 
 const sheetClassRow: RowCodec<SheetClassJoinRow> = (row) => ({
   class_definition_id: sqlInteger(row, 'class_definition_id'),
@@ -305,13 +364,20 @@ export const SHEET_GAPS: readonly SheetGap[] = Object.freeze([
       'sources, so every skill below adds the plain bonus once.',
   },
   {
-    kind: 'no_weapon_proficiency',
-    title: 'Weapon proficiency is not recorded',
+    // RENAMED AND REWRITTEN BY D27/D28, NOT DELETED. Half of what this gap said
+    // is no longer true — a weapon now carries `simple | martial`, and the
+    // Proficiencies section above says which classes grant what — but the OTHER
+    // half is unchanged and is still the reason attack profiles print two
+    // formulas: nothing records whether a weapon is melee or ranged.
+    kind: 'weapon_reach_not_recorded',
+    title: 'Whether a weapon is melee or ranged is not recorded',
     detail:
-      'This application does not record which weapons a character is ' +
-      'proficient with, nor whether a weapon is melee or ranged. Attack ' +
-      'profiles therefore show both formulas and state that the proficiency ' +
-      'bonus is included.',
+      'A weapon carries its simple/martial category, so the Proficiencies ' +
+      'section can say whether a class of this character’s grants it. What is ' +
+      'still not recorded is whether the weapon is MELEE or RANGED, and the ' +
+      'attack formula branches on exactly that — so attack profiles show both ' +
+      'formulas. They also include the proficiency bonus in both, whatever the ' +
+      'Proficiencies section says: withholding it there is a separate change.',
   },
   {
     kind: 'background_skills_are_text',
@@ -393,6 +459,19 @@ export class CharacterSheetBuilder {
       adjustment: adjustment.value,
     });
     const saves = savingThrowProficiencies(classes);
+    // D28's union, and its warnings. It reuses the SAME `startingClass` the
+    // saving throws above go through — which is why the two can disagree about
+    // what they GRANT while agreeing about which class came first. Saving throws
+    // are the starting class ALONE; proficiency is the union in which the
+    // starting class merely contributes more.
+    const proficiencies = characterProficiencies({
+      classes,
+      weapons: this.#proficiencyWeapons(characterId),
+      wornArmor: armorRows.map((row) => ({
+        name: row.name,
+        category: row.category,
+      })),
+    });
 
     // ONE READ OF ONE TABLE, WITH NO JOIN, which is what the effect model was
     // inverted for. This used to select six columns off
@@ -546,6 +625,17 @@ export class CharacterSheetBuilder {
           : walkingSpeedFeet(baseSpeed.feet, effectRows),
       damage_resistances: effects.damageResistances,
       unchosen_damage_resistances: effects.unchosenDamageResistances,
+      proficiencies: {
+        armor_training: [...proficiencies.armor_training],
+        weapon_proficiencies: proficiencies.weapon_proficiencies.map(
+          (entry) => ({ ...entry }),
+        ),
+        classes: proficiencies.grants.map((grant) => ({
+          class_name: grant.class_name,
+          via: grant.via,
+        })),
+        weapons: proficiencies.weapons.map((entry) => ({ ...entry })),
+      },
       classes: classes.map((entry): SheetClassLine => ({
         class_name: entry.class_name,
         level: entry.level,
@@ -570,6 +660,19 @@ export class CharacterSheetBuilder {
         ...hitPoints.warnings,
         ...ac.warnings,
         ...saves.warnings,
+        // `saves` and `proficiencies` BOTH carry `startingClass`'s degradation
+        // warnings, because both go through it. Deduplicated on `code`+`message`
+        // rather than by dropping one arm's warnings wholesale: the two sets
+        // overlap today and need not tomorrow, and a page that printed
+        // "no starting class" twice would read as two different problems.
+        ...proficiencies.warnings.filter(
+          (warning) =>
+            !saves.warnings.some(
+              (existing) =>
+                existing.code === warning.code &&
+                existing.message === warning.message,
+            ),
+        ),
       ],
       gaps: SHEET_GAPS,
     };
@@ -595,6 +698,11 @@ export class CharacterSheetBuilder {
       [characterId],
       sheetClassRow,
     );
+    // ONE QUERY EACH RATHER THAN ONE PER CLASS. The saving-throw subquery below
+    // is an N+1 already; three more of the same shape would make it 4xN on every
+    // sheet read. Both of these are scoped to the character's own classes, so
+    // they read the same rows the loop would have.
+    const proficiencies = this.#classProficiencies(characterId);
     return rows.map((row): SheetClass => {
       const classDefinitionId = row.class_definition_id;
       const contentRow = content.find(
@@ -616,6 +724,13 @@ export class CharacterSheetBuilder {
         // returns an `assumed_hit_die` warning; the class line below prints
         // `null` and the page says the die is not recorded.
         hit_die: row.hit_die,
+        // BOTH GRANTS TRAVEL, UNRESOLVED. Which one applies depends on whether
+        // this class is the one the character STARTED in, and that is not a fact
+        // about the class — `classProficiencyGrants` resolves it once, from
+        // `startingClass`, for the whole character. A builder that resolved it
+        // here would be the second resolver the brief forbids.
+        proficiencies:
+          proficiencies.get(classDefinitionId) ?? EMPTY_CLASS_PROFICIENCIES,
         saving_throws: this.db
           .all(
             `SELECT ability FROM class_saving_throw_proficiencies
@@ -629,6 +744,160 @@ export class CharacterSheetBuilder {
         ...(contentRow ?? {}),
       };
     });
+  }
+
+  /**
+   * Every class's armour training and weapon proficiency, BOTH GRANTS, keyed by
+   * class definition id.
+   *
+   * THE ENTRY SUBSET IS READ OFF THE SAME ROWS AS THE INITIAL SET, filtered by
+   * `granted_on_multiclass_entry`. That is what makes "the entry set is a subset
+   * of the initial set" STRUCTURAL rather than promised: there is one row per
+   * (class, category), and the flag decides whether it appears in the second
+   * list as well as the first. A category not trained at all has no row, so it
+   * can appear in neither.
+   *
+   * A CLASS WITH NO SEEDED CONTENT GETS EMPTY LISTS AND NOT A GUESS, matching
+   * how `hit_die` carries its own absence: an imported class this application
+   * holds no Core Traits row for grants nothing here, and the sheet says every
+   * weapon is unchecked rather than inventing simple-weapon proficiency for it.
+   */
+  #classProficiencies(
+    characterId: number,
+  ): ReadonlyMap<number, ClassProficiencySources> {
+    const found = new Map<number, {
+      initialArmor: ArmorCategory[];
+      entryArmor: ArmorCategory[];
+      initialWeapons: ClassWeaponProficiency[];
+      entryWeapons: ClassWeaponProficiency[];
+    }>();
+    const bucket = (classDefinitionId: number) => {
+      const existing = found.get(classDefinitionId);
+      if (existing !== undefined) {
+        return existing;
+      }
+      const fresh = {
+        initialArmor: [] as ArmorCategory[],
+        entryArmor: [] as ArmorCategory[],
+        initialWeapons: [] as ClassWeaponProficiency[],
+        entryWeapons: [] as ClassWeaponProficiency[],
+      };
+      found.set(classDefinitionId, fresh);
+      return fresh;
+    };
+
+    for (const row of this.db.all(
+      `SELECT training.class_definition_id AS class_definition_id,
+              training.category AS category,
+              training.granted_on_multiclass_entry AS on_entry
+       FROM class_armor_training AS training
+       WHERE training.class_definition_id IN (
+               SELECT class_definition_id FROM character_class_levels
+                WHERE character_id = ?)
+       ORDER BY training.category`,
+      [characterId],
+      (entry) => ({
+        class_definition_id: sqlInteger(entry, 'class_definition_id'),
+        category: sqlString(entry, 'category'),
+        on_entry: sqlBoolean(entry, 'on_entry'),
+      }),
+    )) {
+      // A stored category outside the vocabulary is DROPPED rather than
+      // substituted, and the difference from `enumOr` above is deliberate: an
+      // armour ROW the character wears must still produce a number, so its enum
+      // degrades to a stated approximation. A catalog GRANT that is not a
+      // category grants nothing, and inventing `light` for it would hand
+      // somebody a training they were never given.
+      if (!isEnumValue(armorCategories, row.category)) {
+        continue;
+      }
+      const target = bucket(row.class_definition_id);
+      target.initialArmor.push(row.category);
+      if (row.on_entry) {
+        target.entryArmor.push(row.category);
+      }
+    }
+
+    for (const row of this.db.all(
+      `SELECT proficiency.class_definition_id AS class_definition_id,
+              proficiency.category AS category,
+              proficiency.property_qualifier AS property_qualifier,
+              proficiency.granted_on_multiclass_entry AS on_entry
+       FROM class_weapon_proficiencies AS proficiency
+       WHERE proficiency.class_definition_id IN (
+               SELECT class_definition_id FROM character_class_levels
+                WHERE character_id = ?)
+       ORDER BY proficiency.category`,
+      [characterId],
+      (entry) => ({
+        class_definition_id: sqlInteger(entry, 'class_definition_id'),
+        category: sqlString(entry, 'category'),
+        property_qualifier: sqlNullableString(entry, 'property_qualifier'),
+        on_entry: sqlBoolean(entry, 'on_entry'),
+      }),
+    )) {
+      if (!isEnumValue(weaponProficiencyCategories, row.category)) {
+        continue;
+      }
+      const grant: ClassWeaponProficiency = {
+        category: row.category,
+        property_qualifier: row.property_qualifier,
+      };
+      const target = bucket(row.class_definition_id);
+      target.initialWeapons.push(grant);
+      if (row.on_entry) {
+        target.entryWeapons.push(grant);
+      }
+    }
+
+    return new Map(
+      [...found].map(([classDefinitionId, entry]) => [
+        classDefinitionId,
+        {
+          initial: {
+            armor_training: entry.initialArmor,
+            weapon_proficiencies: entry.initialWeapons,
+          },
+          on_entry: {
+            armor_training: entry.entryArmor,
+            weapon_proficiencies: entry.entryWeapons,
+          },
+        } satisfies ClassProficiencySources,
+      ]),
+    );
+  }
+
+  /**
+   * The character's weapons, reduced to the three columns a proficiency question
+   * reads.
+   *
+   * NOT `WeaponQueries.characterWeapons`, and not because that reader is wrong:
+   * it builds attack profiles and a whole panel, and a sheet asking "is this
+   * character proficient" has no business paying for that. The narrow type is
+   * also what stops this path guessing a category from a damage die.
+   */
+  #proficiencyWeapons(characterId: number): readonly ProficiencyWeapon[] {
+    return this.db.all(
+      `SELECT name, proficiency_category, finesse, light
+       FROM character_weapons WHERE character_id = ? ORDER BY id`,
+      [characterId],
+      (row): ProficiencyWeapon => {
+        const category = sqlNullableString(row, 'proficiency_category');
+        return {
+          name: sqlString(row, 'name'),
+          // NOT STATED on anything unrecognised — never `simple`. D27's null is
+          // the state the sheet knows how to say out loud.
+          proficiency_category: isEnumValue(
+            weaponProficiencyCategories,
+            category,
+          )
+            ? (category as WeaponProficiencyCategory)
+            : null,
+          finesse: sqlBoolean(row, 'finesse'),
+          light: sqlBoolean(row, 'light'),
+        };
+      },
+    );
   }
 
   #rolls(characterId: number): {
