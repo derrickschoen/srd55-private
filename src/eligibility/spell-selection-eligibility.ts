@@ -2,12 +2,17 @@ import {
   sqlBoolean,
   sqlInteger,
   sqlNullableInteger,
+  sqlNullableSpellSchoolList,
   sqlNullableString,
+  sqlSpellSchool,
   sqlString,
   type SqlRow,
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
-import type { SelectionEligibility } from '../domain/enums';
+import type {
+  SelectionEligibility,
+  SpellSchool,
+} from '../domain/enums';
 
 export const eligibilityInvalidReasons = {
   inactive: 'Selected spell version is not active in the catalog.',
@@ -25,6 +30,10 @@ export interface SpellSelectionEvaluation {
 }
 
 export type EligibilityList = string | readonly string[] | null;
+export type SchoolEligibilityList =
+  | string
+  | readonly SpellSchool[]
+  | null;
 
 export interface EligibilitySlot {
   character_id: number;
@@ -33,7 +42,7 @@ export interface EligibilitySlot {
   spell_level_min?: number;
   spell_level_max?: number;
   allowed_spell_lists?: EligibilityList;
-  allowed_schools?: EligibilityList;
+  allowed_schools?: SchoolEligibilityList;
   allowed_tags?: EligibilityList;
   selection_collection?: string | null;
 }
@@ -43,7 +52,7 @@ interface SpellVersion {
   spellIdentityId: number;
   rulesEdition: string;
   level: number;
-  school: string;
+  school: SpellSchool;
   isActive: boolean;
 }
 
@@ -73,7 +82,7 @@ function decodeVersion(row: SqlRow): SpellVersion {
     spellIdentityId: sqlInteger(row, 'spell_identity_id'),
     rulesEdition: sqlString(row, 'rules_edition'),
     level: sqlInteger(row, 'level'),
-    school: sqlString(row, 'school'),
+    school: sqlSpellSchool(row, 'school'),
     isActive: sqlBoolean(row, 'is_active'),
   };
 }
@@ -92,7 +101,7 @@ function decodeSlot(row: SqlRow): RefreshableSlot {
     spell_level_min: sqlInteger(row, 'spell_level_min'),
     spell_level_max: sqlInteger(row, 'spell_level_max'),
     allowed_spell_lists: sqlNullableString(row, 'allowed_spell_lists'),
-    allowed_schools: sqlNullableString(row, 'allowed_schools'),
+    allowed_schools: sqlNullableSpellSchoolList(row, 'allowed_schools'),
     allowed_tags: sqlNullableString(row, 'allowed_tags'),
     selection_collection: sqlNullableString(row, 'selection_collection'),
     selectionEligibility:

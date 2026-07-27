@@ -4,6 +4,7 @@ import type {
   ArmorCategory,
   ArmorDexBonus,
   ArmorSlot,
+  DamageType,
   SelectionEligibility,
   Skill,
   SlotState,
@@ -134,7 +135,7 @@ export interface WeaponFields {
    */
   proficiency_category: WeaponProficiencyCategory | null;
   damage_dice: string | null;
-  damage_type: string | null;
+  damage_type: DamageType | null;
   versatile_damage_dice: string | null;
   finesse: boolean;
   heavy: boolean;

@@ -1,4 +1,5 @@
 import {
+  damageType as toDamageType,
   weaponMasteryProperties,
   weaponProficiencyCategories,
   type SrdWeaponGroup,
@@ -552,7 +553,11 @@ function renderForm(
     );
     damageType.setAttribute('list', 'weapon-damage-types');
     damageType.addEventListener('input', () => {
-      draft = { ...draft, damage_type: trimmedOrNull(damageType.value) };
+      const value = trimmedOrNull(damageType.value);
+      draft = {
+        ...draft,
+        damage_type: value === null ? null : toDamageType(value),
+      };
     });
     const datalist = document.createElement('datalist');
     datalist.id = 'weapon-damage-types';

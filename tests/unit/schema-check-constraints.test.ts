@@ -1250,6 +1250,14 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     accepts: [['a real property', weaponTemplate({ mastery_property: 'Vex' })]],
   },
   {
+    constraint: 'weapon_templates_damage_type_check',
+    rejects: [['a damage type outside SRD 5.2', weaponTemplate({ damage_type: 'Steam' })]],
+    accepts: [
+      ['Acid, the first SRD member', weaponTemplate({ damage_type: 'Acid' })],
+      ['Thunder, the last SRD member', weaponTemplate({ damage_type: 'Thunder' })],
+    ],
+  },
+  {
     constraint: 'weapon_templates_srd_group_check',
     rejects: [['the struck-down simple/martial category', weaponTemplate({ srd_group: 'simple' })]],
     accepts: [
@@ -1314,6 +1322,30 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     accepts: [
       ['the 2024 default', speciesTemplate({})],
       ['2014', speciesTemplate({ rules_edition: '2014' })],
+    ],
+  },
+  {
+    constraint: 'species_templates_creature_type_check',
+    rejects: [['a homebrew type in the SRD-only catalog', speciesTemplate({ creature_type: 'Clockwork' })]],
+    accepts: [
+      ['Aberration, the first SRD member', speciesTemplate({ creature_type: 'Aberration' })],
+      ['Undead, the last SRD member', speciesTemplate({ creature_type: 'Undead' })],
+    ],
+  },
+  {
+    constraint: 'species_templates_size_check',
+    rejects: [['a homebrew size in the SRD-only catalog', speciesTemplate({ size: 'Minuscule' })]],
+    accepts: [
+      ['Tiny, the first SRD member', speciesTemplate({ size: 'Tiny' })],
+      ['Gargantuan, the last SRD member', speciesTemplate({ size: 'Gargantuan' })],
+    ],
+  },
+  {
+    constraint: 'species_templates_alternate_size_check',
+    rejects: [['a homebrew alternate size', speciesTemplate({ alternate_size: 'Minuscule' })]],
+    accepts: [
+      ['NULL when there is no second size', speciesTemplate({ alternate_size: null })],
+      ['a known second size', speciesTemplate({ alternate_size: 'Small' })],
     ],
   },
   {
@@ -1385,6 +1417,16 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
       ['damage_resistance', speciesTemplateTraitEffect({ effect_kind: 'damage_resistance', damage_type: 'Poison' })],
       ['hp_modifier', speciesTemplateTraitEffect({ effect_kind: 'hp_modifier', hit_points_flat: 1 })],
       ['speed', speciesTemplateTraitEffect({ effect_kind: 'speed', speed_bonus_feet: 5 })],
+    ],
+  },
+  {
+    constraint: 'species_template_trait_effects_damage_type_check',
+    rejects: [
+      ['a homebrew damage type in the SRD-only catalog', speciesTemplateTraitEffect({ damage_type: 'Steam' })],
+    ],
+    accepts: [
+      ['a known damage type', speciesTemplateTraitEffect({ damage_type: 'Poison' })],
+      ['NULL when the SRD offers a resistance choice', speciesTemplateTraitEffect({ damage_type: null })],
     ],
   },
   {

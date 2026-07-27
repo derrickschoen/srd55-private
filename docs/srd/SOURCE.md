@@ -53,6 +53,7 @@ pages interleave and the weapon table becomes unreadable.
 | `source/sheet-math.txt` | Passive Perception, Level 1 Hit Points by Class, Fixed Hit Points by Class, Initiative, unarmoured Armor Class | 21-23 | `69ea40b3f3ac7bd7df28868bc0d142ba4fe29163305377bba235f3f691f2ff1e` |
 | `source/multiclassing.txt` | Multiclassing: Hit Points and Hit Dice, Proficiency Bonus, proficiencies, Armor Class and Extra Attack | 24-25 | `4a6cef7329a5338f16e23fc4404d650e5d157ee7a45d99773b9ba7780909d99b` |
 | `source/multiclass-entry-grants.txt` | The "As a Multiclass Character" clause of all twelve classes — the SUBSET a second class grants (D28) | 27-72 | `3ad04904410c40e03c07dceef379414d2c1bfc0ff2e2f1d64c50448256d9b6ec` |
+| `source/domain-vocabularies.txt` | Schools of Magic, conditions, creature types, damage types and size categories | 104, 179-180, 188 | `ef5e8cced8f6dc1dad92d2903cbbcad144cb2d742bebfe595e6290bf4cc32901` |
 
 ### Why there is a checksum PER EXTRACT, and not only for the PDF
 
