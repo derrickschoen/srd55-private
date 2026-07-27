@@ -1,6 +1,7 @@
 import {
   sqlBoolean,
   sqlInteger,
+  sqlNullableInteger,
   sqlNullableJson,
   sqlNullableString,
   sqlString,
@@ -16,16 +17,33 @@ import type {
 import type {
   Ability,
   EffectReliabilityCategory,
+  MaterialCostKind,
   ProgressionType,
   RulesEdition,
+  SpellAreaShape,
+  SpellRangeKind,
   StandaloneSourceType,
+  UpcastScale,
 } from '../domain/enums';
 
-export interface CatalogSpell
-  extends Omit<SpellVersionRow, 'components'> {
-  readonly components: string | null;
+/**
+ * A spell version plus its aggregated list and tag memberships.
+ *
+ * NO LONGER `Omit<SpellVersionRow, 'components'>`. That omission existed solely
+ * to re-declare `components` as `string | null` against a model type that said
+ * `JsonValue | null` while the column was `VARCHAR` and the importer wrote a
+ * string. `SpellVersionRow` now agrees with its writer, so there is nothing to
+ * omit and nothing to restate.
+ *
+ * `upcastLevels` IS THE ONE FIELD THAT IS NOT A COLUMN. The levels a spell can
+ * be upcast at are rows in `spell_version_upcast_levels`, aggregated in the
+ * same way `lists` and `tags` are, and sorted ASCENDING so a consumer never has
+ * to sort a "list of levels" itself.
+ */
+export interface CatalogSpell extends SpellVersionRow {
   readonly lists: string[];
   readonly tags: string[];
+  readonly upcastLevels: number[];
 }
 
 export interface CatalogSnapshot {
@@ -114,6 +132,24 @@ function stringAggregate(value: string | null): string[] {
     : value.split('\u001f');
 }
 
+/**
+ * The upcast levels, aggregated by the query and split back into integers.
+ *
+ * ANY MEMBER THAT IS NOT AN INTEGER DROPS THE WHOLE LIST rather than yielding a
+ * partial one. A half-read "list of levels that can upcast" is worse than none:
+ * a consumer cannot tell it apart from a spell that upcasts at fewer levels
+ * than it does, so it would print a shorter ladder as though it were complete.
+ * The column's CHECK makes this unreachable on any image this build created,
+ * which is precisely why it is written for the images it did not (F11).
+ */
+function numberAggregate(value: string | null): number[] {
+  const parts = stringAggregate(value);
+  const levels = parts.map(Number);
+  return levels.every((level) => Number.isSafeInteger(level) && level >= 1)
+    ? levels
+    : [];
+}
+
 function decodeSpell(row: SqlRow): CatalogSpell {
   return {
     id: sqlInteger(row, 'id'),
@@ -136,8 +172,18 @@ function decodeSpell(row: SqlRow): CatalogSpell {
     ),
     healing: sqlBoolean(row, 'healing'),
     short_summary: sqlNullableString(row, 'short_summary'),
-    upcast_type: sqlNullableString(row, 'upcast_type'),
+    material_cost_copper: sqlNullableInteger(row, 'material_cost_copper'),
+    material_cost_kind: sqlNullableString(
+      row,
+      'material_cost_kind',
+    ) as MaterialCostKind | null,
+    range_kind: sqlNullableString(row, 'range_kind') as SpellRangeKind | null,
+    range_feet: sqlNullableInteger(row, 'range_feet'),
+    area_shape: sqlNullableString(row, 'area_shape') as SpellAreaShape | null,
+    area_feet: sqlNullableInteger(row, 'area_feet'),
+    upcast_scale: sqlNullableString(row, 'upcast_scale') as UpcastScale | null,
     upcast_summary: sqlNullableString(row, 'upcast_summary'),
+    upcastLevels: numberAggregate(sqlNullableString(row, 'upcast_levels')),
     requires_mod_for_effect: sqlBoolean(row, 'requires_mod_for_effect'),
     effect_reliability_category: sqlString(
       row,
@@ -193,7 +239,16 @@ export class CatalogQueries {
                     WHERE tagged.spell_version_id = version.id
                     ORDER BY tagged.tag
                   )
-                ) AS tags
+                ) AS tags,
+                (
+                  SELECT group_concat(value, char(31))
+                  FROM (
+                    SELECT upcast.level AS value
+                    FROM spell_version_upcast_levels AS upcast
+                    WHERE upcast.spell_version_id = version.id
+                    ORDER BY upcast.level
+                  )
+                ) AS upcast_levels
          FROM spell_versions AS version
          ORDER BY version.level, version.display_name,
                   version.rules_edition, version.id`,

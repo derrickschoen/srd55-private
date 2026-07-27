@@ -71,9 +71,16 @@
  */
 import speciesExtract from '../../docs/srd/source/species-descriptions.txt?raw';
 import backgroundsExtract from '../../docs/srd/source/backgrounds.txt?raw';
+import type { BindableValue } from '@sqlite.org/sqlite-wasm';
 import type { DatabaseContext } from '../db/database';
-import type { EffectKind } from '../domain/enums';
+import type {
+  BackgroundEquipmentItemKind,
+  BackgroundEquipmentOption,
+  EffectKind,
+} from '../domain/enums';
+import { coinDenominationOf, copperValue } from '../domain/coin';
 import { rowContractError } from '../domain/contracts/rows';
+import { weaponContentKey } from './weapons-srd';
 
 /** The rules edition every bundled species and background belongs to. */
 export const BUNDLED_ORIGIN_RULES_EDITION = '2024';
@@ -137,6 +144,33 @@ export interface SrdBackgroundTemplate {
   readonly tool_proficiency: string;
   readonly equipment_option_a: string;
   readonly equipment_option_b: string;
+  /**
+   * The two printed packages, SPLIT INTO LINES. The two strings above are kept
+   * verbatim beside them and are still what a reader prints; these are what a
+   * reader counts. See `background_equipment_items` for why both survive.
+   */
+  readonly equipment_items: readonly SrdBackgroundEquipmentItem[];
+}
+
+/**
+ * ONE PARSED LINE OF ONE PACKAGE. The field names are the
+ * `background_equipment_items` column names, for the reason `SrdTraitEffect`
+ * gives: the seeder inserts this object column-wise and needs no mapping.
+ *
+ * `content_key` RATHER THAN AN ID for the weapon and armour links, because the
+ * parse happens before the database is consulted and a parser that had to
+ * resolve ids could not be tested without one. The seeder turns the key into an
+ * id and FAILS if the catalog does not hold it.
+ */
+export interface SrdBackgroundEquipmentItem {
+  readonly option: BackgroundEquipmentOption;
+  readonly sort_order: number;
+  readonly quantity: number;
+  readonly item_name: string;
+  readonly item_kind: BackgroundEquipmentItemKind;
+  readonly weapon_content_key: string | null;
+  readonly armor_content_key: string | null;
+  readonly coin_copper: number | null;
 }
 
 /* ==========================================================================
@@ -819,6 +853,165 @@ const CROSS_REFERENCE = /\s*\(see \u201c[^\u201d]+\u201d\)/g;
 const EQUIPMENT_CHOICE =
   /^Choose A or B:\s*\(A\)\s*(?<a>.+?);\s*or\s*\(B\)\s*(?<b>.+)$/;
 
+/**
+ * A LEADING QUANTITY: `2 Daggers`, `20 Arrows`. Nothing else on a printed line
+ * is a count of the named item — `Parchment (10 sheets)` counts SHEETS, which is
+ * a sub-unit, and `Book (prayers)` is a subject rather than a number at all.
+ */
+const LEADING_QUANTITY = /^(?<quantity>\d{1,4})\s+(?<name>\S.*)$/u;
+/** A whole line that is money and nothing else: `8 GP`, `50 GP`, `16 GP`. */
+const COIN_LINE = /^(?<amount>\d{1,9})\s*(?<coin>CP|SP|EP|GP|PP)$/iu;
+
+/**
+ * WHICH PRINTED EQUIPMENT ENTRIES ARE WEAPONS, DECLARED RATHER THAN MATCHED.
+ *
+ * D15 REFUSED DECIDING A MECHANICAL FACT BY MATCHING TEXT, and this is that
+ * refusal applied to the owner's *"name only unless weapon or armor"*. A
+ * name-matching resolver against `weapon_templates.name` would miss `2 Daggers`
+ * outright (the template is `Dagger`, singular) and would have to decide what to
+ * do with `Gaming Set (same as above)`, which is not an item name at all — it is
+ * a back-reference to a choice made on the SAME ROW'S Tool Proficiency line.
+ *
+ * SO THE FOUR LINKS ARE WRITTEN DOWN, AND `assertEquipmentLinksAreExercised`
+ * CHECKS THEM IN BOTH DIRECTIONS against the parse. A key here that the extract
+ * does not print fails the seed, exactly as `DECLARED_EFFECTS` does for species
+ * traits one section up. The reverse direction — an item that IS a weapon and
+ * is not declared — cannot be checked without the name matching this exists to
+ * avoid, and that limit is stated rather than papered over.
+ *
+ * NO ARMOUR ENTRY, AND THE ABSENCE IS THE FACT. The four licensed packages hold
+ * four weapon-ish entries, ammunition, tools, clothing and coin, and NO ARMOUR:
+ * `Robe` and `Traveler's Clothes` are clothing, which `armor_templates` — the
+ * source's own thirteen-row Armor table — does not carry. The `armor` limb of
+ * the ruling therefore ships with no bundled row that reaches it, which is
+ * stated here so a reader does not conclude the limb is untested. It is tested,
+ * by direct insertion, in `tests/integration/rules/background-equipment.test.ts`.
+ *
+ * A `Map` rather than an object literal, for D33's reason: these keys come from
+ * a parsed document and `constructor` is a string a printed line could contain.
+ */
+const DECLARED_WEAPON_EQUIPMENT = new Map<string, string>([
+  ['Quarterstaff', 'Quarterstaff'],
+  ['Daggers', 'Dagger'],
+  ['Spear', 'Spear'],
+  ['Shortbow', 'Shortbow'],
+]);
+
+/**
+ * SPLIT ONE PRINTED PACKAGE INTO LINES.
+ *
+ * `, ` IS THE SEPARATOR AND THE PARENTHETICALS DO NOT CONTAIN ONE — checked
+ * against all four licensed packages rather than assumed. `Book (prayers)`,
+ * `Parchment (10 sheets)`, `Gaming Set (same as above)` and
+ * `Traveler's Clothes` are each one entry with no internal comma. A future
+ * package that broke that would produce a wrong SPLIT rather than a wrong
+ * VALUE, and `assertEquipmentLinksAreExercised` would catch it for any entry
+ * that carries a link.
+ *
+ * AN EMPTY OR WHITESPACE ENTRY THROWS rather than being skipped. Skipping is
+ * what turns an extraction change into a silently short package, which is the
+ * failure mode this whole module is arranged against.
+ */
+function parseEquipmentPackage(
+  background: string,
+  option: BackgroundEquipmentOption,
+  printed: string,
+): SrdBackgroundEquipmentItem[] {
+  const entries = printed.split(',').map((entry) => entry.trim());
+  return entries.map((entry, index) => {
+    if (entry === '') {
+      throw new OriginExtractError(
+        `${background} equipment option ${option.toUpperCase()} has an empty entry: ${printed}`,
+      );
+    }
+    return parseEquipmentEntry(background, option, index + 1, entry);
+  });
+}
+
+function parseEquipmentEntry(
+  background: string,
+  option: BackgroundEquipmentOption,
+  sortOrder: number,
+  entry: string,
+): SrdBackgroundEquipmentItem {
+  const base = {
+    option,
+    sort_order: sortOrder,
+    item_name: entry,
+    weapon_content_key: null,
+    armor_content_key: null,
+  } as const;
+
+  const coin = COIN_LINE.exec(entry)?.groups;
+  if (coin?.amount !== undefined && coin.coin !== undefined) {
+    const denomination = coinDenominationOf(coin.coin);
+    const copper =
+      denomination === null
+        ? null
+        : copperValue(Number(coin.amount), denomination);
+    if (copper === null || copper < 1) {
+      throw new OriginExtractError(
+        `${background} equipment option ${option.toUpperCase()} has an unreadable coin entry: ${entry}`,
+      );
+    }
+    // QUANTITY 1 AND THE WHOLE PRINTED TEXT AS THE NAME. Fifty gold pieces are
+    // one sum of money, not fifty items — reading `50 GP` as quantity 50 of an
+    // item called `GP` is what would turn currency into inventory.
+    return { ...base, quantity: 1, item_kind: 'coin', coin_copper: copper };
+  }
+
+  const quantified = LEADING_QUANTITY.exec(entry)?.groups;
+  const quantity =
+    quantified?.quantity === undefined ? 1 : Number(quantified.quantity);
+  const name = quantified?.name ?? entry;
+  if (quantity < 1) {
+    throw new OriginExtractError(
+      `${background} equipment option ${option.toUpperCase()} has a zero quantity: ${entry}`,
+    );
+  }
+
+  const weapon = DECLARED_WEAPON_EQUIPMENT.get(name);
+  if (weapon !== undefined) {
+    return {
+      ...base,
+      quantity,
+      item_kind: 'weapon',
+      weapon_content_key: weaponContentKey(weapon),
+      coin_copper: null,
+    };
+  }
+  return { ...base, quantity, item_kind: 'gear', coin_copper: null };
+}
+
+/**
+ * EVERY DECLARED WEAPON LINK MUST BE PRODUCED BY THE PARSE.
+ *
+ * The species side already does this for `DECLARED_EFFECTS` and the reason is
+ * identical: a hand-written declaration that no longer matches the extract is a
+ * silent no-op, and a silent no-op in a seeder writes a catalog that looks
+ * complete. If the extract is re-cut and `Shortbow` moves or changes spelling,
+ * this throws by name instead of quietly producing a `gear` row.
+ */
+function assertEquipmentLinksAreExercised(
+  templates: readonly SrdBackgroundTemplate[],
+): void {
+  const linked = new Set<string>();
+  for (const template of templates) {
+    for (const item of template.equipment_items) {
+      if (item.weapon_content_key !== null) {
+        linked.add(item.weapon_content_key);
+      }
+    }
+  }
+  for (const [printed, weapon] of DECLARED_WEAPON_EQUIPMENT) {
+    if (!linked.has(weaponContentKey(weapon))) {
+      throw new OriginExtractError(
+        `Declared background equipment names ${printed}, which no background package prints.`,
+      );
+    }
+  }
+}
+
 export function parseSrdBackgroundTemplates(): SrdBackgroundTemplate[] {
   const pages = splitPages(bodyOf(backgroundsExtract, 'backgrounds.txt'));
   if (pages.length !== 1) {
@@ -860,6 +1053,7 @@ export function parseSrdBackgroundTemplates(): SrdBackgroundTemplate[] {
       `Background extract must name ${BACKGROUND_NAMES.join(', ')}; found ${parsedNames.join(', ')}.`,
     );
   }
+  assertEquipmentLinksAreExercised(templates);
   return templates;
 }
 
@@ -916,6 +1110,9 @@ function parseBackground(
     );
   }
 
+  const optionA = (equipment.a as string).trim();
+  const optionB = (equipment.b as string).trim();
+
   return {
     content_key: `${BUNDLED_ORIGIN_RULES_EDITION}:background:${slug(name)}`,
     name,
@@ -926,8 +1123,12 @@ function parseBackground(
     skill_proficiency_1: (skills[0] as string).trim(),
     skill_proficiency_2: (skills[1] as string).trim(),
     tool_proficiency: value('Tool Proficiency'),
-    equipment_option_a: (equipment.a as string).trim(),
-    equipment_option_b: (equipment.b as string).trim(),
+    equipment_option_a: optionA,
+    equipment_option_b: optionB,
+    equipment_items: [
+      ...parseEquipmentPackage(name, 'a', optionA),
+      ...parseEquipmentPackage(name, 'b', optionB),
+    ],
   };
 }
 
@@ -944,7 +1145,8 @@ function assertRow(
     | 'species_templates'
     | 'species_template_traits'
     | 'species_template_trait_effects'
-    | 'background_templates',
+    | 'background_templates'
+    | 'background_equipment_items',
   row: Record<string, unknown>,
 ): void {
   const error = rowContractError(table, row, `Bundled ${table} row`);
@@ -1215,6 +1417,98 @@ function seedBackgrounds(db: DatabaseContext, timestamp: string): void {
         row.updated_at,
       ],
     );
+    seedBackgroundEquipment(db, template, timestamp);
   }
+}
+
+/**
+ * REPLACE ONE BACKGROUND'S EQUIPMENT LINES.
+ *
+ * A DELETE-THEN-INSERT rather than an upsert, and the reason is the KEY. The
+ * parent is upserted on `content_key` because a background keeps its identity
+ * across a re-cut of the extract; an equipment LINE has no identity of its own —
+ * it is the third entry of package A, and if the extract prints a different
+ * third entry the old row is not a row to update, it is a row that no longer
+ * exists. Upserting on `(template, option, sort_order)` would leave a package
+ * that got SHORTER carrying its old tail.
+ *
+ * A DECLARED LINK THAT DOES NOT RESOLVE IS A HARD SEED FAILURE. This is the
+ * other half of `assertEquipmentLinksAreExercised`: that one proves the extract
+ * still prints what the declaration names, and this proves the weapon catalog
+ * still holds what the declaration points at. Between them, a link cannot
+ * silently become a plain `gear` row. It is also why `src/db/bootstrap.ts` now
+ * seeds the weapon and armour catalogs BEFORE this one.
+ */
+function seedBackgroundEquipment(
+  db: DatabaseContext,
+  template: SrdBackgroundTemplate,
+  timestamp: string,
+): void {
+  const templateId = db.scalar(
+    'SELECT id FROM background_templates WHERE content_key = ?',
+    [template.content_key],
+  );
+  if (typeof templateId !== 'number') {
+    throw new OriginExtractError(
+      `Background ${template.name} was not written before its equipment.`,
+    );
+  }
+  db.exec(
+    'DELETE FROM background_equipment_items WHERE background_template_id = ?',
+    [templateId],
+  );
+  for (const item of template.equipment_items) {
+    const row = {
+      background_template_id: templateId,
+      option: item.option,
+      sort_order: item.sort_order,
+      quantity: item.quantity,
+      item_name: item.item_name,
+      item_kind: item.item_kind,
+      weapon_template_id: resolveTemplateId(
+        db,
+        'weapon_templates',
+        item.weapon_content_key,
+        template.name,
+      ),
+      armor_template_id: resolveTemplateId(
+        db,
+        'armor_templates',
+        item.armor_content_key,
+        template.name,
+      ),
+      coin_copper: item.coin_copper,
+      created_at: timestamp,
+      updated_at: timestamp,
+    };
+    assertRow('background_equipment_items', { id: 1, ...row });
+    const columns = Object.keys(row);
+    db.exec(
+      `INSERT INTO background_equipment_items (${columns.join(', ')})
+       VALUES (${columns.map(() => '?').join(', ')})`,
+      Object.values(row) as BindableValue[],
+    );
+  }
+}
+
+function resolveTemplateId(
+  db: DatabaseContext,
+  table: 'weapon_templates' | 'armor_templates',
+  contentKey: string | null,
+  background: string,
+): number | null {
+  if (contentKey === null) {
+    return null;
+  }
+  const id = db.scalar(`SELECT id FROM ${table} WHERE content_key = ?`, [
+    contentKey,
+  ]);
+  if (typeof id !== 'number') {
+    throw new OriginExtractError(
+      `${background} equipment names ${contentKey}, which ${table} does not hold. ` +
+        'Seed the weapon and armour catalogs before the origins catalog.',
+    );
+  }
+  return id;
 }
 

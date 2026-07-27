@@ -82,6 +82,9 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       // and the seven class-content tables.
       'armor_templates',
       'background_definitions',
+      // The structured equipment lines of a background template, sorted before
+      // its parent because `e` precedes `t`.
+      'background_equipment_items',
       'background_templates',
       'change_log',
       'character_armor',
@@ -129,6 +132,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       'spell_version_publications',
       'spell_version_save_abilities',
       'spell_version_tags',
+      'spell_version_upcast_levels',
       'spell_versions',
       'subclass_definitions',
       'subclass_features',
@@ -287,13 +291,15 @@ describe('table scope classification', () => {
     const names = Object.keys(TABLE_SCOPES);
     // 30 Laravel-derived tables — 38 until the eight Laravel-only
     // infrastructure ones were dropped — plus the four native weapon tables,
-    // the eight of the sheet core, the six origins tables, the two D19
-    // class-feature tables, the four stored sheet inputs, and the two effect
-    // tables — one per side of the catalog/character split. Each group is
-    // named rather than folded into one total, so a group that vanishes while
-    // another grows cannot pass unnoticed.
-    expect(names).toHaveLength(56);
-    expect(new Set(names).size).toBe(56);
+    // the eight of the sheet core, the SEVEN origins tables, the two D19
+    // class-feature tables, the four stored sheet inputs, the two effect
+    // tables — one per side of the catalog/character split — and the one
+    // structured-value table the spell catalog gained,
+    // `spell_version_upcast_levels`. Each group is named rather than folded
+    // into one total, so a group that vanishes while another grows cannot pass
+    // unnoticed.
+    expect(names).toHaveLength(58);
+    expect(new Set(names).size).toBe(58);
     expect([...names].sort()).toEqual([...APPLICATION_TABLES].sort());
   });
 

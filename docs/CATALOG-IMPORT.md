@@ -44,7 +44,10 @@ document.
     "sourcePage": 202,
     "sourceSlug": "chill-touch",
     "tags": [],
-    "healing": false
+    "healing": false,
+    "upcastScale": null,
+    "upcastLevels": [],
+    "upcastSummary": null
   }
 ]
 ```
@@ -59,12 +62,51 @@ Required fields are:
 - Lists of non-empty strings: `attackModes`, `saveAbilities`, `spellLists`,
   and `sourceBooks`.
 
-`castingTime`, `range`, `components`, `duration`, and `sourceSlug` may be a
-string or `null`. `sourcePage` may be a non-negative integer or `null`.
-`tags` defaults to `[]`, and `healing` defaults to `false`.
+`castingTime`, `range`, `components`, `duration`, `upcastSummary`, and
+`sourceSlug` may be a string or `null`. `sourcePage` may be a non-negative
+integer or `null`. `tags` defaults to `[]`, and `healing` defaults to `false`.
 `effectReliabilityCategory` defaults to `fixed_effect` and accepts
 `attack_roll`, `saving_throw`, `fixed_effect`, `modifier_scaled`,
 `ritual_utility`, or `mixed`.
+
+#### The upcast progression
+
+`upcastScale` and `upcastLevels` are optional and default to `null` and `[]`.
+Every document written before they existed omits them, and omitting them is not
+a claim that the spell cannot be upcast — it is a document that does not say.
+
+They must be supplied TOGETHER or not at all, and the import is refused if only
+one is present. The reason is that the levels alone are ambiguous:
+
+- `"upcastScale": "slot_level"` means the levels are SPELL SLOT LEVELS, 1
+  through 9 — the "Using a Higher-Level Spell Slot" paragraph of a levelled
+  spell.
+- `"upcastScale": "character_level"` means they are CHARACTER LEVELS, 1 through
+  20 — a cantrip's damage ladder, e.g. `[5, 11, 17]`.
+
+`[5, 11, 17]` is a plausible list under either reading and means two completely
+different things, so a list with no scale is refused rather than stored.
+Duplicated levels and levels outside the scale's range are refused too.
+`upcastSummary` is free text and is printed verbatim.
+
+#### What the importer reads OUT of `range` and `components`
+
+Both are stored exactly as you write them and are what the printable spell card
+shows. In addition, the importer parses each and stores what it can recognise in
+separate columns, so a range can be sorted and a material cost compared:
+
+- `"range": "60 feet"` also stores a distance of 60 feet; `"Self (30-foot
+  Cone)"` also stores an origin of `self` and a 30-foot cone; `"Touch"`,
+  `"Self"`, `"Sight"`, `"Unlimited"` and `"Special"` store the origin and no
+  distance.
+- `"components": "M (a diamond worth 300+ GP)"` also stores the material text
+  and a cost of 30000 copper pieces, flagged as a MINIMUM because of the `+`.
+  Without the `+` the cost is stored as exact.
+
+**Anything the importer cannot read whole is stored as nothing extra, and your
+text is never modified, rejected or reformatted.** A range of `"Anywhere on this
+plane"` imports fine and prints exactly as written; it simply has no distance
+attached to it.
 
 ### Subclass records
 

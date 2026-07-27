@@ -8,6 +8,8 @@ import {
 } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 import type {
+  ArmorTemplateId,
+  BackgroundEquipmentItemId,
   BackgroundTemplateId,
   CharacterBackgroundId,
   CharacterEffectId,
@@ -19,9 +21,20 @@ import type {
   SpeciesTemplateId,
   SpeciesTemplateTraitEffectId,
   SpeciesTemplateTraitId,
+  WeaponTemplateId,
 } from '../../src/domain/ids';
-import type { EffectKind, RulesEdition } from '../../src/domain/enums';
-import { effectKinds, rulesEditions } from '../../src/domain/enums';
+import type {
+  BackgroundEquipmentItemKind,
+  BackgroundEquipmentOption,
+  EffectKind,
+  RulesEdition,
+} from '../../src/domain/enums';
+import {
+  backgroundEquipmentItemKinds,
+  backgroundEquipmentOptions,
+  effectKinds,
+  rulesEditions,
+} from '../../src/domain/enums';
 import {
   datetime,
   integerAtLeast,
@@ -31,6 +44,8 @@ import {
   varchar,
 } from './columns';
 import { character_source_instances, characters } from './character';
+import { armor_templates } from './sheet';
+import { weapon_templates } from './weapons';
 
 /**
  * ORIGINS: species and backgrounds, and the character's own EFFECTS. Eight
@@ -774,7 +789,23 @@ export const background_templates = sqliteTable(
      * this project re-deciding what the document already wrote down.
      */
     tool_proficiency: varchar()('tool_proficiency').notNull(),
-    /** "Choose A or B" — both packages, printed verbatim, applied to nothing. */
+    /**
+     * "Choose A or B" — both packages, PRINTED VERBATIM.
+     *
+     * NO LONGER "applied to nothing", and no longer the only record of the
+     * package: `background_equipment_items` now holds each package as a list of
+     * quantity-plus-item rows, parsed from these two strings. These columns
+     * STAY, and staying is the decision. They are the D12/Q4 passthrough limb —
+     * `Gaming Set (same as above)` is a back-reference to a choice made on
+     * another line of the same row, `Parchment (10 sheets)` counts a SUB-UNIT
+     * rather than the item, and `Book (prayers)` is a subject qualifier. None of
+     * the three is a quantity, none survives a strict quantity-plus-name
+     * reading, and all three survive here.
+     *
+     * So the structured rows are what a reader COMPUTES from and these are what
+     * a reader PRINTS, which is the same division `spell_versions.range` and
+     * `range_feet` have one table over.
+     */
     equipment_option_a: sqlText()('equipment_option_a').notNull(),
     equipment_option_b: sqlText()('equipment_option_b').notNull(),
     created_at: datetime()('created_at'),
@@ -789,6 +820,159 @@ export const background_templates = sqliteTable(
     uniqueIndex('background_templates_name_rules_edition_unique').on(
       table.name,
       table.rules_edition,
+    ),
+  ],
+);
+
+/**
+ * ONE PRINTED LINE OF ONE BACKGROUND'S EQUIPMENT PACKAGE — the owner's ruling
+ * that *"background equipment packages should be templates for a list of
+ * quantity + item (name only unless weapon or armor)"*.
+ *
+ * A CHILD TABLE KEYED BY (TEMPLATE, OPTION, SORT ORDER), AND THE OPTION IS PART
+ * OF THE KEY RATHER THAN A THIRD AND FOURTH COLUMN ON THE PARENT. The printed
+ * line is "Choose A or B", so a package is a LIST and a background has TWO of
+ * them; two more columns on `background_templates` is the shape that does not
+ * survive a third option, and a list cannot live in a column at all.
+ *
+ * "NAME ONLY UNLESS WEAPON OR ARMOR", MADE STRUCTURAL. `item_kind` discriminates
+ * and the payload CHECK below makes every other combination unstorable, so a
+ * `weapon` line with no weapon and a `gear` line carrying a coin amount are both
+ * refused by the database rather than caught by a reader.
+ *
+ * THE WEAPON AND ARMOUR LIMBS ARE REAL FOREIGN KEYS, AND D1b PERMITS IT.
+ * `weapon_templates` and `armor_templates` both exist and both are CATALOG
+ * tables, and so is this one — D1b's rule is that a CHARACTER stores values
+ * with no live link back to a template, and nothing here is a character.
+ * Nothing in this repository copies a background template onto a character
+ * today (the species side has `speciesFromTemplate`; the background side has no
+ * equivalent), and when that path is built it must read THROUGH this reference
+ * and write values, exactly as the species copy does.
+ *
+ * NAMES ARE NOT MATCHED. The links are hand-DECLARED in
+ * `src/rules/origins-srd.ts` and checked in both directions against the parse —
+ * a declared link naming an item the extract does not print fails the seed, and
+ * so does a content key `weapon_templates` does not hold. D15 refused deciding a
+ * mechanical fact by matching text and this does not do it: `2 Daggers` is
+ * plural and `Gaming Set (same as above)` is not an item name at all, so a
+ * name-matching resolver would either miss the first or invent the second.
+ *
+ * BOOTSTRAP ORDER IS NOW LOAD-BEARING and `src/db/bootstrap.ts` says so: the
+ * weapon and armour catalogs must be seeded before the origins catalog, or a
+ * declared link has nothing to resolve against and the seed fails loudly.
+ */
+export const background_equipment_items = sqliteTable(
+  'background_equipment_items',
+  {
+    id: integer('id')
+      .primaryKey({ autoIncrement: true })
+      .notNull()
+      .$type<BackgroundEquipmentItemId>(),
+    background_template_id: integer('background_template_id')
+      .notNull()
+      .$type<BackgroundTemplateId>()
+      .references(() => background_templates.id, { onDelete: 'cascade' }),
+    /** `a` or `b` — which of the two printed packages this line belongs to. */
+    option: varchar<BackgroundEquipmentOption>()('option').notNull(),
+    /** Printed order within the package, 1-based. */
+    sort_order: integer('sort_order').notNull(),
+    /**
+     * HOW MANY, AND IT IS THE COUNT OF THE NAMED ITEM ONLY.
+     *
+     * `2 Daggers` is quantity 2, `20 Arrows` is quantity 20, and a line with no
+     * leading numeral is quantity 1. `Parchment (10 sheets)` IS QUANTITY 1 — the
+     * 10 counts sheets, a sub-unit, not parchments — and that distinction is
+     * the reason this column is not simply "the first number on the line".
+     *
+     * A `coin` line is ALSO quantity 1: fifty gold pieces are one sum of money,
+     * not fifty items. Reading `50 GP` as quantity 50 of an item named `GP` is
+     * what would turn currency into inventory, which the owner ruled out.
+     */
+    quantity: integer('quantity').notNull(),
+    /**
+     * THE PRINTED NAME, VERBATIM, MINUS ONLY A LEADING QUANTITY. `Daggers`
+     * stays plural, `Gaming Set (same as above)` keeps its back-reference and a
+     * `coin` line keeps its whole printed text (`50 GP`). Nothing is
+     * singularised, expanded or resolved — the row beside it carries whatever
+     * this application actually knows.
+     */
+    item_name: varchar()('item_name').notNull(),
+    item_kind: varchar<BackgroundEquipmentItemKind>()('item_kind').notNull(),
+    weapon_template_id: integer('weapon_template_id')
+      .$type<WeaponTemplateId>()
+      .references(() => weapon_templates.id, { onDelete: 'restrict' }),
+    armor_template_id: integer('armor_template_id')
+      .$type<ArmorTemplateId>()
+      .references(() => armor_templates.id, { onDelete: 'restrict' }),
+    /**
+     * THE SUM IN COPPER PIECES, for a `coin` line and nothing else. The same
+     * unit the owner ruled for spell components, through the same conversion in
+     * `src/domain/coin.ts`. `50 GP` is 5000.
+     */
+    coin_copper: integer('coin_copper'),
+    created_at: datetime()('created_at'),
+    updated_at: datetime()('updated_at'),
+  },
+  (table) => [
+    check(
+      'background_equipment_items_option_check',
+      oneOf('option', backgroundEquipmentOptions),
+    ),
+    check(
+      'background_equipment_items_item_kind_check',
+      oneOf('item_kind', backgroundEquipmentItemKinds),
+    ),
+    check(
+      'background_equipment_items_sort_order_check',
+      integerAtLeast('sort_order', 1),
+    ),
+    check(
+      'background_equipment_items_quantity_check',
+      integerAtLeast('quantity', 1),
+    ),
+    /**
+     * THE PAYLOAD CHECK — the constraint that makes `item_kind` mean something
+     * rather than merely be recorded.
+     *
+     * Each kind names the ONE payload column it may carry and requires the
+     * other two to be NULL. Without the negative half a `coin` row could carry
+     * a weapon id as well, and a reader would have two answers to "what is this
+     * line" with nothing to break the tie.
+     *
+     * `CASE … ELSE` RATHER THAN A CHAIN OF `IS` LIMBS: the `ELSE` arm is
+     * `gear`, and it is also every value `item_kind` should not hold. So a row
+     * whose kind is misspelled — refused by the CHECK above, but not on an
+     * image created before these constraints existed (F11's point) — is still
+     * required to carry no payload, rather than being handed the weapon limb by
+     * a fall-through.
+     */
+    check(
+      'background_equipment_items_payload_check',
+      sql`CASE \`item_kind\`
+        WHEN 'weapon' THEN \`weapon_template_id\` IS NOT NULL
+          AND \`armor_template_id\` IS NULL AND \`coin_copper\` IS NULL
+        WHEN 'armor' THEN \`armor_template_id\` IS NOT NULL
+          AND \`weapon_template_id\` IS NULL AND \`coin_copper\` IS NULL
+        WHEN 'coin' THEN \`coin_copper\` IS NOT NULL
+          AND \`weapon_template_id\` IS NULL AND \`armor_template_id\` IS NULL
+        ELSE \`weapon_template_id\` IS NULL AND \`armor_template_id\` IS NULL
+          AND \`coin_copper\` IS NULL
+      END`,
+    ),
+    /**
+     * A coin line worth nothing is not a coin line. `1` and not `0`: every
+     * printed package ends in a real sum, and a zero would be the "absence
+     * printed as a fact" D24 forbids.
+     */
+    check(
+      'background_equipment_items_coin_copper_check',
+      nullOrIntegerAtLeast('coin_copper', 1),
+    ),
+    uniqueIndex(
+      'background_equipment_items_template_option_sort_order_unique',
+    ).on(table.background_template_id, table.option, table.sort_order),
+    index('background_equipment_items_background_template_id_index').on(
+      table.background_template_id,
     ),
   ],
 );

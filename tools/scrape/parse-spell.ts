@@ -308,6 +308,16 @@ export function parseSpellPage(
     sourceSlug: options.slug,
     tags: [],
     healing: false,
+    // LEFT ABSENT, for the same reason `attackModes` and `saveAbilities` above
+    // are empty. A page's "Using a Higher-Level Spell Slot" paragraph is prose,
+    // and reading a list of levels out of it would be the plausible-and-wrong
+    // fabrication this parser is arranged to refuse — with the extra hazard
+    // that the two upcast SCALES are indistinguishable once the integers have
+    // been extracted, so a mis-read would not merely be wrong, it would be
+    // wrong about which question it was answering.
+    upcastScale: null,
+    upcastLevels: [],
+    upcastSummary: null,
   };
 
   return { ok: true, value: { record, description } };

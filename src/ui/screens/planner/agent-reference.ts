@@ -326,6 +326,7 @@ export const OMITTED_FROM_REFERENCE: readonly string[] = [
   'the wizard prepared and ritual-only lists, beyond the spellbook and its prepared flag',
   'save points and the edit history',
   'the imported catalog itself: spell descriptions, components, durations, ranges and schools',
+  'the structured values parsed out of that catalog: a range as feet and an area shape, a material component cost in copper pieces, and the levels a spell can be upcast at',
 ];
 
 const FREE_TEXT_STATEMENT =

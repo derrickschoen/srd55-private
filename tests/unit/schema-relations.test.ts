@@ -189,8 +189,13 @@ describe('declared relations match the foreign keys', () => {
     // `character_source_instances` carries its `(id, character_id)` unique
     // index; without it an effect could be attached to another character's
     // source instance and still pass `PRAGMA foreign_key_check`.
-    expect(constraintEdges(db)).toHaveLength(56);
-    expect(rowCount).toBe(59);
+    // Four more constraints and four more PRAGMA rows: one from
+    // `spell_version_upcast_levels` into `spell_versions`, and three from
+    // `background_equipment_items` — into `background_templates`,
+    // `weapon_templates` and `armor_templates`. The last two are what make the
+    // owner's *"unless weapon or armor"* a reference rather than a spelling.
+    expect(constraintEdges(db)).toHaveLength(60);
+    expect(rowCount).toBe(63);
   });
 
   it('declares a relation for every foreign key, and a foreign key for every relation', () => {

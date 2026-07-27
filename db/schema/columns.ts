@@ -215,19 +215,39 @@ export const integerOneOf = (column: string, values: readonly number[]) =>
   );
 
 /**
- * `column IS NULL OR column IN (…)`.
+ * `(column IS NULL OR column IN (…))`.
  *
  * The null limb is deliberate and load-bearing: these columns are nullable
  * because the absence is a real domain state (no subclass ability override
  * chosen; a user-invented weapon with no mastery property), and a CHECK that
  * forgot the null limb would turn a defended null into a rejected row.
+ *
+ * THE OUTER PARENTHESES ARE THE FIX FOR A TRAP THIS HELPER LAID AND SOMEBODY
+ * FELL INTO, and they are not cosmetic. SQL binds `AND` tighter than `OR`, so
+ * composing an un-parenthesised `A IS NULL OR A IN (…)` into a larger
+ * constraint —
+ *
+ *     CHECK(a IS NULL OR a IN ('x') AND b IS NOT NULL)
+ *
+ * — parses as `a IS NULL OR (a IN ('x') AND b IS NOT NULL)`, so the whole
+ * constraint becomes TRUE for every row with a NULL `a` and the second clause
+ * never runs. That is a constraint that reads correctly, parses, and enforces
+ * NOTHING for exactly the rows a nullable column is full of. It was written
+ * while adding the structured spell-range constraints, generated, and caught by
+ * reading the emitted DDL rather than by any test.
+ *
+ * {@link oneOf}, {@link integerOneOf} and {@link integerAtLeast} do NOT need
+ * this: their output is a chain of `AND`s with no `OR` in it, so composition
+ * cannot re-associate them. The two helpers with a top-level `OR` are the two
+ * that carry the hazard, and both now close it at the source rather than
+ * relying on every caller to remember.
  */
 export const nullOrOneOf = (column: string, values: readonly string[]) => {
   const reference = columnRef(column);
   return sql.raw(
-    `${reference} IS NULL OR ${reference} IN (${values
+    `(${reference} IS NULL OR ${reference} IN (${values
       .map(enumLiteral)
-      .join(', ')})`,
+      .join(', ')}))`,
   );
 };
 
@@ -266,11 +286,17 @@ export const integerAtLeast = (column: string, minimum: number) =>
       `AND ${columnRef(column)} >= ${bound(minimum)}`,
   );
 
-/** `column IS NULL OR` {@link integerAtLeast} — for a defended-null column. */
+/**
+ * `(column IS NULL OR` {@link integerAtLeast}`)` — for a defended-null column.
+ *
+ * Parenthesised as a whole for the reason {@link nullOrOneOf} spells out: a
+ * top-level `OR` composed into a larger `AND` re-associates and silently stops
+ * enforcing the rest of the constraint.
+ */
 export const nullOrIntegerAtLeast = (column: string, minimum: number) =>
   sql.raw(
-    `${columnRef(column)} IS NULL OR (typeof(${columnRef(column)}) = 'integer' ` +
-      `AND ${columnRef(column)} >= ${bound(minimum)})`,
+    `(${columnRef(column)} IS NULL OR (typeof(${columnRef(column)}) = 'integer' ` +
+      `AND ${columnRef(column)} >= ${bound(minimum)}))`,
   );
 
 /**

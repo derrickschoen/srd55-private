@@ -23,7 +23,7 @@ CREATE TABLE `armor_templates` (
 	CONSTRAINT "armor_templates_dex_bonus_max_check" CHECK((`dex_bonus` = 'capped') = (`dex_bonus_max` IS NOT NULL) AND (`dex_bonus_max` IS NULL OR (typeof(`dex_bonus_max`) = 'integer' AND `dex_bonus_max` >= 0))),
 	CONSTRAINT "armor_templates_shield_check" CHECK(`category` <> 'shield' OR `dex_bonus` = 'none'),
 	CONSTRAINT "armor_templates_armor_class_check" CHECK(typeof(`armor_class`) = 'integer' AND `armor_class` >= 1),
-	CONSTRAINT "armor_templates_strength_requirement_check" CHECK(`strength_requirement` IS NULL OR (typeof(`strength_requirement`) = 'integer' AND `strength_requirement` >= 1)),
+	CONSTRAINT "armor_templates_strength_requirement_check" CHECK((`strength_requirement` IS NULL OR (typeof(`strength_requirement`) = 'integer' AND `strength_requirement` >= 1))),
 	CONSTRAINT "armor_templates_rules_edition_check" CHECK(`rules_edition` IN ('2014', '2024', 'expanded'))
 );
 
@@ -44,6 +44,41 @@ CREATE TABLE `background_definitions` (
 
 CREATE UNIQUE INDEX `background_definitions_content_key_unique` ON `background_definitions` (`content_key`);
 CREATE UNIQUE INDEX `background_definitions_name_rules_edition_unique` ON `background_definitions` (`name`,`rules_edition`);
+CREATE TABLE `background_equipment_items` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`background_template_id` integer NOT NULL,
+	`option` VARCHAR NOT NULL,
+	`sort_order` integer NOT NULL,
+	`quantity` integer NOT NULL,
+	`item_name` VARCHAR NOT NULL,
+	`item_kind` VARCHAR NOT NULL,
+	`weapon_template_id` integer,
+	`armor_template_id` integer,
+	`coin_copper` integer,
+	`created_at` DATETIME,
+	`updated_at` DATETIME,
+	FOREIGN KEY (`background_template_id`) REFERENCES `background_templates`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`weapon_template_id`) REFERENCES `weapon_templates`(`id`) ON UPDATE no action ON DELETE restrict,
+	FOREIGN KEY (`armor_template_id`) REFERENCES `armor_templates`(`id`) ON UPDATE no action ON DELETE restrict,
+	CONSTRAINT "background_equipment_items_option_check" CHECK(`option` IN ('a', 'b')),
+	CONSTRAINT "background_equipment_items_item_kind_check" CHECK(`item_kind` IN ('gear', 'weapon', 'armor', 'coin')),
+	CONSTRAINT "background_equipment_items_sort_order_check" CHECK(typeof(`sort_order`) = 'integer' AND `sort_order` >= 1),
+	CONSTRAINT "background_equipment_items_quantity_check" CHECK(typeof(`quantity`) = 'integer' AND `quantity` >= 1),
+	CONSTRAINT "background_equipment_items_payload_check" CHECK(CASE `item_kind`
+        WHEN 'weapon' THEN `weapon_template_id` IS NOT NULL
+          AND `armor_template_id` IS NULL AND `coin_copper` IS NULL
+        WHEN 'armor' THEN `armor_template_id` IS NOT NULL
+          AND `weapon_template_id` IS NULL AND `coin_copper` IS NULL
+        WHEN 'coin' THEN `coin_copper` IS NOT NULL
+          AND `weapon_template_id` IS NULL AND `armor_template_id` IS NULL
+        ELSE `weapon_template_id` IS NULL AND `armor_template_id` IS NULL
+          AND `coin_copper` IS NULL
+      END),
+	CONSTRAINT "background_equipment_items_coin_copper_check" CHECK((`coin_copper` IS NULL OR (typeof(`coin_copper`) = 'integer' AND `coin_copper` >= 1)))
+);
+
+CREATE UNIQUE INDEX `background_equipment_items_template_option_sort_order_unique` ON `background_equipment_items` (`background_template_id`,`option`,`sort_order`);
+CREATE INDEX `background_equipment_items_background_template_id_index` ON `background_equipment_items` (`background_template_id`);
 CREATE TABLE `background_templates` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`content_key` VARCHAR NOT NULL,
@@ -107,7 +142,7 @@ CREATE TABLE `character_armor` (
 	CONSTRAINT "character_armor_dex_bonus_max_check" CHECK((`dex_bonus` = 'capped') = (`dex_bonus_max` IS NOT NULL) AND (`dex_bonus_max` IS NULL OR (typeof(`dex_bonus_max`) = 'integer' AND `dex_bonus_max` >= 0))),
 	CONSTRAINT "character_armor_shield_check" CHECK(`category` <> 'shield' OR `dex_bonus` = 'none'),
 	CONSTRAINT "character_armor_armor_class_check" CHECK(typeof(`armor_class`) = 'integer' AND `armor_class` >= 1),
-	CONSTRAINT "character_armor_strength_requirement_check" CHECK(`strength_requirement` IS NULL OR (typeof(`strength_requirement`) = 'integer' AND `strength_requirement` >= 1))
+	CONSTRAINT "character_armor_strength_requirement_check" CHECK((`strength_requirement` IS NULL OR (typeof(`strength_requirement`) = 'integer' AND `strength_requirement` >= 1)))
 );
 
 CREATE UNIQUE INDEX `character_armor_character_id_slot_unique` ON `character_armor` (`character_id`,`slot`);
@@ -145,7 +180,7 @@ CREATE TABLE `character_class_levels` (
 	FOREIGN KEY (`character_id`) REFERENCES `characters`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`class_definition_id`) REFERENCES `class_definitions`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`subclass_definition_id`,`class_definition_id`) REFERENCES `subclass_definitions`(`id`,`class_definition_id`) ON UPDATE no action ON DELETE no action,
-	CONSTRAINT "character_class_levels_spellcasting_ability_override_check" CHECK(`spellcasting_ability_override` IS NULL OR `spellcasting_ability_override` IN ('strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma'))
+	CONSTRAINT "character_class_levels_spellcasting_ability_override_check" CHECK((`spellcasting_ability_override` IS NULL OR `spellcasting_ability_override` IN ('strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma')))
 );
 
 CREATE UNIQUE INDEX `character_class_levels_character_id_class_definition_id_unique` ON `character_class_levels` (`character_id`,`class_definition_id`);
@@ -280,7 +315,7 @@ CREATE TABLE `character_species` (
 	`created_at` DATETIME,
 	`updated_at` DATETIME,
 	FOREIGN KEY (`character_id`) REFERENCES `characters`(`id`) ON UPDATE no action ON DELETE cascade,
-	CONSTRAINT "character_species_base_speed_check" CHECK(`base_speed_feet` IS NULL OR (typeof(`base_speed_feet`) = 'integer' AND `base_speed_feet` >= 1))
+	CONSTRAINT "character_species_base_speed_check" CHECK((`base_speed_feet` IS NULL OR (typeof(`base_speed_feet`) = 'integer' AND `base_speed_feet` >= 1)))
 );
 
 CREATE UNIQUE INDEX `character_species_character_id_unique` ON `character_species` (`character_id`);
@@ -338,8 +373,8 @@ CREATE TABLE `character_weapons` (
 	`updated_at` DATETIME,
 	FOREIGN KEY (`character_id`) REFERENCES `characters`(`id`) ON UPDATE no action ON DELETE cascade,
 	CONSTRAINT "character_weapons_mastery_requires_property_check" CHECK(mastery_selected = 0 OR mastery_property IS NOT NULL),
-	CONSTRAINT "character_weapons_mastery_property_check" CHECK(`mastery_property` IS NULL OR `mastery_property` IN ('Cleave', 'Graze', 'Nick', 'Push', 'Sap', 'Slow', 'Topple', 'Vex')),
-	CONSTRAINT "character_weapons_proficiency_category_check" CHECK(`proficiency_category` IS NULL OR `proficiency_category` IN ('simple', 'martial'))
+	CONSTRAINT "character_weapons_mastery_property_check" CHECK((`mastery_property` IS NULL OR `mastery_property` IN ('Cleave', 'Graze', 'Nick', 'Push', 'Sap', 'Slow', 'Topple', 'Vex'))),
+	CONSTRAINT "character_weapons_proficiency_category_check" CHECK((`proficiency_category` IS NULL OR `proficiency_category` IN ('simple', 'martial')))
 );
 
 CREATE INDEX `character_weapons_character_id_index` ON `character_weapons` (`character_id`);
@@ -366,7 +401,7 @@ CREATE TABLE `characters` (
       AND wisdom BETWEEN 1 AND 30
       AND charisma BETWEEN 1 AND 30),
 	CONSTRAINT "characters_rules_edition_preference_check" CHECK(`rules_edition_preference` IN ('2014', '2024', 'expanded')),
-	CONSTRAINT "characters_proficiency_bonus_override_check" CHECK(`proficiency_bonus_override` IS NULL OR (typeof(`proficiency_bonus_override`) = 'integer' AND `proficiency_bonus_override` >= 1)),
+	CONSTRAINT "characters_proficiency_bonus_override_check" CHECK((`proficiency_bonus_override` IS NULL OR (typeof(`proficiency_bonus_override`) = 'integer' AND `proficiency_bonus_override` >= 1))),
 	CONSTRAINT "characters_revision_check" CHECK(typeof(`revision`) = 'integer' AND `revision` >= 0)
 );
 
@@ -399,7 +434,7 @@ CREATE TABLE `class_definitions` (
 	`created_at` DATETIME,
 	`updated_at` DATETIME,
 	CONSTRAINT "class_definitions_progression_type_check" CHECK(`progression_type` IN ('full', 'half_up', 'half_down', 'third_up', 'third_down', 'pact', 'none')),
-	CONSTRAINT "class_definitions_spellcasting_ability_check" CHECK(`spellcasting_ability` IS NULL OR `spellcasting_ability` IN ('strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma'))
+	CONSTRAINT "class_definitions_spellcasting_ability_check" CHECK((`spellcasting_ability` IS NULL OR `spellcasting_ability` IN ('strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma')))
 );
 
 CREATE UNIQUE INDEX `class_definitions_content_key_unique` ON `class_definitions` (`content_key`);
@@ -550,9 +585,9 @@ CREATE TABLE `named_features` (
 	`updated_at` DATETIME,
 	FOREIGN KEY (`class_definition_id`) REFERENCES `class_definitions`(`id`) ON UPDATE no action ON DELETE cascade,
 	CONSTRAINT "named_features_class_level_check" CHECK(class_level BETWEEN 1 AND 20),
-	CONSTRAINT "named_features_effect_kind_check" CHECK(`effect_kind` IS NULL OR `effect_kind` IN ('extra_attack')),
-	CONSTRAINT "named_features_effect_weapon_scope_check" CHECK(`effect_weapon_scope` IS NULL OR `effect_weapon_scope` IN ('any_weapon', 'one_bonded_weapon')),
-	CONSTRAINT "named_features_effect_attack_count_check" CHECK(`effect_attack_count` IS NULL OR (typeof(`effect_attack_count`) = 'integer' AND `effect_attack_count` >= 2)),
+	CONSTRAINT "named_features_effect_kind_check" CHECK((`effect_kind` IS NULL OR `effect_kind` IN ('extra_attack'))),
+	CONSTRAINT "named_features_effect_weapon_scope_check" CHECK((`effect_weapon_scope` IS NULL OR `effect_weapon_scope` IN ('any_weapon', 'one_bonded_weapon'))),
+	CONSTRAINT "named_features_effect_attack_count_check" CHECK((`effect_attack_count` IS NULL OR (typeof(`effect_attack_count`) = 'integer' AND `effect_attack_count` >= 2))),
 	CONSTRAINT "named_features_attack_count_kind_check" CHECK(effect_attack_count IS NULL OR effect_kind IS 'extra_attack'),
 	CONSTRAINT "named_features_weapon_scope_kind_check" CHECK(effect_weapon_scope IS NULL OR effect_kind IS 'extra_attack'),
 	CONSTRAINT "named_features_extra_attack_payload_check" CHECK(effect_kind IS NOT 'extra_attack' OR (effect_attack_count IS NOT NULL AND effect_weapon_scope IS NOT NULL))
@@ -794,6 +829,15 @@ CREATE TABLE `spell_version_tags` (
 
 CREATE UNIQUE INDEX `spell_version_tags_spell_version_id_tag_unique` ON `spell_version_tags` (`spell_version_id`,`tag`);
 CREATE INDEX `spell_version_tags_tag_index` ON `spell_version_tags` (`tag`);
+CREATE TABLE `spell_version_upcast_levels` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`spell_version_id` integer NOT NULL,
+	`level` integer NOT NULL,
+	FOREIGN KEY (`spell_version_id`) REFERENCES `spell_versions`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "spell_version_upcast_levels_level_check" CHECK(typeof(`level`) = 'integer' AND `level` BETWEEN 1 AND 20)
+);
+
+CREATE UNIQUE INDEX `spell_version_upcast_levels_spell_version_id_level_unique` ON `spell_version_upcast_levels` (`spell_version_id`,`level`);
 CREATE TABLE `spell_versions` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`content_key` VARCHAR NOT NULL,
@@ -807,12 +851,18 @@ CREATE TABLE `spell_versions` (
 	`casting_time` VARCHAR,
 	`action_type` VARCHAR,
 	`range` VARCHAR,
+	`range_kind` VARCHAR,
+	`range_feet` integer,
+	`area_shape` VARCHAR,
+	`area_feet` integer,
 	`duration` VARCHAR,
 	`components` VARCHAR,
 	`material_component_summary` TEXT,
+	`material_cost_copper` integer,
+	`material_cost_kind` VARCHAR,
 	`healing` TINYINT(1) DEFAULT false NOT NULL,
 	`short_summary` TEXT,
-	`upcast_type` VARCHAR,
+	`upcast_scale` VARCHAR,
 	`upcast_summary` TEXT,
 	`requires_mod_for_effect` TINYINT(1) DEFAULT false NOT NULL,
 	`effect_reliability_category` VARCHAR DEFAULT 'fixed_effect' NOT NULL,
@@ -823,7 +873,17 @@ CREATE TABLE `spell_versions` (
 	`updated_at` DATETIME,
 	FOREIGN KEY (`spell_identity_id`) REFERENCES `spell_identities`(`id`) ON UPDATE no action ON DELETE cascade,
 	CONSTRAINT "spell_versions_level_check" CHECK(provenance IS 'placeholder' OR level BETWEEN 0 AND 9),
-	CONSTRAINT "spell_versions_effect_reliability_category_check" CHECK(`effect_reliability_category` IN ('attack_roll', 'saving_throw', 'fixed_effect', 'modifier_scaled', 'ritual_utility', 'mixed'))
+	CONSTRAINT "spell_versions_effect_reliability_category_check" CHECK(`effect_reliability_category` IN ('attack_roll', 'saving_throw', 'fixed_effect', 'modifier_scaled', 'ritual_utility', 'mixed')),
+	CONSTRAINT "spell_versions_range_kind_check" CHECK((`range_kind` IS NULL OR `range_kind` IN ('self', 'touch', 'ranged', 'sight', 'unlimited', 'special'))),
+	CONSTRAINT "spell_versions_range_feet_check" CHECK((`range_feet` IS NULL OR (typeof(`range_feet`) = 'integer' AND `range_feet` >= 0))
+        AND (`range_feet` IS NULL OR `range_kind` IS 'ranged')),
+	CONSTRAINT "spell_versions_area_shape_check" CHECK((`area_shape` IS NULL OR `area_shape` IN ('sphere', 'cylinder', 'cone', 'line'))),
+	CONSTRAINT "spell_versions_area_check" CHECK((`area_feet` IS NULL OR (typeof(`area_feet`) = 'integer' AND `area_feet` >= 1))
+        AND ((`area_shape` IS NULL) = (`area_feet` IS NULL))),
+	CONSTRAINT "spell_versions_material_cost_check" CHECK((`material_cost_copper` IS NULL OR (typeof(`material_cost_copper`) = 'integer' AND `material_cost_copper` >= 0))
+        AND (`material_cost_kind` IS NULL OR `material_cost_kind` IN ('exact', 'minimum'))
+        AND ((`material_cost_copper` IS NULL) = (`material_cost_kind` IS NULL))),
+	CONSTRAINT "spell_versions_upcast_scale_check" CHECK((`upcast_scale` IS NULL OR `upcast_scale` IN ('slot_level', 'character_level')))
 );
 
 CREATE UNIQUE INDEX `spell_versions_content_key_unique` ON `spell_versions` (`content_key`);
@@ -863,9 +923,9 @@ CREATE TABLE `subclass_features` (
 	FOREIGN KEY (`subclass_definition_id`) REFERENCES `subclass_definitions`(`id`) ON UPDATE no action ON DELETE cascade,
 	CONSTRAINT "subclass_features_class_level_check" CHECK(class_level BETWEEN 1 AND 20),
 	CONSTRAINT "subclass_features_sort_order_check" CHECK(typeof(`sort_order`) = 'integer' AND `sort_order` >= 1),
-	CONSTRAINT "subclass_features_effect_kind_check" CHECK(`effect_kind` IS NULL OR `effect_kind` IN ('extra_attack')),
-	CONSTRAINT "subclass_features_effect_weapon_scope_check" CHECK(`effect_weapon_scope` IS NULL OR `effect_weapon_scope` IN ('any_weapon', 'one_bonded_weapon')),
-	CONSTRAINT "subclass_features_effect_attack_count_check" CHECK(`effect_attack_count` IS NULL OR (typeof(`effect_attack_count`) = 'integer' AND `effect_attack_count` >= 2)),
+	CONSTRAINT "subclass_features_effect_kind_check" CHECK((`effect_kind` IS NULL OR `effect_kind` IN ('extra_attack'))),
+	CONSTRAINT "subclass_features_effect_weapon_scope_check" CHECK((`effect_weapon_scope` IS NULL OR `effect_weapon_scope` IN ('any_weapon', 'one_bonded_weapon'))),
+	CONSTRAINT "subclass_features_effect_attack_count_check" CHECK((`effect_attack_count` IS NULL OR (typeof(`effect_attack_count`) = 'integer' AND `effect_attack_count` >= 2))),
 	CONSTRAINT "subclass_features_attack_count_kind_check" CHECK(effect_attack_count IS NULL OR effect_kind IS 'extra_attack'),
 	CONSTRAINT "subclass_features_weapon_scope_kind_check" CHECK(effect_weapon_scope IS NULL OR effect_kind IS 'extra_attack'),
 	CONSTRAINT "subclass_features_extra_attack_payload_check" CHECK(effect_kind IS NOT 'extra_attack' OR (effect_attack_count IS NOT NULL AND effect_weapon_scope IS NOT NULL))
