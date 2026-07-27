@@ -108,8 +108,8 @@ type VersionAttributes = Record<
 >;
 
 /**
- * THE UPCAST FACT, AND THE ONE EXEMPTION FROM THE REFERENCED-VERSION FREEZE
- * THAT IS NOT A CHANGE TO A RULE.
+ * THE TWO PROGRESSION FACTS, AND THE ONE EXEMPTION FROM THE REFERENCED-VERSION
+ * FREEZE THAT IS NOT A CHANGE TO A RULE.
  *
  * A version a character REFERENCES is frozen: `docs/CATALOG-IMPORT.md` states
  * it as *"its imported rules and pivots are preserved byte-for-byte"*, and the
@@ -119,30 +119,38 @@ type VersionAttributes = Record<
  * exemption is not a hole in the freeze, it is the freeze's own distinction
  * between CHANGING a stored fact and SUPPLYING one that was never stored.
  *
- * THE UPCAST PROGRESSION IS NET-NEW, WHICH MAKES THAT DISTINCTION DECISIVE
- * RATHER THAN ACADEMIC. No catalog document written before this change carries
- * `upcastScale`/`upcastLevels`, so EVERY existing version has the fact absent —
+ * BOTH PROGRESSIONS ARE NET-NEW, WHICH MAKES THAT DISTINCTION DECISIVE RATHER
+ * THAN ACADEMIC. No catalog document written before them carries `upcastLevels`
+ * or `cantripUpgradeLevels`, so EVERY existing version has both facts absent —
  * and a version is referenced precisely when a character uses it, which is
  * precisely when the printable card renders it. Frozen unconditionally, the
- * only spells that print an upcast line are the ones no character has, and a
+ * only spells that print a progression are the ones no character has, and a
  * user re-importing an improved document to get it is told `updated: 0`.
  *
- * SO THE EXEMPTION IS A FILL, NEVER AN OVERWRITE, AND IT IS ALL-OR-NOTHING.
- * `upcastFillable` requires `upcast_scale IS NULL` **and** zero
- * `spell_version_upcast_levels` rows — the state "this version says nothing
- * about upcasting". Filling column by column would allow a stored
- * `slot_level` to keep its scale while accepting a document's
- * `character_level` LEVELS, and print `slot levels 5, 11, 17` for a cantrip
- * ladder: a new wrong number invented by the fix for an absence. A version that
- * already carries either half stays frozen whole.
+ * SO THE EXEMPTION IS A FILL, NEVER AN OVERWRITE, AND IT IS ALL-OR-NOTHING
+ * WITHIN EACH FACT. A fact is fillable only when the version says NOTHING about
+ * it: no summary and no level rows. Filling the halves independently would let
+ * a stored summary describing one ladder sit beside a document's levels
+ * describing another, and the card prints them on one line — a new wrong
+ * sentence invented by the fix for an absence.
  *
- * `upcast_summary` is in the set because it is the third field of the same
- * fact; like the other two it is only ever written where it is NULL.
+ * TWO SETS AND NOT ONE, because they are two facts. A version that already
+ * states its slot-level upcasting can still be given the Cantrip Upgrade it
+ * has never had, and vice versa; folding them into one gate would freeze both
+ * because either was present, which is a freeze on content nobody stored.
  */
-const UPCAST_COLUMNS = new Set([
-  'upcast_scale',
-  'upcast_summary',
-]);
+const UPCAST_COLUMNS = new Set(['upcast_summary']);
+const CANTRIP_UPGRADE_COLUMNS = new Set(['cantrip_upgrade_summary']);
+
+/**
+ * The two level ladders, as a closed union. Interpolated into SQL by
+ * `#syncLevels` and `#levelCount`, so it is deliberately NOT `string`: the
+ * union is what makes the interpolation safe by construction rather than by a
+ * caller's discipline.
+ */
+type LevelTable =
+  | 'spell_version_upcast_levels'
+  | 'spell_version_cantrip_upgrade_levels';
 
 class DryRunRollback extends Error {
   constructor(readonly summary: CatalogImportSummary) {
@@ -295,9 +303,10 @@ export class CatalogImporter {
       let versionId: number;
       let referenced: boolean;
       let versionChanged: boolean;
-      // See {@link UPCAST_COLUMNS}. `false` for a version this import CREATED,
-      // which needs no exemption because nothing is frozen on it.
+      // See {@link UPCAST_COLUMNS}. Both `false` for a version this import
+      // CREATED, which needs no exemption because nothing is frozen on it.
       let upcastFillable = false;
+      let cantripUpgradeFillable = false;
       const attributes = this.#versionAttributes(record, identityId);
 
       if (version === null) {
@@ -316,11 +325,18 @@ export class CatalogImporter {
         referenced = this.#isReferenced(versionId);
         const upgradingPlaceholder =
           version.provenance === 'placeholder';
+        const fillable = referenced && !upgradingPlaceholder;
         upcastFillable =
-          referenced &&
-          !upgradingPlaceholder &&
-          version.upcast_scale === null &&
-          this.#upcastLevelCount(versionId) === 0;
+          fillable &&
+          version.upcast_summary === null &&
+          this.#levelCount('spell_version_upcast_levels', versionId) === 0;
+        cantripUpgradeFillable =
+          fillable &&
+          version.cantrip_upgrade_summary === null &&
+          this.#levelCount(
+            'spell_version_cantrip_upgrade_levels',
+            versionId,
+          ) === 0;
         const changes: VersionAttributes = {};
         if (!sqlBoolean(version, 'is_active')) {
           changes.is_active = 1;
@@ -331,9 +347,8 @@ export class CatalogImporter {
             !referenced ||
             upgradingPlaceholder ||
             column === 'short_summary' ||
-            (upcastFillable &&
-              UPCAST_COLUMNS.has(column) &&
-              version[column] === null);
+            (upcastFillable && UPCAST_COLUMNS.has(column)) ||
+            (cantripUpgradeFillable && CANTRIP_UPGRADE_COLUMNS.has(column));
           if (writable && version[column] !== value) {
             changes[column] = value;
           }
@@ -402,17 +417,28 @@ export class CatalogImporter {
           ) || versionChanged;
       }
 
-      // OUTSIDE the freeze block, and {@link UPCAST_COLUMNS} says why. The
-      // levels are the third field of the same fact as `upcast_scale`, so they
-      // move on exactly the condition those two columns move on.
-      if (
+      // OUTSIDE the freeze block, and {@link UPCAST_COLUMNS} says why. Each
+      // list is the other half of the same fact as its summary column, so it
+      // moves on exactly the condition that column moves on — and the two facts
+      // are gated separately because they are two facts.
+      const unfrozen =
         !referenced ||
-        (version !== null && version.provenance === 'placeholder') ||
-        upcastFillable
-      ) {
+        (version !== null && version.provenance === 'placeholder');
+      if (unfrozen || upcastFillable) {
         versionChanged =
-          this.#syncUpcastLevels(versionId, record.upcastLevels) ||
-          versionChanged;
+          this.#syncLevels(
+            'spell_version_upcast_levels',
+            versionId,
+            record.upcastLevels,
+          ) || versionChanged;
+      }
+      if (unfrozen || cantripUpgradeFillable) {
+        versionChanged =
+          this.#syncLevels(
+            'spell_version_cantrip_upgrade_levels',
+            versionId,
+            record.cantripUpgradeLevels,
+          ) || versionChanged;
       }
 
       if (version !== null && versionChanged) {
@@ -566,8 +592,8 @@ export class CatalogImporter {
       // still prints exactly as the author wrote it.
       ...encodeSpellRange(parseSpellRange(record.range)),
       ...encodeSpellComponents(parseSpellComponents(record.components)),
-      upcast_scale: record.upcastScale,
       upcast_summary: record.upcastSummary,
+      cantrip_upgrade_summary: record.cantripUpgradeSummary,
       healing: encodeBoolean(record.healing),
       effect_reliability_category:
         record.effectReliabilityCategory,
@@ -580,32 +606,40 @@ export class CatalogImporter {
   }
 
   /**
-   * REPLACE A SPELL'S UPCAST LEVELS WITH THE DOCUMENT'S.
+   * How many rows one of the two level ladders currently holds. See
+   * {@link UPCAST_COLUMNS}.
+   */
+  #levelCount(table: LevelTable, versionId: number): number {
+    return Number(
+      this.db.scalar(
+        `SELECT COUNT(*) FROM ${table} WHERE spell_version_id = ?`,
+        [versionId],
+      ) ?? 0,
+    );
+  }
+
+  /**
+   * REPLACE ONE OF A SPELL'S TWO LEVEL LADDERS WITH THE DOCUMENT'S.
    *
    * SEPARATE FROM `#syncSimplePivot` RATHER THAN GENERICISED OVER IT, and the
    * reason is the sort. That helper compares two `string[]`s sorted
    * LEXICOGRAPHICALLY, which orders levels `1, 11, 17, 2, 5`. The comparison
    * would still be correct — both sides are sorted the same way — but the
    * insert order would not be, and a "list of levels" whose stored order is
-   * `11` before `2` is a list a reader has to re-sort. Widening the helper to
-   * carry a comparator for one caller is the accommodation D25 names.
+   * `11` before `2` is a list a reader has to re-sort.
+   *
+   * PARAMETERISED BY TABLE, WHICH IS NOT THE SAME WIDENING. `LevelTable` is a
+   * two-member literal union, so a typo is a compile error and no caller can
+   * reach a table this method was not written for; and the two callers are
+   * genuinely the same operation on the same shape, which is what the sort
+   * argument above says `#syncSimplePivot` is not.
    *
    * A FULL REPLACEMENT, like every other pivot here: the document is the whole
    * truth about the record it describes, so a level the document dropped is a
-   * level the spell no longer upcasts at.
+   * level the spell no longer changes at.
    */
-  /** How many levels this version currently upcasts at. See {@link UPCAST_COLUMNS}. */
-  #upcastLevelCount(versionId: number): number {
-    return Number(
-      this.db.scalar(
-        `SELECT COUNT(*) FROM spell_version_upcast_levels
-          WHERE spell_version_id = ?`,
-        [versionId],
-      ) ?? 0,
-    );
-  }
-
-  #syncUpcastLevels(
+  #syncLevels(
+    table: LevelTable,
     versionId: number,
     desiredLevels: readonly number[],
   ): boolean {
@@ -615,7 +649,7 @@ export class CatalogImporter {
     const existing = this.db
       .all(
         `SELECT level
-         FROM spell_version_upcast_levels
+         FROM ${table}
          WHERE spell_version_id = ?
          ORDER BY level`,
         [versionId],
@@ -628,13 +662,12 @@ export class CatalogImporter {
       return false;
     }
     this.db.exec(
-      'DELETE FROM spell_version_upcast_levels WHERE spell_version_id = ?',
+      `DELETE FROM ${table} WHERE spell_version_id = ?`,
       [versionId],
     );
     for (const level of desired) {
       this.db.exec(
-        `INSERT INTO spell_version_upcast_levels (spell_version_id, level)
-         VALUES (?, ?)`,
+        `INSERT INTO ${table} (spell_version_id, level) VALUES (?, ?)`,
         [versionId, level],
       );
     }

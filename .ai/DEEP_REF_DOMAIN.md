@@ -86,9 +86,14 @@ for the reasoning:
 - **OPEN** — recognise known values, preserve unknown ones — `school`,
   `action_type`. (`upcast_type` was named here too and the column NO LONGER
   EXISTS: nothing ever wrote it, so it had no known values to recognise and the
-  claim described an intent as though it were the state of the code. The
-  progression is now `spell_versions.upcast_scale` plus
-  `spell_version_upcast_levels`, and both are CLOSED.)
+  claim described an intent as though it were the state of the code. Its
+  replacement `upcast_scale` no longer exists either — the owner ruled the
+  Cantrip Upgrade a separate mechanic, so there is nothing for a scale to
+  discriminate. The progressions are now two sibling tables,
+  `spell_version_upcast_levels` (SLOT levels, 1..9) and
+  `spell_version_cantrip_upgrade_levels` (CHARACTER levels, 1..20), each with
+  its own text column on `spell_versions`. There is no enum left here to be
+  open or closed: which levels a list holds is the table it is in.)
 - **VALUE OBJECT** where a free string holds structured data — `range` and
   `casting_time`. `range` is the worked example: `spell_versions.range` still
   holds the printed line VERBATIM and `range_kind` / `range_feet` /

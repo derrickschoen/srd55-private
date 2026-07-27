@@ -16,14 +16,12 @@ import type {
   MaterialCostKind,
   SpellAreaShape,
   SpellRangeKind,
-  UpcastScale,
 } from '../../src/domain/enums';
 import {
   effectReliabilityCategories,
   materialCostKinds,
   spellAreaShapes,
   spellRangeKinds,
-  upcastScales,
 } from '../../src/domain/enums';
 import {
   datetime,
@@ -227,26 +225,29 @@ export const spell_versions = sqliteTable(
     healing: tinyint1('healing').notNull().default(false),
     short_summary: sqlText()('short_summary'),
     /**
-     * WHICH LEVEL `spell_version_upcast_levels` COUNTS IN — slot levels for a
-     * levelled spell, character levels for a cantrip upgrade.
-     *
-     * THIS REPLACES `upcast_type`, WHICH WAS DELETED RATHER THAN REUSED. That
-     * column had ZERO writers anywhere in the repository, the Tier 1 document
-     * format had no field for it, and no code ever compared it against
-     * anything — so no database this application can produce ever held a
-     * non-NULL value in it. Two agent-facing docs classified it as an OPEN
-     * vocabulary with "known values recognised"; there were no known values.
-     * D25 says replace rather than accommodate, and keeping a column because it
-     * was there is exactly the accommodation it names.
-     */
-    upcast_scale: varchar<UpcastScale>()('upcast_scale'),
-    /**
      * The owner's *"text description"* half of the upcast ruling. Declared
      * since the Laravel schema, never written until now, and kept for the same
      * reason `material_component_summary` is: it already means what the ruling
      * asks for.
+     *
+     * IT DESCRIBES SLOT LEVELS AND NOTHING ELSE. `spell_version_upcast_levels`
+     * is bounded 1..9 for the same reason; a cantrip's character-level ladder
+     * has its own pair of homes below.
      */
     upcast_summary: sqlText()('upcast_summary'),
+    /**
+     * THE CANTRIP UPGRADE'S TEXT — the sibling of `upcast_summary`, and a
+     * SEPARATE COLUMN rather than a second use of it.
+     *
+     * A spell has at most one of these in practice, but the two facts are not
+     * the same fact and nothing in the schema says they are exclusive: one
+     * describes what a bigger SLOT buys, the other what a higher CHARACTER
+     * LEVEL buys. Sharing one column would make "which mechanic is this
+     * sentence about" a question the reader answers by looking at which level
+     * table has rows — which is exactly the ambiguity `upcast_scale` existed to
+     * paper over, reintroduced one column to the left.
+     */
+    cantrip_upgrade_summary: sqlText()('cantrip_upgrade_summary'),
     requires_mod_for_effect: tinyint1('requires_mod_for_effect')
       .notNull()
       .default(false),
@@ -351,10 +352,6 @@ export const spell_versions = sqliteTable(
         AND ${nullOrOneOf('material_cost_kind', materialCostKinds)}
         AND ((\`material_cost_copper\` IS NULL) = (\`material_cost_kind\` IS NULL))`,
     ),
-    check(
-      'spell_versions_upcast_scale_check',
-      nullOrOneOf('upcast_scale', upcastScales),
-    ),
     uniqueIndex('spell_versions_content_key_unique').on(table.content_key),
     uniqueIndex('spell_versions_spell_identity_id_rules_edition_unique').on(
       table.spell_identity_id,
@@ -412,32 +409,35 @@ export const spell_list_memberships = sqliteTable(
 );
 
 /**
- * THE LEVELS AT WHICH A SPELL CAN BE UPCAST — the owner's *"list of levels that
- * can upcast"*, as a list.
+ * THE SPELL SLOT LEVELS AT WHICH A SPELL'S EFFECT CHANGES — the owner's *"list
+ * of levels that can upcast"*, as a list, and measured in SLOT LEVELS ONLY.
  *
- * A CHILD TABLE AND NOT A COLUMN, because the ruling says LIST and the three
- * column-shaped alternatives all lose something the list has:
+ * THE LIST IS THE RIGHT SHAPE PRECISELY BECAUSE THE CADENCE VARIES. The owner:
+ * *"Some spells can be upcast every spell slot level, others only upcast every
+ * other spell slot level (ex. Spiritual weapon)"*. A spell that gains something
+ * at every slot level above its base stores every one of them; a spell that
+ * gains something every OTHER slot level stores only those. That second case is
+ * what rules out every column-shaped alternative:
  *
- *  - a BOOLEAN (`can_upcast`) drops which levels;
- *  - a RANGE (`upcast_from`, `upcast_to`) cannot express the bundled cantrip
- *    upgrades at all — `5, 11, 17` is not an interval, and neither is any
- *    other cantrip's ladder;
+ *  - a BOOLEAN (`can_upcast`) drops which levels entirely;
+ *  - a THRESHOLD (`upcasts_from`) or a RANGE (`upcast_from`, `upcast_to`)
+ *    cannot express `2, 4, 6, 8` at all — it says `2..9`, which is a claim the
+ *    source never made and four slot levels the spell does not improve at;
  *  - a JSON array makes the contract a shape check rather than a row, and
  *    `src/domain/contracts/json-columns.ts` exists precisely to keep that
  *    decision deliberate.
  *
- * WHICH LEVEL THESE ARE COUNTED IN LIVES ON THE PARENT, in
- * `spell_versions.upcast_scale`, and NOT on this row. The scale is a fact about
- * the spell — a cantrip's ladder is character levels, a levelled spell's is
- * slot levels — so putting it here would let one spell hold two answers, and a
- * reader would have no way to say which was right.
+ * `BETWEEN 1 AND 9` — SLOT LEVELS, and the same bound every other spell/slot
+ * level in this schema carries: `spell_versions.level` (0..9),
+ * `spell_selection_slots.spell_level_min`/`_max` (0..9),
+ * `subclass_progressions.max_spell_level` (0..9). The floor is 1 rather than 0
+ * because level 0 is a cantrip, which is not a slot and cannot be upcast into.
  *
- * `BETWEEN 1 AND 20` COVERS BOTH SCALES AND IS DELIBERATELY THE LOOSER OF THE
- * TWO. Slot levels run 1..9 and character levels 1..20, so a tighter bound
- * would have to be conditional on the parent's scale, which a column CHECK
- * cannot see. The bound that IS enforceable here is enforced; the scale-aware
- * one is enforced where the scale is known, in
- * `src/catalog/catalog-schema.ts`.
+ * IT USED TO BE 1..20, AND THAT ONLY EVER EXISTED TO LET THIS COLUMN ALSO HOLD
+ * CHARACTER LEVELS. It cannot any more: the Cantrip Upgrade is a different
+ * mechanic with its own table below, so the loose bound had nothing left to
+ * accommodate and the discriminant that selected between the two meanings
+ * (`spell_versions.upcast_scale`) went with it.
  *
  * `typeof(…) = 'integer'` for the reason `db/schema/columns.ts` measured: a
  * bare `BETWEEN` already rejects text on its upper limb, but a REAL `2.5` slips
@@ -456,10 +456,61 @@ export const spell_version_upcast_levels = sqliteTable(
   (table) => [
     check(
       'spell_version_upcast_levels_level_check',
-      sql`typeof(\`level\`) = 'integer' AND \`level\` BETWEEN 1 AND 20`,
+      sql`typeof(\`level\`) = 'integer' AND \`level\` BETWEEN 1 AND 9`,
     ),
     uniqueIndex(
       'spell_version_upcast_levels_spell_version_id_level_unique',
+    ).on(table.spell_version_id, table.level),
+  ],
+);
+
+/**
+ * THE CHARACTER LEVELS AT WHICH A CANTRIP'S EFFECT CHANGES — the SRD's *Cantrip
+ * Upgrade*, which is a DIFFERENT MECHANIC from upcasting and gets its own table
+ * for that reason.
+ *
+ * The two were one table with a discriminant column until the owner ruled them
+ * apart: *"Separate concept, own table"*. What made the shipped model ambiguous
+ * was calling this upcasting at all. It is not. Upcasting spends a bigger SLOT;
+ * a Cantrip Upgrade happens because the CHARACTER got older, spends nothing,
+ * and a cantrip has no slot to spend. The bundled text says so in the units it
+ * uses:
+ *
+ *  - *"Cantrip Upgrade. … when you reach levels 5 (1d6), 11 (2d6), and 17
+ *    (3d6)"* (`docs/srd/source/weapon-attack-cantrips.txt:26-29`);
+ *  - *"The damage die changes when you reach levels 5 (d10), 11 (d12), and 17
+ *    (2d6)"* (`:53-54`).
+ *
+ * A SIBLING OF `spell_version_upcast_levels`, NOT A VARIANT OF IT. Identical
+ * shape, different subject, different bound — and the difference in bound is
+ * the whole argument for two tables rather than one with a scale column: a
+ * CHECK can state `1..9` here and `1..20` there, where one shared column could
+ * only state the union and let the parent's discriminant carry the real rule.
+ * A `20` in a slot list is now refused by the database rather than by a
+ * contract that can see the discriminant.
+ *
+ * `BETWEEN 1 AND 20` is the owner's *"Yes — 1 to 9, refuse the rest"* answered
+ * for the other table; here 20 is the highest character level, matching
+ * `class_progressions_class_level_check` and every other character-level bound
+ * in this schema.
+ */
+export const spell_version_cantrip_upgrade_levels = sqliteTable(
+  'spell_version_cantrip_upgrade_levels',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }).notNull(),
+    spell_version_id: integer('spell_version_id')
+      .notNull()
+      .$type<SpellVersionId>()
+      .references(() => spell_versions.id, { onDelete: 'cascade' }),
+    level: integer('level').notNull(),
+  },
+  (table) => [
+    check(
+      'spell_version_cantrip_upgrade_levels_level_check',
+      sql`typeof(\`level\`) = 'integer' AND \`level\` BETWEEN 1 AND 20`,
+    ),
+    uniqueIndex(
+      'spell_version_cantrip_upgrade_levels_spell_version_id_level_unique',
     ).on(table.spell_version_id, table.level),
   ],
 );

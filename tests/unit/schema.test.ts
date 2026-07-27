@@ -39,7 +39,7 @@ type ColumnsByAffinity = Partial<Record<ColumnAffinity, string[]>>;
  * from native ones; D7 retired that goal and F10 measured what the split was
  * costing. What survives is the one thing this inventory catches that nothing
  * else in the suite does: a SURPLUS column. A MISSING column breaks an
- * integration test or a row contract, but 29 of the 56 tables have no row
+ * integration test or a row contract, but 30 of the 57 tables have no row
  * contract at all, so a column that appears and is read by nothing is invisible
  * everywhere else.
  *
@@ -240,13 +240,18 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
       'casting_time', 'action_type', 'range', 'range_kind', 'area_shape',
       'duration', 'components',
       'material_component_summary', 'material_cost_kind', 'short_summary',
-      'upcast_scale',
-      'upcast_summary', 'effect_reliability_category', 'provenance',
+      'upcast_summary', 'cantrip_upgrade_summary',
+      'effect_reliability_category', 'provenance',
       'seed_version',
     ],
     numeric: ['created_at', 'updated_at'],
   },
   spell_version_upcast_levels: {
+    integer: ['id', 'spell_version_id', 'level'],
+    text: [],
+    numeric: [],
+  },
+  spell_version_cantrip_upgrade_levels: {
     integer: ['id', 'spell_version_id', 'level'],
     text: [],
     numeric: [],
@@ -673,6 +678,7 @@ const expectedNotNull: Record<string, string[]> = {
   spell_version_save_abilities: ['id', 'spell_version_id', 'save_ability'],
   spell_version_tags: ['id', 'spell_version_id', 'tag'],
   spell_version_upcast_levels: ['id', 'spell_version_id', 'level'],
+  spell_version_cantrip_upgrade_levels: ['id', 'spell_version_id', 'level'],
   spell_versions: [
     'id', 'content_key', 'spell_identity_id', 'display_name', 'rules_edition',
     'level', 'school', 'ritual', 'concentration', 'healing',
@@ -844,6 +850,8 @@ const expectedNamedIndexes: Record<string, string> = {
   spell_version_tags_tag_index: 'spell_version_tags:tag',
   spell_version_upcast_levels_spell_version_id_level_unique:
     'spell_version_upcast_levels:spell_version_id,level:unique',
+  spell_version_cantrip_upgrade_levels_spell_version_id_level_unique:
+    'spell_version_cantrip_upgrade_levels:spell_version_id,level:unique',
   spell_versions_is_active_index: 'spell_versions:is_active',
   spell_versions_content_key_unique: 'spell_versions:content_key:unique',
   spell_versions_rules_edition_level_index:
@@ -925,6 +933,7 @@ const expectedUniqueGroups: Record<string, string[]> = {
   spell_version_save_abilities: ['spell_version_id,save_ability'],
   spell_version_tags: ['spell_version_id,tag'],
   spell_version_upcast_levels: ['spell_version_id,level'],
+  spell_version_cantrip_upgrade_levels: ['spell_version_id,level'],
   spell_versions: ['content_key', 'spell_identity_id,rules_edition'],
   subclass_definitions: [
     'class_definition_id,name,rules_edition', 'content_key',
@@ -1129,6 +1138,9 @@ const expectedForeignKeys: Record<string, string[]> = {
   spell_version_save_abilities: ['spell_version_id->spell_versions.id|CASCADE'],
   spell_version_tags: ['spell_version_id->spell_versions.id|CASCADE'],
   spell_version_upcast_levels: [
+    'spell_version_id->spell_versions.id|CASCADE',
+  ],
+  spell_version_cantrip_upgrade_levels: [
     'spell_version_id->spell_versions.id|CASCADE',
   ],
   spell_versions: ['spell_identity_id->spell_identities.id|CASCADE'],
