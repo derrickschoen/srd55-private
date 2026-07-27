@@ -91,6 +91,22 @@ export type CharacterSpeciesId = Brand<number, 'CharacterSpeciesId'>;
 export type CharacterSpeciesTraitId = Brand<number, 'CharacterSpeciesTraitId'>;
 export type CharacterBackgroundId = Brand<number, 'CharacterBackgroundId'>;
 
+/**
+ * THE TWO EFFECT IDS, BRANDED APART FOR THE SAME D1b REASON AS THE ROWS ABOVE.
+ *
+ * A `species_template_trait_effects.id` names something a CATALOG TEMPLATE
+ * GRANTS; a `character_effects.id` names something a CHARACTER RECORDS. Those
+ * are different questions (see `db/schema/origins.ts`), the copy between them
+ * is one-way and column-wise, and a template effect id turning up where a
+ * character effect id belongs means the code is reading the catalog when it
+ * meant to read the character.
+ */
+export type SpeciesTemplateTraitEffectId = Brand<
+  number,
+  'SpeciesTemplateTraitEffectId'
+>;
+export type CharacterEffectId = Brand<number, 'CharacterEffectId'>;
+
 /** One `*_definitions.id` brand per definition table, so they cannot cross. */
 export type ClassDefinitionId = Brand<number, 'ClassDefinitionId'>;
 export type SubclassDefinitionId = Brand<number, 'SubclassDefinitionId'>;

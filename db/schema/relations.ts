@@ -50,6 +50,8 @@ import {
   character_background,
   character_species,
   character_species_traits,
+  character_effects,
+  species_template_trait_effects,
   species_template_traits,
   species_templates,
 } from './origins';
@@ -206,7 +208,8 @@ export const speciesTemplatesRelations = relations(
 
 export const speciesTemplateTraitsRelations = relations(
   species_template_traits,
-  ({ one }) => ({
+  ({ one, many }) => ({
+    effects: many(species_template_trait_effects),
     species_template: one(species_templates, {
       fields: [species_template_traits.species_template_id],
       references: [species_templates.id],
@@ -226,6 +229,51 @@ export const characterSpeciesRelations = relations(
     character: one(characters, {
       fields: [character_species.character_id],
       references: [characters.id],
+    }),
+  }),
+);
+
+/**
+ * The catalog effect's parent is the TRAIT, because a template effect is part
+ * of what that printed trait grants. `character_effects` below is deliberately
+ * NOT shaped this way: its parent is the character.
+ */
+export const speciesTemplateTraitEffectsRelations = relations(
+  species_template_trait_effects,
+  ({ one }) => ({
+    species_template_trait: one(species_template_traits, {
+      fields: [species_template_trait_effects.species_template_trait_id],
+      references: [species_template_traits.id],
+    }),
+  }),
+);
+
+/**
+ * TWO relations, and the second is the whole point of the inversion: an effect
+ * belongs to the CHARACTER and OPTIONALLY points at the source instance that
+ * granted it. It is the SECOND composite reference in this schema, after
+ * `spell_selection_slots`, and for the identical reason — see the comment
+ * there, and `character_effects.source_instance_id` itself.
+ */
+export const characterEffectsRelations = relations(
+  character_effects,
+  ({ one }) => ({
+    character: one(characters, {
+      fields: [character_effects.character_id],
+      references: [characters.id],
+    }),
+    // Composite, matching the schema exactly — a single-column relation here
+    // would describe a constraint the database does not have and would let a
+    // reader believe an effect could be attached to another character's source.
+    source_instance: one(character_source_instances, {
+      fields: [
+        character_effects.source_instance_id,
+        character_effects.character_id,
+      ],
+      references: [
+        character_source_instances.id,
+        character_source_instances.character_id,
+      ],
     }),
   }),
 );

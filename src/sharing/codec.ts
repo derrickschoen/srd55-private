@@ -5,6 +5,8 @@ import {
   SHARE_ARMOR_FLAGS,
   SHARE_ARMOR_NUMBERS,
   SHARE_BACKGROUND_TEXT,
+  SHARE_EFFECT_NUMBERS,
+  SHARE_EFFECT_TEXT,
   SHARE_LIMITS,
   SHARE_SPECIES_TEXT,
   SHARE_SPECIES_TRAIT_NUMBERS,
@@ -15,6 +17,7 @@ import {
   type CharacterShareDocument,
   type ShareArmor,
   type ShareBackground,
+  type ShareEffect,
   type ShareHitPointRoll,
   type ShareSheetAdjustment,
   type ShareSpecies,
@@ -26,7 +29,7 @@ import {
 type Tuple = readonly unknown[];
 
 /**
- * THE ROOT TUPLE HAS THREE ACCEPTED LENGTHS, AND THAT IS ON PURPOSE.
+ * THE ROOT TUPLE HAS FIVE ACCEPTED LENGTHS, AND THAT IS ON PURPOSE.
  *
  * A share link is a URL fragment somebody has already pasted into a chat, a
  * wiki or a bookmark. Appending an element while demanding an exact length would
@@ -35,21 +38,33 @@ type Tuple = readonly unknown[];
  *
  * So eleven elements is still a valid document carrying no weapons, no origin
  * and no sheet inputs; twelve carries weapons and neither of the other two;
- * thirteen adds the origin; fourteen is what this build writes.
- * `CHARACTER_SHARE_VERSION` deliberately stays at 1: a version bump buys nothing
- * here and would reject every old link on the way in.
+ * thirteen adds the origin; fourteen adds the sheet inputs; fifteen is what
+ * this build writes. `CHARACTER_SHARE_VERSION` deliberately stays at 1: a
+ * version bump buys nothing here and would reject every old link on the way in.
+ *
+ * THE FIFTEENTH ELEMENT IS THE CHARACTER'S EFFECTS, AND IT IS A ROOT ELEMENT
+ * RATHER THAN A FOURTH SLOT IN THE ORIGIN GROUP. Effects are no longer
+ * species-scoped — that severance is the whole point of the inversion — so
+ * nesting them under the origin would re-create the coupling being removed, and
+ * it would change what element 13 means for links already in the wild.
+ *
+ * The growth is the ESTABLISHED move here, not a format break: this format has
+ * already grown 11 -> 12 -> 13 -> 14 with the version pinned, and the frozen
+ * hand-built fixtures in `tests/unit/sharing/codec.test.ts` are what prove each
+ * older length still decodes rather than merely asserting it.
  *
  * THE ORIGIN IS ONE ELEMENT, NOT THREE, AND THE SHEET IS ONE ELEMENT, NOT FOUR.
  * Three sections travel in the first and four in the second, but each group is a
  * single nested tuple so the root grows by one per FEATURE rather than one per
  * table. The members are independently nullable inside their group, which is
- * what the document type needs.
+ * what the document type needs. Effects need no group: they are one section.
  */
-const ROOT_TUPLE_LENGTHS = [11, 12, 13, 14] as const;
+const ROOT_TUPLE_LENGTHS = [11, 12, 13, 14, 15] as const;
 
 const LEGACY_ROOT_LENGTH = 11;
 const PRE_ORIGIN_ROOT_LENGTH = 12;
 const PRE_SHEET_ROOT_LENGTH = 13;
+const PRE_EFFECTS_ROOT_LENGTH = 14;
 
 /**
  * How many elements the grouped sheet element holds: armour, hit point rolls,
@@ -68,6 +83,14 @@ const SPECIES_TUPLE_LENGTH = 1 + SHARE_SPECIES_TEXT.length + 1;
 const SPECIES_TRAIT_TUPLE_LENGTH =
   1 + SHARE_SPECIES_TRAIT_TEXT.length + SHARE_SPECIES_TRAIT_NUMBERS.length;
 const BACKGROUND_TUPLE_LENGTH = 1 + SHARE_BACKGROUND_TEXT.length;
+
+/**
+ * How many elements one effect occupies on the wire: kind, label, payload, then
+ * the two provenance slots — the ref and the flag that says which of the two
+ * roots that ref minted.
+ */
+const EFFECT_TUPLE_LENGTH =
+  2 + SHARE_EFFECT_TEXT.length + SHARE_EFFECT_NUMBERS.length + 2;
 
 /** How many elements one armour row, one roll and the adjustment occupy. */
 const ARMOR_TUPLE_LENGTH =
@@ -168,6 +191,47 @@ function speciesTraitToPositional(trait: ShareSpeciesTrait): unknown[] {
     ...SHARE_SPECIES_TRAIT_TEXT.map((field) => trait[field] ?? null),
     ...SHARE_SPECIES_TRAIT_NUMBERS.map((field) => trait[field] ?? null),
   ];
+}
+
+/**
+ * An effect's wire order, frozen. `kind` leads because it is what decides how
+ * the payload is read, and `label` follows it because every other section in
+ * this format leads with the thing a reader would call the row. The two
+ * PROVENANCE slots go last, ref then flag: they are the only references here,
+ * and keeping them at the end means a future payload column appends in front of
+ * them rather than displacing them.
+ *
+ * `sourceSubclass` rides in its own slot rather than being folded into the ref
+ * (a negative ref, a second numbering) because the ref space is shared with
+ * `selections[].ref` and re-encoding it here would give one number two readings.
+ */
+function effectToPositional(effect: ShareEffect): unknown[] {
+  return [
+    effect.kind,
+    effect.label,
+    ...SHARE_EFFECT_TEXT.map((field) => effect[field] ?? null),
+    ...SHARE_EFFECT_NUMBERS.map((field) => effect[field] ?? null),
+    effect.sourceRef ?? null,
+    effect.sourceSubclass ?? null,
+  ];
+}
+
+function effectFromPositional(value: unknown, label: string): unknown {
+  const row = tuple(value, EFFECT_TUPLE_LENGTH, label);
+  const effect: Record<string, unknown> = { kind: row[0], label: row[1] };
+  const fields = [
+    ...SHARE_EFFECT_TEXT,
+    ...SHARE_EFFECT_NUMBERS,
+    'sourceRef',
+    'sourceSubclass',
+  ] as const;
+  fields.forEach((field, index) => {
+    const item = row[index + 2];
+    if (item !== null) {
+      effect[field] = item;
+    }
+  });
+  return effect;
 }
 
 function backgroundToPositional(background: ShareBackground): unknown[] {
@@ -363,6 +427,9 @@ export function shareDocumentToPositional(
         ? null
         : sheetAdjustmentToPositional(document.sheetAdjustment),
     ],
+    // Element 14, the character's own EFFECTS. Always written, `null` when the
+    // character has none, so this build's output has one shape rather than two.
+    document.effects?.map(effectToPositional) ?? null,
   ];
 }
 
@@ -393,6 +460,19 @@ export function positionalToShareDocument(
     root.length === PRE_SHEET_ROOT_LENGTH
       ? null
       : tuple(root[13], SHEET_TUPLE_LENGTH, 'wire sheet');
+  // Eleven through fourteen elements all predate the effect model. `null`
+  // rather than an empty list, so the section stays genuinely ABSENT and the
+  // object validator can tell "carried none" from "never carried any" — the
+  // difference between importing a character with no effects and importing a
+  // link whose effects are still written on its trait rows, which is exactly
+  // what `splitLegacyTraitEffect` then migrates.
+  const wireEffects =
+    root.length === LEGACY_ROOT_LENGTH ||
+    root.length === PRE_ORIGIN_ROOT_LENGTH ||
+    root.length === PRE_SHEET_ROOT_LENGTH ||
+    root.length === PRE_EFFECTS_ROOT_LENGTH
+      ? null
+      : root[14];
   if (root[0] !== CHARACTER_SHARE_FORMAT) {
     throw new ShareValidationError('format is unsupported.');
   }
@@ -447,6 +527,12 @@ export function positionalToShareDocument(
   }
   if (wireWeapons !== null) {
     assertListLimit(wireWeapons, SHARE_LIMITS.weapons, 'weapons');
+  }
+  if (wireEffects !== null) {
+    if (!Array.isArray(wireEffects)) {
+      throw new ShareValidationError('wire effects must be null or a list.');
+    }
+    assertListLimit(wireEffects, SHARE_LIMITS.effects, 'effects');
   }
   if (wireSheet !== null) {
     const lists = [
@@ -666,6 +752,11 @@ export function positionalToShareDocument(
         'wire sheetAdjustment',
       );
     }
+  }
+  if (Array.isArray(wireEffects)) {
+    raw.effects = wireEffects.map((value, index) =>
+      effectFromPositional(value, `wire effects[${index}]`),
+    );
   }
   return validateShareDocument(raw);
 }

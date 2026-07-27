@@ -11,6 +11,7 @@ import { COLUMN_FACTS } from '../domain/contracts/generated/column-facts';
 import { rowContractError } from '../domain/contracts/rows';
 import {
   armorDexBonusPairError,
+  effectPayloadKindError,
   slotExclusiveAssignmentError,
   uniqueRowIdError,
   weaponMasterySelectionError,
@@ -28,6 +29,7 @@ import {
 } from '../character/character-state';
 import { FOREIGN_KEY_FACTS } from '../domain/contracts/generated/reference-facts';
 import { domainSourceTypes } from '../domain/enums';
+import { splitLegacyTraitEffect } from '../rules/legacy-trait-effects';
 
 /**
  * THE SEMANTIC AUDIT OF A QUARANTINED CANDIDATE DATABASE.
@@ -647,9 +649,43 @@ function auditSavePointSnapshots(db: Database): void {
       }
       for (const [index, row] of rows.entries()) {
         const rowLabel = `${label}.${table}[${index}]`;
-        const error = rowContractError(table, row, rowLabel);
+        // A save point written before the effect model was inverted carries the
+        // five retired `effect_*` keys on every trait row, and the row contract
+        // is `z.strictObject`. Auditing the STRIPPED row is the same call
+        // `validateCharacterRows` makes for a backup document, and for the same
+        // reason: the image is a user's own database and refusing it over a key
+        // this build simply stopped using would take the app away rather than
+        // protect it. `CharacterState.restore` migrates the payload.
+        const legacy =
+          table === 'character_species_traits'
+            ? splitLegacyTraitEffect(row as Record<string, unknown>)
+            : null;
+        const error = rowContractError(
+          table,
+          legacy === null ? row : legacy.row,
+          rowLabel,
+        );
         if (error !== null) {
           throw new CandidateAuditError(error);
+        }
+        if (legacy?.effect != null) {
+          // The migrated payload, held to the rules of the table
+          // `CharacterState.restore` is about to insert it into — the same
+          // check `validateCharacterRows` makes for a backup document, for the
+          // reason this file already gives for weapons and armour.
+          const payload = effectPayloadKindError(legacy.effect, rowLabel);
+          if (payload !== null) {
+            throw new CandidateAuditError(payload);
+          }
+        }
+        if (table === 'character_effects') {
+          const payload = effectPayloadKindError(
+            row as Record<string, unknown>,
+            rowLabel,
+          );
+          if (payload !== null) {
+            throw new CandidateAuditError(payload);
+          }
         }
         const rowOwner = (row as Record<string, unknown>).character_id;
         if (rowOwner !== owner) {

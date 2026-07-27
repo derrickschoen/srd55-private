@@ -1,9 +1,37 @@
 # ANSWERED 2026-07-26 — see D22. The model is INVERTED, not extended.
+# BUILT on branch `feat/effects`. The question below is kept for its evidence.
 
 The owner's answer: effects belong to the CHARACTER and the trait is
 provenance. A trait granting two effects stops being a special case, and
 `character_source_instances` already answers 'where did it come from'.
-The question below is kept for the evidence it gathered.
+
+WHAT SHIPPED, AND WHERE IT DIVERGED FROM THE "RECOMMENDED IF YES" BELOW:
+
+ - `species_template_trait_effects` is a child of the TRAIT, as recommended.
+   The character side is NOT `character_species_trait_effects`: it is
+   `character_effects`, keyed on `character_id` with a nullable composite
+   reference to `character_source_instances`. Keying it on the trait would
+   have kept every effect species-scoped, which is the coupling D22 removes.
+ - `granted_spells` was DELETED from the vocabulary rather than carried over.
+   It was a marker with no payload and no production consumer; the spells come
+   from `species_definitions.grant_rules` through `src/grants/`, and
+   `SpellAccessBuilder` already reports them with provenance. Removing it is
+   what DISSOLVES this question's worked example: Fiendish Legacy stops being a
+   two-effect trait and becomes a plain untyped `damage_resistance`.
+   `src/rules/legacy-trait-effects.ts` keeps the retired member readable in
+   every artifact already in the wild and drops it on the way in.
+ - THE SHARE WIRE FORMAT WAS NOT A BLOCKER, which this question assumed it
+   would be. The root tuple has grown 11 -> 12 -> 13 -> 14 with the version
+   pinned at 1; effects are a fifteenth root element on the same terms, and
+   `tests/unit/sharing/codec.test.ts` freezes a hand-built fourteen-element
+   link proving the old shape still decodes and still imports its payload.
+ - The `KNOWN GAP` test is REWRITTEN, not renamed: it now asserts the Tiefling's
+   resistance IS recorded, and it was proved able to fail by deleting the
+   effect declaration and the derivation branch in turn.
+
+The "Related, and separate" note at the foot still stands untouched: no
+`species_definitions` row is seeded, `active_from_class_level` cannot follow a
+character's level for a non-class source, and neither was in scope here.
 
 ---
 

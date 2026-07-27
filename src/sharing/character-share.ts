@@ -3,6 +3,7 @@ import { normalizeCatalogName } from '../catalog/catalog-normalize';
 import { assertSourceRepeatable } from '../commands/add-source';
 import type { DatabaseContext } from '../db/database';
 import type { AddableSourceType } from '../domain/enums';
+import { splitLegacyTraitEffect } from '../rules/legacy-trait-effects';
 import {
   SHARE_TABLES,
   SOURCE_DEFINITION_TABLE,
@@ -17,6 +18,8 @@ import {
   SHARE_ARMOR_FLAGS,
   SHARE_ARMOR_NUMBERS,
   SHARE_BACKGROUND_TEXT,
+  SHARE_EFFECT_NUMBERS,
+  SHARE_EFFECT_TEXT,
   SHARE_SPECIES_TEXT,
   SHARE_SPECIES_TRAIT_NUMBERS,
   SHARE_SPECIES_TRAIT_TEXT,
@@ -30,6 +33,7 @@ import {
   type ShareHitPointRoll,
   type ShareSheetAdjustment,
   type ShareSource,
+  type ShareEffect,
   type ShareSpecies,
   type ShareSpeciesTrait,
   type ShareWeapon,
@@ -317,6 +321,17 @@ function shareSpeciesFromRow(row: Row): ShareSpecies {
   return species as unknown as ShareSpecies;
 }
 
+/**
+ * A trait row on its way out.
+ *
+ * The loops over `SHARE_SPECIES_TRAIT_TEXT` and `SHARE_SPECIES_TRAIT_NUMBERS`
+ * stay, and they now find nothing beyond `description` and `notes`: those lists
+ * still name the five retired `effect_*` fields because the WIRE ORDER is
+ * frozen, and the row no longer has the columns. So every link this build
+ * writes carries `null` in those slots — which keeps the trait tuple the same
+ * length, and therefore keeps element 13 meaning what it has always meant for
+ * links already in the wild. The effects travel in element 14 instead.
+ */
 function shareSpeciesTraitFromRow(row: Row): ShareSpeciesTrait {
   const trait: Record<string, unknown> = { name: String(row.name) };
   textFields(row, SHARE_SPECIES_TRAIT_TEXT, trait);
@@ -328,6 +343,64 @@ function shareSpeciesTraitFromRow(row: Row): ShareSpeciesTrait {
   return trait as unknown as ShareSpeciesTrait;
 }
 
+/**
+ * What one document reference means on the export side: which entry it is, and
+ * WHICH OF THE ROOTS THAT ENTRY MINTS it names.
+ *
+ * A `classes[]` entry with a subclass mints two source instances and carries one
+ * id. `selections[].ref` searches the descendants of both and does not need the
+ * distinction; an effect names one row and does.
+ */
+interface ShareSourceOwner {
+  readonly ref: number;
+  readonly subclass: boolean;
+}
+
+/**
+ * An effect row on its way out.
+ *
+ * `sourceRef` is the document reference of the source instance that granted it,
+ * resolved through the same reference space `selections[].ref` uses — so an
+ * effect and the spells from one feat name the same source — and
+ * `sourceSubclass` says which of the two roots a class reference mints. Without
+ * that flag a subclass feature arrives attached to the CLASS, which is a real
+ * row and the wrong one: silently wrong provenance is worse than none.
+ *
+ * A source instance no reference can reach yields no ref rather than a dangling
+ * one: the effect still travels, it simply arrives without its provenance,
+ * which is the state every bundled-species effect is in anyway. Exactly one
+ * shape is unreachable — a REMOVED root (`state != 'active'` with no active
+ * ancestor), because a share document carries the build as it stands and a
+ * removed feat is not in it to be named. A removed source under a live root
+ * keeps its provenance, coarsened to that root the same way an active
+ * non-root's is.
+ */
+function shareEffectFromRow(
+  row: Row,
+  owners: ReadonlyMap<number, ShareSourceOwner>,
+): ShareEffect {
+  const effect: Record<string, unknown> = {
+    kind: String(row.effect_kind),
+    label: String(row.label),
+  };
+  textFields(row, SHARE_EFFECT_TEXT, effect);
+  for (const field of SHARE_EFFECT_NUMBERS) {
+    if (row[field] !== null && row[field] !== undefined) {
+      effect[field] = Number(row[field]);
+    }
+  }
+  if (row.source_instance_id !== null && row.source_instance_id !== undefined) {
+    const owner = owners.get(Number(row.source_instance_id));
+    if (owner !== undefined) {
+      effect.sourceRef = owner.ref;
+      if (owner.subclass) {
+        effect.sourceSubclass = true;
+      }
+    }
+  }
+  return effect as unknown as ShareEffect;
+}
+
 function shareBackgroundFromRow(row: Row): ShareBackground {
   const background: Record<string, unknown> = { name: String(row.name) };
   textFields(row, SHARE_BACKGROUND_TEXT, background);
@@ -336,8 +409,8 @@ function shareBackgroundFromRow(row: Row): ShareBackground {
 
 function sourceOwners(
   rows: readonly Row[],
-  directOwners: ReadonlyMap<number, number>,
-): Map<number, number> {
+  directOwners: ReadonlyMap<number, ShareSourceOwner>,
+): Map<number, ShareSourceOwner> {
   const owners = new Map(directOwners);
   let changed = true;
   while (changed) {
@@ -350,7 +423,10 @@ function sourceOwners(
         Number.isSafeInteger(parent) &&
         owners.has(parent)
       ) {
-        owners.set(id, owners.get(parent) as number);
+        // The whole owner, not just the ref: a feat granted BY a subclass is
+        // still the subclass's, and flattening that here would put the effect
+        // back on the class.
+        owners.set(id, owners.get(parent) as ShareSourceOwner);
         changed = true;
       }
     }
@@ -422,10 +498,13 @@ export function exportCharacterShare(
   );
 
   let nextId = 0;
-  const directOwners = new Map<number, number>();
+  const directOwners = new Map<number, ShareSourceOwner>();
   const classes = classLevels.map((row): ShareClass => {
     const id = nextId++;
-    directOwners.set(Number(row.source_instance_id), id);
+    directOwners.set(Number(row.source_instance_id), {
+      ref: id,
+      subclass: false,
+    });
     const subclassSource =
       row.subclass_definition_id === null
         ? undefined
@@ -436,7 +515,10 @@ export function exportCharacterShare(
                 Number(row.subclass_definition_id),
           );
     if (subclassSource !== undefined) {
-      directOwners.set(Number(subclassSource.id), id);
+      // The SAME ref as the class — a subclass has no `classes[]` entry of its
+      // own — but marked, so an effect hanging from it can say which root it
+      // meant. `selections[].ref` reads `.ref` alone and is unaffected.
+      directOwners.set(Number(subclassSource.id), { ref: id, subclass: true });
     }
     const config = userConfig(db, row.source_config);
     const subclassConfig =
@@ -480,7 +562,7 @@ export function exportCharacterShare(
   );
   const sources = explicitSourceRows.map((row): ShareSource => {
     const id = nextId++;
-    directOwners.set(Number(row.id), id);
+    directOwners.set(Number(row.id), { ref: id, subclass: false });
     const type = String(row.source_type) as ShareSource['type'];
     const config = userConfig(db, row.config);
     return {
@@ -501,6 +583,28 @@ export function exportCharacterShare(
     };
   });
   const owners = sourceOwners(allSources, directOwners);
+  // A SECOND MAP, FOR EFFECTS ONLY, AND THE DIFFERENCE IS DELIBERATE.
+  //
+  // `owners` walks the ACTIVE tree, because that is the tree
+  // `selections[].ref` has always resolved against and widening it would start
+  // exporting selections whose slot hangs from a removed source — a behaviour
+  // change to spells, made silently, in a change about effects.
+  //
+  // An effect is different: it is a row the character still has, whatever
+  // happened to the thing that granted it. A `tombstoned` source under a live
+  // root (the grant generator makes these — see `grant-rule-slot-generator.ts`)
+  // still has an ancestor the document carries, so its ref exists and the
+  // provenance survives at the same root-level coarsening every non-root source
+  // gets. Only the columns `sourceOwners` reads are selected.
+  const effectOwners = sourceOwners(
+    db.all<Row>(
+      `SELECT id, parent_source_instance_id
+       FROM ${SHARE_TABLES.character_source_instances}
+       WHERE character_id = ?`,
+      [characterId],
+    ),
+    directOwners,
+  );
   const versions = spellRows(db, characterId);
 
   const selections = db
@@ -512,7 +616,7 @@ export function exportCharacterShare(
       [characterId],
     )
     .flatMap((row) => {
-      const ref = owners.get(Number(row.source_instance_id));
+      const ref = owners.get(Number(row.source_instance_id))?.ref;
       if (ref === undefined) {
         return [];
       }
@@ -626,6 +730,14 @@ export function exportCharacterShare(
      WHERE character_id = ? ORDER BY sort_order, id`,
     [characterId],
   ).map(shareSpeciesTraitFromRow);
+  const effects = db
+    .all<Row>(
+      `SELECT * FROM ${SHARE_TABLES.character_effects}
+       WHERE character_id = ?
+       ORDER BY sort_order, id`,
+      [characterId],
+    )
+    .map((row) => shareEffectFromRow(row, effectOwners));
   const backgroundRow = db.one<Row>(
     `SELECT * FROM ${SHARE_TABLES.character_background} WHERE character_id = ?`,
     [characterId],
@@ -756,6 +868,10 @@ export function exportCharacterShare(
     ...(hitPointRolls === undefined ? {} : { hitPointRolls }),
     ...(skillProficiencies === undefined ? {} : { skillProficiencies }),
     ...(sheetAdjustment === undefined ? {} : { sheetAdjustment }),
+    // Omitted when empty, on the same terms as every section above: a character
+    // with no effects produces a link exactly the shape it was before the
+    // effect model existed.
+    ...(effects.length === 0 ? {} : { effects }),
   };
   return validateShareDocument(document);
 }
@@ -1360,21 +1476,123 @@ export function importCharacterShare(
     // printed order the template seeds. A document cannot supply it, so it
     // cannot supply a duplicate, a gap or a zero.
     for (const [index, trait] of (document.speciesTraits ?? []).entries()) {
+      // The wire lists are NOT used to build this statement any more: they name
+      // the retired `effect_*` fields, and the table no longer has those
+      // columns. The two surviving text fields are written by name, and the
+      // payload — if this link carries one — became a `character_effects` row
+      // below.
       db.exec(
         `INSERT INTO ${SHARE_TABLES.character_species_traits} (
-           character_id, sort_order, name,
-           ${SHARE_SPECIES_TRAIT_TEXT.join(', ')},
-           ${SHARE_SPECIES_TRAIT_NUMBERS.join(', ')},
+           character_id, sort_order, name, description, notes,
            created_at, updated_at
-         ) VALUES (?, ?, ?,
-           ${SHARE_SPECIES_TRAIT_TEXT.map(() => '?').join(', ')},
-           ${SHARE_SPECIES_TRAIT_NUMBERS.map(() => '?').join(', ')}, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
         [
           characterId,
           index + 1,
           trait.name,
-          ...SHARE_SPECIES_TRAIT_TEXT.map((field) => trait[field] ?? null),
-          ...SHARE_SPECIES_TRAIT_NUMBERS.map((field) => trait[field] ?? null),
+          trait.description ?? null,
+          trait.notes ?? null,
+          now,
+          now,
+        ],
+      );
+    }
+    // THE CHARACTER'S OWN EFFECTS, FROM TWO SOURCES THAT CANNOT BOTH FIRE.
+    //
+    // A link written by this build carries `document.effects` and its trait
+    // tuples carry `null` in the five retired slots. A link written before the
+    // inversion carries NO `effects` key and its trait tuples carry the real
+    // payload. `splitLegacyTraitEffect` returns nothing for the first case and
+    // the effect for the second, so the two paths append to one list and the
+    // ordering is deterministic either way: explicit effects first, in document
+    // order, then migrated ones in trait order.
+    //
+    // `sort_order` is the position in that list, one-based, exactly as a
+    // trait's is — a document cannot supply it, so it cannot supply a
+    // duplicate, a gap or a zero.
+    const importedEffects: {
+      kind: string;
+      label: string;
+      damage_type: string | null;
+      hit_points_flat: number | null;
+      hit_points_per_level: number | null;
+      speed_bonus_feet: number | null;
+      notes: string | null;
+      sourceId: number | null;
+    }[] = [];
+    for (const effect of document.effects ?? []) {
+      // `rootsByRef` is the same map `selections[].ref` resolves through. A
+      // class ref mints TWO roots when it names a subclass — `[class,
+      // subclass]`, in that order, set together a few dozen lines above — and
+      // `sourceSubclass` is how the document says which of the two it meant.
+      // Taking `roots[0]` unconditionally would attach a subclass feature to
+      // the class: a real row, and the wrong one.
+      //
+      // The flag cannot arrive without a ref, and cannot name a ref that mints
+      // one root; `shareEffect` in `./schema.ts` refuses both, so `roots[1]`
+      // here is present by validation rather than by hope.
+      const roots =
+        effect.sourceRef === undefined
+          ? undefined
+          : rootsByRef.get(effect.sourceRef);
+      if (effect.sourceRef !== undefined && roots === undefined) {
+        throw new ShareValidationError(
+          `effect sourceRef ${effect.sourceRef} is unavailable.`,
+        );
+      }
+      const rootIndex = effect.sourceSubclass === true ? 1 : 0;
+      if (roots !== undefined && roots[rootIndex] === undefined) {
+        throw new ShareValidationError(
+          `effect sourceRef ${String(effect.sourceRef)} names no subclass.`,
+        );
+      }
+      importedEffects.push({
+        kind: effect.kind,
+        label: effect.label,
+        damage_type: effect.damage_type ?? null,
+        hit_points_flat: effect.hit_points_flat ?? null,
+        hit_points_per_level: effect.hit_points_per_level ?? null,
+        speed_bonus_feet: effect.speed_bonus_feet ?? null,
+        notes: effect.notes ?? null,
+        sourceId: roots?.[rootIndex] ?? null,
+      });
+    }
+    for (const trait of document.speciesTraits ?? []) {
+      const migrated = splitLegacyTraitEffect({ ...trait }).effect;
+      if (migrated === null) {
+        continue;
+      }
+      importedEffects.push({
+        kind: migrated.effect_kind,
+        label: migrated.label,
+        damage_type: migrated.damage_type,
+        hit_points_flat: migrated.hit_points_flat,
+        hit_points_per_level: migrated.hit_points_per_level,
+        speed_bonus_feet: migrated.speed_bonus_feet,
+        notes: null,
+        // A legacy link predates the provenance column entirely, so there is
+        // nothing to resolve and nothing is invented.
+        sourceId: null,
+      });
+    }
+    for (const [index, effect] of importedEffects.entries()) {
+      db.exec(
+        `INSERT INTO ${SHARE_TABLES.character_effects} (
+           character_id, sort_order, effect_kind, damage_type,
+           hit_points_flat, hit_points_per_level, speed_bonus_feet,
+           source_instance_id, label, notes, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          characterId,
+          index + 1,
+          effect.kind,
+          effect.damage_type,
+          effect.hit_points_flat,
+          effect.hit_points_per_level,
+          effect.speed_bonus_feet,
+          effect.sourceId,
+          effect.label,
+          effect.notes,
           now,
           now,
         ],

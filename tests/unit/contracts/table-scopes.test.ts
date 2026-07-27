@@ -59,6 +59,10 @@ const SNAPSHOT_ADDITIONS = [
   'character_hit_point_rolls',
   'character_skill_proficiencies',
   'character_sheet_adjustments',
+  // The character's own effects. ONE table and not two: the catalog half
+  // (`species_template_trait_effects`) is not character-owned and joins no
+  // portable scope at all, which is the split this change exists to make.
+  'character_effects',
 ] as const;
 const BACKUP_DIRECT_ADDITIONS = [
   'character_weapons',
@@ -69,6 +73,7 @@ const BACKUP_DIRECT_ADDITIONS = [
   'character_hit_point_rolls',
   'character_skill_proficiencies',
   'character_sheet_adjustments',
+  'character_effects',
 ] as const;
 describe('derived table scopes reproduce the hand-maintained lists', () => {
   it('reproduces applicationTables exactly (database-lifecycle.ts)', () => {
@@ -82,6 +87,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       'character_armor',
       'character_background',
       'character_class_levels',
+      'character_effects',
       'character_hit_point_rolls',
       'character_operations',
       'character_rule_overrides',
@@ -108,6 +114,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       'feat_definitions',
       'named_features',
       'species_definitions',
+      'species_template_trait_effects',
       'species_template_traits',
       'species_templates',
       'spell_identities',
@@ -161,6 +168,11 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       'character_hit_point_rolls',
       'character_skill_proficiencies',
       'character_sheet_adjustments',
+      // A leaf as well, but it is the FIRST character-owned table to reference
+      // another one — `character_source_instances`, through a composite key —
+      // so it must delete before that table rather than merely before the
+      // parents. Sitting here with the other leaves is what achieves that.
+      'character_effects',
       'character_species_traits',
       'character_species',
       'character_background',
@@ -226,6 +238,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       'character_hit_point_rolls',
       'character_skill_proficiencies',
       'character_sheet_adjustments',
+      'character_effects',
     ]);
     for (const table of BACKUP_OPTIONAL_TABLES) {
       expect([...BACKUP_TABLES]).toContain(table);
@@ -270,16 +283,17 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
 });
 
 describe('table scope classification', () => {
-  it('classifies all 54 tables exactly once', () => {
+  it('classifies all 56 tables exactly once', () => {
     const names = Object.keys(TABLE_SCOPES);
     // 30 Laravel-derived tables — 38 until the eight Laravel-only
     // infrastructure ones were dropped — plus the four native weapon tables,
     // the eight of the sheet core, the six origins tables, the two D19
-    // class-feature tables, and the four stored sheet inputs. Each group is
+    // class-feature tables, the four stored sheet inputs, and the two effect
+    // tables — one per side of the catalog/character split. Each group is
     // named rather than folded into one total, so a group that vanishes while
     // another grows cannot pass unnoticed.
-    expect(names).toHaveLength(54);
-    expect(new Set(names).size).toBe(54);
+    expect(names).toHaveLength(56);
+    expect(new Set(names).size).toBe(56);
     expect([...names].sort()).toEqual([...APPLICATION_TABLES].sort());
   });
 

@@ -133,7 +133,7 @@ afterAll(() => {
 });
 
 describe('declared relations match the foreign keys', () => {
-  it('budgets 53 constraints across 55 PRAGMA rows', () => {
+  it('budgets 56 constraints across 59 PRAGMA rows', () => {
     const tables = db
       .selectValues(
         `SELECT name FROM sqlite_schema
@@ -178,8 +178,19 @@ describe('declared relations match the foreign keys', () => {
     // `character_class_levels`, deliberately, so that deleting a class cannot
     // cascade away a die the player physically rolled. An edge appearing there
     // is what the reverse direction of the next test would catch.
-    expect(constraintEdges(db)).toHaveLength(53);
-    expect(rowCount).toBe(55);
+    //
+    // The effect model adds THREE more rows across TWO constraints, and that
+    // asymmetry is the assertion worth making: `species_template_trait_effects`
+    // adds one plain edge into `species_template_traits`, and
+    // `character_effects` adds two — `character_id` into `characters`, plus the
+    // COMPOSITE `(source_instance_id, character_id)` into
+    // `character_source_instances`, which is two PRAGMA rows for one
+    // constraint. It is the third composite key in the schema and the reason
+    // `character_source_instances` carries its `(id, character_id)` unique
+    // index; without it an effect could be attached to another character's
+    // source instance and still pass `PRAGMA foreign_key_check`.
+    expect(constraintEdges(db)).toHaveLength(56);
+    expect(rowCount).toBe(59);
   });
 
   it('declares a relation for every foreign key, and a foreign key for every relation', () => {
@@ -188,13 +199,20 @@ describe('declared relations match the foreign keys', () => {
     expect(declaredEdges()).toEqual(constraintEdges(db));
   });
 
-  it('keeps both composite foreign keys composite', () => {
+  it('keeps all three composite foreign keys composite', () => {
     const edges = declaredEdges();
     expect(edges).toContain(
       'character_class_levels: subclass_definition_id,class_definition_id -> subclass_definitions.id,class_definition_id',
     );
     expect(edges).toContain(
       'spell_selection_slots: source_instance_id,character_id -> character_source_instances.id,character_id',
+    );
+    // The third, and the one that matters most here: a relation declared on
+    // `source_instance_id` alone would describe a constraint the database does
+    // not have, and would let a reader believe an effect cannot cross
+    // characters when only the composite key stops it.
+    expect(edges).toContain(
+      'character_effects: source_instance_id,character_id -> character_source_instances.id,character_id',
     );
   });
 

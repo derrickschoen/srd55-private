@@ -81,6 +81,10 @@ const nativeAutoIncrementTables = [
   'character_species_traits',
   'species_template_traits',
   'species_templates',
+  // ...and the two the effect model adds, one per side of the split: what a
+  // template GRANTS and what a character HAS.
+  'character_effects',
+  'species_template_trait_effects',
   // Sheet core (D11/D12): seven class-content tables plus the armour catalog.
   // Every one carries a surrogate autoincrementing key, so the claim below —
   // that `naturalKeyTables` is empty — still holds after they arrive.
@@ -153,7 +157,7 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
       return db;
     }
 
-    it('declares AUTOINCREMENT on exactly the 30 Laravel and 24 native surrogate-key tables', () => {
+    it('declares AUTOINCREMENT on exactly the 30 Laravel and 26 native surrogate-key tables', () => {
       const db = openDb();
       const declared = db
         .selectValues(
@@ -167,12 +171,13 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
         .map(String);
 
       expect(declared).toEqual(allAutoIncrementTables);
-      // 30 surviving Laravel tables plus 24 native: 4 weapons, 8 sheet core,
-      // 6 origins, 2 class features, 4 stored sheet inputs. Counted in parts so
-      // one group shrinking while another grows cannot pass unnoticed.
-      expect(declared).toHaveLength(54);
+      // 30 surviving Laravel tables plus 26 native: 4 weapons, 8 sheet core,
+      // 6 origins, 2 effects, 2 class features, 4 stored sheet inputs. Counted
+      // in parts so one group shrinking while another grows cannot pass
+      // unnoticed.
+      expect(declared).toHaveLength(56);
       expect(autoIncrementTables).toHaveLength(30);
-      expect(nativeAutoIncrementTables).toHaveLength(24);
+      expect(nativeAutoIncrementTables).toHaveLength(26);
 
       const withoutAutoIncrement = db
         .selectValues(

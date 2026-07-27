@@ -22,7 +22,7 @@ import {
   slotBuckets,
   skills,
   slotStates,
-  speciesTraitEffectKinds,
+  effectKinds,
   srdWeaponGroups,
   weaponMasteryGrants,
   weaponMasteryProperties,
@@ -162,18 +162,17 @@ const weaponMasteryPropertyEnum = z.enum(weaponMasteryProperties);
 const weaponMasteryGrantEnum = z.enum(weaponMasteryGrants);
 const srdWeaponGroupEnum = z.enum(srdWeaponGroups);
 /**
- * The closed set of mechanical effects a species trait may carry.
+ * The closed set of mechanical effects a character or a template can carry.
  *
- * An enum and not `sqlText`, unlike `creature_type` / `size` /
- * `effect_damage_type` beside it — the difference is not tidiness. Those three
- * are OPEN vocabularies by decision (see `db/schema/origins.ts`), so a
- * contract narrowing them would reject rows the schema permits. `effect_kind`
- * is closed in the schema too, by
- * `species_template_traits_effect_kind_check`, and a value outside it reads as
- * "no effect" to `src/rules/species-effects.ts` — a trait whose mechanics
+ * An enum and not `sqlText`, unlike `creature_type` / `size` / `damage_type`
+ * beside it — the difference is not tidiness. Those three are OPEN vocabularies
+ * by decision (see `db/schema/origins.ts`), so a contract narrowing them would
+ * reject rows the schema permits. `effect_kind` is closed in the schema too, by
+ * `character_effects_kind_check` and its catalog twin, and a value outside it
+ * reads as "no effect" to `src/rules/species-effects.ts` — mechanics that
  * vanish with no error anywhere.
  */
-const speciesTraitEffectKindEnum = z.enum(speciesTraitEffectKinds);
+const effectKindEnum = z.enum(effectKinds);
 const armorSlotEnum = z.enum(armorSlots);
 const armorCategoryEnum = z.enum(armorCategories);
 const armorDexBonusEnum = z.enum(armorDexBonuses);
@@ -213,7 +212,7 @@ export const COLUMN_REFINEMENTS = {
   weaponMasteryPropertyEnum,
   weaponMasteryGrantEnum,
   srdWeaponGroupEnum,
-  speciesTraitEffectKindEnum,
+  effectKindEnum,
   armorSlotEnum,
   armorCategoryEnum,
   armorDexBonusEnum,
@@ -327,6 +326,7 @@ type NativeContractTable =
   // `backup: true` and arrive through `BackupTable` already.
   | 'species_templates'
   | 'species_template_traits'
+  | 'species_template_trait_effects'
   | 'background_templates';
 
 type Facts = typeof COLUMN_FACTS;
@@ -652,10 +652,25 @@ const REFINEMENTS = {
   // Non-empty: every printed trait has text, and an empty description here is a
   // two-column mis-join rather than a trait.
   'species_template_traits.description': nonEmptyText,
-  'species_template_traits.effect_kind': speciesTraitEffectKindEnum,
-  'species_template_traits.effect_damage_type': sqlText,
   'species_template_traits.created_at': sqlTimestamp,
   'species_template_traits.updated_at': sqlTimestamp,
+
+  // --- species_template_trait_effects --------------------------------------
+  // Contracted for the reason `species_template_traits` is: the rows are
+  // PARSED out of the SRD extract, and a parser is exactly the writer that can
+  // produce a plausible-looking wrong row. `damage_type` stays `sqlText` — it
+  // is an OPEN vocabulary in the schema and narrowing it here would reject
+  // rows the column permits (D6b over-tightening).
+  'species_template_trait_effects.id': positiveInt,
+  'species_template_trait_effects.species_template_trait_id': positiveInt,
+  'species_template_trait_effects.sort_order': positiveInt,
+  'species_template_trait_effects.effect_kind': effectKindEnum,
+  'species_template_trait_effects.damage_type': sqlText,
+  // `sqlInteger` by omission would accept 1.5; these are explicitly the signed
+  // integers the schema allows, and NOT `positiveInt` — Dwarven Toughness is
+  // seeded `hit_points_flat = 0`, and a user's own trait may carry a penalty.
+  'species_template_trait_effects.created_at': sqlTimestamp,
+  'species_template_trait_effects.updated_at': sqlTimestamp,
 
   // --- background_templates ------------------------------------------------
   'background_templates.id': positiveInt,
@@ -702,8 +717,6 @@ const REFINEMENTS = {
   // trait before writing what it does, and the column is nullable for exactly
   // that reason (D6b limb 3).
   'character_species_traits.description': sqlText,
-  'character_species_traits.effect_kind': speciesTraitEffectKindEnum,
-  'character_species_traits.effect_damage_type': sqlText,
   'character_species_traits.notes': sqlText,
   'character_species_traits.created_at': sqlTimestamp,
   'character_species_traits.updated_at': sqlTimestamp,
@@ -724,6 +737,26 @@ const REFINEMENTS = {
   'character_background.notes': sqlText,
   'character_background.created_at': sqlTimestamp,
   'character_background.updated_at': sqlTimestamp,
+
+  // --- character_effects ---------------------------------------------------
+  'character_effects.id': positiveInt,
+  'character_effects.character_id': positiveInt,
+  'character_effects.sort_order': positiveInt,
+  'character_effects.effect_kind': effectKindEnum,
+  // Open vocabulary in the schema, so open here — the same call
+  // `spell_version_damage_types.damage_type` makes.
+  'character_effects.damage_type': sqlText,
+  // The three payload columns are deliberately absent: `sqlInteger` is what
+  // `columnSchema` falls back to for an integer column, and a signed integer is
+  // exactly what the schema permits. `positiveInt` would reject Dwarven
+  // Toughness's seeded `hit_points_flat = 0` and every user-written penalty.
+  'character_effects.source_instance_id': positiveInt,
+  // Non-empty: an effect nobody can name is an effect nobody can find to edit
+  // or delete, and `''` is a null in costume.
+  'character_effects.label': nonEmptyText,
+  'character_effects.notes': sqlText,
+  'character_effects.created_at': sqlTimestamp,
+  'character_effects.updated_at': sqlTimestamp,
 } as const satisfies Record<RequiredRefinementKey, z.ZodType> &
   Partial<Record<OptionalRefinementKey, z.ZodType>>;
 

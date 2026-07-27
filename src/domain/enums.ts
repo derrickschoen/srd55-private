@@ -238,47 +238,54 @@ export const freeCastPoolScopes = ['per_spell', 'shared'] as const;
 export type FreeCastPoolScope = (typeof freeCastPoolScopes)[number];
 
 /**
- * THE CLOSED SET OF MECHANICAL EFFECTS A SPECIES TRAIT MAY CARRY.
+ * THE CLOSED SET OF MECHANICAL EFFECTS A CHARACTER CAN CARRY.
  *
- * A species trait is FREE TEXT first. Twenty-six of the thirty-three traits
- * the SRD prints carry no mechanical effect at all and never will: the Elf's
- * four-hour Trance, all four Halfling traits, every Darkvision range. Those
- * rows have `effect_kind IS NULL`, and that is the DEFAULT rather than a gap.
+ * NOT `speciesTraitEffectKinds`, AND THE RENAME IS THE POINT. The old name
+ * encoded the defect this model was inverted to remove: an effect used to be a
+ * group of five columns ON A SPECIES TRAIT ROW, so the vocabulary was named
+ * after the only thing that could hold one. Effects now live in
+ * `character_effects`, keyed on the CHARACTER and carrying a reference to
+ * whatever granted them — a species trait today, a feat, a subclass or a
+ * background tomorrow (`character_source_instances.source_type` already names
+ * all five). Nothing about `damage_resistance` was ever specific to a species.
  *
- * The seven that do carry one draw from these four members and nothing else.
- * Adding a MEMBER is a deliberate code change — a new value here widens the
- * `species_template_traits_effect_kind_check` CHECK at the next
- * `npm run db:schema`, forces a new branch in `src/rules/species-effects.ts`
- * (whose switch is exhaustive), and needs a payload column. Adding a TRAIT, by
- * contrast, is data: a line in `docs/srd/source/species-descriptions.txt` and
- * nothing else.
+ * THREE MEMBERS, AND `granted_spells` IS GONE. It was a marker with no payload
+ * whose only output, `grantedSpellTraits`, had ZERO production consumers: the
+ * spells themselves are minted from `species_definitions.grant_rules` by
+ * `src/grants/` and surfaced with their provenance by
+ * `src/access/spell-access-builder.ts`, which already answers "what cantrips,
+ * and from where" through `SpellAccessRoute.casting_mode === 'at_will'`.
+ * Keeping a second, parallel record of the same fact is the duplication
+ * `src/rules/origins.ts` refuses in its own words ("Reuse before inventing"),
+ * and deleting it is what DISSOLVES the Tiefling case rather than patching it:
+ * Fiendish Legacy stops being a two-effect trait the moment the spell half is
+ * not an effect, and becomes a plain `damage_resistance` with a null type —
+ * structurally identical to the Dragonborn's, which is exactly the asymmetry
+ * the pinned acceptance test complained about.
  *
- * WHY EXACTLY THESE FOUR — three are borne out by the extract, one is not:
+ * The retirement is NOT a wire-format narrowing that can reject anything. A
+ * share link minted before this build can legitimately carry
+ * `effect_kind: 'granted_spells'` on a trait; `LEGACY_TRAIT_EFFECT_KINDS` in
+ * `src/rules/legacy-trait-effects.ts` keeps that vocabulary readable forever
+ * and DROPS the member on the way in. Rejecting it would make an existing link
+ * undecodable, which is the data loss the codec exists to prevent.
  *
- *  - `damage_resistance` — Dwarven Resilience (Poison) and Dragonborn Damage
- *    Resistance (the type is the Draconic Ancestry choice, so the column stays
- *    null).
+ * Adding a member is still a deliberate code change: a new value widens the
+ * `effect_kind` CHECK on BOTH effect tables at the next `npm run db:schema`,
+ * forces a new branch in `src/rules/species-effects.ts` (whose switch is
+ * exhaustive over this union), and needs a payload column. Adding a TRAIT, by
+ * contrast, is data — a line in `docs/srd/source/species-descriptions.txt`.
+ *
+ * WHY EXACTLY THESE THREE — two are borne out by the extract, one is not:
+ *
+ *  - `damage_resistance` — Dwarven Resilience (Poison), Dragonborn Damage
+ *    Resistance and Tiefling Fiendish Legacy (both leave the type null,
+ *    because in both cases the type is a choice the character has not made
+ *    and the SOURCE ITSELF declines to name it).
  *  - `hp_modifier` — Dwarven Toughness, and only Dwarven Toughness, seeded
  *    `flat = 0, perLevel = 1` so the total is the character's LEVEL. The Orc's
  *    Adrenaline Rush grants TEMPORARY Hit Points, which are not Hit Point
  *    maximum; folding it in here would be wrong in a way nobody notices.
- *  - `granted_spells` — Elven Lineage, Gnomish Lineage, Fiendish Legacy and
- *    Otherworldly Presence. A PURE MARKER carrying no payload on the trait row:
- *    the spells come from the source instance's grant rules
- *    (`species_definitions.grant_rules`, read by `src/grants/`), and this flag
- *    only tells a sheet which trait is the reason those slots exist.
- *
- *    IT POINTS AT NOTHING TODAY, and that is stated here rather than left to be
- *    discovered. No `species_definitions` row is seeded from this extract, so
- *    no species `character_source_instances` row exists and these four traits
- *    grant zero spells. Wiring them needs more than a seed: the level 3/5 gates
- *    are `active_from_class_level` rules, and `SourceRuleReader`
- *    (`classLevelForSource`) resolves that for a non-class source ONLY from a
- *    `class_level` value configured on the instance — it does not throw
- *    outright, it throws when that value is absent. A configured constant
- *    cannot follow a character's level as it rises, so a species source needs
- *    a level resolution the reader does not yet have. That is the real work,
- *    and it is not this track's.
  *  - `speed` — NO SRD SPECIES TRAIT USES IT, which is reported rather than
  *    hidden. Base walking Speed is a species-template COLUMN, not a trait,
  *    because the source lists it under "Parts of a Species" beside Creature
@@ -288,45 +295,20 @@ export type FreeCastPoolScope = (typeof freeCastPoolScopes)[number];
  *    so none is a standing modifier. The member exists for a character's own
  *    hand-written traits, where a flat bonus is exactly what a user means.
  *
- * ONE EFFECT PER TRAIT — A LIMIT OF THE MODEL, NOT A READING OF THE SOURCE.
- *
- * This said the effect is taken from the TRAIT'S OWN PARAGRAPH and never from
- * the choice table it points at, and offered Fiendish Legacy as the worked
- * example: its paragraph "says nothing about resistance". THAT JUSTIFICATION IS
- * WRONG and the extract is what disproves it. The paragraph
- * (`species-descriptions.txt:202-206`) reads "Choose a legacy from the Fiendish
- * Legacies table. You gain the level 1 benefit of the chosen legacy" — and
- * every legacy's level-1 benefit (`:233-238`) is a Resistance plus a cantrip.
- * The paragraph therefore DOES grant a resistance; it declines to name the
- * type, which is exactly what the Dragonborn's Damage Resistance paragraph does
- * ("the damage type determined by your Draconic Ancestry trait") and that one
- * is modelled, with a null type.
- *
- * So the two are structurally identical and the app treats them differently:
- * `unchosenDamageResistances` is 1 for a Dragonborn and 0 for a Tiefling, who
- * has one from level 1. The cause is not the paragraph rule — it is that
- * `effect_kind` is ONE COLUMN and Fiendish Legacy carries TWO effects.
- *
- * NOT SWAPPED, AND NOT REMODELLED, AND BOTH REFUSALS ARE DELIBERATE. Making the
- * trait `damage_resistance` would trade a silent resistance for a silent spell
- * grant — the same defect facing the other way. Recording both means a trait
- * carrying a SET of effects, which is a schema change to two tables plus a
- * positional share wire format whose version is deliberately pinned at 1
- * (`src/sharing/codec.ts`). That is an owner-level call on a model D12 defined,
- * and it is filed as one rather than patched under review; see
- * `.claude/pending-questions/`.
- *
- * The paragraph rule itself still holds where it was actually load-bearing: it
- * keeps the Wood Elf's 35 feet — a lineage sub-choice, not a species-wide
- * Speed — off the Elf template.
+ * ONE TRAIT MAY NOW GRANT SEVERAL EFFECTS, AND THAT IS THE WHOLE INVERSION.
+ * The old model's stated limit — "ONE EFFECT PER TRAIT — A LIMIT OF THE MODEL,
+ * NOT A READING OF THE SOURCE" — is gone, not because the reading changed but
+ * because an effect no longer hangs off a trait row. A catalog trait declares
+ * a LIST of effects (`species_template_trait_effects`) and a character records
+ * a LIST of effects (`character_effects`); "two effects" is no longer a special
+ * case that needs a column to be stolen from one half or the other.
  */
-export const speciesTraitEffectKinds = [
+export const effectKinds = [
   'damage_resistance',
   'hp_modifier',
   'speed',
-  'granted_spells',
 ] as const;
-export type SpeciesTraitEffectKind = (typeof speciesTraitEffectKinds)[number];
+export type EffectKind = (typeof effectKinds)[number];
 
 /**
  * WHAT GRANTED AN EXTRA ATTACK — the closed set D19 says the model needs.

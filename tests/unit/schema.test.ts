@@ -219,19 +219,31 @@ const expectedNativeColumns: Record<string, string[]> = {
   ],
   species_template_traits: [
     'id', 'species_template_id', 'sort_order', 'name', 'description',
-    'effect_kind', 'effect_damage_type', 'effect_hit_points_flat',
-    'effect_hit_points_per_level', 'effect_speed_bonus_feet', 'created_at',
-    'updated_at',
+    'created_at', 'updated_at',
+  ],
+  // The CATALOG half of the inverted effect model: what a printed trait GRANTS.
+  // The five `effect_*` columns that used to sit on the trait row above are
+  // here, one row per effect, so a trait granting two is two rows.
+  species_template_trait_effects: [
+    'id', 'species_template_trait_id', 'sort_order', 'effect_kind',
+    'damage_type', 'hit_points_flat', 'hit_points_per_level',
+    'speed_bonus_feet', 'created_at', 'updated_at',
   ],
   character_species: [
     'id', 'character_id', 'name', 'creature_type', 'size', 'base_speed_feet',
     'notes', 'created_at', 'updated_at',
   ],
   character_species_traits: [
-    'id', 'character_id', 'sort_order', 'name', 'description', 'effect_kind',
-    'effect_damage_type', 'effect_hit_points_flat',
-    'effect_hit_points_per_level', 'effect_speed_bonus_feet', 'notes',
+    'id', 'character_id', 'sort_order', 'name', 'description', 'notes',
     'created_at', 'updated_at',
+  ],
+  // The CHARACTER half: what this character HAS. Keyed on `character_id` and
+  // not on the trait, which is what lets a feat or a subclass grant one and
+  // what stops a trait being the thing an effect hangs from.
+  character_effects: [
+    'id', 'character_id', 'sort_order', 'effect_kind', 'damage_type',
+    'hit_points_flat', 'hit_points_per_level', 'speed_bonus_feet',
+    'source_instance_id', 'label', 'notes', 'created_at', 'updated_at',
   ],
   background_templates: [
     'id', 'content_key', 'rules_edition', 'name', 'ability_score_1',
@@ -351,8 +363,17 @@ const expectedNativeNotNull: Record<string, string[]> = {
   species_template_traits: [
     'id', 'species_template_id', 'sort_order', 'name', 'description',
   ],
+  // `effect_kind` is NOT NULL on both effect tables where it was nullable on
+  // the trait row it replaced: a trait with no mechanical effect is now the
+  // ABSENCE of a row rather than a row of nulls.
+  species_template_trait_effects: [
+    'id', 'species_template_trait_id', 'sort_order', 'effect_kind',
+  ],
   character_species: ['id', 'character_id', 'name'],
   character_species_traits: ['id', 'character_id', 'sort_order', 'name'],
+  character_effects: [
+    'id', 'character_id', 'sort_order', 'effect_kind', 'label',
+  ],
   background_templates: [
     'id', 'content_key', 'rules_edition', 'name', 'ability_score_1',
     'ability_score_2', 'ability_score_3', 'feat_name', 'skill_proficiency_1',
@@ -526,6 +547,12 @@ const expectedNamedIndexes: Record<string, string> = {
     'species_template_traits:species_template_id,sort_order:unique',
   species_template_traits_template_name_unique:
     'species_template_traits:species_template_id,name:unique',
+  // UNIQUE on `(trait, sort_order)` on the CATALOG side, where the character
+  // side below gets a plain index — the same asymmetry the trait tables
+  // already carry, and for the same reason: the source's order is dense and a
+  // repeat means a mis-parse, while a user mid-reorder is not a corrupt row.
+  species_template_trait_effects_trait_sort_unique:
+    'species_template_trait_effects:species_template_trait_id,sort_order:unique',
   named_features_content_key_unique: 'named_features:content_key:unique',
   named_features_class_name_rules_edition_unique:
     'named_features:class_definition_id,name,rules_edition:unique',
@@ -543,6 +570,7 @@ const expectedNamedIndexes: Record<string, string> = {
     'character_species_traits:character_id',
   character_background_character_id_unique:
     'character_background:character_id:unique',
+  character_effects_character_id_index: 'character_effects:character_id',
   // --- THE FOUR STORED SHEET INPUTS ---------------------------------------
   // Every one is UNIQUE and there is no plain index beside any of them: each
   // unique index already serves the `WHERE character_id = ?` read, and the
@@ -680,6 +708,7 @@ const expectedUniqueGroups: Record<string, string[]> = {
   species_template_traits: [
     'species_template_id,name', 'species_template_id,sort_order',
   ],
+  species_template_trait_effects: ['species_template_trait_id,sort_order'],
   background_templates: ['content_key', 'name,rules_edition'],
   character_species: ['character_id'],
   character_background: ['character_id'],
@@ -857,8 +886,21 @@ const expectedForeignKeys: Record<string, string[]> = {
   species_template_traits: [
     'species_template_id->species_templates.id|CASCADE',
   ],
+  species_template_trait_effects: [
+    'species_template_trait_id->species_template_traits.id|CASCADE',
+  ],
   character_species: ['character_id->characters.id|CASCADE'],
   character_species_traits: ['character_id->characters.id|CASCADE'],
+  // TWO edges, and the composite one is the point: a bare
+  // `source_instance_id` would pass `PRAGMA foreign_key_check` while pointing
+  // at ANOTHER character's source instance. Including `character_id` in the
+  // tuple is what makes the database refuse that, and it is the second use of
+  // the `(id, character_id)` unique index `character_source_instances` carries
+  // for exactly this purpose — `spell_selection_slots` above being the first.
+  character_effects: [
+    'character_id->characters.id|CASCADE',
+    'source_instance_id,character_id->character_source_instances.id,character_id|CASCADE',
+  ],
   character_background: ['character_id->characters.id|CASCADE'],
   // ONE EDGE EACH, and `character_hit_point_rolls` having only this one is the
   // assertion that matters: it holds a class NAME and deliberately NOT a
@@ -938,7 +980,7 @@ afterAll(() => {
 // rather than assumed.
 for (const [sourceLabel, schemaSql] of schemaSources) {
 describe(`complete final migration schema (${sourceLabel})`, () => {
-  it('creates the exact 30-table Laravel inventory plus the twenty-four named native tables, and every column of both', () => {
+  it('creates the exact 30-table Laravel inventory plus the twenty-six named native tables, and every column of both', () => {
     const db = openDb(schemaSql);
     const tables = db.selectValues(
       `SELECT name
@@ -957,7 +999,7 @@ describe(`complete final migration schema (${sourceLabel})`, () => {
     // core, 2 class features and the 4 stored sheet inputs.
     expect(tables).toEqual(Object.keys(allExpectedColumns).sort());
     expect(Object.keys(expectedColumns)).toHaveLength(30);
-    expect(Object.keys(expectedNativeColumns)).toHaveLength(24);
+    expect(Object.keys(expectedNativeColumns)).toHaveLength(26);
     // ones that were pruned) and 12 native — the four weapon tables plus the
     // eight of the sheet core.
     expect(tables).toEqual(Object.keys(allExpectedColumns).sort());
@@ -1156,17 +1198,17 @@ describe('the pruned column-metadata hash is derived from Laravel, not from us',
    * avoid. They are not thereby unchecked — `expectedNativeColumns` and
    * `expectedNativeNotNull` hold them to hand-written expectations transcribed
    * from the design, and the exclusion list is asserted to be exactly those
-   * twenty-four, so a twenty-fifth native table cannot slip past unhashed AND
+   * twenty-six, so a twenty-seventh native table cannot slip past unhashed AND
    * unexpected.
    */
-  it('and the generated artifact matches it, skipping only the twenty-four native tables', () => {
+  it('and the generated artifact matches it, skipping only the twenty-six native tables', () => {
     // 4 weapons + 8 sheet core + 6 origins + 2 class features + 4 sheet inputs.
     // Excluded because
     // they reproduce no Laravel migration; the constant on the right is
     // Laravel-derived, and folding them in would force it to be recomputed from
     // our own artifact.
     const nativeTables = Object.keys(expectedNativeColumns);
-    expect(nativeTables).toHaveLength(24);
+    expect(nativeTables).toHaveLength(26);
     for (const [, schemaSql] of schemaSources) {
       expect(metadataHash(schemaSql, nativeTables)).toBe(
         laravelColumnMetadataHash,
