@@ -354,7 +354,7 @@ describe('the derived character sheet', () => {
       'partial_subclass_catalog',
       'no_unarmored_defense',
       'no_expertise',
-      'no_weapon_proficiency',
+      'weapon_reach_not_recorded',
       'background_skills_are_text',
     ]);
   });
@@ -373,6 +373,61 @@ describe('the derived character sheet', () => {
     // imported in this state gets a stated approximation rather than an error
     // page.
     expect(sheet.hit_points.value).toBe(54);
+  });
+
+  it('says a degraded starting class ONCE, not once per derivation', () => {
+    // THREE derivations go through `startingClass` — hit points, saving throws
+    // and the proficiency union — and every one of them returns its warnings. A
+    // review measured the page printing `no_starting_class` TWICE, because the
+    // filter compared only two of the three arms against each other. Two
+    // identical sentences read as two different problems.
+    db.exec(
+      'UPDATE character_class_levels SET is_starting_class = 0 WHERE character_id = ?',
+      [characterId],
+    );
+    expect(
+      builder
+        .build(characterId)
+        .warnings.filter((warning) => warning.code === 'no_starting_class'),
+    ).toHaveLength(1);
+
+    // The other degradation, from the other direction: two classes flagged.
+    db.exec(
+      'UPDATE character_class_levels SET is_starting_class = 1 WHERE character_id = ?',
+      [characterId],
+    );
+    expect(
+      builder
+        .build(characterId)
+        .warnings.filter(
+          (warning) => warning.code === 'several_starting_classes',
+        ),
+    ).toHaveLength(1);
+  });
+
+  it('still says a code twice when it names two different subjects', () => {
+    // THE CONVERSE, and it is what keeps the deduplication from becoming a
+    // one-per-code rule. A Wizard holding two Martial weapons owes TWO
+    // sentences, because they name two different weapons; collapsing them would
+    // hide one of the two from the reader.
+    db.exec('DELETE FROM character_class_levels WHERE character_id = ?', [
+      characterId,
+    ]);
+    addClass('Wizard', 3, true);
+    db.exec(
+      `INSERT INTO character_weapons
+         (character_id, name, proficiency_category, mastery_selected)
+       VALUES (?, 'Greatsword', 'martial', 0), (?, 'Halberd', 'martial', 0)`,
+      [characterId, characterId],
+    );
+    const weapons = builder
+      .build(characterId)
+      .warnings.filter((warning) => warning.code === 'weapon_not_proficient');
+    expect(weapons).toHaveLength(2);
+    expect(weapons.map((warning) => warning.message.split(' ')[0])).toEqual([
+      'Greatsword',
+      'Halberd',
+    ]);
   });
 
   it('does not pass off an assumed hit die as a class’s printed one', () => {

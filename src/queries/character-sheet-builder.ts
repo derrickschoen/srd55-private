@@ -13,6 +13,7 @@ import type {
   ArmorDexBonus,
   ArmorSlot,
   Skill,
+  WeaponProficiencyCategory,
 } from '../domain/enums';
 import {
   abilities,
@@ -21,6 +22,7 @@ import {
   armorSlots,
   isEnumValue,
   skills,
+  weaponProficiencyCategories,
 } from '../domain/enums';
 import { AbilityScores } from '../rules/ability-scores';
 import { SheetContentLookup } from '../rules/sheet-content-lookup';
@@ -43,6 +45,11 @@ import {
   type SheetWarning,
 } from '../rules/sheet';
 import {
+  characterProficiencies,
+  type ProficiencyWeapon,
+  type WeaponProficiencyVerdict,
+} from '../rules/multiclass-proficiency';
+import {
   effectHitPoints,
   summariseEffects,
   walkingSpeedFeet,
@@ -50,6 +57,10 @@ import {
 } from '../rules/species-effects';
 import type { AttacksPerAction } from '../rules/extra-attack';
 import { CharacterNotFoundError } from './character-crud';
+import {
+  ClassProficiencyLookup,
+  EMPTY_CLASS_PROFICIENCIES,
+} from './class-proficiency-lookup';
 
 /**
  * THE CHARACTER SHEET, ASSEMBLED AND THROWN AWAY.
@@ -145,13 +156,41 @@ export interface SheetClassLine {
  * USER has left undone. These report what the APPLICATION does not hold, and
  * they are true of every character equally.
  */
+/**
+ * WHAT THIS CHARACTER IS PROFICIENT WITH, and what could not be decided (D28).
+ *
+ * `armor_training` and `weapon_proficiencies` are the UNION across every class:
+ * the class they STARTED in contributed its full Core Traits row, every later
+ * class only its multiclass entry subset. `classes` names which class
+ * contributed which, and `via` says which of the two roles it played — so the
+ * asymmetry is visible on the page rather than only in the code.
+ */
+export interface SheetProficiencies {
+  readonly armor_training: readonly ArmorCategory[];
+  readonly weapon_proficiencies: readonly {
+    readonly class_name: string;
+    readonly category: WeaponProficiencyCategory;
+    /** Printed verbatim. Evaluated only as the set union D28 §2 describes. */
+    readonly property_qualifier: string | null;
+  }[];
+  readonly classes: readonly {
+    readonly class_name: string;
+    readonly via: 'initial' | 'multiclass_entry';
+  }[];
+  /** One per weapon the character owns, in the order they were added. */
+  readonly weapons: readonly {
+    readonly name: string;
+    readonly verdict: WeaponProficiencyVerdict;
+  }[];
+}
+
 export interface SheetGap {
   readonly kind:
     | 'no_class_feature_text'
     | 'partial_subclass_catalog'
     | 'no_unarmored_defense'
     | 'no_expertise'
-    | 'no_weapon_proficiency'
+    | 'weapon_reach_not_recorded'
     | 'background_skills_are_text';
   readonly title: string;
   readonly detail: string;
@@ -197,6 +236,7 @@ export interface CharacterSheet {
    */
   readonly unchosen_damage_resistances: readonly string[];
   readonly classes: readonly SheetClassLine[];
+  readonly proficiencies: SheetProficiencies;
   readonly armor: readonly SheetArmorRow[];
   readonly hit_point_rolls: readonly SheetHitPointRoll[];
   readonly armor_class_adjustment: number;
@@ -248,6 +288,30 @@ interface SheetClassJoinRow {
    * says so in a warning. See D24.
    */
   readonly hit_die: number | null;
+}
+
+/**
+ * The same sentence about the same subject, said once.
+ *
+ * The KEY IS THE WHOLE WARNING — code and message — because the code alone is
+ * not a subject: `weapon_not_proficient` is one code and a character may have
+ * three weapons it is true of, and collapsing those to one would hide two of
+ * them. Two warnings whose message is byte-for-byte identical are the same
+ * fact, and the only way to produce a pair of those is for two derivations to
+ * have gone through one resolver.
+ */
+function distinctWarnings(
+  warnings: readonly SheetWarning[],
+): readonly SheetWarning[] {
+  const seen = new Set<string>();
+  return warnings.filter((warning) => {
+    const key = `${warning.code} ${warning.message}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
 }
 
 const sheetClassRow: RowCodec<SheetClassJoinRow> = (row) => ({
@@ -305,13 +369,20 @@ export const SHEET_GAPS: readonly SheetGap[] = Object.freeze([
       'sources, so every skill below adds the plain bonus once.',
   },
   {
-    kind: 'no_weapon_proficiency',
-    title: 'Weapon proficiency is not recorded',
+    // RENAMED AND REWRITTEN BY D27/D28, NOT DELETED. Half of what this gap said
+    // is no longer true — a weapon now carries `simple | martial`, and the
+    // Proficiencies section above says which classes grant what — but the OTHER
+    // half is unchanged and is still the reason attack profiles print two
+    // formulas: nothing records whether a weapon is melee or ranged.
+    kind: 'weapon_reach_not_recorded',
+    title: 'Whether a weapon is melee or ranged is not recorded',
     detail:
-      'This application does not record which weapons a character is ' +
-      'proficient with, nor whether a weapon is melee or ranged. Attack ' +
-      'profiles therefore show both formulas and state that the proficiency ' +
-      'bonus is included.',
+      'A weapon carries its simple/martial category, so the Proficiencies ' +
+      'section can say whether a class of this character’s grants it. What is ' +
+      'still not recorded is whether the weapon is MELEE or RANGED, and the ' +
+      'attack formula branches on exactly that — so attack profiles show both ' +
+      'formulas. They also include the proficiency bonus in both, whatever the ' +
+      'Proficiencies section says: withholding it there is a separate change.',
   },
   {
     kind: 'background_skills_are_text',
@@ -393,6 +464,19 @@ export class CharacterSheetBuilder {
       adjustment: adjustment.value,
     });
     const saves = savingThrowProficiencies(classes);
+    // D28's union, and its warnings. It reuses the SAME `startingClass` the
+    // saving throws above go through — which is why the two can disagree about
+    // what they GRANT while agreeing about which class came first. Saving throws
+    // are the starting class ALONE; proficiency is the union in which the
+    // starting class merely contributes more.
+    const proficiencies = characterProficiencies({
+      classes,
+      weapons: this.#proficiencyWeapons(characterId),
+      wornArmor: armorRows.map((row) => ({
+        name: row.name,
+        category: row.category,
+      })),
+    });
 
     // ONE READ OF ONE TABLE, WITH NO JOIN, which is what the effect model was
     // inverted for. This used to select six columns off
@@ -546,6 +630,17 @@ export class CharacterSheetBuilder {
           : walkingSpeedFeet(baseSpeed.feet, effectRows),
       damage_resistances: effects.damageResistances,
       unchosen_damage_resistances: effects.unchosenDamageResistances,
+      proficiencies: {
+        armor_training: [...proficiencies.armor_training],
+        weapon_proficiencies: proficiencies.weapon_proficiencies.map(
+          (entry) => ({ ...entry }),
+        ),
+        classes: proficiencies.grants.map((grant) => ({
+          class_name: grant.class_name,
+          via: grant.via,
+        })),
+        weapons: proficiencies.weapons.map((entry) => ({ ...entry })),
+      },
       classes: classes.map((entry): SheetClassLine => ({
         class_name: entry.class_name,
         level: entry.level,
@@ -565,12 +660,28 @@ export class CharacterSheetBuilder {
       // slots, an unmet Strength requirement, no or several starting classes, an
       // assumed hit die, a roll no such die could show, a stored value outside
       // its own vocabulary), and belong beside the number they changed.
-      warnings: [
+      // THREE OF THE FIVE ARMS CARRY `startingClass`'S DEGRADATION WARNINGS,
+      // because three of them go through it: `hitPointMaximum`,
+      // `savingThrowProficiencies` and `classProficiencyGrants`. The filter here
+      // used to compare `proficiencies` against `saves` ALONE, so a character
+      // with no starting class flagged read "No class is marked as this
+      // character's starting class" TWICE — once from hit points and once from
+      // saves — which is the very thing the filter was written to prevent and a
+      // review measured it still happening.
+      //
+      // Deduplicated across the WHOLE list rather than between two named arms,
+      // on `code`+`message` and not on `code`: two weapons that are both not
+      // proficient are two facts and print twice; the same sentence about the
+      // same subject is one fact, and a page saying it twice reads as two
+      // different problems. Order is preserved, so each survivor still sits
+      // where the arm that produced it put it.
+      warnings: distinctWarnings([
         ...stored.warnings,
         ...hitPoints.warnings,
         ...ac.warnings,
         ...saves.warnings,
-      ],
+        ...proficiencies.warnings,
+      ]),
       gaps: SHEET_GAPS,
     };
   }
@@ -595,6 +706,17 @@ export class CharacterSheetBuilder {
       [characterId],
       sheetClassRow,
     );
+    // ONE QUERY EACH RATHER THAN ONE PER CLASS. The saving-throw subquery below
+    // is an N+1 already; three more of the same shape would make it 4xN on every
+    // sheet read. Both of these are scoped to the character's own classes, so
+    // they read the same rows the loop would have.
+    //
+    // AND THE READER LIVES OUTSIDE THIS CLASS NOW, because the weapons panel
+    // asks the same question and a second copy of these two queries would be a
+    // second answer. See `ClassProficiencyLookup`.
+    const proficiencies = new ClassProficiencyLookup(this.db).sources(
+      characterId,
+    );
     return rows.map((row): SheetClass => {
       const classDefinitionId = row.class_definition_id;
       const contentRow = content.find(
@@ -616,6 +738,13 @@ export class CharacterSheetBuilder {
         // returns an `assumed_hit_die` warning; the class line below prints
         // `null` and the page says the die is not recorded.
         hit_die: row.hit_die,
+        // BOTH GRANTS TRAVEL, UNRESOLVED. Which one applies depends on whether
+        // this class is the one the character STARTED in, and that is not a fact
+        // about the class — `classProficiencyGrants` resolves it once, from
+        // `startingClass`, for the whole character. A builder that resolved it
+        // here would be the second resolver the brief forbids.
+        proficiencies:
+          proficiencies.get(classDefinitionId) ?? EMPTY_CLASS_PROFICIENCIES,
         saving_throws: this.db
           .all(
             `SELECT ability FROM class_saving_throw_proficiencies
@@ -629,6 +758,39 @@ export class CharacterSheetBuilder {
         ...(contentRow ?? {}),
       };
     });
+  }
+
+  /**
+   * The character's weapons, reduced to the three columns a proficiency question
+   * reads.
+   *
+   * NOT `WeaponQueries.characterWeapons`, and not because that reader is wrong:
+   * it builds attack profiles and a whole panel, and a sheet asking "is this
+   * character proficient" has no business paying for that. The narrow type is
+   * also what stops this path guessing a category from a damage die.
+   */
+  #proficiencyWeapons(characterId: number): readonly ProficiencyWeapon[] {
+    return this.db.all(
+      `SELECT name, proficiency_category, finesse, light
+       FROM character_weapons WHERE character_id = ? ORDER BY id`,
+      [characterId],
+      (row): ProficiencyWeapon => {
+        const category = sqlNullableString(row, 'proficiency_category');
+        return {
+          name: sqlString(row, 'name'),
+          // NOT STATED on anything unrecognised — never `simple`. D27's null is
+          // the state the sheet knows how to say out loud.
+          proficiency_category: isEnumValue(
+            weaponProficiencyCategories,
+            category,
+          )
+            ? (category as WeaponProficiencyCategory)
+            : null,
+          finesse: sqlBoolean(row, 'finesse'),
+          light: sqlBoolean(row, 'light'),
+        };
+      },
+    );
   }
 
   #rolls(characterId: number): {

@@ -11,8 +11,10 @@ import {
   isEnumValue,
   srdWeaponGroups,
   weaponMasteryProperties,
+  weaponProficiencyCategories,
   type SrdWeaponGroup,
   type WeaponMasteryProperty,
+  type WeaponProficiencyCategory,
 } from '../domain/enums';
 import type {
   CharacterWeapon,
@@ -24,8 +26,10 @@ import type { SpellAccessRoute } from '../access/spell-access-builder';
 import type { AbilityScores } from '../rules/ability-scores';
 import { attackProfiles } from '../rules/attack-profiles';
 import { recogniseAttackCantrips } from '../rules/attack-cantrips';
+import { weaponProficiency } from '../rules/multiclass-proficiency';
 import { SheetContentLookup } from '../rules/sheet-content-lookup';
 import { WeaponMasteryLookup } from '../rules/weapon-mastery-lookup';
+import { ClassProficiencyLookup } from './class-proficiency-lookup';
 
 /**
  * The three things the attack derivation needs that are NOT weapon rows.
@@ -86,6 +90,19 @@ function masteryProperty(row: SqlRow): WeaponMasteryProperty | null {
   return isEnumValue(weaponMasteryProperties, value) ? value : null;
 }
 
+/**
+ * An unrecognised stored proficiency category reads as NOT STATED.
+ *
+ * The same argument `masteryProperty` above makes, with a sharper consequence:
+ * substituting `simple` would tell a Wizard they are proficient with a weapon
+ * nobody recorded a category for, which is precisely the wrong number D27 exists
+ * to stop. Null is the state the sheet already knows how to say out loud.
+ */
+function proficiencyCategory(row: SqlRow): WeaponProficiencyCategory | null {
+  const value = sqlNullableString(row, 'proficiency_category');
+  return isEnumValue(weaponProficiencyCategories, value) ? value : null;
+}
+
 function weaponProfile(row: SqlRow): WeaponProfile {
   return {
     name: sqlString(row, 'name'),
@@ -120,7 +137,8 @@ export class WeaponQueries {
   /** A character's weapons, ordered by id — the order they were added. */
   characterWeapons(characterId: number): CharacterWeapon[] {
     return this.db.all(
-      `SELECT id, ${PROFILE_COLUMNS.join(', ')}, notes, mastery_selected
+      `SELECT id, ${PROFILE_COLUMNS.join(', ')}, proficiency_category, notes,
+              mastery_selected
        FROM character_weapons
        WHERE character_id = ?
        ORDER BY id`,
@@ -128,6 +146,11 @@ export class WeaponQueries {
       (row): CharacterWeapon => ({
         id: sqlInteger(row, 'id'),
         ...weaponProfile(row),
+        // D27's column, read HERE and not in `weaponProfile`: the profile is the
+        // set of columns the catalog and the character share, and this one is
+        // the character's alone. `weapon_templates` has no such column, so
+        // reading it there would be a SELECT of a column that does not exist.
+        proficiency_category: proficiencyCategory(row),
         notes: sqlNullableString(row, 'notes'),
         mastery_selected: sqlBoolean(row, 'mastery_selected'),
       }),
@@ -195,6 +218,14 @@ export class WeaponQueries {
     weapons: readonly CharacterWeapon[],
     context: WeaponPanelContext,
   ): WeaponsPanel['attacks'] {
+    // THE PROFICIENCY UNION, THROUGH THE SAME LOOKUP THE CHARACTER SHEET USES.
+    // D28 §1: what a non-proficient weapon loses is the BONUS, and it is lost
+    // HERE, on the number, rather than only described on the other screen. Until
+    // this line existed the two screens printed opposite things about one
+    // weapon — the sheet said "not proficient" and this profile added the bonus.
+    const { grants } = new ClassProficiencyLookup(this.db).grantsFor(
+      characterId,
+    );
     return attackProfiles({
       weapons: weapons.map((weapon) => ({
         id: weapon.id,
@@ -202,6 +233,18 @@ export class WeaponQueries {
         damage_dice: weapon.damage_dice,
         damage_type: weapon.damage_type,
         versatile_damage_dice: weapon.versatile_damage_dice,
+        // The three columns a proficiency question reads and nothing else: the
+        // narrow `ProficiencyWeapon` shape is what stops this path guessing a
+        // category from a damage die or a name.
+        proficiency: weaponProficiency(
+          {
+            name: weapon.name,
+            proficiency_category: weapon.proficiency_category,
+            finesse: weapon.finesse,
+            light: weapon.light,
+          },
+          grants,
+        ),
       })),
       classes: this.#content.forCharacter(characterId),
       scores: context.scores,

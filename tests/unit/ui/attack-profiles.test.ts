@@ -66,6 +66,7 @@ function result(
         damage_dice: '1d8',
         damage_type: 'Slashing',
         versatile_damage_dice: '1d10',
+        proficiency: { kind: 'proficient', via: ['Fighter'] },
       },
     ],
     classes: overrides.classes ?? [
@@ -247,6 +248,7 @@ describe('the damage line', () => {
           damage_dice: null,
           damage_type: null,
           versatile_damage_dice: null,
+          proficiency: { kind: 'proficient', via: ['Fighter'] },
         },
       ],
       classes: [{ class_name: 'Fighter', level: 5 }],

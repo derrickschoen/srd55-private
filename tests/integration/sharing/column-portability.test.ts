@@ -492,6 +492,11 @@ const PROBES: { readonly [N in ProbedTable]: Probe<N> } = {
       id: RECIPIENT_ROW_ID,
       character_id: RECIPIENT_OWNER_ID,
       name: { kind: 'verbatim' },
+      // D27's category, added to `character_weapons` by the multiclass track and
+      // appended LAST to the share tuple so a pre-D27 link still decodes. This
+      // classification is the one the guard was built to force: the column
+      // arrived hours after the guard did, and both of its loops fired on it.
+      proficiency_category: { kind: 'verbatim' },
       damage_dice: { kind: 'verbatim' },
       damage_type: { kind: 'verbatim' },
       versatile_damage_dice: { kind: 'verbatim' },
@@ -957,12 +962,13 @@ function seedSender(db: DatabaseContext, catalog: Catalog): number {
        character_id, name, damage_dice, damage_type, versatile_damage_dice,
        finesse, heavy, light, loading, reach, thrown, two_handed, ammunition,
        ammunition_kind, range_normal_feet, range_long_feet, mastery_property,
-       mastery_selected, other_properties, notes, created_at, updated_at
+       mastery_selected, other_properties, notes, proficiency_category,
+       created_at, updated_at
      ) VALUES (
        ?, 'Sender Halberd', '1d10', 'Slashing', '1d12',
        1, 1, 1, 1, 1, 1, 1, 1,
        'bolt', 25, 65, 'Vex', 1, 'sender other properties',
-       'sender weapon note', ?, ?
+       'sender weapon note', 'martial', ?, ?
      )`,
     [characterId, SENDER_TIME, SENDER_TIME],
   );

@@ -8,6 +8,7 @@ import type {
   Skill,
   SlotState,
   WeaponMasteryProperty,
+  WeaponProficiencyCategory,
 } from './enums';
 import type { CharacterSnapshot, JsonObject } from './models';
 
@@ -122,6 +123,16 @@ export interface UpdateClassCommand extends CommandBase {
  */
 export interface WeaponFields {
   name: string;
+  /**
+   * D27's `simple | martial`, or `null` for NOT STATED.
+   *
+   * CHARACTER-ONLY, ALONGSIDE `notes`, WHICH IS WHY `WeaponProfile` EXCLUDES
+   * BOTH. `weapon_templates` has no such column: its `srd_group` is the source's
+   * four table headings and the two categories are DERIVED from it by
+   * `weaponFromTemplate`, in one exhaustive fold. Putting it in the shared
+   * profile would make `templates()` select a column that does not exist.
+   */
+  proficiency_category: WeaponProficiencyCategory | null;
   damage_dice: string | null;
   damage_type: string | null;
   versatile_damage_dice: string | null;

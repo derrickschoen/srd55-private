@@ -337,9 +337,18 @@ test('the attack profiles derive from the weapon, the class and nothing stored',
   await expect(profiles).toContainText(
     'does not record whether a weapon is melee or ranged',
   );
-  await expect(profiles).toContainText(
+  // THE PROFICIENCY DECISION IS ON THE PAGE, and it is a decision now rather
+  // than a deferral. A Fighter IS proficient with a Longsword, so the +2 above
+  // INCLUDES the proficiency bonus and the page says which of the two answers
+  // it gave.
+  await expect(profiles).toContainText('The Proficiency Bonus is included');
+  // NEITHER retired sentence may come back. The first sent a reader looking for
+  // a column that exists; the second admitted a contradiction with the
+  // character sheet that no longer exists either.
+  await expect(profiles).not.toContainText(
     'does not record which weapons a character is proficient with',
   );
+  await expect(profiles).not.toContainText('this number does not yet read it');
 
   // D15's display rule, on a real screen: Fighter 5 grants Extra Attack, and
   // the profile's own count moves with it.
@@ -360,6 +369,60 @@ test('the attack profiles derive from the weapon, the class and nothing stored',
 
   const body = await page.locator('body').innerText();
   expect(body).not.toMatch(/D&D|Dungeons|Wizards/);
+});
+
+/**
+ * THE ONE NUMBER D28 §1 IS ABOUT, ON A REAL SCREEN, ON BOTH SCREENS.
+ *
+ * A Wizard holding a Greatsword. Every ability score is the schema default of
+ * 10 — modifier 0 — so the proficiency bonus is the WHOLE of the to-hit number
+ * and the two possible answers are +2 and +0. Nothing subtler could tell them
+ * apart.
+ *
+ * IT EXISTS BECAUSE A REVIEW COULD INVERT THE SHEET'S WHOLE PROFICIENCIES
+ * SECTION — including labelling a NOT-proficient weapon "Proficient" — with
+ * every browser test still green. There was no browser coverage of that section
+ * at all, and the planner beside it was printing the bonus anyway.
+ */
+test('a Wizard’s Greatsword loses the proficiency bonus, and both screens say so', async ({
+  page,
+}) => {
+  await openPlanner(page, 'Unqualified Wielder');
+  await page
+    .getByRole('combobox', { name: 'Class to add' })
+    .selectOption({ label: 'Wizard' });
+  await page.getByRole('button', { name: 'Add class', exact: true }).click();
+  await expect(page.getByTestId('weapons-panel')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Add weapon' }).click();
+  const form = page.getByTestId('weapon-form');
+  await form
+    .getByLabel('Start from a reference weapon')
+    .selectOption({ label: 'Greatsword' });
+  await form.getByRole('button', { name: 'Add weapon' }).click();
+  await expect.poll(async () => (await weaponRows(page)).length).toBe(1);
+
+  const profiles = page.getByTestId('attack-profiles');
+  // +0, NOT +2. A Wizard's Core Traits row grants Simple weapons only, and a
+  // Greatsword is Martial — which the picker recorded on the weapon itself.
+  await expect(page.getByTestId('attack-profile-numbers').first()).toHaveText(
+    'To hit: +0 (Strength) · Damage: 2d6 Slashing',
+  );
+  await expect(profiles).toContainText('The Proficiency Bonus is NOT included');
+  await expect(profiles).toContainText(
+    'no class this character has grants this weapon’s category',
+  );
+
+  // AND THE SHEET AGREES, in the section that says so in words. Two screens,
+  // one weapon, one answer.
+  await page.goto('/characters/1/sheet');
+  await expect(page.locator('[data-screen="character-sheet"]')).toBeVisible();
+  await expect(
+    page.locator('[data-sheet-value="weapon_verdict:Greatsword"]'),
+  ).toHaveText('Not proficient');
+  await expect(page.locator('[data-screen="character-sheet"]')).toContainText(
+    'they do not add their proficiency bonus to the attack',
+  );
 });
 
 /**
@@ -464,25 +527,32 @@ test('the damage-type choice is undecided on both sides until it is made', async
 
   // WHAT THE BROWSER SHOWS BEFORE ANYTHING IS TOUCHED. The control's value is
   // its first option, and that option and the number line say the same thing:
-  // neither side has been picked. Wizard 1 is a +2 proficiency bonus, every
-  // ability score is the schema default of 10, and below level 5 there is no
-  // extra Radiant clause to muddy which type is on the line.
+  // neither side has been picked. Every ability score is the schema default of
+  // 10, and below level 5 there is no extra Radiant clause to muddy which type
+  // is on the line.
+  //
+  // TO HIT IS +0 AND NOT +2, AND THE REASON IS SOURCED RATHER THAN OBSERVED.
+  // Wizard 1 does carry a +2 proficiency bonus, but a Wizard's Core Traits row
+  // grants SIMPLE weapons and a Longsword is Martial — so D28 §1 withholds the
+  // bonus, here as on the plain attack, and True Strike is a weapon attack like
+  // any other. This line read +2 until the profiles started reading the
+  // verdict, which is the defect and not the baseline.
   await expect(control).toHaveValue('');
   await expect(numbers).toHaveText(
-    'To hit: +2 (Intelligence) · Damage: 1d8 Radiant or Slashing',
+    'To hit: +0 (Intelligence) · Damage: 1d8 Radiant or Slashing',
   );
 
   // Each side, picked in turn, recomputes the line and NOTHING ELSE claims the
   // other type.
   await control.selectOption('Radiant');
   await expect(numbers).toHaveText(
-    'To hit: +2 (Intelligence) · Damage: 1d8 Radiant',
+    'To hit: +0 (Intelligence) · Damage: 1d8 Radiant',
   );
   await expect(numbers).not.toContainText('Slashing');
 
   await control.selectOption('Slashing');
   await expect(numbers).toHaveText(
-    'To hit: +2 (Intelligence) · Damage: 1d8 Slashing',
+    'To hit: +0 (Intelligence) · Damage: 1d8 Slashing',
   );
   await expect(numbers).not.toContainText('Radiant');
 
@@ -490,7 +560,7 @@ test('the damage-type choice is undecided on both sides until it is made', async
   // in the control rather than the absence of one.
   await control.selectOption('');
   await expect(numbers).toHaveText(
-    'To hit: +2 (Intelligence) · Damage: 1d8 Radiant or Slashing',
+    'To hit: +0 (Intelligence) · Damage: 1d8 Radiant or Slashing',
   );
 
   // The Versatile note the plain attack carries is on the True Strike row too:

@@ -296,7 +296,7 @@ export type ReferenceOutstandingItem =
     }
   | { readonly kind: 'no_class' }
   /**
-   * The two SHEET items. They carry no `source_ref` because they hang off no
+   * The three SHEET items. They carry no `source_ref` because they hang off no
    * source instance: a class NAME and a level list is the whole of what
    * identifies them, and a name registered in the free-text registry would
    * claim a provenance it does not have.
@@ -309,6 +309,24 @@ export type ReferenceOutstandingItem =
   | {
       readonly kind: 'no_skill_proficiencies';
       readonly choice_count: number;
+    }
+  /**
+   * Q11. CLASS NAMES TRAVEL IN THE JSON BLOCK HERE, exactly as
+   * `orphan_hit_point_roll.class_name` does above and for the same reason: a
+   * class name comes from the recipient's OWN catalog — a share link carries a
+   * content key that resolves against it — so it is not importer-authored text
+   * and does not belong in the withheld ledger.
+   */
+  | {
+      readonly kind: 'unmade_multiclass_skill_choice';
+      readonly entitled: number;
+      readonly chosen: number;
+      readonly outstanding: number;
+      readonly entries: readonly {
+        readonly class_name: string;
+        readonly count: number;
+        readonly pool: 'class_list' | 'any';
+      }[];
     };
 
 export interface ReferenceCatalogGap {
@@ -728,6 +746,15 @@ export function buildAgentReference(
         return {
           kind: 'no_skill_proficiencies',
           choice_count: item.choice_count,
+        };
+      }
+      if (item.kind === 'unmade_multiclass_skill_choice') {
+        return {
+          kind: 'unmade_multiclass_skill_choice',
+          entitled: item.entitled,
+          chosen: item.chosen,
+          outstanding: item.outstanding,
+          entries: item.entries.map((entry) => ({ ...entry })),
         };
       }
       return {
@@ -1468,9 +1495,9 @@ export function agentReferenceSections(
               ),
             ];
           }
-          // The two sheet items name a class rather than a source instance, so
-          // the middle cell says which class and the detail says which levels —
-          // the same two facts the JSON block carries, in the same order, so
+          // The three sheet items name a class rather than a source instance,
+          // so the middle cell says which class and the detail says the rest —
+          // the same facts the JSON block carries, in the same order, so
           // neither form can state more than the other.
           if (item.kind === 'orphan_hit_point_roll') {
             return [
@@ -1491,6 +1518,25 @@ export function agentReferenceSections(
                 `${String(
                   item.choice_count,
                 )} skill proficiencies are offered and none is recorded`,
+              ),
+            ];
+          }
+          if (item.kind === 'unmade_multiclass_skill_choice') {
+            return [
+              cell('unmade_multiclass_skill_choice'),
+              cell(
+                item.entries.map((entry) => entry.class_name).join(', '),
+              ),
+              cell(
+                `${String(item.chosen)} of ${String(item.entitled)} skill ` +
+                  `proficiencies recorded; ${String(item.outstanding)} still ` +
+                  `owed, including ${item.entries
+                    .map(
+                      (entry) =>
+                        `${String(entry.count)} from ${entry.class_name} ` +
+                        `(${entry.pool})`,
+                    )
+                    .join(', ')}`,
               ),
             ];
           }

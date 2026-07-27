@@ -132,6 +132,27 @@ function sheet(changes: Partial<CharacterSheet> = {}): CharacterSheet {
         saving_throws: ['strength', 'constitution'],
       },
     ],
+    // D28's union, with a HOSTILE class name in it too: the class names in this
+    // section come from the recipient's own catalog by way of a content key, but
+    // the projection must still route them through the free-text path rather
+    // than concatenating them into a sentence.
+    proficiencies: {
+      armor_training: ['light', 'medium', 'shield'],
+      weapon_proficiencies: [
+        {
+          class_name: HOSTILE_CLASS_NAME,
+          category: 'martial',
+          property_qualifier: null,
+        },
+      ],
+      classes: [{ class_name: HOSTILE_CLASS_NAME, via: 'initial' }],
+      weapons: [
+        {
+          name: 'Greatsword',
+          verdict: { kind: 'proficient', via: [HOSTILE_CLASS_NAME] },
+        },
+      ],
+    },
     armor: [
       {
         slot: 'worn',
@@ -263,6 +284,14 @@ describe('the character sheet is projected twice from one value', () => {
       armor: () => ids.has('armor:worn'),
       hit_point_rolls: () =>
         [...ids].some((id) => id.startsWith('hit_point_roll:')),
+      // D28's three. Each has a row of its own, and the per-weapon verdict has
+      // one row per weapon so a reader can see WHICH weapon is undecided
+      // rather than only how many are.
+      armor_training: () => ids.has('armor_training'),
+      weapon_proficiencies: () =>
+        [...ids].some((id) => id.startsWith('weapon_proficiency:')),
+      weapon_proficiency_verdicts: () =>
+        [...ids].some((id) => id.startsWith('weapon_verdict:')),
       // Warnings are rendered as their own alert region rather than as rows,
       // because they must not be reachable only by scrolling past the number
       // they degrade. The browser spec asserts the region; here the claim is
@@ -424,6 +453,183 @@ describe('the character sheet is projected twice from one value', () => {
       'no species speed entered',
     );
     expect(sheetFacts(value).walking_speed_feet).toBeNull();
+  });
+
+  /**
+   * THE PROFICIENCIES SECTION, VALUE BY VALUE.
+   *
+   * EVERY ASSERTION BELOW READS A `value` OR A `detail`, and that is the point.
+   * A review mutated this section — labelling a NOT-proficient weapon
+   * "Proficient", emptying the armour list, swapping "Full" for "Multiclass
+   * entry" and dropping every qualifier — and the whole vitest and Playwright
+   * suites stayed green, because the only assertions this file had for the
+   * section were that the row IDs exist. An id is not a fact about a character;
+   * a Wizard reading "Proficient" beside their Greatsword is the exact D28 §1
+   * failure the section was built to prevent.
+   *
+   * THE FOUR VERDICTS ARE EXERCISED SEPARATELY, because the fixture's single
+   * weapon is `proficient` and three of the four arms of both `weaponVerdictValue`
+   * and `weaponVerdictDetail` never ran under any assertion here.
+   */
+  describe('the Proficiencies section says what it means', () => {
+    function weapons(
+      list: CharacterSheet['proficiencies']['weapons'],
+    ): CharacterSheet {
+      return sheet({
+        proficiencies: { ...sheet().proficiencies, weapons: list },
+      });
+    }
+
+    it('prints a different word for each of the four verdicts', () => {
+      const value = weapons([
+        { name: 'Greatsword', verdict: { kind: 'proficient', via: ['Fighter'] } },
+        { name: 'Heavy Crossbow', verdict: { kind: 'not_proficient' } },
+        { name: 'Grandfather’s sword', verdict: { kind: 'category_not_stated' } },
+        {
+          name: 'Runeblade',
+          verdict: {
+            kind: 'qualifier_not_evaluated',
+            via: ['Runeblade'],
+            qualifiers: ['inscribed with a rune'],
+          },
+        },
+      ]);
+      expect(row(value, 'weapon_verdict:Greatsword').value).toBe('Proficient');
+      expect(row(value, 'weapon_verdict:Heavy Crossbow').value).toBe(
+        'Not proficient',
+      );
+      expect(row(value, 'weapon_verdict:Grandfather’s sword').value).toBe(
+        'Unknown',
+      );
+      expect(row(value, 'weapon_verdict:Runeblade').value).toBe('Undecided');
+      // FOUR DISTINCT WORDS. A mutation collapsing any two of them — the
+      // dangerous direction being "everything reads Proficient" — fails here
+      // even if each individual expectation were somehow satisfied.
+      expect(
+        new Set(
+          ['Greatsword', 'Heavy Crossbow', 'Grandfather’s sword', 'Runeblade'].map(
+            (name) => row(value, `weapon_verdict:${name}`).value,
+          ),
+        ).size,
+      ).toBe(4);
+      // And the JSON block carries the KIND for each, in the same order.
+      expect(sheetFacts(value).weapon_proficiency_verdicts).toEqual([
+        'proficient',
+        'not_proficient',
+        'category_not_stated',
+        'qualifier_not_evaluated',
+      ]);
+    });
+
+    it('gives each verdict a detail that could not be swapped with another', () => {
+      const value = weapons([
+        { name: 'Greatsword', verdict: { kind: 'proficient', via: ['Fighter'] } },
+        { name: 'Heavy Crossbow', verdict: { kind: 'not_proficient' } },
+        { name: 'Grandfather’s sword', verdict: { kind: 'category_not_stated' } },
+        {
+          name: 'Runeblade',
+          verdict: {
+            kind: 'qualifier_not_evaluated',
+            via: ['Runeblade'],
+            qualifiers: ['inscribed with a rune'],
+          },
+        },
+      ]);
+      expect(textOf(row(value, 'weapon_verdict:Greatsword').detail)).toContain(
+        'Granted by Fighter',
+      );
+      const missing = textOf(row(value, 'weapon_verdict:Heavy Crossbow').detail);
+      expect(missing).toContain('No class this character has grants');
+      // The claim the planner's attack profile must agree with. It did not
+      // agree once, and a page saying this beside a profile that adds the bonus
+      // is worse than a page saying nothing.
+      expect(missing).toContain('no proficiency bonus to the attack');
+      expect(
+        textOf(row(value, 'weapon_verdict:Grandfather’s sword').detail),
+      ).toContain('records no simple/martial category');
+      const undecided = textOf(row(value, 'weapon_verdict:Runeblade').detail);
+      expect(undecided).toContain('inscribed with a rune');
+      expect(undecided).toContain('assumed');
+      // A qualifier an IMPORTED class carries is a string a stranger wrote, so
+      // it must travel as free text and not be concatenated into the sentence.
+      expect(
+        row(value, 'weapon_verdict:Runeblade').detail.filter(
+          (cell) => cell.free_text === true,
+        ).map((cell) => cell.text),
+      ).toContain('inscribed with a rune');
+    });
+
+    it('prints the armour training union, and says None when there is none', () => {
+      expect(row(sheet(), 'armor_training').value).toBe('light, medium, shield');
+      const bare = sheet({
+        proficiencies: { ...sheet().proficiencies, armor_training: [] },
+      });
+      // "None" and not an empty cell: a blank reads as a rendering fault.
+      expect(row(bare, 'armor_training').value).toBe('None');
+      expect(sheetFacts(bare).armor_training).toEqual([]);
+    });
+
+    it('distinguishes the class that granted everything from a class dipped into', () => {
+      // The asymmetry D28 §3 is entirely about. Both rows exist for every
+      // multiclass character, and swapping the two words tells the player the
+      // wrong class gave them their saving throws.
+      const value = sheet({
+        proficiencies: {
+          ...sheet().proficiencies,
+          classes: [
+            { class_name: 'Fighter', via: 'initial' },
+            { class_name: 'Wizard', via: 'multiclass_entry' },
+          ],
+        },
+      });
+      expect(row(value, 'proficiency_source:Fighter').value).toBe('Full');
+      expect(row(value, 'proficiency_source:Wizard').value).toBe(
+        'Multiclass entry',
+      );
+      expect(textOf(row(value, 'proficiency_source:Fighter').detail)).toContain(
+        'The starting class',
+      );
+      expect(textOf(row(value, 'proficiency_source:Wizard').detail)).toContain(
+        'Entered by multiclassing',
+      );
+    });
+
+    it('prints a grant’s qualifier where it has one, and "all" where it does not', () => {
+      const value = sheet({
+        proficiencies: {
+          ...sheet().proficiencies,
+          weapon_proficiencies: [
+            {
+              class_name: 'Rogue',
+              category: 'martial',
+              property_qualifier: 'Finesse or Light',
+            },
+            {
+              class_name: 'Rogue',
+              category: 'simple',
+              property_qualifier: null,
+            },
+          ],
+        },
+      });
+      expect(row(value, 'weapon_proficiency:Rogue:martial').value).toBe(
+        'Finesse or Light',
+      );
+      expect(row(value, 'weapon_proficiency:Rogue:simple').value).toBe('all');
+      // A qualified grant and an unqualified one must not print the same
+      // sentence: "every weapon of that category" beside a qualifier would tell
+      // a Rogue they are proficient with a Greatsword.
+      expect(
+        textOf(row(value, 'weapon_proficiency:Rogue:simple').detail),
+      ).toContain('with no qualification');
+      expect(
+        textOf(row(value, 'weapon_proficiency:Rogue:martial').detail),
+      ).not.toContain('with no qualification');
+      expect(sheetFacts(value).weapon_proficiencies).toEqual([
+        { category: 'martial', qualified: true },
+        { category: 'simple', qualified: false },
+      ]);
+    });
   });
 
   it('builds the same two projections from the same input, twice', () => {
