@@ -2214,6 +2214,10 @@ describe('hostile and over-long weapon sections', () => {
   it('shares every weapon the write boundary is willing to store', async () => {
     const maximal = {
       name: 'N'.repeat(WEAPON_TEXT_LIMITS.name),
+      // D27. `martial` rather than null, so this test covers the case where the
+      // value has to SURVIVE the link rather than the case where its absence is
+      // tolerated — the second is covered by the pre-D27 arity tests.
+      proficiency_category: 'martial' as const,
       damage_dice: 'd'.repeat(WEAPON_TEXT_LIMITS.damage_dice),
       damage_type: 't'.repeat(WEAPON_TEXT_LIMITS.damage_type),
       versatile_damage_dice: 'v'.repeat(

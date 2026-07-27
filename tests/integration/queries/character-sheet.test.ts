@@ -354,7 +354,7 @@ describe('the derived character sheet', () => {
       'partial_subclass_catalog',
       'no_unarmored_defense',
       'no_expertise',
-      'no_weapon_proficiency',
+      'weapon_reach_not_recorded',
       'background_skills_are_text',
     ]);
   });

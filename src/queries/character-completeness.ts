@@ -661,6 +661,15 @@ interface SkillEntitlementLine {
 function skillEntitlement(
   context: CheckContext,
 ): readonly SkillEntitlementLine[] {
+  // LEFT JOIN, AND THE OUTER-NESS IS LOAD-BEARING. An inner join drops a class
+  // with no seeded traits row — a homebrew or imported one — from the list
+  // BEFORE `startingClass` sees it, so a character who started as a homebrew
+  // class and dipped Bard would have the Bard resolved as their starting class
+  // and credited with its full "Choose any 3" instead of its entry grant of one.
+  // The homebrew class contributes 0 either way; what it must not do is
+  // disappear from the resolver's view and change what everything else means.
+  // The ORDER matches `CharacterSheetBuilder.#classes`, so both resolvers pick
+  // the same row when the flag is missing.
   const rows = context.db.all(
     `SELECT definition.name AS class_name,
             level.is_starting_class AS is_starting_class,
@@ -670,7 +679,7 @@ function skillEntitlement(
        FROM character_class_levels AS level
        JOIN class_definitions AS definition
          ON definition.id = level.class_definition_id
-       JOIN class_sheet_traits AS traits
+       LEFT JOIN class_sheet_traits AS traits
          ON traits.class_definition_id = level.class_definition_id
       WHERE level.character_id = ?
       ORDER BY definition.name, level.id`,
@@ -678,9 +687,15 @@ function skillEntitlement(
     (row) => ({
       class_name: sqlString(row, 'class_name'),
       is_starting_class: Number(row.is_starting_class) === 1,
-      skill_choice_count: sqlInteger(row, 'skill_choice_count'),
-      entry_count: sqlInteger(row, 'entry_count'),
-      entry_pool: sqlString(row, 'entry_pool'),
+      // NULL where the class has no traits row, and carried as an ABSENCE
+      // rather than filled in with a plausible 2. The line still exists so the
+      // resolver can see it; it simply grants nothing.
+      skill_choice_count:
+        row.skill_choice_count === null
+          ? null
+          : sqlInteger(row, 'skill_choice_count'),
+      entry_count: row.entry_count === null ? 0 : sqlInteger(row, 'entry_count'),
+      entry_pool: row.entry_pool === null ? 'none' : sqlString(row, 'entry_pool'),
     }),
   );
   const { chosen } = startingClass(rows);
@@ -689,7 +704,7 @@ function skillEntitlement(
       return {
         class_name: row.class_name,
         is_starting_class: true,
-        count: row.skill_choice_count,
+        count: row.skill_choice_count ?? 0,
         pool: 'initial',
       };
     }
