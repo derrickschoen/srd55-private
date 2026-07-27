@@ -101,8 +101,96 @@ function slotRow(): Record<string, unknown> {
   };
 }
 
+function classLevelRow(): Record<string, unknown> {
+  return {
+    id: 5,
+    character_id: 7,
+    class_definition_id: 31,
+    subclass_definition_id: null,
+    level: 3,
+    is_starting_class: 1,
+    spellcasting_ability_override: null,
+    notes: null,
+    created_at: null,
+    updated_at: null,
+  };
+}
+
 const label = 'Character backup tables.character_source_instances[3]';
 const slotLabel = 'Character backup tables.spell_selection_slots[0]';
+const classLabel = 'Character backup tables.character_class_levels[0]';
+
+/**
+ * F11: `character_class_levels.level` IS THE ONE LEVEL COLUMN WITH NO CHECK.
+ *
+ * The other class-level columns are bounded twice — by a `class_level BETWEEN 1
+ * AND 20` CHECK and by the `classLevel` contract — so a test of the contract
+ * there duplicates the database. This column has ONLY the contract, because the
+ * CHECK is deliberately absent (`db/schema/character.ts`, and
+ * `tests/integration/rules/class-progression.test.ts` writes a 21 through raw
+ * SQL to force a missing progression row). The contract is therefore the whole
+ * bound, and these cases are the only place it can be observed refusing.
+ *
+ * The values are F11's own, so the measurement it published can be re-run
+ * against the fix rather than restated: it recorded 21, 9999 and
+ * 1,099,511,627,776 all ACCEPTED here.
+ */
+describe('F11: the level every sheet computation runs off', () => {
+  it('accepts the bounds and everything between', () => {
+    for (const level of [1, 2, 10, 19, 20]) {
+      expect(
+        rowContractError(
+          'character_class_levels',
+          { ...classLevelRow(), level },
+          classLabel,
+        ),
+      ).toBeNull();
+    }
+  });
+
+  it.each([
+    { level: 21, bound: 'Too big' },
+    { level: 9999, bound: 'Too big' },
+    { level: 1_099_511_627_776, bound: 'Too big' },
+    { level: 0, bound: 'Too small' },
+    { level: -3, bound: 'Too small' },
+  ])('refuses level $level and names the field', ({ level, bound }) => {
+    const error = rowContractError(
+      'character_class_levels',
+      { ...classLevelRow(), level },
+      classLabel,
+    );
+    expect(error).toContain(`${classLabel}.level:`);
+    expect(error).toContain(bound);
+  });
+
+  it('refuses a fractional level, which no writer and no CHECK would catch', () => {
+    expect(
+      rowContractError(
+        'character_class_levels',
+        { ...classLevelRow(), level: 3.5 },
+        classLabel,
+      ),
+    ).toContain(`${classLabel}.level:`);
+  });
+
+  it('does NOT refuse a combined total over 20 — that is a sheet warning', () => {
+    // D11 part 2, and the half of F11 that deliberately did NOT move into the
+    // contracts. Two rows summing to 25 are each individually legal and the
+    // boundary accepts both; `total_level_exceeds_maximum` in
+    // `src/rules/sheet.ts` is what states the problem. A contract that refused
+    // this pair would lose a whole character to state a number.
+    for (const level of [20, 5]) {
+      expect(
+        rowContractError(
+          'character_class_levels',
+          { ...classLevelRow(), level },
+          classLabel,
+        ),
+      ).toBeNull();
+    }
+  });
+});
 
 describe('per-table row contracts', () => {
   it('accepts a well-formed row', () => {
