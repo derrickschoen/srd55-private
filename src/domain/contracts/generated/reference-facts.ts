@@ -304,6 +304,12 @@ export const FOREIGN_KEY_FACTS = [
     targetColumns: ['id'],
   },
   {
+    table: 'spell_version_cantrip_upgrade_levels',
+    columns: ['spell_version_id'],
+    target: 'spell_versions',
+    targetColumns: ['id'],
+  },
+  {
     table: 'spell_version_conditions',
     columns: ['spell_version_id'],
     target: 'spell_versions',

@@ -4,10 +4,8 @@ import {
   extraAttackWeaponScopes,
   isEnumValue,
   rulesEditions,
-  upcastScales,
   type EffectReliabilityCategory,
   type RulesEdition,
-  type UpcastScale,
 } from '../domain/enums';
 import type { ClassFeatureEffect } from '../rules/class-feature-effects';
 import { isRecord } from '../worker/handler';
@@ -63,25 +61,34 @@ export interface CatalogRecord {
   healing: boolean;
   /**
    * THE UPCAST PROGRESSION — the owner's *"a list of levels that can upcast and
-   * a text description"*.
+   * a text description"*, in SPELL SLOT LEVELS.
    *
-   * NET-NEW DOCUMENT FIELDS, NOT A MIGRATION. `spell_versions.upcast_type` and
-   * `upcast_summary` have existed since the Laravel schema and NOTHING HAS EVER
-   * WRITTEN EITHER — the format had no field for them, the importer never
-   * mentioned them, and no database this application can produce has ever held
-   * a non-NULL value in either. So this is a capability being added to the
-   * DOCUMENT FORMAT first and to the schema second, which is the opposite of
-   * how the other three structured values in this change went.
+   * THE LIST IS NOT A THRESHOLD, AND THE OWNER'S OWN EXAMPLE IS WHY: *"Some
+   * spells can be upcast every spell slot level, others only upcast every other
+   * spell slot level (ex. Spiritual weapon)"*. `[2, 4, 6, 8]` and `[2, 3, 4, 5,
+   * 6, 7, 8, 9]` are both legal documents and they describe different spells; a
+   * "from level N upwards" field could not tell them apart.
    *
-   * ALL THREE ARE OPTIONAL AND DEFAULT TO ABSENT. Every catalog document
-   * already in a user's hands omits them, and `stringList`'s `optional` limb
-   * exists for exactly this reason on `tags`. An omitted upcast is not "this
-   * spell does not upcast" — it is "this document does not say", which is what
-   * an empty list and a NULL scale mean together.
+   * BOTH ARE OPTIONAL AND DEFAULT TO ABSENT. Every catalog document already in
+   * a user's hands omits them, and `stringList`'s `optional` limb exists for
+   * exactly this reason on `tags`. An omitted upcast is not "this spell does not
+   * upcast" — it is "this document does not say", which is what an empty list
+   * means.
    */
-  upcastScale: UpcastScale | null;
   upcastLevels: number[];
   upcastSummary: string | null;
+  /**
+   * THE CANTRIP UPGRADE — the CHARACTER levels at which a cantrip's effect
+   * changes, and a separate pair of fields because it is a separate mechanic.
+   *
+   * The SRD prints it as *"when you reach levels 5 …, 11 …, and 17"*. It is not
+   * upcasting: no slot is spent and a cantrip has none to spend. Splitting it
+   * out is what let `upcastLevels` narrow to 1..9 and this list keep 1..20 —
+   * one field cannot carry two bounds, which is the whole reason the discarded
+   * `upcastScale` discriminant existed.
+   */
+  cantripUpgradeLevels: number[];
+  cantripUpgradeSummary: string | null;
 }
 
 /**
@@ -331,25 +338,73 @@ const HIGHEST_SLOT_LEVEL = 9;
 const HIGHEST_CHARACTER_LEVEL = 20;
 
 /**
- * READ THE THREE UPCAST FIELDS, OR REFUSE THE DOCUMENT.
+ * A LIST OF LEVELS: INTEGERS, IN RANGE, NO DUPLICATES, SORTED.
  *
- * THE SCALE AND THE LIST ARE VALIDATED AGAINST EACH OTHER, IN BOTH DIRECTIONS,
- * and that mutual requirement is the whole reason a discriminant was added
- * rather than one bare list of integers:
+ * ONE FUNCTION FOR BOTH LADDERS BECAUSE THE STRUCTURAL RULES ARE THE SAME AND
+ * ONLY THE CEILING DIFFERS. That is the difference the two tables exist to
+ * express, so it is a parameter here and a CHECK constraint there — the same
+ * fact stated at both levels rather than one of them trusting the other (F11).
  *
- *  - LEVELS WITH NO SCALE ARE REFUSED. `[5, 11, 17]` is a cantrip's character
- *    levels and `[5, 6, 7]` is a levelled spell's slot levels, and there is no
- *    way to tell them apart from the integers. Storing them anyway would put a
- *    number on the sheet that means one of two different things.
- *  - A SCALE WITH NO LEVELS IS REFUSED for the mirror reason: it asserts a
- *    shape for a list that is not there, and an importer that accepted it would
- *    write a scale no row is counted in.
+ * Sorted here rather than by every reader: "a list of levels" has one
+ * meaningful order and an author's file should not decide it.
+ */
+function levelList(
+  raw: unknown,
+  field: string,
+  highest: number,
+): number[] {
+  if (raw === undefined || raw === null) {
+    return [];
+  }
+  if (!Array.isArray(raw)) {
+    throw new TypeError(`Catalog field '${field}' must be a list.`);
+  }
+  const levels: number[] = [];
+  for (const level of raw as unknown[]) {
+    if (
+      !Number.isInteger(level) ||
+      Number(level) < 1 ||
+      Number(level) > highest
+    ) {
+      throw new TypeError(
+        `Catalog field '${field}' must contain integers from 1 through ${String(highest)}.`,
+      );
+    }
+    if (levels.includes(Number(level))) {
+      throw new TypeError(
+        `Catalog field '${field}' repeats level ${String(level)}.`,
+      );
+    }
+    levels.push(Number(level));
+  }
+  return levels.sort((left, right) => left - right);
+}
+
+/**
+ * READ THE FOUR PROGRESSION FIELDS, OR REFUSE THE DOCUMENT.
  *
- * THE BOUND DEPENDS ON THE SCALE, which is the check the column's own CHECK
- * cannot make — a CHECK on `spell_version_upcast_levels.level` cannot see the
- * parent's `upcast_scale`, so it enforces the LOOSER 1..20 and this enforces
- * the exact one. Two guards at two levels of knowledge, which is the division
- * `db/schema/columns.ts` already describes between a CHECK and a contract.
+ * TWO INDEPENDENT PAIRS, AND THE INDEPENDENCE IS THE RULING. `upcastLevels` is
+ * SPELL SLOT LEVELS, 1..9. `cantripUpgradeLevels` is CHARACTER LEVELS, 1..20,
+ * and describes the SRD's Cantrip Upgrade — a different mechanic that the owner
+ * ruled gets its own table. Neither list needs the other and neither needs a
+ * scale field, because the FIELD NAME now says which levels are meant. That is
+ * what `upcastScale` was for and it is why it is gone.
+ *
+ * A LIST NEEDS NO SUMMARY AND A SUMMARY NEEDS NO LIST. The old format required
+ * a scale and a list together because a list with no scale could not be read at
+ * all. Nothing here has that problem: `upcastLevels: [2, 3, 4]` is complete on
+ * its own, and `upcastSummary` with no list is a spell whose text describes a
+ * progression the author did not enumerate.
+ *
+ * `upcastScale` IS REFUSED BY NAME RATHER THAN DROPPED. Unknown fields are
+ * dropped silently everywhere else in this format, and doing that here would
+ * read `{"upcastScale": "character_level", "upcastLevels": [5]}` — a cantrip
+ * ladder — as SLOT level 5, storing a number that means something the document
+ * did not say. That is the one thing this parser exists to refuse. The message
+ * names both replacements, so this is not D12's "refuse what you cannot model":
+ * both meanings ARE modelled, under names that say which is which. An explicit
+ * `null` is still accepted and ignored, because every document the project's own
+ * scraper has emitted writes `"upcastScale": null` and it asserts nothing.
  *
  * WHAT IS DELIBERATELY *NOT* CHECKED: that an upcast slot level exceeds the
  * spell's own level. It is a true rule about content and it is a REFUSAL that
@@ -358,65 +413,33 @@ const HIGHEST_CHARACTER_LEVEL = 20;
  * are the ones a document cannot legitimately violate.
  */
 function upcast(value: Record<string, unknown>): {
-  upcastScale: UpcastScale | null;
   upcastLevels: number[];
   upcastSummary: string | null;
+  cantripUpgradeLevels: number[];
+  cantripUpgradeSummary: string | null;
 } {
-  const rawScale = value.upcastScale;
-  let scale: UpcastScale | null = null;
-  if (rawScale !== undefined && rawScale !== null) {
-    if (!isEnumValue(upcastScales, rawScale)) {
-      throw new TypeError(
-        `Catalog field 'upcastScale' must be one of ${upcastScales.join(', ')}.`,
-      );
-    }
-    scale = rawScale;
-  }
-
-  const rawLevels = value.upcastLevels;
-  const levels: number[] = [];
-  if (rawLevels !== undefined && rawLevels !== null) {
-    if (!Array.isArray(rawLevels)) {
-      throw new TypeError("Catalog field 'upcastLevels' must be a list.");
-    }
-    const highest =
-      scale === 'slot_level' ? HIGHEST_SLOT_LEVEL : HIGHEST_CHARACTER_LEVEL;
-    for (const level of rawLevels as unknown[]) {
-      if (
-        !Number.isInteger(level) ||
-        Number(level) < 1 ||
-        Number(level) > highest
-      ) {
-        throw new TypeError(
-          `Catalog field 'upcastLevels' must contain integers from 1 through ${String(highest)}.`,
-        );
-      }
-      if (levels.includes(Number(level))) {
-        throw new TypeError(
-          `Catalog field 'upcastLevels' repeats level ${String(level)}.`,
-        );
-      }
-      levels.push(Number(level));
-    }
-  }
-
-  if (levels.length > 0 && scale === null) {
+  if (value.upcastScale !== undefined && value.upcastScale !== null) {
     throw new TypeError(
-      "Catalog field 'upcastScale' is required when 'upcastLevels' is not empty.",
-    );
-  }
-  if (levels.length === 0 && scale !== null) {
-    throw new TypeError(
-      "Catalog field 'upcastLevels' must not be empty when 'upcastScale' is set.",
+      "Catalog field 'upcastScale' no longer exists: upcasting is measured in spell slot levels only, so 'upcastLevels' is 1 through 9, and a cantrip's character-level ladder is 'cantripUpgradeLevels', 1 through 20.",
     );
   }
 
   return {
-    upcastScale: scale,
-    // Sorted here rather than by every reader: "a list of levels" has one
-    // meaningful order and an author's file should not decide it.
-    upcastLevels: [...levels].sort((left, right) => left - right),
+    upcastLevels: levelList(
+      value.upcastLevels,
+      'upcastLevels',
+      HIGHEST_SLOT_LEVEL,
+    ),
     upcastSummary: nullableString(value.upcastSummary, 'upcastSummary'),
+    cantripUpgradeLevels: levelList(
+      value.cantripUpgradeLevels,
+      'cantripUpgradeLevels',
+      HIGHEST_CHARACTER_LEVEL,
+    ),
+    cantripUpgradeSummary: nullableString(
+      value.cantripUpgradeSummary,
+      'cantripUpgradeSummary',
+    ),
   };
 }
 

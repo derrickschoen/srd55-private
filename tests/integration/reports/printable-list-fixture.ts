@@ -59,9 +59,10 @@ interface PrintableSpellOptions {
   readonly saveAbilities?: readonly string[];
   readonly tags?: readonly string[];
   readonly lists?: readonly string[];
-  readonly upcastScale?: 'slot_level' | 'character_level';
   readonly upcastLevels?: readonly number[];
   readonly upcastSummary?: string | null;
+  readonly cantripUpgradeLevels?: readonly number[];
+  readonly cantripUpgradeSummary?: string | null;
 }
 
 let fixtureSequence = 0;
@@ -127,12 +128,17 @@ function createPrintableSpell(
       [spellId, tag],
     );
   }
-  if (options.upcastScale !== undefined || options.upcastSummary !== undefined) {
+  if (
+    options.upcastSummary !== undefined ||
+    options.cantripUpgradeSummary !== undefined
+  ) {
     db.exec(
-      'UPDATE spell_versions SET upcast_scale = ?, upcast_summary = ? WHERE id = ?',
+      `UPDATE spell_versions
+       SET upcast_summary = ?, cantrip_upgrade_summary = ?
+       WHERE id = ?`,
       [
-        options.upcastScale ?? null,
         options.upcastSummary ?? null,
+        options.cantripUpgradeSummary ?? null,
         spellId,
       ],
     );
@@ -140,6 +146,13 @@ function createPrintableSpell(
   for (const level of options.upcastLevels ?? []) {
     db.exec(
       `INSERT INTO spell_version_upcast_levels (spell_version_id, level)
+       VALUES (?, ?)`,
+      [spellId, level],
+    );
+  }
+  for (const level of options.cantripUpgradeLevels ?? []) {
+    db.exec(
+      `INSERT INTO spell_version_cantrip_upgrade_levels (spell_version_id, level)
        VALUES (?, ?)`,
       [spellId, level],
     );
@@ -246,12 +259,11 @@ export function createPrintableListFixture(
     summary: 'Bolster three creatures.',
     tags: ['concentration'],
     lists: ['Cleric'],
-    // THE UPCAST PROGRESSION, on ONE spell of the five. The other four carry
-    // none, which is what makes the printable card's "print no line at all"
-    // behaviour observable rather than merely stated: a card that printed
-    // `Upcast: —` for a spell whose document said nothing would be asserting
-    // that it cannot be upcast.
-    upcastScale: 'slot_level',
+    // THE UPCAST PROGRESSION, on ONE spell of the five. Three others carry
+    // neither ladder, which is what makes the printable card's "print no line
+    // at all" behaviour observable rather than merely stated: a card that
+    // printed `Upcast: —` for a spell whose document said nothing would be
+    // asserting that it cannot be upcast.
     upcastLevels: [3, 2, 4],
     upcastSummary: 'One additional creature per slot level above 2.',
   });
@@ -282,6 +294,18 @@ export function createPrintableListFixture(
     summary: 'A thorny vine lashes out.',
     attackModes: ['ranged_spell', 'melee_spell'],
     lists: ['Druid'],
+    // THE CANTRIP UPGRADE, ON A CANTRIP, AND ON A DIFFERENT SPELL FROM THE
+    // UPCAST ONE. It is here rather than on `Guidance` because a cantrip in a
+    // long-rest unprepared section is never rendered (`cantripNote`), so a
+    // ladder placed there would assert nothing about the page.
+    //
+    // The levels hold the two mechanics apart where a reader can see it: they
+    // overlap nothing in Bless's slot-level list, and two of the three (11, 17)
+    // are values `spell_version_upcast_levels`'s CHECK now refuses outright. A
+    // renderer that merged the two ladders into one line, or a builder that
+    // read one table for both, would be visible immediately.
+    cantripUpgradeLevels: [17, 5, 11],
+    cantripUpgradeSummary: 'The damage die changes at higher character levels.',
   });
   const goodberry = createPrintableSpell(db, 'Goodberry', {
     school: 'Transmutation',
