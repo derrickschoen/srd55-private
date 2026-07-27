@@ -282,3 +282,55 @@ it.
 
 **Question for you:** should the multiclass work include this selection, or land
 the proficiency union first and add the choice with the guided builder?
+
+**PROCEEDING (2026-07-26, owner asleep, autonomy granted):** as a COMPLETENESS
+ITEM now. The completeness system is already merged and its stated line is
+"something the USER must decide", which this is exactly. The guided builder does
+not exist yet, so making it a builder step would park the finding until the
+builder lands. Reversible: it is one registry entry.
+
+
+---
+
+# OVERNIGHT AUTONOMY — 2026-07-26
+
+The owner went to bed having said: *"go with consensus best judgment and save
+what the input you wanted was to a file. We can rework tonight's work if
+necessary."*
+
+So everything below is a decision I WOULD have asked about and am instead
+proceeding on. Each says what I chose and what the alternative was, so any of it
+can be reversed in the morning without archaeology. Anything genuinely
+irreversible, or that changes what the product IS, still stops and waits.
+
+## Proceeding on
+
+1. **Q11 multiclass skill choice → completeness item.** Above.
+
+2. **The twelve multiclass-entry clauses → a per-class grant set, separate from
+   the Core Traits row.** The clauses grant a SUBSET and the subsets differ
+   sharply — Fighter gives martial weapons plus light/medium armour and shields;
+   Monk gives only the Hit Point Die. Modelling them as "initial-class grants"
+   versus "multiclass-entry grants" is the only shape that does not over-grant.
+   Alternative rejected: a boolean "is multiclass" flag filtering one list,
+   which cannot express Ranger's skill CHOICE.
+
+3. **Weapon proficiency → warn, never refuse (D28).** Already recorded; I will
+   not revisit it without you.
+
+4. **Enums: close the closed ones, passthrough where users supply content.**
+   Die sizes, damage types, conditions, sizes, creature types and spell school
+   are approved. Where a value can arrive by import I use known-set-plus-
+   passthrough (D12), not a closed enum, because a closed enum rejects homebrew.
+
+## NOT proceeding on — these wait for you
+
+- **Anything that changes what the product IS.** The guided builder's shape
+  beyond D11, or any new user-facing surface you have not asked for.
+- **Deleting the frozen `schema-pre-drizzle.sql` fixture.** D9 forbids it and no
+  autonomy grant overrides a rule written to stop a specific mistake.
+- **Resuming anything the archived bridge branch contains.** It stays archived.
+- **The remaining F10 archaeology beyond items 1-3** — pruning the two dormant
+  catalog pivots, and the `character_source_instances.state` vocabulary. Codex
+  flagged both as inherited-LOOKING but possibly load-bearing, and "possibly
+  load-bearing" is not something to resolve while you are asleep.
