@@ -127,11 +127,27 @@ export interface CoverageFact {
 }
 
 /**
- * F4: this application models SPELLCASTING. The concepts marked `not_modelled`
- * below have zero columns in the schema, so the reference must not imply a
- * character sheet exists. `partial` exists because `false` would be a lie about
- * subclass — there are subclass tables and a Subclass column on this very page,
- * they just only cover the subclasses that change spellcasting.
+ * WHAT THIS APPLICATION MODELS — a claim about the DATABASE AND THE DERIVED
+ * NUMBERS, not about which of them this page happens to show.
+ *
+ * A concept marked `not_modelled` has zero columns in the schema and no
+ * derivation anywhere. `partial` says the concept is recorded and something —
+ * not everything — is derived from it; the note carries which half is which.
+ * `modelled` says the application derives it and stands behind the number.
+ *
+ * F4 was the original rule here and it still holds for the concepts that really
+ * have no columns. What has changed since is the SUBJECT: D17, D20 and D24
+ * added a character sheet, D27/D28 added weapon proficiency, and F15 is the
+ * finding that this table went on saying "not modelled" about six concepts the
+ * sheet had begun deriving. Under-claiming is not the safe direction — an AI
+ * consumer told a capability does not exist will either decline to use it or
+ * recompute it badly, which is the exact fabrication this surface exists to
+ * prevent.
+ *
+ * SO THE NOTE MUST SAY WHERE A VALUE LIVES when it is not on this page. This
+ * reference is a projection of the PLANNER screen; the character sheet screen is
+ * a different projection of the same database, and `scope.omits` names what this
+ * reference leaves out of the planner itself.
  */
 export const COVERAGE: readonly CoverageFact[] = [
   { concept: 'character name', state: 'modelled' },
@@ -141,9 +157,12 @@ export const COVERAGE: readonly CoverageFact[] = [
     concept: 'proficiency bonus',
     state: 'modelled',
     note:
-      'Derived from character level. This application applies it only to ' +
-      'spell attack bonuses and save DCs; weapon, skill and saving-throw ' +
-      'proficiencies are not modelled.',
+      'Derived from TOTAL character level, never from the level in one class. ' +
+      'On this page it reaches spell attack bonuses and save DCs. On the ' +
+      'character sheet it also reaches skill checks, saving throws and weapon ' +
+      'attack rolls — and it is WITHHELD from a weapon whose category no class ' +
+      'of this character grants, so a bonus being absent there is a decision ' +
+      'rather than an omission.',
   },
   { concept: 'spellcasting ability', state: 'modelled' },
   { concept: 'caster level', state: 'modelled' },
@@ -162,33 +181,139 @@ export const COVERAGE: readonly CoverageFact[] = [
       '12 classes have any subclass to choose, and nothing in this ' +
       'application requires a subclass at any level.',
   },
-  { concept: 'hit points', state: 'not_modelled' },
-  { concept: 'hit dice', state: 'not_modelled' },
-  { concept: 'armour class', state: 'not_modelled' },
-  { concept: 'skills', state: 'not_modelled' },
-  { concept: 'saving throw proficiencies', state: 'not_modelled' },
-  { concept: 'class features', state: 'not_modelled' },
-  { concept: 'species traits', state: 'not_modelled' },
-  { concept: 'speed', state: 'not_modelled' },
-  { concept: 'size', state: 'not_modelled' },
+  {
+    concept: 'hit points',
+    state: 'modelled',
+    note:
+      'Not on this page — the character sheet screen derives it. A hit point ' +
+      'maximum comes from each class\u2019s hit die, the Constitution ' +
+      'modifier and any species contribution, using the levelling rolls the ' +
+      'user has entered where they exist. A class this application holds no ' +
+      'hit die for makes the sheet state the die it assumed rather than ' +
+      'printing that assumption as a fact.',
+  },
+  {
+    concept: 'hit dice',
+    state: 'partial',
+    note:
+      'Each class\u2019s hit die is seeded content and feeds the hit point ' +
+      'maximum; a class with none recorded prints the absence rather than a ' +
+      'guess. What is NOT tracked is expenditure — no hit dice spent, none ' +
+      'recovered on a rest.',
+  },
+  {
+    concept: 'armour class',
+    state: 'partial',
+    note:
+      'Derived on the character sheet from the armour and shield recorded for ' +
+      'the character plus the Dexterity modifier, with a manual adjustment and ' +
+      'the user\u2019s note for it beside the number. Barbarian and Monk ' +
+      'Unarmored Defense is NOT applied — that feature text is not among this ' +
+      'application\u2019s sources — which is what the manual adjustment is ' +
+      'for.',
+  },
+  {
+    concept: 'skills',
+    state: 'partial',
+    note:
+      'The character sheet derives a modifier for every skill, adding the ' +
+      'proficiency bonus to the ones ticked as proficient. Expertise is NOT ' +
+      'applied, and the two skills a background prints are stored as words ' +
+      'and are not counted — the skill itself has to be ticked to count.',
+  },
+  {
+    concept: 'saving throw proficiencies',
+    state: 'modelled',
+    note:
+      'Seeded per class and derived on the character sheet: the starting ' +
+      'class contributes its two saving throws, a class entered by ' +
+      'multiclassing contributes none, and the sheet names which class ' +
+      'contributed what.',
+  },
+  {
+    concept: 'class features',
+    state: 'partial',
+    note:
+      'The features that change a NUMBER are modelled — Extra Attack, the ' +
+      'Monk\u2019s Martial Arts die, the two Warlock invocations that alter ' +
+      'spellcasting, and the armour and weapon training a class grants. The ' +
+      'feature TEXT for everything else is not seeded, so a printed ' +
+      'sheet\u2019s features section is not reproduced.',
+  },
+  {
+    concept: 'species traits',
+    state: 'partial',
+    note:
+      'A species and its traits are recorded per character, name and ' +
+      'description, copied from a template rather than linked to one. Three ' +
+      'kinds of effect are derived from them: extra hit points, damage ' +
+      'resistances — including naming the ones whose type is still unchosen ' +
+      '— and a speed bonus. Anything else a trait does is prose this ' +
+      'application does not read. A species that grants SPELLS does it ' +
+      'through its source-instance grant rules rather than through a trait ' +
+      'effect, and those slots are on this page like any other.',
+  },
+  {
+    concept: 'speed',
+    state: 'partial',
+    note:
+      'The species base walking speed is recorded and the character sheet ' +
+      'prints it with every standing bonus applied. Only WALKING speed exists ' +
+      'here: no fly, swim, climb or burrow speed is recorded anywhere.',
+  },
+  {
+    concept: 'size',
+    state: 'partial',
+    note:
+      'Recorded on the character\u2019s species, along with its creature ' +
+      'type. NOTHING is derived from either, and neither is printed on the ' +
+      'character sheet.',
+  },
   { concept: 'languages', state: 'not_modelled' },
   {
     concept: 'equipment and weapons',
     state: 'partial',
     note:
-      'A character\u2019s weapons are recorded — name, damage, properties, ' +
-      'range, mastery property, and which of them the user has chosen their ' +
-      'weapon mastery on. NOTHING is derived from them: no attack bonus, no ' +
-      'damage roll, no weapon proficiency, no encumbrance, and no inventory. ' +
-      'Equipment other than weapons is not modelled at all.',
+      'A character\u2019s weapons are recorded — name, simple/martial ' +
+      'category, damage dice and type, properties, range, mastery property, ' +
+      'and which of them the user has chosen their ' +
+      'weapon mastery on. THREE things are derived from them: an attack ' +
+      'bonus, a damage line, and whether a class of this character grants ' +
+      'proficiency in the weapon\u2019s category — a verdict that decides ' +
+      'whether the proficiency bonus is in the attack bonus at all. What is ' +
+      'still NOT derived: whether a weapon is melee or ranged is not ' +
+      'recorded, so both attack formulas are offered rather than one; and ' +
+      'there is no encumbrance and no inventory. Equipment other than weapons ' +
+      'and armour is not modelled at all.',
   },
-  { concept: 'background features', state: 'not_modelled' },
+  {
+    concept: 'background features',
+    state: 'partial',
+    note:
+      'A background is recorded as the words it prints — its name, its three ' +
+      'ability scores, its feat, its two skill proficiencies, its tool and ' +
+      'its two equipment options. Every one of them is TEXT: none is counted ' +
+      'towards a skill modifier, an ability score, or a feat\u2019s effects.',
+  },
 ];
 
+/**
+ * THE OLD SENTENCE SAID "not a character sheet", AND THAT STOPPED BEING TRUE.
+ *
+ * It was written when the application was spellcasting only. D17, D20 and D24
+ * built a character sheet screen with derived hit points, Armor Class, skills
+ * and saves, so the statement outlived its subject (D29's shape) while a test
+ * pinned it. What is still true is the SCOPE OF THIS REFERENCE — it projects
+ * the planner — and that is what the sentence says now.
+ */
 const SCOPE_STATEMENT =
-  'This application is a spell planner, not a character sheet. Only the ' +
-  'concepts marked modelled or partial exist in its database; the ones marked ' +
-  'not modelled have no columns and no values anywhere on this page.';
+  'This reference is a projection of the SPELL PLANNER screen. The same ' +
+  'database also feeds a character sheet screen, which is a different ' +
+  'projection and is not carried here. The coverage table below is therefore a ' +
+  'claim about the APPLICATION rather than about this page: a concept marked ' +
+  'modelled or partial exists in its database, with the note saying where the ' +
+  'value is derived and what part of the concept is not; a concept marked not ' +
+  'modelled has no columns and no values anywhere.';
 
 /**
  * The reference is a projection of the planner screen, not of the whole
@@ -503,7 +628,7 @@ class SourceRegistry {
     sourceType: DomainSourceType | Unrecognised | null,
   ): number {
     if (sourceType === null) return this.#resolveByName(name).ref;
-    return this.#ensure(`typed ${sourceType} ${name}`, name, sourceType)
+    return this.#ensure(`typed\u0000${sourceType}\u0000${name}`, name, sourceType)
       .ref;
   }
 
@@ -512,7 +637,7 @@ class SourceRegistry {
     sourceType: DomainSourceType | Unrecognised,
   ): number {
     const entry = this.#ensure(
-      `typed ${sourceType} ${name}`,
+      `typed\u0000${sourceType}\u0000${name}`,
       name,
       sourceType,
     );
@@ -547,7 +672,7 @@ class SourceRegistry {
     // Two or more: the name is ambiguous and this reference cannot be
     // attributed to either of them, so it also becomes its own entry rather
     // than being silently folded into whichever was registered first.
-    const key = bearers.length === 0 ? `named ${name}` : `ambiguous ${name}`;
+    const key = bearers.length === 0 ? `named\u0000${name}` : `ambiguous\u0000${name}`;
     return this.#ensure(key, name, null);
   }
 
@@ -1106,7 +1231,7 @@ export function agentReferenceSections(
 
   sections.push({
     id: 'scope',
-    heading: 'What this planner models',
+    heading: 'What this application models',
     notes: [
       reference.scope.statement,
       `Machine-readable twin: format ${reference.format}, version ${String(
@@ -1117,7 +1242,10 @@ export function agentReferenceSections(
     tables: [
       {
         caption: 'Coverage',
-        columns: ['Concept', 'Modelled here', 'Note'],
+        // NOT "Modelled here": the column answers for the application, and a
+        // value the character sheet derives is modelled even though this page
+        // does not show it. The note is where "here" gets said.
+        columns: ['Concept', 'Modelled', 'Note'],
         rows: reference.scope.coverage.map((fact) => [
           cell(fact.concept),
           cell(COVERAGE_STATE_TEXT[fact.state]),
