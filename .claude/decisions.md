@@ -1,6 +1,74 @@
 # Binding scope decisions
 
+## F16 — I verified the SHAPE of a thing instead of the thing, three times in one night, and each time it reached the binding record (2026-07-27)
+
+Not a defect in the code. A defect in how findings were produced, written down
+because three tracks in a row had to correct the finding they were implementing,
+and the correction was the same mistake every time.
+
+| Finding | What was checked | What was NOT checked | What it cost |
+|---|---|---|---|
+| **F12** | that the two die CHECKs describe different SUBJECTS | whether either SET matches the source | `1d4` is absent from the Martial Arts extract; the `4` was an unsourced 2014 memory sitting in a CHECK whose stated purpose is that a mis-parse fails the seed |
+| **F11** | a count of level columns carrying a bound | the columns themselves, enumerated | "nine carry the CHECK" is EIGHT, and an eleventh level-bearing column was missed entirely |
+| **F15** | the six `kind:` values of `SHEET_GAPS` | the `detail` prose those kinds carry | the PLAYER-facing sheet said the proficiency bonus "is included in both, whatever the Proficiencies section says" — D33 had withheld it |
+
+In all three the instrument worked, the sweep ran, and the conclusion was wrong,
+because the question asked was one step away from the question that mattered.
+F15 is the sharpest: the entry it appears in explicitly claims "the user-facing
+surface is CORRECT", and that claim was made after LOOKING at `SHEET_GAPS` —
+just at its enumeration rather than its content.
+
+### Why this is not the same as "verify your instrument"
+
+The instrument rule (added earlier tonight, after a NUL detector that reported
+every file and a bash pattern that collapsed to empty) catches a sweep that
+CANNOT find anything. This is the opposite failure: a sweep that finds exactly
+what it was asked for, where the asking was wrong. A validated instrument
+pointed at the wrong question returns a confident, checkable, wrong answer —
+and it is more dangerous than a broken one, because the evidence looks good.
+
+### The rule
+
+**Before recording a finding, state the claim as a sentence about BEHAVIOUR and
+ask what would have to be read to falsify it.** Then read that.
+
+- "the two sets are different" is a claim about sets. "no character can have a
+  d4 Martial Arts die" is a claim about behaviour, and falsifying it means
+  reading the extract.
+- "nine columns carry a bound" is a count. "no level column can hold 21" is
+  behaviour, and falsifying it means enumerating them.
+- "`SHEET_GAPS` has no weapon-proficiency entry" is a claim about a list.
+  "nothing on the sheet tells the player something false about the proficiency
+  bonus" is behaviour, and falsifying it means reading every `detail` string.
+
+The three tracks caught all three because they were implementing, and
+implementation forces contact with content that reading-for-a-summary does not.
+That is a reason to keep dispatching work rather than only auditing, and a
+reason the review phases keep earning their cost.
+
+### What was NOT concluded
+
+That the findings were worthless. All three named a real defect and all three
+were implemented; F11's core measurement reproduced exactly, F15's central claim
+understated the problem rather than inventing it, and F12 correctly overturned
+the brief it was written against. The failure is in the SUPPORTING detail, which
+is exactly where a reader stops checking — and supporting detail in a binding
+file is read as established fact by whoever comes next.
+
+---
+
 ## F15 — The agent reference tells an AI that this app derives no attack bonus and no weapon proficiency. Both are false, and a test PINS the false claim (2026-07-27)
+
+### IMPLEMENTED as `aa078bf`, and it was WORSE than filed.
+
+Nine further false claims were found while fixing it: eight `COVERAGE` entries
+saying `not_modelled` for concepts with tables the sheet derives from, and
+`SCOPE_STATEMENT` calling the app "not a character sheet" with
+`src/ui/screens/sheet/` on disk. **And this entry's own claim that "the
+user-facing surface is CORRECT" was FALSE** — see F16. The guard
+(`tests/unit/docs/ai-reference-claims-agree.test.ts`) binds the doc gap list to
+`SHEET_GAPS` in order; mutation-verified against this entry's exact defect with
+both lists still six items long. Its limits are stated in the test file.
 
 `src/ui/screens/planner/agent-reference.ts:176-183` ships this to an AI consumer
 as ground truth about what the application models:
@@ -86,6 +154,14 @@ output.
 ---
 
 ## F14 — Three source files are INVISIBLE to plain `grep`, and it cost two false negatives in one tick (2026-07-27)
+
+### IMPLEMENTED as `aa078bf`.
+
+Ten NUL bytes, not the nine counted here. Zero NULs now across all 454 tracked
+files; all three read as UTF-8 text; plain `grep` works. `src/sharing/schema.ts`
+already used the escape form, so the convention existed and these three sites
+were simply not following it. `tests/unit/source-is-greppable.test.ts` scans
+every tracked file and self-tests that its detector fires.
 
 ```
 src/queries/character-sheet-builder.ts     1 NUL byte    file(1): data
@@ -933,6 +1009,19 @@ write path to filter one column out fails them.
 ---
 
 ## F11 — The character's OWN level is the least-constrained level in the database, and two untrusted boundaries disagree about it (2026-07-27)
+
+### IMPLEMENTED as `af5fb7e`, with two corrections to this entry.
+
+**EIGHT columns carry the bound, not nine**, and there is an ELEVENTH
+level-bearing column this entry missed: `character_source_instances.
+acquired_at_character_level`. That one is contract-covered, falls back to
+any-integer, and LOOKS like the same gap — but it holds the character's TOTAL
+level, which this very decision deliberately tolerates above 20. Tightening it
+would refuse values the app's own writers produce.
+
+The strongest argument for the change was in neither the finding nor the brief:
+these contracts gate EXPORT too, so a stored 21 is now refused on the way OUT.
+No state exists where export emits a document its own importer would refuse.
 
 Found by an audit of my own choosing during an autonomous tick, not from the
 queue. Proven by execution on both sides; nothing here is argued.
