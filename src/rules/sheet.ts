@@ -312,6 +312,21 @@ export interface SheetWarning {
     | 'roll_exceeds_hit_die'
     /** A stored armour column holding a value its own vocabulary excludes. */
     | 'armor_value_out_of_vocabulary'
+    /**
+     * The levels across this character's classes add up to more than 20.
+     *
+     * F11'S SECOND HALF, AND IT IS A WARNING RATHER THAN A REFUSAL ON PURPOSE.
+     * The per-row bound (1..20 per class) belongs in the row contract, where a
+     * hand-edited backup meets it — no version of this application emits a
+     * class level outside that range, so rejecting one costs nobody anything.
+     * The COMBINED total is different: a document whose classes sum to 25 is
+     * still a whole character, and refusing it at the boundary would lose that
+     * character in order to state a number. D11 part 2 exactly: the guided
+     * builder BLOCKS the choice (`add-source.ts` and `update-class.ts` both
+     * throw "A character cannot exceed level 20"), the boundary TOLERATES it,
+     * and the sheet SAYS so beside the numbers it changed.
+     */
+    | 'total_level_exceeds_maximum'
     /*
      * THE FOUR D28 CODES. All four WARN and none refuses: anyone may carry any
      * weapon and record any armour, and what is withheld is the proficiency
@@ -360,6 +375,69 @@ export function totalCharacterLevel(
     1,
     classes.reduce((sum, entry) => sum + entry.level, 0),
   );
+}
+
+/**
+ * The highest total character level the rules describe.
+ *
+ * `docs/srd/source/multiclassing.txt`: "you can't take a level in a class if
+ * that would cause your total character level to exceed 20." It is also the
+ * ceiling of every `class_level BETWEEN 1 AND 20` CHECK in the schema and of the
+ * `classLevel` row contract — but this constant states the CHARACTER rule, which
+ * is a different fact from the per-class one and is what `totalCharacterLevel`
+ * is measured against.
+ *
+ * FOUR OTHER SITES STILL WRITE THE LITERAL — `add-source.ts:220`/`:244`,
+ * `update-class.ts:111`/`:122`, `src/sharing/schema.ts:1482` and
+ * `classLevel` in `src/domain/contracts/rows.ts`. They are not imported from
+ * here: the contracts layer sits below `src/rules/` and importing upward would
+ * invert it, and the two command modules belong to another track. Collapsing
+ * them is a real follow-up and is recorded rather than half-done.
+ */
+export const MAXIMUM_CHARACTER_LEVEL = 20;
+
+/**
+ * WHAT THE SHEET SAYS ABOUT A CHARACTER WHOSE CLASS LEVELS DO NOT ADD UP.
+ *
+ * The one rule about total level that the row contracts deliberately do NOT
+ * enforce. `character_class_levels.level` is bounded 1..20 per row at the backup
+ * boundary (F11, `classLevel` in `src/domain/contracts/rows.ts`), but the SUM
+ * across a character's classes is not, because refusing a document over it would
+ * lose a whole character to state a number. So it is stated here instead — D11
+ * part 2, the same shape as `no_starting_class` and `assumed_hit_die`.
+ *
+ * IT TAKES `SheetClassLevels` AND NOT `SheetClass`, matching
+ * `StartingClassCandidate` and `ProficiencyClassCandidate`: the question needs a
+ * level and nothing else, and a caller that had to invent a hit die and a
+ * saving-throw list to ask it would eventually write a second copy instead.
+ *
+ * THE NUMBERS ARE NOT CLAMPED, and that is the decision. Capping the total at 20
+ * would silently rewrite what the character records — the same reasoning
+ * `hitPointMaximum` gives for counting an over-large roll in full. Every derived
+ * number is computed from the total AS RECORDED and the warning says which
+ * numbers those are, so a reader can see both what the sheet did and why it is
+ * not a legal character.
+ */
+export function totalLevelWarnings(
+  classes: readonly SheetClassLevels[],
+): readonly SheetWarning[] {
+  const total = totalCharacterLevel(classes);
+  if (total <= MAXIMUM_CHARACTER_LEVEL) {
+    return [];
+  }
+  return [
+    {
+      code: 'total_level_exceeds_maximum',
+      message:
+        `This character has ${String(total)} levels across ` +
+        `${String(classes.length)} ${classes.length === 1 ? 'class' : 'classes'}, ` +
+        `and a character cannot exceed level ${String(MAXIMUM_CHARACTER_LEVEL)}. ` +
+        'The proficiency bonus, the hit point maximum and the multiclass spell ' +
+        `slots below were all computed from ${String(total)} as recorded, not ` +
+        `from ${String(MAXIMUM_CHARACTER_LEVEL)}. Lower a class level to make ` +
+        'the sheet legal.',
+    },
+  ];
 }
 
 /**
@@ -611,7 +689,18 @@ export function hitPointMaximum(input: {
   const conModifier = input.scores.score('constitution').modifier();
   const starting = startingClass(input.classes);
   const chosen = starting.chosen;
-  const warnings: SheetWarning[] = [...starting.warnings];
+  // THE TOTAL-LEVEL WARNING IS RAISED HERE, AND THE PLACE IS A DECISION.
+  //
+  // `CharacterSheetBuilder` concatenates five warning arms and this is the only
+  // one that sees the class LEVELS, so it is the arm through which a total-level
+  // warning can reach the sheet at all. It is also the honest one: this loop is
+  // what actually spends the excess, adding a per-level contribution for every
+  // level past 20, so the warning sits "beside the number it changed" — the rule
+  // the builder's own comment states for this list.
+  const warnings: SheetWarning[] = [
+    ...totalLevelWarnings(input.classes),
+    ...starting.warnings,
+  ];
 
   let maximum = 0;
   for (const entry of input.classes) {
