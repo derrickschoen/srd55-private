@@ -31,7 +31,8 @@ Three rules follow, and every file here obeys them:
    `DEEP_REF_*.md`, so drift is a defect with a known owner rather than an
    ambiguity.
 
-Rule 2 bans copied MEASUREMENTS. It does not ban line ANCHORS — `codecs.ts:15`
+Rule 2 bans copied MEASUREMENTS. It does not ban line ANCHORS —
+`src/db/codecs.ts`: `RowCodec` (`:15`)
 is navigation, not a claim about the world, and stripping them would make this
 library much harder to use. Anchors are held to their own standard instead:
 `tests/unit/docs/ai-reference-anchors-resolve.test.ts` re-checks every one of
@@ -195,11 +196,11 @@ ownership**.
 
 - A track OWNS a set of files and does not edit outside it. D8 records both
   tracks merging with no conflict because they were genuinely disjoint;
-  `decisions.md:375` records the opposite outcome when a split was badly scoped
+  `decisions.md D20` records the opposite outcome when a split was badly scoped
   ("cost an hour of seam repair", against D18).
 - When two tracks want the same file, the second one **records the change and
   implements it as the next increment** rather than editing underneath the
-  first (`decisions.md:490`).
+  first (`decisions.md D19`).
 - Each worktree needs its own `PLAYWRIGHT_PORT` (trap 4 above).
 - Merge evidence is recorded in `decisions.md` as measured counts — vitest
   tests + files, build exit code, Playwright count, table count — and verified

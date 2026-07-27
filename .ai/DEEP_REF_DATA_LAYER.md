@@ -28,7 +28,7 @@ number does not live anywhere.
 
 ### Drizzle at runtime is a BUILD FAILURE, not a convention
 
-`vite.config.ts:59` defines `forbidDrizzleAtRuntime()`, a rollup plugin that
+`vite.config.ts` defines `forbidDrizzleAtRuntime` (`:59`), a rollup plugin that
 fails the production build if any module in any entry graph resolves into a
 `drizzle-*` package.
 
@@ -51,15 +51,16 @@ schema imports is a type import, and it still derives the whole table inventory.
 
 **`db.all` and `db.one` REQUIRE a codec. Omitting one is a compile error.**
 
-```ts
-// src/db/database.ts:59,67
-all<T>(sql: string, bind: QueryBindings | undefined, codec: RowCodec<T>): T[]
-one<T>(sql: string, bind: QueryBindings | undefined, codec: RowCodec<T>): T | null
+`src/db/database.ts`:
 
-// src/db/database.ts:76,80
-allRaw(sql: string, bind?: QueryBindings): SqlRow[]
-oneRaw(sql: string, bind?: QueryBindings): SqlRow | null
-```
+- `all` (`:59`) —
+  `all<T>(sql: string, bind: QueryBindings | undefined, codec: RowCodec<T>): T[]`
+- `one` (`:67`) —
+  `one<T>(sql: string, bind: QueryBindings | undefined, codec: RowCodec<T>): T | null`
+- `allRaw` (`:76`) —
+  `allRaw(sql: string, bind?: QueryBindings): SqlRow[]`
+- `oneRaw` (`:80`) —
+  `oneRaw(sql: string, bind?: QueryBindings): SqlRow | null`
 
 On the DECODED path `bind` is **positional-required**: pass an explicit
 `undefined` when there is nothing to bind. That is what keeps position 2
