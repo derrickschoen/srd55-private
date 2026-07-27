@@ -37,7 +37,13 @@ import type { AbilityScores } from './ability-scores';
 import { AttackBonus } from './attack-bonus';
 import { proficiencyBonus } from './proficiency';
 import { abilityForSkill } from './skills';
-import type { ArmorCategory, ArmorDexBonus } from '../domain/enums';
+import type {
+  ArmorCategory,
+  ArmorDexBonus,
+  HitDieSize,
+  MartialArtsDieSize,
+} from '../domain/enums';
+import { isHitDieSize } from '../domain/enums';
 import type { AttacksPerAction, ExtraAttackGrant } from './extra-attack';
 import { resolveAttacksPerAction } from './extra-attack';
 
@@ -66,7 +72,7 @@ export interface SheetClassLevels {
   readonly class_name: string;
   readonly level: number;
   readonly extra_attack_grants?: readonly ExtraAttackGrant[];
-  readonly martial_arts_dice?: ReadonlyMap<number, number>;
+  readonly martial_arts_dice?: ReadonlyMap<number, MartialArtsDieSize>;
 }
 
 /**
@@ -85,7 +91,7 @@ export interface SheetClass extends SheetClassLevels {
    * including the D4 machine-readable projection — to decide what to say for it,
    * rather than one construction site choosing 8 on everyone's behalf.
    */
-  readonly hit_die: number | null;
+  readonly hit_die: HitDieSize | null;
   readonly is_starting_class: boolean;
   readonly saving_throws: readonly Ability[];
   /**
@@ -228,7 +234,42 @@ export interface ClassProficiencyGrant extends ClassProficiencies {
  * warning naming the class, because a hit point maximum computed from an
  * invented die is not a fact about the character.
  */
-export const ASSUMED_HIT_DIE = 8;
+export const ASSUMED_HIT_DIE: HitDieSize = 8;
+
+/**
+ * A STORED INTEGER THAT IS NOT A HIT DIE IS READ AS NO HIT DIE.
+ *
+ * The one place `HitDieSize` has to be re-established at runtime, and it lives
+ * here rather than in the query builder that calls it because the DEGRADATION
+ * is a sheet rule, not a decoding detail — it is the same rule `ASSUMED_HIT_DIE`
+ * above and the `assumed_hit_die` warning already implement, extended from "no
+ * row" to "a row we cannot read".
+ *
+ * WHY THE COLUMN'S CHECK IS NOT ENOUGH ON ITS OWN — F11's finding, applied.
+ * `class_sheet_traits_check` refuses anything but 6, 8, 10 and 12, but a CHECK
+ * constrains no image created before it existed (see the header of
+ * `db/schema/columns.ts`) and no hand-edited `.sqlite3`. A reader that trusts a
+ * CHECK is not a contract.
+ *
+ * WHY NULL RATHER THAN A THROW OR A PASSTHROUGH:
+ *
+ *  - THROWING would lose the whole character over one catalog cell. D11 part 2:
+ *    the builder blocks, the reader tolerates and states.
+ *  - PASSING IT THROUGH is what F12 measured. A stored 7 reaches
+ *    `fixedHitPointsPerLevel` and yields 4.5 hit points per level — a real,
+ *    plausible, wrong number, which is the failure this change exists to make
+ *    unrepresentable.
+ *
+ * THE PRICE, STATED RATHER THAN GLOSSED: the sheet cannot then tell "this class
+ * has no `class_sheet_traits` row" from "its row holds a value the CHECK
+ * forbids". Both read as absent and the warning says the die is not recorded —
+ * true in both cases, but one bit of information is dropped. Separating them
+ * needs a warning code that carries the rejected value, through a codec with no
+ * channel for one.
+ */
+export function hitDieOrAbsent(stored: number | null): HitDieSize | null {
+  return stored !== null && isHitDieSize(stored) ? stored : null;
+}
 
 /**
  * A character's armour or shield, as VALUES — never a template reference (D1b).
@@ -496,11 +537,27 @@ export function classProficiencyGrants(
  * table would be a second thing to keep in step. The equivalence is not
  * assumed: `tests/unit/rules/sheet.test.ts` asserts this function against all
  * four printed values, transcribed by hand from that table.
+ *
+ * THE PARAMETER IS THE GUARD NOW, AND THE GUARD IT REPLACED WAS WRONG FOR THE
+ * SUBJECT. This took a `number` and threw below 2, which admits every integer
+ * above it: F12 measured `d7 -> 4.5`, `d13 -> 7.5`, `d1001 -> 501.5` hit points
+ * per level. The paragraph above already writes the closed set out in PROSE —
+ * "for d12, d10, d8 and d6 respectively" — while the signature said `number`.
+ * The prose knew what the type did not, which is the gap D25 exists to close.
+ * With `HitDieSize` the wrong call does not run; it does not compile.
+ *
+ * SO NO RUNTIME CHECK IS KEPT HERE, AND THAT IS A DECISION RATHER THAN AN
+ * OMISSION. A guard here could only fire for a value TypeScript never let
+ * through — "code justified by what it protects", the shape AGENTS.md says to
+ * remove. What the old guard reached for is nonetheless real: an integer
+ * arriving off the disk IS untrusted, and F11 is exactly the finding that a
+ * contract trusting a CHECK is no contract. So the runtime test MOVED to the
+ * boundary where such an integer actually arrives — `sheetClassRow` in
+ * `src/queries/character-sheet-builder.ts` re-establishes `HitDieSize` with
+ * `isHitDieSize` at the read, where a value the CHECK would have refused
+ * becomes a stated ABSENCE instead of a fractional hit point maximum.
  */
-export function fixedHitPointsPerLevel(hitDie: number): number {
-  if (!Number.isSafeInteger(hitDie) || hitDie < 2) {
-    throw new RangeError(`Hit die must be an integer of at least 2, got ${String(hitDie)}.`);
-  }
+export function fixedHitPointsPerLevel(hitDie: HitDieSize): number {
   return hitDie / 2 + 1;
 }
 
@@ -876,7 +933,7 @@ export interface MartialArtsDie {
   readonly class_name: string;
   readonly class_level: number;
   /** The die SIZE — `8` for `1d8`, matching `class_martial_arts_dice`. */
-  readonly die: number;
+  readonly die: MartialArtsDieSize;
 }
 
 /**
@@ -911,19 +968,23 @@ export function martialArtsDice(
     if (dice === undefined) {
       continue;
     }
-    let bestLevel: number | null = null;
-    let bestDie = 0;
+    // THE LEVEL AND THE DIE MOVE TOGETHER, IN ONE VARIABLE. They used to be
+    // two, seeded `null` and `0` — and `0` is not a die size, so the pair could
+    // be read apart in a state no Martial Arts die has ever been in. One
+    // nullable record makes "no row at or below this level" the only absence
+    // there is, and `MartialArtsDieSize` has no zero to pick as a placeholder.
+    let best: { readonly level: number; readonly die: MartialArtsDieSize } | null =
+      null;
     for (const [level, die] of dice) {
-      if (level <= entry.level && (bestLevel === null || level > bestLevel)) {
-        bestLevel = level;
-        bestDie = die;
+      if (level <= entry.level && (best === null || level > best.level)) {
+        best = { level, die };
       }
     }
-    if (bestLevel !== null) {
+    if (best !== null) {
       resolved.push({
         class_name: entry.class_name,
         class_level: entry.level,
-        die: bestDie,
+        die: best.die,
       });
     }
   }

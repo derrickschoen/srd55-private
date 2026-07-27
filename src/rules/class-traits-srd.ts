@@ -52,10 +52,16 @@
 import coreTraitsExtract from '../../docs/srd/source/class-core-traits.txt?raw';
 import attackFeaturesExtract from '../../docs/srd/source/attack-class-features.txt?raw';
 import {
+  hitDieSizes,
+  isHitDieSize,
+  isMartialArtsDieSize,
+  martialArtsDieSizes,
   skills,
   weaponProficiencyCategories,
   type Ability,
   type ArmorCategory,
+  type HitDieSize,
+  type MartialArtsDieSize,
   type Skill,
   type WeaponProficiencyCategory,
 } from '../domain/enums';
@@ -91,7 +97,7 @@ export interface SrdWeaponProficiency {
 
 export interface SrdClassTraits {
   readonly class_name: string;
-  readonly hit_die: number;
+  readonly hit_die: HitDieSize;
   readonly saving_throws: readonly Ability[];
   readonly skill_choice_count: number;
   readonly skill_choice_from_any: boolean;
@@ -318,13 +324,22 @@ function fields(
   return values;
 }
 
-/** `D12 per Barbarian level` -> 12. */
-function hitDie(className: string, text: string): number {
+/**
+ * `D12 per Barbarian level` -> 12.
+ *
+ * THE SET IS `hitDieSizes`, NOT A LITERAL, and the error sentence is built from
+ * the same array — so the guard, the CHECK on `class_sheet_traits.hit_die` and
+ * the sentence the seed fails with can no longer drift apart. The parse-side
+ * guard is what makes a mis-parse fail the SEED; the type is what makes a
+ * mis-USE fail the compile.
+ */
+function hitDie(className: string, text: string): HitDieSize {
   const match = /^D(?<size>\d+)\b/.exec(text);
   const size = match === null ? Number.NaN : Number(match.groups?.size);
-  if (![6, 8, 10, 12].includes(size)) {
+  if (!isHitDieSize(size)) {
     throw new SrdClassTraitsError(
-      `${className} hit die ${JSON.stringify(text)} is not one of D6, D8, D10, D12.`,
+      `${className} hit die ${JSON.stringify(text)} is not one of ` +
+        `${hitDieSizes.map((die) => `D${String(die)}`).join(', ')}.`,
     );
   }
   return size;
@@ -630,13 +645,13 @@ const MARTIAL_ARTS_ROW = /^\s+(?<level>\d{1,2})\s+\+\d+\s+\D.*?1d(?<die>\d+)\s*$
  */
 export function parseSrdMartialArtsDice(
   extract: string = attackFeaturesExtract,
-): ReadonlyMap<number, number> {
+): ReadonlyMap<number, MartialArtsDieSize> {
   const lines = normalise(extract).split('\n');
   const start = lines.findIndex((line) => MARTIAL_ARTS_SECTION.test(line));
   if (start === -1) {
     throw new SrdClassTraitsError('no Monk Features table section.');
   }
-  const dice = new Map<number, number>();
+  const dice = new Map<number, MartialArtsDieSize>();
   for (const line of lines.slice(start + 1)) {
     if (line.startsWith('===')) {
       break;
@@ -647,9 +662,15 @@ export function parseSrdMartialArtsDice(
     }
     const level = Number(row.level);
     const die = Number(row.die);
-    if (![4, 6, 8, 10, 12].includes(die)) {
+    // NOT "is not a die size" ANY MORE, AND THE OLD SENTENCE WAS THE TELL. It
+    // was generic-vocabulary prose over a subject-specific list — a set that
+    // was neither the die vocabulary (no 20, no 100) nor this feature's own
+    // column (it admitted a 4 the extract does not print). The message now
+    // names the subject and enumerates `martialArtsDieSizes` itself.
+    if (!isMartialArtsDieSize(die)) {
       throw new SrdClassTraitsError(
-        `Martial Arts die 1d${String(die)} at level ${String(level)} is not a die size.`,
+        `Martial Arts die 1d${String(die)} at level ${String(level)} is not one ` +
+          `of ${martialArtsDieSizes.map((size) => `1d${String(size)}`).join(', ')}.`,
       );
     }
     if (dice.has(level)) {

@@ -17,6 +17,7 @@ import type {
 } from '../../../src/rules/attack-cantrips';
 import { martialArtsDice, type SheetClassLevels } from '../../../src/rules/sheet';
 import type { ExtraAttackGrant } from '../../../src/rules/extra-attack';
+import type { MartialArtsDieSize } from '../../../src/domain/enums';
 import type { WeaponProficiencyVerdict } from '../../../src/rules/multiclass-proficiency';
 
 /**
@@ -35,8 +36,14 @@ import type { WeaponProficiencyVerdict } from '../../../src/rules/multiclass-pro
  * are swapped.
  */
 
-/** The Monk's Martial Arts column, transcribed from the Monk Features table. */
-const MONK_DICE = new Map<number, number>([
+/**
+ * The Monk's Martial Arts column, transcribed from the Monk Features table.
+ *
+ * `MartialArtsDieSize` AND NOT `number`: this transcription is checked against
+ * the closed set at COMPILE time, so a slipped digit here is an error before it
+ * is an expectation.
+ */
+const MONK_DICE = new Map<number, MartialArtsDieSize>([
   [1, 6],
   [2, 6],
   [3, 6],

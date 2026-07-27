@@ -432,6 +432,28 @@ describe('the parse is load-bearing, not incidental', () => {
     ]);
   });
 
+  /**
+   * THE d4 THIS PARSER USED TO ACCEPT.
+   *
+   * Its guard read `[4, 6, 8, 10, 12]` and its message said "is not a die size"
+   * — generic-vocabulary prose over a list that was neither the vocabulary (no
+   * 20, no 100) nor this feature's own column. The bundled extract prints no
+   * 1d4 anywhere, so a mutation that introduces one is exactly the mis-parse
+   * the seed is supposed to die on, and it did not.
+   */
+  it('throws when the Martial Arts table shows a die the extract never prints', () => {
+    // `1d4` is the 2014 Monk's level-1 die and the value the guard admitted;
+    // `1d20` is a die the vocabulary has and this feature never does.
+    for (const wrong of ['1d4', '1d20'] as const) {
+      const mutated = attackFeaturesSource.replace(/1d6(\s*)$/m, `${wrong}$1`);
+      expect(mutated).not.toBe(attackFeaturesSource);
+      expect(mutated).toContain(wrong);
+      expect(() => parseSrdMartialArtsDice(mutated)).toThrow(
+        /is not one of 1d6, 1d8, 1d10, 1d12/,
+      );
+    }
+  });
+
   it('throws when the Martial Arts table loses a level', () => {
     const mutated = attackFeaturesSource.replace(
       /^ +13 +\+5 +Deflect Energy.*$/m,

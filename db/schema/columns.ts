@@ -167,6 +167,54 @@ export const oneOf = (column: string, values: readonly string[]) =>
   sql.raw(`${columnRef(column)} IN (${values.map(enumLiteral).join(', ')})`);
 
 /**
+ * `typeof(column) = 'integer' AND column IN (…)` over a closed INTEGER
+ * vocabulary.
+ *
+ * {@link oneOf} CANNOT DO THIS JOB, and the reason is the one
+ * `class_sheet_traits` stated in a comment above a hand-written literal until
+ * this helper existed: `enumLiteral` single-quotes its members, so `oneOf` over
+ * die sizes would emit `hit_die IN ('6', '8', …)`. That parses — and given
+ * SQLite's cross-type ordering it means something else entirely, because a
+ * stored INTEGER 6 does not compare equal to the TEXT `'6'`. The CHECK would
+ * then reject every row this application writes.
+ *
+ * THE `typeof` LIMB IS INERT ON BOTH COLUMNS THIS GUARDS TODAY, AND THIS
+ * COMMENT SAID THE OPPOSITE UNTIL A REVIEW MEASURED IT. It claimed a REAL `8.0`
+ * "compares equal to 8 and would otherwise pass" a bare `IN` list. It does not:
+ * `hit_die` and `martial_arts_die` are both declared `integer`, so INTEGER
+ * AFFINITY CONVERTS THE REAL TO AN INTEGER BEFORE THE CHECK IS EVALUATED, and
+ * `typeof` then sees `integer` either way. Run over 24 values — 8, 8.0, 8.5,
+ * 6.0, `'8'`, `'8.0'`, `' 8 '`, `'8e0'`, `'eight'`, `x'38'`, 2^53, NaN,
+ * Infinity, 1e19 and the rest — `typeof(c) = 'integer' AND c IN (…)` and a bare
+ * `c IN (…)` accept and reject IDENTICALLY in every case, as bound parameters
+ * and as literals. 8.5 and `x'38'` are refused by the bare list too.
+ *
+ * WHERE IT IS LOAD-BEARING, AND WHY IT STAYS. The mechanism the old comment
+ * described is real; it just does not apply to a column with INTEGER affinity.
+ * On a column with BLOB or NO affinity nothing converts, `8.0` stays a REAL, and
+ * `8.0 IN (6, 8, 10, 12)` is TRUE — the bare list stores a REAL where the type
+ * says integer, and the `typeof` limb is the only thing that refuses it. So the
+ * limb is what makes THIS HELPER'S guarantee — "an INTEGER equal to one of these"
+ * — a property of the helper rather than of its two current call sites' declared
+ * types. `tests/unit/schema-check-constraints.test.ts` executes both halves of
+ * that claim against the engine, so it cannot rot back into a plausible story.
+ *
+ * (It is emphatically NOT redundant in {@link integerAtLeast}, whose reason it
+ * was originally borrowed from: there a bare `>= 1` admits every text value on
+ * an INTEGER column, because affinity leaves `'two'` as TEXT and SQLite orders
+ * TEXT above every number.)
+ *
+ * The vocabulary is passed as the VALUE array from `src/domain/enums.ts`, so
+ * there is no second transcription to keep in step: narrowing
+ * `martialArtsDieSizes` narrows this CHECK at the next `npm run db:schema`.
+ */
+export const integerOneOf = (column: string, values: readonly number[]) =>
+  sql.raw(
+    `typeof(${columnRef(column)}) = 'integer' AND ` +
+      `${columnRef(column)} IN (${values.map(bound).join(', ')})`,
+  );
+
+/**
  * `column IS NULL OR column IN (…)`.
  *
  * The null limb is deliberate and load-bearing: these columns are nullable

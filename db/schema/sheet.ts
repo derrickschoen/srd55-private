@@ -14,6 +14,8 @@ import type {
   Ability,
   ArmorCategory,
   ArmorDexBonus,
+  HitDieSize,
+  MartialArtsDieSize,
   MulticlassSkillPool,
   RulesEdition,
   Skill,
@@ -23,6 +25,8 @@ import {
   abilities,
   armorCategories,
   armorDexBonuses,
+  hitDieSizes,
+  martialArtsDieSizes,
   multiclassSkillPools,
   rulesEditions,
   skills,
@@ -31,6 +35,7 @@ import {
 import {
   datetime,
   integerAtLeast,
+  integerOneOf,
   nullOrIntegerAtLeast,
   oneOf,
   tinyint1,
@@ -124,8 +129,14 @@ export const class_sheet_traits = sqliteTable(
      * D7 would be a mis-parse, and the whole point of a CHECK on catalog
      * content is that a mis-parse fails the seed instead of writing twelve
      * plausible-looking wrong rows.
+     *
+     * `$type<HitDieSize>` NAMES THE SAME SET IN THE TYPE SYSTEM, which is the
+     * half a CHECK cannot do: `fixedHitPointsPerLevel(7)` used to return 4.5
+     * hit points per level and is now a compile error. See `hitDieSizes` in
+     * `src/domain/enums.ts` for where the four sizes come from and for the one
+     * place the type still has to be re-established at runtime (the read).
      */
-    hit_die: integer('hit_die').notNull(),
+    hit_die: integer('hit_die').notNull().$type<HitDieSize>(),
     /**
      * `Choose 2:` / `Choose 3:` / `Choose 4:` — how many skills the class
      * grants at level 1.
@@ -176,10 +187,13 @@ export const class_sheet_traits = sqliteTable(
   },
   (table) => [
     /**
-     * `hit_die IN (6, 8, 10, 12)` is written out rather than built from an enum
-     * because the values are integers and `oneOf` quotes its members — a
-     * `hit_die IN ('6', …)` would be a CHECK that parses and, given SQLite's
-     * type ordering, means something subtly different.
+     * `hit_die IN (6, 8, 10, 12)` IS NO LONGER A HAND-WRITTEN LITERAL. It is
+     * built from `hitDieSizes` — the same array whose TYPE the column's
+     * `$type<HitDieSize>()` names — by `integerOneOf`, which exists because
+     * `oneOf` quotes its members and `hit_die IN ('6', …)` would be a CHECK
+     * that parses and, given SQLite's type ordering, means something subtly
+     * different. That comment used to sit here justifying the transcription;
+     * the transcription is gone and the reason moved to the helper.
      *
      * The `typeof` limb is the D13 finding: a bare `IN` list over integers does
      * reject text, but `skill_choice_count >= 1` alone would not, since every
@@ -187,7 +201,7 @@ export const class_sheet_traits = sqliteTable(
      */
     check(
       'class_sheet_traits_check',
-      sql`typeof(\`hit_die\`) = 'integer' AND \`hit_die\` IN (6, 8, 10, 12) AND ${integerAtLeast(
+      sql`${integerOneOf('hit_die', hitDieSizes)} AND ${integerAtLeast(
         'skill_choice_count',
         1,
       )}`,
@@ -520,14 +534,32 @@ export const class_martial_arts_dice = sqliteTable(
       .$type<ClassDefinitionId>()
       .references(() => class_definitions.id, { onDelete: 'cascade' }),
     class_level: integer('class_level').notNull(),
-    martial_arts_die: integer('martial_arts_die').notNull(),
+    /**
+     * ONE OF FOUR SIZES — 6, 8, 10, 12 — AND THE `4` THAT USED TO BE HERE WAS
+     * NEVER SOURCED. `docs/srd/source/attack-class-features.txt:15-35` prints
+     * all twenty rows and the string `1d4` does not appear anywhere in the
+     * file; the extra rung came from the 2014 edition's Monk, not from the
+     * bundled 5.2 extract. It defeated this CHECK family's stated purpose (see
+     * `class_sheet_traits.hit_die`) at the very first row of the table it
+     * guards. See `martialArtsDieSizes` in `src/domain/enums.ts`.
+     *
+     * A DIFFERENT SUBJECT FROM `hit_die`, DECLARED SEPARATELY, even though the
+     * two sets now have identical members: they are sourced from different
+     * tables and a widening of one is not a widening of the other.
+     */
+    martial_arts_die: integer('martial_arts_die')
+      .notNull()
+      .$type<MartialArtsDieSize>(),
     created_at: datetime()('created_at'),
     updated_at: datetime()('updated_at'),
   },
   (table) => [
     check(
       'class_martial_arts_dice_check',
-      sql`class_level BETWEEN 1 AND 20 AND typeof(\`martial_arts_die\`) = 'integer' AND \`martial_arts_die\` IN (4, 6, 8, 10, 12)`,
+      sql`class_level BETWEEN 1 AND 20 AND ${integerOneOf(
+        'martial_arts_die',
+        martialArtsDieSizes,
+      )}`,
     ),
     uniqueIndex(
       'class_martial_arts_dice_class_definition_id_class_level_unique',
