@@ -5,7 +5,9 @@ import {
   type SqlRow,
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
-import type { SlotBucket } from '../domain/enums';
+import { isEnumValue, multiclassSkillPools } from '../domain/enums';
+import type { MulticlassSkillPool, SlotBucket } from '../domain/enums';
+import { startingClass } from '../rules/sheet';
 import { EligibleSpellSearch } from '../eligibility/eligible-spell-search';
 import { CharacterNotFoundError } from './character-crud';
 import { orderSources } from './order-sources';
@@ -62,6 +64,43 @@ export interface NoSkillProficienciesItem {
   readonly choice_count: number;
 }
 
+/**
+ * A skill this character is owed by a class they MULTICLASSED INTO, and has not
+ * ticked (Q11).
+ *
+ * THREE CLASSES GRANT ONE and no others do — Bard, Ranger and Rogue — so this
+ * item exists for a small, real population rather than nagging everybody. It is
+ * `outstanding` and not a `catalog_gap` on the line
+ * `character-completeness.ts` already draws: only the player can decide which
+ * skill they took.
+ *
+ * IT NAMES THE POOL, which is the whole reason the entry skill needed a
+ * discriminator rather than a count. The Bard's entry skill may be ANY of the
+ * eighteen; the Ranger's and the Rogue's must come from that class's own list.
+ * A remedy that did not say which would send a Ranger to the wrong list.
+ *
+ * IT CANNOT SAY *WHICH* TICK PAID FOR *WHICH* GRANT, and says so rather than
+ * pretending: `character_skill_proficiencies` is a flat set with no provenance,
+ * so all this can compare is the TOTAL owed against the TOTAL ticked. That is
+ * why `outstanding` is a number and not a list of grants.
+ */
+export interface UnmadeMulticlassSkillChoiceItem {
+  readonly kind: 'unmade_multiclass_skill_choice';
+  readonly title: string;
+  readonly detail: string;
+  readonly remedy: string;
+  /** How many skills every class of theirs entitles them to, in total. */
+  readonly entitled: number;
+  readonly chosen: number;
+  readonly outstanding: number;
+  /** The multiclass entries that owe a skill, and where each may be drawn from. */
+  readonly entries: readonly {
+    readonly class_name: string;
+    readonly count: number;
+    readonly pool: Exclude<MulticlassSkillPool, 'none'>;
+  }[];
+}
+
 export interface NoClassItem {
   readonly kind: 'no_class';
   readonly title: string;
@@ -87,7 +126,8 @@ export type CompletenessItem =
   | UnchosenOptionItem
   | NoClassItem
   | OrphanHitPointRollItem
-  | NoSkillProficienciesItem;
+  | NoSkillProficienciesItem
+  | UnmadeMulticlassSkillChoiceItem;
 
 export type CompletenessFinding = CompletenessItem | CatalogGapItem;
 
@@ -582,30 +622,195 @@ export const orphanHitPointRolls: CompletenessCheck = {
   },
 };
 
+/**
+ * One class's contribution to a character's skill entitlement, RESOLVED.
+ *
+ * `via` is what makes the two counts different questions rather than one column
+ * read twice: the class the character STARTED in offers its full
+ * `skill_choice_count`, and every class they multiclassed into offers only its
+ * `multiclass_skill_choice_count`, which is 0 for nine of the twelve.
+ */
+interface SkillEntitlementLine {
+  readonly class_name: string;
+  readonly is_starting_class: boolean;
+  readonly count: number;
+  readonly pool: MulticlassSkillPool | 'initial';
+}
+
+/**
+ * How many skills this character's classes entitle them to, and from where.
+ *
+ * THIS REPLACES A LIVE WRONG NUMBER. The previous computation was
+ * `sum(traits.skill_choice_count)` across every class with NO reference to
+ * `is_starting_class`, so a Fighter 5 / Bard 1 was told they owed 2 + 3 = 5.
+ * The SRD entry grant is 2 (Fighter, the starting class) + 1 (the Bard's entry
+ * clause) = 3. The multiclass entry columns did not exist when that query was
+ * written; they do now, and this is the number they were seeded for.
+ *
+ * IT REUSES `startingClass` RATHER THAN READING THE FLAG, which is why that
+ * resolver was made generic. Reading `is_starting_class` directly here would
+ * disagree with the sheet whenever the flag is missing or duplicated — the
+ * completeness list would count one class's full row while the sheet counted
+ * another's — and two disagreeing answers to "which class did this character
+ * start as" is worse than either.
+ *
+ * A CLASS WITH NO SEEDED TRAITS ROW CONTRIBUTES NOTHING AND IS NOT COUNTED. Its
+ * entitlement is genuinely unknown, and inventing 2 for it would put a number
+ * the user cannot act on into an outstanding item.
+ */
+function skillEntitlement(
+  context: CheckContext,
+): readonly SkillEntitlementLine[] {
+  const rows = context.db.all(
+    `SELECT definition.name AS class_name,
+            level.is_starting_class AS is_starting_class,
+            traits.skill_choice_count AS skill_choice_count,
+            traits.multiclass_skill_choice_count AS entry_count,
+            traits.multiclass_skill_choice_pool AS entry_pool
+       FROM character_class_levels AS level
+       JOIN class_definitions AS definition
+         ON definition.id = level.class_definition_id
+       JOIN class_sheet_traits AS traits
+         ON traits.class_definition_id = level.class_definition_id
+      WHERE level.character_id = ?
+      ORDER BY definition.name, level.id`,
+    [context.characterId],
+    (row) => ({
+      class_name: sqlString(row, 'class_name'),
+      is_starting_class: Number(row.is_starting_class) === 1,
+      skill_choice_count: sqlInteger(row, 'skill_choice_count'),
+      entry_count: sqlInteger(row, 'entry_count'),
+      entry_pool: sqlString(row, 'entry_pool'),
+    }),
+  );
+  const { chosen } = startingClass(rows);
+  return rows.map((row): SkillEntitlementLine => {
+    if (chosen === row) {
+      return {
+        class_name: row.class_name,
+        is_starting_class: true,
+        count: row.skill_choice_count,
+        pool: 'initial',
+      };
+    }
+    // A stored pool outside the vocabulary is read as `none`, which grants
+    // nothing. The CHECK on `class_sheet_traits` ties pool and count together,
+    // so this is only reachable on a hand-edited image — and granting a skill
+    // from a pool nobody can name would be an outstanding item with no remedy.
+    const pool = isEnumValue(multiclassSkillPools, row.entry_pool)
+      ? row.entry_pool
+      : 'none';
+    return {
+      class_name: row.class_name,
+      is_starting_class: false,
+      count: pool === 'none' ? 0 : row.entry_count,
+      pool,
+    };
+  });
+}
+
+function chosenSkillCount(context: CheckContext): number {
+  return Number(
+    context.db.scalar(
+      `SELECT count(*) FROM character_skill_proficiencies WHERE character_id = ?`,
+      [context.characterId],
+    ) ?? 0,
+  );
+}
+
+/**
+ * The multiclass entries that owe a skill, if any of them do.
+ *
+ * NARROWED to the two pools that actually grant, so the item's `entries` field
+ * cannot carry a `none` row — which would be a class listed as owing a skill it
+ * does not owe.
+ */
+function grantingEntries(
+  lines: readonly SkillEntitlementLine[],
+): readonly UnmadeMulticlassSkillChoiceItem['entries'][number][] {
+  const found: UnmadeMulticlassSkillChoiceItem['entries'][number][] = [];
+  for (const line of lines) {
+    if (line.is_starting_class || line.pool === 'initial' || line.pool === 'none') {
+      continue;
+    }
+    if (line.count > 0) {
+      found.push({
+        class_name: line.class_name,
+        count: line.count,
+        pool: line.pool,
+      });
+    }
+  }
+  return found;
+}
+
+export const unmadeMulticlassSkillChoice: CompletenessCheck = {
+  id: 'unmade_multiclass_skill_choice',
+  run(context) {
+    const lines = skillEntitlement(context);
+    const entries = grantingEntries(lines);
+    if (entries.length === 0) {
+      return [];
+    }
+    const entitled = lines.reduce((sum, line) => sum + line.count, 0);
+    const chosen = chosenSkillCount(context);
+    const outstanding = entitled - chosen;
+    if (outstanding <= 0) {
+      return [];
+    }
+    const named = entries
+      .map(
+        (entry) =>
+          `${entry.class_name} (${String(entry.count)}, ` +
+          `${entry.pool === 'any' ? 'any skill' : `from the ${entry.class_name}'s own skill list`})`,
+      )
+      .join('; ');
+    return [
+      {
+        kind: 'unmade_multiclass_skill_choice',
+        title: 'A skill from multiclassing has not been chosen',
+        detail:
+          `Multiclassing into ${named} grants a skill proficiency. Across every ` +
+          `class this character has ${String(entitled)} skill ` +
+          `proficienc${entitled === 1 ? 'y' : 'ies'} ` +
+          `${entitled === 1 ? 'is' : 'are'} owed and ${String(chosen)} ` +
+          `${chosen === 1 ? 'is' : 'are'} ticked, so ` +
+          `${String(outstanding)} remain${outstanding === 1 ? 's' : ''}. ` +
+          'Which tick pays for which grant is not recorded, so this compares ' +
+          'the totals.',
+        remedy:
+          'Tick the outstanding skills on the character sheet, choosing them ' +
+          'from the list named above.',
+        entitled,
+        chosen,
+        outstanding,
+        entries,
+      },
+    ];
+  },
+};
+
 export const noSkillProficiencies: CompletenessCheck = {
   id: 'no_skill_proficiencies',
   run(context) {
-    const chosen = Number(
-      context.db.scalar(
-        `SELECT count(*) FROM character_skill_proficiencies WHERE character_id = ?`,
-        [context.characterId],
-      ) ?? 0,
-    );
+    const chosen = chosenSkillCount(context);
     if (chosen > 0) {
       return [];
     }
-    // How many the character's classes ENTITLE them to. Zero classes, or
-    // classes with no seeded traits row, means there is nothing to say.
-    const entitled = Number(
-      context.db.scalar(
-        `SELECT coalesce(sum(traits.skill_choice_count), 0)
-         FROM character_class_levels AS level
-         JOIN class_sheet_traits AS traits
-           ON traits.class_definition_id = level.class_definition_id
-         WHERE level.character_id = ?`,
-        [context.characterId],
-      ) ?? 0,
-    );
+    const lines = skillEntitlement(context);
+    // STANDS DOWN WHERE `unmade_multiclass_skill_choice` SPEAKS, so the two
+    // partition the population instead of both firing on the same character.
+    // That item says everything this one does AND names the classes and their
+    // pools, so reporting both would be the same fact twice with one of them
+    // less useful.
+    if (grantingEntries(lines).length > 0) {
+      return [];
+    }
+    // How many the character's classes ENTITLE them to — the STARTING class's
+    // full count plus every other class's entry count, which is what the SRD
+    // grants and what the old `sum(skill_choice_count)` got wrong. Zero classes,
+    // or classes with no seeded traits row, means there is nothing to say.
+    const entitled = lines.reduce((sum, line) => sum + line.count, 0);
     if (entitled === 0) {
       return [];
     }
@@ -630,6 +835,7 @@ export const completenessChecks: readonly CompletenessCheck[] = Object.freeze([
   noClass,
   orphanHitPointRolls,
   noSkillProficiencies,
+  unmadeMulticlassSkillChoice,
 ]);
 
 const kindRank: Readonly<Record<CompletenessItem['kind'], number>> = {
@@ -649,6 +855,10 @@ const kindRank: Readonly<Record<CompletenessItem['kind'], number>> = {
   // it changed.
   orphan_hit_point_roll: 3,
   no_skill_proficiencies: 4,
+  // Beside the skill item it partitions with, and after it: a character with
+  // NOTHING ticked is further from done than one who is a single multiclass
+  // skill short. The two never appear together.
+  unmade_multiclass_skill_choice: 5,
 };
 
 function sortKey(item: CompletenessItem): readonly [string, number, string] {
@@ -657,6 +867,9 @@ function sortKey(item: CompletenessItem): readonly [string, number, string] {
   }
   if (item.kind === 'no_skill_proficiencies') {
     return ['', kindRank.no_skill_proficiencies, ''];
+  }
+  if (item.kind === 'unmade_multiclass_skill_choice') {
+    return ['', kindRank.unmade_multiclass_skill_choice, ''];
   }
   if (item.kind === 'orphan_hit_point_roll') {
     return [item.class_name, kindRank.orphan_hit_point_roll, ''];

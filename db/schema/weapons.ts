@@ -18,12 +18,14 @@ import type {
   SrdWeaponGroup,
   WeaponMasteryGrant,
   WeaponMasteryProperty,
+  WeaponProficiencyCategory,
 } from '../../src/domain/enums';
 import {
   rulesEditions,
   srdWeaponGroups,
   weaponMasteryGrants,
   weaponMasteryProperties,
+  weaponProficiencyCategories,
 } from '../../src/domain/enums';
 import {
   datetime,
@@ -86,6 +88,36 @@ export const character_weapons = sqliteTable(
       .$type<CharacterId>()
       .references(() => characters.id, { onDelete: 'cascade' }),
     name: varchar()('name').notNull(),
+    /**
+     * `simple | martial`, or NULL for NOT STATED — D27.
+     *
+     * D27 AMENDS D1b, WHICH HAD STRUCK THIS FIELD DOWN. D1b's reasoning was
+     * that a character stores VALUES and not a reference to the template it was
+     * filled from, and that reasoning survives intact: this is a VALUE copied
+     * once at pre-fill, with no live link back to `weapon_templates` and nothing
+     * to upgrade in place. What falls is only the claim that a character's
+     * weapon needs no category AT ALL. It does: without it every printed attack
+     * adds the proficiency bonus, so a Rogue holding a Greatsword reads too
+     * high, and D28's multiclass proficiency union has nothing to test a weapon
+     * against.
+     *
+     * TWO VALUES WHERE `weapon_templates.srd_group` HAS FOUR, deliberately. The
+     * template's four are the source's own table HEADINGS, melee and ranged
+     * split, and grouping a 38-item picker is all they are for. PROFICIENCY is
+     * granted per CATEGORY: no class's Core Traits row says "Simple melee". The
+     * fold from four to two happens once, in `weaponFromTemplate`, over an
+     * exhaustive switch with no default arm.
+     *
+     * NULLABLE, AND THE NULL IS THE SOURCED ABSENCE D6b PROTECTS. A weapon
+     * someone typed in, or one that arrived on a share link minted before this
+     * column existed, genuinely has no category — and D11 part 2 says the
+     * boundary tolerates. Null means NOT STATED, never `simple`: the sheet says
+     * it cannot check that weapon rather than asserting a proficiency the
+     * character may not have.
+     */
+    proficiency_category: varchar<WeaponProficiencyCategory>()(
+      'proficiency_category',
+    ),
     /**
      * Nullable, and a completeness observation rather than a defect: a user may
      * add "Grandfather's sword" before looking its damage up, and forbidding
@@ -175,6 +207,25 @@ export const character_weapons = sqliteTable(
       'character_weapons_mastery_property_check',
       nullOrOneOf('mastery_property', weaponMasteryProperties),
     ),
+    /**
+     * D27's column, constrained to the two categories a class can grant.
+     *
+     * THE NULL LIMB IS THE POINT and it is not laxity: `nullOrOneOf` is used
+     * exactly where `mastery_property` uses it, for the same D6b reason. What
+     * the limb defends is an IMPORTED character — a share link minted before
+     * this column existed carries no category, and refusing that row would make
+     * someone's character unopenable to close a gap that only costs a warning.
+     *
+     * `'simple'` ON ITS OWN IS ACCEPTED HERE AND REJECTED ON THE TEMPLATE, and
+     * the asymmetry is the whole of D27. `weapon_templates_srd_group_check`
+     * refuses a bare `simple` because that table's vocabulary is the source's
+     * four headings; this column's vocabulary is the two categories the Core
+     * Traits tables name, and `simple` is a member of it.
+     */
+    check(
+      'character_weapons_proficiency_category_check',
+      nullOrOneOf('proficiency_category', weaponProficiencyCategories),
+    ),
     index('character_weapons_character_id_index').on(table.character_id),
   ],
 );
@@ -182,12 +233,28 @@ export const character_weapons = sqliteTable(
 /**
  * The SRD weapon catalog, seeded by parsing `docs/srd/source/weapons-table.txt`.
  *
- * `srd_group` is NOT the `category: simple | martial` field R1 and D1b struck
- * down. That one lived on the CHARACTER'S weapon and implied a proficiency
- * model this app does not have. This one lives only on the catalog row, is
- * never copied into `character_weapons`, and exists so a 38-item picker can be
- * grouped the way the source's own table groups it. A character's weapon has no
- * category, before or after.
+ * `srd_group` IS STILL NOT THE SAME FIELD AS `character_weapons`.
+ * `proficiency_category`, AND THE ORIGINAL COMMENT HERE IS NOW WRONG IN ITS
+ * LAST SENTENCE. It read "A character's weapon has no category, before or
+ * after." D27 amends D1b and gives the character's weapon a nullable
+ * `simple | martial`; leaving that sentence standing would have left the
+ * schema contradicted by a comment in the same file.
+ *
+ * WHAT SURVIVES THE AMENDMENT, and it is most of it. These are two different
+ * vocabularies serving two different jobs, and neither is a reference to the
+ * other:
+ *
+ *  - `srd_group` has FOUR members because they are the source's own table
+ *    HEADINGS, melee and ranged split, and a 38-item picker groups on them. No
+ *    class grants proficiency in "Simple melee", so this vocabulary cannot
+ *    answer a proficiency question and is not asked one.
+ *  - `character_weapons.proficiency_category` has TWO, because that is what the
+ *    Core Traits tables grant.
+ *
+ * IT IS STILL NOT COPIED ACROSS VERBATIM. `weaponFromTemplate` FOLDS four to
+ * two through an exhaustive switch, so the character's row holds a derived
+ * value rather than a second spelling of this column, and D1b's real principle
+ * — a character's weapon is values, with no live link back here — is untouched.
  */
 export const weapon_templates = sqliteTable(
   'weapon_templates',

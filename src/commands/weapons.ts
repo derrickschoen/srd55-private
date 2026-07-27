@@ -11,7 +11,9 @@ import type {
 import {
   isEnumValue,
   weaponMasteryProperties,
+  weaponProficiencyCategories,
   type WeaponMasteryProperty,
+  type WeaponProficiencyCategory,
 } from '../domain/enums';
 import { rowContractError } from '../domain/contracts/rows';
 
@@ -72,6 +74,7 @@ export function resolvesInverseAfterApply(
 /** The columns a weapon's body occupies, in one place so the four writers agree. */
 const WEAPON_COLUMNS = [
   'name',
+  'proficiency_category',
   'damage_dice',
   'damage_type',
   'versatile_damage_dice',
@@ -105,6 +108,10 @@ function nullableText(value: string | null): string | null {
 function weaponValues(weapon: WeaponFields): Record<string, SqlValue> {
   return {
     name: weapon.name.trim(),
+    // NOT normalised through `nullableText`: it is a closed enum, never free
+    // text, and `''` cannot reach here — the payload validator already refuses
+    // anything that is neither null nor a member.
+    proficiency_category: weapon.proficiency_category,
     damage_dice: nullableText(weapon.damage_dice),
     damage_type: nullableText(weapon.damage_type),
     versatile_damage_dice: nullableText(weapon.versatile_damage_dice),
@@ -156,8 +163,17 @@ function readWeapon(
 
 function fieldsFromRow(row: WeaponRow): WeaponFields {
   const mastery = row.mastery_property;
+  const category = row.proficiency_category;
   return {
     name: String(row.name),
+    // An unrecognised stored category reads as NOT STATED, exactly as an
+    // unrecognised `mastery_property` reads as none: this row is user-owned data
+    // written through a validated command, so holding one means the image was
+    // hand-edited, and inventing `simple` for it would assert a proficiency the
+    // character may not have.
+    proficiency_category: isEnumValue(weaponProficiencyCategories, category)
+      ? (category as WeaponProficiencyCategory)
+      : null,
     damage_dice: row.damage_dice === null ? null : String(row.damage_dice),
     damage_type: row.damage_type === null ? null : String(row.damage_type),
     versatile_damage_dice:

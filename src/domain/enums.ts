@@ -226,6 +226,30 @@ export const weaponProficiencyCategories = ['simple', 'martial'] as const;
 export type WeaponProficiencyCategory =
   (typeof weaponProficiencyCategories)[number];
 
+/**
+ * Where the skill a class grants ON MULTICLASS ENTRY may be chosen FROM.
+ *
+ * Three members because the source prints three shapes, and the third is why a
+ * boolean would not do. From `docs/srd/source/multiclass-entry-grants.txt`:
+ *
+ *  - `none` — nine classes grant no skill on entry at all;
+ *  - `class_list` — the Ranger's "one skill of your choice FROM THE RANGER'S
+ *    SKILL LIST" (L116-117) and the Rogue's identical clause (L128-129), both
+ *    of which resolve against that class's own `class_skill_options` rows;
+ *  - `any` — the Bard's "one skill of your choice" (L37-38), with NO
+ *    class-list qualifier, drawn from the whole Skills table.
+ *
+ * THE BARD IS WHY THIS IS NOT A FLAG ON `class_skill_options`. Its entry grant
+ * is not a subset of its own options — the Bard HAS no options rows, because
+ * its Core Traits table prints "Choose any 3 skills" with no list. A per-row
+ * flag can express a subset and nothing else, so the pool has to be a scalar
+ * beside the count. `none` carries a count of 0 and the CHECK on
+ * `class_sheet_traits` ties the two together, so "pool none, count 1" and
+ * "pool any, count 0" are both unstorable.
+ */
+export const multiclassSkillPools = ['none', 'class_list', 'any'] as const;
+export type MulticlassSkillPool = (typeof multiclassSkillPools)[number];
+
 export const freeCastRecoveries = [
   'long_rest',
   'short_rest',

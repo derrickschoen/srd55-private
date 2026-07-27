@@ -29,6 +29,11 @@ import {
   SrdClassTraitsError,
 } from './class-traits-srd';
 import {
+  multiclassSkillColumns,
+  parseSrdMulticlassEntryGrants,
+  SrdMulticlassEntryError,
+} from './multiclass-entry-srd';
+import {
   bundledArmorTemplates,
   BUNDLED_ARMOR_RULES_EDITION,
 } from './armor-srd';
@@ -129,7 +134,102 @@ export function hasBundledSheetContent(db: DatabaseContext): boolean {
                  WHERE k.class_definition_id = t.class_definition_id))`,
     ) ?? 0,
   );
-  return gutted === 0;
+  if (gutted !== 0) {
+    return false;
+  }
+  return hasBundledMulticlassEntryGrants(db);
+}
+
+/**
+ * True when every class's MULTICLASS ENTRY subset is exactly what the extract
+ * says.
+ *
+ * A COUNT WOULD NOT DO HERE, and this is the `hasBundledNamedFeatures` argument
+ * rather than the `class_armor_training` one. Nine of twelve classes grant no
+ * entry skill and three grant no entry armour at all, so "at least one flagged
+ * row" is false for correct content and a non-empty demand would report a
+ * healthy database as broken forever. But the VALUES are exact — the Barbarian
+ * flags Shields and not Light — and a database in which every flag defaulted to
+ * 0 would pass every existence check while telling a Fighter/Barbarian they have
+ * no shield training. So the flagged SETS are compared, member for member.
+ *
+ * Three queries over the whole catalog rather than three per class: twelve
+ * classes times three round trips on every boot is a cost this check does not
+ * need to pay to say the same thing.
+ *
+ * SILENT ON A CLASS THIS DATABASE DOES NOT CARRY, exactly as the seeder is: a
+ * name with no `class_definitions` row simply has no rows to compare.
+ */
+function hasBundledMulticlassEntryGrants(db: DatabaseContext): boolean {
+  const classes = classIdsByName(db);
+  const flagged = (table: string): Map<number, Set<string>> => {
+    const found = new Map<number, Set<string>>();
+    for (const row of db.all(
+      `SELECT class_definition_id, category FROM ${table}
+        WHERE granted_on_multiclass_entry = 1`,
+      undefined,
+      (entry) => ({
+        classId: Number(entry.class_definition_id),
+        category: String(entry.category),
+      }),
+    )) {
+      const set = found.get(row.classId) ?? new Set<string>();
+      set.add(row.category);
+      found.set(row.classId, set);
+    }
+    return found;
+  };
+  const armor = flagged('class_armor_training');
+  const weapons = flagged('class_weapon_proficiencies');
+  const skills = new Map(
+    db
+      .all(
+        `SELECT class_definition_id, multiclass_skill_choice_count,
+                multiclass_skill_choice_pool
+           FROM class_sheet_traits`,
+        undefined,
+        (row) => ({
+          classId: Number(row.class_definition_id),
+          count: Number(row.multiclass_skill_choice_count),
+          pool: String(row.multiclass_skill_choice_pool),
+        }),
+      )
+      .map((row) => [row.classId, row] as const),
+  );
+
+  for (const grant of parseSrdMulticlassEntryGrants()) {
+    const classId = classes.get(grant.class_name);
+    if (classId === undefined) {
+      continue;
+    }
+    if (
+      !sameMembers(armor.get(classId), grant.armor_categories) ||
+      !sameMembers(weapons.get(classId), grant.weapon_categories)
+    ) {
+      return false;
+    }
+    const stored = skills.get(classId);
+    const expected = multiclassSkillColumns(grant.skill_choice);
+    if (
+      stored === undefined ||
+      stored.count !== expected.count ||
+      stored.pool !== expected.pool
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** Set equality, treating an absent set as the empty one. */
+function sameMembers(
+  stored: ReadonlySet<string> | undefined,
+  expected: readonly string[],
+): boolean {
+  const held = stored ?? new Set<string>();
+  return (
+    held.size === expected.length && expected.every((value) => held.has(value))
+  );
 }
 
 /** Boot-time entry point. Returns whether it wrote anything. */
@@ -189,6 +289,18 @@ function seedClassSheetContent(db: DatabaseContext, timestamp: string): void {
   // Parsed here rather than at module scope so a malformed extract throws
   // inside the seeding transaction and leaves nothing half-written.
   const traits = parseSrdClassTraits();
+  // THE ENTRY GRANTS ARE PARSED HERE, INSIDE THE TRANSACTION, AND CHECKED
+  // AGAINST `traits` AS THEY ARE PARSED. `parseSrdMulticlassEntryGrants` throws
+  // if any class's entry grant names an armour category or a weapon category its
+  // own Core Traits row does not have — which is the invariant the per-row flag
+  // depends on, since a category with no row has nothing to flag and would be
+  // silently dropped rather than loudly refused.
+  const entryGrants = new Map(
+    parseSrdMulticlassEntryGrants(undefined, traits).map((grant) => [
+      grant.class_name,
+      grant,
+    ]),
+  );
   const extraAttacks = new Map(
     parseSrdExtraAttackGrants().map((grant) => [grant.class_name, grant.counts]),
   );
@@ -227,21 +339,54 @@ function seedClassSheetContent(db: DatabaseContext, timestamp: string): void {
       );
     }
 
+    const entryGrant = entryGrants.get(entry.class_name);
+    if (entryGrant === undefined) {
+      // Unreachable while both parsers key on `SRD_CLASS_NAMES` — and asserted
+      // rather than defaulted for exactly that reason. Falling back to "grants
+      // nothing on entry" would turn a drift between the two extracts into a
+      // multiclass character quietly losing a proficiency they have.
+      throw new SrdMulticlassEntryError(
+        `${entry.class_name} has a Core Traits block but no "As a Multiclass ` +
+          'Character" clause. The two extracts have drifted.',
+      );
+    }
+    const entrySkill = multiclassSkillColumns(entryGrant.skill_choice);
+
+    // TOOL PROFICIENCIES ARE PARSED AND THEN DROPPED HERE, DELIBERATELY.
+    // `entryGrant.tool_grants` holds the only two the twelve clauses print —
+    // the Bard's "one Musical Instrument of your choice" and the Rogue's
+    // "Thieves' Tools". Neither is seeded, and the reason is D26: a value earns
+    // structure only if it changes a number on the sheet. This application has
+    // no tool vocabulary, nothing computes a modifier from a tool, and a
+    // nullable free-text column here would also flatten a real distinction —
+    // the Bard's grant is a CHOICE and the Rogue's is a FIXED item.
+    //
+    // Dropped at the SEED rather than at the parse so the omission is visible:
+    // the parser still reads them, so a reader can tell "the source grants no
+    // tool" from "we chose not to model it", and the day tools are modelled the
+    // content is already here.
+    void entryGrant.tool_grants;
+
     db.exec(
       `INSERT INTO class_sheet_traits (
          class_definition_id, hit_die, skill_choice_count, skill_choice_from_any,
+         multiclass_skill_choice_count, multiclass_skill_choice_pool,
          created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?)
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(class_definition_id) DO UPDATE SET
          hit_die = excluded.hit_die,
          skill_choice_count = excluded.skill_choice_count,
          skill_choice_from_any = excluded.skill_choice_from_any,
+         multiclass_skill_choice_count = excluded.multiclass_skill_choice_count,
+         multiclass_skill_choice_pool = excluded.multiclass_skill_choice_pool,
          updated_at = excluded.updated_at`,
       [
         classId,
         entry.hit_die,
         entry.skill_choice_count,
         sqlBool(entry.skill_choice_from_any),
+        entrySkill.count,
+        entrySkill.pool,
         timestamp,
         timestamp,
       ],
@@ -266,20 +411,29 @@ function seedClassSheetContent(db: DatabaseContext, timestamp: string): void {
     for (const category of entry.armor_training) {
       db.exec(
         `INSERT INTO class_armor_training (
-           class_definition_id, category, created_at, updated_at
-         ) VALUES (?, ?, ?, ?)`,
-        [classId, category, timestamp, timestamp],
+           class_definition_id, category, granted_on_multiclass_entry,
+           created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?)`,
+        [
+          classId,
+          category,
+          sqlBool(entryGrant.armor_categories.includes(category)),
+          timestamp,
+          timestamp,
+        ],
       );
     }
     for (const proficiency of entry.weapon_proficiencies) {
       db.exec(
         `INSERT INTO class_weapon_proficiencies (
-           class_definition_id, category, property_qualifier, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?)`,
+           class_definition_id, category, property_qualifier,
+           granted_on_multiclass_entry, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?)`,
         [
           classId,
           proficiency.category,
           proficiency.property_qualifier,
+          sqlBool(entryGrant.weapon_categories.includes(proficiency.category)),
           timestamp,
           timestamp,
         ],
