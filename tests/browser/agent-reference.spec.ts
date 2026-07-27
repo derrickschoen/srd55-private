@@ -278,18 +278,28 @@ test('the build reference sections are collapsed, present in the DOM, and never 
 
   const scope = page.locator('details[data-section="scope"]');
   await scope.locator('summary').click();
-  await expect(scope.locator('tr', { hasText: 'hit points' })).toContainText(
+  // F15: this row said "no" while the character sheet screen derived a hit
+  // point maximum from hit dice, Constitution and species effects. The
+  // assertion moved with the claim rather than the other way round.
+  // Anchored: the notes now discuss hit points in three other rows, and an
+  // unanchored substring matches all of them.
+  await expect(scope.locator('tr', { hasText: /^hit points/u })).toContainText(
+    'yes',
+  );
+  // Languages remain genuinely absent — no column anywhere holds one — so the
+  // table must still be able to say "no" about something.
+  await expect(scope.locator('tr', { hasText: /^languages/u })).toContainText(
     'no',
   );
   // Subclass is neither absent nor complete, and the page has a Subclass
   // column, so the coverage row must not claim it is unmodelled.
-  await expect(scope.locator('tr', { hasText: 'subclass' })).toContainText(
+  await expect(scope.locator('tr', { hasText: /^subclass/u })).toContainText(
     'partly',
   );
   expect(
     value.scope.coverage.find((fact) => fact.concept === 'subclass')?.state,
   ).toBe('partial');
-  await expect(scope).toContainText('not a character sheet');
+  await expect(scope).toContainText('character sheet screen');
   await expect(scope).toContainText('System Reference Document 5.2');
 });
 

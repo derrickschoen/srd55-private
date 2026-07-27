@@ -707,40 +707,124 @@ describe('planner build reference JSON block', () => {
     expect(json.toLowerCase()).not.toContain('</script');
   });
 
-  it('states the spellcasting-only scope rather than implying a character sheet', () => {
+  /**
+   * F15: THIS TEST USED TO PIN CLAIMS THAT WERE FALSE.
+   *
+   * It asserted `not_modelled` for hit points, Armor Class, skills, class
+   * features and speed — every one of which the character sheet derives (D17,
+   * D20, D24) — and it asserted the equipment note contained the words
+   * "no attack bonus" and "no weapon proficiency" while `attack-profiles.ts`
+   * computed the first and D32/D33 built the second. A passing test pinning a
+   * false claim is worse than no test: it makes the falsehood look checked.
+   *
+   * So the assertions moved WITH the prose, in one diff, and the direction of
+   * each one is now the direction the code actually goes. Where a claim was
+   * retired, the test says it must not come back rather than saying nothing —
+   * the retired sentence is the thing a future edit is most likely to restore.
+   */
+  it('states what the application models, including what only the sheet derives', () => {
     const { reference } = buildAgentReference(workspace(), completeness);
 
     expect(reference.scope.coverage).toEqual(COVERAGE);
+    const factFor = (concept: string): CoverageFact | undefined =>
+      reference.scope.coverage.find((fact) => fact.concept === concept);
     const stateOf = (concept: string): string | undefined =>
-      reference.scope.coverage.find((fact) => fact.concept === concept)?.state;
+      factFor(concept)?.state;
+
+    // DERIVED ON THE CHARACTER SHEET, so the reference must not tell an AI
+    // consumer they do not exist. Each is a column plus a derivation:
+    // `character_hit_point_rolls` and `class_sheet_traits.hit_die` for hit
+    // points, `character_armor` for Armor Class, `character_skill_proficiencies`
+    // for skills, `class_saving_throw_proficiencies` for saves.
+    for (const concept of ['hit points', 'saving throw proficiencies']) {
+      expect(stateOf(concept)).toBe('modelled');
+    }
+    // Recorded and PARTLY derived — the note carries which half is which.
     for (const concept of [
-      'hit points',
+      'hit dice',
       'armour class',
       'skills',
       'class features',
+      'species traits',
       'speed',
-      'languages',
+      'size',
+      'background features',
     ]) {
-      expect(stateOf(concept)).toBe('not_modelled');
+      expect(stateOf(concept)).toBe('partial');
     }
+    // Still genuinely absent: no column anywhere holds a language.
+    expect(stateOf('languages')).toBe('not_modelled');
+
     // Subclass is neither absent nor complete: there are subclass tables and a
     // Subclass column on the page, covering 2 of 12 classes.
     expect(stateOf('subclass')).toBe('partial');
-    // Weapons moved from not_modelled to partial when `character_weapons`
-    // landed. `partial` and not `modelled`: the weapons themselves are
-    // recorded, nothing is derived from them, and equipment other than weapons
-    // still has no columns anywhere. The note must keep saying so.
+    expect(factFor('subclass')?.note).toContain('2 of the');
+
+    // WEAPONS. `partial` still, but for the opposite half of the reason it used
+    // to be: the derivations exist now and it is the melee/ranged fact, the
+    // encumbrance and the inventory that do not.
     expect(stateOf('equipment and weapons')).toBe('partial');
-    const equipment = reference.scope.coverage.find(
-      (fact) => fact.concept === 'equipment and weapons',
+    const equipment = factFor('equipment and weapons')?.note ?? '';
+    expect(equipment).toContain('attack bonus');
+    expect(equipment).toContain('proficiency');
+    expect(equipment).toContain('no encumbrance');
+    // The three retired falsehoods, each named so it cannot come back quietly.
+    for (const retired of [
+      'NOTHING is derived',
+      'no attack bonus',
+      'no damage roll',
+      'no weapon proficiency',
+    ]) {
+      expect(equipment).not.toContain(retired);
+    }
+
+    // The scope sentence used to say the application is "not a character
+    // sheet". There is a character sheet screen; it says where this reference
+    // stops instead.
+    expect(reference.scope.statement).toContain('SPELL PLANNER');
+    expect(reference.scope.statement).toContain('character sheet screen');
+    expect(reference.scope.statement).not.toContain('not a character sheet');
+  });
+
+  /**
+   * F14: THE COMPOSITE KEYS ARE SEPARATED BY A NUL, AND THE SPELLING CHANGED.
+   *
+   * `SourceRegistry` keys an entry on `typed<NUL>${sourceType}<NUL>${name}`.
+   * The separator was written as a LITERAL NUL byte, which made this file
+   * invisible to plain `grep`; it is now the escape, which is the same string
+   * at runtime. This test is about the PROPERTY the separator buys, so that
+   * whoever finds the escape ugly and reaches for `|` or `::` fails here
+   * instead of shipping a merged source.
+   *
+   * The distinct-pairs half is already covered — see "keeps an imported source
+   * that copies a class source name separate" above, where a feat and a class
+   * share a display name and stay two entries. What is added here is a name
+   * carrying every printable separator a reader might substitute.
+   */
+  it('keeps a source whose NAME contains every printable separator candidate', () => {
+    const hostile = 'Wizard 1|feat::Wizard 1\tWizard 1\nWizard 1';
+    const source = workspace();
+    source.removable_sources = source.removable_sources.map((entry) => ({
+      ...entry,
+      display_name: hostile,
+    }));
+    source.slots = source.slots.map((entry) =>
+      entry.source_type === 'feat' ? { ...entry, source: hostile } : entry,
     );
-    expect(equipment?.note).toContain('no attack bonus');
-    expect(equipment?.note).toContain('no weapon proficiency');
-    const subclass = reference.scope.coverage.find(
-      (fact) => fact.concept === 'subclass',
+    const { reference, withheld } = buildAgentReference(source, null);
+
+    // Two entries, not one: the class keeps its own and the feat keeps its own,
+    // and the hostile name is carried verbatim rather than being sanitised into
+    // something that might collide with a real one.
+    const typed = reference.sources.filter(
+      (entry) => entry.source_type !== null,
     );
-    expect(subclass?.note).toContain('2 of the');
-    expect(reference.scope.statement).toContain('not a character sheet');
+    expect(typed.map((entry) => entry.source_type)).toEqual(['class', 'feat']);
+    expect(typed.map((entry) => entry.slot_count)).toEqual([2, 1]);
+    const featRef = reference.sources.find(
+      (entry) => entry.source_type === 'feat',
+    )!.ref;
+    expect(withheld.source_names.get(featRef)).toBe(hostile);
   });
 });
 
@@ -878,16 +962,22 @@ describe('planner build reference — the two forms hold the same content', () =
   it('gives every coverage field a column', () => {
     const map: ColumnMap<CoverageFact> = {
       concept: 'Concept',
-      state: 'Modelled here',
+      // NOT "Modelled here": the column answers for the application, and hit
+      // points are modelled even though this page never shows one.
+      state: 'Modelled',
       note: 'Note',
     };
     const table = tableIn(sectionById(sections, 'scope'), 'Coverage');
     expect(table.columns).toEqual(declaredColumns(map));
-    const partial = reference.scope.coverage.findIndex(
-      (fact) => fact.state === 'partial',
+    const subclass = reference.scope.coverage.findIndex(
+      (fact) => fact.concept === 'subclass',
     );
-    expect(table.rows[partial]?.[1]?.text).toBe('partly');
-    expect(table.rows[partial]?.[2]?.text).toContain('2 of the');
+    expect(table.rows[subclass]?.[1]?.text).toBe('partly');
+    expect(table.rows[subclass]?.[2]?.text).toContain('2 of the');
+    // Every state renders, so a row cannot go blank unnoticed.
+    expect(
+      new Set(table.rows.map((row) => row[1]?.text)),
+    ).toEqual(new Set(['yes', 'partly', 'no']));
   });
 
   it('gives every source field a column', () => {
