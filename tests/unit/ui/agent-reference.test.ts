@@ -464,8 +464,18 @@ describe('planner build reference projection', () => {
         chosen: 2,
         outstanding: 2,
         entries: [
-          { class_name: 'Bard', count: 1, pool: 'any' },
-          { class_name: 'Ranger', count: 1, pool: 'class_list' },
+          {
+            class_name: 'Bard',
+            count: 1,
+            pool: 'any',
+            available_skills: ['performance'],
+          },
+          {
+            class_name: 'Ranger',
+            count: 1,
+            pool: 'class_list',
+            available_skills: ['perception'],
+          },
         ],
       },
     ],

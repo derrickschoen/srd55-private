@@ -406,6 +406,7 @@ export class CharacterCommandExecutor {
         // undo visibly repeats the action instead of quietly doing something
         // almost right.
         return payload;
+      case 'choose_multiclass_skill':
       case 'update_source_config':
       case 'add_source':
       case 'remove_source':

@@ -10,6 +10,58 @@ import { seedSheetContent } from '../../../src/rules/sheet-srd';
 import { openTestDatabase } from '../../helpers/open-db';
 
 /**
+ * Hand-transcribed from `docs/srd/source/skills-table.txt`, not produced by the
+ * query under test. Performance is deliberately present: no class list contains
+ * it, so it is the load-bearing proof that Bard draws from the vocabulary.
+ */
+const ALL_SKILLS = [
+  'acrobatics',
+  'animal_handling',
+  'arcana',
+  'athletics',
+  'deception',
+  'history',
+  'insight',
+  'intimidation',
+  'investigation',
+  'medicine',
+  'nature',
+  'perception',
+  'performance',
+  'persuasion',
+  'religion',
+  'sleight_of_hand',
+  'stealth',
+  'survival',
+] as const;
+
+/** Hand-transcribed from the Core Ranger Traits table. */
+const RANGER_SKILLS = [
+  'animal_handling',
+  'athletics',
+  'insight',
+  'investigation',
+  'nature',
+  'perception',
+  'stealth',
+  'survival',
+] as const;
+
+/** Hand-transcribed from the Core Rogue Traits table. */
+const ROGUE_SKILLS = [
+  'acrobatics',
+  'athletics',
+  'deception',
+  'insight',
+  'intimidation',
+  'investigation',
+  'perception',
+  'persuasion',
+  'sleight_of_hand',
+  'stealth',
+] as const;
+
+/**
  * Q11 — THE MULTICLASS SKILL CHOICE AS A COMPLETENESS ITEM.
  *
  * THE ENTITLEMENT ARITHMETIC IS THE SUBJECT, and it is what was WRONG before
@@ -95,8 +147,14 @@ describe('the multiclass skill choice as an outstanding item', () => {
     addClass('Fighter', 5, true);
     addClass('Bard', 1, false);
     expect(skillItem()?.entries).toEqual([
-      { class_name: 'Bard', count: 1, pool: 'any' },
+      {
+        class_name: 'Bard',
+        count: 1,
+        pool: 'any',
+        available_skills: ALL_SKILLS,
+      },
     ]);
+    expect(skillItem()?.entries[0]?.available_skills).toContain('performance');
     expect(skillItem()?.detail).toContain('Bard (1, any skill)');
 
     // Same shape of grant, same count, different pool — which is the whole
@@ -107,11 +165,70 @@ describe('the multiclass skill choice as an outstanding item', () => {
     addClass('Fighter', 5, true);
     addClass('Ranger', 1, false);
     expect(skillItem()?.entries).toEqual([
-      { class_name: 'Ranger', count: 1, pool: 'class_list' },
+      {
+        class_name: 'Ranger',
+        count: 1,
+        pool: 'class_list',
+        available_skills: RANGER_SKILLS,
+      },
     ]);
     expect(skillItem()?.detail).toContain(
       "Ranger (1, from the Ranger's own skill list)",
     );
+  });
+
+  it('offers the Rogue class list, enumerated exactly', () => {
+    addClass('Fighter', 5, true);
+    addClass('Rogue', 1, false);
+    expect(skillItem()?.entries).toEqual([
+      {
+        class_name: 'Rogue',
+        count: 1,
+        pool: 'class_list',
+        available_skills: ROGUE_SKILLS,
+      },
+    ]);
+  });
+
+  it('removes every skill the character already holds from the offer', () => {
+    addClass('Fighter', 5, true);
+    addClass('Ranger', 1, false);
+    tickSkills('athletics', 'perception');
+    expect(skillItem()?.entries[0]?.available_skills).toEqual([
+      'animal_handling',
+      'insight',
+      'investigation',
+      'nature',
+      'stealth',
+      'survival',
+    ]);
+  });
+
+  it('requires the seeded count even when it is greater than one', () => {
+    db.exec(
+      `UPDATE class_sheet_traits
+          SET multiclass_skill_choice_count = 2
+        WHERE class_definition_id = ?`,
+      [classId('Ranger')],
+    );
+    addClass('Fighter', 5, true);
+    addClass('Ranger', 1, false);
+    // The Fighter's two initial choices are already paid.
+    tickSkills('arcana', 'history');
+    expect(skillItem()).toMatchObject({
+      outstanding: 2,
+      entries: [
+        {
+          class_name: 'Ranger',
+          count: 2,
+          pool: 'class_list',
+        },
+      ],
+    });
+    tickSkills('perception');
+    expect(skillItem()?.outstanding).toBe(1);
+    tickSkills('stealth');
+    expect(skillItem()).toBeUndefined();
   });
 
   it('swaps the entitlement when the starting class swaps', () => {
@@ -138,6 +255,16 @@ describe('the multiclass skill choice as an outstanding item', () => {
     // ticked one skill was never told they still owed four.
     expect(skillItem()?.outstanding).toBe(1);
     tickSkills('stealth');
+    expect(skillItem()).toBeUndefined();
+  });
+
+  it("clears Bard's completeness item on the skill alone", () => {
+    addClass('Fighter', 5, true);
+    addClass('Bard', 1, false);
+    tickSkills('arcana', 'history');
+    expect(skillItem()?.outstanding).toBe(1);
+
+    tickSkills('performance');
     expect(skillItem()).toBeUndefined();
   });
 
@@ -185,6 +312,28 @@ describe('the multiclass skill choice as an outstanding item', () => {
     expect(
       items().find((item) => item.kind === 'no_skill_proficiencies'),
     ).toMatchObject({ choice_count: 2 });
+  });
+
+  it('offers no choice for each of the nine fixed-grant entries', () => {
+    const fixedGrantClasses = [
+      'Barbarian',
+      'Cleric',
+      'Druid',
+      'Fighter',
+      'Monk',
+      'Paladin',
+      'Sorcerer',
+      'Warlock',
+      'Wizard',
+    ] as const;
+    for (const className of fixedGrantClasses) {
+      db.exec('DELETE FROM character_class_levels WHERE character_id = ?', [
+        characterId,
+      ]);
+      addClass('Bard', 1, true);
+      addClass(className, 1, false);
+      expect(skillItem(), className).toBeUndefined();
+    }
   });
 
   it('does not report both skill items for one character', () => {
@@ -235,7 +384,12 @@ describe('the multiclass skill choice as an outstanding item', () => {
     const item = skillItem();
     expect(item?.entitled).toBe(1);
     expect(item?.entries).toEqual([
-      { class_name: 'Bard', count: 1, pool: 'any' },
+      {
+        class_name: 'Bard',
+        count: 1,
+        pool: 'any',
+        available_skills: ALL_SKILLS,
+      },
     ]);
   });
 });

@@ -235,6 +235,15 @@ export interface SetSkillProficiencyCommand extends CommandBase {
   proficient: boolean;
 }
 
+/**
+ * Complete one multiclass-entry skill choice. Bard's accompanying instrument
+ * choice is made at the table and is deliberately not tracked.
+ */
+export interface ChooseMulticlassSkillCommand extends CommandBase {
+  type: 'choose_multiclass_skill';
+  skill: Skill;
+}
+
 /** D12's escape hatch: a signed adjustment and the reason for it. */
 export interface SetArmorClassAdjustmentCommand extends CommandBase {
   type: 'set_armor_class_adjustment';
@@ -264,6 +273,7 @@ export type CharacterCommandPayload =
   | SetArmorCommand
   | SetHitPointRollCommand
   | SetSkillProficiencyCommand
+  | ChooseMulticlassSkillCommand
   | SetArmorClassAdjustmentCommand
   | RestoreSnapshotCommand;
 
