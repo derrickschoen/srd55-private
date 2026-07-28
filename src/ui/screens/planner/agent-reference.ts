@@ -537,8 +537,8 @@ export interface AgentReference {
   readonly character: {
     readonly id: number;
     readonly name_withheld: true;
-    readonly character_level: number;
-    readonly proficiency_bonus: number;
+    readonly character_level: number | null;
+    readonly proficiency_bonus: number | null;
     readonly revision: number;
     readonly allow_legacy: boolean;
     readonly abilities: Readonly<
@@ -1303,11 +1303,19 @@ export function agentReferenceSections(
           ],
           [
             cell('character level'),
-            cell(String(reference.character.character_level)),
+            cell(
+              reference.character.character_level === null
+                ? 'undetermined'
+                : String(reference.character.character_level),
+            ),
           ],
           [
             cell('proficiency bonus'),
-            cell(signed(reference.character.proficiency_bonus)),
+            cell(
+              reference.character.proficiency_bonus === null
+                ? 'undetermined'
+                : signed(reference.character.proficiency_bonus),
+            ),
           ],
           [cell('workspace revision'), cell(String(reference.character.revision))],
           [

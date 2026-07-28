@@ -69,6 +69,18 @@ describe('the derived character sheet', () => {
 
   afterEach(() => connection.close());
 
+  it('keeps total level and proficiency undetermined when every class row is absent', () => {
+    db.exec(
+      `DELETE FROM character_class_levels WHERE character_id = ?`,
+      [characterId],
+    );
+
+    const sheet = builder.build(characterId);
+
+    expect(sheet.total_level).toBeNull();
+    expect(sheet.proficiency_bonus.value).toBeNull();
+  });
+
   it('takes the proficiency bonus from TOTAL level, not from either class', () => {
     const sheet = builder.build(characterId);
     expect(sheet.total_level).toBe(8);

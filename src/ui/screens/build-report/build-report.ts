@@ -218,7 +218,7 @@ export function renderBuildReport(report: BuildReportResult): string {
         <header class="report-header">
           <p class="eyebrow">Read-only build report</p>
           <h1>${escapeHtml(report.character.name)}</h1>
-          <p>Character level ${report.character.character_level} · Proficiency bonus +${report.character.proficiency_bonus}</p>
+          <p>Character level ${report.character.character_level === null ? 'undetermined' : report.character.character_level} · Proficiency bonus ${report.character.proficiency_bonus === null ? 'undetermined' : `+${report.character.proficiency_bonus}`}</p>
         </header>
 
         <section class="ability-grid" aria-labelledby="abilities-heading">

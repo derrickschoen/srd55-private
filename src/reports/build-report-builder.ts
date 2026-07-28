@@ -33,6 +33,7 @@ import {
 } from '../access/spell-access-builder';
 import { AbilityScores } from '../rules/ability-scores';
 import { CasterContribution } from '../rules/caster-contribution';
+import { characterLevel } from '../rules/character-level';
 import {
   casterLevel,
   maxPreparableLevelForClass,
@@ -411,13 +412,12 @@ export class BuildReportBuilder {
 
     const { classes, contributions, singleClassSlotTables } =
       this.classesAndContributions(characterId);
-    const characterLevel = classes.reduce(
-      (total, item) => total + item.class_level,
-      0,
-    );
+    const level = characterLevel(this.db, characterId);
     const proficiency =
-      character.proficiencyBonusOverride ??
-      proficiencyBonus(characterLevel);
+      level === null
+        ? null
+        : character.proficiencyBonusOverride ??
+          proficiencyBonus(level);
     const sharedCasterLevel = casterLevel(contributions);
     const sharedSlots =
       singleClassSlotTables.length === 1
@@ -440,7 +440,7 @@ export class BuildReportBuilder {
       character: {
         id: character.id,
         name: character.name,
-        character_level: characterLevel,
+        character_level: level,
         proficiency_bonus: proficiency,
         abilities: {
           strength: character.strength,
@@ -679,7 +679,7 @@ export class BuildReportBuilder {
 
   private invalidSelections(
     character: Character,
-    proficiency: number,
+    proficiency: number | null,
     routes: readonly SpellAccessRoute[],
     assessments: readonly BuildReportAssessment[],
   ): WorkspaceSlot[] {
@@ -780,12 +780,14 @@ export class BuildReportBuilder {
           ability,
           attack_bonus:
             score === null ||
+            proficiency === null ||
             versionId === null ||
             !attackVersionIds.has(versionId)
               ? null
               : score.spellAttackBonus(proficiency).value,
           save_dc:
             score === null ||
+            proficiency === null ||
             versionId === null ||
             !saveVersionIds.has(versionId)
               ? null

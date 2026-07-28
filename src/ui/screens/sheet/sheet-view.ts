@@ -69,7 +69,7 @@ function numberRow(
   entry: {
     readonly id: string;
     readonly label: string;
-    readonly value: number;
+    readonly value: number | null;
     readonly formula: string;
   },
   signedValue: boolean,
@@ -77,7 +77,12 @@ function numberRow(
   return {
     id: entry.id,
     label: plain(entry.label),
-    value: signedValue ? signed(entry.value) : String(entry.value),
+    value:
+      entry.value === null
+        ? 'undetermined'
+        : signedValue
+          ? signed(entry.value)
+          : String(entry.value),
     detail: plain(entry.formula),
   };
 }
@@ -102,7 +107,10 @@ export function sheetSections(sheet: CharacterSheet): readonly SheetSection[] {
     {
       id: 'total_level',
       label: plain('Total character level'),
-      value: String(sheet.total_level),
+      value:
+        sheet.total_level === null
+          ? 'undetermined'
+          : String(sheet.total_level),
       detail: plain(
         'The sum across every class. The proficiency bonus is taken from this ' +
           'and never from the level in one class.',
@@ -143,7 +151,11 @@ export function sheetSections(sheet: CharacterSheet): readonly SheetSection[] {
     numberRow(sheet.proficiency_bonus, true),
     numberRow(sheet.hit_points, false),
   ];
-  if (sheet.species_hit_points !== null) {
+  if (
+    sheet.species_hit_points !== null &&
+    sheet.hit_points.value !== null &&
+    sheet.species_hit_points.value !== null
+  ) {
     core.push(numberRow(sheet.species_hit_points, true));
     // THE SEAM THAT HAD NO CALLER BEFORE THIS SHEET. `hitPointMaximum` does not
     // include the species contribution and `effectHitPoints` returns it
@@ -183,7 +195,7 @@ export function sheetSections(sheet: CharacterSheet): readonly SheetSection[] {
     rows: sheet.ability_scores.map((entry) => ({
       id: entry.id,
       label: plain(`${entry.label} ${String(entry.score)}`),
-      value: signed(entry.value),
+      value: entry.value === null ? 'undetermined' : signed(entry.value),
       detail: plain(entry.formula),
     })),
   });
@@ -193,7 +205,7 @@ export function sheetSections(sheet: CharacterSheet): readonly SheetSection[] {
     rows: sheet.saves.map((save) => ({
       id: save.id,
       label: plain(`${save.label}${save.proficient ? ' (proficient)' : ''}`),
-      value: signed(save.value),
+      value: save.value === null ? 'undetermined' : signed(save.value),
       detail: plain(save.formula),
     })),
   });
@@ -203,7 +215,7 @@ export function sheetSections(sheet: CharacterSheet): readonly SheetSection[] {
     rows: sheet.skills.map((skill) => ({
       id: skill.id,
       label: plain(`${skill.label}${skill.proficient ? ' (proficient)' : ''}`),
-      value: signed(skill.value),
+      value: skill.value === null ? 'undetermined' : signed(skill.value),
       detail: plain(skill.formula),
     })),
   });

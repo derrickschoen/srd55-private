@@ -103,6 +103,9 @@ export function toHitLabel(
   if (option === null) {
     return 'To hit: not available';
   }
+  if (option.attack_bonus === null) {
+    return 'To hit: undetermined (character level is undetermined)';
+  }
   return `To hit: ${signed(option.attack_bonus)} (${abilityLabel(option.ability)})`;
 }
 
@@ -285,7 +288,10 @@ function renderProfile(
       `Ability for ${profile.label} with ${weapon.weapon_name}`,
       options.map((option) => ({
         value: option.ability,
-        label: `${abilityLabel(option.ability)} (${signed(option.attack_bonus)})`,
+        label:
+          option.attack_bonus === null
+            ? `${abilityLabel(option.ability)} (undetermined)`
+            : `${abilityLabel(option.ability)} (${signed(option.attack_bonus)})`,
       })),
     );
     control.addEventListener('change', () => {

@@ -5,6 +5,7 @@ import {
 import { CharacterCommandIntegrity } from './integrity';
 import type { SqlRow } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
+import { characterLevel } from '../rules/character-level';
 import type {
   AddSourceCommand as AddSourcePayload,
   RestoreSnapshotCommand,
@@ -170,13 +171,7 @@ export class AddSourceCommand {
 
       validateSourceConfiguration(String(definition.content_key), config);
       this.#before = this.#state.capture(characterId);
-      const totalLevel = Number(
-        this.db.scalar(
-          `SELECT COALESCE(SUM(level), 0)
-           FROM character_class_levels WHERE character_id = ?`,
-          [characterId],
-        ) ?? 0,
-      );
+      const totalLevel = characterLevel(this.db, characterId);
       const now = timestamp();
       const sourceId = this.db.exec(
         `INSERT INTO character_source_instances (
@@ -191,7 +186,9 @@ export class AddSourceCommand {
           Number(definition.id),
           this.displayName(definition, config),
           JSON.stringify(config),
-          Math.max(1, totalLevel),
+          // The column is nullable, so a source added before the class
+          // precondition is satisfied records the absence instead of level 1.
+          totalLevel,
           now,
           now,
         ],
@@ -234,14 +231,12 @@ export class AddSourceCommand {
       throw new TypeError(`${String(definition.name)} is not repeatable.`);
     }
 
-    const otherLevels = Number(
-      this.db.scalar(
-        `SELECT COALESCE(SUM(level), 0)
-         FROM character_class_levels WHERE character_id = ?`,
-        [characterId],
-      ) ?? 0,
-    );
-    if (otherLevels + (level as number) > 20) {
+    const otherLevels = characterLevel(this.db, characterId);
+    const resultingLevel =
+      otherLevels === null
+        ? (level as number)
+        : otherLevels + (level as number);
+    if (resultingLevel > 20) {
       throw new TypeError('A character cannot exceed level 20.');
     }
 
@@ -269,7 +264,7 @@ export class AddSourceCommand {
         characterId,
         classId,
         level as number,
-        otherLevels === 0 ? 1 : 0,
+        otherLevels === null ? 1 : 0,
         now,
         now,
       ],
@@ -296,7 +291,9 @@ export class AddSourceCommand {
         classId,
         `${String(definition.name)} ${String(level)}`,
         JSON.stringify(sourceConfig),
-        otherLevels + 1,
+        // A first class is acquired at character level 1; later classes are
+        // acquired at the next level after the already-recorded total.
+        otherLevels === null ? 1 : otherLevels + 1,
         now,
         now,
       ],

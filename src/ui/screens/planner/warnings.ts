@@ -98,7 +98,9 @@ export function renderWarnings(options: {
     metric('Caster level', String(options.report.caster.caster_level)),
     metric(
       'Proficiency',
-      `+${options.report.character.proficiency_bonus}`,
+      options.report.character.proficiency_bonus === null
+        ? 'Undetermined'
+        : `+${options.report.character.proficiency_bonus}`,
     ),
     metric('Unique spells', String(options.report.summary.unique_spells)),
     metric('Access routes', String(options.report.summary.access_routes)),

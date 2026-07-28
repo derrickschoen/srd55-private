@@ -210,8 +210,8 @@ export interface BuildReport {
   character: {
     id: number;
     name: string;
-    character_level: number;
-    proficiency_bonus: number;
+    character_level: number | null;
+    proficiency_bonus: number | null;
     abilities: Record<Ability, number>;
   };
   caster: {
@@ -293,7 +293,7 @@ export interface EligibleSpell {
 export interface CharacterSummary {
   id: number;
   name: string;
-  level: number;
+  level: number | null;
   classes: string[];
   warning_count: number;
 }

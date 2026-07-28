@@ -108,6 +108,13 @@ describe('warning, class, and snapshot commands', () => {
   }
 
   function activeConflict(characterId: number): string {
+    const classId = classDefinition('Conflict Route Class');
+    db.exec(
+      `INSERT INTO character_class_levels (
+         character_id, class_definition_id, level, is_starting_class
+       ) VALUES (?, ?, 1, 1)`,
+      [characterId, classId],
+    );
     const versions = spellIdentityVersions('Conflict Spell');
     for (const [index, versionId] of versions.entries()) {
       const featId = db.exec(
@@ -559,6 +566,39 @@ describe('warning, class, and snapshot commands', () => {
         [characterId, otherClassId],
       ),
     ).toBe(0);
+
+    await runClass(characterId, {
+      class_definition_id: otherClassId,
+      level: 15,
+      subclass_definition_id: null,
+    });
+    expect(
+      db.allRaw(
+        `SELECT class_definition_id, level, is_starting_class
+         FROM character_class_levels
+         WHERE character_id = ?
+         ORDER BY class_definition_id`,
+        [characterId],
+      ),
+    ).toEqual([
+      {
+        class_definition_id: classId,
+        level: 5,
+        is_starting_class: 1,
+      },
+      {
+        class_definition_id: otherClassId,
+        level: 15,
+        is_starting_class: 0,
+      },
+    ]);
+    await expect(
+      runClass(characterId, {
+        class_definition_id: otherClassId,
+        level: 16,
+        subclass_definition_id: null,
+      }),
+    ).rejects.toThrow('A character cannot exceed level 20.');
   });
 
   it('rolls back every class write when regeneration fails', async () => {

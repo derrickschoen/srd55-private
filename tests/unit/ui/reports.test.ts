@@ -55,6 +55,34 @@ describe('read-only report presentation', () => {
     connection.close();
   });
 
+  it('renders classless level and proficiency as undetermined on both reports', () => {
+    const characterId = db.exec(
+      `INSERT INTO characters (name) VALUES ('Between wizard steps')`,
+    ).lastInsertId;
+
+    const report = new BuildReportBuilder(db).build(characterId);
+    const printable = new PrintableSpellListBuilder(db).build(characterId);
+    const reportMarkup = renderBuildReport(report);
+    const printableMarkup = renderPrintableList(printable);
+
+    expect(report.character).toMatchObject({
+      character_level: null,
+      proficiency_bonus: null,
+    });
+    expect(printable.character).toMatchObject({
+      character_level: null,
+      proficiency_bonus: null,
+    });
+    for (const markup of [reportMarkup, printableMarkup]) {
+      expect(markup).toContain(
+        'Character level undetermined · Proficiency bonus undetermined',
+      );
+      expect(markup).not.toContain(
+        'Character level 0 · Proficiency bonus +1',
+      );
+    }
+  });
+
   it('renders exact source, route, duplicate, and invalid-selection annotations without writes', () => {
     const fixture = createBuildReportFixture(db);
     db.exec(
