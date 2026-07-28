@@ -672,7 +672,8 @@ describe('catalog import persistence', () => {
     expect(
       rpcHarness.context.db.oneRaw(
         `SELECT content_key, display_name, is_active
-         FROM spell_versions`,
+         FROM spell_versions
+         WHERE content_key = '2024:test-spell'`,
       ),
     ).toEqual({
       content_key: '2024:test-spell',

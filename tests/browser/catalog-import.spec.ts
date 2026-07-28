@@ -49,7 +49,11 @@ test('catalog RPC dry-runs, commits atomically, tombstones, and persists across 
   }, catalog);
   expect(dryRun.created).toBe(1);
   expect(
-    await page.evaluate(() => window.staticApp.inspectRows('spell_versions')),
+    await page.evaluate(() =>
+      window.staticApp.inspectRows('spell_versions', {
+        provenance: 'import',
+      }),
+    ),
   ).toEqual([]);
 
   await page.evaluate(
@@ -58,7 +62,11 @@ test('catalog RPC dry-runs, commits atomically, tombstones, and persists across 
     catalog,
   );
   expect(
-    await page.evaluate(() => window.staticApp.inspectRows('spell_versions')),
+    await page.evaluate(() =>
+      window.staticApp.inspectRows('spell_versions', {
+        provenance: 'import',
+      }),
+    ),
   ).toEqual([
     expect.objectContaining({
       content_key: '2024:browser-spell',
@@ -100,7 +108,11 @@ test('catalog RPC dry-runs, commits atomically, tombstones, and persists across 
   ]);
   expect(failed).toBe(true);
   expect(
-    await page.evaluate(() => window.staticApp.inspectRows('spell_versions')),
+    await page.evaluate(() =>
+      window.staticApp.inspectRows('spell_versions', {
+        provenance: 'import',
+      }),
+    ),
   ).toEqual([
     expect.objectContaining({
       content_key: '2024:browser-spell',
@@ -111,7 +123,11 @@ test('catalog RPC dry-runs, commits atomically, tombstones, and persists across 
   await page.reload();
   await ready(page);
   expect(
-    await page.evaluate(() => window.staticApp.inspectRows('spell_versions')),
+    await page.evaluate(() =>
+      window.staticApp.inspectRows('spell_versions', {
+        provenance: 'import',
+      }),
+    ),
   ).toEqual([
     expect.objectContaining({
       content_key: '2024:browser-spell',
@@ -125,7 +141,11 @@ test('catalog RPC dry-runs, commits atomically, tombstones, and persists across 
   await page.reload();
   await ready(page);
   expect(
-    await page.evaluate(() => window.staticApp.inspectRows('spell_versions')),
+    await page.evaluate(() =>
+      window.staticApp.inspectRows('spell_versions', {
+        provenance: 'import',
+      }),
+    ),
   ).toEqual([
     expect.objectContaining({
       content_key: '2024:browser-spell',

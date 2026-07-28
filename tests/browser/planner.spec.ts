@@ -287,11 +287,20 @@ test('planner parity flows persist override, clear, selection, acknowledgement, 
   const picker = page.getByLabel(
     `Spell selection for slot ${invalidSlotId}`,
   );
+  const fixtureMageHandId = await page.evaluate(async () => {
+    const row = (await window.staticApp.inspectRows('spell_versions')).find(
+      (spell) =>
+        spell.display_name === 'Mage Hand' &&
+        spell.school === 'Abjuration',
+    );
+    return Number(row?.id);
+  });
   await picker.fill('Mage Hand');
-  await expect(
-    page.getByRole('option', { name: /Mage Hand/ }),
-  ).toBeVisible();
-  await picker.press('Enter');
+  const fixtureMageHandOption = page.getByRole('option', {
+    name: /Mage Hand L0 · Abjuration/,
+  });
+  await expect(fixtureMageHandOption).toBeVisible();
+  await fixtureMageHandOption.click();
   await expect
     .poll(() =>
       page.evaluate(
@@ -304,7 +313,7 @@ test('planner parity flows persist override, clear, selection, acknowledgement, 
     )
     .toEqual([
       expect.objectContaining({
-        current_spell_version_id: fixture.spellIds.mageHand,
+        current_spell_version_id: fixtureMageHandId,
         state: 'active',
         selection_eligibility: 'valid',
       }),
