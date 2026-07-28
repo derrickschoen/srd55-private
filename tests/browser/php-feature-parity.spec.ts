@@ -381,11 +381,11 @@ test('builds the complete workspace editing contract for the seeded character', 
         chosen_list: 'Wizard',
       }),
       expect.objectContaining({
-        display_name: 'Magic Initiate: Cleric',
+        display_name: 'Report Fixture Feat: Cleric',
         chosen_list: 'Cleric',
       }),
       expect.objectContaining({
-        display_name: 'Magic Initiate: Druid',
+        display_name: 'Report Fixture Feat: Druid',
         chosen_list: 'Druid',
       }),
     ]),
@@ -401,18 +401,18 @@ test('builds the complete workspace editing contract for the seeded character', 
         String(a.display_name).localeCompare(String(b.display_name))),
   ).toEqual([
     {
-      display_name: 'Magic Initiate: Cleric',
+      display_name: 'Magic Initiate: Wizard',
+      chosen_list: 'Wizard',
+      spellcasting_ability: 'intelligence',
+    },
+    {
+      display_name: 'Report Fixture Feat: Cleric',
       chosen_list: 'Cleric',
       spellcasting_ability: 'wisdom',
     },
     {
-      display_name: 'Magic Initiate: Druid',
+      display_name: 'Report Fixture Feat: Druid',
       chosen_list: 'Druid',
-      spellcasting_ability: 'intelligence',
-    },
-    {
-      display_name: 'Magic Initiate: Wizard',
-      chosen_list: 'Wizard',
       spellcasting_ability: 'intelligence',
     },
     {

@@ -309,6 +309,26 @@ function validateKindFields(
   if (kind === 'spellbook_acquisition') {
     nonEmptyString(input, 'acquisitions_config');
   }
+
+  if (kind === 'fighting_style') {
+    nonEmptyString(input, 'style_key');
+  }
+
+  if (kind === 'weapon_mastery') {
+    nonEmptyString(input, 'selection_pool');
+  }
+
+  if (kind === 'skill_proficiency') {
+    const allowsToolInstead = input.allows_tool_instead;
+    if (
+      allowsToolInstead !== undefined &&
+      typeof allowsToolInstead !== 'boolean'
+    ) {
+      throw new TypeError(
+        `Grant rule '${ruleKey}' field 'allows_tool_instead' must be boolean.`,
+      );
+    }
+  }
 }
 
 export class GrantRule {
@@ -319,6 +339,9 @@ export class GrantRule {
   static readonly CAPABILITY: GrantRuleKind = 'capability';
   static readonly SPELLBOOK_ACQUISITION: GrantRuleKind =
     'spellbook_acquisition';
+  static readonly FIGHTING_STYLE: GrantRuleKind = 'fighting_style';
+  static readonly WEAPON_MASTERY: GrantRuleKind = 'weapon_mastery';
+  static readonly SKILL_PROFICIENCY: GrantRuleKind = 'skill_proficiency';
 
   private constructor(
     readonly kind: GrantRuleKind,
@@ -362,6 +385,8 @@ export class GrantRule {
         break;
       case 'choice_from_list':
       case 'choice_from_query':
+      case 'weapon_mastery':
+      case 'skill_proficiency':
         count = positiveInteger(input, 'count', null, ruleKey);
         break;
       default:

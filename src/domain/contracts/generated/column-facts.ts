@@ -417,6 +417,8 @@ export const COLUMN_FACTS = {
     name: { base: 'degraded', notNull: true },
     rules_edition: { base: 'degraded', notNull: true },
     category: { base: 'degraded', notNull: false },
+    min_level: { base: 'integer', notNull: false },
+    ability_points: { base: 'integer', notNull: true },
     repeatable: { base: 'degraded', notNull: true },
     prerequisites: { base: 'degraded', notNull: false },
     grant_rules: { base: 'degraded', notNull: false },

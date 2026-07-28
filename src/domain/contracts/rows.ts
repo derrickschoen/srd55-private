@@ -36,6 +36,7 @@ import {
   damageType,
   domainSourceTypes,
   effectReliabilityCategories,
+  featAbilityPoints,
   materialCostKinds,
   rulesEditions,
   selectionEligibilities,
@@ -214,6 +215,12 @@ const abilityScore = z.int().min(1).max(30);
  */
 const classLevel = z.int().min(1).max(20);
 
+const featAbilityPointsEnum = z.union([
+  z.literal(featAbilityPoints[0]),
+  z.literal(featAbilityPoints[1]),
+  z.literal(featAbilityPoints[2]),
+]);
+
 const nonNegativeInt = z.int().min(0);
 
 /** What an `integer()` column gets when it needs nothing narrower. */
@@ -323,6 +330,7 @@ export const COLUMN_REFINEMENTS = {
   positiveInt,
   abilityScore,
   classLevel,
+  featAbilityPointsEnum,
   nonNegativeInt,
   sqlInteger,
   rulesEditionEnum,
@@ -458,6 +466,7 @@ export type RowContractTable =
  * fails to compile if any of these contracts refuses a value the column allows.
  */
 type NativeContractTable =
+  | 'feat_definitions'
   | 'character_weapons'
   | 'weapon_templates'
   | 'class_weapon_mastery_grants'
@@ -517,6 +526,20 @@ type OptionalRefinementKey = Exclude<
  * forbids.
  */
 const REFINEMENTS = {
+  // --- bundled feat catalog -----------------------------------------------
+  'feat_definitions.id': positiveInt,
+  'feat_definitions.content_key': nonEmptyText,
+  'feat_definitions.name': nonEmptyText,
+  'feat_definitions.rules_edition': rulesEditionEnum,
+  // Open for homebrew grouping names; bundled content writes only `origin`.
+  'feat_definitions.category': sqlText,
+  'feat_definitions.min_level': classLevel,
+  'feat_definitions.ability_points': featAbilityPointsEnum,
+  'feat_definitions.repeatable': sqlBool,
+  'feat_definitions.notes': sqlText,
+  'feat_definitions.created_at': sqlTimestamp,
+  'feat_definitions.updated_at': sqlTimestamp,
+
   // --- user-imported spell catalog ----------------------------------------
   'spell_identities.id': positiveInt,
   'spell_identities.content_key': sqlText,
