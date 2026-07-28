@@ -1,3 +1,4 @@
+import { GUIDED_NEW_ROUTE } from '../../../builder/contracts';
 import type { CharacterRow } from '../../../domain/models';
 import type { CharacterSummary } from '../../../domain/read-models';
 import type {
@@ -229,6 +230,39 @@ function createShell(
   return { main, status, list, transfer, share };
 }
 
+/**
+ * The PRIMARY action (D42): every new character starts in the guided flow, so
+ * the front-door control navigates to the class chooser and persists nothing
+ * itself — the class comes first (D48), and it is chosen over there.
+ */
+function createGuidedStart(
+  context: ScreenContext,
+  cleanups: Cleanup[],
+): HTMLElement {
+  const start = element('a', {
+    className: 'button-primary',
+    text: 'Create a character',
+    attributes: { href: GUIDED_NEW_ROUTE },
+  });
+  cleanups.push(
+    listen(start, 'click', (event) => {
+      event.preventDefault();
+      context.router.navigate(GUIDED_NEW_ROUTE);
+    }),
+  );
+  return element('section', { className: 'start-panel panel' }, [
+    element('div', { className: 'start-copy' }, [
+      element('h2', { text: 'Start a new character' }),
+      element('p', {
+        text:
+          'The guided builder opens with the class choice and walks the ' +
+          'level 1 steps in order.',
+      }),
+    ]),
+    start,
+  ]);
+}
+
 function createForm(
   controller: CharacterListController,
   setError: (error: unknown | null) => void,
@@ -244,11 +278,11 @@ function createForm(
     },
   });
   const button = element('button', {
-    className: 'button-primary',
-    text: 'Create character',
+    className: 'button-secondary',
+    text: 'Create blank character',
     attributes: { type: 'submit' },
   });
-  const form = element('form', { className: 'create-panel panel' }, [
+  const form = element('form', { className: 'create-panel' }, [
     element('label', { text: 'Character name' }, [input]),
     button,
   ]);
@@ -267,12 +301,35 @@ function createForm(
       void controller.create(input.value).catch((error: unknown) => {
         setError(error);
         button.disabled = input.value.trim() === '';
-        button.textContent = 'Create character';
+        button.textContent = 'Create blank character';
       });
     }),
   );
   button.disabled = true;
   return form;
+}
+
+/**
+ * D42's escape hatch: blank creation SURVIVES — import, share and fixtures
+ * need a class-less row, and `queries.characters.create` is untouched — but it
+ * is no longer the front door. It lives collapsed behind an "advanced"
+ * disclosure, reachable in two clicks and visibly secondary.
+ */
+function createBlankEscapeHatch(
+  controller: CharacterListController,
+  setError: (error: unknown | null) => void,
+  cleanups: Cleanup[],
+): HTMLElement {
+  return element('details', { className: 'advanced-create panel' }, [
+    element('summary', { text: 'Advanced: create a blank character' }),
+    element('p', {
+      className: 'advanced-note',
+      text:
+        'Skips the guided builder. A blank character has no class until ' +
+        'one is added in its workspace.',
+    }),
+    createForm(controller, setError, cleanups),
+  ]);
 }
 
 function renderCards(
@@ -299,7 +356,7 @@ function renderCards(
         }),
         element('h2', { text: 'No characters yet' }),
         element('p', {
-          text: 'Name your first character above, then add classes and spell choices.',
+          text: 'Use "Create a character" above to choose a class and start the guided build.',
         }),
       ]),
     );
@@ -445,9 +502,9 @@ export async function renderCharacterList(
       value instanceof Error ? value.message : String(value);
     error.hidden = false;
   };
-  const form = createForm(controller, setError, cleanups);
   shell.main.append(
-    form,
+    createGuidedStart(context, cleanups),
+    createBlankEscapeHatch(controller, setError, cleanups),
     error,
     shell.share,
     shell.transfer,

@@ -6,22 +6,24 @@ import {
 import { createQueriesClient } from '../../../queries/client';
 import type { Route } from '../../router';
 import { defineScreen, type ScreenContext } from '../../screen';
-import { renderGuidedBuildState, renderGuidedNew } from './guided-builder';
+import { createClassChooser } from './class-chooser';
+import { renderGuidedBuildState } from './guided-builder';
 import './styles.css';
 
 /**
- * THE GUIDED-BUILDER SCREEN (dispatch A1).
+ * THE GUIDED-BUILDER SCREEN (dispatches A1 + A3).
  *
  * Shaped after `sheet/screen.ts`, the deliberately simple one: parse, at most
- * one awaited query, one pure render, composed cleanup. Route matching comes
+ * one awaited query, one render, composed cleanup. Route matching comes
  * from the seam's `matchesGuidedNewRoute` / `matchesGuidedBuildRoute` — never
  * hand-rolled, because `src/ui/app.ts` renders the FIRST matching screen in
  * module-path order and a loose matcher here would shadow another screen.
  *
  * NO SESSION STORAGE, READ OR WRITTEN. D48 deleted the pre-class draft
- * outright: `/characters/new` persists nothing, and the build route derives
- * its step from character state alone via `queries.characters.buildState`,
- * so a reload asks the database and nothing else.
+ * outright: `/characters/new` persists nothing until the chooser's single
+ * `createGuided` call, and the build route derives its step from character
+ * state alone via `queries.characters.buildState`, so a reload asks the
+ * database and nothing else.
  */
 function matches(route: Route): boolean {
   return (
@@ -31,13 +33,22 @@ function matches(route: Route): boolean {
 }
 
 async function render(context: ScreenContext): Promise<() => void> {
+  const cleanups: Array<() => void> = [];
   const characterId = matchesGuidedBuildRoute(context.route.segments);
   let view: HTMLElement;
   if (characterId === null) {
     if (!matchesGuidedNewRoute(context.route.segments)) {
       throw new Error('The guided builder requires a valid build route.');
     }
-    view = renderGuidedNew();
+    const client = createQueriesClient(context.rpc);
+    const chooser = createClassChooser({
+      options: await client.guidedClassOptions(),
+      createGuided: (name, classContentKey) =>
+        client.createGuided(name, classContentKey),
+      navigate: (path) => context.router.navigate(path),
+    });
+    view = chooser.element;
+    cleanups.push(chooser.cleanup);
     document.title = 'Create a character';
   } else {
     const state = await createQueriesClient(context.rpc).buildState(
@@ -48,7 +59,6 @@ async function render(context: ScreenContext): Promise<() => void> {
   }
   context.root.replaceChildren(view);
 
-  const cleanups: Array<() => void> = [];
   const links = Array.from(
     context.root.querySelectorAll<HTMLAnchorElement>('a[data-router-link]'),
   );

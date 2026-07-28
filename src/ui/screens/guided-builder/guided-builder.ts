@@ -62,7 +62,8 @@ function stepList(currentStep: BuildStep): HTMLOListElement {
   );
 }
 
-function characterListLink(): HTMLParagraphElement {
+/** The one anchor guided panels share. Points at the list; never the planner. */
+export function characterListLink(): HTMLParagraphElement {
   return element('p', { className: 'guided-nav' }, [
     element('a', {
       text: 'Back to characters',
@@ -71,7 +72,7 @@ function characterListLink(): HTMLParagraphElement {
   ]);
 }
 
-function shell(
+export function guidedShell(
   currentStep: BuildStep,
   panel: HTMLElement,
 ): HTMLElement {
@@ -82,32 +83,6 @@ function shell(
     stepList(currentStep),
     panel,
   ]);
-}
-
-/**
- * `/characters/new` — the class step's home. The chooser itself is a later
- * dispatch (A2/A3); until it lands this says so plainly rather than showing an
- * empty control, and states the D48 invariant the route is built on: nothing
- * persists before a class is chosen.
- */
-export function renderGuidedNew(): HTMLElement {
-  const panel = element(
-    'section',
-    {
-      className: 'guided-panel',
-      attributes: { 'data-panel': 'class-chooser-pending' },
-    },
-    [
-      element('h2', { text: 'Choose a class' }),
-      element('p', {
-        text:
-          'A guided character starts with its class, and nothing is saved ' +
-          'until a class is chosen. The class chooser is not built yet.',
-      }),
-      characterListLink(),
-    ],
-  );
-  return shell('class', panel);
 }
 
 function notFoundView(): HTMLElement {
@@ -194,5 +169,5 @@ export function renderGuidedBuildState(
     state.current_step === 'class'
       ? classlessPanel()
       : terminalPanel(state.current_step);
-  return shell(state.current_step, panel);
+  return guidedShell(state.current_step, panel);
 }

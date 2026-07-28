@@ -296,14 +296,36 @@ export const GUIDED_PANEL = Object.freeze({
   stepNotBuilt: 'step-not-built',
   /** Shown for a blank-created character opened at the build route. */
   classless: 'classless-character',
-  /** The class step's shell at `/characters/new` until A2/A3 land. */
-  classChooserPending: 'class-chooser-pending',
+  /**
+   * The class chooser at `/characters/new`.
+   *
+   * A1 shipped a placeholder here named `class-chooser-pending`, described in
+   * this file as valid only until A3 landed. A3 landed and replaced it, and the
+   * implementer reported that nothing in the seam named the real panel — so the
+   * two agents would have picked their own locators again. Retired rather than
+   * kept beside its replacement: a constant nothing renders is a trap for the
+   * next reader, who cannot tell a dead value from a live one.
+   */
+  classChooser: 'class-chooser',
   /** No such character. */
   notFound: 'not-found',
 } as const);
 
 /** The attribute the panels above are selected by: `data-panel="…"`. */
 export const GUIDED_PANEL_ATTRIBUTE = 'data-panel';
+
+/**
+ * The inverse of `matchesGuidedBuildRoute`.
+ *
+ * Missing until A3, which is a real gap and not a nicety: the matcher told both
+ * agents how to READ the route and nothing told them how to WRITE it, so the
+ * production code and the browser proof could have formatted the same path
+ * differently and only disagreed at runtime. A round trip through both is worth
+ * asserting.
+ */
+export function guidedBuildPath(characterId: number): string {
+  return `/characters/${characterId}/build/levels/1`;
+}
 
 /* ------------------------------------------------------------ RPC methods */
 
