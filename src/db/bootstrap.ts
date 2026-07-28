@@ -11,13 +11,15 @@ import { ensureBundledOriginContent } from '../rules/origins-srd';
 import { ensureBundledSheetContent } from '../rules/sheet-srd';
 import { ensureBundledSpellContent } from '../rules/spells-srd';
 import { ensureBundledClassEquipment } from '../rules/class-equipment-srd';
+import { ensureBundledFeatContent } from '../rules/feats-srd';
 
 /**
  * The bundled content every application database is expected to carry: the SRD
  * class and subclass progression catalog, the read-only SRD spell catalog, the
  * SRD weapon catalog with its weapon-mastery content, the SRD species and
- * background template catalog, and the sheet core — per-class hit dice, saving
- * throws, skill and proficiency lists, plus the armour templates.
+ * background template catalog, the SRD feat catalog, and the sheet core —
+ * per-class hit dice, saving throws, skill and proficiency lists, plus the
+ * armour templates.
  *
  * ORDER MATTERS, AND IT NOW MATTERS IN THREE PLACES RATHER THAN TWO.
  *
@@ -47,6 +49,7 @@ export const applicationSeed: DatabaseSeed = (db) => {
   ensureBundledSheetContent(db);
   ensureBundledClassEquipment(db);
   ensureBundledOriginContent(db);
+  ensureBundledFeatContent(db);
   ensureBundledSpellContent(db);
 };
 

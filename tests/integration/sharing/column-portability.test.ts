@@ -1319,14 +1319,81 @@ type RecipientSeededColumn = {
 };
 
 /**
- * D30 classification for the new catalog table.
+ * D30 classification for recipient-seeded catalog tables.
  *
- * Every column is omitted because the entire row is recipient-seeded SRD class
- * catalog content, not character data. The per-column fixtures are deliberately
+ * Every column is omitted because these rows are reconstructed from bundled
+ * SRD extracts on the recipient. The per-column fixtures are deliberately
  * non-default so the same instrument rule as the round-trip probes applies: a
  * classification sitting on its declared default proves nothing.
  */
 const RECIPIENT_SEEDED_CATALOG_COLUMNS = {
+  feat_definitions: {
+    id: {
+      kind: 'omitted',
+      fixture: 7101,
+      why: 'Recipient-seeded feat catalog row id; database identifiers have no portable meaning and no feat definition row travels.',
+    },
+    content_key: {
+      kind: 'omitted',
+      fixture: '2024:feat:portability-origin',
+      why: 'Recipient-seeded feat catalog key; shares carry this key only as a reference and the definition itself does not travel.',
+    },
+    name: {
+      kind: 'omitted',
+      fixture: 'Portability Origin Feat',
+      why: 'Recipient-seeded SRD feat name; the recipient resolves its own bundled definition and no definition prose travels.',
+    },
+    rules_edition: {
+      kind: 'omitted',
+      fixture: 'expanded',
+      why: 'Recipient-seeded feat rules edition; it identifies recipient catalog content rather than character-owned portable data.',
+    },
+    category: {
+      kind: 'omitted',
+      fixture: 'portability_group',
+      why: 'Recipient-seeded feat grouping; the recipient rebuilds catalog grouping from its extract and no definition row travels.',
+    },
+    min_level: {
+      kind: 'omitted',
+      fixture: 12,
+      why: 'Recipient-seeded feat eligibility level; the recipient rebuilds this catalog rule and no character choice value travels.',
+    },
+    ability_points: {
+      kind: 'omitted',
+      fixture: 2,
+      why: 'Recipient-seeded feat ability-point grant; the recipient rebuilds this catalog rule and no character-owned value travels.',
+    },
+    repeatable: {
+      kind: 'omitted',
+      fixture: 1,
+      why: 'Recipient-seeded feat repeatability rule; the recipient owns the definition and a sender definition row does not travel.',
+    },
+    prerequisites: {
+      kind: 'omitted',
+      fixture: '{"kind":"portability-prerequisite"}',
+      why: 'Recipient-seeded feat prerequisite JSON; the recipient owns qualification rules and no sender definition row travels.',
+    },
+    grant_rules: {
+      kind: 'omitted',
+      fixture: '[{"kind":"portability-grant"}]',
+      why: 'Recipient-seeded feat grant-rule JSON; the recipient owns effect definitions and no sender definition row travels.',
+    },
+    notes: {
+      kind: 'omitted',
+      fixture: 'Portability-only feat benefit text',
+      why: 'Recipient-seeded feat benefit text; the recipient rebuilds licensed catalog prose and share links do not carry it.',
+    },
+    created_at: {
+      kind: 'omitted',
+      fixture: '2043-04-05T06:07:08.000Z',
+      why: 'Recipient-seeded catalog timestamp; a sender database creation time is not character data and does not travel.',
+    },
+    updated_at: {
+      kind: 'omitted',
+      fixture: '2044-05-06T07:08:09.000Z',
+      why: 'Recipient-seeded catalog timestamp; a sender database update time is not character data and does not travel.',
+    },
+  },
   class_equipment_items: {
     id: {
       kind: 'omitted',
@@ -1385,6 +1452,9 @@ const RECIPIENT_SEEDED_CATALOG_COLUMNS = {
     },
   },
 } as const satisfies {
+  readonly feat_definitions: Readonly<
+    Record<ColumnNamesOf<'feat_definitions'>, RecipientSeededColumn>
+  >;
   readonly class_equipment_items: Readonly<
     Record<ColumnNamesOf<'class_equipment_items'>, RecipientSeededColumn>
   >;
@@ -1580,22 +1650,28 @@ describe('every column of every shared table is classified', () => {
     }
   });
 
-  it('classifies every class equipment column as recipient-seeded catalog content', () => {
-    expect(Object.keys(SHARE_TABLES)).not.toContain('class_equipment_items');
-    const table = 'class_equipment_items';
-    const columns = RECIPIENT_SEEDED_CATALOG_COLUMNS[table];
-    const live = trip.sender
-      .allRaw(`PRAGMA table_info("${table}")`)
-      .map((row) => String(row.name));
-    expect(Object.keys(columns).sort()).toEqual(live.sort());
+  it('classifies every recipient-seeded catalog column', () => {
+    for (const table of [
+      'feat_definitions',
+      'class_equipment_items',
+    ] as const) {
+      expect(Object.keys(SHARE_TABLES)).not.toContain(table);
+      const columns = RECIPIENT_SEEDED_CATALOG_COLUMNS[table];
+      const live = trip.sender
+        .allRaw(`PRAGMA table_info("${table}")`)
+        .map((row) => String(row.name));
+      expect(Object.keys(columns).sort()).toEqual(live.sort());
 
-    const defaults = declaredDefaults(trip.sender, table);
-    for (const [column, decision] of Object.entries(columns)) {
-      expect(decision.kind).toBe('omitted');
-      expect(decision.fixture, `${table}.${column} fixture equals its default`)
-        .not.toBe(defaults.get(column));
-      expect(decision.why.length, `${table}.${column} has no real reason`)
-        .toBeGreaterThan(80);
+      const defaults = declaredDefaults(trip.sender, table);
+      for (const [column, decision] of Object.entries(columns)) {
+        expect(decision.kind).toBe('omitted');
+        expect(
+          decision.fixture,
+          `${table}.${column} fixture equals its default`,
+        ).not.toBe(defaults.get(column));
+        expect(decision.why.length, `${table}.${column} has no real reason`)
+          .toBeGreaterThan(80);
+      }
     }
   });
 
