@@ -1,8 +1,8 @@
 # The front door: guided-builder items 1 and 2
 
 Plan author: Claude Opus (supervisor). Track A, toward D54's "usable" bar.
-Status: **REVISION 2** — rewritten after two independent NOT-READY reviews.
-Round 1 of 3 closed. Awaiting re-review.
+Status: **REVISION 3** — rewritten after four independent NOT-READY reviews
+across two rounds. Round 2 of 3 closed. This is the final round.
 
 Law: `.claude/decisions.md` D1..D54. Binding here: **D48** (class is the FIRST
 step, and it deletes the session-storage draft), **D11** (builder BLOCKS an
@@ -39,6 +39,67 @@ controls could not fire as worded (§9); and the blast radius omitted the two
 browser journeys that actually break (§7).
 
 The reviewers disagreed on exactly one point, arbitrated in §3.1.
+
+### What revision 2 got wrong
+
+Round 2 returned two more NOT-READY verdicts, and the reviewers **contradicted
+each other** on the load-bearing fact. Arbitrated by the supervisor:
+
+**A4 could not persist a species at all.** Revision 2 routed it through
+`add_source`. `AddSourceCommand` resolves the source through the *definition*
+table and throws when the row is absent (`src/commands/add-source.ts:144-152`),
+and **nothing in the repository writes `species_definitions` or
+`background_definitions`** — a `grep -rE "INSERT INTO (species|background)_definitions" src/ db/`
+returns nothing. The origin seeder writes `species_templates`,
+`species_template_traits`, `species_template_trait_effects`,
+`background_templates` and `background_equipment_items` only. The schema says so
+about itself (`db/schema/origins.ts:654-662`): *"the table is empty after a full
+application seed … the planner's species picker is fed from it and offers an
+empty list … the other half of picking a species — which was designed and never
+built."*
+
+This is **the same error I made in revision 1 and was corrected for**. There, I
+treated a bundled content key as proof a row existed (A11). Here, one section
+later and inside the fix for it, I treated `add-source.ts:26` — species being an
+accepted source *type* — as proof a definition row existed. Checking the shape
+of a thing instead of the thing is F16, and I did it twice in consecutive
+revisions of the same document.
+
+**One reviewer defended the `add_source` path** by citing
+`src/rules/origins-srd.ts:249-251`, which says lineage spells *"come from
+`species_definitions.grant_rules` through `src/grants/`"*. That comment states a
+design intent while explaining why trait entries were removed; it is not
+evidence that any row exists, and the grep above disproves it. That is **F27** —
+a citation standing in for source verification. The finding was rejected on
+evidence, not on authority.
+
+**A4 is rescuable, and revision 3 rebuilds it on the tables that are actually
+populated.** `src/rules/origins.ts` exports five pure, already-tested copy
+helpers — `speciesFromTemplate`, `speciesTraitFromTemplate`, `effectsFromTemplate`,
+`backgroundFromTemplate`, `characterEffects` — which map template rows to
+character-owned rows and have **zero callers in `src/`**. The guided step writes
+`character_species`, `character_species_traits` and `character_effects` directly
+from the templates the seeder fills. The species is therefore genuinely
+*applied*: the sheet reads speed from `character_species`
+(`src/queries/character-sheet-builder.ts:546-554`) and effects from
+`character_effects` (`:506-545`), so a person sees a consequence. Background
+mirrors it exactly, which is why revision 3 adds **A5**.
+
+Also accepted and fixed below: A4 was added in revision 2 without extending the
+§8 contract that revision 2 existed to add (the same defect, one dispatch
+later); `hit_die` is not in `class_definitions` or the progressions but in
+`class_sheet_traits` (`src/db/schema.sql:551`) and is absent-able with an
+`ASSUMED_HIT_DIE` fallback (`src/rules/sheet.ts:238`); `exactKeys` and `isUuid`
+are module-private so the "cannot drift" validation reuse was unachievable
+without editing files §8 excluded; the idempotency default needed a migration
+whose paths nothing allocated; `src/queries/client.ts` was unallocated; and
+`buildState`'s not-found shape was never pinned.
+
+Rejected, with reason: the claim that A1-STEP's advanced fixture required A4.
+It does not — the fixture can be built through existing commands — but A4's
+justification does not rest on that, and §4 now states reason 1 as primary.
+
+---
 
 ## 1. What this is for
 
@@ -161,32 +222,47 @@ creation remains reachable only via the advanced escape hatch. **A3 owns moving
 or building that escape hatch**, which revision 1 asserted was reachable without
 anyone building it.
 
-**A4 — the species step (NEW).**
-Exit: a person who has just chosen a class is offered a species, chooses one, the
-choice persists via `add_source` (`src/commands/add-source.ts:26`), the derived
-step advances past species, and a reload lands on the next step.
+**A4 — the species step.**
+Exit: a person who has just chosen a class is offered a species, chooses one,
+and the species is **applied** — `character_species`, `character_species_traits`
+and `character_effects` are written from `species_templates` /
+`species_template_traits` / `species_template_trait_effects` via the existing
+pure helpers `speciesFromTemplate`, `speciesTraitFromTemplate` and
+`effectsFromTemplate` (`src/rules/origins.ts:175-244`). The derived step
+advances; a reload lands on the next step; the sheet shows the species' speed
+and effects, because that is what it reads (`src/queries/character-sheet-builder.ts:506-554`).
 
-A4 exists for two reasons, and the second is the one that matters:
+**It does not go through `add_source`.** Revision 2's fatal error; see §0. The
+definition tables that path resolves against are never written by anything in
+the repository, so the template tables are the only populated source.
 
-1. Without it the group has no actionable post-class step (§5), so A3 cannot
-   honestly pass. D48 fixes the order as class → species → background →
-   abilities → equipment (`.claude/decisions.md:458-473`), so species cannot be
-   skipped for a step that happens to exist.
-2. **Without it `A1-STEP` cannot fire.** Both reviewers found this independently.
-   If nothing can advance a character past class, every character's derived step
-   is the same constant, and a mutation replacing state-derived selection with
-   that constant still passes. A4 is what creates a second persisted completion
-   state, which is what makes the control real. A4 is not scope creep; it is the
-   instrument.
+**A5 — the background step (NEW).**
+Exit: the same shape for background via `backgroundFromTemplate` and
+`background_equipment_items`, advancing the derived step past background.
 
-**Scoped honestly:** A4 delivers species *selection*, not species *application*.
-No complete writer copies species traits, effects or ability increases — the
-design records that as designed-and-never-built (`docs/design/guided-builder.md:554-561`).
-Per **D33**, the sheet must say those are unknown rather than imply zero. A4 that
-silently showed a species with no traits and no marker would be a D33 violation.
+D48 makes background load-bearing rather than optional: the 2024 ability-score
+increases ride the background (`.claude/decisions.md:468-471`), so the abilities
+step depends on it. A group that stopped at species would relocate §5's trap one
+step to the right rather than clearing it — the reviewers' point, accepted.
 
-**None of the four counts as usable progress on its own.** The group's definition
-of done is A3's browser proof, extended by A4's.
+**Why A4 and A5 are in this group at all.** Without them the group has no
+actionable post-class step, so A3 cannot honestly pass. That is the primary
+reason and it stands on its own.
+
+A secondary benefit, corrected from revision 2: they give `A1-STEP` a fixture
+whose derived step differs from any constant. Revision 2 claimed no such fixture
+could exist without A4; a reviewer showed one can be built through existing
+commands, so that claim is withdrawn. A4's justification does not need it.
+
+**Honest limitation, disclosed rather than hidden.** Writing character-owned
+species rows directly means no `character_source_instances` row, so lineage
+spell grants do not flow. The schema already treats a bundled species with no
+source instance as the tolerated state (`db/schema/origins.ts:654-662`). Per
+**D33** the sheet must say lineage spells are not yet granted for the species
+that have them — it must not imply the character has none. §9 controls it.
+
+**None of the five counts as usable progress on its own.** The group's
+definition of done is the browser proof in §5, extended through background.
 
 ## 5. The trap, and the proof that answers it
 
@@ -245,9 +321,15 @@ matchers must be exact or they will shadow existing screens.
 
 A10's cut removed the only guidance D48 named for the blind-choice moment
 (`.claude/decisions.md:478-484`), which leaves "meaningful" untestable as an
-assertion. **Pinned: each class card shows the class name and its hit die**, both
-read from the bundled progressions already in the database. That is a checkable
-assertion, not a vibe. Ability-spread guidance returns when it is real.
+assertion. **Pinned: each class card shows the class name and its hit die.** The hit die is
+**not** in `class_definitions` or the progression tables — it lives in
+`class_sheet_traits` (`src/db/schema.sql:551`), seeded separately by
+`src/rules/sheet-srd.ts`, and the row **can be absent**, which is why
+`ASSUMED_HIT_DIE` exists (`src/rules/sheet.ts:238`). Revision 2 pinned this
+wrongly and a reviewer caught it. The contract therefore carries
+`hit_die: number | null`, and per **D33** a null renders as "unknown" — never as
+the assumed 8, which would present a guess as a fact at the moment of choosing.
+Ability-spread guidance returns when it is real.
 
 ## 8. The pinned contract
 
@@ -262,9 +344,15 @@ type BuildStep = 'class' | 'species' | 'background' | 'abilities' | 'equipment';
 const GUIDED_LEVEL_ONE_STEP_ORDER: readonly BuildStep[];   // D48's order
 
 interface GuidedClassOption {
-  content_key: string;   // the gate's identity — see A11
+  content_key: string;      // the gate's identity — see A11
   name: string;
-  hit_die: number;       // §7 makes this assertable
+  hit_die: number | null;   // null => render "unknown" (§7, D33)
+}
+
+interface GuidedOriginOption {   // species AND background
+  content_key: string;
+  name: string;
+  grants_lineage_spells: boolean;   // drives the D33 disclosure (§4)
 }
 
 interface GuidedCreateParams {
@@ -301,6 +389,54 @@ Malformed structural input stays `invalid_params`; unexpected SQL or generator
 failures stay bare `handler_error`. Without this the production agent throws a
 bare `TypeError` and the test agent asserts a discriminator that does not exist.
 
+**A4/A5 origin contract** — revision 2 added A4 without extending this section,
+which is the very defect this section exists to prevent.
+
+- `queries.characters.originOptions` → params `{ kind: 'species' | 'background' }`,
+  result `readonly GuidedOriginOption[]`, read from the **template** tables only.
+- `queries.characters.applyOrigin` → params
+  `{ character_id, kind: 'species' | 'background', content_key }`,
+  result the updated `{ character_id, current_step }`.
+- Refusal reasons extend to `unknown_origin`.
+- **The completion rule is pinned:** species is complete when a
+  `character_species` row exists for the character; background when a
+  `character_background` row exists. **Not** a `character_source_instances` row —
+  that table is not on this path at all (§4). Two agents guessing differently
+  here is exactly how the derivation and its fixtures diverge.
+- **The origin list is gated to bundled content**, on the same principle as the
+  class gate. Revision 2 left this implicit, which a reviewer correctly called a
+  fourth silently-decided point.
+
+**`buildState` not-found is pinned**, because "or not-found" was not a contract:
+params `{ character_id: number }`; an absent character returns
+`{ kind: 'not_found' }` as a **successful** result, never an RPC error. The
+existing `CharacterNotFoundError` path degrades to a bare `handler_error` with no
+structured reason (`src/worker/registry.ts:95-103`), which the test agent cannot
+discriminate on.
+
+**Validation lives in the seam, not in `queries.ts`.** `exactKeys`
+(`src/worker/handlers/queries.ts:50-60`) and `isUuid`
+(`src/worker/handlers/commands.ts:15`) are **module-private**, so revision 2's
+"matches `isCreateCharacterParams` exactly" was unachievable without editing
+files this section excludes — reuse by copying is drift by construction. Pinned:
+the supervisor lands the params validators in `src/builder/contracts.ts`
+alongside the types, and `queries.ts` is not touched.
+
+**Idempotency has a home.** §3.3's `operation_uuid` needs durable storage;
+`character_operations` cannot serve it (it requires a character id, both
+revisions and an inverse command, which would fabricate the history §3.2
+forbids). Pinned: a new migration adding **`characters.creation_uuid TEXT
+UNIQUE`**, nullable so blank creation is unaffected, and a replay returns the
+existing row. **A2 owns the migration**, including `src/db/migrations.ts` and the
+new `db/schema/` entry — revision 2 allocated none of those paths.
+
+**The terminal state is pinned, not left to invention.** After background the
+derived step is `abilities`, which this group does not build. The build route
+renders an explicit panel saying those steps are not built yet. **It must not
+link into the planner grid** — the most natural invention is "go finish in the
+planner", which is precisely the surface §5's trap forbids. The browser proof
+asserts that panel's presence and the absence of any planner link.
+
 **Route matchers.** `/characters/new` — `segments.length === 2`, `[0]==='characters'`,
 `[1]==='new'`. Build route — `segments.length === 5`, `['characters', id,
 'build', 'levels', level]`, `id` matching `/^[1-9]\d*$/` (the **sheet's** regex,
@@ -314,7 +450,10 @@ only**. A matcher accepting `/build/levels/7` today is a dead route. Screen id:
 exists**. The UI list is served by a worker query applying the same predicate —
 never a second client-side copy of the key list, which would drift.
 
-**Exclusive paths.** Production: `src/builder/guided-creation.ts`,
+**Exclusive paths.** Supervisor: `src/builder/contracts.ts`. Production:
+`src/queries/client.ts` (unallocated in revision 2 — it is where every RPC
+wrapper lands, `:63-102`), the A2 migration paths above,
+`src/builder/guided-creation.ts`,
 `src/worker/handlers/guided.ts` (a new handler file, so nothing collides in
 `queries.ts`), `src/ui/screens/guided-builder/**`,
 `src/ui/screens/character-list/character-list.ts`. Tests:
@@ -350,6 +489,21 @@ Two of revision 1's four controls could not fire as worded. Corrected:
   element passes even when both are visible. **Pinned:** assert the name textbox
   is **absent** before a class is selected and **present** after. Then a mutation
   exposing it initially reliably fails. This is D48's user-visible invariant.
+
+- **A4-APPLIED** *(new)* — make the species step write only a
+  `character_source_instances` row and skip `character_species`. The sheet test
+  asserting the species' speed must fail. This is the control that proves
+  revision 2's defect cannot return: selection metadata is not an applied
+  species, and only the sheet can tell the difference.
+- **A4-LINEAGE** *(new)* — remove the D33 lineage-spell disclosure. The test
+  asserting a lineage species discloses that its spells are not yet granted must
+  fail. Without this the plan legislates a D33 duty in §4 and assigns it to
+  nobody, which a reviewer caught in revision 2.
+- **A5-BACKGROUND** *(new)* — make background completion read the species table.
+  The step-derivation test must fail. Cheap, and it catches the copy-paste that
+  this symmetry invites.
+- **A3-TERMINAL** *(new)* — add a planner link to the not-built-yet panel. The
+  browser proof must fail. §5's trap is a link away at all times.
 
 Forbidden paths to green as always: no `any`, `@ts-ignore`, `@ts-expect-error`,
 `.skip`, no config edits, no weakened assertions, and never regenerate an
