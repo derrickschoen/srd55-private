@@ -118,7 +118,27 @@ on until you change them.
 
 Nothing here blocked; each has a working assumption in place.
 
-*(none yet — this section fills as the night goes)*
+### Q — do share links carry content for spells the recipient does not have?
+
+Not guessed, because the answer is partly a licensing call that is yours.
+
+**The gap, measured:** an imported homebrew spell does NOT survive a share link
+when the recipient lacks that catalogue entry. The character opens, the spell
+becomes a placeholder, and for spellbook-only references even the original
+display name is lost — it is derived from the key. Forks now behave identically,
+deliberately, so this is one gap and not two.
+
+**Why I did not just fix it.** Fixing it means putting spell CONTENT on the wire.
+For a fork of a bundled spell that content is SRD-derived, and SRD 5.2.1 is CC-BY
+— redistribution requires attribution, and whether a URL fragment satisfies that
+is a genuine question. It also means a new wire version, which D41 makes
+permanent. Both are decisions to take awake.
+
+A dispatch reached for exactly this overnight and I refused it — see F24.
+
+**Options when you are back:** leave it (a link is a reference, and the recipient
+needs the catalogue); carry content for user-authored spells only; or carry
+content for everything and settle the attribution question.
 
 ---
 
