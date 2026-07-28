@@ -270,6 +270,19 @@ export const spell_versions = sqliteTable(
     is_active: tinyint1('is_active').notNull().default(true),
     created_at: datetime()('created_at'),
     updated_at: datetime()('updated_at'),
+    /**
+     * The bundled spell this user-authored version was copied from.
+     *
+     * This is a CONTENT KEY rather than a database id because bundled rows are
+     * re-seeded and portable documents resolve catalog content by key. NULL
+     * means the version was not created by the in-app fork dispatch.
+     *
+     * Declared last so a fresh schema is byte-identical to the ALTER TABLE
+     * migration, which necessarily appends the column.
+     */
+    forked_from_content_key: varchar<ContentKey>()(
+      'forked_from_content_key',
+    ),
   },
   (table) => [
     /**

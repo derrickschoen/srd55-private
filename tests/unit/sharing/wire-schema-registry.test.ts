@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { decodeShareFragment } from '../../../src/sharing/codec';
 import {
@@ -86,6 +87,11 @@ const VERSION_FIXTURES = {
   },
 } satisfies Record<SupportedShareVersion, FrozenFixture>;
 
+const HISTORICAL_SCHEMA_MODULE_SHA256 = {
+  'v1.ts': '8a87e9cd8ee49c2beb42f9747dc24025c485fccb63d822179202df29080af449',
+  'v2.ts': '32e662f3db38f09da5b17320b059c917d26e031456fd0f2c4cefb196a872b269',
+} as const;
+
 function allObjects(root: object): object[] {
   const seen = new Set<object>();
   const pending: object[] = [root];
@@ -137,5 +143,19 @@ describe('the share-link wire schema registry', () => {
     expect(fingerprint).toBe(
       'ee4ebe02ba55326246287745e2b72010ffc0ebd982a651406a0ad350c951f0fb',
     );
+  });
+
+  it('keeps every historical schema module byte-for-byte unchanged', () => {
+    for (const [file, expected] of Object.entries(
+      HISTORICAL_SCHEMA_MODULE_SHA256,
+    )) {
+      const bytes = readFileSync(
+        new URL(`../../../src/sharing/wire-schemas/${file}`, import.meta.url),
+      );
+      expect(
+        createHash('sha256').update(bytes).digest('hex'),
+        `${file} bytes changed`,
+      ).toBe(expected);
+    }
   });
 });

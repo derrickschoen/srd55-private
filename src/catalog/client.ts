@@ -1,6 +1,7 @@
 import type { RpcClient } from '../rpc/client';
 import type { CatalogImportSummary } from './catalog-importer';
 import type { CatalogImportParams } from './catalog-schema';
+import type { ForkSpellResult } from './spell-fork';
 
 export interface CatalogClient {
   importCatalog(
@@ -10,6 +11,10 @@ export interface CatalogClient {
       dryRun?: boolean;
     },
   ): Promise<CatalogImportSummary>;
+  forkSpell(
+    sourceContentKey: string,
+    name?: string,
+  ): Promise<ForkSpellResult>;
 }
 
 type CatalogImportOptions = Parameters<CatalogClient['importCatalog']>[1];
@@ -34,5 +39,13 @@ export function createCatalogClient(rpc: RpcClient): CatalogClient {
         params,
       );
     },
+    forkSpell: (sourceContentKey: string, name?: string) =>
+      rpc.call<
+        { sourceContentKey: string; name?: string },
+        ForkSpellResult
+      >(
+        'catalog.forkSpell',
+        name === undefined ? { sourceContentKey } : { sourceContentKey, name },
+      ),
   });
 }

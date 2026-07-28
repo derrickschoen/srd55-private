@@ -178,12 +178,13 @@ interface Probe<N extends AnyTableName> {
 }
 
 /**
- * `characters` is not a `ShareTable` — the root is serialized through its own
- * path rather than a table loop (`TABLE_SCOPES.characters` is all-false) — but
- * its columns travel and can be dropped in exactly the same way, so it is
- * probed alongside the eighteen that are.
+ * `characters` is the root rather than a `ShareTable`. `spell_versions` is
+ * probed for the opposite reason: its stable content key travels as a catalog
+ * reference, while none of the referenced catalog row travels. Keeping both
+ * exceptional boundaries in this map forces new columns on either one to be
+ * classified in the diff that adds them.
  */
-type ProbedTable = ShareTable | 'characters';
+type ProbedTable = ShareTable | 'characters' | 'spell_versions';
 
 const OWNED_TIMESTAMP: Portability = {
   kind: 'omitted',
@@ -196,6 +197,10 @@ const RECIPIENT_ROW_ID: Portability = {
 const RECIPIENT_OWNER_ID: Portability = {
   kind: 'omitted',
   why: 'The owning character is created by the import and has an id only the recipient knows.',
+};
+const REFERENCED_CATALOG_CONTENT: Portability = {
+  kind: 'omitted',
+  why: 'A character share carries only the spell content key. The recipient resolves that key against its own catalogue or creates a placeholder; no sender catalogue content travels.',
 };
 
 const PROBES: { readonly [N in ProbedTable]: Probe<N> } = {
@@ -225,6 +230,49 @@ const PROBES: { readonly [N in ProbedTable]: Probe<N> } = {
       },
       created_at: OWNED_TIMESTAMP,
       updated_at: OWNED_TIMESTAMP,
+    },
+  },
+  spell_versions: {
+    scope:
+      "t.content_key = '2024:fixture-shield' AND EXISTS (SELECT 1 FROM characters WHERE id = ?)",
+    order: 't.content_key',
+    columns: {
+      id: RECIPIENT_ROW_ID,
+      content_key: { kind: 'verbatim' },
+      spell_identity_id: REFERENCED_CATALOG_CONTENT,
+      display_name: REFERENCED_CATALOG_CONTENT,
+      rules_edition: REFERENCED_CATALOG_CONTENT,
+      level: REFERENCED_CATALOG_CONTENT,
+      school: REFERENCED_CATALOG_CONTENT,
+      ritual: REFERENCED_CATALOG_CONTENT,
+      concentration: REFERENCED_CATALOG_CONTENT,
+      casting_time: REFERENCED_CATALOG_CONTENT,
+      action_type: REFERENCED_CATALOG_CONTENT,
+      range: REFERENCED_CATALOG_CONTENT,
+      range_kind: REFERENCED_CATALOG_CONTENT,
+      range_feet: REFERENCED_CATALOG_CONTENT,
+      area_shape: REFERENCED_CATALOG_CONTENT,
+      area_feet: REFERENCED_CATALOG_CONTENT,
+      duration: REFERENCED_CATALOG_CONTENT,
+      components: REFERENCED_CATALOG_CONTENT,
+      material_component_summary: REFERENCED_CATALOG_CONTENT,
+      material_cost_copper: REFERENCED_CATALOG_CONTENT,
+      material_cost_kind: REFERENCED_CATALOG_CONTENT,
+      healing: REFERENCED_CATALOG_CONTENT,
+      short_summary: REFERENCED_CATALOG_CONTENT,
+      upcast_summary: REFERENCED_CATALOG_CONTENT,
+      cantrip_upgrade_summary: REFERENCED_CATALOG_CONTENT,
+      requires_mod_for_effect: REFERENCED_CATALOG_CONTENT,
+      effect_reliability_category: REFERENCED_CATALOG_CONTENT,
+      provenance: REFERENCED_CATALOG_CONTENT,
+      seed_version: REFERENCED_CATALOG_CONTENT,
+      is_active: REFERENCED_CATALOG_CONTENT,
+      created_at: OWNED_TIMESTAMP,
+      updated_at: OWNED_TIMESTAMP,
+      forked_from_content_key: {
+        kind: 'omitted',
+        why: 'Fork ancestry is sender catalogue content. The share carries the fork spell key and resolves it like imported homebrew; ancestry does not get a fork-only transport mechanism.',
+      },
     },
   },
   character_class_levels: {
@@ -734,7 +782,7 @@ interface Catalog {
   readonly spareSpellId: number;
 }
 
-function seedCatalog(db: DatabaseContext): Catalog {
+function seedCatalog(db: DatabaseContext, includeFork = true): Catalog {
   const spell = (key: string, name: string, level: number): number => {
     const identityId = db.exec(
       `INSERT INTO spell_identities (content_key, canonical_name, normalized_name)
@@ -749,7 +797,48 @@ function seedCatalog(db: DatabaseContext): Catalog {
       [key, identityId, name, level],
     ).lastInsertId;
   };
-  const chosenSpellId = spell('2024:shield', 'Shield', 1);
+  const bundledSourceId = spell('2024:shield', 'Shield', 1);
+  db.exec(
+    "UPDATE spell_versions SET provenance = 'srd' WHERE id = ?",
+    [bundledSourceId],
+  );
+  const chosenSpellId = includeFork
+    ? spell('2024:fixture-shield', 'Sender-Only Fixture Shield', 1)
+    : bundledSourceId;
+  if (includeFork) {
+    db.exec(
+      `UPDATE spell_versions
+       SET forked_from_content_key = '2024:shield',
+           rules_edition = 'sender-only-edition',
+           ritual = 1,
+           concentration = 1,
+           casting_time = 'Distinct action',
+           action_type = 'reaction',
+           range = '60 feet (10-foot Sphere)',
+           range_kind = 'ranged',
+           range_feet = 60,
+           area_shape = 'sphere',
+           area_feet = 10,
+           duration = 'Distinct duration',
+           components = 'V, S, M',
+           material_component_summary = 'distinct material',
+           material_cost_copper = 123,
+           material_cost_kind = 'exact',
+           healing = 1,
+           short_summary = 'distinct summary',
+           upcast_summary = 'distinct upcast',
+           cantrip_upgrade_summary = 'distinct cantrip upgrade',
+           requires_mod_for_effect = 1,
+           effect_reliability_category = 'mixed',
+           provenance = 'user',
+           seed_version = 'sender-only-seed-probe',
+           is_active = 1,
+           created_at = ?,
+           updated_at = ?
+       WHERE id = ?`,
+      [SENDER_TIME, SENDER_TIME, chosenSpellId],
+    );
+  }
   const spareSpellId = spell('2024:mage-armor', 'Mage Armor', 1);
   const classId = db.exec(
     `INSERT INTO class_definitions (
@@ -1301,7 +1390,7 @@ beforeAll(async () => {
 
   const recipient = await context();
   offsetSequences(recipient);
-  seedCatalog(recipient);
+  seedCatalog(recipient, false);
 
   // Through the real fragment, not straight from the object: a value dropped
   // by the encoder is as lost as one dropped by the INSERT.
@@ -1328,7 +1417,7 @@ beforeAll(async () => {
   // is also what every link minted before the flags existed carries.
   const optedOut = await context();
   offsetSequences(optedOut);
-  seedCatalog(optedOut);
+  seedCatalog(optedOut, false);
   const plain = await decodeShareFragment(
     await encodeShareFragment(exportCharacterShare(sender, senderCharacterId)),
   );
@@ -1354,14 +1443,13 @@ afterAll(() => {
 });
 
 describe('every column of every shared table is classified', () => {
-  it('probes the character root and all eighteen share tables', () => {
+  it('probes the character root, all eighteen share tables, and spell references', () => {
     expect([...PROBED_TABLES].sort()).toEqual(
-      ['characters', ...Object.keys(SHARE_TABLES)].sort(),
+      ['characters', 'spell_versions', ...Object.keys(SHARE_TABLES)].sort(),
     );
-    // The type already forces this — `PROBES` is keyed by `ShareTable` — but a
-    // table marked `share: true` and left out of the sharing module entirely
-    // would be a compile error there and a silent gap here without it.
-    expect(PROBED_TABLES).toHaveLength(19);
+    // The type already forces the eighteen shared tables; the exact runtime
+    // roster additionally pins the character root and reference-only spell row.
+    expect(PROBED_TABLES).toHaveLength(20);
   });
 
   it.each(PROBED_TABLES)(

@@ -193,6 +193,11 @@ export interface CatalogImportParams {
   dryRun?: boolean;
 }
 
+export interface ForkSpellParams {
+  readonly sourceContentKey: string;
+  readonly name?: string;
+}
+
 function parseJsonDocument(document: string, label: string): unknown {
   try {
     return JSON.parse(document) as unknown;
@@ -794,4 +799,20 @@ export function isCatalogImportParams(
     return false;
   }
   return params.dryRun === undefined || typeof params.dryRun === 'boolean';
+}
+
+export function isForkSpellParams(
+  params: unknown,
+): params is ForkSpellParams {
+  if (!isRecord(params)) {
+    return false;
+  }
+  const keys = Object.keys(params);
+  return (
+    keys.every((key) => key === 'sourceContentKey' || key === 'name') &&
+    typeof params.sourceContentKey === 'string' &&
+    params.sourceContentKey.trim() !== '' &&
+    (params.name === undefined ||
+      (typeof params.name === 'string' && params.name.trim() !== ''))
+  );
 }
