@@ -79,6 +79,39 @@ bundled catalogue is older can reference a spell that build lacks. That is the
 same failure an imported-catalogue reference already has, and the existing
 missing-spell handling covers it.
 
+### 5. A fork's provenance — the one that would have lost data
+
+**Taken: `provenance = 'user'`, meaning "authored in this app, not carried by a
+document".**
+
+This was not on your list of sub-decisions; it surfaced while specifying the fork
+work and it is the most dangerous of the five.
+
+A fork is user-authored content that never came from an imported document. The
+obvious choice is `'import'`, since that is what all user content carries today.
+It is also wrong in a way that destroys data: the importer's tombstone sweep
+(`catalog-importer.ts:451-457`) deactivates every `provenance = 'import'` row
+absent from the document being imported. So a user who forks Fireball, then later
+imports an unrelated homebrew document, would find their fork silently
+deactivated. That is precisely the failure the sweep's own comment says was
+already fixed once for subclasses.
+
+`'user'` is deliberately broader than `'fork'`: a hand-authored spell that is not
+a copy of anything will want the same exemption, and `forked_from_content_key`
+already records whether a given row is a fork.
+
+**Reverse this if** you would rather forks be swept along with imported content —
+but that means a user's own work disappears on an unrelated import, so I doubt it.
+
+### 6. Does a fork keep its class-list memberships?
+
+**Taken: yes, copied.**
+
+A copied Fireball is still a Wizard spell. A fork belonging to no list would be
+invisible to the planner's list-driven pickers and would read as broken. D&D
+Beyond behaves this way too — a homebrew copy stays on the lists its original was
+on until you change them.
+
 ---
 
 ## Questions I could NOT reasonably guess
