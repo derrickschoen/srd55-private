@@ -1017,7 +1017,7 @@ function seedSender(db: DatabaseContext, catalog: Catalog): number {
        'custom', NULL, NULL, 'weapon damage by table', 'Slashing',
        'custom', NULL, NULL, 'two-handed damage by table',
        1, 1, 1, 1, 1, 1, 1, 1,
-       'bolt', 'legacy', 65, 25, 'Vex', 1, 'sender other properties',
+       'bolt', 'ranged', 25, 65, 'Vex', 1, 'sender other properties',
        'sender weapon note', 'martial', ?, ?
      )`,
     [characterId, SENDER_TIME, SENDER_TIME],
