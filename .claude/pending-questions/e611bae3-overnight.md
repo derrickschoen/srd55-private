@@ -261,7 +261,10 @@ sheet (Q9).
 
 ---
 
-## Q11 — Multiclass entry grants a SKILL CHOICE, which nobody has made (NEW)
+## Q11 — ANSWERED 2026-07-27 by the owner (see D44): the UI offers the choice,
+## values come from the skills vocabulary, instruments stay text. The schema for
+## it already existed — `class_sheet_traits.multiclass_skill_choice_pool` encodes
+## `class_list` vs `any`. The question below is kept for its evidence.
 
 Found while extracting the twelve "As a Multiclass Character" clauses. THREE of
 them do not grant a fixed proficiency — they grant a CHOICE, and the three are
