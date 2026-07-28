@@ -1,5 +1,6 @@
 import {
   damageType as toDamageType,
+  type WeaponAttackKind,
   weaponMasteryProperties,
   weaponProficiencyCategories,
   type SrdWeaponGroup,
@@ -87,6 +88,7 @@ export function blankWeapon(): WeaponFields {
     // weapon is simple or martial, and guessing `simple` would hand them a
     // proficiency bonus nobody sourced.
     proficiency_category: null,
+    attack_kind: null,
     damage: { kind: 'not_recorded' },
     damage_type: null,
     versatile_damage: { kind: 'not_applicable' },
@@ -125,7 +127,20 @@ export function weaponFromTemplate(template: WeaponTemplate): WeaponFields {
     ...profile,
     notes: null,
     proficiency_category: weaponProficiencyCategoryOf(group),
+    attack_kind: weaponAttackKindOf(group),
   };
+}
+
+/** Preserve the melee/ranged half of a template heading on the value copy. */
+export function weaponAttackKindOf(group: SrdWeaponGroup): WeaponAttackKind {
+  switch (group) {
+    case 'simple_melee':
+    case 'martial_melee':
+      return 'melee';
+    case 'simple_ranged':
+    case 'martial_ranged':
+      return 'ranged';
+  }
 }
 
 /**

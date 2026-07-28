@@ -582,6 +582,14 @@ const PROBES: { readonly [N in ProbedTable]: Probe<N> } = {
       // classification is the one the guard was built to force: the column
       // arrived hours after the guard did, and both of its loops fired on it.
       proficiency_category: { kind: 'verbatim' },
+      // D46 deliberately splits the channels: a share link remains the frozen
+      // v2 compact reference and omits this new fact, while the full JSON
+      // export carries it. The fixture is non-null so omission cannot pass by
+      // agreeing with the column's null default.
+      attack_kind: {
+        kind: 'omitted',
+        why: 'D46 keeps share links at frozen wire v2. Weapon attack kind travels in the complete JSON export, not in a compact reference link.',
+      },
       damage_kind: { kind: 'verbatim' },
       damage_dice: { kind: 'verbatim' },
       damage_flat: { kind: 'verbatim' },
@@ -1100,6 +1108,7 @@ function seedSender(db: DatabaseContext, catalog: Catalog): number {
        ammunition_kind, range_kind, range_near_feet, range_far_feet,
        mastery_property,
        mastery_selected, other_properties, notes, proficiency_category,
+       attack_kind,
        created_at, updated_at
      ) VALUES (
        ?, 'Sender Custom Halberd',
@@ -1107,7 +1116,7 @@ function seedSender(db: DatabaseContext, catalog: Catalog): number {
        'custom', NULL, NULL, 'two-handed damage by table',
        1, 1, 1, 1, 1, 1, 1, 1,
        'bolt', 'ranged', 25, 65, 'Vex', 1, 'sender other properties',
-       'sender weapon note', 'martial', ?, ?
+       'sender weapon note', 'martial', 'melee', ?, ?
      )`,
     [characterId, SENDER_TIME, SENDER_TIME],
   );

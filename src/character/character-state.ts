@@ -10,6 +10,7 @@ import {
 import { migrateLegacyWeaponDamageRow } from '../domain/weapon-damage';
 import { migrateLegacyWeaponRangeRow } from '../domain/weapon-range';
 import { migrateLegacyTraitRows } from '../rules/legacy-trait-effects';
+import { fillAddedNullableRowColumns } from '../domain/contracts/historical-row-columns';
 
 /**
  * THE VERSION EVERY SNAPSHOT THIS BUILD WRITES CARRIES.
@@ -338,11 +339,13 @@ function snapshotRows(
       throw new Error(`Snapshot table ${table} contains an invalid row.`);
     }
   }
-  return table === 'character_weapons'
-    ? rows.map((row) =>
-        migrateLegacyWeaponRangeRow(migrateLegacyWeaponDamageRow(row)),
-      )
-    : rows;
+  return rows.map((row) => {
+    const migrated =
+      table === 'character_weapons'
+        ? migrateLegacyWeaponRangeRow(migrateLegacyWeaponDamageRow(row))
+        : row;
+    return fillAddedNullableRowColumns(table, migrated) as SnapshotRow;
+  });
 }
 
 /**

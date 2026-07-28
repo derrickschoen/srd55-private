@@ -75,8 +75,20 @@ describe('pre-filling a weapon from a template', () => {
       damage_type: 'Slashing',
       versatile_damage: { kind: 'dice', dice: '1d10' },
       mastery_property: 'Sap',
+      attack_kind: 'melee',
       notes: null,
     });
+  });
+
+  it.each([
+    ['simple_melee', 'melee'],
+    ['simple_ranged', 'ranged'],
+    ['martial_melee', 'melee'],
+    ['martial_ranged', 'ranged'],
+  ] as const)('derives %s as %s', (srd_group, attack_kind) => {
+    expect(weaponFromTemplate(template({ srd_group })).attack_kind).toBe(
+      attack_kind,
+    );
   });
 
   it('produces a detached copy, so editing the draft cannot reach the catalog', () => {
