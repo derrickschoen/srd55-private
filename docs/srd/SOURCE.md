@@ -48,6 +48,7 @@ pages interleave and the weapon table becomes unreadable.
 | `source/armor-table.txt` | Armor table: **12 armours plus Shield — 13 rows**, with AC formula, Strength requirement and stealth penalty | 91 | `c8bd735199d7649f19877f6e746ce2fca40496340c48a0733eb9f0371bfaa884` |
 | `source/species-descriptions.txt` | All nine species — creature type, size, speed and traits | 84-86 | `37e05427bbe352a485d0c336cf49bc79886f186203e0497bfdaa978255e6ab3b` |
 | `source/backgrounds.txt` | All four backgrounds — the five parts each, plus the prose describing them | 83 | `9272cca5b81852bf43ddc013e5581cc3736e8c559c26a702774843e7d0fd3f8d` |
+| `source/feats.txt` | Complete Feat Descriptions section — introductory rules and all 17 feats, with PDF line wrapping and discretionary hyphenation removed | 87-88 | `a1d4c8e010381c42a68ae92eed1f77221c7311f9038c2fdb158aca6976befe79` |
 | `source/weapon-attack-cantrips.txt` | True Strike and Shillelagh, the two cantrips that rewrite a weapon attack (D14) | 157, 163 | `067d1f684daba78391fadb639166dcbba2164683360786059fd65e313b01c50a` |
 | `source/attack-class-features.txt` | Martial Arts (all three benefits, die progression) and every Extra Attack grant, plus the multiclass rule (D15) | 24, 27, 47, 49, 55, 57 | `4d9404fe30d3e49b41168f14b9da7a70803fcaa93aa0b93bc8fd805dcae0c96b` |
 | `source/extra-attack-other-sources.txt` | Thirsting Blade and Devouring Blade — Extra Attack granted by an INVOCATION, and scoped to one weapon (D19) | 68, 69, 24 | `53073d181f004ed2bfdf94d7d54278bdaa00ced8e0f46723732278cd3e59c2cb` |
