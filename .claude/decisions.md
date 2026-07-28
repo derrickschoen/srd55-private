@@ -1,5 +1,55 @@
 # Binding scope decisions
 
+## D55 — OWNER: no Roll in Order, abilities come after class, random character is shelved (2026-07-28)
+
+**The ruling.** *"Drop the roll in order and have the wizard do ability scores
+after class selection. Shelve the goal that there should be a button to generate
+a random character."*
+
+Three things, and the third is what makes the first two clean.
+
+**1. Roll in Order is GONE.** Not moved, not deferred — dropped. This settles the
+D47 ↔ D50 collision that three independent readers each resolved differently and
+that had been sitting open as a question to the owner. D47 offered four ability
+methods including Roll in Order; D50 cut the deliberate builder to three and
+parked Roll in Order in random creation. **Neither survives as written.** The
+deliberate builder offers the methods that remain — standard array, point buy,
+and manual entry — and Roll in Order is not one of them anywhere.
+
+**2. Random character generation is SHELVED.** The "generate a random character"
+button is off the goal list. Shelved, not forbidden: nothing may be built that
+makes it harder later, but nothing is built for it now. This is what removes Roll
+in Order's last home, which is why the two rulings arrived together.
+
+**3. Ability scores come AFTER CLASS SELECTION**, amending D48's step order.
+The order becomes:
+
+    class → abilities → species → background → skills → equipment
+
+D48 put abilities after background. The owner has moved them up to sit directly
+behind class, and the reason is plain once Roll in Order is gone: if a player
+allocates scores deliberately rather than rolling them blind, knowing the class
+is exactly what tells them where the numbers go. Choosing first and learning the
+class afterwards is the ordering that only made sense when the dice went first.
+
+**The consequence I am flagging rather than burying.** In the 2024 rules the
++2/+1 ability increases ride the BACKGROUND, which now comes after the abilities
+step. So the numbers a person sets on the abilities screen are **base scores, and
+they are not final** — the background will raise two of them later.
+
+*Taken for now, reversible:* the abilities step allocates base scores only and
+says so on the screen; the background step applies its increases on top; the
+sheet shows the total. The alternative — hold the abilities step until after
+background so the person sees final numbers immediately — would put the step back
+where D48 had it and contradict this ruling, so it is not taken. *Cost to flip:*
+step order plus one screen's copy. No schema, no data.
+
+**What this does NOT decide**, and remains open: whether the wizard offers the
+SRD equipment package or the gold alternative or both, and whether guided
+creation needs real double-submit protection. Those are separate questions.
+
+---
+
 ## D54 — OWNER: v1 is NOT frozen. Finish it on its current trajectory, to USABLE (2026-07-28)
 
 **The ruling.** *"My intention is to finish v1 based on its current trajectory
