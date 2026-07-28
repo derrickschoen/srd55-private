@@ -371,18 +371,6 @@ function renderPlanner(
   layout.className = 'planner-layout';
   const primary = document.createElement('div');
   primary.className = 'planner-primary';
-  primary.append(
-    renderCompleteness(session.completeness),
-    renderAgentReference(
-      buildAgentReference(workspace, session.completeness),
-    ),
-    renderDiceHelper(
-      workspace.slots,
-      workspace.report.character.character_level,
-      workspace.report.character.abilities,
-    ),
-  );
-
   const mutate = async (
     operation: () => Promise<boolean>,
   ): Promise<void> => {
@@ -400,6 +388,29 @@ function renderPlanner(
       restoreFocus(context.root, mutationFocusKey);
     }
   };
+  primary.append(
+    renderCompleteness(
+      session.completeness,
+      {
+        chooseMulticlassSkill: (skill) =>
+          void mutate(() =>
+            session.execute({
+              type: 'choose_multiclass_skill',
+              skill,
+            }),
+          ),
+      },
+      session.saving,
+    ),
+    renderAgentReference(
+      buildAgentReference(workspace, session.completeness),
+    ),
+    renderDiceHelper(
+      workspace.slots,
+      workspace.report.character.character_level,
+      workspace.report.character.abilities,
+    ),
+  );
   const editorActions: PlannerEditorActions = {
     updateAbility: (ability: Ability, score: number) =>
       void mutate(() =>

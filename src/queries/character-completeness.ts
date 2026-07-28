@@ -5,8 +5,16 @@ import {
   type SqlRow,
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
-import { isEnumValue, multiclassSkillPools } from '../domain/enums';
-import type { MulticlassSkillPool, SlotBucket } from '../domain/enums';
+import {
+  isEnumValue,
+  multiclassSkillPools,
+  skills,
+} from '../domain/enums';
+import type {
+  MulticlassSkillPool,
+  Skill,
+  SlotBucket,
+} from '../domain/enums';
 import { startingClass } from '../rules/sheet';
 import { EligibleSpellSearch } from '../eligibility/eligible-spell-search';
 import { CharacterNotFoundError } from './character-crud';
@@ -114,6 +122,12 @@ export interface UnmadeMulticlassSkillChoiceItem {
     readonly class_name: string;
     readonly count: number;
     readonly pool: Exclude<MulticlassSkillPool, 'none'>;
+    /**
+     * The skills this character may choose NOW. Already-held proficiencies are
+     * absent because the destination is unique on `(character_id, skill)` and
+     * choosing one again would waste the grant even if the write were a no-op.
+     */
+    readonly available_skills: readonly Skill[];
   }[];
 }
 
@@ -647,6 +661,7 @@ export const orphanHitPointRolls: CompletenessCheck = {
  * `multiclass_skill_choice_count`, which is 0 for nine of the twelve.
  */
 interface SkillEntitlementLine {
+  readonly class_definition_id: number;
   readonly class_name: string;
   readonly is_starting_class: boolean;
   readonly count: number;
@@ -687,7 +702,8 @@ function skillEntitlement(
   // The ORDER matches `CharacterSheetBuilder.#classes`, so both resolvers pick
   // the same row when the flag is missing.
   const rows = context.db.all(
-    `SELECT definition.name AS class_name,
+    `SELECT definition.id AS class_definition_id,
+            definition.name AS class_name,
             level.is_starting_class AS is_starting_class,
             traits.skill_choice_count AS skill_choice_count,
             traits.multiclass_skill_choice_count AS entry_count,
@@ -701,6 +717,7 @@ function skillEntitlement(
       ORDER BY definition.name, level.id`,
     [context.characterId],
     (row) => ({
+      class_definition_id: sqlInteger(row, 'class_definition_id'),
       class_name: sqlString(row, 'class_name'),
       is_starting_class: Number(row.is_starting_class) === 1,
       // NULL where the class has no traits row, and carried as an ABSENCE
@@ -718,6 +735,7 @@ function skillEntitlement(
   return rows.map((row): SkillEntitlementLine => {
     if (chosen === row) {
       return {
+        class_definition_id: row.class_definition_id,
         class_name: row.class_name,
         is_starting_class: true,
         count: row.skill_choice_count ?? 0,
@@ -732,6 +750,7 @@ function skillEntitlement(
       ? row.entry_pool
       : 'none';
     return {
+      class_definition_id: row.class_definition_id,
       class_name: row.class_name,
       is_starting_class: false,
       count: pool === 'none' ? 0 : row.entry_count,
@@ -756,7 +775,47 @@ function chosenSkillCount(context: CheckContext): number {
  * cannot carry a `none` row — which would be a class listed as owing a skill it
  * does not owe.
  */
+function availableSkills(
+  context: CheckContext,
+  classDefinitionId: number,
+  pool: Exclude<MulticlassSkillPool, 'none'>,
+): readonly Skill[] {
+  const held = new Set(
+    context.db.all(
+      `SELECT skill
+         FROM character_skill_proficiencies
+        WHERE character_id = ?`,
+      [context.characterId],
+      (row) => sqlString(row, 'skill'),
+    ),
+  );
+  if (pool === 'any') {
+    return skills.filter((skill) => !held.has(skill));
+  }
+  return context.db.all(
+    `SELECT option.skill
+       FROM class_skill_options AS option
+      WHERE option.class_definition_id = ?
+        AND NOT EXISTS (
+          SELECT 1
+            FROM character_skill_proficiencies AS held
+           WHERE held.character_id = ?
+             AND held.skill = option.skill
+        )
+      ORDER BY option.skill`,
+    [classDefinitionId, context.characterId],
+    (row): Skill => {
+      const value = sqlString(row, 'skill');
+      if (!isEnumValue(skills, value)) {
+        throw new Error(`Unknown class skill option '${value}'.`);
+      }
+      return value;
+    },
+  );
+}
+
 function grantingEntries(
+  context: CheckContext,
   lines: readonly SkillEntitlementLine[],
 ): readonly UnmadeMulticlassSkillChoiceItem['entries'][number][] {
   const found: UnmadeMulticlassSkillChoiceItem['entries'][number][] = [];
@@ -769,6 +828,11 @@ function grantingEntries(
         class_name: line.class_name,
         count: line.count,
         pool: line.pool,
+        available_skills: availableSkills(
+          context,
+          line.class_definition_id,
+          line.pool,
+        ),
       });
     }
   }
@@ -779,7 +843,7 @@ export const unmadeMulticlassSkillChoice: CompletenessCheck = {
   id: 'unmade_multiclass_skill_choice',
   run(context) {
     const lines = skillEntitlement(context);
-    const entries = grantingEntries(lines);
+    const entries = grantingEntries(context, lines);
     if (entries.length === 0) {
       return [];
     }
@@ -836,7 +900,7 @@ export const noSkillProficiencies: CompletenessCheck = {
     // That item says everything this one does AND names the classes and their
     // pools, so reporting both would be the same fact twice with one of them
     // less useful.
-    if (grantingEntries(lines).length > 0) {
+    if (grantingEntries(context, lines).length > 0) {
       return [];
     }
     // How many the character's classes ENTITLE them to — the STARTING class's

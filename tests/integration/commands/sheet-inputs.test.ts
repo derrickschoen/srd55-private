@@ -382,6 +382,36 @@ describe('sheet input commands', () => {
     ).rejects.toThrow('Unknown skill');
   });
 
+  it("choosing a Bard's multiclass skill does not modify character notes", async () => {
+    db.exec(`UPDATE characters SET notes = 'Keep this note' WHERE id = ?`, [
+      characterId,
+    ]);
+    const inverse = await inverseOf({
+      type: 'choose_multiclass_skill',
+      skill: 'performance',
+    });
+    expect(
+      db.allRaw(
+        'SELECT skill FROM character_skill_proficiencies WHERE character_id = ?',
+        [characterId],
+      ),
+    ).toEqual([{ skill: 'performance' }]);
+    expect(
+      db.scalar('SELECT notes FROM characters WHERE id = ?', [characterId]),
+    ).toBe('Keep this note');
+
+    await run(inverse);
+    expect(
+      db.scalar(
+        'SELECT count(*) FROM character_skill_proficiencies WHERE character_id = ?',
+        [characterId],
+      ),
+    ).toBe(0);
+    expect(
+      db.scalar('SELECT notes FROM characters WHERE id = ?', [characterId]),
+    ).toBe('Keep this note');
+  });
+
   it('stores a signed Armor Class adjustment with its reason', async () => {
     const inverse = await inverseOf({
       type: 'set_armor_class_adjustment',
