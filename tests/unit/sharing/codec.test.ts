@@ -102,8 +102,7 @@ const complete: CharacterShareDocument = {
       damage_type: 'Piercing',
       versatile_damage: { kind: 'dice', dice: '1d6' },
       ammunition_kind: 'bolt',
-      range_normal_feet: 20,
-      range_long_feet: 60,
+      range: { kind: 'ranged', near_feet: 20, far_feet: 60 },
       mastery_property: 'Nick',
       other_properties: 'Silvered; hums near goblins',
       notes: 'Taken from the barrow.',
@@ -121,6 +120,7 @@ const complete: CharacterShareDocument = {
       name: 'Unfinished club',
       damage: { kind: 'not_recorded' },
       versatile_damage: { kind: 'not_applicable' },
+      range: { kind: 'none' },
     },
   ],
   // THE ORIGIN, WITH EVERY SLOT FILLED SO THE WIRE PIN SEES A REAL VALUE IN
@@ -325,9 +325,7 @@ function deterministicNoise(length: number): string {
   return result;
 }
 
-describe('character-share positional codec', () => {
-  it('pins the complete version-1 wire layout element by element', () => {
-    expect(shareDocumentToPositional(complete)).toEqual([
+const COMPLETE_V1_WIRE = [
       'dnd-multiclass-spells-character-share',
       1,
       [
@@ -611,7 +609,96 @@ describe('character-share positional codec', () => {
           true,
         ],
       ],
-    ]);
+    ] as const;
+
+describe('character-share positional codec', () => {
+  it('keeps the hand-authored complete version-1 positional golden readable', () => {
+    expect(positionalToShareDocument(COMPLETE_V1_WIRE)).toEqual(complete);
+  });
+
+  it('pins the hand-authored complete version-2 wire layout element by element', () => {
+    const version2Golden = [
+      'dnd-multiclass-spells-character-share',
+      2,
+      [
+        'Mira',
+        8,
+        14,
+        13,
+        18,
+        12,
+        10,
+        4,
+        '2014',
+        true,
+        'Retired the staff after Waterdeep.',
+      ],
+      COMPLETE_V1_WIRE[3],
+      COMPLETE_V1_WIRE[4],
+      COMPLETE_V1_WIRE[5],
+      COMPLETE_V1_WIRE[6],
+      COMPLETE_V1_WIRE[7],
+      COMPLETE_V1_WIRE[8],
+      COMPLETE_V1_WIRE[9],
+      COMPLETE_V1_WIRE[10],
+      [
+        [
+          'Dagger of Warning',
+          null,
+          'Piercing',
+          null,
+          'bolt',
+          ['ranged', 20, 60],
+          'Nick',
+          'Silvered; hums near goblins',
+          'Taken from the barrow.',
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          'simple',
+          ['dice', '1d4'],
+          ['dice', '1d6'],
+        ],
+        [
+          'Unfinished club',
+          null,
+          null,
+          null,
+          null,
+          ['none'],
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          ['not_recorded'],
+          ['not_applicable'],
+        ],
+      ],
+      COMPLETE_V1_WIRE[12],
+      COMPLETE_V1_WIRE[13],
+      COMPLETE_V1_WIRE[14],
+      [[
+        '2024:com.example.spells:starward-aegis',
+        'Starward Aegis',
+      ]],
+    ];
+
+    expect(shareDocumentToPositional(complete)).toEqual(version2Golden);
   });
 
   it('round-trips object, positional, gzip, and base64url forms', async () => {
@@ -753,10 +840,9 @@ describe('character-share positional codec', () => {
     const positional = shareDocumentToPositional(minimal);
     expect(positional).toEqual([
       'dnd-multiclass-spells-character-share',
-      1,
+      2,
       [
         'Ten',
-        null,
         null,
         null,
         null,
@@ -806,9 +892,11 @@ describe('character-share positional codec', () => {
       // NOT a group — effects are one section, and a nested tuple here would
       // suggest a structure they do not have.
       null,
+      // Element 15: placeholders moved out of the character tuple in v2.
+      null,
     ]);
-    expect(positional).toHaveLength(15);
-    expect((positional[2] as unknown[]).length).toBe(12);
+    expect(positional).toHaveLength(16);
+    expect((positional[2] as unknown[]).length).toBe(11);
     expect((positional[3] as unknown[][])[0]).toHaveLength(8);
     expect((positional[4] as unknown[][])[0]).toHaveLength(6);
     expect(positional[12]).toHaveLength(3);
@@ -827,15 +915,11 @@ describe('character-share positional codec', () => {
     ).resolves.toEqual(minimal);
   });
 
-  it('rejects every non-version-1 character, class, and source arity', () => {
+  it('rejects every non-version-2 character, class, and source arity', () => {
     const positional = shareDocumentToPositional(complete);
     const cases: Array<[number, number, RegExp]> = [
-      // TEN AND THIRTEEN, not ten and twelve. Twelve is the arity this build
-      // writes and eleven is the one every pre-Q12 link has, so the refusal
-      // moved out by one on the high side — the accepted SET grew, and the
-      // subject of this case grew with it.
-      [2, 10, /wire character must be a tuple of length 11 or 12/],
-      [2, 13, /wire character must be a tuple of length 11 or 12/],
+      [2, 10, /wire character must be a tuple of length 11/],
+      [2, 12, /wire character must be a tuple of length 11/],
       [3, 7, /wire classes\[0\] must be a tuple of length 8/],
       [3, 9, /wire classes\[0\] must be a tuple of length 8/],
       [4, 5, /wire sources\[0\] must be a tuple of length 6/],
@@ -1058,6 +1142,7 @@ describe('a share link generated before weapon damage became a union', () => {
         proficiency_category: 'simple',
         damage: { kind: 'dice', dice: '1d6' },
         versatile_damage: { kind: 'dice', dice: '1d8' },
+        range: { kind: 'none' },
       },
       {
         name: 'Homebrew Blade',
@@ -1070,14 +1155,171 @@ describe('a share link generated before weapon damage became a union', () => {
           kind: 'custom',
           text: 'double proficiency, no rounding',
         },
+        range: { kind: 'none' },
       },
       {
         name: 'Unfinished Club',
         proficiency_category: 'simple',
         damage: { kind: 'not_recorded' },
         versatile_damage: { kind: 'not_applicable' },
+        range: { kind: 'none' },
       },
     ]);
+  });
+});
+
+/**
+ * Five literal fragments independently compressed from hand-written v1
+ * positional documents. None was produced by the current encoder.
+ */
+const V1_RANGE_FRAGMENTS = [
+  [
+    'none',
+    'H4sIAAAAAAAAA52NsQrDMAxEf6Votod-SJeuQhRVFolBVYzk_H8pFDpkSuF4w_G4Q2je6mu32cU4s-ZQs6yycrBMjZorh0K5FoQ7-6KXW1-CfULx3ewUqOAhPwMRfHP9Y_ccPjfzESpbNG1A34LHsC78NAUiojfhWuwEGQEAAA',
+    { kind: 'none' },
+  ],
+  [
+    'near-only',
+    'H4sIAAAAAAAAA5WNsQoCQQxEf0VS74L6Hza2IUjMhruFmF2ye4V_byNYeM3B8IrhMYNQvOTXZrOK8Rh5dDUbWVYOlqmRx8qhkC4J4c6-6OlWl2CfkHwzOwRK-JefgQiuHLm5vffHr-fjn7tA8DYfodKiaAH6Fty7VeGnKRARfQBcrXFWHAEAAA',
+    { kind: 'ranged', near_feet: 20, far_feet: null },
+  ],
+  [
+    'ordinary',
+    'H4sIAAAAAAAAA5WNsQrDMAxEf6VotiHt0L_o0lWIotoiMaiykZ2hf9-lUGiyBI43HI87hGw5vlYdJSn3HnsT1R7Tws5piMe-sAuEc0C4s81yupXZ2QYEW1UPgQJu8jMQoXouxv7e375M4Todf_0HgtXxcEnVs2Sgb8GtaUn8VAEiog9vxLJrGQEAAA',
+    { kind: 'ranged', near_feet: 20, far_feet: 60 },
+  ],
+  [
+    'long-only',
+    'H4sIAAAAAAAAA5WNwQoCMQxEf0VybkEv_oWXvYYgsQ3dQkxL2j34914WBAVhYXiH4TGDkC3H56azJuUx4uiiOmJa2TlN8ThWdoFwCQgLW5HTrRZnmxBsUz0ECviTj4EI2qzEZvr6M349Hz_-BoK1eXdJzbNkoL3g3rUmfqgAEdEb5ydbUhwBAAA',
+    { kind: 'legacy', near_feet: null, far_feet: 60 },
+  ],
+  [
+    'inverted',
+    'H4sIAAAAAAAAA5WNsQoCQQxEf0VS78Jp4V_Y2IYgMRvuFmJuye75_TaCoDYHwyuGxwxC8ZIfm40qxr3n3tSsZ1k4WIZG7guHQjomhCv7rIdLnYN9QPLNbBco4U8-BiJUf2oMLf-3z1M6Tftfv4Hg67iFyhpFC9C74NasCt9NgYjoBQFYHvQZAQAA',
+    { kind: 'legacy', near_feet: 60, far_feet: 20 },
+  ],
+] as const;
+
+/**
+ * Boundary fragments hand-authored in the frozen v1 tuple layout and then
+ * independently gzipped. These are additions to, not replacements for, the
+ * five state fixtures above.
+ */
+const V1_RANGE_BOUNDARY_FRAGMENTS = [
+  [
+    'equal distances',
+    'H4sIAAAAAAAAA5WNQQoCMQxFryJZt6AewSPMNgSJTXAGYlvTduHtB0EQdDYDj7f4fP5HkCzxMawvybi12KqatZhmdk5dPbaZXSGcAsLE-a6HSxlZ2F8Q8jDbJQr4x7eBCPocbNvD5-Ob3Ze_QsilX11TcVEB-gRcqy2Jb6ZARLQCiVU3tRcBAAA',
+    { kind: 'ranged', near_feet: 20, far_feet: 20 },
+  ],
+  [
+    'smallest inverted pair',
+    'H4sIAAAAAAAAA5WNQQoCMQxFryJZt-C4c-sR3JYgsQ1OIZOWpCPM7d0IgroZ-LzF58FLULTEZZVRs5B79M4iHvNMRnmwRZ_JGMIUElxJH3y4tFUL2QZBV5FdwJB-9jFSAl9IhH3Eqk-2weV_5HQM03l__hsJtI2bcW5WuAC-D-pdaqa7MCAivgAgvUoTIwEAAA',
+    { kind: 'legacy', near_feet: 20, far_feet: 19 },
+  ],
+  [
+    'zero near distance',
+    'H4sIAAAAAAAAA5WNMQrDMAxFr1I025AuPUCPkFWIotoiCaiyke2hPX2WQqHtEvi84fP4HyFbjo-hfUvKrcVWRbXFtLJz6uKxrewC4RwQZrZFTtcyLLM_IdhQPQQK-JOPgQgm7PElXv6PT-EyHX_9BoKVfnNJxbNkoHfBteqW-K4CREQ7rBzhzhoBAAA',
+    { kind: 'ranged', near_feet: 0, far_feet: 60 },
+  ],
+  [
+    'zero far distance',
+    'H4sIAAAAAAAAA5WNQQpCMQxEryJZN6BX8AhuQ5DYRv-HmJa0Xejp3QiCgvBheIvhMUNQvOB92lizSe_Ym5p1zIuE5KGBfZFQSIdEcBK_6e5YpxeJBySfZpvAiX7yMYjgKoFPjfpne7_99hsEXsc5NNcoWoDfhbRma5aLKTAzvwCOLPZ1GwEAAA',
+    { kind: 'legacy', near_feet: null, far_feet: 0 },
+  ],
+  [
+    'near distance ceiling',
+    'H4sIAAAAAAAAA5WNsQrDMAxEf6VotqH5hX5CVyOKKovEoMpGtof-fSkEOjRLjuMNx3GXIFuOr6mjsFLvsTdR7ZE3cuIhHvtGLhCWkOBOtsrlVqdl8jcEm6qngCH9-ddICUzII0vRYuvx_nL96vz1IRJYHQ8Xrp4lA-4BtaaF6akCiIgffLGWmyQBAAA',
+    { kind: 'ranged', near_feet: 100_000, far_feet: null },
+  ],
+  [
+    'far distance ceiling',
+    'H4sIAAAAAAAAA5WNwQoCMQxEf0VybmHXT_ATvIYgMY27hdiWtHvw70UQBPWyw_AOwzCDkEqK981GFuPeY29q1qOs7CxDPfaVXSHMAeHMZdHDqW4lsT8glM1sFyjgjz8NRLixR9FsuSz_549TmKeX9p9_A6HUcXGV6kkT0Dvg1iwLX02BiOgJt18DByEBAAA',
+    { kind: 'ranged', near_feet: 20, far_feet: 100_000 },
+  ],
+] as const;
+
+describe('the adjacent v1-to-v2 migration', () => {
+  it.each(V1_RANGE_FRAGMENTS)(
+    'carries the hand-authored %s v1 range fragment losslessly',
+    async (_name, fragment, expectedRange) => {
+      const decoded = await decodeShareFragment(fragment);
+      expect(decoded.weapons?.[0]?.range).toEqual(expectedRange);
+    },
+  );
+
+  it.each(V1_RANGE_BOUNDARY_FRAGMENTS)(
+    'classifies the hand-authored v1 %s boundary losslessly',
+    async (_name, fragment, expectedRange) => {
+      const decoded = await decodeShareFragment(fragment);
+      expect(decoded.weapons?.[0]?.range).toEqual(expectedRange);
+    },
+  );
+
+  it('refuses to freshly encode the migration-only legacy limb', () => {
+    const document = validateShareDocument({
+      format: CHARACTER_SHARE_FORMAT,
+      version: CHARACTER_SHARE_VERSION,
+      character: { name: 'Legacy cannot be minted' },
+      classes: [],
+      sources: [],
+      selections: [],
+      spellbook: [],
+      preferences: [],
+      overrides: [],
+      weapons: [{
+        name: 'Old bow',
+        damage: { kind: 'not_recorded' },
+        versatile_damage: { kind: 'not_applicable' },
+        range: { kind: 'legacy', near_feet: null, far_feet: 60 },
+      }],
+    });
+
+    expect(() => shareDocumentToPositional(document)).toThrow(
+      /decode-only legacy range/,
+    );
+  });
+
+  it('enforces the placeholder cap at the v2 root position', () => {
+    const hostile = [
+      CHARACTER_SHARE_FORMAT,
+      2,
+      [
+        'Hostile placeholders',
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+      ],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      Array.from(
+        { length: SHARE_LIMITS.placeholders + 1 },
+        (_, index) => [
+          `2024:org.example:hostile-placeholder-${String(index)}`,
+          `Placeholder ${String(index)}`,
+        ],
+      ),
+    ];
+
+    expect(() => positionalToShareDocument(hostile)).toThrow(
+      /placeholders exceeds the maximum count of 1000/,
+    );
   });
 });
 
