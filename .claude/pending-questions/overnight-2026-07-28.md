@@ -165,6 +165,55 @@ APP owns, not the user's notes.
 
 ---
 
+## What landed overnight
+
+Eleven tracks, each gated by me independently before merge — `npm test`,
+`npm run build`, `npm run db:migrations`, and the browser suite on a unique port
+— with a mutation on the load-bearing new assertion of each.
+
+| | merge | what |
+| --- | --- | --- |
+| 1 | `635d45a` | database migration runner |
+| 2 | `94ade91` | weapon range as a tagged value, migrated in two steps |
+| 3 | `0160fc7` | share wire v2 and the v1→v2 migration |
+| 4 | `98c8d61` | SRD spell descriptions and eight class lists extracted |
+| 5 | `3a4b319` | the bundled catalogue, read-only — the app now works on first open |
+| 6 | `fecb2cb` | fork a bundled spell into user-owned content |
+| 7 | `b640405` | one `characterLevel()`, absence in the type |
+| 8 | `e51ba2a` | the multiclass skill choice a player could never make |
+| 9 | `6f8a6bf` | class Starting Equipment re-extracted, un-truncated |
+| 10 | `e479549` | ability-score generation, incl. Standard Array by Class |
+| 11 | `b70a75f` | the `coin` kind retired, per D40 |
+| 12 | `0fcb31a` | class starting equipment modelled and seeded |
+
+Findings recorded: **F20** (what drizzle-kit actually emits), **F21** (a correct
+FK ordering nothing held correct), **F22** (one rule written as two expressions),
+**F23** (a merge I ran from inside the worktree, twice), **F24** (the wire freeze
+was never enforced — the guard hashed the object, not the file), **F25** (seven
+level sites, and a mutation that never applied), **F26** (a merged extract
+truncated mid-word).
+
+Numbers moved 2158 → **2231** vitest, 133 → **136** files, 72 → **75** browser,
+59 → **60** tables.
+
+## Where I stopped, and why
+
+The next design items need YOU, not more autonomy:
+
+- **Item 12** (persist weapon attack kind) adds a fact to `character_weapons`,
+  which is share-scoped. D30 makes it a compile error until classified, and the
+  only two answers are "omitted, so a shared custom weapon loses it" or a wire
+  version bump — which D41 makes permanent. I refused exactly that bump earlier
+  tonight (F24); taking it now by a side door would be worse.
+- **Items 11, 13, 14** are projection, commands and UI. They decide how the
+  builder BEHAVES, which is yours.
+- **Item 3** (origin application, L) is the largest prerequisite left and the
+  design calls the current state "designed and never built"
+  (`db/schema/origins.ts:646-661`).
+
+The wire question in the section above is now blocking two things rather than
+one. It is the first thing worth answering.
+
 ## Running order for the night
 
 1. `bqea0wc7s` — read-only SRD catalogue layer. Verify, gate, merge.
