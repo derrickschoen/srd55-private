@@ -13,11 +13,11 @@ import {
   savingThrowProficiencies,
   sheetProficiencyBonus,
   skillModifier,
-  totalCharacterLevel,
   totalLevelWarnings,
   type SheetArmor,
   type SheetClass,
 } from '../../../src/rules/sheet';
+import { characterLevel } from '../../../src/rules/character-level';
 import type { ExtraAttackGrant } from '../../../src/rules/extra-attack';
 import { hitDieSizes } from '../../../src/domain/enums';
 import { parseSkillAbilities } from '../../../src/rules/skills';
@@ -118,15 +118,21 @@ const RANGER: SheetClass = {
 };
 
 describe('proficiency bonus and total level', () => {
+  it('preserves the absence of every class row', () => {
+    expect(characterLevel([])).toBeNull();
+    expect(sheetProficiencyBonus([])).toBeNull();
+    expect(sheetProficiencyBonus([], 7)).toBeNull();
+  });
+
   it('sums levels across classes rather than taking the highest', () => {
     // Fighter 5 + Wizard 3 = 8.
-    expect(totalCharacterLevel([FIGHTER, WIZARD])).toBe(8);
+    expect(characterLevel([FIGHTER.level, WIZARD.level])).toBe(8);
     // `multiclassing.txt`: "if you are a level 3 Fighter / level 2 Rogue, you
     // have the Proficiency Bonus of a level 5 character, which is +3." That
     // worked example is transcribed here as its own case.
     const fighter3: SheetClass = { ...FIGHTER, level: 3 };
     const rogue2: SheetClass = { ...WIZARD, class_name: 'Rogue', level: 2 };
-    expect(totalCharacterLevel([fighter3, rogue2])).toBe(5);
+    expect(characterLevel([fighter3.level, rogue2.level])).toBe(5);
     expect(sheetProficiencyBonus([fighter3, rogue2])).toBe(3);
     // Taking the maximum per class would give a level 3 character, +2 — the
     // bug this asserts against.
@@ -215,7 +221,7 @@ describe('a character whose class levels add up to more than 20', () => {
     expect(result.maximum).not.toBe(124);
     // And the derived bonus follows the recorded total too, rather than being
     // silently capped at the level-20 value.
-    expect(totalCharacterLevel([FIGHTER_20, WIZARD_5])).toBe(25);
+    expect(characterLevel([FIGHTER_20.level, WIZARD_5.level])).toBe(25);
   });
 
   it('states the maximum as one constant rather than a literal in the message', () => {

@@ -41,12 +41,12 @@ import {
   savingThrowProficiencies,
   sheetProficiencyBonus,
   skillModifier,
-  totalCharacterLevel,
   type HitPointRolls,
   type SheetArmor,
   type SheetClass,
   type SheetWarning,
 } from '../rules/sheet';
+import { characterLevel } from '../rules/character-level';
 import {
   characterProficiencies,
   type ProficiencyWeapon,
@@ -96,13 +96,18 @@ export interface SheetNumber {
   readonly formula: string;
 }
 
-export interface SheetSkill extends SheetNumber {
+export interface UndeterminedSheetNumber
+  extends Omit<SheetNumber, 'value'> {
+  readonly value: number | null;
+}
+
+export interface SheetSkill extends UndeterminedSheetNumber {
   readonly skill: Skill;
   readonly ability: Ability;
   readonly proficient: boolean;
 }
 
-export interface SheetSave extends SheetNumber {
+export interface SheetSave extends UndeterminedSheetNumber {
   readonly ability: Ability;
   readonly proficient: boolean;
 }
@@ -202,18 +207,18 @@ export interface SheetGap {
 export interface CharacterSheet {
   readonly character_id: number;
   readonly name: string;
-  readonly total_level: number;
-  readonly proficiency_bonus: SheetNumber;
+  readonly total_level: number | null;
+  readonly proficiency_bonus: UndeterminedSheetNumber;
   readonly ability_scores: readonly (SheetNumber & {
     readonly ability: Ability;
     readonly score: number;
   })[];
   readonly hit_points: SheetNumber;
   /** The species contribution, separately, and `null` when there is none. */
-  readonly species_hit_points: SheetNumber | null;
+  readonly species_hit_points: UndeterminedSheetNumber | null;
   readonly armor_class: SheetNumber;
   readonly initiative: SheetNumber;
-  readonly passive_perception: SheetNumber;
+  readonly passive_perception: UndeterminedSheetNumber;
   readonly saves: readonly SheetSave[];
   readonly skills: readonly SheetSkill[];
   readonly attacks_per_action: AttacksPerAction;
@@ -472,7 +477,7 @@ export class CharacterSheetBuilder {
       classes,
       character.proficiency_bonus_override,
     );
-    const totalLevel = totalCharacterLevel(classes);
+    const totalLevel = characterLevel(classes.map((entry) => entry.level));
 
     const hitPoints = hitPointMaximum({ classes, scores, rolls: rolls.map });
     const worn = armorRows.find((row) => row.slot === 'worn') ?? null;
@@ -530,7 +535,14 @@ export class CharacterSheetBuilder {
       }),
     );
     const effects = summariseEffects(effectRows);
-    const speciesHp = effectHitPoints(effectRows, totalLevel);
+    const hasSpeciesHitPoints =
+      effects.hitPointsFlat !== 0 || effects.hitPointsPerLevel !== 0;
+    const speciesHp =
+      totalLevel === null
+        ? effects.hitPointsPerLevel === 0
+          ? effects.hitPointsFlat
+          : null
+        : effectHitPoints(effectRows, totalLevel);
     const baseSpeed = this.db.one(
       `SELECT base_speed_feet FROM character_species WHERE character_id = ?`,
       [characterId],
@@ -550,8 +562,10 @@ export class CharacterSheetBuilder {
         label: 'Proficiency bonus',
         value: bonus,
         formula:
-          'From TOTAL character level, not from the level in any one class ' +
-          `(multiclassing.txt). Total level ${String(totalLevel)}.`,
+          totalLevel === null
+            ? 'Undetermined because this character has no class levels.'
+            : 'From TOTAL character level, not from the level in any one class ' +
+              `(multiclassing.txt). Total level ${String(totalLevel)}.`,
       },
       ability_scores: abilities.map((ability) => ({
         id: `ability:${ability}`,
@@ -572,15 +586,17 @@ export class CharacterSheetBuilder {
           'is added per level. Species hit points are shown separately.',
       },
       species_hit_points:
-        speciesHp === 0
+        !hasSpeciesHitPoints
           ? null
           : {
               id: 'species_hit_points',
               label: 'Species hit points',
               value: speciesHp,
               formula:
-                'A species trait adds these on top of the class total. Shown ' +
-                'apart because the two come from different sources.',
+                speciesHp === null
+                  ? 'Undetermined because this species effect scales with a character level that is undetermined.'
+                  : 'A species trait adds these on top of the class total. Shown ' +
+                    'apart because the two come from different sources.',
             },
       armor_class: {
         id: 'armor_class',

@@ -44,7 +44,7 @@ function summary(id: number, name: string): CharacterSummary {
   return {
     id,
     name,
-    level: 0,
+    level: null,
     classes: [],
     warning_count: 0,
   };

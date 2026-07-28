@@ -314,7 +314,12 @@ function renderPlanner(
   // records which. Mark it where it is rendered rather than filtering it.
   heading.append(freeTextSpan(workspace.report.character.name));
   const subtitle = document.createElement('p');
-  subtitle.textContent = `Level ${workspace.report.character.character_level} · revision ${workspace.revision}`;
+  subtitle.textContent =
+    `Level ${
+      workspace.report.character.character_level === null
+        ? 'undetermined'
+        : String(workspace.report.character.character_level)
+    } · revision ${workspace.revision}`;
   identity.append(home, heading, subtitle);
   const status = document.createElement('output');
   status.id = 'planner-status';

@@ -44,15 +44,14 @@ import { ClassProficiencyLookup } from './class-proficiency-lookup';
  * They are passed IN rather than read here, and the reason is one number on one
  * screen: `proficiency_bonus` and `scores` are already resolved by
  * `BuildReportBuilder` for the spell math, and a second resolution here could
- * differ from it — `proficiencyBonus(0)` and `sheetProficiencyBonus([])`
- * genuinely disagree for a character with no classes. A sheet printing +1 for a
- * spell attack and +2 for a weapon attack would be this application arguing
- * with itself in front of the user.
+ * differ from it. A class-less character now carries `null` through both
+ * derivations; a sheet printing a guessed spell attack beside a withheld weapon
+ * attack would be this application arguing with itself in front of the user.
  */
 export interface WeaponPanelContext {
   readonly routes: readonly SpellAccessRoute[];
   readonly scores: AbilityScores;
-  readonly proficiency_bonus: number;
+  readonly proficiency_bonus: number | null;
 }
 
 /**

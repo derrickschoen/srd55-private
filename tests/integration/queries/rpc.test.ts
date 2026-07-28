@@ -492,7 +492,7 @@ describe('typed query RPC integration', () => {
       {
         id: character.id,
         name: 'Q60 Client Hero',
-        level: 0,
+        level: null,
         classes: [],
         warning_count: 0,
       },

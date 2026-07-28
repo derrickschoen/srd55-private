@@ -460,12 +460,14 @@ export class CharacterWorkspaceBuilder {
         ability,
         attack_bonus:
           score === null ||
+          proficiency === null ||
           versionId === null ||
           !attackIds.has(versionId)
             ? null
             : score.spellAttackBonus(proficiency).value,
         save_dc:
           score === null ||
+          proficiency === null ||
           versionId === null ||
           !saveIds.has(versionId)
             ? null

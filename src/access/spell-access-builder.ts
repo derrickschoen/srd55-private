@@ -19,6 +19,7 @@ import type { JsonValue } from '../domain/models';
 import { SpellSelectionEligibility } from '../eligibility/spell-selection-eligibility';
 import { SourceRuleReader } from '../grants/source-rule-reader';
 import { AbilityScores } from '../rules/ability-scores';
+import { characterLevel } from '../rules/character-level';
 import { proficiencyBonus } from '../rules/proficiency';
 import { SpellSlotAssignment } from './spell-slot-assignment';
 import { deduplicateRoutes } from './route-key';
@@ -313,6 +314,11 @@ export class SpellAccessBuilder {
     if (character === null) {
       return [];
     }
+    if (characterLevel(this.db, character.id) === null) {
+      // A class-less character has no class spellcasting to turn into routes.
+      // Returning no routes keeps an undetermined level out of spell math.
+      return [];
+    }
 
     return deduplicateRoutes([
       ...this.slotRoutes(character),
@@ -562,20 +568,15 @@ export class SpellAccessBuilder {
     >,
   ): SpellAccessRoute {
     const ability = specific.spellcasting_ability;
-    const characterLevel = Math.max(
-      1,
-      Number(
-        this.db.scalar(
-          `SELECT COALESCE(SUM(level), 0)
-           FROM character_class_levels
-           WHERE character_id = ?`,
-          [character.id],
-        ) ?? 0,
-      ),
-    );
+    const level = characterLevel(this.db, character.id);
+    if (level === null) {
+      throw new Error(
+        'Spell access routes require at least one character class.',
+      );
+    }
     const proficiency =
       character.proficiencyBonusOverride ??
-      proficiencyBonus(characterLevel);
+      proficiencyBonus(level);
     const abilityScore =
       ability === null
         ? null
