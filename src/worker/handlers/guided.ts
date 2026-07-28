@@ -15,10 +15,23 @@
 import {
   GUIDED_RPC,
   hasExactKeys,
+  isGuidedCreateParams,
   type GuidedBuildStateParams,
 } from '../../builder/contracts';
-import { guidedBuildState } from '../../builder/guided-creation';
-import { defineRpcHandler, type RpcHandler } from '../handler';
+import {
+  GuidedCreationRefusal,
+  createGuidedCharacter,
+  guidedBuildState,
+  listGuidedClassOptions,
+} from '../../builder/guided-creation';
+import { CharacterCommandIntegrity } from '../../commands/integrity';
+import { RpcError } from '../../rpc/protocol';
+import {
+  defineRpcHandler,
+  isEmptyParams,
+  type RpcHandler,
+} from '../handler';
+import { COMMAND_INTEGRITY_KEY } from './commands';
 
 /**
  * Not in the seam because the seam pins only what BOTH agents must agree on;
@@ -45,5 +58,34 @@ export const handlers: readonly RpcHandler[] = Object.freeze([
     GUIDED_RPC.buildState,
     isGuidedBuildStateParams,
     (context, params) => guidedBuildState(context.db, params.character_id),
+  ),
+  defineRpcHandler(
+    GUIDED_RPC.classOptions,
+    isEmptyParams,
+    (context) => listGuidedClassOptions(context.db),
+  ),
+  defineRpcHandler(
+    GUIDED_RPC.create,
+    isGuidedCreateParams,
+    (context, params) => {
+      try {
+        return createGuidedCharacter(
+          context.db,
+          params,
+          new CharacterCommandIntegrity(COMMAND_INTEGRITY_KEY),
+        );
+      } catch (error) {
+        // The RevisionConflict precedent: a DOMAIN refusal becomes
+        // `handler_error` with the seam's structured `GuidedRefusalData`, so
+        // callers can discriminate on `reason`. Anything else stays a bare
+        // `handler_error` — an unexpected failure has no reason to offer.
+        if (error instanceof GuidedCreationRefusal) {
+          throw new RpcError('handler_error', error.message, {
+            reason: error.reason,
+          });
+        }
+        throw error;
+      }
+    },
   ),
 ]);

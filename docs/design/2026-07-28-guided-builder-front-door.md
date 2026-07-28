@@ -227,8 +227,8 @@ guided-state query and its client contract** — revision 1 left that unowned.
 **A2 — transactional class-first materialisation.**
 Exit: one validated RPC call creates a character with exactly one bundled
 starting class, its class source, and generated grants; a homebrew class is
-REFUSED; a replayed `operation_uuid` returns the same character; every injected
-failure leaves zero rows belonging to the attempted character. **A2 also owns the
+REFUSED; every injected failure leaves zero rows belonging to the attempted
+character. **A2 also owns the
 filtered bundled-class list query** — revision 1 left that unowned too, and A9's
 disproof means the ordinary catalog cannot feed it.
 
@@ -439,7 +439,6 @@ interface GuidedOriginOption {   // species AND background
 }
 
 interface GuidedCreateParams {
-  operation_uuid: string;      // §3.3
   name: string;                // trimmed non-empty, <= 120 code points
   class_content_key: string;   // KEY, not id — see below
 }
@@ -532,13 +531,16 @@ files this section excludes — reuse by copying is drift by construction. Pinne
 the supervisor lands the params validators in `src/builder/contracts.ts`
 alongside the types, and `queries.ts` is not touched.
 
-**Idempotency has a home.** §3.3's `operation_uuid` needs durable storage;
-`character_operations` cannot serve it (it requires a character id, both
-revisions and an inverse command, which would fabricate the history §3.2
-forbids). Pinned: a new migration adding **`characters.creation_uuid TEXT
-UNIQUE`**, nullable so blank creation is unaffected, and a replay returns the
-existing row. **A2 owns the migration**, including `src/db/migrations.ts` and the
-new `db/schema/` entry — revision 2 allocated none of those paths.
+**There is no idempotency and no migration.** §3.3 reversed this at round 3:
+adding any column to `characters` breaks the backup codec in both directions, so
+guided creation is not idempotent and the class card disables on submit instead.
+
+*This paragraph previously pinned the opposite, and §4's A2 exit criterion and
+§8's params block did too — three passages left standing when §3.3 was reversed.
+The A2 implementer found the contradiction and followed the seam, which is the
+tiebreaker and has never carried an `operation_uuid`. The lesson is mine:
+reversing a decision means sweeping every passage that depended on it, not just
+the one that stated it.*
 
 **The terminal state is pinned, not left to invention.** Under **D55** the order
 is class → abilities → species → background → skills → equipment, so after
