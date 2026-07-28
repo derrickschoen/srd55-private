@@ -84,6 +84,28 @@ can trace to a document.
 Refusing someone's input is the strongest claim an app makes. It should rest on
 the strongest evidence we have, not the weakest.
 
+### The demonstration, added because the abstract version did not land
+
+Asked to explain this, I tried to verify ONE number: does a Ranger prepare 2
+spells at level 1? `HALF_PREPARED` in the seed starts with `2`, which is the 2024
+rule — in 2014 a Ranger got nothing until level 2. So it appears correct.
+
+**But notice how I established that. I recalled it.** There is no extract to
+open, so my check consisted of being confident from memory, which is precisely
+what this project forbids everywhere else.
+
+Set that beside D34. To verify the Monk's die I COUNTED — twenty rows in
+`attack-class-features.txt`, four `1d6`, six `1d8`, six `1d10`, four `1d12`, and
+the string `1d4` occurring nowhere. The wrong value had nowhere to hide, and the
+`4` that had been sitting in a CHECK constraint was a 2014 leftover.
+
+That `4` came from the same Laravel port these progression numbers came from.
+
+**So the finding is not "these numbers are wrong."** It is: *if any of them is
+wrong, nothing in this repository can tell us* — and D11 is about to use them to
+refuse a player's choice. Refusing input is the strongest claim the app makes,
+stronger than displaying a number, because it overrides the person.
+
 ### The fix, and it is the same one that worked five times tonight
 
 Extract the class tables to `docs/srd/source/`, pin the SHA-256 in `SOURCE.md`,
