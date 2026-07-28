@@ -86,6 +86,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       // its parent because `e` precedes `t`.
       'background_equipment_items',
       'background_templates',
+      'class_equipment_items',
       'change_log',
       'character_armor',
       'character_background',
@@ -288,7 +289,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
 });
 
 describe('table scope classification', () => {
-  it('classifies all 57 tables exactly once', () => {
+  it('classifies all 60 tables exactly once', () => {
     const names = Object.keys(TABLE_SCOPES);
     // 30 Laravel-derived tables — 38 until the eight Laravel-only
     // infrastructure ones were dropped — plus the four native weapon tables,
@@ -300,8 +301,8 @@ describe('table scope classification', () => {
     // `spell_version_cantrip_upgrade_levels` (character levels). Each group is
     // named rather than folded into one total, so a group that vanishes while
     // another grows cannot pass unnoticed.
-    expect(names).toHaveLength(59);
-    expect(new Set(names).size).toBe(59);
+    expect(names).toHaveLength(60);
+    expect(new Set(names).size).toBe(60);
     expect([...names].sort()).toEqual([...APPLICATION_TABLES].sort());
   });
 

@@ -173,7 +173,7 @@ const BUNDLED_RULES_EDITION = '2024';
 /** Every bundled progression table covers character levels 1 through 20. */
 const PROGRESSION_LEVELS = 20;
 
-function classContentKey(name: string): string {
+export function classContentKey(name: string): string {
   return `${BUNDLED_RULES_EDITION}:class:${name.toLowerCase()}`;
 }
 

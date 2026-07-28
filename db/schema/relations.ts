@@ -1,5 +1,8 @@
 import { relations } from 'drizzle-orm';
 import {
+  class_equipment_items,
+} from './equipment';
+import {
   background_definitions,
   feat_definitions,
   species_definitions,
@@ -187,6 +190,24 @@ export const characterWeaponsRelations = relations(
  * by name from the picker and copied from; that is the whole of its coupling.
  */
 export const weaponTemplatesRelations = relations(weapon_templates, () => ({}));
+
+export const classEquipmentItemsRelations = relations(
+  class_equipment_items,
+  ({ one }) => ({
+    class_definition: one(class_definitions, {
+      fields: [class_equipment_items.class_definition_id],
+      references: [class_definitions.id],
+    }),
+    weapon_template: one(weapon_templates, {
+      fields: [class_equipment_items.weapon_template_id],
+      references: [weapon_templates.id],
+    }),
+    armor_template: one(armor_templates, {
+      fields: [class_equipment_items.armor_template_id],
+      references: [armor_templates.id],
+    }),
+  }),
+);
 
 /**
  * ORIGINS. The same D1b shape as the weapon pair, one level richer: the

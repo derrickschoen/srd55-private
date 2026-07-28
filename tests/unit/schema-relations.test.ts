@@ -196,8 +196,8 @@ describe('declared relations match the foreign keys', () => {
     // three from `background_equipment_items`, into `background_templates`,
     // `weapon_templates` and `armor_templates`. The last two are what make the
     // owner's *"unless weapon or armor"* a reference rather than a spelling.
-    expect(constraintEdges(db)).toHaveLength(61);
-    expect(rowCount).toBe(64);
+    expect(constraintEdges(db)).toHaveLength(64);
+    expect(rowCount).toBe(67);
   });
 
   it('declares a relation for every foreign key, and a foreign key for every relation', () => {

@@ -24,11 +24,11 @@ import type {
   WeaponTemplateId,
 } from '../../src/domain/ids';
 import type {
-  BackgroundEquipmentItemKind,
   BackgroundEquipmentOption,
   CreatureSize,
   CreatureType,
   DamageType,
+  EquipmentItemKind,
   EffectKind,
   RulesEdition,
   KnownCreatureSize,
@@ -36,16 +36,17 @@ import type {
   KnownDamageType,
 } from '../../src/domain/enums';
 import {
-  backgroundEquipmentItemKinds,
   backgroundEquipmentOptions,
   creatureSizes,
   creatureTypes,
   damageTypes,
+  equipmentItemKinds,
   effectKinds,
   rulesEditions,
 } from '../../src/domain/enums';
 import {
   datetime,
+  equipmentItemPayload,
   integerAtLeast,
   nullOrIntegerAtLeast,
   nullOrOneOf,
@@ -915,7 +916,7 @@ export const background_equipment_items = sqliteTable(
      * this application actually knows.
      */
     item_name: varchar()('item_name').notNull(),
-    item_kind: varchar<BackgroundEquipmentItemKind>()('item_kind').notNull(),
+    item_kind: varchar<EquipmentItemKind>()('item_kind').notNull(),
     weapon_template_id: integer('weapon_template_id')
       .$type<WeaponTemplateId>()
       .references(() => weapon_templates.id, { onDelete: 'restrict' }),
@@ -932,7 +933,7 @@ export const background_equipment_items = sqliteTable(
     ),
     check(
       'background_equipment_items_item_kind_check',
-      oneOf('item_kind', backgroundEquipmentItemKinds),
+      oneOf('item_kind', equipmentItemKinds),
     ),
     check(
       'background_equipment_items_sort_order_check',
@@ -960,13 +961,11 @@ export const background_equipment_items = sqliteTable(
      */
     check(
       'background_equipment_items_payload_check',
-      sql`CASE \`item_kind\`
-        WHEN 'weapon' THEN \`weapon_template_id\` IS NOT NULL
-          AND \`armor_template_id\` IS NULL
-        WHEN 'armor' THEN \`armor_template_id\` IS NOT NULL
-          AND \`weapon_template_id\` IS NULL
-        ELSE \`weapon_template_id\` IS NULL AND \`armor_template_id\` IS NULL
-      END`,
+      equipmentItemPayload(
+        'item_kind',
+        'weapon_template_id',
+        'armor_template_id',
+      ),
     ),
     uniqueIndex(
       'background_equipment_items_template_option_sort_order_unique',
