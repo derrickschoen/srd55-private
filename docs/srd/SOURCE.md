@@ -43,6 +43,7 @@ pages interleave and the weapon table becomes unreadable.
 | `source/weapon-mastery-progression.txt` | Barbarian and Fighter class tables (the count is a COLUMN) | 27, 47 | `39274ea85dbcb94ef663cf5923c53e90db4f2d51a0fa29c759128e448cce0811` |
 | `source/weapon-mastery-flat-classes.txt` | Paladin, Ranger, Rogue feature text (the count is PROSE) | 55, 57, 60 | `616493484b5b0d3b6b0ff11072ad156141fca4e90a2364f37159745715b07591` |
 | `source/class-core-traits.txt` | Core Traits table for all twelve classes — hit die, saving throws, skill/weapon proficiencies, armour training | 26-72 | `64dcc7e5e6fe26e6bb063e8f74a916d140e1cd944c192da4ace1c306ada32bbf` |
+| `source/class-starting-equipment.txt` | Starting Equipment row for all twelve classes, with PDF line wrapping and discretionary hyphenation removed | 28, 31, 36, 41, 47, 49, 53, 57, 61, 64, 70, 77 | `ebf127023e3f5f910bb3f5c50857d10287ea61328363b6cdddc7c54a3f07dfbf` |
 | `source/armor-table.txt` | Armor table: **12 armours plus Shield — 13 rows**, with AC formula, Strength requirement and stealth penalty | 91 | `c8bd735199d7649f19877f6e746ce2fca40496340c48a0733eb9f0371bfaa884` |
 | `source/species-descriptions.txt` | All nine species — creature type, size, speed and traits | 84-86 | `37e05427bbe352a485d0c336cf49bc79886f186203e0497bfdaa978255e6ab3b` |
 | `source/backgrounds.txt` | All four backgrounds — the five parts each, plus the prose describing them | 83 | `9272cca5b81852bf43ddc013e5581cc3736e8c559c26a702774843e7d0fd3f8d` |
