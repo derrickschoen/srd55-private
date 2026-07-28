@@ -184,13 +184,28 @@ Blank creation has the same gap (`src/worker/handlers/queries.ts:76-86`), but th
 wizard makes it far likelier to bite: the class click *is* the moment of
 persistence, on an async RPC, so a double-click creates two characters.
 
-**Taken for now: the params carry a client-generated `operation_uuid`, and a
-replay of the same uuid returns the SAME character rather than creating a
-second.** A disabled button is a UI courtesy, not a transaction-level policy.
-This is cheap now and expensive to retrofit once characters exist.
+**Taken for now — REVERSED at round 3: guided creation is NOT idempotent.
+No `operation_uuid`, no new column, no migration.** Double submission is
+prevented in the UI only: the class card disables on submit.
 
-*Seam:* one params field and one uniqueness check. *Cost to flip:* dropping it
-later is trivial; adding it later is not.
+Revision 3 proposed `characters.creation_uuid` as a nullable unique column. The
+round-3 review showed that is not "just a migration" in this repository, and one
+consequence is genuinely dangerous: **backup export does `SELECT * FROM characters`
+(`src/backup/character-backup.ts:1276`) while backup validation requires an exact
+key set (`:859`)**. Adding any column to `characters` without also changing the
+backup codec makes newly exported backups invalid under their own format — a
+data-loss-shaped defect introduced to fix a double-click.
+
+The column also drags in `db/schema/character.ts`, a regenerated
+`src/db/schema.sql`, a new `drizzle/0008_*` with snapshot and journal metadata,
+regenerated column facts, and an append-only checksum registry
+(`src/db/migrations.ts:29`). That is a schema change wearing a convenience
+feature's clothes, and it is not on the path to D54.
+
+*Seam:* one params field and the UI's submit guard. *Cost to flip:* adding real
+idempotency later costs the migration surface above plus the backup codec — real,
+but it buys a full unit of work now and is **an open question for the owner**,
+not a default I should take unilaterally.
 
 ## 4. Four dispatches, not three
 
@@ -237,8 +252,16 @@ definition tables that path resolves against are never written by anything in
 the repository, so the template tables are the only populated source.
 
 **A5 — the background step (NEW).**
-Exit: the same shape for background via `backgroundFromTemplate` and
-`background_equipment_items`, advancing the derived step past background.
+Exit: **`character_background` only**, copied via `backgroundFromTemplate`,
+advancing the derived step past background.
+
+**Equipment package choice is explicitly OUT of A5.** Revision 3 said "via
+`background_equipment_items`", which permits two incompatible implementations.
+Those are catalog rows carrying **two alternative packages**
+(`db/schema/origins.ts:883`), `applyOrigin` has no option parameter, and the only
+existing reader states that it does not put items on a character
+(`src/queries/background-equipment.ts:11`). A5 copies the background's printed
+fields and nothing else; choosing and applying a package is its own later unit.
 
 D48 makes background load-bearing rather than optional: the 2024 ability-score
 increases ride the background (`.claude/decisions.md:468-471`), so the abilities
@@ -254,12 +277,30 @@ whose derived step differs from any constant. Revision 2 claimed no such fixture
 could exist without A4; a reviewer showed one can be built through existing
 commands, so that claim is withdrawn. A4's justification does not need it.
 
-**Honest limitation, disclosed rather than hidden.** Writing character-owned
-species rows directly means no `character_source_instances` row, so lineage
-spell grants do not flow. The schema already treats a bundled species with no
-source instance as the tolerated state (`db/schema/origins.ts:654-662`). Per
-**D33** the sheet must say lineage spells are not yet granted for the species
-that have them — it must not imply the character has none. §9 controls it.
+**Honest limitation, disclosed rather than hidden — and it is wider than
+revision 3 admitted.** Writing character-owned rows directly means no
+`character_source_instances` row. Revision 3 disclosed only lineage spells; the
+round-3 review enumerated the rest, and D33 requires the sheet to say each is
+unknown rather than imply it is absent:
+
+- **Lineage spells** and every other grant-rule consequence — fixed spells,
+  spell choices, recursively granted child sources such as feats, spellbook
+  entries (`src/grants/grant-rule-slot-generator.ts:180`, `:340`).
+- **Source removal and workspace configuration**, which operate on persisted
+  source instances (`src/commands/remove-source.ts:34`,
+  `src/queries/character-workspace-builder.ts:493`). A species applied this way
+  cannot yet be removed by that path.
+- **From the background:** `backgroundFromTemplate` copies names and printed
+  options only (`src/rules/origins.ts:89`, `:247`). It does **not** apply the
+  2024 ability increases, create the origin feat, add skill proficiencies,
+  resolve the tool, or equip anything. The sheet already discloses that
+  background skill words are not counted (`src/queries/character-sheet-builder.ts:413`);
+  the rest must be disclosed the same way.
+- **Languages are not modelled at all** (`src/ui/screens/planner/agent-reference.ts:278`).
+
+None of this can work today regardless of path, because the definition rows the
+grant machinery reads are never written. The point is that the wizard must say
+so rather than present a half-applied origin as complete.
 
 **None of the five counts as usable progress on its own.** The group's
 definition of done is the browser proof in §5, extended through background.
@@ -339,7 +380,8 @@ seam**. The supervisor lands the seam file first; neither agent edits it.
 **Seam file (supervisor-owned): `src/builder/contracts.ts`**
 
 ```ts
-type BuildStep = 'class' | 'species' | 'background' | 'abilities' | 'equipment';
+type BuildStep =
+  | 'class' | 'species' | 'background' | 'skills' | 'abilities' | 'equipment';
 
 const GUIDED_LEVEL_ONE_STEP_ORDER: readonly BuildStep[];   // D48's order
 
@@ -406,6 +448,23 @@ which is the very defect this section exists to prevent.
 - **The origin list is gated to bundled content**, on the same principle as the
   class gate. Revision 2 left this implicit, which a reviewer correctly called a
   fourth silently-decided point.
+- **`grants_lineage_spells` is a pinned classification, not an inferred one.**
+  No template column carries it, the spell-marker effects were deliberately
+  removed, and trait-text sniffing would let two agents disagree about which
+  species return `true`. Pinned: the supervisor's seam file exports
+  `LINEAGE_SPELL_CONTENT_KEYS`, a literal set naming the bundled species whose
+  lineage grants spells, with a comment citing the SRD entries it came from.
+  **Backgrounds are always `false`.** Note the honest limit this leaves:
+  `A4-LINEAGE` proves the disclosure renders, not that the classification is
+  correct — the set itself is reviewed by eye, once.
+- **`applyOrigin` mutation semantics are pinned.** All writes for one origin —
+  parent row, traits, effects — happen in **one transaction**. Both parent
+  tables enforce one row per character (`db/schema/origins.ts:508`, `:1012`), so
+  a plain retry would otherwise surface as a raw uniqueness violation. Applying
+  an origin when one already exists **replaces it** (delete-then-insert inside
+  the same transaction), and is therefore idempotent under retry. Replacement is
+  the right default because the wizard's back button must be able to change a
+  species; refusing would strand a person on a choice they can see is wrong.
 
 **`buildState` not-found is pinned**, because "or not-found" was not a contract:
 params `{ character_id: number }`; an absent character returns
@@ -431,7 +490,12 @@ existing row. **A2 owns the migration**, including `src/db/migrations.ts` and th
 new `db/schema/` entry — revision 2 allocated none of those paths.
 
 **The terminal state is pinned, not left to invention.** After background the
-derived step is `abilities`, which this group does not build. The build route
+derived step is **`skills`** — not `abilities`. D54 names level-one skills
+explicitly, and revision 3's step union omitted them, which would have stepped
+permanently over a required choice. The database already models the chosen set
+(`db/schema/sheet-inputs.ts:264`) and the sheet reads it (`src/queries/character-sheet-builder.ts:881`),
+so the omission was in the contract, not the data. This group does not build the
+skills screen; The build route
 renders an explicit panel saying those steps are not built yet. **It must not
 link into the planner grid** — the most natural invention is "go finish in the
 planner", which is precisely the surface §5's trap forbids. The browser proof
