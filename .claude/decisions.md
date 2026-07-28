@@ -1,5 +1,69 @@
 # Binding scope decisions
 
+## D53 — OWNER: feats are two numbers plus a grouping, and I had the level-4 rule wrong (2026-07-28)
+
+Asked how to store a feat's category, the owner redesigned instead of picking:
+*"Maybe a number for level requirement instead of Boolean. Another for if the asi
+is 0, 1, or 2. Not sure why fighting style needs its own category."* Then, when I
+argued the app must exclude Alert at level 4: *"you can choose Alert at level
+4—but you don't also get +1 Dexterity. Put the origin feats in a separate
+category with a warning about the lack of asi."*
+
+### MY PREMISE WAS WRONG, and the source says so
+
+I built a whole question on "the builder must not offer Alert at level 4". The
+level-4 class feature reads:
+
+> *You gain the Ability Score Improvement feat (see "Feats") or ANOTHER FEAT OF
+> YOUR CHOICE FOR WHICH YOU QUALIFY.*
+
+Origin feats carry no prerequisite, so a character qualifies. Alert is a legal
+level-4 pick. I asserted a rule from inference rather than reading the class
+feature, which is the same failure F27 is about, committed by me while writing
+about it.
+
+### The model
+
+- **`min_level`** — a number, replacing the boolean. General feats 4, Epic Boon
+  19, Origin and Fighting Style none. This collapses two of the four SRD
+  categories into one field, because General and Epic Boon ARE the same thing at
+  different levels: in 2024 an Epic Boon is taken in place of a General feat.
+- **`ability_points`** — 0, 1 or 2. Origin feats grant 0 (verified: none of
+  Alert, Magic Initiate, Savage Attacker or Skilled contains an ability
+  increase). Grappler grants 1. Ability Score Improvement grants 2 — and 2 is
+  POINTS, not increases, which is what makes it cover the SRD's actual wording:
+  *"Increase one ability score by 2, or increase two ability scores by 1"*, cap
+  20.
+- **`prerequisites`** — already exists, and it is where the Fighting Style gate
+  belongs: *"Prerequisite: Fighting Style Feature"*. It also holds Grappler's
+  *"Strength or Dexterity 13+"*.
+- **A grouping for Origin feats**, with a warning that they grant no ability
+  increase.
+
+### Fighting Style needs no category, and the owner was right to push
+
+Its gate is a class FEATURE, not a level and not a kind. `prerequisites` already
+expresses that. A Fighter who has the Fighting Style feature QUALIFIES for
+Archery at level 4 and may take it there; a Wizard does not qualify and never
+sees it. The prerequisite does all the work, so a category value for it would be
+a second expression of a fact already stored — F22's shape.
+
+### The warning is broader than Origin, and that is correct
+
+The owner asked for the warning on origin feats. Measured, it belongs on
+`ability_points = 0`, which is Origin **and** Fighting Style: a Fighter taking
+Archery at level 4 also gets no ability increase, and should be told so for the
+same reason. Driving the warning off the number rather than the grouping makes it
+right in a case the instruction did not name.
+
+### Left open, deliberately
+
+Whether the grouping carries all four SRD names (`origin | general |
+fighting_style | epic_boon`) or only distinguishes origin from the rest. Using
+the source's four costs nothing and matches the document; using two is smaller.
+Nothing is blocked on it — the builder's behaviour is identical either way.
+
+
 ## D52 — OWNER: the wizard refuses homebrew classes, and no real character exists yet (2026-07-28)
 
 Two rulings.
