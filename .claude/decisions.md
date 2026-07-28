@@ -1,5 +1,84 @@
 # Binding scope decisions
 
+## D51 — OWNER: the feat model. ASI is a feat, most feats are text, and only three kinds earn structure (2026-07-28)
+
+The owner's ruling, in four parts:
+
+1. *"Asi is a feat the gives 2 +1 asi instead of the usual single +1 plus extra
+   effects."* — In the 2024 shape a feat carries an ability bump AND an effect.
+   The Ability Score Improvement feat trades the effect for a SECOND +1. It is
+   not a separate mechanism beside feats; it is a feat.
+2. *"Most feats are just text like we won't model war caster."* — Text, not
+   structure.
+3. *"A feat that gives a fighting style or weapon mastery or skills needs to be
+   modeled."*
+4. *"Need a Boolean for if a feat is an origin feat or not. Origin feats do not
+   give asi at level 1."*
+
+**Part 3 is D26 as amended by D35, applied exactly.** A value earns structure if
+it changes a number on the sheet or makes the catalog searchable. A fighting
+style, a weapon mastery and a skill proficiency all do. War Caster's advantage on
+concentration saves does not — nothing in this app computes a concentration save.
+So the line falls where the existing rule already put it, which is a good sign the
+rule is real rather than post-hoc.
+
+### What already exists — measured before writing this
+
+`feat_definitions` is ALREADY IN THE SCHEMA (`schema.sql:609`), carried over from
+the Laravel port:
+
+```
+content_key, name, rules_edition, category, repeatable,
+prerequisites, grant_rules, notes
+```
+
+- `grant_rules` is a JSON column, so feats already plug into the six-kind grant
+  DSL rather than needing a new effect mechanism.
+- It is READ by `character-workspace-builder.ts:499`.
+- **Nothing seeds it.** There is no feat seeder and no feat extract under
+  `docs/srd/source/`. So the table is real, wired for reading, and empty.
+
+### What does NOT exist, and part 3 needs it
+
+- **Fighting styles are not modelled at all.** Grepping `src/` and `db/` for
+  `fighting_style` returns nothing. A feat that grants a fighting style cannot be
+  structured until the thing it grants exists.
+- **Weapon mastery IS modelled** — `weaponMasteryProperties`, and
+  `character_weapons.mastery_property` with its CHECK. Part 3's second case can
+  be built today.
+- **Skills ARE modelled** — the eighteen, CHECK-closed, plus
+  `character_skill_proficiencies`. Third case buildable today.
+- **No SRD feats extract.** SRD 5.2.1 does contain feats; we have not pulled
+  them. Until we do, any feat content is unsourced, and this project's whole
+  posture is that unsourced content does not ship as fact.
+
+### A collision worth naming before it becomes drift
+
+The owner asked for a **Boolean**. `feat_definitions.category` ALREADY EXISTS and
+is exactly the kind of column an origin/general distinction would land in.
+
+Two facts now competing for one meaning is how D40's `coin` survived in the
+schema for weeks after being dropped, and how F22's one-rule-two-expressions
+happened. Taking the ruling literally — a boolean — while `category` sits beside
+it unexamined would create the same shape.
+
+**Not decided here.** Either the boolean is added and `category` is documented as
+meaning something else, or `category` carries it and the ruling is satisfied by a
+closed vocabulary rather than a flag. That is a small question with a real
+drift cost, and it should be answered deliberately.
+
+### The order this implies
+
+1. Extract SRD feats — content, sourced, the same discipline as the ability
+   methods.
+2. Model fighting styles — part 3 cannot be honoured without them.
+3. Then the feat structure itself: the ASI shape, the origin flag, and
+   `grant_rules` entries for the three structured kinds.
+
+Steps 1 and 2 are prerequisites, not polish. Building the feat structure first
+would mean inventing both the content and the thing it grants.
+
+
 ## D50 — OWNER: Roll in Order belongs to a random-character button, not to the deliberate flow (2026-07-28)
 
 The owner's ruling: *"Use the roll in order for choose random class (roll stats)
