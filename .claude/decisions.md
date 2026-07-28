@@ -1,5 +1,59 @@
 # Binding scope decisions
 
+## D50 — OWNER: Roll in Order belongs to a random-character button, not to the deliberate flow (2026-07-28)
+
+The owner's ruling: *"Use the roll in order for choose random class (roll stats)
+button."*
+
+### The problem it dissolves
+
+D48 put class FIRST. D47 added Roll in Order, which fixes scores to Strength
+through Charisma in the order rolled. Composed, they trap a player: the class is
+already committed when the dice land, and the fixed order means a bad result
+cannot be rearranged to fit it.
+
+The reroll gate does not rescue this, and D47 claimed it did — see the correction
+now recorded there. The gate fires on two scores of 15+ ANYWHERE, so a Wizard
+with fifteens in Strength and Dexterity and Intelligence 8 passes it.
+
+**The ruling separates the flows rather than patching either rule:**
+
+- **Deliberate build** — class first (D48), then Standard Array, Point Cost or
+  manual entry. All three let the player ALLOCATE, so a chosen class is never
+  betrayed by the dice.
+- **Random character** — a "roll stats / random class" button. Roll in Order
+  lives here and only here. Nothing is trapped, because no class was chosen
+  first.
+
+That is why the composition problem disappears instead of being softened: the
+two rules never meet.
+
+### What this means for D47
+
+D47's four methods stand, but they are not four options in one list. Three are
+offered inside the wizard's ability-score step; the fourth is the mechanism
+behind a different button. The house-rule labelling from D47 still applies — the
+button is not SRD, says so, and names nobody.
+
+### A sub-question the wording leaves open, flagged not assumed
+
+*"Choose random class"* could mean either:
+
+- the class is picked at RANDOM and the stats rolled in order beside it — a true
+  "surprise me"; or
+- the class is FITTED to the roll — the app looks at the spread and offers the
+  class it suits.
+
+The second is now possible and would be SOURCED rather than invented, because
+`Standard Array by Class` (merged `e479549`) gives twelve classes' suggested
+spreads and inverts into "which class does this roll resemble". That is a real
+capability the extract bought us and it did not exist yesterday.
+
+**Taken for now: random class.** It is the literal reading and the smaller build.
+Worth one sentence from the owner if the fitted version was meant, because it is
+materially more interesting and the data for it already exists.
+
+
 ## D49 — OWNER: the 2014 edition is real for spells and subclasses, and the level-up wizard multiclasses with a warning (2026-07-28)
 
 Two rulings, verbatim: *"We can have spells and subclasses from 2014"* and
@@ -158,10 +212,18 @@ The fourth is not SRD:
   ROLLED; reroll the entire set if it does not contain at least two scores of
   15 or higher.
 
-**All three parts, and the third is load-bearing.** Without the reroll gate,
-rolling in order is materially harsher than the SRD method, because a bad set cannot be
-rearranged to fit the class. A Wizard who rolls 8 into Intelligence has no
-recourse. The gate is what makes the variant playable, not a softening of it.
+**All three parts.** The reroll gate fires when the set lacks two scores of 15 or
+higher.
+
+**CORRECTION (D50).** This entry originally justified the gate by saying it gave
+recourse to "a Wizard who rolls 8 into Intelligence". **That was wrong and I
+recorded it as fact.** The gate tests the SET, not the character: a Wizard
+rolling 15, 15, 8, 8, 8, 8 with the fifteens in Strength and Dexterity PASSES the
+gate and still has Intelligence 8. The gate protects against a uniformly poor
+spread; it does nothing about a spread that is fine for someone else. Codex found
+this by reading D47 against D48 rather than trusting my summary of it. D50
+resolves the underlying problem by moving the method out of the class-first flow
+entirely.
 
 ### LICENSING — this one is different from everything else we ship
 
