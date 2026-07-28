@@ -3,6 +3,7 @@ import baseline from '../../drizzle/0000_skinny_lionheart.sql?raw';
 import baselineTriggers from '../../drizzle/0000_skinny_lionheart.triggers.sql?raw';
 import weaponRangeAdd from '../../drizzle/0001_weapon_range_add.sql?raw';
 import weaponRangeDrop from '../../drizzle/0002_weapon_range_drop.sql?raw';
+import spellFork from '../../drizzle/0003_spell_fork.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -52,6 +53,14 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
       '9053cce25b59ffc2c22f3f2cd441236219bdfb57c4c3ab195545f39a3bfa0bdf',
     resultSchemaChecksum:
       '6f3b23a58a73cd5daff97044aa31be963b429ac9ed9afe5ec60445f6a12910a0',
+  }),
+  Object.freeze({
+    id: '0003_spell_fork',
+    sql: spellFork,
+    checksum:
+      'f71c10580a314e09791b4cacbbef02b421fc6baa7e95106f8c536fb9f935612e',
+    resultSchemaChecksum:
+      '098203a2476b0c7f4d646e78a9f0f65da85cfe84eab547f5b8915cca4cfbfcbc',
   }),
 ]);
 

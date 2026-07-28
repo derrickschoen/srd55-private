@@ -512,6 +512,7 @@ const REFINEMENTS = {
   'spell_versions.content_key': nonEmptyText,
   'spell_versions.spell_identity_id': positiveInt,
   'spell_versions.display_name': nonEmptyText,
+  'spell_versions.forked_from_content_key': sqlText,
   // Deliberately open: placeholder import writes an arbitrary key prefix.
   'spell_versions.rules_edition': sqlText,
   'spell_versions.school': spellSchoolVocabulary,

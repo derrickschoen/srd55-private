@@ -625,6 +625,7 @@ export const COLUMN_FACTS = {
     is_active: { base: 'degraded', notNull: true },
     created_at: { base: 'degraded', notNull: false },
     updated_at: { base: 'degraded', notNull: false },
+    forked_from_content_key: { base: 'degraded', notNull: false },
   },
   subclass_definitions: {
     id: { base: 'integer', notNull: true },

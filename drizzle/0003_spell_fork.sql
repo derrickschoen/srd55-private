@@ -1,0 +1,1 @@
+ALTER TABLE `spell_versions` ADD `forked_from_content_key` VARCHAR;
