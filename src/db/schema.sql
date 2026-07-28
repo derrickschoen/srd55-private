@@ -346,6 +346,7 @@ CREATE TABLE `character_weapons` (
 	`character_id` integer NOT NULL,
 	`name` VARCHAR NOT NULL,
 	`proficiency_category` VARCHAR,
+	`attack_kind` VARCHAR,
 	`damage_kind` VARCHAR DEFAULT 'not_recorded' NOT NULL,
 	`damage_dice` VARCHAR,
 	`damage_flat` integer,
@@ -397,7 +398,8 @@ CREATE TABLE `character_weapons` (
       )),
 	CONSTRAINT "character_weapons_mastery_requires_property_check" CHECK(mastery_selected = 0 OR mastery_property IS NOT NULL),
 	CONSTRAINT "character_weapons_mastery_property_check" CHECK((`mastery_property` IS NULL OR `mastery_property` IN ('Cleave', 'Graze', 'Nick', 'Push', 'Sap', 'Slow', 'Topple', 'Vex'))),
-	CONSTRAINT "character_weapons_proficiency_category_check" CHECK((`proficiency_category` IS NULL OR `proficiency_category` IN ('simple', 'martial')))
+	CONSTRAINT "character_weapons_proficiency_category_check" CHECK((`proficiency_category` IS NULL OR `proficiency_category` IN ('simple', 'martial'))),
+	CONSTRAINT "character_weapons_attack_kind_check" CHECK((`attack_kind` IS NULL OR `attack_kind` IN ('melee', 'ranged')))
 );
 
 CREATE INDEX `character_weapons_character_id_index` ON `character_weapons` (`character_id`);

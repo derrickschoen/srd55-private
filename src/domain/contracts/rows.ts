@@ -47,6 +47,7 @@ import {
   slotStates,
   effectKinds,
   srdWeaponGroups,
+  weaponAttackKinds,
   weaponMasteryGrants,
   weaponMasteryProperties,
   weaponProficiencyCategories,
@@ -227,6 +228,7 @@ const selectionEligibilityEnum = z.enum(selectionEligibilities);
 const weaponMasteryPropertyEnum = z.enum(weaponMasteryProperties);
 const weaponMasteryGrantEnum = z.enum(weaponMasteryGrants);
 const srdWeaponGroupEnum = z.enum(srdWeaponGroups);
+const weaponAttackKindEnum = z.enum(weaponAttackKinds);
 /**
  * D27's `simple | martial` on a character's weapon.
  *
@@ -332,6 +334,7 @@ export const COLUMN_REFINEMENTS = {
   weaponMasteryPropertyEnum,
   weaponMasteryGrantEnum,
   srdWeaponGroupEnum,
+  weaponAttackKindEnum,
   weaponProficiencyCategoryEnum,
   weaponDamageKindEnum,
   versatileWeaponDamageKindEnum,
@@ -747,6 +750,10 @@ const REFINEMENTS = {
   // Non-empty: a weapon with no name cannot be picked out of a list, and the
   // add/update commands already refuse one.
   'character_weapons.name': nonEmptyText,
+  // D46. Nullability is derived from the column facts: null means the copy has
+  // no recorded melee/ranged fact and must not be classified from its range or
+  // property columns.
+  'character_weapons.attack_kind': weaponAttackKindEnum,
   // Dice and custom payloads remain open strings at this row-contract layer.
   // The discriminator and cross-column rule decide which payload is applicable;
   // custom preserves anything a user's table agreed on.

@@ -15,11 +15,11 @@
  *
  * TWO THINGS THIS APPLICATION CANNOT DECIDE, AND STATES INSTEAD:
  *
- *  1. WHETHER A WEAPON IS MELEE OR RANGED. `character_weapons` stores VALUES
- *     and holds no melee/ranged fact. The source's own attack formula branches
- *     on exactly that, so BOTH branches are offered and the reason is printed.
- *     Guessing from `thrown`/`ammunition` would be this application inventing a
- *     classifier.
+ *  1. WHICH MELEE/RANGED BRANCH THIS PROFILE SHOULD PRESENT. The character
+ *     copy now stores nullable `attack_kind`, but this persistence-only change
+ *     does not alter attack-profile presentation or feed that field into this
+ *     input. BOTH branches therefore remain offered here. No fallback from
+ *     `thrown`/`ammunition` is permitted when the stored fact is absent.
  *  2. WHAT A WEAPON'S PROPERTIES DO. The Finesse, Thrown and Versatile rule
  *     texts are not in `docs/srd/source/`; only the weapons table's use of the
  *     words is. The source's "unless a weapon's property says otherwise" is
@@ -415,11 +415,12 @@ function versatileNote(weapon: AttackProfileWeapon): string | null {
  * Ranged attack bonus = Dexterity modifier + Proficiency Bonus."
  *
  * BOTH FORMULAS ARE SHOWN, AND THE STATE IS `undecided` RATHER THAN `choice`.
- * The source branches on melee versus ranged and this application does not hold
- * that fact, so a single number would be a coin-flip printed as an answer. The
- * `unless a weapon's property says otherwise` limb is quoted for the same
- * reason: the property texts that would override the formula — Finesse, Thrown
- * — are not in `docs/srd/source/`, so nothing here applies them.
+ * The source branches on melee versus ranged. The character copy now persists
+ * that nullable fact, but this persistence-only increment deliberately leaves
+ * this presentation unchanged and does not add it to `AttackProfileWeapon`.
+ * The `unless a weapon's property says otherwise` limb is quoted for the same
+ * reason as before: the property texts that would override the formula —
+ * Finesse, Thrown — are not in `docs/srd/source/`, so nothing here applies them.
  */
 function normalProfile(
   input: AttackProfileInput,

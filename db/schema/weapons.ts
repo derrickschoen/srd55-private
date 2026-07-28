@@ -18,6 +18,7 @@ import type {
   KnownDamageType,
   RulesEdition,
   SrdWeaponGroup,
+  WeaponAttackKind,
   WeaponMasteryGrant,
   WeaponMasteryProperty,
   WeaponProficiencyCategory,
@@ -33,6 +34,7 @@ import {
   srdWeaponGroups,
   weaponMasteryGrants,
   weaponMasteryProperties,
+  weaponAttackKinds,
   weaponProficiencyCategories,
 } from '../../src/domain/enums';
 import {
@@ -126,6 +128,15 @@ export const character_weapons = sqliteTable(
     proficiency_category: varchar<WeaponProficiencyCategory>()(
       'proficiency_category',
     ),
+    /**
+     * `melee | ranged`, or NULL for NOT RECORDED — D46.
+     *
+     * This is a value on the character's copy, derived once from a selected
+     * template's `srd_group`. A custom or historically unmatchable weapon stays
+     * NULL. In particular, range distances and the Thrown, Reach, and
+     * Ammunition properties are not substitutes for this fact.
+     */
+    attack_kind: varchar<WeaponAttackKind>()('attack_kind'),
     damage_kind: varchar<WeaponDamage['kind']>()('damage_kind')
       .notNull()
       .default('not_recorded'),
@@ -259,6 +270,10 @@ export const character_weapons = sqliteTable(
     check(
       'character_weapons_proficiency_category_check',
       nullOrOneOf('proficiency_category', weaponProficiencyCategories),
+    ),
+    check(
+      'character_weapons_attack_kind_check',
+      nullOrOneOf('attack_kind', weaponAttackKinds),
     ),
     index('character_weapons_character_id_index').on(table.character_id),
   ],

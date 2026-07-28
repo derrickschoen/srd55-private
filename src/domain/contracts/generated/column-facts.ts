@@ -250,6 +250,7 @@ export const COLUMN_FACTS = {
     character_id: { base: 'integer', notNull: true },
     name: { base: 'degraded', notNull: true },
     proficiency_category: { base: 'degraded', notNull: false },
+    attack_kind: { base: 'degraded', notNull: false },
     damage_kind: { base: 'degraded', notNull: true },
     damage_dice: { base: 'degraded', notNull: false },
     damage_flat: { base: 'integer', notNull: false },

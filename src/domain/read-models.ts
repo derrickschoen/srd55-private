@@ -26,7 +26,7 @@ import type {
  * a field added to one and forgotten in the other stops compiling at the
  * pre-fill site instead of silently arriving blank.
  *
- * TWO EXCLUSIONS, AND THEY ARE EXCLUDED FOR DIFFERENT REASONS.
+ * THREE EXCLUSIONS, AND THEY ARE EXCLUDED FOR DIFFERENT REASONS.
  *
  *  - `notes` is the USER'S, and no catalog row has one.
  *  - `proficiency_category` (D27) is not a COPY at all — it is DERIVED, folding
@@ -34,11 +34,17 @@ import type {
  *    categories a class grants proficiency in. There is no such column on the
  *    template to select, so leaving it in this type would break `templates()`,
  *    and the fold has to happen somewhere a switch can be exhaustive.
+ *  - `attack_kind` (D46) is derived from that same source heading, preserving
+ *    its melee/ranged half on the character copy without storing a live
+ *    template reference.
  *
  * The fold lives in `weaponFromTemplate`, which is the one place a template
  * becomes a character's weapon.
  */
-export type WeaponProfile = Omit<WeaponFields, 'notes' | 'proficiency_category'>;
+export type WeaponProfile = Omit<
+  WeaponFields,
+  'notes' | 'proficiency_category' | 'attack_kind'
+>;
 
 export interface WeaponTemplate extends WeaponProfile {
   id: number;
