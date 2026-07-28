@@ -43,7 +43,7 @@ describe('GrantRule', () => {
     >;
   }
 
-  it('normalizes and stores exactly the six actual rule kinds', () => {
+  it('normalizes and stores exactly the nine actual rule kinds', () => {
     const stored = persist([
       {
         kind: 'fixed_spell',
@@ -87,6 +87,23 @@ describe('GrantRule', () => {
         bucket: 'spellbook',
         list: 'Wizard',
         acquisitions_config: 'wizard_spellbook_acquisitions',
+      },
+      {
+        kind: 'fighting_style',
+        rule_key: 'style',
+        style_key: 'archery',
+      },
+      {
+        kind: 'weapon_mastery',
+        rule_key: 'mastery',
+        count: 1,
+        selection_pool: 'owned-weapons',
+      },
+      {
+        kind: 'skill_proficiency',
+        rule_key: 'skills',
+        count: 3,
+        allows_tool_instead: true,
       },
     ]);
 
@@ -154,6 +171,32 @@ describe('GrantRule', () => {
         bucket: 'spellbook',
         list: 'Wizard',
         acquisitions_config: 'wizard_spellbook_acquisitions',
+        always_prepared: false,
+        with_slots: true,
+        free_cast: null,
+      },
+      {
+        kind: 'fighting_style',
+        rule_key: 'style',
+        style_key: 'archery',
+        always_prepared: false,
+        with_slots: true,
+        free_cast: null,
+      },
+      {
+        kind: 'weapon_mastery',
+        rule_key: 'mastery',
+        count: 1,
+        selection_pool: 'owned-weapons',
+        always_prepared: false,
+        with_slots: true,
+        free_cast: null,
+      },
+      {
+        kind: 'skill_proficiency',
+        rule_key: 'skills',
+        count: 3,
+        allows_tool_instead: true,
         always_prepared: false,
         with_slots: true,
         free_cast: null,

@@ -115,6 +115,11 @@ const SCHEMA_BEFORE_WEAPON_ATTACK_KIND = DATABASE_MIGRATIONS
   .map((entry) => entry.sql)
   .join('\n');
 
+const SCHEMA_BEFORE_FEAT_MODEL = DATABASE_MIGRATIONS
+  .slice(0, 7)
+  .map((entry) => entry.sql)
+  .join('\n');
+
 const HISTORICAL_BACKGROUND_ROWS = `
 INSERT INTO background_templates (
   id, content_key, rules_edition, name,
@@ -183,6 +188,44 @@ describe('database migration chain', () => {
 
     expect(result.migrationCount).toBe(DATABASE_MIGRATIONS.length);
     expect(result.signature).toBe(schemaSignature(schema));
+  });
+
+  it('adds feat numbers without losing an existing definition', async () => {
+    const storage = await storageHolding(
+      `${SCHEMA_BEFORE_FEAT_MODEL}
+       INSERT INTO feat_definitions (
+         id, content_key, name, rules_edition, category, repeatable,
+         prerequisites, grant_rules, notes, created_at, updated_at
+       ) VALUES (
+         71, 'homebrew:feat:migration', 'Migration Feat', 'expanded',
+         'homebrew-group', 1, '{"feature":"Migration Feature"}',
+         '[{"kind":"migration-grant"}]', 'Migration notes',
+         '2040-01-02T03:04:05.000Z', '2041-02-03T04:05:06.000Z'
+       );`,
+    );
+    const lifecycle = new DatabaseLifecycle(sqlite3, storage, schema);
+    lifecycle.open();
+
+    expect(
+      lifecycle.database.oneRaw(
+        `SELECT * FROM feat_definitions WHERE id = 71`,
+      ),
+    ).toEqual({
+      id: 71,
+      content_key: 'homebrew:feat:migration',
+      name: 'Migration Feat',
+      rules_edition: 'expanded',
+      category: 'homebrew-group',
+      min_level: null,
+      ability_points: 0,
+      repeatable: 1,
+      prerequisites: '{"feature":"Migration Feature"}',
+      grant_rules: '[{"kind":"migration-grant"}]',
+      notes: 'Migration notes',
+      created_at: '2040-01-02T03:04:05.000Z',
+      updated_at: '2041-02-03T04:05:06.000Z',
+    });
+    lifecycle.close();
   });
 
   it('backfills every template group without inferring custom or ranged-distance rows', async () => {

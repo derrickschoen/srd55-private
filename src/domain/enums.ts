@@ -22,6 +22,32 @@ export type ProgressionType = (typeof progressionTypes)[number];
 export const rulesEditions = ['2014', '2024', 'expanded'] as const;
 export type RulesEdition = (typeof rulesEditions)[number];
 
+/** Every level a feat prerequisite can name in the 1–20 character ladder. */
+export const characterLevels = [
+  1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+  11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+] as const;
+export type CharacterLevel = (typeof characterLevels)[number];
+
+/**
+ * Ability-score points carried by one feat.
+ *
+ * This is points rather than increases: 2 can mean either one +2 or two +1s.
+ */
+export const featAbilityPoints = [0, 1, 2] as const;
+export type FeatAbilityPoints = (typeof featAbilityPoints)[number];
+
+/**
+ * The one grouping the product needs to distinguish on bundled feats.
+ *
+ * Open for homebrew on the same known-plus-passthrough terms as spell schools:
+ * a user-authored grouping must survive even though bundled content writes only
+ * `origin`.
+ */
+export type FeatGrouping =
+  | 'origin'
+  | PassthroughVocabulary<'FeatGrouping'>;
+
 export const slotBuckets = [
   'cantrip_known',
   'prepared',
@@ -46,6 +72,9 @@ export const grantRuleKinds = [
   'grant_source',
   'capability',
   'spellbook_acquisition',
+  'fighting_style',
+  'weapon_mastery',
+  'skill_proficiency',
 ] as const;
 export type GrantRuleKind = (typeof grantRuleKinds)[number];
 
