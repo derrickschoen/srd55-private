@@ -16,6 +16,7 @@ import { RestoreSlotCommand } from './set-slot/restore';
 import { SelectSlotCommand } from './set-slot/select';
 import { UpdateAbilityCommand } from './update-ability';
 import { UpdateCharacterRulesCommand } from './update-character-rules';
+import { ChooseMulticlassSkillCommand } from './choose-multiclass-skill';
 import { UpdateClassCommand } from './update-class';
 import { UpdateSourceConfigCommand } from './update-source-config';
 import {
@@ -138,6 +139,8 @@ export class CharacterCommandFactory {
         return new SetHitPointRollCommand(this.db, payload);
       case 'set_skill_proficiency':
         return new SetSkillProficiencyCommand(this.db, payload);
+      case 'choose_multiclass_skill':
+        return new ChooseMulticlassSkillCommand(this.db, payload);
       case 'set_armor_class_adjustment':
         return new SetArmorClassAdjustmentCommand(this.db, payload);
       case 'restore_snapshot':
