@@ -1,5 +1,49 @@
 # Binding scope decisions
 
+## F26 — the class Starting Equipment column is TRUNCATED in a merged extract, and the builder design found it by reading the source (2026-07-28)
+
+The guided-builder design pass (`docs/design/guided-builder.md`) reported that
+`class-core-traits.txt` ends the Fighter's equipment option mid-word. I checked
+it rather than taking it:
+
+```
+143:   Mail, Greatsword, Flail, 8 Jav-
+144:
+145:   === Core Monk Traits ===
+```
+
+The Fighter's option A stops at "8 Jav-" and options B and C are absent
+entirely. Sweeping the whole extract for lines ending in a hyphen inside a
+Starting Equipment block finds at least five classes cut mid-word — Bard
+("En-"), Fighter ("Jav-"), Ranger and Druid ("Ar-", twice), and more.
+
+**This is exactly the failure `docs/srd/SOURCE.md` warns about in its own
+words**: *"Stop at the real column boundary, or a value is truncated mid-word
+and becomes fabricated data downstream."* The warning was written after the
+mistake was made once. It has now been made again, in a file that merged.
+
+**What is and is not affected.** The extract's OTHER columns are fine and are
+seeded correctly — hit die, saving throws, skill choices, armour training and
+weapon proficiencies all parse, and `class-traits-srd.ts` throws on an
+unrecognised shape rather than dropping a class. The damage is confined to
+Starting Equipment, which nothing reads yet.
+
+**Which is the only reason this is not worse.** D42 §4 rules that the builder
+equips the character, so class starting equipment was the next thing to parse.
+A parser run against this extract would have produced twelve plausible classes
+with silently missing options — fabricated data of exactly the kind the project
+refuses.
+
+BINDING for the re-extraction: Starting Equipment gets its OWN extract, sliced
+wide enough for the longest option, with a per-class fixture asserting the
+Fighter has THREE options and that no line ends mid-word. A count of twelve
+classes is not evidence — F16 — because twelve truncated rows count as twelve.
+
+Credit where due: this came out of a design dispatch reading the source, not out
+of any gate. No test could have caught it, because nothing consumes the column
+yet.
+
+
 ## F25 — the level divergence was SEVEN sites, not the two on record; and a mutation that silently fails to apply looks exactly like a mutation that survives (2026-07-28)
 
 `chunk/CHARACTER-LEVEL` merged at `b640405`. Verified by me: **2182 vitest / 133
