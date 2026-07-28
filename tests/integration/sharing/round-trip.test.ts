@@ -150,13 +150,16 @@ function seedCatalog(db: DatabaseContext, padding = false) {
   const identityId = db.exec(
     `INSERT INTO spell_identities
        (content_key, canonical_name, normalized_name)
-     VALUES ('spell:shield', 'Shield', 'shield')`,
+     VALUES ('spell:fixture-shield', 'Fixture Shield', 'fixture shield')`,
   ).lastInsertId;
   const spellId = db.exec(
     `INSERT INTO spell_versions (
        content_key, spell_identity_id, display_name, rules_edition,
        level, school, is_active
-     ) VALUES ('2024:shield', ?, 'Shield', '2024', 1, 'Abjuration', 1)`,
+     ) VALUES (
+       '2024:fixture-shield', ?, 'Fixture Shield', '2024',
+       1, 'Abjuration', 1
+     )`,
     [identityId],
   ).lastInsertId;
   // `2024:class:wizard` is bundled content, so on a real application database
@@ -494,7 +497,7 @@ describe('minimal character sharing', () => {
     expect(document.selections[0]).toMatchObject({
       ref: 0,
       ruleKey: 'wizard-prepared',
-      spellKey: '2024:shield',
+      spellKey: '2024:fixture-shield',
       keep: true,
     });
 
@@ -801,7 +804,7 @@ describe('minimal character sharing', () => {
       config: JSON.stringify(config),
       rule_key: 'configured-choice',
       ordinal: 1,
-      content_key: '2024:shield',
+      content_key: '2024:fixture-shield',
     });
   });
 
@@ -1295,7 +1298,7 @@ describe('minimal character sharing', () => {
     expect(optedIn.loadouts).toEqual([
       {
         name: 'Defense',
-        entries: [{ spellKey: '2024:shield', role: 'defense' }],
+        entries: [{ spellKey: '2024:fixture-shield', role: 'defense' }],
       },
     ]);
 

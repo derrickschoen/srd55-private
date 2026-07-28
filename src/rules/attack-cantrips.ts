@@ -1,16 +1,14 @@
 /**
  * RECOGNISING THE TWO CANTRIPS THAT REWRITE A WEAPON ATTACK.
  *
- * True Strike and Shillelagh are NOT IN THIS APPLICATION. `src/db/bootstrap.ts`
- * is explicit that "the spell catalog stays user-supplied through catalog
- * import and is deliberately absent here", so neither spell has a row until a
- * user imports a document that carries one.
+ * True Strike and Shillelagh ship in the read-only SRD layer. Their official
+ * keys are minted by `officialSpellKey`, so `2024:true-strike` and
+ * `2024:shillelagh` are sourced facts for bundled rows rather than guesses.
  *
- * THAT MAKES THE KEY A GUESS, AND THIS MODULE IS THE PLACE THE GUESS IS MADE
- * HONESTLY. `catalog-schema.ts` validates an imported `versionKey` only for
- * non-blankness — the catalog importer never applies `isSpellVersionKey` — so
- * the key under which somebody's document files True Strike is whatever that
- * document chose. Three failure modes follow, and each has an answer here:
+ * IMPORTED CATALOGUES REMAIN OPEN. `catalog-schema.ts` validates an imported
+ * `versionKey` only for non-blankness, so the key under which somebody's
+ * document files True Strike is whatever that document chose. The existing
+ * guess-handling remains for that real path. Three cases follow:
  *
  *  1. THE KEY IS THE ONE WE EXPECT. Recognised, and a profile is derived.
  *  2. THE KEY IS SOMETHING ELSE, BUT THE SPELL IS PLAINLY THE RIGHT ONE — its
@@ -28,8 +26,11 @@
  * profile. `content_key` is UNIQUE and is the column the importer upserts on,
  * so it is the only stable handle a route carries.
  */
-import { isSpellVersionKey, normalizeCatalogKeyComponent } from '../catalog/catalog-key';
 import type { SpellAccessRoute } from '../access/spell-access-builder';
+import {
+  isSpellVersionKey,
+  normalizeCatalogKeyComponent,
+} from '../catalog/catalog-key';
 import type { Ability } from '../domain/enums';
 
 export const attackCantrips = ['true_strike', 'shillelagh'] as const;

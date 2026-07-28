@@ -435,47 +435,30 @@ test('a Wizard’s Greatsword loses the proficiency bonus, and both screens say 
  * weapon's own type while the control beside it displayed the spell's, and no
  * test in either suite could see the two disagree.
  *
- * The cantrip has to be REAL for the profile to exist: neither True Strike nor
- * Shillelagh ships with this application, so the spell is imported through the
- * catalog RPC and selected into the character's own Wizard cantrip slot, which
- * is the only route by which `recogniseAttackCantrips` ever sees one.
+ * The cantrip has to be REAL for the profile to exist. True Strike now ships in
+ * the read-only SRD layer, and selecting that bundled row into the character's
+ * own Wizard cantrip slot is the route by which `recogniseAttackCantrips` sees
+ * it.
  */
 test('the damage-type choice is undecided on both sides until it is made', async ({
   page,
 }) => {
-  const trueStrike = JSON.stringify([
-    {
-      identityKey: 'true-strike',
-      versionKey: '2024:true-strike',
-      name: 'True Strike',
-      edition: '2024',
-      level: 0,
-      school: 'Divination',
-      castingTime: 'Action',
-      range: 'Self',
-      components: 'S, M',
-      duration: 'Instantaneous',
-      concentration: false,
-      ritual: false,
-      attackModes: [],
-      saveAbilities: [],
-      effectReliabilityCategory: 'attack_roll',
-      spellLists: ['Wizard'],
-      sourceBooks: ['Reference Book'],
-      sourcePage: 163,
-      sourceSlug: 'true-strike',
-    },
-  ]);
-
   await page.goto('/');
   await expect(page.locator('#status')).toHaveAttribute('data-ready', 'true', {
     timeout: 30_000,
   });
-  await page.evaluate(async (document) => {
+  const trueStrikeId = await page.evaluate(async () => {
+    const row = (await window.staticApp.inspectRows('spell_versions')).find(
+      (spell) =>
+        spell.content_key === '2024:true-strike' &&
+        spell.provenance === 'srd',
+    );
+    return Number(row?.id);
+  });
+  await page.evaluate(async () => {
     await window.staticApp.reset();
-    await window.appRpc.call('catalog.import', { documents: [document] });
     await window.staticApp.writeCharacter('Cantrip Bearer');
-  }, trueStrike);
+  });
   await page.goto('/characters/1');
   await expect(page.locator('#planner-status')).toHaveAttribute(
     'data-ready',
@@ -504,7 +487,9 @@ test('the damage-type choice is undecided on both sides until it is made', async
       { timeout: 15_000 },
     )
     .toEqual([
-      expect.objectContaining({ current_spell_version_id: 1 }),
+      expect.objectContaining({
+        current_spell_version_id: trueStrikeId,
+      }),
     ]);
 
   await page.getByRole('button', { name: 'Add weapon' }).click();

@@ -2379,7 +2379,28 @@ test('imports the real index into identities versions publications and normalize
     attack_modes_created: 3,
     save_abilities_created: 2,
   });
-  const versions = await rows(page, 'spell_versions');
+  const versions = (await rows(page, 'spell_versions')).filter(
+    (row) => row.provenance === 'import',
+  );
+  const importedVersionIds = new Set(
+    versions.map((version) => Number(version.id)),
+  );
+  const importedMemberships = (
+    await Promise.all(
+      [...importedVersionIds].map((spellVersionId) =>
+        page.evaluate(
+          (id) =>
+            window.staticApp.inspectRows('spell_list_memberships', {
+              spell_version_id: id,
+            }),
+          spellVersionId,
+        ),
+      ),
+    )
+  ).flat();
+  const importedIdentity = (await rows(page, 'spell_identities')).find(
+    (row) => row.content_key === 'php-parity-spell',
+  )!;
   expect(
     versions.map((row) => ({
       content_key: row.content_key,
@@ -2390,12 +2411,12 @@ test('imports the real index into identities versions publications and normalize
     {
       content_key: '2014:php-parity-spell',
       rules_edition: '2014',
-      spell_identity_id: 1,
+      spell_identity_id: importedIdentity.id,
     },
     {
       content_key: '2024:php-parity-spell',
       rules_edition: '2024',
-      spell_identity_id: 1,
+      spell_identity_id: importedIdentity.id,
     },
   ]);
   expect(
@@ -2413,11 +2434,16 @@ test('imports the real index into identities versions publications and normalize
     { version: '2024:php-parity-spell', book: 'Modern B', page: 82 },
   ]);
   expect(
-    (await rows(page, 'spell_list_memberships')).map((row) => ({
-      version: versions.find((version) => version.id === row.spell_version_id)!
-        .content_key,
-      list: row.spell_list_key,
-    })),
+    importedMemberships
+      .filter((row) =>
+        importedVersionIds.has(Number(row.spell_version_id)),
+      )
+      .map((row) => ({
+        version: versions.find(
+          (version) => version.id === row.spell_version_id,
+        )!.content_key,
+        list: row.spell_list_key,
+      })),
   ).toEqual([
     { version: '2014:php-parity-spell', list: 'Wizard' },
     { version: '2024:php-parity-spell', list: 'Cleric' },
@@ -2472,14 +2498,20 @@ test('imports the real index into identities versions publications and normalize
     save_abilities_created: 0,
   });
   expect(
-    (await rows(page, 'spell_versions')).map((row) => ({
-      id: row.id,
-      content_key: row.content_key,
-    })),
+    (await rows(page, 'spell_versions'))
+      .filter((row) => row.provenance === 'import')
+      .map((row) => ({
+        id: row.id,
+        content_key: row.content_key,
+      })),
   ).toEqual(ids);
   await page.reload();
   await ready(page);
-  expect(await rows(page, 'spell_versions')).toHaveLength(2);
+  expect(
+    (await rows(page, 'spell_versions')).filter(
+      (row) => row.provenance === 'import',
+    ),
+  ).toHaveLength(2);
 });
 
 test('whole-database and portable-character export/import round-trip, corrupt-version rollback, and reload', async ({

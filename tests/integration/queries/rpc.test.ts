@@ -231,10 +231,25 @@ describe('typed query RPC integration', () => {
         query: 'mage',
       },
     );
+    const bundledMageHandId = Number(
+      harness.context.db.scalar(
+        `SELECT id FROM spell_versions
+         WHERE content_key = '2024:mage-hand' AND provenance = 'srd'`,
+      ),
+    );
     expect(eligible).toEqual({
       id: 4,
       ok: true,
       result: [
+        {
+          id: bundledMageHandId,
+          name: 'Mage Hand',
+          level: 0,
+          school: 'Conjuration',
+          ritual: false,
+          concentration: false,
+          edition: '2024',
+        },
         {
           id: fixture.spellIds.mageHand,
           name: 'Mage Hand',

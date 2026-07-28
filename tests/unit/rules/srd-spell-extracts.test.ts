@@ -1,5 +1,19 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { CatalogImporter } from '../../../src/catalog/catalog-importer';
+import {
+  assertSpellVersionCommandAllowed,
+  SRD_SPELL_READ_ONLY_MESSAGE,
+} from '../../../src/commands/srd-spell-policy';
+import { DatabaseContext } from '../../../src/db/database';
+import {
+  parseSrdSpellDescriptions,
+  parseSrdSpellList,
+  parseSrdSpellListMemberships,
+  seedSpellContent,
+  type SrdSpellList,
+} from '../../../src/rules/spells-srd';
+import { openTestDatabase } from '../../helpers/open-db';
 
 const VERBATIM_ATTRIBUTION = `This work includes material from the System Reference Document 5.2
 ("SRD 5.2") by Wizards of the Coast LLC, available at
@@ -36,7 +50,7 @@ const SPELL_LIST_ROW = new RegExp(
  * description names Bard, Sorcerer, and Wizard, but none of those lists include
  * it.
  */
-const EXPECTED_SPELL_NAMES = `Acid Arrow
+export const EXPECTED_SPELL_NAMES = `Acid Arrow
 Acid Splash
 Aid
 Alarm
@@ -406,6 +420,31 @@ function classListNames(source: string): string[] {
   });
 }
 
+function catalogRecord(overrides: Record<string, unknown> = {}) {
+  return {
+    identityKey: 'user-spell',
+    versionKey: '2024:user-spell',
+    name: 'User Spell',
+    edition: '2024',
+    level: 1,
+    school: 'Evocation',
+    castingTime: 'Action',
+    range: '60 feet',
+    components: 'V, S',
+    duration: 'Instantaneous',
+    concentration: false,
+    ritual: false,
+    attackModes: [],
+    saveAbilities: [],
+    effectReliabilityCategory: 'fixed_effect',
+    spellLists: ['Wizard'],
+    sourceBooks: ['User Catalog'],
+    sourcePage: null,
+    sourceSlug: 'user-spell',
+    ...overrides,
+  };
+}
+
 describe('SRD spell extracts', () => {
   it('carries the required attribution verbatim in every extract', () => {
     const files = ['spell-descriptions.txt', ...Object.keys(SPELL_LIST_FILES)];
@@ -455,5 +494,286 @@ describe('SRD spell extracts', () => {
     expect(extract('spell-descriptions.txt')).toMatch(
       /Phantasmal Force\s+Level 2 Illusion \(Bard, Sorcerer, Wizard\)/,
     );
+  });
+
+  it('parses every description against the independent enumerated oracle', () => {
+    const spells = parseSrdSpellDescriptions();
+
+    expect(spells.map((spell) => spell.name).sort()).toEqual(
+      EXPECTED_SPELL_NAMES,
+    );
+    expect(
+      spells.every(
+        (spell) =>
+          spell.content_key.startsWith('2024:') &&
+          spell.description.length > 0,
+      ),
+    ).toBe(true);
+  });
+
+  it('parses every list row with per-list extract counts and the one known omission', () => {
+    const memberships = parseSrdSpellListMemberships();
+    const descriptions = new Set(EXPECTED_SPELL_NAMES);
+    for (const [file, expectedCount] of Object.entries(SPELL_LIST_FILES)) {
+      const spellListKey = file
+        .replace('-spell-list.txt', '')
+        .replace(/^./, (character) =>
+          character.toUpperCase(),
+        ) as SrdSpellList;
+      const parsed = parseSrdSpellList(spellListKey);
+      expect(parsed, file).toHaveLength(expectedCount);
+      expect(parsed.map((entry) => entry.spell_name)).toEqual(
+        classListNames(extract(file)),
+      );
+    }
+    expect(
+      new Set(memberships.map((entry) => entry.spell_name)),
+    ).toEqual(
+      new Set(
+        EXPECTED_SPELL_NAMES.filter((name) => name !== 'Phantasmal Force'),
+      ),
+    );
+    expect(
+      memberships.filter(
+        (entry) => entry.spell_name === 'Phantasmal Force',
+      ),
+    ).toEqual([]);
+    expect(
+      memberships.every((entry) => descriptions.has(entry.spell_name)),
+    ).toBe(true);
+  });
+
+  it('fails loudly when either extract shape changes', () => {
+    expect(() =>
+      parseSrdSpellDescriptions(
+        extract('spell-descriptions.txt').replace(
+          'Casting Time: Action',
+          'Cast Time: Action',
+        ),
+      ),
+    ).toThrow('Acid Arrow expected Casting Time: after metadata.');
+    expect(() =>
+      parseSrdSpellList(
+        'Bard',
+        extract('bard-spell-list.txt').replace(
+          'Dancing Lights                Illusion            C',
+          'Dancing Lights                Unknown             C',
+        ),
+      ),
+    ).toThrow(
+      'Bard list has unrecognised line "Dancing Lights                Unknown             C".',
+    );
+  });
+
+  it('seeds the enumerated catalogue, exact memberships, and no inferred Phantasmal Force rows', async () => {
+    const connection = await openTestDatabase();
+    const db = new DatabaseContext(connection);
+    seedSpellContent(db);
+
+    expect(
+      db
+        .allRaw(
+          `SELECT display_name FROM spell_versions
+           WHERE provenance = 'srd' ORDER BY display_name`,
+        )
+        .map((row) => String(row.display_name)),
+    ).toEqual(EXPECTED_SPELL_NAMES);
+    expect(
+      db.scalar(
+        `SELECT count(*) FROM spell_identities AS identity
+         INNER JOIN spell_versions AS version
+           ON version.spell_identity_id = identity.id
+         WHERE version.provenance = 'srd'`,
+      ),
+    ).toBe(EXPECTED_SPELL_NAMES.length);
+
+    for (const [file, expectedCount] of Object.entries(SPELL_LIST_FILES)) {
+      const spellListKey = file
+        .replace('-spell-list.txt', '')
+        .replace(/^./, (character) =>
+          character.toUpperCase(),
+        ) as SrdSpellList;
+      const stored = db
+        .allRaw(
+          `SELECT version.display_name
+           FROM spell_list_memberships AS membership
+           INNER JOIN spell_versions AS version
+             ON version.id = membership.spell_version_id
+           WHERE membership.spell_list_key = ?
+           ORDER BY membership.id`,
+          [spellListKey],
+        )
+        .map((row) => String(row.display_name));
+      expect(stored, file).toHaveLength(expectedCount);
+      expect(stored, file).toEqual(classListNames(extract(file)));
+    }
+    expect(
+      db.scalar(
+        `SELECT count(*)
+         FROM spell_list_memberships AS membership
+         INNER JOIN spell_versions AS version
+           ON version.id = membership.spell_version_id
+         WHERE version.display_name = 'Phantasmal Force'`,
+      ),
+    ).toBe(0);
+    connection.close();
+  });
+
+  it('makes a second seed byte-for-byte inert', async () => {
+    const connection = await openTestDatabase();
+    const db = new DatabaseContext(connection);
+    seedSpellContent(db);
+    const before = {
+      identities: db.allRaw('SELECT * FROM spell_identities ORDER BY id'),
+      versions: db.allRaw('SELECT * FROM spell_versions ORDER BY id'),
+      memberships: db.allRaw(
+        'SELECT * FROM spell_list_memberships ORDER BY id',
+      ),
+    };
+
+    seedSpellContent(db);
+
+    expect({
+      identities: db.allRaw('SELECT * FROM spell_identities ORDER BY id'),
+      versions: db.allRaw('SELECT * FROM spell_versions ORDER BY id'),
+      memberships: db.allRaw(
+        'SELECT * FROM spell_list_memberships ORDER BY id',
+      ),
+    }).toEqual(before);
+    connection.close();
+  });
+
+  it('refuses edit and delete commands with the exact read-only message', async () => {
+    const connection = await openTestDatabase();
+    const db = new DatabaseContext(connection);
+    seedSpellContent(db);
+    const acidArrowId = Number(
+      db.scalar(
+        "SELECT id FROM spell_versions WHERE content_key = '2024:acid-arrow'",
+      ),
+    );
+
+    expect(() =>
+      assertSpellVersionCommandAllowed(db, acidArrowId, 'edit'),
+    ).toThrow(SRD_SPELL_READ_ONLY_MESSAGE);
+    expect(() =>
+      assertSpellVersionCommandAllowed(db, acidArrowId, 'delete'),
+    ).toThrow(SRD_SPELL_READ_ONLY_MESSAGE);
+
+    const importer = new CatalogImporter(db);
+    expect(() =>
+      importer.import({
+        documents: [
+          JSON.stringify([
+            catalogRecord({
+              identityKey: 'acid-arrow',
+              versionKey: '2024:acid-arrow',
+              name: 'Edited Acid Arrow',
+            }),
+          ]),
+        ],
+      }),
+    ).toThrow(SRD_SPELL_READ_ONLY_MESSAGE);
+    expect(() =>
+      importer.import({
+        documents: [
+          JSON.stringify([
+            catalogRecord({
+              identityKey: 'acid-arrow',
+              versionKey: 'expanded:user.homebrew:acidic-arrow',
+              name: 'Renamed Acid Arrow',
+              edition: 'expanded',
+            }),
+          ]),
+        ],
+      }),
+    ).toThrow(SRD_SPELL_READ_ONLY_MESSAGE);
+    expect(
+      db.oneRaw(
+        `SELECT display_name, provenance
+         FROM spell_versions WHERE id = ?`,
+        [acidArrowId],
+      ),
+    ).toEqual({ display_name: 'Acid Arrow', provenance: 'srd' });
+    expect(
+      db.oneRaw(
+        `SELECT canonical_name, normalized_name
+         FROM spell_identities WHERE content_key = 'acid-arrow'`,
+      ),
+    ).toEqual({
+      canonical_name: 'Acid Arrow',
+      normalized_name: 'acid arrow',
+    });
+    connection.close();
+  });
+
+  it('keeps every SRD row active while the same import sweep tombstones its import-provenance control', async () => {
+    const connection = await openTestDatabase();
+    const db = new DatabaseContext(connection);
+    seedSpellContent(db);
+    const importer = new CatalogImporter(db);
+    importer.import({
+      documents: [JSON.stringify([catalogRecord()])],
+    });
+
+    const summary = importer.import({
+      documents: [
+        JSON.stringify([
+          catalogRecord({
+            identityKey: 'replacement',
+            versionKey: '2024:replacement',
+            name: 'Replacement',
+            sourceSlug: 'replacement',
+          }),
+        ]),
+      ],
+    });
+
+    expect(summary.tombstoned).toBe(1);
+    expect(
+      db.oneRaw(
+        `SELECT is_active, provenance FROM spell_versions
+         WHERE content_key = '2024:user-spell'`,
+      ),
+    ).toEqual({ is_active: 0, provenance: 'import' });
+    expect(
+      db.scalar(
+        `SELECT count(*) FROM spell_versions
+         WHERE provenance = 'srd' AND is_active = 1`,
+      ),
+    ).toBe(EXPECTED_SPELL_NAMES.length);
+    connection.close();
+  });
+
+  it('refuses a pre-existing imported collision instead of overwriting user data or silently skipping the SRD spell', async () => {
+    const connection = await openTestDatabase();
+    const db = new DatabaseContext(connection);
+    const identityId = db.exec(
+      `INSERT INTO spell_identities (
+         content_key, canonical_name, normalized_name
+       ) VALUES ('acid-arrow', 'Acid Arrow', 'acid arrow')`,
+    ).lastInsertId;
+    db.exec(
+      `INSERT INTO spell_versions (
+         content_key, spell_identity_id, display_name, rules_edition,
+         level, school, provenance
+       ) VALUES (
+         '2024:acid-arrow', ?, 'User Acid Arrow', '2024',
+         2, 'Evocation', 'import'
+       )`,
+      [identityId],
+    );
+
+    expect(() => seedSpellContent(db)).toThrow(
+      'SRD spells: cannot seed 2024:acid-arrow: the key already belongs to provenance "import".',
+    );
+    expect(
+      db.oneRaw(
+        `SELECT display_name, provenance FROM spell_versions
+         WHERE content_key = '2024:acid-arrow'`,
+      ),
+    ).toEqual({ display_name: 'User Acid Arrow', provenance: 'import' });
+    expect(db.scalar('SELECT count(*) FROM spell_versions')).toBe(1);
+    connection.close();
   });
 });
