@@ -1,5 +1,44 @@
 # Binding scope decisions
 
+## D52 — OWNER: the wizard refuses homebrew classes, and no real character exists yet (2026-07-28)
+
+Two rulings.
+
+### 1. *"Wizard does not build homebrew class."*
+
+The design's own risk section had already found why this is the honest answer:
+`ClassProficiencyLookup` deliberately grants NOTHING when a class has no seeded
+proficiency rows, rather than guessing "simple". So a user's imported homebrew
+class has no provable armour or weapon proficiencies, and the builder — which
+BLOCKS an SRD-illegal choice under D11 — cannot tell legal from illegal for it.
+
+A wizard that equipped a homebrew class would be inventing its proficiencies.
+Refusing is the same instinct as D33's "a disclosed wrong number is still a wrong
+number".
+
+**The tolerance is unaffected.** D11's other half stands: a homebrew class still
+IMPORTS, still opens, still works in the planner grid. The wizard declines to
+guide it; nothing declines to hold it.
+
+### 2. *"No person has made a character with this tool. Scrap or update any incompatible characters used in tests."*
+
+This retires the question of retrofitting existing characters to the wizard —
+there are none. Every character in the repo is a test fixture.
+
+**What this licenses:** changing or deleting fixture DATA whose shape no longer
+fits. A fixture character built by the blank-create path that D42 §2 replaces,
+or one with no class under D48, can be rebuilt or dropped.
+
+**What it does NOT license, and the distinction is AGENTS.md's own:** deleting a
+TEST to reach green. A test may be deleted when its SUBJECT is gone, never to
+make something pass. Scrapping an incompatible fixture is fine; scrapping the
+assertion that used it because the assertion now fails is not. If a fixture is
+rebuilt and its test then fails, that failure is information.
+
+Nor does it license regenerating an expectation from our own output. The fixture
+may change; where its expected values came from may not.
+
+
 ## F27 — the class progression numbers LOOK sourced and are not: a citation is doing a checksum's job (2026-07-28)
 
 Asked to explain why I was unsure the builder could enforce per-class spell
