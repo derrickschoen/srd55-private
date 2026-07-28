@@ -7,6 +7,7 @@ import spellFork from '../../drizzle/0003_spell_fork.sql?raw';
 import retireCoin from '../../drizzle/0004_retire_coin.sql?raw';
 import classEquipment from '../../drizzle/0005_class_equipment.sql?raw';
 import weaponAttackKind from '../../drizzle/0006_weapon_attack_kind.sql?raw';
+import featModel from '../../drizzle/0007_feat_model.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -88,6 +89,14 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
       '0343dc5213461e0186d51b32ebd6f90047a3650e1b1bccb40d181c41a6769991',
     resultSchemaChecksum:
       'c3d1920ddf61b5ecb64563ae0e04dea577d1ab7bf83d17bdcfce24c04a1bb5d7',
+  }),
+  Object.freeze({
+    id: '0007_feat_model',
+    sql: featModel,
+    checksum:
+      '2b6a218077a4efe287234d30b0da1873c29c0ec8523efed283f40efa29ed11ac',
+    resultSchemaChecksum:
+      'cc2945880764c4a5cba7ba4dd7d85f9f65cf3b7368e6c9d65d7f6ae7b02b489c',
   }),
 ]);
 

@@ -614,12 +614,16 @@ CREATE TABLE `feat_definitions` (
 	`name` VARCHAR NOT NULL,
 	`rules_edition` VARCHAR NOT NULL,
 	`category` VARCHAR,
+	`min_level` integer,
+	`ability_points` integer DEFAULT 0 NOT NULL,
 	`repeatable` TINYINT(1) DEFAULT false NOT NULL,
 	`prerequisites` TEXT,
 	`grant_rules` TEXT,
 	`notes` TEXT,
 	`created_at` DATETIME,
-	`updated_at` DATETIME
+	`updated_at` DATETIME,
+	CONSTRAINT "feat_definitions_min_level_check" CHECK(`min_level` IS NULL OR (typeof(`min_level`) = 'integer' AND `min_level` BETWEEN 1 AND 20)),
+	CONSTRAINT "feat_definitions_ability_points_check" CHECK(typeof(`ability_points`) = 'integer' AND `ability_points` IN (0, 1, 2))
 );
 
 CREATE UNIQUE INDEX `feat_definitions_content_key_unique` ON `feat_definitions` (`content_key`);

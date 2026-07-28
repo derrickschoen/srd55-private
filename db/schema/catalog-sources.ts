@@ -1,13 +1,26 @@
-import { integer, sqliteTable, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { sql } from 'drizzle-orm';
+import {
+  check,
+  integer,
+  sqliteTable,
+  uniqueIndex,
+} from 'drizzle-orm/sqlite-core';
 import type {
   BackgroundDefinitionId,
   ContentKey,
   FeatDefinitionId,
   SpeciesDefinitionId,
 } from '../../src/domain/ids';
-import type { RulesEdition } from '../../src/domain/enums';
+import {
+  featAbilityPoints,
+  type CharacterLevel,
+  type FeatAbilityPoints,
+  type FeatGrouping,
+  type RulesEdition,
+} from '../../src/domain/enums';
 import {
   datetime,
+  integerOneOf,
   sqlText,
   tinyint1,
   varchar,
@@ -34,7 +47,12 @@ export const feat_definitions = sqliteTable(
     content_key: varchar<ContentKey>()('content_key').notNull(),
     name: varchar()('name').notNull(),
     rules_edition: varchar<RulesEdition>()('rules_edition').notNull(),
-    category: varchar()('category'),
+    category: varchar<FeatGrouping>()('category'),
+    min_level: integer('min_level').$type<CharacterLevel>(),
+    ability_points: integer('ability_points')
+      .$type<FeatAbilityPoints>()
+      .notNull()
+      .default(0),
     repeatable: tinyint1('repeatable').notNull().default(false),
     prerequisites: sqlText()('prerequisites'),
     grant_rules: sqlText()('grant_rules'),
@@ -43,6 +61,14 @@ export const feat_definitions = sqliteTable(
     updated_at: datetime()('updated_at'),
   },
   (table) => [
+    check(
+      'feat_definitions_min_level_check',
+      sql`\`min_level\` IS NULL OR (typeof(\`min_level\`) = 'integer' AND \`min_level\` BETWEEN 1 AND 20)`,
+    ),
+    check(
+      'feat_definitions_ability_points_check',
+      integerOneOf('ability_points', featAbilityPoints),
+    ),
     uniqueIndex('feat_definitions_content_key_unique').on(table.content_key),
     uniqueIndex('feat_definitions_name_rules_edition_unique').on(
       table.name,

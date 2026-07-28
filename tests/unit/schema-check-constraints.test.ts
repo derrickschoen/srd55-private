@@ -206,6 +206,17 @@ const classDefinition =
     newClass(db, values);
   };
 
+const featDefinition =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'feat_definitions', {
+      content_key: uid('feat'),
+      name: uid('Feat'),
+      rules_edition: '2024',
+      ...values,
+    });
+  };
+
 const classProgression =
   (values: Values): Write =>
   (db) => {
@@ -883,6 +894,35 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
       ['a single-level window in the interior', slot({ spell_level_min: 3, spell_level_max: 3 })],
       // The same one-column narrowing, in the direction that stays well-formed.
       ['a one-column narrowing that leaves the window well-formed', slotEdit({ spell_level_min: 0, spell_level_max: 9 }, { spell_level_min: 9 })],
+    ],
+  },
+  {
+    constraint: 'feat_definitions_min_level_check',
+    rejects: [
+      ['level 0, below every character level', featDefinition({ min_level: 0 })],
+      ['level 21, above every character level', featDefinition({ min_level: 21 })],
+      ['a fractional level', featDefinition({ min_level: 4.5 })],
+    ],
+    accepts: [
+      ['no minimum level', featDefinition({ min_level: null })],
+      ['level 1', featDefinition({ min_level: 1 })],
+      ['the General feat level', featDefinition({ min_level: 4 })],
+      ['the Epic Boon level', featDefinition({ min_level: 19 })],
+      ['level 20', featDefinition({ min_level: 20 })],
+    ],
+  },
+  {
+    constraint: 'feat_definitions_ability_points_check',
+    rejects: [
+      ['a negative point grant', featDefinition({ ability_points: -1 })],
+      ['three points', featDefinition({ ability_points: 3 })],
+      ['a fractional point', featDefinition({ ability_points: 1.5 })],
+      ['a text description', featDefinition({ ability_points: 'one' })],
+    ],
+    accepts: [
+      ['the zero-point default', featDefinition({})],
+      ['one point', featDefinition({ ability_points: 1 })],
+      ['two points', featDefinition({ ability_points: 2 })],
     ],
   },
   {

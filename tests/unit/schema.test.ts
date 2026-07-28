@@ -148,7 +148,7 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
     numeric: ['created_at', 'updated_at'],
   },
   feat_definitions: {
-    integer: ['id', 'repeatable'],
+    integer: ['id', 'min_level', 'ability_points', 'repeatable'],
     text: [
       'content_key', 'name', 'rules_edition', 'category', 'prerequisites',
       'grant_rules', 'notes',
@@ -677,7 +677,10 @@ const expectedNotNull: Record<string, string[]> = {
     'supports_ritual_casting',
   ],
   class_progressions: ['id', 'class_definition_id', 'class_level', 'cantrips_known', 'prepared_count'],
-  feat_definitions: ['id', 'content_key', 'name', 'rules_edition', 'repeatable'],
+  feat_definitions: [
+    'id', 'content_key', 'name', 'rules_edition', 'ability_points',
+    'repeatable',
+  ],
   species_definitions: ['id', 'content_key', 'name', 'rules_edition', 'repeatable'],
   spell_identities: ['id', 'content_key', 'canonical_name', 'normalized_name'],
   spell_identity_aliases: ['id', 'spell_identity_id', 'alias', 'normalized_alias'],
@@ -1020,7 +1023,7 @@ const expectedDefaults: Record<string, Record<string, string>> = {
     thrown: 'false', two_handed: 'false',
     versatile_damage_kind: "'not_applicable'", range_kind: "'none'",
   },
-  feat_definitions: { repeatable: 'false' },
+  feat_definitions: { ability_points: '0', repeatable: 'false' },
   species_definitions: { repeatable: 'false' },
   background_definitions: { repeatable: 'false' },
   spell_selection_slots: {

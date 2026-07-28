@@ -197,6 +197,9 @@ export class GrantRuleSlotGenerator {
             this.materializeSpellbookEntries(source, rule);
             break;
           case GrantRule.CAPABILITY:
+          case GrantRule.FIGHTING_STYLE:
+          case GrantRule.WEAPON_MASTERY:
+          case GrantRule.SKILL_PROFICIENCY:
             break;
         }
       }

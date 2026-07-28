@@ -265,7 +265,7 @@ export function createBuildReportFixture(
   const featDefinitionId = db.exec(
     `INSERT INTO feat_definitions (
        content_key, name, rules_edition, repeatable, grant_rules
-     ) VALUES (?, 'Magic Initiate', '2024', 1, '[]')`,
+     ) VALUES (?, 'Report Fixture Feat', '2024', 1, '[]')`,
     [nextKey('feat')],
   ).lastInsertId;
   const featSourceId = createSource(
