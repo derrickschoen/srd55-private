@@ -2315,6 +2315,9 @@ describe('hostile and over-long weapon sections', () => {
       // value has to SURVIVE the link rather than the case where its absence is
       // tolerated — the second is covered by the pre-D27 arity tests.
       proficiency_category: 'martial' as const,
+      // D46: the command stores this, but the v2 share document deliberately
+      // omits it. The share boundary is still required to accept the weapon.
+      attack_kind: 'melee' as const,
       damage: {
         kind: 'dice' as const,
         dice: 'd'.repeat(WEAPON_TEXT_LIMITS.damage_dice),
@@ -2350,12 +2353,13 @@ describe('hostile and over-long weapon sections', () => {
       }),
     ).not.toThrow();
 
-    // …and so must the share boundary, field for field, through a real link.
-    // Every flag above is already `true`, which is the only value the wire
-    // accepts, so the same object is a valid share weapon as it stands.
+    // …and every v2 share field must cross a real link. D46 deliberately omits
+    // attack_kind from this channel, so remove that one character-copy field
+    // before constructing the frozen wire document.
+    const { attack_kind: _attackKind, ...shareWeapon } = maximal;
     const shared = await throughShareLink(
       weaponDocument({
-        ...maximal,
+        ...shareWeapon,
         mastery_selected: true,
       }),
     );

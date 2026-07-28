@@ -8,6 +8,7 @@ import {
   selectionEligibilities,
   skills,
   slotStates,
+  weaponAttackKinds,
   weaponMasteryProperties,
   weaponProficiencyCategories,
 } from '../domain/enums';
@@ -382,6 +383,7 @@ const weaponToggles = [
 const weaponFieldKeys = [
   'name',
   'proficiency_category',
+  'attack_kind',
   'damage',
   'damage_type',
   'versatile_damage',
@@ -574,6 +576,15 @@ function validateWeaponFields(value: unknown, allowLegacy = false): void {
     !isEnumValue(weaponProficiencyCategories, weapon.proficiency_category)
   ) {
     invalid('Weapon proficiency category must be simple, martial or null.');
+  }
+  if (!hasOwn(weapon, 'attack_kind')) {
+    invalid('attack_kind is required; use null when it is not recorded.');
+  }
+  if (
+    weapon.attack_kind !== null &&
+    !isEnumValue(weaponAttackKinds, weapon.attack_kind)
+  ) {
+    invalid('Weapon attack kind must be melee, ranged or null.');
   }
   if (!hasOwn(weapon, 'mastery_property')) {
     invalid('mastery_property is required; use null for none.');

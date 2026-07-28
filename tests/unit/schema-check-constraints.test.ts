@@ -1354,6 +1354,19 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     ],
   },
   {
+    constraint: 'character_weapons_attack_kind_check',
+    rejects: [
+      ['a template group copied without its proficiency half removed', weapon({ attack_kind: 'simple_melee' })],
+      ['an attack kind no formula branch knows', weapon({ attack_kind: 'siege' })],
+      ['an empty value pretending to be absence', weapon({ attack_kind: '' })],
+    ],
+    accepts: [
+      ['the honest not-recorded state', weapon({ attack_kind: null })],
+      ['melee', weapon({ attack_kind: 'melee' })],
+      ['ranged', weapon({ attack_kind: 'ranged' })],
+    ],
+  },
+  {
     constraint: 'weapon_templates_damage_check',
     rejects: [
       ['dice with a NULL payload', weaponTemplate({ damage_kind: 'dice', damage_dice: null })],

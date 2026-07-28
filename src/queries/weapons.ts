@@ -13,8 +13,10 @@ import type { DatabaseContext } from '../db/database';
 import {
   isEnumValue,
   srdWeaponGroups,
+  weaponAttackKinds,
   weaponMasteryProperties,
   weaponProficiencyCategories,
+  type WeaponAttackKind,
   type SrdWeaponGroup,
   type WeaponMasteryProperty,
   type WeaponProficiencyCategory,
@@ -116,6 +118,11 @@ function proficiencyCategory(row: SqlRow): WeaponProficiencyCategory | null {
   return isEnumValue(weaponProficiencyCategories, value) ? value : null;
 }
 
+function attackKind(row: SqlRow): WeaponAttackKind | null {
+  const value = sqlNullableString(row, 'attack_kind');
+  return isEnumValue(weaponAttackKinds, value) ? value : null;
+}
+
 function weaponProfile(row: SqlRow): WeaponProfile {
   const rangeKind = sqlString(row, 'range_kind');
   if (!isWeaponRangeKind(rangeKind)) {
@@ -157,7 +164,8 @@ export class WeaponQueries {
   /** A character's weapons, ordered by id — the order they were added. */
   characterWeapons(characterId: number): CharacterWeapon[] {
     return this.db.all(
-      `SELECT id, ${PROFILE_COLUMNS.join(', ')}, proficiency_category, notes,
+      `SELECT id, ${PROFILE_COLUMNS.join(', ')}, proficiency_category,
+              attack_kind, notes,
               mastery_selected
        FROM character_weapons
        WHERE character_id = ?
@@ -171,6 +179,7 @@ export class WeaponQueries {
         // the character's alone. `weapon_templates` has no such column, so
         // reading it there would be a SELECT of a column that does not exist.
         proficiency_category: proficiencyCategory(row),
+        attack_kind: attackKind(row),
         notes: sqlNullableString(row, 'notes'),
         mastery_selected: sqlBoolean(row, 'mastery_selected'),
       }),

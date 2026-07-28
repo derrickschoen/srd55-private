@@ -163,11 +163,12 @@ function seedCompleteCharacter(
        versatile_damage_kind, versatile_damage_dice,
        finesse, light, thrown, ammunition_kind, range_kind, range_near_feet,
        range_far_feet, mastery_property, mastery_selected, other_properties,
-       notes, created_at, updated_at
+       notes, attack_kind, created_at, updated_at
      ) VALUES (
        ?, 'Weathered Longsword', 'dice', '1d8', 'Slashing', 'dice', '1d10',
        0, 0, 1, 'bolt',
-       'ranged', 20, 60, 'Sap', 1, 'Notched near the hilt', 'weapon note', ?, ?
+       'ranged', 20, 60, 'Sap', 1, 'Notched near the hilt', 'weapon note',
+       'ranged', ?, ?
      )`,
     [characterId, timestamp, timestamp],
   );
@@ -452,6 +453,7 @@ describe('portable character backup', () => {
     expect(importedWeapons[0]).toMatchObject({
       character_id: characterId,
       name: 'Weathered Longsword',
+      attack_kind: 'ranged',
       damage_kind: 'dice',
       damage_dice: '1d8',
       damage_flat: null,
@@ -477,6 +479,7 @@ describe('portable character backup', () => {
     expect(importedWeapons[1]).toMatchObject({
       character_id: characterId,
       name: 'Half-entered club',
+      attack_kind: null,
       damage_kind: 'not_recorded',
       damage_dice: null,
       damage_flat: null,
@@ -709,6 +712,7 @@ describe('portable character backup', () => {
     delete weapon.range_kind;
     delete weapon.range_near_feet;
     delete weapon.range_far_feet;
+    delete weapon.attack_kind;
     weapon.range_normal_feet = 60;
     weapon.range_long_feet = 20;
 
@@ -721,7 +725,7 @@ describe('portable character backup', () => {
         `SELECT damage_kind, damage_dice, damage_flat, damage_custom,
                 versatile_damage_kind, versatile_damage_dice,
                 versatile_damage_flat, versatile_damage_custom,
-                range_kind, range_near_feet, range_far_feet
+                range_kind, range_near_feet, range_far_feet, attack_kind
          FROM character_weapons
          WHERE character_id = ?
          ORDER BY id
@@ -740,6 +744,7 @@ describe('portable character backup', () => {
       range_kind: 'legacy',
       range_near_feet: 60,
       range_far_feet: 20,
+      attack_kind: null,
     });
   });
 

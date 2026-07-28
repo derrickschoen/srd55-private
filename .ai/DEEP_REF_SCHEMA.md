@@ -77,7 +77,7 @@ artifact, keep the split.
 |---|---|
 | `generated/column-facts.ts` | GENERATED. Per-column facts: does the column exist, is it `notNull`, could drizzle-zod type it |
 | `generated/reference-facts.ts` | GENERATED. Catalog tables a backup resolves references against |
-| `rows.ts` | The Zod contracts. `COLUMN_REFINEMENTS` (`:316`), `NARROWED_REFINEMENTS` (`:374`), `rowContractError` (`:1142`) |
+| `rows.ts` | The Zod contracts. `COLUMN_REFINEMENTS` (`:318`), `NARROWED_REFINEMENTS` (`:377`), `rowContractError` (`:1149`) |
 | `row-rules.ts` | Cross-column rules a per-column contract cannot express |
 | `json-columns.ts` | WHICH text columns hold serialized JSON, and what SHAPE each reader needs |
 | `tables.ts` | The table inventory and scope classification — §3 below |
@@ -152,7 +152,7 @@ save-point restore. [RECIPES.md](RECIPES.md) §3 is that checklist.
 ## 4. The character root is NOT covered by the table loop
 
 `characters` is classified all-false. The root is serialized through its own
-path in `src/character/character-state.ts`: `CHARACTER_STATE_COLUMNS` (`:200`) for
+path in `src/character/character-state.ts`: `CHARACTER_STATE_COLUMNS` (`:201`) for
 snapshots, and `document.character` for backups. **A new column on `characters`
 therefore does NOT get picked up by any of the table-scope machinery.** It has to
 be added to `CHARACTER_STATE_COLUMNS` by hand, and to the backup and share paths

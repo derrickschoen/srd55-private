@@ -11,8 +11,10 @@ import type {
 import {
   damageType,
   isEnumValue,
+  weaponAttackKinds,
   weaponMasteryProperties,
   weaponProficiencyCategories,
+  type WeaponAttackKind,
   type WeaponMasteryProperty,
   type WeaponProficiencyCategory,
 } from '../domain/enums';
@@ -85,6 +87,7 @@ export function resolvesInverseAfterApply(
 const WEAPON_COLUMNS = [
   'name',
   'proficiency_category',
+  'attack_kind',
   'damage_kind',
   'damage_dice',
   'damage_flat',
@@ -156,6 +159,7 @@ function weaponValues(weapon: WeaponFields): Record<string, SqlValue> {
     // text, and `''` cannot reach here — the payload validator already refuses
     // anything that is neither null nor a member.
     proficiency_category: weapon.proficiency_category,
+    attack_kind: weapon.attack_kind,
     ...damageValues('damage', weapon.damage),
     damage_type: nullableText(weapon.damage_type),
     ...damageValues('versatile_damage', weapon.versatile_damage),
@@ -225,6 +229,7 @@ function readWeapon(
 function fieldsFromRow(row: WeaponRow): WeaponFields {
   const mastery = row.mastery_property;
   const category = row.proficiency_category;
+  const attackKind = row.attack_kind;
   const storedRangeKind = row.range_kind;
   if (!isWeaponRangeKind(storedRangeKind)) {
     throw new TypeError(`Unknown weapon range kind "${String(storedRangeKind)}".`);
@@ -238,6 +243,9 @@ function fieldsFromRow(row: WeaponRow): WeaponFields {
     // character may not have.
     proficiency_category: isEnumValue(weaponProficiencyCategories, category)
       ? (category as WeaponProficiencyCategory)
+      : null,
+    attack_kind: isEnumValue(weaponAttackKinds, attackKind)
+      ? (attackKind as WeaponAttackKind)
       : null,
     damage:
       row.damage_kind === 'dice'

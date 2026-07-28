@@ -835,6 +835,37 @@ describe('candidate database semantic audit', () => {
     });
   });
 
+  it('accepts a pre-D46 save point and restores missing attack kind as null', () => {
+    const db = freshDatabase();
+    seedTwoCharacters(db);
+    db.exec(
+      `INSERT INTO character_weapons (
+         id, character_id, name, attack_kind
+       ) VALUES (1, 1, 'Old copied weapon', 'melee')`,
+    );
+    const snapshot = snapshotOf(db, 1);
+    const weapon = (
+      snapshot.character_weapons as Record<string, unknown>[]
+    )[0]!;
+    delete weapon.attack_kind;
+    expect(Object.hasOwn(weapon, 'attack_kind')).toBe(false);
+    insertSavePoint(db, 1, snapshot);
+
+    expect(() => auditCandidateDatabase(quarantined(bytesOf(db)))).not.toThrow();
+
+    db.exec(
+      `UPDATE character_weapons
+       SET attack_kind = 'ranged'
+       WHERE id = 1`,
+    );
+    new CharacterState(new DatabaseContext(db)).restore(1, snapshot);
+    expect(
+      db.selectValue(
+        'SELECT attack_kind FROM character_weapons WHERE id = 1',
+      ),
+    ).toBeNull();
+  });
+
   it('still audits the rows inside an a7-v1 save point', () => {
     // The corollary of accepting the version: the five tables it does carry get
     // exactly the scrutiny they got before. An older version is not an escape

@@ -8,6 +8,7 @@ import type {
   SelectionEligibility,
   Skill,
   SlotState,
+  WeaponAttackKind,
   WeaponMasteryProperty,
   WeaponProficiencyCategory,
 } from './enums';
@@ -129,6 +130,13 @@ export interface UpdateClassCommand extends CommandBase {
  */
 export interface WeaponFields {
   name: string;
+  /**
+   * Which printed attack formula applies, or null when it was not recorded.
+   *
+   * A template copy derives this from `srd_group`; a custom weapon begins null.
+   * No range or property field is a fallback for the absent state.
+   */
+  attack_kind: WeaponAttackKind | null;
   /**
    * D27's `simple | martial`, or `null` for NOT STATED.
    *

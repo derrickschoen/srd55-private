@@ -32,6 +32,7 @@ import { domainSourceTypes } from '../domain/enums';
 import { splitLegacyTraitEffect } from '../rules/legacy-trait-effects';
 import { migrateLegacyWeaponDamageRow } from '../domain/weapon-damage';
 import { migrateLegacyWeaponRangeRow } from '../domain/weapon-range';
+import { fillAddedNullableRowColumns } from '../domain/contracts/historical-row-columns';
 
 /**
  * THE SEMANTIC AUDIT OF A QUARANTINED CANDIDATE DATABASE.
@@ -664,9 +665,12 @@ function auditSavePointSnapshots(db: Database): void {
             : null;
         const migratedWeapon =
           table === 'character_weapons'
-            ? migrateLegacyWeaponRangeRow(
-                migrateLegacyWeaponDamageRow(
-                  row as Record<string, unknown>,
+            ? fillAddedNullableRowColumns(
+                table,
+                migrateLegacyWeaponRangeRow(
+                  migrateLegacyWeaponDamageRow(
+                    row as Record<string, unknown>,
+                  ),
                 ),
               )
             : null;

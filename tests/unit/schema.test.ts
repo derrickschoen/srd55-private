@@ -303,7 +303,7 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
       'versatile_damage_flat',
     ],
     text: [
-      'name', 'proficiency_category', 'damage_kind', 'damage_dice',
+      'name', 'proficiency_category', 'attack_kind', 'damage_kind', 'damage_dice',
       'damage_custom', 'damage_type', 'versatile_damage_kind',
       'versatile_damage_dice', 'versatile_damage_custom', 'ammunition_kind',
       'range_kind',
@@ -537,9 +537,9 @@ const expectedNotNull: Record<string, string[]> = {
   // `damage_dice`, `damage_type` and `mastery_property` are NULLABLE here and
   // NOT NULL on the template: a half-entered user weapon is a first-class
   // state, and an invented weapon need not have a mastery property at all.
-  // `proficiency_category` is NOT in this list, and D27 says why: null means
-  // NOT STATED. A weapon someone typed in, or one that arrived on a share link
-  // minted before the column existed, genuinely has no category.
+  // `proficiency_category` and `attack_kind` are NOT in this list: null means
+  // NOT STATED / NOT RECORDED. A hand-entered or older shared weapon genuinely
+  // has neither fact.
   character_weapons: [
     'id', 'character_id', 'name', 'damage_kind', 'versatile_damage_kind',
     'finesse', 'heavy', 'light', 'loading', 'reach', 'thrown', 'two_handed',
