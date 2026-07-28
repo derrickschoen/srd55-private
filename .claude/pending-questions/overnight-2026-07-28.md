@@ -142,6 +142,29 @@ content for everything and settle the attribution question.
 
 ---
 
+### 7. Where the Bard's musical instrument goes — decided by NOT storing it
+
+**Taken: state it, do not store it.** The picker says the grant also includes one
+musical instrument of the player's choice and that the app does not track it.
+
+My first spec told codex to put it "wherever character-level free text already
+lives", and codex correctly did exactly that — `characters.notes`. That was my
+error, and it was a bad place for three reasons: D37 ruled notes OPT-IN for
+sharing, so a mechanical proficiency would travel only if the sharer opted their
+notes in; a user tidying their own notes would silently delete a proficiency; and
+the notes length limit could make CHOOSING A SKILL throw.
+
+Not storing it follows your own ruling in D42 §4 about spell focuses — *"assume
+the player will figure out any needed spell focus and sort it out at the table"* —
+and D26/D35, under which an instrument earns no structure because it changes no
+number on the sheet. "Just text" turned out to mean "do not build a vocabulary
+for it", not "write it into the user's field".
+
+**Reverse this if** you want the instrument recorded. It then needs a home the
+APP owns, not the user's notes.
+
+---
+
 ## Running order for the night
 
 1. `bqea0wc7s` — read-only SRD catalogue layer. Verify, gate, merge.
