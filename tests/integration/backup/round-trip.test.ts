@@ -51,8 +51,9 @@ function seedCatalog(db: DatabaseContext, withPadding = false): CatalogIds {
     ).lastInsertId;
     db.exec(
       `INSERT INTO spell_versions
-         (content_key, spell_identity_id, display_name, rules_edition, level, school)
-       VALUES ('dummy:spell', ?, 'Dummy', '2024', 0, 'Illusion')`,
+         (content_key, spell_identity_id, display_name, rules_edition, level,
+          school, provenance)
+       VALUES ('dummy:spell', ?, 'Dummy', '2024', 0, 'Illusion', 'srd')`,
       [dummyIdentity],
     );
     db.exec(
@@ -68,8 +69,8 @@ function seedCatalog(db: DatabaseContext, withPadding = false): CatalogIds {
   const spellId = db.exec(
     `INSERT INTO spell_versions
        (content_key, spell_identity_id, display_name, rules_edition, level,
-        school, is_active)
-     VALUES ('2024:shield', ?, 'Shield', '2024', 1, 'Abjuration', 1)`,
+        school, provenance, is_active)
+     VALUES ('2024:shield', ?, 'Shield', '2024', 1, 'Abjuration', 'srd', 1)`,
     [identityId],
   ).lastInsertId;
   const classId = db.exec(
@@ -1150,6 +1151,20 @@ describe('a backup file written while the dormant orphan column existed', () => 
         species_definitions: [],
         background_definitions: [],
         spell_versions: [],
+      },
+      spell_definitions: {
+        spell_identities: [],
+        spell_identity_aliases: [],
+        spell_versions: [],
+        spell_version_publications: [],
+        spell_list_memberships: [],
+        spell_version_tags: [],
+        spell_version_damage_types: [],
+        spell_version_conditions: [],
+        spell_version_attack_modes: [],
+        spell_version_save_abilities: [],
+        spell_version_upcast_levels: [],
+        spell_version_cantrip_upgrade_levels: [],
       },
     };
   }

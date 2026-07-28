@@ -22,15 +22,18 @@ import {
   BackupValidationError,
   CHARACTER_BACKUP_FORMAT,
   CHARACTER_BACKUP_VERSION,
+  LEGACY_CHARACTER_BACKUP_VERSION,
 } from './backup-version';
 import {
   BACKUP_DIRECT_TABLES,
   BACKUP_OPTIONAL_TABLES,
   BACKUP_TABLES,
   REFERENCE_KINDS,
+  SPELL_DEFINITION_TABLES,
   SOURCE_REFERENCE_KIND,
   type BackupTable,
   type ReferenceKind as DerivedReferenceKind,
+  type SpellDefinitionTable,
 } from '../domain/contracts/tables';
 import {
   rowContractError,
@@ -84,9 +87,24 @@ export type CharacterBackupReferences = {
   readonly [Kind in ReferenceKind]: readonly BackupReference[];
 };
 
+export type CharacterBackupSpellDefinitions = {
+  readonly [Table in SpellDefinitionTable]: readonly BackupRow[];
+};
+
 export interface CharacterBackupDocument {
   readonly format: typeof CHARACTER_BACKUP_FORMAT;
   readonly version: typeof CHARACTER_BACKUP_VERSION;
+  readonly exported_at: string;
+  readonly source_character_id: number;
+  readonly character: BackupRow;
+  readonly tables: CharacterBackupTables;
+  readonly references: CharacterBackupReferences;
+  readonly spell_definitions: CharacterBackupSpellDefinitions;
+}
+
+export interface LegacyCharacterBackupDocument {
+  readonly format: typeof CHARACTER_BACKUP_FORMAT;
+  readonly version: typeof LEGACY_CHARACTER_BACKUP_VERSION;
   readonly exported_at: string;
   readonly source_character_id: number;
   readonly character: BackupRow;
@@ -188,6 +206,13 @@ const shapeOnlyTables = backupTableNames.filter(
 );
 
 type SnapshotStateTable = (typeof CHARACTER_STATE_TABLES)[number];
+
+const spellDefinitionTables = SPELL_DEFINITION_TABLES;
+
+const emptySpellDefinitions = (): CharacterBackupSpellDefinitions =>
+  Object.fromEntries(
+    spellDefinitionTables.map((table) => [table, []]),
+  ) as unknown as CharacterBackupSpellDefinitions;
 
 function positiveInteger(value: unknown, label: string): number {
   if (!Number.isSafeInteger(value) || Number(value) < 1) {
@@ -657,25 +682,201 @@ function validateCharacterRows(
   }
 }
 
+function spellDefinitionRowList(
+  value: unknown,
+  table: SpellDefinitionTable,
+): readonly BackupRow[] {
+  if (!Array.isArray(value)) {
+    throw new BackupValidationError(
+      `Character backup spell_definitions.${table} must be an array.`,
+    );
+  }
+  return value.map((row, index) =>
+    backupRecord(
+      row,
+      `Character backup spell_definitions.${table}[${index}]`,
+    ),
+  );
+}
+
+function uniqueTextColumn(
+  rows: readonly BackupRow[],
+  column: string,
+  label: string,
+): void {
+  const seen = new Set<string>();
+  for (const [index, row] of rows.entries()) {
+    const value = row[column];
+    if (typeof value !== 'string') {
+      throw new BackupValidationError(
+        `${label}[${index}].${column} must be text.`,
+      );
+    }
+    if (seen.has(value)) {
+      throw new BackupValidationError(
+        `${label} contains duplicate ${column} values.`,
+      );
+    }
+    seen.add(value);
+  }
+}
+
+function validateSpellDefinitions(
+  value: unknown,
+  references: ReadonlyMap<number, string>,
+): CharacterBackupSpellDefinitions {
+  const object = backupRecord(
+    value,
+    'Character backup spell_definitions',
+  );
+  assertExactKeys(
+    object,
+    spellDefinitionTables,
+    'Character backup spell_definitions',
+  );
+  const definitions = Object.fromEntries(
+    spellDefinitionTables.map((table) => [
+      table,
+      spellDefinitionRowList(object[table], table),
+    ]),
+  ) as unknown as CharacterBackupSpellDefinitions;
+
+  const ids = Object.fromEntries(
+    spellDefinitionTables.map((table) => [
+      table,
+      uniqueRowIds(
+        definitions[table],
+        `Character backup spell_definitions.${table}`,
+      ),
+    ]),
+  ) as Record<SpellDefinitionTable, Set<number>>;
+
+  for (const table of spellDefinitionTables) {
+    for (const [index, row] of definitions[table].entries()) {
+      assertRowShape(
+        table,
+        row,
+        `Character backup spell_definitions.${table}[${index}]`,
+      );
+    }
+  }
+  uniqueTextColumn(
+    definitions.spell_identities,
+    'content_key',
+    'Character backup spell_definitions.spell_identities',
+  );
+  uniqueTextColumn(
+    definitions.spell_versions,
+    'content_key',
+    'Character backup spell_definitions.spell_versions',
+  );
+
+  const usedIdentityIds = new Set<number>();
+  for (const [index, row] of definitions.spell_versions.entries()) {
+    const versionId = positiveInteger(
+      row.id,
+      `Character backup spell_definitions.spell_versions[${index}].id`,
+    );
+    const identityId = positiveInteger(
+      row.spell_identity_id,
+      `Character backup spell_definitions.spell_versions[${index}].spell_identity_id`,
+    );
+    if (!ids.spell_identities.has(identityId)) {
+      throw new BackupValidationError(
+        `Character backup spell_definitions.spell_versions[${index}] has no carried spell identity.`,
+      );
+    }
+    usedIdentityIds.add(identityId);
+    const contentKey = String(row.content_key);
+    if (references.get(versionId) !== contentKey) {
+      throw new BackupValidationError(
+        `Character backup spell_definitions.spell_versions[${index}] does not match its spell_versions reference.`,
+      );
+    }
+    if (row.provenance !== 'user' && row.provenance !== 'import') {
+      throw new BackupValidationError(
+        `Character backup spell_definitions.spell_versions[${index}].provenance must be "user" or "import".`,
+      );
+    }
+  }
+  if (
+    definitions.spell_identities.some(
+      (row) => !usedIdentityIds.has(Number(row.id)),
+    )
+  ) {
+    throw new BackupValidationError(
+      'Character backup spell_definitions contains an identity with no carried spell version.',
+    );
+  }
+
+  for (const [index, row] of definitions.spell_identity_aliases.entries()) {
+    if (!ids.spell_identities.has(Number(row.spell_identity_id))) {
+      throw new BackupValidationError(
+        `Character backup spell_definitions.spell_identity_aliases[${index}] has no carried spell identity.`,
+      );
+    }
+  }
+  for (const table of spellDefinitionTables) {
+    if (
+      table === 'spell_identities' ||
+      table === 'spell_identity_aliases' ||
+      table === 'spell_versions'
+    ) {
+      continue;
+    }
+    for (const [index, row] of definitions[table].entries()) {
+      if (!ids.spell_versions.has(Number(row.spell_version_id))) {
+        throw new BackupValidationError(
+          `Character backup spell_definitions.${table}[${index}] has no carried spell version.`,
+        );
+      }
+    }
+  }
+  return definitions;
+}
+
 function validateDocument(input: unknown): ValidatedDocument {
   const document = backupRecord(input, 'Character backup');
+  const version = document.version;
+  if (
+    version !== CHARACTER_BACKUP_VERSION &&
+    version !== LEGACY_CHARACTER_BACKUP_VERSION
+  ) {
+    assertBackupHeader(
+      document,
+      CHARACTER_BACKUP_FORMAT,
+      CHARACTER_BACKUP_VERSION,
+      'character backup',
+    );
+  }
   assertExactKeys(
     document,
-    [
-      'format',
-      'version',
-      'exported_at',
-      'source_character_id',
-      'character',
-      'tables',
-      'references',
-    ],
+    version === LEGACY_CHARACTER_BACKUP_VERSION
+      ? [
+          'format',
+          'version',
+          'exported_at',
+          'source_character_id',
+          'character',
+          'tables',
+          'references',
+        ]
+      : [
+          'format',
+          'version',
+          'exported_at',
+          'source_character_id',
+          'character',
+          'tables',
+          'references',
+          'spell_definitions',
+        ],
     'Character backup',
   );
   assertBackupHeader(
     document,
     CHARACTER_BACKUP_FORMAT,
-    CHARACTER_BACKUP_VERSION,
+    Number(version),
     'character backup',
   );
   const characterId = positiveInteger(
@@ -816,6 +1017,13 @@ function validateDocument(input: unknown): ValidatedDocument {
       referenceMap(referenceObject[kind], kind),
     ]),
   ) as Record<ReferenceKind, Map<number, string>>;
+  const spellDefinitions =
+    version === LEGACY_CHARACTER_BACKUP_VERSION
+      ? emptySpellDefinitions()
+      : validateSpellDefinitions(
+          document.spell_definitions,
+          referenceMaps.spell_versions,
+        );
 
   // The five snapshot tables get their shape checked inside
   // `validateCharacterRows`, which also runs for every save point; the rest are
@@ -922,6 +1130,7 @@ function validateDocument(input: unknown): ValidatedDocument {
           })),
         ]),
       ) as unknown as CharacterBackupReferences,
+      spell_definitions: spellDefinitions,
     },
     snapshots,
     referenceMaps,
@@ -930,7 +1139,7 @@ function validateDocument(input: unknown): ValidatedDocument {
 
 export function validateCharacterBackup(
   input: unknown,
-): asserts input is CharacterBackupDocument {
+): asserts input is CharacterBackupDocument | LegacyCharacterBackupDocument {
   validateDocument(input);
 }
 
@@ -985,6 +1194,114 @@ function selectCharacterRows(
     `SELECT * FROM "${table}" WHERE character_id = ? ORDER BY id`,
     [characterId],
   );
+}
+
+function selectRowsByForeignIds(
+  db: DatabaseContext,
+  table: SpellDefinitionTable,
+  column: 'id' | 'spell_identity_id' | 'spell_version_id',
+  ids: ReadonlySet<number>,
+): SqlRow[] {
+  if (ids.size === 0) {
+    return [];
+  }
+  return db.allRaw(
+    `SELECT *
+     FROM "${table}"
+     WHERE "${column}" IN (${placeholders(ids)})
+     ORDER BY id`,
+    [...ids],
+  );
+}
+
+function selectSpellDefinitions(
+  db: DatabaseContext,
+  referencedVersionIds: ReadonlySet<number>,
+): CharacterBackupSpellDefinitions {
+  if (referencedVersionIds.size === 0) {
+    return emptySpellDefinitions();
+  }
+  const versions = db.allRaw(
+    `SELECT *
+     FROM spell_versions
+     WHERE id IN (${placeholders(referencedVersionIds)})
+       AND provenance IN ('user', 'import')
+     ORDER BY id`,
+    [...referencedVersionIds],
+  );
+  const versionIds = new Set(versions.map((row) => Number(row.id)));
+  const identityIds = new Set(
+    versions.map((row) => Number(row.spell_identity_id)),
+  );
+  return {
+    spell_identities: selectRowsByForeignIds(
+      db,
+      'spell_identities',
+      'id',
+      identityIds,
+    ),
+    spell_identity_aliases: selectRowsByForeignIds(
+      db,
+      'spell_identity_aliases',
+      'spell_identity_id',
+      identityIds,
+    ),
+    spell_versions: versions,
+    spell_version_publications: selectRowsByForeignIds(
+      db,
+      'spell_version_publications',
+      'spell_version_id',
+      versionIds,
+    ),
+    spell_list_memberships: selectRowsByForeignIds(
+      db,
+      'spell_list_memberships',
+      'spell_version_id',
+      versionIds,
+    ),
+    spell_version_tags: selectRowsByForeignIds(
+      db,
+      'spell_version_tags',
+      'spell_version_id',
+      versionIds,
+    ),
+    spell_version_damage_types: selectRowsByForeignIds(
+      db,
+      'spell_version_damage_types',
+      'spell_version_id',
+      versionIds,
+    ),
+    spell_version_conditions: selectRowsByForeignIds(
+      db,
+      'spell_version_conditions',
+      'spell_version_id',
+      versionIds,
+    ),
+    spell_version_attack_modes: selectRowsByForeignIds(
+      db,
+      'spell_version_attack_modes',
+      'spell_version_id',
+      versionIds,
+    ),
+    spell_version_save_abilities: selectRowsByForeignIds(
+      db,
+      'spell_version_save_abilities',
+      'spell_version_id',
+      versionIds,
+    ),
+    spell_version_upcast_levels: selectRowsByForeignIds(
+      db,
+      'spell_version_upcast_levels',
+      'spell_version_id',
+      versionIds,
+    ),
+    spell_version_cantrip_upgrade_levels: selectRowsByForeignIds(
+      db,
+      'spell_version_cantrip_upgrade_levels',
+      'spell_version_id',
+      versionIds,
+    ),
+  };
 }
 
 export function exportCharacterBackup(
@@ -1091,6 +1408,10 @@ export function exportCharacterBackup(
     character,
     tables: allTables,
     references,
+    spell_definitions: selectSpellDefinitions(
+      db,
+      referenceIds.spell_versions,
+    ),
   };
   validateCharacterBackup(result);
   return result;
@@ -1099,6 +1420,7 @@ export function exportCharacterBackup(
 function resolveReferences(
   db: DatabaseContext,
   maps: Readonly<Record<ReferenceKind, Map<number, string>>>,
+  portableSpellKeys: ReadonlySet<string>,
 ): ResolvedReferences {
   return Object.fromEntries(
     referenceKinds.map((kind) => {
@@ -1107,27 +1429,39 @@ function resolveReferences(
         return [kind, new Map<number, number>()];
       }
       const keys = [...source.values()];
-      const rows = db.all<{ id: number; content_key: string }>(
-        `SELECT id, content_key
+      const rows = db.all<{
+        id: number;
+        content_key: string;
+        is_active: number | null;
+      }>(
+        `SELECT id, content_key,
+                ${kind === 'spell_versions' ? 'is_active' : 'NULL'} AS is_active
          FROM "${kind}"
          WHERE content_key IN (${keys.map(() => '?').join(', ')})
-           ${kind === 'spell_versions' ? 'AND is_active = 1' : ''}`,
+        `,
         keys,
         (row) => ({
           id: Number(row.id),
           content_key: String(row.content_key),
+          is_active:
+            row.is_active === null ? null : Number(row.is_active),
         }),
       );
-      const byKey = new Map(rows.map((row) => [row.content_key, row.id]));
+      const byKey = new Map(rows.map((row) => [row.content_key, row]));
       const resolved = new Map<number, number>();
       for (const [sourceId, contentKey] of source) {
-        const targetId = byKey.get(contentKey);
-        if (targetId === undefined) {
+        const target = byKey.get(contentKey);
+        if (
+          target === undefined ||
+          (kind === 'spell_versions' &&
+            target.is_active !== 1 &&
+            !portableSpellKeys.has(contentKey))
+        ) {
           throw new BackupValidationError(
             `Character backup requires unavailable active ${kind} content_key "${contentKey}".`,
           );
         }
-        resolved.set(sourceId, targetId);
+        resolved.set(sourceId, target.id);
       }
       return [kind, resolved];
     }),
@@ -1173,6 +1507,123 @@ function insertPortableRow(
     columns.map((column) => row[column] as SqlValue),
   );
   return result.lastInsertId;
+}
+
+/**
+ * Restores only definitions whose version content_key is absent.
+ *
+ * A local row with the same key wins wholesale: neither it nor its pivots are
+ * updated. The file format has no explicit replace instruction, so treating
+ * presence as permission to overwrite would destroy user-owned catalogue data.
+ */
+function restoreSpellDefinitions(
+  db: DatabaseContext,
+  definitions: CharacterBackupSpellDefinitions,
+): ReadonlySet<string> {
+  const portableKeys = new Set(
+    definitions.spell_versions.map((row) => String(row.content_key)),
+  );
+  if (portableKeys.size === 0) {
+    return portableKeys;
+  }
+  const existingKeys = new Set(
+    db
+      .allRaw(
+        `SELECT content_key
+         FROM spell_versions
+         WHERE content_key IN (${[...portableKeys].map(() => '?').join(', ')})`,
+        [...portableKeys],
+      )
+      .map((row) => String(row.content_key)),
+  );
+  const versionsToInsert = definitions.spell_versions.filter(
+    (row) => !existingKeys.has(String(row.content_key)),
+  );
+  if (versionsToInsert.length === 0) {
+    return portableKeys;
+  }
+
+  const neededIdentityIds = new Set(
+    versionsToInsert.map((row) => Number(row.spell_identity_id)),
+  );
+  const identityIds = new Map<number, number>();
+  const insertedIdentityIds = new Set<number>();
+  for (const row of definitions.spell_identities) {
+    const oldId = Number(row.id);
+    if (!neededIdentityIds.has(oldId)) {
+      continue;
+    }
+    const existing = db.oneRaw(
+      'SELECT id FROM spell_identities WHERE content_key = ?',
+      [String(row.content_key)],
+    );
+    if (existing !== null) {
+      identityIds.set(oldId, Number(existing.id));
+      continue;
+    }
+    identityIds.set(
+      oldId,
+      insertPortableRow(db, 'spell_identities', row, {}),
+    );
+    insertedIdentityIds.add(oldId);
+  }
+  for (const row of definitions.spell_identity_aliases) {
+    const oldIdentityId = Number(row.spell_identity_id);
+    if (!insertedIdentityIds.has(oldIdentityId)) {
+      continue;
+    }
+    insertPortableRow(db, 'spell_identity_aliases', row, {
+      spell_identity_id: identityIds.get(oldIdentityId),
+    });
+  }
+
+  const versionIds = new Map<number, number>();
+  for (const row of versionsToInsert) {
+    const oldIdentityId = Number(row.spell_identity_id);
+    const identityId = identityIds.get(oldIdentityId);
+    if (identityId === undefined) {
+      throw new BackupValidationError(
+        `Character backup cannot resolve carried spell identity ${oldIdentityId}.`,
+      );
+    }
+    const editionCollision = db.oneRaw(
+      `SELECT content_key
+       FROM spell_versions
+       WHERE spell_identity_id = ? AND rules_edition = ?`,
+      [identityId, String(row.rules_edition)],
+    );
+    if (editionCollision !== null) {
+      throw new BackupValidationError(
+        `Character backup cannot restore spell "${String(row.content_key)}": ` +
+          `local identity already has rules edition "${String(row.rules_edition)}".`,
+      );
+    }
+    versionIds.set(
+      Number(row.id),
+      insertPortableRow(db, 'spell_versions', row, {
+        spell_identity_id: identityId,
+      }),
+    );
+  }
+  for (const table of spellDefinitionTables) {
+    if (
+      table === 'spell_identities' ||
+      table === 'spell_identity_aliases' ||
+      table === 'spell_versions'
+    ) {
+      continue;
+    }
+    for (const row of definitions[table]) {
+      const versionId = versionIds.get(Number(row.spell_version_id));
+      if (versionId === undefined) {
+        continue;
+      }
+      insertPortableRow(db, table, row, {
+        spell_version_id: versionId,
+      });
+    }
+  }
+  return portableKeys;
 }
 
 function topologicalSources(rows: readonly BackupRow[]): BackupRow[] {
@@ -1823,9 +2274,17 @@ export function importCharacterBackup(
   input: unknown,
 ): CharacterImportResult {
   const validated = validateDocument(input);
-  const references = resolveReferences(db, validated.referenceMaps);
 
   return db.transaction((transaction) => {
+    const portableSpellKeys = restoreSpellDefinitions(
+      transaction,
+      validated.document.spell_definitions,
+    );
+    const references = resolveReferences(
+      transaction,
+      validated.referenceMaps,
+      portableSpellKeys,
+    );
     const characterId = insertPortableRow(
       transaction,
       'characters',
