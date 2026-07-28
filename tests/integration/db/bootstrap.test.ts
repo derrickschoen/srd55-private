@@ -104,12 +104,12 @@ describe('application database bootstrap', () => {
     ).toBe(0);
   });
 
-  it('ships no spells, so a fresh install is classes-without-a-catalog', async () => {
+  it('ships the read-only SRD spell catalogue on a fresh install', async () => {
     const { lifecycle } = await freshApplicationLifecycle();
     const db = lifecycle.database;
 
-    expect(db.scalar('SELECT count(*) FROM spell_versions')).toBe(0);
-    expect(db.scalar('SELECT count(*) FROM spell_identities')).toBe(0);
+    expect(db.scalar('SELECT count(*) FROM spell_versions')).toBe(339);
+    expect(db.scalar('SELECT count(*) FROM spell_identities')).toBe(339);
     expect(db.scalar('SELECT count(*) FROM characters')).toBe(0);
 
     const clericId = Number(
@@ -131,11 +131,10 @@ describe('application database bootstrap', () => {
 
     const result = new CharacterCompletenessQueries(db).build(characterId);
 
-    // The bundled classes generate real choices. With no imported spells the
-    // spell choices are catalog-blocked and must not be counted as work the
-    // user can do, while the Divine Order choice is catalog-independent and is
-    // still outstanding. That pair is the honest description of a fresh
-    // install: classes present, no spell catalog.
+    // The bundled classes and spells generate real choices immediately. The
+    // spell choices are actionable rather than catalog-blocked, while Divine
+    // Order and the Cleric's two skill proficiencies remain independent player
+    // choices.
     //
     // The Cleric's two skill proficiencies join it: they are catalog-
     // independent too, and nobody but the player can say which two were
@@ -165,18 +164,38 @@ describe('application database bootstrap', () => {
         order_name: 'Divine Order',
         options: ['Protector', 'Thaumaturge'],
       },
+      {
+        kind: 'unfilled_choices',
+        title: 'Cleric 1 — 0 of 3 cantrips chosen',
+        detail: 'This source grants 3 cantrip choices; 3 are still empty.',
+        remedy: 'Open Cleric 1 in the planner and choose 3 cantrips.',
+        source_instance_id: expect.any(Number) as number,
+        source_name: 'Cleric 1',
+        rule_key: 'cleric-cantrips',
+        bucket: 'cantrip_known',
+        required: 3,
+        chosen: 0,
+        missing: 3,
+      },
+      {
+        kind: 'unfilled_choices',
+        title: 'Cleric 1 — 0 of 4 prepared spells chosen',
+        detail:
+          'This source grants 4 prepared spell choices; 4 are still empty.',
+        remedy:
+          'Open Cleric 1 in the planner and choose 4 spells for the prepared list.',
+        source_instance_id: expect.any(Number) as number,
+        source_name: 'Cleric 1',
+        rule_key: 'cleric-prepared',
+        bucket: 'prepared',
+        required: 4,
+        chosen: 0,
+        missing: 4,
+      },
     ]);
-    expect(result.outstanding_count).toBe(2);
-    expect(result.catalog_gap_count).toBe(2);
-    expect(result.catalog_gaps.map((gap) => gap.title)).toEqual([
-      'No eligible Cleric cantrips in your catalog',
-      'No eligible Cleric level 1 spells in your catalog',
-    ]);
-    expect(
-      result.catalog_gaps.every((gap) =>
-        gap.remedy.includes('Import a catalog file'),
-      ),
-    ).toBe(true);
+    expect(result.outstanding_count).toBe(4);
+    expect(result.catalog_gap_count).toBe(0);
+    expect(result.catalog_gaps).toEqual([]);
   });
 
   it('leaves the bundled content untouched when it is already present', async () => {

@@ -159,7 +159,11 @@ test('catalog, complete database, and character backup controls preserve durable
     'Catalog imported: 1 created',
   );
   expect(
-    await page.evaluate(() => window.staticApp.inspectRows('spell_versions')),
+    await page.evaluate(() =>
+      window.staticApp.inspectRows('spell_versions', {
+        provenance: 'import',
+      }),
+    ),
   ).toEqual([
     expect.objectContaining({
       content_key: '2024:ui-catalog-spell',
@@ -178,7 +182,11 @@ test('catalog, complete database, and character backup controls preserve durable
     'Invalid Tier 1 catalog document',
   );
   expect(
-    await page.evaluate(() => window.staticApp.inspectRows('spell_versions')),
+    await page.evaluate(() =>
+      window.staticApp.inspectRows('spell_versions', {
+        provenance: 'import',
+      }),
+    ),
   ).toEqual([
     expect.objectContaining({
       content_key: '2024:ui-catalog-spell',
@@ -192,7 +200,11 @@ test('catalog, complete database, and character backup controls preserve durable
     await page.evaluate(() => window.staticApp.inspectRows('characters')),
   ).toHaveLength(2);
   expect(
-    await page.evaluate(() => window.staticApp.inspectRows('spell_versions')),
+    await page.evaluate(() =>
+      window.staticApp.inspectRows('spell_versions', {
+        provenance: 'import',
+      }),
+    ),
   ).toEqual([
     expect.objectContaining({
       content_key: '2024:ui-catalog-spell',

@@ -57,8 +57,8 @@ test('a fresh OPFS install carries the bundled classes and keeps them across res
   expect(await countRows(page, 'class_progressions')).toBe(240);
   expect(await countRows(page, 'subclass_definitions')).toBe(2);
 
-  // Classes ship; the spell catalog does not. That is the expected fresh state.
-  expect(await countRows(page, 'spell_versions')).toBe(0);
+  // The read-only SRD spell layer ships beside the classes.
+  expect(await countRows(page, 'spell_versions')).toBe(339);
 
   await page.reload();
   await waitForWorker(page);

@@ -81,7 +81,9 @@ describe('the homebrew catalog fixture imports through the existing path', () =>
     });
     // A dry run rolls the whole transaction back, so nothing is persisted.
     expect(
-      rpc.context.db.scalar('SELECT count(*) AS n FROM spell_versions'),
+      rpc.context.db.scalar(
+        "SELECT count(*) AS n FROM spell_versions WHERE provenance = 'import'",
+      ),
     ).toBe(0);
 
     const real = await importCatalog(rpc, {
@@ -90,7 +92,9 @@ describe('the homebrew catalog fixture imports through the existing path', () =>
     });
     expect(real).toMatchObject({ created: recordCount, updated: 0 });
     expect(
-      rpc.context.db.scalar('SELECT count(*) AS n FROM spell_versions'),
+      rpc.context.db.scalar(
+        "SELECT count(*) AS n FROM spell_versions WHERE provenance = 'import'",
+      ),
     ).toBe(recordCount);
 
     // The same file twice must be a no-op. This is the property that makes a
@@ -117,7 +121,9 @@ describe('the homebrew catalog fixture imports through the existing path', () =>
       rpc.context.db.allRaw(
         `SELECT content_key, display_name, level, school, action_type,
                 concentration, ritual, healing, effect_reliability_category
-         FROM spell_versions ORDER BY content_key`,
+         FROM spell_versions
+         WHERE provenance = 'import'
+         ORDER BY content_key`,
       ),
     ).toEqual([
       {
@@ -190,8 +196,12 @@ describe('the homebrew catalog fixture imports through the existing path', () =>
     expect(
       rpc.context.db
         .allRaw(
-          `SELECT DISTINCT spell_list_key FROM spell_list_memberships
-           ORDER BY spell_list_key`,
+          `SELECT DISTINCT membership.spell_list_key
+           FROM spell_list_memberships AS membership
+           INNER JOIN spell_versions AS version
+             ON version.id = membership.spell_version_id
+           WHERE version.provenance = 'import'
+           ORDER BY membership.spell_list_key`,
         )
         .map((row) => row.spell_list_key),
     ).toEqual(['Bard', 'Cleric', 'Druid', 'Warlock']);
@@ -617,7 +627,8 @@ describe('importing one kind leaves the other kind alone', () => {
     await importCatalog(rpc, { documents: [TIER1] });
     expect(
       rpc.context.db.scalar(
-        'SELECT count(*) AS n FROM spell_versions WHERE is_active = 1',
+        `SELECT count(*) AS n FROM spell_versions
+         WHERE provenance = 'import' AND is_active = 1`,
       ),
     ).toBe(5);
 
@@ -625,7 +636,8 @@ describe('importing one kind leaves the other kind alone', () => {
     expect(summary).toMatchObject({ tombstoned: 0, subclasses_created: 1 });
     expect(
       rpc.context.db.scalar(
-        'SELECT count(*) AS n FROM spell_versions WHERE is_active = 1',
+        `SELECT count(*) AS n FROM spell_versions
+         WHERE provenance = 'import' AND is_active = 1`,
       ),
     ).toBe(5);
   });
@@ -712,7 +724,8 @@ describe('importing one kind leaves the other kind alone', () => {
     ).toMatchObject({ tombstoned: 5, subclasses_created: 0 });
     expect(
       rpc.context.db.scalar(
-        'SELECT count(*) AS n FROM spell_versions WHERE is_active = 1',
+        `SELECT count(*) AS n FROM spell_versions
+         WHERE provenance = 'import' AND is_active = 1`,
       ),
     ).toBe(0);
     // The subclass in the same call is still imported, and still never removed.
@@ -756,7 +769,9 @@ describe('the frozen pre-subclass document still imports unchanged', () => {
     expect(
       rpc.context.db.allRaw(
         `SELECT content_key, healing, effect_reliability_category
-         FROM spell_versions ORDER BY content_key`,
+         FROM spell_versions
+         WHERE provenance = 'import'
+         ORDER BY content_key`,
       ),
     ).toEqual([
       {
