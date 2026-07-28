@@ -1,5 +1,83 @@
 # Binding scope decisions
 
+## D57 — OWNER: the import ban is about what WE ship, not what the user holds (2026-07-28)
+
+**The ruling.** *"The rule for no imported rules is for development env only. I
+can't have it end up in git for GitHub distribution. End user can have whatever
+data they want."*
+
+**This resolves the D3 ↔ D46 collision**, which had sat open as a question and
+which two separate audits flagged as a genuine A↔A contradiction. It does not
+pick a side; it draws the line in a different place than either ruling did, and
+the line is *who is doing the distributing*.
+
+**Binding, and narrower than D3 read:**
+
+1. Imported rules text must never reach **the repository, git, or the built
+   distribution**. That is the whole of the concern: this project is published
+   from GitHub, and shipping someone else's rules text is the thing that cannot
+   happen.
+2. What the **end user** holds, imports, exports, or saves locally is **their
+   own data and their own business**. A full JSON export carrying the homebrew
+   they imported themselves is the user handling their own files, not us
+   redistributing anything. D46 stands as written.
+3. A **share link we mint** is on our side of the line, because we are the ones
+   handing it to a third party. D3 continues to govern it.
+
+The practical test, for anyone reading this later: *would this content travel
+because WE published it, or because the USER moved their own file?* Ours is
+banned. Theirs is not our business.
+
+---
+
+## D56 — OWNER: package-only equipment, lineage spells are real, straight level-up before multiclass (2026-07-28)
+
+Three rulings from one batch.
+
+**1. Starting equipment is the PACKAGE ONLY. No gold alternative.** *"Starting
+equipment: package only, no gold."* The SRD offers a class/background equipment
+package or a gold sum to buy from; the wizard offers the package and does not
+offer the gold. This is a scope reduction and it stands until reversed — the gold
+path is not deferred-and-tracked, it is simply not in the product for now.
+
+**2. Lineage spells MUST actually be granted.** *"I think we should be able to
+give spells that are sourced from species lineage."*
+
+This raises the bar on the species step. The plan I had written applied a species
+by copying template rows, and disclosed that lineage spells were NOT granted
+because the grant machinery reads `species_definitions.grant_rules` and nothing
+in the repository has ever written a `species_definitions` row. Disclosure is no
+longer sufficient: the spells have to arrive.
+
+**What it costs, measured rather than guessed.** The machinery is present and
+working — `GrantRuleSlotGenerator` resolves a source type to its definition
+table and reads `grant_rules` (`src/grants/grant-rule-slot-generator.ts:345-370`),
+and the class path uses it today. What is missing is the bridge, which the design
+has always called "designed and never built": seed `species_definitions` rows
+carrying `grant_rules`, write a `character_source_instances` row when a species is
+applied, then call the existing generator. Three pieces, none of them new
+machinery.
+
+*Taken for now, reversible:* this lands as its own unit **immediately after** the
+wizard's first five dispatches, NOT folded into the species step. The species
+step's template-copy path is proven and lands first; the lineage bridge is
+additive on top of it. Sequencing it this way means the wizard exists while the
+bridge is built, rather than the bridge blocking the wizard. *Cost to flip:* fold
+it into the species step and accept a larger, riskier single dispatch.
+
+**3. Straight-class level-up comes BEFORE multiclass level-up.** *"Defer multi
+class level up until straight class level up is finished."*
+
+This is sequencing, and it does not amend D49 — the wizard still handles
+multiclassing with a warning rather than a refusal when it gets there. It orders
+the work: a person must be able to take a normal level 2 in the wizard before any
+effort goes into multiclass entry. The multiclass prerequisite question — whether
+the class primary-ability rule becomes structured so an illegal choice can be
+blocked (D27 versus D49) — is therefore **not urgent**, and is parked rather than
+pressed.
+
+---
+
 ## D55 — OWNER: no Roll in Order, abilities come after class, random character is shelved (2026-07-28)
 
 **The ruling.** *"Drop the roll in order and have the wizard do ability scores
