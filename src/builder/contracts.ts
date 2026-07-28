@@ -273,6 +273,38 @@ export function matchesGuidedBuildRoute(
   return Number(raw);
 }
 
+/* ----------------------------------------------------------------- panels */
+
+/**
+ * PANEL LOCATORS, PINNED.
+ *
+ * These belong in the seam and were missing from it — the A1 implementer found
+ * the gap and reported it rather than quietly choosing for both sides. It was a
+ * real hole: the plan requires the class-less panel's locator not to collide
+ * with the terminal panel's control assertion, while pinning neither locator,
+ * so the production agent and the test agent could each have picked their own
+ * and disagreed about nothing but names.
+ *
+ * The values are the implementer's, ratified here BEFORE the tests are written.
+ * That direction matters: pinning a locator the tests must then match is the
+ * seam doing its job, whereas rewriting a test afterwards to match whatever
+ * shipped would be narrowing an assertion to fit an implementation, which this
+ * project forbids outright.
+ */
+export const GUIDED_PANEL = Object.freeze({
+  /** Shown when the derived step exists but this group has not built it. */
+  stepNotBuilt: 'step-not-built',
+  /** Shown for a blank-created character opened at the build route. */
+  classless: 'classless-character',
+  /** The class step's shell at `/characters/new` until A2/A3 land. */
+  classChooserPending: 'class-chooser-pending',
+  /** No such character. */
+  notFound: 'not-found',
+} as const);
+
+/** The attribute the panels above are selected by: `data-panel="…"`. */
+export const GUIDED_PANEL_ATTRIBUTE = 'data-panel';
+
 /* ------------------------------------------------------------ RPC methods */
 
 export const GUIDED_RPC = Object.freeze({

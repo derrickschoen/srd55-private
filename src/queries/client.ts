@@ -1,6 +1,11 @@
 import type { CharacterCommandPayload } from '../domain/command-contracts';
 import type { CharacterRow } from '../domain/models';
 import {
+  GUIDED_RPC,
+  type GuidedBuildStateParams,
+  type GuidedBuildStateResult,
+} from '../builder/contracts';
+import {
   createCatalogClient,
   type CatalogClient,
 } from '../catalog/client';
@@ -58,6 +63,7 @@ export interface QueriesClient extends CatalogClient {
     variant?: PrintableVariant,
   ): Promise<PrintableSpellList>;
   operationHistory(characterId: number): Promise<OperationHistory>;
+  buildState(characterId: number): Promise<GuidedBuildStateResult>;
 }
 
 export function createQueriesClient(rpc: RpcClient): QueriesClient {
@@ -163,6 +169,11 @@ export function createQueriesClient(rpc: RpcClient): QueriesClient {
     operationHistory: (characterId: number) =>
       rpc.call<{ character_id: number }, OperationHistory>(
         'queries.history.read',
+        characterParams(characterId),
+      ),
+    buildState: (characterId: number) =>
+      rpc.call<GuidedBuildStateParams, GuidedBuildStateResult>(
+        GUIDED_RPC.buildState,
         characterParams(characterId),
       ),
   });

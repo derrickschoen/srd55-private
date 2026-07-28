@@ -1,0 +1,60 @@
+/*
+ * The guided builder is plain and labelled on the sheet's terms (D4): the step
+ * list and one panel, nothing hidden — no `display: none`, no zero opacity,
+ * no off-screen positioning.
+ */
+.guided-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 3rem;
+}
+
+.guided-header h1 {
+  margin: 0.75rem 0 0.25rem;
+}
+
+.guided-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: guided-step;
+}
+
+.guided-step {
+  counter-increment: guided-step;
+  border: 1px solid var(--border, #c9c9c9);
+  border-radius: 1rem;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.9rem;
+}
+
+.guided-step::before {
+  content: counter(guided-step) '. ';
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+
+.guided-step-current {
+  border-color: var(--accent, #333);
+  font-weight: 700;
+}
+
+.guided-panel {
+  border: 1px solid var(--border, #c9c9c9);
+  border-radius: 0.5rem;
+  padding: 1rem;
+}
+
+.guided-panel > h2 {
+  margin-top: 0;
+}
+
+.guided-nav {
+  margin-bottom: 0;
+}
