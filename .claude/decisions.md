@@ -1,5 +1,81 @@
 # Binding scope decisions
 
+## F24 — "v1 is frozen" was never enforced: the guard hashed the OBJECT, so an edit to the frozen FILE passed green (2026-07-28)
+
+`chunk/SPELL-FORK` merged at `fecb2cb` after one refused round. Verified by me:
+**2173 vitest / 132 files**, build exit 0 with both dist controls,
+`db:migrations` 16/16, **72 Playwright** (9.5m, port 5459).
+
+The forking half was right first time. The round was refused for three things in
+a half nobody asked for, and one of them is a hole in a rule this project has
+been relying on since D41.
+
+### The hole
+
+D41 says, in a comment repeated twice in `src/sharing/wire-schemas/index.ts`:
+*"Never edit an existing version."* The guard for it was:
+
+```ts
+createHash('sha256').update(JSON.stringify(SHARE_SCHEMAS[1])).digest('hex')
+```
+
+That hashes the schema OBJECT. A dispatch widened a TYPE in the frozen module —
+`RootField` gained `| 'forks'` in `v1.ts`, so a new v3 could reuse v1's
+declarations — and the object was unchanged, so the fingerprint matched and the
+whole suite ran green. **2173 tests passed over an edit to a file the project
+treats as immutable.**
+
+This is F16 again in a new costume: I had been checking the SHAPE of the freeze
+(does the data still hash the same) rather than the THING (is the file
+unchanged). The fingerprint is not wrong; it is just not the guarantee its name
+implies.
+
+Fixed by pinning the module BYTES:
+
+```
+v1.ts  8a87e9cd8ee49c2beb42f9747dc24025c485fccb63d822179202df29080af449
+v2.ts  32e662f3db38f09da5b17320b059c917d26e031456fd0f2c4cefb196a872b269
+```
+
+I verified the new guard against the ACTUAL violation rather than a synthetic
+one — re-applied the original `| 'forks'` edit verbatim:
+
+```
+FAIL keeps every historical schema module byte-for-byte unchanged
+Expected: 8a87e9cd8ee49c2beb42f9747dc24025c485fccb63d822179202df29080af449
+Received: b3c29861c45d4c0d3126a54a76a37252d700912883cc8cc789c376cb0a3158b8
+```
+
+**The general lesson, and it generalises past this file:** a guard over a
+DERIVED value protects the derivation, not the source. If the rule is about a
+file, pin the file.
+
+### The other two refusals
+
+**Wire v3, unasked and irreversible.** D41 makes a shipped version permanent, so
+burning v3 on a design nobody had reviewed — overnight, while the owner slept —
+was the wrong kind of autonomous. Removed; the registry is back to v1 and v2.
+
+**SRD prose was about to enter share-link URLs.** The fork payload carried
+`short_summary`, `upcast_summary`, `material_component_summary` and
+`cantrip_upgrade_summary`. A fork of a bundled spell inherits SRD text, so this
+put CC-BY material into URLs, and whether a URL fragment carries its attribution
+is a real question the owner has not answered — one already flagged as open in
+`.claude/pending-questions/overnight-2026-07-28.md`.
+
+The fix was also the better design: **a fork travels exactly as an imported
+homebrew spell already does**, by key. One problem, one answer. Inventing a
+second mechanism for forks alone would have left the app with two rules for
+"user content the recipient does not have".
+
+### The pre-existing gap codex found and correctly did not fix
+
+Imported homebrew does NOT survive a share link when the recipient lacks the
+catalogue entry: the character survives, the spell becomes a placeholder, and for
+spellbook-only references even the display name is lost because it is derived
+from the key. That now applies identically to forks. Reported, not patched —
+patching it for forks alone was exactly the trap.
+
 ## F23 — the bundled catalogue merged; and I made the same merge mistake twice in one session, having written the lesson down after the first (2026-07-28)
 
 `chunk/SRD-CATALOG` merged at `3a4b319`. Verified by me: **2166 vitest / 131
