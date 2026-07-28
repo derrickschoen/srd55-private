@@ -1,5 +1,9 @@
 import type { BindableValue } from '@sqlite.org/sqlite-wasm';
 import {
+  assertImportedSpellIdentityWritable,
+  assertImportedSpellKeyWritable,
+} from '../commands/srd-spell-policy';
+import {
   encodeBoolean,
   sqlBoolean,
   sqlInteger,
@@ -249,6 +253,21 @@ export class CatalogImporter {
 
     try {
       return this.db.transaction(() => {
+        // An official-looking two-part key is legal in legacy/imported
+        // documents, so key grammar alone cannot separate it from the bundled
+        // SRD layer. Resolve every target before any write and refuse an
+        // attempted edit explicitly. Omission is different: the tombstone
+        // sweep below is scoped to `provenance = 'import'`, so a normal user
+        // import simply leaves all bundled rows alone.
+        for (const record of normalized) {
+          assertImportedSpellKeyWritable(this.db, record.versionKey);
+          assertImportedSpellIdentityWritable(
+            this.db,
+            record.identityKey,
+            record.canonicalName,
+            normalizeCatalogName(record.canonicalName),
+          );
+        }
         const counters = this.#importRecords(normalized, sweepSpells);
         const subclasses = importSubclassRecords(this.db, records.subclasses);
         const summary: CatalogImportSummary = {
