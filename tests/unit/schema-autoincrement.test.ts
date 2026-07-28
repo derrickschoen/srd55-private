@@ -82,6 +82,7 @@ const nativeAutoIncrementTables = [
   // seeder deletes and re-inserts rather than upserting, and a natural key
   // would invite the upsert that leaves a shortened package carrying its tail.
   'background_equipment_items',
+  'class_equipment_items',
   'background_templates',
   'character_background',
   'character_species',
@@ -170,7 +171,7 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
       return db;
     }
 
-    it('declares AUTOINCREMENT on exactly the 30 Laravel and 29 native surrogate-key tables', () => {
+    it('declares AUTOINCREMENT on exactly the 30 Laravel and 30 native surrogate-key tables', () => {
       const db = openDb();
       const declared = db
         .selectValues(
@@ -184,15 +185,15 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
         .map(String);
 
       expect(declared).toEqual(allAutoIncrementTables);
-      // 30 surviving Laravel tables plus 29 native: 4 weapons, 8 sheet core,
+      // 30 surviving Laravel tables plus 30 native: 4 weapons, 8 sheet core,
       // 7 origins (the seventh is `background_equipment_items`), 2 effects,
       // 2 class features, 4 stored sheet inputs, plus the TWO progression
       // ladders on the catalog side, `spell_version_upcast_levels` and
       // `spell_version_cantrip_upgrade_levels`. Counted in parts so one group
       // shrinking while another grows cannot pass unnoticed.
-      expect(declared).toHaveLength(59);
+      expect(declared).toHaveLength(60);
       expect(autoIncrementTables).toHaveLength(30);
-      expect(nativeAutoIncrementTables).toHaveLength(29);
+      expect(nativeAutoIncrementTables).toHaveLength(30);
 
       const withoutAutoIncrement = db
         .selectValues(

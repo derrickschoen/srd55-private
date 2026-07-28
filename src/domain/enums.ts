@@ -804,7 +804,7 @@ export type MaterialCostKind = (typeof materialCostKinds)[number];
  */
 
 /* ==========================================================================
- * BACKGROUND EQUIPMENT
+ * STARTING EQUIPMENT
  * ========================================================================== */
 
 /**
@@ -822,8 +822,19 @@ export type BackgroundEquipmentOption =
   (typeof backgroundEquipmentOptions)[number];
 
 /**
- * THE OWNER'S RULING, MADE STRUCTURAL: *"a list of quantity + item (name only
- * unless weapon or armor)"*.
+ * WHICH OF THE PRINTED CLASS PACKAGES AN EQUIPMENT LINE BELONGS TO.
+ *
+ * Eleven classes print A/B and Fighter prints A/B/C. This vocabulary is
+ * deliberately separate from `backgroundEquipmentOptions`: widening the
+ * background's source grammar to accommodate the Fighter would permit a
+ * background option the background extract cannot contain.
+ */
+export const classEquipmentOptions = ['a', 'b', 'c'] as const;
+export type ClassEquipmentOption = (typeof classEquipmentOptions)[number];
+
+/**
+ * THE OWNER'S RULING, MADE STRUCTURAL AND SHARED BY BACKGROUND AND CLASS
+ * PACKAGES: *"a list of quantity + item (name only unless weapon or armor)"*.
  *
  * `gear` IS "NAME ONLY" AND IS THE MAJORITY. Robe, Crowbar, Healer's Kit,
  * Parchment (10 sheets) — all name, no mechanics, exactly as D26 wants.
@@ -850,13 +861,8 @@ export type BackgroundEquipmentOption =
  * `tests/integration/rules/background-equipment.test.ts`, both the accepting
  * and the refusing case, so the branch is not merely unreached-and-unproven.
  */
-export const backgroundEquipmentItemKinds = [
-  'gear',
-  'weapon',
-  'armor',
-] as const;
-export type BackgroundEquipmentItemKind =
-  (typeof backgroundEquipmentItemKinds)[number];
+export const equipmentItemKinds = ['gear', 'weapon', 'armor'] as const;
+export type EquipmentItemKind = (typeof equipmentItemKinds)[number];
 
 export function isUsableSlotState(state: SlotState): boolean {
   return state === 'active' || state === 'kept_override';

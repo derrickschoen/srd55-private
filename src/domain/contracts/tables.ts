@@ -815,6 +815,19 @@ export const TABLE_SCOPES = {
     share: false,
     backupReference: false,
   },
+  /**
+   * Recipient-seeded class catalog content. It has no character id and no
+   * character-owned values; shares and backups resolve the class catalog on
+   * the recipient rather than carrying package rows.
+   */
+  class_equipment_items: {
+    role: 'catalog_class',
+    snapshot: false,
+    backupDirect: false,
+    backup: false,
+    share: false,
+    backupReference: false,
+  },
 
   // --- the character's own origin ------------------------------------------
   /**
@@ -1012,6 +1025,7 @@ export const APPLICATION_TABLES = order<AnyTableName>()([
   'background_definitions',
   'background_equipment_items',
   'background_templates',
+  'class_equipment_items',
   'change_log',
   'character_armor',
   'character_background',

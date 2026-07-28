@@ -67,7 +67,7 @@ describe('pre-Drizzle database images', () => {
     // is why the counts are asserted rather than left as a surprise: the
     // fixture still declares the eight Laravel-only tables that were dropped,
     // and it has never held the four native weapon tables or the six native
-    // origins tables that were added. 38 - 8 + 4 + 6 = 40. Originally only the
+    // origins tables that were added, plus class starting equipment.
     // SIGNATURE tripped, because the two
     // declared the same 38 tables in a different presentation; an old image is
     // now short of `applicationTables` too, so it fails EARLIER, not less.
@@ -80,7 +80,7 @@ describe('pre-Drizzle database images', () => {
     const tableCount = (sql: string) =>
       [...sql.matchAll(/CREATE TABLE/g)].length;
     expect(tableCount(preDrizzleSchema)).toBe(38);
-    expect(tableCount(schema)).toBe(59);
+    expect(tableCount(schema)).toBe(60);
   });
 
   it('rejects a pre-Drizzle image at open instead of half-working', async () => {
@@ -97,7 +97,7 @@ describe('pre-Drizzle database images', () => {
     // actually short of. Both paths produce the same recoverable
     // `schema_mismatch` status, which is what the next test depends on.
     expect(boot.detail).toContain(
-      // All twenty-NINE native tables, in the order the check reports them:
+      // All thirty native tables, in the order the check reports them:
       // the four weapon tables, the eight of the sheet core, the SEVEN origins
       // tables, the two effect tables, the two D19 class-feature tables, the
       // four stored sheet inputs, and the two progression ladders,
@@ -105,7 +105,8 @@ describe('pre-Drizzle database images', () => {
       // `spell_version_upcast_levels`. A pre-Drizzle image has none of them.
       'Database image is missing application tables: armor_templates, ' +
         'background_equipment_items, ' +
-        'background_templates, character_armor, character_background, ' +
+        'background_templates, class_equipment_items, character_armor, ' +
+        'character_background, ' +
         'character_effects, character_hit_point_rolls, ' +
         'character_sheet_adjustments, ' +
         'character_skill_proficiencies, character_species, ' +

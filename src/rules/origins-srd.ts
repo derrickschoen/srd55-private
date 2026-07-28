@@ -80,10 +80,14 @@ import {
   type KnownCreatureSize,
   type KnownCreatureType,
   type KnownDamageType,
-  type BackgroundEquipmentItemKind,
   type BackgroundEquipmentOption,
   type EffectKind,
 } from '../domain/enums';
+import {
+  parseEquipmentPackage,
+  resolveEquipmentTemplateId,
+  type ParsedEquipmentItem,
+} from './equipment-packages';
 import { rowContractError } from '../domain/contracts/rows';
 import { weaponContentKey } from './weapons-srd';
 
@@ -167,15 +171,8 @@ export interface SrdBackgroundTemplate {
  * resolve ids could not be tested without one. The seeder turns the key into an
  * id and FAILS if the catalog does not hold it.
  */
-export interface SrdBackgroundEquipmentItem {
-  readonly option: BackgroundEquipmentOption;
-  readonly sort_order: number;
-  readonly quantity: number;
-  readonly item_name: string;
-  readonly item_kind: BackgroundEquipmentItemKind;
-  readonly weapon_content_key: string | null;
-  readonly armor_content_key: string | null;
-}
+export type SrdBackgroundEquipmentItem =
+  ParsedEquipmentItem<BackgroundEquipmentOption>;
 
 /* ==========================================================================
  * HAND-DECLARED FACTS ABOUT THE SOURCE
@@ -868,15 +865,6 @@ const EQUIPMENT_CHOICE =
   /^Choose A or B:\s*\(A\)\s*(?<a>.+?);\s*or\s*\(B\)\s*(?<b>.+)$/;
 
 /**
- * A LEADING QUANTITY: `2 Daggers`, `20 Arrows`. Nothing else on a printed line
- * is a count of the named item — `Parchment (10 sheets)` counts SHEETS, which is
- * a sub-unit, and `Book (prayers)` is a subject rather than a number at all.
- */
-const LEADING_QUANTITY = /^(?<quantity>\d{1,4})\s+(?<name>\S.*)$/u;
-/** A whole printed money line: text, on the same terms as a bedroll (D40). */
-const MONEY_LINE = /^\d{1,9}\s+GP$/u;
-
-/**
  * WHICH PRINTED EQUIPMENT ENTRIES ARE WEAPONS, DECLARED RATHER THAN MATCHED.
  *
  * D15 REFUSED DECIDING A MECHANICAL FACT BY MATCHING TEXT, and this is that
@@ -927,82 +915,26 @@ const DECLARED_WEAPON_EQUIPMENT = new Map<string, string>([
  * what turns an extraction change into a silently short package, which is the
  * failure mode this whole module is arranged against.
  */
-function parseEquipmentPackage(
+function parseBackgroundEquipmentPackage(
   background: string,
   option: BackgroundEquipmentOption,
   printed: string,
 ): SrdBackgroundEquipmentItem[] {
-  const entries = printed.split(',').map((entry) => entry.trim());
-  return entries.map((entry, index) => {
-    if (entry === '') {
-      throw new OriginExtractError(
-        `${background} equipment option ${option.toUpperCase()} has an empty entry: ${printed}`,
-      );
-    }
-    return parseEquipmentEntry(background, option, index + 1, entry);
-  });
-}
-
-function parseEquipmentEntry(
-  background: string,
-  option: BackgroundEquipmentOption,
-  sortOrder: number,
-  entry: string,
-): SrdBackgroundEquipmentItem {
-  const base = {
+  return parseEquipmentPackage(
+    background,
     option,
-    sort_order: sortOrder,
-    weapon_content_key: null,
-    armor_content_key: null,
-  } as const;
-
-  if (MONEY_LINE.test(entry)) {
-    // QUANTITY 1 AND THE WHOLE PRINTED TEXT AS THE NAME. D40 deliberately
-    // gives this line no numeric money payload.
-    return {
-      ...base,
-      item_name: entry,
-      quantity: 1,
-      item_kind: 'gear',
-    };
-  }
-
-  const quantified = LEADING_QUANTITY.exec(entry)?.groups;
-  const quantity =
-    quantified?.quantity === undefined ? 1 : Number(quantified.quantity);
-  // THE COUNT COMES OUT OF THE NAME, AND IT IS SAID ONCE. `2 Daggers` is
-  // `quantity: 2` of `Daggers` — keeping the printed numeral in `item_name`
-  // too states the same fact in two columns, and any renderer that trusts both
-  // prints it twice (`2 Daggers (×2)`). The owner's ruling is *"a list of
-  // quantity + item"*: two fields, one count.
-  //
-  // THE PRINTED LINE IS NOT LOST — `background_templates.equipment_option_a`
-  // and `_b` hold the whole package verbatim and are what a reader prints, and
-  // the PLURAL survives here (`Daggers`, not `Dagger`), which is what makes
-  // the weapon link a declaration rather than a name match (D15).
-  const name = quantified?.name ?? entry;
-  if (quantity < 1) {
-    throw new OriginExtractError(
-      `${background} equipment option ${option.toUpperCase()} has a zero quantity: ${entry}`,
-    );
-  }
-
-  const weapon = DECLARED_WEAPON_EQUIPMENT.get(name);
-  if (weapon !== undefined) {
-    return {
-      ...base,
-      item_name: name,
-      quantity,
-      item_kind: 'weapon',
-      weapon_content_key: weaponContentKey(weapon),
-    };
-  }
-  return {
-    ...base,
-    item_name: name,
-    quantity,
-    item_kind: 'gear',
-  };
+    printed,
+    (name) => {
+      const weapon = DECLARED_WEAPON_EQUIPMENT.get(name);
+      return weapon === undefined
+        ? null
+        : {
+            item_kind: 'weapon',
+            content_key: weaponContentKey(weapon),
+          };
+    },
+    (message) => new OriginExtractError(message),
+  );
 }
 
 /**
@@ -1148,8 +1080,8 @@ function parseBackground(
     equipment_option_a: optionA,
     equipment_option_b: optionB,
     equipment_items: [
-      ...parseEquipmentPackage(name, 'a', optionA),
-      ...parseEquipmentPackage(name, 'b', optionB),
+      ...parseBackgroundEquipmentPackage(name, 'a', optionA),
+      ...parseBackgroundEquipmentPackage(name, 'b', optionB),
     ],
   };
 }
@@ -1487,17 +1419,19 @@ function seedBackgroundEquipment(
       quantity: item.quantity,
       item_name: item.item_name,
       item_kind: item.item_kind,
-      weapon_template_id: resolveTemplateId(
+      weapon_template_id: resolveEquipmentTemplateId(
         db,
         'weapon_templates',
         item.weapon_content_key,
         template.name,
+        (message) => new OriginExtractError(message),
       ),
-      armor_template_id: resolveTemplateId(
+      armor_template_id: resolveEquipmentTemplateId(
         db,
         'armor_templates',
         item.armor_content_key,
         template.name,
+        (message) => new OriginExtractError(message),
       ),
       created_at: timestamp,
       updated_at: timestamp,
@@ -1510,25 +1444,4 @@ function seedBackgroundEquipment(
       Object.values(row) as BindableValue[],
     );
   }
-}
-
-function resolveTemplateId(
-  db: DatabaseContext,
-  table: 'weapon_templates' | 'armor_templates',
-  contentKey: string | null,
-  background: string,
-): number | null {
-  if (contentKey === null) {
-    return null;
-  }
-  const id = db.scalar(`SELECT id FROM ${table} WHERE content_key = ?`, [
-    contentKey,
-  ]);
-  if (typeof id !== 'number') {
-    throw new OriginExtractError(
-      `${background} equipment names ${contentKey}, which ${table} does not hold. ` +
-        'Seed the weapon and armour catalogs before the origins catalog.',
-    );
-  }
-  return id;
 }

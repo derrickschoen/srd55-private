@@ -1,10 +1,10 @@
 import { sqlInteger, sqlNullableInteger, sqlString } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import {
-  backgroundEquipmentItemKinds,
+  equipmentItemKinds,
   backgroundEquipmentOptions,
   isEnumValue,
-  type BackgroundEquipmentItemKind,
+  type EquipmentItemKind,
   type BackgroundEquipmentOption,
 } from '../domain/enums';
 
@@ -31,7 +31,7 @@ import {
  * WHAT IT IS FOR TODAY is being the reader that makes `item_kind` a decision
  * rather than a stored word. `describeBackgroundEquipmentItem` switches over the
  * kind EXHAUSTIVELY with no `default` arm, so a fifth kind cannot be added to
- * `backgroundEquipmentItemKinds` without this file refusing to compile — which
+ * `equipmentItemKinds` without this file refusing to compile — which
  * is the D12 mechanism that makes "adding a KIND is a deliberate change" true
  * rather than aspirational. That half is a COMPILE-time fact and needs no
  * caller; the RUNTIME half — the tolerant drop below — does, and it is pinned
@@ -43,7 +43,7 @@ export interface BackgroundEquipmentItem {
   readonly sort_order: number;
   readonly quantity: number;
   readonly item_name: string;
-  readonly item_kind: BackgroundEquipmentItemKind;
+  readonly item_kind: EquipmentItemKind;
   readonly weapon_template_id: number | null;
   readonly armor_template_id: number | null;
 }
@@ -125,7 +125,7 @@ export function backgroundEquipmentPackages(
   for (const row of rows) {
     if (
       !isEnumValue(backgroundEquipmentOptions, row.option) ||
-      !isEnumValue(backgroundEquipmentItemKinds, row.item_kind)
+      !isEnumValue(equipmentItemKinds, row.item_kind)
     ) {
       continue;
     }

@@ -5,6 +5,7 @@ import weaponRangeAdd from '../../drizzle/0001_weapon_range_add.sql?raw';
 import weaponRangeDrop from '../../drizzle/0002_weapon_range_drop.sql?raw';
 import spellFork from '../../drizzle/0003_spell_fork.sql?raw';
 import retireCoin from '../../drizzle/0004_retire_coin.sql?raw';
+import classEquipment from '../../drizzle/0005_class_equipment.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -70,6 +71,14 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
       '9ab23a9810078e3aff5808b145aa3f1df6fce6af933506f487e248d1df0acaab',
     resultSchemaChecksum:
       '801bac9e738d40392178b88f67291230ce51aa1c60c2fdbb9aae4bd95cc1e64d',
+  }),
+  Object.freeze({
+    id: '0005_class_equipment',
+    sql: classEquipment,
+    checksum:
+      '42fef4ecdb27704ba956b7a2dd95b591f84c6670eba212df4547a6a981f58123',
+    resultSchemaChecksum:
+      'c38a9355b00ddb5adf961e7c40120720bb0d601daadd32ad835444199b99e6fb',
   }),
 ]);
 
