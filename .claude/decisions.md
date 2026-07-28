@@ -1,5 +1,80 @@
 # Binding scope decisions
 
+## D44 — OWNER: Q11 answered. The player picks the multiclass skill; instruments are text. And the schema for it already exists (2026-07-27)
+
+The owner's ruling, verbatim: *"For q11, have the ui give the player to select
+skills from a multi class addition. The music instruments are just text. The
+rogue and ranger skills should come from the enum of acrobatics, perception,
+stealth… etc."*
+
+Q11 was the last open item in `.claude/pending-questions/e611bae3-overnight.md`:
+three of the twelve "As a Multiclass Character" clauses grant a skill CHOICE
+rather than a fixed proficiency, in two different shapes, and nothing made the
+choice — so those characters were silently short a proficiency.
+
+### The ruling
+
+- **The UI offers the choice.** A multiclass entry that grants a skill choice
+  presents it to the player; it is not auto-picked and not silently dropped.
+- **The value is the skills VOCABULARY**, not free text — `skills` at
+  `enums.ts:158`, the eighteen closed on `docs/srd/source/skills-table.txt`.
+- **Musical instruments are text.** Bard's multiclass clause also grants "one
+  Musical Instrument of your choice", over a set this app does not model. It
+  stays text rather than becoming a vocabulary nobody sourced. This is D26 and
+  D35 applied: an instrument changes no number on the sheet.
+
+### THE MODEL IS ALREADY BUILT, and I checked before assuming it was not
+
+`class_sheet_traits` (`schema.sql:520-533`) already carries:
+
+```sql
+`multiclass_skill_choice_count` integer DEFAULT 0 NOT NULL,
+`multiclass_skill_choice_pool`  VARCHAR DEFAULT 'none' NOT NULL,
+CONSTRAINT "class_sheet_traits_multiclass_skill_choice_check" CHECK(
+  typeof(`multiclass_skill_choice_count`) = 'integer'
+  AND ((`multiclass_skill_choice_pool` IN ('none')
+        AND `multiclass_skill_choice_count` = 0)
+    OR (`multiclass_skill_choice_pool` IN ('class_list', 'any')
+        AND `multiclass_skill_choice_count` >= 1)))
+```
+
+`class_list` and `any` are exactly the two shapes Q11 found: Ranger and Rogue
+bound the choice to their own list, Bard does not bound it at all. The CHECK also
+makes the incoherent combination — a pool with a zero count, or `none` with a
+count — unrepresentable.
+
+The destination exists too: `character_skill_proficiencies`
+(`schema.sql:275-285`), whose `skill` column is CHECK-closed to the same
+eighteen, with a unique index on `(character_id, skill)` so the same
+proficiency cannot be granted twice.
+
+**So Q11 is a UI gap, not a modelling gap.** That is worth stating plainly
+because the parked question reads like a schema problem and it is not.
+
+### The reading of "come from the enum", stated so it can be corrected
+
+The owner said the Ranger and Rogue skills come from the vocabulary. I am taking
+that as a ruling about the TYPE — enum-valued, not free text — and NOT as
+removing the SRD's bound. Ranger and Rogue offer their own class list, drawn
+from that vocabulary; Bard offers all eighteen. That is what
+`multiclass_skill_choice_pool` already encodes, and D11 Part 2 requires it: the
+builder makes an SRD-illegal choice unavailable, and offering a Ranger a skill
+outside the Ranger list would be exactly that. If the intent was instead "any of
+the eighteen for all three", say so and the pool column collapses to `any`.
+
+### What is NOT closed by this
+
+`character_skill_proficiencies` has no provenance column, so nothing records
+WHY a character has a skill — background, class, or multiclass entry. That is
+fine for the sheet, which only needs the set, but it means the builder cannot
+later show "this one came from your Rogue dip" without a schema change. Noted,
+not fixed, and not blocking.
+
+The unique index means a multiclass choice that duplicates an existing
+proficiency is a constraint violation rather than a silent no-op. The UI must
+therefore exclude already-held skills from the offered list — which is also the
+correct behaviour, since picking one you already have wastes the grant.
+
 ## F22 — wire v2 merged after three refused rounds, and the boundary between two variants was invisible because ONE RULE IS WRITTEN TWICE (2026-07-27)
 
 `chunk/WIRE-V2` merged at `0160fc7`. Verified by me on the tree: **2154 vitest /
