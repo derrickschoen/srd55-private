@@ -1,5 +1,118 @@
 # Binding scope decisions
 
+## F22 — wire v2 merged after three refused rounds, and the boundary between two variants was invisible because ONE RULE IS WRITTEN TWICE (2026-07-27)
+
+`chunk/WIRE-V2` merged at `0160fc7`. Verified by me on the tree: **2154 vitest /
+130 files**, build exit 0 with both dist controls, **72 Playwright** (8.2m, port
+5449). It took three rounds, and each refusal found something a green suite had
+already certified.
+
+### Round 1 — a stale green
+
+Codex reported 2140 passed. My independent run on the same tree:
+
+```
+FAIL tests/unit/docs/ai-reference-anchors-resolve.test.ts
+  raw: "tests/unit/sharing/codec.test.ts:1330 should name `PRE_SHEET_WIRE`"
+  line reads: 'Pzp9Dy15RQcGBKnuAKGzlLTxE1xzifDCh-uTHAv_3y6G4fGT4ggIbXHkg1GA8MTKFDfL' +
+Test Files  1 failed | 128 passed (129)
+```
+
+Codex ran its gates and then edited. That is the whole failure: not a wrong
+change, a green measured before the last edit. Every dispatch since says to run
+the full suite AFTER the final edit.
+
+The defect itself is **F17's hazard, in a place F17 did not reach**. F17 moved
+`.ai/` anchors into `decisions.md` off line numbers and onto D/F numbers.
+Anchors into SOURCE still use line numbers, so any edit above one breaks it
+silently. v2 shifted `codec.test.ts` and `PRE_SHEET_WIRE` moved 1330 -> 1334.
+
+Two instrument notes from this round, both mine:
+
+- `grep -rn "codec.test.ts:1330" .ai/` returned NOTHING while the test named
+  three exact locations. Not F14, no NUL bytes — the anchor is written as two
+  backtick spans, `` `path` ``, `` `SYMBOL` (`:N`) ``, so the literal string I
+  searched for does not exist anywhere. I believed a zero from a query that
+  could not have matched.
+- I piped `npm test` to `tail -5` and got only the summary, so the first run
+  told me "1 failed" and nothing else. I had made the same mistake an hour
+  earlier piping Playwright to `tail`, where it also cost the exit code. Capture
+  to a file; read the file.
+
+The anchor guard itself is sound and I checked its denominator rather than
+trusting the count: **34 split-form anchors across `.ai/`**, iterated over every
+doc, with `expect(docs.length).toBeGreaterThan(5)` and a named-file assertion
+inside it. Green means all 34 resolve.
+
+### Round 2 — the surviving mutation
+
+D41's table says `(n, f), f >= n` is `ranged`. Equality is explicitly ranged.
+I changed `>=` to `>` in `src/domain/weapon-range.ts:61`:
+
+```
+npx vitest run tests/unit/sharing tests/integration/sharing   7 files, 151 passed
+npm test                                                      130 files, 2154 passed
+```
+
+Nothing failed. The fixtures covered 20/60, null/60, 60/20, n/null and
+null/null — every state, and not one boundary BETWEEN two states. This is the
+same shape as F21: the code was right and nothing held it right.
+
+It matters more than an ordinary uncovered branch. `legacy` is the variant that
+must be unmintable by a fresh encode; it exists only to carry corrupt historical
+pairs. Under the mutation an ordinary weapon recorded 20/20 decodes into that
+reserved state, so "we never mint legacy" quietly becomes false for a value a
+user can type.
+
+### Round 3 — THE FINDING: one rule, two expressions
+
+The added coverage killed my mutation — but only ONE test failed, where the
+dispatch had asked for three layers. Chasing the discrepancy rather than
+accepting the kill is what found it: **`weapon-range.ts` states the same rule in
+two places.**
+
+- `:61` — storage classification
+- `:79`, inside `weaponRangeFromV1Pair` — what the v1->v2 migration calls
+
+Mutating each independently:
+
+```
+mutate :61  ->  1 failed  (weapon range boundary mapping)
+mutate :79  ->  2 failed  (boundary mapping + the adjacent v1-to-v2 migration)
+```
+
+Both are pinned now. But the dispatch had been told, in these words, to reuse
+the existing mapper and *not write a second one*. It did not write a second
+FILE; it wrote a second EXPRESSION, in the same file, twelve lines apart. That
+satisfies the letter of "one mapper" and none of its purpose: the two can drift,
+and the only reason we know they currently agree is that I mutated both.
+
+**The rule this yields:** "do not duplicate the logic" is not a reviewable
+instruction, because duplication hides at whatever granularity the instruction
+did not name. What IS reviewable is the mutation — if two expressions encode one
+rule, mutating either must fail a test, and if only one of them does, the other
+is unprotected. Ask for that, not for tidiness.
+
+The third layer — `tests/integration/sharing/round-trip.test.ts` — cannot catch
+either mutation, and that is CORRECT rather than a gap. Storage records
+`range_kind` explicitly, so export reads the recorded kind instead of
+reclassifying. What that test proves is that nothing reclassifies on the way
+out, which is worth an assertion of its own.
+
+### What landed
+
+v1 unedited. Its complete positional golden is carried verbatim as
+`COMPLETE_V1_WIRE` — I confirmed the old asserted array is a byte-for-byte
+prefix of the new constant — and now asserts decodability rather than pinning
+the encoder, because v1 is no longer what the encoder emits. v2 has its own
+hand-authored positional golden. `placeholders` left the character tuple for its
+own root element and took its count cap with it; left behind, the cap would have
+guarded an index v2 no longer uses.
+
+Codex also reported honestly on coverage it had NOT added: `far = 0` was
+previously missing, and the 100000 ceiling was only ever exercised with both
+fields set at once. That is the distinction between found and added, kept.
+
 ## F21 — the migration runner's foreign-key ordering is correct and completely unprotected: the exact defect F20 documents survives every test (2026-07-27)
 
 The runner landed on `chunk/MIGRATE-RUNNER` with the F20 ordering implemented
