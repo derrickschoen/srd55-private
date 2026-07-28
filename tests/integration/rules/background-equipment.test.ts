@@ -8,7 +8,7 @@ import {
   backgroundEquipmentPackages,
   describeBackgroundEquipmentItem,
 } from '../../../src/queries/background-equipment';
-import { backgroundEquipmentItemKinds } from '../../../src/domain/enums';
+import { equipmentItemKinds } from '../../../src/domain/enums';
 import { openTestDatabase } from '../../helpers/open-db';
 
 /**
@@ -48,12 +48,12 @@ describe('the bundled background equipment packages, structured', () => {
   }
 
   it('has only the three live item kinds in its runtime vocabulary', () => {
-    expect(backgroundEquipmentItemKinds).toEqual([
+    expect(equipmentItemKinds).toEqual([
       'gear',
       'weapon',
       'armor',
     ]);
-    expect(backgroundEquipmentItemKinds).not.toContain('coin');
+    expect(equipmentItemKinds).not.toContain('coin');
   });
 
   it('splits all four licensed packages, in printed order', () => {

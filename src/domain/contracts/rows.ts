@@ -20,8 +20,9 @@ import {
   armorCategories,
   armorDexBonuses,
   armorSlots,
-  backgroundEquipmentItemKinds,
   backgroundEquipmentOptions,
+  classEquipmentOptions,
+  equipmentItemKinds,
   conditionType,
   creatureSizes,
   creatureTypes,
@@ -280,7 +281,8 @@ const skillEnum = z.enum(skills);
  * with no error anywhere.
  */
 const backgroundEquipmentOptionEnum = z.enum(backgroundEquipmentOptions);
-const backgroundEquipmentItemKindEnum = z.enum(backgroundEquipmentItemKinds);
+const classEquipmentOptionEnum = z.enum(classEquipmentOptions);
+const equipmentItemKindEnum = z.enum(equipmentItemKinds);
 const spellRangeKindEnum = z.enum(spellRangeKinds);
 const spellAreaShapeEnum = z.enum(spellAreaShapes);
 const materialCostKindEnum = z.enum(materialCostKinds);
@@ -337,7 +339,8 @@ export const COLUMN_REFINEMENTS = {
   armorDexBonusEnum,
   skillEnum,
   backgroundEquipmentOptionEnum,
-  backgroundEquipmentItemKindEnum,
+  classEquipmentOptionEnum,
+  equipmentItemKindEnum,
   spellRangeKindEnum,
   spellAreaShapeEnum,
   materialCostKindEnum,
@@ -462,6 +465,7 @@ type NativeContractTable =
   | 'species_template_trait_effects'
   | 'background_templates'
   | 'background_equipment_items'
+  | 'class_equipment_items'
   // User-imported catalog rows. These contracts are the Zod half of the open
   // school/damage/condition types; unknown strings must survive, not narrow.
   | 'spell_versions'
@@ -904,9 +908,22 @@ const REFINEMENTS = {
   // not a line, and the CHECK on the column says the same thing.
   'background_equipment_items.quantity': positiveInt,
   'background_equipment_items.item_name': nonEmptyText,
-  'background_equipment_items.item_kind': backgroundEquipmentItemKindEnum,
+  'background_equipment_items.item_kind': equipmentItemKindEnum,
   'background_equipment_items.created_at': sqlTimestamp,
   'background_equipment_items.updated_at': sqlTimestamp,
+
+  // --- class_equipment_items -----------------------------------------------
+  // The same parsed package-item contract as the background table, with the
+  // class-specific A/B/C discriminant.
+  'class_equipment_items.id': positiveInt,
+  'class_equipment_items.class_definition_id': positiveInt,
+  'class_equipment_items.option': classEquipmentOptionEnum,
+  'class_equipment_items.sort_order': positiveInt,
+  'class_equipment_items.quantity': positiveInt,
+  'class_equipment_items.item_name': nonEmptyText,
+  'class_equipment_items.item_kind': equipmentItemKindEnum,
+  'class_equipment_items.created_at': sqlTimestamp,
+  'class_equipment_items.updated_at': sqlTimestamp,
 
   // --- character_species ---------------------------------------------------
   // As with `character_weapons`, the nullable columns are NOT written as

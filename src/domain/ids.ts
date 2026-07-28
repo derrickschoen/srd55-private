@@ -97,6 +97,11 @@ export type BackgroundEquipmentItemId = Brand<
   number,
   'BackgroundEquipmentItemId'
 >;
+/**
+ * One printed line of one class's starting-equipment package. Catalog content,
+ * never an id stored on a character.
+ */
+export type ClassEquipmentItemId = Brand<number, 'ClassEquipmentItemId'>;
 export type CharacterSpeciesId = Brand<number, 'CharacterSpeciesId'>;
 export type CharacterSpeciesTraitId = Brand<number, 'CharacterSpeciesTraitId'>;
 export type CharacterBackgroundId = Brand<number, 'CharacterBackgroundId'>;

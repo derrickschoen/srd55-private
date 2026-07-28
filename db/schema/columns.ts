@@ -167,6 +167,27 @@ export const oneOf = (column: string, values: readonly string[]) =>
   sql.raw(`${columnRef(column)} IN (${values.map(enumLiteral).join(', ')})`);
 
 /**
+ * The shared payload rule for every structured equipment-package line.
+ *
+ * `gear` carries neither catalog reference, while each mechanical kind carries
+ * exactly its own reference. Keeping the CASE here means the background and
+ * class tables cannot drift into two definitions of what an equipment kind
+ * means.
+ */
+export const equipmentItemPayload = (
+  kindColumn: string,
+  weaponColumn: string,
+  armorColumn: string,
+) =>
+  sql.raw(`CASE ${columnRef(kindColumn)}
+        WHEN 'weapon' THEN ${columnRef(weaponColumn)} IS NOT NULL
+          AND ${columnRef(armorColumn)} IS NULL
+        WHEN 'armor' THEN ${columnRef(armorColumn)} IS NOT NULL
+          AND ${columnRef(weaponColumn)} IS NULL
+        ELSE ${columnRef(weaponColumn)} IS NULL AND ${columnRef(armorColumn)} IS NULL
+      END`);
+
+/**
  * `typeof(column) = 'integer' AND column IN (…)` over a closed INTEGER
  * vocabulary.
  *
