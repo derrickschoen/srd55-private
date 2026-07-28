@@ -8,6 +8,7 @@ import {
   backgroundEquipmentPackages,
   describeBackgroundEquipmentItem,
 } from '../../../src/queries/background-equipment';
+import { backgroundEquipmentItemKinds } from '../../../src/domain/enums';
 import { openTestDatabase } from '../../helpers/open-db';
 
 /**
@@ -45,6 +46,15 @@ describe('the bundled background equipment packages, structured', () => {
     expect(found, `${background} option ${option}`).toBeDefined();
     return found as NonNullable<typeof found>;
   }
+
+  it('has only the three live item kinds in its runtime vocabulary', () => {
+    expect(backgroundEquipmentItemKinds).toEqual([
+      'gear',
+      'weapon',
+      'armor',
+    ]);
+    expect(backgroundEquipmentItemKinds).not.toContain('coin');
+  });
 
   it('splits all four licensed packages, in printed order', () => {
     // Eight packages: four backgrounds, two options each. Four is the complete
@@ -125,28 +135,25 @@ describe('the bundled background equipment packages, structured', () => {
     ).toBe('Dagger');
   });
 
-  it('records money as COIN with a copper amount, not as an inventory item', () => {
-    // Every option A ends in coin and option B is coin ALONE for all four.
-    // Under a strict quantity-plus-name reading, option B would be a package
-    // with zero items or an item literally named `GP` with a quantity of 50.
+  it('records every printed money line as ordinary gear text', () => {
+    // D40: the amount is the whole item name, like a bedroll. It is not a
+    // quantity of GP and carries no second numeric money representation.
     for (const background of ['Acolyte', 'Criminal', 'Sage', 'Soldier']) {
       const optionB = packageFor(background, 'b').items;
       expect(optionB, background).toHaveLength(1);
       expect(optionB[0], background).toMatchObject({
         item_name: '50 GP',
-        item_kind: 'coin',
+        item_kind: 'gear',
         quantity: 1,
-        coin_copper: 5000,
       });
     }
     expect(packageFor('Criminal', 'a').items.at(-1)).toMatchObject({
       item_name: '16 GP',
-      item_kind: 'coin',
-      coin_copper: 1600,
+      item_kind: 'gear',
     });
     expect(packageFor('Soldier', 'a').items.at(-1)).toMatchObject({
       item_name: '14 GP',
-      coin_copper: 1400,
+      item_kind: 'gear',
     });
   });
 
@@ -201,7 +208,7 @@ describe('the bundled background equipment packages, structured', () => {
     ).toBe('Daggers (×2) — weapon');
     expect(
       describeBackgroundEquipmentItem(packageFor('Sage', 'b').items[0]!),
-    ).toBe('50 GP (5000 cp)');
+    ).toBe('50 GP');
     expect(
       describeBackgroundEquipmentItem({
         option: 'a',
@@ -211,7 +218,6 @@ describe('the bundled background equipment packages, structured', () => {
         item_kind: 'armor',
         weapon_template_id: null,
         armor_template_id: 7,
-        coin_copper: null,
       }),
     ).toBe('Chain Shirt — armour');
   });
@@ -264,7 +270,6 @@ describe('the armour limb, which no licensed package reaches', () => {
       item_kind: 'armor',
       armor_template_id: armorId,
       weapon_template_id: null,
-      coin_copper: null,
     });
   });
 
@@ -318,7 +323,6 @@ describe('the armour limb, which no licensed package reaches', () => {
          item_kind VARCHAR NOT NULL,
          weapon_template_id integer,
          armor_template_id integer,
-         coin_copper integer,
          created_at DATETIME,
          updated_at DATETIME
        );
