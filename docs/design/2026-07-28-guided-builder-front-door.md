@@ -9,7 +9,10 @@ step, and it deletes the session-storage draft), **D11** (builder BLOCKS an
 SRD-illegal choice, import stays tolerant), **D42** (wizard is the front door;
 blank creation survives as an escape hatch), **D52** (the wizard refuses to guide
 homebrew classes), **D33** (an unknown says unknown), **D54** (the bar is usable,
-not green), **D55** (no Roll in Order; abilities sit directly after class).
+not green), **D55** (no Roll in Order; abilities sit directly after class), **D56**
+(package-only equipment; lineage spells are granted, not merely disclosed;
+straight level-up before multiclass), **D57** (the import ban governs what WE
+ship, not the user's own files).
 
 **D54's convergence rule applies to this plan:** v1 is developed on its own
 trajectory. Nothing here may be reshaped toward v2's architecture.
@@ -272,6 +275,12 @@ existing reader states that it does not put items on a character
 (`src/queries/background-equipment.ts:11`). A5 copies the background's printed
 fields and nothing else; choosing and applying a package is its own later unit.
 
+**Per D56 that later unit offers the PACKAGE ONLY — there is no gold
+alternative.** The SRD's buy-with-gold path is not deferred-and-tracked; it is
+out of the product until the owner reverses it. That removes the A-or-B selection
+parameter the reviewers wanted pinned: the background's package is applied, not
+chosen between.
+
 Background is load-bearing rather than optional: the 2024 ability-score increases
 ride it. **Under D55 that dependency now runs backwards** — abilities are chosen
 before background, so the abilities step allocates BASE scores and the background
@@ -280,6 +289,25 @@ numbers a later step silently changes is a D33 violation dressed as a total.
 
 A group that stopped at species would relocate §5's trap one step right rather
 than clearing it — the reviewers' point, accepted.
+
+**A6 — the lineage-spell bridge (NEW, per D56).**
+Exit: choosing Elf, Gnome or Tiefling **actually grants the lineage spells**, and
+they appear on the sheet with their provenance.
+
+D56 raises this from a disclosure to a requirement. The route is the bridge the
+design has always called designed-and-never-built, and the supervisor measured it
+rather than guessing: seed `species_definitions` rows carrying `grant_rules`,
+write a `character_source_instances` row on apply, then call the **existing**
+`GrantRuleSlotGenerator`, which already resolves a source type to its definition
+table and reads `grant_rules` (`src/grants/grant-rule-slot-generator.ts:345-370`)
+and which the class path uses today. No new machinery.
+
+**A6 is additive on top of A4, and sequenced after it.** A4's template-copy path
+is proven and ships first; A6 adds the source instance and the grants beside it.
+Folding the bridge into A4 would put a never-built path inside the dispatch that
+finally makes the wizard exist. When A6 lands, §4's D33 disclosure for lineage
+spells is deleted rather than reworded — the disclosure exists only because the
+spells were missing.
 
 **Why A4 and A5 are in this group at all.** Without them the group has no
 actionable post-class step, so A3 cannot honestly pass. That is the primary
