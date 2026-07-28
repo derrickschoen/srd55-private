@@ -1,5 +1,67 @@
 # Binding scope decisions
 
+## D47 — OWNER: the builder offers all four ability-score methods, and the fourth is a HOUSE RULE with no source (2026-07-28)
+
+The owner's ruling: *"Do all methods plus look up the optional Matt coleville
+rolling 4d6 drop the lowest, keep the order method"*, then, asked whether the
+reroll gate was included: **all three parts, labelled a house rule.**
+
+### The four methods
+
+Three are SRD 5.2.1 and are extracted, checksummed and enumerated in tests
+(`docs/srd/source/ability-score-generation.txt`, merged `e479549`):
+
+- **Standard Array** — `15, 14, 13, 12, 10, 8`
+- **Random Generation** — 4d6, total the highest three, six times, assigned freely
+- **Point Cost** — 27 points, with the full score-to-cost table
+
+The SRD's own name is **Point Cost**, not "point buy". Naming it from memory
+would have put a permanently wrong identifier in an enum, which is the whole
+reason the values were extracted rather than typed.
+
+The fourth is not SRD:
+
+- **In-order roll (house rule)** — 4d6 drop lowest; assign to Strength,
+  Dexterity, Constitution, Intelligence, Wisdom and Charisma IN THE ORDER
+  ROLLED; reroll the entire set if it does not contain at least two scores of
+  15 or higher.
+
+**All three parts, and the third is load-bearing.** Without the reroll gate,
+in-order is materially harsher than the SRD method, because a bad set cannot be
+rearranged to fit the class. A Wizard who rolls 8 into Intelligence has no
+recourse. The gate is what makes the variant playable, not a softening of it.
+
+### LICENSING — this one is different from everything else we ship
+
+The house rule is **not SRD content** and must never be dressed as it:
+
+- It does NOT go in `docs/srd/source/`, and it carries NO SRD citation.
+- Game PROCEDURES are not copyrightable, so implementing the method is fine.
+  Copying anyone's WORDING is not, and neither is implying endorsement.
+- It is labelled in the UI as a house rule, so a player can tell at a glance
+  which of the four the rules actually license.
+
+D34 is the precedent and it is exact: `dieSizes` is recorded as *"the OWNER'S
+list ... rather than dressed up with a citation it does not have"*. A house rule
+gets the same honesty.
+
+### Sourcing caveat, recorded because it is weaker than our usual standard
+
+I verified the three SRD methods against a checksummed PDF. I could NOT verify
+the house rule that way — what I found were forum descriptions of it, not a
+primary source. The rule is implemented because the owner asked for it and can
+describe it, not because we confirmed it against a document. That is a different
+epistemic footing from every other number in this project and the record should
+say so rather than let it blend in.
+
+### What this unblocks
+
+`docs/design/guided-builder.md` item 7 sized this as "S per supported method"
+and its risk section warned that ability methods would otherwise be *"recalled
+from memory"*. Three are now sourced; the fourth is explicitly not, and is
+labelled. The design's step 5 can proceed.
+
+
 ## D46 — OWNER: a share link stays a REFERENCE; the full JSON export carries user-authored content (2026-07-28)
 
 The owner's ruling, verbatim: *"Do the placeholder for a share link and export
