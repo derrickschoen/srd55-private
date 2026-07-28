@@ -138,6 +138,16 @@ export const srdWeaponGroups = [
 export type SrdWeaponGroup = (typeof srdWeaponGroups)[number];
 
 /**
+ * Whether a character-owned weapon uses the melee or ranged attack formula.
+ *
+ * The character copy stores this as a value, never as a template reference.
+ * `null` is the third state at use sites: NOT RECORDED, with no fallback from
+ * range or property columns.
+ */
+export const weaponAttackKinds = ['melee', 'ranged'] as const;
+export type WeaponAttackKind = (typeof weaponAttackKinds)[number];
+
+/**
  * The eighteen skills, from the Skills table in
  * `docs/srd/source/skills-table.txt`. That table is the source that CLOSES this
  * vocabulary, and it had to be extracted for the purpose.

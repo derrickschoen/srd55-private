@@ -110,6 +110,11 @@ const SCHEMA_BEFORE_COIN_RETIREMENT = DATABASE_MIGRATIONS
   .map((entry) => entry.sql)
   .join('\n');
 
+const SCHEMA_BEFORE_WEAPON_ATTACK_KIND = DATABASE_MIGRATIONS
+  .slice(0, 6)
+  .map((entry) => entry.sql)
+  .join('\n');
+
 const HISTORICAL_BACKGROUND_ROWS = `
 INSERT INTO background_templates (
   id, content_key, rules_edition, name,
@@ -178,6 +183,70 @@ describe('database migration chain', () => {
 
     expect(result.migrationCount).toBe(DATABASE_MIGRATIONS.length);
     expect(result.signature).toBe(schemaSignature(schema));
+  });
+
+  it('backfills every template group without inferring custom or ranged-distance rows', async () => {
+    const storage = await storageHolding(
+      `${SCHEMA_BEFORE_WEAPON_ATTACK_KIND}
+       INSERT INTO characters (id, name) VALUES (1, 'Attack-kind migration');
+       INSERT INTO weapon_templates (
+         content_key, name, srd_group, damage_kind, damage_dice, damage_type,
+         thrown, ammunition, range_kind, range_near_feet, range_far_feet,
+         mastery_property
+       ) VALUES
+         ('test:spear', 'Spear', 'simple_melee', 'dice', '1d6', 'Piercing',
+          1, 0, 'ranged', 20, 60, 'Sap'),
+         ('test:shortbow', 'Shortbow', 'simple_ranged', 'dice', '1d6',
+          'Piercing', 0, 1, 'ranged', 20, 60, 'Vex'),
+         ('test:glaive', 'Glaive', 'martial_melee', 'dice', '1d10',
+          'Slashing', 0, 0, 'none', NULL, NULL, 'Graze'),
+         ('test:longbow', 'Longbow', 'martial_ranged', 'dice', '1d8',
+          'Piercing', 0, 1, 'ranged', 150, 600, 'Slow');
+       INSERT INTO character_weapons (
+         character_id, name, proficiency_category, damage_kind, damage_dice,
+         damage_type, finesse, heavy, light, loading, reach, thrown,
+         two_handed, ammunition, ammunition_kind, range_kind, range_near_feet,
+         range_far_feet, mastery_property, other_properties
+       )
+       SELECT
+         1, name,
+         CASE srd_group
+           WHEN 'simple_melee' THEN 'simple'
+           WHEN 'simple_ranged' THEN 'simple'
+           WHEN 'martial_melee' THEN 'martial'
+           WHEN 'martial_ranged' THEN 'martial'
+         END,
+         damage_kind, damage_dice, damage_type, finesse, heavy, light, loading,
+         reach, thrown, two_handed, ammunition, ammunition_kind, range_kind,
+         range_near_feet, range_far_feet, mastery_property, other_properties
+       FROM weapon_templates;
+       INSERT INTO character_weapons (
+         character_id, name, proficiency_category, damage_kind, damage_dice,
+         damage_type, thrown, range_kind, range_near_feet, range_far_feet,
+         mastery_property
+       ) VALUES (
+         1, 'Custom thrown range twin', 'simple', 'dice', '1d6', 'Piercing',
+         1, 'ranged', 20, 60, 'Sap'
+       );`,
+    );
+    const lifecycle = new DatabaseLifecycle(sqlite3, storage, schema);
+
+    lifecycle.open();
+
+    expect(
+      lifecycle.database.allRaw(
+        `SELECT name, attack_kind
+         FROM character_weapons
+         ORDER BY id`,
+      ),
+    ).toEqual([
+      { name: 'Spear', attack_kind: 'melee' },
+      { name: 'Shortbow', attack_kind: 'ranged' },
+      { name: 'Glaive', attack_kind: 'melee' },
+      { name: 'Longbow', attack_kind: 'ranged' },
+      { name: 'Custom thrown range twin', attack_kind: null },
+    ]);
+    lifecycle.close();
   });
 
   it('maps all five historical weapon range pairs without losing a value', async () => {

@@ -110,6 +110,7 @@ describe('weapon commands', () => {
       // NOT STATED — the state a weapon someone typed in is genuinely in, and
       // the one D27 makes the column nullable for.
       proficiency_category: null,
+      attack_kind: null,
       damage: { kind: 'not_recorded' },
       damage_type: null,
       versatile_damage: { kind: 'not_applicable' },
@@ -152,11 +153,15 @@ describe('weapon commands', () => {
       // class grants proficiency in. Copying the group across verbatim would
       // store a value `character_weapons_proficiency_category_check` refuses.
       proficiency_category: 'martial',
+      attack_kind: 'melee',
     });
     // The other half of the fold, so a switch that returned `martial` for
     // everything cannot pass. A Club is `simple_melee`.
     await run({ type: 'add_weapon', weapon: fromTemplate('Club') });
-    expect(weapons()[1]).toMatchObject({ proficiency_category: 'simple' });
+    expect(weapons()[1]).toMatchObject({
+      proficiency_category: 'simple',
+      attack_kind: 'melee',
+    });
 
     // Now change EVERY field the template filled, one command, and confirm each
     // one took. "Pre-filled" must not mean "locked".
@@ -170,6 +175,7 @@ describe('weapon commands', () => {
         // able to take it back to NOT STATED. Without an option for that the
         // undecided state would be unreachable after any pick.
         proficiency_category: null,
+        attack_kind: null,
         damage: { kind: 'dice', dice: '1d10' },
         damage_type: 'Radiant',
         versatile_damage: { kind: 'dice', dice: '2d6' },
@@ -191,6 +197,7 @@ describe('weapon commands', () => {
     expect(weapons()[0]).toMatchObject({
       name: 'Heirloom blade',
       proficiency_category: null,
+      attack_kind: null,
       damage: { kind: 'dice', dice: '1d10' },
       damage_type: 'Radiant',
       versatile_damage: { kind: 'dice', dice: '2d6' },

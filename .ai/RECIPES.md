@@ -132,7 +132,7 @@ test:
 | Arm | Where the column has to be added | Its test |
 |---|---|---|
 | **Storage** | `db/schema/*.ts`, then `npm run db:schema` + `npm run db:contracts` | `tests/unit/schema-generation.test.ts`, `tests/unit/contracts/column-facts-generation.test.ts` |
-| **Snapshot** (undo/redo) | Covered by `TABLE_SCOPES` for an owned TABLE. For a column on `characters`, `src/character/character-state.ts`: `CHARACTER_STATE_COLUMNS` (`:200`) — BY HAND | a save-point restore test |
+| **Snapshot** (undo/redo) | Covered by `TABLE_SCOPES` for an owned TABLE. For a column on `characters`, `src/character/character-state.ts`: `CHARACTER_STATE_COLUMNS` (`:201`) — BY HAND | a save-point restore test |
 | **Backup** (portable character) | `src/backup/character-backup.ts`, and `docs/BACKUP-FORMATS.md` | a **column-for-column** round trip |
 | **Share** (compressed URL fragment) | `src/sharing/schema.ts` + `src/sharing/character-share.ts`, and `docs/sharing/SCHEMA.md` | a round trip **through the fragment**, plus an OLD-payload test |
 
