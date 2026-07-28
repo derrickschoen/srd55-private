@@ -59,9 +59,9 @@ import {
 import {
   attacksPerAction,
   martialArtsDice,
-  totalCharacterLevel,
   type SheetClassLevels,
 } from './sheet';
+import { characterLevel } from './character-level';
 import type {
   AttacksPerAction,
   ResolvedExtraAttackGrant,
@@ -92,7 +92,7 @@ export type AttackProfileKind = (typeof attackProfileKinds)[number];
  */
 export interface AbilityOption {
   readonly ability: Ability;
-  readonly attack_bonus: number;
+  readonly attack_bonus: number | null;
   readonly damage_modifier: number;
   /** Why this ability is on offer — the sentence the sheet shows. */
   readonly reason: string;
@@ -262,7 +262,7 @@ export interface AttackProfileInput {
   readonly weapons: readonly AttackProfileWeapon[];
   readonly classes: readonly SheetClassLevels[];
   readonly scores: AbilityScores;
-  readonly proficiencyBonus: number;
+  readonly proficiencyBonus: number | null;
   readonly cantrips: RecognisedAttackCantrips;
 }
 
@@ -384,7 +384,8 @@ function option(
     proficiency.state === 'included' ? input.proficiencyBonus : 0;
   return {
     ability,
-    attack_bonus: AttackBonus.from(score, applied).value,
+    attack_bonus:
+      applied === null ? null : AttackBonus.from(score, applied).value,
     damage_modifier: score.modifier(),
     reason:
       proficiency.state === 'included'
@@ -640,8 +641,11 @@ function trueStrikeProfile(
   sources: readonly CantripSource[],
   attacks: AttacksPerAction,
 ): AttackProfile {
-  const totalLevel = totalCharacterLevel(input.classes);
-  const extraDice = trueStrikeExtraDice(totalLevel);
+  const totalLevel = characterLevel(
+    input.classes.map((entry) => entry.level),
+  );
+  const extraDice =
+    totalLevel === null ? null : trueStrikeExtraDice(totalLevel);
   const proficiency = profileProficiency(weapon.proficiency);
   const notes: string[] = [];
   if (attacks.count > 1) {
@@ -733,7 +737,14 @@ function shillelaghProfile(
   sources: readonly CantripSource[],
   attacks: AttacksPerAction,
 ): WeaponAttackProfiles {
-  const totalLevel = totalCharacterLevel(input.classes);
+  const totalLevel = characterLevel(
+    input.classes.map((entry) => entry.level),
+  );
+  if (totalLevel === null) {
+    throw new Error(
+      'A Shillelagh profile requires a determined character level.',
+    );
+  }
   const strength = option(
     input,
     'strength',

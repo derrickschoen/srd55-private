@@ -574,6 +574,104 @@ describe('character rule and source commands', () => {
     expect(state.capture(characterId)).toEqual(empty);
   });
 
+  it('records source acquisition as null without classes and as the exact total with classes', () => {
+    const featId = definition(
+      'feat_definitions',
+      'test:level-aware-feat',
+      'Level-aware feat',
+      [],
+      true,
+    );
+    const classlessId = character('Classless source');
+    add(classlessId, {
+      type: 'add_source',
+      source_type: 'feat',
+      source_definition_id: featId,
+      config: {},
+    });
+    expect(
+      db.scalar(
+        `SELECT acquired_at_character_level
+         FROM character_source_instances
+         WHERE character_id = ?`,
+        [classlessId],
+      ),
+    ).toBeNull();
+
+    const classedId = character('Known source level');
+    const fighterId = classDefinition('Source Level Fighter', 'strength', []);
+    add(classedId, {
+      type: 'add_source',
+      source_type: 'class',
+      source_definition_id: fighterId,
+      config: { level: 3 },
+    });
+    add(classedId, {
+      type: 'add_source',
+      source_type: 'feat',
+      source_definition_id: featId,
+      config: {},
+    });
+
+    expect(
+      db.scalar(
+        `SELECT acquired_at_character_level
+         FROM character_source_instances
+         WHERE character_id = ? AND source_type = 'feat'`,
+        [classedId],
+      ),
+    ).toBe(3);
+  });
+
+  it('permits class additions through total level 20 and refuses 21', () => {
+    const characterId = character('Exact class total');
+    const fighterId = classDefinition('Level Fighter', 'strength', []);
+    const wizardId = classDefinition('Level Wizard', 'intelligence', []);
+    add(characterId, {
+      type: 'add_source',
+      source_type: 'class',
+      source_definition_id: fighterId,
+      config: { level: 12 },
+    });
+    add(characterId, {
+      type: 'add_source',
+      source_type: 'class',
+      source_definition_id: wizardId,
+      config: { level: 8 },
+    });
+
+    expect(
+      db.allRaw(
+        `SELECT class_definition_id, level, is_starting_class
+         FROM character_class_levels
+         WHERE character_id = ?
+         ORDER BY class_definition_id`,
+        [characterId],
+      ),
+    ).toEqual([
+      {
+        class_definition_id: fighterId,
+        level: 12,
+        is_starting_class: 1,
+      },
+      {
+        class_definition_id: wizardId,
+        level: 8,
+        is_starting_class: 0,
+      },
+    ]);
+
+    const rogueId = classDefinition('Level Rogue', 'dexterity', []);
+    expect(() =>
+      add(characterId, {
+        type: 'add_source',
+        source_type: 'class',
+        source_definition_id: rogueId,
+        config: { level: 1 },
+      }),
+    ).toThrow('A character cannot exceed level 20.');
+  });
+
   it('adds a nested source tree, rejects non-repeatable duplicates and invalid configurable inputs without residue', () => {
     const magicInitiateId = definition(
       'feat_definitions',

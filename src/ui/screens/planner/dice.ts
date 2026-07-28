@@ -757,7 +757,7 @@ function metricNode(label: string, value: string): HTMLElement {
 
 export function renderDiceHelper(
   slots: readonly WorkspaceSlot[],
-  characterLevel: number,
+  characterLevel: number | null,
   abilities: Readonly<Record<Ability, number>>,
 ): HTMLElement {
   const section = document.createElement('section');
@@ -765,6 +765,13 @@ export function renderDiceHelper(
   section.setAttribute('aria-labelledby', 'dice-helper-title');
   section.innerHTML =
     '<div class="panel-heading"><div><h2 id="dice-helper-title">At-the-table dice calculator</h2><p>Exact odds, quick live rolls, and a replay token for every result.</p></div><span class="badge badge-ok">No simulation</span></div>';
+  if (characterLevel === null) {
+    const message = document.createElement('p');
+    message.textContent =
+      'Dice calculations that depend on character level are unavailable until a class is selected.';
+    section.append(message);
+    return section;
+  }
   const config = defaultDiceConfig();
   config.sorcerousBaseDice =
     characterLevel >= 17

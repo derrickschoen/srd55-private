@@ -67,6 +67,35 @@ function minimalDocument(
   };
 }
 
+describe('combined character level validation', () => {
+  const classRow = (id: number, level: number) => ({
+    id,
+    classKey: `test:class:${String(id)}`,
+    level,
+    start: level,
+  });
+
+  it('permits no classes and total level 20, but refuses 21', () => {
+    expect(
+      validateShareDocument(minimalDocument({ classes: [] })).classes,
+    ).toEqual([]);
+    expect(
+      validateShareDocument(
+        minimalDocument({
+          classes: [classRow(0, 12), classRow(1, 8)],
+        }),
+      ).classes.map((entry) => entry.level),
+    ).toEqual([12, 8]);
+    expect(() =>
+      validateShareDocument(
+        minimalDocument({
+          classes: [classRow(0, 12), classRow(1, 9)],
+        }),
+      ),
+    ).toThrow('combined class levels must not exceed 20.');
+  });
+});
+
 async function throughShareLink(
   document: CharacterShareDocument,
 ): Promise<CharacterShareDocument> {

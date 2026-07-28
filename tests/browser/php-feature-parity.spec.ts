@@ -624,7 +624,7 @@ test('creates and opens an empty character without additional setup', async ({
   );
   expect(workspace.report.character).toMatchObject({
     name: 'Fresh Build',
-    character_level: 0,
+    character_level: null,
   });
   expect(workspace.slots).toEqual([]);
   expect(await rows(page, 'characters')).toEqual([

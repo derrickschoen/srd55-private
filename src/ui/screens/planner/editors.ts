@@ -131,15 +131,20 @@ function renderAbilities(
     string,
     { ability: Ability; attack: number; dc: number }
   >();
+  const proficiency = workspace.report.character.proficiency_bonus;
   for (const slot of workspace.slots) {
-    if (slot.ability === null || casting.has(slot.source)) continue;
+    if (
+      slot.ability === null ||
+      proficiency === null ||
+      casting.has(slot.source)
+    ) continue;
     const abilityScore =
       workspace.report.character.abilities[slot.ability];
     const mod = Math.floor((abilityScore - 10) / 2);
     casting.set(slot.source, {
       ability: slot.ability,
-      attack: workspace.report.character.proficiency_bonus + mod,
-      dc: 8 + workspace.report.character.proficiency_bonus + mod,
+      attack: proficiency + mod,
+      dc: 8 + proficiency + mod,
     });
   }
   if (casting.size > 0) {

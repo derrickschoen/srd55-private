@@ -391,7 +391,12 @@ function renderCards(
         element('div', { className: 'card-heading' }, [
           element('div', {}, [
             element('h2', { text: character.name }),
-            element('p', { text: `Level ${character.level || 0}` }),
+            element('p', {
+              text:
+                character.level === null
+                  ? 'Level undetermined'
+                  : `Level ${character.level}`,
+            }),
           ]),
           element('div', { className: 'card-badges' }, badges),
         ]),

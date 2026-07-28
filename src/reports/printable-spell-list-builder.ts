@@ -373,11 +373,13 @@ export class PrintableSpellListBuilder {
             casting_mode: 'available_on_long_rest',
             spellcasting_ability: ability,
             attack_bonus:
-              modifier === null
+              modifier === null ||
+              report.character.proficiency_bonus === null
                 ? null
                 : report.character.proficiency_bonus + modifier,
             save_dc:
-              modifier === null
+              modifier === null ||
+              report.character.proficiency_bonus === null
                 ? null
                 : 8 + report.character.proficiency_bonus + modifier,
           };

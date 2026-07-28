@@ -209,6 +209,9 @@ function bonusFor(profile: AttackProfile, ability: string): number {
   if (option === undefined) {
     throw new Error(`No ${ability} option on this profile.`);
   }
+  if (option.attack_bonus === null) {
+    throw new Error(`${ability} attack bonus is undetermined.`);
+  }
   return option.attack_bonus;
 }
 
