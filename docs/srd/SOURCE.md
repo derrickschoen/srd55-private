@@ -54,6 +54,15 @@ pages interleave and the weapon table becomes unreadable.
 | `source/multiclassing.txt` | Multiclassing: Hit Points and Hit Dice, Proficiency Bonus, proficiencies, Armor Class and Extra Attack | 24-25 | `4a6cef7329a5338f16e23fc4404d650e5d157ee7a45d99773b9ba7780909d99b` |
 | `source/multiclass-entry-grants.txt` | The "As a Multiclass Character" clause of all twelve classes — the SUBSET a second class grants (D28) | 27-72 | `3ad04904410c40e03c07dceef379414d2c1bfc0ff2e2f1d64c50448256d9b6ec` |
 | `source/domain-vocabularies.txt` | Schools of Magic, conditions, creature types, damage types and size categories | 104, 179-180, 188 | `ef5e8cced8f6dc1dad92d2903cbbcad144cb2d742bebfe595e6290bf4cc32901` |
+| `source/bard-spell-list.txt` | Complete Bard Spell List | 33-35 | `c0b9c78a5f56a1feffdb58bf42bcac2e475e09e9eae7ec623b617854bdbd4228` |
+| `source/cleric-spell-list.txt` | Complete Cleric Spell List | 38-40 | `9a891b62d3fee06ce0a759437da2385233373afef9ed367e9e65e301a962214c` |
+| `source/druid-spell-list.txt` | Complete Druid Spell List | 44-45 | `b9577c1fb57e334f00e4cdd8663b596edd31f4a1e468b834e596f5ebda3d24a1` |
+| `source/paladin-spell-list.txt` | Complete Paladin Spell List | 55-56 | `444894bc59347f5a5fe931d12340d478662c45592adcd08d713470e269c18ee4` |
+| `source/ranger-spell-list.txt` | Complete Ranger Spell List | 60 | `4331180fbbce595e0c72e7647a0ba3c114671c14c6ccd421420d56584bbb2b16` |
+| `source/sorcerer-spell-list.txt` | Complete Sorcerer Spell List | 67-69 | `7942750ff98fd1a230cd44a42cf79064caa40f63eabfcd68c546b9666dbd7fa6` |
+| `source/warlock-spell-list.txt` | Complete Warlock Spell List | 74-76 | `0845b2b01463abc15c56b6c6f3b0eb2f234920e4ad5e93ce672ad5110839c7cb` |
+| `source/wizard-spell-list.txt` | Complete Wizard Spell List | 79-82 | `c1e51d5f924cdb5ff0b36f73ccce3870b9b3f11b974ef827daabace8ba23a583` |
+| `source/spell-descriptions.txt` | Complete Spell Descriptions section, enumerating 339 unique spell headings | 107-175 | `93e7a5c245b073586872c0736deb24a5463f94c55033871bd71e6d76cf0bd4fa` |
 
 ### Why there is a checksum PER EXTRACT, and not only for the PDF
 
