@@ -1,5 +1,69 @@
 # Binding scope decisions
 
+## F25 — the level divergence was SEVEN sites, not the two on record; and a mutation that silently fails to apply looks exactly like a mutation that survives (2026-07-28)
+
+`chunk/CHARACTER-LEVEL` merged at `b640405`. Verified by me: **2182 vitest / 133
+files**, build exit 0 with both dist controls, **72 Playwright** (9.4m, port
+5463).
+
+### D40 recorded two. There were seven.
+
+D40's flagged-but-not-asserted note named the divergence as a pair —
+`Math.max(1, SUM(level))` at `spell-access-builder.ts:565` against the unfloored
+`reduce` at `build-report-builder.ts:414`. I grepped instead of trusting it and
+found six:
+
+```
+src/access/spell-access-builder.ts:565   Math.max(1, COALESCE(SUM(level), 0))
+src/reports/build-report-builder.ts:415  classes.reduce(+class_level, 0)
+src/sharing/schema.ts:1618               classes.reduce(+level, 0) > 20
+src/commands/add-source.ts:175           COALESCE(SUM(level), 0)
+src/commands/add-source.ts:239           COALESCE(SUM(level), 0)
+src/commands/update-class.ts:116         COALESCE(SUM(level), 0)
+```
+
+Codex then found a SEVENTH my grep had missed — a separate sheet-level helper.
+Two in the record, six in my sweep, seven in the code. F16's rule keeps earning
+its place: I checked the thing rather than the note, and the thing was still
+bigger than I found.
+
+### What landed
+
+`characterLevel()` returns `number | null`, null meaning **no class rows**. That
+is AGENTS.md principle 1 applied — "make an absence a type, not a fallback" —
+and it is what lets D42 §1's "undetermined" be a real state instead of a display
+hack over an invented number. Every consumer handles null explicitly: no class
+means no class spellcasting routes; the reports and sheet say undetermined; the
+`> 20` validation treats absence as "cannot exceed".
+
+The user-visible defect is gone: a class-less character no longer reports level 0
+and proficiency bonus +1.
+
+Mutating the shared function so an empty class list returns `0` instead of `null`
+fails **eleven** tests across access, commands, sheet, reports, UI and the
+function's own suite. That is the proof F22 asked for and could not previously
+be given.
+
+### THE INSTRUMENT FINDING, and it is against me
+
+My first mutation attempt did not apply. The script asserted on a literal
+`return null;` that does not exist — the function uses a ternary — so the
+assertion threw, and the `npm test` that followed ran on the UNMUTATED tree and
+reported 2182 passing.
+
+Read carelessly, that is indistinguishable from "the mutation survives", and it
+would have been a false finding against codex's work. What saved it was noticing
+the Python traceback sitting above the green summary.
+
+BINDING: **a mutation is not applied until you have proved it applied.** Assert
+the replacement count, or grep the mutated file for the vanished text, BEFORE
+running the suite. The second attempt did exactly that — `grep -c "? null"`
+returned 0 — and only then was the result worth anything.
+
+This is RULE 8 in a place I had not applied it. RULE 8 says verify the instrument
+before believing a zero; a mutation harness is an instrument, and "0 tests
+failed" is a zero.
+
 ## F24 — "v1 is frozen" was never enforced: the guard hashed the OBJECT, so an edit to the frozen FILE passed green (2026-07-28)
 
 `chunk/SPELL-FORK` merged at `fecb2cb` after one refused round. Verified by me:
