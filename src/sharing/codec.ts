@@ -507,7 +507,7 @@ function assertListLimit(
 ): void {
   if (value.length > maximum) {
     throw new ShareValidationError(
-      `${label} exceeds the maximum count of ${maximum}.`,
+      `wire ${label} exceeds the maximum count of ${maximum}.`,
     );
   }
 }

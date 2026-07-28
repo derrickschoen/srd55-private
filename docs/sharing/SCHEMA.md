@@ -81,11 +81,25 @@ entries, preferences, or loadouts.
 
 ## Wire transport
 
-Both versions serialize the validated object as positional JSON. Version 1's
-shipped root arities 11/12/13/14/15, character arities 11/12, and weapon
-arities 19/20/22 are frozen exactly as shipped. A shorter accepted v1 tuple
-reads as the historical shape that originally produced it; anything outside
-those exact variants is refused.
+Both versions serialize the validated object as positional JSON. Tuple arity is
+versioned; it is not one fixed length shared by every historical link.
+
+Version 1 accepts exactly these variants:
+
+- root: 11, 12, 13, 14, or 15 positions;
+- character: 11 or 12 positions;
+- class: 8 positions;
+- source: 6 positions;
+- weapon: 19, 20, or 22 positions.
+
+The v1 character's trailing positions are `placeholders` at index 10 and the
+optional character `notes` at index 11. A shorter character tuple therefore
+means that the note predates that trailing position; it does not shift any
+earlier field. The class's eighth position is `subclassConfig`, and the
+source's sixth position is its fallback display `name`. Those class and source
+positions were introduced while the format still identified itself as v1, so
+the frozen v1 registry accepts the resulting 8- and 6-position records. A v1
+tuple outside the exact variants above is refused.
 
 Version 2 changes exactly two structures:
 
@@ -98,6 +112,11 @@ Version 2 changes exactly two structures:
   therefore exactly 16 elements and its character tuple exactly 11. The
   placeholder list's count and shape validation run at that new root position.
 
+Class and source records do not change in v2: they remain exactly 8 and 6
+positions respectively. Thus v2 accepts root 16, character 11, class 8, source
+6, and weapon 21. The placeholder move—not an appended character field—is the
+wire-v2 placeholder mechanism.
+
 The adjacent v1-to-v2 migration pads historical short roots without inventing
 optional sections, moves placeholders and the optional character note to their
 v2 positions, upgrades old weapon damage variants, and maps all five possible
@@ -106,7 +125,9 @@ ordinary, long-only, and inverted. It never coerces, rejects, or drops either
 v1 range field. Decoding dispatches from the frozen root version and applies
 that migration before v2 validation; encoding always writes v2.
 
-An absent optional record field occupies its assigned `null` position.
+Within any accepted variant, an absent optional/default field occupies its
+assigned `null` position. `null` preserves field position; it does not imply
+that all versions or all historical variants have the same tuple length.
 
 Any subsequent change to tuple order, meaning, membership, or accepted value
 domain increments the root version, adds an adjacent migration, and adds an
