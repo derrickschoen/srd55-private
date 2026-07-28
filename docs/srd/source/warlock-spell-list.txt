@@ -1,0 +1,142 @@
+This work includes material from the System Reference Document 5.2
+("SRD 5.2") by Wizards of the Coast LLC, available at
+https://www.dndbeyond.com/srd. The SRD 5.2 is licensed under the Creative
+Commons Attribution 4.0 International License, available at
+https://creativecommons.org/licenses/by/4.0/legalcode.
+
+--- Verbatim extract: SRD 5.2.1 printed pages 74-76, Warlock Spell List. ---
+
+LAYOUT: selected `pdftotext -layout` lines are split at the measured
+gutter by Unicode CHARACTER and placed in reading order. Source text is not
+edited or re-wrapped; only trailing layout whitespace is omitted.
+
+=== SRD 5.2.1 page 74, right column ===
+
+Warlock Spell List
+This section presents the Warlock spell list. The
+spells are organized by spell level and then alpha-
+betized, and each spell’s school of magic is listed.
+In the Special column, C means the spell requires
+
+Concentration, R means it’s a Ritual, and M means it
+
+requires a specific Material component.
+
+=== SRD 5.2.1 page 75, left column ===
+
+     Cantrips (Level 0 Warlock Spells)
+     Spell                           School          Special
+     Chill Touch                     Necromancy        —
+     Eldritch Blast                  Evocation         —
+     Mage Hand                       Conjuration       —
+     Minor Illusion                  Illusion          —
+     Poison Spray                    Necromancy        —
+     Prestidigitation                Transmutation     —
+     True Strike                     Divination        —
+
+     Level 1 Warlock Spells
+     Spell                           School          Special
+     Bane                            Enchantment       C
+     Charm Person                    Enchantment       —
+     Comprehend Languages            Divination        R
+     Detect Magic                    Divination       C, R
+     Expeditious Retreat             Transmutation     C
+     Hellish Rebuke                  Evocation         —
+     Hex                             Enchantment       C
+     Hideous Laughter                Enchantment       C
+     Illusory Script                 Illusion         R, M
+     Protection from Evil and Good   Abjuration       C, M
+     Speak with Animals              Divination        R
+     Unseen Servant                  Conjuration       R
+
+     Level 2 Warlock Spells
+     Spell                           School          Special
+     Darkness                        Evocation         C
+     Enthrall                        Enchantment       C
+     Hold Person                     Enchantment       C
+     Invisibility                    Illusion          C
+     Mind Spike                      Divination        C
+     Mirror Image                    Illusion          —
+     Misty Step                      Conjuration       —
+
+     Ray of Enfeeblement             Necromancy        C
+
+     Spider Climb                    Transmutation     C
+
+     Suggestion                      Enchantment       C
+
+     Level 3 Warlock Spells
+     Spell                           School          Special
+     Counterspell                    Abjuration        —
+     Dispel Magic                    Abjuration        —
+     Fear                            Illusion          C
+     Fly                             Transmutation     C
+
+=== SRD 5.2.1 page 75, right column ===
+
+Spell                    School          Special
+Gaseous Form             Transmutation     C
+Hypnotic Pattern         Illusion          C
+Magic Circle             Abjuration        M
+Major Image              Illusion          C
+Remove Curse             Abjuration        —
+Tongues                  Divination        —
+Vampiric Touch           Necromancy        C
+
+Level 4 Warlock Spells
+Spell                    School          Special
+Banishment               Abjuration        C
+Blight                   Necromancy        —
+Charm Monster            Enchantment       —
+Dimension Door           Conjuration       —
+Hallucinatory Terrain    Illusion          —
+
+Level 5 Warlock Spells
+Spell                    School          Special
+Contact Other Plane      Divination        R
+Dream                    Illusion          —
+Hold Monster             Enchantment       C
+Mislead                  Illusion          C
+Planar Binding           Abjuration        M
+Scrying                  Divination       C, M
+Teleportation Circle     Conjuration       M
+
+Level 6 Warlock Spells
+Spell                    School          Special
+Circle of Death          Necromancy        M
+Create Undead            Necromancy        M
+Eyebite                  Necromancy        C
+True Seeing              Divination        M
+
+Level 7 Warlock Spells
+
+Spell                    School          Special
+
+Etherealness             Conjuration       —
+
+Finger of Death          Necromancy        —
+Forcecage                Evocation        C, M
+Plane Shift              Conjuration       M
+
+=== SRD 5.2.1 page 76, left column ===
+
+     Level 8 Warlock Spells
+     Spell                          School          Special
+     Befuddlement                  Enchantment        —
+     Demiplane                     Conjuration        —
+     Dominate Monster              Enchantment         C
+     Glibness                      Enchantment        —
+     Power Word Stun               Enchantment        —
+
+     Level 9 Warlock Spells
+
+     Spell                          School          Special
+
+     Astral Projection             Necromancy         M
+     Foresight                     Divination         —
+     Gate                          Conjuration       C, M
+
+     Imprisonment                  Abjuration         M
+     Power Word Kill               Enchantment        —
+     True Polymorph                Transmutation       C
+     Weird                         Illusion            C

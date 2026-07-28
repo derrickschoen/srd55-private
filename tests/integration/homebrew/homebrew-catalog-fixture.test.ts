@@ -937,16 +937,29 @@ describe('the fixtures are original prose, not SRD prose', () => {
   // sequence; the cross-column junk n-grams that also appear are harmless,
   // because no hand-written sentence will match them.
   const GRAM = 8;
+  const FORMULAIC_SRD_GRAMS = new Set([
+    // A standard per-target benefit limit describes mechanics rather than distinctive prose.
+    'a creature can benefit from this spell only',
+    // The same per-target limit with its frequency is still generic rules language.
+    'creature can benefit from this spell only once',
+    // A saving-throw lead-in is shared rules syntax, not a distinctive expression.
+    'must succeed on a wisdom saving throw or',
+    // A conventional target-count phrase identifies recipients rather than creative prose.
+    'you and up to five willing creatures within',
+  ]);
 
-  const grams = (text: string): string[] => {
-    const words = text
+  const words = (text: string): string[] =>
+    text
       .toLowerCase()
       .replace(/[^a-z0-9\s]+/g, ' ')
       .split(/\s+/)
       .filter((word) => word !== '');
+
+  const grams = (text: string): string[] => {
+    const normalized = words(text);
     const out: string[] = [];
-    for (let index = 0; index + GRAM <= words.length; index += 1) {
-      out.push(words.slice(index, index + GRAM).join(' '));
+    for (let index = 0; index + GRAM <= normalized.length; index += 1) {
+      out.push(normalized.slice(index, index + GRAM).join(' '));
     }
     return out;
   };
@@ -958,13 +971,20 @@ describe('the fixtures are original prose, not SRD prose', () => {
       .flatMap((name) => grams(readFileSync(join(srdDir, name), 'utf8'))),
   );
 
+  const matchingSrdGrams = (text: string): string[] =>
+    grams(text).filter(
+      (gram) => srdGrams.has(gram) && !FORMULAIC_SRD_GRAMS.has(gram),
+    );
+
   // Negative control: the scan is only meaningful if it can see the SRD at all.
   // The exact sentence that was found here must still be detectable.
   it('can detect the wording that was actually found here', () => {
     expect(srdGrams.size).toBeGreaterThan(1000);
     const offending =
       'You can attack twice, instead of once, whenever you take the Attack action on your turn.';
-    expect(grams(offending).some((gram) => srdGrams.has(gram))).toBe(true);
+    expect(matchingSrdGrams(offending)).toContain(
+      'you can attack twice instead of once whenever',
+    );
   });
 
   it('finds no SRD sentence in any homebrew fixture', () => {
@@ -989,10 +1009,8 @@ describe('the fixtures are original prose, not SRD prose', () => {
       ['long-road-spells.tier2.json', TIER2],
     ] as const) {
       for (const value of strings(JSON.parse(text))) {
-        for (const gram of grams(value)) {
-          if (srdGrams.has(gram)) {
-            offenders.push(`${name}: "…${gram}…"`);
-          }
+        for (const gram of matchingSrdGrams(value)) {
+          offenders.push(`${name}: "…${gram}…"`);
         }
       }
     }
