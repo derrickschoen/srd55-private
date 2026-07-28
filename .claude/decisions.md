@@ -1,5 +1,53 @@
 # Binding scope decisions
 
+## D46 — OWNER: a share link stays a REFERENCE; the full JSON export carries user-authored content (2026-07-28)
+
+The owner's ruling, verbatim: *"Do the placeholder for a share link and export
+all user authored content for the full json export."*
+
+I had offered three options and all three treated the wire and the backup as one
+question. They are not. The answer splits by CHANNEL, and the split is the point:
+
+- **A share link is a compact reference.** A spell the recipient's catalogue
+  lacks degrades to a placeholder, exactly as today. No wire version bump.
+- **The full JSON export is a complete artifact.** It carries all USER-AUTHORED
+  content — forks and imported homebrew — so an exported character can be
+  restored without the author's catalogue.
+
+### What this settles, and it is more than it looks
+
+**The wire stays at v2 and no licensing determination is needed.** F24 records a
+dispatch that reached for wire v3 and put `short_summary`, `upcast_summary` and
+the rest into share links; for a fork of a bundled spell that is SRD-derived
+prose in a URL, and whether a URL fragment discharges CC-BY attribution is a
+question nobody had answered. Under this ruling it never arises for links.
+
+**Design item 12 is unblocked with a shape, not a compromise.** The attack-kind
+fact on `character_weapons` is classified omitted for the SHARE, and carried in
+the export. D30's guard gets a real answer instead of a coin toss between "lose
+it" and "bump the wire".
+
+**Bundled SRD content still does not travel, in either channel.** The recipient
+seeds it. Only what the user AUTHORED needs carrying, which is also what keeps
+the export honest about the licence: our own bundled text stays ours to seed,
+and the user's own work is the user's to move.
+
+### This REFINES overnight decision 4, and I want the change visible
+
+`.claude/pending-questions/overnight-2026-07-28.md` decision 4 said the portable
+per-character backup carries references only, "because it never carried
+catalogue rows". That was right about SRD rows and wrong about user-authored
+ones. The refined rule: SRD rows are seeded by the recipient and never carried;
+forks and imported homebrew are carried by the export and NOT by the link.
+
+### Consequence worth stating before it is built
+
+A share link and an export now have DIFFERENT completeness guarantees, and the
+UI must not blur them. Someone who shares a link with a friend and expects their
+homebrew to arrive will be disappointed unless the app says so at the moment of
+sharing. That is a UI obligation this ruling creates, not a defect in it.
+
+
 ## F26 — the class Starting Equipment column is TRUNCATED in a merged extract, and the builder design found it by reading the source (2026-07-28)
 
 The guided-builder design pass (`docs/design/guided-builder.md`) reported that
