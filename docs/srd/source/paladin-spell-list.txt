@@ -1,0 +1,91 @@
+This work includes material from the System Reference Document 5.2
+("SRD 5.2") by Wizards of the Coast LLC, available at
+https://www.dndbeyond.com/srd. The SRD 5.2 is licensed under the Creative
+Commons Attribution 4.0 International License, available at
+https://creativecommons.org/licenses/by/4.0/legalcode.
+
+--- Verbatim extract: SRD 5.2.1 printed pages 55-56, Paladin Spell List. ---
+
+LAYOUT: selected `pdftotext -layout` lines are split at the measured
+gutter by Unicode CHARACTER and placed in reading order. Source text is not
+edited or re-wrapped; only trailing layout whitespace is omitted.
+
+=== SRD 5.2.1 page 55, right column ===
+
+Paladin Spell List
+This section presents the Paladin spell list. The
+spells are organized by spell level and then alpha-
+betized, and each spell’s school of magic is listed.
+In the Special column, C means the spell requires
+Concentration, R means it’s a Ritual, and M means it
+requires a specific Material component.
+
+Level 1 Paladin Spells
+Spell                        School          Special
+Bless                        Enchantment      C, M
+Command                      Enchantment       —
+Cure Wounds                  Abjuration        —
+
+Detect Evil and Good         Divination         C
+
+Detect Magic                 Divination       C, R
+Detect Poison and Disease    Divination       C, R
+
+=== SRD 5.2.1 page 56, left column ===
+
+     Spell                           School          Special
+     Divine Favor                    Transmutation     —
+     Divine Smite                    Evocation         —
+     Heroism                         Enchantment       C
+
+     Protection from Evil and Good   Abjuration       C, M
+
+     Purify Food and Drink           Transmutation     R
+     Searing Smite                   Evocation         —
+     Shield of Faith                 Abjuration        C
+
+     Level 2 Paladin Spells
+
+     Spell                           School          Special
+
+     Aid                             Abjuration        —
+     Find Steed                      Conjuration       —
+     Gentle Repose                   Necromancy       R, M
+     Lesser Restoration              Abjuration        —
+     Locate Object                   Divination        C
+     Magic Weapon                    Transmutation     —
+     Prayer of Healing               Abjuration        —
+
+     Protection from Poison          Abjuration        —
+
+     Shining Smite                   Transmutation     C
+     Warding Bond                    Abjuration        M
+     Zone of Truth                   Enchantment       —
+
+     Level 3 Paladin Spells
+     Spell                           School          Special
+     Create Food and Water           Conjuration       —
+     Daylight                        Evocation         —
+     Dispel Magic                    Abjuration        —
+     Magic Circle                    Abjuration        M
+     Remove Curse                    Abjuration        —
+
+     Revivify                        Necromancy        M
+
+     Level 4 Paladin Spells
+     Spell                           School          Special
+     Aura of Life                    Abjuration        C
+
+     Banishment                      Abjuration        C
+
+     Death Ward                      Abjuration        —
+     Locate Creature                 Divination        C
+
+     Level 5 Paladin Spells
+     Spell                           School          Special
+
+     Dispel Evil and Good            Abjuration        C
+     Geas                            Enchantment       —
+     Greater Restoration             Abjuration        M
+
+     Raise Dead                      Necromancy        M
