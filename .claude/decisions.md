@@ -1,5 +1,64 @@
 # Binding scope decisions
 
+## D48 — OWNER: CLASS IS THE FIRST STEP, and that deletes the draft-state problem rather than solving it (2026-07-28)
+
+Asked what happens when someone starts the builder, picks a species and closes
+the tab before choosing a class, the owner did not pick any of the three
+answers. The reply was: *"The class should be first."*
+
+That is the better move and it makes the question moot.
+
+### Why the question disappears
+
+D42 §1 ruled class a PRECONDITION — outside the wizard there is no class-less
+character. The abandoned-draft question only existed because the proposed order
+put species and background ahead of class, so a partial build had to be held
+SOMEWHERE that was not the database.
+
+With class first:
+
+- the character row is created the moment a class is chosen;
+- everything after that is an ordinary incomplete character, resumed from the
+  database like any other;
+- abandoning before step one leaves nothing behind, because nothing was created.
+
+The precondition stops needing enforcement machinery. It is satisfied by
+construction.
+
+**This deletes a work item.** `docs/design/guided-builder.md` item 1 proposed
+keeping "the pre-class draft in versioned session storage" — its own state
+format, its own versioning, its own loss modes on cleared site data. None of it
+is needed now. Item 1 shrinks to the route and the step contracts.
+
+### The revised order, and what still constrains it
+
+D42 §5 recorded the step order as species/background → class → ability scores →
+equipment, and said explicitly that **only the last edge was binding** and the
+earlier ones remained free. This ruling fixes an earlier one:
+
+    class → species → background → ability scores → equipment
+
+Two edges are now load-bearing, for different reasons:
+
+- **class first** — this ruling, and it is what makes the precondition free;
+- **background before ability scores** — the 2024 rules put the ability score
+  increases on the BACKGROUND, so scores cannot be finalised before it is
+  chosen. This is a rules constraint, not a preference;
+- **equipment last** — D42 §5, because a Dex build and a Str build want opposite
+  kits and the SRD's `Choose A or B` cannot be offered before the scores exist.
+
+Species sits between class and background with no mechanical dependency either
+way in the 2024 rules; its position is free and chosen for flow.
+
+### A consequence to build deliberately
+
+Choosing a class now happens BEFORE the player has seen anything else, which
+means the class step carries the weight of the whole decision. The Standard
+Array by Class table (merged `e479549`) matters more under this order than it
+did under the old one: it is the only sourced thing the app can show at the
+moment the player is choosing blind.
+
+
 ## D47 — OWNER: the builder offers all four ability-score methods, and the fourth is a HOUSE RULE with no source (2026-07-28)
 
 The owner's ruling: *"Do all methods plus look up the optional Matt coleville
