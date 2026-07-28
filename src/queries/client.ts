@@ -4,6 +4,8 @@ import {
   GUIDED_RPC,
   type GuidedBuildStateParams,
   type GuidedBuildStateResult,
+  type GuidedClassOption,
+  type GuidedCreateParams,
 } from '../builder/contracts';
 import {
   createCatalogClient,
@@ -64,6 +66,11 @@ export interface QueriesClient extends CatalogClient {
   ): Promise<PrintableSpellList>;
   operationHistory(characterId: number): Promise<OperationHistory>;
   buildState(characterId: number): Promise<GuidedBuildStateResult>;
+  guidedClassOptions(): Promise<readonly GuidedClassOption[]>;
+  createGuided(
+    name: string,
+    classContentKey: string,
+  ): Promise<CharacterRow>;
 }
 
 export function createQueriesClient(rpc: RpcClient): QueriesClient {
@@ -176,5 +183,15 @@ export function createQueriesClient(rpc: RpcClient): QueriesClient {
         GUIDED_RPC.buildState,
         characterParams(characterId),
       ),
+    guidedClassOptions: () =>
+      rpc.call<Record<string, never>, readonly GuidedClassOption[]>(
+        GUIDED_RPC.classOptions,
+        {},
+      ),
+    createGuided: (name: string, classContentKey: string) =>
+      rpc.call<GuidedCreateParams, CharacterRow>(GUIDED_RPC.create, {
+        name,
+        class_content_key: classContentKey,
+      }),
   });
 }
