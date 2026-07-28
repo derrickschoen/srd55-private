@@ -41,6 +41,7 @@ const commandTypes = [
   'set_armor',
   'set_hit_point_roll',
   'set_skill_proficiency',
+  'choose_multiclass_skill',
   'set_armor_class_adjustment',
   'restore_snapshot',
 ] as const;
@@ -239,6 +240,14 @@ function validateUpdateCharacterRules(record: UnknownRecord): void {
   rejectUnknown(record, ['type', 'allow_legacy', 'reason']);
   if (!hasOwn(record, 'allow_legacy') || typeof record.allow_legacy !== 'boolean') {
     invalid('allow_legacy must be a boolean.');
+  }
+}
+
+function validateChooseMulticlassSkill(record: UnknownRecord): void {
+  rejectUnknown(record, ['type', 'skill', 'reason']);
+  const skill = requiredString(record, 'skill', 40);
+  if (!isEnumValue(skills, skill)) {
+    invalid('Unknown skill.');
   }
 }
 
@@ -822,6 +831,9 @@ function validateByType(
       return record;
     case 'set_skill_proficiency':
       validateSetSkillProficiency(record);
+      return record;
+    case 'choose_multiclass_skill':
+      validateChooseMulticlassSkill(record);
       return record;
     case 'set_armor_class_adjustment':
       validateSetArmorClassAdjustment(record);

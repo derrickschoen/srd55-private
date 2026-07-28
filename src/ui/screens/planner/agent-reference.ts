@@ -885,7 +885,11 @@ export function buildAgentReference(
           entitled: item.entitled,
           chosen: item.chosen,
           outstanding: item.outstanding,
-          entries: item.entries.map((entry) => ({ ...entry })),
+          entries: item.entries.map((entry) => ({
+            class_name: entry.class_name,
+            count: entry.count,
+            pool: entry.pool,
+          })),
         };
       }
       return {

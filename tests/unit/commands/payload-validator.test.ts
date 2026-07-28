@@ -121,6 +121,10 @@ describe('character command payload validation', () => {
         subclass_definition_id: null,
       },
       {
+        type: 'choose_multiclass_skill',
+        skill: 'performance',
+      },
+      {
         type: 'restore_snapshot',
         snapshot: { version: 'a7-v1', tables: {} },
         integrity: signature,
@@ -204,6 +208,14 @@ describe('character command payload validation', () => {
           integrity: signature,
         },
         'Character snapshot must be an object.',
+      ],
+      [
+        {
+          type: 'choose_multiclass_skill',
+          skill: 'performance',
+          instrument: 'Lute',
+        },
+        'Unknown command field: instrument.',
       ],
     ];
 
