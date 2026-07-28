@@ -1,5 +1,60 @@
 # Binding scope decisions
 
+## F27 — the class progression numbers LOOK sourced and are not: a citation is doing a checksum's job (2026-07-28)
+
+Asked to explain why I was unsure the builder could enforce per-class spell
+counts, I checked instead of speculating. The answer is worse than "not
+extracted".
+
+**The numbers exist and are bundled.** `class_progressions` carries
+`cantrips_known` and `prepared_count` per class per level
+(`schema.sql:519-534`), seeded from a `ClassSeed` literal in
+`src/rules/class-progression-lookup.ts` with `cantrips: readonly number[]` and
+`prepared: readonly number[]`.
+
+**They are not sourced the way every other SRD number here is.** They are a
+hand-written TypeScript literal. The file header states they are *"derived from
+the System Reference Document 5.2"* and claims the attribution obligation that
+goes with bundled SRD data — but:
+
+- there is NO extract for them under `docs/srd/source/`;
+- no test compares them to any document — I grepped the rules tests for a tie
+  between these numbers and a source and found none.
+
+Every other SRD number in this repo is pinned to a checksummed file: the
+skill-to-ability map, the weapon table, the armour table, ability-score
+generation, class starting equipment, the spell catalogue.
+
+### Why this is the hard kind
+
+It does not look like a gap. The numbers carry a citation, they live in
+`src/rules/` beside the genuine seeders, and the header reads exactly like the
+ones above files that ARE pinned. A reviewer who reads the header and moves on
+sees sourced data. **The citation is doing the job a checksum should do.**
+
+F26 was an extract truncated mid-word — bad, but discoverable by looking at the
+file. This is worse to find, because there is no file to look at.
+
+### What it blocks
+
+D11 says the builder BLOCKS an SRD-illegal choice. Enforcing spell counts is
+therefore required, and it is implementable today — the data is right there. It
+would mean the app refusing a player's choice on the authority of numbers nobody
+can trace to a document.
+
+Refusing someone's input is the strongest claim an app makes. It should rest on
+the strongest evidence we have, not the weakest.
+
+### The fix, and it is the same one that worked five times tonight
+
+Extract the class tables to `docs/srd/source/`, pin the SHA-256 in `SOURCE.md`,
+and assert the literal against the extract — the pattern that caught a truncated
+Fighter option, an unsourced `1d4` Monk die, and would have caught this. The
+ability-methods track is the template.
+
+Until then the builder should not enforce counts it cannot justify.
+
+
 ## D51 — OWNER: the feat model. ASI is a feat, most feats are text, and only three kinds earn structure (2026-07-28)
 
 The owner's ruling, in four parts:
