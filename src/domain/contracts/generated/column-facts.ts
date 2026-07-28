@@ -53,7 +53,6 @@ export const COLUMN_FACTS = {
     item_kind: { base: 'degraded', notNull: true },
     weapon_template_id: { base: 'integer', notNull: false },
     armor_template_id: { base: 'integer', notNull: false },
-    coin_copper: { base: 'integer', notNull: false },
     created_at: { base: 'degraded', notNull: false },
     updated_at: { base: 'degraded', notNull: false },
   },

@@ -9,6 +9,7 @@ import {
   databaseSchemaSignature,
   openDatabaseImage,
 } from '../../../src/db/database-lifecycle';
+import type { DatabaseContext } from '../../../src/db/database';
 import {
   DATABASE_MIGRATIONS,
   databaseSchemaChecksum,
@@ -104,6 +105,43 @@ function image(sql: string): Uint8Array {
   }
 }
 
+const SCHEMA_BEFORE_COIN_RETIREMENT = DATABASE_MIGRATIONS
+  .slice(0, 4)
+  .map((entry) => entry.sql)
+  .join('\n');
+
+const HISTORICAL_BACKGROUND_ROWS = `
+INSERT INTO background_templates (
+  id, content_key, rules_edition, name,
+  ability_score_1, ability_score_2, ability_score_3, feat_name,
+  skill_proficiency_1, skill_proficiency_2, tool_proficiency,
+  equipment_option_a, equipment_option_b
+) VALUES
+  (1, '2024:background:acolyte', '2024', 'Acolyte',
+   'Intelligence', 'Wisdom', 'Charisma', 'Magic Initiate (Cleric)',
+   'Insight', 'Religion', 'Calligrapher’s Supplies', 'A', '50 GP'),
+  (2, '2024:background:criminal', '2024', 'Criminal',
+   'Dexterity', 'Constitution', 'Intelligence', 'Alert',
+   'Sleight of Hand', 'Stealth', 'Thieves’ Tools', 'A', '50 GP'),
+  (3, '2024:background:sage', '2024', 'Sage',
+   'Constitution', 'Intelligence', 'Wisdom', 'Magic Initiate (Wizard)',
+   'Arcana', 'History', 'Calligrapher’s Supplies', 'A', '50 GP'),
+  (4, '2024:background:soldier', '2024', 'Soldier',
+   'Strength', 'Dexterity', 'Constitution', 'Savage Attacker',
+   'Athletics', 'Intimidation', 'Choose one kind of Gaming Set', 'A', '50 GP');
+INSERT INTO background_equipment_items (
+  id, background_template_id, option, sort_order, quantity, item_name,
+  item_kind, coin_copper
+) VALUES
+  (101, 1, 'a', 1, 1, 'stale', 'coin', 800),
+  (102, 1, 'b', 1, 1, 'stale', 'coin', 5000),
+  (201, 2, 'a', 1, 1, 'stale', 'coin', 1600),
+  (202, 2, 'b', 1, 1, 'stale', 'coin', 5000),
+  (301, 3, 'a', 1, 1, 'stale', 'coin', 800),
+  (302, 3, 'b', 1, 1, 'stale', 'coin', 5000),
+  (401, 4, 'a', 1, 1, 'stale', 'coin', 1400),
+  (402, 4, 'b', 1, 1, 'stale', 'coin', 5000);`;
+
 async function storageHolding(sql: string): Promise<MemoryDatabaseStorage> {
   const storage = new MemoryDatabaseStorage(sqlite3);
   await storage.replaceFile(image(sql));
@@ -171,6 +209,96 @@ describe('database migration chain', () => {
       { id: 4, range_kind: 'legacy', range_near_feet: null, range_far_feet: 60 },
       { id: 5, range_kind: 'legacy', range_near_feet: 60, range_far_feet: 20 },
     ]);
+    lifecycle.close();
+  });
+
+  it('renders every historical background coin row as its exact GP gear line and round-trips the migrated database', async () => {
+    const storage = await storageHolding(
+      `${SCHEMA_BEFORE_COIN_RETIREMENT}\n${HISTORICAL_BACKGROUND_ROWS}`,
+    );
+    const lifecycle = new DatabaseLifecycle(sqlite3, storage, schema);
+    lifecycle.open();
+
+    const expected = [
+      { background: 'Acolyte', option: 'a', item_name: '8 GP', item_kind: 'gear' },
+      { background: 'Acolyte', option: 'b', item_name: '50 GP', item_kind: 'gear' },
+      { background: 'Criminal', option: 'a', item_name: '16 GP', item_kind: 'gear' },
+      { background: 'Criminal', option: 'b', item_name: '50 GP', item_kind: 'gear' },
+      { background: 'Sage', option: 'a', item_name: '8 GP', item_kind: 'gear' },
+      { background: 'Sage', option: 'b', item_name: '50 GP', item_kind: 'gear' },
+      { background: 'Soldier', option: 'a', item_name: '14 GP', item_kind: 'gear' },
+      { background: 'Soldier', option: 'b', item_name: '50 GP', item_kind: 'gear' },
+    ];
+    const read = (database: DatabaseContext) =>
+      database.allRaw(
+        `SELECT template.name AS background, item.option, item.item_name,
+                item.item_kind
+         FROM background_equipment_items AS item
+         JOIN background_templates AS template
+           ON template.id = item.background_template_id
+         ORDER BY template.id, item.option`,
+      );
+    expect(read(lifecycle.database)).toEqual(expected);
+    expect(
+      lifecycle.database.allRaw(
+        `SELECT name, equipment_option_b
+         FROM background_templates ORDER BY id`,
+      ),
+    ).toEqual([
+      { name: 'Acolyte', equipment_option_b: '50 GP' },
+      { name: 'Criminal', equipment_option_b: '50 GP' },
+      { name: 'Sage', equipment_option_b: '50 GP' },
+      { name: 'Soldier', equipment_option_b: '50 GP' },
+    ]);
+
+    const migratedBytes = await lifecycle.exportBytes();
+    const imported = new DatabaseLifecycle(
+      sqlite3,
+      new MemoryDatabaseStorage(sqlite3),
+      schema,
+    );
+    imported.open();
+    await imported.replace(migratedBytes);
+    expect(read(imported.database)).toEqual(expected);
+    expect(await imported.exportBytes()).toEqual(migratedBytes);
+    imported.close();
+    lifecycle.close();
+  });
+
+  it('aborts on an unrenderable historical copper value, naming the row and preserving the image', async () => {
+    const storage = await storageHolding(
+      `${SCHEMA_BEFORE_COIN_RETIREMENT}
+       ${HISTORICAL_BACKGROUND_ROWS}
+       UPDATE background_equipment_items
+       SET coin_copper = 5050
+       WHERE id = 302;`,
+    );
+    const before = await storage.exportFile();
+    const lifecycle = new DatabaseLifecycle(sqlite3, storage, schema);
+
+    expect(() => lifecycle.open()).toThrow(
+      'background_equipment_items id 302 coin_copper=5050 cannot be rendered as whole GP',
+    );
+    expect(await storage.exportFile()).toEqual(before);
+  });
+
+  it('renders a large whole-GP value without clamping it', async () => {
+    const storage = await storageHolding(
+      `${SCHEMA_BEFORE_COIN_RETIREMENT}
+       ${HISTORICAL_BACKGROUND_ROWS}
+       UPDATE background_equipment_items
+       SET coin_copper = 12345678900
+       WHERE id = 101;`,
+    );
+    const lifecycle = new DatabaseLifecycle(sqlite3, storage, schema);
+
+    lifecycle.open();
+
+    expect(
+      lifecycle.database.scalar(
+        'SELECT item_name FROM background_equipment_items WHERE id = 101',
+      ),
+    ).toBe('123456789 GP');
     lifecycle.close();
   });
 

@@ -395,7 +395,7 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
   background_equipment_items: {
     integer: [
       'id', 'background_template_id', 'sort_order', 'quantity',
-      'weapon_template_id', 'armor_template_id', 'coin_copper',
+      'weapon_template_id', 'armor_template_id',
     ],
     text: ['option', 'item_name', 'item_kind'],
     numeric: ['created_at', 'updated_at'],
