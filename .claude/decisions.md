@@ -61,9 +61,18 @@ moment the player is choosing blind.
 
 ## D47 — OWNER: the builder offers all four ability-score methods, and the fourth is a HOUSE RULE with no source (2026-07-28)
 
-The owner's ruling: *"Do all methods plus look up the optional Matt coleville
-rolling 4d6 drop the lowest, keep the order method"*, then, asked whether the
-reroll gate was included: **all three parts, labelled a house rule.**
+The owner's ruling: all four methods, the fourth being an optional variant that
+rolls 4d6 drop the lowest and keeps the order; then, asked whether the reroll
+gate was included: **all three parts, labelled a house rule.**
+
+**IT IS CALLED "ROLL IN ORDER" AND NAMES NOBODY.** The owner's later
+instruction, verbatim: *"Do not use Matt's name. Just call it roll in order."*
+The variant is associated with a particular person in the wider hobby; the
+product and this record do not say so. Naming an individual would imply
+endorsement we do not have and attach a person to a rule they did not write for
+us. The commit that first recorded this decision (`59fa83e`) predates the
+instruction and does contain the name; it is left as immutable history rather
+than rewritten, and nothing after it repeats it.
 
 ### The four methods
 
@@ -80,13 +89,13 @@ reason the values were extracted rather than typed.
 
 The fourth is not SRD:
 
-- **In-order roll (house rule)** — 4d6 drop lowest; assign to Strength,
+- **Roll in order (house rule)** — 4d6 drop lowest; assign to Strength,
   Dexterity, Constitution, Intelligence, Wisdom and Charisma IN THE ORDER
   ROLLED; reroll the entire set if it does not contain at least two scores of
   15 or higher.
 
 **All three parts, and the third is load-bearing.** Without the reroll gate,
-in-order is materially harsher than the SRD method, because a bad set cannot be
+rolling in order is materially harsher than the SRD method, because a bad set cannot be
 rearranged to fit the class. A Wizard who rolls 8 into Intelligence has no
 recourse. The gate is what makes the variant playable, not a softening of it.
 
