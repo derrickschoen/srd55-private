@@ -505,7 +505,6 @@ describe('SRD character backgrounds', () => {
           item_kind: 'weapon',
           weapon_content_key: '2024:weapon:dagger',
           armor_content_key: null,
-          coin_copper: null,
         },
         {
           option: 'a',
@@ -515,7 +514,6 @@ describe('SRD character backgrounds', () => {
           item_kind: 'gear',
           weapon_content_key: null,
           armor_content_key: null,
-          coin_copper: null,
         },
         {
           option: 'a',
@@ -525,7 +523,6 @@ describe('SRD character backgrounds', () => {
           item_kind: 'gear',
           weapon_content_key: null,
           armor_content_key: null,
-          coin_copper: null,
         },
         {
           option: 'a',
@@ -535,7 +532,6 @@ describe('SRD character backgrounds', () => {
           item_kind: 'gear',
           weapon_content_key: null,
           armor_content_key: null,
-          coin_copper: null,
         },
         {
           option: 'a',
@@ -545,27 +541,24 @@ describe('SRD character backgrounds', () => {
           item_kind: 'gear',
           weapon_content_key: null,
           armor_content_key: null,
-          coin_copper: null,
         },
         {
           option: 'a',
           sort_order: 6,
           quantity: 1,
           item_name: '16 GP',
-          item_kind: 'coin',
+          item_kind: 'gear',
           weapon_content_key: null,
           armor_content_key: null,
-          coin_copper: 1600,
         },
         {
           option: 'b',
           sort_order: 1,
           quantity: 1,
           item_name: '50 GP',
-          item_kind: 'coin',
+          item_kind: 'gear',
           weapon_content_key: null,
           armor_content_key: null,
-          coin_copper: 5000,
         },
       ],
     });

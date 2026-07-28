@@ -84,7 +84,6 @@ import {
   type BackgroundEquipmentOption,
   type EffectKind,
 } from '../domain/enums';
-import { coinDenominationOf, copperValue } from '../domain/coin';
 import { rowContractError } from '../domain/contracts/rows';
 import { weaponContentKey } from './weapons-srd';
 
@@ -176,7 +175,6 @@ export interface SrdBackgroundEquipmentItem {
   readonly item_kind: BackgroundEquipmentItemKind;
   readonly weapon_content_key: string | null;
   readonly armor_content_key: string | null;
-  readonly coin_copper: number | null;
 }
 
 /* ==========================================================================
@@ -875,8 +873,8 @@ const EQUIPMENT_CHOICE =
  * a sub-unit, and `Book (prayers)` is a subject rather than a number at all.
  */
 const LEADING_QUANTITY = /^(?<quantity>\d{1,4})\s+(?<name>\S.*)$/u;
-/** A whole line that is money and nothing else: `8 GP`, `50 GP`, `16 GP`. */
-const COIN_LINE = /^(?<amount>\d{1,9})\s*(?<coin>CP|SP|EP|GP|PP)$/iu;
+/** A whole printed money line: text, on the same terms as a bedroll (D40). */
+const MONEY_LINE = /^\d{1,9}\s+GP$/u;
 
 /**
  * WHICH PRINTED EQUIPMENT ENTRIES ARE WEAPONS, DECLARED RATHER THAN MATCHED.
@@ -897,7 +895,7 @@ const COIN_LINE = /^(?<amount>\d{1,9})\s*(?<coin>CP|SP|EP|GP|PP)$/iu;
  * avoid, and that limit is stated rather than papered over.
  *
  * NO ARMOUR ENTRY, AND THE ABSENCE IS THE FACT. The four licensed packages hold
- * four weapon-ish entries, ammunition, tools, clothing and coin, and NO ARMOUR:
+ * four weapon-ish entries, ammunition, tools, clothing and money, and NO ARMOUR:
  * `Robe` and `Traveler's Clothes` are clothing, which `armor_templates` — the
  * source's own thirteen-row Armor table — does not carry. The `armor` limb of
  * the ruling therefore ships with no bundled row that reaches it, which is
@@ -958,28 +956,14 @@ function parseEquipmentEntry(
     armor_content_key: null,
   } as const;
 
-  const coin = COIN_LINE.exec(entry)?.groups;
-  if (coin?.amount !== undefined && coin.coin !== undefined) {
-    const denomination = coinDenominationOf(coin.coin);
-    const copper =
-      denomination === null
-        ? null
-        : copperValue(Number(coin.amount), denomination);
-    if (copper === null || copper < 1) {
-      throw new OriginExtractError(
-        `${background} equipment option ${option.toUpperCase()} has an unreadable coin entry: ${entry}`,
-      );
-    }
-    // QUANTITY 1 AND THE WHOLE PRINTED TEXT AS THE NAME. Fifty gold pieces are
-    // one sum of money, not fifty items — reading `50 GP` as quantity 50 of an
-    // item called `GP` is what would turn currency into inventory. The `50` is
-    // not a count here, so it is not stripped: it is part of what the line is.
+  if (MONEY_LINE.test(entry)) {
+    // QUANTITY 1 AND THE WHOLE PRINTED TEXT AS THE NAME. D40 deliberately
+    // gives this line no numeric money payload.
     return {
       ...base,
       item_name: entry,
       quantity: 1,
-      item_kind: 'coin',
-      coin_copper: copper,
+      item_kind: 'gear',
     };
   }
 
@@ -1011,7 +995,6 @@ function parseEquipmentEntry(
       quantity,
       item_kind: 'weapon',
       weapon_content_key: weaponContentKey(weapon),
-      coin_copper: null,
     };
   }
   return {
@@ -1019,7 +1002,6 @@ function parseEquipmentEntry(
     item_name: name,
     quantity,
     item_kind: 'gear',
-    coin_copper: null,
   };
 }
 
@@ -1517,7 +1499,6 @@ function seedBackgroundEquipment(
         item.armor_content_key,
         template.name,
       ),
-      coin_copper: item.coin_copper,
       created_at: timestamp,
       updated_at: timestamp,
     };

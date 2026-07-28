@@ -1126,7 +1126,7 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     ],
     accepts: [
       ['package A', equipmentItem({ option: 'a' })],
-      ['package B, which is coin alone for all four backgrounds', equipmentItem({ option: 'b' })],
+      ['package B, which is money text alone for all four backgrounds', equipmentItem({ option: 'b' })],
     ],
   },
   {
@@ -1134,6 +1134,7 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     rejects: [
       ['a kind the exhaustive switch has no arm for', equipmentItem({ item_kind: 'tool' })],
       ['an empty kind', equipmentItem({ item_kind: '' })],
+      ['the retired coin kind', equipmentItem({ item_kind: 'coin' })],
     ],
     accepts: [
       ['gear, the majority case', equipmentItem({ item_kind: 'gear' })],
@@ -1142,7 +1143,6 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
       // `Traveler's Clothes` are clothing. This is the case that keeps the
       // owner's "unless weapon or ARMOR" limb from shipping unexercised.
       ['an armour line, which no bundled package reaches', equipmentItem({ item_kind: 'armor', armor_template_id: '@armor' })],
-      ['a coin line', equipmentItem({ item_kind: 'coin', coin_copper: 5000 })],
     ],
   },
   {
@@ -1171,33 +1171,16 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     rejects: [
       ['a weapon line with no weapon', equipmentItem({ item_kind: 'weapon' })],
       ['an armour line with no armour', equipmentItem({ item_kind: 'armor' })],
-      ['a coin line with no amount', equipmentItem({ item_kind: 'coin' })],
       // THE NEGATIVE HALF, and it is what makes `item_kind` mean something
       // rather than merely be recorded: without it a reader would have two
       // answers to "what is this line" and no way to break the tie.
       ['gear carrying a weapon anyway', equipmentItem({ item_kind: 'gear', weapon_template_id: '@weapon' })],
-      ['gear carrying coin anyway', equipmentItem({ item_kind: 'gear', coin_copper: 100 })],
       ['a weapon line that is also armour', equipmentItem({ item_kind: 'weapon', weapon_template_id: '@weapon', armor_template_id: '@armor' })],
-      ['a coin line that is also a weapon', equipmentItem({ item_kind: 'coin', coin_copper: 100, weapon_template_id: '@weapon' })],
     ],
     accepts: [
       ['gear carrying nothing', equipmentItem({ item_kind: 'gear' })],
       ['a weapon line with its weapon', equipmentItem({ item_kind: 'weapon', weapon_template_id: '@weapon' })],
       ['an armour line with its armour', equipmentItem({ item_kind: 'armor', armor_template_id: '@armor' })],
-      ['a coin line with its amount', equipmentItem({ item_kind: 'coin', coin_copper: 1400 })],
-    ],
-  },
-  {
-    constraint: 'background_equipment_items_coin_copper_check',
-    rejects: [
-      ['a coin line worth nothing', equipmentItem({ item_kind: 'coin', coin_copper: 0 })],
-      ['a negative sum', equipmentItem({ item_kind: 'coin', coin_copper: -1 })],
-      ['a fractional copper piece', equipmentItem({ item_kind: 'coin', coin_copper: 0.5 })],
-    ],
-    accepts: [
-      ['the null every non-coin line carries', equipmentItem({ item_kind: 'gear' })],
-      ['one copper piece', equipmentItem({ item_kind: 'coin', coin_copper: 1 })],
-      ['the fifty gold of every option B', equipmentItem({ item_kind: 'coin', coin_copper: 5000 })],
     ],
   },
   {
