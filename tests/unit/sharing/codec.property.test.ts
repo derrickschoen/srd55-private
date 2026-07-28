@@ -247,20 +247,26 @@ function generateDocument(seed: number): CharacterShareDocument {
     // property, and a generator that produced one would be testing the
     // validator's rejection rather than the codec's fidelity.
     const masterySelected = random() < 0.4;
+    const nearFeet = integer(random, WEAPON_RANGE_MAX_FEET + 1);
+    const range = random() < 0.5
+      ? { kind: 'none' as const }
+      : {
+          kind: 'ranged' as const,
+          near_feet: nearFeet,
+          far_feet: random() < 0.5
+            ? null
+            : nearFeet + integer(
+                random,
+                WEAPON_RANGE_MAX_FEET - nearFeet + 1,
+              ),
+        };
     return {
       name: textValue(random, `-weapon-${weaponIndex}`),
       damage: weaponDamage(random, `-weapon-${weaponIndex}`),
       ...(random() < 0.5 ? {} : { damage_type: textValue(random, '-type') }),
       versatile_damage: versatileDamage(random, `-weapon-${weaponIndex}`),
       ...(random() < 0.5 ? {} : { ammunition_kind: textValue(random, '-ammo') }),
-      // Drawn from `WEAPON_RANGE_MAX_FEET + 1` rather than a transcribed
-      // literal. A hard-coded bound would silently stop covering the top of the
-      // range the moment the shared limit moved, which is exactly the drift
-      // that let the share and write boundaries disagree in the first place.
-      ...(random() < 0.5 ? {} : { range_normal_feet: integer(random, 601) }),
-      ...(random() < 0.5
-        ? {}
-        : { range_long_feet: integer(random, WEAPON_RANGE_MAX_FEET + 1) }),
+      range,
       ...(masterySelected || random() < 0.5
         ? {
             mastery_property: pick(random, [

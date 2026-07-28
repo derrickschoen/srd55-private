@@ -15,16 +15,16 @@ import {
   validateShareDocument,
 } from './schema';
 import {
-  versatileWeaponDamageFromLegacy,
-  weaponDamageFromLegacy,
   type VersatileWeaponDamage,
   type WeaponDamage,
 } from '../domain/weapon-damage';
 import {
   CURRENT_CHARACTER_SHARE_VERSION,
+  MIGRATIONS,
   SHARE_SCHEMAS,
   type WireField,
 } from './wire-schemas';
+import type { WeaponRange } from '../domain/weapon-range';
 
 type Tuple = readonly unknown[];
 
@@ -94,18 +94,12 @@ const ROOT_WEAPONS_INDEX = fieldIndex(
 const ROOT_ORIGIN_INDEX = fieldIndex(WIRE_SCHEMA.tuples.root.fields, 'origin');
 const ROOT_SHEET_INDEX = fieldIndex(WIRE_SCHEMA.tuples.root.fields, 'sheet');
 const ROOT_EFFECTS_INDEX = fieldIndex(WIRE_SCHEMA.tuples.root.fields, 'effects');
-const [
-  LEGACY_ROOT_LENGTH,
-  PRE_ORIGIN_ROOT_LENGTH,
-  PRE_SHEET_ROOT_LENGTH,
-  PRE_EFFECTS_ROOT_LENGTH,
-] = ROOT_TUPLE_LENGTHS;
-
-const CHARACTER_TUPLE_LENGTHS = WIRE_SCHEMA.tuples.character.arities;
-const CHARACTER_PLACEHOLDERS_INDEX = fieldIndex(
-  WIRE_SCHEMA.tuples.character.fields,
+const ROOT_PLACEHOLDERS_INDEX = fieldIndex(
+  WIRE_SCHEMA.tuples.root.fields,
   'placeholders',
 );
+
+const CHARACTER_TUPLE_LENGTHS = WIRE_SCHEMA.tuples.character.arities;
 const SHEET_TUPLE_LENGTH = WIRE_SCHEMA.tuples.sheet.arities[0];
 const SHEET_ARMOR_INDEX = fieldIndex(WIRE_SCHEMA.tuples.sheet.fields, 'armor');
 const SHEET_HIT_POINT_ROLLS_INDEX = fieldIndex(
@@ -148,13 +142,8 @@ const HIT_POINT_ROLL_TUPLE_LENGTH =
 const SHEET_ADJUSTMENT_TUPLE_LENGTH =
   WIRE_SCHEMA.tuples.sheetAdjustment.arities[0];
 
-const WEAPON_TUPLE_LENGTHS =
-  WIRE_SCHEMA.tuples.weapon.variants.map((variant) => variant.arity);
 const WEAPON_TUPLE_LENGTH =
-  WIRE_SCHEMA.tuples.weapon.variants.at(-1)?.arity;
-if (WEAPON_TUPLE_LENGTH === undefined) {
-  throw new Error('Wire schema v1 must define a current weapon variant.');
-}
+  WIRE_SCHEMA.tuples.weapon.variants[0].arity;
 
 function tuple(
   value: unknown,
@@ -182,18 +171,21 @@ function variableTuple(
   return value;
 }
 
-/**
- * A weapon's wire order, frozen.
- *
- * Positional encoding trades self-description for size, so the order is part of
- * the format: name, the four short text columns, the two ranges, the mastery
- * property, the two long free-text columns, the nine flags, and — appended by
- * D27 — the proficiency category. Reordering this silently reinterprets every
- * link ever generated.
- */
-const WEAPON_LEGACY_WIRE_FIELDS = fieldKeys(
-  WIRE_SCHEMA.tuples.weapon.variants[1].fields,
-).slice(1);
+const WEAPON_WIRE_FIELDS = fieldKeys(
+  WIRE_SCHEMA.tuples.weapon.variants[0].fields,
+);
+const WEAPON_DAMAGE_INDEX = fieldIndex(
+  WIRE_SCHEMA.tuples.weapon.variants[0].fields,
+  'damage',
+);
+const WEAPON_VERSATILE_DAMAGE_INDEX = fieldIndex(
+  WIRE_SCHEMA.tuples.weapon.variants[0].fields,
+  'versatile_damage',
+);
+const WEAPON_RANGE_INDEX = fieldIndex(
+  WIRE_SCHEMA.tuples.weapon.variants[0].fields,
+  'range',
+);
 const SPECIES_WIRE_FIELDS = fieldKeys(
   WIRE_SCHEMA.tuples.species.fields,
 ).slice(1);
@@ -257,8 +249,52 @@ function damageFromPositional(value: unknown, label: string): unknown {
   throw new ShareValidationError(`${label} kind is unsupported.`);
 }
 
-function legacyWireValue(weapon: ShareWeapon, field: string): unknown {
+function weaponRangeToPositional(
+  range: WeaponRange,
+): readonly unknown[] {
+  switch (range.kind) {
+    case 'none':
+      return ['none'];
+    case 'ranged':
+      return [range.kind, range.near_feet, range.far_feet];
+    case 'legacy':
+      throw new ShareValidationError(
+        'weapons cannot freshly encode a decode-only legacy range.',
+      );
+  }
+}
+
+function weaponRangeFromPositional(
+  value: unknown,
+  label: string,
+): unknown {
+  if (!Array.isArray(value)) {
+    throw new ShareValidationError(`${label} must be a tagged range tuple.`);
+  }
+  switch (value[0]) {
+    case 'none':
+      tuple(value, 1, label);
+      return { kind: 'none' };
+    case 'ranged':
+    case 'legacy':
+      tuple(value, 3, label);
+      return {
+        kind: value[0],
+        near_feet: value[1],
+        far_feet: value[2],
+      };
+    default:
+      throw new ShareValidationError(`${label} kind is unsupported.`);
+  }
+}
+
+function weaponWireValue(
+  weapon: ShareWeapon,
+  field: string,
+): unknown {
   switch (field) {
+    case 'name':
+      return weapon.name;
     case 'damage_dice':
     case 'versatile_damage_dice':
       return null;
@@ -266,10 +302,8 @@ function legacyWireValue(weapon: ShareWeapon, field: string): unknown {
       return weapon.damage_type ?? null;
     case 'ammunition_kind':
       return weapon.ammunition_kind ?? null;
-    case 'range_normal_feet':
-      return weapon.range_normal_feet ?? null;
-    case 'range_long_feet':
-      return weapon.range_long_feet ?? null;
+    case 'range':
+      return weaponRangeToPositional(weapon.range);
     case 'mastery_property':
       return weapon.mastery_property ?? null;
     case 'other_properties':
@@ -288,56 +322,51 @@ function legacyWireValue(weapon: ShareWeapon, field: string): unknown {
       return weapon[field] ?? null;
     case 'proficiency_category':
       return weapon.proficiency_category ?? null;
+    case 'damage':
+      return damageToPositional(weapon.damage);
+    case 'versatile_damage':
+      return damageToPositional(weapon.versatile_damage);
     default:
       throw new Error(`Unknown weapon wire field ${field}.`);
   }
 }
 
 function weaponToPositional(weapon: ShareWeapon): unknown[] {
-  return [
-    weapon.name,
-    ...WEAPON_LEGACY_WIRE_FIELDS.map((field) =>
-      legacyWireValue(weapon, field),
-    ),
-    damageToPositional(weapon.damage),
-    damageToPositional(weapon.versatile_damage),
-  ];
+  return WEAPON_WIRE_FIELDS.map((field) =>
+    weaponWireValue(weapon, field)
+  );
 }
 
 function weaponFromPositional(value: unknown, label: string): unknown {
-  const row = variableTuple(value, WEAPON_TUPLE_LENGTHS, label);
-  let legacyDamage: string | null = null;
-  let legacyVersatile: string | null = null;
+  const row = tuple(value, WEAPON_TUPLE_LENGTH, label);
   const weapon: Record<string, unknown> = { name: row[0] };
-  WEAPON_LEGACY_WIRE_FIELDS.forEach((field, index) => {
-    const item = row[index + 1];
-    // `undefined` is a SHORT TUPLE — a link minted before D27 — and `null` is a
-    // column this weapon genuinely has nothing in. Both leave the key absent,
-    // which is what `ShareWeapon` optionality means, so the two cases need no
-    // separate branch and neither can invent a value.
-    if (field === 'damage_dice') {
-      legacyDamage = item === null || item === undefined ? null : String(item);
-    } else if (field === 'versatile_damage_dice') {
-      legacyVersatile =
-        item === null || item === undefined ? null : String(item);
-    } else if (item !== null && item !== undefined) {
+  WEAPON_WIRE_FIELDS.forEach((field, index) => {
+    const item = row[index];
+    if (
+      field === 'damage_dice' ||
+      field === 'versatile_damage_dice' ||
+      field === 'damage' ||
+      field === 'versatile_damage' ||
+      field === 'range'
+    ) {
+      return;
+    }
+    if (item !== null) {
       weapon[field] = item;
     }
   });
-  if (row.length === WEAPON_TUPLE_LENGTH) {
-    weapon.damage = damageFromPositional(
-      row[WEAPON_TUPLE_LENGTH - 2],
-      `${label}.damage`,
-    );
-    weapon.versatile_damage = damageFromPositional(
-      row[WEAPON_TUPLE_LENGTH - 1],
-      `${label}.versatile_damage`,
-    );
-  } else {
-    weapon.damage = weaponDamageFromLegacy(legacyDamage);
-    weapon.versatile_damage =
-      versatileWeaponDamageFromLegacy(legacyVersatile);
-  }
+  weapon.range = weaponRangeFromPositional(
+    row[WEAPON_RANGE_INDEX],
+    `${label}.range`,
+  );
+  weapon.damage = damageFromPositional(
+    row[WEAPON_DAMAGE_INDEX],
+    `${label}.damage`,
+  );
+  weapon.versatile_damage = damageFromPositional(
+    row[WEAPON_VERSATILE_DAMAGE_INDEX],
+    `${label}.versatile_damage`,
+  );
   return weapon;
 }
 
@@ -366,7 +395,7 @@ function speciesTraitToPositional(trait: ShareSpeciesTrait): unknown[] {
  * the payload is read, and `label` follows it because every other section in
  * this format leads with the thing a reader would call the row. The two
  * PROVENANCE slots go last, ref then flag: they are the only references here.
- * Their v1 positions never move; a future payload shape belongs to v2.
+ * Their positions do not move between v1 and v2.
  *
  * `sourceSubclass` rides in its own slot rather than being folded into the ref
  * (a negative ref, a second numbering) because the ref space is shared with
@@ -489,12 +518,7 @@ export function shareDocumentToPositional(
   const document = validateShareDocument(input);
   const character = document.character;
   const characterWire = objectToPositional(
-    {
-      ...character,
-      placeholders: document.placeholders?.map((row) =>
-        objectToPositional(row, WIRE_SCHEMA.tuples.placeholder.fields)
-      ),
-    },
+    character,
     WIRE_SCHEMA.tuples.character.fields,
   );
   const originWire = objectToPositional(
@@ -564,49 +588,25 @@ export function shareDocumentToPositional(
       origin: originWire,
       sheet: sheetWire,
       effects: document.effects?.map(effectToPositional),
+      placeholders: document.placeholders?.map((row) =>
+        objectToPositional(row, WIRE_SCHEMA.tuples.placeholder.fields)
+      ),
     },
     WIRE_SCHEMA.tuples.root.fields,
   );
 }
 
-function decodeWireV1(input: unknown): CharacterShareDocument {
+function decodeWireV2(input: unknown): CharacterShareDocument {
   const root = variableTuple(input, ROOT_TUPLE_LENGTHS, 'wire document');
-  // An eleven-element document predates weapons. `undefined`, not `null`: the
-  // section is genuinely absent, and the object validator distinguishes the two.
-  const wireWeapons =
-    root.length === LEGACY_ROOT_LENGTH ? null : root[ROOT_WEAPONS_INDEX];
-  // Eleven or twelve elements both predate the origin. `null` rather than a
-  // three-element tuple of nulls, so the three sections stay genuinely ABSENT
-  // and the object validator can tell "carried none" from "never carried".
-  const wireOrigin =
-    root.length === LEGACY_ROOT_LENGTH ||
-    root.length === PRE_ORIGIN_ROOT_LENGTH
-      ? null
-      : tuple(root[ROOT_ORIGIN_INDEX], ORIGIN_TUPLE_LENGTH, 'wire origin');
-  // Eleven, twelve and thirteen elements all predate the sheet inputs. `null`
-  // rather than a four-element tuple of nulls, so the four sections stay
-  // genuinely ABSENT and the object validator can tell "recorded none" from
-  // "never carried any" — the difference between importing a character with no
-  // armour and importing a link that never mentioned armour.
-  const wireSheet =
-    root.length === LEGACY_ROOT_LENGTH ||
-    root.length === PRE_ORIGIN_ROOT_LENGTH ||
-    root.length === PRE_SHEET_ROOT_LENGTH
-      ? null
-      : tuple(root[ROOT_SHEET_INDEX], SHEET_TUPLE_LENGTH, 'wire sheet');
-  // Eleven through fourteen elements all predate the effect model. `null`
-  // rather than an empty list, so the section stays genuinely ABSENT and the
-  // object validator can tell "carried none" from "never carried any" — the
-  // difference between importing a character with no effects and importing a
-  // link whose effects are still written on its trait rows, which is exactly
-  // what `splitLegacyTraitEffect` then migrates.
-  const wireEffects =
-    root.length === LEGACY_ROOT_LENGTH ||
-    root.length === PRE_ORIGIN_ROOT_LENGTH ||
-    root.length === PRE_SHEET_ROOT_LENGTH ||
-    root.length === PRE_EFFECTS_ROOT_LENGTH
-      ? null
-      : root[ROOT_EFFECTS_INDEX];
+  const wireWeapons = root[ROOT_WEAPONS_INDEX];
+  const wireOrigin = root[ROOT_ORIGIN_INDEX] === null
+    ? null
+    : tuple(root[ROOT_ORIGIN_INDEX], ORIGIN_TUPLE_LENGTH, 'wire origin');
+  const wireSheet = root[ROOT_SHEET_INDEX] === null
+    ? null
+    : tuple(root[ROOT_SHEET_INDEX], SHEET_TUPLE_LENGTH, 'wire sheet');
+  const wireEffects = root[ROOT_EFFECTS_INDEX];
+  const wirePlaceholders = root[ROOT_PLACEHOLDERS_INDEX];
   const character = variableTuple(
     root[ROOT_CHARACTER_INDEX],
     CHARACTER_TUPLE_LENGTHS,
@@ -738,14 +738,14 @@ function decodeWireV1(input: unknown): CharacterShareDocument {
       );
     }
   }
-  if (character[CHARACTER_PLACEHOLDERS_INDEX] !== null) {
-    if (!Array.isArray(character[CHARACTER_PLACEHOLDERS_INDEX])) {
+  if (wirePlaceholders !== null) {
+    if (!Array.isArray(wirePlaceholders)) {
       throw new ShareValidationError(
         'wire placeholders must be a list.',
       );
     }
     assertListLimit(
-      character[CHARACTER_PLACEHOLDERS_INDEX],
+      wirePlaceholders,
       SHARE_LIMITS.placeholders,
       'placeholders',
     );
@@ -754,10 +754,9 @@ function decodeWireV1(input: unknown): CharacterShareDocument {
   const rawCharacter = fromPositional(
     character,
     character.length,
-    fieldKeys(WIRE_SCHEMA.tuples.character.fields).slice(0, character.length),
+    fieldKeys(WIRE_SCHEMA.tuples.character.fields),
     'wire character',
   );
-  delete rawCharacter.placeholders;
 
   const raw: Record<string, unknown> = {
     format: root[ROOT_FORMAT_INDEX],
@@ -844,8 +843,8 @@ function decodeWireV1(input: unknown): CharacterShareDocument {
       };
     });
   }
-  if (character[CHARACTER_PLACEHOLDERS_INDEX] !== null) {
-    raw.placeholders = character[CHARACTER_PLACEHOLDERS_INDEX].map(
+  if (Array.isArray(wirePlaceholders)) {
+    raw.placeholders = wirePlaceholders.map(
       (value, index) =>
         fromPositional(
           value,
@@ -924,13 +923,32 @@ function decodeWireV1(input: unknown): CharacterShareDocument {
 export function positionalToShareDocument(
   input: unknown,
 ): CharacterShareDocument {
-  const root = variableTuple(input, ROOT_TUPLE_LENGTHS, 'wire document');
-  if (root[ROOT_FORMAT_INDEX] !== CHARACTER_SHARE_FORMAT) {
+  if (!Array.isArray(input)) {
+    variableTuple(
+      input,
+      SHARE_SCHEMAS[1].tuples.root.arities,
+      'wire document',
+    );
+    throw new ShareValidationError('wire document must be a tuple.');
+  }
+  if (input[0] !== CHARACTER_SHARE_FORMAT) {
     throw new ShareValidationError('format is unsupported.');
   }
-  switch (root[ROOT_VERSION_INDEX]) {
+  switch (input[1]) {
     case 1:
-      return decodeWireV1(root);
+      variableTuple(
+        input,
+        SHARE_SCHEMAS[1].tuples.root.arities,
+        'wire document',
+      );
+      variableTuple(
+        input[2],
+        SHARE_SCHEMAS[1].tuples.character.arities,
+        'wire character',
+      );
+      return decodeWireV2(MIGRATIONS[1](input));
+    case 2:
+      return decodeWireV2(input);
     default:
       throw new ShareValidationError('version is unsupported.');
   }

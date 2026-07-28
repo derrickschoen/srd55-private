@@ -13,6 +13,7 @@ import {
   decodeShareFragment,
   encodeShareFragment,
 } from '../../../src/sharing/codec';
+import { CHARACTER_SHARE_VERSION } from '../../../src/sharing/schema';
 import { CharacterState } from '../../../src/character/character-state';
 import { seedOriginContent } from '../../../src/rules/origins-srd';
 import { seedWeaponContent } from '../../../src/rules/weapons-srd';
@@ -447,18 +448,17 @@ describe('a character’s origin survives every portability path', () => {
   });
 
   /**
-   * A SHARE DOCUMENT FROM THE BUILD BEFORE THE INVERSION, HAND-BUILT.
+   * A LOGICAL SHARE DOCUMENT FROM BEFORE THE EFFECT INVERSION, HAND-BUILT.
    *
    * Written as a literal and never obtained from `exportCharacterShare`, which
    * cannot produce one any more: this build writes `null` in the five retired
-   * trait slots and puts the effects in their own section. The payload here is
-   * where that build put it, and there is NO `effects` key at all — which is
-   * the difference between "this character has no effects" and "this document
-   * predates the question".
+   * trait slots and puts the effects in their own section. This is the logical
+   * object after wire-version migration: the payload remains where that build
+   * put it, and there is NO `effects` key at all.
    */
   const PRE_INVERSION_SHARE = {
     format: 'dnd-multiclass-spells-character-share',
-    version: 1,
+    version: CHARACTER_SHARE_VERSION,
     character: { name: 'Pre-Inversion Hero' },
     classes: [],
     sources: [],
