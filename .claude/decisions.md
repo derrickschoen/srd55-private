@@ -1,5 +1,55 @@
 # Binding scope decisions
 
+## D54 — OWNER: v1 is NOT frozen. Finish it on its current trajectory, to USABLE (2026-07-28)
+
+**The ruling.** *"My intention is to finish v1 based on its current trajectory
+and then compare once v2 is done. I may end up liking parts of v1 better, but I
+need it usable."*
+
+This REVERSES the freeze. v1 is an active track again, developed on its own
+trajectory — not retrofitted toward v2's architecture, because the point is to
+have two genuinely different things to compare. v2's rulings (its D1..D8) do NOT
+bind here; this file remains v1's law.
+
+**THE BAR IS "USABLE", and that is a higher bar than "green".** v1 is green
+today — 139 files / 2290 vitest, build exit 0, 75 Playwright — and still cannot
+be used to make a character without expert knowledge of the planner grid. Green
+measures the code; usable measures the person holding it.
+
+**Taken for now, as the working definition — reversible, one owner sentence
+flips it:** v1 is usable when a person who knows D&D but not this app can, in
+one sitting and without hitting a dead end:
+
+1. create a character and choose a class first (D48);
+2. get through level 1 with the choices the SRD actually requires — species,
+   background, skills, ability scores, starting equipment;
+3. level up, including a multiclass level, with the wizard warning rather than
+   refusing (D49);
+4. read a sheet whose numbers are right, with anything unknown shown as unknown
+   rather than guessed (D33);
+5. not lose the character on reload.
+
+Anything not on that list is polish for this purpose, however much it is wanted.
+
+**What this makes the queue.** The largest unbuilt thing is still the guided
+builder and level-up wizard (D11, D42) — and the blocker audit of 2026-07-28
+found that most of what was reported as owner-blocked was not: two independent
+reviewers classified 12 to 14 of 16 items as decidable from rulings already in
+this file. That audit is the work list. Items 1 and 2 of the guided-builder
+design (route and step engine; transactional class-first materialisation) are
+unblocked and are the front door.
+
+**The one genuine owner question that remains**, named independently by both
+auditors as the single most-unblocking answer: **when does a weapon get the
+"relies on True Strike / Shillelagh / Pact of the Blade" badge?** It sits behind
+a pure policy seam, so work proceeds with the strict-improvement default and the
+badge worded "better with", reversible at zero data and wire cost.
+
+**Comparison, not convergence.** v1 must NOT be reshaped to resemble v2 while
+this runs. If v2's design turns out better the owner will say so after seeing
+both; a v1 quietly rebuilt in v2's image would destroy the comparison this
+ruling exists to enable.
+
 ## D53 — OWNER: feats are two numbers plus a grouping, and I had the level-4 rule wrong (2026-07-28)
 
 Asked how to store a feat's category, the owner redesigned instead of picking:
