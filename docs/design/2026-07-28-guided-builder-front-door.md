@@ -255,6 +255,15 @@ the repository, so the template tables are the only populated source.
 Exit: **`character_background` only**, copied via `backgroundFromTemplate`,
 advancing the derived step past background.
 
+**Background's only consequence in this group is step advancement, and that must
+be disclosed.** Verified by the supervisor: **nothing in production reads
+`character_background`** — the sole mention in `src/queries/` or `src/ui/` is a
+comment (`src/queries/background-equipment.ts:19`). So unlike species, which
+visibly changes speed and effects on the sheet, an applied background is
+invisible everywhere. The step is honest only if the terminal panel says the
+feat, the two skills, the tool and the equipment are recorded but not yet
+granted. §9's disclosure control covers it.
+
 **Equipment package choice is explicitly OUT of A5.** Revision 3 said "via
 `background_equipment_items`", which permits two incompatible implementations.
 Those are catalog rows carrying **two alternative packages**
@@ -469,6 +478,16 @@ which is the very defect this section exists to prevent.
   the same transaction), and is therefore idempotent under retry. Replacement is
   the right default because the wizard's back button must be able to change a
   species; refusing would strand a person on a choice they can see is wrong.
+
+**A class-less character at the build route is pinned.** Blank creation survives
+under D42, so `/characters/:id/build/levels/1` is URL-reachable for a row with no
+class. `characterLevel()` returns null there (`src/rules/character-level.ts:32-35`),
+so `current_step` is `'class'` — but the wizard's class step exists only
+pre-persistence at `/characters/new`, and `applyOrigin` has no `kind: 'class'`.
+Pinned: the build screen renders an explicit panel offering a link to
+`/characters/new`, and **no link into the planner** — its locator must be worded
+so it does not collide with `A3-TERMINAL`'s assertion that no planner link
+exists.
 
 **`buildState` not-found is pinned**, because "or not-found" was not a contract:
 params `{ character_id: number }`; an absent character returns
