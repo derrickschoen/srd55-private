@@ -15,9 +15,10 @@ The versioned registry is the source of truth for the wire contract:
   tuple inventory.
 - `shareDocumentToPositional()` and the version-dispatched decoder in
   `src/sharing/codec.ts` interpret that inventory.
-- the golden assertions in `tests/unit/sharing/codec.test.ts` pin the exact
-  version-1 bytes, while the registry fingerprint and independent frozen
-  fragments guard its field meanings and accepted arities.
+- separate hand-authored golden assertions in
+  `tests/unit/sharing/codec.test.ts` pin the exact v1 and v2 positions, while
+  the registry fingerprint and independent frozen fragments guard each
+  version's field meanings and accepted arities.
 
 This guide records the design intent and invariants without duplicating those
 contracts field by field.
@@ -25,7 +26,7 @@ contracts field by field.
 ## Logical semantics
 
 The readable object form uses the format marker
-`dnd-multiclass-spells-character-share` and version `1`. Unknown fields are
+`dnd-multiclass-spells-character-share` and version `2`. Unknown fields are
 rejected.
 
 Notes are not one policy, and the line between them is which side of the
@@ -80,25 +81,47 @@ entries, preferences, or loadouts.
 
 ## Wire transport
 
-Version 1 serializes the validated object as positional JSON. Its shipped root
-arities 11/12/13/14/15, character arities 11/12, and weapon arities 19/20/22
-are all frozen parts of v1. A shorter accepted tuple reads as the historical
-shape that originally produced it; anything outside those exact variants is
-refused. An absent optional record field occupies its assigned `null` position.
+Both versions serialize the validated object as positional JSON. Version 1's
+shipped root arities 11/12/13/14/15, character arities 11/12, and weapon
+arities 19/20/22 are frozen exactly as shipped. A shorter accepted v1 tuple
+reads as the historical shape that originally produced it; anything outside
+those exact variants is refused.
+
+Version 2 changes exactly two structures:
+
+- The weapon's independent `range_normal_feet` and `range_long_feet` slots
+  become one tagged range tuple. `none` has no distances. `ranged` has a
+  required near distance and a nullable far distance at least as large.
+  `legacy` losslessly carries only v1's long-only and inverted pairs; the
+  current encoder refuses to mint it.
+- `placeholders` moves from character index 10 to root index 15. The v2 root is
+  therefore exactly 16 elements and its character tuple exactly 11. The
+  placeholder list's count and shape validation run at that new root position.
+
+The adjacent v1-to-v2 migration pads historical short roots without inventing
+optional sections, moves placeholders and the optional character note to their
+v2 positions, upgrades old weapon damage variants, and maps all five possible
+range pairs through the shared weapon-range boundary: null/null, near-only,
+ordinary, long-only, and inverted. It never coerces, rejects, or drops either
+v1 range field. Decoding dispatches from the frozen root version and applies
+that migration before v2 validation; encoding always writes v2.
+
+An absent optional record field occupies its assigned `null` position.
 
 Any subsequent change to tuple order, meaning, membership, or accepted value
 domain increments the root version, adds an adjacent migration, and adds an
-independently hand-frozen fragment fixture. Version 1 is never extended or
-edited to make room for that change. One root version governs the complete
-export; nested tuples carry no separate versions.
+independently hand-frozen fragment fixture. Existing versions are never
+extended or edited to make room for that change. One root version governs the
+complete export; nested tuples carry no separate versions.
 
 The UTF-8 JSON bytes are compressed with `CompressionStream("gzip")`, encoded
 as unpadded base64url, and stored after the URL fragment marker (`#`). Fragment
 data is therefore not sent to the web server as part of an HTTP request.
 
-Brotli is intentionally rejected for version 1. It saves too little for this
-payload to justify a fallback codec, and browser-native Compression Streams
-support is not sufficiently universal across the project's target browsers.
+Brotli is intentionally rejected for the share transport. It saves too little
+for this payload to justify a fallback codec, and browser-native Compression
+Streams support is not sufficiently universal across the project's target
+browsers.
 MessagePack, CBOR, TSV hybrids, and database JSONB also add parser or
 maintenance cost without beating positional JSON plus gzip enough to warrant
 another dependency or grammar.

@@ -15,6 +15,11 @@ import type {
   VersatileWeaponDamage,
   WeaponDamage,
 } from '../domain/weapon-damage';
+import {
+  isWeaponRangeKind,
+  weaponRangeFromStorage,
+  type WeaponRange,
+} from '../domain/weapon-range';
 import { CHARACTER_TEXT_LIMITS } from '../domain/character-limits';
 import {
   WEAPON_RANGE_MAX_FEET,
@@ -196,23 +201,21 @@ export interface SharePlaceholder {
 /**
  * ONE OF A CHARACTER'S WEAPONS, AS IT TRAVELS.
  *
- * FIELD NAMES ARE COLUMN NAMES, deliberately. `ShareCharacter` already does
- * this (`proficiency_bonus_override`, `rules_edition_preference`), and for the
- * same reason: these are the character's own row, not a re-modelled projection
- * of it. The camelCase names elsewhere in this module (`classKey`, `spellKey`)
- * name things that are NOT columns — content keys that replace database ids.
- * A weapon has no id to replace: by D1b it holds no template reference, so the
- * whole row is portable as-is.
+ * FIELD NAMES ARE COLUMN NAMES except for `range`, deliberately.
+ * `ShareCharacter` already follows the column-name convention
+ * (`proficiency_bonus_override`, `rules_edition_preference`), and for the same
+ * reason: these are the character's own row, not a catalog projection. Range
+ * is the one structured value: `src/domain/weapon-range.ts` maps the storage
+ * discriminator and its two payload columns into a tagged value once.
  *
  * WHAT IS OMITTED AND WHY. `id`, `character_id`, `created_at` and `updated_at`
  * — the same four a share document omits everywhere else. A share carries no
  * database identifiers and no timestamps.
  *
- * OPTIONALITY MIRRORS THE COLUMN, IT DOES NOT INVENT A NEW ONE (D6/D6b). Every
- * nullable column is an optional field, so a half-entered weapon — a name and
- * nothing else, which this schema treats as a first-class state — survives a
- * round trip as exactly that rather than being coerced to empty strings or
- * rejected. Every NOT NULL boolean flag is `true`-when-present, exactly as
+ * OPTIONALITY MIRRORS THE COLUMN, IT DOES NOT INVENT A NEW ONE (D6/D6b).
+ * Nullable scalar columns are optional. Range is required because its storage
+ * discriminator is required; `{ kind: 'none' }` is the explicit no-range state.
+ * Every NOT NULL boolean flag is `true`-when-present, exactly as
  * `ShareCharacter.allow_legacy` is: absent means the column's default of 0.
  */
 export interface ShareWeapon {
@@ -236,8 +239,11 @@ export interface ShareWeapon {
   readonly damage_type?: string;
   readonly versatile_damage: VersatileWeaponDamage;
   readonly ammunition_kind?: string;
+  /** Frozen v1 wire-only field. Current documents use `range`. */
   readonly range_normal_feet?: number;
+  /** Frozen v1 wire-only field. Current documents use `range`. */
   readonly range_long_feet?: number;
+  readonly range: WeaponRange;
   readonly mastery_property?: string;
   readonly other_properties?: string;
   readonly notes?: string;
@@ -389,14 +395,15 @@ export interface ShareSpeciesTrait {
 }
 
 /**
- * ONE OF THE CHARACTER'S OWN EFFECTS — the fifteenth root element.
+ * ONE OF THE CHARACTER'S OWN EFFECTS — the fifteenth root element in v1 and
+ * the same index in v2.
  *
  * A NEW ROOT ELEMENT AND NOT A FOURTH MEMBER OF THE ORIGIN GROUP, deliberately.
  * Effects are no longer species-scoped — that severance is the whole point of
  * the inversion — so nesting them under the origin would re-create the coupling
  * being removed, and would change the meaning of element 13 for links already in
- * the wild. Version 1 freezes every arity it shipped; any subsequent wire
- * change uses a new root version and an explicit migration.
+ * the wild. Version 1 freezes every arity it shipped; v2 preserves the index
+ * and reaches older documents through its explicit adjacent migration.
  *
  * `sourceRef` names a `sources[].id` — the SAME reference space
  * `selections[].ref` uses — and is optional because `source_instance_id` is
@@ -857,16 +864,54 @@ function shareVersatileDamage(
   return damage;
 }
 
+function shareWeaponRange(value: unknown, label: string): WeaponRange {
+  const row = record(value, label);
+  if (!isWeaponRangeKind(row.kind)) {
+    throw new ShareValidationError(`${label}.kind is unsupported.`);
+  }
+  switch (row.kind) {
+    case 'none':
+      exactKeys(row, ['kind'], [], label);
+      return { kind: 'none' };
+    case 'ranged': {
+      exactKeys(row, ['kind', 'near_feet', 'far_feet'], [], label);
+      const near = weaponRange(row.near_feet, `${label}.near_feet`);
+      const far = row.far_feet === null
+        ? null
+        : weaponRange(row.far_feet, `${label}.far_feet`);
+      try {
+        return weaponRangeFromStorage(row.kind, near, far);
+      } catch {
+        throw new ShareValidationError(
+          `${label} must have a far distance greater than or equal to its near distance.`,
+        );
+      }
+    }
+    case 'legacy': {
+      exactKeys(row, ['kind', 'near_feet', 'far_feet'], [], label);
+      const near = row.near_feet === null
+        ? null
+        : weaponRange(row.near_feet, `${label}.near_feet`);
+      const far = weaponRange(row.far_feet, `${label}.far_feet`);
+      try {
+        return weaponRangeFromStorage(row.kind, near, far);
+      } catch {
+        throw new ShareValidationError(
+          `${label} is not an exceptional v1 range pair.`,
+        );
+      }
+    }
+  }
+}
+
 function shareWeapon(value: unknown, label: string): ShareWeapon {
   const row = record(value, label);
   exactKeys(
     row,
-    ['name', 'damage', 'versatile_damage'],
+    ['name', 'damage', 'versatile_damage', 'range'],
     [
       'proficiency_category',
       ...SHARE_WEAPON_TEXT,
-      'range_normal_feet',
-      'range_long_feet',
       'mastery_property',
       'other_properties',
       'notes',
@@ -881,6 +926,7 @@ function shareWeapon(value: unknown, label: string): ShareWeapon {
       row.versatile_damage,
       `${label}.versatile_damage`,
     ),
+    range: shareWeaponRange(row.range, `${label}.range`),
   };
   // D27. Checked against the enum here rather than passed through as text, for
   // the same reason `mastery_property` is: `character_weapons` has a CHECK on
@@ -911,11 +957,6 @@ function shareWeapon(value: unknown, label: string): ShareWeapon {
         `${label}.${field}`,
         WEAPON_TEXT_LIMITS[field],
       );
-    }
-  }
-  for (const field of ['range_normal_feet', 'range_long_feet'] as const) {
-    if (row[field] !== undefined) {
-      weapon[field] = weaponRange(row[field], `${label}.${field}`);
     }
   }
   if (row.mastery_property !== undefined) {

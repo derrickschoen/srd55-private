@@ -61,8 +61,6 @@ import type {
 import {
   isWeaponRangeKind,
   weaponRangeFromStorage,
-  weaponRangeFromV1Pair,
-  weaponRangeToV1Pair,
   type WeaponRange,
 } from '../domain/weapon-range';
 
@@ -286,19 +284,12 @@ function shareWeaponFromRow(row: Row): ShareWeapon {
       `Unknown weapon range kind "${String(storedRangeKind)}".`,
     );
   }
-  const pair = weaponRangeToV1Pair(
-    weaponRangeFromStorage(
-      storedRangeKind,
-      row.range_near_feet === null ? null : Number(row.range_near_feet),
-      row.range_far_feet === null ? null : Number(row.range_far_feet),
-    ),
+  const range = weaponRangeFromStorage(
+    storedRangeKind,
+    row.range_near_feet === null ? null : Number(row.range_near_feet),
+    row.range_far_feet === null ? null : Number(row.range_far_feet),
   );
-  if (pair.range_normal_feet !== null) {
-    weapon.range_normal_feet = pair.range_normal_feet;
-  }
-  if (pair.range_long_feet !== null) {
-    weapon.range_long_feet = pair.range_long_feet;
-  }
+  weapon.range = range;
   if (row.mastery_property !== null && row.mastery_property !== undefined) {
     weapon.mastery_property = String(row.mastery_property);
   }
@@ -1550,10 +1541,6 @@ export function importCharacterShare(
     // arrived, with the absent optional fields taking the column's own
     // NULL / 0 rather than a value this importer invented.
     for (const weapon of document.weapons ?? []) {
-      const range = weaponRangeFromV1Pair(
-        weapon.range_normal_feet ?? null,
-        weapon.range_long_feet ?? null,
-      );
       db.exec(
         `INSERT INTO ${SHARE_TABLES.character_weapons} (
            character_id, name, proficiency_category,
@@ -1578,7 +1565,7 @@ export function importCharacterShare(
           ...sharedDamageValues(weapon.damage),
           ...SHARE_WEAPON_TEXT.map((field) => weapon[field] ?? null),
           ...sharedDamageValues(weapon.versatile_damage),
-          ...sharedRangeValues(range),
+          ...sharedRangeValues(weapon.range),
           weapon.mastery_property ?? null,
           weapon.other_properties ?? null,
           weapon.notes ?? null,

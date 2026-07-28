@@ -1726,8 +1726,8 @@ describe('adversarial character-share rejection', () => {
   it('rejects wrong format/version, tuple arity errors, and extra or missing elements', async () => {
     const positional = shareDocumentToPositional(minimalDocument());
     const cases: Array<[unknown, RegExp]> = [
-      [[...positional.slice(0, 10)], /tuple of length 11/],
-      [[...positional, null], /tuple of length 11/],
+      [[...positional.slice(0, 10)], /tuple of length 16/],
+      [[...positional, null], /tuple of length 16/],
       [
         ['wrong-format', ...positional.slice(1)],
         /format is unsupported/,
@@ -1852,15 +1852,13 @@ describe('adversarial character-share rejection', () => {
       ],
       [
         (wire) => {
-          const character = [...(wire[2] as unknown[])];
-          character[10] = Array.from(
+          wire[15] = Array.from(
             { length: SHARE_LIMITS.placeholders + 1 },
             (_, index) => [
               `2024:org.example.spells:placeholder-${index}`,
               `Placeholder ${index}`,
             ],
           );
-          wire[2] = character;
         },
         /placeholders exceeds/,
       ],
@@ -1976,7 +1974,7 @@ describe('adversarial character-share rejection', () => {
 
   it('rejects prototype keys, non-finite/bigint values, and malformed homebrew spell keys', async () => {
     const polluted = JSON.parse(
-      '{"format":"dnd-multiclass-spells-character-share","version":1,' +
+      '{"format":"dnd-multiclass-spells-character-share","version":2,' +
         '"character":{"name":"Safe"},"classes":[],"sources":[],' +
         '"selections":[],"spellbook":[],"preferences":[],' +
       '"overrides":[{"ruleKey":"pollution","value":{"__proto__":{"polluted":true},"prototype":{"x":1},"constructor":{"y":2}}}]}',
@@ -2228,6 +2226,7 @@ describe('hostile and over-long weapon sections', () => {
         {
           damage: { kind: 'not_recorded' },
           versatile_damage: { kind: 'not_applicable' },
+          range: { kind: 'none' },
           ...weapon,
         },
       ],
@@ -2325,19 +2324,20 @@ describe('hostile and over-long weapon sections', () => {
     // …and so must the share boundary, field for field, through a real link.
     // Every flag above is already `true`, which is the only value the wire
     // accepts, so the same object is a valid share weapon as it stands.
-    const { range: _storageRange, ...wireFields } = maximal;
     const shared = await throughShareLink(
       weaponDocument({
-        ...wireFields,
-        range_normal_feet: maximal.range.near_feet,
-        range_long_feet: maximal.range.far_feet,
+        ...maximal,
         mastery_selected: true,
       }),
     );
     const weapon = shared.weapons?.[0];
     expect(weapon?.notes).toBe(maximal.notes);
     expect(weapon?.other_properties).toBe(maximal.other_properties);
-    expect(weapon?.range_long_feet).toBe(WEAPON_RANGE_MAX_FEET);
+    expect(weapon?.range).toEqual({
+      kind: 'ranged',
+      near_feet: WEAPON_RANGE_MAX_FEET,
+      far_feet: WEAPON_RANGE_MAX_FEET,
+    });
     expect(weapon?.name).toBe(maximal.name);
   });
 
@@ -2365,6 +2365,7 @@ describe('hostile and over-long weapon sections', () => {
         name: `Blade ${index}`,
         damage: { kind: 'not_recorded' as const },
         versatile_damage: { kind: 'not_applicable' as const },
+        range: { kind: 'none' as const },
         notes: noise(WEAPON_TEXT_LIMITS.notes),
         other_properties: noise(WEAPON_TEXT_LIMITS.other_properties),
       })),
@@ -2429,9 +2430,12 @@ describe('hostile and over-long weapon sections', () => {
     for (const value of [-1, 100_001, 1.5]) {
       expect(() =>
         validateShareDocument(
-          weaponDocument({ name: 'Blade', range_normal_feet: value }),
+          weaponDocument({
+            name: 'Blade',
+            range: { kind: 'ranged', near_feet: value, far_feet: null },
+          }),
         ),
-      ).toThrow(/weapons\[0\]\.range_normal_feet must be an integer/);
+      ).toThrow(/weapons\[0\]\.range\.near_feet must be an integer/);
     }
   });
 
@@ -2444,11 +2448,13 @@ describe('hostile and over-long weapon sections', () => {
           name: 'Dagger',
           damage: { kind: 'not_recorded' },
           versatile_damage: { kind: 'not_applicable' },
+          range: { kind: 'none' },
         },
         {
           name: 'Dagger',
           damage: { kind: 'not_recorded' },
           versatile_damage: { kind: 'not_applicable' },
+          range: { kind: 'none' },
         },
       ],
     } as unknown as Partial<CharacterShareDocument>);

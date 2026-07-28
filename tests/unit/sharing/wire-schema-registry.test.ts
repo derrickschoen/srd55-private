@@ -47,6 +47,43 @@ const VERSION_FIXTURES = {
       overrides: [],
     },
   },
+  2: {
+    // Independently compressed from the hand-authored v2 positional tuple,
+    // never from `shareDocumentToPositional`.
+    fragment:
+      'H4sIAAAAAAAAA32QvQ7CMAyEX6Xy7KI2IIauLAzdGKMMUWNohZtUTioQT4_6IwQdWE726T7b' +
+      'sgbnXd6PnLqGbYx5HIg55k1rxTaJJI-tFQJUqOE0ipBPWd35e3YmCYB-ZP6S8rh1fsWg1gW' +
+      'CKtShmvdVj-5lxa2D9lhugYkoEa5kE6zgVFeWSdKKqU_UoF4yse2IHSyW-X8U6hUKctvR0_' +
+      'YDU8UhpuUZgFCHmLLL3Bhj3opyo4o0AQAA',
+    expected: {
+      format: CHARACTER_SHARE_FORMAT,
+      version: CHARACTER_SHARE_VERSION,
+      character: {
+        name: 'Current Link Hero',
+        intelligence: 16,
+      },
+      classes: [{
+        id: 0,
+        classKey: '2024:class:wizard',
+        level: 3,
+        start: 1,
+      }],
+      sources: [{
+        id: 1,
+        type: 'feat',
+        key: '2024:feat:alert',
+        acquired: 2,
+      }],
+      selections: [],
+      spellbook: ['2024:shield'],
+      preferences: [],
+      overrides: [],
+      placeholders: [{
+        spellKey: '2024:org.example:lost-spell',
+        spellName: 'Lost Spell',
+      }],
+    },
+  },
 } satisfies Record<SupportedShareVersion, FrozenFixture>;
 
 function allObjects(root: object): object[] {

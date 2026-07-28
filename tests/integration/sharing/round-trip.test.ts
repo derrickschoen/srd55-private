@@ -588,7 +588,85 @@ describe('minimal character sharing', () => {
     expect(previewCharacterShare(target, shared).weaponCount).toBe(2);
   });
 
-  it('round-trips both exceptional legacy range pairs through frozen v1 fields', async () => {
+  it('round-trips every weapon range boundary through storage without reclassifying it', async () => {
+    const source = await database();
+    const characterId = source.exec(
+      "INSERT INTO characters (name) VALUES ('Range boundaries')",
+    ).lastInsertId;
+    source.exec(
+      `INSERT INTO character_weapons
+         (character_id, name, range_kind, range_near_feet, range_far_feet)
+       VALUES
+         (?, 'Equal', 'ranged', 20, 20),
+         (?, 'Smallest inverted', 'legacy', 20, 19),
+         (?, 'Near zero', 'ranged', 0, 60),
+         (?, 'Far zero', 'legacy', NULL, 0),
+         (?, 'Near ceiling', 'ranged', 100000, NULL),
+         (?, 'Far ceiling', 'ranged', 20, 100000)`,
+      Array.from({ length: 6 }, () => characterId),
+    );
+
+    const document = exportCharacterShare(source, characterId);
+    expect(document.weapons?.map((weapon) => weapon.range)).toEqual([
+      { kind: 'ranged', near_feet: 20, far_feet: 20 },
+      { kind: 'legacy', near_feet: 20, far_feet: 19 },
+      { kind: 'ranged', near_feet: 0, far_feet: 60 },
+      { kind: 'legacy', near_feet: null, far_feet: 0 },
+      { kind: 'ranged', near_feet: 100_000, far_feet: null },
+      { kind: 'ranged', near_feet: 20, far_feet: 100_000 },
+    ]);
+
+    // A migrated document may carry legacy values into storage even though a
+    // fresh v2 link cannot mint them.
+    const target = await database();
+    const imported = importCharacterShare(target, document);
+    expect(
+      target.allRaw(
+        `SELECT name, range_kind, range_near_feet, range_far_feet
+         FROM character_weapons WHERE character_id = ? ORDER BY id`,
+        [imported.characterId],
+      ),
+    ).toEqual([
+      {
+        name: 'Equal',
+        range_kind: 'ranged',
+        range_near_feet: 20,
+        range_far_feet: 20,
+      },
+      {
+        name: 'Smallest inverted',
+        range_kind: 'legacy',
+        range_near_feet: 20,
+        range_far_feet: 19,
+      },
+      {
+        name: 'Near zero',
+        range_kind: 'ranged',
+        range_near_feet: 0,
+        range_far_feet: 60,
+      },
+      {
+        name: 'Far zero',
+        range_kind: 'legacy',
+        range_near_feet: null,
+        range_far_feet: 0,
+      },
+      {
+        name: 'Near ceiling',
+        range_kind: 'ranged',
+        range_near_feet: 100_000,
+        range_far_feet: null,
+      },
+      {
+        name: 'Far ceiling',
+        range_kind: 'ranged',
+        range_near_feet: 20,
+        range_far_feet: 100_000,
+      },
+    ]);
+  });
+
+  it('exposes stored exceptional pairs as decode-only ranges that cannot be freshly encoded', async () => {
     const source = await database();
     const characterId = source.exec(
       "INSERT INTO characters (name) VALUES ('Legacy ranges')",
@@ -604,39 +682,18 @@ describe('minimal character sharing', () => {
 
     const document = exportCharacterShare(source, characterId);
     expect(document.weapons).toMatchObject([
-      { name: 'Long only', range_long_feet: 60 },
-      {
-        name: 'Inverted',
-        range_normal_feet: 60,
-        range_long_feet: 20,
-      },
-    ]);
-
-    const target = await database();
-    const decoded = await decodeShareFragment(
-      await encodeShareFragment(document),
-    );
-    const imported = importCharacterShare(target, decoded);
-    expect(
-      target.allRaw(
-        `SELECT name, range_kind, range_near_feet, range_far_feet
-         FROM character_weapons WHERE character_id = ? ORDER BY id`,
-        [imported.characterId],
-      ),
-    ).toEqual([
       {
         name: 'Long only',
-        range_kind: 'legacy',
-        range_near_feet: null,
-        range_far_feet: 60,
+        range: { kind: 'legacy', near_feet: null, far_feet: 60 },
       },
       {
         name: 'Inverted',
-        range_kind: 'legacy',
-        range_near_feet: 60,
-        range_far_feet: 20,
+        range: { kind: 'legacy', near_feet: 60, far_feet: 20 },
       },
     ]);
+    expect(() => encodeShareFragment(document)).toThrow(
+      /decode-only legacy range/,
+    );
   });
 
   it('leaves the weapons section out entirely for a character with none', async () => {

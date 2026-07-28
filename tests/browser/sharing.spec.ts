@@ -100,14 +100,18 @@ test('creates, independently verifies, previews, and explicitly imports a durabl
     gunzipSync(Buffer.from(fragment, 'base64url')).toString('utf8'),
   ) as unknown[];
   expect(positional[0]).toBe('dnd-multiclass-spells-character-share');
-  expect(positional[1]).toBe(1);
+  expect(positional[1]).toBe(2);
   expect((positional[2] as unknown[])[0]).toBe('Journey Hero 🧙');
-  // TWELVE, and the last one NULL. That is the shape a link gets when nobody
-  // ticks the notes box — the twelfth slot is written (this build has one
+  // ELEVEN, and the last one NULL. That is the shape a link gets when nobody
+  // ticks the notes box — the eleventh slot is written (this build has one
   // output shape, not two) and carries nothing.
-  expect(positional[2]).toHaveLength(12);
-  expect((positional[2] as unknown[])[11]).toBeNull();
+  expect(positional[2]).toHaveLength(11);
+  expect((positional[2] as unknown[])[10]).toBeNull();
   expect(positional.slice(3, 9)).toEqual([[], [], [], [], [], []]);
+  // Placeholders are the sixteenth root element in v2, absent for this
+  // character but still occupying their frozen positional slot.
+  expect(positional).toHaveLength(16);
+  expect(positional[15]).toBeNull();
 
   const freshProfile = await browser.newContext();
   try {
