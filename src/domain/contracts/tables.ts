@@ -927,6 +927,7 @@ export type BackupDirectTable = TablesWith<'backupDirect'>;
 export type BackupTable = TablesWith<'backup'>;
 export type ShareTable = TablesWith<'share'>;
 export type ReferenceKind = TablesWith<'backupReference'>;
+export type SpellDefinitionTable = TablesWithRole<'catalog_spell'>;
 
 // --- compile-checked invariants ------------------------------------------
 // These are `never`-assertions, not tests: they fail `tsc -b`, which fails
@@ -1009,6 +1010,29 @@ export function order<Member extends string>() {
     members: T & ([Member] extends [T[number]] ? unknown : never),
   ): T => members;
 }
+
+/**
+ * Every table that makes one spell definition complete.
+ *
+ * The portable character backup filters these tables down to the user-authored
+ * spell versions the character actually references. Deriving membership from
+ * the catalog role means a future spell-owned pivot cannot be added to the
+ * schema while silently falling out of the artifact.
+ */
+export const SPELL_DEFINITION_TABLES = order<SpellDefinitionTable>()([
+  'spell_identities',
+  'spell_identity_aliases',
+  'spell_versions',
+  'spell_version_publications',
+  'spell_list_memberships',
+  'spell_version_tags',
+  'spell_version_damage_types',
+  'spell_version_conditions',
+  'spell_version_attack_modes',
+  'spell_version_save_abilities',
+  'spell_version_upcast_levels',
+  'spell_version_cantrip_upgrade_levels',
+]);
 
 /**
  * Every table in the database, in the order `PRAGMA`-level validation reports

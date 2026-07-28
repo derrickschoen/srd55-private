@@ -10,7 +10,11 @@ import {
   jsonColumnError,
   type JsonColumnKey,
 } from './json-columns';
-import type { BackupTable, TableFor } from './tables';
+import type {
+  BackupTable,
+  SpellDefinitionTable,
+  TableFor,
+} from './tables';
 import {
   weaponDamagePayloadError,
   weaponRangePayloadError,
@@ -66,13 +70,12 @@ import { weaponRangeKinds } from '../weapon-range';
  * exist and which are nullable. This module never restates either.
  *
  * WHAT DRIZZLE-ZOD COULD NOT DO, AND WHAT REPLACES IT.
- * 223 of the schema's 332 columns — 72 of the 118 in the tables contracted here
- * — come out of drizzle-zod as `z.any()`, because every text-ish column is a
- * Drizzle `customType` (`db/schema/columns.ts`) and a custom type carries no
- * runtime schema. Shipping those as `z.any()` would be validation theatre, so
- * every one of them is refined: eight are JSON columns whose shape comes from
- * `./json-columns.ts`, and the remaining 64 are refined by `REFINEMENTS` below.
- * The split is COMPILE-ENFORCED and the two sides cannot overlap:
+ * Most text-ish columns come out of drizzle-zod as `z.any()`, because they are
+ * Drizzle `customType` columns (`db/schema/columns.ts`) and a custom type
+ * carries no runtime schema. Shipping those as `z.any()` would be validation
+ * theatre, so every one is refined: JSON columns get their shape from
+ * `./json-columns.ts`, and the rest are refined by `REFINEMENTS` below. The
+ * split is COMPILE-ENFORCED and the two sides cannot overlap:
  * `REFINEMENTS satisfies Record<RequiredRefinementKey, …>` fails to compile if a
  * degraded column has neither a refinement nor a JSON classification, and
  * `RequiredRefinementKey` excludes the JSON columns, so declaring one in both
@@ -444,6 +447,8 @@ export type RowContractTable =
  *    payload in `src/commands/weapons.ts`.
  *  - the two mastery tables are seeded from the progression extract by the same
  *    parser.
+ *  - spell-catalog rows in a character backup are user-authored definitions
+ *    arriving from an untrusted JSON artifact.
  *
  * Listing them here is what makes their nullability DERIVED rather than
  * restated: `columnSchema` reads `COLUMN_FACTS`, and `_NoOverTightening` below
@@ -466,11 +471,9 @@ type NativeContractTable =
   | 'background_templates'
   | 'background_equipment_items'
   | 'class_equipment_items'
-  // User-imported catalog rows. These contracts are the Zod half of the open
-  // school/damage/condition types; unknown strings must survive, not narrow.
-  | 'spell_versions'
-  | 'spell_version_damage_types'
-  | 'spell_version_conditions';
+  // Every carried user-authored spell row crosses the same untrusted backup
+  // boundary as the character-owned tables.
+  | SpellDefinitionTable;
 
 type Facts = typeof COLUMN_FACTS;
 
@@ -512,6 +515,52 @@ type OptionalRefinementKey = Exclude<
  */
 const REFINEMENTS = {
   // --- user-imported spell catalog ----------------------------------------
+  'spell_identities.id': positiveInt,
+  'spell_identities.content_key': sqlText,
+  'spell_identities.canonical_name': sqlText,
+  'spell_identities.normalized_name': sqlText,
+  'spell_identities.notes': sqlText,
+  'spell_identities.created_at': sqlTimestamp,
+  'spell_identities.updated_at': sqlTimestamp,
+
+  'spell_identity_aliases.id': positiveInt,
+  'spell_identity_aliases.spell_identity_id': positiveInt,
+  'spell_identity_aliases.alias': sqlText,
+  'spell_identity_aliases.normalized_alias': sqlText,
+  'spell_identity_aliases.created_at': sqlTimestamp,
+  'spell_identity_aliases.updated_at': sqlTimestamp,
+
+  'spell_list_memberships.id': positiveInt,
+  'spell_list_memberships.spell_version_id': positiveInt,
+  'spell_list_memberships.spell_list_key': sqlText,
+  'spell_list_memberships.created_at': sqlTimestamp,
+  'spell_list_memberships.updated_at': sqlTimestamp,
+
+  'spell_version_publications.id': positiveInt,
+  'spell_version_publications.spell_version_id': positiveInt,
+  'spell_version_publications.source_book': sqlText,
+  'spell_version_publications.source_reference': sqlText,
+  'spell_version_publications.created_at': sqlTimestamp,
+  'spell_version_publications.updated_at': sqlTimestamp,
+
+  'spell_version_tags.id': positiveInt,
+  'spell_version_tags.spell_version_id': positiveInt,
+  'spell_version_tags.tag': sqlText,
+
+  'spell_version_attack_modes.id': positiveInt,
+  'spell_version_attack_modes.spell_version_id': positiveInt,
+  'spell_version_attack_modes.attack_mode': sqlText,
+
+  'spell_version_save_abilities.id': positiveInt,
+  'spell_version_save_abilities.spell_version_id': positiveInt,
+  'spell_version_save_abilities.save_ability': sqlText,
+
+  'spell_version_upcast_levels.id': positiveInt,
+  'spell_version_upcast_levels.spell_version_id': positiveInt,
+
+  'spell_version_cantrip_upgrade_levels.id': positiveInt,
+  'spell_version_cantrip_upgrade_levels.spell_version_id': positiveInt,
+
   'spell_versions.id': positiveInt,
   'spell_versions.content_key': nonEmptyText,
   'spell_versions.spell_identity_id': positiveInt,

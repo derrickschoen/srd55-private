@@ -1,0 +1,440 @@
+import type { Database } from '@sqlite.org/sqlite-wasm';
+import { afterEach, describe, expect, it } from 'vitest';
+import {
+  exportCharacterBackup,
+  importCharacterBackup,
+  type CharacterBackupSpellDefinitions,
+} from '../../../src/backup/character-backup';
+import { DatabaseContext } from '../../../src/db/database';
+import { SPELL_DEFINITION_TABLES } from '../../../src/domain/contracts/tables';
+import { openTestDatabase } from '../../helpers/open-db';
+
+const opened: Database[] = [];
+const timestamp = '2026-07-28 09:15:00';
+
+async function database(): Promise<DatabaseContext> {
+  const connection = await openTestDatabase();
+  opened.push(connection);
+  return new DatabaseContext(connection);
+}
+
+interface SeededSpell {
+  readonly identityId: number;
+  readonly versionId: number;
+  readonly characterId: number;
+}
+
+function seedReferencedSpell(
+  db: DatabaseContext,
+  provenance: 'user' | 'import' | 'srd',
+  contentKey: string,
+  displayName: string,
+  forkedFromContentKey: string | null,
+): SeededSpell {
+  const identityId = db.exec(
+    `INSERT INTO spell_identities (
+       content_key, canonical_name, normalized_name, notes, created_at, updated_at
+     ) VALUES (?, ?, ?, 'identity note', ?, ?)`,
+    [
+      `identity:${contentKey}`,
+      `${displayName} Canonical`,
+      displayName.toLowerCase(),
+      timestamp,
+      timestamp,
+    ],
+  ).lastInsertId;
+  db.exec(
+    `INSERT INTO spell_identity_aliases (
+       spell_identity_id, alias, normalized_alias, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?)`,
+    [
+      identityId,
+      `${displayName} Alias`,
+      `${displayName.toLowerCase()} alias`,
+      timestamp,
+      timestamp,
+    ],
+  );
+  const versionId = db.exec(
+    `INSERT INTO spell_versions (
+       content_key, spell_identity_id, display_name, rules_edition, level,
+       school, ritual, concentration, casting_time, action_type, range,
+       range_kind, range_feet, area_shape, area_feet, duration, components,
+       material_component_summary, material_cost_copper, material_cost_kind,
+       healing, short_summary, upcast_summary, cantrip_upgrade_summary,
+       requires_mod_for_effect, effect_reliability_category, provenance,
+       seed_version, is_active, created_at, updated_at, forked_from_content_key
+     ) VALUES (
+       ?, ?, ?, '2024', 3, 'Chronomancy', 1, 1, '1 reaction', 'reaction',
+       '90 feet', 'ranged', 90, 'sphere', 15, 'Concentration, up to 1 minute',
+       'V, S, M', 'a silver hourglass', 2500, 'minimum', 0,
+       'Complete short summary.', 'Complete upcast summary.',
+       'Complete cantrip upgrade summary.', 1, 'mixed', ?, 'seed-17', 1,
+       ?, ?, ?
+     )`,
+    [
+      contentKey,
+      identityId,
+      displayName,
+      provenance,
+      timestamp,
+      timestamp,
+      forkedFromContentKey,
+    ],
+  ).lastInsertId;
+  db.exec(
+    `INSERT INTO spell_version_publications (
+       spell_version_id, source_book, source_page, source_reference,
+       created_at, updated_at
+     ) VALUES (?, 'Homebrew Grimoire', 47, 'chapter-seven', ?, ?)`,
+    [versionId, timestamp, timestamp],
+  );
+  db.exec(
+    `INSERT INTO spell_list_memberships (
+       spell_version_id, spell_list_key, created_at, updated_at
+     ) VALUES (?, 'Wizard', ?, ?)`,
+    [versionId, timestamp, timestamp],
+  );
+  db.exec(
+    `INSERT INTO spell_version_tags (spell_version_id, tag)
+     VALUES (?, 'time')`,
+    [versionId],
+  );
+  db.exec(
+    `INSERT INTO spell_version_damage_types (spell_version_id, damage_type)
+     VALUES (?, 'Temporal')`,
+    [versionId],
+  );
+  db.exec(
+    `INSERT INTO spell_version_conditions (spell_version_id, condition_type)
+     VALUES (?, 'Aged')`,
+    [versionId],
+  );
+  db.exec(
+    `INSERT INTO spell_version_attack_modes (spell_version_id, attack_mode)
+     VALUES (?, 'ranged_spell')`,
+    [versionId],
+  );
+  db.exec(
+    `INSERT INTO spell_version_save_abilities (spell_version_id, save_ability)
+     VALUES (?, 'wisdom')`,
+    [versionId],
+  );
+  db.exec(
+    `INSERT INTO spell_version_upcast_levels (spell_version_id, level)
+     VALUES (?, 4)`,
+    [versionId],
+  );
+  db.exec(
+    `INSERT INTO spell_version_cantrip_upgrade_levels
+       (spell_version_id, level)
+     VALUES (?, 5)`,
+    [versionId],
+  );
+  const characterId = db.exec(
+    `INSERT INTO characters (name, notes, created_at, updated_at)
+     VALUES (?, 'portable character', ?, ?)`,
+    [`${displayName} User`, timestamp, timestamp],
+  ).lastInsertId;
+  db.exec(
+    `INSERT INTO character_spell_preferences (
+       character_id, spell_version_id, favourite, notes, created_at, updated_at
+     ) VALUES (?, ?, 1, 'portable preference', ?, ?)`,
+    [characterId, versionId, timestamp, timestamp],
+  );
+  return { identityId, versionId, characterId };
+}
+
+function expectedDefinitions(
+  provenance: 'user' | 'import',
+  contentKey: string,
+  displayName: string,
+  forkedFromContentKey: string | null,
+): CharacterBackupSpellDefinitions {
+  return {
+    spell_identities: [
+      {
+        id: 1,
+        content_key: `identity:${contentKey}`,
+        canonical_name: `${displayName} Canonical`,
+        normalized_name: displayName.toLowerCase(),
+        notes: 'identity note',
+        created_at: timestamp,
+        updated_at: timestamp,
+      },
+    ],
+    spell_identity_aliases: [
+      {
+        id: 1,
+        spell_identity_id: 1,
+        alias: `${displayName} Alias`,
+        normalized_alias: `${displayName.toLowerCase()} alias`,
+        created_at: timestamp,
+        updated_at: timestamp,
+      },
+    ],
+    spell_versions: [
+      {
+        id: 1,
+        content_key: contentKey,
+        spell_identity_id: 1,
+        display_name: displayName,
+        rules_edition: '2024',
+        level: 3,
+        school: 'Chronomancy',
+        ritual: 1,
+        concentration: 1,
+        casting_time: '1 reaction',
+        action_type: 'reaction',
+        range: '90 feet',
+        range_kind: 'ranged',
+        range_feet: 90,
+        area_shape: 'sphere',
+        area_feet: 15,
+        duration: 'Concentration, up to 1 minute',
+        components: 'V, S, M',
+        material_component_summary: 'a silver hourglass',
+        material_cost_copper: 2500,
+        material_cost_kind: 'minimum',
+        healing: 0,
+        short_summary: 'Complete short summary.',
+        upcast_summary: 'Complete upcast summary.',
+        cantrip_upgrade_summary: 'Complete cantrip upgrade summary.',
+        requires_mod_for_effect: 1,
+        effect_reliability_category: 'mixed',
+        provenance,
+        seed_version: 'seed-17',
+        is_active: 1,
+        created_at: timestamp,
+        updated_at: timestamp,
+        forked_from_content_key: forkedFromContentKey,
+      },
+    ],
+    spell_version_publications: [
+      {
+        id: 1,
+        spell_version_id: 1,
+        source_book: 'Homebrew Grimoire',
+        source_page: 47,
+        source_reference: 'chapter-seven',
+        created_at: timestamp,
+        updated_at: timestamp,
+      },
+    ],
+    spell_list_memberships: [
+      {
+        id: 1,
+        spell_version_id: 1,
+        spell_list_key: 'Wizard',
+        created_at: timestamp,
+        updated_at: timestamp,
+      },
+    ],
+    spell_version_tags: [{ id: 1, spell_version_id: 1, tag: 'time' }],
+    spell_version_damage_types: [
+      { id: 1, spell_version_id: 1, damage_type: 'Temporal' },
+    ],
+    spell_version_conditions: [
+      { id: 1, spell_version_id: 1, condition_type: 'Aged' },
+    ],
+    spell_version_attack_modes: [
+      { id: 1, spell_version_id: 1, attack_mode: 'ranged_spell' },
+    ],
+    spell_version_save_abilities: [
+      { id: 1, spell_version_id: 1, save_ability: 'wisdom' },
+    ],
+    spell_version_upcast_levels: [
+      { id: 1, spell_version_id: 1, level: 4 },
+    ],
+    spell_version_cantrip_upgrade_levels: [
+      { id: 1, spell_version_id: 1, level: 5 },
+    ],
+  };
+}
+
+function storedDefinitions(db: DatabaseContext): CharacterBackupSpellDefinitions {
+  return Object.fromEntries(
+    SPELL_DEFINITION_TABLES.map((table) => [
+      table,
+      db.allRaw(`SELECT * FROM "${table}" ORDER BY id`),
+    ]),
+  ) as unknown as CharacterBackupSpellDefinitions;
+}
+
+afterEach(() => {
+  for (const connection of opened.splice(0)) {
+    if (connection.isOpen()) {
+      connection.close();
+    }
+  }
+});
+
+describe('portable character backup user-authored spells', () => {
+  it.each([
+    {
+      label: 'fork',
+      provenance: 'user' as const,
+      contentKey: '2024:local.dnd-wt:forked-hour',
+      displayName: 'Forked Hour',
+      ancestry: '2024:time-stop',
+    },
+    {
+      label: 'imported homebrew',
+      provenance: 'import' as const,
+      contentKey: '2024:homebrew.example:borrowed-hour',
+      displayName: 'Borrowed Hour',
+      ancestry: null,
+    },
+  ])(
+    'round-trips a $label with every identity, version, and pivot field',
+    async ({ provenance, contentKey, displayName, ancestry }) => {
+      const source = await database();
+      const seeded = seedReferencedSpell(
+        source,
+        provenance,
+        contentKey,
+        displayName,
+        ancestry,
+      );
+      const document = exportCharacterBackup(
+        source,
+        seeded.characterId,
+        '2026-07-28T13:15:00.000Z',
+      );
+      const expected = expectedDefinitions(
+        provenance,
+        contentKey,
+        displayName,
+        ancestry,
+      );
+      expect(document.spell_definitions).toEqual(expected);
+
+      const target = await database();
+      const imported = importCharacterBackup(target, document);
+      expect(storedDefinitions(target)).toEqual(expected);
+      expect(
+        target.oneRaw(
+          `SELECT name, notes, created_at, updated_at
+           FROM characters WHERE id = ?`,
+          [imported.characterId],
+        ),
+      ).toEqual({
+        name: `${displayName} User`,
+        notes: 'portable character',
+        created_at: timestamp,
+        updated_at: timestamp,
+      });
+      expect(
+        target.oneRaw(
+          `SELECT character_id, spell_version_id, favourite, notes,
+                  created_at, updated_at
+           FROM character_spell_preferences WHERE character_id = ?`,
+          [imported.characterId],
+        ),
+      ).toEqual({
+        character_id: imported.characterId,
+        spell_version_id: 1,
+        favourite: 1,
+        notes: 'portable preference',
+        created_at: timestamp,
+        updated_at: timestamp,
+      });
+      expect(
+        exportCharacterBackup(
+          target,
+          imported.characterId,
+          '2026-07-28T13:15:00.000Z',
+        ),
+      ).toEqual(document);
+    },
+  );
+
+  it('carries no bundled definition while proving the same instrument carries a fork', async () => {
+    const bundledDb = await database();
+    const bundled = seedReferencedSpell(
+      bundledDb,
+      'srd',
+      '2024:time-stop',
+      'Time Stop',
+      null,
+    );
+    const bundledDocument = exportCharacterBackup(
+      bundledDb,
+      bundled.characterId,
+    );
+    expect(
+      Object.values(bundledDocument.spell_definitions).every(
+        (rows) => rows.length === 0,
+      ),
+    ).toBe(true);
+    expect(bundledDocument.references.spell_versions).toEqual([
+      { id: bundled.versionId, content_key: '2024:time-stop' },
+    ]);
+
+    const forkDb = await database();
+    const fork = seedReferencedSpell(
+      forkDb,
+      'user',
+      '2024:local.dnd-wt:time-stop-copy',
+      'Time Stop (Copy)',
+      '2024:time-stop',
+    );
+    const forkDocument = exportCharacterBackup(forkDb, fork.characterId);
+    expect(forkDocument.spell_definitions.spell_versions).toHaveLength(1);
+    expect(forkDocument.spell_definitions.spell_versions[0]).toMatchObject({
+      provenance: 'user',
+      forked_from_content_key: '2024:time-stop',
+    });
+  });
+
+  it('installs an absent definition but keeps a colliding local content_key wholesale', async () => {
+    const source = await database();
+    const carried = seedReferencedSpell(
+      source,
+      'user',
+      '2024:local.dnd-wt:collision',
+      'Carried Version',
+      '2024:time-stop',
+    );
+    const document = exportCharacterBackup(source, carried.characterId);
+
+    const emptyTarget = await database();
+    importCharacterBackup(emptyTarget, document);
+    expect(
+      emptyTarget.scalar(
+        'SELECT display_name FROM spell_versions WHERE content_key = ?',
+        ['2024:local.dnd-wt:collision'],
+      ),
+    ).toBe('Carried Version');
+
+    const collisionTarget = await database();
+    const local = seedReferencedSpell(
+      collisionTarget,
+      'user',
+      '2024:local.dnd-wt:collision',
+      'Local Version',
+      '2024:local-ancestor',
+    );
+    const before = storedDefinitions(collisionTarget);
+    const imported = importCharacterBackup(collisionTarget, document);
+    expect(storedDefinitions(collisionTarget)).toEqual(before);
+    expect(
+      collisionTarget.oneRaw(
+        `SELECT display_name, provenance, forked_from_content_key
+         FROM spell_versions WHERE id = ?`,
+        [local.versionId],
+      ),
+    ).toEqual({
+      display_name: 'Local Version',
+      provenance: 'user',
+      forked_from_content_key: '2024:local-ancestor',
+    });
+    expect(
+      collisionTarget.scalar(
+        `SELECT spell_version_id
+         FROM character_spell_preferences WHERE character_id = ?`,
+        [imported.characterId],
+      ),
+    ).toBe(local.versionId);
+  });
+});
