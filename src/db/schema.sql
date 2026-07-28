@@ -912,6 +912,7 @@ CREATE TABLE `spell_versions` (
 	`is_active` TINYINT(1) DEFAULT true NOT NULL,
 	`created_at` DATETIME,
 	`updated_at` DATETIME,
+	`forked_from_content_key` VARCHAR,
 	FOREIGN KEY (`spell_identity_id`) REFERENCES `spell_identities`(`id`) ON UPDATE no action ON DELETE cascade,
 	CONSTRAINT "spell_versions_level_check" CHECK(provenance IS 'placeholder' OR level BETWEEN 0 AND 9),
 	CONSTRAINT "spell_versions_effect_reliability_category_check" CHECK(`effect_reliability_category` IN ('attack_roll', 'saving_throw', 'fixed_effect', 'modifier_scaled', 'ritual_utility', 'mixed')),

@@ -242,7 +242,7 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
       'material_component_summary', 'material_cost_kind', 'short_summary',
       'upcast_summary', 'cantrip_upgrade_summary',
       'effect_reliability_category', 'provenance',
-      'seed_version',
+      'seed_version', 'forked_from_content_key',
     ],
     numeric: ['created_at', 'updated_at'],
   },
