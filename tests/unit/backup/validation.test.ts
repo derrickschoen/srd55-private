@@ -67,6 +67,20 @@ function minimalCharacterBackup(): CharacterBackupDocument {
       background_definitions: [],
       spell_versions: [],
     },
+    spell_definitions: {
+      spell_identities: [],
+      spell_identity_aliases: [],
+      spell_versions: [],
+      spell_version_publications: [],
+      spell_list_memberships: [],
+      spell_version_tags: [],
+      spell_version_damage_types: [],
+      spell_version_conditions: [],
+      spell_version_attack_modes: [],
+      spell_version_save_abilities: [],
+      spell_version_upcast_levels: [],
+      spell_version_cantrip_upgrade_levels: [],
+    },
   };
 }
 

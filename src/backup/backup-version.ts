@@ -4,7 +4,8 @@ export const DATABASE_BACKUP_VERSION = 1 as const;
 
 export const CHARACTER_BACKUP_FORMAT =
   'dnd-multiclass-spells/character' as const;
-export const CHARACTER_BACKUP_VERSION = 1 as const;
+export const CHARACTER_BACKUP_VERSION = 2 as const;
+export const LEGACY_CHARACTER_BACKUP_VERSION = 1 as const;
 
 export class BackupValidationError extends Error {
   constructor(message: string) {
