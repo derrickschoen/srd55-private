@@ -1,5 +1,67 @@
 # Binding scope decisions
 
+## D49 — OWNER: the 2014 edition is real for spells and subclasses, and the level-up wizard multiclasses with a warning (2026-07-28)
+
+Two rulings, verbatim: *"We can have spells and subclasses from 2014"* and
+*"Level up wizard should handle multiclass, but warn that it is for advanced
+players"*.
+
+### 1. `rules_edition` is a promise, not dead weight
+
+I had asked whether the `'2014' | '2024' | 'expanded'` axis was real or
+vestigial, since everything SEEDED is 2024. It is real, and the ruling scopes it:
+**spells and subclasses**. Not armour, not backgrounds, not class core traits —
+those were not named and are not assumed.
+
+**A distinction the ruling does NOT settle, so it is not being assumed.**
+"We can have" could mean the app SUPPORTS 2014 content arriving by import, or
+that we SHIP it. Only the first is implied. SRD 5.1 (the 2014 rules) was released
+under CC-BY in 2023, so bundling it would be lawful — but `LICENSING ABSOLUTE`
+in the standing brief says "only SRD 5.2", and widening that is a separate
+decision with real cost: a second extraction pipeline, a second catalogue layer,
+and every "which edition is this" question doubling. **Taken for now: the app
+supports imported 2014 spells and subclasses; we bundle only 5.2.** Reversible,
+and worth asking explicitly if you meant more.
+
+### 2. The wizard multiclasses, and the warning is not the same thing as a block
+
+This resolves a real tension. D11 called it a "guided single-class builder";
+D42 §6 described a level-up that ADDS A CLASS and re-reads D28's proficiency
+union. The ruling picks: the wizard handles it, with a warning that multiclassing
+is for experienced players.
+
+**Warn and block are different mechanisms here and must not be conflated:**
+
+- **Complexity → WARN.** Multiclassing is legal. D28 already ruled "warn rather
+  than refuse" for this class of thing, and D11's tolerance was never about
+  preventing legal choices.
+- **Failed prerequisite → BLOCK.** D11 is explicit that an SRD-illegal choice is
+  unavailable in the builder. A character who does not meet the ability minimum
+  does not qualify, full stop — that is not complexity, it is illegality.
+
+### THE DEPENDENCY THIS CREATES, measured before recording
+
+The prerequisite rule IS extracted — `docs/srd/source/multiclassing.txt:22`:
+*"To qualify for a new class, you must have a score of at least 13 in the primary
+ability of the new class"*.
+
+It is **NOT modelled**. Grepping the schema for a multiclass prerequisite,
+minimum or ability threshold returns nothing.
+
+Enforcing the block therefore needs each class's PRIMARY ABILITY, and
+`docs/design/guided-builder.md` item 8 records an unresolved collision in exactly
+that value. So:
+
+- **the warning is buildable now** — it depends on nothing;
+- **the block is not**, until item 8's primary-ability collision is resolved and
+  the threshold is modelled.
+
+Shipping the warning without the block would leave the wizard permitting an
+SRD-illegal multiclass, which contradicts D11. Either item 8 lands first, or the
+multiclass step is gated off until it does. It should not ship half-enforced and
+silent about which half.
+
+
 ## D48 — OWNER: CLASS IS THE FIRST STEP, and that deletes the draft-state problem rather than solving it (2026-07-28)
 
 Asked what happens when someone starts the builder, picks a species and closes
