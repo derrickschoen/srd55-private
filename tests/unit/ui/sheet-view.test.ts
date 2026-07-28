@@ -211,6 +211,25 @@ function readableText(value: CharacterSheet): string {
 }
 
 describe('the character sheet is projected twice from one value', () => {
+  it('prints an undetermined total and proficiency without inventing JSON numbers', () => {
+    const value = sheet({
+      total_level: null,
+      proficiency_bonus: {
+        id: 'proficiency_bonus',
+        label: 'Proficiency bonus',
+        value: null,
+        formula: 'Undetermined because there are no classes.',
+      },
+    });
+
+    expect(row(value, 'total_level').value).toBe('undetermined');
+    expect(row(value, 'proficiency_bonus').value).toBe('undetermined');
+    expect(sheetFacts(value)).toMatchObject({
+      total_level: null,
+      proficiency_bonus: null,
+    });
+  });
+
   it('prints every core number as a labelled row, matching the JSON', () => {
     const value = sheet();
     const parsed = sheetFacts(value);

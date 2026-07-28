@@ -10,6 +10,7 @@ import {
   weaponMasteryProperties,
   weaponProficiencyCategories,
 } from '../domain/enums';
+import { characterLevel } from '../rules/character-level';
 import { weaponMasterySelectionError } from '../domain/contracts/row-rules';
 import type {
   VersatileWeaponDamage,
@@ -1614,9 +1615,10 @@ export function validateShareDocument(
     classes.map((item) => item.classKey),
     'classes',
   );
-  if (
-    classes.reduce((total, item) => total + item.level, 0) > 20
-  ) {
+  const totalLevel = characterLevel(classes.map((item) => item.level));
+  // No classes means the total is undetermined, and an absent total cannot
+  // exceed the validation ceiling.
+  if (totalLevel !== null && totalLevel > 20) {
     throw new ShareValidationError(
       'combined class levels must not exceed 20.',
     );

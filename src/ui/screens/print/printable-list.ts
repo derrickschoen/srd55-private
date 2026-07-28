@@ -318,7 +318,7 @@ export function renderPrintableList(spellList: PrintableSpellList): string {
         <header class="print-header">
           <p>${spellList.variant === 'full' ? 'Full spell reference' : 'Spell reference sheet'}</p>
           <h1>${escapeHtml(spellList.character.name)}</h1>
-          <p>Character level ${spellList.character.character_level} · Proficiency bonus +${spellList.character.proficiency_bonus}</p>
+          <p>Character level ${spellList.character.character_level === null ? 'undetermined' : spellList.character.character_level} · Proficiency bonus ${spellList.character.proficiency_bonus === null ? 'undetermined' : `+${spellList.character.proficiency_bonus}`}</p>
         </header>
 
         ${textNotice(spellList)}

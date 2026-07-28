@@ -36,6 +36,7 @@ import type {
 import type { AbilityScores } from './ability-scores';
 import { AttackBonus } from './attack-bonus';
 import { proficiencyBonus } from './proficiency';
+import { characterLevel } from './character-level';
 import { abilityForSkill } from './skills';
 import type {
   ArmorCategory,
@@ -51,7 +52,7 @@ import { resolveAttacksPerAction } from './extra-attack';
  * A class NAME, a LEVEL in it, and the per-level content keyed on that level.
  *
  * Split out of `SheetClass` so the functions that need nothing else —
- * `totalCharacterLevel`, `attacksPerAction`, `martialArtsDice` — can be handed
+ * `characterLevel`, `attacksPerAction`, `martialArtsDice` — can be handed
  * the classes a caller actually has. The attack-profile derivation reads class
  * levels and their level-keyed content and has no business knowing a hit die or
  * a saving throw list; requiring them would have made that caller invent both.
@@ -362,29 +363,13 @@ export interface ArmorClassResult {
 }
 
 /**
- * Total character level — the SUM across classes, floored at 1.
- *
- * Matches what `spell-access-builder.ts` and `build-report-builder.ts` already
- * compute, deliberately: a sheet that derived a different total would print a
- * save DC disagreeing with the planner on the same screen.
- */
-export function totalCharacterLevel(
-  classes: readonly SheetClassLevels[],
-): number {
-  return Math.max(
-    1,
-    classes.reduce((sum, entry) => sum + entry.level, 0),
-  );
-}
-
-/**
  * The highest total character level the rules describe.
  *
  * `docs/srd/source/multiclassing.txt`: "you can't take a level in a class if
  * that would cause your total character level to exceed 20." It is also the
  * ceiling of every `class_level BETWEEN 1 AND 20` CHECK in the schema and of the
  * `classLevel` row contract — but this constant states the CHARACTER rule, which
- * is a different fact from the per-class one and is what `totalCharacterLevel`
+ * is a different fact from the per-class one and is what `characterLevel`
  * is measured against.
  *
  * FOUR OTHER SITES STILL WRITE THE LITERAL — `add-source.ts:220`/`:244`,
@@ -421,7 +406,12 @@ export const MAXIMUM_CHARACTER_LEVEL = 20;
 export function totalLevelWarnings(
   classes: readonly SheetClassLevels[],
 ): readonly SheetWarning[] {
-  const total = totalCharacterLevel(classes);
+  const total = characterLevel(classes.map((entry) => entry.level));
+  if (total === null) {
+    // No classes cannot exceed the maximum; the absent total is displayed as
+    // undetermined by the sheet instead of being converted to a number here.
+    return [];
+  }
   if (total <= MAXIMUM_CHARACTER_LEVEL) {
     return [];
   }
@@ -449,13 +439,19 @@ export function totalLevelWarnings(
  * Proficiency Bonus of a level 5 character, which is +3."
  *
  * The override is resolved the way the two existing call sites resolve it, and
- * for the same reason as `totalCharacterLevel`: one number on the screen.
+ * for the same reason as `characterLevel`: one number on the screen.
  */
 export function sheetProficiencyBonus(
   classes: readonly SheetClass[],
   override: number | null = null,
-): number {
-  return override ?? proficiencyBonus(totalCharacterLevel(classes));
+): number | null {
+  const level = characterLevel(classes.map((entry) => entry.level));
+  if (level === null) {
+    // D42 requires both level and proficiency to remain undetermined for a
+    // class-less character, even when a stale override is present.
+    return null;
+  }
+  return override ?? proficiencyBonus(level);
 }
 
 /**
@@ -917,13 +913,18 @@ function proficientModifier(
 export function savingThrowModifier(input: {
   readonly ability: Ability;
   readonly scores: AbilityScores;
-  readonly proficiencyBonus: number;
+  readonly proficiencyBonus: number | null;
   readonly proficient: boolean;
-}): number {
+}): number | null {
+  if (input.proficient && input.proficiencyBonus === null) {
+    return null;
+  }
   return proficientModifier(
     input.scores,
     input.ability,
-    input.proficiencyBonus,
+    // A non-proficient save does not use proficiency at all, so the absent
+    // value cannot affect this branch.
+    input.proficiencyBonus === null ? 0 : input.proficiencyBonus,
     input.proficient,
   );
 }
@@ -942,13 +943,18 @@ export function savingThrowModifier(input: {
 export function skillModifier(input: {
   readonly skill: Skill;
   readonly scores: AbilityScores;
-  readonly proficiencyBonus: number;
+  readonly proficiencyBonus: number | null;
   readonly proficient: boolean;
-}): number {
+}): number | null {
+  if (input.proficient && input.proficiencyBonus === null) {
+    return null;
+  }
   return proficientModifier(
     input.scores,
     abilityForSkill(input.skill),
-    input.proficiencyBonus,
+    // A non-proficient skill does not use proficiency at all, so the absent
+    // value cannot affect this branch.
+    input.proficiencyBonus === null ? 0 : input.proficiencyBonus,
     input.proficient,
   );
 }
@@ -975,18 +981,16 @@ export function initiative(scores: AbilityScores): number {
  */
 export function passivePerception(input: {
   readonly scores: AbilityScores;
-  readonly proficiencyBonus: number;
+  readonly proficiencyBonus: number | null;
   readonly proficient: boolean;
-}): number {
-  return (
-    10 +
-    skillModifier({
-      skill: 'perception',
-      scores: input.scores,
-      proficiencyBonus: input.proficiencyBonus,
-      proficient: input.proficient,
-    })
-  );
+}): number | null {
+  const modifier = skillModifier({
+    skill: 'perception',
+    scores: input.scores,
+    proficiencyBonus: input.proficiencyBonus,
+    proficient: input.proficient,
+  });
+  return modifier === null ? null : 10 + modifier;
 }
 
 /**
@@ -1036,7 +1040,7 @@ export interface MartialArtsDie {
  * THIS IS THE LEVEL THE CANTRIP UPGRADES DO NOT USE, and the difference is a
  * real number on a real sheet rather than a pedantic distinction. A Monk 3 /
  * Fighter 10 has a d6 here — Monk level 3 — while a cantrip of theirs upgrades
- * on `totalCharacterLevel`, which is 13. One `level` variable serving both is
+ * on `characterLevel`, which is 13. One `level` variable serving both is
  * the bug this pair of functions exists to make impossible.
  *
  * RETURNS ONE ENTRY PER GRANTING CLASS, never a single combined die. Only the

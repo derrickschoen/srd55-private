@@ -11,6 +11,7 @@ import {
   type RowCodec,
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
+import { characterLevel } from '../rules/character-level';
 import type {
   RestoreSnapshotCommand as RestoreSnapshotPayload,
   UpdateClassCommand as UpdateClassPayload,
@@ -111,15 +112,12 @@ export class UpdateClassCommand {
       if (level < 1 || level > 20) {
         throw new TypeError('Class level must be between 1 and 20.');
       }
-      const otherLevels = Number(
-        this.db.scalar(
-          `SELECT COALESCE(SUM(level), 0)
-           FROM character_class_levels
-           WHERE character_id = ? AND class_definition_id != ?`,
-          [characterId, classId],
-        ) ?? 0,
-      );
-      if (otherLevels + level > 20) {
+      const otherLevels = characterLevel(this.db, characterId, {
+        excludingClassDefinitionId: classId,
+      });
+      const resultingLevel =
+        otherLevels === null ? level : otherLevels + level;
+      if (resultingLevel > 20) {
         throw new TypeError('A character cannot exceed level 20.');
       }
 
@@ -148,16 +146,7 @@ export class UpdateClassCommand {
         [characterId, classId],
       );
       if (existingLevelId === null) {
-        const firstClass =
-          Number(
-            this.db.scalar(
-              `SELECT EXISTS (
-                 SELECT 1 FROM character_class_levels
-                 WHERE character_id = ?
-               )`,
-              [characterId],
-            ) ?? 0,
-          ) === 0;
+        const firstClass = otherLevels === null;
         this.db.exec(
           `INSERT INTO character_class_levels (
              character_id, class_definition_id, subclass_definition_id,
@@ -209,7 +198,9 @@ export class UpdateClassCommand {
             classId,
             `${definition.name} ${level}`,
             config,
-            Math.max(1, otherLevels + 1),
+            // A first class is acquired at character level 1; later classes
+            // are acquired at the next level after the other-class total.
+            otherLevels === null ? 1 : otherLevels + 1,
             timestamp,
             timestamp,
           ],

@@ -97,6 +97,9 @@ describe('the sheet and the weapons panel agree about one weapon', () => {
     if (option === undefined) {
       throw new Error(`No Strength option for ${name}.`);
     }
+    if (option.attack_bonus === null) {
+      throw new Error(`Strength attack bonus is undetermined for ${name}.`);
+    }
     return option.attack_bonus;
   }
 

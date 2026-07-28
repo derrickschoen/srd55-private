@@ -278,6 +278,34 @@ describe('persisted spell access routes', () => {
     };
   }
 
+  it('builds no routes without a class and resumes exact level math once one exists', () => {
+    const characterId = character('Class precondition', {
+      intelligence: 16,
+    });
+    const featId = featDefinition('Classless spell holder');
+    const sourceId = source(
+      characterId,
+      'feat',
+      featId,
+      'Classless spell holder',
+      { spellcasting_ability: 'intelligence' },
+    );
+    const versionId = spell('2024:classless-route', 'Classless Route');
+    slot(characterId, sourceId, versionId, 'classless:1');
+
+    expect(builder.buildForCharacter(characterId)).toEqual([]);
+
+    const fighterId = classDefinition('Fighter', null);
+    classLevel(characterId, fighterId, 3);
+    expect(builder.buildForCharacter(characterId)).toEqual([
+      expect.objectContaining({
+        spell_version_id: versionId,
+        attack_bonus: 5,
+        save_dc: 13,
+      }),
+    ]);
+  });
+
   it('builds every slot casting mode with fixed/selected provenance and source ability math', () => {
     const characterId = character('Casting Math', {
       intelligence: 18,
@@ -553,6 +581,8 @@ describe('persisted spell access routes', () => {
 
   it('evaluates ordinary routes live, lets kept overrides bypass source and eligibility, but never inactive versions', () => {
     const characterId = character();
+    const classId = classDefinition('Override Route Class', null);
+    classLevel(characterId, classId, 1);
     const definitionId = featDefinition('Override Feat');
     const activeSourceId = source(
       characterId,

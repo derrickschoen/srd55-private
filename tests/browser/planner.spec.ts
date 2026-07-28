@@ -86,7 +86,9 @@ test('planner editors, history, focus, keyboard, and responsive state persist', 
         revision: 3,
       }),
     ]);
-  await expect(page.getByText('Level 0 · revision 3')).toBeVisible();
+  await expect(
+    page.getByText('Level undetermined · revision 3'),
+  ).toBeVisible();
 
   await page.locator('body').click({ position: { x: 1, y: 1 } });
   await page.keyboard.press('Control+Shift+Z');
@@ -98,7 +100,9 @@ test('planner editors, history, focus, keyboard, and responsive state persist', 
         revision: 4,
       }),
     ]);
-  await expect(page.getByText('Level 0 · revision 4')).toBeVisible();
+  await expect(
+    page.getByText('Level undetermined · revision 4'),
+  ).toBeVisible();
 
   await page
     .locator('[data-focus-key="save-point-label"]')
