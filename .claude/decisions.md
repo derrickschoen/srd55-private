@@ -66,8 +66,10 @@ rolls 4d6 drop the lowest and keeps the order; then, asked whether the reroll
 gate was included: **all three parts, labelled a house rule.**
 
 **IT IS CALLED "ROLL IN ORDER" AND NAMES NOBODY.** The owner's later
-instruction, verbatim: *"Do not use Matt's name. Just call it roll in order."*
-The variant is associated with a particular person in the wider hobby; the
+instruction was to drop the person's name and call it "roll in order". That
+instruction is PARAPHRASED here rather than quoted, which is unusual for this
+record — quoting it verbatim would print the name and defeat it. The variant is
+associated with a particular person in the wider hobby; the
 product and this record do not say so. Naming an individual would imply
 endorsement we do not have and attach a person to a rule they did not write for
 us. The commit that first recorded this decision (`59fa83e`) predates the
