@@ -1,5 +1,69 @@
 # Binding scope decisions
 
+## F23 — the bundled catalogue merged; and I made the same merge mistake twice in one session, having written the lesson down after the first (2026-07-28)
+
+`chunk/SRD-CATALOG` merged at `3a4b319`. Verified by me: **2166 vitest / 131
+files**, build exit 0 with both dist controls, **72 Playwright** (9.4m, port
+5453), frozen paths untouched against merge-base.
+
+The app now works on first open. 339 SRD spells and their eight class lists seed
+with `provenance = 'srd'`, refuse edit and delete at the command layer, and
+survive a user's catalogue import.
+
+### Verified rather than accepted
+
+- **My mutation killed the load-bearing guarantee.** Made the read-only refusal
+  unable to fire (`provenance === 'srd'` changed to an impossible value) →
+  `FAIL refuses edit and delete commands with the exact read-only message`,
+  1 failed / 2165 passed. Restored. D45's whole promise rests on that refusal
+  and it is held by a test.
+- **"339 spells" is an ENUMERATION, not a count** (F16). The test is
+  `expect([...actual].sort()).toEqual(EXPECTED_SPELL_NAMES)`, the seeded rows are
+  compared the same way, and the class-list assertion is that list MINUS
+  Phantasmal Force. The oracle is hand-enumerated from the printed headings, and
+  this branch did not regenerate it — the only deletion in that file is `const`
+  becoming `export const`.
+- **The import-sweep test carries its own negative control** — imported rows DO
+  get tombstoned in the same test — so "SRD rows survived" is not vacuous. That
+  was codex's own doing, unprompted, and it is the pattern to keep.
+
+One change I did not expect and checked before merging: the sharing round-trip
+fixture renamed `2024:shield` to `2024:fixture-shield`. Legitimate and an
+improvement — the fixture had invented a key that is now REAL bundled content, so
+it was accidentally testing catalogue collision. The assertions are unchanged;
+the fixture merely stopped impersonating a shipped spell.
+
+### THE PROCESS FINDING, and it is against me
+
+I ran `git merge` from inside the worktree. The worktree is checked out on the
+branch being merged, so git merged it into itself and reported:
+
+```
+Already up to date.
+```
+
+Then `git worktree remove` deleted the directory the shell was standing in:
+
+```
+fatal: Unable to read current working directory: No such file or directory
+```
+
+The commit had landed; the merge silently had not. **I did this identically two
+merges earlier on `chunk/SRD-SPELLS`, and reported the lesson at the time.**
+Writing it in a report did not stop me repeating it forty minutes later, which is
+the actual finding — a procedural lesson that lives only in prose I emit is not
+retained, exactly as the `CLAUDE.md` "How to report" section says about the
+terseness rule that kept evaporating.
+
+BINDING, so it has a home instead of a mention:
+
+- **Merges run from the main worktree, never from the branch's own worktree.**
+- **"Already up to date." from a merge you expect to do work is a FAILURE
+  message.** Read it as one. The merge that does nothing is the merge that did
+  not happen.
+- Remove a worktree only after `git worktree list` shows the merge landed on
+  main.
+
 ## D45 — OWNER: the SRD catalogue is a read-only bundled layer, and customising a spell FORKS it (2026-07-27)
 
 The owner's ruling, verbatim: *"I like the c idea of forking the srd spell. In
