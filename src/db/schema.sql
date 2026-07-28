@@ -54,27 +54,22 @@ CREATE TABLE `background_equipment_items` (
 	`item_kind` VARCHAR NOT NULL,
 	`weapon_template_id` integer,
 	`armor_template_id` integer,
-	`coin_copper` integer,
 	`created_at` DATETIME,
 	`updated_at` DATETIME,
 	FOREIGN KEY (`background_template_id`) REFERENCES `background_templates`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`weapon_template_id`) REFERENCES `weapon_templates`(`id`) ON UPDATE no action ON DELETE restrict,
 	FOREIGN KEY (`armor_template_id`) REFERENCES `armor_templates`(`id`) ON UPDATE no action ON DELETE restrict,
 	CONSTRAINT "background_equipment_items_option_check" CHECK(`option` IN ('a', 'b')),
-	CONSTRAINT "background_equipment_items_item_kind_check" CHECK(`item_kind` IN ('gear', 'weapon', 'armor', 'coin')),
+	CONSTRAINT "background_equipment_items_item_kind_check" CHECK(`item_kind` IN ('gear', 'weapon', 'armor')),
 	CONSTRAINT "background_equipment_items_sort_order_check" CHECK(typeof(`sort_order`) = 'integer' AND `sort_order` >= 1),
 	CONSTRAINT "background_equipment_items_quantity_check" CHECK(typeof(`quantity`) = 'integer' AND `quantity` >= 1),
 	CONSTRAINT "background_equipment_items_payload_check" CHECK(CASE `item_kind`
         WHEN 'weapon' THEN `weapon_template_id` IS NOT NULL
-          AND `armor_template_id` IS NULL AND `coin_copper` IS NULL
+          AND `armor_template_id` IS NULL
         WHEN 'armor' THEN `armor_template_id` IS NOT NULL
-          AND `weapon_template_id` IS NULL AND `coin_copper` IS NULL
-        WHEN 'coin' THEN `coin_copper` IS NOT NULL
-          AND `weapon_template_id` IS NULL AND `armor_template_id` IS NULL
+          AND `weapon_template_id` IS NULL
         ELSE `weapon_template_id` IS NULL AND `armor_template_id` IS NULL
-          AND `coin_copper` IS NULL
-      END),
-	CONSTRAINT "background_equipment_items_coin_copper_check" CHECK((`coin_copper` IS NULL OR (typeof(`coin_copper`) = 'integer' AND `coin_copper` >= 1)))
+      END)
 );
 
 CREATE UNIQUE INDEX `background_equipment_items_template_option_sort_order_unique` ON `background_equipment_items` (`background_template_id`,`option`,`sort_order`);

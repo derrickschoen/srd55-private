@@ -837,19 +837,14 @@ export type BackgroundEquipmentOption =
  * is built it must read through this reference and write VALUES, the way
  * `speciesFromTemplate` already does.
  *
- * `coin` EXISTS BECAUSE EVERY PRINTED PACKAGE ENDS IN MONEY AND ONE OF THEM IS
- * MONEY ALONE. Option B for all four backgrounds is exactly `50 GP`
- * (`tests/unit/rules/origins-srd.test.ts:519` asserts it for every row), and
- * every option A ends in `8 GP`, `16 GP` or `14 GP`. Under a strict
- * quantity-plus-name reading, option B is either a package with zero items or
- * an item literally named "GP" with a quantity of 50 — currency as an inventory
- * entry, which is the thing the owner's *"we don't track user gold or inventory"*
- * rules out. A `coin` line stores the printed text as its name and the amount
- * in copper beside it, so the money is typed without becoming stock.
+ * MONEY IS ORDINARY `gear` TEXT, per D40. Option B for all four backgrounds is
+ * exactly `50 GP`; it is quantity 1 with that whole printed string as its name,
+ * on the same terms as a bedroll. There is no denomination or numeric value in
+ * this domain because the owner explicitly dropped coin tracking.
  *
  * NO BUNDLED ROW REACHES `armor`, AND THAT IS STATED RATHER THAN DISCOVERED.
  * The four licensed packages hold four weapon entries (Quarterstaff, 2 Daggers,
- * Spear, Shortbow), ammunition, clothing and coin, and NO ARMOUR — `Robe` and
+ * Spear, Shortbow), ammunition, clothing and money text, and NO ARMOUR — `Robe` and
  * `Traveler's Clothes` are clothing, which `armor_templates` does not carry.
  * The member and its CHECK arm are exercised by direct insertion in
  * `tests/integration/rules/background-equipment.test.ts`, both the accepting
@@ -859,7 +854,6 @@ export const backgroundEquipmentItemKinds = [
   'gear',
   'weapon',
   'armor',
-  'coin',
 ] as const;
 export type BackgroundEquipmentItemKind =
   (typeof backgroundEquipmentItemKinds)[number];

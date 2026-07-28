@@ -855,8 +855,8 @@ export const background_templates = sqliteTable(
  *
  * "NAME ONLY UNLESS WEAPON OR ARMOR", MADE STRUCTURAL. `item_kind` discriminates
  * and the payload CHECK below makes every other combination unstorable, so a
- * `weapon` line with no weapon and a `gear` line carrying a coin amount are both
- * refused by the database rather than caught by a reader.
+ * `weapon` line with no weapon and a `gear` line carrying an armour reference
+ * are both refused by the database rather than caught by a reader.
  *
  * THE WEAPON AND ARMOUR LIMBS ARE REAL FOREIGN KEYS, AND D1b PERMITS IT.
  * `weapon_templates` and `armor_templates` both exist and both are CATALOG
@@ -902,15 +902,15 @@ export const background_equipment_items = sqliteTable(
      * 10 counts sheets, a sub-unit, not parchments — and that distinction is
      * the reason this column is not simply "the first number on the line".
      *
-     * A `coin` line is ALSO quantity 1: fifty gold pieces are one sum of money,
-     * not fifty items. Reading `50 GP` as quantity 50 of an item named `GP` is
-     * what would turn currency into inventory, which the owner ruled out.
+     * A printed money line is ALSO quantity 1: `50 GP` is one textual package
+     * line, on the same terms as a bedroll. Reading it as quantity 50 of an item
+     * named `GP` would turn currency into tracked inventory, which D40 rejects.
      */
     quantity: integer('quantity').notNull(),
     /**
      * THE PRINTED NAME, VERBATIM, MINUS ONLY A LEADING QUANTITY. `Daggers`
      * stays plural, `Gaming Set (same as above)` keeps its back-reference and a
-     * `coin` line keeps its whole printed text (`50 GP`). Nothing is
+     * money line keeps its whole printed text (`50 GP`). Nothing is
      * singularised, expanded or resolved — the row beside it carries whatever
      * this application actually knows.
      */
@@ -922,12 +922,6 @@ export const background_equipment_items = sqliteTable(
     armor_template_id: integer('armor_template_id')
       .$type<ArmorTemplateId>()
       .references(() => armor_templates.id, { onDelete: 'restrict' }),
-    /**
-     * THE SUM IN COPPER PIECES, for a `coin` line and nothing else. The same
-     * unit the owner ruled for spell components, through the same conversion in
-     * `src/domain/coin.ts`. `50 GP` is 5000.
-     */
-    coin_copper: integer('coin_copper'),
     created_at: datetime()('created_at'),
     updated_at: datetime()('updated_at'),
   },
@@ -952,10 +946,10 @@ export const background_equipment_items = sqliteTable(
      * THE PAYLOAD CHECK — the constraint that makes `item_kind` mean something
      * rather than merely be recorded.
      *
-     * Each kind names the ONE payload column it may carry and requires the
-     * other two to be NULL. Without the negative half a `coin` row could carry
-     * a weapon id as well, and a reader would have two answers to "what is this
-     * line" with nothing to break the tie.
+     * Each structured kind names the ONE payload column it may carry and
+     * requires the other one to be NULL. Without the negative half a gear row
+     * could carry a weapon id as well, and a reader would have two answers to
+     * "what is this line" with nothing to break the tie.
      *
      * `CASE … ELSE` RATHER THAN A CHAIN OF `IS` LIMBS: the `ELSE` arm is
      * `gear`, and it is also every value `item_kind` should not hold. So a row
@@ -968,23 +962,11 @@ export const background_equipment_items = sqliteTable(
       'background_equipment_items_payload_check',
       sql`CASE \`item_kind\`
         WHEN 'weapon' THEN \`weapon_template_id\` IS NOT NULL
-          AND \`armor_template_id\` IS NULL AND \`coin_copper\` IS NULL
+          AND \`armor_template_id\` IS NULL
         WHEN 'armor' THEN \`armor_template_id\` IS NOT NULL
-          AND \`weapon_template_id\` IS NULL AND \`coin_copper\` IS NULL
-        WHEN 'coin' THEN \`coin_copper\` IS NOT NULL
-          AND \`weapon_template_id\` IS NULL AND \`armor_template_id\` IS NULL
+          AND \`weapon_template_id\` IS NULL
         ELSE \`weapon_template_id\` IS NULL AND \`armor_template_id\` IS NULL
-          AND \`coin_copper\` IS NULL
       END`,
-    ),
-    /**
-     * A coin line worth nothing is not a coin line. `1` and not `0`: every
-     * printed package ends in a real sum, and a zero would be the "absence
-     * printed as a fact" D24 forbids.
-     */
-    check(
-      'background_equipment_items_coin_copper_check',
-      nullOrIntegerAtLeast('coin_copper', 1),
     ),
     uniqueIndex(
       'background_equipment_items_template_option_sort_order_unique',

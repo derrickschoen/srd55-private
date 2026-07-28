@@ -1281,6 +1281,28 @@ const RUNTIME_PROBES: Readonly<Record<string, RuntimeProbe>> = PROBES;
 
 const PROBED_TABLES = Object.keys(RUNTIME_PROBES);
 
+/**
+ * REMOVED COLUMNS ARE HISTORICAL PORTABILITY DECISIONS TOO.
+ *
+ * `background_equipment_items` is catalog content and therefore does not
+ * travel in a character share, but deleting its old classification without a
+ * word would make that easy to mistake for an overlooked shared value. D40
+ * retires the numeric limb only after the database migration renders its value
+ * into `item_name`; this record pins both halves of that decision here.
+ */
+const RETIRED_COLUMN_DECISIONS = [
+  {
+    table: 'background_equipment_items',
+    column: 'coin_copper',
+    why:
+      'The table is recipient-seeded catalog content, not character data sent in a share. Migration 0004 renders every historical value into the ordinary gear item_name before the numeric column is removed.',
+  },
+] as const satisfies readonly {
+  readonly table: AnyTableName;
+  readonly column: string;
+  readonly why: string;
+}[];
+
 /** `PRAGMA table_info`, as `column -> declared default` (undefined for none). */
 function declaredDefaults(
   db: DatabaseContext,
@@ -1450,6 +1472,25 @@ describe('every column of every shared table is classified', () => {
     // The type already forces the eighteen shared tables; the exact runtime
     // roster additionally pins the character root and reference-only spell row.
     expect(PROBED_TABLES).toHaveLength(20);
+  });
+
+  it('records why each deliberately retired column no longer travels', () => {
+    expect(RETIRED_COLUMN_DECISIONS).toEqual([
+      {
+        table: 'background_equipment_items',
+        column: 'coin_copper',
+        why:
+          'The table is recipient-seeded catalog content, not character data sent in a share. Migration 0004 renders every historical value into the ordinary gear item_name before the numeric column is removed.',
+      },
+    ]);
+    for (const decision of RETIRED_COLUMN_DECISIONS) {
+      const live = trip.sender
+        .allRaw(`PRAGMA table_info("${decision.table}")`)
+        .map((row) => String(row.name));
+      expect(live, `${decision.table}.${decision.column} is still live`)
+        .not.toContain(decision.column);
+      expect(decision.why.length).toBeGreaterThan(80);
+    }
   });
 
   it.each(PROBED_TABLES)(

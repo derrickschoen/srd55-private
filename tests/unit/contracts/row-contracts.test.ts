@@ -116,6 +116,22 @@ function classLevelRow(): Record<string, unknown> {
   };
 }
 
+function backgroundEquipmentRow(): Record<string, unknown> {
+  return {
+    id: 19,
+    background_template_id: 3,
+    option: 'b',
+    sort_order: 1,
+    quantity: 1,
+    item_name: '50 GP',
+    item_kind: 'gear',
+    weapon_template_id: null,
+    armor_template_id: null,
+    created_at: null,
+    updated_at: null,
+  };
+}
+
 const label = 'Character backup tables.character_source_instances[3]';
 const slotLabel = 'Character backup tables.spell_selection_slots[0]';
 const classLabel = 'Character backup tables.character_class_levels[0]';
@@ -229,6 +245,24 @@ describe('per-table row contracts', () => {
     expect(rowContractError('character_source_instances', row, label)).toContain(
       `${label}.source_type:`,
     );
+  });
+
+  it('refuses the retired coin equipment kind at the command-side seed contract', () => {
+    const equipmentLabel = 'Bundled background_equipment_items row';
+    expect(
+      rowContractError(
+        'background_equipment_items',
+        backgroundEquipmentRow(),
+        equipmentLabel,
+      ),
+    ).toBeNull();
+    expect(
+      rowContractError(
+        'background_equipment_items',
+        { ...backgroundEquipmentRow(), item_kind: 'coin' },
+        equipmentLabel,
+      ),
+    ).toContain(`${equipmentLabel}.item_kind:`);
   });
 
   it('refuses non-JSON in a JSON text column — the F3b hole', () => {

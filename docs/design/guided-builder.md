@@ -606,11 +606,11 @@ and portability (about 1–2 weeks), and **XL** is a new reusable domain track
    (`docs/srd/source/class-core-traits.txt:139-143`). GP is an untracked text
    line, not a `coin` kind, per D40.
 
-10. **Reconcile the existing background equipment shape with D40 — M.** The
-    current schema still contains `item_kind = coin` and `coin_copper`
-    (`db/schema/origins.ts:918-930`, `:968-987`) even though D40 dropped coin as
-    a kind. Do not copy that obsolete limb into class equipment. Replace it
-    before sharing a generic package-item model.
+10. **Reconcile the existing background equipment shape with D40 — completed.**
+    Migration `0004_retire_coin` renders every historical numeric money row as
+    whole-GP line-item text or aborts by row id when that is impossible. The
+    live package-item shape now has only `gear | weapon | armor`, so class
+    equipment can reuse it without copying the obsolete limb.
 
 11. **Equipment projection and commands — M.** Query class/background packages,
     copy only weapons and armour to character value rows, and apply a reviewed

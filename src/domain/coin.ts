@@ -2,10 +2,9 @@
  * COIN, IN COPPER PIECES.
  *
  * The owner ruled that a spell's material component is *"a cost in copper
- * pieces plus text"*, and copper is therefore the unit two different parsers
- * have to reach — the spell-component reader in `./spell-components.ts` and the
- * background-equipment reader in `../rules/origins-srd.ts`, whose packages all
- * end in coin. One conversion, declared once.
+ * pieces plus text"*, and copper is therefore the unit the spell-component
+ * reader in `./spell-components.ts` reaches. Background equipment deliberately
+ * does NOT use this conversion: D40 keeps `50 GP` as ordinary line-item text.
  *
  * THE EXCHANGE RATES ARE NOT SOURCED FROM A BUNDLED EXTRACT, AND SAYING SO IS
  * THE POINT. `docs/srd/source/` holds fourteen extracts and NONE of them is the

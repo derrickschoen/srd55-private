@@ -46,7 +46,6 @@ export interface BackgroundEquipmentItem {
   readonly item_kind: BackgroundEquipmentItemKind;
   readonly weapon_template_id: number | null;
   readonly armor_template_id: number | null;
-  readonly coin_copper: number | null;
 }
 
 export interface BackgroundEquipmentPackage {
@@ -62,8 +61,6 @@ export interface BackgroundEquipmentPackage {
  * THE SWITCH IS EXHAUSTIVE AND HAS NO `default` ARM. Each arm says what this
  * application actually knows about the line, and no arm invents anything:
  *
- *  - `coin` prints the amount in copper, because copper is the unit the owner
- *    ruled and the printed text (`50 GP`) is already the item's name;
  *  - `weapon` and `armor` say that the line RESOLVES to a catalog row, which is
  *    the whole content of "unless weapon or armor";
  *  - `gear` says nothing beyond the name, which is "name only", and is correct.
@@ -85,10 +82,6 @@ export function describeBackgroundEquipmentItem(
       return `${counted} — weapon`;
     case 'armor':
       return `${counted} — armour`;
-    case 'coin':
-      return item.coin_copper === null
-        ? counted
-        : `${counted} (${String(item.coin_copper)} cp)`;
   }
 }
 
@@ -108,8 +101,7 @@ export function backgroundEquipmentPackages(
     `SELECT template.content_key AS background_content_key,
             template.name AS background_name,
             item.option, item.sort_order, item.quantity, item.item_name,
-            item.item_kind, item.weapon_template_id, item.armor_template_id,
-            item.coin_copper
+            item.item_kind, item.weapon_template_id, item.armor_template_id
      FROM background_equipment_items AS item
      JOIN background_templates AS template
        ON template.id = item.background_template_id
@@ -125,7 +117,6 @@ export function backgroundEquipmentPackages(
       item_kind: sqlString(row, 'item_kind'),
       weapon_template_id: sqlNullableInteger(row, 'weapon_template_id'),
       armor_template_id: sqlNullableInteger(row, 'armor_template_id'),
-      coin_copper: sqlNullableInteger(row, 'coin_copper'),
     }),
   );
 
@@ -158,7 +149,6 @@ export function backgroundEquipmentPackages(
       item_kind: row.item_kind,
       weapon_template_id: row.weapon_template_id,
       armor_template_id: row.armor_template_id,
-      coin_copper: row.coin_copper,
     });
   }
   return packages;
