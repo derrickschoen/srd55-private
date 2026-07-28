@@ -172,6 +172,24 @@ export const FOREIGN_KEY_FACTS = [
     targetColumns: ['id'],
   },
   {
+    table: 'class_equipment_items',
+    columns: ['class_definition_id'],
+    target: 'class_definitions',
+    targetColumns: ['id'],
+  },
+  {
+    table: 'class_equipment_items',
+    columns: ['weapon_template_id'],
+    target: 'weapon_templates',
+    targetColumns: ['id'],
+  },
+  {
+    table: 'class_equipment_items',
+    columns: ['armor_template_id'],
+    target: 'armor_templates',
+    targetColumns: ['id'],
+  },
+  {
     table: 'class_extra_attack_grants',
     columns: ['class_definition_id'],
     target: 'class_definitions',

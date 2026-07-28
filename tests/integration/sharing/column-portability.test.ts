@@ -1303,6 +1303,84 @@ const RETIRED_COLUMN_DECISIONS = [
   readonly why: string;
 }[];
 
+type RecipientSeededColumn = {
+  readonly kind: 'omitted';
+  readonly fixture: SqlValue;
+  readonly why: string;
+};
+
+/**
+ * D30 classification for the new catalog table.
+ *
+ * Every column is omitted because the entire row is recipient-seeded SRD class
+ * catalog content, not character data. The per-column fixtures are deliberately
+ * non-default so the same instrument rule as the round-trip probes applies: a
+ * classification sitting on its declared default proves nothing.
+ */
+const RECIPIENT_SEEDED_CATALOG_COLUMNS = {
+  class_equipment_items: {
+    id: {
+      kind: 'omitted',
+      fixture: 7001,
+      why: 'Recipient-seeded catalog row id; database identifiers have no portable meaning and no class package row travels.',
+    },
+    class_definition_id: {
+      kind: 'omitted',
+      fixture: 7002,
+      why: 'Recipient-seeded class catalog parent; the recipient resolves its own bundled class and no package row travels.',
+    },
+    option: {
+      kind: 'omitted',
+      fixture: 'c',
+      why: 'Recipient-seeded SRD package label; class equipment is catalog content, not character data sent in a share.',
+    },
+    sort_order: {
+      kind: 'omitted',
+      fixture: 7,
+      why: 'Recipient-seeded SRD package order; class equipment is catalog content, not character data sent in a share.',
+    },
+    quantity: {
+      kind: 'omitted',
+      fixture: 8,
+      why: 'Recipient-seeded SRD item quantity; class equipment is catalog content, not character data sent in a share.',
+    },
+    item_name: {
+      kind: 'omitted',
+      fixture: 'Portability Javelins',
+      why: 'Recipient-seeded SRD printed item name; class equipment is catalog content, not character data sent in a share.',
+    },
+    item_kind: {
+      kind: 'omitted',
+      fixture: 'weapon',
+      why: 'Recipient-seeded SRD item classification; class equipment is catalog content, not character data sent in a share.',
+    },
+    weapon_template_id: {
+      kind: 'omitted',
+      fixture: 7003,
+      why: 'Recipient-seeded catalog reference; the recipient owns both catalogs and no sender template id can travel.',
+    },
+    armor_template_id: {
+      kind: 'omitted',
+      fixture: 7004,
+      why: 'Recipient-seeded catalog reference; the recipient owns both catalogs and no sender template id can travel.',
+    },
+    created_at: {
+      kind: 'omitted',
+      fixture: '2041-02-03T04:05:06.000Z',
+      why: 'Recipient-seeded catalog timestamp; a sender database creation time is not character data and does not travel.',
+    },
+    updated_at: {
+      kind: 'omitted',
+      fixture: '2042-03-04T05:06:07.000Z',
+      why: 'Recipient-seeded catalog timestamp; a sender database update time is not character data and does not travel.',
+    },
+  },
+} as const satisfies {
+  readonly class_equipment_items: Readonly<
+    Record<ColumnNamesOf<'class_equipment_items'>, RecipientSeededColumn>
+  >;
+};
+
 /** `PRAGMA table_info`, as `column -> declared default` (undefined for none). */
 function declaredDefaults(
   db: DatabaseContext,
@@ -1490,6 +1568,25 @@ describe('every column of every shared table is classified', () => {
       expect(live, `${decision.table}.${decision.column} is still live`)
         .not.toContain(decision.column);
       expect(decision.why.length).toBeGreaterThan(80);
+    }
+  });
+
+  it('classifies every class equipment column as recipient-seeded catalog content', () => {
+    expect(Object.keys(SHARE_TABLES)).not.toContain('class_equipment_items');
+    const table = 'class_equipment_items';
+    const columns = RECIPIENT_SEEDED_CATALOG_COLUMNS[table];
+    const live = trip.sender
+      .allRaw(`PRAGMA table_info("${table}")`)
+      .map((row) => String(row.name));
+    expect(Object.keys(columns).sort()).toEqual(live.sort());
+
+    const defaults = declaredDefaults(trip.sender, table);
+    for (const [column, decision] of Object.entries(columns)) {
+      expect(decision.kind).toBe('omitted');
+      expect(decision.fixture, `${table}.${column} fixture equals its default`)
+        .not.toBe(defaults.get(column));
+      expect(decision.why.length, `${table}.${column} has no real reason`)
+        .toBeGreaterThan(80);
     }
   });
 

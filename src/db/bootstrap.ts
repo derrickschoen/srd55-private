@@ -10,6 +10,7 @@ import { ensureBundledWeaponContent } from '../rules/weapons-srd';
 import { ensureBundledOriginContent } from '../rules/origins-srd';
 import { ensureBundledSheetContent } from '../rules/sheet-srd';
 import { ensureBundledSpellContent } from '../rules/spells-srd';
+import { ensureBundledClassEquipment } from '../rules/class-equipment-srd';
 
 /**
  * The bundled content every application database is expected to carry: the SRD
@@ -44,6 +45,7 @@ export const applicationSeed: DatabaseSeed = (db) => {
   ensureBundledClassContent(db);
   ensureBundledWeaponContent(db);
   ensureBundledSheetContent(db);
+  ensureBundledClassEquipment(db);
   ensureBundledOriginContent(db);
   ensureBundledSpellContent(db);
 };

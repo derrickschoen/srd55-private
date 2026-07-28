@@ -611,7 +611,11 @@ function newArmorTemplate(db: Database, values: Values = {}): number {
  * writers run before any database exists.
  */
 const equipmentItem =
-  (values: Values): Write =>
+  (
+    values: Values,
+    table: 'background_equipment_items' | 'class_equipment_items' =
+      'background_equipment_items',
+  ): Write =>
   (db) => {
     const resolved: Record<string, SqlValue> = { ...values };
     if (resolved.weapon_template_id === '@weapon') {
@@ -620,8 +624,10 @@ const equipmentItem =
     if (resolved.armor_template_id === '@armor') {
       resolved.armor_template_id = newArmorTemplate(db);
     }
-    insert(db, 'background_equipment_items', {
-      background_template_id: newBackgroundTemplate(db),
+    insert(db, table, {
+      ...(table === 'background_equipment_items'
+        ? { background_template_id: newBackgroundTemplate(db) }
+        : { class_definition_id: newClass(db) }),
       option: 'a',
       sort_order: 1,
       quantity: 1,
@@ -1181,6 +1187,68 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
       ['gear carrying nothing', equipmentItem({ item_kind: 'gear' })],
       ['a weapon line with its weapon', equipmentItem({ item_kind: 'weapon', weapon_template_id: '@weapon' })],
       ['an armour line with its armour', equipmentItem({ item_kind: 'armor', armor_template_id: '@armor' })],
+    ],
+  },
+  /* ======================================================================
+   * CLASS EQUIPMENT. These execute the same shared rule against its A/B/C
+   * parent, so neither table's named constraint is merely assumed.
+   * ====================================================================== */
+  {
+    constraint: 'class_equipment_items_option_check',
+    rejects: [
+      ['a fourth package the extract does not print', equipmentItem({ option: 'd' }, 'class_equipment_items')],
+      ['the printed capitalisation', equipmentItem({ option: 'C' }, 'class_equipment_items')],
+    ],
+    accepts: [
+      ['package A', equipmentItem({ option: 'a' }, 'class_equipment_items')],
+      ['package B', equipmentItem({ option: 'b' }, 'class_equipment_items')],
+      ['Fighter package C', equipmentItem({ option: 'c' }, 'class_equipment_items')],
+    ],
+  },
+  {
+    constraint: 'class_equipment_items_item_kind_check',
+    rejects: [
+      ['a kind no package reader knows', equipmentItem({ item_kind: 'tool' }, 'class_equipment_items')],
+      ['the retired coin kind', equipmentItem({ item_kind: 'coin' }, 'class_equipment_items')],
+    ],
+    accepts: [
+      ['gear', equipmentItem({ item_kind: 'gear' }, 'class_equipment_items')],
+      ['weapon', equipmentItem({ item_kind: 'weapon', weapon_template_id: '@weapon' }, 'class_equipment_items')],
+      ['armor', equipmentItem({ item_kind: 'armor', armor_template_id: '@armor' }, 'class_equipment_items')],
+    ],
+  },
+  {
+    constraint: 'class_equipment_items_sort_order_check',
+    rejects: [
+      ['a zero-based order', equipmentItem({ sort_order: 0 }, 'class_equipment_items')],
+      ['a fractional order', equipmentItem({ sort_order: 1.5 }, 'class_equipment_items')],
+    ],
+    accepts: [['the first printed line', equipmentItem({ sort_order: 1 }, 'class_equipment_items')]],
+  },
+  {
+    constraint: 'class_equipment_items_quantity_check',
+    rejects: [
+      ['a quantity of nothing', equipmentItem({ quantity: 0 }, 'class_equipment_items')],
+      ['a fractional quantity', equipmentItem({ quantity: 1.5 }, 'class_equipment_items')],
+    ],
+    accepts: [
+      ['Chain Mail as one item', equipmentItem({ quantity: 1 }, 'class_equipment_items')],
+      ['the Fighter\u2019s eight javelins', equipmentItem({ quantity: 8 }, 'class_equipment_items')],
+      ['twenty arrows', equipmentItem({ quantity: 20 }, 'class_equipment_items')],
+    ],
+  },
+  {
+    constraint: 'class_equipment_items_payload_check',
+    rejects: [
+      ['a weapon line with no weapon', equipmentItem({ item_kind: 'weapon' }, 'class_equipment_items')],
+      ['an armour line with no armour', equipmentItem({ item_kind: 'armor' }, 'class_equipment_items')],
+      ['gear carrying a weapon anyway', equipmentItem({ item_kind: 'gear', weapon_template_id: '@weapon' }, 'class_equipment_items')],
+      ['a weapon line that is also armour', equipmentItem({ item_kind: 'weapon', weapon_template_id: '@weapon', armor_template_id: '@armor' }, 'class_equipment_items')],
+    ],
+    accepts: [
+      ['gear carrying nothing', equipmentItem({ item_kind: 'gear' }, 'class_equipment_items')],
+      ['a weapon line with its weapon', equipmentItem({ item_kind: 'weapon', weapon_template_id: '@weapon' }, 'class_equipment_items')],
+      ['an armour line with its armour', equipmentItem({ item_kind: 'armor', armor_template_id: '@armor' }, 'class_equipment_items')],
     ],
   },
   {

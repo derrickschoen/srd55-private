@@ -400,6 +400,14 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
     text: ['option', 'item_name', 'item_kind'],
     numeric: ['created_at', 'updated_at'],
   },
+  class_equipment_items: {
+    integer: [
+      'id', 'class_definition_id', 'sort_order', 'quantity',
+      'weapon_template_id', 'armor_template_id',
+    ],
+    text: ['option', 'item_name', 'item_kind'],
+    numeric: ['created_at', 'updated_at'],
+  },
   character_background: {
     integer: ['id', 'character_id'],
     text: [
@@ -578,6 +586,10 @@ const expectedNotNull: Record<string, string[]> = {
     'id', 'background_template_id', 'option', 'sort_order', 'quantity',
     'item_name', 'item_kind',
   ],
+  class_equipment_items: [
+    'id', 'class_definition_id', 'option', 'sort_order', 'quantity',
+    'item_name', 'item_kind',
+  ],
   character_background: ['id', 'character_id', 'name'],
   // Sheet core. `dex_bonus_max` and `strength_requirement` are the only
   // nullable columns across all eight, and both are D6b limb 2 — the source
@@ -749,6 +761,10 @@ const expectedNamedIndexes: Record<string, string> = {
     'background_equipment_items:background_template_id,option,sort_order:unique',
   background_equipment_items_background_template_id_index:
     'background_equipment_items:background_template_id',
+  class_equipment_items_class_option_sort_order_unique:
+    'class_equipment_items:class_definition_id,option,sort_order:unique',
+  class_equipment_items_class_definition_id_index:
+    'class_equipment_items:class_definition_id',
   character_species_character_id_unique:
     'character_species:character_id:unique',
   character_species_traits_character_id_index:
@@ -900,6 +916,7 @@ const expectedUniqueGroups: Record<string, string[]> = {
   species_template_trait_effects: ['species_template_trait_id,sort_order'],
   background_templates: ['content_key', 'name,rules_edition'],
   background_equipment_items: ['background_template_id,option,sort_order'],
+  class_equipment_items: ['class_definition_id,option,sort_order'],
   character_species: ['character_id'],
   character_background: ['character_id'],
   character_armor: ['character_id,slot'],
@@ -1080,6 +1097,11 @@ const expectedForeignKeys: Record<string, string[]> = {
   background_equipment_items: [
     'armor_template_id->armor_templates.id|RESTRICT',
     'background_template_id->background_templates.id|CASCADE',
+    'weapon_template_id->weapon_templates.id|RESTRICT',
+  ],
+  class_equipment_items: [
+    'armor_template_id->armor_templates.id|RESTRICT',
+    'class_definition_id->class_definitions.id|CASCADE',
     'weapon_template_id->weapon_templates.id|RESTRICT',
   ],
   change_log: ['character_id->characters.id|CASCADE'],
