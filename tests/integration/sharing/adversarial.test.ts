@@ -1779,6 +1779,60 @@ describe('adversarial character-share rejection', () => {
 
   it('rejects every over-count collection before database mutation', async () => {
     const base = shareDocumentToPositional(minimalDocument());
+    const classRecord = (
+      shareDocumentToPositional(
+        minimalDocument({
+          classes: [{
+            id: 0,
+            classKey: '2024:class:x-0',
+            level: 1,
+            start: 1,
+          }],
+        }),
+      )[3] as unknown[][]
+    )[0] as unknown[];
+    const sourceRecord = (
+      shareDocumentToPositional(
+        minimalDocument({
+          sources: [{
+            id: 0,
+            type: 'feat',
+            key: '2024:feat:x-0',
+            acquired: 1,
+          }],
+        }),
+      )[4] as unknown[][]
+    )[0] as unknown[];
+    const selectionRecord = (
+      shareDocumentToPositional(
+        minimalDocument({
+          sources: [{
+            id: 0,
+            type: 'feat',
+            key: '2024:feat:test',
+            acquired: 1,
+          }],
+          selections: [{
+            ref: 0,
+            ruleKey: 'choice-0',
+            ordinal: 1,
+            spellKey: '2024:shield',
+          }],
+        }),
+      )[5] as unknown[][]
+    )[0] as unknown[];
+    const weaponRecord = (
+      shareDocumentToPositional(
+        minimalDocument({
+          weapons: [{
+            name: 'Weapon 0',
+            damage: { kind: 'not_recorded' },
+            versatile_damage: { kind: 'not_applicable' },
+            range: { kind: 'none' },
+          }],
+        }),
+      )[11] as unknown[][]
+    )[0] as unknown[];
     const cases: Array<[
       (wire: unknown[]) => void,
       RegExp,
@@ -1787,52 +1841,43 @@ describe('adversarial character-share rejection', () => {
         (wire) => {
           wire[3] = Array.from(
             { length: SHARE_LIMITS.classes + 1 },
-            (_, id) => [
-              id,
-              `2024:class:x-${id}`,
-              null,
-              1,
-              1,
-              null,
-              null,
-              null,
-            ],
+            (_, id) => {
+              const record = structuredClone(classRecord);
+              record[0] = id;
+              record[1] = `2024:class:x-${id}`;
+              return record;
+            },
           );
         },
-        /classes exceeds/,
+        /wire classes exceeds/,
       ],
       [
         (wire) => {
           wire[4] = Array.from(
             { length: SHARE_LIMITS.sources + 1 },
-            (_, id) => [
-              id,
-              'feat',
-              `2024:feat:x-${id}`,
-              null,
-              1,
-              null,
-            ],
+            (_, id) => {
+              const record = structuredClone(sourceRecord);
+              record[0] = id;
+              record[2] = `2024:feat:x-${id}`;
+              return record;
+            },
           );
         },
-        /sources exceeds/,
+        /wire sources exceeds/,
       ],
       [
         (wire) => {
           wire[4] = [[0, 'feat', '2024:feat:test', null, 1, null]];
           wire[5] = Array.from(
             { length: SHARE_LIMITS.selections + 1 },
-            (_, ordinal) => [
-              0,
-              'choice',
-              ordinal,
-              '2024:shield',
-              null,
-              null,
-            ],
+            (_, index) => {
+              const record = structuredClone(selectionRecord);
+              record[1] = `choice-${index}`;
+              return record;
+            },
           );
         },
-        /selections exceeds/,
+        /wire selections exceeds/,
       ],
       [
         (wire) => {
@@ -1841,7 +1886,7 @@ describe('adversarial character-share rejection', () => {
             (_, index) => `2024:spell-${index}`,
           );
         },
-        /spellbook exceeds/,
+        /wire spellbook exceeds/,
       ],
       [
         (wire) => {
@@ -1850,7 +1895,7 @@ describe('adversarial character-share rejection', () => {
             (_, index) => [`2024:spell-${index}`, false],
           );
         },
-        /preferences exceeds/,
+        /wire preferences exceeds/,
       ],
       [
         (wire) => {
@@ -1859,7 +1904,7 @@ describe('adversarial character-share rejection', () => {
             (_, index) => [`override-${index}`, index],
           );
         },
-        /overrides exceeds/,
+        /wire overrides exceeds/,
       ],
       [
         (wire) => {
@@ -1868,7 +1913,7 @@ describe('adversarial character-share rejection', () => {
             (_, index) => [`warning-${index}`],
           );
         },
-        /acknowledgements exceeds/,
+        /wire acknowledgements exceeds/,
       ],
       [
         (wire) => {
@@ -1877,7 +1922,7 @@ describe('adversarial character-share rejection', () => {
             (_, index) => [`Loadout ${index}`, []],
           );
         },
-        /loadouts exceeds/,
+        /wire loadouts exceeds/,
       ],
       [
         (wire) => {
@@ -1889,7 +1934,7 @@ describe('adversarial character-share rejection', () => {
             ],
           );
         },
-        /placeholders exceeds/,
+        /wire placeholders exceeds/,
       ],
       [
         (wire) => {
@@ -1910,13 +1955,14 @@ describe('adversarial character-share rejection', () => {
         (wire) => {
           wire[11] = Array.from(
             { length: SHARE_LIMITS.weapons + 1 },
-            (_, index) => [
-              `Weapon ${index}`,
-              ...Array.from({ length: 18 }, () => null),
-            ],
+            (_, index) => {
+              const record = structuredClone(weaponRecord);
+              record[0] = `Weapon ${index}`;
+              return record;
+            },
           );
         },
-        /weapons exceeds/,
+        /wire weapons exceeds/,
       ],
     ];
     for (const [mutate, message] of cases) {

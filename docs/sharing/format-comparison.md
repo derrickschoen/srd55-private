@@ -18,10 +18,12 @@ to decide whether a byte win is worth adopting.
 
 The original comparison used the precursor of
 [`minimal-share-example.json`](./minimal-share-example.json). That example now
-tracks the live logical validator. The measurements and the positional mapper
-in [`measure-formats.mjs`](./measure-formats.mjs) are retained as illustrative
-historical research; the script's field order is not the current wire contract.
-The production codec and its golden tests are authoritative.
+tracks the live logical validator. The measurements remain historical results
+for that earlier specimen. The positional mapper in
+[`measure-formats.mjs`](./measure-formats.mjs) now follows the live v2 field
+order for every structure populated by this specimen, so reruns compare it
+honestly; the production codec, version registry, and golden tests remain
+authoritative.
 
 The baseline is `JSON.stringify()` of the full specimen. “Trimmed” applies the
 previously agreed semantic policy:

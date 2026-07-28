@@ -70,19 +70,15 @@ function trimShareValue(value, key, path = []) {
 
 const trimmed = trimShareValue(source);
 
-function compactTuple(values) {
-  const tuple = [...values];
-  while (tuple.at(-1) === undefined) {
-    tuple.pop();
-  }
-  return tuple.map((value) => (value === undefined ? null : value));
+function fixedTuple(values) {
+  return values.map((value) => (value === undefined ? null : value));
 }
 
 function positionalEncode(document) {
   return [
     document.format,
     document.version,
-    compactTuple([
+    fixedTuple([
       document.character.name,
       document.character.strength,
       document.character.dexterity,
@@ -90,58 +86,82 @@ function positionalEncode(document) {
       document.character.intelligence,
       document.character.wisdom,
       document.character.charisma,
-      document.character.rules_edition_preference,
       document.character.proficiency_bonus_override,
+      document.character.rules_edition_preference,
       document.character.allow_legacy,
+      document.character.notes,
     ]),
     document.classes?.map((record) =>
-      compactTuple([
-        record.handle,
+      fixedTuple([
+        record.id,
         record.classKey,
         record.subclassKey,
         record.level,
         record.start,
         record.ability,
         record.config,
+        record.subclassConfig,
       ]),
     ),
     document.sources?.map((record) =>
-      compactTuple([
-        record.handle,
+      fixedTuple([
+        record.id,
         record.type,
         record.key,
-        record.acquired,
         record.config,
+        record.acquired,
+        record.name,
       ]),
     ),
     document.selections?.map((record) =>
-      compactTuple([
-        record.handle,
+      fixedTuple([
+        record.ref,
         record.ruleKey,
         record.ordinal,
         record.spellKey,
-        record.keep,
         record.spellName,
+        record.keep,
       ]),
     ),
     document.spellbook,
     document.preferences?.map((record) =>
-      compactTuple([record.spellKey, record.favourite]),
+      fixedTuple([record.spellKey, record.favourite]),
     ),
     document.overrides?.map((record) =>
-      compactTuple([record.ruleKey, record.value]),
+      fixedTuple([record.ruleKey, record.value]),
     ),
     document.acknowledgements?.map((record) =>
-      compactTuple([record.warning]),
+      fixedTuple([record.warning]),
     ),
     document.loadouts?.map((record) =>
-      compactTuple([
+      fixedTuple([
         record.name,
         record.entries?.map((entry) =>
-          compactTuple([entry.spellKey, entry.role]),
+          fixedTuple([entry.spellKey, entry.role]),
         ),
       ]),
     ),
+    document.weapons ?? null,
+    document.species || document.speciesTraits || document.background
+      ? [
+          document.species ?? null,
+          document.speciesTraits ?? null,
+          document.background ?? null,
+        ]
+      : null,
+    document.armor ||
+      document.hitPointRolls ||
+      document.skillProficiencies ||
+      document.sheetAdjustment
+      ? [
+          document.armor ?? null,
+          document.hitPointRolls ?? null,
+          document.skillProficiencies ?? null,
+          document.sheetAdjustment ?? null,
+        ]
+      : null,
+    document.effects ?? null,
+    document.placeholders ?? null,
   ];
 }
 
@@ -166,6 +186,11 @@ function positionalDecode(tuple) {
     overrides,
     acknowledgements,
     loadouts,
+    weapons,
+    origin,
+    sheet,
+    effects,
+    placeholders,
   ] = tuple;
 
   return {
@@ -180,9 +205,10 @@ function positionalDecode(tuple) {
         "intelligence",
         "wisdom",
         "charisma",
-        "rules_edition_preference",
         "proficiency_bonus_override",
+        "rules_edition_preference",
         "allow_legacy",
+        "notes",
       ],
       character,
     ),
@@ -190,13 +216,14 @@ function positionalDecode(tuple) {
       classes: classes.map((record) =>
         objectFromTuple(
           [
-            "handle",
+            "id",
             "classKey",
             "subclassKey",
             "level",
             "start",
             "ability",
             "config",
+            "subclassConfig",
           ],
           record,
         ),
@@ -205,7 +232,7 @@ function positionalDecode(tuple) {
     ...(sources && {
       sources: sources.map((record) =>
         objectFromTuple(
-          ["handle", "type", "key", "acquired", "config"],
+          ["id", "type", "key", "config", "acquired", "name"],
           record,
         ),
       ),
@@ -213,7 +240,7 @@ function positionalDecode(tuple) {
     ...(selections && {
       selections: selections.map((record) =>
         objectFromTuple(
-          ["handle", "ruleKey", "ordinal", "spellKey", "keep", "spellName"],
+          ["ref", "ruleKey", "ordinal", "spellKey", "spellName", "keep"],
           record,
         ),
       ),
@@ -244,6 +271,16 @@ function positionalDecode(tuple) {
         }),
       })),
     }),
+    ...(weapons && { weapons }),
+    ...(origin?.[0] && { species: origin[0] }),
+    ...(origin?.[1] && { speciesTraits: origin[1] }),
+    ...(origin?.[2] && { background: origin[2] }),
+    ...(sheet?.[0] && { armor: sheet[0] }),
+    ...(sheet?.[1] && { hitPointRolls: sheet[1] }),
+    ...(sheet?.[2] && { skillProficiencies: sheet[2] }),
+    ...(sheet?.[3] && { sheetAdjustment: sheet[3] }),
+    ...(effects && { effects }),
+    ...(placeholders && { placeholders }),
   };
 }
 
@@ -295,12 +332,12 @@ function tabularEncode(document) {
     ...document,
     selections: encodeRows(
       document.selections.map((record) => [
-        record.handle,
+        record.ref,
         record.ruleKey,
         record.ordinal,
         record.spellKey,
-        record.keep ? "1" : "",
         record.spellName,
+        record.keep ? "1" : "",
       ]),
     ),
     spellbook: encodeRows(document.spellbook.map((spellKey) => [spellKey])),
@@ -317,13 +354,13 @@ function tabularDecode(document) {
   return {
     ...document,
     selections: decodeRows(document.selections, 6).map(
-      ([handle, ruleKey, ordinal, spellKey, keep, spellName]) => ({
-        handle,
+      ([ref, ruleKey, ordinal, spellKey, spellName, keep]) => ({
+        ref: Number(ref),
         ruleKey,
         ordinal: Number(ordinal),
         spellKey,
-        ...(keep && { keep: keep === "1" }),
         ...(spellName && { spellName }),
+        ...(keep && { keep: keep === "1" }),
       }),
     ),
     spellbook: decodeRows(document.spellbook, 1).map(([spellKey]) => spellKey),
