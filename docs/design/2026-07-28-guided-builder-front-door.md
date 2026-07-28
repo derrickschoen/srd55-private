@@ -9,7 +9,7 @@ step, and it deletes the session-storage draft), **D11** (builder BLOCKS an
 SRD-illegal choice, import stays tolerant), **D42** (wizard is the front door;
 blank creation survives as an escape hatch), **D52** (the wizard refuses to guide
 homebrew classes), **D33** (an unknown says unknown), **D54** (the bar is usable,
-not green).
+not green), **D55** (no Roll in Order; abilities sit directly after class).
 
 **D54's convergence rule applies to this plan:** v1 is developed on its own
 trajectory. Nothing here may be reshaped toward v2's architecture.
@@ -263,10 +263,14 @@ existing reader states that it does not put items on a character
 (`src/queries/background-equipment.ts:11`). A5 copies the background's printed
 fields and nothing else; choosing and applying a package is its own later unit.
 
-D48 makes background load-bearing rather than optional: the 2024 ability-score
-increases ride the background (`.claude/decisions.md:468-471`), so the abilities
-step depends on it. A group that stopped at species would relocate §5's trap one
-step to the right rather than clearing it — the reviewers' point, accepted.
+Background is load-bearing rather than optional: the 2024 ability-score increases
+ride it. **Under D55 that dependency now runs backwards** — abilities are chosen
+before background, so the abilities step allocates BASE scores and the background
+raises two of them afterwards. The abilities screen must say so; a screen showing
+numbers a later step silently changes is a D33 violation dressed as a total.
+
+A group that stopped at species would relocate §5's trap one step right rather
+than clearing it — the reviewers' point, accepted.
 
 **Why A4 and A5 are in this group at all.** Without them the group has no
 actionable post-class step, so A3 cannot honestly pass. That is the primary
@@ -381,9 +385,9 @@ seam**. The supervisor lands the seam file first; neither agent edits it.
 
 ```ts
 type BuildStep =
-  | 'class' | 'species' | 'background' | 'skills' | 'abilities' | 'equipment';
+  | 'class' | 'abilities' | 'species' | 'background' | 'skills' | 'equipment';
 
-const GUIDED_LEVEL_ONE_STEP_ORDER: readonly BuildStep[];   // D48's order
+const GUIDED_LEVEL_ONE_STEP_ORDER: readonly BuildStep[];   // D55's order, amending D48
 
 interface GuidedClassOption {
   content_key: string;      // the gate's identity — see A11
@@ -489,8 +493,9 @@ UNIQUE`**, nullable so blank creation is unaffected, and a replay returns the
 existing row. **A2 owns the migration**, including `src/db/migrations.ts` and the
 new `db/schema/` entry — revision 2 allocated none of those paths.
 
-**The terminal state is pinned, not left to invention.** After background the
-derived step is **`skills`** — not `abilities`. D54 names level-one skills
+**The terminal state is pinned, not left to invention.** Under **D55** the order
+is class → abilities → species → background → skills → equipment, so after
+background the derived step is **`skills`**. D54 names level-one skills
 explicitly, and revision 3's step union omitted them, which would have stepped
 permanently over a required choice. The database already models the chosen set
 (`db/schema/sheet-inputs.ts:264`) and the sheet reads it (`src/queries/character-sheet-builder.ts:881`),
