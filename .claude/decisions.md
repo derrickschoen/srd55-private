@@ -1,5 +1,77 @@
 # Binding scope decisions
 
+## D45 — OWNER: the SRD catalogue is a read-only bundled layer, and customising a spell FORKS it (2026-07-27)
+
+The owner's ruling, verbatim: *"I like the c idea of forking the srd spell. In
+dndbeyond you have to make a homebrew copy of a spell and then customize it and
+give it a different name."*
+
+This settles the last blocker on D43. The options put were: A read-only bundled
+layer, B seed-then-user-owned, C read-only base plus user overlay, D toggleable
+source, E ship a document the user imports.
+
+### FORK IS NOT SHADOW, and the difference removes most of C's cost
+
+I described option C as *shadowing* — a user row with the same identity masking
+the SRD row, resolved at read time. The owner described something simpler and
+better: a **copy**, customised, under a **different name**. That is a new spell,
+not an override.
+
+Everything C's "cons" column listed falls away with it:
+
+- **No layer resolution on any read path.** A fork is an ordinary spell row. No
+  query has to ask which layer wins.
+- **No "I edited it and nothing changed" bug**, because nothing is masked —
+  both spells exist and are separately visible.
+- **No new duplicate-detection case from the mechanism itself.** The fork has
+  its own identity and its own name.
+
+What survives from C is the part that mattered: the SRD row is never mutated, so
+re-seeding the bundled layer after an extraction fix is safe. We already know we
+will need that — the Phantasmal Force finding came out of the first extraction,
+and a two-column PDF will produce more.
+
+### What this binds
+
+- **SRD rows ship with a distinct provenance and are READ-ONLY.** The user
+  cannot edit or delete them. `spell_versions.provenance` already exists
+  (`schema.sql:910`, `VARCHAR DEFAULT 'import' NOT NULL`), and the importer's
+  tombstone sweep is already scoped to `provenance = 'import'`
+  (`catalog-importer.ts:451-457`), so a non-`import` provenance inherits
+  immunity from a user's import wiping the catalogue. That protection exists
+  because the same class of silent data loss was already fixed once.
+- **Customisation is fork-then-edit.** The app copies the SRD spell into a new
+  user-owned row; the user edits the copy.
+- **The SRD layer is replaceable on upgrade** precisely because nothing
+  user-owned lives in it.
+
+### Sub-decisions this raises, NOT decided here
+
+Recorded so they are answered deliberately rather than by whatever the first
+implementation happens to do:
+
+1. **Is a different name REQUIRED or merely defaulted?** The owner described
+   D&D Beyond's behaviour, which requires one. `spell_versions.content_key` and
+   `spell_identities.content_key` are both UNIQUE (`schema.sql:709,929`), but
+   `display_name` is NOT — two spells may share a name today. Enforcing a
+   distinct name is therefore a NEW constraint, not an existing one.
+2. **Does a fork record its ancestry?** Storing "derived from `srd:fireball`"
+   costs one nullable column and buys provenance in the UI. Omitting it makes
+   the fork indistinguishable from any other homebrew spell.
+3. **Do SRD rows travel in a share link, or resolve by key on the recipient's
+   side?** Resolving keeps links small and self-healing; carrying survives a
+   recipient on an older catalogue. A FORK is user content either way and
+   follows whatever rule homebrew spells already follow.
+4. **Do SRD rows appear in backups?** Re-derivable content need not be carried,
+   but omitting it means a backup restored on an older build can reference
+   spells that build lacks.
+
+### Sequencing
+
+Ship the read-only layer first — it is the smaller half, it makes the app usable
+on first open, and forking is additive on top of it. The reverse order is not
+available: forking has nothing to fork from until the layer exists.
+
 ## D44 — OWNER: Q11 answered. The player picks the multiclass skill; instruments are text. And the schema for it already exists (2026-07-27)
 
 The owner's ruling, verbatim: *"For q11, have the ui give the player to select
