@@ -1,5 +1,45 @@
 # Binding scope decisions
 
+## D68 — OWNER: choosing the background feat and ASI is NOT a house rule; mark the DEFAULTS instead (2026-07-29)
+
+**The ruling.** *"Don't mark the custom background asi and feat as homebrew
+because it is commonly allowed. Just use the backgrounds srd ones as default, but
+make the asi and feat selectable. Mark the default ones for the background. Make
+a comment to let future sessions know not to mark as homebrew."*
+
+**This amends D61 and it is the second amendment in a row to narrow that
+decision.** D61 said the freedom was a deliberate SRD departure that must be
+labelled where a person can see it. **It is not a departure worth labelling** —
+choosing the feat and the increases is commonly allowed at real tables, and
+calling it homebrew tells a person something misleading about their own
+character.
+
+**What the step does now:**
+
+1. **The SRD's printed feat and ability increases are the DEFAULT.** A person who
+   changes nothing gets exactly what the book prints.
+2. **Both are SELECTABLE.** Changing them is ordinary use, not an exception.
+3. **The DEFAULTS ARE MARKED** — the printed pairing is identified as the
+   background's own, so a person can see what the book says and what they picked.
+   The marking moved from the deviation to the default; that inversion is the
+   whole ruling.
+4. **NOTHING is labelled a house rule, homebrew, or a departure.** The
+   always-visible notice goes away. The deviation sentence goes away. They are
+   **deleted, not reworded** — the standing rule in this project for a disclosure
+   whose reason has expired.
+
+**A COMMENT MUST SAY THIS AT THE CODE**, by explicit instruction, so a future
+session does not helpfully reintroduce the label. It goes where the notice used
+to live, `src/builder/background-choices.ts`.
+
+**This also overrules the reversible default I took in [D67].** I had kept the
+D61 disclosure as a visible sheet line, since a hover reveal does not exist on
+paper. There is now no disclosure to keep. D67's rule — final number on the
+sheet, sources on hover or touch — is untouched.
+
+**What survives from D61:** background is REQUIRED, and the player chooses. Only
+the labelling is struck.
+
 ## D67 — OWNER: the sheet shows the FINAL NUMBER only; the sources appear on hover or touch (2026-07-29)
 
 **The ruling.** *"For ability scores and hp and ac and initiative, etc. show only

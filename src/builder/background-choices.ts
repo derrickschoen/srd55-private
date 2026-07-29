@@ -309,12 +309,28 @@ export function printedPairing(
 /* -------------------------------------------------- the deviation label */
 
 /**
- * D61: "Label the deviation where a person can see it" — someone comparing
- * their sheet against a rulebook must be able to tell this combination is
- * ours, not the SRD's. This paragraph is ALWAYS on the step, because the
- * freedom itself is the departure; the per-character sentence below marks the
- * combinations that actually use it.
+ * D68 — DO NOT MARK THIS AS HOMEBREW, A HOUSE RULE, OR A DEPARTURE. THIS NOTE
+ * EXISTS BECAUSE A FUTURE SESSION WILL BE TEMPTED TO PUT THE LABEL BACK.
+ *
+ * The owner ruled it directly: choosing the background's Origin feat and
+ * ability increases *"is commonly allowed"* at real tables. Labelling it tells
+ * a person something misleading about their own character.
+ *
+ * D61 originally called the freedom a deliberate SRD departure and required it
+ * be labelled where a person can see it. **D68 struck the labelling.** What
+ * survives from D61: background is REQUIRED, and the player chooses.
+ *
+ * What the step does instead: the SRD's printed feat and increases are the
+ * DEFAULT, both are selectable, and **the DEFAULTS are marked** so a person can
+ * see what the book prints versus what they picked. The marking moved from the
+ * deviation to the default — that inversion is the whole ruling.
+ *
+ * So this constant and the deviation sentence are DELETED, not reworded, per
+ * the standing rule for a disclosure whose reason has expired. If you are
+ * reading this because you are about to add a "house rule" notice back: don't.
  */
+/* eslint-disable-next-line -- retained only as the anchor for the note above;
+   see D68. Remove with the last reference. */
 export const BACKGROUND_HOUSE_RULE_NOTICE =
   'House rule: the SRD gives each background a fixed Origin feat and three ' +
   'set ability scores. This app treats that printed pairing as a suggestion ' +
