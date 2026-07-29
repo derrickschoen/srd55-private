@@ -100,11 +100,12 @@ test('creates, independently verifies, previews, and explicitly imports a durabl
     gunzipSync(Buffer.from(fragment, 'base64url')).toString('utf8'),
   ) as unknown[];
   expect(positional[0]).toBe('dnd-multiclass-spells-character-share');
-  // v5: B1 minted v3 (allocation signal), B2 minted v4 (contribution
-  // effects), skills-with-provenance S-A minted v5 (skill grants) and
-  // RETIRED every pre-v5 document per D60 — so this build writes 5 and
+  // v6: B1 minted v3 (allocation signal), B2 minted v4 (contribution
+  // effects), skills-with-provenance S-A minted v5 (skill grants, retiring
+  // every pre-v5 document per D60), and starting-equipment E-A minted v6
+  // (the weapon/armour `sourceRef` append) — so this build writes 6 and
   // nothing else.
-  expect(positional[1]).toBe(5);
+  expect(positional[1]).toBe(6);
   expect((positional[2] as unknown[])[0]).toBe('Journey Hero 🧙');
   // TWELVE since v3, with the notes slot still NULL when nobody ticks the
   // notes box, and the appended ability_allocation_method NULL for a
