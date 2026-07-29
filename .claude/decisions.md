@@ -1,5 +1,44 @@
 # Binding scope decisions
 
+## D80 — SUPERVISOR: the level-3 subclass REFUSAL is struck; D70 already governs it (2026-07-29)
+
+**Not a new ruling — a plan of mine contradicted an owner ruling and the ruling
+wins.** Recorded because the refusal was pinned in the seam and was being
+implemented when this was caught.
+
+The level-up plan pinned `L-SUBCLASS`: *"a structured refusal before the
+transaction... level 3 with a null subclass must fail."*
+
+**Verified against the code: only TWO subclasses are seeded** — EK
+and AT (`src/rules/class-progression-lookup.ts`), which is why the
+sheet already carries a `partial_subclass_catalog` gap. So the refusal would be a
+**dead end for ten of the twelve classes**: a Cleric or Wizard levelling 2→3
+refused, with nothing available to choose.
+
+**Two standing rules already forbid that.** D54's bar is *"without a dead end"*.
+And **D70 names an unpicked subclass explicitly** as an owed choice that saves,
+reloads, and warns in the wizard and on the sheet.
+
+**Struck:**
+- The `subclass_required` refusal, and its member of the seam's refusal union.
+- The `L-SUBCLASS` control.
+- The plan's §8b four-refusal claim, now **three**: `class_not_held`,
+  `level_not_adjacent`, `ability_increase_required`.
+
+**Level 3 proceeds.** The unmade subclass is a D70 warning and a sheet gap. The
+command records the level; it does not police the choice. `LEVEL_UP_SUBCLASS_LEVEL
+= 3` survives so the screen knows when to **offer** — offering is not requiring.
+
+**Found by a question-generation pass, not by a review round.** The plan had
+closed at its three-round cap with the refusal intact; three reviewers read it
+and none tested the pin against how much content is actually seeded. Asking *"what
+would a person hit?"* found in one pass what *"is this document consistent?"*
+missed three times — the checks answer different questions and the caps are
+per-question, not per-document.
+
+**Seeding the remaining ten SRD 5.2 subclasses is its own content unit**, not a
+gate on level-up, and is not decided here.
+
 ## D79 — OWNER: the homebrew species is an ARMADILLO, not a turtle (2026-07-29)
 
 **The ruling.** *"I just remembered that 5e already did a turtle species. Change
