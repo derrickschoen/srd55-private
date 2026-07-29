@@ -1,5 +1,56 @@
 # Binding scope decisions
 
+## D77 — OWNER: FIXED HIT POINTS ONLY. Rolling is not offered. This REVERSES D66 (2026-07-29)
+
+**The ruling.** *"I've decided that I am fine shipping with the fixed by default
+hp calculation like bg3 does. If a player really wants to roll hp, he can use a
+pencil at the table."*
+
+**D66 IS OVERRULED, not narrowed.** D66 pinned "fixed by default, rolling
+available per level" and said a level must record *which method was used and the
+value*, because a total that cannot say whether it was taken or rolled cannot be
+re-derived. **Under D77 there is nothing to record**: hit points at each level
+past the first are the class's fixed value (`die / 2 + 1`) plus the Constitution
+modifier, always, for everyone.
+
+**This landed while dispatch L-A was mid-flight building exactly the machinery it
+voids**, which is recorded here as a fact about the work, not a complaint: the
+owner is entitled to change a product decision and this one makes the app
+smaller. L-A was redirected the moment the ruling arrived.
+
+**What it voids:**
+
+- The `method` column on `character_hit_point_rolls`, its migration, and the
+  NOT NULL blast radius across three production writers and eight test files.
+- The share wire version mint and the snapshot version decision, both of which
+  existed only to carry `method`.
+- The method-aware read model, and the `L-METHOD` control.
+
+**And it dissolves the bug the unit was built around.** The level-up plan's §1
+named `src/rules/sheet.ts:730` — `const base = roll ?? fixedHitPointsPerLevel(die)`
+— as a live D33 failure, because nothing distinguished *"the player chose fixed"*
+from *"no row was ever written"*. **When fixed is the only answer, that ambiguity
+does not exist.** The fallback is simply the rule. `L-UNKNOWN` goes with it, and
+so does the consequence recorded under the level-up plan §10 that every
+multiclassed character's hit points would render unknown.
+
+**What survives, and is still the unit:** the level-up command with one payload
+and one transaction, all four refusals (a class the character does not have,
+level 3 without a subclass, an ASI level without an increase, a non-adjacent
+level), `level` stripped from the `update_class` payload, and **ASI levels read
+from the seeded data — 4, 6, 8, 10, 12, 14, 16 — never hardcoded.**
+
+**`character_hit_point_rolls` and `SetHitPointRollCommand` are now UNUSED.**
+Retiring them is a separate decision and is NOT taken here. They are left in
+place, untouched and unbuilt-upon. Under D60 deleting them would be permitted;
+under AGENTS.md's bias toward replacing rather than accommodating it is probably
+right — but a table that travels on the wire and in snapshots is not removed as
+a side effect of a hit-point ruling.
+
+**Precedent worth keeping:** BG3, which the owner named as feature-complete,
+gives hit dice average rounded down plus the Constitution modifier and never
+offers the roll. This is the same choice.
+
 ## D76 — OWNER: warn on a STRICT reduction only; a tie is not a reduction (2026-07-29)
 
 **The ruling.** *"Also, show a warning when equipping an item reduces ac. Do not
