@@ -1,5 +1,44 @@
 # Binding scope decisions
 
+## D65 — OWNER: starting equipment is recorded as a NAMED PACKAGE CHOICE, not as owned items (2026-07-29)
+
+**The ruling.** Asked where a class or background package's non-weapon,
+non-armour gear should live, the owner chose option 2: **record the package as a
+named choice; show its contents from the rules tables; do not mint owned rows for
+gear.**
+
+**What was already built, so nobody rediscovers it.** The rules side is done and
+seeded: `class_equipment_items` (options a/b/c), `background_equipment_items`
+(options a/b), `src/rules/class-equipment-srd.ts`,
+`src/rules/equipment-packages.ts`. What is missing is only the character side.
+
+**What exists to own an item.** Exactly two tables: `character_weapons` and
+`character_armor`. There is no gear table and, under this ruling, **none is
+built**.
+
+**So the equipment step does this:**
+
+- The player picks **one option** (a/b/c for class, a/b for background). The
+  choice is recorded — which package, from which source — with the same
+  provenance discipline skills got.
+- **Weapons and armour in the chosen option still become owned rows** in
+  `character_weapons` / `character_armor`. They already have homes and the sheet
+  already computes from them; not writing them would make the sheet wrong, which
+  is a different and worse failure.
+- **Gear is displayed from the rules tables, never owned.** A Dungeoneer's Pack
+  is one recorded line; its contents render from `equipment-packages.ts`.
+- **No gold** (D56 stands). A package's trailing coin is not granted.
+
+**What this deliberately gives up, said plainly so the sheet can say it too:** a
+person cannot tick off a used torch, drop the crowbar, or carry anything the
+package did not contain. Per D33 the sheet must **say** gear is not itemised
+rather than imply an empty inventory.
+
+**Cost to flip.** A `character_gear` table plus a producer, and a backfill from
+the recorded package choice — which is why the choice is recorded structurally
+rather than as prose. Recording the *choice* is what keeps option 1 cheap later;
+recording it as a sentence would not.
+
 ## D64 — OWNER: standard array is the default and everything else WARNS; initiative must be correct (2026-07-28)
 
 **The rulings.** *"Default to standard array. If a player rolls or point buys,
