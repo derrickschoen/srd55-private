@@ -132,7 +132,7 @@ describe('character command factory and executor', () => {
       ],
       [protectedDelete, AcknowledgeWarningCommand],
       [
-        { type: 'update_class', class_definition_id: 1, level: 1 },
+        { type: 'update_class', class_definition_id: 1 },
         UpdateClassCommand,
       ],
       [protectedSnapshot, RestoreSnapshotCommand],

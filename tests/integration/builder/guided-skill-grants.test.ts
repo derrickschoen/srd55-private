@@ -491,9 +491,12 @@ describe('the species producers', () => {
     const fighterId = Number(
       db.scalar(`SELECT id FROM class_definitions WHERE name = 'Fighter'`),
     );
+    // `update_class` no longer carries a level (level-up plan §3); the
+    // subject here is the generator re-run over the class source, which a
+    // subclass-preserving re-apply triggers just the same.
     new UpdateClassCommand(
       db,
-      { type: 'update_class', class_definition_id: fighterId, level: 2 },
+      { type: 'update_class', class_definition_id: fighterId },
       integrity(),
     ).apply(characterId);
 

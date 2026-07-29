@@ -37,6 +37,7 @@ const commandTypes = [
   'remove_source',
   'acknowledge_warning',
   'update_class',
+  'level_up_class',
   'add_weapon',
   'update_weapon',
   'remove_weapon',
@@ -367,26 +368,97 @@ function validateAcknowledgeWarning(record: UnknownRecord): UnknownRecord {
   return normalized;
 }
 
+/**
+ * `level` is REFUSED HERE, BY NAME (level-up plan §3). The field used to be
+ * accepted 1..20, which meant any caller could move a level without a
+ * hit-point row and no control would fire — L-STRAIGHT and its siblings
+ * guard `level_up_class`, not this command. `rejectUnknown` refuses the key,
+ * so a payload still carrying it fails with "Unknown command field: level."
+ * rather than being silently ignored.
+ */
 function validateUpdateClass(record: UnknownRecord): void {
   rejectUnknown(record, [
     'type',
     'class_definition_id',
-    'level',
     'subclass_definition_id',
+    'remove',
     'reason',
   ]);
   positiveInteger(record, 'class_definition_id');
-  if (!hasOwn(record, 'level')) {
-    invalid('Class level is required; use null to remove the class.');
-  }
-  if (record.level !== null) {
-    requiredInteger(record, 'level');
+  if (hasOwn(record, 'remove')) {
+    if (record.remove !== true) {
+      invalid('remove must be true when present.');
+    }
+    if (hasOwn(record, 'subclass_definition_id')) {
+      invalid('A removed class cannot also set a subclass.');
+    }
+    return;
   }
   if (
     hasOwn(record, 'subclass_definition_id') &&
     record.subclass_definition_id !== null
   ) {
     positiveInteger(record, 'subclass_definition_id');
+  }
+}
+
+/**
+ * The one levelling payload (level-up plan §8b, reduced by D77: no hit-point
+ * field — the fixed value is computed, never carried). Structural facts are
+ * checked here — the SRD's +2/+1+1 increase shape — while the four DOMAIN
+ * refusals (class held, adjacency, subclass at 3, ASI required) belong to
+ * the command, which is the layer every caller shares.
+ */
+function validateLevelUpClass(record: UnknownRecord): void {
+  rejectUnknown(record, [
+    'type',
+    'class_definition_id',
+    'target_level',
+    'subclass_content_key',
+    'ability_increases',
+    'reason',
+  ]);
+  positiveInteger(record, 'class_definition_id');
+  // 2..20: level 1 is creation's, and a target above 20 is not a level.
+  boundedInteger(record, 'target_level', 2, 20);
+
+  if (hasOwn(record, 'subclass_content_key')) {
+    nonEmptyString(record, 'subclass_content_key', 255);
+  }
+
+  if (hasOwn(record, 'ability_increases')) {
+    const increases = record.ability_increases;
+    if (!Array.isArray(increases)) {
+      invalid('ability_increases must be a list.');
+    }
+    // SRD 2024 ASI: +2 to one ability, or +1 to each of two DIFFERENT
+    // abilities. One or two entries, each amount 1 or 2, summing to exactly
+    // 2 — a singular field cannot express the +1/+1 arm, which is why the
+    // seam pins a LIST.
+    if (increases.length < 1 || increases.length > 2) {
+      invalid('ability_increases must hold one or two increases.');
+    }
+    const seen = new Set<string>();
+    let total = 0;
+    for (const entry of increases) {
+      const increase = objectValue(
+        entry,
+        'Each ability increase must be an object.',
+      );
+      rejectUnknown(increase, ['ability', 'amount'], 'ability increase');
+      if (!isEnumValue(abilities, increase.ability)) {
+        invalid('Unknown ability.');
+      }
+      if (seen.has(increase.ability as string)) {
+        invalid('An ability cannot be increased twice in one improvement.');
+      }
+      seen.add(increase.ability as string);
+      boundedInteger(increase, 'amount', 1, 2);
+      total += increase.amount as number;
+    }
+    if (total !== 2) {
+      invalid('Ability increases must total exactly 2 (+2, or +1 and +1).');
+    }
   }
 }
 
@@ -853,6 +925,9 @@ function validateByType(
       return validateAcknowledgeWarning(record);
     case 'update_class':
       validateUpdateClass(record);
+      return record;
+    case 'level_up_class':
+      validateLevelUpClass(record);
       return record;
     case 'add_weapon':
       validateAddWeapon(record);

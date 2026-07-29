@@ -69,6 +69,181 @@ function configWithAbility(
   });
 }
 
+/**
+ * The class-side source state, brought back in step with the stored level:
+ * the class source instance is created or reactivated with its display name
+ * and spellcasting config, its grants are regenerated at the stored level,
+ * and the subclass sources are reconciled. Shared by `UpdateClassCommand`
+ * (entry / subclass change) and `LevelUpClassCommand` (the one levelling
+ * path) so the two cannot drift — extracting it is what keeps the level-up
+ * command from becoming a second, slightly different copy of this logic.
+ */
+export function syncClassSourceState(
+  db: DatabaseContext,
+  generator: GrantRuleSlotGenerator,
+  characterId: number,
+  definition: { id: number; name: string; spellcasting_ability: string | null },
+  subclassId: number | null,
+  level: number,
+  acquiredAtCharacterLevel: number,
+): void {
+  const classId = definition.id;
+  const timestamp = new Date().toISOString();
+  const source = db.one(
+    `SELECT id, source_definition_id, config
+     FROM character_source_instances
+     WHERE character_id = ? AND source_type = 'class'
+       AND source_definition_id = ?
+     LIMIT 1`,
+    [characterId, classId],
+    sourceRow,
+  );
+  const config = configWithAbility(
+    source?.config,
+    definition.spellcasting_ability,
+  );
+  let sourceId: number;
+  if (source === null) {
+    sourceId = db.exec(
+      `INSERT INTO character_source_instances (
+         character_id, instance_uuid, source_type,
+         source_definition_id, display_name, config,
+         acquired_at_character_level, state, created_at, updated_at
+       ) VALUES (?, ?, 'class', ?, ?, ?, ?, 'active', ?, ?)`,
+      [
+        characterId,
+        crypto.randomUUID(),
+        classId,
+        `${definition.name} ${level}`,
+        config,
+        acquiredAtCharacterLevel,
+        timestamp,
+        timestamp,
+      ],
+    ).lastInsertId;
+  } else {
+    sourceId = source.id;
+    db.exec(
+      `UPDATE character_source_instances
+       SET display_name = ?, config = ?, state = 'active',
+           updated_at = ?
+       WHERE id = ?`,
+      [
+        `${definition.name} ${level}`,
+        config,
+        timestamp,
+        sourceId,
+      ],
+    );
+  }
+
+  generator.generateForSource(sourceId);
+  syncSubclassSources(db, generator, characterId, classId, subclassId, level);
+}
+
+/**
+ * Reconcile the subclass source instances of one class: tombstone every
+ * subclass source that is not the chosen one, and create or reactivate the
+ * chosen one's, regenerating grants either way.
+ */
+export function syncSubclassSources(
+  db: DatabaseContext,
+  generator: GrantRuleSlotGenerator,
+  characterId: number,
+  classId: number,
+  subclassId: number | null,
+  level: number,
+): void {
+  const sources = db.all(
+    `SELECT source.id AS id,
+            source.source_definition_id AS source_definition_id,
+            source.config AS config
+     FROM character_source_instances AS source
+     INNER JOIN subclass_definitions AS subclass
+       ON subclass.id = source.source_definition_id
+     WHERE source.character_id = ?
+       AND source.source_type = 'subclass'
+       AND subclass.class_definition_id = ?`,
+    [characterId, classId],
+    sourceRow,
+  );
+  const timestamp = new Date().toISOString();
+  for (const source of sources) {
+    if (
+      subclassId !== null &&
+      source.source_definition_id === subclassId
+    ) {
+      continue;
+    }
+    const sourceId = source.id;
+    db.exec(
+      `UPDATE character_source_instances
+       SET state = 'tombstoned', updated_at = ?
+       WHERE id = ?`,
+      [timestamp, sourceId],
+    );
+    generator.generateForSource(sourceId);
+  }
+  if (subclassId === null) {
+    return;
+  }
+
+  const definition = db.one(
+    'SELECT id, name, spellcasting_ability FROM subclass_definitions WHERE id = ?',
+    [subclassId],
+    definitionRow,
+  );
+  if (definition === null) {
+    throw new TypeError(
+      'That subclass does not belong to the selected class.',
+    );
+  }
+  const source =
+    sources.find(
+      (candidate) =>
+        candidate.source_definition_id === subclassId,
+    ) ?? null;
+  const config = configWithAbility(
+    source?.config,
+    definition.spellcasting_ability,
+  );
+  let sourceId: number;
+  if (source === null) {
+    sourceId = db.exec(
+      `INSERT INTO character_source_instances (
+         character_id, instance_uuid, source_type,
+         source_definition_id, display_name, config,
+         acquired_at_character_level, state, created_at, updated_at
+       ) VALUES (?, ?, 'subclass', ?, ?, ?, ?, 'active', ?, ?)`,
+      [
+        characterId,
+        crypto.randomUUID(),
+        subclassId,
+        definition.name,
+        config,
+        level,
+        timestamp,
+        timestamp,
+      ],
+    ).lastInsertId;
+  } else {
+    sourceId = source.id;
+    db.exec(
+      `UPDATE character_source_instances
+       SET display_name = ?, config = ?, state = 'active',
+           updated_at = ?
+       WHERE id = ?`,
+      [
+        definition.name,
+        config,
+        timestamp,
+        sourceId,
+      ],
+    );
+  }
+  generator.generateForSource(sourceId);
+}
+
 export class UpdateClassCommand {
   readonly actionType = 'update_class';
 
@@ -88,6 +263,17 @@ export class UpdateClassCommand {
     this.#generator = generator ?? new GrantRuleSlotGenerator(db);
   }
 
+  /**
+   * ENTRY, SUBCLASS, REMOVAL — NEVER THE LEVEL (level-up plan §3).
+   *
+   * The payload no longer carries `level`. A class the character does not
+   * have is created at level 1; a class they do have keeps its STORED level
+   * untouched while the subclass is set or cleared. Any other caller that
+   * wants to move a level goes through `level_up_class`, where the four
+   * guards (L-STRAIGHT, L-SUBCLASS, L-ASI-LEVELS, L-ADJACENT) actually fire —
+   * leaving level-moving power here would re-open §1's bug with no control
+   * on the path.
+   */
   apply(characterId: number): void {
     this.db.transaction(() => {
       const before = this.#state.capture(characterId);
@@ -101,24 +287,11 @@ export class UpdateClassCommand {
         throw new TypeError('Unknown class.');
       }
 
-      if (this.payload.level === null) {
+      if (this.payload.remove === true) {
         this.remove(characterId, classId);
         this.#before = before;
         this.#characterId = characterId;
         return;
-      }
-
-      const level = this.payload.level;
-      if (level < 1 || level > 20) {
-        throw new TypeError('Class level must be between 1 and 20.');
-      }
-      const otherLevels = characterLevel(this.db, characterId, {
-        excludingClassDefinitionId: classId,
-      });
-      const resultingLevel =
-        otherLevels === null ? level : otherLevels + level;
-      if (resultingLevel > 20) {
-        throw new TypeError('A character cannot exceed level 20.');
       }
 
       const subclassId = this.payload.subclass_definition_id ?? null;
@@ -140,12 +313,24 @@ export class UpdateClassCommand {
       }
 
       const timestamp = new Date().toISOString();
-      const existingLevelId = this.db.scalar<number>(
-        `SELECT id FROM character_class_levels
+      const existing = this.db.one(
+        `SELECT id, level FROM character_class_levels
          WHERE character_id = ? AND class_definition_id = ?`,
         [characterId, classId],
+        (row) => ({
+          id: sqlInteger(row, 'id'),
+          level: sqlInteger(row, 'level'),
+        }),
       );
-      if (existingLevelId === null) {
+      const otherLevels = characterLevel(this.db, characterId, {
+        excludingClassDefinitionId: classId,
+      });
+      let level: number;
+      if (existing === null) {
+        level = 1;
+        if (otherLevels !== null && otherLevels + level > 20) {
+          throw new TypeError('A character cannot exceed level 20.');
+        }
         const firstClass = otherLevels === null;
         this.db.exec(
           `INSERT INTO character_class_levels (
@@ -163,70 +348,25 @@ export class UpdateClassCommand {
           ],
         );
       } else {
+        level = existing.level;
         this.db.exec(
           `UPDATE character_class_levels
-           SET subclass_definition_id = ?, level = ?, updated_at = ?
+           SET subclass_definition_id = ?, updated_at = ?
            WHERE id = ?`,
-          [subclassId, level, timestamp, existingLevelId],
+          [subclassId, timestamp, existing.id],
         );
       }
 
-      const source = this.db.one(
-        `SELECT id, source_definition_id, config
-         FROM character_source_instances
-         WHERE character_id = ? AND source_type = 'class'
-           AND source_definition_id = ?
-         LIMIT 1`,
-        [characterId, classId],
-        sourceRow,
-      );
-      const config = configWithAbility(
-        source?.config,
-        definition.spellcasting_ability,
-      );
-      let sourceId: number;
-      if (source === null) {
-        sourceId = this.db.exec(
-          `INSERT INTO character_source_instances (
-             character_id, instance_uuid, source_type,
-             source_definition_id, display_name, config,
-             acquired_at_character_level, state, created_at, updated_at
-           ) VALUES (?, ?, 'class', ?, ?, ?, ?, 'active', ?, ?)`,
-          [
-            characterId,
-            crypto.randomUUID(),
-            classId,
-            `${definition.name} ${level}`,
-            config,
-            // A first class is acquired at character level 1; later classes
-            // are acquired at the next level after the other-class total.
-            otherLevels === null ? 1 : otherLevels + 1,
-            timestamp,
-            timestamp,
-          ],
-        ).lastInsertId;
-      } else {
-        sourceId = source.id;
-        this.db.exec(
-          `UPDATE character_source_instances
-           SET display_name = ?, config = ?, state = 'active',
-               updated_at = ?
-           WHERE id = ?`,
-          [
-            `${definition.name} ${level}`,
-            config,
-            timestamp,
-            sourceId,
-          ],
-        );
-      }
-
-      this.#generator.generateForSource(sourceId);
-      this.syncSubclass(
+      syncClassSourceState(
+        this.db,
+        this.#generator,
         characterId,
-        classId,
+        definition,
         subclassId,
         level,
+        // A first class is acquired at character level 1; later classes
+        // are acquired at the next level after the other-class total.
+        otherLevels === null ? 1 : otherLevels + 1,
       );
       this.#before = before;
       this.#characterId = characterId;
@@ -241,102 +381,6 @@ export class UpdateClassCommand {
       type: 'restore_snapshot',
       snapshot: this.#before,
     }) as unknown as Promise<RestoreSnapshotPayload>;
-  }
-
-  private syncSubclass(
-    characterId: number,
-    classId: number,
-    subclassId: number | null,
-    level: number,
-  ): void {
-    const sources = this.db.all(
-      `SELECT source.id AS id,
-              source.source_definition_id AS source_definition_id,
-              source.config AS config
-       FROM character_source_instances AS source
-       INNER JOIN subclass_definitions AS subclass
-         ON subclass.id = source.source_definition_id
-       WHERE source.character_id = ?
-         AND source.source_type = 'subclass'
-         AND subclass.class_definition_id = ?`,
-      [characterId, classId],
-      sourceRow,
-    );
-    const timestamp = new Date().toISOString();
-    for (const source of sources) {
-      if (
-        subclassId !== null &&
-        source.source_definition_id === subclassId
-      ) {
-        continue;
-      }
-      const sourceId = source.id;
-      this.db.exec(
-        `UPDATE character_source_instances
-         SET state = 'tombstoned', updated_at = ?
-         WHERE id = ?`,
-        [timestamp, sourceId],
-      );
-      this.#generator.generateForSource(sourceId);
-    }
-    if (subclassId === null) {
-      return;
-    }
-
-    const definition = this.db.one(
-      'SELECT id, name, spellcasting_ability FROM subclass_definitions WHERE id = ?',
-      [subclassId],
-      definitionRow,
-    );
-    if (definition === null) {
-      throw new TypeError(
-        'That subclass does not belong to the selected class.',
-      );
-    }
-    const source =
-      sources.find(
-        (candidate) =>
-          candidate.source_definition_id === subclassId,
-      ) ?? null;
-    const config = configWithAbility(
-      source?.config,
-      definition.spellcasting_ability,
-    );
-    let sourceId: number;
-    if (source === null) {
-      sourceId = this.db.exec(
-        `INSERT INTO character_source_instances (
-           character_id, instance_uuid, source_type,
-           source_definition_id, display_name, config,
-           acquired_at_character_level, state, created_at, updated_at
-         ) VALUES (?, ?, 'subclass', ?, ?, ?, ?, 'active', ?, ?)`,
-        [
-          characterId,
-          crypto.randomUUID(),
-          subclassId,
-          definition.name,
-          config,
-          level,
-          timestamp,
-          timestamp,
-        ],
-      ).lastInsertId;
-    } else {
-      sourceId = source.id;
-      this.db.exec(
-        `UPDATE character_source_instances
-         SET display_name = ?, config = ?, state = 'active',
-             updated_at = ?
-         WHERE id = ?`,
-        [
-          definition.name,
-          config,
-          timestamp,
-          sourceId,
-        ],
-      );
-    }
-    this.#generator.generateForSource(sourceId);
   }
 
   private remove(characterId: number, classId: number): void {

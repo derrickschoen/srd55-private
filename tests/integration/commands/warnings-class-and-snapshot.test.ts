@@ -18,6 +18,7 @@ import type {
 import { DuplicateWarningDetector } from '../../../src/duplicates/duplicate-warning-detector';
 import { SpellSelectionService } from '../../../src/eligibility/spell-selection-service';
 import { openTestDatabase } from '../../helpers/open-db';
+import { raiseClassLevelForTest } from '../../helpers/class-levels';
 
 const integrityKey = 'C43-test-integrity-key';
 
@@ -164,13 +165,22 @@ describe('warning, class, and snapshot commands', () => {
     return warning!.warning_fingerprint!;
   }
 
+  // `update_class` no longer carries a level (level-up plan §3): entry is at
+  // level 1, removal is `remove: true`, and where a fixture needs a higher
+  // level it is a direct fixture write (`raiseClassLevelForTest`) — the
+  // guarded levelling path has its own test file.
   async function runClass(
     characterId: number,
-    payload: Omit<UpdateClassPayload, 'type'>,
+    payload:
+      | {
+          class_definition_id: number;
+          subclass_definition_id?: number | null;
+        }
+      | { class_definition_id: number; remove: true },
   ): Promise<UpdateClassCommand> {
     const command = new UpdateClassCommand(
       db,
-      { type: 'update_class', ...payload },
+      { type: 'update_class', ...payload } as UpdateClassPayload,
       integrity,
     );
     command.apply(characterId);
@@ -366,9 +376,9 @@ describe('warning, class, and snapshot commands', () => {
 
     const added = await runClass(characterId, {
       class_definition_id: classId,
-      level: 2,
       subclass_definition_id: null,
     });
+    raiseClassLevelForTest(db, characterId, classId, 2);
     const slotId = Number(
       db.scalar('SELECT id FROM spell_selection_slots'),
     );
@@ -379,11 +389,10 @@ describe('warning, class, and snapshot commands', () => {
       [slotId],
     );
 
-    await runClass(characterId, {
-      class_definition_id: classId,
-      level: 1,
-      subclass_definition_id: null,
-    });
+    // Level LOSS is outside every command since the strip (levelling down is
+    // out of the unit's scope, plan §10); the slot lifecycle it exercises is
+    // the generator's, so the fixture write drives the same regeneration.
+    raiseClassLevelForTest(db, characterId, classId, 1);
     expect(
       db.oneRaw(
         `SELECT id, slot_key, current_spell_version_id, state,
@@ -399,11 +408,7 @@ describe('warning, class, and snapshot commands', () => {
         'Selection preserved because its grant rule is no longer active.',
     });
 
-    await runClass(characterId, {
-      class_definition_id: classId,
-      level: 2,
-      subclass_definition_id: null,
-    });
+    raiseClassLevelForTest(db, characterId, classId, 2);
     expect(
       db.oneRaw(
         `SELECT id, slot_key, current_spell_version_id, state,
@@ -437,8 +442,7 @@ describe('warning, class, and snapshot commands', () => {
     const beforeRemoval = state.capture(characterId);
     const removed = await runClass(characterId, {
       class_definition_id: classId,
-      level: null,
-      subclass_definition_id: null,
+      remove: true,
     });
     expect(
       db.scalar(
@@ -487,7 +491,6 @@ describe('warning, class, and snapshot commands', () => {
     await expect(
       runClass(characterId, {
         class_definition_id: classId,
-        level: 3,
         subclass_definition_id: foreignSubclassId,
       }),
     ).rejects.toThrow(
@@ -503,7 +506,6 @@ describe('warning, class, and snapshot commands', () => {
 
     await runClass(characterId, {
       class_definition_id: classId,
-      level: 3,
       subclass_definition_id: firstSubclassId,
     });
     const firstSourceId = Number(
@@ -522,14 +524,15 @@ describe('warning, class, and snapshot commands', () => {
     );
     await runClass(characterId, {
       class_definition_id: classId,
-      level: 4,
       subclass_definition_id: secondSubclassId,
     });
     await runClass(characterId, {
       class_definition_id: classId,
-      level: 5,
       subclass_definition_id: firstSubclassId,
     });
+    // The stored level never moved through any of those switches — that is
+    // the strip itself, asserted where it used to be exercised.
+    raiseClassLevelForTest(db, characterId, classId, 5);
 
     expect(
       db.allRaw(
@@ -552,10 +555,12 @@ describe('warning, class, and snapshot commands', () => {
         config: '{"spellcasting_ability":"intelligence"}',
       },
     ]);
+    // ENTRY refuses the 21st level: with the first class raised to 20, a
+    // second class's level-1 entry would exceed the cap.
+    raiseClassLevelForTest(db, characterId, classId, 20);
     await expect(
       runClass(characterId, {
         class_definition_id: otherClassId,
-        level: 16,
         subclass_definition_id: null,
       }),
     ).rejects.toThrow('A character cannot exceed level 20.');
@@ -567,11 +572,12 @@ describe('warning, class, and snapshot commands', () => {
       ),
     ).toBe(0);
 
+    raiseClassLevelForTest(db, characterId, classId, 5);
     await runClass(characterId, {
       class_definition_id: otherClassId,
-      level: 15,
       subclass_definition_id: null,
     });
+    raiseClassLevelForTest(db, characterId, otherClassId, 15);
     expect(
       db.allRaw(
         `SELECT class_definition_id, level, is_starting_class
@@ -592,13 +598,8 @@ describe('warning, class, and snapshot commands', () => {
         is_starting_class: 0,
       },
     ]);
-    await expect(
-      runClass(characterId, {
-        class_definition_id: otherClassId,
-        level: 16,
-        subclass_definition_id: null,
-      }),
-    ).rejects.toThrow('A character cannot exceed level 20.');
+    // Levelling past 20 is the guarded path's own refusal now — see the
+    // `level_up_class` cap case in level-up-class.test.ts.
   });
 
   it('rolls back every class write when regeneration fails', async () => {
@@ -621,7 +622,6 @@ describe('warning, class, and snapshot commands', () => {
     await expect(
       runClass(characterId, {
         class_definition_id: brokenClassId,
-        level: 1,
         subclass_definition_id: null,
       }),
     ).rejects.toThrow(
@@ -642,7 +642,6 @@ describe('warning, class, and snapshot commands', () => {
     const classId = classDefinition('Snapshot Mage');
     await runClass(characterId, {
       class_definition_id: classId,
-      level: 1,
       subclass_definition_id: null,
     });
     const sourceId = Number(

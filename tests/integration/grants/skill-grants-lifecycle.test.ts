@@ -11,6 +11,7 @@ import {
 } from '../../../src/grants/skill-grants';
 import { CharacterSheetBuilder } from '../../../src/queries/character-sheet-builder';
 import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
+import { raiseClassLevelForTest } from '../../helpers/class-levels';
 import { seedSheetContent } from '../../../src/rules/sheet-srd';
 import { openTestDatabase } from '../../helpers/open-db';
 
@@ -88,11 +89,29 @@ describe('the skill-grant lifecycle: tombstone, reactivate, and the projection',
     classDefinitionId: number,
     level: number | null,
   ): void {
+    // `update_class` no longer carries a level (level-up plan §3): entry is
+    // at 1, removal is `remove: true`, and a higher fixture level is a
+    // direct fixture write — see `raiseClassLevelForTest`.
+    if (level === null) {
+      new UpdateClassCommand(
+        db,
+        {
+          type: 'update_class',
+          class_definition_id: classDefinitionId,
+          remove: true,
+        },
+        integrity,
+      ).apply(characterId);
+      return;
+    }
     new UpdateClassCommand(
       db,
-      { type: 'update_class', class_definition_id: classDefinitionId, level },
+      { type: 'update_class', class_definition_id: classDefinitionId },
       integrity,
     ).apply(characterId);
+    if (level > 1) {
+      raiseClassLevelForTest(db, characterId, classDefinitionId, level);
+    }
   }
 
   /** A source with no producer of its own yet (S-B is a later unit) — a manual insert stands in for "acquired from another source". */

@@ -122,11 +122,65 @@ export type AcknowledgeWarningCommand =
       integrity: string;
     });
 
-export interface UpdateClassCommand extends CommandBase {
-  type: 'update_class';
+/**
+ * ENTRY AND SUBCLASS ONLY — `level` IS DELIBERATELY GONE (level-up plan §3).
+ *
+ * The payload used to carry `level: number | null`, and the planner's number
+ * input could move a class to any level 1..20 without a hit-point row ever
+ * being written — the live bug the level-up unit closes (§1). Levelling now
+ * belongs to ONE path, `level_up_class` below, whose command-layer guards
+ * (adjacency, subclass at 3, ASI, class held) would never fire for a second
+ * writer. What survives here:
+ *
+ *  - ENTRY: a class the character does not have is created at level 1 —
+ *    multiclass entry is untouched (D56 defers multiclass LEVEL-UP only).
+ *  - SUBCLASS: `subclass_definition_id` still sets or clears the subclass of
+ *    a class the character has; the stored level never moves.
+ *  - REMOVAL: the `remove: true` variant, replacing the old `level: null`.
+ */
+export type UpdateClassCommand =
+  | (CommandBase & {
+      type: 'update_class';
+      class_definition_id: number;
+      subclass_definition_id?: number | null;
+      remove?: never;
+    })
+  | (CommandBase & {
+      type: 'update_class';
+      class_definition_id: number;
+      remove: true;
+      subclass_definition_id?: never;
+    });
+
+/** SRD 2024 ASI: +2 to one ability, or +1 to each of two (seam §8b). */
+export interface LevelUpAbilityIncrease {
+  ability: Ability;
+  amount: number;
+}
+
+/**
+ * THE ONE LEVELLING PATH (level-up plan §8b): one command, one payload, one
+ * transaction, one snapshot inverse, one refusal set.
+ *
+ * `target_level` must be exactly the class's current level plus one
+ * (L-ADJACENT). There is NO hit-point field, and that is D77 rather than an
+ * omission: hit points at every level past the first are the class's fixed
+ * value (`die / 2 + 1`) plus the Constitution modifier, computed live by the
+ * sheet — nothing per level is recorded, so there is nothing to carry.
+ * `subclass_content_key` is required exactly when the new level is 3 (all
+ * twelve seeded 2024 classes subclass at 3); `ability_increases` is required
+ * exactly when the new level is an ASI level READ FROM THE SEEDED TABLE
+ * (`src/rules/class-asi-levels-srd.ts` — never a hardcoded list, which is
+ * the D15 mistake §5 names; D78 records that even the plan's own enumeration
+ * of those levels was wrong). The increases field is a LIST of one or two
+ * entries because a singular field cannot express the +1/+1 arm.
+ */
+export interface LevelUpClassCommand extends CommandBase {
+  type: 'level_up_class';
   class_definition_id: number;
-  level: number | null;
-  subclass_definition_id?: number | null;
+  target_level: number;
+  subclass_content_key?: string;
+  ability_increases?: readonly LevelUpAbilityIncrease[];
 }
 
 /**
@@ -296,6 +350,7 @@ export type CharacterCommandPayload =
   | RemoveSourceCommand
   | AcknowledgeWarningCommand
   | UpdateClassCommand
+  | LevelUpClassCommand
   | AddWeaponCommand
   | UpdateWeaponCommand
   | RemoveWeaponCommand

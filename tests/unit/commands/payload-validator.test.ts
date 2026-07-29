@@ -108,17 +108,51 @@ describe('character command payload validation', () => {
         warning_fingerprint: 'conflicting_versions:1',
         integrity: signature,
       },
+      // `update_class` carries NO level since the strip (level-up plan §3):
+      // entry/subclass update, and the `remove: true` variant that replaced
+      // `level: null`.
       {
         type: 'update_class',
         class_definition_id: 9,
-        level: 3,
         subclass_definition_id: 10,
       },
       {
         type: 'update_class',
         class_definition_id: 9,
-        level: null,
-        subclass_definition_id: null,
+      },
+      {
+        type: 'update_class',
+        class_definition_id: 9,
+        remove: true,
+      },
+      // The one levelling payload (level-up plan §8b, reduced by D77 — no
+      // hit-point field): plain adjacency, the offered subclass key at 3,
+      // and both SRD increase shapes (+2, and +1/+1) at an ASI level.
+      {
+        type: 'level_up_class',
+        class_definition_id: 9,
+        target_level: 2,
+      },
+      {
+        type: 'level_up_class',
+        class_definition_id: 9,
+        target_level: 3,
+        subclass_content_key: '2024:subclass:eldritch-knight',
+      },
+      {
+        type: 'level_up_class',
+        class_definition_id: 9,
+        target_level: 4,
+        ability_increases: [{ ability: 'strength', amount: 2 }],
+      },
+      {
+        type: 'level_up_class',
+        class_definition_id: 9,
+        target_level: 6,
+        ability_increases: [
+          { ability: 'strength', amount: 1 },
+          { ability: 'constitution', amount: 1 },
+        ],
       },
       {
         type: 'restore_snapshot',
@@ -190,12 +224,93 @@ describe('character command payload validation', () => {
         },
         'Source configuration must provide exactly one of chosen_list or chosen_option.',
       ],
+      // THE STRIP ITSELF, AS A REFUSAL BY NAME (level-up plan §3): a payload
+      // still carrying `level` is the exact caller that could re-open §1's
+      // bug, and it must fail loudly rather than be silently ignored.
       [
         {
           type: 'update_class',
           class_definition_id: 1,
+          level: 3,
         },
-        'Class level is required; use null to remove the class.',
+        'Unknown command field: level.',
+      ],
+      [
+        {
+          type: 'update_class',
+          class_definition_id: 1,
+          remove: false,
+        },
+        'remove must be true when present.',
+      ],
+      [
+        {
+          type: 'update_class',
+          class_definition_id: 1,
+          remove: true,
+          subclass_definition_id: 2,
+        },
+        'A removed class cannot also set a subclass.',
+      ],
+      // The levelling payload's structural bounds and the SRD's +2/+1+1
+      // increase shape (level-up plan §8b).
+      [
+        {
+          type: 'level_up_class',
+          class_definition_id: 1,
+          target_level: 1,
+        },
+        'target_level must be an integer from 2 to 20.',
+      ],
+      [
+        {
+          type: 'level_up_class',
+          class_definition_id: 1,
+          target_level: 21,
+        },
+        'target_level must be an integer from 2 to 20.',
+      ],
+      [
+        {
+          type: 'level_up_class',
+          class_definition_id: 1,
+          target_level: 4,
+          ability_increases: [],
+        },
+        'ability_increases must hold one or two increases.',
+      ],
+      [
+        {
+          type: 'level_up_class',
+          class_definition_id: 1,
+          target_level: 4,
+          ability_increases: [{ ability: 'strength', amount: 1 }],
+        },
+        'Ability increases must total exactly 2 (+2, or +1 and +1).',
+      ],
+      [
+        {
+          type: 'level_up_class',
+          class_definition_id: 1,
+          target_level: 4,
+          ability_increases: [
+            { ability: 'strength', amount: 1 },
+            { ability: 'strength', amount: 1 },
+          ],
+        },
+        'An ability cannot be increased twice in one improvement.',
+      ],
+      [
+        {
+          type: 'level_up_class',
+          class_definition_id: 1,
+          target_level: 4,
+          ability_increases: [
+            { ability: 'strength', amount: 2 },
+            { ability: 'constitution', amount: 2 },
+          ],
+        },
+        'Ability increases must total exactly 2 (+2, or +1 and +1).',
       ],
       [
         {

@@ -43,6 +43,7 @@ import {
   type RpcHarness,
 } from '../../helpers/rpc-harness';
 import { openTestDatabase } from '../../helpers/open-db';
+import { raiseClassLevelForTest } from '../../helpers/class-levels';
 
 const connections: Database[] = [];
 const harnesses: RpcHarness[] = [];
@@ -990,22 +991,37 @@ describe('minimal character sharing', () => {
     const integrity = new CharacterCommandIntegrity(
       'sharing-timing-test-key',
     );
+    // `update_class` no longer carries a level (level-up plan §3): entry is
+    // at 1, and the fixture levels are direct writes — this file's subject
+    // is share transport, not the guarded levelling path.
     new UpdateClassCommand(
       source,
       {
         type: 'update_class',
         class_definition_id: catalog.otherClassId,
-        level: 2,
         subclass_definition_id: null,
       },
       integrity,
     ).apply(characterId);
+    raiseClassLevelForTest(source, characterId, catalog.otherClassId, 2);
     new UpdateClassCommand(
       source,
       {
         type: 'update_class',
         class_definition_id: catalog.classId,
-        level: 5,
+        subclass_definition_id: null,
+      },
+      integrity,
+    ).apply(characterId);
+    raiseClassLevelForTest(source, characterId, catalog.classId, 5);
+    // The subclass is taken AT level 5 — a second `update_class` once the
+    // level stands, so its source's acquisition timing (5) is the same fact
+    // the import re-derives from the class row on the other side.
+    new UpdateClassCommand(
+      source,
+      {
+        type: 'update_class',
+        class_definition_id: catalog.classId,
         subclass_definition_id: catalog.subclassId,
       },
       integrity,
@@ -1773,11 +1789,11 @@ describe('an effect knows which source granted it, across a link', () => {
       {
         type: 'update_class',
         class_definition_id: catalog.classId,
-        level: 5,
         subclass_definition_id: catalog.subclassId,
       },
       integrity,
     ).apply(characterId);
+    raiseClassLevelForTest(origin, characterId, catalog.classId, 5);
     new AddSourceCommand(
       origin,
       {
@@ -1855,17 +1871,10 @@ describe('an effect knows which source granted it, across a link', () => {
     ]);
 
     // Case 3: the grant stops applying, through the generator rather than by
-    // hand. Its source is tombstoned; the class it hangs from is not.
-    new UpdateClassCommand(
-      origin,
-      {
-        type: 'update_class',
-        class_definition_id: catalog.classId,
-        level: 3,
-        subclass_definition_id: catalog.subclassId,
-      },
-      integrity,
-    ).apply(characterId);
+    // hand. Its source is tombstoned; the class it hangs from is not. The
+    // level drop is a fixture write — levelling DOWN has no command at all
+    // (level-up plan §10) — and the raise helper re-runs the same generator.
+    raiseClassLevelForTest(origin, characterId, catalog.classId, 3);
     // Case 4: the feat is removed outright, so nothing in the document can name
     // it.
     new RemoveSourceCommand(
@@ -1964,11 +1973,11 @@ describe('an effect knows which source granted it, across a link', () => {
       {
         type: 'update_class',
         class_definition_id: catalog.classId,
-        level: 3,
         subclass_definition_id: null,
       },
       new CharacterCommandIntegrity('sharing-provenance-key'),
     ).apply(characterId);
+    raiseClassLevelForTest(origin, characterId, catalog.classId, 3);
     const document = exportCharacterShare(origin, characterId);
     // Hand-written, because the exporter cannot produce it: the flag is set
     // from the row's own source instance. A pasted link can carry anything, and

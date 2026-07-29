@@ -428,10 +428,12 @@ function renderPlanner(
           allow_legacy: allowLegacy,
         }),
       ),
+    // `level` is gone from `update_class` (level-up plan §3): the planner can
+    // set a subclass, enter a class at level 1, or remove one — levelling
+    // belongs to the one guarded `level_up_class` path.
     updateClass: (
       entry: CharacterClass,
       changes: {
-        level?: number;
         subclass_definition_id?: number | null;
       },
     ) =>
@@ -439,7 +441,6 @@ function renderPlanner(
         session.execute({
           type: 'update_class',
           class_definition_id: entry.class_definition_id,
-          level: changes.level ?? entry.level,
           subclass_definition_id:
             changes.subclass_definition_id === undefined
               ? entry.subclass_definition_id
@@ -454,7 +455,7 @@ function renderPlanner(
             session.execute({
               type: 'update_class',
               class_definition_id: entry.class_definition_id,
-              level: null,
+              remove: true,
             }),
           ),
       ),
@@ -463,7 +464,6 @@ function renderPlanner(
         session.execute({
           type: 'update_class',
           class_definition_id: classDefinitionId,
-          level: 1,
           subclass_definition_id: null,
         }),
       ),

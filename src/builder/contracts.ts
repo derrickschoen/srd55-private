@@ -1050,3 +1050,15 @@ export * from './background-choices';
  * `EQUIPMENT_CHOICE_CONFIG_KEY`) rather than inventing parallels.
  */
 export * from './equipment-choices';
+
+/* ---------------------- straight-class level-up (L-A, offered for ratification) */
+
+/**
+ * L-A's contract — the one levelling command's type and payload shape (D77:
+ * no hit-point field), the four refusal reasons, the subclass level, the
+ * ASI cap and total, and the ASI rules module path — authored in its own
+ * module on the B3 precedent above and offered for ratification the same
+ * way. Level-up is NOT a creation step, which is why the values live in
+ * `./level-up` rather than a new section of this level-one file (plan §8b).
+ */
+export * from './level-up';
