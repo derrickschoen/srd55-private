@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
+import { readGuidedSeam } from './fixtures/guided-seam';
 
 async function ready(page: import('@playwright/test').Page): Promise<void> {
   await expect(page.locator('#status')).toHaveAttribute(
@@ -9,13 +10,40 @@ async function ready(page: import('@playwright/test').Page): Promise<void> {
 }
 
 async function resetHome(
-  page: import('@playwright/test').Page,
+  page: Page,
 ): Promise<void> {
   await page.goto('/');
   await ready(page);
   await page.evaluate(() => window.staticApp.reset());
   await page.reload();
   await ready(page);
+}
+
+async function createThroughGuidedBuilder(
+  page: Page,
+  name: string,
+): Promise<number> {
+  const seam = await readGuidedSeam(page);
+  await page.getByRole('link', { name: 'Create a character' }).click();
+  await expect(page).toHaveURL(new URL(seam.newRoute, page.url()).href);
+  await expect(page.locator('input')).toHaveCount(0);
+  await page.locator('[data-class-option]').first().click();
+  await page.getByLabel('Character name').fill(name);
+  await page.getByRole('button', { name: 'Create character' }).click();
+
+  const characters = await page.evaluate(() =>
+    window.staticApp.inspectRows('characters'),
+  );
+  const characterId = Number(characters[0]?.['id']);
+  expect(Number.isSafeInteger(characterId)).toBe(true);
+  const persistedSeam = await readGuidedSeam(page, characterId);
+  if (persistedSeam.buildPath === null) {
+    throw new Error('The guided seam returned no persisted build path.');
+  }
+  await expect(page).toHaveURL(
+    new URL(persistedSeam.buildPath, page.url()).href,
+  );
+  return characterId;
 }
 
 async function downloadBytes(
@@ -62,20 +90,27 @@ test('character shell creates, opens, confirms deletion, and persists every flow
 
   await expect(page.getByRole('heading', { name: 'No characters yet' })).toBeVisible();
   await expect(page.locator('#status')).toContainText('Local database ready.');
-  await page.getByLabel('Character name').fill('  Selene, spellblade  ');
-  await page.getByRole('button', { name: 'Create character' }).click();
-  await expect(page).toHaveURL(/\/characters\/1$/);
+  const characterId = await createThroughGuidedBuilder(
+    page,
+    '  Selene, spellblade  ',
+  );
   expect(
     await page.evaluate(() => window.staticApp.inspectRows('characters')),
   ).toEqual([
-    expect.objectContaining({ id: 1, name: 'Selene, spellblade', revision: 0 }),
+    expect.objectContaining({
+      id: characterId,
+      name: 'Selene, spellblade',
+      revision: 0,
+    }),
   ]);
 
   await page.goto('/');
   await ready(page);
   await expect(page.getByRole('heading', { name: 'Selene, spellblade' })).toBeVisible();
   await page.getByRole('link', { name: 'Open workspace' }).click();
-  await expect(page).toHaveURL(/\/characters\/1$/);
+  await expect(page).toHaveURL(
+    new URL(`/characters/${characterId}`, page.url()).href,
+  );
 
   await page.goto('/');
   await ready(page);
@@ -84,7 +119,10 @@ test('character shell creates, opens, confirms deletion, and persists every flow
   expect(
     await page.evaluate(() => window.staticApp.inspectRows('characters')),
   ).toEqual([
-    expect.objectContaining({ id: 1, name: 'Selene, spellblade' }),
+    expect.objectContaining({
+      id: characterId,
+      name: 'Selene, spellblade',
+    }),
   ]);
 
   page.once('dialog', (dialog) => dialog.accept());
@@ -99,9 +137,7 @@ test('catalog, complete database, and character backup controls preserve durable
   page,
 }) => {
   await resetHome(page);
-  await page.getByLabel('Character name').fill('Backup Hero');
-  await page.getByRole('button', { name: 'Create character' }).click();
-  await expect(page).toHaveURL(/\/characters\/1$/);
+  const characterId = await createThroughGuidedBuilder(page, 'Backup Hero');
   await page.goto('/');
   await ready(page);
   await page.getByText('Import and backups').click();
@@ -125,7 +161,7 @@ test('catalog, complete database, and character backup controls preserve durable
   expect(
     await page.evaluate(() => window.staticApp.inspectRows('characters')),
   ).toEqual([
-    expect.objectContaining({ id: 1, name: 'Backup Hero' }),
+    expect.objectContaining({ id: characterId, name: 'Backup Hero' }),
   ]);
 
   const [characterDownload] = await Promise.all([
@@ -145,8 +181,11 @@ test('catalog, complete database, and character backup controls preserve durable
   expect(
     await page.evaluate(() => window.staticApp.inspectRows('characters')),
   ).toEqual([
-    expect.objectContaining({ id: 1, name: 'Backup Hero' }),
-    expect.objectContaining({ id: 2, name: 'Backup Hero' }),
+    expect.objectContaining({ id: characterId, name: 'Backup Hero' }),
+    expect.objectContaining({
+      id: characterId + 1,
+      name: 'Backup Hero',
+    }),
   ]);
 
   await page.getByLabel('Catalog JSON').setInputFiles({
@@ -211,4 +250,44 @@ test('catalog, complete database, and character backup controls preserve durable
       is_active: 1,
     }),
   ]);
+});
+
+test('the advanced blank-character escape hatch remains reachable without becoming the primary action', async ({
+  page,
+}) => {
+  await resetHome(page);
+
+  const seam = await readGuidedSeam(page);
+  await expect(
+    page.getByRole('link', { name: 'Create a character' }),
+  ).toHaveAttribute('href', seam.newRoute);
+  const details = page.locator('details.advanced-create');
+  await expect(details).not.toHaveAttribute('open', '');
+  await expect(
+    page.getByRole('button', { name: 'Create blank character' }),
+  ).not.toBeVisible();
+
+  await page
+    .getByText('Advanced: create a blank character', { exact: true })
+    .click();
+  await page.getByLabel('Character name').fill('Blank Escape Hero');
+  await page
+    .getByRole('button', { name: 'Create blank character' })
+    .click();
+
+  await expect(page).toHaveURL(/\/characters\/1$/);
+  expect(
+    await page.evaluate(() => window.staticApp.inspectRows('characters')),
+  ).toEqual([
+    expect.objectContaining({
+      id: 1,
+      name: 'Blank Escape Hero',
+      revision: 0,
+    }),
+  ]);
+  expect(
+    await page.evaluate(() =>
+      window.staticApp.inspectRows('character_class_levels'),
+    ),
+  ).toEqual([]);
 });
