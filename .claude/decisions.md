@@ -1,5 +1,46 @@
 # Binding scope decisions
 
+## D70 — OWNER: an unmade choice is a SAVEABLE state, and it WARNS in the wizard AND on the sheet (2026-07-29)
+
+**The ruling.** *"Yes, saveable — matches how class skill choices already behave;
+the character is incomplete but real. Make sure to have warnings in the wizard
+and on the sheet for incomplete choices."*
+
+**1. Incomplete is a real, persistable state.** A character with an unfilled
+Keen Senses or Skillful grant, an unchosen class skill, an unpicked subclass, or
+any other owed choice **saves, reloads and shares**. It is not an error and must
+not be refused. This confirms as a decision what the machinery already did by
+accident.
+
+**2. The wizard warns.** It already has the vocabulary — `character-completeness`
+names *"class skill choice"*, *"multiclass skill choice"*, *"Keen Senses skill
+choice"*, *"Skillful skill choice"*. That side is largely built.
+
+**3. THE SHEET WARNS TOO, AND THIS IS THE NEW WORK.** Verified before writing
+this: the sheet has a `gaps` mechanism with seven kinds — `class`,
+`gear_not_itemised`, `no_class_feature_text`, `no_expertise`,
+`no_unarmored_defense`, `partial_subclass_catalog`,
+`weapon_reach_not_recorded` — and **not one of them says a choice is owed.**
+Completeness and gaps are two separate systems that have never met. A person
+reading their own sheet cannot currently tell that they still owe a skill.
+
+**PINNED: outstanding choices become sheet gaps**, named individually rather
+than as one "incomplete" flag, because *"you owe a skill from your class"* and
+*"you owe your subclass"* are different sentences and D33 requires the sheet to
+say what it does not know.
+
+**A WARNING IS NOT A BLOCK (D49).** The character saves, shares and prints with
+the warning attached. Nothing about an owed choice may refuse an action.
+
+**One vocabulary, not two.** The gap text derives from the completeness
+vocabulary rather than restating it — the same rule written twice is F22, which
+this project has already been bitten by. *Seam:* one shared source of the
+outstanding-choice names. *Cost to flip:* none, it is the cheaper build anyway.
+
+**Interaction with D67.** The reveal names the sources of a number. A gap says a
+number or a choice is missing. They are different surfaces and both stay: a
+printed sheet carries the gap, because a printed sheet cannot hover.
+
 ## D69 — OWNER: weapons carry NO provenance. Let people add any weapon; WARN when not proficient (2026-07-29)
 
 **The ruling.** *"I don't care where the greatsword came from. Just care that we
