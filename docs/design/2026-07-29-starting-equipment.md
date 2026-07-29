@@ -185,9 +185,25 @@ sites.** The fix is not invention: `character_effects` sits in the same file wit
 its own branch precisely because *"it is the first character-owned table to
 reference another one, so its `source_instance_id` must be remapped… Leaving it
 in the group would write a snapshot pointing at another character's source
-instance — which the composite foreign key would then refuse."* Copy the
-**nullable-remap** shape (`character_effects`), **not** the throw-on-missing
-shape (`character_skill_grants`), because NULL is a legitimate value here.
+instance — which the composite foreign key would then refuse."* Copy the **nullable-remap** shape (`character_effects`), not the
+throw-on-missing shape (`character_skill_grants`), because NULL is legitimate
+here.
+
+**And `character_effects` has TWO remaps, not one — a reviewer caught that
+"copy the nullable shape" was ambiguous, and I confirmed both.** They differ:
+
+- **Full import** (`:1966-1969`): resolves the id and **throws** a
+  `BackupValidationError` when a non-null reference cannot be resolved. A
+  complete document should always resolve; failing loudly is right.
+- **Save-point rewrite** (`:2257-2263`): `?? null` — a non-null unresolvable id
+  becomes NULL, silently. A stale undo snapshot may legitimately reference a
+  since-deleted source instance.
+
+**Pinned per site:** `:1833-1836` and `:1903-1910` are full-import sites and take
+the **throwing** variant. `:2225-2231` is the save-point rewrite and takes the
+**`?? null`** variant. The rationale text quoted above comes from the save-point
+comment; copying it uncritically into the two import sites would install a
+silent-null where a throw belongs.
 
 Left unfixed, a D62 import-as-clone of a character with a granted weapon either
 violates the composite FK or silently points the clone's weapon at a stranger's
@@ -321,8 +337,15 @@ dispatch is cut**:
 ## 7. Dispatches
 
 - **E-A — the source column and the mint.** Migration `0011`, both tables,
-  `a7-v10` (freeze a7-v9 first), wire v6, backup, row contracts, the mint and
-  cleanup keyed on source instance.
+  wire v6, the three backup remap sites named in §2, row contracts, the mint and
+  cleanup keyed on source instance, **and the class-side declared
+  weapon-equipment map from §0b** — E-PLURAL cannot fire without it and revision 3
+  left it unassigned to either dispatch.
+
+  **NO `a7-v10`.** §2 pinned that and this bullet contradicted it in every
+  revision from 1 through 3 — an implementer reading only §7 would mint a version
+  bump the document forbids. §2 is correct: a nullable column on an
+  already-carried child table rides along via `ADDED_NULLABLE_ROW_COLUMNS`.
 - **E-B — the step.** Reads both option sets, records the choice, drives
   completeness, and the sheet's not-itemised disclosure.
 
