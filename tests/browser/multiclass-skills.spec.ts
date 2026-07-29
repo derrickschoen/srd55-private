@@ -45,6 +45,15 @@ interface MulticlassImage {
   readonly characterId: number;
 }
 
+/**
+ * A hand-built image on the PER-GRANT model (skills-with-provenance §3.3):
+ * the Fighter's two class choices are FILLED GRANTS under the Fighter's own
+ * source — arcana and history, deliberately outside the Ranger fixture's
+ * most useful keyboard choices — and the entered class's entry grant is an
+ * UNFILLED grant under its own source. The flat
+ * `character_skill_proficiencies` rows exist only as the derived projection
+ * of the filled grants; nothing reads them for completeness.
+ */
 async function multiclassImage(options: {
   readonly target: 'Bard' | 'Ranger' | 'Scout';
   readonly count?: number;
@@ -85,7 +94,7 @@ async function multiclassImage(options: {
   const fighterId = defineClass('Fighter', 2, 'none', 0);
   const targetId = defineClass(
     options.target,
-    options.target === 'Bard' ? 3 : 3,
+    3,
     options.target === 'Bard' ? 'any' : 'class_list',
     options.count ?? 1,
   );
@@ -108,9 +117,39 @@ async function multiclassImage(options: {
      VALUES (?, ?, 1, 1), (?, ?, 1, 0)`,
     [characterId, fighterId, characterId, targetId],
   );
-  // The Fighter's two initial choices are already paid, leaving only the entry
-  // grant outstanding. These are intentionally outside the Ranger fixture's
-  // most useful keyboard choices.
+
+  const addSource = (definitionId: number, displayName: string): number =>
+    db.exec(
+      `INSERT INTO character_source_instances (
+         character_id, instance_uuid, source_type, source_definition_id,
+         display_name, state
+       ) VALUES (?, ?, 'class', ?, ?, 'active')`,
+      [characterId, crypto.randomUUID(), definitionId, displayName],
+    ).lastInsertId;
+  const fighterSource = addSource(fighterId, 'Fighter 1');
+  const targetSource = addSource(targetId, `${options.target} 1`);
+
+  const addGrant = (
+    sourceId: number,
+    grantKey: string,
+    ordinal: number,
+    skill: string | null,
+  ): void => {
+    db.exec(
+      `INSERT INTO character_skill_grants (
+         character_id, source_instance_id, grant_key, ordinal, skill, state
+       ) VALUES (?, ?, ?, ?, ?, 'active')`,
+      [characterId, sourceId, grantKey, ordinal, skill],
+    );
+  };
+  // The Fighter's two initial choices are already made, as filled grants.
+  addGrant(fighterSource, 'class_skill', 1, 'arcana');
+  addGrant(fighterSource, 'class_skill', 2, 'history');
+  // The entry grant(s), unfilled — the outstanding obligations under test.
+  for (let ordinal = 1; ordinal <= (options.count ?? 1); ordinal += 1) {
+    addGrant(targetSource, 'multiclass_skill', ordinal, null);
+  }
+  // The derived projection of the two filled grants.
   db.exec(
     `INSERT INTO character_skill_proficiencies (character_id, skill)
      VALUES (?, 'arcana'), (?, 'history')`,
@@ -147,14 +186,26 @@ function skillRows(page: Page) {
   );
 }
 
-test('the Ranger entry choice is keyboard-reachable, persists, and clears completeness', async ({
+function filledGrantSkills(page: Page) {
+  return page.evaluate(async () => {
+    const rows = await window.staticApp.inspectRows('character_skill_grants', {
+      character_id: 1,
+    });
+    return rows
+      .filter((row) => row['skill'] !== null)
+      .map((row) => [row['grant_key'], row['skill']])
+      .sort();
+  });
+}
+
+test('the Ranger entry choice is keyboard-reachable, fills the ADDRESSED grant, and clears completeness', async ({
   page,
 }) => {
   const image = await multiclassImage({ target: 'Ranger' });
   await install(page, image);
 
   const picker = page.getByRole('combobox', {
-    name: 'Ranger multiclass skill (1 granted)',
+    name: 'Ranger 1 skill choice 1 of 1',
   });
   await expect(picker.locator('option')).toHaveText([
     'Choose a skill',
@@ -172,29 +223,34 @@ test('the Ranger entry choice is keyboard-reachable, persists, and clears comple
   await picker.press('p');
   await expect(picker).toHaveValue('perception');
   await picker.press('Tab');
-  const choose = page.getByRole('button', { name: 'Choose Ranger skill' });
+  const choose = page.getByRole('button', { name: 'Choose Ranger 1 skill 1' });
   await expect(choose).toBeFocused();
   await page.keyboard.press('Enter');
 
+  // The write landed on the RANGER's grant — provenance, not just totals —
+  // and the projection derived it.
+  await expect.poll(() => filledGrantSkills(page)).toEqual([
+    ['class_skill', 'arcana'],
+    ['class_skill', 'history'],
+    ['multiclass_skill', 'perception'],
+  ]);
   await expect.poll(() => skillRows(page)).toEqual([
     expect.objectContaining({ skill: 'arcana' }),
     expect.objectContaining({ skill: 'history' }),
     expect.objectContaining({ skill: 'perception' }),
   ]);
   await expect(
-    page.getByRole('heading', {
-      name: 'A skill from multiclassing has not been chosen',
-    }),
+    page.getByRole('heading', { name: /Ranger 1 — .* chosen/ }),
   ).toHaveCount(0);
 });
 
-test('the Bard entry offers all eighteen skills, including Performance', async ({
+test('the Bard entry offers all eighteen skills minus the held two, including Performance', async ({
   page,
 }) => {
   const image = await multiclassImage({ target: 'Bard' });
   await install(page, image);
   const picker = page.getByRole('combobox', {
-    name: 'Bard multiclass skill (1 granted)',
+    name: 'Bard 1 skill choice 1 of 1',
   });
   const options = await picker.locator('option').allTextContents();
   expect(options).toEqual([
@@ -211,16 +267,14 @@ test('the Bard entry offers all eighteen skills, including Performance', async (
   ).toBeVisible();
 
   await picker.selectOption('performance');
-  await page.getByRole('button', { name: 'Choose Bard skill' }).click();
+  await page.getByRole('button', { name: 'Choose Bard 1 skill 1' }).click();
   await expect.poll(() => skillRows(page)).toEqual([
     expect.objectContaining({ skill: 'arcana' }),
     expect.objectContaining({ skill: 'history' }),
     expect.objectContaining({ skill: 'performance' }),
   ]);
   await expect(
-    page.getByRole('heading', {
-      name: 'A skill from multiclassing has not been chosen',
-    }),
+    page.getByRole('heading', { name: /Bard 1 — .* chosen/ }),
   ).toHaveCount(0);
   await expect
     .poll(() =>
@@ -235,38 +289,39 @@ test('the Bard entry offers all eighteen skills, including Performance', async (
     ]);
 });
 
-test('an entry count above one stays outstanding until every choice is made', async ({
+test('an entry count above one stays outstanding until every grant is filled', async ({
   page,
 }) => {
-  // A homebrew class keeps the synthetic count above one intact when the app's
-  // startup health check refreshes the bundled SRD Ranger back to its sourced
-  // count of one.
+  // A homebrew class keeps the synthetic count above one intact when the
+  // app's startup health check refreshes the bundled SRD Ranger back to its
+  // sourced count of one — and each ordinal is its OWN addressed grant.
   const image = await multiclassImage({ target: 'Scout', count: 2 });
   await install(page, image);
 
-  let picker = page.getByRole('combobox', {
-    name: 'Scout multiclass skill (2 granted)',
-  });
-  await picker.selectOption('perception');
-  await page.getByRole('button', { name: 'Choose Scout skill' }).click();
+  await page
+    .getByRole('combobox', { name: 'Scout 1 skill choice 1 of 2' })
+    .selectOption('perception');
+  await page
+    .getByRole('button', { name: 'Choose Scout 1 skill 1' })
+    .click();
   await expect(
     page.getByRole('heading', {
-      name: 'A skill from multiclassing has not been chosen',
+      name: 'Scout 1 — 1 of 2 multiclass skill choices chosen',
     }),
   ).toBeVisible();
 
-  picker = page.getByRole('combobox', {
-    name: 'Scout multiclass skill (2 granted)',
+  const second = page.getByRole('combobox', {
+    name: 'Scout 1 skill choice 2 of 2',
   });
   await expect
-    .poll(() => picker.locator('option').allTextContents())
+    .poll(() => second.locator('option').allTextContents())
     .not.toContain('Perception');
-  await picker.selectOption('stealth');
-  await page.getByRole('button', { name: 'Choose Scout skill' }).click();
+  await second.selectOption('stealth');
+  await page
+    .getByRole('button', { name: 'Choose Scout 1 skill 2' })
+    .click();
   await expect(
-    page.getByRole('heading', {
-      name: 'A skill from multiclassing has not been chosen',
-    }),
+    page.getByRole('heading', { name: /Scout 1 — .* chosen/ }),
   ).toHaveCount(0);
   await expect.poll(() => skillRows(page)).toHaveLength(4);
 });

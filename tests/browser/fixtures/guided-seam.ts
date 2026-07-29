@@ -7,10 +7,16 @@ export interface BrowserGuidedSeam {
   readonly abilitiesStepPanel: string;
   readonly speciesStepPanel: string;
   readonly backgroundStepPanel: string;
+  readonly skillsStepPanel: string;
   readonly abilityMethodAttribute: string;
   readonly abilityInputAttribute: string;
   readonly abilityWarningAttribute: string;
   readonly abilitySubmitAttribute: string;
+  readonly skillGrantedAttribute: string;
+  readonly skillChoiceAttribute: string;
+  readonly skillSelectAttribute: string;
+  readonly skillFillAttribute: string;
+  readonly skillClearAttribute: string;
   readonly buildPath: string | null;
 }
 
@@ -35,16 +41,27 @@ export async function readGuidedSeam(
         throw new Error('The guided seam did not export ability-step locators.');
       }
       const abilityAttributeRecord = abilityAttributes as Record<string, unknown>;
+      const skillAttributes = exports['SKILL_STEP_ATTR'];
+      if (typeof skillAttributes !== 'object' || skillAttributes === null) {
+        throw new Error('The guided seam did not export skill-step locators.');
+      }
+      const skillAttributeRecord = skillAttributes as Record<string, unknown>;
       const newRoute = exports['GUIDED_NEW_ROUTE'];
       const panelAttribute = exports['GUIDED_PANEL_ATTRIBUTE'];
       const classChooserPanel = panelRecord['classChooser'];
       const abilitiesStepPanel = panelRecord['abilitiesStep'];
       const speciesStepPanel = panelRecord['speciesStep'];
       const backgroundStepPanel = panelRecord['backgroundStep'];
+      const skillsStepPanel = panelRecord['skillsStep'];
       const abilityMethodAttribute = abilityAttributeRecord['method'];
       const abilityInputAttribute = abilityAttributeRecord['input'];
       const abilityWarningAttribute = abilityAttributeRecord['warning'];
       const abilitySubmitAttribute = abilityAttributeRecord['submit'];
+      const skillGrantedAttribute = skillAttributeRecord['granted'];
+      const skillChoiceAttribute = skillAttributeRecord['choice'];
+      const skillSelectAttribute = skillAttributeRecord['select'];
+      const skillFillAttribute = skillAttributeRecord['fill'];
+      const skillClearAttribute = skillAttributeRecord['clear'];
       const pathWriter = exports['guidedBuildPath'];
       if (
         typeof newRoute !== 'string' ||
@@ -53,10 +70,16 @@ export async function readGuidedSeam(
         typeof abilitiesStepPanel !== 'string' ||
         typeof speciesStepPanel !== 'string' ||
         typeof backgroundStepPanel !== 'string' ||
+        typeof skillsStepPanel !== 'string' ||
         typeof abilityMethodAttribute !== 'string' ||
         typeof abilityInputAttribute !== 'string' ||
         typeof abilityWarningAttribute !== 'string' ||
         typeof abilitySubmitAttribute !== 'string' ||
+        typeof skillGrantedAttribute !== 'string' ||
+        typeof skillChoiceAttribute !== 'string' ||
+        typeof skillSelectAttribute !== 'string' ||
+        typeof skillFillAttribute !== 'string' ||
+        typeof skillClearAttribute !== 'string' ||
         typeof pathWriter !== 'function'
       ) {
         throw new Error('The guided seam exports have unexpected shapes.');
@@ -75,10 +98,16 @@ export async function readGuidedSeam(
         abilitiesStepPanel,
         speciesStepPanel,
         backgroundStepPanel,
+        skillsStepPanel,
         abilityMethodAttribute,
         abilityInputAttribute,
         abilityWarningAttribute,
         abilitySubmitAttribute,
+        skillGrantedAttribute,
+        skillChoiceAttribute,
+        skillSelectAttribute,
+        skillFillAttribute,
+        skillClearAttribute,
         buildPath,
       };
     },
