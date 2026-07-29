@@ -9,6 +9,7 @@ import { ensureBundledClassContent } from '../rules/class-progression-lookup';
 import { ensureBundledWeaponContent } from '../rules/weapons-srd';
 import { ensureBundledOriginContent } from '../rules/origins-srd';
 import { ensureBundledSpeciesDefinitions } from '../rules/origin-definitions-srd';
+import { ensureBundledBackgroundDefinitions } from '../rules/background-definitions-srd';
 import { ensureBundledSheetContent } from '../rules/sheet-srd';
 import { ensureBundledSpellContent } from '../rules/spells-srd';
 import { ensureBundledClassEquipment } from '../rules/class-equipment-srd';
@@ -54,6 +55,10 @@ export const applicationSeed: DatabaseSeed = (db) => {
   // their `spell_version_key` references resolve lazily, at grant generation,
   // not at seed time, so they need nothing above and nothing below needs them.
   ensureBundledSpeciesDefinitions(db);
+  // The background DEFINITIONS (dispatch B3, per D61) are order-independent
+  // for the same reason: their one grant rule resolves its feat lazily, from
+  // the instance config, at grant generation — never at seed time.
+  ensureBundledBackgroundDefinitions(db);
   ensureBundledFeatContent(db);
   ensureBundledSpellContent(db);
 };

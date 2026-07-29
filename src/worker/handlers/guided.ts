@@ -24,11 +24,17 @@ import {
   type GuidedOriginOptionsParams,
 } from '../../builder/contracts';
 import {
+  BACKGROUND_RPC,
+  isGuidedApplyBackgroundParams,
+} from '../../builder/background-choices';
+import {
   GuidedCreationRefusal,
   allocateGuidedAbilities,
+  applyGuidedBackgroundChoices,
   applyGuidedOrigin,
   createGuidedCharacter,
   guidedBuildState,
+  listGuidedBackgroundChoiceOptions,
   listGuidedClassOptions,
   listGuidedOriginOptions,
 } from '../../builder/guided-creation';
@@ -191,6 +197,25 @@ export const handlers: readonly RpcHandler[] = Object.freeze([
     isGuidedOriginParams,
     (context, params) =>
       translatingRefusals(() => applyGuidedOrigin(context.db, params)),
+  ),
+  /**
+   * The B3 pair. Method names and validator come from
+   * `src/builder/background-choices.ts` — the seam pins nothing for B3, a gap
+   * reported with this dispatch, so that module is the single place both
+   * agents' names can be ratified from.
+   */
+  defineRpcHandler(
+    BACKGROUND_RPC.choiceOptions,
+    isEmptyParams,
+    (context) => listGuidedBackgroundChoiceOptions(context.db),
+  ),
+  defineRpcHandler(
+    BACKGROUND_RPC.applyBackground,
+    isGuidedApplyBackgroundParams,
+    (context, params) =>
+      translatingRefusals(() =>
+        applyGuidedBackgroundChoices(context.db, params),
+      ),
   ),
   /**
    * WARNINGS NEVER SURFACE HERE AS ERRORS (D49): `allocateGuidedAbilities`

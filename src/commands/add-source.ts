@@ -17,12 +17,10 @@ import {
 import type { JsonObject } from '../domain/models';
 import { GrantRuleSlotGenerator } from '../grants/grant-rule-slot-generator';
 
-const MAGIC_INITIATE_LISTS = ['Cleric', 'Druid', 'Wizard'] as const;
-const MAGIC_INITIATE_ABILITIES = [
-  'intelligence',
-  'wisdom',
-  'charisma',
-] as const;
+import {
+  MAGIC_INITIATE_ABILITIES,
+  MAGIC_INITIATE_LISTS,
+} from '../builder/background-choices';
 const SOURCE_TYPES = ['class', 'feat', 'species', 'background'] as const;
 
 type MutableConfig = Record<string, unknown>;
