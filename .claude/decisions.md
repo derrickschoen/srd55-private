@@ -1,5 +1,44 @@
 # Binding scope decisions
 
+## D71 — OWNER: double-submit is the UI's problem, and `unknown_origin` stays one reason (2026-07-29)
+
+Two open questions closed, both by declining to build.
+
+**1. DOUBLE-SUBMIT.** *"Leave it to the ui to block a second click until backend
+responds."*
+
+This **confirms as a decision** what `guided-creation.ts:596-599` already says in
+a comment: creation is revision 0, carries no `operation_uuid`, is not
+idempotent, and *"double submission is the UI's problem."* It had been a comment
+recording a plan reversal; it is now the ruling.
+
+**No `operation_uuid` on creation, no migration, no backup-codec change.** The
+control is a disabled button between click and response, and that is the whole
+mechanism. Note what this accepts honestly: every step *after* creation already
+carries an `operation_uuid` and a revision check, so creation stays the one
+unguarded door — deliberately, because the door is cheap to hold shut from the
+other side.
+
+*Not affected:* the equipment mint's **re-confirm no-op**, introduced during the
+D69 strip. That exists because, with the source-keyed cleanup gone, confirming a
+recorded choice twice would duplicate every row and then self-collide on the
+armour slot. It is a correctness guard on a repeated *intent*, not a
+double-click guard, and it stays.
+
+**2. `unknown_origin`.** *"Leave it."*
+
+The refusal reason stays a single union member covering several distinct
+failures — a species key that does not exist, and a real background whose
+definition row was never seeded. `guided-creation.ts:832` already admits the
+shape: *"has only `unknown_origin` for this path — there is no
+`origin_not_bundled`."*
+
+**No split.** D33 is satisfied because something is said; the finer distinction
+would help us diagnose more than it helps a person act, and nothing depends on
+it. *Seam:* one member of a closed union. *Cost to flip:* add a member and the
+compiler names every site that must decide — which is exactly why leaving it is
+safe rather than lazy.
+
 ## D70 — OWNER: an unmade choice is a SAVEABLE state, and it WARNS in the wizard AND on the sheet (2026-07-29)
 
 **The ruling.** *"Yes, saveable — matches how class skill choices already behave;
