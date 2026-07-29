@@ -1,5 +1,61 @@
 # Binding scope decisions
 
+## D61 — OWNER: background is REQUIRED, and its feat and ability increases are the player's to choose (2026-07-28)
+
+**The ruling.** *"We should require that every character have a background.
+Remember to make an option for the player to customize the origin feat and the
+asi because the srd is too restrictive about what combinations of feat and
+ability scores are allowed."*
+
+Two rulings. The second is a deliberate departure from the SRD and is recorded as
+one, not smuggled in as a feature.
+
+**1. Every character has a background. It is required, not optional.** The
+guided builder does not offer a skip, and a character without one is incomplete
+rather than merely unfinished. This is stronger than the step order in D55, which
+only said where background sits.
+
+**2. The Origin feat and the ability-score increases are CHOSEN BY THE PLAYER,
+not dictated by the background.**
+
+In the 2024 rules a background hands you a fixed package: a specific Origin feat,
+and +2/+1 (or +1/+1/+1) spread over three named abilities. The owner's judgement
+is that the allowed combinations are too restrictive, and the app will not
+enforce them.
+
+- The player picks the **Origin feat** from the available origin feats — not only
+  the one their background prints.
+- The player assigns the **ability increases** themselves.
+- The background's printed feat and abilities remain visible as **what the SRD
+  suggests**, because that is genuinely useful and is also the licensed content
+  we are showing. They are a default and a reference, never a constraint.
+
+**This narrows D11**, and the narrowing is the owner's to make. D11 says the
+builder BLOCKS an SRD-illegal choice while import stays tolerant. A feat and
+ability spread the SRD does not pair is now a **legal choice in this app**. D11
+continues to govern everything it governed before; it no longer reaches the
+origin feat/ASI pairing. **Label the deviation where a person can see it** —
+someone comparing their sheet against a rulebook must be able to tell that this
+combination is ours and not the SRD's.
+
+**Consequence worth stating before it bites: this makes the provenance question
+urgent.** Ability scores are six NOT NULL columns defaulting to 10. Once the
+background writes increases into them, **two different sources are writing the
+same six numbers** — the (unbuilt) abilities step and the background — and
+nothing records which contributed what. Without provenance, "what is my base
+Strength" becomes unanswerable and re-applying or changing a background cannot
+subtract what it added. This is the same provenance record already flagged as
+collapsing four of the fourteen forecast blockers; D61 promotes it from
+worthwhile to load-bearing.
+
+*Taken for now:* the in-flight A5 dispatch lands as scoped — background copied,
+everything unapplied disclosed. **Feat and ASI customization is its own unit
+(A5b) immediately after**, because it needs the provenance decision and A5 does
+not. *Cost to flip:* fold it into A5 and enlarge a dispatch that is already the
+one most likely to ship as a lie.
+
+---
+
 ## D60 — OWNER: v1 has no users and no exports, so backward compatibility is not a constraint (2026-07-28)
 
 **The ruling.** *"There are no existing exports, this app has never been used by
