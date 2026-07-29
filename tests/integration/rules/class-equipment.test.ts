@@ -29,7 +29,7 @@ const EXPECTED_CLASS_EQUIPMENT: Readonly<
   Barbarian: {
     a: [
       [1, 'Greataxe', 'weapon'],
-      [4, 'Handaxes', 'gear'],
+      [4, 'Handaxes', 'weapon'],
       [1, 'Explorer’s Pack', 'gear'],
       [1, '15 GP', 'gear'],
     ],
@@ -38,7 +38,7 @@ const EXPECTED_CLASS_EQUIPMENT: Readonly<
   Bard: {
     a: [
       [1, 'Leather Armor', 'armor'],
-      [2, 'Daggers', 'gear'],
+      [2, 'Daggers', 'weapon'],
       [1, 'Musical Instrument of your choice', 'gear'],
       [1, 'Entertainer’s Pack', 'gear'],
       [1, '19 GP', 'gear'],
@@ -73,7 +73,7 @@ const EXPECTED_CLASS_EQUIPMENT: Readonly<
       [1, 'Chain Mail', 'armor'],
       [1, 'Greatsword', 'weapon'],
       [1, 'Flail', 'weapon'],
-      [8, 'Javelins', 'gear'],
+      [8, 'Javelins', 'weapon'],
       [1, 'Dungeoneer’s Pack', 'gear'],
       [1, '4 GP', 'gear'],
     ],
@@ -92,7 +92,7 @@ const EXPECTED_CLASS_EQUIPMENT: Readonly<
   Monk: {
     a: [
       [1, 'Spear', 'weapon'],
-      [5, 'Daggers', 'gear'],
+      [5, 'Daggers', 'weapon'],
       [
         1,
         'Artisan’s Tools or Musical Instrument chosen for the tool proficiency above',
@@ -108,7 +108,7 @@ const EXPECTED_CLASS_EQUIPMENT: Readonly<
       [1, 'Chain Mail', 'armor'],
       [1, 'Shield', 'armor'],
       [1, 'Longsword', 'weapon'],
-      [6, 'Javelins', 'gear'],
+      [6, 'Javelins', 'weapon'],
       [1, 'Holy Symbol', 'gear'],
       [1, 'Priest’s Pack', 'gear'],
       [1, '9 GP', 'gear'],
@@ -132,7 +132,7 @@ const EXPECTED_CLASS_EQUIPMENT: Readonly<
   Rogue: {
     a: [
       [1, 'Leather Armor', 'armor'],
-      [2, 'Daggers', 'gear'],
+      [2, 'Daggers', 'weapon'],
       [1, 'Shortsword', 'weapon'],
       [1, 'Shortbow', 'weapon'],
       [20, 'Arrows', 'gear'],
@@ -146,7 +146,7 @@ const EXPECTED_CLASS_EQUIPMENT: Readonly<
   Sorcerer: {
     a: [
       [1, 'Spear', 'weapon'],
-      [2, 'Daggers', 'gear'],
+      [2, 'Daggers', 'weapon'],
       [1, 'Arcane Focus (crystal)', 'gear'],
       [1, 'Dungeoneer’s Pack', 'gear'],
       [1, '28 GP', 'gear'],
@@ -157,7 +157,7 @@ const EXPECTED_CLASS_EQUIPMENT: Readonly<
     a: [
       [1, 'Leather Armor', 'armor'],
       [1, 'Sickle', 'weapon'],
-      [2, 'Daggers', 'gear'],
+      [2, 'Daggers', 'weapon'],
       [1, 'Arcane Focus (orb)', 'gear'],
       [1, 'Book (occult lore)', 'gear'],
       [1, 'Scholar’s Pack', 'gear'],
@@ -167,7 +167,7 @@ const EXPECTED_CLASS_EQUIPMENT: Readonly<
   },
   Wizard: {
     a: [
-      [2, 'Daggers', 'gear'],
+      [2, 'Daggers', 'weapon'],
       [1, 'Arcane Focus (Quarterstaff)', 'gear'],
       [1, 'Robe', 'gear'],
       [1, 'Spellbook', 'gear'],
@@ -221,11 +221,18 @@ describe('SRD class starting equipment parser and seed', () => {
 
   it('keeps all three Fighter options and the exact load-bearing quantities', () => {
     expect(Object.keys(parserPackages().Fighter ?? {})).toEqual(['a', 'b', 'c']);
+    // The declared plural bundle (starting-equipment plan §0b): a WEAPON,
+    // quantity 8 against the singular Javelin template. Classifying this as
+    // gear was the sinker the plan's revision 3 caught — a mint keyed on
+    // item_kind would silently disarm five classes.
     expect(parserPackages().Fighter?.a?.[3]).toEqual([
       8,
       'Javelins',
-      'gear',
+      'weapon',
     ]);
+    // And the pinned NO-MATCH case, one row over: `Arrow` is not a weapon
+    // template (ammunition is not tracked as a weapon), so the identically
+    // shaped `20 Arrows` REMAINS GEAR.
     expect(parserPackages().Fighter?.b?.[4]).toEqual([
       20,
       'Arrows',
@@ -297,16 +304,28 @@ describe('SRD class starting equipment parser and seed', () => {
        WHERE item.item_kind <> 'gear'
        ORDER BY item.id`,
     );
+    // The three DECLARED plural bundles (starting-equipment plan §0b): the
+    // printed name keeps its plural while the link lands on the singular
+    // template — written down, never derived by stripping an `s` (D15).
+    const declaredPlurals: Readonly<Record<string, string>> = {
+      Handaxes: 'Handaxe',
+      Daggers: 'Dagger',
+      Javelins: 'Javelin',
+    };
     expect(linked.length).toBeGreaterThan(0);
     for (const row of linked) {
       const resolved =
         row.item_kind === 'weapon' ? row.weapon_name : row.armor_name;
-      expect(resolved, String(row.item_name)).toBe(row.item_name);
+      expect(resolved, String(row.item_name)).toBe(
+        declaredPlurals[String(row.item_name)] ?? row.item_name,
+      );
     }
     for (const printedName of [
-      'Handaxes',
-      'Daggers',
-      'Javelins',
+      // Pinned no-match cases: no declared entry means the row REMAINS GEAR.
+      // `Arrow` is not a weapon template at all, a Quiver is a container, and
+      // the two qualified focus names are not item names.
+      'Arrows',
+      'Quiver',
       'Druidic Focus (Quarterstaff)',
       'Arcane Focus (Quarterstaff)',
     ]) {

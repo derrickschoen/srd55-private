@@ -92,6 +92,7 @@ export const COLUMN_FACTS = {
   character_armor: {
     id: { base: 'integer', notNull: true },
     character_id: { base: 'integer', notNull: true },
+    source_instance_id: { base: 'integer', notNull: false },
     slot: { base: 'degraded', notNull: true },
     name: { base: 'degraded', notNull: true },
     category: { base: 'degraded', notNull: true },
@@ -264,6 +265,7 @@ export const COLUMN_FACTS = {
   character_weapons: {
     id: { base: 'integer', notNull: true },
     character_id: { base: 'integer', notNull: true },
+    source_instance_id: { base: 'integer', notNull: false },
     name: { base: 'degraded', notNull: true },
     proficiency_category: { base: 'degraded', notNull: false },
     attack_kind: { base: 'degraded', notNull: false },

@@ -12,7 +12,14 @@
  */
 
 import { isEnumValue, skills } from '../domain/enums';
-import type { Ability, Skill, SkillGrantState } from '../domain/enums';
+import type {
+  Ability,
+  ArmorSlot,
+  BackgroundEquipmentOption,
+  ClassEquipmentOption,
+  Skill,
+  SkillGrantState,
+} from '../domain/enums';
 // From the EXTRACT-FREE module, never `origins-srd` (which imports the SRD
 // text via Vite's `?raw`): the seam is loaded by node-side test processes
 // through the command layer, and a `?raw` in its closure breaks their
@@ -949,6 +956,97 @@ export interface GuidedSkillsStepState {
   readonly unapplied_skill_rule_sources: readonly string[];
   readonly expertise_gap: boolean;
 }
+
+/* --------------------------------- starting equipment (E-A, offered for ratification) */
+
+/**
+ * THE STARTING-EQUIPMENT SEAM — dispatch E-A of
+ * `docs/design/2026-07-29-starting-equipment.md` (§2, §3, §6b). The values
+ * below are the E-A implementer's, OFFERED FOR RATIFICATION on the direction
+ * every earlier dispatch used: pinned here BEFORE the step (E-B) or its tests
+ * are written, reported rather than silently chosen for both sides. §6b names
+ * the five values two implementers would otherwise invent independently.
+ */
+
+/**
+ * §6b value 1 — THE COLUMN. `source_instance_id` on BOTH `character_weapons`
+ * and `character_armor`: nullable, composite same-character FK to
+ * `character_source_instances`, cascade on hard delete. NULL means A PERSON
+ * PUT THIS HERE — the default for every hand-added row and every row that
+ * predates the column. Non-NULL means a rule granted it, and only rules may
+ * remove it: the option-change cleanup deletes by this column and never
+ * touches a NULL-sourced row.
+ */
+export const EQUIPMENT_SOURCE_COLUMN = 'source_instance_id';
+
+/** The two sources that offer a starting-equipment package (D65, D61). */
+export type EquipmentSourceKind = 'class' | 'background';
+
+/**
+ * §6b value 2 — THE RECORDED CHOICE. It lives in the granting source
+ * instance's `config` under this key (the `applyGuidedBackgroundChoices`
+ * pattern, and `config` is already on the share wire since v1, so the choice
+ * travels for free). The value carries the source kind AND the option letter,
+ * discriminated so a class's three-way choice and a background's two-way one
+ * cannot be conflated.
+ */
+export const EQUIPMENT_CHOICE_CONFIG_KEY = 'equipment_choice';
+
+export type EquipmentChoiceConfig =
+  | { readonly kind: 'class'; readonly option: ClassEquipmentOption }
+  | { readonly kind: 'background'; readonly option: BackgroundEquipmentOption };
+
+/**
+ * §6b value 3 — THE ARMOUR-COLLISION REFUSAL REASON. `character_armor` is
+ * UNIQUE on `(character_id, slot)`; minting worn armour for a character who
+ * hand-added their own is a NAMED refusal with whole-apply rollback — the
+ * shape S-B built for `skill_already_held` — never a raw SQLite constraint
+ * violation and never a silent overwrite. The data names the slot, the item
+ * that could not be placed, and the item already holding the slot, so the
+ * step can tell the person exactly what collided.
+ */
+export type EquipmentGrantRefusalReason = 'armor_slot_occupied';
+
+export interface EquipmentGrantRefusalData {
+  readonly reason: EquipmentGrantRefusalReason;
+  readonly slot: ArmorSlot;
+  /** The granted item that could not be placed. */
+  readonly item: string;
+  /** The name of the row already occupying the slot. */
+  readonly holder: string;
+}
+
+/**
+ * §6b value 4 — THE WIRE. Share wire v6 appends ONE field to the weapon tuple
+ * (arity 21 → 22) and one to the armour tuple (9 → 10), both named
+ * `sourceRef`, resolving through the same `classes[].id` / `sources[].id`
+ * reference space `selections[].ref` uses. `migrateV5ToV6` appends null —
+ * pre-v6 rows could only have been hand-added, so this is the literal truth,
+ * NOT a retirement (that debate is settled at v5 and does not reopen).
+ */
+export const EQUIPMENT_SHARE_WIRE_VERSION = 6;
+export const EQUIPMENT_WIRE_SOURCE_REF_FIELD = 'sourceRef';
+
+/**
+ * §6b value 5 — THE DECLARED CLASS WEAPON-EQUIPMENT MAP'S MODULE. The
+ * class-side `DECLARED_WEAPON_EQUIPMENT` (plural bundles: Daggers, Handaxes,
+ * Javelins) lives beside the parser it corrects, with its exercised-entries
+ * guard, mirroring `origins-srd.ts`'s background map. No singularisation
+ * algorithm — D15 forbids deciding a mechanical fact by matching text, and no
+ * declared entry means the row REMAINS GEAR (`20 Arrows`, `Quiver`).
+ */
+export const CLASS_EQUIPMENT_RULES_MODULE = 'src/rules/class-equipment-srd.ts';
+
+/**
+ * Where the mint and the option-change cleanup live, on the
+ * `SKILL_GRANTS_MODULE` precedent. The module exports
+ * `applyEquipmentPackageChoice(db, params)` — one transaction that records
+ * the choice in `config`, removes exactly the rows carrying that source
+ * instance, and mints the chosen option's weapon/armour rows stamped with it
+ * — and `EquipmentGrantRefusal`, the named-refusal error carrying
+ * `EquipmentGrantRefusalData`. Rows with a NULL source are never touched.
+ */
+export const EQUIPMENT_GRANTS_MODULE = 'src/grants/equipment-grants.ts';
 
 /* ------------------------------------------ background choices (B3, ratified) */
 

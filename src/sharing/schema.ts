@@ -302,6 +302,19 @@ export interface ShareWeapon {
   readonly two_handed?: true;
   readonly ammunition?: true;
   readonly mastery_selected?: true;
+  /**
+   * WHICH RULE GRANTED THIS WEAPON — wire v6, the equipment-provenance column.
+   *
+   * Names a `classes[].id` / `sources[].id`, the SAME reference space
+   * `selections[].ref` and `effects[].sourceRef` resolve through. Optional
+   * because `source_instance_id` is nullable and NULL is the ordinary state:
+   * a person put this here. Every link minted before v6 arrives without it,
+   * which is the same truth — nothing but a person could have added those
+   * rows. No subclass flag, deliberately: equipment is granted by a class root
+   * or a background root, never by a subclass, and a flag nothing can set is a
+   * field that reads as meaningful and is not.
+   */
+  readonly sourceRef?: number;
 }
 
 /** The `true`-when-present flags of a weapon, in wire order. */
@@ -353,6 +366,8 @@ export interface ShareArmor {
   readonly strength_requirement?: number;
   readonly stealth_disadvantage?: true;
   readonly notes?: string;
+  /** The granting source (wire v6) — `ShareWeapon.sourceRef`'s terms exactly. */
+  readonly sourceRef?: number;
 }
 
 /**
@@ -973,7 +988,11 @@ function shareWeaponRange(value: unknown, label: string): WeaponRange {
   }
 }
 
-function shareWeapon(value: unknown, label: string): ShareWeapon {
+function shareWeapon(
+  value: unknown,
+  label: string,
+  knownSourceIds: ReadonlySet<number>,
+): ShareWeapon {
   const row = record(value, label);
   exactKeys(
     row,
@@ -985,6 +1004,7 @@ function shareWeapon(value: unknown, label: string): ShareWeapon {
       'other_properties',
       'notes',
       ...SHARE_WEAPON_FLAGS,
+      'sourceRef',
     ],
     label,
   );
@@ -1083,6 +1103,17 @@ function shareWeapon(value: unknown, label: string): ShareWeapon {
   if (mastery !== null) {
     throw new ShareValidationError(mastery);
   }
+  // The equipment-provenance reference (wire v6): the SAME reference space
+  // `selections[].ref` uses, checked the same way — a ref naming no source in
+  // this document would import as a weapon pointing at nothing, which the
+  // composite foreign key would then refuse mid-transaction.
+  if (row.sourceRef !== undefined) {
+    const ref = integer(row.sourceRef, `${label}.sourceRef`, 0, 119);
+    if (!knownSourceIds.has(ref)) {
+      throw new ShareValidationError(`${label}.sourceRef is unknown.`);
+    }
+    weapon.sourceRef = ref;
+  }
   return weapon as unknown as ShareWeapon;
 }
 
@@ -1112,12 +1143,16 @@ function originInteger(
  * with a raw SQLITE_CONSTRAINT_CHECK naming nothing the recipient could act on,
  * and the transaction has by then already written unrelated rows.
  */
-function shareArmor(value: unknown, label: string): ShareArmor {
+function shareArmor(
+  value: unknown,
+  label: string,
+  knownSourceIds: ReadonlySet<number>,
+): ShareArmor {
   const row = record(value, label);
   exactKeys(
     row,
     ['slot', 'name', 'category', 'armor_class', 'dex_bonus'],
-    [...SHARE_ARMOR_NUMBERS, ...SHARE_ARMOR_FLAGS, 'notes'],
+    [...SHARE_ARMOR_NUMBERS, ...SHARE_ARMOR_FLAGS, 'notes', 'sourceRef'],
     label,
   );
   const armor: Record<string, unknown> = {
@@ -1192,6 +1227,14 @@ function shareArmor(value: unknown, label: string): ShareArmor {
     throw new ShareValidationError(
       `${label}.dex_bonus must be none for a shield.`,
     );
+  }
+  // The equipment-provenance reference (wire v6), on `shareWeapon`'s terms.
+  if (row.sourceRef !== undefined) {
+    const ref = integer(row.sourceRef, `${label}.sourceRef`, 0, 119);
+    if (!knownSourceIds.has(ref)) {
+      throw new ShareValidationError(`${label}.sourceRef is unknown.`);
+    }
+    armor.sourceRef = ref;
   }
   return armor as unknown as ShareArmor;
 }
@@ -2060,7 +2103,7 @@ export function validateShareDocument(
   let weapons: CharacterShareDocument['weapons'] | undefined;
   if (source.weapons !== undefined) {
     weapons = list(source.weapons, 'weapons', SHARE_LIMITS.weapons).map(
-      (item, index) => shareWeapon(item, `weapons[${index}]`),
+      (item, index) => shareWeapon(item, `weapons[${index}]`, knownIds),
     );
     // NOT `assertUnique`. Two identical weapons is a normal thing to own — a
     // pair of daggers, a quiver of javelins — and each is its own row with its
@@ -2106,7 +2149,7 @@ export function validateShareDocument(
     // IS the cardinality: `character_armor_character_id_slot_unique` permits one
     // row per slot and there are two slots.
     armor = list(source.armor, 'armor', armorSlots.length).map((item, index) =>
-      shareArmor(item, `armor[${index}]`),
+      shareArmor(item, `armor[${index}]`, knownIds),
     );
     // UNLIKE weapons, this one IS unique-checked: the database makes it so, and
     // two rows claiming the worn slot would abort the import transaction on the

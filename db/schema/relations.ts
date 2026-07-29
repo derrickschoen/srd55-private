@@ -139,6 +139,19 @@ export const characterArmorRelations = relations(
       fields: [character_armor.character_id],
       references: [characters.id],
     }),
+    // Composite, matching the schema exactly, on the terms the weapon edge
+    // below records: granted armour cannot belong to another character's
+    // source instance, and NULL is "a person put this here".
+    source_instance: one(character_source_instances, {
+      fields: [
+        character_armor.source_instance_id,
+        character_armor.character_id,
+      ],
+      references: [
+        character_source_instances.id,
+        character_source_instances.character_id,
+      ],
+    }),
   }),
 );
 
@@ -184,6 +197,22 @@ export const characterWeaponsRelations = relations(
     // There is no `weapon_template_id` column for a relation to sit on, and
     // declaring one would fail the reverse direction of the relations test —
     // which is exactly the protection working.
+    //
+    // The SOURCE edge is a different thing entirely and does not reopen that
+    // door: `source_instance_id` points at another CHARACTER-OWNED row — which
+    // rule granted this weapon (starting-equipment plan §2) — never at the
+    // catalog. Composite, matching the schema exactly, for the reason the
+    // effect edge gives.
+    source_instance: one(character_source_instances, {
+      fields: [
+        character_weapons.source_instance_id,
+        character_weapons.character_id,
+      ],
+      references: [
+        character_source_instances.id,
+        character_source_instances.character_id,
+      ],
+    }),
   }),
 );
 
@@ -368,6 +397,11 @@ export const characterSourceInstancesRelations = relations(
     }),
     slots: many(spell_selection_slots),
     skill_grants: many(character_skill_grants),
+    // The equipment rows this source granted (starting-equipment plan §2/§3):
+    // deleted with their owner by the composite cascade, exactly as slots and
+    // skill grants are.
+    granted_weapons: many(character_weapons),
+    granted_armor: many(character_armor),
   }),
 );
 

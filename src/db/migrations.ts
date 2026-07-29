@@ -11,6 +11,7 @@ import featModel from '../../drizzle/0007_feat_model.sql?raw';
 import abilityAllocationMethod from '../../drizzle/0008_ability_allocation_method.sql?raw';
 import abilityIncrease from '../../drizzle/0009_ability_increase.sql?raw';
 import characterSkillGrants from '../../drizzle/0010_character_skill_grants.sql?raw';
+import equipmentProvenance from '../../drizzle/0011_equipment_provenance.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -124,6 +125,14 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
       'f4ddef795542f602699f3e247ea1fa519952238c66e43bbd84185155b44aed27',
     resultSchemaChecksum:
       'ba7cd3692fae389a569fcbec8afb3dc3058f212f129bebb61b4976f31b65c587',
+  }),
+  Object.freeze({
+    id: '0011_equipment_provenance',
+    sql: equipmentProvenance,
+    checksum:
+      'a30d5b0d7e81923dbe0734931e7c2d986babf408a6577567bbd8431264a78d47',
+    resultSchemaChecksum:
+      'eec2bb4a6d9d1381720152e805f6bca2a828379b6dd36780649aa1a5c0c459fa',
   }),
 ]);
 

@@ -54,12 +54,54 @@ const THREE_OPTIONS =
   /^Choose A, B, or C:\s*\(A\)\s*(?<a>.+);\s*\(B\)\s*(?<b>.+);\s*or\s*\(C\)\s*(?<c>.+)$/u;
 
 /**
- * Exact, case-sensitive printed-name links only.
+ * WHICH PRINTED PLURAL BUNDLES ARE WEAPONS, DECLARED RATHER THAN MATCHED —
+ * the class-side mirror of `DECLARED_WEAPON_EQUIPMENT` in `origins-srd.ts`
+ * (starting-equipment plan §0b).
  *
- * The lookup comes from the parsed catalogs, not a second list of weapons and
- * armour. A name occurring in both catalogs would be ambiguous and therefore
- * remains gear. Plurals such as `Javelins` and qualified names such as
- * `Druidic Focus (Quarterstaff)` do not equal a template name and remain gear.
+ * D15 REFUSED DECIDING A MECHANICAL FACT BY MATCHING TEXT, and the background
+ * side has already applied that refusal to THIS EXACT problem: a
+ * strip-the-`s`-and-look-it-up resolver is a rule about spelling standing in
+ * for a rule about weapons. So the plural links are written down. Before this
+ * map existed, `parseEquipmentEntry` stripped the count, missed the plural in
+ * the catalog, and fell through to `gear` — which seeded a catalog in which
+ * **Bard option A mints zero weapons** and every 2-Daggers class loses its
+ * actual weapons, wrong against the data while correct against the schema.
+ *
+ * THE THREE ENTRIES ARE THE EXTRACT'S OWN PLURALS, counted in
+ * `docs/srd/source/class-starting-equipment.txt`: `Daggers` ("2 Daggers" ×5,
+ * "5 Daggers"), `Handaxes` ("4 Handaxes"), `Javelins` ("8 Javelins",
+ * "6 Javelins") — nine lines across the class list.
+ *
+ * NO DECLARED ENTRY MEANS THE ROW REMAINS GEAR, and that is pinned, not an
+ * accident: `20 Arrows` (Fighter B, Ranger A, Rogue A) has the identical
+ * printed shape and `Arrow` is NOT a weapon template — ammunition is not
+ * tracked as a weapon — so it stays gear, as do `Quiver` and
+ * `Druidic Focus (Quarterstaff)`, a qualified name that is not an item name.
+ *
+ * `assertClassEquipmentLinksAreExercised` checks the declared direction
+ * against every parse, exactly as the background guard does: an entry the
+ * extract stops printing throws by name instead of quietly becoming a no-op.
+ *
+ * A `Map` rather than an object literal, for the reason the background map
+ * gives: these keys come from a parsed document.
+ */
+const DECLARED_WEAPON_EQUIPMENT = new Map<string, string>([
+  ['Daggers', 'Dagger'],
+  ['Handaxes', 'Handaxe'],
+  ['Javelins', 'Javelin'],
+]);
+
+/**
+ * Exact, case-sensitive printed-name links, LAYERED with the declared plural
+ * map above.
+ *
+ * The exact lookup comes from the parsed catalogs, not a second list of
+ * weapons and armour. A name occurring in both catalogs would be ambiguous
+ * and therefore remains gear. Qualified names such as
+ * `Druidic Focus (Quarterstaff)` do not equal a template name and remain
+ * gear. Plurals are NOT resolved here — they resolve only through
+ * `DECLARED_WEAPON_EQUIPMENT`, consulted second, so a declared plural can
+ * never shadow a real printed template name.
  */
 function exactCatalogLinks(): ReadonlyMap<string, EquipmentCatalogLink | null> {
   const links = new Map<string, EquipmentCatalogLink | null>();
@@ -78,7 +120,47 @@ function exactCatalogLinks(): ReadonlyMap<string, EquipmentCatalogLink | null> {
       content_key: armorContentKey(armor.name),
     });
   }
+  // The declared plural bundles, second: a printed name the catalog already
+  // links exactly must keep its exact link, and a declared plural colliding
+  // with a catalog name would be the ambiguity the null sentinel records.
+  for (const [printed, weapon] of DECLARED_WEAPON_EQUIPMENT) {
+    if (!links.has(printed)) {
+      links.set(printed, {
+        item_kind: 'weapon',
+        content_key: weaponContentKey(weapon),
+      });
+    }
+  }
   return links;
+}
+
+/**
+ * EVERY DECLARED PLURAL LINK MUST BE PRODUCED BY THE PARSE — the mirror of
+ * `assertEquipmentLinksAreExercised` in `origins-srd.ts`, and for the same
+ * reason: a hand-written declaration the extract no longer prints is a silent
+ * no-op, and a silent no-op in a seeder writes a catalog that looks complete.
+ * If the extract is re-cut and `Javelins` moves or changes spelling, this
+ * throws by name instead of quietly producing a `gear` row — and a silently
+ * disarmed Barbarian.
+ */
+function assertClassEquipmentLinksAreExercised(
+  sections: readonly SrdClassEquipment[],
+): void {
+  const weaponItemNames = new Set<string>();
+  for (const section of sections) {
+    for (const item of section.items) {
+      if (item.item_kind === 'weapon') {
+        weaponItemNames.add(item.item_name);
+      }
+    }
+  }
+  for (const [printed] of DECLARED_WEAPON_EQUIPMENT) {
+    if (!weaponItemNames.has(printed)) {
+      throw new SrdClassEquipmentError(
+        `declared weapon equipment names ${printed}, which no class package prints.`,
+      );
+    }
+  }
 }
 
 function parseOptions(
@@ -156,6 +238,7 @@ export function parseSrdClassEquipment(
       `extract must name ${SRD_CLASS_NAMES.join(', ')} in order; found ${actualNames.join(', ')}.`,
     );
   }
+  assertClassEquipmentLinksAreExercised(sections);
   return sections;
 }
 
