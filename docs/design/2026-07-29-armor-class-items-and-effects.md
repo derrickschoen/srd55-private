@@ -49,6 +49,17 @@ the one vocabulary), **D73**
   ±20 with a free-text note and **no source**.
 - **There is no attunement anywhere.** Zero matches for `attun` in
   `src/db/schema.sql`. `character_items` and its attunement flags are entirely new.
+- **A SUBCLASS CANNOT WRITE AN EFFECT ROW AT ALL, and revisions 1 and 2 built the
+  headline fixture on the assumption that it could.** Verified: `subclass_features`
+  has `effect_kind` CHECK'd to **`'extra_attack'` only**, read live at sheet-build
+  time and **never copied into `character_effects`**. The only files mentioning
+  both tables are generated contracts. And `INSERT INTO character_effects` appears
+  at exactly **three** sites — `guided-creation.ts:1116` (the species-template
+  copy), `guided-creation.ts:1586` and `level-up-class.ts:238` (both hand-written
+  `ability_increase`). **So §9's Armadillo Paladin — `hp_modifier` +3/+1-per-level
+  AND `armor_class_formula` 10+CON+CHA — has no mechanism to exist**, and neither
+  does §9's "collision fixture that matters most". Species have a template-copy
+  path; subclasses have nothing. **This is AC-2 and it was unbudgeted.**
 
 ## 1. The shape (D72)
 
@@ -105,8 +116,18 @@ winning base without re-running eligibility reports **18**.
 - **Armour you are not proficient with STILL GIVES ITS AC.** Withholding it
   would be a wrong number, which D33 forbids more strongly than an unwelcome one.
   **That half is settled and not in question.**
-- **WHAT THE SHEET SAYS ABOUT THE PENALTY IS BLOCKED ON THE OWNER, and this is
-  the one thing that must not be guessed.** D73 — which I wrote — tells the sheet
+- **RESOLVED, and revision 2's "BLOCKED" was over-cautious — the answer already
+  ships.** `armor_not_trained` (`multiclass-proficiency.ts:366-372`) already
+  prints: *"X is [a Shield | category] armor, and no class this character has
+  trains them in it. The Armor Class below still counts it — recording it is
+  allowed — but training is a requirement the table will want to apply."* That
+  satisfies D73's substance exactly — the AC is not withheld, the existence of a
+  requirement is stated, nothing is recited from memory — and it is computed from
+  `character_armor` via `characterProficiencies`, a path **orthogonal to the new
+  resolver**. **Taken for now: AC-B reuses it unchanged and invents nothing.**
+  *Cost to flip:* one message if the owner wants D73's fuller wording, which
+  would then need the F4 exception blessed explicitly. The background, kept
+  because it is the reason this is a decision rather than an oversight: D73 — which I wrote — tells the sheet
   to state *"Disadvantage on any D20 test using Strength or Dexterity and an
   inability to cast spells."* **That text is not in `docs/srd/source/`**, and the
   codebase already refuses to print it, deliberately:
@@ -137,7 +158,8 @@ winning base without re-running eligibility reports **18**.
   (13 + DEX) does not apply while you are wearing armour."* A number that falls
   when a person picks something up is indistinguishable from a bug otherwise.
 - **A tie that was broken**, naming winner, loser and rule (D73).
-- **The non-proficiency penalty** (D73).
+- **The non-proficiency fact**, via the **existing** `armor_not_trained`
+  warning — not a new sentence, and not the SRD penalty text (§3).
 - **`no_unarmored_defense` is DELETED** — the disclosure's reason expires.
 - **`strength_requirement_unmet` MUST SURVIVE the rewrite**, named here because
   the function carrying it is being replaced wholesale and this unit introduces
@@ -197,8 +219,11 @@ rule in two places is F22, which has already bitten this project.
 - **AC-WARN-STRICT** — mutate the warning to fire on exclusion. Must fail: a tie
   with a flipped winner **does not warn** while the sheet **still explains** the
   exclusion. One mutation, both halves asserted.
-- **AC-PROFICIENCY** — mutate non-proficient armour to withhold its AC. Must
-  fail: the AC applies **and** the penalty is stated.
+- **AC-PROFICIENCY** — **retargeted; revision 2's version asserted the blocked
+  text as a MUST.** Mutate non-proficient armour to withhold its AC. Must fail:
+  **the AC still applies, and the existing `armor_not_trained` warning is
+  present.** It asserts a warning that ships today, not a sentence nobody has
+  agreed to write.
 - **AC-ATTUNEMENT** — mutate the attunement gate away. Must fail: an unattuned
   item requiring attunement grants nothing.
 - **AC-ONE-VOCABULARY** — mutate an item to carry its own `ac_change` column.
@@ -228,18 +253,35 @@ formulas, a shield and a flat bonus at once.
 **Licensing:** all ours, so committing is fine under D59 — the test is
 authorization and we are the author.
 
-## 10. Dispatches
+## 10. Dispatches — FOUR, not two
 
-- **AC-A — the vocabulary and the resolver.** The new effect kinds and their
-  migration, `character_items`, the resolver with eligibility-then-value, the
-  retirement of `armor_class_adjustment`, proficiency and attunement gates, and
-  every persistence contract: row contracts, snapshot, backup, and the share wire
-  **version mint** (D41 ritual — read the current version, do not assume it).
-- **AC-B — the surfaces.** The sheet's exclusion reasons, tie disclosure and
-  proficiency penalty; the strict-reduction warning; deletion of
-  `no_unarmored_defense`; and the fixtures.
+Revision 2 called this AC-A and AC-B. A reviewer counted the blast radius and it
+is not two dispatches: `armor_class_adjustment` alone is referenced in **21
+files** including a live command, the wire codec, row contracts and the sheet
+view, which is comparable to the whole D69 unit. Today's own precedent is
+against bundling — `d924bf2` needed `219e56f` four hours later, and `7be2243`
+needed `ec2be58` for its controls.
 
-AC-A owns the vocabulary and every contract; AC-B consumes them.
+- **AC-1 — the vocabulary and persistence.** Five new effect kinds; the five new
+  payload columns (`base`, `ability_1`, `ability_2`, `allows_shield`,
+  `weapon_scope`); **widening the existing `amount` and `ability` kind-scoped
+  CHECKs**, which are reused columns, not new ones; `character_items`; row
+  contracts, snapshot, backup, and the share wire **version mint** (D41 — read
+  the current version, do not assume it).
+- **AC-2 — THE SUBCLASS EFFECT PATH, which revision 2 did not know it needed.**
+  See §0's finding: subclasses cannot write an effect row at all. This dispatch
+  builds the template-and-copy mechanism, and **also widens
+  `species_template_trait_effects`' own separate closed CHECK** so the Armadillo
+  species' formula can be seeded content rather than a synthetic row. **Two
+  tables are in play and revision 2 said one.**
+- **AC-3 — the resolver and the gates.** Eligibility-then-value, the tie-break,
+  proficiency and attunement, and **carrying `strength_requirement_unmet`
+  forward**.
+- **AC-4 — retiring `armor_class_adjustment`**, all 21 references.
+- **AC-B — the surfaces**: exclusion reasons, tie disclosure, the
+  strict-reduction warning, deletion of `no_unarmored_defense`, and the fixtures.
+
+Controls get their own dispatch after AC-3, per `ec2be58`'s precedent.
 
 ## 11. NOT in this unit
 
