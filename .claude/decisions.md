@@ -1,5 +1,50 @@
 # Binding scope decisions
 
+## D74 — OWNER: a broken condition EXCLUDES a formula outright; wearing armour is the player's right (2026-07-29)
+
+**The ruling.** *"The resolver for unarmed defence will need to be able to short
+circuit if one of the conditions are broken (like equipping armor) even if the ac
+is the same or lower with the armor. Sometimes players want to wear armor
+regardless."*
+
+**This AMENDS D73 §1, which was wrong as written.** D73 said "highest total
+wins". That is only true **among formulas whose conditions hold**. An
+`armor_class_formula` is not a number that competes — it is a number **plus a
+precondition**, and a broken precondition removes it from the competition
+entirely.
+
+**1. ELIGIBILITY IS DECIDED FIRST, VALUE SECOND.** The resolver:
+
+1. Evaluates each formula's **conditions**. Wearing armour breaks *"while you
+   aren't wearing armour"*. Carrying a shield breaks a formula whose
+   `allows_shield` is false (Monk forbids, Barbarian permits).
+2. **Discards every ineligible formula outright** — not as a low score, not as a
+   tie-break loser. It is not in the running.
+3. Applies D73's highest-wins and its tie-break **only to what remains**.
+
+**2. A LOWER ARMOR CLASS IS A LEGITIMATE OUTCOME.** A turtle-species character in
+light armour may end up worse off than unarmoured. **That is the player's
+choice and the app honours it.** It does not silently keep the higher unarmoured
+number, and it does not quietly ignore the armour to protect the total. Doing
+either would make the sheet disagree with what the person is holding, which is
+D33's failure with better manners.
+
+**3. THE SHEET SAYS WHY THE FORMULA IS GONE**, and this is the part a naive
+implementation drops. A person who equips leather and watches their Armor Class
+*fall* will think the app is broken unless it says: *"Turtle Shell (13 + DEX)
+does not apply while you are wearing armour."* Under D67 the reveal names the
+sources of a number; **a source that was excluded, and the condition that
+excluded it, is part of that answer.**
+
+**4. WARN, NEVER BLOCK, NEVER AUTO-SWAP (D49).** If the excluded formula would
+have been higher, say so. Do not refuse the armour, do not un-equip it, do not
+offer to "fix" it by removing what the person deliberately put on.
+
+**5. The fixture this demands**, added to D72's list: **a turtle-species
+character wearing light armour whose total is LOWER than their unarmoured
+formula.** A resolver that ranks by value before checking conditions passes every
+higher-is-better test and fails exactly this one.
+
 ## D73 — OWNER: an AC resolver with a stated tie-break, and proficiency counts (2026-07-29)
 
 **The rulings.** *"Also have a resolver to choose the highest ac, and some simple
