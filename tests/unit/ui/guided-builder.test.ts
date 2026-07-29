@@ -9,10 +9,12 @@ import {
   GUIDED_PANEL,
   GUIDED_PANEL_ATTRIBUTE,
   GUIDED_RPC,
+  LINEAGE_SPELL_SPECIES_CONTENT_KEYS,
   guidedBuildPath,
   matchesGuidedBuildRoute,
   type GuidedBuildStateResult,
   type GuidedClassOption,
+  type GuidedOriginOption,
 } from '../../../src/builder/contracts';
 import type { CharacterRow } from '../../../src/domain/models';
 import { RpcError } from '../../../src/rpc/protocol';
@@ -26,6 +28,7 @@ import {
   renderGuidedBuildState,
 } from '../../../src/ui/screens/guided-builder/guided-builder';
 import { screen } from '../../../src/ui/screens/guided-builder/screen';
+import { createSpeciesStep } from '../../../src/ui/screens/guided-builder/species-step';
 import { screen as plannerScreen } from '../../../src/ui/screens/planner/screen';
 import { rpcRegistry } from '../../../src/worker/registry';
 import {
@@ -292,6 +295,118 @@ describe('guided-builder panels', () => {
       ),
     ).toHaveLength(0);
     expectNoPlannerLinks(view);
+  });
+});
+
+function originOption(
+  contentKey: string,
+  name: string,
+  grantsLineageSpells: boolean,
+): GuidedOriginOption {
+  return {
+    content_key: contentKey,
+    name,
+    grants_lineage_spells: grantsLineageSpells,
+  };
+}
+
+function lineageKeyEndingIn(suffix: string): string {
+  const key = [...LINEAGE_SPELL_SPECIES_CONTENT_KEYS].find((candidate) =>
+    candidate.endsWith(suffix),
+  );
+  if (key === undefined) {
+    throw new Error(`The seam lineage set has no key ending in ${suffix}.`);
+  }
+  return key;
+}
+
+describe('guided species step', () => {
+  it('discloses that abilities were skipped and no scores were chosen', () => {
+    const step = createSpeciesStep({
+      characterId: 1,
+      options: [],
+      applyOrigin: () => Promise.reject(new Error('not submitted')),
+      navigate: () => undefined,
+    });
+
+    expect(elementText(step.element)).toContain(
+      'The Ability scores step is not built yet, so the guided builder has ' +
+        'skipped it: no scores have been asked for or chosen.',
+    );
+    step.cleanup();
+  });
+
+  it('names every unmade Elf choice required by the plan', () => {
+    const elfKey = lineageKeyEndingIn(':species:elf');
+    const step = createSpeciesStep({
+      characterId: 1,
+      options: [originOption(elfKey, 'Elf', true)],
+      applyOrigin: () => Promise.reject(new Error('not submitted')),
+      navigate: () => undefined,
+    });
+    const text = elementText(step.element);
+
+    expect(text).toContain(
+      'Required choices this step cannot make yet — applying this species records none of them:',
+    );
+    expect(text).toContain('an Elven Lineage (Drow, High Elf, or Wood Elf)');
+    expect(text).toContain(
+      'a spellcasting ability for its spells (Intelligence, Wisdom, or Charisma)',
+    );
+    expect(text).toContain(
+      'a Keen Senses skill (Insight, Perception, or Survival)',
+    );
+    step.cleanup();
+  });
+
+  it('renders the lineage-spell disclosure for exactly options classified by the seam key set', () => {
+    const options = [
+      ...[...LINEAGE_SPELL_SPECIES_CONTENT_KEYS].map((contentKey, index) =>
+        originOption(contentKey, `Lineage species ${index + 1}`, true),
+      ),
+      originOption('test:species:no-lineage-spells', 'No lineage spells', false),
+    ];
+    const step = createSpeciesStep({
+      characterId: 1,
+      options,
+      applyOrigin: () => Promise.reject(new Error('not submitted')),
+      navigate: () => undefined,
+    });
+
+    expect(
+      elementsByTagName(step.element, 'p').filter(
+        (element) => element.className === 'guided-lineage-disclosure',
+      ),
+    ).toHaveLength(LINEAGE_SPELL_SPECIES_CONTENT_KEYS.size);
+    expect(elementText(step.element)).toContain(
+      'Lineage spells are not granted yet: this species has them by the rules',
+    );
+    step.cleanup();
+  });
+
+  it('renders the seam species panel without any link into the planner', () => {
+    const step = createSpeciesStep({
+      characterId: 1,
+      options: [
+        originOption(
+          lineageKeyEndingIn(':species:elf'),
+          'Elf',
+          true,
+        ),
+      ],
+      applyOrigin: () => Promise.reject(new Error('not submitted')),
+      navigate: () => undefined,
+    });
+
+    expect(
+      elementsWithAttribute(
+        step.element,
+        GUIDED_PANEL_ATTRIBUTE,
+        GUIDED_PANEL.speciesStep,
+      ),
+    ).toHaveLength(1);
+    expectNoPlannerLinks(step.element);
+    step.cleanup();
   });
 });
 

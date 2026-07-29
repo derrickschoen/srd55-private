@@ -4,6 +4,7 @@ export interface BrowserGuidedSeam {
   readonly newRoute: string;
   readonly panelAttribute: string;
   readonly classChooserPanel: string;
+  readonly speciesStepPanel: string;
   readonly buildPath: string | null;
 }
 
@@ -26,11 +27,13 @@ export async function readGuidedSeam(
       const newRoute = exports['GUIDED_NEW_ROUTE'];
       const panelAttribute = exports['GUIDED_PANEL_ATTRIBUTE'];
       const classChooserPanel = panelRecord['classChooser'];
+      const speciesStepPanel = panelRecord['speciesStep'];
       const pathWriter = exports['guidedBuildPath'];
       if (
         typeof newRoute !== 'string' ||
         typeof panelAttribute !== 'string' ||
         typeof classChooserPanel !== 'string' ||
+        typeof speciesStepPanel !== 'string' ||
         typeof pathWriter !== 'function'
       ) {
         throw new Error('The guided seam exports have unexpected shapes.');
@@ -46,6 +49,7 @@ export async function readGuidedSeam(
         newRoute,
         panelAttribute,
         classChooserPanel,
+        speciesStepPanel,
         buildPath,
       };
     },
