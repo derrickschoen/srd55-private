@@ -6,6 +6,7 @@ import {
 import { createQueriesClient } from '../../../queries/client';
 import type { Route } from '../../router';
 import { defineScreen, type ScreenContext } from '../../screen';
+import { createBackgroundStep } from './background-step';
 import { createClassChooser } from './class-chooser';
 import { renderGuidedBuildState } from './guided-builder';
 import { createSpeciesStep } from './species-step';
@@ -55,13 +56,23 @@ async function render(context: ScreenContext): Promise<() => void> {
     const client = createQueriesClient(context.rpc);
     const state = await client.buildState(characterId);
     if (state.kind === 'ready' && state.current_step === 'species') {
-      // The one live post-class step (A4). Every other derived step still
-      // renders one of the pinned pure panels.
+      // The live post-class steps (A4 species, A5 background). Every other
+      // derived step still renders one of the pinned pure panels.
       const step = createSpeciesStep({
         characterId,
         options: await client.originOptions('species'),
         applyOrigin: (contentKey) =>
           client.applyOrigin(characterId, 'species', contentKey),
+        navigate: (path) => context.router.navigate(path),
+      });
+      view = step.element;
+      cleanups.push(step.cleanup);
+    } else if (state.kind === 'ready' && state.current_step === 'background') {
+      const step = createBackgroundStep({
+        characterId,
+        options: await client.originOptions('background'),
+        applyOrigin: (contentKey) =>
+          client.applyOrigin(characterId, 'background', contentKey),
         navigate: (path) => context.router.navigate(path),
       });
       view = step.element;

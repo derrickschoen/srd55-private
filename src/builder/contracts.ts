@@ -323,6 +323,8 @@ export const GUIDED_PANEL = Object.freeze({
   notFound: 'not-found',
   /** The species step. Ratified from A4, as A1's and A3's panels were. */
   speciesStep: 'species-step',
+  /** The background step. Ratified from A5, same pattern. */
+  backgroundStep: 'background-step',
 } as const);
 
 /** The attribute the panels above are selected by: `data-panel="…"`. */
