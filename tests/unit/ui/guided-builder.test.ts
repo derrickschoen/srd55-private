@@ -20,6 +20,9 @@ import type { CharacterRow } from '../../../src/domain/models';
 import { RpcError } from '../../../src/rpc/protocol';
 import { parseRoute } from '../../../src/ui/router';
 import {
+  createBackgroundStep,
+} from '../../../src/ui/screens/guided-builder/background-step';
+import {
   createClassChooser,
   guidedBuildPath as chooserGuidedBuildPath,
   hitDieLabel,
@@ -403,6 +406,82 @@ describe('guided species step', () => {
         step.element,
         GUIDED_PANEL_ATTRIBUTE,
         GUIDED_PANEL.speciesStep,
+      ),
+    ).toHaveLength(1);
+    expectNoPlannerLinks(step.element);
+    step.cleanup();
+  });
+});
+
+describe('guided background step', () => {
+  it('A5-HONESTY discloses all five benefits that recording a background does not apply', () => {
+    const step = createBackgroundStep({
+      characterId: 1,
+      options: [
+        originOption(
+          'test:background:honesty',
+          'Honesty Background',
+          false,
+        ),
+      ],
+      applyOrigin: () => Promise.reject(new Error('not submitted')),
+      navigate: () => undefined,
+    });
+    const text = elementText(step.element);
+    const disclosure = elementsByTagName(step.element, 'div').find(
+      (element) => element.className === 'guided-background-unapplied',
+    );
+    if (disclosure === undefined) {
+      throw new Error('The background step rendered no unapplied disclosure.');
+    }
+    const disclosureList = disclosure.children.find(
+      (element) => element.tagName === 'ul',
+    );
+    if (disclosureList === undefined) {
+      throw new Error('The unapplied disclosure rendered no list.');
+    }
+    const unapplied = disclosureList.children.map((element) =>
+      elementText(element as unknown as Node),
+    );
+
+    expect(text).toContain(
+      'Choosing a background records its printed text on the character and ' +
+        'marks this step complete. That is the only visible change: nothing ' +
+        'on the sheet reads the background yet.',
+    );
+    expect(unapplied).toEqual([
+      'the 2024 ability score increases the background carries — and the ' +
+        'Ability scores step before this one is not built either, so no ' +
+        'scores have been asked for or chosen anywhere',
+      'the Origin feat',
+      'the two skill proficiencies',
+      'the tool proficiency',
+      'the starting equipment package — equipment is the package only, with ' +
+        'no gold alternative, and choosing and applying the package is a ' +
+        'later step that is not built yet',
+    ]);
+    step.cleanup();
+  });
+
+  it('renders the seam background panel without any link into the planner', () => {
+    const step = createBackgroundStep({
+      characterId: 1,
+      options: [
+        originOption(
+          'test:background:no-planner',
+          'No Planner Background',
+          false,
+        ),
+      ],
+      applyOrigin: () => Promise.reject(new Error('not submitted')),
+      navigate: () => undefined,
+    });
+
+    expect(
+      elementsWithAttribute(
+        step.element,
+        GUIDED_PANEL_ATTRIBUTE,
+        GUIDED_PANEL.backgroundStep,
       ),
     ).toHaveLength(1);
     expectNoPlannerLinks(step.element);

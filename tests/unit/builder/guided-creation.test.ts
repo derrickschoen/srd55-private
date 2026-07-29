@@ -5,7 +5,11 @@ import { deriveBuildStep } from '../../../src/builder/guided-creation';
 describe('deriveBuildStep', () => {
   it('selects the first seam-ordered step when no class is present', () => {
     expect(
-      deriveBuildStep({ classChosen: false, speciesChosen: false }),
+      deriveBuildStep({
+        classChosen: false,
+        speciesChosen: false,
+        backgroundChosen: false,
+      }),
     ).toBe(
       GUIDED_LEVEL_ONE_STEP_ORDER[0],
     );
@@ -13,7 +17,11 @@ describe('deriveBuildStep', () => {
 
   it('skips the undetectable abilities step and selects species when only a class is present', () => {
     expect(
-      deriveBuildStep({ classChosen: true, speciesChosen: false }),
+      deriveBuildStep({
+        classChosen: true,
+        speciesChosen: false,
+        backgroundChosen: false,
+      }),
     ).toBe(
       GUIDED_LEVEL_ONE_STEP_ORDER[2],
     );
@@ -21,9 +29,25 @@ describe('deriveBuildStep', () => {
 
   it('selects background after both class and species are present', () => {
     expect(
-      deriveBuildStep({ classChosen: true, speciesChosen: true }),
+      deriveBuildStep({
+        classChosen: true,
+        speciesChosen: true,
+        backgroundChosen: false,
+      }),
     ).toBe(
       GUIDED_LEVEL_ONE_STEP_ORDER[3],
+    );
+  });
+
+  it('selects skills after class, species, and background are present', () => {
+    expect(
+      deriveBuildStep({
+        classChosen: true,
+        speciesChosen: true,
+        backgroundChosen: true,
+      }),
+    ).toBe(
+      GUIDED_LEVEL_ONE_STEP_ORDER[4],
     );
   });
 });

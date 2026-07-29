@@ -94,6 +94,30 @@ describe('guidedBuildState', () => {
       current_step: seamStep(3),
     } satisfies GuidedBuildStateResult);
   });
+
+  it('selects skills for a persisted character with class, species, and background', async () => {
+    const db = await realDatabase();
+    seedClassProgressions(db);
+    const characterId = createCharacter(db, 'Classed Species Background');
+    addClassLevel(db, characterId, 'Wizard', 1);
+    db.exec(
+      `INSERT INTO character_species
+         (character_id, name, creature_type, size, base_speed_feet)
+       VALUES (?, 'Test Species', 'Humanoid', 'Medium', 30)`,
+      [characterId],
+    );
+    db.exec(
+      `INSERT INTO character_background (character_id, name)
+       VALUES (?, 'Test Background')`,
+      [characterId],
+    );
+
+    expect(guidedBuildState(db, characterId)).toEqual({
+      kind: 'ready',
+      character_id: characterId,
+      current_step: seamStep(4),
+    } satisfies GuidedBuildStateResult);
+  });
 });
 
 describe('guided build-state RPC registry contract', () => {
