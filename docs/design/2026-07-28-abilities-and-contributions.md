@@ -1,7 +1,7 @@
 # Ability scores: the step that sets them, and the layer that adds to them
 
 Plan author: Claude Opus (supervisor). Track A, toward D54's "usable" bar.
-Status: **REVISION 3** — round 2 closed. This is the final round.
+Status: **REVISION 4** — round 3 closed, the 3-round cap reached. DISPATCHABLE.
 
 Law: `.claude/decisions.md` D1..D64. Binding here: **D33** (an unknown says
 unknown), **D35** (anything changing a sheet number earns structure), **D49**
@@ -222,7 +222,7 @@ to know its source, so the CHECK is what turns a convention into an invariant.
 **THE RESOLVER'S ARITHMETIC IS PINNED, and revision 2's omission of it is what
 made this plan briefly worse than revision 1.**
 
-Contributions apply **in `(sort_order, id)` order** to a running total starting at
+Contributions apply **in `id` order — ACQUISITION order** to a running total starting at
 base. Each positive contribution adds
 `max(0, min(running + amount, maximum) − running)` — so it applies **partially**
 when it would cross its own cap (base 19 with `+2/max20` contributes 1) and
@@ -230,16 +230,39 @@ when it would cross its own cap (base 19 with `+2/max20` contributes 1) and
 contributions floor the running total at **1**, because `AbilityScore` throws
 below it and a throw is not a number a person can read.
 
-This is order-dependent by construction, and that is deliberate: the alternative
-is a rule that silently discards part of a contribution with no stated reason.
-`(sort_order, id)` is stable and total even though `sort_order` is the user's
-editable display order and not an acquisition chronology — the tie-break on `id`
-is what makes it total. **The unit test fixture is base 19, `+2/max20`,
-`+1/max30`, asserted in BOTH orders**, because a rule that only works in one is
-not a rule.
+**Round 3's reviewers disagreed here and the arbitration produced a third
+answer, which is the one pinned.** One called the order-dependence unacceptable
+because a user reordering their effects would change their Strength; the other
+observed that every output is SRD-lawful for *some* acquisition order and asked
+only that the expected numbers be stated. Both are right about what they saw, and
+neither fix is sufficient alone.
 
-**The payload carries a maximum, not just an amount.** Background increases stop
-at 20 and feats differ; `AbilityScore` **throws** outside 1–30
+Revision 3 ordered by `(sort_order, id)`, and `sort_order` is documented in the
+schema as **the user's own editable display order** — explicitly not unique, so a
+two-step swap works. Letting it govern arithmetic means a **cosmetic reorder
+changes a character's ability score**. That is the real defect, and stating the
+expected numbers would have preserved it.
+
+**Pinned: order by `id` alone.** `character_effects.id` is
+`primaryKey({ autoIncrement: true })`, so it is monotonic in insertion order —
+which *is* acquisition order — and the user cannot reorder it. The rule stays
+deterministic and total, and it stops being something a person can change by
+dragging a list.
+
+**The fixture: base 19, `+2/max20` acquired first, `+1/max30` acquired second →
+21.** Acquired in the other order → **20**. Both are asserted, and the plan states
+both numbers so nobody reads "asserted in both orders" as a claim of
+order-*independence* and "repairs" the rule to make them agree. The residual
+dependence is on **acquisition order**, which is a real fact about the character,
+not a display preference.
+
+**The payload carries a maximum, not just an amount, and the maximum is itself
+bounded to 1–30** at the command validator, the kind CHECK and the share
+validator. Revision 3 floored negatives at 1 "because a throw is not a number a
+person can read" and then left the top of the range open — a stored `max 32` on a
+high base drives the total past 30 and throws, which is the same crash by the
+same argument. Background increases stop at 20 and feats differ; `AbilityScore`
+**throws** outside 1–30
 (`src/rules/ability-score.ts:4-13`). A `15 + 2` happy path passes while a
 high-score character over-applies or becomes unreadable. Revision 1's
 `{ability, amount}` could not express that.
@@ -250,8 +273,10 @@ CHECK on `species_template_trait_effects` widens too (plus a decision on whether
 the catalog table carries the payload at all); the **exhaustive switch** in
 `src/rules/species-effects.ts`; the row contract; the **share validator**, which
 enforces exact keys and per-kind payload pairings, so export would emit keys
-import refuses until both change; the wire-version decision; and the backup
-portable row shape with regenerated column facts.
+import refuses until both change; the wire-version decision (now taken — §3.8); the backup
+portable row shape with regenerated column facts; and **`character_effects` in
+`ADDED_NULLABLE_ROW_COLUMNS`**, without which every existing save point's effect
+rows fail the exact-key row contract in the candidate audit.
 
 **The required-source CHECK collides with the share wire, and B3 is the
 producer.** The wire documents that an effect whose owner is unreachable "still
@@ -305,8 +330,11 @@ front rather than discovering it again:
 
 - `AbilityAllocationMethod = 'standard_array' | 'point_buy' | 'manual'`
 - `GuidedAbilityScores` — six named ability fields
-- `GuidedAllocateAbilitiesParams { character_id, method, scores }` plus its
-  exact-keys validator
+- `GuidedAllocateAbilitiesParams { character_id, method, scores, operation_uuid,
+  expected_revision }` plus its exact-keys validator. **The last two are not
+  optional** — every executor request requires them, and revision 3's prose said
+  so while this list still omitted them, which is exactly the contradiction two
+  parallel agents resolve differently
 - `AbilityWarning` as a **discriminated union** (`'method' | 'weak_scores'`) —
   **warnings as DATA is what makes D49's warn-versus-block distinction
   structural** rather than a matter of styling
@@ -357,6 +385,26 @@ selection writing sourced contributions (D61); initiative sources modelled (D64)
   provenance; skills have no source column at all today.
 - **Feat ASI application** — the kind this plan adds is what makes it possible,
   but wiring feats is its own unit.
+
+## 3.8 Wire-version ownership and landing order
+
+**Both reviewers named this as the one seam still open, and one called it the
+most likely dispatch failure.** B1 changes the share wire (the allocation
+signal). B2 changes it again (effect payload, required `sourceRef`,
+reference-minting backgrounds). D41 makes every schema change mint a frozen
+version plus a mandatory migration entry, so **two parallel agents would each mint
+a v3** — two frozen schema files, two migration entries, a hard collision rather
+than a merge conflict.
+
+**Pinned: B1 lands FIRST and mints share v3 (the allocation signal). B2 mints v4
+(effect payload, required `sourceRef`, reference-minting backgrounds), rebased on
+B1.** The units are sequential, not parallel — §1 already argued they are coupled;
+this is where that has consequences.
+
+**Historical documents are untouched, and D41 versus D60 resolves cleanly:** the
+`ability_increase` kind does not exist in v1 or v2, so no historical document can
+carry one. D41 governs the mechanics — freeze, bump, forced migration. D60
+explains why nothing older constrains the new shape. Neither overrides the other.
 
 ## 4. Dispatches
 
@@ -442,6 +490,12 @@ miss.
 
 ## 7. Controls
 
+**Thirteen named controls, not the fifteen revision 3 claimed** — a reviewer
+counted and I had not. `B2-BASE` also cannot fire during B2, because B2 has no
+production contribution writer; its first real writer is B3, so the control lands
+with B3.
+
+
 - **B1-ALLOC** — make the completion predicate infer allocation from the scores
   rather than the signal. The all-10s test must fail. This is B-A2 made real.
 - **B1-BLOCK** — make the weakness warning prevent submission. The
@@ -486,9 +540,11 @@ miss.
   field. The wire has a hand-written nine-field tuple with fixed payload lists,
   so a new payload is silently lost without this; revision 2 protected two of the
   three fields and a dropped `maximum` would resolve to a different number.
-- **B2-PROVENANCE** *(new)* — export a background-owned `ability_increase` and
-  re-import it. It must NOT be refused by our own importer and must NOT arrive
-  without its source. This is the collision between the required-source CHECK and
+- **B2-PROVENANCE** — **mutation: revert the share document's background entry to
+  text-only** (or drop the required-`sourceRef` validation). Export a
+  background-owned `ability_increase` and re-import it; it must NOT be refused by
+  our own importer and must NOT arrive without its source. Revision 3 wrote this
+  as a positive round-trip with no named mutation, which every other control has. This is the collision between the required-source CHECK and
   the wire's provenance-optional allowance, made executable.
 - **B1-SIGNAL** *(new)* — omit the allocation signal from the share wire. An
   all-10s character exported and re-imported must NOT come back looking
