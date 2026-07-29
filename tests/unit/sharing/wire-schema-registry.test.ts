@@ -112,6 +112,46 @@ const VERSION_FIXTURES = {
       placeholders: [],
     },
   },
+  4: {
+    // Independently compressed from a hand-authored v4 positional tuple. The
+    // effect's last three positions are the B2 payload, and sourceRef 0 names
+    // the background entry in the ordinary source reference space.
+    fragment:
+      'H4sIAAAAAAAAA5WPwQrCMAyGX2XknME2dnFXD_oEXkqRrC1dsWaStgffXnATh6AghD_hJ_8X' +
+      'osCyra8l5mAipVSnm4sx1WYiIZOd1GkicYA9Kjj11X7mLGEsOcxcHZ3MgO0OucT4XaBruh6' +
+      '2xpW4UASNSqNSDcJI5uJlLmxhWR_ezuALiV3z7bPpJfmqj3tqM8JhE_5H9IpVCmgMMeT7Ob' +
+      'ARR8kBLtQqCwUO7H_gm_XjlMWxzxNgh12zwvUDG1MmbH4BAAA',
+    expected: {
+      format: CHARACTER_SHARE_FORMAT,
+      version: CHARACTER_SHARE_VERSION,
+      character: {
+        name: 'V4 Contribution Hero',
+        strength: 19,
+        rules_edition_preference: '2024',
+        ability_allocation_method: 'manual',
+      },
+      classes: [],
+      sources: [{
+        id: 0,
+        type: 'background',
+        key: '2024:background:guard',
+        acquired: 1,
+      }],
+      selections: [],
+      spellbook: [],
+      preferences: [],
+      overrides: [],
+      background: { name: 'Guard' },
+      effects: [{
+        kind: 'ability_increase',
+        label: 'Guard training',
+        sourceRef: 0,
+        ability: 'strength',
+        amount: 2,
+        maximum: 20,
+      }],
+    },
+  },
 } satisfies Record<SupportedShareVersion, FrozenFixture>;
 
 const HISTORICAL_SCHEMA_MODULE_SHA256 = {

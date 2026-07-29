@@ -115,6 +115,14 @@ describe('deterministic read-only build report', () => {
         wisdom: 14,
         charisma: 18,
       },
+      abilities_base: {
+        strength: 10,
+        dexterity: 10,
+        constitution: 10,
+        intelligence: 16,
+        wisdom: 14,
+        charisma: 18,
+      },
     });
     expect(report.caster).toEqual({
       caster_level: 3,

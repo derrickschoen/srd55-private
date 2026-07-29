@@ -306,6 +306,48 @@ describe('persisted spell access routes', () => {
     ]);
   });
 
+  it('B2-DC resolves casting contributions inside the spell-access calculation', () => {
+    const characterId = character('Contributed casting', {
+      intelligence: 15,
+    });
+    const wizardId = classDefinition('Contribution Wizard', 'intelligence');
+    classLevel(characterId, wizardId, 3);
+    const wizardSourceId = source(
+      characterId,
+      'class',
+      wizardId,
+      'Contribution Wizard 3',
+    );
+    const versionId = spell(
+      '2024:contributed-casting',
+      'Contributed Casting',
+    );
+    slot(
+      characterId,
+      wizardSourceId,
+      versionId,
+      'contributed-casting:1',
+    );
+    db.exec(
+      `INSERT INTO character_effects (
+         character_id, sort_order, effect_kind, ability, amount, maximum,
+         source_instance_id, label
+       ) VALUES (
+         ?, 1, 'ability_increase', 'intelligence', 2, 20, ?,
+         'Arcane training'
+       )`,
+      [characterId, wizardSourceId],
+    );
+
+    const [route] = builder.buildForCharacter(characterId);
+
+    // Base 15 is +2; the contribution resolves 17 to +3. Character level 3
+    // supplies proficiency +2, so spell access must expose +5 and DC 13.
+    expect(route?.ability_modifier).toBe(3);
+    expect(route?.attack_bonus).toBe(5);
+    expect(route?.save_dc).toBe(13);
+  });
+
   it('builds every slot casting mode with fixed/selected provenance and source ability math', () => {
     const characterId = character('Casting Math', {
       intelligence: 18,

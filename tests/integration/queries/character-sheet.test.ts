@@ -149,6 +149,45 @@ describe('the derived character sheet', () => {
     expect(builder.build(characterId).hit_points.value).toBe(54 + 3 + 5);
   });
 
+  it('B2-HP sends a Constitution contribution through CharacterSheetBuilder hit-point math', () => {
+    const featId = db.exec(
+      `INSERT INTO feat_definitions (
+         content_key, name, rules_edition, repeatable, grant_rules
+       ) VALUES (
+         'test:feat:hardy', 'Hardy', '2024', 0, '[]'
+       )`,
+    ).lastInsertId;
+    const sourceId = db.exec(
+      `INSERT INTO character_source_instances (
+         character_id, instance_uuid, source_type, source_definition_id,
+         display_name, config, acquired_at_character_level, state
+       ) VALUES (
+         ?, 'test-source:hardy', 'feat', ?, 'Hardy', '{}', 8, 'active'
+       )`,
+      [characterId, featId],
+    ).lastInsertId;
+    db.exec(
+      `INSERT INTO character_effects (
+         character_id, sort_order, effect_kind, ability, amount, maximum,
+         source_instance_id, label
+       ) VALUES (
+         ?, 1, 'ability_increase', 'constitution', 2, 20, ?, 'Hardy'
+       )`,
+      [characterId, sourceId],
+    );
+
+    const sheet = new CharacterSheetBuilder(db).build(characterId);
+
+    // Base Constitution 13 has modifier +1; the sourced +2 makes 15 and +2.
+    // Eight class levels therefore gain exactly 8 HP: 54 becomes 62.
+    expect(
+      sheet.ability_scores.find(
+        (ability) => ability.ability === 'constitution',
+      )?.score,
+    ).toBe(15);
+    expect(sheet.hit_points.value).toBe(62);
+  });
+
   it('ignores a roll filed under a class the character does not have, and says so', () => {
     db.exec(
       `INSERT INTO character_hit_point_rolls

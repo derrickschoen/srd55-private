@@ -105,6 +105,14 @@ function workspace(): Workspace {
           wisdom: 14,
           charisma: 10,
         },
+        abilities_base: {
+          strength: 8,
+          dexterity: 12,
+          constitution: 13,
+          intelligence: 17,
+          wisdom: 14,
+          charisma: 10,
+        },
       },
       caster: {
         caster_level: 3,

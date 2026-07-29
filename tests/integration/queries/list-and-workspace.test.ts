@@ -204,4 +204,39 @@ describe('character list and workspace query builders', () => {
       before,
     );
   });
+
+  it('B2-DC resolves contributions again at the independent workspace slot-math site', () => {
+    db.exec(
+      'UPDATE characters SET wisdom = 15 WHERE id = ?',
+      [fixture.characterId],
+    );
+    db.exec(
+      `INSERT INTO character_effects (
+         character_id, sort_order, effect_kind, ability, amount, maximum,
+         source_instance_id, label
+       ) VALUES (
+         ?, 1, 'ability_increase', 'wisdom', 2, 20, ?, 'Wise training'
+       )`,
+      [fixture.characterId, fixture.featSourceId],
+    );
+    db.exec(
+      `INSERT INTO spell_version_save_abilities (
+         spell_version_id, save_ability
+       ) VALUES (?, 'dexterity')`,
+      [fixture.spellIds.invalidSpell],
+    );
+
+    const workspace = new CharacterWorkspaceBuilder(db).build(
+      fixture.characterId,
+    );
+    const slot = workspace.slots.find(
+      (candidate) => candidate.id === fixture.invalidSlotIds[1],
+    );
+
+    // Wisdom 15 (+2) becomes 17 (+3), and total level 8 supplies proficiency
+    // +3. The workspace's own mechanic lookup must therefore yield +6/DC 14.
+    expect(slot?.ability).toBe('wisdom');
+    expect(slot?.attack_bonus).toBe(6);
+    expect(slot?.save_dc).toBe(14);
+  });
 });
