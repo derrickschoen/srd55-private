@@ -1,8 +1,7 @@
 # Ability scores: the step that sets them, and the layer that adds to them
 
 Plan author: Claude Opus (supervisor). Track A, toward D54's "usable" bar.
-Status: **REVISION 2** — round 1 closed with two independent reviews, one
-NOT-READY and one READY-WITH-FIXES. Awaiting re-review.
+Status: **REVISION 3** — round 2 closed. This is the final round.
 
 Law: `.claude/decisions.md` D1..D64. Binding here: **D33** (an unknown says
 unknown), **D35** (anything changing a sheet number earns structure), **D49**
@@ -12,6 +11,63 @@ skills → equipment; Roll in Order is deleted), **D61** (background required; i
 Origin feat and ASI are player-chosen), **D63** (base plus contributions; every
 species modelled), **D64** (standard array default, everything else warns;
 initiative must be correct).
+
+---
+
+## 0a. What round 2 found — including that my marquee control was decorative
+
+**The worst finding is against the fix I was proudest of.** Revision 2 added
+`B2-EDIT` to catch revision 1's best defect: the planner editor baking a
+contribution into base. **The control cannot detect it**, and I verified that by
+walking it:
+
+`update_ability` writes **what was typed** straight into the base column
+(`src/commands/update-ability.ts:46-52`), regardless of what the input displayed.
+So with a mutant editor showing total 17 (base 15 + 2), a tester types 16, base
+becomes 16 and total 18. Revision 2's two assertions — base equals what was typed
+(16 = 16) and total exceeds it by the contributions (18 = 16 + 2) — **pass under
+the mutation, and pass under correct code too.** The only observable that
+separates them is the **pre-edit displayed value**. §7 now asserts it.
+
+A control that cannot fail proves nothing about the code and everything about the
+control. This is the third time that lesson has been paid for in this project and
+the first time it landed on a control I had written specifically to prevent a
+known defect.
+
+**Second: revision 2 made the plan LESS deterministic than revision 1, and both
+reviewers found it independently.** Revision 1 said the resolver sums
+contributions — rules-incomplete, but unambiguous. Round 1 told me a cap was
+missing, so I added `maximum` and **never pinned how caps resolve.** Verified:
+backgrounds cap at 20 (`docs/srd/source/backgrounds.txt:51`), ASI feats at 20
+(`feats.txt:67`), Epic Boons at 30. Base 19 with `+2/max20` and `+1/max30` yields
+22 by summation, 20 by clamping to the lowest maximum, 21 chronologically — and
+`character_effects.sort_order` is documented as the **user's editable display
+order, deliberately not unique**, so there is no acquisition chronology to order
+by. `AbilityScore` only throws outside 1–30, so a rules-wrong 20 or 22 ships
+silently. I fixed a completeness gap by introducing an ambiguity, which is worse.
+§3.3 now pins the arithmetic.
+
+**Third: §3.6's "pin which one" was unsatisfiable.** `report.character.abilities`
+feeds the editor input (needs **base**), the planner's casting attack/DC badges
+(`editors.ts:141-148`, needs **total**) and `AbilityScores.fromArray(...)` for
+slot math (`character-workspace-builder.ts:308`, needs **total**). One field,
+three consumers, two answers. The read model widens; §3.6 says how.
+
+**Fourth: "version-aware" named a mechanism that does not exist.** Snapshot
+versioning covers *tables*, not columns, and both validators enforce the current
+column list against every accepted version. Adding the column either breaks the
+seven deliberately-kept save-point versions or needs machinery I never named.
+
+**Also accepted:** the required-source CHECK collides with the share wire's
+documented "effect travels without provenance", and B3 is the producer — a
+background travels as text with no reference entry, so its owner is unreachable
+and import must either refuse its own export, drop the effect, or invent a
+source. And a reviewer did the initiative enumeration I had demanded rather than
+done: **three sources**, of which `flat` has **zero** bundled producers.
+
+**One good null result, from both reviewers independently:** no sibling of the
+editor defect exists. Class-level and weapon editors write back stored values;
+the AC editor displays a delta, not a total.
 
 ---
 
@@ -107,7 +163,14 @@ step.
 **Its five touch points, enumerated because adding a column to `characters` has
 already broken this project's backup codec once:**
 
-1. `CHARACTER_STATE_COLUMNS` for snapshot capture and restore, version-aware.
+1. `CHARACTER_STATE_COLUMNS` for snapshot capture and restore. **Revision 2 said
+   "version-aware", which named a mechanism that does not exist:** snapshot
+   versioning covers *tables*, not columns, and both validators enforce the
+   current column list against every accepted version — so adding a column breaks
+   the seven save-point versions this project deliberately keeps loadable.
+   **Pinned:** bump the snapshot version; both validators treat the column as
+   required at the new version and absent-decodes-as-NULL below it; restore
+   writes NULL when the snapshot predates it.
 2. Backup exact-key validation, **in both directions** — export emits it, import
    requires it.
 3. The share wire, encoder and importer. **This one has a live defect:** share
@@ -117,9 +180,18 @@ already broken this project's backup codec once:**
 4. Character row decoding and the row contract.
 5. Regenerated column facts.
 
-**Also pinned:** the allocation operation rides the command executor, so undo
-restores the signal together with the six scores. A direct write would let undo
-put the scores back and leave the character marked allocated.
+**Also pinned, and revision 2 stated this too loosely:** riding the executor is
+not by itself enough. `prepareInverse` is an exhaustive switch and root columns
+come back only through a **snapshot inverse** whose projection includes the
+column. So the allocation command's inverse is pinned as a snapshot inverse, and
+the column must join `CHARACTER_STATE_COLUMNS` for undo to restore it with the
+scores. **Also:** `GuidedAllocateAbilitiesParams` must carry `operation_uuid` and
+`expected_revision` — every executor request requires both, and revision 2's seam
+omitted them, which would have failed at the first dispatch.
+
+**The method records HOW allocation happened and is not touched by later
+`update_ability` edits.** Said explicitly so nobody wires the editor to flip it to
+`'manual'`.
 
 *Seam:* the column plus one completion predicate. *Cost to flip:* the five touch
 points above; the alternative is inference, which B-A2 disproves.
@@ -147,6 +219,25 @@ existing per-kind payload pattern, and reuse `source_instance_id` unchanged.
 available on `character_effects` but not enforced, and D63 requires a contribution
 to know its source, so the CHECK is what turns a convention into an invariant.
 
+**THE RESOLVER'S ARITHMETIC IS PINNED, and revision 2's omission of it is what
+made this plan briefly worse than revision 1.**
+
+Contributions apply **in `(sort_order, id)` order** to a running total starting at
+base. Each positive contribution adds
+`max(0, min(running + amount, maximum) − running)` — so it applies **partially**
+when it would cross its own cap (base 19 with `+2/max20` contributes 1) and
+**zero** when the running total already meets or exceeds its maximum. Negative
+contributions floor the running total at **1**, because `AbilityScore` throws
+below it and a throw is not a number a person can read.
+
+This is order-dependent by construction, and that is deliberate: the alternative
+is a rule that silently discards part of a contribution with no stated reason.
+`(sort_order, id)` is stable and total even though `sort_order` is the user's
+editable display order and not an acquisition chronology — the tie-break on `id`
+is what makes it total. **The unit test fixture is base 19, `+2/max20`,
+`+1/max30`, asserted in BOTH orders**, because a rule that only works in one is
+not a rule.
+
 **The payload carries a maximum, not just an amount.** Background increases stop
 at 20 and feats differ; `AbilityScore` **throws** outside 1–30
 (`src/rules/ability-score.ts:4-13`). A `15 + 2` happy path passes while a
@@ -160,7 +251,20 @@ the catalog table carries the payload at all); the **exhaustive switch** in
 `src/rules/species-effects.ts`; the row contract; the **share validator**, which
 enforces exact keys and per-kind payload pairings, so export would emit keys
 import refuses until both change; the wire-version decision; and the backup
-portable row shape with regenerated column facts. *Cost to flip:* a separate
+portable row shape with regenerated column facts.
+
+**The required-source CHECK collides with the share wire, and B3 is the
+producer.** The wire documents that an effect whose owner is unreachable "still
+travels, it simply arrives without its provenance" — `sourceRef` is dropped. A
+background currently travels as **text only, with no reference-minting entry**,
+so a background-owned `ability_increase` would export with its provenance
+stripped and then be **refused by our own importer** under the new CHECK. That is
+precisely the defect D60 says survives its own narrowing: an export its own
+importer refuses. **Pinned:** the share document's background entry becomes a
+reference-minting entry, mirroring species; `sourceRef` is **required** on the
+wire for `ability_increase` and the validator refuses its absence; import mints
+the owning instance before inserting the effect. The "travels without provenance"
+allowance does **not** extend to this kind. *Cost to flip:* a separate
 table would duplicate provenance that already works and need its own cascade —
 rejected.
 
@@ -186,8 +290,13 @@ which is precisely what D63 forbids — and `B2-BASE` stays green because it mut
 only the resolver.
 
 **Taken: the planner ability editor displays and edits BASE, with the resolved
-total shown beside it.** Control `B2-EDIT` mutates the editor to display totals;
-the round-trip test must fail.
+total shown beside it.** Control `B2-EDIT` mutates the editor to display totals.
+
+**The nearest sibling is B1's own step, and it is armed one dispatch later.** The
+guided abilities step is itself a writer; at B1 time it reads raw base trivially,
+but the moment B2 lands, a step prefilling manual entry or a revisit from the
+report's totals re-commits totals as base — the identical defect. **Pinned: the
+step's inputs and any prefill read `abilities_base`, never the resolved total.**
 
 ### 3.6 Seam additions, pinned before either dispatch
 
@@ -214,9 +323,20 @@ front rather than discovering it again:
   signed non-zero `amount`, `maximum`, and a **required** `source_instance_id`
 - the initiative contribution kind and payload — see B4
 - **the resolver's signature, returning `{ base, contributions, total }` with all
-  three addressable**, plus a per-surface pinning of which one
-  `report.character.abilities`, `CharacterSheet.ability_scores` and the machine
-  block each carry. A resolver returning only a total makes §3.5 unenforceable.
+  three addressable**
+- **the read model WIDENS — revision 2's "pin which one" was unsatisfiable.**
+  `report.character.abilities` feeds three consumers needing two different
+  answers: the editor input (**base**), the planner's casting attack/DC badges
+  (`editors.ts:141-148`, **total**) and `AbilityScores.fromArray(...)` for slot
+  math (`character-workspace-builder.ts:308`, **total**). Pinned: the report
+  surface carries **both** — `abilities` becomes the resolved total and a sibling
+  `abilities_base` carries base. Per surface: **editor inputs and the guided
+  abilities step read `abilities_base`**; casting badges, slot math,
+  `CharacterSheet.ability_scores` and the machine block read `abilities`.
+- **`CharacterSheet.initiative` stops being a bare number.** Its own comment says
+  advantage "is not represented here"; B4's roll-state contribution needs the
+  field, its sheet-view rendering and its machine-block shape — none of which
+  revision 2 named.
 
 ### 3.7 Scope boundaries
 
@@ -288,9 +408,17 @@ deferred.** So at B4's time the only live numeric source is the Dexterity
 modifier the resolver already fixes, and "every source is modelled" would be
 satisfiable as modelled-but-unapplied. D33's own title is *"A disclosed wrong
 number is still a wrong number"*, and D64 says initiative must be **correct** —
-so **non-ASI feat-granted effects are pulled into or ahead of B4**, deferring only
-feat *ASI*. Without that, a character who takes Alert the moment B3 ships has a
-wrong initiative with a note next to it.
+so the feat-source application seam plus **Alert's one structured effect** is
+pulled into B4. Without it, a character who takes Alert the moment B3 ships has a
+wrong initiative with a note beside it.
+
+**Revision 2 said "non-ASI feat-granted effects", which was over-broad and would
+have dragged feat application in wholesale.** The other bundled origin-feat
+non-ASI effects move no sheet number — Savage Attacker is a damage reroll,
+Lucky is luck points, Magic Initiate already flows through grant rules — so under
+D35 they earn no structure yet. **Narrowed to: feat effects that change
+initiative.** B4 must also materialise the Champion roll-state effect, which
+revision 2 left unstated.
 
 ## 5. Disclosures this plan DELETES
 
@@ -331,35 +459,54 @@ miss.
 - **B2-HP** — resolve contributions for display only, leaving `hitPointMaximum()`
   on base Constitution. The HP test must fail. **This is the control that matters
   most**; it is the trap in §6 made executable.
-- **B2-DC** — same, for spell save DC and attack bonus. **Name the pipeline:**
-  there are three DC sites — build report, spell access, and workspace slots —
-  and a control that does not say which it mutates can be satisfied by fixing a
-  different one.
+- **B2-DC** — same, for spell save DC and attack bonus. Revision 2 diagnosed that
+  an unnamed pipeline makes this satisfiable by fixing a different one, and then
+  named none. **There are TWO independent calculations, not three** — the build
+  report reuses spell-access routes rather than computing its own. Pinned: one
+  mutation and assertion each for **spell access** (`spell-access-builder.ts:307`)
+  and **workspace slot math** (`character-workspace-builder.ts:218`/`:308`); the
+  planner's casting badges (`editors.ts:141-148`) are a display fed by the report
+  surface and are covered by §3.6's per-surface pin.
 - **B2-BASE** — mutate the **contribution writer** to write the total into the
   base column. The base-unchanged test must fail. Contributions must never become
   base. *(Revision 1 mutated the resolver, which would have made a nominally pure
   function perform database writes — a mutation the type system may refuse.)*
-- **B2-EDIT** *(new — §3.5)* — make the planner ability editor display resolved
-  totals instead of base. The round-trip test must fail: edit the displayed
-  value, and base must equal what was typed while the total exceeds it by the
-  contributions. **This is the control for the false success neither the plan nor
-  one of its two reviewers found** — a writer fed by a reader, invisible to every
-  read-side control.
-- **B2-SHARE** *(new)* — drop the ability and amount fields from the share
-  effect tuple. A round-trip test must fail. The wire has a hand-written
-  nine-field tuple with fixed payload lists, so a new payload is silently lost
-  without this.
+- **B2-EDIT** *(§3.5)* — make the planner ability editor display resolved totals
+  instead of base. **REWRITTEN AT ROUND 2, because as first written it could not
+  fail.** `update_ability` writes what was TYPED into base regardless of what was
+  displayed, so "base equals what was typed, total exceeds it by the
+  contributions" holds under the mutation and under correct code alike. **The
+  only observable that separates them is the PRE-EDIT DISPLAYED VALUE.** Pinned:
+  with non-zero contributions present, the test asserts the input shows **base**
+  (15, not the total 17) **before** any edit; the post-edit round trip is kept as
+  a secondary assertion. This was the control written specifically to prevent the
+  best defect either review found, and it was decorative.
+- **B2-SHARE** — drop the ability, amount **and maximum** fields from the share
+  effect tuple, each with its own assertion. A round-trip test must fail per
+  field. The wire has a hand-written nine-field tuple with fixed payload lists,
+  so a new payload is silently lost without this; revision 2 protected two of the
+  three fields and a dropped `maximum` would resolve to a different number.
+- **B2-PROVENANCE** *(new)* — export a background-owned `ability_increase` and
+  re-import it. It must NOT be refused by our own importer and must NOT arrive
+  without its source. This is the collision between the required-source CHECK and
+  the wire's provenance-optional allowance, made executable.
 - **B1-SIGNAL** *(new)* — omit the allocation signal from the share wire. An
   all-10s character exported and re-imported must NOT come back looking
   unallocated. This is §3.1's live defect made executable.
 - **B2-CASCADE** — drop the source link on an ability contribution. Removing the
-  background must then leave its increase behind, and that test must fail.
-- **B4-INIT** — remove one initiative source. The initiative test must fail.
-  **Unanchorable until B4's kind and payload are pinned:** with no enumerated
-  source list, "remove one source" tests an implementation-authored list against
-  itself, which proves only that the implementation equals itself. The control
-  becomes real once the bundled sources are enumerated and each is classified as
-  changing the number or the roll.
+  background must then leave its increase behind, and that test must fail. **The
+  mutation script must drop the kind's required-source CHECK alongside**, or the
+  insert fails on the constraint and the control proves a constraint works rather
+  than that the cascade does.
+- **B2-CAP** *(new)* — make the resolver sum contributions without applying
+  maxima. The capped-total test must fail. Fixture: base 19, `+2/max20`,
+  `+1/max30`, asserted in both orders. Without this, §3.3's arithmetic is prose.
+- **B4-INIT** — remove **Alert's proficiency-bonus contribution**. The initiative
+  test must fail. Revision 2 admitted this was unanchorable "until the sources are
+  enumerated" — in the plan that was meant to enumerate them. B4's table now does,
+  so the control tests against a **plan-authored** list rather than an
+  implementation-authored one, which is the whole difference between a control and
+  a tautology.
 
 ## 8. Verification
 
