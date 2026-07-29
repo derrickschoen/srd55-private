@@ -1,5 +1,59 @@
 # Binding scope decisions
 
+## D81 — OWNER: full JSON export carries non-SRD content, and content identity is DERIVED (2026-07-29)
+
+**The ruling.** *"Full json export should export all of the non srd content as
+well. Collaborate with sol and fable to come up with a smart way to key pieces of
+content by their numeric and logical properties as well as key by name case
+insensitive removing non alphanumeric characters. That way if my friend and I
+both import the phb, his character will not write a new subclass or item or…
+etc. as long as they have the same name and properties."*
+
+**Two rulings, one design.**
+
+**1. THE FULL JSON EXPORT CARRIES NON-SRD CONTENT.** Not just the character's
+choices — the definitions those choices point at. A backup must be openable by
+someone who does not already own the same books.
+
+**2. CONTENT IDENTITY IS DERIVED FROM THE CONTENT**, along two axes the owner
+named: the **numeric and logical properties**, and the **name normalised
+case-insensitively with non-alphanumerics removed**. The goal is stated as an
+outcome, which is the right way to state it: two people who independently import
+the same book must land on the **same key**, so importing a friend's character
+mints no duplicate subclass, item, spell or feat.
+
+**This inverts the current scheme.** `src/catalog/catalog-key.ts` mints
+`2024:owner:slug`, where `owner` is a locally-registered namespace with **no
+global authority** — two people can both register `me.dev`, which is the
+collision a reviewer raised hours ago and which this ruling dissolves rather than
+patches. Identity stops being *"who typed it"* and becomes *"what it is."*
+
+**Design is DELEGATED and IN PROGRESS**, per the owner's instruction to
+collaborate: fable is proposing the derivation, sol is attacking it and defining
+what can and cannot be proven. **No mechanism is pinned here.** What is pinned is
+the requirement and the acceptance test:
+
+> Alice and Bob independently import the same book. Bob opens Alice's share link
+> or backup. **Nothing is duplicated.**
+
+**The hazards already visible, recorded so the design must answer them:**
+
+- **A derived key is a FROZEN CONTRACT.** Once identity travels on the wire, the
+  derivation can never change silently — the same class of problem D41 solves for
+  wire versions, and it needs the same discipline.
+- **Canonicalisation is where two honest implementations diverge**: field order,
+  null versus absent, `5` versus `5.0`, list ordering, trimming, non-ASCII names.
+- **Same normalised name, different properties** must have a stated answer. Two
+  keys and both exist is defensible; so is a disclosed conflict. Silence is not.
+- **Prose.** If two printings differ only in flavour text, are they one thing?
+  Excluding prose from the fingerprint makes errata invisible; including it makes
+  every reformat a new item.
+
+**Licensing (D59) is unchanged and worth restating**, because "export all
+non-SRD content" sounds like it strains it: a person's own files are their
+business, and only what lands in **our git repo** is our concern. An export
+written on a person's machine carrying their own imported content is theirs.
+
 ## D80 — SUPERVISOR: the level-3 subclass REFUSAL is struck; D70 already governs it (2026-07-29)
 
 **Not a new ruling — a plan of mine contradicted an owner ruling and the ruling
