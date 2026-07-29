@@ -25,6 +25,7 @@
 import { UpdateClassCommand } from '../commands/update-class';
 import type { CharacterCommandIntegrity } from '../commands/integrity';
 import {
+  rowId,
   sqlInteger,
   sqlNullableInteger,
   sqlNullableString,
@@ -43,6 +44,7 @@ import {
   type KnownDamageType,
 } from '../domain/enums';
 import type { CharacterRow } from '../domain/models';
+import { GrantRuleSlotGenerator } from '../grants/grant-rule-slot-generator';
 import { CharacterCrud } from '../queries/character-crud';
 import { characterLevel } from '../rules/character-level';
 import { bundledClassContentKeys } from '../rules/class-progression-lookup';
@@ -384,10 +386,14 @@ export function createGuidedCharacter(
  * reads speed from `character_species` and effects from `character_effects`,
  * so a person sees a consequence (§9's A4-APPLIED control).
  *
- * The honest limit, disclosed on the screen rather than hidden: there is no
- * `character_source_instances` row, so no grant-rule consequence exists —
- * lineage spells above all (A6 grants them for real; until then the UI says
- * they are not granted YET, never that the character lacks them).
+ * A6 ADDED THE GRANT BRIDGE BESIDE THE COPY (D56): when the applied species
+ * has a `species_definitions` row — seeded for the three lineage species by
+ * `src/rules/origin-definitions-srd.ts`, this repository's first writer of
+ * that table — the apply also writes a `character_source_instances` row and
+ * runs the EXISTING `GrantRuleSlotGenerator` over it, the same generator the
+ * class path uses. See {@link replaceGuidedLineageGrants} for what actually
+ * arrives today and for the honest limit that remains — the lineage choice
+ * itself, which the species screen's unmade-choices list still names.
  */
 
 /**
@@ -669,6 +675,20 @@ function gateBundledBackground(
  * belong to a source instance (a share-imported grant, a future feat) are not
  * touched.
  *
+ * A6 WIDENED WHAT AN APPLY OWNS, so the replace widened with it: the previous
+ * apply's grant SOURCE INSTANCE — marked with
+ * {@link GUIDED_SPECIES_SOURCE_MARKER}, so only rows this path minted are
+ * ever candidates — is hard-deleted with its subtree before the new one is
+ * written, inside the same transaction. Its spell-selection slots and any
+ * sourced effects go with it by `ON DELETE CASCADE`. Without this, a player
+ * who switches from Tiefling to Dwarf keeps Thaumaturgy forever — the orphan
+ * shape §9's A4-SOURCED control was written against, inverted. A hard delete
+ * rather than the tombstone `RemoveSourceCommand` uses, because this is the
+ * SAME replace semantic as the tables above: re-applying means the earlier
+ * apply never happened, and is idempotent under retry. Source instances the
+ * guided path did not mint — added through the planner's expert commands —
+ * carry no marker and are left alone.
+ *
  * `effectsFromTemplate` deliberately drops the template's `sort_order`; this
  * caller assigns a dense per-character order starting after the character's
  * surviving effects, honouring the template's ordering as array order.
@@ -738,6 +758,10 @@ export function applyGuidedOrigin(
     }
 
     const template = gateBundledSpecies(db, params.content_key);
+
+    // Replace the previous apply's grant bridge first (A6): the marker finds
+    // it without reference to the rows the statements below delete.
+    replaceGuidedLineageGrants(db, characterId, template);
 
     // Replace: effects first, because identifying them needs the trait rows
     // that the next statement deletes.
@@ -843,4 +867,120 @@ export function applyGuidedOrigin(
       current_step: deriveBuildStep(readGuidedStepEvidence(db, characterId)),
     };
   });
+}
+
+/* ----------------------------------------- A6: the lineage-spell bridge */
+
+/**
+ * The `notes` marker naming a source instance the guided species apply owns.
+ *
+ * Ownership must be recorded, not inferred: the planner's expert commands can
+ * also put species source instances on a character, and "any root species
+ * source" as the replace target would delete rows this path never wrote. The
+ * generator's own children use `notes` markers (`grant_rule:…`) the same way
+ * and for the same reason.
+ */
+const GUIDED_SPECIES_SOURCE_MARKER = 'guided:species-apply';
+
+/**
+ * Deletes one source instance AND its subtree, children first — necessary
+ * because the parent foreign key is `ON DELETE SET NULL`, so deleting only
+ * the root would silently orphan any granted children rather than remove
+ * them. The rows that hang OFF each instance — `spell_selection_slots`,
+ * sourced `character_effects` — cascade (`src/db/schema.sql`, both FKs are
+ * `ON DELETE CASCADE`, and `PRAGMA foreign_keys = ON` is set at open).
+ */
+function deleteSourceInstanceTree(
+  db: DatabaseContext,
+  sourceInstanceId: number,
+): void {
+  const children = db.all(
+    `SELECT id FROM character_source_instances
+     WHERE parent_source_instance_id = ?`,
+    [sourceInstanceId],
+    rowId,
+  );
+  for (const childId of children) {
+    deleteSourceInstanceTree(db, childId);
+  }
+  db.exec(`DELETE FROM character_source_instances WHERE id = ?`, [
+    sourceInstanceId,
+  ]);
+}
+
+/**
+ * THE BRIDGE (dispatch A6, per D56). Three pieces, none of them new
+ * machinery: the `species_definitions` rows are seeded at boot
+ * (`src/rules/origin-definitions-srd.ts`), this writes the
+ * `character_source_instances` row, and the EXISTING `GrantRuleSlotGenerator`
+ * turns the definition's rules into spell-selection slots exactly as it does
+ * for classes.
+ *
+ * WHAT ARRIVES TODAY, HONESTLY: only the rules that are unconditional — the
+ * Tiefling's Thaumaturgy. Every other lineage spell is gated on the lineage
+ * choice (`active_if_config` on the seeded rules), which nothing can record
+ * yet: the seam's `applyOrigin` params carry no lineage, and the species
+ * screen lists that choice as unmade. Granting a Drow's spells to an Elf who
+ * never chose Drow would be a guess wearing a fact's clothes (D33), so the
+ * dormant rules wait for the unit that records the choice, and the moment a
+ * source config carries it the generator fires them with no further change
+ * here.
+ *
+ * `config.class_level` IS REQUIRED, NOT DECORATION: the seeded level-3/5
+ * rules are gated `active_from_class_level`, and for a non-class source
+ * `SourceRuleReader.classLevelForSource` reads `class_level` from the
+ * instance config — and THROWS if it is absent, which would fail the whole
+ * apply. Guided creation is class-first at level 1, so 1 is exact here; the
+ * level-up unit inherits the duty of maintaining it.
+ *
+ * NO DEFINITION IS A QUIET NO-OP, and that is correct rather than lenient:
+ * only the three lineage species have definitions (the other six grant no
+ * spells), and a bundled definition can also be legitimately absent when
+ * seeding yielded its name to user-authored content. A species with no
+ * definition has no grants to bridge — the template copy above is the whole
+ * apply, exactly as it was under A4.
+ */
+function replaceGuidedLineageGrants(
+  db: DatabaseContext,
+  characterId: number,
+  template: SpeciesTemplateRow,
+): void {
+  const previous = db.all(
+    `SELECT id FROM character_source_instances
+     WHERE character_id = ? AND source_type = 'species' AND notes = ?`,
+    [characterId, GUIDED_SPECIES_SOURCE_MARKER],
+    rowId,
+  );
+  for (const sourceInstanceId of previous) {
+    deleteSourceInstanceTree(db, sourceInstanceId);
+  }
+
+  const definitionId = db.one(
+    `SELECT id FROM species_definitions WHERE content_key = ?`,
+    [template.content_key],
+    rowId,
+  );
+  if (definitionId === null) {
+    return;
+  }
+
+  const timestamp = new Date().toISOString();
+  const instanceId = db.exec(
+    `INSERT INTO character_source_instances (
+       character_id, instance_uuid, source_type, source_definition_id,
+       display_name, config, acquired_at_character_level, state, notes,
+       created_at, updated_at
+     ) VALUES (?, ?, 'species', ?, ?, ?, 1, 'active', ?, ?, ?)`,
+    [
+      characterId,
+      crypto.randomUUID(),
+      definitionId,
+      template.name,
+      JSON.stringify({ class_level: 1 }),
+      GUIDED_SPECIES_SOURCE_MARKER,
+      timestamp,
+      timestamp,
+    ],
+  ).lastInsertId;
+  new GrantRuleSlotGenerator(db).generateForSource(instanceId);
 }

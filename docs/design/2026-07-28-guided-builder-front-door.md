@@ -411,6 +411,51 @@ so rather than present a half-applied origin as complete.
 **None of the five counts as usable progress on its own.** The group's
 definition of done is the browser proof in §5, extended through background.
 
+### 4.1 A6 delivers D56 for ONE species of three, and the disclosure it deleted was still true for the other two
+
+Found by the A6 implementer and confirmed by the supervisor.
+
+D56 required lineage spells to be granted for real. A6 built the whole bridge —
+`species_definitions` is written for the first time in this project's history, a
+source instance is minted, and the existing generator runs. But **every Elven and
+Gnomish lineage spell hangs on a lineage sub-choice the builder cannot yet make**,
+and `SPECIES_UNMADE_CHOICES` already declares that choice unmakeable. So what
+actually arrives today is Tiefling's Thaumaturgy — one unconditional grant — plus
+nine fully-configured lineages lying dormant until something can choose between
+them.
+
+Granting a Drow's spells to an Elf who never chose Drow would be a guess wearing
+a fact's clothes, so the implementer was right not to.
+
+**The problem this creates, which is mine.** I instructed that the "lineage spells
+are not granted yet" disclosure be **deleted, not reworded**, on the reasoning
+that it existed only while the spells were missing. That reasoning holds for
+Tiefling and is **false for Elf and Gnome** — for those two the sentence was still
+true, and deleting it made the screen less honest than it was, which is a D33
+regression introduced by my own instruction.
+
+The unmade-choices list still names the lineage choice, so a person is not told a
+flat lie. But "you have not chosen a lineage" and "choosing one is what would
+bring you spells" are different sentences, and only the second one explains why
+the sheet has no spells on it.
+
+*Taken for now:* a narrow disclosure returns for species whose lineage is
+unchosen — the spells arrive when the lineage does — and it is scoped to those
+species rather than to all three. *Seam:* one conditional in the species step.
+*Cost to flip:* deleted outright when the lineage-choice unit lands, which is the
+same rule as before, applied correctly this time.
+
+**Two further limits the implementer measured and recorded rather than papering
+over:**
+
+- The rule vocabulary gates on **class** level, not character level, so the source
+  config carries `class_level: 1`. That is exact at creation and **nothing
+  maintains it on level-up** — the straight-level-up unit inherits that duty, or a
+  level-3 Drow never receives Faerie Fire.
+- `FreeCast.uses` cannot express proficiency-bonus scaling, so Forest Gnome's
+  Speak with Animals ships without its PB-times-per-long-rest pool. A literal 2
+  would be a plausible wrong number from level 5 on, so it was left out.
+
 ## 5. The trap, and the proof that answers it
 
 The likely false success, named by one reviewer and confirmed by the other: **a

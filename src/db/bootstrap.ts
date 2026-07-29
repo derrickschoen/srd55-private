@@ -8,6 +8,7 @@ import {
 import { ensureBundledClassContent } from '../rules/class-progression-lookup';
 import { ensureBundledWeaponContent } from '../rules/weapons-srd';
 import { ensureBundledOriginContent } from '../rules/origins-srd';
+import { ensureBundledSpeciesDefinitions } from '../rules/origin-definitions-srd';
 import { ensureBundledSheetContent } from '../rules/sheet-srd';
 import { ensureBundledSpellContent } from '../rules/spells-srd';
 import { ensureBundledClassEquipment } from '../rules/class-equipment-srd';
@@ -49,6 +50,10 @@ export const applicationSeed: DatabaseSeed = (db) => {
   ensureBundledSheetContent(db);
   ensureBundledClassEquipment(db);
   ensureBundledOriginContent(db);
+  // The species DEFINITIONS (grant rules — dispatch A6) are order-independent:
+  // their `spell_version_key` references resolve lazily, at grant generation,
+  // not at seed time, so they need nothing above and nothing below needs them.
+  ensureBundledSpeciesDefinitions(db);
   ensureBundledFeatContent(db);
   ensureBundledSpellContent(db);
 };
