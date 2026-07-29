@@ -101,7 +101,7 @@ describe('guidedBuildState', () => {
     } satisfies GuidedBuildStateResult);
   });
 
-  it('selects skills for a persisted character with class, species, and background', async () => {
+  it('selects skills while an ACTIVE class grant is unfilled, and equipment once it fills (S-C)', async () => {
     const db = await realDatabase();
     seedClassProgressions(db);
     const characterId = createCharacter(db, 'Classed Species Background');
@@ -124,10 +124,45 @@ describe('guidedBuildState', () => {
       [characterId],
     );
 
+    // The skills step is detected PER GRANT (skills-with-provenance §3.6),
+    // not by a literal: this hand-built fixture minted no grants, so it
+    // honestly owes nothing and rests on the step AFTER skills.
+    expect(guidedBuildState(db, characterId)).toEqual({
+      kind: 'ready',
+      character_id: characterId,
+      current_step: seamStep(5),
+    } satisfies GuidedBuildStateResult);
+
+    // An unfilled ACTIVE class grant is exactly what holds the step open.
+    const sourceId = db.exec(
+      `INSERT INTO character_source_instances (
+         character_id, instance_uuid, source_type, source_definition_id,
+         display_name, state
+       ) VALUES (?, ?, 'class',
+         (SELECT id FROM class_definitions WHERE name = 'Wizard'),
+         'Wizard 1', 'active')`,
+      [characterId, crypto.randomUUID()],
+    ).lastInsertId;
+    const grantId = db.exec(
+      `INSERT INTO character_skill_grants (
+         character_id, source_instance_id, grant_key, ordinal, skill, state
+       ) VALUES (?, ?, 'class_skill', 1, NULL, 'active')`,
+      [characterId, sourceId],
+    ).lastInsertId;
     expect(guidedBuildState(db, characterId)).toEqual({
       kind: 'ready',
       character_id: characterId,
       current_step: seamStep(4),
+    } satisfies GuidedBuildStateResult);
+
+    // Filling it — the grant's OWN skill, never a count — releases the step.
+    db.exec(`UPDATE character_skill_grants SET skill = 'arcana' WHERE id = ?`, [
+      grantId,
+    ]);
+    expect(guidedBuildState(db, characterId)).toEqual({
+      kind: 'ready',
+      character_id: characterId,
+      current_step: seamStep(5),
     } satisfies GuidedBuildStateResult);
   });
 });

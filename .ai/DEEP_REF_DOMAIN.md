@@ -149,8 +149,12 @@ The gaps, by their stable `kind` keys:
   recorded, so an attack profile offers both formulas. Its simple/martial
   category IS recorded and its proficiency verdict IS derived — see D27, D28 and
   D33 — so the renamed gap is about reach alone.
-- `background_skills_are_text` — a background's two skill proficiencies are
-  stored as words and are not counted towards a skill modifier.
+
+`background_skills_are_text` was in this list and is DELETED, not reworded
+(skills-with-provenance §3.5): a background's two printed skills are now FILLED
+`character_skill_grants` rows under the background's own source, counted by the
+skill modifiers, and the hand-tick command the old sentence pointed at
+(`set_skill_proficiency`) is retired from the command vocabulary.
 
 That list is not prose a reader has to take on trust: it is bound to the constant
 by `tests/unit/docs/ai-reference-claims-agree.test.ts`, which fails when a gap is

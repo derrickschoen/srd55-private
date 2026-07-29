@@ -415,13 +415,16 @@ describe('the derived character sheet', () => {
     // F4: a blank features box reads as "this character has no features",
     // which is false. These are stated on every sheet because they are true of
     // every character in this application.
+    // `background_skills_are_text` is DELETED, not reworded
+    // (skills-with-provenance §3.5): background skills are FILLED grants the
+    // modifiers count, and the hand-tick command the disclosure pointed at is
+    // retired.
     expect(builder.build(characterId).gaps.map((gap) => gap.kind)).toEqual([
       'no_class_feature_text',
       'partial_subclass_catalog',
       'no_unarmored_defense',
       'no_expertise',
       'weapon_reach_not_recorded',
-      'background_skills_are_text',
     ]);
   });
 

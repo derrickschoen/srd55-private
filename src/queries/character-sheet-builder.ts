@@ -203,8 +203,7 @@ export interface SheetGap {
     | 'partial_subclass_catalog'
     | 'no_unarmored_defense'
     | 'no_expertise'
-    | 'weapon_reach_not_recorded'
-    | 'background_skills_are_text';
+    | 'weapon_reach_not_recorded';
   readonly title: string;
   readonly detail: string;
 }
@@ -419,14 +418,11 @@ export const SHEET_GAPS: readonly SheetGap[] = Object.freeze([
       'proficiency bonus: a weapon no class of this character grants does not ' +
       'get it, and the profile says why.',
   },
-  {
-    kind: 'background_skills_are_text',
-    title: 'Background skill proficiencies are text, not mechanics',
-    detail:
-      'A background prints two skill proficiencies as words, and this ' +
-      'application stores them as words. They are NOT counted in the skill ' +
-      'modifiers below — tick the skill itself to count it.',
-  },
+  // `background_skills_are_text` LIVED HERE AND IS DELETED, NOT REWORDED
+  // (skills-with-provenance §3.5): it told a person to hand-tick background
+  // skills through `set_skill_proficiency`, a command the surface now refuses,
+  // and S-B made background skills real FILLED grants the modifiers count.
+  // The disclosure existed only while the choice was untracked.
 ]);
 
 /**

@@ -251,20 +251,13 @@ export interface SetHitPointRollCommand extends CommandBase {
   rolled_value: number | null;
 }
 
-export interface SetSkillProficiencyCommand extends CommandBase {
-  type: 'set_skill_proficiency';
-  skill: Skill;
-  proficient: boolean;
-}
-
-/**
- * Complete one multiclass-entry skill choice. Bard's accompanying instrument
- * choice is made at the table and is deliberately not tracked.
+/*
+ * `set_skill_proficiency` and `choose_multiclass_skill` are RETIRED
+ * (skills-with-provenance §3.5), not renamed: a manual tick has no source and
+ * a choice that cannot name its grant survives D44 only cosmetically. The RPC
+ * surface refuses both as unknown commands; `fill_skill_grant` below is the
+ * one skill writer, and it addresses the grant it fills.
  */
-export interface ChooseMulticlassSkillCommand extends CommandBase {
-  type: 'choose_multiclass_skill';
-  skill: Skill;
-}
 
 /**
  * Fill — or, with `skill: null`, CLEAR — one ADDRESSED skill grant
@@ -309,8 +302,6 @@ export type CharacterCommandPayload =
   | SetWeaponMasteryCommand
   | SetArmorCommand
   | SetHitPointRollCommand
-  | SetSkillProficiencyCommand
-  | ChooseMulticlassSkillCommand
   | FillSkillGrantCommand
   | SetArmorClassAdjustmentCommand
   | RestoreSnapshotCommand;

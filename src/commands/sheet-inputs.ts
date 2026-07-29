@@ -11,7 +11,6 @@ import type {
   SetArmorClassAdjustmentCommand as SetArmorClassAdjustmentPayload,
   SetArmorCommand as SetArmorPayload,
   SetHitPointRollCommand as SetHitPointRollPayload,
-  SetSkillProficiencyCommand as SetSkillProficiencyPayload,
 } from '../domain/command-contracts';
 import {
   isEnumValue,
@@ -313,68 +312,13 @@ export class SetHitPointRollCommand implements ResolvesInverseAfterApply {
   }
 }
 
-export class SetSkillProficiencyCommand implements ResolvesInverseAfterApply {
-  readonly actionType = 'set_skill_proficiency';
-  readonly invertsAfterApply = true;
-
-  #previous: boolean | undefined;
-
-  constructor(
-    private readonly db: DatabaseContext,
-    private readonly payload: SetSkillProficiencyPayload,
-  ) {}
-
-  apply(characterId: number): void {
-    const key: SqlValue[] = [characterId, this.payload.skill];
-    this.#previous =
-      this.db.one(
-        `SELECT id FROM character_skill_proficiencies
-         WHERE character_id = ? AND skill = ?`,
-        key,
-        rowId,
-      ) !== null;
-
-    if (!this.payload.proficient) {
-      this.db.exec(
-        `DELETE FROM character_skill_proficiencies
-         WHERE character_id = ? AND skill = ?`,
-        key,
-      );
-      return;
-    }
-    if (this.#previous) {
-      // Already proficient. Re-inserting would violate the unique index, and
-      // the inverse below correctly says "put it back to proficient" — a no-op
-      // undo for a no-op command.
-      return;
-    }
-    const timestamp = new Date().toISOString();
-    assertSheetRow(
-      'character_skill_proficiencies',
-      { skill: this.payload.skill },
-      characterId,
-      timestamp,
-      'Skill proficiency',
-    );
-    this.db.exec(
-      `INSERT INTO character_skill_proficiencies (
-         character_id, skill, created_at, updated_at
-       ) VALUES (?, ?, ?, ?)`,
-      [...key, timestamp, timestamp],
-    );
-  }
-
-  inverse(): SetSkillProficiencyPayload {
-    if (this.#previous === undefined) {
-      throw new Error('Cannot create an inverse before applying the command.');
-    }
-    return {
-      type: 'set_skill_proficiency',
-      skill: this.payload.skill,
-      proficient: this.#previous,
-    };
-  }
-}
+/*
+ * `SetSkillProficiencyCommand` LIVED HERE AND IS RETIRED
+ * (skills-with-provenance §3.5): a manual tick has no source, and
+ * `character_skill_proficiencies` is now a derived projection with one
+ * deriving writer (`rebuildSkillProjection`). The one skill writer is
+ * `fill_skill_grant`, which addresses the grant it fills.
+ */
 
 export class SetArmorClassAdjustmentCommand
   implements ResolvesInverseAfterApply

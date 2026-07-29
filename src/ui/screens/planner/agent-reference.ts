@@ -428,9 +428,9 @@ export type ReferenceOutstandingItem =
     }
   | { readonly kind: 'no_class' }
   /**
-   * The three SHEET items. They carry no `source_ref` because they hang off no
+   * The sheet item. It carries no `source_ref` because it hangs off no
    * source instance: a class NAME and a level list is the whole of what
-   * identifies them, and a name registered in the free-text registry would
+   * identifies it, and a name registered in the free-text registry would
    * claim a provenance it does not have.
    */
   | {
@@ -438,26 +438,24 @@ export type ReferenceOutstandingItem =
       readonly class_name: string;
       readonly levels: readonly number[];
     }
-  | {
-      readonly kind: 'no_skill_proficiencies';
-      readonly choice_count: number;
-    }
   /**
-   * Q11. CLASS NAMES TRAVEL IN THE JSON BLOCK HERE, exactly as
-   * `orphan_hit_point_roll.class_name` does above and for the same reason: a
-   * class name comes from the recipient's OWN catalog — a share link carries a
-   * content key that resolves against it — so it is not importer-authored text
-   * and does not belong in the withheld ledger.
+   * The per-grant skill item (skills-with-provenance §3.3, S-C). Its source
+   * name goes through the free-text registry exactly as `unfilled_choices`'
+   * does; the available skills are closed-vocabulary values and travel
+   * verbatim. Grants are addressable — `grant_id` is what `fill_skill_grant`
+   * takes — so an agent reading this block can act on a specific ordinal.
    */
   | {
-      readonly kind: 'unmade_multiclass_skill_choice';
-      readonly entitled: number;
+      readonly kind: 'unfilled_skill_grants';
+      readonly source_ref: number;
+      readonly grant_key: string;
       readonly chosen: number;
-      readonly outstanding: number;
-      readonly entries: readonly {
-        readonly class_name: string;
-        readonly count: number;
-        readonly pool: 'class_list' | 'any';
+      readonly required: number;
+      readonly missing: number;
+      readonly grants: readonly {
+        readonly grant_id: number;
+        readonly ordinal: number;
+        readonly available_skills: readonly string[];
       }[];
     };
 
@@ -873,22 +871,18 @@ export function buildAgentReference(
           levels: [...item.levels],
         };
       }
-      if (item.kind === 'no_skill_proficiencies') {
+      if (item.kind === 'unfilled_skill_grants') {
         return {
-          kind: 'no_skill_proficiencies',
-          choice_count: item.choice_count,
-        };
-      }
-      if (item.kind === 'unmade_multiclass_skill_choice') {
-        return {
-          kind: 'unmade_multiclass_skill_choice',
-          entitled: item.entitled,
+          kind: 'unfilled_skill_grants',
+          source_ref: registry.register(item.source_name, null),
+          grant_key: item.grant_key,
           chosen: item.chosen,
-          outstanding: item.outstanding,
-          entries: item.entries.map((entry) => ({
-            class_name: entry.class_name,
-            count: entry.count,
-            pool: entry.pool,
+          required: item.required,
+          missing: item.missing,
+          grants: item.grants.map((grant) => ({
+            grant_id: grant.grant_id,
+            ordinal: grant.ordinal,
+            available_skills: [...grant.available_skills],
           })),
         };
       }
@@ -1656,8 +1650,8 @@ export function agentReferenceSections(
               ),
             ];
           }
-          // The three sheet items name a class rather than a source instance,
-          // so the middle cell says which class and the detail says the rest —
+          // The sheet item names a class rather than a source instance, so
+          // the middle cell says which class and the detail says the rest —
           // the same facts the JSON block carries, in the same order, so
           // neither form can state more than the other.
           if (item.kind === 'orphan_hit_point_roll') {
@@ -1671,33 +1665,18 @@ export function agentReferenceSections(
               ),
             ];
           }
-          if (item.kind === 'no_skill_proficiencies') {
+          if (item.kind === 'unfilled_skill_grants') {
             return [
-              cell('no_skill_proficiencies'),
-              cell('not applicable'),
+              cell('unfilled_skill_grants'),
+              sourceCell(projection, item.source_ref),
               cell(
-                `${String(
-                  item.choice_count,
-                )} skill proficiencies are offered and none is recorded`,
-              ),
-            ];
-          }
-          if (item.kind === 'unmade_multiclass_skill_choice') {
-            return [
-              cell('unmade_multiclass_skill_choice'),
-              cell(
-                item.entries.map((entry) => entry.class_name).join(', '),
-              ),
-              cell(
-                `${String(item.chosen)} of ${String(item.entitled)} skill ` +
-                  `proficiencies recorded; ${String(item.outstanding)} still ` +
-                  `owed, including ${item.entries
-                    .map(
-                      (entry) =>
-                        `${String(entry.count)} from ${entry.class_name} ` +
-                        `(${entry.pool})`,
-                    )
-                    .join(', ')}`,
+                `${String(item.chosen)} of ${String(item.required)} skill ` +
+                  `choices filled; ${String(item.missing)} still unchosen ` +
+                  `(grant key ${item.grant_key}, grant id${
+                    item.grants.length === 1 ? '' : 's'
+                  } ${item.grants
+                    .map((grant) => String(grant.grant_id))
+                    .join(', ')})`,
               ),
             ];
           }

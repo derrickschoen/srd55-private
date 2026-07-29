@@ -425,7 +425,6 @@ export class CharacterCommandExecutor {
       // armour change must not disturb a spell selection made in between.
       case 'set_armor':
       case 'set_hit_point_roll':
-      case 'set_skill_proficiency':
       case 'set_armor_class_adjustment':
         // PROVISIONAL AND NEVER STORED. These resolve their inverse after
         // apply (see `commit`). Echoing the payload rather than guessing a
@@ -441,7 +440,6 @@ export class CharacterCommandExecutor {
       // signal standing — a character that reads as allocated to scores nobody
       // allocated.
       case 'allocate_abilities':
-      case 'choose_multiclass_skill':
       case 'update_source_config':
       case 'add_source':
       case 'remove_source':

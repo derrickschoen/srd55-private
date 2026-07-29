@@ -329,6 +329,8 @@ export const GUIDED_PANEL = Object.freeze({
   backgroundStep: 'background-step',
   /** The abilities step (B1). */
   abilitiesStep: 'abilities-step',
+  /** The skills step (S-C, skills-with-provenance §3.6). */
+  skillsStep: 'skills-step',
 } as const);
 
 /** The attribute the panels above are selected by: `data-panel="…"`. */
@@ -358,6 +360,8 @@ export const GUIDED_RPC = Object.freeze({
   allocateAbilities: 'queries.characters.allocateAbilities',
   /** The skills step's fill/clear command (S-B, §3.6), riding the executor. */
   fillSkillGrant: 'queries.characters.fillSkillGrant',
+  /** The skills step's read (S-C): everything the step renders, in one query. */
+  skillsStep: 'queries.characters.skillsStep',
 } as const);
 
 /* --------------------------------------------------------------- abilities */
@@ -686,7 +690,10 @@ export interface ResolvedSkillGrants {
  *  - `syncClassSkillGrants(db, source): void` — the generator's sync/revive
  *    class arm (§3.8);
  *  - `orphanSkillGrantsForSource(db, sourceInstanceId): void` — the tombstone
- *    path.
+ *    path;
+ *  - `classSkillGrantsFilled(db, characterId): boolean` — the guided skills
+ *    step's completion predicate (S-C, §3.6): true exactly when
+ *    `resolveSkillGrants` reports no unfilled ACTIVE class grants.
  */
 export const SKILL_GRANTS_MODULE = 'src/grants/skill-grants.ts';
 
@@ -834,6 +841,109 @@ export function isGuidedFillSkillGrantParams(
     Number.isInteger(expectedRevision) &&
     expectedRevision >= 0
   );
+}
+
+/* --------------------------------- the skills step (S-C, offered for ratification) */
+
+/**
+ * THE S-C ADDITIONS — the guided skills step and its completion predicate
+ * (`docs/design/2026-07-29-skills-with-provenance.md` §3.3/§3.6/§3.7, §4 S-C).
+ * The values below are the S-C implementer's, OFFERED FOR RATIFICATION on the
+ * same direction every earlier dispatch used.
+ *
+ * THE COMPLETION PREDICATE is `classSkillGrantsFilled(db, characterId)` in
+ * `SKILL_GRANTS_MODULE`, and its `GuidedStepEvidence` field is `skillsFilled`
+ * — replacing the hard-coded `skills: false` (§3.6). It is TRUE exactly when
+ * the resolver reports no unfilled ACTIVE class grants: §5's trap is reusing
+ * planner-count completeness here, and deriving both the step and the planner
+ * item from `resolveSkillGrants().unfilledClassGrants` is what makes the
+ * per-grant rule one truth rather than two predicates that can drift.
+ * Species choice grants (Keen Senses, Skillful) are CHOOSABLE in the step but
+ * never gate it — §4 pins "advances only when every class ordinal is filled",
+ * and an Elf whose three-way pool is exhausted by other sources must not be
+ * stranded on this step forever.
+ */
+
+/** The step's locators, on the `ABILITY_STEP_ATTR` precedent (§3.6). */
+export const SKILL_STEP_ATTR = Object.freeze({
+  /**
+   * The already-granted-by-background/species display (§3.6 pins this
+   * locator by name — S-C's exit needs it). One element per FILLED active
+   * grant; the value is the skill.
+   */
+  granted: 'data-skill-granted',
+  /** One container per unfilled choice grant; the value is the grant id. */
+  choice: 'data-skill-choice',
+  /** The choice's `select`; the value is the grant id. */
+  select: 'data-skill-select',
+  /** The choice's fill button; the value is the grant id. */
+  fill: 'data-skill-fill',
+  /** The clear button on a clearable filled grant; the value is the grant id. */
+  clear: 'data-skill-clear',
+  /** The §3.7 Skilled-feat disclosure: skill grants the app does not apply. */
+  skilledFeatGap: 'data-skill-gap-unapplied-rule',
+  /** The §3.7 Expertise disclosure for a level-1 Rogue. */
+  expertiseGap: 'data-skill-gap-expertise',
+} as const);
+
+/**
+ * §3.7's Expertise disclosure population: the classes whose LEVEL-ONE kit
+ * includes Expertise — the Rogue, per D54's level-1 bar (the Bard takes it at
+ * level 2, outside the bar). A PINNED LITERAL on the
+ * `LINEAGE_SPELL_SPECIES_CONTENT_KEYS` precedent: no table records which
+ * classes take Expertise or when, and sniffing feature prose would let two
+ * agents invent two lists. Reviewed by eye against
+ * `docs/srd/source/`'s Rogue and Bard core traits.
+ */
+export const EXPERTISE_AT_LEVEL_ONE_CLASS_CONTENT_KEYS: ReadonlySet<string> =
+  Object.freeze(
+    new Set([`${BUNDLED_ORIGIN_RULES_EDITION}:class:rogue`]),
+  ) as ReadonlySet<string>;
+
+/** One FILLED active grant, as the step's already-granted display shows it. */
+export interface GuidedGrantedSkillDisplay {
+  readonly grant_id: number;
+  readonly skill: Skill;
+  readonly grant_key: string;
+  readonly source_name: string;
+  /**
+   * True when the grant is a CHOICE the step may CLEAR (class and species
+   * keys). A background's printed skills are minted filled and are not
+   * choices, so they are shown but never clearable here.
+   */
+  readonly clearable: boolean;
+}
+
+/** One unfilled SPECIES choice grant (Keen Senses / Skillful), fillable here. */
+export interface GuidedSpeciesSkillChoice {
+  readonly grant_id: number;
+  readonly grant_key: string;
+  readonly source_name: string;
+  /** The seam's plan pool minus every skill an active grant already holds. */
+  readonly available: readonly Skill[];
+}
+
+/**
+ * `queries.characters.skillsStep`'s result: everything the step renders.
+ *
+ * `revision` rides along because every fill is an executor command requiring
+ * `expected_revision`, and the step re-derives after each successful write —
+ * the same read-then-command shape the abilities step uses.
+ *
+ * The two §3.7 gaps are DATA here, never inferred in the UI:
+ * `unapplied_skill_rule_sources` names every ACTIVE source whose definition
+ * carries a `skill_proficiency` grant rule nothing consumes (the Skilled
+ * feat, S6), and `expertise_gap` is true for the
+ * `EXPERTISE_AT_LEVEL_ONE_CLASS_CONTENT_KEYS` population.
+ */
+export interface GuidedSkillsStepState {
+  readonly character_id: number;
+  readonly revision: number;
+  readonly granted: readonly GuidedGrantedSkillDisplay[];
+  readonly class_choices: readonly UnfilledClassSkillGrant[];
+  readonly species_choices: readonly GuidedSpeciesSkillChoice[];
+  readonly unapplied_skill_rule_sources: readonly string[];
+  readonly expertise_gap: boolean;
 }
 
 /* ------------------------------------------ background choices (B3, ratified) */

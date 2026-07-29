@@ -10,6 +10,7 @@ describe('deriveBuildStep', () => {
         abilitiesAllocated: false,
         speciesChosen: false,
         backgroundChosen: false,
+        skillsFilled: false,
       }),
     ).toBe(
       GUIDED_LEVEL_ONE_STEP_ORDER[0],
@@ -23,6 +24,7 @@ describe('deriveBuildStep', () => {
         abilitiesAllocated: false,
         speciesChosen: false,
         backgroundChosen: false,
+        skillsFilled: false,
       }),
     ).toBe(
       GUIDED_LEVEL_ONE_STEP_ORDER[1],
@@ -36,6 +38,7 @@ describe('deriveBuildStep', () => {
         abilitiesAllocated: true,
         speciesChosen: true,
         backgroundChosen: false,
+        skillsFilled: false,
       }),
     ).toBe(
       GUIDED_LEVEL_ONE_STEP_ORDER[3],
@@ -49,9 +52,27 @@ describe('deriveBuildStep', () => {
         abilitiesAllocated: true,
         speciesChosen: true,
         backgroundChosen: true,
+        skillsFilled: false,
       }),
     ).toBe(
       GUIDED_LEVEL_ONE_STEP_ORDER[4],
+    );
+  });
+
+  it('selects equipment once every class skill ordinal is filled (S-C)', () => {
+    // The `skills: false` literal is DELETED, not reworded: the evidence
+    // field is the per-grant predicate, so a fully-filled character rests on
+    // the equipment step rather than being pinned to skills forever.
+    expect(
+      deriveBuildStep({
+        classChosen: true,
+        abilitiesAllocated: true,
+        speciesChosen: true,
+        backgroundChosen: true,
+        skillsFilled: true,
+      }),
+    ).toBe(
+      GUIDED_LEVEL_ONE_STEP_ORDER[5],
     );
   });
 });
