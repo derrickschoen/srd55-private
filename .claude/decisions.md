@@ -1,5 +1,63 @@
 # Binding scope decisions
 
+## D73 — OWNER: an AC resolver with a stated tie-break, and proficiency counts (2026-07-29)
+
+**The rulings.** *"Also have a resolver to choose the highest ac, and some simple
+arbitrary tie breaker you can come up with."* and *"I want to make sure that
+proficiency is taken into account when adding effects from items to a
+character."*
+
+### 1. The resolver
+
+**Highest total wins.** Every `armor_class_formula` (D72) is evaluated with the
+character's current ability modifiers, worn armour is evaluated as itself, and
+the largest result is the base. `armor_class_bonus` addends and a shield then
+apply **on top of whichever base won** — they are not part of the competition.
+
+**The tie-break, which I was asked to invent and therefore must justify:**
+
+1. A fixed source precedence: **worn armour, then species, then subclass, then
+   class, then item.**
+2. Then **alphabetically by the effect's label.**
+
+*Why not "earliest acquired", which was my first instinct:* it would order by
+`source_instance_id`, and **those ids are remapped on import** (D62 clones into a
+new character). A tie could then break differently in the clone than in the
+original — the same character, two Armor Classes. The precedence above is
+**stable under any id remapping**, which is the property that actually matters;
+"simple and arbitrary" is satisfied either way, so the clone-stable one wins.
+
+**The sheet says a tie happened.** Per D67 the reveal names the sources of a
+number; a tie means two sources produced the same total and one was chosen by
+rule. It says which won, what the other was, and that a rule broke it. A silently
+broken tie is a confident number with a hidden decision inside it (D33).
+
+### 2. Proficiency
+
+**Proficiency is consulted, and the rules-correct reading is that it does NOT
+gate the effect** — it changes the consequences. Stated explicitly because the
+instruction admits a stricter reading, and one sentence overrules this:
+
+- **Armour you are not proficient with STILL GIVES ITS ARMOR CLASS.** The
+  penalty in SRD 5.2 is Disadvantage on any D20 test using Strength or Dexterity
+  and an inability to cast spells — **not** a loss of AC. Withholding the AC
+  would be a wrong number, which D33 forbids more strongly than an unwelcome one.
+  **The sheet must state the penalty**, because a person reading an AC of 18 in
+  plate they cannot use needs to know what it costs them.
+- **A shield you are not proficient with** behaves the same way.
+- **A weapon you are not proficient with loses the proficiency bonus to attack**,
+  which is already built and already proven —
+  `tests/browser/weapons.spec.ts:387` asserts a Wizard's Greatsword loses it and
+  that **both screens say so**, and `src/rules/attack-profiles.ts:40` records a
+  past bug where the label said "not proficient" while the number still added the
+  bonus. **That is the standing example of getting this right: the label and the
+  number must agree.**
+- **Attunement is not proficiency.** An unattuned item that requires attunement
+  grants nothing; that is a separate gate on the same row and both are checked.
+
+**Every item effect therefore resolves through a proficiency-aware step**, and
+what that step changes is disclosed rather than silently applied.
+
 ## D72 — OWNER: items are THINGS, effects are the ONE vocabulary (2026-07-29)
 
 **The ruling.** Offered three schemas for Armor Class and item modifiers, the
