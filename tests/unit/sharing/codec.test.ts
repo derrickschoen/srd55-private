@@ -616,10 +616,10 @@ describe('character-share positional codec', () => {
     expect(positionalToShareDocument(COMPLETE_V1_WIRE)).toEqual(complete);
   });
 
-  it('pins the hand-authored complete version-2 wire layout element by element', () => {
-    const version2Golden = [
+  it('pins the hand-authored complete version-3 wire layout element by element', () => {
+    const version3Golden = [
       'dnd-multiclass-spells-character-share',
-      2,
+      3,
       [
         'Mira',
         8,
@@ -631,7 +631,7 @@ describe('character-share positional codec', () => {
         4,
         '2014',
         true,
-        'Retired the staff after Waterdeep.',
+        'Retired the staff after Waterdeep.', null,
       ],
       COMPLETE_V1_WIRE[3],
       COMPLETE_V1_WIRE[4],
@@ -698,7 +698,7 @@ describe('character-share positional codec', () => {
       ]],
     ];
 
-    expect(shareDocumentToPositional(complete)).toEqual(version2Golden);
+    expect(shareDocumentToPositional(complete)).toEqual(version3Golden);
   });
 
   it('round-trips object, positional, gzip, and base64url forms', async () => {
@@ -840,7 +840,7 @@ describe('character-share positional codec', () => {
     const positional = shareDocumentToPositional(minimal);
     expect(positional).toEqual([
       'dnd-multiclass-spells-character-share',
-      2,
+      3,
       [
         'Ten',
         null,
@@ -856,6 +856,7 @@ describe('character-share positional codec', () => {
         // written, `null` when the sharer did not opt in or there is nothing to
         // send, decoding to an absent key.
         null,
+        null, // v3 allocation signal: absent means never allocated.
       ],
       [
         [
@@ -896,7 +897,7 @@ describe('character-share positional codec', () => {
       null,
     ]);
     expect(positional).toHaveLength(16);
-    expect((positional[2] as unknown[]).length).toBe(11);
+    expect((positional[2] as unknown[]).length).toBe(12);
     expect((positional[3] as unknown[][])[0]).toHaveLength(8);
     expect((positional[4] as unknown[][])[0]).toHaveLength(6);
     expect(positional[12]).toHaveLength(3);
@@ -915,11 +916,11 @@ describe('character-share positional codec', () => {
     ).resolves.toEqual(minimal);
   });
 
-  it('rejects every non-version-2 character, class, and source arity', () => {
+  it('rejects every non-version-3 character, class, and source arity', () => {
     const positional = shareDocumentToPositional(complete);
     const cases: Array<[number, number, RegExp]> = [
-      [2, 10, /wire character must be a tuple of length 11/],
-      [2, 12, /wire character must be a tuple of length 11/],
+      [2, 11, /wire character must be a tuple of length 12/],
+      [2, 13, /wire character must be a tuple of length 12/],
       [3, 7, /wire classes\[0\] must be a tuple of length 8/],
       [3, 9, /wire classes\[0\] must be a tuple of length 8/],
       [4, 5, /wire sources\[0\] must be a tuple of length 6/],
@@ -989,7 +990,7 @@ describe('character-share positional codec', () => {
     wrongTuple[2] = ['Mira'];
     await expect(
       decodeShareFragment(await arbitraryFragment(wrongTuple)),
-    ).rejects.toThrow(/wire character must be a tuple of length 11/);
+    ).rejects.toThrow(/wire character must be a tuple of length 12/);
 
     const overCount = [...positional];
     overCount[6] = Array.from(
@@ -1376,7 +1377,6 @@ const PRE_SHEET_FRAGMENT =
   'Pzp9Dy15RQcGBKnuAKGzlLTxE1xzifDCh-uTHAv_3y6G4fGT4ggIbXHkg1GA8MTKFDfL' +
   'ruoF9sFePIcyac8pAcJrKFG0JottMD4LRwfjihPGD5EpcRLvX0LeAILev7mgzGiW951S' +
   'Pf_waAS6YNVpDl2O7Kes_9wFD1lbzmZI108-a-2-ARz1CkIcAgAA';
-
 const PRE_SHEET_WIRE = [
   'dnd-multiclass-spells-character-share',
   1,

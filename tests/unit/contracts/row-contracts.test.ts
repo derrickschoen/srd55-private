@@ -34,6 +34,7 @@ function characterRow(): Record<string, unknown> {
     intelligence: 10,
     wisdom: 10,
     charisma: 10,
+    ability_allocation_method: null,
     proficiency_bonus_override: null,
     rules_edition_preference: '2024',
     allow_legacy: 0,

@@ -108,15 +108,15 @@ describe('character CRUD, catalog, save points, and operation history', () => {
     expect(stored).toMatchObject({
       character_id: characterId,
       label: 'Before experiment',
-      // a7-v7: the version whose weapon rows carry tagged ranges.
+      // a7-v8: the version that carries the explicit ability-allocation signal.
       // The column and the JSON inside it must agree — the backup validator
       // refuses a save point that disagrees with itself, so both are asserted
       // here.
-      schema_version: 'a7-v7',
+      schema_version: 'a7-v8',
       created_at: '2026-07-23T11:00:00.000Z',
     });
     expect(JSON.parse(String(stored?.snapshot))).toMatchObject({
-      schema_version: 'a7-v7',
+      schema_version: 'a7-v8',
       character: { name: 'Snapshot Hero', intelligence: 17 },
       character_class_levels: [],
       character_source_instances: [],

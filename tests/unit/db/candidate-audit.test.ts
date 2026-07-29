@@ -21,6 +21,7 @@ import {
   CHARACTER_SNAPSHOT_SCHEMA_VERSION,
   CHARACTER_STATE_COLUMNS,
   CHARACTER_STATE_TABLES,
+  snapshotCharacterColumnsFor,
 } from '../../../src/character/character-state';
 import { rowContractError } from '../../../src/domain/contracts/rows';
 
@@ -121,7 +122,7 @@ const A7_V1_TABLES = [
 /** A snapshot in exactly the shape `CharacterState.capture` produces. */
 function snapshotOf(db: Database, characterId: number): Record<string, unknown> {
   const snapshot: Record<string, unknown> = {
-    schema_version: 'a7-v2',
+    schema_version: CHARACTER_SNAPSHOT_SCHEMA_VERSION,
     character: db.selectObject(
       `SELECT ${CHARACTER_STATE_COLUMNS.join(', ')}
        FROM characters WHERE id = ?`,
@@ -148,7 +149,7 @@ function legacySnapshotOf(
   const snapshot: Record<string, unknown> = {
     schema_version: 'a7-v1',
     character: db.selectObject(
-      `SELECT ${CHARACTER_STATE_COLUMNS.join(', ')}
+      `SELECT ${snapshotCharacterColumnsFor('a7-v1').join(', ')}
        FROM characters WHERE id = ?`,
       [characterId],
     ),
@@ -789,6 +790,8 @@ describe('candidate database semantic audit', () => {
     );
     const snapshot = snapshotOf(db, 1);
     snapshot.schema_version = 'a7-v5';
+    delete (snapshot.character as Record<string, unknown>)
+      .ability_allocation_method;
     const weapon = (snapshot.character_weapons as Record<
       string,
       unknown
@@ -954,6 +957,8 @@ describe('candidate database semantic audit', () => {
     // whose trait rows carried the payload — a save point on a real user's disk
     // rather than a shape this build could write.
     snapshot.schema_version = 'a7-v4';
+    delete (snapshot.character as Record<string, unknown>)
+      .ability_allocation_method;
     const trait = (
       snapshot.character_species_traits as Record<string, unknown>[]
     )[0]!;

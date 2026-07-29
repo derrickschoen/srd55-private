@@ -1,6 +1,6 @@
 {
   "format": "dnd-multiclass-spells-character-share",
-  "version": 2,
+  "version": 3,
   "character": {
     "name": "Mira Ashdown",
     "strength": 8,
@@ -9,6 +9,7 @@
     "intelligence": 16,
     "wisdom": 18,
     "charisma": 10,
+    "ability_allocation_method": "manual",
     "rules_edition_preference": "2024"
   },
   "classes": [

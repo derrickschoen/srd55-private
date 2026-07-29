@@ -61,7 +61,7 @@ function createClassedCharacter(db: DatabaseContext, name: string): number {
   if (classOption === undefined) {
     throw new Error('The bundled class catalogue is empty.');
   }
-  return createGuidedCharacter(
+  const characterId = createGuidedCharacter(
     db,
     {
       name,
@@ -69,6 +69,13 @@ function createClassedCharacter(db: DatabaseContext, name: string): number {
     },
     new CharacterCommandIntegrity('guided-species-test-key'),
   ).id;
+  db.exec(
+    `UPDATE characters
+     SET ability_allocation_method = 'standard_array'
+     WHERE id = ?`,
+    [characterId],
+  );
+  return characterId;
 }
 
 function guidedSpeciesSources(db: DatabaseContext, characterId: number) {

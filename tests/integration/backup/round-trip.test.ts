@@ -240,9 +240,9 @@ function seedCompleteCharacter(
   );
   const snapshot = new CharacterState(db).capture(characterId);
   db.exec(
-    `INSERT INTO character_save_points
+     `INSERT INTO character_save_points
        (character_id, label, snapshot, schema_version, created_at, updated_at)
-     VALUES (?, 'Before experiment', ?, 'a7-v7', ?, ?)`,
+     VALUES (?, 'Before experiment', ?, 'a7-v8', ?, ?)`,
     [characterId, JSON.stringify(snapshot), timestamp, timestamp],
   );
   // A SECOND SAVE POINT IN THE OLD SNAPSHOT FORMAT.
@@ -256,7 +256,14 @@ function seedCompleteCharacter(
   const legacySnapshot: Record<string, unknown> = {
     ...(snapshot as unknown as Record<string, unknown>),
     schema_version: 'a7-v1',
+    character: { ...snapshot.character },
   };
+  const legacyCharacter = legacySnapshot.character;
+  if (typeof legacyCharacter !== 'object' || legacyCharacter === null) {
+    throw new Error('The legacy snapshot fixture has no character object.');
+  }
+  delete (legacyCharacter as Record<string, unknown>)
+    .ability_allocation_method;
   delete legacySnapshot.character_weapons;
   delete legacySnapshot.character_species;
   delete legacySnapshot.character_species_traits;
@@ -504,7 +511,7 @@ describe('portable character backup', () => {
     ) as Record<string, any>;
     // The current-format save point carries the weapons, re-keyed to the rows
     // that were just written, so restoring it puts back the same two weapons.
-    expect(saved.schema_version).toBe('a7-v7');
+    expect(saved.schema_version).toBe('a7-v8');
     expect(saved.character_weapons.map((row: { name: string }) => row.name)).toEqual([
       'Weathered Longsword',
       'Half-entered club',
@@ -832,6 +839,7 @@ const FROZEN_V1_BACKUP_JSON = `{
     "intelligence": 17,
     "wisdom": 9,
     "charisma": 13,
+    "ability_allocation_method": null,
     "proficiency_bonus_override": null,
     "rules_edition_preference": "2024",
     "allow_legacy": 0,
@@ -1090,6 +1098,7 @@ describe('a backup file written while the dormant orphan column existed', () => 
         intelligence: 10,
         wisdom: 10,
         charisma: 10,
+        ability_allocation_method: null,
         proficiency_bonus_override: null,
         rules_edition_preference: '2024',
         allow_legacy: 0,
