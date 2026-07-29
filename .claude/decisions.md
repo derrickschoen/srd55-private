@@ -1,5 +1,47 @@
 # Binding scope decisions
 
+## D78 — SUPERVISOR CORRECTION: the ASI levels I recorded were a UNION, not a per-class set (2026-07-29)
+
+**Recorded as a correction rather than an edit, because this file is
+append-only and the mistake is more useful on the record than erased.**
+
+D77, and the level-up plan's §5 before it, state the Ability Score Improvement
+levels as **"4, 6, 8, 10, 12, 14, 16"**. That is the **union across all twelve
+class tables**. **It is wrong as a per-class statement**, and an implementation
+following that sentence gives a Wizard an increase at 6, 10 and 14 that the SRD
+does not grant.
+
+**The verified per-class truth**, parsed by me from
+`docs/srd/source/class-level-tables.txt` block by block:
+
+- **4, 8, 12, 16** — Barbarian, Bard, Cleric, Druid, Monk, Paladin, Ranger,
+  Sorcerer, Warlock, Wizard
+- **4, 6, 8, 12, 14, 16** — Fighter
+- **4, 8, 10, 12, 16** — Rogue
+
+**How the error was made and how it was caught, because the method matters.** I
+counted with a script that collected every level at which an ASI line begins
+**across the whole file** and printed one flat list. A union of twelve tables
+looks exactly like a per-class set when it is printed as one list, and I did not
+ask the question that would have separated them. A reviewer had told me the right
+shape one round earlier — *"8/12/16 in all twelve classes, plus Fighter 6/14 and
+Rogue 10"* — and **I compressed a correct statement into an incorrect one.**
+
+It was caught by the implementing dispatch, which parsed the table **per class**
+because the plan pinned *"ASI levels are READ FROM THE SEEDED DATA, never
+hardcoded"* — and reported the real per-class output, which did not match my
+sentence.
+
+**THAT PIN IS WHY THIS DID NOT SHIP.** The rule that a mechanical fact must come
+from the data rather than from a literal (D15's principle) protected the build
+from a wrong literal **written by the person who wrote the rule.** It is the
+strongest argument for the pin that this effort has produced, and it is the
+reason to keep applying it when it feels like ceremony.
+
+**Also recorded:** the Sorcerer's table wraps "Ability Score / Improvement"
+across two lines, so a per-line scan misses all four of its levels. Any parser
+must handle the wrap; the extract has 47 ASI *lines* for 51 ASI *occurrences*.
+
 ## D77 — OWNER: FIXED HIT POINTS ONLY. Rolling is not offered. This REVERSES D66 (2026-07-29)
 
 **The ruling.** *"I've decided that I am fine shipping with the fixed by default
