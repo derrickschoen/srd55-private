@@ -1,5 +1,51 @@
 # Binding scope decisions
 
+## D62 — OWNER: import CLONES into a new character with a new UUID (2026-07-28)
+
+**The ruling.** *"Importing an export should clone into a new character with a
+new UUID. UUID in the export may not be needed for anything other than verifying
+which character the export came from because it is the only guaranteed unique
+attribute."*
+
+**Import is a clone, not a restore.** Bringing in an export produces a NEW
+character with a **newly minted** identifier. The identifier travelling in the
+document is **provenance** — it answers *which character did this come from* —
+and it is never adopted as the new character's own.
+
+The owner's reason is the load-bearing part: a UUID is **the only guaranteed
+unique attribute**. Names collide, two characters can be identical in every
+visible respect, and nothing else on a character distinguishes it reliably.
+
+**This retires the last live objection to `creation_uuid`.** D60 recorded three
+objections, dismissed one as void (there are no old documents), and left two:
+
+1. A new export carrying the column would fail the importer's exact-key check.
+   Answered by making the column **non-portable in the identity sense**: the
+   importer never writes the incoming value into the new row.
+2. Re-importing while the original exists would hit the UNIQUE constraint.
+   **Answered outright by D62** — import mints a new value, so there is nothing
+   to collide with. Importing the same document twice yields two clones, which is
+   the correct behaviour for a clone operation.
+
+So the column is now **cheaper and more useful than when I dropped it**: it gives
+double-submit protection at creation, and it gives an export a truthful answer to
+"where did this come from".
+
+**Pinned shape**, so the later dispatch cannot drift:
+
+- Every character gets an identifier at creation.
+- An export **carries** it, as the source's identity.
+- An import **mints a fresh one** for the clone and records the incoming value as
+  the source it was cloned from — never as the clone's own identity.
+- Importing one document twice produces two distinct characters. That is correct,
+  not a bug to guard against.
+
+*Taken for now:* this still lands as its own unit after the wizard reaches
+background and lineage spells, because it carries a migration. *Cost to flip:*
+say the word and it moves ahead of A5b.
+
+---
+
 ## D61 — OWNER: background is REQUIRED, and its feat and ability increases are the player's to choose (2026-07-28)
 
 **The ruling.** *"We should require that every character have a background.
