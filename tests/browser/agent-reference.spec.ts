@@ -338,8 +338,11 @@ test('the planner exposes accessible names and a real sort state for an operator
   await expect(
     page.getByRole('button', { name: /^Clear selection for slot / }).first(),
   ).toBeVisible();
+  // NOT a spinbutton any more (level-up plan §3): the numeric level input
+  // could move a level outside the one guarded path, so the planner shows a
+  // read-only <output> — role "status" — with the same accessible name.
   await expect(
-    page.getByRole('spinbutton', { name: 'Wizard level' }),
+    page.getByRole('status', { name: 'Wizard level' }),
   ).toBeVisible();
   await expect(
     page.getByRole('combobox', { name: 'Wizard subclass' }),

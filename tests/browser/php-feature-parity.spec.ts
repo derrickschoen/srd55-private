@@ -1034,7 +1034,6 @@ test('adding a class level generates new slots without disturbing existing slots
     {
       type: 'update_class',
       class_definition_id: workspaceImage.ids.sorcererClass,
-      level: 1,
       subclass_definition_id: null,
     },
     13,
@@ -1114,7 +1113,6 @@ test('undoes a structural class change through its snapshot inverse', async ({
     {
       type: 'update_class',
       class_definition_id: workspaceImage.ids.sorcererClass,
-      level: 1,
       subclass_definition_id: null,
     },
     14,
