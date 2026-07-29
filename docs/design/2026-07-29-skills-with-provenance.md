@@ -1,13 +1,69 @@
 # Skills: a grant knows where it came from
 
 Plan author: Claude Opus (supervisor). Track A, toward D54's "usable" bar.
-Status: **REVISION 2** — round 1 closed with one NOT-READY and one
-READY-WITH-FIXES. Awaiting re-review.
+Status: **REVISION 3** — round 2 closed with two NOT-READY verdicts. This is the
+final round.
 
 Law: `.claude/decisions.md` D1..D64. Binding here: **D33** (an unknown says
 unknown), **D35** (anything changing a sheet number earns structure), **D44**
 (the player chooses multiclass skills), **D54** (level 1 includes skills),
 **D61** (background is required), **D63** (a contribution knows its source).
+
+---
+
+## 0a. What round 2 found — including two defects revision 2 CREATED
+
+**The best finding is one I should have seen, because I cited the very table
+that solves it.** Removal in this codebase is **tombstoning, not deletion**:
+class removal sets `state = 'tombstoned'` and the source row **survives**
+(`src/commands/update-class.ts:361-368`), so `ON DELETE CASCADE` never fires. My
+entire cascade story covered only the guided hard-delete path.
+
+And `spell_selection_slots` — **the precedent revision 2 leaned on** — carries
+`state`, `orphan_reason_code`, `orphaned_at`, `prior_config`
+(`src/db/schema.sql:823-828`), with the generator orphaning slots when a source
+tombstones. **I copied that table's shape and left its lifecycle behind.**
+Verified by the supervisor.
+
+In revision 1 I invented a false premise to defend a right answer. In revision 2
+I cited a real precedent and took only the half that suited me. Different
+mistakes, one root: reasoning that stops on reaching the conclusion I already
+wanted. §3.8 now carries the lifecycle.
+
+What it would have shipped, with no control watching: a removed Fighter's filled
+Athletics grant stays a live proficiency on the sheet; the partial unique index
+then **blocks** granting Athletics from any other source; unfilled tombstoned
+grants keep completeness outstanding forever. Every control in revision 2
+exercises the hard-delete path or the constraint. **None touches tombstoning.**
+
+**Revision 2 broke two things revision 1 had right, both because it resolved
+§3.2 to DROP.**
+
+1. **The frozen snapshot lists cannot survive the drop.** The current version is
+   already `a7-v8`, every version from `a7-v4` carries the table, and the
+   historical lists `satisfies readonly SnapshotTable[]` where `SnapshotTable`
+   derives from live table classification — so dropping breaks the **type** of
+   every frozen list, and restore iterates those names and inserts into them.
+   Minting `a7-v9` does not help. **§3.2 is reversed below.**
+2. **`S-DISTINCT` died with it.** "Make the sheet read the retired flat table" is
+   unimplementable against a dropped table: the query throws and every sheet test
+   fails for a reason that proves nothing.
+
+**A factual error I introduced:** revision 2 claimed a "planner skill checkbox"
+drives `set_skill_proficiency`. **No such control exists** — the live planner
+skill surface invokes `chooseMulticlassSkill`
+(`src/ui/screens/planner/screen.ts:395`), verified by the supervisor. I wrote a
+disposition and a control around a surface I had invented, and a dispatched agent
+would have hunted for a phantom.
+
+**Also accepted:** the old-share migration was not a migration story — and as
+written it was **jointly unsatisfiable**, since a required source forbids an
+unattributed grant, §3.5 refused to mint a manual source, and losing user data is
+forbidden. One of three had to give; §3.2 now says which.
+`choose_multiclass_skill` **cannot name the class it fills** — the payload
+carries only `skill` and the UI discards class identity — so D44 would have
+survived cosmetically. And §3.3's remedy ("unfill the class ordinal first")
+named an operation the plan never pinned.
 
 ---
 
@@ -138,38 +194,62 @@ arrive:
 reverse would leave per-grant completeness querying a table whose shape argues
 against it. The asymmetry favours this.
 
-### 3.2 The flat table is DROPPED
+### 3.2 The flat table is KEPT as a TRANSPORT PROJECTION — the drop is reversed
 
-Revision 1's heading said "derived, not deleted" while its body said "retired as
-a source of truth". **Those are different units**, both reviewers said so, and
-one reading makes `S-DISTINCT` unable to fire at all — a synchronised copy
-returns the same answer under mutation.
+Revision 1 was ambiguous. Revision 2 resolved it to DROP. **Both reviewers showed
+the drop is not available**, and §0a records why: the frozen snapshot lists
+`satisfies readonly SnapshotTable[]`, so removing the table breaks the **type** of
+every historical version, and restore iterates those names to insert into them.
 
-**Taken: drop `character_skill_proficiencies`.** D60 removes the compatibility
-constraint, and a writable table nobody reads is worse than no table: a person's
-tick succeeds and changes nothing.
+**Taken: `character_skill_proficiencies` stays, and becomes a PROJECTION with
+exactly one writer — the grants resolver.**
 
-**The fan-out, enumerated because revision 1 named writers only and admitted
-roughly half of it:**
+- **Grants are the single source of truth.** Nothing else writes the flat table.
+- **The sheet and completeness read GRANTS**, never the projection.
+- The projection exists **only** so snapshot, backup and share keep a shape their
+  frozen versions already demand.
+- It is written from grants inside the same transaction that fills or clears one.
 
-- the generic set/unset command and its inverse-state read;
-- `choose_multiclass_skill`, which delegates to it;
-- the planner's sheet checkbox surface;
-- completeness — the count AND the available-choice exclusion;
-- the sheet builder's proficiency resolution;
-- share export, import, and the wire bump (**this unit mints v5**; B1 minted v3,
-  B2 v4);
-- backup export, direct import, and save-point id remapping;
-- snapshot capture, restore, and diff/audit — **plus a new A7 snapshot version**,
-  since the table sits in a frozen version list whose own comment warns that
-  getting it wrong breaks undo, save-point restore and backup export together;
-- schema-derived row contracts, generated column and reference facts, table
-  classification, deletion order, backup scope, share scope, audit vocabulary;
-- the schema, schema-signature, candidate-audit, table-scopes and agent-reference
-  suites, and the browser specs that exercise ticking.
+This is not revision 1's ambiguity returning: revision 1 never named a derivation
+mechanism, which is precisely what made it two sources of truth. **Naming the one
+writer is what makes it a projection rather than a rival.**
 
-Old share documents carrying a bare string list must be migrated to sourced
-grants — say how, or the importer refuses its own format's history.
+*Cost to flip:* dropping it later costs a snapshot-version scheme that can express
+a removed table — real work, and not this unit's.
+
+**Old share documents: RETIRED, not migrated.** A bare skill string carries no
+source, grant key or ordinal, and inventing attribution would be guessing —
+forbidden here. §3.5 refuses a synthetic manual source, a required source forbids
+an unattributed grant, and losing data is forbidden; one had to give. **D60 gives
+it:** v1 has zero users and zero exports, so pre-v5 documents are refused with a
+sentence rather than silently half-imported. That is the honest option and the
+only one that does not fabricate provenance.
+
+### 3.8 Grants have a LIFECYCLE, because removal is a tombstone
+
+**The finding that most nearly shipped, and §0a records that I cited the table
+which solves it while omitting its lifecycle.**
+
+`ON DELETE CASCADE` does not fire on removal, because removal sets
+`state = 'tombstoned'` and the row survives. A grants table without its own
+lifecycle would therefore leave a removed class's skills live on the sheet, and
+the `(character_id, skill)` partial unique index would then **block** any other
+source from granting that skill — a removal making a later legitimate choice
+impossible.
+
+**Taken: mirror `spell_selection_slots` fully, not partially.** The grant carries
+`state` (`active` / `orphaned`), `orphan_reason_code` and `orphaned_at`. When a
+source tombstones, its grants orphan. **The resolver counts only `active`
+grants** — for the sheet, for completeness, and for the unique index's purposes.
+
+**Who mints unfilled grants, pinned because two agents would diverge:** the
+generator materialises them when a source is created, the same arm that
+materialises spell slots. Not the command on demand — a grant must exist before
+it can be outstanding, which is the whole reason §3.1 chose a slot shape.
+
+*Seam:* three columns and one generator arm. *Cost to flip:* none; the
+alternative is delete-on-tombstone, which contradicts how every other source
+behaves.
 
 ### 3.5 The legacy writers, which revision 1 never mentioned
 
@@ -181,17 +261,25 @@ hypothetical, it is advertised.
 
 **Dispositions, pinned:**
 
-- **`choose_multiclass_skill`** (D44's mechanism) **migrates**: it writes a
-  filled grant against the entered class's **existing** source instance, which
-  `UpdateClassCommand` already creates. D44 is preserved, and the command stops
-  being the unenforced pass-through S8 proved it is.
-- **`set_skill_proficiency`** — the generic tick — is **removed**, along with the
-  planner checkbox that drives it. A manual tick has no source, and the required
-  source is the whole point. *Taken for now; cost to flip:* mint a `manual`
-  source instance and let it stay, which is a bigger decision than this unit
-  should take alone.
-- **The sheet's disclosure is deleted with it**, since it names an affordance
-  that will not exist.
+- **`choose_multiclass_skill`** (D44's mechanism) **migrates, and its payload
+  must change.** Revision 2 said it writes "against the entered class's existing
+  source" — the source reliably **exists** (`UpdateClassCommand` creates or
+  reactivates it), but the command **cannot say which one**: the payload carries
+  only `skill`, and the completeness UI renders a per-class form and then
+  **discards the class when dispatching** (`src/ui/screens/planner/screen.ts:395`).
+  With two entered classes whose pools overlap, filling "a" grant is not filling
+  "the" grant. **Pinned: the payload gains the grant's addressable identity, the
+  per-class form passes it, and the validator's exact-keys covers it.** Without
+  that, D44 survives cosmetically — the shape of §5's likeliest false success.
+- **`set_skill_proficiency`** — the generic tick — is **removed**. A manual tick
+  has no source, and the required source is the whole point. *Cost to flip:* mint
+  a `manual` source, a bigger decision than this unit should take alone.
+  **Correction: revision 2 claimed a planner checkbox drives this command. It does
+  not exist** — §0a records the error. The removable surfaces are the three
+  command registrations (validator, factory, executor) and the sheet disclosure,
+  and a dispatched agent must not go looking for UI that was never there.
+- **The sheet's disclosure is deleted**, since it tells a person to hand-tick
+  background skills through a command that will refuse.
 
 **A retired path is deleted, not left writing rows nobody reads** — that is the
 §5 trap's real shape, and a control enforces it.
@@ -223,8 +311,19 @@ with Athletics, then **switches background** to one granting Athletics. Steps ru
 in order but the RPC surface does not, and B3's background apply is replace-style.
 **Pinned: the `(character_id, skill) WHERE skill IS NOT NULL` unique index from
 §3.1 makes this a refusal, not a duplicate** — the background re-apply refuses
-with a reason naming the conflict, and the person unfills the class ordinal first.
-Silently unfilling a choice they made is worse than saying no.
+with a **named** reason, `skill_already_held`, rather than surfacing a raw SQLite
+constraint error. Silently unfilling a choice the person made is worse than
+saying no.
+
+**But revision 2's remedy named an operation the plan never pinned, and both
+reviewers caught it.** "The person unfills the class ordinal first" requires a
+**clear** operation, and §3.6 pinned only filling — with `grant_already_filled`
+in the refusal union, meaning fills are not overwrites. Without a clear, the
+refusal **strands** someone who simply wants to change their background.
+
+**Pinned: the RPC accepts a null selection to CLEAR a grant**, and the background
+re-apply's refusal names the conflicting skill so the step can offer to clear it.
+Refusing is right only because unfilling is possible.
 
 **Degenerate case:** if available choices ever fall below unfilled ordinals, the
 completeness item must not print an obligation with an empty remedy. Unreachable
@@ -274,7 +373,24 @@ Ratified into `src/builder/contracts.ts` **before** S-A:
   already-granted-by-background/species display**, which S-C's exit needs.
 - The completion predicate's name and its `GuidedStepEvidence` field, replacing
   the hard-coded `skills: false`.
-- **The share wire version this unit mints: v5.**
+- **The share wire version this unit mints: v5**, and **pre-v5 documents are
+  refused** per §3.2 rather than migrated with fabricated provenance.
+- **The grant's own stable id.** Revision 2 listed columns with no `id` while
+  pinning a `grant_not_found` refusal and an addressable RPC — the fill command
+  needs something to address.
+- **The RPC's grant locator, its null-selection CLEAR semantics, and its result
+  type**, per §3.3.
+- **Literal `grant_key` values**, not semantic labels. "starting-class" and
+  "Keen Senses" are descriptions; two agents will write two vocabularies.
+- **`skill_already_held`** joins the refusal reasons, for §3.3's collision.
+- **The grant lifecycle columns** from §3.8 — `state`, `orphan_reason_code`,
+  `orphaned_at` — and the rule that the resolver counts only `active`.
+- **The Drizzle relation entries and the append-only migration/checksum record.**
+  Relations are checked bidirectionally against foreign keys and every schema
+  change requires an immutable migration entry; neither is optional and revision 2
+  named neither.
+- **Who seeds Human's `species_definitions` row** and its content key — S7 says
+  it does not exist, and §3.4 requires Human to gain a species source.
 
 ### 3.7 The two deferrals are DISCLOSED, and the disclosure is an exit criterion
 
@@ -324,6 +440,13 @@ test would pass.
 background that grants two skills still owes two class choices**, asserted
 end to end.
 
+**The second trap, which revision 2 could not see because it had no control for
+it: correct totals attached to the WRONG class source.** With two entered classes
+both owing a choice, an implementation that fills whichever grant is available
+produces the right distinct proficiency set, the right outstanding count, and a
+faithful round trip of the wrong provenance. It passes S-SILENCE, S-POOL,
+S-DISTINCT and S-SHARE. `S-GRANT-IDENTITY` is that trap made executable.
+
 ## 6. Controls
 
 - **S-SILENCE** — **retargeted; revision 1's mutation could not be applied.** It
@@ -349,8 +472,12 @@ end to end.
 - **S-BACKGROUND** — stop writing the background's two skills as grants. The
   granted-skills test must fail. S4 says they are unapplied today, so this
   proves the unit actually applied them.
-- **S-DISTINCT** — make the sheet read the retired flat table. The sheet test
-  must fail, proving §3.2's single source of truth.
+- **S-DISTINCT** — **retargeted; revision 2 killed it by resolving §3.2 to DROP,
+  and §3.2 is now reversed.** With the flat table kept as a projection, the
+  mutation is: **make the sheet read the PROJECTION instead of grants.** A test
+  where the projection is deliberately stale must fail. That proves grants are
+  the source of truth and the projection is downstream — which is exactly what
+  §3.2 claims and nothing else checks.
 - **S-SHARE** — drop the grant provenance from the wire. A round trip must fail,
   asserting **source identity, grant key, ordinal and the nullable selection** —
   not merely the final `DISTINCT skill`, which survives losing all of it.
