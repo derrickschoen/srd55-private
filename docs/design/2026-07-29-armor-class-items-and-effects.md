@@ -60,6 +60,26 @@ the one vocabulary), **D73**
   AND `armor_class_formula` 10+CON+CHA — has no mechanism to exist**, and neither
   does §9's "collision fixture that matters most". Species have a template-copy
   path; subclasses have nothing. **This is AC-2 and it was unbudgeted.**
+- **AND THE SAME GAP EXISTS ONE LEVEL UP, WHICH REVISION 3 MISSED WHILE
+  CONGRATULATING ITSELF ON FINDING IT.** `named_features` — the BASE-CLASS
+  feature table, where **Monk and Barbarian Unarmored Defense actually live** —
+  has the identical shape: `effect_kind` CHECK'd to `'extra_attack'` only
+  (`schema.sql`), read live, and its only `INSERT` is the catalog seeder at
+  `sheet-srd.ts:545`, never a per-character effect row. **Verified, including
+  that the word `named_features` appeared ZERO times in this document before
+  this revision.**
+
+  That is worse than an omission. **Monk/Barbarian Unarmored Defense is the
+  motivating example this plan quotes in §0** from `sheet.ts:754-759`, **and the
+  Monk-with-a-shield case is §2's flagship worked example and `AC-SHIELD-BASE`'s
+  entire fixture.** The plan's headline demonstration had no mechanism, in a
+  revision whose headline finding was that another fixture had no mechanism.
+  Three rounds of review found the subclass half; only the third found this half.
+- **A phrasing overclaim from revision 3, corrected:** it said the only files
+  mentioning both `subclass_features` and `character_effects` are generated
+  contracts. `schema.sql` and six whole-schema invariant tests also do. They
+  enumerate every table mechanically, so the finding stands — but the sentence
+  was wrong and is not left standing.
 
 ## 1. The shape (D72)
 
@@ -233,6 +253,14 @@ rule in two places is F22, which has already bitten this project.
 and unarmoured totals are equal cannot exercise AC-ELIGIBILITY; a Monk with DEX +0
 cannot exercise AC-SHIELD-BASE.
 
+**When each control becomes buildable.** This codebase's resolver tests seed
+`character_effects` with raw INSERTs (`ability-contributions.test.ts:44`), so most
+controls need only **AC-1 + AC-3** and can use seeded rows rather than the
+production copy path. `AC-PROFICIENCY` is buildable **today** — `armor_not_trained`
+already ships. **`AC-SHIELD-BASE` needs AC-2**, because a Monk formula cannot be
+represented at all — not even as a seeded row — until `named_features`' CHECK is
+widened. That ordering is load-bearing, not convenient.
+
 ## 9. Fixtures (D79 names)
 
 **Armadillo species** — `armor_class_formula` base 13, DEX, allows shield.
@@ -268,16 +296,23 @@ needed `ec2be58` for its controls.
   CHECKs**, which are reused columns, not new ones; `character_items`; row
   contracts, snapshot, backup, and the share wire **version mint** (D41 — read
   the current version, do not assume it).
-- **AC-2 — THE SUBCLASS EFFECT PATH, which revision 2 did not know it needed.**
-  See §0's finding: subclasses cannot write an effect row at all. This dispatch
-  builds the template-and-copy mechanism, and **also widens
-  `species_template_trait_effects`' own separate closed CHECK** so the Armadillo
-  species' formula can be seeded content rather than a synthetic row. **Two
-  tables are in play and revision 2 said one.**
+- **AC-2 — THE CLASS AND SUBCLASS EFFECT PATH.** Neither `subclass_features` nor
+  `named_features` can produce an effect row, so this dispatch builds the
+  template-and-copy mechanism for **both**, and widens **three** closed CHECKs:
+  `subclass_features`, `named_features`, and
+  `species_template_trait_effects` (whose own enum excludes the new kinds).
+  Revision 2 said one table; revision 3 said two; **it is three.** Monk and
+  Barbarian Unarmored Defense live in `named_features` and are the reason this
+  cannot be deferred — they are the resolver's own worked example.
 - **AC-3 — the resolver and the gates.** Eligibility-then-value, the tie-break,
   proficiency and attunement, and **carrying `strength_requirement_unmet`
   forward**.
-- **AC-4 — retiring `armor_class_adjustment`**, all 21 references.
+- **AC-4 — retiring `armor_class_adjustment`**, all 21 references, **and
+  migrating existing non-null values into `armor_class_bonus` effect rows
+  carrying their note as the label.** §6 implied the migration and revision 3's
+  dispatch line said only "references" — a reviewer caught the mismatch. It must
+  land **after AC-3**: removing the column before the resolver reads bonuses
+  would silently drop a working feature, which D33 forbids.
 - **AC-B — the surfaces**: exclusion reasons, tie disclosure, the
   strict-reduction warning, deletion of `no_unarmored_defense`, and the fixtures.
 
