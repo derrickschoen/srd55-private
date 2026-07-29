@@ -3,6 +3,12 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+  BACKGROUND_HOUSE_RULE_NOTICE,
+  BACKGROUND_STEP_ATTR,
+  MAGIC_INITIATE_FEAT_CONTENT_KEY,
+  type GuidedBackgroundChoiceOptions,
+} from '../../../src/builder/background-choices';
+import {
   GUIDED_CHARACTER_ID_PATTERN,
   GUIDED_LEVEL_ONE_STEP_ORDER,
   GUIDED_NEW_ROUTE,
@@ -425,17 +431,38 @@ describe('guided species step', () => {
 });
 
 describe('guided background step', () => {
-  it('A5-HONESTY discloses all five benefits that recording a background does not apply', () => {
+  const backgroundChoices: GuidedBackgroundChoiceOptions = {
+    backgrounds: [
+      {
+        content_key: 'test:background:honesty',
+        name: 'Honesty Background',
+        pairing: {
+          background_name: 'Honesty Background',
+          printed_abilities: ['Intelligence', 'Wisdom', 'Charisma'],
+          printed_feat: 'Magic Initiate (Cleric)',
+          suggested_abilities: ['intelligence', 'wisdom', 'charisma'],
+          suggested_feat_content_key: MAGIC_INITIATE_FEAT_CONTENT_KEY,
+          suggested_magic_initiate_list: 'Cleric',
+        },
+      },
+    ],
+    origin_feats: [
+      {
+        content_key: MAGIC_INITIATE_FEAT_CONTENT_KEY,
+        name: 'Magic Initiate',
+      },
+      {
+        content_key: '2024:feat:lucky',
+        name: 'Lucky',
+      },
+    ],
+  };
+
+  it('B3-HONESTY says what background apply now does and discloses only the three remaining gaps', () => {
     const step = createBackgroundStep({
       characterId: 1,
-      options: [
-        originOption(
-          'test:background:honesty',
-          'Honesty Background',
-          false,
-        ),
-      ],
-      applyOrigin: () => Promise.reject(new Error('not submitted')),
+      options: backgroundChoices,
+      applyBackground: () => Promise.reject(new Error('not submitted')),
       navigate: () => undefined,
     });
     const text = elementText(step.element);
@@ -456,15 +483,12 @@ describe('guided background step', () => {
     );
 
     expect(text).toContain(
-      'Choosing a background records its printed text on the character and ' +
-        'marks this step complete. That is the only visible change: nothing ' +
-        'on the sheet reads the background yet.',
+      'Choosing a background records its printed text, applies your ability ' +
+        'increases as additions on top of the scores you allocated, and adds ' +
+        'your chosen Origin feat to the character.',
     );
+    expect(text).toContain(BACKGROUND_HOUSE_RULE_NOTICE);
     expect(unapplied).toEqual([
-      'the 2024 ability score increases the background carries — and the ' +
-        'Ability scores step before this one is not built either, so no ' +
-        'scores have been asked for or chosen anywhere',
-      'the Origin feat',
       'the two skill proficiencies',
       'the tool proficiency',
       'the starting equipment package — equipment is the package only, with ' +
@@ -477,14 +501,8 @@ describe('guided background step', () => {
   it('renders the seam background panel without any link into the planner', () => {
     const step = createBackgroundStep({
       characterId: 1,
-      options: [
-        originOption(
-          'test:background:no-planner',
-          'No Planner Background',
-          false,
-        ),
-      ],
-      applyOrigin: () => Promise.reject(new Error('not submitted')),
+      options: backgroundChoices,
+      applyBackground: () => Promise.reject(new Error('not submitted')),
       navigate: () => undefined,
     });
 
@@ -496,6 +514,59 @@ describe('guided background step', () => {
       ),
     ).toHaveLength(1);
     expectNoPlannerLinks(step.element);
+    step.cleanup();
+  });
+
+  it('shows the deviation label only after the player leaves the printed pairing', () => {
+    const step = createBackgroundStep({
+      characterId: 1,
+      options: backgroundChoices,
+      applyBackground: () => Promise.reject(new Error('not submitted')),
+      navigate: () => undefined,
+    });
+    const background = elementsWithAttribute(
+      step.element,
+      BACKGROUND_STEP_ATTR.option,
+      'test:background:honesty',
+    )[0];
+    if (background === undefined) {
+      throw new Error('The background option was not rendered.');
+    }
+    const backgroundInput = interactiveElement(
+      background as unknown as Node,
+    );
+    backgroundInput.checked = true;
+    backgroundInput.dispatchEvent(new Event('change'));
+
+    expect(
+      elementsWithAttribute(
+        step.element,
+        BACKGROUND_STEP_ATTR.deviation,
+        '',
+      ),
+    ).toHaveLength(0);
+
+    const feat = elementsWithAttribute(
+      step.element,
+      BACKGROUND_STEP_ATTR.feat,
+      '',
+    )[0];
+    if (feat === undefined) {
+      throw new Error('The Origin feat selector was not rendered.');
+    }
+    const featSelect = interactiveElement(feat as unknown as Node);
+    featSelect.value = '2024:feat:lucky';
+    featSelect.dispatchEvent(new Event('change'));
+
+    const labels = elementsWithAttribute(
+      step.element,
+      BACKGROUND_STEP_ATTR.deviation,
+      '',
+    );
+    expect(labels).toHaveLength(1);
+    expect(elementText(labels[0] as unknown as Node)).toMatch(
+      /House rule:.*chosen by the player.*not the SRD's printed pairing/,
+    );
     step.cleanup();
   });
 });
