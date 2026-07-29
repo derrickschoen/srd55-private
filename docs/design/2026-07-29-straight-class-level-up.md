@@ -1,140 +1,189 @@
 # Straight-class level-up — the last item on the bar
 
-Binding law: **D66** (the hit-point ruling that gates this), D56 (straight class
-before multiclass), D33, D49 (warn versus block), D7.
+Binding law: **D66** (the hit-point ruling that gates this), D56, D33, D49, D7.
 
-## 0. What is true right now, each checked against the repo rather than recalled
+## 0. REVISION 2 EXISTS BECAUSE REVISION 1's PREMISE WAS FALSE
 
-- **Nothing in this application writes `character_hit_point_rolls`.** The table
-  exists, has row contracts, is carried by snapshots (`character-state.ts:137`)
-  and travels on the share wire (`character-share.ts:922`, `:1938`) — and the
-  only code that inserts into it is **share import**. No command, no UI, no
-  guided step. It is a table that can only ever be filled by a document written
-  by an app that could fill it. **This is the same finding shape as
-  `feat_definitions.ability_points`: seeded, contracted, carried, never applied.**
-- **There is no level-up command and no level-up screen.** `src/commands/`
-  contains exactly one class-related command, `update-class.ts`; the glob for a
-  level-up UI returns nothing.
-- **Level is a COLUMN, not a record of events.** `character_class_levels.level`
-  (default 1) with `is_starting_class`, `subclass_definition_id` on the same row.
-  Levelling is an increment, not an append.
-- **`character_hit_point_rolls` has NO method column.** Its columns are
-  `class_name`, `class_level`, `rolled_value`, with a CHECK pinning
-  `class_level` 1..20 and `rolled_value` 1..12.
-- **`class_name` is `VARCHAR`, not a foreign key** to `class_definitions`.
-- The sheet already computes a hit-point maximum and already handles an absent
-  hit die honestly — `hitPointMaximum`, `hitDieOrAbsent`, and an
-  `ASSUMED_HIT_DIE` substitution that the sheet **prints as an absence** rather
-  than hiding (`character-sheet-builder.ts:143`, `:325-335`, `src/rules/sheet.ts`).
+Revision 1 opened by claiming nothing writes `character_hit_point_rolls` and
+that there is no level-up command or UI. **Both claims are wrong, a reviewer
+caught them, and I confirmed each against the code myself.** They are recorded
+here rather than quietly corrected, because the whole shape of the unit changes:
+**this is not greenfield work. It is disposing of two entry points that already
+exist and already reach the database.**
 
-## 1. The finding that shapes the whole unit
+### Writer 1 — `SetHitPointRollCommand`, `src/commands/sheet-inputs.ts:245`
 
-D66 requires that each level record **which method was used, and the value**,
-because *"a total that cannot say whether it was taken or rolled cannot be
-re-derived, and a level-up that silently averages a rolled character is a
-confidently wrong number."*
+A real command, fully wired: `DELETE FROM character_hit_point_rolls` at `:270`,
+`INSERT INTO character_hit_point_rolls` at `:294`, an `inverse()` at `:302`, a
+payload type, a factory case and an executor case, and integration tests. Its
+own comment states the semantics: **"no roll means 'use the printed fixed
+value'"**.
 
-**The existing table cannot express that.** It has one value column named
-`rolled_value` and no method. The only way to encode "fixed" without a new
-column is **absence of a row**, and absence is not a statement — it is
-indistinguishable from a level whose row was never written, which is the state
-of literally every character today, since nothing has ever written one.
+So revision 1's "REJECTED — absence means fixed" was not rejecting a hypothetical.
+**It is the shipped, tested behaviour of an existing command.** Rejecting it is
+still right, but it is a change to working code, not a road not taken.
 
-**PINNED: add `method` to `character_hit_point_rolls`** (`'fixed' | 'rolled'`,
-NOT NULL) and rename the value column's *meaning* by widening the CHECK to admit
-the class's fixed value. A row per class level, always written, always saying
-which it was. *Seam:* one column and one CHECK. *Cost to flip:* none — no
-character has a row.
+### Writer 2 — `UpdateClassCommand` plus a live planner control
 
-**REJECTED — absence means fixed.** It compiles, needs no migration, and makes
-"we never wrote a row" and "the player took the average" the same state. That is
-the D33 failure in its purest form: a confident number with no way to say what it
-is.
+`src/commands/update-class.ts:168` runs `SET subclass_definition_id = ?, level = ?`
+for a class the character already has, then calls `generateForSource` (`:224`)
+to regenerate grants at the new level. The planner already exposes it:
+`src/ui/screens/planner/editors.ts:397-406` renders a `type = 'number'` input
+with `max = '20'` whose change handler calls
+`actions.updateClass(entry, { level: Number(level.value) })`.
 
-## 2. What the step does
+**A person can level their character today** — type a number, features and spell
+slots regenerate correctly — **and no hit-point row is ever written.** §5's
+"trap" is not a warning about a future implementation. It is a description of
+what currently ships.
 
-1. **Straight class only** (D56). The character's existing class levels up; no
-   class chooser, no multiclass entry. Multiclass level-up is out of scope and
-   must not be half-built here.
-2. **The hit-point choice, per level** (D66): the class's fixed value is the
-   **default**; rolling is available; a rolled value is **typed in**, because
-   this app does not roll dice (D55's line, restated in D66).
-3. **Features that need no choice arrive automatically** — a Fighter reaching 2
-   gets Action Surge with nothing to pick.
-4. **A level that carries a choice opens that choice.** Subclass at 3 is the
-   first one; `character_class_levels.subclass_definition_id` already exists with
-   a composite FK to `subclass_definitions`, so the storage is there.
+### How I got it wrong, because the method matters more than the fact
 
-## 3. Screen or button — PINNED, and it is a reversible default
+- For the writer, my probe printed `grep(...)[:8]` — I **truncated a list to
+  eight and read it as an enumeration.** The `sheet-inputs.ts` INSERT was the
+  ninth thing. The standing rule in this project is *a count is not an
+  enumeration*; I did worse, I enumerated a slice.
+- For the command, I listed `src/commands/*.ts` filenames matching
+  `level|hit.?point|class`, got `update-class.ts`, and concluded "no level-up
+  command" **without opening it**. The file that levels a class was named in my
+  own output and I read it as evidence of absence.
 
-**A button that levels the class, opening a screen only when the level carries a
-choice.** Most levels grant features with nothing to pick, and a screen whose
-only content is "you gained Action Surge" is a click that buys nothing.
+### Facts from revision 1 that DID survive verification
 
-The hit-point choice is a **choice**, so under this rule every level opens
-something. That is not a contradiction — it is the reason the rule is written as
-"a screen when there is a choice" rather than "a screen at level 3".
+`character_class_levels.level` is a column with default 1 — levelling is an
+increment. `character_hit_point_rolls` has exactly `class_name`, `class_level`,
+`rolled_value`, CHECK `class_level BETWEEN 1 AND 20` and `rolled_value` 1..12.
+`class_name` is a `VARCHAR` with no foreign key. There is no level-up *screen*.
 
-*Cost to flip:* the button becomes the screen's confirm control. Nothing about
-the recording changes.
+## 1. The live bug this unit closes
 
-## 4. What the sheet must do
+`src/rules/sheet.ts:730` computes each level past the first as:
 
-The hit-point maximum already exists and already discloses an absent hit die. It
-must now be **derivable from the recorded rows**: base at level 1, plus each
-level's recorded value, plus the Constitution contribution. A character with a
-rolled 3 at level 2 shows the total that follows from 3 — never an average
-substituted because the row was inconvenient.
+```
+const base = roll ?? fixedHitPointsPerLevel(die);
+```
 
-Per **D67**, the sheet shows the final number and the reveal names the sources.
-The per-level rows are exactly that reveal's content for hit points; this unit
-records them, and does not build the reveal.
+With no row, it **silently** takes the fixed value. Nothing on the sheet
+distinguishes *"the player chose the fixed value"* from *"no row was ever
+written"* — and since the planner can level without writing one, the second case
+is reachable today. That is D33's failure in the live code, not a risk to avoid.
 
-## 5. The trap
+## 2. The record — PINNED
 
-**Levelling by writing `level = level + 1` and letting the sheet re-derive
-everything.** It compiles, the level is right, the proficiency bonus is right,
-and the features are right — because every one of those is a pure function of
-level. **Hit points are not**, and they are the one number that cannot be
-recovered after the fact: if no row is written at the moment of the choice, the
-information is gone and any later total is a guess wearing a number's clothes.
+**Add `method` to `character_hit_point_rolls`**: `'fixed' | 'rolled'`, NOT NULL.
+A row per class level past the first, always written, always saying which.
 
-That is this project's recurring shape — correct-looking totals with the
-provenance silently dropped — and it has now been caught in skills (a fill with
-no source filter), in abilities (a base equal to its total), and in equipment (a
-mint with no stamp). Here it would pass every test that asserts a level or a
-bonus.
+**Revision 1 also pinned "widen the CHECK". Drop that — it is dead work.**
+`hitDieSizes` is closed at `[6, 8, 10, 12]` (`src/domain/enums.ts:511`) and
+`fixedHitPointsPerLevel = die/2 + 1` (`src/rules/sheet.ts:634`) yields **4, 5, 6,
+7** — every one already inside `rolled_value BETWEEN 1 AND 12`. Verified against
+`docs/srd/source/class-level-tables.txt`. The only schema delta is the new
+column.
 
-## 6. Controls
+**NOT NULL has a blast radius revision 1 did not name, and "cost to flip: none"
+was true only of production data.** Every bare INSERT breaks the moment the
+migration lands: `SetHitPointRollCommand` itself (`sheet-inputs.ts:294`) plus raw
+inserts in `tests/integration/commands/sheet-inputs.test.ts`,
+`tests/integration/queries/character-sheet.test.ts:144,193,557`,
+`tests/integration/character/state.test.ts:170`,
+`tests/integration/sharing/column-portability.test.ts:1249`,
+`tests/integration/rules/sheet-inputs-portability.test.ts:74`, and
+`tests/browser/character-sheet.spec.ts:127`. This is L-A's scope and is named
+here so it is not discovered mid-dispatch.
 
-- **L-METHOD** — mutate the writer to omit `method`. Must fail: a level taken at
-  the fixed value and a level rolled to the same number are **distinguishable**
-  in the stored row. Asserted on the row, not on the total, or a fixture where
-  the roll equals the average defeats it by construction.
-- **L-NO-REDERIVE** — mutate the hit-point maximum to average an existing rolled
-  row. Must fail: a character who rolled **3** at level 2 shows the total that
-  follows from 3. Fixture must roll a value **far from the average**, or the
-  mutation is unobservable.
-- **L-STRAIGHT** — mutate the level-up to accept a second class. Must fail: the
-  straight path never offers or applies one (D56).
-- **L-SUBCLASS** — mutate level 3 to level without the subclass choice. Must
-  fail: level 3 does not complete until the subclass is chosen.
-- **L-PERSIST** — reload after levelling. Must fail: the level, the method and
-  the value all survive, asserted from disk.
+## 3. Disposing of the two existing entry points — PINNED, and this is the unit
 
-## 7. Dispatches
+- **`SetHitPointRollCommand` is EXTENDED, not duplicated**: it carries `method`,
+  and its null-means-fixed branch becomes an explicit `method: 'fixed'` row.
+  Building a second writer beside it is the F22 trap — one rule in two places.
+- **The planner's numeric level input is RETIRED for the levelling path.**
+  Leaving it live means the level can still move without a hit-point row, which
+  is exactly the bug §1 closes. Multiclass *entry* is untouched (D56 defers
+  multiclass level-up; it does not remove entry).
+- **The level write and the hit-point row happen in ONE transaction.** A level
+  that moved without its row is the unrecoverable state.
 
-- **L-A — the record.** The `method` column, a migration, the widened CHECK, row
-  contracts, snapshot and backup and wire carry, and the command that levels a
-  class and writes the row in one transaction.
-- **L-B — the screen.** The button, the hit-point choice with the fixed value
-  defaulted, the subclass choice at 3, and the sheet's derivation from rows.
+## 4. Screen or button — revision 1's pin was vacuous, and this says so
 
-L-A owns the column and every persistence contract; L-B consumes them.
+Revision 1 pinned "a button, with a screen only when the level carries a choice",
+then admitted the hit-point choice makes every level open something. A reviewer
+put it exactly right: the rule is a conditional **with one live branch**. Under
+D66 every level 2..20 carries the hit-point choice, so the button-only path never
+fires in this unit's scope.
 
-## 8. Explicitly NOT in this unit
+**PINNED, plainly: every level opens the screen.** The conditional was decoration.
 
-Multiclass level-up (D56 orders it after). Levelling *down*. The D67 reveal.
-`class_name` remaining a VARCHAR rather than a foreign key — a real weakness,
-recorded here so it is not mistaken for an oversight, but changing it is a
-separate migration with its own review and nothing in this unit depends on it.
+## 5. Level 4 — SCOPED IN, because silence would ship a wrong number
+
+`docs/srd/source/class-level-tables.txt` prints **Ability Score Improvement at
+level 4** for every class. Revision 1 did not mention it, not even as an
+exclusion — so a level-up to 4 would silently grant nothing and say nothing about
+a choice the character is owed. That is the confidently-wrong-number shape this
+project keeps catching.
+
+D63 already models ability increases as additive contributions that know their
+source, so the layer exists. **L-B offers the level-4 increase and records it as
+a contribution.** If it proves larger than one dispatch, it is split — but it is
+not silently omitted.
+
+## 6. Already solved, stated so nobody rebuilds it
+
+Spell slots and features at the new level need **no new machinery**:
+`SourceRuleReader` reads `character_class_levels.level` live and gates on
+`active_from_class_level`, and `UpdateClassCommand` already calls
+`generateForSource` after a level change. Whatever command lands must call the
+same regeneration. `is_starting_class` is untouched by any level path and needs
+nothing.
+
+Subclass at level 3 is right for all twelve classes in the seeded 2024 data —
+verified, and unlike 2014 where it varies.
+
+## 7. The trap
+
+**Moving the level and letting the sheet re-derive.** Level, proficiency bonus
+and features are pure functions of level, so they will all be right. **Hit points
+are not**, and they are the one number that cannot be recovered after the fact.
+This is not hypothetical here: it is what the planner input does today.
+
+## 8. Controls
+
+- **L-METHOD** — **retargeted; revision 1's mutation was too weak.** "Omit
+  `method`" throws at the NOT NULL constraint and nearly any test catches it,
+  which proves the constraint, not the writer. The fireable mutation:
+  **hardcode `method` to one value regardless of payload.** Must fail: a level
+  taken fixed and a level rolled to the same number are distinguishable in the
+  stored row.
+- **L-UNKNOWN** *(new — §1)* — mutate the sheet's derivation back to the silent
+  `roll ?? fixed` fallback. Must fail: a level with **no recorded row** renders
+  as **unknown** (D33), not as a confident fixed value. **No control in revision
+  1 covered the one live bug this unit exists to close.**
+- **L-NO-REDERIVE** — mutate the maximum to average an existing rolled row. Must
+  fail: a character who rolled **3** at level 2 shows the total that follows from
+  3. Fixture must roll far from the average.
+- **L-STRAIGHT** — **the control I would have bet against.** `UpdateClassCommand`
+  accepts any `class_definition_id` and has no such guard, so a control scoped to
+  "the new screen has no class picker" passes while proving nothing. **The guard
+  must live in the COMMAND**: the levelling path refuses a class the character
+  does not already have, with a named reason. Mutate the guard away; the refusal
+  must fail.
+- **L-SUBCLASS** — same layer rule: a **structured refusal before the
+  transaction**, matching E-B's precedent, not a greyed-out button. Mutate the
+  refusal away; level 3 with a null subclass must fail.
+- **L-PERSIST** — reload after levelling: level, method and value all survive,
+  asserted from disk.
+
+## 9. Dispatches
+
+- **L-A — the record and the writers.** The `method` column and its migration,
+  `SetHitPointRollCommand` extended, every bare INSERT in §2's list updated, the
+  level-and-row single transaction, the command-layer guards from L-STRAIGHT and
+  L-SUBCLASS, row contracts, snapshot/backup/wire carry.
+- **L-B — the screen.** The level-up screen, the hit-point choice defaulting to
+  fixed, the subclass choice at 3, the level-4 increase, the sheet's derivation
+  and its unknown disclosure, and **retiring the planner's level input**.
+
+## 10. NOT in this unit
+
+Multiclass level-up (D56). Levelling down. The D67 reveal. `class_name` staying a
+VARCHAR rather than a foreign key — a real weakness, recorded so it is not
+mistaken for an oversight; nothing here depends on changing it.
