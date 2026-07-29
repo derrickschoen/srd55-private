@@ -1,5 +1,46 @@
 # Binding scope decisions
 
+## D58 — OWNER: the only licensing concern is what lands in git (2026-07-28)
+
+**The ruling.** *"We only need to worry about copyrighted works ending up in our
+git repo. Everything else, I don't care. Just can't have it in my personal
+GitHub account."*
+
+**This narrows D57, and supersedes the part of it I drew too wide.** D57 already
+moved the line from "imported content" to "who is doing the distributing", and
+put a share link on our side because we hand it to a third party. The owner has
+now drawn it tighter still, and the test is no longer about distribution at all:
+
+**The whole rule: copyrighted content must never be committed to the
+repository.** That is the hard stop, and it is the only one licensing has.
+
+What follows, stated plainly so nobody re-derives a stricter rule from first
+principles later:
+
+- **Not a licensing concern:** what the user imports, what they export, what a
+  share link carries, what the running app renders, or what sits in an
+  uncommitted working tree or a build directory. The owner has said, in these
+  words, that they do not care.
+- **Still a concern, unchanged:** `docs/srd/**` and any bundled rules text in
+  either repository. Those are committed, so they are squarely inside the rule
+  and stay CC-BY SRD 5.2 with attribution intact.
+- **The standing hard-stop item is rewritten to match.** It was "non-SRD-5.2
+  content entering either repo". It now reads: **committing copyrighted content
+  to git.** Same intent, a smaller and more checkable surface.
+
+**One factual note, offered once and not re-litigated.** A share link is a
+distribution channel: content in a link travels to whoever opens it, and that is
+a different exposure from a GitHub account. The owner's ruling is recorded as
+given and governs the work; this note exists so that the choice is visible as a
+choice rather than an oversight, and one sentence from the owner retires it.
+
+**Practical consequence for the tooling.** `tools/assert-dist-clean.mjs` guards
+the build output, which D58 says is not a licensing concern. It is cheap, it
+already passes, and removing a working guard to satisfy a narrowing is the wrong
+direction — it stays, reclassified from licensing gate to hygiene check.
+
+---
+
 ## D57 — OWNER: the import ban is about what WE ship, not what the user holds (2026-07-28)
 
 **The ruling.** *"The rule for no imported rules is for development env only. I
