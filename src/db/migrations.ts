@@ -8,6 +8,7 @@ import retireCoin from '../../drizzle/0004_retire_coin.sql?raw';
 import classEquipment from '../../drizzle/0005_class_equipment.sql?raw';
 import weaponAttackKind from '../../drizzle/0006_weapon_attack_kind.sql?raw';
 import featModel from '../../drizzle/0007_feat_model.sql?raw';
+import abilityAllocationMethod from '../../drizzle/0008_ability_allocation_method.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -97,6 +98,14 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
       '2b6a218077a4efe287234d30b0da1873c29c0ec8523efed283f40efa29ed11ac',
     resultSchemaChecksum:
       'cc2945880764c4a5cba7ba4dd7d85f9f65cf3b7368e6c9d65d7f6ae7b02b489c',
+  }),
+  Object.freeze({
+    id: '0008_ability_allocation_method',
+    sql: abilityAllocationMethod,
+    checksum:
+      'dcc6e5de3a8f7ac44af39e27f53fc7942576ad8734a4c18916b95dfb2b201b27',
+    resultSchemaChecksum:
+      'd8c6d27baba26254e14f7316797bed69deb0a9e58377b1dfb744ffd7eea44331',
   }),
 ]);
 

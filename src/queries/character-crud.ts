@@ -8,7 +8,12 @@ import {
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import type { CharacterRow } from '../domain/models';
-import type { RulesEdition } from '../domain/enums';
+import {
+  abilityAllocationMethods,
+  isEnumValue,
+  type KnownAbilityAllocationMethod,
+  type RulesEdition,
+} from '../domain/enums';
 
 export interface CreateCharacterInput {
   readonly name: string;
@@ -28,6 +33,27 @@ export class CharacterNotFoundError extends Error {
   }
 }
 
+/**
+ * The CHECK constraint closes this vocabulary, so an unknown value here is
+ * stored corruption — thrown rather than passed through, because a method the
+ * step's warnings cannot key on would be silently treated as chosen.
+ */
+function sqlAllocationMethod(
+  row: SqlRow,
+  column: string,
+): KnownAbilityAllocationMethod | null {
+  const value = sqlNullableString(row, column);
+  if (value === null) {
+    return null;
+  }
+  if (!isEnumValue(abilityAllocationMethods, value)) {
+    throw new Error(
+      `Character column ${column} holds unknown allocation method ${JSON.stringify(value)}.`,
+    );
+  }
+  return value;
+}
+
 function decodeCharacter(row: SqlRow): CharacterRow {
   return {
     id: sqlInteger(row, 'id'),
@@ -38,6 +64,10 @@ function decodeCharacter(row: SqlRow): CharacterRow {
     intelligence: sqlInteger(row, 'intelligence'),
     wisdom: sqlInteger(row, 'wisdom'),
     charisma: sqlInteger(row, 'charisma'),
+    ability_allocation_method: sqlAllocationMethod(
+      row,
+      'ability_allocation_method',
+    ),
     proficiency_bonus_override: sqlNullableInteger(
       row,
       'proficiency_bonus_override',

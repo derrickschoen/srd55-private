@@ -596,7 +596,7 @@ export function shareDocumentToPositional(
   );
 }
 
-function decodeWireV2(input: unknown): CharacterShareDocument {
+function decodeCurrentWire(input: unknown): CharacterShareDocument {
   const root = variableTuple(input, ROOT_TUPLE_LENGTHS, 'wire document');
   const wireWeapons = root[ROOT_WEAPONS_INDEX];
   const wireOrigin = root[ROOT_ORIGIN_INDEX] === null
@@ -934,6 +934,8 @@ export function positionalToShareDocument(
   if (input[0] !== CHARACTER_SHARE_FORMAT) {
     throw new ShareValidationError('format is unsupported.');
   }
+  // Migrations are ADJACENT and composed: a v1 link lifts 1→2 then 2→3, and
+  // every historical version funnels into the one current decoder.
   switch (input[1]) {
     case 1:
       variableTuple(
@@ -946,9 +948,21 @@ export function positionalToShareDocument(
         SHARE_SCHEMAS[1].tuples.character.arities,
         'wire character',
       );
-      return decodeWireV2(MIGRATIONS[1](input));
+      return decodeCurrentWire(MIGRATIONS[2](MIGRATIONS[1](input)));
     case 2:
-      return decodeWireV2(input);
+      variableTuple(
+        input,
+        SHARE_SCHEMAS[2].tuples.root.arities,
+        'wire document',
+      );
+      variableTuple(
+        input[2],
+        SHARE_SCHEMAS[2].tuples.character.arities,
+        'wire character',
+      );
+      return decodeCurrentWire(MIGRATIONS[2](input));
+    case 3:
+      return decodeCurrentWire(input);
     default:
       throw new ShareValidationError('version is unsupported.');
   }

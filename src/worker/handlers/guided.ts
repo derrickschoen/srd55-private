@@ -18,11 +18,14 @@ import {
   isGuidedCreateParams,
   isGuidedOriginParams,
   isOriginKind,
+  type AbilityAllocationMethod,
+  type GuidedAllocateAbilitiesParams,
   type GuidedBuildStateParams,
   type GuidedOriginOptionsParams,
 } from '../../builder/contracts';
 import {
   GuidedCreationRefusal,
+  allocateGuidedAbilities,
   applyGuidedOrigin,
   createGuidedCharacter,
   guidedBuildState,
@@ -30,6 +33,8 @@ import {
   listGuidedOriginOptions,
 } from '../../builder/guided-creation';
 import { CharacterCommandIntegrity } from '../../commands/integrity';
+import { RevisionConflict } from '../../commands/revision-conflict';
+import { abilities } from '../../domain/enums';
 import { RpcError } from '../../rpc/protocol';
 import {
   defineRpcHandler,
@@ -63,6 +68,75 @@ function isGuidedOriginOptionsParams(
   value: unknown,
 ): value is GuidedOriginOptionsParams {
   return hasExactKeys(value, ['kind']) && isOriginKind(value['kind']);
+}
+
+function isAllocationMethod(
+  value: unknown,
+): value is AbilityAllocationMethod {
+  return (
+    value === 'standard_array' || value === 'point_buy' || value === 'manual'
+  );
+}
+
+/**
+ * All six abilities, present as exact keys, each an integer in the schema's
+ * 1–30 — a partial map is refused as `invalid_params` before the atomic
+ * command ever runs. All 10s passes: D64 makes it a valid allocation, not an
+ * error state.
+ */
+function isGuidedAbilityScores(value: unknown): boolean {
+  if (!hasExactKeys(value, abilities)) {
+    return false;
+  }
+  return abilities.every((ability) => {
+    const score = value[ability];
+    return (
+      typeof score === 'number' &&
+      Number.isSafeInteger(score) &&
+      score >= 1 &&
+      score <= 30
+    );
+  });
+}
+
+/**
+ * The seam pins the params shape (`GuidedAllocateAbilitiesParams`) but — a
+ * seam gap, reported with this dispatch — ratified no validator for it, so the
+ * guard lives here like the two above: the registry turns a validator failure
+ * into `invalid_params` before any handler runs, and only this module needs
+ * it. The UUID and revision idioms match `commands.execute` exactly, because
+ * this request rides the same executor.
+ */
+function isGuidedAllocateAbilitiesParams(
+  value: unknown,
+): value is GuidedAllocateAbilitiesParams {
+  if (
+    !hasExactKeys(value, [
+      'character_id',
+      'method',
+      'scores',
+      'operation_uuid',
+      'expected_revision',
+    ])
+  ) {
+    return false;
+  }
+  const characterId = value['character_id'];
+  const expectedRevision = value['expected_revision'];
+  return (
+    typeof characterId === 'number' &&
+    Number.isSafeInteger(characterId) &&
+    characterId > 0 &&
+    isAllocationMethod(value['method']) &&
+    isGuidedAbilityScores(value['scores']) &&
+    typeof value['operation_uuid'] === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      value['operation_uuid'],
+    ) &&
+    typeof expectedRevision === 'number' &&
+    Number.isSafeInteger(expectedRevision) &&
+    expectedRevision >= 0
+  );
 }
 
 /**
@@ -117,5 +191,32 @@ export const handlers: readonly RpcHandler[] = Object.freeze([
     isGuidedOriginParams,
     (context, params) =>
       translatingRefusals(() => applyGuidedOrigin(context.db, params)),
+  ),
+  /**
+   * WARNINGS NEVER SURFACE HERE AS ERRORS (D49): `allocateGuidedAbilities`
+   * carries them inside the successful result, and this handler adds only the
+   * `RevisionConflict` translation every executor-riding method owes — the
+   * same structured `handler_error` `commands.execute` emits, so the two
+   * paths cannot drift on the precedent.
+   */
+  defineRpcHandler(
+    GUIDED_RPC.allocateAbilities,
+    isGuidedAllocateAbilitiesParams,
+    async (context, params) => {
+      try {
+        return await allocateGuidedAbilities(
+          context.db,
+          params,
+          new CharacterCommandIntegrity(COMMAND_INTEGRITY_KEY),
+        );
+      } catch (error) {
+        if (error instanceof RevisionConflict) {
+          throw new RpcError('handler_error', error.message, {
+            current_revision: error.currentRevision,
+          });
+        }
+        throw error;
+      }
+    },
   ),
 ]);

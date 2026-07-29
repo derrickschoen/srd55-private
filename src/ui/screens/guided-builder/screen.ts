@@ -6,6 +6,7 @@ import {
 import { createQueriesClient } from '../../../queries/client';
 import type { Route } from '../../router';
 import { defineScreen, type ScreenContext } from '../../screen';
+import { createAbilitiesStep } from './abilities-step';
 import { createBackgroundStep } from './background-step';
 import { createClassChooser } from './class-chooser';
 import { renderGuidedBuildState } from './guided-builder';
@@ -55,7 +56,27 @@ async function render(context: ScreenContext): Promise<() => void> {
   } else {
     const client = createQueriesClient(context.rpc);
     const state = await client.buildState(characterId);
-    if (state.kind === 'ready' && state.current_step === 'species') {
+    if (state.kind === 'ready' && state.current_step === 'abilities') {
+      // The abilities step (B1). The character row supplies the BASE scores
+      // the inputs prefill from (plan §3.5 — never a resolved total) and the
+      // revision the atomic allocation command requires.
+      const character = await client.getCharacter(characterId);
+      const step = createAbilitiesStep({
+        characterId,
+        character,
+        allocateAbilities: (method, scores, operationUuid) =>
+          client.allocateAbilities({
+            character_id: characterId,
+            method,
+            scores,
+            operation_uuid: operationUuid,
+            expected_revision: character.revision,
+          }),
+        navigate: (path) => context.router.navigate(path),
+      });
+      view = step.element;
+      cleanups.push(step.cleanup);
+    } else if (state.kind === 'ready' && state.current_step === 'species') {
       // The live post-class steps (A4 species, A5 background). Every other
       // derived step still renders one of the pinned pure panels.
       const step = createSpeciesStep({

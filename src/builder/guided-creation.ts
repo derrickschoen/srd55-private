@@ -23,6 +23,9 @@
  */
 
 import { UpdateClassCommand } from '../commands/update-class';
+import {
+  CharacterCommandExecutor,
+} from '../commands/character-command-executor';
 import type { CharacterCommandIntegrity } from '../commands/integrity';
 import {
   rowId,
@@ -35,10 +38,12 @@ import {
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import {
+  abilityAllocationMethods,
   creatureSizes,
   creatureTypes,
   damageTypes,
   isEnumValue,
+  type KnownAbilityAllocationMethod,
   type KnownCreatureSize,
   type KnownCreatureType,
   type KnownDamageType,
@@ -63,9 +68,15 @@ import {
   bundledSpeciesTemplates,
 } from '../rules/origins-srd';
 import {
+  countAbilitiesAtLeastPlusTwo,
   grantsLineageSpells,
   GUIDED_LEVEL_ONE_STEP_ORDER,
+  hasWeakScores,
+  type AbilityAllocationMethod,
   type BuildStep,
+  type GuidedAbilityWarning,
+  type GuidedAllocateAbilitiesParams,
+  type GuidedAllocateAbilitiesResult,
   type GuidedApplyOriginResult,
   type GuidedBuildStateResult,
   type GuidedClassOption,
@@ -93,9 +104,17 @@ import {
  * the tool or the equipment, because recording a background applies none of
  * them. The step is complete when the choice is recorded, and the screen says
  * out loud that recording is ALL that happened.
+ *
+ * `abilitiesAllocated` (B1): `characters.ability_allocation_method` is
+ * non-NULL. The signal is EXPLICIT because inference is unsound (plan B-A2):
+ * the six score columns are NOT NULL with a DEFAULT of 10, so "scores exist"
+ * is true for every character by construction and nothing else can tell a
+ * chosen 10 from a defaulted one. D64 makes all 10s a VALID allocation, so
+ * this is the difference between a completion predicate and a guess.
  */
 export interface GuidedStepEvidence {
   readonly classChosen: boolean;
+  readonly abilitiesAllocated: boolean;
   readonly speciesChosen: boolean;
   readonly backgroundChosen: boolean;
 }
@@ -108,23 +127,17 @@ export interface GuidedStepEvidence {
  * those undetectable steps as the terminal not-built-yet panel rather than
  * pretending they can be finished here.
  *
- * `abilities` IS PINNED COMPLETE, AND THAT IS A DISCLOSED LIMITATION, NOT A
- * DETECTION. Ability scores are six NOT-NULL columns on `characters` with a
- * DEFAULT of 10, so "scores exist" is true for every character by construction
- * and nothing in the schema can distinguish an allocated score from a
- * defaulted one. A literal `false` here would be worse: the walk would stop at
- * `abilities` forever — no dispatch in this group builds that screen — and the
- * species and background steps behind it would be unreachable dead code, the
- * exact dead-end wizard shell §5 of the plan forbids (D54: the bar is usable).
- * It would also leave §9's A1-STEP control unfireable, which requires a
- * fixture advanced PAST species. The species screen says out loud that the
- * abilities step was skipped (D33), and when an abilities step is built this
- * literal becomes its evidence field.
+ * `abilities` (B1) is REAL DETECTION now: the allocation signal
+ * `characters.ability_allocation_method` replaced the pinned `abilities: true`
+ * literal A1 shipped while no abilities screen existed. That literal is
+ * DELETED, not reworded (plan §5), along with the species screen's
+ * abilities-step-skipped disclosure — both existed only while the step was
+ * unbuildable.
  */
 export function deriveBuildStep(evidence: GuidedStepEvidence): BuildStep {
   const complete: Readonly<Record<BuildStep, boolean>> = {
     class: evidence.classChosen,
-    abilities: true,
+    abilities: evidence.abilitiesAllocated,
     species: evidence.speciesChosen,
     background: evidence.backgroundChosen,
     skills: false,
@@ -146,6 +159,14 @@ export function readGuidedStepEvidence(
 ): GuidedStepEvidence {
   return {
     classChosen: characterLevel(db, characterId) !== null,
+    abilitiesAllocated:
+      db.one(
+        `SELECT ability_allocation_method
+         FROM characters
+         WHERE id = ?`,
+        [characterId],
+        (row) => sqlNullableString(row, 'ability_allocation_method'),
+      ) !== null,
     speciesChosen:
       db.one(
         `SELECT id
@@ -983,4 +1004,83 @@ function replaceGuidedLineageGrants(
     ],
   ).lastInsertId;
   new GrantRuleSlotGenerator(db).generateForSource(instanceId);
+}
+
+/* --------------------------------------------- B1: the abilities step */
+
+/**
+ * The seam's `AbilityAllocationMethod` and the domain vocabulary
+ * `abilityAllocationMethods` are the SAME closed set, proven at compile time
+ * in both directions. The seam is supervisor-owned and cannot host the
+ * runtime array; the schema CHECK and the payload validator read the domain
+ * array; these two lines are what stop the pair drifting apart silently.
+ */
+type _Expect<T extends true> = T;
+export type _AllocationMethodsMatchSeam = _Expect<
+  [
+    Exclude<AbilityAllocationMethod, KnownAbilityAllocationMethod>,
+    Exclude<KnownAbilityAllocationMethod, AbilityAllocationMethod>,
+  ] extends [never, never]
+    ? true
+    : never
+>;
+const _allocationMethodsAreTheSeams: readonly AbilityAllocationMethod[] =
+  abilityAllocationMethods;
+void _allocationMethodsAreTheSeams;
+
+/**
+ * ONE atomic allocation (plan §3.1): all six base scores AND the method land
+ * together through the command executor — never six `update_ability` calls,
+ * because partial allocation is not a state the wizard should be able to
+ * produce. Riding the executor is what buys idempotent replay by
+ * `operation_uuid`, the revision check, the audit entry — and the SNAPSHOT
+ * inverse pinned in `prepareInverse`, so undo restores the signal with the
+ * scores.
+ *
+ * WARNINGS ARE DATA IN THE RESULT, NEVER REFUSALS (D49, D64). Point buy and
+ * manual entry warn; a result with fewer than two abilities at modifier +2 or
+ * better warns via the seam's `hasWeakScores`. Every one of these journeys
+ * SUCCEEDS — the signal is written and `current_step` advances — with the
+ * warning travelling beside the result. All 10s is a VALID allocation, not an
+ * error state. Nothing in this function can turn a warning into a block,
+ * because the warnings are computed after the command has already committed.
+ *
+ * THE WEAKNESS WARNING FIRES ON THE RESULT, NOT THE METHOD: a weak standard
+ * array assignment warns, a strong manual entry does not (it carries only the
+ * method warning).
+ */
+export async function allocateGuidedAbilities(
+  db: DatabaseContext,
+  params: GuidedAllocateAbilitiesParams,
+  integrity: CharacterCommandIntegrity,
+): Promise<GuidedAllocateAbilitiesResult> {
+  await new CharacterCommandExecutor(db, integrity).execute({
+    character_id: params.character_id,
+    operation_uuid: params.operation_uuid,
+    expected_revision: params.expected_revision,
+    command: {
+      type: 'allocate_abilities',
+      method: params.method,
+      scores: params.scores,
+    },
+  });
+
+  const warnings: GuidedAbilityWarning[] = [];
+  if (params.method !== 'standard_array') {
+    warnings.push({ kind: 'non_standard_method', method: params.method });
+  }
+  if (hasWeakScores(params.scores)) {
+    warnings.push({
+      kind: 'weak_scores',
+      at_least_plus_two: countAbilitiesAtLeastPlusTwo(params.scores),
+    });
+  }
+
+  return {
+    character_id: params.character_id,
+    current_step: deriveBuildStep(
+      readGuidedStepEvidence(db, params.character_id),
+    ),
+    warnings,
+  };
 }

@@ -2,6 +2,7 @@ import type { SqlValue } from '@sqlite.org/sqlite-wasm';
 import {
   CHARACTER_STATE_COLUMNS,
   CHARACTER_STATE_TABLES,
+  snapshotCharacterColumnsFor,
   snapshotSchemaVersion,
   snapshotTablesFor,
   type CharacterSnapshotSchemaVersion,
@@ -367,7 +368,11 @@ function parseSnapshot(value: unknown, label: string): CharacterSnapshotData {
     label,
   );
   const character = backupRecord(snapshot.character, `${label}.character`);
-  for (const column of CHARACTER_STATE_COLUMNS) {
+  // The columns, like the tables above, are the VERSION'S OWN: a pre-`a7-v8`
+  // save point predates `ability_allocation_method`, and requiring today's
+  // list would refuse every save point in a backup a user already downloaded.
+  const characterColumns = snapshotCharacterColumnsFor(version);
+  for (const column of characterColumns) {
     if (!Object.hasOwn(character, column)) {
       throw new BackupValidationError(
         `${label}.character is missing ${column}.`,
@@ -381,7 +386,7 @@ function parseSnapshot(value: unknown, label: string): CharacterSnapshotData {
     'characters',
     character,
     `${label}.character`,
-    CHARACTER_STATE_COLUMNS,
+    characterColumns,
   );
   return {
     schema_version: version,

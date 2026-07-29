@@ -412,6 +412,7 @@ CREATE TABLE `characters` (
 	`intelligence` integer DEFAULT 10 NOT NULL,
 	`wisdom` integer DEFAULT 10 NOT NULL,
 	`charisma` integer DEFAULT 10 NOT NULL,
+	`ability_allocation_method` VARCHAR,
 	`proficiency_bonus_override` integer,
 	`rules_edition_preference` VARCHAR DEFAULT '2024' NOT NULL,
 	`allow_legacy` TINYINT(1) DEFAULT false NOT NULL,
@@ -425,6 +426,7 @@ CREATE TABLE `characters` (
       AND intelligence BETWEEN 1 AND 30
       AND wisdom BETWEEN 1 AND 30
       AND charisma BETWEEN 1 AND 30),
+	CONSTRAINT "characters_ability_allocation_method_check" CHECK((`ability_allocation_method` IS NULL OR `ability_allocation_method` IN ('standard_array', 'point_buy', 'manual'))),
 	CONSTRAINT "characters_rules_edition_preference_check" CHECK(`rules_edition_preference` IN ('2014', '2024', 'expanded')),
 	CONSTRAINT "characters_proficiency_bonus_override_check" CHECK((`proficiency_bonus_override` IS NULL OR (typeof(`proficiency_bonus_override`) = 'integer' AND `proficiency_bonus_override` >= 1))),
 	CONSTRAINT "characters_revision_check" CHECK(typeof(`revision`) = 'integer' AND `revision` >= 0)

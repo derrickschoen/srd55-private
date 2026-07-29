@@ -1,5 +1,6 @@
 import { WIRE_SCHEMA_V1 } from './v1';
 import { WIRE_SCHEMA_V2 } from './v2';
+import { WIRE_SCHEMA_V3 } from './v3';
 import {
   versatileWeaponDamageFromLegacy,
   weaponDamageFromLegacy,
@@ -16,7 +17,7 @@ import {
  * domain requires a new schema version, an adjacent migration, and a
  * hand-frozen fragment fixture. Never edit an existing version.
  */
-export const CURRENT_CHARACTER_SHARE_VERSION = 2 as const;
+export const CURRENT_CHARACTER_SHARE_VERSION = 3 as const;
 
 /**
  * Any change to tuple field order, meaning, membership, or accepted value
@@ -26,6 +27,7 @@ export const CURRENT_CHARACTER_SHARE_VERSION = 2 as const;
 export const SHARE_SCHEMAS = Object.freeze({
   1: WIRE_SCHEMA_V1,
   2: WIRE_SCHEMA_V2,
+  3: WIRE_SCHEMA_V3,
 } as const);
 
 export type SupportedShareVersion = keyof typeof SHARE_SCHEMAS;
@@ -154,11 +156,51 @@ function migrateV1ToV2(document: unknown): unknown {
   ];
 }
 
+/**
+ * The v2→v3 migration is the null-pad the appended-field rule promises: a v2
+ * character tuple could not carry `ability_allocation_method`, so it arrives
+ * as null — which decodes to an absent optional field, which imports as NULL,
+ * the never-allocated state. Nothing else in the document moves. The version
+ * slot is rewritten to 3 because the decoder validates the root version.
+ */
+function migrateV2ToV3(document: unknown): unknown {
+  if (
+    !Array.isArray(document) ||
+    !WIRE_SCHEMA_V2.tuples.root.arities.some(
+      (arity) => arity === document.length,
+    )
+  ) {
+    throw new TypeError('wire document has an unsupported v2 tuple length.');
+  }
+  const character = document[2];
+  if (
+    !Array.isArray(character) ||
+    !WIRE_SCHEMA_V2.tuples.character.arities.some(
+      (arity) => arity === character.length,
+    )
+  ) {
+    throw new TypeError('wire character has an unsupported v2 tuple length.');
+  }
+  return [
+    document[0],
+    3,
+    [...character, null],
+    ...document.slice(3),
+  ];
+}
+
+/**
+ * ADJACENT means each migration lifts exactly one version step; the decoder
+ * composes them, so a v1 document runs 1→2 and then 2→3.
+ */
 export const MIGRATIONS = Object.freeze({
   1: migrateV1ToV2,
+  2: migrateV2ToV3,
 }) satisfies AdjacentMigrations;
 
 export { WIRE_SCHEMA_V1 } from './v1';
 export { WIRE_SCHEMA_V2 } from './v2';
+export { WIRE_SCHEMA_V3 } from './v3';
 export type { WireField, WireSchemaV1 } from './v1';
 export type { WireSchemaV2 } from './v2';
+export type { WireSchemaV3 } from './v3';
