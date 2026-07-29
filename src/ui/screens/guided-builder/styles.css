@@ -226,3 +226,64 @@
   cursor: not-allowed;
   opacity: 0.5;
 }
+
+/* The background step (A5). The recording-only disclosure is panel-level and
+   deliberately prominent: recording is ALL that applying a background does,
+   and the copy above the cards is the only place a person can learn that. */
+.guided-background-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr));
+  gap: 0.75rem;
+  margin: 1rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.guided-background-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  border: 1px solid var(--border, #c9c9c9);
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+}
+
+.guided-background-name {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.guided-background-recorded-only {
+  font-size: 0.9rem;
+  font-style: italic;
+}
+
+.guided-background-unapplied p {
+  margin: 0;
+  font-size: 0.85rem;
+  opacity: 0.85;
+}
+
+.guided-background-unapplied ul {
+  margin: 0.25rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.85rem;
+}
+
+.guided-background-apply {
+  margin-top: auto;
+  min-height: 2.4rem;
+  border: 1px solid var(--accent, #333);
+  border-radius: 0.45rem;
+  padding: 0.5rem 0.9rem;
+  color: #fff;
+  background: var(--accent, #333);
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.guided-background-apply:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}

@@ -1,7 +1,7 @@
 /**
  * GUIDED CREATION — build-state derivation (dispatch A1), transactional
- * class-first materialisation (dispatch A2), and the species step (dispatch
- * A4).
+ * class-first materialisation (dispatch A2), the species step (dispatch A4)
+ * and the background step (dispatch A5).
  *
  * The wizard's current step is a PURE FUNCTION OF CHARACTER STATE and nothing
  * else. D48 deleted the session-storage draft outright, so there is no second
@@ -47,18 +47,24 @@ import { CharacterCrud } from '../queries/character-crud';
 import { characterLevel } from '../rules/character-level';
 import { bundledClassContentKeys } from '../rules/class-progression-lookup';
 import {
+  backgroundFromTemplate,
   effectsFromTemplate,
   speciesFromTemplate,
   speciesTraitFromTemplate,
+  type BackgroundTemplateRow,
   type SpeciesTemplateRow,
   type SpeciesTemplateTraitEffectRow,
   type SpeciesTemplateTraitRow,
 } from '../rules/origins';
-import { bundledSpeciesTemplates } from '../rules/origins-srd';
+import {
+  bundledBackgroundTemplates,
+  bundledSpeciesTemplates,
+} from '../rules/origins-srd';
 import {
   grantsLineageSpells,
   GUIDED_LEVEL_ONE_STEP_ORDER,
   type BuildStep,
+  type GuidedApplyOriginResult,
   type GuidedBuildStateResult,
   type GuidedClassOption,
   type GuidedCreateParams,
@@ -78,17 +84,25 @@ import {
  * `speciesChosen` (A4): a `character_species` row exists for the character.
  * That rule is PINNED by the plan (§8) — NOT a `character_source_instances`
  * row, which is not on this path at all.
+ *
+ * `backgroundChosen` (A5): a `character_background` row exists — pinned by the
+ * same clause of §8, and by the same reasoning. Note what this deliberately
+ * does NOT attest: a background row proves nothing about the feat, the skills,
+ * the tool or the equipment, because recording a background applies none of
+ * them. The step is complete when the choice is recorded, and the screen says
+ * out loud that recording is ALL that happened.
  */
 export interface GuidedStepEvidence {
   readonly classChosen: boolean;
   readonly speciesChosen: boolean;
+  readonly backgroundChosen: boolean;
 }
 
 /**
  * The first step the evidence cannot prove complete, in D55's order.
  *
- * Steps with no detection yet (`background`, `skills`, `equipment`) are pinned
- * incomplete, so the walk stops at the first of them. The build screen renders
+ * Steps with no detection yet (`skills`, `equipment`) are pinned incomplete,
+ * so the walk stops at the first of them. The build screen renders
  * those undetectable steps as the terminal not-built-yet panel rather than
  * pretending they can be finished here.
  *
@@ -110,7 +124,7 @@ export function deriveBuildStep(evidence: GuidedStepEvidence): BuildStep {
     class: evidence.classChosen,
     abilities: true,
     species: evidence.speciesChosen,
-    background: false,
+    background: evidence.backgroundChosen,
     skills: false,
     equipment: false,
   };
@@ -134,6 +148,14 @@ export function readGuidedStepEvidence(
       db.one(
         `SELECT id
          FROM character_species
+         WHERE character_id = ?`,
+        [characterId],
+        (row) => sqlInteger(row, 'id'),
+      ) !== null,
+    backgroundChosen:
+      db.one(
+        `SELECT id
+         FROM character_background
          WHERE character_id = ?`,
         [characterId],
         (row) => sqlInteger(row, 'id'),
@@ -344,7 +366,7 @@ export function createGuidedCharacter(
   });
 }
 
-/* ------------------------------------------------------ A4: the species step */
+/* ------------------------------------- A4 + A5: the species and background steps */
 
 /**
  * SPECIES ARE APPLIED FROM THE TEMPLATE TABLES. NOT THROUGH `add_source`.
@@ -368,11 +390,15 @@ export function createGuidedCharacter(
  * they are not granted YET, never that the character lacks them).
  */
 
-/** The seam pins `{ character_id, current_step }` as `applyOrigin`'s result. */
-export interface GuidedApplyOriginResult {
-  readonly character_id: number;
-  readonly current_step: BuildStep;
-}
+/**
+ * The seam pins `{ character_id, current_step }` as `applyOrigin`'s result.
+ *
+ * A4 declared this locally because §8 described the shape only in prose; the
+ * seam has since ratified it (`contracts.ts`). Re-exported from here so A4's
+ * existing importers keep working, but the declaration now lives in the seam
+ * ALONE — two identical declarations are one edit away from being different.
+ */
+export type { GuidedApplyOriginResult };
 
 /**
  * THE BUNDLED ORIGIN IDENTITY IS CONTENT-KEY MEMBERSHIP, mirroring the class
@@ -382,6 +408,11 @@ export interface GuidedApplyOriginResult {
  */
 function bundledSpeciesKeys(): readonly string[] {
   return bundledSpeciesTemplates().map((template) => template.content_key);
+}
+
+/** The background twin (A5), derived from the same SRD parse the seeder uses. */
+function bundledBackgroundKeys(): readonly string[] {
+  return bundledBackgroundTemplates().map((template) => template.content_key);
 }
 
 function sqlKnownCreatureType(
@@ -483,18 +514,35 @@ const speciesTemplateTraitEffectRow: RowCodec<SpeciesTemplateTraitEffectRow> = (
  * `grants_lineage_spells` comes from the seam's pinned literal set, NEVER from
  * trait text — sniffing text is how two agents invent two different lists.
  *
- * `kind: 'background'` is dispatch A5 and is refused loudly rather than
- * answered wrongly: an empty list here would read as "no backgrounds exist",
- * which is a wrong answer wearing a right shape (D33).
+ * `kind: 'background'` (A5) reads `background_templates` the same way. Its
+ * `grants_lineage_spells` is a LITERAL `false`, pinned by the seam — "the
+ * seam's set is species-only; backgrounds are always false" — not a lookup
+ * that happens to miss.
  */
 export function listGuidedOriginOptions(
   db: DatabaseContext,
   kind: OriginKind,
 ): readonly GuidedOriginOption[] {
   if (kind === 'background') {
-    throw new Error(
-      'The background step is dispatch A5; the guided builder cannot list backgrounds yet.',
-    );
+    const keys = bundledBackgroundKeys();
+    const placeholders = keys.map(() => '?').join(', ');
+    return db
+      .all(
+        `SELECT content_key, name
+         FROM background_templates
+         WHERE content_key IN (${placeholders})
+         ORDER BY name`,
+        [...keys],
+        (row) => ({
+          content_key: sqlString(row, 'content_key'),
+          name: sqlString(row, 'name'),
+        }),
+      )
+      .map(({ content_key, name }) => ({
+        content_key,
+        name,
+        grants_lineage_spells: false,
+      }));
   }
   const keys = bundledSpeciesKeys();
   const placeholders = keys.map(() => '?').join(', ');
@@ -551,6 +599,60 @@ function gateBundledSpecies(
 }
 
 /**
+ * Every `background_templates` column is NOT NULL except the timestamps, so
+ * the codec is all plain strings — no enum narrowing, because the background
+ * fields (ability names, feat, skills, tool, equipment text) are printed prose
+ * copied verbatim, not values any rule dispatches on.
+ */
+const backgroundTemplateRow: RowCodec<BackgroundTemplateRow> = (row) => ({
+  id: sqlInteger(row, 'id'),
+  content_key: sqlString(row, 'content_key'),
+  rules_edition: sqlString(row, 'rules_edition'),
+  name: sqlString(row, 'name'),
+  ability_score_1: sqlString(row, 'ability_score_1'),
+  ability_score_2: sqlString(row, 'ability_score_2'),
+  ability_score_3: sqlString(row, 'ability_score_3'),
+  feat_name: sqlString(row, 'feat_name'),
+  skill_proficiency_1: sqlString(row, 'skill_proficiency_1'),
+  skill_proficiency_2: sqlString(row, 'skill_proficiency_2'),
+  tool_proficiency: sqlString(row, 'tool_proficiency'),
+  equipment_option_a: sqlString(row, 'equipment_option_a'),
+  equipment_option_b: sqlString(row, 'equipment_option_b'),
+  created_at: sqlNullableString(row, 'created_at'),
+  updated_at: sqlNullableString(row, 'updated_at'),
+});
+
+/** The background gate, `gateBundledSpecies`'s twin, same refusal vocabulary. */
+function gateBundledBackground(
+  db: DatabaseContext,
+  contentKey: string,
+): BackgroundTemplateRow {
+  if (!bundledBackgroundKeys().includes(contentKey)) {
+    throw new GuidedCreationRefusal(
+      'unknown_origin',
+      `No bundled background exists for content key "${contentKey}".`,
+    );
+  }
+  const template = db.one(
+    `SELECT id, content_key, rules_edition, name, ability_score_1,
+            ability_score_2, ability_score_3, feat_name, skill_proficiency_1,
+            skill_proficiency_2, tool_proficiency, equipment_option_a,
+            equipment_option_b, created_at, updated_at
+     FROM background_templates
+     WHERE content_key = ?`,
+    [contentKey],
+    backgroundTemplateRow,
+  );
+  if (template === null) {
+    throw new GuidedCreationRefusal(
+      'unknown_origin',
+      `The bundled background "${contentKey}" has no row in this database.`,
+    );
+  }
+  return template;
+}
+
+/**
  * ONE transaction for the whole origin, and RE-APPLYING REPLACES (plan §8).
  *
  * `character_species` is unique per character, so a second naive insert is a
@@ -570,16 +672,22 @@ function gateBundledSpecies(
  * `effectsFromTemplate` deliberately drops the template's `sort_order`; this
  * caller assigns a dense per-character order starting after the character's
  * surviving effects, honouring the template's ordering as array order.
+ *
+ * THE BACKGROUND ARM (A5) IS THE SPECIES ARM WITH ONE TABLE. A background copy
+ * is a single `character_background` row via `backgroundFromTemplate` — no
+ * traits, no effects, no proficiency rows, no equipment rows, because the
+ * copy records the printed words and applies nothing. Its replace is therefore
+ * one delete of the one row the previous copy owned, and it deliberately
+ * spares EVERYTHING else on the character — there is nothing else a
+ * background apply has ever written. `character_background` is unique per
+ * character, so without the delete a re-apply would be a raw constraint
+ * failure; with it, re-applying is idempotent under retry and the back button
+ * can change a background, same as species.
  */
 export function applyGuidedOrigin(
   db: DatabaseContext,
   params: GuidedOriginParams,
 ): GuidedApplyOriginResult {
-  if (params.kind === 'background') {
-    throw new Error(
-      'The background step is dispatch A5; the guided builder cannot apply a background yet.',
-    );
-  }
   return db.transaction(() => {
     const characterId = params.character_id;
     const existing = db.one(
@@ -592,6 +700,43 @@ export function applyGuidedOrigin(
     if (existing === null) {
       throw new Error(`No character with id ${characterId} exists.`);
     }
+
+    if (params.kind === 'background') {
+      const backgroundTemplate = gateBundledBackground(db, params.content_key);
+      // Replace: the parent row is the whole footprint of a background apply.
+      db.exec(
+        `DELETE FROM character_background WHERE character_id = ?`,
+        [characterId],
+      );
+      const background = backgroundFromTemplate(backgroundTemplate);
+      db.exec(
+        `INSERT INTO character_background (
+           character_id, name, ability_score_1, ability_score_2,
+           ability_score_3, feat_name, skill_proficiency_1,
+           skill_proficiency_2, tool_proficiency, equipment_option_a,
+           equipment_option_b, notes
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          characterId,
+          background.name,
+          background.ability_score_1,
+          background.ability_score_2,
+          background.ability_score_3,
+          background.feat_name,
+          background.skill_proficiency_1,
+          background.skill_proficiency_2,
+          background.tool_proficiency,
+          background.equipment_option_a,
+          background.equipment_option_b,
+          background.notes,
+        ],
+      );
+      return {
+        character_id: characterId,
+        current_step: deriveBuildStep(readGuidedStepEvidence(db, characterId)),
+      };
+    }
+
     const template = gateBundledSpecies(db, params.content_key);
 
     // Replace: effects first, because identifying them needs the trait rows
