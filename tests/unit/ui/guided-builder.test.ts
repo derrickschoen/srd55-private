@@ -3,7 +3,6 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  BACKGROUND_HOUSE_RULE_NOTICE,
   BACKGROUND_STEP_ATTR,
   MAGIC_INITIATE_FEAT_CONTENT_KEY,
   type GuidedBackgroundChoiceOptions,
@@ -488,7 +487,9 @@ describe('guided background step', () => {
         'increases as additions on top of the scores you allocated, and adds ' +
         'your chosen Origin feat to the character.',
     );
-    expect(text).toContain(BACKGROUND_HOUSE_RULE_NOTICE);
+    // D68: nothing on this step may call the player's feat/increase choice a
+    // house rule, homebrew, or a departure.
+    expect(text).not.toMatch(/house rule|homebrew|departure/i);
     expect(unapplied).toEqual([
       'the two skill proficiencies',
       'the tool proficiency',
@@ -518,7 +519,7 @@ describe('guided background step', () => {
     step.cleanup();
   });
 
-  it('shows the deviation label only after the player leaves the printed pairing', () => {
+  it('marks the printed pairing as the background default and never labels a change (D68)', () => {
     const step = createBackgroundStep({
       characterId: 1,
       options: backgroundChoices,
@@ -539,14 +540,23 @@ describe('guided background step', () => {
     backgroundInput.checked = true;
     backgroundInput.dispatchEvent(new Event('change'));
 
-    expect(
-      elementsWithAttribute(
-        step.element,
-        BACKGROUND_STEP_ATTR.deviation,
-        '',
-      ),
-    ).toHaveLength(0);
+    // The pairing line identifies the printed pairing as the BACKGROUND'S OWN
+    // default — never as a rule and never as anything the player deviates from.
+    const suggestion = elementsWithAttribute(
+      step.element,
+      BACKGROUND_STEP_ATTR.suggestion,
+      '',
+    )[0];
+    if (suggestion === undefined) {
+      throw new Error('The printed-default line was not rendered.');
+    }
+    const suggestionText = elementText(suggestion as unknown as Node);
+    expect(suggestionText).toContain("Honesty Background's printed default");
+    expect(suggestionText).toContain('Intelligence, Wisdom, Charisma');
+    expect(suggestionText).toContain('Magic Initiate (Cleric)');
 
+    // The feat select marks exactly the printed feat as the default and
+    // preselects it; the other feats carry no mark.
     const feat = elementsWithAttribute(
       step.element,
       BACKGROUND_STEP_ATTR.feat,
@@ -555,18 +565,50 @@ describe('guided background step', () => {
     if (feat === undefined) {
       throw new Error('The Origin feat selector was not rendered.');
     }
+    const featOptionText = (contentKey: string): string => {
+      const option = elementsByTagName(feat as unknown as Node, 'option').find(
+        (candidate) => candidate.getAttribute('value') === contentKey,
+      );
+      if (option === undefined) {
+        throw new Error(`No Origin feat option for ${contentKey}.`);
+      }
+      return elementText(option as unknown as Node);
+    };
+    expect(featOptionText(MAGIC_INITIATE_FEAT_CONTENT_KEY)).toBe(
+      'Magic Initiate (default)',
+    );
+    expect(featOptionText('2024:feat:lucky')).toBe('Lucky');
+
+    // Each ability select marks exactly the three printed abilities.
+    const slot = elementsWithAttribute(
+      step.element,
+      BACKGROUND_STEP_ATTR.increaseAbility,
+      '0',
+    )[0];
+    if (slot === undefined) {
+      throw new Error('The first increase select was not rendered.');
+    }
+    const abilityLabels = elementsByTagName(
+      slot as unknown as Node,
+      'option',
+    ).map((option) => elementText(option as unknown as Node));
+    expect(abilityLabels).toContain('Intelligence (default)');
+    expect(abilityLabels).toContain('Wisdom (default)');
+    expect(abilityLabels).toContain('Charisma (default)');
+    expect(abilityLabels).toContain('Strength');
+    expect(abilityLabels).not.toContain('Strength (default)');
+
+    // Leaving the default is ordinary use: after choosing a different feat,
+    // the defaults stay marked and NOTHING labels the choice a house rule,
+    // homebrew, or a departure (D68).
     const featSelect = interactiveElement(feat as unknown as Node);
     featSelect.value = '2024:feat:lucky';
     featSelect.dispatchEvent(new Event('change'));
-
-    const labels = elementsWithAttribute(
-      step.element,
-      BACKGROUND_STEP_ATTR.deviation,
-      '',
+    expect(featOptionText(MAGIC_INITIATE_FEAT_CONTENT_KEY)).toBe(
+      'Magic Initiate (default)',
     );
-    expect(labels).toHaveLength(1);
-    expect(elementText(labels[0] as unknown as Node)).toMatch(
-      /House rule:.*chosen by the player.*not the SRD's printed pairing/,
+    expect(elementText(step.element)).not.toMatch(
+      /house rule|homebrew|departure/i,
     );
     step.cleanup();
   });

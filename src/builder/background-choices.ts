@@ -20,12 +20,12 @@
  * the implementer's, OFFERED FOR RATIFICATION into the seam — reported, not
  * silently chosen for both sides.
  *
- * WHAT D61 RULES, restated because it is a deliberate SRD departure: the
- * background is required; its Origin feat and ability increases are the
- * PLAYER'S to choose, because the owner judges the SRD's allowed combinations
- * too restrictive. The printed pairing stays visible as what the SRD suggests
- * — a default and a reference, never a constraint — and the deviation is
- * labelled where a person can see it.
+ * WHAT D61 RULES, as amended by D68: the background is required; its Origin
+ * feat and ability increases are the PLAYER'S to choose, because the owner
+ * judges the SRD's allowed combinations too restrictive. The printed pairing
+ * is the DEFAULT — marked as the background's own, prefilled, never a
+ * constraint — and changing it is ordinary use, not a labelled departure
+ * (D68; see the note at the locators below).
  */
 
 import { abilities, isEnumValue, type Ability } from '../domain/enums';
@@ -306,7 +306,7 @@ export function printedPairing(
   };
 }
 
-/* -------------------------------------------------- the deviation label */
+/* ---------------------------------------------------------------- locators */
 
 /**
  * D68 — DO NOT MARK THIS AS HOMEBREW, A HOUSE RULE, OR A DEPARTURE. THIS NOTE
@@ -328,66 +328,13 @@ export function printedPairing(
  * So this constant and the deviation sentence are DELETED, not reworded, per
  * the standing rule for a disclosure whose reason has expired. If you are
  * reading this because you are about to add a "house rule" notice back: don't.
- */
-/* eslint-disable-next-line -- retained only as the anchor for the note above;
-   see D68. Remove with the last reference. */
-export const BACKGROUND_HOUSE_RULE_NOTICE =
-  'House rule: the SRD gives each background a fixed Origin feat and three ' +
-  'set ability scores. This app treats that printed pairing as a suggestion ' +
-  '— you choose the feat and assign the increases yourself. A combination ' +
-  'that differs from the printed one is a house rule of this app, not SRD ' +
-  'content.';
-
-/**
- * The player's side of the pairing, as the deviation check reads it. The
- * Magic Initiate list participates because the SRD prints it as part of the
- * feat ("Magic Initiate (Cleric)"): an Acolyte with the Wizard list is not
- * the printed pairing.
- */
-export interface ChosenBackgroundPairing {
-  readonly increases: readonly GuidedBackgroundIncrease[];
-  readonly origin_feat_content_key: string;
-  readonly magic_initiate_list: string | null;
-}
-
-/**
- * Null when the chosen combination IS the SRD's printed pairing — any
- * distribution of the printed spread over the three printed abilities, with
- * the printed feat — and the deviation sentence otherwise. An unparseable
- * printed pairing (a suggestion field at null) cannot certify a match, so it
- * labels; the sentence claims only whose combination it is, which stays true.
  *
- * ONE function produces the sentence and both surfaces show it: the step
- * renders it live as the choice deviates, and the apply persists it into each
- * contribution's `notes`, so the wire, the backup and every future effects
- * surface carry the label with the rows.
+ * (The constant the note above anchored to — `BACKGROUND_HOUSE_RULE_NOTICE` —
+ * and `backgroundPairingDeviation` lived here until D68 deleted them, along
+ * with the `houseRule` and `deviation` locators below. The note stays, by
+ * explicit owner instruction, where a session touching this step's contract
+ * will read it.)
  */
-export function backgroundPairingDeviation(
-  pairing: BackgroundPrintedPairing,
-  chosen: ChosenBackgroundPairing,
-): string | null {
-  const featMatches =
-    pairing.suggested_feat_content_key !== null &&
-    chosen.origin_feat_content_key === pairing.suggested_feat_content_key &&
-    (pairing.suggested_magic_initiate_list === null ||
-      chosen.magic_initiate_list === pairing.suggested_magic_initiate_list);
-  const printed = pairing.suggested_abilities;
-  const abilitiesMatch =
-    printed !== null &&
-    chosen.increases.every((increase) => printed.includes(increase.ability));
-  if (featMatches && abilitiesMatch) {
-    return null;
-  }
-  return (
-    'House rule: this feat and ability combination was chosen by the ' +
-    "player and is not the SRD's printed pairing for " +
-    `${pairing.background_name} (${pairing.printed_abilities.join(', ')}; ` +
-    `${pairing.printed_feat}).`
-  );
-}
-
-/* ---------------------------------------------------------------- locators */
-
 /**
  * The step's locators, mirroring `ABILITY_STEP_ATTR`'s ratified shape.
  */
@@ -404,12 +351,8 @@ export const BACKGROUND_STEP_ATTR = Object.freeze({
   magicInitiateList: 'data-background-feat-list',
   /** Magic Initiate's casting ability select. */
   magicInitiateAbility: 'data-background-feat-ability',
-  /** The printed-pairing line for the selected background. */
+  /** The line naming the selected background's printed default pairing. */
   suggestion: 'data-background-suggestion',
-  /** The always-visible house-rule notice. */
-  houseRule: 'data-background-house-rule',
-  /** The live deviation sentence; absent while the choice matches the SRD. */
-  deviation: 'data-background-deviation',
   /** The one submit button. */
   submit: 'data-background-submit',
 } as const);
