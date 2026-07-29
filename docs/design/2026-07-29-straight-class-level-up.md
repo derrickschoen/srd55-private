@@ -148,7 +148,11 @@ fires in this unit's scope.
 ## 5. Ability Score Improvement — revision 2 said "level 4" and that was WRONG
 
 **Verified by counting the seeded table myself: ASI appears on 47 lines of
-`docs/srd/source/class-level-tables.txt`, at levels 4, 6, 8, 10, 12, 14 and 16.**
+`docs/srd/source/class-level-tables.txt`, at levels **4, 8, 12 and 16 for ten of the twelve classes**, with **Fighter at
+4, 6, 8, 12, 14, 16** and **Rogue at 4, 8, 10, 12, 16**. (Revisions 3 and 4 said
+"4, 6, 8, 10, 12, 14, 16" — that is the UNION across all tables and is wrong per
+class; see D78. The Sorcerer's cell wraps across two lines, so a per-line scan
+misses all four of its levels.)**
 Revision 2 scoped in "level 4" and congratulated itself for not omitting it
 silently — while omitting six other levels exactly as silently. A level-up to 8
 would have shipped the identical wrong number the section condemns.
