@@ -1,5 +1,44 @@
 # Binding scope decisions
 
+## D76 — OWNER: warn on a STRICT reduction only; a tie is not a reduction (2026-07-29)
+
+**The ruling.** *"Also, show a warning when equipping an item reduces ac. Do not
+warn if there was a tie even if the tiebreaker would have gone the other way."*
+
+**1. The warning predicate is exactly: new total < previous total.** Strictly
+less. Nothing else fires it — not a formula being excluded, not the tie-break
+selecting a different source, not the base changing while the total holds.
+
+**2. A TIE IS NOT A REDUCTION, even when the tie-break flips the winner.** If
+equipping a shield excludes one formula and another produces the same number, the
+person lost nothing and must not be told they did. D73's tie-break is a
+bookkeeping rule for choosing a source, not a change in outcome; wiring the
+warning to it would fire on a difference the character never feels.
+
+**3. THE WARNING AND THE DISCLOSURE ARE DIFFERENT SURFACES, and conflating them
+breaks both.** This is the trap in implementing this ruling:
+
+- **The disclosure** (D74 §3, D75 §4) is on the sheet, **always**, whenever a
+  formula was excluded: *"Martial Arts (10 + DEX + WIS) does not apply while you
+  carry a shield."* It is an explanation, and it appears whether the total went
+  down, stayed level, or rose.
+- **The warning** is at the moment of equipping, and **only on a strict drop**.
+
+Wire the disclosure to the warning's predicate and every tie loses its
+explanation. Wire the warning to the disclosure's predicate and it cries on every
+tie. **They share the resolver's output and nothing else.**
+
+**4. It stays a warning (D49).** Never a block, never an auto-swap, never a
+prompt to remove what the person deliberately equipped.
+
+**5. The fixtures**, joining D74's and D75's:
+
+- **Strict drop** — Monk with DEX +3 / WIS +3 equips a shield: 16 → 15. **Warns.**
+- **Tie with a flipped winner** — the excluded formula and the surviving one
+  produce the same total. **Does NOT warn**, and the sheet still explains the
+  exclusion. This is the fixture that catches the conflation in §3, and a naive
+  implementation passes the first and fails this one.
+
 ## D75 — OWNER: a shield can CHANGE THE BASE, not just add to it (2026-07-29)
 
 **The ruling.** *"The resolver will also need to account for changing the base
