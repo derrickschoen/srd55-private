@@ -91,8 +91,14 @@ import {
 import { rowContractError } from '../domain/contracts/rows';
 import { weaponContentKey } from './weapons-srd';
 
-/** The rules edition every bundled species and background belongs to. */
-export const BUNDLED_ORIGIN_RULES_EDITION = '2024';
+/**
+ * The rules edition every bundled species and background belongs to.
+ * Declared in `origin-rules-edition.ts` (an extract-free module — see its
+ * comment for why that matters) and re-exported here so existing importers
+ * keep one import point.
+ */
+import { BUNDLED_ORIGIN_RULES_EDITION } from './origin-rules-edition';
+export { BUNDLED_ORIGIN_RULES_EDITION };
 
 export class OriginExtractError extends Error {
   constructor(message: string) {

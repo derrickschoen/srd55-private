@@ -164,6 +164,13 @@ async function portableTableCounts(
       await rows(page, 'character_weapons'),
       characterId,
     ).length,
+    // Skill grants joined it with skills-with-provenance S-A: a document
+    // that does not carry them silently loses every skill choice's
+    // provenance and keeps only the derived flat projection.
+    character_skill_grants: forCharacter(
+      await rows(page, 'character_skill_grants'),
+      characterId,
+    ).length,
     // The character's origin joined it on the same terms.
     character_species: forCharacter(
       await rows(page, 'character_species'),
@@ -541,6 +548,10 @@ test('captures every restorable character table and reports exact state differen
     'character_rule_overrides',
     'character_save_points',
     'character_sheet_adjustments',
+    // Added when skill grants became the source of truth (S-A): a backup
+    // without them silently loses every choice's provenance, keeping only
+    // the flat projection.
+    'character_skill_grants',
     'character_skill_proficiencies',
     'character_source_instances',
     'character_species',
@@ -848,8 +859,9 @@ test('round-trips a named save point through the mutation path', async ({
   )[0]!;
   expect(point).toMatchObject({
     label: 'Before experiment',
-    // a7-v7 is the snapshot version whose weapon rows carry tagged ranges.
-    schema_version: 'a7-v7',
+    // a7-v9 is the snapshot version that carries character_skill_grants
+    // (skills-with-provenance S-A; a7-v8 was hand-frozen first).
+    schema_version: 'a7-v9',
   });
   await execute(
     page,
@@ -1109,7 +1121,7 @@ test('undoes a structural class change through its snapshot inverse', async ({
   );
   expect(changed.inverse).toMatchObject({
     type: 'restore_snapshot',
-    snapshot: { schema_version: 'a7-v7' },
+    snapshot: { schema_version: 'a7-v9' },
     integrity: expect.any(String),
   });
   await execute(
@@ -1719,7 +1731,7 @@ test('adds species and background roots with nested Magic Initiate chains and re
       config: humanConfig,
     },
   });
-  expect(duplicate.message).toBe('Human is not repeatable.');
+  expect(duplicate.message).toBe('Parity Human is not repeatable.');
   await execute(
     page,
     character.id,
@@ -2029,6 +2041,17 @@ test('builds the golden read-only report values and duplicate classifications', 
     character_level: 8,
     proficiency_bonus: 3,
     abilities: {
+      strength: 10,
+      dexterity: 10,
+      constitution: 10,
+      intelligence: 16,
+      wisdom: 14,
+      charisma: 18,
+    },
+    // B2's additive layer: base is addressable beside the resolved totals,
+    // and with no ability_increase contributions in this fixture the two are
+    // equal by construction.
+    abilities_base: {
       strength: 10,
       dexterity: 10,
       constitution: 10,
