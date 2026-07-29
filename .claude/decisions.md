@@ -1,5 +1,76 @@
 # Binding scope decisions
 
+## D72 — OWNER: items are THINGS, effects are the ONE vocabulary (2026-07-29)
+
+**The ruling.** Offered three schemas for Armor Class and item modifiers, the
+owner chose **Option C**: *"items are things; effects are the one vocabulary and
+every numeric change routes through `character_effects`, with new kinds. Armor,
+shields and weapons keep their own tables, because they carry mechanics nothing
+else has — dex caps, stealth, damage dice, mastery. They're equipment, not
+modifiers. An item that only modifies goes in `character_items` and speaks
+through effects."*
+
+**1. `character_armor` and `character_weapons` STAY.** They carry mechanics
+nothing else has: `dex_bonus` full/capped/none with its cap, stealth
+disadvantage, strength requirement, damage dice and versatile damage, mastery,
+range. A shield is already `character_armor.slot = 'shield'` and does **not**
+get a table of its own.
+
+**2. `character_items` is NEW**, and it is for things that only modify: name,
+description, attunement required, attuned, and a source instance. **It carries
+no `ac_change`, no `to_hit_change`, no `flat_damage_bonus` columns** — that was
+the rejected Option A, where every future modifier becomes a new column and the
+same "+1 AC" wears three different shapes depending on where it came from.
+
+**3. EVERY numeric change to a sheet number is a `character_effects` row.**
+The four kinds today — `damage_resistance`, `hp_modifier`, `speed`,
+`ability_increase` — are joined by, at minimum:
+
+- `armor_class_bonus` — a flat addend (Cloak of the Turtle, Ring of Protection)
+- `armor_class_formula` — base + up to two ability modifiers + `allows_shield`
+  (Monk 10+DEX+WIS, Barbarian 10+DEX+CON, the homebrew turtle paladin
+  10+CON+CHA, the homebrew turtle species 13+DEX)
+- `attack_ability_override` — Pact of the Blade using CHA, **scoped to a weapon**
+- `weapon_attack_bonus` and `weapon_damage_bonus` — scoped the same way
+
+**Why this and not a second vocabulary for items** (the rejected Option B): one
+rule expressed twice drifts, which is F22 and has already bitten this project.
+An effect row already carries `source_instance_id` and `label`, so a "+1 AC" from
+a cloak, a subclass and a species are the same row shape with different sources.
+
+**4. UNARMORED DEFENCE IS A REPLACEMENT, AND THEY COMPETE.** A turtle-species
+turtle-paladin has both 13+DEX and 10+CON+CHA. **The rule is HIGHEST WINS**, and
+per D67 the sheet must say **which won and what the loser would have been**. This
+is a resolver, not a sum, and it is the one genuinely new piece of logic in the
+unit. Monk forbids a shield and Barbarian permits one, which is why
+`allows_shield` lives on the row rather than in a hardcoded rule.
+
+**5. `character_sheet_adjustments.armor_class_adjustment` MUST BE DISPOSITIONED.**
+It is a single integer ±20 with a free-text note and **no source** — a second,
+unsourced way to change Armor Class that cannot answer D67's reveal. Leaving it
+beside the effects layer is two mechanisms for one rule. *Taken for now:* it is
+**retired into an `armor_class_bonus` effect** carrying its note as the label.
+*Seam:* one column and one migration. *Cost to flip:* keep the column as a
+labelled effect source instead.
+
+**6. The cost, stated rather than discovered.** `effect_kind` is a closed CHECK
+in the schema, so new kinds are a migration; the payload columns grow (seven
+today for four kinds, roughly doubling); and every kind must be carried by
+snapshot, backup and the share wire, which is a version mint under D41. This is
+the same tax the skills table paid and it is not cheap.
+
+**7. The homebrew fixtures are OURS**, so committing them is fine under D59 —
+the test is authorization and we are the author. They must cover every
+permutation: armour of each weight, a shield, an attuned and an unattuned AC
+item, an item that is both weapon and AC source, a damage-bonus weapon, a
+pact-style ability override, and flat and per-level HP items. **The fixture that
+matters most is the collision**: turtle species + turtle paladin + shield +
+cloak, unarmored — two formulas, a shield and a flat bonus at once, which catches
+a resolver that sums formulas or drops the shield.
+
+**This is its own unit with its own plan and review rounds**, not a rider on
+level-up.
+
 ## D71 — OWNER: double-submit is the UI's problem, and `unknown_origin` stays one reason (2026-07-29)
 
 Two open questions closed, both by declining to build.
