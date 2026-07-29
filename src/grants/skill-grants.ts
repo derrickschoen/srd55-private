@@ -475,6 +475,75 @@ export function resolveSkillGrants(
   };
 }
 
+/** One unfilled SPECIES choice grant, with its per-grant available choices. */
+export interface UnfilledSpeciesSkillGrant {
+  readonly grant_id: number;
+  readonly source_instance_id: number;
+  readonly grant_key: string;
+  readonly ordinal: number;
+  readonly available: readonly Skill[];
+}
+
+/**
+ * The unfilled ACTIVE species choice grants (Keen Senses, Skillful), each
+ * with its available choices — the seam's plan pool minus every skill an
+ * active grant already holds, §3.3's same held-skill rule the class arm
+ * applies. Shared by planner completeness and the guided step (S-C) so the
+ * two surfaces cannot disagree about what a species still owes.
+ */
+export function unfilledSpeciesSkillGrants(
+  db: DatabaseContext,
+  characterId: number,
+): UnfilledSpeciesSkillGrant[] {
+  const resolved = resolveSkillGrants(db, characterId);
+  const held = new Set<Skill>(resolved.skills);
+  const unfilled: UnfilledSpeciesSkillGrant[] = [];
+  for (const grant of resolved.grants) {
+    if (
+      grant.state !== 'active' ||
+      grant.skill !== null ||
+      !isEnumValue(SPECIES_SKILL_GRANT_KEYS, grant.grant_key)
+    ) {
+      continue;
+    }
+    const plan = Object.values(SPECIES_SKILL_GRANT_PLANS).find(
+      (candidate) => candidate.grant_key === grant.grant_key,
+    );
+    if (plan === undefined) {
+      continue;
+    }
+    const pool = plan.pool === 'any_skill' ? [...skills] : [...plan.pool];
+    unfilled.push({
+      grant_id: grant.id,
+      source_instance_id: grant.source_instance_id,
+      grant_key: grant.grant_key,
+      ordinal: grant.ordinal,
+      available: pool.filter((skill) => !held.has(skill)),
+    });
+  }
+  return unfilled;
+}
+
+/**
+ * THE GUIDED SKILLS STEP'S COMPLETION PREDICATE (S-C, §3.6): true exactly
+ * when the resolver reports no unfilled ACTIVE class grants.
+ *
+ * DELIBERATELY DERIVED FROM `resolveSkillGrants`, not a parallel count query:
+ * §5's trap is a completion predicate that silences on totals, and one truth
+ * shared by the step, planner completeness and this predicate is what keeps
+ * "an unfilled class grant is outstanding no matter what else is held" a
+ * single rule rather than three predicates that can drift. Species choice
+ * grants never gate it — §4 pins "advances only when every class ordinal is
+ * filled", and a species pool exhausted by other sources must not strand the
+ * step.
+ */
+export function classSkillGrantsFilled(
+  db: DatabaseContext,
+  characterId: number,
+): boolean {
+  return resolveSkillGrants(db, characterId).unfilledClassGrants.length === 0;
+}
+
 /**
  * A DOMAIN refusal of a skill-grant write, distinct from an unexpected
  * failure — the `GuidedCreationRefusal` pattern with the seam's

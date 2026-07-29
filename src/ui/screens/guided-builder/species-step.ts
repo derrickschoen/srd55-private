@@ -10,12 +10,14 @@
  *   metadata and calls nothing but the seam's `applyOrigin` method.
  * - D33, the part people get wrong (§3.4): the step advances once the
  *   `character_species` row exists, but several bundled species REQUIRE
- *   choices this application cannot model — there is no table for a lineage,
- *   a chosen skill, or an Origin feat. Every card names the choices applying
- *   it will NOT make, so a species never arrives looking finished while its
- *   lineage and skill were never chosen. The lists live in
- *   {@link SPECIES_UNMADE_CHOICES}, a pinned literal reviewed by eye — never
- *   inferred from trait text.
+ *   choices this application cannot model — there is no table for a lineage
+ *   or an Origin feat. Every card names the choices applying it will NOT
+ *   make, so a species never arrives looking finished while its lineage was
+ *   never chosen. The lists live in {@link SPECIES_UNMADE_CHOICES}, a pinned
+ *   literal reviewed by eye — never inferred from trait text. The SKILL
+ *   choices (Elf Keen Senses, Human Skillful) left these lists when
+ *   skills-with-provenance made them tracked grants: applying the species
+ *   mints the grant, and the guided SKILLS step makes it choosable.
  * - Lineage spells (D56, granted by A6): applying a species now also runs the
  *   grant machinery over its seeded definition, so the spells a species
  *   grants unconditionally (the Tiefling's Thaumaturgy) actually arrive. The
@@ -94,12 +96,15 @@ export const SPECIES_UNMADE_CHOICES: ReadonlyMap<string, readonly string[]> =
         'a Draconic Ancestry — the kind of dragon, which sets the Breath Weapon and Damage Resistance damage type',
       ],
     ],
+    // The Keen Senses skill entry is DELETED, not reworded (plan §3.4 rule;
+    // skills-with-provenance S-B/S-C): the choice is now a tracked grant the
+    // guided skills step makes choosable, so applying Elf no longer leaves it
+    // unmakeable.
     [
       speciesKey('elf'),
       [
         'an Elven Lineage (Drow, High Elf, or Wood Elf)',
         'a spellcasting ability for its spells (Intelligence, Wisdom, or Charisma)',
-        'a Keen Senses skill (Insight, Perception, or Survival)',
       ],
     ],
     [
@@ -113,11 +118,13 @@ export const SPECIES_UNMADE_CHOICES: ReadonlyMap<string, readonly string[]> =
       speciesKey('goliath'),
       ['a Giant Ancestry benefit (one of six)'],
     ],
+    // The Skillful skill entry is DELETED for the same reason as Elf's Keen
+    // Senses above: S-B made it a tracked grant and the skills step makes it
+    // choosable.
     [
       speciesKey('human'),
       [
         'a size (Small or Medium — the copy records Medium)',
-        'a Skillful skill (any one skill)',
         'a Versatile Origin feat',
       ],
     ],

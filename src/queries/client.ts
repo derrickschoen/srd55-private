@@ -8,9 +8,12 @@ import {
   type GuidedBuildStateResult,
   type GuidedClassOption,
   type GuidedCreateParams,
+  type GuidedFillSkillGrantParams,
+  type GuidedFillSkillGrantResult,
   type GuidedOriginOption,
   type GuidedOriginOptionsParams,
   type GuidedOriginParams,
+  type GuidedSkillsStepState,
   type OriginKind,
 } from '../builder/contracts';
 import {
@@ -96,6 +99,10 @@ export interface QueriesClient extends CatalogClient {
   applyBackground(
     params: GuidedApplyBackgroundParams,
   ): Promise<GuidedApplyOriginResult>;
+  skillsStep(characterId: number): Promise<GuidedSkillsStepState>;
+  fillSkillGrant(
+    params: GuidedFillSkillGrantParams,
+  ): Promise<GuidedFillSkillGrantResult>;
 }
 
 export function createQueriesClient(rpc: RpcClient): QueriesClient {
@@ -249,6 +256,16 @@ export function createQueriesClient(rpc: RpcClient): QueriesClient {
     applyBackground: (params: GuidedApplyBackgroundParams) =>
       rpc.call<GuidedApplyBackgroundParams, GuidedApplyOriginResult>(
         BACKGROUND_RPC.applyBackground,
+        params,
+      ),
+    skillsStep: (characterId: number) =>
+      rpc.call<GuidedBuildStateParams, GuidedSkillsStepState>(
+        GUIDED_RPC.skillsStep,
+        characterParams(characterId),
+      ),
+    fillSkillGrant: (params: GuidedFillSkillGrantParams) =>
+      rpc.call<GuidedFillSkillGrantParams, GuidedFillSkillGrantResult>(
+        GUIDED_RPC.fillSkillGrant,
         params,
       ),
   });

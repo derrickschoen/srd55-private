@@ -360,9 +360,10 @@ describe('guided species step', () => {
     expect(text).toContain(
       'a spellcasting ability for its spells (Intelligence, Wisdom, or Charisma)',
     );
-    expect(text).toContain(
-      'a Keen Senses skill (Insight, Perception, or Survival)',
-    );
+    // The Keen Senses entry is DELETED, not reworded (skills-with-provenance
+    // S-C): the choice is a tracked grant the skills step makes choosable, so
+    // disclosing it as unmakeable here would be false.
+    expect(text).not.toContain('a Keen Senses skill');
     step.cleanup();
   });
 

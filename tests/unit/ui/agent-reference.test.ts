@@ -431,22 +431,18 @@ describe('planner build reference projection', () => {
   });
 
   /**
-   * THE THREE SHEET ITEMS, IN BOTH FORMS.
+   * THE SHEET ITEM AND THE PER-GRANT SKILL ITEM, IN BOTH FORMS.
    *
-   * A review measured that neither of the `unmade_multiclass_skill_choice`
-   * branches — the JSON projection and the readable row — was executed by any
-   * test: replacing all four numbers with 999 and both cells with a literal
-   * left the whole suite green. Its two siblings, `orphan_hit_point_roll` and
-   * `no_skill_proficiencies`, were in the same state and are covered here too,
-   * because the gap was the FAMILY and not the newest member of it.
-   *
-   * All three carry no `source_ref` — they hang off no source instance — so the
-   * projection cannot reuse the registry the other items go through, and that
-   * is exactly the branch nothing was running.
+   * A review measured that the retired `unmade_multiclass_skill_choice`
+   * branches were executed by no test, and the same class of gap must not
+   * reopen for the item that replaced it: `unfilled_skill_grants`
+   * (skills-with-provenance §3.3, S-C) carries a `source_ref` through the
+   * registry like `unfilled_choices`, plus addressable grant ids the readable
+   * row must print — every value here is one a mutation could replace.
    */
   const sheetItems: CompletenessResult = {
     ...completeness,
-    outstanding_count: 3,
+    outstanding_count: 2,
     items: [
       {
         kind: 'orphan_hit_point_roll',
@@ -457,39 +453,25 @@ describe('planner build reference projection', () => {
         levels: [2, 3],
       },
       {
-        kind: 'no_skill_proficiencies',
-        title: 'No skill proficiencies chosen',
+        kind: 'unfilled_skill_grants',
+        title: 'Fighter 1 — 0 of 2 class skill choices chosen',
         detail: 'detail',
         remedy: 'remedy',
-        choice_count: 3,
-      },
-      {
-        kind: 'unmade_multiclass_skill_choice',
-        title: 'A skill from multiclassing has not been chosen',
-        detail: 'detail',
-        remedy: 'remedy',
-        entitled: 4,
-        chosen: 2,
-        outstanding: 2,
-        entries: [
-          {
-            class_name: 'Bard',
-            count: 1,
-            pool: 'any',
-            available_skills: ['performance'],
-          },
-          {
-            class_name: 'Ranger',
-            count: 1,
-            pool: 'class_list',
-            available_skills: ['perception'],
-          },
+        source_instance_id: 41,
+        source_name: 'Fighter 1',
+        grant_key: 'class_skill',
+        chosen: 0,
+        required: 2,
+        missing: 2,
+        grants: [
+          { grant_id: 71, ordinal: 1, available_skills: ['athletics'] },
+          { grant_id: 72, ordinal: 2, available_skills: ['perception'] },
         ],
       },
     ],
   };
 
-  it('projects the three sheet items with their own numbers, not a shared shape', () => {
+  it('projects the sheet item and the per-grant skill item with their own numbers', () => {
     const { reference } = buildAgentReference(workspace(), sheetItems);
     expect(reference.outstanding.items).toEqual([
       {
@@ -497,22 +479,20 @@ describe('planner build reference projection', () => {
         class_name: 'Barbarian',
         levels: [2, 3],
       },
-      { kind: 'no_skill_proficiencies', choice_count: 3 },
       {
-        kind: 'unmade_multiclass_skill_choice',
-        entitled: 4,
-        chosen: 2,
-        outstanding: 2,
-        entries: [
-          { class_name: 'Bard', count: 1, pool: 'any' },
-          { class_name: 'Ranger', count: 1, pool: 'class_list' },
+        kind: 'unfilled_skill_grants',
+        source_ref: expect.any(Number) as number,
+        grant_key: 'class_skill',
+        chosen: 0,
+        required: 2,
+        missing: 2,
+        grants: [
+          { grant_id: 71, ordinal: 1, available_skills: ['athletics'] },
+          { grant_id: 72, ordinal: 2, available_skills: ['perception'] },
         ],
       },
     ]);
-    // A CLASS NAME TRAVELS IN THE JSON HERE, deliberately: it comes from the
-    // recipient's OWN catalog by way of a content key, so it is not
-    // importer-authored text and does not belong in the withheld ledger. The
-    // hostile strings this fixture carries elsewhere must still be absent.
+    // The hostile strings this fixture carries elsewhere must still be absent.
     const json = JSON.stringify(reference);
     for (const hostile of IMPORTER_AUTHORED) {
       expect(json).not.toContain(hostile);
@@ -527,7 +507,7 @@ describe('planner build reference projection', () => {
     );
     // THE MIDDLE CELL IS THE SUBJECT AND THE THIRD IS THE NUMBERS, in the same
     // order the JSON carries them, so neither form can state more than the
-    // other. Every value asserted below is one the mutation replaced.
+    // other. Every value asserted below is one a mutation could replace.
     expect(table.rows.map((row) => row.map((cell) => cell.text))).toEqual([
       [
         'orphan_hit_point_roll',
@@ -536,15 +516,10 @@ describe('planner build reference projection', () => {
           'not have; they are not counted',
       ],
       [
-        'no_skill_proficiencies',
-        'not applicable',
-        '3 skill proficiencies are offered and none is recorded',
-      ],
-      [
-        'unmade_multiclass_skill_choice',
-        'Bard, Ranger',
-        '2 of 4 skill proficiencies recorded; 2 still owed, including 1 from ' +
-          'Bard (any), 1 from Ranger (class_list)',
+        'unfilled_skill_grants',
+        'Fighter 1',
+        '0 of 2 skill choices filled; 2 still unchosen (grant key ' +
+          'class_skill, grant ids 71, 72)',
       ],
     ]);
   });

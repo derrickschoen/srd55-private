@@ -392,10 +392,11 @@ function renderPlanner(
     renderCompleteness(
       session.completeness,
       {
-        chooseMulticlassSkill: (skill) =>
+        fillSkillGrant: (grantId, skill) =>
           void mutate(() =>
             session.execute({
-              type: 'choose_multiclass_skill',
+              type: 'fill_skill_grant',
+              grant_id: grantId,
               skill,
             }),
           ),

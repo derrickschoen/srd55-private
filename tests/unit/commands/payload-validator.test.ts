@@ -121,10 +121,6 @@ describe('character command payload validation', () => {
         subclass_definition_id: null,
       },
       {
-        type: 'choose_multiclass_skill',
-        skill: 'performance',
-      },
-      {
         type: 'restore_snapshot',
         snapshot: { version: 'a7-v1', tables: {} },
         integrity: signature,
@@ -209,13 +205,24 @@ describe('character command payload validation', () => {
         },
         'Character snapshot must be an object.',
       ],
+      // RETIRED COMMANDS REFUSE AS UNKNOWN (skills-with-provenance §3.5):
+      // `choose_multiclass_skill` could not name the grant it filled and
+      // `set_skill_proficiency` had no source; both are deliberately absent
+      // from the command vocabulary, not renamed within it.
       [
         {
           type: 'choose_multiclass_skill',
           skill: 'performance',
-          instrument: 'Lute',
         },
-        'Unknown command field: instrument.',
+        'Unknown character command type.',
+      ],
+      [
+        {
+          type: 'set_skill_proficiency',
+          skill: 'stealth',
+          proficient: true,
+        },
+        'Unknown character command type.',
       ],
     ];
 

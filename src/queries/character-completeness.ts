@@ -5,17 +5,12 @@ import {
   type SqlRow,
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
+import type { Skill, SlotBucket } from '../domain/enums';
+import { SKILL_GRANT_KEYS } from '../builder/contracts';
 import {
-  isEnumValue,
-  multiclassSkillPools,
-  skills,
-} from '../domain/enums';
-import type {
-  MulticlassSkillPool,
-  Skill,
-  SlotBucket,
-} from '../domain/enums';
-import { startingClass } from '../rules/sheet';
+  resolveSkillGrants,
+  unfilledSpeciesSkillGrants,
+} from '../grants/skill-grants';
 import { EligibleSpellSearch } from '../eligibility/eligible-spell-search';
 import { CharacterNotFoundError } from './character-crud';
 import { orderSources } from './order-sources';
@@ -64,71 +59,55 @@ export interface OrphanHitPointRollItem {
   readonly levels: readonly number[];
 }
 
-export interface NoSkillProficienciesItem {
-  readonly kind: 'no_skill_proficiencies';
-  readonly title: string;
-  readonly detail: string;
-  readonly remedy: string;
-  readonly choice_count: number;
+/** One unfilled grant inside an {@link UnfilledSkillGrantsItem} group. */
+export interface UnfilledSkillGrantChoice {
+  readonly grant_id: number;
+  readonly ordinal: number;
+  /**
+   * The skills this grant may be filled with NOW: its own pool minus every
+   * skill an active grant already holds — §3.3's rule, enforced by the
+   * partial unique index. Empty is possible (every pool skill held from
+   * other sources) and the item's detail says so rather than printing an
+   * obligation with an empty remedy.
+   */
+  readonly available_skills: readonly Skill[];
 }
 
 /**
- * A skill this character is owed by a class they MULTICLASSED INTO, and has not
- * ticked (Q11).
+ * A source's unfilled skill CHOICE GRANTS (skills-with-provenance §3.3, S-C).
  *
- * THREE CLASSES GRANT ONE and no others do — Bard, Ranger and Rogue — so this
- * item exists for a small, real population rather than nagging everybody. It is
- * `outstanding` and not a `catalog_gap` on the line
- * `character-completeness.ts` already draws: only the player can decide which
- * skill they took.
+ * COMPLETION IS PER GRANT, NEVER A COUNT. This item replaces the two retired
+ * count-shaped items (`no_skill_proficiencies`, which silenced on ANY flat
+ * tick, and `unmade_multiclass_skill_choice`, whose `entitled − chosen`
+ * arithmetic let a background tick pay off a class grant). An unfilled class
+ * grant is reported outstanding NO MATTER HOW MANY skills the character holds
+ * from other sources; held skills reduce only each grant's `available_skills`.
  *
- * IT NAMES THE POOL, which is the whole reason the entry skill needed a
- * discriminator rather than a count. The Bard's entry skill may be ANY of the
- * eighteen; the Ranger's and the Rogue's must come from that class's own list.
- * A remedy that did not say which would send a Ranger to the wrong list.
+ * Every grant is ADDRESSABLE: `grant_id` is what the planner's per-grant form
+ * passes to `fill_skill_grant`, so filling through one class's form fills THAT
+ * class's ordinal (§3.5 — the payload gained the grant's addressable identity;
+ * `choose_multiclass_skill`, which could not say which grant it filled, is
+ * retired).
  *
- * IT CANNOT SAY *WHICH* TICK PAID FOR *WHICH* GRANT, and says so rather than
- * pretending: `character_skill_proficiencies` is a flat set with no provenance,
- * so all this can compare is the TOTAL owed against the TOTAL ticked. That is
- * why `outstanding` is a number and not a list of grants.
- *
- * AND `chosen` COUNTS EVERY TICK, NOT ONLY THE CLASS-SOURCED ONES. A review
- * measured what that costs and the printed sentence now states it: the
- * entitlement is class-only, but a skill ticked because of a BACKGROUND or a
- * SPECIES lands in the same flat table, so such a tick pays off a class grant
- * here and can silence the item. THE ERROR DIRECTION IS SAFE — it can only
- * UNDER-report an outstanding choice, never invent one — so nobody is sent to
- * pick a skill they do not owe.
- *
- * FIXING IT PROPERLY IS A PROVENANCE COLUMN on `character_skill_proficiencies`,
- * a `db/schema/` change with its own backup, share and snapshot arms (D24) and
- * its own decision about what an imported tick with no provenance means. That is
- * not in this item's reach. Guessing the provenance from the skill's name —
- * "Arcana looks like a Wizard tick" — is the name matching this application
- * refuses. The sheet's `background_skills_are_text` gap already tells a reader
- * that background skills are unmodelled; this says what that costs HERE.
+ * One item per `(source_instance_id, grant_key)` group, the same grouping
+ * `unfilled_choices` uses per source and rule. Species choice grants (Keen
+ * Senses, Skillful) report here too — they are tracked obligations with a
+ * remedy, though they never gate the guided step (§4 pins class ordinals as
+ * the gate).
  */
-export interface UnmadeMulticlassSkillChoiceItem {
-  readonly kind: 'unmade_multiclass_skill_choice';
+export interface UnfilledSkillGrantsItem {
+  readonly kind: 'unfilled_skill_grants';
   readonly title: string;
   readonly detail: string;
   readonly remedy: string;
-  /** How many skills every class of theirs entitles them to, in total. */
-  readonly entitled: number;
+  readonly source_instance_id: number;
+  readonly source_name: string;
+  readonly grant_key: string;
+  /** Filled ordinals in THIS group — never a count of ticks from elsewhere. */
   readonly chosen: number;
-  readonly outstanding: number;
-  /** The multiclass entries that owe a skill, and where each may be drawn from. */
-  readonly entries: readonly {
-    readonly class_name: string;
-    readonly count: number;
-    readonly pool: Exclude<MulticlassSkillPool, 'none'>;
-    /**
-     * The skills this character may choose NOW. Already-held proficiencies are
-     * absent because the destination is unique on `(character_id, skill)` and
-     * choosing one again would waste the grant even if the write were a no-op.
-     */
-    readonly available_skills: readonly Skill[];
-  }[];
+  readonly required: number;
+  readonly missing: number;
+  readonly grants: readonly UnfilledSkillGrantChoice[];
 }
 
 export interface NoClassItem {
@@ -156,8 +135,7 @@ export type CompletenessItem =
   | UnchosenOptionItem
   | NoClassItem
   | OrphanHitPointRollItem
-  | NoSkillProficienciesItem
-  | UnmadeMulticlassSkillChoiceItem;
+  | UnfilledSkillGrantsItem;
 
 export type CompletenessFinding = CompletenessItem | CatalogGapItem;
 
@@ -653,276 +631,149 @@ export const orphanHitPointRolls: CompletenessCheck = {
 };
 
 /**
- * One class's contribution to a character's skill entitlement, RESOLVED.
- *
- * `via` is what makes the two counts different questions rather than one column
- * read twice: the class the character STARTED in offers its full
- * `skill_choice_count`, and every class they multiclassed into offers only its
- * `multiclass_skill_choice_count`, which is 0 for nine of the twelve.
+ * The display words per `grant_key`, so a Bard and an Elf are told different
+ * things by their titles rather than sharing one generic sentence.
  */
-interface SkillEntitlementLine {
-  readonly class_definition_id: number;
-  readonly class_name: string;
-  readonly is_starting_class: boolean;
-  readonly count: number;
-  readonly pool: MulticlassSkillPool | 'initial';
-}
-
-/**
- * How many skills this character's classes entitle them to, and from where.
- *
- * THIS REPLACES A LIVE WRONG NUMBER. The previous computation was
- * `sum(traits.skill_choice_count)` across every class with NO reference to
- * `is_starting_class`, so a Fighter 5 / Bard 1 was told they owed 2 + 3 = 5.
- * The SRD entry grant is 2 (Fighter, the starting class) + 1 (the Bard's entry
- * clause) = 3. The multiclass entry columns did not exist when that query was
- * written; they do now, and this is the number they were seeded for.
- *
- * IT REUSES `startingClass` RATHER THAN READING THE FLAG, which is why that
- * resolver was made generic. Reading `is_starting_class` directly here would
- * disagree with the sheet whenever the flag is missing or duplicated — the
- * completeness list would count one class's full row while the sheet counted
- * another's — and two disagreeing answers to "which class did this character
- * start as" is worse than either.
- *
- * A CLASS WITH NO SEEDED TRAITS ROW CONTRIBUTES NOTHING AND IS NOT COUNTED. Its
- * entitlement is genuinely unknown, and inventing 2 for it would put a number
- * the user cannot act on into an outstanding item.
- */
-function skillEntitlement(
-  context: CheckContext,
-): readonly SkillEntitlementLine[] {
-  // LEFT JOIN, AND THE OUTER-NESS IS LOAD-BEARING. An inner join drops a class
-  // with no seeded traits row — a homebrew or imported one — from the list
-  // BEFORE `startingClass` sees it, so a character who started as a homebrew
-  // class and dipped Bard would have the Bard resolved as their starting class
-  // and credited with its full "Choose any 3" instead of its entry grant of one.
-  // The homebrew class contributes 0 either way; what it must not do is
-  // disappear from the resolver's view and change what everything else means.
-  // The ORDER matches `CharacterSheetBuilder.#classes`, so both resolvers pick
-  // the same row when the flag is missing.
-  const rows = context.db.all(
-    `SELECT definition.id AS class_definition_id,
-            definition.name AS class_name,
-            level.is_starting_class AS is_starting_class,
-            traits.skill_choice_count AS skill_choice_count,
-            traits.multiclass_skill_choice_count AS entry_count,
-            traits.multiclass_skill_choice_pool AS entry_pool
-       FROM character_class_levels AS level
-       JOIN class_definitions AS definition
-         ON definition.id = level.class_definition_id
-       LEFT JOIN class_sheet_traits AS traits
-         ON traits.class_definition_id = level.class_definition_id
-      WHERE level.character_id = ?
-      ORDER BY definition.name, level.id`,
-    [context.characterId],
-    (row) => ({
-      class_definition_id: sqlInteger(row, 'class_definition_id'),
-      class_name: sqlString(row, 'class_name'),
-      is_starting_class: Number(row.is_starting_class) === 1,
-      // NULL where the class has no traits row, and carried as an ABSENCE
-      // rather than filled in with a plausible 2. The line still exists so the
-      // resolver can see it; it simply grants nothing.
-      skill_choice_count:
-        row.skill_choice_count === null
-          ? null
-          : sqlInteger(row, 'skill_choice_count'),
-      entry_count: row.entry_count === null ? 0 : sqlInteger(row, 'entry_count'),
-      entry_pool: row.entry_pool === null ? 'none' : sqlString(row, 'entry_pool'),
-    }),
-  );
-  const { chosen } = startingClass(rows);
-  return rows.map((row): SkillEntitlementLine => {
-    if (chosen === row) {
-      return {
-        class_definition_id: row.class_definition_id,
-        class_name: row.class_name,
-        is_starting_class: true,
-        count: row.skill_choice_count ?? 0,
-        pool: 'initial',
-      };
-    }
-    // A stored pool outside the vocabulary is read as `none`, which grants
-    // nothing. The CHECK on `class_sheet_traits` ties pool and count together,
-    // so this is only reachable on a hand-edited image — and granting a skill
-    // from a pool nobody can name would be an outstanding item with no remedy.
-    const pool = isEnumValue(multiclassSkillPools, row.entry_pool)
-      ? row.entry_pool
-      : 'none';
-    return {
-      class_definition_id: row.class_definition_id,
-      class_name: row.class_name,
-      is_starting_class: false,
-      count: pool === 'none' ? 0 : row.entry_count,
-      pool,
-    };
-  });
-}
-
-function chosenSkillCount(context: CheckContext): number {
-  return Number(
-    context.db.scalar(
-      `SELECT count(*) FROM character_skill_proficiencies WHERE character_id = ?`,
-      [context.characterId],
-    ) ?? 0,
-  );
-}
-
-/**
- * The multiclass entries that owe a skill, if any of them do.
- *
- * NARROWED to the two pools that actually grant, so the item's `entries` field
- * cannot carry a `none` row — which would be a class listed as owing a skill it
- * does not owe.
- */
-function availableSkills(
-  context: CheckContext,
-  classDefinitionId: number,
-  pool: Exclude<MulticlassSkillPool, 'none'>,
-): readonly Skill[] {
-  const held = new Set(
-    context.db.all(
-      `SELECT skill
-         FROM character_skill_proficiencies
-        WHERE character_id = ?`,
-      [context.characterId],
-      (row) => sqlString(row, 'skill'),
-    ),
-  );
-  if (pool === 'any') {
-    return skills.filter((skill) => !held.has(skill));
-  }
-  return context.db.all(
-    `SELECT option.skill
-       FROM class_skill_options AS option
-      WHERE option.class_definition_id = ?
-        AND NOT EXISTS (
-          SELECT 1
-            FROM character_skill_proficiencies AS held
-           WHERE held.character_id = ?
-             AND held.skill = option.skill
-        )
-      ORDER BY option.skill`,
-    [classDefinitionId, context.characterId],
-    (row): Skill => {
-      const value = sqlString(row, 'skill');
-      if (!isEnumValue(skills, value)) {
-        throw new Error(`Unknown class skill option '${value}'.`);
-      }
-      return value;
-    },
-  );
-}
-
-function grantingEntries(
-  context: CheckContext,
-  lines: readonly SkillEntitlementLine[],
-): readonly UnmadeMulticlassSkillChoiceItem['entries'][number][] {
-  const found: UnmadeMulticlassSkillChoiceItem['entries'][number][] = [];
-  for (const line of lines) {
-    if (line.is_starting_class || line.pool === 'initial' || line.pool === 'none') {
-      continue;
-    }
-    if (line.count > 0) {
-      found.push({
-        class_name: line.class_name,
-        count: line.count,
-        pool: line.pool,
-        available_skills: availableSkills(
-          context,
-          line.class_definition_id,
-          line.pool,
-        ),
-      });
-    }
-  }
-  return found;
-}
-
-export const unmadeMulticlassSkillChoice: CompletenessCheck = {
-  id: 'unmade_multiclass_skill_choice',
-  run(context) {
-    const lines = skillEntitlement(context);
-    const entries = grantingEntries(context, lines);
-    if (entries.length === 0) {
-      return [];
-    }
-    const entitled = lines.reduce((sum, line) => sum + line.count, 0);
-    const chosen = chosenSkillCount(context);
-    const outstanding = entitled - chosen;
-    if (outstanding <= 0) {
-      return [];
-    }
-    const named = entries
-      .map(
-        (entry) =>
-          `${entry.class_name} (${String(entry.count)}, ` +
-          `${entry.pool === 'any' ? 'any skill' : `from the ${entry.class_name}'s own skill list`})`,
-      )
-      .join('; ');
-    return [
-      {
-        kind: 'unmade_multiclass_skill_choice',
-        title: 'A skill from multiclassing has not been chosen',
-        detail:
-          `Multiclassing into ${named} grants a skill proficiency. Across every ` +
-          `class this character has ${String(entitled)} skill ` +
-          `proficienc${entitled === 1 ? 'y' : 'ies'} ` +
-          `${entitled === 1 ? 'is' : 'are'} owed and ${String(chosen)} ` +
-          `${chosen === 1 ? 'is' : 'are'} ticked, so ` +
-          `${String(outstanding)} remain${outstanding === 1 ? 's' : ''}. ` +
-          'Which tick pays for which grant is not recorded, so this compares ' +
-          'the totals — and the ticked count is every skill on the sheet, ' +
-          'including any ticked for a background or a species, which this ' +
-          'application does not tell apart from a class one.',
-        remedy:
-          'Tick the outstanding skills on the character sheet, choosing them ' +
-          'from the list named above.',
-        entitled,
-        chosen,
-        outstanding,
-        entries,
-      },
-    ];
+const skillGrantWords: Readonly<
+  Record<string, { readonly singular: string; readonly plural: string }>
+> = {
+  [SKILL_GRANT_KEYS.classSkill]: {
+    singular: 'class skill choice',
+    plural: 'class skill choices',
+  },
+  [SKILL_GRANT_KEYS.multiclassSkill]: {
+    singular: 'multiclass skill choice',
+    plural: 'multiclass skill choices',
+  },
+  [SKILL_GRANT_KEYS.speciesKeenSenses]: {
+    singular: 'Keen Senses skill choice',
+    plural: 'Keen Senses skill choices',
+  },
+  [SKILL_GRANT_KEYS.speciesSkillful]: {
+    singular: 'Skillful skill choice',
+    plural: 'Skillful skill choices',
   },
 };
 
-export const noSkillProficiencies: CompletenessCheck = {
-  id: 'no_skill_proficiencies',
+interface SkillGrantGroup {
+  readonly source_instance_id: number;
+  readonly grant_key: string;
+  readonly grants: UnfilledSkillGrantChoice[];
+}
+
+/**
+ * THE PER-GRANT SKILL CHECK (skills-with-provenance §3.3, S-C).
+ *
+ * Reads `character_skill_grants` through the SAME resolver the guided step's
+ * completion predicate uses (`resolveSkillGrants` /
+ * `unfilledSpeciesSkillGrants`), so the planner and the step cannot disagree
+ * about what is outstanding. It NEVER reads the flat projection and it never
+ * compares totals: a grant is outstanding because ITS OWN `skill` is null,
+ * and no tick from any other source can pay it off — the retired
+ * `entitlement − count(*)` arithmetic is §5's trap and `S-SILENCE`'s mutation.
+ *
+ * A character whose classes minted no grants (a homebrew class with no
+ * structured entitlement, or a hand-built image that never ran the generator)
+ * reports nothing — an honest absence, exactly as a class with no traits row
+ * reported nothing before: the obligation is genuinely unknown (D33).
+ */
+export const unfilledSkillGrants: CompletenessCheck = {
+  id: 'unfilled_skill_grants',
   run(context) {
-    const chosen = chosenSkillCount(context);
-    if (chosen > 0) {
-      return [];
-    }
-    const lines = skillEntitlement(context);
-    // STANDS DOWN WHERE `unmade_multiclass_skill_choice` SPEAKS, so the two
-    // partition the population instead of both firing on the same character.
-    // That item says everything this one does AND names the classes and their
-    // pools, so reporting both would be the same fact twice with one of them
-    // less useful.
-    if (grantingEntries(context, lines).length > 0) {
-      return [];
-    }
-    // How many the character's classes ENTITLE them to — the STARTING class's
-    // full count plus every other class's entry count, which is what the SRD
-    // grants and what the old `sum(skill_choice_count)` got wrong. Zero classes,
-    // or classes with no seeded traits row, means there is nothing to say.
-    const entitled = lines.reduce((sum, line) => sum + line.count, 0);
-    if (entitled === 0) {
-      return [];
-    }
-    return [
-      {
-        kind: 'no_skill_proficiencies',
-        title: 'No skill proficiencies chosen',
-        detail:
-          `This character's classes offer ${String(entitled)} skill ` +
-          'proficiencies and none is recorded, so every skill modifier on ' +
-          'the sheet is the bare ability modifier.',
-        remedy: 'Tick the skills on the character sheet.',
-        choice_count: entitled,
-      },
+    const resolved = resolveSkillGrants(context.db, context.characterId);
+    const unfilled = [
+      ...resolved.unfilledClassGrants.map((grant) => ({
+        source_instance_id: grant.source_instance_id,
+        grant_key: grant.grant_key,
+        grant_id: grant.grant_id,
+        ordinal: grant.ordinal,
+        available: grant.available,
+      })),
+      ...unfilledSpeciesSkillGrants(context.db, context.characterId).map(
+        (grant) => ({
+          source_instance_id: grant.source_instance_id,
+          grant_key: grant.grant_key,
+          grant_id: grant.grant_id,
+          ordinal: grant.ordinal,
+          available: grant.available,
+        }),
+      ),
     ];
+    if (unfilled.length === 0) {
+      return [];
+    }
+
+    const groups = new Map<string, SkillGrantGroup>();
+    for (const grant of unfilled) {
+      const key = `${String(grant.source_instance_id)}:${grant.grant_key}`;
+      const group = groups.get(key) ?? {
+        source_instance_id: grant.source_instance_id,
+        grant_key: grant.grant_key,
+        grants: [],
+      };
+      group.grants.push({
+        grant_id: grant.grant_id,
+        ordinal: grant.ordinal,
+        available_skills: grant.available,
+      });
+      groups.set(key, group);
+    }
+
+    return [...groups.values()].map((group): UnfilledSkillGrantsItem => {
+      const sourceName =
+        context.db.scalar<string>(
+          'SELECT display_name FROM character_source_instances WHERE id = ?',
+          [group.source_instance_id],
+        ) ?? 'Unknown source';
+      // Filled ordinals in THIS group — the group's own progress, never a
+      // count of skills held elsewhere.
+      const chosen = resolved.grants.filter(
+        (grant) =>
+          grant.state === 'active' &&
+          grant.skill !== null &&
+          grant.source_instance_id === group.source_instance_id &&
+          grant.grant_key === group.grant_key,
+      ).length;
+      const missing = group.grants.length;
+      const required = chosen + missing;
+      const words = skillGrantWords[group.grant_key] ?? {
+        singular: 'skill choice',
+        plural: 'skill choices',
+      };
+      const emptied = group.grants.filter(
+        (grant) => grant.available_skills.length === 0,
+      ).length;
+      const detail =
+        `This source grants ${String(required)} ` +
+        `${required === 1 ? words.singular : words.plural}; ` +
+        `${String(missing)} ${missing === 1 ? 'is' : 'are'} still unchosen. ` +
+        'A skill held from another source never fills this choice — it only ' +
+        'leaves the list of skills still available to pick.' +
+        (emptied > 0
+          ? ` ${emptied === 1 ? 'One choice has' : `${String(emptied)} choices have`} ` +
+            'no skill left to offer, because every option is already held ' +
+            'from another source; clearing one of those choices would free ' +
+            'a skill.'
+          : '');
+      return {
+        kind: 'unfilled_skill_grants',
+        title:
+          `${String(sourceName)} — ${String(chosen)} of ${String(required)} ` +
+          `${words.plural} chosen`,
+        detail,
+        remedy:
+          missing === required
+            ? `Pick ${String(missing)} ${missing === 1 ? 'skill' : 'skills'} with the choice controls below.`
+            : `Pick ${String(missing)} more ${missing === 1 ? 'skill' : 'skills'} with the choice controls below.`,
+        source_instance_id: group.source_instance_id,
+        source_name: String(sourceName),
+        grant_key: group.grant_key,
+        chosen,
+        required,
+        missing,
+        grants: [...group.grants].sort((a, b) => a.ordinal - b.ordinal),
+      };
+    });
   },
 };
 
@@ -931,18 +782,13 @@ export const completenessChecks: readonly CompletenessCheck[] = Object.freeze([
   unchosenOrder,
   noClass,
   orphanHitPointRolls,
-  noSkillProficiencies,
-  unmadeMulticlassSkillChoice,
+  unfilledSkillGrants,
 ]);
 
 const kindRank: Readonly<Record<CompletenessItem['kind'], number>> = {
   no_class: 0,
   unchosen_option: 1,
   unfilled_choices: 2,
-  // The two sheet items sort after the build items and among themselves in the
-  // order a player would act on them: a stale roll is a mistake to correct, an
-  // unticked skill list is a decision not yet made.
-  //
   // A LEVEL WITH NO RECORDED ROLL IS DELIBERATELY NOT HERE. Not rolling is a
   // legitimate steady state, not an unfinished decision: no roll means "use the
   // printed fixed value", which is a complete answer. Reporting it would nag
@@ -951,28 +797,24 @@ const kindRank: Readonly<Record<CompletenessItem['kind'], number>> = {
   // The sheet still states which levels use the fixed value, beside the number
   // it changed.
   orphan_hit_point_roll: 3,
-  no_skill_proficiencies: 4,
-  // Beside the skill item it partitions with, and after it: a character with
-  // NOTHING ticked is further from done than one who is a single multiclass
-  // skill short. The two never appear together.
-  unmade_multiclass_skill_choice: 5,
+  // Sorts among the other per-source items by source name, after that
+  // source's spell choices: a class's skill choices sit beside its cantrips
+  // rather than in a global bucket at the bottom.
+  unfilled_skill_grants: 4,
 };
 
 function sortKey(item: CompletenessItem): readonly [string, number, string] {
   if (item.kind === 'no_class') {
     return ['', kindRank.no_class, ''];
   }
-  if (item.kind === 'no_skill_proficiencies') {
-    return ['', kindRank.no_skill_proficiencies, ''];
-  }
-  if (item.kind === 'unmade_multiclass_skill_choice') {
-    return ['', kindRank.unmade_multiclass_skill_choice, ''];
-  }
   if (item.kind === 'orphan_hit_point_roll') {
     return [item.class_name, kindRank.orphan_hit_point_roll, ''];
   }
   if (item.kind === 'unchosen_option') {
     return [item.source_name, kindRank.unchosen_option, item.order_name];
+  }
+  if (item.kind === 'unfilled_skill_grants') {
+    return [item.source_name, kindRank.unfilled_skill_grants, item.grant_key];
   }
   return [
     item.source_name,

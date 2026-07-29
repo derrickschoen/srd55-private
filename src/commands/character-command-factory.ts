@@ -18,14 +18,12 @@ import { SelectSlotCommand } from './set-slot/select';
 import { FillSkillGrantCommand } from './fill-skill-grant';
 import { UpdateAbilityCommand } from './update-ability';
 import { UpdateCharacterRulesCommand } from './update-character-rules';
-import { ChooseMulticlassSkillCommand } from './choose-multiclass-skill';
 import { UpdateClassCommand } from './update-class';
 import { UpdateSourceConfigCommand } from './update-source-config';
 import {
   SetArmorClassAdjustmentCommand,
   SetArmorCommand,
   SetHitPointRollCommand,
-  SetSkillProficiencyCommand,
 } from './sheet-inputs';
 import {
   AddWeaponCommand,
@@ -141,10 +139,6 @@ export class CharacterCommandFactory {
         return new SetArmorCommand(this.db, payload);
       case 'set_hit_point_roll':
         return new SetHitPointRollCommand(this.db, payload);
-      case 'set_skill_proficiency':
-        return new SetSkillProficiencyCommand(this.db, payload);
-      case 'choose_multiclass_skill':
-        return new ChooseMulticlassSkillCommand(this.db, payload);
       case 'fill_skill_grant':
         return new FillSkillGrantCommand(this.db, payload);
       case 'set_armor_class_adjustment':

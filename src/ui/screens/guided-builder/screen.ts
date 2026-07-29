@@ -10,6 +10,7 @@ import { createAbilitiesStep } from './abilities-step';
 import { createBackgroundStep } from './background-step';
 import { createClassChooser } from './class-chooser';
 import { renderGuidedBuildState } from './guided-builder';
+import { createSkillsStep } from './skills-step';
 import { createSpeciesStep } from './species-step';
 import './styles.css';
 
@@ -84,6 +85,26 @@ async function render(context: ScreenContext): Promise<() => void> {
         options: await client.originOptions('species'),
         applyOrigin: (contentKey) =>
           client.applyOrigin(characterId, 'species', contentKey),
+        navigate: (path) => context.router.navigate(path),
+      });
+      view = step.element;
+      cleanups.push(step.cleanup);
+    } else if (state.kind === 'ready' && state.current_step === 'skills') {
+      // S-C: the skills step. One read supplies everything it renders,
+      // including the revision every addressed fill/clear command requires;
+      // each successful write re-navigates and this screen re-derives.
+      const skillsState = await client.skillsStep(characterId);
+      const step = createSkillsStep({
+        characterId,
+        state: skillsState,
+        fillSkillGrant: (grantId, skill, operationUuid) =>
+          client.fillSkillGrant({
+            character_id: characterId,
+            grant_id: grantId,
+            skill,
+            operation_uuid: operationUuid,
+            expected_revision: skillsState.revision,
+          }),
         navigate: (path) => context.router.navigate(path),
       });
       view = step.element;

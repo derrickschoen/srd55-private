@@ -66,11 +66,14 @@ describe('completeness RPCs', () => {
       result: [
         {
           character_id: fixture.characterId,
-          // ONE: the build-report fixture's class has seeded sheet traits, so
-          // it offers skill proficiencies, and none is recorded. Nobody but the
-          // player can say which were picked, so it is genuinely outstanding
-          // rather than a catalog gap.
-          outstanding_count: 1,
+          // ZERO, deliberately (skills-with-provenance §3.3): the build-report
+          // fixture hand-inserts class levels without ever running the
+          // generator, so no skill grants exist — and an obligation that was
+          // never minted is an honest absence (D33), not an inferred count.
+          // The retired count-based item invented "1 outstanding" here from
+          // the traits table alone; per-grant completeness reports what the
+          // grants record says.
+          outstanding_count: 0,
           catalog_gap_count: 0,
         },
       ],

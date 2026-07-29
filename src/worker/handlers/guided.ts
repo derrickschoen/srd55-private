@@ -36,6 +36,7 @@ import {
   createGuidedCharacter,
   fillGuidedSkillGrant,
   guidedBuildState,
+  guidedSkillsStepState,
   listGuidedBackgroundChoiceOptions,
   listGuidedClassOptions,
   listGuidedOriginOptions,
@@ -256,6 +257,16 @@ export const handlers: readonly RpcHandler[] = Object.freeze([
         throw error;
       }
     },
+  ),
+  /**
+   * The S-C skills-step read: one query for everything the step renders.
+   * Same params shape as `buildState`, same structural guard rationale.
+   */
+  defineRpcHandler(
+    GUIDED_RPC.skillsStep,
+    isGuidedBuildStateParams,
+    (context, params) =>
+      guidedSkillsStepState(context.db, params.character_id),
   ),
   /**
    * The S-B fill command (§3.6). Rides the executor like `allocateAbilities`,

@@ -1,9 +1,13 @@
 import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { CharacterCommandExecutor } from '../../../src/commands/character-command-executor';
+import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
+import { UpdateClassCommand } from '../../../src/commands/update-class';
 import { DatabaseContext } from '../../../src/db/database';
+import type { Skill } from '../../../src/domain/enums';
 import {
   CharacterCompletenessQueries,
-  type UnmadeMulticlassSkillChoiceItem,
+  type UnfilledSkillGrantsItem,
 } from '../../../src/queries/character-completeness';
 import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
 import { seedSheetContent } from '../../../src/rules/sheet-srd';
@@ -62,21 +66,32 @@ const ROGUE_SKILLS = [
 ] as const;
 
 /**
- * Q11 — THE MULTICLASS SKILL CHOICE AS A COMPLETENESS ITEM.
+ * THE SKILL CHOICES AS PER-GRANT COMPLETENESS ITEMS (skills-with-provenance
+ * §3.3, dispatch S-C).
  *
- * THE ENTITLEMENT ARITHMETIC IS THE SUBJECT, and it is what was WRONG before
- * this change rather than merely absent. `noSkillProficiencies` summed every
- * class's FULL level-1 `skill_choice_count` with no reference to
- * `is_starting_class`, so the app told a Fighter 5 / Bard 1 they owed 5 skills
- * where the SRD grants 3. The Fighter/Bard fixture below is that exact case, and
- * the number is the first thing asserted.
+ * RETARGETED WHOLE from the count-based semantics this file used to pin:
+ * classes are added through the REAL `UpdateClassCommand` — the path that
+ * mints `character_skill_grants` — and choices are made through the REAL
+ * `fill_skill_grant` executor path, never by inserting flat proficiency rows.
+ * The entitlement arithmetic (starting class full count, entered class entry
+ * count) now lives in the GENERATOR's class arm; what completeness owes is
+ * reporting each minted, unfilled grant as outstanding, per grant.
+ *
+ * ONE TEST FROM THE OLD FILE IS DELETED, NOT RETARGETED — the plan's single
+ * authorised deletion (§7): "counts EVERY tick, whatever granted it" pinned
+ * the silencing this unit removes (a background tick paying off a class
+ * grant). Its replacement subject — a Fighter with a skill-granting
+ * background still owing two class choices — is asserted end to end in
+ * `tests/integration/builder/guided-skills-step.test.ts`, where the real
+ * background producer exists.
  *
  * EVERY EXPECTED COUNT IS WORKED OUT IN THE COMMENT BESIDE IT from the two
  * extracts, never read back from the query.
  */
-describe('the multiclass skill choice as an outstanding item', () => {
+describe('skill grants as outstanding items', () => {
   let connection: Database;
   let db: DatabaseContext;
+  let integrity: CharacterCommandIntegrity;
   let characterId: number;
 
   function classId(name: string): number {
@@ -85,39 +100,49 @@ describe('the multiclass skill choice as an outstanding item', () => {
     );
   }
 
-  function addClass(name: string, level: number, starting: boolean): void {
-    db.exec(
-      `INSERT INTO character_class_levels
-         (character_id, class_definition_id, level, is_starting_class)
-       VALUES (?, ?, ?, ?)`,
-      [characterId, classId(name), level, starting ? 1 : 0],
-    );
+  function addClass(name: string, level: number): void {
+    new UpdateClassCommand(
+      db,
+      {
+        type: 'update_class',
+        class_definition_id: classId(name),
+        level,
+      },
+      integrity,
+    ).apply(characterId);
   }
 
-  function tickSkills(...skills: readonly string[]): void {
-    for (const skill of skills) {
-      db.exec(
-        `INSERT INTO character_skill_proficiencies (character_id, skill)
-         VALUES (?, ?)`,
-        [characterId, skill],
-      );
-    }
+  async function fillGrant(grantId: number, skill: Skill): Promise<void> {
+    const revision = Number(
+      db.scalar('SELECT revision FROM characters WHERE id = ?', [characterId]),
+    );
+    await new CharacterCommandExecutor(db, integrity).execute({
+      character_id: characterId,
+      operation_uuid: crypto.randomUUID(),
+      expected_revision: revision,
+      command: { type: 'fill_skill_grant', grant_id: grantId, skill },
+    });
   }
 
   function items() {
     return new CharacterCompletenessQueries(db).build(characterId).items;
   }
 
-  function skillItem(): UnmadeMulticlassSkillChoiceItem | undefined {
-    return items().find(
-      (item): item is UnmadeMulticlassSkillChoiceItem =>
-        item.kind === 'unmade_multiclass_skill_choice',
+  function skillItems(): UnfilledSkillGrantsItem[] {
+    return items().filter(
+      (item): item is UnfilledSkillGrantsItem =>
+        item.kind === 'unfilled_skill_grants',
     );
+  }
+
+  function skillItemFor(sourceName: string): UnfilledSkillGrantsItem | undefined {
+    return skillItems().find((item) => item.source_name === sourceName);
   }
 
   beforeEach(async () => {
     connection = await openTestDatabase();
     db = new DatabaseContext(connection);
+    integrity = new CharacterCommandIntegrity('skill-completeness-test-key');
     seedClassProgressions(db);
     seedSheetContent(db);
     characterId = db.exec(
@@ -127,74 +152,70 @@ describe('the multiclass skill choice as an outstanding item', () => {
 
   afterEach(() => connection.close());
 
-  it('counts a Fighter 5 / Bard 1 at THREE and not five', () => {
+  it('reports a Fighter 5 / Bard 1 as owing THREE choices, each addressed to its own source', () => {
     // Fighter is the starting class, so its FULL count applies: "Choose 2"
     // (`class-core-traits.txt`, Fighter). The Bard was entered by
     // multiclassing, so only its entry clause applies: one skill
-    // (`multiclass-entry-grants.txt:37-38`). 2 + 1 = 3.
-    //
-    // The old computation summed the Bard's FULL "Choose any 3" instead, giving
-    // 2 + 3 = 5 — a number the player could act on and be wrong.
-    addClass('Fighter', 5, true);
-    addClass('Bard', 1, false);
-    const item = skillItem();
-    expect(item?.entitled).toBe(3);
-    expect(item?.chosen).toBe(0);
-    expect(item?.outstanding).toBe(3);
+    // (`multiclass-entry-grants.txt:37-38`). 2 + 1 = 3 — as THREE addressable
+    // grants in TWO per-source groups, never one pooled number.
+    addClass('Fighter', 5);
+    addClass('Bard', 1);
+    const fighter = skillItemFor('Fighter 5');
+    const bard = skillItemFor('Bard 1');
+    expect(fighter).toMatchObject({
+      grant_key: 'class_skill',
+      chosen: 0,
+      required: 2,
+      missing: 2,
+    });
+    expect(bard).toMatchObject({
+      grant_key: 'multiclass_skill',
+      chosen: 0,
+      required: 1,
+      missing: 1,
+    });
+    expect(
+      skillItems().reduce((sum, item) => sum + item.missing, 0),
+    ).toBe(3);
   });
 
-  it('names the pool, so the Bard and the Ranger are told different things', () => {
-    addClass('Fighter', 5, true);
-    addClass('Bard', 1, false);
-    expect(skillItem()?.entries).toEqual([
-      {
-        class_name: 'Bard',
-        count: 1,
-        pool: 'any',
-        available_skills: ALL_SKILLS,
-      },
-    ]);
-    expect(skillItem()?.entries[0]?.available_skills).toContain('performance');
-    expect(skillItem()?.detail).toContain('Bard (1, any skill)');
+  it('offers the Bard grant the whole vocabulary, including Performance', () => {
+    addClass('Fighter', 5);
+    addClass('Bard', 1);
+    expect(
+      skillItemFor('Bard 1')?.grants.map((grant) => grant.available_skills),
+    ).toEqual([ALL_SKILLS]);
+    expect(
+      skillItemFor('Bard 1')?.grants[0]?.available_skills,
+    ).toContain('performance');
+  });
 
-    // Same shape of grant, same count, different pool — which is the whole
-    // reason the entry skill needed a discriminator rather than a number.
-    db.exec('DELETE FROM character_class_levels WHERE character_id = ?', [
-      characterId,
-    ]);
-    addClass('Fighter', 5, true);
-    addClass('Ranger', 1, false);
-    expect(skillItem()?.entries).toEqual([
-      {
-        class_name: 'Ranger',
-        count: 1,
-        pool: 'class_list',
-        available_skills: RANGER_SKILLS,
-      },
-    ]);
-    expect(skillItem()?.detail).toContain(
-      "Ranger (1, from the Ranger's own skill list)",
-    );
+  it("offers the Ranger grant the Ranger's own list — same shape, different pool", () => {
+    addClass('Fighter', 5);
+    addClass('Ranger', 1);
+    expect(
+      skillItemFor('Ranger 1')?.grants.map((grant) => grant.available_skills),
+    ).toEqual([RANGER_SKILLS]);
   });
 
   it('offers the Rogue class list, enumerated exactly', () => {
-    addClass('Fighter', 5, true);
-    addClass('Rogue', 1, false);
-    expect(skillItem()?.entries).toEqual([
-      {
-        class_name: 'Rogue',
-        count: 1,
-        pool: 'class_list',
-        available_skills: ROGUE_SKILLS,
-      },
-    ]);
+    addClass('Fighter', 5);
+    addClass('Rogue', 1);
+    expect(
+      skillItemFor('Rogue 1')?.grants.map((grant) => grant.available_skills),
+    ).toEqual([ROGUE_SKILLS]);
   });
 
-  it('removes every skill the character already holds from the offer', () => {
-    addClass('Fighter', 5, true);
-    addClass('Ranger', 1, false);
-    tickSkills('athletics', 'perception');
-    expect(skillItem()?.entries[0]?.available_skills).toEqual([
+  it('removes every held skill from the offer, without reducing the unfilled count', async () => {
+    addClass('Fighter', 5);
+    addClass('Ranger', 1);
+    const fighter = skillItemFor('Fighter 5');
+    await fillGrant(fighter!.grants[0]!.grant_id, 'athletics');
+    await fillGrant(fighter!.grants[1]!.grant_id, 'perception');
+    // §3.3's two halves in one assertion: the held skills leave the Ranger's
+    // AVAILABLE list, and the Ranger's ordinal stays outstanding.
+    expect(skillItemFor('Ranger 1')).toMatchObject({ missing: 1 });
+    expect(skillItemFor('Ranger 1')?.grants[0]?.available_skills).toEqual([
       'animal_handling',
       'insight',
       'investigation',
@@ -204,114 +225,92 @@ describe('the multiclass skill choice as an outstanding item', () => {
     ]);
   });
 
-  it('requires the seeded count even when it is greater than one', () => {
+  it('mints and requires the seeded count even when it is greater than one', async () => {
+    // Traits are edited BEFORE the class is added: the generator mints grants
+    // when the source is created, from the structured entitlement.
     db.exec(
       `UPDATE class_sheet_traits
           SET multiclass_skill_choice_count = 2
         WHERE class_definition_id = ?`,
       [classId('Ranger')],
     );
-    addClass('Fighter', 5, true);
-    addClass('Ranger', 1, false);
-    // The Fighter's two initial choices are already paid.
-    tickSkills('arcana', 'history');
-    expect(skillItem()).toMatchObject({
-      outstanding: 2,
-      entries: [
-        {
-          class_name: 'Ranger',
-          count: 2,
-          pool: 'class_list',
-        },
-      ],
+    addClass('Fighter', 5);
+    addClass('Ranger', 1);
+    const ranger = skillItemFor('Ranger 1');
+    expect(ranger).toMatchObject({ required: 2, missing: 2 });
+
+    await fillGrant(ranger!.grants[0]!.grant_id, 'perception');
+    expect(skillItemFor('Ranger 1')).toMatchObject({
+      chosen: 1,
+      missing: 1,
     });
-    tickSkills('perception');
-    expect(skillItem()?.outstanding).toBe(1);
-    tickSkills('stealth');
-    expect(skillItem()).toBeUndefined();
+    await fillGrant(
+      skillItemFor('Ranger 1')!.grants[0]!.grant_id,
+      'stealth',
+    );
+    expect(skillItemFor('Ranger 1')).toBeUndefined();
   });
 
   it('swaps the entitlement when the starting class swaps', () => {
     // Bard FIRST: its full "Choose any 3" applies, and the Fighter contributes
     // only its entry clause — which grants NO skill at all
-    // (`multiclass-entry-grants.txt:77-80`). 3 + 0 = 3, and no item, because no
-    // multiclass ENTRY owes a skill.
-    addClass('Bard', 1, true);
-    addClass('Fighter', 5, false);
-    expect(skillItem()).toBeUndefined();
-    const noSkills = items().find(
-      (item) => item.kind === 'no_skill_proficiencies',
+    // (`multiclass-entry-grants.txt:77-80`). 3 + 0 = 3, all under the Bard.
+    addClass('Bard', 1);
+    addClass('Fighter', 5);
+    expect(skillItemFor('Fighter 5')).toBeUndefined();
+    expect(skillItemFor('Bard 1')).toMatchObject({
+      grant_key: 'class_skill',
+      required: 3,
+      missing: 3,
+    });
+  });
+
+  it('stays outstanding through partial fills and goes quiet only when every grant is filled', async () => {
+    addClass('Fighter', 5);
+    addClass('Bard', 1);
+    await fillGrant(
+      skillItemFor('Fighter 5')!.grants[0]!.grant_id,
+      'athletics',
     );
-    expect(noSkills).toMatchObject({ choice_count: 3 });
-  });
+    // NOT SILENCED BY THE FIRST CHOICE: the Fighter still owes one and the
+    // Bard still owes one, each against its own source.
+    expect(skillItemFor('Fighter 5')).toMatchObject({ chosen: 1, missing: 1 });
+    expect(skillItemFor('Bard 1')).toMatchObject({ missing: 1 });
 
-  it('goes quiet once enough skills are ticked', () => {
-    addClass('Fighter', 5, true);
-    addClass('Bard', 1, false);
-    expect(skillItem()?.outstanding).toBe(3);
-    tickSkills('athletics', 'perception');
-    // NOT SILENCED BY THE FIRST TICK, which is the other half of the old
-    // defect: `noSkillProficiencies` fired only at zero, so a character who
-    // ticked one skill was never told they still owed four.
-    expect(skillItem()?.outstanding).toBe(1);
-    tickSkills('stealth');
-    expect(skillItem()).toBeUndefined();
-  });
-
-  it("clears Bard's completeness item on the skill alone", () => {
-    addClass('Fighter', 5, true);
-    addClass('Bard', 1, false);
-    tickSkills('arcana', 'history');
-    expect(skillItem()?.outstanding).toBe(1);
-
-    tickSkills('performance');
-    expect(skillItem()).toBeUndefined();
-  });
-
-  it('counts EVERY tick, whatever granted it, and prints that limitation', () => {
-    // A review measured this, and it is a stated limit rather than an error in
-    // the arithmetic. `character_skill_proficiencies` has no provenance column,
-    // so a skill ticked for a BACKGROUND — which this application does not model
-    // at all — is indistinguishable from one ticked for a class grant, and pays
-    // off a class grant here.
-    //
-    // The direction is SAFE: the item can only UNDER-report, never invent an
-    // outstanding choice. What it must not do is print the ticked count as
-    // though it were the class-sourced count without saying otherwise.
-    addClass('Fighter', 5, true);
-    addClass('Bard', 1, false);
-    tickSkills('athletics', 'perception');
-    const item = skillItem();
-    expect(item?.entitled).toBe(3);
-    expect(item?.chosen).toBe(2);
-    expect(item?.detail).toContain(
-      'including any ticked for a background or a species',
+    await fillGrant(
+      skillItemFor('Fighter 5')!.grants[0]!.grant_id,
+      'perception',
     );
+    expect(skillItemFor('Fighter 5')).toBeUndefined();
+    expect(skillItemFor('Bard 1')).toMatchObject({ missing: 1 });
 
-    // A third tick silences the item whatever granted it. Pinned rather than
-    // left implicit, so a future provenance column has to come back through
-    // this test and change it deliberately.
-    tickSkills('history');
-    expect(skillItem()).toBeUndefined();
+    await fillGrant(
+      skillItemFor('Bard 1')!.grants[0]!.grant_id,
+      'performance',
+    );
+    expect(skillItems()).toEqual([]);
   });
 
-  it('says nothing for a single-class character, however many they owe', () => {
-    // Nine of twelve classes grant no entry skill, and a character who never
-    // multiclassed has no entry at all. This item must not become a second
-    // "you have not picked your skills" nag for everybody.
-    addClass('Fighter', 5, true);
-    expect(skillItem()).toBeUndefined();
+  it('reports a single-class character per grant too — two Fighter choices, addressed', () => {
+    // The retired `no_skill_proficiencies` fired only at zero ticks and
+    // silenced on the first; the per-grant item reports both Fighter ordinals
+    // until each is filled, with its own grant id.
+    addClass('Fighter', 5);
+    const fighter = skillItemFor('Fighter 5');
+    expect(fighter).toMatchObject({ required: 2, missing: 2 });
+    expect(fighter?.grants.map((grant) => grant.ordinal)).toEqual([1, 2]);
+    expect(
+      new Set(fighter?.grants.map((grant) => grant.grant_id)).size,
+    ).toBe(2);
   });
 
-  it('says nothing when the second class grants no entry skill', () => {
+  it('mints nothing for a second class whose entry clause grants no skill', () => {
     // Fighter 5 / Wizard 3. The Wizard's entry clause is the hit die alone
     // (`:166-167`), so nothing is owed beyond the Fighter's own two.
-    addClass('Fighter', 5, true);
-    addClass('Wizard', 3, false);
-    expect(skillItem()).toBeUndefined();
-    expect(
-      items().find((item) => item.kind === 'no_skill_proficiencies'),
-    ).toMatchObject({ choice_count: 2 });
+    addClass('Fighter', 5);
+    addClass('Wizard', 3);
+    expect(skillItemFor('Wizard 3')).toBeUndefined();
+    expect(skillItemFor('Fighter 5')).toMatchObject({ missing: 2 });
   });
 
   it('offers no choice for each of the nine fixed-grant entries', () => {
@@ -326,70 +325,54 @@ describe('the multiclass skill choice as an outstanding item', () => {
       'Warlock',
       'Wizard',
     ] as const;
+    addClass('Bard', 1);
     for (const className of fixedGrantClasses) {
-      db.exec('DELETE FROM character_class_levels WHERE character_id = ?', [
-        characterId,
-      ]);
-      addClass('Bard', 1, true);
-      addClass(className, 1, false);
-      expect(skillItem(), className).toBeUndefined();
+      addClass(className, 1);
+      expect(skillItemFor(`${className} 1`), className).toBeUndefined();
+      // Remove again so the next class enters as a multiclass too.
+      new UpdateClassCommand(
+        db,
+        {
+          type: 'update_class',
+          class_definition_id: classId(className),
+          level: null,
+        },
+        integrity,
+      ).apply(characterId);
     }
   });
 
-  it('does not report both skill items for one character', () => {
-    // The two partition the population: `no_skill_proficiencies` stands down
-    // where this one speaks, because this one says everything it does and also
-    // names the classes and their pools.
-    addClass('Fighter', 5, true);
-    addClass('Rogue', 1, false);
-    const kinds = items().map((item) => item.kind);
-    expect(kinds).toContain('unmade_multiclass_skill_choice');
-    expect(kinds).not.toContain('no_skill_proficiencies');
+  it('reads GRANTS, not flags: a hand-cleared starting flag does not change what was minted', () => {
+    // Completeness no longer computes entitlement from `is_starting_class`;
+    // the grants are the record of what the generator minted. A hand edit to
+    // the flag after the fact changes nothing the player is told.
+    addClass('Fighter', 5);
+    addClass('Bard', 1);
+    db.exec(
+      'UPDATE character_class_levels SET is_starting_class = 0 WHERE character_id = ?',
+      [characterId],
+    );
+    expect(skillItemFor('Fighter 5')).toMatchObject({ missing: 2 });
+    expect(skillItemFor('Bard 1')).toMatchObject({ missing: 1 });
   });
 
-  it('still counts when no class is flagged as the starting one', () => {
-    // `startingClass` degrades to the first row by class name — Bard here — and
-    // still picks ONE, so the entitlement stays computable. A check that gave up
-    // would leave the player with no number at all because of a flag they cannot
-    // see; one that gave every class its full count would say 3 + 2 = 5 again.
-    addClass('Fighter', 5, false);
-    addClass('Bard', 1, false);
-    // Bard full (3) + Fighter entry (0) = 3.
-    expect(skillItem()).toBeUndefined();
-    expect(
-      items().find((item) => item.kind === 'no_skill_proficiencies'),
-    ).toMatchObject({ choice_count: 3 });
-  });
-
-  it('counts a class with no traits row as ZERO without losing its place', () => {
-    // A homebrew class's entitlement is genuinely unknown, and inventing 2 for
-    // it would put a number the user cannot act on into an outstanding item.
-    //
-    // BUT IT MUST STILL BE THE STARTING CLASS. An inner join would have dropped
-    // this row before the resolver saw it, promoted the Bard to starting class,
-    // and credited it with its FULL "Choose any 3" — turning an unknown into a
-    // wrong number about a different class. Here the Runeblade IS the starting
-    // class, contributes 0, and the Bard contributes its ENTRY grant of one.
-    const homebrew = db.exec(
+  it('mints nothing for a class with no traits row, without losing the entered class', () => {
+    // A homebrew class's entitlement is genuinely unknown, and inventing 2
+    // for it would put a number the user cannot act on into an outstanding
+    // item (D33). It must still BE the starting class, so the Bard entered
+    // second contributes its ENTRY grant of one — from the whole vocabulary.
+    db.exec(
       `INSERT INTO class_definitions (content_key, name, rules_edition)
        VALUES ('2024:class:runeblade', 'Runeblade', '2024')`,
-    ).lastInsertId;
-    addClass('Bard', 1, false);
-    db.exec(
-      `INSERT INTO character_class_levels
-         (character_id, class_definition_id, level, is_starting_class)
-       VALUES (?, ?, 1, 1)`,
-      [characterId, homebrew],
     );
-    const item = skillItem();
-    expect(item?.entitled).toBe(1);
-    expect(item?.entries).toEqual([
-      {
-        class_name: 'Bard',
-        count: 1,
-        pool: 'any',
-        available_skills: ALL_SKILLS,
-      },
-    ]);
+    addClass('Runeblade', 1);
+    addClass('Bard', 1);
+    const bard = skillItemFor('Bard 1');
+    expect(skillItems()).toHaveLength(1);
+    expect(bard).toMatchObject({
+      grant_key: 'multiclass_skill',
+      missing: 1,
+    });
+    expect(bard?.grants[0]?.available_skills).toEqual(ALL_SKILLS);
   });
 });

@@ -43,8 +43,9 @@ const commandTypes = [
   'set_weapon_mastery',
   'set_armor',
   'set_hit_point_roll',
-  'set_skill_proficiency',
-  'choose_multiclass_skill',
+  // `set_skill_proficiency` and `choose_multiclass_skill` are RETIRED
+  // (skills-with-provenance §3.5): deliberately absent, so both refuse as
+  // 'Unknown character command type.' — the S-LEGACY control's assertion.
   'fill_skill_grant',
   'set_armor_class_adjustment',
   'restore_snapshot',
@@ -269,14 +270,6 @@ function validateUpdateCharacterRules(record: UnknownRecord): void {
   rejectUnknown(record, ['type', 'allow_legacy', 'reason']);
   if (!hasOwn(record, 'allow_legacy') || typeof record.allow_legacy !== 'boolean') {
     invalid('allow_legacy must be a boolean.');
-  }
-}
-
-function validateChooseMulticlassSkill(record: UnknownRecord): void {
-  rejectUnknown(record, ['type', 'skill', 'reason']);
-  const skill = requiredString(record, 'skill', 40);
-  if (!isEnumValue(skills, skill)) {
-    invalid('Unknown skill.');
   }
 }
 
@@ -807,14 +800,6 @@ function validateFillSkillGrant(record: UnknownRecord): void {
   }
 }
 
-function validateSetSkillProficiency(record: UnknownRecord): void {
-  rejectUnknown(record, ['type', 'skill', 'proficient', 'reason']);
-  if (!isEnumValue(skills, record.skill)) {
-    invalid('Unknown skill.');
-  }
-  requiredBoolean(record, 'proficient');
-}
-
 function validateSetArmorClassAdjustment(record: UnknownRecord): void {
   rejectUnknown(record, ['type', 'value', 'note', 'reason']);
   const magnitude = SHEET_ADJUSTMENT_BOUNDS.armorClassMagnitude;
@@ -886,12 +871,6 @@ function validateByType(
       return record;
     case 'set_hit_point_roll':
       validateSetHitPointRoll(record);
-      return record;
-    case 'set_skill_proficiency':
-      validateSetSkillProficiency(record);
-      return record;
-    case 'choose_multiclass_skill':
-      validateChooseMulticlassSkill(record);
       return record;
     case 'fill_skill_grant':
       validateFillSkillGrant(record);

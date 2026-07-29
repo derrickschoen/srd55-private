@@ -52,8 +52,11 @@ import {
 import type { CharacterRow } from '../domain/models';
 import { GrantRuleSlotGenerator } from '../grants/grant-rule-slot-generator';
 import {
+  classSkillGrantsFilled,
   mintFilledSkillGrants,
   rebuildSkillProjection,
+  resolveSkillGrants,
+  unfilledSpeciesSkillGrants,
 } from '../grants/skill-grants';
 import { CharacterCrud } from '../queries/character-crud';
 import { skillFromLabel } from '../rules/skills';
@@ -86,8 +89,11 @@ import {
   type GuidedApplyBackgroundParams,
   type GuidedBackgroundChoiceOptions,
 } from './background-choices';
+import { GrantRule } from '../grants/grant-rule';
+import { SourceRuleReader } from '../grants/source-rule-reader';
 import {
   countAbilitiesAtLeastPlusTwo,
+  EXPERTISE_AT_LEVEL_ONE_CLASS_CONTENT_KEYS,
   grantsLineageSpells,
   GUIDED_LEVEL_ONE_STEP_ORDER,
   hasWeakScores,
@@ -106,6 +112,7 @@ import {
   type GuidedOriginOption,
   type GuidedOriginParams,
   type GuidedRefusalReason,
+  type GuidedSkillsStepState,
   type OriginKind,
 } from './contracts';
 
@@ -133,28 +140,38 @@ import {
  * is true for every character by construction and nothing else can tell a
  * chosen 10 from a defaulted one. D64 makes all 10s a VALID allocation, so
  * this is the difference between a completion predicate and a guess.
+ *
+ * `skillsFilled` (S-C): NO unfilled ACTIVE class grant exists —
+ * `classSkillGrantsFilled` in `src/grants/skill-grants.ts`, the seam-pinned
+ * predicate. NEVER the planner-count completeness (skills-with-provenance
+ * §5's trap): a count-shaped predicate reports a Fighter complete the moment
+ * a background hands them two skills, and this per-grant one does not.
+ * Species choice grants are choosable in the step but never gate it (§4:
+ * "advances only when every class ordinal is filled").
  */
 export interface GuidedStepEvidence {
   readonly classChosen: boolean;
   readonly abilitiesAllocated: boolean;
   readonly speciesChosen: boolean;
   readonly backgroundChosen: boolean;
+  readonly skillsFilled: boolean;
 }
 
 /**
  * The first step the evidence cannot prove complete, in D55's order.
  *
- * Steps with no detection yet (`skills`, `equipment`) are pinned incomplete,
- * so the walk stops at the first of them. The build screen renders
- * those undetectable steps as the terminal not-built-yet panel rather than
- * pretending they can be finished here.
+ * The one step with no detection yet (`equipment`) is pinned incomplete, so
+ * the walk stops there. The build screen renders that undetectable step as
+ * the terminal not-built-yet panel rather than pretending it can be finished
+ * here.
  *
  * `abilities` (B1) is REAL DETECTION now: the allocation signal
  * `characters.ability_allocation_method` replaced the pinned `abilities: true`
  * literal A1 shipped while no abilities screen existed. That literal is
  * DELETED, not reworded (plan §5), along with the species screen's
  * abilities-step-skipped disclosure — both existed only while the step was
- * unbuildable.
+ * unbuildable. `skills` (S-C) followed the same path: its `false` literal is
+ * deleted and the evidence field is the per-grant predicate.
  */
 export function deriveBuildStep(evidence: GuidedStepEvidence): BuildStep {
   const complete: Readonly<Record<BuildStep, boolean>> = {
@@ -162,7 +179,7 @@ export function deriveBuildStep(evidence: GuidedStepEvidence): BuildStep {
     abilities: evidence.abilitiesAllocated,
     species: evidence.speciesChosen,
     background: evidence.backgroundChosen,
-    skills: false,
+    skills: evidence.skillsFilled,
     equipment: false,
   };
   for (const step of GUIDED_LEVEL_ONE_STEP_ORDER) {
@@ -205,6 +222,7 @@ export function readGuidedStepEvidence(
         [characterId],
         (row) => sqlInteger(row, 'id'),
       ) !== null,
+    skillsFilled: classSkillGrantsFilled(db, characterId),
   };
 }
 
@@ -1511,6 +1529,133 @@ export async function allocateGuidedAbilities(
  * `SkillGrantRefusal` for the RPC handler to translate; this wrapper adds
  * only the executor envelope and the updated build position.
  */
+/* --------------------------------------------- S-C: the skills step's read */
+
+/**
+ * Everything the guided skills step renders, in one query (seam:
+ * `GuidedSkillsStepState`, `GUIDED_RPC.skillsStep`).
+ *
+ * ONE TRUTH, SHARED: the class choices are the resolver's
+ * `unfilledClassGrants` and the species choices are
+ * `unfilledSpeciesSkillGrants` — the same functions the completion predicate
+ * and planner completeness read — so the step, the derivation and the
+ * planner cannot disagree about what is outstanding (§5's trap is exactly
+ * three surfaces with three predicates).
+ *
+ * THE TWO §3.7 DISCLOSURES ARE COMPUTED HERE, AS DATA:
+ *
+ *  - `unapplied_skill_rule_sources` — every ACTIVE source whose active rules
+ *    include a `skill_proficiency` grant rule. S6 proved the Skilled feat
+ *    seeds one and the generator explicitly does nothing with it; a guided
+ *    player can pick Skilled in the REQUIRED background step and receive
+ *    nothing, so the step must name the gap rather than stay silent (D33).
+ *    Detection is STRUCTURAL (the rule kind), never feat-name text.
+ *  - `expertise_gap` — the character has a class in the seam's
+ *    `EXPERTISE_AT_LEVEL_ONE_CLASS_CONTENT_KEYS` (the Rogue): Expertise is a
+ *    level-1 choice D54's bar names, this application does not model it, and
+ *    the step says so instead of inheriting a sheet footnote.
+ */
+export function guidedSkillsStepState(
+  db: DatabaseContext,
+  characterId: number,
+): GuidedSkillsStepState {
+  const revision = db.one(
+    `SELECT revision FROM characters WHERE id = ?`,
+    [characterId],
+    (row) => sqlInteger(row, 'revision'),
+  );
+  if (revision === null) {
+    throw new Error(`No character with id ${characterId} exists.`);
+  }
+
+  const resolved = resolveSkillGrants(db, characterId);
+  const sourceName = (sourceInstanceId: number): string => {
+    const name = db.scalar<string>(
+      'SELECT display_name FROM character_source_instances WHERE id = ?',
+      [sourceInstanceId],
+    );
+    return name === null ? 'Unknown source' : String(name);
+  };
+
+  const clearableKeys: readonly string[] = [
+    SKILL_GRANT_KEYS.classSkill,
+    SKILL_GRANT_KEYS.multiclassSkill,
+    SKILL_GRANT_KEYS.speciesKeenSenses,
+    SKILL_GRANT_KEYS.speciesSkillful,
+  ];
+  const granted = resolved.grants
+    .filter(
+      (grant): grant is typeof grant & { skill: Skill } =>
+        grant.state === 'active' && grant.skill !== null,
+    )
+    .map((grant) => ({
+      grant_id: grant.id,
+      skill: grant.skill,
+      grant_key: grant.grant_key,
+      source_name: sourceName(grant.source_instance_id),
+      // A background's printed skills are FACTS, not choices — shown, never
+      // clearable here. The §3.3 collision's clear remedy targets the CHOICE
+      // grants, which are exactly the fillable keys.
+      clearable: clearableKeys.includes(grant.grant_key),
+    }));
+
+  const speciesChoices = unfilledSpeciesSkillGrants(db, characterId).map(
+    (grant) => ({
+      grant_id: grant.grant_id,
+      grant_key: grant.grant_key,
+      source_name: sourceName(grant.source_instance_id),
+      available: grant.available,
+    }),
+  );
+
+  const reader = new SourceRuleReader(db);
+  const activeSourceIds = db.all(
+    `SELECT id FROM character_source_instances
+     WHERE character_id = ? AND state = 'active'
+     ORDER BY id`,
+    [characterId],
+    rowId,
+  );
+  const unappliedRuleSources: string[] = [];
+  for (const sourceInstanceId of activeSourceIds) {
+    const hasSkillRule = reader
+      .activeRulesForSource(sourceInstanceId)
+      .some((rule) => rule.kind === GrantRule.SKILL_PROFICIENCY);
+    if (hasSkillRule) {
+      unappliedRuleSources.push(sourceName(sourceInstanceId));
+    }
+  }
+
+  const expertiseKeys = [...EXPERTISE_AT_LEVEL_ONE_CLASS_CONTENT_KEYS];
+  const expertiseGap =
+    expertiseKeys.length > 0 &&
+    Number(
+      db.scalar(
+        `SELECT EXISTS (
+           SELECT 1
+           FROM character_class_levels AS level
+           JOIN class_definitions AS definition
+             ON definition.id = level.class_definition_id
+           WHERE level.character_id = ?
+             AND definition.content_key IN (${expertiseKeys
+               .map(() => '?')
+               .join(', ')})
+         )`,
+        [characterId, ...expertiseKeys],
+      ) ?? 0,
+    ) === 1;
+
+  return {
+    character_id: characterId,
+    revision,
+    granted,
+    class_choices: resolved.unfilledClassGrants,
+    species_choices: speciesChoices,
+    unapplied_skill_rule_sources: unappliedRuleSources,
+    expertise_gap: expertiseGap,
+  };
+}
+
 export async function fillGuidedSkillGrant(
   db: DatabaseContext,
   params: GuidedFillSkillGrantParams,

@@ -328,88 +328,47 @@ describe('sheet input commands', () => {
     ).rejects.toThrow('rolled_value must be an integer from 1 to 12');
   });
 
-  it('toggles a skill proficiency, with presence as the value', async () => {
-    const inverse = await inverseOf({
-      type: 'set_skill_proficiency',
-      skill: 'stealth',
-      proficient: true,
-    });
-    expect(
-      db.allRaw(
-        'SELECT skill FROM character_skill_proficiencies WHERE character_id = ?',
-        [characterId],
-      ),
-    ).toEqual([{ skill: 'stealth' }]);
-    expect(inverse).toEqual({
-      type: 'set_skill_proficiency',
-      skill: 'stealth',
-      proficient: false,
-    });
-
-    // Setting it again is a no-op rather than a unique-index violation, and its
-    // inverse correctly says "put it back to proficient".
-    const second = await inverseOf({
-      type: 'set_skill_proficiency',
-      skill: 'stealth',
-      proficient: true,
-    });
-    expect(second).toEqual({
-      type: 'set_skill_proficiency',
-      skill: 'stealth',
-      proficient: true,
-    });
-
-    await run({
-      type: 'set_skill_proficiency',
-      skill: 'stealth',
-      proficient: false,
-    });
-    expect(
-      db.scalar(
-        'SELECT count(*) FROM character_skill_proficiencies WHERE character_id = ?',
-        [characterId],
-      ),
-    ).toBe(0);
-  });
-
-  it('refuses a skill outside the eighteen', async () => {
+  /**
+   * RETARGETED, NOT DELETED (skills-with-provenance §3.5): these two commands
+   * used to be sheet-input writers and their tests lived here. Their subject
+   * is now the RETIREMENT — a manual tick has no source, and a choice that
+   * cannot name its grant survives D44 only cosmetically — so what this file
+   * proves is that the executor refuses both as UNKNOWN, exactly as it would
+   * any command that never existed. The one skill writer is
+   * `fill_skill_grant`, tested in `fill-skill-grant.test.ts`, and the flat
+   * table is a derived projection nothing here may write.
+   */
+  it('refuses the retired set_skill_proficiency as an unknown command (§3.5, S-LEGACY subject)', async () => {
     await expect(
       run({
         type: 'set_skill_proficiency',
-        skill: 'lockpicking' as never,
+        skill: 'stealth',
         proficient: true,
-      }),
-    ).rejects.toThrow('Unknown skill');
-  });
-
-  it("choosing a Bard's multiclass skill does not modify character notes", async () => {
-    db.exec(`UPDATE characters SET notes = 'Keep this note' WHERE id = ?`, [
-      characterId,
-    ]);
-    const inverse = await inverseOf({
-      type: 'choose_multiclass_skill',
-      skill: 'performance',
-    });
-    expect(
-      db.allRaw(
-        'SELECT skill FROM character_skill_proficiencies WHERE character_id = ?',
-        [characterId],
-      ),
-    ).toEqual([{ skill: 'performance' }]);
-    expect(
-      db.scalar('SELECT notes FROM characters WHERE id = ?', [characterId]),
-    ).toBe('Keep this note');
-
-    await run(inverse);
+      } as unknown as CharacterCommandPayload),
+    ).rejects.toThrow('Unknown character command type.');
+    // Nothing wrote the projection: a retired path is DELETED, not left
+    // writing rows nobody reads.
     expect(
       db.scalar(
         'SELECT count(*) FROM character_skill_proficiencies WHERE character_id = ?',
         [characterId],
       ),
     ).toBe(0);
+  });
+
+  it('refuses the retired choose_multiclass_skill as an unknown command (§3.5)', async () => {
+    await expect(
+      run({
+        type: 'choose_multiclass_skill',
+        skill: 'performance',
+      } as unknown as CharacterCommandPayload),
+    ).rejects.toThrow('Unknown character command type.');
     expect(
-      db.scalar('SELECT notes FROM characters WHERE id = ?', [characterId]),
-    ).toBe('Keep this note');
+      db.scalar(
+        'SELECT count(*) FROM character_skill_proficiencies WHERE character_id = ?',
+        [characterId],
+      ),
+    ).toBe(0);
   });
 
   it('stores a signed Armor Class adjustment with its reason', async () => {
@@ -491,14 +450,30 @@ describe('sheet input commands', () => {
 
   it('writes one change-log entry per affected row, under an accepted entity type', async () => {
     await run({ type: 'set_armor', slot: 'worn', armor: armor() });
+    // The skill path is now the ADDRESSED fill (§3.5): a hand-planted species
+    // choice grant — Skillful's pool is any skill, so no seeded class content
+    // is needed — filled through the real executor. The fill writes the grant
+    // AND derives the projection, so both entity types must be accepted.
+    const sourceId = db.exec(
+      `INSERT INTO character_source_instances (
+         character_id, instance_uuid, source_type, display_name, state
+       ) VALUES (?, ?, 'species', 'Human', 'active')`,
+      [characterId, crypto.randomUUID()],
+    ).lastInsertId;
+    const grantId = db.exec(
+      `INSERT INTO character_skill_grants (
+         character_id, source_instance_id, grant_key, ordinal, skill, state
+       ) VALUES (?, ?, 'species_skillful', 1, NULL, 'active')`,
+      [characterId, sourceId],
+    ).lastInsertId;
     await run({
-      type: 'set_skill_proficiency',
+      type: 'fill_skill_grant',
+      grant_id: grantId,
       skill: 'arcana',
-      proficient: true,
     });
     // `CharacterState.diff` emits a change per row of every snapshot table, and
     // an entity type the diff can produce that the log will not accept is a
-    // write that fails at runtime, mid-command. These four are in
+    // write that fails at runtime, mid-command. These are in
     // `AUDIT_ENTITY_TYPES` for that reason.
     const types = db.all(
       'SELECT DISTINCT entity_type FROM change_log ORDER BY entity_type',
@@ -506,6 +481,7 @@ describe('sheet input commands', () => {
       (row) => sqlString(row, 'entity_type'),
     );
     expect(types).toContain('character_armor');
+    expect(types).toContain('character_skill_grants');
     expect(types).toContain('character_skill_proficiencies');
   });
 });

@@ -2,31 +2,43 @@ import type {
   CatalogGapItem,
   CompletenessItem,
   CompletenessResult,
-  UnmadeMulticlassSkillChoiceItem,
+  UnfilledSkillGrantsItem,
 } from '../../../queries/character-completeness';
+import { SKILL_GRANT_KEYS } from '../../../builder/contracts';
 import type { Skill } from '../../../domain/enums';
 import { SKILL_LABELS } from '../../../rules/skills';
 
 export interface PlannerCompletenessActions {
-  chooseMulticlassSkill(skill: Skill): void;
+  /**
+   * Fills one ADDRESSED grant (skills-with-provenance §3.5): the payload
+   * carries the grant's own id, so filling through one class's form fills
+   * THAT class's ordinal — the retired `choose_multiclass_skill` could not
+   * say which grant it paid.
+   */
+  fillSkillGrant(grantId: number, skill: Skill): void;
 }
 
-function multiclassSkillControls(
-  item: UnmadeMulticlassSkillChoiceItem,
+/**
+ * One form per UNFILLED GRANT, each addressed by its `grant_id`. A grant with
+ * no available skill renders its select disabled — the item's detail already
+ * explains why — rather than a control that can only fail.
+ */
+function skillGrantControls(
+  item: UnfilledSkillGrantsItem,
   actions: PlannerCompletenessActions,
   disabled: boolean,
 ): HTMLElement {
   const controls = document.createElement('div');
-  controls.className = 'multiclass-skill-controls';
-  for (const grant of item.entries) {
+  controls.className = 'skill-grant-controls';
+  for (const grant of item.grants) {
     const form = document.createElement('form');
-    form.className = 'multiclass-skill-form';
+    form.className = 'skill-grant-form';
     const label = document.createElement('label');
     label.className = 'planner-field';
     const select = document.createElement('select');
     select.className = 'planner-input';
-    select.name = `${grant.class_name.toLowerCase()}-multiclass-skill`;
-    select.dataset.focusKey = `multiclass-skill-${grant.class_name}`;
+    select.name = `skill-grant-${String(grant.grant_id)}`;
+    select.dataset.focusKey = `skill-grant-${String(grant.grant_id)}`;
     select.disabled = disabled || grant.available_skills.length === 0;
     const placeholder = document.createElement('option');
     placeholder.value = '';
@@ -39,11 +51,14 @@ function multiclassSkillControls(
       select.append(option);
     }
     label.append(
-      `${grant.class_name} multiclass skill (${String(grant.count)} granted)`,
+      `${item.source_name} skill choice ${String(grant.ordinal)} of ${String(item.required)}`,
       select,
     );
     let instrumentStatement: HTMLParagraphElement | null = null;
-    if (grant.class_name === 'Bard') {
+    if (
+      item.grant_key === SKILL_GRANT_KEYS.multiclassSkill &&
+      item.source_name.startsWith('Bard')
+    ) {
       instrumentStatement = document.createElement('p');
       instrumentStatement.className = 'multiclass-instrument-statement';
       instrumentStatement.textContent =
@@ -53,12 +68,12 @@ function multiclassSkillControls(
     button.type = 'submit';
     button.className = 'button-primary';
     button.disabled = select.disabled;
-    button.textContent = `Choose ${grant.class_name} skill`;
+    button.textContent = `Choose ${item.source_name} skill ${String(grant.ordinal)}`;
     form.addEventListener('submit', (event) => {
       event.preventDefault();
       const skill = select.value;
       if (skill === '') return;
-      actions.chooseMulticlassSkill(skill as Skill);
+      actions.fillSkillGrant(grant.grant_id, skill as Skill);
     });
     form.append(label, button);
     if (instrumentStatement !== null) {
@@ -83,8 +98,8 @@ function entry(
   remedy.className = 'outstanding-remedy';
   remedy.textContent = item.remedy;
   listItem.append(heading, detail, remedy);
-  if (item.kind === 'unmade_multiclass_skill_choice') {
-    listItem.append(multiclassSkillControls(item, actions, disabled));
+  if (item.kind === 'unfilled_skill_grants') {
+    listItem.append(skillGrantControls(item, actions, disabled));
   }
   return listItem;
 }

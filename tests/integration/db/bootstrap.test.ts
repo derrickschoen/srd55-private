@@ -136,22 +136,14 @@ describe('application database bootstrap', () => {
     // Order and the Cleric's two skill proficiencies remain independent player
     // choices.
     //
-    // The Cleric's two skill proficiencies join it: they are catalog-
-    // independent too, and nobody but the player can say which two were
-    // picked. NOT here, deliberately: a level whose hit die was never rolled.
-    // Not rolling is a legitimate steady state — the printed fixed value is a
-    // complete answer — so reporting it would nag every character forever.
+    // The Cleric's two skill proficiencies arrive as PER-GRANT items
+    // (skills-with-provenance §3.3): `add_source` runs the generator, the
+    // class arm mints two addressable unfilled grants, and each stays
+    // outstanding until ITS OWN skill is chosen. NOT here, deliberately: a
+    // level whose hit die was never rolled. Not rolling is a legitimate
+    // steady state — the printed fixed value is a complete answer — so
+    // reporting it would nag every character forever.
     expect(result.items).toEqual([
-      {
-        kind: 'no_skill_proficiencies',
-        title: 'No skill proficiencies chosen',
-        detail:
-          "This character's classes offer 2 skill proficiencies and none is " +
-          'recorded, so every skill modifier on the sheet is the bare ability ' +
-          'modifier.',
-        remedy: 'Tick the skills on the character sheet.',
-        choice_count: 2,
-      },
       {
         kind: 'unchosen_option',
         title: 'Cleric 1 — Divine Order not chosen',
@@ -191,6 +183,47 @@ describe('application database bootstrap', () => {
         required: 4,
         chosen: 0,
         missing: 4,
+      },
+      {
+        kind: 'unfilled_skill_grants',
+        title: 'Cleric 1 — 0 of 2 class skill choices chosen',
+        detail:
+          'This source grants 2 class skill choices; 2 are still unchosen. ' +
+          'A skill held from another source never fills this choice — it ' +
+          'only leaves the list of skills still available to pick.',
+        remedy: 'Pick 2 skills with the choice controls below.',
+        source_instance_id: expect.any(Number) as number,
+        source_name: 'Cleric 1',
+        grant_key: 'class_skill',
+        chosen: 0,
+        required: 2,
+        missing: 2,
+        grants: [
+          {
+            grant_id: expect.any(Number) as number,
+            ordinal: 1,
+            // Hand-transcribed from the Core Cleric Traits table, never read
+            // back from the query.
+            available_skills: [
+              'history',
+              'insight',
+              'medicine',
+              'persuasion',
+              'religion',
+            ],
+          },
+          {
+            grant_id: expect.any(Number) as number,
+            ordinal: 2,
+            available_skills: [
+              'history',
+              'insight',
+              'medicine',
+              'persuasion',
+              'religion',
+            ],
+          },
+        ],
       },
     ]);
     expect(result.outstanding_count).toBe(4);
