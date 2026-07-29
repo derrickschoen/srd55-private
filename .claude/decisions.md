@@ -1,5 +1,77 @@
 # Binding scope decisions
 
+## D63 — OWNER: ability increases are an ADDITIVE LAYER, and every species is modelled in the domain (2026-07-28)
+
+**The rulings.** *"Background asi are not part of base asi. They are added on
+like feat asi are."* and *"We need to be able to have elf work in the character
+sheet and wizard. Elf lineage can be 3 separate lineages. All species Needs to be
+modeled in the domain. Dwarf hp needs to be modeled for instance and elve's
+spellcasting modifier and humans extra feat and skill for example."*
+
+**1. Ability scores are BASE PLUS CONTRIBUTIONS. The base is never overwritten.**
+
+A character's six scores are what the player allocated. A background's increases,
+a feat's increases, and anything else that raises a score are **separate additive
+contributions**, each knowing where it came from. The sheet shows the total; the
+base stays answerable; removing a background subtracts exactly what it added and
+nothing else.
+
+**This settles the provenance question that has been open for several sessions,
+and it settles it from the rules side rather than the storage side.** I had been
+asking whether to add a "chosen by this grant at this level" record. The owner's
+answer makes it structural: a contribution is a thing, it has a source, and base
+is not where contributions live.
+
+**FINDING, and it changes the size of this ruling: the pattern the owner named as
+the model does not exist yet.** `feat_definitions.ability_points` is a real column
+(0, 1 or 2) and `src/rules/feats-srd.ts` seeds it — but **nothing in `src/`
+consumes it into a score.** Verified: every reference is schema, generated
+contract, or seeder. So "added on like feat asi are" describes an intention the
+codebase declares and never applies. Feat ASI is not applied today either.
+
+The consequence is not that the ruling is wrong — it is that this unit **builds
+the additive layer for the first time**, and both feat and background increases
+ride it once it exists. That is more work than "make background match feats", and
+saying so now is cheaper than discovering it mid-dispatch.
+
+**2. Every species is modelled in the domain. The template copy is not enough.**
+
+A4 applies a species by copying printed template rows. That was the right first
+step and it is not the end state. Species carry mechanics the copy cannot
+express, and the owner named four:
+
+- **Elf's lineage is three distinct lineages**, each a real choice with real
+  consequences — not one row with a text field.
+- **Elf's spellcasting ability** is a choice, and until it is made the sheet must
+  say unknown rather than guess (D33). This is also why A6's lineage spells sit
+  dormant for Elf and Gnome.
+- **Dwarf's hit points** — a species affecting HP is a number on the sheet, so
+  under D35 it earns structure.
+- **Human's extra feat and extra skill.**
+
+These are examples, not the list. **All** species get modelled.
+
+**What this supersedes:** not A4 — A4 stands and its rows remain correct — but
+the assumption in §3.4 of the front-door plan that unmade species choices could
+be disclosed indefinitely. Disclosure was the honest interim; modelling is the
+answer, and the disclosures for each choice are **deleted when its model lands**,
+never reworded. Same rule that governed A6's lineage disclosure, applied
+correctly this time.
+
+*Taken for now, on sequencing:* the additive ability layer comes FIRST, because
+the background ASI, the feat ASI and the species increases all need it, and
+building any of them on the six base columns would have to be undone. Species
+domain modelling follows. *Cost to flip:* say the word and species goes first,
+but then its ability effects wait for the layer anyway.
+
+**Owner-visible consequence:** this is the largest single piece of work recorded
+since the wizard began, and it sits between here and D54's bar rather than beside
+it. The abilities step also still does not exist, so a guided character currently
+keeps six 10s nobody chose — the base the whole additive layer sits on is itself
+unbuilt.
+
+---
+
 ## D62 — OWNER: import CLONES into a new character with a new UUID (2026-07-28)
 
 **The ruling.** *"Importing an export should clone into a new character with a
