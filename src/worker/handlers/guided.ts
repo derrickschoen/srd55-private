@@ -16,13 +16,18 @@ import {
   GUIDED_RPC,
   hasExactKeys,
   isGuidedCreateParams,
+  isGuidedOriginParams,
+  isOriginKind,
   type GuidedBuildStateParams,
+  type GuidedOriginOptionsParams,
 } from '../../builder/contracts';
 import {
   GuidedCreationRefusal,
+  applyGuidedOrigin,
   createGuidedCharacter,
   guidedBuildState,
   listGuidedClassOptions,
+  listGuidedOriginOptions,
 } from '../../builder/guided-creation';
 import { CharacterCommandIntegrity } from '../../commands/integrity';
 import { RpcError } from '../../rpc/protocol';
@@ -53,6 +58,32 @@ function isGuidedBuildStateParams(
   );
 }
 
+/** Same rationale as above: only this module needs the structural guard. */
+function isGuidedOriginOptionsParams(
+  value: unknown,
+): value is GuidedOriginOptionsParams {
+  return hasExactKeys(value, ['kind']) && isOriginKind(value['kind']);
+}
+
+/**
+ * The one translation from a domain refusal to the wire, shared by every
+ * guided mutation so `createGuided` and `applyOrigin` cannot drift on the
+ * `RevisionConflict` precedent: refusals become `handler_error` with the
+ * seam's structured `GuidedRefusalData`; anything else stays bare.
+ */
+function translatingRefusals<T>(operation: () => T): T {
+  try {
+    return operation();
+  } catch (error) {
+    if (error instanceof GuidedCreationRefusal) {
+      throw new RpcError('handler_error', error.message, {
+        reason: error.reason,
+      });
+    }
+    throw error;
+  }
+}
+
 export const handlers: readonly RpcHandler[] = Object.freeze([
   defineRpcHandler(
     GUIDED_RPC.buildState,
@@ -67,25 +98,24 @@ export const handlers: readonly RpcHandler[] = Object.freeze([
   defineRpcHandler(
     GUIDED_RPC.create,
     isGuidedCreateParams,
-    (context, params) => {
-      try {
-        return createGuidedCharacter(
+    (context, params) =>
+      translatingRefusals(() =>
+        createGuidedCharacter(
           context.db,
           params,
           new CharacterCommandIntegrity(COMMAND_INTEGRITY_KEY),
-        );
-      } catch (error) {
-        // The RevisionConflict precedent: a DOMAIN refusal becomes
-        // `handler_error` with the seam's structured `GuidedRefusalData`, so
-        // callers can discriminate on `reason`. Anything else stays a bare
-        // `handler_error` — an unexpected failure has no reason to offer.
-        if (error instanceof GuidedCreationRefusal) {
-          throw new RpcError('handler_error', error.message, {
-            reason: error.reason,
-          });
-        }
-        throw error;
-      }
-    },
+        ),
+      ),
+  ),
+  defineRpcHandler(
+    GUIDED_RPC.originOptions,
+    isGuidedOriginOptionsParams,
+    (context, params) => listGuidedOriginOptions(context.db, params.kind),
+  ),
+  defineRpcHandler(
+    GUIDED_RPC.applyOrigin,
+    isGuidedOriginParams,
+    (context, params) =>
+      translatingRefusals(() => applyGuidedOrigin(context.db, params)),
   ),
 ]);
