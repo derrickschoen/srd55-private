@@ -1,5 +1,58 @@
 # Binding scope decisions
 
+## D69 — OWNER: weapons carry NO provenance. Let people add any weapon; WARN when not proficient (2026-07-29)
+
+**The ruling.** *"I don't care where the greatsword came from. Just care that we
+show proficiency. Don't track where it came from just let players add whatever
+weapons they want and put a warning if not proficient."*
+
+**This strikes the central mechanism of dispatch E-A, which merged four hours
+earlier.** Said plainly because it must not be softened: E-A added
+`source_instance_id` to `character_weapons` and `character_armor` (migration
+`0011`), taught three backup remap sites about it, minted share wire **v6** to
+carry it, and built two mutation controls (E-SOURCE, E-PRESERVE) around it. The
+owner asked the provenance question and answered by rejecting the premise. That
+is their call and it is a good one — the tracking existed to solve a problem
+(cleaning up on option-switch without eating a player's own weapon) that
+disappears entirely once nobody owns the cleanup.
+
+**What is true now:**
+
+1. **No provenance on weapons or armour.** The stamp goes. A weapon is a weapon.
+2. **A person may add ANY weapon.** No gating, no refusal, no "your class cannot
+   use this."
+3. **A non-proficient weapon WARNS.** It does not block. This is D49's
+   warn-versus-block line again, and the machinery already exists: the sheet and
+   the planner both already say "not proficient" and correctly withhold the
+   proficiency bonus (`tests/browser/weapons.spec.ts:387` — *"a Wizard's
+   Greatsword loses the proficiency bonus, and both screens say so"*, and the
+   `attack-profiles.ts:40` note recording a past bug where the label and the
+   number disagreed). **That behaviour is the ruling already satisfied; what goes
+   is the stamp, not the warning.**
+4. **The equipment step still MINTS the package's weapons and armour** (D65), so
+   the sheet's AC and attack profiles stay right. They simply arrive unowned,
+   exactly like a hand-added one.
+5. **Option-switch no longer cleans up.** With no stamp there is nothing to key
+   on, and under this ruling that is correct rather than a gap: the weapons are
+   the player's, and the player removes what they do not want.
+
+**Extended to ARMOUR as a reversible default, since the ruling names weapons.**
+`character_armor` got the same stamp in the same dispatch for the same reason;
+keeping it on one table and not the other would leave half a mechanism with no
+consumer. *Seam:* the same column. *Cost to flip:* re-add one nullable column.
+One sentence overrules this.
+
+**What this does NOT strike.** Skills provenance stands — `character_skill_grants`
+is untouched, and the reasons differ: a skill grant records a CHOICE a person
+made from a pool, and removing its source must not silently delete that choice.
+A weapon is an object on a list.
+
+**The cleanup is a deletion, not a deprecation** (pre-alpha, D60, zero users):
+the column, migration `0011`'s use of it, the three backup remaps, the v6 wire
+field, and the two controls that guard it all go. Wire **v6 stays minted** — it
+is already frozen and a version is never edited (D41); a v7 that removes the
+field is the honest way if the field must go from the wire at all.
+
 ## D68 — OWNER: choosing the background feat and ASI is NOT a house rule; mark the DEFAULTS instead (2026-07-29)
 
 **The ruling.** *"Don't mark the custom background asi and feat as homebrew
