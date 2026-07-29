@@ -16,10 +16,14 @@
  *   lineage and skill were never chosen. The lists live in
  *   {@link SPECIES_UNMADE_CHOICES}, a pinned literal reviewed by eye — never
  *   inferred from trait text.
- * - Lineage spells (D56, deferred to A6): for species in the seam's pinned
- *   lineage set, the card says the spells are NOT YET GRANTED — the character
- *   has them by the rules; this builder simply has not granted them. It must
- *   never imply the character has none.
+ * - Lineage spells (D56, granted by A6): applying a species now also runs the
+ *   grant machinery over its seeded definition, so the spells a species
+ *   grants unconditionally (the Tiefling's Thaumaturgy) actually arrive. The
+ *   old "not granted yet" disclosure is DELETED rather than reworded — it
+ *   existed only while the machinery was missing. What remains unmade is the
+ *   LINEAGE CHOICE itself, which {@link SPECIES_UNMADE_CHOICES} already
+ *   names; the spells that hang on it stay off the character until a unit
+ *   records that choice, and the screen must never imply otherwise.
  * - §5's trap: nothing here links into the planner grid. Success re-navigates
  *   to the build route, which re-derives the step from the database.
  * - Re-applying replaces (§8): the worker owns that semantic; this screen just
@@ -115,12 +119,6 @@ export const SPECIES_UNMADE_CHOICES: ReadonlyMap<string, readonly string[]> =
       ],
     ],
   ]);
-
-/** D33 disclosure for the seam's pinned lineage-spell species. */
-export const LINEAGE_SPELLS_DISCLOSURE =
-  'Lineage spells are not granted yet: this species has them by the rules, ' +
-  'but this builder does not put them on the character, so they will not ' +
-  'appear on the sheet until spell grants are built.';
 
 /**
  * D33 disclosure for the step this group never built. `deriveBuildStep` pins
@@ -269,14 +267,6 @@ export function createSpeciesStep(deps: SpeciesStepDeps): SpeciesStep {
             text: option.name,
           }),
           unmadeChoicesBlock(option),
-          ...(option.grants_lineage_spells
-            ? [
-                element('p', {
-                  className: 'guided-lineage-disclosure',
-                  text: LINEAGE_SPELLS_DISCLOSURE,
-                }),
-              ]
-            : []),
           apply,
         ],
       );

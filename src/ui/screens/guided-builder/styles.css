@@ -199,14 +199,9 @@
   font-size: 0.85rem;
 }
 
-.guided-lineage-disclosure,
 .guided-abilities-skipped {
   font-size: 0.85rem;
   font-style: italic;
-}
-
-.guided-lineage-disclosure {
-  margin: 0;
 }
 
 .guided-species-apply {
