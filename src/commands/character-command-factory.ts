@@ -15,6 +15,7 @@ import { ClearSlotCommand } from './set-slot/clear';
 import { KeepOverrideSlotCommand } from './set-slot/keep-override';
 import { RestoreSlotCommand } from './set-slot/restore';
 import { SelectSlotCommand } from './set-slot/select';
+import { FillSkillGrantCommand } from './fill-skill-grant';
 import { UpdateAbilityCommand } from './update-ability';
 import { UpdateCharacterRulesCommand } from './update-character-rules';
 import { ChooseMulticlassSkillCommand } from './choose-multiclass-skill';
@@ -144,6 +145,8 @@ export class CharacterCommandFactory {
         return new SetSkillProficiencyCommand(this.db, payload);
       case 'choose_multiclass_skill':
         return new ChooseMulticlassSkillCommand(this.db, payload);
+      case 'fill_skill_grant':
+        return new FillSkillGrantCommand(this.db, payload);
       case 'set_armor_class_adjustment':
         return new SetArmorClassAdjustmentCommand(this.db, payload);
       case 'restore_snapshot':

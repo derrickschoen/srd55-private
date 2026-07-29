@@ -15,13 +15,20 @@
  * instance against. Two review rounds of the guided-builder plan died on that
  * distinction, so it is restated here where the first writer lives.
  *
- * ONLY THE THREE LINEAGE SPECIES ARE SEEDED. The seam
+ * FOUR SPECIES ARE SEEDED, AND THE FOURTH IS THE RULE'S OWN TEST. The seam
  * (`src/builder/contracts.ts`, `LINEAGE_SPELL_SPECIES_CONTENT_KEYS`) pins Elf,
- * Gnome and Tiefling as the bundled species whose lineage grants spells; the
- * other six SRD species grant none, and a definition row carrying an empty
- * rule list would make `add_source` succeed while granting nothing — a row
- * that exists only to look complete. When a species gains a real rule, it
- * gains a row.
+ * Gnome and Tiefling as the bundled species whose lineage grants spells. The
+ * rule stands: a definition row carrying an empty rule list and anchoring
+ * nothing would make `add_source` succeed while granting nothing — a row that
+ * exists only to look complete. When a species gains a real reason, it gains
+ * a row — and HUMAN gained one (skills-with-provenance plan §3.4/§3.6):
+ * Skillful is a structured skill grant now, the grant requires a species
+ * SOURCE INSTANCE to hang on, and the source requires this definition row.
+ * Human's `grant_rules` is honestly empty — Skillful is not a spell rule; the
+ * generator's SPECIES SKILL ARM (`syncSpeciesSkillGrants`) reads the seam's
+ * `SPECIES_SKILL_GRANT_PLANS` by content key. Elf's Keen Senses rides the
+ * same arm on the definition Elf already had. The remaining five SRD species
+ * still anchor nothing and still get no row.
  *
  * THE SPELL NAMES ARE TRANSCRIBED FROM THE SRD EXTRACT, NOT FROM MEMORY:
  * `docs/srd/source/species-descriptions.txt` — the `Elven Lineages` table
@@ -319,6 +326,18 @@ export function bundledSpeciesDefinitions(): readonly BundledSpeciesDefinition[]
         otherworldlyPresenceRule(),
         ...lineageRules('tiefling', FIENDISH_LEGACIES),
       ],
+    },
+    {
+      // HUMAN CARRIES NO SPELL RULES AND THAT IS THE POINT of its row: it
+      // exists so the guided species apply mints a SOURCE INSTANCE for the
+      // Skillful skill grant to hang on (skills-with-provenance §3.4 — "Human
+      // gets a species source instance"). The grant itself is minted by the
+      // generator's species skill arm from the seam's
+      // `SPECIES_SKILL_GRANT_PLANS`, keyed by this content key; see the
+      // header for why an empty rule list is honest here and nowhere else.
+      content_key: `${BUNDLED_ORIGIN_RULES_EDITION}:species:human`,
+      name: 'Human',
+      grant_rules: [],
     },
   ];
   for (const definition of definitions) {

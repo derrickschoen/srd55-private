@@ -47,10 +47,16 @@ import {
   type KnownCreatureSize,
   type KnownCreatureType,
   type KnownDamageType,
+  type Skill,
 } from '../domain/enums';
 import type { CharacterRow } from '../domain/models';
 import { GrantRuleSlotGenerator } from '../grants/grant-rule-slot-generator';
+import {
+  mintFilledSkillGrants,
+  rebuildSkillProjection,
+} from '../grants/skill-grants';
 import { CharacterCrud } from '../queries/character-crud';
+import { skillFromLabel } from '../rules/skills';
 import { characterLevel } from '../rules/character-level';
 import { bundledClassContentKeys } from '../rules/class-progression-lookup';
 import {
@@ -85,6 +91,7 @@ import {
   grantsLineageSpells,
   GUIDED_LEVEL_ONE_STEP_ORDER,
   hasWeakScores,
+  SKILL_GRANT_KEYS,
   type AbilityAllocationMethod,
   type BuildStep,
   type GuidedAbilityWarning,
@@ -94,6 +101,8 @@ import {
   type GuidedBuildStateResult,
   type GuidedClassOption,
   type GuidedCreateParams,
+  type GuidedFillSkillGrantParams,
+  type GuidedFillSkillGrantResult,
   type GuidedOriginOption,
   type GuidedOriginParams,
   type GuidedRefusalReason,
@@ -765,7 +774,15 @@ export function applyGuidedOrigin(
       // must still remove the previous apply's, or a background change through
       // this path would leave increases from a background the character no
       // longer has: exactly the orphan D63's cascade exists to forbid.
+      //
+      // S-B widened the footprint AGAIN: the previous apply's source now owns
+      // FILLED skill grants, which the hard delete just cascaded away — a
+      // grant-changing path, so the projection is reconciled here (§3.2).
+      // What this record-only path still does NOT do is mint grants of its
+      // own: a grant requires a source instance and this path writes none —
+      // the B3 apply (`applyGuidedBackgroundChoices`) is the producer.
       deleteGuidedBackgroundSources(db, characterId);
+      rebuildSkillProjection(db, characterId);
       db.exec(
         `DELETE FROM character_background WHERE character_id = ?`,
         [characterId],
@@ -976,11 +993,18 @@ function deleteSourceInstanceTree(
  * level-up unit inherits the duty of maintaining it.
  *
  * NO DEFINITION IS A QUIET NO-OP, and that is correct rather than lenient:
- * only the three lineage species have definitions (the other six grant no
- * spells), and a bundled definition can also be legitimately absent when
- * seeding yielded its name to user-authored content. A species with no
- * definition has no grants to bridge — the template copy above is the whole
- * apply, exactly as it was under A4.
+ * only four species have definitions — the three lineage species, plus HUMAN
+ * since S-B, whose row exists so this bridge mints the source instance the
+ * Skillful skill grant hangs on (skills-with-provenance §3.4) — and a bundled
+ * definition can also be legitimately absent when seeding yielded its name to
+ * user-authored content. A species with no definition has no grants to bridge
+ * — the template copy above is the whole apply, exactly as it was under A4.
+ *
+ * S-B WIDENED WHAT THE BRIDGE DELIVERS: `generateForSource` now runs the
+ * generator's SPECIES SKILL ARM (`syncSpeciesSkillGrants`), so an Elf source
+ * mints its unfilled Keen Senses grant and a Human source its unfilled
+ * Skillful grant from the seam's `SPECIES_SKILL_GRANT_PLANS` — structured
+ * obligations the skills step reports, not prose.
  */
 function replaceGuidedLineageGrants(
   db: DatabaseContext,
@@ -996,6 +1020,11 @@ function replaceGuidedLineageGrants(
   for (const sourceInstanceId of previous) {
     deleteSourceInstanceTree(db, sourceInstanceId);
   }
+  // S-B: the deleted tree's skill grants (Elf's Keen Senses, Human's
+  // Skillful) just cascaded away — a grant-changing path, reconciled HERE,
+  // before the no-definition early return below, so switching to a species
+  // with no definition row cannot leave a stale projection row behind (§3.2).
+  rebuildSkillProjection(db, characterId);
 
   const definitionId = db.one(
     `SELECT id FROM species_definitions WHERE content_key = ?`,
@@ -1160,6 +1189,31 @@ function gateBundledOriginFeat(
     );
   }
   return feat;
+}
+
+/**
+ * The two printed skills, normalised from prose to verified `Skill` values
+ * (S-B). The template columns hold PRINTED WORDS copied verbatim from the SRD
+ * extract ("Insight", "Sleight of Hand"); `skillFromLabel` inverts the
+ * display spellings the Skills table closed the vocabulary on. Failure is a
+ * LOUD error, not a refusal and not a skipped grant: every bundled
+ * background's prose must normalise, so an unrecognised value is a seed
+ * defect to fix, and minting one skill of two would be a background that
+ * looks applied with half of it missing.
+ */
+function backgroundSkillsFromTemplate(
+  template: BackgroundTemplateRow,
+): readonly [Skill, Skill] {
+  const first = skillFromLabel(template.skill_proficiency_1);
+  const second = skillFromLabel(template.skill_proficiency_2);
+  if (first === null || second === null) {
+    throw new Error(
+      `The background "${template.name}" prints a skill the vocabulary ` +
+        `does not know (${JSON.stringify(template.skill_proficiency_1)}, ` +
+        `${JSON.stringify(template.skill_proficiency_2)}).`,
+    );
+  }
+  return [first, second];
 }
 
 /**
@@ -1332,6 +1386,24 @@ export function applyGuidedBackgroundChoices(
       );
     }
 
+    // THE BACKGROUND'S TWO PRINTED SKILLS, AS FILLED GRANTS (S-B, §4): the
+    // prose is normalised to VERIFIED `Skill` values — a background whose
+    // printed skill the vocabulary does not know throws loudly rather than
+    // minting a guess — and written under this apply's own source instance,
+    // ordinals in printed order. §3.3's collision (a class ordinal already
+    // filled with a skill the new background grants) refuses inside the mint
+    // with the NAMED `skill_already_held`, rolling this whole transaction
+    // back: silently unfilling a choice the person made is worse than saying
+    // no, and refusing is right only because the fill command's null-selection
+    // CLEAR exists.
+    mintFilledSkillGrants(
+      db,
+      characterId,
+      instanceId,
+      SKILL_GRANT_KEYS.backgroundSkill,
+      backgroundSkillsFromTemplate(template),
+    );
+
     // The Origin feat, through the EXISTING machinery: the seeded
     // definition's grant_source rule resolves the config's feat key,
     // materialises the child feat source and recursively generates ITS
@@ -1422,5 +1494,43 @@ export async function allocateGuidedAbilities(
       readGuidedStepEvidence(db, params.character_id),
     ),
     warnings,
+  };
+}
+
+/* --------------------------------------------- S-B: the skills fill command */
+
+/**
+ * ONE fill (or clear) of one ADDRESSED grant, through the command executor —
+ * the same ride `allocateGuidedAbilities` takes, and for the same reasons:
+ * idempotent replay by `operation_uuid`, the revision check, the audit entry,
+ * and an inverse (here a PRECISE one — the same command with the displaced
+ * selection, prepared by the executor).
+ *
+ * All domain refusals — the seam's `SkillGrantRefusalReason` — are raised by
+ * `fillSkillGrant` in `src/grants/skill-grants.ts` and thrown through here as
+ * `SkillGrantRefusal` for the RPC handler to translate; this wrapper adds
+ * only the executor envelope and the updated build position.
+ */
+export async function fillGuidedSkillGrant(
+  db: DatabaseContext,
+  params: GuidedFillSkillGrantParams,
+  integrity: CharacterCommandIntegrity,
+): Promise<GuidedFillSkillGrantResult> {
+  await new CharacterCommandExecutor(db, integrity).execute({
+    character_id: params.character_id,
+    operation_uuid: params.operation_uuid,
+    expected_revision: params.expected_revision,
+    command: {
+      type: 'fill_skill_grant',
+      grant_id: params.grant_id,
+      skill: params.skill,
+    },
+  });
+
+  return {
+    character_id: params.character_id,
+    current_step: deriveBuildStep(
+      readGuidedStepEvidence(db, params.character_id),
+    ),
   };
 }

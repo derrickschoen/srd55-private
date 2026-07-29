@@ -16,6 +16,7 @@ import {
   GUIDED_RPC,
   hasExactKeys,
   isGuidedCreateParams,
+  isGuidedFillSkillGrantParams,
   isGuidedOriginParams,
   isOriginKind,
   type AbilityAllocationMethod,
@@ -33,11 +34,13 @@ import {
   applyGuidedBackgroundChoices,
   applyGuidedOrigin,
   createGuidedCharacter,
+  fillGuidedSkillGrant,
   guidedBuildState,
   listGuidedBackgroundChoiceOptions,
   listGuidedClassOptions,
   listGuidedOriginOptions,
 } from '../../builder/guided-creation';
+import { SkillGrantRefusal } from '../../grants/skill-grants';
 import { CharacterCommandIntegrity } from '../../commands/integrity';
 import { RevisionConflict } from '../../commands/revision-conflict';
 import { abilities } from '../../domain/enums';
@@ -160,6 +163,16 @@ function translatingRefusals<T>(operation: () => T): T {
         reason: error.reason,
       });
     }
+    // The S-B skill-grant refusals ride the same precedent with their own
+    // data shape (the seam's `SkillGrantRefusalData`): §3.3 pins that the
+    // background collision NAMES the conflicting skill so the step can offer
+    // to clear it.
+    if (error instanceof SkillGrantRefusal) {
+      throw new RpcError('handler_error', error.message, {
+        reason: error.reason,
+        skill: error.skill,
+      });
+    }
     throw error;
   }
 }
@@ -235,6 +248,42 @@ export const handlers: readonly RpcHandler[] = Object.freeze([
           new CharacterCommandIntegrity(COMMAND_INTEGRITY_KEY),
         );
       } catch (error) {
+        if (error instanceof RevisionConflict) {
+          throw new RpcError('handler_error', error.message, {
+            current_revision: error.currentRevision,
+          });
+        }
+        throw error;
+      }
+    },
+  ),
+  /**
+   * The S-B fill command (§3.6). Rides the executor like `allocateAbilities`,
+   * so it owes the same `RevisionConflict` translation; its DOMAIN refusals —
+   * the seam's `SkillGrantRefusalReason`, each naming the skill at issue —
+   * ride `translatingRefusals`' `SkillGrantRefusal` arm.
+   */
+  defineRpcHandler(
+    GUIDED_RPC.fillSkillGrant,
+    isGuidedFillSkillGrantParams,
+    async (context, params) => {
+      try {
+        return await fillGuidedSkillGrant(
+          context.db,
+          params,
+          new CharacterCommandIntegrity(COMMAND_INTEGRITY_KEY),
+        );
+      } catch (error) {
+        // Translated HERE, not through `translatingRefusals`: that wrapper is
+        // synchronous and this request rejects asynchronously out of the
+        // executor — a sync try/catch around a returned promise catches
+        // nothing.
+        if (error instanceof SkillGrantRefusal) {
+          throw new RpcError('handler_error', error.message, {
+            reason: error.reason,
+            skill: error.skill,
+          });
+        }
         if (error instanceof RevisionConflict) {
           throw new RpcError('handler_error', error.message, {
             current_revision: error.currentRevision,

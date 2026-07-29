@@ -52,6 +52,18 @@ export const SKILL_LABELS: Readonly<Record<Skill, string>> = {
   survival: 'Survival',
 };
 
+/**
+ * Printed prose to enum member, or null for anything the vocabulary does not
+ * know. The background templates store their two skills as PRINTED WORDS
+ * ("Sleight of Hand"), and the S-B producer must normalise them to VERIFIED
+ * `Skill` values before a grant row can carry them — a grant holding
+ * unrecognised prose would fail the schema CHECK anyway, so the honest
+ * translation lives here beside the display spellings it inverts.
+ */
+export function skillFromLabel(label: string): Skill | null {
+  return LABEL_TO_SKILL.get(label.trim()) ?? null;
+}
+
 const ABILITY_WORDS: Readonly<Record<string, Ability>> = {
   Strength: 'strength',
   Dexterity: 'dexterity',
