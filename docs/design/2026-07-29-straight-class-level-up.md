@@ -80,26 +80,58 @@ A row per class level past the first, always written, always saying which.
 `docs/srd/source/class-level-tables.txt`. The only schema delta is the new
 column.
 
-**NOT NULL has a blast radius revision 1 did not name, and "cost to flip: none"
-was true only of production data.** Every bare INSERT breaks the moment the
-migration lands: `SetHitPointRollCommand` itself (`sheet-inputs.ts:294`) plus raw
-inserts in `tests/integration/commands/sheet-inputs.test.ts`,
+**NOT NULL has a blast radius, and revision 2's list of it was itself wrong —
+a second reviewer corrected it and I verified every entry.** Revision 2 named
+`tests/integration/commands/sheet-inputs.test.ts` as holding a bare INSERT: it
+holds **zero** (its hit-point rows go through the command; it breaks anyway, but
+because the payload gains a field). And it MISSED three writers, one of them
+**production code**:
+
+**Production writers:**
+- `SetHitPointRollCommand` — `src/commands/sheet-inputs.ts:294`.
+- **`src/sharing/character-share.ts:1938` — share import**, an explicit-column
+  `INSERT` listing `character_id, class_name, class_level, rolled_value`.
+  Verified by reading it. A NOT NULL column not in that list fails on the first
+  import.
+- `src/backup/character-backup.ts:1920-1923` — `insertPortableRow` is
+  **document-driven**, so a backup written before the column violates NOT NULL
+  unless the backup layer supplies a default. This is exactly the
+  "optional for older files" handling the skills unit needed (`bf7bc14`).
+
+**Test writers, verified individually:**
 `tests/integration/queries/character-sheet.test.ts:144,193,557`,
 `tests/integration/character/state.test.ts:170`,
 `tests/integration/sharing/column-portability.test.ts:1249`,
-`tests/integration/rules/sheet-inputs-portability.test.ts:74`, and
-`tests/browser/character-sheet.spec.ts:127`. This is L-A's scope and is named
-here so it is not discovered mid-dispatch.
+`tests/integration/rules/sheet-inputs-portability.test.ts:74`,
+`tests/browser/character-sheet.spec.ts:127`,
+`tests/unit/schema-check-constraints.test.ts:343` (its `hitPointRoll` helper),
+plus `tests/integration/commands/sheet-inputs.test.ts` for the payload change.
+
+**And what a `method: 'fixed'` row STORES was never said.** `rolled_value` is
+`integer NOT NULL` (verified in `schema.sql`), so a fixed row **stores the
+class's fixed value** (4/5/6/7) and `method` is what disambiguates it from a roll
+that happened to land there. The column keeps its name; renaming it is a
+migration this unit does not need.
 
 ## 3. Disposing of the two existing entry points — PINNED, and this is the unit
 
 - **`SetHitPointRollCommand` is EXTENDED, not duplicated**: it carries `method`,
   and its null-means-fixed branch becomes an explicit `method: 'fixed'` row.
   Building a second writer beside it is the F22 trap — one rule in two places.
-- **The planner's numeric level input is RETIRED for the levelling path.**
-  Leaving it live means the level can still move without a hit-point row, which
-  is exactly the bug §1 closes. Multiclass *entry* is untouched (D56 defers
-  multiclass level-up; it does not remove entry).
+- **The planner's numeric level input is RETIRED for the levelling path**, and
+  **`level` is STRIPPED FROM THE `update_class` PAYLOAD.** Revision 2 retired the
+  input and left the command's power intact — `payload-validator.ts:854` still
+  accepts any level 1..20, so any other caller re-opens the exact bug §1 closes
+  and **L-STRAIGHT would not fire, because it guards the NEW command.** A second
+  reviewer named this as the closest thing to a dispatch-killer after the seam.
+  `update_class` keeps entry and subclass; levelling belongs to one path.
+  Multiclass *entry* is untouched (D56 defers multiclass level-up, it does not
+  remove entry).
+- **Retiring the input moves browser tests revision 2 did not name**:
+  `tests/browser/weapons.spec.ts:355-356,588-591` and
+  `tests/browser/agent-reference.spec.ts:342` all drive the level spinbutton.
+  They are retargeted, not deleted — their subjects are weapons and the agent
+  reference, not the input.
 - **The level write and the hit-point row happen in ONE transaction.** A level
   that moved without its row is the unrecoverable state.
 
@@ -113,18 +145,31 @@ fires in this unit's scope.
 
 **PINNED, plainly: every level opens the screen.** The conditional was decoration.
 
-## 5. Level 4 — SCOPED IN, because silence would ship a wrong number
+## 5. Ability Score Improvement — revision 2 said "level 4" and that was WRONG
 
-`docs/srd/source/class-level-tables.txt` prints **Ability Score Improvement at
-level 4** for every class. Revision 1 did not mention it, not even as an
-exclusion — so a level-up to 4 would silently grant nothing and say nothing about
-a choice the character is owed. That is the confidently-wrong-number shape this
-project keeps catching.
+**Verified by counting the seeded table myself: ASI appears on 47 lines of
+`docs/srd/source/class-level-tables.txt`, at levels 4, 6, 8, 10, 12, 14 and 16.**
+Revision 2 scoped in "level 4" and congratulated itself for not omitting it
+silently — while omitting six other levels exactly as silently. A level-up to 8
+would have shipped the identical wrong number the section condemns.
 
-D63 already models ability increases as additive contributions that know their
-source, so the layer exists. **L-B offers the level-4 increase and records it as
-a contribution.** If it proves larger than one dispatch, it is split — but it is
-not silently omitted.
+**PINNED: the ASI levels are READ FROM THE SEEDED DATA, not hardcoded.** The
+information is in the table the app already ships; a literal `4` in the code is
+the same class of mistake as the plural-weapon map D15 forbids — a mechanical
+fact decided by something other than the data.
+
+**The increase is offered; "or another feat" is DEFERRED AND DISCLOSED.** SRD
+2024 lets a level-4 character take the Ability Score Improvement feat **or
+another feat**. The feat layer is not applied — `feat_definitions.ability_points`
+is still seeded and consumed by nothing but row contracts, which a reviewer
+confirmed. So this unit offers the increase, and **says on the screen that
+choosing a different feat is not yet supported**. Saying it is the difference
+between a deferral and a silent omission.
+
+The machinery for the increase exists: `guided-creation.ts:1553-1600` already
+mints a source instance and writes `ability_increase` rows into
+`character_effects`, and `src/rules/ability-contributions.ts` resolves them into
+all four consuming pipelines. No feat-layer drag-in.
 
 ## 6. Already solved, stated so nobody rebuilds it
 
@@ -156,7 +201,11 @@ This is not hypothetical here: it is what the planner input does today.
 - **L-UNKNOWN** *(new — §1)* — mutate the sheet's derivation back to the silent
   `roll ?? fixed` fallback. Must fail: a level with **no recorded row** renders
   as **unknown** (D33), not as a confident fixed value. **No control in revision
-  1 covered the one live bug this unit exists to close.**
+  1 covered the one live bug this unit exists to close.** *Its cost, which
+  revision 2 did not name:* flipping absence to unknown moves **every existing
+  fixture that levels past 1 without rolls and asserts a numeric maximum** —
+  sheet unit tests, character-sheet integration tests, browser parity. Those are
+  retargets, not deletions, and they are the bulk of L-B's test work.
 - **L-NO-REDERIVE** — mutate the maximum to average an existing rolled row. Must
   fail: a character who rolled **3** at level 2 shows the total that follows from
   3. Fixture must roll far from the average.
@@ -172,6 +221,51 @@ This is not hypothetical here: it is what the planner input does today.
 - **L-PERSIST** — reload after levelling: level, method and value all survive,
   asserted from disk.
 
+## 8b. THE SEAM — pinned here because it is the named dispatch-killer
+
+A reviewer's verdict: the single thing most likely to fail is that **L-A must
+build the level-and-row transaction and both guards without knowing what L-B's
+screen submits.** Two implementers would invent it differently. So it is pinned
+before either is cut, in `src/builder/contracts.ts`:
+
+- **ONE command, ONE payload**, not three. It carries: the class source being
+  levelled, the target level, the hit-point `{ method, value }`, the subclass
+  content key **when the new level is 3**, and the ability increase **when the
+  new level is an ASI level**. One transaction, one inverse, one refusal set.
+- **The refusal reasons, as strings**: a class the character does not have, a
+  level 3 with no subclass, an ASI level with no increase, a non-adjacent target
+  level. Named in the seam, not invented per dispatch.
+- **The inverse is a SNAPSHOT inverse**, matching what `update_class` already
+  does (`character-command-executor.ts:446-451`). Revision 2 left this open, and
+  a field-by-field inverse cannot express it: `#previous` in
+  `sheet-inputs.ts:262` captures only `rolled_value`, so once every row carries a
+  method the prior state is `(method, value) | absent` — a tri-state the existing
+  `rolled_value: null` encoding inverts rather than represents.
+- **The read model becomes method-aware**, and this belongs to **L-A**:
+  `HitPointRolls` is `ReadonlyMap<string, ReadonlyMap<number, number>>`
+  (`sheet.ts:646`) with the builder query at `character-sheet-builder.ts:909`.
+  A map to a bare number cannot carry a method. Revision 2 assigned it to
+  neither dispatch.
+
+## 8c. Persistence is a VERSION MINT, not "carry"
+
+Revision 2 wrote "snapshot and backup and wire carry" and hid two rituals in one
+word:
+
+- **Share wire**: `ShareHitPointRoll` (`sharing/schema.ts:667`) carries
+  `{ className, classLevel, value }`. Adding a method **mints a wire version**
+  with its adjacent migration and a hand-frozen fixture — the D41 ritual, exactly
+  as the skills unit paid it. Today's current version is what the equipment strip
+  left; L-A reads it rather than assuming.
+- **Snapshot**: a new column on a carried table needs the
+  `ADDED_NULLABLE_ROW_COLUMNS` route — **which does not apply, because `method` is
+  NOT NULL.** So either the column is nullable-with-backfill, or the snapshot
+  version is minted with the historical list hand-frozen first. **L-A decides and
+  reports; both are honest, and picking silently is not.**
+- **Hand-transcribed inventories move**: `tests/unit/schema.test.ts:654`,
+  `column-portability.test.ts:691`, column facts, table contracts. Real volume,
+  and the precedent commits show it.
+
 ## 9. Dispatches
 
 - **L-A — the record and the writers.** The `method` column and its migration,
@@ -184,6 +278,17 @@ This is not hypothetical here: it is what the planner input does today.
 
 ## 10. NOT in this unit
 
-Multiclass level-up (D56). Levelling down. The D67 reveal. `class_name` staying a
-VARCHAR rather than a foreign key — a real weakness, recorded so it is not
+Multiclass level-up (D56). Levelling down. The D67 reveal. Taking a different
+feat instead of the ASI (§5, disclosed on the screen).
+
+**A consequence that must be said rather than discovered:** multiclass entry
+creates a second class at level 1, which is not the character's first level, gets
+no hit-point row, and has no UI anywhere that dispatches `set_hit_point_roll` —
+a reviewer grepped for call sites and found zero. So **after L-UNKNOWN lands,
+every multiclassed character's hit points render as unknown, with no way to
+resolve it until the deferred multiclass unit.** That is D33-honest and it is a
+real reduction in what the app can show; it is named here so nobody meets it as a
+surprise.
+
+`class_name` staying a VARCHAR rather than a foreign key — a real weakness, recorded so it is not
 mistaken for an oversight; nothing here depends on changing it.
