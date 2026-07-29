@@ -15,6 +15,13 @@ const ADDED_NULLABLE_ROW_COLUMNS: Readonly<
   Partial<Record<HistoricalRowTable, readonly string[]>>
 > = {
   character_weapons: ['proficiency_category', 'attack_kind'],
+  // The `ability_increase` payload (B2). Every effect row written before the
+  // contribution layer existed lacks all three keys; without this entry the
+  // exact-key row contract would refuse every save point and portable backup
+  // already in the wild over columns their rows could not have named. NULL is
+  // correct: no historical row can be of kind `ability_increase`, so the
+  // kind-payload CHECKs hold with all three absent.
+  character_effects: ['ability', 'amount', 'maximum'],
 };
 
 /**

@@ -21,8 +21,9 @@
  *    CHECKs `character_armor_dex_bonus_max_check` and
  *    `character_armor_shield_check`). Two columns again, twice.
  *  - `character_effects` ties each payload column to the `effect_kind` that
- *    gives it meaning, in both directions (five named CHECKs, listed on
- *    `effectPayloadKindError`). Two columns again, five times.
+ *    gives it meaning, in both directions, and ties `ability_increase` to a
+ *    non-null source (the named CHECKs are listed on
+ *    `effectPayloadKindError`). Two columns again, several times over.
  *
  * WHY THIS MODULE EXISTS RATHER THAN TWO COPIES OF THE RULES.
  * Both rules were already implemented in `src/backup/character-backup.ts`, for
@@ -241,9 +242,11 @@ export function weaponRangePayloadError(
 /**
  * AN EFFECT'S PAYLOAD BELONGS TO ITS KIND, AND ITS KIND REQUIRES ITS PAYLOAD.
  *
- * `character_effects` declares five CHECKs saying so — `damage_type_kind`,
- * `hit_points_kind`, `speed_kind`, `hp_modifier_payload`, `speed_payload` — and
- * a per-column contract cannot see any of them: each is a statement about two
+ * `character_effects` declares CHECKs saying so — `damage_type_kind`,
+ * `hit_points_kind`, `speed_kind`, `hp_modifier_payload`, `speed_payload`,
+ * and for `ability_increase` the `ability_kind`/`amount_kind`/`maximum_kind`
+ * trio, `ability_increase_payload` and `ability_increase_source` — and a
+ * per-column contract cannot see any of them: each is a statement about two
  * columns together. Reaching the INSERT with `effect_kind: 'damage_resistance'`
  * and a hit point value aborts the whole import with a raw
  * `SQLITE_CONSTRAINT_CHECK` naming a constraint, not an effect.
@@ -287,6 +290,30 @@ export function effectPayloadKindError(
   }
   if (kind === 'speed' && !present(row.speed_bonus_feet)) {
     return `${label} has effect_kind speed and no speed bonus.`;
+  }
+  // The `ability_increase` pairings (B2), mirroring its schema CHECKs: the
+  // three payload columns belong to the kind and the kind requires all three —
+  // plus the one rule no other kind has, that THE KIND REQUIRES A SOURCE
+  // (`character_effects_ability_increase_source_check`). D63 makes "a
+  // contribution knows where it came from" an invariant, and a JSON row that
+  // reached the INSERT without a source would fail there with a raw
+  // SQLITE_CONSTRAINT_CHECK naming a constraint rather than an effect.
+  const abilityPayload =
+    present(row.ability) || present(row.amount) || present(row.maximum);
+  if (abilityPayload && kind !== 'ability_increase') {
+    return `${label} carries an ability payload without effect_kind ability_increase.`;
+  }
+  if (kind === 'ability_increase') {
+    if (
+      !present(row.ability) ||
+      !present(row.amount) ||
+      !present(row.maximum)
+    ) {
+      return `${label} has effect_kind ability_increase without its ability, amount and maximum.`;
+    }
+    if (!present(row.source_instance_id)) {
+      return `${label} has effect_kind ability_increase and no source instance.`;
+    }
   }
   return null;
 }

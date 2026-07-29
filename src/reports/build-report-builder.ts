@@ -31,6 +31,10 @@ import {
   SpellAccessBuilder,
   type SpellAccessRoute,
 } from '../access/spell-access-builder';
+import {
+  resolveCharacterAbilities,
+  resolvedTotals,
+} from '../rules/ability-contributions';
 import { AbilityScores } from '../rules/ability-scores';
 import { CasterContribution } from '../rules/caster-contribution';
 import { characterLevel } from '../rules/character-level';
@@ -436,20 +440,33 @@ export class BuildReportBuilder {
         ? 0
         : Math.max(...classes.map((item) => item.max_preparable_level));
 
+    // READER TWO OF THE FOUR (plan §3.4): the report's scores go through the
+    // one resolver. The read model carries BOTH answers because its consumers
+    // need different ones (§3.6): `abilities` is the RESOLVED TOTAL — casting
+    // badges, slot math, dice, print, the machine block — and `abilities_base`
+    // is what the planner's ability editor displays and edits, because
+    // `update_ability` writes what was typed straight into base and an editor
+    // fed totals would bake a contribution into base on the first edit.
+    const baseAbilities = {
+      strength: character.strength,
+      dexterity: character.dexterity,
+      constitution: character.constitution,
+      intelligence: character.intelligence,
+      wisdom: character.wisdom,
+      charisma: character.charisma,
+    };
+    const abilityTotals = resolvedTotals(
+      resolveCharacterAbilities(this.db, character.id, baseAbilities),
+    );
+
     const reportCore = {
       character: {
         id: character.id,
         name: character.name,
         character_level: level,
         proficiency_bonus: proficiency,
-        abilities: {
-          strength: character.strength,
-          dexterity: character.dexterity,
-          constitution: character.constitution,
-          intelligence: character.intelligence,
-          wisdom: character.wisdom,
-          charisma: character.charisma,
-        },
+        abilities: abilityTotals,
+        abilities_base: baseAbilities,
       },
       caster: {
         caster_level: sharedCasterLevel,
@@ -474,6 +491,7 @@ export class BuildReportBuilder {
         proficiency,
         routes,
         assessments,
+        AbilityScores.fromArray(abilityTotals),
       ),
     };
   }
@@ -682,6 +700,11 @@ export class BuildReportBuilder {
     proficiency: number | null,
     routes: readonly SpellAccessRoute[],
     assessments: readonly BuildReportAssessment[],
+    // The RESOLVED scores `build()` already produced — passed in rather than
+    // rebuilt from the raw row, so an invalid selection's attack bonus and
+    // save DC cannot disagree with the rest of the report about what the
+    // character's scores are.
+    scores: AbilityScores,
   ): WorkspaceSlot[] {
     const routeBySlot = new Map(
       routes.flatMap((route) =>
@@ -694,14 +717,6 @@ export class BuildReportBuilder {
         assessment,
       ]),
     );
-    const scores = AbilityScores.fromArray({
-      strength: character.strength,
-      dexterity: character.dexterity,
-      constitution: character.constitution,
-      intelligence: character.intelligence,
-      wisdom: character.wisdom,
-      charisma: character.charisma,
-    });
 
     const rows = this.db.all(
       `SELECT slot.id, slot.slot_key, slot.label, slot.bucket,

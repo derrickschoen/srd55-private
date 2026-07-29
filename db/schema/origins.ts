@@ -24,6 +24,7 @@ import type {
   WeaponTemplateId,
 } from '../../src/domain/ids';
 import type {
+  Ability,
   BackgroundEquipmentOption,
   CreatureSize,
   CreatureType,
@@ -36,6 +37,7 @@ import type {
   KnownDamageType,
 } from '../../src/domain/enums';
 import {
+  abilities,
   backgroundEquipmentOptions,
   creatureSizes,
   creatureTypes,
@@ -436,6 +438,20 @@ export const species_template_trait_effects = sqliteTable(
       'species_template_trait_effects_speed_payload_check',
       sql`effect_kind IS NOT 'speed' OR speed_bonus_feet IS NOT NULL`,
     ),
+    /**
+     * `ability_increase` IS REFUSED HERE, NOT GIVEN PAYLOAD COLUMNS, and the
+     * decision is deliberate (B2). The shared `effectKinds` vocabulary widened
+     * the kind CHECK above automatically, but no 2024 SRD species grants a
+     * standing ability increase — that moved to backgrounds — and the
+     * catalog-to-character copy writes `source_instance_id = NULL`, which the
+     * character-side `ability_increase_source_check` refuses. Admitting the
+     * kind here would seed catalog rows the copy could never deliver; refusing
+     * it makes that dead end unrepresentable instead of a runtime surprise.
+     */
+    check(
+      'species_template_trait_effects_no_ability_increase_check',
+      sql`effect_kind IS NOT 'ability_increase'`,
+    ),
     /** Declared order starts at 1 and is dense; 0 or a negative is a mis-parse. */
     check(
       'species_template_trait_effects_sort_order_check',
@@ -644,6 +660,25 @@ export const character_effects = sqliteTable(
     /** The `speed` payload, nullable on the same limb 2 terms. */
     speed_bonus_feet: integer('speed_bonus_feet'),
     /**
+     * The `ability_increase` payload (D63, B2): which ability, a signed
+     * non-zero amount, and the increase's OWN maximum. All three nullable on
+     * D6b limb 2 — a resistance does not HAVE an ability — with the CHECKs
+     * below making a row of this kind without all three, and a row of any
+     * other kind with any of them, unrepresentable.
+     *
+     * `maximum` is per-CONTRIBUTION because the sources genuinely differ:
+     * background increases stop at 20 (`docs/srd/source/backgrounds.txt:51`),
+     * ASI feats at 20 (`feats.txt:67`), Epic Boons at 30. It is bounded 1–30
+     * because `AbilityScore` throws outside that range
+     * (`src/rules/ability-score.ts:4-13`) — a stored `max 32` on a high base
+     * would drive a resolved total past 30 and turn a sheet into a stack
+     * trace. `amount` is non-zero because a zero contribution is not a
+     * contribution; it is a row that changes nothing and can never be noticed.
+     */
+    ability: varchar<Ability>()('ability'),
+    amount: integer('amount'),
+    maximum: integer('maximum'),
+    /**
      * WHAT GRANTED THIS, AS A LIVE REFERENCE. Nullable, D6b LIMB 2 — THE
      * ABSENCE IS REAL AND NOT AN UNSET VALUE — and today it is the COMMON state
      * rather than an edge. (Limb 1 joins it on the day the other half of
@@ -728,6 +763,48 @@ export const character_effects = sqliteTable(
     check(
       'character_effects_speed_payload_check',
       sql`effect_kind IS NOT 'speed' OR speed_bonus_feet IS NOT NULL`,
+    ),
+    /**
+     * The `ability_increase` constraints (D63, B2), in the same two directions
+     * as every kind above — payload columns belong to the kind, and the kind
+     * requires its payload — plus one the other kinds do not have: THE KIND
+     * REQUIRES A SOURCE. `source_instance_id` is nullable in general and
+     * guided species copying writes NULL, so without the source CHECK a
+     * contribution that forgot where it came from would be a stored row rather
+     * than a refused one — and D63's "base plus contributions that know their
+     * source" would be a convention, not an invariant.
+     */
+    check(
+      'character_effects_ability_check',
+      nullOrOneOf('ability', abilities),
+    ),
+    check(
+      'character_effects_ability_kind_check',
+      sql`ability IS NULL OR effect_kind IS 'ability_increase'`,
+    ),
+    check(
+      'character_effects_amount_kind_check',
+      sql`amount IS NULL OR effect_kind IS 'ability_increase'`,
+    ),
+    check(
+      'character_effects_maximum_kind_check',
+      sql`maximum IS NULL OR effect_kind IS 'ability_increase'`,
+    ),
+    check(
+      'character_effects_ability_increase_payload_check',
+      sql`effect_kind IS NOT 'ability_increase' OR (ability IS NOT NULL AND amount IS NOT NULL AND maximum IS NOT NULL)`,
+    ),
+    check(
+      'character_effects_ability_increase_source_check',
+      sql`effect_kind IS NOT 'ability_increase' OR source_instance_id IS NOT NULL`,
+    ),
+    check(
+      'character_effects_amount_check',
+      sql`amount IS NULL OR (typeof(amount) = 'integer' AND amount <> 0)`,
+    ),
+    check(
+      'character_effects_maximum_check',
+      sql`maximum IS NULL OR (typeof(maximum) = 'integer' AND maximum BETWEEN 1 AND 30)`,
     ),
     check(
       'character_effects_sort_order_check',

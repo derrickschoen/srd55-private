@@ -105,25 +105,38 @@ function renderAbilities(
   const grid = document.createElement('div');
   grid.className = 'ability-grid';
   for (const ability of abilities) {
+    // THE INPUT DISPLAYS AND EDITS BASE, NEVER THE RESOLVED TOTAL (plan §3.5).
+    // `update_ability` writes whatever was typed straight into the base
+    // column, so an input showing the total (base 15 + 2 = 17) would let a
+    // person "nudge 17 to 18" and write base = 18 — the contribution baked
+    // into base by their own hand, which is exactly what D63 forbids. The
+    // dirty-check and the modifier caption read base for the same reason; the
+    // resolved total is shown BESIDE the input, not in it.
+    const base = workspace.report.character.abilities_base[ability];
+    const total = workspace.report.character.abilities[ability];
     const input = document.createElement('input');
     input.type = 'number';
     input.min = '1';
     input.max = '30';
-    input.value = String(workspace.report.character.abilities[ability]);
+    input.value = String(base);
     input.disabled = disabled;
     input.dataset.focusKey = `ability-${ability}`;
     input.addEventListener('change', () => {
       const score = Number(input.value);
-      if (score !== workspace.report.character.abilities[ability]) {
+      if (score !== workspace.report.character.abilities_base[ability]) {
         actions.updateAbility(ability, score);
       }
     });
     const wrapper = field(ability.slice(0, 3).toUpperCase(), input);
     const result = document.createElement('small');
-    result.textContent = `modifier ${modifier(
-      workspace.report.character.abilities[ability],
-    )}`;
+    result.textContent = `modifier ${modifier(base)}`;
     wrapper.append(result);
+    if (total !== base) {
+      const resolved = document.createElement('small');
+      resolved.className = 'ability-total';
+      resolved.textContent = `total ${total} (${modifier(total)})`;
+      wrapper.append(resolved);
+    }
     grid.append(wrapper);
   }
   section.append(grid);

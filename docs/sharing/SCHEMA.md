@@ -26,7 +26,7 @@ contracts field by field.
 ## Logical semantics
 
 The readable object form uses the format marker
-`dnd-multiclass-spells-character-share` and version `3`. Unknown fields are
+`dnd-multiclass-spells-character-share` and version `4`. Unknown fields are
 rejected.
 
 Notes are not one policy, and the line between them is which side of the
@@ -125,6 +125,18 @@ field exists because the exporter omits scores equal to the default 10 and the
 importer refills them: without the signal on the wire, an allocated all-10s
 character — explicitly valid under D64 — round-tripped looking unallocated.
 
+Version 4 changes exactly one structure: the effect tuple appends the
+`ability_increase` payload — `ability`, `amount`, `maximum` — taking the
+effect tuple from 9 to 12 positions (D63's contribution layer). Every earlier
+position keeps its meaning; the two provenance slots stay at positions 7 and 8.
+For the `ability_increase` kind alone, `sourceRef` is REQUIRED and the
+validator refuses its absence, on export and on import alike. The format's
+standing allowance — an effect whose owning source no reference can reach
+still travels, merely without its provenance — does not extend to this kind:
+the database's kind-specific CHECK makes a sourceless contribution
+unrepresentable, so a document carrying one would be an export this
+application's own importer refuses.
+
 The adjacent v1-to-v2 migration pads historical short roots without inventing
 optional sections, moves placeholders and the optional character note to their
 v2 positions, upgrades old weapon damage variants, and maps all five possible
@@ -132,10 +144,12 @@ range pairs through the shared weapon-range boundary: null/null, near-only,
 ordinary, long-only, and inverted. It never coerces, rejects, or drops either
 v1 range field. The adjacent v2-to-v3 migration null-pads the character tuple's
 new trailing position: a v2 link could not carry the allocation signal, and
-`null` is the never-allocated state that was true when it was minted. Decoding
-dispatches from the frozen root version and composes the adjacent migrations
-(a v1 link lifts 1→2 then 2→3) before current-version validation; encoding
-always writes v3.
+`null` is the never-allocated state that was true when it was minted. The
+adjacent v3-to-v4 migration null-pads each effect tuple's three new trailing
+positions: no v3 link can carry an `ability_increase`, so the pad is
+unconditionally correct. Decoding dispatches from the frozen root version and
+composes the adjacent migrations (a v1 link lifts 1→2, then 2→3, then 3→4)
+before current-version validation; encoding always writes v4.
 
 Within any accepted variant, an absent optional/default field occupies its
 assigned `null` position. `null` preserves field position; it does not imply
