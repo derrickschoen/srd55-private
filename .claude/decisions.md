@@ -1,5 +1,60 @@
 # Binding scope decisions
 
+## D60 — OWNER: v1 has no users and no exports, so backward compatibility is not a constraint (2026-07-28)
+
+**The ruling.** *"There are no existing exports, this app has never been used by
+a person."*
+
+**This corrects a premise I reasoned from, and the correction is wider than the
+thing that prompted it.**
+
+The immediate case: `creation_uuid`, the column that would have given guided
+creation real double-submit protection. I dropped it, and told the owner it broke
+the backup codec "in both directions". Two reviewers had found three objections
+and I repeated all three as though they were equally solid:
+
+1. A **new** export would carry the column and fail `assertExactKeys` on import.
+   **Still true, and still a real bug** — export producing something import
+   rejects is broken regardless of who has used the app.
+2. An **old** backup document would lack the column and fail `assertRowShape`.
+   **Void.** There are no old documents. This was the half that made the
+   objection sound fatal, and it rested on users who do not exist.
+3. Re-importing while the original exists would hit the UNIQUE constraint.
+   **Still true**, and a design question rather than a blocker.
+
+Objections 1 and 3 are both answered by one decision a reviewer had already
+proposed and I did not carry forward: **make the column non-portable** — the
+export projects it away, so nothing carrying it ever reaches import. That is a
+projection in the backup export plus the migration itself.
+
+**The general rule, which is the part worth keeping:**
+
+> v1 has zero users, zero real characters and zero exports in existence. An
+> argument of the form "this would break existing documents" is **void in v1
+> until a real person creates a character.** Wipe-and-reseed is available.
+
+This is the same ground v2-D8 already stands on, and it applies to v1 for the
+same reason. It does **not** license breaking round-trips, losing user data once
+users exist, or shipping an export that its own importer refuses — those are
+defects on their own terms, which is exactly why objection 1 survives and
+objection 2 does not.
+
+**What I got wrong, precisely.** Not the decision to drop the column from the
+dispatch that was finally making the wizard exist — that sequencing still looks
+right, since the migration drags in a drizzle file, snapshot and journal
+metadata, a regenerated schema, regenerated column facts and an append-only
+checksum registry. What I got wrong was the *reason I gave*: I presented a
+compound objection as though every part held, and one part was resting on users
+who have never existed. The owner had to supply a fact I already had.
+
+**Taken for now: real double-submit protection lands as its own unit, after the
+wizard reaches background and lineage spells.** *Seam:* the migration plus one
+projection in the backup export. *Cost to flip:* say the word and it moves ahead
+of A5. Until then the class card disabling on submit is the only guard, and the
+worst case is a duplicate character the person can delete.
+
+---
+
 ## D59 — OWNER: the test is AUTHORIZATION, not copyright (2026-07-28)
 
 **The ruling.** *"I only care about unauthorized works ending up in the git repo.
