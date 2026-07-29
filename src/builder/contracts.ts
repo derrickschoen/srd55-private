@@ -142,6 +142,18 @@ export interface GuidedOriginOptionsParams {
  * nothing a test can discriminate on. A discriminated result keeps the two
  * agents from asserting different things about the same absence.
  */
+/**
+ * The result of applying an origin.
+ *
+ * §8 described this in prose — "the updated `{ character_id, current_step }`" —
+ * and pinned no type, which the A4 implementer flagged. Ratified here so the
+ * test author reads the same shape rather than a second plausible one.
+ */
+export interface GuidedApplyOriginResult {
+  readonly character_id: number;
+  readonly current_step: BuildStep;
+}
+
 export type GuidedBuildStateResult =
   | {
       readonly kind: 'ready';
@@ -309,6 +321,8 @@ export const GUIDED_PANEL = Object.freeze({
   classChooser: 'class-chooser',
   /** No such character. */
   notFound: 'not-found',
+  /** The species step. Ratified from A4, as A1's and A3's panels were. */
+  speciesStep: 'species-step',
 } as const);
 
 /** The attribute the panels above are selected by: `data-panel="…"`. */

@@ -162,9 +162,11 @@ export function renderGuidedBuildState(
   if (state.kind === 'not_found') {
     return notFoundView();
   }
-  // Every step except `class` is one this group has not built a screen for
-  // (A1). A4/A5 replace individual arms of this conditional with real step
-  // panels; the terminal panel remains the default for whatever is left.
+  // `class` renders the pinned class-less panel, and `species` never reaches
+  // this function — the screen module intercepts it and mounts the live
+  // species step (A4), which needs the RPC wiring a pure render cannot hold.
+  // A5 intercepts `background` the same way; the terminal panel remains the
+  // default for whatever is left.
   const panel =
     state.current_step === 'class'
       ? classlessPanel()

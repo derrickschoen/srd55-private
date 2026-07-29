@@ -8,6 +8,7 @@ import type { Route } from '../../router';
 import { defineScreen, type ScreenContext } from '../../screen';
 import { createClassChooser } from './class-chooser';
 import { renderGuidedBuildState } from './guided-builder';
+import { createSpeciesStep } from './species-step';
 import './styles.css';
 
 /**
@@ -51,10 +52,23 @@ async function render(context: ScreenContext): Promise<() => void> {
     cleanups.push(chooser.cleanup);
     document.title = 'Create a character';
   } else {
-    const state = await createQueriesClient(context.rpc).buildState(
-      characterId,
-    );
-    view = renderGuidedBuildState(state);
+    const client = createQueriesClient(context.rpc);
+    const state = await client.buildState(characterId);
+    if (state.kind === 'ready' && state.current_step === 'species') {
+      // The one live post-class step (A4). Every other derived step still
+      // renders one of the pinned pure panels.
+      const step = createSpeciesStep({
+        characterId,
+        options: await client.originOptions('species'),
+        applyOrigin: (contentKey) =>
+          client.applyOrigin(characterId, 'species', contentKey),
+        navigate: (path) => context.router.navigate(path),
+      });
+      view = step.element;
+      cleanups.push(step.cleanup);
+    } else {
+      view = renderGuidedBuildState(state);
+    }
     document.title = 'Guided character builder';
   }
   context.root.replaceChildren(view);

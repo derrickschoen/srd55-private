@@ -160,3 +160,69 @@
 .dark .guided-error {
   color: #fca5a5;
 }
+
+/* The species step (A4). Cards are containers with an explicit apply button,
+   not one giant clickable surface — the D33 disclosures are flow content. */
+.guided-species-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+  gap: 0.75rem;
+  margin: 1rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.guided-species-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  border: 1px solid var(--border, #c9c9c9);
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+}
+
+.guided-species-name {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.guided-species-choices p,
+.guided-species-choices-none {
+  margin: 0;
+  font-size: 0.85rem;
+  opacity: 0.85;
+}
+
+.guided-species-choices ul {
+  margin: 0.25rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.85rem;
+}
+
+.guided-lineage-disclosure,
+.guided-abilities-skipped {
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
+.guided-lineage-disclosure {
+  margin: 0;
+}
+
+.guided-species-apply {
+  margin-top: auto;
+  min-height: 2.4rem;
+  border: 1px solid var(--accent, #333);
+  border-radius: 0.45rem;
+  padding: 0.5rem 0.9rem;
+  color: #fff;
+  background: var(--accent, #333);
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.guided-species-apply:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}

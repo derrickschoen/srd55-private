@@ -1,6 +1,7 @@
 /**
- * GUIDED CREATION — build-state derivation (dispatch A1) and transactional
- * class-first materialisation (dispatch A2).
+ * GUIDED CREATION — build-state derivation (dispatch A1), transactional
+ * class-first materialisation (dispatch A2), and the species step (dispatch
+ * A4).
  *
  * The wizard's current step is a PURE FUNCTION OF CHARACTER STATE and nothing
  * else. D48 deleted the session-storage draft outright, so there is no second
@@ -26,48 +27,89 @@ import type { CharacterCommandIntegrity } from '../commands/integrity';
 import {
   sqlInteger,
   sqlNullableInteger,
+  sqlNullableString,
   sqlString,
   type RowCodec,
+  type SqlRow,
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
+import {
+  creatureSizes,
+  creatureTypes,
+  damageTypes,
+  isEnumValue,
+  type KnownCreatureSize,
+  type KnownCreatureType,
+  type KnownDamageType,
+} from '../domain/enums';
 import type { CharacterRow } from '../domain/models';
 import { CharacterCrud } from '../queries/character-crud';
 import { characterLevel } from '../rules/character-level';
 import { bundledClassContentKeys } from '../rules/class-progression-lookup';
 import {
+  effectsFromTemplate,
+  speciesFromTemplate,
+  speciesTraitFromTemplate,
+  type SpeciesTemplateRow,
+  type SpeciesTemplateTraitEffectRow,
+  type SpeciesTemplateTraitRow,
+} from '../rules/origins';
+import { bundledSpeciesTemplates } from '../rules/origins-srd';
+import {
+  grantsLineageSpells,
   GUIDED_LEVEL_ONE_STEP_ORDER,
   type BuildStep,
   type GuidedBuildStateResult,
   type GuidedClassOption,
   type GuidedCreateParams,
+  type GuidedOriginOption,
+  type GuidedOriginParams,
   type GuidedRefusalReason,
+  type OriginKind,
 } from './contracts';
 
 /**
  * What the database can currently attest about a character's guided progress.
  *
- * A1 can distinguish exactly one thing: whether any class row exists.
- * `characterLevel()` returns null with no class rows (A12 in the plan), and
- * that null IS the class check — no separate query, so the two cannot drift.
+ * `classChosen` (A1): `characterLevel()` returns null with no class rows (A12
+ * in the plan), and that null IS the class check — no separate query, so the
+ * two cannot drift.
+ *
+ * `speciesChosen` (A4): a `character_species` row exists for the character.
+ * That rule is PINNED by the plan (§8) — NOT a `character_source_instances`
+ * row, which is not on this path at all.
  */
 export interface GuidedStepEvidence {
   readonly classChosen: boolean;
+  readonly speciesChosen: boolean;
 }
 
 /**
  * The first step the evidence cannot prove complete, in D55's order.
  *
- * Steps with no detection yet (`abilities`, `species`, `background`, `skills`,
- * `equipment`) are pinned incomplete, so the walk stops at the first of them —
- * for A1 that means: no class rows → `'class'`; class present → `'abilities'`.
- * The build screen renders those undetectable steps as the terminal
- * not-built-yet panel rather than pretending they can be finished here.
+ * Steps with no detection yet (`background`, `skills`, `equipment`) are pinned
+ * incomplete, so the walk stops at the first of them. The build screen renders
+ * those undetectable steps as the terminal not-built-yet panel rather than
+ * pretending they can be finished here.
+ *
+ * `abilities` IS PINNED COMPLETE, AND THAT IS A DISCLOSED LIMITATION, NOT A
+ * DETECTION. Ability scores are six NOT-NULL columns on `characters` with a
+ * DEFAULT of 10, so "scores exist" is true for every character by construction
+ * and nothing in the schema can distinguish an allocated score from a
+ * defaulted one. A literal `false` here would be worse: the walk would stop at
+ * `abilities` forever — no dispatch in this group builds that screen — and the
+ * species and background steps behind it would be unreachable dead code, the
+ * exact dead-end wizard shell §5 of the plan forbids (D54: the bar is usable).
+ * It would also leave §9's A1-STEP control unfireable, which requires a
+ * fixture advanced PAST species. The species screen says out loud that the
+ * abilities step was skipped (D33), and when an abilities step is built this
+ * literal becomes its evidence field.
  */
 export function deriveBuildStep(evidence: GuidedStepEvidence): BuildStep {
   const complete: Readonly<Record<BuildStep, boolean>> = {
     class: evidence.classChosen,
-    abilities: false,
-    species: false,
+    abilities: true,
+    species: evidence.speciesChosen,
     background: false,
     skills: false,
     equipment: false,
@@ -86,7 +128,17 @@ export function readGuidedStepEvidence(
   db: DatabaseContext,
   characterId: number,
 ): GuidedStepEvidence {
-  return { classChosen: characterLevel(db, characterId) !== null };
+  return {
+    classChosen: characterLevel(db, characterId) !== null,
+    speciesChosen:
+      db.one(
+        `SELECT id
+         FROM character_species
+         WHERE character_id = ?`,
+        [characterId],
+        (row) => sqlInteger(row, 'id'),
+      ) !== null,
+  };
 }
 
 /**
@@ -289,5 +341,361 @@ export function createGuidedCharacter(
       integrity,
     ).apply(created.id);
     return crud.get(created.id);
+  });
+}
+
+/* ------------------------------------------------------ A4: the species step */
+
+/**
+ * SPECIES ARE APPLIED FROM THE TEMPLATE TABLES. NOT THROUGH `add_source`.
+ *
+ * `AddSourceCommand` resolves a species through `species_definitions`, and
+ * nothing in this repository ever writes that table — it is empty after a full
+ * application seed, and two review rounds of the plan died on exactly this.
+ * What IS populated, by `ensureBundledOriginContent`, is `species_templates`,
+ * `species_template_traits` and `species_template_trait_effects`; the guided
+ * step copies those into the character-owned rows `character_species`,
+ * `character_species_traits` and `character_effects` via the existing pure
+ * helpers in `src/rules/origins.ts` — their first production callers.
+ *
+ * The species is therefore genuinely APPLIED, not merely recorded: the sheet
+ * reads speed from `character_species` and effects from `character_effects`,
+ * so a person sees a consequence (§9's A4-APPLIED control).
+ *
+ * The honest limit, disclosed on the screen rather than hidden: there is no
+ * `character_source_instances` row, so no grant-rule consequence exists —
+ * lineage spells above all (A6 grants them for real; until then the UI says
+ * they are not granted YET, never that the character lacks them).
+ */
+
+/** The seam pins `{ character_id, current_step }` as `applyOrigin`'s result. */
+export interface GuidedApplyOriginResult {
+  readonly character_id: number;
+  readonly current_step: BuildStep;
+}
+
+/**
+ * THE BUNDLED ORIGIN IDENTITY IS CONTENT-KEY MEMBERSHIP, mirroring the class
+ * gate. `species_templates` carries no provenance column either; the bundled
+ * set is derived from the same SRD parse the seeder writes from, so the option
+ * list and the apply gate cannot drift apart.
+ */
+function bundledSpeciesKeys(): readonly string[] {
+  return bundledSpeciesTemplates().map((template) => template.content_key);
+}
+
+function sqlKnownCreatureType(
+  row: SqlRow,
+  column: string,
+): KnownCreatureType {
+  const value = sqlString(row, column);
+  if (!isEnumValue(creatureTypes, value)) {
+    throw new Error(
+      `Species template column ${column} holds unknown creature type ${JSON.stringify(value)}.`,
+    );
+  }
+  return value;
+}
+
+function sqlKnownCreatureSize(
+  row: SqlRow,
+  column: string,
+): KnownCreatureSize {
+  const value = sqlString(row, column);
+  if (!isEnumValue(creatureSizes, value)) {
+    throw new Error(
+      `Species template column ${column} holds unknown size ${JSON.stringify(value)}.`,
+    );
+  }
+  return value;
+}
+
+function sqlKnownNullableCreatureSize(
+  row: SqlRow,
+  column: string,
+): KnownCreatureSize | null {
+  const value = sqlNullableString(row, column);
+  if (value === null) {
+    return null;
+  }
+  return sqlKnownCreatureSize(row, column);
+}
+
+function sqlKnownNullableDamageType(
+  row: SqlRow,
+  column: string,
+): KnownDamageType | null {
+  const value = sqlNullableString(row, column);
+  if (value === null) {
+    return null;
+  }
+  if (!isEnumValue(damageTypes, value)) {
+    throw new Error(
+      `Species template column ${column} holds unknown damage type ${JSON.stringify(value)}.`,
+    );
+  }
+  return value;
+}
+
+const speciesTemplateRow: RowCodec<SpeciesTemplateRow> = (row) => ({
+  id: sqlInteger(row, 'id'),
+  content_key: sqlString(row, 'content_key'),
+  rules_edition: sqlString(row, 'rules_edition'),
+  name: sqlString(row, 'name'),
+  creature_type: sqlKnownCreatureType(row, 'creature_type'),
+  size: sqlKnownCreatureSize(row, 'size'),
+  alternate_size: sqlKnownNullableCreatureSize(row, 'alternate_size'),
+  base_speed_feet: sqlInteger(row, 'base_speed_feet'),
+  created_at: sqlNullableString(row, 'created_at'),
+  updated_at: sqlNullableString(row, 'updated_at'),
+});
+
+const speciesTemplateTraitRow: RowCodec<SpeciesTemplateTraitRow> = (row) => ({
+  id: sqlInteger(row, 'id'),
+  species_template_id: sqlInteger(row, 'species_template_id'),
+  sort_order: sqlInteger(row, 'sort_order'),
+  name: sqlString(row, 'name'),
+  description: sqlString(row, 'description'),
+  created_at: sqlNullableString(row, 'created_at'),
+  updated_at: sqlNullableString(row, 'updated_at'),
+});
+
+const speciesTemplateTraitEffectRow: RowCodec<SpeciesTemplateTraitEffectRow> = (
+  row,
+) => ({
+  id: sqlInteger(row, 'id'),
+  species_template_trait_id: sqlInteger(row, 'species_template_trait_id'),
+  sort_order: sqlInteger(row, 'sort_order'),
+  effect_kind: sqlString(row, 'effect_kind'),
+  damage_type: sqlKnownNullableDamageType(row, 'damage_type'),
+  hit_points_flat: sqlNullableInteger(row, 'hit_points_flat'),
+  hit_points_per_level: sqlNullableInteger(row, 'hit_points_per_level'),
+  speed_bonus_feet: sqlNullableInteger(row, 'speed_bonus_feet'),
+  created_at: sqlNullableString(row, 'created_at'),
+  updated_at: sqlNullableString(row, 'updated_at'),
+});
+
+/**
+ * The species the wizard offers: rows of `species_templates` whose
+ * `content_key` is in the bundled set — the same shape as the class list, for
+ * the same reasons (a bundled key with no row is simply not offered).
+ *
+ * `grants_lineage_spells` comes from the seam's pinned literal set, NEVER from
+ * trait text — sniffing text is how two agents invent two different lists.
+ *
+ * `kind: 'background'` is dispatch A5 and is refused loudly rather than
+ * answered wrongly: an empty list here would read as "no backgrounds exist",
+ * which is a wrong answer wearing a right shape (D33).
+ */
+export function listGuidedOriginOptions(
+  db: DatabaseContext,
+  kind: OriginKind,
+): readonly GuidedOriginOption[] {
+  if (kind === 'background') {
+    throw new Error(
+      'The background step is dispatch A5; the guided builder cannot list backgrounds yet.',
+    );
+  }
+  const keys = bundledSpeciesKeys();
+  const placeholders = keys.map(() => '?').join(', ');
+  return db
+    .all(
+      `SELECT content_key, name
+       FROM species_templates
+       WHERE content_key IN (${placeholders})
+       ORDER BY name`,
+      [...keys],
+      (row) => ({
+        content_key: sqlString(row, 'content_key'),
+        name: sqlString(row, 'name'),
+      }),
+    )
+    .map(({ content_key, name }) => ({
+      content_key,
+      name,
+      grants_lineage_spells: grantsLineageSpells(content_key),
+    }));
+}
+
+/**
+ * The origin gate, mirroring `gateBundledClass`. The seam's refusal vocabulary
+ * has only `unknown_origin` for this path — there is no `origin_not_bundled` —
+ * so a key outside the bundled set and a bundled key whose row is absent both
+ * refuse with the same reason: neither is a species the guided builder knows.
+ */
+function gateBundledSpecies(
+  db: DatabaseContext,
+  contentKey: string,
+): SpeciesTemplateRow {
+  if (!bundledSpeciesKeys().includes(contentKey)) {
+    throw new GuidedCreationRefusal(
+      'unknown_origin',
+      `No bundled species exists for content key "${contentKey}".`,
+    );
+  }
+  const template = db.one(
+    `SELECT id, content_key, rules_edition, name, creature_type, size,
+            alternate_size, base_speed_feet, created_at, updated_at
+     FROM species_templates
+     WHERE content_key = ?`,
+    [contentKey],
+    speciesTemplateRow,
+  );
+  if (template === null) {
+    throw new GuidedCreationRefusal(
+      'unknown_origin',
+      `The bundled species "${contentKey}" has no row in this database.`,
+    );
+  }
+  return template;
+}
+
+/**
+ * ONE transaction for the whole origin, and RE-APPLYING REPLACES (plan §8).
+ *
+ * `character_species` is unique per character, so a second naive insert is a
+ * raw constraint failure; the wizard's back button must be able to change a
+ * species, so the existing species rows are deleted and the new ones inserted
+ * inside the same transaction. There is no `ClearSpeciesCommand` to call — the
+ * schema comment names one and it was never built — so the delete is inline.
+ *
+ * The delete removes exactly what a species apply owns: the parent row, the
+ * trait rows, and the `character_effects` rows the previous copy minted —
+ * identified as unsourced effects (`source_instance_id IS NULL`) whose label
+ * matches a current species trait name, because the label-is-the-trait's-name
+ * binding is made at the moment of the copy and nowhere else. Effects that
+ * belong to a source instance (a share-imported grant, a future feat) are not
+ * touched.
+ *
+ * `effectsFromTemplate` deliberately drops the template's `sort_order`; this
+ * caller assigns a dense per-character order starting after the character's
+ * surviving effects, honouring the template's ordering as array order.
+ */
+export function applyGuidedOrigin(
+  db: DatabaseContext,
+  params: GuidedOriginParams,
+): GuidedApplyOriginResult {
+  if (params.kind === 'background') {
+    throw new Error(
+      'The background step is dispatch A5; the guided builder cannot apply a background yet.',
+    );
+  }
+  return db.transaction(() => {
+    const characterId = params.character_id;
+    const existing = db.one(
+      `SELECT id
+       FROM characters
+       WHERE id = ?`,
+      [characterId],
+      (row) => sqlInteger(row, 'id'),
+    );
+    if (existing === null) {
+      throw new Error(`No character with id ${characterId} exists.`);
+    }
+    const template = gateBundledSpecies(db, params.content_key);
+
+    // Replace: effects first, because identifying them needs the trait rows
+    // that the next statement deletes.
+    db.exec(
+      `DELETE FROM character_effects
+       WHERE character_id = ?
+         AND source_instance_id IS NULL
+         AND label IN (
+           SELECT name FROM character_species_traits WHERE character_id = ?
+         )`,
+      [characterId, characterId],
+    );
+    db.exec(
+      `DELETE FROM character_species_traits WHERE character_id = ?`,
+      [characterId],
+    );
+    db.exec(
+      `DELETE FROM character_species WHERE character_id = ?`,
+      [characterId],
+    );
+
+    const species = speciesFromTemplate(template);
+    db.exec(
+      `INSERT INTO character_species (
+         character_id, name, creature_type, size, base_speed_feet, notes
+       ) VALUES (?, ?, ?, ?, ?, ?)`,
+      [
+        characterId,
+        species.name,
+        species.creature_type,
+        species.size,
+        species.base_speed_feet,
+        species.notes,
+      ],
+    );
+
+    const baseOrder = db.one(
+      `SELECT COALESCE(MAX(sort_order), 0) AS base
+       FROM character_effects
+       WHERE character_id = ?`,
+      [characterId],
+      (row) => sqlInteger(row, 'base'),
+    );
+    let effectOrder = baseOrder ?? 0;
+    const traits = db.all(
+      `SELECT id, species_template_id, sort_order, name, description,
+              created_at, updated_at
+       FROM species_template_traits
+       WHERE species_template_id = ?
+       ORDER BY sort_order`,
+      [template.id],
+      speciesTemplateTraitRow,
+    );
+    for (const trait of traits) {
+      const copy = speciesTraitFromTemplate(trait);
+      db.exec(
+        `INSERT INTO character_species_traits (
+           character_id, sort_order, name, description, notes
+         ) VALUES (?, ?, ?, ?, ?)`,
+        [
+          characterId,
+          copy.sort_order,
+          copy.name,
+          copy.description,
+          copy.notes,
+        ],
+      );
+      const effects = db.all(
+        `SELECT id, species_template_trait_id, sort_order, effect_kind,
+                damage_type, hit_points_flat, hit_points_per_level,
+                speed_bonus_feet, created_at, updated_at
+         FROM species_template_trait_effects
+         WHERE species_template_trait_id = ?
+         ORDER BY sort_order`,
+        [trait.id],
+        speciesTemplateTraitEffectRow,
+      );
+      for (const effect of effectsFromTemplate(trait.name, effects)) {
+        effectOrder += 1;
+        db.exec(
+          `INSERT INTO character_effects (
+             character_id, sort_order, effect_kind, damage_type,
+             hit_points_flat, hit_points_per_level, speed_bonus_feet,
+             source_instance_id, label, notes
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
+          [
+            characterId,
+            effectOrder,
+            effect.effect_kind,
+            effect.damage_type,
+            effect.hit_points_flat,
+            effect.hit_points_per_level,
+            effect.speed_bonus_feet,
+            effect.label,
+            effect.notes,
+          ],
+        );
+      }
+    }
+
+    return {
+      character_id: characterId,
+      current_step: deriveBuildStep(readGuidedStepEvidence(db, characterId)),
+    };
   });
 }

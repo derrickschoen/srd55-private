@@ -210,6 +210,39 @@ idempotency later costs the migration surface above plus the backup codec — re
 but it buys a full unit of work now and is **an open question for the owner**,
 not a default I should take unilaterally.
 
+### 3.5 D55 made the abilities step unavoidable, and nobody builds it
+
+**Found by the A4 implementer, and it is a consequence of D55 that neither the
+owner nor I foresaw.**
+
+D55 moved abilities to sit directly behind class, so the order is class →
+abilities → species → background → skills → equipment. **No dispatch in this
+group builds the abilities step.** The derivation walks the order and returns the
+first incomplete step, so with abilities marked incomplete the walk stops there
+permanently and **every screen after it — species, background — is unreachable
+dead code.** A4 and A5 would have shipped as surfaces no person could ever see.
+That is §5's dead-end shell exactly, arrived at from a direction the plan never
+considered, and it would also have made §9's `A1-STEP` control unfireable, since
+its fixture is a character advanced past species.
+
+It is undetectable by construction, too: the six ability scores are NOT NULL with
+DEFAULT 10, so a character created moments ago is indistinguishable from one
+whose player deliberately chose all tens.
+
+**Taken for now: abilities is pinned complete in the derivation, and the screen
+says so.** Copy: *"The Ability scores step is not built yet, so the guided builder
+has skipped it: no scores have been asked for or chosen."* The wizard reaches
+species and background; nobody is told a lie about what happened.
+
+*Seam:* one entry in the completion map plus one disclosure. *Cost to flip:* when
+the abilities step is built, that entry becomes real detection and the disclosure
+is deleted — it exists only while the step does not.
+
+**Owner-visible consequence, flagged not buried:** until the abilities step
+exists, a guided character keeps six 10s that nobody chose. That is a real gap
+against D54's bar, and it is now the largest one between here and a complete
+level 1.
+
 ### 3.4 Species choices the SRD requires but this group does not model
 
 Two owner questions are open here and neither is answered, so per the raised

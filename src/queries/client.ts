@@ -6,7 +6,12 @@ import {
   type GuidedBuildStateResult,
   type GuidedClassOption,
   type GuidedCreateParams,
+  type GuidedOriginOption,
+  type GuidedOriginOptionsParams,
+  type GuidedOriginParams,
+  type OriginKind,
 } from '../builder/contracts';
+import type { GuidedApplyOriginResult } from '../builder/guided-creation';
 import {
   createCatalogClient,
   type CatalogClient,
@@ -71,6 +76,12 @@ export interface QueriesClient extends CatalogClient {
     name: string,
     classContentKey: string,
   ): Promise<CharacterRow>;
+  originOptions(kind: OriginKind): Promise<readonly GuidedOriginOption[]>;
+  applyOrigin(
+    characterId: number,
+    kind: OriginKind,
+    contentKey: string,
+  ): Promise<GuidedApplyOriginResult>;
 }
 
 export function createQueriesClient(rpc: RpcClient): QueriesClient {
@@ -193,5 +204,23 @@ export function createQueriesClient(rpc: RpcClient): QueriesClient {
         name,
         class_content_key: classContentKey,
       }),
+    originOptions: (kind: OriginKind) =>
+      rpc.call<GuidedOriginOptionsParams, readonly GuidedOriginOption[]>(
+        GUIDED_RPC.originOptions,
+        { kind },
+      ),
+    applyOrigin: (
+      characterId: number,
+      kind: OriginKind,
+      contentKey: string,
+    ) =>
+      rpc.call<GuidedOriginParams, GuidedApplyOriginResult>(
+        GUIDED_RPC.applyOrigin,
+        {
+          character_id: characterId,
+          kind,
+          content_key: contentKey,
+        },
+      ),
   });
 }
