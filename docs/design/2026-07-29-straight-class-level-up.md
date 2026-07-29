@@ -219,9 +219,11 @@ This is not hypothetical here: it is what the planner input does today.
   must live in the COMMAND**: the levelling path refuses a class the character
   does not already have, with a named reason. Mutate the guard away; the refusal
   must fail.
-- **L-SUBCLASS** — same layer rule: a **structured refusal before the
-  transaction**, matching E-B's precedent, not a greyed-out button. Mutate the
-  refusal away; level 3 with a null subclass must fail.
+- **L-SUBCLASS — STRUCK by D80.** Only Eldritch Knight and Arcane Trickster are
+  seeded, so refusing level 3 without a subclass is a dead end for ten of twelve
+  classes, which D54's bar forbids and D70 already governs: an unpicked subclass
+  is a saveable, warned state. Level 3 proceeds; the choice is offered, never
+  required. **Three refusals remain, not four.**
 - **L-ASI-LEVELS** *(new)* — **§5 pinned that ASI levels are read from the data
   and then no control guarded it**, which is the same shape as §5's own
   complaint. Mutate the source back to a hardcoded `[4]`. Must fail: a level-up
