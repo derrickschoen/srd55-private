@@ -274,14 +274,18 @@ if (action === 'apply') {
   const originals = {};
   for (const change of mutations[mutation]) {
     const absolute = resolve(root, change.path);
-    const original = readFileSync(absolute, 'utf8');
-    if (original.split(change.from).length !== 2) {
+    const current = readFileSync(absolute, 'utf8');
+    if (current.split(change.from).length !== 2) {
       throw new Error(
         `${mutation}: expected exactly one target in ${change.path}`,
       );
     }
-    originals[change.path] = original;
-    writeFileSync(absolute, original.replace(change.from, change.to));
+    // Store the FIRST read only: a mutation with two edits to one file must
+    // restore the true original, not the once-edited intermediate — the
+    // S-LEGACY mutation is exactly that shape, and the un-guarded version of
+    // this line left its first edit applied after restore.
+    originals[change.path] ??= current;
+    writeFileSync(absolute, current.replace(change.from, change.to));
   }
   writeFileSync(backupPath, JSON.stringify(originals));
   process.stdout.write(`applied ${mutation}\n`);
