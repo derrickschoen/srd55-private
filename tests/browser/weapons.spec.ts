@@ -45,6 +45,100 @@ function templateRows(page: Page) {
   return page.evaluate(() => window.staticApp.inspectRows('weapon_templates'));
 }
 
+/**
+ * Level a class through the ONE levelling path — `level_up_class` over the
+ * app's own RPC — one adjacent step at a time (level-up plan §3). The
+ * planner's numeric level input is retired: a browser can no longer type a
+ * level, so this drives the same guarded command the level-up screen will.
+ * When the command refuses a step because the SEEDED table grants an
+ * Ability Score Improvement there, the step is retried with a +2 — the
+ * refusal doing its job is part of what this exercises.
+ *
+ * THE INCREASE DEFAULTS TO CHARISMA, AND THAT IS LOAD-BEARING. This helper
+ * changes the character in order to get past the refusal, so it must not
+ * change a number the calling test asserts. It first shipped hardcoded to
+ * STRENGTH and broke `the attack profiles derive from the weapon, the class
+ * and nothing stored`: a Fighter levelled to 5 read `+4 / 1d8 +1` instead of
+ * `+3 / 1d8`, because the helper had quietly raised the very ability the
+ * profile is computed from. The app was right and the fixture was wrong.
+ * Charisma moves no weapon attack, no armour class and no hit point total;
+ * a test that needs the increase elsewhere passes `asiAbility`.
+ */
+async function levelClassTo(
+  page: Page,
+  className: string,
+  target: number,
+  asiAbility = 'charisma',
+): Promise<void> {
+  await page.evaluate(
+    async ({ name, targetLevel, ability }) => {
+      const classRows = await window.staticApp.inspectRows(
+        'class_definitions',
+        { name },
+      );
+      const classId = Number((classRows[0] as { id?: unknown })?.id);
+      if (!Number.isFinite(classId)) {
+        throw new Error(`No class definition named ${name}.`);
+      }
+      const currentLevel = async (): Promise<number> => {
+        const levels = await window.staticApp.inspectRows(
+          'character_class_levels',
+          { character_id: 1, class_definition_id: classId },
+        );
+        const level = Number((levels[0] as { level?: unknown })?.level);
+        if (!Number.isFinite(level)) {
+          throw new Error(`The character has no ${name} levels to advance.`);
+        }
+        return level;
+      };
+      const execute = async (command: Record<string, unknown>) => {
+        const characters = await window.staticApp.inspectRows('characters', {
+          id: 1,
+        });
+        await window.appRpc.call('commands.execute', {
+          character_id: 1,
+          operation_uuid: crypto.randomUUID(),
+          expected_revision: Number(
+            (characters[0] as { revision?: unknown })?.revision,
+          ),
+          command,
+        });
+      };
+      for (let level = await currentLevel(); level < targetLevel; level += 1) {
+        const command = {
+          type: 'level_up_class',
+          class_definition_id: classId,
+          target_level: level + 1,
+        };
+        try {
+          await execute(command);
+        } catch (error) {
+          if (
+            !(error instanceof Error) ||
+            !error.message.includes('Ability Score Improvement')
+          ) {
+            throw error;
+          }
+          await execute({
+            ...command,
+            ability_increases: [{ ability, amount: 2 }],
+          });
+        }
+      }
+    },
+    { name: className, targetLevel: target, ability: asiAbility },
+  );
+  // The level-ups ran through the worker, not the planner's own actions, so
+  // the screen re-reads them on a fresh load.
+  await page.goto('/characters/1');
+  await expect(page.locator('#planner-status')).toHaveAttribute(
+    'data-ready',
+    'true',
+    { timeout: 30_000 },
+  );
+}
+
+
 test('a weapon is added from a reference template, then edited without touching the template', async ({
   page,
 }) => {
@@ -351,9 +445,9 @@ test('the attack profiles derive from the weapon, the class and nothing stored',
   await expect(profiles).not.toContainText('this number does not yet read it');
 
   // D15's display rule, on a real screen: Fighter 5 grants Extra Attack, and
-  // the profile's own count moves with it.
-  await page.getByRole('spinbutton', { name: 'Fighter level' }).fill('5');
-  await page.getByRole('spinbutton', { name: 'Fighter level' }).blur();
+  // the profile's own count moves with it. Levelled through the guarded
+  // command — the planner's level input is retired (level-up plan §3).
+  await levelClassTo(page, 'Fighter', 5);
   await expect(profiles).toContainText('The Attack action gives 2 attacks.', {
     timeout: 15_000,
   });
@@ -581,14 +675,15 @@ test('a grant it cannot apply is stated on the page, not folded into the number'
     .getByRole('combobox', { name: 'Class to add' })
     .selectOption({ label: 'Warlock' });
   await page.getByRole('button', { name: 'Add class', exact: true }).click();
-  // Waited on the class's own level control rather than on the mastery status:
-  // no Warlock row grants Weapon Mastery, so that panel correctly keeps saying
-  // none of this character's classes do.
+  // Waited on the class's own level display rather than on the mastery
+  // status: no Warlock row grants Weapon Mastery, so that panel correctly
+  // keeps saying none of this character's classes do. The display is a
+  // read-only output — the input is retired — and the levelling itself goes
+  // through the guarded command (level-up plan §3).
   await expect(
-    page.getByRole('spinbutton', { name: 'Warlock level' }),
+    page.getByRole('status', { name: 'Warlock level' }),
   ).toBeVisible({ timeout: 15_000 });
-  await page.getByRole('spinbutton', { name: 'Warlock level' }).fill('5');
-  await page.getByRole('spinbutton', { name: 'Warlock level' }).blur();
+  await levelClassTo(page, 'Warlock', 5);
 
   await page.getByRole('button', { name: 'Add weapon' }).click();
   const form = page.getByTestId('weapon-form');
