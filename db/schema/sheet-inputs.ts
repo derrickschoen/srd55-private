@@ -1,6 +1,5 @@
 import {
   check,
-  foreignKey,
   integer,
   sqliteTable,
   uniqueIndex,
@@ -12,7 +11,6 @@ import type {
   CharacterId,
   CharacterSheetAdjustmentId,
   CharacterSkillProficiencyId,
-  SourceInstanceId,
 } from '../../src/domain/ids';
 import type {
   ArmorCategory,
@@ -36,7 +34,7 @@ import {
   tinyint1,
   varchar,
 } from './columns';
-import { character_source_instances, characters } from './character';
+import { characters } from './character';
 
 /**
  * THE FOUR STORED SHEET INPUTS — and NOTHING ELSE.
@@ -103,17 +101,11 @@ export const character_armor = sqliteTable(
       .notNull()
       .$type<CharacterId>()
       .references(() => characters.id, { onDelete: 'cascade' }),
-    /**
-     * WHICH RULE GRANTED THIS ARMOUR, or NULL for "a person put this here" —
-     * the starting-equipment plan (`docs/design/2026-07-29-starting-equipment.md`
-     * §2), D65. The full argument lives on
-     * `character_weapons.source_instance_id`, which this column mirrors
-     * exactly: NULL is the default for every hand-added row and every row that
-     * predates the column; non-NULL means a rule granted it and only rules may
-     * remove it. No template reference, no amendment to D1b — the values are
-     * still the character's own copy.
-     */
-    source_instance_id: integer('source_instance_id').$type<SourceInstanceId>(),
+    // NO PROVENANCE COLUMN, BY OWNER RULING (D69) — the same stamp
+    // `character_weapons` briefly carried (migration 0011), struck by the
+    // same ruling and removed by migration 0012. Armour is included as a
+    // reversible default: keeping the stamp on one table and not the other
+    // would leave half a mechanism with no consumer.
     slot: varchar<ArmorSlot>()('slot').notNull(),
     name: varchar()('name').notNull(),
     /**
@@ -190,18 +182,6 @@ export const character_armor = sqliteTable(
       'character_armor_strength_requirement_check',
       nullOrIntegerAtLeast('strength_requirement', 1),
     ),
-    /**
-     * The same composite reference `character_weapons` carries, and for the
-     * same reason: granted armour cannot be attached to another character's
-     * source instance.
-     */
-    foreignKey({
-      columns: [table.source_instance_id, table.character_id],
-      foreignColumns: [
-        character_source_instances.id,
-        character_source_instances.character_id,
-      ],
-    }).onDelete('cascade'),
     uniqueIndex('character_armor_character_id_slot_unique').on(
       table.character_id,
       table.slot,

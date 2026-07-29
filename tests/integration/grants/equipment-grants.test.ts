@@ -19,11 +19,6 @@ import {
   EquipmentGrantRefusal,
 } from '../../../src/grants/equipment-grants';
 import {
-  exportCharacterBackup,
-  importCharacterBackup,
-} from '../../../src/backup/character-backup';
-import { BackupValidationError } from '../../../src/backup/backup-version';
-import {
   exportCharacterShare,
   importCharacterShare,
 } from '../../../src/sharing/character-share';
@@ -37,24 +32,27 @@ import {
 } from '../../helpers/rpc-harness';
 
 /**
- * THE STARTING-EQUIPMENT MINT AND CLEANUP (plan
- * `docs/design/2026-07-29-starting-equipment.md` §2/§3, dispatch E-A), against
- * the full application seed and the real guided applies. These are the
- * fixtures the plan's §6 controls fire against:
+ * THE STARTING-EQUIPMENT MINT (plan
+ * `docs/design/2026-07-29-starting-equipment.md` §2/§3 dispatch E-A, reduced
+ * by owner ruling D69: no provenance stamp, no option-change cleanup),
+ * against the full application seed and the real guided applies. These are
+ * the fixtures the plan's SURVIVING §6 controls fire against:
  *
- *  - E-SOURCE: a granted Greatsword is distinguishable from a hand-added one
- *    on `source_instance_id`, never on any count;
- *  - E-PRESERVE: a hand-added weapon whose NAME COLLIDES with a granted one
- *    survives an option switch — only FIGHTER can exercise this, being the
- *    one class with two non-gold options (§0c);
  *  - E-NO-GEAR: a pack and a GP line mint nothing, because both are gear;
- *  - E-PLURAL: a Bard's option A mints TWO Daggers as owned weapon rows with
- *    the class source stamped — the control whose absence would have shipped
- *    a silently disarmed Bard (§0b);
+ *  - E-PLURAL: a Bard's option A mints TWO Daggers as owned weapon rows —
+ *    the control whose absence would have shipped a silently disarmed Bard
+ *    (§0b);
  *  - the armour-slot collision refuses BY NAME with whole-apply rollback;
- *  - the record-only background path produces a source instance before
- *    minting, because a granted row with a NULL source is indistinguishable
- *    from a hand-added one — the entire defect this unit exists to prevent.
+ *  - the record-only background path produces a marker-tagged source
+ *    instance, because the recorded CHOICE lives in a `config` and needs a
+ *    row to carry it.
+ *
+ * E-SOURCE and E-PRESERVE lived here and are DELETED, not weakened: their
+ * subject — granted rows distinguishable on `source_instance_id`, and a
+ * cleanup that removes exactly what a source granted — was struck by D69.
+ * What replaces the cleanup's contract is asserted below in its own words:
+ * an option switch leaves the previous option's rows in place, and the
+ * player removes what they do not want.
  */
 let harness: RpcHarness | undefined;
 
@@ -110,36 +108,23 @@ function classSourceInstanceId(
   return id;
 }
 
-interface OwnedRow {
-  readonly name: string;
-  readonly source: number | null;
-}
-
-function ownedWeapons(
+function ownedWeaponNames(
   db: DatabaseContext,
   characterId: number,
-): OwnedRow[] {
+): string[] {
   return db.allRaw(
-    `SELECT name, source_instance_id FROM character_weapons
+    `SELECT name FROM character_weapons
      WHERE character_id = ? ORDER BY name, id`,
     [characterId],
-  ).map((row) => ({
-    name: String(row.name),
-    source:
-      row.source_instance_id === null ? null : Number(row.source_instance_id),
-  }));
+  ).map((row) => String(row.name));
 }
 
-function ownedArmor(db: DatabaseContext, characterId: number): OwnedRow[] {
+function ownedArmorNames(db: DatabaseContext, characterId: number): string[] {
   return db.allRaw(
-    `SELECT name, source_instance_id FROM character_armor
+    `SELECT name FROM character_armor
      WHERE character_id = ? ORDER BY slot`,
     [characterId],
-  ).map((row) => ({
-    name: String(row.name),
-    source:
-      row.source_instance_id === null ? null : Number(row.source_instance_id),
-  }));
+  ).map((row) => String(row.name));
 }
 
 function recordedChoice(
@@ -172,8 +157,8 @@ function handAddWeapon(
   );
 }
 
-describe('the equipment mint and cleanup (E-A)', () => {
-  it('mints a Fighter option A stamped with the class source, and nothing for gear (E-SOURCE, E-NO-GEAR)', async () => {
+describe('the equipment mint (E-A, reduced by D69)', () => {
+  it('mints a Fighter option A as plain owned rows, and nothing for gear (E-NO-GEAR)', async () => {
     const db = (await applicationDatabase()).context.db;
     const { characterId, contentKey } = createWithClass(db, 'Fighter', 'Astrid');
     const classSource = classSourceInstanceId(db, characterId);
@@ -187,21 +172,14 @@ describe('the equipment mint and cleanup (E-A)', () => {
 
     // Chain Mail, Greatsword, Flail, 8 Javelins — and NOTHING for the
     // Dungeoneer's Pack or the trailing 4 GP line, both gear (D65, D56).
-    expect(ownedArmor(db, characterId)).toEqual([
-      { name: 'Chain Mail', source: classSource },
-    ]);
-    const weapons = ownedWeapons(db, characterId);
-    expect(weapons.map((weapon) => weapon.name)).toEqual([
+    expect(ownedArmorNames(db, characterId)).toEqual(['Chain Mail']);
+    expect(ownedWeaponNames(db, characterId)).toEqual([
       'Flail',
       'Greatsword',
       ...Array.from({ length: 8 }, () => 'Javelin'),
     ]);
-    // E-SOURCE's subject: every granted row carries the granting instance —
-    // the assertion is on provenance, not on any count.
-    expect(weapons.every((weapon) => weapon.source === classSource)).toBe(
-      true,
-    );
-    // The recorded choice, in the instance's own config (§3, pinned).
+    // The recorded choice, in the instance's own config (§3, pinned) — the
+    // ONLY thing the mint attaches to the source since D69.
     expect(recordedChoice(db, classSource)).toEqual({
       kind: 'class',
       option: 'a',
@@ -221,14 +199,10 @@ describe('the equipment mint and cleanup (E-A)', () => {
     });
   });
 
-  it('switching Fighter A to B removes exactly the granted rows; a colliding hand-added weapon survives (E-PRESERVE)', async () => {
+  it('switching options does NOT clean up (D69): the old armour must be removed by the player, and the old weapons stay', async () => {
     const db = (await applicationDatabase()).context.db;
     const { characterId, contentKey } = createWithClass(db, 'Fighter', 'Brand');
     const classSource = classSourceInstanceId(db, characterId);
-
-    // The fixture the plan pins: a hand-added weapon whose name COLLIDES
-    // with a granted one, or the remove-by-name mutation is unobservable.
-    handAddWeapon(db, characterId, 'Greatsword');
 
     applyEquipmentPackageChoice(db, {
       character_id: characterId,
@@ -236,15 +210,40 @@ describe('the equipment mint and cleanup (E-A)', () => {
       kind: 'class',
       option: 'a',
     });
-    expect(
-      ownedWeapons(db, characterId).filter(
-        (weapon) => weapon.name === 'Greatsword',
-      ),
-    ).toEqual([
-      { name: 'Greatsword', source: null },
-      { name: 'Greatsword', source: classSource },
-    ]);
 
+    // Option A's Chain Mail still occupies the worn slot, so the switch to
+    // option B (Studded Leather) REFUSES rather than silently eating it —
+    // under D69 the minted rows are the player's own.
+    let refusal: EquipmentGrantRefusal | undefined;
+    try {
+      applyEquipmentPackageChoice(db, {
+        character_id: characterId,
+        content_key: contentKey,
+        kind: 'class',
+        option: 'b',
+      });
+    } catch (error) {
+      refusal = error as EquipmentGrantRefusal;
+    }
+    expect(refusal).toBeInstanceOf(EquipmentGrantRefusal);
+    expect(refusal?.data).toMatchObject({
+      reason: 'armor_slot_occupied',
+      slot: 'worn',
+      holder: 'Chain Mail',
+    });
+    // Whole-apply rollback: the recorded choice is still A and no option-B
+    // weapon arrived.
+    expect(recordedChoice(db, classSource)).toEqual({
+      kind: 'class',
+      option: 'a',
+    });
+    expect(ownedWeaponNames(db, characterId)).not.toContain('Scimitar');
+
+    // The player removes what they do not want (D69, point 5)...
+    db.exec(
+      `DELETE FROM character_armor WHERE character_id = ? AND slot = 'worn'`,
+      [characterId],
+    );
     applyEquipmentPackageChoice(db, {
       character_id: characterId,
       content_key: contentKey,
@@ -252,16 +251,18 @@ describe('the equipment mint and cleanup (E-A)', () => {
       option: 'b',
     });
 
-    // Option A's grant is gone — including its Greatsword — while the
-    // player's own survives untouched, and option B's rows arrive.
-    expect(ownedWeapons(db, characterId)).toEqual([
-      { name: 'Greatsword', source: null },
-      { name: 'Longbow', source: classSource },
-      { name: 'Scimitar', source: classSource },
-      { name: 'Shortsword', source: classSource },
+    // ...and the switch records B and mints B's rows WITHOUT touching A's
+    // weapons: no stamp, no cleanup, the Greatsword is theirs now.
+    expect(ownedWeaponNames(db, characterId)).toEqual([
+      'Flail',
+      'Greatsword',
+      ...Array.from({ length: 8 }, () => 'Javelin'),
+      'Longbow',
+      'Scimitar',
+      'Shortsword',
     ]);
-    expect(ownedArmor(db, characterId)).toEqual([
-      { name: 'Studded Leather Armor', source: classSource },
+    expect(ownedArmorNames(db, characterId)).toEqual([
+      'Studded Leather Armor',
     ]);
     expect(recordedChoice(db, classSource)).toEqual({
       kind: 'class',
@@ -269,10 +270,9 @@ describe('the equipment mint and cleanup (E-A)', () => {
     });
   });
 
-  it("mints a Bard's option A as TWO owned Daggers with the class source stamped (E-PLURAL)", async () => {
+  it("mints a Bard's option A as TWO owned Daggers (E-PLURAL)", async () => {
     const db = (await applicationDatabase()).context.db;
     const { characterId, contentKey } = createWithClass(db, 'Bard', 'Cadenza');
-    const classSource = classSourceInstanceId(db, characterId);
 
     applyEquipmentPackageChoice(db, {
       character_id: characterId,
@@ -284,13 +284,8 @@ describe('the equipment mint and cleanup (E-A)', () => {
     // "2 Daggers" is a WEAPON bundle resolved against the singular template
     // (§0b) — under the old seed classification this minted zero weapons and
     // silently disarmed the Bard.
-    expect(ownedWeapons(db, characterId)).toEqual([
-      { name: 'Dagger', source: classSource },
-      { name: 'Dagger', source: classSource },
-    ]);
-    expect(ownedArmor(db, characterId)).toEqual([
-      { name: 'Leather Armor', source: classSource },
-    ]);
+    expect(ownedWeaponNames(db, characterId)).toEqual(['Dagger', 'Dagger']);
+    expect(ownedArmorNames(db, characterId)).toEqual(['Leather Armor']);
   });
 
   it('refuses an occupied armour slot BY NAME and rolls the whole apply back', async () => {
@@ -327,14 +322,12 @@ describe('the equipment mint and cleanup (E-A)', () => {
 
     // WHOLE-APPLY ROLLBACK: no weapon was minted, no choice was recorded,
     // and the person's armour is exactly where they put it.
-    expect(ownedWeapons(db, characterId)).toEqual([]);
-    expect(ownedArmor(db, characterId)).toEqual([
-      { name: 'Family Breastplate', source: null },
-    ]);
+    expect(ownedWeaponNames(db, characterId)).toEqual([]);
+    expect(ownedArmorNames(db, characterId)).toEqual(['Family Breastplate']);
     expect(recordedChoice(db, classSource)).toBeUndefined();
   });
 
-  it('re-applying the same option re-mints under the same source, never duplicating', async () => {
+  it('re-confirming the recorded choice is a NO-OP, never a duplicate mint', async () => {
     const db = (await applicationDatabase()).context.db;
     const { characterId, contentKey } = createWithClass(db, 'Fighter', 'Edda');
     const choice = {
@@ -344,10 +337,13 @@ describe('the equipment mint and cleanup (E-A)', () => {
       option: 'a',
     } as const;
     applyEquipmentPackageChoice(db, choice);
-    const first = ownedWeapons(db, characterId);
+    const first = ownedWeaponNames(db, characterId);
+    // With no cleanup (D69) a second mint would DUPLICATE every row and
+    // collide on the armour slot; the recorded-choice no-op is what makes a
+    // double-confirm harmless.
     applyEquipmentPackageChoice(db, choice);
-    expect(ownedWeapons(db, characterId)).toEqual(first);
-    expect(ownedArmor(db, characterId)).toHaveLength(1);
+    expect(ownedWeaponNames(db, characterId)).toEqual(first);
+    expect(ownedArmorNames(db, characterId)).toHaveLength(1);
   });
 });
 
@@ -386,14 +382,14 @@ function nonMagicInitiateFeat(db: DatabaseContext): string {
   return feat.content_key;
 }
 
-describe('the background arm (E-A)', () => {
-  it('the record-only applyOrigin path gets an instance PRODUCED before minting — granted rows never carry NULL', async () => {
+describe('the background arm (E-A, reduced by D69)', () => {
+  it('the record-only applyOrigin path gets an instance PRODUCED, marker-tagged, to carry the recorded choice', async () => {
     const db = (await applicationDatabase()).context.db;
     const { characterId } = createWithClass(db, 'Fighter', 'Ferro');
     const backgroundKey = weaponBearingBackground(db);
 
     // The seam's record-only apply: it writes the printed words and NO
-    // source instance — the state §3's second refusal names.
+    // source instance — the state the produced-instance path exists for.
     applyGuidedOrigin(db, {
       character_id: characterId,
       kind: 'background',
@@ -421,25 +417,19 @@ describe('the background arm (E-A)', () => {
       [characterId],
     );
     expect(backgroundSource).not.toBeNull();
-    // Marker-tagged, so the next background change deletes it — and, by the
-    // composite cascade, everything it granted.
+    // Marker-tagged, so the next background change deletes it — and the
+    // recorded choice with it.
     expect(String(backgroundSource?.notes)).toBe('guided:background-apply');
 
-    const granted = ownedWeapons(db, characterId).filter(
-      (weapon) => weapon.source !== null,
-    );
-    expect(granted.length).toBeGreaterThan(0);
-    expect(
-      granted.every(
-        (weapon) => weapon.source === Number(backgroundSource?.id),
-      ),
-    ).toBe(true);
+    // The background's weapon arrived as a plain owned row (D69), and the
+    // choice is recorded on the produced instance.
+    expect(ownedWeaponNames(db, characterId).length).toBeGreaterThan(0);
     expect(
       recordedChoice(db, Number(backgroundSource?.id)),
     ).toEqual({ kind: 'background', option: 'a' });
   });
 
-  it('attaches to the B3 apply’s existing instance, and a background change cascades the grant away', async () => {
+  it('attaches the record to the B3 apply’s existing instance; a background change deletes the record, never the weapons', async () => {
     const db = (await applicationDatabase()).context.db;
     const { characterId } = createWithClass(db, 'Fighter', 'Grit');
     const backgroundKey = weaponBearingBackground(db);
@@ -469,7 +459,7 @@ describe('the background arm (E-A)', () => {
       option: 'a',
     });
 
-    // No second instance was minted: the grant hangs off the B3 apply's own.
+    // No second instance was minted: the record hangs off the B3 apply's own.
     expect(
       db.scalar(
         `SELECT COUNT(*) FROM character_source_instances
@@ -478,18 +468,17 @@ describe('the background arm (E-A)', () => {
         [characterId],
       ),
     ).toBe(1);
-    const granted = ownedWeapons(db, characterId).filter(
-      (weapon) => weapon.source !== null,
-    );
-    expect(granted.length).toBeGreaterThan(0);
-    expect(
-      granted.every((weapon) => weapon.source === Number(existing)),
-    ).toBe(true);
+    const minted = ownedWeaponNames(db, characterId);
+    expect(minted.length).toBeGreaterThan(0);
+    expect(recordedChoice(db, Number(existing))).toEqual({
+      kind: 'background',
+      option: 'a',
+    });
 
-    // Changing the background through the record-only path hard-deletes the
-    // marker-tagged instance tree; the composite FK's ON DELETE CASCADE must
-    // take every row it granted with it — the D63-shaped orphan the marker
-    // exists to prevent.
+    // Changing the background hard-deletes the instance tree and its
+    // recorded choice — but the minted weapons SURVIVE: since D69 they are
+    // the player's own rows with no cascade edge back to the source, and
+    // the player removes what they do not want.
     const otherBackground = listGuidedOriginOptions(db, 'background').find(
       (candidate) => candidate.content_key !== backgroundKey,
     );
@@ -501,30 +490,20 @@ describe('the background arm (E-A)', () => {
       kind: 'background',
       content_key: otherBackground.content_key,
     });
-    expect(
-      ownedWeapons(db, characterId).filter(
-        (weapon) => weapon.source !== null,
-      ),
-    ).toEqual([]);
+    expect(ownedWeaponNames(db, characterId)).toEqual(minted);
   });
 });
 
-describe('equipment provenance through a share link (E-SHARE)', () => {
-  it('a v6 round trip preserves which source granted each row, for a character who switched options once', async () => {
+describe('equipment through a share link (D62)', () => {
+  it('a round trip carries every weapon and armour row as plain rows, and the recorded choice in config', async () => {
     const db = (await applicationDatabase()).context.db;
     const { characterId, contentKey } = createWithClass(db, 'Fighter', 'Skye');
-    handAddWeapon(db, characterId, 'Longbow');
+    handAddWeapon(db, characterId, 'Family Blade');
     applyEquipmentPackageChoice(db, {
       character_id: characterId,
       content_key: contentKey,
       kind: 'class',
       option: 'a',
-    });
-    applyEquipmentPackageChoice(db, {
-      character_id: characterId,
-      content_key: contentKey,
-      kind: 'class',
-      option: 'b',
     });
 
     // Through the real fragment, exactly as a link travels.
@@ -534,102 +513,18 @@ describe('equipment provenance through a share link (E-SHARE)', () => {
     const imported = importCharacterShare(db, decoded);
     const cloneClassSource = classSourceInstanceId(db, imported.characterId);
 
-    // The hand-added Longbow arrives NULL-sourced even though the switched-to
-    // option grants one of the same name; the three granted weapons and the
-    // granted armour all point at the CLONE's own class source. This is the
-    // fixture E-SHARE demands: without the switch, stale option-A rows would
-    // make the round trip pass for the wrong reason.
-    expect(ownedWeapons(db, imported.characterId)).toEqual([
-      { name: 'Longbow', source: null },
-      { name: 'Longbow', source: cloneClassSource },
-      { name: 'Scimitar', source: cloneClassSource },
-      { name: 'Shortsword', source: cloneClassSource },
-    ]);
-    expect(ownedArmor(db, imported.characterId)).toEqual([
-      { name: 'Studded Leather Armor', source: cloneClassSource },
-    ]);
-    // The recorded CHOICE travelled too, in the source's own config — an
-    // imported clone that lost it would regress to equipment-incomplete
-    // the moment E-B starts reading it (§2's D62 argument).
+    // Every row arrives — the hand-added Family Blade and the minted kit
+    // alike, indistinguishable by design (D69).
+    expect(ownedWeaponNames(db, imported.characterId)).toEqual(
+      ownedWeaponNames(db, characterId),
+    );
+    expect(ownedArmorNames(db, imported.characterId)).toEqual(['Chain Mail']);
+    // The recorded CHOICE travelled in the source's own config — an imported
+    // clone that lost it would regress to equipment-incomplete the moment
+    // E-B reads it (§2's D62 argument).
     expect(recordedChoice(db, cloneClassSource)).toEqual({
       kind: 'class',
-      option: 'b',
-    });
-  });
-});
-
-describe('equipment provenance through the portable backup (E-A)', () => {
-  it('a full import REMAPS the stamp onto the clone’s own source instance', async () => {
-    const db = (await applicationDatabase()).context.db;
-    const { characterId, contentKey } = createWithClass(db, 'Fighter', 'Hild');
-    applyEquipmentPackageChoice(db, {
-      character_id: characterId,
-      content_key: contentKey,
-      kind: 'class',
       option: 'a',
     });
-    handAddWeapon(db, characterId, 'Family Blade');
-
-    const document = exportCharacterBackup(db, characterId);
-    const clone = importCharacterBackup(db, document);
-    expect(clone.characterId).not.toBe(characterId);
-
-    const cloneClassSource = classSourceInstanceId(db, clone.characterId);
-    const originalClassSource = classSourceInstanceId(db, characterId);
-    expect(cloneClassSource).not.toBe(originalClassSource);
-    const weapons = ownedWeapons(db, clone.characterId);
-    // The hand-added row keeps its NULL; every granted row points at the
-    // CLONE's class source — not the original's, which the composite FK
-    // would refuse (D62's import-as-clone, §2's named line item).
-    expect(
-      weapons.find((weapon) => weapon.name === 'Family Blade')?.source,
-    ).toBeNull();
-    expect(
-      weapons
-        .filter((weapon) => weapon.name !== 'Family Blade')
-        .every((weapon) => weapon.source === cloneClassSource),
-    ).toBe(true);
-    expect(ownedArmor(db, clone.characterId)).toEqual([
-      { name: 'Chain Mail', source: cloneClassSource },
-    ]);
-  });
-
-  it('a full import REFUSES a weapon or armour stamp the document does not describe', async () => {
-    const db = (await applicationDatabase()).context.db;
-    const { characterId, contentKey } = createWithClass(db, 'Fighter', 'Iva');
-    applyEquipmentPackageChoice(db, {
-      character_id: characterId,
-      content_key: contentKey,
-      kind: 'class',
-      option: 'a',
-    });
-    const document = exportCharacterBackup(db, characterId);
-    const tampered = JSON.parse(JSON.stringify(document)) as {
-      tables: {
-        character_weapons: { source_instance_id: unknown }[];
-        character_armor: { source_instance_id: unknown }[];
-      };
-    };
-    for (const row of tampered.tables.character_weapons) {
-      if (row.source_instance_id !== null) {
-        row.source_instance_id = 999_999;
-      }
-    }
-    expect(() => importCharacterBackup(db, tampered)).toThrow(
-      BackupValidationError,
-    );
-    expect(() => importCharacterBackup(db, tampered)).toThrow(
-      /weapon source is missing/,
-    );
-
-    const armorTampered = JSON.parse(JSON.stringify(document)) as {
-      tables: { character_armor: { source_instance_id: unknown }[] };
-    };
-    for (const row of armorTampered.tables.character_armor) {
-      row.source_instance_id = 999_999;
-    }
-    expect(() => importCharacterBackup(db, armorTampered)).toThrow(
-      /armor source is missing/,
-    );
   });
 });

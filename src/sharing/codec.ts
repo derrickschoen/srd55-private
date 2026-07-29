@@ -330,10 +330,6 @@ function weaponWireValue(
       return damageToPositional(weapon.damage);
     case 'versatile_damage':
       return damageToPositional(weapon.versatile_damage);
-    // Wire v6: the equipment-provenance reference. Null is "a person put this
-    // here", the column's own default.
-    case 'sourceRef':
-      return weapon.sourceRef ?? null;
     default:
       throw new Error(`Unknown weapon wire field ${field}.`);
   }
@@ -1034,8 +1030,20 @@ export function positionalToShareDocument(
         SHARE_SCHEMAS[5].tuples.character.arities,
         'wire character',
       );
-      return decodeCurrentWire(MIGRATIONS[5](input));
+      return decodeCurrentWire(MIGRATIONS[6](MIGRATIONS[5](input)));
     case 6:
+      variableTuple(
+        input,
+        SHARE_SCHEMAS[6].tuples.root.arities,
+        'wire document',
+      );
+      variableTuple(
+        input[2],
+        SHARE_SCHEMAS[6].tuples.character.arities,
+        'wire character',
+      );
+      return decodeCurrentWire(MIGRATIONS[6](input));
+    case 7:
       return decodeCurrentWire(input);
     default:
       throw new ShareValidationError('version is unsupported.');

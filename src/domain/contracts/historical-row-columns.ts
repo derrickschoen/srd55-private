@@ -14,18 +14,12 @@ type HistoricalRow = Readonly<Record<string, unknown>>;
 const ADDED_NULLABLE_ROW_COLUMNS: Readonly<
   Partial<Record<HistoricalRowTable, readonly string[]>>
 > = {
-  character_weapons: [
-    'proficiency_category',
-    'attack_kind',
-    // The equipment-provenance column (starting-equipment plan §2, E-A). NULL
-    // on a historical row is not a fabrication — it is the literal pre-feature
-    // truth, because before the equipment step nothing but a person could have
-    // put a weapon there.
-    'source_instance_id',
-  ],
-  // The same column on the same terms: before the equipment step, armour rows
-  // could only be hand-added, so NULL is the historical fact.
-  character_armor: ['source_instance_id'],
+  // NOTE (D69): E-A briefly listed `source_instance_id` here for BOTH
+  // weapons and armour; the owner struck the column (migration 0012), and a
+  // dropped column needs no added-column allowance — a document written
+  // while it existed is handled by `RETIRED_ROW_COLUMNS` in
+  // `src/backup/character-backup.ts`, the removed-column direction.
+  character_weapons: ['proficiency_category', 'attack_kind'],
   // The `ability_increase` payload (B2). Every effect row written before the
   // contribution layer existed lacks all three keys; without this entry the
   // exact-key row contract would refuse every save point and portable backup

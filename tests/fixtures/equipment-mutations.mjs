@@ -13,63 +13,21 @@ const edit = (path, from, to) => ({ path, from, to });
 
 /**
  * Mutations for the starting-equipment controls (plan
- * `docs/design/2026-07-29-starting-equipment.md` §6): E-SOURCE, E-PRESERVE,
- * E-NO-GEAR, E-PLURAL from dispatch E-A; E-NO-GOLD-SHOWN (`goldshown`),
- * E-NO-GOLD-OFFERED (`goldoffered`) and E-COMPLETE (`complete`) from
- * dispatch E-B, added once the step existed so no mutation ever landed in
- * nothing — the trap §6's own retargeting history warns about.
+ * `docs/design/2026-07-29-starting-equipment.md` §6, reduced by owner ruling
+ * D69): E-NO-GEAR and E-PLURAL from dispatch E-A; E-NO-GOLD-SHOWN
+ * (`goldshown`), E-NO-GOLD-OFFERED (`goldoffered`) and E-COMPLETE
+ * (`complete`) from dispatch E-B.
+ *
+ * E-SOURCE (`source`) and E-PRESERVE (`preserve`) are DELETED, not broken:
+ * their subject — the provenance stamp and the stamp-keyed option-change
+ * cleanup — was struck by D69, so there is no code left for either mutation
+ * to land in.
  *
  * Same apply/restore convention as
  * `tests/fixtures/skills-provenance-mutations.mjs`. Applied for a VITEST run
  * only; a mutation is not required to type-check.
  */
 const mutations = {
-  // E-SOURCE (§6): the mint drops the source stamp — the §5 trap made
-  // executable: every count is right, the AC is right, and only provenance
-  // is gone. Must fail: a granted Greatsword is asserted DISTINGUISHABLE
-  // from a hand-added one on `source_instance_id`, not on any count.
-  source: [
-    edit(
-      'src/grants/equipment-grants.ts',
-      `  const row: Record<string, unknown> = {
-    character_id: characterId,
-    source_instance_id: sourceInstanceId,
-    proficiency_category: weaponProficiencyCategoryOf(group as SrdWeaponGroup),`,
-      `  const row: Record<string, unknown> = {
-    character_id: characterId,
-    source_instance_id: null,
-    proficiency_category: weaponProficiencyCategoryOf(group as SrdWeaponGroup),`,
-    ),
-  ],
-  // E-PRESERVE (§6): the option-change cleanup removes by `character_id`
-  // alone — the species-cleanup trap re-created. Must fail: the fixture's
-  // hand-added weapon COLLIDES by name with a granted one and must survive
-  // the switch from option A to option B.
-  preserve: [
-    edit(
-      'src/grants/equipment-grants.ts',
-      `  db.exec(
-    \`DELETE FROM character_weapons
-     WHERE character_id = ? AND source_instance_id = ?\`,
-    [characterId, sourceInstanceId],
-  );
-  db.exec(
-    \`DELETE FROM character_armor
-     WHERE character_id = ? AND source_instance_id = ?\`,
-    [characterId, sourceInstanceId],
-  );`,
-      `  db.exec(
-    \`DELETE FROM character_weapons
-     WHERE character_id = ?\`,
-    [characterId],
-  );
-  db.exec(
-    \`DELETE FROM character_armor
-     WHERE character_id = ?\`,
-    [characterId],
-  );`,
-    ),
-  ],
   // E-NO-GEAR (§6): the mint also creates owned rows for `gear` items.
   // Must fail: a Dungeoneer's Pack (and the trailing GP line, which IS a
   // gear row) produces no owned row.
@@ -83,9 +41,9 @@ const mutations = {
         for (let count = 0; count < item.quantity; count += 1) {
           db.exec(
             \`INSERT INTO character_weapons (
-               character_id, source_instance_id, name
-             ) VALUES (?, ?, ?)\`,
-            [params.character_id, sourceInstanceId, item.item_name],
+               character_id, name
+             ) VALUES (?, ?)\`,
+            [params.character_id, item.item_name],
           );
         }
       }

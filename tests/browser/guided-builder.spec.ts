@@ -373,8 +373,8 @@ test('the empty-database front door chooses class first, persists once named, an
   expect(equipmentText).toContain('Dungeoneer’s Pack');
   expect(equipmentText).toContain('not tracked individually');
 
-  // Confirm Fighter option A. The mint stamps every granted row with the
-  // class source instance — provenance, not just totals.
+  // Confirm Fighter option A. The mint writes PLAIN rows (D69: no
+  // provenance stamp) — the proof is the rows themselves, on disk.
   await classSection
     .locator(`[${persistedSeam.equipmentChooseAttribute}="a"]`)
     .click();
@@ -389,9 +389,6 @@ test('the empty-database front door chooses class first, persists once named, an
     'Greatsword',
     ...Array.from({ length: 8 }, () => 'Javelin'),
   ].sort());
-  for (const row of mintedWeapons) {
-    expect(typeof row['source_instance_id']).toBe('number');
-  }
   expect(
     (await page.evaluate(() =>
       window.staticApp.inspectRows('character_armor'),
@@ -400,7 +397,6 @@ test('the empty-database front door chooses class first, persists once named, an
     expect.objectContaining({
       name: 'Chain Mail',
       slot: 'worn',
-      source_instance_id: expect.any(Number),
     }),
   ]);
 

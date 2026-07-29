@@ -52,12 +52,6 @@ export const FOREIGN_KEY_FACTS = [
     targetColumns: ['id'],
   },
   {
-    table: 'character_armor',
-    columns: ['source_instance_id', 'character_id'],
-    target: 'character_source_instances',
-    targetColumns: ['id', 'character_id'],
-  },
-  {
     table: 'character_background',
     columns: ['character_id'],
     target: 'characters',
@@ -182,12 +176,6 @@ export const FOREIGN_KEY_FACTS = [
     columns: ['character_id'],
     target: 'characters',
     targetColumns: ['id'],
-  },
-  {
-    table: 'character_weapons',
-    columns: ['source_instance_id', 'character_id'],
-    target: 'character_source_instances',
-    targetColumns: ['id', 'character_id'],
   },
   {
     table: 'class_armor_training',

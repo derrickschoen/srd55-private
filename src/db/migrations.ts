@@ -12,6 +12,7 @@ import abilityAllocationMethod from '../../drizzle/0008_ability_allocation_metho
 import abilityIncrease from '../../drizzle/0009_ability_increase.sql?raw';
 import characterSkillGrants from '../../drizzle/0010_character_skill_grants.sql?raw';
 import equipmentProvenance from '../../drizzle/0011_equipment_provenance.sql?raw';
+import removeEquipmentProvenance from '../../drizzle/0012_remove_equipment_provenance.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -133,6 +134,20 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
       'a30d5b0d7e81923dbe0734931e7c2d986babf408a6577567bbd8431264a78d47',
     resultSchemaChecksum:
       'eec2bb4a6d9d1381720152e805f6bca2a828379b6dd36780649aa1a5c0c459fa',
+  }),
+  // D69: the owner struck equipment provenance four hours after 0011 minted
+  // it. The chain is append-only — 0011 is never edited — so this migration
+  // recreates both tables WITHOUT `source_instance_id`, discarding the stamp
+  // values (pre-alpha, zero users; the rows themselves all survive).
+  Object.freeze({
+    id: '0012_remove_equipment_provenance',
+    sql: removeEquipmentProvenance,
+    checksum:
+      '42009457e8c61528cfb31c5746899378e75d7315ff9a1af74605f8abde42d8eb',
+    // Identical to 0010's result checksum, and that identity is the proof
+    // the removal is exact: 0012 restores the pre-0011 schema shape.
+    resultSchemaChecksum:
+      'ba7cd3692fae389a569fcbec8afb3dc3058f212f129bebb61b4976f31b65c587',
   }),
 ]);
 

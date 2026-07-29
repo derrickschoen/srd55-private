@@ -284,18 +284,8 @@ function contentKey(
  * absent rather than `false`. Both directions round-trip back to the column's
  * own null/0, so a half-entered weapon stays half-entered (D6b) instead of being
  * silently completed with placeholder values.
- *
- * `sourceRef` (wire v6) resolves `source_instance_id` through the SAME
- * root-coarsened reference space `shareEffectFromRow` uses, on the same
- * allowance: a weapon whose source no reference can reach still travels, it
- * simply arrives without its provenance — which is the exact state every
- * hand-added weapon is in, and the column's null limb makes that legal where
- * `ability_increase` had to refuse.
  */
-function shareWeaponFromRow(
-  row: Row,
-  owners: ReadonlyMap<number, ShareSourceOwner>,
-): ShareWeapon {
+function shareWeaponFromRow(row: Row): ShareWeapon {
   const weapon: Record<string, unknown> = {
     name: String(row.name),
     damage: sqlWeaponDamage(row),
@@ -335,12 +325,6 @@ function shareWeaponFromRow(
   for (const flag of SHARE_WEAPON_FLAGS) {
     if (Number(row[flag]) === 1) {
       weapon[flag] = true;
-    }
-  }
-  if (row.source_instance_id !== null && row.source_instance_id !== undefined) {
-    const owner = owners.get(Number(row.source_instance_id));
-    if (owner !== undefined) {
-      weapon.sourceRef = owner.ref;
     }
   }
   return weapon as unknown as ShareWeapon;
@@ -402,13 +386,8 @@ function textFields<T>(
  * optional field the sender never filled must arrive absent rather than as an
  * explicit null, so that the recipient's row carries the column's own default
  * instead of a value the sender never chose.
- *
- * `sourceRef` (wire v6) rides on `shareWeaponFromRow`'s terms exactly.
  */
-function shareArmorFromRow(
-  row: Row,
-  owners: ReadonlyMap<number, ShareSourceOwner>,
-): ShareArmor {
+function shareArmorFromRow(row: Row): ShareArmor {
   const armor: Record<string, unknown> = { name: String(row.name) };
   for (const field of SHARE_ARMOR_ENUMS) {
     armor[field] = String(row[field]);
@@ -426,12 +405,6 @@ function shareArmorFromRow(
   }
   if (row.notes !== null && row.notes !== undefined) {
     armor.notes = String(row.notes);
-  }
-  if (row.source_instance_id !== null && row.source_instance_id !== undefined) {
-    const owner = owners.get(Number(row.source_instance_id));
-    if (owner !== undefined) {
-      armor.sourceRef = owner.ref;
-    }
   }
   return armor as unknown as ShareArmor;
 }
@@ -897,15 +870,11 @@ export function exportCharacterShare(
   // Not behind an option flag. `acknowledgements` and `loadouts` are opt-in
   // because they are working state the recipient may not want; a weapon is part
   // of the build being shared, like the class levels and the spellbook.
-  // `effectOwners`, not `owners`: like an effect, a weapon is a row the
-  // character still has whatever happened to the thing that granted it, so a
-  // tombstoned source under a live root keeps its provenance at the same
-  // root-level coarsening.
   const weapons = db.allRaw(
     `SELECT * FROM ${SHARE_TABLES.character_weapons}
      WHERE character_id = ? ORDER BY id`,
     [characterId],
-  ).map((row) => shareWeaponFromRow(row, effectOwners));
+  ).map(shareWeaponFromRow);
   // Not behind an option flag either, and for the same reason: a character's
   // species and background are the build being shared, not working state.
   const speciesRow = db.oneRaw(
@@ -947,7 +916,7 @@ export function exportCharacterShare(
     `SELECT * FROM ${SHARE_TABLES.character_armor}
      WHERE character_id = ? ORDER BY slot`,
     [characterId],
-  ).map((row) => shareArmorFromRow(row, effectOwners));
+  ).map(shareArmorFromRow);
   const armor = armorRows.length === 0 ? undefined : armorRows;
   const rollRows = db.allRaw(
     `SELECT * FROM ${SHARE_TABLES.character_hit_point_rolls}
@@ -1724,33 +1693,10 @@ export function importCharacterShare(
     // character's weapon holds no template id — so the row is written as it
     // arrived, with the absent optional fields taking the column's own
     // NULL / 0 rather than a value this importer invented.
-    //
-    // `sourceRef` (wire v6) is the one exception, and it resolves against the
-    // DOCUMENT, not the catalog: `rootsByRef` is the same map
-    // `selections[].ref` and `effects[].sourceRef` resolve through. Equipment
-    // is granted by a class root or a background root, never a subclass, so
-    // `roots[0]` is always the row meant — there is no `sourceSubclass` flag
-    // here to consult. Absent means NULL: a person put this here.
-    const equipmentSourceId = (
-      sourceRef: number | undefined,
-      label: string,
-    ): number | null => {
-      if (sourceRef === undefined) {
-        return null;
-      }
-      const roots = rootsByRef.get(sourceRef);
-      const root = roots?.[0];
-      if (root === undefined) {
-        throw new ShareValidationError(
-          `${label} sourceRef ${sourceRef} is unavailable.`,
-        );
-      }
-      return root;
-    };
     for (const weapon of document.weapons ?? []) {
       db.exec(
         `INSERT INTO ${SHARE_TABLES.character_weapons} (
-           character_id, source_instance_id, name, proficiency_category,
+           character_id, name, proficiency_category,
            damage_kind, damage_dice, damage_flat, damage_custom,
            ${SHARE_WEAPON_TEXT.join(', ')},
            versatile_damage_kind, versatile_damage_dice,
@@ -1758,13 +1704,12 @@ export function importCharacterShare(
            range_kind, range_near_feet, range_far_feet, mastery_property,
            other_properties, notes, ${SHARE_WEAPON_FLAGS.join(', ')},
            created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?,
            ${SHARE_WEAPON_TEXT.map(() => '?').join(', ')}, ?, ?, ?, ?,
            ?, ?, ?, ?, ?, ?, ${SHARE_WEAPON_FLAGS.map(() => '?').join(', ')},
            ?, ?)`,
         [
           characterId,
-          equipmentSourceId(weapon.sourceRef, 'weapon'),
           weapon.name,
           // Absent means the column's own NULL — NOT STATED — which is exactly
           // what a link minted before D27 means and exactly what the sheet then
@@ -1969,16 +1914,14 @@ export function importCharacterShare(
     for (const armor of document.armor ?? []) {
       db.exec(
         `INSERT INTO ${SHARE_TABLES.character_armor} (
-           character_id, source_instance_id,
-           ${SHARE_ARMOR_ENUMS.join(', ')}, name, armor_class,
+           character_id, ${SHARE_ARMOR_ENUMS.join(', ')}, name, armor_class,
            ${SHARE_ARMOR_NUMBERS.join(', ')}, ${SHARE_ARMOR_FLAGS.join(', ')},
            notes, created_at, updated_at
-         ) VALUES (?, ?, ${SHARE_ARMOR_ENUMS.map(() => '?').join(', ')}, ?, ?,
+         ) VALUES (?, ${SHARE_ARMOR_ENUMS.map(() => '?').join(', ')}, ?, ?,
            ${SHARE_ARMOR_NUMBERS.map(() => '?').join(', ')},
            ${SHARE_ARMOR_FLAGS.map(() => '?').join(', ')}, ?, ?, ?)`,
         [
           characterId,
-          equipmentSourceId(armor.sourceRef, 'armor'),
           ...SHARE_ARMOR_ENUMS.map((field) => armor[field]),
           armor.name,
           armor.armor_class,

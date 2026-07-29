@@ -961,23 +961,15 @@ export interface GuidedSkillsStepState {
 
 /**
  * THE STARTING-EQUIPMENT SEAM — dispatch E-A of
- * `docs/design/2026-07-29-starting-equipment.md` (§2, §3, §6b). The values
- * below are the E-A implementer's, OFFERED FOR RATIFICATION on the direction
- * every earlier dispatch used: pinned here BEFORE the step (E-B) or its tests
- * are written, reported rather than silently chosen for both sides. §6b names
- * the five values two implementers would otherwise invent independently.
+ * `docs/design/2026-07-29-starting-equipment.md` (§2, §3, §6b), REDUCED BY
+ * OWNER RULING D69: weapons and armour carry NO provenance. §6b's value 1
+ * (the `source_instance_id` column, `EQUIPMENT_SOURCE_COLUMN`) and value 4's
+ * wire pins (`EQUIPMENT_SHARE_WIRE_VERSION`, `EQUIPMENT_WIRE_SOURCE_REF_FIELD`)
+ * were ratified here and are now UNRATIFIED — the column is dropped
+ * (migration `0012`) and wire v7 removed the field, so a constant naming
+ * either would be a dead value wearing a live one's clothes. What survives is
+ * what the step still uses: the recorded CHOICE and the armour-slot refusal.
  */
-
-/**
- * §6b value 1 — THE COLUMN. `source_instance_id` on BOTH `character_weapons`
- * and `character_armor`: nullable, composite same-character FK to
- * `character_source_instances`, cascade on hard delete. NULL means A PERSON
- * PUT THIS HERE — the default for every hand-added row and every row that
- * predates the column. Non-NULL means a rule granted it, and only rules may
- * remove it: the option-change cleanup deletes by this column and never
- * touches a NULL-sourced row.
- */
-export const EQUIPMENT_SOURCE_COLUMN = 'source_instance_id';
 
 /** The two sources that offer a starting-equipment package (D65, D61). */
 export type EquipmentSourceKind = 'class' | 'background';
@@ -998,12 +990,14 @@ export type EquipmentChoiceConfig =
 
 /**
  * §6b value 3 — THE ARMOUR-COLLISION REFUSAL REASON. `character_armor` is
- * UNIQUE on `(character_id, slot)`; minting worn armour for a character who
- * hand-added their own is a NAMED refusal with whole-apply rollback — the
- * shape S-B built for `skill_already_held` — never a raw SQLite constraint
+ * UNIQUE on `(character_id, slot)`; minting worn armour for a character whose
+ * slot is occupied is a NAMED refusal with whole-apply rollback — the shape
+ * S-B built for `skill_already_held` — never a raw SQLite constraint
  * violation and never a silent overwrite. The data names the slot, the item
  * that could not be placed, and the item already holding the slot, so the
- * step can tell the person exactly what collided.
+ * step can tell the person exactly what collided. Since D69 the occupant may
+ * be ANY row — a hand-added one or a previous mint's, now indistinguishable
+ * — and the remedy is the player's own removal.
  */
 export type EquipmentGrantRefusalReason = 'armor_slot_occupied';
 
@@ -1017,17 +1011,6 @@ export interface EquipmentGrantRefusalData {
 }
 
 /**
- * §6b value 4 — THE WIRE. Share wire v6 appends ONE field to the weapon tuple
- * (arity 21 → 22) and one to the armour tuple (9 → 10), both named
- * `sourceRef`, resolving through the same `classes[].id` / `sources[].id`
- * reference space `selections[].ref` uses. `migrateV5ToV6` appends null —
- * pre-v6 rows could only have been hand-added, so this is the literal truth,
- * NOT a retirement (that debate is settled at v5 and does not reopen).
- */
-export const EQUIPMENT_SHARE_WIRE_VERSION = 6;
-export const EQUIPMENT_WIRE_SOURCE_REF_FIELD = 'sourceRef';
-
-/**
  * §6b value 5 — THE DECLARED CLASS WEAPON-EQUIPMENT MAP'S MODULE. The
  * class-side `DECLARED_WEAPON_EQUIPMENT` (plural bundles: Daggers, Handaxes,
  * Javelins) lives beside the parser it corrects, with its exercised-entries
@@ -1038,13 +1021,13 @@ export const EQUIPMENT_WIRE_SOURCE_REF_FIELD = 'sourceRef';
 export const CLASS_EQUIPMENT_RULES_MODULE = 'src/rules/class-equipment-srd.ts';
 
 /**
- * Where the mint and the option-change cleanup live, on the
- * `SKILL_GRANTS_MODULE` precedent. The module exports
- * `applyEquipmentPackageChoice(db, params)` — one transaction that records
- * the choice in `config`, removes exactly the rows carrying that source
- * instance, and mints the chosen option's weapon/armour rows stamped with it
- * — and `EquipmentGrantRefusal`, the named-refusal error carrying
- * `EquipmentGrantRefusalData`. Rows with a NULL source are never touched.
+ * Where the mint lives, on the `SKILL_GRANTS_MODULE` precedent. The module
+ * exports `applyEquipmentPackageChoice(db, params)` — one transaction that
+ * records the choice in `config` and mints the chosen option's
+ * weapon/armour rows as PLAIN rows (D69: no provenance stamp, no
+ * option-change cleanup; re-confirming a recorded choice is a no-op) — and
+ * `EquipmentGrantRefusal`, the named-refusal error carrying
+ * `EquipmentGrantRefusalData`.
  */
 export const EQUIPMENT_GRANTS_MODULE = 'src/grants/equipment-grants.ts';
 

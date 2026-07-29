@@ -299,10 +299,9 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
   // dressed up.
   character_weapons: {
     integer: [
-      // `source_instance_id` is the equipment-provenance column
-      // (starting-equipment plan §2, E-A): nullable, NULL means a person put
-      // the weapon here.
-      'id', 'character_id', 'source_instance_id', 'finesse', 'heavy', 'light',
+      // NO `source_instance_id`: E-A's equipment-provenance column was
+      // struck by owner ruling D69 (migration 0012).
+      'id', 'character_id', 'finesse', 'heavy', 'light',
       'loading', 'reach',
       'thrown', 'two_handed', 'ammunition', 'range_near_feet',
       'range_far_feet', 'mastery_selected', 'damage_flat',
@@ -506,9 +505,9 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
   // and `notes`.
   character_armor: {
     integer: [
-      // `source_instance_id` is the equipment-provenance column, on exactly
-      // `character_weapons`' terms.
-      'id', 'character_id', 'source_instance_id', 'armor_class',
+      // NO `source_instance_id`, on exactly `character_weapons`' terms
+      // (D69, migration 0012).
+      'id', 'character_id', 'armor_class',
       'dex_bonus_max',
       'strength_requirement', 'stealth_disadvantage',
     ],
@@ -1156,13 +1155,9 @@ const expectedForeignKeys: Record<string, string[]> = {
     'subclass_definition_id,class_definition_id->subclass_definitions.id,class_definition_id|NO ACTION',
   ],
   character_operations: ['character_id->characters.id|CASCADE'],
-  // TWO edges since E-A: the composite equipment-provenance reference is what
-  // stops a granted weapon being attached to another character's source
-  // instance (starting-equipment plan §2).
-  character_weapons: [
-    'character_id->characters.id|CASCADE',
-    'source_instance_id,character_id->character_source_instances.id,character_id|CASCADE',
-  ],
+  // Back to ONE edge: E-A's composite equipment-provenance reference was
+  // struck by owner ruling D69 (migration 0012).
+  character_weapons: ['character_id->characters.id|CASCADE'],
   class_weapon_mastery_counts: [
     'class_definition_id->class_definitions.id|CASCADE',
   ],
@@ -1259,12 +1254,9 @@ const expectedForeignKeys: Record<string, string[]> = {
   // assertion that matters: it holds a class NAME and deliberately NOT a
   // foreign key to `character_class_levels`, so deleting a class cannot cascade
   // away a die the player physically rolled.
-  // TWO edges since E-A, on `character_weapons`' terms — the second is the
-  // composite equipment-provenance reference.
-  character_armor: [
-    'character_id->characters.id|CASCADE',
-    'source_instance_id,character_id->character_source_instances.id,character_id|CASCADE',
-  ],
+  // Back to ONE edge: E-A's composite equipment-provenance reference was
+  // struck by owner ruling D69 (migration 0012).
+  character_armor: ['character_id->characters.id|CASCADE'],
   character_hit_point_rolls: ['character_id->characters.id|CASCADE'],
   character_skill_proficiencies: ['character_id->characters.id|CASCADE'],
   // TWO edges, on `character_effects`' terms: the composite one is what stops

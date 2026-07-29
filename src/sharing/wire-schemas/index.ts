@@ -4,6 +4,7 @@ import { WIRE_SCHEMA_V3 } from './v3';
 import { WIRE_SCHEMA_V4 } from './v4';
 import { WIRE_SCHEMA_V5 } from './v5';
 import { WIRE_SCHEMA_V6 } from './v6';
+import { WIRE_SCHEMA_V7 } from './v7';
 import {
   versatileWeaponDamageFromLegacy,
   weaponDamageFromLegacy,
@@ -20,7 +21,7 @@ import {
  * domain requires a new schema version, an adjacent migration, and a
  * hand-frozen fragment fixture. Never edit an existing version.
  */
-export const CURRENT_CHARACTER_SHARE_VERSION = 6 as const;
+export const CURRENT_CHARACTER_SHARE_VERSION = 7 as const;
 
 /**
  * Any change to tuple field order, meaning, membership, or accepted value
@@ -34,6 +35,7 @@ export const SHARE_SCHEMAS = Object.freeze({
   4: WIRE_SCHEMA_V4,
   5: WIRE_SCHEMA_V5,
   6: WIRE_SCHEMA_V6,
+  7: WIRE_SCHEMA_V7,
 } as const);
 
 export type SupportedShareVersion = keyof typeof SHARE_SCHEMAS;
@@ -369,10 +371,102 @@ function migrateV5ToV6(document: unknown): unknown {
 }
 
 /**
+ * The v6→v7 migration DROPS the appended `sourceRef` slot from every WEAPON
+ * tuple (22 → 21) and every ARMOR tuple (10 → 9) — the inverse of the 5→6
+ * null-pad, and the wire form of owner ruling D69: weapons carry no
+ * provenance, so a non-null value here is a datum the owner struck, not one
+ * to preserve. The row itself survives as a plain row, which is exactly the
+ * state D69 puts every weapon and armour row in. Armour lives inside the
+ * SHEET tuple, so the drop reaches through it. Nothing else in the document
+ * moves. The version slot is rewritten to 7 because the decoder validates
+ * the root version.
+ */
+function migrateV6ToV7(document: unknown): unknown {
+  if (
+    !Array.isArray(document) ||
+    !WIRE_SCHEMA_V6.tuples.root.arities.some(
+      (arity) => arity === document.length,
+    )
+  ) {
+    throw new TypeError('wire document has an unsupported v6 tuple length.');
+  }
+  const weaponsIndex = WIRE_SCHEMA_V6.tuples.root.fields.findIndex(
+    (field) => field.key === 'weapons',
+  );
+  const sheetIndex = WIRE_SCHEMA_V6.tuples.root.fields.findIndex(
+    (field) => field.key === 'sheet',
+  );
+  const weapons = document[weaponsIndex];
+  if (weapons !== null && !Array.isArray(weapons)) {
+    throw new TypeError('wire weapons must be null or a list.');
+  }
+  const migratedWeapons =
+    weapons === null
+      ? null
+      : weapons.map((weapon: unknown) => {
+          if (
+            !Array.isArray(weapon) ||
+            !WIRE_SCHEMA_V6.tuples.weapon.variants.some(
+              (variant) => variant.arity === weapon.length,
+            )
+          ) {
+            throw new TypeError(
+              'wire weapon has an unsupported v6 tuple length.',
+            );
+          }
+          return weapon.slice(0, -1);
+        });
+  const sheet = document[sheetIndex];
+  let migratedSheet = sheet;
+  if (sheet !== null) {
+    if (
+      !Array.isArray(sheet) ||
+      !WIRE_SCHEMA_V6.tuples.sheet.arities.some(
+        (arity) => arity === sheet.length,
+      )
+    ) {
+      throw new TypeError('wire sheet has an unsupported v6 tuple length.');
+    }
+    const armorIndex = WIRE_SCHEMA_V6.tuples.sheet.fields.findIndex(
+      (field) => field.key === 'armor',
+    );
+    const armor = sheet[armorIndex];
+    if (armor !== null && !Array.isArray(armor)) {
+      throw new TypeError('wire armor must be null or a list.');
+    }
+    const migratedArmor =
+      armor === null
+        ? null
+        : armor.map((row: unknown) => {
+            if (
+              !Array.isArray(row) ||
+              !WIRE_SCHEMA_V6.tuples.armor.arities.some(
+                (arity) => arity === row.length,
+              )
+            ) {
+              throw new TypeError(
+                'wire armor has an unsupported v6 tuple length.',
+              );
+            }
+            return row.slice(0, -1);
+          });
+    const rewrittenSheet = [...sheet];
+    rewrittenSheet[armorIndex] = migratedArmor;
+    migratedSheet = rewrittenSheet;
+  }
+  const migrated = [...document];
+  migrated[1] = 7;
+  migrated[weaponsIndex] = migratedWeapons;
+  migrated[sheetIndex] = migratedSheet;
+  return migrated;
+}
+
+/**
  * ADJACENT means each migration lifts exactly one version step; the decoder
  * composes them, so a v1 document runs 1→2, then 2→3, then 3→4, then 4→5 —
- * where every pre-v5 document is retired by the deliberate throw above — and a
- * v5 document runs 5→6, the null-pad.
+ * where every pre-v5 document is retired by the deliberate throw above — a
+ * v5 document runs 5→6 (the null-pad) then 6→7, and a v6 document runs 6→7,
+ * the sourceRef drop.
  */
 export const MIGRATIONS = Object.freeze({
   1: migrateV1ToV2,
@@ -380,6 +474,7 @@ export const MIGRATIONS = Object.freeze({
   3: migrateV3ToV4,
   4: migrateV4ToV5,
   5: migrateV5ToV6,
+  6: migrateV6ToV7,
 }) satisfies AdjacentMigrations;
 
 export { WIRE_SCHEMA_V1 } from './v1';
@@ -388,9 +483,11 @@ export { WIRE_SCHEMA_V3 } from './v3';
 export { WIRE_SCHEMA_V4 } from './v4';
 export { WIRE_SCHEMA_V5 } from './v5';
 export { WIRE_SCHEMA_V6 } from './v6';
+export { WIRE_SCHEMA_V7 } from './v7';
 export type { WireField, WireSchemaV1 } from './v1';
 export type { WireSchemaV2 } from './v2';
 export type { WireSchemaV3 } from './v3';
 export type { WireSchemaV4 } from './v4';
 export type { WireSchemaV5 } from './v5';
 export type { WireSchemaV6 } from './v6';
+export type { WireSchemaV7 } from './v7';

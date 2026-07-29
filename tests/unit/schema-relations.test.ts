@@ -205,15 +205,13 @@ describe('declared relations match the foreign keys', () => {
     // and the third use of the `(id, character_id)` unique index, without
     // which a grant could claim another character's source instance.
     //
-    // Equipment provenance (starting-equipment plan §2, E-A) adds TWO more
-    // constraints across FOUR more PRAGMA rows: `character_weapons` and
-    // `character_armor` each gain the same COMPOSITE
-    // `(source_instance_id, character_id)` edge — the fifth and sixth
-    // composite keys, and the fourth and fifth uses of the
-    // `(id, character_id)` unique index, without which a granted weapon or
-    // suit of armour could claim another character's source instance.
-    expect(constraintEdges(db)).toHaveLength(68);
-    expect(rowCount).toBe(74);
+    // Equipment provenance (E-A) briefly added TWO more constraints across
+    // FOUR more PRAGMA rows — a composite edge each on `character_weapons`
+    // and `character_armor`. Owner ruling D69 struck the column (migration
+    // 0012), so both edges are GONE again and the counts are back where the
+    // skills unit left them.
+    expect(constraintEdges(db)).toHaveLength(66);
+    expect(rowCount).toBe(70);
   });
 
   it('declares a relation for every foreign key, and a foreign key for every relation', () => {

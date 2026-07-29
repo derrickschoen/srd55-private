@@ -312,10 +312,6 @@ function assertWeaponRow(
     {
       id: 1,
       character_id: characterId,
-      // The planner's commands are how a PERSON adds a weapon, and NULL is
-      // that fact's own value (starting-equipment plan §2): only the
-      // equipment mint writes a non-null source, through its own module.
-      source_instance_id: null,
       ...values,
       mastery_selected: masterySelected ? 1 : 0,
       created_at: timestamp,
