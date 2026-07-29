@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { decodeShareFragment } from '../../../src/sharing/codec';
 import {
   SHARE_SCHEMAS,
+  ShareWireRetirementError,
   type SupportedShareVersion,
 } from '../../../src/sharing/wire-schemas';
 import {
@@ -12,10 +13,25 @@ import {
   type CharacterShareDocument,
 } from '../../../src/sharing/schema';
 
-interface FrozenFixture {
-  readonly fragment: string;
-  readonly expected: CharacterShareDocument;
-}
+/**
+ * A RETIRED fixture's fragment is still hand-frozen and still exercised: the
+ * composed decode path runs its version's tuple checks and every migration up
+ * to v4→v5, which THROWS `ShareWireRetirementError` by design (D60, skills
+ * plan §3.2) — a pre-v5 document carries skills as bare strings with no
+ * provenance, and migrating one would fabricate attribution. What each retired
+ * fixture proves is therefore that its frozen schema still PARSES and that the
+ * refusal is the deliberate, named one — not `version is unsupported.` and not
+ * a malformed-document error.
+ */
+type FrozenFixture =
+  | {
+      readonly fragment: string;
+      readonly expected: CharacterShareDocument;
+    }
+  | {
+      readonly fragment: string;
+      readonly retired: true;
+    };
 
 const VERSION_FIXTURES = {
   1: {
@@ -23,30 +39,7 @@ const VERSION_FIXTURES = {
       'H4sIAAAAAAACA12NwQrCMBBEf6XseQNNFQ_5Ag-CHxByWJqVBtcqm5SCXy-1QWovwzDMm_EQ' +
       'x2gek5TUC-Vs8otFsukHUuoLq8kDKQNa9HCV2FzSeG_OrE_AcRLZiD3tk38J6H2L0LXd0X2_' +
       '3JzepLEOHdDugYWwCDemAhVcvCNhLRXrftWAfu3kIbFEWKOw2fsAKTM71e0AAAA',
-    expected: {
-      format: CHARACTER_SHARE_FORMAT,
-      version: CHARACTER_SHARE_VERSION,
-      character: {
-        name: 'Old Link Hero',
-        intelligence: 16,
-      },
-      classes: [{
-        id: 0,
-        classKey: '2024:class:wizard',
-        level: 3,
-        start: 1,
-      }],
-      sources: [{
-        id: 1,
-        type: 'feat',
-        key: '2024:feat:alert',
-        acquired: 2,
-      }],
-      selections: [],
-      spellbook: ['2024:shield'],
-      preferences: [],
-      overrides: [],
-    },
+    retired: true,
   },
   2: {
     // Independently compressed from the hand-authored v2 positional tuple,
@@ -56,34 +49,7 @@ const VERSION_FIXTURES = {
       'sgbnXd6PnLqGbYx5HIg55k1rxTaJJI-tFQJUqOE0ipBPWd35e3YmCYB-ZP6S8rh1fsWg1gW' +
       'CKtShmvdVj-5lxa2D9lhugYkoEa5kE6zgVFeWSdKKqU_UoF4yse2IHSyW-X8U6hUKctvR0_' +
       'YDU8UhpuUZgFCHmLLL3Bhj3opyo4o0AQAA',
-    expected: {
-      format: CHARACTER_SHARE_FORMAT,
-      version: CHARACTER_SHARE_VERSION,
-      character: {
-        name: 'Current Link Hero',
-        intelligence: 16,
-      },
-      classes: [{
-        id: 0,
-        classKey: '2024:class:wizard',
-        level: 3,
-        start: 1,
-      }],
-      sources: [{
-        id: 1,
-        type: 'feat',
-        key: '2024:feat:alert',
-        acquired: 2,
-      }],
-      selections: [],
-      spellbook: ['2024:shield'],
-      preferences: [],
-      overrides: [],
-      placeholders: [{
-        spellKey: '2024:org.example:lost-spell',
-        spellName: 'Lost Spell',
-      }],
-    },
+    retired: true,
   },
   3: {
     // Independently compressed from this hand-authored v3 positional tuple.
@@ -91,26 +57,7 @@ const VERSION_FIXTURES = {
     // appended method is the allocation signal that must survive separately.
     fragment:
       'H4sIAAAAAAAAA4WKMQqAMBAEvyJXJyDqB-ws_EGwOJKDiGuUXPJ_wUYbEYaBgXEUUrB7RVk9WNXqKYBaHzmzL5KtRs5CpjeORuDwXCQ085q2ZpJ8kEkV-BF1bTe8T9o5VQYtxn3z7HcvFwNExNerAAAA',
-    expected: {
-      format: CHARACTER_SHARE_FORMAT,
-      version: CHARACTER_SHARE_VERSION,
-      character: {
-        name: 'Allocated Link Hero',
-        rules_edition_preference: '2024',
-        ability_allocation_method: 'manual',
-      },
-      classes: [],
-      sources: [],
-      selections: [],
-      spellbook: [],
-      preferences: [],
-      overrides: [],
-      acknowledgements: [],
-      loadouts: [],
-      weapons: [],
-      effects: [],
-      placeholders: [],
-    },
+    retired: true,
   },
   4: {
     // Independently compressed from a hand-authored v4 positional tuple. The
@@ -121,35 +68,42 @@ const VERSION_FIXTURES = {
       'osCyra8l5mAipVSnm4sx1WYiIZOd1GkicYA9Kjj11X7mLGEsOcxcHZ3MgO0OucT4XaBruh6' +
       '2xpW4UASNSqNSDcJI5uJlLmxhWR_ezuALiV3z7bPpJfmqj3tqM8JhE_5H9IpVCmgMMeT7Ob' +
       'ARR8kBLtQqCwUO7H_gm_XjlMWxzxNgh12zwvUDG1MmbH4BAAA',
+    retired: true,
+  },
+  5: {
+    // Independently compressed from a hand-authored v5 positional tuple —
+    // never from `shareDocumentToPositional`. The two skill-grant tuples are
+    // the section v5 exists for: a FILLED class grant and an UNFILLED one
+    // whose null selection must survive the wire as an absent field.
+    fragment:
+      'H4sIAAAAAAAC_22OzwrCMAzGX2Xk3MJW_xz2BB48eC9FQlewLMukXRV8emvdYRYhfITky_eL' +
+      'hoEHOSVavCWMUca7I4rS3jCgXVyQMXcOxEFouIT54RjZuubseWxOLswgOBFtpDvWE1Ct2m99' +
+      'MCEnJDBC6_a77gu9f_oXhmH17kRXRZl88VsV6p8URom_xtETQY4FDBYZPx_US7WSzBsBTpfd' +
+      'GwEAAA',
     expected: {
       format: CHARACTER_SHARE_FORMAT,
       version: CHARACTER_SHARE_VERSION,
       character: {
-        name: 'V4 Contribution Hero',
-        strength: 19,
+        name: 'Provenance Link Hero',
+        intelligence: 16,
         rules_edition_preference: '2024',
         ability_allocation_method: 'manual',
       },
-      classes: [],
-      sources: [{
+      classes: [{
         id: 0,
-        type: 'background',
-        key: '2024:background:guard',
-        acquired: 1,
+        classKey: '2024:class:wizard',
+        level: 3,
+        start: 1,
       }],
+      sources: [],
       selections: [],
       spellbook: [],
       preferences: [],
       overrides: [],
-      background: { name: 'Guard' },
-      effects: [{
-        kind: 'ability_increase',
-        label: 'Guard training',
-        sourceRef: 0,
-        ability: 'strength',
-        amount: 2,
-        maximum: 20,
-      }],
+      skillGrants: [
+        { ref: 0, grantKey: 'class_skill', ordinal: 1, skill: 'arcana' },
+        { ref: 0, grantKey: 'class_skill', ordinal: 2 },
+      ],
     },
   },
 } satisfies Record<SupportedShareVersion, FrozenFixture>;
@@ -195,8 +149,19 @@ describe('the share-link wire schema registry', () => {
     }
   });
 
-  it('decodes every independently frozen version fixture', async () => {
+  it('decodes the current fixture and refuses every retired one BY NAME', async () => {
     for (const fixture of Object.values(VERSION_FIXTURES)) {
+      if ('retired' in fixture) {
+        // The refusal must be the DELIBERATE retirement (D60, skills plan
+        // §3.2) — reaching it proves the frozen schema's tuple checks and
+        // every migration below v5 still ran. A generic `version is
+        // unsupported.` or a malformed-document error would mean the frozen
+        // history itself broke, which this fixture exists to catch.
+        await expect(
+          decodeShareFragment(fixture.fragment),
+        ).rejects.toThrow(ShareWireRetirementError);
+        continue;
+      }
       await expect(decodeShareFragment(fixture.fragment)).resolves.toEqual(
         fixture.expected,
       );

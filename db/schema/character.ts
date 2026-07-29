@@ -10,6 +10,7 @@ import {
 import { sql } from 'drizzle-orm';
 import type {
   CharacterId,
+  CharacterSkillGrantId,
   ClassDefinitionId,
   SlotId,
   SourceInstanceId,
@@ -22,6 +23,8 @@ import type {
   KnownAbilityAllocationMethod,
   RulesEdition,
   SelectionEligibility,
+  Skill,
+  SkillGrantState,
   SlotBucket,
   SlotState,
 } from '../../src/domain/enums';
@@ -30,6 +33,8 @@ import {
   abilityAllocationMethods,
   rulesEditions,
   selectionEligibilities,
+  skillGrantStates,
+  skills,
   slotBuckets,
   slotStates,
 } from '../../src/domain/enums';
@@ -452,6 +457,112 @@ export const spell_selection_slots = sqliteTable(
     index('slots_character_collection_index').on(
       table.character_id,
       table.selection_collection,
+    ),
+  ],
+);
+
+/**
+ * ONE SKILL CHOICE SLOT A SOURCE GRANTS — the skills-with-provenance model
+ * (plan `docs/design/2026-07-29-skills-with-provenance.md`, D63).
+ *
+ * The shape is `spell_selection_slots`' shape on purpose (§3.1): a skill grant
+ * is a source-owned CHOICE SLOT with stable rule identity and an ordinal, not
+ * a resolved mechanic. `skill IS NULL` means GRANTED BUT UNFILLED — the
+ * obligation exists before the choice is made, which is the whole reason the
+ * generator mints the row rather than a command creating it on demand (§3.8).
+ *
+ * LIFECYCLE (§3.8): removal in this codebase is a TOMBSTONE, not a delete, so
+ * `ON DELETE CASCADE` never fires on the ordinary remove-a-class path. When a
+ * source tombstones its grants become `orphaned`; re-adding the source revives
+ * the same rows with their selection intact. The two-member state vocabulary
+ * is deliberate — see `skillGrantStates`.
+ *
+ * THE PARTIAL UNIQUE INDEX IS THE CORRECTNESS CONTENT of §3.1/§3.3: a
+ * character cannot hold the same proficiency twice FROM LIVE GRANTS, while an
+ * orphaned grant's remembered selection must not block a live one from taking
+ * that skill. Both the `skill IS NOT NULL` and the `state = 'active'` limbs
+ * are load-bearing; dropping the state limb makes class removal permanently
+ * reserve a skill.
+ *
+ * `character_skill_proficiencies` above (in `sheet-inputs.ts`) SURVIVES as a
+ * derived transport projection of this table with exactly one deriving writer,
+ * `rebuildSkillProjection` (§3.2). The sheet and completeness read GRANTS.
+ */
+export const character_skill_grants = sqliteTable(
+  'character_skill_grants',
+  {
+    id: integer('id')
+      .primaryKey({ autoIncrement: true })
+      .notNull()
+      .$type<CharacterSkillGrantId>(),
+    character_id: integer('character_id')
+      .notNull()
+      .$type<CharacterId>()
+      .references(() => characters.id, { onDelete: 'cascade' }),
+    source_instance_id: integer('source_instance_id')
+      .notNull()
+      .$type<SourceInstanceId>(),
+    grant_key: varchar()('grant_key').notNull(),
+    ordinal: integer('ordinal').notNull(),
+    /** NULL is GRANTED BUT UNFILLED — the defended null this table exists for. */
+    skill: varchar<Skill>()('skill'),
+    state: varchar<SkillGrantState>()('state').notNull().default('active'),
+    orphan_reason_code: varchar()('orphan_reason_code'),
+    orphaned_at: datetime()('orphaned_at'),
+    created_at: datetime()('created_at'),
+    updated_at: datetime()('updated_at'),
+  },
+  (table) => [
+    /**
+     * The eighteen skills, with the null limb first: an unfilled grant is the
+     * ordinary state of a freshly minted row, not an error. A nineteenth value
+     * would reach `abilityForSkill`'s exhaustive map with no ability to check
+     * against — the same silent-wrong the flat table's CHECK refuses.
+     */
+    check('character_skill_grants_skill_check', nullOrOneOf('skill', skills)),
+    check(
+      'character_skill_grants_state_check',
+      oneOf('state', skillGrantStates),
+    ),
+    /**
+     * Ordinals are 1-based (§3.6, "positive ordinal") and `integerAtLeast`
+     * rather than a bare `>= 1` for the reason `columns.ts` measured: written
+     * bare, `'abc' >= 1` is TRUE in SQLite.
+     */
+    check(
+      'character_skill_grants_ordinal_check',
+      integerAtLeast('ordinal', 1),
+    ),
+    /**
+     * The same composite reference `spell_selection_slots` carries, and for
+     * the same reason: a grant cannot be attached to another character's
+     * source instance. Cascade fires only on HARD deletion, which only the
+     * guided replace performs — ordinary removal tombstones (§3.8).
+     */
+    foreignKey({
+      columns: [table.source_instance_id, table.character_id],
+      foreignColumns: [
+        character_source_instances.id,
+        character_source_instances.character_id,
+      ],
+    }).onDelete('cascade'),
+    /** One slot per ordinal — the grant's addressable identity (§3.1). */
+    uniqueIndex('character_skill_grants_source_grant_ordinal_unique').on(
+      table.source_instance_id,
+      table.grant_key,
+      table.ordinal,
+    ),
+    /**
+     * §3.1's second uniqueness constraint, WITH the state limb. Partial, so an
+     * orphaned grant's remembered skill does not block a live one — the exact
+     * contradiction revision 3 of the plan carried and both reviewers caught.
+     */
+    uniqueIndex('character_skill_grants_character_id_skill_unique')
+      .on(table.character_id, table.skill)
+      .where(sql`skill IS NOT NULL AND state = 'active'`),
+    index('character_skill_grants_character_id_state_index').on(
+      table.character_id,
+      table.state,
     ),
   ],
 );

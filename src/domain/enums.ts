@@ -104,6 +104,19 @@ export const slotStates = [
 ] as const;
 export type SlotState = (typeof slotStates)[number];
 
+/**
+ * The lifecycle of one skill grant (`character_skill_grants.state`).
+ *
+ * TWO members, not `slotStates`' four: a skill grant has no fixed/`discarded`
+ * variant and no `kept_override` — the only lifecycle event a grant has is its
+ * source tombstoning, which orphans it, and reactivation, which revives it
+ * (plan §3.8). Sharing `slotStates` would let a writer store `discarded` on a
+ * row no reader ever counts, which is the silent-disable failure the slot
+ * state's own CHECK comment warns about.
+ */
+export const skillGrantStates = ['active', 'orphaned'] as const;
+export type SkillGrantState = (typeof skillGrantStates)[number];
+
 export const selectionEligibilities = [
   'valid',
   'invalid',

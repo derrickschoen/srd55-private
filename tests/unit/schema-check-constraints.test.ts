@@ -359,6 +359,19 @@ const skillProficiency =
     });
   };
 
+const skillGrant =
+  (values: Values): Write =>
+  (db) => {
+    const characterId = newCharacter(db);
+    insert(db, 'character_skill_grants', {
+      character_id: characterId,
+      source_instance_id: newSource(db, characterId),
+      grant_key: 'class_skill',
+      ordinal: 1,
+      ...values,
+    });
+  };
+
 const sheetAdjustment =
   (values: Values): Write =>
   (db) => {
@@ -2461,6 +2474,57 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     accepts: [
       ['a one-word skill', skillProficiency({ skill: 'stealth' })],
       ['a two-word skill in snake case', skillProficiency({ skill: 'sleight_of_hand' })],
+    ],
+  },
+  {
+    constraint: 'character_skill_grants_skill_check',
+    rejects: [
+      ['a skill outside the eighteen', skillGrant({ skill: 'lockpicking' })],
+      // The display casing the source prints; the column stores snake case
+      // because a CHECK cannot hold a value with a space in it.
+      ['the printed display form', skillGrant({ skill: 'Sleight of Hand' })],
+    ],
+    accepts: [
+      // The null limb FIRST, because it is the constraint's most important
+      // half: NULL is GRANTED BUT UNFILLED — the defended null the grants
+      // table exists for (skills plan §3.1) — not a missing value.
+      ['an unfilled grant', skillGrant({})],
+      ['a filled grant', skillGrant({ skill: 'athletics' })],
+      ['a two-word skill in snake case', skillGrant({ skill: 'sleight_of_hand' })],
+    ],
+  },
+  {
+    constraint: 'character_skill_grants_state_check',
+    rejects: [
+      // The spell-slot vocabulary's other two members, refused ON PURPOSE: a
+      // grant has no `discarded` and no `kept_override` (skills plan §3.8),
+      // and admitting one would let a writer park a grant in a state no
+      // reader counts — the silent-disable failure the slot state's own
+      // comment warns about.
+      ['the slot vocabulary discarded state', skillGrant({ state: 'discarded' })],
+      ['the slot vocabulary kept_override state', skillGrant({ state: 'kept_override' })],
+      ['the source vocabulary tombstoned state', skillGrant({ state: 'tombstoned' })],
+    ],
+    accepts: [
+      ['the default active state', skillGrant({})],
+      ['an orphaned grant', skillGrant({ state: 'orphaned' })],
+    ],
+  },
+  {
+    constraint: 'character_skill_grants_ordinal_check',
+    rejects: [
+      // Ordinals are 1-based (skills plan §3.6): the generator mints from 1,
+      // matching the spell slots' loop, and a zero would collide with the
+      // slot table's "ordinal 0" default meaning something different.
+      ['a zero ordinal', skillGrant({ ordinal: 0 })],
+      ['a negative ordinal', skillGrant({ ordinal: -1 })],
+      // The `typeof` limb: SQLite orders every TEXT value above every number,
+      // so a bare `>= 1` would admit this.
+      ['a text ordinal', skillGrant({ ordinal: 'first' })],
+    ],
+    accepts: [
+      ['the first ordinal', skillGrant({ ordinal: 1 })],
+      ['a later ordinal', skillGrant({ ordinal: 3 })],
     ],
   },
   {

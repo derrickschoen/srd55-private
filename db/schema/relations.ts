@@ -35,6 +35,7 @@ import {
   character_operations,
   character_rule_overrides,
   character_save_points,
+  character_skill_grants,
   character_source_instances,
   character_spell_preferences,
   characters,
@@ -113,6 +114,7 @@ export const charactersRelations = relations(characters, ({ many }) => ({
   armor: many(character_armor),
   hit_point_rolls: many(character_hit_point_rolls),
   skill_proficiencies: many(character_skill_proficiencies),
+  skill_grants: many(character_skill_grants),
   sheet_adjustments: many(character_sheet_adjustments),
 }));
 
@@ -365,6 +367,35 @@ export const characterSourceInstancesRelations = relations(
       relationName: 'source_instance_parent',
     }),
     slots: many(spell_selection_slots),
+    skill_grants: many(character_skill_grants),
+  }),
+);
+
+/**
+ * A skill grant hangs off its character and — through the same composite the
+ * spell slots use — off the source instance that granted it. No edge to any
+ * catalog table: which skills a class OFFERS lives in `class_skill_options`,
+ * and the grant row deliberately records only what was granted and chosen.
+ */
+export const characterSkillGrantsRelations = relations(
+  character_skill_grants,
+  ({ one }) => ({
+    character: one(characters, {
+      fields: [character_skill_grants.character_id],
+      references: [characters.id],
+    }),
+    // Composite, for the reason the slot's edge is: a grant cannot be attached
+    // to another character's source instance.
+    source_instance: one(character_source_instances, {
+      fields: [
+        character_skill_grants.source_instance_id,
+        character_skill_grants.character_id,
+      ],
+      references: [
+        character_source_instances.id,
+        character_source_instances.character_id,
+      ],
+    }),
   }),
 );
 

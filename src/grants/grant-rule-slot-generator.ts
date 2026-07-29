@@ -14,6 +14,11 @@ import {
 } from '../eligibility/spell-selection-eligibility';
 import { GrantRule } from './grant-rule';
 import {
+  orphanSkillGrantsForSource,
+  rebuildSkillProjection,
+  syncClassSkillGrants,
+} from './skill-grants';
+import {
   decodeGrantJson,
   SourceRuleReader,
   sourceDefinitionTable,
@@ -199,6 +204,12 @@ export class GrantRuleSlotGenerator {
           case GrantRule.CAPABILITY:
           case GrantRule.FIGHTING_STYLE:
           case GrantRule.WEAPON_MASTERY:
+          // DELIBERATELY still inert (plan §3.4): the Skilled feat's
+          // `skill_proficiency` rule stays entitlement data with no consumer
+          // in this unit — wiring feat-granted skills is its own unit, and
+          // the gap is a rendered D33 disclosure (S-C), not silence. The
+          // CLASS skill arm below does not ride this rule kind at all: class
+          // entitlement lives in `class_sheet_traits`, not in grant rules.
           case GrantRule.SKILL_PROFICIENCY:
             break;
         }
@@ -206,6 +217,18 @@ export class GrantRuleSlotGenerator {
 
       this.reconcileSlots(source, desiredSlotKeys);
       this.reconcileGrantedChildren(source, desiredChildMarkers);
+      // THE SKILL-GRANT CLASS ARM (plan §3.8): sync/revive keyed on
+      // (source_instance_id, grant_key, ordinal), mirroring syncSlot —
+      // creation mints unfilled grants, reactivation revives orphaned rows
+      // with their selection intact. The projection is reconciled on every
+      // path that changes the active grant set, this one included.
+      syncClassSkillGrants(this.db, {
+        id: source.id,
+        characterId: source.characterId,
+        sourceType: source.sourceType,
+        sourceDefinitionId: source.sourceDefinitionId,
+      });
+      rebuildSkillProjection(this.db, source.characterId);
     });
   }
 
@@ -796,6 +819,13 @@ export class GrantRuleSlotGenerator {
         ],
       );
     }
+
+    // The tombstone path (§3.8): cascade never fires here, so the grants are
+    // orphaned explicitly — every key, not only the class arm's, because
+    // whatever minted a grant, its source is now gone. The projection is
+    // reconciled in the same pass so a removed class's skills leave the sheet.
+    orphanSkillGrantsForSource(this.db, sourceInstanceId);
+    rebuildSkillProjection(this.db, source.characterId);
 
     if (source.state !== 'tombstoned') {
       this.db.exec(

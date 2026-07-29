@@ -33,6 +33,7 @@ import {
 import { AbilityScores } from '../rules/ability-scores';
 import { SheetContentLookup } from '../rules/sheet-content-lookup';
 import { SKILL_LABELS, abilityForSkill } from '../rules/skills';
+import { activeGrantedSkills } from '../grants/skill-grants';
 import {
   armorClass,
   attacksPerAction,
@@ -900,17 +901,17 @@ export class CharacterSheetBuilder {
     return { map, list };
   }
 
+  /**
+   * THE SHEET READS GRANTS, NEVER THE PROJECTION (skills plan §3.2, S-A).
+   *
+   * `character_skill_proficiencies` still exists — as a derived transport
+   * projection with one deriving writer — but a stale projection must be
+   * invisible here for the grants table to be the source of truth in fact.
+   * Only ACTIVE grants count: a removed class's orphaned grants keep their
+   * remembered selection without keeping the proficiency (§3.8).
+   */
   #skillProficiencies(characterId: number): ReadonlySet<Skill> {
-    return new Set(
-      this.db
-        .all(
-          `SELECT skill FROM character_skill_proficiencies
-           WHERE character_id = ? ORDER BY skill`,
-          [characterId],
-          (row) => sqlString(row, 'skill'),
-        )
-        .filter((skill): skill is Skill => isEnumValue(skills, skill)),
-    );
+    return new Set(activeGrantedSkills(this.db, characterId));
   }
 
   #armor(characterId: number): {

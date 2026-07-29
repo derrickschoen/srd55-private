@@ -521,6 +521,14 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
     text: ['skill'],
     numeric: ['created_at', 'updated_at'],
   },
+  // THE SKILL GRANTS (skills plan, S-A). `skill` NULLABLE ON PURPOSE — the
+  // defended "granted but unfilled" null — beside a NOT NULL `state` whose
+  // two-member vocabulary carries the tombstone lifecycle (§3.8).
+  character_skill_grants: {
+    integer: ['id', 'character_id', 'source_instance_id', 'ordinal'],
+    text: ['grant_key', 'skill', 'state', 'orphan_reason_code'],
+    numeric: ['orphaned_at', 'created_at', 'updated_at'],
+  },
   character_sheet_adjustments: {
     integer: ['id', 'character_id', 'armor_class_adjustment'],
     text: ['armor_class_adjustment_note'],
@@ -641,6 +649,14 @@ const expectedNotNull: Record<string, string[]> = {
     'id', 'character_id', 'class_name', 'class_level', 'rolled_value',
   ],
   character_skill_proficiencies: ['id', 'character_id', 'skill'],
+  // `skill` is ABSENT from this list and that absence is the model: an
+  // unfilled grant is a real row (skills plan §3.1). The lifecycle pair
+  // (`orphan_reason_code`, `orphaned_at`) is nullable exactly as the spell
+  // slots' is.
+  character_skill_grants: [
+    'id', 'character_id', 'source_instance_id', 'grant_key', 'ordinal',
+    'state',
+  ],
   character_sheet_adjustments: [
     'id', 'character_id', 'armor_class_adjustment',
   ],
@@ -790,6 +806,18 @@ const expectedNamedIndexes: Record<string, string> = {
     'character_hit_point_rolls:character_id,class_name,class_level:unique',
   character_skill_proficiencies_character_id_skill_unique:
     'character_skill_proficiencies:character_id,skill:unique',
+  // The grants table (skills plan §3.1): the slot identity, the PARTIAL
+  // uniqueness over live filled grants — its `WHERE skill IS NOT NULL AND
+  // state = 'active'` predicate is not visible to this columns-only
+  // inventory; what enforces it is the schema-generation test (the artifact
+  // carries the WHERE verbatim) and the behavioural suites — and the state
+  // walk index the resolver reads through.
+  character_skill_grants_source_grant_ordinal_unique:
+    'character_skill_grants:source_instance_id,grant_key,ordinal:unique',
+  character_skill_grants_character_id_skill_unique:
+    'character_skill_grants:character_id,skill:unique',
+  character_skill_grants_character_id_state_index:
+    'character_skill_grants:character_id,state',
   character_sheet_adjustments_character_id_unique:
     'character_sheet_adjustments:character_id:unique',
   // --- SHEET CORE (D11/D12) -----------------------------------------------
@@ -928,6 +956,9 @@ const expectedUniqueGroups: Record<string, string[]> = {
   character_armor: ['character_id,slot'],
   character_hit_point_rolls: ['character_id,class_name,class_level'],
   character_skill_proficiencies: ['character_id,skill'],
+  character_skill_grants: [
+    'source_instance_id,grant_key,ordinal', 'character_id,skill',
+  ],
   character_sheet_adjustments: ['character_id'],
   // Sheet core. The set tables are keyed on (class, member) so a class cannot
   // hold the same saving throw, skill or category twice; the two progressions
@@ -1000,6 +1031,7 @@ const expectedUniqueGroups: Record<string, string[]> = {
 const expectedDefaults: Record<string, Record<string, string>> = {
   change_log: { reversible: 'true' },
   character_class_levels: { is_starting_class: 'false', level: '1' },
+  character_skill_grants: { state: "'active'" },
   character_source_instances: { state: "'active'" },
   character_spell_preferences: { favourite: 'false' },
   characters: {
@@ -1217,6 +1249,12 @@ const expectedForeignKeys: Record<string, string[]> = {
   character_armor: ['character_id->characters.id|CASCADE'],
   character_hit_point_rolls: ['character_id->characters.id|CASCADE'],
   character_skill_proficiencies: ['character_id->characters.id|CASCADE'],
+  // TWO edges, on `character_effects`' terms: the composite one is what stops
+  // a grant being attached to another character's source instance.
+  character_skill_grants: [
+    'character_id->characters.id|CASCADE',
+    'source_instance_id,character_id->character_source_instances.id,character_id|CASCADE',
+  ],
   character_sheet_adjustments: ['character_id->characters.id|CASCADE'],
   warning_acknowledgements: ['character_id->characters.id|CASCADE'],
   wizard_spellbook_entries: [

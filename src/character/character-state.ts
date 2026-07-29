@@ -11,6 +11,7 @@ import { migrateLegacyWeaponDamageRow } from '../domain/weapon-damage';
 import { migrateLegacyWeaponRangeRow } from '../domain/weapon-range';
 import { migrateLegacyTraitRows } from '../rules/legacy-trait-effects';
 import { fillAddedNullableRowColumns } from '../domain/contracts/historical-row-columns';
+import { rebuildSkillProjection } from '../grants/skill-grants';
 
 /**
  * THE VERSION EVERY SNAPSHOT THIS BUILD WRITES CARRIES.
@@ -51,6 +52,15 @@ import { fillAddedNullableRowColumns } from '../domain/contracts/historical-row-
  * the snapshot predates it — the snapshot genuinely records a character from
  * before allocation could be recorded, and NULL is that state's honest value.
  *
+ * `a7-v9` adds ONE table: `character_skill_grants` — the skills-with-provenance
+ * source of truth (plan §3.2, §3.8). `character_skill_proficiencies` stays in
+ * the list as that table's derived projection, because every historical version
+ * from `a7-v4` carries it and restore iterates those names. A pre-v9 snapshot
+ * does not carry the grants table, so restoring one LEAVES the character's
+ * grants alone — snapshots do not move tables they do not carry — and its
+ * projection rows are the only truth it has, restored as-is with no
+ * reconciliation against grants that were never recorded.
+ *
  * NOT BUMPING WOULD HAVE BEEN THE LOUDEST FAILURE IN THIS CHANGE.
  * `SNAPSHOT_TABLES_BY_VERSION` aliases the CURRENT version to the live
  * `CHARACTER_STATE_TABLES`, so adding four tables without minting `a7-v4` would
@@ -60,7 +70,7 @@ import { fillAddedNullableRowColumns } from '../domain/contracts/historical-row-
  * containing one. Undo, save-point restore and `exportCharacterBackup` — which
  * re-parses its own stored save points on the way out — would break together.
  */
-export const CHARACTER_SNAPSHOT_SCHEMA_VERSION = 'a7-v8' as const;
+export const CHARACTER_SNAPSHOT_SCHEMA_VERSION = 'a7-v9' as const;
 
 /**
  * WHICH TABLES EACH SNAPSHOT VERSION CARRIES.
@@ -151,6 +161,19 @@ const A7_V6_TABLES = [...A7_V5_TABLES] as const satisfies readonly SnapshotTable
  */
 const A7_V7_TABLES = [...A7_V6_TABLES] as const satisfies readonly SnapshotTable[];
 
+/**
+ * `a7-v8` becomes a HISTORICAL FACT at the `a7-v9` bump, exactly as every
+ * predecessor did at its own successor's mint: until this change it was an
+ * ALIAS for the live list, which is correct only while it is the current
+ * version. HAND-FROZEN FIRST, before `character_skill_grants` joined the live
+ * list — appending to the live list while `a7-v8` still aliased it would
+ * silently rewrite what every existing `a7-v8` save point claims to carry,
+ * which this file's own header calls the most expensive mistake available.
+ * Its table list equals `a7-v7`'s; what distinguished v8 was its `character`
+ * COLUMN set (`ability_allocation_method`).
+ */
+const A7_V8_TABLES = [...A7_V7_TABLES] as const satisfies readonly SnapshotTable[];
+
 const SNAPSHOT_TABLES_BY_VERSION = {
   'a7-v1': A7_V1_TABLES,
   'a7-v2': A7_V2_TABLES,
@@ -159,7 +182,8 @@ const SNAPSHOT_TABLES_BY_VERSION = {
   'a7-v5': A7_V5_TABLES,
   'a7-v6': A7_V6_TABLES,
   'a7-v7': A7_V7_TABLES,
-  'a7-v8': CHARACTER_STATE_TABLES,
+  'a7-v8': A7_V8_TABLES,
+  'a7-v9': CHARACTER_STATE_TABLES,
 } as const satisfies Readonly<Record<string, readonly SnapshotTable[]>>;
 
 /**
@@ -182,6 +206,7 @@ export const CHARACTER_SNAPSHOT_SCHEMA_VERSIONS = [
   'a7-v6',
   'a7-v7',
   'a7-v8',
+  'a7-v9',
 ] as const satisfies readonly (keyof typeof SNAPSHOT_TABLES_BY_VERSION)[];
 
 export type CharacterSnapshotSchemaVersion =
@@ -264,7 +289,12 @@ const SNAPSHOT_CHARACTER_COLUMNS_BY_VERSION = {
   'a7-v5': PRE_V8_CHARACTER_COLUMNS,
   'a7-v6': PRE_V8_CHARACTER_COLUMNS,
   'a7-v7': PRE_V8_CHARACTER_COLUMNS,
-  'a7-v8': CHARACTER_STATE_COLUMNS,
+  // Frozen at the `a7-v9` mint, as the table lists are: v8 and v9 carry the
+  // same twelve columns, and the spread is of the FROZEN pre-v8 list plus the
+  // one column v8 added — never of the live `CHARACTER_STATE_COLUMNS`, which
+  // would silently follow the next column addition.
+  'a7-v8': [...PRE_V8_CHARACTER_COLUMNS, 'ability_allocation_method'] as const,
+  'a7-v9': CHARACTER_STATE_COLUMNS,
 } as const satisfies Readonly<
   Record<CharacterSnapshotSchemaVersion, readonly string[]>
 >;
@@ -619,6 +649,18 @@ export class CharacterState {
           sort_order: index + 1,
           character_id: characterId,
         });
+      }
+      // The projection reconciler runs AFTER the grants are restored (skills
+      // plan §3.2) — and ONLY when this snapshot actually recorded grants. A
+      // pre-`a7-v9` snapshot makes no claim about grants, and an `a7-v9`
+      // snapshot with an EMPTY grants list can still carry flat rows written
+      // by the legacy skill commands that are retired later in this unit; in
+      // both cases the `character_skill_proficiencies` rows are the only
+      // truth the snapshot has, and reconciling them against no grants would
+      // delete the very rows the snapshot just restored — the data loss this
+      // guard exists to prevent, matching the backup and share import rules.
+      if ((rows.character_skill_grants ?? []).length > 0) {
+        rebuildSkillProjection(db, characterId);
       }
     };
     this.db.transaction(restoreRows);

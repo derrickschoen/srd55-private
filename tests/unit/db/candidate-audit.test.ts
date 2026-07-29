@@ -217,6 +217,7 @@ describe('candidate database semantic audit', () => {
       'character_rule_overrides',
       'character_save_points',
       'character_sheet_adjustments',
+      'character_skill_grants',
       'character_skill_proficiencies',
       'character_source_instances',
       'character_species',

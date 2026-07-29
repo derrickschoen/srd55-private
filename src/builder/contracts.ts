@@ -11,7 +11,7 @@
  * — the plan records why.
  */
 
-import type { Ability } from '../domain/enums';
+import type { Ability, Skill, SkillGrantState } from '../domain/enums';
 import { BUNDLED_ORIGIN_RULES_EDITION } from '../rules/origins-srd';
 
 /* ------------------------------------------------------------------ steps */
@@ -554,6 +554,147 @@ export const ABILITY_STEP_ATTR = Object.freeze({
  */
 export const ABILITY_GENERATION_RULES_MODULE =
   'src/rules/ability-score-generation-srd.ts';
+
+/* --------------------------------- skill grants (S-A, ratified from plan §3.6) */
+
+/**
+ * THE SKILLS-WITH-PROVENANCE SEAM — dispatch S-A of
+ * `docs/design/2026-07-29-skills-with-provenance.md`. The values below are the
+ * S-A implementer's, ratified here BEFORE the tests are written, on the same
+ * direction-of-ratification the panel locators established.
+ *
+ * The runtime lives in `src/grants/skill-grants.ts` (`SKILL_GRANTS_MODULE`);
+ * this file pins the SHAPES and the LITERALS so the production agent and the
+ * test author cannot each invent their own.
+ */
+
+/**
+ * LITERAL `grant_key` values, not semantic labels (§3.6): "starting-class" and
+ * "Keen Senses" are descriptions, and two agents would write two vocabularies.
+ * Rule-driven feat grants (the Skilled feat, §3.4 — deferred, D33-disclosed)
+ * will use their own `rule_key` as the grant key when that unit lands; they
+ * are deliberately NOT in this map because nothing mints them yet.
+ */
+export const SKILL_GRANT_KEYS = Object.freeze({
+  /** A starting class's "choose N" (`class_sheet_traits.skill_choice_count`). */
+  classSkill: 'class_skill',
+  /** A multiclass entry grant (D44; `multiclass_skill_choice_count`/`_pool`). */
+  multiclassSkill: 'multiclass_skill',
+  /** A background's two printed skills, produced by S-B. */
+  backgroundSkill: 'background_skill',
+  /** Elf Keen Senses (three-way choice), produced by S-B. */
+  speciesKeenSenses: 'species_keen_senses',
+  /** Human Skillful (any one), produced by S-B. */
+  speciesSkillful: 'species_skillful',
+} as const);
+
+/** The two grant keys the GENERATOR's class arm owns and reconciles (S-A). */
+export const CLASS_SKILL_GRANT_KEYS = [
+  SKILL_GRANT_KEYS.classSkill,
+  SKILL_GRANT_KEYS.multiclassSkill,
+] as const;
+
+/**
+ * The orphan reason vocabulary, matching the spell slots' literals so one
+ * grep finds both lifecycles: `rule_no_longer_active` when the entitlement
+ * shrinks under a live source, `parent_rule_removed` when the source itself
+ * tombstones (§3.8).
+ */
+export const SKILL_GRANT_ORPHAN_REASONS = Object.freeze({
+  ruleNoLongerActive: 'rule_no_longer_active',
+  sourceRemoved: 'parent_rule_removed',
+} as const);
+
+/**
+ * THE DISCLOSURE REASON for a grant that revived UNFILLED because another
+ * ACTIVE grant already holds its remembered skill (§3.8's corrected policy —
+ * re-adding a class is not an operation that may fail, so this is a
+ * disclosure, never a refusal). It reuses §3.3's `skill_already_held` literal
+ * so the collision has ONE name whether it is refused (a background re-apply)
+ * or disclosed (a revival). S-A does not persist it on the row — the row's
+ * observable state is active + unfilled, which completeness reports
+ * outstanding; surfaces that narrate the revival use this constant.
+ */
+export const SKILL_GRANT_REVIVED_UNFILLED_REASON = 'skill_already_held';
+
+/**
+ * One `character_skill_grants` row, as the resolver returns it. `skill: null`
+ * is GRANTED BUT UNFILLED — the defended null the table exists for. The two
+ * lifecycle columns ride along so a consumer never has to re-query to learn
+ * why a grant is orphaned.
+ */
+export interface SkillGrantRow {
+  readonly id: number;
+  readonly character_id: number;
+  readonly source_instance_id: number;
+  readonly grant_key: string;
+  readonly ordinal: number;
+  readonly skill: Skill | null;
+  readonly state: SkillGrantState;
+  readonly orphan_reason_code: string | null;
+  readonly orphaned_at: string | null;
+}
+
+/**
+ * One unfilled, ACTIVE class grant, with its per-grant available choices.
+ * `available` is the class pool MINUS every skill any active grant already
+ * holds (§3.3: you cannot pick what you already have — but a held skill never
+ * reduces the number of unfilled ordinals). `class_name: null` is D33's
+ * honest unknown for a class definition that has vanished.
+ */
+export interface UnfilledClassSkillGrant {
+  readonly grant_id: number;
+  readonly source_instance_id: number;
+  readonly grant_key: string;
+  readonly ordinal: number;
+  readonly class_definition_id: number;
+  readonly class_name: string | null;
+  readonly available: readonly Skill[];
+}
+
+/**
+ * THE RESOLVER'S RETURN SHAPE (§3.6): four different questions, and a
+ * resolver returning only the third makes the step unbuildable.
+ *
+ *  - `grants` — every grant row, BOTH states (the generator and the
+ *    persistence layers need orphaned rows; §3.8);
+ *  - `skills` — the filled DISTINCT proficiencies of ACTIVE grants, the set
+ *    the sheet prints;
+ *  - `unfilledClassGrants` — the outstanding obligations, each carrying its
+ *    own `available` choices.
+ */
+export interface ResolvedSkillGrants {
+  readonly grants: readonly SkillGrantRow[];
+  readonly skills: readonly Skill[];
+  readonly unfilledClassGrants: readonly UnfilledClassSkillGrant[];
+}
+
+/**
+ * Where the runtime lives, on the `ABILITY_GENERATION_RULES_MODULE` precedent.
+ * The module exports, whose names are pinned here so neither agent renames
+ * them unilaterally:
+ *
+ *  - `resolveSkillGrants(db, characterId): ResolvedSkillGrants` — the resolver;
+ *  - `activeGrantedSkills(db, characterId): Skill[]` — the sheet's read,
+ *    `DISTINCT skill` from ACTIVE grants, never the projection;
+ *  - `rebuildSkillProjection(db, characterId): void` — the ONE deriving writer
+ *    of `character_skill_proficiencies` (§3.2), called on every path that
+ *    changes the active grant set;
+ *  - `syncClassSkillGrants(db, source): void` — the generator's sync/revive
+ *    class arm (§3.8);
+ *  - `orphanSkillGrantsForSource(db, sourceInstanceId): void` — the tombstone
+ *    path.
+ */
+export const SKILL_GRANTS_MODULE = 'src/grants/skill-grants.ts';
+
+/**
+ * The share wire version this unit mints (§3.6). Pre-v5 documents are RETIRED
+ * per D60 — refused by `ShareWireRetirementError` in
+ * `src/sharing/wire-schemas/index.ts`, never migrated with fabricated
+ * provenance — and the refusal's name is pinned there rather than here
+ * because the wire registry owns its own error vocabulary.
+ */
+export const SKILL_GRANTS_SHARE_WIRE_VERSION = 5;
 
 /* ------------------------------------------ background choices (B3, ratified) */
 

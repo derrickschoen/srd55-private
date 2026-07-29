@@ -384,6 +384,42 @@ export const TABLE_SCOPES = {
     share: true,
     backupReference: false,
   },
+  /**
+   * THE SKILL GRANTS — the source of truth the flat table above is now a
+   * projection of (skills-with-provenance plan, §3.2). All four
+   * character-owned scopes are set IN THE SAME CHANGE THAT CREATED THE TABLE,
+   * for the reason the sheet-input block above shouts: "not portable" is a
+   * legal classification the type system cannot distinguish from a forgotten
+   * one, and a grant that misses a backup silently degrades a character's
+   * skills to unattributed rows on the next import.
+   *
+   * WHAT THE THREE PORTABILITY FLAGS COST, AND WHERE IT WAS PAID:
+   *
+   *  - `backup` puts the table in the document's set and therefore in
+   *    `BACKUP_OPTIONAL_TABLES`, so a file exported before grants existed
+   *    still imports; its projection rows are the only truth it has and are
+   *    restored as-is (§3.2).
+   *  - `share` MINTS WIRE v5 — a new root element carrying source ref, grant
+   *    key, ordinal and the nullable selection — and pre-v5 documents are
+   *    RETIRED per D60 via a v4→v5 migration that deliberately throws
+   *    (§3.2): a bare skill string list carries no provenance, and inventing
+   *    attribution would be fabricating user data.
+   *  - `snapshot` moves the snapshot schema from `a7-v8` to `a7-v9` and
+   *    freezes `A7_V8_TABLES` by hand FIRST — `character-state.ts` calls the
+   *    alternative the most expensive mistake available.
+   *
+   * `backupReference` stays false: `source_instance_id` points at another
+   * CHARACTER-OWNED row, which a backup remaps rather than resolves — the
+   * same treatment `spell_selection_slots` and `character_effects` get.
+   */
+  character_skill_grants: {
+    role: 'character_owned',
+    snapshot: true,
+    backupDirect: true,
+    backup: true,
+    share: true,
+    backupReference: false,
+  },
   character_sheet_adjustments: {
     role: 'character_owned',
     snapshot: true,
@@ -1060,6 +1096,7 @@ export const APPLICATION_TABLES = order<AnyTableName>()([
   'character_rule_overrides',
   'character_save_points',
   'character_sheet_adjustments',
+  'character_skill_grants',
   'character_skill_proficiencies',
   'character_source_instances',
   'character_species',
@@ -1141,6 +1178,10 @@ export const CHARACTER_STATE_TABLES = order<SnapshotTable>()([
   // and the restore pass must insert `character_source_instances` before this,
   // which the existing order already guarantees.
   'character_effects',
+  // Appended, never inserted, for the fifth time and the same reason. It sits
+  // last because it references `character_source_instances` (composite key),
+  // which the existing order already inserts before this on restore.
+  'character_skill_grants',
 ]);
 
 /**
@@ -1170,6 +1211,10 @@ export const DELETE_ORDER = order<SnapshotTable>()([
   // with the other leaves achieves. The integration test that deletes a fully
   // populated character is what proves the order rather than this comment.
   'character_effects',
+  // A leaf on the same terms as `character_effects`: no children, but it
+  // references `character_source_instances` through the same composite key, so
+  // it must be deleted before that table — which this position guarantees.
+  'character_skill_grants',
   // Leaves too. `character_species_traits` is keyed on `character_id` and NOT
   // on `character_species.id` — see `db/schema/origins.ts` — so there is no
   // parent-before-child edge between the two and the order between them is
@@ -1204,6 +1249,7 @@ export const BACKUP_DIRECT_TABLES = order<BackupDirectTable>()([
   'character_skill_proficiencies',
   'character_sheet_adjustments',
   'character_effects',
+  'character_skill_grants',
 ]);
 
 /** Every table in the portable-character backup document. */
@@ -1249,6 +1295,12 @@ export const BACKUP_OPTIONAL_TABLES = [
   // `src/rules/legacy-trait-effects.ts` migrates on the way in, so nothing is
   // lost by defaulting this key to empty.
   'character_effects',
+  // The skill grants. Every backup file written before the provenance model
+  // predates the table; `[]` is the honest reading of one, and its flat
+  // `character_skill_proficiencies` rows are the only truth it has — they are
+  // restored as-is rather than being reconciled against grants that were
+  // never recorded (plan §3.2).
+  'character_skill_grants',
 ] as const satisfies readonly BackupTable[];
 
 /** The catalog tables a backup document resolves references against. */
@@ -1303,6 +1355,7 @@ export const SHARE_TABLES: { readonly [N in ShareTable]: N } = {
   character_armor: 'character_armor',
   character_hit_point_rolls: 'character_hit_point_rolls',
   character_skill_proficiencies: 'character_skill_proficiencies',
+  character_skill_grants: 'character_skill_grants',
   character_sheet_adjustments: 'character_sheet_adjustments',
   character_effects: 'character_effects',
 };
@@ -1372,6 +1425,9 @@ export const AUDIT_ENTITY_TYPES = [
   // effect row, and an entity type the diff can produce that the log will not
   // accept is a write that fails at runtime, mid-command.
   'character_effects',
+  // Added on the same terms once more: the grants table is snapshot-scoped, so
+  // `CharacterState.diff` emits a change per grant row.
+  'character_skill_grants',
 ] as const satisfies readonly ('character' | AnyTableName)[];
 
 export type AuditEntityType = (typeof AUDIT_ENTITY_TYPES)[number];

@@ -98,6 +98,10 @@ const ROOT_PLACEHOLDERS_INDEX = fieldIndex(
   WIRE_SCHEMA.tuples.root.fields,
   'placeholders',
 );
+const ROOT_SKILL_GRANTS_INDEX = fieldIndex(
+  WIRE_SCHEMA.tuples.root.fields,
+  'skillGrants',
+);
 
 const CHARACTER_TUPLE_LENGTHS = WIRE_SCHEMA.tuples.character.arities;
 const SHEET_TUPLE_LENGTH = WIRE_SCHEMA.tuples.sheet.arities[0];
@@ -591,6 +595,9 @@ export function shareDocumentToPositional(
       placeholders: document.placeholders?.map((row) =>
         objectToPositional(row, WIRE_SCHEMA.tuples.placeholder.fields)
       ),
+      skillGrants: document.skillGrants?.map((row) =>
+        objectToPositional(row, WIRE_SCHEMA.tuples.skillGrant.fields)
+      ),
     },
     WIRE_SCHEMA.tuples.root.fields,
   );
@@ -607,6 +614,7 @@ function decodeCurrentWire(input: unknown): CharacterShareDocument {
     : tuple(root[ROOT_SHEET_INDEX], SHEET_TUPLE_LENGTH, 'wire sheet');
   const wireEffects = root[ROOT_EFFECTS_INDEX];
   const wirePlaceholders = root[ROOT_PLACEHOLDERS_INDEX];
+  const wireSkillGrants = root[ROOT_SKILL_GRANTS_INDEX];
   const character = variableTuple(
     root[ROOT_CHARACTER_INDEX],
     CHARACTER_TUPLE_LENGTHS,
@@ -749,6 +757,14 @@ function decodeCurrentWire(input: unknown): CharacterShareDocument {
       SHARE_LIMITS.placeholders,
       'placeholders',
     );
+  }
+  if (wireSkillGrants !== null) {
+    if (!Array.isArray(wireSkillGrants)) {
+      throw new ShareValidationError(
+        'wire skillGrants must be null or a list.',
+      );
+    }
+    assertListLimit(wireSkillGrants, SHARE_LIMITS.skillGrants, 'skillGrants');
   }
 
   const rawCharacter = fromPositional(
@@ -917,6 +933,16 @@ function decodeCurrentWire(input: unknown): CharacterShareDocument {
       effectFromPositional(value, `wire effects[${index}]`),
     );
   }
+  if (Array.isArray(wireSkillGrants)) {
+    raw.skillGrants = wireSkillGrants.map((value, index) =>
+      fromPositional(
+        value,
+        WIRE_SCHEMA.tuples.skillGrant.arities[0],
+        fieldKeys(WIRE_SCHEMA.tuples.skillGrant.fields),
+        `wire skillGrants[${index}]`,
+      ),
+    );
+  }
   return validateShareDocument(raw);
 }
 
@@ -934,8 +960,12 @@ export function positionalToShareDocument(
   if (input[0] !== CHARACTER_SHARE_FORMAT) {
     throw new ShareValidationError('format is unsupported.');
   }
-  // Migrations are ADJACENT and composed: a v1 link lifts 1→2, 2→3, then 3→4,
-  // and every historical version funnels into the one current decoder.
+  // Migrations are ADJACENT and composed: a v1 link lifts 1→2, 2→3, 3→4, then
+  // 4→5 — and 4→5 deliberately THROWS `ShareWireRetirementError` (D60, skills
+  // plan §3.2): a pre-v5 document carries skills as bare strings with no
+  // provenance, and migrating one would mean fabricating attribution. The
+  // per-version tuple checks still run first, so a MALFORMED old document is
+  // still refused as malformed rather than dignified as retired.
   switch (input[1]) {
     case 1:
       variableTuple(
@@ -949,7 +979,7 @@ export function positionalToShareDocument(
         'wire character',
       );
       return decodeCurrentWire(
-        MIGRATIONS[3](MIGRATIONS[2](MIGRATIONS[1](input))),
+        MIGRATIONS[4](MIGRATIONS[3](MIGRATIONS[2](MIGRATIONS[1](input)))),
       );
     case 2:
       variableTuple(
@@ -962,7 +992,9 @@ export function positionalToShareDocument(
         SHARE_SCHEMAS[2].tuples.character.arities,
         'wire character',
       );
-      return decodeCurrentWire(MIGRATIONS[3](MIGRATIONS[2](input)));
+      return decodeCurrentWire(
+        MIGRATIONS[4](MIGRATIONS[3](MIGRATIONS[2](input))),
+      );
     case 3:
       variableTuple(
         input,
@@ -974,8 +1006,20 @@ export function positionalToShareDocument(
         SHARE_SCHEMAS[3].tuples.character.arities,
         'wire character',
       );
-      return decodeCurrentWire(MIGRATIONS[3](input));
+      return decodeCurrentWire(MIGRATIONS[4](MIGRATIONS[3](input)));
     case 4:
+      variableTuple(
+        input,
+        SHARE_SCHEMAS[4].tuples.root.arities,
+        'wire document',
+      );
+      variableTuple(
+        input[2],
+        SHARE_SCHEMAS[4].tuples.character.arities,
+        'wire character',
+      );
+      return decodeCurrentWire(MIGRATIONS[4](input));
+    case 5:
       return decodeCurrentWire(input);
     default:
       throw new ShareValidationError('version is unsupported.');

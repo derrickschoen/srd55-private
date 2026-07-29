@@ -41,6 +41,7 @@ import {
   materialCostKinds,
   rulesEditions,
   selectionEligibilities,
+  skillGrantStates,
   slotBuckets,
   skills,
   spellAreaShapes,
@@ -245,6 +246,7 @@ const abilityAllocationMethodEnum = z.enum(abilityAllocationMethods);
 const sourceTypeEnum = z.enum(domainSourceTypes);
 const slotBucketEnum = z.enum(slotBuckets);
 const slotStateEnum = z.enum(slotStates);
+const skillGrantStateEnum = z.enum(skillGrantStates);
 const selectionEligibilityEnum = z.enum(selectionEligibilities);
 const weaponMasteryPropertyEnum = z.enum(weaponMasteryProperties);
 const weaponMasteryGrantEnum = z.enum(weaponMasteryGrants);
@@ -354,6 +356,7 @@ export const COLUMN_REFINEMENTS = {
   sourceTypeEnum,
   slotBucketEnum,
   slotStateEnum,
+  skillGrantStateEnum,
   selectionEligibilityEnum,
   weaponMasteryPropertyEnum,
   weaponMasteryGrantEnum,
@@ -881,6 +884,29 @@ const REFINEMENTS = {
   'character_skill_proficiencies.skill': skillEnum,
   'character_skill_proficiencies.created_at': sqlTimestamp,
   'character_skill_proficiencies.updated_at': sqlTimestamp,
+
+  // --- character_skill_grants ----------------------------------------------
+  // The provenance source of truth the flat table above is a projection of.
+  // Nullability is DERIVED, not restated: `columnSchema` adds `| null` from
+  // the column facts, so `skill` — the defended "granted but unfilled" null —
+  // cannot be tightened here by accident.
+  'character_skill_grants.id': positiveInt,
+  'character_skill_grants.character_id': positiveInt,
+  'character_skill_grants.source_instance_id': positiveInt,
+  // Open text, not an enum: the pinned literals live in
+  // `SKILL_GRANT_KEYS` (src/builder/contracts.ts), and rule-driven feat keys
+  // will join the vocabulary when that unit lands — closing it here would
+  // refuse those rows at the backup boundary for no schema reason.
+  'character_skill_grants.grant_key': nonEmptyText,
+  // Matches the `>= 1` CHECK carried since the table was created (§3.6's
+  // "positive ordinal"), so no stored row can fall outside it.
+  'character_skill_grants.ordinal': positiveInt,
+  'character_skill_grants.skill': skillEnum,
+  'character_skill_grants.state': skillGrantStateEnum,
+  'character_skill_grants.orphan_reason_code': sqlText,
+  'character_skill_grants.orphaned_at': sqlTimestamp,
+  'character_skill_grants.created_at': sqlTimestamp,
+  'character_skill_grants.updated_at': sqlTimestamp,
 
   'character_sheet_adjustments.id': positiveInt,
   'character_sheet_adjustments.character_id': positiveInt,

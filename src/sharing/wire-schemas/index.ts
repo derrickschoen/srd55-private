@@ -2,6 +2,7 @@ import { WIRE_SCHEMA_V1 } from './v1';
 import { WIRE_SCHEMA_V2 } from './v2';
 import { WIRE_SCHEMA_V3 } from './v3';
 import { WIRE_SCHEMA_V4 } from './v4';
+import { WIRE_SCHEMA_V5 } from './v5';
 import {
   versatileWeaponDamageFromLegacy,
   weaponDamageFromLegacy,
@@ -18,7 +19,7 @@ import {
  * domain requires a new schema version, an adjacent migration, and a
  * hand-frozen fragment fixture. Never edit an existing version.
  */
-export const CURRENT_CHARACTER_SHARE_VERSION = 4 as const;
+export const CURRENT_CHARACTER_SHARE_VERSION = 5 as const;
 
 /**
  * Any change to tuple field order, meaning, membership, or accepted value
@@ -30,6 +31,7 @@ export const SHARE_SCHEMAS = Object.freeze({
   2: WIRE_SCHEMA_V2,
   3: WIRE_SCHEMA_V3,
   4: WIRE_SCHEMA_V4,
+  5: WIRE_SCHEMA_V5,
 } as const);
 
 export type SupportedShareVersion = keyof typeof SHARE_SCHEMAS;
@@ -239,20 +241,60 @@ function migrateV3ToV4(document: unknown): unknown {
 }
 
 /**
+ * THE RETIREMENT REFUSAL — pre-v5 share documents are RETIRED, not migrated
+ * (plan §3.2, D60).
+ *
+ * Its own named error class so the import surface can tell "this link is from
+ * before the provenance model and was deliberately retired" apart from "this
+ * link is malformed" without string-matching a message.
+ */
+export class ShareWireRetirementError extends TypeError {
+  constructor() {
+    super(
+      'Share links from before version 5 are no longer supported: they ' +
+        'carry skills as bare names with no record of where each came ' +
+        'from, and inventing that attribution would corrupt the character.',
+    );
+    this.name = 'ShareWireRetirementError';
+  }
+}
+
+/**
+ * v4→v5 EXISTS AND DELIBERATELY THROWS (plan §3.2). The registry's
+ * `AdjacentMigrations` type requires a function for every historical version
+ * and D41 mandates one per bump, so "refused" cannot mean "omitted" — it
+ * would not compile. A v4 document's `skillProficiencies` is a bare string
+ * list: no source, no grant key, no ordinal. Migrating it would mean
+ * fabricating provenance, and D60 says v1 has zero users and zero exports, so
+ * the honest move is a sentence. Every composed pre-v5 path (1→…→4→5) funnels
+ * through this throw; the frozen v1–v4 schemas and their fragment fixtures
+ * stay untouched — the alternative, dropping v1–v4 from `SHARE_SCHEMAS`, was
+ * considered and rejected because it deletes the only proof those schemas
+ * still decode.
+ */
+function migrateV4ToV5(_document: unknown): unknown {
+  throw new ShareWireRetirementError();
+}
+
+/**
  * ADJACENT means each migration lifts exactly one version step; the decoder
- * composes them, so a v1 document runs 1→2, then 2→3, then 3→4.
+ * composes them, so a v1 document runs 1→2, then 2→3, then 3→4, then 4→5 —
+ * where every pre-v5 document is retired by the deliberate throw above.
  */
 export const MIGRATIONS = Object.freeze({
   1: migrateV1ToV2,
   2: migrateV2ToV3,
   3: migrateV3ToV4,
+  4: migrateV4ToV5,
 }) satisfies AdjacentMigrations;
 
 export { WIRE_SCHEMA_V1 } from './v1';
 export { WIRE_SCHEMA_V2 } from './v2';
 export { WIRE_SCHEMA_V3 } from './v3';
 export { WIRE_SCHEMA_V4 } from './v4';
+export { WIRE_SCHEMA_V5 } from './v5';
 export type { WireField, WireSchemaV1 } from './v1';
 export type { WireSchemaV2 } from './v2';
 export type { WireSchemaV3 } from './v3';
 export type { WireSchemaV4 } from './v4';
+export type { WireSchemaV5 } from './v5';
