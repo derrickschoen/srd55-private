@@ -13,7 +13,11 @@
 
 import { isEnumValue, skills } from '../domain/enums';
 import type { Ability, Skill, SkillGrantState } from '../domain/enums';
-import { BUNDLED_ORIGIN_RULES_EDITION } from '../rules/origins-srd';
+// From the EXTRACT-FREE module, never `origins-srd` (which imports the SRD
+// text via Vite's `?raw`): the seam is loaded by node-side test processes
+// through the command layer, and a `?raw` in its closure breaks their
+// transpilers — Playwright's whole suite failed collection on exactly this.
+import { BUNDLED_ORIGIN_RULES_EDITION } from '../rules/origin-rules-edition';
 
 /* ------------------------------------------------------------------ steps */
 

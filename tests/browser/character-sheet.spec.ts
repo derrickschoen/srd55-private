@@ -99,6 +99,25 @@ async function sheetImage(): Promise<SheetImage> {
      VALUES (?, 'shield', 'Shield', 'shield', 2, 'none')`,
     [characterId],
   );
+  // THE SHEET READS GRANTS, NOT THE FLAT TABLE (skills-with-provenance
+  // §3.2/S-A): the two proficiencies are FILLED grants under the Fighter's
+  // own source, and the flat rows below exist only as their derived
+  // projection — a flat row without a grant would be invisible to the sheet,
+  // which is exactly S-DISTINCT's subject.
+  const fighterSource = db.exec(
+    `INSERT INTO character_source_instances (
+       character_id, instance_uuid, source_type, source_definition_id,
+       display_name, state
+     ) VALUES (?, ?, 'class', ?, 'Fighter 5', 'active')`,
+    [characterId, crypto.randomUUID(), fighterId],
+  ).lastInsertId;
+  db.exec(
+    `INSERT INTO character_skill_grants (
+       character_id, source_instance_id, grant_key, ordinal, skill, state
+     ) VALUES (?, ?, 'class_skill', 1, 'stealth', 'active'),
+              (?, ?, 'class_skill', 2, 'perception', 'active')`,
+    [characterId, fighterSource, characterId, fighterSource],
+  );
   db.exec(
     `INSERT INTO character_skill_proficiencies (character_id, skill)
      VALUES (?, 'stealth'), (?, 'perception')`,
@@ -171,8 +190,11 @@ test('the sheet prints the derived numbers, and prints what it lacks', async ({
 
   await expect(page).toHaveTitle(`${HOSTILE_NAME} character sheet`);
 
-  // F4: every gap is printed rather than left as a blank box.
-  await expect(page.locator('[data-sheet-id^="gap:"]')).toHaveCount(6);
+  // F4: every gap is printed rather than left as a blank box. FIVE since
+  // skills-with-provenance §3.5 deleted `background_skills_are_text` — the
+  // hand-tick it instructed is a retired command and background skills are
+  // counted grants now.
+  await expect(page.locator('[data-sheet-id^="gap:"]')).toHaveCount(5);
   await expect(
     page.locator('[data-sheet-id="gap:no_unarmored_defense"]'),
   ).toContainText('Unarmored Defense');

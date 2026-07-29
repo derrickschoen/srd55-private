@@ -141,10 +141,16 @@ function seedSourceCatalog(
         child_config_config: 'origin_feat_config',
       },
     ]);
+  // NOT '2024:species:human', deliberately: S-B's boot seeding owns that
+  // bundled key (Human anchors the Skillful grant) and reconciles its
+  // definition on every start, so a fixture squatting on it had its nested
+  // Magic Initiate rule silently rewritten to the bundled empty rule set —
+  // which is exactly what happened, unobserved, while this suite could not
+  // collect. A fixture species keeps a key seeding will never claim.
   const human = db.exec(
     `INSERT INTO species_definitions (
        content_key, name, rules_edition, repeatable, grant_rules
-     ) VALUES ('2024:species:human', 'Human', '2024', 0, ?)`,
+     ) VALUES ('2024:species:parity-human', 'Parity Human', '2024', 0, ?)`,
     [nestedRule('human-origin-feat')],
   ).lastInsertId;
   const background = db.exec(

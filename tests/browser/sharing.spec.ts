@@ -100,18 +100,26 @@ test('creates, independently verifies, previews, and explicitly imports a durabl
     gunzipSync(Buffer.from(fragment, 'base64url')).toString('utf8'),
   ) as unknown[];
   expect(positional[0]).toBe('dnd-multiclass-spells-character-share');
-  expect(positional[1]).toBe(2);
+  // v5: B1 minted v3 (allocation signal), B2 minted v4 (contribution
+  // effects), skills-with-provenance S-A minted v5 (skill grants) and
+  // RETIRED every pre-v5 document per D60 — so this build writes 5 and
+  // nothing else.
+  expect(positional[1]).toBe(5);
   expect((positional[2] as unknown[])[0]).toBe('Journey Hero 🧙');
-  // ELEVEN, and the last one NULL. That is the shape a link gets when nobody
-  // ticks the notes box — the eleventh slot is written (this build has one
-  // output shape, not two) and carries nothing.
-  expect(positional[2]).toHaveLength(11);
+  // TWELVE since v3, with the notes slot still NULL when nobody ticks the
+  // notes box, and the appended ability_allocation_method NULL for a
+  // character whose scores were never allocated — every earlier position
+  // keeps its meaning; versions only append.
+  expect(positional[2]).toHaveLength(12);
   expect((positional[2] as unknown[])[10]).toBeNull();
+  expect((positional[2] as unknown[])[11]).toBeNull();
   expect(positional.slice(3, 9)).toEqual([[], [], [], [], [], []]);
-  // Placeholders are the sixteenth root element in v2, absent for this
-  // character but still occupying their frozen positional slot.
-  expect(positional).toHaveLength(16);
+  // Placeholders keep their frozen sixteenth slot; v5 appends skillGrants as
+  // the seventeenth, NULL for a character with no grants — absent data is an
+  // occupied null slot, never a shorter tuple.
+  expect(positional).toHaveLength(17);
   expect(positional[15]).toBeNull();
+  expect(positional[16]).toBeNull();
 
   const freshProfile = await browser.newContext();
   try {
