@@ -770,6 +770,19 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     ],
   },
   {
+    constraint: 'characters_ability_allocation_method_check',
+    rejects: [
+      ['a removed Roll in Order method', character({ ability_allocation_method: 'roll_in_order' })],
+      ['an unknown method', character({ ability_allocation_method: 'guess' })],
+    ],
+    accepts: [
+      ['the never-allocated NULL', character({ ability_allocation_method: null })],
+      ['standard array', character({ ability_allocation_method: 'standard_array' })],
+      ['point buy', character({ ability_allocation_method: 'point_buy' })],
+      ['manual entry', character({ ability_allocation_method: 'manual' })],
+    ],
+  },
+  {
     constraint: 'characters_rules_edition_preference_check',
     rejects: [
       ['an edition no catalog row uses', character({ rules_edition_preference: '2025' })],

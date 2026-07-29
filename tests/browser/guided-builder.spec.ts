@@ -113,12 +113,65 @@ test('the empty-database front door chooses class first, persists once named, an
   );
   await expect(
     page.locator(
+      `[${persistedSeam.panelAttribute}="${persistedSeam.abilitiesStepPanel}"]`,
+    ),
+  ).toBeVisible();
+  await expect(
+    page.locator(
+      `[${persistedSeam.abilityMethodAttribute}="standard_array"]`,
+    ),
+  ).toBeChecked();
+  await expect(
+    page.locator(`[${persistedSeam.abilityMethodAttribute}]`),
+  ).toHaveCount(3);
+  await expect(page.getByText('Roll in Order', { exact: false })).toHaveCount(0);
+
+  await page.locator(
+    `[${persistedSeam.abilityMethodAttribute}="manual"]`,
+  ).check();
+  const abilityInputs = page.locator(
+    `[${persistedSeam.abilityInputAttribute}]`,
+  );
+  await expect(abilityInputs).toHaveCount(6);
+  for (const input of await abilityInputs.all()) {
+    await expect(input).toHaveValue('10');
+  }
+  await expect(
+    page.locator(
+      `[${persistedSeam.abilityWarningAttribute}="non_standard_method"]`,
+    ),
+  ).toBeVisible();
+  await expect(
+    page.locator(
+      `[${persistedSeam.abilityWarningAttribute}="weak_scores"]`,
+    ),
+  ).toBeVisible();
+  const abilitySubmit = page.locator(
+    `[${persistedSeam.abilitySubmitAttribute}]`,
+  );
+  await expect(abilitySubmit).toBeEnabled();
+  await abilitySubmit.click();
+
+  await expect(
+    page.locator(
       `[${persistedSeam.panelAttribute}="${persistedSeam.speciesStepPanel}"]`,
     ),
   ).toBeVisible();
-  await expect(page.locator('.guided-abilities-skipped')).toContainText(
-    'no scores have been asked for or chosen',
-  );
+  expect(
+    await page.evaluate(() => window.staticApp.inspectRows('characters')),
+  ).toEqual([
+    expect.objectContaining({
+      id: characterId,
+      strength: 10,
+      dexterity: 10,
+      constitution: 10,
+      intelligence: 10,
+      wisdom: 10,
+      charisma: 10,
+      ability_allocation_method: 'manual',
+      revision: 1,
+    }),
+  ]);
   await expectNoPlannerRouteAnchors(page);
 
   await page.reload();
@@ -141,7 +194,8 @@ test('the empty-database front door chooses class first, persists once named, an
     expect.objectContaining({
       id: characterId,
       name: 'Front Door Hero',
-      revision: 0,
+      ability_allocation_method: 'manual',
+      revision: 1,
     }),
   ]);
   expect(

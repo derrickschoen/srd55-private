@@ -1,5 +1,18 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import {
+  ABILITY_GENERATION_RULES_MODULE,
+} from '../../../src/builder/contracts';
+
+interface AbilityGenerationRules {
+  readonly STANDARD_ARRAY: readonly number[];
+  readonly POINT_BUY_BUDGET: number;
+  readonly POINT_COSTS: ReadonlyMap<number, number>;
+}
+
+const RULE_MODULES = import.meta.glob('../../../src/rules/*.ts', {
+  eager: true,
+});
 
 const VERBATIM_ATTRIBUTION = `This work includes material from the System Reference Document 5.2
 ("SRD 5.2") by Wizards of the Coast LLC, available at
@@ -98,6 +111,32 @@ function pointCosts(source: string): [number, number][] {
   return pairs.sort(([left], [right]) => left - right);
 }
 
+function pointBudget(source: string): number {
+  const match = normalized(source).match(
+    /Point Cost\. You have (?<budget>\d+) points to spend on your ability scores\./u,
+  );
+  const budget = match?.groups?.budget;
+  if (budget === undefined) {
+    throw new Error('Point Cost budget wording is absent or unrecognised.');
+  }
+  return Number(budget);
+}
+
+function productionRules(): AbilityGenerationRules {
+  const modulePath = `../../../${ABILITY_GENERATION_RULES_MODULE}`;
+  const candidate = RULE_MODULES[modulePath];
+  if (
+    typeof candidate !== 'object' ||
+    candidate === null ||
+    !Object.hasOwn(candidate, 'STANDARD_ARRAY') ||
+    !Object.hasOwn(candidate, 'POINT_BUY_BUDGET') ||
+    !Object.hasOwn(candidate, 'POINT_COSTS')
+  ) {
+    throw new Error(`No ability-generation rules module exists at ${modulePath}.`);
+  }
+  return candidate as AbilityGenerationRules;
+}
+
 function standardArraysByClass(
   source: string,
 ): [string, number, number, number, number, number, number][] {
@@ -188,6 +227,17 @@ describe('SRD ability-score generation extract', () => {
       'Point Cost. You have 27 points to spend on your ability scores.',
     );
     expect(text).toContain('a score of 14 costs 7 of your 27 points.');
+  });
+
+  it('keeps the production standard array, budget, and complete cost table in agreement with the SRD extract', () => {
+    const rules = productionRules();
+
+    expect(rules.STANDARD_ARRAY).toEqual(standardArray(source));
+    expect(rules.STANDARD_ARRAY).toEqual([15, 14, 13, 12, 10, 8]);
+    expect(rules.POINT_BUY_BUDGET).toBe(pointBudget(source));
+    expect(rules.POINT_BUY_BUDGET).toBe(27);
+    expect([...rules.POINT_COSTS.entries()].sort(([left], [right]) => left - right))
+      .toEqual(pointCosts(source));
   });
 
   it('enumerates every class and all six sourced Standard Array values', () => {

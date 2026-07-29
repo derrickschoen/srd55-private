@@ -126,7 +126,9 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
       'id', 'strength', 'dexterity', 'constitution', 'intelligence', 'wisdom',
       'charisma', 'proficiency_bonus_override', 'allow_legacy', 'revision',
     ],
-    text: ['name', 'rules_edition_preference', 'notes'],
+    text: [
+      'name', 'ability_allocation_method', 'rules_edition_preference', 'notes',
+    ],
     numeric: ['created_at', 'updated_at'],
   },
   class_definitions: {

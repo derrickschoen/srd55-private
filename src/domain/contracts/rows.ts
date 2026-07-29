@@ -337,6 +337,7 @@ export const COLUMN_REFINEMENTS = {
   sqlInteger,
   rulesEditionEnum,
   abilityEnum,
+  abilityAllocationMethodEnum,
   sourceTypeEnum,
   slotBucketEnum,
   slotStateEnum,

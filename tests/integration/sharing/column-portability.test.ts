@@ -216,6 +216,7 @@ const PROBES: { readonly [N in ProbedTable]: Probe<N> } = {
       intelligence: { kind: 'verbatim' },
       wisdom: { kind: 'verbatim' },
       charisma: { kind: 'verbatim' },
+      ability_allocation_method: { kind: 'verbatim' },
       proficiency_bonus_override: { kind: 'verbatim' },
       rules_edition_preference: { kind: 'verbatim' },
       allow_legacy: { kind: 'verbatim' },
@@ -909,11 +910,12 @@ function seedSender(db: DatabaseContext, catalog: Catalog): number {
   const characterId = db.exec(
     `INSERT INTO characters (
        name, strength, dexterity, constitution, intelligence, wisdom,
-       charisma, proficiency_bonus_override, rules_edition_preference,
-       allow_legacy, revision, notes, created_at, updated_at
+       charisma, ability_allocation_method, proficiency_bonus_override,
+       rules_edition_preference, allow_legacy, revision, notes, created_at,
+       updated_at
      ) VALUES (
-       'Portability Probe', 8, 14, 13, 18, 12, 11, 4, 'expanded', 1, 7,
-       'sender private character note', ?, ?
+       'Portability Probe', 8, 14, 13, 18, 12, 11, 'manual', 4, 'expanded',
+       1, 7, 'sender private character note', ?, ?
      )`,
     [SENDER_TIME, SENDER_TIME],
   ).lastInsertId;

@@ -5,13 +5,16 @@ logical document used by the format benchmark and by an executable validator
 test. It contains catalog identifiers, user choices, and fallback names, but no
 spell rules text.
 
-The specimen follows the live v2 logical contract:
+The specimen follows the live v3 logical contract:
 
 - share-local numeric `id` values identify classes and standalone sources;
 - selections use `ref` to point into that shared identifier space;
 - `acquired` is a numeric character-level position;
 - a standalone source may carry its fallback display `name`;
 - unknown-spell metadata is deduplicated in the root `placeholders` list;
+- the character carries `ability_allocation_method` — v3's one addition
+  (D64's allocation signal); this specimen records `manual` because its
+  scores match neither the standard array nor a point-buy purchase;
 - class, source, selection, preference, override, acknowledgement, and loadout
   working-state notes are not part of the contract;
 - the optional character `notes` field is valid but is omitted from this
@@ -19,7 +22,7 @@ The specimen follows the live v2 logical contract:
 
 The object form is intentionally keyed and readable. Production links do not
 embed this keyed JSON directly: the codec validates it, maps it to the
-versioned positional v2 layout, serializes compact JSON, compresses with gzip,
+versioned positional v3 layout, serializes compact JSON, compresses with gzip,
 and uses unpadded base64url in the fragment.
 
 ## Why each populated section remains

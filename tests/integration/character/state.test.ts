@@ -227,12 +227,12 @@ describe('capture and deterministic diff', () => {
       'character',
       ...CHARACTER_STATE_TABLES,
     ]);
-    // a7-v7 is the version whose weapon rows carry tagged ranges.
+    // a7-v8 is the version that carries the explicit allocation signal.
     // Written out rather than compared against the exported constant: a version
     // identifier is a wire fact that other stored data is matched against, so a
     // test that reads it from the module under test could never notice it
     // changing.
-    expect(snapshot.schema_version).toBe('a7-v7');
+    expect(snapshot.schema_version).toBe('a7-v8');
     expect(Object.keys(snapshot.character)).toEqual(CHARACTER_STATE_COLUMNS);
     expect(snapshot.character).toEqual({
       name: 'Snapshot Hero',
@@ -242,6 +242,7 @@ describe('capture and deterministic diff', () => {
       intelligence: 12,
       wisdom: 11,
       charisma: 10,
+      ability_allocation_method: null,
       proficiency_bonus_override: 4,
       rules_edition_preference: '2024',
       allow_legacy: 1,
@@ -704,6 +705,7 @@ describe('restoring a snapshot written by an older build', () => {
   function legacySnapshot(): MutableSnapshot {
     const snapshot = mutableCapture();
     snapshot.schema_version = 'a7-v1';
+    delete snapshot.character.ability_allocation_method;
     delete snapshot.character_weapons;
     return snapshot;
   }
@@ -744,7 +746,7 @@ describe('restoring a snapshot written by an older build', () => {
     // oversight: a current snapshot DOES speak for weapons, so restoring it
     // removes one added afterwards.
     const snapshot = mutableCapture();
-    expect(snapshot.schema_version).toBe('a7-v7');
+    expect(snapshot.schema_version).toBe('a7-v8');
     db.exec(
       `INSERT INTO character_weapons (character_id, name)
        VALUES (?, 'Bought since')`,
@@ -764,6 +766,7 @@ describe('restoring a snapshot written by an older build', () => {
   it('restores a v5 free-text weapon row through the damage migration', () => {
     const snapshot = mutableCapture();
     snapshot.schema_version = 'a7-v5';
+    delete snapshot.character.ability_allocation_method;
     const weapon = snapshot.character_weapons[0] as Record<string, unknown>;
     for (const column of [
       'damage_kind',

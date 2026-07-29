@@ -85,6 +85,33 @@ const VERSION_FIXTURES = {
       }],
     },
   },
+  3: {
+    // Independently compressed from this hand-authored v3 positional tuple.
+    // Its six null score slots mean the wire's compressed default of 10; the
+    // appended method is the allocation signal that must survive separately.
+    fragment:
+      'H4sIAAAAAAAAA4WKMQqAMBAEvyJXJyDqB-ws_EGwOJKDiGuUXPJ_wUYbEYaBgXEUUrB7RVk9WNXqKYBaHzmzL5KtRs5CpjeORuDwXCQ085q2ZpJ8kEkV-BF1bTe8T9o5VQYtxn3z7HcvFwNExNerAAAA',
+    expected: {
+      format: CHARACTER_SHARE_FORMAT,
+      version: CHARACTER_SHARE_VERSION,
+      character: {
+        name: 'Allocated Link Hero',
+        rules_edition_preference: '2024',
+        ability_allocation_method: 'manual',
+      },
+      classes: [],
+      sources: [],
+      selections: [],
+      spellbook: [],
+      preferences: [],
+      overrides: [],
+      acknowledgements: [],
+      loadouts: [],
+      weapons: [],
+      effects: [],
+      placeholders: [],
+    },
+  },
 } satisfies Record<SupportedShareVersion, FrozenFixture>;
 
 const HISTORICAL_SCHEMA_MODULE_SHA256 = {

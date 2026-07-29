@@ -1767,7 +1767,7 @@ describe('adversarial character-share rejection', () => {
       ],
       [
         [positional[0], positional[1], ['short'], ...positional.slice(3)],
-        /wire character must be a tuple of length 11/,
+        /wire character must be a tuple of length 12/,
       ],
     ];
     for (const [value, message] of cases) {
@@ -2049,7 +2049,7 @@ describe('adversarial character-share rejection', () => {
 
   it('rejects prototype keys, non-finite/bigint values, and malformed homebrew spell keys', async () => {
     const polluted = JSON.parse(
-      '{"format":"dnd-multiclass-spells-character-share","version":2,' +
+      `{"format":"dnd-multiclass-spells-character-share","version":${CHARACTER_SHARE_VERSION},` +
         '"character":{"name":"Safe"},"classes":[],"sources":[],' +
         '"selections":[],"spellbook":[],"preferences":[],' +
       '"overrides":[{"ruleKey":"pollution","value":{"__proto__":{"polluted":true},"prototype":{"x":1},"constructor":{"y":2}}}]}',

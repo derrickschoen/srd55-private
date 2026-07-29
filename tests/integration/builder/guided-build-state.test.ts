@@ -63,7 +63,7 @@ describe('guidedBuildState', () => {
     } satisfies GuidedBuildStateResult);
   });
 
-  it('skips abilities and selects species for a persisted character with only a class', async () => {
+  it('selects abilities for a persisted character with only a class', async () => {
     const db = await realDatabase();
     seedClassProgressions(db);
     const characterId = createCharacter(db, 'Classed');
@@ -72,7 +72,7 @@ describe('guidedBuildState', () => {
     expect(guidedBuildState(db, characterId)).toEqual({
       kind: 'ready',
       character_id: characterId,
-      current_step: seamStep(2),
+      current_step: seamStep(1),
     } satisfies GuidedBuildStateResult);
   });
 
@@ -81,6 +81,12 @@ describe('guidedBuildState', () => {
     seedClassProgressions(db);
     const characterId = createCharacter(db, 'Classed Species');
     addClassLevel(db, characterId, 'Wizard', 1);
+    db.exec(
+      `UPDATE characters
+       SET ability_allocation_method = 'standard_array'
+       WHERE id = ?`,
+      [characterId],
+    );
     db.exec(
       `INSERT INTO character_species
          (character_id, name, creature_type, size, base_speed_feet)
@@ -100,6 +106,12 @@ describe('guidedBuildState', () => {
     seedClassProgressions(db);
     const characterId = createCharacter(db, 'Classed Species Background');
     addClassLevel(db, characterId, 'Wizard', 1);
+    db.exec(
+      `UPDATE characters
+       SET ability_allocation_method = 'standard_array'
+       WHERE id = ?`,
+      [characterId],
+    );
     db.exec(
       `INSERT INTO character_species
          (character_id, name, creature_type, size, base_speed_feet)

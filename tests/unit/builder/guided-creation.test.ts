@@ -7,6 +7,7 @@ describe('deriveBuildStep', () => {
     expect(
       deriveBuildStep({
         classChosen: false,
+        abilitiesAllocated: false,
         speciesChosen: false,
         backgroundChosen: false,
       }),
@@ -15,22 +16,24 @@ describe('deriveBuildStep', () => {
     );
   });
 
-  it('skips the undetectable abilities step and selects species when only a class is present', () => {
+  it('selects abilities when only a class is present', () => {
     expect(
       deriveBuildStep({
         classChosen: true,
+        abilitiesAllocated: false,
         speciesChosen: false,
         backgroundChosen: false,
       }),
     ).toBe(
-      GUIDED_LEVEL_ONE_STEP_ORDER[2],
+      GUIDED_LEVEL_ONE_STEP_ORDER[1],
     );
   });
 
-  it('selects background after both class and species are present', () => {
+  it('selects background after abilities and species are complete', () => {
     expect(
       deriveBuildStep({
         classChosen: true,
+        abilitiesAllocated: true,
         speciesChosen: true,
         backgroundChosen: false,
       }),
@@ -43,6 +46,7 @@ describe('deriveBuildStep', () => {
     expect(
       deriveBuildStep({
         classChosen: true,
+        abilitiesAllocated: true,
         speciesChosen: true,
         backgroundChosen: true,
       }),

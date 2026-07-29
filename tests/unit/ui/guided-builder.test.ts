@@ -324,7 +324,7 @@ function lineageKeyEndingIn(suffix: string): string {
 }
 
 describe('guided species step', () => {
-  it('discloses that abilities were skipped and no scores were chosen', () => {
+  it('does not retain the deleted abilities-skipped disclosure', () => {
     const step = createSpeciesStep({
       characterId: 1,
       options: [],
@@ -332,10 +332,8 @@ describe('guided species step', () => {
       navigate: () => undefined,
     });
 
-    expect(elementText(step.element)).toContain(
-      'The Ability scores step is not built yet, so the guided builder has ' +
-        'skipped it: no scores have been asked for or chosen.',
-    );
+    expect(elementText(step.element)).not.toContain('abilities step is not built');
+    expect(elementText(step.element)).not.toContain('no scores have been asked');
     step.cleanup();
   });
 

@@ -4,8 +4,13 @@ export interface BrowserGuidedSeam {
   readonly newRoute: string;
   readonly panelAttribute: string;
   readonly classChooserPanel: string;
+  readonly abilitiesStepPanel: string;
   readonly speciesStepPanel: string;
   readonly backgroundStepPanel: string;
+  readonly abilityMethodAttribute: string;
+  readonly abilityInputAttribute: string;
+  readonly abilityWarningAttribute: string;
+  readonly abilitySubmitAttribute: string;
   readonly buildPath: string | null;
 }
 
@@ -25,18 +30,33 @@ export async function readGuidedSeam(
         throw new Error('The guided seam did not export its panels.');
       }
       const panelRecord = panels as Record<string, unknown>;
+      const abilityAttributes = exports['ABILITY_STEP_ATTR'];
+      if (typeof abilityAttributes !== 'object' || abilityAttributes === null) {
+        throw new Error('The guided seam did not export ability-step locators.');
+      }
+      const abilityAttributeRecord = abilityAttributes as Record<string, unknown>;
       const newRoute = exports['GUIDED_NEW_ROUTE'];
       const panelAttribute = exports['GUIDED_PANEL_ATTRIBUTE'];
       const classChooserPanel = panelRecord['classChooser'];
+      const abilitiesStepPanel = panelRecord['abilitiesStep'];
       const speciesStepPanel = panelRecord['speciesStep'];
       const backgroundStepPanel = panelRecord['backgroundStep'];
+      const abilityMethodAttribute = abilityAttributeRecord['method'];
+      const abilityInputAttribute = abilityAttributeRecord['input'];
+      const abilityWarningAttribute = abilityAttributeRecord['warning'];
+      const abilitySubmitAttribute = abilityAttributeRecord['submit'];
       const pathWriter = exports['guidedBuildPath'];
       if (
         typeof newRoute !== 'string' ||
         typeof panelAttribute !== 'string' ||
         typeof classChooserPanel !== 'string' ||
+        typeof abilitiesStepPanel !== 'string' ||
         typeof speciesStepPanel !== 'string' ||
         typeof backgroundStepPanel !== 'string' ||
+        typeof abilityMethodAttribute !== 'string' ||
+        typeof abilityInputAttribute !== 'string' ||
+        typeof abilityWarningAttribute !== 'string' ||
+        typeof abilitySubmitAttribute !== 'string' ||
         typeof pathWriter !== 'function'
       ) {
         throw new Error('The guided seam exports have unexpected shapes.');
@@ -52,8 +72,13 @@ export async function readGuidedSeam(
         newRoute,
         panelAttribute,
         classChooserPanel,
+        abilitiesStepPanel,
         speciesStepPanel,
         backgroundStepPanel,
+        abilityMethodAttribute,
+        abilityInputAttribute,
+        abilityWarningAttribute,
+        abilitySubmitAttribute,
         buildPath,
       };
     },
