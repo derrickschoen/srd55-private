@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { gunzipSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import { decodeShareFragment } from '../../../src/sharing/codec';
 import {
@@ -131,6 +132,61 @@ function allObjects(root: object): object[] {
   return [...seen];
 }
 
+/**
+ * THE RESTORED PROPERTY (plan §3.2's rejected-alternative note, corrected).
+ *
+ * The plan defended keeping v1–v4's frozen fragment fixtures on the ground
+ * that they are "the only proof those schemas still decode" — but the
+ * composed path (`decodeShareFragment` → `positionalToShareDocument`) now
+ * THROWS `ShareWireRetirementError` for every one of them before reaching
+ * `decodeCurrentWire`, so that justification stopped being true the moment
+ * v4→v5 became a deliberate throw. A fixture whose only exercise is "hits the
+ * throw" no longer proves its OWN schema decodes anything — a schema with
+ * scrambled field order would hit the identical throw, for the identical
+ * reason, and this suite would not notice.
+ *
+ * This decodes each retired fixture's raw wire tuple using ONLY that
+ * fixture's own frozen `SHARE_SCHEMAS[N]` field positions — never composing
+ * through `MIGRATIONS`, never touching `positionalToShareDocument` — so the
+ * decompression is a local, independent re-implementation of the fragment
+ * format (gzip + base64url), not a reuse of the production decode path that
+ * is exactly what throws.
+ */
+interface StructuralTupleSchema {
+  readonly arities: readonly number[];
+  readonly fields: readonly { readonly key: string }[];
+}
+
+function decodeStructural(
+  value: unknown,
+  schema: StructuralTupleSchema,
+  label: string,
+): Record<string, unknown> {
+  if (!Array.isArray(value) || !schema.arities.includes(value.length)) {
+    throw new Error(
+      `${label} did not parse against its own frozen schema (arity ${
+        Array.isArray(value) ? value.length : typeof value
+      }, expected one of ${schema.arities.join(', ')}).`,
+    );
+  }
+  const record: Record<string, unknown> = {};
+  schema.fields.forEach((field, index) => {
+    record[field.key] = value[index] ?? null;
+  });
+  return record;
+}
+
+/** Independent of `decodeShareFragment`'s own gzip/base64url handling. */
+function decodeFragmentToRawPositional(fragment: string): unknown {
+  const encoded = fragment.startsWith('#') ? fragment.slice(1) : fragment;
+  const padded = encoded
+    .replaceAll('-', '+')
+    .replaceAll('_', '/')
+    .padEnd(Math.ceil(encoded.length / 4) * 4, '=');
+  const decompressed = gunzipSync(Buffer.from(padded, 'base64'));
+  return JSON.parse(decompressed.toString('utf-8'));
+}
+
 describe('the share-link wire schema registry', () => {
   it('has exactly the frozen-fixture keys and every schema is deeply frozen at runtime', () => {
     expect(Object.keys(SHARE_SCHEMAS)).toEqual(Object.keys(VERSION_FIXTURES));
@@ -165,6 +221,168 @@ describe('the share-link wire schema registry', () => {
       await expect(decodeShareFragment(fixture.fragment)).resolves.toEqual(
         fixture.expected,
       );
+    }
+  });
+
+  it('still parses every retired fixture against ITS OWN frozen schema, before migration composition', () => {
+    // v1: the format marker, root list membership, and the character/class/
+    // source field POSITIONS all still line up with the frozen v1 schema.
+    {
+      const schema = SHARE_SCHEMAS[1];
+      const raw = decodeFragmentToRawPositional(
+        VERSION_FIXTURES[1].fragment,
+      ) as unknown[];
+      const root = decodeStructural(raw, schema.tuples.root, 'v1 root');
+      expect(root.format).toBe(CHARACTER_SHARE_FORMAT);
+      expect(root.version).toBe(1);
+      const character = decodeStructural(
+        root.character,
+        schema.tuples.character,
+        'v1 character',
+      );
+      expect(character.name).toBe('Old Link Hero');
+      expect(character.intelligence).toBe(16);
+      const classes = (root.classes as unknown[]).map((row) =>
+        decodeStructural(row, schema.tuples.class, 'v1 class')
+      );
+      expect(classes).toEqual([
+        {
+          id: 0,
+          classKey: '2024:class:wizard',
+          subclassKey: null,
+          level: 3,
+          start: 1,
+          ability: null,
+          config: null,
+          subclassConfig: null,
+        },
+      ]);
+      const sources = (root.sources as unknown[]).map((row) =>
+        decodeStructural(row, schema.tuples.source, 'v1 source')
+      );
+      expect(sources).toEqual([
+        {
+          id: 1,
+          type: 'feat',
+          key: '2024:feat:alert',
+          config: null,
+          acquired: 2,
+          name: null,
+        },
+      ]);
+      expect(root.spellbook).toEqual(['2024:shield']);
+    }
+
+    // v2: placeholders moved to a trailing ROOT field (out of the character
+    // tuple) — the fixture proves that field is still at ITS position.
+    {
+      const schema = SHARE_SCHEMAS[2];
+      const raw = decodeFragmentToRawPositional(
+        VERSION_FIXTURES[2].fragment,
+      ) as unknown[];
+      const root = decodeStructural(raw, schema.tuples.root, 'v2 root');
+      expect(root.version).toBe(2);
+      const character = decodeStructural(
+        root.character,
+        schema.tuples.character,
+        'v2 character',
+      );
+      expect(character.name).toBe('Current Link Hero');
+      expect(character.intelligence).toBe(16);
+      const placeholders = (root.placeholders as unknown[]).map((row) =>
+        decodeStructural(row, schema.tuples.placeholder, 'v2 placeholder')
+      );
+      expect(placeholders).toEqual([
+        {
+          spellKey: '2024:org.example:lost-spell',
+          spellName: 'Lost Spell',
+        },
+      ]);
+    }
+
+    // v3: the character tuple APPENDS `ability_allocation_method` — the
+    // fixture proves the appended position still decodes, not merely that
+    // its arity is accepted.
+    {
+      const schema = SHARE_SCHEMAS[3];
+      const raw = decodeFragmentToRawPositional(
+        VERSION_FIXTURES[3].fragment,
+      ) as unknown[];
+      const root = decodeStructural(raw, schema.tuples.root, 'v3 root');
+      expect(root.version).toBe(3);
+      const character = decodeStructural(
+        root.character,
+        schema.tuples.character,
+        'v3 character',
+      );
+      expect(character.name).toBe('Allocated Link Hero');
+      expect(character.rules_edition_preference).toBe('2024');
+      expect(character.ability_allocation_method).toBe('manual');
+      expect(root.classes).toEqual([]);
+      expect(root.effects).toEqual([]);
+    }
+
+    // v4: the effect tuple APPENDS the ability_increase payload, and origin
+    // carries a nested background tuple — both must still decode positionally
+    // through the frozen v4 schema alone.
+    {
+      const schema = SHARE_SCHEMAS[4];
+      const raw = decodeFragmentToRawPositional(
+        VERSION_FIXTURES[4].fragment,
+      ) as unknown[];
+      const root = decodeStructural(raw, schema.tuples.root, 'v4 root');
+      expect(root.version).toBe(4);
+      const character = decodeStructural(
+        root.character,
+        schema.tuples.character,
+        'v4 character',
+      );
+      expect(character.name).toBe('V4 Contribution Hero');
+      expect(character.strength).toBe(19);
+      expect(character.ability_allocation_method).toBe('manual');
+      const sources = (root.sources as unknown[]).map((row) =>
+        decodeStructural(row, schema.tuples.source, 'v4 source')
+      );
+      expect(sources).toEqual([
+        {
+          id: 0,
+          type: 'background',
+          key: '2024:background:guard',
+          config: null,
+          acquired: 1,
+          name: null,
+        },
+      ]);
+      const origin = decodeStructural(
+        root.origin,
+        schema.tuples.origin,
+        'v4 origin',
+      );
+      const background = decodeStructural(
+        origin.background,
+        schema.tuples.background,
+        'v4 background',
+      );
+      expect(background.name).toBe('Guard');
+      const effects = (root.effects as unknown[]).map((row) =>
+        decodeStructural(row, schema.tuples.effect, 'v4 effect')
+      );
+      expect(effects).toEqual([
+        {
+          kind: 'ability_increase',
+          label: 'Guard training',
+          damage_type: null,
+          notes: null,
+          hit_points_flat: null,
+          hit_points_per_level: null,
+          speed_bonus_feet: null,
+          sourceRef: 0,
+          sourceSubclass: null,
+          ability: 'strength',
+          amount: 2,
+          maximum: 20,
+        },
+      ]);
     }
   });
 

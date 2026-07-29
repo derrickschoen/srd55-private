@@ -32,7 +32,9 @@ import {
   CHARACTER_SHARE_VERSION,
   ShareValidationError,
   type CharacterShareDocument,
+  validateShareDocument,
 } from '../../../src/sharing/schema';
+import { ShareWireRetirementError } from '../../../src/sharing/wire-schemas';
 import { handlers as sharingHandlers } from '../../../src/worker/handlers/sharing';
 import type { HandlerContext } from '../../../src/worker/handler';
 import { rpcRegistry } from '../../../src/worker/registry';
@@ -1395,20 +1397,54 @@ describe('minimal character sharing', () => {
 });
 
 /**
- * A SHARE LINK SOMEBODY IS STILL HOLDING.
+ * A SHARE LINK SOMEBODY IS STILL HOLDING — AND WHY IT NO LONGER IMPORTS.
  *
- * The same hand-frozen eleven-element link the codec suite pins, imported into
- * a real database this time. It was minted once and pasted here as a literal;
- * nothing regenerates it, so no change to the encoder can quietly move it to
- * the current format and make this pass for the wrong reason.
+ * The same hand-frozen eleven-element link the codec suite pins. It was
+ * minted once and pasted here as a literal; nothing regenerates it, so no
+ * change to the encoder can quietly move it to the current format and make
+ * this pass for the wrong reason.
+ *
+ * D60/plan §3.2: pre-v5 links are RETIRED, not migrated — a v1 document's
+ * `skillProficiencies` is a bare string list with no source, grant key or
+ * ordinal, and inventing that attribution would corrupt the character. So
+ * `decodeShareFragment` now refuses this exact fragment BY NAME, and the two
+ * tests below start with that refusal.
+ *
+ * What each test actually existed to prove — that an ABSENT optional wire
+ * section (weapons; the character's note) imports as a character with NONE
+ * of that section, rather than an error or a fabricated value — is still
+ * real, unretired import-pipeline behaviour. It is re-expressed against a
+ * hand-authored v5 `CharacterShareDocument` carrying the identical content
+ * this link carried, MINUS the sections it never had — never produced by
+ * `shareDocumentToPositional`/`exportCharacterShare`, so the fixture cannot
+ * quietly track the encoder.
  */
 const LEGACY_FRAGMENT =
   'H4sIAAAAAAACA12NwQrCMBBEf6XseQNNFQ_5Ag-CHxByWJqVBtcqm5SCXy-1QWovwzDMm_EQ' +
   'x2gek5TUC-Vs8otFsukHUuoLq8kDKQNa9HCV2FzSeG_OrE_AcRLZiD3tk38J6H2L0LXd0X2_' +
   '3JzepLEOHdDugYWwCDemAhVcvCNhLRXrftWAfu3kIbFEWKOw2fsAKTM71e0AAAA';
 
+const LEGACY_STYLE_DOCUMENT: CharacterShareDocument = validateShareDocument({
+  format: CHARACTER_SHARE_FORMAT,
+  version: CHARACTER_SHARE_VERSION,
+  character: { name: 'Old Link Hero', intelligence: 16 },
+  classes: [{ id: 0, classKey: '2024:class:wizard', level: 3, start: 1 }],
+  sources: [{ id: 1, type: 'feat', key: '2024:feat:alert', acquired: 2 }],
+  selections: [],
+  spellbook: ['2024:shield'],
+  preferences: [],
+  overrides: [],
+});
+
 describe('a share link that predates weapons', () => {
   it('imports into a build that carries weapons, as a character with none', async () => {
+    // (a) D60: the frozen pre-v5 link is refused, by name.
+    await expect(decodeShareFragment(LEGACY_FRAGMENT)).rejects.toThrow(
+      ShareWireRetirementError,
+    );
+
+    // (b) The claim this fixture pins — a document with no weapons section
+    // imports as a character with none, not an error — re-expressed at v5.
     const target = await database();
     seedCatalog(target);
     // The link names a feat the catalog must hold, or the import is refused for
@@ -1418,7 +1454,7 @@ describe('a share link that predates weapons', () => {
        VALUES ('2024:feat:alert', 'Alert', '2024')`,
     );
 
-    const shared = await decodeShareFragment(LEGACY_FRAGMENT);
+    const shared = LEGACY_STYLE_DOCUMENT;
     expect(Object.hasOwn(shared, 'weapons')).toBe(false);
     expect(previewCharacterShare(target, shared)).toMatchObject({
       name: 'Old Link Hero',
@@ -1436,9 +1472,15 @@ describe('a share link that predates weapons', () => {
   });
 
   it('imports into a build that carries notes, as a character with none', async () => {
-    // THE SAME QUESTION FOR Q12, and it is the one that matters most here: this
-    // link's CHARACTER element has eleven slots, and the reader now accepts
-    // twelve. A build that demanded twelve would refuse the link outright.
+    // (a) D60: the frozen pre-v5 link is refused, by name.
+    await expect(decodeShareFragment(LEGACY_FRAGMENT)).rejects.toThrow(
+      ShareWireRetirementError,
+    );
+
+    // (b) THE SAME QUESTION FOR Q12, and it is the one that matters most
+    // here: a document whose character never carried a note imports as a
+    // character with none, re-expressed at v5 since a v1-tagged document can
+    // no longer reach this far.
     const target = await database();
     seedCatalog(target);
     target.exec(
@@ -1446,7 +1488,7 @@ describe('a share link that predates weapons', () => {
        VALUES ('2024:feat:alert', 'Alert', '2024')`,
     );
 
-    const shared = await decodeShareFragment(LEGACY_FRAGMENT);
+    const shared = LEGACY_STYLE_DOCUMENT;
     expect(Object.hasOwn(shared.character, 'notes')).toBe(false);
     expect(previewCharacterShare(target, shared)).toMatchObject({
       name: 'Old Link Hero',

@@ -316,10 +316,25 @@ describe('the derived character sheet', () => {
     // Initiative is the Dexterity modifier.
     expect(before.initiative.value).toBe(2);
 
+    // THE SHEET READS GRANTS, NEVER THE PROJECTION (skills plan §3.2, S-A):
+    // `character_skill_proficiencies` is a derived transport projection now,
+    // with `rebuildSkillProjection` as its one deriving writer, and the sheet
+    // reads `activeGrantedSkills` off `character_skill_grants` instead. A
+    // grant requires a real source instance — the FK is composite and
+    // `ON DELETE CASCADE`-backed — so one is created here to hang the two
+    // filled, ACTIVE grants off.
+    const sourceInstanceId = db.exec(
+      `INSERT INTO character_source_instances
+         (character_id, instance_uuid, source_type, display_name)
+       VALUES (?, 'test-skill-source', 'background', 'Test Skill Source')`,
+      [characterId],
+    ).lastInsertId;
     db.exec(
-      `INSERT INTO character_skill_proficiencies (character_id, skill)
-       VALUES (?, 'stealth'), (?, 'perception')`,
-      [characterId, characterId],
+      `INSERT INTO character_skill_grants
+         (character_id, source_instance_id, grant_key, ordinal, skill, state)
+       VALUES (?, ?, 'background_skill', 1, 'stealth', 'active'),
+              (?, ?, 'background_skill', 2, 'perception', 'active')`,
+      [characterId, sourceInstanceId, characterId, sourceInstanceId],
     );
     const after = builder.build(characterId);
     const now = (skill: string) =>
