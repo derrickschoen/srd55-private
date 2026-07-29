@@ -1,5 +1,46 @@
 # Binding scope decisions
 
+## D59 — OWNER: the test is AUTHORIZATION, not copyright (2026-07-28)
+
+**The ruling.** *"I only care about unauthorized works ending up in the git repo.
+SRD and other attribution licenses are fine."*
+
+**This corrects D58's wording, which was mine and was wrong.** D58 said
+"copyrighted content must never be committed". That is overbroad to the point of
+being useless: SRD 5.2 is copyrighted. So is every MIT-licensed dependency. The
+question was never whether a work carries copyright — it is whether **we are
+authorized to redistribute it**.
+
+**The rule, corrected:**
+
+> Never commit a work we are not licensed to redistribute.
+
+Licensed and therefore fine, in git, permanently:
+
+- **SRD 5.2 under CC-BY-4.0**, with its attribution notice intact — this is the
+  whole basis of `docs/srd/**` in both repositories and it was never in doubt.
+- **Other attribution-style licences** — CC-BY-SA where compatible, MIT,
+  Apache-2.0. This restores D3's original test: bundle content whose licence's
+  obligations we actually meet.
+
+Not licensed and therefore never committed: Player's Handbook text and anything
+else we hold no redistribution right to. A user importing their own copy into
+their own browser is untouched by this — D58 already settled that everything
+outside git is not a licensing concern, and that stands.
+
+**What actually changes: nothing in the tree.** `docs/srd/**` was compliant under
+D3, under D57, under D58's intent, and under this correction. The attribution
+requirement is unchanged and remains binding — an attribution licence is only
+satisfied while the attribution is present, which is why v2-F1 exists and why the
+notice check in chunk 1's guard is not decoration.
+
+**Recorded because the wording mattered.** Taken literally, D58 would have
+condemned the SRD extracts this project is built on. It was caught in the same
+conversation and cost nothing. Left standing, it was the kind of rule a later
+reader obeys precisely and destroys something with.
+
+---
+
 ## D58 — OWNER: the only licensing concern is what lands in git (2026-07-28)
 
 **The ruling.** *"We only need to worry about copyrighted works ending up in our
