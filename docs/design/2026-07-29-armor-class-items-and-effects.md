@@ -1,6 +1,10 @@
 # Armor Class, items, and one effect vocabulary
 
-Binding law: **D72** (items are things, effects are the one vocabulary), **D73**
+Binding law: **D69** (weapons and armour carry NO provenance — cited because §1
+builds on those two tables and a reader will otherwise wonder where their source
+lineage went; verified no conflict, since "worn armour" as a tie-break category is
+identified structurally, not by provenance), **D72** (items are things, effects are
+the one vocabulary), **D73**
 (resolver + proficiency), **D74** (a broken condition excludes outright), **D75**
 (a shield changes the base), **D76** (warn only on a strict reduction), **D79**
 (armadillo, not turtle), D33, D35, D49, D67, D7.
@@ -9,7 +13,12 @@ Binding law: **D72** (items are things, effects are the one vocabulary), **D73**
 
 - **`armorClass` already exists** — `src/rules/sheet.ts:770` — taking
   `{ armor?, shield?, scores, adjustment? }` and returning a result with
-  warnings.
+  warnings. **It has exactly ONE caller**, `character-sheet-builder.ts:540`.
+  **Its signature cannot hold this unit's problem**: there is no parameter for a
+  LIST of competing formulas with per-candidate eligibility and tie-break
+  metadata. This is a **replacement of its input and internals**, not an
+  extension. Pre-alpha licenses that; the plan says it so nobody implies
+  continuity that is not there.
 - **Its own comment names the gap this unit closes** (`sheet.ts:754-759):
   *"WHAT THIS DOES NOT MODEL, and says so rather than guessing: Unarmored Defense
   (Barbarian, Monk) and any other class feature offering an alternative
@@ -18,11 +27,17 @@ Binding law: **D72** (items are things, effects are the one vocabulary), **D73**
 - **The sheet already discloses it** — gap kind `no_unarmored_defense`, titled
   *"Unarmored Defense is not calculated"* (`character-sheet-builder.ts:409-412`).
   When this unit lands, that disclosure is **DELETED, not reworded**.
-- **A highest-wins-and-say-so precedent ALREADY SHIPS.** `sheet.ts:791-793`: two
-  rows both claiming to be worn armour cannot both apply, *"the SRD has no rule
-  for layering, so the better of the two is used and stated."* D74's resolver
-  **extends an existing pattern rather than inventing one** — worth knowing before
-  anyone designs a resolver from scratch.
+- **HALF a precedent ships, and revision 1 claimed the whole thing — an F27
+  error in the section that exists to prevent F27 errors.** `sheet.ts:791-793`
+  does `Math.max` over two worn-armour candidates, so **highest-wins is real**.
+  Its comment says *"the better of the two is used and stated"* — and **nothing is
+  stated**: I enumerated the warning codes emitted inside `armorClass` and there
+  are exactly two, `armor_slot_mismatch` and `strength_requirement_unmet`.
+  Neither says a tie happened or which candidate won. **The "and stated" is a
+  sentence addressed to a source reader, not behaviour.** So: highest-wins
+  extends a shipped pattern; **the disclosure D67/D73 require is entirely new
+  work**, and AC-B must be scoped as building it, not wiring up something that
+  already talks.
 - **`character_effects` has four kinds** — `damage_resistance`, `hp_modifier`,
   `speed`, `ability_increase` — with kind-scoped nullable payload columns,
   `source_instance_id`, and a `label`. The CHECK is closed, so new kinds are a
@@ -87,10 +102,27 @@ winning base without re-running eligibility reports **18**.
 
 **Proficiency does NOT gate an effect; it changes consequences.**
 
-- **Armour you are not proficient with STILL GIVES ITS AC.** The SRD penalty is
-  Disadvantage on STR/DEX D20 tests and no spellcasting. Withholding the AC would
-  be a wrong number, which D33 forbids more strongly than an unwelcome one. **The
-  sheet states the penalty.**
+- **Armour you are not proficient with STILL GIVES ITS AC.** Withholding it
+  would be a wrong number, which D33 forbids more strongly than an unwelcome one.
+  **That half is settled and not in question.**
+- **WHAT THE SHEET SAYS ABOUT THE PENALTY IS BLOCKED ON THE OWNER, and this is
+  the one thing that must not be guessed.** D73 — which I wrote — tells the sheet
+  to state *"Disadvantage on any D20 test using Strength or Dexterity and an
+  inability to cast spells."* **That text is not in `docs/srd/source/`**, and the
+  codebase already refuses to print it, deliberately:
+  `multiclass-proficiency.ts:354-362` — *"THE SENTENCE STOPS AT WHAT IS SOURCED…
+  the only 'Disadvantage' in `armor-table.txt` is the Stealth column of seven
+  specific rows… Reciting the penalty from memory is the one thing this
+  application is built not to do (F4), and D26 leaves the adjudication to the
+  table anyway."* I verified all of it: 28 files in `docs/srd/source/`, none
+  covering equipment or general rules.
+
+  So **a decision I recorded today instructs a violation of a shipped principle
+  with an F-number behind it.** Three ways out, none of which a dispatch may pick
+  on its own: state it anyway as a named exception the owner blesses; keep the
+  existing softer shape (*"no class of theirs trains this; the Armor Class still
+  counts it"*) and treat D73's wording as intent rather than text; or add the
+  missing SRD source first. **AC-B does not ship this until it is answered.**
 - A weapon you are not proficient with loses the proficiency bonus — **already
   built and already proven**: `tests/browser/weapons.spec.ts` asserts a Wizard's
   Greatsword loses it and *both screens say so*, and `attack-profiles.ts:40`
@@ -107,6 +139,18 @@ winning base without re-running eligibility reports **18**.
 - **A tie that was broken**, naming winner, loser and rule (D73).
 - **The non-proficiency penalty** (D73).
 - **`no_unarmored_defense` is DELETED** — the disclosure's reason expires.
+- **`strength_requirement_unmet` MUST SURVIVE the rewrite**, named here because
+  the function carrying it is being replaced wholesale and this unit introduces
+  new armour that triggers it (Shell Plate, Carapace Mail). Revision 1 never
+  mentioned it and a silent loss was the likely outcome.
+- **A PRE-EXISTING disagreement this unit must not inherit.** That warning says
+  *"so their speed is reduced by 10 feet"*, and the printed speed
+  (`character-sheet-builder.ts:601-608`) reads `character_species.base_speed_feet`
+  with **no subtraction**. The number and the sentence already contradict each
+  other — the exact defect class `attack-profiles.ts:40` records, where a label
+  said "not proficient" while the number still added the bonus. **Pinned: either
+  the speed applies the penalty or the warning stops claiming it.** Choosing
+  silently is what produced the original bug.
 - Under **D67** these are reveal content for Armor Class; under **D70** an owed
   choice is a gap. Different surfaces, and §7's trap keeps them apart.
 
