@@ -439,11 +439,16 @@ export class CharacterCommandExecutor {
       // `update_ability` inverses would restore the numbers and leave the
       // signal standing — a character that reads as allocated to scores nobody
       // allocated.
+      // `level_up_class` is PINNED to a snapshot inverse (level-up plan
+      // §8b): the write moves the level row, the ASI effect rows and the
+      // source instances together, and a field-by-field inverse cannot
+      // express that set.
       case 'allocate_abilities':
       case 'update_source_config':
       case 'add_source':
       case 'remove_source':
       case 'update_class':
+      case 'level_up_class':
       case 'restore_snapshot':
         return this.integrity.attach(characterId, {
           type: 'restore_snapshot',

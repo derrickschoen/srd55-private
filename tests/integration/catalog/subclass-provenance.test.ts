@@ -11,6 +11,7 @@ import { importedContentKeyOwner } from '../../../src/catalog/catalog-key';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import { UpdateClassCommand } from '../../../src/commands/update-class';
 import { DatabaseContext } from '../../../src/db/database';
+import { raiseClassLevelForTest } from '../../helpers/class-levels';
 import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
 import {
   assessImportCompatibility,
@@ -55,25 +56,31 @@ function importSubclass(db: DatabaseContext): number {
   );
 }
 
-/** A Bard 6 who has taken the imported subclass, built through the command. */
+/**
+ * A Bard 6 who has taken the imported subclass, built through the command —
+ * entry and subclass through `update_class` (which no longer carries a
+ * level; level-up plan §3), then the fixture level raised directly, since
+ * this file's subject is subclass provenance, not the levelling path.
+ */
 function walker(db: DatabaseContext, subclassId: number): number {
   const characterId = db.exec(
     "INSERT INTO characters (name) VALUES ('Walker')",
   ).lastInsertId;
+  const bardId = Number(
+    db.scalar('SELECT id FROM class_definitions WHERE content_key = ?', [
+      '2024:class:bard',
+    ]),
+  );
   new UpdateClassCommand(
     db,
     {
       type: 'update_class',
-      class_definition_id: Number(
-        db.scalar('SELECT id FROM class_definitions WHERE content_key = ?', [
-          '2024:class:bard',
-        ]),
-      ),
-      level: 6,
+      class_definition_id: bardId,
       subclass_definition_id: subclassId,
     },
     new CharacterCommandIntegrity('subclass-provenance-test-key'),
   ).apply(characterId);
+  raiseClassLevelForTest(db, characterId, bardId, 6);
   return characterId;
 }
 

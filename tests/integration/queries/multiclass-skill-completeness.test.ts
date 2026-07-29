@@ -12,6 +12,7 @@ import {
 import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
 import { seedSheetContent } from '../../../src/rules/sheet-srd';
 import { openTestDatabase } from '../../helpers/open-db';
+import { raiseClassLevelForTest } from '../../helpers/class-levels';
 
 /**
  * Hand-transcribed from `docs/srd/source/skills-table.txt`, not produced by the
@@ -101,15 +102,20 @@ describe('skill grants as outstanding items', () => {
   }
 
   function addClass(name: string, level: number): void {
+    // `update_class` no longer carries a level (level-up plan §3): entry is
+    // at 1, and a higher fixture level is a direct fixture write — see
+    // `raiseClassLevelForTest`.
     new UpdateClassCommand(
       db,
       {
         type: 'update_class',
         class_definition_id: classId(name),
-        level,
       },
       integrity,
     ).apply(characterId);
+    if (level > 1) {
+      raiseClassLevelForTest(db, characterId, classId(name), level);
+    }
   }
 
   async function fillGrant(grantId: number, skill: Skill): Promise<void> {
@@ -335,7 +341,7 @@ describe('skill grants as outstanding items', () => {
         {
           type: 'update_class',
           class_definition_id: classId(className),
-          level: null,
+          remove: true,
         },
         integrity,
       ).apply(characterId);

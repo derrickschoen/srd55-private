@@ -11,6 +11,7 @@ import {
   SkillGrantRefusal,
 } from '../../../src/grants/skill-grants';
 import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
+import { raiseClassLevelForTest } from '../../helpers/class-levels';
 import { seedSheetContent } from '../../../src/rules/sheet-srd';
 import { openTestDatabase } from '../../helpers/open-db';
 
@@ -52,15 +53,32 @@ describe('fill_skill_grant through the real executor', () => {
   }
 
   function updateClass(name: string, level: number | null): void {
+    // `update_class` no longer carries a level (level-up plan §3): entry is
+    // at 1, removal is `remove: true`, and a higher fixture level is a
+    // direct fixture write — see `raiseClassLevelForTest`.
+    if (level === null) {
+      new UpdateClassCommand(
+        db,
+        {
+          type: 'update_class',
+          class_definition_id: classId(name),
+          remove: true,
+        },
+        integrity,
+      ).apply(characterId);
+      return;
+    }
     new UpdateClassCommand(
       db,
       {
         type: 'update_class',
         class_definition_id: classId(name),
-        level,
       },
       integrity,
     ).apply(characterId);
+    if (level > 1) {
+      raiseClassLevelForTest(db, characterId, classId(name), level);
+    }
   }
 
   function grantId(className: string, grantKey: string, ordinal: number): number {
@@ -232,7 +250,6 @@ describe('fill_skill_grant through the real executor', () => {
       {
         type: 'update_class',
         class_definition_id: classId('Fighter'),
-        level: 1,
       },
       integrity,
     );

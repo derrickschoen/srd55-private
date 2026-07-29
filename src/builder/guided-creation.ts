@@ -616,7 +616,6 @@ export function createGuidedCharacter(
       {
         type: 'update_class',
         class_definition_id: definition.id,
-        level: 1,
       },
       integrity,
     ).apply(created.id);

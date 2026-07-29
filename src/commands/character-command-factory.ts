@@ -16,6 +16,7 @@ import { KeepOverrideSlotCommand } from './set-slot/keep-override';
 import { RestoreSlotCommand } from './set-slot/restore';
 import { SelectSlotCommand } from './set-slot/select';
 import { FillSkillGrantCommand } from './fill-skill-grant';
+import { LevelUpClassCommand } from './level-up-class';
 import { UpdateAbilityCommand } from './update-ability';
 import { UpdateCharacterRulesCommand } from './update-character-rules';
 import { UpdateClassCommand } from './update-class';
@@ -127,6 +128,8 @@ export class CharacterCommandFactory {
         );
       case 'update_class':
         return new UpdateClassCommand(this.db, payload, this.integrity);
+      case 'level_up_class':
+        return new LevelUpClassCommand(this.db, payload, this.integrity);
       case 'add_weapon':
         return new AddWeaponCommand(this.db, payload);
       case 'update_weapon':

@@ -17,7 +17,6 @@ export interface PlannerEditorActions {
   updateClass(
     entry: CharacterClass,
     changes: {
-      level?: number;
       subclass_definition_id?: number | null;
     },
   ): void;
@@ -44,7 +43,7 @@ function panel(title: string): [HTMLElement, HTMLElement] {
 
 function field(
   label: string,
-  input: HTMLInputElement | HTMLSelectElement,
+  input: HTMLInputElement | HTMLSelectElement | HTMLOutputElement,
 ): HTMLLabelElement {
   const wrapper = document.createElement('label');
   wrapper.className = 'planner-field';
@@ -393,18 +392,15 @@ function renderClasses(
     const row = document.createElement('article');
     const name = document.createElement('strong');
     name.textContent = entry.name;
-    const level = document.createElement('input');
-    level.type = 'number';
-    level.min = '1';
-    level.max = '20';
-    level.value = String(entry.level);
-    level.disabled = disabled;
-    // Every class row repeats the captions "Level" and "Subclass", so the
-    // implicit label alone does not identify which class a control belongs to.
+    // NOT AN INPUT ANY MORE (level-up plan §3): the numeric level control was
+    // the second writer §0 names — it could move a level to any number
+    // without a hit-point row ever being written. The level is read-only
+    // here; levelling happens through the guarded `level_up_class` path
+    // (L-B's screen). The output keeps a per-class accessible name for the
+    // same reason the input carried one.
+    const level = document.createElement('output');
+    level.textContent = String(entry.level);
     level.setAttribute('aria-label', `${entry.name} level`);
-    level.addEventListener('change', () =>
-      actions.updateClass(entry, { level: Number(level.value) }),
-    );
     const subclass = document.createElement('select');
     subclass.setAttribute('aria-label', `${entry.name} subclass`);
     subclass.append(
