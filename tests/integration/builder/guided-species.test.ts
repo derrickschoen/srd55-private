@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { SpellAccessBuilder } from '../../../src/access/spell-access-builder';
 import {
   GUIDED_LEVEL_ONE_STEP_ORDER,
   GUIDED_RPC,
@@ -13,6 +14,7 @@ import {
   listGuidedOriginOptions,
 } from '../../../src/builder/guided-creation';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
+import { applicationSeed } from '../../../src/db/bootstrap';
 import type { DatabaseContext } from '../../../src/db/database';
 import { CharacterSheetBuilder } from '../../../src/queries/character-sheet-builder';
 import { rpcRegistry } from '../../../src/worker/registry';
@@ -67,6 +69,36 @@ function createClassedCharacter(db: DatabaseContext, name: string): number {
     },
     new CharacterCommandIntegrity('guided-species-test-key'),
   ).id;
+}
+
+function guidedSpeciesSources(db: DatabaseContext, characterId: number) {
+  return db.allRaw(
+    `SELECT id, display_name, config
+     FROM character_source_instances
+     WHERE character_id = ?
+       AND source_type = 'species'
+       AND notes = 'guided:species-apply'
+     ORDER BY id`,
+    [characterId],
+  );
+}
+
+function speciesSpellSlotCount(
+  db: DatabaseContext,
+  characterId: number,
+): number {
+  return Number(
+    db.scalar(
+      `SELECT count(*)
+       FROM spell_selection_slots AS slot
+       INNER JOIN character_source_instances AS source
+         ON source.id = slot.source_instance_id
+       WHERE slot.character_id = ?
+         AND source.source_type = 'species'
+         AND source.notes = 'guided:species-apply'`,
+      [characterId],
+    ),
+  );
 }
 
 interface FixtureEffect {
@@ -369,6 +401,324 @@ describe('guided species application', () => {
         label: 'Rollback Ward',
       },
     ]);
+  });
+});
+
+describe('guided lineage spell grants', () => {
+  it('surfaces Tiefling Thaumaturgy through spell access with species provenance and an unchosen ability', async () => {
+    const rpcHarness = await applicationDatabase();
+    const db = rpcHarness.context.db;
+    const tiefling = speciesNamed(db, 'Tiefling');
+    const characterId = createClassedCharacter(db, 'Tiefling Access');
+
+    applyGuidedOrigin(db, {
+      character_id: characterId,
+      kind: 'species',
+      content_key: tiefling.content_key,
+    });
+
+    const thaumaturgy = new SpellAccessBuilder(db)
+      .buildForCharacter(characterId)
+      .filter((route) => route.spell_name === 'Thaumaturgy');
+    expect(thaumaturgy).toEqual([
+      expect.objectContaining({
+        spell_name: 'Thaumaturgy',
+        source_name: 'Tiefling',
+        origin: 'slot',
+        bucket: 'cantrip_known',
+        casting_mode: 'at_will',
+        spellcasting_ability: null,
+        ability_modifier: null,
+        attack_bonus: null,
+        save_dc: null,
+      }),
+    ]);
+    expect(
+      db.allRaw(
+        `SELECT source_type, display_name
+         FROM character_source_instances
+         WHERE id = ?`,
+        [thaumaturgy[0]?.source_instance_id ?? 0],
+      ),
+    ).toEqual([{ source_type: 'species', display_name: 'Tiefling' }]);
+  });
+
+  it('removes Tiefling spell access and its guided source when switching to Elf', async () => {
+    const rpcHarness = await applicationDatabase();
+    const db = rpcHarness.context.db;
+    const tiefling = speciesNamed(db, 'Tiefling');
+    const elf = speciesNamed(db, 'Elf');
+    const characterId = createClassedCharacter(db, 'Tiefling To Elf');
+
+    applyGuidedOrigin(db, {
+      character_id: characterId,
+      kind: 'species',
+      content_key: tiefling.content_key,
+    });
+    const tieflingSource = guidedSpeciesSources(db, characterId)[0];
+    if (tieflingSource === undefined) {
+      throw new Error('Applying Tiefling did not create a guided source.');
+    }
+
+    applyGuidedOrigin(db, {
+      character_id: characterId,
+      kind: 'species',
+      content_key: elf.content_key,
+    });
+
+    expect(
+      new SpellAccessBuilder(db)
+        .buildForCharacter(characterId)
+        .filter((route) => route.spell_name === 'Thaumaturgy'),
+    ).toEqual([]);
+    expect(
+      db.scalar(
+        'SELECT count(*) FROM character_source_instances WHERE id = ?',
+        [tieflingSource['id']],
+      ),
+    ).toBe(0);
+    const elfSources = guidedSpeciesSources(db, characterId);
+    expect(elfSources).toHaveLength(1);
+    expect(elfSources[0]).toMatchObject({
+      display_name: 'Elf',
+      config: '{"class_level":1}',
+    });
+    expect(Number.isSafeInteger(elfSources[0]?.['id'])).toBe(true);
+    expect(speciesSpellSlotCount(db, characterId)).toBe(0);
+  });
+
+  it('leaves no guided species source when switching from Tiefling to Dwarf', async () => {
+    const rpcHarness = await applicationDatabase();
+    const db = rpcHarness.context.db;
+    const tiefling = speciesNamed(db, 'Tiefling');
+    const dwarf = speciesNamed(db, 'Dwarf');
+    const characterId = createClassedCharacter(db, 'Tiefling To Dwarf');
+
+    applyGuidedOrigin(db, {
+      character_id: characterId,
+      kind: 'species',
+      content_key: tiefling.content_key,
+    });
+    applyGuidedOrigin(db, {
+      character_id: characterId,
+      kind: 'species',
+      content_key: dwarf.content_key,
+    });
+
+    expect(guidedSpeciesSources(db, characterId)).toEqual([]);
+    expect(speciesSpellSlotCount(db, characterId)).toBe(0);
+    expect(
+      new SpellAccessBuilder(db)
+        .buildForCharacter(characterId)
+        .filter((route) => route.spell_name === 'Thaumaturgy'),
+    ).toEqual([]);
+  });
+
+  it('is idempotent when the same species is applied twice', async () => {
+    const rpcHarness = await applicationDatabase();
+    const db = rpcHarness.context.db;
+    const tiefling = speciesNamed(db, 'Tiefling');
+    const characterId = createClassedCharacter(db, 'Tiefling Twice');
+    const apply = () =>
+      applyGuidedOrigin(db, {
+        character_id: characterId,
+        kind: 'species',
+        content_key: tiefling.content_key,
+      });
+
+    apply();
+    apply();
+
+    expect(guidedSpeciesSources(db, characterId)).toHaveLength(1);
+    expect(speciesSpellSlotCount(db, characterId)).toBe(1);
+    expect(
+      new SpellAccessBuilder(db)
+        .buildForCharacter(characterId)
+        .filter((route) => route.spell_name === 'Thaumaturgy'),
+    ).toHaveLength(1);
+  });
+
+  it('replaces only marker-owned sources and preserves a planner-added species source', async () => {
+    const rpcHarness = await applicationDatabase();
+    const db = rpcHarness.context.db;
+    const tiefling = speciesNamed(db, 'Tiefling');
+    const elf = speciesNamed(db, 'Elf');
+    const characterId = createClassedCharacter(
+      db,
+      'Guided And Planner Species',
+    );
+
+    applyGuidedOrigin(db, {
+      character_id: characterId,
+      kind: 'species',
+      content_key: tiefling.content_key,
+    });
+    const oldGuidedSourceId = Number(
+      guidedSpeciesSources(db, characterId)[0]?.['id'],
+    );
+    const tieflingDefinitionId = Number(
+      db.scalar(
+        'SELECT id FROM species_definitions WHERE content_key = ?',
+        [tiefling.content_key],
+      ),
+    );
+    const plannerSourceId = db.exec(
+      `INSERT INTO character_source_instances (
+         character_id, instance_uuid, source_type, source_definition_id,
+         display_name, config, acquired_at_character_level, state, notes
+       ) VALUES (?, ?, 'species', ?, 'Planner Tiefling', ?, 1, 'active',
+                 'planner:species-add')`,
+      [
+        characterId,
+        crypto.randomUUID(),
+        tieflingDefinitionId,
+        JSON.stringify({ class_level: 1 }),
+      ],
+    ).lastInsertId;
+
+    applyGuidedOrigin(db, {
+      character_id: characterId,
+      kind: 'species',
+      content_key: elf.content_key,
+    });
+
+    const survivingSources = db.allRaw(
+      `SELECT id, display_name, notes
+       FROM character_source_instances
+       WHERE character_id = ? AND source_type = 'species'
+       ORDER BY id`,
+      [characterId],
+    );
+    expect(survivingSources).toHaveLength(2);
+    expect(survivingSources[0]).toEqual({
+      id: plannerSourceId,
+      display_name: 'Planner Tiefling',
+      notes: 'planner:species-add',
+    });
+    expect(survivingSources[1]).toMatchObject({
+      display_name: 'Elf',
+      notes: 'guided:species-apply',
+    });
+    expect(Number.isSafeInteger(survivingSources[1]?.['id'])).toBe(true);
+    expect(
+      db.scalar(
+        'SELECT count(*) FROM character_source_instances WHERE id = ?',
+        [oldGuidedSourceId],
+      ),
+    ).toBe(0);
+  });
+
+  it.each(['Elf', 'Gnome'] as const)(
+    'keeps %s lineage rules dormant while its lineage is unchosen',
+    async (speciesName) => {
+      const rpcHarness = await applicationDatabase();
+      const db = rpcHarness.context.db;
+      const species = speciesNamed(db, speciesName);
+      const characterId = createClassedCharacter(
+        db,
+        `${speciesName} Dormant`,
+      );
+
+      expect(() =>
+        applyGuidedOrigin(db, {
+          character_id: characterId,
+          kind: 'species',
+          content_key: species.content_key,
+        }),
+      ).not.toThrow();
+      const sources = guidedSpeciesSources(db, characterId);
+      expect(sources).toHaveLength(1);
+      expect(sources[0]).toMatchObject({
+        display_name: speciesName,
+        config: '{"class_level":1}',
+      });
+      expect(Number.isSafeInteger(sources[0]?.['id'])).toBe(true);
+      expect(speciesSpellSlotCount(db, characterId)).toBe(0);
+      expect(
+        new SpellAccessBuilder(db)
+          .buildForCharacter(characterId)
+          .filter((route) => route.source_name === speciesName),
+      ).toEqual([]);
+    },
+  );
+});
+
+describe('bundled species definition seed', () => {
+  it('is idempotent across repeated application boot seeds', async () => {
+    const rpcHarness = await applicationDatabase();
+    const db = rpcHarness.context.db;
+    const before = db.allRaw(
+      `SELECT id, content_key, name, rules_edition, grant_rules
+       FROM species_definitions
+       ORDER BY content_key`,
+    );
+
+    applicationSeed(db);
+    applicationSeed(db);
+
+    expect(
+      db.allRaw(
+        `SELECT id, content_key, name, rules_edition, grant_rules
+         FROM species_definitions
+         ORDER BY content_key`,
+      ),
+    ).toEqual(before);
+    expect(before).toHaveLength(LINEAGE_SPELL_SPECIES_CONTENT_KEYS.size);
+    expect(
+      db.scalar(
+        `SELECT sum(json_array_length(grant_rules))
+         FROM species_definitions`,
+      ),
+    ).toBe(23);
+  });
+
+  it('yields the bundled name-and-edition slot to a homebrew definition', async () => {
+    const rpcHarness = await applicationDatabase();
+    const db = rpcHarness.context.db;
+    const elf = speciesNamed(db, 'Elf');
+    const bundledSlot = db.allRaw(
+      `SELECT name, rules_edition
+       FROM species_definitions
+       WHERE content_key = ?`,
+      [elf.content_key],
+    )[0];
+    if (bundledSlot === undefined) {
+      throw new Error('The real seed did not create the Elf definition.');
+    }
+    db.exec('DELETE FROM species_definitions WHERE content_key = ?', [
+      elf.content_key,
+    ]);
+    db.exec(
+      `INSERT INTO species_definitions (
+         content_key, name, rules_edition, repeatable, grant_rules, notes
+       ) VALUES ('homebrew:species:elf', ?, ?, 1, '[]',
+                 'homebrew must survive boot')`,
+      [bundledSlot['name'], bundledSlot['rules_edition']],
+    );
+
+    applicationSeed(db);
+
+    expect(
+      db.allRaw(
+        `SELECT content_key, repeatable, grant_rules, notes
+         FROM species_definitions
+         WHERE name = ? AND rules_edition = ?`,
+        [bundledSlot['name'], bundledSlot['rules_edition']],
+      ),
+    ).toEqual([
+      {
+        content_key: 'homebrew:species:elf',
+        repeatable: 1,
+        grant_rules: '[]',
+        notes: 'homebrew must survive boot',
+      },
+    ]);
+    expect(
+      db.scalar(
+        'SELECT count(*) FROM species_definitions WHERE content_key = ?',
+        [elf.content_key],
+      ),
+    ).toBe(0);
   });
 });
 
