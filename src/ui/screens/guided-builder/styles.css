@@ -187,7 +187,8 @@
 }
 
 .guided-species-choices p,
-.guided-species-choices-none {
+.guided-species-choices-none,
+.guided-species-lineage-gated {
   margin: 0;
   font-size: 0.85rem;
   opacity: 0.85;

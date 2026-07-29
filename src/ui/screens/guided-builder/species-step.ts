@@ -23,7 +23,14 @@
  *   existed only while the machinery was missing. What remains unmade is the
  *   LINEAGE CHOICE itself, which {@link SPECIES_UNMADE_CHOICES} already
  *   names; the spells that hang on it stay off the character until a unit
- *   records that choice, and the screen must never imply otherwise.
+ *   records that choice, and the screen must never imply otherwise. For the
+ *   species whose EVERY spell hangs on that choice (Elf and Gnome today), a
+ *   card-scoped disclosure states the causal fact an empty spell list needs
+ *   explained: choosing the lineage is what brings the spells. The gated set
+ *   is DERIVED from the seed data ({@link LINEAGE_GATED_SPECIES_CONTENT_KEYS})
+ *   rather than hand-typed, so it cannot go stale against the rules; the
+ *   Tiefling, whose Thaumaturgy genuinely arrives, is excluded by the same
+ *   derivation — showing the disclosure there would be the mirror-image lie.
  * - §5's trap: nothing here links into the planner grid. Success re-navigates
  *   to the build route, which re-derives the step from the database.
  * - Re-applying replaces (§8): the worker owns that semantic; this screen just
@@ -36,6 +43,10 @@ import {
   type GuidedOriginOption,
 } from '../../../builder/contracts';
 import type { GuidedApplyOriginResult } from '../../../builder/guided-creation';
+import {
+  bundledSpeciesDefinitions,
+  LINEAGE_CHOICE_CONFIG_KEY,
+} from '../../../rules/origin-definitions-srd';
 import { BUNDLED_ORIGIN_RULES_EDITION } from '../../../rules/origins-srd';
 import { RpcError } from '../../../rpc/protocol';
 import { clear, element, listen, type Cleanup } from '../../dom';
@@ -119,6 +130,55 @@ export const SPECIES_UNMADE_CHOICES: ReadonlyMap<string, readonly string[]> =
       ],
     ],
   ]);
+
+/**
+ * True when the rule is inert until the lineage choice is recorded — its
+ * `active_if_config` gate reads {@link LINEAGE_CHOICE_CONFIG_KEY}. The seed
+ * type is a plain record, so the gate is narrowed structurally.
+ */
+function ruleIsLineageGated(rule: Readonly<Record<string, unknown>>): boolean {
+  const gate: unknown = rule['active_if_config'];
+  if (typeof gate !== 'object' || gate === null || Array.isArray(gate)) {
+    return false;
+  }
+  return (
+    (gate as Readonly<Record<string, unknown>>)['key'] ===
+    LINEAGE_CHOICE_CONFIG_KEY
+  );
+}
+
+/**
+ * The species whose spell grants are ALL gated behind the unmade lineage
+ * choice — Elf and Gnome today. DERIVED from the seed data rather than
+ * hand-typed: a second hand-maintained species list is a second thing to go
+ * stale, and the seed already knows which rules hang on the choice. A species
+ * qualifies iff it has at least one grant rule AND every rule carries the
+ * lineage-choice gate; the empty-rule-list case is guarded explicitly because
+ * `.every()` on an empty array is vacuously true, and a species granting
+ * nothing has no gated spells to disclose. The Tiefling falls out naturally:
+ * its Thaumaturgy rule has no gate, so its spell list is not empty and the
+ * disclosure would be a lie there.
+ */
+export const LINEAGE_GATED_SPECIES_CONTENT_KEYS: ReadonlySet<string> = new Set(
+  bundledSpeciesDefinitions()
+    .filter(
+      (definition) =>
+        definition.grant_rules.length > 0 &&
+        definition.grant_rules.every(ruleIsLineageGated),
+    )
+    .map((definition) => definition.content_key),
+);
+
+/**
+ * D33/D56 disclosure for the species above: the causal sentence an empty
+ * spell list needs. "You have not chosen a lineage" and "choosing one is what
+ * would bring you spells" are different sentences; only the second explains
+ * why applying the species granted nothing.
+ */
+export const LINEAGE_GATED_SPELLS_DISCLOSURE =
+  'Its lineage spells arrive only when you choose a lineage — choosing one ' +
+  'is what brings them, and this step cannot record that choice, so ' +
+  'applying this species grants no spells today.';
 
 /**
  * D33 disclosure for the step this group never built. `deriveBuildStep` pins
@@ -267,6 +327,14 @@ export function createSpeciesStep(deps: SpeciesStepDeps): SpeciesStep {
             text: option.name,
           }),
           unmadeChoicesBlock(option),
+          ...(LINEAGE_GATED_SPECIES_CONTENT_KEYS.has(option.content_key)
+            ? [
+                element('p', {
+                  className: 'guided-species-lineage-gated',
+                  text: LINEAGE_GATED_SPELLS_DISCLOSURE,
+                }),
+              ]
+            : []),
           apply,
         ],
       );

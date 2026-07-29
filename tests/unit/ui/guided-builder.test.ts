@@ -362,12 +362,11 @@ describe('guided species step', () => {
     step.cleanup();
   });
 
-  it('renders the lineage-spell disclosure for exactly options classified by the seam key set', () => {
+  it('says Elf and Gnome lineage spells arrive when their unchosen lineage does', () => {
     const options = [
-      ...[...LINEAGE_SPELL_SPECIES_CONTENT_KEYS].map((contentKey, index) =>
-        originOption(contentKey, `Lineage species ${index + 1}`, true),
-      ),
-      originOption('test:species:no-lineage-spells', 'No lineage spells', false),
+      originOption(lineageKeyEndingIn(':species:elf'), 'Elf', true),
+      originOption(lineageKeyEndingIn(':species:gnome'), 'Gnome', true),
+      originOption(lineageKeyEndingIn(':species:tiefling'), 'Tiefling', true),
     ];
     const step = createSpeciesStep({
       characterId: 1,
@@ -376,13 +375,27 @@ describe('guided species step', () => {
       navigate: () => undefined,
     });
 
-    expect(
-      elementsByTagName(step.element, 'p').filter(
-        (element) => element.className === 'guided-lineage-disclosure',
-      ),
-    ).toHaveLength(LINEAGE_SPELL_SPECIES_CONTENT_KEYS.size);
-    expect(elementText(step.element)).toContain(
-      'Lineage spells are not granted yet: this species has them by the rules',
+    const cards = interactiveElement(step.element)
+      .querySelectorAll('li')
+      .filter((element) => element.className === 'guided-species-card');
+    const cardText = (speciesName: string): string => {
+      const card = cards.find((candidate) =>
+        elementText(candidate as unknown as Node).includes(speciesName),
+      );
+      if (card === undefined) {
+        throw new Error(`The species step has no ${speciesName} card.`);
+      }
+      return elementText(card as unknown as Node);
+    };
+
+    expect(cardText('Elf')).toMatch(
+      /lineage spells.*arrive.*choose.*lineage/i,
+    );
+    expect(cardText('Gnome')).toMatch(
+      /lineage spells.*arrive.*choose.*lineage/i,
+    );
+    expect(cardText('Tiefling')).not.toMatch(
+      /lineage spells.*arrive.*choose.*lineage/i,
     );
     step.cleanup();
   });
