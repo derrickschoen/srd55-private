@@ -1,5 +1,38 @@
 # Binding scope decisions
 
+## D66 — OWNER: level-up hit points default to the FIXED value, rolling is available per level (2026-07-29)
+
+**The ruling.** Asked what the wizard does about hit points at level 2, the owner
+chose option 1: **fixed value by default, rolling available per level.**
+
+**This is the SRD rule, not a house rule**, which is why it needs no D61-style
+label: 5.2 lets the player take the class's stated fixed value or roll the hit
+die, and the choice is **per level** — fixed at 2 and rolled at 3 is legal and
+must be recordable.
+
+**Worked example, so the numbers are pinned.** Fighter 1→2, Constitution 14 (+2):
+
+- **Fixed:** 6 + 2 = **8**, total 18.
+- **Rolled:** 1d10 + 2, so **3 to 12**, total 13 to 22.
+
+**The app does NOT roll dice.** A rolled value is entered manually, exactly as
+D64 has manual entry serve "if a player rolls" for abilities. This is the same
+line D55 drew when it deleted Roll in Order: we do not own a rolling workflow.
+The difference from Roll in Order — and the reason this is not a reversal — is
+that there is no workflow to build here at all. The player types a number they
+already have on their sheet.
+
+**Storage already exists**: `character_hit_point_rolls`, named for exactly this.
+
+**What each level must record**, because "the total is right" is not enough under
+D33: which method was used, and the value. A total that cannot say whether it was
+taken or rolled cannot be re-derived, and a level-up that silently averages a
+rolled character is a confidently wrong number.
+
+**What this rules out:** fixed-value-only, which would make a real rolled
+character unrecordable, and asking once at creation and applying it to every
+level, which is a house rule the SRD does not have.
+
 ## D65 — OWNER: starting equipment is recorded as a NAMED PACKAGE CHOICE, not as owned items (2026-07-29)
 
 **The ruling.** Asked where a class or background package's non-weapon,
