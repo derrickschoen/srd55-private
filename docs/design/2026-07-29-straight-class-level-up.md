@@ -292,8 +292,11 @@ word:
 
 - **L-A — the record and the writers.** The `method` column and its migration,
   `SetHitPointRollCommand` extended, every bare INSERT in §2's list updated, the
-  level-and-row single transaction, the command-layer guards from L-STRAIGHT and
-  L-SUBCLASS, row contracts, snapshot/backup/wire carry.
+  level-and-row single transaction, **the command-layer guards for ALL FOUR
+  refusals** — L-STRAIGHT, L-SUBCLASS, L-ASI-LEVELS and L-ADJACENT; §8b named
+  four and revision 3 assigned two, leaving two owned by nobody — row contracts,
+  and the persistence ritual of §8c (wire mint, snapshot decision, backup
+  default), which "carry" understated.
 - **L-B — the screen.** The level-up screen, the hit-point choice defaulting to
   fixed, the subclass choice at 3, **the increase at every ASI level the seeded
   data names** (§5 — this line said "the level-4 increase" through revision 3,
