@@ -288,6 +288,7 @@ export const COLUMN_FACTS = {
     intelligence: { base: 'integer', notNull: true },
     wisdom: { base: 'integer', notNull: true },
     charisma: { base: 'integer', notNull: true },
+    ability_allocation_method: { base: 'degraded', notNull: false },
     proficiency_bonus_override: { base: 'integer', notNull: false },
     rules_edition_preference: { base: 'degraded', notNull: true },
     allow_legacy: { base: 'degraded', notNull: true },

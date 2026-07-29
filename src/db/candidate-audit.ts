@@ -23,7 +23,7 @@ import {
   jsonColumnLocation,
 } from '../domain/contracts/json-columns';
 import {
-  CHARACTER_STATE_COLUMNS,
+  snapshotCharacterColumnsFor,
   snapshotSchemaVersion,
   snapshotTablesFor,
 } from '../character/character-state';
@@ -636,11 +636,14 @@ function auditSavePointSnapshots(db: Database): void {
     // would reject a legitimate user's whole database over a save point that
     // predates weapons, which is the D6b failure this pass exists to avoid.
     const tables = snapshotTablesFor(version);
+    // Columns, like tables, are audited at the VERSION'S OWN set: a pre-v8
+    // save point predates `ability_allocation_method`, and holding it to
+    // today's column list would reject a legitimate user's whole database.
     const characterError = rowContractError(
       'characters',
       snapshot.character,
       `${label}.character`,
-      CHARACTER_STATE_COLUMNS,
+      snapshotCharacterColumnsFor(version),
     );
     if (characterError !== null) {
       throw new CandidateAuditError(characterError);

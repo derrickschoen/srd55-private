@@ -1,6 +1,7 @@
 import { isSpellVersionKey } from '../catalog/catalog-key';
 import {
   abilities,
+  abilityAllocationMethods,
   armorCategories,
   armorDexBonuses,
   armorSlots,
@@ -9,6 +10,7 @@ import {
   effectKinds,
   weaponMasteryProperties,
   weaponProficiencyCategories,
+  type KnownAbilityAllocationMethod,
 } from '../domain/enums';
 import { characterLevel } from '../rules/character-level';
 import { weaponMasterySelectionError } from '../domain/contracts/row-rules';
@@ -127,6 +129,15 @@ export interface ShareCharacter {
   readonly intelligence?: number;
   readonly wisdom?: number;
   readonly charisma?: number;
+  /**
+   * D64's allocation signal, on the wire since v3. OPTIONAL MIRRORING THE
+   * NULLABLE COLUMN (D6/D6b): absent means never allocated. It MUST travel
+   * whenever it is set, because the exporter omits scores equal to 10 and the
+   * importer refills them — without the signal an allocated all-10s character
+   * (explicitly valid under D64) round-trips looking unallocated. That was a
+   * live defect; v3 exists to close it.
+   */
+  readonly ability_allocation_method?: KnownAbilityAllocationMethod;
   readonly proficiency_bonus_override?: number;
   readonly rules_edition_preference?: string;
   readonly allow_legacy?: true;
@@ -1491,6 +1502,7 @@ export function validateShareDocument(
       'intelligence',
       'wisdom',
       'charisma',
+      'ability_allocation_method',
       'proficiency_bonus_override',
       'rules_edition_preference',
       'allow_legacy',
@@ -1517,6 +1529,23 @@ export function validateShareDocument(
         30,
       );
     }
+  }
+  if (rawCharacter.ability_allocation_method !== undefined) {
+    const method = text(
+      rawCharacter.ability_allocation_method,
+      'character.ability_allocation_method',
+      40,
+    );
+    if (
+      !abilityAllocationMethods.includes(
+        method as (typeof abilityAllocationMethods)[number],
+      )
+    ) {
+      throw new ShareValidationError(
+        'character.ability_allocation_method is unsupported.',
+      );
+    }
+    character.ability_allocation_method = method;
   }
   if (rawCharacter.proficiency_bonus_override !== undefined) {
     character.proficiency_bonus_override = integer(

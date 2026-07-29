@@ -21,6 +21,7 @@ import {
 } from './row-rules';
 import {
   abilities,
+  abilityAllocationMethods,
   armorCategories,
   armorDexBonuses,
   armorSlots,
@@ -228,6 +229,7 @@ const sqlInteger = z.int();
 
 const rulesEditionEnum = z.enum(rulesEditions);
 const abilityEnum = z.enum(abilities);
+const abilityAllocationMethodEnum = z.enum(abilityAllocationMethods);
 const sourceTypeEnum = z.enum(domainSourceTypes);
 const slotBucketEnum = z.enum(slotBuckets);
 const slotStateEnum = z.enum(slotStates);
@@ -636,6 +638,10 @@ const REFINEMENTS = {
   'characters.intelligence': abilityScore,
   'characters.wisdom': abilityScore,
   'characters.charisma': abilityScore,
+  // Nullability comes from COLUMN_FACTS, never restated here: `columnSchema`
+  // adds `| null` because the column is nullable, and NULL means never
+  // allocated (plan §3.1).
+  'characters.ability_allocation_method': abilityAllocationMethodEnum,
   'characters.proficiency_bonus_override': positiveInt,
   'characters.rules_edition_preference': rulesEditionEnum,
   'characters.allow_legacy': sqlBool,

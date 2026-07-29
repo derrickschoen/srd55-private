@@ -7,7 +7,12 @@ import {
   type SqlRow,
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
-import type { AddableSourceType } from '../domain/enums';
+import {
+  abilityAllocationMethods,
+  isEnumValue,
+  type AddableSourceType,
+  type KnownAbilityAllocationMethod,
+} from '../domain/enums';
 import { splitLegacyTraitEffect } from '../rules/legacy-trait-effects';
 import {
   SHARE_TABLES,
@@ -236,6 +241,24 @@ function optionalDefault<T>(
   defaultValue: T,
 ): T | undefined {
   return Object.is(value, defaultValue) ? undefined : value;
+}
+
+/**
+ * The stored allocation method, narrowed rather than cast: the CHECK closes
+ * the column's vocabulary, so a non-member here is stored corruption and the
+ * export refuses it with a sentence instead of minting a link its own
+ * importer would reject.
+ */
+function storedAllocationMethod(
+  value: unknown,
+): KnownAbilityAllocationMethod {
+  const method = String(value);
+  if (!isEnumValue(abilityAllocationMethods, method)) {
+    throw new ShareValidationError(
+      `stored ability_allocation_method '${method}' is unsupported.`,
+    );
+  }
+  return method;
 }
 
 function contentKey(
@@ -931,6 +954,18 @@ export function exportCharacterShare(
       ...(optionalDefault(Number(character.charisma), 10) === undefined
         ? {}
         : { charisma: Number(character.charisma) }),
+      // THE ALLOCATION SIGNAL ALWAYS TRAVELS WHEN SET (v3). The six scores
+      // above compress away when they equal the default 10, so this field is
+      // the only thing that keeps an allocated all-10s character — valid under
+      // D64 — from round-tripping as unallocated. NULL (never allocated) stays
+      // absent, mirroring the column.
+      ...(character.ability_allocation_method === null
+        ? {}
+        : {
+            ability_allocation_method: storedAllocationMethod(
+              character.ability_allocation_method,
+            ),
+          }),
       ...(character.proficiency_bonus_override === null
         ? {}
         : {
@@ -1266,17 +1301,23 @@ export function importCharacterShare(
     const characterId = db.exec(
       `INSERT INTO characters (
          name, strength, dexterity, constitution, intelligence, wisdom,
-         charisma, proficiency_bonus_override, rules_edition_preference,
-         allow_legacy, revision, notes, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+         charisma, ability_allocation_method, proficiency_bonus_override,
+         rules_edition_preference, allow_legacy, revision, notes,
+         created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
       [
         c.name,
+        // `?? 10` refills the scores the exporter compressed away — which is
+        // exactly why the allocation signal below must travel independently:
+        // without it an allocated all-10s character (valid, D64) arrived
+        // looking unallocated.
         c.strength ?? 10,
         c.dexterity ?? 10,
         c.constitution ?? 10,
         c.intelligence ?? 10,
         c.wisdom ?? 10,
         c.charisma ?? 10,
+        c.ability_allocation_method ?? null,
         c.proficiency_bonus_override ?? null,
         c.rules_edition_preference ?? '2024',
         c.allow_legacy === true ? 1 : 0,

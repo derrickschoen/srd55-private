@@ -2,6 +2,8 @@ import type { CharacterCommandPayload } from '../domain/command-contracts';
 import type { CharacterRow } from '../domain/models';
 import {
   GUIDED_RPC,
+  type GuidedAllocateAbilitiesParams,
+  type GuidedAllocateAbilitiesResult,
   type GuidedBuildStateParams,
   type GuidedBuildStateResult,
   type GuidedClassOption,
@@ -82,6 +84,9 @@ export interface QueriesClient extends CatalogClient {
     kind: OriginKind,
     contentKey: string,
   ): Promise<GuidedApplyOriginResult>;
+  allocateAbilities(
+    params: GuidedAllocateAbilitiesParams,
+  ): Promise<GuidedAllocateAbilitiesResult>;
 }
 
 export function createQueriesClient(rpc: RpcClient): QueriesClient {
@@ -221,6 +226,11 @@ export function createQueriesClient(rpc: RpcClient): QueriesClient {
           kind,
           content_key: contentKey,
         },
+      ),
+    allocateAbilities: (params: GuidedAllocateAbilitiesParams) =>
+      rpc.call<GuidedAllocateAbilitiesParams, GuidedAllocateAbilitiesResult>(
+        GUIDED_RPC.allocateAbilities,
+        params,
       ),
   });
 }

@@ -4,6 +4,7 @@ import type {
 } from '../domain/command-contracts';
 import { AcknowledgeWarningCommand } from './acknowledge-warning';
 import { AddSourceCommand } from './add-source';
+import { AllocateAbilitiesCommand } from './allocate-abilities';
 import type { CharacterCommandIntegrity } from './integrity';
 import {
   CharacterCommandPayloadValidator,
@@ -74,6 +75,8 @@ export class CharacterCommandFactory {
     switch (payload.type) {
       case 'update_ability':
         return new UpdateAbilityCommand(this.db, payload);
+      case 'allocate_abilities':
+        return new AllocateAbilitiesCommand(this.db, payload);
       case 'set_slot':
         switch (payload.mode) {
           case 'select':

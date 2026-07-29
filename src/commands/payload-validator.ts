@@ -1,6 +1,7 @@
 import type { CharacterCommandPayload } from '../domain/command-contracts';
 import {
   abilities,
+  abilityAllocationMethods,
   armorCategories,
   armorDexBonuses,
   armorSlots,
@@ -28,6 +29,7 @@ type UnknownRecord = Record<string, unknown>;
 
 const commandTypes = [
   'update_ability',
+  'allocate_abilities',
   'set_slot',
   'update_character_rules',
   'update_source_config',
@@ -208,6 +210,31 @@ function validateUpdateAbility(record: UnknownRecord): void {
     invalid('Unknown ability.');
   }
   requiredInteger(record, 'score');
+}
+
+/**
+ * The atomic allocation (plan §3.1): EVERY one of the six abilities must be
+ * present — a partial map would be exactly the partial allocation the single
+ * command exists to make unrepresentable. Bounds are the schema's own 1–30;
+ * all 10s is VALID (D64), not an error state.
+ */
+function validateAllocateAbilities(record: UnknownRecord): void {
+  rejectUnknown(record, ['type', 'method', 'scores', 'reason']);
+  const method = requiredString(record, 'method', 40);
+  if (!isEnumValue(abilityAllocationMethods, method)) {
+    invalid('Unknown ability allocation method.');
+  }
+  const scores = objectValue(
+    record.scores,
+    'Ability scores must be an object.',
+  );
+  rejectUnknown(scores, abilities, 'ability scores');
+  for (const ability of abilities) {
+    if (!hasOwn(scores, ability)) {
+      invalid(`Ability scores are missing ${ability}.`);
+    }
+    boundedInteger(scores, ability, 1, 30);
+  }
 }
 
 function validateSetSlot(record: UnknownRecord): void {
@@ -801,6 +828,9 @@ function validateByType(
   switch (type) {
     case 'update_ability':
       validateUpdateAbility(record);
+      return record;
+    case 'allocate_abilities':
+      validateAllocateAbilities(record);
       return record;
     case 'set_slot':
       validateSetSlot(record);

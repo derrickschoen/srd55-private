@@ -19,6 +19,7 @@ import type {
 import type {
   Ability,
   DomainSourceType,
+  KnownAbilityAllocationMethod,
   RulesEdition,
   SelectionEligibility,
   SlotBucket,
@@ -26,6 +27,7 @@ import type {
 } from '../../src/domain/enums';
 import {
   abilities,
+  abilityAllocationMethods,
   rulesEditions,
   selectionEligibilities,
   slotBuckets,
@@ -65,6 +67,20 @@ export const characters = sqliteTable('characters', {
   intelligence: integer('intelligence').notNull().default(10),
   wisdom: integer('wisdom').notNull().default(10),
   charisma: integer('charisma').notNull().default(10),
+  /**
+   * How the six base scores were allocated (D64), or NULL for never allocated.
+   *
+   * A DEFENDED NULL, and the whole point of the column: the six score columns
+   * are NOT NULL with a DEFAULT of 10, so nothing else in the schema can
+   * distinguish a chosen 10 from a defaulted one (plan B-A2). The method
+   * doubles as the allocation signal — one column serves D64's method warnings
+   * and the abilities step's completion detection, so there is no second
+   * thing to keep in step. Written only by the atomic `allocate_abilities`
+   * command; `update_ability` edits never touch it.
+   */
+  ability_allocation_method: varchar<KnownAbilityAllocationMethod>()(
+    'ability_allocation_method',
+  ),
   /** Null means "derive from total level"; it is a genuine override slot. */
   proficiency_bonus_override: integer('proficiency_bonus_override'),
   rules_edition_preference: varchar<RulesEdition>()('rules_edition_preference')
@@ -99,6 +115,16 @@ export const characters = sqliteTable('characters', {
    * constraint exists to make impossible. Both restore paths already refuse it
    * in a document (`character-backup.ts`, `sharing/schema.ts`).
    */
+  /**
+   * NULL is the never-allocated state and is the constraint's most important
+   * limb. A non-member here would make the guided builder's completion
+   * detection lie in both directions at once — an unknown method neither warns
+   * (D64 keys warnings on the method) nor reads as unallocated.
+   */
+  check(
+    'characters_ability_allocation_method_check',
+    nullOrOneOf('ability_allocation_method', abilityAllocationMethods),
+  ),
   check(
     'characters_rules_edition_preference_check',
     oneOf('rules_edition_preference', rulesEditions),

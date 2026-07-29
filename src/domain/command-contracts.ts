@@ -5,6 +5,7 @@ import type {
   ArmorDexBonus,
   ArmorSlot,
   DamageType,
+  KnownAbilityAllocationMethod,
   SelectionEligibility,
   Skill,
   SlotState,
@@ -27,6 +28,19 @@ export interface UpdateAbilityCommand extends CommandBase {
   type: 'update_ability';
   ability: Ability;
   score: number;
+}
+
+/**
+ * The guided abilities step's ONE atomic write (plan §3.1): all six base
+ * scores AND the allocation method together. Not six `update_ability` calls —
+ * the step is one decision, and partial allocation is not a state the wizard
+ * should be able to produce. Its inverse is a SNAPSHOT inverse, so undo
+ * restores the signal with the scores.
+ */
+export interface AllocateAbilitiesCommand extends CommandBase {
+  type: 'allocate_abilities';
+  method: KnownAbilityAllocationMethod;
+  scores: Readonly<Record<Ability, number>>;
 }
 
 export interface SlotRestoreState {
@@ -267,6 +281,7 @@ export interface RestoreSnapshotCommand extends CommandBase {
 
 export type CharacterCommandPayload =
   | UpdateAbilityCommand
+  | AllocateAbilitiesCommand
   | SetSlotCommand
   | UpdateCharacterRulesCommand
   | UpdateSourceConfigCommand

@@ -406,6 +406,14 @@ export class CharacterCommandExecutor {
         // undo visibly repeats the action instead of quietly doing something
         // almost right.
         return payload;
+      // `allocate_abilities` is PINNED to a snapshot inverse (plan §3.1): root
+      // columns come back only through a snapshot whose projection includes
+      // them, and `ability_allocation_method` is in `CHARACTER_STATE_COLUMNS`,
+      // so undo restores the allocation signal WITH the six scores. Six
+      // `update_ability` inverses would restore the numbers and leave the
+      // signal standing — a character that reads as allocated to scores nobody
+      // allocated.
+      case 'allocate_abilities':
       case 'choose_multiclass_skill':
       case 'update_source_config':
       case 'add_source':

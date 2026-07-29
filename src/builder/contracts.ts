@@ -480,3 +480,77 @@ export interface ResolvedAbility {
 }
 
 export type ResolvedAbilities = Readonly<Record<Ability, ResolvedAbility>>;
+
+/* ------------------------------------------- abilities step, ratified from B1 */
+
+/**
+ * Three gaps the B1 implementer found and REPORTED rather than filled silently.
+ * §3.6 promised all three and the seam shipped none of them; the values are the
+ * implementer's, ratified here BEFORE the tests are written — which is the only
+ * direction that works, since a test written first would have pinned itself.
+ */
+
+/** §3.6 promised "plus its exact-keys validator" and the seam had no validator. */
+export function isGuidedAllocateAbilitiesParams(
+  value: unknown,
+): value is GuidedAllocateAbilitiesParams {
+  if (
+    !hasExactKeys(value, [
+      'character_id',
+      'method',
+      'scores',
+      'operation_uuid',
+      'expected_revision',
+    ])
+  ) {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  const scores = candidate['scores'];
+  if (typeof scores !== 'object' || scores === null) return false;
+  const everyAbilityScored = (
+    Object.values(scores as Record<string, unknown>) as unknown[]
+  ).every(
+    (score) =>
+      typeof score === 'number' &&
+      Number.isInteger(score) &&
+      score >= ABILITY_SCORE_MIN &&
+      score <= ABILITY_SCORE_MAX,
+  );
+  return (
+    typeof candidate['character_id'] === 'number' &&
+    Number.isInteger(candidate['character_id']) &&
+    candidate['character_id'] > 0 &&
+    (candidate['method'] === 'standard_array' ||
+      candidate['method'] === 'point_buy' ||
+      candidate['method'] === 'manual') &&
+    everyAbilityScored &&
+    typeof candidate['operation_uuid'] === 'string' &&
+    candidate['operation_uuid'].length > 0 &&
+    typeof candidate['expected_revision'] === 'number' &&
+    Number.isInteger(candidate['expected_revision']) &&
+    candidate['expected_revision'] >= 0
+  );
+}
+
+/**
+ * The step's locators. §3.6 pinned only the panel, which would have left the
+ * test author inventing a second set — the exact divergence that made A1's and
+ * A3's panel locators worth ratifying.
+ */
+export const ABILITY_STEP_ATTR = Object.freeze({
+  method: 'data-ability-method',
+  input: 'data-ability-input',
+  warnings: 'data-ability-warnings',
+  warning: 'data-ability-warning',
+  submit: 'data-ability-submit',
+  pointBuyBudget: 'data-point-buy-budget',
+} as const);
+
+/**
+ * The production rules module holding the SRD standard array and point costs.
+ * §3.6 listed "the production rules module path" as a seam addition and neither
+ * the plan nor the seam ever named it; `B1-ARRAY`'s author needs it.
+ */
+export const ABILITY_GENERATION_RULES_MODULE =
+  'src/rules/ability-score-generation-srd.ts';

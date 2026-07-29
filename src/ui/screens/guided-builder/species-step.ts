@@ -181,15 +181,6 @@ export const LINEAGE_GATED_SPELLS_DISCLOSURE =
   'applying this species grants no spells today.';
 
 /**
- * D33 disclosure for the step this group never built. `deriveBuildStep` pins
- * abilities complete because nothing can detect allocation; the person on this
- * screen is told rather than left to notice the step list jumped.
- */
-export const ABILITIES_SKIPPED_DISCLOSURE =
-  'The Ability scores step is not built yet, so the guided builder has ' +
-  'skipped it: no scores have been asked for or chosen.';
-
-/**
  * The worker refuses `unknown_origin` as `handler_error` with structured
  * `data.reason` (seam, `GuidedRefusalData`). Anything else is not a refusal
  * and falls through to the raw message.
@@ -354,10 +345,6 @@ export function createSpeciesStep(deps: SpeciesStepDeps): SpeciesStep {
           'Applying a species copies its printed traits, speed and effects ' +
           'onto the character, and they appear on the sheet immediately. ' +
           'Choosing again later replaces the earlier species.',
-      }),
-      element('p', {
-        className: 'guided-abilities-skipped',
-        text: ABILITIES_SKIPPED_DISCLOSURE,
       }),
       ...(deps.options.length === 0
         ? [

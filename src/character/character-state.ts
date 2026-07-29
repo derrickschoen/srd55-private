@@ -40,6 +40,17 @@ import { fillAddedNullableRowColumns } from '../domain/contracts/historical-row-
  * columns with the tagged range triplet. Versions 2 through 6 remain readable
  * through `migrateLegacyWeaponRangeRow`.
  *
+ * `a7-v8` changes no table list either. It is the FIRST bump for a COLUMN
+ * rather than a table: the `character` projection gains
+ * `ability_allocation_method` (the D64 allocation signal). Snapshot versioning
+ * covered only tables until now, and both validators required the current
+ * column list against every accepted version — which would have broken all
+ * seven kept versions the moment the column was added. So columns are now
+ * versioned too (`SNAPSHOT_CHARACTER_COLUMNS_BY_VERSION`): the column is
+ * required at `a7-v8`, absent below it, and `restore` writes NULL for it when
+ * the snapshot predates it — the snapshot genuinely records a character from
+ * before allocation could be recorded, and NULL is that state's honest value.
+ *
  * NOT BUMPING WOULD HAVE BEEN THE LOUDEST FAILURE IN THIS CHANGE.
  * `SNAPSHOT_TABLES_BY_VERSION` aliases the CURRENT version to the live
  * `CHARACTER_STATE_TABLES`, so adding four tables without minting `a7-v4` would
@@ -49,7 +60,7 @@ import { fillAddedNullableRowColumns } from '../domain/contracts/historical-row-
  * containing one. Undo, save-point restore and `exportCharacterBackup` — which
  * re-parses its own stored save points on the way out — would break together.
  */
-export const CHARACTER_SNAPSHOT_SCHEMA_VERSION = 'a7-v7' as const;
+export const CHARACTER_SNAPSHOT_SCHEMA_VERSION = 'a7-v8' as const;
 
 /**
  * WHICH TABLES EACH SNAPSHOT VERSION CARRIES.
@@ -131,6 +142,15 @@ const A7_V5_TABLES = [
 /** `a7-v6` weapon rows still carry the retired normal/long range columns. */
 const A7_V6_TABLES = [...A7_V5_TABLES] as const satisfies readonly SnapshotTable[];
 
+/**
+ * `a7-v7` becomes a HISTORICAL FACT at the `a7-v8` bump, for the reason every
+ * predecessor did: until this change it was an ALIAS for the live list, which
+ * is correct only while it is the current version. Its table list equals the
+ * current one; what distinguishes it is its `character` COLUMN set — see
+ * `SNAPSHOT_CHARACTER_COLUMNS_BY_VERSION` below.
+ */
+const A7_V7_TABLES = [...A7_V6_TABLES] as const satisfies readonly SnapshotTable[];
+
 const SNAPSHOT_TABLES_BY_VERSION = {
   'a7-v1': A7_V1_TABLES,
   'a7-v2': A7_V2_TABLES,
@@ -138,7 +158,8 @@ const SNAPSHOT_TABLES_BY_VERSION = {
   'a7-v4': A7_V4_TABLES,
   'a7-v5': A7_V5_TABLES,
   'a7-v6': A7_V6_TABLES,
-  'a7-v7': CHARACTER_STATE_TABLES,
+  'a7-v7': A7_V7_TABLES,
+  'a7-v8': CHARACTER_STATE_TABLES,
 } as const satisfies Readonly<Record<string, readonly SnapshotTable[]>>;
 
 /**
@@ -160,6 +181,7 @@ export const CHARACTER_SNAPSHOT_SCHEMA_VERSIONS = [
   'a7-v5',
   'a7-v6',
   'a7-v7',
+  'a7-v8',
 ] as const satisfies readonly (keyof typeof SNAPSHOT_TABLES_BY_VERSION)[];
 
 export type CharacterSnapshotSchemaVersion =
@@ -183,6 +205,31 @@ export function snapshotTablesFor(
 }
 
 /**
+ * WHICH `character` COLUMNS EACH SNAPSHOT VERSION CARRIES — the column-level
+ * twin of `SNAPSHOT_TABLES_BY_VERSION`, new at `a7-v8`.
+ *
+ * The pre-v8 list is a HISTORICAL FACT written out by hand, exactly as the
+ * historical table lists are and for the same reason: deriving it as "the
+ * current list minus the new column" would make it silently follow the next
+ * column addition and start lying about snapshots already on a user's disk.
+ * Versions 1 through 7 all captured the same eleven columns, so one frozen
+ * list serves all seven.
+ */
+const PRE_V8_CHARACTER_COLUMNS = [
+  'name',
+  'strength',
+  'dexterity',
+  'constitution',
+  'intelligence',
+  'wisdom',
+  'charisma',
+  'proficiency_bonus_override',
+  'rules_edition_preference',
+  'allow_legacy',
+  'notes',
+] as const;
+
+/**
  * Every accepted version carries a SUBSET of the current tables.
  *
  * A version naming a table the schema no longer classifies as snapshot-scoped
@@ -199,18 +246,55 @@ export type _SnapshotVersionsAreSubsets = [
   : never;
 
 export const CHARACTER_STATE_COLUMNS = [
-  'name',
-  'strength',
-  'dexterity',
-  'constitution',
-  'intelligence',
-  'wisdom',
-  'charisma',
-  'proficiency_bonus_override',
-  'rules_edition_preference',
-  'allow_legacy',
-  'notes',
+  ...PRE_V8_CHARACTER_COLUMNS,
+  /**
+   * The D64 allocation signal, added at `a7-v8`. In this list so that a
+   * snapshot restore — including the `allocate_abilities` command's snapshot
+   * inverse — restores the signal WITH the scores: root columns come back only
+   * through a snapshot whose projection includes the column.
+   */
+  'ability_allocation_method',
 ] as const;
+
+const SNAPSHOT_CHARACTER_COLUMNS_BY_VERSION = {
+  'a7-v1': PRE_V8_CHARACTER_COLUMNS,
+  'a7-v2': PRE_V8_CHARACTER_COLUMNS,
+  'a7-v3': PRE_V8_CHARACTER_COLUMNS,
+  'a7-v4': PRE_V8_CHARACTER_COLUMNS,
+  'a7-v5': PRE_V8_CHARACTER_COLUMNS,
+  'a7-v6': PRE_V8_CHARACTER_COLUMNS,
+  'a7-v7': PRE_V8_CHARACTER_COLUMNS,
+  'a7-v8': CHARACTER_STATE_COLUMNS,
+} as const satisfies Readonly<
+  Record<CharacterSnapshotSchemaVersion, readonly string[]>
+>;
+
+/**
+ * The `character` columns a snapshot of the given version is REQUIRED to
+ * carry. A column a version does not carry is absent, not defaulted — the
+ * validators require exactly this set per version, and `restore` writes NULL
+ * for any current column the version predates.
+ */
+export function snapshotCharacterColumnsFor(
+  version: CharacterSnapshotSchemaVersion,
+): readonly (typeof CHARACTER_STATE_COLUMNS)[number][] {
+  return SNAPSHOT_CHARACTER_COLUMNS_BY_VERSION[version];
+}
+
+/**
+ * Every accepted version's column set is a SUBSET of the current columns, for
+ * the reason `_SnapshotVersionsAreSubsets` gives about tables: a version
+ * naming a column the projection no longer holds would make `restore` build an
+ * UPDATE against a column it must not touch.
+ */
+export type _SnapshotColumnVersionsAreSubsets = [
+  Exclude<
+    (typeof SNAPSHOT_CHARACTER_COLUMNS_BY_VERSION)[CharacterSnapshotSchemaVersion][number],
+    (typeof CHARACTER_STATE_COLUMNS)[number]
+  >,
+] extends [never]
+  ? true
+  : never;
 
 /**
  * The tables an undo/redo snapshot captures.
@@ -464,10 +548,16 @@ export class CharacterState {
    * so they make no claim about effects and this leaves the table alone.
    */
   restore(characterId: number, snapshot: unknown): void {
-    const { character, rows, tables } = this.validateSnapshot(
+    const { character, columns, rows, tables } = this.validateSnapshot(
       characterId,
       snapshot,
     );
+    // A current column the snapshot's version predates restores as NULL: the
+    // snapshot records a character from before that column could hold
+    // anything, and NULL is that state's honest value. For
+    // `ability_allocation_method` specifically, NULL is "never allocated" —
+    // which is exactly what was true when the snapshot was written.
+    const carriedColumns = new Set<string>(columns);
     const carried = new Set<string>(tables);
     const legacyTraits =
       carried.has('character_species_traits') && !carried.has('character_effects')
@@ -489,7 +579,10 @@ export class CharacterState {
          WHERE id = ?`,
         [
           ...CHARACTER_STATE_COLUMNS.map(
-            (column) => character[column] as SqlValue,
+            (column) =>
+              (carriedColumns.has(column)
+                ? character[column]
+                : null) as SqlValue,
           ),
           characterId,
         ],
@@ -594,6 +687,7 @@ export class CharacterState {
     snapshot: unknown,
   ): {
     character: SnapshotObject;
+    columns: readonly (typeof CHARACTER_STATE_COLUMNS)[number][];
     rows: Partial<Record<CharacterStateTable, SnapshotRow[]>>;
     tables: readonly CharacterStateTable[];
   } {
@@ -608,7 +702,10 @@ export class CharacterState {
     if (!isObject(character)) {
       throw new Error('Character snapshot is missing character data.');
     }
-    for (const column of CHARACTER_STATE_COLUMNS) {
+    // Required columns are the VERSION'S OWN, not the current list: an
+    // `a7-v7` snapshot predates `ability_allocation_method` and demanding it
+    // would refuse every save point already on a user's disk.
+    for (const column of snapshotCharacterColumnsFor(version)) {
       if (!Object.hasOwn(character, column)) {
         throw new Error(`Character snapshot is missing ${column}.`);
       }
@@ -681,6 +778,11 @@ export class CharacterState {
       }
     }
 
-    return { character, rows, tables };
+    return {
+      character,
+      columns: snapshotCharacterColumnsFor(version),
+      rows,
+      tables,
+    };
   }
 }

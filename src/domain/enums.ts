@@ -8,6 +8,24 @@ export const abilities = [
 ] as const;
 export type Ability = (typeof abilities)[number];
 
+/**
+ * How a character's six base ability scores were allocated (D64). NULL in the
+ * column means never allocated — the method doubles as the allocation signal,
+ * so there is no second thing to keep in step.
+ *
+ * The seam (`src/builder/contracts.ts`) declares the same union as
+ * `AbilityAllocationMethod`; the seam is supervisor-owned, so the runtime
+ * vocabulary lives here and `src/builder/guided-creation.ts` proves the two
+ * identical at compile time.
+ */
+export const abilityAllocationMethods = [
+  'standard_array',
+  'point_buy',
+  'manual',
+] as const;
+export type KnownAbilityAllocationMethod =
+  (typeof abilityAllocationMethods)[number];
+
 export const progressionTypes = [
   'full',
   'half_up',

@@ -26,7 +26,7 @@ contracts field by field.
 ## Logical semantics
 
 The readable object form uses the format marker
-`dnd-multiclass-spells-character-share` and version `2`. Unknown fields are
+`dnd-multiclass-spells-character-share` and version `3`. Unknown fields are
 rejected.
 
 Notes are not one policy, and the line between them is which side of the
@@ -117,13 +117,25 @@ positions respectively. Thus v2 accepts root 16, character 11, class 8, source
 6, and weapon 21. The placeholder move—not an appended character field—is the
 wire-v2 placeholder mechanism.
 
+Version 3 changes exactly one structure: the character tuple appends
+`ability_allocation_method` (D64's allocation signal — `standard_array`,
+`point_buy`, or `manual`, `null` when never allocated), taking the character
+tuple from 11 to 12 positions. Every earlier position keeps its meaning. The
+field exists because the exporter omits scores equal to the default 10 and the
+importer refills them: without the signal on the wire, an allocated all-10s
+character — explicitly valid under D64 — round-tripped looking unallocated.
+
 The adjacent v1-to-v2 migration pads historical short roots without inventing
 optional sections, moves placeholders and the optional character note to their
 v2 positions, upgrades old weapon damage variants, and maps all five possible
 range pairs through the shared weapon-range boundary: null/null, near-only,
 ordinary, long-only, and inverted. It never coerces, rejects, or drops either
-v1 range field. Decoding dispatches from the frozen root version and applies
-that migration before v2 validation; encoding always writes v2.
+v1 range field. The adjacent v2-to-v3 migration null-pads the character tuple's
+new trailing position: a v2 link could not carry the allocation signal, and
+`null` is the never-allocated state that was true when it was minted. Decoding
+dispatches from the frozen root version and composes the adjacent migrations
+(a v1 link lifts 1→2 then 2→3) before current-version validation; encoding
+always writes v3.
 
 Within any accepted variant, an absent optional/default field occupies its
 assigned `null` position. `null` preserves field position; it does not imply

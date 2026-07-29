@@ -2,6 +2,7 @@ import type {
   Ability,
   DomainSourceType,
   EffectReliabilityCategory,
+  KnownAbilityAllocationMethod,
   MaterialCostKind,
   ProgressionType,
   RulesEdition,
@@ -104,6 +105,11 @@ export interface CharacterRow extends TimestampedRow {
   intelligence: number;
   wisdom: number;
   charisma: number;
+  /**
+   * How the six base scores were allocated (D64); NULL means never allocated.
+   * The nullable method IS the allocation signal — see `db/schema/character.ts`.
+   */
+  ability_allocation_method: KnownAbilityAllocationMethod | null;
   proficiency_bonus_override: number | null;
   rules_edition_preference: RulesEdition;
   allow_legacy: boolean;
