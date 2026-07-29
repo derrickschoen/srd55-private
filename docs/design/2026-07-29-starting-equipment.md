@@ -54,11 +54,35 @@ picks a singular weapon; E-NO-GEAR *passes* when daggers mint nothing. All six g
 green on a build that silently disarms a Bard. That is §5's trap one layer down:
 correct totals attached to the wrong **classification**.
 
-**PINNED: the seed classification is fixed, not worked around.** A leading count
-followed by a plural resolves to `quantity: N` against the singular template, so
-"8 Javelins" becomes eight Javelin rows' worth of one linked item. Pre-alpha
-licenses replacing the parser rather than accommodating it. **A control must fail
-when a plural bundle mints nothing** — E-PLURAL, below.
+**PINNED: the seed classification is fixed — and revision 2 pinned it to the
+WRONG MECHANISM, which a second reviewer caught and I confirmed.** Revision 2
+said "a leading count followed by a plural resolves to `quantity: N` against the
+singular template." That is strip-the-`s`-and-look-it-up: **deciding a mechanical
+fact by matching text, which D15 forbids** — and the codebase has already applied
+that refusal to *this exact problem*. `origins-srd.ts:874-877` states it: *"D15
+REFUSED DECIDING A MECHANICAL FACT BY MATCHING TEXT… A name-matching resolver
+would miss `2 Daggers` outright — the count comes off, but the name that remains
+is `Daggers` and the template is `Dagger`, singular."* It names my own failing
+case. The background side solved it with a **declared map**,
+`DECLARED_WEAPON_EQUIPMENT` (`:874-947`), guarded by
+`assertEquipmentLinksAreExercised` (`:948-969`), which **throws if a declared
+entry stops appearing in the extract** — closing the drift hole a regex leaves
+open.
+
+**PINNED, corrected: the class side gets a `DECLARED_WEAPON_EQUIPMENT`-shaped
+map of its own, mirroring `origins-srd.ts`, with the same exercised-entries
+assertion. No singularisation algorithm.**
+
+**And what happens on NO MATCH must be stated, because revision 2 never did.**
+`"20 Arrows"` appears on three class lines (Fighter B, Ranger A, Rogue A) in the
+identical shape to the nine broken ones — but **`Arrow` is not a weapon template
+at all** (zero matches in `weapons-table.txt`; ammunition is not tracked as a
+weapon). Under revision 2's algorithm this is undefined behaviour on real seeded
+data the plan had already read. **Pinned: no declared entry means the row REMAINS
+GEAR**, which is right for arrows, right for `Quiver`, and right for
+`Druidic Focus (Quarterstaff)` — a qualified name that is not an item name.
+
+**A control must fail when a plural bundle mints nothing** — E-PLURAL, below.
 
 Revision 1 also got its own worked example wrong twice: Fighter B is *Studded
 Leather, Scimitar, Shortsword, Longbow, 20 Arrows, Quiver, 11 GP*, not what I
@@ -140,8 +164,34 @@ number from before S-A shifted the file: F17, positional anchors drift, inside
 the plan that warns about it. No bump is minted here, but if one ever is, both
 maps freeze.
 
-**What remains:** migration `0011`, share wire **v6**, backup carry, row
-contracts.
+**What remains:** migration `0011`, share wire **v6**, row contracts, and the
+backup remap below — which revision 2 hid inside the two words "backup carry".
+
+### The backup import remap, named site by site
+
+A reviewer called this the single most likely dispatch failure and I confirmed
+every site. `character-backup.ts` currently places `character_weapons` and
+`character_armor` among the tables with **nothing to remap**, and each placement
+is justified by a comment invoking **D1b**:
+
+- `:1833-1836` — *"No reference to resolve and no foreign key but `character_id`:
+  a weapon holds no template id by D1b, so the row travels exactly as written."*
+- `:1903-1910` — armour, same treatment.
+- `:2225-2231` — the save-point rewrite groups `character_weapons` with
+  `warning_acknowledgements` under *"Only id and ownership are rewritten."*
+
+**The moment `source_instance_id` exists, that D1b premise is FALSE at all three
+sites.** The fix is not invention: `character_effects` sits in the same file with
+its own branch precisely because *"it is the first character-owned table to
+reference another one, so its `source_instance_id` must be remapped… Leaving it
+in the group would write a snapshot pointing at another character's source
+instance — which the composite foreign key would then refuse."* Copy the
+**nullable-remap** shape (`character_effects`), **not** the throw-on-missing
+shape (`character_skill_grants`), because NULL is a legitimate value here.
+
+Left unfixed, a D62 import-as-clone of a character with a granted weapon either
+violates the composite FK or silently points the clone's weapon at a stranger's
+source instance. **This is a named line item in E-A, not folded into "carry".**
 
 **Wire v6, which revision 1 left silent.** `AdjacentMigrations`
 (`src/sharing/wire-schemas/index.ts`) forces a `migrateV5ToV6` to exist —
@@ -231,9 +281,15 @@ the wrong provenance*, which passed four controls before a fifth caught it.
   mutation**, and the GP line has no code site distinct from E-NO-GEAR because it
   *is* a gear row (`equipment-packages.ts:83-90`). This is the
   mutation-lands-in-nothing class this effort has already been bitten by. The
-  fireable shape: **mutate away the coin-line display filter**, and assert that a
-  Fighter's rendered package contents do **not** include "4 GP" and that
-  gold-only options are **not offered** at all.
+  fireable shape — **and revision 2's retarget was still two controls wearing one
+  name**, with the second half unfalsifiable by the named mutation. Split:
+- **E-NO-GOLD-SHOWN** — mutate away the coin-line display filter. Must fail: a
+  Fighter's rendered package contents do **not** include "4 GP".
+- **E-NO-GOLD-OFFERED** — mutate away the gold-only option filter, a **different
+  code path**: whichever decides which options the step presents. Must fail: a
+  Wizard is offered exactly **one** option, not two. Under revision 2's single
+  mutation this half held whether applied or reverted — the same
+  mutation-lands-in-nothing trap the paragraph above it warns about.
 - **E-PLURAL** *(new — §0b)* — mutate the seed classification back to leaving
   plurals as gear. Must fail: **a Bard's option A mints two Daggers**, as owned
   weapon rows with the class source stamped. This is the control whose absence
@@ -246,6 +302,21 @@ the wrong provenance*, which passed four controls before a fifth caught it.
 Every fixture must make its mutation observable. A class whose only option
 contains no weapons cannot exercise E-SOURCE; a fixture with no hand-added
 weapon cannot exercise E-PRESERVE.
+
+## 6b. The seam, pinned here because every dispatch in this project has found a gap
+
+Revision 2 had no equivalent of the skills plan's §3.6 and would have sent two
+implementers to diverge. Pinned in `src/builder/contracts.ts` **before either
+dispatch is cut**:
+
+- the column name `source_instance_id` on both tables, nullable, NULL = added by
+  a person
+- the `config` key holding the choice, and the shape of its value (source kind +
+  option letter)
+- the armour-collision refusal reason **string**, which revision 2 described only
+  as *"the shape S-B built for `skill_already_held`"* without ever naming it
+- the wire v6 field name for the weapon and armour `sourceRef`
+- the declared class weapon-equipment map's module path
 
 ## 7. Dispatches
 
