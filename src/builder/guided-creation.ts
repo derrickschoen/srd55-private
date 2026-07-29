@@ -82,9 +82,7 @@ import {
 } from '../rules/background-definitions-srd';
 import { bundledFeatDefinitions } from '../rules/feats-srd';
 import {
-  backgroundPairingDeviation,
   BACKGROUND_ABILITY_INCREASE_MAXIMUM,
-  MAGIC_INITIATE_FEAT_CONTENT_KEY,
   printedPairing,
   type GuidedApplyBackgroundParams,
   type GuidedBackgroundChoiceOptions,
@@ -1123,7 +1121,8 @@ function bundledOriginFeatKeysByName(): ReadonlyMap<string, string> {
 
 /**
  * The background step's option data: every bundled background with its
- * printed pairing (the SRD's suggestion, per D61 never a constraint), and
+ * printed pairing (the background's own DEFAULT, per D61/D68 never a
+ * constraint), and
  * every bundled Origin feat the player may pick instead. Both lists follow
  * the class-options rule — a bundled key whose row was yielded to
  * user-authored content is simply not offered.
@@ -1252,11 +1251,10 @@ function backgroundSkillsFromTemplate(
  * (`docs/srd/source/backgrounds.txt:51`), carried per contribution because
  * other sources genuinely differ (Epic Boons stop at 30).
  *
- * THE DEVIATION IS LABELLED WHERE A PERSON CAN SEE IT (D61): when the chosen
- * combination is not the SRD's printed pairing,
- * `backgroundPairingDeviation`'s sentence is persisted into each
- * contribution's `notes` — travelling with the rows through share and backup
- * — and the step shows the same sentence live while the choice is being made.
+ * NO LABEL IS PERSISTED (D68): a chosen combination that differs from the
+ * printed pairing is ordinary use, not a house rule, so the contributions'
+ * `notes` stay null. The deviation sentence D61 used to persist here was
+ * deleted with the ruling — see the D68 note in `background-choices.ts`.
  *
  * NO DEFINITION IS A REFUSAL HERE, NOT A QUIET NO-OP, and the difference from
  * the species bridge is deliberate: a species with no definition merely has
@@ -1363,18 +1361,9 @@ export function applyGuidedBackgroundChoices(
 
     // The contributions (D63): base is never touched; each increase is an
     // additive row that knows its source. Ordered after the character's
-    // surviving effects, exactly as the species copy orders its own.
-    const deviation = backgroundPairingDeviation(
-      printedPairing(template, bundledOriginFeatKeysByName()),
-      {
-        increases: params.increases,
-        origin_feat_content_key: params.origin_feat_content_key,
-        magic_initiate_list:
-          params.origin_feat_content_key === MAGIC_INITIATE_FEAT_CONTENT_KEY
-            ? String(params.origin_feat_config['chosen_list'])
-            : null,
-      },
-    );
+    // surviving effects, exactly as the species copy orders its own. No
+    // `notes` label rides along — the player's own pairing is ordinary use,
+    // never a house rule (D68).
     const baseOrder =
       db.one(
         `SELECT COALESCE(MAX(sort_order), 0) AS base
@@ -1389,8 +1378,8 @@ export function applyGuidedBackgroundChoices(
       db.exec(
         `INSERT INTO character_effects (
            character_id, sort_order, effect_kind, ability, amount, maximum,
-           source_instance_id, label, notes
-         ) VALUES (?, ?, 'ability_increase', ?, ?, ?, ?, ?, ?)`,
+           source_instance_id, label
+         ) VALUES (?, ?, 'ability_increase', ?, ?, ?, ?, ?)`,
         [
           characterId,
           effectOrder,
@@ -1399,7 +1388,6 @@ export function applyGuidedBackgroundChoices(
           BACKGROUND_ABILITY_INCREASE_MAXIMUM,
           instanceId,
           `${template.name} (background increase)`,
-          deviation,
         ],
       );
     }

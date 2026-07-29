@@ -3,18 +3,17 @@
  * makes the step APPLY what D61 puts in the player's hands: the ability
  * increases and the Origin feat.
  *
- * WHAT D61 RULES, because this screen is where the ruling is visible: the
- * 2024 rules hand a background over as a fixed package — a specific Origin
- * feat and increases to three named abilities. The owner judges the SRD's
- * allowed combinations too restrictive, so this app does not enforce them.
- * The player picks the feat from all Origin feats and assigns the increases
- * to any abilities; the printed pairing stays on screen as WHAT THE SRD
- * SUGGESTS — it prefills the controls as a default and constrains nothing —
- * and the deviation is labelled where a person can see it: the house-rule
- * notice is always visible, and the moment the chosen combination stops
- * being the printed one, a live sentence says so. The same sentence is
- * persisted into each contribution's `notes` by the apply, so the label
- * travels with the character.
+ * WHAT D61, AS AMENDED BY D68, RULES, because this screen is where the ruling
+ * is visible: the 2024 rules hand a background over as a fixed package — a
+ * specific Origin feat and increases to three named abilities. The owner
+ * judges the SRD's allowed combinations too restrictive, so this app does not
+ * enforce them. The printed pairing is the DEFAULT — it prefills the controls
+ * and constrains nothing — and the DEFAULTS ARE MARKED as the background's
+ * own, in the pairing line and on the options themselves, so a person can see
+ * what the book prints versus what they picked. Changing either is ordinary
+ * use: nothing here calls the choice a house rule, homebrew, or a departure,
+ * and nothing is persisted into the contributions' `notes` (D68 deleted that
+ * labelling — see the note in `background-choices.ts`).
  *
  * ONE SUBMISSION, ONE TRANSACTION: the background, both increases (or all
  * three), and the feat land through a single `applyBackground` call.
@@ -29,9 +28,7 @@
  */
 
 import {
-  BACKGROUND_HOUSE_RULE_NOTICE,
   BACKGROUND_STEP_ATTR,
-  backgroundPairingDeviation,
   MAGIC_INITIATE_ABILITIES,
   MAGIC_INITIATE_FEAT_CONTENT_KEY,
   MAGIC_INITIATE_LISTS,
@@ -181,8 +178,9 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
     }));
 
   /**
-   * THE PRINTED PAIRING, shown for the selected background as what the SRD
-   * suggests. Verbatim licensed text — never a constraint (D61).
+   * THE PRINTED PAIRING, shown for the selected background as ITS OWN DEFAULT
+   * (D68). Verbatim licensed text — never a constraint (D61) — and the same
+   * defaults are marked on the individual options below.
    */
   const suggestionMount = element('p', {
     className: 'guided-background-suggestion',
@@ -191,48 +189,20 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
   const renderSuggestion = (): void => {
     if (selected === null) {
       suggestionMount.textContent =
-        'Choose a background to see what the SRD suggests for it.';
+        'Choose a background to see its default increases and Origin feat.';
       return;
     }
     const pairing = selected.pairing;
     suggestionMount.textContent =
-      `The SRD suggests for ${pairing.background_name}: increases to ` +
+      `${pairing.background_name}'s printed default: increases to ` +
       `${pairing.printed_abilities.join(', ')}, and the ` +
-      `${pairing.printed_feat} feat. That is a suggestion here, not a rule.`;
+      `${pairing.printed_feat} feat. Change any of it below; the defaults ` +
+      'are marked.';
   };
 
-  /**
-   * THE LIVE DEVIATION LABEL (D61). Present exactly while the chosen
-   * combination is not the SRD's printed pairing; the apply persists the
-   * same sentence into the contributions' notes.
-   */
-  const deviationMount = element('div', {
-    className: 'guided-background-deviation-mount',
-    attributes: { role: 'status' },
-  });
-  const renderDeviation = (): void => {
-    clear(deviationMount);
-    if (selected === null) {
-      return;
-    }
-    const sentence = backgroundPairingDeviation(selected.pairing, {
-      increases: chosenIncreases(),
-      origin_feat_content_key: featKey,
-      magic_initiate_list:
-        featKey === MAGIC_INITIATE_FEAT_CONTENT_KEY
-          ? magicInitiateList
-          : null,
-    });
-    if (sentence !== null) {
-      deviationMount.append(
-        element('p', {
-          className: 'guided-background-deviation',
-          text: sentence,
-          attributes: { [BACKGROUND_STEP_ATTR.deviation]: '' },
-        }),
-      );
-    }
-  };
+  /** True when `ability` is one of the selected background's printed three. */
+  const isDefaultAbility = (ability: Ability): boolean =>
+    selected?.pairing.suggested_abilities?.includes(ability) ?? false;
 
   /* ------------------------------------------------------ the increases */
 
@@ -252,8 +222,12 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
           },
         },
         abilities.map((ability) => {
+          // The background's printed abilities are marked as its defaults
+          // (D68); every ability stays equally selectable.
           const option = element('option', {
-            text: ABILITY_LABELS[ability],
+            text: isDefaultAbility(ability)
+              ? `${ABILITY_LABELS[ability]} (default)`
+              : ABILITY_LABELS[ability],
             attributes: { value: ability },
           });
           if (ability === slots[index]) {
@@ -266,7 +240,6 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
         listen(select, 'change', () => {
           slots[index] = select.value as Ability;
           setError(null);
-          renderDeviation();
         }),
       );
       slotMount.append(
@@ -313,7 +286,6 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
             slots = defaultSlotsFor(candidate);
             setError(null);
             renderSlots();
-            renderDeviation();
           }),
         );
         return element('label', { className: 'guided-background-mode' }, [
@@ -326,25 +298,36 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
 
   /* -------------------------------------------------------- the feat */
 
-  const featSelect = element(
-    'select',
-    {
-      attributes: {
-        [BACKGROUND_STEP_ATTR.feat]: '',
-        'aria-label': 'Origin feat',
-      },
+  const featSelect = element('select', {
+    attributes: {
+      [BACKGROUND_STEP_ATTR.feat]: '',
+      'aria-label': 'Origin feat',
     },
-    deps.options.origin_feats.map((feat) => {
-      const option = element('option', {
-        text: feat.name,
-        attributes: { value: feat.content_key },
-      });
-      if (feat.content_key === featKey) {
-        option.selected = true;
-      }
-      return option;
-    }),
-  );
+  });
+  /**
+   * Rebuilt whenever the background changes, because the selected
+   * background's printed feat is marked as its default (D68). Every Origin
+   * feat stays equally selectable.
+   */
+  const renderFeatOptions = (): void => {
+    clear(featSelect);
+    const defaultFeat = selected?.pairing.suggested_feat_content_key ?? null;
+    featSelect.append(
+      ...deps.options.origin_feats.map((feat) => {
+        const option = element('option', {
+          text:
+            feat.content_key === defaultFeat
+              ? `${feat.name} (default)`
+              : feat.name,
+          attributes: { value: feat.content_key },
+        });
+        if (feat.content_key === featKey) {
+          option.selected = true;
+        }
+        return option;
+      }),
+    );
+  };
 
   const magicInitiateFields = element(
     'div',
@@ -367,8 +350,13 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
         },
       },
       MAGIC_INITIATE_LISTS.map((candidate) => {
+        // The list printed in the background's feat name ("Magic Initiate
+        // (Cleric)") is marked as its default (D68).
         const option = element('option', {
-          text: candidate,
+          text:
+            candidate === selected?.pairing.suggested_magic_initiate_list
+              ? `${candidate} (default)`
+              : candidate,
           attributes: { value: candidate },
         });
         if (candidate === magicInitiateList) {
@@ -380,7 +368,6 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
     cleanups.push(
       listen(list, 'change', () => {
         magicInitiateList = list.value;
-        renderDeviation();
       }),
     );
     const ability = element(
@@ -423,7 +410,6 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
       featKey = featSelect.value;
       setError(null);
       renderMagicInitiateFields();
-      renderDeviation();
     }),
   );
 
@@ -432,8 +418,8 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
   const selectBackground = (option: GuidedBackgroundOption): void => {
     selected = option;
     setError(null);
-    // Prefill from the SRD's printed pairing — a DEFAULT, never a constraint
-    // (D61). The player changes any of it freely below.
+    // Prefill from the printed pairing — the background's own DEFAULT, never
+    // a constraint (D61/D68). The player changes any of it freely below.
     slots = defaultSlotsFor(mode);
     const suggestedFeat = option.pairing.suggested_feat_content_key;
     if (
@@ -443,16 +429,15 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
       )
     ) {
       featKey = suggestedFeat;
-      featSelect.value = suggestedFeat;
     }
     const suggestedList = option.pairing.suggested_magic_initiate_list;
     if (suggestedList !== null) {
       magicInitiateList = suggestedList;
     }
     renderSlots();
+    renderFeatOptions();
     renderMagicInitiateFields();
     renderSuggestion();
-    renderDeviation();
   };
 
   const backgroundList = element(
@@ -569,11 +554,6 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
         className: 'guided-background-applied',
         text: BACKGROUND_APPLIED_DISCLOSURE,
       }),
-      element('p', {
-        className: 'guided-background-house-rule',
-        text: BACKGROUND_HOUSE_RULE_NOTICE,
-        attributes: { [BACKGROUND_STEP_ATTR.houseRule]: '' },
-      }),
       ...(deps.options.backgrounds.length === 0
         ? [
             element('p', {
@@ -593,7 +573,6 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
               featSelect,
             ]),
             magicInitiateFields,
-            deviationMount,
             element('div', { className: 'guided-background-unapplied' }, [
               element('p', {
                 text:
@@ -617,9 +596,9 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
   );
 
   renderSlots();
+  renderFeatOptions();
   renderMagicInitiateFields();
   renderSuggestion();
-  renderDeviation();
 
   return {
     element: guidedShell('background', panel),

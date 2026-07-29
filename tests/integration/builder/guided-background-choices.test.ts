@@ -451,13 +451,16 @@ describe('B3 guided background choices on a seeded application database', () => 
     ).toEqual(backgroundBefore);
   });
 
-  it('persists no deviation note for the printed pairing and a house-rule note for a different pairing', async () => {
+  it('persists no label on the contributions for the printed pairing or a custom one (D68)', async () => {
+    // D68 struck D61's deviation labelling: a player-chosen feat and spread is
+    // ordinary use, so no house-rule sentence may ride the rows through share
+    // and backup. Both applies must leave `notes` null.
     const harness = await applicationDatabase();
     const db = harness.context.db;
     const options = choiceOptions(db);
     const background =
       backgroundWithDifferentMagicInitiateSuggestion(options);
-    const characterId = character(db, 'B3 Deviation Label');
+    const characterId = character(db, 'D68 No Label');
 
     applyGuidedBackgroundChoices(
       db,
@@ -471,17 +474,9 @@ describe('B3 guided background choices on a seeded application database', () => 
       db,
       customMagicInitiateParams(characterId, background),
     );
-    const notes = contributionRows(db, characterId).map((row) => row.notes);
-    expect(notes).toHaveLength(2);
     expect(
-      notes.every(
-        (note) =>
-          typeof note === 'string' &&
-          /House rule:.*chosen by the player.*not the SRD's printed pairing/u.test(
-            note,
-          ),
-      ),
-    ).toBe(true);
+      contributionRows(db, characterId).map((row) => row.notes),
+    ).toEqual([null, null]);
   });
 
   it.each([

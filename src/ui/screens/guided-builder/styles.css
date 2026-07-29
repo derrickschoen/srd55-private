@@ -291,10 +291,9 @@
 }
 
 /* The background step (A5 recorded; B3 applies the increases and the Origin
-   feat, per D61). The house-rule notice is panel-level and deliberately
-   prominent: the whole step is a labelled SRD departure, and the deviation
-   sentence appears the moment the chosen combination stops being the printed
-   pairing. */
+   feat, per D61 as amended by D68). The printed pairing is the background's
+   own marked default; choosing differently is ordinary use and carries no
+   label. */
 .guided-background-options {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr));
@@ -321,14 +320,6 @@
 .guided-background-applied {
   font-size: 0.9rem;
   font-style: italic;
-}
-
-.guided-background-house-rule {
-  margin: 0 0 0.75rem;
-  padding: 0.5rem 0.75rem;
-  border-left: 3px solid #b58900;
-  background: rgba(181, 137, 0, 0.12);
-  font-size: 0.9rem;
 }
 
 .guided-background-choice {
@@ -393,14 +384,6 @@
   flex-wrap: wrap;
   gap: 0.75rem;
   margin: 0 0 0.75rem;
-}
-
-.guided-background-deviation {
-  margin: 0 0 0.75rem;
-  padding: 0.5rem 0.75rem;
-  border-left: 3px solid #b58900;
-  background: rgba(181, 137, 0, 0.12);
-  font-size: 0.9rem;
 }
 
 .guided-background-unapplied p {
