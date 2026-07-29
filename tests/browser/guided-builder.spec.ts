@@ -111,6 +111,14 @@ test('the empty-database front door chooses class first, persists once named, an
   await expect(page).toHaveURL(
     new URL(persistedSeam.buildPath, page.url()).href,
   );
+  await expect(
+    page.locator(
+      `[${persistedSeam.panelAttribute}="${persistedSeam.speciesStepPanel}"]`,
+    ),
+  ).toBeVisible();
+  await expect(page.locator('.guided-abilities-skipped')).toContainText(
+    'no scores have been asked for or chosen',
+  );
   await expectNoPlannerRouteAnchors(page);
 
   await page.reload();
@@ -120,6 +128,11 @@ test('the empty-database front door chooses class first, persists once named, an
   );
   await expect(
     page.getByRole('heading', { name: 'Guided character builder' }),
+  ).toBeVisible();
+  await expect(
+    page.locator(
+      `[${persistedSeam.panelAttribute}="${persistedSeam.speciesStepPanel}"]`,
+    ),
   ).toBeVisible();
   await expectNoPlannerRouteAnchors(page);
   expect(
@@ -142,4 +155,49 @@ test('the empty-database front door chooses class first, persists once named, an
       is_starting_class: 1,
     }),
   ]);
+
+  const dwarf = page.getByRole('button', { name: 'Choose Dwarf' });
+  await expect(dwarf).toBeVisible();
+  await dwarf.click();
+
+  await expect(page).toHaveURL(
+    new URL(persistedSeam.buildPath, page.url()).href,
+  );
+  await expect(
+    page.getByRole('heading', {
+      name: 'The Background step is not built yet',
+    }),
+  ).toBeVisible();
+  await expectNoPlannerRouteAnchors(page);
+  expect(
+    await page.evaluate(() =>
+      window.staticApp.inspectRows('character_species'),
+    ),
+  ).toEqual([
+    expect.objectContaining({
+      character_id: characterId,
+    }),
+  ]);
+  expect(
+    (
+      await page.evaluate(() =>
+        window.staticApp.inspectRows('character_species_traits'),
+      )
+    ).length,
+  ).toBeGreaterThan(0);
+  expect(
+    (
+      await page.evaluate(() =>
+        window.staticApp.inspectRows('character_effects'),
+      )
+    ).length,
+  ).toBeGreaterThan(0);
+
+  await page.reload();
+  await expect(
+    page.getByRole('heading', {
+      name: 'The Background step is not built yet',
+    }),
+  ).toBeVisible();
+  await expectNoPlannerRouteAnchors(page);
 });

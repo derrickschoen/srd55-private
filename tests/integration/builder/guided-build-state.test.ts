@@ -63,7 +63,7 @@ describe('guidedBuildState', () => {
     } satisfies GuidedBuildStateResult);
   });
 
-  it('selects the next seam-ordered step for a persisted character with a class', async () => {
+  it('skips abilities and selects species for a persisted character with only a class', async () => {
     const db = await realDatabase();
     seedClassProgressions(db);
     const characterId = createCharacter(db, 'Classed');
@@ -72,7 +72,26 @@ describe('guidedBuildState', () => {
     expect(guidedBuildState(db, characterId)).toEqual({
       kind: 'ready',
       character_id: characterId,
-      current_step: seamStep(1),
+      current_step: seamStep(2),
+    } satisfies GuidedBuildStateResult);
+  });
+
+  it('selects background for a persisted character with class and species', async () => {
+    const db = await realDatabase();
+    seedClassProgressions(db);
+    const characterId = createCharacter(db, 'Classed Species');
+    addClassLevel(db, characterId, 'Wizard', 1);
+    db.exec(
+      `INSERT INTO character_species
+         (character_id, name, creature_type, size, base_speed_feet)
+       VALUES (?, 'Test Species', 'Humanoid', 'Medium', 30)`,
+      [characterId],
+    );
+
+    expect(guidedBuildState(db, characterId)).toEqual({
+      kind: 'ready',
+      character_id: characterId,
+      current_step: seamStep(3),
     } satisfies GuidedBuildStateResult);
   });
 });
