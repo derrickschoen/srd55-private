@@ -290,9 +290,11 @@
   opacity: 0.5;
 }
 
-/* The background step (A5). The recording-only disclosure is panel-level and
-   deliberately prominent: recording is ALL that applying a background does,
-   and the copy above the cards is the only place a person can learn that. */
+/* The background step (A5 recorded; B3 applies the increases and the Origin
+   feat, per D61). The house-rule notice is panel-level and deliberately
+   prominent: the whole step is a labelled SRD departure, and the deviation
+   sentence appears the moment the chosen combination stops being the printed
+   pairing. */
 .guided-background-options {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr));
@@ -316,9 +318,89 @@
   font-size: 1rem;
 }
 
-.guided-background-recorded-only {
+.guided-background-applied {
   font-size: 0.9rem;
   font-style: italic;
+}
+
+.guided-background-house-rule {
+  margin: 0 0 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-left: 3px solid #b58900;
+  background: rgba(181, 137, 0, 0.12);
+  font-size: 0.9rem;
+}
+
+.guided-background-choice {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.guided-background-printed {
+  margin: 0;
+  font-size: 0.85rem;
+  opacity: 0.85;
+}
+
+.guided-background-suggestion {
+  margin: 0.75rem 0;
+  font-size: 0.9rem;
+  font-style: italic;
+}
+
+.guided-background-increase-modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 0 0 0.75rem;
+  border: 1px solid var(--border, #c9c9c9);
+  border-radius: 0.5rem;
+  padding: 0.6rem 0.75rem;
+}
+
+.guided-background-mode {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+}
+
+.guided-background-increase-slots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 0 0 0.75rem;
+}
+
+.guided-background-increase,
+.guided-background-feat,
+.guided-background-feat-config {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.9rem;
+  font-weight: 650;
+}
+
+.guided-background-feat {
+  margin: 0 0 0.75rem;
+  max-width: 20rem;
+}
+
+.guided-background-magic-initiate {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 0 0 0.75rem;
+}
+
+.guided-background-deviation {
+  margin: 0 0 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-left: 3px solid #b58900;
+  background: rgba(181, 137, 0, 0.12);
+  font-size: 0.9rem;
 }
 
 .guided-background-unapplied p {
@@ -333,8 +415,7 @@
   font-size: 0.85rem;
 }
 
-.guided-background-apply {
-  margin-top: auto;
+.guided-background-submit {
   min-height: 2.4rem;
   border: 1px solid var(--accent, #333);
   border-radius: 0.45rem;
@@ -346,7 +427,7 @@
   cursor: pointer;
 }
 
-.guided-background-apply:disabled {
+.guided-background-submit:disabled {
   cursor: not-allowed;
   opacity: 0.5;
 }

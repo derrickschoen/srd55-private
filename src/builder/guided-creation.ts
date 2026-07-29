@@ -68,6 +68,19 @@ import {
   bundledSpeciesTemplates,
 } from '../rules/origins-srd';
 import {
+  ORIGIN_FEAT_CONFIG_CONFIG,
+  ORIGIN_FEAT_KEY_CONFIG,
+} from '../rules/background-definitions-srd';
+import { bundledFeatDefinitions } from '../rules/feats-srd';
+import {
+  backgroundPairingDeviation,
+  BACKGROUND_ABILITY_INCREASE_MAXIMUM,
+  MAGIC_INITIATE_FEAT_CONTENT_KEY,
+  printedPairing,
+  type GuidedApplyBackgroundParams,
+  type GuidedBackgroundChoiceOptions,
+} from './background-choices';
+import {
   countAbilitiesAtLeastPlusTwo,
   grantsLineageSpells,
   GUIDED_LEVEL_ONE_STEP_ORDER,
@@ -744,7 +757,15 @@ export function applyGuidedOrigin(
 
     if (params.kind === 'background') {
       const backgroundTemplate = gateBundledBackground(db, params.content_key);
-      // Replace: the parent row is the whole footprint of a background apply.
+      // Replace. A5 could say "the parent row is the whole footprint of a
+      // background apply"; B3 widened the footprint to a marker-tagged source
+      // instance owning ability_increase contributions and a child feat
+      // source. This RECORD-ONLY path (the seam's `applyOrigin`) writes no
+      // instance of its own — it has no choices to write one from — but it
+      // must still remove the previous apply's, or a background change through
+      // this path would leave increases from a background the character no
+      // longer has: exactly the orphan D63's cascade exists to forbid.
+      deleteGuidedBackgroundSources(db, characterId);
       db.exec(
         `DELETE FROM character_background WHERE character_id = ?`,
         [characterId],
@@ -1004,6 +1025,325 @@ function replaceGuidedLineageGrants(
     ],
   ).lastInsertId;
   new GrantRuleSlotGenerator(db).generateForSource(instanceId);
+}
+
+/* ------------------------------- B3: background choices, per D61 and D63 */
+
+/**
+ * The `notes` marker naming a source instance the guided BACKGROUND apply
+ * owns — {@link GUIDED_SPECIES_SOURCE_MARKER}'s twin, for the same reason:
+ * ownership is recorded, not inferred, so the replace never deletes an
+ * instance the planner's expert commands or a share import put there.
+ */
+const GUIDED_BACKGROUND_SOURCE_MARKER = 'guided:background-apply';
+
+/**
+ * Hard-deletes every background source instance this path minted, with its
+ * subtree: the child Origin-feat source goes recursively, and the
+ * `ability_increase` contributions owned by any of them go by the composite
+ * `(source_instance_id, character_id)` FK's ON DELETE CASCADE — the cascade
+ * the plan says proves the replace. Same replace-not-tombstone semantic as
+ * the species twin: re-applying means the earlier apply never happened.
+ */
+function deleteGuidedBackgroundSources(
+  db: DatabaseContext,
+  characterId: number,
+): void {
+  const previous = db.all(
+    `SELECT id FROM character_source_instances
+     WHERE character_id = ? AND source_type = 'background' AND notes = ?`,
+    [characterId, GUIDED_BACKGROUND_SOURCE_MARKER],
+    rowId,
+  );
+  for (const sourceInstanceId of previous) {
+    deleteSourceInstanceTree(db, sourceInstanceId);
+  }
+}
+
+/**
+ * The bundled ORIGIN feats, keyed by printed name. Derived from the same SRD
+ * parse the feat seeder writes from, so the suggestion resolver and the gate
+ * cannot drift from the catalog — the identical reasoning as
+ * `bundledBackgroundKeys` above.
+ */
+function bundledOriginFeatKeysByName(): ReadonlyMap<string, string> {
+  return new Map(
+    bundledFeatDefinitions()
+      .filter((feat) => feat.source_category === 'Origin')
+      .map((feat) => [feat.name, feat.content_key]),
+  );
+}
+
+/**
+ * The background step's option data: every bundled background with its
+ * printed pairing (the SRD's suggestion, per D61 never a constraint), and
+ * every bundled Origin feat the player may pick instead. Both lists follow
+ * the class-options rule — a bundled key whose row was yielded to
+ * user-authored content is simply not offered.
+ */
+export function listGuidedBackgroundChoiceOptions(
+  db: DatabaseContext,
+): GuidedBackgroundChoiceOptions {
+  const featKeysByName = bundledOriginFeatKeysByName();
+  const backgroundKeys = bundledBackgroundKeys();
+  const backgroundPlaceholders = backgroundKeys.map(() => '?').join(', ');
+  const backgrounds = db
+    .all(
+      `SELECT content_key, name, ability_score_1, ability_score_2,
+              ability_score_3, feat_name
+       FROM background_templates
+       WHERE content_key IN (${backgroundPlaceholders})
+       ORDER BY name`,
+      [...backgroundKeys],
+      (row) => ({
+        content_key: sqlString(row, 'content_key'),
+        name: sqlString(row, 'name'),
+        ability_score_1: sqlString(row, 'ability_score_1'),
+        ability_score_2: sqlString(row, 'ability_score_2'),
+        ability_score_3: sqlString(row, 'ability_score_3'),
+        feat_name: sqlString(row, 'feat_name'),
+      }),
+    )
+    .map((template) => ({
+      content_key: template.content_key,
+      name: template.name,
+      pairing: printedPairing(template, featKeysByName),
+    }));
+
+  const featKeys = [...featKeysByName.values()];
+  const featPlaceholders = featKeys.map(() => '?').join(', ');
+  const originFeats = db.all(
+    `SELECT content_key, name
+     FROM feat_definitions
+     WHERE content_key IN (${featPlaceholders})
+     ORDER BY name`,
+    [...featKeys],
+    (row) => ({
+      content_key: sqlString(row, 'content_key'),
+      name: sqlString(row, 'name'),
+    }),
+  );
+
+  return { backgrounds, origin_feats: originFeats };
+}
+
+/**
+ * The Origin-feat gate, `gateBundledBackground`'s shape with the feat
+ * catalog. The seam's refusal vocabulary is a CLOSED union with no
+ * feat-specific member — a gap reported with this dispatch — so both refusals
+ * ride `unknown_origin`: the feat is part of applying the origin, and neither
+ * a key outside the bundled Origin set nor a bundled key whose row was
+ * yielded is a feat the guided builder knows.
+ */
+function gateBundledOriginFeat(
+  db: DatabaseContext,
+  contentKey: string,
+): { readonly id: number; readonly name: string } {
+  if (![...bundledOriginFeatKeysByName().values()].includes(contentKey)) {
+    throw new GuidedCreationRefusal(
+      'unknown_origin',
+      `No bundled Origin feat exists for content key "${contentKey}".`,
+    );
+  }
+  const feat = db.one(
+    `SELECT id, name FROM feat_definitions WHERE content_key = ?`,
+    [contentKey],
+    (row) => ({
+      id: sqlInteger(row, 'id'),
+      name: sqlString(row, 'name'),
+    }),
+  );
+  if (feat === null) {
+    throw new GuidedCreationRefusal(
+      'unknown_origin',
+      `The bundled Origin feat "${contentKey}" has no row in this database.`,
+    );
+  }
+  return feat;
+}
+
+/**
+ * THE B3 APPLY: background, player-assigned increases and player-chosen
+ * Origin feat, ONE transaction (plan §4 B3).
+ *
+ * What one apply owns, and therefore what a replace removes: the
+ * `character_background` row; a marker-tagged background SOURCE INSTANCE —
+ * the owner D63's contributions require, minted here exactly as the species
+ * bridge mints its own; the `ability_increase` rows that instance owns; and
+ * the child Origin-feat source the EXISTING `GrantRuleSlotGenerator`
+ * materialises from the seeded definition's one `grant_source` rule, reading
+ * the chosen feat from the instance config — no parallel machinery. Changing
+ * the background deletes that tree first, so the feat and the increases
+ * cascade away with their owner and cannot outlive it.
+ *
+ * THE CAP IS 20: "None of these increases can raise a score above 20"
+ * (`docs/srd/source/backgrounds.txt:51`), carried per contribution because
+ * other sources genuinely differ (Epic Boons stop at 30).
+ *
+ * THE DEVIATION IS LABELLED WHERE A PERSON CAN SEE IT (D61): when the chosen
+ * combination is not the SRD's printed pairing,
+ * `backgroundPairingDeviation`'s sentence is persisted into each
+ * contribution's `notes` — travelling with the rows through share and backup
+ * — and the step shows the same sentence live while the choice is being made.
+ *
+ * NO DEFINITION IS A REFUSAL HERE, NOT A QUIET NO-OP, and the difference from
+ * the species bridge is deliberate: a species with no definition merely has
+ * no spells to grant, but a background instance is what OWNS the increases —
+ * the kind's CHECK requires a non-null source — so without the definition row
+ * (its name slot yielded to user-authored content) the choices cannot be
+ * recorded and pretending otherwise would ship a background that looks
+ * applied with nothing behind it.
+ */
+export function applyGuidedBackgroundChoices(
+  db: DatabaseContext,
+  params: GuidedApplyBackgroundParams,
+): GuidedApplyOriginResult {
+  return db.transaction(() => {
+    const characterId = params.character_id;
+    const existing = db.one(
+      `SELECT id
+       FROM characters
+       WHERE id = ?`,
+      [characterId],
+      (row) => sqlInteger(row, 'id'),
+    );
+    if (existing === null) {
+      throw new Error(`No character with id ${characterId} exists.`);
+    }
+
+    const template = gateBundledBackground(db, params.content_key);
+    gateBundledOriginFeat(db, params.origin_feat_content_key);
+    const definitionId = db.one(
+      `SELECT id FROM background_definitions WHERE content_key = ?`,
+      [template.content_key],
+      rowId,
+    );
+    if (definitionId === null) {
+      throw new GuidedCreationRefusal(
+        'unknown_origin',
+        `The background "${template.name}" has no definition in this ` +
+          'database, so its ability increases and Origin feat cannot be ' +
+          'recorded with an owner.',
+      );
+    }
+
+    // Replace: the previous apply's whole footprint, sources first (the
+    // marker finds them without reference to the row the next statement
+    // deletes), then the recorded text row.
+    deleteGuidedBackgroundSources(db, characterId);
+    db.exec(
+      `DELETE FROM character_background WHERE character_id = ?`,
+      [characterId],
+    );
+    const background = backgroundFromTemplate(template);
+    db.exec(
+      `INSERT INTO character_background (
+         character_id, name, ability_score_1, ability_score_2,
+         ability_score_3, feat_name, skill_proficiency_1,
+         skill_proficiency_2, tool_proficiency, equipment_option_a,
+         equipment_option_b, notes
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        characterId,
+        background.name,
+        background.ability_score_1,
+        background.ability_score_2,
+        background.ability_score_3,
+        background.feat_name,
+        background.skill_proficiency_1,
+        background.skill_proficiency_2,
+        background.tool_proficiency,
+        background.equipment_option_a,
+        background.equipment_option_b,
+        background.notes,
+      ],
+    );
+
+    // The owning instance. `class_level` for the reason the species bridge
+    // records at length; the feat choice lives in config because that is the
+    // path the seeded grant_source rule reads (`definition_key_config`), and
+    // the config vocabulary is `add_source`'s existing one.
+    const config: Record<string, unknown> = {
+      class_level: 1,
+      [ORIGIN_FEAT_KEY_CONFIG]: params.origin_feat_content_key,
+    };
+    if (Object.keys(params.origin_feat_config).length > 0) {
+      config[ORIGIN_FEAT_CONFIG_CONFIG] = { ...params.origin_feat_config };
+    }
+    const timestamp = new Date().toISOString();
+    const instanceId = db.exec(
+      `INSERT INTO character_source_instances (
+         character_id, instance_uuid, source_type, source_definition_id,
+         display_name, config, acquired_at_character_level, state, notes,
+         created_at, updated_at
+       ) VALUES (?, ?, 'background', ?, ?, ?, 1, 'active', ?, ?, ?)`,
+      [
+        characterId,
+        crypto.randomUUID(),
+        definitionId,
+        template.name,
+        JSON.stringify(config),
+        GUIDED_BACKGROUND_SOURCE_MARKER,
+        timestamp,
+        timestamp,
+      ],
+    ).lastInsertId;
+
+    // The contributions (D63): base is never touched; each increase is an
+    // additive row that knows its source. Ordered after the character's
+    // surviving effects, exactly as the species copy orders its own.
+    const deviation = backgroundPairingDeviation(
+      printedPairing(template, bundledOriginFeatKeysByName()),
+      {
+        increases: params.increases,
+        origin_feat_content_key: params.origin_feat_content_key,
+        magic_initiate_list:
+          params.origin_feat_content_key === MAGIC_INITIATE_FEAT_CONTENT_KEY
+            ? String(params.origin_feat_config['chosen_list'])
+            : null,
+      },
+    );
+    const baseOrder =
+      db.one(
+        `SELECT COALESCE(MAX(sort_order), 0) AS base
+         FROM character_effects
+         WHERE character_id = ?`,
+        [characterId],
+        (row) => sqlInteger(row, 'base'),
+      ) ?? 0;
+    let effectOrder = baseOrder;
+    for (const increase of params.increases) {
+      effectOrder += 1;
+      db.exec(
+        `INSERT INTO character_effects (
+           character_id, sort_order, effect_kind, ability, amount, maximum,
+           source_instance_id, label, notes
+         ) VALUES (?, ?, 'ability_increase', ?, ?, ?, ?, ?, ?)`,
+        [
+          characterId,
+          effectOrder,
+          increase.ability,
+          increase.amount,
+          BACKGROUND_ABILITY_INCREASE_MAXIMUM,
+          instanceId,
+          `${template.name} (background increase)`,
+          deviation,
+        ],
+      );
+    }
+
+    // The Origin feat, through the EXISTING machinery: the seeded
+    // definition's grant_source rule resolves the config's feat key,
+    // materialises the child feat source and recursively generates ITS
+    // grants — Magic Initiate's spell slots arrive the same way they do on
+    // the expert path.
+    new GrantRuleSlotGenerator(db).generateForSource(instanceId);
+
+    return {
+      character_id: characterId,
+      current_step: deriveBuildStep(readGuidedStepEvidence(db, characterId)),
+    };
+  });
 }
 
 /* --------------------------------------------- B1: the abilities step */

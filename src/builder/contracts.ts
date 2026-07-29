@@ -554,3 +554,12 @@ export const ABILITY_STEP_ATTR = Object.freeze({
  */
 export const ABILITY_GENERATION_RULES_MODULE =
   'src/rules/ability-score-generation-srd.ts';
+
+/* ------------------------------------------ background choices (B3, ratified) */
+
+/**
+ * B3's contract, authored in its own module because this file is read-only to
+ * implementers, then ratified into the seam. Re-exported here so callers have
+ * one import point and neither agent has to know which file a name lives in.
+ */
+export * from './background-choices';

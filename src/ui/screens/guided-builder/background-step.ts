@@ -1,39 +1,51 @@
 /**
- * THE BACKGROUND STEP — dispatch A5, the species step's twin, and the one
- * whose honesty carries the whole risk.
+ * THE BACKGROUND STEP — dispatch A5 recorded the printed text; dispatch B3
+ * makes the step APPLY what D61 puts in the player's hands: the ability
+ * increases and the Origin feat.
  *
- * Unlike a species — which visibly changes speed and effects on the sheet the
- * moment it is applied — NOTHING in production reads `character_background`.
- * Applying a background records its printed text and advances this step, and
- * that is the entire observable consequence. A background that arrived looking
- * finished while its feat, skills, tool, ability increases and equipment were
- * never granted would be a default presented as a fact — the exact D33
- * violation this project keeps rediscovering — so this screen says, in words,
- * that recording is all that happened. The disclosure lives in
- * {@link BACKGROUND_UNAPPLIED_GRANTS} and is panel-level rather than per-card,
- * because every 2024 background carries the same five kinds of benefit and
- * this step applies none of them for any background.
+ * WHAT D61 RULES, because this screen is where the ruling is visible: the
+ * 2024 rules hand a background over as a fixed package — a specific Origin
+ * feat and increases to three named abilities. The owner judges the SRD's
+ * allowed combinations too restrictive, so this app does not enforce them.
+ * The player picks the feat from all Origin feats and assigns the increases
+ * to any abilities; the printed pairing stays on screen as WHAT THE SRD
+ * SUGGESTS — it prefills the controls as a default and constrains nothing —
+ * and the deviation is labelled where a person can see it: the house-rule
+ * notice is always visible, and the moment the chosen combination stops
+ * being the printed one, a live sentence says so. The same sentence is
+ * persisted into each contribution's `notes` by the apply, so the label
+ * travels with the character.
  *
- * The rest follows A4 exactly:
+ * ONE SUBMISSION, ONE TRANSACTION: the background, both increases (or all
+ * three), and the feat land through a single `applyBackground` call.
+ * Re-submitting REPLACES — the worker deletes the previous apply's source
+ * instance tree, and the contributions and child feat source cascade away
+ * with their owner.
  *
- * - §5's trap: nothing here links into the planner grid. Success re-navigates
- *   to the build route, which re-derives the step from the database (after
- *   background that is `skills`, whose screen is not built — the terminal
- *   panel says so honestly).
- * - Re-applying replaces (§8): the worker owns that semantic; this screen just
- *   shows the options whenever the derived step is `background`.
- * - D56: equipment is the PACKAGE ONLY — there is no gold alternative — and
- *   choosing/applying the package is NOT this dispatch. The disclosure says
- *   the package is not applied yet; it does not invent a selection between the
- *   two printed alternatives.
+ * WHAT THIS STEP STILL DOES NOT APPLY is disclosed in
+ * {@link BACKGROUND_UNAPPLIED_GRANTS}. The entries for the ability increases
+ * and the Origin feat are DELETED rather than reworded, per the rule the
+ * species step established: a disclosure exists only while its gap does.
  */
 
 import {
+  BACKGROUND_HOUSE_RULE_NOTICE,
+  BACKGROUND_STEP_ATTR,
+  backgroundPairingDeviation,
+  MAGIC_INITIATE_ABILITIES,
+  MAGIC_INITIATE_FEAT_CONTENT_KEY,
+  MAGIC_INITIATE_LISTS,
+  type GuidedApplyBackgroundParams,
+  type GuidedBackgroundChoiceOptions,
+  type GuidedBackgroundIncrease,
+  type GuidedBackgroundOption,
+} from '../../../builder/background-choices';
+import {
   guidedBuildPath,
   GUIDED_PANEL_ATTRIBUTE,
-  type GuidedOriginOption,
 } from '../../../builder/contracts';
 import type { GuidedApplyOriginResult } from '../../../builder/guided-creation';
+import { abilities, type Ability } from '../../../domain/enums';
 import { RpcError } from '../../../rpc/protocol';
 import { clear, element, listen, type Cleanup } from '../../dom';
 import { characterListLink, guidedShell } from './guided-builder';
@@ -45,29 +57,48 @@ import { characterListLink, guidedShell } from './guided-builder';
  */
 export const BACKGROUND_STEP_PANEL = 'background-step';
 
-/**
- * THE HONESTY LINE. Nothing in production reads `character_background`, so the
- * only thing a person can observe after choosing is that the step advanced.
- * Said plainly, before the choice is made.
- */
-export const BACKGROUND_RECORDED_ONLY_DISCLOSURE =
-  'Choosing a background records its printed text on the character and ' +
-  'marks this step complete. That is the only visible change: nothing on ' +
-  'the sheet reads the background yet.';
+const ABILITY_LABELS: Readonly<Record<Ability, string>> = {
+  strength: 'Strength',
+  dexterity: 'Dexterity',
+  constitution: 'Constitution',
+  intelligence: 'Intelligence',
+  wisdom: 'Wisdom',
+  charisma: 'Charisma',
+};
+
+/** The two printed spread shapes; the SIZE of the budget is not D61's to lift. */
+type IncreaseMode = 'two_one' | 'one_one_one';
+
+const MODE_LABELS: Readonly<Record<IncreaseMode, string>> = {
+  two_one: '+2 to one ability, +1 to another',
+  one_one_one: '+1 to each of three abilities',
+};
+
+const SLOT_AMOUNTS: Readonly<Record<IncreaseMode, readonly number[]>> = {
+  two_one: [2, 1],
+  one_one_one: [1, 1, 1],
+};
 
 /**
- * WHAT RECORDING A BACKGROUND DOES NOT APPLY. One list for every background,
- * because every 2024 background carries all five and this step applies none.
- *
- * When a later unit grants one of these for real, its entry here is DELETED
- * rather than reworded — the same rule the species step applies to its unmade
- * choices (plan §3.4): the disclosure exists only while the gap does.
+ * WHAT CHOOSING A BACKGROUND NOW DOES — the honest replacement for A5's
+ * recorded-only line, which B3 made false. Recording is no longer all that
+ * happens: the increases become additive contributions that change the
+ * sheet's totals (never the allocated base), and the Origin feat becomes a
+ * real source whose own grants apply — picking Magic Initiate mints its
+ * spell choices.
+ */
+export const BACKGROUND_APPLIED_DISCLOSURE =
+  'Choosing a background records its printed text, applies your ability ' +
+  'increases as additions on top of the scores you allocated, and adds ' +
+  'your chosen Origin feat to the character. Choosing again later replaces ' +
+  'all of it together.';
+
+/**
+ * WHAT THIS STEP STILL DOES NOT APPLY. The A5 entries for the ability
+ * increases and the Origin feat are DELETED — B3 closed those gaps — never
+ * reworded; these three remain because their gaps remain.
  */
 export const BACKGROUND_UNAPPLIED_GRANTS: readonly string[] = [
-  'the 2024 ability score increases the background carries — and the ' +
-    'Ability scores step before this one is not built either, so no scores ' +
-    'have been asked for or chosen anywhere',
-  'the Origin feat',
   'the two skill proficiencies',
   'the tool proficiency',
   'the starting equipment package — equipment is the package only, with no ' +
@@ -77,10 +108,12 @@ export const BACKGROUND_UNAPPLIED_GRANTS: readonly string[] = [
 
 /**
  * The worker refuses `unknown_origin` as `handler_error` with structured
- * `data.reason` (seam, `GuidedRefusalData`). Anything else is not a refusal
- * and falls through to the raw message. A local twin of the species step's
- * helper rather than a reuse: that one's message names a species, and its
- * wording belongs to A4's tests.
+ * `data.reason` (seam, `GuidedRefusalData`). B3 widened what the reason can
+ * mean — an unknown background, an unknown Origin feat, or a background
+ * whose definition row was yielded to user-authored content — so the message
+ * no longer guesses which; the worker's own sentence stays primary and this
+ * is the fallback framing. Anything else is not a refusal and falls through
+ * to the raw message.
  */
 export function applyBackgroundRefusalMessage(error: unknown): string | null {
   if (!(error instanceof RpcError) || error.code !== 'handler_error') {
@@ -93,8 +126,8 @@ export function applyBackgroundRefusalMessage(error: unknown): string | null {
   const reason = (data as Record<string, unknown>)['reason'];
   if (reason === 'unknown_origin') {
     return (
-      'That background is not available in this database, so nothing was ' +
-      'recorded. Reload the page to refresh the background list.'
+      'That choice is not available in this database, so nothing was ' +
+      'recorded. Reload the page to refresh the options.'
     );
   }
   return null;
@@ -102,9 +135,9 @@ export function applyBackgroundRefusalMessage(error: unknown): string | null {
 
 export interface BackgroundStepDeps {
   readonly characterId: number;
-  readonly options: readonly GuidedOriginOption[];
-  readonly applyOrigin: (
-    contentKey: string,
+  readonly options: GuidedBackgroundChoiceOptions;
+  readonly applyBackground: (
+    params: GuidedApplyBackgroundParams,
   ) => Promise<GuidedApplyOriginResult>;
   readonly navigate: (path: string) => void;
 }
@@ -116,10 +149,17 @@ export interface BackgroundStep {
 
 export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
   const cleanups: Cleanup[] = [];
-  const cards: HTMLButtonElement[] = [];
   let inFlight = false;
 
-  /** Errors exist only while there is one to show, mirroring the chooser. */
+  let selected: GuidedBackgroundOption | null = null;
+  let mode: IncreaseMode = 'two_one';
+  /** One chosen ability per slot of the current mode. */
+  let slots: Ability[] = ['strength', 'dexterity'];
+  let featKey =
+    deps.options.origin_feats[0]?.content_key ?? '';
+  let magicInitiateList: string = MAGIC_INITIATE_LISTS[0];
+  let magicInitiateAbility: string = MAGIC_INITIATE_ABILITIES[0];
+
   const errorMount = element('div', { className: 'guided-error-mount' });
   const setError = (message: string | null): void => {
     clear(errorMount);
@@ -134,27 +174,377 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
     }
   };
 
-  const setCardsDisabled = (disabled: boolean): void => {
-    for (const card of cards) {
-      card.disabled = disabled;
+  const chosenIncreases = (): readonly GuidedBackgroundIncrease[] =>
+    SLOT_AMOUNTS[mode].map((amount, index) => ({
+      ability: slots[index] ?? 'strength',
+      amount,
+    }));
+
+  /**
+   * THE PRINTED PAIRING, shown for the selected background as what the SRD
+   * suggests. Verbatim licensed text — never a constraint (D61).
+   */
+  const suggestionMount = element('p', {
+    className: 'guided-background-suggestion',
+    attributes: { [BACKGROUND_STEP_ATTR.suggestion]: '' },
+  });
+  const renderSuggestion = (): void => {
+    if (selected === null) {
+      suggestionMount.textContent =
+        'Choose a background to see what the SRD suggests for it.';
+      return;
+    }
+    const pairing = selected.pairing;
+    suggestionMount.textContent =
+      `The SRD suggests for ${pairing.background_name}: increases to ` +
+      `${pairing.printed_abilities.join(', ')}, and the ` +
+      `${pairing.printed_feat} feat. That is a suggestion here, not a rule.`;
+  };
+
+  /**
+   * THE LIVE DEVIATION LABEL (D61). Present exactly while the chosen
+   * combination is not the SRD's printed pairing; the apply persists the
+   * same sentence into the contributions' notes.
+   */
+  const deviationMount = element('div', {
+    className: 'guided-background-deviation-mount',
+    attributes: { role: 'status' },
+  });
+  const renderDeviation = (): void => {
+    clear(deviationMount);
+    if (selected === null) {
+      return;
+    }
+    const sentence = backgroundPairingDeviation(selected.pairing, {
+      increases: chosenIncreases(),
+      origin_feat_content_key: featKey,
+      magic_initiate_list:
+        featKey === MAGIC_INITIATE_FEAT_CONTENT_KEY
+          ? magicInitiateList
+          : null,
+    });
+    if (sentence !== null) {
+      deviationMount.append(
+        element('p', {
+          className: 'guided-background-deviation',
+          text: sentence,
+          attributes: { [BACKGROUND_STEP_ATTR.deviation]: '' },
+        }),
+      );
     }
   };
 
-  const applyBackground = async (
-    option: GuidedOriginOption,
-  ): Promise<void> => {
+  /* ------------------------------------------------------ the increases */
+
+  const slotMount = element('div', {
+    className: 'guided-background-increase-slots',
+  });
+  const renderSlots = (): void => {
+    clear(slotMount);
+    const amounts = SLOT_AMOUNTS[mode];
+    amounts.forEach((amount, index) => {
+      const select = element(
+        'select',
+        {
+          attributes: {
+            [BACKGROUND_STEP_ATTR.increaseAbility]: String(index),
+            'aria-label': `Ability receiving +${String(amount)}`,
+          },
+        },
+        abilities.map((ability) => {
+          const option = element('option', {
+            text: ABILITY_LABELS[ability],
+            attributes: { value: ability },
+          });
+          if (ability === slots[index]) {
+            option.selected = true;
+          }
+          return option;
+        }),
+      );
+      cleanups.push(
+        listen(select, 'change', () => {
+          slots[index] = select.value as Ability;
+          setError(null);
+          renderDeviation();
+        }),
+      );
+      slotMount.append(
+        element('label', { className: 'guided-background-increase' }, [
+          element('span', { text: `+${String(amount)}` }),
+          select,
+        ]),
+      );
+    });
+  };
+
+  const defaultSlotsFor = (nextMode: IncreaseMode): Ability[] => {
+    const suggested = selected?.pairing.suggested_abilities ?? null;
+    const fallback: readonly Ability[] = abilities;
+    const source = suggested ?? fallback;
+    return SLOT_AMOUNTS[nextMode].map(
+      (_, index) => source[index] ?? fallback[index] ?? 'strength',
+    );
+  };
+
+  const modeSelector = element(
+    'fieldset',
+    { className: 'guided-background-increase-modes' },
+    [
+      element('legend', { text: 'Assign the ability increases' }),
+      ...(['two_one', 'one_one_one'] as const).map((candidate) => {
+        const radio = element('input', {
+          attributes: {
+            type: 'radio',
+            name: 'background-increase-mode',
+            value: candidate,
+            [BACKGROUND_STEP_ATTR.increaseMode]: candidate,
+          },
+        });
+        if (candidate === mode) {
+          radio.checked = true;
+        }
+        cleanups.push(
+          listen(radio, 'change', () => {
+            if (!radio.checked) {
+              return;
+            }
+            mode = candidate;
+            slots = defaultSlotsFor(candidate);
+            setError(null);
+            renderSlots();
+            renderDeviation();
+          }),
+        );
+        return element('label', { className: 'guided-background-mode' }, [
+          radio,
+          element('span', { text: MODE_LABELS[candidate] }),
+        ]);
+      }),
+    ],
+  );
+
+  /* -------------------------------------------------------- the feat */
+
+  const featSelect = element(
+    'select',
+    {
+      attributes: {
+        [BACKGROUND_STEP_ATTR.feat]: '',
+        'aria-label': 'Origin feat',
+      },
+    },
+    deps.options.origin_feats.map((feat) => {
+      const option = element('option', {
+        text: feat.name,
+        attributes: { value: feat.content_key },
+      });
+      if (feat.content_key === featKey) {
+        option.selected = true;
+      }
+      return option;
+    }),
+  );
+
+  const magicInitiateFields = element(
+    'div',
+    { className: 'guided-background-magic-initiate' },
+    [],
+  );
+  const renderMagicInitiateFields = (): void => {
+    clear(magicInitiateFields);
+    if (featKey !== MAGIC_INITIATE_FEAT_CONTENT_KEY) {
+      magicInitiateFields.hidden = true;
+      return;
+    }
+    magicInitiateFields.hidden = false;
+    const list = element(
+      'select',
+      {
+        attributes: {
+          [BACKGROUND_STEP_ATTR.magicInitiateList]: '',
+          'aria-label': 'Magic Initiate spell list',
+        },
+      },
+      MAGIC_INITIATE_LISTS.map((candidate) => {
+        const option = element('option', {
+          text: candidate,
+          attributes: { value: candidate },
+        });
+        if (candidate === magicInitiateList) {
+          option.selected = true;
+        }
+        return option;
+      }),
+    );
+    cleanups.push(
+      listen(list, 'change', () => {
+        magicInitiateList = list.value;
+        renderDeviation();
+      }),
+    );
+    const ability = element(
+      'select',
+      {
+        attributes: {
+          [BACKGROUND_STEP_ATTR.magicInitiateAbility]: '',
+          'aria-label': 'Magic Initiate spellcasting ability',
+        },
+      },
+      MAGIC_INITIATE_ABILITIES.map((candidate) => {
+        const option = element('option', {
+          text: ABILITY_LABELS[candidate],
+          attributes: { value: candidate },
+        });
+        if (candidate === magicInitiateAbility) {
+          option.selected = true;
+        }
+        return option;
+      }),
+    );
+    cleanups.push(
+      listen(ability, 'change', () => {
+        magicInitiateAbility = ability.value;
+      }),
+    );
+    magicInitiateFields.append(
+      element('label', { className: 'guided-background-feat-config' }, [
+        element('span', { text: 'Magic Initiate spell list' }),
+        list,
+      ]),
+      element('label', { className: 'guided-background-feat-config' }, [
+        element('span', { text: 'Magic Initiate spellcasting ability' }),
+        ability,
+      ]),
+    );
+  };
+  cleanups.push(
+    listen(featSelect, 'change', () => {
+      featKey = featSelect.value;
+      setError(null);
+      renderMagicInitiateFields();
+      renderDeviation();
+    }),
+  );
+
+  /* -------------------------------------------------- the backgrounds */
+
+  const selectBackground = (option: GuidedBackgroundOption): void => {
+    selected = option;
+    setError(null);
+    // Prefill from the SRD's printed pairing — a DEFAULT, never a constraint
+    // (D61). The player changes any of it freely below.
+    slots = defaultSlotsFor(mode);
+    const suggestedFeat = option.pairing.suggested_feat_content_key;
+    if (
+      suggestedFeat !== null &&
+      deps.options.origin_feats.some(
+        (feat) => feat.content_key === suggestedFeat,
+      )
+    ) {
+      featKey = suggestedFeat;
+      featSelect.value = suggestedFeat;
+    }
+    const suggestedList = option.pairing.suggested_magic_initiate_list;
+    if (suggestedList !== null) {
+      magicInitiateList = suggestedList;
+    }
+    renderSlots();
+    renderMagicInitiateFields();
+    renderSuggestion();
+    renderDeviation();
+  };
+
+  const backgroundList = element(
+    'ul',
+    {
+      className: 'guided-background-options',
+      attributes: { 'aria-label': 'Bundled backgrounds' },
+    },
+    deps.options.backgrounds.map((option) => {
+      const radio = element('input', {
+        attributes: {
+          type: 'radio',
+          name: 'background-option',
+          value: option.content_key,
+          [BACKGROUND_STEP_ATTR.option]: option.content_key,
+        },
+      });
+      cleanups.push(
+        listen(radio, 'change', () => {
+          if (radio.checked) {
+            selectBackground(option);
+          }
+        }),
+      );
+      return element('li', { className: 'guided-background-card' }, [
+        element('label', { className: 'guided-background-choice' }, [
+          radio,
+          element('span', {
+            className: 'guided-background-name',
+            text: option.name,
+          }),
+        ]),
+        element('p', {
+          className: 'guided-background-printed',
+          text:
+            `SRD: ${option.pairing.printed_abilities.join(', ')}; ` +
+            `${option.pairing.printed_feat}.`,
+        }),
+      ]);
+    }),
+  );
+
+  /* ------------------------------------------------------- submission */
+
+  const entryError = (): string | null => {
+    if (selected === null) {
+      return 'Choose a background first.';
+    }
+    const chosen = chosenIncreases().map((increase) => increase.ability);
+    if (new Set(chosen).size !== chosen.length) {
+      return 'Each increase must go to a different ability.';
+    }
+    if (featKey === '') {
+      return 'Choose an Origin feat.';
+    }
+    return null;
+  };
+
+  const submit = element('button', {
+    className: 'guided-background-submit',
+    text: 'Apply background',
+    attributes: { type: 'button', [BACKGROUND_STEP_ATTR.submit]: '' },
+  });
+
+  const apply = async (): Promise<void> => {
     if (inFlight) {
       return;
     }
-    // The same UI-only double-submit guard as creation (plan §3.3): disable
-    // before the await, re-enable only on failure.
+    const refusal = entryError();
+    if (refusal !== null || selected === null) {
+      setError(refusal);
+      return;
+    }
     inFlight = true;
     setError(null);
-    setCardsDisabled(true);
+    submit.disabled = true;
     try {
-      await deps.applyOrigin(option.content_key);
-      // The background is now recorded; the build route re-derives the step
-      // from the database and renders whatever comes next.
+      await deps.applyBackground({
+        character_id: deps.characterId,
+        content_key: selected.content_key,
+        increases: chosenIncreases(),
+        origin_feat_content_key: featKey,
+        origin_feat_config:
+          featKey === MAGIC_INITIATE_FEAT_CONTENT_KEY
+            ? {
+                chosen_list: magicInitiateList,
+                spellcasting_ability: magicInitiateAbility,
+              }
+            : {},
+      });
+      // The background is applied; the build route re-derives the step from
+      // the database and renders whatever comes next.
       deps.navigate(guidedBuildPath(deps.characterId));
     } catch (error) {
       setError(
@@ -162,38 +552,10 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
           (error instanceof Error ? error.message : String(error)),
       );
       inFlight = false;
-      setCardsDisabled(false);
+      submit.disabled = false;
     }
   };
-
-  const cardList = element(
-    'ul',
-    {
-      className: 'guided-background-options',
-      attributes: { 'aria-label': 'Bundled backgrounds' },
-    },
-    deps.options.map((option) => {
-      const apply = element('button', {
-        className: 'guided-background-apply',
-        text: `Choose ${option.name}`,
-        attributes: {
-          type: 'button',
-          'data-background-option': option.content_key,
-        },
-      });
-      cards.push(apply);
-      cleanups.push(
-        listen(apply, 'click', () => void applyBackground(option)),
-      );
-      return element('li', { className: 'guided-background-card' }, [
-        element('h3', {
-          className: 'guided-background-name',
-          text: option.name,
-        }),
-        apply,
-      ]);
-    }),
-  );
+  cleanups.push(listen(submit, 'click', () => void apply()));
 
   const panel = element(
     'section',
@@ -204,27 +566,15 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
     [
       element('h2', { text: 'Choose a background' }),
       element('p', {
-        className: 'guided-background-recorded-only',
-        text: BACKGROUND_RECORDED_ONLY_DISCLOSURE,
+        className: 'guided-background-applied',
+        text: BACKGROUND_APPLIED_DISCLOSURE,
       }),
-      element('div', { className: 'guided-background-unapplied' }, [
-        element('p', {
-          text:
-            'A background carries benefits this step does NOT apply — ' +
-            'choosing one puts none of these on the character:',
-        }),
-        element(
-          'ul',
-          {},
-          BACKGROUND_UNAPPLIED_GRANTS.map((grant) =>
-            element('li', { text: grant }),
-          ),
-        ),
-      ]),
       element('p', {
-        text: 'Choosing again later replaces the earlier background.',
+        className: 'guided-background-house-rule',
+        text: BACKGROUND_HOUSE_RULE_NOTICE,
+        attributes: { [BACKGROUND_STEP_ATTR.houseRule]: '' },
       }),
-      ...(deps.options.length === 0
+      ...(deps.options.backgrounds.length === 0
         ? [
             element('p', {
               className: 'guided-empty-catalog',
@@ -233,11 +583,43 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
                 'this step cannot offer one.',
             }),
           ]
-        : [cardList]),
+        : [
+            backgroundList,
+            suggestionMount,
+            modeSelector,
+            slotMount,
+            element('label', { className: 'guided-background-feat' }, [
+              element('span', { text: 'Origin feat' }),
+              featSelect,
+            ]),
+            magicInitiateFields,
+            deviationMount,
+            element('div', { className: 'guided-background-unapplied' }, [
+              element('p', {
+                text:
+                  'A background also carries benefits this step does NOT ' +
+                  'apply yet — applying one puts none of these on the ' +
+                  'character:',
+              }),
+              element(
+                'ul',
+                {},
+                BACKGROUND_UNAPPLIED_GRANTS.map((grant) =>
+                  element('li', { text: grant }),
+                ),
+              ),
+            ]),
+            submit,
+          ]),
       errorMount,
       characterListLink(),
     ],
   );
+
+  renderSlots();
+  renderMagicInitiateFields();
+  renderSuggestion();
+  renderDeviation();
 
   return {
     element: guidedShell('background', panel),

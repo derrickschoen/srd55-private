@@ -13,6 +13,11 @@ import {
   type GuidedOriginParams,
   type OriginKind,
 } from '../builder/contracts';
+import {
+  BACKGROUND_RPC,
+  type GuidedApplyBackgroundParams,
+  type GuidedBackgroundChoiceOptions,
+} from '../builder/background-choices';
 import type { GuidedApplyOriginResult } from '../builder/guided-creation';
 import {
   createCatalogClient,
@@ -87,6 +92,10 @@ export interface QueriesClient extends CatalogClient {
   allocateAbilities(
     params: GuidedAllocateAbilitiesParams,
   ): Promise<GuidedAllocateAbilitiesResult>;
+  backgroundChoiceOptions(): Promise<GuidedBackgroundChoiceOptions>;
+  applyBackground(
+    params: GuidedApplyBackgroundParams,
+  ): Promise<GuidedApplyOriginResult>;
 }
 
 export function createQueriesClient(rpc: RpcClient): QueriesClient {
@@ -230,6 +239,16 @@ export function createQueriesClient(rpc: RpcClient): QueriesClient {
     allocateAbilities: (params: GuidedAllocateAbilitiesParams) =>
       rpc.call<GuidedAllocateAbilitiesParams, GuidedAllocateAbilitiesResult>(
         GUIDED_RPC.allocateAbilities,
+        params,
+      ),
+    backgroundChoiceOptions: () =>
+      rpc.call<Record<string, never>, GuidedBackgroundChoiceOptions>(
+        BACKGROUND_RPC.choiceOptions,
+        {},
+      ),
+    applyBackground: (params: GuidedApplyBackgroundParams) =>
+      rpc.call<GuidedApplyBackgroundParams, GuidedApplyOriginResult>(
+        BACKGROUND_RPC.applyBackground,
         params,
       ),
   });

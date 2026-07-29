@@ -89,11 +89,14 @@ async function render(context: ScreenContext): Promise<() => void> {
       view = step.element;
       cleanups.push(step.cleanup);
     } else if (state.kind === 'ready' && state.current_step === 'background') {
+      // B3: the step gathers the whole choice — background, player-assigned
+      // increases, player-chosen Origin feat (D61) — and applies it through
+      // one `applyBackground` transaction, so its options carry the printed
+      // pairings and the Origin feat list rather than bare names.
       const step = createBackgroundStep({
         characterId,
-        options: await client.originOptions('background'),
-        applyOrigin: (contentKey) =>
-          client.applyOrigin(characterId, 'background', contentKey),
+        options: await client.backgroundChoiceOptions(),
+        applyBackground: (params) => client.applyBackground(params),
         navigate: (path) => context.router.navigate(path),
       });
       view = step.element;
