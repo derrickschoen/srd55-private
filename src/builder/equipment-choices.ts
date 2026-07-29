@@ -21,10 +21,10 @@
  *    above, and the two are controlled separately (E-NO-GOLD-SHOWN vs
  *    E-NO-GOLD-OFFERED).
  *  - Confirming an option records the choice through E-A's
- *    `applyEquipmentPackageChoice` — into the granting source instance's
+ *    `applyEquipmentPackageChoice` — into the recording source instance's
  *    `config` under the seam's `EQUIPMENT_CHOICE_CONFIG_KEY` — and mints the
- *    option's weapon/armour rows stamped with that instance. Gear mints
- *    nothing and renders from the rules tables (D65).
+ *    option's weapon/armour rows as plain, unowned rows (D69: no provenance).
+ *    Gear mints nothing and renders from the rules tables (D65).
  *  - The step completes when BOTH sources carry a recorded choice; that same
  *    predicate is the build-derivation's `equipmentChosen` evidence, so the
  *    step and the derivation cannot disagree.

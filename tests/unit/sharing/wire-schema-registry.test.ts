@@ -115,10 +115,11 @@ const VERSION_FIXTURES = {
   6: {
     // Independently compressed from a hand-authored v6 positional tuple —
     // never from `shareDocumentToPositional`. The appended `sourceRef` slots
-    // are the section v6 exists for (equipment provenance, E-A): a GRANTED
-    // Greatsword and GRANTED worn armour each name the class entry (ref 0),
-    // while the hand-typed club's null must survive the wire as an absent
-    // field — NULL means a person put this here.
+    // were the section v6 existed for (equipment provenance, E-A): a granted
+    // Greatsword and granted worn armour each name the class entry (ref 0).
+    // D69 struck provenance, so this fixture now proves the 6→7 migration:
+    // the composed decode DROPS both refs, and the document arrives as plain
+    // rows — the state D69 puts every weapon and armour row in.
     fragment:
       'H4sIAAAAAAAAA5WRQUvEMBCF_0qZcwrtrvSw10Xcg570ForMJoMNTic1SS3rr5duy1q7ggrh' +
       'QWaGeV9eNFixedtzcoYxxjx2xBxz02BAkyjkscFAoCql4fatd11LkrJ7J6_ZgYIHJT3zQspq' +
@@ -156,7 +157,6 @@ const VERSION_FIXTURES = {
           heavy: true,
           two_handed: true,
           proficiency_category: 'martial',
-          sourceRef: 0,
         },
         {
           name: 'Hand-Typed Club',
@@ -174,7 +174,69 @@ const VERSION_FIXTURES = {
           dex_bonus: 'none',
           strength_requirement: 13,
           stealth_disadvantage: true,
-          sourceRef: 0,
+        },
+      ],
+    },
+  },
+  7: {
+    // Independently compressed from a hand-authored v7 positional tuple —
+    // never from `shareDocumentToPositional`. The RESTORED arities are the
+    // section v7 exists for (D69, equipment provenance struck): the weapon
+    // tuples are back at 21 and the armour tuple at 9, with no sourceRef
+    // slot anywhere — a weapon is a weapon, whoever put it there.
+    fragment:
+      'H4sIAAAAAAAAA5WRT0vDQBDFv0p45w00qVTotYg96ElvS5BpdjCLk03cP4b66aWNtjEVVFge' +
+      '7Lxh5rdvNYwzeZsk2loohDz0LBLyuiFPdWSfh4Y8Q10rjZvXZPuWXczurHvJtuw7KJdEJlKs' +
+      '5hWUi_Jq2oeWXCJBpbRejPb6uHw92Hfy5rN3qYrZqKpS-vs5-1rj1jPFMHSnCXgQCo11z9Pt' +
+      'Gq5zjGqOeZToE__FQEs-WhIoDWNrhkJpVocXwXXxifpebE07YRyYsSVn8sd9zybbSNpdhPY7' +
+      '2L9khPBcd96w-Zmq-opNY9OQddk9WYHC0HkHhYbpbQ81Ip0-tVieg6jmoBf3DyuIlyZcAgAA',
+    expected: {
+      format: CHARACTER_SHARE_FORMAT,
+      version: CHARACTER_SHARE_VERSION,
+      character: {
+        name: 'Equipment Link Hero',
+        intelligence: 16,
+        rules_edition_preference: '2024',
+        ability_allocation_method: 'manual',
+      },
+      classes: [{
+        id: 0,
+        classKey: '2024:class:wizard',
+        level: 3,
+        start: 1,
+      }],
+      sources: [],
+      selections: [],
+      spellbook: [],
+      preferences: [],
+      overrides: [],
+      weapons: [
+        {
+          name: 'Greatsword',
+          damage: { kind: 'dice', dice: '2d6' },
+          damage_type: 'Slashing',
+          versatile_damage: { kind: 'not_applicable' },
+          range: { kind: 'none' },
+          heavy: true,
+          two_handed: true,
+          proficiency_category: 'martial',
+        },
+        {
+          name: 'Hand-Typed Club',
+          damage: { kind: 'not_recorded' },
+          versatile_damage: { kind: 'not_applicable' },
+          range: { kind: 'none' },
+        },
+      ],
+      armor: [
+        {
+          slot: 'worn',
+          name: 'Chain Mail',
+          category: 'heavy',
+          armor_class: 16,
+          dex_bonus: 'none',
+          strength_requirement: 13,
+          stealth_disadvantage: true,
         },
       ],
     },

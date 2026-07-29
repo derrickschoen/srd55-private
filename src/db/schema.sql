@@ -119,7 +119,6 @@ CREATE INDEX `change_log_operation_uuid_index` ON `change_log` (`operation_uuid`
 CREATE TABLE `character_armor` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`character_id` integer NOT NULL,
-	`source_instance_id` integer,
 	`slot` VARCHAR NOT NULL,
 	`name` VARCHAR NOT NULL,
 	`category` VARCHAR NOT NULL,
@@ -132,7 +131,6 @@ CREATE TABLE `character_armor` (
 	`created_at` DATETIME,
 	`updated_at` DATETIME,
 	FOREIGN KEY (`character_id`) REFERENCES `characters`(`id`) ON UPDATE no action ON DELETE cascade,
-	FOREIGN KEY (`source_instance_id`,`character_id`) REFERENCES `character_source_instances`(`id`,`character_id`) ON UPDATE no action ON DELETE cascade,
 	CONSTRAINT "character_armor_slot_check" CHECK(`slot` IN ('worn', 'shield')),
 	CONSTRAINT "character_armor_category_check" CHECK(`category` IN ('light', 'medium', 'heavy', 'shield')),
 	CONSTRAINT "character_armor_dex_bonus_check" CHECK(`dex_bonus` IN ('full', 'capped', 'none')),
@@ -379,7 +377,6 @@ CREATE UNIQUE INDEX `character_spell_preferences_character_id_spell_version_id_u
 CREATE TABLE `character_weapons` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`character_id` integer NOT NULL,
-	`source_instance_id` integer,
 	`name` VARCHAR NOT NULL,
 	`proficiency_category` VARCHAR,
 	`attack_kind` VARCHAR,
@@ -411,7 +408,6 @@ CREATE TABLE `character_weapons` (
 	`created_at` DATETIME,
 	`updated_at` DATETIME,
 	FOREIGN KEY (`character_id`) REFERENCES `characters`(`id`) ON UPDATE no action ON DELETE cascade,
-	FOREIGN KEY (`source_instance_id`,`character_id`) REFERENCES `character_source_instances`(`id`,`character_id`) ON UPDATE no action ON DELETE cascade,
 	CONSTRAINT "character_weapons_damage_check" CHECK((
         (damage_kind = 'dice' AND damage_dice IS NOT NULL AND damage_flat IS NULL AND damage_custom IS NULL)
         OR (damage_kind = 'flat' AND damage_dice IS NULL AND damage_flat IS NOT NULL AND damage_flat >= 0 AND damage_custom IS NULL)

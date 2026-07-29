@@ -939,6 +939,20 @@ const COMPLETE_V6_WIRE = [
   ...COMPLETE_V5_WIRE.slice(14),
 ];
 
+/**
+ * THE COMPLETE DOCUMENT, RE-EXPRESSED AT V7 (owner ruling D69: equipment
+ * provenance struck). v7 restores the v5 weapon and armour tuples — the
+ * `sourceRef` slot v6 appended is DROPPED by `migrateV6ToV7` — so the v7
+ * wire differs from the frozen v5 literal in exactly one position: the
+ * version slot. Written out that way rather than generated, so the layout
+ * pin below stays non-circular.
+ */
+const COMPLETE_V7_WIRE = [
+  COMPLETE_V5_WIRE[0],
+  7,
+  ...COMPLETE_V5_WIRE.slice(2),
+];
+
 describe('character-share positional codec', () => {
   it('refuses the hand-authored complete version-1 positional golden BY NAME', () => {
     // D60: pre-v5 documents are RETIRED, not migrated. This fixture stays
@@ -952,18 +966,24 @@ describe('character-share positional codec', () => {
   });
 
   it('keeps a hand-authored complete version-5 positional golden readable', () => {
-    // Through the 5→6 null-pad: a v5 document predates equipment minting, so
-    // its rows arrive with no sourceRef anywhere — the same document it
-    // always meant.
+    // Through the 5→6 null-pad and the 6→7 drop: a v5 document predates
+    // equipment minting, so its rows arrive with no provenance anywhere —
+    // the same document it always meant.
     expect(positionalToShareDocument(COMPLETE_V5_WIRE)).toEqual(complete);
   });
 
   it('keeps a hand-authored complete version-6 positional golden readable', () => {
+    // Through the 6→7 drop (D69): the appended null sourceRef slots come
+    // off, and the document decodes to the same plain rows.
     expect(positionalToShareDocument(COMPLETE_V6_WIRE)).toEqual(complete);
   });
 
-  it('pins the hand-authored complete version-6 wire layout element by element', () => {
-    expect(shareDocumentToPositional(complete)).toEqual(COMPLETE_V6_WIRE);
+  it('keeps a hand-authored complete version-7 positional golden readable', () => {
+    expect(positionalToShareDocument(COMPLETE_V7_WIRE)).toEqual(complete);
+  });
+
+  it('pins the hand-authored complete version-7 wire layout element by element', () => {
+    expect(shareDocumentToPositional(complete)).toEqual(COMPLETE_V7_WIRE);
   });
 
   it('round-trips object, positional, gzip, and base64url forms', async () => {
@@ -1105,7 +1125,7 @@ describe('character-share positional codec', () => {
     const positional = shareDocumentToPositional(minimal);
     expect(positional).toEqual([
       'dnd-multiclass-spells-character-share',
-      6,
+      7,
       [
         'Ten',
         null,
@@ -1762,11 +1782,9 @@ describe('a share link generated before the sheet inputs travelled', () => {
     const currentWithoutSheet = [...migratedRoot];
     currentWithoutSheet[1] = CHARACTER_SHARE_VERSION;
     currentWithoutSheet.push(null); // skillGrants, absent
-    // Re-expressed again at v6: the weapon tuples gain their appended
-    // `sourceRef` slot, null — the pre-sheet link's rows were hand-added.
-    currentWithoutSheet[11] = (currentWithoutSheet[11] as unknown[][]).map(
-      (weapon) => [...weapon, null],
-    );
+    // NOT re-expressed at v6/v7: v6 appended a sourceRef slot to the weapon
+    // tuples and v7 (D69) removed it again, so the current weapon tuple is
+    // the v5 shape this migrated root already carries.
     const currentWithNullTupleSheet = [...currentWithoutSheet];
     currentWithNullTupleSheet[13] = [null, null, null, null];
     expect(positionalToShareDocument(currentWithNullTupleSheet)).toEqual(

@@ -1279,12 +1279,14 @@ function replaceGuidedLineageGrants(
  *
  * EXPORTED since E-A: the equipment mint's record-only fallback
  * (`src/grants/equipment-grants.ts`) produces a background instance when the
- * seam's `applyOrigin` path recorded a background without one, and that
- * instance MUST carry this marker — an unmarked instance would survive the
- * next background change and leave granted equipment from a background the
- * character no longer has, which is exactly the orphan the replace exists to
- * prevent. One string, one owner; the mint imports it rather than spelling a
- * second copy.
+ * seam's `applyOrigin` path recorded a background without one — the recorded
+ * equipment CHOICE lives in a source instance's `config` and needs a row to
+ * carry it — and that instance MUST carry this marker: an unmarked instance
+ * would survive the next background change and leave a recorded choice from
+ * a background the character no longer has. (Since D69 the instance owns
+ * only the record; minted weapon and armour rows are the player's own and
+ * survive the replace.) One string, one owner; the mint imports it rather
+ * than spelling a second copy.
  */
 export const GUIDED_BACKGROUND_SOURCE_MARKER = 'guided:background-apply';
 

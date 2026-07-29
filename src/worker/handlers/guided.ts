@@ -304,11 +304,11 @@ export const handlers: readonly RpcHandler[] = Object.freeze([
       guidedEquipmentStepState(context.db, params.character_id),
   ),
   /**
-   * The E-B apply (plan §3): one transaction records the choice in the
-   * granting source instance's config, removes exactly what that instance
-   * granted before, and mints the option's weapon/armour rows stamped with
-   * it. Domain refusals — the step's two guards and E-A's armour-slot
-   * collision — ride `translatingRefusals`' equipment arms.
+   * The E-B apply (plan §3, reshaped by D69): one transaction records the
+   * choice in the recording source instance's config and mints the option's
+   * weapon/armour rows as plain rows — no stamp, no option-change cleanup.
+   * Domain refusals — the step's two guards and E-A's armour-slot collision
+   * — ride `translatingRefusals`' equipment arms.
    */
   defineRpcHandler(
     EQUIPMENT_RPC.applyEquipment,

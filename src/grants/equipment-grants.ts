@@ -16,45 +16,43 @@ import {
 } from '../rules/weapon-template-fold';
 
 /**
- * THE STARTING-EQUIPMENT MINT AND CLEANUP — dispatch E-A of
- * `docs/design/2026-07-29-starting-equipment.md` (§2, §3), the runtime the
- * seam's `EQUIPMENT_GRANTS_MODULE` names.
+ * THE STARTING-EQUIPMENT MINT — the runtime the seam's
+ * `EQUIPMENT_GRANTS_MODULE` names, reshaped by owner ruling D69
+ * (`.claude/decisions.md`): weapons and armour carry NO provenance. E-A
+ * originally stamped every minted row with its granting source instance and
+ * keyed an option-change cleanup on the stamp; the owner rejected the premise
+ * — "I don't care where the greatsword came from" — so minted rows arrive as
+ * plain rows, exactly like hand-added ones.
  *
  * WHAT ONE APPLY DOES, in one transaction:
  *
- *  1. resolves the GRANTING SOURCE INSTANCE — the character's active class
+ *  1. resolves the RECORDING source instance — the character's active class
  *     instance for `kind: 'class'`, the guided background instance for
  *     `kind: 'background'` (produced HERE when the record-only `applyOrigin`
- *     path left the background without one — a granted row with a NULL source
- *     is indistinguishable from a hand-added one, which is the entire defect
- *     this unit exists to prevent);
- *  2. records the CHOICE in that instance's `config` under the seam's
+ *     path left the background without one — the recorded CHOICE needs a
+ *     `config` to live in);
+ *  2. if that instance already records EXACTLY this choice, stops — a
+ *     re-confirmation is a no-op, never a duplicate mint;
+ *  3. records the CHOICE in the instance's `config` under the seam's
  *     `EQUIPMENT_CHOICE_CONFIG_KEY` — which is already on the share wire, so
  *     the recorded choice travels for free;
- *  3. removes EXACTLY the rows carrying that source instance — rows with a
- *     NULL `source_instance_id` are NEVER touched, because a person put those
- *     there and only a person may remove them (§5's species-cleanup trap);
  *  4. mints owned `character_weapons` / `character_armor` rows for the chosen
- *     option's `weapon`/`armor` items, each stamped with the granting
- *     instance, quantities expanded to rows; mints NOTHING for `gear` (D65)
- *     and therefore nothing for a package's trailing GP line, which IS a gear
- *     row (D56).
+ *     option's `weapon`/`armor` items, quantities expanded to rows; mints
+ *     NOTHING for `gear` (D65) and therefore nothing for a package's trailing
+ *     GP line, which IS a gear row (D56).
  *
- * Changing the option is the same call with a different letter: step 3
- * removes what the previous option minted and step 4 re-mints.
- *
- * THE MINT DOES NOT RIDE THE PLANNER'S ADD-WEAPON PATH, deliberately — §5
- * names that reuse as the trap: it compiles, produces the right AC and attack
- * profile, and stamps nothing, which only an option switch reveals. The copy
- * here is the same column-wise template copy (D1b) with the source stamp made
- * impossible to omit.
+ * CHANGING THE OPTION DOES NOT CLEAN UP (D69, point 5). With no stamp there
+ * is nothing to key a cleanup on, and under the ruling that is correct rather
+ * than a gap: the minted rows are the player's, and the player removes what
+ * they do not want. A switch whose new option needs an occupied armour slot
+ * refuses by name (below) until the player clears the slot themselves.
  */
 
 /**
  * The armour-slot collision, refused by NAME with whole-apply rollback — the
  * shape S-B built for `skill_already_held`, never a raw SQLite constraint
  * violation and never a silent overwrite. Thrown inside the transaction, so
- * the whole apply (choice, cleanup, every already-minted row) rolls back.
+ * the whole apply (choice and every already-minted row) rolls back.
  */
 export class EquipmentGrantRefusal extends Error {
   readonly reason: EquipmentGrantRefusalReason;
@@ -91,8 +89,8 @@ function timestamp(): string {
  * The chosen option's rows, from the rules tables the seeders own. An option
  * letter with no rows is legal here — a gold-only option (Wizard B) has gear
  * rows only after D40 retired the coin kind, and some letters simply do not
- * exist for a source — the mint then removes the previous grant and mints
- * nothing, which is exactly what choosing a packageless option means.
+ * exist for a source — the mint then records the choice and mints nothing,
+ * which is exactly what choosing a packageless option means.
  * WHICH options the step OFFERS (suppressing gold-only ones per D56) is
  * E-B's filter, not this module's.
  */
@@ -143,14 +141,15 @@ function grantableItems(
 }
 
 /**
- * The granting source instance, resolved — or, for a background the
- * record-only `applyOrigin` path recorded without one, PRODUCED (plan §3's
- * second refusal, pinned): minting under NULL would make granted rows
- * indistinguishable from hand-added ones. The produced instance carries the
- * guided marker so the next background change deletes it — and, by the
- * composite cascade, every row it granted.
+ * The source instance the CHOICE is recorded on — or, for a background the
+ * record-only `applyOrigin` path recorded without one, PRODUCED: the choice
+ * lives in a `config` and needs a row to carry it. Since D69 the instance no
+ * longer owns any minted row; it owns only the record. The produced instance
+ * still carries the guided marker so the next background change deletes it —
+ * taking the recorded choice with it, while the minted rows (the player's
+ * own, under the ruling) stay.
  */
-function grantingSourceInstanceId(
+function recordingSourceInstanceId(
   db: DatabaseContext,
   params: EquipmentChoiceParams,
 ): number {
@@ -169,8 +168,9 @@ function grantingSourceInstanceId(
     if (typeof classInstance !== 'number') {
       throw new Error(
         `Character ${params.character_id} has no active class source ` +
-          `instance for "${params.content_key}" to stamp equipment with. ` +
-          'The wizard requires a class before anything else happens (D42).',
+          `instance for "${params.content_key}" to record the equipment ` +
+          'choice on. The wizard requires a class before anything else ' +
+          'happens (D42).',
       );
     }
     return classInstance;
@@ -203,7 +203,7 @@ function grantingSourceInstanceId(
   if (typeof definitionId !== 'number' || typeof displayName !== 'string') {
     throw new Error(
       `The background "${params.content_key}" has no definition in this ` +
-        'database, so granted equipment cannot be recorded with an owner.',
+        'database, so its equipment choice cannot be recorded.',
     );
   }
   const now = timestamp();
@@ -225,22 +225,43 @@ function grantingSourceInstanceId(
   ).lastInsertId;
 }
 
-/** Record the choice in the instance's `config`, preserving every other key. */
-function recordChoice(
+/** The instance's parsed `config`, or `{}` for NULL/non-object storage. */
+function storedConfig(
   db: DatabaseContext,
   sourceInstanceId: number,
-  choice: EquipmentChoiceConfig,
-): void {
+): Record<string, unknown> {
   const stored = db.scalar(
     'SELECT config FROM character_source_instances WHERE id = ?',
     [sourceInstanceId],
   );
   const parsed: unknown =
     typeof stored === 'string' && stored !== '' ? JSON.parse(stored) : {};
-  const config: Record<string, unknown> =
-    typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
-      ? { ...(parsed as Record<string, unknown>) }
-      : {};
+  return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+    ? { ...(parsed as Record<string, unknown>) }
+    : {};
+}
+
+/** True when the instance already records exactly this choice. */
+function choiceAlreadyRecorded(
+  config: Record<string, unknown>,
+  choice: EquipmentChoiceConfig,
+): boolean {
+  const recorded = config[EQUIPMENT_CHOICE_CONFIG_KEY];
+  return (
+    typeof recorded === 'object' &&
+    recorded !== null &&
+    (recorded as Record<string, unknown>).kind === choice.kind &&
+    (recorded as Record<string, unknown>).option === choice.option
+  );
+}
+
+/** Record the choice in the instance's `config`, preserving every other key. */
+function recordChoice(
+  db: DatabaseContext,
+  sourceInstanceId: number,
+  config: Record<string, unknown>,
+  choice: EquipmentChoiceConfig,
+): void {
   config[EQUIPMENT_CHOICE_CONFIG_KEY] = {
     kind: choice.kind,
     option: choice.option,
@@ -250,28 +271,6 @@ function recordChoice(
      SET config = ?, updated_at = ?
      WHERE id = ?`,
     [JSON.stringify(config), timestamp(), sourceInstanceId],
-  );
-}
-
-/**
- * Remove exactly what this source instance granted. The predicate is the
- * non-null stamp itself, so a NULL-sourced row — a person's own — is
- * unreachable by construction, not by care.
- */
-function removeGrantedEquipment(
-  db: DatabaseContext,
-  characterId: number,
-  sourceInstanceId: number,
-): void {
-  db.exec(
-    `DELETE FROM character_weapons
-     WHERE character_id = ? AND source_instance_id = ?`,
-    [characterId, sourceInstanceId],
-  );
-  db.exec(
-    `DELETE FROM character_armor
-     WHERE character_id = ? AND source_instance_id = ?`,
-    [characterId, sourceInstanceId],
   );
 }
 
@@ -306,7 +305,6 @@ const WEAPON_COPY_COLUMNS = [
 function mintWeapons(
   db: DatabaseContext,
   characterId: number,
-  sourceInstanceId: number,
   item: GrantableItem,
 ): void {
   if (item.weapon_template_id === null) {
@@ -336,7 +334,6 @@ function mintWeapons(
   const now = timestamp();
   const row: Record<string, unknown> = {
     character_id: characterId,
-    source_instance_id: sourceInstanceId,
     proficiency_category: weaponProficiencyCategoryOf(group as SrdWeaponGroup),
     attack_kind: weaponAttackKindOf(group as SrdWeaponGroup),
     mastery_selected: 0,
@@ -379,7 +376,6 @@ const ARMOR_COPY_COLUMNS = [
 function mintArmor(
   db: DatabaseContext,
   characterId: number,
-  sourceInstanceId: number,
   item: GrantableItem,
 ): void {
   if (item.armor_template_id === null) {
@@ -405,11 +401,12 @@ function mintArmor(
   }
   for (let count = 0; count < item.quantity; count += 1) {
     // THE COLLISION REFUSAL (§3, pinned): `character_armor` is UNIQUE on
-    // `(character_id, slot)`, and a person who hand-added worn armour must be
+    // `(character_id, slot)`, and a person who holds worn armour must be
     // told which item collided — never handed a raw SQLite constraint
-    // violation, never silently overwritten. Our own previous grant is
-    // already gone (the cleanup ran first), so any occupant is either a
-    // person's own row or another source's grant; both refuse.
+    // violation, never silently overwritten. Since D69 there is no cleanup
+    // and no stamp, so a previously minted grant is indistinguishable from a
+    // person's own row; whatever holds the slot, the mint refuses and the
+    // player clears the slot themselves.
     const holder = db.scalar(
       `SELECT name FROM character_armor
        WHERE character_id = ? AND slot = ?`,
@@ -431,7 +428,6 @@ function mintArmor(
     const now = timestamp();
     const row: Record<string, unknown> = {
       character_id: characterId,
-      source_instance_id: sourceInstanceId,
       slot,
       notes: null,
       created_at: now,
@@ -459,9 +455,9 @@ function mintArmor(
 
 /**
  * Apply (or change) one source's starting-equipment package choice. See the
- * module header for the four steps; everything happens inside one
- * transaction, so an `EquipmentGrantRefusal` rolls the WHOLE apply back —
- * the recorded choice, the cleanup and every already-minted row.
+ * module header for the steps; everything happens inside one transaction, so
+ * an `EquipmentGrantRefusal` rolls the WHOLE apply back — the recorded
+ * choice and every already-minted row.
  */
 export function applyEquipmentPackageChoice(
   db: DatabaseContext,
@@ -469,14 +465,19 @@ export function applyEquipmentPackageChoice(
 ): void {
   db.transaction(() => {
     const items = grantableItems(db, params);
-    const sourceInstanceId = grantingSourceInstanceId(db, params);
-    recordChoice(db, sourceInstanceId, params);
-    removeGrantedEquipment(db, params.character_id, sourceInstanceId);
+    const sourceInstanceId = recordingSourceInstanceId(db, params);
+    const config = storedConfig(db, sourceInstanceId);
+    if (choiceAlreadyRecorded(config, params)) {
+      // Re-confirming the recorded choice is a NO-OP: with no cleanup (D69)
+      // a re-mint would duplicate every row the first apply produced.
+      return;
+    }
+    recordChoice(db, sourceInstanceId, config, params);
     for (const item of items) {
       if (item.item_kind === 'weapon') {
-        mintWeapons(db, params.character_id, sourceInstanceId, item);
+        mintWeapons(db, params.character_id, item);
       } else if (item.item_kind === 'armor') {
-        mintArmor(db, params.character_id, sourceInstanceId, item);
+        mintArmor(db, params.character_id, item);
       }
       // `gear` mints NOTHING (D65): a Dungeoneer's Pack and a trailing GP
       // line render from the rules tables and are never owned.

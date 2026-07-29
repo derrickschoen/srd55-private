@@ -12,9 +12,9 @@
  * WHAT IT DELIBERATELY DOES NOT DO:
  *
  *  - It never reads or writes `character_weapons` / `character_armor`
- *    directly. The mint, the option-change cleanup and the armour-slot
- *    refusal are E-A's, in `src/grants/equipment-grants.ts`, and reaching
- *    around them is §5's trap (rows minted without their source stamp).
+ *    directly. The mint and the armour-slot refusal are E-A's, in
+ *    `src/grants/equipment-grants.ts` (reshaped by D69: no provenance
+ *    stamp, no option-change cleanup).
  *  - It never re-derives completeness its own way: `complete` and the
  *    build evidence both read `recordedEquipmentChoiceOption`.
  */
@@ -254,8 +254,8 @@ export function recordedEquipmentPackages(
  *     (a suppressed option confirmed by a crafted request would otherwise
  *     record a choice the step can neither show nor change).
  *
- * The mint itself (choice recorded, cleanup, stamped rows, armour-slot
- * refusal, whole-apply rollback) is E-A's transaction, unchanged.
+ * The mint itself (choice recorded, plain rows minted, armour-slot refusal,
+ * whole-apply rollback — D69: no stamp, no cleanup) is E-A's transaction.
  */
 export function applyGuidedEquipment(
   db: DatabaseContext,

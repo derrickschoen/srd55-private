@@ -1,6 +1,5 @@
 import {
   check,
-  foreignKey,
   index,
   integer,
   sqliteTable,
@@ -12,7 +11,6 @@ import type {
   CharacterWeaponId,
   ClassDefinitionId,
   ContentKey,
-  SourceInstanceId,
   WeaponTemplateId,
 } from '../../src/domain/ids';
 import type {
@@ -48,7 +46,7 @@ import {
   tinyint1,
   varchar,
 } from './columns';
-import { character_source_instances, characters } from './character';
+import { characters } from './character';
 import { class_definitions } from './catalog-classes';
 
 /**
@@ -99,29 +97,10 @@ export const character_weapons = sqliteTable(
       .notNull()
       .$type<CharacterId>()
       .references(() => characters.id, { onDelete: 'cascade' }),
-    /**
-     * WHICH RULE GRANTED THIS WEAPON, or NULL for "a person put this here" —
-     * the starting-equipment plan (`docs/design/2026-07-29-starting-equipment.md`
-     * §2), D65.
-     *
-     * NULLABLE, AND THE NULL IS LOAD-BEARING: every hand-added weapon and every
-     * row written before this column existed genuinely has no granting rule,
-     * which is the literal pre-feature truth — before the equipment step nothing
-     * but a person could put a weapon here. Non-NULL means a rule granted the
-     * row, and ONLY rules may remove it: the option-change cleanup deletes by
-     * this column and must never touch a NULL-sourced row, or it eats a weapon
-     * the player typed in themselves — the species-cleanup trap a mutation
-     * control caught earlier in this effort.
-     *
-     * THIS IS NOT A TEMPLATE REFERENCE AND DOES NOT AMEND D1b: the weapon's
-     * fields are still values copied once with no live link to the catalog.
-     * What it references is another CHARACTER-OWNED row — the same composite
-     * same-character shape `character_effects` and `character_skill_grants`
-     * carry, so a weapon cannot be attached to another character's source.
-     * Cascade is correct here: the guided replace hard-deletes a source tree,
-     * and a granted weapon must not outlive the grant that minted it.
-     */
-    source_instance_id: integer('source_instance_id').$type<SourceInstanceId>(),
+    // NO PROVENANCE COLUMN, BY OWNER RULING (D69). E-A added a
+    // `source_instance_id` here (migration 0011); the owner struck it —
+    // a weapon is a weapon, whoever put it there — and migration 0012
+    // removed it. Do not reintroduce it without a new ruling.
     name: varchar()('name').notNull(),
     /**
      * `simple | martial`, or NULL for NOT STATED — D27.
@@ -300,18 +279,6 @@ export const character_weapons = sqliteTable(
       'character_weapons_attack_kind_check',
       nullOrOneOf('attack_kind', weaponAttackKinds),
     ),
-    /**
-     * The same composite reference `character_effects` and
-     * `character_skill_grants` carry, and for the same reason: a granted
-     * weapon cannot be attached to another character's source instance.
-     */
-    foreignKey({
-      columns: [table.source_instance_id, table.character_id],
-      foreignColumns: [
-        character_source_instances.id,
-        character_source_instances.character_id,
-      ],
-    }).onDelete('cascade'),
     index('character_weapons_character_id_index').on(table.character_id),
   ],
 );
