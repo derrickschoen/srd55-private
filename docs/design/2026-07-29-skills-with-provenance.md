@@ -185,8 +185,12 @@ Columns: `character_id`, `source_instance_id` (**required**), `grant_key`,
 `(character_id, skill)` unique and dropping that silently is how duplicates
 arrive:
 - `(source_instance_id, grant_key, ordinal)` **unique** — one slot per ordinal.
-- `(character_id, skill) WHERE skill IS NOT NULL` **unique** — a character cannot
-  hold the same proficiency twice. This is what makes §3.3's "cannot pick what
+- `(character_id, skill) WHERE skill IS NOT NULL AND state = 'active'`
+  **unique** — a character cannot hold the same proficiency twice **from live
+  grants**. **Revision 3 contradicted itself here**: §3.1 wrote the predicate
+  without the state clause while §3.8 said uniqueness considers only active
+  grants. Those are different indexes. The state clause is correct — an orphaned
+  grant must not block a live one. This is what makes §3.3's "cannot pick what
   you already have" an enforced invariant rather than prose, and it decides the
   collision in §3.3's last paragraph.
 
@@ -204,11 +208,36 @@ every historical version, and restore iterates those names to insert into them.
 **Taken: `character_skill_proficiencies` stays, and becomes a PROJECTION with
 exactly one writer — the grants resolver.**
 
-- **Grants are the single source of truth.** Nothing else writes the flat table.
+- **Grants are the single source of truth.** Nothing else *derives* the flat
+  table. Stated flatly as "nothing else writes" it is FALSE — snapshot restore,
+  backup import and share import all write it document-driven, and they write
+  grants in the same transaction, so consistency holds. Say **sole deriving
+  writer**, so no agent tries to route an import through the resolver.
 - **The sheet and completeness read GRANTS**, never the projection.
 - The projection exists **only** so snapshot, backup and share keep a shape their
   frozen versions already demand.
-- It is written from grants inside the same transaction that fills or clears one.
+- It is reconciled by **one named function**, `rebuildSkillProjection(characterId)`,
+  called on **every** path that changes the active grant set: fill, clear,
+  background and species production, class-grant generation, **orphaning,
+  reactivation**, and hard deletion.
+
+**"Exactly one writer" is not achievable and revision 3 overclaimed it.** Three
+transport paths write the flat table directly and the resolver cannot own them:
+snapshot restore deletes and reinserts every carried table, backup import
+inserts, share import inserts. **Pinned: those three call the reconciler after
+restoring grants**, and historical snapshots that carry the flat table but no
+grants are restored as-is — their projection is the only truth they have.
+
+**And keeping the table does NOT avoid a snapshot bump**, which revision 3 implied
+it would: adding `character_skill_grants` to snapshot scope requires minting **`a7-v9`**
+AND hand-freezing the a7-v8 list first. Verified: `character-state.ts:162` maps
+`'a7-v8'` to the LIVE `CHARACTER_STATE_TABLES` by alias, so appending a table to
+the live list silently rewrites what a7-v8 means and every existing a7-v8 save
+point fails restore. The file's own comment calls the analogous slip the most
+expensive mistake available in this change. Pre-v9 restores leave the grants
+table untouched — snapshots do not move tables they do not carry — which is
+disclosed, not discovered mid-dispatch. Keeping the flat table avoids breaking the *historical*
+lists; it does not avoid the new version.
 
 This is not revision 1's ambiguity returning: revision 1 never named a derivation
 mechanism, which is precisely what made it two sources of truth. **Naming the one
@@ -224,6 +253,21 @@ an unattributed grant, and losing data is forbidden; one had to give. **D60 give
 it:** v1 has zero users and zero exports, so pre-v5 documents are refused with a
 sentence rather than silently half-imported. That is the honest option and the
 only one that does not fabricate provenance.
+
+**The mechanism, which revision 3 left unpinned:** the registry's type requires a
+function for **every** adjacent version and D41 mandates one per bump, so
+"refused" cannot mean "omitted" — it would not compile. **Pinned: the v4→v5
+migration exists and deliberately throws a named retirement error**, which refuses
+every composed pre-v5 path without touching the frozen v1–v4 schemas or inventing
+attribution.
+
+*A reviewer proposed the opposite mechanism* — drop v1–v4 from `SHARE_SCHEMAS`
+so `HistoricalVersion` collapses to `never`, `MIGRATIONS` to `{}`, and old links
+fall to the existing `'version is unsupported.'` refusal. It type-checks (verified
+against `index.ts:37-44`). **Rejected:** it deletes the hand-frozen v1–v4
+fragment fixtures that are the only proof those schemas still decode. D60 lets us
+refuse an old document; it does not license deleting the evidence. The throwing
+migration refuses just as hard and keeps the fixtures running.
 
 ### 3.8 Grants have a LIFECYCLE, because removal is a tombstone
 
@@ -247,9 +291,31 @@ generator materialises them when a source is created, the same arm that
 materialises spell slots. Not the command on demand — a grant must exist before
 it can be outstanding, which is the whole reason §3.1 chose a slot shape.
 
-*Seam:* three columns and one generator arm. *Cost to flip:* none; the
-alternative is delete-on-tombstone, which contradicts how every other source
-behaves.
+**Reactivation, which revision 3 left unresolved and a reviewer named as the
+most likely dispatch failure.** Re-adding a removed class reactivates the same
+source, and the spell generator **preserves the existing selection** on
+reactivation. So: remove a class, acquire its former skill from another source,
+re-add the class — the reactivating grant now collides.
+
+**Pinned, and this is a correction to the first thing I wrote here — I had
+pinned "refuse with a named reason", which is wrong: re-adding a class is not an
+operation that may fail.** The generator arm is a **sync/revive keyed on
+`(source_instance_id, grant_key, ordinal)`**, mirroring `syncSlot` — creation
+mints, reactivation flips the orphaned rows back to `active` with their selection
+intact. **A revived grant whose skill is already held by another ACTIVE grant
+revives UNFILLED, and the step reports it as outstanding** — never a
+mid-transaction throw, never a silent overwrite of the other source. An
+insert-shaped arm instead of a revive-shaped one throws inside the generator
+transaction on the ordinary remove-then-re-add path; that is the single most
+likely dispatch failure and S-TOMBSTONE is what catches it.
+
+**Consumers that need orphaned rows**, since "the resolver counts only active" is
+not true everywhere: the **generator** must see them to reactivate them, exactly
+as the spell generator queries without a state filter, and **snapshot and backup
+must retain them**.
+
+*Seam:* three columns, one generator arm, one refusal reason. *Cost to flip:*
+none; delete-on-tombstone contradicts how every other source behaves.
 
 ### 3.5 The legacy writers, which revision 1 never mentioned
 
@@ -413,9 +479,15 @@ plan is narrowing.
 
 **S-A — the grants table and the resolver.** Exit: the table exists with a
 required source and a nullable skill; the sheet reads `DISTINCT skill` from it;
-the flat table is retired in the same increment; backup, share (a wire bump —
+**the flat table is KEPT as a derived projection** (§3.2) — revision 3 reversed
+that and this exit still said "retired", which is what a dispatched agent would
+have executed; **S-A owns the lifecycle columns, the generator arm and the
+projection reconciler**, S-B only consumes them; backup, share (a wire bump —
 S10), snapshot and row contracts all carry the new shape; removing a source
-removes its grants by cascade.
+**orphans** its grants — removal here is a tombstone, so cascade never fires
+(§3.8). Hard deletion, which only the guided replace performs, still cascades.
+Revision 3 left "by cascade" standing in this exit while §3.8 said the opposite;
+a reviewer caught the contradiction.
 
 **S-B — the producers.** Exit: background writes its two printed skills as
 filled grants under its own source, normalised from prose to verified `Skill`
@@ -481,10 +553,31 @@ S-DISTINCT and S-SHARE. `S-GRANT-IDENTITY` is that trap made executable.
 - **S-SHARE** — drop the grant provenance from the wire. A round trip must fail,
   asserting **source identity, grant key, ordinal and the nullable selection** —
   not merely the final `DISTINCT skill`, which survives losing all of it.
-- **S-LEGACY** *(new — §3.5)* — restore the removed `set_skill_proficiency`
-  write path. A test must fail proving a legacy write cannot alter the sheet or
-  completeness. **This guards the likeliest false success**: every gate green
-  while a person's tick on the planner writes a row nobody reads.
+- **S-LEGACY** — **retargeted; as written it could not fire.** Restoring the
+  legacy command makes it write only the PROJECTION, and sheet and completeness
+  read grants — so "a legacy write cannot alter the sheet" stays TRUE under the
+  mutation. **The fireable shape: assert the RPC surface REFUSES
+  `set_skill_proficiency` as an unknown command**, and mutate by re-registering
+  it in the factory.
+- **S-TOMBSTONE** *(new — §3.8)* — mutate orphaning away, so grants keep their
+  state when their source tombstones. A test must fail in which a class is
+  **removed** and its filled skill disappears from the sheet, from completeness,
+  and from the active projection **while the orphan row is retained**. Every
+  other control exercises hard deletion or a constraint; **this is the only one
+  that touches how removal actually works here.**
+- **S-GRANT-IDENTITY** *(new — §3.5)* — make the fill command target any
+  available class grant rather than the addressed one. A test with **two entered
+  classes whose pools overlap** must fail: filling through the second class's
+  form must fill that class's ordinal and leave the first's unfilled. The UI
+  demonstrably discards class identity today, which is why this is reachable.
+- **S-REACTIVATE** *(new — §3.8)* — remove the reactivation collision policy.
+  A test must fail in which a class is removed, its former skill is acquired from
+  another source, and the class is **re-added**: the class must be re-added **successfully**, its reactivating grant must come
+  back **UNFILLED**, and the step must report it outstanding — not a raw
+  uniqueness violation, not a silent steal of the other source's skill, and not a
+  refusal to re-add the class (§3.8's corrected policy).
+  **This is the path sol named as most likely to fail in dispatch, and no earlier
+  revision had a control for it.**
 
 **Every fixture must make its mutation observable.** A fixture whose background
 grants no skills cannot exercise S-SILENCE; a fixture where base equals total
