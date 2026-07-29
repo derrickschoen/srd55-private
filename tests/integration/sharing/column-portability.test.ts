@@ -710,6 +710,39 @@ const PROBES: { readonly [N in ProbedTable]: Probe<N> } = {
       updated_at: OWNED_TIMESTAMP,
     },
   },
+  character_skill_grants: {
+    travels: "t.state = 'active'",
+    order: 't.grant_key, t.ordinal',
+    columns: {
+      id: RECIPIENT_ROW_ID,
+      character_id: RECIPIENT_OWNER_ID,
+      source_instance_id: {
+        kind: 'translated',
+        key: '(SELECT display_name FROM character_source_instances WHERE id = t.source_instance_id)',
+        why: "`skillGrants[].ref` carries the granting source in the same reference space `selections[].ref` uses — provenance is the whole point of the section — and the recipient's source row has its own id.",
+      },
+      grant_key: { kind: 'verbatim' },
+      ordinal: { kind: 'verbatim' },
+      skill: { kind: 'verbatim' },
+      state: {
+        kind: 'omitted',
+        provedByExcludedRow: true,
+        why: "Only ACTIVE grants are exported at all — an orphaned grant hangs from a removed source the document does not carry — so a state other than active never reaches the wire and the recipient's grants all start active. The fixture gives the sender an orphaned grant the recipient never sees.",
+      },
+      orphan_reason_code: {
+        kind: 'omitted',
+        provedByExcludedRow: true,
+        why: "Lifecycle detail of the orphaned rows that never travel at all. The recipient's grants carry no orphan verdict, and importing the sender's would state a fact about a source the document does not even carry.",
+      },
+      orphaned_at: {
+        kind: 'omitted',
+        provedByExcludedRow: true,
+        why: 'With `orphan_reason_code` — and it is a timestamp besides, which a share never carries in any table.',
+      },
+      created_at: OWNED_TIMESTAMP,
+      updated_at: OWNED_TIMESTAMP,
+    },
+  },
   character_sheet_adjustments: {
     order: 't.id',
     columns: {
@@ -975,7 +1008,7 @@ function seedSender(db: DatabaseContext, catalog: Catalog): number {
     4,
     'sender-subclass-source',
   );
-  source(
+  const featSourceId = source(
     'feat',
     catalog.featId,
     'Alert (sender label)',
@@ -1228,6 +1261,39 @@ function seedSender(db: DatabaseContext, catalog: Catalog): number {
       [characterId, skill, SENDER_TIME, SENDER_TIME],
     );
   }
+  // The skill GRANTS the two flat rows above are the projection of: a filled
+  // class grant (arcana), an UNFILLED class grant whose null selection must
+  // survive the wire, and a filled feat-source grant (stealth). Inserted
+  // AFTER the generator ran, like the tombstoned child above — the class arm
+  // reconciles the keys it owns and this catalog seeds no entitlement.
+  const skillGrant = (
+    sourceId: number,
+    grantKey: string,
+    ordinal: number,
+    skill: string | null,
+  ): void => {
+    db.exec(
+      `INSERT INTO character_skill_grants (
+         character_id, source_instance_id, grant_key, ordinal, skill,
+         state, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?)`,
+      [characterId, sourceId, grantKey, ordinal, skill, SENDER_TIME, SENDER_TIME],
+    );
+  };
+  skillGrant(classSourceId, 'class_skill', 1, 'arcana');
+  skillGrant(classSourceId, 'class_skill', 2, null);
+  skillGrant(featSourceId, 'probe_feat_skill', 1, 'stealth');
+  // An ORPHANED grant, so `state`, `orphan_reason_code` and `orphaned_at`
+  // hold distinctive values on a row the export deliberately keeps off the
+  // wire — the `provedByExcludedRow` proof for all three columns.
+  db.exec(
+    `INSERT INTO character_skill_grants (
+       character_id, source_instance_id, grant_key, ordinal, skill,
+       state, orphan_reason_code, orphaned_at, created_at, updated_at
+     ) VALUES (?, ?, 'class_skill', 3, 'perception', 'orphaned',
+       'sender_orphan_reason', ?, ?, ?)`,
+    [characterId, classSourceId, SENDER_TIME, SENDER_TIME, SENDER_TIME],
+  );
   db.exec(
     `INSERT INTO character_sheet_adjustments (
        character_id, armor_class_adjustment, armor_class_adjustment_note,
@@ -1637,13 +1703,13 @@ afterAll(() => {
 });
 
 describe('every column of every shared table is classified', () => {
-  it('probes the character root, all eighteen share tables, and spell references', () => {
+  it('probes the character root, all nineteen share tables, and spell references', () => {
     expect([...PROBED_TABLES].sort()).toEqual(
       ['characters', 'spell_versions', ...Object.keys(SHARE_TABLES)].sort(),
     );
-    // The type already forces the eighteen shared tables; the exact runtime
+    // The type already forces the nineteen shared tables; the exact runtime
     // roster additionally pins the character root and reference-only spell row.
-    expect(PROBED_TABLES).toHaveLength(20);
+    expect(PROBED_TABLES).toHaveLength(21);
   });
 
   it('records why each deliberately retired column no longer travels', () => {

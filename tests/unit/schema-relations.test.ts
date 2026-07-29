@@ -133,7 +133,7 @@ afterAll(() => {
 });
 
 describe('declared relations match the foreign keys', () => {
-  it('budgets 61 constraints across 64 PRAGMA rows', () => {
+  it('budgets 66 constraints across 70 PRAGMA rows', () => {
     const tables = db
       .selectValues(
         `SELECT name FROM sqlite_schema
@@ -196,8 +196,16 @@ describe('declared relations match the foreign keys', () => {
     // three from `background_equipment_items`, into `background_templates`,
     // `weapon_templates` and `armor_templates`. The last two are what make the
     // owner's *"unless weapon or armor"* a reference rather than a spelling.
-    expect(constraintEdges(db)).toHaveLength(64);
-    expect(rowCount).toBe(67);
+    //
+    // The skill grants (skills plan, S-A) add TWO more constraints across
+    // THREE more PRAGMA rows, the same asymmetry `character_effects`
+    // established and for the same reason: `character_id` into `characters`,
+    // plus the COMPOSITE `(source_instance_id, character_id)` into
+    // `character_source_instances` — the fourth composite key in the schema,
+    // and the third use of the `(id, character_id)` unique index, without
+    // which a grant could claim another character's source instance.
+    expect(constraintEdges(db)).toHaveLength(66);
+    expect(rowCount).toBe(70);
   });
 
   it('declares a relation for every foreign key, and a foreign key for every relation', () => {

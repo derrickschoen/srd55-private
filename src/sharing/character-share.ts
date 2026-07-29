@@ -20,6 +20,7 @@ import {
   type AnyTableName,
 } from '../domain/contracts/tables';
 import { GrantRuleSlotGenerator } from '../grants/grant-rule-slot-generator';
+import { rebuildSkillProjection } from '../grants/skill-grants';
 import { SpellSelectionEligibility } from '../eligibility/spell-selection-eligibility';
 import {
   CHARACTER_SHARE_FORMAT,
@@ -929,6 +930,35 @@ export function exportCharacterShare(
     [characterId],
   ).map((row) => String(row.skill));
   const skillProficiencies = skillRows.length === 0 ? undefined : skillRows;
+  // THE SKILL GRANTS (wire v5) — the provenance source of truth the flat
+  // `skillProficiencies` list above is a projection of. ACTIVE grants only, on
+  // the rule `selections` has always followed: a share carries the build as it
+  // stands, and an orphaned grant's source is not in the document to be named.
+  // The ref space is `owners` — the active tree, coarsened to its root — so a
+  // grant minted on a class source names that class's `classes[]` entry.
+  const skillGrants = db
+    .allRaw(
+      `SELECT * FROM ${SHARE_TABLES.character_skill_grants}
+       WHERE character_id = ? AND state = 'active'
+       ORDER BY source_instance_id, grant_key, ordinal, id`,
+      [characterId],
+    )
+    .flatMap((row) => {
+      const ref = owners.get(Number(row.source_instance_id))?.ref;
+      if (ref === undefined) {
+        return [];
+      }
+      return [
+        {
+          ref,
+          grantKey: String(row.grant_key),
+          ordinal: Number(row.ordinal),
+          ...(row.skill === null || row.skill === undefined
+            ? {}
+            : { skill: String(row.skill) }),
+        },
+      ];
+    });
   const adjustmentRow = db.oneRaw(
     `SELECT * FROM ${SHARE_TABLES.character_sheet_adjustments}
      WHERE character_id = ?`,
@@ -1041,6 +1071,7 @@ export function exportCharacterShare(
     // with no effects produces a link exactly the shape it was before the
     // effect model existed.
     ...(effects.length === 0 ? {} : { effects }),
+    ...(skillGrants.length === 0 ? {} : { skillGrants }),
   };
   return validateShareDocument(document);
 }
@@ -1486,6 +1517,61 @@ export function importCharacterShare(
       return result;
     };
 
+    // THE SKILL GRANTS. The generator above has already MINTED the class
+    // grants (unfilled) while materialising each class source, so a class
+    // grant in the document FILLS the minted row — resolved through the same
+    // descendants search `selections` uses, keyed on (grant_key, ordinal). A
+    // grant the generator does not mint (a background's or species', produced
+    // outside the generator) is inserted document-driven under the ref's own
+    // root. Exactly-one resolution mirrors the selection-slot rule: an
+    // ambiguous match means the recipient's catalog mints a different grant
+    // set than the sender's, and silently picking one would be wrong
+    // provenance — the trap §5 names.
+    for (const grant of document.skillGrants ?? []) {
+      const roots = rootsByRef.get(grant.ref);
+      if (roots === undefined) {
+        throw new ShareValidationError(
+          `skill grant ref ${grant.ref} is unavailable.`,
+        );
+      }
+      const sourceIds = [...descendants(roots)];
+      const minted = db.allRaw(
+        `SELECT id FROM ${SHARE_TABLES.character_skill_grants}
+         WHERE character_id = ? AND grant_key = ? AND ordinal = ?
+           AND source_instance_id IN (${sourceIds.map(() => '?').join(', ')})
+         ORDER BY id`,
+        [characterId, grant.grantKey, grant.ordinal, ...sourceIds],
+      );
+      if (minted.length > 1) {
+        throw new ShareValidationError(
+          `skill grant ${grant.grantKey} #${grant.ordinal} is ambiguous.`,
+        );
+      }
+      if (minted.length === 1) {
+        db.exec(
+          `UPDATE ${SHARE_TABLES.character_skill_grants}
+           SET skill = ?, updated_at = ?
+           WHERE id = ?`,
+          [grant.skill ?? null, now, Number((minted[0] as Row).id)],
+        );
+        continue;
+      }
+      db.exec(
+        `INSERT INTO ${SHARE_TABLES.character_skill_grants} (
+           character_id, source_instance_id, grant_key, ordinal,
+           skill, state, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?)`,
+        [
+          characterId,
+          roots[0] as number,
+          grant.grantKey,
+          grant.ordinal,
+          grant.skill ?? null,
+          now,
+          now,
+        ],
+      );
+    }
     const names = spellNameMap(document);
     const spellIds = new Map<string, number>();
     const resolveSpell = (key: string): number => {
@@ -1896,6 +1982,16 @@ export function importCharacterShare(
           ],
         );
       }
+    }
+    // The projection reconciler runs LAST — after the grants were filled AND
+    // after the document-driven `character_skill_proficiencies` inserts, so
+    // it reconciles the final state of both rather than racing the flat
+    // inserts into a unique-index abort. Guarded on the document actually
+    // carrying grants: a v5 document without the section describes a
+    // character whose flat rows are its only truth, and reconciling those
+    // against nothing would delete them (plan §3.2's restored-as-is rule).
+    if ((document.skillGrants ?? []).length > 0) {
+      rebuildSkillProjection(db, characterId);
     }
     return { characterId };
   });

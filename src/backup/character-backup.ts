@@ -37,6 +37,7 @@ import {
   type SpellDefinitionTable,
 } from '../domain/contracts/tables';
 import { fillAddedNullableRowColumns } from '../domain/contracts/historical-row-columns';
+import { rebuildSkillProjection } from '../grants/skill-grants';
 import {
   rowContractError,
   type RowContractTable,
@@ -653,6 +654,23 @@ function validateCharacterRows(
       row.spell_version_id,
       `${label}.wizard_spellbook_entries[${index}].spell_version_id`,
     );
+  }
+
+  // A skill grant's source is REQUIRED (the whole point of the provenance
+  // model), so unlike `character_effects` there is no null limb: a grant row
+  // whose source the document does not describe is internally inconsistent
+  // and refused here with a sentence rather than at the INSERT's composite
+  // foreign key.
+  for (const [index, row] of (tables.character_skill_grants ?? []).entries()) {
+    const sourceId = positiveInteger(
+      row.source_instance_id,
+      `${label}.character_skill_grants[${index}].source_instance_id`,
+    );
+    if (!sourceIds.has(sourceId)) {
+      throw new BackupValidationError(
+        `${label}.character_skill_grants[${index}] references a source from another character.`,
+      );
+    }
   }
 }
 
@@ -1658,6 +1676,7 @@ interface CurrentImportMaps {
   readonly character_armor: Map<number, number>;
   readonly character_hit_point_rolls: Map<number, number>;
   readonly character_skill_proficiencies: Map<number, number>;
+  readonly character_skill_grants: Map<number, number>;
   readonly character_sheet_adjustments: Map<number, number>;
   readonly character_effects: Map<number, number>;
   readonly spell_loadouts: Map<number, number>;
@@ -1684,6 +1703,7 @@ function importCurrentTables(
     character_armor: new Map(),
     character_hit_point_rolls: new Map(),
     character_skill_proficiencies: new Map(),
+    character_skill_grants: new Map(),
     character_sheet_adjustments: new Map(),
     character_effects: new Map(),
     spell_loadouts: new Map(),
@@ -1904,6 +1924,28 @@ function importCurrentTables(
       }),
     );
   }
+  // The skill grants. `source_instance_id` is REMAPPED, not resolved — it
+  // points at another character-owned row this import has just minted,
+  // exactly like `spell_selection_slots.source_instance_id` above — and it
+  // has no null limb: a grant without a source is unrepresentable, and
+  // `validateCharacterRows` already refused any document whose grant names a
+  // source it does not describe.
+  for (const row of document.tables.character_skill_grants) {
+    const oldSourceId = Number(row.source_instance_id);
+    const sourceId = maps.character_source_instances.get(oldSourceId);
+    if (sourceId === undefined) {
+      throw new BackupValidationError(
+        'Character backup skill grant source is missing.',
+      );
+    }
+    maps.character_skill_grants.set(
+      Number(row.id),
+      insertPortableRow(db, 'character_skill_grants', row, {
+        character_id: characterId,
+        source_instance_id: sourceId,
+      }),
+    );
+  }
   // The character's own effects. `source_instance_id` is the ONLY column here
   // that needs rewriting, and it is remapped rather than resolved: it points at
   // another CHARACTER-OWNED row whose id this import has just minted, exactly
@@ -2039,6 +2081,7 @@ function portableSnapshots(
     character_skill_proficiencies: new Map(
       current.character_skill_proficiencies,
     ),
+    character_skill_grants: new Map(current.character_skill_grants),
     character_sheet_adjustments: new Map(current.character_sheet_adjustments),
     character_effects: new Map(current.character_effects),
   };
@@ -2219,6 +2262,27 @@ function portableSnapshots(
                     Number(row.source_instance_id),
                   ) ?? null,
           }));
+        // A skill grant's source is remapped like an effect's, with NO null
+        // limb: the column is NOT NULL, so a snapshot grant whose source the
+        // snapshot does not carry would restore into a composite-FK refusal
+        // mid-undo. Refusing the document here names the problem instead.
+        case 'character_skill_grants':
+          return rowsOf(table).map((row) => {
+            const sourceId = ids.character_source_instances.get(
+              Number(row.source_instance_id),
+            );
+            if (sourceId === undefined) {
+              throw new BackupValidationError(
+                'Character backup save point skill grant source is missing.',
+              );
+            }
+            return {
+              ...row,
+              id: ids[table].get(Number(row.id)),
+              character_id: characterId,
+              source_instance_id: sourceId,
+            };
+          });
       }
     };
     // THE VERSION AND THE KEY SET ARE THE SNAPSHOT'S OWN, NOT THIS BUILD'S.
@@ -2271,6 +2335,15 @@ export function importCharacterBackup(
       characterId,
       references,
     );
+    // The reconciler runs AFTER the grants are restored (plan §3.2) — and only
+    // when the document actually carried grants. A file written before the
+    // provenance model defaults `character_skill_grants` to `[]`, and its flat
+    // `character_skill_proficiencies` rows are the only truth it has;
+    // reconciling those against grants that were never recorded would delete a
+    // user's skills, which is the one loss this format exists to prevent.
+    if (validated.document.tables.character_skill_grants.length > 0) {
+      rebuildSkillProjection(transaction, characterId);
+    }
     const snapshots = portableSnapshots(
       transaction,
       validated.snapshots,

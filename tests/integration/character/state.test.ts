@@ -186,6 +186,19 @@ function seedFixture(): void {
      ) VALUES (?, 3, 'Ring of Protection, house ruled.', ?, ?)`,
     [characterId, createdAt, updatedAt],
   );
+  // A skill grant, FILLED with the same skill as the flat row above: the flat
+  // table is the grants table's derived projection (skills plan §3.2), so a
+  // fixture whose two tables disagreed would be a state the application
+  // cannot produce — and the restore-time reconciler would visibly rewrite
+  // the projection, failing the exact-row restore assertions for a fixture
+  // reason rather than a product one.
+  db.exec(
+    `INSERT INTO character_skill_grants (
+       character_id, source_instance_id, grant_key, ordinal, skill, state,
+       created_at, updated_at
+     ) VALUES (?, 1, 'class_skill', 1, 'arcana', 'active', ?, ?)`,
+    [characterId, createdAt, updatedAt],
+  );
 }
 
 function mutableCapture(): MutableSnapshot {
@@ -227,12 +240,12 @@ describe('capture and deterministic diff', () => {
       'character',
       ...CHARACTER_STATE_TABLES,
     ]);
-    // a7-v8 is the version that carries the explicit allocation signal.
+    // a7-v9 is the version that carries the skill grants table.
     // Written out rather than compared against the exported constant: a version
     // identifier is a wire fact that other stored data is matched against, so a
     // test that reads it from the module under test could never notice it
     // changing.
-    expect(snapshot.schema_version).toBe('a7-v8');
+    expect(snapshot.schema_version).toBe('a7-v9');
     expect(Object.keys(snapshot.character)).toEqual(CHARACTER_STATE_COLUMNS);
     expect(snapshot.character).toEqual({
       name: 'Snapshot Hero',
@@ -337,6 +350,7 @@ describe('capture and deterministic diff', () => {
       character_skill_proficiencies: [],
       character_sheet_adjustments: [],
       character_effects: [],
+      character_skill_grants: [],
     };
     const before = {
       character: { name: 'Before' },
@@ -369,6 +383,7 @@ describe('capture and deterministic diff', () => {
       character_skill_proficiencies: [],
       character_sheet_adjustments: [],
       character_effects: [],
+      character_skill_grants: [],
     };
 
     expect(state.diff(before, after)).toEqual([
@@ -746,7 +761,7 @@ describe('restoring a snapshot written by an older build', () => {
     // oversight: a current snapshot DOES speak for weapons, so restoring it
     // removes one added afterwards.
     const snapshot = mutableCapture();
-    expect(snapshot.schema_version).toBe('a7-v8');
+    expect(snapshot.schema_version).toBe('a7-v9');
     db.exec(
       `INSERT INTO character_weapons (character_id, name)
        VALUES (?, 'Bought since')`,

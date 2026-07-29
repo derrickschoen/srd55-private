@@ -10,6 +10,7 @@ import weaponAttackKind from '../../drizzle/0006_weapon_attack_kind.sql?raw';
 import featModel from '../../drizzle/0007_feat_model.sql?raw';
 import abilityAllocationMethod from '../../drizzle/0008_ability_allocation_method.sql?raw';
 import abilityIncrease from '../../drizzle/0009_ability_increase.sql?raw';
+import characterSkillGrants from '../../drizzle/0010_character_skill_grants.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -115,6 +116,14 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
       '58ec411448ee05a15e25bb782157e905ea08d7bff9ebb996850f14468521309b',
     resultSchemaChecksum:
       '0ecf8c299a6a95d56f5c4824629dd3c2f814cdfcfc7ea64a2c8cdd4e0b3d3645',
+  }),
+  Object.freeze({
+    id: '0010_character_skill_grants',
+    sql: characterSkillGrants,
+    checksum:
+      'f4ddef795542f602699f3e247ea1fa519952238c66e43bbd84185155b44aed27',
+    resultSchemaChecksum:
+      'ba7cd3692fae389a569fcbec8afb3dc3058f212f129bebb61b4976f31b65c587',
   }),
 ]);
 

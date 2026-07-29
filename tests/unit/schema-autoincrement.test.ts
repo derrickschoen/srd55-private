@@ -118,6 +118,11 @@ const nativeAutoIncrementTables = [
   'character_armor',
   'character_hit_point_rolls',
   'character_sheet_adjustments',
+  // The skill grants (skills plan, S-A), in this group's sorted position. Its
+  // surrogate key is the same backup-remap argument as its neighbours', plus
+  // one of its own: the fill command addresses a grant BY id, and a natural
+  // key would change under the row when the skill is chosen.
+  'character_skill_grants',
   'character_skill_proficiencies',
   // The two progression ladders — SLOT levels and the Cantrip Upgrade's
   // CHARACTER levels. A surrogate key each, for the reason
@@ -171,7 +176,7 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
       return db;
     }
 
-    it('declares AUTOINCREMENT on exactly the 30 Laravel and 30 native surrogate-key tables', () => {
+    it('declares AUTOINCREMENT on exactly the 30 Laravel and 31 native surrogate-key tables', () => {
       const db = openDb();
       const declared = db
         .selectValues(
@@ -185,15 +190,17 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
         .map(String);
 
       expect(declared).toEqual(allAutoIncrementTables);
-      // 30 surviving Laravel tables plus 30 native: 4 weapons, 8 sheet core,
+      // 30 surviving Laravel tables plus 31 native: 4 weapons, 8 sheet core,
       // 7 origins (the seventh is `background_equipment_items`), 2 effects,
-      // 2 class features, 4 stored sheet inputs, plus the TWO progression
-      // ladders on the catalog side, `spell_version_upcast_levels` and
-      // `spell_version_cantrip_upgrade_levels`. Counted in parts so one group
-      // shrinking while another grows cannot pass unnoticed.
-      expect(declared).toHaveLength(60);
+      // 2 class features, 4 stored sheet inputs, the TWO progression
+      // ladders on the catalog side (`spell_version_upcast_levels` and
+      // `spell_version_cantrip_upgrade_levels`), plus the ONE
+      // skills-with-provenance table, `character_skill_grants`. Counted in
+      // parts so one group shrinking while another grows cannot pass
+      // unnoticed.
+      expect(declared).toHaveLength(61);
       expect(autoIncrementTables).toHaveLength(30);
-      expect(nativeAutoIncrementTables).toHaveLength(30);
+      expect(nativeAutoIncrementTables).toHaveLength(31);
 
       const withoutAutoIncrement = db
         .selectValues(

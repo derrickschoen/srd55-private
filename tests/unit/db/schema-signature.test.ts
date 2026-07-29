@@ -80,7 +80,7 @@ describe('pre-Drizzle database images', () => {
     const tableCount = (sql: string) =>
       [...sql.matchAll(/CREATE TABLE/g)].length;
     expect(tableCount(preDrizzleSchema)).toBe(38);
-    expect(tableCount(schema)).toBe(60);
+    expect(tableCount(schema)).toBe(61);
   });
 
   it('rejects a pre-Drizzle image at open instead of half-working', async () => {
@@ -97,7 +97,7 @@ describe('pre-Drizzle database images', () => {
     // actually short of. Both paths produce the same recoverable
     // `schema_mismatch` status, which is what the next test depends on.
     expect(boot.detail).toContain(
-      // All thirty native tables, in the order the check reports them:
+      // All thirty-one native tables, in the order the check reports them:
       // the four weapon tables, the eight of the sheet core, the SEVEN origins
       // tables, the two effect tables, the two D19 class-feature tables, the
       // four stored sheet inputs, and the two progression ladders,
@@ -109,6 +109,7 @@ describe('pre-Drizzle database images', () => {
         'character_background, ' +
         'character_effects, character_hit_point_rolls, ' +
         'character_sheet_adjustments, ' +
+        'character_skill_grants, ' +
         'character_skill_proficiencies, character_species, ' +
         'character_species_traits, character_weapons, class_armor_training, ' +
         'class_extra_attack_grants, class_martial_arts_dice, ' +

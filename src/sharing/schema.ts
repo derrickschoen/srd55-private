@@ -123,6 +123,15 @@ export const SHARE_LIMITS = Object.freeze({
    */
   hitPointRolls: SHEET_SHARE_COUNTS.hitPointRolls,
   skillProficiencies: SHEET_SHARE_COUNTS.skillProficiencies,
+  /**
+   * How many skill grants one document may carry (wire v5). A real character
+   * holds at most a few dozen — two per class plus a handful from origin
+   * sources — so 200 is far past any hand-built character and exists for the
+   * reason every other cap does: to stop a hostile document spending the
+   * decompressed budget on one section, and to name that section when it
+   * fires.
+   */
+  skillGrants: 200,
 });
 
 export interface ShareCharacter {
@@ -189,6 +198,27 @@ export interface ShareSelection {
   readonly spellKey: string;
   readonly spellName?: string;
   readonly keep?: true;
+}
+
+/**
+ * ONE SKILL CHOICE SLOT, AS IT TRAVELS (wire v5; skills plan §3.2/§3.6).
+ *
+ * `ref` names the granting source in the same `classes[].id` / `sources[].id`
+ * reference space `selections[].ref` resolves through — provenance is the
+ * point of this section, so unlike an effect there is NO source-less variant.
+ *
+ * `skill` OPTIONAL MIRRORING THE NULLABLE COLUMN (D6/D6b): absent means
+ * GRANTED BUT UNFILLED, and it must survive the round trip or the recipient's
+ * character loses the record of what it still owes. Orphaned grants do not
+ * travel: a share carries the build as it stands, and the sources they hang
+ * from are not in the document to be named — the same rule `selections` has
+ * always followed.
+ */
+export interface ShareSkillGrant {
+  readonly ref: number;
+  readonly grantKey: string;
+  readonly ordinal: number;
+  readonly skill?: string;
 }
 
 export interface SharePreference {
@@ -637,6 +667,16 @@ export interface CharacterShareDocument {
   readonly hitPointRolls?: readonly ShareHitPointRoll[];
   readonly skillProficiencies?: readonly string[];
   readonly sheetAdjustment?: ShareSheetAdjustment;
+  /**
+   * THE SKILL GRANTS (wire v5) — the provenance source of truth
+   * `skillProficiencies` above is now a derived projection of. Optional on
+   * the same terms as every appended section: absent means the character has
+   * none. There is no pre-v5 compatibility story here, because pre-v5
+   * documents are RETIRED outright (D60, plan §3.2) — the v4→v5 migration
+   * deliberately throws rather than fabricating attribution for bare skill
+   * strings.
+   */
+  readonly skillGrants?: readonly ShareSkillGrant[];
 }
 
 export class ShareValidationError extends TypeError {
@@ -1557,6 +1597,7 @@ export function validateShareDocument(
       'skillProficiencies',
       'sheetAdjustment',
       'effects',
+      'skillGrants',
     ],
     'document',
   );
@@ -2114,6 +2155,68 @@ export function validateShareDocument(
       ? undefined
       : shareSheetAdjustment(source.sheetAdjustment, 'sheetAdjustment');
 
+  let skillGrants: CharacterShareDocument['skillGrants'] | undefined;
+  if (source.skillGrants !== undefined) {
+    skillGrants = list(
+      source.skillGrants,
+      'skillGrants',
+      SHARE_LIMITS.skillGrants,
+    ).map((item, index): ShareSkillGrant => {
+      const row = record(item, `skillGrants[${index}]`);
+      exactKeys(
+        row,
+        ['ref', 'grantKey', 'ordinal'],
+        ['skill'],
+        `skillGrants[${index}]`,
+      );
+      const ref = integer(row.ref, `skillGrants[${index}].ref`, 0, 119);
+      if (!knownIds.has(ref)) {
+        throw new ShareValidationError(
+          `skillGrants[${index}].ref is unknown.`,
+        );
+      }
+      const skill =
+        row.skill === undefined
+          ? undefined
+          : text(row.skill, `skillGrants[${index}].skill`, 40);
+      if (
+        skill !== undefined &&
+        !skills.includes(skill as (typeof skills)[number])
+      ) {
+        throw new ShareValidationError(
+          `skillGrants[${index}].skill is unsupported.`,
+        );
+      }
+      return {
+        ref,
+        grantKey: text(row.grantKey, `skillGrants[${index}].grantKey`, 240),
+        ordinal: integer(
+          row.ordinal,
+          `skillGrants[${index}].ordinal`,
+          1,
+          1_000,
+        ),
+        ...(skill === undefined ? {} : { skill }),
+      };
+    });
+    assertUnique(
+      skillGrants.map(
+        (item) => `${item.ref}\u0000${item.grantKey}\u0000${item.ordinal}`,
+      ),
+      'skillGrants',
+    );
+    // Filled skills must be distinct across the document's grants: the
+    // schema's partial unique index makes a character hold each proficiency
+    // once from live grants, and refusing the duplicate HERE names the field
+    // instead of aborting the import transaction with a raw constraint error.
+    assertUnique(
+      skillGrants
+        .filter((item) => item.skill !== undefined)
+        .map((item) => String(item.skill)),
+      'skillGrants',
+    );
+  }
+
   return {
     format: CHARACTER_SHARE_FORMAT,
     version: CHARACTER_SHARE_VERSION,
@@ -2136,5 +2239,6 @@ export function validateShareDocument(
     ...(skillProficiencies === undefined ? {} : { skillProficiencies }),
     ...(sheetAdjustment === undefined ? {} : { sheetAdjustment }),
     ...(effects === undefined ? {} : { effects }),
+    ...(skillGrants === undefined ? {} : { skillGrants }),
   };
 }

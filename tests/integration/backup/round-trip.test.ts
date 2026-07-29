@@ -242,7 +242,7 @@ function seedCompleteCharacter(
   db.exec(
      `INSERT INTO character_save_points
        (character_id, label, snapshot, schema_version, created_at, updated_at)
-     VALUES (?, 'Before experiment', ?, 'a7-v8', ?, ?)`,
+     VALUES (?, 'Before experiment', ?, 'a7-v9', ?, ?)`,
     [characterId, JSON.stringify(snapshot), timestamp, timestamp],
   );
   // A SECOND SAVE POINT IN THE OLD SNAPSHOT FORMAT.
@@ -273,6 +273,7 @@ function seedCompleteCharacter(
   delete legacySnapshot.character_skill_proficiencies;
   delete legacySnapshot.character_sheet_adjustments;
   delete legacySnapshot.character_effects;
+  delete legacySnapshot.character_skill_grants;
   db.exec(
     `INSERT INTO character_save_points
        (character_id, label, snapshot, schema_version, created_at, updated_at)
@@ -511,7 +512,7 @@ describe('portable character backup', () => {
     ) as Record<string, any>;
     // The current-format save point carries the weapons, re-keyed to the rows
     // that were just written, so restoring it puts back the same two weapons.
-    expect(saved.schema_version).toBe('a7-v8');
+    expect(saved.schema_version).toBe('a7-v9');
     expect(saved.character_weapons.map((row: { name: string }) => row.name)).toEqual([
       'Weathered Longsword',
       'Half-entered club',
@@ -1157,6 +1158,7 @@ describe('a backup file written while the dormant orphan column existed', () => 
         character_skill_proficiencies: [],
         character_sheet_adjustments: [],
         character_effects: [],
+        character_skill_grants: [],
       },
       references: {
         class_definitions: [{ id: 31, content_key: 'class:wizard' }],

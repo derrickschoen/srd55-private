@@ -73,6 +73,14 @@ export type CharacterSkillProficiencyId = Brand<
   number,
   'CharacterSkillProficiencyId'
 >;
+/**
+ * `character_skill_grants.id` — one addressable skill choice slot, branded
+ * apart from `CharacterSkillProficiencyId` because the two must never be
+ * interchanged: the grant is the source of truth and the proficiency row is
+ * its derived projection (plan §3.2), so a projection id turning up where a
+ * grant id belongs means the code is about to fill or orphan the wrong table.
+ */
+export type CharacterSkillGrantId = Brand<number, 'CharacterSkillGrantId'>;
 export type CharacterSheetAdjustmentId = Brand<
   number,
   'CharacterSheetAdjustmentId'

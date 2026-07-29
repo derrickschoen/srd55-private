@@ -59,6 +59,7 @@ function minimalCharacterBackup(): CharacterBackupDocument {
       character_skill_proficiencies: [],
       character_sheet_adjustments: [],
       character_effects: [],
+      character_skill_grants: [],
     },
     references: {
       class_definitions: [],

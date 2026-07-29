@@ -118,6 +118,18 @@ export const FOREIGN_KEY_FACTS = [
     targetColumns: ['id'],
   },
   {
+    table: 'character_skill_grants',
+    columns: ['character_id'],
+    target: 'characters',
+    targetColumns: ['id'],
+  },
+  {
+    table: 'character_skill_grants',
+    columns: ['source_instance_id', 'character_id'],
+    target: 'character_source_instances',
+    targetColumns: ['id', 'character_id'],
+  },
+  {
     table: 'character_skill_proficiencies',
     columns: ['character_id'],
     target: 'characters',
