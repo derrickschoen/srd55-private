@@ -21,6 +21,14 @@ import {
   type PlannerCommandClient,
   type PlannerQueryClient,
 } from '../../../src/ui/screens/planner/screen';
+import {
+  renderEditors,
+  type PlannerEditorActions,
+} from '../../../src/ui/screens/planner/editors';
+import {
+  installInteractiveDocument,
+  interactiveElement,
+} from '../../fixtures/interactive-dom';
 
 function slot(
   changes: Partial<WorkspaceSlot> = {},
@@ -77,7 +85,7 @@ function workspace(
           strength: 10,
           dexterity: 10,
           constitution: 10,
-          intelligence: 14,
+          intelligence: 17,
           wisdom,
           charisma: 10,
         },
@@ -85,7 +93,7 @@ function workspace(
           strength: 10,
           dexterity: 10,
           constitution: 10,
-          intelligence: 14,
+          intelligence: 15,
           wisdom,
           charisma: 10,
         },
@@ -150,6 +158,67 @@ const emptyCompleteness: CompletenessResult = {
   items: [],
   catalog_gaps: [],
 };
+
+describe('planner ability editor', () => {
+  it('displays base before editing and keeps the resolved total separate', () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const initial = workspace(0, 10, false);
+      let update: { ability: string; score: number } | null = null;
+      const actions: PlannerEditorActions = {
+        updateAbility: (ability, score) => {
+          update = { ability, score };
+        },
+        updateLegacy: () => undefined,
+        updateClass: () => undefined,
+        removeClass: () => undefined,
+        addClass: () => undefined,
+        updateSourceList: () => undefined,
+        updateClassOrder: () => undefined,
+        addSource: () => undefined,
+        removeSource: () => undefined,
+      };
+      const firstRender = interactiveElement(
+        renderEditors({ workspace: initial, actions, disabled: false }),
+      );
+      const intelligence = firstRender.querySelector(
+        '[data-focus-key="ability-intelligence"]',
+      );
+      if (intelligence === null) {
+        throw new Error('The planner did not render the Intelligence editor.');
+      }
+
+      // LOAD-BEARING PRE-EDIT OBSERVABLE: base 15 plus a +2 contribution
+      // resolves to 17. Reading resolved totals in the editor changes this
+      // value to 17 before the user has edited anything.
+      expect(intelligence.value).toBe('15');
+      expect(firstRender.querySelector('.ability-total')?.textContent).toBe(
+        'total 17 (+3)',
+      );
+
+      intelligence.value = '16';
+      intelligence.dispatchEvent(new Event('change'));
+      expect(update).toEqual({ ability: 'intelligence', score: 16 });
+
+      const refreshed = workspace(1, 10, false);
+      refreshed.report.character.abilities_base.intelligence = 16;
+      refreshed.report.character.abilities.intelligence = 18;
+      const secondRender = interactiveElement(
+        renderEditors({ workspace: refreshed, actions, disabled: false }),
+      );
+      expect(
+        secondRender.querySelector(
+          '[data-focus-key="ability-intelligence"]',
+        )?.value,
+      ).toBe('16');
+      expect(secondRender.querySelector('.ability-total')?.textContent).toBe(
+        'total 18 (+4)',
+      );
+    } finally {
+      restoreDocument();
+    }
+  });
+});
 
 describe('planner persisted workflow', () => {
   it('filters deterministically and refreshes persisted command, undo, and redo state', async () => {

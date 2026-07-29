@@ -3,15 +3,48 @@ type Listener = (event: Event) => void;
 export class InteractiveTestElement {
   readonly children: InteractiveTestElement[] = [];
   readonly attributes = new Map<string, string>();
+  readonly classList: { add: (...tokens: string[]) => void };
+  readonly dataset: Record<string, string>;
   className = '';
   textContent: string | null = null;
+  innerHTML = '';
   disabled = false;
   hidden = false;
+  checked = false;
+  selected = false;
+  type = '';
+  min = '';
+  max = '';
   value = '';
 
   private readonly listeners = new Map<string, Set<Listener>>();
 
-  constructor(readonly tagName: string) {}
+  constructor(readonly tagName: string) {
+    this.classList = {
+      add: (...tokens) => {
+        const names = new Set(this.className.split(/\s+/u).filter(Boolean));
+        for (const token of tokens) {
+          names.add(token);
+        }
+        this.className = [...names].join(' ');
+      },
+    };
+    this.dataset = new Proxy<Record<string, string>>(
+      {},
+      {
+        set: (target, property, value) => {
+          if (typeof property === 'string' && typeof value === 'string') {
+            const attribute = property.replace(
+              /[A-Z]/gu,
+              (letter) => `-${letter.toLowerCase()}`,
+            );
+            this.setAttribute(`data-${attribute}`, value);
+          }
+          return Reflect.set(target, property, value);
+        },
+      },
+    );
+  }
 
   setAttribute(name: string, value: string): void {
     this.attributes.set(name, value);
@@ -93,6 +126,9 @@ export class InteractiveTestElement {
       const actual = this.getAttribute(name);
       return actual !== null && (expected === undefined || actual === expected);
     }
+    if (selector.startsWith('.')) {
+      return this.className.split(/\s+/u).includes(selector.slice(1));
+    }
     return this.tagName === selector.toLowerCase();
   }
 }
@@ -100,6 +136,10 @@ export class InteractiveTestElement {
 class InteractiveTestDocument {
   createElement(tagName: string): InteractiveTestElement {
     return new InteractiveTestElement(tagName);
+  }
+
+  createDocumentFragment(): InteractiveTestElement {
+    return new InteractiveTestElement('#document-fragment');
   }
 }
 
