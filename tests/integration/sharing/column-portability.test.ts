@@ -735,6 +735,9 @@ const PROBES: { readonly [N in ProbedTable]: Probe<N> } = {
       hit_points_flat: { kind: 'verbatim' },
       hit_points_per_level: { kind: 'verbatim' },
       speed_bonus_feet: { kind: 'verbatim' },
+      ability: { kind: 'verbatim' },
+      amount: { kind: 'verbatim' },
+      maximum: { kind: 'verbatim' },
       source_instance_id: {
         kind: 'translated',
         key: '(SELECT display_name FROM character_source_instances WHERE id = t.source_instance_id)',
@@ -1232,7 +1235,7 @@ function seedSender(db: DatabaseContext, catalog: Catalog): number {
      ) VALUES (?, 5, 'sender adjustment note', ?, ?)`,
     [characterId, SENDER_TIME, SENDER_TIME],
   );
-  // Three effects, because the per-kind CHECK constraints refuse to let one row
+  // Four effects, because the per-kind CHECK constraints refuse to let one row
   // carry a damage type, a hit point payload and a speed bonus at once. The
   // sort orders are 3, 6, 9 so the recipient's dense renumbering from 1 is
   // visible while the ORDER itself stays comparable.
@@ -1258,6 +1261,16 @@ function seedSender(db: DatabaseContext, catalog: Catalog): number {
        source_instance_id, label, notes, created_at, updated_at
      ) VALUES (?, 9, 'speed', 10, NULL, 'Sender Speed', NULL, ?, ?)`,
     [characterId, SENDER_TIME, SENDER_TIME],
+  );
+  db.exec(
+    `INSERT INTO character_effects (
+       character_id, sort_order, effect_kind, ability, amount, maximum,
+       source_instance_id, label, notes, created_at, updated_at
+     ) VALUES (
+       ?, 12, 'ability_increase', 'intelligence', 2, 20, ?,
+       'Sender Training', 'sender contribution note', ?, ?
+     )`,
+    [characterId, classSourceId, SENDER_TIME, SENDER_TIME],
   );
   // A SAVE POINT. It is `backup: true, share: false`, so it plays no part in
   // the share probe above and would leave the backup comparison below with an

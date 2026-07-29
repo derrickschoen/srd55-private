@@ -10,6 +10,7 @@ import type { SqlRow } from '../../../src/db/codecs';
 import { DatabaseContext } from '../../../src/db/database';
 import { GrantRuleSlotGenerator } from '../../../src/grants/grant-rule-slot-generator';
 import { CharacterWorkspaceBuilder } from '../../../src/queries/character-workspace-builder';
+import { resolveCharacterAbilities } from '../../../src/rules/ability-contributions';
 import { RpcClient, type RpcTransport } from '../../../src/rpc/client';
 import type {
   RpcRequest,
@@ -1959,5 +1960,108 @@ describe('an effect knows which source granted it, across a link', () => {
         ],
       }),
     ).toThrow(/effects\[0\]\.sourceSubclass requires a sourceRef/);
+  });
+});
+
+describe('B2 contribution sharing', () => {
+  function seedBackground(db: DatabaseContext): number {
+    return db.exec(
+      `INSERT INTO background_definitions (
+         content_key, name, rules_edition, repeatable, grant_rules
+       ) VALUES (
+         '2024:background:ability-guard',
+         'Ability Guard', '2024', 0, '[]'
+       )`,
+    ).lastInsertId;
+  }
+
+  it('B2-SHARE and B2-PROVENANCE preserve every capped payload field and its background owner', async () => {
+    const source = await database();
+    const backgroundId = seedBackground(source);
+    const characterId = source.exec(
+      `INSERT INTO characters (name, strength)
+       VALUES ('Shared Contribution', 19)`,
+    ).lastInsertId;
+    source.exec(
+      `INSERT INTO character_background (character_id, name)
+       VALUES (?, 'Ability Guard')`,
+      [characterId],
+    );
+    const sourceId = source.exec(
+      `INSERT INTO character_source_instances (
+         character_id, instance_uuid, source_type, source_definition_id,
+         display_name, config, acquired_at_character_level, state
+       ) VALUES (
+         ?, 'share-source:ability-guard', 'background', ?,
+         'Ability Guard', '{}', 1, 'active'
+       )`,
+      [characterId, backgroundId],
+    ).lastInsertId;
+    source.exec(
+      `INSERT INTO character_effects (
+         character_id, sort_order, effect_kind, ability, amount, maximum,
+         source_instance_id, label
+       ) VALUES (
+         ?, 1, 'ability_increase', 'strength', 2, 20, ?,
+         'Guard training'
+       )`,
+      [characterId, sourceId],
+    );
+
+    const document = exportCharacterShare(source, characterId);
+    expect(document.sources).toContainEqual({
+      id: 0,
+      type: 'background',
+      key: '2024:background:ability-guard',
+      acquired: 1,
+    });
+    expect(document.effects?.[0]?.sourceRef).toBe(0);
+
+    const decoded = await decodeShareFragment(
+      await encodeShareFragment(document),
+    );
+    // Three independent wire assertions: dropping any one tuple slot must
+    // fail its own line, rather than hiding behind one object comparison.
+    expect(decoded.effects?.[0]?.ability).toBe('strength');
+    expect(decoded.effects?.[0]?.amount).toBe(2);
+    expect(decoded.effects?.[0]?.maximum).toBe(20);
+
+    const target = await database();
+    seedBackground(target);
+    const imported = importCharacterShare(target, decoded);
+    const stored = target.oneRaw(
+      `SELECT effect.ability, effect.amount, effect.maximum,
+              source.source_type, background.content_key AS source_key
+       FROM character_effects AS effect
+       INNER JOIN character_source_instances AS source
+         ON source.id = effect.source_instance_id
+       INNER JOIN background_definitions AS background
+         ON source.source_type = 'background'
+        AND background.id = source.source_definition_id
+       WHERE effect.character_id = ?`,
+      [imported.characterId],
+    );
+    expect(stored).toEqual({
+      ability: 'strength',
+      amount: 2,
+      maximum: 20,
+      source_type: 'background',
+      source_key: '2024:background:ability-guard',
+    });
+
+    const resolved = resolveCharacterAbilities(
+      target,
+      imported.characterId,
+      {
+        strength: 19,
+        dexterity: 10,
+        constitution: 10,
+        intelligence: 10,
+        wisdom: 10,
+        charisma: 10,
+      },
+    );
+    // The maximum is load-bearing: uncapped +2 would produce 21, not 20.
+    expect(resolved.strength.total).toBe(20);
   });
 });

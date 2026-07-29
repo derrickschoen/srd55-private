@@ -740,6 +740,40 @@ const characterEffect =
     });
   };
 
+const sourcedCharacterEffect =
+  (values: Values): Write =>
+  (db) => {
+    const characterId = newCharacter(db);
+    const definitionId = insert(db, 'feat_definitions', {
+      content_key: uid('feat'),
+      name: uid('Feat'),
+      rules_edition: '2024',
+      repeatable: 1,
+      grant_rules: '[]',
+    });
+    const sourceId = insert(db, 'character_source_instances', {
+      character_id: characterId,
+      instance_uuid: uid('source'),
+      source_type: 'feat',
+      source_definition_id: definitionId,
+      display_name: uid('Source'),
+      config: '{}',
+      acquired_at_character_level: 1,
+      state: 'active',
+    });
+    insert(db, 'character_effects', {
+      character_id: characterId,
+      sort_order: 1,
+      effect_kind: 'ability_increase',
+      ability: 'strength',
+      amount: 1,
+      maximum: 20,
+      source_instance_id: sourceId,
+      label: uid('Grant'),
+      ...values,
+    });
+  };
+
 interface ConstraintCase {
   readonly constraint: string;
   /** Writes that MUST be refused, each with the corruption it would have made. */
@@ -1717,6 +1751,15 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     ],
   },
   {
+    constraint: 'species_template_trait_effects_no_ability_increase_check',
+    rejects: [
+      ['an ability contribution in the catalog effect table', speciesTemplateTraitEffect({ effect_kind: 'ability_increase' })],
+    ],
+    accepts: [
+      ['an ordinary typed resistance', speciesTemplateTraitEffect({ effect_kind: 'damage_resistance', damage_type: 'Fire' })],
+    ],
+  },
+  {
     constraint: 'species_template_trait_effects_sort_order_check',
     rejects: [
       ['sort order 0, below the dense 1-based declared order', speciesTemplateTraitEffect({ sort_order: 0 })],
@@ -1752,6 +1795,7 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
       ['damage_resistance', characterEffect({ effect_kind: 'damage_resistance', damage_type: 'Poison' })],
       ['hp_modifier', characterEffect({ effect_kind: 'hp_modifier', hit_points_flat: 1 })],
       ['speed', characterEffect({ effect_kind: 'speed', speed_bonus_feet: 5 })],
+      ['ability_increase', sourcedCharacterEffect({})],
     ],
   },
   {
@@ -1809,6 +1853,92 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     accepts: [
       ['a speed effect carrying its bonus', characterEffect({ effect_kind: 'speed', speed_bonus_feet: 10 })],
       ['a resistance, which promises no number', characterEffect({ effect_kind: 'damage_resistance' })],
+    ],
+  },
+  {
+    constraint: 'character_effects_ability_check',
+    rejects: [
+      ['an unknown ability vocabulary value', characterEffect({ ability: 'luck' })],
+    ],
+    accepts: [
+      ['each closed-set ability used by a complete contribution', sourcedCharacterEffect({ ability: 'charisma' })],
+    ],
+  },
+  {
+    constraint: 'character_effects_ability_kind_check',
+    rejects: [
+      ['an ability payload on a resistance', characterEffect({ ability: 'strength' })],
+    ],
+    accepts: [
+      ['an ability payload on an ability contribution', sourcedCharacterEffect({ ability: 'wisdom' })],
+    ],
+  },
+  {
+    constraint: 'character_effects_amount_kind_check',
+    rejects: [
+      ['an amount payload on a resistance', characterEffect({ amount: 1 })],
+    ],
+    accepts: [
+      ['an amount payload on an ability contribution', sourcedCharacterEffect({ amount: 2 })],
+    ],
+  },
+  {
+    constraint: 'character_effects_maximum_kind_check',
+    rejects: [
+      ['a maximum payload on a resistance', characterEffect({ maximum: 20 })],
+    ],
+    accepts: [
+      ['a maximum payload on an ability contribution', sourcedCharacterEffect({ maximum: 30 })],
+    ],
+  },
+  {
+    constraint: 'character_effects_ability_increase_payload_check',
+    rejects: [
+      ['an ability contribution missing ability', sourcedCharacterEffect({ ability: null })],
+      ['an ability contribution missing amount', sourcedCharacterEffect({ amount: null })],
+      ['an ability contribution missing maximum', sourcedCharacterEffect({ maximum: null })],
+    ],
+    accepts: [
+      ['the complete three-field payload', sourcedCharacterEffect({ ability: 'dexterity', amount: 2, maximum: 20 })],
+    ],
+  },
+  {
+    constraint: 'character_effects_ability_increase_source_check',
+    rejects: [
+      ['a complete contribution with no granting source', characterEffect({
+        effect_kind: 'ability_increase',
+        ability: 'strength',
+        amount: 2,
+        maximum: 20,
+      })],
+    ],
+    accepts: [
+      ['a complete contribution linked to its source', sourcedCharacterEffect({})],
+    ],
+  },
+  {
+    constraint: 'character_effects_amount_check',
+    rejects: [
+      ['zero, which contributes nothing', sourcedCharacterEffect({ amount: 0 })],
+      ['a fractional amount', sourcedCharacterEffect({ amount: 1.5 })],
+      ['a text amount', sourcedCharacterEffect({ amount: 'two' })],
+    ],
+    accepts: [
+      ['a positive amount', sourcedCharacterEffect({ amount: 2 })],
+      ['a negative amount', sourcedCharacterEffect({ amount: -2 })],
+    ],
+  },
+  {
+    constraint: 'character_effects_maximum_check',
+    rejects: [
+      ['a maximum below the seam minimum', sourcedCharacterEffect({ maximum: 0 })],
+      ['a maximum above the seam maximum', sourcedCharacterEffect({ maximum: 31 })],
+      ['a fractional maximum', sourcedCharacterEffect({ maximum: 20.5 })],
+      ['a text maximum', sourcedCharacterEffect({ maximum: 'twenty' })],
+    ],
+    accepts: [
+      ['the seam minimum', sourcedCharacterEffect({ maximum: 1 })],
+      ['the seam maximum', sourcedCharacterEffect({ maximum: 30 })],
     ],
   },
   {

@@ -379,9 +379,10 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
   character_effects: {
     integer: [
       'id', 'character_id', 'sort_order', 'hit_points_flat',
-      'hit_points_per_level', 'speed_bonus_feet', 'source_instance_id',
+      'hit_points_per_level', 'speed_bonus_feet', 'amount', 'maximum',
+      'source_instance_id',
     ],
-    text: ['effect_kind', 'damage_type', 'label', 'notes'],
+    text: ['effect_kind', 'damage_type', 'ability', 'label', 'notes'],
     numeric: ['created_at', 'updated_at'],
   },
   background_templates: {

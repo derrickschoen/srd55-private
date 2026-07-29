@@ -616,10 +616,10 @@ describe('character-share positional codec', () => {
     expect(positionalToShareDocument(COMPLETE_V1_WIRE)).toEqual(complete);
   });
 
-  it('pins the hand-authored complete version-3 wire layout element by element', () => {
-    const version3Golden = [
+  it('pins the hand-authored complete version-4 wire layout element by element', () => {
+    const version4Golden = [
       'dnd-multiclass-spells-character-share',
-      3,
+      4,
       [
         'Mira',
         8,
@@ -691,14 +691,14 @@ describe('character-share positional codec', () => {
       ],
       COMPLETE_V1_WIRE[12],
       COMPLETE_V1_WIRE[13],
-      COMPLETE_V1_WIRE[14],
+      COMPLETE_V1_WIRE[14].map((effect) => [...effect, null, null, null]),
       [[
         '2024:com.example.spells:starward-aegis',
         'Starward Aegis',
       ]],
     ];
 
-    expect(shareDocumentToPositional(complete)).toEqual(version3Golden);
+    expect(shareDocumentToPositional(complete)).toEqual(version4Golden);
   });
 
   it('round-trips object, positional, gzip, and base64url forms', async () => {
@@ -840,7 +840,7 @@ describe('character-share positional codec', () => {
     const positional = shareDocumentToPositional(minimal);
     expect(positional).toEqual([
       'dnd-multiclass-spells-character-share',
-      3,
+      4,
       [
         'Ten',
         null,
@@ -856,7 +856,7 @@ describe('character-share positional codec', () => {
         // written, `null` when the sharer did not opt in or there is nothing to
         // send, decoding to an absent key.
         null,
-        null, // v3 allocation signal: absent means never allocated.
+        null, // v3 allocation signal retained by v4: absent means never allocated.
       ],
       [
         [
@@ -916,7 +916,7 @@ describe('character-share positional codec', () => {
     ).resolves.toEqual(minimal);
   });
 
-  it('rejects every non-version-3 character, class, and source arity', () => {
+  it('rejects every non-version-4 character, class, and source arity', () => {
     const positional = shareDocumentToPositional(complete);
     const cases: Array<[number, number, RegExp]> = [
       [2, 11, /wire character must be a tuple of length 12/],

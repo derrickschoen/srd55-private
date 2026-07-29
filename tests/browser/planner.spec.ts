@@ -23,6 +23,33 @@ async function plannerFixture() {
   return { bytes, fixture };
 }
 
+async function contributionPlannerFixture() {
+  const sqlite3 = await sqlite3InitModule();
+  const connection = new sqlite3.oo1.DB(':memory:', 'c');
+  connection.exec(schema);
+  const db = new DatabaseContext(connection);
+  const fixture = createBuildReportFixture(db);
+  db.exec(
+    'UPDATE characters SET intelligence = 15 WHERE id = ?',
+    [fixture.characterId],
+  );
+  db.exec(
+    `INSERT INTO character_effects (
+       character_id, sort_order, effect_kind, ability, amount, maximum,
+       source_instance_id, label
+     ) VALUES (
+       ?, 1, 'ability_increase', 'intelligence', 2, 20, ?,
+       'Background training'
+     )`,
+    [fixture.characterId, fixture.featSourceId],
+  );
+  const bytes = Array.from(
+    sqlite3.capi.sqlite3_js_db_export(connection),
+  );
+  connection.close();
+  return { bytes, fixture };
+}
+
 async function persistedCharacter(
   page: import('@playwright/test').Page,
 ) {
@@ -145,6 +172,63 @@ test('planner editors, history, focus, keyboard, and responsive state persist', 
   await expect(
     page.getByText('Before browser experiment'),
   ).toBeVisible();
+});
+
+test('B2-EDIT displays base before editing and keeps the resolved total separate', async ({
+  page,
+}) => {
+  const { bytes, fixture } = await contributionPlannerFixture();
+  await page.goto('/');
+  await expect(page.locator('#status')).toHaveAttribute(
+    'data-ready',
+    'true',
+    { timeout: 30_000 },
+  );
+  await page.evaluate(
+    (database) =>
+      window.staticApp.replaceDatabase(Uint8Array.from(database)),
+    bytes,
+  );
+  await page.goto(`/characters/${fixture.characterId}`);
+  await expect(page.locator('#planner-status')).toHaveAttribute(
+    'data-ready',
+    'true',
+    { timeout: 30_000 },
+  );
+
+  const intelligence = page.locator(
+    '[data-focus-key="ability-intelligence"]',
+  );
+  const intelligenceField = intelligence.locator('..');
+
+  // LOAD-BEARING PRE-EDIT OBSERVABLE. Base is 15 and its +2 contribution
+  // resolves to 17. A mutant feeding totals into the editor shows 17 here;
+  // the later write assertions cannot distinguish that mutant on their own.
+  await expect(intelligence).toHaveValue('15');
+  await expect(intelligenceField.locator('.ability-total')).toHaveText(
+    'total 17 (+3)',
+  );
+
+  await intelligence.fill('16');
+  await intelligence.press('Enter');
+  await expect
+    .poll(() =>
+      page.evaluate(
+        (characterId) =>
+          window.staticApp.inspectRows('characters', { id: characterId }),
+        fixture.characterId,
+      ),
+    )
+    .toEqual([
+      expect.objectContaining({
+        intelligence: 16,
+        revision: 1,
+      }),
+    ]);
+  await expect(intelligence).toHaveValue('16');
+  await expect(intelligenceField.locator('.ability-total')).toHaveText(
+    'total 18 (+4)',
+  );
 });
 
 test('planner parity flows persist override, clear, selection, acknowledgement, and source edits', async ({

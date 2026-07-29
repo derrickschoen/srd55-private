@@ -138,6 +138,7 @@ describe('damage_resistance', () => {
       'damage_resistance',
       'hp_modifier',
       'speed',
+      'ability_increase',
     ]);
 
     // And the cantrip is still in the trait's own text, which is where the
@@ -328,7 +329,9 @@ describe('the closed set itself', () => {
           ? { hit_points_flat: 1 }
           : kind === 'speed'
             ? { speed_bonus_feet: 1 }
-            : { damage_type: 'Fire' };
+            : kind === 'damage_resistance'
+              ? { damage_type: 'Fire' }
+              : {};
       expect(() =>
         summariseEffects([effect('E', { effect_kind: kind, ...payload })]),
       ).not.toThrow();
@@ -337,6 +340,7 @@ describe('the closed set itself', () => {
       'damage_resistance',
       'hp_modifier',
       'speed',
+      'ability_increase',
     ]);
   });
 
