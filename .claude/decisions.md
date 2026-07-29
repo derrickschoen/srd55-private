@@ -1,5 +1,38 @@
 # Binding scope decisions
 
+## D79 — OWNER: the homebrew species is an ARMADILLO, not a turtle (2026-07-29)
+
+**The ruling.** *"I just remembered that 5e already did a turtle species. Change
+it to an armadillo."*
+
+Correct, and the reason is worth writing down rather than treating as taste:
+**Tortle is published 5e content and is NOT in the SRD.** Naming our own homebrew
+"turtle" invites a reader to think we shipped Tortle, which is both confusing and
+the wrong side of D59's authorization test. An armadillo is ours outright.
+
+**Renames across D72–D76's fixture set, which is all still unbuilt** — nothing to
+migrate, only text to write correctly the first time:
+
+- **Turtle (species)** → **Armadillo (species)** — unarmoured `13 + DEX`
+- **Turtle Paladin (subclass)** → **Armadillo Paladin** — `+3` hit points and
+  `+1` per paladin level; unarmoured `10 + CON + CHA`
+- **Cloak of the Turtle** → **Cloak of the Armadillo**
+- **Staff of the Turtle** → **Staff of the Armadillo**
+- **Tortoise Blade** → **Armadillo Blade**
+- **Amulet of the Deep** → **Amulet of the Burrow** — the old name was
+  sea-themed and an armadillo is not aquatic
+
+**Unchanged, because they were never turtle-specific:** Shell Plate, Carapace
+Mail, Scute Wrap, Shell Shield, Ring of Shell, Band of Growth. An armadillo has
+plates and scutes; the words already fit.
+
+**The formula label a person will actually read** becomes *"Armadillo Shell
+(13 + DEX)"* — it appears in D74's and D75's exclusion disclosures, so it is
+user-visible text and not merely a fixture name.
+
+**Nothing else changes.** Every mechanic pinned in D72 through D76 stands
+exactly as recorded; this is a naming decision only.
+
 ## D78 — SUPERVISOR CORRECTION: the ASI levels I recorded were a UNION, not a per-class set (2026-07-29)
 
 **Recorded as a correction rather than an edit, because this file is
