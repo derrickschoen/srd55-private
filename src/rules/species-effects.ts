@@ -149,6 +149,14 @@ export function summariseEffects(
       case 'speed':
         speedBonusFeet += effect.speed_bonus_feet ?? 0;
         break;
+      case 'ability_increase':
+        // DELIBERATELY NOT SUMMARISED HERE. An ability contribution is not a
+        // sheet line beside resistances and speed — it changes the six scores
+        // themselves, and `src/rules/ability-contributions.ts` is the ONE
+        // resolver every score reader goes through (plan §3.4). Summing it
+        // here as well would apply it twice. The branch exists so the switch
+        // stays exhaustive: a fifth kind is a compile error, not a silent skip.
+        break;
       /* c8 ignore next 4 -- unreachable while the switch is exhaustive; kept so
          a new enum member is a compile error here rather than a silent skip. */
       default: {

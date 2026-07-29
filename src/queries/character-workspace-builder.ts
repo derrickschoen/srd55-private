@@ -45,21 +45,22 @@ interface SlotWithOrder extends WorkspaceSlot {
 /**
  * The character columns the workspace needs, decoded once.
  *
- * The six ability columns become an `AbilityScores` HERE rather than being
- * carried as a raw row into `#slots` and assembled there: the query selects them
- * for exactly one reason, and building the value at the read is what stops a
- * half-decoded row travelling between two methods.
+ * THE SIX ABILITY COLUMNS ARE DELIBERATELY GONE FROM THIS QUERY (B2). The
+ * workspace used to build an `AbilityScores` from the raw row here — reader
+ * four of the four raw-score readers plan §3.4 counts, and one of TWO sites
+ * inside this builder — which is exactly how a contribution would have moved
+ * the report's numbers while the slot grid kept computing save DCs from base.
+ * Both sites now derive from `report.character.abilities`, the RESOLVED totals
+ * the report already ran through the one resolver, so the two cannot disagree.
  */
 interface WorkspaceCharacter {
   readonly revision: number;
   readonly allow_legacy: boolean;
-  readonly scores: AbilityScores;
 }
 
 const workspaceCharacter: RowCodec<WorkspaceCharacter> = (row) => ({
   revision: sqlInteger(row, 'revision'),
   allow_legacy: sqlBoolean(row, 'allow_legacy'),
-  scores: AbilityScores.fromArray(row),
 });
 
 /**
@@ -215,8 +216,7 @@ export class CharacterWorkspaceBuilder {
 
   build(characterId: number): Workspace {
     const character = this.db.one(
-      `SELECT revision, allow_legacy, strength, dexterity, constitution,
-              intelligence, wisdom, charisma
+      `SELECT revision, allow_legacy
        FROM characters
        WHERE id = ?`,
       [characterId],
@@ -227,7 +227,11 @@ export class CharacterWorkspaceBuilder {
     }
 
     const report = this.#reports.build(characterId);
-    const slots = this.slots(characterId, character, report);
+    // The report's RESOLVED totals (base plus ability_increase contributions),
+    // built once and used by both scoring sites in this builder — the slot
+    // grid below and the weapons panel further down.
+    const scores = AbilityScores.fromArray(report.character.abilities);
+    const slots = this.slots(characterId, scores, report);
     const invalid = slots.filter(
       (slot) =>
         slot.eligibility === 'invalid' ||
@@ -302,10 +306,11 @@ export class CharacterWorkspaceBuilder {
       ),
       // The report's own proficiency bonus and ability scores are reused rather
       // than re-derived, so a weapon attack bonus and a spell attack bonus on
-      // the same screen cannot disagree about what level the character is.
+      // the same screen cannot disagree about what level the character is —
+      // and, since B2, about whether a contribution applies.
       weapons: new WeaponQueries(this.db).panel(characterId, {
         routes: report.access_routes,
-        scores: AbilityScores.fromArray(report.character.abilities),
+        scores,
         proficiency_bonus: report.character.proficiency_bonus,
       }),
       save_points: new SavePointQueries(this.db).list(characterId),
@@ -373,7 +378,7 @@ export class CharacterWorkspaceBuilder {
 
   private slots(
     characterId: number,
-    character: WorkspaceCharacter,
+    scores: AbilityScores,
     report: BuildReportResult,
   ): SlotWithOrder[] {
     const rows = this.db.all(
@@ -429,7 +434,6 @@ export class CharacterWorkspaceBuilder {
         assessment.category,
       ]),
     );
-    const scores = character.scores;
     const proficiency = report.character.proficiency_bonus;
 
     return rows.map((row): SlotWithOrder => {

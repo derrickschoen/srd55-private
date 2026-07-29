@@ -18,20 +18,32 @@ import {
 import type { JsonValue } from '../domain/models';
 import { SpellSelectionEligibility } from '../eligibility/spell-selection-eligibility';
 import { SourceRuleReader } from '../grants/source-rule-reader';
+import {
+  resolveCharacterAbilities,
+  resolvedTotals,
+} from '../rules/ability-contributions';
 import { AbilityScores } from '../rules/ability-scores';
 import { characterLevel } from '../rules/character-level';
 import { proficiencyBonus } from '../rules/proficiency';
 import { SpellSlotAssignment } from './spell-slot-assignment';
 import { deduplicateRoutes } from './route-key';
 
+/**
+ * The character as spell access computes with it: RESOLVED scores, not the six
+ * raw columns. `buildForCharacter` is reader three of the four raw-score
+ * readers (plan §3.4) and runs the row through the one resolver before
+ * anything downstream can touch a score — so a casting-ability contribution
+ * moves every attack bonus and save DC built here, not just a displayed six.
+ */
 interface Character {
   readonly id: number;
-  readonly strength: number;
-  readonly dexterity: number;
-  readonly constitution: number;
-  readonly intelligence: number;
-  readonly wisdom: number;
-  readonly charisma: number;
+  readonly scores: AbilityScores;
+  readonly proficiencyBonusOverride: number | null;
+}
+
+interface CharacterRow {
+  readonly id: number;
+  readonly base: Readonly<Record<Ability, number>>;
   readonly proficiencyBonusOverride: number | null;
 }
 
@@ -124,15 +136,12 @@ export interface SpellAccessRoute {
   readonly spellbook_entry_id?: number;
 }
 
-function decodeCharacter(row: SqlRow): Character {
+function decodeCharacter(row: SqlRow): CharacterRow {
   return {
     id: sqlInteger(row, 'id'),
-    strength: sqlInteger(row, 'strength'),
-    dexterity: sqlInteger(row, 'dexterity'),
-    constitution: sqlInteger(row, 'constitution'),
-    intelligence: sqlInteger(row, 'intelligence'),
-    wisdom: sqlInteger(row, 'wisdom'),
-    charisma: sqlInteger(row, 'charisma'),
+    base: Object.fromEntries(
+      abilities.map((ability) => [ability, sqlInteger(row, ability)]),
+    ) as Record<Ability, number>,
     proficiencyBonusOverride: sqlNullableInteger(
       row,
       'proficiency_bonus_override',
@@ -303,7 +312,7 @@ export class SpellAccessBuilder {
   }
 
   buildForCharacter(characterId: number): SpellAccessRoute[] {
-    const character = this.db.one(
+    const row = this.db.one(
       `SELECT id, strength, dexterity, constitution, intelligence,
               wisdom, charisma, proficiency_bonus_override
        FROM characters
@@ -311,14 +320,25 @@ export class SpellAccessBuilder {
       [characterId],
       decodeCharacter,
     );
-    if (character === null) {
+    if (row === null) {
       return [];
     }
-    if (characterLevel(this.db, character.id) === null) {
+    if (characterLevel(this.db, row.id) === null) {
       // A class-less character has no class spellcasting to turn into routes.
       // Returning no routes keeps an undetermined level out of spell math.
       return [];
     }
+    // Base plus `ability_increase` contributions, resolved ONCE and carried —
+    // see the `Character` comment. Nothing after this line sees a raw score.
+    const character: Character = {
+      id: row.id,
+      scores: AbilityScores.fromArray(
+        resolvedTotals(
+          resolveCharacterAbilities(this.db, row.id, row.base),
+        ),
+      ),
+      proficiencyBonusOverride: row.proficiencyBonusOverride,
+    };
 
     return deduplicateRoutes([
       ...this.slotRoutes(character),
@@ -578,16 +598,7 @@ export class SpellAccessBuilder {
       character.proficiencyBonusOverride ??
       proficiencyBonus(level);
     const abilityScore =
-      ability === null
-        ? null
-        : AbilityScores.fromArray({
-            strength: character.strength,
-            dexterity: character.dexterity,
-            constitution: character.constitution,
-            intelligence: character.intelligence,
-            wisdom: character.wisdom,
-            charisma: character.charisma,
-          }).score(ability);
+      ability === null ? null : character.scores.score(ability);
 
     return {
       spell_identity_id: spell.spellIdentityId,

@@ -5,7 +5,7 @@ logical document used by the format benchmark and by an executable validator
 test. It contains catalog identifiers, user choices, and fallback names, but no
 spell rules text.
 
-The specimen follows the live v3 logical contract:
+The specimen follows the live v4 logical contract:
 
 - share-local numeric `id` values identify classes and standalone sources;
 - selections use `ref` to point into that shared identifier space;
@@ -15,6 +15,10 @@ The specimen follows the live v3 logical contract:
 - the character carries `ability_allocation_method` — v3's one addition
   (D64's allocation signal); this specimen records `manual` because its
   scores match neither the standard array nor a point-buy purchase;
+- v4's one addition is the `ability_increase` effect payload (`ability`,
+  `amount`, `maximum`, with a required `sourceRef` — D63's contribution
+  layer); this specimen carries no effects, so the section is validly absent
+  and only its `version` distinguishes it from a v3 document;
 - class, source, selection, preference, override, acknowledgement, and loadout
   working-state notes are not part of the contract;
 - the optional character `notes` field is valid but is omitted from this
@@ -22,7 +26,7 @@ The specimen follows the live v3 logical contract:
 
 The object form is intentionally keyed and readable. Production links do not
 embed this keyed JSON directly: the codec validates it, maps it to the
-versioned positional v3 layout, serializes compact JSON, compresses with gzip,
+versioned positional v4 layout, serializes compact JSON, compresses with gzip,
 and uses unpadded base64url in the fragment.
 
 ## Why each populated section remains

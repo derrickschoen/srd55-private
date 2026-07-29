@@ -491,6 +491,14 @@ interface ShareSourceOwner {
  * removed feat is not in it to be named. A removed source under a live root
  * keeps its provenance, coarsened to that root the same way an active
  * non-root's is.
+ *
+ * THAT ALLOWANCE DOES NOT EXTEND TO `ability_increase` (v4, B2, plan §3.3).
+ * The kind's schema CHECK requires a non-null source, so a document carrying
+ * one without its `sourceRef` would be an export our own importer refuses —
+ * D60's surviving defect by name. An `ability_increase` whose owner no
+ * reference can reach therefore refuses the EXPORT, with a sentence, while the
+ * character is still on the sender's screen; `shareEffect` in `./schema.ts`
+ * enforces the same rule again at validation, so neither side can drift alone.
  */
 function shareEffectFromRow(
   row: Row,
@@ -506,6 +514,15 @@ function shareEffectFromRow(
       effect[field] = Number(row[field]);
     }
   }
+  if (row.ability !== null && row.ability !== undefined) {
+    effect.ability = String(row.ability);
+  }
+  if (row.amount !== null && row.amount !== undefined) {
+    effect.amount = Number(row.amount);
+  }
+  if (row.maximum !== null && row.maximum !== undefined) {
+    effect.maximum = Number(row.maximum);
+  }
   if (row.source_instance_id !== null && row.source_instance_id !== undefined) {
     const owner = owners.get(Number(row.source_instance_id));
     if (owner !== undefined) {
@@ -514,6 +531,15 @@ function shareEffectFromRow(
         effect.sourceSubclass = true;
       }
     }
+  }
+  if (
+    String(row.effect_kind) === 'ability_increase' &&
+    effect.sourceRef === undefined
+  ) {
+    throw new ShareValidationError(
+      `the ability increase '${String(row.label)}' has a source this share ` +
+        'link cannot name. Restore or remove its granting source, then share.',
+    );
   }
   return effect as unknown as ShareEffect;
 }
@@ -1680,6 +1706,9 @@ export function importCharacterShare(
       hit_points_flat: number | null;
       hit_points_per_level: number | null;
       speed_bonus_feet: number | null;
+      ability: string | null;
+      amount: number | null;
+      maximum: number | null;
       notes: string | null;
       sourceId: number | null;
     }[] = [];
@@ -1716,7 +1745,13 @@ export function importCharacterShare(
         hit_points_flat: effect.hit_points_flat ?? null,
         hit_points_per_level: effect.hit_points_per_level ?? null,
         speed_bonus_feet: effect.speed_bonus_feet ?? null,
+        ability: effect.ability ?? null,
+        amount: effect.amount ?? null,
+        maximum: effect.maximum ?? null,
         notes: effect.notes ?? null,
+        // For `ability_increase` this is non-null by validation: `shareEffect`
+        // refuses the document when the kind arrives without a `sourceRef`, so
+        // the required-source CHECK below cannot fire on an imported row.
         sourceId: roots?.[rootIndex] ?? null,
       });
     }
@@ -1732,6 +1767,11 @@ export function importCharacterShare(
         hit_points_flat: migrated.hit_points_flat,
         hit_points_per_level: migrated.hit_points_per_level,
         speed_bonus_feet: migrated.speed_bonus_feet,
+        // A legacy trait payload predates the contribution layer, and the
+        // legacy vocabulary has no ability_increase to migrate.
+        ability: null,
+        amount: null,
+        maximum: null,
         notes: null,
         // A legacy link predates the provenance column entirely, so there is
         // nothing to resolve and nothing is invented.
@@ -1743,8 +1783,9 @@ export function importCharacterShare(
         `INSERT INTO ${SHARE_TABLES.character_effects} (
            character_id, sort_order, effect_kind, damage_type,
            hit_points_flat, hit_points_per_level, speed_bonus_feet,
+           ability, amount, maximum,
            source_instance_id, label, notes, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           characterId,
           index + 1,
@@ -1753,6 +1794,9 @@ export function importCharacterShare(
           effect.hit_points_flat,
           effect.hit_points_per_level,
           effect.speed_bonus_feet,
+          effect.ability,
+          effect.amount,
+          effect.maximum,
           effect.sourceId,
           effect.label,
           effect.notes,

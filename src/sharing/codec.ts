@@ -934,8 +934,8 @@ export function positionalToShareDocument(
   if (input[0] !== CHARACTER_SHARE_FORMAT) {
     throw new ShareValidationError('format is unsupported.');
   }
-  // Migrations are ADJACENT and composed: a v1 link lifts 1→2 then 2→3, and
-  // every historical version funnels into the one current decoder.
+  // Migrations are ADJACENT and composed: a v1 link lifts 1→2, 2→3, then 3→4,
+  // and every historical version funnels into the one current decoder.
   switch (input[1]) {
     case 1:
       variableTuple(
@@ -948,7 +948,9 @@ export function positionalToShareDocument(
         SHARE_SCHEMAS[1].tuples.character.arities,
         'wire character',
       );
-      return decodeCurrentWire(MIGRATIONS[2](MIGRATIONS[1](input)));
+      return decodeCurrentWire(
+        MIGRATIONS[3](MIGRATIONS[2](MIGRATIONS[1](input))),
+      );
     case 2:
       variableTuple(
         input,
@@ -960,8 +962,20 @@ export function positionalToShareDocument(
         SHARE_SCHEMAS[2].tuples.character.arities,
         'wire character',
       );
-      return decodeCurrentWire(MIGRATIONS[2](input));
+      return decodeCurrentWire(MIGRATIONS[3](MIGRATIONS[2](input)));
     case 3:
+      variableTuple(
+        input,
+        SHARE_SCHEMAS[3].tuples.root.arities,
+        'wire document',
+      );
+      variableTuple(
+        input[2],
+        SHARE_SCHEMAS[3].tuples.character.arities,
+        'wire character',
+      );
+      return decodeCurrentWire(MIGRATIONS[3](input));
+    case 4:
       return decodeCurrentWire(input);
     default:
       throw new ShareValidationError('version is unsupported.');

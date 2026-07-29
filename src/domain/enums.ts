@@ -647,10 +647,31 @@ export type FreeCastPoolScope = (typeof freeCastPoolScopes)[number];
  * a LIST of effects (`character_effects`); "two effects" is no longer a special
  * case that needs a column to be stolen from one half or the other.
  */
+/**
+ * `ability_increase` — THE CONTRIBUTION LAYER (D63, B2).
+ *
+ * Base is what the player allocated; an ability increase is an ADDITIVE
+ * contribution on top of it, carrying the ability, a signed non-zero amount and
+ * its own maximum (backgrounds stop at 20, Epic Boons at 30 — the payload says
+ * which, bounded 1–30 because `AbilityScore` throws outside that range).
+ *
+ * UNLIKE THE OTHER THREE KINDS, IT REQUIRES A NON-NULL `source_instance_id`,
+ * enforced by a kind-specific CHECK on `character_effects`. The column is
+ * nullable in general and guided species copying writes NULL, so without the
+ * CHECK D63's "a contribution knows where it came from" would be a convention
+ * rather than an invariant.
+ *
+ * IT IS ALSO UNREPRESENTABLE ON `species_template_trait_effects`, by its own
+ * CHECK there. No 2024 SRD species grants a standing ability increase (that
+ * moved to backgrounds), and the catalog-to-character copy writes a NULL
+ * source — which the character-side CHECK above refuses — so admitting the
+ * kind at the catalog would seed rows the copy could never deliver.
+ */
 export const effectKinds = [
   'damage_resistance',
   'hp_modifier',
   'speed',
+  'ability_increase',
 ] as const;
 export type EffectKind = (typeof effectKinds)[number];
 

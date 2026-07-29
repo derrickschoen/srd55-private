@@ -1,6 +1,7 @@
 import { WIRE_SCHEMA_V1 } from './v1';
 import { WIRE_SCHEMA_V2 } from './v2';
 import { WIRE_SCHEMA_V3 } from './v3';
+import { WIRE_SCHEMA_V4 } from './v4';
 import {
   versatileWeaponDamageFromLegacy,
   weaponDamageFromLegacy,
@@ -17,7 +18,7 @@ import {
  * domain requires a new schema version, an adjacent migration, and a
  * hand-frozen fragment fixture. Never edit an existing version.
  */
-export const CURRENT_CHARACTER_SHARE_VERSION = 3 as const;
+export const CURRENT_CHARACTER_SHARE_VERSION = 4 as const;
 
 /**
  * Any change to tuple field order, meaning, membership, or accepted value
@@ -28,6 +29,7 @@ export const SHARE_SCHEMAS = Object.freeze({
   1: WIRE_SCHEMA_V1,
   2: WIRE_SCHEMA_V2,
   3: WIRE_SCHEMA_V3,
+  4: WIRE_SCHEMA_V4,
 } as const);
 
 export type SupportedShareVersion = keyof typeof SHARE_SCHEMAS;
@@ -190,17 +192,67 @@ function migrateV2ToV3(document: unknown): unknown {
 }
 
 /**
+ * The v3→v4 migration is the appended-field null-pad, applied per EFFECT
+ * tuple this time rather than to the character: a v3 effect could not carry
+ * the `ability_increase` payload, so its three appended slots arrive as null —
+ * which decode drops as absent optional fields. Correct unconditionally,
+ * because no v3 document can carry the kind that needs them (the kind did not
+ * exist). Nothing else in the document moves. The version slot is rewritten to
+ * 4 because the decoder validates the root version.
+ */
+function migrateV3ToV4(document: unknown): unknown {
+  if (
+    !Array.isArray(document) ||
+    !WIRE_SCHEMA_V3.tuples.root.arities.some(
+      (arity) => arity === document.length,
+    )
+  ) {
+    throw new TypeError('wire document has an unsupported v3 tuple length.');
+  }
+  const effectsIndex = WIRE_SCHEMA_V3.tuples.root.fields.findIndex(
+    (field) => field.key === 'effects',
+  );
+  const effects = document[effectsIndex];
+  if (effects !== null && !Array.isArray(effects)) {
+    throw new TypeError('wire effects must be null or a list.');
+  }
+  const migratedEffects =
+    effects === null
+      ? null
+      : effects.map((effect: unknown) => {
+          if (
+            !Array.isArray(effect) ||
+            !WIRE_SCHEMA_V3.tuples.effect.arities.some(
+              (arity) => arity === effect.length,
+            )
+          ) {
+            throw new TypeError(
+              'wire effect has an unsupported v3 tuple length.',
+            );
+          }
+          return [...effect, null, null, null];
+        });
+  const migrated = [...document];
+  migrated[1] = 4;
+  migrated[effectsIndex] = migratedEffects;
+  return migrated;
+}
+
+/**
  * ADJACENT means each migration lifts exactly one version step; the decoder
- * composes them, so a v1 document runs 1→2 and then 2→3.
+ * composes them, so a v1 document runs 1→2, then 2→3, then 3→4.
  */
 export const MIGRATIONS = Object.freeze({
   1: migrateV1ToV2,
   2: migrateV2ToV3,
+  3: migrateV3ToV4,
 }) satisfies AdjacentMigrations;
 
 export { WIRE_SCHEMA_V1 } from './v1';
 export { WIRE_SCHEMA_V2 } from './v2';
 export { WIRE_SCHEMA_V3 } from './v3';
+export { WIRE_SCHEMA_V4 } from './v4';
 export type { WireField, WireSchemaV1 } from './v1';
 export type { WireSchemaV2 } from './v2';
 export type { WireSchemaV3 } from './v3';
+export type { WireSchemaV4 } from './v4';

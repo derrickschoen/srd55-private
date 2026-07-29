@@ -224,6 +224,18 @@ const featAbilityPointsEnum = z.union([
 
 const nonNegativeInt = z.int().min(0);
 
+/**
+ * A signed integer that must not be zero — `character_effects.amount`, the
+ * `ability_increase` payload. A zero contribution is not a contribution; it is
+ * a row that changes nothing and can never be noticed, and the column's own
+ * CHECK (`character_effects_amount_check`) refuses it for the same reason.
+ * Registered in {@link NARROWED_REFINEMENTS} because `.refine()` is invisible
+ * to `z.infer` and the compile guard cannot see the narrowing.
+ */
+const nonZeroInt = z
+  .int()
+  .refine((value) => value !== 0, { message: 'must not be zero' });
+
 /** What an `integer()` column gets when it needs nothing narrower. */
 const sqlInteger = z.int();
 
@@ -334,6 +346,7 @@ export const COLUMN_REFINEMENTS = {
   classLevel,
   featAbilityPointsEnum,
   nonNegativeInt,
+  nonZeroInt,
   sqlInteger,
   rulesEditionEnum,
   abilityEnum,
@@ -419,6 +432,12 @@ export const NARROWED_REFINEMENTS: readonly {
     rejects: -1,
     reason:
       'Pre-existing for characters.revision. New for spell_selection_slots.ordinal, whose only writer is a loop index — a negative ordinal cannot be produced by this application.',
+  },
+  {
+    name: 'nonZeroInt',
+    rejects: 0,
+    reason:
+      'Matches the character_effects_amount_check CHECK carried since the column was created, so no stored row and no artifact generated from one can hold a zero amount. A zero ability contribution changes nothing and can never be noticed; the schema and this contract refuse it together.',
   },
   {
     name: 'sqlInteger',
@@ -1065,10 +1084,20 @@ const REFINEMENTS = {
   // Open vocabulary in the schema, so open here — the same call
   // `spell_version_damage_types.damage_type` makes.
   'character_effects.damage_type': damageTypeVocabulary,
-  // The three payload columns are deliberately absent: `sqlInteger` is what
-  // `columnSchema` falls back to for an integer column, and a signed integer is
-  // exactly what the schema permits. `positiveInt` would reject Dwarven
-  // Toughness's seeded `hit_points_flat = 0` and every user-written penalty.
+  // The three hit-point/speed payload columns are deliberately absent:
+  // `sqlInteger` is what `columnSchema` falls back to for an integer column,
+  // and a signed integer is exactly what the schema permits. `positiveInt`
+  // would reject Dwarven Toughness's seeded `hit_points_flat = 0` and every
+  // user-written penalty.
+  //
+  // The `ability_increase` payload (B2) IS refined, mirroring its CHECKs:
+  // the ability names one of the closed six, the amount is signed but never
+  // zero, and the maximum shares `abilityScore`'s 1..30 because that is the
+  // range `AbilityScore` can represent — a stored 32 would drive a resolved
+  // total past 30 and throw where a person expected a sheet.
+  'character_effects.ability': abilityEnum,
+  'character_effects.amount': nonZeroInt,
+  'character_effects.maximum': abilityScore,
   'character_effects.source_instance_id': positiveInt,
   // Non-empty: an effect nobody can name is an effect nobody can find to edit
   // or delete, and `''` is a null in costume.

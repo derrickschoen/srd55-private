@@ -26,6 +26,10 @@ import {
   skills,
   weaponProficiencyCategories,
 } from '../domain/enums';
+import {
+  resolveCharacterAbilities,
+  resolvedTotals,
+} from '../rules/ability-contributions';
 import { AbilityScores } from '../rules/ability-scores';
 import { SheetContentLookup } from '../rules/sheet-content-lookup';
 import { SKILL_LABELS, abilityForSkill } from '../rules/skills';
@@ -266,18 +270,23 @@ export interface CharacterSheet {
 interface SheetCharacterRow {
   readonly id: number;
   readonly name: string;
-  readonly scores: AbilityScores;
+  /**
+   * BASE scores, as stored. The sheet computes with the RESOLVED totals —
+   * base plus `ability_increase` contributions (D63) — built in `build()`
+   * through the one resolver every score reader shares
+   * (`src/rules/ability-contributions.ts`). Kept as the raw record here
+   * because the resolver needs base, not an `AbilityScores`.
+   */
+  readonly base_abilities: Readonly<Record<Ability, number>>;
   readonly proficiency_bonus_override: number | null;
 }
 
 const sheetCharacter: RowCodec<SheetCharacterRow> = (row) => ({
   id: sqlInteger(row, 'id'),
   name: sqlString(row, 'name'),
-  // Built HERE rather than handed the row to build itself later: the six
-  // ability columns are the reason this query selects them, and decoding them
-  // at the read is what stops a caller receiving an undecoded row that merely
-  // looks decoded.
-  scores: AbilityScores.fromArray(row),
+  base_abilities: Object.fromEntries(
+    abilities.map((ability) => [ability, sqlInteger(row, ability)]),
+  ) as Record<Ability, number>,
   proficiency_bonus_override: sqlNullableInteger(
     row,
     'proficiency_bonus_override',
@@ -464,7 +473,20 @@ export class CharacterSheetBuilder {
     if (character === null) {
       throw new CharacterNotFoundError(characterId);
     }
-    const scores = character.scores;
+    // THE RESOLVED TOTALS, NOT BASE — reader one of the four (plan §3.4, §6).
+    // Everything below that computes with a score — hit point maximum, Armor
+    // Class, saving throws, skills, initiative, the printed six — uses these,
+    // so a Constitution contribution moves HP here rather than only moving a
+    // number on the planner.
+    const scores = AbilityScores.fromArray(
+      resolvedTotals(
+        resolveCharacterAbilities(
+          this.db,
+          characterId,
+          character.base_abilities,
+        ),
+      ),
+    );
     const content = this.#content.forCharacter(characterId);
     const classes = this.#classes(characterId, content);
     const rolls = this.#rolls(characterId);

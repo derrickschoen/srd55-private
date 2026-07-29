@@ -41,6 +41,10 @@ import {
   SHEET_SHARE_COUNTS,
   SHEET_TEXT_LIMITS,
 } from '../domain/sheet-limits';
+import {
+  ABILITY_SCORE_MAX,
+  ABILITY_SCORE_MIN,
+} from '../builder/contracts';
 import { CURRENT_CHARACTER_SHARE_VERSION } from './wire-schemas';
 
 export const CHARACTER_SHARE_FORMAT =
@@ -444,6 +448,19 @@ export interface ShareEffect {
   readonly sourceRef?: number;
   readonly sourceSubclass?: true;
   readonly notes?: string;
+  /**
+   * The `ability_increase` payload (v4, B2): present exactly when `kind` is
+   * `ability_increase`, all three together, mirroring the table's CHECKs. FOR
+   * THIS KIND `sourceRef` IS REQUIRED — the format's "an effect may travel
+   * without its provenance" allowance does not extend to it, because the
+   * schema's `character_effects_ability_increase_source_check` makes a
+   * sourceless contribution unrepresentable and a document carrying one would
+   * be an export our own importer refuses (D60's surviving defect, named in
+   * plan §3.3).
+   */
+  readonly ability?: string;
+  readonly amount?: number;
+  readonly maximum?: number;
 }
 
 export interface ShareBackground {
@@ -1324,6 +1341,9 @@ function shareEffect(
       ...SHARE_EFFECT_NUMBERS,
       'sourceRef',
       'sourceSubclass',
+      'ability',
+      'amount',
+      'maximum',
     ],
     label,
   );
@@ -1420,6 +1440,62 @@ function shareEffect(
     throw new ShareValidationError(
       `${label} kind speed requires speed_bonus_feet.`,
     );
+  }
+  // The `ability_increase` payload (v4, B2), held to EXACTLY the table's own
+  // CHECKs: the three fields together and only for this kind, an ability from
+  // the closed six, a signed non-zero amount, a maximum inside the 1–30 range
+  // `AbilityScore` can represent — and, unlike every other kind, a REQUIRED
+  // `sourceRef`. The format's "travels without provenance" allowance does not
+  // extend here: the table's required-source CHECK would make our own importer
+  // refuse the document, and this validator runs on export too, so the refusal
+  // happens while the character is still on the sender's screen.
+  const abilityPayloadPresent =
+    row.ability !== undefined ||
+    row.amount !== undefined ||
+    row.maximum !== undefined;
+  if (abilityPayloadPresent && kind !== 'ability_increase') {
+    throw new ShareValidationError(
+      `${label} ability payloads require kind ability_increase.`,
+    );
+  }
+  if (kind === 'ability_increase') {
+    if (
+      row.ability === undefined ||
+      row.amount === undefined ||
+      row.maximum === undefined
+    ) {
+      throw new ShareValidationError(
+        `${label} kind ability_increase requires ability, amount and maximum.`,
+      );
+    }
+    if (
+      typeof row.ability !== 'string' ||
+      !abilities.includes(row.ability as (typeof abilities)[number])
+    ) {
+      throw new ShareValidationError(`${label}.ability is unsupported.`);
+    }
+    effect.ability = row.ability;
+    const amount = originInteger(
+      row.amount,
+      `${label}.amount`,
+      ORIGIN_EFFECT_MAGNITUDE_MAX,
+      -ORIGIN_EFFECT_MAGNITUDE_MAX,
+    );
+    if (amount === 0) {
+      throw new ShareValidationError(`${label}.amount must not be zero.`);
+    }
+    effect.amount = amount;
+    effect.maximum = originInteger(
+      row.maximum,
+      `${label}.maximum`,
+      ABILITY_SCORE_MAX,
+      ABILITY_SCORE_MIN,
+    );
+    if (effect.sourceRef === undefined) {
+      throw new ShareValidationError(
+        `${label} kind ability_increase requires a sourceRef.`,
+      );
+    }
   }
   return effect as unknown as ShareEffect;
 }

@@ -218,7 +218,24 @@ export interface BuildReport {
     name: string;
     character_level: number | null;
     proficiency_bonus: number | null;
+    /**
+     * THE RESOLVED TOTALS — base plus `ability_increase` contributions (D63),
+     * through the one resolver in `src/rules/ability-contributions.ts`. This
+     * is what every surface that COMPUTES or PRINTS a score reads: casting
+     * attack/DC badges, workspace slot math, dice, print, the machine block.
+     */
     abilities: Record<Ability, number>;
+    /**
+     * BASE, as stored — what the player allocated, before any contribution.
+     *
+     * EXISTS BECAUSE THE EDITOR IS A WRITER FED BY A READER (plan §3.5/§3.6):
+     * `update_ability` writes whatever was typed straight into the base
+     * column, so the planner's ability inputs — value, dirty-check and
+     * modifier caption — and the guided abilities step's prefill MUST read
+     * this field. An editor fed `abilities` would bake a contribution into
+     * base the first time a person nudged a number.
+     */
+    abilities_base: Record<Ability, number>;
   };
   caster: {
     caster_level: number;
