@@ -2107,3 +2107,168 @@ describe('B2 contribution sharing', () => {
     expect(resolved.strength.total).toBe(20);
   });
 });
+
+/**
+ * S-SHARE (plan §6, skills-with-provenance): A V5 ROUND TRIP PRESERVES GRANT
+ * PROVENANCE — not merely the final distinct skill list.
+ *
+ * §5's second trap, made executable for share the same way it is for the
+ * guided step: an implementation that fills whichever grant is REACHABLE
+ * rather than the one the `ref` actually names produces the right skill
+ * list, the right count, and a faithful round trip of the WRONG provenance.
+ * A test that only checked `skills` (or `skillProficiencies`) would pass
+ * under that bug. This one instead confirms, after a full export→import round
+ * trip into a SECOND database, that the filled grant's `source_instance_id`
+ * resolves (by joining back to `character_source_instances`) to the class it
+ * was actually granted from.
+ *
+ * THE CHARACTER ALSO CARRIES A REMOVED CLASS with an orphaned, filled grant
+ * (Fighter/`athletics`) — `exportCharacterShare`'s own rule is ACTIVE grants
+ * only ("an orphaned grant's source is not in the document to be named"), so
+ * this proves the orphaned grant is correctly left off the wire and does not
+ * corrupt the two ACTIVE grants that do travel.
+ *
+ * TWO ACTIVE, DIFFERENTLY-SOURCED GRANTS ARE THE POINT: a single-grant
+ * fixture cannot distinguish "the right ref" from "whichever ref came up
+ * first" — the exact shape of bug this control exists to catch.
+ */
+describe('a v5 round trip preserves skill grant provenance (S-SHARE)', () => {
+  function seedProvenanceClasses(db: DatabaseContext): {
+    readonly wizardId: number;
+    readonly fighterId: number;
+    readonly featId: number;
+  } {
+    const wizardId = seedCatalog(db).classId;
+    const fighterId = db.exec(
+      `INSERT INTO class_definitions (content_key, name, rules_edition)
+       VALUES ('2024:class:fighter', 'Fighter', '2024')
+       ON CONFLICT(content_key) DO UPDATE SET name = excluded.name`,
+    ).lastInsertId;
+    const featId = db.exec(
+      `INSERT INTO feat_definitions (content_key, name, rules_edition)
+       VALUES ('2024:feat:alert', 'Alert', '2024')
+       ON CONFLICT(content_key) DO UPDATE SET name = excluded.name`,
+    ).lastInsertId;
+    return { wizardId, fighterId, featId };
+  }
+
+  it('assigns the filled row to the RIGHT source, not merely the right skill', async () => {
+    const source = await database();
+    const catalog = seedProvenanceClasses(source);
+    const characterId = source.exec(
+      `INSERT INTO characters (name, intelligence)
+       VALUES ('Provenance Share Hero', 16)`,
+    ).lastInsertId;
+
+    // Wizard: KEPT, active, one filled class-skill grant (`arcana`) — ref
+    // should resolve to `classes[0]`.
+    source.exec(
+      `INSERT INTO character_class_levels
+         (character_id, class_definition_id, level, is_starting_class)
+       VALUES (?, ?, 4, 1)`,
+      [characterId, catalog.wizardId],
+    );
+    const wizardSourceId = source.exec(
+      `INSERT INTO character_source_instances (
+         character_id, instance_uuid, source_type, source_definition_id,
+         display_name, acquired_at_character_level, state
+       ) VALUES (?, 'provenance-wizard', 'class', ?, 'Wizard 4', 1, 'active')`,
+      [characterId, catalog.wizardId],
+    ).lastInsertId;
+    source.exec(
+      `INSERT INTO character_skill_grants (
+         character_id, source_instance_id, grant_key, ordinal, skill, state
+       ) VALUES (?, ?, 'class_skill', 1, 'arcana', 'active')`,
+      [characterId, wizardSourceId],
+    );
+
+    // Alert (a feat): KEPT, active, one filled grant (`religion`) — ref should
+    // resolve to `sources[0]`, a DIFFERENT ref than Wizard's. Two active,
+    // differently-sourced grants are what makes a wrong-ref bug observable.
+    const featSourceId = source.exec(
+      `INSERT INTO character_source_instances (
+         character_id, instance_uuid, source_type, source_definition_id,
+         display_name, acquired_at_character_level, state
+       ) VALUES (?, 'provenance-feat', 'feat', ?, 'Alert', 1, 'active')`,
+      [characterId, catalog.featId],
+    ).lastInsertId;
+    source.exec(
+      `INSERT INTO character_skill_grants (
+         character_id, source_instance_id, grant_key, ordinal, skill, state
+       ) VALUES (?, ?, 'background_skill', 1, 'religion', 'active')`,
+      [characterId, featSourceId],
+    );
+
+    // Fighter: REMOVED (tombstoned; its class-level row deleted, exactly as
+    // `UpdateClassCommand.remove` leaves it), with an ORPHANED filled grant
+    // (`athletics`) that must NOT travel.
+    const fighterSourceId = source.exec(
+      `INSERT INTO character_source_instances (
+         character_id, instance_uuid, source_type, source_definition_id,
+         display_name, acquired_at_character_level, state
+       ) VALUES (?, 'provenance-fighter', 'class', ?, 'Fighter 1', 1, 'tombstoned')`,
+      [characterId, catalog.fighterId],
+    ).lastInsertId;
+    source.exec(
+      `INSERT INTO character_skill_grants (
+         character_id, source_instance_id, grant_key, ordinal, skill, state,
+         orphan_reason_code
+       ) VALUES (?, ?, 'class_skill', 1, 'athletics', 'orphaned', 'parent_rule_removed')`,
+      [characterId, fighterSourceId],
+    );
+
+    const document = exportCharacterShare(source, characterId);
+
+    // The orphaned Fighter grant does not reach the wire.
+    expect(document.classes).toHaveLength(1);
+    expect(document.classes[0]?.classKey).toBe('2024:class:wizard');
+    expect(document.skillGrants).toEqual([
+      { ref: 0, grantKey: 'class_skill', ordinal: 1, skill: 'arcana' },
+      { ref: 1, grantKey: 'background_skill', ordinal: 1, skill: 'religion' },
+    ]);
+
+    const target = await database();
+    seedProvenanceClasses(target);
+    const imported = importCharacterShare(target, document);
+
+    // NOT MERELY THE SKILL TOTALS: each filled grant's `source_instance_id`
+    // must resolve, in the TARGET database, to the class/feat it actually
+    // came from.
+    const arcanaSource = target.oneRaw(
+      `SELECT source.source_type AS source_type,
+              source.source_definition_id AS source_definition_id
+       FROM character_skill_grants AS grant
+       INNER JOIN character_source_instances AS source
+         ON source.id = grant.source_instance_id
+       WHERE grant.character_id = ? AND grant.skill = 'arcana'`,
+      [imported.characterId],
+    );
+    expect(arcanaSource).toEqual({
+      source_type: 'class',
+      source_definition_id: catalog.wizardId,
+    });
+
+    const religionSource = target.oneRaw(
+      `SELECT source.source_type AS source_type,
+              source.source_definition_id AS source_definition_id
+       FROM character_skill_grants AS grant
+       INNER JOIN character_source_instances AS source
+         ON source.id = grant.source_instance_id
+       WHERE grant.character_id = ? AND grant.skill = 'religion'`,
+      [imported.characterId],
+    );
+    expect(religionSource).toEqual({
+      source_type: 'feat',
+      source_definition_id: catalog.featId,
+    });
+
+    // The removed class's skill never arrives at all.
+    expect(
+      target.scalar(
+        `SELECT count(*) FROM character_skill_grants
+         WHERE character_id = ? AND skill = 'athletics'`,
+        [imported.characterId],
+      ),
+    ).toBe(0);
+  });
+});
