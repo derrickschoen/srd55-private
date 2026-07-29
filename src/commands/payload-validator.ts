@@ -45,6 +45,7 @@ const commandTypes = [
   'set_hit_point_roll',
   'set_skill_proficiency',
   'choose_multiclass_skill',
+  'fill_skill_grant',
   'set_armor_class_adjustment',
   'restore_snapshot',
 ] as const;
@@ -790,6 +791,22 @@ function validateSetHitPointRoll(record: UnknownRecord): void {
   );
 }
 
+function validateFillSkillGrant(record: UnknownRecord): void {
+  rejectUnknown(record, ['type', 'grant_id', 'skill', 'reason']);
+  const grantId = record.grant_id;
+  if (!Number.isSafeInteger(grantId) || (grantId as number) < 1) {
+    invalid('grant_id must be a positive integer.');
+  }
+  // `null` is the pinned CLEAR (skills-with-provenance §3.3) — a defended
+  // null, not a missing field: the key must be present either way.
+  if (!hasOwn(record, 'skill')) {
+    invalid('skill must be present (a skill, or null to clear).');
+  }
+  if (record.skill !== null && !isEnumValue(skills, record.skill)) {
+    invalid('Unknown skill.');
+  }
+}
+
 function validateSetSkillProficiency(record: UnknownRecord): void {
   rejectUnknown(record, ['type', 'skill', 'proficient', 'reason']);
   if (!isEnumValue(skills, record.skill)) {
@@ -875,6 +892,9 @@ function validateByType(
       return record;
     case 'choose_multiclass_skill':
       validateChooseMulticlassSkill(record);
+      return record;
+    case 'fill_skill_grant':
+      validateFillSkillGrant(record);
       return record;
     case 'set_armor_class_adjustment':
       validateSetArmorClassAdjustment(record);

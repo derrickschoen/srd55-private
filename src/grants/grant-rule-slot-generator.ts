@@ -17,6 +17,7 @@ import {
   orphanSkillGrantsForSource,
   rebuildSkillProjection,
   syncClassSkillGrants,
+  syncSpeciesSkillGrants,
 } from './skill-grants';
 import {
   decodeGrantJson,
@@ -223,6 +224,17 @@ export class GrantRuleSlotGenerator {
       // with their selection intact. The projection is reconciled on every
       // path that changes the active grant set, this one included.
       syncClassSkillGrants(this.db, {
+        id: source.id,
+        characterId: source.characterId,
+        sourceType: source.sourceType,
+        sourceDefinitionId: source.sourceDefinitionId,
+      });
+      // THE SPECIES ARM (S-B): same sync/revive, scoped to the two SPECIES
+      // grant keys, desired set from the seam's literal plans (Elf Keen
+      // Senses, Human Skillful). A separate arm rather than a widening of the
+      // class arm's scope, so neither reconcile can orphan the other's grants
+      // — or the background producer's, which no arm owns.
+      syncSpeciesSkillGrants(this.db, {
         id: source.id,
         characterId: source.characterId,
         sourceType: source.sourceType,

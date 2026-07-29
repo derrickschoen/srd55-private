@@ -10,6 +10,7 @@ import {
   applyGuidedOrigin,
   listGuidedOriginOptions,
 } from '../../../src/builder/guided-creation';
+import { rebuildSkillProjection } from '../../../src/grants/skill-grants';
 import { CharacterSheetBuilder } from '../../../src/queries/character-sheet-builder';
 import { rpcRegistry } from '../../../src/worker/registry';
 import {
@@ -70,11 +71,26 @@ function createAdvancedCharacter(rpcHarness: RpcHarness, name: string): number {
      VALUES (?, 1, 'speed', 3, 'A5-SOURCED Effect')`,
     [characterId],
   );
+  // An ACTIVE GRANT against a real source instance, not a bare flat row: the
+  // flat table is a derived projection since S-A (§3.2), and the record-only
+  // background apply now reconciles it — a projection row with no grant
+  // behind it is exactly the stale shape S-DISTINCT rejects, so planting one
+  // would test nothing a correct implementation preserves. The subject is
+  // unchanged: a proficiency the background apply never wrote must survive
+  // the replace, and it does because its GRANT (and source) survive.
+  const sourceInstanceId = db.exec(
+    `INSERT INTO character_source_instances (
+       character_id, instance_uuid, source_type, display_name, state
+     ) VALUES (?, ?, 'feat', 'A5-SOURCED Skill Source', 'active')`,
+    [characterId, crypto.randomUUID()],
+  ).lastInsertId;
   db.exec(
-    `INSERT INTO character_skill_proficiencies (character_id, skill)
-     VALUES (?, 'arcana')`,
-    [characterId],
+    `INSERT INTO character_skill_grants (
+       character_id, source_instance_id, grant_key, ordinal, skill, state
+     ) VALUES (?, ?, 'a5-sourced-skill', 1, 'arcana', 'active')`,
+    [characterId, sourceInstanceId],
   );
+  rebuildSkillProjection(db, characterId);
   return characterId;
 }
 

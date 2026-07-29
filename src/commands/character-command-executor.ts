@@ -20,6 +20,7 @@ import type {
   RestoreSnapshotCommand,
   SetSlotCommand,
 } from '../domain/command-contracts';
+import { isEnumValue, skills } from '../domain/enums';
 import type { JsonObject } from '../domain/models';
 import {
   CharacterAuditLog,
@@ -386,6 +387,32 @@ export class CharacterCommandExecutor {
         };
       case 'acknowledge_warning':
         return this.warningInverse(characterId, payload, before);
+      // The PRECISE inverse: the same command with the selection the write
+      // displaces, read from the before-snapshot (`character_skill_grants` is
+      // snapshot-scoped since a7-v9) — so undo of a fill is a clear, undo of
+      // a clear restores the fill, and undoing a skill choice cannot disturb
+      // anything else. A grant absent from the snapshot echoes the payload
+      // provisionally, exactly like the sheet-input commands: `apply()` will
+      // refuse with the named `grant_not_found` and nothing is ever stored.
+      case 'fill_skill_grant': {
+        const grant = before.character_skill_grants.find(
+          (row) => Number(row.id) === payload.grant_id,
+        );
+        if (grant === undefined) {
+          return payload;
+        }
+        const prior = grant.skill;
+        if (prior !== null && !isEnumValue(skills, prior)) {
+          // Unreachable past the schema CHECK; a throw beats storing an
+          // inverse that would "restore" a value the vocabulary rejects.
+          throw new TypeError(`Unknown stored skill '${String(prior)}'.`);
+        }
+        return {
+          type: 'fill_skill_grant',
+          grant_id: payload.grant_id,
+          skill: prior,
+        };
+      }
       case 'add_weapon':
       case 'update_weapon':
       case 'remove_weapon':

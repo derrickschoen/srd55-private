@@ -670,7 +670,11 @@ describe('bundled species definition seed', () => {
          ORDER BY content_key`,
       ),
     ).toEqual(before);
-    expect(before).toHaveLength(LINEAGE_SPELL_SPECIES_CONTENT_KEYS.size);
+    // The three lineage species, plus Human — whose definition row exists so
+    // the guided apply can mint the species source instance the Skillful
+    // skill grant hangs on (skills-with-provenance §3.4, dispatch S-B). Its
+    // empty grant_rules keep the summed rule count below unchanged.
+    expect(before).toHaveLength(LINEAGE_SPELL_SPECIES_CONTENT_KEYS.size + 1);
     expect(
       db.scalar(
         `SELECT sum(json_array_length(grant_rules))

@@ -266,6 +266,20 @@ export interface ChooseMulticlassSkillCommand extends CommandBase {
   skill: Skill;
 }
 
+/**
+ * Fill — or, with `skill: null`, CLEAR — one ADDRESSED skill grant
+ * (skills-with-provenance §3.3/§3.6). The locator is the grant's own stable
+ * id, never "whichever grant is unfilled": with two entered classes whose
+ * pools overlap, the addressed grant is what makes the provenance right, not
+ * merely the totals. Its inverse is the same command with the displaced
+ * selection, so undo of a fill is a clear and undo of a clear is the fill.
+ */
+export interface FillSkillGrantCommand extends CommandBase {
+  type: 'fill_skill_grant';
+  grant_id: number;
+  skill: Skill | null;
+}
+
 /** D12's escape hatch: a signed adjustment and the reason for it. */
 export interface SetArmorClassAdjustmentCommand extends CommandBase {
   type: 'set_armor_class_adjustment';
@@ -297,6 +311,7 @@ export type CharacterCommandPayload =
   | SetHitPointRollCommand
   | SetSkillProficiencyCommand
   | ChooseMulticlassSkillCommand
+  | FillSkillGrantCommand
   | SetArmorClassAdjustmentCommand
   | RestoreSnapshotCommand;
 

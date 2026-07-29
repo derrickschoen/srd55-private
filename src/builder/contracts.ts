@@ -11,6 +11,7 @@
  * — the plan records why.
  */
 
+import { isEnumValue, skills } from '../domain/enums';
 import type { Ability, Skill, SkillGrantState } from '../domain/enums';
 import { BUNDLED_ORIGIN_RULES_EDITION } from '../rules/origins-srd';
 
@@ -355,6 +356,8 @@ export const GUIDED_RPC = Object.freeze({
   applyOrigin: 'queries.characters.applyOrigin',
   buildState: 'queries.characters.buildState',
   allocateAbilities: 'queries.characters.allocateAbilities',
+  /** The skills step's fill/clear command (S-B, §3.6), riding the executor. */
+  fillSkillGrant: 'queries.characters.fillSkillGrant',
 } as const);
 
 /* --------------------------------------------------------------- abilities */
@@ -695,6 +698,143 @@ export const SKILL_GRANTS_MODULE = 'src/grants/skill-grants.ts';
  * because the wire registry owns its own error vocabulary.
  */
 export const SKILL_GRANTS_SHARE_WIRE_VERSION = 5;
+
+/* --------------------------------- skill producers (S-B, offered for ratification) */
+
+/**
+ * THE S-B ADDITIONS — the producers and the fill command
+ * (`docs/design/2026-07-29-skills-with-provenance.md` §3.3/§3.6/§4 S-B).
+ * The values below are the S-B implementer's, OFFERED FOR RATIFICATION on the
+ * same direction every earlier dispatch used: pinned here before more tests
+ * are written, reported rather than silently chosen for both sides.
+ */
+
+/**
+ * The two grant keys the GENERATOR's species arm owns and reconciles —
+ * `syncSpeciesSkillGrants` in `SKILL_GRANTS_MODULE`, scoped exactly as the
+ * class arm is scoped to `CLASS_SKILL_GRANT_KEYS`, so neither arm's
+ * reconcile can orphan the other's grants (or the background producer's).
+ */
+export const SPECIES_SKILL_GRANT_KEYS = [
+  SKILL_GRANT_KEYS.speciesKeenSenses,
+  SKILL_GRANT_KEYS.speciesSkillful,
+] as const;
+
+/**
+ * What one species is entitled to grant, keyed by `species_definitions`
+ * content key. A LITERAL MAP, NOT AN INFERENCE — the trait text ("You have
+ * proficiency in the Insight, Perception, or Survival skill") is prose, and
+ * sniffing it would let two agents each invent their own pool. The two
+ * entries are the two species D63 names and §3.4 scopes:
+ *
+ *  - Elf, Keen Senses: ONE choice from a printed three-way pool
+ *    (`docs/srd/source/species-descriptions.txt`, the Keen Senses trait);
+ *  - Human, Skillful: ONE choice from any skill ("one skill of your
+ *    choice"), represented as `'any_skill'` rather than a copied-out
+ *    eighteen so the pool cannot drift from the `skills` vocabulary.
+ *
+ * The grants are minted UNFILLED by the generator when the species source is
+ * created (§3.8 pins the generator, not a command on demand) and revive on
+ * reactivation exactly as class grants do.
+ */
+export interface SpeciesSkillGrantPlan {
+  readonly grant_key: (typeof SPECIES_SKILL_GRANT_KEYS)[number];
+  readonly count: number;
+  readonly pool: readonly Skill[] | 'any_skill';
+}
+
+export const SPECIES_SKILL_GRANT_PLANS: Readonly<
+  Record<string, SpeciesSkillGrantPlan>
+> = Object.freeze({
+  [`${BUNDLED_ORIGIN_RULES_EDITION}:species:elf`]: {
+    grant_key: SKILL_GRANT_KEYS.speciesKeenSenses,
+    count: 1,
+    pool: ['insight', 'perception', 'survival'],
+  },
+  [`${BUNDLED_ORIGIN_RULES_EDITION}:species:human`]: {
+    grant_key: SKILL_GRANT_KEYS.speciesSkillful,
+    count: 1,
+    pool: 'any_skill',
+  },
+});
+
+/**
+ * §3.6's refusal reasons, a SEPARATE union from `GuidedRefusalReason`: these
+ * are skill-grant refusals with their own data shape (the conflicting skill),
+ * raised by the fill command and by the background producer's §3.3 collision
+ * check, and carried by `SkillGrantRefusal` in `SKILL_GRANTS_MODULE`.
+ */
+export type SkillGrantRefusalReason =
+  | 'skill_not_in_pool'
+  | 'grant_not_found'
+  | 'grant_already_filled'
+  | 'skill_already_held';
+
+/**
+ * The wire data of a skill-grant refusal. §3.3 pins that `skill_already_held`
+ * NAMES the conflicting skill so the step can offer to clear it; `skill` is
+ * null where no particular skill is at issue (`grant_not_found`).
+ */
+export interface SkillGrantRefusalData {
+  readonly reason: SkillGrantRefusalReason;
+  readonly skill: Skill | null;
+}
+
+/**
+ * THE FILL COMMAND'S PARAMS (§3.6): the grant's own stable id is the locator
+ * — an addressed grant, never "whichever grant happens to be unfilled", which
+ * is §5's second trap. `skill: null` is the pinned CLEAR (§3.3: refusing the
+ * background collision is right only because unfilling is possible).
+ * `operation_uuid` and `expected_revision` are required because the request
+ * rides the command executor, exactly as B1's allocation does.
+ */
+export interface GuidedFillSkillGrantParams {
+  readonly character_id: number;
+  readonly grant_id: number;
+  readonly skill: Skill | null;
+  readonly operation_uuid: string;
+  readonly expected_revision: number;
+}
+
+/** The result: the updated build position, `allocateAbilities`'s shape. */
+export interface GuidedFillSkillGrantResult {
+  readonly character_id: number;
+  readonly current_step: BuildStep;
+}
+
+/** §3.6's exact-keys validator for the fill params. */
+export function isGuidedFillSkillGrantParams(
+  value: unknown,
+): value is GuidedFillSkillGrantParams {
+  if (
+    !hasExactKeys(value, [
+      'character_id',
+      'grant_id',
+      'skill',
+      'operation_uuid',
+      'expected_revision',
+    ])
+  ) {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  const skill = candidate['skill'];
+  const expectedRevision = candidate['expected_revision'];
+  return (
+    typeof candidate['character_id'] === 'number' &&
+    Number.isInteger(candidate['character_id']) &&
+    candidate['character_id'] > 0 &&
+    typeof candidate['grant_id'] === 'number' &&
+    Number.isInteger(candidate['grant_id']) &&
+    candidate['grant_id'] > 0 &&
+    (skill === null || isEnumValue(skills, skill)) &&
+    typeof candidate['operation_uuid'] === 'string' &&
+    candidate['operation_uuid'].length > 0 &&
+    typeof expectedRevision === 'number' &&
+    Number.isInteger(expectedRevision) &&
+    expectedRevision >= 0
+  );
+}
 
 /* ------------------------------------------ background choices (B3, ratified) */
 
