@@ -218,6 +218,15 @@ This is not hypothetical here: it is what the planner input does today.
 - **L-SUBCLASS** — same layer rule: a **structured refusal before the
   transaction**, matching E-B's precedent, not a greyed-out button. Mutate the
   refusal away; level 3 with a null subclass must fail.
+- **L-ASI-LEVELS** *(new)* — **§5 pinned that ASI levels are read from the data
+  and then no control guarded it**, which is the same shape as §5's own
+  complaint. Mutate the source back to a hardcoded `[4]`. Must fail: a level-up
+  to **6** still requires an increase. Fixture must use a level other than 4 or
+  the mutation is unobservable.
+- **L-ADJACENT** *(new)* — mutate away the non-adjacent-level refusal. Must fail:
+  levelling 2 → 7 in one command is refused by name. §8b named this refusal and
+  revision 3 gave it neither a control nor an owner; both orphans are now L-A's,
+  stated in §9.
 - **L-PERSIST** — reload after levelling: level, method and value all survive,
   asserted from disk.
 
@@ -230,8 +239,21 @@ before either is cut, in `src/builder/contracts.ts`:
 
 - **ONE command, ONE payload**, not three. It carries: the class source being
   levelled, the target level, the hit-point `{ method, value }`, the subclass
-  content key **when the new level is 3**, and the ability increase **when the
+  content key **when the new level is 3**, and the ability increases **when the
   new level is an ASI level**. One transaction, one inverse, one refusal set.
+- **The increases field is a LIST, not one increase** — pinned because revision 3
+  wrote it singular and a reviewer caught that the existing machinery disagrees:
+  `guided-creation.ts:1584` iterates `for (const increase of params.increases)`.
+  SRD 2024 ASI is **+2 to one ability or +1 to two**, so the shape is an array of
+  one or two `{ ability, amount }`. A singular field cannot express the +1/+1
+  arm, and inventing the shape per dispatch is what this section exists to
+  prevent.
+- **Where the seam lives.** `src/builder/contracts.ts` is scoped to the level-ONE
+  creation wizard and says so in its own header. Levelling 2..20 is a different
+  feature. Follow the **ratified-by-re-export** path this file already uses for
+  B3 and E-B: the values are declared in their own module and re-exported from
+  `contracts.ts`, so there is one import point without pretending level-up is a
+  creation step.
 - **The refusal reasons, as strings**: a class the character does not have, a
   level 3 with no subclass, an ASI level with no increase, a non-adjacent target
   level. Named in the seam, not invented per dispatch.
@@ -273,7 +295,10 @@ word:
   level-and-row single transaction, the command-layer guards from L-STRAIGHT and
   L-SUBCLASS, row contracts, snapshot/backup/wire carry.
 - **L-B — the screen.** The level-up screen, the hit-point choice defaulting to
-  fixed, the subclass choice at 3, the level-4 increase, the sheet's derivation
+  fixed, the subclass choice at 3, **the increase at every ASI level the seeded
+  data names** (§5 — this line said "the level-4 increase" through revision 3,
+  contradicting the correction two sections above it; the third plan in a row
+  where a reversal left stale text behind), the sheet's derivation
   and its unknown disclosure, and **retiring the planner's level input**.
 
 ## 10. NOT in this unit
