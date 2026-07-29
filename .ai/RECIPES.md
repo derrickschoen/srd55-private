@@ -146,7 +146,7 @@ Nothing will tell you. Add it to each path by hand.
 ### The old-payload test is the one people skip
 
 A link or backup minted before your column must still import. The mechanism is
-in `tests/unit/sharing/codec.test.ts`: `PRE_SHEET_WIRE` (`:1380`) — the frozen
+in `tests/unit/sharing/codec.test.ts`: `PRE_SHEET_WIRE` (`:1637`) — the frozen
 pre-sheet-inputs wire tuple is asserted to be THIRTEEN elements, so regenerating
 that literal from current code (which would make it fourteen) fails loudly
 instead of letting the suite quietly test the new format against itself. And a

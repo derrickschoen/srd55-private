@@ -14,6 +14,11 @@ import {
   type CharacterShareDocument,
   validateShareDocument,
 } from '../../../src/sharing/schema';
+import {
+  MIGRATIONS,
+  SHARE_SCHEMAS,
+  ShareWireRetirementError,
+} from '../../../src/sharing/wire-schemas';
 
 const complete: CharacterShareDocument = {
   format: CHARACTER_SHARE_FORMAT,
@@ -243,6 +248,14 @@ const complete: CharacterShareDocument = {
   ],
   skillProficiencies: ['arcana', 'perception'],
   sheetAdjustment: { value: 3, note: 'Ring of Protection, house ruled.' },
+  // THE V5 SECTION (S-A, skills-with-provenance): one FILLED class grant and
+  // one UNFILLED one, so the wire pin below sees a real value in the skill
+  // slot AND proves the null/absent selection survives. `ref: 0` is
+  // `classes[0].id` — the same reference space `selections[].ref` uses.
+  skillGrants: [
+    { ref: 0, grantKey: 'class_skill', ordinal: 1, skill: 'arcana' },
+    { ref: 0, grantKey: 'class_skill', ordinal: 2 },
+  ],
 };
 
 async function arbitraryFragment(value: unknown): Promise<string> {
@@ -323,6 +336,188 @@ function deterministicNoise(length: number): string {
     result += String.fromCharCode(33 + ((state >>> 0) % 90));
   }
   return result;
+}
+
+/**
+ * RETARGETING HELPERS FOR THE RETIREMENT (D60, skills plan §3.2).
+ *
+ * `positionalToShareDocument`/`decodeShareFragment` now throw
+ * `ShareWireRetirementError` for every pre-v5 wire — deliberately, per the
+ * v4→v5 migration in `src/sharing/wire-schemas/index.ts`. Every fixture below
+ * that used to assert a FULL decoded document from a v1-v4 wire has a
+ * two-part surviving subject: (a) the composed path refuses it BY NAME, and
+ * (b) the actual migration/validation behaviour the fixture was pinning is
+ * still real, unretired production code, reachable by composing the
+ * exported adjacent `MIGRATIONS` up to (but not including) the deliberate
+ * v4→v5 throw. These helpers exercise (b) directly, independent of
+ * `positionalToShareDocument`.
+ */
+
+/** Raw fragment → raw positional array, independent of `decodeShareFragment` (which now throws for every pre-v5 version). */
+function rawPositionalFromFragment(fragment: string): unknown {
+  return JSON.parse(
+    new TextDecoder().decode(gunzipSync(independentBase64urlDecode(fragment))),
+  ) as unknown;
+}
+
+/** Composes the SAME adjacent migrations the codec uses, stopping one step short of the deliberate v4→v5 retirement throw. */
+function migrateV1WireToV4(wire: unknown): unknown {
+  return MIGRATIONS[3](MIGRATIONS[2](MIGRATIONS[1](wire)));
+}
+
+interface StructuralTupleSchema {
+  readonly arities: readonly number[];
+  readonly fields: readonly { readonly key: string }[];
+}
+interface StructuralVariantSchema {
+  readonly variants: readonly {
+    readonly arity: number;
+    readonly fields: readonly { readonly key: string }[];
+  }[];
+}
+
+/** Decodes a single-shape tuple positionally, by field NAME rather than index — reused from the same pattern in `wire-schema-registry.test.ts`. */
+function decodeStructural(
+  value: unknown,
+  schema: StructuralTupleSchema,
+  label: string,
+): Record<string, unknown> {
+  if (!Array.isArray(value) || !schema.arities.includes(value.length)) {
+    throw new Error(
+      `${label} did not parse against its frozen schema (arity ${
+        Array.isArray(value) ? value.length : typeof value
+      }, expected one of ${schema.arities.join(', ')}).`,
+    );
+  }
+  const record: Record<string, unknown> = {};
+  schema.fields.forEach((field, index) => {
+    record[field.key] = value[index] ?? null;
+  });
+  return record;
+}
+
+/** As `decodeStructural`, for a tuple whose SHAPE varies by arity (weapon, damage). */
+function decodeVariant(
+  value: unknown,
+  schema: StructuralVariantSchema,
+  label: string,
+): Record<string, unknown> {
+  if (!Array.isArray(value)) {
+    throw new Error(`${label} must be a tuple.`);
+  }
+  const variant = schema.variants.find(
+    (candidate) => candidate.arity === value.length,
+  );
+  if (!variant) {
+    throw new Error(`${label} has an unrecognised arity ${value.length}.`);
+  }
+  const record: Record<string, unknown> = {};
+  variant.fields.forEach((field, index) => {
+    record[field.key] = value[index] ?? null;
+  });
+  return record;
+}
+
+/**
+ * A migrated weapon range wire tuple, decoded positionally. `rangeToWire` in
+ * `src/sharing/wire-schemas/index.ts` writes `[kind, near_feet, far_feet]` for
+ * BOTH the `ranged` and `legacy` limbs — the wire schema's field labels
+ * ('near'/'far' vs 'normal'/'long') are documentation only, not a positional
+ * difference — so one positional reader covers every kind.
+ */
+function decodeMigratedWeaponRange(tuple: unknown): unknown {
+  if (!Array.isArray(tuple)) {
+    throw new Error('migrated weapon range must be a tuple.');
+  }
+  if (tuple.length === 1) {
+    return { kind: tuple[0] };
+  }
+  if (tuple.length === 3) {
+    return {
+      kind: tuple[0],
+      near_feet: tuple[1] ?? null,
+      far_feet: tuple[2] ?? null,
+    };
+  }
+  throw new Error(`migrated weapon range has an unexpected arity ${tuple.length}.`);
+}
+
+/** A migrated damage/versatile_damage wire tuple, mapped to the domain shape (`{kind:'dice',dice}`, not the wire's generic `{kind,payload}`). */
+function decodeMigratedDamage(tuple: unknown, label: string): unknown {
+  const decoded = decodeVariant(tuple, SHARE_SCHEMAS[4].tuples.damage, label);
+  switch (decoded.kind) {
+    case 'dice':
+      return { kind: 'dice', dice: decoded.payload };
+    case 'flat':
+      return { kind: 'flat', amount: decoded.payload };
+    case 'custom':
+      return { kind: 'custom', text: decoded.payload };
+    default:
+      return { kind: decoded.kind };
+  }
+}
+
+/** The subset of a migrated weapon tuple's fields these fixtures actually assert on. */
+function decodeMigratedWeapon(tuple: unknown): {
+  readonly name: unknown;
+  readonly damage: unknown;
+  readonly versatile_damage: unknown;
+  readonly range: unknown;
+} {
+  const record = decodeVariant(
+    tuple,
+    SHARE_SCHEMAS[4].tuples.weapon,
+    'migrated weapon',
+  );
+  return {
+    name: record.name,
+    damage: decodeMigratedDamage(record.damage, 'migrated weapon.damage'),
+    versatile_damage: decodeMigratedDamage(
+      record.versatile_damage,
+      'migrated weapon.versatile_damage',
+    ),
+    range: decodeMigratedWeaponRange(record.range),
+  };
+}
+
+/** The migrated `origin` tuple's three slots, each null when absent — exactly `decodeCurrentWire`'s own absence rule, applied one schema version early. */
+function decodeMigratedOrigin(tuple: unknown): {
+  readonly species: Record<string, unknown> | null;
+  readonly speciesTraits: readonly Record<string, unknown>[] | null;
+  readonly background: Record<string, unknown> | null;
+} {
+  const origin = decodeStructural(
+    tuple,
+    SHARE_SCHEMAS[4].tuples.origin,
+    'migrated origin',
+  );
+  const species =
+    origin.species === null
+      ? null
+      : decodeStructural(
+          origin.species,
+          SHARE_SCHEMAS[4].tuples.species,
+          'migrated species',
+        );
+  const speciesTraits =
+    origin.speciesTraits === null
+      ? null
+      : (origin.speciesTraits as unknown[]).map((trait) =>
+          decodeStructural(
+            trait,
+            SHARE_SCHEMAS[4].tuples.speciesTrait,
+            'migrated species trait',
+          )
+        );
+  const background =
+    origin.background === null
+      ? null
+      : decodeStructural(
+          origin.background,
+          SHARE_SCHEMAS[4].tuples.background,
+          'migrated background',
+        );
+  return { species, speciesTraits, background };
 }
 
 const COMPLETE_V1_WIRE = [
@@ -611,94 +806,130 @@ const COMPLETE_V1_WIRE = [
       ],
     ] as const;
 
+/**
+ * THE COMPLETE DOCUMENT, RE-EXPRESSED AT V5 (plan §3.2/§3.6, D60).
+ *
+ * `COMPLETE_V1_WIRE` above is now RETIRED — the composed decode path throws
+ * `ShareWireRetirementError` for every pre-v5 version, by design. Its own
+ * test below is retargeted to prove exactly that, BY NAME.
+ *
+ * The subject `COMPLETE_V1_WIRE` and the old "version-4 golden" test actually
+ * served — that a fully-populated wire tuple decodes/encodes losslessly,
+ * position by position — still holds, just one version later. This is built
+ * the SAME way the old version-4 golden was: the positions unaffected by any
+ * version bump are SLICED directly from the hand-authored v1 literal, and
+ * only the positions that actually changed (the character tuple's appended
+ * method slot, the weapon tuples' typed range, the effect tuples' appended
+ * ability_increase payload, and the new trailing `skillGrants` root element)
+ * are written out by hand. Nothing here is produced by
+ * `shareDocumentToPositional` — that would make this test circular.
+ */
+const COMPLETE_V5_WIRE = [
+  'dnd-multiclass-spells-character-share',
+  5,
+  [
+    'Mira',
+    8,
+    14,
+    13,
+    18,
+    12,
+    10,
+    4,
+    '2014',
+    true,
+    'Retired the staff after Waterdeep.', null,
+  ],
+  COMPLETE_V1_WIRE[3],
+  COMPLETE_V1_WIRE[4],
+  COMPLETE_V1_WIRE[5],
+  COMPLETE_V1_WIRE[6],
+  COMPLETE_V1_WIRE[7],
+  COMPLETE_V1_WIRE[8],
+  COMPLETE_V1_WIRE[9],
+  COMPLETE_V1_WIRE[10],
+  [
+    [
+      'Dagger of Warning',
+      null,
+      'Piercing',
+      null,
+      'bolt',
+      ['ranged', 20, 60],
+      'Nick',
+      'Silvered; hums near goblins',
+      'Taken from the barrow.',
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      'simple',
+      ['dice', '1d4'],
+      ['dice', '1d6'],
+    ],
+    [
+      'Unfinished club',
+      null,
+      null,
+      null,
+      null,
+      ['none'],
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      ['not_recorded'],
+      ['not_applicable'],
+    ],
+  ],
+  COMPLETE_V1_WIRE[12],
+  COMPLETE_V1_WIRE[13],
+  COMPLETE_V1_WIRE[14].map((effect) => [...effect, null, null, null]),
+  [[
+    '2024:com.example.spells:starward-aegis',
+    'Starward Aegis',
+  ]],
+  // Element 16: the S-A skillGrants section. One FILLED class grant, one
+  // UNFILLED — the null selection is the defended value the table exists
+  // for, and it must survive the wire as an absent field, not a crash.
+  [
+    [0, 'class_skill', 1, 'arcana'],
+    [0, 'class_skill', 2, null],
+  ],
+];
+
 describe('character-share positional codec', () => {
-  it('keeps the hand-authored complete version-1 positional golden readable', () => {
-    expect(positionalToShareDocument(COMPLETE_V1_WIRE)).toEqual(complete);
+  it('refuses the hand-authored complete version-1 positional golden BY NAME', () => {
+    // D60: pre-v5 documents are RETIRED, not migrated. This fixture stays
+    // frozen and unmodified — the point is that reaching this exact,
+    // deliberate error proves every v1-v4 tuple check and migration still ran
+    // underneath, rather than the codec breaking earlier for an unrelated
+    // reason.
+    expect(() => positionalToShareDocument(COMPLETE_V1_WIRE)).toThrow(
+      ShareWireRetirementError,
+    );
   });
 
-  it('pins the hand-authored complete version-4 wire layout element by element', () => {
-    const version4Golden = [
-      'dnd-multiclass-spells-character-share',
-      4,
-      [
-        'Mira',
-        8,
-        14,
-        13,
-        18,
-        12,
-        10,
-        4,
-        '2014',
-        true,
-        'Retired the staff after Waterdeep.', null,
-      ],
-      COMPLETE_V1_WIRE[3],
-      COMPLETE_V1_WIRE[4],
-      COMPLETE_V1_WIRE[5],
-      COMPLETE_V1_WIRE[6],
-      COMPLETE_V1_WIRE[7],
-      COMPLETE_V1_WIRE[8],
-      COMPLETE_V1_WIRE[9],
-      COMPLETE_V1_WIRE[10],
-      [
-        [
-          'Dagger of Warning',
-          null,
-          'Piercing',
-          null,
-          'bolt',
-          ['ranged', 20, 60],
-          'Nick',
-          'Silvered; hums near goblins',
-          'Taken from the barrow.',
-          true,
-          true,
-          true,
-          true,
-          true,
-          true,
-          true,
-          true,
-          true,
-          'simple',
-          ['dice', '1d4'],
-          ['dice', '1d6'],
-        ],
-        [
-          'Unfinished club',
-          null,
-          null,
-          null,
-          null,
-          ['none'],
-          null,
-          null,
-          null,
-          null,
-          null,
-          null,
-          null,
-          null,
-          null,
-          null,
-          null,
-          null,
-          null,
-          ['not_recorded'],
-          ['not_applicable'],
-        ],
-      ],
-      COMPLETE_V1_WIRE[12],
-      COMPLETE_V1_WIRE[13],
-      COMPLETE_V1_WIRE[14].map((effect) => [...effect, null, null, null]),
-      [[
-        '2024:com.example.spells:starward-aegis',
-        'Starward Aegis',
-      ]],
-    ];
+  it('keeps a hand-authored complete version-5 positional golden readable', () => {
+    expect(positionalToShareDocument(COMPLETE_V5_WIRE)).toEqual(complete);
+  });
 
-    expect(shareDocumentToPositional(complete)).toEqual(version4Golden);
+  it('pins the hand-authored complete version-5 wire layout element by element', () => {
+    expect(shareDocumentToPositional(complete)).toEqual(COMPLETE_V5_WIRE);
   });
 
   it('round-trips object, positional, gzip, and base64url forms', async () => {
@@ -840,7 +1071,7 @@ describe('character-share positional codec', () => {
     const positional = shareDocumentToPositional(minimal);
     expect(positional).toEqual([
       'dnd-multiclass-spells-character-share',
-      4,
+      5,
       [
         'Ten',
         null,
@@ -895,8 +1126,12 @@ describe('character-share positional codec', () => {
       null,
       // Element 15: placeholders moved out of the character tuple in v2.
       null,
+      // Element 16: the S-A skillGrants section (v5). `null`, not `[]`, on
+      // the same terms as every other always-written, absent-decodes-to-
+      // absent-key section above.
+      null,
     ]);
-    expect(positional).toHaveLength(16);
+    expect(positional).toHaveLength(17);
     expect((positional[2] as unknown[]).length).toBe(12);
     expect((positional[3] as unknown[][])[0]).toHaveLength(8);
     expect((positional[4] as unknown[][])[0]).toHaveLength(6);
@@ -911,6 +1146,7 @@ describe('character-share positional codec', () => {
     expect(minimal).not.toHaveProperty('skillProficiencies');
     expect(minimal).not.toHaveProperty('sheetAdjustment');
     expect(minimal).not.toHaveProperty('effects');
+    expect(minimal).not.toHaveProperty('skillGrants');
     await expect(
       decodeShareFragment(await encodeShareFragment(minimal)),
     ).resolves.toEqual(minimal);
@@ -1135,36 +1371,35 @@ describe('a share link generated before weapon damage became a union', () => {
     expect(decodedWire).toEqual(PRE_DAMAGE_UNION_WIRE);
   });
 
-  it('migrates every old primary and versatile damage state losslessly', async () => {
-    const decoded = await decodeShareFragment(PRE_DAMAGE_UNION_FRAGMENT);
-    expect(decoded.weapons).toEqual([
-      {
-        name: 'Parseable Spear',
-        proficiency_category: 'simple',
-        damage: { kind: 'dice', dice: '1d6' },
-        versatile_damage: { kind: 'dice', dice: '1d8' },
-        range: { kind: 'none' },
-      },
-      {
-        name: 'Homebrew Blade',
-        proficiency_category: 'martial',
-        damage: {
-          kind: 'custom',
-          text: 'the table decides: 2 × level',
-        },
-        versatile_damage: {
-          kind: 'custom',
-          text: 'double proficiency, no rounding',
-        },
-        range: { kind: 'none' },
-      },
-      {
-        name: 'Unfinished Club',
-        proficiency_category: 'simple',
-        damage: { kind: 'not_recorded' },
-        versatile_damage: { kind: 'not_applicable' },
-        range: { kind: 'none' },
-      },
+  it('refuses the fragment BY NAME — pre-v5 links are retired, not migrated (D60)', async () => {
+    await expect(
+      decodeShareFragment(PRE_DAMAGE_UNION_FRAGMENT),
+    ).rejects.toThrow(ShareWireRetirementError);
+  });
+
+  it('migrates every old primary and versatile damage state losslessly', () => {
+    // The composed decode now refuses every pre-v5 link (above), but the
+    // v1→v2 damage/range conversion this fixture exists to pin is still real,
+    // unretired production code — reachable one step short of the deliberate
+    // v4→v5 throw. Weapon field positions per `WIRE_SCHEMA_V2`: `range` is
+    // index 5, `damage` is index 19, `versatile_damage` is index 20.
+    const rawWire = rawPositionalFromFragment(PRE_DAMAGE_UNION_FRAGMENT);
+    const migratedRoot = MIGRATIONS[1](rawWire) as unknown[];
+    const weapons = migratedRoot[11] as unknown[][];
+    expect(weapons.map((weapon) => weapon[19])).toEqual([
+      ['dice', '1d6'],
+      ['custom', 'the table decides: 2 × level'],
+      ['not_recorded'],
+    ]);
+    expect(weapons.map((weapon) => weapon[20])).toEqual([
+      ['dice', '1d8'],
+      ['custom', 'double proficiency, no rounding'],
+      ['not_applicable'],
+    ]);
+    expect(weapons.map((weapon) => weapon[5])).toEqual([
+      ['none'],
+      ['none'],
+      ['none'],
     ]);
   });
 });
@@ -1241,18 +1476,32 @@ const V1_RANGE_BOUNDARY_FRAGMENTS = [
 
 describe('the adjacent v1-to-v2 migration', () => {
   it.each(V1_RANGE_FRAGMENTS)(
-    'carries the hand-authored %s v1 range fragment losslessly',
+    'refuses the %s v1 range fragment BY NAME, though its frozen v1→v2 migration still classifies it losslessly',
     async (_name, fragment, expectedRange) => {
-      const decoded = await decodeShareFragment(fragment);
-      expect(decoded.weapons?.[0]?.range).toEqual(expectedRange);
+      // (a) D60: the composed path refuses every pre-v5 link, by name.
+      await expect(decodeShareFragment(fragment)).rejects.toThrow(
+        ShareWireRetirementError,
+      );
+      // (b) The actual v1→v2 range conversion this fixture pins is still
+      // real, unretired production code — reachable one step short of the
+      // deliberate v4→v5 throw.
+      const rawWire = rawPositionalFromFragment(fragment);
+      const migratedRoot = MIGRATIONS[1](rawWire) as unknown[];
+      const weapons = migratedRoot[11] as unknown[][];
+      expect(decodeMigratedWeaponRange(weapons[0]?.[5])).toEqual(expectedRange);
     },
   );
 
   it.each(V1_RANGE_BOUNDARY_FRAGMENTS)(
-    'classifies the hand-authored v1 %s boundary losslessly',
+    'refuses the v1 %s boundary fragment BY NAME, though its frozen v1→v2 migration still classifies it losslessly',
     async (_name, fragment, expectedRange) => {
-      const decoded = await decodeShareFragment(fragment);
-      expect(decoded.weapons?.[0]?.range).toEqual(expectedRange);
+      await expect(decodeShareFragment(fragment)).rejects.toThrow(
+        ShareWireRetirementError,
+      );
+      const rawWire = rawPositionalFromFragment(fragment);
+      const migratedRoot = MIGRATIONS[1](rawWire) as unknown[];
+      const weapons = migratedRoot[11] as unknown[][];
+      expect(decodeMigratedWeaponRange(weapons[0]?.[5])).toEqual(expectedRange);
     },
   );
 
@@ -1280,12 +1529,19 @@ describe('the adjacent v1-to-v2 migration', () => {
     );
   });
 
-  it('enforces the placeholder cap at the v2 root position', () => {
+  it('enforces the placeholder cap at the v5 root position', () => {
+    // Retargeted to v5 (D60): a v2-tagged document now hits the deliberate
+    // v4→v5 retirement throw before `decodeCurrentWire`'s own list-limit
+    // check ever runs, so the cap can only be exercised, honestly, through a
+    // document the composed path does not refuse. The cap check itself is
+    // unmoved, unweakened production code (`assertListLimit`); only the
+    // fixture's version tag changes.
     const hostile = [
       CHARACTER_SHARE_FORMAT,
-      2,
+      5,
       [
         'Hostile placeholders',
+        null,
         null,
         null,
         null,
@@ -1316,6 +1572,7 @@ describe('the adjacent v1-to-v2 migration', () => {
           `Placeholder ${String(index)}`,
         ],
       ),
+      null,
     ];
 
     expect(() => positionalToShareDocument(hostile)).toThrow(
@@ -1415,43 +1672,67 @@ describe('a share link generated before the sheet inputs travelled', () => {
     expect(decodedWire).toEqual(PRE_SHEET_WIRE);
   });
 
-  it('still decodes, with no sheet section at all', async () => {
-    const decoded = await decodeShareFragment(PRE_SHEET_FRAGMENT);
-    expect(decoded.character.name).toBe('Pre-Sheet Hero');
-    expect(decoded.classes[0]?.classKey).toBe('2024:class:fighter');
+  it('refuses the fragment BY NAME, though it still migrates with no sheet section at all', async () => {
+    // (a) D60: refused, by name.
+    await expect(decodeShareFragment(PRE_SHEET_FRAGMENT)).rejects.toThrow(
+      ShareWireRetirementError,
+    );
+    // (b) The claim this fixture pins — the sections that existed when this
+    // link was minted still arrive, and the sections that did not stay
+    // ABSENT rather than becoming empty — is still true of the frozen
+    // migration chain, one step short of the deliberate v4→v5 throw.
+    const migratedRoot = migrateV1WireToV4(
+      rawPositionalFromFragment(PRE_SHEET_FRAGMENT),
+    ) as unknown[];
+    const root = decodeStructural(
+      migratedRoot,
+      SHARE_SCHEMAS[4].tuples.root,
+      'migrated root',
+    );
+    const character = decodeStructural(
+      root.character,
+      SHARE_SCHEMAS[4].tuples.character,
+      'migrated character',
+    );
+    expect(character.name).toBe('Pre-Sheet Hero');
+    const classes = (root.classes as unknown[]).map((row) =>
+      decodeStructural(row, SHARE_SCHEMAS[4].tuples.class, 'migrated class')
+    );
+    expect(classes[0]?.classKey).toBe('2024:class:fighter');
     // The sections that DID exist when this link was minted still arrive.
-    expect(decoded.weapons?.[0]?.name).toBe('Handaxe');
-    expect(decoded.weapons?.[0]?.damage).toEqual({
-      kind: 'dice',
-      dice: '1d6',
-    });
-    expect(decoded.weapons?.[0]?.versatile_damage).toEqual({
-      kind: 'not_applicable',
-    });
-    expect(decoded.species?.name).toBe('Dwarf');
-    expect(decoded.background?.name).toBe('Soldier');
-    // ABSENT, NOT EMPTY. The link never said anything about armour, rolls,
-    // skills or an adjustment, and an empty list would be this build putting
-    // words in its mouth.
-    for (const key of [
-      'armor',
-      'hitPointRolls',
-      'skillProficiencies',
-      'sheetAdjustment',
-    ]) {
-      expect(Object.hasOwn(decoded, key)).toBe(false);
-    }
+    const weapons = (root.weapons as unknown[]).map(decodeMigratedWeapon);
+    expect(weapons[0]?.name).toBe('Handaxe');
+    expect(weapons[0]?.damage).toEqual({ kind: 'dice', dice: '1d6' });
+    expect(weapons[0]?.versatile_damage).toEqual({ kind: 'not_applicable' });
+    const origin = decodeMigratedOrigin(root.origin);
+    expect(origin.species?.name).toBe('Dwarf');
+    expect(origin.background?.name).toBe('Soldier');
+    // ABSENT, NOT EMPTY. The link never said anything about the sheet
+    // section (armour, rolls, skills, the adjustment) — the migrated root's
+    // `sheet` slot is `null`, not a tuple of nulls.
+    expect(root.sheet).toBeNull();
   });
 
-  it('decodes identically whether or not the fourteenth element is present', async () => {
-    // A fourteen-element tuple with four nulls and a thirteen-element tuple
-    // must mean the same thing, or a character shared today and the same
-    // character shared last month would import differently.
-    const decodedOld = await decodeShareFragment(PRE_SHEET_FRAGMENT);
-    const decodedNew = await decodeShareFragment(
-      nodeFragment([...PRE_SHEET_WIRE, [null, null, null, null]]),
+  it('the current codec still treats an explicit null-tuple sheet the same as an absent one', () => {
+    // Re-expressed at v5 (D60): "a fourteenth element of four nulls means the
+    // same as no fourteenth element at all" is `decodeCurrentWire`'s own
+    // absence rule, unmoved and unretired by S-A — but the composed chain no
+    // longer reaches that domain-level decode for a v1-tagged document, so
+    // the claim is verified directly against the CURRENT, unretired version
+    // instead of through the retired migration chain (which is a structural
+    // pass-through and does not itself collapse null-tuples to null — that
+    // collapsing is `decodeCurrentWire`'s job, reachable only at v5).
+    const migratedRoot = migrateV1WireToV4(
+      rawPositionalFromFragment(PRE_SHEET_FRAGMENT),
+    ) as unknown[];
+    const v5WithoutSheet = [...migratedRoot];
+    v5WithoutSheet[1] = CHARACTER_SHARE_VERSION;
+    v5WithoutSheet.push(null); // skillGrants, absent
+    const v5WithNullTupleSheet = [...v5WithoutSheet];
+    v5WithNullTupleSheet[13] = [null, null, null, null];
+    expect(positionalToShareDocument(v5WithNullTupleSheet)).toEqual(
+      positionalToShareDocument(v5WithoutSheet),
     );
-    expect(decodedNew).toEqual(decodedOld);
   });
 });
 
@@ -1535,44 +1816,67 @@ describe('a share link generated before the effect model was inverted', () => {
     expect(decodedWire).toEqual(PRE_EFFECTS_WIRE);
   });
 
-  it('still decodes, keeping the retired vocabulary readable', async () => {
-    const decoded = await decodeShareFragment(PRE_EFFECTS_FRAGMENT);
-    expect(decoded.character.name).toBe('Pre-Effects Hero');
-    expect(decoded.species?.name).toBe('Tiefling');
-    // THE PAYLOAD ARRIVES INTACT, on the trait rows where this link put it.
-    // The decoder does not migrate — `importCharacterShare` does — so what the
-    // document says is exactly what it said when it was minted.
-    expect(decoded.speciesTraits?.[0]).toMatchObject({
+  it('refuses the fragment BY NAME, though it still migrates keeping the retired vocabulary readable', async () => {
+    // (a) D60: refused, by name.
+    await expect(decodeShareFragment(PRE_EFFECTS_FRAGMENT)).rejects.toThrow(
+      ShareWireRetirementError,
+    );
+    // (b) THE PAYLOAD ARRIVES INTACT, on the trait rows where this link put
+    // it, one step short of the deliberate v4→v5 throw. The migration chain
+    // does not validate vocabulary — `importCharacterShare` does — so what
+    // the document says is exactly what it said when it was minted, even
+    // though `effectKinds` no longer has `granted_spells` as a member.
+    const migratedRoot = migrateV1WireToV4(
+      rawPositionalFromFragment(PRE_EFFECTS_FRAGMENT),
+    ) as unknown[];
+    const root = decodeStructural(
+      migratedRoot,
+      SHARE_SCHEMAS[4].tuples.root,
+      'migrated root',
+    );
+    const character = decodeStructural(
+      root.character,
+      SHARE_SCHEMAS[4].tuples.character,
+      'migrated character',
+    );
+    expect(character.name).toBe('Pre-Effects Hero');
+    const origin = decodeMigratedOrigin(root.origin);
+    expect(origin.species?.name).toBe('Tiefling');
+    expect(origin.speciesTraits?.[0]).toMatchObject({
       name: 'Fiendish Legacy',
       // ACCEPTED, not rejected, even though `effectKinds` no longer has this
       // member. Validating a link minted last week against this week's
       // vocabulary is how you make somebody's pasted URL undecodable.
       effect_kind: 'granted_spells',
     });
-    expect(decoded.speciesTraits?.[1]).toMatchObject({
+    expect(origin.speciesTraits?.[1]).toMatchObject({
       effect_kind: 'hp_modifier',
       effect_hit_points_flat: 0,
       effect_hit_points_per_level: 1,
     });
-    expect(decoded.speciesTraits?.[2]).toMatchObject({
+    expect(origin.speciesTraits?.[2]).toMatchObject({
       effect_kind: 'damage_resistance',
       effect_damage_type: 'Poison',
     });
-    // ABSENT, NOT EMPTY. The link never mentioned effects, and an empty list
-    // would be this build claiming the character had none — which is exactly
-    // wrong, since three of its traits carry one.
-    expect(Object.hasOwn(decoded, 'effects')).toBe(false);
+    // ABSENT, NOT EMPTY. The link never mentioned effects, and the migrated
+    // root's `effects` slot is `null`, not an empty list — which is exactly
+    // wrong, since three of its traits carry a payload.
+    expect(root.effects).toBeNull();
   });
 
-  it('decodes identically whether or not the fifteenth element is present', async () => {
+  it('migrates identically whether or not the fifteenth element is present', () => {
     // A fifteen-element tuple with a null effects slot and a fourteen-element
-    // tuple must mean the same thing, or a character shared today and the same
-    // character shared last month would import differently.
-    const decodedOld = await decodeShareFragment(PRE_EFFECTS_FRAGMENT);
-    const decodedNew = await decodeShareFragment(
-      nodeFragment([...PRE_EFFECTS_WIRE, null]),
+    // tuple must mean the same thing all the way through the frozen migration
+    // chain, or a character shared today and the same character shared last
+    // month would import differently the moment v5 stops retiring them.
+    const migratedOld = migrateV1WireToV4(
+      rawPositionalFromFragment(PRE_EFFECTS_FRAGMENT),
     );
-    expect(decodedNew).toEqual(decodedOld);
+    const migratedNew = migrateV1WireToV4([
+      ...(rawPositionalFromFragment(PRE_EFFECTS_FRAGMENT) as unknown[]),
+      null,
+    ]);
+    expect(migratedNew).toEqual(migratedOld);
   });
 });
 
@@ -1590,50 +1894,111 @@ describe('a share link generated before weapons travelled', () => {
     expect(decodedWire).toEqual(LEGACY_WIRE);
   });
 
-  it('still decodes, as a document with no weapons section at all', async () => {
-    const decoded = await decodeShareFragment(LEGACY_FRAGMENT);
-    expect(decoded.character.name).toBe('Old Link Hero');
-    expect(decoded.character.intelligence).toBe(16);
-    expect(decoded.classes[0]?.classKey).toBe('2024:class:wizard');
-    expect(decoded.spellbook).toEqual(['2024:shield']);
-    // Absent, not an empty list. The link never said anything about weapons.
-    expect(Object.hasOwn(decoded, 'weapons')).toBe(false);
-    expect(decoded.weapons).toBeUndefined();
-  });
-
-  it('decodes identically whether or not the twelfth element is present', async () => {
-    // A twelve-element tuple with `null` weapons and an eleven-element tuple
-    // must mean the same thing, or a character shared today and the same
-    // character shared last month would import differently.
-    const decodedOld = await decodeShareFragment(LEGACY_FRAGMENT);
-    const decodedNew = await decodeShareFragment(
-      nodeFragment([...LEGACY_WIRE, null]),
+  it('refuses the fragment BY NAME, though it still migrates as a document with no weapons section at all', async () => {
+    // (a) D60: refused, by name.
+    await expect(decodeShareFragment(LEGACY_FRAGMENT)).rejects.toThrow(
+      ShareWireRetirementError,
     );
-    expect(decodedNew).toEqual(decodedOld);
+    // (b) The claim this fixture pins is still true one step short of the
+    // deliberate v4→v5 throw.
+    const migratedRoot = migrateV1WireToV4(
+      rawPositionalFromFragment(LEGACY_FRAGMENT),
+    ) as unknown[];
+    const root = decodeStructural(
+      migratedRoot,
+      SHARE_SCHEMAS[4].tuples.root,
+      'migrated root',
+    );
+    const character = decodeStructural(
+      root.character,
+      SHARE_SCHEMAS[4].tuples.character,
+      'migrated character',
+    );
+    expect(character.name).toBe('Old Link Hero');
+    expect(character.intelligence).toBe(16);
+    const classes = (root.classes as unknown[]).map((row) =>
+      decodeStructural(row, SHARE_SCHEMAS[4].tuples.class, 'migrated class')
+    );
+    expect(classes[0]?.classKey).toBe('2024:class:wizard');
+    expect(root.spellbook).toEqual(['2024:shield']);
+    // Absent, not an empty list. The link never said anything about weapons.
+    expect(root.weapons).toBeNull();
   });
 
-  it('decodes identically at every one of the four accepted lengths', async () => {
-    // The same claim, carried forward to the sheet element: eleven, twelve with
-    // a null, thirteen with a null and three nulls, and fourteen with a null,
-    // three nulls and four nulls must ALL be the same document. Anything else
-    // means a link's meaning changed under the person who sent it.
-    const decodedOld = await decodeShareFragment(LEGACY_FRAGMENT);
-    for (const wire of [
-      [...LEGACY_WIRE, null],
-      [...LEGACY_WIRE, null, [null, null, null]],
-      [...LEGACY_WIRE, null, [null, null, null], [null, null, null, null]],
-    ]) {
-      expect(await decodeShareFragment(nodeFragment(wire))).toEqual(decodedOld);
-    }
+  /**
+   * Every one of the following is re-expressed at v5 (D60): the composed
+   * decode no longer reaches `decodeCurrentWire`'s own absence handling for a
+   * v1-tagged document, but that handling is unmoved, unretired production
+   * code, and the fixture's real subject — "a trailing section written as
+   * all-nulls (or padded away entirely) means the same as it being absent" —
+   * is verified directly against it. The starting point in each case is the
+   * fully migrated (one step short of the v4→v5 throw), then hand-bumped to
+   * v5, `LEGACY_FRAGMENT` — never anything produced by
+   * `shareDocumentToPositional`.
+   */
+  it('a v5 document treats a null-tuple origin and sheet the same as their absence', () => {
+    const migratedRoot = migrateV1WireToV4(
+      rawPositionalFromFragment(LEGACY_FRAGMENT),
+    ) as unknown[];
+    const baseline = [...migratedRoot];
+    baseline[1] = CHARACTER_SHARE_VERSION;
+    baseline.push(null); // skillGrants
+    const decodedBaseline = positionalToShareDocument(baseline);
+
+    const withNullTupleOrigin = [...baseline];
+    withNullTupleOrigin[12] = [null, null, null];
+    expect(positionalToShareDocument(withNullTupleOrigin)).toEqual(
+      decodedBaseline,
+    );
+
+    const withNullTupleSheet = [...baseline];
+    withNullTupleSheet[13] = [null, null, null, null];
+    expect(positionalToShareDocument(withNullTupleSheet)).toEqual(
+      decodedBaseline,
+    );
+
+    const withBothNullTuples = [...baseline];
+    withBothNullTuples[12] = [null, null, null];
+    withBothNullTuples[13] = [null, null, null, null];
+    expect(positionalToShareDocument(withBothNullTuples)).toEqual(
+      decodedBaseline,
+    );
   });
 
-  it('decodes a thirteen-element link — origin but no sheet — as recording none', async () => {
-    // Every link generated between the origins change and this one looks like
-    // this. It must decode with no sheet keys at all, not with four empty ones:
-    // "recorded no armour" and "never carried armour" are the same import here,
-    // and the absent key is what keeps them from being told apart wrongly.
-    const withOrigin = [...LEGACY_WIRE, [], [null, null, null]];
-    const decoded = await decodeShareFragment(nodeFragment(withOrigin));
+  it('a v5 document with weapons but a null-tuple origin records the weapons and no origin keys', () => {
+    // The intermediate format, which is what every link generated between the
+    // weapons change and the origins change looked like. It must decode with
+    // a `weapons` key (recorded as explicitly empty) and no origin keys at
+    // all — not three empty ones.
+    const migratedRoot = migrateV1WireToV4(
+      rawPositionalFromFragment(LEGACY_FRAGMENT),
+    ) as unknown[];
+    const withWeapons = [...migratedRoot];
+    withWeapons[1] = CHARACTER_SHARE_VERSION;
+    withWeapons[11] = []; // weapons: explicitly recorded as none
+    withWeapons.push(null); // skillGrants
+    const decoded = positionalToShareDocument(withWeapons);
+    expect(decoded.weapons).toEqual([]);
+    expect(decoded).not.toHaveProperty('species');
+    expect(decoded).not.toHaveProperty('speciesTraits');
+    expect(decoded).not.toHaveProperty('background');
+  });
+
+  it('a v5 document with weapons and a null-tuple origin, but no sheet section, records no sheet keys', () => {
+    // Every link generated between the origins change and the sheet-inputs
+    // change looks like this. It must decode with no sheet keys at all, not
+    // with four empty ones: "recorded no armour" and "never carried armour"
+    // are the same import here, and the absent key is what keeps them from
+    // being told apart wrongly.
+    const migratedRoot = migrateV1WireToV4(
+      rawPositionalFromFragment(LEGACY_FRAGMENT),
+    ) as unknown[];
+    const withOrigin = [...migratedRoot];
+    withOrigin[1] = CHARACTER_SHARE_VERSION;
+    withOrigin[11] = []; // weapons: explicitly recorded as none
+    withOrigin[12] = [null, null, null]; // origin: explicit null-tuple
+    withOrigin.push(null); // skillGrants
+    const decoded = positionalToShareDocument(withOrigin);
     expect(decoded.weapons).toEqual([]);
     expect(decoded).not.toHaveProperty('armor');
     expect(decoded).not.toHaveProperty('hitPointRolls');
@@ -1654,18 +2019,6 @@ describe('a share link generated before weapons travelled', () => {
         /wire document must be a tuple of length 11 or 12 or 13 or 14/,
       );
     }
-  });
-
-  it('decodes a twelve-element link — weapons but no origin — as having none', async () => {
-    // The intermediate format, which is what every link generated between the
-    // weapons change and this one looks like. It must decode with a `weapons`
-    // key and no origin keys at all, not with three empty ones.
-    const withWeapons = [...LEGACY_WIRE, []];
-    const decoded = await decodeShareFragment(nodeFragment(withWeapons));
-    expect(decoded.weapons).toEqual([]);
-    expect(decoded).not.toHaveProperty('species');
-    expect(decoded).not.toHaveProperty('speciesTraits');
-    expect(decoded).not.toHaveProperty('background');
   });
 });
 
@@ -1703,44 +2056,71 @@ describe('a share link generated before a character note could travel', () => {
     },
   );
 
-  it.each(frozen)('the %s link still decodes, with no note', async (
-    _name,
-    fragment,
-  ) => {
-    const decoded = await decodeShareFragment(fragment);
-    // ABSENT, NOT EMPTY AND NOT NULL. The link never said anything about a
-    // note, and any present value would be this build inventing one.
-    expect(Object.hasOwn(decoded.character, 'notes')).toBe(false);
-    expect(decoded.character.notes).toBeUndefined();
-  });
+  it.each(frozen)(
+    'refuses the %s fragment BY NAME, though its migrated character still carries no note',
+    async (_name, fragment) => {
+      // (a) D60: refused, by name.
+      await expect(decodeShareFragment(fragment)).rejects.toThrow(
+        ShareWireRetirementError,
+      );
+      // (b) ABSENT, NOT EMPTY AND NOT NULL, one step short of the deliberate
+      // v4→v5 throw. The link never said anything about a note, and any
+      // present value would be this build inventing one.
+      const migratedRoot = migrateV1WireToV4(
+        rawPositionalFromFragment(fragment),
+      ) as unknown[];
+      const root = decodeStructural(
+        migratedRoot,
+        SHARE_SCHEMAS[4].tuples.root,
+        'migrated root',
+      );
+      const character = decodeStructural(
+        root.character,
+        SHARE_SCHEMAS[4].tuples.character,
+        'migrated character',
+      );
+      expect(character.notes).toBeNull();
+    },
+  );
 
-  it('decodes identically whether or not the twelfth CHARACTER element is present', async () => {
+  it('migrates identically whether or not the twelfth CHARACTER element is present', () => {
     // A twelve-element character with a `null` note and an eleven-element one
-    // must mean the same thing, or a character shared today and the same
-    // character shared last month would import differently.
-    const decodedOld = await decodeShareFragment(LEGACY_FRAGMENT);
-    const padded: unknown[] = [...LEGACY_WIRE];
-    padded[2] = [...(LEGACY_WIRE[2] as unknown[]), null];
-    expect(await decodeShareFragment(nodeFragment(padded))).toEqual(decodedOld);
+    // must mean the same thing all the way through the frozen migration
+    // chain, or a character shared today and the same character shared last
+    // month would import differently the moment v5 stops retiring them.
+    const rawWire = rawPositionalFromFragment(LEGACY_FRAGMENT) as unknown[];
+    const migratedOld = migrateV1WireToV4(rawWire);
+    const padded = [...rawWire];
+    padded[2] = [...(rawWire[2] as unknown[]), null];
+    const migratedNew = migrateV1WireToV4(padded);
+    expect(migratedNew).toEqual(migratedOld);
   });
 
-  it('reads the twelfth CHARACTER element when a link actually carries one', async () => {
-    // The other direction, and the reason the padding test above is not enough
-    // on its own: an element that is accepted and then ignored would pass it.
-    const withNote: unknown[] = [...LEGACY_WIRE];
+  it('a v5 document still reads the twelfth CHARACTER element when a link actually carries one', () => {
+    // The other direction, and the reason the padding test above is not
+    // enough on its own: an element that is accepted and then ignored would
+    // pass it. Re-expressed at v5 (D60): the composed chain no longer reaches
+    // `decodeCurrentWire` for a v1-tagged document, so the final document
+    // shape is checked directly against the current, unretired version.
+    const rawWire = rawPositionalFromFragment(LEGACY_FRAGMENT) as unknown[];
+    const withNote = [...rawWire];
     withNote[2] = [
-      ...(LEGACY_WIRE[2] as unknown[]),
+      ...(rawWire[2] as unknown[]),
       'Sent on purpose, by a sharer who opted in.',
     ];
-    const decoded = await decodeShareFragment(nodeFragment(withNote));
+    const migratedRoot = migrateV1WireToV4(withNote) as unknown[];
+    migratedRoot[1] = CHARACTER_SHARE_VERSION;
+    migratedRoot.push(null); // skillGrants
+    const decoded = positionalToShareDocument(migratedRoot);
     expect(decoded.character.notes).toBe(
       'Sent on purpose, by a sharer who opted in.',
     );
-    // ...and nothing before it moved. `placeholders` sits at index 10 and is
-    // the element an inserted — rather than appended — note would have shifted.
+    // ...and nothing before it moved. `placeholders` sits at a different
+    // ROOT position entirely and is the element an inserted — rather than
+    // appended — note would have shifted.
     expect(decoded.character.name).toBe('Old Link Hero');
     expect(decoded.character.intelligence).toBe(16);
-    expect(Object.hasOwn(decoded, 'placeholders')).toBe(false);
+    expect(decoded).not.toHaveProperty('placeholders');
   });
 
   it('refuses a character arity that is neither eleven nor twelve', async () => {
