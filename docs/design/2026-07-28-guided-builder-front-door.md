@@ -210,6 +210,38 @@ idempotency later costs the migration surface above plus the backup codec — re
 but it buys a full unit of work now and is **an open question for the owner**,
 not a default I should take unilaterally.
 
+### 3.4 Species choices the SRD requires but this group does not model
+
+Two owner questions are open here and neither is answered, so per the raised
+threshold these are recorded defaults rather than a stop.
+
+Several bundled species require a choice the template tables cannot carry: an Elf
+picks a lineage, a spellcasting ability and one of three skills; a Human gets a
+free skill and an Origin feat. A4 copies the template. It does not model those
+choices, and there is no table for them.
+
+**Taken for now: A4 applies the species and DISCLOSES every required choice it
+has not made.** The step advances on the `character_species` row existing —
+otherwise the wizard dead-ends, which D54 forbids outright — but the panel and
+the sheet must name each unmade choice as unmade. A species that arrives looking
+finished while its lineage, skill and feat were never chosen is the D33 violation
+this project keeps rediscovering: a default presented as a fact.
+
+*Seam:* the disclosure list and the step's completion predicate. *Cost to flip:*
+when the choice model is built, the completion predicate tightens and the
+disclosures for the modelled choices are deleted rather than reworded — they
+exist only while the choices are unmakeable.
+
+**Explicitly NOT taken:** making the step refuse to advance until the choices
+exist. That converts an honest gap into a dead end, and it is the exact shape
+§5's trap describes.
+
+**Also open and NOT decided here:** whether to add the provenance record — one
+"chosen by this grant at this level" row — that four of the fourteen forecast
+blockers each need separately. It does not gate A4, because `character_species`
+is its own table with its own shape. It binds at the skills step, and deciding it
+early and wrongly would be worse than deciding it late.
+
 ## 4. Four dispatches, not three
 
 Revision 1 had three and guaranteed the third would fail. The design's "M" for
