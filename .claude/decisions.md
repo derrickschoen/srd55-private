@@ -1,5 +1,54 @@
 # Binding scope decisions
 
+## D67 — OWNER: the sheet shows the FINAL NUMBER only; the sources appear on hover or touch (2026-07-29)
+
+**The ruling.** *"For ability scores and hp and ac and initiative, etc. show only
+the final number on the printable character sheet. Have alt text show on touch
+for mobile or on hover for desktop that shows the sources that led to the
+calculation that summed to the final number."*
+
+This answers the open question about where D61's house-rule label and D63's
+contributions could live, and it answers it for **every derived number**, not
+just abilities. It **overrules** the option I had recommended — a visible
+per-ability breakdown printed on the sheet.
+
+**1. The printed sheet carries final numbers only.** Strength 17. AC 16.
+Initiative +2. Hit Points 12. No inline arithmetic, no source list, no
+parenthetical. This is a deliberate rejection of the breakdown-on-the-sheet
+design.
+
+**2. Every derived number carries a reveal**, shown on **hover** for pointer
+devices and on **touch** for touch devices. "etc." is load-bearing: this is not
+an ability-score feature. Ability scores, hit points, armour class and initiative
+are named; anything else the app computes from contributions is in scope by the
+same rule.
+
+**3. The reveal names the SOURCES that summed to the number** — base plus each
+contribution with what produced it. D63 already requires abilities to be modelled
+as base + additive contributions that know their source, and D64 requires the
+same of every initiative source. **This ruling is what those two decisions were
+for.** The data exists and is already computed; today the read-model collapses it
+to a single integer and throws the rest away.
+
+**4. This is a REVEAL, not a tooltip that happens to work with a mouse.** Two
+input modalities are named in the ruling and both are requirements. A hover-only
+implementation fails the ruling on every phone.
+
+**TAKEN FOR NOW, and flagged because it is a tension the ruling did not address.**
+D61 requires the background house-rule (player-chosen Origin feat and ability
+increases, a deliberate SRD departure) to be **labelled where a person can see
+it** — and a reveal does not exist on paper. A printed sheet under this ruling
+would carry no trace of the departure. So: **the D61 disclosure stays as a
+visible line on the sheet**, separate from the per-number reveals, because it is
+a statement about the character, not a term in a sum. *Seam:* one sheet
+disclosure, independent of the reveal surface. *Cost to flip:* delete the line.
+One sentence overrules this if the owner wants the departure to live in the
+reveal too, or nowhere.
+
+**What this does NOT license.** A reveal is not permission for the number itself
+to be unexplained when it is UNKNOWN. D33 stands: an unknown says unknown, on the
+face of the sheet, not only inside a reveal a printout will never show.
+
 ## D66 — OWNER: level-up hit points default to the FIXED value, rolling is available per level (2026-07-29)
 
 **The ruling.** Asked what the wizard does about hit points at level 2, the owner
