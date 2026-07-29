@@ -25,6 +25,10 @@ import type {
 import type { WeaponRange } from '../../../domain/weapon-range';
 import { freeTextSpan } from '../../free-text';
 import { renderAttackProfiles } from './attack-profiles';
+import {
+  weaponAttackKindOf,
+  weaponProficiencyCategoryOf,
+} from '../../../rules/weapon-template-fold';
 
 /**
  * THE WEAPONS PANEL.
@@ -131,46 +135,13 @@ export function weaponFromTemplate(template: WeaponTemplate): WeaponFields {
   };
 }
 
-/** Preserve the melee/ranged half of a template heading on the value copy. */
-export function weaponAttackKindOf(group: SrdWeaponGroup): WeaponAttackKind {
-  switch (group) {
-    case 'simple_melee':
-    case 'martial_melee':
-      return 'melee';
-    case 'simple_ranged':
-    case 'martial_ranged':
-      return 'ranged';
-  }
-}
-
 /**
- * The source's four table headings folded onto the two categories a class can
- * grant proficiency in — D27, and THE ONE PLACE THE FOLD HAPPENS.
- *
- * This line used to read `srd_group: _group` and throw the group away, on D1b's
- * rule that a character's weapon has no category. D27 amends that rule, and this
- * is the moment it applies: the template is being copied onto a character, and
- * the category has to be a VALUE on the copy rather than a lookup back into the
- * catalog, or D1b's real principle would fall too.
- *
- * NO `default` ARM, deliberately. A fifth `srd_group` — an imported catalog
- * heading, a future edition — is a COMPILE ERROR here rather than a weapon that
- * silently arrives with no category and reads as "we cannot check this one".
- * That is the difference between a gap the type system made someone decide about
- * and a gap nobody noticed.
+ * The two `srd_group` folds moved to `src/rules/weapon-template-fold.ts` when
+ * the equipment mint became their second caller — a worker-side module must
+ * not import this DOM-building one. Re-exported so existing importers keep
+ * working; the fold still happens in exactly ONE place.
  */
-export function weaponProficiencyCategoryOf(
-  group: SrdWeaponGroup,
-): WeaponProficiencyCategory {
-  switch (group) {
-    case 'simple_melee':
-    case 'simple_ranged':
-      return 'simple';
-    case 'martial_melee':
-    case 'martial_ranged':
-      return 'martial';
-  }
-}
+export { weaponAttackKindOf, weaponProficiencyCategoryOf };
 
 function labelled(
   labelText: string,

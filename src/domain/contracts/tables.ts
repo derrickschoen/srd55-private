@@ -286,8 +286,13 @@ export const TABLE_SCOPES = {
    * — all four of the character-owned scopes a `character_id`-keyed table can
    * hold. `backupReference` stays false for the reason `weapon_templates`
    * records below: by D1b a character's weapon holds NO template id, so a
-   * document has nothing to resolve against the catalog and a reference kind
-   * for it could never be populated.
+   * document has nothing to resolve against the CATALOG and a reference kind
+   * for it could never be populated. Since the starting-equipment column
+   * landed the row DOES hold `source_instance_id` — but that points at another
+   * CHARACTER-OWNED row, which a backup REMAPS rather than resolves, the same
+   * treatment `spell_selection_slots`, `character_effects` and
+   * `character_skill_grants` get; it changes the import remap, never this
+   * flag.
    *
    * WHAT THE THREE `true`s COST, AND WHERE THE COST WAS PAID. Turning a flag on
    * here is the compile gate, not the work:
@@ -358,7 +363,8 @@ export const TABLE_SCOPES = {
    * `backupReference` is false for the D1b reason `character_weapons` records:
    * a character's armour holds no `armor_templates` id, so a document has
    * nothing to resolve against the catalog and a reference kind for it could
-   * never be populated.
+   * never be populated. Its `source_instance_id` is remapped, not resolved —
+   * see the `character_weapons` entry above.
    */
   character_armor: {
     role: 'character_owned',
@@ -1194,12 +1200,15 @@ export const CHARACTER_STATE_TABLES = order<SnapshotTable>()([
  */
 export const DELETE_ORDER = order<SnapshotTable>()([
   // No table references `character_weapons`, so it has no children and can go
-  // first alongside the other leaves.
+  // first alongside the other leaves. It now REFERENCES
+  // `character_source_instances` (composite key, starting-equipment plan §2),
+  // which this position already deletes it before.
   'character_weapons',
   // Leaves too, and nothing references any of them — `character_hit_point_rolls`
   // deliberately has no foreign key to `character_class_levels` (see
   // `db/schema/sheet-inputs.ts`), so there is no edge here to respect and the
-  // order within this group is free.
+  // order within this group is free. `character_armor` also now references
+  // `character_source_instances`, deleted later, so its position here holds.
   'character_armor',
   'character_hit_point_rolls',
   'character_skill_proficiencies',

@@ -76,6 +76,11 @@ const VERSION_FIXTURES = {
     // never from `shareDocumentToPositional`. The two skill-grant tuples are
     // the section v5 exists for: a FILLED class grant and an UNFILLED one
     // whose null selection must survive the wire as an absent field.
+    //
+    // NOT retired at the v6 mint: 5→6 is the appended-`sourceRef` null-pad
+    // (every v5 row could only have been hand-added), so this fixture now
+    // ALSO proves that migration — it decodes through it to the same document
+    // it always meant, with no sourceRef anywhere.
     fragment:
       'H4sIAAAAAAAC_22OzwrCMAzGX2Xk3MJW_xz2BB48eC9FQlewLMukXRV8emvdYRYhfITky_eL' +
       'hoEHOSVavCWMUca7I4rS3jCgXVyQMXcOxEFouIT54RjZuubseWxOLswgOBFtpDvWE1Ct2m99' +
@@ -104,6 +109,73 @@ const VERSION_FIXTURES = {
       skillGrants: [
         { ref: 0, grantKey: 'class_skill', ordinal: 1, skill: 'arcana' },
         { ref: 0, grantKey: 'class_skill', ordinal: 2 },
+      ],
+    },
+  },
+  6: {
+    // Independently compressed from a hand-authored v6 positional tuple —
+    // never from `shareDocumentToPositional`. The appended `sourceRef` slots
+    // are the section v6 exists for (equipment provenance, E-A): a GRANTED
+    // Greatsword and GRANTED worn armour each name the class entry (ref 0),
+    // while the hand-typed club's null must survive the wire as an absent
+    // field — NULL means a person put this here.
+    fragment:
+      'H4sIAAAAAAAAA5WRQUvEMBCF_0qZcwrtrvSw10Xcg570ForMJoMNTic1SS3rr5duy1q7ggrh' +
+      'QWaGeV9eNFixedtzcoYxxjx2xBxz02BAkyjkscFAoCql4fatd11LkrJ7J6_ZgYIHJT3zQspq' +
+      'XYFNsblZzkGL0iNDrbQupvbubL4b3AcGO89uVblaVddKfz9ffa3hLhCmOPjLBnhkjI2Tl6W7' +
+      'BvFCUK8xz5JCT39pQIshOWRQGqwzBAo2thpfBOLTM3YdO4NHHn2KsXpAsfnTqSOb7bk_XsX2' +
+      'O9q_ZMIIZHywZH_mmhOd09Owb9BJ9oCOQcHgg4CChvD9BGriuvxtuV3kUdRr3qv7Jxp27tNl' +
+      'AgAA',
+    expected: {
+      format: CHARACTER_SHARE_FORMAT,
+      version: CHARACTER_SHARE_VERSION,
+      character: {
+        name: 'Equipment Link Hero',
+        intelligence: 16,
+        rules_edition_preference: '2024',
+        ability_allocation_method: 'manual',
+      },
+      classes: [{
+        id: 0,
+        classKey: '2024:class:wizard',
+        level: 3,
+        start: 1,
+      }],
+      sources: [],
+      selections: [],
+      spellbook: [],
+      preferences: [],
+      overrides: [],
+      weapons: [
+        {
+          name: 'Greatsword',
+          damage: { kind: 'dice', dice: '2d6' },
+          damage_type: 'Slashing',
+          versatile_damage: { kind: 'not_applicable' },
+          range: { kind: 'none' },
+          heavy: true,
+          two_handed: true,
+          proficiency_category: 'martial',
+          sourceRef: 0,
+        },
+        {
+          name: 'Hand-Typed Club',
+          damage: { kind: 'not_recorded' },
+          versatile_damage: { kind: 'not_applicable' },
+          range: { kind: 'none' },
+        },
+      ],
+      armor: [
+        {
+          slot: 'worn',
+          name: 'Chain Mail',
+          category: 'heavy',
+          armor_class: 16,
+          dex_bonus: 'none',
+          strength_requirement: 13,
+          stealth_disadvantage: true,
+          sourceRef: 0,
+        },
       ],
     },
   },

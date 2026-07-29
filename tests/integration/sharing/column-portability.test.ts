@@ -577,6 +577,11 @@ const PROBES: { readonly [N in ProbedTable]: Probe<N> } = {
     columns: {
       id: RECIPIENT_ROW_ID,
       character_id: RECIPIENT_OWNER_ID,
+      source_instance_id: {
+        kind: 'translated',
+        key: '(SELECT display_name FROM character_source_instances WHERE id = t.source_instance_id)',
+        why: '`weapons[].sourceRef` (wire v6) names the granting source in the same reference space `selections[].ref` uses; NULL — a person put this here — stays NULL, and the recipient\'s source row has its own id.',
+      },
       name: { kind: 'verbatim' },
       // D27's category, added to `character_weapons` by the multiclass track and
       // appended LAST to the share tuple so a pre-D27 link still decodes. This
@@ -675,6 +680,11 @@ const PROBES: { readonly [N in ProbedTable]: Probe<N> } = {
     columns: {
       id: RECIPIENT_ROW_ID,
       character_id: RECIPIENT_OWNER_ID,
+      source_instance_id: {
+        kind: 'translated',
+        key: '(SELECT display_name FROM character_source_instances WHERE id = t.source_instance_id)',
+        why: '`armor[].sourceRef` (wire v6), on exactly the weapon column\'s terms: the granting source travels as a document reference, NULL stays NULL, and the recipient\'s source row has its own id.',
+      },
       slot: { kind: 'verbatim' },
       name: { kind: 'verbatim' },
       category: { kind: 'verbatim' },
@@ -1136,9 +1146,13 @@ function seedSender(db: DatabaseContext, catalog: Catalog): number {
      VALUES (?, ?, 'sender-role', ?, ?)`,
     [loadoutId, catalog.chosenSpellId, SENDER_TIME, SENDER_TIME],
   );
+  // The first weapon carries a GRANTED provenance (wire v6): its
+  // `source_instance_id` names the class source, so the translated probe has
+  // a non-null key to prove. The other two stay NULL — a person put those
+  // here — which proves the null limb travels as null.
   db.exec(
     `INSERT INTO character_weapons (
-       character_id, name,
+       character_id, source_instance_id, name,
        damage_kind, damage_dice, damage_flat, damage_custom, damage_type,
        versatile_damage_kind, versatile_damage_dice, versatile_damage_flat,
        versatile_damage_custom,
@@ -1149,14 +1163,14 @@ function seedSender(db: DatabaseContext, catalog: Catalog): number {
        attack_kind,
        created_at, updated_at
      ) VALUES (
-       ?, 'Sender Custom Halberd',
+       ?, ?, 'Sender Custom Halberd',
        'custom', NULL, NULL, 'weapon damage by table', 'Slashing',
        'custom', NULL, NULL, 'two-handed damage by table',
        1, 1, 1, 1, 1, 1, 1, 1,
        'bolt', 'ranged', 25, 65, 'Vex', 1, 'sender other properties',
        'sender weapon note', 'martial', 'melee', ?, ?
      )`,
-    [characterId, SENDER_TIME, SENDER_TIME],
+    [characterId, classSourceId, SENDER_TIME, SENDER_TIME],
   );
   db.exec(
     `INSERT INTO character_weapons (
@@ -1223,16 +1237,18 @@ function seedSender(db: DatabaseContext, catalog: Catalog): number {
      )`,
     [characterId, SENDER_TIME, SENDER_TIME],
   );
+  // The worn armour is GRANTED (wire v6) on the weapon fixture's terms; the
+  // shield below stays NULL-sourced to prove the null limb.
   db.exec(
     `INSERT INTO character_armor (
-       character_id, slot, name, category, armor_class, dex_bonus,
-       dex_bonus_max, strength_requirement, stealth_disadvantage, notes,
-       created_at, updated_at
+       character_id, source_instance_id, slot, name, category, armor_class,
+       dex_bonus, dex_bonus_max, strength_requirement, stealth_disadvantage,
+       notes, created_at, updated_at
      ) VALUES (
-       ?, 'worn', 'Sender Half Plate', 'medium', 15, 'capped', 2, 13, 1,
+       ?, ?, 'worn', 'Sender Half Plate', 'medium', 15, 'capped', 2, 13, 1,
        'sender armour note', ?, ?
      )`,
-    [characterId, SENDER_TIME, SENDER_TIME],
+    [characterId, classSourceId, SENDER_TIME, SENDER_TIME],
   );
   db.exec(
     `INSERT INTO character_armor (

@@ -1830,15 +1830,36 @@ function importCurrentTables(
       }),
     );
   }
-  // No reference to resolve and no foreign key but `character_id`: a weapon
-  // holds no template id by D1b, so the row travels exactly as written. The id
+  // A weapon still holds no TEMPLATE id by D1b, so its values travel exactly
+  // as written — but since the starting-equipment column it MAY hold a
+  // `source_instance_id`, which points at another character-owned row this
+  // import has just minted and is therefore REMAPPED, exactly as
+  // `character_effects` below. This is a FULL-IMPORT site, so it takes the
+  // throwing variant: a complete document should always resolve its own
+  // sources, a null stays null (a person put this here), and a non-null id the
+  // document does not describe is refused rather than silently nulled. The id
   // map is still kept, because a save-point snapshot in the same document
   // refers to these rows by their OLD ids.
   for (const row of document.tables.character_weapons) {
+    const oldWeaponSourceId =
+      row.source_instance_id === null || row.source_instance_id === undefined
+        ? null
+        : Number(row.source_instance_id);
+    let weaponSourceId: number | null = null;
+    if (oldWeaponSourceId !== null) {
+      const mapped = maps.character_source_instances.get(oldWeaponSourceId);
+      if (mapped === undefined) {
+        throw new BackupValidationError(
+          'Character backup weapon source is missing.',
+        );
+      }
+      weaponSourceId = mapped;
+    }
     maps.character_weapons.set(
       Number(row.id),
       insertPortableRow(db, 'character_weapons', row, {
         character_id: characterId,
+        source_instance_id: weaponSourceId,
       }),
     );
   }
@@ -1900,11 +1921,31 @@ function importCurrentTables(
       }),
     );
   }
+  // Armour takes the same treatment the weapons loop above spells out: values
+  // travel as written (no template id by D1b), and the equipment-provenance
+  // `source_instance_id` is REMAPPED with the full-import THROWING variant —
+  // null stays null, a non-null id the document does not describe refuses the
+  // document.
   for (const row of document.tables.character_armor) {
+    const oldArmorSourceId =
+      row.source_instance_id === null || row.source_instance_id === undefined
+        ? null
+        : Number(row.source_instance_id);
+    let armorSourceId: number | null = null;
+    if (oldArmorSourceId !== null) {
+      const mapped = maps.character_source_instances.get(oldArmorSourceId);
+      if (mapped === undefined) {
+        throw new BackupValidationError(
+          'Character backup armor source is missing.',
+        );
+      }
+      armorSourceId = mapped;
+    }
     maps.character_armor.set(
       Number(row.id),
       insertPortableRow(db, 'character_armor', row, {
         character_id: characterId,
+        source_instance_id: armorSourceId,
       }),
     );
   }
@@ -2222,20 +2263,20 @@ function portableSnapshots(
               row.spell_version_id,
             ),
           }));
-        // Only id and ownership are rewritten: a weapon references nothing in
-        // the catalog, so there is no content key to resolve.
+        // Only id and ownership are rewritten: none of these references
+        // anything in the catalog, so there is no content key to resolve.
         case 'warning_acknowledgements':
-        case 'character_weapons':
         // The origin tables join this group rather than getting their own: by
-        // D1b they hold no template id, so like a weapon there is nothing in
-        // the catalog to resolve and only id and ownership are rewritten.
+        // D1b they hold no template id, so there is nothing in the catalog to
+        // resolve and only id and ownership are rewritten.
         case 'character_species':
         case 'character_species_traits':
         case 'character_background':
-        // And the four sheet inputs, for the third time on the same terms:
-        // nothing in the catalog to resolve, no class-level id to remap, so
-        // only id and ownership are rewritten.
-        case 'character_armor':
+        // And three of the four sheet inputs, on the same terms: nothing in
+        // the catalog to resolve, no class-level id to remap, so only id and
+        // ownership are rewritten. `character_armor` LEFT this group when the
+        // equipment-provenance column landed — see the weapons/armor arm
+        // below.
         case 'character_hit_point_rolls':
         case 'character_skill_proficiencies':
         case 'character_sheet_adjustments':
@@ -2244,6 +2285,34 @@ function portableSnapshots(
             id: ids[table].get(Number(row.id)),
             character_id: characterId,
           }));
+        // `character_weapons` and `character_armor` left the group above when
+        // the starting-equipment `source_instance_id` landed: the D1b premise
+        // ("nothing but character_id to rewrite") is false for them now. This
+        // is the SAVE-POINT REWRITE, so it takes the `?? null` variant, not
+        // the full-import throw: a stale undo snapshot may legitimately
+        // reference a since-deleted source instance, and its row degrades to
+        // "a person put this here" rather than refusing the whole document.
+        // The key is rewritten only when the row CARRIES it — a snapshot
+        // written before the column existed keeps its own key set, exactly as
+        // the version note below demands for tables.
+        case 'character_weapons':
+        case 'character_armor':
+          return rowsOf(table).map((row) => {
+            const rewritten: Record<string, unknown> = {
+              ...row,
+              id: ids[table].get(Number(row.id)),
+              character_id: characterId,
+            };
+            if (Object.hasOwn(row, 'source_instance_id')) {
+              rewritten.source_instance_id =
+                row.source_instance_id === null
+                  ? null
+                  : ids.character_source_instances.get(
+                      Number(row.source_instance_id),
+                    ) ?? null;
+            }
+            return rewritten;
+          });
         // `character_effects` needs its OWN branch and cannot join the group
         // above: it is the first character-owned table to reference another
         // one, so its `source_instance_id` must be remapped to the id this

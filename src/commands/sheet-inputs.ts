@@ -157,6 +157,11 @@ function assertSheetRow(
   const row = {
     id: 1,
     character_id: characterId,
+    // The sheet commands are how a PERSON records armour, and NULL is that
+    // fact's own value (starting-equipment plan §2). The spread is harmless
+    // for the other three tables, which have no such column — `...values`
+    // could not overwrite it anyway, because no payload carries it.
+    ...(table === 'character_armor' ? { source_instance_id: null } : {}),
     ...values,
     created_at: timestamp,
     updated_at: timestamp,

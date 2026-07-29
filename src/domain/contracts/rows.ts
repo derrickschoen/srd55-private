@@ -799,6 +799,10 @@ const REFINEMENTS = {
   // exactly one payload without pretending any nullable payload is always set.
   'character_weapons.id': positiveInt,
   'character_weapons.character_id': positiveInt,
+  // The granting rule, or NULL for "a person put this here" (starting-equipment
+  // plan §2). Nullability is DERIVED from the column facts, exactly as
+  // `character_effects.source_instance_id`'s is.
+  'character_weapons.source_instance_id': positiveInt,
   // Non-empty: a weapon with no name cannot be picked out of a list, and the
   // add/update commands already refuse one.
   'character_weapons.name': nonEmptyText,
@@ -844,6 +848,9 @@ const REFINEMENTS = {
   // than its column by accident.
   'character_armor.id': positiveInt,
   'character_armor.character_id': positiveInt,
+  // The granting rule, or NULL for "a person put this here" — the mirror of
+  // `character_weapons.source_instance_id` above.
+  'character_armor.source_instance_id': positiveInt,
   'character_armor.slot': armorSlotEnum,
   // Non-empty: armour with no name cannot be told apart from the unarmoured
   // case on the sheet, and the write command already refuses one.

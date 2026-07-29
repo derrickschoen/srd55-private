@@ -1079,8 +1079,17 @@ function replaceGuidedLineageGrants(
  * owns — {@link GUIDED_SPECIES_SOURCE_MARKER}'s twin, for the same reason:
  * ownership is recorded, not inferred, so the replace never deletes an
  * instance the planner's expert commands or a share import put there.
+ *
+ * EXPORTED since E-A: the equipment mint's record-only fallback
+ * (`src/grants/equipment-grants.ts`) produces a background instance when the
+ * seam's `applyOrigin` path recorded a background without one, and that
+ * instance MUST carry this marker — an unmarked instance would survive the
+ * next background change and leave granted equipment from a background the
+ * character no longer has, which is exactly the orphan the replace exists to
+ * prevent. One string, one owner; the mint imports it rather than spelling a
+ * second copy.
  */
-const GUIDED_BACKGROUND_SOURCE_MARKER = 'guided:background-apply';
+export const GUIDED_BACKGROUND_SOURCE_MARKER = 'guided:background-apply';
 
 /**
  * Hard-deletes every background source instance this path minted, with its
