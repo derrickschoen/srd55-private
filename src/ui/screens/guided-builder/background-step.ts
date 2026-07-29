@@ -98,9 +98,12 @@ export const BACKGROUND_APPLIED_DISCLOSURE =
 export const BACKGROUND_UNAPPLIED_GRANTS: readonly string[] = [
   'the two skill proficiencies',
   'the tool proficiency',
+  // The "not built yet" clause this entry carried is DELETED, not reworded,
+  // now that E-B built the step — the standing rule for a disclosure whose
+  // reason has expired. What remains true: THIS step applies no equipment.
   'the starting equipment package — equipment is the package only, with no ' +
-    'gold alternative, and choosing and applying the package is a later ' +
-    'step that is not built yet',
+    'gold alternative, and the package is chosen and applied at the ' +
+    'equipment step',
 ];
 
 /**

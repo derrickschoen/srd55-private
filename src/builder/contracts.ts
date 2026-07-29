@@ -1056,3 +1056,14 @@ export const EQUIPMENT_GRANTS_MODULE = 'src/grants/equipment-grants.ts';
  * one import point and neither agent has to know which file a name lives in.
  */
 export * from './background-choices';
+
+/* ---------------------- equipment step (E-B, offered for ratification) */
+
+/**
+ * E-B's contract — the step's RPC names, read-model shape, panel, locators,
+ * validator and refusals — authored in its own module on the B3 precedent
+ * above and offered for ratification the same way. It consumes the E-A
+ * section's ratified values (`EquipmentChoiceConfig`,
+ * `EQUIPMENT_CHOICE_CONFIG_KEY`) rather than inventing parallels.
+ */
+export * from './equipment-choices';

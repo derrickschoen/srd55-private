@@ -176,6 +176,21 @@ function sheet(changes: Partial<CharacterSheet> = {}): CharacterSheet {
     ],
     armor_class_adjustment: -2,
     armor_class_adjustment_note: HOSTILE_ADJUSTMENT_NOTE,
+    // E-B: the recorded package (D33/D65). The source and item names are
+    // stored text — a share link can carry anything — so both ride the
+    // hostile fixtures; only the closed-vocabulary kind and option letter
+    // may reach the JSON.
+    equipment_packages: [
+      {
+        kind: 'class',
+        source_name: HOSTILE_CLASS_NAME,
+        option: 'a',
+        contents: [
+          { item_name: HOSTILE_ARMOR_NAME, quantity: 1 },
+          { item_name: 'Dagger', quantity: 2 },
+        ],
+      },
+    ],
     warnings: [],
     gaps: SHEET_GAPS,
     ...changes,
@@ -311,6 +326,9 @@ describe('the character sheet is projected twice from one value', () => {
         [...ids].some((id) => id.startsWith('weapon_proficiency:')),
       weapon_proficiency_verdicts: () =>
         [...ids].some((id) => id.startsWith('weapon_verdict:')),
+      // E-B: the recorded package prints as a "What is recorded" row; the
+      // JSON carries only its closed-vocabulary kind and option letter.
+      equipment_packages: () => ids.has('equipment:class'),
       // Warnings are rendered as their own alert region rather than as rows,
       // because they must not be reachable only by scrolling past the number
       // they degrade. The browser spec asserts the region; here the claim is
@@ -387,6 +405,27 @@ describe('the character sheet is projected twice from one value', () => {
     for (const gap of SHEET_GAPS) {
       expect(readable).toContain(gap.detail);
     }
+  });
+
+  it('never implies an empty inventory: no recorded package still prints a row (E-B, D33)', () => {
+    const value = sheet({ equipment_packages: [] });
+    const none = row(value, 'equipment:none');
+    expect(textOf(none.detail)).toContain('No package choice is recorded');
+    // The D65 disclosure stays either way — it is a constant gap, true of
+    // every character, not a per-choice fact.
+    expect(readableText(value)).toContain('Gear is not itemised');
+  });
+
+  it('prints the recorded package with its contents, marked not tracked individually (E-B, D65)', () => {
+    const value = sheet();
+    const recorded = row(value, 'equipment:class');
+    expect(recorded.value).toBe('Option A');
+    const detail = textOf(recorded.detail);
+    expect(detail).toContain('2 Dagger');
+    expect(detail).toContain('not tracked individually');
+    expect(sheetFacts(value).equipment_packages).toEqual([
+      { kind: 'class', option: 'a' },
+    ]);
   });
 
   it('says an orphaned hit point roll is not counted', () => {

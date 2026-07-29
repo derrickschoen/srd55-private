@@ -190,17 +190,21 @@ test('the sheet prints the derived numbers, and prints what it lacks', async ({
 
   await expect(page).toHaveTitle(`${HOSTILE_NAME} character sheet`);
 
-  // F4: every gap is printed rather than left as a blank box. FIVE since
-  // skills-with-provenance §3.5 deleted `background_skills_are_text` — the
-  // hand-tick it instructed is a retired command and background skills are
-  // counted grants now.
-  await expect(page.locator('[data-sheet-id^="gap:"]')).toHaveCount(5);
+  // F4: every gap is printed rather than left as a blank box. SIX since E-B
+  // added `gear_not_itemised` (D65: only a package's weapons and armour are
+  // tracked; gear renders from the rules and no gold is granted). FIVE
+  // before that, since skills-with-provenance §3.5 deleted
+  // `background_skills_are_text`.
+  await expect(page.locator('[data-sheet-id^="gap:"]')).toHaveCount(6);
   await expect(
     page.locator('[data-sheet-id="gap:no_unarmored_defense"]'),
   ).toContainText('Unarmored Defense');
   await expect(
     page.locator('[data-sheet-id="gap:no_expertise"]'),
   ).toContainText('Expertise');
+  await expect(
+    page.locator('[data-sheet-id="gap:gear_not_itemised"]'),
+  ).toContainText('not tracked individually');
 });
 
 test('the structured block says exactly what the page says, and hides nothing', async ({

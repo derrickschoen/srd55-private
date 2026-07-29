@@ -419,12 +419,16 @@ describe('the derived character sheet', () => {
     // (skills-with-provenance §3.5): background skills are FILLED grants the
     // modifiers count, and the hand-tick command the disclosure pointed at is
     // retired.
+    // `gear_not_itemised` JOINED with E-B (D65): gear renders from the rules
+    // tables and is never owned, which is true of every character equally —
+    // no gear table exists under that ruling.
     expect(builder.build(characterId).gaps.map((gap) => gap.kind)).toEqual([
       'no_class_feature_text',
       'partial_subclass_catalog',
       'no_unarmored_defense',
       'no_expertise',
       'weapon_reach_not_recorded',
+      'gear_not_itemised',
     ]);
   });
 

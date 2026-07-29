@@ -11,6 +11,7 @@ describe('deriveBuildStep', () => {
         speciesChosen: false,
         backgroundChosen: false,
         skillsFilled: false,
+        equipmentChosen: false,
       }),
     ).toBe(
       GUIDED_LEVEL_ONE_STEP_ORDER[0],
@@ -25,6 +26,7 @@ describe('deriveBuildStep', () => {
         speciesChosen: false,
         backgroundChosen: false,
         skillsFilled: false,
+        equipmentChosen: false,
       }),
     ).toBe(
       GUIDED_LEVEL_ONE_STEP_ORDER[1],
@@ -39,6 +41,7 @@ describe('deriveBuildStep', () => {
         speciesChosen: true,
         backgroundChosen: false,
         skillsFilled: false,
+        equipmentChosen: false,
       }),
     ).toBe(
       GUIDED_LEVEL_ONE_STEP_ORDER[3],
@@ -53,6 +56,7 @@ describe('deriveBuildStep', () => {
         speciesChosen: true,
         backgroundChosen: true,
         skillsFilled: false,
+        equipmentChosen: false,
       }),
     ).toBe(
       GUIDED_LEVEL_ONE_STEP_ORDER[4],
@@ -70,9 +74,46 @@ describe('deriveBuildStep', () => {
         speciesChosen: true,
         backgroundChosen: true,
         skillsFilled: true,
+        equipmentChosen: false,
       }),
     ).toBe(
       GUIDED_LEVEL_ONE_STEP_ORDER[5],
+    );
+  });
+
+  it('rests on equipment when every step, equipment included, is complete (E-B)', () => {
+    // The `equipment: false` literal — the last pinned entry of the record —
+    // is DELETED, not reworded. The contract has no "done" member, so a
+    // fully complete character rests on the final step; the step's own read
+    // carries `complete`, which is where "done" becomes visible.
+    expect(
+      deriveBuildStep({
+        classChosen: true,
+        abilitiesAllocated: true,
+        speciesChosen: true,
+        backgroundChosen: true,
+        skillsFilled: true,
+        equipmentChosen: true,
+      }),
+    ).toBe(
+      GUIDED_LEVEL_ONE_STEP_ORDER[5],
+    );
+  });
+
+  it('holds an earlier step even when equipment evidence is already true', () => {
+    // The walk is D55's order, not a completeness count: recorded equipment
+    // never papers over an unfilled skills step.
+    expect(
+      deriveBuildStep({
+        classChosen: true,
+        abilitiesAllocated: true,
+        speciesChosen: true,
+        backgroundChosen: true,
+        skillsFilled: false,
+        equipmentChosen: true,
+      }),
+    ).toBe(
+      GUIDED_LEVEL_ONE_STEP_ORDER[4],
     );
   });
 });

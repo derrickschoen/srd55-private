@@ -490,12 +490,15 @@ describe('guided background step', () => {
     // D68: nothing on this step may call the player's feat/increase choice a
     // house rule, homebrew, or a departure.
     expect(text).not.toMatch(/house rule|homebrew|departure/i);
+    // RETARGETED WITH E-B: the equipment entry's "not built yet" clause
+    // expired when the equipment step was built; the disclosure now points
+    // at the step instead of at a gap.
     expect(unapplied).toEqual([
       'the two skill proficiencies',
       'the tool proficiency',
       'the starting equipment package — equipment is the package only, with ' +
-        'no gold alternative, and choosing and applying the package is a ' +
-        'later step that is not built yet',
+        'no gold alternative, and the package is chosen and applied at the ' +
+        'equipment step',
     ]);
     step.cleanup();
   });

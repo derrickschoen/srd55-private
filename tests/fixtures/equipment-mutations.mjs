@@ -13,11 +13,11 @@ const edit = (path, from, to) => ({ path, from, to });
 
 /**
  * Mutations for the starting-equipment controls (plan
- * `docs/design/2026-07-29-starting-equipment.md` §6), dispatch E-A:
- * E-SOURCE, E-PRESERVE, E-NO-GEAR, E-PLURAL. The E-B-dependent controls
- * (E-NO-GOLD-SHOWN, E-NO-GOLD-OFFERED, E-COMPLETE) have no code site until
- * the step exists and are deliberately absent — a mutation that lands in
- * nothing is the trap §6's own retargeting history warns about.
+ * `docs/design/2026-07-29-starting-equipment.md` §6): E-SOURCE, E-PRESERVE,
+ * E-NO-GEAR, E-PLURAL from dispatch E-A; E-NO-GOLD-SHOWN (`goldshown`),
+ * E-NO-GOLD-OFFERED (`goldoffered`) and E-COMPLETE (`complete`) from
+ * dispatch E-B, added once the step existed so no mutation ever landed in
+ * nothing — the trap §6's own retargeting history warns about.
  *
  * Same apply/restore convention as
  * `tests/fixtures/skills-provenance-mutations.mjs`. Applied for a VITEST run
@@ -106,6 +106,64 @@ const mutations = {
   ['Javelins', 'Javelin'],
 ]);`,
       `const DECLARED_WEAPON_EQUIPMENT = new Map<string, string>([]);`,
+    ),
+  ],
+  // E-NO-GOLD-SHOWN (§6, E-B): the coin-line DISPLAY filter is gone — every
+  // offered option renders its seeded trailing GP line. Must fail: a
+  // Fighter's rendered contents do NOT include "4 GP". This is a different
+  // code path from `goldoffered` below; revision 2 had the two as one
+  // control and the second half was unfalsifiable by the first's mutation.
+  goldshown: [
+    edit(
+      'src/rules/equipment-package-display.ts',
+      `export function displayableEquipmentLines(
+  lines: readonly EquipmentPackageLine[],
+): readonly EquipmentPackageLine[] {
+  return lines.filter((line) => !isEquipmentMoneyLine(line.item_name));
+}`,
+      `export function displayableEquipmentLines(
+  lines: readonly EquipmentPackageLine[],
+): readonly EquipmentPackageLine[] {
+  return lines;
+}`,
+    ),
+  ],
+  // E-NO-GOLD-OFFERED (§6, E-B): the gold-only OPTION filter is gone — the
+  // step presents every seeded option, gold included. Must fail: a Wizard is
+  // offered exactly ONE option, not two (D56).
+  goldoffered: [
+    edit(
+      'src/rules/equipment-package-display.ts',
+      `export function offerableEquipmentPackageOptions(
+  options: readonly EquipmentPackageOption[],
+): readonly EquipmentPackageOption[] {
+  return options.filter(
+    (candidate) =>
+      !candidate.lines.every((line) => isEquipmentMoneyLine(line.item_name)),
+  );
+}`,
+      `export function offerableEquipmentPackageOptions(
+  options: readonly EquipmentPackageOption[],
+): readonly EquipmentPackageOption[] {
+  return options;
+}`,
+    ),
+  ],
+  // E-COMPLETE (§6, E-B): `equipment` completeness back to a constant — the
+  // literal pre-E-B state. The mutation targets the EVIDENCE READ, which is
+  // the one observable site: the record entry in `deriveBuildStep` cannot
+  // change that function's output (equipment is the terminal step, so the
+  // walk returns 'equipment' whether the entry is true or false), while this
+  // predicate is what the step's `complete` and every completeness assertion
+  // consume. Must fail in both directions: false before a choice, true
+  // after, for both sources.
+  complete: [
+    edit(
+      'src/builder/guided-creation.ts',
+      `    equipmentChosen:
+      recordedEquipmentChoiceOption(db, characterId, 'class') !== null &&
+      recordedEquipmentChoiceOption(db, characterId, 'background') !== null,`,
+      `    equipmentChosen: false,`,
     ),
   ],
 };
