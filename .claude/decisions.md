@@ -1,5 +1,65 @@
 # Binding scope decisions
 
+## D64 — OWNER: standard array is the default and everything else WARNS; initiative must be correct (2026-07-28)
+
+**The rulings.** *"Default to standard array. If a player rolls or point buys,
+give a warning. All 10s is a possible valid situation and ask can be added as
+normal, but warn if there are not at least 2 +2 ability scores that the character
+will be weak and suggest point buys or standard array."* and *"We need a correct
+initiative number on the character sheet. Need to add all initiative changing
+sources to the domain model."*
+
+**1. The abilities step defaults to STANDARD ARRAY, and every other path warns
+rather than refuses.**
+
+- **Standard array is the default.** It is what a person gets without choosing.
+- **Point buy and manually-entered (including rolled) scores WARN.** They are
+  permitted; the warning is information, never a block. This is D49's
+  warn-versus-block distinction again, and the two must not be conflated: a
+  warning that prevents progress is a block wearing a friendlier word.
+- **All 10s is VALID and enterable as normal.** It is not an error state and must
+  not be treated as one.
+- **The weakness warning fires on the RESULT, not the method:** if the character
+  does not have at least two abilities at +2 or better, say the character will be
+  weak and suggest point buy or standard array.
+
+*My reading of "2 +2 ability scores", stated so it can be corrected in one
+sentence:* two abilities whose **modifier** is +2 or better, i.e. score 14+. Not
+two scores literally equal to 2, and not "+2 above 10". If that is wrong the fix
+is one number in one predicate.
+
+Note what this does NOT reintroduce: **Roll in Order is still deleted** (D55).
+"If a player rolls" is served by manual entry of whatever the dice produced — the
+app does not own a rolling workflow.
+
+**2. Initiative must be RIGHT, and every source that changes it is modelled.**
+
+This closes the Alert question I had left open. It also goes further than that
+question did: the ruling is not "structure Alert", it is **structure everything
+that changes initiative**. A sheet number that is silently just the Dexterity
+modifier while a feat, a class feature or a species trait is also moving it is a
+confidently wrong number, which D33 forbids more strongly than it forbids a blank.
+
+Under **D35** anything that changes a sheet number earns structure, so this
+ruling and D35 point the same way; where D51's "only three structured kinds"
+resists, D64 wins for initiative.
+
+**The architectural observation worth recording, because it makes both rulings
+one job:** an initiative contribution and an ability-score contribution are the
+**same shape** — a value, a source, and something that knows how to sum them.
+D63 already requires that shape for abilities. Building it twice would be D63's
+own warning about drift, so the additive-contribution model is designed once and
+initiative is its second consumer.
+
+*Taken for now, on sequencing:* the abilities step ships with the default, the
+warnings and the weakness check, because it is small and it closes the largest
+gap to D54. The contribution model follows and initiative rides it. *Cost to
+flip:* build the contribution model first and the abilities step waits behind it
+for no benefit — the base scores it writes are the one thing that does not need
+contributions.
+
+---
+
 ## D63 — OWNER: ability increases are an ADDITIVE LAYER, and every species is modelled in the domain (2026-07-28)
 
 **The rulings.** *"Background asi are not part of base asi. They are added on
