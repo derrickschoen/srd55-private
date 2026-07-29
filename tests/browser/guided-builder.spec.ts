@@ -77,12 +77,18 @@ test('the empty-database front door chooses class first, persists once named, an
   await expect(page.locator('input')).toHaveCount(0);
   await expectNoPlannerRouteAnchors(page);
 
-  const firstClass = page.locator('[data-class-option]').first();
-  await expect(firstClass.locator('.guided-class-name')).not.toHaveText('');
-  await expect(firstClass.locator('.guided-class-hit-die')).toHaveText(
+  // FIGHTER, deliberately: the S-C exit is "a Fighter with a background that
+  // grants two skills still owes two class choices", asserted end to end at
+  // the bottom of this journey.
+  const fighterCard = page
+    .locator('[data-class-option]')
+    .filter({ hasText: 'Fighter' })
+    .first();
+  await expect(fighterCard.locator('.guided-class-name')).not.toHaveText('');
+  await expect(fighterCard.locator('.guided-class-hit-die')).toHaveText(
     /^Hit die: (?:d[1-9]\d*|unknown)$/,
   );
-  await firstClass.click();
+  await fighterCard.click();
 
   expect(
     await page.evaluate(() => window.staticApp.inspectRows('characters')),
@@ -255,18 +261,27 @@ test('the empty-database front door chooses class first, persists once named, an
   ).toBeVisible();
   await expectNoPlannerRouteAnchors(page);
 
-  const firstBackground = page.locator('[data-background-option]').first();
-  await expect(firstBackground).toBeVisible();
-  await firstBackground.click();
+  // B3's form: choose ACOLYTE (its two printed skills, Insight and Religion,
+  // are the exit fixture's held skills — and Insight sits in the Fighter's
+  // own pool, which is the plan's §3.3 worked case), keep the suggested
+  // pairing the step prefills, and submit the one atomic apply.
+  const acolyte = page
+    .locator('.guided-background-choice')
+    .filter({ hasText: 'Acolyte' })
+    .locator('input');
+  await expect(acolyte).toBeVisible();
+  await acolyte.check();
+  await page.locator('[data-background-submit]').click();
 
   await expect(page).toHaveURL(
     new URL(persistedSeam.buildPath, page.url()).href,
   );
-  await expect(
-    page.getByRole('heading', {
-      name: 'The Skills step is not built yet',
-    }),
-  ).toBeVisible();
+  // S-C: the REAL skills step renders — the terminal "not built" panel for
+  // this step is retired.
+  const skillsPanel = page.locator(
+    `[${persistedSeam.panelAttribute}="${persistedSeam.skillsStepPanel}"]`,
+  );
+  await expect(skillsPanel).toBeVisible();
   await expectNoPlannerRouteAnchors(page);
   expect(
     await page.evaluate(() =>
@@ -278,20 +293,92 @@ test('the empty-database front door chooses class first, persists once named, an
     }),
   ]);
 
+  // THE EXIT (plan §5, dispatch S-C): the background handed this Fighter two
+  // skills — shown as ALREADY GRANTED — and the Fighter STILL owes exactly
+  // two class choices. A count-based step would have advanced right past
+  // this panel.
+  const granted = page.locator(`[${persistedSeam.skillGrantedAttribute}]`);
+  await expect(granted).toHaveCount(2);
+  const choices = page.locator(`[${persistedSeam.skillChoiceAttribute}]`);
+  await expect(choices).toHaveCount(2);
+  // §3.3's worked case: Insight is held (Acolyte), so the first ordinal's
+  // list offers 8 of the Fighter's 9 — Insight gone because it is already
+  // held, Religion never in the pool.
+  const firstSelect = choices
+    .first()
+    .locator(`[${persistedSeam.skillSelectAttribute}]`);
+  const firstOptions = await firstSelect.locator('option').allTextContents();
+  expect(firstOptions).toHaveLength(9); // placeholder + 8 available
+  expect(firstOptions).not.toContain('Insight');
+  expect(firstOptions).not.toContain('Religion');
+  expect(firstOptions).toContain('Athletics');
+
+  await firstSelect.selectOption('athletics');
+  await choices
+    .first()
+    .locator(`[${persistedSeam.skillFillAttribute}]`)
+    .click();
+  await expect(granted).toHaveCount(3);
+  await expect(choices).toHaveCount(1);
+
+  // A reload re-derives the same step from the database: one class ordinal
+  // is still unfilled, so the step holds.
   await page.reload();
+  await expect(skillsPanel).toBeVisible();
+  await expect(
+    page.locator(`[${persistedSeam.skillChoiceAttribute}]`),
+  ).toHaveCount(1);
+  await expectNoPlannerRouteAnchors(page);
+
+  const lastChoice = page
+    .locator(`[${persistedSeam.skillChoiceAttribute}]`)
+    .first();
+  await lastChoice
+    .locator(`[${persistedSeam.skillSelectAttribute}]`)
+    .selectOption('perception');
+  await lastChoice
+    .locator(`[${persistedSeam.skillFillAttribute}]`)
+    .click();
+
+  // Every class ordinal is filled: the step advances to the one remaining
+  // not-built panel.
   await expect(
     page.getByRole('heading', {
-      name: 'The Skills step is not built yet',
+      name: 'The Equipment step is not built yet',
     }),
   ).toBeVisible();
   await expectNoPlannerRouteAnchors(page);
+
+  // The provenance is on disk, per grant: two FILLED background grants under
+  // the background's source, two FILLED class grants under the Fighter's —
+  // and the projection derived all four.
+  const grants = (await page.evaluate(() =>
+    window.staticApp.inspectRows('character_skill_grants'),
+  )) as ReadonlyArray<Record<string, unknown>>;
+  expect(grants).toHaveLength(4);
   expect(
-    await page.evaluate(() =>
-      window.staticApp.inspectRows('character_background'),
-    ),
+    grants.map((row) => [row['grant_key'], row['skill'], row['state']]).sort(),
   ).toEqual([
-    expect.objectContaining({
-      character_id: characterId,
-    }),
+    ['background_skill', 'insight', 'active'],
+    ['background_skill', 'religion', 'active'],
+    ['class_skill', 'athletics', 'active'],
+    ['class_skill', 'perception', 'active'],
   ]);
+  expect(
+    (
+      (await page.evaluate(() =>
+        window.staticApp.inspectRows('character_skill_proficiencies'),
+      )) as ReadonlyArray<Record<string, unknown>>
+    )
+      .map((row) => row['skill'])
+      .sort(),
+  ).toEqual(['athletics', 'insight', 'perception', 'religion']);
+
+  await page.reload();
+  await expect(
+    page.getByRole('heading', {
+      name: 'The Equipment step is not built yet',
+    }),
+  ).toBeVisible();
+  await expectNoPlannerRouteAnchors(page);
 });

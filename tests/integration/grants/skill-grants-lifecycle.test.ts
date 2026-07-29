@@ -5,6 +5,7 @@ import { UpdateClassCommand } from '../../../src/commands/update-class';
 import { DatabaseContext } from '../../../src/db/database';
 import {
   activeGrantedSkills,
+  mintFilledSkillGrants,
   rebuildSkillProjection,
   resolveSkillGrants,
 } from '../../../src/grants/skill-grants';
@@ -259,5 +260,37 @@ describe('the skill-grant lifecycle: tombstone, reactivate, and the projection',
     expect(
       sheet.skills.find((entry) => entry.skill === 'religion')?.proficient,
     ).toBe(false);
+  });
+
+  it('S-SOURCE: a grant with no source is refused at the constraint, and a producer always writes one', () => {
+    // The constraint limb: the required source is the whole point of the
+    // table (§3.1), and NOT NULL is what enforces it against any writer that
+    // skips the producers. `S-SOURCE`'s mutation drops the NOT NULL AND makes
+    // a producer write null — either half alone would leave the other
+    // unexercised.
+    expect(() =>
+      db.exec(
+        `INSERT INTO character_skill_grants (
+           character_id, source_instance_id, grant_key, ordinal, skill, state
+         ) VALUES (?, NULL, 'background_skill', 1, 'religion', 'active')`,
+        [characterId],
+      ),
+    ).toThrow(/NOT NULL/i);
+
+    // The producer limb: every grant the mint writes carries the source it
+    // was given, never an unattributed row.
+    const sourceId = otherActiveSource();
+    mintFilledSkillGrants(db, characterId, sourceId, 'background_skill', [
+      'religion',
+      'insight',
+    ]);
+    const sources = db
+      .allRaw(
+        `SELECT source_instance_id FROM character_skill_grants
+         WHERE character_id = ?`,
+        [characterId],
+      )
+      .map((row) => row.source_instance_id);
+    expect(sources).toEqual([sourceId, sourceId]);
   });
 });
