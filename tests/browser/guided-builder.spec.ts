@@ -340,12 +340,83 @@ test('the empty-database front door chooses class first, persists once named, an
     .locator(`[${persistedSeam.skillFillAttribute}]`)
     .click();
 
-  // Every class ordinal is filled: the step advances to the one remaining
-  // not-built panel.
+  // E-B: every class ordinal is filled and the REAL equipment step renders —
+  // the terminal "not built" panel for this step is retired.
+  const equipmentPanel = page.locator(
+    `[${persistedSeam.panelAttribute}="${persistedSeam.equipmentStepPanel}"]`,
+  );
+  await expect(equipmentPanel).toBeVisible();
+  await expectNoPlannerRouteAnchors(page);
+
+  // FIGHTER IS THE ONLY CLASS WITH A REAL CHOICE (§0c): options A and B are
+  // offered, the gold-only C is suppressed, and the Acolyte background has
+  // exactly its option A — its "50 GP" option B is suppressed too.
+  const classSection = page.locator(
+    `[${persistedSeam.equipmentSourceAttribute}="class"]`,
+  );
   await expect(
-    page.getByRole('heading', {
-      name: 'The Equipment step is not built yet',
+    classSection.locator(`[${persistedSeam.equipmentOptionAttribute}]`),
+  ).toHaveCount(2);
+  const backgroundSection = page.locator(
+    `[${persistedSeam.equipmentSourceAttribute}="background"]`,
+  );
+  await expect(
+    backgroundSection.locator(`[${persistedSeam.equipmentOptionAttribute}]`),
+  ).toHaveCount(1);
+
+  // NO GOLD ANYWHERE ON THE STEP (D56): the seeded coin lines — Fighter A's
+  // "4 GP", B's "11 GP", the Acolyte's "50 GP" — never render, while the
+  // package's GEAR does (displayed, never owned — D65).
+  const equipmentText = await equipmentPanel.textContent();
+  expect(equipmentText).not.toBeNull();
+  expect(equipmentText).not.toMatch(/\d+\s+GP/);
+  expect(equipmentText).toContain('Dungeoneer’s Pack');
+  expect(equipmentText).toContain('not tracked individually');
+
+  // Confirm Fighter option A. The mint stamps every granted row with the
+  // class source instance — provenance, not just totals.
+  await classSection
+    .locator(`[${persistedSeam.equipmentChooseAttribute}="a"]`)
+    .click();
+  await expect(
+    page.locator(`[${persistedSeam.equipmentRecordedAttribute}="a"]`),
+  ).toBeVisible();
+  const mintedWeapons = (await page.evaluate(() =>
+    window.staticApp.inspectRows('character_weapons'),
+  )) as ReadonlyArray<Record<string, unknown>>;
+  expect(mintedWeapons.map((row) => row['name']).sort()).toEqual([
+    'Flail',
+    'Greatsword',
+    ...Array.from({ length: 8 }, () => 'Javelin'),
+  ].sort());
+  for (const row of mintedWeapons) {
+    expect(typeof row['source_instance_id']).toBe('number');
+  }
+  expect(
+    (await page.evaluate(() =>
+      window.staticApp.inspectRows('character_armor'),
+    )) as ReadonlyArray<Record<string, unknown>>,
+  ).toEqual([
+    expect.objectContaining({
+      name: 'Chain Mail',
+      slot: 'worn',
+      source_instance_id: expect.any(Number),
     }),
+  ]);
+
+  // One source alone is not completeness (§3): both are required.
+  await expect(
+    page.locator(`[${persistedSeam.equipmentCompleteAttribute}]`),
+  ).toHaveCount(0);
+
+  // Confirm the Acolyte package. Its option A carries no weapon or armour,
+  // so it mints nothing and ONLY records the choice — and the whole level 1
+  // journey is complete.
+  await backgroundSection
+    .locator(`[${persistedSeam.equipmentChooseAttribute}="a"]`)
+    .click();
+  await expect(
+    page.locator(`[${persistedSeam.equipmentCompleteAttribute}]`),
   ).toBeVisible();
   await expectNoPlannerRouteAnchors(page);
 
@@ -374,11 +445,19 @@ test('the empty-database front door chooses class first, persists once named, an
       .sort(),
   ).toEqual(['athletics', 'insight', 'perception', 'religion']);
 
+  // A reload re-derives from the database alone: the finished character
+  // rests on the equipment step with both choices shown as recorded.
   await page.reload();
   await expect(
-    page.getByRole('heading', {
-      name: 'The Equipment step is not built yet',
-    }),
+    page.locator(
+      `[${persistedSeam.panelAttribute}="${persistedSeam.equipmentStepPanel}"]`,
+    ),
+  ).toBeVisible();
+  await expect(
+    page.locator(`[${persistedSeam.equipmentRecordedAttribute}]`),
+  ).toHaveCount(2);
+  await expect(
+    page.locator(`[${persistedSeam.equipmentCompleteAttribute}]`),
   ).toBeVisible();
   await expectNoPlannerRouteAnchors(page);
 });

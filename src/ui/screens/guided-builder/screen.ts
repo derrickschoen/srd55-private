@@ -9,6 +9,7 @@ import { defineScreen, type ScreenContext } from '../../screen';
 import { createAbilitiesStep } from './abilities-step';
 import { createBackgroundStep } from './background-step';
 import { createClassChooser } from './class-chooser';
+import { createEquipmentStep } from './equipment-step';
 import { renderGuidedBuildState } from './guided-builder';
 import { createSkillsStep } from './skills-step';
 import { createSpeciesStep } from './species-step';
@@ -105,6 +106,20 @@ async function render(context: ScreenContext): Promise<() => void> {
             operation_uuid: operationUuid,
             expected_revision: skillsState.revision,
           }),
+        navigate: (path) => context.router.navigate(path),
+      });
+      view = step.element;
+      cleanups.push(step.cleanup);
+    } else if (state.kind === 'ready' && state.current_step === 'equipment') {
+      // E-B: the equipment step — the last step, so it also renders the
+      // recorded/complete state (the derivation has no "done" member and a
+      // finished character rests here). One read supplies both sources'
+      // offerable options, the recorded choices and the completion flag.
+      const equipmentState = await client.equipmentStep(characterId);
+      const step = createEquipmentStep({
+        characterId,
+        state: equipmentState,
+        applyEquipment: (params) => client.applyEquipment(params),
         navigate: (path) => context.router.navigate(path),
       });
       view = step.element;

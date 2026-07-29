@@ -64,6 +64,7 @@ import {
   type EffectRow,
 } from '../rules/species-effects';
 import type { AttacksPerAction } from '../rules/extra-attack';
+import { recordedEquipmentPackages } from '../builder/equipment-step';
 import { CharacterNotFoundError } from './character-crud';
 import {
   ClassProficiencyLookup,
@@ -203,9 +204,27 @@ export interface SheetGap {
     | 'partial_subclass_catalog'
     | 'no_unarmored_defense'
     | 'no_expertise'
-    | 'weapon_reach_not_recorded';
+    | 'weapon_reach_not_recorded'
+    | 'gear_not_itemised';
   readonly title: string;
   readonly detail: string;
+}
+
+/**
+ * One recorded starting-equipment package, for the D33/D65 line: the sheet
+ * SAYS gear is not itemised rather than implying an empty inventory, and the
+ * recorded package name shows with its contents from the rules tables. The
+ * contents arrive display-filtered — no coin line, because no purse is ever
+ * granted (D56).
+ */
+export interface SheetEquipmentPackage {
+  readonly kind: 'class' | 'background';
+  readonly source_name: string;
+  readonly option: string;
+  readonly contents: readonly {
+    readonly item_name: string;
+    readonly quantity: number;
+  }[];
 }
 
 export interface CharacterSheet {
@@ -253,6 +272,8 @@ export interface CharacterSheet {
   readonly hit_point_rolls: readonly SheetHitPointRoll[];
   readonly armor_class_adjustment: number;
   readonly armor_class_adjustment_note: string | null;
+  /** The recorded package choices, D33's answer to a blank inventory (D65). */
+  readonly equipment_packages: readonly SheetEquipmentPackage[];
   /** Degradations of a specific derivation, from `src/rules/sheet.ts`. */
   readonly warnings: readonly SheetWarning[];
   readonly gaps: readonly SheetGap[];
@@ -423,6 +444,21 @@ export const SHEET_GAPS: readonly SheetGap[] = Object.freeze([
   // skills through `set_skill_proficiency`, a command the surface now refuses,
   // and S-B made background skills real FILLED grants the modifiers count.
   // The disclosure existed only while the choice was untracked.
+  {
+    // D65, stated in the ruling's own terms so the sheet can say it too. TRUE
+    // OF EVERY CHARACTER — no gear table exists under that ruling — which is
+    // what qualifies it for this constant list; the recorded package and its
+    // contents are per-character facts and print under "What is recorded".
+    kind: 'gear_not_itemised',
+    title: 'Gear is not itemised',
+    detail:
+      'Starting equipment is recorded as a package choice, and only its ' +
+      'weapons and armour become tracked items. Other gear is shown from ' +
+      'the rules tables and is not tracked individually: a used torch ' +
+      'cannot be ticked off, a crowbar cannot be dropped, and nothing ' +
+      'outside the package can be carried here. No gold is granted — ' +
+      'equipment is the package only, with no gold alternative.',
+  },
 ]);
 
 /**
@@ -710,6 +746,11 @@ export class CharacterSheetBuilder {
       hit_point_rolls: rolls.list,
       armor_class_adjustment: adjustment.value,
       armor_class_adjustment_note: adjustment.note,
+      // Read through E-B's one recorded-package reader — the same source
+      // resolution, choice reader and coin-line display filter the equipment
+      // step uses — so the sheet's package line and the step cannot disagree
+      // (D33, D65; plan §4).
+      equipment_packages: recordedEquipmentPackages(this.db, characterId),
       // The warning sets are CONCATENATED and not merged with `gaps`: these
       // describe a degradation of THIS character's derivation (crossed armour
       // slots, an unmet Strength requirement, no or several starting classes, an

@@ -13,8 +13,10 @@
  */
 
 import {
+  EQUIPMENT_RPC,
   GUIDED_RPC,
   hasExactKeys,
+  isGuidedApplyEquipmentParams,
   isGuidedCreateParams,
   isGuidedFillSkillGrantParams,
   isGuidedOriginParams,
@@ -28,6 +30,12 @@ import {
   BACKGROUND_RPC,
   isGuidedApplyBackgroundParams,
 } from '../../builder/background-choices';
+import {
+  EquipmentStepRefusal,
+  applyGuidedEquipment,
+  guidedEquipmentStepState,
+} from '../../builder/equipment-step';
+import { EquipmentGrantRefusal } from '../../grants/equipment-grants';
 import {
   GuidedCreationRefusal,
   allocateGuidedAbilities,
@@ -174,6 +182,16 @@ function translatingRefusals<T>(operation: () => T): T {
         skill: error.skill,
       });
     }
+    // The E-B equipment refusals, same precedent. The armour-slot collision
+    // (E-A's `armor_slot_occupied`) carries slot, item and holder so the
+    // step can tell the person exactly what collided and offer the remedy —
+    // never a raw constraint violation (plan §3).
+    if (error instanceof EquipmentStepRefusal) {
+      throw new RpcError('handler_error', error.message, { ...error.data });
+    }
+    if (error instanceof EquipmentGrantRefusal) {
+      throw new RpcError('handler_error', error.message, { ...error.data });
+    }
     throw error;
   }
 }
@@ -274,6 +292,30 @@ export const handlers: readonly RpcHandler[] = Object.freeze([
    * the seam's `SkillGrantRefusalReason`, each naming the skill at issue —
    * ride `translatingRefusals`' `SkillGrantRefusal` arm.
    */
+  /**
+   * The E-B equipment-step read: both sources' offerable options (gold-only
+   * suppressed, D56), the recorded choices and the completion flag, in one
+   * query. Same params shape and structural-guard rationale as `buildState`.
+   */
+  defineRpcHandler(
+    EQUIPMENT_RPC.equipmentStep,
+    isGuidedBuildStateParams,
+    (context, params) =>
+      guidedEquipmentStepState(context.db, params.character_id),
+  ),
+  /**
+   * The E-B apply (plan §3): one transaction records the choice in the
+   * granting source instance's config, removes exactly what that instance
+   * granted before, and mints the option's weapon/armour rows stamped with
+   * it. Domain refusals — the step's two guards and E-A's armour-slot
+   * collision — ride `translatingRefusals`' equipment arms.
+   */
+  defineRpcHandler(
+    EQUIPMENT_RPC.applyEquipment,
+    isGuidedApplyEquipmentParams,
+    (context, params) =>
+      translatingRefusals(() => applyGuidedEquipment(context.db, params)),
+  ),
   defineRpcHandler(
     GUIDED_RPC.fillSkillGrant,
     isGuidedFillSkillGrantParams,

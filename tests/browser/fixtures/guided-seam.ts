@@ -17,6 +17,12 @@ export interface BrowserGuidedSeam {
   readonly skillSelectAttribute: string;
   readonly skillFillAttribute: string;
   readonly skillClearAttribute: string;
+  readonly equipmentStepPanel: string;
+  readonly equipmentSourceAttribute: string;
+  readonly equipmentOptionAttribute: string;
+  readonly equipmentChooseAttribute: string;
+  readonly equipmentRecordedAttribute: string;
+  readonly equipmentCompleteAttribute: string;
   readonly buildPath: string | null;
 }
 
@@ -46,6 +52,19 @@ export async function readGuidedSeam(
         throw new Error('The guided seam did not export skill-step locators.');
       }
       const skillAttributeRecord = skillAttributes as Record<string, unknown>;
+      const equipmentAttributes = exports['EQUIPMENT_STEP_ATTR'];
+      if (
+        typeof equipmentAttributes !== 'object' ||
+        equipmentAttributes === null
+      ) {
+        throw new Error(
+          'The guided seam did not export equipment-step locators.',
+        );
+      }
+      const equipmentAttributeRecord = equipmentAttributes as Record<
+        string,
+        unknown
+      >;
       const newRoute = exports['GUIDED_NEW_ROUTE'];
       const panelAttribute = exports['GUIDED_PANEL_ATTRIBUTE'];
       const classChooserPanel = panelRecord['classChooser'];
@@ -62,6 +81,12 @@ export async function readGuidedSeam(
       const skillSelectAttribute = skillAttributeRecord['select'];
       const skillFillAttribute = skillAttributeRecord['fill'];
       const skillClearAttribute = skillAttributeRecord['clear'];
+      const equipmentStepPanel = exports['EQUIPMENT_STEP_PANEL'];
+      const equipmentSourceAttribute = equipmentAttributeRecord['source'];
+      const equipmentOptionAttribute = equipmentAttributeRecord['option'];
+      const equipmentChooseAttribute = equipmentAttributeRecord['choose'];
+      const equipmentRecordedAttribute = equipmentAttributeRecord['recorded'];
+      const equipmentCompleteAttribute = equipmentAttributeRecord['complete'];
       const pathWriter = exports['guidedBuildPath'];
       if (
         typeof newRoute !== 'string' ||
@@ -80,6 +105,12 @@ export async function readGuidedSeam(
         typeof skillSelectAttribute !== 'string' ||
         typeof skillFillAttribute !== 'string' ||
         typeof skillClearAttribute !== 'string' ||
+        typeof equipmentStepPanel !== 'string' ||
+        typeof equipmentSourceAttribute !== 'string' ||
+        typeof equipmentOptionAttribute !== 'string' ||
+        typeof equipmentChooseAttribute !== 'string' ||
+        typeof equipmentRecordedAttribute !== 'string' ||
+        typeof equipmentCompleteAttribute !== 'string' ||
         typeof pathWriter !== 'function'
       ) {
         throw new Error('The guided seam exports have unexpected shapes.');
@@ -108,6 +139,12 @@ export async function readGuidedSeam(
         skillSelectAttribute,
         skillFillAttribute,
         skillClearAttribute,
+        equipmentStepPanel,
+        equipmentSourceAttribute,
+        equipmentOptionAttribute,
+        equipmentChooseAttribute,
+        equipmentRecordedAttribute,
+        equipmentCompleteAttribute,
         buildPath,
       };
     },

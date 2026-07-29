@@ -435,6 +435,49 @@ export function sheetSections(sheet: CharacterSheet): readonly SheetSection[] {
       ],
     });
   }
+  // THE RECORDED PACKAGE, NEVER A BLANK INVENTORY (D33, D65): the sheet says
+  // gear is not itemised rather than showing nothing. The recorded package
+  // prints with its contents from the rules tables — already coin-free,
+  // because no purse is ever granted (D56) — marked as not tracked
+  // individually. The option letter is closed-vocabulary; the source and
+  // item names are stored text and carry the free-text marker.
+  if (sheet.equipment_packages.length === 0) {
+    recorded.push({
+      id: 'equipment:none',
+      label: plain('Starting equipment'),
+      value: null,
+      detail: plain(
+        'No package choice is recorded. Gear is never itemised here either ' +
+          'way — see "What this sheet does not show".',
+      ),
+    });
+  }
+  for (const pack of sheet.equipment_packages) {
+    recorded.push({
+      id: `equipment:${pack.kind}`,
+      label: plain(`Starting equipment — ${pack.kind} package`),
+      value: `Option ${pack.option.toUpperCase()}`,
+      detail: [
+        { text: pack.source_name, free_text: true },
+        { text: ' — ' },
+        {
+          text: pack.contents
+            .map((line) =>
+              line.quantity === 1
+                ? line.item_name
+                : `${String(line.quantity)} ${line.item_name}`,
+            )
+            .join(', '),
+          free_text: true,
+        },
+        {
+          text:
+            '. Shown from the rules tables; these items are not tracked ' +
+            'individually.',
+        },
+      ],
+    });
+  }
   sections.push({ caption: 'What is recorded', rows: recorded });
 
   // WHAT THE SHEET DOES NOT HAVE, PRINTED RATHER THAN LEFT BLANK. F4: a blank
@@ -517,6 +560,12 @@ export function sheetFacts(sheet: CharacterSheet): Record<string, unknown> {
       class_level: roll.class_level,
       rolled_value: roll.rolled_value,
       applies: roll.applies,
+    })),
+    // The recorded package choices: source kind and option letter are both
+    // closed vocabularies; the item names stay in the readable form only.
+    equipment_packages: sheet.equipment_packages.map((pack) => ({
+      kind: pack.kind,
+      option: pack.option,
     })),
     // D4's machine block gets the union and the per-weapon verdict KINDS, not
     // the prose. A verdict kind is a stable key; the sentence beside it is not.

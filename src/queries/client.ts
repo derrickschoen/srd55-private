@@ -1,13 +1,16 @@
 import type { CharacterCommandPayload } from '../domain/command-contracts';
 import type { CharacterRow } from '../domain/models';
 import {
+  EQUIPMENT_RPC,
   GUIDED_RPC,
   type GuidedAllocateAbilitiesParams,
   type GuidedAllocateAbilitiesResult,
+  type GuidedApplyEquipmentParams,
   type GuidedBuildStateParams,
   type GuidedBuildStateResult,
   type GuidedClassOption,
   type GuidedCreateParams,
+  type GuidedEquipmentStepState,
   type GuidedFillSkillGrantParams,
   type GuidedFillSkillGrantResult,
   type GuidedOriginOption,
@@ -103,6 +106,10 @@ export interface QueriesClient extends CatalogClient {
   fillSkillGrant(
     params: GuidedFillSkillGrantParams,
   ): Promise<GuidedFillSkillGrantResult>;
+  equipmentStep(characterId: number): Promise<GuidedEquipmentStepState>;
+  applyEquipment(
+    params: GuidedApplyEquipmentParams,
+  ): Promise<GuidedApplyOriginResult>;
 }
 
 export function createQueriesClient(rpc: RpcClient): QueriesClient {
@@ -266,6 +273,16 @@ export function createQueriesClient(rpc: RpcClient): QueriesClient {
     fillSkillGrant: (params: GuidedFillSkillGrantParams) =>
       rpc.call<GuidedFillSkillGrantParams, GuidedFillSkillGrantResult>(
         GUIDED_RPC.fillSkillGrant,
+        params,
+      ),
+    equipmentStep: (characterId: number) =>
+      rpc.call<GuidedBuildStateParams, GuidedEquipmentStepState>(
+        EQUIPMENT_RPC.equipmentStep,
+        characterParams(characterId),
+      ),
+    applyEquipment: (params: GuidedApplyEquipmentParams) =>
+      rpc.call<GuidedApplyEquipmentParams, GuidedApplyOriginResult>(
+        EQUIPMENT_RPC.applyEquipment,
         params,
       ),
   });

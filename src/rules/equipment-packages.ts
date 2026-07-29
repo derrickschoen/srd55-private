@@ -30,6 +30,20 @@ const LEADING_QUANTITY = /^(?<quantity>\d{1,4})\s+(?<name>\S.*)$/u;
 const MONEY_LINE = /^\d{1,9}\s+GP$/u;
 
 /**
+ * Whether a seeded item name is a whole-line coin entry ("4 GP", "50 GP").
+ *
+ * EXPORTED SO THE CLASSIFICATION IS DECIDED ONCE. The parser above already
+ * decides at seed time that a money line is ordinary gear with the printed
+ * string as its name (D40); the equipment step and the sheet must recognise
+ * the SAME lines again at read time — to suppress gold-only options and to
+ * filter coin lines from rendered package contents (D56, plan §0c) — and two
+ * regexes for one grammar would drift.
+ */
+export function isEquipmentMoneyLine(itemName: string): boolean {
+  return MONEY_LINE.test(itemName);
+}
+
+/**
  * Split one printed package and state its quantity/name rule once for every
  * catalog that consumes an SRD equipment package.
  */

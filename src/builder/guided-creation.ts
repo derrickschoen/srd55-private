@@ -39,6 +39,8 @@ import {
 import type { DatabaseContext } from '../db/database';
 import {
   abilityAllocationMethods,
+  backgroundEquipmentOptions,
+  classEquipmentOptions,
   creatureSizes,
   creatureTypes,
   damageTypes,
@@ -91,6 +93,7 @@ import { GrantRule } from '../grants/grant-rule';
 import { SourceRuleReader } from '../grants/source-rule-reader';
 import {
   countAbilitiesAtLeastPlusTwo,
+  EQUIPMENT_CHOICE_CONFIG_KEY,
   EXPERTISE_AT_LEVEL_ONE_CLASS_CONTENT_KEYS,
   grantsLineageSpells,
   GUIDED_LEVEL_ONE_STEP_ORDER,
@@ -98,6 +101,7 @@ import {
   SKILL_GRANT_KEYS,
   type AbilityAllocationMethod,
   type BuildStep,
+  type EquipmentSourceKind,
   type GuidedAbilityWarning,
   type GuidedAllocateAbilitiesParams,
   type GuidedAllocateAbilitiesResult,
@@ -146,6 +150,16 @@ import {
  * a background hands them two skills, and this per-grant one does not.
  * Species choice grants are choosable in the step but never gate it (§4:
  * "advances only when every class ordinal is filled").
+ *
+ * `equipmentChosen` (E-B): BOTH sources carry a recorded package choice —
+ * the starting class's active source instance AND the background's each hold
+ * the seam's `EQUIPMENT_CHOICE_CONFIG_KEY` in `config` with a valid option
+ * letter (plan §3: "one option per source. Both are required before the step
+ * completes", per D65 and D61). The predicate reads the RECORDED CHOICE and
+ * never counts owned rows: an option can legitimately mint zero rows, and a
+ * count-shaped predicate is exactly §5's trap one more time. A character
+ * whose class or background has no resolvable source instance cannot be
+ * equipment-complete, which is true — there is nothing to stamp grants with.
  */
 export interface GuidedStepEvidence {
   readonly classChosen: boolean;
@@ -153,15 +167,11 @@ export interface GuidedStepEvidence {
   readonly speciesChosen: boolean;
   readonly backgroundChosen: boolean;
   readonly skillsFilled: boolean;
+  readonly equipmentChosen: boolean;
 }
 
 /**
  * The first step the evidence cannot prove complete, in D55's order.
- *
- * The one step with no detection yet (`equipment`) is pinned incomplete, so
- * the walk stops there. The build screen renders that undetectable step as
- * the terminal not-built-yet panel rather than pretending it can be finished
- * here.
  *
  * `abilities` (B1) is REAL DETECTION now: the allocation signal
  * `characters.ability_allocation_method` replaced the pinned `abilities: true`
@@ -169,7 +179,10 @@ export interface GuidedStepEvidence {
  * DELETED, not reworded (plan §5), along with the species screen's
  * abilities-step-skipped disclosure — both existed only while the step was
  * unbuildable. `skills` (S-C) followed the same path: its `false` literal is
- * deleted and the evidence field is the per-grant predicate.
+ * deleted and the evidence field is the per-grant predicate. `equipment`
+ * (E-B) was the LAST literal `false` — the one step whose flag could never
+ * be true — and its evidence is now the both-choices-recorded predicate, so
+ * no entry of this record is pinned any more.
  */
 export function deriveBuildStep(evidence: GuidedStepEvidence): BuildStep {
   const complete: Readonly<Record<BuildStep, boolean>> = {
@@ -178,16 +191,197 @@ export function deriveBuildStep(evidence: GuidedStepEvidence): BuildStep {
     species: evidence.speciesChosen,
     background: evidence.backgroundChosen,
     skills: evidence.skillsFilled,
-    equipment: false,
+    equipment: evidence.equipmentChosen,
   };
   for (const step of GUIDED_LEVEL_ONE_STEP_ORDER) {
     if (!complete[step]) {
       return step;
     }
   }
-  // Unreachable while any step above is a literal `false`; the contract has no
-  // "done" member, so a fully complete character rests on the final step.
+  // The contract has no "done" member, so a fully complete character rests on
+  // the final step — whose SCREEN then shows the recorded state rather than
+  // an open choice, because the equipment step read carries `complete`.
   return 'equipment';
+}
+
+/**
+ * One equipment-granting source, resolved from character state (E-B).
+ *
+ * `source_instance_id` is the ACTIVE instance the recorded choice lives on —
+ * null when the source was recorded without one (the record-only
+ * `applyOrigin` background arm), in which case no choice can be recorded yet
+ * and E-A's mint produces the instance at apply time.
+ */
+export interface ResolvedEquipmentSource {
+  readonly content_key: string;
+  readonly source_name: string;
+  readonly source_instance_id: number | null;
+}
+
+/**
+ * The class whose kit the equipment step offers: the STARTING class (D42's
+ * class-first door; a second class re-opens the kit only as a suggestion
+ * that never rewrites a choice, D42.6, which is not this step). Null when
+ * the character has no class rows at all.
+ */
+export function resolveEquipmentClassSource(
+  db: DatabaseContext,
+  characterId: number,
+): ResolvedEquipmentSource | null {
+  const definition = db.one(
+    `SELECT definition.id AS definition_id, definition.content_key,
+            definition.name
+     FROM character_class_levels AS level
+     INNER JOIN class_definitions AS definition
+       ON definition.id = level.class_definition_id
+     WHERE level.character_id = ?
+     ORDER BY level.is_starting_class DESC, level.id
+     LIMIT 1`,
+    [characterId],
+    (row) => ({
+      definition_id: sqlInteger(row, 'definition_id'),
+      content_key: sqlString(row, 'content_key'),
+      name: sqlString(row, 'name'),
+    }),
+  );
+  if (definition === null) {
+    return null;
+  }
+  const instanceId = db.scalar(
+    `SELECT id FROM character_source_instances
+     WHERE character_id = ? AND source_type = 'class' AND state = 'active'
+       AND source_definition_id = ?
+     ORDER BY id
+     LIMIT 1`,
+    [characterId, definition.definition_id],
+  );
+  return {
+    content_key: definition.content_key,
+    source_name: definition.name,
+    source_instance_id: typeof instanceId === 'number' ? instanceId : null,
+  };
+}
+
+/**
+ * The background whose kit the equipment step offers.
+ *
+ * The active root background source instance is the primary resolution — the
+ * guided `applyBackground` (B3) always mints one. A background recorded by
+ * the record-only `applyOrigin` arm stores only the printed prose, so it
+ * resolves through a UNIQUE template-name match; a name matching zero or
+ * several bundled templates yields null and the step DISCLOSES that the
+ * background has no resolvable package rather than guessing (D33). This is
+ * content identity, not a mechanical fact decided by text (D15's subject):
+ * the row was copied verbatim from the template whose name it carries.
+ */
+export function resolveEquipmentBackgroundSource(
+  db: DatabaseContext,
+  characterId: number,
+): ResolvedEquipmentSource | null {
+  const instance = db.one(
+    `SELECT source.id AS instance_id, definition.content_key,
+            source.display_name
+     FROM character_source_instances AS source
+     INNER JOIN background_definitions AS definition
+       ON definition.id = source.source_definition_id
+     WHERE source.character_id = ?
+       AND source.source_type = 'background'
+       AND source.parent_source_instance_id IS NULL
+       AND source.state = 'active'
+     ORDER BY source.id
+     LIMIT 1`,
+    [characterId],
+    (row) => ({
+      instance_id: sqlInteger(row, 'instance_id'),
+      content_key: sqlString(row, 'content_key'),
+      display_name: sqlString(row, 'display_name'),
+    }),
+  );
+  if (instance !== null) {
+    return {
+      content_key: instance.content_key,
+      source_name: instance.display_name,
+      source_instance_id: instance.instance_id,
+    };
+  }
+  const recordedName = db.scalar(
+    'SELECT name FROM character_background WHERE character_id = ?',
+    [characterId],
+  );
+  if (typeof recordedName !== 'string') {
+    return null;
+  }
+  const templates = db.all(
+    'SELECT content_key, name FROM background_templates WHERE name = ?',
+    [recordedName],
+    (row) => ({
+      content_key: sqlString(row, 'content_key'),
+      name: sqlString(row, 'name'),
+    }),
+  );
+  const template = templates[0];
+  if (templates.length !== 1 || template === undefined) {
+    return null;
+  }
+  return {
+    content_key: template.content_key,
+    source_name: template.name,
+    source_instance_id: null,
+  };
+}
+
+/**
+ * ONE source's recorded package choice, read from its active source
+ * instance's `config` under the seam's `EQUIPMENT_CHOICE_CONFIG_KEY` — the
+ * single truth the step evidence, the equipment step read AND the sheet's
+ * package line all consult, so three surfaces cannot disagree about whether
+ * a choice was made (§5's trap is exactly several surfaces with several
+ * predicates).
+ *
+ * A stored value whose `kind` does not match the source it sits on, or whose
+ * option letter is outside the source's closed set, reads as NO CHOICE
+ * rather than a plausible one: nothing downstream may act on a config shape
+ * this module never writes.
+ */
+export function recordedEquipmentChoiceOption(
+  db: DatabaseContext,
+  characterId: number,
+  kind: EquipmentSourceKind,
+): string | null {
+  const source =
+    kind === 'class'
+      ? resolveEquipmentClassSource(db, characterId)
+      : resolveEquipmentBackgroundSource(db, characterId);
+  if (source === null || source.source_instance_id === null) {
+    return null;
+  }
+  const stored = db.scalar(
+    'SELECT config FROM character_source_instances WHERE id = ?',
+    [source.source_instance_id],
+  );
+  if (typeof stored !== 'string' || stored === '') {
+    return null;
+  }
+  const parsed: unknown = JSON.parse(stored);
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return null;
+  }
+  const choice = (parsed as Record<string, unknown>)[
+    EQUIPMENT_CHOICE_CONFIG_KEY
+  ];
+  if (typeof choice !== 'object' || choice === null || Array.isArray(choice)) {
+    return null;
+  }
+  const record = choice as Record<string, unknown>;
+  if (record['kind'] !== kind) {
+    return null;
+  }
+  const option = record['option'];
+  const validOptions: readonly string[] =
+    kind === 'class' ? classEquipmentOptions : backgroundEquipmentOptions;
+  return typeof option === 'string' && validOptions.includes(option)
+    ? option
+    : null;
 }
 
 export function readGuidedStepEvidence(
@@ -221,6 +415,9 @@ export function readGuidedStepEvidence(
         (row) => sqlInteger(row, 'id'),
       ) !== null,
     skillsFilled: classSkillGrantsFilled(db, characterId),
+    equipmentChosen:
+      recordedEquipmentChoiceOption(db, characterId, 'class') !== null &&
+      recordedEquipmentChoiceOption(db, characterId, 'background') !== null,
   };
 }
 

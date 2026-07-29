@@ -163,10 +163,11 @@ export function renderGuidedBuildState(
     return notFoundView();
   }
   // `class` renders the pinned class-less panel; `species` (A4),
-  // `background` (A5), `abilities` (B1) and `skills` (S-C) never reach this
-  // function — the screen module intercepts them and mounts the live steps,
-  // which need the RPC wiring a pure render cannot hold. The terminal panel
-  // remains the default for what is left (`equipment`).
+  // `background` (A5), `abilities` (B1), `skills` (S-C) and `equipment`
+  // (E-B) never reach this function — the screen module intercepts them and
+  // mounts the live steps, which need the RPC wiring a pure render cannot
+  // hold. Every step is now built, so the terminal panel is purely the
+  // defensive default a FUTURE step lands on before its screen exists.
   const panel =
     state.current_step === 'class'
       ? classlessPanel()

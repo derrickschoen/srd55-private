@@ -149,6 +149,11 @@ The gaps, by their stable `kind` keys:
   recorded, so an attack profile offers both formulas. Its simple/martial
   category IS recorded and its proficiency verdict IS derived — see D27, D28 and
   D33 — so the renamed gap is about reach alone.
+- `gear_not_itemised` — starting equipment is a recorded package choice (D65):
+  only its weapons and armour become tracked items, other gear renders from the
+  rules tables and cannot be edited or spent, and no gold is granted (D56). The
+  recorded package itself prints under "What is recorded"; this gap is the
+  unconditional half, true of every character because no gear table exists.
 
 `background_skills_are_text` was in this list and is DELETED, not reworded
 (skills-with-provenance §3.5): a background's two printed skills are now FILLED
