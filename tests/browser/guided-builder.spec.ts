@@ -164,9 +164,9 @@ test('the empty-database front door chooses class first, persists once named, an
     new URL(persistedSeam.buildPath, page.url()).href,
   );
   await expect(
-    page.getByRole('heading', {
-      name: 'The Background step is not built yet',
-    }),
+    page.locator(
+      `[${persistedSeam.panelAttribute}="${persistedSeam.backgroundStepPanel}"]`,
+    ),
   ).toBeVisible();
   await expectNoPlannerRouteAnchors(page);
   expect(
@@ -195,9 +195,49 @@ test('the empty-database front door chooses class first, persists once named, an
 
   await page.reload();
   await expect(
+    page.locator(
+      `[${persistedSeam.panelAttribute}="${persistedSeam.backgroundStepPanel}"]`,
+    ),
+  ).toBeVisible();
+  await expectNoPlannerRouteAnchors(page);
+
+  const firstBackground = page.locator('[data-background-option]').first();
+  await expect(firstBackground).toBeVisible();
+  await firstBackground.click();
+
+  await expect(page).toHaveURL(
+    new URL(persistedSeam.buildPath, page.url()).href,
+  );
+  await expect(
     page.getByRole('heading', {
-      name: 'The Background step is not built yet',
+      name: 'The Skills step is not built yet',
     }),
   ).toBeVisible();
   await expectNoPlannerRouteAnchors(page);
+  expect(
+    await page.evaluate(() =>
+      window.staticApp.inspectRows('character_background'),
+    ),
+  ).toEqual([
+    expect.objectContaining({
+      character_id: characterId,
+    }),
+  ]);
+
+  await page.reload();
+  await expect(
+    page.getByRole('heading', {
+      name: 'The Skills step is not built yet',
+    }),
+  ).toBeVisible();
+  await expectNoPlannerRouteAnchors(page);
+  expect(
+    await page.evaluate(() =>
+      window.staticApp.inspectRows('character_background'),
+    ),
+  ).toEqual([
+    expect.objectContaining({
+      character_id: characterId,
+    }),
+  ]);
 });
