@@ -1,5 +1,55 @@
 # Binding scope decisions
 
+## D75 — OWNER: a shield can CHANGE THE BASE, not just add to it (2026-07-29)
+
+**The ruling.** *"The resolver will also need to account for changing the base
+armor if a shield is equipped and the source of unarmored defense does not allow
+shields."*
+
+**This closes a hole D74 left open.** D74 made a shield break a formula whose
+`allows_shield` is false. It did not say what happens next — and the answer is
+not "no base". **Equipping a shield can lower the base while adding +2, and the
+net can go either way.**
+
+**1. THE SHIELD IS PART OF ELIGIBILITY, NOT A LATE ADDEND.** D73 said bonuses and
+shields *"apply on top of whichever base won"*. For flat `armor_class_bonus`
+rows that is still true. **For a shield it is not**, because the shield decides
+which bases are eligible in the first place. The resolver must therefore compute
+**against the equipment actually carried**, not compute a base and then decorate
+it.
+
+**2. THERE IS ALWAYS A FLOOR: 10 + DEX.** The default unarmoured Armor Class is
+itself a formula — base 10, Dexterity, `allows_shield: true` — and it is
+**always eligible while unarmoured**. Without it, excluding every other formula
+would leave the resolver with nothing, which is how a sheet ends up showing no
+Armor Class at all. It competes like any other and normally loses.
+
+**3. THE WORKED CASE, so nobody has to derive it.** A Monk with DEX +3, WIS +3,
+whose formula forbids shields:
+
+- **No shield:** Monk 10+3+3 = **16** wins over the floor 10+3 = 13. Armor Class
+  **16**.
+- **Shield equipped:** the Monk formula is **excluded** (D74). The floor wins at
+  **13**, and the shield adds +2. Armor Class **15**.
+
+**Picking up a shield made this character worse, and that is correct.** A
+resolver that adds +2 to the winning base without re-running eligibility reports
+**18** — a confidently wrong number that no higher-is-better test catches.
+
+**4. THE SHEET EXPLAINS THE DROP.** Per D67 and D74: it names the winning base,
+the shield, and **the formula that was excluded and why**. *"Martial Arts
+(10 + DEX + WIS) does not apply while you carry a shield."* A number that falls
+when a person picks something up is indistinguishable from a bug unless the sheet
+says otherwise.
+
+**5. WARN, NEVER BLOCK (D49).** Say that dropping the shield would be better. Do
+not refuse the shield.
+
+**6. The fixture**, added to D72's list: **a Monk with a shield**, asserting the
+total is 15 rather than 18 **and** that the exclusion is named on the sheet. This
+is the second fixture — with D74's lower-AC-in-armour case — that a
+value-before-conditions resolver fails and everything else passes.
+
 ## D74 — OWNER: a broken condition EXCLUDES a formula outright; wearing armour is the player's right (2026-07-29)
 
 **The ruling.** *"The resolver for unarmed defence will need to be able to short
