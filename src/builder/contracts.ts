@@ -11,6 +11,7 @@
  * — the plan records why.
  */
 
+import type { Ability } from '../domain/enums';
 import { BUNDLED_ORIGIN_RULES_EDITION } from '../rules/origins-srd';
 
 /* ------------------------------------------------------------------ steps */
@@ -325,6 +326,8 @@ export const GUIDED_PANEL = Object.freeze({
   speciesStep: 'species-step',
   /** The background step. Ratified from A5, same pattern. */
   backgroundStep: 'background-step',
+  /** The abilities step (B1). */
+  abilitiesStep: 'abilities-step',
 } as const);
 
 /** The attribute the panels above are selected by: `data-panel="…"`. */
@@ -351,4 +354,129 @@ export const GUIDED_RPC = Object.freeze({
   create: 'queries.characters.createGuided',
   applyOrigin: 'queries.characters.applyOrigin',
   buildState: 'queries.characters.buildState',
+  allocateAbilities: 'queries.characters.allocateAbilities',
 } as const);
+
+/* --------------------------------------------------------------- abilities */
+
+/**
+ * THE ABILITIES STEP AND THE CONTRIBUTION LAYER.
+ *
+ * Pinned by `docs/design/2026-07-28-abilities-and-contributions.md` after three
+ * review rounds. B1 and B2 are SEQUENTIAL, not parallel — §3.8 — because both
+ * change the share wire and D41 makes each change mint a frozen version plus a
+ * mandatory migration. B1 mints share v3; B2 mints v4, rebased on B1.
+ */
+
+/** D64: standard array is the default; the other two WARN, never block. */
+export type AbilityAllocationMethod =
+  | 'standard_array'
+  | 'point_buy'
+  | 'manual';
+
+export type GuidedAbilityScores = Readonly<Record<Ability, number>>;
+
+/**
+ * `operation_uuid` and `expected_revision` are NOT optional. Every executor
+ * request requires both, and revision 3 of the plan said so in prose while the
+ * pinned shape omitted them — the kind of contradiction two parallel agents
+ * resolve differently.
+ */
+export interface GuidedAllocateAbilitiesParams {
+  readonly character_id: number;
+  readonly method: AbilityAllocationMethod;
+  readonly scores: GuidedAbilityScores;
+  readonly operation_uuid: string;
+  readonly expected_revision: number;
+}
+
+/**
+ * WARNINGS ARE DATA, AND THAT IS WHAT MAKES D49 STRUCTURAL.
+ *
+ * D49 says warn and block are different mechanisms that must not be conflated.
+ * A warning carried in the result — rather than expressed as styling, or as a
+ * disabled button, or as a refusal reason — is the only form a test can assert
+ * without proving something about CSS. `GuidedAbilityWarning` deliberately does
+ * NOT share a union with `GuidedRefusalReason`: a refusal stops the work, a
+ * warning never does.
+ */
+export type GuidedAbilityWarning =
+  | { readonly kind: 'non_standard_method'; readonly method: AbilityAllocationMethod }
+  | { readonly kind: 'weak_scores'; readonly at_least_plus_two: number };
+
+export interface GuidedAllocateAbilitiesResult {
+  readonly character_id: number;
+  readonly current_step: BuildStep;
+  readonly warnings: readonly GuidedAbilityWarning[];
+}
+
+/**
+ * D64's weakness condition, as one named function so the step, the tests and
+ * any later surface cannot each invent their own threshold.
+ *
+ * "At least two +2 ability scores" is read as two abilities whose MODIFIER is
+ * +2 or better — score 14 or higher. The plan records that reading explicitly so
+ * one sentence from the owner can change this one number.
+ */
+export const WEAK_SCORES_MIN_COUNT = 2;
+export const WEAK_SCORES_MIN_SCORE = 14;
+
+export function countAbilitiesAtLeastPlusTwo(
+  scores: GuidedAbilityScores,
+): number {
+  return Object.values(scores).filter(
+    (score) => score >= WEAK_SCORES_MIN_SCORE,
+  ).length;
+}
+
+export function hasWeakScores(scores: GuidedAbilityScores): boolean {
+  return countAbilitiesAtLeastPlusTwo(scores) < WEAK_SCORES_MIN_COUNT;
+}
+
+/* ------------------------------------------------- contributions (B2) */
+
+/**
+ * The additive layer. A contribution is a `character_effects` row of kind
+ * `ability_increase`, and it REQUIRES a non-null `source_instance_id` — the
+ * column is nullable in general and guided species copying writes NULL, so
+ * without a kind-specific CHECK D63's "knows where it came from" would be a
+ * convention rather than an invariant.
+ *
+ * `maximum` is bounded 1–30 at the validator, the CHECK and the share wire.
+ * Revision 3 floored negatives at 1 because `AbilityScore` throws below it, then
+ * left the top of the range open — the same crash by the same argument.
+ */
+export const ABILITY_SCORE_MIN = 1;
+export const ABILITY_SCORE_MAX = 30;
+
+export interface AbilityIncreaseContribution {
+  readonly ability: Ability;
+  readonly amount: number;
+  readonly maximum: number;
+  readonly source_instance_id: number;
+}
+
+/**
+ * THE RESOLVER, AND WHY IT ORDERS BY ACQUISITION.
+ *
+ * Contributions apply in `id` order. `character_effects.id` is autoincrement, so
+ * it is monotonic in insertion order — acquisition order — and no user can
+ * change it. Revision 3 ordered by `(sort_order, id)`, and `sort_order` is the
+ * user's own editable display order: a cosmetic drag would have changed an
+ * ability score.
+ *
+ * Each positive contribution adds `max(0, min(running + amount, maximum) −
+ * running)`, so it applies PARTIALLY when it would cross its own cap and ZERO
+ * when the running total already meets it. Negatives floor the running total at
+ * `ABILITY_SCORE_MIN`.
+ *
+ * The result keeps all three values addressable because different surfaces need
+ * different ones — see `abilities_base` versus `abilities` in the read model.
+ */
+export interface ResolvedAbility {
+  readonly base: number;
+  readonly contributions: readonly AbilityIncreaseContribution[];
+  readonly total: number;
+}
+
+export type ResolvedAbilities = Readonly<Record<Ability, ResolvedAbility>>;
