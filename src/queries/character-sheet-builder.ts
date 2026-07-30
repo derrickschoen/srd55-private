@@ -47,9 +47,13 @@ import {
   skillModifier,
   type HitPointRolls,
   type ArmorClassBonusCandidate,
+  type ArmorClassExclusionReason,
+  type ArmorClassFormula,
   type ArmorClassFormulaCandidate,
+  type ArmorClassResult,
   type ArmorClassSourceCategory,
   type EquippedArmor,
+  type ResolvedArmorClassFormula,
   type SheetArmor,
   type SheetClass,
   type SheetWarning,
@@ -138,6 +142,55 @@ export interface SheetArmorRow {
   readonly notes: string | null;
 }
 
+/** One modifier-only item, including the attunement state that gates its effects. */
+export interface SheetItemRow {
+  readonly name: string;
+  readonly description: string | null;
+  readonly requires_attunement: boolean;
+  readonly attuned: boolean;
+}
+
+export interface SheetArmorClassFormula {
+  /** User/catalog-authored display label; never copied into structured JSON. */
+  readonly label: string;
+  readonly source: ArmorClassSourceCategory;
+  /** Closed-vocabulary/numeric expression, such as `13 + DEX`. */
+  readonly expression: string;
+  /** Absent for excluded formulas, which eligibility prevents us from scoring. */
+  readonly total: number | null;
+}
+
+export interface SheetArmorClassExclusion {
+  readonly formula: SheetArmorClassFormula;
+  readonly reason: ArmorClassExclusionReason;
+}
+
+export interface SheetArmorClassTieBreak {
+  readonly winner: SheetArmorClassFormula;
+  readonly losers: readonly SheetArmorClassFormula[];
+  readonly rule: 'source_precedence_then_label';
+}
+
+/**
+ * The transient, source-carrying explanation of the final Armor Class.
+ *
+ * Labels remain separate from the numeric/closed-vocabulary fields so the view
+ * can mark every imported or hand-written label as unverified free text.
+ */
+export interface SheetArmorClass extends SheetNumber {
+  readonly winner: SheetArmorClassFormula;
+  readonly shields: readonly {
+    readonly label: string;
+    readonly amount: number;
+  }[];
+  readonly bonuses: readonly {
+    readonly label: string;
+    readonly amount: number;
+  }[];
+  readonly excluded: readonly SheetArmorClassExclusion[];
+  readonly tie_break: SheetArmorClassTieBreak | null;
+}
+
 export interface SheetHitPointRoll {
   readonly class_name: string;
   readonly class_level: number;
@@ -209,7 +262,6 @@ export interface SheetGap {
   readonly kind:
     | 'no_class_feature_text'
     | 'partial_subclass_catalog'
-    | 'no_unarmored_defense'
     | 'no_expertise'
     | 'weapon_reach_not_recorded'
     | 'gear_not_itemised';
@@ -246,7 +298,7 @@ export interface CharacterSheet {
   readonly hit_points: SheetNumber;
   /** The species contribution, separately, and `null` when there is none. */
   readonly species_hit_points: UndeterminedSheetNumber | null;
-  readonly armor_class: SheetNumber;
+  readonly armor_class: SheetArmorClass;
   readonly initiative: SheetNumber;
   readonly passive_perception: UndeterminedSheetNumber;
   readonly saves: readonly SheetSave[];
@@ -276,6 +328,7 @@ export interface CharacterSheet {
   readonly classes: readonly SheetClassLine[];
   readonly proficiencies: SheetProficiencies;
   readonly armor: readonly SheetArmorRow[];
+  readonly items: readonly SheetItemRow[];
   readonly hit_point_rolls: readonly SheetHitPointRoll[];
   /** The recorded package choices, D33's answer to a blank inventory (D65). */
   readonly equipment_packages: readonly SheetEquipmentPackage[];
@@ -491,31 +544,28 @@ export class CharacterSheetBuilder {
     this.#content = new SheetContentLookup(db);
   }
 
+  /**
+   * The narrow read used by the equip preview.
+   *
+   * It deliberately does not build classes, hit points, gaps, or any other
+   * sheet section. A pending armour command must not become unwriteable because
+   * an unrelated sheet section contains incomplete imported content.
+   */
+  armorClassValue(characterId: number): number {
+    const character = this.#character(characterId);
+    const scores = this.#scores(characterId, character);
+    const armorRows = this.#armor(characterId).rows;
+    const effects = readEligibleCharacterEffects(
+      this.db,
+      characterId,
+      'display',
+    );
+    return resolveSheetArmorClass(scores, armorRows, effects).result.value;
+  }
+
   build(characterId: number): CharacterSheet {
-    const character = this.db.one(
-      `SELECT id, name, strength, dexterity, constitution, intelligence,
-              wisdom, charisma, proficiency_bonus_override
-       FROM characters WHERE id = ?`,
-      [characterId],
-      sheetCharacter,
-    );
-    if (character === null) {
-      throw new CharacterNotFoundError(characterId);
-    }
-    // THE RESOLVED TOTALS, NOT BASE — reader one of the four (plan §3.4, §6).
-    // Everything below that computes with a score — hit point maximum, Armor
-    // Class, saving throws, skills, initiative, the printed six — uses these,
-    // so a Constitution contribution moves HP here rather than only moving a
-    // number on the planner.
-    const scores = AbilityScores.fromArray(
-      resolvedTotals(
-        resolveCharacterAbilities(
-          this.db,
-          characterId,
-          character.base_abilities,
-        ),
-      ),
-    );
+    const character = this.#character(characterId);
+    const scores = this.#scores(characterId, character);
     const content = this.#content.forCharacter(characterId);
     const classes = this.#classes(characterId, content);
     const rolls = this.#rolls(characterId);
@@ -530,24 +580,17 @@ export class CharacterSheetBuilder {
     const totalLevel = characterLevel(classes.map((entry) => entry.level));
 
     const hitPoints = hitPointMaximum({ classes, scores, rolls: rolls.map });
-    const worn = armorRows.find((row) => row.slot === 'worn') ?? null;
-    const shield = armorRows.find((row) => row.slot === 'shield') ?? null;
     const eligibleEffectRows = readEligibleCharacterEffects(
       this.db,
       characterId,
       'display',
     );
-    const ac = armorClass({
-      equipment: armorRows.map(
-        (row): EquippedArmor => ({
-          slot: row.slot,
-          armor: sheetArmor(row),
-        }),
-      ),
-      formulas: armorClassFormulas(eligibleEffectRows),
-      bonuses: armorClassBonuses(eligibleEffectRows),
+    const acResolution = resolveSheetArmorClass(
       scores,
-    });
+      armorRows,
+      eligibleEffectRows,
+    );
+    const ac = acResolution.result;
     const saves = savingThrowProficiencies(classes);
     // D28's union, and its warnings. It reuses the SAME `startingClass` the
     // saving throws above go through — which is why the two can disagree about
@@ -656,7 +699,26 @@ export class CharacterSheetBuilder {
         id: 'armor_class',
         label: 'Armor Class',
         value: ac.value,
-        formula: armorClassFormula(worn, shield),
+        formula:
+          'Conditions are checked before eligible base formulas compete; ' +
+          'shields and flat effects are then added to the winner.',
+        winner: armorClassFormulaSummary(ac.winner),
+        shields: armorRows
+          .filter((row) => row.category === 'shield')
+          .map((row) => ({ label: row.name, amount: row.armor_class })),
+        bonuses: acResolution.bonuses.map((entry) => ({ ...entry })),
+        excluded: ac.excluded.map((entry) => ({
+          formula: armorClassFormulaSummary(entry.formula),
+          reason: entry.reason,
+        })),
+        tie_break:
+          ac.tie_break === null
+            ? null
+            : {
+                winner: armorClassFormulaSummary(ac.tie_break.winner),
+                losers: ac.tie_break.losers.map(armorClassFormulaSummary),
+                rule: ac.tie_break.rule,
+              },
       },
       initiative: {
         id: 'initiative',
@@ -746,6 +808,7 @@ export class CharacterSheetBuilder {
         saving_throws: entry.saving_throws,
       })),
       armor: armorRows,
+      items: this.#items(characterId),
       hit_point_rolls: rolls.list,
       // Read through E-B's one recorded-package reader — the same source
       // resolution, choice reader and coin-line display filter the equipment
@@ -781,6 +844,37 @@ export class CharacterSheetBuilder {
       ]),
       gaps: SHEET_GAPS,
     };
+  }
+
+  #character(characterId: number): SheetCharacterRow {
+    const character = this.db.one(
+      `SELECT id, name, strength, dexterity, constitution, intelligence,
+              wisdom, charisma, proficiency_bonus_override
+       FROM characters WHERE id = ?`,
+      [characterId],
+      sheetCharacter,
+    );
+    if (character === null) {
+      throw new CharacterNotFoundError(characterId);
+    }
+    return character;
+  }
+
+  #scores(
+    characterId: number,
+    character: SheetCharacterRow,
+  ): AbilityScores {
+    // THE RESOLVED TOTALS, NOT BASE — reader one of the four (plan §3.4, §6).
+    // Every computed score consumer uses this one result.
+    return AbilityScores.fromArray(
+      resolvedTotals(
+        resolveCharacterAbilities(
+          this.db,
+          characterId,
+          character.base_abilities,
+        ),
+      ),
+    );
   }
 
   #classes(
@@ -1002,6 +1096,21 @@ export class CharacterSheetBuilder {
     return { rows, warnings };
   }
 
+  #items(characterId: number): readonly SheetItemRow[] {
+    return this.db.all(
+      `SELECT name, description, requires_attunement, attuned
+       FROM character_items
+       WHERE character_id = ?
+       ORDER BY name, id`,
+      [characterId],
+      (row): SheetItemRow => ({
+        name: sqlString(row, 'name'),
+        description: sqlNullableString(row, 'description'),
+        requires_attunement: sqlBoolean(row, 'requires_attunement'),
+        attuned: sqlBoolean(row, 'attuned'),
+      }),
+    );
+  }
 }
 
 function sheetArmor(row: SheetArmorRow): SheetArmor {
@@ -1058,6 +1167,31 @@ function armorClassBonuses(
     });
 }
 
+function resolveSheetArmorClass(
+  scores: AbilityScores,
+  armorRows: readonly SheetArmorRow[],
+  effects: readonly EligibleCharacterEffect[],
+): {
+  readonly result: ArmorClassResult;
+  readonly bonuses: readonly ArmorClassBonusCandidate[];
+} {
+  const bonuses = armorClassBonuses(effects);
+  return {
+    result: armorClass({
+      equipment: armorRows.map(
+        (row): EquippedArmor => ({
+          slot: row.slot,
+          armor: sheetArmor(row),
+        }),
+      ),
+      formulas: armorClassFormulas(effects),
+      bonuses,
+      scores,
+    }),
+    bonuses,
+  };
+}
+
 function armorClassSource(
   effect: EligibleCharacterEffect,
 ): Exclude<ArmorClassSourceCategory, 'worn_armor'> {
@@ -1070,31 +1204,60 @@ function armorClassSource(
   return effect.source_type ?? 'manual';
 }
 
-function armorClassFormula(
-  worn: SheetArmorRow | null,
-  shield: SheetArmorRow | null,
-): string {
-  const parts: string[] = [];
-  parts.push(
-    worn === null
-      ? 'Unarmoured: 10 + Dexterity modifier.'
-      : `${worn.name}: base ${String(worn.armor_class)}, ${dexTermText(worn)}.`,
-  );
-  if (shield !== null) {
-    parts.push(`${shield.name}: +${String(shield.armor_class)}.`);
-  }
-  return parts.join(' ');
+function armorClassFormulaSummary(
+  resolved: ResolvedArmorClassFormula,
+): SheetArmorClassFormula;
+function armorClassFormulaSummary(
+  formula: ArmorClassFormulaCandidate,
+): SheetArmorClassFormula;
+function armorClassFormulaSummary(
+  value: ResolvedArmorClassFormula | ArmorClassFormulaCandidate,
+): SheetArmorClassFormula {
+  const formula = 'formula' in value ? value.formula : value;
+  return {
+    label: formula.label,
+    source: formula.source,
+    expression: armorClassExpression(formula),
+    total: 'total' in value ? value.total : null,
+  };
 }
 
-function dexTermText(armor: SheetArmorRow): string {
-  switch (armor.dex_bonus) {
+function armorClassExpression(formula: ArmorClassFormula): string {
+  if (formula.kind === 'ability_formula') {
+    return [
+      String(formula.base),
+      abilityAbbreviation(formula.ability_1),
+      ...(formula.ability_2 === null
+        ? []
+        : [abilityAbbreviation(formula.ability_2)]),
+    ].join(' + ');
+  }
+  switch (formula.armor.dex_bonus) {
     case 'full':
-      return 'plus the Dexterity modifier';
+      return `${String(formula.armor.armor_class)} + DEX`;
     case 'capped':
-      return `plus the Dexterity modifier capped at ${String(
-        armor.dex_bonus_max ?? 0,
-      )}`;
+      return (
+        `${String(formula.armor.armor_class)} + DEX ` +
+        `(maximum ${String(formula.armor.dex_bonus_max ?? 0)})`
+      );
     case 'none':
-      return 'with no Dexterity term';
+      return String(formula.armor.armor_class);
+  }
+}
+
+function abilityAbbreviation(ability: Ability): string {
+  switch (ability) {
+    case 'strength':
+      return 'STR';
+    case 'dexterity':
+      return 'DEX';
+    case 'constitution':
+      return 'CON';
+    case 'intelligence':
+      return 'INT';
+    case 'wisdom':
+      return 'WIS';
+    case 'charisma':
+      return 'CHA';
   }
 }

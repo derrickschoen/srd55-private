@@ -243,6 +243,14 @@ describe('the derived character sheet', () => {
     // flat bonus: 19 − 2 = 17.
     const adjusted = builder.build(characterId);
     expect(adjusted.armor_class.value).toBe(17);
+    expect(adjusted.armor_class.bonuses).toEqual([
+      { label: 'Cursed helm, house ruled.', amount: -2 },
+    ]);
+    expect(adjusted.armor_class.winner).toMatchObject({
+      label: 'Half Plate Armor',
+      source: 'worn_armor',
+      total: 17,
+    });
   });
 
   it('counts Heavy armour as a flat value, never as a cap of zero', () => {
@@ -431,6 +439,31 @@ describe('the derived character sheet', () => {
     expect(unattuned.species_hit_points).toBeNull();
     expect(unattuned.walking_speed_feet).toBe(30);
     expect(unattuned.damage_resistances).toEqual([]);
+    expect(unattuned.items).toEqual([
+      {
+        name: 'Attuned Shell',
+        description: null,
+        requires_attunement: true,
+        attuned: true,
+      },
+      {
+        name: 'Cloak of the Armadillo',
+        description: null,
+        requires_attunement: true,
+        attuned: false,
+      },
+      {
+        name: 'Ring of Shell',
+        description: null,
+        requires_attunement: false,
+        attuned: false,
+      },
+    ]);
+    expect(unattuned.armor_class.bonuses.map((entry) => entry.label)).toEqual([
+      'Attuned Shell AC',
+      'Ring AC',
+      'Manual AC',
+    ]);
     expect(
       characterEffects(db, characterId).map((effect) => effect.label),
     ).not.toContain('Amulet HP');
@@ -441,6 +474,12 @@ describe('the derived character sheet', () => {
     );
     const attuned = builder.build(characterId);
     expect(attuned.armor_class.value).toBe(19);
+    expect(attuned.armor_class.bonuses.map((entry) => entry.label)).toEqual([
+      'Cloak AC',
+      'Attuned Shell AC',
+      'Ring AC',
+      'Manual AC',
+    ]);
     // Constitution 13 + 2 = 15, moving its modifier from +1 to +2 across all
     // eight levels: 54 + 8 = 62.
     expect(attuned.hit_points.value).toBe(62);
@@ -491,7 +530,14 @@ describe('the derived character sheet', () => {
 
     // DEX 14 is +2 and WIS 11 is +0: Armadillo Shell 15 beats Martial Arts
     // 12, then the Cloak adds 1.
-    expect(builder.build(characterId).armor_class.value).toBe(16);
+    const unshielded = builder.build(characterId);
+    expect(unshielded.armor_class.value).toBe(16);
+    expect(unshielded.armor_class.winner).toMatchObject({
+      label: 'Armadillo Shell',
+      source: 'species',
+      expression: '13 + DEX',
+      total: 15,
+    });
 
     db.exec(
       `INSERT INTO character_armor (
@@ -501,7 +547,88 @@ describe('the derived character sheet', () => {
     );
     // Martial Arts is ineligible with a shield. Armadillo Shell still permits
     // it: base 15 + shield 2 + cloak 1 = 18.
-    expect(builder.build(characterId).armor_class.value).toBe(18);
+    const shielded = builder.build(characterId);
+    expect(shielded.armor_class.value).toBe(18);
+    expect(shielded.armor_class.excluded).toEqual([
+      {
+        formula: {
+          label: 'Martial Arts',
+          source: 'class',
+          expression: '10 + DEX + WIS',
+          total: null,
+        },
+        reason: {
+          kind: 'shield_not_allowed',
+          shield_name: 'Shell Shield',
+        },
+      },
+    ]);
+  });
+
+  it('carries every excluded formula and a broken tie into the sheet projection', () => {
+    const speciesSource = db.exec(
+      `INSERT INTO character_source_instances (
+         character_id, instance_uuid, source_type, display_name
+       ) VALUES (?, 'test-ac-disclosure-species', 'species', 'Armadillo')`,
+      [characterId],
+    ).lastInsertId;
+    const classSource = db.exec(
+      `INSERT INTO character_source_instances (
+         character_id, instance_uuid, source_type, display_name
+       ) VALUES (?, 'test-ac-disclosure-class', 'class', 'Monk')`,
+      [characterId],
+    ).lastInsertId;
+    db.exec(
+      `INSERT INTO character_effects (
+         character_id, sort_order, effect_kind, base, ability_1, ability_2,
+         allows_shield, source_instance_id, label
+       ) VALUES
+         (?, 1, 'armor_class_formula', 13, 'dexterity', NULL, 1, ?,
+          'Armadillo Shell'),
+         (?, 2, 'armor_class_formula', 13, 'dexterity', NULL, 1, ?,
+          'Monk Shell')`,
+      [characterId, speciesSource, characterId, classSource],
+    );
+
+    const tied = builder.build(characterId);
+    expect(tied.armor_class.value).toBe(15);
+    expect(tied.armor_class.tie_break).toEqual({
+      winner: {
+        label: 'Armadillo Shell',
+        source: 'species',
+        expression: '13 + DEX',
+        total: 15,
+      },
+      losers: [
+        {
+          label: 'Monk Shell',
+          source: 'class',
+          expression: '13 + DEX',
+          total: 15,
+        },
+      ],
+      rule: 'source_precedence_then_label',
+    });
+
+    db.exec(
+      `INSERT INTO character_armor (
+         character_id, slot, name, category, armor_class, dex_bonus
+       ) VALUES (?, 'worn', 'Scute Wrap', 'light', 11, 'full')`,
+      [characterId],
+    );
+    const armoured = builder.build(characterId);
+    expect(armoured.armor_class.value).toBe(13);
+    expect(
+      armoured.armor_class.excluded.map((entry) => [
+        entry.formula.label,
+        entry.formula.expression,
+        entry.reason.kind,
+      ]),
+    ).toEqual([
+      ['Unarmoured', '10 + DEX', 'wearing_armor'],
+      ['Armadillo Shell', '13 + DEX', 'wearing_armor'],
+      ['Monk Shell', '13 + DEX', 'wearing_armor'],
+    ]);
   });
 
   it('adds the proficiency bonus to a chosen skill and to nothing else', () => {

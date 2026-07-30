@@ -3,8 +3,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import schema from '../../../src/db/schema.sql?raw';
 import { createApplicationLifecycle } from '../../../src/db/bootstrap';
 import { sqlString } from '../../../src/db/codecs';
-import { DatabaseLifecycle } from '../../../src/db/database-lifecycle';
+import {
+  DatabaseLifecycle,
+  openDatabaseImage,
+} from '../../../src/db/database-lifecycle';
+import { auditCandidateDatabase } from '../../../src/db/candidate-audit';
 import { AddSourceCommand } from '../../../src/commands/add-source';
+import { CharacterCommandExecutor } from '../../../src/commands/character-command-executor';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import { CharacterCompletenessQueries } from '../../../src/queries/character-completeness';
 import {
@@ -430,6 +435,113 @@ describe('application database bootstrap', () => {
     expect(() => {
       lifecycle.validateBytes(seededBytes);
     }).not.toThrow();
+  });
+
+  it('validates, audits, and reopens a Monk formula image after equipping a shield', async () => {
+    const sqlite3 = await getSqlite3();
+    const fixture = bareLifecycle(sqlite3);
+    const monkId = fixture.database.exec(
+      `INSERT INTO class_definitions (
+         content_key, name, rules_edition
+       ) VALUES ('2024:class:monk', 'Monk', '2024')`,
+    ).lastInsertId;
+    const characterId = fixture.database.exec(
+      `INSERT INTO characters (name, dexterity, wisdom)
+       VALUES ('Monk shield lifecycle', 16, 16)`,
+    ).lastInsertId;
+    new AddSourceCommand(
+      fixture.database,
+      {
+        type: 'add_source',
+        source_type: 'class',
+        source_definition_id: monkId,
+        config: { level: 1 },
+      },
+      new CharacterCommandIntegrity('monk-shield-source'),
+    ).apply(characterId);
+    const sourceId = Number(
+      fixture.database.scalar(
+        `SELECT id FROM character_source_instances
+         WHERE character_id = ? AND source_type = 'class'`,
+        [characterId],
+      ),
+    );
+    fixture.database.exec(
+      `INSERT INTO character_effects (
+         character_id, sort_order, effect_kind, base, ability_1, ability_2,
+         allows_shield, source_instance_id, label
+       ) VALUES (
+         ?, 1, 'armor_class_formula', 10, 'dexterity', 'wisdom', 0, ?,
+         'Monk Unarmored Defense'
+       )`,
+      [characterId, sourceId],
+    );
+    const fixtureBytes = await fixture.exportBytes();
+
+    const lifecycle = track(
+      createApplicationLifecycle(
+        sqlite3,
+        new MemoryDatabaseStorage(sqlite3),
+      ),
+    );
+    lifecycle.open();
+    await lifecycle.replace(fixtureBytes);
+    const result = await new CharacterCommandExecutor(
+      lifecycle.database,
+      new CharacterCommandIntegrity('monk-shield-lifecycle'),
+    ).execute({
+      character_id: characterId,
+      operation_uuid: '71717171-7171-4171-8171-717171717171',
+      expected_revision: 0,
+      command: {
+        type: 'set_armor',
+        slot: 'shield',
+        armor: {
+          name: 'Shell Shield',
+          category: 'shield',
+          armor_class: 2,
+          dex_bonus: 'none',
+          dex_bonus_max: null,
+          strength_requirement: null,
+          stealth_disadvantage: false,
+          notes: null,
+        },
+      },
+    });
+    expect(result.preview_warnings).toEqual([
+      {
+        code: 'armor_class_reduced',
+        message: 'Equipping Shell Shield reduces Armor Class from 16 to 15.',
+        item_name: 'Shell Shield',
+        previous_armor_class: 16,
+        new_armor_class: 15,
+      },
+    ]);
+
+    const bytes = await lifecycle.exportBytes();
+    expect(() => lifecycle.validateBytes(bytes)).not.toThrow();
+    const candidate = openDatabaseImage(sqlite3, bytes);
+    try {
+      expect(() => auditCandidateDatabase(candidate)).not.toThrow();
+    } finally {
+      candidate.close();
+    }
+    expect(() => lifecycle.reopen()).not.toThrow();
+    expect(
+      lifecycle.database.scalar(
+        `SELECT count(*) FROM character_armor
+         WHERE character_id = ? AND slot = 'shield'`,
+        [characterId],
+      ),
+    ).toBe(1);
+    expect(
+      lifecycle.database.scalar(
+        `SELECT count(*) FROM character_effects
+         WHERE character_id = ? AND source_instance_id = ?
+           AND effect_kind = 'armor_class_formula'`,
+        [characterId, sourceId],
+      ),
+    ).toBe(1);
   });
 });
 

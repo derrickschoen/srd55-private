@@ -286,6 +286,14 @@ test('the build reference sections are collapsed, present in the DOM, and never 
   await expect(scope.locator('tr', { hasText: /^hit points/u })).toContainText(
     'yes',
   );
+  // AC-B closes the old partial claim: formulas, conditions, the stable
+  // tie-break, shields and labelled flat effects now resolve and disclose.
+  await expect(scope.locator('tr', { hasText: /^armour class/u })).toContainText(
+    'yes',
+  );
+  expect(
+    value.scope.coverage.find((fact) => fact.concept === 'armour class')?.state,
+  ).toBe('modelled');
   // Languages remain genuinely absent — no column anywhere holds one — so the
   // table must still be able to say "no" about something.
   await expect(scope.locator('tr', { hasText: /^languages/u })).toContainText(
