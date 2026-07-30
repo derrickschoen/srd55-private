@@ -39,13 +39,13 @@ describe('B2 persisted ability contributions', () => {
 
   afterEach(() => connection.close());
 
-  function writeContribution(): void {
+  function writeContribution(maximum = 20): void {
     db.exec(
       `INSERT INTO character_effects (
          character_id, sort_order, effect_kind, ability, amount, maximum,
          source_instance_id, label
-       ) VALUES (?, 1, 'ability_increase', 'strength', 2, 20, ?, 'Training')`,
-      [characterId, sourceId],
+       ) VALUES (?, 1, 'ability_increase', 'strength', 2, ?, ?, 'Training')`,
+      [characterId, maximum, sourceId],
     );
   }
 
@@ -92,5 +92,86 @@ describe('B2 persisted ability contributions', () => {
     expect(
       db.scalar('SELECT strength FROM characters WHERE id = ?', [characterId]),
     ).toBe(15);
+  });
+
+  it('D83 resolves a maximum-22 increase and source-owned boon override end to end', () => {
+    db.exec('UPDATE characters SET strength = 20 WHERE id = ?', [characterId]);
+    writeContribution(22);
+    db.exec(
+      `INSERT INTO character_effects (
+         character_id, sort_order, effect_kind, ability, maximum,
+         source_instance_id, label
+       ) VALUES (
+         ?, 2, 'ability_override', 'strength', 24, ?, 'Epic Strength Boon'
+       )`,
+      [characterId, sourceId],
+    );
+
+    const resolved = resolveCharacterAbilities(
+      db,
+      characterId,
+      {
+        strength: 20,
+        dexterity: 10,
+        constitution: 10,
+        intelligence: 10,
+        wisdom: 10,
+        charisma: 10,
+      },
+    );
+
+    expect(resolved.strength.increased).toBe(22);
+    expect(resolved.strength.total).toBe(24);
+    expect(resolved.strength.overrides).toEqual([
+      expect.objectContaining({
+        label: 'Epic Strength Boon',
+        set_to: 24,
+        source_instance_id: sourceId,
+        outcome: 'applied',
+      }),
+    ]);
+  });
+
+  it('D83 keeps an unattuned item override outside the resolver until it holds a slot', () => {
+    const itemId = db.exec(
+      `INSERT INTO character_items (
+         character_id, name, requires_attunement
+       ) VALUES (?, 'Belt of Giant Strength', 1)`,
+      [characterId],
+    ).lastInsertId;
+    db.exec(
+      `INSERT INTO character_effects (
+         character_id, sort_order, effect_kind, ability, maximum,
+         character_item_id, label
+       ) VALUES (
+         ?, 1, 'ability_override', 'strength', 24, ?,
+         'Belt of Giant Strength'
+       )`,
+      [characterId, itemId],
+    );
+
+    expect(resolvedStrength()).toBe(15);
+    expect(
+      resolveCharacterAbilities(
+        db,
+        characterId,
+        {
+          strength: 15,
+          dexterity: 10,
+          constitution: 10,
+          intelligence: 10,
+          wisdom: 10,
+          charisma: 10,
+        },
+      ).strength.overrides,
+    ).toEqual([]);
+
+    db.exec(
+      `INSERT INTO character_attunement_slots (
+         character_id, slot_1_item_id
+       ) VALUES (?, ?)`,
+      [characterId, itemId],
+    );
+    expect(resolvedStrength()).toBe(24);
   });
 });

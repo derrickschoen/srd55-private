@@ -10,6 +10,7 @@ import { WIRE_SCHEMA_V9 } from './v9';
 import { WIRE_SCHEMA_V10 } from './v10';
 import { WIRE_SCHEMA_V11 } from './v11';
 import { WIRE_SCHEMA_V12 } from './v12';
+import { WIRE_SCHEMA_V13 } from './v13';
 import {
   versatileWeaponDamageFromLegacy,
   weaponDamageFromLegacy,
@@ -26,7 +27,7 @@ import {
  * domain requires a new schema version, an adjacent migration, and a
  * hand-frozen fragment fixture. Never edit an existing version.
  */
-export const CURRENT_CHARACTER_SHARE_VERSION = 12 as const;
+export const CURRENT_CHARACTER_SHARE_VERSION = 13 as const;
 
 /**
  * Any change to tuple field order, meaning, membership, or accepted value
@@ -46,6 +47,7 @@ export const SHARE_SCHEMAS = Object.freeze({
   10: WIRE_SCHEMA_V10,
   11: WIRE_SCHEMA_V11,
   12: WIRE_SCHEMA_V12,
+  13: WIRE_SCHEMA_V13,
 } as const);
 
 export type SupportedShareVersion = keyof typeof SHARE_SCHEMAS;
@@ -761,6 +763,73 @@ function migrateV11ToV12(document: unknown): unknown {
   return migrated;
 }
 
+const V12_EFFECT_KINDS = Object.freeze([
+  'damage_resistance',
+  'hp_modifier',
+  'speed',
+  'ability_increase',
+  'armor_class_bonus',
+  'armor_class_formula',
+  'attack_ability_override',
+  'weapon_attack_bonus',
+  'weapon_damage_bonus',
+] as const);
+
+/**
+ * v12→v13 changes no positions. It validates the frozen v12 accepted-value
+ * domain before bumping the root version, so `ability_override` can first
+ * appear in an honestly versioned v13 document rather than being smuggled
+ * through a historical tuple with the same arity.
+ */
+function migrateV12ToV13(document: unknown): unknown {
+  if (
+    !Array.isArray(document) ||
+    !WIRE_SCHEMA_V12.tuples.root.arities.some(
+      (arity) => arity === document.length,
+    )
+  ) {
+    throw new TypeError('wire document has an unsupported v12 tuple length.');
+  }
+  const effectsIndex = WIRE_SCHEMA_V12.tuples.root.fields.findIndex(
+    (field) => field.key === 'effects',
+  );
+  const versionIndex = WIRE_SCHEMA_V12.tuples.root.fields.findIndex(
+    (field) => field.key === 'version',
+  );
+  const effectKindIndex = WIRE_SCHEMA_V12.tuples.effect.fields.findIndex(
+    (field) => field.key === 'kind',
+  );
+  if (effectsIndex < 0 || versionIndex < 0 || effectKindIndex < 0) {
+    throw new TypeError('wire v12 schema is missing a required field.');
+  }
+  const effects = document[effectsIndex];
+  if (effects !== null && !Array.isArray(effects)) {
+    throw new TypeError('wire effects must be null or a list.');
+  }
+  for (const effect of effects ?? []) {
+    if (
+      !Array.isArray(effect) ||
+      !WIRE_SCHEMA_V12.tuples.effect.arities.some(
+        (arity) => arity === effect.length,
+      )
+    ) {
+      throw new TypeError('wire effect has an unsupported v12 tuple length.');
+    }
+    const effectKind = effect[effectKindIndex];
+    if (
+      typeof effectKind !== 'string' ||
+      !V12_EFFECT_KINDS.includes(
+        effectKind as (typeof V12_EFFECT_KINDS)[number],
+      )
+    ) {
+      throw new TypeError('wire effect kind is unsupported in v12.');
+    }
+  }
+  const migrated = [...document];
+  migrated[versionIndex] = 13;
+  return migrated;
+}
+
 /**
  * ADJACENT means each migration lifts exactly one version step; the decoder
  * composes them, so a v1 document runs 1→2, then 2→3, then 3→4, then 4→5 —
@@ -781,6 +850,7 @@ export const MIGRATIONS = Object.freeze({
   9: migrateV9ToV10,
   10: migrateV10ToV11,
   11: migrateV11ToV12,
+  12: migrateV12ToV13,
 }) satisfies AdjacentMigrations;
 
 export { WIRE_SCHEMA_V1 } from './v1';
@@ -795,6 +865,7 @@ export { WIRE_SCHEMA_V9 } from './v9';
 export { WIRE_SCHEMA_V10 } from './v10';
 export { WIRE_SCHEMA_V11 } from './v11';
 export { WIRE_SCHEMA_V12 } from './v12';
+export { WIRE_SCHEMA_V13 } from './v13';
 export type { WireField, WireSchemaV1 } from './v1';
 export type { WireSchemaV2 } from './v2';
 export type { WireSchemaV3 } from './v3';
@@ -807,3 +878,4 @@ export type { WireSchemaV9 } from './v9';
 export type { WireSchemaV10 } from './v10';
 export type { WireSchemaV11 } from './v11';
 export type { WireSchemaV12 } from './v12';
+export type { WireSchemaV13 } from './v13';

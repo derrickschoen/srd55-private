@@ -49,7 +49,10 @@ import {
   renderWeapons,
   type PlannerWeaponActions,
 } from './weapons';
-import type { WeaponFields } from '../../../domain/command-contracts';
+import type {
+  ItemFields,
+  WeaponFields,
+} from '../../../domain/command-contracts';
 import type {
   AttunementOccupant,
   AttunementSlot,
@@ -366,10 +369,12 @@ export function renderArmorClassReductionWarning(
  * survive navigating away.
  */
 export type WeaponEditing = number | 'new' | null;
+export type ItemEditing = number | 'new' | null;
 
 interface PlannerViewState {
   readonly filters: GridFilters;
   weaponEditing: WeaponEditing;
+  itemEditing: ItemEditing;
 }
 
 function renderPlanner(
@@ -648,6 +653,18 @@ function renderPlanner(
     }),
   );
   const itemActions: PlannerItemActions = {
+    addItem: (item: ItemFields) =>
+      void mutate(() => session.execute({ type: 'add_item', item })),
+    updateItem: (itemId: number, item: ItemFields) =>
+      void mutate(() =>
+        session.execute({ type: 'update_item', item_id: itemId, item }),
+      ),
+    removeItem: (itemId: number, name: string) =>
+      confirmAction(`Remove ${name} from this character?`, () =>
+        void mutate(() =>
+          session.execute({ type: 'remove_item', item_id: itemId }),
+        ),
+      ),
     updateQuantity: (itemId, quantity) => {
       const item = workspace.items.items.find((candidate) => candidate.id === itemId);
       if (item === undefined) return;
@@ -692,6 +709,11 @@ function renderPlanner(
       replacement: session.attunementReplacement,
       actions: itemActions,
       disabled: session.saving,
+      editing: view.itemEditing,
+      onEditingChanged: (editing) => {
+        view.itemEditing = editing;
+        rerender();
+      },
     }),
   );
   const grid = renderPlannerGrid({
@@ -793,6 +815,7 @@ export const screen = defineScreen({
     const view: PlannerViewState = {
       filters: { ...defaultGridFilters },
       weaponEditing: null,
+      itemEditing: null,
     };
     let destroyGrid: (() => void) | undefined;
     let active = true;

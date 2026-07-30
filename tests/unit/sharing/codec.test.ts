@@ -1061,6 +1061,56 @@ const COMPLETE_V12_WIRE = [
   ...COMPLETE_V11_WIRE.slice(2),
 ];
 
+/** D83: accepted-kind mint only; every tuple position is unchanged. */
+const COMPLETE_V13_WIRE = [
+  COMPLETE_V12_WIRE[0],
+  13,
+  ...COMPLETE_V12_WIRE.slice(2),
+];
+
+const V13_ABILITY_OVERRIDE_WIRE = [
+  CHARACTER_SHARE_FORMAT,
+  13,
+  ['V13 Override Hero', 18, null, null, null, null, null, null, null, null, null, null],
+  [],
+  [],
+  [],
+  [],
+  [],
+  [],
+  null,
+  null,
+  null,
+  [null, null, null],
+  [null, null, null],
+  [[
+    'ability_override',
+    'Belt of Giant Strength',
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    'strength',
+    null,
+    24,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+  ]],
+  null,
+  null,
+  null,
+  null,
+];
+
 describe('character-share positional codec', () => {
   it('refuses the hand-authored complete version-1 positional golden BY NAME', () => {
     // D60: pre-v5 documents are RETIRED, not migrated. This fixture stays
@@ -1097,8 +1147,33 @@ describe('character-share positional codec', () => {
     expect(positionalToShareDocument(COMPLETE_V8_WIRE)).toEqual(complete);
   });
 
-  it('pins the hand-authored complete version-12 wire layout element by element', () => {
-    expect(shareDocumentToPositional(complete)).toEqual(COMPLETE_V12_WIRE);
+  it('pins the hand-authored complete version-13 wire layout element by element', () => {
+    expect(shareDocumentToPositional(complete)).toEqual(COMPLETE_V13_WIRE);
+  });
+
+  it('accepts ability_override only in a hand-frozen v13 document', () => {
+    expect(positionalToShareDocument(V13_ABILITY_OVERRIDE_WIRE)).toEqual({
+      format: CHARACTER_SHARE_FORMAT,
+      version: CHARACTER_SHARE_VERSION,
+      character: { name: 'V13 Override Hero', strength: 18 },
+      classes: [],
+      sources: [],
+      selections: [],
+      spellbook: [],
+      preferences: [],
+      overrides: [],
+      effects: [{
+        kind: 'ability_override',
+        label: 'Belt of Giant Strength',
+        ability: 'strength',
+        maximum: 24,
+      }],
+    });
+    const falselyVersioned = [...V13_ABILITY_OVERRIDE_WIRE];
+    falselyVersioned[1] = 12;
+    expect(() => positionalToShareDocument(falselyVersioned)).toThrow(
+      'wire effect kind is unsupported in v12.',
+    );
   });
 
   it('migrates v10 item booleans into exactly three slots and explicitly drops the fourth', () => {
@@ -1138,6 +1213,11 @@ describe('character-share positional codec', () => {
     expect(migrated[17]).toEqual([
       ['Potion', null, false, null, 1],
     ]);
+  });
+
+  it('migrates v12 to v13 without changing any existing tuple field', () => {
+    const migrated = MIGRATIONS[12](COMPLETE_V12_WIRE) as unknown[];
+    expect(migrated).toEqual(COMPLETE_V13_WIRE);
   });
 
   it('round-trips object, positional, gzip, and base64url forms', async () => {
@@ -1279,7 +1359,7 @@ describe('character-share positional codec', () => {
     const positional = shareDocumentToPositional(minimal);
     expect(positional).toEqual([
       'dnd-multiclass-spells-character-share',
-      12,
+      13,
       [
         'Ten',
         null,

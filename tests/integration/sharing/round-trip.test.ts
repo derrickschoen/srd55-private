@@ -2117,6 +2117,115 @@ describe('B2 contribution sharing', () => {
   });
 });
 
+describe('D83 ability override sharing', () => {
+  it('round-trips source- and item-owned SET payloads through wire v13', async () => {
+    const source = await database();
+    const characterId = source.exec(
+      `INSERT INTO characters (name, strength)
+       VALUES ('Shared Giant Strength', 20)`,
+    ).lastInsertId;
+    const featId = source.exec(
+      `INSERT INTO feat_definitions (content_key, name, rules_edition)
+       VALUES ('2024:feat:giant-boon', 'Giant Boon', '2024')`,
+    ).lastInsertId;
+    const sourceId = source.exec(
+       `INSERT INTO character_source_instances (
+         character_id, instance_uuid, source_type, source_definition_id,
+         display_name, acquired_at_character_level, state
+       ) VALUES (
+         ?, 'share-source:giant-boon', 'feat', ?, 'Giant Boon', 1, 'active'
+       )`,
+      [characterId, featId],
+    ).lastInsertId;
+    const itemId = source.exec(
+      `INSERT INTO character_items (
+         character_id, name, requires_attunement
+       ) VALUES (?, 'Belt of Fire Giant Strength', 0)`,
+      [characterId],
+    ).lastInsertId;
+    source.exec(
+      `INSERT INTO character_effects (
+         character_id, sort_order, effect_kind, ability, maximum,
+         source_instance_id, character_item_id, label
+       ) VALUES
+         (?, 1, 'ability_override', 'strength', 21, ?, NULL,
+          'Giant Boon'),
+         (?, 2, 'ability_override', 'strength', 24, NULL, ?,
+          'Belt of Fire Giant Strength')`,
+      [characterId, sourceId, characterId, itemId],
+    );
+
+    const decoded = await decodeShareFragment(
+      await encodeShareFragment(exportCharacterShare(source, characterId)),
+    );
+    expect(decoded.version).toBe(13);
+    expect(decoded.effects).toMatchObject([
+      {
+        kind: 'ability_override',
+        ability: 'strength',
+        maximum: 21,
+        sourceRef: 0,
+      },
+      {
+        kind: 'ability_override',
+        ability: 'strength',
+        maximum: 24,
+        itemRef: 0,
+      },
+    ]);
+
+    const target = await database();
+    target.exec(
+      `INSERT INTO feat_definitions (content_key, name, rules_edition)
+       VALUES ('2024:feat:giant-boon', 'Giant Boon', '2024')`,
+    );
+    const imported = importCharacterShare(target, decoded);
+    expect(
+      target.allRaw(
+        `SELECT effect_kind, ability, amount, maximum, source_instance_id,
+                character_item_id, label
+         FROM character_effects
+         WHERE character_id = ?
+         ORDER BY sort_order`,
+        [imported.characterId],
+      ),
+    ).toEqual([
+      {
+        effect_kind: 'ability_override',
+        ability: 'strength',
+        amount: null,
+        maximum: 21,
+        source_instance_id: expect.any(Number),
+        character_item_id: null,
+        label: 'Giant Boon',
+      },
+      {
+        effect_kind: 'ability_override',
+        ability: 'strength',
+        amount: null,
+        maximum: 24,
+        source_instance_id: null,
+        character_item_id: expect.any(Number),
+        label: 'Belt of Fire Giant Strength',
+      },
+    ]);
+    expect(
+      resolveCharacterAbilities(
+        target,
+        imported.characterId,
+        {
+          strength: 20,
+          dexterity: 10,
+          constitution: 10,
+          intelligence: 10,
+          wisdom: 10,
+          charisma: 10,
+        },
+      ).strength.total,
+    ).toBe(24);
+  });
+});
+
 /**
  * S-SHARE (plan §6, skills-with-provenance): A V5 ROUND TRIP PRESERVES GRANT
  * PROVENANCE — not merely the final distinct skill list.

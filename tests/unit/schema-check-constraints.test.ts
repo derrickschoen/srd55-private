@@ -890,6 +890,20 @@ const weaponScopedCharacterEffect =
     });
   };
 
+const abilityOverrideEffect =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'character_effects', {
+      character_id: newCharacter(db),
+      sort_order: 1,
+      effect_kind: 'ability_override',
+      ability: 'strength',
+      maximum: 19,
+      label: uid('Set score'),
+      ...values,
+    });
+  };
+
 interface ConstraintCase {
   readonly constraint: string;
   /** Writes that MUST be refused, each with the corruption it would have made. */
@@ -911,7 +925,10 @@ function featureEffectConstraintCases(
   return [
     {
       constraint: `${table}_kind_check`,
-      rejects: [['an unknown mechanical kind', effect({ effect_kind: 'extra_attacks' })]],
+      rejects: [
+        ['an unknown mechanical kind', effect({ effect_kind: 'extra_attacks' })],
+        ['the character-only ability override', effect({ effect_kind: 'ability_override', ability: 'strength', maximum: 19 })],
+      ],
       accepts: [['Extra Attack', effect({ effect_kind: 'extra_attack', attack_count: 2, weapon_scope: 'any_weapon' })]],
     },
     {
@@ -2135,6 +2152,7 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
       ['hp_modifier', characterEffect({ effect_kind: 'hp_modifier', hit_points_flat: 1 })],
       ['speed', characterEffect({ effect_kind: 'speed', speed_bonus_feet: 5 })],
       ['ability_increase', sourcedCharacterEffect({})],
+      ['ability_override', abilityOverrideEffect({})],
     ],
   },
   {
@@ -2210,6 +2228,7 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     ],
     accepts: [
       ['an ability payload on an ability contribution', sourcedCharacterEffect({ ability: 'wisdom' })],
+      ['an ability payload on a score override', abilityOverrideEffect({ ability: 'constitution' })],
       // WIDENED (AC-1, D72): the same column is now also
       // `attack_ability_override`'s payload.
       ['an ability payload on an attack override', weaponScopedCharacterEffect({})],
@@ -2236,6 +2255,7 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     ],
     accepts: [
       ['a maximum payload on an ability contribution', sourcedCharacterEffect({ maximum: 30 })],
+      ['a set-to value on an ability override', abilityOverrideEffect({ maximum: 24 })],
     ],
   },
   {
@@ -2264,6 +2284,16 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     ],
   },
   {
+    constraint: 'character_effects_ability_override_payload_check',
+    rejects: [
+      ['an ability override missing ability', abilityOverrideEffect({ ability: null })],
+      ['an ability override missing its set-to value', abilityOverrideEffect({ maximum: null })],
+    ],
+    accepts: [
+      ['the complete ability and set-to payload', abilityOverrideEffect({ ability: 'constitution', maximum: 24 })],
+    ],
+  },
+  {
     constraint: 'character_effects_amount_check',
     rejects: [
       ['zero, which contributes nothing', sourcedCharacterEffect({ amount: 0 })],
@@ -2286,6 +2316,7 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     accepts: [
       ['the seam minimum', sourcedCharacterEffect({ maximum: 1 })],
       ['the seam maximum', sourcedCharacterEffect({ maximum: 30 })],
+      ['an override at the seam maximum', abilityOverrideEffect({ maximum: 30 })],
     ],
   },
   // --- AC-1 (D72): the five new kinds' own kind-scope, payload-completeness

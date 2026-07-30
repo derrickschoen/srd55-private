@@ -267,6 +267,53 @@ async function armadilloItemsImage(): Promise<SheetImage> {
   return exportedImage(sqlite3, connection, characterId);
 }
 
+async function abilityOverrideImage(): Promise<SheetImage> {
+  const sqlite3 = await sqlite3InitModule();
+  const connection = new sqlite3.oo1.DB(':memory:', 'c');
+  connection.exec(schema);
+  const db = new DatabaseContext(connection);
+  const characterId = db.exec(
+    `INSERT INTO characters (name, strength)
+     VALUES ('Ability override walkthrough', 20)`,
+  ).lastInsertId;
+  const boonSourceId = db.exec(
+    `INSERT INTO character_source_instances (
+       character_id, instance_uuid, source_type, display_name, state
+     ) VALUES (?, ?, 'feat', 'Epic Strength Boon', 'active')`,
+    [characterId, crypto.randomUUID()],
+  ).lastInsertId;
+  const beltId = db.exec(
+    `INSERT INTO character_items (
+       character_id, name, requires_attunement
+     ) VALUES (?, 'Belt of Fire Giant Strength', 1)`,
+    [characterId],
+  ).lastInsertId;
+  db.exec(
+    `INSERT INTO character_attunement_slots (
+       character_id, slot_1_item_id
+     ) VALUES (?, ?)`,
+    [characterId, beltId],
+  );
+  db.exec(
+    `INSERT INTO character_effects (
+       character_id, sort_order, effect_kind, ability, amount, maximum,
+       source_instance_id, character_item_id, label
+     ) VALUES
+       (?, 1, 'ability_increase', 'strength', 2, 22, ?, NULL,
+        'Epic Strength increase'),
+       (?, 2, 'ability_override', 'strength', NULL, 21, ?, NULL,
+        'Lesser Giant boon'),
+       (?, 3, 'ability_override', 'strength', NULL, 24, NULL, ?,
+        'Belt of Fire Giant Strength')`,
+    [
+      characterId, boonSourceId,
+      characterId, boonSourceId,
+      characterId, beltId,
+    ],
+  );
+  return exportedImage(sqlite3, connection, characterId);
+}
+
 async function ready(page: Page): Promise<void> {
   await expect(page.locator('#status')).toHaveAttribute('data-ready', 'true', {
     timeout: 30_000,
@@ -623,6 +670,60 @@ test('an unattuned Cloak grants nothing while its state and Ring of Shell bonus 
   await expect(page.locator('[data-sheet-id="item:1"]')).toContainText(
     'Ring of Shell — Does not require attunement; its effects apply.',
   );
+});
+
+test('ability overrides render the winning source and the floored source term', async ({
+  page,
+}) => {
+  const image = await abilityOverrideImage();
+  await install(page, image);
+  await navigateWithinApp(page, `/characters/${image.characterId}/sheet`);
+
+  const strength = page.locator('[data-sheet-id="ability:strength"]');
+  await expect(strength).toContainText('strength 24');
+  await expect(strength.locator('[data-sheet-value="ability:strength"]'))
+    .toHaveText('+7');
+  await expect(strength).toContainText(
+    'Score path: base 20; after increases 22.',
+  );
+  await expect(strength).toContainText(
+    'Belt of Fire Giant Strength sets the score to 24 and is the winning override.',
+  );
+  await expect(strength).toContainText(
+    'Lesser Giant boon would set the score to 21 but is inert; the score after increases is already 22.',
+  );
+  await expect(
+    strength
+      .locator('[data-free-text="unverified-origin"]')
+      .filter({ hasText: 'Belt of Fire Giant Strength' }),
+  ).toBeVisible();
+
+  const facts = JSON.parse(
+    (await page.locator('#character-sheet-facts').textContent()) ?? '',
+  ) as {
+    ability_modifiers: {
+      ability: string;
+      score: number;
+      modifier: number;
+      overrides: {
+        set_to: number;
+        outcome: string;
+      }[];
+    }[];
+  };
+  expect(
+    facts.ability_modifiers.find(
+      (ability) => ability.ability === 'strength',
+    ),
+  ).toEqual({
+    ability: 'strength',
+    score: 24,
+    modifier: 7,
+    overrides: [
+      { set_to: 21, outcome: 'floored_by_increased_score' },
+      { set_to: 24, outcome: 'applied' },
+    ],
+  });
 });
 
 test('the planner links to the sheet, and the sheet links back', async ({

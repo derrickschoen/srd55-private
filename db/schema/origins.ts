@@ -723,25 +723,34 @@ export const character_effects = sqliteTable(
     /** The `speed` payload, nullable on the same limb 2 terms. */
     speed_bonus_feet: integer('speed_bonus_feet'),
     /**
-     * TWO KINDS SHARE THIS COLUMN NOW (AC-1) — `ability_increase`'S ORIGINAL
+     * THREE KINDS SHARE THIS COLUMN NOW — `ability_increase`'S ORIGINAL
      * PAYLOAD (D63, B2: which ability, a signed non-zero `amount`, and the
-     * increase's OWN `maximum`) AND `attack_ability_override`'s (D72: the
+     * increase's OWN `maximum`), `ability_override`'s D83 SET target, AND
+     * `attack_ability_override`'s (D72: the
      * ability a weapon-scoped attack uses instead of the printed one — Pact of
      * the Blade). Reused rather than given a second column, per the dispatch's
      * own instruction: the two are the same shape — "one ability, closed six"
      * — and a second column would be F22's duplication for no different rule.
-     * `amount` and `maximum` stay `ability_increase`-only; `attack_ability_override`
-     * has no amount and no cap.
+     * `amount` stays `ability_increase`-only. `maximum` is shared with
+     * `ability_override` because both values are absolute ability-score
+     * values bounded 1..30; for the override it means SET TO, not a cap.
+     * Keeping it out of `amount` preserves the additive/SET distinction in
+     * the row shape itself.
      *
      * All three nullable on D6b limb 2 — a resistance does not HAVE an
      * ability — with the CHECKs below making a row of one of these two kinds
      * without its own required subset unrepresentable, and a row of any other
      * kind with any of them unrepresentable.
      *
-     * `maximum` is per-CONTRIBUTION because the sources genuinely differ:
+     * For `ability_increase`, `maximum` is per-CONTRIBUTION because the sources genuinely differ:
      * background increases stop at 20 (`docs/srd/source/backgrounds.txt:51`),
      * ASI feats at 20 (`feats.txt:67`), Epic Boons at 30. It is bounded 1–30
-     * because `AbilityScore` throws outside that range
+     * `ability_override` reuses that same range because its target becomes the
+     * resolved score. It is CHARACTER-ONLY: no feature-template effect CHECK
+     * is widened by D83 because the shipped corpus has no authorable feat or
+     * species needing SET-to-score.
+     *
+     * Both uses are bounded 1–30 because `AbilityScore` throws outside that range
      * (`src/rules/ability-score.ts:4-13`) — a stored `max 32` on a high base
      * would drive a resolved total past 30 and turn a sheet into a stack
      * trace. `amount` is non-zero because a zero contribution is not a
@@ -922,7 +931,7 @@ export const character_effects = sqliteTable(
      */
     check(
       'character_effects_ability_kind_check',
-      sql`ability IS NULL OR effect_kind IN ('ability_increase', 'attack_ability_override')`,
+      sql`ability IS NULL OR effect_kind IN ('ability_increase', 'ability_override', 'attack_ability_override')`,
     ),
     /**
      * WIDENED (AC-1): `amount` is now also `armor_class_bonus`'s flat addend
@@ -935,7 +944,7 @@ export const character_effects = sqliteTable(
     ),
     check(
       'character_effects_maximum_kind_check',
-      sql`maximum IS NULL OR effect_kind IS 'ability_increase'`,
+      sql`maximum IS NULL OR effect_kind IN ('ability_increase', 'ability_override')`,
     ),
     check(
       'character_effects_ability_increase_payload_check',
@@ -944,6 +953,10 @@ export const character_effects = sqliteTable(
     check(
       'character_effects_ability_increase_source_check',
       sql`effect_kind IS NOT 'ability_increase' OR source_instance_id IS NOT NULL`,
+    ),
+    check(
+      'character_effects_ability_override_payload_check',
+      sql`effect_kind IS NOT 'ability_override' OR (ability IS NOT NULL AND maximum IS NOT NULL)`,
     ),
     check(
       'character_effects_amount_check',

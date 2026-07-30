@@ -60,6 +60,9 @@ function sheet(changes: Partial<CharacterSheet> = {}): CharacterSheet {
         score: 15,
         value: 2,
         formula: '(score − 10) / 2, rounded down.',
+        base_score: 15,
+        increased_score: 15,
+        override_terms: [],
       },
     ],
     hit_points: {

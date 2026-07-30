@@ -99,6 +99,15 @@ import {
 export const CHARACTER_SNAPSHOT_SCHEMA_VERSION = 'a7-v12' as const;
 
 /**
+ * D83 does not mint a snapshot version. `ability_override` occupies the
+ * existing character_effects kind/ability/maximum columns, and snapshot
+ * versions freeze table and column membership rather than a separate accepted
+ * value vocabulary. The shared row contract now validates the kind on capture,
+ * candidate audit, and restore for every snapshot version that already carries
+ * character_effects; no positional or nullable-fill migration exists to make.
+ */
+
+/**
  * WHICH TABLES EACH SNAPSHOT VERSION CARRIES.
  *
  * `a7-v1` is a HISTORICAL FACT and is written out by hand, never derived. It is

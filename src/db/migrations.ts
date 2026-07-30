@@ -19,6 +19,7 @@ import effectEquipmentOwnership from '../../drizzle/0015_effect_equipment_owners
 import retireArmorClassAdjustment from '../../drizzle/0016_retire_armor_class_adjustment.sql?raw';
 import attunementSlots from '../../drizzle/0017_attunement_slots.sql?raw';
 import characterItemsQuantity from '../../drizzle/0018_character_items_quantity.sql?raw';
+import abilityOverride from '../../drizzle/0019_ability_override.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -217,6 +218,17 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
       '420715637dfc3dc8d567fb62c742b33efef3771a2da4c2e2e6c559bbbd8fafd3',
     resultSchemaChecksum:
       'b1638cdde8aa3e968354dcbf29c637f4dd45c0a5179e768e2480c54a1ee7d8f5',
+  }),
+  // D83: SET-to-score is a character-only effect kind. SQLite cannot alter a
+  // CHECK in place, so rebuild character_effects with its kind and shared
+  // ability/maximum payload arms widened; every existing row copies exactly.
+  Object.freeze({
+    id: '0019_ability_override',
+    sql: abilityOverride,
+    checksum:
+      '373193882ed11de782d6a44c480c7b33a5204bcc2d1cd5076201f532f09a029c',
+    resultSchemaChecksum:
+      '7279592c33987032e30b1421781fe3e7cfe06bba3c5af01077794ecef3e5c05f',
   }),
 ]);
 
