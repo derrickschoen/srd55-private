@@ -109,7 +109,7 @@ async function sheetImage(): Promise<SheetImage> {
     `INSERT INTO character_armor
        (character_id, slot, name, category, armor_class, dex_bonus,
         dex_bonus_max, strength_requirement, stealth_disadvantage)
-     VALUES (?, 'worn', ?, 'medium', 15, 'capped', 2, 15, 1)`,
+     VALUES (?, 'worn', ?, 'medium', 15, 'capped', 2, 16, 1)`,
     [characterId, HOSTILE_ARMOR_NAME],
   );
   db.exec(
@@ -338,6 +338,84 @@ test('the sheet prints the derived numbers, and prints what it lacks', async ({
   await expect(
     page.locator('[data-sheet-id="gap:gear_not_itemised"]'),
   ).toContainText('not tracked individually');
+});
+
+test('print media keeps the sheet and full-size warnings, hides chrome, and adds empty paper fields', async ({
+  page,
+}) => {
+  const image = await sheetImage();
+  await install(page, image);
+  await navigateWithinApp(page, `/characters/${image.characterId}/sheet`);
+
+  const sheet = page.locator('[data-screen="character-sheet"]');
+  const warning = sheet.locator('[role="alert"] [data-warning-code]').first();
+  await expect(sheet).toBeVisible();
+  await expect(warning).toBeVisible();
+  const screenWarningFontSize = await warning.evaluate(
+    (element) => window.getComputedStyle(element).fontSize,
+  );
+  expect(screenWarningFontSize).toBe(
+    await page.locator('html').evaluate(
+      (element) => window.getComputedStyle(element).fontSize,
+    ),
+  );
+  await expect(
+    sheet.locator('[data-sheet-print-field="current-hit-points"]'),
+  ).toHaveCount(0);
+  await expect(
+    sheet.locator('[data-sheet-print-field="experience-points"]'),
+  ).toHaveCount(0);
+
+  await page.emulateMedia({ media: 'print' });
+
+  await expect(page.getByRole('link', { name: 'All characters' })).toBeHidden();
+  await expect(page.getByRole('link', { name: 'Open planner' })).toBeHidden();
+  await expect(page.locator('.site-footer')).toBeHidden();
+  await expect(page.locator('[data-sheet-value="hit_points"]')).toBeVisible();
+  expect(
+    (
+      await sheet.locator('.sheet-numbers').first().evaluate(
+        (element) => window.getComputedStyle(element).gridTemplateColumns,
+      )
+    )
+      .trim()
+      .split(/\s+/),
+  ).toHaveLength(1);
+  await expect(
+    sheet.locator('[data-sheet-id="armor_class:base"]'),
+  ).toBeVisible();
+  await expect(warning).toBeVisible();
+  expect(
+    await warning.evaluate(
+      (element) => window.getComputedStyle(element).fontSize,
+    ),
+  ).toBe(
+    await page.locator('html').evaluate(
+      (element) => window.getComputedStyle(element).fontSize,
+    ),
+  );
+
+  const currentHitPoints = sheet.locator(
+    '[data-sheet-print-field="current-hit-points"]',
+  );
+  await expect(currentHitPoints).toBeVisible();
+  await expect(currentHitPoints).toContainText('Current HP');
+  await expect(
+    currentHitPoints.locator('[data-sheet-print-entry="box"]'),
+  ).toHaveText('');
+
+  const experiencePoints = sheet.locator(
+    '[data-sheet-print-field="experience-points"]',
+  );
+  await expect(experiencePoints).toBeVisible();
+  await expect(experiencePoints).toContainText('Experience points');
+  await expect(
+    experiencePoints.locator('[data-sheet-print-entry="line"]'),
+  ).toHaveText('');
+
+  await page.emulateMedia({ media: 'screen' });
+  await expect(currentHitPoints).toHaveCount(0);
+  await expect(experiencePoints).toHaveCount(0);
 });
 
 test('the structured block says exactly what the page says, and hides nothing', async ({

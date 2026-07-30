@@ -1,7 +1,7 @@
 import { createQueriesClient } from '../../../queries/client';
 import type { Route } from '../../router';
 import { defineScreen, type ScreenContext } from '../../screen';
-import { renderSheet } from './sheet-view';
+import { renderSheet, setSheetPrintFields } from './sheet-view';
 import './styles.css';
 
 /**
@@ -41,7 +41,8 @@ async function render(context: ScreenContext): Promise<() => void> {
     throw new Error('The character sheet route requires a valid character ID.');
   }
   const sheet = await createQueriesClient(context.rpc).sheet(id);
-  context.root.replaceChildren(renderSheet(sheet));
+  const sheetElement = renderSheet(sheet);
+  context.root.replaceChildren(sheetElement);
   document.title = `${sheet.name} character sheet`;
 
   const cleanups: Array<() => void> = [];
@@ -65,6 +66,32 @@ async function render(context: ScreenContext): Promise<() => void> {
     link.addEventListener('click', onClick);
     cleanups.push(() => link.removeEventListener('click', onClick));
   }
+
+  /**
+   * `beforeprint` covers the browser's real print dialog; the media-query
+   * listener covers print preview transitions and Playwright's emulated media.
+   * Initial synchronisation also handles a sheet route opened while print
+   * media is already active.
+   */
+  const printMedia = window.matchMedia('print');
+  const syncPrintFields = (): void => {
+    setSheetPrintFields(sheetElement, printMedia.matches);
+  };
+  const beforePrint = (): void => {
+    setSheetPrintFields(sheetElement, true);
+  };
+  const afterPrint = (): void => {
+    setSheetPrintFields(sheetElement, printMedia.matches);
+  };
+  syncPrintFields();
+  printMedia.addEventListener('change', syncPrintFields);
+  window.addEventListener('beforeprint', beforePrint);
+  window.addEventListener('afterprint', afterPrint);
+  cleanups.push(() => {
+    printMedia.removeEventListener('change', syncPrintFields);
+    window.removeEventListener('beforeprint', beforePrint);
+    window.removeEventListener('afterprint', afterPrint);
+  });
 
   return () => {
     for (const cleanup of cleanups) {
