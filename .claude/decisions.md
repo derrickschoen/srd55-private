@@ -1,5 +1,39 @@
 # Binding scope decisions
 
+## D100 — OWNER: no performance bar in v1 (2026-07-30)
+
+The owner's answer: **"Nothing in v1."** No perf budget, no regression
+floor, no measurement harness. Local-first with no network on the hot path
+is the bet; revisit only if someone feels slowness. (Build-size numbers
+keep printing on every build as they already do — informational, not a
+gate.)
+
+## D99 — OWNER: characters archive before purge; the list gets Duplicate (2026-07-30)
+
+Two answers. **Deletion**: "Archive first, purge from there." Delete moves
+a character to a hidden archived section — restorable any time; permanent
+purge exists only INSIDE the archive view. No misclick is fatal; the
+tombstone philosophy applied to whole characters. **Duplicate**: "Yes —
+reuse the clone path." One list action runs the existing D62 export-import
+clone locally and names the copy visibly (e.g. "(copy)"); no new
+machinery.
+
+## D98 — OWNER: v1 is an installable, offline PWA with eviction protection (2026-07-30)
+
+The owner's answer (after asking for and receiving a plain-language
+explanation of PWA): **"All of it."** What this binds:
+
+- A web app manifest — the app is installable with its own icon and
+  window.
+- A service worker caching the app's own files — the sheet opens with no
+  network, guaranteed, including airplane mode; the update path must use a
+  deliberate refresh-to-update pattern, because stale-cache fights are the
+  known cost.
+- `navigator.storage.persist()` requested, with HONEST UI when the browser
+  refuses (D33 applies to durability claims too): characters protected
+  from automatic browser eviction, and the app never claims protection it
+  was not granted.
+
 ## D97 — OWNER: level deletion without undo data is BEST-EFFORT RECONSTRUCTION; never to 0; multiclass skill keep-vs-lose is resolved (2026-07-30)
 
 The owner's ruling, verbatim: *"If there is no undo information, when we
