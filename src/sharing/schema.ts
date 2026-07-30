@@ -1562,8 +1562,9 @@ function shareEffect(
       `${label} kind speed requires speed_bonus_feet.`,
     );
   }
-  // `ability` NOW BELONGS TO TWO KINDS (AC-1): `ability_increase` and
-  // `attack_ability_override`. Extracted once, generically, here; WHICH kind
+  // `ability` belongs to three kinds: additive `ability_increase`, D83's
+  // score-setting `ability_override`, and `attack_ability_override`.
+  // Extracted once, generically, here; WHICH kind
   // requires it (and what else that kind requires) is checked kind-by-kind
   // below, mirroring `effectPayloadKindError` in
   // `src/domain/contracts/row-rules.ts` — see that function's own comment for
@@ -1576,9 +1577,13 @@ function shareEffect(
     ) {
       throw new ShareValidationError(`${label}.ability is unsupported.`);
     }
-    if (kind !== 'ability_increase' && kind !== 'attack_ability_override') {
+    if (
+      kind !== 'ability_increase' &&
+      kind !== 'ability_override' &&
+      kind !== 'attack_ability_override'
+    ) {
       throw new ShareValidationError(
-        `${label}.ability requires kind ability_increase or attack_ability_override.`,
+        `${label}.ability requires a kind that uses one.`,
       );
     }
     effect.ability = row.ability;
@@ -1609,9 +1614,9 @@ function shareEffect(
     effect.amount = amount;
   }
   if (row.maximum !== undefined) {
-    if (kind !== 'ability_increase') {
+    if (kind !== 'ability_increase' && kind !== 'ability_override') {
       throw new ShareValidationError(
-        `${label}.maximum requires kind ability_increase.`,
+        `${label}.maximum requires a kind that uses one.`,
       );
     }
     effect.maximum = originInteger(
@@ -1724,6 +1729,12 @@ function shareEffect(
     if (effect.sourceRef === undefined) {
       throw new ShareValidationError(
         `${label} kind ability_increase requires a sourceRef.`,
+      );
+    }
+  } else if (kind === 'ability_override') {
+    if (effect.ability === undefined || effect.maximum === undefined) {
+      throw new ShareValidationError(
+        `${label} kind ability_override requires ability and maximum.`,
       );
     }
   } else if (kind === 'armor_class_bonus') {

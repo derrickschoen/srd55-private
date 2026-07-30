@@ -1,6 +1,7 @@
 import { freeTextSpan } from '../../free-text';
 import type {
   CharacterSheet,
+  SheetAbilityScore,
   SheetArmorClassFormula,
 } from '../../../queries/character-sheet-builder';
 import type {
@@ -214,6 +215,50 @@ function armorClassRows(sheet: CharacterSheet): SheetRow[] {
   return rows;
 }
 
+function abilitySourceCells(entry: SheetAbilityScore): SheetCell[] {
+  const cells: SheetCell[] = [
+    {
+      text:
+        `${entry.formula} Score path: base ${String(entry.base_score)}; ` +
+        `after increases ${String(entry.increased_score)}.`,
+    },
+  ];
+  for (const override of entry.override_terms) {
+    cells.push({ text: ' ' }, { text: override.label, free_text: true });
+    switch (override.outcome) {
+      case 'applied':
+        cells.push({
+          text:
+            ` sets the score to ${String(override.set_to)} and is the ` +
+            'winning override.',
+        });
+        break;
+      case 'floored_by_increased_score':
+        cells.push({
+          text:
+            ` would set the score to ${String(override.set_to)} but is inert; ` +
+            `the score after increases is already ${String(entry.increased_score)}.`,
+        });
+        break;
+      case 'tied_at_winning_value':
+        cells.push({
+          text:
+            ` also sets the score to ${String(override.set_to)}, matching ` +
+            'the winning value without stacking.',
+        });
+        break;
+      case 'superseded_by_higher_override':
+        cells.push({
+          text:
+            ` would set the score to ${String(override.set_to)} but is inert; ` +
+            'a higher set-to value wins.',
+        });
+        break;
+    }
+  }
+  return cells;
+}
+
 /**
  * The readable projection: every number on the sheet as a labelled row.
  *
@@ -310,7 +355,7 @@ export function sheetSections(sheet: CharacterSheet): readonly SheetSection[] {
       id: entry.id,
       label: plain(`${entry.label} ${String(entry.score)}`),
       value: entry.value === null ? 'undetermined' : signed(entry.value),
-      detail: plain(entry.formula),
+      detail: abilitySourceCells(entry),
     })),
   });
 
@@ -658,6 +703,10 @@ export function sheetFacts(sheet: CharacterSheet): Record<string, unknown> {
       ability: entry.ability,
       score: entry.score,
       modifier: entry.value,
+      overrides: entry.override_terms.map((override) => ({
+        set_to: override.set_to,
+        outcome: override.outcome,
+      })),
     })),
     hit_point_maximum: sheet.hit_points.value,
     species_hit_points: sheet.species_hit_points?.value ?? 0,

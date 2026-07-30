@@ -307,9 +307,10 @@ export function effectPayloadKindError(
   if (
     present(row.ability) &&
     kind !== 'ability_increase' &&
+    kind !== 'ability_override' &&
     kind !== 'attack_ability_override'
   ) {
-    return `${label} carries an ability without effect_kind ability_increase or attack_ability_override.`;
+    return `${label} carries an ability without an effect_kind that uses it.`;
   }
   // `amount` belongs to exactly four kinds now (AC-1).
   if (
@@ -324,8 +325,12 @@ export function effectPayloadKindError(
   // `maximum`, `base`, `ability_1`, `ability_2` and `weapon_scope` each still
   // belong to exactly one or two kinds; checked per-kind below rather than
   // here, alongside that kind's payload-completeness rule.
-  if (present(row.maximum) && kind !== 'ability_increase') {
-    return `${label} carries a maximum without effect_kind ability_increase.`;
+  if (
+    present(row.maximum) &&
+    kind !== 'ability_increase' &&
+    kind !== 'ability_override'
+  ) {
+    return `${label} carries a maximum without an effect_kind that uses it.`;
   }
   if (present(row.base) && kind !== 'armor_class_formula') {
     return `${label} carries a base without effect_kind armor_class_formula.`;
@@ -366,6 +371,12 @@ export function effectPayloadKindError(
     if (!present(row.source_instance_id)) {
       return `${label} has effect_kind ability_increase and no source instance.`;
     }
+  }
+  if (
+    kind === 'ability_override' &&
+    (!present(row.ability) || !present(row.maximum))
+  ) {
+    return `${label} has effect_kind ability_override without its ability and set-to value.`;
   }
   // `armor_class_bonus` requires only its flat addend (AC-1, D72).
   if (kind === 'armor_class_bonus' && !present(row.amount)) {

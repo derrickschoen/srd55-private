@@ -444,6 +444,50 @@ describe('database migration chain', () => {
     reopened.close();
   });
 
+  it('widens character effects for ability_override without changing existing rows', async () => {
+    const beforeD83 = DATABASE_MIGRATIONS
+      .slice(0, 19)
+      .map((entry) => entry.sql)
+      .join('\n');
+    const storage = await storageHolding(
+      `${beforeD83}
+       INSERT INTO characters (id, name) VALUES (1, 'Before D83');
+       INSERT INTO character_effects (
+         id, character_id, sort_order, effect_kind, amount, label
+       ) VALUES (7, 1, 3, 'armor_class_bonus', 2, 'Existing bonus');`,
+    );
+    const lifecycle = new DatabaseLifecycle(sqlite3, storage, schema);
+    lifecycle.open();
+
+    expect(
+      lifecycle.database.oneRaw(
+        `SELECT id, character_id, sort_order, effect_kind, amount, label
+         FROM character_effects WHERE id = 7`,
+      ),
+    ).toEqual({
+      id: 7,
+      character_id: 1,
+      sort_order: 3,
+      effect_kind: 'armor_class_bonus',
+      amount: 2,
+      label: 'Existing bonus',
+    });
+    lifecycle.database.exec(
+      `INSERT INTO character_effects (
+         character_id, sort_order, effect_kind, ability, maximum, label
+       ) VALUES (
+         1, 4, 'ability_override', 'strength', 24, 'Giant strength'
+       )`,
+    );
+    expect(
+      lifecycle.database.scalar(
+        `SELECT maximum FROM character_effects
+         WHERE effect_kind = 'ability_override'`,
+      ),
+    ).toBe(24);
+    lifecycle.close();
+  });
+
   it('adds feat numbers without losing an existing definition', async () => {
     const storage = await storageHolding(
       `${SCHEMA_BEFORE_FEAT_MODEL}

@@ -20,6 +20,7 @@ const panel: ItemsPanel = {
       requires_attunement: true,
       source_instance_id: null,
       attunement_slot: 1,
+      effects: [],
     },
     {
       id: 20,
@@ -29,6 +30,7 @@ const panel: ItemsPanel = {
       requires_attunement: true,
       source_instance_id: null,
       attunement_slot: 2,
+      effects: [],
     },
     {
       id: 30,
@@ -38,6 +40,7 @@ const panel: ItemsPanel = {
       requires_attunement: true,
       source_instance_id: null,
       attunement_slot: 3,
+      effects: [],
     },
     {
       id: 40,
@@ -47,6 +50,7 @@ const panel: ItemsPanel = {
       requires_attunement: true,
       source_instance_id: null,
       attunement_slot: null,
+      effects: [],
     },
   ],
 };
@@ -57,6 +61,9 @@ describe('the item attunement surface', () => {
     try {
       const calls: string[] = [];
       const actions: PlannerItemActions = {
+        addItem: () => undefined,
+        updateItem: () => undefined,
+        removeItem: () => undefined,
         updateQuantity: (itemId, quantity) =>
           calls.push(`quantity:${String(itemId)}:${String(quantity)}`),
         attune: (itemId) => calls.push(`attune:${String(itemId)}`),
@@ -70,6 +77,8 @@ describe('the item attunement surface', () => {
           replacement: null,
           actions,
           disabled: false,
+          editing: null,
+          onEditingChanged: () => undefined,
         }),
       );
 
@@ -99,6 +108,9 @@ describe('the item attunement surface', () => {
     try {
       const calls: string[] = [];
       const actions: PlannerItemActions = {
+        addItem: () => undefined,
+        updateItem: () => undefined,
+        removeItem: () => undefined,
         updateQuantity: () => undefined,
         attune: () => undefined,
         unattune: () => undefined,
@@ -119,9 +131,12 @@ describe('the item attunement surface', () => {
           },
           actions,
           disabled: false,
+          editing: null,
+          onEditingChanged: () => undefined,
         }),
       );
-      const dialog = rendered.children.at(-1);
+      // The add-item button follows the modal in the rendered section.
+      const dialog = rendered.children.at(-2);
       const choices = dialog?.children[2];
 
       expect(dialog?.getAttribute('data-testid')).toBe(
@@ -134,6 +149,76 @@ describe('the item attunement surface', () => {
 
       dialog?.children.at(-1)?.click();
       expect(calls).toEqual(['replace:40:20', 'cancel']);
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('offers ability_override with ability and set-to fields in the item editor', () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const actions: PlannerItemActions = {
+        addItem: () => undefined,
+        updateItem: () => undefined,
+        removeItem: () => undefined,
+        updateQuantity: () => undefined,
+        attune: () => undefined,
+        unattune: () => undefined,
+        replace: () => undefined,
+        cancelReplacement: () => undefined,
+      };
+      const rendered = interactiveElement(
+        renderItems({
+          panel,
+          replacement: null,
+          actions,
+          disabled: false,
+          editing: 'new',
+          onEditingChanged: () => undefined,
+        }),
+      );
+
+      expect(elementText(rendered as unknown as Node)).toContain(
+        'Ability score override',
+      );
+      expect(elementText(rendered as unknown as Node)).toContain('Effect kind');
+      expect(rendered.querySelectorAll('select')[0]?.children[0]?.value).toBe(
+        'ability_override',
+      );
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('recovers the add affordance when the item under an edit form vanishes', () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const rendered = interactiveElement(
+        renderItems({
+          panel,
+          replacement: null,
+          actions: {
+            addItem: () => undefined,
+            updateItem: () => undefined,
+            removeItem: () => undefined,
+            updateQuantity: () => undefined,
+            attune: () => undefined,
+            unattune: () => undefined,
+            replace: () => undefined,
+            cancelReplacement: () => undefined,
+          },
+          disabled: false,
+          editing: 99,
+          onEditingChanged: () => undefined,
+        }),
+      );
+
+      expect(
+        rendered
+          .querySelectorAll('button')
+          .some((button) => button.textContent === 'Add item'),
+      ).toBe(true);
+      expect(rendered.querySelector('[data-testid="item-form"]')).toBeNull();
     } finally {
       restoreDocument();
     }

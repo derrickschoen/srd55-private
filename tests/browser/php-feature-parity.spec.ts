@@ -380,6 +380,7 @@ test('builds the complete workspace editing contract for the seeded character', 
       requires_attunement: false,
       source_instance_id: null,
       attunement_slot: null,
+      effects: [],
     }],
   });
   expect(workspace.report.summary).toEqual({

@@ -1,4 +1,5 @@
 import type { SqlValue } from '@sqlite.org/sqlite-wasm';
+import { sqlInteger } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import { rowContractError } from '../domain/contracts/rows';
 import { effectPayloadKindError } from '../domain/contracts/row-rules';
@@ -51,6 +52,10 @@ function effectValues(
     case 'ability_increase':
       values.ability = effect.ability;
       values.amount = effect.amount;
+      values.maximum = effect.maximum;
+      return values;
+    case 'ability_override':
+      values.ability = effect.ability;
       values.maximum = effect.maximum;
       return values;
     case 'armor_class_bonus':
@@ -134,6 +139,13 @@ function effectFromRow(
         amount: Number(row.amount),
         maximum: Number(row.maximum),
       };
+    case 'ability_override':
+      return {
+        ...shared,
+        effect_kind: 'ability_override',
+        ability: storedAbility(row.ability, 'ability'),
+        maximum: Number(row.maximum),
+      };
     case 'armor_class_bonus':
       return {
         ...shared,
@@ -188,6 +200,29 @@ export function readOwnedEffects(
       [characterId, ownerId],
     )
     .map(effectFromRow);
+}
+
+export function readOwnedEffectsByOwner(
+  db: DatabaseContext,
+  characterId: number,
+  ownerColumn: EffectOwnerColumn,
+): ReadonlyMap<number, readonly EquipmentEffectInput[]> {
+  const grouped = new Map<number, EquipmentEffectInput[]>();
+  for (const row of db.allRaw(
+    `SELECT * FROM character_effects
+     WHERE character_id = ? AND ${ownerColumn} IS NOT NULL
+     ORDER BY ${ownerColumn}, sort_order, id`,
+    [characterId],
+  )) {
+    const ownerId = sqlInteger(row, ownerColumn);
+    const existing = grouped.get(ownerId);
+    if (existing === undefined) {
+      grouped.set(ownerId, [effectFromRow(row)]);
+    } else {
+      existing.push(effectFromRow(row));
+    }
+  }
+  return grouped;
 }
 
 export function replaceOwnedEffects(

@@ -236,6 +236,65 @@ test('B2-EDIT displays base before editing and keeps the resolved total separate
   );
 });
 
+test('the item editor authors an ability override that resolves on the sheet', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await expect(page.locator('#status')).toHaveAttribute(
+    'data-ready',
+    'true',
+    { timeout: 30_000 },
+  );
+  await page.evaluate(async () => {
+    await window.staticApp.reset();
+    await window.staticApp.writeCharacter('Belt Test');
+  });
+  await page.goto('/characters/1');
+  await expect(page.locator('#planner-status')).toHaveAttribute(
+    'data-ready',
+    'true',
+    { timeout: 30_000 },
+  );
+
+  const items = page.locator('[data-testid="items-panel"]');
+  await items.getByRole('button', { name: 'Add item' }).click();
+  await items.getByLabel('Name').fill('Belt of Giant Strength');
+  await expect(items.getByLabel('Effect kind')).toHaveValue(
+    'ability_override',
+  );
+  await items.getByRole('button', { name: 'Add effect' }).click();
+  await items.getByLabel('Ability').selectOption('strength');
+  await items.getByLabel('Set score to').fill('24');
+  await items.getByLabel('Source label').fill('Belt of Giant Strength');
+  await items.getByRole('button', { name: 'Add item' }).click();
+
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        window.staticApp.inspectRows('character_effects', {
+          character_id: 1,
+        }),
+      ),
+    )
+    .toEqual([
+      expect.objectContaining({
+        effect_kind: 'ability_override',
+        ability: 'strength',
+        amount: null,
+        maximum: 24,
+        label: 'Belt of Giant Strength',
+        character_item_id: expect.any(Number),
+      }),
+    ]);
+
+  await page.getByRole('link', { name: 'Character sheet' }).click();
+  const strength = page.locator('[data-sheet-id="ability:strength"]');
+  await expect(strength).toContainText('strength 24');
+  await expect(strength).toContainText(
+    'Belt of Giant Strength sets the score to 24 and is the winning override.',
+  );
+});
+
 test('planner parity flows persist override, clear, selection, acknowledgement, and source edits', async ({
   page,
 }) => {
