@@ -402,7 +402,8 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
   // modifier columns — see `db/schema/items.ts`.
   character_items: {
     integer: [
-      'id', 'character_id', 'requires_attunement', 'source_instance_id',
+      'id', 'character_id', 'quantity', 'requires_attunement',
+      'source_instance_id',
     ],
     text: ['name', 'description'],
     numeric: ['created_at', 'updated_at'],
@@ -652,7 +653,7 @@ const expectedNotNull: Record<string, string[]> = {
   // columns — a name may travel with no prose yet, and most items are
   // hand-added with no granting source.
   character_items: [
-    'id', 'character_id', 'name', 'requires_attunement',
+    'id', 'character_id', 'name', 'quantity', 'requires_attunement',
   ],
   character_attunement_slots: ['character_id'],
   background_templates: [
@@ -1193,7 +1194,7 @@ const expectedDefaults: Record<string, Record<string, string>> = {
   // Ring of Shell (D72 §9's own "proves
   // attunement is not required" fixture) needs `requires_attunement` to
   // default false and not read as unknown.
-  character_items: { requires_attunement: 'false' },
+  character_items: { quantity: '1', requires_attunement: 'false' },
 };
 
 /**

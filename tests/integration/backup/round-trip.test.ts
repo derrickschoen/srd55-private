@@ -242,7 +242,7 @@ function seedCompleteCharacter(
   db.exec(
      `INSERT INTO character_save_points
        (character_id, label, snapshot, schema_version, created_at, updated_at)
-     VALUES (?, 'Before experiment', ?, 'a7-v11', ?, ?)`,
+     VALUES (?, 'Before experiment', ?, 'a7-v12', ?, ?)`,
     [characterId, JSON.stringify(snapshot), timestamp, timestamp],
   );
   // A SECOND SAVE POINT IN THE OLD SNAPSHOT FORMAT.
@@ -343,6 +343,49 @@ afterEach(() => {
 });
 
 describe('portable character backup', () => {
+  it('default-fills quantity one in a historical item row and re-exports it', async () => {
+    const source = await database();
+    const sourceCharacterId = source.exec(
+      "INSERT INTO characters (name) VALUES ('Historical inventory')",
+    ).lastInsertId;
+    source.exec(
+      `INSERT INTO character_items (character_id, name, quantity)
+       VALUES (?, 'Potion', 6)`,
+      [sourceCharacterId],
+    );
+    const historical = structuredClone(
+      exportCharacterBackup(
+        source,
+        sourceCharacterId,
+        '2026-07-30T12:00:00.000Z',
+      ),
+    ) as CharacterBackupDocument;
+    const historicalItem = historical.tables.character_items[0] as Record<
+      string,
+      unknown
+    >;
+    delete historicalItem.quantity;
+
+    const target = await database();
+    const imported = importCharacterBackup(target, historical);
+    expect(
+      target.oneRaw(
+        'SELECT name, quantity FROM character_items WHERE character_id = ?',
+        [imported.characterId],
+      ),
+    ).toEqual({ name: 'Potion', quantity: 1 });
+
+    const reexported = exportCharacterBackup(
+      target,
+      imported.characterId,
+      '2026-07-30T12:01:00.000Z',
+    );
+    expect(reexported.tables.character_items[0]).toMatchObject({
+      name: 'Potion',
+      quantity: 1,
+    });
+  });
+
   it('round-trips every user-authored surface using target catalog keys and restorable save points', async () => {
     const source = await database();
     const sourceCatalog = seedCatalog(source);
@@ -514,7 +557,7 @@ describe('portable character backup', () => {
     ) as Record<string, any>;
     // The current-format save point carries the weapons, re-keyed to the rows
     // that were just written, so restoring it puts back the same two weapons.
-    expect(saved.schema_version).toBe('a7-v11');
+    expect(saved.schema_version).toBe('a7-v12');
     expect(saved.character_weapons.map((row: { name: string }) => row.name)).toEqual([
       'Weathered Longsword',
       'Half-entered club',

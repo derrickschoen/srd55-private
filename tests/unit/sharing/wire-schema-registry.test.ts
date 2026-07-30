@@ -286,6 +286,7 @@ const VERSION_FIXTURES = {
         {
           name: 'Ring of Shell',
           requires_attunement: false,
+          quantity: 1,
         },
       ],
     },
@@ -343,6 +344,7 @@ const VERSION_FIXTURES = {
       items: [{
         name: 'Cloak of the Armadillo',
         requires_attunement: true,
+        quantity: 1,
         sourceRef: 0,
       }],
     },
@@ -391,11 +393,33 @@ const VERSION_FIXTURES = {
       preferences: [],
       overrides: [],
       items: [
-        { name: 'Cloak', requires_attunement: true },
-        { name: 'Ring', requires_attunement: true },
-        { name: 'Staff', requires_attunement: true },
+        { name: 'Cloak', requires_attunement: true, quantity: 1 },
+        { name: 'Ring', requires_attunement: true, quantity: 1 },
+        { name: 'Staff', requires_attunement: true, quantity: 1 },
       ],
       attunementSlots: [0, 1, 2],
+    },
+  },
+  12: {
+    // Independently compressed from a hand-authored v12 positional tuple.
+    // The item tuple's final 3 is the quantity field D86 appended.
+    fragment:
+      'H4sIAAAAAAAAA4tWSslL0c0tzSnJTM5JLC7WLS5Izckp1k3OSCxKTC5JLdItzkgsSlXSMTTSiVYKMzRSCCxNzCvJLKlU8EgtylfSySvNySGdiNWJxkBoyqIxdKALoGuIVgrIL8nMz4M6Ki0xpzgVwjSOhaiOBQDKgG6N7wAAAA',
+    expected: {
+      format: CHARACTER_SHARE_FORMAT,
+      version: CHARACTER_SHARE_VERSION,
+      character: { name: 'V12 Quantity Hero' },
+      classes: [],
+      sources: [],
+      selections: [],
+      spellbook: [],
+      preferences: [],
+      overrides: [],
+      items: [{
+        name: 'Potion',
+        requires_attunement: false,
+        quantity: 3,
+      }],
     },
   },
 } satisfies Record<SupportedShareVersion, FrozenFixture>;
@@ -525,7 +549,7 @@ describe('the share-link wire schema registry', () => {
       'znYkjqpeGzGrT3uUmIzE6x6FACcM8J3cnM-udlExt5JUwNKZ32PDMOyhhaF4Ch-ERWprlN2PpLpSjWAbju76D1796GfoAAAA';
 
     await expect(decodeShareFragment(nonZero)).resolves.toMatchObject({
-      version: 11,
+      version: 12,
       effects: [{
         kind: 'armor_class_bonus',
         label: 'Manual Armor Class adjustment',
@@ -533,7 +557,7 @@ describe('the share-link wire schema registry', () => {
       }],
     });
     const zero = await decodeShareFragment(zeroWithNote);
-    expect(zero.version).toBe(11);
+    expect(zero.version).toBe(12);
     expect(zero).not.toHaveProperty('effects');
     expect(zero).not.toHaveProperty('sheetAdjustment');
   });

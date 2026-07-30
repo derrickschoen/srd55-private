@@ -903,6 +903,7 @@ function validateItemFields(value: unknown): void {
     [
       'name',
       'description',
+      'quantity',
       'requires_attunement',
       'source_instance_id',
       'effects',
@@ -911,6 +912,7 @@ function validateItemFields(value: unknown): void {
   );
   nonEmptyString(item, 'name', ORIGIN_TEXT_LIMITS.trait_name);
   nullableString(item, 'description', ORIGIN_TEXT_LIMITS.description);
+  positiveInteger(item, 'quantity');
   requiredBoolean(item, 'requires_attunement');
   if (!hasOwn(item, 'source_instance_id')) {
     invalid('source_instance_id is required; use null when absent.');

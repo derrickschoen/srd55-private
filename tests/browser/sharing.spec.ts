@@ -100,7 +100,7 @@ test('creates, independently verifies, previews, and explicitly imports a durabl
     gunzipSync(Buffer.from(fragment, 'base64url')).toString('utf8'),
   ) as unknown[];
   expect(positional[0]).toBe('dnd-multiclass-spells-character-share');
-  // v11: B1 minted v3 (allocation signal), B2 minted v4 (contribution
+  // v12: B1 minted v3 (allocation signal), B2 minted v4 (contribution
   // effects), skills-with-provenance S-A minted v5 (skill grants, retiring
   // every pre-v5 document per D60), starting-equipment E-A minted v6 (the
   // weapon/armour `sourceRef` append), D69 minted v7 (that append dropped —
@@ -112,8 +112,9 @@ test('creates, independently verifies, previews, and explicitly imports a durabl
   // type `species`, key NULL, generated TRUE. AC-4 minted v10: the sheet tuple
   // drops the retired `sheetAdjustment` fourth field and has arity 3. D92
   // minted v11: item tuples drop `attuned` and have arity 4, while the root
-  // appends a fixed three-position attunement tuple and has arity 19.
-  expect(positional[1]).toBe(11);
+  // appends a fixed three-position attunement tuple and has arity 19. D86
+  // minted v12: item tuples append positive-integer quantity at arity 5.
+  expect(positional[1]).toBe(12);
   expect((positional[2] as unknown[])[0]).toBe('Journey Hero 🧙');
   // TWELVE since v3, with the notes slot still NULL when nobody ticks the
   // notes box, and the appended ability_allocation_method NULL for a

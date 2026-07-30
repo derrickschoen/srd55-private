@@ -276,12 +276,14 @@ CREATE TABLE `character_items` (
 	`character_id` integer NOT NULL,
 	`name` VARCHAR NOT NULL,
 	`description` TEXT,
+	`quantity` integer DEFAULT 1 NOT NULL,
 	`requires_attunement` TINYINT(1) DEFAULT false NOT NULL,
 	`source_instance_id` integer,
 	`created_at` DATETIME,
 	`updated_at` DATETIME,
 	FOREIGN KEY (`character_id`) REFERENCES `characters`(`id`) ON UPDATE no action ON DELETE cascade,
-	FOREIGN KEY (`source_instance_id`,`character_id`) REFERENCES `character_source_instances`(`id`,`character_id`) ON UPDATE no action ON DELETE cascade
+	FOREIGN KEY (`source_instance_id`,`character_id`) REFERENCES `character_source_instances`(`id`,`character_id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "character_items_quantity_check" CHECK(typeof(`quantity`) = 'integer' AND `quantity` >= 1)
 );
 
 CREATE INDEX `character_items_character_id_index` ON `character_items` (`character_id`);
