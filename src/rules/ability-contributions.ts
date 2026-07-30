@@ -43,9 +43,9 @@ import {
   type ResolvedAbilities,
   type ResolvedAbility,
 } from '../builder/contracts';
-import { sqlInteger, sqlString } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
-import { abilities, isEnumValue, type Ability } from '../domain/enums';
+import { abilities, type Ability } from '../domain/enums';
+import { readEligibleCharacterEffects } from './eligible-character-effects';
 
 /**
  * Resolves the six abilities from base scores and contributions.
@@ -105,28 +105,28 @@ export function readAbilityContributions(
   db: DatabaseContext,
   characterId: number,
 ): AbilityIncreaseContribution[] {
-  return db.all(
-    `SELECT ability, amount, maximum, source_instance_id
-     FROM character_effects
-     WHERE character_id = ? AND effect_kind = 'ability_increase'
-     ORDER BY id`,
-    [characterId],
-    (row): AbilityIncreaseContribution => {
-      const ability = sqlString(row, 'ability');
-      if (!isEnumValue(abilities, ability)) {
-        // Unreachable behind the schema's `character_effects_ability_check`;
-        // thrown rather than skipped because a contribution that silently
-        // vanishes is exactly the wrong number D33 forbids.
-        throw new Error(`Unknown ability '${ability}' on an ability increase.`);
+  return readEligibleCharacterEffects(db, characterId, 'acquisition')
+    .filter((effect) => effect.effect_kind === 'ability_increase')
+    .map((effect): AbilityIncreaseContribution => {
+      if (
+        effect.ability === null ||
+        effect.amount === null ||
+        effect.maximum === null ||
+        effect.source_instance_id === null
+      ) {
+        // Unreachable behind the kind-scoped character_effects CHECKs. Throwing
+        // keeps a malformed contribution from silently changing no score.
+        throw new Error(
+          `Ability increase effect ${String(effect.id)} has an incomplete payload.`,
+        );
       }
       return {
-        ability,
-        amount: sqlInteger(row, 'amount'),
-        maximum: sqlInteger(row, 'maximum'),
-        source_instance_id: sqlInteger(row, 'source_instance_id'),
+        ability: effect.ability,
+        amount: effect.amount,
+        maximum: effect.maximum,
+        source_instance_id: effect.source_instance_id,
       };
-    },
-  );
+    });
 }
 
 /** One call for the common reader shape: load, resolve, and keep all three. */

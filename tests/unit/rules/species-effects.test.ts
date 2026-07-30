@@ -250,6 +250,19 @@ describe('speed', () => {
     expect(summariseEffects(effects).speedBonusFeet).toBe(5);
   });
 
+  it('applies the unmet armour Strength requirement after standing effects', () => {
+    const effects = [
+      effect('Fleet of Foot', {
+        effect_kind: 'speed',
+        speed_bonus_feet: 5,
+      }),
+    ];
+    // Base 30 + 5 standing bonus − 10 armour penalty = 25.
+    expect(walkingSpeedFeet(30, effects, 10)).toBe(25);
+    // The closed zero arm is a real negative control, not an omitted argument.
+    expect(walkingSpeedFeet(30, effects, 0)).toBe(35);
+  });
+
   it('takes effect: a penalty applies and is clamped at zero', () => {
     const effects = [
       effect('Cursed Gait', {

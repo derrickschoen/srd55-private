@@ -210,22 +210,27 @@ export function effectHitPoints(
 }
 
 /**
- * The character's walking Speed: their own base plus every standing bonus.
+ * The character's walking Speed: their own base plus every standing bonus,
+ * minus the Armor Class resolver's Strength-requirement penalty when present.
  *
  * `baseSpeedFeet` is `character_species.base_speed_feet`, which is nullable —
  * a half-entered species has no Speed and this returns `null` rather than
  * pretending the bonuses apply to a 30 nobody wrote down.
  *
+ * `armorStrengthPenaltyFeet` is a closed 0-or-10 result rather than an
+ * arbitrary adjustment: the resolver owns the requirement check and this
+ * function only makes the printed number agree with its existing warning.
  * Clamped at zero. A user's own effect may carry a penalty, and a negative
  * Speed is not a slower character; it is a number no sheet can print.
  */
 export function walkingSpeedFeet(
   baseSpeedFeet: number | null,
   effects: readonly EffectRow[],
+  armorStrengthPenaltyFeet: 0 | 10 = 0,
 ): number | null {
   if (baseSpeedFeet === null) {
     return null;
   }
   const bonus = summariseEffects(effects).speedBonusFeet;
-  return Math.max(0, baseSpeedFeet + bonus);
+  return Math.max(0, baseSpeedFeet + bonus - armorStrengthPenaltyFeet);
 }

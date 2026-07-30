@@ -1,5 +1,4 @@
 import type { DatabaseContext } from '../db/database';
-import { sqlNullableDamageType } from '../db/codecs';
 import type {
   CreatureSize,
   CreatureType,
@@ -9,6 +8,7 @@ import type {
   KnownDamageType,
 } from '../domain/enums';
 import type { EffectRow } from './species-effects';
+import { readEligibleCharacterEffects } from './eligible-character-effects';
 
 /**
  * PICKING A TEMPLATE IS A COPY, AND THE COPY IS THE WHOLE MECHANISM (D1b).
@@ -292,25 +292,14 @@ export function characterEffects(
   db: DatabaseContext,
   characterId: number,
 ): EffectRow[] {
-  return db.all(
-    `SELECT effect_kind, damage_type, hit_points_flat, hit_points_per_level,
-            speed_bonus_feet, label
-       FROM character_effects
-      WHERE character_id = ?
-      ORDER BY sort_order, id`,
-    [characterId],
-    (row): EffectRow => ({
-      effect_kind: String(row.effect_kind),
-      damage_type: sqlNullableDamageType(row, 'damage_type'),
-      hit_points_flat:
-        row.hit_points_flat === null ? null : Number(row.hit_points_flat),
-      hit_points_per_level:
-        row.hit_points_per_level === null
-          ? null
-          : Number(row.hit_points_per_level),
-      speed_bonus_feet:
-        row.speed_bonus_feet === null ? null : Number(row.speed_bonus_feet),
-      label: String(row.label),
+  return readEligibleCharacterEffects(db, characterId, 'display').map(
+    (effect): EffectRow => ({
+      effect_kind: effect.effect_kind,
+      damage_type: effect.damage_type,
+      hit_points_flat: effect.hit_points_flat,
+      hit_points_per_level: effect.hit_points_per_level,
+      speed_bonus_feet: effect.speed_bonus_feet,
+      label: effect.label,
     }),
   );
 }

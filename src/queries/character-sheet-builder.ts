@@ -1,7 +1,6 @@
 import {
   sqlBoolean,
   sqlInteger,
-  sqlNullableDamageType,
   sqlNullableInteger,
   sqlNullableString,
   sqlString,
@@ -47,10 +46,18 @@ import {
   sheetProficiencyBonus,
   skillModifier,
   type HitPointRolls,
+  type ArmorClassBonusCandidate,
+  type ArmorClassFormulaCandidate,
+  type ArmorClassSourceCategory,
+  type EquippedArmor,
   type SheetArmor,
   type SheetClass,
   type SheetWarning,
 } from '../rules/sheet';
+import {
+  readEligibleCharacterEffects,
+  type EligibleCharacterEffect,
+} from '../rules/eligible-character-effects';
 import { characterLevel } from '../rules/character-level';
 import {
   characterProficiencies,
@@ -537,11 +544,32 @@ export class CharacterSheetBuilder {
     const hitPoints = hitPointMaximum({ classes, scores, rolls: rolls.map });
     const worn = armorRows.find((row) => row.slot === 'worn') ?? null;
     const shield = armorRows.find((row) => row.slot === 'shield') ?? null;
+    const eligibleEffectRows = readEligibleCharacterEffects(
+      this.db,
+      characterId,
+      'display',
+    );
     const ac = armorClass({
-      armor: worn === null ? null : sheetArmor(worn),
-      shield: shield === null ? null : sheetArmor(shield),
+      equipment: armorRows.map(
+        (row): EquippedArmor => ({
+          slot: row.slot,
+          armor: sheetArmor(row),
+        }),
+      ),
+      formulas: armorClassFormulas(eligibleEffectRows),
+      bonuses: [
+        ...armorClassBonuses(eligibleEffectRows),
+        ...(adjustment.value === 0
+          ? []
+          : [
+              {
+                label:
+                  adjustment.note ?? 'Manual Armor Class adjustment',
+                amount: adjustment.value,
+              },
+            ]),
+      ],
       scores,
-      adjustment: adjustment.value,
     });
     const saves = savingThrowProficiencies(classes);
     // D28's union, and its warnings. It reuses the SAME `startingClass` the
@@ -573,20 +601,14 @@ export class CharacterSheetBuilder {
     // Reads `character_effects` rather than the trait table: D22 inverted the
     // model so an effect belongs to the CHARACTER and names its source, which
     // is what lets one trait carry both a resistance and a cantrip.
-    const effectRows = this.db.all(
-      `SELECT effect_kind, damage_type, hit_points_flat, hit_points_per_level,
-              speed_bonus_feet, label
-       FROM character_effects
-       WHERE character_id = ?
-       ORDER BY sort_order, id`,
-      [characterId],
-      (row): EffectRow => ({
-        effect_kind: sqlString(row, 'effect_kind'),
-        damage_type: sqlNullableDamageType(row, 'damage_type'),
-        hit_points_flat: sqlNullableInteger(row, 'hit_points_flat'),
-        hit_points_per_level: sqlNullableInteger(row, 'hit_points_per_level'),
-        speed_bonus_feet: sqlNullableInteger(row, 'speed_bonus_feet'),
-        label: sqlString(row, 'label'),
+    const effectRows = eligibleEffectRows.map(
+      (effect): EffectRow => ({
+        effect_kind: effect.effect_kind,
+        damage_type: effect.damage_type,
+        hit_points_flat: effect.hit_points_flat,
+        hit_points_per_level: effect.hit_points_per_level,
+        speed_bonus_feet: effect.speed_bonus_feet,
+        label: effect.label,
       }),
     );
     const effects = summariseEffects(effectRows);
@@ -718,7 +740,11 @@ export class CharacterSheetBuilder {
       walking_speed_feet:
         baseSpeed === null
           ? null
-          : walkingSpeedFeet(baseSpeed.feet, effectRows),
+          : walkingSpeedFeet(
+              baseSpeed.feet,
+              effectRows,
+              ac.speed_penalty_feet,
+            ),
       damage_resistances: effects.damageResistances,
       unchosen_damage_resistances: effects.unchosenDamageResistances,
       proficiencies: {
@@ -1031,6 +1057,60 @@ function sheetArmor(row: SheetArmorRow): SheetArmor {
     strength_requirement: row.strength_requirement,
     stealth_disadvantage: row.stealth_disadvantage,
   };
+}
+
+function armorClassFormulas(
+  effects: readonly EligibleCharacterEffect[],
+): ArmorClassFormulaCandidate[] {
+  return effects
+    .filter((effect) => effect.effect_kind === 'armor_class_formula')
+    .map((effect): ArmorClassFormulaCandidate => {
+      if (
+        effect.base === null ||
+        effect.ability_1 === null ||
+        effect.allows_shield === null
+      ) {
+        throw new Error(
+          `Armor Class formula effect ${String(effect.id)} has an incomplete payload.`,
+        );
+      }
+      return {
+        kind: 'ability_formula',
+        label: effect.label,
+        source: armorClassSource(effect),
+        base: effect.base,
+        ability_1: effect.ability_1,
+        ability_2: effect.ability_2,
+        allows_shield: effect.allows_shield,
+      };
+    });
+}
+
+function armorClassBonuses(
+  effects: readonly EligibleCharacterEffect[],
+): ArmorClassBonusCandidate[] {
+  return effects
+    .filter((effect) => effect.effect_kind === 'armor_class_bonus')
+    .map((effect): ArmorClassBonusCandidate => {
+      if (effect.amount === null) {
+        throw new Error(
+          `Armor Class bonus effect ${String(effect.id)} has no amount.`,
+        );
+      }
+      return { label: effect.label, amount: effect.amount };
+    });
+}
+
+function armorClassSource(
+  effect: EligibleCharacterEffect,
+): Exclude<ArmorClassSourceCategory, 'worn_armor'> {
+  if (effect.character_item_id !== null) {
+    return 'item';
+  }
+  if (effect.character_weapon_id !== null) {
+    return 'weapon';
+  }
+  return effect.source_type ?? 'manual';
 }
 
 function armorClassFormula(

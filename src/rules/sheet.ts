@@ -41,6 +41,7 @@ import { abilityForSkill } from './skills';
 import type {
   ArmorCategory,
   ArmorDexBonus,
+  ArmorSlot,
   HitDieSize,
   MartialArtsDieSize,
 } from '../domain/enums';
@@ -360,6 +361,95 @@ export interface HitPointResult {
 export interface ArmorClassResult {
   readonly value: number;
   readonly warnings: readonly SheetWarning[];
+  /** The eligible base formula selected before shields and flat bonuses. */
+  readonly winner: ResolvedArmorClassFormula;
+  /** Broken-condition formulas, never scored and never tie-broken. */
+  readonly excluded: readonly ExcludedArmorClassFormula[];
+  /** Present only when source precedence or label order selected among equals. */
+  readonly tie_break: ArmorClassTieBreak | null;
+  /** The one non-stacking penalty the Strength warning says is in force. */
+  readonly speed_penalty_feet: 0 | 10;
+}
+
+/**
+ * Every category the clone-stable AC tie-break can receive, in precedence
+ * order. Database ids and acquisition order are deliberately absent (D62).
+ */
+export const ARMOR_CLASS_SOURCE_PRECEDENCE = [
+  'worn_armor',
+  'species',
+  'subclass',
+  'class',
+  'feat',
+  'background',
+  'item',
+  'weapon',
+  'manual',
+] as const;
+export type ArmorClassSourceCategory =
+  (typeof ARMOR_CLASS_SOURCE_PRECEDENCE)[number];
+
+/** One persisted `armor_class_formula` after its source category is derived. */
+export interface ArmorClassFormulaCandidate {
+  readonly kind: 'ability_formula';
+  readonly label: string;
+  readonly source: Exclude<ArmorClassSourceCategory, 'worn_armor'>;
+  readonly base: number;
+  readonly ability_1: Ability;
+  readonly ability_2: Ability | null;
+  readonly allows_shield: boolean;
+}
+
+/** One flat addend. It never competes with a base formula. */
+export interface ArmorClassBonusCandidate {
+  readonly label: string;
+  readonly amount: number;
+}
+
+/** One stored armour row together with the slot in which it was recorded. */
+export interface EquippedArmor {
+  readonly slot: ArmorSlot;
+  readonly armor: SheetArmor;
+}
+
+export interface WornArmorClassFormula {
+  readonly kind: 'worn_armor';
+  readonly label: string;
+  readonly source: 'worn_armor';
+  readonly armor: SheetArmor;
+}
+
+export type ArmorClassFormula =
+  | ArmorClassFormulaCandidate
+  | WornArmorClassFormula;
+
+export interface ResolvedArmorClassFormula {
+  readonly formula: ArmorClassFormula;
+  readonly total: number;
+}
+
+export type ArmorClassExclusionReason =
+  | {
+      readonly kind: 'wearing_armor';
+      readonly armor_name: string;
+    }
+  | {
+      readonly kind: 'shield_not_allowed';
+      readonly shield_name: string;
+    };
+
+export interface ExcludedArmorClassFormula {
+  readonly formula: ArmorClassFormulaCandidate;
+  readonly reason: ArmorClassExclusionReason;
+}
+
+export const ARMOR_CLASS_TIE_BREAK_RULE =
+  'source_precedence_then_label' as const;
+
+export interface ArmorClassTieBreak {
+  readonly winner: ResolvedArmorClassFormula;
+  readonly losers: readonly ResolvedArmorClassFormula[];
+  readonly rule: typeof ARMOR_CLASS_TIE_BREAK_RULE;
 }
 
 /**
@@ -735,74 +825,63 @@ export function hitPointMaximum(input: {
 }
 
 /**
- * Armor Class.
+ * Armor Class: eligibility first, value second (D72–D75).
  *
- * UNARMOURED: `10 + Dexterity modifier`. `docs/srd/source/sheet-math.txt`:
- * "Without armor or a shield, your base Armor Class is 10 plus your Dexterity
- * modifier", and `skills-table.txt` prints the same as "Base AC = 10 + the
- * creature's Dexterity modifier".
+ * The floor is a real candidate — 10 + Dexterity, shield-compatible — and is
+ * present on every call. Worn armour, the floor, and every supplied
+ * `armor_class_formula` compete for ONE base. Shields and flat bonuses are
+ * addends after that competition, but a shield first excludes every formula
+ * that forbids it.
  *
- * ARMOURED: the base the Armor table prints, plus the Dexterity term that row
- * allows — `docs/srd/source/armor-table.txt`. Light armour adds the modifier
- * uncapped, Medium adds it capped at 2, Heavy adds NOTHING.
+ * BROKEN CONDITIONS EXCLUDE OUTRIGHT. Wearing body armour excludes every
+ * unarmoured ability formula, including the floor; carrying a shield excludes
+ * a formula whose `allows_shield` is false. Excluded formulas are returned as
+ * data for AC-B, but never receive a total and never enter the sort.
  *
- * HEAVY ARMOUR IS `none`, NOT A CAP OF ZERO, and the difference is a real bug
- * avoided: `Math.min(dexModifier, 0)` SUBTRACTS for a negative modifier, so a
- * Dexterity 6 character in Chain Mail would come out at 14 where the table says
- * a flat 16.
+ * The tie-break uses only structural/source categories and labels. It never
+ * consults a database id, source_instance_id, or acquisition order, so cloning
+ * a character cannot change the winner when ids are remapped (D62).
  *
- * WHAT THIS DOES NOT MODEL, and says so rather than guessing: Unarmored Defense
- * (Barbarian, Monk) and any other class feature offering an alternative
- * calculation. `docs/srd/source/multiclassing.txt` is explicit that a character
- * with several such features picks ONE, and the feature text for neither class
- * is in `docs/srd/source/`. The manual adjustment is the honest escape hatch
- * until it is.
- *
- * THE ROLE OF A ROW IS DECIDED BY `category`, NOT BY WHICH ARGUMENT IT ARRIVES
- * IN. `armorClassFrom` below is the exhaustive dispatch the schema comment on
- * `armor_templates.armor_class` promises. Passing a Shield as `armor` is a real
- * reachable mistake once persistence lands — the two are the same TypeScript
- * shape — and reading its `+2` as a base Armor Class would silently halve
- * somebody's defence. Here it contributes its bonus over the unarmoured base and
- * the sheet SAYS the slots are crossed, which is D11 part 2 applied to a value
- * this module was already given.
+ * Equipment is still interpreted by CATEGORY rather than slot. A crossed
+ * Shield is a shield bonus; crossed body armour is a worn-armour candidate.
+ * The existing mismatch and Strength warnings therefore survive unchanged.
  */
 export function armorClass(input: {
-  readonly armor?: SheetArmor | null;
-  readonly shield?: SheetArmor | null;
+  readonly equipment: readonly EquippedArmor[];
+  readonly formulas: readonly ArmorClassFormulaCandidate[];
+  readonly bonuses: readonly ArmorClassBonusCandidate[];
   readonly scores: AbilityScores;
-  readonly adjustment?: number;
 }): ArmorClassResult {
   const dexModifier = input.scores.score('dexterity').modifier();
   const warnings: SheetWarning[] = [];
+  const wornArmor: WornArmorClassFormula[] = [];
+  const shields: SheetArmor[] = [];
+  let strengthRequirementUnmet = false;
 
-  let base: number | null = null;
-  let bonus = 0;
-
-  for (const slot of ['armor', 'shield'] as const) {
-    const row = input[slot] ?? null;
-    if (row === null) {
-      continue;
-    }
-    const contribution = armorClassFrom(row, dexModifier);
-    if (contribution.base === null) {
-      bonus += contribution.bonus;
+  for (const equipped of input.equipment) {
+    const row = equipped.armor;
+    if (row.category === 'shield') {
+      shields.push(row);
     } else {
-      // Two rows both claiming to be worn armour cannot both apply; the SRD has
-      // no rule for layering, so the better of the two is used and stated.
-      base = base === null ? contribution.base : Math.max(base, contribution.base);
+      wornArmor.push({
+        kind: 'worn_armor',
+        label: row.name,
+        source: 'worn_armor',
+        armor: row,
+      });
     }
-    if ((contribution.base === null) !== (slot === 'shield')) {
+    if ((row.category === 'shield') !== (equipped.slot === 'shield')) {
       warnings.push({
         code: 'armor_slot_mismatch',
         message:
           `${row.name} is ${row.category === 'shield' ? 'a Shield' : `${row.category} armor`}, ` +
-          `but it is recorded in the ${slot === 'shield' ? 'shield' : 'worn armor'} slot. ` +
+          `but it is recorded in the ${equipped.slot === 'shield' ? 'shield' : 'worn armor'} slot. ` +
           'It has been counted according to what it is, not where it was put.',
       });
     }
     const required = row.strength_requirement;
     if (required !== null && input.scores.score('strength').value < required) {
+      strengthRequirementUnmet = true;
       warnings.push({
         code: 'strength_requirement_unmet',
         message:
@@ -812,38 +891,110 @@ export function armorClass(input: {
     }
   }
 
-  const value = (base ?? 10 + dexModifier) + bonus;
-  return { value: value + (input.adjustment ?? 0), warnings };
+  const floor: ArmorClassFormulaCandidate = {
+    kind: 'ability_formula',
+    label: 'Unarmoured',
+    source: 'manual',
+    base: 10,
+    ability_1: 'dexterity',
+    ability_2: null,
+    allows_shield: true,
+  };
+  const unarmouredFormulas = [floor, ...input.formulas];
+  const excluded: ExcludedArmorClassFormula[] = [];
+  const eligible: ResolvedArmorClassFormula[] = wornArmor.map((formula) => ({
+    formula,
+    total:
+      formula.armor.armor_class +
+      dexterityTerm(formula.armor, dexModifier),
+  }));
+  const wornArmorName = wornArmor[0]?.label;
+  const shieldName = shields[0]?.name;
+
+  for (const formula of unarmouredFormulas) {
+    if (wornArmorName !== undefined) {
+      excluded.push({
+        formula,
+        reason: { kind: 'wearing_armor', armor_name: wornArmorName },
+      });
+      continue;
+    }
+    if (shieldName !== undefined && !formula.allows_shield) {
+      excluded.push({
+        formula,
+        reason: { kind: 'shield_not_allowed', shield_name: shieldName },
+      });
+      continue;
+    }
+    eligible.push({
+      formula,
+      total:
+        formula.base +
+        input.scores.score(formula.ability_1).modifier() +
+        (formula.ability_2 === null
+          ? 0
+          : input.scores.score(formula.ability_2).modifier()),
+    });
+  }
+
+  // The floor is eligible whenever there is no worn armour, and every worn
+  // armour row is eligible otherwise. The list therefore cannot be empty.
+  eligible.sort(compareResolvedArmorClassFormulas);
+  const winner = eligible[0];
+  if (winner === undefined) {
+    throw new Error('Armor Class has no eligible base formula.');
+  }
+  const tied = eligible.filter(
+    (candidate) =>
+      candidate !== winner && candidate.total === winner.total,
+  );
+  const shieldBonus = shields.reduce(
+    (total, shield) => total + shield.armor_class,
+    0,
+  );
+  const flatBonus = input.bonuses.reduce(
+    (total, bonus) => total + bonus.amount,
+    0,
+  );
+
+  return {
+    value: winner.total + shieldBonus + flatBonus,
+    warnings,
+    winner,
+    excluded,
+    tie_break:
+      tied.length === 0
+        ? null
+        : {
+            winner,
+            losers: tied,
+            rule: ARMOR_CLASS_TIE_BREAK_RULE,
+          },
+    speed_penalty_feet: strengthRequirementUnmet ? 10 : 0,
+  };
 }
 
-/**
- * What one row contributes, decided by `category` and by nothing else.
- *
- * `base` is the Armor Class the row SETS, replacing the unarmoured `10 + Dex`;
- * `bonus` is what it ADDS on top of whatever base applies. Exactly one of the
- * two is meaningful per category, which is why `base` is nullable here and
- * nowhere else: `null` means "this row is not worn armour", a fact about the
- * category rather than missing data (D6b limb 1).
- *
- * THE SWITCH IS EXHAUSTIVE OVER `ArmorCategory` with no `default`, so adding a
- * category to the vocabulary is a compile error here rather than a silent
- * miscalculation — which is the guarantee `armor_templates.armor_class` is
- * documented as relying on.
- */
-function armorClassFrom(
-  row: SheetArmor,
-  dexModifier: number,
-): { readonly base: number | null; readonly bonus: number } {
-  switch (row.category) {
-    case 'light':
-    case 'medium':
-    case 'heavy':
-      return { base: row.armor_class + dexterityTerm(row, dexModifier), bonus: 0 };
-    case 'shield':
-      // The Shield row's `armor_class` is the `+2` BONUS the table prints, not
-      // a base — the one place the column changes meaning.
-      return { base: null, bonus: row.armor_class };
+function compareResolvedArmorClassFormulas(
+  left: ResolvedArmorClassFormula,
+  right: ResolvedArmorClassFormula,
+): number {
+  const valueDifference = right.total - left.total;
+  if (valueDifference !== 0) {
+    return valueDifference;
   }
+  const sourceDifference =
+    ARMOR_CLASS_SOURCE_PRECEDENCE.indexOf(left.formula.source) -
+    ARMOR_CLASS_SOURCE_PRECEDENCE.indexOf(right.formula.source);
+  if (sourceDifference !== 0) {
+    return sourceDifference;
+  }
+  if (left.formula.label < right.formula.label) {
+    return -1;
+  }
+  if (left.formula.label > right.formula.label) {
+    return 1;
+  }
+  return 0;
 }
 
 /** The Dexterity contribution of one armour row. Exhaustive over the vocabulary. */
