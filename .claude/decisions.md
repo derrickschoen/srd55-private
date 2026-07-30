@@ -1,5 +1,33 @@
 # Binding scope decisions
 
+## D86 — OWNER: character_items holds plain possessions, WITH a quantity (2026-07-30)
+
+The owner's answer to the inventory question: **"Possessions plus a quantity
+field."** What this binds:
+
+- `character_items` accepts rows with zero effect rows — a rope, a potion,
+  an unidentified trinket. The Add Item flow must not demand effects.
+- A `quantity` column is added (NOT NULL, default 1, positive integer
+  CHECK): 3 potions are one row with quantity 3, not three rows.
+- Nullable-ride rules: quantity is NOT NULL, so it does NOT ride
+  `ADDED_NULLABLE_ROW_COLUMNS` — it needs its default-fill handling on the
+  historical direction and a wire bump when it lands (the AC-1 discipline).
+- Still OUT: encumbrance, coins, weight, containers. D65's "starting gear
+  renders from the rules" stands — packages do not itemise on creation;
+  this is about things a person chooses to record later.
+- Deliberately NOT scheduled into a current unit; it slots into the next
+  items-touching dispatch.
+
+## D85 — OWNER: the wizard is the Level-Up button; the planner keeps writing (2026-07-30)
+
+The owner's answer to the front-door question: **"Wizard is the Level-Up
+button."** The sheet and the character list carry a Level Up button that
+always enters the level-up wizard, one level per pass. The planner remains
+fully reachable and remains a writer — bulk retuning stays a planner
+strength — and both surfaces write through the same command layer (D71), so
+no command gains a second shape from this ruling. The level-up wizard plan's
+front-door seam is now pinned.
+
 ## D84 — OWNER: SRD matches by catalog key first, content fingerprint as FALLBACK only (2026-07-30)
 
 The owner's answer to the bundled-SRD-identity question: **"Fingerprint as
