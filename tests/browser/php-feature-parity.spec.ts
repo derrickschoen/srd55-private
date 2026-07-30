@@ -194,6 +194,13 @@ async function portableTableCounts(
       await rows(page, 'character_items'),
       characterId,
     ).length,
+    // D92's fixed three-position attunement row is character-owned portable
+    // state. Omitting it would preserve the items while silently losing which
+    // of them actually applies.
+    character_attunement_slots: forCharacter(
+      await rows(page, 'character_attunement_slots'),
+      characterId,
+    ).length,
     // And the four stored sheet inputs, on the same terms again: a document
     // that does not carry them is a document that silently loses a player's
     // armour, their rolled hit points and the skills they chose.
@@ -357,6 +364,7 @@ test('builds the complete workspace editing contract for the seeded character', 
     'slots',
     'placeholder_spells',
     'weapons',
+    'items',
     'save_points',
   ]);
   expect(workspace.revision).toBe(0);
@@ -533,6 +541,7 @@ test('captures every restorable character table and reports exact state differen
     'character_skill_proficiencies',
     'character_sheet_adjustments',
     'character_effects',
+    'character_attunement_slots',
     'character_items',
   ]) {
     expect(document.tables[table]).toEqual(
@@ -544,6 +553,9 @@ test('captures every restorable character table and reports exact state differen
     // reason the weapons and origin keys were added: a backup without them
     // silently loses the player's armour, rolls and skill choices.
     'character_armor',
+    // D92 makes attunement a fixed character-owned row. A backup without it
+    // keeps the possessions but silently loses which item effects apply.
+    'character_attunement_slots',
     // Added when the character's origin became portable, for the same reason
     // the weapons key was: a backup without it silently loses the species.
     'character_background',
@@ -593,6 +605,7 @@ test('captures every restorable character table and reports exact state differen
     'character_skill_proficiencies',
     'character_sheet_adjustments',
     'character_effects',
+    'character_attunement_slots',
     'character_items',
   ]) {
     expect(document.tables[table], `${table} is captured exactly`).toEqual([]);
@@ -872,9 +885,9 @@ test('round-trips a named save point through the mutation path', async ({
   )[0]!;
   expect(point).toMatchObject({
     label: 'Before experiment',
-    // a7-v10 is the snapshot version that carries character_items
-    // (AC-1, D72; a7-v9 was hand-frozen first).
-    schema_version: 'a7-v10',
+    // a7-v11 adds character_attunement_slots; a7-v10 remains frozen as the
+    // first snapshot version that carried character_items.
+    schema_version: 'a7-v11',
   });
   await execute(
     page,
@@ -1132,7 +1145,7 @@ test('undoes a structural class change through its snapshot inverse', async ({
   );
   expect(changed.inverse).toMatchObject({
     type: 'restore_snapshot',
-    snapshot: { schema_version: 'a7-v10' },
+    snapshot: { schema_version: 'a7-v11' },
     integrity: expect.any(String),
   });
   await execute(
