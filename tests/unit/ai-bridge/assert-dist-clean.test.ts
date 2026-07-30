@@ -12,6 +12,12 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { SCRAPE_SENTINEL } from '../../../tools/scrape/provenance';
+import {
+  appShellCacheName,
+  appShellUrl,
+  serviceWorkerSource,
+  type BuildAsset,
+} from '../../../tools/pwa/service-worker';
 
 const scanner = fileURLToPath(
   new URL('../../../tools/assert-dist-clean.mjs', import.meta.url),
@@ -31,7 +37,24 @@ afterEach(() => {
 function distWith(files: Record<string, string>): string {
   const root = mkdtempSync(join(tmpdir(), 'assert-dist-clean-'));
   made.push(root);
-  for (const [name, content] of Object.entries(files)) {
+  const complete: Record<string, string> = {
+    'manifest.webmanifest': '{"name":"Test"}',
+    'icons/app-icon.svg': '<svg/>',
+    'icons/app-icon-192.png': 'png-192',
+    'icons/app-icon-512.png': 'png-512',
+    ...files,
+  };
+  complete['index.html'] =
+    `${complete['index.html'] ?? ''}\n` +
+    '<link rel="manifest" href="./manifest.webmanifest" />';
+  const assets: BuildAsset[] = Object.entries(complete).map(
+    ([fileName, source]) => ({ fileName, source }),
+  );
+  complete['service-worker.js'] = serviceWorkerSource(
+    appShellCacheName(assets),
+    ['./', ...assets.map((asset) => appShellUrl(asset.fileName))],
+  );
+  for (const [name, content] of Object.entries(complete)) {
     const path = join(root, name);
     mkdirSync(join(path, '..'), { recursive: true });
     writeFileSync(path, content);
@@ -85,7 +108,29 @@ describe('the dist guard passes only a genuinely clean build', () => {
       }),
     );
     expect(run.code).toBe(0);
-    expect(run.stdout).toContain('2 files scanned');
+    expect(run.stdout).toContain('7 files scanned');
+  });
+
+  it('fails when the PWA shell bytes no longer match the cache version', async () => {
+    const root = distWith({ 'assets/index.js': CLEAN });
+    writeFileSync(join(root, 'assets/index.js'), `${CLEAN}\nchanged`);
+
+    const run = await scan(root);
+
+    expect(run.code).toBe(1);
+    expect(run.stderr).toContain('cache name is not the version');
+  });
+
+  it('fails when a required install artifact is missing', async () => {
+    const root = distWith({ 'assets/index.js': CLEAN });
+    rmSync(join(root, 'manifest.webmanifest'));
+
+    const run = await scan(root);
+
+    expect(run.code).toBe(1);
+    expect(run.stderr).toContain(
+      'required build artifact "manifest.webmanifest" is missing',
+    );
   });
 });
 

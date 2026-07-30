@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">Multiclass Spell Planner</title>
+  <rect width="512" height="512" rx="104" fill="#7c3a20"/>
+  <path d="M256 92 402 198 346 370H166L110 198Z" fill="#f5f1e8"/>
+  <path d="m256 92 90 278-236-172h292L166 370Z" fill="none" stroke="#7c3a20" stroke-width="18" stroke-linejoin="round"/>
+  <circle cx="256" cy="242" r="44" fill="#7c3a20"/>
+</svg>

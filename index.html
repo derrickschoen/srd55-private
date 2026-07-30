@@ -9,6 +9,9 @@
       name="description"
       content="A local-first multiclass spell planner"
     />
+    <meta name="theme-color" content="#7c3a20" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icons/app-icon.svg" type="image/svg+xml" />
     <title>Multiclass Spell Planner</title>
   </head>
   <body>
@@ -21,6 +24,18 @@
     <!-- Outside #app so it survives every screen render: screens replace the
          children of #app whenever they redraw. -->
     <footer class="site-footer">
+      <div class="pwa-status">
+        <output
+          id="persistence-status"
+          role="status"
+          aria-live="polite"
+          data-persistence-state="requesting"
+        >Requesting browser eviction protection…</output>
+        <div id="update-ready" role="status" hidden>
+          <span>Update ready.</span>
+          <button id="refresh-update" type="button">Refresh to update</button>
+        </div>
+      </div>
       <a href="/legal" data-router-link>Licences and attribution</a>
     </footer>
     <script type="module" src="/src/main.ts"></script>

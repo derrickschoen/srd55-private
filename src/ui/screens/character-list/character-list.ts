@@ -71,34 +71,6 @@ export class CharacterListController {
   }
 }
 
-export type DurableStorageState =
-  | 'durable'
-  | 'best-effort'
-  | 'unavailable';
-
-export async function durableStorageState(
-  storage: Pick<StorageManager, 'persisted'> | undefined,
-): Promise<DurableStorageState> {
-  if (storage === undefined || typeof storage.persisted !== 'function') {
-    return 'unavailable';
-  }
-  try {
-    return (await storage.persisted()) ? 'durable' : 'best-effort';
-  } catch {
-    return 'unavailable';
-  }
-}
-
-export function durableStorageLabel(state: DurableStorageState): string {
-  if (state === 'durable') {
-    return 'Durable local storage is enabled.';
-  }
-  if (state === 'best-effort') {
-    return 'Local data may be cleared by the browser; keep backups.';
-  }
-  return 'Durable-storage status is unavailable in this browser.';
-}
-
 export function warningLabel(count: number): string {
   return `${count} ${count === 1 ? 'warning' : 'warnings'}`;
 }
@@ -511,9 +483,6 @@ export async function renderCharacterList(
     shell.list,
   );
 
-  const storage = navigator.storage;
-  const durability = durableStorageState(storage);
-
   const reload = async (): Promise<void> => {
     shell.list.setAttribute('aria-busy', 'true');
     const [characters, completeness] = await Promise.all([
@@ -579,11 +548,8 @@ export async function renderCharacterList(
     }
     throw error;
   }
-  const storageState = await durability;
   if (active) {
-    shell.status.textContent = `Local database ready. ${durableStorageLabel(
-      storageState,
-    )}`;
+    shell.status.textContent = 'Local database ready.';
     shell.status.dataset.ready = 'true';
   }
 
