@@ -90,7 +90,8 @@ a {
   }
 
   /* Printed sheets carry the notice itself, so a link to it is noise. */
-  .site-footer {
+  .site-footer,
+  .ai-chat {
     display: none;
   }
 }

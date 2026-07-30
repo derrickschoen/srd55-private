@@ -874,12 +874,12 @@ export function renderSheet(sheet: CharacterSheet): HTMLElement {
   const home = document.createElement('a');
   home.href = '/';
   home.dataset.routerLink = 'true';
-  home.className = 'button-secondary';
+  home.className = 'button-secondary sheet-chrome';
   home.textContent = 'All characters';
   const planner = document.createElement('a');
   planner.href = `/characters/${String(sheet.character_id)}`;
   planner.dataset.routerLink = 'true';
-  planner.className = 'button-secondary';
+  planner.className = 'button-secondary sheet-chrome';
   planner.textContent = 'Open planner';
   const heading = document.createElement('h1');
   heading.append('Character sheet — ');
@@ -893,7 +893,7 @@ export function renderSheet(sheet: CharacterSheet): HTMLElement {
   // without the warning has been told something false.
   if (sheet.warnings.length > 0) {
     const warnings = document.createElement('section');
-    warnings.className = 'sheet-panel';
+    warnings.className = 'sheet-panel sheet-warnings';
     warnings.setAttribute('role', 'alert');
     const warningHeading = document.createElement('h2');
     warningHeading.textContent = 'Warnings about these numbers';
@@ -957,4 +957,70 @@ export function renderSheet(sheet: CharacterSheet): HTMLElement {
   shell.append(facts);
 
   return shell;
+}
+
+const PRINT_FIELD_SELECTOR = '[data-sheet-print-field]';
+
+function emptyPaperEntry(kind: 'box' | 'line'): HTMLSpanElement {
+  const entry = document.createElement('span');
+  entry.className = `sheet-print-entry sheet-print-entry-${kind}`;
+  entry.dataset.sheetPrintEntry = kind;
+  entry.setAttribute('aria-label', 'Empty; fill in on paper');
+  return entry;
+}
+
+/**
+ * D88/D89/D104: play-state is paper state. These two empty writing surfaces
+ * exist only while print media is active; they are deliberately not hidden
+ * screen DOM, because the sheet's D4 invariant says its screen subtree contains
+ * no concealed content.
+ */
+export function setSheetPrintFields(
+  shell: HTMLElement,
+  printMedia: boolean,
+): void {
+  for (const field of Array.from(
+    shell.querySelectorAll(PRINT_FIELD_SELECTOR),
+  )) {
+    field.remove();
+  }
+  if (!printMedia) {
+    return;
+  }
+
+  const hitPointValue = shell.querySelector<HTMLElement>(
+    '[data-sheet-id="hit_points"] dd',
+  );
+  if (hitPointValue === null) {
+    throw new Error('The printable sheet requires its hit point maximum row.');
+  }
+  const currentHitPoints = document.createElement('span');
+  currentHitPoints.className = 'sheet-print-current-hp';
+  currentHitPoints.dataset.sheetPrintField = 'current-hit-points';
+  const currentHitPointLabel = document.createElement('span');
+  currentHitPointLabel.textContent = 'Current HP';
+  currentHitPoints.append(
+    currentHitPointLabel,
+    emptyPaperEntry('box'),
+  );
+  hitPointValue.insertBefore(
+    currentHitPoints,
+    hitPointValue.querySelector('.sheet-formula'),
+  );
+
+  const totalLevel = shell.querySelector<HTMLElement>(
+    '[data-sheet-id="total_level"]',
+  );
+  if (totalLevel === null) {
+    throw new Error('The printable sheet requires its total level row.');
+  }
+  const experiencePoints = document.createElement('div');
+  experiencePoints.className = 'sheet-number sheet-print-xp';
+  experiencePoints.dataset.sheetPrintField = 'experience-points';
+  const experiencePointsLabel = document.createElement('dt');
+  experiencePointsLabel.textContent = 'Experience points';
+  const experiencePointsValue = document.createElement('dd');
+  experiencePointsValue.append(emptyPaperEntry('line'));
+  experiencePoints.append(experiencePointsLabel, experiencePointsValue);
+  totalLevel.after(experiencePoints);
 }

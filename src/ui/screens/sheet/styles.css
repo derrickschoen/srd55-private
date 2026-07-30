@@ -96,3 +96,89 @@
     padding-bottom: 0.4rem;
   }
 }
+
+/**
+ * D89: the v1 paper sheet is this route, reflowed into one column. Disclosures
+ * remain inline and D95 warnings retain the same readable size; only
+ * interactive chrome is suppressed.
+ */
+@media print {
+  .sheet-shell {
+    display: block;
+    max-width: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .sheet-shell > * + * {
+    margin-top: 1rem;
+  }
+
+  .sheet-shell :is(.sheet-chrome, button, nav, [data-router-link]) {
+    display: none;
+  }
+
+  .sheet-header h1 {
+    margin: 0;
+  }
+
+  .sheet-panel {
+    border-color: #777;
+    border-radius: 0;
+    break-inside: auto;
+  }
+
+  .sheet-panel > h2 {
+    break-after: avoid;
+  }
+
+  .sheet-warnings {
+    font-size: 1rem;
+  }
+
+  .sheet-numbers {
+    grid-template-columns: 1fr;
+  }
+
+  .sheet-number {
+    display: block;
+    break-inside: avoid;
+  }
+
+  .sheet-number + .sheet-number {
+    margin-top: 0.6rem;
+  }
+
+  .sheet-print-current-hp {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    margin-left: 2rem;
+    font-weight: 600;
+  }
+
+  .sheet-print-entry {
+    display: inline-block;
+  }
+
+  .sheet-print-entry-box {
+    width: 3.5rem;
+    height: 2.25rem;
+    border: 2px solid #000;
+    vertical-align: middle;
+  }
+
+  .sheet-print-xp {
+    display: grid;
+    grid-template-columns: max-content minmax(8rem, 1fr);
+    align-items: end;
+    gap: 0.75rem;
+  }
+
+  .sheet-print-entry-line {
+    width: 100%;
+    min-width: 8rem;
+    height: 1.35rem;
+    border-bottom: 1px solid #000;
+  }
+}
