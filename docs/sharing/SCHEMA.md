@@ -1,22 +1,22 @@
 # Character share wire schema
 
-> Generated from `SHARE_SCHEMAS` at commit `4e03e7f`. Update this document
+> Generated from `SHARE_SCHEMAS` at commit `713bcc7`. Update this document
 > with every wire-version mint.
 
 The executable source of truth is
 `src/sharing/wire-schemas/index.ts` and its immutable version modules
-`v1.ts` through `v12.ts`. This guide describes that registry; it does not
-replace it. `CURRENT_CHARACTER_SHARE_VERSION` is **12**.
+`v1.ts` through `v13.ts`. This guide describes that registry; it does not
+replace it. `CURRENT_CHARACTER_SHARE_VERSION` is **13**.
 
 One version at `root[1]` governs the complete document. Nested tuples do not
 carry independent versions. Encoding always mints the current version.
 Decoding validates the frozen schema selected by `root[1]`, then composes
-one-version-at-a-time migrations until it reaches v12.
+one-version-at-a-time migrations until it reaches v13.
 
 Versions 1 through 4 remain in the registry as frozen history, but they are
 deliberately retired from import. Their migration path reaches v4→v5 and throws
 `ShareWireRetirementError` because their bare skill names cannot be given honest
-provenance. Versions 5 through 11 migrate to v12; v12 is already current.
+provenance. Versions 5 through 12 migrate to v13.
 
 Tuple arity is exact. A nullable or omitted logical value still occupies its
 assigned wire position as `null`; it does not shorten a current tuple. The
@@ -224,12 +224,27 @@ The root remains arity **19**.
 **Adjacent migration (v11→v12):** appends integer `1` to every item, because
 each v11 row represented exactly one possession, and rewrites the version.
 
-## Current v12 shape
+### Version 13 — ability score overrides
+
+**Minted by:** D83's `ability_override` unit.
+
+**Change:** this is an **accepted-value change**, not an arity change. No tuple
+gains a field. `effect.kind` gains the accepted value `ability_override`,
+reusing the existing `ability` and `maximum` positions; `maximum` carries the
+absolute 1–30 SET score.
+
+**Adjacent migration (v12→v13):** validates the frozen v12 effect-kind domain
+so the new kind cannot be smuggled through a same-arity historical tuple, then
+rewrites the version.
+
+## Current v13 shape
 
 Positions are zero-based. The keys, wire types, and arities in this section are
-exactly those of the resolved `WIRE_SCHEMA_V12.tuples` object; the meanings
-faithfully restate its meaning strings with minor prose normalization. The
-inventory includes tuples inherited from older frozen schema objects.
+exactly those of the resolved `WIRE_SCHEMA_V13.tuples` object. The tuple
+inventory is identical to v12—v13 reuses `WIRE_SCHEMA_V12.tuples`—with only the
+accepted `effect.kind` domain widened. The meanings faithfully restate the
+schema's meaning strings with minor prose normalization. The inventory includes
+tuples inherited from older frozen schema objects.
 
 ### Root tuple
 
@@ -541,7 +556,7 @@ Arity: **3**.
 
 #### `sheetAdjustment` (historical, unreachable from current `sheet`)
 
-Arity: **2**. This schema object is inherited into v12, but v10 removed the
+Arity: **2**. This schema object is inherited into v13, but v10 removed the
 only current tuple position that referred to it.
 
 | Position | Key | Wire type | Meaning |
@@ -626,7 +641,7 @@ D41 makes the registry an append-only historical contract:
 
 ## How to mint the next version
 
-The v9, v10, v11, and v12 mints followed this discipline:
+The v9, v10, v11, v12, and v13 mints followed this discipline:
 
 1. Add `src/sharing/wire-schemas/vN.ts`. Build the new schema from the previous
    frozen inventory, replacing only changed tuple objects. Do not edit any
