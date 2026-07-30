@@ -1,5 +1,39 @@
 # Binding scope decisions
 
+## D97 — OWNER: level deletion without undo data is BEST-EFFORT RECONSTRUCTION; never to 0; multiclass skill keep-vs-lose is resolved (2026-07-30)
+
+The owner's ruling, verbatim: *"If there is no undo information, when we
+delete a level, the core will have to remove the feature given by the
+deleted level and make a best effort to reconstruct the character the same
+way it does when it imports. Do not allow level down to 0. When deleting a
+multi class level, the code may have to resolve which skills proficiencys
+to keep vs lose."*
+
+What this binds, refining D94:
+
+- **Level deletion is not gated on a stored inverse.** With an inverse
+  (D94's local stack) the undo is exact. WITHOUT one — imported character,
+  or stack exhausted — deletion still works: remove what the deleted level
+  granted (generated feature effects via their template identity, ASI rows
+  written at that level, spell picks of that level, subclass if that level
+  chose it) and then RECONSTRUCT through the same best-effort
+  reconciliation the import path already runs. One reconciliation engine,
+  two callers — not a second implementation (F22).
+- **Total character level never reaches 0.** Deleting the last remaining
+  level of a character's only class is refused. Supervisor's reading,
+  recorded for correction if wrong: the floor is on the CHARACTER's total,
+  so deleting a secondary class's only level (removing that class from a
+  multiclass) remains legal — that is class removal, which the planner
+  already models — while a single-class character stops at level 1.
+- **Multiclass skill keep-vs-lose is resolved by provenance, not guessed.**
+  First-class acquisition grants full skills; multiclass entry grants the
+  D28 subset — the skills-with-provenance machinery records who granted
+  what, and deletion follows it. Where a proficiency is genuinely claimed
+  by more than one surviving source it is KEPT under the surviving grant;
+  where its only grantor is deleted it follows the existing
+  tombstone-and-warn discipline (D70), never silent loss, never silent
+  retention without a grantor.
+
 ## D96 — OWNER: multiclass ability minimums WARN and ALLOW (2026-07-30)
 
 The owner's answer: **"Warn, still allow."** Taking a class whose multiclass
