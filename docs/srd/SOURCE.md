@@ -67,6 +67,7 @@ pages interleave and the weapon table becomes unreadable.
 | `source/warlock-spell-list.txt` | Complete Warlock Spell List | 74-76 | `0845b2b01463abc15c56b6c6f3b0eb2f234920e4ad5e93ce672ad5110839c7cb` |
 | `source/wizard-spell-list.txt` | Complete Wizard Spell List | 79-82 | `c1e51d5f924cdb5ff0b36f73ccce3870b9b3f11b974ef827daabace8ba23a583` |
 | `source/spell-descriptions.txt` | Complete Spell Descriptions section, enumerating 339 unique spell headings | 107-175 | `93e7a5c245b073586872c0736deb24a5463f94c55033871bd71e6d76cf0bd4fa` |
+| `source/unarmored-defense.txt` | Unarmored Defense — the Barbarian and Monk level-1 features, whose second ability AND shield clause differ (D75) | 29, 50 | `312bfc8e1e4dbe5f8bcfca589cbd4c7b9faaee89cfe47c4fbec4e62c4e75e544` |
 
 ### Why there is a checksum PER EXTRACT, and not only for the PDF
 
@@ -162,6 +163,21 @@ previously believed here:
   written.** Its seven rows carried no class names, so deciding which class each
   belonged to would have come from memory. The section has been re-extracted
   with each class's Features table title and column headers above its own rows.
+
+## The complete text, committed
+
+`docs/srd/full/srd-5.2.1.txt` is the ENTIRE `pdftotext -layout` output of the
+document above, byte for byte after its notice header, committed 2026-07-30 at
+the owner's direction ("we will need it all"). The PDF was re-fetched that day
+and its SHA-256 matched this file's table exactly before conversion. Committed
+file SHA-256: `e69e053879d96e8e5568a6807212875ab1dfa1e4059cd14444c0a33f5fba95f2`
+(2,146,883 bytes).
+
+Two-column pages interleave their columns on each line in that file, so the
+extracts in `source/` remain the readable, column-sliced references and every
+future slice should still land there with a row in the table above. What the
+full file changes is provenance: a new slice is now checked against a
+COMMITTED source, not a download.
 
 ## Attribution
 
