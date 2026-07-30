@@ -133,7 +133,7 @@ afterAll(() => {
 });
 
 describe('declared relations match the foreign keys', () => {
-  it('budgets 66 constraints across 70 PRAGMA rows', () => {
+  it('budgets 73 constraints across 80 PRAGMA rows', () => {
     const tables = db
       .selectValues(
         `SELECT name FROM sqlite_schema
@@ -219,8 +219,10 @@ describe('declared relations match the foreign keys', () => {
     // the fifth composite key in the schema and the fourth use of the
     // `(id, character_id)` unique index.
     // AC-2a adds one parent edge for each of the three effect-template tables.
-    expect(constraintEdges(db)).toHaveLength(71);
-    expect(rowCount).toBe(76);
+    // AC-2b adds two composite ownership edges from effects to items/weapons:
+    // two constraints, four PRAGMA rows.
+    expect(constraintEdges(db)).toHaveLength(73);
+    expect(rowCount).toBe(80);
   });
 
   it('declares a relation for every foreign key, and a foreign key for every relation', () => {
@@ -229,7 +231,7 @@ describe('declared relations match the foreign keys', () => {
     expect(declaredEdges()).toEqual(constraintEdges(db));
   });
 
-  it('keeps all five composite foreign keys composite', () => {
+  it('keeps all seven composite foreign keys composite', () => {
     const edges = declaredEdges();
     expect(edges).toContain(
       'character_class_levels: subclass_definition_id,class_definition_id -> subclass_definitions.id,class_definition_id',
@@ -252,6 +254,12 @@ describe('declared relations match the foreign keys', () => {
     // from crossing characters.
     expect(edges).toContain(
       'character_items: source_instance_id,character_id -> character_source_instances.id,character_id',
+    );
+    expect(edges).toContain(
+      'character_effects: character_item_id,character_id -> character_items.id,character_id',
+    );
+    expect(edges).toContain(
+      'character_effects: character_weapon_id,character_id -> character_weapons.id,character_id',
     );
   });
 

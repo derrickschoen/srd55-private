@@ -1167,6 +1167,8 @@ const REFINEMENTS = {
   // `weapon_damage_bonus` (AC-1) — see `extraAttackWeaponScopeEnum`.
   'character_effects.weapon_scope': extraAttackWeaponScopeEnum,
   'character_effects.source_instance_id': positiveInt,
+  'character_effects.character_item_id': positiveInt,
+  'character_effects.character_weapon_id': positiveInt,
   'character_effects.template_ref': sqlText,
   // Non-empty: an effect nobody can name is an effect nobody can find to edit
   // or delete, and `''` is a null in costume.

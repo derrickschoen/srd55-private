@@ -32,6 +32,11 @@ import {
   SetWeaponMasteryCommand,
   UpdateWeaponCommand,
 } from './weapons';
+import {
+  AddItemCommand,
+  RemoveItemCommand,
+  UpdateItemCommand,
+} from './items';
 
 export interface ConstructedCharacterCommand {
   readonly actionType: string;
@@ -138,6 +143,12 @@ export class CharacterCommandFactory {
         return new RemoveWeaponCommand(this.db, payload);
       case 'set_weapon_mastery':
         return new SetWeaponMasteryCommand(this.db, payload);
+      case 'add_item':
+        return new AddItemCommand(this.db, payload);
+      case 'update_item':
+        return new UpdateItemCommand(this.db, payload);
+      case 'remove_item':
+        return new RemoveItemCommand(this.db, payload);
       case 'set_armor':
         return new SetArmorCommand(this.db, payload);
       case 'set_hit_point_roll':

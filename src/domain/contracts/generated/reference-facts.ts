@@ -88,6 +88,18 @@ export const FOREIGN_KEY_FACTS = [
     targetColumns: ['id', 'character_id'],
   },
   {
+    table: 'character_effects',
+    columns: ['character_item_id', 'character_id'],
+    target: 'character_items',
+    targetColumns: ['id', 'character_id'],
+  },
+  {
+    table: 'character_effects',
+    columns: ['character_weapon_id', 'character_id'],
+    target: 'character_weapons',
+    targetColumns: ['id', 'character_id'],
+  },
+  {
     table: 'character_hit_point_rolls',
     columns: ['character_id'],
     target: 'characters',

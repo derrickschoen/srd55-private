@@ -291,11 +291,70 @@ const VERSION_FIXTURES = {
       ],
     },
   },
+  9: {
+    // Independently compressed from a hand-authored v9 positional tuple,
+    // never from `shareDocumentToPositional`. It exercises all four appended
+    // values: the generated-only species marker, item/weapon array indexes,
+    // and a generated template reference.
+    fragment:
+      'H4sIAAAAAAAAA42SwWrDMAyGXyXo7EBaBqO9jV1226GwizFGtZXGTLGN7ayHsXcfTdItlK0tmB9jJPnTL0mw3tb9wMUZxpzrHIk516bDhKZQqnOHiUBshIS3TfV69JRy52L1QimA8APzDYF1s364jFRCKiFlIyBHMo7yHPAJI4Zm-iCG7epLrAQ8pR6tYw4gShpITcnn81tYStgVbNsqtFXpqFrk_QUmwQdPoO5p4rqcKhWdyIRkyYKaHzBGdgb3TKDUBSimPiQ9NbsPfsgg4JkDvle5I-YrzjaL--oG2Bx7NlkX6iNjIV0SuqKpbcmUvH0ckY-EMXhtsccD_UBNjpI90F3THmV9ZRuCH2tbsnr6EJaolzZNlvwzz9MyiBY5k2iUUt_Y-ILWzAIAAA',
+    expected: {
+      format: CHARACTER_SHARE_FORMAT,
+      version: CHARACTER_SHARE_VERSION,
+      character: {
+        name: 'V9 Ownership Hero',
+        rules_edition_preference: '2024',
+      },
+      classes: [],
+      sources: [{
+        id: 0,
+        type: 'species',
+        name: 'Armadillo',
+        config: { class_level: 1 },
+        acquired: 1,
+        generated: true,
+      }],
+      selections: [],
+      spellbook: [],
+      preferences: [],
+      overrides: [],
+      weapons: [{
+        name: 'Staff of the Armadillo',
+        damage: { kind: 'not_recorded' },
+        versatile_damage: { kind: 'not_applicable' },
+        range: { kind: 'none' },
+      }],
+      effects: [
+        {
+          kind: 'armor_class_bonus',
+          label: 'Cloak shell',
+          sourceRef: 0,
+          amount: 1,
+          itemRef: 0,
+          template_ref: 'species_template_trait_effects:7',
+        },
+        {
+          kind: 'weapon_damage_bonus',
+          label: 'Staff edge',
+          amount: 2,
+          weapon_scope: 'one_bonded_weapon',
+          weaponRef: 0,
+        },
+      ],
+      items: [{
+        name: 'Cloak of the Armadillo',
+        requires_attunement: true,
+        attuned: false,
+        sourceRef: 0,
+      }],
+    },
+  },
 } satisfies Record<SupportedShareVersion, FrozenFixture>;
 
 const HISTORICAL_SCHEMA_MODULE_SHA256 = {
   'v1.ts': '8a87e9cd8ee49c2beb42f9747dc24025c485fccb63d822179202df29080af449',
   'v2.ts': '32e662f3db38f09da5b17320b059c917d26e031456fd0f2c4cefb196a872b269',
+  'v8.ts': '1ac43e5dbc33e34ef025af12e80914a51daa8ecda5599a8c1143cbe2baf748af',
 } as const;
 
 function allObjects(root: object): object[] {

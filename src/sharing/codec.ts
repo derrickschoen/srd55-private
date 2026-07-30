@@ -1054,7 +1054,9 @@ export function positionalToShareDocument(
         'wire character',
       );
       return decodeCurrentWire(
-        MIGRATIONS[7](MIGRATIONS[6](MIGRATIONS[5](input))),
+        MIGRATIONS[8](
+          MIGRATIONS[7](MIGRATIONS[6](MIGRATIONS[5](input))),
+        ),
       );
     case 6:
       variableTuple(
@@ -1067,7 +1069,9 @@ export function positionalToShareDocument(
         SHARE_SCHEMAS[6].tuples.character.arities,
         'wire character',
       );
-      return decodeCurrentWire(MIGRATIONS[7](MIGRATIONS[6](input)));
+      return decodeCurrentWire(
+        MIGRATIONS[8](MIGRATIONS[7](MIGRATIONS[6](input))),
+      );
     case 7:
       variableTuple(
         input,
@@ -1079,8 +1083,10 @@ export function positionalToShareDocument(
         SHARE_SCHEMAS[7].tuples.character.arities,
         'wire character',
       );
-      return decodeCurrentWire(MIGRATIONS[7](input));
+      return decodeCurrentWire(MIGRATIONS[8](MIGRATIONS[7](input)));
     case 8:
+      return decodeCurrentWire(MIGRATIONS[8](input));
+    case 9:
       return decodeCurrentWire(input);
     default:
       throw new ShareValidationError('version is unsupported.');

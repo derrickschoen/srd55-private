@@ -120,6 +120,8 @@ export const charactersRelations = relations(characters, ({ many }) => ({
   skill_proficiencies: many(character_skill_proficiencies),
   skill_grants: many(character_skill_grants),
   sheet_adjustments: many(character_sheet_adjustments),
+  effects: many(character_effects),
+  items: many(character_items),
 }));
 
 /**
@@ -178,11 +180,12 @@ export const characterSheetAdjustmentsRelations = relations(
 
 export const characterWeaponsRelations = relations(
   character_weapons,
-  ({ one }) => ({
+  ({ one, many }) => ({
     character: one(characters, {
       fields: [character_weapons.character_id],
       references: [characters.id],
     }),
+    effects: many(character_effects),
     // NO `template` edge, and its absence is the point: by D1b a character's
     // weapon holds VALUES copied from a template, never a reference to one.
     // There is no `weapon_template_id` column for a relation to sit on, and
@@ -308,7 +311,8 @@ export const speciesTemplateTraitEffectsRelations = relations(
 );
 
 /**
- * TWO relations, and the second is the whole point of the inversion: an effect
+ * FOUR relations. An effect belongs to the CHARACTER, may point at the source
+ * instance that granted it, and may be owned by exactly one item or weapon.
  * belongs to the CHARACTER and OPTIONALLY points at the source instance that
  * granted it. It is the SECOND composite reference in this schema, after
  * `spell_selection_slots`, and for the identical reason — see the comment
@@ -334,6 +338,20 @@ export const characterEffectsRelations = relations(
         character_source_instances.character_id,
       ],
     }),
+    item: one(character_items, {
+      fields: [
+        character_effects.character_item_id,
+        character_effects.character_id,
+      ],
+      references: [character_items.id, character_items.character_id],
+    }),
+    weapon: one(character_weapons, {
+      fields: [
+        character_effects.character_weapon_id,
+        character_effects.character_id,
+      ],
+      references: [character_weapons.id, character_weapons.character_id],
+    }),
   }),
 );
 
@@ -346,7 +364,7 @@ export const characterEffectsRelations = relations(
  */
 export const characterItemsRelations = relations(
   character_items,
-  ({ one }) => ({
+  ({ one, many }) => ({
     character: one(characters, {
       fields: [character_items.character_id],
       references: [characters.id],
@@ -361,6 +379,7 @@ export const characterItemsRelations = relations(
         character_source_instances.character_id,
       ],
     }),
+    effects: many(character_effects),
   }),
 );
 

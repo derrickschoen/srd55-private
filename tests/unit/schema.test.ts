@@ -388,7 +388,7 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
       // AC-1 (D72): `base` and `allows_shield` are the two new integer-
       // affinity columns (allows_shield is TINYINT(1), integer affinity).
       'base', 'allows_shield',
-      'source_instance_id',
+      'source_instance_id', 'character_item_id', 'character_weapon_id',
     ],
     text: [
       'effect_kind', 'damage_type', 'ability', 'template_ref', 'label', 'notes',
@@ -871,7 +871,15 @@ const expectedNamedIndexes: Record<string, string> = {
   character_background_character_id_unique:
     'character_background:character_id:unique',
   character_effects_character_id_index: 'character_effects:character_id',
+  character_effects_character_item_id_index:
+    'character_effects:character_item_id',
+  character_effects_character_weapon_id_index:
+    'character_effects:character_weapon_id',
   character_items_character_id_index: 'character_items:character_id',
+  character_items_id_character_id_unique:
+    'character_items:id,character_id:unique',
+  character_weapons_id_character_id_unique:
+    'character_weapons:id,character_id:unique',
   // --- THE FOUR STORED SHEET INPUTS ---------------------------------------
   // Every one is UNIQUE and there is no plain index beside any of them: each
   // unique index already serves the `WHERE character_id = ?` read, and the
@@ -1015,6 +1023,8 @@ const expectedUniqueGroups: Record<string, string[]> = {
   character_operations: ['operation_uuid'],
   character_rule_overrides: ['character_id,rule_key'],
   character_source_instances: ['id,character_id', 'instance_uuid'],
+  character_items: ['id,character_id'],
+  character_weapons: ['id,character_id'],
   character_spell_preferences: ['character_id,spell_version_id'],
   class_definitions: ['content_key', 'name,rules_edition'],
   class_progressions: ['class_definition_id,class_level'],
@@ -1323,7 +1333,7 @@ const expectedForeignKeys: Record<string, string[]> = {
   ],
   character_species: ['character_id->characters.id|CASCADE'],
   character_species_traits: ['character_id->characters.id|CASCADE'],
-  // TWO edges, and the composite one is the point: a bare
+  // FOUR edges, and every composite one is the point: a bare
   // `source_instance_id` would pass `PRAGMA foreign_key_check` while pointing
   // at ANOTHER character's source instance. Including `character_id` in the
   // tuple is what makes the database refuse that, and it is the second use of
@@ -1331,6 +1341,8 @@ const expectedForeignKeys: Record<string, string[]> = {
   // for exactly this purpose — `spell_selection_slots` above being the first.
   character_effects: [
     'character_id->characters.id|CASCADE',
+    'character_item_id,character_id->character_items.id,character_id|CASCADE',
+    'character_weapon_id,character_id->character_weapons.id,character_id|CASCADE',
     'source_instance_id,character_id->character_source_instances.id,character_id|CASCADE',
   ],
   // The identical two-edge shape `character_effects` carries just above, for

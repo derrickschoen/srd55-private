@@ -279,6 +279,10 @@ export const character_weapons = sqliteTable(
       'character_weapons_attack_kind_check',
       nullOrOneOf('attack_kind', weaponAttackKinds),
     ),
+    uniqueIndex('character_weapons_id_character_id_unique').on(
+      table.id,
+      table.character_id,
+    ),
     index('character_weapons_character_id_index').on(table.character_id),
   ],
 );

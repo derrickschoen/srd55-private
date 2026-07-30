@@ -294,6 +294,94 @@ describe('weapon commands', () => {
     expect(weapons()[0]).toMatchObject({ id, name: 'Greatsword' });
   });
 
+  it('owns optional effects across add, update, remove, and undo', async () => {
+    await run({
+      type: 'add_weapon',
+      weapon: custom({
+        name: 'Armadillo Blade',
+        effects: [{
+          effect_kind: 'weapon_damage_bonus',
+          amount: 2,
+          weapon_scope: 'one_bonded_weapon',
+          label: 'Armadillo edge',
+          notes: null,
+        }],
+      }),
+    });
+    const weaponId = weapons()[0]!.id;
+    const original = db.oneRaw(
+      `SELECT id, effect_kind, amount, character_weapon_id, template_ref
+       FROM character_effects WHERE character_weapon_id = ?`,
+      [weaponId],
+    );
+    expect(original).toMatchObject({
+      effect_kind: 'weapon_damage_bonus',
+      amount: 2,
+      character_weapon_id: weaponId,
+      template_ref: null,
+    });
+
+    const updated = await run({
+      type: 'update_weapon',
+      weapon_id: weaponId,
+      weapon: custom({
+        name: 'Pact Shell Blade',
+        effects: [{
+          effect_kind: 'attack_ability_override',
+          ability: 'charisma',
+          weapon_scope: 'one_bonded_weapon',
+          label: 'Pact binding',
+          notes: null,
+        }],
+      }),
+    });
+    expect(
+      db.oneRaw(
+        `SELECT effect_kind, ability
+         FROM character_effects WHERE character_weapon_id = ?`,
+        [weaponId],
+      ),
+    ).toEqual({
+      effect_kind: 'attack_ability_override',
+      ability: 'charisma',
+    });
+
+    await run(updated.inverse);
+    expect(
+      db.oneRaw(
+        `SELECT id, effect_kind, amount
+         FROM character_effects WHERE character_weapon_id = ?`,
+        [weaponId],
+      ),
+    ).toEqual({
+      id: Number(original?.id),
+      effect_kind: 'weapon_damage_bonus',
+      amount: 2,
+    });
+
+    const removed = await run({
+      type: 'remove_weapon',
+      weapon_id: weaponId,
+    });
+    expect(
+      db.scalar(
+        'SELECT count(*) FROM character_effects WHERE character_weapon_id = ?',
+        [weaponId],
+      ),
+    ).toBe(0);
+    await run(removed.inverse);
+    expect(
+      db.oneRaw(
+        `SELECT id, character_weapon_id
+         FROM character_effects WHERE character_weapon_id = ?`,
+        [weaponId],
+      ),
+    ).toEqual({
+      id: Number(original?.id),
+      character_weapon_id: weaponId,
+    });
+  });
+
   it('restores a removed weapon at its original id, with its mastery choice', async () => {
     await run({ type: 'add_weapon', weapon: fromTemplate('Longsword') });
     await run({ type: 'add_weapon', weapon: fromTemplate('Greatsword') });

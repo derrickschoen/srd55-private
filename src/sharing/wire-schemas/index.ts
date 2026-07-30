@@ -6,6 +6,7 @@ import { WIRE_SCHEMA_V5 } from './v5';
 import { WIRE_SCHEMA_V6 } from './v6';
 import { WIRE_SCHEMA_V7 } from './v7';
 import { WIRE_SCHEMA_V8 } from './v8';
+import { WIRE_SCHEMA_V9 } from './v9';
 import {
   versatileWeaponDamageFromLegacy,
   weaponDamageFromLegacy,
@@ -22,7 +23,7 @@ import {
  * domain requires a new schema version, an adjacent migration, and a
  * hand-frozen fragment fixture. Never edit an existing version.
  */
-export const CURRENT_CHARACTER_SHARE_VERSION = 8 as const;
+export const CURRENT_CHARACTER_SHARE_VERSION = 9 as const;
 
 /**
  * Any change to tuple field order, meaning, membership, or accepted value
@@ -38,6 +39,7 @@ export const SHARE_SCHEMAS = Object.freeze({
   6: WIRE_SCHEMA_V6,
   7: WIRE_SCHEMA_V7,
   8: WIRE_SCHEMA_V8,
+  9: WIRE_SCHEMA_V9,
 } as const);
 
 export type SupportedShareVersion = keyof typeof SHARE_SCHEMAS;
@@ -510,6 +512,66 @@ function migrateV7ToV8(document: unknown): unknown {
 }
 
 /**
+ * V8 predates effect ownership, generated-row identity, and the generated-only
+ * source marker. All four additions are nullable, so the adjacent migration is
+ * an exact append-only null pad: one slot per source and three per effect.
+ */
+function migrateV8ToV9(document: unknown): unknown {
+  if (
+    !Array.isArray(document) ||
+    !WIRE_SCHEMA_V8.tuples.root.arities.some(
+      (arity) => arity === document.length,
+    )
+  ) {
+    throw new TypeError('wire document has an unsupported v8 tuple length.');
+  }
+  const sourcesIndex = WIRE_SCHEMA_V8.tuples.root.fields.findIndex(
+    (field) => field.key === 'sources',
+  );
+  const effectsIndex = WIRE_SCHEMA_V8.tuples.root.fields.findIndex(
+    (field) => field.key === 'effects',
+  );
+  const sources = document[sourcesIndex];
+  const effects = document[effectsIndex];
+  if (!Array.isArray(sources)) {
+    throw new TypeError('wire sources must be a list.');
+  }
+  if (effects !== null && !Array.isArray(effects)) {
+    throw new TypeError('wire effects must be null or a list.');
+  }
+  const migrated = [...document];
+  migrated[1] = 9;
+  migrated[sourcesIndex] = sources.map((source: unknown) => {
+    if (
+      !Array.isArray(source) ||
+      !WIRE_SCHEMA_V8.tuples.source.arities.some(
+        (arity) => arity === source.length,
+      )
+    ) {
+      throw new TypeError('wire source has an unsupported v8 tuple length.');
+    }
+    return [...source, null];
+  });
+  migrated[effectsIndex] =
+    effects === null
+      ? null
+      : effects.map((effect: unknown) => {
+          if (
+            !Array.isArray(effect) ||
+            !WIRE_SCHEMA_V8.tuples.effect.arities.some(
+              (arity) => arity === effect.length,
+            )
+          ) {
+            throw new TypeError(
+              'wire effect has an unsupported v8 tuple length.',
+            );
+          }
+          return [...effect, null, null, null];
+        });
+  return migrated;
+}
+
+/**
  * ADJACENT means each migration lifts exactly one version step; the decoder
  * composes them, so a v1 document runs 1→2, then 2→3, then 3→4, then 4→5 —
  * where every pre-v5 document is retired by the deliberate throw above — a
@@ -524,6 +586,7 @@ export const MIGRATIONS = Object.freeze({
   5: migrateV5ToV6,
   6: migrateV6ToV7,
   7: migrateV7ToV8,
+  8: migrateV8ToV9,
 }) satisfies AdjacentMigrations;
 
 export { WIRE_SCHEMA_V1 } from './v1';
@@ -534,6 +597,7 @@ export { WIRE_SCHEMA_V5 } from './v5';
 export { WIRE_SCHEMA_V6 } from './v6';
 export { WIRE_SCHEMA_V7 } from './v7';
 export { WIRE_SCHEMA_V8 } from './v8';
+export { WIRE_SCHEMA_V9 } from './v9';
 export type { WireField, WireSchemaV1 } from './v1';
 export type { WireSchemaV2 } from './v2';
 export type { WireSchemaV3 } from './v3';
@@ -542,3 +606,4 @@ export type { WireSchemaV5 } from './v5';
 export type { WireSchemaV6 } from './v6';
 export type { WireSchemaV7 } from './v7';
 export type { WireSchemaV8 } from './v8';
+export type { WireSchemaV9 } from './v9';

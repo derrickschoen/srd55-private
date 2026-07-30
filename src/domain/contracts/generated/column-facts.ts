@@ -151,6 +151,8 @@ export const COLUMN_FACTS = {
     allows_shield: { base: 'degraded', notNull: false },
     weapon_scope: { base: 'degraded', notNull: false },
     source_instance_id: { base: 'integer', notNull: false },
+    character_item_id: { base: 'integer', notNull: false },
+    character_weapon_id: { base: 'integer', notNull: false },
     template_ref: { base: 'degraded', notNull: false },
     label: { base: 'degraded', notNull: true },
     notes: { base: 'degraded', notNull: false },

@@ -4,6 +4,7 @@ import {
   index,
   integer,
   sqliteTable,
+  uniqueIndex,
 } from 'drizzle-orm/sqlite-core';
 import type { CharacterId, CharacterItemId, SourceInstanceId } from '../../src/domain/ids';
 import { datetime, sqlText, tinyint1, varchar } from './columns';
@@ -22,15 +23,12 @@ import { character_source_instances, characters } from './character';
  *
  * CARRIES NO `ac_change`, NO `to_hit_change`, NO `flat_damage_bonus` COLUMN —
  * D72 REJECTED THAT BY NAME (Option A). Every numeric change a thing on this
- * table grants is a `character_effects` row instead, referencing this row's
- * `character_source_instances` companion the same way any other effect does.
- * An item and its effects are linked only by a shared `label` a person reads
- * and, where the effect actually has one, a shared `source_instance_id` — the
- * SAME severed-by-design relationship `character_effects.label` already has
- * with the trait that named it (`db/schema/origins.ts`). There is deliberately
- * no foreign key from an effect to the item row that "granted" it: nothing in
- * this unit copies one into the other (AC-2/AC-3), and inventing a link this
- * dispatch does not populate would be schema slack with nothing behind it.
+ * table grants is a `character_effects` row instead. AC-2b gives that effect
+ * an explicit `(character_item_id, character_id)` reference back to this row.
+ * The composite guard prevents a cross-character owner, and ON DELETE CASCADE
+ * means removing the character's own item removes exactly the effects it
+ * grants. `source_instance_id` remains a different relation: what granted the
+ * ITEM, not which item owns an effect.
  *
  * NO `sort_order`. Unlike `character_effects` and `character_species_traits`,
  * the plan's own row shape names exactly five fields — name, description,
@@ -91,6 +89,10 @@ export const character_items = sqliteTable(
   },
   (table) => [
     index('character_items_character_id_index').on(table.character_id),
+    uniqueIndex('character_items_id_character_id_unique').on(
+      table.id,
+      table.character_id,
+    ),
     foreignKey({
       columns: [table.source_instance_id, table.character_id],
       foreignColumns: [

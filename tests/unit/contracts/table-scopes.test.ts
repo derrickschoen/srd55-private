@@ -175,13 +175,16 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
 
   it('reproduces the snapshot DELETE_ORDER exactly, plus the declared additions', () => {
     // Order is topological rather than capture order, so the additions go where
-    // their foreign keys allow: none of the four has children, so they delete
-    // first, alongside the other leaves. Within the group the traits precede
+    // their foreign keys allow. Effects now depend on both equipment tables,
+    // so they delete first; items and weapons then remain ahead of their own
+    // source parent. Within the group the traits precede
     // the species row purely for readability — `character_species_traits` is
     // keyed on `character_id`, not on `character_species.id`, so there is no
     // edge between them to respect.
     expect([...DELETE_ORDER]).toEqual([
+      'character_effects',
       'character_weapons',
+      'character_items',
       // The four sheet inputs are leaves too: `character_hit_point_rolls` has
       // no foreign key to `character_class_levels` by design, so there is no
       // edge among these four and their order here is free.
@@ -189,18 +192,10 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       'character_hit_point_rolls',
       'character_skill_proficiencies',
       'character_sheet_adjustments',
-      // A leaf as well, but it is the FIRST character-owned table to reference
-      // another one — `character_source_instances`, through a composite key —
-      // so it must delete before that table rather than merely before the
-      // parents. Sitting here with the other leaves is what achieves that.
-      'character_effects',
-      // A leaf on the same terms as `character_effects`: no children, and it
+      // A leaf with no children, and it
       // references `character_source_instances` through the same composite
       // key, so it deletes here with the other leaves.
       'character_skill_grants',
-      // A leaf on the same terms again (AC-1, D72): no children, references
-      // `character_source_instances` through the same composite key.
-      'character_items',
       'character_species_traits',
       'character_species',
       'character_background',

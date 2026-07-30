@@ -100,14 +100,18 @@ test('creates, independently verifies, previews, and explicitly imports a durabl
     gunzipSync(Buffer.from(fragment, 'base64url')).toString('utf8'),
   ) as unknown[];
   expect(positional[0]).toBe('dnd-multiclass-spells-character-share');
-  // v8: B1 minted v3 (allocation signal), B2 minted v4 (contribution
+  // v9: B1 minted v3 (allocation signal), B2 minted v4 (contribution
   // effects), skills-with-provenance S-A minted v5 (skill grants, retiring
   // every pre-v5 document per D60), starting-equipment E-A minted v6 (the
   // weapon/armour `sourceRef` append), D69 minted v7 (that append dropped —
   // weapons carry no provenance), and AC-1 (D72) minted v8 (the
   // armor_class_formula/weapon-scope effect payload plus the new `items`
-  // root element) — so this build writes 8 and nothing else.
-  expect(positional[1]).toBe(8);
+  // root element). AC-2b minted v9: the effect tuple appends `itemRef`,
+  // `weaponRef`, and `template_ref` (arity 20), while the source tuple appends
+  // `generated` (arity 7), encoding a generated-only species source exactly as
+  // type `species`, key NULL, generated TRUE — so this build writes 9 and
+  // nothing else.
+  expect(positional[1]).toBe(9);
   expect((positional[2] as unknown[])[0]).toBe('Journey Hero 🧙');
   // TWELVE since v3, with the notes slot still NULL when nobody ticks the
   // notes box, and the appended ability_allocation_method NULL for a
@@ -119,8 +123,9 @@ test('creates, independently verifies, previews, and explicitly imports a durabl
   expect(positional.slice(3, 9)).toEqual([[], [], [], [], [], []]);
   // Placeholders keep their frozen sixteenth slot; v5 appends skillGrants as
   // the seventeenth, NULL for a character with no grants, and AC-1 appends
-  // `items` as the eighteenth, NULL for a character with none — absent data
-  // is an occupied null slot, never a shorter tuple.
+  // `items` as the eighteenth, NULL for a character with none. V9 only grows
+  // the nested effect and source tuples, so the root remains exactly eighteen
+  // positions — absent data is an occupied null slot, never a shorter tuple.
   expect(positional).toHaveLength(18);
   expect(positional[15]).toBeNull();
   expect(positional[16]).toBeNull();

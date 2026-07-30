@@ -43,7 +43,7 @@ import type {
  */
 export type WeaponProfile = Omit<
   WeaponFields,
-  'notes' | 'proficiency_category' | 'attack_kind'
+  'notes' | 'proficiency_category' | 'attack_kind' | 'effects'
 >;
 
 export interface WeaponTemplate extends WeaponProfile {

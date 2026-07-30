@@ -1247,6 +1247,33 @@ export const CHARACTER_STATE_TABLES = order<SnapshotTable>()([
 ]);
 
 /**
+ * Snapshot tables in an order safe to INSERT under `PRAGMA foreign_keys = ON`.
+ *
+ * Deliberately distinct from `CHARACTER_STATE_TABLES`: capture order is stable
+ * serialized output, while insertion order is a dependency graph. AC-2b makes
+ * effects children of items and weapons, so both equipment tables must exist
+ * before an effect that names them is restored.
+ */
+export const CHARACTER_STATE_INSERT_ORDER = order<SnapshotTable>()([
+  'character_class_levels',
+  'character_source_instances',
+  'spell_selection_slots',
+  'wizard_spellbook_entries',
+  'warning_acknowledgements',
+  'character_weapons',
+  'character_species',
+  'character_species_traits',
+  'character_background',
+  'character_armor',
+  'character_hit_point_rolls',
+  'character_skill_proficiencies',
+  'character_sheet_adjustments',
+  'character_skill_grants',
+  'character_items',
+  'character_effects',
+]);
+
+/**
  * Snapshot tables in an order safe to DELETE under
  * `PRAGMA foreign_keys = ON`: children before parents.
  *
@@ -1255,9 +1282,14 @@ export const CHARACTER_STATE_TABLES = order<SnapshotTable>()([
  * an integration test that deletes a fully-populated character.
  */
 export const DELETE_ORDER = order<SnapshotTable>()([
-  // No table references `character_weapons`, so it has no children and can go
-  // first alongside the other leaves.
+  // Effects are children of source instances, items and weapons. Deleting them
+  // first makes the remaining order explicit rather than relying on cascades
+  // to erase rows before their own delete step.
+  'character_effects',
+  // Weapons and items are no longer childless leaves (AC-2b): their owned
+  // effects were deleted immediately above, so both parents are now safe.
   'character_weapons',
+  'character_items',
   // Leaves too, and nothing references any of them — `character_hit_point_rolls`
   // deliberately has no foreign key to `character_class_levels` (see
   // `db/schema/sheet-inputs.ts`), so there is no edge here to respect and the
@@ -1266,21 +1298,10 @@ export const DELETE_ORDER = order<SnapshotTable>()([
   'character_hit_point_rolls',
   'character_skill_proficiencies',
   'character_sheet_adjustments',
-  // A leaf as well, but NOT for the same reason: `character_effects` has no
-  // children, yet it is the first character-owned table to REFERENCE another
-  // one (`character_source_instances`, through a composite key). It must
-  // therefore be deleted before that table, which is what putting it up here
-  // with the other leaves achieves. The integration test that deletes a fully
-  // populated character is what proves the order rather than this comment.
-  'character_effects',
   // A leaf on the same terms as `character_effects`: no children, but it
   // references `character_source_instances` through the same composite key, so
   // it must be deleted before that table — which this position guarantees.
   'character_skill_grants',
-  // A leaf on the same terms again (AC-1, D72): no children, references
-  // `character_source_instances` through the same composite key, must be
-  // deleted before that table — which this position guarantees.
-  'character_items',
   // Leaves too. `character_species_traits` is keyed on `character_id` and NOT
   // on `character_species.id` — see `db/schema/origins.ts` — so there is no
   // parent-before-child edge between the two and the order between them is

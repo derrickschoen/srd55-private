@@ -1754,6 +1754,23 @@ describe('adversarial character-share rejection', () => {
 
   it('rejects wrong format/version, tuple arity errors, and extra or missing elements', async () => {
     const positional = shareDocumentToPositional(minimalDocument());
+    const withEffect = shareDocumentToPositional(
+      minimalDocument({
+        effects: [{
+          kind: 'armor_class_bonus',
+          label: 'Tuple arity probe',
+          amount: 1,
+        }],
+      }),
+    );
+    const shortEffect = structuredClone(withEffect);
+    (shortEffect[14] as unknown[][])[0] =
+      ((shortEffect[14] as unknown[][])[0] as unknown[]).slice(0, 19);
+    const longEffect = structuredClone(withEffect);
+    (longEffect[14] as unknown[][])[0] = [
+      ...((longEffect[14] as unknown[][])[0] as unknown[]),
+      null,
+    ];
     const cases: Array<[unknown, RegExp]> = [
       [[...positional.slice(0, 10)], /tuple of length 18/],
       [[...positional, null], /tuple of length 18/],
@@ -1769,6 +1786,8 @@ describe('adversarial character-share rejection', () => {
         [positional[0], positional[1], ['short'], ...positional.slice(3)],
         /wire character must be a tuple of length 12/,
       ],
+      [shortEffect, /wire effects\[0\] must be a tuple of length 20/],
+      [longEffect, /wire effects\[0\] must be a tuple of length 20/],
     ];
     for (const [value, message] of cases) {
       await expect(

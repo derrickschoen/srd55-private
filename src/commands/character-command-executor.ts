@@ -417,6 +417,9 @@ export class CharacterCommandExecutor {
       case 'update_weapon':
       case 'remove_weapon':
       case 'set_weapon_mastery':
+      case 'add_item':
+      case 'update_item':
+      case 'remove_item':
       // The four sheet-input writers join them: each captures the value it
       // displaced during `apply()`, which `prepareInverse` runs too early to
       // see. `character_armor` and the other three ARE snapshot tables, unlike
