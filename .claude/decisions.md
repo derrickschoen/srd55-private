@@ -1,5 +1,24 @@
 # Binding scope decisions
 
+## D84 — OWNER: SRD matches by catalog key first, content fingerprint as FALLBACK only (2026-07-30)
+
+The owner's answer to the bundled-SRD-identity question: **"Fingerprint as
+fallback only."**
+
+What this binds:
+
+- **Primary match for bundled SRD content is the stable catalog key.** An
+  extraction fix never changes identity; a share referencing an SRD spell
+  matches by key on every build.
+- **The content fingerprint exists for SRD rows too, but is consulted only
+  when key matching fails** — the future case where an imported non-bundled
+  book overlaps SRD content, or a share arrives from an app whose key scheme
+  differs. Fallback matches surface in the D82 match-review modal like any
+  other derived-identity adoption.
+- The Phantasmal Force precedent stands as the reason primary-by-fingerprint
+  was rejected: two extraction versions of the same spell must not become
+  two spells.
+
 ## D83 — OWNER: ability_override exists; increases may pass 20; boons may SET a score (2026-07-30)
 
 The owner's ruling, verbatim: *"We will need some sort of ability override so
