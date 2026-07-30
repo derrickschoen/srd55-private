@@ -210,8 +210,16 @@ describe('declared relations match the foreign keys', () => {
     // and `character_armor`. Owner ruling D69 struck the column (migration
     // 0012), so both edges are GONE again and the counts are back where the
     // skills unit left them.
-    expect(constraintEdges(db)).toHaveLength(66);
-    expect(rowCount).toBe(70);
+    //
+    // AC-1 (D72) adds TWO more constraints across THREE more PRAGMA rows, the
+    // identical asymmetry `character_effects` and `character_skill_grants`
+    // both established and for the same reason: `character_items.character_id`
+    // into `characters`, plus the COMPOSITE
+    // `(source_instance_id, character_id)` into `character_source_instances` —
+    // the fifth composite key in the schema and the fourth use of the
+    // `(id, character_id)` unique index.
+    expect(constraintEdges(db)).toHaveLength(68);
+    expect(rowCount).toBe(73);
   });
 
   it('declares a relation for every foreign key, and a foreign key for every relation', () => {
@@ -220,7 +228,7 @@ describe('declared relations match the foreign keys', () => {
     expect(declaredEdges()).toEqual(constraintEdges(db));
   });
 
-  it('keeps all three composite foreign keys composite', () => {
+  it('keeps all five composite foreign keys composite', () => {
     const edges = declaredEdges();
     expect(edges).toContain(
       'character_class_levels: subclass_definition_id,class_definition_id -> subclass_definitions.id,class_definition_id',
@@ -234,6 +242,15 @@ describe('declared relations match the foreign keys', () => {
     // characters when only the composite key stops it.
     expect(edges).toContain(
       'character_effects: source_instance_id,character_id -> character_source_instances.id,character_id',
+    );
+    expect(edges).toContain(
+      'character_skill_grants: source_instance_id,character_id -> character_source_instances.id,character_id',
+    );
+    // The fifth (AC-1, D72), on the identical terms: an item's source is
+    // remapped rather than resolved, and only the composite key stops one
+    // from crossing characters.
+    expect(edges).toContain(
+      'character_items: source_instance_id,character_id -> character_source_instances.id,character_id',
     );
   });
 

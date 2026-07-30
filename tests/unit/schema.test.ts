@@ -383,9 +383,27 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
     integer: [
       'id', 'character_id', 'sort_order', 'hit_points_flat',
       'hit_points_per_level', 'speed_bonus_feet', 'amount', 'maximum',
+      // AC-1 (D72): `base` and `allows_shield` are the two new integer-
+      // affinity columns (allows_shield is TINYINT(1), integer affinity).
+      'base', 'allows_shield',
       'source_instance_id',
     ],
-    text: ['effect_kind', 'damage_type', 'ability', 'label', 'notes'],
+    text: [
+      'effect_kind', 'damage_type', 'ability', 'label', 'notes',
+      // AC-1 (D72): the three new text-affinity columns.
+      'ability_1', 'ability_2', 'weapon_scope',
+    ],
+    numeric: ['created_at', 'updated_at'],
+  },
+  // The character's own ITEMS (AC-1, D72): things that only modify, speaking
+  // through `character_effects` above rather than carrying their own
+  // modifier columns — see `db/schema/items.ts`.
+  character_items: {
+    integer: [
+      'id', 'character_id', 'requires_attunement', 'attuned',
+      'source_instance_id',
+    ],
+    text: ['name', 'description'],
     numeric: ['created_at', 'updated_at'],
   },
   background_templates: {
@@ -592,6 +610,12 @@ const expectedNotNull: Record<string, string[]> = {
   character_species_traits: ['id', 'character_id', 'sort_order', 'name'],
   character_effects: [
     'id', 'character_id', 'sort_order', 'effect_kind', 'label',
+  ],
+  // AC-1 (D72): `description` and `source_instance_id` are the only nullable
+  // columns — a name may travel with no prose yet, and most items are
+  // hand-added with no granting source.
+  character_items: [
+    'id', 'character_id', 'name', 'requires_attunement', 'attuned',
   ],
   background_templates: [
     'id', 'content_key', 'rules_edition', 'name', 'ability_score_1',
@@ -800,6 +824,7 @@ const expectedNamedIndexes: Record<string, string> = {
   character_background_character_id_unique:
     'character_background:character_id:unique',
   character_effects_character_id_index: 'character_effects:character_id',
+  character_items_character_id_index: 'character_items:character_id',
   // --- THE FOUR STORED SHEET INPUTS ---------------------------------------
   // Every one is UNIQUE and there is no plain index beside any of them: each
   // unique index already serves the `WHERE character_id = ?` read, and the
@@ -1107,6 +1132,10 @@ const expectedDefaults: Record<string, Record<string, string>> = {
   // NOT NULL with a default of 0 — the pairing that makes an absent ROW and a
   // stored zero mean the same thing rather than two different things.
   character_sheet_adjustments: { armor_class_adjustment: '0' },
+  // AC-1 (D72): both default off. Ring of Shell (D72 §9's own "proves
+  // attunement is not required" fixture) needs `requires_attunement` to
+  // default false and not read as unknown.
+  character_items: { requires_attunement: 'false', attuned: 'false' },
 };
 
 /**
@@ -1246,6 +1275,12 @@ const expectedForeignKeys: Record<string, string[]> = {
   // the `(id, character_id)` unique index `character_source_instances` carries
   // for exactly this purpose — `spell_selection_slots` above being the first.
   character_effects: [
+    'character_id->characters.id|CASCADE',
+    'source_instance_id,character_id->character_source_instances.id,character_id|CASCADE',
+  ],
+  // The identical two-edge shape `character_effects` carries just above, for
+  // the identical reason (AC-1, D72).
+  character_items: [
     'character_id->characters.id|CASCADE',
     'source_instance_id,character_id->character_source_instances.id,character_id|CASCADE',
   ],

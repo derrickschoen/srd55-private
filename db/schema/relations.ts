@@ -62,6 +62,7 @@ import {
   species_template_traits,
   species_templates,
 } from './origins';
+import { character_items } from './items';
 import {
   armor_templates,
   class_armor_training,
@@ -324,6 +325,33 @@ export const characterEffectsRelations = relations(
       fields: [
         character_effects.source_instance_id,
         character_effects.character_id,
+      ],
+      references: [
+        character_source_instances.id,
+        character_source_instances.character_id,
+      ],
+    }),
+  }),
+);
+
+/**
+ * `character_items` (AC-1, D72): the identical two-relation shape
+ * `characterEffectsRelations` carries and for the identical reason — the item
+ * belongs to the CHARACTER and OPTIONALLY points at the source instance that
+ * granted it, composite for the same reason `spell_selection_slots` and
+ * `character_effects` are.
+ */
+export const characterItemsRelations = relations(
+  character_items,
+  ({ one }) => ({
+    character: one(characters, {
+      fields: [character_items.character_id],
+      references: [characters.id],
+    }),
+    source_instance: one(character_source_instances, {
+      fields: [
+        character_items.source_instance_id,
+        character_items.character_id,
       ],
       references: [
         character_source_instances.id,

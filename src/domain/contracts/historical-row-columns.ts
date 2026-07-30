@@ -20,13 +20,24 @@ const ADDED_NULLABLE_ROW_COLUMNS: Readonly<
   // while it existed is handled by `RETIRED_ROW_COLUMNS` in
   // `src/backup/character-backup.ts`, the removed-column direction.
   character_weapons: ['proficiency_category', 'attack_kind'],
-  // The `ability_increase` payload (B2). Every effect row written before the
-  // contribution layer existed lacks all three keys; without this entry the
-  // exact-key row contract would refuse every save point and portable backup
-  // already in the wild over columns their rows could not have named. NULL is
-  // correct: no historical row can be of kind `ability_increase`, so the
-  // kind-payload CHECKs hold with all three absent.
-  character_effects: ['ability', 'amount', 'maximum'],
+  // The `ability_increase` payload (B2), PLUS the five AC-1 (D72) columns —
+  // `base`, `ability_1`, `ability_2`, `allows_shield`, `weapon_scope`. Every
+  // effect row written before this unit lacks all eight keys; without this
+  // entry the exact-key row contract would refuse every save point and
+  // portable backup already in the wild over columns their rows could not
+  // have named. NULL is correct in every case: no historical row can be of a
+  // kind that needs one of these columns, so the kind-payload CHECKs hold
+  // with all eight absent.
+  character_effects: [
+    'ability',
+    'amount',
+    'maximum',
+    'base',
+    'ability_1',
+    'ability_2',
+    'allows_shield',
+    'weapon_scope',
+  ],
 };
 
 /**

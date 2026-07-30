@@ -42,6 +42,7 @@ import {
   type ShareBackground,
   type ShareClass,
   type ShareHitPointRoll,
+  type ShareItem,
   type ShareSheetAdjustment,
   type ShareSource,
   type ShareEffect,
@@ -524,6 +525,27 @@ function shareEffectFromRow(
   if (row.maximum !== null && row.maximum !== undefined) {
     effect.maximum = Number(row.maximum);
   }
+  // THE FIVE AC-1 (D72) PAYLOADS (wire v8): `armor_class_formula`'s base and
+  // up to two abilities plus its shield eligibility, and the weapon scope
+  // shared by `attack_ability_override` / `weapon_attack_bonus` /
+  // `weapon_damage_bonus`. Extracted the same way every other nullable
+  // payload column on this row is — present or absent, never a stand-in
+  // default.
+  if (row.base !== null && row.base !== undefined) {
+    effect.base = Number(row.base);
+  }
+  if (row.ability_1 !== null && row.ability_1 !== undefined) {
+    effect.ability_1 = String(row.ability_1);
+  }
+  if (row.ability_2 !== null && row.ability_2 !== undefined) {
+    effect.ability_2 = String(row.ability_2);
+  }
+  if (row.allows_shield !== null && row.allows_shield !== undefined) {
+    effect.allows_shield = Number(row.allows_shield) === 1;
+  }
+  if (row.weapon_scope !== null && row.weapon_scope !== undefined) {
+    effect.weapon_scope = String(row.weapon_scope);
+  }
   if (row.source_instance_id !== null && row.source_instance_id !== undefined) {
     const owner = owners.get(Number(row.source_instance_id));
     if (owner !== undefined) {
@@ -543,6 +565,37 @@ function shareEffectFromRow(
     );
   }
   return effect as unknown as ShareEffect;
+}
+
+/**
+ * AN ITEM ROW ON ITS WAY OUT (wire v8, AC-1, D72).
+ *
+ * `sourceRef` resolves through the SAME `owners` map `shareEffectFromRow`
+ * does (the tolerant, root-coarsened tree — an item is a thing the character
+ * still has, whatever happened to what granted it), and on the identical
+ * "travels without its provenance if unreachable" terms: no kind here has
+ * `ability_increase`'s required-source CHECK, so an item's source is simply
+ * omitted rather than refusing the export.
+ */
+function shareItemFromRow(
+  row: Row,
+  owners: ReadonlyMap<number, ShareSourceOwner>,
+): ShareItem {
+  const item: Record<string, unknown> = {
+    name: String(row.name),
+    requires_attunement: Number(row.requires_attunement) === 1,
+    attuned: Number(row.attuned) === 1,
+  };
+  if (row.description !== null && row.description !== undefined) {
+    item.description = String(row.description);
+  }
+  if (row.source_instance_id !== null && row.source_instance_id !== undefined) {
+    const owner = owners.get(Number(row.source_instance_id));
+    if (owner !== undefined) {
+      item.sourceRef = owner.ref;
+    }
+  }
+  return item as unknown as ShareItem;
 }
 
 function shareBackgroundFromRow(row: Row): ShareBackground {
@@ -895,6 +948,19 @@ export function exportCharacterShare(
     [characterId],
     (row) => shareEffectFromRow(row, effectOwners),
   );
+  // THE CHARACTER'S OWN ITEMS (wire v8, AC-1, D72). Ordered by id: unlike
+  // effects and species traits, an item has no `sort_order` of its own (the
+  // plan's row shape does not name one — see `db/schema/items.ts`). Resolved
+  // through the SAME tolerant `effectOwners` map effects use, for the
+  // identical reason: an item is a thing the character still has, whatever
+  // happened to what granted it.
+  const items = db.all(
+    `SELECT * FROM ${SHARE_TABLES.character_items}
+     WHERE character_id = ?
+     ORDER BY id`,
+    [characterId],
+    (row) => shareItemFromRow(row, effectOwners),
+  );
   const backgroundRow = db.oneRaw(
     `SELECT * FROM ${SHARE_TABLES.character_background} WHERE character_id = ?`,
     [characterId],
@@ -1072,6 +1138,7 @@ export function exportCharacterShare(
     // effect model existed.
     ...(effects.length === 0 ? {} : { effects }),
     ...(skillGrants.length === 0 ? {} : { skillGrants }),
+    ...(items.length === 0 ? {} : { items }),
   };
   return validateShareDocument(document);
 }
@@ -1795,6 +1862,11 @@ export function importCharacterShare(
       ability: string | null;
       amount: number | null;
       maximum: number | null;
+      base: number | null;
+      ability_1: string | null;
+      ability_2: string | null;
+      allows_shield: boolean | null;
+      weapon_scope: string | null;
       notes: string | null;
       sourceId: number | null;
     }[] = [];
@@ -1834,6 +1906,11 @@ export function importCharacterShare(
         ability: effect.ability ?? null,
         amount: effect.amount ?? null,
         maximum: effect.maximum ?? null,
+        base: effect.base ?? null,
+        ability_1: effect.ability_1 ?? null,
+        ability_2: effect.ability_2 ?? null,
+        allows_shield: effect.allows_shield ?? null,
+        weapon_scope: effect.weapon_scope ?? null,
         notes: effect.notes ?? null,
         // For `ability_increase` this is non-null by validation: `shareEffect`
         // refuses the document when the kind arrives without a `sourceRef`, so
@@ -1854,10 +1931,16 @@ export function importCharacterShare(
         hit_points_per_level: migrated.hit_points_per_level,
         speed_bonus_feet: migrated.speed_bonus_feet,
         // A legacy trait payload predates the contribution layer, and the
-        // legacy vocabulary has no ability_increase to migrate.
+        // legacy vocabulary has no ability_increase — nor any AC-1 kind — to
+        // migrate.
         ability: null,
         amount: null,
         maximum: null,
+        base: null,
+        ability_1: null,
+        ability_2: null,
+        allows_shield: null,
+        weapon_scope: null,
         notes: null,
         // A legacy link predates the provenance column entirely, so there is
         // nothing to resolve and nothing is invented.
@@ -1870,8 +1953,9 @@ export function importCharacterShare(
            character_id, sort_order, effect_kind, damage_type,
            hit_points_flat, hit_points_per_level, speed_bonus_feet,
            ability, amount, maximum,
+           base, ability_1, ability_2, allows_shield, weapon_scope,
            source_instance_id, label, notes, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           characterId,
           index + 1,
@@ -1883,9 +1967,47 @@ export function importCharacterShare(
           effect.ability,
           effect.amount,
           effect.maximum,
+          effect.base,
+          effect.ability_1,
+          effect.ability_2,
+          effect.allows_shield === null ? null : (effect.allows_shield ? 1 : 0),
+          effect.weapon_scope,
           effect.sourceId,
           effect.label,
           effect.notes,
+          now,
+          now,
+        ],
+      );
+    }
+    // THE CHARACTER'S OWN ITEMS (wire v8, AC-1, D72). `sourceRef` resolves
+    // through the SAME `rootsByRef` map effects use, on the identical terms —
+    // EXCEPT there is no `sourceSubclass` flag: the plan's row shape carries
+    // one reference column, not two, so an item can only ever name a ref's
+    // FIRST root. No kind here requires a source, so an unresolvable ref
+    // simply imports with no provenance rather than refusing the document.
+    for (const item of document.items ?? []) {
+      const roots =
+        item.sourceRef === undefined
+          ? undefined
+          : rootsByRef.get(item.sourceRef);
+      if (item.sourceRef !== undefined && roots === undefined) {
+        throw new ShareValidationError(
+          `item sourceRef ${item.sourceRef} is unavailable.`,
+        );
+      }
+      db.exec(
+        `INSERT INTO ${SHARE_TABLES.character_items} (
+           character_id, name, description, requires_attunement, attuned,
+           source_instance_id, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          characterId,
+          item.name,
+          item.description ?? null,
+          item.requires_attunement ? 1 : 0,
+          item.attuned ? 1 : 0,
+          roots?.[0] ?? null,
           now,
           now,
         ],

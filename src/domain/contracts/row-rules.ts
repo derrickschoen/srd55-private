@@ -244,8 +244,9 @@ export function weaponRangePayloadError(
  *
  * `character_effects` declares CHECKs saying so — `damage_type_kind`,
  * `hit_points_kind`, `speed_kind`, `hp_modifier_payload`, `speed_payload`,
- * and for `ability_increase` the `ability_kind`/`amount_kind`/`maximum_kind`
- * trio, `ability_increase_payload` and `ability_increase_source` — and a
+ * for `ability_increase` the `ability_kind`/`amount_kind`/`maximum_kind` trio,
+ * `ability_increase_payload` and `ability_increase_source`, and — AC-1, D72 —
+ * the five new kinds' own kind-scope and payload-completeness CHECKs — and a
  * per-column contract cannot see any of them: each is a statement about two
  * columns together. Reaching the INSERT with `effect_kind: 'damage_resistance'`
  * and a hit point value aborts the whole import with a raw
@@ -266,6 +267,15 @@ export function weaponRangePayloadError(
  * JSON row carries `null` for an empty column, and a migrated legacy payload is
  * built by a function that writes `null` too — but a hand-written document may
  * simply omit the key, and the CHECK it is about to meet treats that as NULL.
+ *
+ * TWO COLUMNS ARE NOW SHARED ACROSS KINDS (AC-1) AND THE OLD FIELD-CENTRIC
+ * SHAPE OF THIS FUNCTION COULD NOT SAY SO WITHOUT A BUG: `ability` belongs to
+ * `ability_increase` OR `attack_ability_override`; `amount` belongs to
+ * `ability_increase`, `armor_class_bonus`, `weapon_attack_bonus` or
+ * `weapon_damage_bonus`. The function is therefore written KIND-FIRST below —
+ * one block per kind, stating exactly what that kind owns and requires —
+ * rather than column-first, which is what let the four-kind `amount` silently
+ * stay married to one kind's error message.
  */
 export function effectPayloadKindError(
   row: UntrustedRow,
@@ -274,6 +284,7 @@ export function effectPayloadKindError(
   const kind = row.effect_kind;
   const present = (value: unknown): boolean =>
     value !== null && value !== undefined;
+
   if (present(row.damage_type) && kind !== 'damage_resistance') {
     return `${label} carries a damage type without effect_kind damage_resistance.`;
   }
@@ -291,6 +302,52 @@ export function effectPayloadKindError(
   if (kind === 'speed' && !present(row.speed_bonus_feet)) {
     return `${label} has effect_kind speed and no speed bonus.`;
   }
+
+  // `ability` belongs to exactly two kinds now (AC-1).
+  if (
+    present(row.ability) &&
+    kind !== 'ability_increase' &&
+    kind !== 'attack_ability_override'
+  ) {
+    return `${label} carries an ability without effect_kind ability_increase or attack_ability_override.`;
+  }
+  // `amount` belongs to exactly four kinds now (AC-1).
+  if (
+    present(row.amount) &&
+    kind !== 'ability_increase' &&
+    kind !== 'armor_class_bonus' &&
+    kind !== 'weapon_attack_bonus' &&
+    kind !== 'weapon_damage_bonus'
+  ) {
+    return `${label} carries an amount without a kind that uses one.`;
+  }
+  // `maximum`, `base`, `ability_1`, `ability_2` and `weapon_scope` each still
+  // belong to exactly one or two kinds; checked per-kind below rather than
+  // here, alongside that kind's payload-completeness rule.
+  if (present(row.maximum) && kind !== 'ability_increase') {
+    return `${label} carries a maximum without effect_kind ability_increase.`;
+  }
+  if (present(row.base) && kind !== 'armor_class_formula') {
+    return `${label} carries a base without effect_kind armor_class_formula.`;
+  }
+  if (present(row.ability_1) && kind !== 'armor_class_formula') {
+    return `${label} carries ability_1 without effect_kind armor_class_formula.`;
+  }
+  if (present(row.ability_2) && kind !== 'armor_class_formula') {
+    return `${label} carries ability_2 without effect_kind armor_class_formula.`;
+  }
+  if (present(row.allows_shield) && kind !== 'armor_class_formula') {
+    return `${label} carries allows_shield without effect_kind armor_class_formula.`;
+  }
+  if (
+    present(row.weapon_scope) &&
+    kind !== 'attack_ability_override' &&
+    kind !== 'weapon_attack_bonus' &&
+    kind !== 'weapon_damage_bonus'
+  ) {
+    return `${label} carries a weapon_scope without a kind that uses one.`;
+  }
+
   // The `ability_increase` pairings (B2), mirroring its schema CHECKs: the
   // three payload columns belong to the kind and the kind requires all three —
   // plus the one rule no other kind has, that THE KIND REQUIRES A SOURCE
@@ -298,11 +355,6 @@ export function effectPayloadKindError(
   // contribution knows where it came from" an invariant, and a JSON row that
   // reached the INSERT without a source would fail there with a raw
   // SQLITE_CONSTRAINT_CHECK naming a constraint rather than an effect.
-  const abilityPayload =
-    present(row.ability) || present(row.amount) || present(row.maximum);
-  if (abilityPayload && kind !== 'ability_increase') {
-    return `${label} carries an ability payload without effect_kind ability_increase.`;
-  }
   if (kind === 'ability_increase') {
     if (
       !present(row.ability) ||
@@ -314,6 +366,35 @@ export function effectPayloadKindError(
     if (!present(row.source_instance_id)) {
       return `${label} has effect_kind ability_increase and no source instance.`;
     }
+  }
+  // `armor_class_bonus` requires only its flat addend (AC-1, D72).
+  if (kind === 'armor_class_bonus' && !present(row.amount)) {
+    return `${label} has effect_kind armor_class_bonus and no amount.`;
+  }
+  // `armor_class_formula` requires base, ability_1 and allows_shield;
+  // `ability_2` stays optional — a formula may use one ability or two.
+  if (
+    kind === 'armor_class_formula' &&
+    (!present(row.base) ||
+      !present(row.ability_1) ||
+      !present(row.allows_shield))
+  ) {
+    return `${label} has effect_kind armor_class_formula without its base, ability_1 and allows_shield.`;
+  }
+  // `attack_ability_override` requires the override ability and a scope.
+  if (
+    kind === 'attack_ability_override' &&
+    (!present(row.ability) || !present(row.weapon_scope))
+  ) {
+    return `${label} has effect_kind attack_ability_override without its ability and weapon_scope.`;
+  }
+  // `weapon_attack_bonus` / `weapon_damage_bonus` each require an amount and a
+  // scope.
+  if (
+    (kind === 'weapon_attack_bonus' || kind === 'weapon_damage_bonus') &&
+    (!present(row.amount) || !present(row.weapon_scope))
+  ) {
+    return `${label} has effect_kind ${String(kind)} without its amount and weapon_scope.`;
   }
   return null;
 }

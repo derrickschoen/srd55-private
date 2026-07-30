@@ -1062,3 +1062,17 @@ export * from './equipment-choices';
  * `./level-up` rather than a new section of this level-one file (plan §8b).
  */
 export * from './level-up';
+
+/* ---------------- Armor Class, items and one effect vocabulary (AC-1, offered for ratification) */
+
+/**
+ * AC-1's contract — the five new `character_effects` kind literals, the five
+ * new payload columns and the two widened ones, the `character_items` row
+ * shape, and the share wire's new fields and minted version — authored in
+ * its own module on the B3 / E-B / L-A precedent above and offered for
+ * ratification the same way. AC-1 is the vocabulary and persistence layer
+ * AC-2, AC-3 and AC-B build on, not a wizard step, which is why the values
+ * live in `./armor-class-effects` rather than a new section of this
+ * level-one file (plan §10).
+ */
+export * from './armor-class-effects';

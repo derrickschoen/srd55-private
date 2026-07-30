@@ -1755,8 +1755,8 @@ describe('adversarial character-share rejection', () => {
   it('rejects wrong format/version, tuple arity errors, and extra or missing elements', async () => {
     const positional = shareDocumentToPositional(minimalDocument());
     const cases: Array<[unknown, RegExp]> = [
-      [[...positional.slice(0, 10)], /tuple of length 17/],
-      [[...positional, null], /tuple of length 17/],
+      [[...positional.slice(0, 10)], /tuple of length 18/],
+      [[...positional, null], /tuple of length 18/],
       [
         ['wrong-format', ...positional.slice(1)],
         /format is unsupported/,

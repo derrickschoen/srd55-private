@@ -26,6 +26,7 @@ import {
   armorDexBonuses,
   armorSlots,
   backgroundEquipmentOptions,
+  characterEffectKinds,
   classEquipmentOptions,
   equipmentItemKinds,
   conditionType,
@@ -37,6 +38,7 @@ import {
   damageType,
   domainSourceTypes,
   effectReliabilityCategories,
+  extraAttackWeaponScopes,
   featAbilityPoints,
   materialCostKinds,
   rulesEditions,
@@ -288,6 +290,21 @@ const weaponRangeKindEnum = z.enum(weaponRangeKinds);
  * vanish with no error anywhere.
  */
 const effectKindEnum = z.enum(effectKinds);
+/**
+ * `character_effects.effect_kind`'s OWN, wider enum (AC-1) — see
+ * `characterEffectKinds` in `src/domain/enums.ts`. Deliberately a SEPARATE
+ * schema from {@link effectKindEnum} rather than a widening of it:
+ * `species_template_trait_effects.effect_kind` keeps the narrower one, and a
+ * shared schema would let an AC-1 kind pass validation for a row it can never
+ * legally belong to.
+ */
+const characterEffectKindEnum = z.enum(characterEffectKinds);
+/**
+ * The weapon-scope vocabulary `character_effects.weapon_scope` reuses from
+ * Extra Attack's own grant model (AC-1, D72) — see the column's comment in
+ * `db/schema/origins.ts` for why one vocabulary serves both questions.
+ */
+const extraAttackWeaponScopeEnum = z.enum(extraAttackWeaponScopes);
 const armorSlotEnum = z.enum(armorSlots);
 const armorCategoryEnum = z.enum(armorCategories);
 const armorDexBonusEnum = z.enum(armorDexBonuses);
@@ -367,6 +384,8 @@ export const COLUMN_REFINEMENTS = {
   versatileWeaponDamageKindEnum,
   weaponRangeKindEnum,
   effectKindEnum,
+  characterEffectKindEnum,
+  extraAttackWeaponScopeEnum,
   armorSlotEnum,
   armorCategoryEnum,
   armorDexBonusEnum,
@@ -1106,7 +1125,8 @@ const REFINEMENTS = {
   'character_effects.id': positiveInt,
   'character_effects.character_id': positiveInt,
   'character_effects.sort_order': positiveInt,
-  'character_effects.effect_kind': effectKindEnum,
+  // The WIDER, table-own enum (AC-1) — see `characterEffectKindEnum`.
+  'character_effects.effect_kind': characterEffectKindEnum,
   // Open vocabulary in the schema, so open here — the same call
   // `spell_version_damage_types.damage_type` makes.
   'character_effects.damage_type': damageTypeVocabulary,
@@ -1120,10 +1140,24 @@ const REFINEMENTS = {
   // the ability names one of the closed six, the amount is signed but never
   // zero, and the maximum shares `abilityScore`'s 1..30 because that is the
   // range `AbilityScore` can represent — a stored 32 would drive a resolved
-  // total past 30 and throw where a person expected a sheet.
+  // total past 30 and throw where a person expected a sheet. `ability` is now
+  // ALSO `attack_ability_override`'s payload (AC-1) and the same closed six
+  // covers it; `amount` is now ALSO `armor_class_bonus` /
+  // `weapon_attack_bonus` / `weapon_damage_bonus`'s flat addend, and the same
+  // signed-non-zero rule covers all four.
   'character_effects.ability': abilityEnum,
   'character_effects.amount': nonZeroInt,
   'character_effects.maximum': abilityScore,
+  // The `armor_class_formula` payload (AC-1): a flat base of at least 1 (the
+  // same floor `character_armor_armor_class_check` uses), up to two abilities
+  // from the closed six, and a plain boolean.
+  'character_effects.base': positiveInt,
+  'character_effects.ability_1': abilityEnum,
+  'character_effects.ability_2': abilityEnum,
+  'character_effects.allows_shield': sqlBool,
+  // Shared by `attack_ability_override`, `weapon_attack_bonus` and
+  // `weapon_damage_bonus` (AC-1) — see `extraAttackWeaponScopeEnum`.
+  'character_effects.weapon_scope': extraAttackWeaponScopeEnum,
   'character_effects.source_instance_id': positiveInt,
   // Non-empty: an effect nobody can name is an effect nobody can find to edit
   // or delete, and `''` is a null in costume.
@@ -1131,6 +1165,19 @@ const REFINEMENTS = {
   'character_effects.notes': sqlText,
   'character_effects.created_at': sqlTimestamp,
   'character_effects.updated_at': sqlTimestamp,
+
+  // --- character_items (AC-1, D72) -----------------------------------------
+  'character_items.id': positiveInt,
+  'character_items.character_id': positiveInt,
+  // Non-empty, matching `character_effects.label`: an item nobody can name is
+  // an item nobody can find to edit or delete.
+  'character_items.name': nonEmptyText,
+  'character_items.description': sqlText,
+  'character_items.requires_attunement': sqlBool,
+  'character_items.attuned': sqlBool,
+  'character_items.source_instance_id': positiveInt,
+  'character_items.created_at': sqlTimestamp,
+  'character_items.updated_at': sqlTimestamp,
 } as const satisfies Record<RequiredRefinementKey, z.ZodType> &
   Partial<Record<OptionalRefinementKey, z.ZodType>>;
 

@@ -689,6 +689,51 @@ export const effectKinds = [
 export type EffectKind = (typeof effectKinds)[number];
 
 /**
+ * `character_effects`' OWN, WIDER vocabulary (AC-1,
+ * `docs/design/2026-07-29-armor-class-items-and-effects.md` §1, D72).
+ *
+ * A SUPERSET OF `effectKinds`, NOT A REPLACEMENT OF IT, AND THE TWO MUST STAY
+ * SEPARATE ARRAYS. `species_template_trait_effects` shares `effectKinds`'
+ * CHECK today and must go on refusing these five kinds until AC-2 does the
+ * work of widening it on purpose — neither table can produce them (no
+ * `character_effects` row copies FROM the template with one of these kinds,
+ * and no producer exists yet regardless), so a template row admitting one
+ * would be schema slack with nothing behind it. Union-ing the constants would
+ * widen BOTH tables' CHECKs from one edit, which is exactly the silent
+ * coupling `character_effects_kind_check`'s own comment warns against days
+ * before this: two tables sharing one CHECK because a query happened to filter
+ * both the same way is how an invariant stops being one.
+ *
+ * The five new members close the Armor Class gap `sheet.ts:754-759` names in
+ * its own comment — Unarmored Defense and every other alternative AC formula
+ * — plus the weapon- and attack-scoped modifiers D72 groups with it under one
+ * vocabulary rather than a second, item-only one (D72's Option B, rejected):
+ *
+ *  - `armor_class_bonus` — a flat addend (Cloak of the Armadillo, Ring of
+ *    Shell, and `armor_class_adjustment`'s eventual AC-4 retirement target).
+ *  - `armor_class_formula` — base + up to two ability modifiers +
+ *    `allows_shield` (Monk, Barbarian, the Armadillo Paladin's 10+CON+CHA, the
+ *    Armadillo species' 13+DEX).
+ *  - `attack_ability_override` — a weapon-scoped ability substitution (Pact of
+ *    the Blade).
+ *  - `weapon_attack_bonus` / `weapon_damage_bonus` — weapon-scoped flat
+ *    addends (a +1 weapon; a flat damage bonus).
+ *
+ * `character_effects.effect_kind` is retyped `CharacterEffectKind` in
+ * `db/schema/origins.ts`; `species_template_trait_effects.effect_kind` KEEPS
+ * `EffectKind`, unchanged, on purpose.
+ */
+export const characterEffectKinds = [
+  ...effectKinds,
+  'armor_class_bonus',
+  'armor_class_formula',
+  'attack_ability_override',
+  'weapon_attack_bonus',
+  'weapon_damage_bonus',
+] as const;
+export type CharacterEffectKind = (typeof characterEffectKinds)[number];
+
+/**
  * WHAT GRANTED AN EXTRA ATTACK — the closed set D19 says the model needs.
  *
  * `class_extra_attack_grants` can express only the first member, because it is

@@ -944,6 +944,35 @@ export const TABLE_SCOPES = {
     share: true,
     backupReference: false,
   },
+  /**
+   * `character_items` (AC-1, D72), on the IDENTICAL three-true terms
+   * `character_effects` carries just above and for the identical reason: an
+   * item is the character's own data, so it belongs in the portable backup
+   * document, in a shared link, and in the undo/redo snapshot.
+   *
+   *  - `backup` puts it in the document's table set and therefore in
+   *    `BACKUP_OPTIONAL_TABLES`, so a file exported before this table existed
+   *    still imports, and yields a character with no items — which is what
+   *    that file honestly says, since no character owned one before this unit.
+   *  - `share` adds an EIGHTEENTH root element to the positional wire tuple.
+   *    Wire version 8 (D41) is minted for it.
+   *  - `snapshot` moves the snapshot schema from `a7-v9` to `a7-v10` and
+   *    freezes `A7_V9_TABLES` by hand FIRST, exactly as `character_skill_grants`
+   *    did one version earlier.
+   *
+   * `backupReference` stays false: the row holds no catalog id. Its
+   * `source_instance_id` points at another CHARACTER-OWNED row, which a
+   * backup remaps rather than resolves — the same treatment
+   * `character_effects` gets.
+   */
+  character_items: {
+    role: 'character_owned',
+    snapshot: true,
+    backupDirect: true,
+    backup: true,
+    share: true,
+    backupReference: false,
+  },
 } as const satisfies { [N in AnyTableName]: ScopesFor<N> };
 
 type Scopes = typeof TABLE_SCOPES;
@@ -1092,6 +1121,7 @@ export const APPLICATION_TABLES = order<AnyTableName>()([
   'character_class_levels',
   'character_effects',
   'character_hit_point_rolls',
+  'character_items',
   'character_operations',
   'character_rule_overrides',
   'character_save_points',
@@ -1182,6 +1212,11 @@ export const CHARACTER_STATE_TABLES = order<SnapshotTable>()([
   // last because it references `character_source_instances` (composite key),
   // which the existing order already inserts before this on restore.
   'character_skill_grants',
+  // Appended, never inserted, for the sixth time and the same reason
+  // (AC-1, D72). It sits last for the identical reason `character_skill_grants`
+  // does: it references `character_source_instances` (composite key), which
+  // the existing order already inserts before this on restore.
+  'character_items',
 ]);
 
 /**
@@ -1215,6 +1250,10 @@ export const DELETE_ORDER = order<SnapshotTable>()([
   // references `character_source_instances` through the same composite key, so
   // it must be deleted before that table — which this position guarantees.
   'character_skill_grants',
+  // A leaf on the same terms again (AC-1, D72): no children, references
+  // `character_source_instances` through the same composite key, must be
+  // deleted before that table — which this position guarantees.
+  'character_items',
   // Leaves too. `character_species_traits` is keyed on `character_id` and NOT
   // on `character_species.id` — see `db/schema/origins.ts` — so there is no
   // parent-before-child edge between the two and the order between them is
@@ -1250,6 +1289,7 @@ export const BACKUP_DIRECT_TABLES = order<BackupDirectTable>()([
   'character_sheet_adjustments',
   'character_effects',
   'character_skill_grants',
+  'character_items',
 ]);
 
 /** Every table in the portable-character backup document. */
@@ -1301,6 +1341,11 @@ export const BACKUP_OPTIONAL_TABLES = [
   // restored as-is rather than being reconciled against grants that were
   // never recorded (plan §3.2).
   'character_skill_grants',
+  // The character's own items (AC-1, D72). Every backup file a user already
+  // holds predates the table, and `[]` is the honest reading of one: no
+  // character owned an item before this unit, so there is nothing lost by
+  // defaulting this key to empty.
+  'character_items',
 ] as const satisfies readonly BackupTable[];
 
 /** The catalog tables a backup document resolves references against. */
@@ -1358,6 +1403,7 @@ export const SHARE_TABLES: { readonly [N in ShareTable]: N } = {
   character_skill_grants: 'character_skill_grants',
   character_sheet_adjustments: 'character_sheet_adjustments',
   character_effects: 'character_effects',
+  character_items: 'character_items',
 };
 
 /**
@@ -1428,6 +1474,9 @@ export const AUDIT_ENTITY_TYPES = [
   // Added on the same terms once more: the grants table is snapshot-scoped, so
   // `CharacterState.diff` emits a change per grant row.
   'character_skill_grants',
+  // Added on the same terms once more (AC-1, D72): the items table is
+  // snapshot-scoped, so `CharacterState.diff` emits a change per item row.
+  'character_items',
 ] as const satisfies readonly ('character' | AnyTableName)[];
 
 export type AuditEntityType = (typeof AUDIT_ENTITY_TYPES)[number];

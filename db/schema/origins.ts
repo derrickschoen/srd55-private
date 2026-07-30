@@ -26,11 +26,13 @@ import type {
 import type {
   Ability,
   BackgroundEquipmentOption,
+  CharacterEffectKind,
   CreatureSize,
   CreatureType,
   DamageType,
   EquipmentItemKind,
   EffectKind,
+  ExtraAttackWeaponScope,
   RulesEdition,
   KnownCreatureSize,
   KnownCreatureType,
@@ -39,11 +41,13 @@ import type {
 import {
   abilities,
   backgroundEquipmentOptions,
+  characterEffectKinds,
   creatureSizes,
   creatureTypes,
   damageTypes,
   equipmentItemKinds,
   effectKinds,
+  extraAttackWeaponScopes,
   rulesEditions,
 } from '../../src/domain/enums';
 import {
@@ -54,6 +58,7 @@ import {
   nullOrOneOf,
   oneOf,
   sqlText,
+  tinyint1,
   varchar,
 } from './columns';
 import { character_source_instances, characters } from './character';
@@ -633,7 +638,15 @@ export const character_effects = sqliteTable(
      * and uniqueness would make an ordinary two-step swap impossible.
      */
     sort_order: integer('sort_order').notNull(),
-    effect_kind: varchar<EffectKind>()('effect_kind').notNull(),
+    /**
+     * `CharacterEffectKind`, NOT `EffectKind` — this table's own, WIDER
+     * vocabulary (AC-1, D72). See `characterEffectKinds` in
+     * `src/domain/enums.ts` for why the two stay separate arrays rather than
+     * one being unioned into the other: `species_template_trait_effects`
+     * below keeps `EffectKind` and must go on refusing these five kinds until
+     * AC-2 widens it on purpose.
+     */
+    effect_kind: varchar<CharacterEffectKind>()('effect_kind').notNull(),
     /**
      * The resisted damage type, for `damage_resistance` only.
      *
@@ -660,11 +673,20 @@ export const character_effects = sqliteTable(
     /** The `speed` payload, nullable on the same limb 2 terms. */
     speed_bonus_feet: integer('speed_bonus_feet'),
     /**
-     * The `ability_increase` payload (D63, B2): which ability, a signed
-     * non-zero amount, and the increase's OWN maximum. All three nullable on
-     * D6b limb 2 — a resistance does not HAVE an ability — with the CHECKs
-     * below making a row of this kind without all three, and a row of any
-     * other kind with any of them, unrepresentable.
+     * TWO KINDS SHARE THIS COLUMN NOW (AC-1) — `ability_increase`'S ORIGINAL
+     * PAYLOAD (D63, B2: which ability, a signed non-zero `amount`, and the
+     * increase's OWN `maximum`) AND `attack_ability_override`'s (D72: the
+     * ability a weapon-scoped attack uses instead of the printed one — Pact of
+     * the Blade). Reused rather than given a second column, per the dispatch's
+     * own instruction: the two are the same shape — "one ability, closed six"
+     * — and a second column would be F22's duplication for no different rule.
+     * `amount` and `maximum` stay `ability_increase`-only; `attack_ability_override`
+     * has no amount and no cap.
+     *
+     * All three nullable on D6b limb 2 — a resistance does not HAVE an
+     * ability — with the CHECKs below making a row of one of these two kinds
+     * without its own required subset unrepresentable, and a row of any other
+     * kind with any of them unrepresentable.
      *
      * `maximum` is per-CONTRIBUTION because the sources genuinely differ:
      * background increases stop at 20 (`docs/srd/source/backgrounds.txt:51`),
@@ -676,8 +698,52 @@ export const character_effects = sqliteTable(
      * contribution; it is a row that changes nothing and can never be noticed.
      */
     ability: varchar<Ability>()('ability'),
+    /**
+     * FOUR KINDS SHARE THIS COLUMN NOW (AC-1): `ability_increase`'s signed
+     * contribution (unchanged), `armor_class_bonus`'s flat addend (Cloak of
+     * the Armadillo, Ring of Shell), and `weapon_attack_bonus` /
+     * `weapon_damage_bonus`'s flat weapon-scoped bonuses (a +1 weapon; a flat
+     * damage bonus). All four are "one signed non-zero integer"; the CHECK
+     * below stays `amount <> 0` for every one of them — a +0 bonus changes
+     * nothing and can never be noticed, the same argument `ability_increase`
+     * already made.
+     */
     amount: integer('amount'),
     maximum: integer('maximum'),
+    /**
+     * THE `armor_class_formula` PAYLOAD (AC-1, D72, D74, D75): the flat base
+     * (10 for the default floor, 13 for the Armadillo species, and so on) plus
+     * up to two ability modifiers and whether a shield may be carried at all.
+     * The floor formula (base 10, `ability_1` dexterity, `allows_shield` true)
+     * is not stored anywhere — D75 makes it the resolver's own default,
+     * AC-3's job — these columns exist only for formulas a source actually
+     * grants.
+     *
+     * `ability_1` is REQUIRED wherever `base` is (every formula uses at least
+     * one ability — the floor uses DEX alone); `ability_2` stays nullable
+     * because a formula may use only one (Armadillo species: 13 + DEX) or two
+     * (Monk: 10 + DEX + WIS; the Armadillo Paladin: 10 + CON + CHA).
+     * `allows_shield` is a plain boolean and NOT nullable once the kind is
+     * `armor_class_formula` — D75 needs an explicit true or false for every
+     * formula in the competition, never an absence standing in for either.
+     */
+    base: integer('base'),
+    ability_1: varchar<Ability>()('ability_1'),
+    ability_2: varchar<Ability>()('ability_2'),
+    allows_shield: tinyint1('allows_shield'),
+    /**
+     * THE WEAPON SCOPE (AC-1, D72), shared by THREE kinds:
+     * `attack_ability_override`, `weapon_attack_bonus`, `weapon_damage_bonus`.
+     * Deliberately typed `ExtraAttackWeaponScope` and not a second, new
+     * vocabulary — `subclass_features.effect_weapon_scope` /
+     * `named_features.effect_weapon_scope` already model exactly this
+     * question ("does this reach every weapon, or one bonded/pact weapon this
+     * application cannot resolve to a specific row") for Extra Attack grants,
+     * and a modifier scoped the same way is the same question asked about a
+     * different number. Reusing the array is the D72 "one vocabulary" rule
+     * applied to a case the plan's own table did not spell out by name.
+     */
+    weapon_scope: varchar<ExtraAttackWeaponScope>()('weapon_scope'),
     /**
      * WHAT GRANTED THIS, AS A LIVE REFERENCE. Nullable, D6b LIMB 2 — THE
      * ABSENCE IS REAL AND NOT AN UNSET VALUE — and today it is the COMMON state
@@ -743,7 +809,10 @@ export const character_effects = sqliteTable(
      * character's would let the copy itself produce a row the schema refuses.
      * `IS`/`IS NOT` rather than `=`/`<>` for the reason stated at length there.
      */
-    check('character_effects_kind_check', oneOf('effect_kind', effectKinds)),
+    check(
+      'character_effects_kind_check',
+      oneOf('effect_kind', characterEffectKinds),
+    ),
     check(
       'character_effects_damage_type_kind_check',
       sql`damage_type IS NULL OR effect_kind IS 'damage_resistance'`,
@@ -778,13 +847,23 @@ export const character_effects = sqliteTable(
       'character_effects_ability_check',
       nullOrOneOf('ability', abilities),
     ),
+    /**
+     * WIDENED (AC-1): `ability` is now also `attack_ability_override`'s
+     * payload — see the column's own comment for why the two kinds share it
+     * rather than getting a second column each.
+     */
     check(
       'character_effects_ability_kind_check',
-      sql`ability IS NULL OR effect_kind IS 'ability_increase'`,
+      sql`ability IS NULL OR effect_kind IN ('ability_increase', 'attack_ability_override')`,
     ),
+    /**
+     * WIDENED (AC-1): `amount` is now also `armor_class_bonus`'s flat addend
+     * and `weapon_attack_bonus` / `weapon_damage_bonus`'s flat weapon-scoped
+     * bonuses — see the column's own comment.
+     */
     check(
       'character_effects_amount_kind_check',
-      sql`amount IS NULL OR effect_kind IS 'ability_increase'`,
+      sql`amount IS NULL OR effect_kind IN ('ability_increase', 'armor_class_bonus', 'weapon_attack_bonus', 'weapon_damage_bonus')`,
     ),
     check(
       'character_effects_maximum_kind_check',
@@ -805,6 +884,70 @@ export const character_effects = sqliteTable(
     check(
       'character_effects_maximum_check',
       sql`maximum IS NULL OR (typeof(maximum) = 'integer' AND maximum BETWEEN 1 AND 30)`,
+    ),
+    /**
+     * THE FIVE NEW (AC-1) KIND-SCOPE CHECKS, in the same "column belongs to
+     * kind" direction every existing one above already uses.
+     */
+    check(
+      'character_effects_base_kind_check',
+      sql`base IS NULL OR effect_kind IS 'armor_class_formula'`,
+    ),
+    check(
+      'character_effects_ability_1_kind_check',
+      sql`ability_1 IS NULL OR effect_kind IS 'armor_class_formula'`,
+    ),
+    check(
+      'character_effects_ability_2_kind_check',
+      sql`ability_2 IS NULL OR effect_kind IS 'armor_class_formula'`,
+    ),
+    check(
+      'character_effects_allows_shield_kind_check',
+      sql`allows_shield IS NULL OR effect_kind IS 'armor_class_formula'`,
+    ),
+    check(
+      'character_effects_weapon_scope_kind_check',
+      sql`weapon_scope IS NULL OR effect_kind IN ('attack_ability_override', 'weapon_attack_bonus', 'weapon_damage_bonus')`,
+    ),
+    /**
+     * THE FIVE NEW (AC-1) "KIND REQUIRES ITS PAYLOAD" CHECKS — the other
+     * direction, one per new kind. `armor_class_formula` requires `base` and
+     * `ability_1` and `allows_shield`; `ability_2` stays optional (a formula
+     * may use one ability or two — see the column's own comment).
+     */
+    check(
+      'character_effects_armor_class_bonus_payload_check',
+      sql`effect_kind IS NOT 'armor_class_bonus' OR amount IS NOT NULL`,
+    ),
+    check(
+      'character_effects_armor_class_formula_payload_check',
+      sql`effect_kind IS NOT 'armor_class_formula' OR (base IS NOT NULL AND ability_1 IS NOT NULL AND allows_shield IS NOT NULL)`,
+    ),
+    check(
+      'character_effects_attack_ability_override_payload_check',
+      sql`effect_kind IS NOT 'attack_ability_override' OR (ability IS NOT NULL AND weapon_scope IS NOT NULL)`,
+    ),
+    check(
+      'character_effects_weapon_attack_bonus_payload_check',
+      sql`effect_kind IS NOT 'weapon_attack_bonus' OR (amount IS NOT NULL AND weapon_scope IS NOT NULL)`,
+    ),
+    check(
+      'character_effects_weapon_damage_bonus_payload_check',
+      sql`effect_kind IS NOT 'weapon_damage_bonus' OR (amount IS NOT NULL AND weapon_scope IS NOT NULL)`,
+    ),
+    /** The three new columns' own value-domain CHECKs. */
+    check('character_effects_base_check', nullOrIntegerAtLeast('base', 1)),
+    check(
+      'character_effects_ability_1_check',
+      nullOrOneOf('ability_1', abilities),
+    ),
+    check(
+      'character_effects_ability_2_check',
+      nullOrOneOf('ability_2', abilities),
+    ),
+    check(
+      'character_effects_weapon_scope_check',
+      nullOrOneOf('weapon_scope', extraAttackWeaponScopes),
     ),
     check(
       'character_effects_sort_order_check',

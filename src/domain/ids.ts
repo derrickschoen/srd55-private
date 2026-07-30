@@ -130,6 +130,13 @@ export type SpeciesTemplateTraitEffectId = Brand<
 >;
 export type CharacterEffectId = Brand<number, 'CharacterEffectId'>;
 
+/**
+ * `character_items.id` (AC-1, D72): a THING the character owns that speaks
+ * through `character_effects` rather than carrying its own modifier columns —
+ * see `db/schema/items.ts`.
+ */
+export type CharacterItemId = Brand<number, 'CharacterItemId'>;
+
 /** One `*_definitions.id` brand per definition table, so they cannot cross. */
 export type ClassDefinitionId = Brand<number, 'ClassDefinitionId'>;
 export type SubclassDefinitionId = Brand<number, 'SubclassDefinitionId'>;

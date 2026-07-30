@@ -61,6 +61,10 @@ import { rebuildSkillProjection } from '../grants/skill-grants';
  * projection rows are the only truth it has, restored as-is with no
  * reconciliation against grants that were never recorded.
  *
+ * `a7-v10` adds ONE table: `character_items` — the AC-1 (D72) "things that only
+ * modify" table. A pre-v10 snapshot does not carry it, so restoring one LEAVES
+ * the character's items alone, on the identical terms `a7-v9` states for grants.
+ *
  * NOT BUMPING WOULD HAVE BEEN THE LOUDEST FAILURE IN THIS CHANGE.
  * `SNAPSHOT_TABLES_BY_VERSION` aliases the CURRENT version to the live
  * `CHARACTER_STATE_TABLES`, so adding four tables without minting `a7-v4` would
@@ -70,7 +74,7 @@ import { rebuildSkillProjection } from '../grants/skill-grants';
  * containing one. Undo, save-point restore and `exportCharacterBackup` — which
  * re-parses its own stored save points on the way out — would break together.
  */
-export const CHARACTER_SNAPSHOT_SCHEMA_VERSION = 'a7-v9' as const;
+export const CHARACTER_SNAPSHOT_SCHEMA_VERSION = 'a7-v10' as const;
 
 /**
  * WHICH TABLES EACH SNAPSHOT VERSION CARRIES.
@@ -174,6 +178,19 @@ const A7_V7_TABLES = [...A7_V6_TABLES] as const satisfies readonly SnapshotTable
  */
 const A7_V8_TABLES = [...A7_V7_TABLES] as const satisfies readonly SnapshotTable[];
 
+/**
+ * `a7-v9` becomes a HISTORICAL FACT at the `a7-v10` bump, exactly as every
+ * predecessor did at its own successor's mint: until this change it was an
+ * ALIAS for the live list, which is correct only while it is the current
+ * version. HAND-FROZEN FIRST, before `character_items` joined the live list —
+ * appending to the live list while `a7-v9` still aliased it would silently
+ * rewrite what every existing `a7-v9` save point claims to carry.
+ */
+const A7_V9_TABLES = [
+  ...A7_V8_TABLES,
+  'character_skill_grants',
+] as const satisfies readonly SnapshotTable[];
+
 const SNAPSHOT_TABLES_BY_VERSION = {
   'a7-v1': A7_V1_TABLES,
   'a7-v2': A7_V2_TABLES,
@@ -183,7 +200,8 @@ const SNAPSHOT_TABLES_BY_VERSION = {
   'a7-v6': A7_V6_TABLES,
   'a7-v7': A7_V7_TABLES,
   'a7-v8': A7_V8_TABLES,
-  'a7-v9': CHARACTER_STATE_TABLES,
+  'a7-v9': A7_V9_TABLES,
+  'a7-v10': CHARACTER_STATE_TABLES,
 } as const satisfies Readonly<Record<string, readonly SnapshotTable[]>>;
 
 /**
@@ -207,6 +225,7 @@ export const CHARACTER_SNAPSHOT_SCHEMA_VERSIONS = [
   'a7-v7',
   'a7-v8',
   'a7-v9',
+  'a7-v10',
 ] as const satisfies readonly (keyof typeof SNAPSHOT_TABLES_BY_VERSION)[];
 
 export type CharacterSnapshotSchemaVersion =
@@ -294,7 +313,11 @@ const SNAPSHOT_CHARACTER_COLUMNS_BY_VERSION = {
   // one column v8 added — never of the live `CHARACTER_STATE_COLUMNS`, which
   // would silently follow the next column addition.
   'a7-v8': [...PRE_V8_CHARACTER_COLUMNS, 'ability_allocation_method'] as const,
-  'a7-v9': CHARACTER_STATE_COLUMNS,
+  // Frozen again at the `a7-v10` mint, on the identical terms: v9 and v10
+  // carry the same twelve `character` columns — `a7-v10` changes the TABLE
+  // list only (`character_items`), not this one.
+  'a7-v9': [...PRE_V8_CHARACTER_COLUMNS, 'ability_allocation_method'] as const,
+  'a7-v10': CHARACTER_STATE_COLUMNS,
 } as const satisfies Readonly<
   Record<CharacterSnapshotSchemaVersion, readonly string[]>
 >;
