@@ -1,12 +1,40 @@
 # Content-derived identity and complete non-SRD export
 
+## Revision 3
+
+- **A1:** Exact-byte content found under the derived primary key computed from
+  that incoming fingerprint is now a trivial self-match, not a review event.
+  This is option (b): it closes D82's fresh-database repeated-character-import
+  gap without manufacturing a receipt for a choice nobody made. Alias,
+  compatible-fingerprint and SRD-fallback matches, plus metadata conflicts,
+  remain reviewable with Match selected and Clone reachable.
+- **A2:** The identity contract now states the JavaScript-runtime Unicode-table
+  caveat, makes stored keys/normalized names/canonical bytes authoritative
+  after creation, forbids cross-engine renormalization as an integrity check,
+  and treats cross-engine fingerprint convergence as best-effort.
+- **A3:** Set-like canonical element JSON now names ECMAScript's default
+  UTF-16-code-unit comparator, matching `src/commands/canonical-json.ts`.
+- **S1:** D83, D86 and D92 are explicit external prerequisites for CI-3c and,
+  transitively, CI-5 in the dependency graph and acceptance gates.
+- **C1:** Added a backfill-classification control so bundled/external provenance
+  cannot swap across D59's authorization boundary.
+- **C2:** Added a cycle-refusal control proving a cyclic content graph stops
+  before hashing or writes.
+- **C3:** Strengthened CI-PROPERTIES with named species/background
+  template-half fields, covering the two-halves-one-key failure without an
+  overlapping control.
+- **C4:** Added a closed-set control proving new content cannot mint
+  `legacy-opaque`.
+- **C5:** Added a forget-scope control proving the action deletes exactly one
+  receipt and touches no character/content row.
+
 **Revision 2 — incorporates D82 and D84.**
 
 Binding law: **D81** (the full JSON export carries all non-SRD content, and
 content identity derives from normalized name plus numeric/logical properties),
 **D82** (one derived-identity rule covers imported, hand-made and forked content;
-derived matches are reviewed with match as the default and a per-entry clone
-choice), **D84** (bundled SRD keeps its stable catalog key and uses a content
+non-trivial derived matches are reviewed with match as the default and a
+per-entry clone choice), **D84** (bundled SRD keeps its stable catalog key and uses a content
 fingerprint only as fallback), **D46** (a share link remains a compact reference;
 the full JSON export is the complete channel), **D45** (an SRD customization is
 a differently named copy, a new spell rather than an override), **D57/D59** (a
@@ -257,6 +285,28 @@ punctuation are **removed**, not translated into separators. Unicode
 letters/numbers remain so a homebrew name written outside ASCII is not rejected
 or made indistinguishable from every other non-ASCII name.
 
+This algorithm deliberately uses the JavaScript engine's Unicode tables:
+`String.prototype.normalize('NFKD')` and the `\p{L}`/`\p{N}` property escapes
+follow that runtime's Unicode Character Database version. That version is not
+pinned by this scheme and this project does not ship a custom Unicode table. In
+particular, a code point unassigned in an older engine is not classified as a
+letter/number and is stripped, while a newer engine may assign it as a letter
+and retain it. The same raw name can therefore derive a different new key on
+those two engines.
+
+The stability boundary is the first successful derivation. Once stored,
+`content_key`, `normalized_name`, the canonical envelope bytes and their digest
+are authoritative identity data. Boot, export, audit and later integrity checks
+must not renormalize the display name under the current engine and compare the
+result with that stored key. They verify the engine-independent
+`sha256(canonical_json)` relationship and may reproject the non-name semantic
+payload while supplying the stored `normalized_name`. A content-bearing import
+still validates and projects new incoming content on its current engine; its
+carried key/fingerprints are candidate facts for §3.2, so convergence across
+different Unicode-table versions is best-effort through the fingerprint
+candidate path, never a reason to reject an otherwise valid stored aggregate or
+to force a false match.
+
 `normalizeCatalogKeyComponent` stays unchanged for legacy/bundled slugs and
 legacy aliases. Calling it from a v1 projector is a type error: the two functions
 return different brands (`LegacyCatalogKeyComponent` versus
@@ -292,7 +342,10 @@ The canonical serializer then enforces:
   punctuation, case and paragraph breaks remain significant;
 - structured JSON such as `grant_rules` is parsed into its typed object first,
   then canonicalized recursively; no JSON blob string enters the hash;
-- set-like children are sorted by their canonical element JSON and deduplicated;
+- set-like children are sorted by their canonical element JSON using
+  ECMAScript's default UTF-16 code-unit order (the same comparator used by
+  `Object.keys(value).sort()` in `src/commands/canonical-json.ts`) and
+  deduplicated;
 - sequence-like children retain semantic order and carry no database
   `sort_order` field—the array position is the order;
 - database ids, foreign ids, timestamps, `content_key`, provenance/layer,
@@ -547,8 +600,11 @@ the SRD graph before a later extraction correction. Reprojecting the current
 stable row cannot reproduce those old bytes. On insertion, the runner asserts
 `sha256(canonical_json) = fingerprint_digest`; a content-bearing fallback
 compares the incoming canonical JSON byte-for-byte with the stored value. A
-current fingerprint additionally reprojects the live aggregate and compares all
-three. Thus D84 history does not weaken CI-COLLISION into digest-only trust.
+current fingerprint additionally reprojects the live aggregate's non-name
+semantic payload using the registry's authoritative stored `normalized_name`
+and compares all three. It never renormalizes the display name as an integrity
+check. Thus D84 history does not weaken CI-COLLISION into digest-only trust or
+make a Unicode-table upgrade invalidate stored identity.
 
 Legacy owner-namespaced keys supplied by catalog documents are input aliases,
 not primary keys and not proof of ownership. Import validates the content,
@@ -571,9 +627,11 @@ All content ingestion uses the same planner/installer primitives:
 6. if no candidate exists, plan an atomic registry + aggregate-graph insert;
 7. if a candidate exists, re-project the stored graph under the matching scheme
    and compare canonical bytes;
-8. exact bytes means a proposed **adoption**: reuse every local database id;
-   never rewrite rules or display spelling, but pass it through §3.4 before
-   commit;
+8. exact bytes means a proposed **adoption**: reuse every local database id and
+   never rewrite rules or display spelling. If the candidate is the derived
+   primary key computed directly from this incoming fingerprint and there is no
+   metadata conflict, it is a trivial self-match and bypasses §3.4 review;
+   every other adoption passes through §3.4 before commit;
 9. same primary key/fingerprint with different canonical bytes means
    `ContentIdentityCollision` and rolls back the whole document;
 10. record safe declared/rekeyed aliases and compatible fingerprints;
@@ -603,11 +661,20 @@ fallback proposal for §3.4; it never updates the SRD graph.
 
 `planContentImport` runs the real dependency resolution and installer inside a
 rollback and returns an `ImportPlan` plus a token bound to the canonical input
-hash and every candidate key/fingerprint it observed. The UI opens one
-accessible `<dialog>` listing every unresolved adoption. Each row shows the
-kind, incoming/local names, why it matched (`derived key`, `compatible
-fingerprint`, or `SRD fingerprint fallback`) and any metadata conflict. Its
-choices are:
+hash and every candidate key/fingerprint it observed. A byte-identical
+candidate reached by the derived primary key computed from that same incoming
+fingerprint is a **trivial self-match** when it has no metadata conflict: the
+identity function itself says the incoming and stored aggregate are one
+content-addressed value, so the planner reuses it without a receipt or modal.
+This narrow exemption is what makes D82's fresh-database repeated-character
+scenario silent after the first creation.
+
+Every alias match, compatible-fingerprint match, SRD fingerprint fallback and
+match with a metadata conflict remains review-required. The UI opens one
+accessible `<dialog>` listing every unresolved review-required adoption. Each
+row shows the kind, incoming/local names, why it matched (`alias`, `compatible
+fingerprint`, `SRD fingerprint fallback`, or `metadata conflict`) and any
+metadata conflict. Its choices are:
 
 - **Match** — selected by default; reuse the existing aggregate and local ids.
 - **Clone instead** — make a local private copy and route this import's
@@ -641,14 +708,16 @@ catalog_content_match_decisions
   UNIQUE(content_kind, incoming_fingerprint_scheme, incoming_fingerprint_digest)
 ```
 
-Only an actual adoption writes this receipt; creating a previously absent
-aggregate does not silently pre-approve a future match. On later imports, a
-valid receipt routes that incoming fingerprint to the remembered target without
-showing it again. A match receipt points at the adopted aggregate; a clone
-receipt points at the renamed derived clone. Because installed aggregates are
-immutable and not physically deleted while referenced, the mapping is stable.
-An explicit “forget match choice” control may delete a receipt for future
-imports but never retargets existing characters.
+Only an actual reviewed choice writes this receipt. Creating a previously
+absent aggregate and later trivially self-matching its derived primary key do
+not manufacture consent for a choice that was never presented. On later
+imports, a valid receipt routes that incoming fingerprint to the remembered
+target without showing it again. A match receipt points at the adopted
+aggregate; a clone receipt points at the renamed derived clone. Because
+installed aggregates are immutable and not physically deleted while
+referenced, the mapping is stable. An explicit “forget match choice” control
+deletes exactly that one receipt for future imports and nothing else; it never
+retargets or deletes existing character/content rows.
 
 Receipts are recipient-local workflow state. They are absent from portable
 character JSON and share links; a whole-database image necessarily retains them
@@ -661,8 +730,10 @@ commits content, receipts and character rows together. With no unresolved
 adoptions, the existing confirmation/add surface proceeds directly. Catalog
 JSON, portable character JSON, share preview/import and draft/fork publishing
 all use this protocol; whole-database replacement does not. This makes the first
-adoption visible, match the path of least resistance, and the Nth identical
-import both zero-new-content and no-modal.
+non-trivial adoption visible and Match the path of least resistance. A
+previously reviewed choice is remembered; a derived-primary trivial self-match
+needs no choice to remember. In both cases the Nth identical import is
+zero-new-content and no-modal.
 
 ## 4. Catalog documents and authoring
 
@@ -693,9 +764,11 @@ character references in one transaction when the user explicitly chooses
 Spell forks use exactly this boundary. `crypto.randomUUID()` may remain as the
 draft id, but `spell-fork.ts` publishes the differently named copy through the
 spell projector and receives a derived key. Hand-made homebrew uses the same
-path. If publishing would adopt existing derived content, §3.4's review modal
-appears; “clone instead” requires/prefills another name and derives another key.
-No authoring path exposes a published key and then mutates the bytes that key
+path. If publishing reaches an existing aggregate through an alias/fingerprint
+or has a metadata conflict, §3.4's review modal appears; “clone instead”
+requires/prefills another name and derives another key. A byte-identical
+derived-primary self-match reuses the existing aggregate without review. No
+authoring path exposes a published key and then mutates the bytes that key
 claims.
 
 ## 5. Portability channels
@@ -730,7 +803,8 @@ a row would violate “all”; guessing a semantic DTO would violate D6/D6b.
 
 The exporter selects **every**
 `catalog_content_identities.catalog_layer = 'external'` row, not only the
-character reference closure, builds each aggregate, validates/recomputes its key,
+character reference closure, builds each aggregate, validates the stored
+canonical-bytes/digest/key relationship without renormalizing its display name,
 and orders records by `(content_kind, content_key)`. Bundled rows are omitted by
 layer, never by key grammar; their fingerprints do not make them exportable.
 
@@ -752,8 +826,10 @@ The whole operation is one transaction after §3.4 review. Preview runs the same
 installer inside a rollback and reports:
 
 - new/matched content counts by kind;
-- every unreviewed derived adoption, with match preselected and clone available;
-- exact-derived versus SRD/compatible-fingerprint match reason;
+- every unreviewed, review-required adoption, with match preselected and clone
+  available;
+- trivial exact-derived self-match counts versus
+  alias/SRD/compatible-fingerprint review reasons;
 - same-name/different-content pairs;
 - ambiguous legacy aliases;
 - non-identity metadata conflicts;
@@ -771,14 +847,16 @@ Acceptance fixture:
 3. Alice's export contains every external aggregate, including one unused by
    her character.
 4. Bob imports Alice's character.
-5. The first adoption modal lists every unresolved derived match, defaults all
-   rows to match, and offers a valid derived clone name per row.
-6. With those defaults accepted, every content count is unchanged; the unused
-   aggregate was present in the document but matched; all character catalog FKs
-   resolve to Bob's existing ids; only character-owned rows (including item
-   instances) increase.
+5. Exact derived-primary matches with no metadata conflict are trivial
+   self-matches and open no modal. Any alias/fingerprint/SRD-fallback or
+   metadata-conflict fixture opens the first-adoption modal, defaults all rows
+   to match, and offers a valid derived clone name per row.
+6. After automatic self-matches and any reviewed defaults, every content count
+   is unchanged; the unused aggregate was present in the document but matched;
+   all character catalog FKs resolve to Bob's existing ids; only
+   character-owned rows (including item instances) increase.
 7. Importing Alice's later-level export again creates no catalog rows and does
-   not ask about the remembered matches.
+   not ask about trivial self-matches or remembered review-required matches.
 8. Importing the export into a fresh database restores the same external catalog
    and character without a match modal because the aggregates are new there.
 
@@ -791,7 +869,10 @@ subclasses, sources and spells. The importer replaces direct
 
 - exact bundled-stable key: use the existing local definition id without a
   derived-adoption review;
-- exact/unique alias to derived content: propose adoption through §3.4;
+- exact derived primary key whose digest is the incoming fingerprint, with
+  byte-identical content and no metadata conflict: treat as a trivial self-match
+  without review or receipt;
+- unique alias to derived content: propose adoption through §3.4;
 - recognized derived fingerprint key that uniquely finds the same indexed
   scheme on a local stable SRD or external aggregate: propose a
   fingerprint-fallback adoption through §3.4;
@@ -898,7 +979,9 @@ For forks specifically:
 1. copy the active SRD aggregate into a UUID-addressed draft;
 2. require a differently normalized name, preserving D45;
 3. publish through the current spell projector;
-4. if that derived identity already exists, use the D82 review modal;
+4. if resolution is a review-required alias/fingerprint/metadata-conflict
+   adoption, use the D82 review modal; an exact derived-primary self-match
+   silently reuses the aggregate;
 5. on later edits, create another draft and another derived identity.
 
 The existing random published `homebrewSpellKey` path is removed. Existing
@@ -949,9 +1032,18 @@ tuple shape.
 - **CI-NAME-UNICODE — the Unicode alphanumeric retain rule.** Mutate it to
   `[a-z0-9]`. Must fail: two different all-non-ASCII names do not collapse to an
   empty/fallback identity, and canonically equivalent accented forms agree.
+  Also mutate stored-aggregate verification/export to renormalize the display
+  name. Must fail: a simulated cross-UCD fixture whose authoritative stored
+  `normalized_name` retains a code point that the test normalizer drops still
+  validates and exports from its pinned canonical bytes. The fixture injects
+  the divergent result; it does not implement a custom Unicode table.
 - **CI-PROPERTIES — each kind projector.** Delete one load-bearing numeric or
   logical field per kind. Must fail: same normalized name with that one property
-  changed derives a different key.
+  changed derives a different key. This explicitly covers C3's two-halves-one-
+  key boundary: delete species `species_templates.base_speed_feet` or background
+  `background_templates.ability_score_1` from its aggregate projector. Must
+  fail: changing that named TEMPLATE-half field changes the species/background
+  key.
 - **CI-ID-FREE — aggregate projectors.** Add database ids/timestamps or read
   children in insertion order. Must fail: equivalent graphs inserted with
   different ids/order on Alice and Bob derive identical canonical bytes/key.
@@ -994,13 +1086,15 @@ tuple shape.
   row is not.
 - **CI-CROSS-IMPORT — installer + reference remap.** Match by a declared owner key
   or insert despite a derived match. Must fail the Alice/Bob fixture in §5.1:
-  the first adoption is reviewed, catalog counts remain unchanged, Bob's local
-  ids are used, and the repeated import neither creates content nor re-asks.
+  exact derived-primary self-matches need no review, catalog counts remain
+  unchanged, Bob's local ids are used, review-required alias/fingerprint
+  matches are shown once, and the repeated import neither creates content nor
+  re-asks.
 - **CI-SHARE-REFERENCE — share exporter and immutable codecs.** Add aggregate
   content to the share or bypass the resolver. Must fail: frozen v10 and the
   then-current link contain keys only; exact stable keys resolve first;
-  derived/fingerprint adoptions are reviewed; missing content retains existing
-  issues/placeholders.
+  exact derived-primary self-matches bypass review; alias/fingerprint adoptions
+  are reviewed; missing content retains existing issues/placeholders.
 - **CI-SRD-KEY-FIRST — bundled resolver and seeder.** Prefer a changed
   fingerprint over an exact bundled key or rekey SRD after an extraction fix.
   Must fail: the same frozen stable-key share resolves before fingerprint
@@ -1011,12 +1105,15 @@ tuple shape.
   fail: preview labels it `SRD fingerprint fallback`, commit requires the
   default match or clone choice, and no bundled row is overwritten.
 - **CI-REVIEW-DEFAULT — match-review modal and plan DTO.** Default a row to
-  clone or omit one unresolved adoption. Must fail: every adoption is listed,
-  every initial choice is `match`, and accepting defaults adds zero content.
+  clone or omit one unresolved review-required adoption. Must fail: every
+  review-required adoption is listed, every initial choice is `match`, and
+  accepting defaults adds zero content; trivial derived-primary self-matches do
+  not create review rows.
 - **CI-REVIEW-REMEMBER — `catalog_content_match_decisions`.** Ignore the
   receipt or write it before the enclosing import commits. Must fail: the second
-  identical import has no review rows and no new catalog rows, while a forced
-  later failure leaves neither character nor receipt.
+  identical import of a reviewed alias/fingerprint match has no review rows and
+  no new catalog rows, while a forced later failure leaves neither character
+  nor receipt.
 - **CI-CLONE-DERIVED — clone planner.** Add a random salt/opaque key or accept an
   unchanged normalized name. Must fail: the clone name changes, the key equals
   the production projector's digest, incoming references use it, and the
@@ -1042,6 +1139,23 @@ tuple shape.
   receipts before a later character/reference refusal. Must fail: after a
   forced final-stage refusal, catalog, receipt and character counts are all
   unchanged.
+- **CI-BACKFILL-CLASSIFY — `content_identity_v1_backfill` classification.**
+  Mutate the CI-4b backfill to classify a projectable pre-existing bundled row
+  as `external + legacy-opaque`, or a projectable external row as bundled. Must
+  fail: registration and idempotence fixtures detect the misclassification
+  before exposure; bundled versus external provenance never swaps across
+  D59's authorization boundary.
+- **CI-CYCLE — dependency graph refusal.** Remove the stable Kahn-sort cycle
+  refusal so a cyclic reference graph reaches hashing. Must fail: the
+  content-bearing import is refused before hashing or writing any aggregate.
+- **CI-LEGACY-CLOSED — registry authoring/import boundary.** Allow a newly
+  authored, forked or imported aggregate to mint
+  `key_kind='legacy-opaque'`. Must fail: the closed-set assertion permits that
+  state only for a pre-existing unprojectable row classified by the backfill.
+- **CI-FORGET-SCOPE — remembered-choice deletion.** Make “forget match choice”
+  retarget/delete a character or content row, or delete more than the selected
+  receipt. Must fail: forgetting deletes exactly one receipt and changes no
+  other table.
 
 Every control uses fixtures authored in this repository. No non-SRD book content
 is committed; D57/D59's authorization line remains intact.
@@ -1132,9 +1246,11 @@ Two already-decided schema units are sequencing inputs rather than hidden work
 inside a projector:
 
 - land D83's effect vocabulary before CI-1 freezes v1 if practicable; if it
-  lands later, §6 requires `content-v2` and CI-SCHEME-EVOLUTION;
+  lands later, §6 requires `content-v2` and CI-SCHEME-EVOLUTION, but its final
+  schema shape still lands before CI-3c or CI-5 starts;
 - land D86 quantity and D92 attunement slots before the item picker and backup
-  cutovers in CI-3c/CI-5. They remain excluded from the fingerprint.
+  cutovers in CI-3c/CI-5. They remain excluded from the fingerprint. These are
+  external prerequisite merges, not work hidden inside either CI dispatch.
 
 - **CI-1 — M: identity kernel and frozen vectors.** Brands, name/rule-text
   normalization, canonical serializer, versioned fingerprint/adjacent-
@@ -1156,7 +1272,7 @@ inside a projector:
   `spell_identities.content_key` as an internal group key, relaxed
   same-identity/edition uniqueness, child-graph reprojection and derived-fork
   publishing behind tests. Public import/fork cutover waits for CI-4a so no
-  derived adoption can be silent.
+  review-required adoption can be silent.
 - **CI-3c — L: equipment and modifier-item catalog.** Weapon/armor projectors;
   new `item_definitions` and effect children; picker copies into
   `character_items`/`character_effects`; catalog record kinds and import
@@ -1199,9 +1315,9 @@ inside a projector:
   No tuple changes are caused by identity.
 - **CI-7 — L: authoring immutability.** Draft ids and publish-to-derived-key
   across nine content kinds, edit-as-new-version, explicit reference retarget
-  command, D82 review on an existing derived result, and refusal to export/share
-  drafts. Forks are one spell-shaped use of this common lifecycle, not a policy
-  branch.
+  command, D82 review on a review-required existing result, silent reuse of a
+  trivial exact-derived self-match, and refusal to export/share drafts. Forks
+  are one spell-shaped use of this common lifecycle, not a policy branch.
 - **CI-8 — M: adversarial controls and UI disclosure.** Mutation suite for every
   projector and scheme transition, import preview counts/conflicts,
   same-name-distinct and match-reason labeling, remembered-choice management,
@@ -1210,6 +1326,12 @@ inside a projector:
 Strict dependency order:
 
 ```text
+External prerequisites:
+D83 effect schema ─────┐
+D86 quantity schema ───┼→ CI-3c
+D92 slot schema ───────┘
+
+Identity work:
 CI-1 → CI-2a → CI-2b
                   ├→ CI-3a ───────┐
                   └→ CI-3c → CI-3b┴→ CI-3s → CI-4a → CI-4b → CI-5 → CI-8
@@ -1223,7 +1345,9 @@ and the new item catalog have different failure surfaces. CI-4a does not cut
 over any public ingestion path until all nine projectors and the review UI
 exist. CI-5 does not begin until backfill is registered; otherwise “all non-SRD
 content” would ship as a format with known holes or unstable legacy
-classifications.
+classifications. The three external prerequisite edges gate CI-3c directly and
+CI-5 transitively: neither dispatch starts until the D83 effect shape, D86
+quantity shape and D92 three-slot shape are merged.
 
 ## 11. Acceptance and explicit non-goals
 
@@ -1235,10 +1359,17 @@ The unit is complete only when:
   representable identities and a disclosed conflict;
 - a v3 full JSON restored into a fresh database carries every external catalog
   aggregate and the character;
-- a v3 import into an independently populated database lists every first-time
-  derived adoption, defaults each to match, and reuses local content ids;
+- a v3 import into an independently populated database silently reuses each
+  exact derived-primary self-match; every first-time alias/fingerprint/SRD
+  fallback or metadata-conflict adoption is listed, defaults to match, and
+  reuses local content ids;
 - repeating that import creates zero catalog rows and does not show already
   remembered matches again;
+- in D82's fresh-database repeated-character-import scenario, import #1 creates
+  the absent external aggregates with no modal, import #2 resolves their
+  byte-identical derived-primary keys with no modal, and import #N remains
+  no-modal with zero catalog clones created by default; Clone remains available
+  whenever a non-trivial match is actually reviewed;
 - choosing clone creates a differently named, fingerprint-derived private copy,
   remaps this import to it, and does not clone it again on the Nth import;
 - bundled SRD always resolves by its stable key first; a fingerprint fallback
@@ -1249,7 +1380,9 @@ The unit is complete only when:
 - share wire remains reference-only, identity itself causes no version bump,
   and existing missing-content behavior remains;
 - v1/v2 backups and v1-v10 shares remain readable through explicit legacy
-  adapters/aliases.
+  adapters/aliases;
+- CI-3c and CI-5 do not start until D83's final effect schema, D86's quantity
+  schema and D92's three-slot attunement schema shapes are merged.
 
 Not in this unit:
 
