@@ -64,6 +64,17 @@ the one vocabulary), **D73**
   grants nothing" has nothing to read**, and AC-ATTUNEMENT was a control whose
   mechanism appeared zero times in the plan — the identical miss revision 4
   caught for `named_features`, one section over.
+- **(Revision 6.) The candidate audit refuses what restore accepts, and AC-1
+  widened the gap.** Verified by probe, not by reading: `rowContractError`
+  refuses a pre-AC-1 `character_effects` row (`probe.ability: Invalid input`)
+  and accepts the same row after `fillAddedNullableRowColumns`; the audit's
+  save-point loop applies that fill **only for `character_weapons`**
+  (`candidate-audit.ts:669`), while restore (`character-state.ts:484`) and
+  backup validation (`character-backup.ts:296`) apply it for every table. So
+  an imported image whose save points predate B2 or AC-1 fails the audit that
+  quarantine runs, on rows restore itself would take. Pre-existing since B2's
+  three columns; AC-1 made it eight. **Fixed as its own dispatch, not
+  deferred to AC-2** — it is a live inconsistency in shipped code.
 - **A SUBCLASS CANNOT WRITE AN EFFECT ROW AT ALL, and revisions 1 and 2 built the
   headline fixture on the assumption that it could.** Verified: `subclass_features`
   has `effect_kind` CHECK'd to **`'extra_attack'` only**, read live at sheet-build
@@ -195,6 +206,14 @@ winning base without re-running eligibility reports **18**.
   an effect whose owning item has `requires_attunement = 1 AND attuned = 0` is
   **excluded**; an effect with NULL `character_item_id` is untouched. Nullable,
   so it rides `ADDED_NULLABLE_ROW_COLUMNS` without a snapshot bump.
+  **The gate is for every effect reader, not AC (revision 6).** Effects are
+  read independently at `ability-contributions.ts:108`,
+  `character-sheet-builder.ts:576` (hp/speed/resistance) and `origins.ts:275`;
+  an AC-only join suppresses the cloak while an unattuned amulet still adds
+  HP. AC-3 defines ONE eligible-effects predicate and routes every mechanical
+  consumer through it. Its SQL must be NULL-safe explicitly: under
+  three-valued logic a naive `NOT (requires_attunement AND NOT attuned)`
+  drops the NULL-joined rows the gate is defined to leave untouched.
 
 ## 4. What the sheet says
 
@@ -269,7 +288,11 @@ rule in two places is F22, which has already bitten this project.
   present.** It asserts a warning that ships today, not a sentence nobody has
   agreed to write.
 - **AC-ATTUNEMENT** — mutate the attunement gate away. Must fail: an unattuned
-  item requiring attunement grants nothing.
+  item requiring attunement grants nothing. **The fixture asserts all four
+  states (revision 6)** — required+unattuned excluded, required+attuned
+  included, not-required+unattuned included (Ring of Shell), NULL
+  `character_item_id` included — because against the exclusion alone, an
+  implementation that drops EVERY item-owned effect passes the control.
 - **AC-ONE-VOCABULARY** — mutate an item to carry its own `ac_change` column.
   Must fail: the resolver reads effects only.
 
@@ -333,6 +356,24 @@ needed `ec2be58` for its controls.
   target, and the item-add surface writing it when it writes the effect. AC-2
   is where it lands because AC-2 is already this unit's only other
   `character_effects` migration; a fifth dispatch for one column is overhead.
+  **Revision 6 adds, from the codex review of revision 5, each verified in the
+  tree before being written here:**
+  - a child-side index on `character_effects (character_item_id,
+    character_id)` — cascade lookups and the resolver join both read it;
+  - `DELETE_ORDER` comment truth (`tables.ts:1230-1256`): the order itself is
+    already correct — effects precede items — but two comments call
+    `character_items` a childless leaf, which the new reference falsifies;
+  - superseding `db/schema/items.ts:23-33`: the "deliberately no foreign key
+    from an effect to the item" comment was correct for AC-1's scope and is
+    exactly what revision 5 reverses — it is REPLACED, not appended to;
+  - **the item-add command**: "the surface writes it" was a sentence with no
+    mechanism (the revision-4 class of miss, a third time). AC-2 pins a
+    transactional command that inserts the item first and its effect rows
+    with the returned id in the same transaction — there is no item-add
+    command in `src` today; items are written only by restore machinery;
+  - an integration test on the hard-delete chain: deleting a source cascades
+    into its item (`items.ts:94`) which now cascades into that item's
+    effects — three tables, one DELETE, proven not assumed.
   Revision 2 said one table; revision 3 said two; **it is three.** Monk and
   Barbarian Unarmored Defense live in `named_features` and are the reason this
   cannot be deferred — they are the resolver's own worked example.
