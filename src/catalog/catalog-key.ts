@@ -1,8 +1,28 @@
+import type { Brand } from '../domain/ids';
+
 const KEY_COMPONENT = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const OWNER_NAMESPACE =
   /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\.[a-z0-9]+(?:-[a-z0-9]+)*)+$/;
 
-export function normalizeCatalogKeyComponent(value: string): string {
+/**
+ * A component produced by the legacy slug normalizer.
+ *
+ * This brand deliberately differs from the content-v1 normalized-name brand:
+ * legacy keys hyphenate ASCII slugs, while content identity removes separators
+ * and retains Unicode letters/numbers.
+ */
+export type LegacyCatalogKeyComponent = Brand<
+  string,
+  'LegacyCatalogKeyComponent'
+>;
+
+export function isCatalogKeyComponent(value: string): boolean {
+  return KEY_COMPONENT.test(value);
+}
+
+export function normalizeCatalogKeyComponent(
+  value: string,
+): LegacyCatalogKeyComponent {
   const normalized = value
     .normalize('NFKD')
     .replace(/\p{M}+/gu, '')
@@ -12,7 +32,7 @@ export function normalizeCatalogKeyComponent(value: string): string {
   if (normalized === '') {
     throw new TypeError('Catalog key components must not be empty.');
   }
-  return normalized;
+  return normalized as LegacyCatalogKeyComponent;
 }
 
 export function isSpellVersionKey(value: string): boolean {
