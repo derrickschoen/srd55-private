@@ -23,8 +23,8 @@ import { classFeatureEffectKinds } from '../../../src/domain/enums';
 
 const TEXT_ONLY = {
   effect_kind: null,
-  effect_attack_count: null,
-  effect_weapon_scope: null,
+  attack_count: null,
+  weapon_scope: null,
 };
 
 describe('reading a stored effect kind', () => {
@@ -62,8 +62,8 @@ describe('resolving a feature to an effect', () => {
     expect(
       classFeatureEffect({
         effect_kind: 'extra_attack',
-        effect_attack_count: 3,
-        effect_weapon_scope: 'one_bonded_weapon',
+        attack_count: 3,
+        weapon_scope: 'one_bonded_weapon',
       }),
     ).toEqual({
       kind: 'extra_attack',
@@ -79,8 +79,8 @@ describe('resolving a feature to an effect', () => {
     expect(
       classFeatureEffect({
         effect_kind: 'extra_attack',
-        effect_attack_count: 2,
-        effect_weapon_scope: null,
+        attack_count: 2,
+        weapon_scope: null,
       }),
     ).toBeNull();
   });
@@ -89,8 +89,8 @@ describe('resolving a feature to an effect', () => {
     expect(
       classFeatureEffect({
         effect_kind: 'extra_attack',
-        effect_attack_count: null,
-        effect_weapon_scope: 'any_weapon',
+        attack_count: null,
+        weapon_scope: 'any_weapon',
       }),
     ).toBeNull();
   });
@@ -99,8 +99,8 @@ describe('resolving a feature to an effect', () => {
     expect(
       classFeatureEffect({
         effect_kind: 'extra_attack',
-        effect_attack_count: 2,
-        effect_weapon_scope: 'pact_weapon',
+        attack_count: 2,
+        weapon_scope: 'pact_weapon',
       }),
     ).toBeNull();
   });
@@ -109,8 +109,8 @@ describe('resolving a feature to an effect', () => {
     expect(
       classFeatureEffect({
         effect_kind: 'granted_spells',
-        effect_attack_count: 2,
-        effect_weapon_scope: 'any_weapon',
+        attack_count: 2,
+        weapon_scope: 'any_weapon',
       }),
     ).toBeNull();
   });

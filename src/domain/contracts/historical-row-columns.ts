@@ -37,6 +37,7 @@ const ADDED_NULLABLE_ROW_COLUMNS: Readonly<
     'ability_2',
     'allows_shield',
     'weapon_scope',
+    'template_ref',
   ],
 };
 

@@ -156,6 +156,12 @@ export type BackgroundDefinitionId = Brand<number, 'BackgroundDefinitionId'>;
  */
 export type SubclassFeatureId = Brand<number, 'SubclassFeatureId'>;
 export type NamedFeatureId = Brand<number, 'NamedFeatureId'>;
+export type SubclassFeatureEffectId = Brand<
+  number,
+  'SubclassFeatureEffectId'
+>;
+export type NamedFeatureEffectId = Brand<number, 'NamedFeatureEffectId'>;
+export type ClassFeatureEffectId = Brand<number, 'ClassFeatureEffectId'>;
 
 /**
  * A catalog content key: `<edition>:<slug>` (see `src/catalog/catalog-key.ts`).

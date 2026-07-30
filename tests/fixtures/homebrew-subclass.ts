@@ -133,25 +133,36 @@ export function insertHomebrewSubclass(
   ).lastInsertId;
 
   for (const feature of FEATURES) {
-    db.exec(
+    const featureId = db.exec(
       `INSERT INTO subclass_features
          (subclass_definition_id, class_level, sort_order, name, description,
-          effect_kind, effect_attack_count, effect_weapon_scope,
           created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
         subclassId,
         feature.class_level,
         feature.sort_order,
         feature.name,
         feature.description,
-        feature.effect_attack_count === null ? null : 'extra_attack',
-        feature.effect_attack_count,
-        feature.effect_weapon_scope,
         timestamp,
         timestamp,
       ],
-    );
+    ).lastInsertId;
+    if (feature.effect_attack_count !== null) {
+      db.exec(
+        `INSERT INTO subclass_feature_effects
+           (subclass_feature_id, sort_order, effect_kind, attack_count,
+            weapon_scope, created_at, updated_at)
+         VALUES (?, 1, 'extra_attack', ?, ?, ?, ?)`,
+        [
+          featureId,
+          feature.effect_attack_count,
+          feature.effect_weapon_scope,
+          timestamp,
+          timestamp,
+        ],
+      );
+    }
   }
   return subclassId;
 }

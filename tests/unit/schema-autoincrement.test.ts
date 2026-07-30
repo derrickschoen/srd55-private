@@ -113,6 +113,11 @@ const nativeAutoIncrementTables = [
   // foreign key onto it would move when the content was corrected.
   'named_features',
   'subclass_features',
+  // AC-2a: automatic, optional named, and subclass feature mechanics live in
+  // child rows. Each child has its own identity for template_ref and cascades.
+  'class_feature_effects',
+  'named_feature_effects',
+  'subclass_feature_effects',
   // The four STORED SHEET INPUTS. Each carries a surrogate autoincrementing key
   // even though each has a natural one — (character, slot), (character, class,
   // level), (character, skill), (character) — because a save-point snapshot
@@ -179,7 +184,7 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
       return db;
     }
 
-    it('declares AUTOINCREMENT on exactly the 30 Laravel and 32 native surrogate-key tables', () => {
+    it('declares AUTOINCREMENT on exactly the 30 Laravel and 35 native surrogate-key tables', () => {
       const db = openDb();
       const declared = db
         .selectValues(
@@ -193,17 +198,18 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
         .map(String);
 
       expect(declared).toEqual(allAutoIncrementTables);
-      // 30 surviving Laravel tables plus 32 native: 4 weapons, 8 sheet core,
+      // 30 surviving Laravel tables plus 35 native: 4 weapons, 8 sheet core,
       // 7 origins (the seventh is `background_equipment_items`), 2 effects,
       // 2 class features, 4 stored sheet inputs, the TWO progression
       // ladders on the catalog side (`spell_version_upcast_levels` and
       // `spell_version_cantrip_upgrade_levels`), the ONE
       // skills-with-provenance table, `character_skill_grants`, and the ONE
-      // AC-1 (D72) items table, `character_items`. Counted in parts so one
-      // group shrinking while another grows cannot pass unnoticed.
-      expect(declared).toHaveLength(62);
+      // AC-1 (D72) items table, `character_items`, and AC-2a's three feature
+      // effect tables. Counted in parts so one group shrinking while another
+      // grows cannot pass unnoticed.
+      expect(declared).toHaveLength(65);
       expect(autoIncrementTables).toHaveLength(30);
-      expect(nativeAutoIncrementTables).toHaveLength(32);
+      expect(nativeAutoIncrementTables).toHaveLength(35);
 
       const withoutAutoIncrement = db
         .selectValues(

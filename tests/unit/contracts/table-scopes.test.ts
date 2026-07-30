@@ -119,6 +119,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       'class_armor_training',
       'class_definitions',
       'class_extra_attack_grants',
+      'class_feature_effects',
       'class_martial_arts_dice',
       'class_progressions',
       'class_saving_throw_proficiencies',
@@ -129,6 +130,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       'class_weapon_proficiencies',
       'feat_definitions',
       'named_features',
+      'named_feature_effects',
       'species_definitions',
       'species_template_trait_effects',
       'species_template_traits',
@@ -149,6 +151,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       'spell_version_upcast_levels',
       'spell_versions',
       'subclass_definitions',
+      'subclass_feature_effects',
       'subclass_features',
       'subclass_progressions',
       'warning_acknowledgements',
@@ -324,8 +327,8 @@ describe('table scope classification', () => {
     // ONE items table, `character_items` (AC-1, D72). Each group is named
     // rather than folded into one total, so a group that vanishes while
     // another grows cannot pass unnoticed.
-    expect(names).toHaveLength(62);
-    expect(new Set(names).size).toBe(62);
+    expect(names).toHaveLength(65);
+    expect(new Set(names).size).toBe(65);
     expect([...names].sort()).toEqual([...APPLICATION_TABLES].sort());
   });
 

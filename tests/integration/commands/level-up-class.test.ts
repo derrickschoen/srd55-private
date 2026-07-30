@@ -187,6 +187,24 @@ describe('level_up_class', () => {
   it('applies an offered subclass content key at level 3, and refuses a foreign one', () => {
     enterClass('Fighter');
     raiseClassLevelForTest(db, characterId, classId('Fighter'), 2);
+    const subclassId = Number(
+      db.scalar(
+        `SELECT id FROM subclass_definitions WHERE content_key = ?`,
+        ['2024:subclass:ek'],
+      ),
+    );
+    const featureId = db.exec(
+      `INSERT INTO subclass_features (
+         subclass_definition_id, class_level, sort_order, name, description
+       ) VALUES (?, 3, 1, 'Fixture Ward', 'A test-owned mechanical feature.')`,
+      [subclassId],
+    ).lastInsertId;
+    const effectId = db.exec(
+      `INSERT INTO subclass_feature_effects (
+         subclass_feature_id, sort_order, effect_kind, amount
+       ) VALUES (?, 1, 'armor_class_bonus', 1)`,
+      [featureId],
+    ).lastInsertId;
     // AT belongs to the Rogue: a key of another class must
     // fail loudly, not attach.
     expect(() =>
@@ -203,12 +221,6 @@ describe('level_up_class', () => {
       subclass_content_key: '2024:subclass:ek',
     });
     expect(storedLevel('Fighter')).toBe(3);
-    const subclassId = Number(
-      db.scalar(
-        `SELECT id FROM subclass_definitions WHERE content_key = ?`,
-        ['2024:subclass:ek'],
-      ),
-    );
     expect(
       Number(
         db.scalar(
@@ -228,6 +240,21 @@ describe('level_up_class', () => {
         [characterId, subclassId],
       ),
     ).toBe('active');
+    expect(
+      db.allRaw(
+        `SELECT effect_kind, amount, label, template_ref
+         FROM character_effects
+         WHERE character_id = ? AND template_ref IS NOT NULL`,
+        [characterId],
+      ),
+    ).toEqual([
+      {
+        effect_kind: 'armor_class_bonus',
+        amount: 1,
+        label: 'Fixture Ward',
+        template_ref: `subclass_feature_effects:${String(effectId)}`,
+      },
+    ]);
   });
 
   it('requires an increase at a level the SEEDED table names — Fighter 6, not only 4 (L-ASI-LEVELS)', () => {
@@ -392,5 +419,68 @@ describe('level_up_class', () => {
         [characterId],
       ),
     ).toBe('Wizard 3');
+  });
+
+  it('copies automatic feature effects once on sync and preserves hand-written ASIs on re-sync', () => {
+    const fighterId = classId('Fighter');
+    const templateId = db.exec(
+      `INSERT INTO class_feature_effects (
+         class_definition_id, class_level, name, effect_kind,
+         base, ability_1, ability_2, allows_shield
+       ) VALUES (?, 4, 'Fixture Defense', 'armor_class_formula',
+                 10, 'constitution', 'charisma', 1)`,
+      [fighterId],
+    ).lastInsertId;
+    enterClass('Fighter');
+    raiseClassLevelForTest(db, characterId, fighterId, 3);
+
+    levelUp({
+      class_definition_id: fighterId,
+      target_level: 4,
+      ability_increases: [{ ability: 'strength', amount: 2 }],
+    });
+
+    // An ordinary update_class apply is a second sync of the same level. It
+    // must replace the generated row, not duplicate it, and must not touch the
+    // ASI row whose template_ref is NULL.
+    enterClass('Fighter');
+    expect(
+      db.allRaw(
+        `SELECT effect_kind, ability, amount, base, ability_1, ability_2,
+                allows_shield, template_ref
+         FROM character_effects
+         WHERE character_id = ?
+         ORDER BY effect_kind`,
+        [characterId],
+      ),
+    ).toEqual([
+      {
+        effect_kind: 'ability_increase',
+        ability: 'strength',
+        amount: 2,
+        base: null,
+        ability_1: null,
+        ability_2: null,
+        allows_shield: null,
+        template_ref: null,
+      },
+      {
+        effect_kind: 'armor_class_formula',
+        ability: null,
+        amount: null,
+        base: 10,
+        ability_1: 'constitution',
+        ability_2: 'charisma',
+        allows_shield: 1,
+        template_ref: `class_feature_effects:${String(templateId)}`,
+      },
+    ]);
+    expect(
+      db.scalar(
+        `SELECT count(*) FROM character_effects
+         WHERE character_id = ? AND template_ref IS NOT NULL`,
+        [characterId],
+      ),
+    ).toBe(1);
   });
 });

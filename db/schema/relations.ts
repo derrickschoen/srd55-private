@@ -9,9 +9,12 @@ import {
 } from './catalog-sources';
 import {
   class_definitions,
+  class_feature_effects,
   class_progressions,
+  named_feature_effects,
   named_features,
   subclass_definitions,
+  subclass_feature_effects,
   subclass_features,
   subclass_progressions,
 } from './catalog-classes';
@@ -740,6 +743,7 @@ export const classDefinitionsRelations = relations(
     // counts, which is the only relationship it has to a class at all — it is
     // not a class table row and the character has not necessarily taken it.
     named_features: many(named_features),
+    automatic_feature_effects: many(class_feature_effects),
   }),
 );
 
@@ -878,20 +882,52 @@ export const subclassProgressionsRelations = relations(
 
 export const subclassFeaturesRelations = relations(
   subclass_features,
-  ({ one }) => ({
+  ({ one, many }) => ({
     subclass_definition: one(subclass_definitions, {
       fields: [subclass_features.subclass_definition_id],
       references: [subclass_definitions.id],
     }),
+    effects: many(subclass_feature_effects),
   }),
 );
 
-export const namedFeaturesRelations = relations(named_features, ({ one }) => ({
+export const subclassFeatureEffectsRelations = relations(
+  subclass_feature_effects,
+  ({ one }) => ({
+    feature: one(subclass_features, {
+      fields: [subclass_feature_effects.subclass_feature_id],
+      references: [subclass_features.id],
+    }),
+  }),
+);
+
+export const namedFeaturesRelations = relations(named_features, ({ one, many }) => ({
   class_definition: one(class_definitions, {
     fields: [named_features.class_definition_id],
     references: [class_definitions.id],
   }),
+  effects: many(named_feature_effects),
 }));
+
+export const namedFeatureEffectsRelations = relations(
+  named_feature_effects,
+  ({ one }) => ({
+    feature: one(named_features, {
+      fields: [named_feature_effects.named_feature_id],
+      references: [named_features.id],
+    }),
+  }),
+);
+
+export const classFeatureEffectsRelations = relations(
+  class_feature_effects,
+  ({ one }) => ({
+    class_definition: one(class_definitions, {
+      fields: [class_feature_effects.class_definition_id],
+      references: [class_definitions.id],
+    }),
+  }),
+);
 
 // Standalone source definitions are pointed AT polymorphically and have no
 // foreign keys of their own, in either direction.

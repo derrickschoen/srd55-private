@@ -284,6 +284,21 @@ describe('guided species application', () => {
       kind: 'species',
       content_key: second.content_key,
     });
+    const replacementSources = guidedSpeciesSources(db, characterId);
+    expect(replacementSources).toHaveLength(1);
+    const replacementSourceId = Number(replacementSources[0]?.['id']);
+    const replacementTemplateRef = `species_template_trait_effects:${String(
+      db.scalar(
+        `SELECT effect.id
+         FROM species_template_trait_effects AS effect
+         JOIN species_template_traits AS trait
+           ON trait.id = effect.species_template_trait_id
+         JOIN species_templates AS template
+           ON template.id = trait.species_template_id
+         WHERE template.content_key = ? AND trait.name = 'New Ward'`,
+        [second.content_key],
+      ),
+    )}`;
 
     expect(
       db.allRaw(
@@ -305,7 +320,7 @@ describe('guided species application', () => {
     expect(
       db.allRaw(
         `SELECT effect_kind, damage_type, speed_bonus_feet,
-                source_instance_id, label
+                source_instance_id, template_ref, label
          FROM character_effects
          WHERE character_id = ?
          ORDER BY sort_order`,
@@ -317,13 +332,15 @@ describe('guided species application', () => {
         damage_type: 'Cold',
         speed_bonus_feet: null,
         source_instance_id: sourceId,
+        template_ref: null,
         label: 'Old Ward',
       },
       {
         effect_kind: 'damage_resistance',
         damage_type: 'Cold',
         speed_bonus_feet: null,
-        source_instance_id: null,
+        source_instance_id: replacementSourceId,
+        template_ref: replacementTemplateRef,
         label: 'New Ward',
       },
     ]);
@@ -494,7 +511,7 @@ describe('guided lineage spell grants', () => {
     expect(speciesSpellSlotCount(db, characterId)).toBe(0);
   });
 
-  it('leaves no guided species source when switching from Tiefling to Dwarf', async () => {
+  it('replaces the Tiefling source with a spell-free Dwarf source', async () => {
     const rpcHarness = await applicationDatabase();
     const db = rpcHarness.context.db;
     const tiefling = speciesNamed(db, 'Tiefling');
@@ -512,7 +529,13 @@ describe('guided lineage spell grants', () => {
       content_key: dwarf.content_key,
     });
 
-    expect(guidedSpeciesSources(db, characterId)).toEqual([]);
+    const dwarfSources = guidedSpeciesSources(db, characterId);
+    expect(dwarfSources).toHaveLength(1);
+    expect(dwarfSources[0]).toMatchObject({
+      display_name: 'Dwarf',
+      config: '{"class_level":1}',
+    });
+    expect(Number.isSafeInteger(dwarfSources[0]?.['id'])).toBe(true);
     expect(speciesSpellSlotCount(db, characterId)).toBe(0);
     expect(
       new SpellAccessBuilder(db)

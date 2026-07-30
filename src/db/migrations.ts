@@ -14,6 +14,7 @@ import characterSkillGrants from '../../drizzle/0010_character_skill_grants.sql?
 import equipmentProvenance from '../../drizzle/0011_equipment_provenance.sql?raw';
 import removeEquipmentProvenance from '../../drizzle/0012_remove_equipment_provenance.sql?raw';
 import armorClassItemsAndEffects from '../../drizzle/0013_armor_class_items_and_effects.sql?raw';
+import featureEffectProduction from '../../drizzle/0014_feature_effect_production.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -162,6 +163,14 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
       '22cfd200c40d46ffbf698f7a3da92bca49f087bdbfdbee3e21bc07405aa4bf52',
     resultSchemaChecksum:
       'b8b13b323d1eb176c490b688413f2eacb2e8e19c96c4933a6a159165e9dcdfa1',
+  }),
+  Object.freeze({
+    id: '0014_feature_effect_production',
+    sql: featureEffectProduction,
+    checksum:
+      'babf5dd042c78f8865a3cdd9a2b725db75472fe785fa6af9c05a9f0efb667a67',
+    resultSchemaChecksum:
+      '4fc9e0f01553d7161dd81799466276d2068357598a9fde0a07d69491ed0bd600',
   }),
 ]);
 

@@ -541,12 +541,11 @@ function seedNamedFeatures(db: DatabaseContext, timestamp: string): void {
     if (classId === null || nameSlotTaken(db, classId, feature.name)) {
       continue;
     }
-    db.exec(
+    const featureId = db.exec(
       `INSERT INTO named_features (
          content_key, class_definition_id, name, rules_edition, prerequisite,
-         description, class_level, effect_kind, effect_attack_count,
-         effect_weapon_scope, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, 'extra_attack', ?, ?, ?, ?)`,
+         description, class_level, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         feature.content_key,
         classId,
@@ -555,6 +554,17 @@ function seedNamedFeatures(db: DatabaseContext, timestamp: string): void {
         feature.prerequisite,
         feature.description,
         feature.class_level,
+        timestamp,
+        timestamp,
+      ],
+    ).lastInsertId;
+    db.exec(
+      `INSERT INTO named_feature_effects (
+         named_feature_id, sort_order, effect_kind, attack_count,
+         weapon_scope, created_at, updated_at
+       ) VALUES (?, 1, 'extra_attack', ?, ?, ?, ?)`,
+      [
+        featureId,
         feature.attack_count,
         feature.weapon_scope,
         timestamp,
@@ -628,10 +638,15 @@ function classIdsByName(db: DatabaseContext): Map<string, number> {
 function hasBundledNamedFeatures(db: DatabaseContext): boolean {
   for (const feature of parseSrdNamedExtraAttackFeatures()) {
     const stored = db.all(
-      `SELECT class_definition_id, name, rules_edition, prerequisite,
-              description, class_level, effect_kind, effect_attack_count,
-              effect_weapon_scope
-       FROM named_features WHERE content_key = ?`,
+      `SELECT feature.class_definition_id, feature.name, feature.rules_edition,
+              feature.prerequisite, feature.description, feature.class_level,
+              effect.effect_kind, effect.attack_count,
+              effect.weapon_scope
+       FROM named_features AS feature
+       LEFT JOIN named_feature_effects AS effect
+         ON effect.named_feature_id = feature.id
+        AND effect.sort_order = 1
+       WHERE feature.content_key = ?`,
       [feature.content_key],
       (row) => [
         Number(row.class_definition_id),
@@ -641,12 +656,12 @@ function hasBundledNamedFeatures(db: DatabaseContext): boolean {
         String(row.description),
         Number(row.class_level),
         row.effect_kind === null ? null : String(row.effect_kind),
-        row.effect_attack_count === null
+        row.attack_count === null
           ? null
-          : Number(row.effect_attack_count),
-        row.effect_weapon_scope === null
+          : Number(row.attack_count),
+        row.weapon_scope === null
           ? null
-          : String(row.effect_weapon_scope),
+          : String(row.weapon_scope),
       ],
     );
 

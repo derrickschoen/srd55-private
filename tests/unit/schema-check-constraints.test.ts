@@ -489,9 +489,8 @@ const martialArtsRealDie =
     );
   };
 
-// D19's two class-feature tables. Both start from a FREE-TEXT row — no
-// `effect_kind`, no payload — because that is the common case and because it is
-// the row every payload-without-a-kind case has to start from.
+// D19's two class-feature tables contain printed feature identity only. A
+// feature with no mechanical effect is now the absence of a child row.
 const subclassFeature =
   (values: Values): Write =>
   (db) => {
@@ -516,6 +515,53 @@ const namedFeature =
       prerequisite: 'Level 5+ Someclass',
       description: 'Printed feature text.',
       class_level: 5,
+      ...values,
+    });
+  };
+
+const subclassFeatureEffect =
+  (values: Values): Write =>
+  (db) => {
+    const featureId = insert(db, 'subclass_features', {
+      subclass_definition_id: newSubclass(db, newClass(db)),
+      class_level: 6,
+      sort_order: 1,
+      name: uid('Feature'),
+      description: 'Printed feature text.',
+    });
+    insert(db, 'subclass_feature_effects', {
+      subclass_feature_id: featureId,
+      sort_order: 1,
+      ...values,
+    });
+  };
+
+const namedFeatureEffect =
+  (values: Values): Write =>
+  (db) => {
+    const featureId = insert(db, 'named_features', {
+      content_key: uid('feature'),
+      class_definition_id: newClass(db),
+      name: uid('Feature'),
+      rules_edition: '2024',
+      prerequisite: 'Level 5+ Someclass',
+      description: 'Printed feature text.',
+      class_level: 5,
+    });
+    insert(db, 'named_feature_effects', {
+      named_feature_id: featureId,
+      sort_order: 1,
+      ...values,
+    });
+  };
+
+const classFeatureEffect =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'class_feature_effects', {
+      class_definition_id: newClass(db),
+      class_level: 5,
+      name: uid('Feature'),
       ...values,
     });
   };
@@ -829,6 +875,175 @@ interface ConstraintCase {
   readonly rejects: ReadonlyArray<readonly [string, Write]>;
   /** Legitimate writes that MUST get through — the over-strictness guard. */
   readonly accepts: ReadonlyArray<readonly [string, Write]>;
+}
+
+/**
+ * The three class-feature effect tables deliberately have the same payload
+ * contract. This factory is an independently authored behavioural oracle for
+ * that shared contract: every returned case attempts one illegal row and one
+ * legal boundary row. The live DDL is not read or transformed here.
+ */
+function featureEffectConstraintCases(
+  table: string,
+  effect: (values: Values) => Write,
+): readonly ConstraintCase[] {
+  return [
+    {
+      constraint: `${table}_kind_check`,
+      rejects: [['an unknown mechanical kind', effect({ effect_kind: 'extra_attacks' })]],
+      accepts: [['Extra Attack', effect({ effect_kind: 'extra_attack', attack_count: 2, weapon_scope: 'any_weapon' })]],
+    },
+    {
+      constraint: `${table}_damage_type_check`,
+      rejects: [['a damage type outside the closed mechanical set', effect({ effect_kind: 'damage_resistance', damage_type: 'Steam' })]],
+      accepts: [['a known damage type', effect({ effect_kind: 'damage_resistance', damage_type: 'Poison' })]],
+    },
+    {
+      constraint: `${table}_damage_type_kind_check`,
+      rejects: [['a damage type on an HP effect', effect({ effect_kind: 'hp_modifier', hit_points_flat: 1, damage_type: 'Fire' })]],
+      accepts: [['a typed resistance', effect({ effect_kind: 'damage_resistance', damage_type: 'Fire' })]],
+    },
+    {
+      constraint: `${table}_hit_points_kind_check`,
+      rejects: [['HP payload on a speed effect', effect({ effect_kind: 'speed', speed_bonus_feet: 5, hit_points_flat: 1 })]],
+      accepts: [['both HP payloads on one HP effect', effect({ effect_kind: 'hp_modifier', hit_points_flat: 1, hit_points_per_level: 1 })]],
+    },
+    {
+      constraint: `${table}_speed_kind_check`,
+      rejects: [['a speed payload on a resistance', effect({ effect_kind: 'damage_resistance', speed_bonus_feet: 5 })]],
+      accepts: [['a speed payload on a speed effect', effect({ effect_kind: 'speed', speed_bonus_feet: 5 })]],
+    },
+    {
+      constraint: `${table}_ability_kind_check`,
+      rejects: [['an ability on an AC bonus', effect({ effect_kind: 'armor_class_bonus', amount: 1, ability: 'dexterity' })]],
+      accepts: [['an attack ability override', effect({ effect_kind: 'attack_ability_override', ability: 'charisma', weapon_scope: 'one_bonded_weapon' })]],
+    },
+    {
+      constraint: `${table}_amount_kind_check`,
+      rejects: [['an amount on a resistance', effect({ effect_kind: 'damage_resistance', amount: 1 })]],
+      accepts: [['an amount on an AC bonus', effect({ effect_kind: 'armor_class_bonus', amount: 1 })]],
+    },
+    {
+      constraint: `${table}_maximum_kind_check`,
+      rejects: [['a maximum on an AC bonus', effect({ effect_kind: 'armor_class_bonus', amount: 1, maximum: 20 })]],
+      accepts: [['an ability increase maximum', effect({ effect_kind: 'ability_increase', ability: 'strength', amount: 1, maximum: 20 })]],
+    },
+    {
+      constraint: `${table}_base_kind_check`,
+      rejects: [['an AC base on a resistance', effect({ effect_kind: 'damage_resistance', base: 10 })]],
+      accepts: [['an AC formula base', effect({ effect_kind: 'armor_class_formula', base: 10, ability_1: 'dexterity', allows_shield: 1 })]],
+    },
+    {
+      constraint: `${table}_ability_1_kind_check`,
+      rejects: [['a formula ability on a resistance', effect({ effect_kind: 'damage_resistance', ability_1: 'dexterity' })]],
+      accepts: [['a first formula ability', effect({ effect_kind: 'armor_class_formula', base: 10, ability_1: 'dexterity', allows_shield: 1 })]],
+    },
+    {
+      constraint: `${table}_ability_2_kind_check`,
+      rejects: [['a second formula ability on a resistance', effect({ effect_kind: 'damage_resistance', ability_2: 'wisdom' })]],
+      accepts: [['a second formula ability', effect({ effect_kind: 'armor_class_formula', base: 10, ability_1: 'dexterity', ability_2: 'wisdom', allows_shield: 1 })]],
+    },
+    {
+      constraint: `${table}_allows_shield_kind_check`,
+      rejects: [['a shield flag on a resistance', effect({ effect_kind: 'damage_resistance', allows_shield: 1 })]],
+      accepts: [['a shield flag on a formula', effect({ effect_kind: 'armor_class_formula', base: 10, ability_1: 'dexterity', allows_shield: 0 })]],
+    },
+    {
+      constraint: `${table}_weapon_scope_kind_check`,
+      rejects: [['a weapon scope on an AC bonus', effect({ effect_kind: 'armor_class_bonus', amount: 1, weapon_scope: 'any_weapon' })]],
+      accepts: [['a weapon-scoped attack bonus', effect({ effect_kind: 'weapon_attack_bonus', amount: 1, weapon_scope: 'any_weapon' })]],
+    },
+    {
+      constraint: `${table}_attack_count_kind_check`,
+      rejects: [['an attack count on a resistance', effect({ effect_kind: 'damage_resistance', attack_count: 2 })]],
+      accepts: [['an Extra Attack count', effect({ effect_kind: 'extra_attack', attack_count: 2, weapon_scope: 'any_weapon' })]],
+    },
+    {
+      constraint: `${table}_hp_modifier_payload_check`,
+      rejects: [['an HP effect with neither payload', effect({ effect_kind: 'hp_modifier' })]],
+      accepts: [['a per-level HP effect', effect({ effect_kind: 'hp_modifier', hit_points_per_level: 1 })]],
+    },
+    {
+      constraint: `${table}_speed_payload_check`,
+      rejects: [['a speed effect with no speed', effect({ effect_kind: 'speed' })]],
+      accepts: [['a complete speed effect', effect({ effect_kind: 'speed', speed_bonus_feet: 5 })]],
+    },
+    {
+      constraint: `${table}_ability_increase_payload_check`,
+      rejects: [['an ability increase with no maximum', effect({ effect_kind: 'ability_increase', ability: 'strength', amount: 1 })]],
+      accepts: [['a complete ability increase', effect({ effect_kind: 'ability_increase', ability: 'strength', amount: 1, maximum: 20 })]],
+    },
+    {
+      constraint: `${table}_armor_class_bonus_payload_check`,
+      rejects: [['an AC bonus with no amount', effect({ effect_kind: 'armor_class_bonus' })]],
+      accepts: [['a complete AC bonus', effect({ effect_kind: 'armor_class_bonus', amount: 1 })]],
+    },
+    {
+      constraint: `${table}_armor_class_formula_payload_check`,
+      rejects: [['an AC formula with no shield rule', effect({ effect_kind: 'armor_class_formula', base: 10, ability_1: 'dexterity' })]],
+      accepts: [['a complete AC formula', effect({ effect_kind: 'armor_class_formula', base: 10, ability_1: 'dexterity', allows_shield: 1 })]],
+    },
+    {
+      constraint: `${table}_attack_ability_override_payload_check`,
+      rejects: [['an ability override with no weapon scope', effect({ effect_kind: 'attack_ability_override', ability: 'charisma' })]],
+      accepts: [['a complete ability override', effect({ effect_kind: 'attack_ability_override', ability: 'charisma', weapon_scope: 'one_bonded_weapon' })]],
+    },
+    {
+      constraint: `${table}_weapon_attack_bonus_payload_check`,
+      rejects: [['a weapon attack bonus with no scope', effect({ effect_kind: 'weapon_attack_bonus', amount: 1 })]],
+      accepts: [['a complete weapon attack bonus', effect({ effect_kind: 'weapon_attack_bonus', amount: 1, weapon_scope: 'any_weapon' })]],
+    },
+    {
+      constraint: `${table}_weapon_damage_bonus_payload_check`,
+      rejects: [['a weapon damage bonus with no amount', effect({ effect_kind: 'weapon_damage_bonus', weapon_scope: 'any_weapon' })]],
+      accepts: [['a complete weapon damage bonus', effect({ effect_kind: 'weapon_damage_bonus', amount: 1, weapon_scope: 'any_weapon' })]],
+    },
+    {
+      constraint: `${table}_extra_attack_payload_check`,
+      rejects: [['Extra Attack with no count', effect({ effect_kind: 'extra_attack', weapon_scope: 'any_weapon' })]],
+      accepts: [['a complete Extra Attack effect', effect({ effect_kind: 'extra_attack', attack_count: 2, weapon_scope: 'any_weapon' })]],
+    },
+    {
+      constraint: `${table}_ability_check`,
+      rejects: [['an unknown ability', effect({ effect_kind: 'attack_ability_override', ability: 'luck', weapon_scope: 'any_weapon' })]],
+      accepts: [['a known ability', effect({ effect_kind: 'attack_ability_override', ability: 'wisdom', weapon_scope: 'any_weapon' })]],
+    },
+    {
+      constraint: `${table}_amount_check`,
+      rejects: [['zero, which changes no number', effect({ effect_kind: 'armor_class_bonus', amount: 0 })]],
+      accepts: [['a negative amount', effect({ effect_kind: 'armor_class_bonus', amount: -1 })]],
+    },
+    {
+      constraint: `${table}_maximum_check`,
+      rejects: [['a maximum above 30', effect({ effect_kind: 'ability_increase', ability: 'strength', amount: 1, maximum: 31 })]],
+      accepts: [['the upper bound 30', effect({ effect_kind: 'ability_increase', ability: 'strength', amount: 1, maximum: 30 })]],
+    },
+    {
+      constraint: `${table}_base_check`,
+      rejects: [['a zero AC base', effect({ effect_kind: 'armor_class_formula', base: 0, ability_1: 'dexterity', allows_shield: 1 })]],
+      accepts: [['the lower bound one', effect({ effect_kind: 'armor_class_formula', base: 1, ability_1: 'dexterity', allows_shield: 1 })]],
+    },
+    {
+      constraint: `${table}_ability_1_check`,
+      rejects: [['an unknown first formula ability', effect({ effect_kind: 'armor_class_formula', base: 10, ability_1: 'luck', allows_shield: 1 })]],
+      accepts: [['a known first formula ability', effect({ effect_kind: 'armor_class_formula', base: 10, ability_1: 'constitution', allows_shield: 1 })]],
+    },
+    {
+      constraint: `${table}_ability_2_check`,
+      rejects: [['an unknown second formula ability', effect({ effect_kind: 'armor_class_formula', base: 10, ability_1: 'dexterity', ability_2: 'luck', allows_shield: 1 })]],
+      accepts: [['a known second formula ability', effect({ effect_kind: 'armor_class_formula', base: 10, ability_1: 'dexterity', ability_2: 'wisdom', allows_shield: 1 })]],
+    },
+    {
+      constraint: `${table}_weapon_scope_check`,
+      rejects: [['an unknown weapon scope', effect({ effect_kind: 'extra_attack', attack_count: 2, weapon_scope: 'pact_weapon' })]],
+      accepts: [['one bonded weapon', effect({ effect_kind: 'extra_attack', attack_count: 2, weapon_scope: 'one_bonded_weapon' })]],
+    },
+    {
+      constraint: `${table}_attack_count_check`,
+      rejects: [['one attack, which is no Extra Attack', effect({ effect_kind: 'extra_attack', attack_count: 1, weapon_scope: 'any_weapon' })]],
+      accepts: [['two attacks', effect({ effect_kind: 'extra_attack', attack_count: 2, weapon_scope: 'any_weapon' })]],
+    },
+  ];
 }
 
 const CONSTRAINT_CASES: readonly ConstraintCase[] = [
@@ -1723,6 +1938,7 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
       ['damage_resistance', speciesTemplateTraitEffect({ effect_kind: 'damage_resistance', damage_type: 'Poison' })],
       ['hp_modifier', speciesTemplateTraitEffect({ effect_kind: 'hp_modifier', hit_points_flat: 1 })],
       ['speed', speciesTemplateTraitEffect({ effect_kind: 'speed', speed_bonus_feet: 5 })],
+      ['armor_class_formula', speciesTemplateTraitEffect({ effect_kind: 'armor_class_formula', base: 13, ability_1: 'dexterity', allows_shield: 1 })],
     ],
   },
   {
@@ -1775,6 +1991,31 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     ],
   },
   {
+    constraint: 'species_template_trait_effects_base_kind_check',
+    rejects: [['an AC base on a resistance', speciesTemplateTraitEffect({ effect_kind: 'damage_resistance', base: 13 })]],
+    accepts: [['an AC formula base', speciesTemplateTraitEffect({ effect_kind: 'armor_class_formula', base: 13, ability_1: 'dexterity', allows_shield: 1 })]],
+  },
+  {
+    constraint: 'species_template_trait_effects_ability_1_kind_check',
+    rejects: [['a formula ability on a resistance', speciesTemplateTraitEffect({ effect_kind: 'damage_resistance', ability_1: 'dexterity' })]],
+    accepts: [['a first formula ability', speciesTemplateTraitEffect({ effect_kind: 'armor_class_formula', base: 13, ability_1: 'dexterity', allows_shield: 1 })]],
+  },
+  {
+    constraint: 'species_template_trait_effects_ability_2_kind_check',
+    rejects: [['a second formula ability on a resistance', speciesTemplateTraitEffect({ effect_kind: 'damage_resistance', ability_2: 'wisdom' })]],
+    accepts: [['a second formula ability', speciesTemplateTraitEffect({ effect_kind: 'armor_class_formula', base: 10, ability_1: 'dexterity', ability_2: 'wisdom', allows_shield: 1 })]],
+  },
+  {
+    constraint: 'species_template_trait_effects_allows_shield_kind_check',
+    rejects: [['a shield flag on a resistance', speciesTemplateTraitEffect({ effect_kind: 'damage_resistance', allows_shield: 1 })]],
+    accepts: [['a formula that forbids a shield', speciesTemplateTraitEffect({ effect_kind: 'armor_class_formula', base: 13, ability_1: 'dexterity', allows_shield: 0 })]],
+  },
+  {
+    constraint: 'species_template_trait_effects_weapon_scope_kind_check',
+    rejects: [['a weapon scope on a species formula', speciesTemplateTraitEffect({ effect_kind: 'armor_class_formula', base: 13, ability_1: 'dexterity', allows_shield: 1, weapon_scope: 'any_weapon' })]],
+    accepts: [['a species formula with no weapon scope', speciesTemplateTraitEffect({ effect_kind: 'armor_class_formula', base: 13, ability_1: 'dexterity', allows_shield: 1, weapon_scope: null })]],
+  },
+  {
     constraint: 'species_template_trait_effects_hp_modifier_payload_check',
     rejects: [
       // Without this the derivation returns 0, which is indistinguishable from
@@ -1798,6 +2039,34 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
       ['a speed effect carrying its bonus', speciesTemplateTraitEffect({ effect_kind: 'speed', speed_bonus_feet: 10 })],
       ['a resistance, which promises no number', speciesTemplateTraitEffect({ effect_kind: 'damage_resistance' })],
     ],
+  },
+  {
+    constraint: 'species_template_trait_effects_armor_class_formula_payload_check',
+    rejects: [['a formula with no shield rule', speciesTemplateTraitEffect({ effect_kind: 'armor_class_formula', base: 13, ability_1: 'dexterity' })]],
+    accepts: [['a complete species formula', speciesTemplateTraitEffect({ effect_kind: 'armor_class_formula', base: 13, ability_1: 'dexterity', allows_shield: 1 })]],
+  },
+  {
+    constraint: 'species_template_trait_effects_base_check',
+    rejects: [['a zero AC base', speciesTemplateTraitEffect({ effect_kind: 'armor_class_formula', base: 0, ability_1: 'dexterity', allows_shield: 1 })]],
+    accepts: [['the lower bound one', speciesTemplateTraitEffect({ effect_kind: 'armor_class_formula', base: 1, ability_1: 'dexterity', allows_shield: 1 })]],
+  },
+  {
+    constraint: 'species_template_trait_effects_ability_1_check',
+    rejects: [['an unknown first ability', speciesTemplateTraitEffect({ effect_kind: 'armor_class_formula', base: 13, ability_1: 'luck', allows_shield: 1 })]],
+    accepts: [['a known first ability', speciesTemplateTraitEffect({ effect_kind: 'armor_class_formula', base: 13, ability_1: 'constitution', allows_shield: 1 })]],
+  },
+  {
+    constraint: 'species_template_trait_effects_ability_2_check',
+    rejects: [['an unknown second ability', speciesTemplateTraitEffect({ effect_kind: 'armor_class_formula', base: 10, ability_1: 'dexterity', ability_2: 'luck', allows_shield: 1 })]],
+    accepts: [['a known second ability', speciesTemplateTraitEffect({ effect_kind: 'armor_class_formula', base: 10, ability_1: 'dexterity', ability_2: 'wisdom', allows_shield: 1 })]],
+  },
+  {
+    constraint: 'species_template_trait_effects_weapon_scope_check',
+    // No current species template kind may carry a weapon scope, so the kind
+    // check is the rejecting guard and the vocabulary check's reachable state
+    // is NULL. This accept pins that the domain check does not over-reject it.
+    rejects: [],
+    accepts: [['the required NULL scope', speciesTemplateTraitEffect({ effect_kind: 'damage_resistance', weapon_scope: null })]],
   },
   {
     constraint: 'species_template_trait_effects_no_ability_increase_check',
@@ -2348,104 +2617,26 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
       ['a REAL 8.0, which affinity converts before the CHECK runs', martialArtsRealDie('8.0')],
     ],
   },
-  // --- D19: subclass features ---------------------------------------------
+  // --- D19 and D72: feature identity and mechanical child rows -------------
   {
     constraint: 'subclass_features_class_level_check',
     rejects: [
-      ['level 0, which a `class_level <= ?` resolution would always win', subclassFeature({ class_level: 0 })],
+      ['level 0, which a class-level resolution would always win', subclassFeature({ class_level: 0 })],
       ['level 21', subclassFeature({ class_level: 21 })],
     ],
     accepts: [
-      // The owner's own case: a subclass that grants Extra Attack at level 6.
       ['the level 6 grant D19 was raised about', subclassFeature({ class_level: 6 })],
-      ['level 3, where a 2024 subclass is taken', subclassFeature({ class_level: 3 })],
       ['level 20', subclassFeature({ class_level: 20 })],
     ],
   },
   {
     constraint: 'subclass_features_sort_order_check',
     rejects: [
-      ['a zero order, which printed order never starts at', subclassFeature({ sort_order: 0 })],
-      ['a negative order', subclassFeature({ sort_order: -1 })],
-      ['a text order', subclassFeature({ sort_order: 'first' })],
+      ['a zero printed order', subclassFeature({ sort_order: 0 })],
+      ['a text printed order', subclassFeature({ sort_order: 'first' })],
     ],
     accepts: [['the first printed feature', subclassFeature({ sort_order: 1 })]],
   },
-  {
-    constraint: 'subclass_features_effect_kind_check',
-    rejects: [
-      ['a kind outside the closed set', subclassFeature({ effect_kind: 'extra_attacks' })],
-      ['an empty kind', subclassFeature({ effect_kind: '' })],
-      // The species vocabulary is a different closed set on a different table,
-      // and a member of one is not a member of the other.
-      ['a member of the species trait vocabulary', subclassFeature({ effect_kind: 'hp_modifier' })],
-    ],
-    accepts: [
-      // THE DEFAULT CASE, NOT AN EDGE: most subclass features are text.
-      ['the NULL a text-only feature carries', subclassFeature({ effect_kind: null })],
-      ['extra_attack, with both halves of its payload', subclassFeature({ effect_kind: 'extra_attack', effect_attack_count: 2, effect_weapon_scope: 'any_weapon' })],
-    ],
-  },
-  {
-    constraint: 'subclass_features_effect_weapon_scope_check',
-    rejects: [
-      ['a scope outside the closed set', subclassFeature({ effect_kind: 'extra_attack', effect_attack_count: 2, effect_weapon_scope: 'pact_weapon' })],
-      ['an empty scope', subclassFeature({ effect_kind: 'extra_attack', effect_attack_count: 2, effect_weapon_scope: '' })],
-    ],
-    accepts: [
-      ['any_weapon', subclassFeature({ effect_kind: 'extra_attack', effect_attack_count: 2, effect_weapon_scope: 'any_weapon' })],
-      ['one_bonded_weapon', subclassFeature({ effect_kind: 'extra_attack', effect_attack_count: 2, effect_weapon_scope: 'one_bonded_weapon' })],
-    ],
-  },
-  {
-    constraint: 'subclass_features_effect_attack_count_check',
-    rejects: [
-      // A row carries this effect BECAUSE the feature granted Extra Attack, and
-      // the least that can mean is two attacks.
-      ['a single attack, which is the absence of the feature', subclassFeature({ effect_kind: 'extra_attack', effect_attack_count: 1, effect_weapon_scope: 'any_weapon' })],
-      ['zero attacks', subclassFeature({ effect_kind: 'extra_attack', effect_attack_count: 0, effect_weapon_scope: 'any_weapon' })],
-      ['a text attack count', subclassFeature({ effect_kind: 'extra_attack', effect_attack_count: 'two', effect_weapon_scope: 'any_weapon' })],
-    ],
-    accepts: [
-      ['the NULL a text-only feature carries', subclassFeature({ effect_attack_count: null })],
-      ['two attacks', subclassFeature({ effect_kind: 'extra_attack', effect_attack_count: 2, effect_weapon_scope: 'any_weapon' })],
-    ],
-  },
-  {
-    constraint: 'subclass_features_attack_count_kind_check',
-    rejects: [
-      // The `IS` limb doing its work: written with `=`, this CHECK would
-      // evaluate to NULL for a text-only feature and SQLite would PASS it,
-      // admitting exactly the orphaned payload it exists to refuse.
-      ['an attack count on a free-text feature', subclassFeature({ effect_kind: null, effect_attack_count: 2 })],
-    ],
-    accepts: [
-      ['a free-text feature with no count', subclassFeature({ effect_kind: null, effect_attack_count: null })],
-    ],
-  },
-  {
-    constraint: 'subclass_features_weapon_scope_kind_check',
-    rejects: [
-      ['a weapon scope on a free-text feature', subclassFeature({ effect_kind: null, effect_weapon_scope: 'any_weapon' })],
-    ],
-    accepts: [
-      ['a free-text feature with no scope', subclassFeature({ effect_kind: null, effect_weapon_scope: null })],
-    ],
-  },
-  {
-    constraint: 'subclass_features_extra_attack_payload_check',
-    rejects: [
-      ['an extra_attack effect with no count at all', subclassFeature({ effect_kind: 'extra_attack', effect_weapon_scope: 'any_weapon' })],
-      // A scope-less grant would have to be defaulted to `any_weapon` by every
-      // reader, which silently WIDENS a one-weapon grant to all of them.
-      ['an extra_attack effect with no weapon scope', subclassFeature({ effect_kind: 'extra_attack', effect_attack_count: 2 })],
-      ['an extra_attack effect with neither', subclassFeature({ effect_kind: 'extra_attack' })],
-    ],
-    accepts: [
-      ['an extra_attack effect carrying both', subclassFeature({ effect_kind: 'extra_attack', effect_attack_count: 3, effect_weapon_scope: 'one_bonded_weapon' })],
-    ],
-  },
-  // --- D19: named features -------------------------------------------------
   {
     constraint: 'named_features_class_level_check',
     rejects: [
@@ -2453,69 +2644,41 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
       ['level 21', namedFeature({ class_level: 21 })],
     ],
     accepts: [
-      // The two bundled rows: Thirsting Blade at 5, Devouring Blade at 12.
-      ['the level 5 prerequisite', namedFeature({ class_level: 5 })],
-      ['the level 12 prerequisite', namedFeature({ class_level: 12 })],
+      ['Thirsting Blade at level 5', namedFeature({ class_level: 5 })],
+      ['Devouring Blade at level 12', namedFeature({ class_level: 12 })],
     ],
   },
+  ...featureEffectConstraintCases(
+    'subclass_feature_effects',
+    subclassFeatureEffect,
+  ),
   {
-    constraint: 'named_features_effect_kind_check',
+    constraint: 'subclass_feature_effects_sort_order_check',
     rejects: [
-      ['a kind outside the closed set', namedFeature({ effect_kind: 'invocation' })],
-      ['an empty kind', namedFeature({ effect_kind: '' })],
+      ['a zero child order', subclassFeatureEffect({ sort_order: 0, effect_kind: 'extra_attack', attack_count: 2, weapon_scope: 'any_weapon' })],
+      ['a text child order', subclassFeatureEffect({ sort_order: 'first', effect_kind: 'extra_attack', attack_count: 2, weapon_scope: 'any_weapon' })],
     ],
-    accepts: [
-      ['the NULL a text-only feature carries', namedFeature({ effect_kind: null })],
-      ['extra_attack, with both halves of its payload', namedFeature({ effect_kind: 'extra_attack', effect_attack_count: 2, effect_weapon_scope: 'one_bonded_weapon' })],
-    ],
+    accepts: [['the first effect', subclassFeatureEffect({ sort_order: 1, effect_kind: 'extra_attack', attack_count: 2, weapon_scope: 'any_weapon' })]],
   },
+  ...featureEffectConstraintCases('named_feature_effects', namedFeatureEffect),
   {
-    constraint: 'named_features_effect_weapon_scope_check',
+    constraint: 'named_feature_effects_sort_order_check',
     rejects: [
-      ['a scope outside the closed set', namedFeature({ effect_kind: 'extra_attack', effect_attack_count: 2, effect_weapon_scope: 'pact' })],
+      ['a zero child order', namedFeatureEffect({ sort_order: 0, effect_kind: 'extra_attack', attack_count: 2, weapon_scope: 'any_weapon' })],
+      ['a text child order', namedFeatureEffect({ sort_order: 'first', effect_kind: 'extra_attack', attack_count: 2, weapon_scope: 'any_weapon' })],
     ],
-    accepts: [
-      ["Thirsting Blade's own scope", namedFeature({ effect_kind: 'extra_attack', effect_attack_count: 2, effect_weapon_scope: 'one_bonded_weapon' })],
-      ['an unscoped named feature', namedFeature({ effect_kind: 'extra_attack', effect_attack_count: 2, effect_weapon_scope: 'any_weapon' })],
-    ],
+    accepts: [['the first effect', namedFeatureEffect({ sort_order: 1, effect_kind: 'extra_attack', attack_count: 2, weapon_scope: 'any_weapon' })]],
   },
+  ...featureEffectConstraintCases('class_feature_effects', classFeatureEffect),
   {
-    constraint: 'named_features_effect_attack_count_check',
+    constraint: 'class_feature_effects_class_level_check',
     rejects: [
-      ['a single attack, which is the absence of the feature', namedFeature({ effect_kind: 'extra_attack', effect_attack_count: 1, effect_weapon_scope: 'one_bonded_weapon' })],
-      ['a text attack count', namedFeature({ effect_kind: 'extra_attack', effect_attack_count: 'three', effect_weapon_scope: 'one_bonded_weapon' })],
+      ['level 0', classFeatureEffect({ class_level: 0, effect_kind: 'armor_class_bonus', amount: 1 })],
+      ['level 21', classFeatureEffect({ class_level: 21, effect_kind: 'armor_class_bonus', amount: 1 })],
     ],
     accepts: [
-      ['the NULL a text-only feature carries', namedFeature({ effect_attack_count: null })],
-      ["Devouring Blade's three", namedFeature({ effect_kind: 'extra_attack', effect_attack_count: 3, effect_weapon_scope: 'one_bonded_weapon' })],
-    ],
-  },
-  {
-    constraint: 'named_features_attack_count_kind_check',
-    rejects: [
-      ['an attack count on a free-text feature', namedFeature({ effect_kind: null, effect_attack_count: 2 })],
-    ],
-    accepts: [
-      ['a free-text feature with no count', namedFeature({ effect_kind: null, effect_attack_count: null })],
-    ],
-  },
-  {
-    constraint: 'named_features_weapon_scope_kind_check',
-    rejects: [
-      ['a weapon scope on a free-text feature', namedFeature({ effect_kind: null, effect_weapon_scope: 'one_bonded_weapon' })],
-    ],
-    accepts: [
-      ['a free-text feature with no scope', namedFeature({ effect_kind: null, effect_weapon_scope: null })],
-    ],
-  },
-  {
-    constraint: 'named_features_extra_attack_payload_check',
-    rejects: [
-      ['an extra_attack effect with no count at all', namedFeature({ effect_kind: 'extra_attack', effect_weapon_scope: 'one_bonded_weapon' })],
-      ['an extra_attack effect with no weapon scope', namedFeature({ effect_kind: 'extra_attack', effect_attack_count: 2 })],
-    ],
-    accepts: [
-      ['Thirsting Blade, whole', namedFeature({ effect_kind: 'extra_attack', effect_attack_count: 2, effect_weapon_scope: 'one_bonded_weapon' })],
+      ['level 1', classFeatureEffect({ class_level: 1, effect_kind: 'armor_class_bonus', amount: 1 })],
+      ['level 20', classFeatureEffect({ class_level: 20, effect_kind: 'armor_class_bonus', amount: 1 })],
     ],
   },
   // --- the four stored sheet inputs ---------------------------------------
@@ -2885,13 +3048,19 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
      * a later change that made the column nullable again would have to delete
      * this test rather than merely watch it keep passing.
      */
-    it('refuses a NULL effect_kind on both effect tables, by NOT NULL', () => {
+    it('refuses a NULL effect_kind on every effect table, by NOT NULL', () => {
       for (const [table, write] of [
         [
           'species_template_trait_effects',
           speciesTemplateTraitEffect({ effect_kind: null }),
         ],
         ['character_effects', characterEffect({ effect_kind: null })],
+        [
+          'subclass_feature_effects',
+          subclassFeatureEffect({ effect_kind: null }),
+        ],
+        ['named_feature_effects', namedFeatureEffect({ effect_kind: null })],
+        ['class_feature_effects', classFeatureEffect({ effect_kind: null })],
       ] as const) {
         expect(caughtErrorMessage(() => write(db)), table).toContain(
           'SQLITE_CONSTRAINT_NOTNULL',

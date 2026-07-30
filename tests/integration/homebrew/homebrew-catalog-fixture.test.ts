@@ -338,11 +338,16 @@ describe('the College of the Long Road imports and reaches the sheet', () => {
     // and is not authored in the document at all — this is where that is proved.
     expect(
       db.allRaw(
-        `SELECT sort_order, class_level, name, description,
-                effect_kind, effect_attack_count, effect_weapon_scope
-         FROM subclass_features
-         WHERE subclass_definition_id = ?
-         ORDER BY sort_order`,
+        `SELECT feature.sort_order, feature.class_level, feature.name,
+                feature.description, effect.effect_kind,
+                effect.attack_count AS effect_attack_count,
+                effect.weapon_scope AS effect_weapon_scope
+         FROM subclass_features AS feature
+         LEFT JOIN subclass_feature_effects AS effect
+           ON effect.subclass_feature_id = feature.id
+          AND effect.sort_order = 1
+         WHERE feature.subclass_definition_id = ?
+         ORDER BY feature.sort_order`,
         [subclassId(db)],
       ),
     ).toEqual([

@@ -12,6 +12,11 @@ import {
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import { characterLevel } from '../rules/character-level';
+import {
+  clearGeneratedFeatureEffects,
+  syncAutomaticClassEffects,
+  syncAutomaticSubclassEffects,
+} from '../rules/generated-feature-effects';
 import type {
   RestoreSnapshotCommand as RestoreSnapshotPayload,
   UpdateClassCommand as UpdateClassPayload,
@@ -138,6 +143,13 @@ export function syncClassSourceState(
   }
 
   generator.generateForSource(sourceId);
+  syncAutomaticClassEffects(
+    db,
+    characterId,
+    sourceId,
+    classId,
+    level,
+  );
   syncSubclassSources(db, generator, characterId, classId, subclassId, level);
 }
 
@@ -182,6 +194,7 @@ export function syncSubclassSources(
        WHERE id = ?`,
       [timestamp, sourceId],
     );
+    clearGeneratedFeatureEffects(db, characterId, sourceId);
     generator.generateForSource(sourceId);
   }
   if (subclassId === null) {
@@ -242,6 +255,13 @@ export function syncSubclassSources(
     );
   }
   generator.generateForSource(sourceId);
+  syncAutomaticSubclassEffects(
+    db,
+    characterId,
+    sourceId,
+    subclassId,
+    level,
+  );
 }
 
 export class UpdateClassCommand {
