@@ -204,7 +204,8 @@ select:disabled {
   background: #fff1ef;
 }
 
-.placeholder-banner {
+.placeholder-banner,
+.planner-preview-warning {
   max-width: 112rem;
   margin: 1rem auto 0;
   border: 1px solid #b7791f;

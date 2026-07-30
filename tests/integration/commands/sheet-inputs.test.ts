@@ -8,6 +8,7 @@ import type {
   ArmorFields,
   CharacterCommandPayload,
 } from '../../../src/domain/command-contracts';
+import { CharacterSheetBuilder } from '../../../src/queries/character-sheet-builder';
 import { openTestDatabase } from '../../helpers/open-db';
 
 const key = 'S1-sheet-command-integrity-key';
@@ -84,6 +85,25 @@ describe('sheet input commands', () => {
               strength_requirement, stealth_disadvantage, notes
          FROM character_armor WHERE character_id = ? ORDER BY slot`,
       [characterId],
+    );
+  }
+
+  function monkFormula(): void {
+    const sourceId = db.exec(
+      `INSERT INTO character_source_instances (
+         character_id, instance_uuid, source_type, display_name
+       ) VALUES (?, ?, 'class', 'Monk')`,
+      [characterId, crypto.randomUUID()],
+    ).lastInsertId;
+    db.exec(
+      `INSERT INTO character_effects (
+         character_id, sort_order, effect_kind, base, ability_1, ability_2,
+         allows_shield, source_instance_id, label
+       ) VALUES (
+         ?, 1, 'armor_class_formula', 10, 'dexterity', 'wisdom', 0, ?,
+         'Monk Unarmored Defense'
+       )`,
+      [characterId, sourceId],
     );
   }
 
@@ -207,6 +227,92 @@ describe('sheet input commands', () => {
     expect(armorRows().map((row) => row.slot)).toEqual(['shield', 'worn']);
     await run({ type: 'set_armor', slot: 'shield', armor: null });
     expect(armorRows().map((row) => row.slot)).toEqual(['worn']);
+  });
+
+  it('warns only when a pending equip strictly reduces Armor Class, without persisting the preview', async () => {
+    db.exec(
+      'UPDATE characters SET dexterity = 16, wisdom = 16 WHERE id = ?',
+      [characterId],
+    );
+    monkFormula();
+    const operation = operationUuid();
+    const result = await executor.execute({
+      character_id: characterId,
+      operation_uuid: operation,
+      expected_revision: 0,
+      command: {
+        type: 'set_armor',
+        slot: 'shield',
+        armor: armor({
+          name: 'Shell Shield',
+          category: 'shield',
+          armor_class: 2,
+          dex_bonus: 'none',
+          dex_bonus_max: null,
+          strength_requirement: null,
+          stealth_disadvantage: false,
+        }),
+      },
+    });
+
+    expect(result.preview_warnings).toEqual([
+      {
+        code: 'armor_class_reduced',
+        message:
+          'Equipping Shell Shield reduces Armor Class from 16 to 15.',
+        item_name: 'Shell Shield',
+        previous_armor_class: 16,
+        new_armor_class: 15,
+      },
+    ]);
+    const sheet = new CharacterSheetBuilder(db).build(characterId);
+    expect(sheet.armor_class.value).toBe(15);
+    expect(sheet.armor_class.excluded.map((entry) => entry.formula.label))
+      .toContain('Monk Unarmored Defense');
+
+    const replay = await executor.execute({
+      character_id: characterId,
+      operation_uuid: operation,
+      expected_revision: 999,
+      command: {
+        type: 'update_ability',
+        ability: 'wisdom',
+        score: 20,
+      },
+    });
+    expect(replay.idempotent_replay).toBe(true);
+    expect(replay.preview_warnings).toBeUndefined();
+  });
+
+  it('does not warn on an AC tie even when equipping flips the winning formula', async () => {
+    db.exec(
+      'UPDATE characters SET dexterity = 16, wisdom = 14 WHERE id = ?',
+      [characterId],
+    );
+    monkFormula();
+
+    const result = await run({
+      type: 'set_armor',
+      slot: 'shield',
+      armor: armor({
+        name: 'Shell Shield',
+        category: 'shield',
+        armor_class: 2,
+        dex_bonus: 'none',
+        dex_bonus_max: null,
+        strength_requirement: null,
+        stealth_disadvantage: false,
+      }),
+    });
+
+    // Monk is 15 before. The shield excludes it, then the 13-point floor plus
+    // the shield is also 15. The source changed; the number did not.
+    expect(result.preview_warnings).toBeUndefined();
+    const sheet = new CharacterSheetBuilder(db).build(characterId);
+    expect(sheet.armor_class.value).toBe(15);
+    expect(sheet.armor_class.winner.label).toBe('Unarmoured');
+    expect(sheet.armor_class.excluded.map((entry) => entry.formula.label))
+      .toContain('Monk Unarmored Defense');
   });
 
   it('accepts a shield recorded in the worn slot, because the sheet warns about it', async () => {

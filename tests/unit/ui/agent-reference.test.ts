@@ -729,13 +729,16 @@ describe('planner build reference JSON block', () => {
     // `character_hit_point_rolls` and `class_sheet_traits.hit_die` for hit
     // points, `character_armor` for Armor Class, `character_skill_proficiencies`
     // for skills, `class_saving_throw_proficiencies` for saves.
-    for (const concept of ['hit points', 'saving throw proficiencies']) {
+    for (const concept of [
+      'hit points',
+      'armour class',
+      'saving throw proficiencies',
+    ]) {
       expect(stateOf(concept)).toBe('modelled');
     }
     // Recorded and PARTLY derived — the note carries which half is which.
     for (const concept of [
       'hit dice',
-      'armour class',
       'skills',
       'class features',
       'species traits',

@@ -1,5 +1,12 @@
 import { freeTextSpan } from '../../free-text';
-import type { CharacterSheet } from '../../../queries/character-sheet-builder';
+import type {
+  CharacterSheet,
+  SheetArmorClassFormula,
+} from '../../../queries/character-sheet-builder';
+import type {
+  ArmorClassExclusionReason,
+  ArmorClassSourceCategory,
+} from '../../../rules/sheet';
 import type { WeaponProficiencyVerdict } from '../../../rules/multiclass-proficiency';
 
 /**
@@ -87,6 +94,126 @@ function numberRow(
   };
 }
 
+function armorClassSourceText(source: ArmorClassSourceCategory): string {
+  switch (source) {
+    case 'worn_armor':
+      return 'worn armour';
+    case 'species':
+      return 'species';
+    case 'subclass':
+      return 'subclass';
+    case 'class':
+      return 'class';
+    case 'feat':
+      return 'feat';
+    case 'background':
+      return 'background';
+    case 'item':
+      return 'item';
+    case 'weapon':
+      return 'weapon';
+    case 'manual':
+      return 'manual or default';
+  }
+}
+
+function armorClassFormulaCells(
+  formula: SheetArmorClassFormula,
+): SheetCell[] {
+  return [
+    { text: formula.label, free_text: true },
+    { text: ` (${formula.expression})` },
+  ];
+}
+
+function armorClassExclusionText(
+  reason: ArmorClassExclusionReason,
+): string {
+  switch (reason.kind) {
+    case 'wearing_armor':
+      return ' does not apply while you are wearing armour.';
+    case 'shield_not_allowed':
+      return ' does not apply while you carry a shield.';
+  }
+}
+
+function armorClassRows(sheet: CharacterSheet): SheetRow[] {
+  const armorClass = sheet.armor_class;
+  const winner = armorClass.winner;
+  const rows: SheetRow[] = [
+    {
+      id: 'armor_class:base',
+      label: plain('Armor Class base'),
+      value: winner.total === null ? null : String(winner.total),
+      detail: [
+        ...armorClassFormulaCells(winner),
+        {
+          text:
+            ` is the winning eligible formula. Source category: ` +
+            `${armorClassSourceText(winner.source)}.`,
+        },
+      ],
+    },
+  ];
+  armorClass.shields.forEach((shield, index) => {
+    rows.push({
+      id: `armor_class:shield:${String(index)}`,
+      label: plain('Shield contribution'),
+      value: signed(shield.amount),
+      detail: [
+        { text: shield.label, free_text: true },
+        { text: ' applies after the winning base is chosen.' },
+      ],
+    });
+  });
+  armorClass.bonuses.forEach((bonus, index) => {
+    rows.push({
+      id: `armor_class:bonus:${String(index)}`,
+      label: plain('Armor Class effect'),
+      value: signed(bonus.amount),
+      detail: [
+        { text: bonus.label, free_text: true },
+        { text: ' applies after the winning base is chosen.' },
+      ],
+    });
+  });
+  armorClass.excluded.forEach((excluded, index) => {
+    rows.push({
+      id: `armor_class:excluded:${String(index)}`,
+      label: plain('Armor Class formula excluded'),
+      value: null,
+      detail: [
+        ...armorClassFormulaCells(excluded.formula),
+        {
+          text: armorClassExclusionText(excluded.reason),
+        },
+      ],
+    });
+  });
+  armorClass.tie_break?.losers.forEach((loser, index) => {
+    const tieWinner = armorClass.tie_break?.winner;
+    if (tieWinner === undefined) {
+      throw new Error('Armor Class tie has no winner.');
+    }
+    rows.push({
+      id: `armor_class:tie:${String(index)}`,
+      label: plain('Armor Class tie resolved'),
+      value: tieWinner.total === null ? null : String(tieWinner.total),
+      detail: [
+        ...armorClassFormulaCells(tieWinner),
+        { text: ' won over ' },
+        ...armorClassFormulaCells(loser),
+        {
+          text:
+            '. Both produced the same base; source precedence, then ' +
+            'alphabetical label, broke the tie.',
+        },
+      ],
+    });
+  });
+  return rows;
+}
+
 /**
  * The readable projection: every number on the sheet as a labelled row.
  *
@@ -172,6 +299,7 @@ export function sheetSections(sheet: CharacterSheet): readonly SheetSection[] {
     });
   }
   core.push(numberRow(sheet.armor_class, false));
+  core.push(...armorClassRows(sheet));
   core.push(numberRow(sheet.initiative, true));
   core.push(numberRow(sheet.passive_perception, false));
   sections.push({ caption: 'Core numbers', rows: core });
@@ -394,6 +522,38 @@ export function sheetSections(sheet: CharacterSheet): readonly SheetSection[] {
       ],
     });
   }
+  if (sheet.items.length === 0) {
+    recorded.push({
+      id: 'item:none',
+      label: plain('Items with mechanical effects'),
+      value: null,
+      detail: plain(
+        'None recorded. General possessions are not itemised on this sheet.',
+      ),
+    });
+  }
+  for (const [index, item] of sheet.items.entries()) {
+    const state = item.requires_attunement
+      ? item.attuned
+        ? 'Requires attunement; attuned, so its effects apply.'
+        : 'Requires attunement; not attuned, so its effects do not apply.'
+      : 'Does not require attunement; its effects apply.';
+    recorded.push({
+      id: `item:${String(index)}`,
+      label: plain('Item'),
+      value: null,
+      detail: [
+        { text: item.name, free_text: true },
+        { text: ` — ${state}` },
+        ...(item.description === null
+          ? []
+          : [
+              { text: ' ' },
+              { text: item.description, free_text: true as const },
+            ]),
+      ],
+    });
+  }
   if (sheet.hit_point_rolls.length === 0) {
     recorded.push({
       id: 'hit_point_roll:none',
@@ -502,6 +662,27 @@ export function sheetFacts(sheet: CharacterSheet): Record<string, unknown> {
     hit_point_maximum: sheet.hit_points.value,
     species_hit_points: sheet.species_hit_points?.value ?? 0,
     armor_class: sheet.armor_class.value,
+    armor_class_resolution: {
+      winner: {
+        source: sheet.armor_class.winner.source,
+        expression: sheet.armor_class.winner.expression,
+        total: sheet.armor_class.winner.total,
+      },
+      shields: sheet.armor_class.shields.map((shield) => shield.amount),
+      bonuses: sheet.armor_class.bonuses.map((bonus) => bonus.amount),
+      excluded: sheet.armor_class.excluded.map((excluded) => ({
+        source: excluded.formula.source,
+        expression: excluded.formula.expression,
+        reason: excluded.reason.kind,
+      })),
+      tie_break:
+        sheet.armor_class.tie_break === null
+          ? null
+          : {
+              rule: sheet.armor_class.tie_break.rule,
+              loser_count: sheet.armor_class.tie_break.losers.length,
+            },
+    },
     initiative: sheet.initiative.value,
     passive_perception: sheet.passive_perception.value,
     saving_throws: sheet.saves.map((save) => ({
@@ -540,6 +721,10 @@ export function sheetFacts(sheet: CharacterSheet): Record<string, unknown> {
       dex_bonus_max: row.dex_bonus_max,
       strength_requirement: row.strength_requirement,
       stealth_disadvantage: row.stealth_disadvantage,
+    })),
+    items: sheet.items.map((item) => ({
+      requires_attunement: item.requires_attunement,
+      attuned: item.attuned,
     })),
     hit_point_rolls: sheet.hit_point_rolls.map((roll) => ({
       class_level: roll.class_level,

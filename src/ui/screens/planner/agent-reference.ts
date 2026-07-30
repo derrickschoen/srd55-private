@@ -209,14 +209,14 @@ export const COVERAGE: readonly CoverageFact[] = [
   },
   {
     concept: 'armour class',
-    state: 'partial',
+    state: 'modelled',
     note:
-      'Derived on the character sheet from the armour and shield recorded for ' +
-      'the character plus the Dexterity modifier, with a manual adjustment and ' +
-      'the user\u2019s note for it beside the number. Barbarian and Monk ' +
-      'Unarmored Defense is NOT applied — that feature text is not among this ' +
-      'application\u2019s sources — which is what the manual adjustment is ' +
-      'for.',
+      'Derived on the character sheet by checking each base formula\u2019s ' +
+      'eligibility before comparing values. Worn armour, species, class and ' +
+      'other effect formulas use one stable tie-break; shields and flat ' +
+      'effects apply to the winner. The sheet names the winning source, every ' +
+      'excluded formula and reason, every broken tie, and each labelled flat ' +
+      'effect beside the final number.',
   },
   {
     concept: 'skills',

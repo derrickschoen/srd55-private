@@ -10,7 +10,10 @@ import type {
   Workspace,
   WorkspaceSlot,
 } from '../../../domain/read-models';
-import type { CharacterCommandResult } from '../../../commands/character-command-executor';
+import type {
+  CharacterCommandPreviewWarning,
+  CharacterCommandResult,
+} from '../../../commands/character-command-executor';
 import { createCommandsClient } from '../../../commands/client';
 import type {
   CompletenessResult,
@@ -75,6 +78,7 @@ export class PlannerSession {
   saving = false;
   error: string | null = null;
   stale = false;
+  previewWarnings: readonly CharacterCommandPreviewWarning[] = [];
   readonly #undo: CharacterCommandPayload[] = [];
   readonly #redo: CharacterCommandPayload[] = [];
 
@@ -100,6 +104,7 @@ export class PlannerSession {
     if (this.saving || this.workspace === null) return false;
     this.saving = true;
     this.error = null;
+    this.previewWarnings = [];
     try {
       const result = await this.commands.execute(
         this.characterId,
@@ -108,6 +113,7 @@ export class PlannerSession {
       );
       this.#undo.push(result.inverse);
       this.#redo.length = 0;
+      this.previewWarnings = result.preview_warnings ?? [];
       await this.#refresh();
       return true;
     } catch (error) {
@@ -124,6 +130,7 @@ export class PlannerSession {
     if (command === undefined) return false;
     this.saving = true;
     this.error = null;
+    this.previewWarnings = [];
     try {
       const result = await this.commands.execute(
         this.characterId,
@@ -131,6 +138,7 @@ export class PlannerSession {
         command,
       );
       this.#redo.push(result.inverse);
+      this.previewWarnings = result.preview_warnings ?? [];
       await this.#refresh();
       return true;
     } catch (error) {
@@ -148,6 +156,7 @@ export class PlannerSession {
     if (command === undefined) return false;
     this.saving = true;
     this.error = null;
+    this.previewWarnings = [];
     try {
       const result = await this.commands.execute(
         this.characterId,
@@ -155,6 +164,7 @@ export class PlannerSession {
         command,
       );
       this.#undo.push(result.inverse);
+      this.previewWarnings = result.preview_warnings ?? [];
       await this.#refresh();
       return true;
     } catch (error) {
@@ -268,6 +278,27 @@ function restoreFocus(root: HTMLElement, focusKey: string): void {
 }
 
 /**
+ * The warning is assembled from structured fields so the item name remains in
+ * its own provenance-marked node rather than disappearing into an unmarked
+ * pre-composed sentence.
+ */
+export function renderArmorClassReductionWarning(
+  warning: CharacterCommandPreviewWarning,
+): HTMLDivElement {
+  const banner = document.createElement('div');
+  banner.className = 'planner-preview-warning';
+  banner.setAttribute('role', 'status');
+  banner.dataset.testid = 'armor-class-reduction-warning';
+  banner.append(
+    'Equipping ',
+    freeTextSpan(warning.item_name),
+    ` reduces Armor Class from ${String(warning.previous_armor_class)} ` +
+      `to ${String(warning.new_armor_class)}.`,
+  );
+  return banner;
+}
+
+/**
  * Which weapon form is open, if any.
  *
  * Held next to the grid filters rather than in the session, for the same reason
@@ -351,6 +382,9 @@ function renderPlanner(
       error.append(' ', reload);
     }
     shell.append(error);
+  }
+  for (const warning of session.previewWarnings) {
+    shell.append(renderArmorClassReductionWarning(warning));
   }
   if ((workspace.placeholder_spells?.length ?? 0) > 0) {
     const placeholderBanner = document.createElement('div');

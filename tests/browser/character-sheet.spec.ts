@@ -1,4 +1,5 @@
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
+import type { Database } from '@sqlite.org/sqlite-wasm';
 import { expect, test, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { DatabaseContext } from '../../src/db/database';
@@ -31,6 +32,43 @@ interface SheetImage {
   readonly characterId: number;
 }
 
+function exportedImage(
+  sqlite3: Awaited<ReturnType<typeof sqlite3InitModule>>,
+  connection: Database,
+  characterId: number,
+): SheetImage {
+  const bytes = Array.from(sqlite3.capi.sqlite3_js_db_export(connection));
+  connection.close();
+  return { bytes, characterId };
+}
+
+function defineClass(
+  db: DatabaseContext,
+  name: string,
+  hitDie: number,
+  saves: readonly string[],
+): number {
+  const id = db.exec(
+    `INSERT INTO class_definitions (content_key, name, rules_edition)
+     VALUES (?, ?, '2024')`,
+    [`2024:class:${name.toLowerCase()}`, name],
+  ).lastInsertId;
+  db.exec(
+    `INSERT INTO class_sheet_traits
+       (class_definition_id, hit_die, skill_choice_count)
+     VALUES (?, ?, 2)`,
+    [id, hitDie],
+  );
+  for (const ability of saves) {
+    db.exec(
+      `INSERT INTO class_saving_throw_proficiencies
+         (class_definition_id, ability) VALUES (?, ?)`,
+      [id, ability],
+    );
+  }
+  return id;
+}
+
 async function sheetImage(): Promise<SheetImage> {
   const sqlite3 = await sqlite3InitModule();
   const connection = new sqlite3.oo1.DB(':memory:', 'c');
@@ -43,33 +81,14 @@ async function sheetImage(): Promise<SheetImage> {
   // parser's output. Both are from `class-core-traits.txt`: the Fighter has a
   // d10 and Strength/Constitution saves, the Wizard a d6 and
   // Intelligence/Wisdom saves.
-  const defineClass = (
-    name: string,
-    hitDie: number,
-    saves: readonly string[],
-  ): number => {
-    const id = db.exec(
-      `INSERT INTO class_definitions (content_key, name, rules_edition)
-       VALUES (?, ?, '2024')`,
-      [`2024:class:${name.toLowerCase()}`, name],
-    ).lastInsertId;
-    db.exec(
-      `INSERT INTO class_sheet_traits
-         (class_definition_id, hit_die, skill_choice_count)
-       VALUES (?, ?, 2)`,
-      [id, hitDie],
-    );
-    for (const ability of saves) {
-      db.exec(
-        `INSERT INTO class_saving_throw_proficiencies
-           (class_definition_id, ability) VALUES (?, ?)`,
-        [id, ability],
-      );
-    }
-    return id;
-  };
-  const fighterId = defineClass('Fighter', 10, ['strength', 'constitution']);
-  const wizardId = defineClass('Wizard', 6, ['intelligence', 'wisdom']);
+  const fighterId = defineClass(db, 'Fighter', 10, [
+    'strength',
+    'constitution',
+  ]);
+  const wizardId = defineClass(db, 'Wizard', 6, [
+    'intelligence',
+    'wisdom',
+  ]);
 
   // Strength 15 (+2), Dexterity 14 (+2), Constitution 13 (+1),
   // Intelligence 12 (+1), Wisdom 11 (+0), Charisma 8 (−1).
@@ -136,9 +155,116 @@ async function sheetImage(): Promise<SheetImage> {
     [characterId],
   );
 
-  const bytes = Array.from(sqlite3.capi.sqlite3_js_db_export(connection));
-  connection.close();
-  return { bytes, characterId };
+  return exportedImage(sqlite3, connection, characterId);
+}
+
+async function monkShieldImage(): Promise<SheetImage> {
+  const sqlite3 = await sqlite3InitModule();
+  const connection = new sqlite3.oo1.DB(':memory:', 'c');
+  connection.exec(schema);
+  const db = new DatabaseContext(connection);
+  const monkId = defineClass(db, 'Monk', 8, ['strength', 'dexterity']);
+  const characterId = db.exec(
+    `INSERT INTO characters (
+       name, dexterity, wisdom
+     ) VALUES ('Monk shield walkthrough', 16, 16)`,
+  ).lastInsertId;
+  db.exec(
+    `INSERT INTO character_class_levels (
+       character_id, class_definition_id, level, is_starting_class
+     ) VALUES (?, ?, 1, 1)`,
+    [characterId, monkId],
+  );
+  const sourceId = db.exec(
+    `INSERT INTO character_source_instances (
+       character_id, instance_uuid, source_type, source_definition_id,
+       display_name, config, acquired_at_character_level, state
+     ) VALUES (?, ?, 'class', ?, 'Monk 1', ?, 1, 'active')`,
+    [
+      characterId,
+      crypto.randomUUID(),
+      monkId,
+      JSON.stringify({ spellcasting_ability: null }),
+    ],
+  ).lastInsertId;
+  db.exec(
+    `INSERT INTO character_effects (
+       character_id, sort_order, effect_kind, base, ability_1, ability_2,
+       allows_shield, source_instance_id, label
+     ) VALUES (
+       ?, 1, 'armor_class_formula', 10, 'dexterity', 'wisdom', 0, ?,
+       'Monk Unarmored Defense'
+     )`,
+    [characterId, sourceId],
+  );
+  return exportedImage(sqlite3, connection, characterId);
+}
+
+async function armadilloArmorImage(): Promise<SheetImage> {
+  const sqlite3 = await sqlite3InitModule();
+  const connection = new sqlite3.oo1.DB(':memory:', 'c');
+  connection.exec(schema);
+  const db = new DatabaseContext(connection);
+  const characterId = db.exec(
+    `INSERT INTO characters (name, dexterity)
+     VALUES ('Armadillo armor walkthrough', 14)`,
+  ).lastInsertId;
+  const sourceId = db.exec(
+    `INSERT INTO character_source_instances (
+       character_id, instance_uuid, source_type, display_name
+     ) VALUES (?, ?, 'species', 'Armadillo')`,
+    [characterId, crypto.randomUUID()],
+  ).lastInsertId;
+  db.exec(
+    `INSERT INTO character_effects (
+       character_id, sort_order, effect_kind, base, ability_1,
+       allows_shield, source_instance_id, label
+     ) VALUES (
+       ?, 1, 'armor_class_formula', 13, 'dexterity', 1, ?,
+       'Armadillo Shell'
+     )`,
+    [characterId, sourceId],
+  );
+  db.exec(
+    `INSERT INTO character_armor (
+       character_id, slot, name, category, armor_class, dex_bonus
+     ) VALUES (?, 'worn', 'Scute Wrap', 'light', 11, 'full')`,
+    [characterId],
+  );
+  return exportedImage(sqlite3, connection, characterId);
+}
+
+async function armadilloItemsImage(): Promise<SheetImage> {
+  const sqlite3 = await sqlite3InitModule();
+  const connection = new sqlite3.oo1.DB(':memory:', 'c');
+  connection.exec(schema);
+  const db = new DatabaseContext(connection);
+  const characterId = db.exec(
+    `INSERT INTO characters (name, dexterity)
+     VALUES ('Armadillo item walkthrough', 14)`,
+  ).lastInsertId;
+  const cloakId = db.exec(
+    `INSERT INTO character_items (
+       character_id, name, requires_attunement, attuned
+     ) VALUES (?, 'Cloak of the Armadillo', 1, 0)`,
+    [characterId],
+  ).lastInsertId;
+  const ringId = db.exec(
+    `INSERT INTO character_items (
+       character_id, name, requires_attunement, attuned
+     ) VALUES (?, 'Ring of Shell', 0, 0)`,
+    [characterId],
+  ).lastInsertId;
+  db.exec(
+    `INSERT INTO character_effects (
+       character_id, sort_order, effect_kind, amount,
+       character_item_id, label
+     ) VALUES
+       (?, 1, 'armor_class_bonus', 1, ?, 'Cloak of the Armadillo'),
+       (?, 2, 'armor_class_bonus', 1, ?, 'Ring of Shell')`,
+    [characterId, cloakId, characterId, ringId],
+  );
+  return exportedImage(sqlite3, connection, characterId);
 }
 
 async function ready(page: Page): Promise<void> {
@@ -154,6 +280,13 @@ async function install(page: Page, image: SheetImage): Promise<void> {
     (bytes) => window.staticApp.replaceDatabase(Uint8Array.from(bytes)),
     image.bytes,
   );
+}
+
+async function navigateWithinApp(page: Page, path: string): Promise<void> {
+  await page.evaluate((target) => {
+    window.history.pushState(null, '', target);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  }, path);
 }
 
 test('the sheet prints the derived numbers, and prints what it lacks', async ({
@@ -233,12 +366,17 @@ test('the structured block says exactly what the page says, and hides nothing', 
   expect(json).toContain('"slot":"worn"');
   expect(json).toContain('"category":"shield"');
 
-  // The hostile armour name is on the page, visible, carrying its provenance.
-  // AC-4 retired the separate manual-adjustment row, so the effect label has
-  // no legacy row to render into.
+  // Both the armour name and the effect label are on the page, visible and
+  // carrying their provenance. The hostile armour name has two intended homes:
+  // its armour-list row and the AC provenance line naming the winning formula.
+  // AC-B gives the retired manual adjustment effect a real home beside the
+  // Armor Class number instead of moving it invisibly.
   const marked = page.locator('[data-free-text="unverified-origin"]');
-  await expect(marked.filter({ hasText: HOSTILE_ARMOR_NAME })).toBeVisible();
-  await expect(marked.filter({ hasText: 'Cursed helm' })).toHaveCount(0);
+  const hostileArmorMarks = marked.filter({ hasText: HOSTILE_ARMOR_NAME });
+  await expect(hostileArmorMarks).toHaveCount(2);
+  await expect(hostileArmorMarks.nth(0)).toBeVisible();
+  await expect(hostileArmorMarks.nth(1)).toBeVisible();
+  await expect(marked.filter({ hasText: 'Cursed helm' })).toBeVisible();
 
   // D4: NOTHING IS HIDDEN. A page whose structured block says more than its
   // visible text is the injection shape that rule exists to refuse, so the
@@ -258,6 +396,155 @@ test('the structured block says exactly what the page says, and hides nothing', 
       }).length,
     ),
   ).toBe(0);
+});
+
+test('a Monk equipping Shell Shield walks from AC 16 to 15 with a strict-reduction warning', async ({
+  page,
+}) => {
+  const image = await monkShieldImage();
+  await install(page, image);
+  // Route inside the already-running app so this test has exactly one full
+  // document reload: the persistence boundary below. The failed trace had
+  // created and torn down two OPFS workers about one second apart; avoiding
+  // that extra worker removes the harness-only contention while retaining the
+  // reload and every post-reload persistence assertion.
+  await navigateWithinApp(page, `/characters/${image.characterId}/sheet`);
+  await expect(page.locator('[data-sheet-value="armor_class"]')).toHaveText(
+    '16',
+  );
+  await expect(page.locator('[data-sheet-id="armor_class:base"]')).toContainText(
+    'Monk Unarmored Defense (10 + DEX + WIS)',
+  );
+
+  const result = await page.evaluate(async (characterId) =>
+    window.appRpc.call<
+      {
+        character_id: number;
+        operation_uuid: string;
+        expected_revision: number;
+        command: {
+          type: 'set_armor';
+          slot: 'shield';
+          armor: {
+            name: string;
+            category: 'shield';
+            armor_class: number;
+            dex_bonus: 'none';
+            dex_bonus_max: null;
+            strength_requirement: null;
+            stealth_disadvantage: false;
+            notes: null;
+          };
+        };
+      },
+      {
+        preview_warnings?: readonly {
+          code: string;
+          message: string;
+          item_name: string;
+          previous_armor_class: number;
+          new_armor_class: number;
+        }[];
+      }
+    >('commands.execute', {
+      character_id: characterId,
+      operation_uuid: '71717171-7171-4171-8171-717171717171',
+      expected_revision: 0,
+      command: {
+        type: 'set_armor',
+        slot: 'shield',
+        armor: {
+          name: 'Shell Shield',
+          category: 'shield',
+          armor_class: 2,
+          dex_bonus: 'none',
+          dex_bonus_max: null,
+          strength_requirement: null,
+          stealth_disadvantage: false,
+          notes: null,
+        },
+      },
+    }), image.characterId);
+  expect(result.preview_warnings).toEqual([
+    {
+      code: 'armor_class_reduced',
+      message: 'Equipping Shell Shield reduces Armor Class from 16 to 15.',
+      item_name: 'Shell Shield',
+      previous_armor_class: 16,
+      new_armor_class: 15,
+    },
+  ]);
+
+  await page.reload();
+  // NOT ready(page): data-ready="true" is set by the empty shell (app.ts:71)
+  // and the character-list route (initialised false at character-list.ts:195,
+  // flipped true at :582) — the sheet route never flips it, and the boot
+  // status element is removed at app start (app.ts:91), so waiting for it
+  // after reloading straight onto a sheet URL waits forever. The sheet's own
+  // rendered number is the readiness signal: the sheet subtree is built
+  // complete and installed in one replaceChildren (sheet screen.ts:43-44),
+  // so the number cannot appear from a half-rendered page.
+  await expect(page.locator('[data-sheet-value="armor_class"]')).toHaveText(
+    '15',
+    { timeout: 30_000 },
+  );
+  await expect(
+    page.locator('[data-sheet-id^="armor_class:excluded:"]').filter({
+      hasText:
+        'Monk Unarmored Defense (10 + DEX + WIS) does not apply while you carry a shield.',
+    }),
+  ).toBeVisible();
+  await expect(page.locator('[data-sheet-id="armor:shield"]')).toContainText(
+    'Shell Shield',
+  );
+});
+
+test('Scute Wrap is honoured over the higher Armadillo formula and the exclusion is stated', async ({
+  page,
+}) => {
+  const image = await armadilloArmorImage();
+  await install(page, image);
+  await navigateWithinApp(page, `/characters/${image.characterId}/sheet`);
+
+  // Scute Wrap 11 + DEX 2 = 13. Armadillo Shell would be 15, but wearing
+  // armour excludes it before values are ranked.
+  await expect(page.locator('[data-sheet-value="armor_class"]')).toHaveText(
+    '13',
+  );
+  await expect(page.locator('[data-sheet-id="armor_class:base"]')).toContainText(
+    'Scute Wrap (11 + DEX)',
+  );
+  await expect(
+    page.locator('[data-sheet-id^="armor_class:excluded:"]').filter({
+      hasText:
+        'Armadillo Shell (13 + DEX) does not apply while you are wearing armour.',
+    }),
+  ).toBeVisible();
+});
+
+test('an unattuned Cloak grants nothing while its state and Ring of Shell bonus stay visible', async ({
+  page,
+}) => {
+  const image = await armadilloItemsImage();
+  await install(page, image);
+  await navigateWithinApp(page, `/characters/${image.characterId}/sheet`);
+
+  // Floor 12 plus Ring 1. The Cloak's identical +1 is gated off.
+  await expect(page.locator('[data-sheet-value="armor_class"]')).toHaveText(
+    '13',
+  );
+  await expect(page.locator('[data-sheet-id^="armor_class:bonus:"]')).toHaveCount(
+    1,
+  );
+  await expect(page.locator('[data-sheet-id="armor_class:bonus:0"]')).toContainText(
+    'Ring of Shell',
+  );
+  await expect(page.locator('[data-sheet-id="item:0"]')).toContainText(
+    'Cloak of the Armadillo — Requires attunement; not attuned, so its effects do not apply.',
+  );
+  await expect(page.locator('[data-sheet-id="item:1"]')).toContainText(
+    'Ring of Shell — Does not require attunement; its effects apply.',
+  );
 });
 
 test('the planner links to the sheet, and the sheet links back', async ({

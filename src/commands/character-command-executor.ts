@@ -39,11 +39,25 @@ import {
   resolvesInverseAfterApply,
   type ResolvesInverseAfterApply,
 } from './weapons';
+import { CharacterSheetBuilder } from '../queries/character-sheet-builder';
+
+export interface CharacterCommandPreviewWarning {
+  readonly code: 'armor_class_reduced';
+  readonly message: string;
+  readonly item_name: string;
+  readonly previous_armor_class: number;
+  readonly new_armor_class: number;
+}
 
 export interface CharacterCommandResult {
   readonly inverse: CharacterCommandPayload;
   readonly revision: number;
   readonly idempotent_replay: boolean;
+  /**
+   * Ephemeral facts requiring a before/after pair. They are deliberately
+   * absent on idempotent replay: no warning state is persisted or reconstructed.
+   */
+  readonly preview_warnings?: readonly CharacterCommandPreviewWarning[];
 }
 
 export interface CharacterCommandExecutorOptions {
@@ -129,6 +143,29 @@ function snapshotJson(snapshot: CharacterStateSnapshot): JsonObject {
   return snapshot as unknown as JsonObject;
 }
 
+function armorClassReductionWarnings(
+  payload: CharacterCommandPayload,
+  previousArmorClass: number,
+  newArmorClass: number,
+): CharacterCommandPreviewWarning[] {
+  if (
+    payload.type !== 'set_armor' ||
+    payload.armor === null ||
+    newArmorClass >= previousArmorClass
+  ) {
+    return [];
+  }
+  return [{
+    code: 'armor_class_reduced',
+    message:
+      `Equipping ${payload.armor.name} reduces Armor Class from ` +
+      `${String(previousArmorClass)} to ${String(newArmorClass)}.`,
+    item_name: payload.armor.name,
+    previous_armor_class: previousArmorClass,
+    new_armor_class: newArmorClass,
+  }];
+}
+
 export class CharacterCommandExecutor {
   readonly #factory: CharacterCommandFactory;
   readonly #state: CharacterState;
@@ -212,7 +249,26 @@ export class CharacterCommandExecutor {
       throw new RevisionConflict(currentRevision);
     }
 
+    // D76: the warning is a PREVIEW, not persisted character state. Resolve
+    // against the current equipment, apply the pending equip below, then resolve
+    // again in the same transaction. Clearing a slot is not equipping an item.
+    const previousArmorClass =
+      payload.type === 'set_armor' && payload.armor !== null
+        ? new CharacterSheetBuilder(this.db).armorClassValue(
+            request.character_id,
+          )
+        : null;
     this.applySynchronously(request.character_id, payload, command);
+    const previewWarnings: CharacterCommandPreviewWarning[] =
+      previousArmorClass === null
+        ? []
+        : armorClassReductionWarnings(
+            payload,
+            previousArmorClass,
+            new CharacterSheetBuilder(this.db).armorClassValue(
+              request.character_id,
+            ),
+          );
     // SOME INVERSES ARE ONLY KNOWABLE AFTER THE WRITE. `add_weapon` must name
     // the row id SQLite assigned, and `prepareInverse` ran before this
     // transaction opened. Commands in that position publish the real inverse
@@ -255,6 +311,9 @@ export class CharacterCommandExecutor {
       inverse: storedInverse,
       revision: nextRevision,
       idempotent_replay: false,
+      ...(previewWarnings.length === 0
+        ? {}
+        : { preview_warnings: previewWarnings }),
     };
   }
 
