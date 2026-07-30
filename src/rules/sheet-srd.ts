@@ -42,6 +42,10 @@ import {
   BUNDLED_FEATURE_RULES_EDITION,
 } from './extra-attack-srd';
 import { skillAbilities } from './skills';
+import {
+  parseSrdUnarmoredDefenseFeatures,
+  type SrdUnarmoredDefenseFeature,
+} from './unarmored-defense-srd';
 
 /** The class the Martial Arts progression belongs to. */
 const MARTIAL_ARTS_CLASS = 'Monk';
@@ -95,6 +99,10 @@ export function hasBundledSheetContent(db: DatabaseContext): boolean {
   }
 
   if (!hasBundledNamedFeatures(db)) {
+    return false;
+  }
+
+  if (!hasBundledClassFeatureEffects(db)) {
     return false;
   }
 
@@ -246,6 +254,7 @@ export function seedSheetContent(db: DatabaseContext): void {
   db.transaction(() => {
     seedArmorTemplates(db, timestamp);
     seedClassSheetContent(db, timestamp);
+    seedClassFeatureEffects(db, timestamp);
     seedNamedFeatures(db, timestamp);
   });
 }
@@ -474,6 +483,117 @@ function seedClassSheetContent(db: DatabaseContext, timestamp: string): void {
       );
     }
   }
+}
+
+/**
+ * THE TWO AUTOMATIC CLASS FORMULAS FROM
+ * `docs/srd/source/unarmored-defense.txt`.
+ *
+ * UPSERT, NOT DELETE-THEN-INSERT: `character_effects.template_ref` names the
+ * template row id, so preserving that id keeps generated-row identity stable
+ * when bundled content is repaired or reseeded. Every sibling payload is
+ * cleared on conflict so a corrupted row cannot retain mechanics belonging to
+ * another effect kind.
+ */
+function seedClassFeatureEffects(
+  db: DatabaseContext,
+  timestamp: string,
+): void {
+  for (const feature of parseSrdUnarmoredDefenseFeatures()) {
+    const classId = bundledClassId(db, feature.class_name);
+    if (classId === null) {
+      continue;
+    }
+    db.exec(
+      `INSERT INTO class_feature_effects (
+         class_definition_id, class_level, name, effect_kind,
+         base, ability_1, ability_2, allows_shield, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(class_definition_id, name, class_level) DO UPDATE SET
+         effect_kind = excluded.effect_kind,
+         damage_type = NULL,
+         hit_points_flat = NULL,
+         hit_points_per_level = NULL,
+         speed_bonus_feet = NULL,
+         ability = NULL,
+         amount = NULL,
+         maximum = NULL,
+         base = excluded.base,
+         ability_1 = excluded.ability_1,
+         ability_2 = excluded.ability_2,
+         allows_shield = excluded.allows_shield,
+         weapon_scope = NULL,
+         attack_count = NULL,
+         updated_at = excluded.updated_at`,
+      [
+        classId,
+        feature.class_level,
+        feature.name,
+        feature.effect_kind,
+        feature.base,
+        feature.ability_1,
+        feature.ability_2,
+        sqlBool(feature.allows_shield),
+        timestamp,
+        timestamp,
+      ],
+    );
+  }
+}
+
+/**
+ * True when every bundled class this database carries has the exact formula
+ * parsed from `docs/srd/source/unarmored-defense.txt`.
+ */
+function hasBundledClassFeatureEffects(db: DatabaseContext): boolean {
+  for (const feature of parseSrdUnarmoredDefenseFeatures()) {
+    const classId = bundledClassId(db, feature.class_name);
+    if (classId === null) {
+      continue;
+    }
+    const stored = db.allRaw(
+      `SELECT class_level, name, effect_kind, damage_type, hit_points_flat,
+              hit_points_per_level, speed_bonus_feet, ability, amount, maximum,
+              base, ability_1, ability_2, allows_shield, weapon_scope,
+              attack_count
+       FROM class_feature_effects
+      WHERE class_definition_id = ? AND name = ? AND class_level = ?`,
+      [classId, feature.name, feature.class_level],
+    );
+    const row = stored[0];
+    if (
+      stored.length !== 1 ||
+      row === undefined ||
+      !sameClassFeatureEffect(row, feature)
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function sameClassFeatureEffect(
+  row: Record<string, unknown>,
+  feature: SrdUnarmoredDefenseFeature,
+): boolean {
+  return (
+    Number(row['class_level']) === feature.class_level &&
+    String(row['name']) === feature.name &&
+    String(row['effect_kind']) === feature.effect_kind &&
+    row['damage_type'] === null &&
+    row['hit_points_flat'] === null &&
+    row['hit_points_per_level'] === null &&
+    row['speed_bonus_feet'] === null &&
+    row['ability'] === null &&
+    row['amount'] === null &&
+    row['maximum'] === null &&
+    Number(row['base']) === feature.base &&
+    String(row['ability_1']) === feature.ability_1 &&
+    String(row['ability_2']) === feature.ability_2 &&
+    Number(row['allows_shield']) === sqlBool(feature.allows_shield) &&
+    row['weapon_scope'] === null &&
+    row['attack_count'] === null
+  );
 }
 
 /**
