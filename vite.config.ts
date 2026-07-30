@@ -1,9 +1,106 @@
 import { defineConfig, type Plugin } from 'vite';
 import { createHash } from 'node:crypto';
-import { realpathSync } from 'node:fs';
+import {
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import { aiBridge } from './tools/ai-bridge/plugin';
+import {
+  appShellCacheName,
+  appShellUrl,
+  serviceWorkerSource,
+  type BuildAsset,
+} from './tools/pwa/service-worker';
+
+function deployableAssets(
+  root: string,
+  directory: string = root,
+): BuildAsset[] {
+  const assets: BuildAsset[] = [];
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) {
+      assets.push(...deployableAssets(root, path));
+      continue;
+    }
+    if (!entry.isFile()) {
+      continue;
+    }
+    const fileName = relative(root, path);
+    if (
+      fileName === '_headers' ||
+      fileName === '_redirects' ||
+      fileName === 'service-worker.js'
+    ) {
+      continue;
+    }
+    assets.push({ fileName, source: readFileSync(path) });
+  }
+  return assets;
+}
+
+/**
+ * Production receives a worker built from the finalized Rollup output. The
+ * exact shell filenames and bytes mint its cache name, so each build installs
+ * into a distinct cache and cache.addAll can make that install atomic.
+ *
+ * Development serves a no-fetch worker. That keeps real registration testable
+ * without taking requests away from Vite, HMR, or Playwright's page-level
+ * network interception. Offline behavior belongs to the emitted production
+ * worker and its independently checked artifact transcription.
+ */
+function appShellServiceWorker(): Plugin {
+  let outputDirectory: string | undefined;
+  return {
+    name: 'app-shell-service-worker',
+    configResolved(config) {
+      outputDirectory = resolve(config.root, config.build.outDir);
+    },
+    configureServer(server) {
+      server.middlewares.use(
+        '/service-worker.js',
+        (request, response, next) => {
+          if (request.method !== 'GET') {
+            next();
+            return;
+          }
+          response.statusCode = 200;
+          response.setHeader(
+            'Content-Type',
+            'text/javascript; charset=utf-8',
+          );
+          response.setHeader('Cache-Control', 'no-store');
+          response.end(
+            "self.addEventListener('install', () => undefined);\n",
+          );
+        },
+      );
+    },
+    closeBundle() {
+      if (
+        outputDirectory === undefined ||
+        !statSync(outputDirectory).isDirectory()
+      ) {
+        throw new Error('Vite output directory is unavailable for PWA build.');
+      }
+      const shellAssets = deployableAssets(outputDirectory);
+      const cacheName = appShellCacheName(shellAssets);
+      const urls = [
+        './',
+        ...shellAssets.map((asset) => appShellUrl(asset.fileName)),
+      ];
+      writeFileSync(
+        join(outputDirectory, 'service-worker.js'),
+        serviceWorkerSource(cacheName, urls),
+      );
+    },
+  };
+}
 
 /**
  * ONE DEPENDENCY CACHE PER CHECKOUT.
@@ -79,7 +176,7 @@ function forbidDrizzleAtRuntime(): Plugin {
   };
 }
 
-const shared = {
+const core = {
   base: './',
   cacheDir: process.env.STATIC_APP_CACHE_DIR ?? checkoutCacheDir,
   plugins: [forbidDrizzleAtRuntime()],
@@ -129,6 +226,11 @@ const shared = {
      */
     include: ['zod'],
   },
+};
+
+const shared = {
+  ...core,
+  plugins: [...core.plugins, appShellServiceWorker()],
 };
 
 /**

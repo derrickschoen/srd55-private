@@ -161,7 +161,7 @@ Every script, from `package.json`:
    decoration. `vite.config.ts` branches on `command === 'serve'` to add the AI
    bridge plugin; the runner loader closes its module runner before the exported
    function is called, so a dynamic `import()` inside that branch fails outright
-   (`vite.config.ts:140-148`). If you invoke vite or vitest by hand, keep the
+   (`vite.config.ts:237-246`). If you invoke vite or vitest by hand, keep the
    flag.
 
 2. **`tsc -b` typechecks `tests/`, `tools/`, `scripts/` and `db/` too.** The

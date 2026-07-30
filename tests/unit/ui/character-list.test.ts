@@ -6,8 +6,6 @@ import {
   catalogGapLabel,
   classSummary,
   completenessByCharacter,
-  durableStorageLabel,
-  durableStorageState,
   outstandingLabel,
   warningLabel,
 } from '../../../src/ui/screens/character-list/character-list';
@@ -199,19 +197,6 @@ describe('character list behavior', () => {
     ).resolves.toEqual(new Map());
   });
 
-  it('reports durable, best-effort, and unavailable browser storage states', async () => {
-    await expect(
-      durableStorageState({ persisted: async () => true }),
-    ).resolves.toBe('durable');
-    await expect(
-      durableStorageState({ persisted: async () => false }),
-    ).resolves.toBe('best-effort');
-    await expect(durableStorageState(undefined)).resolves.toBe('unavailable');
-    expect(durableStorageLabel('durable')).toBe(
-      'Durable local storage is enabled.',
-    );
-    expect(durableStorageLabel('best-effort')).toContain('keep backups');
-  });
 });
 
 describe('catalog and backup entry points', () => {
