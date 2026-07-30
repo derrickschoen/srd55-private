@@ -8,6 +8,7 @@ import {
   type ShareBackground,
   type ShareEffect,
   type ShareHitPointRoll,
+  type ShareItem,
   type ShareSheetAdjustment,
   type ShareSpecies,
   type ShareSpeciesTrait,
@@ -102,6 +103,7 @@ const ROOT_SKILL_GRANTS_INDEX = fieldIndex(
   WIRE_SCHEMA.tuples.root.fields,
   'skillGrants',
 );
+const ROOT_ITEMS_INDEX = fieldIndex(WIRE_SCHEMA.tuples.root.fields, 'items');
 
 const CHARACTER_TUPLE_LENGTHS = WIRE_SCHEMA.tuples.character.arities;
 const SHEET_TUPLE_LENGTH = WIRE_SCHEMA.tuples.sheet.arities[0];
@@ -140,6 +142,7 @@ const SPECIES_TRAIT_TUPLE_LENGTH =
   WIRE_SCHEMA.tuples.speciesTrait.arities[0];
 const BACKGROUND_TUPLE_LENGTH = WIRE_SCHEMA.tuples.background.arities[0];
 const EFFECT_TUPLE_LENGTH = WIRE_SCHEMA.tuples.effect.arities[0];
+const ITEM_TUPLE_LENGTH = WIRE_SCHEMA.tuples.item.arities[0];
 const ARMOR_TUPLE_LENGTH = WIRE_SCHEMA.tuples.armor.arities[0];
 const HIT_POINT_ROLL_TUPLE_LENGTH =
   WIRE_SCHEMA.tuples.hitPointRoll.arities[0];
@@ -598,6 +601,9 @@ export function shareDocumentToPositional(
       skillGrants: document.skillGrants?.map((row) =>
         objectToPositional(row, WIRE_SCHEMA.tuples.skillGrant.fields)
       ),
+      items: document.items?.map((row) =>
+        objectToPositional(row, WIRE_SCHEMA.tuples.item.fields)
+      ),
     },
     WIRE_SCHEMA.tuples.root.fields,
   );
@@ -615,6 +621,7 @@ function decodeCurrentWire(input: unknown): CharacterShareDocument {
   const wireEffects = root[ROOT_EFFECTS_INDEX];
   const wirePlaceholders = root[ROOT_PLACEHOLDERS_INDEX];
   const wireSkillGrants = root[ROOT_SKILL_GRANTS_INDEX];
+  const wireItems = root[ROOT_ITEMS_INDEX];
   const character = variableTuple(
     root[ROOT_CHARACTER_INDEX],
     CHARACTER_TUPLE_LENGTHS,
@@ -765,6 +772,12 @@ function decodeCurrentWire(input: unknown): CharacterShareDocument {
       );
     }
     assertListLimit(wireSkillGrants, SHARE_LIMITS.skillGrants, 'skillGrants');
+  }
+  if (wireItems !== null) {
+    if (!Array.isArray(wireItems)) {
+      throw new ShareValidationError('wire items must be null or a list.');
+    }
+    assertListLimit(wireItems, SHARE_LIMITS.items, 'items');
   }
 
   const rawCharacter = fromPositional(
@@ -943,6 +956,16 @@ function decodeCurrentWire(input: unknown): CharacterShareDocument {
       ),
     );
   }
+  if (Array.isArray(wireItems)) {
+    raw.items = wireItems.map((value, index) =>
+      fromPositional(
+        value,
+        ITEM_TUPLE_LENGTH,
+        fieldKeys(WIRE_SCHEMA.tuples.item.fields),
+        `wire items[${index}]`,
+      ),
+    );
+  }
   return validateShareDocument(raw);
 }
 
@@ -1030,7 +1053,9 @@ export function positionalToShareDocument(
         SHARE_SCHEMAS[5].tuples.character.arities,
         'wire character',
       );
-      return decodeCurrentWire(MIGRATIONS[6](MIGRATIONS[5](input)));
+      return decodeCurrentWire(
+        MIGRATIONS[7](MIGRATIONS[6](MIGRATIONS[5](input))),
+      );
     case 6:
       variableTuple(
         input,
@@ -1042,8 +1067,20 @@ export function positionalToShareDocument(
         SHARE_SCHEMAS[6].tuples.character.arities,
         'wire character',
       );
-      return decodeCurrentWire(MIGRATIONS[6](input));
+      return decodeCurrentWire(MIGRATIONS[7](MIGRATIONS[6](input)));
     case 7:
+      variableTuple(
+        input,
+        SHARE_SCHEMAS[7].tuples.root.arities,
+        'wire document',
+      );
+      variableTuple(
+        input[2],
+        SHARE_SCHEMAS[7].tuples.character.arities,
+        'wire character',
+      );
+      return decodeCurrentWire(MIGRATIONS[7](input));
+    case 8:
       return decodeCurrentWire(input);
     default:
       throw new ShareValidationError('version is unsupported.');

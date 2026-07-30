@@ -199,6 +199,15 @@ function seedFixture(): void {
      ) VALUES (?, 1, 'class_skill', 1, 'arcana', 'active', ?, ?)`,
     [characterId, createdAt, updatedAt],
   );
+  // The character's own item (AC-1, D72), sourced the same way the effect row
+  // above is, so capture/restore exercises the composite reference here too.
+  db.exec(
+    `INSERT INTO character_items (
+       character_id, name, description, requires_attunement, attuned,
+       source_instance_id, created_at, updated_at
+     ) VALUES (?, 'Ring of Protection', 'item row', 1, 1, 2, ?, ?)`,
+    [characterId, createdAt, updatedAt],
+  );
 }
 
 function mutableCapture(): MutableSnapshot {
@@ -245,7 +254,7 @@ describe('capture and deterministic diff', () => {
     // identifier is a wire fact that other stored data is matched against, so a
     // test that reads it from the module under test could never notice it
     // changing.
-    expect(snapshot.schema_version).toBe('a7-v9');
+    expect(snapshot.schema_version).toBe('a7-v10');
     expect(Object.keys(snapshot.character)).toEqual(CHARACTER_STATE_COLUMNS);
     expect(snapshot.character).toEqual({
       name: 'Snapshot Hero',
@@ -351,6 +360,7 @@ describe('capture and deterministic diff', () => {
       character_sheet_adjustments: [],
       character_effects: [],
       character_skill_grants: [],
+      character_items: [],
     };
     const before = {
       character: { name: 'Before' },
@@ -384,6 +394,7 @@ describe('capture and deterministic diff', () => {
       character_sheet_adjustments: [],
       character_effects: [],
       character_skill_grants: [],
+      character_items: [],
     };
 
     expect(state.diff(before, after)).toEqual([
@@ -761,7 +772,7 @@ describe('restoring a snapshot written by an older build', () => {
     // oversight: a current snapshot DOES speak for weapons, so restoring it
     // removes one added afterwards.
     const snapshot = mutableCapture();
-    expect(snapshot.schema_version).toBe('a7-v9');
+    expect(snapshot.schema_version).toBe('a7-v10');
     db.exec(
       `INSERT INTO character_weapons (character_id, name)
        VALUES (?, 'Bought since')`,

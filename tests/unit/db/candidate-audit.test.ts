@@ -213,6 +213,7 @@ describe('candidate database semantic audit', () => {
       'character_class_levels',
       'character_effects',
       'character_hit_point_rolls',
+      'character_items',
       'character_operations',
       'character_rule_overrides',
       'character_save_points',

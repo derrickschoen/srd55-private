@@ -5,9 +5,10 @@ import {
   armorCategories,
   armorDexBonuses,
   armorSlots,
+  characterEffectKinds,
+  extraAttackWeaponScopes,
   rulesEditions,
   skills,
-  effectKinds,
   weaponMasteryProperties,
   weaponProficiencyCategories,
   type KnownAbilityAllocationMethod,
@@ -132,6 +133,14 @@ export const SHARE_LIMITS = Object.freeze({
    * fires.
    */
   skillGrants: 200,
+  /**
+   * How many items one document may carry (wire v8, AC-1, D72). A real
+   * character owns at most a few dozen modifying things; 200 matches
+   * `effects` and exists for the same reason every other cap does: to stop a
+   * hostile document spending the whole decompressed budget on one section,
+   * and to name that section when it fires.
+   */
+  items: 200,
 });
 
 export interface ShareCharacter {
@@ -491,6 +500,43 @@ export interface ShareEffect {
   readonly ability?: string;
   readonly amount?: number;
   readonly maximum?: number;
+  /**
+   * THE FIVE AC-1 (D72) PAYLOADS, wire v8. `base`/`ability_1`/`allows_shield`
+   * travel together for `armor_class_formula` (`ability_2` stays optional —
+   * a formula may use one ability or two); `weapon_scope` travels with
+   * `attack_ability_override`, `weapon_attack_bonus` and
+   * `weapon_damage_bonus`. All five mirror the column's own nullability and
+   * are held to the table's CHECKs by `shareEffect` below.
+   */
+  readonly base?: number;
+  readonly ability_1?: string;
+  readonly ability_2?: string;
+  readonly allows_shield?: boolean;
+  readonly weapon_scope?: string;
+}
+
+/**
+ * ONE OF A CHARACTER'S OWN ITEMS, AS IT TRAVELS (wire v8, AC-1, D72).
+ *
+ * `character_items` is for things that only MODIFY and speak through
+ * `character_effects`; this tuple carries exactly its five columns beyond the
+ * row's own identity: `name`, `description`, `requires_attunement`,
+ * `attuned`, and `sourceRef` — the SAME reference-space resolution
+ * `ShareEffect.sourceRef` gets, and on the identical "travels without its
+ * provenance if the source is unreachable" terms, because no kind here has
+ * `ability_increase`'s required-source CHECK.
+ *
+ * `requires_attunement` and `attuned` are REQUIRED, not optional: unlike a
+ * nullable column, both are `NOT NULL DEFAULT false` — there is no absent
+ * state to mirror, only a `false` a document must state plainly, matching
+ * how a weapon's boolean flags travel.
+ */
+export interface ShareItem {
+  readonly name: string;
+  readonly description?: string;
+  readonly requires_attunement: boolean;
+  readonly attuned: boolean;
+  readonly sourceRef?: number;
 }
 
 export interface ShareBackground {
@@ -677,6 +723,12 @@ export interface CharacterShareDocument {
    * strings.
    */
   readonly skillGrants?: readonly ShareSkillGrant[];
+  /**
+   * THE CHARACTER'S OWN ITEMS (wire v8, AC-1, D72). Optional on the same
+   * terms as every appended section: absent means the character has none, and
+   * every link generated before this unit carries no such key.
+   */
+  readonly items?: readonly ShareItem[];
 }
 
 export class ShareValidationError extends TypeError {
@@ -1361,10 +1413,10 @@ function shareSpeciesTrait(value: unknown, label: string): ShareSpeciesTrait {
  * different kind, aborts the whole import transaction with a raw
  * SQLITE_CONSTRAINT_CHECK naming nothing the user could act on.
  *
- * `effectKinds` and not the legacy list, because this section did not exist
- * before this build: no link in the wild can carry a `granted_spells` effect
- * HERE, and accepting one would be inventing tolerance for an artifact that
- * cannot exist.
+ * `characterEffectKinds` (AC-1's wider, table-own vocabulary) and not the
+ * legacy list, because this section did not exist before this build: no link
+ * in the wild can carry a `granted_spells` effect HERE, and accepting one
+ * would be inventing tolerance for an artifact that cannot exist.
  */
 function shareEffect(
   value: unknown,
@@ -1384,13 +1436,20 @@ function shareEffect(
       'ability',
       'amount',
       'maximum',
+      'base',
+      'ability_1',
+      'ability_2',
+      'allows_shield',
+      'weapon_scope',
     ],
     label,
   );
   const kind = row.kind;
   if (
     typeof kind !== 'string' ||
-    !effectKinds.includes(kind as (typeof effectKinds)[number])
+    !characterEffectKinds.includes(
+      kind as (typeof characterEffectKinds)[number],
+    )
   ) {
     throw new ShareValidationError(`${label}.kind is unsupported.`);
   }
@@ -1481,40 +1540,31 @@ function shareEffect(
       `${label} kind speed requires speed_bonus_feet.`,
     );
   }
-  // The `ability_increase` payload (v4, B2), held to EXACTLY the table's own
-  // CHECKs: the three fields together and only for this kind, an ability from
-  // the closed six, a signed non-zero amount, a maximum inside the 1–30 range
-  // `AbilityScore` can represent — and, unlike every other kind, a REQUIRED
-  // `sourceRef`. The format's "travels without provenance" allowance does not
-  // extend here: the table's required-source CHECK would make our own importer
-  // refuse the document, and this validator runs on export too, so the refusal
-  // happens while the character is still on the sender's screen.
-  const abilityPayloadPresent =
-    row.ability !== undefined ||
-    row.amount !== undefined ||
-    row.maximum !== undefined;
-  if (abilityPayloadPresent && kind !== 'ability_increase') {
-    throw new ShareValidationError(
-      `${label} ability payloads require kind ability_increase.`,
-    );
-  }
-  if (kind === 'ability_increase') {
-    if (
-      row.ability === undefined ||
-      row.amount === undefined ||
-      row.maximum === undefined
-    ) {
-      throw new ShareValidationError(
-        `${label} kind ability_increase requires ability, amount and maximum.`,
-      );
-    }
+  // `ability` NOW BELONGS TO TWO KINDS (AC-1): `ability_increase` and
+  // `attack_ability_override`. Extracted once, generically, here; WHICH kind
+  // requires it (and what else that kind requires) is checked kind-by-kind
+  // below, mirroring `effectPayloadKindError` in
+  // `src/domain/contracts/row-rules.ts` — see that function's own comment for
+  // why a field-first shape stopped being safe the moment a field started
+  // belonging to more than one kind.
+  if (row.ability !== undefined) {
     if (
       typeof row.ability !== 'string' ||
       !abilities.includes(row.ability as (typeof abilities)[number])
     ) {
       throw new ShareValidationError(`${label}.ability is unsupported.`);
     }
+    if (kind !== 'ability_increase' && kind !== 'attack_ability_override') {
+      throw new ShareValidationError(
+        `${label}.ability requires kind ability_increase or attack_ability_override.`,
+      );
+    }
     effect.ability = row.ability;
+  }
+  // `amount` NOW BELONGS TO FOUR KINDS (AC-1): `ability_increase`,
+  // `armor_class_bonus`, `weapon_attack_bonus`, `weapon_damage_bonus`. Same
+  // shape in all four — a signed, non-zero integer — so it is extracted once.
+  if (row.amount !== undefined) {
     const amount = originInteger(
       row.amount,
       `${label}.amount`,
@@ -1524,20 +1574,224 @@ function shareEffect(
     if (amount === 0) {
       throw new ShareValidationError(`${label}.amount must not be zero.`);
     }
+    if (
+      kind !== 'ability_increase' &&
+      kind !== 'armor_class_bonus' &&
+      kind !== 'weapon_attack_bonus' &&
+      kind !== 'weapon_damage_bonus'
+    ) {
+      throw new ShareValidationError(
+        `${label}.amount requires a kind that uses one.`,
+      );
+    }
     effect.amount = amount;
+  }
+  if (row.maximum !== undefined) {
+    if (kind !== 'ability_increase') {
+      throw new ShareValidationError(
+        `${label}.maximum requires kind ability_increase.`,
+      );
+    }
     effect.maximum = originInteger(
       row.maximum,
       `${label}.maximum`,
       ABILITY_SCORE_MAX,
       ABILITY_SCORE_MIN,
     );
+  }
+  // The `armor_class_formula` payload (AC-1, D72): `base`, `ability_1`
+  // (required alongside it), `ability_2` (optional — a formula may use one
+  // ability or two).
+  if (row.base !== undefined) {
+    if (kind !== 'armor_class_formula') {
+      throw new ShareValidationError(
+        `${label}.base requires kind armor_class_formula.`,
+      );
+    }
+    effect.base = originInteger(
+      row.base,
+      `${label}.base`,
+      ORIGIN_EFFECT_MAGNITUDE_MAX,
+      1,
+    );
+  }
+  if (row.ability_1 !== undefined) {
+    if (kind !== 'armor_class_formula') {
+      throw new ShareValidationError(
+        `${label}.ability_1 requires kind armor_class_formula.`,
+      );
+    }
+    if (
+      typeof row.ability_1 !== 'string' ||
+      !abilities.includes(row.ability_1 as (typeof abilities)[number])
+    ) {
+      throw new ShareValidationError(`${label}.ability_1 is unsupported.`);
+    }
+    effect.ability_1 = row.ability_1;
+  }
+  if (row.ability_2 !== undefined) {
+    if (kind !== 'armor_class_formula') {
+      throw new ShareValidationError(
+        `${label}.ability_2 requires kind armor_class_formula.`,
+      );
+    }
+    if (
+      typeof row.ability_2 !== 'string' ||
+      !abilities.includes(row.ability_2 as (typeof abilities)[number])
+    ) {
+      throw new ShareValidationError(`${label}.ability_2 is unsupported.`);
+    }
+    effect.ability_2 = row.ability_2;
+  }
+  if (row.allows_shield !== undefined) {
+    if (kind !== 'armor_class_formula') {
+      throw new ShareValidationError(
+        `${label}.allows_shield requires kind armor_class_formula.`,
+      );
+    }
+    if (typeof row.allows_shield !== 'boolean') {
+      throw new ShareValidationError(
+        `${label}.allows_shield must be boolean.`,
+      );
+    }
+    effect.allows_shield = row.allows_shield;
+  }
+  // `weapon_scope` belongs to three kinds (AC-1): `attack_ability_override`,
+  // `weapon_attack_bonus`, `weapon_damage_bonus`. Reuses Extra Attack's own
+  // scope vocabulary — see the column's comment in `db/schema/origins.ts`.
+  if (row.weapon_scope !== undefined) {
+    if (
+      kind !== 'attack_ability_override' &&
+      kind !== 'weapon_attack_bonus' &&
+      kind !== 'weapon_damage_bonus'
+    ) {
+      throw new ShareValidationError(
+        `${label}.weapon_scope requires a kind that uses one.`,
+      );
+    }
+    if (
+      typeof row.weapon_scope !== 'string' ||
+      !extraAttackWeaponScopes.includes(
+        row.weapon_scope as (typeof extraAttackWeaponScopes)[number],
+      )
+    ) {
+      throw new ShareValidationError(`${label}.weapon_scope is unsupported.`);
+    }
+    effect.weapon_scope = row.weapon_scope;
+  }
+
+  // THE PER-KIND COMPLETENESS RULES — the kind REQUIRES its payload, mirroring
+  // the table's own CHECKs and `effectPayloadKindError` exactly.
+  if (kind === 'ability_increase') {
+    // The `ability_increase` payload (v4, B2), held to EXACTLY the table's own
+    // CHECKs: the three fields together and only for this kind — and, unlike
+    // every other kind, a REQUIRED `sourceRef`. The format's "travels without
+    // provenance" allowance does not extend here: the table's required-source
+    // CHECK would make our own importer refuse the document, and this
+    // validator runs on export too, so the refusal happens while the
+    // character is still on the sender's screen.
+    if (
+      effect.ability === undefined ||
+      effect.amount === undefined ||
+      effect.maximum === undefined
+    ) {
+      throw new ShareValidationError(
+        `${label} kind ability_increase requires ability, amount and maximum.`,
+      );
+    }
     if (effect.sourceRef === undefined) {
       throw new ShareValidationError(
         `${label} kind ability_increase requires a sourceRef.`,
       );
     }
+  } else if (kind === 'armor_class_bonus') {
+    if (effect.amount === undefined) {
+      throw new ShareValidationError(
+        `${label} kind armor_class_bonus requires an amount.`,
+      );
+    }
+  } else if (kind === 'armor_class_formula') {
+    if (
+      effect.base === undefined ||
+      effect.ability_1 === undefined ||
+      effect.allows_shield === undefined
+    ) {
+      throw new ShareValidationError(
+        `${label} kind armor_class_formula requires base, ability_1 and allows_shield.`,
+      );
+    }
+  } else if (kind === 'attack_ability_override') {
+    if (effect.ability === undefined || effect.weapon_scope === undefined) {
+      throw new ShareValidationError(
+        `${label} kind attack_ability_override requires ability and weapon_scope.`,
+      );
+    }
+  } else if (
+    kind === 'weapon_attack_bonus' ||
+    kind === 'weapon_damage_bonus'
+  ) {
+    if (effect.amount === undefined || effect.weapon_scope === undefined) {
+      throw new ShareValidationError(
+        `${label} kind ${kind} requires an amount and weapon_scope.`,
+      );
+    }
   }
   return effect as unknown as ShareEffect;
+}
+
+/**
+ * One item, held to EXACTLY the constraints `character_items` declares
+ * (AC-1, D72). The same reason `shareEffect` gives, one paragraph up: a
+ * hand-edited document reaching the INSERT with an unsupported shape aborts
+ * the whole import transaction with a raw SQLITE error naming nothing the
+ * user could act on.
+ */
+function shareItem(
+  value: unknown,
+  label: string,
+  knownSourceIds: ReadonlySet<number>,
+): ShareItem {
+  const row = record(value, label);
+  exactKeys(
+    row,
+    ['name', 'requires_attunement', 'attuned'],
+    ['description', 'sourceRef'],
+    label,
+  );
+  if (typeof row.requires_attunement !== 'boolean') {
+    throw new ShareValidationError(
+      `${label}.requires_attunement must be boolean.`,
+    );
+  }
+  if (typeof row.attuned !== 'boolean') {
+    throw new ShareValidationError(`${label}.attuned must be boolean.`);
+  }
+  const item: Record<string, unknown> = {
+    // Non-empty, matching `character_effects.label`: an item nobody can name
+    // is an item nobody can find to edit or delete.
+    name: text(row.name, `${label}.name`, ORIGIN_TEXT_LIMITS.trait_name),
+    requires_attunement: row.requires_attunement,
+    attuned: row.attuned,
+  };
+  if (row.description !== undefined) {
+    item.description = text(
+      row.description,
+      `${label}.description`,
+      ORIGIN_TEXT_LIMITS.description,
+    );
+  }
+  if (row.sourceRef !== undefined) {
+    const ref = integer(row.sourceRef, `${label}.sourceRef`, 0, 119);
+    // The SAME reference space `effects[].sourceRef` uses, checked the same
+    // way: a ref naming no source in this document would import as an item
+    // pointing at nothing, which the composite foreign key would then refuse
+    // mid-transaction with a message naming neither the item nor the source.
+    if (!knownSourceIds.has(ref)) {
+      throw new ShareValidationError(`${label}.sourceRef is unknown.`);
+    }
+    item.sourceRef = ref;
+  }
+  return item as unknown as ShareItem;
 }
 
 function shareBackground(value: unknown, label: string): ShareBackground {
@@ -1598,6 +1852,7 @@ export function validateShareDocument(
       'sheetAdjustment',
       'effects',
       'skillGrants',
+      'items',
     ],
     'document',
   );
@@ -2100,6 +2355,17 @@ export function validateShareDocument(
     // the schema's index on `(character_id)` is deliberately not unique.
   }
 
+  // THE CHARACTER'S OWN ITEMS (wire v8, AC-1, D72). NOT `assertUnique`, for
+  // the identical reason `effects` just above gives: two identical Rings of
+  // Shell is a real build, and the schema's index on `(character_id)` is
+  // deliberately not unique.
+  let items: CharacterShareDocument['items'] | undefined;
+  if (source.items !== undefined) {
+    items = list(source.items, 'items', SHARE_LIMITS.items).map(
+      (item, index) => shareItem(item, `items[${index}]`, knownIds),
+    );
+  }
+
   let armor: CharacterShareDocument['armor'] | undefined;
   if (source.armor !== undefined) {
     // The count cap is 2 and not a `SHARE_LIMITS` entry, because the cap here
@@ -2240,5 +2506,6 @@ export function validateShareDocument(
     ...(sheetAdjustment === undefined ? {} : { sheetAdjustment }),
     ...(effects === undefined ? {} : { effects }),
     ...(skillGrants === undefined ? {} : { skillGrants }),
+    ...(items === undefined ? {} : { items }),
   };
 }

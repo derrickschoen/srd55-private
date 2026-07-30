@@ -13,6 +13,7 @@ import abilityIncrease from '../../drizzle/0009_ability_increase.sql?raw';
 import characterSkillGrants from '../../drizzle/0010_character_skill_grants.sql?raw';
 import equipmentProvenance from '../../drizzle/0011_equipment_provenance.sql?raw';
 import removeEquipmentProvenance from '../../drizzle/0012_remove_equipment_provenance.sql?raw';
+import armorClassItemsAndEffects from '../../drizzle/0013_armor_class_items_and_effects.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -148,6 +149,19 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
     // the removal is exact: 0012 restores the pre-0011 schema shape.
     resultSchemaChecksum:
       'ba7cd3692fae389a569fcbec8afb3dc3058f212f129bebb61b4976f31b65c587',
+  }),
+  // AC-1 (D72): the vocabulary and persistence for Armor Class formulas,
+  // bonuses and weapon-scoped modifiers, plus the new `character_items`
+  // table. Widens `character_effects` with five new kinds, five new payload
+  // columns, and widened `amount`/`ability` kind-scoped CHECKs; creates
+  // `character_items` fresh. `docs/design/2026-07-29-armor-class-items-and-effects.md`.
+  Object.freeze({
+    id: '0013_armor_class_items_and_effects',
+    sql: armorClassItemsAndEffects,
+    checksum:
+      '22cfd200c40d46ffbf698f7a3da92bca49f087bdbfdbee3e21bc07405aa4bf52',
+    resultSchemaChecksum:
+      'b8b13b323d1eb176c490b688413f2eacb2e8e19c96c4933a6a159165e9dcdfa1',
   }),
 ]);
 

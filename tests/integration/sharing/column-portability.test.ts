@@ -771,6 +771,11 @@ const PROBES: { readonly [N in ProbedTable]: Probe<N> } = {
       ability: { kind: 'verbatim' },
       amount: { kind: 'verbatim' },
       maximum: { kind: 'verbatim' },
+      base: { kind: 'verbatim' },
+      ability_1: { kind: 'verbatim' },
+      ability_2: { kind: 'verbatim' },
+      allows_shield: { kind: 'verbatim' },
+      weapon_scope: { kind: 'verbatim' },
       source_instance_id: {
         kind: 'translated',
         key: '(SELECT display_name FROM character_source_instances WHERE id = t.source_instance_id)',
@@ -778,6 +783,24 @@ const PROBES: { readonly [N in ProbedTable]: Probe<N> } = {
       },
       label: { kind: 'verbatim' },
       notes: { kind: 'verbatim' },
+      created_at: OWNED_TIMESTAMP,
+      updated_at: OWNED_TIMESTAMP,
+    },
+  },
+  character_items: {
+    order: 't.id',
+    columns: {
+      id: RECIPIENT_ROW_ID,
+      character_id: RECIPIENT_OWNER_ID,
+      name: { kind: 'verbatim' },
+      description: { kind: 'verbatim' },
+      requires_attunement: { kind: 'verbatim' },
+      attuned: { kind: 'verbatim' },
+      source_instance_id: {
+        kind: 'translated',
+        key: '(SELECT display_name FROM character_source_instances WHERE id = t.source_instance_id)',
+        why: 'The identical translation `character_effects.source_instance_id` gets, for the identical reason (AC-1, D72): the recipient\'s source row has its own id.',
+      },
       created_at: OWNED_TIMESTAMP,
       updated_at: OWNED_TIMESTAMP,
     },
@@ -1338,6 +1361,40 @@ function seedSender(db: DatabaseContext, catalog: Catalog): number {
      )`,
     [characterId, classSourceId, SENDER_TIME, SENDER_TIME],
   );
+  // TWO MORE EFFECTS (AC-1, D72), proving the five new payload columns:
+  // `armor_class_formula` carries base/ability_1/ability_2/allows_shield;
+  // `attack_ability_override` carries weapon_scope (and reuses `ability`,
+  // already proved distinctive by the ability_increase row above).
+  db.exec(
+    `INSERT INTO character_effects (
+       character_id, sort_order, effect_kind, base, ability_1, ability_2,
+       allows_shield, label, notes, created_at, updated_at
+     ) VALUES (
+       ?, 15, 'armor_class_formula', 13, 'dexterity', 'constitution', 1,
+       'Sender Shell', 'sender formula note', ?, ?
+     )`,
+    [characterId, SENDER_TIME, SENDER_TIME],
+  );
+  db.exec(
+    `INSERT INTO character_effects (
+       character_id, sort_order, effect_kind, ability, weapon_scope,
+       label, notes, created_at, updated_at
+     ) VALUES (
+       ?, 18, 'attack_ability_override', 'charisma', 'one_bonded_weapon',
+       'Sender Pact', 'sender override note', ?, ?
+     )`,
+    [characterId, SENDER_TIME, SENDER_TIME],
+  );
+  // ONE ITEM (AC-1, D72), attuned and sourced, so both the `verbatim` booleans
+  // and the `translated` source reference are proved: default `false` for both
+  // flags would make the distinctive-value check above vacuous.
+  db.exec(
+    `INSERT INTO character_items (
+       character_id, name, description, requires_attunement, attuned,
+       source_instance_id, created_at, updated_at
+     ) VALUES (?, 'Sender Trinket', 'sender item description', 1, 1, ?, ?, ?)`,
+    [characterId, classSourceId, SENDER_TIME, SENDER_TIME],
+  );
   // A SAVE POINT. It is `backup: true, share: false`, so it plays no part in
   // the share probe above and would leave the backup comparison below with an
   // empty table — the vacuous pass a guard like this dies of. The snapshot is a
@@ -1703,13 +1760,14 @@ afterAll(() => {
 });
 
 describe('every column of every shared table is classified', () => {
-  it('probes the character root, all nineteen share tables, and spell references', () => {
+  it('probes the character root, all twenty share tables, and spell references', () => {
     expect([...PROBED_TABLES].sort()).toEqual(
       ['characters', 'spell_versions', ...Object.keys(SHARE_TABLES)].sort(),
     );
-    // The type already forces the nineteen shared tables; the exact runtime
-    // roster additionally pins the character root and reference-only spell row.
-    expect(PROBED_TABLES).toHaveLength(21);
+    // The type already forces the twenty shared tables (AC-1 added
+    // `character_items`); the exact runtime roster additionally pins the
+    // character root and reference-only spell row.
+    expect(PROBED_TABLES).toHaveLength(22);
   });
 
   it('records why each deliberately retired column no longer travels', () => {

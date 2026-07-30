@@ -787,6 +787,42 @@ const sourcedCharacterEffect =
     });
   };
 
+/**
+ * AC-1 (D72) fixtures. `armorClassFormulaEffect` defaults to the Armadillo
+ * species' own formula (13 + DEX, shield permitted); `weaponScopedCharacterEffect`
+ * defaults to Pact-of-the-Blade-shaped `attack_ability_override` (one bonded
+ * weapon). Neither needs `sourcedCharacterEffect`'s granting source: unlike
+ * `ability_increase`, no new kind's CHECK requires one.
+ */
+const armorClassFormulaEffect =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'character_effects', {
+      character_id: newCharacter(db),
+      sort_order: 1,
+      effect_kind: 'armor_class_formula',
+      base: 13,
+      ability_1: 'dexterity',
+      allows_shield: 1,
+      label: uid('Formula'),
+      ...values,
+    });
+  };
+
+const weaponScopedCharacterEffect =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'character_effects', {
+      character_id: newCharacter(db),
+      sort_order: 1,
+      effect_kind: 'attack_ability_override',
+      ability: 'charisma',
+      weapon_scope: 'one_bonded_weapon',
+      label: uid('Override'),
+      ...values,
+    });
+  };
+
 interface ConstraintCase {
   readonly constraint: string;
   /** Writes that MUST be refused, each with the corruption it would have made. */
@@ -1884,6 +1920,9 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     ],
     accepts: [
       ['an ability payload on an ability contribution', sourcedCharacterEffect({ ability: 'wisdom' })],
+      // WIDENED (AC-1, D72): the same column is now also
+      // `attack_ability_override`'s payload.
+      ['an ability payload on an attack override', weaponScopedCharacterEffect({})],
     ],
   },
   {
@@ -1893,6 +1932,11 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     ],
     accepts: [
       ['an amount payload on an ability contribution', sourcedCharacterEffect({ amount: 2 })],
+      // WIDENED (AC-1, D72): the same column is now also `armor_class_bonus`'s
+      // flat addend and `weapon_attack_bonus` / `weapon_damage_bonus`'s
+      // weapon-scoped bonus.
+      ['an amount payload on an armor class bonus', characterEffect({ effect_kind: 'armor_class_bonus', amount: 1 })],
+      ['an amount payload on a weapon attack bonus', characterEffect({ effect_kind: 'weapon_attack_bonus', amount: 1, weapon_scope: 'any_weapon' })],
     ],
   },
   {
@@ -1952,6 +1996,149 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     accepts: [
       ['the seam minimum', sourcedCharacterEffect({ maximum: 1 })],
       ['the seam maximum', sourcedCharacterEffect({ maximum: 30 })],
+    ],
+  },
+  // --- AC-1 (D72): the five new kinds' own kind-scope, payload-completeness
+  // and value-domain CHECKs. ---------------------------------------------
+  {
+    constraint: 'character_effects_base_kind_check',
+    rejects: [
+      ['a base on a resistance', characterEffect({ base: 13 })],
+    ],
+    accepts: [
+      ['a base on an armor class formula', armorClassFormulaEffect({})],
+    ],
+  },
+  {
+    constraint: 'character_effects_ability_1_kind_check',
+    rejects: [
+      ['an ability_1 on a resistance', characterEffect({ ability_1: 'dexterity' })],
+    ],
+    accepts: [
+      ['an ability_1 on an armor class formula', armorClassFormulaEffect({})],
+    ],
+  },
+  {
+    constraint: 'character_effects_ability_2_kind_check',
+    rejects: [
+      ['an ability_2 on a resistance', characterEffect({ ability_2: 'constitution' })],
+    ],
+    accepts: [
+      // The Armadillo Paladin's own formula: 10 + CON + CHA.
+      ['an ability_2 on a two-ability armor class formula', armorClassFormulaEffect({ base: 10, ability_1: 'constitution', ability_2: 'charisma' })],
+    ],
+  },
+  {
+    constraint: 'character_effects_allows_shield_kind_check',
+    rejects: [
+      ['an allows_shield on a resistance', characterEffect({ allows_shield: 1 })],
+    ],
+    accepts: [
+      // The Monk's own formula: shield forbidden.
+      ['allows_shield false on an armor class formula', armorClassFormulaEffect({ ability_2: 'wisdom', allows_shield: 0 })],
+    ],
+  },
+  {
+    constraint: 'character_effects_weapon_scope_kind_check',
+    rejects: [
+      ['a weapon_scope on a resistance', characterEffect({ weapon_scope: 'any_weapon' })],
+    ],
+    accepts: [
+      ['a weapon_scope on an attack override', weaponScopedCharacterEffect({})],
+      ['a weapon_scope on a weapon attack bonus', characterEffect({ effect_kind: 'weapon_attack_bonus', amount: 1, weapon_scope: 'any_weapon' })],
+      ['a weapon_scope on a weapon damage bonus', characterEffect({ effect_kind: 'weapon_damage_bonus', amount: 2, weapon_scope: 'one_bonded_weapon' })],
+    ],
+  },
+  {
+    constraint: 'character_effects_armor_class_bonus_payload_check',
+    rejects: [
+      ['an armor class bonus promising a number and carrying none', characterEffect({ effect_kind: 'armor_class_bonus' })],
+    ],
+    accepts: [
+      ['an armor class bonus carrying its amount', characterEffect({ effect_kind: 'armor_class_bonus', amount: 1 })],
+    ],
+  },
+  {
+    constraint: 'character_effects_armor_class_formula_payload_check',
+    rejects: [
+      ['an armor class formula missing base', characterEffect({ effect_kind: 'armor_class_formula', ability_1: 'dexterity', allows_shield: 1 })],
+      ['an armor class formula missing ability_1', characterEffect({ effect_kind: 'armor_class_formula', base: 13, allows_shield: 1 })],
+      ['an armor class formula missing allows_shield', characterEffect({ effect_kind: 'armor_class_formula', base: 13, ability_1: 'dexterity' })],
+    ],
+    accepts: [
+      ['the complete one-ability payload (the Armadillo species)', armorClassFormulaEffect({})],
+      ['the complete two-ability payload (the Armadillo Paladin)', armorClassFormulaEffect({ base: 10, ability_1: 'constitution', ability_2: 'charisma' })],
+    ],
+  },
+  {
+    constraint: 'character_effects_attack_ability_override_payload_check',
+    rejects: [
+      ['an attack override missing ability', characterEffect({ effect_kind: 'attack_ability_override', weapon_scope: 'any_weapon' })],
+      ['an attack override missing weapon_scope', characterEffect({ effect_kind: 'attack_ability_override', ability: 'charisma' })],
+    ],
+    accepts: [
+      ['the complete payload (Pact of the Blade)', weaponScopedCharacterEffect({})],
+    ],
+  },
+  {
+    constraint: 'character_effects_weapon_attack_bonus_payload_check',
+    rejects: [
+      ['a weapon attack bonus missing amount', characterEffect({ effect_kind: 'weapon_attack_bonus', weapon_scope: 'any_weapon' })],
+      ['a weapon attack bonus missing weapon_scope', characterEffect({ effect_kind: 'weapon_attack_bonus', amount: 1 })],
+    ],
+    accepts: [
+      ['the complete payload (a +1 weapon)', characterEffect({ effect_kind: 'weapon_attack_bonus', amount: 1, weapon_scope: 'any_weapon' })],
+    ],
+  },
+  {
+    constraint: 'character_effects_weapon_damage_bonus_payload_check',
+    rejects: [
+      ['a weapon damage bonus missing amount', characterEffect({ effect_kind: 'weapon_damage_bonus', weapon_scope: 'any_weapon' })],
+      ['a weapon damage bonus missing weapon_scope', characterEffect({ effect_kind: 'weapon_damage_bonus', amount: 2 })],
+    ],
+    accepts: [
+      ['the complete payload (a flat damage bonus)', characterEffect({ effect_kind: 'weapon_damage_bonus', amount: 2, weapon_scope: 'one_bonded_weapon' })],
+    ],
+  },
+  {
+    constraint: 'character_effects_base_check',
+    rejects: [
+      ['a zero base', armorClassFormulaEffect({ base: 0 })],
+      ['a negative base', armorClassFormulaEffect({ base: -1 })],
+      ['a fractional base', armorClassFormulaEffect({ base: 13.5 })],
+      ['a text base', armorClassFormulaEffect({ base: 'thirteen' })],
+    ],
+    accepts: [
+      ['the seam minimum', armorClassFormulaEffect({ base: 1 })],
+      ['the Armadillo species base', armorClassFormulaEffect({ base: 13 })],
+    ],
+  },
+  {
+    constraint: 'character_effects_ability_1_check',
+    rejects: [
+      ['an unknown ability_1 vocabulary value', armorClassFormulaEffect({ ability_1: 'luck' })],
+    ],
+    accepts: [
+      ["the Monk's own ability_1", armorClassFormulaEffect({ ability_1: 'wisdom' })],
+    ],
+  },
+  {
+    constraint: 'character_effects_ability_2_check',
+    rejects: [
+      ['an unknown ability_2 vocabulary value', armorClassFormulaEffect({ ability_2: 'luck' })],
+    ],
+    accepts: [
+      ["the Monk's own ability_2", armorClassFormulaEffect({ ability_2: 'wisdom' })],
+    ],
+  },
+  {
+    constraint: 'character_effects_weapon_scope_check',
+    rejects: [
+      ['an unknown weapon_scope vocabulary value', weaponScopedCharacterEffect({ weapon_scope: 'every_weapon' })],
+    ],
+    accepts: [
+      ['any_weapon', weaponScopedCharacterEffect({ weapon_scope: 'any_weapon' })],
+      ['one_bonded_weapon', weaponScopedCharacterEffect({ weapon_scope: 'one_bonded_weapon' })],
     ],
   },
   {

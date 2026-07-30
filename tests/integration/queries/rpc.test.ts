@@ -381,7 +381,7 @@ describe('typed query RPC integration', () => {
     ).toEqual({
       character_id: characterId,
       label: 'RPC checkpoint',
-      schema_version: 'a7-v9',
+      schema_version: 'a7-v10',
     });
     if (!workspace.ok) {
       throw new Error('Save-point creation unexpectedly failed.');

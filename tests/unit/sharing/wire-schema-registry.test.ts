@@ -241,6 +241,56 @@ const VERSION_FIXTURES = {
       ],
     },
   },
+  8: {
+    // Independently compressed from a hand-authored v8 positional tuple —
+    // never from `shareDocumentToPositional` (AC-1, D72;
+    // `docs/design/2026-07-29-armor-class-items-and-effects.md`). The effect's
+    // last five positions are the new `armor_class_formula` payload (base,
+    // ability_1, ability_2, allows_shield, weapon_scope); the trailing root
+    // element is the new `items` list — the section v8 exists for.
+    fragment:
+      'H4sIAAAAAAAAA3VOywrCMBD8lbDnFKyKiDcvouBJvYUiS7u1wU0qmwQfXy9qRS0IyxxmZmfG' +
+      'QOWrzCWOtmQMIQsnYg5Z2aBgGUmy0KAQ6Kk2sIrk1Nr6o1qStKB9Yv6CfNJnYDgYjr994NAn' +
+      'ZCi0MYOXPHv2zs72hlJ13pHOe1FFoc3v9ao-YAyguFb2z-B93YpLjKBhRyGq-UNSizf5N-Uv' +
+      '5CMNFV0iiY3XLiBKovfMnyEb6w-qrdW2IebOXCMH6vD1U9wBJBACeYYBAAA',
+    expected: {
+      format: CHARACTER_SHARE_FORMAT,
+      version: CHARACTER_SHARE_VERSION,
+      character: {
+        name: 'Item Link Hero',
+        intelligence: 16,
+        rules_edition_preference: '2024',
+        ability_allocation_method: 'manual',
+      },
+      classes: [{
+        id: 0,
+        classKey: '2024:class:wizard',
+        level: 3,
+        start: 1,
+      }],
+      sources: [],
+      selections: [],
+      spellbook: [],
+      preferences: [],
+      overrides: [],
+      effects: [
+        {
+          kind: 'armor_class_formula',
+          label: 'Test Armor Formula',
+          base: 13,
+          ability_1: 'dexterity',
+          allows_shield: true,
+        },
+      ],
+      items: [
+        {
+          name: 'Ring of Shell',
+          requires_attunement: false,
+          attuned: false,
+        },
+      ],
+    },
+  },
 } satisfies Record<SupportedShareVersion, FrozenFixture>;
 
 const HISTORICAL_SCHEMA_MODULE_SHA256 = {

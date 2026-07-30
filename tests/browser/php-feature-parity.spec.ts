@@ -187,6 +187,13 @@ async function portableTableCounts(
       await rows(page, 'character_effects'),
       characterId,
     ).length,
+    // The character's own ITEMS (AC-1, D72) joined on the same terms: a
+    // document that does not carry them silently loses every thing the
+    // player owns that only modifies.
+    character_items: forCharacter(
+      await rows(page, 'character_items'),
+      characterId,
+    ).length,
     // And the four stored sheet inputs, on the same terms again: a document
     // that does not carry them is a document that silently loses a player's
     // armour, their rolled hit points and the skills they chose.
@@ -526,6 +533,7 @@ test('captures every restorable character table and reports exact state differen
     'character_skill_proficiencies',
     'character_sheet_adjustments',
     'character_effects',
+    'character_items',
   ]) {
     expect(document.tables[table]).toEqual(
       forCharacter(await rows(page, table), workspaceImage.ids.character),
@@ -545,6 +553,10 @@ test('captures every restorable character table and reports exact state differen
     // resistance and hit point bonus they have.
     'character_effects',
     'character_hit_point_rolls',
+    // Added when the AC-1 (D72) items table joined the portable document: a
+    // backup without this key silently loses every thing the player owns
+    // that only modifies.
+    'character_items',
     'character_rule_overrides',
     'character_save_points',
     'character_sheet_adjustments',
@@ -581,6 +593,7 @@ test('captures every restorable character table and reports exact state differen
     'character_skill_proficiencies',
     'character_sheet_adjustments',
     'character_effects',
+    'character_items',
   ]) {
     expect(document.tables[table], `${table} is captured exactly`).toEqual([]);
   }
@@ -859,9 +872,9 @@ test('round-trips a named save point through the mutation path', async ({
   )[0]!;
   expect(point).toMatchObject({
     label: 'Before experiment',
-    // a7-v9 is the snapshot version that carries character_skill_grants
-    // (skills-with-provenance S-A; a7-v8 was hand-frozen first).
-    schema_version: 'a7-v9',
+    // a7-v10 is the snapshot version that carries character_items
+    // (AC-1, D72; a7-v9 was hand-frozen first).
+    schema_version: 'a7-v10',
   });
   await execute(
     page,
@@ -1119,7 +1132,7 @@ test('undoes a structural class change through its snapshot inverse', async ({
   );
   expect(changed.inverse).toMatchObject({
     type: 'restore_snapshot',
-    snapshot: { schema_version: 'a7-v9' },
+    snapshot: { schema_version: 'a7-v10' },
     integrity: expect.any(String),
   });
   await execute(

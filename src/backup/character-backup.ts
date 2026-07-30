@@ -1686,6 +1686,7 @@ interface CurrentImportMaps {
   readonly character_skill_grants: Map<number, number>;
   readonly character_sheet_adjustments: Map<number, number>;
   readonly character_effects: Map<number, number>;
+  readonly character_items: Map<number, number>;
   readonly spell_loadouts: Map<number, number>;
   readonly sourceUuids: Map<number, string>;
   readonly sourceRows: Map<number, BackupRow>;
@@ -1713,6 +1714,7 @@ function importCurrentTables(
     character_skill_grants: new Map(),
     character_sheet_adjustments: new Map(),
     character_effects: new Map(),
+    character_items: new Map(),
     spell_loadouts: new Map(),
     sourceUuids: new Map(),
     sourceRows: new Map(
@@ -1998,6 +2000,34 @@ function importCurrentTables(
       new Set(),
     );
   }
+  // The character's own items (AC-1, D72). `source_instance_id` is the ONLY
+  // column here that needs rewriting, remapped rather than resolved on the
+  // IDENTICAL terms `character_effects.source_instance_id` just above: it
+  // points at another CHARACTER-OWNED row whose id this import has just
+  // minted. A null stays null — most items have no source instance — and a
+  // non-null id the document does not describe is refused rather than
+  // silently nulled, because that document is internally inconsistent.
+  for (const row of document.tables.character_items) {
+    const oldItemSourceId =
+      row.source_instance_id === null ? null : Number(row.source_instance_id);
+    let itemSourceId: number | null = null;
+    if (oldItemSourceId !== null) {
+      const mapped = maps.character_source_instances.get(oldItemSourceId);
+      if (mapped === undefined) {
+        throw new BackupValidationError(
+          'Character backup item source is missing.',
+        );
+      }
+      itemSourceId = mapped;
+    }
+    maps.character_items.set(
+      Number(row.id),
+      insertPortableRow(db, 'character_items', row, {
+        character_id: characterId,
+        source_instance_id: itemSourceId,
+      }),
+    );
+  }
   for (const row of document.tables.character_sheet_adjustments) {
     maps.character_sheet_adjustments.set(
       Number(row.id),
@@ -2093,6 +2123,7 @@ function portableSnapshots(
     character_skill_grants: new Map(current.character_skill_grants),
     character_sheet_adjustments: new Map(current.character_sheet_adjustments),
     character_effects: new Map(current.character_effects),
+    character_items: new Map(current.character_items),
   };
   const next = Object.fromEntries(
     CHARACTER_STATE_TABLES.map((table) => [
@@ -2262,6 +2293,23 @@ function portableSnapshots(
         // pointing at another character's source instance — which the composite
         // foreign key would then refuse on the next restore, mid-undo.
         case 'character_effects':
+          return rowsOf(table).map((row) => ({
+            ...row,
+            id: ids[table].get(Number(row.id)),
+            character_id: characterId,
+            source_instance_id:
+              row.source_instance_id === null
+                ? null
+                : ids.character_source_instances.get(
+                    Number(row.source_instance_id),
+                  ) ?? null,
+          }));
+        // `character_items` needs its OWN branch too, on the IDENTICAL terms
+        // `character_effects` does one arm up: it is the second character-owned
+        // table to reference another one via a nullable `source_instance_id`
+        // (AC-1, D72), and leaving it in the plain-remap group would write a
+        // snapshot pointing at another character's source instance.
+        case 'character_items':
           return rowsOf(table).map((row) => ({
             ...row,
             id: ids[table].get(Number(row.id)),

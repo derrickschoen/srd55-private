@@ -68,6 +68,9 @@ const SNAPSHOT_ADDITIONS = [
   // of (skills plan, S-A). Snapshot-scoped so undo restores a grant WITH its
   // lifecycle state.
   'character_skill_grants',
+  // The character's own items (AC-1, D72): things that only modify, speaking
+  // through `character_effects` rather than carrying their own columns.
+  'character_items',
 ] as const;
 const BACKUP_DIRECT_ADDITIONS = [
   'character_weapons',
@@ -80,6 +83,7 @@ const BACKUP_DIRECT_ADDITIONS = [
   'character_sheet_adjustments',
   'character_effects',
   'character_skill_grants',
+  'character_items',
 ] as const;
 describe('derived table scopes reproduce the hand-maintained lists', () => {
   it('reproduces applicationTables exactly (database-lifecycle.ts)', () => {
@@ -99,6 +103,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       'character_class_levels',
       'character_effects',
       'character_hit_point_rolls',
+      'character_items',
       'character_operations',
       'character_rule_overrides',
       'character_save_points',
@@ -190,6 +195,9 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       // references `character_source_instances` through the same composite
       // key, so it deletes here with the other leaves.
       'character_skill_grants',
+      // A leaf on the same terms again (AC-1, D72): no children, references
+      // `character_source_instances` through the same composite key.
+      'character_items',
       'character_species_traits',
       'character_species',
       'character_background',
@@ -257,6 +265,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       'character_sheet_adjustments',
       'character_effects',
       'character_skill_grants',
+      'character_items',
     ]);
     for (const table of BACKUP_OPTIONAL_TABLES) {
       expect([...BACKUP_TABLES]).toContain(table);
@@ -301,7 +310,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
 });
 
 describe('table scope classification', () => {
-  it('classifies all 61 tables exactly once', () => {
+  it('classifies all 62 tables exactly once', () => {
     const names = Object.keys(TABLE_SCOPES);
     // 30 Laravel-derived tables — 38 until the eight Laravel-only
     // infrastructure ones were dropped — plus the four native weapon tables,
@@ -310,12 +319,13 @@ describe('table scope classification', () => {
     // tables — one per side of the catalog/character split — the TWO
     // progression-ladder tables the spell catalog gained,
     // `spell_version_upcast_levels` (slot levels) and
-    // `spell_version_cantrip_upgrade_levels` (character levels), and the ONE
-    // skills-with-provenance table, `character_skill_grants` (S-A). Each group
-    // is named rather than folded into one total, so a group that vanishes
-    // while another grows cannot pass unnoticed.
-    expect(names).toHaveLength(61);
-    expect(new Set(names).size).toBe(61);
+    // `spell_version_cantrip_upgrade_levels` (character levels), the ONE
+    // skills-with-provenance table, `character_skill_grants` (S-A), and the
+    // ONE items table, `character_items` (AC-1, D72). Each group is named
+    // rather than folded into one total, so a group that vanishes while
+    // another grows cannot pass unnoticed.
+    expect(names).toHaveLength(62);
+    expect(new Set(names).size).toBe(62);
     expect([...names].sort()).toEqual([...APPLICATION_TABLES].sort());
   });
 

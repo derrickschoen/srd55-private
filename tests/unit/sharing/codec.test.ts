@@ -953,6 +953,31 @@ const COMPLETE_V7_WIRE = [
   ...COMPLETE_V5_WIRE.slice(2),
 ];
 
+/**
+ * THE COMPLETE DOCUMENT, RE-EXPRESSED AT V8 (AC-1, D72). Built the way every
+ * earlier version was: every position a bump does not touch is SLICED from
+ * the frozen v7 literal, and only what v8 actually changes is written out —
+ * the version slot, five appended nulls on every EFFECT tuple (`complete`
+ * sets none of the new AC-1 payload fields), and a trailing `null` ROOT
+ * element for `items` (`complete` owns none). Nothing here is produced by
+ * `shareDocumentToPositional` — that would make the layout pin circular.
+ */
+const COMPLETE_V8_WIRE = [
+  COMPLETE_V7_WIRE[0],
+  8,
+  ...COMPLETE_V7_WIRE.slice(2, 14),
+  (COMPLETE_V7_WIRE[14] as unknown[][]).map((effect) => [
+    ...effect,
+    null,
+    null,
+    null,
+    null,
+    null,
+  ]),
+  ...COMPLETE_V7_WIRE.slice(15),
+  null,
+];
+
 describe('character-share positional codec', () => {
   it('refuses the hand-authored complete version-1 positional golden BY NAME', () => {
     // D60: pre-v5 documents are RETIRED, not migrated. This fixture stays
@@ -979,11 +1004,18 @@ describe('character-share positional codec', () => {
   });
 
   it('keeps a hand-authored complete version-7 positional golden readable', () => {
+    // Through the 7→8 null-pad (AC-1, D72): five trailing nulls on every
+    // effect tuple and a trailing null root element, decoding to the same
+    // document it always meant.
     expect(positionalToShareDocument(COMPLETE_V7_WIRE)).toEqual(complete);
   });
 
-  it('pins the hand-authored complete version-7 wire layout element by element', () => {
-    expect(shareDocumentToPositional(complete)).toEqual(COMPLETE_V7_WIRE);
+  it('keeps a hand-authored complete version-8 positional golden readable', () => {
+    expect(positionalToShareDocument(COMPLETE_V8_WIRE)).toEqual(complete);
+  });
+
+  it('pins the hand-authored complete version-8 wire layout element by element', () => {
+    expect(shareDocumentToPositional(complete)).toEqual(COMPLETE_V8_WIRE);
   });
 
   it('round-trips object, positional, gzip, and base64url forms', async () => {
@@ -1125,7 +1157,7 @@ describe('character-share positional codec', () => {
     const positional = shareDocumentToPositional(minimal);
     expect(positional).toEqual([
       'dnd-multiclass-spells-character-share',
-      7,
+      8,
       [
         'Ten',
         null,
@@ -1184,8 +1216,10 @@ describe('character-share positional codec', () => {
       // the same terms as every other always-written, absent-decodes-to-
       // absent-key section above.
       null,
+      // Element 17: the AC-1 (D72) items section (v8), on the identical terms.
+      null,
     ]);
-    expect(positional).toHaveLength(17);
+    expect(positional).toHaveLength(18);
     expect((positional[2] as unknown[]).length).toBe(12);
     expect((positional[3] as unknown[][])[0]).toHaveLength(8);
     expect((positional[4] as unknown[][])[0]).toHaveLength(6);
@@ -1201,6 +1235,7 @@ describe('character-share positional codec', () => {
     expect(minimal).not.toHaveProperty('sheetAdjustment');
     expect(minimal).not.toHaveProperty('effects');
     expect(minimal).not.toHaveProperty('skillGrants');
+    expect(minimal).not.toHaveProperty('items');
     await expect(
       decodeShareFragment(await encodeShareFragment(minimal)),
     ).resolves.toEqual(minimal);
@@ -1782,6 +1817,7 @@ describe('a share link generated before the sheet inputs travelled', () => {
     const currentWithoutSheet = [...migratedRoot];
     currentWithoutSheet[1] = CHARACTER_SHARE_VERSION;
     currentWithoutSheet.push(null); // skillGrants, absent
+    currentWithoutSheet.push(null); // items, absent (AC-1, D72)
     // NOT re-expressed at v6/v7: v6 appended a sourceRef slot to the weapon
     // tuples and v7 (D69) removed it again, so the current weapon tuple is
     // the v5 shape this migrated root already carries.
@@ -2000,6 +2036,7 @@ describe('a share link generated before weapons travelled', () => {
     const baseline = [...migratedRoot];
     baseline[1] = CHARACTER_SHARE_VERSION;
     baseline.push(null); // skillGrants
+    baseline.push(null); // items (AC-1, D72)
     const decodedBaseline = positionalToShareDocument(baseline);
 
     const withNullTupleOrigin = [...baseline];
@@ -2034,6 +2071,7 @@ describe('a share link generated before weapons travelled', () => {
     withWeapons[1] = CHARACTER_SHARE_VERSION;
     withWeapons[11] = []; // weapons: explicitly recorded as none
     withWeapons.push(null); // skillGrants
+    withWeapons.push(null); // items (AC-1, D72)
     const decoded = positionalToShareDocument(withWeapons);
     expect(decoded.weapons).toEqual([]);
     expect(decoded).not.toHaveProperty('species');
@@ -2055,6 +2093,7 @@ describe('a share link generated before weapons travelled', () => {
     withOrigin[11] = []; // weapons: explicitly recorded as none
     withOrigin[12] = [null, null, null]; // origin: explicit null-tuple
     withOrigin.push(null); // skillGrants
+    withOrigin.push(null); // items (AC-1, D72)
     const decoded = positionalToShareDocument(withOrigin);
     expect(decoded.weapons).toEqual([]);
     expect(decoded).not.toHaveProperty('armor');
@@ -2168,6 +2207,7 @@ describe('a share link generated before a character note could travel', () => {
     const migratedRoot = migrateV1WireToV4(withNote) as unknown[];
     migratedRoot[1] = CHARACTER_SHARE_VERSION;
     migratedRoot.push(null); // skillGrants
+    migratedRoot.push(null); // items (AC-1, D72)
     const decoded = positionalToShareDocument(migratedRoot);
     expect(decoded.character.notes).toBe(
       'Sent on purpose, by a sharer who opted in.',

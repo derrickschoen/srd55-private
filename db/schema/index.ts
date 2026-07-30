@@ -21,6 +21,7 @@ export * from './origins';
 export * from './relations';
 export * from './columns';
 export * from './equipment';
+export * from './items';
 export * from './sheet';
 export * from './sheet-inputs';
 export * from './weapons';
