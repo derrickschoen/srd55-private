@@ -262,6 +262,86 @@ describe('the weapons panel derives attacks without storing them', () => {
     ]);
   });
 
+  it('consumes eligible +1 weapon and ability-override effects from the database', () => {
+    const weaponId = Number(
+      db.scalar(
+        `SELECT id FROM character_weapons
+         WHERE character_id = ? AND name = 'Longsword'`,
+        [characterId],
+      ),
+    );
+    const unattunedItemId = db.exec(
+      `INSERT INTO character_items
+         (character_id, name, requires_attunement, attuned)
+       VALUES (?, 'Dormant weapon charm', 1, 0)`,
+      [characterId],
+    ).lastInsertId;
+    db.exec(
+      `INSERT INTO character_effects
+         (character_id, sort_order, effect_kind, amount, weapon_scope,
+          character_weapon_id, label)
+       VALUES
+         (?, 1, 'weapon_attack_bonus', 1, 'one_bonded_weapon', ?, '+1 Longsword'),
+         (?, 2, 'weapon_damage_bonus', 1, 'one_bonded_weapon', ?, '+1 Longsword')`,
+      [characterId, weaponId, characterId, weaponId],
+    );
+    db.exec(
+      `INSERT INTO character_effects
+         (character_id, sort_order, effect_kind, ability, weapon_scope,
+          character_weapon_id, label)
+       VALUES
+         (?, 3, 'attack_ability_override', 'charisma', 'one_bonded_weapon', ?,
+          'Pact Shell Blade')`,
+      [characterId, weaponId],
+    );
+    db.exec(
+      `INSERT INTO character_effects
+         (character_id, sort_order, effect_kind, amount, weapon_scope,
+          character_item_id, character_weapon_id, label)
+       VALUES
+         (?, 4, 'weapon_attack_bonus', 10, 'one_bonded_weapon', ?, ?,
+          'Dormant charm');`,
+      [characterId, unattunedItemId, weaponId],
+    );
+
+    const profiles = panel().attacks.weapons[0]?.profiles ?? [];
+    expect(profiles.map((profile) => [profile.kind, profile.label])).toEqual([
+      ['normal', 'Attack'],
+      ['attack_ability_override', 'Pact Shell Blade'],
+    ]);
+    expect(
+      profiles.map((profile) =>
+        profile.abilities.state === 'unavailable'
+          ? []
+          : profile.abilities.options.map((option) => [
+              option.ability,
+              option.attack_bonus,
+              option.damage_modifier,
+            ]),
+      ),
+    ).toEqual([
+      [
+        // Strength 18: +4 ability, +3 proficiency, +1 weapon; damage +4 +1.
+        ['strength', 8, 5],
+        // Dexterity 14: +2 ability, +3 proficiency, +1 weapon; damage +2 +1.
+        ['dexterity', 6, 3],
+      ],
+      [
+        // Charisma 10: +0 ability, +3 proficiency, +1 weapon; damage +0 +1.
+        ['charisma', 4, 1],
+      ],
+    ]);
+    expect(profiles[0]?.notes).toEqual([
+      '+1 Longsword: +1 to this profile’s attack bonus.',
+      '+1 Longsword: +1 to this profile’s damage.',
+    ]);
+    // If this consumer bypasses the shared eligible-effects predicate, the
+    // unattuned charm adds another +10 and every attack number above fails.
+    expect(profiles.flatMap((profile) => profile.notes).join(' ')).not.toContain(
+      'Dormant charm',
+    );
+  });
+
   it('offers no cantrip profile when the catalog holds neither cantrip', () => {
     // The spell catalog is user-supplied and deliberately empty here, which is
     // the state every fresh database is in. Nothing is fabricated for it.

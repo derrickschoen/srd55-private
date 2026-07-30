@@ -666,6 +666,7 @@ describe('the grants a character actually has, read from the database', () => {
         shillelagh: { state: 'not_known' },
         unrecognised: [],
       },
+      effects: [],
     });
 
     // The crossbow gets ONE attack, which is the answer that would have been
@@ -714,6 +715,7 @@ describe('the grants a character actually has, read from the database', () => {
         shillelagh: { state: 'not_known' },
         unrecognised: [],
       },
+      effects: [],
     });
     expect(result.attacks_per_action).toBe(2);
     expect(
