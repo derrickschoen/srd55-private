@@ -37,11 +37,17 @@ const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
  *
  * WHAT THIS DOES NOT COVER: only NUL. A file can still be hard to search for
  * other reasons — an escape nobody would guess at, a name split across a line
- * break — and nothing here sees any of that. Every tracked file in this
- * repository is text today, so there is no binary exemption list to get wrong;
- * if one is ever committed (an image, a font) this test is where the exemption
- * has to be argued, deliberately, rather than being assumed.
+ * break — and nothing here sees any of that. The binary exemption list below is
+ * deliberately narrow, and every addition must be argued here rather than
+ * assumed; its own assertions fail when an exemption stops being necessary.
  */
+
+// These are PWA manifest raster icons: binary by nature and never grep targets.
+// Their SVG source of truth, public/icons/app-icon.svg, remains text and scanned.
+const BINARY_EXEMPT: readonly string[] = [
+  'public/icons/app-icon-192.png',
+  'public/icons/app-icon-512.png',
+];
 
 function trackedFiles(): string[] {
   return execFileSync('git', ['ls-files', '-z'], {
@@ -76,8 +82,16 @@ describe('tracked source is greppable', () => {
     expect(files).toContain('src/queries/character-sheet-builder.ts');
   });
 
+  it('keeps binary exemptions tracked and genuinely binary', () => {
+    for (const file of BINARY_EXEMPT) {
+      expect(files).toContain(file);
+      expect(readFileSync(join(repoRoot, file)).includes(0x00)).toBe(true);
+    }
+  });
+
   it('contains no literal NUL byte anywhere', () => {
     const offenders = files
+      .filter((file) => !BINARY_EXEMPT.includes(file))
       .filter((file) => statSync(join(repoRoot, file)).isFile())
       .flatMap((file) => {
         const lines = nulLines(readFileSync(join(repoRoot, file)));
