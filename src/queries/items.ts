@@ -18,7 +18,7 @@ export class ItemQueries {
   panel(characterId: number): ItemsPanel {
     return {
       items: this.db.all(
-        `SELECT item.id, item.name, item.description,
+        `SELECT item.id, item.name, item.description, item.quantity,
                 item.requires_attunement, item.source_instance_id,
                 CASE
                   WHEN slots.slot_1_item_id = item.id THEN 1
@@ -36,6 +36,7 @@ export class ItemQueries {
           id: sqlInteger(row, 'id'),
           name: sqlString(row, 'name'),
           description: sqlNullableString(row, 'description'),
+          quantity: sqlInteger(row, 'quantity'),
           requires_attunement: sqlBoolean(row, 'requires_attunement'),
           source_instance_id: sqlNullableInteger(row, 'source_instance_id'),
           attunement_slot:

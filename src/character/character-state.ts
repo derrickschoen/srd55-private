@@ -11,7 +11,7 @@ import {
 import { migrateLegacyWeaponDamageRow } from '../domain/weapon-damage';
 import { migrateLegacyWeaponRangeRow } from '../domain/weapon-range';
 import { migrateLegacyTraitRows } from '../rules/legacy-trait-effects';
-import { fillAddedNullableRowColumns } from '../domain/contracts/historical-row-columns';
+import { fillHistoricalRowColumns } from '../domain/contracts/historical-row-columns';
 import { rebuildSkillProjection } from '../grants/skill-grants';
 import {
   legacyArmorClassAdjustmentError,
@@ -76,12 +76,16 @@ import {
  * and `RETIRED_ROW_COLUMNS`-style reconciliation converts either retired
  * payload column into an `armor_class_bonus` effect before restore.
  *
- * D92 now mints `a7-v11` for `character_attunement_slots`; `a7-v10` is frozen
+ * D92 minted `a7-v11` for `character_attunement_slots`; `a7-v10` is frozen
  * before that table joins the live list. A pre-v11 snapshot makes no claim
  * about attunement slots and therefore leaves them untouched on restore.
  * A current
  * capture has the new table contract, while an older
  * capture keeps the numeric adjustment it actually recorded.
+ *
+ * D86 mints `a7-v12` for the NOT NULL `character_items.quantity` column.
+ * `a7-v11` is frozen before the column exists; restore fills one for every
+ * historical item row, matching the quarantined-image audit.
  *
  * NOT BUMPING WOULD HAVE BEEN THE LOUDEST FAILURE IN THIS CHANGE.
  * `SNAPSHOT_TABLES_BY_VERSION` aliases the CURRENT version to the live
@@ -92,7 +96,7 @@ import {
  * containing one. Undo, save-point restore and `exportCharacterBackup` — which
  * re-parses its own stored save points on the way out — would break together.
  */
-export const CHARACTER_SNAPSHOT_SCHEMA_VERSION = 'a7-v11' as const;
+export const CHARACTER_SNAPSHOT_SCHEMA_VERSION = 'a7-v12' as const;
 
 /**
  * WHICH TABLES EACH SNAPSHOT VERSION CARRIES.
@@ -215,6 +219,12 @@ const A7_V10_TABLES = [
   'character_items',
 ] as const satisfies readonly SnapshotTable[];
 
+/** Frozen before D86 added `character_items.quantity`. */
+const A7_V11_TABLES = [
+  ...A7_V10_TABLES,
+  'character_attunement_slots',
+] as const satisfies readonly SnapshotTable[];
+
 const SNAPSHOT_TABLES_BY_VERSION = {
   'a7-v1': A7_V1_TABLES,
   'a7-v2': A7_V2_TABLES,
@@ -226,7 +236,8 @@ const SNAPSHOT_TABLES_BY_VERSION = {
   'a7-v8': A7_V8_TABLES,
   'a7-v9': A7_V9_TABLES,
   'a7-v10': A7_V10_TABLES,
-  'a7-v11': CHARACTER_STATE_TABLES,
+  'a7-v11': A7_V11_TABLES,
+  'a7-v12': CHARACTER_STATE_TABLES,
 } as const satisfies Readonly<Record<string, readonly SnapshotTable[]>>;
 
 /**
@@ -252,6 +263,7 @@ export const CHARACTER_SNAPSHOT_SCHEMA_VERSIONS = [
   'a7-v9',
   'a7-v10',
   'a7-v11',
+  'a7-v12',
 ] as const satisfies readonly (keyof typeof SNAPSHOT_TABLES_BY_VERSION)[];
 
 export type CharacterSnapshotSchemaVersion =
@@ -344,7 +356,8 @@ const SNAPSHOT_CHARACTER_COLUMNS_BY_VERSION = {
   // list only (`character_items`), not this one.
   'a7-v9': [...PRE_V8_CHARACTER_COLUMNS, 'ability_allocation_method'] as const,
   'a7-v10': [...PRE_V8_CHARACTER_COLUMNS, 'ability_allocation_method'] as const,
-  'a7-v11': CHARACTER_STATE_COLUMNS,
+  'a7-v11': [...PRE_V8_CHARACTER_COLUMNS, 'ability_allocation_method'] as const,
+  'a7-v12': CHARACTER_STATE_COLUMNS,
 } as const satisfies Readonly<
   Record<CharacterSnapshotSchemaVersion, readonly string[]>
 >;
@@ -529,7 +542,12 @@ function snapshotRows(
               Object.entries(migrated).filter(([key]) => key !== 'attuned'),
             )
           : migrated;
-    return fillAddedNullableRowColumns(table, retired) as SnapshotRow;
+    return fillHistoricalRowColumns(
+      table,
+      retired,
+      snapshotObject(snapshot).schema_version !==
+        CHARACTER_SNAPSHOT_SCHEMA_VERSION,
+    ) as SnapshotRow;
   });
 }
 

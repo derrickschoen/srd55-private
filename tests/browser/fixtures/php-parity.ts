@@ -253,6 +253,14 @@ export async function workspaceFixtureImage(): Promise<
        WHERE id = ?`,
       [fixture.characterId],
     );
+    // D86's portable/restorable column probe: a plain possession with no
+    // effects, and a non-default quantity so a dropped/defaulted field is loud.
+    db.exec(
+      `INSERT INTO character_items (
+         character_id, name, description, quantity, requires_attunement
+       ) VALUES (?, 'Healing Potion', 'Browser parity possession', 4, 0)`,
+      [fixture.characterId],
+    );
 
     const catalog = seedSourceCatalog(db, Number(
       db.scalar(

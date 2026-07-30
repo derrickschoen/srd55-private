@@ -1037,10 +1037,12 @@ export function positionalToShareDocument(
         'wire character',
       );
       return decodeCurrentWire(
-        MIGRATIONS[10](
-          MIGRATIONS[9](
-            MIGRATIONS[8](
-              MIGRATIONS[7](MIGRATIONS[6](MIGRATIONS[5](input))),
+        MIGRATIONS[11](
+          MIGRATIONS[10](
+            MIGRATIONS[9](
+              MIGRATIONS[8](
+                MIGRATIONS[7](MIGRATIONS[6](MIGRATIONS[5](input))),
+              ),
             ),
           ),
         ),
@@ -1057,9 +1059,11 @@ export function positionalToShareDocument(
         'wire character',
       );
       return decodeCurrentWire(
-        MIGRATIONS[10](
-          MIGRATIONS[9](
-            MIGRATIONS[8](MIGRATIONS[7](MIGRATIONS[6](input))),
+        MIGRATIONS[11](
+          MIGRATIONS[10](
+            MIGRATIONS[9](
+              MIGRATIONS[8](MIGRATIONS[7](MIGRATIONS[6](input))),
+            ),
           ),
         ),
       );
@@ -1075,17 +1079,27 @@ export function positionalToShareDocument(
         'wire character',
       );
       return decodeCurrentWire(
-        MIGRATIONS[10](MIGRATIONS[9](MIGRATIONS[8](MIGRATIONS[7](input)))),
+        MIGRATIONS[11](
+          MIGRATIONS[10](
+            MIGRATIONS[9](MIGRATIONS[8](MIGRATIONS[7](input))),
+          ),
+        ),
       );
     case 8:
       return decodeCurrentWire(
-        MIGRATIONS[10](MIGRATIONS[9](MIGRATIONS[8](input))),
+        MIGRATIONS[11](
+          MIGRATIONS[10](MIGRATIONS[9](MIGRATIONS[8](input))),
+        ),
       );
     case 9:
-      return decodeCurrentWire(MIGRATIONS[10](MIGRATIONS[9](input)));
+      return decodeCurrentWire(
+        MIGRATIONS[11](MIGRATIONS[10](MIGRATIONS[9](input))),
+      );
     case 10:
-      return decodeCurrentWire(MIGRATIONS[10](input));
+      return decodeCurrentWire(MIGRATIONS[11](MIGRATIONS[10](input)));
     case 11:
+      return decodeCurrentWire(MIGRATIONS[11](input));
+    case 12:
       return decodeCurrentWire(input);
     default:
       throw new ShareValidationError('version is unsupported.');

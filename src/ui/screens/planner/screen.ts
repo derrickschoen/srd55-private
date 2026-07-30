@@ -648,6 +648,23 @@ function renderPlanner(
     }),
   );
   const itemActions: PlannerItemActions = {
+    updateQuantity: (itemId, quantity) => {
+      const item = workspace.items.items.find((candidate) => candidate.id === itemId);
+      if (item === undefined) return;
+      void mutate(() =>
+        session.execute({
+          type: 'update_item',
+          item_id: itemId,
+          item: {
+            name: item.name,
+            description: item.description,
+            quantity,
+            requires_attunement: item.requires_attunement,
+            source_instance_id: item.source_instance_id,
+          },
+        }),
+      );
+    },
     attune: (itemId) =>
       void mutate(() =>
         session.execute({ type: 'attune_item', item_id: itemId }),

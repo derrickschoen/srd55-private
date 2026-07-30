@@ -16,6 +16,7 @@ const panel: ItemsPanel = {
       id: 10,
       name: 'Crown',
       description: null,
+      quantity: 1,
       requires_attunement: true,
       source_instance_id: null,
       attunement_slot: 1,
@@ -24,6 +25,7 @@ const panel: ItemsPanel = {
       id: 20,
       name: 'Cloak',
       description: null,
+      quantity: 2,
       requires_attunement: true,
       source_instance_id: null,
       attunement_slot: 2,
@@ -32,6 +34,7 @@ const panel: ItemsPanel = {
       id: 30,
       name: 'Ring',
       description: null,
+      quantity: 3,
       requires_attunement: true,
       source_instance_id: null,
       attunement_slot: 3,
@@ -40,6 +43,7 @@ const panel: ItemsPanel = {
       id: 40,
       name: 'Boots',
       description: null,
+      quantity: 4,
       requires_attunement: true,
       source_instance_id: null,
       attunement_slot: null,
@@ -53,6 +57,8 @@ describe('the item attunement surface', () => {
     try {
       const calls: string[] = [];
       const actions: PlannerItemActions = {
+        updateQuantity: (itemId, quantity) =>
+          calls.push(`quantity:${String(itemId)}:${String(quantity)}`),
         attune: (itemId) => calls.push(`attune:${String(itemId)}`),
         unattune: (itemId) => calls.push(`unattune:${String(itemId)}`),
         replace: () => undefined,
@@ -72,7 +78,17 @@ describe('the item attunement surface', () => {
       expect(elementText(rendered as unknown as Node)).toContain('Slot 3');
       rendered.querySelector('[aria-label="Unattune Crown"]')?.click();
       rendered.querySelector('[aria-label="Attune Boots"]')?.click();
-      expect(calls).toEqual(['unattune:10', 'attune:40']);
+      const quantity = rendered.querySelector('[aria-label="Quantity for Cloak"]');
+      if (quantity === null) {
+        throw new Error('Quantity control did not render.');
+      }
+      quantity.value = '6';
+      quantity.dispatchEvent(new Event('change'));
+      expect(calls).toEqual([
+        'unattune:10',
+        'attune:40',
+        'quantity:20:6',
+      ]);
     } finally {
       restoreDocument();
     }
@@ -83,6 +99,7 @@ describe('the item attunement surface', () => {
     try {
       const calls: string[] = [];
       const actions: PlannerItemActions = {
+        updateQuantity: () => undefined,
         attune: () => undefined,
         unattune: () => undefined,
         replace: (itemId, replacedItemId) =>

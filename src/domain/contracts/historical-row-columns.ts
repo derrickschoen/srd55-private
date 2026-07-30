@@ -44,24 +44,44 @@ const ADDED_NULLABLE_ROW_COLUMNS: Readonly<
 };
 
 /**
- * Reconcile one historical row with nullable columns introduced later.
+ * NOT NULL columns added after portable rows and save-point rows already
+ * existed. Unlike the nullable map above, each entry carries the domain
+ * default that reconstructs the historical fact.
+ */
+const ADDED_DEFAULTED_ROW_COLUMNS: Readonly<
+  Partial<Record<HistoricalRowTable, Readonly<Record<string, unknown>>>>
+> = {
+  // D86: every historical item row represented one possession because no
+  // quantity could be recorded. Restore and candidate audit share this fill.
+  character_items: { quantity: 1 },
+};
+
+/**
+ * Reconcile one historical row with columns introduced later.
  *
  * Shared by full-backup validation, save-point restore, and quarantined-image
  * audit so the three portability paths cannot disagree about an old row.
  */
-export function fillAddedNullableRowColumns(
+export function fillHistoricalRowColumns(
   table: HistoricalRowTable,
   row: HistoricalRow,
+  fillDefaultedColumns = true,
 ): HistoricalRow {
-  const fills = (ADDED_NULLABLE_ROW_COLUMNS[table] ?? []).filter(
+  const nullableFills = (ADDED_NULLABLE_ROW_COLUMNS[table] ?? []).filter(
     (key) => !Object.hasOwn(row, key),
   );
-  if (fills.length === 0) {
+  const defaultFills = Object.entries(
+    fillDefaultedColumns ? ADDED_DEFAULTED_ROW_COLUMNS[table] ?? {} : {},
+  ).filter(([key]) => !Object.hasOwn(row, key));
+  if (nullableFills.length === 0 && defaultFills.length === 0) {
     return row;
   }
   const reconciled: Record<string, unknown> = { ...row };
-  for (const key of fills) {
+  for (const key of nullableFills) {
     reconciled[key] = null;
+  }
+  for (const [key, value] of defaultFills) {
+    reconciled[key] = value;
   }
   return reconciled;
 }

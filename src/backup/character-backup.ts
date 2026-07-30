@@ -42,7 +42,7 @@ import {
   type ReferenceKind as DerivedReferenceKind,
   type SpellDefinitionTable,
 } from '../domain/contracts/tables';
-import { fillAddedNullableRowColumns } from '../domain/contracts/historical-row-columns';
+import { fillHistoricalRowColumns } from '../domain/contracts/historical-row-columns';
 import { rebuildSkillProjection } from '../grants/skill-grants';
 import {
   rowContractError,
@@ -306,7 +306,7 @@ function reconciledColumns(
   const added =
     table === null
       ? weaponMigrated
-      : fillAddedNullableRowColumns(table, weaponMigrated);
+      : fillHistoricalRowColumns(table, weaponMigrated);
   const retired = (table === null ? undefined : RETIRED_ROW_COLUMNS[table]) ?? [];
   const drops = retired.filter((key) => Object.hasOwn(added, key));
   if (drops.length === 0) {
@@ -442,8 +442,8 @@ function parseSnapshot(value: unknown, label: string): CharacterSnapshotData {
   const migratedVersion =
     version === 'a7-v4' && migratedArmorClassBonuses.length > 0
       ? 'a7-v5'
-      : version === 'a7-v10'
-        ? 'a7-v11'
+      : version === 'a7-v10' || version === 'a7-v11'
+        ? 'a7-v12'
         : version;
   const parsedRows = Object.fromEntries(
     tables.map((table) => [
@@ -2663,8 +2663,9 @@ function portableSnapshots(
         snapshot.schema_version === 'a7-v4' &&
         snapshot.legacyArmorClassBonuses.length > 0
           ? 'a7-v5'
-          : snapshot.schema_version === 'a7-v10'
-            ? 'a7-v11'
+          : snapshot.schema_version === 'a7-v10' ||
+              snapshot.schema_version === 'a7-v11'
+            ? 'a7-v12'
             : snapshot.schema_version,
       character: snapshot.character,
     };
