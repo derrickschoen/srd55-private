@@ -816,6 +816,34 @@ describe('armor class', () => {
     ]);
   });
 
+  it('keeps the floor when the only supplied formula is excluded by a shield', () => {
+    const monk = formula(
+      'Martial Arts',
+      'class',
+      'dexterity',
+      'wisdom',
+      false,
+    );
+    const result = armorClass({
+      shield: template('Shield'),
+      scores: scores({ dexterity: 14, wisdom: 18 }),
+      formulas: [monk],
+    });
+
+    // Martial Arts would be 16, but the Shield excludes it. The always-present
+    // floor is 10 + Dexterity 14 (+2), then the Shield adds 2: AC 14. Removing
+    // the floor leaves no eligible base at all.
+    expect(result.value).toBe(14);
+    expect(result.winner.formula.label).toBe('Unarmoured');
+    expect(result.winner.total).toBe(12);
+    expect(result.excluded).toEqual([
+      {
+        formula: monk,
+        reason: { kind: 'shield_not_allowed', shield_name: 'Shield' },
+      },
+    ]);
+  });
+
   it('discards every unarmoured formula outright while body armour is worn', () => {
     const shell = formula(
       'Armadillo Shell',
