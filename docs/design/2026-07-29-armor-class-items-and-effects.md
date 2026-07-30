@@ -41,7 +41,9 @@ the one vocabulary), **D73**
 - **`character_effects` has four kinds** — `damage_resistance`, `hp_modifier`,
   `speed`, `ability_increase` — with kind-scoped nullable payload columns,
   `source_instance_id`, and a `label`. The CHECK is closed, so new kinds are a
-  migration.
+  migration. *(Revision 7: true when written; AC-1 landed at `0f099bb` and the
+  live schema now has NINE kinds. Kept because §1's design reasoning starts
+  from this state.)*
 - **`hp_modifier` already carries `hit_points_flat` AND `hit_points_per_level`.**
   The Armadillo Paladin's *"+3, and +1 whenever you gain another paladin level"*
   is **one existing row with no new schema.**
@@ -49,6 +51,7 @@ the one vocabulary), **D73**
   ±20 with a free-text note and **no source**.
 - **There is no attunement anywhere.** Zero matches for `attun` in
   `src/db/schema.sql`. `character_items` and its attunement flags are entirely new.
+  *(Revision 7: `character_items` now ships — AC-1, snapshot `a7-v10`, wire v8.)*
 - **(Revision 5, after AC-1 landed at `0f099bb`.) The attunement gate has no
   input, and four revisions of this plan ran AC-ATTUNEMENT without asking what
   it reads.** AC-1 shipped exactly the row shape §1 specified — name,
@@ -75,6 +78,18 @@ the one vocabulary), **D73**
   quarantine runs, on rows restore itself would take. Pre-existing since B2's
   three columns; AC-1 made it eight. **Fixed as its own dispatch, not
   deferred to AC-2** — it is a live inconsistency in shipped code.
+  *(Merged at `1fedac1`, negative-controlled.)*
+- **(Revision 7, from the round-2 review — nine findings, all accepted, the
+  four load-bearing ones re-verified in the tree before this revision was
+  written.)** The biggest: "widen three CHECKs" was a third of AC-2's real
+  size — the template tables cannot STORE the new payloads, `named_features`
+  is the optional-features table and cannot mean Monk/Barbarian Unarmored
+  Defense, the item FK inverts an insertion order three import paths share,
+  and three of AC-1's nine kinds had no consumer anywhere in the plan. §10
+  is restructured: AC-2 became AC-2a and AC-2b, AC-5 exists, and two more
+  controls got mechanisms. The pattern across seven revisions holds: every
+  round found a control or dispatch whose mechanism appeared zero times in
+  the document.
 - **A SUBCLASS CANNOT WRITE AN EFFECT ROW AT ALL, and revisions 1 and 2 built the
   headline fixture on the assumption that it could.** Verified: `subclass_features`
   has `effect_kind` CHECK'd to **`'extra_attack'` only**, read live at sheet-build
@@ -146,6 +161,14 @@ column and one "+1 AC" would wear three shapes.
    differently in a clone than in the original — the same character with two
    Armor Classes. This ordering is stable under remapping, which is the property
    that matters.
+   **Where each category comes FROM (revision 7 — it was asserted, not
+   derivable):** worn armour is structural; item is `character_item_id`
+   (revision 5); class and subclass read the effect's `source_instance_id`'s
+   source kind. **Species could not be derived at all**: the guided copy
+   writes `source_instance_id = NULL` literally (`guided-creation.ts:1116`),
+   leaving only the severed label. AC-2a changes that copy to carry the
+   species source instance. A row with NULL source and NULL item is
+   **manual, and ranks after item**, which revision 4's list omitted.
 6. **Bonuses and the shield apply on top of the winner** — they are not in the
    competition. But **the shield is part of step 2**, so equipping one can lower
    the base while adding +2.
@@ -189,7 +212,10 @@ winning base without re-running eligibility reports **18**.
   on its own: state it anyway as a named exception the owner blesses; keep the
   existing softer shape (*"no class of theirs trains this; the Armor Class still
   counts it"*) and treat D73's wording as intent rather than text; or add the
-  missing SRD source first. **AC-B does not ship this until it is answered.**
+  missing SRD source first. *(Revision 7: the taken-for-now above IS the
+  answer — the second way out, the existing softer shape, D73's wording read
+  as intent. This paragraph stays as the background that makes it a decision;
+  it no longer blocks AC-B. Cost to flip is still one owner message.)*
 - A weapon you are not proficient with loses the proficiency bonus — **already
   built and already proven**: `tests/browser/weapons.spec.ts` asserts a Wizard's
   Greatsword loses it and *both screens say so*, and `attack-profiles.ts:40`
@@ -274,14 +300,28 @@ rule in two places is F22, which has already bitten this project.
   an Armadillo-species character **in light armour** shows the armour's total, not
   the higher unarmoured formula.
 - **AC-SHIELD-BASE** — mutate the shield to a late addend. Must fail: the Monk
-  with a shield is **15, not 18**.
+  with a shield is **15, not 18**. **(Revision 7: buildable after AC-1 + AC-3
+  with a raw-inserted `armor_class_formula` row — AC-1's schema accepts a
+  complete row today, and this file's controls already seed effects raw. The
+  revision-4 claim that it needs AC-2 confused representing a Monk formula
+  with PRODUCING one; the production path gets its own integration test in
+  AC-2a, not this control.)**
 - **AC-FLOOR** — mutate the floor away. Must fail: a character whose only formula
   is excluded still has an Armor Class.
 - **AC-TIE-STABLE** — mutate the tie-break to order by `source_instance_id`. Must
   fail: a **clone** (D62) resolves the same tie the same way as its original.
+  **(Revision 7: a naive clone does NOT make this mutant fail — export and
+  import both preserve canonical order, so remapped ids usually keep their
+  relative order. The fixture must CONSTRUCT the inversion: acquire the two
+  tying sources in one order, tombstone-and-reacquire so the original's id
+  order and the clone's canonical import order disagree, and assert both
+  characters resolve alike. If ids never invert, the control proved nothing.)**
 - **AC-WARN-STRICT** — mutate the warning to fire on exclusion. Must fail: a tie
   with a flipped winner **does not warn** while the sheet **still explains** the
-  exclusion. One mutation, both halves asserted.
+  exclusion. One mutation, both halves asserted. **(Revision 7: this control
+  follows AC-B, not the post-AC-3 controls dispatch — the warning needs a
+  before-and-after pair no command result carries today, and AC-B owns the
+  preview mechanism that supplies it.)**
 - **AC-PROFICIENCY** — **retargeted; revision 2's version asserted the blocked
   text as a MUST.** Mutate non-proficient armour to withhold its AC. Must fail:
   **the AC still applies, and the existing `armor_not_trained` warning is
@@ -294,7 +334,11 @@ rule in two places is F22, which has already bitten this project.
   `character_item_id` included — because against the exclusion alone, an
   implementation that drops EVERY item-owned effect passes the control.
 - **AC-ONE-VOCABULARY** — mutate an item to carry its own `ac_change` column.
-  Must fail: the resolver reads effects only.
+  Must fail: the resolver reads effects only. **(Revision 7, pinned: an unused
+  column breaks nothing. The mutant stores the fixture's +1 ONLY in the new
+  column, writes no effect row, and teaches the resolver to read it. Must
+  fail: the fixture's AC keeps the +1 through the mutation — proving the test
+  asserts the vocabulary, not just the number.)**
 
 **Every fixture must make its mutation observable.** A character whose armoured
 and unarmoured totals are equal cannot exercise AC-ELIGIBILITY; a Monk with DEX +0
@@ -330,66 +374,115 @@ formulas, a shield and a flat bonus at once.
 **Licensing:** all ours, so committing is fine under D59 — the test is
 authorization and we are the author.
 
-## 10. Dispatches — FOUR, not two
+## 10. Dispatches — recounted every revision, because the count keeps being wrong
 
-Revision 2 called this AC-A and AC-B. A reviewer counted the blast radius and it
-is not two dispatches: `armor_class_adjustment` alone is referenced in **21
-files** including a live command, the wire codec, row contracts and the sheet
-view, which is comparable to the whole D69 unit. Today's own precedent is
-against bundling — `d924bf2` needed `219e56f` four hours later, and `7be2243`
-needed `ec2be58` for its controls.
+Revision 2 said two; revision 4 said four plus AC-B; **revision 7 says six plus
+AC-B**, after the round-2 review measured AC-2 and found it was three
+dispatches wearing one name. AC-1 has shipped (`0f099bb`).
 
-- **AC-1 — the vocabulary and persistence.** Five new effect kinds; the five new
-  payload columns (`base`, `ability_1`, `ability_2`, `allows_shield`,
-  `weapon_scope`); **widening the existing `amount` and `ability` kind-scoped
-  CHECKs**, which are reused columns, not new ones; `character_items`; row
-  contracts, snapshot, backup, and the share wire **version mint** (D41 — read
-  the current version, do not assume it).
-- **AC-2 — THE CLASS AND SUBCLASS EFFECT PATH.** Neither `subclass_features` nor
-  `named_features` can produce an effect row, so this dispatch builds the
-  template-and-copy mechanism for **both**, and widens **three** closed CHECKs:
-  `subclass_features`, `named_features`, and
-  `species_template_trait_effects` (whose own enum excludes the new kinds).
-  **Plus (revision 5): the nullable `character_effects.character_item_id`
-  column** — migration 0014, the composite reference and cascade §3 pins, a
-  unique index on `character_items (id, character_id)` as the reference
-  target, and the item-add surface writing it when it writes the effect. AC-2
-  is where it lands because AC-2 is already this unit's only other
-  `character_effects` migration; a fifth dispatch for one column is overhead.
-  **Revision 6 adds, from the codex review of revision 5, each verified in the
-  tree before being written here:**
-  - a child-side index on `character_effects (character_item_id,
-    character_id)` — cascade lookups and the resolver join both read it;
-  - `DELETE_ORDER` comment truth (`tables.ts:1230-1256`): the order itself is
-    already correct — effects precede items — but two comments call
-    `character_items` a childless leaf, which the new reference falsifies;
-  - superseding `db/schema/items.ts:23-33`: the "deliberately no foreign key
-    from an effect to the item" comment was correct for AC-1's scope and is
-    exactly what revision 5 reverses — it is REPLACED, not appended to;
-  - **the item-add command**: "the surface writes it" was a sentence with no
-    mechanism (the revision-4 class of miss, a third time). AC-2 pins a
-    transactional command that inserts the item first and its effect rows
-    with the returned id in the same transaction — there is no item-add
-    command in `src` today; items are written only by restore machinery;
-  - an integration test on the hard-delete chain: deleting a source cascades
-    into its item (`items.ts:94`) which now cascades into that item's
-    effects — three tables, one DELETE, proven not assumed.
-  Revision 2 said one table; revision 3 said two; **it is three.** Monk and
-  Barbarian Unarmored Defense live in `named_features` and are the reason this
-  cannot be deferred — they are the resolver's own worked example.
-- **AC-3 — the resolver and the gates.** Eligibility-then-value, the tie-break,
-  proficiency and attunement, and **carrying `strength_requirement_unmet`
-  forward**.
-- **AC-4 — retiring `armor_class_adjustment`**, all 21 references, **and
-  migrating existing non-null values into `armor_class_bonus` effect rows
-  carrying their note as the label.** §6 implied the migration and revision 3's
-  dispatch line said only "references" — a reviewer caught the mismatch. It must
-  land **after AC-3**: removing the column before the resolver reads bonuses
-  would silently drop a working feature, which D33 forbids.
-- **AC-B — the surfaces**: exclusion reasons, tie disclosure, the
-  strict-reduction warning, deletion of `no_unarmored_defense`, and the fixtures.
+- **AC-1 — SHIPPED.** Five new effect kinds, `character_items`, migration 0013,
+  wire v8, snapshot `a7-v10`. The audit-fill defect its review surfaced was
+  fixed separately (`1fedac1`).
+- **AC-2a — FEATURE PRODUCTION (class, subclass, species).** The revision-5/6
+  version said "widen three CHECKs" — but the CHECKs are the small half:
+  **the template tables cannot STORE the new payloads.**
+  `species_template_trait_effects` carries only damage/HP/speed columns
+  (`origins.ts:316`); `subclass_features` and `named_features` carry only
+  `effect_attack_count`/`effect_weapon_scope` (`catalog-classes.ts:332,488`),
+  and `enums.ts:809` RECORDS the decision that a second class-feature kind
+  requires child effect tables before content uses it. AC-2a honours that
+  record rather than re-litigating it:
+  - `subclass_feature_effects` and `named_feature_effects` — child tables
+    mirroring `species_template_trait_effects` (the shape the trait inversion
+    already established), each carrying the full effect payload set including
+    the five AC-1 columns; the inline `effect_*` columns on their parents are
+    retired the way the trait inversion retired theirs;
+  - `species_template_trait_effects` widened with the five new payload columns
+    and their kind-scoped CHECKs;
+  - **a new automatic-class-feature shape** — `named_features` is EXPLICITLY
+    the optional/conditional table (`catalog-classes.ts:419`,
+    `sheet-content-lookup.ts:220`): auto-copying it would hand Thirsting
+    Blade to every level-5 Warlock. Monk and Barbarian Unarmored Defense are
+    AUTOMATIC and revision 4 was wrong to put them there. They get
+    `class_feature_effects` (class_definition_id, class_level, name, payload),
+    copied at class sync;
+  - **generated-row identity**: a new nullable
+    `character_effects.template_ref` (TEXT, e.g.
+    `class_feature_effects:12`), NULL on every hand-written row. Re-sync
+    deletes and re-copies ONLY rows whose `template_ref` is non-null and whose
+    source instance belongs to the class being synced — the ASI rows sharing
+    that `source_instance_id` (`level-up-class.ts:238`) have NULL
+    `template_ref` and are untouchable. **Generation happens ONLY in
+    commands; import NEVER invokes the generator** — share import already
+    regenerates class/subclass SOURCES (`character-share.ts:1500`) and then
+    carries effect rows verbatim, and a generator that also ran on import
+    would duplicate every generated effect;
+  - **the species copy carries its source**: `guided-creation.ts:1116` writes
+    `source_instance_id = NULL` today; AC-2a passes the species source
+    instance so §2's tie-break can tell species from manual;
+  - an integration test proving the production path end-to-end: seed a
+    template, sync, level, re-sync — one row, correct payload, ASI intact.
+- **AC-2b — ITEM AND WEAPON OWNERSHIP, AND PORTABILITY.** After AC-2a, one
+  migration and one wire mint carry everything:
+  - `character_effects.character_item_id` (revision 5: composite reference,
+    cascade, unique target index on `character_items (id, character_id)`,
+    child-side index) and `character_effects.character_weapon_id` on identical
+    terms — `one_bonded_weapon` cannot identify a weapon today
+    (`enums.ts:780`), and without the column the three weapon kinds AC-1
+    minted have no resolvable target;
+  - **insertion order, NOT capture order**: restore, backup import and share
+    import all insert effects before items today (`tables.ts:1210`,
+    `character-state.ts:654`, `character-backup.ts:1967`,
+    `character-share.ts:1950`), which the new FK inverts. Capture order is
+    stable output and part of what `equalValues` compares — it does NOT move.
+    AC-2b introduces a dependency-safe INSERT order distinct from capture
+    order, and items/weapons insert before effects there;
+  - backup import remaps `character_item_id`/`character_weapon_id` through
+    `maps.character_items`/`maps.character_weapons` exactly as
+    `source_instance_id` is remapped;
+  - **wire v9**, minted once, carrying `itemRef`, `weaponRef` and
+    `template_ref` in the effect tuple — v8 is frozen (D41) and is not
+    amended;
+  - **the item-add command** (revision 6): transactional, inserts the item
+    first and its effect rows with the returned id;
+  - comment truth: `DELETE_ORDER`'s "childless leaf" comments
+    (`tables.ts:1230-1256`) and the superseded `items.ts:23-33` paragraph;
+  - the cascade-chain integration test (source → item → effects, one DELETE).
+- **AC-3 — the AC resolver and the gates.** Eligibility-then-value, the
+  tie-break with §2's category derivation, the floor, proficiency and
+  attunement — the attunement gate as ONE eligible-effects predicate every
+  mechanical consumer routes through (revision 6), NULL-safe explicitly.
+  Carries `strength_requirement_unmet` forward. **Needs AC-2a AND AC-2b.**
+- **AC-5 — weapon effects into attack profiles.** `AttackProfileInput`
+  accepts no effects today (`attack-profiles.ts:261`), so
+  `attack_ability_override`, `weapon_attack_bonus` and `weapon_damage_bonus`
+  have NO consumer — the +1 weapon and Pact Shell Blade fixtures the owner
+  asked for cannot produce their numbers without this dispatch. Routes the
+  same eligible-effects predicate (attunement gates a sword's +1 exactly as
+  it gates a cloak's), resolves `one_bonded_weapon` via
+  `character_weapon_id`, and keeps the label-and-number-agree standard
+  `attack-profiles.ts:40` records. After AC-3.
+- **AC-4 — retiring `armor_class_adjustment`**, all 21 references, migrating
+  non-null values into `armor_class_bonus` effect rows. After AC-3, for the
+  reason revision 4 gives. **Revision 7 pins the two edge rows the CHECKs
+  refuse**: `amount` forbids zero (`origins.ts:881`) and `label` is NOT NULL,
+  while a stored adjustment can be zero and its note can be null
+  (`sheet-inputs.ts:328`). Disposition: a zero adjustment produces NO effect
+  row — it changes no number, and D60 applies to its orphaned note, which the
+  migration logs and drops; a null note becomes the label
+  `Manual Armor Class adjustment`.
+- **AC-B — the surfaces**: exclusion reasons, tie disclosure, deletion of
+  `no_unarmored_defense`, the fixtures, and **the strict-reduction warning's
+  mechanism, pinned (revision 7)**: commands return void and their results
+  carry only inverse/revision/replay (`sheet-inputs.ts:176`,
+  `character-command-executor.ts:43`), and a later read cannot reconstruct
+  the previous total — so the warning is a PREVIEW: the surface runs the
+  resolver on current state, applies, runs it again, and compares. Nothing
+  persisted, replay untouched, D76's tie rule enforced where the pair exists.
 
-Controls get their own dispatch after AC-3, per `ec2be58`'s precedent.
+Controls get their own dispatch after AC-3, per `ec2be58`'s precedent —
+except AC-WARN-STRICT, which follows AC-B (§8), and AC-2a's production-path
+proof, which lives inside AC-2a as an integration test.
 
 ## 11. NOT in this unit
 
