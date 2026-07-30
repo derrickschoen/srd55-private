@@ -228,6 +228,9 @@ describe('sheet content seeding', () => {
 
   it('is idempotent, and reports itself healthy only once complete', () => {
     const before = Number(db.scalar('SELECT count(*) FROM class_skill_options'));
+    const featureIds = column<number>(
+      'SELECT id FROM class_feature_effects ORDER BY id',
+    );
     expect(hasBundledSheetContent(db)).toBe(true);
     // A second ensure writes nothing.
     expect(ensureBundledSheetContent(db)).toBe(false);
@@ -237,6 +240,12 @@ describe('sheet content seeding', () => {
     expect(Number(db.scalar('SELECT count(*) FROM class_skill_options'))).toBe(before);
     expect(Number(db.scalar('SELECT count(*) FROM class_martial_arts_dice'))).toBe(20);
     expect(Number(db.scalar('SELECT count(*) FROM armor_templates'))).toBe(13);
+    // Upsert preserves ids because generated character rows retain them in
+    // `template_ref`; reseeding must not turn those references stale.
+    expect(
+      column<number>('SELECT id FROM class_feature_effects ORDER BY id'),
+    ).toEqual(featureIds);
+    expect(featureIds).toHaveLength(2);
   });
 
   it('reports itself unhealthy when the content is missing, and repairs it', async () => {
@@ -250,6 +259,22 @@ describe('sheet content seeding', () => {
       expect(
         Number(fresh.scalar('SELECT count(*) FROM class_sheet_traits')),
       ).toBe(12);
+      expect(
+        Number(fresh.scalar('SELECT count(*) FROM class_feature_effects')),
+      ).toBe(2);
+
+      fresh.exec(
+        `DELETE FROM class_feature_effects
+         WHERE class_definition_id = (
+           SELECT id FROM class_definitions
+           WHERE content_key = '2024:class:monk'
+         )`,
+      );
+      expect(hasBundledSheetContent(fresh)).toBe(false);
+      expect(ensureBundledSheetContent(fresh)).toBe(true);
+      expect(
+        Number(fresh.scalar('SELECT count(*) FROM class_feature_effects')),
+      ).toBe(2);
     } finally {
       empty.close();
     }
@@ -338,7 +363,7 @@ describe('sheet content seeding', () => {
   });
 
   it('cascades sheet content away with its class', () => {
-    // The seven class tables all hang off `class_definitions` by a cascading
+    // The class tables all hang off `class_definitions` by a cascading
     // key, so losing a class takes its sheet content with it rather than
     // leaving rows pointing at nothing.
     const monk = classId('Monk');
@@ -351,6 +376,7 @@ describe('sheet content seeding', () => {
       'class_extra_attack_grants',
       'class_martial_arts_dice',
       'class_weapon_proficiencies',
+      'class_feature_effects',
     ]) {
       expect(
         Number(

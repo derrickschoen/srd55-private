@@ -1,5 +1,65 @@
 # Binding scope decisions
 
+## D83 — OWNER: ability_override exists; increases may pass 20; boons may SET a score (2026-07-30)
+
+The owner's ruling, verbatim: *"We will need some sort of ability override so
+that items like belt of giant strength work. Also, there is an item that lets
+you raise your asi +2 even if that raises it above 20. I have seen epic boons
+that set asi to 24."*
+
+Three distinct mechanics, and the vocabulary must keep them distinct:
+
+1. **SET-TO-VALUE with a floor** (Belt of Giant Strength): the score BECOMES
+   N unless it is already higher. A new `character_effects` kind
+   (`ability_override`) with `ability` + a set-to value; it is not additive
+   and must not stack with itself — highest set-to wins, and a set-to below
+   the natural score changes nothing.
+2. **INCREASE PAST THE CAP** (the +2-above-20 item): `ability_increase`
+   already carries a per-effect `maximum` (CHECK 1..30), so this is
+   EXPRESSIBLE TODAY — a row with maximum 22 (or 24, 30) is the mechanism;
+   nothing new to build except content.
+3. **SET-TO from a boon** ("set asi to 24"): same kind as 1; the source is a
+   feat/boon rather than an item, which the effect model already carries via
+   `source_instance_id`.
+
+Resolution order the sheet must honour: base score → increases (each capped
+by its own maximum) → overrides (max of set-to values, floored at the
+increased score). Wrong order is a wrong number.
+
+NOT scheduled into the current units; needs its own plan (new kind = closed
+CHECK widened = migration + wire + payload columns, the AC-1 discipline).
+§11 of the AC/items plan left this open with the owner by name; it is now
+answered.
+
+## D82 — OWNER: one identity rule for ALL content, with a match-review modal offering clone (2026-07-30)
+
+The owner's ruling on the D81 fork question, verbatim: *"Yes, one rule for
+everything, but pop up a modal screen with a list of everything that is
+getting a derived identity and give the option to clone. I don't want to
+have to clean up a bunch of cloned stuff because I imported my friends
+character multiple times as he leveled up over time."*
+
+What this binds:
+
+- **Derived identity covers forks and hand-made homebrew too** — no split
+  between book-imported and hand-typed content. Same normalised name + same
+  properties = same content, on every import path.
+- **The import surface shows a MATCH-REVIEW MODAL**: everything about to be
+  ADOPTED under an existing derived identity is listed, and each entry
+  offers "clone instead" (a private copy under a new identity). Silent
+  merging is out; silent duplication is out; the person chooses, once, with
+  the list in front of them.
+- **The default is MATCH, not clone** — the owner's stated reason is
+  repeated imports of the same friend's character as he levels; the flow
+  must converge to zero new rows on the Nth import, so match must be the
+  path of least resistance and a re-import of already-matched content
+  should not re-ask.
+
+D45's fork mechanism (copy, customise, rename) is unchanged; what changes is
+that a fork's IDENTITY comes from its content, not from crypto.randomUUID
+(`spell-fork.ts:129` inverts). The in-flight content-identity plan must
+carry all of this.
+
 ## D81 — OWNER: full JSON export carries non-SRD content, and content identity is DERIVED (2026-07-29)
 
 **The ruling.** *"Full json export should export all of the non srd content as

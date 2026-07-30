@@ -90,6 +90,42 @@ function guidedSpeciesSources(db: DatabaseContext, characterId: number) {
   );
 }
 
+function generatedClassEffectIdentity(
+  db: DatabaseContext,
+  characterId: number,
+): {
+  readonly source_instance_id: number;
+  readonly template_ref: string;
+} {
+  const rows = db.allRaw(
+    `SELECT source.id AS source_instance_id,
+            'class_feature_effects:' || effect.id AS template_ref
+     FROM character_source_instances AS source
+     JOIN class_feature_effects AS effect
+       ON effect.class_definition_id = source.source_definition_id
+     WHERE source.character_id = ?
+       AND source.source_type = 'class'
+       AND source.state = 'active'
+       AND effect.name = 'Unarmored Defense'`,
+    [characterId],
+  );
+  const row = rows[0];
+  if (
+    rows.length !== 1 ||
+    row === undefined ||
+    typeof row['source_instance_id'] !== 'number' ||
+    typeof row['template_ref'] !== 'string'
+  ) {
+    throw new Error(
+      'The guided class has no unique Unarmored Defense template identity.',
+    );
+  }
+  return {
+    source_instance_id: row['source_instance_id'],
+    template_ref: row['template_ref'],
+  };
+}
+
 function speciesSpellSlotCount(
   db: DatabaseContext,
   characterId: number,
@@ -223,6 +259,12 @@ describe('guided species application', () => {
       ),
     ).toEqual([
       {
+        effect_kind: 'armor_class_formula',
+        damage_type: null,
+        speed_bonus_feet: null,
+        label: 'Unarmored Defense',
+      },
+      {
         effect_kind: 'damage_resistance',
         damage_type: 'Fire',
         speed_bonus_feet: null,
@@ -287,6 +329,7 @@ describe('guided species application', () => {
     const replacementSources = guidedSpeciesSources(db, characterId);
     expect(replacementSources).toHaveLength(1);
     const replacementSourceId = Number(replacementSources[0]?.['id']);
+    const classEffect = generatedClassEffectIdentity(db, characterId);
     const replacementTemplateRef = `species_template_trait_effects:${String(
       db.scalar(
         `SELECT effect.id
@@ -327,6 +370,14 @@ describe('guided species application', () => {
         [characterId],
       ),
     ).toEqual([
+      {
+        effect_kind: 'armor_class_formula',
+        damage_type: null,
+        speed_bonus_feet: null,
+        source_instance_id: classEffect.source_instance_id,
+        template_ref: classEffect.template_ref,
+        label: 'Unarmored Defense',
+      },
       {
         effect_kind: 'damage_resistance',
         damage_type: 'Cold',
@@ -415,10 +466,16 @@ describe('guided species application', () => {
       db.allRaw(
         `SELECT effect_kind, damage_type, label
          FROM character_effects
-         WHERE character_id = ?`,
+         WHERE character_id = ?
+         ORDER BY sort_order`,
         [characterId],
       ),
     ).toEqual([
+      {
+        effect_kind: 'armor_class_formula',
+        damage_type: null,
+        label: 'Unarmored Defense',
+      },
       {
         effect_kind: 'damage_resistance',
         damage_type: 'Fire',
