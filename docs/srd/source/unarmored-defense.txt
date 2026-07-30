@@ -1,0 +1,27 @@
+This work includes material from the System Reference Document 5.2
+("SRD 5.2") by Wizards of the Coast LLC, available at
+https://www.dndbeyond.com/srd. The SRD 5.2 is licensed under the Creative
+Commons Attribution 4.0 International License, available at
+https://creativecommons.org/licenses/by/4.0/legalcode.
+
+--- Verbatim extract: Unarmored Defense, the Barbarian and Monk level-1
+    features. SRD 5.2.1 pages 29 and 50, sliced by character at the column
+    boundary, with PDF line wrapping and discretionary hyphenation removed. ---
+
+The two features differ in BOTH the second ability and the shield clause, and
+each difference is load-bearing for the Armor Class resolver: the Barbarian
+formula stays eligible while a Shield is held (allows_shield = true); the
+Monk formula is broken by wielding one (allows_shield = false, D75).
+
+=== Barbarian (page 29) ===
+
+Level 1: Unarmored Defense
+While you aren’t wearing any armor, your base Armor Class equals 10 plus
+your Dexterity and Constitution modifiers. You can use a Shield and still
+gain this benefit.
+
+=== Monk (page 50) ===
+
+Level 1: Unarmored Defense
+While you aren’t wearing armor or wielding a Shield, your base Armor Class
+equals 10 plus your Dexterity and Wisdom modifiers.
