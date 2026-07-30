@@ -422,6 +422,30 @@ const VERSION_FIXTURES = {
       }],
     },
   },
+  13: {
+    // Independently compressed from a hand-authored v13 positional tuple.
+    // No field was added: the effect's frozen ability and maximum positions
+    // carry D83's newly accepted ability_override kind.
+    fragment:
+      'H4sIAAAAAAAAA5WPsQoCMRBEfyVsvSniWVjbaGch2ASReFlNYE1ksyf494LYaJoThimGGXjjIZZobxNrHjm0ZtudmJsdU5AwKoltKQgBugE9HNxgdg8SyZHMlqQCuhWWifkvO6Lv9FPz3aILPIRz5qzPU_0gAcKaWE29mE0ORc1ehcpVE8whg_bdXixn_-nw3-kLsxS_6FwBAAA',
+    expected: {
+      format: CHARACTER_SHARE_FORMAT,
+      version: CHARACTER_SHARE_VERSION,
+      character: { name: 'V13 Override Hero', strength: 18 },
+      classes: [],
+      sources: [],
+      selections: [],
+      spellbook: [],
+      preferences: [],
+      overrides: [],
+      effects: [{
+        kind: 'ability_override',
+        label: 'Belt of Giant Strength',
+        ability: 'strength',
+        maximum: 24,
+      }],
+    },
+  },
 } satisfies Record<SupportedShareVersion, FrozenFixture>;
 
 const HISTORICAL_SCHEMA_MODULE_SHA256 = {
@@ -549,7 +573,7 @@ describe('the share-link wire schema registry', () => {
       'znYkjqpeGzGrT3uUmIzE6x6FACcM8J3cnM-udlExt5JUwNKZ32PDMOyhhaF4Ch-ERWprlN2PpLpSjWAbju76D1796GfoAAAA';
 
     await expect(decodeShareFragment(nonZero)).resolves.toMatchObject({
-      version: 12,
+      version: 13,
       effects: [{
         kind: 'armor_class_bonus',
         label: 'Manual Armor Class adjustment',
@@ -557,7 +581,7 @@ describe('the share-link wire schema registry', () => {
       }],
     });
     const zero = await decodeShareFragment(zeroWithNote);
-    expect(zero.version).toBe(12);
+    expect(zero.version).toBe(13);
     expect(zero).not.toHaveProperty('effects');
     expect(zero).not.toHaveProperty('sheetAdjustment');
   });

@@ -132,7 +132,7 @@ test:
 | Arm | Where the column has to be added | Its test |
 |---|---|---|
 | **Storage** | `db/schema/*.ts`, then `npm run db:schema` + `npm run db:contracts` | `tests/unit/schema-generation.test.ts`, `tests/unit/contracts/column-facts-generation.test.ts` |
-| **Snapshot** (undo/redo) | Covered by `TABLE_SCOPES` for an owned TABLE. For a column on `characters`, `src/character/character-state.ts`: `CHARACTER_STATE_COLUMNS` (`:330`) — BY HAND | a save-point restore test |
+| **Snapshot** (undo/redo) | Covered by `TABLE_SCOPES` for an owned TABLE. For a column on `characters`, `src/character/character-state.ts`: `CHARACTER_STATE_COLUMNS` (`:339`) — BY HAND | a save-point restore test |
 | **Backup** (portable character) | `src/backup/character-backup.ts`, and `docs/BACKUP-FORMATS.md` | a **column-for-column** round trip |
 | **Share** (compressed URL fragment) | `src/sharing/schema.ts` + `src/sharing/character-share.ts`, and `docs/sharing/SCHEMA.md` | a round trip **through the fragment**, plus an OLD-payload test |
 
@@ -146,7 +146,7 @@ Nothing will tell you. Add it to each path by hand.
 ### The old-payload test is the one people skip
 
 A link or backup minted before your column must still import. The mechanism is
-in `tests/unit/sharing/codec.test.ts`: `PRE_SHEET_WIRE` (`:1850`) — the frozen
+in `tests/unit/sharing/codec.test.ts`: `PRE_SHEET_WIRE` (`:1930`) — the frozen
 pre-sheet-inputs wire tuple is asserted to be THIRTEEN elements, so regenerating
 that literal from current code (which would make it fourteen) fails loudly
 instead of letting the suite quietly test the new format against itself. And a

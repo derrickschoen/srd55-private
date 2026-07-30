@@ -33,6 +33,18 @@ export type EquipmentEffectInput =
       readonly maximum: number;
     })
   | (NamedEquipmentEffect & {
+      readonly effect_kind: 'ability_override';
+      readonly ability: Ability;
+      /**
+       * The score to set, carried in the shared absolute-score column.
+       *
+       * `amount` stays additive-only. Reusing `maximum` keeps this value under
+       * the existing 1..30 ability-score discipline without making a SET look
+       * like an increment.
+       */
+      readonly maximum: number;
+    })
+  | (NamedEquipmentEffect & {
       readonly effect_kind: 'armor_class_bonus';
       readonly amount: number;
     })

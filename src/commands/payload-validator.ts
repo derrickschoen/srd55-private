@@ -835,6 +835,13 @@ function validateEquipmentEffect(value: unknown): void {
       }
       boundedInteger(effect, 'maximum', 1, 30);
       return;
+    case 'ability_override':
+      validateEffectCommon(effect, ['ability', 'maximum']);
+      if (!isEnumValue(abilities, effect.ability)) {
+        invalid('Effect ability is unsupported.');
+      }
+      boundedInteger(effect, 'maximum', 1, 30);
+      return;
     case 'armor_class_bonus':
       validateEffectCommon(effect, ['amount']);
       signedEffectInteger(effect, 'amount');

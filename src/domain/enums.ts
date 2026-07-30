@@ -725,6 +725,7 @@ export type EffectKind = (typeof effectKinds)[number];
  */
 export const characterEffectKinds = [
   ...effectKinds,
+  'ability_override',
   'armor_class_bonus',
   'armor_class_formula',
   'attack_ability_override',
@@ -820,11 +821,18 @@ export type ClassFeatureEffectKind = (typeof classFeatureEffectKinds)[number];
 
 /**
  * Every effect a class, subclass, or optional named feature template can
- * describe. `extra_attack` remains catalog-live, while the nine
- * `characterEffectKinds` are copied into `character_effects` by class sync.
+ * describe. `extra_attack` remains catalog-live, while the pre-D83 character
+ * kinds are copied into `character_effects` by class sync. D83's
+ * `ability_override` is deliberately character-only: no catalog feat, species,
+ * class, or subclass template needs to author a set-to ability score.
  */
 export const featureTemplateEffectKinds = [
-  ...characterEffectKinds,
+  ...effectKinds,
+  'armor_class_bonus',
+  'armor_class_formula',
+  'attack_ability_override',
+  'weapon_attack_bonus',
+  'weapon_damage_bonus',
   ...classFeatureEffectKinds,
 ] as const;
 export type FeatureTemplateEffectKind =

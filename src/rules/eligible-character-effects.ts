@@ -216,6 +216,7 @@ export function readEligibleWeaponEffects(
         case 'hp_modifier':
         case 'speed':
         case 'ability_increase':
+        case 'ability_override':
         case 'armor_class_bonus':
         case 'armor_class_formula':
           return [];

@@ -152,7 +152,7 @@ save-point restore. [RECIPES.md](RECIPES.md) §3 is that checklist.
 ## 4. The character root is NOT covered by the table loop
 
 `characters` is classified all-false. The root is serialized through its own
-path in `src/character/character-state.ts`: `CHARACTER_STATE_COLUMNS` (`:330`) for
+path in `src/character/character-state.ts`: `CHARACTER_STATE_COLUMNS` (`:339`) for
 snapshots, and `document.character` for backups. **A new column on `characters`
 therefore does NOT get picked up by any of the table-scope machinery.** It has to
 be added to `CHARACTER_STATE_COLUMNS` by hand, and to the backup and share paths
