@@ -49,6 +49,21 @@ the one vocabulary), **D73**
   ±20 with a free-text note and **no source**.
 - **There is no attunement anywhere.** Zero matches for `attun` in
   `src/db/schema.sql`. `character_items` and its attunement flags are entirely new.
+- **(Revision 5, after AC-1 landed at `0f099bb`.) The attunement gate has no
+  input, and four revisions of this plan ran AC-ATTUNEMENT without asking what
+  it reads.** AC-1 shipped exactly the row shape §1 specified — name,
+  description, `requires_attunement`, `attuned`, `source_instance_id` — and
+  **none of those fields links an item to the effects it grants.** The
+  implementer saw this and severed the link *on purpose*, documenting it at
+  `db/schema/items.ts:23-33`: inventing a link its own dispatch does not
+  populate would be schema slack. Correct in isolation. But the only remaining
+  link is `source_instance_id`, and `items.ts:79-88` states the common case
+  defeats it: hand-added items — the common case — carry NULL there, and so do
+  their hand-added effects. A shared `label` is severed by design and not
+  unique. **So for the common case, "an unattuned item requiring attunement
+  grants nothing" has nothing to read**, and AC-ATTUNEMENT was a control whose
+  mechanism appeared zero times in the plan — the identical miss revision 4
+  caught for `named_features`, one section over.
 - **A SUBCLASS CANNOT WRITE AN EFFECT ROW AT ALL, and revisions 1 and 2 built the
   headline fixture on the assumption that it could.** Verified: `subclass_features`
   has `effect_kind` CHECK'd to **`'extra_attack'` only**, read live at sheet-build
@@ -171,6 +186,15 @@ winning base without re-running eligibility reports **18**.
   standard: label and number must agree.**
 - **Attunement is a separate gate.** An unattuned item requiring attunement grants
   nothing. Both gates are checked; neither is confused for the other.
+  **What the gate reads (revision 5):** a new **nullable
+  `character_effects.character_item_id`**, added by AC-2's migration —
+  composite `(character_item_id, character_id)` reference onto
+  `character_items`, the same cross-character guard `source_instance_id`
+  carries, `ON DELETE CASCADE` so deleting the cloak deletes its +1 (an item is
+  the character's own row, not a source; tombstoning does not apply). The gate:
+  an effect whose owning item has `requires_attunement = 1 AND attuned = 0` is
+  **excluded**; an effect with NULL `character_item_id` is untouched. Nullable,
+  so it rides `ADDED_NULLABLE_ROW_COLUMNS` without a snapshot bump.
 
 ## 4. What the sheet says
 
@@ -259,7 +283,9 @@ controls need only **AC-1 + AC-3** and can use seeded rows rather than the
 production copy path. `AC-PROFICIENCY` is buildable **today** — `armor_not_trained`
 already ships. **`AC-SHIELD-BASE` needs AC-2**, because a Monk formula cannot be
 represented at all — not even as a seeded row — until `named_features`' CHECK is
-widened. That ordering is load-bearing, not convenient.
+widened. **`AC-ATTUNEMENT` also needs AC-2** — `character_item_id` does not
+exist until its migration lands, so before AC-2 the control cannot fail for the
+right reason (revision 5). That ordering is load-bearing, not convenient.
 
 ## 9. Fixtures (D79 names)
 
@@ -301,6 +327,12 @@ needed `ec2be58` for its controls.
   template-and-copy mechanism for **both**, and widens **three** closed CHECKs:
   `subclass_features`, `named_features`, and
   `species_template_trait_effects` (whose own enum excludes the new kinds).
+  **Plus (revision 5): the nullable `character_effects.character_item_id`
+  column** — migration 0014, the composite reference and cascade §3 pins, a
+  unique index on `character_items (id, character_id)` as the reference
+  target, and the item-add surface writing it when it writes the effect. AC-2
+  is where it lands because AC-2 is already this unit's only other
+  `character_effects` migration; a fifth dispatch for one column is overhead.
   Revision 2 said one table; revision 3 said two; **it is three.** Monk and
   Barbarian Unarmored Defense live in `named_features` and are the reason this
   cannot be deferred — they are the resolver's own worked example.
