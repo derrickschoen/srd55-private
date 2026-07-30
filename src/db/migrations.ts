@@ -16,6 +16,7 @@ import removeEquipmentProvenance from '../../drizzle/0012_remove_equipment_prove
 import armorClassItemsAndEffects from '../../drizzle/0013_armor_class_items_and_effects.sql?raw';
 import featureEffectProduction from '../../drizzle/0014_feature_effect_production.sql?raw';
 import effectEquipmentOwnership from '../../drizzle/0015_effect_equipment_ownership.sql?raw';
+import retireArmorClassAdjustment from '../../drizzle/0016_retire_armor_class_adjustment.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -180,6 +181,18 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
       'a3471329fd7f62a9637e738437ab977ee1664bea1783784295ac17cb42cd4d3e',
     resultSchemaChecksum:
       '2533e8099b522103359dad23da321304cf3a3dac3b797b8607e29820b39e03eb',
+  }),
+  // AC-4 (D72): the manual Armor Class escape hatch is now the same
+  // `armor_class_bonus` effect every other flat modifier uses. Zero rows
+  // produce no effect; the historical table remains as an empty shell so old
+  // snapshot table sets stay readable without a cosmetic version mint.
+  Object.freeze({
+    id: '0016_retire_armor_class_adjustment',
+    sql: retireArmorClassAdjustment,
+    checksum:
+      '872df9e1828d1f36fa69aa491430a3f931be00606cc07ee4393bbbfd98d7731d',
+    resultSchemaChecksum:
+      '00b25ef999c033d70738ccc1d6e6e354735be9a8801acbef20dc3beeb7247c1d',
   }),
 ]);
 

@@ -743,17 +743,6 @@ const PROBES: { readonly [N in ProbedTable]: Probe<N> } = {
       updated_at: OWNED_TIMESTAMP,
     },
   },
-  character_sheet_adjustments: {
-    order: 't.id',
-    columns: {
-      id: RECIPIENT_ROW_ID,
-      character_id: RECIPIENT_OWNER_ID,
-      armor_class_adjustment: { kind: 'verbatim' },
-      armor_class_adjustment_note: { kind: 'verbatim' },
-      created_at: OWNED_TIMESTAMP,
-      updated_at: OWNED_TIMESTAMP,
-    },
-  },
   character_effects: {
     order: 't.sort_order',
     columns: {
@@ -1328,13 +1317,6 @@ function seedSender(db: DatabaseContext, catalog: Catalog): number {
        'sender_orphan_reason', ?, ?, ?)`,
     [characterId, classSourceId, SENDER_TIME, SENDER_TIME, SENDER_TIME],
   );
-  db.exec(
-    `INSERT INTO character_sheet_adjustments (
-       character_id, armor_class_adjustment, armor_class_adjustment_note,
-       created_at, updated_at
-     ) VALUES (?, 5, 'sender adjustment note', ?, ?)`,
-    [characterId, SENDER_TIME, SENDER_TIME],
-  );
   const ownedItemId = db.exec(
     `INSERT INTO character_items (
        character_id, name, description, requires_attunement, attuned,
@@ -1769,14 +1751,14 @@ afterAll(() => {
 });
 
 describe('every column of every shared table is classified', () => {
-  it('probes the character root, all twenty share tables, and spell references', () => {
+  it('probes the character root, all nineteen share tables, and spell references', () => {
     expect([...PROBED_TABLES].sort()).toEqual(
       ['characters', 'spell_versions', ...Object.keys(SHARE_TABLES)].sort(),
     );
-    // The type already forces the twenty shared tables (AC-1 added
-    // `character_items`); the exact runtime roster additionally pins the
-    // character root and reference-only spell row.
-    expect(PROBED_TABLES).toHaveLength(22);
+    // The type already forces the nineteen current shared tables; AC-4 removed
+    // the historical adjustment shell from that scope. The exact runtime
+    // roster additionally pins the character root and reference-only spell row.
+    expect(PROBED_TABLES).toHaveLength(21);
   });
 
   it('records why each deliberately retired column no longer travels', () => {
@@ -2062,6 +2044,14 @@ describe('the other two portable scopes carry every column generically', () => {
     for (const table of ['characters', ...BACKUP_TABLES] as const) {
       const columns = portableColumns(sender, table);
       const sent = everyRow(sender, table, senderCharacterId, columns);
+      if (table === 'character_sheet_adjustments') {
+        // AC-4 keeps this key as an empty historical-import shell. Its retired
+        // payload is exercised by the dedicated backup migration test; a
+        // current export must never manufacture a row here.
+        expect(sent).toEqual([]);
+        expect(everyRow(recipient, table, characterId, columns)).toEqual([]);
+        continue;
+      }
       expect(sent.length, `${table}: the sender has no rows`).toBeGreaterThan(
         0,
       );
@@ -2094,6 +2084,13 @@ describe('the other two portable scopes carry every column generically', () => {
     for (const table of CHARACTER_STATE_TABLES) {
       const columns = portableColumns(db, table);
       const captured = before.get(table) ?? [];
+      if (table === 'character_sheet_adjustments') {
+        // The table remains in the versioned set so a7-v10 does not change its
+        // table claim, but current captures contain only the empty shell.
+        expect(captured).toEqual([]);
+        expect(everyRow(db, table, characterId, columns)).toEqual([]);
+        continue;
+      }
       expect(captured.length, `${table}: nothing was captured`).toBeGreaterThan(
         0,
       );

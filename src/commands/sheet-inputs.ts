@@ -1,14 +1,8 @@
-import {
-  rowId,
-  sqlInteger,
-  sqlNullableString,
-  type RowCodec,
-} from '../db/codecs';
+import { rowId, sqlInteger, type RowCodec } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import type { SqlValue } from '@sqlite.org/sqlite-wasm';
 import type {
   ArmorFields,
-  SetArmorClassAdjustmentCommand as SetArmorClassAdjustmentPayload,
   SetArmorCommand as SetArmorPayload,
   SetHitPointRollCommand as SetHitPointRollPayload,
 } from '../domain/command-contracts';
@@ -24,15 +18,15 @@ import { armorDexBonusPairError } from '../domain/contracts/row-rules';
 import type { ResolvesInverseAfterApply } from './weapons';
 
 /**
- * THE WRITERS FOR THE FOUR STORED SHEET INPUTS.
+ * THE WRITERS FOR THE TWO DIRECTLY EDITABLE STORED SHEET INPUTS.
  *
- * ALL FOUR ARE `set_*` AND NONE IS `add`/`remove`, and that shape follows from
- * the tables rather than from taste. Each of the four is keyed by something the
- * user names — a slot, a (class, level) pair, a skill, the character — so there
+ * BOTH ARE `set_*` AND NEITHER IS `add`/`remove`, and that shape follows from
+ * the tables rather than from taste. Each is keyed by something the user
+ * names — a slot or a (class, level) pair — so there
  * is exactly one row to talk about and "set it to this" covers creating,
  * changing and clearing it. A weapon needed `add`/`remove` because a character
  * may own two identical daggers and only an id can tell them apart; none of
- * these four has that problem, and `add_armor` would have needed an id the user
+ * these inputs has that problem, and `add_armor` would have needed an id the user
  * has no way to mean.
  *
  * CLEARING IS SETTING TO NOTHING, AND IT DELETES THE ROW RATHER THAN BLANKING
@@ -40,9 +34,7 @@ import type { ResolvesInverseAfterApply } from './weapons';
  * has never touched the sheet and a character who removed their armour are
  * indistinguishable, which is exactly what they should be. A `cleared` flag or
  * an all-null row would be a second spelling of the same fact that two readers
- * could disagree about. The adjustment follows the same rule: set back to 0
- * with no note and the row goes, so an imported pre-sheet payload and a
- * deliberately-zeroed character both produce literally nothing.
+ * could disagree about.
  *
  * THEIR INVERSES ARE EXPLICIT AND RESOLVED AFTER APPLY, following
  * `src/commands/weapons.ts`. Each captures the value it displaced during
@@ -319,73 +311,3 @@ export class SetHitPointRollCommand implements ResolvesInverseAfterApply {
  * deriving writer (`rebuildSkillProjection`). The one skill writer is
  * `fill_skill_grant`, which addresses the grant it fills.
  */
-
-export class SetArmorClassAdjustmentCommand
-  implements ResolvesInverseAfterApply
-{
-  readonly actionType = 'set_armor_class_adjustment';
-  readonly invertsAfterApply = true;
-
-  #previous: { value: number; note: string | null } | undefined;
-
-  constructor(
-    private readonly db: DatabaseContext,
-    private readonly payload: SetArmorClassAdjustmentPayload,
-  ) {}
-
-  apply(characterId: number): void {
-    this.#previous = this.db.one(
-      `SELECT armor_class_adjustment, armor_class_adjustment_note
-       FROM character_sheet_adjustments
-       WHERE character_id = ?`,
-      [characterId],
-      (row) => ({
-        value: sqlInteger(row, 'armor_class_adjustment'),
-        note: sqlNullableString(row, 'armor_class_adjustment_note'),
-      }),
-      // NO ROW MEANS ZERO WITH NO NOTE, which is what the write command stores
-      // by deleting the row — so there is one representation, not two.
-    ) ?? { value: 0, note: null };
-
-    this.db.exec(
-      'DELETE FROM character_sheet_adjustments WHERE character_id = ?',
-      [characterId],
-    );
-    const note = nullableText(this.payload.note);
-    if (this.payload.value === 0 && note === null) {
-      // ZERO WITH NO NOTE IS NOTHING RECORDED, and it is stored as nothing so
-      // that "never touched" and "set back to zero" have one representation.
-      return;
-    }
-    const timestamp = new Date().toISOString();
-    const values: Record<string, SqlValue> = {
-      armor_class_adjustment: this.payload.value,
-      armor_class_adjustment_note: note,
-    };
-    assertSheetRow(
-      'character_sheet_adjustments',
-      values,
-      characterId,
-      timestamp,
-      'Armor Class adjustment',
-    );
-    this.db.exec(
-      `INSERT INTO character_sheet_adjustments (
-         character_id, armor_class_adjustment, armor_class_adjustment_note,
-         created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?)`,
-      [characterId, this.payload.value, note, timestamp, timestamp],
-    );
-  }
-
-  inverse(): SetArmorClassAdjustmentPayload {
-    if (this.#previous === undefined) {
-      throw new Error('Cannot create an inverse before applying the command.');
-    }
-    return {
-      type: 'set_armor_class_adjustment',
-      value: this.#previous.value,
-      note: this.#previous.note,
-    };
-  }
-}

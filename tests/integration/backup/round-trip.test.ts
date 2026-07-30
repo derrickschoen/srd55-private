@@ -638,6 +638,104 @@ describe('portable character backup', () => {
     ]);
   });
 
+  it('imports and restores pre-AC-4 adjustment rows as manual bonus effects', async () => {
+    const source = await database();
+    const sourceCatalog = seedCatalog(source);
+    const sourceCharacterId = seedCompleteCharacter(source, sourceCatalog);
+    const document = structuredClone(
+      exportCharacterBackup(
+        source,
+        sourceCharacterId,
+        '2026-07-30T12:00:00.000Z',
+      ),
+    );
+    const tables = document.tables as unknown as Record<string, unknown>;
+    tables.character_sheet_adjustments = [{
+      id: 700,
+      character_id: sourceCharacterId,
+      armor_class_adjustment: 4,
+      armor_class_adjustment_note: 'Imported manual bonus',
+      created_at: timestamp,
+      updated_at: timestamp,
+    }];
+
+    const savePoint =
+      document.tables.character_save_points[0] as Record<string, unknown>;
+    const snapshot = JSON.parse(String(savePoint.snapshot)) as Record<
+      string,
+      unknown
+    >;
+    snapshot.character_sheet_adjustments = [{
+      id: 701,
+      character_id: sourceCharacterId,
+      armor_class_adjustment: -2,
+      armor_class_adjustment_note: null,
+      created_at: timestamp,
+      updated_at: timestamp,
+    }];
+    savePoint.snapshot = JSON.stringify(snapshot);
+
+    const target = await database();
+    seedCatalog(target);
+    const { characterId } = importCharacterBackup(target, document);
+
+    expect(
+      target.oneRaw(
+        `SELECT amount, label, source_instance_id, character_item_id,
+                character_weapon_id, template_ref
+         FROM character_effects
+         WHERE character_id = ? AND label = 'Imported manual bonus'`,
+        [characterId],
+      ),
+    ).toEqual({
+      amount: 4,
+      label: 'Imported manual bonus',
+      source_instance_id: null,
+      character_item_id: null,
+      character_weapon_id: null,
+      template_ref: null,
+    });
+
+    const stored = target.scalar<string>(
+      `SELECT snapshot
+       FROM character_save_points
+       WHERE character_id = ? AND label = 'Before experiment'`,
+      [characterId],
+    );
+    const importedSnapshot = JSON.parse(String(stored)) as Record<
+      string,
+      unknown
+    >;
+    expect(importedSnapshot.character_sheet_adjustments).toEqual([]);
+    expect(
+      importedSnapshot.character_effects as Array<Record<string, unknown>>,
+    ).toContainEqual(
+      expect.objectContaining({
+        effect_kind: 'armor_class_bonus',
+        amount: -2,
+        label: 'Manual Armor Class adjustment',
+        source_instance_id: null,
+        character_item_id: null,
+        character_weapon_id: null,
+        template_ref: null,
+      }),
+    );
+
+    new CharacterState(target).restore(characterId, importedSnapshot);
+    expect(
+      target.oneRaw(
+        `SELECT amount, label
+         FROM character_effects
+         WHERE character_id = ?
+           AND label = 'Manual Armor Class adjustment'`,
+        [characterId],
+      ),
+    ).toEqual({
+      amount: -2,
+      label: 'Manual Armor Class adjustment',
+    });
+  });
+
   it('preserves both exceptional legacy ranges through backup and snapshot round trips', async () => {
     const source = await database();
     const sourceCharacterId = source.exec(

@@ -481,11 +481,8 @@ describe('character command payload validation', () => {
 
     const cases: Array<[unknown, string]> = [
       [
-        // 26 is the length of the longest command type,
-        // `set_armor_class_adjustment`, and the bound is DERIVED from the
-        // vocabulary rather than typed here — the hand-written 22 it replaced
-        // was already shorter than that command's own name, so adding it would
-        // have made every one of those commands fail on its length.
+        // The 26-character retired-command boundary remains accepted far
+        // enough to produce "unknown command"; longer junk is still bounded.
         { type: 'x'.repeat(27) },
         'type must not exceed 26 characters.',
       ],

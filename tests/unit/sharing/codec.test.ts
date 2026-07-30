@@ -206,6 +206,11 @@ const complete: CharacterShareDocument = {
       sourceRef: 0,
       sourceSubclass: true,
     },
+    {
+      kind: 'armor_class_bonus',
+      label: 'Ring of Protection, house ruled.',
+      amount: 3,
+    },
   ],
   background: {
     name: 'Soldier',
@@ -220,7 +225,7 @@ const complete: CharacterShareDocument = {
     equipment_option_b: '50 GP',
     notes: 'Retired from the watch.',
   },
-  // The four stored sheet inputs. Both armour slots are filled, and the worn
+  // The three stored sheet inputs. Both armour slots are filled, and the worn
   // one is `capped` so that the paired `dex_bonus_max` really travels.
   armor: [
     {
@@ -247,7 +252,6 @@ const complete: CharacterShareDocument = {
     { className: 'Wizard', classLevel: 3, value: 6 },
   ],
   skillProficiencies: ['arcana', 'perception'],
-  sheetAdjustment: { value: 3, note: 'Ring of Protection, house ruled.' },
   // THE V5 SECTION (S-A, skills-with-provenance): one FILLED class grant and
   // one UNFILLED one, so the wire pin below sees a real value in the skill
   // slot AND proves the null/absent selection survives. `ref: 0` is
@@ -1004,6 +1008,43 @@ const COMPLETE_V9_WIRE = [
   ...COMPLETE_V8_WIRE.slice(15),
 ];
 
+/**
+ * THE COMPLETE DOCUMENT, RE-EXPRESSED AT V10 (AC-4, D72). The adjustment
+ * leaves the fourth sheet slot and becomes the final ordinary effect tuple.
+ */
+const COMPLETE_V10_WIRE = [
+  COMPLETE_V9_WIRE[0],
+  10,
+  ...COMPLETE_V9_WIRE.slice(2, 13),
+  (COMPLETE_V9_WIRE[13] as unknown[]).slice(0, 3),
+  [
+    ...(COMPLETE_V9_WIRE[14] as unknown[][]),
+    [
+      'armor_class_bonus',
+      'Ring of Protection, house ruled.',
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      3,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+    ],
+  ],
+  ...COMPLETE_V9_WIRE.slice(15),
+];
+
 describe('character-share positional codec', () => {
   it('refuses the hand-authored complete version-1 positional golden BY NAME', () => {
     // D60: pre-v5 documents are RETIRED, not migrated. This fixture stays
@@ -1040,8 +1081,8 @@ describe('character-share positional codec', () => {
     expect(positionalToShareDocument(COMPLETE_V8_WIRE)).toEqual(complete);
   });
 
-  it('pins the hand-authored complete version-9 wire layout element by element', () => {
-    expect(shareDocumentToPositional(complete)).toEqual(COMPLETE_V9_WIRE);
+  it('pins the hand-authored complete version-10 wire layout element by element', () => {
+    expect(shareDocumentToPositional(complete)).toEqual(COMPLETE_V10_WIRE);
   });
 
   it('round-trips object, positional, gzip, and base64url forms', async () => {
@@ -1183,7 +1224,7 @@ describe('character-share positional codec', () => {
     const positional = shareDocumentToPositional(minimal);
     expect(positional).toEqual([
       'dnd-multiclass-spells-character-share',
-      9,
+      10,
       [
         'Ten',
         null,
@@ -1228,9 +1269,9 @@ describe('character-share positional codec', () => {
       // slots, so this build's output has one shape rather than eight. Each
       // null decodes to an ABSENT key for the same reason weapons does.
       [null, null, null],
-      // The sheet element, on identical terms: always written, four nulls, each
+      // The sheet element, on identical terms: always written, three nulls, each
       // decoding to an absent key.
-      [null, null, null, null],
+      [null, null, null],
       // Element 14, the character's own effects: always written, `null` when
       // there are none, decoding to an absent key like every section above.
       // NOT a group — effects are one section, and a nested tuple here would
@@ -1250,7 +1291,7 @@ describe('character-share positional codec', () => {
     expect((positional[3] as unknown[][])[0]).toHaveLength(8);
     expect((positional[4] as unknown[][])[0]).toHaveLength(7);
     expect(positional[12]).toHaveLength(3);
-    expect(positional[13]).toHaveLength(4);
+    expect(positional[13]).toHaveLength(3);
     expect(minimal).not.toHaveProperty('weapons');
     expect(minimal).not.toHaveProperty('species');
     expect(minimal).not.toHaveProperty('speciesTraits');
@@ -1849,7 +1890,7 @@ describe('a share link generated before the sheet inputs travelled', () => {
     // tuples and v7 (D69) removed it again, so the current weapon tuple is
     // the v5 shape this migrated root already carries.
     const currentWithNullTupleSheet = [...currentWithoutSheet];
-    currentWithNullTupleSheet[13] = [null, null, null, null];
+    currentWithNullTupleSheet[13] = [null, null, null];
     expect(positionalToShareDocument(currentWithNullTupleSheet)).toEqual(
       positionalToShareDocument(currentWithoutSheet),
     );
@@ -2074,14 +2115,14 @@ describe('a share link generated before weapons travelled', () => {
     );
 
     const withNullTupleSheet = [...baseline];
-    withNullTupleSheet[13] = [null, null, null, null];
+    withNullTupleSheet[13] = [null, null, null];
     expect(positionalToShareDocument(withNullTupleSheet)).toEqual(
       decodedBaseline,
     );
 
     const withBothNullTuples = [...baseline];
     withBothNullTuples[12] = [null, null, null];
-    withBothNullTuples[13] = [null, null, null, null];
+    withBothNullTuples[13] = [null, null, null];
     expect(positionalToShareDocument(withBothNullTuples)).toEqual(
       decodedBaseline,
     );

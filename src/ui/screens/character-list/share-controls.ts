@@ -133,9 +133,6 @@ function previewText(preview: SharePreview): string {
     preview.skillProficiencyCount === 0
       ? null
       : `${String(preview.skillProficiencyCount)} skill proficiencies`,
-    preview.includesArmorClassAdjustment
-      ? 'a manual Armor Class adjustment'
-      : null,
   ].filter((item): item is string => item !== null);
   return `${classes}. ${preview.selectionCount} selections, ${
     preview.spellbookCount

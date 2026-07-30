@@ -586,8 +586,7 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
     numeric: ['orphaned_at', 'created_at', 'updated_at'],
   },
   character_sheet_adjustments: {
-    integer: ['id', 'character_id', 'armor_class_adjustment'],
-    text: ['armor_class_adjustment_note'],
+    integer: ['id', 'character_id'],
     numeric: ['created_at', 'updated_at'],
   },
 };
@@ -693,16 +692,11 @@ const expectedNotNull: Record<string, string[]> = {
   class_weapon_proficiencies: [
     'id', 'class_definition_id', 'category', 'granted_on_multiclass_entry',
   ],
-  // The four stored sheet inputs. `dex_bonus_max` and `strength_requirement`
+  // The live stored sheet inputs. `dex_bonus_max` and `strength_requirement`
   // are nullable on `character_armor` for exactly the reason they are nullable
   // on `armor_templates` — D6b limb 2, the source prints no value — and
-  // `character_armor.notes` and `character_sheet_adjustments`
-  // `.armor_class_adjustment_note` are nullable because a user may record
-  // armour or an adjustment without explaining it.
-  //
-  // `character_sheet_adjustments.armor_class_adjustment` IS NOT NULL with a
-  // default of 0, and that pairing is what makes an absent ROW and a stored
-  // zero mean the same thing rather than two different things.
+  // `character_armor.notes` is nullable because a user may record armour
+  // without explaining it.
   character_armor: [
     'id', 'character_id', 'slot', 'name', 'category', 'armor_class',
     'dex_bonus', 'stealth_disadvantage',
@@ -720,7 +714,7 @@ const expectedNotNull: Record<string, string[]> = {
     'state',
   ],
   character_sheet_adjustments: [
-    'id', 'character_id', 'armor_class_adjustment',
+    'id', 'character_id',
   ],
   // D19, and the ABSENCE of the three `effect_*` columns from both lists is the
   // assertion that matters: `description` is NOT NULL on both tables and every
@@ -1189,9 +1183,6 @@ const expectedDefaults: Record<string, Record<string, string>> = {
   // and grants only Shields on entry.
   class_armor_training: { granted_on_multiclass_entry: 'false' },
   class_weapon_proficiencies: { granted_on_multiclass_entry: 'false' },
-  // NOT NULL with a default of 0 — the pairing that makes an absent ROW and a
-  // stored zero mean the same thing rather than two different things.
-  character_sheet_adjustments: { armor_class_adjustment: '0' },
   // AC-1 (D72): both default off. Ring of Shell (D72 §9's own "proves
   // attunement is not required" fixture) needs `requires_attunement` to
   // default false and not read as unknown.

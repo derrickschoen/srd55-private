@@ -151,13 +151,11 @@ function positionalEncode(document) {
       : null,
     document.armor ||
       document.hitPointRolls ||
-      document.skillProficiencies ||
-      document.sheetAdjustment
+      document.skillProficiencies
       ? [
           document.armor ?? null,
           document.hitPointRolls ?? null,
           document.skillProficiencies ?? null,
-          document.sheetAdjustment ?? null,
         ]
       : null,
     document.effects ?? null,
@@ -278,7 +276,6 @@ function positionalDecode(tuple) {
     ...(sheet?.[0] && { armor: sheet[0] }),
     ...(sheet?.[1] && { hitPointRolls: sheet[1] }),
     ...(sheet?.[2] && { skillProficiencies: sheet[2] }),
-    ...(sheet?.[3] && { sheetAdjustment: sheet[3] }),
     ...(effects && { effects }),
     ...(placeholders && { placeholders }),
   };

@@ -183,7 +183,7 @@ export const WIRE_ROOT_ITEMS_FIELD = 'items' as const;
  *    proficiency and attunement gates) — nothing in AC-1 reads a
  *    `character_effects` row of one of these kinds back into an Armor Class
  *    number, and nothing gates an item's effect on `attuned`.
- *  - AC-4 retires `armor_class_adjustment` — untouched by this unit.
+ *  - AC-4 retires the old manual-adjustment columns into bonus effects.
  *  - AC-B builds the sheet surface — no UI, warning or disclosure exists yet.
  *
  * A future module that needs one of these is finding a gap in the plan's own

@@ -141,8 +141,6 @@ The gaps, by their stable `kind` keys:
   two Warlock invocations.
 - `partial_subclass_catalog` — two subclasses are bundled, so a character of any
   other class has none to choose.
-- `no_unarmored_defense` — the Barbarian and Monk Armor Class formulas are not
-  applied; the manual adjustment is what covers them.
 - `no_expertise` — Rogue and Bard Expertise does not double the proficiency
   bonus on a chosen skill.
 - `weapon_reach_not_recorded` — whether a weapon is MELEE or RANGED is not

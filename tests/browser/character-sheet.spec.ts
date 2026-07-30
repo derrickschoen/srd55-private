@@ -130,9 +130,9 @@ async function sheetImage(): Promise<SheetImage> {
     [characterId],
   );
   db.exec(
-    `INSERT INTO character_sheet_adjustments
-       (character_id, armor_class_adjustment, armor_class_adjustment_note)
-     VALUES (?, -2, 'Cursed helm, house ruled.')`,
+    `INSERT INTO character_effects
+       (character_id, sort_order, effect_kind, amount, label)
+     VALUES (?, 2, 'armor_class_bonus', -2, 'Cursed helm, house ruled.')`,
     [characterId],
   );
 
@@ -221,7 +221,6 @@ test('the structured block says exactly what the page says, and hides nothing', 
   expect(facts.proficiency_bonus).toBe(3);
   expect(facts.hit_point_maximum).toBe(57);
   expect(facts.armor_class).toBe(17);
-  expect(facts.armor_class_adjustment).toBe(-2);
   expect(facts.passive_perception).toBe(13);
 
   // NO FREE TEXT CROSSES INTO THE STRUCTURED FORM. An armour name and a

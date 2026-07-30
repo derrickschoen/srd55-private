@@ -174,20 +174,6 @@ export function sheetSections(sheet: CharacterSheet): readonly SheetSection[] {
   core.push(numberRow(sheet.armor_class, false));
   core.push(numberRow(sheet.initiative, true));
   core.push(numberRow(sheet.passive_perception, false));
-  if (sheet.armor_class_adjustment !== 0) {
-    core.push({
-      id: 'armor_class_adjustment',
-      label: plain('Manual Armor Class adjustment'),
-      value: signed(sheet.armor_class_adjustment),
-      detail:
-        sheet.armor_class_adjustment_note === null
-          ? plain('Applied to the Armor Class above. No reason was recorded.')
-          : [
-              { text: 'Applied to the Armor Class above. Recorded reason: ' },
-              { text: sheet.armor_class_adjustment_note, free_text: true },
-            ],
-    });
-  }
   sections.push({ caption: 'Core numbers', rows: core });
 
   sections.push({
@@ -516,7 +502,6 @@ export function sheetFacts(sheet: CharacterSheet): Record<string, unknown> {
     hit_point_maximum: sheet.hit_points.value,
     species_hit_points: sheet.species_hit_points?.value ?? 0,
     armor_class: sheet.armor_class.value,
-    armor_class_adjustment: sheet.armor_class_adjustment,
     initiative: sheet.initiative.value,
     passive_perception: sheet.passive_perception.value,
     saving_throws: sheet.saves.map((save) => ({

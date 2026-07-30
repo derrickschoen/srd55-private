@@ -234,18 +234,15 @@ describe('the derived character sheet', () => {
     expect(builder.build(characterId).armor_class.value).toBe(19);
 
     db.exec(
-      `INSERT INTO character_sheet_adjustments
-         (character_id, armor_class_adjustment, armor_class_adjustment_note)
-       VALUES (?, -2, 'Cursed helm, house ruled.')`,
+      `INSERT INTO character_effects
+         (character_id, sort_order, effect_kind, amount, label)
+       VALUES (?, 1, 'armor_class_bonus', -2, 'Cursed helm, house ruled.')`,
       [characterId],
     );
-    // Signed, so a negative adjustment subtracts: 19 − 2 = 17.
+    // The retired manual value is now the same signed effect as every other
+    // flat bonus: 19 − 2 = 17.
     const adjusted = builder.build(characterId);
     expect(adjusted.armor_class.value).toBe(17);
-    expect(adjusted.armor_class_adjustment).toBe(-2);
-    expect(adjusted.armor_class_adjustment_note).toBe(
-      'Cursed helm, house ruled.',
-    );
   });
 
   it('counts Heavy armour as a flat value, never as a cap of zero', () => {
@@ -631,7 +628,6 @@ describe('the derived character sheet', () => {
     expect(builder.build(characterId).gaps.map((gap) => gap.kind)).toEqual([
       'no_class_feature_text',
       'partial_subclass_catalog',
-      'no_unarmored_defense',
       'no_expertise',
       'weapon_reach_not_recorded',
       'gear_not_itemised',

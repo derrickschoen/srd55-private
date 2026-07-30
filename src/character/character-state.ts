@@ -13,6 +13,11 @@ import { migrateLegacyWeaponRangeRow } from '../domain/weapon-range';
 import { migrateLegacyTraitRows } from '../rules/legacy-trait-effects';
 import { fillAddedNullableRowColumns } from '../domain/contracts/historical-row-columns';
 import { rebuildSkillProjection } from '../grants/skill-grants';
+import {
+  legacyArmorClassAdjustmentError,
+  splitLegacyArmorClassAdjustment,
+  type LegacyArmorClassBonus,
+} from '../rules/legacy-armor-class-adjustment';
 
 /**
  * THE VERSION EVERY SNAPSHOT THIS BUILD WRITES CARRIES.
@@ -65,6 +70,13 @@ import { rebuildSkillProjection } from '../grants/skill-grants';
  * `a7-v10` adds ONE table: `character_items` — the AC-1 (D72) "things that only
  * modify" table. A pre-v10 snapshot does not carry it, so restoring one LEAVES
  * the character's items alone, on the identical terms `a7-v9` states for grants.
+ *
+ * AC-4 does not mint `a7-v11`: the captured table set is unchanged. The
+ * `character_sheet_adjustments` table remains as an empty historical shell,
+ * and `RETIRED_ROW_COLUMNS`-style reconciliation converts either retired
+ * payload column into an `armor_class_bonus` effect before restore. A current
+ * capture therefore has the same versioned table contract, while an older
+ * capture keeps the numeric adjustment it actually recorded.
  *
  * NOT BUMPING WOULD HAVE BEEN THE LOUDEST FAILURE IN THIS CHANGE.
  * `SNAPSHOT_TABLES_BY_VERSION` aliases the CURRENT version to the live
@@ -481,12 +493,41 @@ function snapshotRows(
       throw new Error(`Snapshot table ${table} contains an invalid row.`);
     }
   }
-  return rows.map((row) => {
+  return rows.map((row, index) => {
+    if (table === 'character_sheet_adjustments') {
+      const error = legacyArmorClassAdjustmentError(
+        row,
+        `Snapshot table ${table}[${index}]`,
+      );
+      if (error !== null) {
+        throw new Error(error);
+      }
+    }
     const migrated =
       table === 'character_weapons'
         ? migrateLegacyWeaponRangeRow(migrateLegacyWeaponDamageRow(row))
         : row;
-    return fillAddedNullableRowColumns(table, migrated) as SnapshotRow;
+    const retired =
+      table === 'character_sheet_adjustments'
+        ? splitLegacyArmorClassAdjustment(migrated)?.row ?? migrated
+        : migrated;
+    return fillAddedNullableRowColumns(table, retired) as SnapshotRow;
+  });
+}
+
+function snapshotLegacyArmorClassBonuses(
+  snapshot: unknown,
+): LegacyArmorClassBonus[] {
+  const rows = snapshotObject(snapshot).character_sheet_adjustments;
+  if (!Array.isArray(rows)) {
+    return [];
+  }
+  return rows.flatMap((row) => {
+    if (!isObject(row)) {
+      return [];
+    }
+    const split = splitLegacyArmorClassAdjustment(row);
+    return split?.effect == null ? [] : [split.effect];
   });
 }
 
@@ -586,8 +627,8 @@ export class CharacterState {
    *
    * TABLES THE SNAPSHOT DOES NOT CARRY ARE NOT TOUCHED — not deleted, not
    * re-inserted. An `a7-v1` snapshot predates weapons and an `a7-v3` snapshot
-   * predates the four sheet inputs, so restoring either leaves that data
-   * standing. The alternative, treating the absent key as an empty list, would
+   * predates the four historical sheet tables, so restoring either leaves that
+   * data standing. The alternative, treating the absent key as an empty list, would
    * assert "this character had no armour at that moment" — a claim the snapshot
    * never made, and one that would silently delete real data on undo.
    *
@@ -606,7 +647,13 @@ export class CharacterState {
    * so they make no claim about effects and this leaves the table alone.
    */
   restore(characterId: number, snapshot: unknown): void {
-    const { character, columns, rows, tables } = this.validateSnapshot(
+    const {
+      character,
+      columns,
+      rows,
+      tables,
+      legacyArmorClassBonuses,
+    } = this.validateSnapshot(
       characterId,
       snapshot,
     );
@@ -624,6 +671,9 @@ export class CharacterState {
     if (legacyTraits !== null) {
       // Join the DELETE pass, so the migrated rows replace what is there rather
       // than piling on top of it. `DELETE_ORDER` already lists the table.
+      carried.add('character_effects');
+    }
+    if (legacyArmorClassBonuses.length > 0) {
       carried.add('character_effects');
     }
 
@@ -664,7 +714,9 @@ export class CharacterState {
         const tableRows =
           table === 'character_species_traits' && legacyTraits !== null
             ? legacyTraits.rows
-            : rows[table] ?? [];
+            : table === 'character_sheet_adjustments'
+              ? []
+              : rows[table] ?? [];
         for (const sourceRow of tableRows) {
           insertRow(db, table, {
             ...sourceRow,
@@ -679,6 +731,21 @@ export class CharacterState {
         insertRow(db, 'character_effects', {
           ...effect,
           sort_order: index + 1,
+          character_id: characterId,
+        });
+      }
+      const existingEffectSortOrders = [
+        ...(rows.character_effects ?? []).map((row) =>
+          Number(row.sort_order),
+        ),
+        ...(legacyTraits?.effects ?? []).map((_, index) => index + 1),
+      ];
+      const nextEffectSortOrder =
+        Math.max(0, ...existingEffectSortOrders) + 1;
+      for (const [index, effect] of legacyArmorClassBonuses.entries()) {
+        insertRow(db, 'character_effects', {
+          ...effect,
+          sort_order: nextEffectSortOrder + index,
           character_id: characterId,
         });
       }
@@ -764,6 +831,7 @@ export class CharacterState {
     columns: readonly (typeof CHARACTER_STATE_COLUMNS)[number][];
     rows: Partial<Record<CharacterStateTable, SnapshotRow[]>>;
     tables: readonly CharacterStateTable[];
+    legacyArmorClassBonuses: readonly LegacyArmorClassBonus[];
   } {
     const root = snapshotObject(snapshot);
     const version = snapshotSchemaVersion(root.schema_version);
@@ -857,6 +925,7 @@ export class CharacterState {
       columns: snapshotCharacterColumnsFor(version),
       rows,
       tables,
+      legacyArmorClassBonuses: snapshotLegacyArmorClassBonuses(root),
     };
   }
 }

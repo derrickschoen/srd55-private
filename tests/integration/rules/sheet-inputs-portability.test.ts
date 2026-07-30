@@ -18,7 +18,7 @@ import { CharacterState } from '../../../src/character/character-state';
 import { openTestDatabase } from '../../helpers/open-db';
 
 /**
- * THE FOUR STORED SHEET INPUTS SURVIVE BACKUP, A SHARE LINK AND A SAVE POINT.
+ * THE THREE STORED SHEET INPUTS SURVIVE BACKUP, A SHARE LINK AND A SAVE POINT.
  *
  * THIS IS THE Q8 TEST, AND Q8 IS WHY IT IS WRITTEN BEFORE THE SCREEN THAT READS
  * THE DATA. `character_weapons` shipped with all four scope flags false: no
@@ -33,11 +33,10 @@ import { openTestDatabase } from '../../helpers/open-db';
  * filled, the worn one is `capped` so the paired `dex_bonus_max` really
  * travels, the shield carries every optional field as NULL so an absence
  * survives as an absence, one hit point roll sits on a class the character does
- * not have, and the adjustment carries a note. A payload column dropped from a
- * statement is invisible in a row count and shows up only as a number that
- * quietly stops being right.
+ * not have. A payload column dropped from a statement is invisible in a row
+ * count and shows up only as a number that quietly stops being right.
  */
-describe('the four stored sheet inputs survive every portability path', () => {
+describe('the three stored sheet inputs survive every portability path', () => {
   let connection: Database;
   let db: DatabaseContext;
   let characterId: number;
@@ -84,12 +83,6 @@ describe('the four stored sheet inputs survive every portability path', () => {
         [characterId, skill],
       );
     }
-    db.exec(
-      `INSERT INTO character_sheet_adjustments (
-         character_id, armor_class_adjustment, armor_class_adjustment_note
-       ) VALUES (?, -2, 'Cursed helm, house ruled.')`,
-      [characterId],
-    );
   });
 
   afterEach(() => connection.close());
@@ -113,11 +106,6 @@ describe('the four stored sheet inputs survive every portability path', () => {
           WHERE character_id = ? ORDER BY skill`,
         [id],
       ),
-      adjustment: db.oneRaw(
-        `SELECT armor_class_adjustment, armor_class_adjustment_note
-           FROM character_sheet_adjustments WHERE character_id = ?`,
-        [id],
-      ),
     };
   }
 
@@ -126,7 +114,7 @@ describe('the four stored sheet inputs survive every portability path', () => {
     expect(document.tables.character_armor).toHaveLength(2);
     expect(document.tables.character_hit_point_rolls).toHaveLength(3);
     expect(document.tables.character_skill_proficiencies).toHaveLength(3);
-    expect(document.tables.character_sheet_adjustments).toHaveLength(1);
+    expect(document.tables.character_sheet_adjustments).toEqual([]);
 
     const before = sheetInputsOf(characterId);
     const imported = importCharacterBackup(db, document);
@@ -168,10 +156,6 @@ describe('the four stored sheet inputs survive every portability path', () => {
       'perception',
       'sleight_of_hand',
     ]);
-    expect(document.sheetAdjustment).toEqual({
-      value: -2,
-      note: 'Cursed helm, house ruled.',
-    });
 
     const fragment = await encodeShareFragment(document);
     const decoded = await decodeShareFragment(fragment);
@@ -193,7 +177,6 @@ describe('the four stored sheet inputs survive every portability path', () => {
     expect(preview.armorCount).toBe(2);
     expect(preview.hitPointRollCount).toBe(3);
     expect(preview.skillProficiencyCount).toBe(3);
-    expect(preview.includesArmorClassAdjustment).toBe(true);
   });
 
   it('carries nothing at all when the character has recorded nothing', () => {
@@ -207,13 +190,11 @@ describe('the four stored sheet inputs survive every portability path', () => {
     expect(document).not.toHaveProperty('armor');
     expect(document).not.toHaveProperty('hitPointRolls');
     expect(document).not.toHaveProperty('skillProficiencies');
-    expect(document).not.toHaveProperty('sheetAdjustment');
     const imported = importCharacterShare(db, document);
     expect(sheetInputsOf(imported.characterId)).toEqual({
       armor: [],
       rolls: [],
       skills: [],
-      adjustment: null,
     });
   });
 
@@ -229,20 +210,15 @@ describe('the four stored sheet inputs survive every portability path', () => {
     db.exec('DELETE FROM character_skill_proficiencies WHERE character_id = ?', [
       characterId,
     ]);
-    db.exec(
-      `UPDATE character_sheet_adjustments SET armor_class_adjustment = 7
-       WHERE character_id = ?`,
-      [characterId],
-    );
+    db.exec('DELETE FROM character_hit_point_rolls WHERE character_id = ?', [
+      characterId,
+    ]);
 
     state.restore(characterId, snapshot);
 
     expect(sheetInputsOf(characterId).armor).toHaveLength(2);
     expect(sheetInputsOf(characterId).skills).toHaveLength(3);
-    expect(sheetInputsOf(characterId).adjustment).toEqual({
-      armor_class_adjustment: -2,
-      armor_class_adjustment_note: 'Cursed helm, house ruled.',
-    });
+    expect(sheetInputsOf(characterId).rolls).toHaveLength(3);
   });
 
   it('leaves the sheet inputs alone when the save point predates them', () => {
@@ -252,7 +228,7 @@ describe('the four stored sheet inputs survive every portability path', () => {
     // claim the snapshot never made, and one that silently deletes real data on
     // undo.
     //
-    // The fixture is built by REMOVING the four keys from a live capture and
+    // The fixture is built by REMOVING the four historical keys from a live capture and
     // relabelling it, which is exactly the shape `a7-v3` had. Nothing in `src/`
     // can produce one any more, so it cannot be generated.
     const state = new CharacterState(db);

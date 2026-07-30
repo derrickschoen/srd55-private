@@ -24,7 +24,7 @@ import {
   armorSlots,
   skills,
 } from '../../src/domain/enums';
-import { SHEET_ADJUSTMENT_BOUNDS, SHEET_ROLL_BOUNDS } from '../../src/domain/sheet-limits';
+import { SHEET_ROLL_BOUNDS } from '../../src/domain/sheet-limits';
 import {
   datetime,
   integerAtLeast,
@@ -37,13 +37,13 @@ import {
 import { characters } from './character';
 
 /**
- * THE FOUR STORED SHEET INPUTS — and NOTHING ELSE.
+ * THE THREE STORED SHEET INPUTS — and NOTHING ELSE.
  *
  * `src/rules/sheet.ts` opens by naming what a character sheet genuinely stores
  * as opposed to derives: a per-level HIT POINT ROLL, the ARMOUR worn and the
- * SHIELD held, the MANUAL ARMOR CLASS ADJUSTMENT, and (implied by
- * `skillModifier`'s `proficient` parameter, which had no source) the SKILL
- * PROFICIENCIES the player chose. Those four are inputs a die or a person
+ * SHIELD held, and (implied by `skillModifier`'s `proficient` parameter,
+ * which had no source) the SKILL
+ * PROFICIENCIES the player chose. Those three are inputs a die or a person
  * supplied and this application cannot recompute. Every other number on a sheet
  * — hit point maximum, Armor Class, saving throws, skill modifiers, initiative,
  * passive Perception, attacks per action — is derived live from these plus the
@@ -51,16 +51,15 @@ import { characters } from './character';
  * them: a stored Armor Class drifts from the Dexterity score the moment either
  * moves, and there is then no way to tell which is right.
  *
- * WHY FOUR TABLES AND NOT ONE. Each has a different cardinality per character
+ * WHY THREE INPUT TABLES AND NOT ONE. Each has a different cardinality per character
  * and a different key, and merging any two would require a nullable column that
  * stands for "this row is the other kind" — the correlated-null shape D6 rejects:
  *
  *  - `character_armor` — at most one row per SLOT, so at most two.
  *  - `character_hit_point_rolls` — one row per (class, level in that class).
  *  - `character_skill_proficiencies` — one row per skill, presence IS the value.
- *  - `character_sheet_adjustments` — at most ONE row per character.
  *
- * EVERY ONE OF THE FOUR IS `snapshot`, `backupDirect`, `backup` AND `share` IN
+ * EVERY INPUT TABLE IS `snapshot`, `backupDirect`, `backup` AND `share` IN
  * `src/domain/contracts/tables.ts`, SET IN THE SAME CHANGE THAT CREATES THEM.
  * That is the Q8 lesson stated as a rule rather than a hope: `character_weapons`
  * shipped with all four flags false, no compile error anywhere, and the symptom
@@ -317,25 +316,13 @@ export const character_skill_proficiencies = sqliteTable(
 );
 
 /**
- * The manual Armor Class adjustment — D12's deliberate escape hatch.
+ * Historical shell for pre-AC-4 snapshots and backups.
  *
- * ONE SIGNED INTEGER PER CHARACTER, and it exists because two real features
- * cannot be computed here: Unarmored Defense (Barbarian, Monk) and every other
- * class feature offering an alternative calculation. Neither feature's text is
- * in `docs/srd/source/`, so `armorClass` refuses to guess, and without this
- * column a Barbarian's sheet would be wrong with no recourse at all.
- *
- * AT MOST ONE ROW, AND AN ABSENT ROW MEANS ZERO. Both readings are identical by
- * construction rather than by convention: the write command deletes the row when
- * the adjustment is set back to 0 with no note, so "nothing recorded" has ONE
- * representation and an imported pre-sheet payload produces literally no row.
- *
- * `armor_class_adjustment_note` IS NOT DECORATION. An unexplained `+3` on a
- * sheet is indistinguishable from a typo six months later. The note is where
- * "Unarmored Defense (Barbarian): +Con" is written down, and the sheet prints it
- * beside the number. It is nullable because a player may adjust without
- * explaining, which is D6b limb 1 — a half-decided state this schema treats as
- * first class rather than forcing into a modal.
+ * AC-4 retired the manual Armor Class adjustment into the one effect
+ * vocabulary. The table remains snapshot-scoped so an `a7-v4` through
+ * `a7-v10` artifact can still name it; its two retired payload columns are
+ * accepted, stripped, and migrated to `character_effects` at the boundary.
+ * Current code has no writer, so fresh captures contain no rows.
  */
 export const character_sheet_adjustments = sqliteTable(
   'character_sheet_adjustments',
@@ -348,39 +335,11 @@ export const character_sheet_adjustments = sqliteTable(
       .notNull()
       .$type<CharacterId>()
       .references(() => characters.id, { onDelete: 'cascade' }),
-    armor_class_adjustment: integer('armor_class_adjustment')
-      .notNull()
-      .default(0),
-    armor_class_adjustment_note: varchar()('armor_class_adjustment_note'),
     created_at: datetime()('created_at'),
     updated_at: datetime()('updated_at'),
   },
   (table) => [
-    /**
-     * SIGNED, so this cannot use `integerAtLeast`: a negative adjustment is
-     * legitimate (a cursed item, a house rule) and refusing it would invent a
-     * rule the source does not state. The `typeof` limb is still needed for the
-     * reason `columns.ts` measured — SQLite orders every TEXT value above every
-     * number, so a lower bound alone rejects nothing — and the symmetric bound
-     * comes from `src/domain/sheet-limits.ts` so the database, the write
-     * boundary and the share boundary hold to ONE number rather than three that
-     * can drift apart. That drift was the sub-bug inside Q8: a share cap below
-     * a write cap makes a character the app will let you build and then refuse
-     * to share.
-     */
-    check(
-      'character_sheet_adjustments_armor_class_adjustment_check',
-      sql`typeof(\`armor_class_adjustment\`) = 'integer' AND \`armor_class_adjustment\` BETWEEN ${sql.raw(
-        String(-SHEET_ADJUSTMENT_BOUNDS.armorClassMagnitude),
-      )} AND ${sql.raw(String(SHEET_ADJUSTMENT_BOUNDS.armorClassMagnitude))}`,
-    ),
-    /**
-     * UNIQUE and not a plain index, and there is no second index beside it: the
-     * unique index already serves every `WHERE character_id = ?` read, and the
-     * uniqueness is the cardinality claim — at most one adjustment row per
-     * character is what makes "absent means zero" a total reading rather than
-     * a guess about which of several rows to believe.
-     */
+    /** Historical artifacts carried at most one such row per character. */
     uniqueIndex(
       'character_sheet_adjustments_character_id_unique',
     ).on(table.character_id),

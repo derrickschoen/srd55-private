@@ -179,13 +179,6 @@ function seedFixture(): void {
      ) VALUES (?, 'arcana', ?, ?)`,
     [characterId, createdAt, updatedAt],
   );
-  db.exec(
-    `INSERT INTO character_sheet_adjustments (
-       character_id, armor_class_adjustment, armor_class_adjustment_note,
-       created_at, updated_at
-     ) VALUES (?, 3, 'Ring of Protection, house ruled.', ?, ?)`,
-    [characterId, createdAt, updatedAt],
-  );
   // A skill grant, FILLED with the same skill as the flat row above: the flat
   // table is the grants table's derived projection (skills plan §3.2), so a
   // fixture whose two tables disagreed would be a state the application
@@ -327,9 +320,7 @@ describe('capture and deterministic diff', () => {
     expect(snapshot.character_skill_proficiencies[0]).toMatchObject({
       skill: 'arcana',
     });
-    expect(snapshot.character_sheet_adjustments[0]).toMatchObject({
-      armor_class_adjustment: 3,
-    });
+    expect(snapshot.character_sheet_adjustments).toEqual([]);
     for (const table of CHARACTER_STATE_TABLES) {
       expect(snapshot[table]).toEqual(
         db.allRaw(
@@ -337,8 +328,56 @@ describe('capture and deterministic diff', () => {
           [characterId],
         ),
       );
-      expect(snapshot[table][0]).toMatchObject({ created_at: createdAt, updated_at: updatedAt });
+      if (table !== 'character_sheet_adjustments') {
+        expect(snapshot[table][0]).toMatchObject({
+          created_at: createdAt,
+          updated_at: updatedAt,
+        });
+      }
     }
+  });
+
+  it('restores a pre-AC-4 save point by migrating its adjustment into an effect', () => {
+    const snapshot = structuredClone(
+      state.capture(characterId),
+    ) as unknown as MutableSnapshot;
+    snapshot.character_sheet_adjustments = [{
+      id: 900,
+      character_id: characterId,
+      armor_class_adjustment: -2,
+      armor_class_adjustment_note: null,
+      created_at: createdAt,
+      updated_at: updatedAt,
+    }];
+
+    db.exec('DELETE FROM character_effects WHERE character_id = ?', [
+      characterId,
+    ]);
+    state.restore(characterId, snapshot);
+
+    expect(
+      db.allRaw(
+        `SELECT effect_kind, amount, label, source_instance_id,
+                character_item_id, character_weapon_id, template_ref
+         FROM character_effects
+         WHERE character_id = ? AND effect_kind = 'armor_class_bonus'`,
+        [characterId],
+      ),
+    ).toEqual([{
+      effect_kind: 'armor_class_bonus',
+      amount: -2,
+      label: 'Manual Armor Class adjustment',
+      source_instance_id: null,
+      character_item_id: null,
+      character_weapon_id: null,
+      template_ref: null,
+    }]);
+    expect(
+      db.scalar(
+        'SELECT count(*) FROM character_sheet_adjustments WHERE character_id = ?',
+        [characterId],
+      ),
+    ).toBe(0);
   });
 
   it('reports changed persisted row identities in stable table and numeric-id order', () => {

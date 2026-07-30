@@ -8,7 +8,6 @@ import type {
   ArmorFields,
   CharacterCommandPayload,
 } from '../../../src/domain/command-contracts';
-import { SHEET_ADJUSTMENT_BOUNDS } from '../../../src/domain/sheet-limits';
 import { openTestDatabase } from '../../helpers/open-db';
 
 const key = 'S1-sheet-command-integrity-key';
@@ -371,81 +370,20 @@ describe('sheet input commands', () => {
     ).toBe(0);
   });
 
-  it('stores a signed Armor Class adjustment with its reason', async () => {
-    const inverse = await inverseOf({
-      type: 'set_armor_class_adjustment',
-      value: -2,
-      note: 'Cursed helm, house ruled.',
-    });
-    expect(
-      db.oneRaw(
-        `SELECT armor_class_adjustment, armor_class_adjustment_note
-           FROM character_sheet_adjustments WHERE character_id = ?`,
-        [characterId],
-      ),
-    ).toEqual({
-      armor_class_adjustment: -2,
-      armor_class_adjustment_note: 'Cursed helm, house ruled.',
-    });
-    // The inverse of a first-time set is the ZERO state, which is stored as no
-    // row at all.
-    expect(inverse).toEqual({
-      type: 'set_armor_class_adjustment',
-      value: 0,
-      note: null,
-    });
-    await run(inverse);
+  it('refuses the retired Armor Class adjustment command as unknown', async () => {
+    await expect(
+      run({
+        type: 'set_armor_class_adjustment',
+        value: -2,
+        note: 'Cursed helm, house ruled.',
+      } as unknown as CharacterCommandPayload),
+    ).rejects.toThrow('Unknown character command type.');
     expect(
       db.scalar(
         'SELECT count(*) FROM character_sheet_adjustments WHERE character_id = ?',
         [characterId],
       ),
     ).toBe(0);
-  });
-
-  it('keeps a note even when the adjustment itself is zero', async () => {
-    // Zero WITH a note is a real state — "I checked, and nothing applies" — and
-    // only zero WITHOUT a note collapses to no row. Storing the first as
-    // nothing would silently discard the sentence the user typed.
-    await run({
-      type: 'set_armor_class_adjustment',
-      value: 0,
-      note: 'Unarmored Defense does not apply; checked 2026-07-24.',
-    });
-    expect(
-      db.scalar(
-        'SELECT count(*) FROM character_sheet_adjustments WHERE character_id = ?',
-        [characterId],
-      ),
-    ).toBe(1);
-  });
-
-  it('refuses an adjustment past the bound, in both directions', async () => {
-    const magnitude = SHEET_ADJUSTMENT_BOUNDS.armorClassMagnitude;
-    for (const value of [magnitude + 1, -magnitude - 1]) {
-      await expect(
-        run({ type: 'set_armor_class_adjustment', value, note: null }),
-      ).rejects.toThrow('value must be an integer from -20 to 20');
-    }
-    // Both bounds themselves are accepted: a symmetric bound that refused its
-    // own edge would be a rule nobody stated.
-    await run({
-      type: 'set_armor_class_adjustment',
-      value: magnitude,
-      note: null,
-    });
-    await run({
-      type: 'set_armor_class_adjustment',
-      value: -magnitude,
-      note: null,
-    });
-    expect(
-      db.scalar(
-        `SELECT armor_class_adjustment FROM character_sheet_adjustments
-          WHERE character_id = ?`,
-        [characterId],
-      ),
-    ).toBe(-magnitude);
   });
 
   it('writes one change-log entry per affected row, under an accepted entity type', async () => {
