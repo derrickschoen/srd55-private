@@ -169,7 +169,7 @@ test('the sheet prints the derived numbers, and prints what it lacks', async ({
   //   proficiency bonus from TOTAL level 8 → +3;
   //   hit points 11 (d10 + Con at level 1) + 28 (Fighter 2-5, one rolled 9)
   //     + 15 (Wizard 1-3) = 54 with no rolls, +3 for the recorded 9 → 57;
-  //   Armor Class 15 + min(Dex +2, cap 2) + shield 2 − 2 adjustment = 17;
+  //   Armor Class 15 + min(Dex +2, cap 2) + shield 2 − 2 effect = 17;
   //   initiative = Dexterity modifier +2;
   //   passive Perception 10 + (Wisdom +0 + proficiency 3) = 13.
   await expect(figure('proficiency_bonus')).toHaveText('+3');
@@ -190,15 +190,15 @@ test('the sheet prints the derived numbers, and prints what it lacks', async ({
 
   await expect(page).toHaveTitle(`${HOSTILE_NAME} character sheet`);
 
-  // F4: every gap is printed rather than left as a blank box. SIX since E-B
-  // added `gear_not_itemised` (D65: only a package's weapons and armour are
-  // tracked; gear renders from the rules and no gold is granted). FIVE
-  // before that, since skills-with-provenance §3.5 deleted
-  // `background_skills_are_text`.
-  await expect(page.locator('[data-sheet-id^="gap:"]')).toHaveCount(6);
+  // F4: every gap is printed rather than left as a blank box. FIVE after AC-4
+  // deleted the false `no_unarmored_defense` disclosure. SIX immediately
+  // before that, since E-B added `gear_not_itemised` (D65: only a package's
+  // weapons and armour are tracked; gear renders from the rules and no gold
+  // is granted).
+  await expect(page.locator('[data-sheet-id^="gap:"]')).toHaveCount(5);
   await expect(
     page.locator('[data-sheet-id="gap:no_unarmored_defense"]'),
-  ).toContainText('Unarmored Defense');
+  ).toHaveCount(0);
   await expect(
     page.locator('[data-sheet-id="gap:no_expertise"]'),
   ).toContainText('Expertise');
@@ -233,10 +233,12 @@ test('the structured block says exactly what the page says, and hides nothing', 
   expect(json).toContain('"slot":"worn"');
   expect(json).toContain('"category":"shield"');
 
-  // Both hostile strings are on the page, visible, carrying their provenance.
+  // The hostile armour name is on the page, visible, carrying its provenance.
+  // AC-4 retired the separate manual-adjustment row, so the effect label has
+  // no legacy row to render into.
   const marked = page.locator('[data-free-text="unverified-origin"]');
   await expect(marked.filter({ hasText: HOSTILE_ARMOR_NAME })).toBeVisible();
-  await expect(marked.filter({ hasText: 'Cursed helm' })).toBeVisible();
+  await expect(marked.filter({ hasText: 'Cursed helm' })).toHaveCount(0);
 
   // D4: NOTHING IS HIDDEN. A page whose structured block says more than its
   // visible text is the injection shape that rule exists to refuse, so the
