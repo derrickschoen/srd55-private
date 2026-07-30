@@ -100,7 +100,7 @@ test('creates, independently verifies, previews, and explicitly imports a durabl
     gunzipSync(Buffer.from(fragment, 'base64url')).toString('utf8'),
   ) as unknown[];
   expect(positional[0]).toBe('dnd-multiclass-spells-character-share');
-  // v10: B1 minted v3 (allocation signal), B2 minted v4 (contribution
+  // v11: B1 minted v3 (allocation signal), B2 minted v4 (contribution
   // effects), skills-with-provenance S-A minted v5 (skill grants, retiring
   // every pre-v5 document per D60), starting-equipment E-A minted v6 (the
   // weapon/armour `sourceRef` append), D69 minted v7 (that append dropped —
@@ -110,9 +110,10 @@ test('creates, independently verifies, previews, and explicitly imports a durabl
   // `weaponRef`, and `template_ref` (arity 20), while the source tuple appends
   // `generated` (arity 7), encoding a generated-only species source exactly as
   // type `species`, key NULL, generated TRUE. AC-4 minted v10: the sheet tuple
-  // drops the retired `sheetAdjustment` fourth field and has arity 3 — so this
-  // build writes 10 and nothing else.
-  expect(positional[1]).toBe(10);
+  // drops the retired `sheetAdjustment` fourth field and has arity 3. D92
+  // minted v11: item tuples drop `attuned` and have arity 4, while the root
+  // appends a fixed three-position attunement tuple and has arity 19.
+  expect(positional[1]).toBe(11);
   expect((positional[2] as unknown[])[0]).toBe('Journey Hero 🧙');
   // TWELVE since v3, with the notes slot still NULL when nobody ticks the
   // notes box, and the appended ability_allocation_method NULL for a
@@ -129,12 +130,14 @@ test('creates, independently verifies, previews, and explicitly imports a durabl
   // the seventeenth, NULL for a character with no grants, and AC-1 appends
   // `items` as the eighteenth, NULL for a character with none. V9 grows the
   // nested effect and source tuples; v10 shrinks only the nested sheet tuple
-  // from arity 4 to 3. The root remains exactly eighteen positions — absent
-  // data is an occupied null slot, never a shorter tuple.
-  expect(positional).toHaveLength(18);
+  // from arity 4 to 3. V11 appends `attunementSlots` as the nineteenth root
+  // position, NULL when all three fixed positions are empty. Absent data is
+  // an occupied null slot, never a shorter tuple.
+  expect(positional).toHaveLength(19);
   expect(positional[15]).toBeNull();
   expect(positional[16]).toBeNull();
   expect(positional[17]).toBeNull();
+  expect(positional[18]).toBeNull();
 
   const freshProfile = await browser.newContext();
   try {

@@ -196,10 +196,16 @@ function seedFixture(): void {
   // above is, so capture/restore exercises the composite reference here too.
   db.exec(
     `INSERT INTO character_items (
-       character_id, name, description, requires_attunement, attuned,
+       character_id, name, description, requires_attunement,
        source_instance_id, created_at, updated_at
-     ) VALUES (?, 'Ring of Protection', 'item row', 1, 1, 2, ?, ?)`,
+     ) VALUES (?, 'Ring of Protection', 'item row', 1, 2, ?, ?)`,
     [characterId, createdAt, updatedAt],
+  );
+  db.exec(
+    `INSERT INTO character_attunement_slots (
+       character_id, slot_1_item_id
+     ) VALUES (?, last_insert_rowid())`,
+    [characterId],
   );
 }
 
@@ -214,7 +220,9 @@ function persistedCharacterState(id = characterId): Record<string, unknown> {
       CHARACTER_STATE_TABLES.map((table) => [
         table,
         db.allRaw(
-          `SELECT * FROM "${table}" WHERE character_id = ? ORDER BY id`,
+          `SELECT * FROM "${table}" WHERE character_id = ? ORDER BY ${
+            table === 'character_attunement_slots' ? 'character_id' : 'id'
+          }`,
           [id],
         ),
       ]),
@@ -242,12 +250,12 @@ describe('capture and deterministic diff', () => {
       'character',
       ...CHARACTER_STATE_TABLES,
     ]);
-    // a7-v9 is the version that carries the skill grants table.
+    // a7-v11 is the version that carries the fixed attunement row.
     // Written out rather than compared against the exported constant: a version
     // identifier is a wire fact that other stored data is matched against, so a
     // test that reads it from the module under test could never notice it
     // changing.
-    expect(snapshot.schema_version).toBe('a7-v10');
+    expect(snapshot.schema_version).toBe('a7-v11');
     expect(Object.keys(snapshot.character)).toEqual(CHARACTER_STATE_COLUMNS);
     expect(snapshot.character).toEqual({
       name: 'Snapshot Hero',
@@ -324,11 +332,16 @@ describe('capture and deterministic diff', () => {
     for (const table of CHARACTER_STATE_TABLES) {
       expect(snapshot[table]).toEqual(
         db.allRaw(
-          `SELECT * FROM "${table}" WHERE character_id = ? ORDER BY id`,
+          `SELECT * FROM "${table}" WHERE character_id = ? ORDER BY ${
+            table === 'character_attunement_slots' ? 'character_id' : 'id'
+          }`,
           [characterId],
         ),
       );
-      if (table !== 'character_sheet_adjustments') {
+      if (
+        table !== 'character_sheet_adjustments' &&
+        table !== 'character_attunement_slots'
+      ) {
         expect(snapshot[table][0]).toMatchObject({
           created_at: createdAt,
           updated_at: updatedAt,
@@ -400,6 +413,7 @@ describe('capture and deterministic diff', () => {
       character_effects: [],
       character_skill_grants: [],
       character_items: [],
+      character_attunement_slots: [],
     };
     const before = {
       character: { name: 'Before' },
@@ -434,6 +448,7 @@ describe('capture and deterministic diff', () => {
       character_effects: [],
       character_skill_grants: [],
       character_items: [],
+      character_attunement_slots: [],
     };
 
     expect(state.diff(before, after)).toEqual([
@@ -811,7 +826,7 @@ describe('restoring a snapshot written by an older build', () => {
     // oversight: a current snapshot DOES speak for weapons, so restoring it
     // removes one added afterwards.
     const snapshot = mutableCapture();
-    expect(snapshot.schema_version).toBe('a7-v10');
+    expect(snapshot.schema_version).toBe('a7-v11');
     db.exec(
       `INSERT INTO character_weapons (character_id, name)
        VALUES (?, 'Bought since')`,
@@ -826,6 +841,44 @@ describe('restoring a snapshot written by an older build', () => {
         [characterId],
       ),
     ).toEqual([{ name: 'Shortsword' }]);
+  });
+
+  it('migrates a7-v10 item booleans into the first three fixed slots by item id', () => {
+    for (const name of ['Amulet', 'Boots', 'Crown']) {
+      db.exec(
+        `INSERT INTO character_items (
+           character_id, name, requires_attunement, created_at, updated_at
+         ) VALUES (?, ?, 1, ?, ?)`,
+        [characterId, name, createdAt, updatedAt],
+      );
+    }
+    const snapshot = mutableCapture();
+    snapshot.schema_version = 'a7-v10';
+    delete snapshot.character_attunement_slots;
+    for (const row of snapshot.character_items as Array<Record<string, unknown>>) {
+      row.attuned = 1;
+    }
+
+    state.restore(characterId, snapshot);
+
+    const expected = db
+      .allRaw(
+        `SELECT id FROM character_items
+         WHERE character_id = ? ORDER BY id LIMIT 3`,
+        [characterId],
+      )
+      .map((row) => row.id);
+    expect(
+      db.oneRaw(
+        `SELECT slot_1_item_id, slot_2_item_id, slot_3_item_id
+         FROM character_attunement_slots WHERE character_id = ?`,
+        [characterId],
+      ),
+    ).toEqual({
+      slot_1_item_id: expected[0],
+      slot_2_item_id: expected[1],
+      slot_3_item_id: expected[2],
+    });
   });
 
   it('restores a v5 free-text weapon row through the damage migration', () => {

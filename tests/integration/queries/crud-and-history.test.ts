@@ -108,15 +108,15 @@ describe('character CRUD, catalog, save points, and operation history', () => {
     expect(stored).toMatchObject({
       character_id: characterId,
       label: 'Before experiment',
-      // a7-v10: the version that carries the character_items table (AC-1).
+      // a7-v11: the version that carries D92's fixed attunement slots.
       // The column and the JSON inside it must agree — the backup validator
       // refuses a save point that disagrees with itself, so both are asserted
       // here.
-      schema_version: 'a7-v10',
+      schema_version: 'a7-v11',
       created_at: '2026-07-23T11:00:00.000Z',
     });
     expect(JSON.parse(String(stored?.snapshot))).toMatchObject({
-      schema_version: 'a7-v10',
+      schema_version: 'a7-v11',
       character: { name: 'Snapshot Hero', intelligence: 17 },
       character_class_levels: [],
       character_source_instances: [],
@@ -124,6 +124,7 @@ describe('character CRUD, catalog, save points, and operation history', () => {
       wizard_spellbook_entries: [],
       warning_acknowledgements: [],
       character_weapons: [],
+      character_attunement_slots: [],
     });
 
     const command = await savePoints.restoreCommand(

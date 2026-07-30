@@ -286,7 +286,6 @@ const VERSION_FIXTURES = {
         {
           name: 'Ring of Shell',
           requires_attunement: false,
-          attuned: false,
         },
       ],
     },
@@ -344,7 +343,6 @@ const VERSION_FIXTURES = {
       items: [{
         name: 'Cloak of the Armadillo',
         requires_attunement: true,
-        attuned: false,
         sourceRef: 0,
       }],
     },
@@ -374,6 +372,30 @@ const VERSION_FIXTURES = {
         label: 'Manual Armor Class adjustment',
         amount: -2,
       }],
+    },
+  },
+  11: {
+    // Independently compressed from a hand-authored v11 positional tuple.
+    // Three item tuples have no historical boolean; the final fixed tuple
+    // occupies all three structural attunement positions.
+    fragment:
+      'H4sIAAAAAAAAA5WOvQrDMAyEXyVolqHqK3Tp3EAX4UE4ShOq2sU_75-lXewuheOGu_vgGJa4uFezugeTUlx5q1lxYZMsoWp2ZZOsgETIcCeaZkt1umpOgLGZ_W8eeVA344Hogx5guFiS5-dTzU2_JNz2-PiVz1XWdSg88gkJz94f50ZEahsBAAA',
+    expected: {
+      format: CHARACTER_SHARE_FORMAT,
+      version: CHARACTER_SHARE_VERSION,
+      character: { name: 'V11 Slot Hero' },
+      classes: [],
+      sources: [],
+      selections: [],
+      spellbook: [],
+      preferences: [],
+      overrides: [],
+      items: [
+        { name: 'Cloak', requires_attunement: true },
+        { name: 'Ring', requires_attunement: true },
+        { name: 'Staff', requires_attunement: true },
+      ],
+      attunementSlots: [0, 1, 2],
     },
   },
 } satisfies Record<SupportedShareVersion, FrozenFixture>;
@@ -503,7 +525,7 @@ describe('the share-link wire schema registry', () => {
       'znYkjqpeGzGrT3uUmIzE6x6FACcM8J3cnM-udlExt5JUwNKZ32PDMOyhhaF4Ch-ERWprlN2PpLpSjWAbju76D1796GfoAAAA';
 
     await expect(decodeShareFragment(nonZero)).resolves.toMatchObject({
-      version: 10,
+      version: 11,
       effects: [{
         kind: 'armor_class_bonus',
         label: 'Manual Armor Class adjustment',
@@ -511,7 +533,7 @@ describe('the share-link wire schema registry', () => {
       }],
     });
     const zero = await decodeShareFragment(zeroWithNote);
-    expect(zero.version).toBe(10);
+    expect(zero.version).toBe(11);
     expect(zero).not.toHaveProperty('effects');
     expect(zero).not.toHaveProperty('sheetAdjustment');
   });

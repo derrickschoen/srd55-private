@@ -29,6 +29,7 @@ import {
   ORIGIN_EFFECT_MAGNITUDE_MAX,
   ORIGIN_TEXT_LIMITS,
 } from '../domain/origin-limits';
+import { attunementSlots } from '../domain/attunement';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -50,6 +51,10 @@ const commandTypes = [
   'add_item',
   'update_item',
   'remove_item',
+  'attune_item',
+  'unattune_item',
+  'replace_attuned_item',
+  'restore_attunement_slot',
   'set_armor',
   'set_hit_point_roll',
   // `set_skill_proficiency` and `choose_multiclass_skill` are RETIRED
@@ -899,7 +904,6 @@ function validateItemFields(value: unknown): void {
       'name',
       'description',
       'requires_attunement',
-      'attuned',
       'source_instance_id',
       'effects',
     ],
@@ -908,7 +912,6 @@ function validateItemFields(value: unknown): void {
   nonEmptyString(item, 'name', ORIGIN_TEXT_LIMITS.trait_name);
   nullableString(item, 'description', ORIGIN_TEXT_LIMITS.description);
   requiredBoolean(item, 'requires_attunement');
-  requiredBoolean(item, 'attuned');
   if (!hasOwn(item, 'source_instance_id')) {
     invalid('source_instance_id is required; use null when absent.');
   }
@@ -921,10 +924,21 @@ function validateItemFields(value: unknown): void {
 }
 
 function validateAddItem(record: UnknownRecord): void {
-  rejectUnknown(record, ['type', 'item', 'item_id', 'reason']);
+  rejectUnknown(
+    record,
+    ['type', 'item', 'item_id', 'attunement_slot', 'reason'],
+  );
   validateItemFields(record.item);
   if (hasOwn(record, 'item_id')) {
     positiveInteger(record, 'item_id');
+  }
+  if (
+    hasOwn(record, 'attunement_slot') &&
+    !attunementSlots.includes(
+      record.attunement_slot as (typeof attunementSlots)[number],
+    )
+  ) {
+    invalid('attunement_slot must be 1, 2, or 3.');
   }
 }
 
@@ -937,6 +951,35 @@ function validateUpdateItem(record: UnknownRecord): void {
 function validateRemoveItem(record: UnknownRecord): void {
   rejectUnknown(record, ['type', 'item_id', 'reason']);
   positiveInteger(record, 'item_id');
+}
+
+function validateItemLocator(record: UnknownRecord): void {
+  rejectUnknown(record, ['type', 'item_id', 'reason']);
+  positiveInteger(record, 'item_id');
+}
+
+function validateReplaceAttunedItem(record: UnknownRecord): void {
+  rejectUnknown(
+    record,
+    ['type', 'item_id', 'replaced_item_id', 'reason'],
+  );
+  positiveInteger(record, 'item_id');
+  positiveInteger(record, 'replaced_item_id');
+  if (record.item_id === record.replaced_item_id) {
+    invalid('An item cannot replace itself in an attunement slot.');
+  }
+}
+
+function validateRestoreAttunementSlot(record: UnknownRecord): void {
+  rejectUnknown(record, ['type', 'slot', 'item_id', 'reason']);
+  positiveInteger(record, 'item_id');
+  if (
+    !attunementSlots.includes(
+      record.slot as (typeof attunementSlots)[number],
+    )
+  ) {
+    invalid('slot must be 1, 2, or 3.');
+  }
 }
 
 /** A nullable signed integer inside an inclusive range, present as a key. */
@@ -1149,6 +1192,16 @@ function validateByType(
       return record;
     case 'remove_item':
       validateRemoveItem(record);
+      return record;
+    case 'attune_item':
+    case 'unattune_item':
+      validateItemLocator(record);
+      return record;
+    case 'replace_attuned_item':
+      validateReplaceAttunedItem(record);
+      return record;
+    case 'restore_attunement_slot':
+      validateRestoreAttunementSlot(record);
       return record;
     case 'set_armor':
       validateSetArmor(record);

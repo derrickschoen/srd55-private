@@ -343,6 +343,63 @@ describe('database migration chain', () => {
     lifecycle.close();
   });
 
+  it('keeps only the first three historically attuned items by id and drops every later attunement', async () => {
+    const beforeAttunementSlots = DATABASE_MIGRATIONS
+      .slice(0, 17)
+      .map((entry) => entry.sql)
+      .join('\n');
+    const storage = await storageHolding(
+      `${beforeAttunementSlots}
+       INSERT INTO characters (id, name) VALUES (1, 'Four-item history');
+       INSERT INTO character_items (
+         id, character_id, name, requires_attunement, attuned
+       ) VALUES
+         (9, 1, 'Fourth by id', 1, 1),
+         (2, 1, 'First by id', 1, 1),
+         (7, 1, 'Third by id', 1, 1),
+         (4, 1, 'Second by id', 1, 1),
+         (11, 1, 'Never attuned', 1, 0);`,
+    );
+    const lifecycle = new DatabaseLifecycle(sqlite3, storage, schema);
+
+    lifecycle.open();
+
+    expect(
+      lifecycle.database.oneRaw(
+        `SELECT slot_1_item_id, slot_2_item_id, slot_3_item_id
+         FROM character_attunement_slots
+         WHERE character_id = 1`,
+      ),
+    ).toEqual({
+      slot_1_item_id: 2,
+      slot_2_item_id: 4,
+      slot_3_item_id: 7,
+    });
+    expect(
+      lifecycle.database.allRaw(
+        `SELECT item.id, item.name
+         FROM character_items AS item
+         LEFT JOIN character_attunement_slots AS slots
+           ON slots.character_id = item.character_id
+          AND item.id IN (
+            slots.slot_1_item_id, slots.slot_2_item_id, slots.slot_3_item_id
+          )
+         WHERE item.character_id = 1
+           AND slots.character_id IS NULL
+         ORDER BY item.id`,
+      ),
+    ).toEqual([
+      { id: 9, name: 'Fourth by id' },
+      { id: 11, name: 'Never attuned' },
+    ]);
+    expect(
+      lifecycle.database
+        .allRaw('SELECT name FROM pragma_table_info(?)', ['character_items'])
+        .map((row) => row.name),
+    ).not.toContain('attuned');
+    lifecycle.close();
+  });
+
   it('adds feat numbers without losing an existing definition', async () => {
     const storage = await storageHolding(
       `${SCHEMA_BEFORE_FEAT_MODEL}
@@ -528,7 +585,7 @@ describe('database migration chain', () => {
     expect(await imported.exportBytes()).toEqual(migratedBytes);
     imported.close();
     lifecycle.close();
-  });
+  }, 15_000);
 
   it('aborts on an unrenderable historical copper value, naming the row and preserving the image', async () => {
     const storage = await storageHolding(

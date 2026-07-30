@@ -596,7 +596,6 @@ function shareItemFromRow(
   const item: Record<string, unknown> = {
     name: String(row.name),
     requires_attunement: Number(row.requires_attunement) === 1,
-    attuned: Number(row.attuned) === 1,
   };
   if (row.description !== null && row.description !== undefined) {
     item.description = String(row.description);
@@ -992,6 +991,30 @@ export function exportCharacterShare(
     itemRows.map((row, index) => [Number(row.id), index]),
   );
   const items = itemRows.map((row) => shareItemFromRow(row, effectOwners));
+  const attunementRow = db.oneRaw(
+    `SELECT * FROM ${SHARE_TABLES.character_attunement_slots}
+     WHERE character_id = ?`,
+    [characterId],
+  );
+  const attunementSlots =
+    attunementRow === null
+      ? undefined
+      : ([
+          attunementRow.slot_1_item_id,
+          attunementRow.slot_2_item_id,
+          attunementRow.slot_3_item_id,
+        ].map((itemId) => {
+          if (itemId === null || itemId === undefined) {
+            return null;
+          }
+          const ref = itemRefs.get(Number(itemId));
+          if (ref === undefined) {
+            throw new ShareValidationError(
+              'an attunement slot names an item this share cannot encode.',
+            );
+          }
+          return ref;
+        }) as [number | null, number | null, number | null]);
   const effects = db.all(
     `SELECT * FROM ${SHARE_TABLES.character_effects}
      WHERE character_id = ?
@@ -1167,6 +1190,10 @@ export function exportCharacterShare(
     ...(effects.length === 0 ? {} : { effects }),
     ...(skillGrants.length === 0 ? {} : { skillGrants }),
     ...(items.length === 0 ? {} : { items }),
+    ...(attunementSlots === undefined ||
+    attunementSlots.every((slot) => slot === null)
+      ? {}
+      : { attunementSlots }),
   };
   return validateShareDocument(document);
 }
@@ -1909,21 +1936,31 @@ export function importCharacterShare(
       }
       const inserted = db.exec(
         `INSERT INTO ${SHARE_TABLES.character_items} (
-           character_id, name, description, requires_attunement, attuned,
+           character_id, name, description, requires_attunement,
            source_instance_id, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
         [
           characterId,
           item.name,
           item.description ?? null,
           item.requires_attunement ? 1 : 0,
-          item.attuned ? 1 : 0,
           roots?.[0] ?? null,
           now,
           now,
         ],
       );
       itemIds.push(inserted.lastInsertId);
+    }
+    if (document.attunementSlots !== undefined) {
+      const mapped = document.attunementSlots.map((ref) =>
+        ref === null ? null : itemIds[ref] ?? null,
+      );
+      db.exec(
+        `INSERT INTO ${SHARE_TABLES.character_attunement_slots} (
+           character_id, slot_1_item_id, slot_2_item_id, slot_3_item_id
+         ) VALUES (?, ?, ?, ?)`,
+        [characterId, mapped[0], mapped[1], mapped[2]],
+      );
     }
     // THE CHARACTER'S OWN EFFECTS, FROM TWO SOURCES THAT CANNOT BOTH FIRE.
     //

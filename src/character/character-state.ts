@@ -71,11 +71,16 @@ import {
  * modify" table. A pre-v10 snapshot does not carry it, so restoring one LEAVES
  * the character's items alone, on the identical terms `a7-v9` states for grants.
  *
- * AC-4 does not mint `a7-v11`: the captured table set is unchanged. The
+ * AC-4 did not mint `a7-v11`: the captured table set was unchanged. The
  * `character_sheet_adjustments` table remains as an empty historical shell,
  * and `RETIRED_ROW_COLUMNS`-style reconciliation converts either retired
- * payload column into an `armor_class_bonus` effect before restore. A current
- * capture therefore has the same versioned table contract, while an older
+ * payload column into an `armor_class_bonus` effect before restore.
+ *
+ * D92 now mints `a7-v11` for `character_attunement_slots`; `a7-v10` is frozen
+ * before that table joins the live list. A pre-v11 snapshot makes no claim
+ * about attunement slots and therefore leaves them untouched on restore.
+ * A current
+ * capture has the new table contract, while an older
  * capture keeps the numeric adjustment it actually recorded.
  *
  * NOT BUMPING WOULD HAVE BEEN THE LOUDEST FAILURE IN THIS CHANGE.
@@ -87,7 +92,7 @@ import {
  * containing one. Undo, save-point restore and `exportCharacterBackup` — which
  * re-parses its own stored save points on the way out — would break together.
  */
-export const CHARACTER_SNAPSHOT_SCHEMA_VERSION = 'a7-v10' as const;
+export const CHARACTER_SNAPSHOT_SCHEMA_VERSION = 'a7-v11' as const;
 
 /**
  * WHICH TABLES EACH SNAPSHOT VERSION CARRIES.
@@ -204,6 +209,12 @@ const A7_V9_TABLES = [
   'character_skill_grants',
 ] as const satisfies readonly SnapshotTable[];
 
+/** Frozen before D92's fixed attunement row joined the live snapshot list. */
+const A7_V10_TABLES = [
+  ...A7_V9_TABLES,
+  'character_items',
+] as const satisfies readonly SnapshotTable[];
+
 const SNAPSHOT_TABLES_BY_VERSION = {
   'a7-v1': A7_V1_TABLES,
   'a7-v2': A7_V2_TABLES,
@@ -214,7 +225,8 @@ const SNAPSHOT_TABLES_BY_VERSION = {
   'a7-v7': A7_V7_TABLES,
   'a7-v8': A7_V8_TABLES,
   'a7-v9': A7_V9_TABLES,
-  'a7-v10': CHARACTER_STATE_TABLES,
+  'a7-v10': A7_V10_TABLES,
+  'a7-v11': CHARACTER_STATE_TABLES,
 } as const satisfies Readonly<Record<string, readonly SnapshotTable[]>>;
 
 /**
@@ -239,6 +251,7 @@ export const CHARACTER_SNAPSHOT_SCHEMA_VERSIONS = [
   'a7-v8',
   'a7-v9',
   'a7-v10',
+  'a7-v11',
 ] as const satisfies readonly (keyof typeof SNAPSHOT_TABLES_BY_VERSION)[];
 
 export type CharacterSnapshotSchemaVersion =
@@ -330,7 +343,8 @@ const SNAPSHOT_CHARACTER_COLUMNS_BY_VERSION = {
   // carry the same twelve `character` columns — `a7-v10` changes the TABLE
   // list only (`character_items`), not this one.
   'a7-v9': [...PRE_V8_CHARACTER_COLUMNS, 'ability_allocation_method'] as const,
-  'a7-v10': CHARACTER_STATE_COLUMNS,
+  'a7-v10': [...PRE_V8_CHARACTER_COLUMNS, 'ability_allocation_method'] as const,
+  'a7-v11': CHARACTER_STATE_COLUMNS,
 } as const satisfies Readonly<
   Record<CharacterSnapshotSchemaVersion, readonly string[]>
 >;
@@ -510,7 +524,11 @@ function snapshotRows(
     const retired =
       table === 'character_sheet_adjustments'
         ? splitLegacyArmorClassAdjustment(migrated)?.row ?? migrated
-        : migrated;
+        : table === 'character_items' && Object.hasOwn(migrated, 'attuned')
+          ? Object.fromEntries(
+              Object.entries(migrated).filter(([key]) => key !== 'attuned'),
+            )
+          : migrated;
     return fillAddedNullableRowColumns(table, retired) as SnapshotRow;
   });
 }
@@ -615,7 +633,9 @@ export class CharacterState {
       snapshot[table] = this.db.allRaw(
         `SELECT * FROM ${quoteIdentifier(table)}
          WHERE character_id = ?
-         ORDER BY id`,
+         ORDER BY ${
+           table === 'character_attunement_slots' ? 'character_id' : 'id'
+         }`,
         [characterId],
       );
     }
@@ -895,6 +915,33 @@ export class CharacterState {
         }
       }
     }
+    const migratedTables: readonly CharacterStateTable[] =
+      version === 'a7-v10'
+        ? [...tables, 'character_attunement_slots']
+        : tables;
+    if (version === 'a7-v10') {
+      const rawItems = Array.isArray(root.character_items)
+        ? root.character_items
+        : [];
+      const attuned = rawItems
+        .filter(
+          (row): row is SnapshotObject =>
+            isObject(row) && (row.attuned === true || row.attuned === 1),
+        )
+        .map((row) => Number(row.id))
+        .filter((id) => Number.isSafeInteger(id) && id >= 1)
+        .sort((left, right) => left - right)
+        .slice(0, 3);
+      rows.character_attunement_slots =
+        attuned.length === 0
+          ? []
+          : [{
+              character_id: characterId,
+              slot_1_item_id: attuned[0] ?? null,
+              slot_2_item_id: attuned[1] ?? null,
+              slot_3_item_id: attuned[2] ?? null,
+            }];
+    }
 
     const uniqueVersionIds = [...new Set(spellVersionIds)];
     if (uniqueVersionIds.length > 0) {
@@ -924,7 +971,7 @@ export class CharacterState {
       character,
       columns: snapshotCharacterColumnsFor(version),
       rows,
-      tables,
+      tables: migratedTables,
       legacyArmorClassBonuses: snapshotLegacyArmorClassBonuses(root),
     };
   }

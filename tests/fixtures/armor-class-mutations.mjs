@@ -178,7 +178,11 @@ const controls = {
     AND (
       effect.character_item_id IS NULL
       OR item.requires_attunement = 0
-      OR item.attuned = 1
+      OR item.id IN (
+        attunement.slot_1_item_id,
+        attunement.slot_2_item_id,
+        attunement.slot_3_item_id
+      )
     )\`;`,
         `  WHERE effect.character_id = ?\`;`,
       ),

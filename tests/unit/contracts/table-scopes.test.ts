@@ -71,6 +71,8 @@ const SNAPSHOT_ADDITIONS = [
   // The character's own items (AC-1, D72): things that only modify, speaking
   // through `character_effects` rather than carrying their own columns.
   'character_items',
+  // D92's exact three-column, one-row capacity boundary.
+  'character_attunement_slots',
 ] as const;
 const BACKUP_DIRECT_ADDITIONS = [
   'character_weapons',
@@ -84,6 +86,7 @@ const BACKUP_DIRECT_ADDITIONS = [
   'character_effects',
   'character_skill_grants',
   'character_items',
+  'character_attunement_slots',
 ] as const;
 describe('derived table scopes reproduce the hand-maintained lists', () => {
   it('reproduces applicationTables exactly (database-lifecycle.ts)', () => {
@@ -99,6 +102,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       'class_equipment_items',
       'change_log',
       'character_armor',
+      'character_attunement_slots',
       'character_background',
       'character_class_levels',
       'character_effects',
@@ -183,6 +187,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
     // edge between them to respect.
     expect([...DELETE_ORDER]).toEqual([
       'character_effects',
+      'character_attunement_slots',
       'character_weapons',
       'character_items',
       // The four sheet inputs are leaves too: `character_hit_point_rolls` has
@@ -264,6 +269,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       'character_effects',
       'character_skill_grants',
       'character_items',
+      'character_attunement_slots',
     ]);
     for (const table of BACKUP_OPTIONAL_TABLES) {
       expect([...BACKUP_TABLES]).toContain(table);
@@ -308,7 +314,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
 });
 
 describe('table scope classification', () => {
-  it('classifies all 62 tables exactly once', () => {
+  it('classifies all 66 tables exactly once', () => {
     const names = Object.keys(TABLE_SCOPES);
     // 30 Laravel-derived tables — 38 until the eight Laravel-only
     // infrastructure ones were dropped — plus the four native weapon tables,
@@ -319,11 +325,12 @@ describe('table scope classification', () => {
     // `spell_version_upcast_levels` (slot levels) and
     // `spell_version_cantrip_upgrade_levels` (character levels), the ONE
     // skills-with-provenance table, `character_skill_grants` (S-A), and the
-    // ONE items table, `character_items` (AC-1, D72). Each group is named
+    // ONE items table, `character_items` (AC-1, D72), and D92's ONE
+    // fixed-capacity attunement table. Each group is named
     // rather than folded into one total, so a group that vanishes while
     // another grows cannot pass unnoticed.
-    expect(names).toHaveLength(65);
-    expect(new Set(names).size).toBe(65);
+    expect(names).toHaveLength(66);
+    expect(new Set(names).size).toBe(66);
     expect([...names].sort()).toEqual([...APPLICATION_TABLES].sort());
   });
 

@@ -80,7 +80,7 @@ describe('pre-Drizzle database images', () => {
     const tableCount = (sql: string) =>
       [...sql.matchAll(/CREATE TABLE/g)].length;
     expect(tableCount(preDrizzleSchema)).toBe(38);
-    expect(tableCount(schema)).toBe(65);
+    expect(tableCount(schema)).toBe(66);
   });
 
   it('rejects a pre-Drizzle image at open instead of half-working', async () => {
@@ -106,6 +106,7 @@ describe('pre-Drizzle database images', () => {
       'Database image is missing application tables: armor_templates, ' +
         'background_equipment_items, ' +
         'background_templates, class_equipment_items, character_armor, ' +
+        'character_attunement_slots, ' +
         'character_background, ' +
         'character_effects, character_hit_point_rolls, character_items, ' +
         'character_sheet_adjustments, ' +

@@ -372,6 +372,7 @@ function migrateV1WireToV4(wire: unknown): unknown {
 /** Hand-lifts v4's unchanged source tuples to v9's appended marker slot. */
 function appendV9SourceMarker(root: unknown[]): void {
   root[4] = (root[4] as unknown[][]).map((source) => [...source, null]);
+  root.push(null); // v11 attunementSlots
 }
 
 interface StructuralTupleSchema {
@@ -1045,6 +1046,14 @@ const COMPLETE_V10_WIRE = [
   ...COMPLETE_V9_WIRE.slice(15),
 ];
 
+/** D92: item tuples lose `attuned`; the root gains three fixed slots. */
+const COMPLETE_V11_WIRE = [
+  COMPLETE_V10_WIRE[0],
+  11,
+  ...COMPLETE_V10_WIRE.slice(2),
+  null,
+];
+
 describe('character-share positional codec', () => {
   it('refuses the hand-authored complete version-1 positional golden BY NAME', () => {
     // D60: pre-v5 documents are RETIRED, not migrated. This fixture stays
@@ -1081,8 +1090,32 @@ describe('character-share positional codec', () => {
     expect(positionalToShareDocument(COMPLETE_V8_WIRE)).toEqual(complete);
   });
 
-  it('pins the hand-authored complete version-10 wire layout element by element', () => {
-    expect(shareDocumentToPositional(complete)).toEqual(COMPLETE_V10_WIRE);
+  it('pins the hand-authored complete version-11 wire layout element by element', () => {
+    expect(shareDocumentToPositional(complete)).toEqual(COMPLETE_V11_WIRE);
+  });
+
+  it('migrates v10 item booleans into exactly three slots and explicitly drops the fourth', () => {
+    const v10 = new Array<unknown>(18).fill(null);
+    v10[0] = CHARACTER_SHARE_FORMAT;
+    v10[1] = 10;
+    v10[17] = [
+      ['First', null, true, true, null],
+      ['Second', null, true, true, null],
+      ['Third', null, true, true, null],
+      ['Fourth loses attunement', null, true, true, null],
+    ];
+
+    const migrated = MIGRATIONS[10](v10) as unknown[];
+
+    expect(migrated).toHaveLength(19);
+    expect(migrated[1]).toBe(11);
+    expect(migrated[17]).toEqual([
+      ['First', null, true, null],
+      ['Second', null, true, null],
+      ['Third', null, true, null],
+      ['Fourth loses attunement', null, true, null],
+    ]);
+    expect(migrated[18]).toEqual([0, 1, 2]);
   });
 
   it('round-trips object, positional, gzip, and base64url forms', async () => {
@@ -1224,7 +1257,7 @@ describe('character-share positional codec', () => {
     const positional = shareDocumentToPositional(minimal);
     expect(positional).toEqual([
       'dnd-multiclass-spells-character-share',
-      10,
+      11,
       [
         'Ten',
         null,
@@ -1285,8 +1318,10 @@ describe('character-share positional codec', () => {
       null,
       // Element 17: the AC-1 (D72) items section (v8), on the identical terms.
       null,
+      // Element 18: D92's exact three attunement positions.
+      null,
     ]);
-    expect(positional).toHaveLength(18);
+    expect(positional).toHaveLength(19);
     expect((positional[2] as unknown[]).length).toBe(12);
     expect((positional[3] as unknown[][])[0]).toHaveLength(8);
     expect((positional[4] as unknown[][])[0]).toHaveLength(7);

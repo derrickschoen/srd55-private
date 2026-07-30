@@ -239,6 +239,7 @@ describe(`ported persistence invariants (${sourceLabel})`, () => {
          ORDER BY name`,
       ),
     ).toEqual([
+      'character_items_clear_attunement_slots_before_delete',
       'spell_slots_exclusive_assignment_insert',
       'spell_slots_exclusive_assignment_update',
     ]);
