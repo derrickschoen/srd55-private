@@ -1,9 +1,11 @@
 # Level-up wizard — one existing character, one level, one honest transaction
 
-Status: design only, **revision 2**. **Gates: none (plan only).** Revision 2
-starts from `a71bc0991adf4d5d5eebd1a27c2d2e367ac53db5`. It supersedes revision 1's
-spell scope-out, open launch seam and in-memory-only undo assumption. It does
-not absorb unrelated work.
+Status: design only, **revision 3**. **Gates: none (plan only).** Revision 3
+starts from `e5c64b0adcfd56a9dcb829cf72144599f768f18c`. It retains revision 2's
+spell, launch and durable-undo corrections and supersedes its partial feat
+picker. D101 now requires the complete sourced 17-feat catalog at every
+class-table ASI occurrence, with mechanics applied only through vocabulary the
+repository actually has. It does not absorb unrelated work.
 
 Binding law: **D48** (class first), **D55** (class → abilities before origins in
 creation; for level-up, a class choice still precedes every consequence),
@@ -22,8 +24,11 @@ sheet, not in wizard screens), **D94** (level-up undo is database-local and
 never exported), **D95** (warnings are permanent while their condition holds),
 **D96** (multiclass ability minimums warn and allow), and **D97** (level deletion
 falls back to import-style reconstruction, never reaches total level 0, and
-uses skill provenance). D42, D49, D52, D53, D54 and D33 remain load-bearing
-where this design cites them.
+uses skill provenance), and **D101** (every ASI occurrence offers the full
+qualifying SRD feat catalog; ASI is one feat among equals; expressible effects
+use the existing vocabulary and everything else is sourced text under D33).
+D42, D49, D52, D53, D54 and D33 remain load-bearing where this design cites
+them. D100 adds no performance gate to this plan.
 
 ## 0. What is true now, each claim read rather than recalled
 
@@ -51,8 +56,8 @@ where this design cites them.
   optional list of ability increases (`src/domain/command-contracts.ts:156-185`);
   validation pins the +2 or +1/+1 shape
   (`src/commands/payload-validator.ts:421-470`). This plan replaces that narrow
-  ASI-only arm with a discriminated ASI-or-feat choice; it does not add a second
-  level command.
+  ASI-only arm with one discriminated feat choice; it does not add a second
+  level command or a privileged non-feat ASI path.
 - **The current refusal set has three members.** They are `class_not_held`,
   `ability_increase_required` and `level_not_adjacent`; `subclass_required` is
   deliberately absent (`src/builder/level-up.ts:38-67`). This matches D80's
@@ -65,8 +70,9 @@ where this design cites them.
   `ability_increase_required` among the three refusals
   (`.claude/decisions.md:136-140`). That later, specific statement governs the
   apparent tension with D70: subclass and generated follow-up choices may stay
-  unmade; the ASI-or-feat decision itself remains required until the owner says
-  otherwise.
+  unmade; the feat decision at the class's ASI occurrence remains required.
+  D101 changes what satisfies that refusal—any qualified sourced feat, including
+  a zero-point feat—not the historical refusal key.
 - **ASI applicability is already derived per class from the bundled class
   tables.** The parser reassembles wrapped feature cells, verifies every class
   enumerates levels 1–20, and exports `asiLevelsForClassName`
@@ -104,7 +110,7 @@ where this design cites them.
   numeric `slot_id` for search and mutation
   (`src/ui/screens/planner/spell-picker.ts:4-27`, `:117-170`;
   `src/domain/command-contracts.ts:52-82`). A newly unlocked class, subclass or
-  feat slot has no ID before the level transaction. Revision 2 therefore adds a
+  feat slot has no ID before the level transaction. Revision 3 therefore keeps a
   planned logical locator and maps it to the generated durable slot inside the
   command; it does not defer the screen again.
 - **Wizard spellbook acquisition is a grant-rule path but not a selection
@@ -139,6 +145,43 @@ where this design cites them.
   choices such as Grappler's allowed abilities and ability cap remain trapped in
   prose, so a complete level-up feat picker cannot be a select box over today's
   rows.
+- **D101's full catalog is exactly 17 feats, and today's safe mechanical split
+  is narrower than the numeric-looking prose.** The existing character effect
+  vocabulary is `damage_resistance | hp_modifier | speed | ability_increase |
+  armor_class_bonus | armor_class_formula | attack_ability_override |
+  weapon_attack_bonus | weapon_damage_bonus`; the separate
+  `ability_override` set-to kind from D83 has not landed. The source corpus has
+  no feat-granted flat HP or speed increase and no set-to ability boon. The
+  following matrix is hand-derived from `docs/srd/source/feats.txt:28-173`;
+  “text” means the exact sourced benefit is shown and is not smuggled into a
+  nearby but weaker effect kind.
+
+  | sourced feat | mechanically representable now | sourced benefit that remains text / named gap |
+  |---|---|---|
+  | Alert | none | Initiative Proficiency adds proficiency bonus to Initiative, for which there is no effect kind; Initiative Swap is a post-roll ally exchange. Initiative is undetermined while this feat is active. |
+  | Magic Initiate | two cantrip choices, one level-1 prepared/free-cast choice, chosen list and casting ability through existing grant rules and D87 slots | Spell Change is not structured today; LU-0 reads it from this feat extract and GF-1 plans its same-list/same-level replacement. The once-per-long-rest use remains paper play state under D91. |
+  | Savage Attacker | none | once-per-turn weapon damage-die reroll/use-higher mechanic; it is not a flat `weapon_damage_bonus`. |
+  | Skilled | skill selections through `skill_proficiency` grant rules | tool alternatives are not modelled by D102. The feat text says that limitation; the wizard does not fabricate tool rows or claim that an unrecorded tool is a skill. |
+  | Ability Score Improvement | +2 to one ability or +1/+1 to distinct abilities, maximum 20, as `ability_increase` rows | none. |
+  | Grappler | +1 Strength or Dexterity, maximum 20, as `ability_increase` | Punch and Grab, advantage against a creature grappled by the character, and moving a grappled creature without extra movement. |
+  | Archery | none safely | +2 only to attacks with Ranged weapons. `weapon_attack_bonus` exists, but its current scopes are all weapons or one bonded weapon; using either would lie about melee attacks. Affected ranged attack bonuses are undetermined. |
+  | Defense | none safely | +1 AC only while wearing Light, Medium or Heavy armor. `armor_class_bonus` has no equipment predicate; an unconditional row would be wrong. AC is undetermined while the condition holds. |
+  | Great Weapon Fighting | none | conditional minimum-3 replacement for weapon damage dice on two-handed Melee attacks; not a flat damage bonus. |
+  | Two-Weapon Fighting | none | conditional addition of the ability modifier to the extra Light-weapon attack when it is not already added. |
+  | Boon of Combat Prowess | +1 to any ability, maximum 30 | turning one missed attack into a hit, refreshed at the start of the next turn. |
+  | Boon of Dimensional Travel | +1 to any ability, maximum 30 | a conditional 30-foot teleport after the Attack or Magic action. |
+  | Boon of Fate | +1 to any ability, maximum 30 | the reaction-like 2d4 bonus/penalty to a nearby D20 Test and its Initiative/Short/Long Rest recovery. |
+  | Boon of Irresistible Offense | +1 Strength or Dexterity, maximum 30 | ignoring Bludgeoning/Piercing/Slashing Resistance and natural-20 extra damage equal to the increased ability score. |
+  | Boon of Spell Recall | +1 Intelligence, Wisdom or Charisma, maximum 30 | the 1d4 slot-retention mechanic for level 1–4 slots. It grants no spell choice, so it creates no D87 locator. |
+  | Boon of the Night Spirit | +1 to any ability, maximum 30 | conditional invisibility and conditional resistance to every damage type except Psychic and Radiant; a standing `damage_resistance` row would be false outside Dim Light/Darkness. |
+  | Boon of Truesight | +1 to any ability, maximum 30 | 60-foot Truesight; senses have no effect kind. |
+
+  The net is one fully effect-modelled feat (Ability Score Improvement), eight
+  feats with safe `ability_increase` rows plus sourced text (Grappler and seven
+  Epic Boons), two feats with non-effect grant machinery (Magic Initiate and
+  Skilled, both with stated limits), and six wholly text-modelled feats (Alert,
+  Savage Attacker and the four Fighting Style feats). This classification is a
+  checked source-to-vocabulary contract, not a promise to simulate prose.
 - **A feat source can already be persisted and can generate child spell
   choices.** `AddSourceCommand` validates duplicate/repeatable state and Magic
   Initiate configuration, inserts a source instance, and invokes the grant
@@ -149,9 +192,10 @@ where this design cites them.
   (`src/ui/screens/guided-builder/background-step.ts:302-443`).
 - **Current ASIs are not feat sources.** `LevelUpClassCommand` writes
   `ability_increase` effects owned by the class source and labels them with class
-  and level (`src/commands/level-up-class.ts:208-253`). Supporting “ASI or
-  another feat” therefore requires replacing this arm with one choice writer,
-  not calling `AddSourceCommand` beside it and leaving ASI in a second shape.
+  and level (`src/commands/level-up-class.ts:208-253`). D101 therefore requires
+  replacing this arm with one feat-source writer. Ability Score Improvement
+  uses the same source, eligibility, application and provenance path as the
+  other 16 definitions.
 - **Outstanding-choice warnings and sheet gaps are separate today.**
   Completeness knows unfilled spell choices, unchosen source options and
   addressable skill grants (`src/queries/character-completeness.ts:18-140`,
@@ -272,7 +316,7 @@ where this design cites them.
   offer those packages again nor mint their contents again.
 - **Resource maxima are not wizard choices.** D91 puts Rage uses, Focus Points,
   Channel Divinity and the multiclass spell-slot maximum on the character sheet
-  with empty printed boxes. Revision 2 may show a sourced spell-capacity delta
+  with empty printed boxes. Revision 3 may show a sourced spell-capacity delta
   in Gains, but it does not add resource trackers or resource-choice screens to
   this wizard.
 
@@ -291,10 +335,12 @@ the class screen and no character data has moved. After confirmation, the new
 level, every spell/skill/Expertise choice made in the wizard, and every generated
 grant are ordinary persisted character state. D70 still permits subclass,
 spell, Expertise and Epic Boon choices to remain unmade: their durable grant or
-choice rows reload, share and print with permanent warnings. The ASI-or-feat
-decision remains D80's one required choice.
+choice rows reload, share and print with permanent warnings. The ASI occurrence
+becomes one required **feat** decision: every qualifying row from the
+17-feat corpus is eligible to satisfy it, and Ability Score Improvement is the
+default-marked member rather than a separate arm.
 
-Revision 2 is intentionally **two implementation units with one ratified
+Revision 3 is intentionally **two implementation units with one ratified
 contract**:
 
 1. **Guided choices foundation** models Expertise and separates shared
@@ -346,7 +392,7 @@ type LevelUpStep =
   | 'class'
   | 'gains'
   | 'subclass'
-  | 'advancement'
+  | 'feat'
   | 'epic_boon'
   | 'skills'
   | 'expertise'
@@ -354,7 +400,7 @@ type LevelUpStep =
   | 'review'
   | 'complete';
 
-type LevelAdvancementChoice =
+type LevelFeatChoice =
   | {
       kind: 'feat';
       feat_content_key: ContentKey;
@@ -369,7 +415,7 @@ interface LevelUpDraft {
   class_definition_id: ClassDefinitionId;
   target_class_level: ClassLevel;
   subclass_content_key?: ContentKey;
-  advancement_choice?: LevelAdvancementChoice;
+  feat_choice?: LevelFeatChoice;
   skill_choices: readonly PlannedSkillChoice[];
   expertise_choices: readonly PlannedExpertiseChoice[];
   spell_choices: readonly PlannedSpellChoice[];
@@ -383,7 +429,7 @@ row IDs:
 type PlannedGrantSource =
   | { kind: 'selected_class' }
   | { kind: 'selected_class_subclass' }
-  | { kind: 'advancement_feat' }
+  | { kind: 'selected_feat' }
   | {
       kind: 'existing_source';
       source_instance_id: CharacterSourceInstanceId;
@@ -444,6 +490,32 @@ There is no persisted `wizard_run` table. The durable facts are the class level,
 source instances, effect rows, spell/skill/Expertise grant rows and the new
 level-granted feat choice in §5. Navigation state is not character state.
 
+The seam also defines `FeatApplicationPlan`, the one pure projection between a
+selected sourced feat and its consumers:
+
+```ts
+interface FeatApplicationPlan {
+  feat_content_key: ContentKey;
+  eligibility: FeatEligibilityResult;
+  config: JsonObject;
+  effects: readonly PlannedCharacterEffect[];
+  grant_rules: readonly GrantRuleObject[];
+  text_benefits: readonly FeatTextBenefit[];
+  undetermined_numbers: readonly DerivedNumberId[];
+}
+```
+
+It is derived from the feat definition, the projected character and selected
+configuration; it is not persisted and is not a second benefit catalog. The
+picker, preview and command call the same builder. Its `effects` arm may emit
+only existing `character_effects` kinds. Its `grant_rules` arm feeds
+`GrantRulePlanner`. This is the named D101/D87 seam: Magic Initiate produces
+three planned spell locators from `selected_feat`, while Boon of Spell Recall
+produces no locator because it changes slot expenditure rather than granting a
+spell. `text_benefits` carries the sourced mechanics the application does not
+simulate, and `undetermined_numbers` prevents a partial effect model from
+printing a confident wrong number.
+
 ## 3. The one read model
 
 `queries.characters.levelUpState` returns everything required to render every
@@ -478,9 +550,11 @@ Each `HeldClassLevelOption` carries:
   cantrip and prepared-count deltas;
 - applicable subclass options at level 3, including imported 2014/expanded
   subclasses attached to this class;
-- `asi_or_feat` applicability from `asiLevelsForClassName`;
+- `asi_level_feat` applicability from `asiLevelsForClassName`;
 - `epic_boon` applicability from the same class-table feature cell at 19;
-- qualified, unqualified and unprovable feat candidates with a named reason;
+- all 17 sourced feat candidates, each with
+  `qualified | unmet | unprovable`, repeat/config availability and a named
+  reason, plus the derived `FeatApplicationPlan` for a selected qualified feat;
 - the target-level planned skill, Expertise and spell grants, addressed by
   source/rule/ordinal rather than fabricated row IDs;
 - which planned spell slots are newly unlocked, which existing slots are
@@ -585,37 +659,52 @@ The planner's existing subclass select remains a later remedy. Setting it calls
 `update_class`, which already reconciles subclass sources without moving the
 level.
 
-### 4.4 Ability Score Improvement or feat — only at that class's ASI levels
+### 4.4 Feat choice — only at that class's ASI levels
 
 Render only when the selected class's parsed table says the target class level
 has Ability Score Improvement. This is where Fighter 6/14 and Rogue 10 matter;
 a Wizard at 6 must never see it.
 
-The first card is **Ability Score Improvement (class default)**. “Class default”
-is the D68 interaction pattern: it marks what the class feature names first; no
-other legal choice is called homebrew or a departure. Its controls are +2 to one
-ability or +1 to two distinct abilities, capped at 20.
+Render all 17 sourced feat cards through one card and selection component.
+Ability Score Improvement carries the **class default** marker required by D68,
+but it is a normal `feat_content_key`, normal feat source and normal
+`FeatApplicationPlan`, not a separate radio arm or privileged payload shape.
+No other legal feat is called homebrew or a departure.
 
-Other cards are feats for which the target character qualifies:
+Each card shows name, source category, minimum level, repeatability, ability
+points, prerequisite result, its mechanically applied benefits and its exact
+text-only benefits. Qualified cards are selectable; unmet and unprovable cards
+remain visible but disabled with their named reason. In particular:
 
-- show name, minimum level, ability points and prerequisite result;
+- Ability Score Improvement renders +2 to one ability or +1 to two distinct
+  abilities, capped at 20;
 - feats with `ability_points = 0` show D53's warning: choosing this feat grants
   no ability increase;
 - feats with one point render the sourced allowed-ability set and cap;
-- feats with two points render the same +2/+1+1 control as ASI;
+- feats with two points render the sourced +2/+1+1 control;
 - Magic Initiate gathers spell list and casting ability because its source
-  cannot generate without them; its generated spell choices appear on the
-  Spells screen in §4.8;
-- repeatable feats are offered only when their repeat rule and configuration can
-  be satisfied; a non-repeatable active feat is unavailable with the reason;
-- an unmet prerequisite disables the card; an unprovable prerequisite is not
-  treated as met.
+  cannot generate without them. `FeatApplicationPlan.grant_rules` then creates
+  its two cantrip and one level-1 spell locators on the Spells screen in §4.8;
+- Skilled exposes the skill part of its existing grant rule. Its tool
+  alternative is printed as an unmodelled benefit under D102, never coerced to
+  a skill and never hidden;
+- repeatable feats are selectable only when their repeat rule and configuration
+  can be satisfied. Magic Initiate requires a list not used by another active
+  instance; Skilled and Ability Score Improvement may repeat; every other
+  active feat is unavailable with the non-repeatable reason;
+- Fighting Style feats require the sourced Fighting Style Feature entitlement;
+  Boon of Spell Recall requires Spellcasting; Grappler requires projected
+  Strength or Dexterity 13; Epic Boons require projected total level 19;
+- the six wholly text-modelled feats and every partially modelled feat display
+  the §0 coverage statement before selection. Alert, Archery and Defense also
+  name the derived number that becomes undetermined rather than printing a
+  confidently incomplete result.
 
 Per the later, explicit D80 refusal count, this screen has no “Decide later.”
-Confirmation cannot proceed without ASI or another qualified feat, and the
-command retains the structured `ability_increase_required` refusal as the
-server-side guard. The message is widened to “Choose Ability Score Improvement
-or another feat for this level”; the reason string stays fixed.
+Confirmation cannot proceed without one qualified feat. The command retains
+the historical structured `ability_increase_required` refusal as D80's fixed
+server-side key even when the qualifying selection is a zero-point feat; its
+message becomes “Choose a feat for this class level.”
 
 ### 4.5 Epic Boon — target class level 19 only
 
@@ -632,7 +721,7 @@ that is one policy-arm change in the seam and command—not a schema change.
 
 ### 4.6 Skill choices — only when this level creates them
 
-Render after advancement/Epic Boon because the selected feat may create a skill
+Render after the feat/Epic Boon screen because the selected feat may create a skill
 grant. It shows only planned grants that do not already have a durable selection,
 using the same pools, distinct-skill rules and recommended/default labelling as
 the existing guided skills step.
@@ -640,6 +729,13 @@ the existing guided skills step.
 - The screen writes only the draft's logical source/rule/ordinal choices.
 - “Decide later” is allowed; the command still materializes the unfilled durable
   grant and the shared warning survives Complete, sheet and print.
+- `Skilled` is the exception at the rule boundary because its three ordinals are
+  **skill or tool**, while D102 forbids structured tool facts. The screen may
+  fill zero to three ordinals with skills. An unfilled `allows_tool_instead`
+  ordinal is not materialized as an owed skill and does not emit the false
+  warning “choose a skill”; it contributes the permanent
+  `unmodelled_tool_alternative` rules gap and the sourced Skilled text instead.
+  Pure skill entitlements still materialize unfilled rows normally.
 - A choice is revalidated after every earlier draft change. Selecting a
   different feat discards stale skill and downstream Expertise choices.
 - No bundled 2024 class in the currently sourced Expertise set grants new skill
@@ -674,7 +770,7 @@ proficiencies, as D90 requires.
 
 ### 4.8 Spells — only when this level creates or permits choices
 
-Render after subclass, advancement-feat configuration, skills and Expertise so
+Render after subclass, selected-feat configuration, skills and Expertise so
 all spell-granting sources for the transaction are known. The plan includes the
 selected class/subclass, the newly selected feat and active existing sources
 whose own rules trigger on gaining any level (Magic Initiate's spell change is
@@ -701,7 +797,7 @@ Wizard spellbook acquisitions use nullable generated
 an addressed spellbook remedy rather than hiding an owed choice in opaque source
 config. An optional replacement has no owed-choice warning when skipped because
 retaining the current spell is a complete choice. Magic Initiate selections
-appear here after its list and casting ability were chosen in Advancement.
+appear here after its list and casting ability were chosen in Feat Choice.
 
 The screen does not call `set_slot` before confirmation. Confirmation generates
 or revives the durable slots and applies every selected logical locator inside
@@ -718,7 +814,8 @@ Show:
 
 - class and level being gained;
 - selected subclass or an explicit owed-choice warning;
-- selected ASI/feat/Epic Boon and its ability increases;
+- selected class-level feat or Epic Boon, its applied effects, grant choices and
+  sourced text-only benefits;
 - selected or deferred skill, Expertise and spell choices, including any
   optional spell replacement;
 - fixed HP delta;
@@ -775,7 +872,7 @@ Add `character_level_feat_choices`:
 | `character_id` | composite ownership guard |
 | `character_class_level_id` | the held class row that granted the choice |
 | `class_level` | branded 1..20 target class level |
-| `choice_kind` | closed `asi_or_feat | epic_boon` |
+| `choice_kind` | closed `asi_level_feat | epic_boon` |
 | `feat_source_instance_id` | nullable; null means D70-owed |
 | timestamps | normal carried row metadata |
 
@@ -805,7 +902,7 @@ exist per D52, but imports and fixtures still deserve the non-destructive rule.
 Replace top-level `ability_increases` with:
 
 ```ts
-advancement_choice?:
+feat_choice?:
   | {
       kind: 'feat';
       feat_content_key: ContentKey;
@@ -818,19 +915,24 @@ expertise_choices: readonly PlannedExpertiseChoice[];
 spell_choices: readonly PlannedSpellChoice[];
 ```
 
-At an ASI level, the field is required and must be `feat`. At Epic Boon it may
+At an ASI level, the field is required and must be `feat`. Every one of the 17
+sourced definitions reaches this same arm when its prerequisites and repeat
+rules are satisfied. At Epic Boon it may
 be a qualified feat or `defer_epic_boon`. At any other level it is rejected.
 
 The command, inside its existing transaction:
 
 1. validates class-held, adjacency and total-level guards;
 2. derives the target occurrence from the class-table parser;
-3. resolves and rechecks feat eligibility against server-side state;
+3. resolves and rechecks feat eligibility, repeatability and configuration
+   against server-side state, then builds the same `FeatApplicationPlan` used by
+   preview;
 4. updates the class level and optional subclass;
 5. creates/reactivates the feat source with acquisition timing at the target
    character level;
-6. writes ability contributions owned by that feat source, using the feat's
-   structured point budget, allowed abilities and cap;
+6. writes only the plan's expressible effects, owned by that feat source, using
+   the feat's structured point budget, allowed abilities and cap; it never
+   converts a text-only benefit to a broader effect;
 7. records the level-feat choice pointer, or the deferred Epic Boon row;
 8. runs the grant generator for the class, subclass and feat, including
    nullable Wizard acquisition rows and durable skill, Expertise and spell
@@ -856,6 +958,9 @@ Extend the feat parse/model with:
   (`origin | general | fighting_style | epic_boon`);
 - typed prerequisite decoding/evaluation results:
   `qualified | unmet | unprovable`, with reasons.
+- one exhaustively checked source-benefit coverage projection for all 17 rows:
+  `effect | grant_rule | text`, including the affected derived-number key when
+  omitted mechanics make a displayed number undetermined.
 
 The current grouping's `origin | null` loses information the level-19 filter
 needs. Replace it; this is pre-alpha and D53 explicitly left the four-value
@@ -869,12 +974,39 @@ feature entitlement index for “Fighting Style Feature” and “Spellcasting
 Feature.” Imported feature prerequisites remain `unprovable`, never silently
 qualified.
 
-The feat source records and generates every mechanic the existing grant rules
-understand. This unit does not claim the application simulates every prose
-benefit. Any feat that changes a displayed number must either contribute through
-the effect/resolver vocabulary or make that number undetermined with a named
-sheet gap; a confidently wrong initiative or AC is not an acceptable “recorded
-feat.” Alert, Archery and Defense are the first required numeric fixtures.
+`FeatApplicationPlan` records and generates every mechanic the existing effects
+and grant rules safely understand. Its coverage switch is exhaustive over the
+17 content keys and has no default arm. Source tests compare its classification
+to a hand-authored oracle derived from the §0 matrix; production output never
+regenerates that expectation.
+
+This dispatch does not add effect kinds or broaden effect predicates. In
+particular, it refuses the tempting but false mappings `Alert ->
+ability_increase`, `Archery -> weapon_attack_bonus(any_weapon)`, `Defense ->
+armor_class_bonus(unconditional)`, `Great Weapon Fighting ->
+weapon_damage_bonus`, and `Night Spirit -> standing damage_resistance`.
+Ability Score Improvement, Grappler and each Epic Boon use
+`ability_increase` with the sourced options and maximum. Magic Initiate and
+Skilled use grant rules; every other mechanic remains sourced feature text.
+When omitted mechanics affect a displayed total, the shared warnings layer
+marks that total undetermined with the specific missing mechanic. A confidently
+wrong initiative, ranged attack bonus or conditional AC is not an acceptable
+“recorded feat.”
+
+D83's future `ability_override` is accepted by the plan builder only after that
+kind actually lands in `characterEffectKinds`, its row contracts and the
+resolver. No feat in this 17-row corpus requires a set-to ability effect, so
+revision 3 neither schedules nor anticipates it with a placeholder column.
+
+Magic Initiate is the corpus's only spell-granting feat. Its selected list and
+casting ability are part of `FeatApplicationPlan.config`; its existing two
+`choice_from_list` rules flow into `GrantRulePlanner` under
+`{ kind: 'selected_feat' }`, producing two cantrip ordinals and one level-1
+ordinal before commit. LU-0 promotes its already sourced Spell Change paragraph
+to the normalized replacement entitlement, and GF-1 resolves both new picks and
+that optional replacement through the same D87 constraint/assignment services.
+Boon of Spell Recall stays outside this seam beyond its +1 ability effect: its
+slot-retention roll creates no spell selection and no resource tracker.
 
 This is the largest dependency in the plan and is split from the UI in §13.
 
@@ -1130,6 +1262,11 @@ The shared presentation vocabulary owns typed facts and text for:
 - class level 3+ with null subclass;
 - deferred Epic Boon choice;
 - unmet/unprovable multiclass primary-ability minimums;
+- feat benefits intentionally left as sourced text because no exact effect or
+  grant-rule vocabulary exists, including `unmodelled_tool_alternative`;
+- derived numbers made undetermined by a selected feat's omitted numeric
+  mechanic (Alert initiative, Archery ranged attack bonuses, Defense AC while
+  armored);
 - unprovable best-effort reconstruction facts.
 
 Completeness, planner, `CharacterSheetBuilder` and wizard consume this one
@@ -1145,7 +1282,7 @@ The wizard consumes the same presentation objects:
 - preview/complete warnings come directly from the rollback/committed query;
 - wording is not copied into a UI constant.
 
-Warnings never disable Continue or Confirm, except the ASI-or-feat requirement
+Warnings never disable Continue or Confirm, except the ASI-level feat requirement
 that D80 explicitly preserves. Catalog gaps and user choices remain distinct:
 “No Wizard subclass is bundled” and “Subclass not chosen” can both be true and
 need different remedies.
@@ -1236,12 +1373,16 @@ writer.
 | **LU-ADJACENT** | remove the current+1 guard | command test attempts Fighter 2→7 and asserts named refusal and byte-identical state |
 | **LU-CLASS-FIRST** | derive gains before a held class is chosen | UI unit asserts first panel/step is `class`; no preview RPC fires before selection |
 | **LU-HELD-ONLY** | offer/add an unheld class | read-model fixture has Fighter held and Wizard catalogued; Wizard does not appear |
-| **LU-HOMEBREW-HONEST** | substitute defaults for an unbundled class | held homebrew class renders disabled with named missing hit die/advancement data; no command fires |
-| **LU-ASI-PER-CLASS** | hardcode the union or `[4]` | Fighter 5→6 and Rogue 9→10 render advancement; Wizard 5→6 does not; Sorcerer wrapped cells still produce 4/8/12/16 |
-| **LU-ASI-REQUIRED** | allow an empty ASI-level payload | command preserves `ability_increase_required`; UI cannot confirm and raw RPC gets the structured refusal |
+| **LU-HOMEBREW-HONEST** | substitute defaults for an unbundled class | held homebrew class renders disabled with named missing hit die/feat-occurrence data; no command fires |
+| **LU-ASI-PER-CLASS** | hardcode the union or `[4]` | Fighter 5→6 and Rogue 9→10 render Feat Choice; Wizard 5→6 does not; Sorcerer wrapped cells still produce 4/8/12/16 |
+| **LU-ASI-REQUIRED** | allow an empty ASI-level payload | command preserves `ability_increase_required`; UI requires one qualified feat, including a legal zero-point feat, and raw RPC without one gets the structured refusal |
+| **LU-FEAT-FULL-17** | keep revision 2's partial picker, filter by category, or special-case ASI outside feats | every ASI-level fixture renders the same hand-authored 17 content keys; unmet/unprovable cards are visible with reasons; ASI has only the D68 default marker and uses the same source/payload path |
 | **LU-FEAT-ZERO** | infer a +1 from choosing Alert/Archery | D53 fixture selects a 0-point feat and asserts warning, no `ability_increase` row |
 | **LU-FEAT-POINTS** | accept the wrong ability/cap/point sum | Grappler permits only STR/DEX +1 cap 20; ASI permits any +2 or +1/+1 cap 20; Epic Boon fixture uses cap 30 |
 | **LU-FEAT-PREREQ** | treat unprovable/unmet as qualified | Grappler below 13 and Wizard choosing Fighting Style are unavailable with different reasons; qualified Fighter fixture is available |
+| **LU-FEAT-COVERAGE** | map numeric-looking prose to an over-broad effect or silently omit it | a hand-authored 17-row oracle matches `FeatApplicationPlan`: nine feats emit sourced ability effects, Magic Initiate/Skilled emit their supported grants, and Alert/Archery/Defense make the named numbers undetermined; mutations that map Archery to all weapons, Defense to unconditional AC, or Night Spirit to standing resistance fail |
+| **LU-FEAT-SPELL-SEAM** | create feat spell picks outside D87 or treat Spell Recall as spell acquisition | Magic Initiate config produces exactly three `selected_feat` locators and commits them atomically; its later same-list/same-level swap uses the same constraint; Boon of Spell Recall produces no spell locator |
+| **LU-SKILLED-HONEST** | force three skills, create phantom tool rows, or warn that every unfilled skill-or-tool ordinal owes a skill | Skilled accepts zero to three modelled skill selections; remaining tool-capable ordinals create the sourced D102 coverage gap, no unfilled `character_skill_grants`, and no tool fact |
 | **LU-FEAT-ATOMIC** | level moves but feat/effects fail | induce grant-generation failure after the level update; class row, choice row, source, effects and slots all remain before-state |
 | **LU-LEGACY-ASI** | delete a lookalike effect or leave a proven old command effect unattributed | exact legacy writer fingerprint migrates to ASI feat/choice provenance; each single-field mutation preserves the effect, creates unresolved choice and warns |
 | **LU-HP-FIXED** | add a roll/input or omit Constitution/minimum 1 | browser asserts no HP form controls; integration fixtures cover Fighter CON +2 and Wizard CON −5, showing fixed delta and floor 1, with zero roll rows |
@@ -1259,7 +1400,7 @@ writer.
 | **LU-EXPERTISE-ORDER** | offer Expertise before all proficiency choices | guided creation and level-up step derivation put every applicable skill screen first; unresolved same-level proficiency entitlement defers Expertise with a warning |
 | **LU-EXPERTISE-MATH** | double an untrained/orphaned skill or add proficiency more than twice | active grant fixture is base + proficiency + proficiency; removing its last proficiency source orphans Expertise and removes the second bonus |
 | **LU-MULTICLASS-WARN** | block advancement or dismiss an unmet minimum | multiclass fixture below 13 advances; wizard/sheet/print retain the same permanent warning with rule, actual score and source |
-| **LU-EQUIPMENT-NOOP** | reapply a starting package | count/package/weapon/armor rows before and after ordinary and ASI level-ups are identical |
+| **LU-EQUIPMENT-NOOP** | reapply a starting package | count/package/weapon/armor rows before and after ordinary and feat-choice level-ups are identical |
 | **LU-PREVIEW-ROLLBACK** | preview leaks a row, revision or sequence change | capture full `CharacterState` and relevant catalog IDs before/after preview and assert equality |
 | **LU-PREVIEW-EXACT** | parallel preview arithmetic drifts | preview and subsequent unchanged commit produce identical derived-number/source projections |
 | **LU-D67-SOURCES** | hide a prose formula, sum HP in the view or call modifier terms score sources | ability score/modifier, class+species HP, AC and initiative fixtures compare structured source label/amounts to hand-authored expected terms whose result equals the correct face value |
@@ -1309,7 +1450,9 @@ is the level-up transaction and route.
    nullable, addressable acquisition rows and migrate the current
    config-driven acquisitions without losing selected spells. Add selection
    acquisition provenance with migration, snapshot/backup/share contracts and
-   frozen fixtures. Exit: planned
+   frozen fixtures. The planner accepts a normalized configured rule list from
+   `FeatApplicationPlan`, so LU-0 can supply Magic Initiate without a
+   feat-specific spell path. Exit: planned
    and durable eligibility return identical candidates, Wizard acquisitions
    retain rule/ordinal/level provenance, and one generated slot model plus the
    one existing spellbook model remain.
@@ -1319,37 +1462,49 @@ is the level-up transaction and route.
    Expertise after every skill source. Add level-1 spell screens using GF-1's
    shared picker/constraint/assignment services over the durable slots that
    creation has already generated, including Magic Initiate-generated choices.
-   This dispatch owns
+   Make the `allows_tool_instead` boundary explicit: selected skill ordinals
+   persist, while unrecorded tool alternatives produce the D102 coverage gap
+   rather than false unfilled-skill rows. This dispatch owns
    migration, snapshot, backup, share wire/frozen fixtures and creation browser
    tests. Exit: a level-1 Wizard's spell section and Rogue's Expertise math are
    complete without opening the planner.
 
 ### Unit B — level-up transaction, reversibility and route
 
-4. **LU-0 — feat model and eligibility (L).** Migrate the four-value grouping,
-   ability options/cap and typed prerequisite evaluator; update seeding, row
-   contracts, schema inventories and source tests. Add structured numeric effect
-   handling or explicit undetermined results for Alert, Archery and Defense.
-   Exit: every bundled feat is deterministically
-   `qualified | unmet | unprovable`, and every displayed number it affects is
-   correct or explicitly undetermined.
-5. **LU-1 — level choice schema and command core (XL).** Add
-   `character_level_feat_choices`; replace the ASI-only arm with the unified feat
-   source/effects; add Epic defer/resolution; retain class-held, adjacent and
-   D80 ASI-required refusals. This dispatch owns its migration, snapshot,
-   backup/share wire mint/frozen fixture, row contracts, audit and inverse
-   tests. Exit: class/subclass/feat grant generation is one atomic command before
+4. **LU-0 — full feat corpus, eligibility and application plans (XL).** Migrate
+   the four-value grouping, ability options/cap and typed prerequisite
+   evaluator; update seeding, row contracts, schema inventories and source
+   tests. Add the exhaustive 17-key `FeatApplicationPlan` coverage switch and
+   the named D33 gaps for text-only benefits. Wire only safe existing-vocabulary
+   mappings: nine ability-increase feats, Magic Initiate's spell grants and the
+   supported skill side of Skilled. Do not widen effect kinds or predicates.
+   Exit: every card is deterministically `qualified | unmet | unprovable`;
+   every sourced benefit is classified `effect | grant_rule | text`; the
+   hand-authored matrix catches over-broad Archery, Defense, Great Weapon
+   Fighting and Night Spirit mappings; affected numbers are correct or
+   explicitly undetermined.
+5. **LU-1 — level feat-choice schema and command core (XL).** Add
+   `character_level_feat_choices`; replace the ASI-only arm with the unified
+   feat source/application plan; add Epic defer/resolution; retain class-held,
+   adjacent and D80's historically named ASI-required refusal. This dispatch
+   owns its migration, snapshot, backup/share wire mint/frozen fixture, row
+   contracts, audit and inverse tests. Exit: ASI is one normal feat source,
+   each of the other 16 qualified definitions can use the identical command
+   arm, and class/subclass/feat grant generation is one atomic command before
    guided subchoices are attached.
 6. **LU-2 — atomic skill/Expertise/spell choices (XL).** Extend the ratified
    payload, validator and command with GF logical choices. Generate sources and
    grants, map every locator, fill skill/Expertise/spell rows, and reject stale
    or ambiguous mappings in the same transaction. Exit: selected new spells and
-   swaps, Magic Initiate, Skilled and Expertise commit in one revision; induced
-   failure leaves byte-identical state.
-7. **LU-3 — shared permanent warnings (L).** Extract outstanding-choice
-   presentation, add subclass/Epic/skill/Expertise/spell and D96 warnings, feed
-   planner/sheet/wizard, and keep them visible in print with no acknowledgement
-   state. Exit: D70/D95 key-and-text equality is executable.
+   swaps, Magic Initiate's three `selected_feat` locators, supported Skilled
+   skill picks and Expertise commit in one revision; induced failure leaves
+   byte-identical state. Spell Recall produces no locator.
+7. **LU-3 — shared permanent warnings and feat-coverage gaps (L).** Extract
+   outstanding-choice presentation, add subclass/Epic/skill/Expertise/spell,
+   D96 and D101 coverage warnings, feed planner/sheet/wizard, and keep them
+   visible in print with no acknowledgement state. Exit: D70/D95 key-and-text
+   equality is executable, and selected text-only/partial feats name what the
+   numbers omit.
 8. **LU-4 — rollback preview and read model (L).** Implement
    `levelUpState`, planned eligibility, `previewLevelUp`, validators and
    worker/client plumbing. Reuse the real command under rollback and compare
@@ -1372,12 +1527,12 @@ is the level-up transaction and route.
     schemas. This is its own XXL dispatch because import semantics, deletion,
     history, schema and candidate audit must agree before the fallback is safe.
 11. **LU-7 — wizard route and screens (XXL).** Build class, gains, subclass,
-    advancement/Epic, skills, Expertise, spells, review and complete; in-memory
+    full-17 feat/Epic, skills, Expertise, spells, review and complete; in-memory
     draft; operation UUID lifecycle; revision conflict; direct not-found/max
     states; exact-undo/fallback affordances; responsive/a11y behavior. Exit:
     browser journeys cover ordinary, subclass, Fighter 6, Rogue 10, Wizard 6,
-    a caster new spell and swap, Magic Initiate, Expertise, D96 warning and
-    level 19.
+    all 17 feat cards with allow/deny reasons, a caster new spell and swap,
+    Magic Initiate, Expertise, D96 warning and level 19.
 12. **LU-8 — D85 entry and regression closeout (M).** Put Level Up buttons on
     sheet and every list card, both targeting the wizard (level 20 lands on its
     terminal state). Keep planner
@@ -1390,7 +1545,7 @@ is the level-up transaction and route.
 The following checks were run against the stated working tree:
 
 - `git rev-parse HEAD` returned
-  `a71bc0991adf4d5d5eebd1a27c2d2e367ac53db5`.
+  `e5c64b0adcfd56a9dcb829cf72144599f768f18c`.
 - `rg` found no production UI dispatch of `level_up_class`; production wiring is
   factory/executor only, with tests and comments elsewhere.
 - The targeted suite
@@ -1408,6 +1563,21 @@ The following checks were run against the stated working tree:
   ability/cap 20, Grappler's STR/DEX/cap 20, Epic Boons' cap 30, Alert's
   initiative bonus, Archery's attack bonus and Defense's conditional AC bonus
   (`docs/srd/source/feats.txt:28-35`, `:64-80`, `:84-104`, `:106-173`).
+- The same complete extract contains exactly 4 Origin, 2 General, 4 Fighting
+  Style and 7 Epic Boon feats. Comparing every benefit to
+  `characterEffectKinds` proved the §0 split: only nine feats can emit a safe
+  current effect, all nine are `ability_increase`, and none of the corpus uses
+  flat HP, speed or D83's not-yet-landed set-to `ability_override`. Archery's
+  ranged-only predicate is narrower than either current weapon scope; Defense's
+  armor-worn predicate is absent from `armor_class_bonus`; Alert has no
+  initiative effect kind. Those three therefore cannot honestly ride the
+  tempting numeric kinds.
+- `Magic Initiate` is the only one of the 17 feats that grants spell choices:
+  its current rules provide two cantrip ordinals and one level-1 ordinal.
+  `Boon of Spell Recall` changes whether a level 1–4 slot is expended and grants
+  no spell, so it must not create a D87 locator. `Skilled` carries
+  `allows_tool_instead`; D102 means the skill arm is representable but tool
+  selections are not.
 - Direct inspection of the committed full SRD found Expertise at Bard 2/9
   (two choices each), Ranger 2/9 (one then two), Rogue 1/6 (two each), and
   Wizard Scholar 2 (one from six named skills in which the character is
@@ -1461,11 +1631,15 @@ The final manual pass uses:
 
 1. Fighter 1→2, CON 14 — fixed HP is shown, no choice exists.
 2. Wizard 2→3 with no bundled subclass — level saves; wizard and sheet warn.
-3. Fighter 5→6 — ASI/feat screen appears.
-4. Wizard 5→6 — ASI/feat screen does not appear.
-5. Rogue 9→10 — ASI/feat screen appears.
-6. Fighter 3→4 choosing Alert — no ability increase is invented; warning shows;
-   initiative is correct or explicitly undetermined.
+3. Fighter 5→6 — Feat Choice shows the same 17 sourced cards, marks ASI as the
+   class default, enables only qualified/repeatable choices and uses no separate
+   ASI payload.
+4. Wizard 5→6 — Feat Choice does not appear.
+5. Rogue 9→10 — Feat Choice appears with the same 17-card catalog.
+6. Fighter 3→4 choosing Alert — no ability increase is invented; its two
+   benefits render as sourced text and Initiative is explicitly undetermined.
+   Choosing Archery or Defense in qualified fixtures likewise does not create
+   an all-weapon or unconditional-AC effect.
 7. Bard 1→2, Rogue 5→6 and Wizard 1→2 — Expertise appears after skills with
    sourced count/pool, trained selections add proficiency twice, and deferral
    warns. Bard also exercises its sourced optional cantrip replacement.
@@ -1473,7 +1647,9 @@ The final manual pass uses:
    prepared choice; preview and the one committed transaction show all three in
    their existing durable models.
 9. Fighter 3→4 choosing Magic Initiate — configure its list/ability and choose
-   its generated spells on the same wizard pass and revision.
+   its two cantrips and level-1 spell through three `selected_feat` locators on
+   the same wizard pass and revision. A repeat instance rejects a used list;
+   Boon of Spell Recall creates no locator.
 10. A caster defers one new spell — Complete/sheet/print warn and the planner
     fills the same durable slot.
 11. Any class 18→19 deferring Epic Boon — level saves and the warning survives
@@ -1521,11 +1697,15 @@ The final manual pass uses:
    the generator must consume one normalized rule representation, and commit
    must reject any logical locator that no longer maps exactly. A planner that
    merely resembles generation would preview eligible spells and then select a
-   different durable slot—the most likely atomicity failure in revision 2.
-3. **Feat completeness is larger than the existing feat catalog suggests.**
-   Eligibility is partly structured, but ability options/caps and several
-   number-changing benefits are still prose. LU-0 must either model each offered
-   numeric effect or make its affected number visibly undetermined; recording a
-   feat beside a confidently wrong number remains unacceptable. Magic Initiate
-   also couples feat configuration to the new planned-spell path, so it is the
-   cross-unit integration fixture most likely to expose an incomplete model.
+   different durable slot—the most likely atomicity failure in revision 3.
+3. **Full choice makes benefit coverage a correctness boundary, not catalog
+   decoration.** All 17 feats must be selectable when qualified, but the
+   existing vocabulary is intentionally weaker than several benefits:
+   ranged-only attack bonuses, armor-conditional AC, Initiative proficiency,
+   die replacement, conditional resistance and tool selections cannot be
+   represented faithfully. The exhaustive `FeatApplicationPlan` matrix must
+   neither grow a secret parallel effect system nor map those benefits to
+   broader effects. Its failure mode is a plausible wrong number, especially
+   Alert/Archery/Defense. Magic Initiate adds the cross-unit risk: its config,
+   three new spell locators and later replacement entitlement must remain one
+   normalized grant plan from preview through commit.
