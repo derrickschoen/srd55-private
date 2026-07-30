@@ -190,6 +190,67 @@ describe('database migration chain', () => {
     expect(result.signature).toBe(schemaSignature(schema));
   });
 
+  it('moves every inline class-feature effect into its child table', async () => {
+    const beforeAc2a = DATABASE_MIGRATIONS
+      .slice(0, 14)
+      .map((entry) => entry.sql)
+      .join('\n');
+    const storage = await storageHolding(
+      `${beforeAc2a}
+       INSERT INTO class_definitions (
+         id, content_key, name, rules_edition, progression_type
+       ) VALUES (1, 'test:class', 'Migration Class', 'expanded', 'none');
+       INSERT INTO subclass_definitions (
+         id, content_key, class_definition_id, name, rules_edition
+       ) VALUES (2, 'test:subclass', 1, 'Migration Subclass', 'expanded');
+       INSERT INTO subclass_features (
+         id, subclass_definition_id, class_level, sort_order, name,
+         description, effect_kind, effect_attack_count, effect_weapon_scope
+       ) VALUES (
+         3, 2, 5, 1, 'Subclass Attack', 'Migrated subclass payload.',
+         'extra_attack', 2, 'any_weapon'
+       );
+       INSERT INTO named_features (
+         id, content_key, class_definition_id, name, rules_edition,
+         prerequisite, description, class_level, effect_kind,
+         effect_attack_count, effect_weapon_scope
+       ) VALUES (
+         4, 'test:named', 1, 'Named Attack', 'expanded', 'Level 5+',
+         'Migrated named payload.', 5, 'extra_attack', 3,
+         'one_bonded_weapon'
+       );`,
+    );
+    const lifecycle = new DatabaseLifecycle(sqlite3, storage, schema);
+    lifecycle.open();
+    expect(
+      lifecycle.database.allRaw(
+        `SELECT subclass_feature_id, effect_kind, attack_count, weapon_scope
+         FROM subclass_feature_effects`,
+      ),
+    ).toEqual([
+      {
+        subclass_feature_id: 3,
+        effect_kind: 'extra_attack',
+        attack_count: 2,
+        weapon_scope: 'any_weapon',
+      },
+    ]);
+    expect(
+      lifecycle.database.allRaw(
+        `SELECT named_feature_id, effect_kind, attack_count, weapon_scope
+         FROM named_feature_effects`,
+      ),
+    ).toEqual([
+      {
+        named_feature_id: 4,
+        effect_kind: 'extra_attack',
+        attack_count: 3,
+        weapon_scope: 'one_bonded_weapon',
+      },
+    ]);
+    lifecycle.close();
+  });
+
   it('adds feat numbers without losing an existing definition', async () => {
     const storage = await storageHolding(
       `${SCHEMA_BEFORE_FEAT_MODEL}

@@ -6,23 +6,28 @@ import {
 } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 import type {
+  ClassFeatureEffectId,
   ClassDefinitionId,
   ContentKey,
+  NamedFeatureEffectId,
   NamedFeatureId,
   SubclassDefinitionId,
+  SubclassFeatureEffectId,
   SubclassFeatureId,
 } from '../../src/domain/ids';
 import type {
   Ability,
-  ClassFeatureEffectKind,
+  FeatureTemplateEffectKind,
   ExtraAttackWeaponScope,
+  KnownDamageType,
   ProgressionType,
   RulesEdition,
 } from '../../src/domain/enums';
 import {
   abilities,
-  classFeatureEffectKinds,
+  damageTypes,
   extraAttackWeaponScopes,
+  featureTemplateEffectKinds,
   progressionTypes,
 } from '../../src/domain/enums';
 import {
@@ -35,6 +40,138 @@ import {
   tinyint1,
   varchar,
 } from './columns';
+
+function featureEffectColumns() {
+  return {
+    effect_kind:
+      varchar<FeatureTemplateEffectKind>()('effect_kind').notNull(),
+    damage_type: varchar<KnownDamageType>()('damage_type'),
+    hit_points_flat: integer('hit_points_flat'),
+    hit_points_per_level: integer('hit_points_per_level'),
+    speed_bonus_feet: integer('speed_bonus_feet'),
+    ability: varchar<Ability>()('ability'),
+    amount: integer('amount'),
+    maximum: integer('maximum'),
+    base: integer('base'),
+    ability_1: varchar<Ability>()('ability_1'),
+    ability_2: varchar<Ability>()('ability_2'),
+    allows_shield: tinyint1('allows_shield'),
+    weapon_scope:
+      varchar<ExtraAttackWeaponScope>()('weapon_scope'),
+    attack_count: integer('attack_count'),
+  };
+}
+
+function featureEffectChecks(prefix: string) {
+  return [
+    check(`${prefix}_kind_check`, oneOf('effect_kind', featureTemplateEffectKinds)),
+    check(`${prefix}_damage_type_check`, nullOrOneOf('damage_type', damageTypes)),
+    check(
+      `${prefix}_damage_type_kind_check`,
+      sql`damage_type IS NULL OR effect_kind IS 'damage_resistance'`,
+    ),
+    check(
+      `${prefix}_hit_points_kind_check`,
+      sql`(hit_points_flat IS NULL AND hit_points_per_level IS NULL) OR effect_kind IS 'hp_modifier'`,
+    ),
+    check(
+      `${prefix}_speed_kind_check`,
+      sql`speed_bonus_feet IS NULL OR effect_kind IS 'speed'`,
+    ),
+    check(
+      `${prefix}_ability_kind_check`,
+      sql`ability IS NULL OR effect_kind IN ('ability_increase', 'attack_ability_override')`,
+    ),
+    check(
+      `${prefix}_amount_kind_check`,
+      sql`amount IS NULL OR effect_kind IN ('ability_increase', 'armor_class_bonus', 'weapon_attack_bonus', 'weapon_damage_bonus')`,
+    ),
+    check(
+      `${prefix}_maximum_kind_check`,
+      sql`maximum IS NULL OR effect_kind IS 'ability_increase'`,
+    ),
+    check(
+      `${prefix}_base_kind_check`,
+      sql`base IS NULL OR effect_kind IS 'armor_class_formula'`,
+    ),
+    check(
+      `${prefix}_ability_1_kind_check`,
+      sql`ability_1 IS NULL OR effect_kind IS 'armor_class_formula'`,
+    ),
+    check(
+      `${prefix}_ability_2_kind_check`,
+      sql`ability_2 IS NULL OR effect_kind IS 'armor_class_formula'`,
+    ),
+    check(
+      `${prefix}_allows_shield_kind_check`,
+      sql`allows_shield IS NULL OR effect_kind IS 'armor_class_formula'`,
+    ),
+    check(
+      `${prefix}_weapon_scope_kind_check`,
+      sql`weapon_scope IS NULL OR effect_kind IN ('extra_attack', 'attack_ability_override', 'weapon_attack_bonus', 'weapon_damage_bonus')`,
+    ),
+    check(
+      `${prefix}_attack_count_kind_check`,
+      sql`attack_count IS NULL OR effect_kind IS 'extra_attack'`,
+    ),
+    check(
+      `${prefix}_hp_modifier_payload_check`,
+      sql`effect_kind IS NOT 'hp_modifier' OR hit_points_flat IS NOT NULL OR hit_points_per_level IS NOT NULL`,
+    ),
+    check(
+      `${prefix}_speed_payload_check`,
+      sql`effect_kind IS NOT 'speed' OR speed_bonus_feet IS NOT NULL`,
+    ),
+    check(
+      `${prefix}_ability_increase_payload_check`,
+      sql`effect_kind IS NOT 'ability_increase' OR (ability IS NOT NULL AND amount IS NOT NULL AND maximum IS NOT NULL)`,
+    ),
+    check(
+      `${prefix}_armor_class_bonus_payload_check`,
+      sql`effect_kind IS NOT 'armor_class_bonus' OR amount IS NOT NULL`,
+    ),
+    check(
+      `${prefix}_armor_class_formula_payload_check`,
+      sql`effect_kind IS NOT 'armor_class_formula' OR (base IS NOT NULL AND ability_1 IS NOT NULL AND allows_shield IS NOT NULL)`,
+    ),
+    check(
+      `${prefix}_attack_ability_override_payload_check`,
+      sql`effect_kind IS NOT 'attack_ability_override' OR (ability IS NOT NULL AND weapon_scope IS NOT NULL)`,
+    ),
+    check(
+      `${prefix}_weapon_attack_bonus_payload_check`,
+      sql`effect_kind IS NOT 'weapon_attack_bonus' OR (amount IS NOT NULL AND weapon_scope IS NOT NULL)`,
+    ),
+    check(
+      `${prefix}_weapon_damage_bonus_payload_check`,
+      sql`effect_kind IS NOT 'weapon_damage_bonus' OR (amount IS NOT NULL AND weapon_scope IS NOT NULL)`,
+    ),
+    check(
+      `${prefix}_extra_attack_payload_check`,
+      sql`effect_kind IS NOT 'extra_attack' OR (attack_count IS NOT NULL AND weapon_scope IS NOT NULL)`,
+    ),
+    check(`${prefix}_ability_check`, nullOrOneOf('ability', abilities)),
+    check(
+      `${prefix}_amount_check`,
+      sql`amount IS NULL OR (typeof(amount) = 'integer' AND amount <> 0)`,
+    ),
+    check(
+      `${prefix}_maximum_check`,
+      sql`maximum IS NULL OR (typeof(maximum) = 'integer' AND maximum BETWEEN 1 AND 30)`,
+    ),
+    check(`${prefix}_base_check`, nullOrIntegerAtLeast('base', 1)),
+    check(`${prefix}_ability_1_check`, nullOrOneOf('ability_1', abilities)),
+    check(`${prefix}_ability_2_check`, nullOrOneOf('ability_2', abilities)),
+    check(
+      `${prefix}_weapon_scope_check`,
+      nullOrOneOf('weapon_scope', extraAttackWeaponScopes),
+    ),
+    check(
+      `${prefix}_attack_count_check`,
+      nullOrIntegerAtLeast('attack_count', 2),
+    ),
+  ];
+}
 
 /**
  * CLASSES AND SUBCLASSES.
@@ -316,32 +453,6 @@ export const subclass_features = sqliteTable(
     name: varchar()('name').notNull(),
     /** NOT NULL: every printed feature has text, and an empty one is a parse bug. */
     description: sqlText()('description').notNull(),
-    /**
-     * NULLABLE ON D6b LIMB 2, AND THIS IS THE LIMB'S CLEAREST CASE: the SRD
-     * cannot be represented without it. A subclass prints features that move no
-     * number at all, and a NULL here is what says so — not a gap, not an
-     * "undecided", and not a value waiting to be filled in. D12 measured the
-     * same absence at 26 of 33 on the species side.
-     *
-     * The two payload columns below are nullable for a DIFFERENT reason and it
-     * is not a limb of D6b at all: they are meaningless for a feature with no
-     * kind, and the CHECKs make a row with either an orphaned payload or a
-     * payload-less kind unrepresentable. That is D6's "extract a variant" answer
-     * given inside one table, which `species_template_traits` established.
-     */
-    effect_kind: varchar<ClassFeatureEffectKind>()('effect_kind'),
-    /**
-     * `extra_attack`: the TOTAL attacks the Attack action gives, absolute and
-     * never an increment — the same convention `class_extra_attack_grants`
-     * stores and for the same two reasons. It resolves as "the greatest
-     * granting level at or below this one" rather than a running sum, so a
-     * partial parse degrades to a stale-but-real number; and the multiclass
-     * combinator is `max`, which only works on absolutes.
-     */
-    effect_attack_count: integer('effect_attack_count'),
-    effect_weapon_scope: varchar<ExtraAttackWeaponScope>()(
-      'effect_weapon_scope',
-    ),
     created_at: datetime()('created_at'),
     updated_at: datetime()('updated_at'),
   },
@@ -351,60 +462,6 @@ export const subclass_features = sqliteTable(
       'subclass_features_sort_order_check',
       integerAtLeast('sort_order', 1),
     ),
-    /**
-     * An unrecognised `effect_kind` reads as "some effect" to anything that is
-     * not an exhaustive switch and as NOTHING to
-     * `src/rules/class-feature-effects.ts`, so the character silently loses the
-     * feature's mechanics with no error anywhere. The null limb is the DEFAULT
-     * case here, not an edge: a feature that is only text is the common one.
-     */
-    check(
-      'subclass_features_effect_kind_check',
-      nullOrOneOf('effect_kind', classFeatureEffectKinds),
-    ),
-    check(
-      'subclass_features_effect_weapon_scope_check',
-      nullOrOneOf('effect_weapon_scope', extraAttackWeaponScopes),
-    ),
-    /**
-     * `attack_count >= 2`: a row carrying this effect EXISTS because a feature
-     * granted Extra Attack, and the smallest thing that feature can mean is two
-     * attacks. A 1 is a parse that found the wrong line — the same limb
-     * `class_extra_attack_grants_check` carries.
-     */
-    check(
-      'subclass_features_effect_attack_count_check',
-      nullOrIntegerAtLeast('effect_attack_count', 2),
-    ),
-    /**
-     * Payload ⇒ kind, then kind ⇒ payload, in both directions and with `IS`
-     * rather than `=`.
-     *
-     * `IS` IS LOAD-BEARING AND WAS MEASURED ON THE SPECIES SIDE FIRST: written
-     * as `effect_kind = 'extra_attack'`, the whole expression evaluates to NULL
-     * for every text-only feature, and SQLite PASSES a CHECK that evaluates to
-     * NULL. The constraint would then admit exactly the row it exists to
-     * refuse — a free-text feature carrying an orphaned mechanical payload.
-     */
-    check(
-      'subclass_features_attack_count_kind_check',
-      sql`effect_attack_count IS NULL OR effect_kind IS 'extra_attack'`,
-    ),
-    check(
-      'subclass_features_weapon_scope_kind_check',
-      sql`effect_weapon_scope IS NULL OR effect_kind IS 'extra_attack'`,
-    ),
-    /**
-     * The other direction: a kind that promises a number must carry one, AND
-     * must carry its scope. A scope-less `extra_attack` row would have to be
-     * defaulted to `any_weapon` by every reader, and a grant that is silently
-     * widened from one weapon to all of them is the exact wrong answer D19 §3
-     * describes.
-     */
-    check(
-      'subclass_features_extra_attack_payload_check',
-      sql`effect_kind IS NOT 'extra_attack' OR (effect_attack_count IS NOT NULL AND effect_weapon_scope IS NOT NULL)`,
-    ),
     uniqueIndex('subclass_features_subclass_sort_unique').on(
       table.subclass_definition_id,
       table.sort_order,
@@ -412,6 +469,36 @@ export const subclass_features = sqliteTable(
     uniqueIndex('subclass_features_subclass_name_unique').on(
       table.subclass_definition_id,
       table.name,
+    ),
+  ],
+);
+
+/** Mechanical effects are rows, so one printed feature may grant many. */
+export const subclass_feature_effects = sqliteTable(
+  'subclass_feature_effects',
+  {
+    id: integer('id')
+      .primaryKey({ autoIncrement: true })
+      .notNull()
+      .$type<SubclassFeatureEffectId>(),
+    subclass_feature_id: integer('subclass_feature_id')
+      .notNull()
+      .$type<SubclassFeatureId>()
+      .references(() => subclass_features.id, { onDelete: 'cascade' }),
+    sort_order: integer('sort_order').notNull(),
+    ...featureEffectColumns(),
+    created_at: datetime()('created_at'),
+    updated_at: datetime()('updated_at'),
+  },
+  (table) => [
+    ...featureEffectChecks('subclass_feature_effects'),
+    check(
+      'subclass_feature_effects_sort_order_check',
+      integerAtLeast('sort_order', 1),
+    ),
+    uniqueIndex('subclass_feature_effects_feature_sort_unique').on(
+      table.subclass_feature_id,
+      table.sort_order,
     ),
   ],
 );
@@ -433,8 +520,8 @@ export const subclass_features = sqliteTable(
  *     `db/schema/`, so `character_class_levels` cannot say. The prerequisite is
  *     not a level either — it is "Level 5+ Warlock, Pact of the Blade", and the
  *     second half is a choice this schema does not record.
- *  2. WHICH WEAPON IS THE BONDED ONE, when `effect_weapon_scope` says the grant
- *     reaches only one.
+ *  2. WHICH WEAPON IS THE BONDED ONE, when a child effect's `weapon_scope`
+ *     says the grant reaches only one.
  *
  * So a grant from this table is SURFACED against every attack profile and
  * applied to none, with both reasons printed. That is not a shortcoming hidden
@@ -485,41 +572,11 @@ export const named_features = sqliteTable(
     description: sqlText()('description').notNull(),
     /** The level in `class_definition_id` at which the prerequisite is met. */
     class_level: integer('class_level').notNull(),
-    /** Nullable on D6b limb 2, exactly as `subclass_features.effect_kind` is. */
-    effect_kind: varchar<ClassFeatureEffectKind>()('effect_kind'),
-    effect_attack_count: integer('effect_attack_count'),
-    effect_weapon_scope: varchar<ExtraAttackWeaponScope>()(
-      'effect_weapon_scope',
-    ),
     created_at: datetime()('created_at'),
     updated_at: datetime()('updated_at'),
   },
   (table) => [
     check('named_features_class_level_check', sql`class_level BETWEEN 1 AND 20`),
-    check(
-      'named_features_effect_kind_check',
-      nullOrOneOf('effect_kind', classFeatureEffectKinds),
-    ),
-    check(
-      'named_features_effect_weapon_scope_check',
-      nullOrOneOf('effect_weapon_scope', extraAttackWeaponScopes),
-    ),
-    check(
-      'named_features_effect_attack_count_check',
-      nullOrIntegerAtLeast('effect_attack_count', 2),
-    ),
-    check(
-      'named_features_attack_count_kind_check',
-      sql`effect_attack_count IS NULL OR effect_kind IS 'extra_attack'`,
-    ),
-    check(
-      'named_features_weapon_scope_kind_check',
-      sql`effect_weapon_scope IS NULL OR effect_kind IS 'extra_attack'`,
-    ),
-    check(
-      'named_features_extra_attack_payload_check',
-      sql`effect_kind IS NOT 'extra_attack' OR (effect_attack_count IS NOT NULL AND effect_weapon_scope IS NOT NULL)`,
-    ),
     uniqueIndex('named_features_content_key_unique').on(table.content_key),
     /**
      * The same triple `subclass_definitions` is unique on, and for the same
@@ -532,6 +589,72 @@ export const named_features = sqliteTable(
       table.class_definition_id,
       table.name,
       table.rules_edition,
+    ),
+  ],
+);
+
+/** Mechanical effects of an optional feature; never auto-copied to a character. */
+export const named_feature_effects = sqliteTable(
+  'named_feature_effects',
+  {
+    id: integer('id')
+      .primaryKey({ autoIncrement: true })
+      .notNull()
+      .$type<NamedFeatureEffectId>(),
+    named_feature_id: integer('named_feature_id')
+      .notNull()
+      .$type<NamedFeatureId>()
+      .references(() => named_features.id, { onDelete: 'cascade' }),
+    sort_order: integer('sort_order').notNull(),
+    ...featureEffectColumns(),
+    created_at: datetime()('created_at'),
+    updated_at: datetime()('updated_at'),
+  },
+  (table) => [
+    ...featureEffectChecks('named_feature_effects'),
+    check(
+      'named_feature_effects_sort_order_check',
+      integerAtLeast('sort_order', 1),
+    ),
+    uniqueIndex('named_feature_effects_feature_sort_unique').on(
+      table.named_feature_id,
+      table.sort_order,
+    ),
+  ],
+);
+
+/**
+ * An automatic base-class feature. Unlike `named_features`, reaching
+ * `class_level` is sufficient to gain it, so class sync copies its mechanical
+ * row into `character_effects`.
+ */
+export const class_feature_effects = sqliteTable(
+  'class_feature_effects',
+  {
+    id: integer('id')
+      .primaryKey({ autoIncrement: true })
+      .notNull()
+      .$type<ClassFeatureEffectId>(),
+    class_definition_id: integer('class_definition_id')
+      .notNull()
+      .$type<ClassDefinitionId>()
+      .references(() => class_definitions.id, { onDelete: 'cascade' }),
+    class_level: integer('class_level').notNull(),
+    name: varchar()('name').notNull(),
+    ...featureEffectColumns(),
+    created_at: datetime()('created_at'),
+    updated_at: datetime()('updated_at'),
+  },
+  (table) => [
+    ...featureEffectChecks('class_feature_effects'),
+    check(
+      'class_feature_effects_class_level_check',
+      sql`class_level BETWEEN 1 AND 20`,
+    ),
+    uniqueIndex('class_feature_effects_class_name_level_unique').on(
+      table.class_definition_id,
+      table.name,
+      table.class_level,
     ),
   ],
 );

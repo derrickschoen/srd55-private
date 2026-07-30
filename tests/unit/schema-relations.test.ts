@@ -218,8 +218,9 @@ describe('declared relations match the foreign keys', () => {
     // `(source_instance_id, character_id)` into `character_source_instances` —
     // the fifth composite key in the schema and the fourth use of the
     // `(id, character_id)` unique index.
-    expect(constraintEdges(db)).toHaveLength(68);
-    expect(rowCount).toBe(73);
+    // AC-2a adds one parent edge for each of the three effect-template tables.
+    expect(constraintEdges(db)).toHaveLength(71);
+    expect(rowCount).toBe(76);
   });
 
   it('declares a relation for every foreign key, and a foreign key for every relation', () => {

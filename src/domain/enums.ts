@@ -818,6 +818,30 @@ export type ExtraAttackWeaponScope = (typeof extraAttackWeaponScopes)[number];
 export const classFeatureEffectKinds = ['extra_attack'] as const;
 export type ClassFeatureEffectKind = (typeof classFeatureEffectKinds)[number];
 
+/**
+ * Every effect a class, subclass, or optional named feature template can
+ * describe. `extra_attack` remains catalog-live, while the nine
+ * `characterEffectKinds` are copied into `character_effects` by class sync.
+ */
+export const featureTemplateEffectKinds = [
+  ...characterEffectKinds,
+  ...classFeatureEffectKinds,
+] as const;
+export type FeatureTemplateEffectKind =
+  (typeof featureTemplateEffectKinds)[number];
+
+/**
+ * Species templates can produce the pre-AC effects plus the AC formula D72
+ * assigns to a species. `ability_increase` remains refused by the table's
+ * source-required invariant.
+ */
+export const speciesTemplateEffectKinds = [
+  ...effectKinds,
+  'armor_class_formula',
+] as const;
+export type SpeciesTemplateEffectKind =
+  (typeof speciesTemplateEffectKinds)[number];
+
 export const effectReliabilityCategories = [
   'attack_roll',
   'saving_throw',

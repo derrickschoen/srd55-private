@@ -179,10 +179,19 @@ export class SourceRuleReader {
       return this.rulesForSubclassSource(source);
     }
 
+    // A source instance may identify a real character-owned source category
+    // without pointing at a rules definition. Guided species uses that shape
+    // when a template has generated effects but no sourced grant text: the
+    // instance supplies effect provenance, while the typed absence means there
+    // are no grant rules to read.
+    if (source.sourceDefinitionId === null) {
+      return [];
+    }
+
     const table = sourceDefinitionTable(source.sourceType);
     const definition = this.db.one(
       `SELECT id, grant_rules FROM ${table} WHERE id = ?`,
-      [source.sourceDefinitionId ?? 0],
+      [source.sourceDefinitionId],
       identifiedGrantRulesText,
     );
     if (definition === null) {

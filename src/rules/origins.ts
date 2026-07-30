@@ -82,6 +82,11 @@ export interface SpeciesTemplateTraitEffectRow {
   readonly hit_points_flat: number | null;
   readonly hit_points_per_level: number | null;
   readonly speed_bonus_feet: number | null;
+  readonly base: number | null;
+  readonly ability_1: string | null;
+  readonly ability_2: string | null;
+  readonly allows_shield: number | null;
+  readonly weapon_scope: string | null;
   readonly created_at: string | null;
   readonly updated_at: string | null;
 }
@@ -138,6 +143,12 @@ export interface CharacterEffectFields {
   readonly hit_points_flat: number | null;
   readonly hit_points_per_level: number | null;
   readonly speed_bonus_feet: number | null;
+  readonly base: number | null;
+  readonly ability_1: string | null;
+  readonly ability_2: string | null;
+  readonly allows_shield: number | null;
+  readonly weapon_scope: string | null;
+  readonly template_ref: string | null;
   readonly label: string;
   readonly notes: string | null;
 }
@@ -233,14 +244,19 @@ export function effectsFromTemplate(
 ): CharacterEffectProfile[] {
   return effects.map((effect) => {
     const {
-      id: _id,
+      id,
       species_template_trait_id: _trait,
       sort_order: _order,
       created_at: _created,
       updated_at: _updated,
       ...profile
     } = effect;
-    return { ...profile, label: traitName, notes: null };
+    return {
+      ...profile,
+      template_ref: `species_template_trait_effects:${String(id)}`,
+      label: traitName,
+      notes: null,
+    };
   });
 }
 

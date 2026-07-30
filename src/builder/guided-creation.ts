@@ -763,6 +763,11 @@ const speciesTemplateTraitEffectRow: RowCodec<SpeciesTemplateTraitEffectRow> = (
   hit_points_flat: sqlNullableInteger(row, 'hit_points_flat'),
   hit_points_per_level: sqlNullableInteger(row, 'hit_points_per_level'),
   speed_bonus_feet: sqlNullableInteger(row, 'speed_bonus_feet'),
+  base: sqlNullableInteger(row, 'base'),
+  ability_1: sqlNullableString(row, 'ability_1'),
+  ability_2: sqlNullableString(row, 'ability_2'),
+  allows_shield: sqlNullableInteger(row, 'allows_shield'),
+  weapon_scope: sqlNullableString(row, 'weapon_scope'),
   created_at: sqlNullableString(row, 'created_at'),
   updated_at: sqlNullableString(row, 'updated_at'),
 });
@@ -923,12 +928,9 @@ function gateBundledBackground(
  * schema comment names one and it was never built — so the delete is inline.
  *
  * The delete removes exactly what a species apply owns: the parent row, the
- * trait rows, and the `character_effects` rows the previous copy minted —
- * identified as unsourced effects (`source_instance_id IS NULL`) whose label
- * matches a current species trait name, because the label-is-the-trait's-name
- * binding is made at the moment of the copy and nowhere else. Effects that
- * belong to a source instance (a share-imported grant, a future feat) are not
- * touched.
+ * trait rows, and the marker-owned source instance whose cascade removes the
+ * generated `character_effects` rows. A narrow unsourced label cleanup remains
+ * below only for rows minted by builds predating generated source ownership.
  *
  * A6 WIDENED WHAT AN APPLY OWNS, so the replace widened with it: the previous
  * apply's grant SOURCE INSTANCE — marked with
@@ -1032,7 +1034,11 @@ export function applyGuidedOrigin(
 
     // Replace the previous apply's grant bridge first (A6): the marker finds
     // it without reference to the rows the statements below delete.
-    replaceGuidedLineageGrants(db, characterId, template);
+    const speciesSourceId = replaceGuidedLineageGrants(
+      db,
+      characterId,
+      template,
+    );
 
     // Replace: effects first, because identifying them needs the trait rows
     // that the next statement deletes.
@@ -1103,7 +1109,8 @@ export function applyGuidedOrigin(
       const effects = db.all(
         `SELECT id, species_template_trait_id, sort_order, effect_kind,
                 damage_type, hit_points_flat, hit_points_per_level,
-                speed_bonus_feet, created_at, updated_at
+                speed_bonus_feet, base, ability_1, ability_2, allows_shield,
+                weapon_scope, created_at, updated_at
          FROM species_template_trait_effects
          WHERE species_template_trait_id = ?
          ORDER BY sort_order`,
@@ -1116,8 +1123,9 @@ export function applyGuidedOrigin(
           `INSERT INTO character_effects (
              character_id, sort_order, effect_kind, damage_type,
              hit_points_flat, hit_points_per_level, speed_bonus_feet,
-             source_instance_id, label, notes
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
+             base, ability_1, ability_2, allows_shield, weapon_scope,
+             source_instance_id, template_ref, label, notes
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             characterId,
             effectOrder,
@@ -1126,6 +1134,13 @@ export function applyGuidedOrigin(
             effect.hit_points_flat,
             effect.hit_points_per_level,
             effect.speed_bonus_feet,
+            effect.base,
+            effect.ability_1,
+            effect.ability_2,
+            effect.allows_shield,
+            effect.weapon_scope,
+            speciesSourceId,
+            effect.template_ref,
             effect.label,
             effect.notes,
           ],
@@ -1222,7 +1237,7 @@ function replaceGuidedLineageGrants(
   db: DatabaseContext,
   characterId: number,
   template: SpeciesTemplateRow,
-): void {
+): number {
   const previous = db.all(
     `SELECT id FROM character_source_instances
      WHERE character_id = ? AND source_type = 'species' AND notes = ?`,
@@ -1243,10 +1258,6 @@ function replaceGuidedLineageGrants(
     [template.content_key],
     rowId,
   );
-  if (definitionId === null) {
-    return;
-  }
-
   const timestamp = new Date().toISOString();
   const instanceId = db.exec(
     `INSERT INTO character_source_instances (
@@ -1265,7 +1276,10 @@ function replaceGuidedLineageGrants(
       timestamp,
     ],
   ).lastInsertId;
-  new GrantRuleSlotGenerator(db).generateForSource(instanceId);
+  if (definitionId !== null) {
+    new GrantRuleSlotGenerator(db).generateForSource(instanceId);
+  }
+  return instanceId;
 }
 
 /* ------------------------------- B3: background choices, per D61 and D63 */

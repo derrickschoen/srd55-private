@@ -18,28 +18,26 @@ import {
  * number. Its switch is exhaustive, so adding a member to the enum stops this
  * file compiling until the new kind is given a meaning.
  *
- * BOTH FEATURE TABLES ARE READ THROUGH ONE STRUCTURAL TYPE, for the reason
- * `SpeciesTraitEffect` gives: `subclass_features` and `named_features` carry the
- * same three effect columns under the same names, and a derivation that worked
- * on only one of them would be one that could not be checked against the other.
+ * BOTH FEATURE CHILD TABLES ARE READ THROUGH ONE STRUCTURAL TYPE, for the
+ * reason `SpeciesTraitEffect` gives: `subclass_feature_effects` and
+ * `named_feature_effects` carry the same columns under the same names, and a
+ * derivation that worked on only one could not be checked against the other.
  *
- * FREE TEXT IS NOT AN EFFECT, AND THAT IS THE COMMON CASE. A feature with
- * `effect_kind IS NULL` is a printed paragraph and nothing else — the owner's
- * "most things are just a text box" — and every function here ignores it,
- * however mechanical the English sounds.
+ * FREE TEXT IS NOT AN EFFECT, AND THAT IS THE COMMON CASE. It is represented
+ * by a parent feature with no child row; this module receives child rows.
  *
  * AN UNRECOGNISED KIND READS AS NO EFFECT, WHICH IS WHY THE DATABASE REFUSES
  * ONE. This function cannot distinguish "no effect" from "an effect this build
- * does not understand", so `subclass_features_effect_kind_check` and
- * `named_features_effect_kind_check` refuse the second case at the storage
- * layer rather than letting it degrade quietly here.
+ * does not understand", so `subclass_feature_effects_kind_check` and
+ * `named_feature_effects_kind_check` refuse it at storage rather than letting
+ * it degrade quietly here.
  */
 
-/** The three effect columns both feature tables carry, as stored. */
+/** The Extra Attack consumer's three columns, shared by both child tables. */
 export interface ClassFeatureEffectColumns {
   readonly effect_kind: string | null;
-  readonly effect_attack_count: number | null;
-  readonly effect_weapon_scope: string | null;
+  readonly attack_count: number | null;
+  readonly weapon_scope: string | null;
 }
 
 /**
@@ -72,8 +70,8 @@ export function classFeatureEffectKind(
  *
  * A KIND WITH AN INCOMPLETE PAYLOAD RETURNS `null` RATHER THAN A DEFAULT, and
  * the choice is the whole reason this function is not three field reads at the
- * call site. `effect_attack_count ?? 2` would invent an entitlement, and
- * `effect_weapon_scope ?? 'any_weapon'` would WIDEN a one-weapon grant to every
+ * call site. `attack_count ?? 2` would invent an entitlement, and
+ * `weapon_scope ?? 'any_weapon'` would WIDEN a one-weapon grant to every
  * weapon the character holds — the specific wrong answer D19 §3 describes. The
  * schema's `*_extra_attack_payload_check` already makes such a row
  * unrepresentable in a database this application created; this is what happens
@@ -88,8 +86,8 @@ export function classFeatureEffect(
   }
   switch (kind) {
     case 'extra_attack': {
-      const count = feature.effect_attack_count;
-      const scope = feature.effect_weapon_scope;
+      const count = feature.attack_count;
+      const scope = feature.weapon_scope;
       if (count === null || !isEnumValue(extraAttackWeaponScopes, scope)) {
         return null;
       }

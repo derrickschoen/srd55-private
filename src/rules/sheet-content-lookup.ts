@@ -114,6 +114,27 @@ export interface SheetClassContent extends SheetClassLevels {
 export class SheetContentLookup {
   constructor(private readonly db: DatabaseContext) {}
 
+  private featureExtraAttack(
+    table: 'subclass_feature_effects' | 'named_feature_effects',
+    foreignKey: 'subclass_feature_id' | 'named_feature_id',
+    featureId: number,
+  ): ClassFeatureEffect | null {
+    const row = this.db.one(
+      `SELECT effect_kind, attack_count, weapon_scope
+       FROM ${table}
+       WHERE ${foreignKey} = ? AND effect_kind = 'extra_attack'
+       ORDER BY sort_order
+       LIMIT 1`,
+      [featureId],
+      (effectRow) => ({
+        effect_kind: sqlString(effectRow, 'effect_kind'),
+        attack_count: sqlNullableInteger(effectRow, 'attack_count'),
+        weapon_scope: sqlNullableString(effectRow, 'weapon_scope'),
+      }),
+    );
+    return row === null ? null : classFeatureEffect(row);
+  }
+
   /**
    * The class-table Extra Attack grants of one class.
    *
@@ -196,49 +217,53 @@ export class SheetContentLookup {
    */
   subclassFeatures(subclassDefinitionId: number): readonly SubclassFeature[] {
     return this.db.all(
-      `SELECT id, name, description, class_level, sort_order,
-              effect_kind, effect_attack_count, effect_weapon_scope
+      `SELECT id, name, description, class_level, sort_order
        FROM subclass_features
        WHERE subclass_definition_id = ?
        ORDER BY sort_order`,
       [subclassDefinitionId],
-      (row): SubclassFeature => ({
-        id: sqlInteger(row, 'id'),
-        name: sqlString(row, 'name'),
-        description: sqlString(row, 'description'),
-        class_level: sqlInteger(row, 'class_level'),
-        sort_order: sqlInteger(row, 'sort_order'),
-        effect: classFeatureEffect({
-          effect_kind: sqlNullableString(row, 'effect_kind'),
-          effect_attack_count: sqlNullableInteger(row, 'effect_attack_count'),
-          effect_weapon_scope: sqlNullableString(row, 'effect_weapon_scope'),
-        }),
-      }),
+      (row): SubclassFeature => {
+        const id = sqlInteger(row, 'id');
+        return {
+          id,
+          name: sqlString(row, 'name'),
+          description: sqlString(row, 'description'),
+          class_level: sqlInteger(row, 'class_level'),
+          sort_order: sqlInteger(row, 'sort_order'),
+          effect: this.featureExtraAttack(
+            'subclass_feature_effects',
+            'subclass_feature_id',
+            id,
+          ),
+        };
+      },
     );
   }
 
   /** Every named optional feature whose prerequisite counts one class's level. */
   namedFeatures(classDefinitionId: number): readonly NamedFeature[] {
     return this.db.all(
-      `SELECT id, content_key, name, prerequisite, description, class_level,
-              effect_kind, effect_attack_count, effect_weapon_scope
+      `SELECT id, content_key, name, prerequisite, description, class_level
        FROM named_features
        WHERE class_definition_id = ?
        ORDER BY class_level, name`,
       [classDefinitionId],
-      (row): NamedFeature => ({
-        id: sqlInteger(row, 'id'),
-        content_key: sqlString(row, 'content_key'),
-        name: sqlString(row, 'name'),
-        prerequisite: sqlString(row, 'prerequisite'),
-        description: sqlString(row, 'description'),
-        class_level: sqlInteger(row, 'class_level'),
-        effect: classFeatureEffect({
-          effect_kind: sqlNullableString(row, 'effect_kind'),
-          effect_attack_count: sqlNullableInteger(row, 'effect_attack_count'),
-          effect_weapon_scope: sqlNullableString(row, 'effect_weapon_scope'),
-        }),
-      }),
+      (row): NamedFeature => {
+        const id = sqlInteger(row, 'id');
+        return {
+          id,
+          content_key: sqlString(row, 'content_key'),
+          name: sqlString(row, 'name'),
+          prerequisite: sqlString(row, 'prerequisite'),
+          description: sqlString(row, 'description'),
+          class_level: sqlInteger(row, 'class_level'),
+          effect: this.featureExtraAttack(
+            'named_feature_effects',
+            'named_feature_id',
+            id,
+          ),
+        };
+      },
     );
   }
 

@@ -92,9 +92,13 @@ describe('the grants a character actually has, read from the database', () => {
   it('seeds exactly the two invocations the extract prints, on the Warlock', () => {
     const rows = db.all(
       `SELECT f.content_key, f.name, f.class_level, f.prerequisite,
-              f.effect_kind, f.effect_attack_count, f.effect_weapon_scope,
+              effect.effect_kind, effect.attack_count,
+              effect.weapon_scope,
               c.name AS class_name
        FROM named_features AS f
+       JOIN named_feature_effects AS effect
+         ON effect.named_feature_id = f.id
+        AND effect.sort_order = 1
        JOIN class_definitions AS c ON c.id = f.class_definition_id
        ORDER BY f.class_level`,
       undefined,
@@ -105,8 +109,8 @@ describe('the grants a character actually has, read from the database', () => {
         class_level: Number(row.class_level),
         prerequisite: String(row.prerequisite),
         effect_kind: String(row.effect_kind),
-        attack_count: Number(row.effect_attack_count),
-        weapon_scope: String(row.effect_weapon_scope),
+        attack_count: Number(row.attack_count),
+        weapon_scope: String(row.weapon_scope),
       }),
     );
     // Read off `docs/srd/source/extra-attack-other-sources.txt` by eye.
@@ -186,30 +190,72 @@ describe('the grants a character actually has, read from the database', () => {
     // then prints "would give 4 attacks" — a sourced-looking number that is in
     // no extract anywhere. Each column is broken separately so a guard that
     // compares only some of them fails on the ones it skipped.
-    const corruptions: readonly [string, unknown][] = [
-      ['effect_attack_count = 4', null],
-      ["effect_weapon_scope = 'any_weapon'", null],
-      ['effect_kind = NULL, effect_attack_count = NULL, effect_weapon_scope = NULL', null],
-      ['class_level = 3', null],
-      ["prerequisite = 'Level 5+ Warlock'", null],
-      ["description = ''", null],
-      ["name = 'Thirsty Blade'", null],
-      ["rules_edition = '2014'", null],
+    const corruptions: readonly {
+      readonly label: string;
+      readonly mutate: () => void;
+    }[] = [
+      {
+        label: 'attack_count = 4',
+        mutate: () =>
+          db.exec(
+            `UPDATE named_feature_effects SET attack_count = 4
+             WHERE named_feature_id = (
+               SELECT id FROM named_features
+               WHERE content_key = '2024:feature:thirsting-blade'
+             )`,
+          ),
+      },
+      {
+        label: "weapon_scope = 'any_weapon'",
+        mutate: () =>
+          db.exec(
+            `UPDATE named_feature_effects SET weapon_scope = 'any_weapon'
+             WHERE named_feature_id = (
+               SELECT id FROM named_features
+               WHERE content_key = '2024:feature:thirsting-blade'
+             )`,
+          ),
+      },
+      {
+        label: 'effect child missing',
+        mutate: () =>
+          db.exec(
+            `DELETE FROM named_feature_effects
+             WHERE named_feature_id = (
+               SELECT id FROM named_features
+               WHERE content_key = '2024:feature:thirsting-blade'
+             )`,
+          ),
+      },
+      ...[
+        'class_level = 3',
+        "prerequisite = 'Level 5+ Warlock'",
+        "description = ''",
+        "name = 'Thirsty Blade'",
+        "rules_edition = '2014'",
+      ].map((setClause) => ({
+        label: setClause,
+        mutate: () =>
+          db.exec(
+            `UPDATE named_features SET ${setClause}
+             WHERE content_key = '2024:feature:thirsting-blade'`,
+          ),
+      })),
     ];
-    for (const [setClause] of corruptions) {
-      db.exec(
-        `UPDATE named_features SET ${setClause}
-         WHERE content_key = '2024:feature:thirsting-blade'`,
-      );
-      expect(hasBundledSheetContent(db), setClause).toBe(false);
+    for (const corruption of corruptions) {
+      corruption.mutate();
+      expect(hasBundledSheetContent(db), corruption.label).toBe(false);
       seedSheetContent(db);
-      expect(hasBundledSheetContent(db), setClause).toBe(true);
+      expect(hasBundledSheetContent(db), corruption.label).toBe(true);
     }
     // And after every repair the row says exactly what the extract says.
     expect(
       db.scalar(
-        `SELECT effect_attack_count FROM named_features
-         WHERE content_key = '2024:feature:thirsting-blade'`,
+        `SELECT effect.attack_count
+         FROM named_feature_effects AS effect
+         JOIN named_features AS feature
+           ON feature.id = effect.named_feature_id
+         WHERE feature.content_key = '2024:feature:thirsting-blade'`,
       ),
     ).toBe(2);
   });
@@ -279,9 +325,16 @@ describe('the grants a character actually has, read from the database', () => {
     // the real Warlock slot.
     db.exec(
       `UPDATE named_features
-       SET class_definition_id = ?, name = 'Thirsting Edge', effect_attack_count = 4
+       SET class_definition_id = ?, name = 'Thirsting Edge'
        WHERE content_key = '2024:feature:thirsting-blade'`,
       [classId('Fighter')],
+    );
+    db.exec(
+      `UPDATE named_feature_effects SET attack_count = 4
+       WHERE named_feature_id = (
+         SELECT id FROM named_features
+         WHERE content_key = '2024:feature:thirsting-blade'
+       )`,
     );
     db.exec(
       `INSERT INTO named_features
@@ -540,12 +593,17 @@ describe('the grants a character actually has, read from the database', () => {
     const subclassId = insertHomebrewSubclass(db);
     db.exec(
       `INSERT INTO subclass_features
-         (subclass_definition_id, class_level, sort_order, name, description,
-          effect_kind, effect_attack_count, effect_weapon_scope)
+         (subclass_definition_id, class_level, sort_order, name, description)
        VALUES (?, 6, 3, 'Bound Refrain',
-               'A feature this user wrote, tied to one instrument they carry.',
-               'extra_attack', 3, 'one_bonded_weapon')`,
+               'A feature this user wrote, tied to one instrument they carry.')`,
       [subclassId],
+    );
+    db.exec(
+      `INSERT INTO subclass_feature_effects
+         (subclass_feature_id, sort_order, effect_kind, attack_count,
+          weapon_scope)
+       VALUES (last_insert_rowid(), 1, 'extra_attack', 3,
+               'one_bonded_weapon')`,
     );
     addLevels('Bard', 6, { starting: true, subclassId });
 

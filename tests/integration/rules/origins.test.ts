@@ -419,6 +419,23 @@ describe('origins content seeding and the D1b copy', () => {
       hit_points_flat: 0,
       hit_points_per_level: 1,
       speed_bonus_feet: null,
+      base: null,
+      ability_1: null,
+      ability_2: null,
+      allows_shield: null,
+      weapon_scope: null,
+      template_ref: `species_template_trait_effects:${String(
+        db.scalar(
+          `SELECT effect.id
+           FROM species_template_trait_effects AS effect
+           JOIN species_template_traits AS trait
+             ON trait.id = effect.species_template_trait_id
+           JOIN species_templates AS template
+             ON template.id = trait.species_template_id
+           WHERE template.name = 'Dwarf'
+             AND trait.name = 'Dwarven Toughness'`,
+        ),
+      )}`,
       label: 'Dwarven Toughness',
       notes: null,
     });

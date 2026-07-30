@@ -776,6 +776,10 @@ const PROBES: { readonly [N in ProbedTable]: Probe<N> } = {
       ability_2: { kind: 'verbatim' },
       allows_shield: { kind: 'verbatim' },
       weapon_scope: { kind: 'verbatim' },
+      template_ref: {
+        kind: 'omitted',
+        why: 'AC-2a generated-row identity is intentionally absent from frozen wire v8; AC-2b mints the wire that can carry it, so this accepted internal window imports it as NULL.',
+      },
       source_instance_id: {
         kind: 'translated',
         key: '(SELECT display_name FROM character_source_instances WHERE id = t.source_instance_id)',
@@ -1331,8 +1335,9 @@ function seedSender(db: DatabaseContext, catalog: Catalog): number {
   db.exec(
     `INSERT INTO character_effects (
        character_id, sort_order, effect_kind, damage_type, source_instance_id,
-       label, notes, created_at, updated_at
-     ) VALUES (?, 3, 'damage_resistance', 'Fire', ?, 'Sender Resistance',
+       template_ref, label, notes, created_at, updated_at
+     ) VALUES (?, 3, 'damage_resistance', 'Fire', ?,
+       'class_feature_effects:9001', 'Sender Resistance',
        'sender effect note', ?, ?)`,
     [characterId, classSourceId, SENDER_TIME, SENDER_TIME],
   );

@@ -59,8 +59,8 @@ interface StoredFeature {
   readonly name: string;
   readonly description: string;
   readonly effect_kind: string | null;
-  readonly effect_attack_count: number | null;
-  readonly effect_weapon_scope: string | null;
+  readonly attack_count: number | null;
+  readonly weapon_scope: string | null;
 }
 
 function timestamp(): string {
@@ -87,9 +87,9 @@ function storedFeature(
     name: feature.name,
     description: feature.description,
     effect_kind: feature.effect === null ? null : feature.effect.kind,
-    effect_attack_count:
+    attack_count:
       feature.effect === null ? null : feature.effect.attack_count,
-    effect_weapon_scope:
+    weapon_scope:
       feature.effect === null ? null : feature.effect.weapon_scope,
   };
 }
@@ -99,11 +99,15 @@ function readStoredFeatures(
   subclassId: number,
 ): StoredFeature[] {
   return db.all(
-    `SELECT class_level, sort_order, name, description,
-            effect_kind, effect_attack_count, effect_weapon_scope
-     FROM subclass_features
-     WHERE subclass_definition_id = ?
-     ORDER BY sort_order`,
+    `SELECT feature.class_level, feature.sort_order, feature.name,
+            feature.description, effect.effect_kind, effect.attack_count,
+            effect.weapon_scope
+     FROM subclass_features AS feature
+     LEFT JOIN subclass_feature_effects AS effect
+       ON effect.subclass_feature_id = feature.id
+      AND effect.effect_kind = 'extra_attack'
+     WHERE feature.subclass_definition_id = ?
+     ORDER BY feature.sort_order`,
     [subclassId],
     (row): StoredFeature => ({
       class_level: Number(row.class_level),
@@ -111,14 +115,14 @@ function readStoredFeatures(
       name: String(row.name),
       description: String(row.description),
       effect_kind: row.effect_kind === null ? null : String(row.effect_kind),
-      effect_attack_count:
-        row.effect_attack_count === null
+      attack_count:
+        row.attack_count === null
           ? null
-          : Number(row.effect_attack_count),
-      effect_weapon_scope:
-        row.effect_weapon_scope === null
+          : Number(row.attack_count),
+      weapon_scope:
+        row.weapon_scope === null
           ? null
-          : String(row.effect_weapon_scope),
+          : String(row.weapon_scope),
     }),
   );
 }
@@ -137,8 +141,8 @@ function sameFeatures(
         feature.name === other.name &&
         feature.description === other.description &&
         feature.effect_kind === other.effect_kind &&
-        feature.effect_attack_count === other.effect_attack_count &&
-        feature.effect_weapon_scope === other.effect_weapon_scope
+        feature.attack_count === other.attack_count &&
+        feature.weapon_scope === other.weapon_scope
       );
     })
   );
@@ -272,25 +276,37 @@ function importSubclass(
       subclassId,
     ]);
     for (const feature of desired) {
-      db.exec(
+      const featureId = db.exec(
         `INSERT INTO subclass_features (
            subclass_definition_id, class_level, sort_order, name, description,
-           effect_kind, effect_attack_count, effect_weapon_scope,
            created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
         [
           subclassId,
           feature.class_level,
           feature.sort_order,
           feature.name,
           feature.description,
-          feature.effect_kind,
-          feature.effect_attack_count,
-          feature.effect_weapon_scope,
           now,
           now,
         ],
-      );
+      ).lastInsertId;
+      if (feature.effect_kind !== null) {
+        db.exec(
+          `INSERT INTO subclass_feature_effects (
+             subclass_feature_id, sort_order, effect_kind, attack_count,
+             weapon_scope, created_at, updated_at
+           ) VALUES (?, 1, ?, ?, ?, ?, ?)`,
+          [
+            featureId,
+            feature.effect_kind,
+            feature.attack_count,
+            feature.weapon_scope,
+            now,
+            now,
+          ],
+        );
+      }
       counters.subclass_features_created += 1;
     }
     changed = true;

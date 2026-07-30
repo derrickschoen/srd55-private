@@ -1294,6 +1294,11 @@ function seedSpecies(db: DatabaseContext, timestamp: string): void {
           hit_points_flat: effect.hit_points_flat,
           hit_points_per_level: effect.hit_points_per_level,
           speed_bonus_feet: effect.speed_bonus_feet,
+          base: null,
+          ability_1: null,
+          ability_2: null,
+          allows_shield: null,
+          weapon_scope: null,
           created_at: timestamp,
           updated_at: timestamp,
         };
@@ -1302,8 +1307,9 @@ function seedSpecies(db: DatabaseContext, timestamp: string): void {
           `INSERT INTO species_template_trait_effects (
              species_template_trait_id, sort_order, effect_kind, damage_type,
              hit_points_flat, hit_points_per_level, speed_bonus_feet,
+             base, ability_1, ability_2, allows_shield, weapon_scope,
              created_at, updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             effectRow.species_template_trait_id,
             effectRow.sort_order,
@@ -1312,6 +1318,11 @@ function seedSpecies(db: DatabaseContext, timestamp: string): void {
             effectRow.hit_points_flat,
             effectRow.hit_points_per_level,
             effectRow.speed_bonus_feet,
+            effectRow.base,
+            effectRow.ability_1,
+            effectRow.ability_2,
+            effectRow.allows_shield,
+            effectRow.weapon_scope,
             effectRow.created_at,
             effectRow.updated_at,
           ],

@@ -31,9 +31,9 @@ import type {
   CreatureType,
   DamageType,
   EquipmentItemKind,
-  EffectKind,
   ExtraAttackWeaponScope,
   RulesEdition,
+  SpeciesTemplateEffectKind,
   KnownCreatureSize,
   KnownCreatureType,
   KnownDamageType,
@@ -46,9 +46,9 @@ import {
   creatureTypes,
   damageTypes,
   equipmentItemKinds,
-  effectKinds,
   extraAttackWeaponScopes,
   rulesEditions,
+  speciesTemplateEffectKinds,
 } from '../../src/domain/enums';
 import {
   datetime,
@@ -330,7 +330,8 @@ export const species_template_trait_effects = sqliteTable(
      * a sheet that reshuffled a trait's two effects would read differently.
      */
     sort_order: integer('sort_order').notNull(),
-    effect_kind: varchar<EffectKind>()('effect_kind').notNull(),
+    effect_kind:
+      varchar<SpeciesTemplateEffectKind>()('effect_kind').notNull(),
     /**
      * The resisted damage type, for `damage_resistance` only.
      *
@@ -378,6 +379,12 @@ export const species_template_trait_effects = sqliteTable(
      * exists for a character's own hand-written trait.
      */
     speed_bonus_feet: integer('speed_bonus_feet'),
+    base: integer('base'),
+    ability_1: varchar<Ability>()('ability_1'),
+    ability_2: varchar<Ability>()('ability_2'),
+    allows_shield: tinyint1('allows_shield'),
+    weapon_scope:
+      varchar<ExtraAttackWeaponScope>()('weapon_scope'),
     created_at: datetime()('created_at'),
     updated_at: datetime()('updated_at'),
   },
@@ -391,7 +398,7 @@ export const species_template_trait_effects = sqliteTable(
      */
     check(
       'species_template_trait_effects_kind_check',
-      oneOf('effect_kind', effectKinds),
+      oneOf('effect_kind', speciesTemplateEffectKinds),
     ),
     check(
       'species_template_trait_effects_damage_type_check',
@@ -425,6 +432,26 @@ export const species_template_trait_effects = sqliteTable(
       'species_template_trait_effects_speed_kind_check',
       sql`speed_bonus_feet IS NULL OR effect_kind IS 'speed'`,
     ),
+    check(
+      'species_template_trait_effects_base_kind_check',
+      sql`base IS NULL OR effect_kind IS 'armor_class_formula'`,
+    ),
+    check(
+      'species_template_trait_effects_ability_1_kind_check',
+      sql`ability_1 IS NULL OR effect_kind IS 'armor_class_formula'`,
+    ),
+    check(
+      'species_template_trait_effects_ability_2_kind_check',
+      sql`ability_2 IS NULL OR effect_kind IS 'armor_class_formula'`,
+    ),
+    check(
+      'species_template_trait_effects_allows_shield_kind_check',
+      sql`allows_shield IS NULL OR effect_kind IS 'armor_class_formula'`,
+    ),
+    check(
+      'species_template_trait_effects_weapon_scope_kind_check',
+      sql`weapon_scope IS NULL OR effect_kind IN ('attack_ability_override', 'weapon_attack_bonus', 'weapon_damage_bonus')`,
+    ),
     /**
      * The other direction: a kind that promises a number must carry one.
      * Without this an `hp_modifier` effect with both HP columns null derives a
@@ -443,13 +470,33 @@ export const species_template_trait_effects = sqliteTable(
       'species_template_trait_effects_speed_payload_check',
       sql`effect_kind IS NOT 'speed' OR speed_bonus_feet IS NOT NULL`,
     ),
+    check(
+      'species_template_trait_effects_armor_class_formula_payload_check',
+      sql`effect_kind IS NOT 'armor_class_formula' OR (base IS NOT NULL AND ability_1 IS NOT NULL AND allows_shield IS NOT NULL)`,
+    ),
+    check(
+      'species_template_trait_effects_base_check',
+      nullOrIntegerAtLeast('base', 1),
+    ),
+    check(
+      'species_template_trait_effects_ability_1_check',
+      nullOrOneOf('ability_1', abilities),
+    ),
+    check(
+      'species_template_trait_effects_ability_2_check',
+      nullOrOneOf('ability_2', abilities),
+    ),
+    check(
+      'species_template_trait_effects_weapon_scope_check',
+      nullOrOneOf('weapon_scope', extraAttackWeaponScopes),
+    ),
     /**
      * `ability_increase` IS REFUSED HERE, NOT GIVEN PAYLOAD COLUMNS, and the
      * decision is deliberate (B2). The shared `effectKinds` vocabulary widened
      * the kind CHECK above automatically, but no 2024 SRD species grants a
      * standing ability increase — that moved to backgrounds — and the
-     * catalog-to-character copy writes `source_instance_id = NULL`, which the
-     * character-side `ability_increase_source_check` refuses. Admitting the
+     * character-side `ability_increase_source_check` requires a granting
+     * source. Admitting the
      * kind here would seed catalog rows the copy could never deliver; refusing
      * it makes that dead end unrepresentable instead of a runtime surprise.
      */
@@ -735,8 +782,8 @@ export const character_effects = sqliteTable(
      * THE WEAPON SCOPE (AC-1, D72), shared by THREE kinds:
      * `attack_ability_override`, `weapon_attack_bonus`, `weapon_damage_bonus`.
      * Deliberately typed `ExtraAttackWeaponScope` and not a second, new
-     * vocabulary — `subclass_features.effect_weapon_scope` /
-     * `named_features.effect_weapon_scope` already model exactly this
+     * vocabulary — `subclass_feature_effects.weapon_scope` /
+     * `named_feature_effects.weapon_scope` already model exactly this
      * question ("does this reach every weapon, or one bonded/pact weapon this
      * application cannot resolve to a specific row") for Extra Attack grants,
      * and a modifier scoped the same way is the same question asked about a
@@ -780,6 +827,11 @@ export const character_effects = sqliteTable(
      * has, showing on the sheet with nothing to explain it.
      */
     source_instance_id: integer('source_instance_id').$type<SourceInstanceId>(),
+    /**
+     * Stable identity of a generated template row. Hand-written effects leave
+     * this NULL; command-side re-sync replaces only non-NULL rows.
+     */
+    template_ref: sqlText()('template_ref'),
     /**
      * WHAT TO CALL THIS ON A SHEET — the granting trait's name, the feat's
      * name, whatever the user typed. NOT NULL.

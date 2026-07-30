@@ -51,6 +51,7 @@ import {
   spellSchool,
   slotStates,
   effectKinds,
+  speciesTemplateEffectKinds,
   srdWeaponGroups,
   weaponAttackKinds,
   weaponMasteryGrants,
@@ -290,6 +291,7 @@ const weaponRangeKindEnum = z.enum(weaponRangeKinds);
  * vanish with no error anywhere.
  */
 const effectKindEnum = z.enum(effectKinds);
+const speciesTemplateEffectKindEnum = z.enum(speciesTemplateEffectKinds);
 /**
  * `character_effects.effect_kind`'s OWN, wider enum (AC-1) — see
  * `characterEffectKinds` in `src/domain/enums.ts`. Deliberately a SEPARATE
@@ -384,6 +386,7 @@ export const COLUMN_REFINEMENTS = {
   versatileWeaponDamageKindEnum,
   weaponRangeKindEnum,
   effectKindEnum,
+  speciesTemplateEffectKindEnum,
   characterEffectKindEnum,
   extraAttackWeaponScopeEnum,
   armorSlotEnum,
@@ -1015,11 +1018,16 @@ const REFINEMENTS = {
   'species_template_trait_effects.id': positiveInt,
   'species_template_trait_effects.species_template_trait_id': positiveInt,
   'species_template_trait_effects.sort_order': positiveInt,
-  'species_template_trait_effects.effect_kind': effectKindEnum,
+  'species_template_trait_effects.effect_kind': speciesTemplateEffectKindEnum,
   'species_template_trait_effects.damage_type': damageTypeEnum,
   // `sqlInteger` by omission would accept 1.5; these are explicitly the signed
   // integers the schema allows, and NOT `positiveInt` — Dwarven Toughness is
   // seeded `hit_points_flat = 0`, and a user's own trait may carry a penalty.
+  'species_template_trait_effects.base': positiveInt,
+  'species_template_trait_effects.ability_1': abilityEnum,
+  'species_template_trait_effects.ability_2': abilityEnum,
+  'species_template_trait_effects.allows_shield': sqlBool,
+  'species_template_trait_effects.weapon_scope': extraAttackWeaponScopeEnum,
   'species_template_trait_effects.created_at': sqlTimestamp,
   'species_template_trait_effects.updated_at': sqlTimestamp,
 
@@ -1159,6 +1167,7 @@ const REFINEMENTS = {
   // `weapon_damage_bonus` (AC-1) — see `extraAttackWeaponScopeEnum`.
   'character_effects.weapon_scope': extraAttackWeaponScopeEnum,
   'character_effects.source_instance_id': positiveInt,
+  'character_effects.template_ref': sqlText,
   // Non-empty: an effect nobody can name is an effect nobody can find to edit
   // or delete, and `''` is a null in costume.
   'character_effects.label': nonEmptyText,

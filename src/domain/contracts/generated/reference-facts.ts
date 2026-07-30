@@ -220,6 +220,12 @@ export const FOREIGN_KEY_FACTS = [
     targetColumns: ['id'],
   },
   {
+    table: 'class_feature_effects',
+    columns: ['class_definition_id'],
+    target: 'class_definitions',
+    targetColumns: ['id'],
+  },
+  {
     table: 'class_martial_arts_dice',
     columns: ['class_definition_id'],
     target: 'class_definitions',
@@ -265,6 +271,12 @@ export const FOREIGN_KEY_FACTS = [
     table: 'class_weapon_proficiencies',
     columns: ['class_definition_id'],
     target: 'class_definitions',
+    targetColumns: ['id'],
+  },
+  {
+    table: 'named_feature_effects',
+    columns: ['named_feature_id'],
+    target: 'named_features',
     targetColumns: ['id'],
   },
   {
@@ -397,6 +409,12 @@ export const FOREIGN_KEY_FACTS = [
     table: 'subclass_definitions',
     columns: ['class_definition_id'],
     target: 'class_definitions',
+    targetColumns: ['id'],
+  },
+  {
+    table: 'subclass_feature_effects',
+    columns: ['subclass_feature_id'],
+    target: 'subclass_features',
     targetColumns: ['id'],
   },
   {

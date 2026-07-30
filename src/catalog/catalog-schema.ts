@@ -104,9 +104,9 @@ export interface CatalogRecord {
  *
  * `null` IS THE COMMON CASE AND NOT AN OMISSION. A feature with no effect is a
  * printed paragraph — the owner's "most things are just a text box", and 26 of
- * 33 rows on the species side D12 measured. D6b limb 2 is the justification the
- * `subclass_features.effect_kind` column already carries: the content cannot be
- * represented without the null, because most features genuinely move no number.
+ * 33 rows on the species side D12 measured. D6b limb 2 is now represented by
+ * the absence of a `subclass_feature_effects` child row: most features
+ * genuinely move no number, so no nullable inline effect is needed.
  *
  * NO `sortOrder` FIELD. Printed order is the ARRAY's order and is derived from
  * the index, because an authored `sortOrder` beside an array is a second source

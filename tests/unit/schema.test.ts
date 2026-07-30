@@ -361,9 +361,11 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
   species_template_trait_effects: {
     integer: [
       'id', 'species_template_trait_id', 'sort_order', 'hit_points_flat',
-      'hit_points_per_level', 'speed_bonus_feet',
+      'hit_points_per_level', 'speed_bonus_feet', 'base', 'allows_shield',
     ],
-    text: ['effect_kind', 'damage_type'],
+    text: [
+      'effect_kind', 'damage_type', 'ability_1', 'ability_2', 'weapon_scope',
+    ],
     numeric: ['created_at', 'updated_at'],
   },
   character_species: {
@@ -389,7 +391,7 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
       'source_instance_id',
     ],
     text: [
-      'effect_kind', 'damage_type', 'ability', 'label', 'notes',
+      'effect_kind', 'damage_type', 'ability', 'template_ref', 'label', 'notes',
       // AC-1 (D72): the three new text-affinity columns.
       'ability_1', 'ability_2', 'weapon_scope',
     ],
@@ -495,21 +497,51 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
   // transcribed: an expectation produced from `PRAGMA table_info` reprints our
   // own output and cannot fail.
   named_features: {
-    integer: [
-      'id', 'class_definition_id', 'class_level', 'effect_attack_count',
-    ],
+    integer: ['id', 'class_definition_id', 'class_level'],
     text: [
       'content_key', 'name', 'rules_edition', 'prerequisite', 'description',
-      'effect_kind', 'effect_weapon_scope',
     ],
     numeric: ['created_at', 'updated_at'],
   },
   subclass_features: {
+    integer: ['id', 'subclass_definition_id', 'class_level', 'sort_order'],
+    text: ['name', 'description'],
+    numeric: ['created_at', 'updated_at'],
+  },
+  class_feature_effects: {
     integer: [
-      'id', 'subclass_definition_id', 'class_level', 'sort_order',
-      'effect_attack_count',
+      'id', 'class_definition_id', 'class_level', 'hit_points_flat',
+      'hit_points_per_level', 'speed_bonus_feet', 'amount', 'maximum', 'base',
+      'allows_shield', 'attack_count',
     ],
-    text: ['name', 'description', 'effect_kind', 'effect_weapon_scope'],
+    text: [
+      'name', 'effect_kind', 'damage_type', 'ability', 'ability_1', 'ability_2',
+      'weapon_scope',
+    ],
+    numeric: ['created_at', 'updated_at'],
+  },
+  named_feature_effects: {
+    integer: [
+      'id', 'named_feature_id', 'sort_order', 'hit_points_flat',
+      'hit_points_per_level', 'speed_bonus_feet', 'amount', 'maximum', 'base',
+      'allows_shield', 'attack_count',
+    ],
+    text: [
+      'effect_kind', 'damage_type', 'ability', 'ability_1', 'ability_2',
+      'weapon_scope',
+    ],
+    numeric: ['created_at', 'updated_at'],
+  },
+  subclass_feature_effects: {
+    integer: [
+      'id', 'subclass_feature_id', 'sort_order', 'hit_points_flat',
+      'hit_points_per_level', 'speed_bonus_feet', 'amount', 'maximum', 'base',
+      'allows_shield', 'attack_count',
+    ],
+    text: [
+      'effect_kind', 'damage_type', 'ability', 'ability_1', 'ability_2',
+      'weapon_scope',
+    ],
     numeric: ['created_at', 'updated_at'],
   },
   // The four STORED SHEET INPUTS, transcribed from the declarations in
@@ -705,6 +737,15 @@ const expectedNotNull: Record<string, string[]> = {
     'id', 'subclass_definition_id', 'class_level', 'sort_order', 'name',
     'description',
   ],
+  class_feature_effects: [
+    'id', 'class_definition_id', 'class_level', 'name', 'effect_kind',
+  ],
+  named_feature_effects: [
+    'id', 'named_feature_id', 'sort_order', 'effect_kind',
+  ],
+  subclass_feature_effects: [
+    'id', 'subclass_feature_id', 'sort_order', 'effect_kind',
+  ],
 
   // --- THE TABLES INHERITED FROM THE ORIGINAL MIGRATIONS -------------------
   // Merged into the list above for the same reason the column inventory was:
@@ -801,10 +842,16 @@ const expectedNamedIndexes: Record<string, string> = {
   named_features_content_key_unique: 'named_features:content_key:unique',
   named_features_class_name_rules_edition_unique:
     'named_features:class_definition_id,name,rules_edition:unique',
+  named_feature_effects_feature_sort_unique:
+    'named_feature_effects:named_feature_id,sort_order:unique',
+  class_feature_effects_class_name_level_unique:
+    'class_feature_effects:class_definition_id,name,class_level:unique',
   subclass_features_subclass_sort_unique:
     'subclass_features:subclass_definition_id,sort_order:unique',
   subclass_features_subclass_name_unique:
     'subclass_features:subclass_definition_id,name:unique',
+  subclass_feature_effects_feature_sort_unique:
+    'subclass_feature_effects:subclass_feature_id,sort_order:unique',
   background_templates_content_key_unique:
     'background_templates:content_key:unique',
   background_templates_name_rules_edition_unique:
@@ -1009,9 +1056,12 @@ const expectedUniqueGroups: Record<string, string[]> = {
   // sort order AND on name, so neither the printed order nor the feature list
   // can carry a duplicate.
   named_features: ['class_definition_id,name,rules_edition', 'content_key'],
+  named_feature_effects: ['named_feature_id,sort_order'],
+  class_feature_effects: ['class_definition_id,name,class_level'],
   subclass_features: [
     'subclass_definition_id,name', 'subclass_definition_id,sort_order',
   ],
+  subclass_feature_effects: ['subclass_feature_id,sort_order'],
   feat_definitions: ['content_key', 'name,rules_edition'],
   species_definitions: ['content_key', 'name,rules_edition'],
   spell_identities: ['content_key'],
@@ -1259,7 +1309,12 @@ const expectedForeignKeys: Record<string, string[]> = {
   // cascades from the class whose LEVEL its prerequisite counts. Both are
   // meaningless without their parent, so both go with it.
   subclass_features: ['subclass_definition_id->subclass_definitions.id|CASCADE'],
+  subclass_feature_effects: [
+    'subclass_feature_id->subclass_features.id|CASCADE',
+  ],
   named_features: ['class_definition_id->class_definitions.id|CASCADE'],
+  named_feature_effects: ['named_feature_id->named_features.id|CASCADE'],
+  class_feature_effects: ['class_definition_id->class_definitions.id|CASCADE'],
   species_template_traits: [
     'species_template_id->species_templates.id|CASCADE',
   ],
