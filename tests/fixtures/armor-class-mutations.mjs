@@ -184,6 +184,21 @@ const controls = {
       ),
     ],
   },
+  'AC-WARN-STRICT': {
+    key: 'AC-WARN-STRICT',
+    description:
+      'Relaxes the strict Armor Class reduction warning so an equal total also warns after equipping.',
+    tests: [
+      'tests/integration/commands/sheet-inputs.test.ts > sheet input commands > does not warn on an AC tie even when equipping flips the winning formula',
+    ],
+    edits: [
+      edit(
+        'src/commands/character-command-executor.ts',
+        `    newArmorClass >= previousArmorClass`,
+        `    newArmorClass > previousArmorClass`,
+      ),
+    ],
+  },
 };
 
 if (
