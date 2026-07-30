@@ -15,6 +15,7 @@ import equipmentProvenance from '../../drizzle/0011_equipment_provenance.sql?raw
 import removeEquipmentProvenance from '../../drizzle/0012_remove_equipment_provenance.sql?raw';
 import armorClassItemsAndEffects from '../../drizzle/0013_armor_class_items_and_effects.sql?raw';
 import featureEffectProduction from '../../drizzle/0014_feature_effect_production.sql?raw';
+import effectEquipmentOwnership from '../../drizzle/0015_effect_equipment_ownership.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -171,6 +172,14 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
       'babf5dd042c78f8865a3cdd9a2b725db75472fe785fa6af9c05a9f0efb667a67',
     resultSchemaChecksum:
       '4fc9e0f01553d7161dd81799466276d2068357598a9fde0a07d69491ed0bd600',
+  }),
+  Object.freeze({
+    id: '0015_effect_equipment_ownership',
+    sql: effectEquipmentOwnership,
+    checksum:
+      'a3471329fd7f62a9637e738437ab977ee1664bea1783784295ac17cb42cd4d3e',
+    resultSchemaChecksum:
+      '2533e8099b522103359dad23da321304cf3a3dac3b797b8607e29820b39e03eb',
   }),
 ]);
 

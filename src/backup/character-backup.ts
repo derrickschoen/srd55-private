@@ -679,6 +679,35 @@ function validateCharacterRows(
       );
     }
   }
+
+  const weaponIds = uniqueRowIds(
+    tables.character_weapons ?? [],
+    `${label}.character_weapons`,
+  );
+  const itemIds = uniqueRowIds(
+    tables.character_items ?? [],
+    `${label}.character_items`,
+  );
+  for (const [index, row] of (tables.character_effects ?? []).entries()) {
+    const itemId = nullablePositiveInteger(
+      row.character_item_id,
+      `${label}.character_effects[${index}].character_item_id`,
+    );
+    if (itemId !== null && !itemIds.has(itemId)) {
+      throw new BackupValidationError(
+        `${label}.character_effects[${index}] references an item from another character.`,
+      );
+    }
+    const weaponId = nullablePositiveInteger(
+      row.character_weapon_id,
+      `${label}.character_effects[${index}].character_weapon_id`,
+    );
+    if (weaponId !== null && !weaponIds.has(weaponId)) {
+      throw new BackupValidationError(
+        `${label}.character_effects[${index}] references a weapon from another character.`,
+      );
+    }
+  }
 }
 
 function spellDefinitionRowList(
@@ -1957,56 +1986,10 @@ function importCurrentTables(
       }),
     );
   }
-  // The character's own effects. `source_instance_id` is the ONLY column here
-  // that needs rewriting, and it is remapped rather than resolved: it points at
-  // another CHARACTER-OWNED row whose id this import has just minted, exactly
-  // like `spell_selection_slots.source_instance_id` above. A null stays null —
-  // an effect with no source instance is the common case, not an error — and a
-  // non-null id the document does not describe is refused rather than silently
-  // nulled, because that document is internally inconsistent.
-  for (const row of document.tables.character_effects) {
-    const oldSourceId =
-      row.source_instance_id === null ? null : Number(row.source_instance_id);
-    let sourceId: number | null = null;
-    if (oldSourceId !== null) {
-      const mapped = maps.character_source_instances.get(oldSourceId);
-      if (mapped === undefined) {
-        throw new BackupValidationError(
-          'Character backup effect source is missing.',
-        );
-      }
-      sourceId = mapped;
-    }
-    maps.character_effects.set(
-      Number(row.id),
-      insertPortableRow(db, 'character_effects', row, {
-        character_id: characterId,
-        source_instance_id: sourceId,
-      }),
-    );
-  }
-  // The migrated legacy effects go in LAST and with a fresh `sort_order`, so a
-  // document that carries both (which no writer produces, but a hand-edited
-  // file could) keeps its explicit rows in front of the derived ones.
-  for (const [index, effect] of legacyTraits.effects.entries()) {
-    insertPortableRow(
-      db,
-      'character_effects',
-      { ...effect },
-      {
-        character_id: characterId,
-        sort_order: document.tables.character_effects.length + index + 1,
-      },
-      new Set(),
-    );
-  }
-  // The character's own items (AC-1, D72). `source_instance_id` is the ONLY
-  // column here that needs rewriting, remapped rather than resolved on the
-  // IDENTICAL terms `character_effects.source_instance_id` just above: it
-  // points at another CHARACTER-OWNED row whose id this import has just
-  // minted. A null stays null — most items have no source instance — and a
-  // non-null id the document does not describe is refused rather than
-  // silently nulled, because that document is internally inconsistent.
+  // The character's own items (AC-1, D72). Inserted BEFORE effects since AC-2b:
+  // an effect may name this row through its composite ownership FK.
+  // `source_instance_id` is remapped rather than resolved on the same terms as
+  // every other character-owned reference.
   for (const row of document.tables.character_items) {
     const oldItemSourceId =
       row.source_instance_id === null ? null : Number(row.source_instance_id);
@@ -2026,6 +2009,66 @@ function importCurrentTables(
         character_id: characterId,
         source_instance_id: itemSourceId,
       }),
+    );
+  }
+  // The character's own effects. All three nullable character-owned
+  // references are remapped through the rows this import has just minted.
+  for (const row of document.tables.character_effects) {
+    const oldSourceId =
+      row.source_instance_id === null ? null : Number(row.source_instance_id);
+    let sourceId: number | null = null;
+    if (oldSourceId !== null) {
+      const mapped = maps.character_source_instances.get(oldSourceId);
+      if (mapped === undefined) {
+        throw new BackupValidationError(
+          'Character backup effect source is missing.',
+        );
+      }
+      sourceId = mapped;
+    }
+    const oldItemId =
+      row.character_item_id === null ? null : Number(row.character_item_id);
+    const itemId =
+      oldItemId === null ? null : maps.character_items.get(oldItemId);
+    if (oldItemId !== null && itemId === undefined) {
+      throw new BackupValidationError(
+        'Character backup effect item is missing.',
+      );
+    }
+    const oldWeaponId =
+      row.character_weapon_id === null
+        ? null
+        : Number(row.character_weapon_id);
+    const weaponId =
+      oldWeaponId === null ? null : maps.character_weapons.get(oldWeaponId);
+    if (oldWeaponId !== null && weaponId === undefined) {
+      throw new BackupValidationError(
+        'Character backup effect weapon is missing.',
+      );
+    }
+    maps.character_effects.set(
+      Number(row.id),
+      insertPortableRow(db, 'character_effects', row, {
+        character_id: characterId,
+        source_instance_id: sourceId,
+        character_item_id: itemId ?? null,
+        character_weapon_id: weaponId ?? null,
+      }),
+    );
+  }
+  // The migrated legacy effects go in LAST and with a fresh `sort_order`, so a
+  // document that carries both (which no writer produces, but a hand-edited
+  // file could) keeps its explicit rows in front of the derived ones.
+  for (const [index, effect] of legacyTraits.effects.entries()) {
+    insertPortableRow(
+      db,
+      'character_effects',
+      { ...effect },
+      {
+        character_id: characterId,
+        sort_order: document.tables.character_effects.length + index + 1,
+      },
+      new Set(),
     );
   }
   for (const row of document.tables.character_sheet_adjustments) {
@@ -2302,6 +2345,18 @@ function portableSnapshots(
                 ? null
                 : ids.character_source_instances.get(
                     Number(row.source_instance_id),
+                  ) ?? null,
+            character_item_id:
+              row.character_item_id === null
+                ? null
+                : ids.character_items.get(
+                    Number(row.character_item_id),
+                  ) ?? null,
+            character_weapon_id:
+              row.character_weapon_id === null
+                ? null
+                : ids.character_weapons.get(
+                    Number(row.character_weapon_id),
                   ) ?? null,
           }));
         // `character_items` needs its OWN branch too, on the IDENTICAL terms

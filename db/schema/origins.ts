@@ -14,8 +14,10 @@ import type {
   CharacterBackgroundId,
   CharacterEffectId,
   CharacterId,
+  CharacterItemId,
   CharacterSpeciesId,
   CharacterSpeciesTraitId,
+  CharacterWeaponId,
   ContentKey,
   SourceInstanceId,
   SpeciesTemplateId,
@@ -62,8 +64,9 @@ import {
   varchar,
 } from './columns';
 import { character_source_instances, characters } from './character';
+import { character_items } from './items';
 import { armor_templates } from './sheet';
-import { weapon_templates } from './weapons';
+import { character_weapons, weapon_templates } from './weapons';
 
 /**
  * ORIGINS: species and backgrounds, and the character's own EFFECTS. Eight
@@ -828,6 +831,19 @@ export const character_effects = sqliteTable(
      */
     source_instance_id: integer('source_instance_id').$type<SourceInstanceId>(),
     /**
+     * THE CHARACTER-OWNED ITEM OR WEAPON THAT GRANTS THIS EFFECT (AC-2b).
+     *
+     * Both are nullable because most effects come from a class, subclass,
+     * species, feat, background, or a manual entry. They are independent:
+     * Staff of the Armadillo is a weapon and may own an Armor Class bonus,
+     * while Cloak of the Armadillo is an item. The composite references carry
+     * `character_id` so an effect cannot name another character's equipment.
+     * ON DELETE CASCADE makes the equipment row the lifecycle owner.
+     */
+    character_item_id: integer('character_item_id').$type<CharacterItemId>(),
+    character_weapon_id: integer('character_weapon_id')
+      .$type<CharacterWeaponId>(),
+    /**
      * Stable identity of a generated template row. Hand-written effects leave
      * this NULL; command-side re-sync replaces only non-NULL rows.
      */
@@ -1006,12 +1022,26 @@ export const character_effects = sqliteTable(
       integerAtLeast('sort_order', 1),
     ),
     index('character_effects_character_id_index').on(table.character_id),
+    index('character_effects_character_item_id_index').on(
+      table.character_item_id,
+    ),
+    index('character_effects_character_weapon_id_index').on(
+      table.character_weapon_id,
+    ),
     foreignKey({
       columns: [table.source_instance_id, table.character_id],
       foreignColumns: [
         character_source_instances.id,
         character_source_instances.character_id,
       ],
+    }).onDelete('cascade'),
+    foreignKey({
+      columns: [table.character_item_id, table.character_id],
+      foreignColumns: [character_items.id, character_items.character_id],
+    }).onDelete('cascade'),
+    foreignKey({
+      columns: [table.character_weapon_id, table.character_id],
+      foreignColumns: [character_weapons.id, character_weapons.character_id],
     }).onDelete('cascade'),
   ],
 );

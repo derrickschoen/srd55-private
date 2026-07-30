@@ -28,6 +28,10 @@ import {
   weaponRangeFromStorage,
   type WeaponRange,
 } from '../domain/weapon-range';
+import {
+  readOwnedEffects,
+  replaceOwnedEffects,
+} from './equipment-effects';
 
 /**
  * WEAPON COMMANDS.
@@ -369,19 +373,22 @@ export class AddWeaponCommand implements ResolvesInverseAfterApply {
       bindings.unshift(restoredId);
     }
 
-    this.db.exec(
+    const inserted = this.db.exec(
       `INSERT INTO character_weapons (${columns.join(', ')})
        VALUES (${columns.map(() => '?').join(', ')})`,
       bindings,
     );
-    this.#weaponId =
-      restoredId ??
-      Number(
-        this.db.scalar<number>(
-          'SELECT max(id) FROM character_weapons WHERE character_id = ?',
-          [characterId],
-        ),
+    this.#weaponId = restoredId ?? inserted.lastInsertId;
+    if (this.payload.weapon.effects !== undefined) {
+      replaceOwnedEffects(
+        this.db,
+        characterId,
+        'character_weapon_id',
+        this.#weaponId,
+        null,
+        this.payload.weapon.effects,
       );
+    }
   }
 
   inverse(): RemoveWeaponPayload {
@@ -405,7 +412,15 @@ export class UpdateWeaponCommand implements ResolvesInverseAfterApply {
 
   apply(characterId: number): void {
     const existing = readWeapon(this.db, characterId, this.payload.weapon_id);
-    const previous = fieldsFromRow(existing);
+    const previous: WeaponFields = {
+      ...fieldsFromRow(existing),
+      effects: readOwnedEffects(
+        this.db,
+        characterId,
+        'character_weapon_id',
+        this.payload.weapon_id,
+      ),
+    };
     if (
       this.payload.weapon.range.kind === 'legacy' &&
       (previous.range.kind !== 'legacy' ||
@@ -453,6 +468,16 @@ export class UpdateWeaponCommand implements ResolvesInverseAfterApply {
         this.payload.weapon_id,
       ],
     );
+    if (this.payload.weapon.effects !== undefined) {
+      replaceOwnedEffects(
+        this.db,
+        characterId,
+        'character_weapon_id',
+        this.payload.weapon_id,
+        null,
+        this.payload.weapon.effects,
+      );
+    }
   }
 
   inverse(): UpdateWeaponPayload {
@@ -482,7 +507,15 @@ export class RemoveWeaponCommand implements ResolvesInverseAfterApply {
     const existing = readWeapon(this.db, characterId, this.payload.weapon_id);
     this.#removed = {
       type: 'add_weapon',
-      weapon: fieldsFromRow(existing),
+      weapon: {
+        ...fieldsFromRow(existing),
+        effects: readOwnedEffects(
+          this.db,
+          characterId,
+          'character_weapon_id',
+          this.payload.weapon_id,
+        ),
+      },
       weapon_id: Number(existing.id),
       mastery_selected: Number(existing.mastery_selected) === 1,
     };

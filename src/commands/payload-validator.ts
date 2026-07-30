@@ -5,6 +5,8 @@ import {
   armorCategories,
   armorDexBonuses,
   armorSlots,
+  characterEffectKinds,
+  extraAttackWeaponScopes,
   isEnumValue,
   selectionEligibilities,
   skills,
@@ -24,6 +26,10 @@ import {
   SHEET_TEXT_LIMITS,
 } from '../domain/sheet-limits';
 import { canonicalizeJson } from './canonical-json';
+import {
+  ORIGIN_EFFECT_MAGNITUDE_MAX,
+  ORIGIN_TEXT_LIMITS,
+} from '../domain/origin-limits';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -42,6 +48,9 @@ const commandTypes = [
   'update_weapon',
   'remove_weapon',
   'set_weapon_mastery',
+  'add_item',
+  'update_item',
+  'remove_item',
   'set_armor',
   'set_hit_point_roll',
   // `set_skill_proficiency` and `choose_multiclass_skill` are RETIRED
@@ -486,6 +495,7 @@ const weaponFieldKeys = [
   'mastery_property',
   'other_properties',
   'notes',
+  'effects',
 ] as const;
 
 function requiredBoolean(record: UnknownRecord, key: string): boolean {
@@ -694,6 +704,9 @@ function validateWeaponFields(value: unknown, allowLegacy = false): void {
     WEAPON_TEXT_LIMITS.other_properties,
   );
   nullableString(weapon, 'notes', WEAPON_TEXT_LIMITS.notes);
+  if (hasOwn(weapon, 'effects')) {
+    validateEquipmentEffects(weapon.effects);
+  }
 }
 
 function validateAddWeapon(record: UnknownRecord): void {
@@ -730,6 +743,200 @@ function validateSetWeaponMastery(record: UnknownRecord): void {
   rejectUnknown(record, ['type', 'weapon_id', 'selected', 'reason']);
   positiveInteger(record, 'weapon_id');
   requiredBoolean(record, 'selected');
+}
+
+const EFFECT_COMMON_KEYS = [
+  'effect_kind',
+  'label',
+  'notes',
+  'effect_id',
+  'sort_order',
+] as const;
+
+function validateEffectCommon(
+  effect: UnknownRecord,
+  fields: readonly string[],
+): void {
+  rejectUnknown(effect, [...EFFECT_COMMON_KEYS, ...fields], 'effect');
+  nonEmptyString(effect, 'label', ORIGIN_TEXT_LIMITS.trait_name);
+  nullableString(effect, 'notes', ORIGIN_TEXT_LIMITS.notes);
+  if (hasOwn(effect, 'effect_id')) {
+    positiveInteger(effect, 'effect_id');
+  }
+  if (hasOwn(effect, 'sort_order')) {
+    positiveInteger(effect, 'sort_order');
+  }
+}
+
+function signedEffectInteger(
+  effect: UnknownRecord,
+  key: string,
+  nullable = false,
+): void {
+  if (nullable && effect[key] === null) {
+    return;
+  }
+  boundedInteger(
+    effect,
+    key,
+    -ORIGIN_EFFECT_MAGNITUDE_MAX,
+    ORIGIN_EFFECT_MAGNITUDE_MAX,
+  );
+}
+
+function validateEquipmentEffect(value: unknown): void {
+  const effect = objectValue(value, 'Effect must be an object.');
+  if (
+    !hasOwn(effect, 'effect_kind') ||
+    !isEnumValue(characterEffectKinds, effect.effect_kind)
+  ) {
+    invalid('Effect kind is unsupported.');
+  }
+  switch (effect.effect_kind) {
+    case 'damage_resistance':
+      validateEffectCommon(effect, ['damage_type']);
+      nullableString(
+        effect,
+        'damage_type',
+        ORIGIN_TEXT_LIMITS.name,
+      );
+      return;
+    case 'hp_modifier':
+      validateEffectCommon(effect, [
+        'hit_points_flat',
+        'hit_points_per_level',
+      ]);
+      signedEffectInteger(effect, 'hit_points_flat', true);
+      signedEffectInteger(effect, 'hit_points_per_level', true);
+      if (
+        effect.hit_points_flat === null &&
+        effect.hit_points_per_level === null
+      ) {
+        invalid('An hp_modifier effect requires a hit point value.');
+      }
+      return;
+    case 'speed':
+      validateEffectCommon(effect, ['speed_bonus_feet']);
+      signedEffectInteger(effect, 'speed_bonus_feet');
+      return;
+    case 'ability_increase':
+      validateEffectCommon(effect, ['ability', 'amount', 'maximum']);
+      if (!isEnumValue(abilities, effect.ability)) {
+        invalid('Effect ability is unsupported.');
+      }
+      signedEffectInteger(effect, 'amount');
+      if (effect.amount === 0) {
+        invalid('Effect amount must not be zero.');
+      }
+      boundedInteger(effect, 'maximum', 1, 30);
+      return;
+    case 'armor_class_bonus':
+      validateEffectCommon(effect, ['amount']);
+      signedEffectInteger(effect, 'amount');
+      if (effect.amount === 0) {
+        invalid('Effect amount must not be zero.');
+      }
+      return;
+    case 'armor_class_formula':
+      validateEffectCommon(effect, [
+        'base',
+        'ability_1',
+        'ability_2',
+        'allows_shield',
+      ]);
+      boundedInteger(effect, 'base', 1, ORIGIN_EFFECT_MAGNITUDE_MAX);
+      if (!isEnumValue(abilities, effect.ability_1)) {
+        invalid('Effect ability_1 is unsupported.');
+      }
+      if (
+        effect.ability_2 !== null &&
+        !isEnumValue(abilities, effect.ability_2)
+      ) {
+        invalid('Effect ability_2 is unsupported.');
+      }
+      requiredBoolean(effect, 'allows_shield');
+      return;
+    case 'attack_ability_override':
+      validateEffectCommon(effect, ['ability', 'weapon_scope']);
+      if (!isEnumValue(abilities, effect.ability)) {
+        invalid('Effect ability is unsupported.');
+      }
+      if (!isEnumValue(extraAttackWeaponScopes, effect.weapon_scope)) {
+        invalid('Effect weapon_scope is unsupported.');
+      }
+      return;
+    case 'weapon_attack_bonus':
+    case 'weapon_damage_bonus':
+      validateEffectCommon(effect, ['amount', 'weapon_scope']);
+      signedEffectInteger(effect, 'amount');
+      if (effect.amount === 0) {
+        invalid('Effect amount must not be zero.');
+      }
+      if (!isEnumValue(extraAttackWeaponScopes, effect.weapon_scope)) {
+        invalid('Effect weapon_scope is unsupported.');
+      }
+      return;
+  }
+}
+
+function validateEquipmentEffects(value: unknown): void {
+  if (!Array.isArray(value)) {
+    invalid('effects must be a list.');
+  }
+  if (value.length > 200) {
+    invalid('effects must not contain more than 200 rows.');
+  }
+  for (const effect of value) {
+    validateEquipmentEffect(effect);
+  }
+}
+
+function validateItemFields(value: unknown): void {
+  const item = objectValue(value, 'Item must be an object.');
+  rejectUnknown(
+    item,
+    [
+      'name',
+      'description',
+      'requires_attunement',
+      'attuned',
+      'source_instance_id',
+      'effects',
+    ],
+    'item',
+  );
+  nonEmptyString(item, 'name', ORIGIN_TEXT_LIMITS.trait_name);
+  nullableString(item, 'description', ORIGIN_TEXT_LIMITS.description);
+  requiredBoolean(item, 'requires_attunement');
+  requiredBoolean(item, 'attuned');
+  if (!hasOwn(item, 'source_instance_id')) {
+    invalid('source_instance_id is required; use null when absent.');
+  }
+  if (item.source_instance_id !== null) {
+    positiveInteger(item, 'source_instance_id');
+  }
+  if (hasOwn(item, 'effects')) {
+    validateEquipmentEffects(item.effects);
+  }
+}
+
+function validateAddItem(record: UnknownRecord): void {
+  rejectUnknown(record, ['type', 'item', 'item_id', 'reason']);
+  validateItemFields(record.item);
+  if (hasOwn(record, 'item_id')) {
+    positiveInteger(record, 'item_id');
+  }
+}
+
+function validateUpdateItem(record: UnknownRecord): void {
+  rejectUnknown(record, ['type', 'item_id', 'item', 'reason']);
+  positiveInteger(record, 'item_id');
+  validateItemFields(record.item);
+}
+
+function validateRemoveItem(record: UnknownRecord): void {
+  rejectUnknown(record, ['type', 'item_id', 'reason']);
+  positiveInteger(record, 'item_id');
 }
 
 /** A nullable signed integer inside an inclusive range, present as a key. */
@@ -940,6 +1147,15 @@ function validateByType(
       return record;
     case 'set_weapon_mastery':
       validateSetWeaponMastery(record);
+      return record;
+    case 'add_item':
+      validateAddItem(record);
+      return record;
+    case 'update_item':
+      validateUpdateItem(record);
+      return record;
+    case 'remove_item':
+      validateRemoveItem(record);
       return record;
     case 'set_armor':
       validateSetArmor(record);

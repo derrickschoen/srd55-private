@@ -18,6 +18,7 @@ import type {
   WeaponDamage,
 } from './weapon-damage';
 import type { WeaponRange } from './weapon-range';
+import type { EquipmentEffectInput } from './equipment-effects';
 import type { CharacterSnapshot, JsonObject } from './models';
 
 interface CommandBase {
@@ -231,6 +232,11 @@ export interface WeaponFields {
   mastery_property: WeaponMasteryProperty | null;
   other_properties: string | null;
   notes: string | null;
+  /**
+   * Effects this weapon grants. Absent means an ordinary weapon edit leaves
+   * existing owned effects untouched; a present list replaces them.
+   */
+  effects?: readonly EquipmentEffectInput[];
 }
 
 export interface AddWeaponCommand extends CommandBase {
@@ -261,6 +267,37 @@ export interface SetWeaponMasteryCommand extends CommandBase {
   type: 'set_weapon_mastery';
   weapon_id: number;
   selected: boolean;
+}
+
+export interface ItemFields {
+  name: string;
+  description: string | null;
+  requires_attunement: boolean;
+  attuned: boolean;
+  source_instance_id: number | null;
+  /**
+   * Effects this item grants. Absent has the same preserve-on-update meaning
+   * as `WeaponFields.effects`; an empty list explicitly clears them.
+   */
+  effects?: readonly EquipmentEffectInput[];
+}
+
+export interface AddItemCommand extends CommandBase {
+  type: 'add_item';
+  item: ItemFields;
+  /** Present only on the inverse of `remove_item`. */
+  item_id?: number;
+}
+
+export interface UpdateItemCommand extends CommandBase {
+  type: 'update_item';
+  item_id: number;
+  item: ItemFields;
+}
+
+export interface RemoveItemCommand extends CommandBase {
+  type: 'remove_item';
+  item_id: number;
 }
 
 /**
@@ -355,6 +392,9 @@ export type CharacterCommandPayload =
   | UpdateWeaponCommand
   | RemoveWeaponCommand
   | SetWeaponMasteryCommand
+  | AddItemCommand
+  | UpdateItemCommand
+  | RemoveItemCommand
   | SetArmorCommand
   | SetHitPointRollCommand
   | FillSkillGrantCommand

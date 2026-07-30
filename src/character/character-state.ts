@@ -3,6 +3,7 @@ import type { DatabaseContext } from '../db/database';
 import type { SqlRow } from '../db/codecs';
 import {
   CHARACTER_STATE_TABLES,
+  CHARACTER_STATE_INSERT_ORDER,
   DELETE_ORDER,
   type AuditEntityType,
   type SnapshotTable,
@@ -358,7 +359,11 @@ export type _SnapshotColumnVersionsAreSubsets = [
  * could not give: it had no connection to the schema at all, and a second,
  * different list lived in `src/backup/`.
  */
-export { CHARACTER_STATE_TABLES, DELETE_ORDER as CHARACTER_STATE_DELETE_ORDER };
+export {
+  CHARACTER_STATE_TABLES,
+  CHARACTER_STATE_INSERT_ORDER,
+  DELETE_ORDER as CHARACTER_STATE_DELETE_ORDER,
+};
 
 export type CharacterStateTable = SnapshotTable;
 
@@ -651,7 +656,11 @@ export class CharacterState {
         );
       }
 
-      for (const table of tables) {
+      const insertable = new Set<CharacterStateTable>(tables);
+      for (const table of CHARACTER_STATE_INSERT_ORDER) {
+        if (!insertable.has(table)) {
+          continue;
+        }
         const tableRows =
           table === 'character_species_traits' && legacyTraits !== null
             ? legacyTraits.rows

@@ -38,6 +38,8 @@ const ADDED_NULLABLE_ROW_COLUMNS: Readonly<
     'allows_shield',
     'weapon_scope',
     'template_ref',
+    'character_item_id',
+    'character_weapon_id',
   ],
 };
 

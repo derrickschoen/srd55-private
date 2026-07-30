@@ -197,6 +197,8 @@ CREATE TABLE `character_effects` (
 	`allows_shield` TINYINT(1),
 	`weapon_scope` VARCHAR,
 	`source_instance_id` integer,
+	`character_item_id` integer,
+	`character_weapon_id` integer,
 	`template_ref` TEXT,
 	`label` VARCHAR NOT NULL,
 	`notes` TEXT,
@@ -204,6 +206,8 @@ CREATE TABLE `character_effects` (
 	`updated_at` DATETIME,
 	FOREIGN KEY (`character_id`) REFERENCES `characters`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`source_instance_id`,`character_id`) REFERENCES `character_source_instances`(`id`,`character_id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`character_item_id`,`character_id`) REFERENCES `character_items`(`id`,`character_id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`character_weapon_id`,`character_id`) REFERENCES `character_weapons`(`id`,`character_id`) ON UPDATE no action ON DELETE cascade,
 	CONSTRAINT "character_effects_kind_check" CHECK(`effect_kind` IN ('damage_resistance', 'hp_modifier', 'speed', 'ability_increase', 'armor_class_bonus', 'armor_class_formula', 'attack_ability_override', 'weapon_attack_bonus', 'weapon_damage_bonus')),
 	CONSTRAINT "character_effects_damage_type_kind_check" CHECK(damage_type IS NULL OR effect_kind IS 'damage_resistance'),
 	CONSTRAINT "character_effects_hit_points_kind_check" CHECK((hit_points_flat IS NULL AND hit_points_per_level IS NULL) OR effect_kind IS 'hp_modifier'),
@@ -236,6 +240,8 @@ CREATE TABLE `character_effects` (
 );
 
 CREATE INDEX `character_effects_character_id_index` ON `character_effects` (`character_id`);
+CREATE INDEX `character_effects_character_item_id_index` ON `character_effects` (`character_item_id`);
+CREATE INDEX `character_effects_character_weapon_id_index` ON `character_effects` (`character_weapon_id`);
 CREATE TABLE `character_hit_point_rolls` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`character_id` integer NOT NULL,
@@ -264,6 +270,7 @@ CREATE TABLE `character_items` (
 );
 
 CREATE INDEX `character_items_character_id_index` ON `character_items` (`character_id`);
+CREATE UNIQUE INDEX `character_items_id_character_id_unique` ON `character_items` (`id`,`character_id`);
 CREATE TABLE `character_operations` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`character_id` integer NOT NULL,
@@ -470,6 +477,7 @@ CREATE TABLE `character_weapons` (
 	CONSTRAINT "character_weapons_attack_kind_check" CHECK((`attack_kind` IS NULL OR `attack_kind` IN ('melee', 'ranged')))
 );
 
+CREATE UNIQUE INDEX `character_weapons_id_character_id_unique` ON `character_weapons` (`id`,`character_id`);
 CREATE INDEX `character_weapons_character_id_index` ON `character_weapons` (`character_id`);
 CREATE TABLE `characters` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,

@@ -51,6 +51,8 @@ import {
   type KnownDamageType,
   type Skill,
 } from '../domain/enums';
+import { GUIDED_SPECIES_SOURCE_MARKER } from '../domain/source-markers';
+export { GUIDED_SPECIES_SOURCE_MARKER } from '../domain/source-markers';
 import type { CharacterRow } from '../domain/models';
 import { GrantRuleSlotGenerator } from '../grants/grant-rule-slot-generator';
 import {
@@ -1166,7 +1168,6 @@ export function applyGuidedOrigin(
  * generator's own children use `notes` markers (`grant_rule:…`) the same way
  * and for the same reason.
  */
-const GUIDED_SPECIES_SOURCE_MARKER = 'guided:species-apply';
 
 /**
  * Deletes one source instance AND its subtree, children first — necessary

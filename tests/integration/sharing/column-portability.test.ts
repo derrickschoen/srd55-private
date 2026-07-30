@@ -776,10 +776,17 @@ const PROBES: { readonly [N in ProbedTable]: Probe<N> } = {
       ability_2: { kind: 'verbatim' },
       allows_shield: { kind: 'verbatim' },
       weapon_scope: { kind: 'verbatim' },
-      template_ref: {
-        kind: 'omitted',
-        why: 'AC-2a generated-row identity is intentionally absent from frozen wire v8; AC-2b mints the wire that can carry it, so this accepted internal window imports it as NULL.',
+      character_item_id: {
+        kind: 'translated',
+        key: '(SELECT name FROM character_items WHERE id = t.character_item_id)',
+        why: '`effects[].itemRef` is the zero-based index in the document item array. The recipient item has its own id.',
       },
+      character_weapon_id: {
+        kind: 'translated',
+        key: '(SELECT name FROM character_weapons WHERE id = t.character_weapon_id)',
+        why: '`effects[].weaponRef` is the zero-based index in the document weapon array. The recipient weapon has its own id.',
+      },
+      template_ref: { kind: 'verbatim' },
       source_instance_id: {
         kind: 'translated',
         key: '(SELECT display_name FROM character_source_instances WHERE id = t.source_instance_id)',
@@ -1163,7 +1170,7 @@ function seedSender(db: DatabaseContext, catalog: Catalog): number {
      VALUES (?, ?, 'sender-role', ?, ?)`,
     [loadoutId, catalog.chosenSpellId, SENDER_TIME, SENDER_TIME],
   );
-  db.exec(
+  const ownedWeaponId = db.exec(
     `INSERT INTO character_weapons (
        character_id, name,
        damage_kind, damage_dice, damage_flat, damage_custom, damage_type,
@@ -1184,7 +1191,7 @@ function seedSender(db: DatabaseContext, catalog: Catalog): number {
        'sender weapon note', 'martial', 'melee', ?, ?
      )`,
     [characterId, SENDER_TIME, SENDER_TIME],
-  );
+  ).lastInsertId;
   db.exec(
     `INSERT INTO character_weapons (
        character_id, name,
@@ -1328,6 +1335,13 @@ function seedSender(db: DatabaseContext, catalog: Catalog): number {
      ) VALUES (?, 5, 'sender adjustment note', ?, ?)`,
     [characterId, SENDER_TIME, SENDER_TIME],
   );
+  const ownedItemId = db.exec(
+    `INSERT INTO character_items (
+       character_id, name, description, requires_attunement, attuned,
+       source_instance_id, created_at, updated_at
+     ) VALUES (?, 'Sender Trinket', 'sender item description', 1, 1, ?, ?, ?)`,
+    [characterId, classSourceId, SENDER_TIME, SENDER_TIME],
+  ).lastInsertId;
   // Four effects, because the per-kind CHECK constraints refuse to let one row
   // carry a damage type, a hit point payload and a speed bonus at once. The
   // sort orders are 3, 6, 9 so the recipient's dense renumbering from 1 is
@@ -1335,11 +1349,11 @@ function seedSender(db: DatabaseContext, catalog: Catalog): number {
   db.exec(
     `INSERT INTO character_effects (
        character_id, sort_order, effect_kind, damage_type, source_instance_id,
-       template_ref, label, notes, created_at, updated_at
+       character_item_id, template_ref, label, notes, created_at, updated_at
      ) VALUES (?, 3, 'damage_resistance', 'Fire', ?,
-       'class_feature_effects:9001', 'Sender Resistance',
+       ?, 'class_feature_effects:9001', 'Sender Resistance',
        'sender effect note', ?, ?)`,
-    [characterId, classSourceId, SENDER_TIME, SENDER_TIME],
+    [characterId, classSourceId, ownedItemId, SENDER_TIME, SENDER_TIME],
   );
   db.exec(
     `INSERT INTO character_effects (
@@ -1383,22 +1397,12 @@ function seedSender(db: DatabaseContext, catalog: Catalog): number {
   db.exec(
     `INSERT INTO character_effects (
        character_id, sort_order, effect_kind, ability, weapon_scope,
-       label, notes, created_at, updated_at
+       character_weapon_id, label, notes, created_at, updated_at
      ) VALUES (
        ?, 18, 'attack_ability_override', 'charisma', 'one_bonded_weapon',
-       'Sender Pact', 'sender override note', ?, ?
+       ?, 'Sender Pact', 'sender override note', ?, ?
      )`,
-    [characterId, SENDER_TIME, SENDER_TIME],
-  );
-  // ONE ITEM (AC-1, D72), attuned and sourced, so both the `verbatim` booleans
-  // and the `translated` source reference are proved: default `false` for both
-  // flags would make the distinctive-value check above vacuous.
-  db.exec(
-    `INSERT INTO character_items (
-       character_id, name, description, requires_attunement, attuned,
-       source_instance_id, created_at, updated_at
-     ) VALUES (?, 'Sender Trinket', 'sender item description', 1, 1, ?, ?, ?)`,
-    [characterId, classSourceId, SENDER_TIME, SENDER_TIME],
+    [characterId, ownedWeaponId, SENDER_TIME, SENDER_TIME],
   );
   // A SAVE POINT. It is `backup: true, share: false`, so it plays no part in
   // the share probe above and would leave the backup comparison below with an

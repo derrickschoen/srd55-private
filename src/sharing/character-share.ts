@@ -70,6 +70,7 @@ import {
   weaponRangeFromStorage,
   type WeaponRange,
 } from '../domain/weapon-range';
+import { GUIDED_SPECIES_SOURCE_MARKER } from '../domain/source-markers';
 
 /**
  * WHAT THE SHARER CHOOSES TO SEND. Every flag is OPT-IN and every default is
@@ -505,6 +506,8 @@ interface ShareSourceOwner {
 function shareEffectFromRow(
   row: Row,
   owners: ReadonlyMap<number, ShareSourceOwner>,
+  itemRefs: ReadonlyMap<number, number>,
+  weaponRefs: ReadonlyMap<number, number>,
 ): ShareEffect {
   const effect: Record<string, unknown> = {
     kind: String(row.effect_kind),
@@ -545,6 +548,30 @@ function shareEffectFromRow(
   }
   if (row.weapon_scope !== null && row.weapon_scope !== undefined) {
     effect.weapon_scope = String(row.weapon_scope);
+  }
+  if (row.character_item_id !== null && row.character_item_id !== undefined) {
+    const itemRef = itemRefs.get(Number(row.character_item_id));
+    if (itemRef === undefined) {
+      throw new ShareValidationError(
+        `effect '${String(row.label)}' names an item this share cannot encode.`,
+      );
+    }
+    effect.itemRef = itemRef;
+  }
+  if (
+    row.character_weapon_id !== null &&
+    row.character_weapon_id !== undefined
+  ) {
+    const weaponRef = weaponRefs.get(Number(row.character_weapon_id));
+    if (weaponRef === undefined) {
+      throw new ShareValidationError(
+        `effect '${String(row.label)}' names a weapon this share cannot encode.`,
+      );
+    }
+    effect.weaponRef = weaponRef;
+  }
+  if (row.template_ref !== null && row.template_ref !== undefined) {
+    effect.template_ref = String(row.template_ref);
   }
   if (row.source_instance_id !== null && row.source_instance_id !== undefined) {
     const owner = owners.get(Number(row.source_instance_id));
@@ -762,6 +789,25 @@ export function exportCharacterShare(
     directOwners.set(Number(row.id), { ref: id, subclass: false });
     const type = String(row.source_type) as ShareSource['type'];
     const config = userConfig(db, row.config);
+    if (row.source_definition_id === null) {
+      if (
+        row.source_type !== 'species' ||
+        row.notes !== GUIDED_SPECIES_SOURCE_MARKER
+      ) {
+        throw new ShareValidationError(
+          `the ${type} source '${String(row.display_name)}' has no catalog ` +
+            'definition and is not a guided generated species source.',
+        );
+      }
+      return {
+        id,
+        type: 'species',
+        name: String(row.display_name),
+        ...(config === undefined ? {} : { config }),
+        acquired: Number(row.acquired_at_character_level),
+        generated: true,
+      };
+    }
     return {
       id,
       type,
@@ -923,11 +969,15 @@ export function exportCharacterShare(
   // Not behind an option flag. `acknowledgements` and `loadouts` are opt-in
   // because they are working state the recipient may not want; a weapon is part
   // of the build being shared, like the class levels and the spellbook.
-  const weapons = db.allRaw(
+  const weaponRows = db.allRaw(
     `SELECT * FROM ${SHARE_TABLES.character_weapons}
      WHERE character_id = ? ORDER BY id`,
     [characterId],
-  ).map(shareWeaponFromRow);
+  );
+  const weaponRefs = new Map(
+    weaponRows.map((row, index) => [Number(row.id), index]),
+  );
+  const weapons = weaponRows.map(shareWeaponFromRow);
   // Not behind an option flag either, and for the same reason: a character's
   // species and background are the build being shared, not working state.
   const speciesRow = db.oneRaw(
@@ -941,25 +991,28 @@ export function exportCharacterShare(
      WHERE character_id = ? ORDER BY sort_order, id`,
     [characterId],
   ).map(shareSpeciesTraitFromRow);
-  const effects = db.all(
-    `SELECT * FROM ${SHARE_TABLES.character_effects}
-     WHERE character_id = ?
-     ORDER BY sort_order, id`,
-    [characterId],
-    (row) => shareEffectFromRow(row, effectOwners),
-  );
   // THE CHARACTER'S OWN ITEMS (wire v8, AC-1, D72). Ordered by id: unlike
   // effects and species traits, an item has no `sort_order` of its own (the
   // plan's row shape does not name one — see `db/schema/items.ts`). Resolved
   // through the SAME tolerant `effectOwners` map effects use, for the
   // identical reason: an item is a thing the character still has, whatever
   // happened to what granted it.
-  const items = db.all(
+  const itemRows = db.allRaw(
     `SELECT * FROM ${SHARE_TABLES.character_items}
      WHERE character_id = ?
      ORDER BY id`,
     [characterId],
-    (row) => shareItemFromRow(row, effectOwners),
+  );
+  const itemRefs = new Map(
+    itemRows.map((row, index) => [Number(row.id), index]),
+  );
+  const items = itemRows.map((row) => shareItemFromRow(row, effectOwners));
+  const effects = db.all(
+    `SELECT * FROM ${SHARE_TABLES.character_effects}
+     WHERE character_id = ?
+     ORDER BY sort_order, id`,
+    [characterId],
+    (row) => shareEffectFromRow(row, effectOwners, itemRefs, weaponRefs),
   );
   const backgroundRow = db.oneRaw(
     `SELECT * FROM ${SHARE_TABLES.character_background} WHERE character_id = ?`,
@@ -1225,17 +1278,21 @@ export function assessImportCompatibility(
   // rather than one per duplicate occurrence.
   const sourceCounts = new Map<string, number>();
   for (const item of document.sources) {
-    const table = SOURCE_TABLES[item.type];
-    const row = lookup(db, table, item.key);
-    if (row === null) {
-      issues.push(missingSourceIssue(item.type, item.key));
+    if (item.generated === true) {
       continue;
     }
-    const seen = (sourceCounts.get(item.key) ?? 0) + 1;
-    sourceCounts.set(item.key, seen);
+    const table = SOURCE_TABLES[item.type];
+    const key = item.key as string;
+    const row = lookup(db, table, key);
+    if (row === null) {
+      issues.push(missingSourceIssue(item.type, key));
+      continue;
+    }
+    const seen = (sourceCounts.get(key) ?? 0) + 1;
+    sourceCounts.set(key, seen);
     if (seen === 2 && Number(row.repeatable) !== 1) {
       issues.push(
-        notRepeatableIssue(item.type, item.key, String(row.name)),
+        notRepeatableIssue(item.type, key, String(row.name)),
       );
     }
   }
@@ -1535,7 +1592,29 @@ export function importCharacterShare(
       (left, right) =>
         left.acquired - right.acquired || left.id - right.id,
     )) {
-      const sourceRow = definition(db, SOURCE_TABLES[item.type], item.key);
+      if (item.generated === true) {
+        const sourceId = db.exec(
+          `INSERT INTO ${SHARE_TABLES.character_source_instances} (
+             character_id, instance_uuid, source_type, source_definition_id,
+             display_name, config, acquired_at_character_level, state, notes,
+             created_at, updated_at
+           ) VALUES (?, ?, 'species', NULL, ?, ?, ?, 'active', ?, ?, ?)`,
+          [
+            characterId,
+            crypto.randomUUID(),
+            item.name ?? 'Generated species',
+            JSON.stringify(item.config ?? {}),
+            item.acquired,
+            GUIDED_SPECIES_SOURCE_MARKER,
+            now,
+            now,
+          ],
+        ).lastInsertId;
+        rootsByRef.set(item.id, [sourceId]);
+        continue;
+      }
+      const key = item.key as string;
+      const sourceRow = definition(db, SOURCE_TABLES[item.type], key);
       assertSourceRepeatable(
         db,
         characterId,
@@ -1760,8 +1839,9 @@ export function importCharacterShare(
     // character's weapon holds no template id — so the row is written as it
     // arrived, with the absent optional fields taking the column's own
     // NULL / 0 rather than a value this importer invented.
+    const weaponIds: number[] = [];
     for (const weapon of document.weapons ?? []) {
-      db.exec(
+      const inserted = db.exec(
         `INSERT INTO ${SHARE_TABLES.character_weapons} (
            character_id, name, proficiency_category,
            damage_kind, damage_dice, damage_flat, damage_custom,
@@ -1794,6 +1874,7 @@ export function importCharacterShare(
           now,
         ],
       );
+      weaponIds.push(inserted.lastInsertId);
     }
     // The origin resolves nothing against the recipient's catalog either — by
     // D1b these rows hold no template id — so each is written as it arrived.
@@ -1839,6 +1920,37 @@ export function importCharacterShare(
         ],
       );
     }
+    // ITEMS MUST PRECEDE EFFECTS. Wire references are local array indexes;
+    // this insertion map translates them to the recipient's database ids.
+    const itemIds: number[] = [];
+    for (const item of document.items ?? []) {
+      const roots =
+        item.sourceRef === undefined
+          ? undefined
+          : rootsByRef.get(item.sourceRef);
+      if (item.sourceRef !== undefined && roots === undefined) {
+        throw new ShareValidationError(
+          `item sourceRef ${item.sourceRef} is unavailable.`,
+        );
+      }
+      const inserted = db.exec(
+        `INSERT INTO ${SHARE_TABLES.character_items} (
+           character_id, name, description, requires_attunement, attuned,
+           source_instance_id, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          characterId,
+          item.name,
+          item.description ?? null,
+          item.requires_attunement ? 1 : 0,
+          item.attuned ? 1 : 0,
+          roots?.[0] ?? null,
+          now,
+          now,
+        ],
+      );
+      itemIds.push(inserted.lastInsertId);
+    }
     // THE CHARACTER'S OWN EFFECTS, FROM TWO SOURCES THAT CANNOT BOTH FIRE.
     //
     // A link written by this build carries `document.effects` and its trait
@@ -1869,6 +1981,9 @@ export function importCharacterShare(
       weapon_scope: string | null;
       notes: string | null;
       sourceId: number | null;
+      itemId: number | null;
+      weaponId: number | null;
+      templateRef: string | null;
     }[] = [];
     for (const effect of document.effects ?? []) {
       // `rootsByRef` is the same map `selections[].ref` resolves through. A
@@ -1916,6 +2031,15 @@ export function importCharacterShare(
         // refuses the document when the kind arrives without a `sourceRef`, so
         // the required-source CHECK below cannot fire on an imported row.
         sourceId: roots?.[rootIndex] ?? null,
+        itemId:
+          effect.itemRef === undefined
+            ? null
+            : (itemIds[effect.itemRef] as number),
+        weaponId:
+          effect.weaponRef === undefined
+            ? null
+            : (weaponIds[effect.weaponRef] as number),
+        templateRef: effect.template_ref ?? null,
       });
     }
     for (const trait of document.speciesTraits ?? []) {
@@ -1945,6 +2069,9 @@ export function importCharacterShare(
         // A legacy link predates the provenance column entirely, so there is
         // nothing to resolve and nothing is invented.
         sourceId: null,
+        itemId: null,
+        weaponId: null,
+        templateRef: null,
       });
     }
     for (const [index, effect] of importedEffects.entries()) {
@@ -1954,8 +2081,9 @@ export function importCharacterShare(
            hit_points_flat, hit_points_per_level, speed_bonus_feet,
            ability, amount, maximum,
            base, ability_1, ability_2, allows_shield, weapon_scope,
-           source_instance_id, label, notes, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           source_instance_id, character_item_id, character_weapon_id,
+           template_ref, label, notes, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           characterId,
           index + 1,
@@ -1973,41 +2101,11 @@ export function importCharacterShare(
           effect.allows_shield === null ? null : (effect.allows_shield ? 1 : 0),
           effect.weapon_scope,
           effect.sourceId,
+          effect.itemId,
+          effect.weaponId,
+          effect.templateRef,
           effect.label,
           effect.notes,
-          now,
-          now,
-        ],
-      );
-    }
-    // THE CHARACTER'S OWN ITEMS (wire v8, AC-1, D72). `sourceRef` resolves
-    // through the SAME `rootsByRef` map effects use, on the identical terms —
-    // EXCEPT there is no `sourceSubclass` flag: the plan's row shape carries
-    // one reference column, not two, so an item can only ever name a ref's
-    // FIRST root. No kind here requires a source, so an unresolvable ref
-    // simply imports with no provenance rather than refusing the document.
-    for (const item of document.items ?? []) {
-      const roots =
-        item.sourceRef === undefined
-          ? undefined
-          : rootsByRef.get(item.sourceRef);
-      if (item.sourceRef !== undefined && roots === undefined) {
-        throw new ShareValidationError(
-          `item sourceRef ${item.sourceRef} is unavailable.`,
-        );
-      }
-      db.exec(
-        `INSERT INTO ${SHARE_TABLES.character_items} (
-           character_id, name, description, requires_attunement, attuned,
-           source_instance_id, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          characterId,
-          item.name,
-          item.description ?? null,
-          item.requires_attunement ? 1 : 0,
-          item.attuned ? 1 : 0,
-          roots?.[0] ?? null,
           now,
           now,
         ],

@@ -194,10 +194,11 @@ export interface ShareClass {
 export interface ShareSource {
   readonly id: number;
   readonly type: 'feat' | 'species' | 'background';
-  readonly key: string;
+  readonly key?: string;
   readonly name?: string;
   readonly config?: Readonly<Record<string, unknown>>;
   readonly acquired: number;
+  readonly generated?: true;
 }
 
 export interface ShareSelection {
@@ -513,6 +514,13 @@ export interface ShareEffect {
   readonly ability_2?: string;
   readonly allows_shield?: boolean;
   readonly weapon_scope?: string;
+  /**
+   * Wire-v9 ownership and generated-row identity. Equipment references are
+   * zero-based indexes into this document's own arrays, never database ids.
+   */
+  readonly itemRef?: number;
+  readonly weaponRef?: number;
+  readonly template_ref?: string;
 }
 
 /**
@@ -1423,6 +1431,8 @@ function shareEffect(
   label: string,
   knownSourceIds: ReadonlySet<number>,
   subclassRefs: ReadonlySet<number>,
+  itemCount: number,
+  weaponCount: number,
 ): ShareEffect {
   const row = record(value, label);
   exactKeys(
@@ -1441,6 +1451,9 @@ function shareEffect(
       'ability_2',
       'allows_shield',
       'weapon_scope',
+      'itemRef',
+      'weaponRef',
+      'template_ref',
     ],
     label,
   );
@@ -1511,6 +1524,29 @@ function shareEffect(
       );
     }
     effect.sourceSubclass = true;
+  }
+  if (row.itemRef !== undefined) {
+    effect.itemRef = integer(
+      row.itemRef,
+      `${label}.itemRef`,
+      0,
+      itemCount - 1,
+    );
+  }
+  if (row.weaponRef !== undefined) {
+    effect.weaponRef = integer(
+      row.weaponRef,
+      `${label}.weaponRef`,
+      0,
+      weaponCount - 1,
+    );
+  }
+  if (row.template_ref !== undefined) {
+    effect.template_ref = text(
+      row.template_ref,
+      `${label}.template_ref`,
+      240,
+    );
   }
   if (effect.damage_type !== undefined && kind !== 'damage_resistance') {
     throw new ShareValidationError(
@@ -2035,8 +2071,8 @@ export function validateShareDocument(
     const row = record(item, `sources[${index}]`);
     exactKeys(
       row,
-      ['id', 'type', 'key', 'acquired'],
-      ['name', 'config'],
+      ['id', 'type', 'acquired'],
+      ['key', 'name', 'config', 'generated'],
       `sources[${index}]`,
     );
     const type = text(row.type, `sources[${index}].type`, 20);
@@ -2045,10 +2081,32 @@ export function validateShareDocument(
         `sources[${index}].type is unsupported.`,
       );
     }
+    if (row.generated !== undefined && row.generated !== true) {
+      throw new ShareValidationError(
+        `sources[${index}].generated must be true when present.`,
+      );
+    }
+    if (row.generated === true) {
+      if (
+        type !== 'species' ||
+        row.key !== undefined ||
+        row.name === undefined
+      ) {
+        throw new ShareValidationError(
+          `sources[${index}] generated sources must be named species without a key.`,
+        );
+      }
+    } else if (row.key === undefined) {
+      throw new ShareValidationError(
+        `sources[${index}].key is required unless generated is true.`,
+      );
+    }
     return {
       id: integer(row.id, `sources[${index}].id`, 0, 119),
       type: type as ShareSource['type'],
-      key: text(row.key, `sources[${index}].key`, 200),
+      ...(row.key === undefined
+        ? {}
+        : { key: text(row.key, `sources[${index}].key`, 200) }),
       ...(row.name === undefined
         ? {}
         : { name: text(row.name, `sources[${index}].name`, 120) }),
@@ -2061,6 +2119,7 @@ export function validateShareDocument(
       ...(row.config === undefined
         ? {}
         : { config: config(row.config, `sources[${index}].config`) }),
+      ...(row.generated === true ? { generated: true as const } : {}),
     };
   });
 
@@ -2343,18 +2402,6 @@ export function validateShareDocument(
       ? undefined
       : shareBackground(source.background, 'background');
 
-  let effects: CharacterShareDocument['effects'] | undefined;
-  if (source.effects !== undefined) {
-    effects = list(source.effects, 'effects', SHARE_LIMITS.effects).map(
-      (item, index) =>
-        shareEffect(item, `effects[${index}]`, knownIds, subclassRefs),
-    );
-    // NOT `assertUnique`, for the reason `speciesTraits` gives one line up and
-    // one more besides: a character may legitimately carry two identical
-    // effects — two feats each granting Fire resistance is a real build — and
-    // the schema's index on `(character_id)` is deliberately not unique.
-  }
-
   // THE CHARACTER'S OWN ITEMS (wire v8, AC-1, D72). NOT `assertUnique`, for
   // the identical reason `effects` just above gives: two identical Rings of
   // Shell is a real build, and the schema's index on `(character_id)` is
@@ -2364,6 +2411,25 @@ export function validateShareDocument(
     items = list(source.items, 'items', SHARE_LIMITS.items).map(
       (item, index) => shareItem(item, `items[${index}]`, knownIds),
     );
+  }
+
+  let effects: CharacterShareDocument['effects'] | undefined;
+  if (source.effects !== undefined) {
+    effects = list(source.effects, 'effects', SHARE_LIMITS.effects).map(
+      (item, index) =>
+        shareEffect(
+          item,
+          `effects[${index}]`,
+          knownIds,
+          subclassRefs,
+          items?.length ?? 0,
+          weapons?.length ?? 0,
+        ),
+    );
+    // NOT `assertUnique`, for the reason `speciesTraits` gives one line up and
+    // one more besides: a character may legitimately carry two identical
+    // effects — two feats each granting Fire resistance is a real build — and
+    // the schema's index on `(character_id)` is deliberately not unique.
   }
 
   let armor: CharacterShareDocument['armor'] | undefined;
