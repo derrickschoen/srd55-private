@@ -1,5 +1,149 @@
 # Binding scope decisions
 
+## D95 — OWNER: warnings are PERMANENT — no acknowledgment state (2026-07-30)
+
+The owner's answer: **"Permanent — no acknowledgment."** Sheet warnings
+(armor_not_trained, non-proficiency, D70 incomplete-choice, and their kin)
+stay at full size for as long as their condition holds, on screen and in
+print (D89). No acknowledged state, no collapsed group, no dismissal — zero
+warning-state storage exists. A warning leaves the sheet exactly one way:
+the condition it names stops being true.
+
+## D94 — OWNER: undo-last-level-up is stored in the DB, and ONLY the DB — never exports (2026-07-30)
+
+The owner's ruling, verbatim: *"Store the undo last level up in the db, but
+only in the db, not the exports."*
+
+What this binds:
+
+- The wizard's mistake-correction is UNDO LAST LEVEL-UP, and its inverse is
+  PERSISTED — undo survives reload, repeatable back level by level while
+  inverses remain.
+- The undo stack is LOCAL-ONLY: share links and portable JSON backups do
+  NOT carry it. An imported character arrives with no undo history — its
+  levels are facts, not reversible operations. Wire schemas never gain an
+  inverse-stack element.
+- The nuance recorded so nobody relitigates it: a raw database image copy
+  is the DB itself and necessarily contains the stack; "exports" means the
+  character-level documents (share wire, portable backup). Their omission
+  is BY DESIGN, not a gap for an audit to flag — the candidate audit must
+  accept an image whose undo stack is absent, present, or partial.
+
+## D93 — OWNER: the armadillo homebrews are TESTS ONLY (2026-07-30)
+
+The owner's answer: **"Tests only."** The D79 fixtures (Armadillo Paladin,
+armadillo species, Cloak of the Armadillo, Ring of Shell, Shell Shield, the
+weapon set) stay inside the test suite. The shipped app carries SRD content
+plus what the user makes — no bundled demo pack, no example-content toggle.
+Nothing currently ships them, so this binds future dispatches rather than
+changing code.
+
+## D92 — OWNER: attunement is THREE SCHEMA-ENFORCED SLOTS with a replace modal (2026-07-30)
+
+The owner's ruling, verbatim: *"Pop up a modal when trying to attune a 4th
+item so the user can choose which to replace. Have attunement slots 1-3 as
+columns in a db table to make it impossible to add a 4th."*
+
+What this binds:
+
+- Attunement becomes SLOT-BASED: exactly three slots, and the schema makes
+  a fourth attunement UNREPRESENTABLE — the wrong program fails to compile
+  / the wrong row fails its constraint, per this project's founding rule.
+  The owner's sketch is three columns on a per-character table; if the
+  implementing plan prefers the equivalent one-column form
+  (`attunement_slot` 1..3 with UNIQUE(character_id, slot) — same
+  impossibility, friendlier joins to `character_effects`), that is a
+  question to put BACK to the owner, not a silent substitution.
+  **PUT BACK AND ANSWERED, same day: the owner chose the three-column form
+  as sketched.** `slot_1_item_id` / `slot_2_item_id` / `slot_3_item_id` on
+  a character-side table, each a composite cross-character-guarded
+  reference to `character_items`; empty slot = NULL column. The one-column
+  alternative is REJECTED. The gate and the replace modal join through
+  this table.
+- The attune action on a character with all three slots full opens a
+  REPLACE MODAL listing the three attuned items; the person picks which
+  one the new item replaces (or cancels). No fourth state exists to warn
+  about.
+- `character_items.attuned` (boolean, shipped in AC-1) INVERTS into slot
+  membership — a migration of a days-old model, which pre-alpha welcomes.
+  The attunement gate (eligible-effects predicate) reads slot membership
+  instead of the boolean; the AC-ATTUNEMENT control's four states carry
+  over with "attuned" redefined as "holds a slot".
+- Cap-raising (Artificer, house rules) is explicitly OUT until the owner
+  asks; three is structural for v1.
+
+## D91 — OWNER: the sheet prints resource maxima with empty tick-boxes (2026-07-30)
+
+The owner's answer: **"Yes — maxima printed, boxes empty."** The sheet
+computes each class resource's maximum from the seeded class tables (Rage
+uses, Focus Points, Channel Divinity, and the — multiclass where
+applicable — spell slot table) and prints it with unchecked boxes; spending
+is pencil work per D88. Maxima are numbers under D33: computed from sourced
+tables or absent-and-stated, never recited. Slots for a multiclass caster
+use the multiclass slot rule the app is named for.
+
+## D90 — OWNER: Expertise is modelled, for every class that grants it, chosen AFTER all skills (2026-07-30)
+
+The owner's ruling, verbatim: *"Model it, we need accurate rogue and bard
+and ranger (needs to be chosen after all skills are chosen from species,
+class, background because expertise goes on existing proficiency) skill
+bonus numbers."*
+
+What this binds:
+
+- Expertise (doubled proficiency bonus on chosen skills) is modelled; the
+  `no_expertise` disclosure is deleted when it lands, not reworded.
+- It covers EVERY class the SRD grants it to — the owner named Rogue, Bard
+  and Ranger; the implementing plan reads the granting features, levels and
+  pick counts from `docs/srd/full/srd-5.2.1.txt` (committed) and slices
+  them into `docs/srd/source/` per SOURCE.md — never from anyone's memory
+  (F4), mine included.
+- **ORDERING IS PINNED BY THE OWNER**: the Expertise choice is offered only
+  after ALL skill proficiencies are settled — species, class, background —
+  because Expertise attaches to an existing proficiency. In guided creation
+  that places the step after every proficiency source; in the level-up
+  wizard, a level that grants Expertise offers it against the
+  proficiencies the character already has. An Expertise pick whose
+  underlying proficiency is later removed follows the skills unit's
+  existing tombstone/warning discipline rather than silently floating.
+
+## D89 — OWNER: the v1 printout is a print stylesheet over the sheet route (2026-07-30)
+
+The owner's answer: **"Print stylesheet over the sheet route."** One column,
+interactive chrome suppressed, the D88 empty current-HP box added in print;
+browser print-to-PDF is the export. The classic two-page form layout is NOT
+v1. Since AC-B the provenance disclosures are inline, so the printed page
+keeps them; anything hover-only (the future D67 reveal surface) must keep a
+printable fallback or state its absence.
+
+## D88 — OWNER: play-state stays on paper — v1 tracks no current HP (2026-07-30)
+
+The owner's answer: **"Paper — builder stays a builder."** The sheet prints
+maximum HP (D77 fixed method) and an EMPTY current-HP box for the table to
+fill by hand. No current-HP, temp-HP or death-save storage in v1; nothing
+mid-session can desync from the table's reality because the app never
+claims it. Consistent with D26 (adjudication belongs to the table) and D33
+(one less number that can be wrong).
+
+## D87 — OWNER: spells are IN v1's bar — the guided flows carry spell screens (2026-07-30)
+
+The owner's answer: **"In the wizard flows — casters need it."** What this
+binds:
+
+- Guided CREATION gains spell screens where the class grants choices at
+  level 1 (cantrips, known/prepared) — a D54-persona Wizard finishes
+  creation playable, without discovering the planner.
+- The LEVEL-UP wizard gains the new-level spell picks (new known spells,
+  swaps where the class allows them) — the drafted plan's
+  "scope spells out unless trivially derivable" clause is OVERRIDDEN; the
+  plan must scope them in, honestly sized, and if that makes the wizard
+  unit two units the plan says so rather than thinning the screens.
+- The machinery is the EXISTING spell_selection_slots + grant rules — the
+  screens drive what the planner already writes (D71's one-command-layer
+  rule); no second spell model.
+- D54's bar is AMENDED: "read a sheet whose numbers are right" now includes
+  a caster's spell section reflecting choices made inside the guided flows.
+
 ## D86 — OWNER: character_items holds plain possessions, WITH a quantity (2026-07-30)
 
 The owner's answer to the inventory question: **"Possessions plus a quantity
