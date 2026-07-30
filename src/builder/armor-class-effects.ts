@@ -94,7 +94,7 @@ export const ARMOR_CLASS_EFFECT_WIDENED_COLUMNS = ['ability', 'amount'] as const
  * one to reconstruct from the migration.
  *
  * NO `sort_order`: unlike `character_effects` and `character_species_traits`,
- * D92's inverted row shape names exactly four fields beyond identity and
+ * D86's row shape names exactly five fields beyond identity and
  * timestamps and does not ask for a display order.
  *
  * NO `ac_change`, `to_hit_change` or `flat_damage_bonus` column — D72 rejected
@@ -106,6 +106,7 @@ export interface CharacterItemRow {
   readonly character_id: number;
   readonly name: string;
   readonly description: string | null;
+  readonly quantity: number;
   readonly requires_attunement: boolean;
   readonly source_instance_id: number | null;
   readonly created_at: string | null;
@@ -118,6 +119,7 @@ export const CHARACTER_ITEM_COLUMNS = [
   'character_id',
   'name',
   'description',
+  'quantity',
   'requires_attunement',
   'source_instance_id',
   'created_at',

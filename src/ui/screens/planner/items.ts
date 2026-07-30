@@ -10,6 +10,7 @@ export interface AttunementReplacement {
 }
 
 export interface PlannerItemActions {
+  updateQuantity(itemId: number, quantity: number): void;
   attune(itemId: number): void;
   unattune(itemId: number): void;
   replace(itemId: number, replacedItemId: number): void;
@@ -88,16 +89,16 @@ export function renderItems(options: ItemsPanelOptions): HTMLElement {
 
   if (options.panel.items.length === 0) {
     const empty = document.createElement('p');
-    empty.textContent = 'No items with mechanical effects are recorded.';
+    empty.textContent = 'No possessions are recorded.';
     section.append(empty);
   } else {
     const table = document.createElement('table');
     table.className = 'item-table';
     const caption = document.createElement('caption');
-    caption.textContent = 'Items with mechanical effects';
+    caption.textContent = 'Possessions';
     const head = document.createElement('thead');
     const headRow = document.createElement('tr');
-    for (const label of ['Item', 'Attunement', 'Action']) {
+    for (const label of ['Item', 'Quantity', 'Attunement', 'Action']) {
       const cell = document.createElement('th');
       cell.scope = 'col';
       cell.textContent = label;
@@ -111,6 +112,23 @@ export function renderItems(options: ItemsPanelOptions): HTMLElement {
       const name = document.createElement('th');
       name.scope = 'row';
       name.append(freeTextSpan(item.name));
+      const quantity = document.createElement('td');
+      const quantityInput = document.createElement('input');
+      quantityInput.type = 'number';
+      quantityInput.min = '1';
+      quantityInput.step = '1';
+      quantityInput.value = String(item.quantity);
+      quantityInput.disabled = options.disabled;
+      quantityInput.setAttribute('aria-label', `Quantity for ${item.name}`);
+      quantityInput.addEventListener('change', () => {
+        const next = Number(quantityInput.value);
+        if (Number.isSafeInteger(next) && next >= 1 && next !== item.quantity) {
+          options.actions.updateQuantity(item.id, next);
+        } else {
+          quantityInput.value = String(item.quantity);
+        }
+      });
+      quantity.append(quantityInput);
       const state = document.createElement('td');
       state.textContent =
         item.attunement_slot === null
@@ -140,7 +158,7 @@ export function renderItems(options: ItemsPanelOptions): HTMLElement {
         button.addEventListener('click', () => options.actions.attune(item.id));
         action.append(button);
       }
-      row.append(name, state, action);
+      row.append(name, quantity, state, action);
       body.append(row);
     }
     table.append(caption, head, body);

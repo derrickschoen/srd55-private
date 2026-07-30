@@ -18,6 +18,7 @@ import featureEffectProduction from '../../drizzle/0014_feature_effect_productio
 import effectEquipmentOwnership from '../../drizzle/0015_effect_equipment_ownership.sql?raw';
 import retireArmorClassAdjustment from '../../drizzle/0016_retire_armor_class_adjustment.sql?raw';
 import attunementSlots from '../../drizzle/0017_attunement_slots.sql?raw';
+import characterItemsQuantity from '../../drizzle/0018_character_items_quantity.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -205,6 +206,17 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
       'c117e918be830185018ca14deb7b5587e65fd881c200a73e4f32333e44632514',
     resultSchemaChecksum:
       '7e9e69b3b95cffc9013db1b309fae0d033e8bdac806bce781232e0823560bb70',
+  }),
+  // D86: one item row can now represent multiple identical possessions.
+  // Rebuild the table so the positive-integer CHECK is part of the final DDL;
+  // historical rows copy with the only quantity they could have meant: one.
+  Object.freeze({
+    id: '0018_character_items_quantity',
+    sql: characterItemsQuantity,
+    checksum:
+      '420715637dfc3dc8d567fb62c742b33efef3771a2da4c2e2e6c559bbbd8fafd3',
+    resultSchemaChecksum:
+      'b1638cdde8aa3e968354dcbf29c637f4dd45c0a5179e768e2480c54a1ee7d8f5',
   }),
 ]);
 

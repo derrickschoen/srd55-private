@@ -50,6 +50,7 @@ describe('item commands and effect ownership', () => {
       item: {
         name: 'Cloak of the Armadillo',
         description: 'A layered shell cloak.',
+        quantity: 3,
         requires_attunement: true,
         source_instance_id: null,
         effects: [{
@@ -66,6 +67,7 @@ describe('item commands and effect ownership', () => {
     );
     expect(item).toMatchObject({
       name: 'Cloak of the Armadillo',
+      quantity: 3,
       requires_attunement: 1,
     });
     const itemId = Number(item?.id);
@@ -89,6 +91,7 @@ describe('item commands and effect ownership', () => {
       item: {
         name: 'Cloak of the Armadillo',
         description: 'Fastened and attuned.',
+        quantity: 7,
         requires_attunement: true,
         source_instance_id: null,
         effects: [{
@@ -106,8 +109,15 @@ describe('item commands and effect ownership', () => {
         [itemId],
       ),
     ).toEqual({ effect_kind: 'hp_modifier', hit_points_flat: 5 });
+    expect(updated.inverse).toMatchObject({
+      type: 'update_item',
+      item: { quantity: 3 },
+    });
 
     await run(updated.inverse);
+    expect(
+      db.scalar('SELECT quantity FROM character_items WHERE id = ?', [itemId]),
+    ).toBe(3);
     expect(
       db.oneRaw(
         'SELECT id, effect_kind, amount FROM character_effects WHERE character_item_id = ?',
@@ -125,8 +135,15 @@ describe('item commands and effect ownership', () => {
 
     await run(removed.inverse);
     expect(
-      db.oneRaw('SELECT id, name FROM character_items WHERE id = ?', [itemId]),
-    ).toEqual({ id: itemId, name: 'Cloak of the Armadillo' });
+      db.oneRaw(
+        'SELECT id, name, quantity FROM character_items WHERE id = ?',
+        [itemId],
+      ),
+    ).toEqual({
+      id: itemId,
+      name: 'Cloak of the Armadillo',
+      quantity: 3,
+    });
     expect(
       db.oneRaw(
         'SELECT id, character_item_id, template_ref FROM character_effects WHERE character_item_id = ?',
@@ -137,6 +154,28 @@ describe('item commands and effect ownership', () => {
       character_item_id: itemId,
       template_ref: null,
     });
+  });
+
+  it('accepts a plain possession with zero effect rows', async () => {
+    await run({
+      type: 'add_item',
+      item: {
+        name: 'Hempen rope',
+        description: null,
+        quantity: 2,
+        requires_attunement: false,
+        source_instance_id: null,
+        effects: [],
+      },
+    });
+
+    expect(
+      db.oneRaw(
+        'SELECT name, quantity FROM character_items WHERE character_id = ?',
+        [characterId],
+      ),
+    ).toEqual({ name: 'Hempen rope', quantity: 2 });
+    expect(db.scalar('SELECT count(*) FROM character_effects')).toBe(0);
   });
 
   it('hard-deleting a source cascades through its item into the item effects', () => {
@@ -183,6 +222,7 @@ describe('item commands and effect ownership', () => {
         item: {
           name,
           description: null,
+          quantity: 1,
           requires_attunement: true,
           source_instance_id: null,
         },
@@ -236,6 +276,7 @@ describe('item commands and effect ownership', () => {
         item: {
           name,
           description: null,
+          quantity: 1,
           requires_attunement: true,
           source_instance_id: null,
         },
@@ -296,6 +337,7 @@ describe('item commands and effect ownership', () => {
       item: {
         name: 'Restorable Ring',
         description: null,
+        quantity: 3,
         requires_attunement: true,
         source_instance_id: null,
       },
@@ -305,6 +347,22 @@ describe('item commands and effect ownership', () => {
     }
     const itemId = added.inverse.item_id;
     await run({ type: 'attune_item', item_id: itemId });
+    expect(
+      db.oneRaw(
+        `SELECT item.quantity, slots.slot_1_item_id,
+                slots.slot_2_item_id, slots.slot_3_item_id
+         FROM character_items AS item
+         JOIN character_attunement_slots AS slots
+           ON slots.character_id = item.character_id
+         WHERE item.id = ?`,
+        [itemId],
+      ),
+    ).toEqual({
+      quantity: 3,
+      slot_1_item_id: itemId,
+      slot_2_item_id: null,
+      slot_3_item_id: null,
+    });
     const removed = await run({ type: 'remove_item', item_id: itemId });
 
     expect(

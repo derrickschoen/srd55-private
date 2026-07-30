@@ -179,6 +179,7 @@ export const COLUMN_FACTS = {
     character_id: { base: 'integer', notNull: true },
     name: { base: 'degraded', notNull: true },
     description: { base: 'degraded', notNull: false },
+    quantity: { base: 'integer', notNull: true },
     requires_attunement: { base: 'degraded', notNull: true },
     source_instance_id: { base: 'integer', notNull: false },
     created_at: { base: 'degraded', notNull: false },

@@ -372,6 +372,16 @@ const skillGrant =
     });
   };
 
+const characterItem =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'character_items', {
+      character_id: newCharacter(db),
+      name: uid('Item'),
+      ...values,
+    });
+  };
+
 const attunementSlotRow =
   (positions: readonly (number | null)[]): Write =>
   (db) => {
@@ -2979,6 +2989,17 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     accepts: [
       ['the 2024 default the seeder binds', armorTemplate({})],
       ['2014', armorTemplate({ rules_edition: '2014' })],
+    ],
+  },
+  {
+    constraint: 'character_items_quantity_check',
+    rejects: [
+      ['a zero quantity', characterItem({ quantity: 0 })],
+      ['a negative quantity', characterItem({ quantity: -1 })],
+    ],
+    accepts: [
+      ['the default single possession', characterItem({})],
+      ['three identical possessions in one row', characterItem({ quantity: 3 })],
     ],
   },
   {

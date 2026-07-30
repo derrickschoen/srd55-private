@@ -13,8 +13,13 @@ async function plannerFixture() {
   const sqlite3 = await sqlite3InitModule();
   const connection = new sqlite3.oo1.DB(':memory:', 'c');
   connection.exec(schema);
-  const fixture = createBuildReportFixture(
-    new DatabaseContext(connection),
+  const db = new DatabaseContext(connection);
+  const fixture = createBuildReportFixture(db);
+  db.exec(
+    `INSERT INTO character_items (
+       character_id, name, quantity, requires_attunement
+     ) VALUES (?, 'Healing Potion', 2, 0)`,
+    [fixture.characterId],
   );
   const bytes = Array.from(
     sqlite3.capi.sqlite3_js_db_export(connection),
@@ -408,6 +413,26 @@ test('planner parity flows persist override, clear, selection, acknowledgement, 
     ]);
   await expect(page.getByText('Level 8 · revision 4')).toBeVisible();
   await expect(page.locator('#planner-status')).toHaveText('Autosaved');
+
+  const itemQuantity = page.getByLabel('Quantity for Healing Potion');
+  await expect(itemQuantity).toHaveValue('2');
+  await itemQuantity.fill('5');
+  await itemQuantity.press('Tab');
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        window.staticApp.inspectRows('character_items', {
+          character_id: 1,
+        }),
+      ),
+    )
+    .toEqual([
+      expect.objectContaining({
+        name: 'Healing Potion',
+        quantity: 5,
+      }),
+    ]);
+  await expect(page.getByText('Level 8 · revision 5')).toBeVisible();
 
   await page.getByLabel('Source to add').selectOption({
     label: 'Magic Initiate',

@@ -23,6 +23,7 @@ import {
   jsonColumnLocation,
 } from '../domain/contracts/json-columns';
 import {
+  CHARACTER_SNAPSHOT_SCHEMA_VERSION,
   snapshotCharacterColumnsFor,
   snapshotSchemaVersion,
   snapshotTablesFor,
@@ -32,7 +33,7 @@ import { domainSourceTypes } from '../domain/enums';
 import { splitLegacyTraitEffect } from '../rules/legacy-trait-effects';
 import { migrateLegacyWeaponDamageRow } from '../domain/weapon-damage';
 import { migrateLegacyWeaponRangeRow } from '../domain/weapon-range';
-import { fillAddedNullableRowColumns } from '../domain/contracts/historical-row-columns';
+import { fillHistoricalRowColumns } from '../domain/contracts/historical-row-columns';
 import {
   legacyArmorClassAdjustmentError,
   splitLegacyArmorClassAdjustment,
@@ -693,8 +694,16 @@ function auditSavePointSnapshots(db: Database): void {
         const retired =
           table === 'character_sheet_adjustments'
             ? splitLegacyArmorClassAdjustment(migrated)?.row ?? migrated
+            : table === 'character_items' && Object.hasOwn(migrated, 'attuned')
+              ? Object.fromEntries(
+                  Object.entries(migrated).filter(([key]) => key !== 'attuned'),
+                )
             : migrated;
-        const reconciled = fillAddedNullableRowColumns(table, retired);
+        const reconciled = fillHistoricalRowColumns(
+          table,
+          retired,
+          version !== CHARACTER_SNAPSHOT_SCHEMA_VERSION,
+        );
         const error = rowContractError(
           table,
           legacy?.row ?? reconciled,

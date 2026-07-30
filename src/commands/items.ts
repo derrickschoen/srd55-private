@@ -26,6 +26,7 @@ import {
 const ITEM_COLUMNS = [
   'name',
   'description',
+  'quantity',
   'requires_attunement',
   'source_instance_id',
 ] as const;
@@ -46,6 +47,7 @@ function itemValues(item: ItemFields): Record<string, SqlValue> {
   return {
     name: item.name.trim(),
     description: nullableText(item.description),
+    quantity: item.quantity,
     requires_attunement: item.requires_attunement ? 1 : 0,
     source_instance_id: item.source_instance_id,
   };
@@ -56,6 +58,7 @@ function fieldsFromRow(row: ItemRow): ItemFields {
     name: String(row.name),
     description:
       row.description === null ? null : String(row.description),
+    quantity: Number(row.quantity),
     requires_attunement: Number(row.requires_attunement) === 1,
     source_instance_id:
       row.source_instance_id === null

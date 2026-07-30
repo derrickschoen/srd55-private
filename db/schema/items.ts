@@ -8,7 +8,13 @@ import {
 } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 import type { CharacterId, CharacterItemId, SourceInstanceId } from '../../src/domain/ids';
-import { datetime, sqlText, tinyint1, varchar } from './columns';
+import {
+  datetime,
+  integerAtLeast,
+  sqlText,
+  tinyint1,
+  varchar,
+} from './columns';
 import { character_source_instances, characters } from './character';
 
 /* ==========================================================================
@@ -32,7 +38,7 @@ import { character_source_instances, characters } from './character';
  * ITEM, not which item owns an effect.
  *
  * NO `sort_order`. Unlike `character_effects` and `character_species_traits`,
- * the plan's own row shape names exactly four fields — name, description,
+ * the row shape names exactly five fields — name, description, quantity,
  * `requires_attunement`, `source_instance_id` — and does not ask
  * for a display order; a display surface (AC-B) can sort by name or id
  * without this unit inventing a column nothing yet reads.
@@ -58,6 +64,13 @@ export const character_items = sqliteTable(
      * thing does, exactly as `character_species_traits.description` allows.
      */
     description: sqlText()('description'),
+    /**
+     * How many identical possessions this row represents (D86). NOT NULL with
+     * a default of one so an ordinary single possession stays concise, and a
+     * positive-integer CHECK keeps zero/negative/fractional inventory states
+     * out of both direct SQLite writes and future command paths.
+     */
+    quantity: integer('quantity').notNull().default(1),
     /**
      * Whether the item NEEDS attunement at all. NOT NULL with a `false`
      * default: Ring of Shell (D72 §9's own "proves attunement is not required"
@@ -93,6 +106,10 @@ export const character_items = sqliteTable(
         character_source_instances.character_id,
       ],
     }).onDelete('cascade'),
+    check(
+      'character_items_quantity_check',
+      integerAtLeast('quantity', 1),
+    ),
   ],
 );
 
