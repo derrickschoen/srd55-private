@@ -1,5 +1,15 @@
 # Binding scope decisions
 
+## D96 — OWNER: multiclass ability minimums WARN and ALLOW (2026-07-30)
+
+The owner's answer: **"Warn, still allow."** Taking a class whose multiclass
+ability minimums (sourced in `docs/srd/source/multiclassing.txt`) are unmet
+is permitted everywhere — wizard and planner alike — and produces a
+permanent (D95) warning on both the wizard step and the sheet, naming the
+unmet minimum from the sourced table, in the `armor_not_trained` shape: the
+rule stated, the number honoured, the table adjudicating. No grey-out, no
+command refusal.
+
 ## D95 — OWNER: warnings are PERMANENT — no acknowledgment state (2026-07-30)
 
 The owner's answer: **"Permanent — no acknowledgment."** Sheet warnings
