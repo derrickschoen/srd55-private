@@ -267,6 +267,31 @@ describe('the derived character sheet', () => {
     expect(sheet.warnings.map((warning) => warning.code)).toEqual([]);
   });
 
+  it('keeps non-proficient armour AC and the armor_not_trained warning together', () => {
+    db.exec(
+      `DELETE FROM character_class_levels
+       WHERE character_id = ? AND class_definition_id = ?`,
+      [characterId, classId('Fighter')],
+    );
+    db.exec(
+      `INSERT INTO character_armor
+         (character_id, slot, name, category, armor_class, dex_bonus,
+          strength_requirement)
+       VALUES (?, 'worn', 'Chain Mail', 'heavy', 16, 'none', 13)`,
+      [characterId],
+    );
+
+    const sheet = builder.build(characterId);
+
+    // Wizard grants no Heavy armour training. Chain Mail still supplies its
+    // flat AC 16; proficiency changes the consequences, not the base. The
+    // warning must survive beside the number so neither half can drift alone.
+    expect(sheet.armor_class.value).toBe(16);
+    expect(sheet.warnings.map((warning) => warning.code)).toContain(
+      'armor_not_trained',
+    );
+  });
+
   it('counts a shield by what it IS, and says the slots are crossed', () => {
     db.exec(
       `INSERT INTO character_armor
