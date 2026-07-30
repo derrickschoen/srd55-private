@@ -2,7 +2,8 @@
  * ATTACK PROFILES. Nothing here is stored (D11).
  *
  * For each weapon a character owns, the ways that weapon can be swung: the
- * plain attack, and the two cantrips and one class feature that REWRITE it.
+ * plain attack, the two cantrips and one class feature that REWRITE it, and
+ * source-labelled ability overrides carried by eligible character effects.
  * Every number is derived from ability scores, class levels, the sourced
  * content in `db/schema/sheet.ts` and the character's spell access — so a
  * Dexterity change moves every profile at once and there is no second copy to
@@ -67,6 +68,7 @@ import type {
   ResolvedExtraAttackGrant,
 } from './extra-attack';
 import type { WeaponProficiencyVerdict } from './multiclass-proficiency';
+import type { EligibleWeaponEffect } from './eligible-character-effects';
 import {
   formatWeaponDamage,
   type VersatileWeaponDamage,
@@ -78,6 +80,7 @@ export const attackProfileKinds = [
   'true_strike',
   'shillelagh',
   'martial_arts',
+  'attack_ability_override',
 ] as const;
 export type AttackProfileKind = (typeof attackProfileKinds)[number];
 
@@ -211,6 +214,11 @@ export type AttackProfileWarningCode =
   | 'no_spellcasting_ability'
   | 'ambiguous_spellcasting_ability'
   /**
+   * A one-weapon effect that names no weapon is preserved and disclosed, but
+   * changes no profile. Guessing a target would make the stored null invisible.
+   */
+  | 'inert_weapon_effect'
+  /**
    * An Extra Attack grant this character may well have and this application
    * cannot apply. Reported once per grant, at the panel level, because the
    * reason is a fact about this application rather than about any one weapon.
@@ -264,6 +272,12 @@ export interface AttackProfileInput {
   readonly scores: AbilityScores;
   readonly proficiencyBonus: number | null;
   readonly cantrips: RecognisedAttackCantrips;
+  /**
+   * Mechanically active effects only. The production reader obtains these
+   * through `readEligibleWeaponEffects`, which applies the shared attunement
+   * predicate before closing the kind-scoped payloads into this union.
+   */
+  readonly effects: readonly EligibleWeaponEffect[];
 }
 
 /**
@@ -885,6 +899,136 @@ function martialArtsProfile(
   };
 }
 
+/**
+ * One added attack option from one weapon-scoped ability override.
+ *
+ * This is a sibling of Attack, True Strike and Martial Arts rather than a
+ * replacement for any of them. Two effects therefore produce two labelled
+ * profiles even when they happen to name the same ability.
+ */
+function attackAbilityOverrideProfile(
+  input: AttackProfileInput,
+  weapon: AttackProfileWeapon,
+  effect: Extract<
+    EligibleWeaponEffect,
+    { readonly effect_kind: 'attack_ability_override' }
+  >,
+  attacks: AttacksPerAction,
+): AttackProfile {
+  const proficiency = profileProficiency(weapon.proficiency);
+  return {
+    kind: 'attack_ability_override',
+    label: effect.label,
+    abilities: {
+      state: 'fixed',
+      options: [
+        option(
+          input,
+          effect.ability,
+          `${effect.label} uses ${effect.ability} for this weapon’s attack and damage rolls.`,
+          proficiency,
+        ),
+      ],
+    },
+    damage: {
+      amount: weapon.damage,
+      versatile_note: versatileNote(weapon),
+      damage_type: weaponDamageType(weapon),
+      extra: [],
+    },
+    attacks_per_action: attacks.count,
+    unresolved_attacks: attacks.unresolved,
+    preconditions: [proficiency.reason],
+    notes: [],
+  };
+}
+
+function reachesWeapon(
+  effect: EligibleWeaponEffect,
+  weaponId: number,
+): boolean {
+  switch (effect.weapon_scope) {
+    case 'any_weapon':
+      return true;
+    case 'one_bonded_weapon':
+      return effect.character_weapon_id === weaponId;
+  }
+}
+
+function signedEffectAmount(amount: number): string {
+  return amount < 0 ? String(amount) : `+${String(amount)}`;
+}
+
+/**
+ * Applies flat bonuses to a finished profile, so every existing profile kind
+ * and every added override option goes through the same arithmetic.
+ *
+ * The source label is appended to this profile's own notes. A changed number
+ * without that adjacent label would repeat the proficiency bug documented at
+ * the top of this module: the explanation and number would disagree.
+ */
+function applyWeaponBonuses(
+  profile: AttackProfile,
+  effects: readonly EligibleWeaponEffect[],
+): AttackProfile {
+  const attackEffects = effects.filter(
+    (
+      effect,
+    ): effect is Extract<
+      EligibleWeaponEffect,
+      { readonly effect_kind: 'weapon_attack_bonus' }
+    > => effect.effect_kind === 'weapon_attack_bonus',
+  );
+  const damageEffects = effects.filter(
+    (
+      effect,
+    ): effect is Extract<
+      EligibleWeaponEffect,
+      { readonly effect_kind: 'weapon_damage_bonus' }
+    > => effect.effect_kind === 'weapon_damage_bonus',
+  );
+  const attackBonus = attackEffects.reduce(
+    (total, effect) => total + effect.amount,
+    0,
+  );
+  const damageBonus = damageEffects.reduce(
+    (total, effect) => total + effect.amount,
+    0,
+  );
+
+  const options =
+    profile.abilities.state === 'unavailable'
+      ? null
+      : profile.abilities.options.map((entry): AbilityOption => ({
+          ...entry,
+          attack_bonus:
+            entry.attack_bonus === null
+              ? null
+              : entry.attack_bonus + attackBonus,
+          damage_modifier: entry.damage_modifier + damageBonus,
+        }));
+  const abilities: ProfileAbilities =
+    profile.abilities.state === 'unavailable'
+      ? profile.abilities
+      : { ...profile.abilities, options: options ?? [] };
+
+  return {
+    ...profile,
+    abilities,
+    notes: [
+      ...profile.notes,
+      ...attackEffects.map(
+        (effect) =>
+          `${effect.label}: ${signedEffectAmount(effect.amount)} to this profile’s attack bonus.`,
+      ),
+      ...damageEffects.map(
+        (effect) =>
+          `${effect.label}: ${signedEffectAmount(effect.amount)} to this profile’s damage.`,
+      ),
+    ],
+  };
+}
+
 function cantripWarnings(
   cantrips: RecognisedAttackCantrips,
 ): AttackProfileWarning[] {
@@ -959,6 +1103,9 @@ export function attackProfiles(
   const attacks = attacksPerAction(input.classes);
 
   const weapons: WeaponAttackProfiles[] = input.weapons.map((weapon) => {
+    const effects = input.effects.filter((effect) =>
+      reachesWeapon(effect, weapon.id),
+    );
     const profiles: AttackProfile[] = [normalProfile(input, weapon, attacks)];
     if (trueStrike !== null) {
       profiles.push(trueStrikeProfile(input, weapon, trueStrike, attacks));
@@ -966,11 +1113,18 @@ export function attackProfiles(
     for (const granted of martialArts) {
       profiles.push(martialArtsProfile(input, weapon, granted, attacks));
     }
+    for (const effect of effects) {
+      if (effect.effect_kind === 'attack_ability_override') {
+        profiles.push(
+          attackAbilityOverrideProfile(input, weapon, effect, attacks),
+        );
+      }
+    }
     return {
       weapon_id: weapon.id,
       weapon_name: weapon.name,
       derived: false,
-      profiles,
+      profiles: profiles.map((profile) => applyWeaponBonuses(profile, effects)),
     };
   });
 
@@ -983,10 +1137,27 @@ export function attackProfiles(
     warnings: [
       ...cantripWarnings(input.cantrips),
       ...unresolvedAttackWarnings(attacks),
+      ...inertWeaponEffectWarnings(input.effects),
     ],
     attacks_per_action: attacks.count,
     has_extra_attack: attacks.count > 1,
   };
+}
+
+function inertWeaponEffectWarnings(
+  effects: readonly EligibleWeaponEffect[],
+): AttackProfileWarning[] {
+  return effects.flatMap((effect): AttackProfileWarning[] =>
+    effect.weapon_scope === 'one_bonded_weapon' &&
+    effect.character_weapon_id === null
+      ? [{
+          code: 'inert_weapon_effect',
+          message:
+            `${effect.label} is scoped to one bonded weapon but names no ` +
+            'weapon, so it changes no attack profile.',
+        }]
+      : [],
+  );
 }
 
 /**

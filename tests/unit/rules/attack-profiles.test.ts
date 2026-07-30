@@ -20,6 +20,7 @@ import { martialArtsDice, type SheetClassLevels } from '../../../src/rules/sheet
 import type { ExtraAttackGrant } from '../../../src/rules/extra-attack';
 import type { MartialArtsDieSize } from '../../../src/domain/enums';
 import type { WeaponProficiencyVerdict } from '../../../src/rules/multiclass-proficiency';
+import type { EligibleWeaponEffect } from '../../../src/rules/eligible-character-effects';
 
 /**
  * EVERY NUMBER HERE IS COMPUTED BY HAND AND WRITTEN AS A LITERAL, and the
@@ -176,6 +177,7 @@ function build(
     scores: scores({}),
     proficiencyBonus: 3,
     cantrips: NO_CANTRIPS,
+    effects: [],
     ...overrides,
   });
 }
@@ -368,6 +370,7 @@ describe('the plain weapon attack', () => {
       cantrips: knows('true_strike', [
         { source_name: 'Monk', spellcasting_ability: 'wisdom' },
       ]),
+      effects: [],
     });
     for (const kind of ['normal', 'true_strike', 'martial_arts'] as const) {
       const profile = profileOf(result, kind);
@@ -396,6 +399,7 @@ describe('the plain weapon attack', () => {
       cantrips: knows('shillelagh', [
         { source_name: 'Druid', spellcasting_ability: 'wisdom' },
       ]),
+      effects: [],
     });
     const profile = profileOf(result, 'shillelagh');
     expect(bonusFor(profile, 'wisdom')).toBe(7);
@@ -903,6 +907,7 @@ describe('the two levels are DIFFERENT numbers on the same character', () => {
         },
         unrecognised: [],
       },
+      effects: [],
     });
 
     expect(damageText(profileOf(result, 'martial_arts'))).toBe('1d6');
@@ -1025,6 +1030,222 @@ describe('an unrecognised catalog key', () => {
   });
 });
 
+describe('weapon effects', () => {
+  it('applies a +1 weapon to every existing profile and every ability option', () => {
+    const effects: readonly EligibleWeaponEffect[] = [
+      {
+        id: 1,
+        effect_kind: 'weapon_attack_bonus',
+        amount: 1,
+        weapon_scope: 'any_weapon',
+        character_weapon_id: null,
+        label: 'Staff of the Armadillo',
+      },
+      {
+        id: 2,
+        effect_kind: 'weapon_damage_bonus',
+        amount: 1,
+        weapon_scope: 'any_weapon',
+        character_weapon_id: null,
+        label: 'Staff of the Armadillo',
+      },
+    ];
+    const result = build({
+      classes: [monk(5)],
+      scores: scores({
+        strength: 18,
+        dexterity: 18,
+        wisdom: 18,
+      }),
+      cantrips: knows('true_strike', [
+        { source_name: 'Monk', spellcasting_ability: 'wisdom' },
+      ]),
+      effects,
+    });
+
+    const profiles = result.weapons[0]?.profiles ?? [];
+    expect(profiles.map((profile) => profile.kind)).toEqual([
+      'normal',
+      'true_strike',
+      'martial_arts',
+    ]);
+    for (const profile of profiles) {
+      if (profile.abilities.state === 'unavailable') {
+        throw new Error(`${profile.label} unexpectedly has no ability options.`);
+      }
+      expect(profile.notes.slice(-2)).toEqual([
+        'Staff of the Armadillo: +1 to this profile’s attack bonus.',
+        'Staff of the Armadillo: +1 to this profile’s damage.',
+      ]);
+    }
+    // Every score is 18: modifier +4, proficiency +3, weapon +1 => +8.
+    // Damage is modifier +4 plus the weapon's +1 => +5. The literal has two
+    // normal options, one True Strike option and two Martial Arts options.
+    expect(
+      profiles.flatMap((profile) =>
+        profile.abilities.state === 'unavailable'
+          ? []
+          : profile.abilities.options.map((entry) => [
+              entry.attack_bonus,
+              entry.damage_modifier,
+            ]),
+      ),
+    ).toEqual([
+      [8, 5],
+      [8, 5],
+      [8, 5],
+      [8, 5],
+      [8, 5],
+    ]);
+  });
+
+  it('adds one source-labelled profile per ability override without replacing existing options', () => {
+    const effects: readonly EligibleWeaponEffect[] = [
+      {
+        id: 3,
+        effect_kind: 'attack_ability_override',
+        ability: 'charisma',
+        weapon_scope: 'any_weapon',
+        character_weapon_id: null,
+        label: 'Pact Shell Blade',
+      },
+      {
+        id: 4,
+        effect_kind: 'attack_ability_override',
+        ability: 'wisdom',
+        weapon_scope: 'one_bonded_weapon',
+        character_weapon_id: LONGSWORD.id,
+        label: 'Armadillo oath',
+      },
+    ];
+    const result = build({
+      scores: scores({ charisma: 16, wisdom: 14 }),
+      effects,
+    });
+    const profiles = result.weapons[0]?.profiles ?? [];
+
+    expect(profiles.map((profile) => [profile.kind, profile.label])).toEqual([
+      ['normal', 'Attack'],
+      ['attack_ability_override', 'Pact Shell Blade'],
+      ['attack_ability_override', 'Armadillo oath'],
+    ]);
+    expect(bonusFor(profiles[1]!, 'charisma')).toBe(6);
+    expect(bonusFor(profiles[2]!, 'wisdom')).toBe(5);
+    expect(profiles[1]?.abilities.state).toBe('fixed');
+    expect(profiles[2]?.abilities.state).toBe('fixed');
+  });
+
+  it('resolves one-weapon scope by weapon id and surfaces an unbound row as inert', () => {
+    const dagger: AttackProfileWeapon = {
+      ...LONGSWORD,
+      id: 2,
+      name: 'Dagger',
+    };
+    const effects: readonly EligibleWeaponEffect[] = [
+      {
+        id: 5,
+        effect_kind: 'weapon_damage_bonus',
+        amount: 2,
+        weapon_scope: 'one_bonded_weapon',
+        character_weapon_id: LONGSWORD.id,
+        label: 'Armadillo Blade',
+      },
+      {
+        id: 6,
+        effect_kind: 'weapon_attack_bonus',
+        amount: 1,
+        weapon_scope: 'any_weapon',
+        character_weapon_id: null,
+        label: 'Training charm',
+      },
+      {
+        id: 7,
+        effect_kind: 'attack_ability_override',
+        ability: 'charisma',
+        weapon_scope: 'one_bonded_weapon',
+        character_weapon_id: null,
+        label: 'Unbound pact',
+      },
+    ];
+    const result = build({ weapons: [LONGSWORD, dagger], effects });
+    const [longsword, second] = result.weapons;
+    const longswordStrength =
+      longsword?.profiles[0]?.abilities.state === 'unavailable'
+        ? undefined
+        : longsword?.profiles[0]?.abilities.options[0];
+    const daggerStrength =
+      second?.profiles[0]?.abilities.state === 'unavailable'
+        ? undefined
+        : second?.profiles[0]?.abilities.options[0];
+
+    expect(longswordStrength?.damage_modifier).toBe(2);
+    expect(daggerStrength?.damage_modifier).toBe(0);
+    // The any-weapon charm reaches BOTH weapons: modifier 0 + proficiency 3
+    // + effect 1. The bonded damage effect above still reaches only Longsword.
+    expect(longswordStrength?.attack_bonus).toBe(4);
+    expect(daggerStrength?.attack_bonus).toBe(4);
+    expect(
+      result.weapons.flatMap((weapon) =>
+        weapon.profiles.map((profile) => profile.label),
+      ),
+    ).not.toContain('Unbound pact');
+    expect(result.warnings).toContainEqual({
+      code: 'inert_weapon_effect',
+      message:
+        'Unbound pact is scoped to one bonded weapon but names no weapon, so it changes no attack profile.',
+    });
+  });
+
+  it('adds weapon bonuses after withholding proficiency and labels both changes', () => {
+    const effects: readonly EligibleWeaponEffect[] = [
+      {
+        id: 7,
+        effect_kind: 'weapon_attack_bonus',
+        amount: 1,
+        weapon_scope: 'one_bonded_weapon',
+        character_weapon_id: LONGSWORD.id,
+        label: '+1 weapon',
+      },
+      {
+        id: 8,
+        effect_kind: 'weapon_damage_bonus',
+        amount: 1,
+        weapon_scope: 'one_bonded_weapon',
+        character_weapon_id: LONGSWORD.id,
+        label: '+1 weapon',
+      },
+    ];
+    const profile = profileOf(
+      build({
+        weapons: [{
+          ...LONGSWORD,
+          proficiency: { kind: 'not_proficient' },
+        }],
+        scores: scores({ strength: 18 }),
+        effects,
+      }),
+      'normal',
+    );
+    const strength =
+      profile.abilities.state === 'unavailable'
+        ? undefined
+        : profile.abilities.options.find(
+            (entry) => entry.ability === 'strength',
+          );
+
+    // Strength 18 is +4. Proficiency is withheld, then the weapon adds +1.
+    expect(strength?.attack_bonus).toBe(5);
+    expect(strength?.damage_modifier).toBe(5);
+    expect(profile.preconditions.join(' ')).toContain(
+      'The Proficiency Bonus is NOT included',
+    );
+    expect(profile.notes).toEqual([
+      '+1 weapon: +1 to this profile’s attack bonus.',
+      '+1 weapon: +1 to this profile’s damage.',
+    ]);
+  });
+});
+
 describe('nothing is stored', () => {
   it('is a pure function of its input', () => {
     // Called twice with the same input, byte-identical output; called with a
@@ -1036,6 +1257,7 @@ describe('nothing is stored', () => {
       scores: scores({ dexterity: 16 }),
       proficiencyBonus: 3,
       cantrips: NO_CANTRIPS,
+      effects: [],
     };
     expect(attackProfiles(input)).toEqual(attackProfiles(input));
     const moved = attackProfiles({ ...input, scores: scores({ dexterity: 18 }) });

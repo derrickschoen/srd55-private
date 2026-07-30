@@ -75,6 +75,7 @@ function result(
     scores: scores(overrides.scoreValues ?? { strength: 18, dexterity: 14 }),
     proficiencyBonus: overrides.proficiencyBonus ?? 3,
     cantrips: overrides.cantrips ?? NO_CANTRIPS,
+    effects: [],
   });
 }
 
@@ -255,6 +256,7 @@ describe('the damage line', () => {
       scores: scores({ strength: 18 }),
       proficiencyBonus: 3,
       cantrips: NO_CANTRIPS,
+      effects: [],
     });
     const profile = firstProfile(value);
     expect(damageLabel(profile, optionOf(profile, 'strength'), null)).toBe(

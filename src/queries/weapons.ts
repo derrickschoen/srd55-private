@@ -35,6 +35,7 @@ import type { SpellAccessRoute } from '../access/spell-access-builder';
 import type { AbilityScores } from '../rules/ability-scores';
 import { attackProfiles } from '../rules/attack-profiles';
 import { recogniseAttackCantrips } from '../rules/attack-cantrips';
+import { readEligibleWeaponEffects } from '../rules/eligible-character-effects';
 import { weaponProficiency } from '../rules/multiclass-proficiency';
 import { SheetContentLookup } from '../rules/sheet-content-lookup';
 import { WeaponMasteryLookup } from '../rules/weapon-mastery-lookup';
@@ -279,6 +280,7 @@ export class WeaponQueries {
       scores: context.scores,
       proficiencyBonus: context.proficiency_bonus,
       cantrips: recogniseAttackCantrips(context.routes),
+      effects: readEligibleWeaponEffects(this.db, characterId, 'display'),
     });
   }
 }

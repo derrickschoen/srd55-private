@@ -12,9 +12,9 @@
  * remains NULL, and a WHERE clause drops it under three-valued logic.
  *
  * Every mechanical reader goes through `readEligibleCharacterEffects`:
- * abilities, Armor Class, Hit Points, Speed, and damage resistance. Transport
- * readers do not; backup/share/snapshot must preserve an inactive row rather
- * than erase it from the character.
+ * abilities, Armor Class, attack profiles, Hit Points, Speed, and damage
+ * resistance. Transport readers do not; backup/share/snapshot must preserve an
+ * inactive row rather than erase it from the character.
  */
 import {
   sqlBoolean,
@@ -30,11 +30,13 @@ import {
   abilities,
   characterEffectKinds,
   domainSourceTypes,
+  extraAttackWeaponScopes,
   isEnumValue,
   type Ability,
   type CharacterEffectKind,
   type DamageType,
   type DomainSourceType,
+  type ExtraAttackWeaponScope,
 } from '../domain/enums';
 
 export type EligibleCharacterEffectOrder = 'acquisition' | 'display';
@@ -58,8 +60,37 @@ export interface EligibleCharacterEffect {
   readonly source_type: DomainSourceType | null;
   readonly character_item_id: number | null;
   readonly character_weapon_id: number | null;
+  readonly weapon_scope: ExtraAttackWeaponScope | null;
   readonly label: string;
 }
+
+interface EligibleWeaponEffectBase {
+  readonly id: number;
+  readonly label: string;
+  readonly character_weapon_id: number | null;
+  readonly weapon_scope: ExtraAttackWeaponScope;
+}
+
+/**
+ * The three mechanically eligible effect shapes consumed by attack profiles.
+ *
+ * This is narrower than the database-shaped `EligibleCharacterEffect`: once a
+ * weapon effect reaches the attack resolver, its kind-scoped payload is present
+ * in the type rather than represented by nullable sibling columns.
+ */
+export type EligibleWeaponEffect =
+  | (EligibleWeaponEffectBase & {
+      readonly effect_kind: 'attack_ability_override';
+      readonly ability: Ability;
+    })
+  | (EligibleWeaponEffectBase & {
+      readonly effect_kind: 'weapon_attack_bonus';
+      readonly amount: number;
+    })
+  | (EligibleWeaponEffectBase & {
+      readonly effect_kind: 'weapon_damage_bonus';
+      readonly amount: number;
+    });
 
 const ELIGIBLE_EFFECT_SQL = `
   FROM character_effects AS effect
@@ -99,7 +130,8 @@ export function readEligibleCharacterEffects(
             effect.ability, effect.amount, effect.maximum, effect.base,
             effect.ability_1, effect.ability_2, effect.allows_shield,
             effect.source_instance_id, source.source_type,
-            effect.character_item_id, effect.character_weapon_id, effect.label
+            effect.character_item_id, effect.character_weapon_id,
+            effect.weapon_scope, effect.label
      ${ELIGIBLE_EFFECT_SQL}
      ORDER BY ${orderBy}`,
     [characterId],
@@ -125,8 +157,63 @@ export function readEligibleCharacterEffects(
       source_type: nullableSourceType(row),
       character_item_id: sqlNullableInteger(row, 'character_item_id'),
       character_weapon_id: sqlNullableInteger(row, 'character_weapon_id'),
+      weapon_scope: nullableWeaponScope(row),
       label: sqlString(row, 'label'),
     }),
+  );
+}
+
+/**
+ * Reads the active weapon effects through the one attunement predicate, then
+ * closes their kind-scoped nullable database payloads into a discriminated
+ * union for the attack resolver.
+ */
+export function readEligibleWeaponEffects(
+  db: DatabaseContext,
+  characterId: number,
+  order: EligibleCharacterEffectOrder,
+): EligibleWeaponEffect[] {
+  return readEligibleCharacterEffects(db, characterId, order).flatMap(
+    (effect): EligibleWeaponEffect[] => {
+      switch (effect.effect_kind) {
+        case 'attack_ability_override':
+          if (effect.ability === null || effect.weapon_scope === null) {
+            throw new TypeError(
+              `${effect.label} has an incomplete attack ability override payload.`,
+            );
+          }
+          return [{
+            id: effect.id,
+            effect_kind: effect.effect_kind,
+            ability: effect.ability,
+            weapon_scope: effect.weapon_scope,
+            character_weapon_id: effect.character_weapon_id,
+            label: effect.label,
+          }];
+        case 'weapon_attack_bonus':
+        case 'weapon_damage_bonus':
+          if (effect.amount === null || effect.weapon_scope === null) {
+            throw new TypeError(
+              `${effect.label} has an incomplete weapon bonus payload.`,
+            );
+          }
+          return [{
+            id: effect.id,
+            effect_kind: effect.effect_kind,
+            amount: effect.amount,
+            weapon_scope: effect.weapon_scope,
+            character_weapon_id: effect.character_weapon_id,
+            label: effect.label,
+          }];
+        case 'damage_resistance':
+        case 'hp_modifier':
+        case 'speed':
+        case 'ability_increase':
+        case 'armor_class_bonus':
+        case 'armor_class_formula':
+          return [];
+      }
+    },
   );
 }
 
@@ -165,4 +252,17 @@ function nullableSourceType(
     throw new Error(`Unknown effect source type '${sourceType}'.`);
   }
   return sourceType;
+}
+
+function nullableWeaponScope(
+  row: SqlRow,
+): ExtraAttackWeaponScope | null {
+  const scope = sqlNullableString(row, 'weapon_scope');
+  if (scope === null) {
+    return null;
+  }
+  if (!isEnumValue(extraAttackWeaponScopes, scope)) {
+    throw new Error(`Unknown effect weapon scope '${scope}'.`);
+  }
+  return scope;
 }
