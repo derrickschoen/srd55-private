@@ -1,5 +1,51 @@
 # Binding scope decisions
 
+## D104 — OWNER: the flavor layer is TEXT FIELDS ONLY (2026-07-30)
+
+The owner's answer: **"Text fields only."** Optional alignment,
+appearance, backstory and notes text — stored, carried in exports,
+printed when present (D89), absent fields not printed. No portrait (no
+image storage or wire carriage in v1), no XP number tracking (play-state
+is paper, D88 — the printout gets an empty XP line). Free text follows
+the existing hostile-string discipline: rendered visibly, marked
+unverified-origin, never entering structured facts (D4).
+
+## D103 — OWNER: v1 ships authoring FORMS for species, subclass and background (2026-07-30)
+
+The owner's answer: **"Forms for species/subclass/background."** In-app
+authoring UIs over the template machinery the AC unit shipped (template
+tables, effect vocabulary, template-to-character copy with template_ref
+identity). Classes stay SRD-only in v1 — structurally deepest, not
+authorable. Authored content is homebrew-marked, carries derived identity
+(D82) on export, and its effects use the one vocabulary — a form field
+per effect kind, no free-numeric side channels (D72's rule applied to
+authoring). This is the largest new scope accepted today and needs its
+own plan; the JSON-import path is NOT ruled in by this (forms are the
+door), though export-format round-tripping means a hand-written document
+already works through the existing import.
+
+## D102 — OWNER: languages and tools are NOT modelled in v1 (2026-07-30)
+
+The owner's answer: **"Neither in v1."** No structured language or
+tool-proficiency facts, no choice steps, no dedicated sheet lines. The
+sheet shows the granting features' text (the Sage background's own words
+about its two languages), and the gap is stated in the D33 disclosure
+pattern rather than silently absent. A future unit can ride the skills
+machinery when the owner asks.
+
+## D101 — OWNER: ASI levels offer the FULL feat choice, effects where expressible (2026-07-30)
+
+The owner's answer: **"Full choice, effects where expressible."** At every
+ASI level (per-class levels from seeded data, D78) the wizard offers the
+Ability Score Improvement feat OR any qualifying SRD feat: all 17 from the
+sourced corpus (`docs/srd/source/feats.txt`), prerequisites checked from
+the sourced text, repeatable flags honoured. A feat's numeric grants ride
+the EXISTING effects vocabulary (ability increases with their caps, HP,
+speed, AC bonuses — and D83's ability_override when it lands); anything
+the vocabulary cannot express renders as stated feature text, absent from
+the numbers and saying so (D33). ASI is one feat among equals, not a
+special case.
+
 ## D100 — OWNER: no performance bar in v1 (2026-07-30)
 
 The owner's answer: **"Nothing in v1."** No perf budget, no regression
