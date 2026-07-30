@@ -5,6 +5,31 @@ import type { SystemInfo } from './worker/handlers/system';
 import { Application } from './ui/app';
 import { Router } from './ui/router';
 import { screen as legalScreen } from './ui/screens/legal/screen';
+import {
+  persistentStorageLabel,
+  requestPersistentStorage,
+} from './pwa/storage-persistence';
+import { registerAppServiceWorker } from './pwa/register-service-worker';
+
+const persistenceStatus =
+  document.querySelector<HTMLOutputElement>('#persistence-status');
+const browserStorage =
+  'storage' in navigator ? navigator.storage : undefined;
+void requestPersistentStorage(browserStorage).then((state) => {
+  if (persistenceStatus !== null) {
+    persistenceStatus.value = persistentStorageLabel(state);
+    persistenceStatus.dataset.persistenceState = state;
+  }
+});
+
+if ('serviceWorker' in navigator) {
+  registerAppServiceWorker(
+    navigator.serviceWorker,
+    document.querySelector<HTMLElement>('#update-ready'),
+    document.querySelector<HTMLButtonElement>('#refresh-update'),
+    () => location.reload(),
+  );
+}
 
 const worker = new Worker(new URL('./db/worker.ts', import.meta.url), {
   type: 'module',

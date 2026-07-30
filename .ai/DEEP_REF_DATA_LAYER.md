@@ -28,12 +28,12 @@ number does not live anywhere.
 
 ### Drizzle at runtime is a BUILD FAILURE, not a convention
 
-`vite.config.ts` defines `forbidDrizzleAtRuntime` (`:59`), a rollup plugin that
+`vite.config.ts` defines `forbidDrizzleAtRuntime` (`:156`), a rollup plugin that
 fails the production build if any module in any entry graph resolves into a
 `drizzle-*` package.
 
-**It is registered TWICE** — `vite.config.ts:85` for the main graph and
-`vite.config.ts:87` for the worker graph — because Vite builds worker graphs
+**It is registered TWICE** — `vite.config.ts:182` for the main graph and
+`vite.config.ts:184` for the worker graph — because Vite builds worker graphs
 through `config.worker.plugins`, a separate pipeline that does NOT inherit
 top-level `plugins`. Registering it only at the top level was verified to leave
 the worker unguarded. `tests/unit/db/drizzle-is-build-time-only.test.ts` asserts
