@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { AbilityScores } from '../../../src/rules/ability-scores';
 import {
-  armorClass,
+  armorClass as resolveArmorClass,
   attacksPerAction,
   fixedHitPointsPerLevel,
   hitDieOrAbsent,
@@ -16,6 +16,9 @@ import {
   totalLevelWarnings,
   type SheetArmor,
   type SheetClass,
+  type ArmorClassBonusCandidate,
+  type ArmorClassFormulaCandidate,
+  type EquippedArmor,
 } from '../../../src/rules/sheet';
 import { characterLevel } from '../../../src/rules/character-level';
 import type { ExtraAttackGrant } from '../../../src/rules/extra-attack';
@@ -46,6 +49,38 @@ function scores(values: Partial<Record<string, number>>): AbilityScores {
     wisdom: 10,
     charisma: 10,
     ...values,
+  });
+}
+
+/**
+ * Mechanical adapter for the pre-AC-3 fixtures below. Their hand-computed
+ * assertions remain unchanged; only the resolver input was replaced.
+ */
+function armorClass(input: {
+  readonly armor?: SheetArmor | null;
+  readonly shield?: SheetArmor | null;
+  readonly scores: AbilityScores;
+  readonly adjustment?: number;
+  readonly formulas?: readonly ArmorClassFormulaCandidate[];
+  readonly bonuses?: readonly ArmorClassBonusCandidate[];
+}) {
+  const equipment: EquippedArmor[] = [];
+  if (input.armor !== undefined && input.armor !== null) {
+    equipment.push({ slot: 'worn', armor: input.armor });
+  }
+  if (input.shield !== undefined && input.shield !== null) {
+    equipment.push({ slot: 'shield', armor: input.shield });
+  }
+  return resolveArmorClass({
+    equipment,
+    formulas: input.formulas ?? [],
+    bonuses: [
+      ...(input.bonuses ?? []),
+      ...(input.adjustment === undefined || input.adjustment === 0
+        ? []
+        : [{ label: 'Manual adjustment', amount: input.adjustment }]),
+    ],
+    scores: input.scores,
   });
 }
 
@@ -647,6 +682,22 @@ describe('armor class', () => {
     }
     return found;
   };
+  const formula = (
+    label: string,
+    source: ArmorClassFormulaCandidate['source'],
+    ability_1: ArmorClassFormulaCandidate['ability_1'],
+    ability_2: ArmorClassFormulaCandidate['ability_2'],
+    allows_shield: boolean,
+    base = 10,
+  ): ArmorClassFormulaCandidate => ({
+    kind: 'ability_formula',
+    label,
+    source,
+    base,
+    ability_1,
+    ability_2,
+    allows_shield,
+  });
 
   it('is 10 + Dexterity with no armour', () => {
     // `sheet-math.txt`: "Without armor or a shield, your base Armor Class is 10
@@ -725,6 +776,121 @@ describe('armor class', () => {
         scores: scores({ dexterity: 14 }),
       }).value,
     ).toBe(14);
+  });
+
+  it('re-runs formula eligibility before adding a shield', () => {
+    const monk = formula(
+      'Martial Arts',
+      'class',
+      'dexterity',
+      'wisdom',
+      false,
+    );
+    const monkScores = scores({ dexterity: 16, wisdom: 16 });
+
+    const withoutShield = armorClass({
+      scores: monkScores,
+      formulas: [monk],
+    });
+    expect(withoutShield.value).toBe(16);
+    expect(withoutShield.winner.formula.label).toBe('Martial Arts');
+    expect(withoutShield.winner.total).toBe(16);
+    expect(withoutShield.excluded).toEqual([]);
+
+    const withShield = armorClass({
+      shield: template('Shield'),
+      scores: monkScores,
+      formulas: [monk],
+    });
+    // Martial Arts is excluded first; the 10 + Dexterity floor wins at 13,
+    // then the Shield adds 2. A late-only shield addend would produce 18.
+    expect(withShield.value).toBe(15);
+    expect(withShield.value).not.toBe(18);
+    expect(withShield.winner.formula.label).toBe('Unarmoured');
+    expect(withShield.winner.total).toBe(13);
+    expect(withShield.excluded).toEqual([
+      {
+        formula: monk,
+        reason: { kind: 'shield_not_allowed', shield_name: 'Shield' },
+      },
+    ]);
+  });
+
+  it('discards every unarmoured formula outright while body armour is worn', () => {
+    const shell = formula(
+      'Armadillo Shell',
+      'species',
+      'dexterity',
+      null,
+      true,
+      13,
+    );
+    const result = armorClass({
+      armor: template('Leather Armor'),
+      scores: scores({ dexterity: 18 }),
+      formulas: [shell],
+    });
+
+    // Leather is 11 + 4 = 15. Armadillo Shell would be 17, but its broken
+    // unarmoured condition excludes it rather than making it the winner.
+    expect(result.value).toBe(15);
+    expect(result.winner.formula.label).toBe('Leather Armor');
+    expect(result.excluded.map((entry) => entry.formula.label)).toEqual([
+      'Unarmoured',
+      'Armadillo Shell',
+    ]);
+    expect(
+      result.excluded.every(
+        (entry) => entry.reason.kind === 'wearing_armor',
+      ),
+    ).toBe(true);
+  });
+
+  it('uses the total clone-stable source-and-label tie-break', () => {
+    const tied = [
+      formula('Zulu Manual', 'manual', 'dexterity', null, true),
+      formula('Weapon Shell', 'weapon', 'dexterity', null, true),
+      formula('Item Shell', 'item', 'dexterity', null, true),
+      formula('Background Shell', 'background', 'dexterity', null, true),
+      formula('Feat Shell', 'feat', 'dexterity', null, true),
+      formula('Zulu Class', 'class', 'dexterity', null, true),
+      formula('Alpha Class', 'class', 'dexterity', null, true),
+      formula('Subclass Shell', 'subclass', 'dexterity', null, true),
+      formula('Species Shell', 'species', 'dexterity', null, true),
+    ];
+    const result = armorClass({
+      scores: scores({ dexterity: 10 }),
+      formulas: tied,
+    });
+
+    // All ten formulas, including the built-in floor, total 10. Species is the
+    // first eligible persisted category; ids and acquisition order never enter.
+    expect(result.value).toBe(10);
+    expect(result.winner.formula.label).toBe('Species Shell');
+    expect(result.tie_break?.rule).toBe('source_precedence_then_label');
+    expect(result.tie_break?.losers.map((entry) => entry.formula.label)).toEqual([
+      'Subclass Shell',
+      'Alpha Class',
+      'Zulu Class',
+      'Feat Shell',
+      'Background Shell',
+      'Item Shell',
+      'Weapon Shell',
+      'Unarmoured',
+      'Zulu Manual',
+    ]);
+  });
+
+  it('adds every flat bonus after resolving the winning base', () => {
+    const result = armorClass({
+      scores: scores({ dexterity: 14 }),
+      bonuses: [
+        { label: 'Cloak of the Armadillo', amount: 1 },
+        { label: 'Ring of Shell', amount: 1 },
+      ],
+    });
+    expect(result.winner.total).toBe(12);
+    expect(result.value).toBe(14);
   });
 
   it('applies the manual adjustment last', () => {

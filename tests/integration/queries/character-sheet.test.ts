@@ -5,6 +5,7 @@ import { seedClassProgressions } from '../../../src/rules/class-progression-look
 import { seedSheetContent } from '../../../src/rules/sheet-srd';
 import { CharacterSheetBuilder } from '../../../src/queries/character-sheet-builder';
 import { CharacterNotFoundError } from '../../../src/queries/character-crud';
+import { characterEffects } from '../../../src/rules/origins';
 import { openTestDatabase } from '../../helpers/open-db';
 
 /**
@@ -286,6 +287,11 @@ describe('the derived character sheet', () => {
   it('warns when the Strength requirement is unmet, without changing the number', () => {
     db.exec('UPDATE characters SET strength = 10 WHERE id = ?', [characterId]);
     db.exec(
+      `INSERT INTO character_species (character_id, name, base_speed_feet)
+       VALUES (?, 'Human', 30)`,
+      [characterId],
+    );
+    db.exec(
       `INSERT INTO character_armor
          (character_id, slot, name, category, armor_class, dex_bonus,
           strength_requirement, stealth_disadvantage)
@@ -299,6 +305,181 @@ describe('the derived character sheet', () => {
     expect(sheet.warnings.map((warning) => warning.code)).toContain(
       'strength_requirement_unmet',
     );
+    // The warning has always said the speed is reduced by 10 feet. AC-3 makes
+    // the printed number agree: Human 30 becomes 20 while the requirement is
+    // unmet.
+    expect(sheet.walking_speed_feet).toBe(20);
+  });
+
+  it('gates every mechanical effect reader through item attunement', () => {
+    db.exec(
+      `INSERT INTO character_species (character_id, name, base_speed_feet)
+       VALUES (?, 'Human', 30)`,
+      [characterId],
+    );
+    const featId = db.exec(
+      `INSERT INTO feat_definitions (
+         content_key, name, rules_edition, repeatable, grant_rules
+       ) VALUES (
+         'test:feat:armadillo-boon', 'Armadillo Boon', '2024', 0, '[]'
+       )`,
+    ).lastInsertId;
+    const sourceId = db.exec(
+      `INSERT INTO character_source_instances (
+         character_id, instance_uuid, source_type, source_definition_id,
+         display_name, config, acquired_at_character_level, state
+       ) VALUES (
+         ?, 'test-source:armadillo-boon', 'feat', ?, 'Armadillo Boon',
+         '{}', 8, 'active'
+       )`,
+      [characterId, featId],
+    ).lastInsertId;
+    const cloakId = db.exec(
+      `INSERT INTO character_items (
+         character_id, name, requires_attunement, attuned
+       ) VALUES (?, 'Cloak of the Armadillo', 1, 0)`,
+      [characterId],
+    ).lastInsertId;
+    const attunedId = db.exec(
+      `INSERT INTO character_items (
+         character_id, name, requires_attunement, attuned
+       ) VALUES (?, 'Attuned Shell', 1, 1)`,
+      [characterId],
+    ).lastInsertId;
+    const ringId = db.exec(
+      `INSERT INTO character_items (
+         character_id, name, requires_attunement, attuned
+       ) VALUES (?, 'Ring of Shell', 0, 0)`,
+      [characterId],
+    ).lastInsertId;
+
+    db.exec(
+      `INSERT INTO character_effects (
+         character_id, sort_order, effect_kind, amount, source_instance_id,
+         character_item_id, label
+       ) VALUES
+         (?, 1, 'armor_class_bonus', 4, ?, ?, 'Cloak AC'),
+         (?, 2, 'armor_class_bonus', 1, ?, ?, 'Attuned Shell AC'),
+         (?, 3, 'armor_class_bonus', 1, ?, ?, 'Ring AC'),
+         (?, 4, 'armor_class_bonus', 1, ?, NULL, 'Manual AC')`,
+      [
+        characterId, sourceId, cloakId,
+        characterId, sourceId, attunedId,
+        characterId, sourceId, ringId,
+        characterId, sourceId,
+      ],
+    );
+    db.exec(
+      `INSERT INTO character_effects (
+         character_id, sort_order, effect_kind, hit_points_flat,
+         source_instance_id, character_item_id, label
+       ) VALUES (?, 5, 'hp_modifier', 5, ?, ?, 'Amulet HP')`,
+      [characterId, sourceId, cloakId],
+    );
+    db.exec(
+      `INSERT INTO character_effects (
+         character_id, sort_order, effect_kind, speed_bonus_feet,
+         source_instance_id, character_item_id, label
+       ) VALUES (?, 6, 'speed', 5, ?, ?, 'Cloak Speed')`,
+      [characterId, sourceId, cloakId],
+    );
+    db.exec(
+      `INSERT INTO character_effects (
+         character_id, sort_order, effect_kind, damage_type,
+         source_instance_id, character_item_id, label
+       ) VALUES (?, 7, 'damage_resistance', 'Fire', ?, ?, 'Cloak Resistance')`,
+      [characterId, sourceId, cloakId],
+    );
+    db.exec(
+      `INSERT INTO character_effects (
+         character_id, sort_order, effect_kind, ability, amount, maximum,
+         source_instance_id, character_item_id, label
+       ) VALUES (
+         ?, 8, 'ability_increase', 'constitution', 2, 20, ?, ?,
+         'Cloak Constitution'
+       )`,
+      [characterId, sourceId, cloakId],
+    );
+
+    const unattuned = builder.build(characterId);
+    // Base 12 plus the attuned-required, non-required-unattuned and NULL-owned
+    // +1 effects. The required-and-unattuned Cloak's +4 is absent.
+    expect(unattuned.armor_class.value).toBe(15);
+    expect(unattuned.hit_points.value).toBe(54);
+    expect(unattuned.species_hit_points).toBeNull();
+    expect(unattuned.walking_speed_feet).toBe(30);
+    expect(unattuned.damage_resistances).toEqual([]);
+    expect(
+      characterEffects(db, characterId).map((effect) => effect.label),
+    ).not.toContain('Amulet HP');
+
+    db.exec(
+      'UPDATE character_items SET attuned = 1 WHERE id = ?',
+      [cloakId],
+    );
+    const attuned = builder.build(characterId);
+    expect(attuned.armor_class.value).toBe(19);
+    // Constitution 13 + 2 = 15, moving its modifier from +1 to +2 across all
+    // eight levels: 54 + 8 = 62.
+    expect(attuned.hit_points.value).toBe(62);
+    expect(attuned.species_hit_points?.value).toBe(5);
+    expect(attuned.walking_speed_feet).toBe(35);
+    expect(attuned.damage_resistances).toEqual(['Fire']);
+    expect(
+      characterEffects(db, characterId).map((effect) => effect.label),
+    ).toContain('Amulet HP');
+  });
+
+  it('resolves produced formulas before applying shields and AC bonuses', () => {
+    db.exec(
+      `UPDATE characters
+       SET constitution = 16, charisma = 16
+       WHERE id = ?`,
+      [characterId],
+    );
+    const speciesSource = db.exec(
+      `INSERT INTO character_source_instances (
+         character_id, instance_uuid, source_type, display_name
+       ) VALUES (?, 'test-source:armadillo-species', 'species', 'Armadillo')`,
+      [characterId],
+    ).lastInsertId;
+    const classSource = db.exec(
+      `INSERT INTO character_source_instances (
+         character_id, instance_uuid, source_type, display_name
+       ) VALUES (?, 'test-source:monk', 'class', 'Monk')`,
+      [characterId],
+    ).lastInsertId;
+    db.exec(
+      `INSERT INTO character_effects (
+         character_id, sort_order, effect_kind, base, ability_1, ability_2,
+         allows_shield, source_instance_id, label
+       ) VALUES
+         (?, 1, 'armor_class_formula', 13, 'dexterity', NULL, 1, ?,
+          'Armadillo Shell'),
+         (?, 2, 'armor_class_formula', 10, 'dexterity', 'wisdom', 0, ?,
+          'Martial Arts')`,
+      [characterId, speciesSource, characterId, classSource],
+    );
+    db.exec(
+      `INSERT INTO character_effects (
+         character_id, sort_order, effect_kind, amount, label
+       ) VALUES (?, 3, 'armor_class_bonus', 1, 'Cloak of the Armadillo')`,
+      [characterId],
+    );
+
+    // DEX 14 is +2 and WIS 11 is +0: Armadillo Shell 15 beats Martial Arts
+    // 12, then the Cloak adds 1.
+    expect(builder.build(characterId).armor_class.value).toBe(16);
+
+    db.exec(
+      `INSERT INTO character_armor (
+         character_id, slot, name, category, armor_class, dex_bonus
+       ) VALUES (?, 'shield', 'Shell Shield', 'shield', 2, 'none')`,
+      [characterId],
+    );
+    // Martial Arts is ineligible with a shield. Armadillo Shell still permits
+    // it: base 15 + shield 2 + cloak 1 = 18.
+    expect(builder.build(characterId).armor_class.value).toBe(18);
   });
 
   it('adds the proficiency bonus to a chosen skill and to nothing else', () => {
