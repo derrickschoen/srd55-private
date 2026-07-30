@@ -11,29 +11,36 @@ import type {
   ItemsPanel,
 } from '../domain/read-models';
 import type { AttunementSlot } from '../domain/attunement';
+import { readOwnedEffectsByOwner } from '../commands/equipment-effects';
 
 export class ItemQueries {
   constructor(private readonly db: DatabaseContext) {}
 
   panel(characterId: number): ItemsPanel {
-    return {
-      items: this.db.all(
-        `SELECT item.id, item.name, item.description, item.quantity,
-                item.requires_attunement, item.source_instance_id,
-                CASE
-                  WHEN slots.slot_1_item_id = item.id THEN 1
-                  WHEN slots.slot_2_item_id = item.id THEN 2
-                  WHEN slots.slot_3_item_id = item.id THEN 3
-                  ELSE NULL
-                END AS attunement_slot
-         FROM character_items AS item
-         LEFT JOIN character_attunement_slots AS slots
-           ON slots.character_id = item.character_id
-         WHERE item.character_id = ?
-         ORDER BY item.name, item.id`,
-        [characterId],
-        (row): CharacterItem => ({
-          id: sqlInteger(row, 'id'),
+    const effectsByItem = readOwnedEffectsByOwner(
+      this.db,
+      characterId,
+      'character_item_id',
+    );
+    const items = this.db.all(
+      `SELECT item.id, item.name, item.description, item.quantity,
+              item.requires_attunement, item.source_instance_id,
+              CASE
+                WHEN slots.slot_1_item_id = item.id THEN 1
+                WHEN slots.slot_2_item_id = item.id THEN 2
+                WHEN slots.slot_3_item_id = item.id THEN 3
+                ELSE NULL
+              END AS attunement_slot
+       FROM character_items AS item
+       LEFT JOIN character_attunement_slots AS slots
+         ON slots.character_id = item.character_id
+       WHERE item.character_id = ?
+       ORDER BY item.name, item.id`,
+      [characterId],
+      (row): CharacterItem => {
+        const id = sqlInteger(row, 'id');
+        return {
+          id,
           name: sqlString(row, 'name'),
           description: sqlNullableString(row, 'description'),
           quantity: sqlInteger(row, 'quantity'),
@@ -41,8 +48,12 @@ export class ItemQueries {
           source_instance_id: sqlNullableInteger(row, 'source_instance_id'),
           attunement_slot:
             sqlNullableInteger(row, 'attunement_slot') as AttunementSlot | null,
-        }),
-      ),
+          effects: effectsByItem.get(id) ?? [],
+        };
+      },
+    );
+    return {
+      items,
     };
   }
 }

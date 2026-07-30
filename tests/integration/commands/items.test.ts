@@ -54,9 +54,10 @@ describe('item commands and effect ownership', () => {
         requires_attunement: true,
         source_instance_id: null,
         effects: [{
-          effect_kind: 'armor_class_bonus',
-          amount: 1,
-          label: 'Cloak shell',
+          effect_kind: 'ability_override',
+          ability: 'strength',
+          maximum: 24,
+          label: 'Giant strength',
           notes: null,
         }],
       },
@@ -76,8 +77,9 @@ describe('item commands and effect ownership', () => {
       [itemId],
     );
     expect(originalEffect).toMatchObject({
-      effect_kind: 'armor_class_bonus',
-      amount: 1,
+      effect_kind: 'ability_override',
+      ability: 'strength',
+      maximum: 24,
       character_id: characterId,
       character_item_id: itemId,
       character_weapon_id: null,
@@ -120,13 +122,14 @@ describe('item commands and effect ownership', () => {
     ).toBe(3);
     expect(
       db.oneRaw(
-        'SELECT id, effect_kind, amount FROM character_effects WHERE character_item_id = ?',
+        'SELECT id, effect_kind, ability, maximum FROM character_effects WHERE character_item_id = ?',
         [itemId],
       ),
     ).toEqual({
       id: Number(originalEffect?.id),
-      effect_kind: 'armor_class_bonus',
-      amount: 1,
+      effect_kind: 'ability_override',
+      ability: 'strength',
+      maximum: 24,
     });
 
     const removed = await run({ type: 'remove_item', item_id: itemId });

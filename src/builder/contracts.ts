@@ -474,6 +474,25 @@ export interface AbilityIncreaseContribution {
   readonly source_instance_id: number;
 }
 
+export interface AbilityOverrideCandidate {
+  readonly effect_id: number;
+  readonly ability: Ability;
+  readonly set_to: number;
+  readonly label: string;
+  readonly source_instance_id: number | null;
+  readonly character_item_id: number | null;
+}
+
+export type AbilityOverrideOutcome =
+  | 'applied'
+  | 'floored_by_increased_score'
+  | 'tied_at_winning_value'
+  | 'superseded_by_higher_override';
+
+export interface ResolvedAbilityOverride extends AbilityOverrideCandidate {
+  readonly outcome: AbilityOverrideOutcome;
+}
+
 /**
  * THE RESOLVER, AND WHY IT ORDERS BY ACQUISITION.
  *
@@ -494,6 +513,13 @@ export interface AbilityIncreaseContribution {
 export interface ResolvedAbility {
   readonly base: number;
   readonly contributions: readonly AbilityIncreaseContribution[];
+  /** Score after every additive contribution and before SET effects. */
+  readonly increased: number;
+  /**
+   * Every eligible SET effect, including inert ones, so the sheet can explain
+   * both a winner and a value floored by the already-increased score.
+   */
+  readonly overrides: readonly ResolvedAbilityOverride[];
   readonly total: number;
 }
 

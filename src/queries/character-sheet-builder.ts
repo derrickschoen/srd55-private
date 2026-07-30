@@ -29,6 +29,7 @@ import {
   resolveCharacterAbilities,
   resolvedTotals,
 } from '../rules/ability-contributions';
+import type { AbilityOverrideOutcome } from '../builder/contracts';
 import { AbilityScores } from '../rules/ability-scores';
 import { SheetContentLookup } from '../rules/sheet-content-lookup';
 import { SKILL_LABELS, abilityForSkill } from '../rules/skills';
@@ -111,6 +112,21 @@ export interface SheetNumber {
   readonly value: number;
   /** How the number was reached, in the source's own terms. */
   readonly formula: string;
+}
+
+export interface SheetAbilityOverrideTerm {
+  /** User- or source-authored name; the view must mark it as free text. */
+  readonly label: string;
+  readonly set_to: number;
+  readonly outcome: AbilityOverrideOutcome;
+}
+
+export interface SheetAbilityScore extends SheetNumber {
+  readonly ability: Ability;
+  readonly score: number;
+  readonly base_score: number;
+  readonly increased_score: number;
+  readonly override_terms: readonly SheetAbilityOverrideTerm[];
 }
 
 export interface UndeterminedSheetNumber
@@ -291,10 +307,7 @@ export interface CharacterSheet {
   readonly name: string;
   readonly total_level: number | null;
   readonly proficiency_bonus: UndeterminedSheetNumber;
-  readonly ability_scores: readonly (SheetNumber & {
-    readonly ability: Ability;
-    readonly score: number;
-  })[];
+  readonly ability_scores: readonly SheetAbilityScore[];
   readonly hit_points: SheetNumber;
   /** The species contribution, separately, and `null` when there is none. */
   readonly species_hit_points: UndeterminedSheetNumber | null;
@@ -565,7 +578,12 @@ export class CharacterSheetBuilder {
 
   build(characterId: number): CharacterSheet {
     const character = this.#character(characterId);
-    const scores = this.#scores(characterId, character);
+    const resolvedAbilities = resolveCharacterAbilities(
+      this.db,
+      characterId,
+      character.base_abilities,
+    );
+    const scores = AbilityScores.fromArray(resolvedTotals(resolvedAbilities));
     const content = this.#content.forCharacter(characterId);
     const classes = this.#classes(characterId, content);
     const rolls = this.#rolls(characterId);
@@ -671,6 +689,15 @@ export class CharacterSheetBuilder {
         score: scores.score(ability).value,
         value: scores.score(ability).modifier(),
         formula: `(score − 10) / 2, rounded down.`,
+        base_score: resolvedAbilities[ability].base,
+        increased_score: resolvedAbilities[ability].increased,
+        override_terms: resolvedAbilities[ability].overrides.map(
+          (override) => ({
+            label: override.label,
+            set_to: override.set_to,
+            outcome: override.outcome,
+          }),
+        ),
       })),
       hit_points: {
         id: 'hit_points',

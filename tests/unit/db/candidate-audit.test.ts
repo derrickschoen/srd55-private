@@ -785,6 +785,40 @@ describe('candidate database semantic audit', () => {
     ).not.toThrow();
   });
 
+  it('audits and restores ability_override in the existing a7-v12 snapshot shape', () => {
+    const db = freshDatabase();
+    seedTwoCharacters(db);
+    db.exec(
+      `INSERT INTO character_effects (
+         id, character_id, sort_order, effect_kind, ability, maximum,
+         source_instance_id, label
+       ) VALUES (
+         1, 1, 1, 'ability_override', 'strength', 24, 1,
+         'Epic Strength Boon'
+       )`,
+    );
+    const snapshot = snapshotOf(db, 1);
+    expect(snapshot.schema_version).toBe('a7-v12');
+    insertSavePoint(db, 1, snapshot);
+
+    expect(() => auditCandidateDatabase(quarantined(bytesOf(db)))).not.toThrow();
+
+    db.exec('DELETE FROM character_effects WHERE id = 1');
+    new CharacterState(new DatabaseContext(db)).restore(1, snapshot);
+    expect(
+      db.selectObject(
+        `SELECT effect_kind, ability, maximum, source_instance_id, label
+         FROM character_effects WHERE id = 1`,
+      ),
+    ).toEqual({
+      effect_kind: 'ability_override',
+      ability: 'strength',
+      maximum: 24,
+      source_instance_id: 1,
+      label: 'Epic Strength Boon',
+    });
+  });
+
   it('accepts and restores a v5 save point with legacy damage and range', () => {
     const db = freshDatabase();
     seedTwoCharacters(db);

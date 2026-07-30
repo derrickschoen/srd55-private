@@ -1,4 +1,5 @@
 import type { WeaponFields } from './command-contracts';
+import type { EquipmentEffectInput } from './equipment-effects';
 import type { AttunementSlot } from './attunement';
 import type { AttackProfileResult } from '../rules/attack-profiles';
 import type { CharacterMasteryAllowance } from '../rules/weapon-mastery-lookup';
@@ -89,6 +90,7 @@ export interface CharacterItem {
   readonly requires_attunement: boolean;
   readonly source_instance_id: number | null;
   readonly attunement_slot: AttunementSlot | null;
+  readonly effects: readonly EquipmentEffectInput[];
 }
 
 export interface ItemsPanel {

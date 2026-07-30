@@ -40,12 +40,14 @@
 import {
   ABILITY_SCORE_MIN,
   type AbilityIncreaseContribution,
+  type AbilityOverrideCandidate,
   type ResolvedAbilities,
   type ResolvedAbility,
 } from '../builder/contracts';
 import type { DatabaseContext } from '../db/database';
 import { abilities, type Ability } from '../domain/enums';
 import { readEligibleCharacterEffects } from './eligible-character-effects';
+import type { EligibleCharacterEffect } from './eligible-character-effects';
 
 /**
  * Resolves the six abilities from base scores and contributions.
@@ -64,6 +66,7 @@ import { readEligibleCharacterEffects } from './eligible-character-effects';
 export function resolveAbilities(
   base: Readonly<Record<Ability, number>>,
   contributions: readonly AbilityIncreaseContribution[],
+  overrides: readonly AbilityOverrideCandidate[] = [],
 ): ResolvedAbilities {
   const resolved = {} as Record<Ability, ResolvedAbility>;
   for (const ability of abilities) {
@@ -85,9 +88,38 @@ export function resolveAbilities(
         );
       }
     }
+    const ownOverrides = overrides.filter(
+      (override) => override.ability === ability,
+    );
+    const winner = ownOverrides.reduce<AbilityOverrideCandidate | null>(
+      (highest, override) =>
+        highest === null || override.set_to > highest.set_to
+          ? override
+          : highest,
+      null,
+    );
+    const increased = running;
+    const resolvedOverrides = ownOverrides.map((override) => ({
+      ...override,
+      outcome:
+        override.set_to <= increased
+          ? ('floored_by_increased_score' as const)
+          : override.effect_id === winner?.effect_id
+            ? ('applied' as const)
+            : override.set_to === winner?.set_to
+              ? ('tied_at_winning_value' as const)
+              : ('superseded_by_higher_override' as const),
+    }));
+    if (winner !== null) {
+      // D83's order is exact: base -> individually capped increases -> highest
+      // SET target, floored at the increased score. SET effects never add.
+      running = Math.max(increased, winner.set_to);
+    }
     resolved[ability] = {
       base: base[ability],
       contributions: own,
+      increased,
+      overrides: resolvedOverrides,
       total: running,
     };
   }
@@ -101,11 +133,10 @@ export function resolveAbilities(
  * appear here. The kind's CHECKs make every selected column non-null for this
  * kind, so the codec reads them as required.
  */
-export function readAbilityContributions(
-  db: DatabaseContext,
-  characterId: number,
+function abilityContributionsFrom(
+  effects: readonly EligibleCharacterEffect[],
 ): AbilityIncreaseContribution[] {
-  return readEligibleCharacterEffects(db, characterId, 'acquisition')
+  return effects
     .filter((effect) => effect.effect_kind === 'ability_increase')
     .map((effect): AbilityIncreaseContribution => {
       if (
@@ -129,13 +160,62 @@ export function readAbilityContributions(
     });
 }
 
+export function readAbilityContributions(
+  db: DatabaseContext,
+  characterId: number,
+): AbilityIncreaseContribution[] {
+  return abilityContributionsFrom(
+    readEligibleCharacterEffects(db, characterId, 'acquisition'),
+  );
+}
+
+function abilityOverridesFrom(
+  effects: readonly EligibleCharacterEffect[],
+): AbilityOverrideCandidate[] {
+  return effects
+    .filter((effect) => effect.effect_kind === 'ability_override')
+    .map((effect): AbilityOverrideCandidate => {
+      if (effect.ability === null || effect.maximum === null) {
+        throw new Error(
+          `Ability override effect ${String(effect.id)} has an incomplete payload.`,
+        );
+      }
+      return {
+        effect_id: effect.id,
+        ability: effect.ability,
+        set_to: effect.maximum,
+        label: effect.label,
+        source_instance_id: effect.source_instance_id,
+        character_item_id: effect.character_item_id,
+      };
+    });
+}
+
+export function readAbilityOverrides(
+  db: DatabaseContext,
+  characterId: number,
+): AbilityOverrideCandidate[] {
+  return abilityOverridesFrom(
+    readEligibleCharacterEffects(db, characterId, 'acquisition'),
+  );
+}
+
 /** One call for the common reader shape: load, resolve, and keep all three. */
 export function resolveCharacterAbilities(
   db: DatabaseContext,
   characterId: number,
   base: Readonly<Record<Ability, number>>,
 ): ResolvedAbilities {
-  return resolveAbilities(base, readAbilityContributions(db, characterId));
+  const effects = readEligibleCharacterEffects(
+    db,
+    characterId,
+    'acquisition',
+  );
+  return resolveAbilities(
+    base,
+    abilityContributionsFrom(effects),
+    abilityOverridesFrom(effects),
+  );
 }
 
 /** The totals alone, shaped for `AbilityScores.fromArray` and the read model. */
