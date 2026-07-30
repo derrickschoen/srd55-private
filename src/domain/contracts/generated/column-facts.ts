@@ -210,8 +210,6 @@ export const COLUMN_FACTS = {
   character_sheet_adjustments: {
     id: { base: 'integer', notNull: true },
     character_id: { base: 'integer', notNull: true },
-    armor_class_adjustment: { base: 'integer', notNull: true },
-    armor_class_adjustment_note: { base: 'degraded', notNull: false },
     created_at: { base: 'degraded', notNull: false },
     updated_at: { base: 'degraded', notNull: false },
   },

@@ -48,20 +48,6 @@ export const SHEET_ROLL_BOUNDS = Object.freeze({
   maximum: 12,
 });
 
-export const SHEET_ADJUSTMENT_BOUNDS = Object.freeze({
-  /**
-   * The manual Armor Class adjustment is bounded SYMMETRICALLY at ±20.
-   *
-   * Signed because a negative adjustment is legitimate — a cursed item, a house
-   * rule — and refusing one would invent a rule the source does not state. The
-   * magnitude is sized to the largest thing it stands in for: Unarmored Defense
-   * adds a second ability modifier, at most +10 on a score of 30, and 20 leaves
-   * room for a house rule on top while still refusing the six-digit paste that
-   * a hostile share document would otherwise put on a sheet.
-   */
-  armorClassMagnitude: 20,
-});
-
 /** How long the free text on a stored sheet input may be. */
 export const SHEET_TEXT_LIMITS = Object.freeze({
   /** An armour's name. Matched to `WEAPON_TEXT_LIMITS.name` — same kind of field. */
@@ -70,8 +56,6 @@ export const SHEET_TEXT_LIMITS = Object.freeze({
   class_name: 120,
   /** Why the armour is what it is, or where it came from. */
   armor_notes: 2_000,
-  /** Why the manual adjustment exists — "Unarmored Defense (Barbarian): +Con". */
-  adjustment_note: 500,
 });
 
 export type SheetTextField = keyof typeof SHEET_TEXT_LIMITS;

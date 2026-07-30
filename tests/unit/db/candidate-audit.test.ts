@@ -903,6 +903,36 @@ describe('candidate database semantic audit', () => {
     expect(() => auditCandidateDatabase(quarantined(bytesOf(db)))).not.toThrow();
   });
 
+  it('accepts a pre-AC-4 save point carrying the retired adjustment columns', () => {
+    const db = freshDatabase();
+    seedTwoCharacters(db);
+    const snapshot = snapshotOf(db, 1);
+    snapshot.character_sheet_adjustments = [{
+      id: 14,
+      character_id: 1,
+      armor_class_adjustment: 3,
+      armor_class_adjustment_note: 'Old manual bonus',
+      created_at: '2026-07-30 12:00:00',
+      updated_at: '2026-07-30 12:00:00',
+    }];
+    insertSavePoint(db, 1, snapshot);
+
+    expect(() => auditCandidateDatabase(quarantined(bytesOf(db)))).not.toThrow();
+
+    new CharacterState(new DatabaseContext(db)).restore(1, snapshot);
+    expect(
+      db.selectObject(
+        `SELECT effect_kind, amount, label
+         FROM character_effects
+         WHERE character_id = 1`,
+      ),
+    ).toEqual({
+      effect_kind: 'armor_class_bonus',
+      amount: 3,
+      label: 'Old manual bonus',
+    });
+  });
+
   it('still audits the rows inside an a7-v1 save point', () => {
     // The corollary of accepting the version: the five tables it does carry get
     // exactly the scrutiny they got before. An older version is not an escape

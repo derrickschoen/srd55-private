@@ -13,6 +13,12 @@ import {
   migrateLegacyTraitRows,
   splitLegacyTraitEffect,
 } from '../rules/legacy-trait-effects';
+import {
+  legacyArmorClassAdjustmentError,
+  RETIRED_ARMOR_CLASS_ADJUSTMENT_COLUMNS,
+  splitLegacyArmorClassAdjustment,
+  type LegacyArmorClassBonus,
+} from '../rules/legacy-armor-class-adjustment';
 import { migrateLegacyWeaponDamageRow } from '../domain/weapon-damage';
 import { migrateLegacyWeaponRangeRow } from '../domain/weapon-range';
 import {
@@ -123,6 +129,7 @@ interface ValidatedDocument {
   readonly document: CharacterBackupDocument;
   readonly snapshots: readonly CharacterSnapshotData[];
   readonly referenceMaps: Readonly<Record<ReferenceKind, Map<number, string>>>;
+  readonly legacyArmorClassBonuses: readonly LegacyArmorClassBonus[];
 }
 
 /**
@@ -144,6 +151,7 @@ interface CharacterSnapshotData {
   readonly tables: readonly SnapshotStateTable[];
   readonly character: BackupRow;
   readonly rows: SnapshotRowMap;
+  readonly legacyArmorClassBonuses: readonly LegacyArmorClassBonus[];
 }
 
 type ResolvedReferences = Readonly<Record<ReferenceKind, Map<number, number>>>;
@@ -276,6 +284,7 @@ const RETIRED_ROW_COLUMNS: Readonly<
   // armour row, exactly as if a person had added it.
   character_weapons: ['source_instance_id'],
   character_armor: ['source_instance_id'],
+  character_sheet_adjustments: RETIRED_ARMOR_CLASS_ADJUSTMENT_COLUMNS,
 };
 
 /**
@@ -314,9 +323,31 @@ function rowList(
   if (!Array.isArray(value)) {
     throw new BackupValidationError(`${label} must be a list.`);
   }
-  return value.map((row, index) =>
-    reconciledColumns(table, backupRecord(row, `${label}[${index}]`)),
-  );
+  return value.map((row, index) => {
+    const rowLabel = `${label}[${index}]`;
+    const record = backupRecord(row, rowLabel);
+    if (table === 'character_sheet_adjustments') {
+      const error = legacyArmorClassAdjustmentError(record, rowLabel);
+      if (error !== null) {
+        throw new BackupValidationError(error);
+      }
+    }
+    return reconciledColumns(table, record);
+  });
+}
+
+function legacyArmorClassBonuses(
+  value: unknown,
+  label: string,
+): LegacyArmorClassBonus[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.flatMap((row, index) => {
+    const record = backupRecord(row, `${label}[${index}]`);
+    const split = splitLegacyArmorClassAdjustment(record);
+    return split?.effect == null ? [] : [split.effect];
+  });
 }
 
 /**
@@ -396,9 +427,21 @@ function parseSnapshot(value: unknown, label: string): CharacterSnapshotData {
     `${label}.character`,
     characterColumns,
   );
+  const migratedArmorClassBonuses = legacyArmorClassBonuses(
+    snapshot.character_sheet_adjustments,
+    `${label}.character_sheet_adjustments`,
+  );
+  // a7-v4 predates character_effects. A non-zero retired adjustment is itself
+  // an effect claim, so a portable copy is lifted to the first schema that can
+  // carry that claim rather than preserving a version that has nowhere to put
+  // it. Later versions already carry character_effects.
+  const migratedVersion =
+    version === 'a7-v4' && migratedArmorClassBonuses.length > 0
+      ? 'a7-v5'
+      : version;
   return {
     schema_version: version,
-    tables,
+    tables: snapshotTablesFor(migratedVersion),
     character,
     rows: Object.fromEntries(
       tables.map((table) => [
@@ -406,6 +449,7 @@ function parseSnapshot(value: unknown, label: string): CharacterSnapshotData {
         rowList(snapshot[table], `${label}.${table}`, table),
       ]),
     ) as SnapshotRowMap,
+    legacyArmorClassBonuses: migratedArmorClassBonuses,
   };
 }
 
@@ -1029,6 +1073,10 @@ function validateDocument(input: unknown): ValidatedDocument {
         : rowList(tableObject[table], `Character backup tables.${table}`, table),
     ]),
   ) as unknown as CharacterBackupTables;
+  const currentLegacyArmorClassBonuses = legacyArmorClassBonuses(
+    tableObject.character_sheet_adjustments,
+    'Character backup tables.character_sheet_adjustments',
+  );
 
   const referenceObject = backupRecord(
     document.references,
@@ -1162,6 +1210,7 @@ function validateDocument(input: unknown): ValidatedDocument {
     },
     snapshots,
     referenceMaps,
+    legacyArmorClassBonuses: currentLegacyArmorClassBonuses,
   };
 }
 
@@ -1726,6 +1775,7 @@ function importCurrentTables(
   document: CharacterBackupDocument,
   characterId: number,
   references: ResolvedReferences,
+  legacyArmorClassEffects: readonly LegacyArmorClassBonus[],
 ): CurrentImportMaps {
   const maps: CurrentImportMaps = {
     character_class_levels: new Map(),
@@ -1927,7 +1977,8 @@ function importCurrentTables(
       }),
     );
   }
-  // The four stored sheet inputs, on the same terms as the two groups above:
+  // The three current sheet inputs and the retired adjustment shell, on the
+  // same terms as the two groups above:
   // by D1b none holds a template id, and `character_hit_point_rolls` holds no
   // class-level id either, so every row travels exactly as written and only
   // `character_id` is rewritten. The id maps are still kept, because a save
@@ -2071,12 +2122,23 @@ function importCurrentTables(
       new Set(),
     );
   }
-  for (const row of document.tables.character_sheet_adjustments) {
-    maps.character_sheet_adjustments.set(
-      Number(row.id),
-      insertPortableRow(db, 'character_sheet_adjustments', row, {
+  // AC-4's retired adjustment joins the same migration tail. It comes after
+  // explicit and trait-derived effects, preserving both lists' order, and the
+  // historical shell row itself is not reinserted into current state.
+  for (const [index, effect] of legacyArmorClassEffects.entries()) {
+    insertPortableRow(
+      db,
+      'character_effects',
+      { ...effect },
+      {
         character_id: characterId,
-      }),
+        sort_order:
+          document.tables.character_effects.length +
+          legacyTraits.effects.length +
+          index +
+          1,
+      },
+      new Set(),
     );
   }
   for (const row of document.tables.spell_loadouts) {
@@ -2317,18 +2379,20 @@ function portableSnapshots(
         case 'character_species':
         case 'character_species_traits':
         case 'character_background':
-        // And the four sheet inputs, for the third time on the same terms:
+        // And the live sheet inputs, for the third time on the same terms:
         // nothing in the catalog to resolve, no class-level id to remap, so
         // only id and ownership are rewritten.
         case 'character_armor':
         case 'character_hit_point_rolls':
         case 'character_skill_proficiencies':
-        case 'character_sheet_adjustments':
           return rowsOf(table).map((row) => ({
             ...row,
             id: ids[table].get(Number(row.id)),
             character_id: characterId,
           }));
+        case 'character_sheet_adjustments':
+          // Current snapshots never carry a row in the historical shell.
+          return [];
         // `character_effects` needs its OWN branch and cannot join the group
         // above: it is the first character-owned table to reference another
         // one, so its `source_instance_id` must be remapped to the id this
@@ -2336,29 +2400,48 @@ function portableSnapshots(
         // pointing at another character's source instance — which the composite
         // foreign key would then refuse on the next restore, mid-undo.
         case 'character_effects':
-          return rowsOf(table).map((row) => ({
-            ...row,
-            id: ids[table].get(Number(row.id)),
-            character_id: characterId,
-            source_instance_id:
-              row.source_instance_id === null
-                ? null
-                : ids.character_source_instances.get(
-                    Number(row.source_instance_id),
-                  ) ?? null,
-            character_item_id:
-              row.character_item_id === null
-                ? null
-                : ids.character_items.get(
-                    Number(row.character_item_id),
-                  ) ?? null,
-            character_weapon_id:
-              row.character_weapon_id === null
-                ? null
-                : ids.character_weapons.get(
-                    Number(row.character_weapon_id),
-                  ) ?? null,
-          }));
+          return [
+            ...rowsOf(table).map((row) => ({
+              ...row,
+              id: ids[table].get(Number(row.id)),
+              character_id: characterId,
+              source_instance_id:
+                row.source_instance_id === null
+                  ? null
+                  : ids.character_source_instances.get(
+                      Number(row.source_instance_id),
+                    ) ?? null,
+              character_item_id:
+                row.character_item_id === null
+                  ? null
+                  : ids.character_items.get(
+                      Number(row.character_item_id),
+                    ) ?? null,
+              character_weapon_id:
+                row.character_weapon_id === null
+                  ? null
+                  : ids.character_weapons.get(
+                      Number(row.character_weapon_id),
+                    ) ?? null,
+            })),
+            ...snapshot.legacyArmorClassBonuses.map((effect, index) => ({
+              ...effect,
+              id: next.character_effects.value++,
+              character_id: characterId,
+              sort_order: rowsOf(table).length + index + 1,
+              damage_type: null,
+              hit_points_flat: null,
+              hit_points_per_level: null,
+              speed_bonus_feet: null,
+              ability: null,
+              maximum: null,
+              base: null,
+              ability_1: null,
+              ability_2: null,
+              allows_shield: null,
+              weapon_scope: null,
+            })),
+          ];
         // `character_items` needs its OWN branch too, on the IDENTICAL terms
         // `character_effects` does one arm up: it is the second character-owned
         // table to reference another one via a nullable `source_instance_id`
@@ -2406,7 +2489,11 @@ function portableSnapshots(
     // that moment. Nobody knows that; the snapshot simply predates the question.
     // So an old save point survives a round trip as an old save point.
     const rewritten: Record<string, unknown> = {
-      schema_version: snapshot.schema_version,
+      schema_version:
+        snapshot.schema_version === 'a7-v4' &&
+        snapshot.legacyArmorClassBonuses.length > 0
+          ? 'a7-v5'
+          : snapshot.schema_version,
       character: snapshot.character,
     };
     for (const table of snapshot.tables) {
@@ -2448,6 +2535,7 @@ export function importCharacterBackup(
       validated.document,
       characterId,
       references,
+      validated.legacyArmorClassBonuses,
     );
     // The reconciler runs AFTER the grants are restored (plan §3.2) — and only
     // when the document actually carried grants. A file written before the

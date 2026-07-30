@@ -349,6 +349,33 @@ const VERSION_FIXTURES = {
       }],
     },
   },
+  10: {
+    // Independently compressed from a hand-authored v10 positional tuple.
+    // Its three-field sheet tuple is the field-removal AC-4 exists for, and
+    // the manual -2 now occupies the ordinary effect tuple instead.
+    fragment:
+      'H4sIAAAAAAAAA5VPywrCMBD8lbDnBFr_QETw4tVLKGVNtlTZJLKb_L_UY3OxMMxhHjDjIebo' +
+      'UuP6CoyqTj_ErC6sKBgqidMVhcCOg_XwGAdzXRYK1dxICtjcmI_TZH2HXcx3jU7wgJKKzL_' +
+      'd87PkpmDhjrkhm_NmmctmGYzvpjVRrv8Pdqdjj_YHpi-q5zZvWQEAAA',
+    expected: {
+      format: CHARACTER_SHARE_FORMAT,
+      version: CHARACTER_SHARE_VERSION,
+      character: {
+        name: 'V10 Effect Hero',
+      },
+      classes: [],
+      sources: [],
+      selections: [],
+      spellbook: [],
+      preferences: [],
+      overrides: [],
+      effects: [{
+        kind: 'armor_class_bonus',
+        label: 'Manual Armor Class adjustment',
+        amount: -2,
+      }],
+    },
+  },
 } satisfies Record<SupportedShareVersion, FrozenFixture>;
 
 const HISTORICAL_SCHEMA_MODULE_SHA256 = {
@@ -465,6 +492,28 @@ describe('the share-link wire schema registry', () => {
         fixture.expected,
       );
     }
+  });
+
+  it('migrates the retired v9 adjustment into one effect and drops zero with its note', async () => {
+    const nonZero =
+      'H4sIAAAAAAAAA4tWSslL0c0tzSnJTM5JLC7WLS5Izckp1k3OSCxKTC5JLdItzkgsSlXSsdSJ' +
+      'VgqzVHBMySotLslNzStR8EgtylfSySvNySGdiNWJxkBoyqIxdKAr0DWCyGBoBYsCAFHpYzfaAAAA';
+    const zeroWithNote =
+      'H4sIAAAAAAAAA5WMMQrEMAwEv2JUy3BtykCKvOAak8LYgiQotpHk5l5_kDKuAstUMxsgl-yv' +
+      'znYkjqpeGzGrT3uUmIzE6x6FACcM8J3cnM-udlExt5JUwNKZ32PDMOyhhaF4Ch-ERWprlN2PpLpSjWAbju76D1796GfoAAAA';
+
+    await expect(decodeShareFragment(nonZero)).resolves.toMatchObject({
+      version: 10,
+      effects: [{
+        kind: 'armor_class_bonus',
+        label: 'Manual Armor Class adjustment',
+        amount: -2,
+      }],
+    });
+    const zero = await decodeShareFragment(zeroWithNote);
+    expect(zero.version).toBe(10);
+    expect(zero).not.toHaveProperty('effects');
+    expect(zero).not.toHaveProperty('sheetAdjustment');
   });
 
   it('still parses every retired fixture against ITS OWN frozen schema, before migration composition', () => {

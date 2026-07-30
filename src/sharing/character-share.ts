@@ -43,7 +43,6 @@ import {
   type ShareClass,
   type ShareHitPointRoll,
   type ShareItem,
-  type ShareSheetAdjustment,
   type ShareSource,
   type ShareEffect,
   type ShareSpecies,
@@ -130,7 +129,6 @@ export interface SharePreview {
   readonly armorCount: number;
   readonly hitPointRollCount: number;
   readonly skillProficiencyCount: number;
-  readonly includesArmorClassAdjustment: boolean;
   readonly includesAcknowledgements: boolean;
   readonly includesLoadouts: boolean;
   /**
@@ -417,19 +415,6 @@ function shareHitPointRollFromRow(row: Row): ShareHitPointRoll {
     classLevel: Number(row.class_level),
     value: Number(row.rolled_value),
   };
-}
-
-function shareSheetAdjustmentFromRow(row: Row): ShareSheetAdjustment {
-  const adjustment: Record<string, unknown> = {
-    value: Number(row.armor_class_adjustment),
-  };
-  if (
-    row.armor_class_adjustment_note !== null &&
-    row.armor_class_adjustment_note !== undefined
-  ) {
-    adjustment.note = String(row.armor_class_adjustment_note);
-  }
-  return adjustment as unknown as ShareSheetAdjustment;
 }
 
 function shareSpeciesFromRow(row: Row): ShareSpecies {
@@ -1078,15 +1063,6 @@ export function exportCharacterShare(
         },
       ];
     });
-  const adjustmentRow = db.oneRaw(
-    `SELECT * FROM ${SHARE_TABLES.character_sheet_adjustments}
-     WHERE character_id = ?`,
-    [characterId],
-  );
-  const sheetAdjustment =
-    adjustmentRow === null
-      ? undefined
-      : shareSheetAdjustmentFromRow(adjustmentRow);
   const sharedSpellKeys = new Set([
     ...selections.map((selection) => selection.spellKey),
     ...spellbook,
@@ -1185,7 +1161,6 @@ export function exportCharacterShare(
     ...(armor === undefined ? {} : { armor }),
     ...(hitPointRolls === undefined ? {} : { hitPointRolls }),
     ...(skillProficiencies === undefined ? {} : { skillProficiencies }),
-    ...(sheetAdjustment === undefined ? {} : { sheetAdjustment }),
     // Omitted when empty, on the same terms as every section above: a character
     // with no effects produces a link exactly the shape it was before the
     // effect model existed.
@@ -1459,7 +1434,6 @@ export function previewCharacterShare(
     armorCount: document.armor?.length ?? 0,
     hitPointRollCount: document.hitPointRolls?.length ?? 0,
     skillProficiencyCount: document.skillProficiencies?.length ?? 0,
-    includesArmorClassAdjustment: document.sheetAdjustment !== undefined,
     includesAcknowledgements:
       document.acknowledgements !== undefined,
     includesLoadouts: document.loadouts !== undefined,
@@ -2168,16 +2142,6 @@ export function importCharacterShare(
            character_id, skill, created_at, updated_at
          ) VALUES (?, ?, ?, ?)`,
         [characterId, skill, now, now],
-      );
-    }
-    if (document.sheetAdjustment !== undefined) {
-      const adjustment = document.sheetAdjustment;
-      db.exec(
-        `INSERT INTO ${SHARE_TABLES.character_sheet_adjustments} (
-           character_id, armor_class_adjustment,
-           armor_class_adjustment_note, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?)`,
-        [characterId, adjustment.value, adjustment.note ?? null, now, now],
       );
     }
     for (const loadout of document.loadouts ?? []) {

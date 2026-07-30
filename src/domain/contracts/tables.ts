@@ -425,7 +425,9 @@ export const TABLE_SCOPES = {
     snapshot: true,
     backupDirect: true,
     backup: true,
-    share: true,
+    // Historical shell only. AC-4 migrates its retired payload into effects;
+    // current share documents carry those effects and never this table.
+    share: false,
     backupReference: false,
   },
 
@@ -1220,8 +1222,8 @@ export const CHARACTER_STATE_TABLES = order<SnapshotTable>()([
   // Appended for the third time and for the third time never inserted: capture
   // order is stable output, and an existing snapshot's key order is part of
   // what `equalValues` compares in `CharacterState.diff`. The armour row comes
-  // before the rolls, the rolls before the skills and the adjustment last,
-  // which is the order the sheet itself prints them in.
+  // before the rolls and the rolls before the skills. The retired adjustment
+  // table remains last as a historical snapshot shell.
   'character_armor',
   'character_hit_point_rolls',
   'character_skill_proficiencies',
@@ -1368,11 +1370,11 @@ export const BACKUP_OPTIONAL_TABLES = [
   'character_species',
   'character_species_traits',
   'character_background',
-  // The four stored sheet inputs. Every backup file a user already holds
+  // The four historical sheet tables. Every backup file a user already holds
   // predates all four, and without these entries `assertExactKeys` would make
   // each of those files UNOPENABLE — loud, and inflicted on exactly the data
   // this format exists to protect. `[]` is the honest reading: that document
-  // records no armour, no rolls, no skill choices and no adjustment.
+  // records no armour, no rolls, no skill choices and no legacy adjustment.
   'character_armor',
   'character_hit_point_rolls',
   'character_skill_proficiencies',
@@ -1449,7 +1451,6 @@ export const SHARE_TABLES: { readonly [N in ShareTable]: N } = {
   character_hit_point_rolls: 'character_hit_point_rolls',
   character_skill_proficiencies: 'character_skill_proficiencies',
   character_skill_grants: 'character_skill_grants',
-  character_sheet_adjustments: 'character_sheet_adjustments',
   character_effects: 'character_effects',
   character_items: 'character_items',
 };

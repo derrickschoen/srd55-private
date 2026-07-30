@@ -251,6 +251,98 @@ describe('database migration chain', () => {
     lifecycle.close();
   });
 
+  it('retires each non-zero Armor Class adjustment into one manual effect', async () => {
+    const beforeAc4 = DATABASE_MIGRATIONS
+      .slice(0, 16)
+      .map((entry) => entry.sql)
+      .join('\n');
+    const storage = await storageHolding(
+      `${beforeAc4}
+       INSERT INTO characters (id, name) VALUES
+         (1, 'Labelled adjustment'),
+         (2, 'Unlabelled adjustment');
+       INSERT INTO character_effects (
+         character_id, sort_order, effect_kind, amount, label
+       ) VALUES (1, 4, 'armor_class_bonus', 1, 'Existing bonus');
+       INSERT INTO character_sheet_adjustments (
+         character_id, armor_class_adjustment, armor_class_adjustment_note
+       ) VALUES
+         (1, 3, 'House rule'),
+         (2, -2, NULL);`,
+    );
+    const lifecycle = new DatabaseLifecycle(sqlite3, storage, schema);
+    lifecycle.open();
+
+    expect(
+      lifecycle.database.allRaw(
+        `SELECT character_id, sort_order, effect_kind, amount, label,
+                source_instance_id, character_item_id, character_weapon_id,
+                template_ref
+         FROM character_effects
+         WHERE label <> 'Existing bonus'
+         ORDER BY character_id`,
+      ),
+    ).toEqual([
+      {
+        character_id: 1,
+        sort_order: 5,
+        effect_kind: 'armor_class_bonus',
+        amount: 3,
+        label: 'House rule',
+        source_instance_id: null,
+        character_item_id: null,
+        character_weapon_id: null,
+        template_ref: null,
+      },
+      {
+        character_id: 2,
+        sort_order: 1,
+        effect_kind: 'armor_class_bonus',
+        amount: -2,
+        label: 'Manual Armor Class adjustment',
+        source_instance_id: null,
+        character_item_id: null,
+        character_weapon_id: null,
+        template_ref: null,
+      },
+    ]);
+    expect(
+      lifecycle.database.allRaw('SELECT * FROM character_sheet_adjustments'),
+    ).toEqual([]);
+    lifecycle.close();
+  });
+
+  it('drops a zero Armor Class adjustment and its named note without creating an effect', async () => {
+    const beforeAc4 = DATABASE_MIGRATIONS
+      .slice(0, 16)
+      .map((entry) => entry.sql)
+      .join('\n');
+    const storage = await storageHolding(
+      `${beforeAc4}
+       INSERT INTO characters (id, name) VALUES (1, 'Zero adjustment');
+       INSERT INTO character_sheet_adjustments (
+         character_id, armor_class_adjustment, armor_class_adjustment_note
+       ) VALUES (1, 0, 'This zero-with-note is deliberately dropped');`,
+    );
+    const lifecycle = new DatabaseLifecycle(sqlite3, storage, schema);
+    lifecycle.open();
+
+    expect(
+      lifecycle.database.allRaw(
+        `SELECT effect_kind, amount, label
+         FROM character_effects WHERE character_id = 1`,
+      ),
+    ).toEqual([]);
+    expect(
+      lifecycle.database
+        .allRaw('SELECT name FROM pragma_table_info(?)', [
+          'character_sheet_adjustments',
+        ])
+        .map((row) => row.name),
+    ).toEqual(['id', 'character_id', 'created_at', 'updated_at']);
+    lifecycle.close();
+  });
+
   it('adds feat numbers without losing an existing definition', async () => {
     const storage = await storageHolding(
       `${SCHEMA_BEFORE_FEAT_MODEL}

@@ -710,7 +710,7 @@ export type EffectKind = (typeof effectKinds)[number];
  * vocabulary rather than a second, item-only one (D72's Option B, rejected):
  *
  *  - `armor_class_bonus` — a flat addend (Cloak of the Armadillo, Ring of
- *    Shell, and `armor_class_adjustment`'s eventual AC-4 retirement target).
+ *    Shell, and AC-4's migrated manual Armor Class adjustments).
  *  - `armor_class_formula` — base + up to two ability modifiers +
  *    `allows_shield` (Monk, Barbarian, the Armadillo Paladin's 10+CON+CHA, the
  *    Armadillo species' 13+DEX).

@@ -372,16 +372,6 @@ const skillGrant =
     });
   };
 
-const sheetAdjustment =
-  (values: Values): Write =>
-  (db) => {
-    insert(db, 'character_sheet_adjustments', {
-      character_id: newCharacter(db),
-      armor_class_adjustment: 0,
-      ...values,
-    });
-  };
-
 const sheetTraits =
   (values: Values): Write =>
   (db) => {
@@ -2875,25 +2865,6 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     accepts: [
       ['the first ordinal', skillGrant({ ordinal: 1 })],
       ['a later ordinal', skillGrant({ ordinal: 3 })],
-    ],
-  },
-  {
-    constraint: 'character_sheet_adjustments_armor_class_adjustment_check',
-    rejects: [
-      ['a magnitude past the bound', sheetAdjustment({ armor_class_adjustment: 21 })],
-      ['a negative magnitude past the bound', sheetAdjustment({ armor_class_adjustment: -21 })],
-      // The `typeof` limb: SQLite orders every TEXT value above every number,
-      // so a bare range would admit this on the upper side.
-      ['a text adjustment', sheetAdjustment({ armor_class_adjustment: 'three' })],
-    ],
-    accepts: [
-      ['the column default of zero', sheetAdjustment({})],
-      // SIGNED, on purpose: a cursed item or a house rule is a real negative
-      // adjustment, and refusing one would invent a rule the source never states.
-      ['a negative adjustment', sheetAdjustment({ armor_class_adjustment: -2 })],
-      ['the positive bound', sheetAdjustment({ armor_class_adjustment: 20 })],
-      ['the negative bound', sheetAdjustment({ armor_class_adjustment: -20 })],
-      ['a Barbarian-sized Unarmored Defense bonus', sheetAdjustment({ armor_class_adjustment: 5, armor_class_adjustment_note: 'Unarmored Defense: +Con' })],
     ],
   },
   {

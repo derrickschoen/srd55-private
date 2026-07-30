@@ -364,13 +364,6 @@ export interface FillSkillGrantCommand extends CommandBase {
   skill: Skill | null;
 }
 
-/** D12's escape hatch: a signed adjustment and the reason for it. */
-export interface SetArmorClassAdjustmentCommand extends CommandBase {
-  type: 'set_armor_class_adjustment';
-  value: number;
-  note: string | null;
-}
-
 export interface RestoreSnapshotCommand extends CommandBase {
   type: 'restore_snapshot';
   snapshot: CharacterSnapshot | JsonObject;
@@ -398,7 +391,6 @@ export type CharacterCommandPayload =
   | SetArmorCommand
   | SetHitPointRollCommand
   | FillSkillGrantCommand
-  | SetArmorClassAdjustmentCommand
   | RestoreSnapshotCommand;
 
 export interface CharacterCommandRequest {

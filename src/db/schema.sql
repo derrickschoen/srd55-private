@@ -311,12 +311,9 @@ CREATE TABLE `character_save_points` (
 CREATE TABLE `character_sheet_adjustments` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`character_id` integer NOT NULL,
-	`armor_class_adjustment` integer DEFAULT 0 NOT NULL,
-	`armor_class_adjustment_note` VARCHAR,
 	`created_at` DATETIME,
 	`updated_at` DATETIME,
-	FOREIGN KEY (`character_id`) REFERENCES `characters`(`id`) ON UPDATE no action ON DELETE cascade,
-	CONSTRAINT "character_sheet_adjustments_armor_class_adjustment_check" CHECK(typeof(`armor_class_adjustment`) = 'integer' AND `armor_class_adjustment` BETWEEN -20 AND 20)
+	FOREIGN KEY (`character_id`) REFERENCES `characters`(`id`) ON UPDATE no action ON DELETE cascade
 );
 
 CREATE UNIQUE INDEX `character_sheet_adjustments_character_id_unique` ON `character_sheet_adjustments` (`character_id`);

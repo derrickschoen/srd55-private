@@ -277,8 +277,6 @@ export interface CharacterSheet {
   readonly proficiencies: SheetProficiencies;
   readonly armor: readonly SheetArmorRow[];
   readonly hit_point_rolls: readonly SheetHitPointRoll[];
-  readonly armor_class_adjustment: number;
-  readonly armor_class_adjustment_note: string | null;
   /** The recorded package choices, D33's answer to a blank inventory (D65). */
   readonly equipment_packages: readonly SheetEquipmentPackage[];
   /** Degradations of a specific derivation, from `src/rules/sheet.ts`. */
@@ -413,15 +411,6 @@ export const SHEET_GAPS: readonly SheetGap[] = Object.freeze([
       '"no subclass taken".',
   },
   {
-    kind: 'no_unarmored_defense',
-    title: 'Unarmored Defense is not calculated',
-    detail:
-      'Barbarian and Monk Unarmored Defense replace the Armor Class formula, ' +
-      'and neither feature text is among this application’s sources. Use ' +
-      'the manual Armor Class adjustment and write down why; the sheet prints ' +
-      'the note beside the number.',
-  },
-  {
     kind: 'no_expertise',
     title: 'Expertise is not applied',
     detail:
@@ -533,7 +522,6 @@ export class CharacterSheetBuilder {
     const proficientSkills = this.#skillProficiencies(characterId);
     const stored = this.#armor(characterId);
     const armorRows = stored.rows;
-    const adjustment = this.#adjustment(characterId);
 
     const bonus = sheetProficiencyBonus(
       classes,
@@ -557,18 +545,7 @@ export class CharacterSheetBuilder {
         }),
       ),
       formulas: armorClassFormulas(eligibleEffectRows),
-      bonuses: [
-        ...armorClassBonuses(eligibleEffectRows),
-        ...(adjustment.value === 0
-          ? []
-          : [
-              {
-                label:
-                  adjustment.note ?? 'Manual Armor Class adjustment',
-                amount: adjustment.value,
-              },
-            ]),
-      ],
+      bonuses: armorClassBonuses(eligibleEffectRows),
       scores,
     });
     const saves = savingThrowProficiencies(classes);
@@ -679,7 +656,7 @@ export class CharacterSheetBuilder {
         id: 'armor_class',
         label: 'Armor Class',
         value: ac.value,
-        formula: armorClassFormula(worn, shield, adjustment.value),
+        formula: armorClassFormula(worn, shield),
       },
       initiative: {
         id: 'initiative',
@@ -770,8 +747,6 @@ export class CharacterSheetBuilder {
       })),
       armor: armorRows,
       hit_point_rolls: rolls.list,
-      armor_class_adjustment: adjustment.value,
-      armor_class_adjustment_note: adjustment.note,
       // Read through E-B's one recorded-package reader — the same source
       // resolution, choice reader and coin-line display filter the equipment
       // step uses — so the sheet's package line and the step cannot disagree
@@ -1027,24 +1002,6 @@ export class CharacterSheetBuilder {
     return { rows, warnings };
   }
 
-  #adjustment(characterId: number): {
-    readonly value: number;
-    readonly note: string | null;
-  } {
-    const row = this.db.one(
-      `SELECT armor_class_adjustment, armor_class_adjustment_note
-       FROM character_sheet_adjustments WHERE character_id = ?`,
-      [characterId],
-      (stored) => ({
-        value: sqlInteger(stored, 'armor_class_adjustment'),
-        note: sqlNullableString(stored, 'armor_class_adjustment_note'),
-      }),
-    );
-    // NO ROW MEANS ZERO, which is the same thing a stored 0 with no note would
-    // mean — and the write command deletes the row in that case precisely so
-    // there is only one representation to read.
-    return row ?? { value: 0, note: null };
-  }
 }
 
 function sheetArmor(row: SheetArmorRow): SheetArmor {
@@ -1116,7 +1073,6 @@ function armorClassSource(
 function armorClassFormula(
   worn: SheetArmorRow | null,
   shield: SheetArmorRow | null,
-  adjustment: number,
 ): string {
   const parts: string[] = [];
   parts.push(
@@ -1126,11 +1082,6 @@ function armorClassFormula(
   );
   if (shield !== null) {
     parts.push(`${shield.name}: +${String(shield.armor_class)}.`);
-  }
-  if (adjustment !== 0) {
-    parts.push(
-      `Manual adjustment: ${adjustment > 0 ? '+' : ''}${String(adjustment)}.`,
-    );
   }
   return parts.join(' ');
 }

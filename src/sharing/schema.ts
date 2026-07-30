@@ -36,7 +36,6 @@ import {
   ORIGIN_TEXT_LIMITS,
 } from '../domain/origin-limits';
 import {
-  SHEET_ADJUSTMENT_BOUNDS,
   SHEET_ARMOR_MAX,
   SHEET_ROLL_BOUNDS,
   SHEET_SHARE_COUNTS,
@@ -103,12 +102,14 @@ export const SHARE_LIMITS = Object.freeze({
    * How many effects one document may carry.
    *
    * Higher than `speciesTraits` because one trait may now grant several and a
-   * feat, a subclass or a background may grant more; 200 is far past any
+   * feat, a subclass or a background may grant more; 201 is far past any
    * hand-built character and exists for the same reason every other cap does —
    * to stop a hostile document spending the whole decompressed budget on one
    * section, and to name that section when it fires.
    */
-  effects: 200,
+  // One more than v9's cap: its independently-carried adjustment can become
+  // the 201st effect during the v9→v10 migration.
+  effects: 201,
   /**
    * The two unbounded-by-cardinality sheet sections.
    *
@@ -118,9 +119,9 @@ export const SHARE_LIMITS = Object.freeze({
    * drifted below a write cap and made a legitimately built character
    * unshareable.
    *
-   * `armor` and `sheetAdjustment` need no count here: the schema's UNIQUE
-   * indexes bound them at two rows and one row per character, and the validator
-   * refuses a duplicate slot outright rather than counting.
+   * `armor` needs no count here: the schema's UNIQUE index bounds it at two
+   * rows and the validator refuses a duplicate slot outright rather than
+   * counting.
    */
   hitPointRolls: SHEET_SHARE_COUNTS.hitPointRolls,
   skillProficiencies: SHEET_SHARE_COUNTS.skillProficiencies,
@@ -383,7 +384,7 @@ export interface ShareHitPointRoll {
 }
 
 /**
- * The manual Armor Class adjustment, D12's escape hatch, as at most one object.
+ * Historical v1–v9 wire payload for the retired manual Armor Class adjustment.
  *
  * A bare number would have been smaller on the wire and wrong: the note is what
  * makes an unexplained `+3` readable six months later, and an object leaves room
@@ -704,12 +705,12 @@ export interface CharacterShareDocument {
    */
   readonly effects?: readonly ShareEffect[];
   /**
-   * THE FOUR STORED SHEET INPUTS. Optional for the third time and for the same
+   * THE THREE STORED SHEET INPUTS. Optional for the third time and for the same
    * compatibility guarantee: every link generated before this change carries
    * none of these keys, and making any of them required would make each of
    * those links unreadable — a far larger loss than the one this change closes.
    *
-   * Four keys rather than one nested object, because they are independently
+   * Three keys rather than one nested object, because they are independently
    * absent: a character may have chosen skills and rolled no dice. A nested
    * object would need a fifth "present but empty" state to say so.
    *
@@ -720,7 +721,6 @@ export interface CharacterShareDocument {
   readonly armor?: readonly ShareArmor[];
   readonly hitPointRolls?: readonly ShareHitPointRoll[];
   readonly skillProficiencies?: readonly string[];
-  readonly sheetAdjustment?: ShareSheetAdjustment;
   /**
    * THE SKILL GRANTS (wire v5) — the provenance source of truth
    * `skillProficiencies` above is now a derived projection of. Optional on
@@ -1278,26 +1278,6 @@ function shareHitPointRoll(
       SHEET_ROLL_BOUNDS.maximum,
     ),
   };
-}
-
-function shareSheetAdjustment(
-  value: unknown,
-  label: string,
-): ShareSheetAdjustment {
-  const row = record(value, label);
-  exactKeys(row, ['value'], ['note'], label);
-  const magnitude = SHEET_ADJUSTMENT_BOUNDS.armorClassMagnitude;
-  const adjustment: Record<string, unknown> = {
-    value: integer(row.value, `${label}.value`, -magnitude, magnitude),
-  };
-  if (row.note !== undefined) {
-    adjustment.note = text(
-      row.note,
-      `${label}.note`,
-      SHEET_TEXT_LIMITS.adjustment_note,
-    );
-  }
-  return adjustment as unknown as ShareSheetAdjustment;
 }
 
 function shareSpecies(value: unknown, label: string): ShareSpecies {
@@ -1885,7 +1865,6 @@ export function validateShareDocument(
       'armor',
       'hitPointRolls',
       'skillProficiencies',
-      'sheetAdjustment',
       'effects',
       'skillGrants',
       'items',
@@ -2482,11 +2461,6 @@ export function validateShareDocument(
     assertUnique(skillProficiencies, 'skillProficiencies');
   }
 
-  const sheetAdjustment =
-    source.sheetAdjustment === undefined
-      ? undefined
-      : shareSheetAdjustment(source.sheetAdjustment, 'sheetAdjustment');
-
   let skillGrants: CharacterShareDocument['skillGrants'] | undefined;
   if (source.skillGrants !== undefined) {
     skillGrants = list(
@@ -2569,7 +2543,6 @@ export function validateShareDocument(
     ...(armor === undefined ? {} : { armor }),
     ...(hitPointRolls === undefined ? {} : { hitPointRolls }),
     ...(skillProficiencies === undefined ? {} : { skillProficiencies }),
-    ...(sheetAdjustment === undefined ? {} : { sheetAdjustment }),
     ...(effects === undefined ? {} : { effects }),
     ...(skillGrants === undefined ? {} : { skillGrants }),
     ...(items === undefined ? {} : { items }),

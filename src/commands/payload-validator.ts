@@ -20,7 +20,6 @@ import {
   WEAPON_TEXT_LIMITS,
 } from '../domain/weapon-limits';
 import {
-  SHEET_ADJUSTMENT_BOUNDS,
   SHEET_ARMOR_MAX,
   SHEET_ROLL_BOUNDS,
   SHEET_TEXT_LIMITS,
@@ -57,7 +56,6 @@ const commandTypes = [
   // (skills-with-provenance §3.5): deliberately absent, so both refuse as
   // 'Unknown character command type.' — the S-LEGACY control's assertion.
   'fill_skill_grant',
-  'set_armor_class_adjustment',
   'restore_snapshot',
 ] as const;
 
@@ -65,12 +63,14 @@ const commandTypes = [
  * The longest command type, DERIVED.
  *
  * `type` was bounded by a hand-written `22`, which is exactly the length of
- * `update_source_config` plus slack — and `set_armor_class_adjustment` is 26,
- * so adding it would have made every one of those commands fail validation
- * with a message about the string being too long rather than about the command.
- * Deriving the bound means the next command type cannot reintroduce that.
+ * `update_source_config` plus slack. Deriving the bound means the next command
+ * type cannot make its own name fail validation.
  */
 const COMMAND_TYPE_MAX_LENGTH = Math.max(
+  // Preserve the retired-command boundary: old RPC names at this length must
+  // reach the vocabulary check and receive "unknown command", not a misleading
+  // string-length error.
+  26,
   ...commandTypes.map((type) => type.length),
 );
 
@@ -1079,13 +1079,6 @@ function validateFillSkillGrant(record: UnknownRecord): void {
   }
 }
 
-function validateSetArmorClassAdjustment(record: UnknownRecord): void {
-  rejectUnknown(record, ['type', 'value', 'note', 'reason']);
-  const magnitude = SHEET_ADJUSTMENT_BOUNDS.armorClassMagnitude;
-  boundedInteger(record, 'value', -magnitude, magnitude);
-  nullableString(record, 'note', SHEET_TEXT_LIMITS.adjustment_note);
-}
-
 function validateRestoreSnapshot(record: UnknownRecord): void {
   rejectUnknown(record, ['type', 'snapshot', 'integrity', 'reason']);
   const snapshot = objectValue(
@@ -1165,9 +1158,6 @@ function validateByType(
       return record;
     case 'fill_skill_grant':
       validateFillSkillGrant(record);
-      return record;
-    case 'set_armor_class_adjustment':
-      validateSetArmorClassAdjustment(record);
       return record;
     case 'restore_snapshot':
       validateRestoreSnapshot(record);

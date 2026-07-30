@@ -22,7 +22,6 @@ import { UpdateCharacterRulesCommand } from './update-character-rules';
 import { UpdateClassCommand } from './update-class';
 import { UpdateSourceConfigCommand } from './update-source-config';
 import {
-  SetArmorClassAdjustmentCommand,
   SetArmorCommand,
   SetHitPointRollCommand,
 } from './sheet-inputs';
@@ -155,8 +154,6 @@ export class CharacterCommandFactory {
         return new SetHitPointRollCommand(this.db, payload);
       case 'fill_skill_grant':
         return new FillSkillGrantCommand(this.db, payload);
-      case 'set_armor_class_adjustment':
-        return new SetArmorClassAdjustmentCommand(this.db, payload);
       case 'restore_snapshot':
         return new RestoreSnapshotCommand(
           this.db,

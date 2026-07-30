@@ -9,7 +9,6 @@ import {
   type ShareEffect,
   type ShareHitPointRoll,
   type ShareItem,
-  type ShareSheetAdjustment,
   type ShareSpecies,
   type ShareSpeciesTrait,
   type ShareWeapon,
@@ -116,10 +115,6 @@ const SHEET_SKILL_PROFICIENCIES_INDEX = fieldIndex(
   WIRE_SCHEMA.tuples.sheet.fields,
   'skillProficiencies',
 );
-const SHEET_ADJUSTMENT_INDEX = fieldIndex(
-  WIRE_SCHEMA.tuples.sheet.fields,
-  'sheetAdjustment',
-);
 
 /** One worn item and one held item — `character_armor`'s own cardinality. */
 const ARMOR_SLOT_COUNT = 2;
@@ -146,8 +141,6 @@ const ITEM_TUPLE_LENGTH = WIRE_SCHEMA.tuples.item.arities[0];
 const ARMOR_TUPLE_LENGTH = WIRE_SCHEMA.tuples.armor.arities[0];
 const HIT_POINT_ROLL_TUPLE_LENGTH =
   WIRE_SCHEMA.tuples.hitPointRoll.arities[0];
-const SHEET_ADJUSTMENT_TUPLE_LENGTH =
-  WIRE_SCHEMA.tuples.sheetAdjustment.arities[0];
 
 const WEAPON_TUPLE_LENGTH =
   WIRE_SCHEMA.tuples.weapon.variants[0].arity;
@@ -472,24 +465,6 @@ function hitPointRollFromPositional(value: unknown, label: string): unknown {
   );
 }
 
-function sheetAdjustmentToPositional(
-  adjustment: ShareSheetAdjustment,
-): unknown[] {
-  return [adjustment.value, adjustment.note ?? null];
-}
-
-function sheetAdjustmentFromPositional(
-  value: unknown,
-  label: string,
-): unknown {
-  return fromPositional(
-    value,
-    SHEET_ADJUSTMENT_TUPLE_LENGTH,
-    fieldKeys(WIRE_SCHEMA.tuples.sheetAdjustment.fields),
-    label,
-  );
-}
-
 function fromPositional(
   value: unknown,
   length: number,
@@ -547,9 +522,6 @@ export function shareDocumentToPositional(
       skillProficiencies: document.skillProficiencies === undefined
         ? null
         : [...document.skillProficiencies],
-      sheetAdjustment: document.sheetAdjustment === undefined
-        ? null
-        : sheetAdjustmentToPositional(document.sheetAdjustment),
     },
     WIRE_SCHEMA.tuples.sheet.fields,
   );
@@ -934,12 +906,6 @@ function decodeCurrentWire(input: unknown): CharacterShareDocument {
         ...wireSheet[SHEET_SKILL_PROFICIENCIES_INDEX],
       ];
     }
-    if (wireSheet[SHEET_ADJUSTMENT_INDEX] !== null) {
-      raw.sheetAdjustment = sheetAdjustmentFromPositional(
-        wireSheet[SHEET_ADJUSTMENT_INDEX],
-        'wire sheetAdjustment',
-      );
-    }
   }
   if (Array.isArray(wireEffects)) {
     raw.effects = wireEffects.map((value, index) =>
@@ -1054,8 +1020,10 @@ export function positionalToShareDocument(
         'wire character',
       );
       return decodeCurrentWire(
-        MIGRATIONS[8](
-          MIGRATIONS[7](MIGRATIONS[6](MIGRATIONS[5](input))),
+        MIGRATIONS[9](
+          MIGRATIONS[8](
+            MIGRATIONS[7](MIGRATIONS[6](MIGRATIONS[5](input))),
+          ),
         ),
       );
     case 6:
@@ -1070,7 +1038,9 @@ export function positionalToShareDocument(
         'wire character',
       );
       return decodeCurrentWire(
-        MIGRATIONS[8](MIGRATIONS[7](MIGRATIONS[6](input))),
+        MIGRATIONS[9](
+          MIGRATIONS[8](MIGRATIONS[7](MIGRATIONS[6](input))),
+        ),
       );
     case 7:
       variableTuple(
@@ -1083,10 +1053,14 @@ export function positionalToShareDocument(
         SHARE_SCHEMAS[7].tuples.character.arities,
         'wire character',
       );
-      return decodeCurrentWire(MIGRATIONS[8](MIGRATIONS[7](input)));
+      return decodeCurrentWire(
+        MIGRATIONS[9](MIGRATIONS[8](MIGRATIONS[7](input))),
+      );
     case 8:
-      return decodeCurrentWire(MIGRATIONS[8](input));
+      return decodeCurrentWire(MIGRATIONS[9](MIGRATIONS[8](input)));
     case 9:
+      return decodeCurrentWire(MIGRATIONS[9](input));
+    case 10:
       return decodeCurrentWire(input);
     default:
       throw new ShareValidationError('version is unsupported.');

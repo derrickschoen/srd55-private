@@ -932,12 +932,6 @@ const REFINEMENTS = {
 
   'character_sheet_adjustments.id': positiveInt,
   'character_sheet_adjustments.character_id': positiveInt,
-  // SIGNED — `sqlInteger`, never `nonNegativeInt`. A negative adjustment is a
-  // cursed item or a house rule, and refusing it would invent a rule the source
-  // does not state. The symmetric magnitude bound is the CHECK's and the two
-  // boundaries', all from `SHEET_ADJUSTMENT_BOUNDS`.
-  'character_sheet_adjustments.armor_class_adjustment': sqlInteger,
-  'character_sheet_adjustments.armor_class_adjustment_note': sqlText,
   'character_sheet_adjustments.created_at': sqlTimestamp,
   'character_sheet_adjustments.updated_at': sqlTimestamp,
 

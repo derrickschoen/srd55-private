@@ -33,6 +33,10 @@ import { splitLegacyTraitEffect } from '../rules/legacy-trait-effects';
 import { migrateLegacyWeaponDamageRow } from '../domain/weapon-damage';
 import { migrateLegacyWeaponRangeRow } from '../domain/weapon-range';
 import { fillAddedNullableRowColumns } from '../domain/contracts/historical-row-columns';
+import {
+  legacyArmorClassAdjustmentError,
+  splitLegacyArmorClassAdjustment,
+} from '../rules/legacy-armor-class-adjustment';
 
 /**
  * THE SEMANTIC AUDIT OF A QUARANTINED CANDIDATE DATABASE.
@@ -677,7 +681,20 @@ function auditSavePointSnapshots(db: Database): void {
                 ),
               )
             : (row as Record<string, unknown>);
-        const reconciled = fillAddedNullableRowColumns(table, migrated);
+        if (table === 'character_sheet_adjustments') {
+          const adjustmentError = legacyArmorClassAdjustmentError(
+            migrated,
+            rowLabel,
+          );
+          if (adjustmentError !== null) {
+            throw new CandidateAuditError(adjustmentError);
+          }
+        }
+        const retired =
+          table === 'character_sheet_adjustments'
+            ? splitLegacyArmorClassAdjustment(migrated)?.row ?? migrated
+            : migrated;
+        const reconciled = fillAddedNullableRowColumns(table, retired);
         const error = rowContractError(
           table,
           legacy?.row ?? reconciled,

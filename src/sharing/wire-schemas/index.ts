@@ -7,6 +7,7 @@ import { WIRE_SCHEMA_V6 } from './v6';
 import { WIRE_SCHEMA_V7 } from './v7';
 import { WIRE_SCHEMA_V8 } from './v8';
 import { WIRE_SCHEMA_V9 } from './v9';
+import { WIRE_SCHEMA_V10 } from './v10';
 import {
   versatileWeaponDamageFromLegacy,
   weaponDamageFromLegacy,
@@ -23,7 +24,7 @@ import {
  * domain requires a new schema version, an adjacent migration, and a
  * hand-frozen fragment fixture. Never edit an existing version.
  */
-export const CURRENT_CHARACTER_SHARE_VERSION = 9 as const;
+export const CURRENT_CHARACTER_SHARE_VERSION = 10 as const;
 
 /**
  * Any change to tuple field order, meaning, membership, or accepted value
@@ -40,6 +41,7 @@ export const SHARE_SCHEMAS = Object.freeze({
   7: WIRE_SCHEMA_V7,
   8: WIRE_SCHEMA_V8,
   9: WIRE_SCHEMA_V9,
+  10: WIRE_SCHEMA_V10,
 } as const);
 
 export type SupportedShareVersion = keyof typeof SHARE_SCHEMAS;
@@ -572,11 +574,108 @@ function migrateV8ToV9(document: unknown): unknown {
 }
 
 /**
+ * V9's fourth SHEET field is the retired manual Armor Class adjustment. V10
+ * removes that field and carries its non-zero value through the one effect
+ * vocabulary instead. The old row has no provenance, item, weapon or template
+ * owner, so all four ownership slots remain null and the resolver ranks it as
+ * manual. A zero value — including zero with a note — deliberately appends
+ * nothing.
+ */
+function migrateV9ToV10(document: unknown): unknown {
+  if (
+    !Array.isArray(document) ||
+    !WIRE_SCHEMA_V9.tuples.root.arities.some(
+      (arity) => arity === document.length,
+    )
+  ) {
+    throw new TypeError('wire document has an unsupported v9 tuple length.');
+  }
+  const sheetIndex = WIRE_SCHEMA_V9.tuples.root.fields.findIndex(
+    (field) => field.key === 'sheet',
+  );
+  const effectsIndex = WIRE_SCHEMA_V9.tuples.root.fields.findIndex(
+    (field) => field.key === 'effects',
+  );
+  const sheet = document[sheetIndex];
+  const effects = document[effectsIndex];
+  if (effects !== null && !Array.isArray(effects)) {
+    throw new TypeError('wire effects must be null or a list.');
+  }
+
+  let migratedSheet = sheet;
+  let migratedEffects = effects;
+  if (sheet !== null) {
+    if (
+      !Array.isArray(sheet) ||
+      !WIRE_SCHEMA_V9.tuples.sheet.arities.some(
+        (arity) => arity === sheet.length,
+      )
+    ) {
+      throw new TypeError('wire sheet has an unsupported v9 tuple length.');
+    }
+    const adjustmentIndex = WIRE_SCHEMA_V9.tuples.sheet.fields.findIndex(
+      (field) => field.key === 'sheetAdjustment',
+    );
+    const adjustment = sheet[adjustmentIndex];
+    migratedSheet = sheet.slice(0, adjustmentIndex);
+    if (adjustment !== null) {
+      if (
+        !Array.isArray(adjustment) ||
+        !WIRE_SCHEMA_V9.tuples.sheetAdjustment.arities.some(
+          (arity) => arity === adjustment.length,
+        )
+      ) {
+        throw new TypeError(
+          'wire sheet adjustment has an unsupported v9 tuple length.',
+        );
+      }
+      const amount = adjustment[0];
+      const note = adjustment[1];
+      if (
+        !Number.isSafeInteger(amount) ||
+        Number(amount) < -20 ||
+        Number(amount) > 20
+      ) {
+        throw new TypeError(
+          'wire sheet adjustment value must be an integer from -20 through 20.',
+        );
+      }
+      if (note !== null && typeof note !== 'string') {
+        throw new TypeError(
+          'wire sheet adjustment note must be a string or null.',
+        );
+      }
+      if (amount !== 0) {
+        const effect: Record<string, unknown> = {
+          kind: 'armor_class_bonus',
+          label: note ?? 'Manual Armor Class adjustment',
+          amount,
+        };
+        const effectTuple = WIRE_SCHEMA_V9.tuples.effect.fields.map(
+          (field) => effect[field.key] ?? null,
+        );
+        migratedEffects = [
+          ...(effects === null ? [] : effects),
+          effectTuple,
+        ];
+      }
+    }
+  }
+
+  const migrated = [...document];
+  migrated[1] = 10;
+  migrated[sheetIndex] = migratedSheet;
+  migrated[effectsIndex] = migratedEffects;
+  return migrated;
+}
+
+/**
  * ADJACENT means each migration lifts exactly one version step; the decoder
  * composes them, so a v1 document runs 1→2, then 2→3, then 3→4, then 4→5 —
  * where every pre-v5 document is retired by the deliberate throw above — a
  * v5 document runs 5→6 (the null-pad) then 6→7, a v6 document runs 6→7, the
- * sourceRef drop, then 7→8, and a v7 document runs 7→8 alone.
+ * sourceRef drop, then 7→8. V8 appends equipment ownership in v9, and v9
+ * retires the sheet adjustment into an effect in v10.
  */
 export const MIGRATIONS = Object.freeze({
   1: migrateV1ToV2,
@@ -587,6 +686,7 @@ export const MIGRATIONS = Object.freeze({
   6: migrateV6ToV7,
   7: migrateV7ToV8,
   8: migrateV8ToV9,
+  9: migrateV9ToV10,
 }) satisfies AdjacentMigrations;
 
 export { WIRE_SCHEMA_V1 } from './v1';
@@ -598,6 +698,7 @@ export { WIRE_SCHEMA_V6 } from './v6';
 export { WIRE_SCHEMA_V7 } from './v7';
 export { WIRE_SCHEMA_V8 } from './v8';
 export { WIRE_SCHEMA_V9 } from './v9';
+export { WIRE_SCHEMA_V10 } from './v10';
 export type { WireField, WireSchemaV1 } from './v1';
 export type { WireSchemaV2 } from './v2';
 export type { WireSchemaV3 } from './v3';
@@ -607,3 +708,4 @@ export type { WireSchemaV6 } from './v6';
 export type { WireSchemaV7 } from './v7';
 export type { WireSchemaV8 } from './v8';
 export type { WireSchemaV9 } from './v9';
+export type { WireSchemaV10 } from './v10';
