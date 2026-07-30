@@ -43,8 +43,8 @@ describe('wire-v9 effect ownership', () => {
     ).lastInsertId;
     const itemId = db.exec(
       `INSERT INTO character_items (
-         character_id, name, requires_attunement, attuned, source_instance_id
-       ) VALUES (?, 'Cloak of the Armadillo', 1, 0, ?)`,
+         character_id, name, requires_attunement, source_instance_id
+       ) VALUES (?, 'Cloak of the Armadillo', 1, ?)`,
       [characterId, sourceId],
     ).lastInsertId;
     db.exec(

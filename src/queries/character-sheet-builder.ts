@@ -1098,10 +1098,20 @@ export class CharacterSheetBuilder {
 
   #items(characterId: number): readonly SheetItemRow[] {
     return this.db.all(
-      `SELECT name, description, requires_attunement, attuned
-       FROM character_items
-       WHERE character_id = ?
-       ORDER BY name, id`,
+      `SELECT item.name, item.description, item.requires_attunement,
+              CASE
+                WHEN item.id IN (
+                  slots.slot_1_item_id,
+                  slots.slot_2_item_id,
+                  slots.slot_3_item_id
+                ) THEN 1
+                ELSE 0
+              END AS attuned
+       FROM character_items AS item
+       LEFT JOIN character_attunement_slots AS slots
+         ON slots.character_id = item.character_id
+       WHERE item.character_id = ?
+       ORDER BY item.name, item.id`,
       [characterId],
       (row): SheetItemRow => ({
         name: sqlString(row, 'name'),

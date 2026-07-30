@@ -52,6 +52,30 @@ export const FOREIGN_KEY_FACTS = [
     targetColumns: ['id'],
   },
   {
+    table: 'character_attunement_slots',
+    columns: ['character_id'],
+    target: 'characters',
+    targetColumns: ['id'],
+  },
+  {
+    table: 'character_attunement_slots',
+    columns: ['slot_1_item_id', 'character_id'],
+    target: 'character_items',
+    targetColumns: ['id', 'character_id'],
+  },
+  {
+    table: 'character_attunement_slots',
+    columns: ['slot_2_item_id', 'character_id'],
+    target: 'character_items',
+    targetColumns: ['id', 'character_id'],
+  },
+  {
+    table: 'character_attunement_slots',
+    columns: ['slot_3_item_id', 'character_id'],
+    target: 'character_items',
+    targetColumns: ['id', 'character_id'],
+  },
+  {
     table: 'character_background',
     columns: ['character_id'],
     target: 'characters',

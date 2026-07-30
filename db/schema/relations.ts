@@ -65,7 +65,10 @@ import {
   species_template_traits,
   species_templates,
 } from './origins';
-import { character_items } from './items';
+import {
+  character_attunement_slots,
+  character_items,
+} from './items';
 import {
   armor_templates,
   class_armor_training,
@@ -122,6 +125,7 @@ export const charactersRelations = relations(characters, ({ many }) => ({
   sheet_adjustments: many(character_sheet_adjustments),
   effects: many(character_effects),
   items: many(character_items),
+  attunement_slots: many(character_attunement_slots),
 }));
 
 /**
@@ -380,6 +384,40 @@ export const characterItemsRelations = relations(
       ],
     }),
     effects: many(character_effects),
+  }),
+);
+
+export const characterAttunementSlotsRelations = relations(
+  character_attunement_slots,
+  ({ one }) => ({
+    character: one(characters, {
+      fields: [character_attunement_slots.character_id],
+      references: [characters.id],
+    }),
+    slot_1_item: one(character_items, {
+      fields: [
+        character_attunement_slots.slot_1_item_id,
+        character_attunement_slots.character_id,
+      ],
+      references: [character_items.id, character_items.character_id],
+      relationName: 'attunement_slot_1',
+    }),
+    slot_2_item: one(character_items, {
+      fields: [
+        character_attunement_slots.slot_2_item_id,
+        character_attunement_slots.character_id,
+      ],
+      references: [character_items.id, character_items.character_id],
+      relationName: 'attunement_slot_2',
+    }),
+    slot_3_item: one(character_items, {
+      fields: [
+        character_attunement_slots.slot_3_item_id,
+        character_attunement_slots.character_id,
+      ],
+      references: [character_items.id, character_items.character_id],
+      relationName: 'attunement_slot_3',
+    }),
   }),
 );
 

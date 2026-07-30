@@ -402,11 +402,17 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
   // modifier columns — see `db/schema/items.ts`.
   character_items: {
     integer: [
-      'id', 'character_id', 'requires_attunement', 'attuned',
-      'source_instance_id',
+      'id', 'character_id', 'requires_attunement', 'source_instance_id',
     ],
     text: ['name', 'description'],
     numeric: ['created_at', 'updated_at'],
+  },
+  character_attunement_slots: {
+    integer: [
+      'character_id', 'slot_1_item_id', 'slot_2_item_id', 'slot_3_item_id',
+    ],
+    text: [],
+    numeric: [],
   },
   background_templates: {
     integer: ['id'],
@@ -646,8 +652,9 @@ const expectedNotNull: Record<string, string[]> = {
   // columns — a name may travel with no prose yet, and most items are
   // hand-added with no granting source.
   character_items: [
-    'id', 'character_id', 'name', 'requires_attunement', 'attuned',
+    'id', 'character_id', 'name', 'requires_attunement',
   ],
+  character_attunement_slots: ['character_id'],
   background_templates: [
     'id', 'content_key', 'rules_edition', 'name', 'ability_score_1',
     'ability_score_2', 'ability_score_3', 'feat_name', 'skill_proficiency_1',
@@ -1183,10 +1190,10 @@ const expectedDefaults: Record<string, Record<string, string>> = {
   // and grants only Shields on entry.
   class_armor_training: { granted_on_multiclass_entry: 'false' },
   class_weapon_proficiencies: { granted_on_multiclass_entry: 'false' },
-  // AC-1 (D72): both default off. Ring of Shell (D72 §9's own "proves
+  // Ring of Shell (D72 §9's own "proves
   // attunement is not required" fixture) needs `requires_attunement` to
   // default false and not read as unknown.
-  character_items: { requires_attunement: 'false', attuned: 'false' },
+  character_items: { requires_attunement: 'false' },
 };
 
 /**
@@ -1341,6 +1348,12 @@ const expectedForeignKeys: Record<string, string[]> = {
   character_items: [
     'character_id->characters.id|CASCADE',
     'source_instance_id,character_id->character_source_instances.id,character_id|CASCADE',
+  ],
+  character_attunement_slots: [
+    'character_id->characters.id|CASCADE',
+    'slot_1_item_id,character_id->character_items.id,character_id|NO ACTION',
+    'slot_2_item_id,character_id->character_items.id,character_id|NO ACTION',
+    'slot_3_item_id,character_id->character_items.id,character_id|NO ACTION',
   ],
   character_background: ['character_id->characters.id|CASCADE'],
   // ONE EDGE EACH, and `character_hit_point_rolls` having only this one is the

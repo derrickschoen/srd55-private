@@ -372,6 +372,27 @@ const skillGrant =
     });
   };
 
+const attunementSlotRow =
+  (positions: readonly (number | null)[]): Write =>
+  (db) => {
+    const characterId = newCharacter(db);
+    const itemIds = ['Crown', 'Cloak', 'Ring'].map((name) =>
+      insert(db, 'character_items', {
+        character_id: characterId,
+        name: `${name} ${uid('item')}`,
+      })
+    );
+    insert(db, 'character_attunement_slots', {
+      character_id: characterId,
+      slot_1_item_id:
+        positions[0] === null ? null : itemIds[positions[0] ?? 0]!,
+      slot_2_item_id:
+        positions[1] === null ? null : itemIds[positions[1] ?? 1]!,
+      slot_3_item_id:
+        positions[2] === null ? null : itemIds[positions[2] ?? 2]!,
+    });
+  };
+
 const sheetTraits =
   (values: Values): Write =>
   (db) => {
@@ -2958,6 +2979,19 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     accepts: [
       ['the 2024 default the seeder binds', armorTemplate({})],
       ['2014', armorTemplate({ rules_edition: '2014' })],
+    ],
+  },
+  {
+    constraint: 'character_attunement_slots_distinct_check',
+    rejects: [
+      ['one item in slots 1 and 2', attunementSlotRow([0, 0, null])],
+      ['one item in slots 1 and 3', attunementSlotRow([0, null, 0])],
+      ['one item in slots 2 and 3', attunementSlotRow([null, 1, 1])],
+    ],
+    accepts: [
+      ['three distinct occupants', attunementSlotRow([0, 1, 2])],
+      ['three empty slots', attunementSlotRow([null, null, null])],
+      ['one occupant with two empty slots', attunementSlotRow([null, 1, null])],
     ],
   },
 ];

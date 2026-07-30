@@ -160,7 +160,7 @@ const allAutoIncrementTables = [
  * be made deliberately, which is the only thing the second direction ever
  * bought.
  */
-const naturalKeyTables = [] as const;
+const naturalKeyTables = ['character_attunement_slots'] as const;
 
 let sqlite3: Sqlite3Static;
 const openDatabases: Database[] = [];
@@ -206,7 +206,8 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
       // skills-with-provenance table, `character_skill_grants`, and the ONE
       // AC-1 (D72) items table, `character_items`, and AC-2a's three feature
       // effect tables. Counted in parts so one group shrinking while another
-      // grows cannot pass unnoticed.
+      // grows cannot pass unnoticed. D92's slot row uses character_id as its
+      // natural primary key and therefore belongs in `naturalKeyTables`.
       expect(declared).toHaveLength(65);
       expect(autoIncrementTables).toHaveLength(30);
       expect(nativeAutoIncrementTables).toHaveLength(35);

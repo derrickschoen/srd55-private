@@ -147,6 +147,7 @@ function workspace(
         has_extra_attack: false,
       },
     },
+    items: { items: [] },
   };
 }
 
@@ -375,6 +376,54 @@ describe('planner persisted workflow', () => {
       allowLegacy: false,
     });
     expect(session.workspace?.revision).toBe(4);
+  });
+
+  it('turns a full-slot command response into replacement-modal data without recording an ordinary error', async () => {
+    const queries: PlannerQueryClient = {
+      workspace: async () => workspace(3, 10, false),
+      operationHistory: async () => noHistory,
+      completeness: async () => emptyCompleteness,
+      eligibleSpells: async () => [],
+      createSavePoint: async () => workspace(3, 10, false),
+      savePointRestoreCommand: async () => ({
+        type: 'attune_item',
+        item_id: 40,
+      }),
+    };
+    const commands: PlannerCommandClient = {
+      execute: async () => {
+        throw new RpcError(
+          'handler_error',
+          'All three attunement slots are occupied.',
+          {
+            reason: 'attunement_slots_full',
+            occupants: [
+              { slot: 1, item_id: 10, name: 'Crown' },
+              { slot: 2, item_id: 20, name: 'Cloak' },
+              { slot: 3, item_id: 30, name: 'Ring' },
+            ],
+          },
+        );
+      },
+    };
+    const session = new PlannerSession(7, queries, commands);
+    await session.load();
+
+    await expect(
+      session.execute({ type: 'attune_item', item_id: 40 }),
+    ).resolves.toBe(false);
+    expect(session.error).toBeNull();
+    expect(session.attunementReplacement).toEqual({
+      item_id: 40,
+      occupants: [
+        { slot: 1, item_id: 10, name: 'Crown' },
+        { slot: 2, item_id: 20, name: 'Cloak' },
+        { slot: 3, item_id: 30, name: 'Ring' },
+      ],
+    });
+
+    session.cancelAttunementReplacement();
+    expect(session.attunementReplacement).toBeNull();
   });
 });
 

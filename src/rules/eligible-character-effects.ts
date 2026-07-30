@@ -2,14 +2,15 @@
  * THE ONE MECHANICAL-EFFECT READER, INCLUDING THE ATTUNEMENT GATE (D72, D73).
  *
  * An item-owned effect is inactive only in the one state the rule names:
- * its item requires attunement and is not attuned. Effects with no owning item
+ * its item requires attunement and does not hold one of the three slots.
+ * Effects with no owning item
  * are untouched, including effects owned by a source or a weapon.
  *
  * The predicate is deliberately written as an OR whose first arm accepts a
  * NULL `character_item_id`. A compact
- * `NOT (item.requires_attunement AND NOT item.attuned)` is wrong in SQLite:
- * both joined item columns are NULL for an effect with no item, NOT(NULL)
- * remains NULL, and a WHERE clause drops it under three-valued logic.
+ * A compact negated predicate is wrong in SQLite: joined item/slot columns are
+ * NULL for an effect with no item, NOT(NULL) remains NULL, and a WHERE clause
+ * drops it under three-valued logic.
  *
  * Every mechanical reader goes through `readEligibleCharacterEffects`:
  * abilities, Armor Class, attack profiles, Hit Points, Speed, and damage
@@ -97,6 +98,8 @@ const ELIGIBLE_EFFECT_SQL = `
   LEFT JOIN character_items AS item
     ON item.id = effect.character_item_id
    AND item.character_id = effect.character_id
+  LEFT JOIN character_attunement_slots AS attunement
+    ON attunement.character_id = effect.character_id
   LEFT JOIN character_source_instances AS source
     ON source.id = effect.source_instance_id
    AND source.character_id = effect.character_id
@@ -104,7 +107,11 @@ const ELIGIBLE_EFFECT_SQL = `
     AND (
       effect.character_item_id IS NULL
       OR item.requires_attunement = 0
-      OR item.attuned = 1
+      OR item.id IN (
+        attunement.slot_1_item_id,
+        attunement.slot_2_item_id,
+        attunement.slot_3_item_id
+      )
     )`;
 
 /**

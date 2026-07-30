@@ -51,7 +51,6 @@ describe('item commands and effect ownership', () => {
         name: 'Cloak of the Armadillo',
         description: 'A layered shell cloak.',
         requires_attunement: true,
-        attuned: false,
         source_instance_id: null,
         effects: [{
           effect_kind: 'armor_class_bonus',
@@ -68,7 +67,6 @@ describe('item commands and effect ownership', () => {
     expect(item).toMatchObject({
       name: 'Cloak of the Armadillo',
       requires_attunement: 1,
-      attuned: 0,
     });
     const itemId = Number(item?.id);
     const originalEffect = db.oneRaw(
@@ -92,7 +90,6 @@ describe('item commands and effect ownership', () => {
         name: 'Cloak of the Armadillo',
         description: 'Fastened and attuned.',
         requires_attunement: true,
-        attuned: true,
         source_instance_id: null,
         effects: [{
           effect_kind: 'hp_modifier',
@@ -157,8 +154,8 @@ describe('item commands and effect ownership', () => {
     ).lastInsertId;
     const itemId = db.exec(
       `INSERT INTO character_items (
-         character_id, name, requires_attunement, attuned, source_instance_id
-       ) VALUES (?, 'Cascading Cloak', 0, 0, ?)`,
+         character_id, name, requires_attunement, source_instance_id
+       ) VALUES (?, 'Cascading Cloak', 0, ?)`,
       [characterId, sourceId],
     ).lastInsertId;
     db.exec(
@@ -176,5 +173,205 @@ describe('item commands and effect ownership', () => {
     ).toBe(0);
     expect(db.scalar('SELECT count(*) FROM character_items')).toBe(0);
     expect(db.scalar('SELECT count(*) FROM character_effects')).toBe(0);
+  });
+
+  it('fills the lowest free attunement slot and every inverse restores the exact slot', async () => {
+    const itemIds: number[] = [];
+    for (const name of ['First', 'Second', 'Third']) {
+      const result = await run({
+        type: 'add_item',
+        item: {
+          name,
+          description: null,
+          requires_attunement: true,
+          source_instance_id: null,
+        },
+      });
+      if (result.inverse.type !== 'remove_item') {
+        throw new Error('Adding an item did not return its remove inverse.');
+      }
+      itemIds.push(result.inverse.item_id);
+    }
+
+    await run({ type: 'attune_item', item_id: itemIds[0]! });
+    await run({ type: 'attune_item', item_id: itemIds[1]! });
+    const unattuned = await run({
+      type: 'unattune_item',
+      item_id: itemIds[0]!,
+    });
+    const filled = await run({ type: 'attune_item', item_id: itemIds[2]! });
+
+    expect(
+      db.oneRaw(
+        `SELECT slot_1_item_id, slot_2_item_id, slot_3_item_id
+         FROM character_attunement_slots WHERE character_id = ?`,
+        [characterId],
+      ),
+    ).toEqual({
+      slot_1_item_id: itemIds[2],
+      slot_2_item_id: itemIds[1],
+      slot_3_item_id: null,
+    });
+
+    await run(filled.inverse);
+    await run(unattuned.inverse);
+    expect(
+      db.oneRaw(
+        `SELECT slot_1_item_id, slot_2_item_id, slot_3_item_id
+         FROM character_attunement_slots WHERE character_id = ?`,
+        [characterId],
+      ),
+    ).toEqual({
+      slot_1_item_id: itemIds[0],
+      slot_2_item_id: itemIds[1],
+      slot_3_item_id: null,
+    });
+  });
+
+  it('returns all three occupants when full and transactionally replaces the chosen slot', async () => {
+    const itemIds: number[] = [];
+    for (const name of ['Crown', 'Cloak', 'Ring', 'Boots']) {
+      const result = await run({
+        type: 'add_item',
+        item: {
+          name,
+          description: null,
+          requires_attunement: true,
+          source_instance_id: null,
+        },
+      });
+      if (result.inverse.type !== 'remove_item') {
+        throw new Error('Adding an item did not return its remove inverse.');
+      }
+      itemIds.push(result.inverse.item_id);
+    }
+    for (const itemId of itemIds.slice(0, 3)) {
+      await run({ type: 'attune_item', item_id: itemId! });
+    }
+
+    await expect(
+      run({ type: 'attune_item', item_id: itemIds[3]! }),
+    ).rejects.toMatchObject({
+      name: 'AttunementSlotsFull',
+      data: {
+        reason: 'attunement_slots_full',
+        occupants: [
+          { slot: 1, item_id: itemIds[0], name: 'Crown' },
+          { slot: 2, item_id: itemIds[1], name: 'Cloak' },
+          { slot: 3, item_id: itemIds[2], name: 'Ring' },
+        ],
+      },
+    });
+
+    const replaced = await run({
+      type: 'replace_attuned_item',
+      item_id: itemIds[3]!,
+      replaced_item_id: itemIds[1]!,
+    });
+    expect(
+      db.oneRaw(
+        `SELECT slot_1_item_id, slot_2_item_id, slot_3_item_id
+         FROM character_attunement_slots WHERE character_id = ?`,
+        [characterId],
+      ),
+    ).toEqual({
+      slot_1_item_id: itemIds[0],
+      slot_2_item_id: itemIds[3],
+      slot_3_item_id: itemIds[2],
+    });
+
+    await run(replaced.inverse);
+    expect(
+      db.scalar(
+        `SELECT slot_2_item_id FROM character_attunement_slots
+         WHERE character_id = ?`,
+        [characterId],
+      ),
+    ).toBe(itemIds[1]);
+  });
+
+  it('removes and restores an attuned item without moving its slot', async () => {
+    const added = await run({
+      type: 'add_item',
+      item: {
+        name: 'Restorable Ring',
+        description: null,
+        requires_attunement: true,
+        source_instance_id: null,
+      },
+    });
+    if (added.inverse.type !== 'remove_item') {
+      throw new Error('Adding an item did not return its remove inverse.');
+    }
+    const itemId = added.inverse.item_id;
+    await run({ type: 'attune_item', item_id: itemId });
+    const removed = await run({ type: 'remove_item', item_id: itemId });
+
+    expect(
+      db.scalar(
+        `SELECT slot_1_item_id FROM character_attunement_slots
+         WHERE character_id = ?`,
+        [characterId],
+      ),
+    ).toBeNull();
+
+    await run(removed.inverse);
+    expect(
+      db.scalar(
+        `SELECT slot_1_item_id FROM character_attunement_slots
+         WHERE character_id = ?`,
+        [characterId],
+      ),
+    ).toBe(itemId);
+  });
+
+  it('makes a fourth slot and cross-character occupants unrepresentable in the schema', () => {
+    const otherCharacterId = db.exec(
+      "INSERT INTO characters (name) VALUES ('Other collector')",
+    ).lastInsertId;
+    const ownItemId = db.exec(
+      `INSERT INTO character_items (character_id, name)
+       VALUES (?, 'Own item')`,
+      [characterId],
+    ).lastInsertId;
+    const otherItemId = db.exec(
+      `INSERT INTO character_items (character_id, name)
+       VALUES (?, 'Other item')`,
+      [otherCharacterId],
+    ).lastInsertId;
+
+    expect(() =>
+      db.exec(
+        `INSERT INTO character_attunement_slots (
+           character_id, slot_1_item_id
+         ) VALUES (?, ?)`,
+        [characterId, otherItemId],
+      )
+    ).toThrow(/FOREIGNKEY/u);
+
+    db.exec(
+      `INSERT INTO character_attunement_slots (
+         character_id, slot_1_item_id
+       ) VALUES (?, ?)`,
+      [characterId, ownItemId],
+    );
+    expect(() =>
+      db.exec(
+        `INSERT INTO character_attunement_slots (
+           character_id, slot_2_item_id
+         ) VALUES (?, ?)`,
+        [characterId, ownItemId],
+      )
+    ).toThrow(/PRIMARYKEY|UNIQUE/u);
+    expect(
+      db.allRaw(
+        `SELECT name FROM pragma_table_info('character_attunement_slots')
+         WHERE name LIKE 'slot_%_item_id' ORDER BY cid`,
+      ).map((row) => row.name),
+    ).toEqual([
+      'slot_1_item_id',
+      'slot_2_item_id',
+      'slot_3_item_id',
+    ]);
   });
 });

@@ -8,6 +8,7 @@ import { WIRE_SCHEMA_V7 } from './v7';
 import { WIRE_SCHEMA_V8 } from './v8';
 import { WIRE_SCHEMA_V9 } from './v9';
 import { WIRE_SCHEMA_V10 } from './v10';
+import { WIRE_SCHEMA_V11 } from './v11';
 import {
   versatileWeaponDamageFromLegacy,
   weaponDamageFromLegacy,
@@ -24,7 +25,7 @@ import {
  * domain requires a new schema version, an adjacent migration, and a
  * hand-frozen fragment fixture. Never edit an existing version.
  */
-export const CURRENT_CHARACTER_SHARE_VERSION = 10 as const;
+export const CURRENT_CHARACTER_SHARE_VERSION = 11 as const;
 
 /**
  * Any change to tuple field order, meaning, membership, or accepted value
@@ -42,6 +43,7 @@ export const SHARE_SCHEMAS = Object.freeze({
   8: WIRE_SCHEMA_V8,
   9: WIRE_SCHEMA_V9,
   10: WIRE_SCHEMA_V10,
+  11: WIRE_SCHEMA_V11,
 } as const);
 
 export type SupportedShareVersion = keyof typeof SHARE_SCHEMAS;
@@ -669,6 +671,57 @@ function migrateV9ToV10(document: unknown): unknown {
   return migrated;
 }
 
+function migrateV10ToV11(document: unknown): unknown {
+  if (
+    !Array.isArray(document) ||
+    !WIRE_SCHEMA_V10.tuples.root.arities.some(
+      (arity) => arity === document.length,
+    )
+  ) {
+    throw new TypeError('wire document has an unsupported v10 tuple length.');
+  }
+  const itemsIndex = WIRE_SCHEMA_V10.tuples.root.fields.findIndex(
+    (field) => field.key === 'items',
+  );
+  const items = document[itemsIndex];
+  if (items !== null && !Array.isArray(items)) {
+    throw new TypeError('wire items must be null or a list.');
+  }
+  const attunedRefs: number[] = [];
+  const migratedItems =
+    items === null
+      ? null
+      : items.map((item: unknown, index: number) => {
+          if (
+            !Array.isArray(item) ||
+            !WIRE_SCHEMA_V10.tuples.item.arities.some(
+              (arity) => arity === item.length,
+            )
+          ) {
+            throw new TypeError(
+              'wire item has an unsupported v10 tuple length.',
+            );
+          }
+          if (item[3] === true && attunedRefs.length < 3) {
+            attunedRefs.push(index);
+          }
+          return [item[0], item[1], item[2], item[4]];
+        });
+  const migrated = [
+    ...document,
+    attunedRefs.length === 0
+      ? null
+      : [
+          attunedRefs[0] ?? null,
+          attunedRefs[1] ?? null,
+          attunedRefs[2] ?? null,
+        ],
+  ];
+  migrated[1] = 11;
+  migrated[itemsIndex] = migratedItems;
+  return migrated;
+}
+
 /**
  * ADJACENT means each migration lifts exactly one version step; the decoder
  * composes them, so a v1 document runs 1→2, then 2→3, then 3→4, then 4→5 —
@@ -687,6 +740,7 @@ export const MIGRATIONS = Object.freeze({
   7: migrateV7ToV8,
   8: migrateV8ToV9,
   9: migrateV9ToV10,
+  10: migrateV10ToV11,
 }) satisfies AdjacentMigrations;
 
 export { WIRE_SCHEMA_V1 } from './v1';
@@ -699,6 +753,7 @@ export { WIRE_SCHEMA_V7 } from './v7';
 export { WIRE_SCHEMA_V8 } from './v8';
 export { WIRE_SCHEMA_V9 } from './v9';
 export { WIRE_SCHEMA_V10 } from './v10';
+export { WIRE_SCHEMA_V11 } from './v11';
 export type { WireField, WireSchemaV1 } from './v1';
 export type { WireSchemaV2 } from './v2';
 export type { WireSchemaV3 } from './v3';
@@ -709,3 +764,4 @@ export type { WireSchemaV7 } from './v7';
 export type { WireSchemaV8 } from './v8';
 export type { WireSchemaV9 } from './v9';
 export type { WireSchemaV10 } from './v10';
+export type { WireSchemaV11 } from './v11';
