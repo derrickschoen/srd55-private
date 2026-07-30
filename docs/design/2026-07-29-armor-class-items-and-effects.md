@@ -90,6 +90,19 @@ the one vocabulary), **D73**
   controls got mechanisms. The pattern across seven revisions holds: every
   round found a control or dispatch whose mechanism appeared zero times in
   the document.
+- **(Revision 8 — round 3 returned NOT READY with nine convergence findings;
+  the three-round cap is reached, so these were ARBITRATED by the
+  supervisor rather than sent back for a fourth round.)** All nine accepted;
+  the pins: wire-local array indexes for `itemRef`/`weaponRef`; the
+  AC-2a→AC-2b `template_ref` window accepted under D60 and bounded by
+  making the two dispatches strictly consecutive; `add_weapon` gains effect
+  payloads; the tie-break made total (feat, background, weapon, manual
+  ranked); `armor_slot_mismatch` carried forward; AC-5 overrides ADD
+  profile options, never replace; the Strength speed penalty is APPLIED;
+  AC-4's "logs" corrected to an asserted drop; AC-B's disclosures render
+  inline with the D67 reveal surface still out of scope; the stale
+  buildability paragraph rewritten. Consensus is recorded as
+  supervisor-arbitrated at cap, per the protocol's own terms.
 - **A SUBCLASS CANNOT WRITE AN EFFECT ROW AT ALL, and revisions 1 and 2 built the
   headline fixture on the assumption that it could.** Verified: `subclass_features`
   has `effect_kind` CHECK'd to **`'extra_attack'` only**, read live at sheet-build
@@ -169,6 +182,13 @@ column and one "+1 AC" would wear three shapes.
    leaving only the severed label. AC-2a changes that copy to carry the
    species source instance. A row with NULL source and NULL item is
    **manual, and ranks after item**, which revision 4's list omitted.
+   **The order must be TOTAL over every category that can exist (revision 8):
+   worn armour → species → subclass → class → feat → background → item →
+   weapon → manual**, alphabetically by label within a category. Feat and
+   background are real source kinds (`enums.ts:138`) revision 4's list never
+   ranked, and revision 7 created weapon-owned effects without ranking them —
+   a comparator missing a category is exactly the partial-order bug
+   AC-TIE-STABLE exists to catch.
 6. **Bonuses and the shield apply on top of the winner** — they are not in the
    competition. But **the shield is part of step 2**, so equipping one can lower
    the base while adding +2.
@@ -261,7 +281,11 @@ winning base without re-running eligibility reports **18**.
   other — the exact defect class `attack-profiles.ts:40` records, where a label
   said "not proficient" while the number still added the bonus. **Pinned: either
   the speed applies the penalty or the warning stops claiming it.** Choosing
-  silently is what produced the original bug.
+  silently is what produced the original bug. **(Revision 8, arbitrated: the
+  speed APPLIES the penalty — AC-3 subtracts the 10 feet the shipped sentence
+  already claims while the requirement is unmet. The sentence ships today, so
+  its claim is already ours; making the number match it is the
+  label-and-number-agree standard, not new rules text.)**
 - Under **D67** these are reveal content for Armor Class; under **D70** an owed
   choice is a gap. Different surfaces, and §7's trap keeps them apart.
 
@@ -344,15 +368,16 @@ rule in two places is F22, which has already bitten this project.
 and unarmoured totals are equal cannot exercise AC-ELIGIBILITY; a Monk with DEX +0
 cannot exercise AC-SHIELD-BASE.
 
-**When each control becomes buildable.** This codebase's resolver tests seed
-`character_effects` with raw INSERTs (`ability-contributions.test.ts:44`), so most
-controls need only **AC-1 + AC-3** and can use seeded rows rather than the
-production copy path. `AC-PROFICIENCY` is buildable **today** — `armor_not_trained`
-already ships. **`AC-SHIELD-BASE` needs AC-2**, because a Monk formula cannot be
-represented at all — not even as a seeded row — until `named_features`' CHECK is
-widened. **`AC-ATTUNEMENT` also needs AC-2** — `character_item_id` does not
-exist until its migration lands, so before AC-2 the control cannot fail for the
-right reason (revision 5). That ordering is load-bearing, not convenient.
+**When each control becomes buildable (rewritten in revision 8 — the old
+version predated AC-1 landing and contradicted AC-SHIELD-BASE's own revision-7
+correction).** This codebase's resolver tests seed `character_effects` with raw
+INSERTs (`ability-contributions.test.ts:44`), and AC-1's schema accepts a
+complete `armor_class_formula` row today — so **AC-ELIGIBILITY, AC-SHIELD-BASE,
+AC-FLOOR, AC-TIE-STABLE and AC-ONE-VOCABULARY need only AC-3** on top of what
+ships. `AC-PROFICIENCY` is buildable **today**. **`AC-ATTUNEMENT` needs
+AC-2b** — `character_item_id` does not exist until its migration lands.
+**`AC-WARN-STRICT` follows AC-B**, which owns the preview pair. The production
+copy path is proven by AC-2a's own integration test, not by these controls.
 
 ## 9. Fixtures (D79 names)
 
@@ -442,9 +467,22 @@ dispatches wearing one name. AC-1 has shipped (`0f099bb`).
     `source_instance_id` is remapped;
   - **wire v9**, minted once, carrying `itemRef`, `weaponRef` and
     `template_ref` in the effect tuple — v8 is frozen (D41) and is not
-    amended;
+    amended. **Referents pinned (revision 8): `itemRef` and `weaponRef` are
+    ARRAY INDEXES into the document's own items and weapons arrays** — the
+    wire already omits database ids deliberately (`schema.ts:266,534`), and a
+    wire-local index is remap-proof by construction. **The AC-2a→AC-2b window
+    is accepted, named, and bounded**: a v8 export taken between the two
+    dispatches carries no `template_ref`, so importing it and re-syncing
+    would duplicate generated rows — real, and void under D60 (zero users,
+    zero exports) PROVIDED the window stays internal: AC-2a and AC-2b are
+    **strictly consecutive — no other dispatch lands between them**, and v9
+    ships before any share surface changes;
   - **the item-add command** (revision 6): transactional, inserts the item
-    first and its effect rows with the returned id;
+    first and its effect rows with the returned id. **And the weapon path
+    (revision 8): `add_weapon`/`update_weapon` gain the same optional effect
+    payloads** — `WeaponFields` (`command-contracts.ts:236`) carries none
+    today, which left Armadillo Blade and Pact Shell Blade raw-fixture-only
+    with no production writer;
   - comment truth: `DELETE_ORDER`'s "childless leaf" comments
     (`tables.ts:1230-1256`) and the superseded `items.ts:23-33` paragraph;
   - the cascade-chain integration test (source → item → effects, one DELETE).
@@ -452,7 +490,13 @@ dispatches wearing one name. AC-1 has shipped (`0f099bb`).
   tie-break with §2's category derivation, the floor, proficiency and
   attunement — the attunement gate as ONE eligible-effects predicate every
   mechanical consumer routes through (revision 6), NULL-safe explicitly.
-  Carries `strength_requirement_unmet` forward. **Needs AC-2a AND AC-2b.**
+  Carries `strength_requirement_unmet` forward — **and `armor_slot_mismatch`
+  with it (revision 8)**: the live contract deliberately permits slot/category
+  disagreement, counts by category and warns (`sheet.ts:761`), and the wire
+  schema encodes that permission (`schema.ts:341`); the replacement keeps all
+  three behaviours unchanged. AC-3 also **applies the −10 speed penalty**
+  §4 pins, so the shipped warning's sentence becomes true.
+  **Needs AC-2a AND AC-2b.**
 - **AC-5 — weapon effects into attack profiles.** `AttackProfileInput`
   accepts no effects today (`attack-profiles.ts:261`), so
   `attack_ability_override`, `weapon_attack_bonus` and `weapon_damage_bonus`
@@ -461,16 +505,25 @@ dispatches wearing one name. AC-1 has shipped (`0f099bb`).
   same eligible-effects predicate (attunement gates a sword's +1 exactly as
   it gates a cloak's), resolves `one_bonded_weapon` via
   `character_weapon_id`, and keeps the label-and-number-agree standard
-  `attack-profiles.ts:40` records. After AC-3.
+  `attack-profiles.ts:40` records. **Collision semantics pinned (revision 8),
+  on the pattern the profiles already use** — a weapon yields normal, True
+  Strike and Martial Arts OPTIONS (`attack-profiles.ts:953`), never a silent
+  replacement: an `attack_ability_override` **adds one more option per
+  in-scope weapon**, labelled with its source; N overrides are N options;
+  nothing existing is removed or mutated. `weapon_attack_bonus` and
+  `weapon_damage_bonus` apply to **every option** of an in-scope weapon — a
+  +1 sword is +1 however it is swung. After AC-3.
 - **AC-4 — retiring `armor_class_adjustment`**, all 21 references, migrating
   non-null values into `armor_class_bonus` effect rows. After AC-3, for the
   reason revision 4 gives. **Revision 7 pins the two edge rows the CHECKs
   refuse**: `amount` forbids zero (`origins.ts:881`) and `label` is NOT NULL,
   while a stored adjustment can be zero and its note can be null
   (`sheet-inputs.ts:328`). Disposition: a zero adjustment produces NO effect
-  row — it changes no number, and D60 applies to its orphaned note, which the
-  migration logs and drops; a null note becomes the label
-  `Manual Armor Class adjustment`.
+  row — it changes no number, and D60 applies to its orphaned note, which is
+  **dropped, not "logged" — migrations are SQL-only with no logging hook
+  (`migrations.ts:19`); the drop is asserted instead by the migration's
+  adjacent test, which enumerates the zero-with-note case by name (revision
+  8)**; a null note becomes the label `Manual Armor Class adjustment`.
 - **AC-B — the surfaces**: exclusion reasons, tie disclosure, deletion of
   `no_unarmored_defense`, the fixtures, and **the strict-reduction warning's
   mechanism, pinned (revision 7)**: commands return void and their results
@@ -479,6 +532,15 @@ dispatches wearing one name. AC-1 has shipped (`0f099bb`).
   the previous total — so the warning is a PREVIEW: the surface runs the
   resolver on current state, applies, runs it again, and compares. Nothing
   persisted, replay untouched, D76's tie rule enforced where the pair exists.
+  **Where the disclosures render, pinned (revision 8): INLINE, in the
+  existing gap-disclosure pattern the sheet already uses
+  (`sheet-view.ts:762` renders details inline, not on hover)** — D74's
+  exclusion reason and D73's tie disclosure are warnings the sheet must
+  state somewhere NOW, and inline is where every existing disclosure lives.
+  **The D67 hover/touch reveal surface stays out of scope (§11)**; when it
+  ships, these disclosures MOVE into it rather than being written twice —
+  the F22 rule. No contradiction remains: §11 excludes the reveal SURFACE,
+  AC-B ships the disclosure CONTENT inline.
 
 Controls get their own dispatch after AC-3, per `ec2be58`'s precedent —
 except AC-WARN-STRICT, which follows AC-B (§8), and AC-2a's production-path
