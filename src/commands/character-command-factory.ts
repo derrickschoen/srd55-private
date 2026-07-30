@@ -33,7 +33,11 @@ import {
 } from './weapons';
 import {
   AddItemCommand,
+  AttuneItemCommand,
   RemoveItemCommand,
+  ReplaceAttunedItemCommand,
+  RestoreAttunementSlotCommand,
+  UnattuneItemCommand,
   UpdateItemCommand,
 } from './items';
 
@@ -148,6 +152,14 @@ export class CharacterCommandFactory {
         return new UpdateItemCommand(this.db, payload);
       case 'remove_item':
         return new RemoveItemCommand(this.db, payload);
+      case 'attune_item':
+        return new AttuneItemCommand(this.db, payload);
+      case 'unattune_item':
+        return new UnattuneItemCommand(this.db, payload);
+      case 'replace_attuned_item':
+        return new ReplaceAttunedItemCommand(this.db, payload);
+      case 'restore_attunement_slot':
+        return new RestoreAttunementSlotCommand(this.db, payload);
       case 'set_armor':
         return new SetArmorCommand(this.db, payload);
       case 'set_hit_point_roll':

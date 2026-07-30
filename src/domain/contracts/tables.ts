@@ -999,6 +999,19 @@ export const TABLE_SCOPES = {
     share: true,
     backupReference: false,
   },
+  /**
+   * D92's fixed three-position attunement row. It is character state and must
+   * therefore travel through snapshots, backups, and shares with the items its
+   * three composite references name.
+   */
+  character_attunement_slots: {
+    role: 'character_owned',
+    snapshot: true,
+    backupDirect: true,
+    backup: true,
+    share: true,
+    backupReference: false,
+  },
 } as const satisfies { [N in AnyTableName]: ScopesFor<N> };
 
 type Scopes = typeof TABLE_SCOPES;
@@ -1143,6 +1156,7 @@ export const APPLICATION_TABLES = order<AnyTableName>()([
   'class_equipment_items',
   'change_log',
   'character_armor',
+  'character_attunement_slots',
   'character_background',
   'character_class_levels',
   'character_effects',
@@ -1246,6 +1260,7 @@ export const CHARACTER_STATE_TABLES = order<SnapshotTable>()([
   // does: it references `character_source_instances` (composite key), which
   // the existing order already inserts before this on restore.
   'character_items',
+  'character_attunement_slots',
 ]);
 
 /**
@@ -1272,6 +1287,7 @@ export const CHARACTER_STATE_INSERT_ORDER = order<SnapshotTable>()([
   'character_sheet_adjustments',
   'character_skill_grants',
   'character_items',
+  'character_attunement_slots',
   'character_effects',
 ]);
 
@@ -1288,6 +1304,8 @@ export const DELETE_ORDER = order<SnapshotTable>()([
   // first makes the remaining order explicit rather than relying on cascades
   // to erase rows before their own delete step.
   'character_effects',
+  // Slot rows reference items, so they must be gone before their occupants.
+  'character_attunement_slots',
   // Weapons and items are no longer childless leaves (AC-2b): their owned
   // effects were deleted immediately above, so both parents are now safe.
   'character_weapons',
@@ -1340,6 +1358,7 @@ export const BACKUP_DIRECT_TABLES = order<BackupDirectTable>()([
   'character_effects',
   'character_skill_grants',
   'character_items',
+  'character_attunement_slots',
 ]);
 
 /** Every table in the portable-character backup document. */
@@ -1396,6 +1415,7 @@ export const BACKUP_OPTIONAL_TABLES = [
   // character owned an item before this unit, so there is nothing lost by
   // defaulting this key to empty.
   'character_items',
+  'character_attunement_slots',
 ] as const satisfies readonly BackupTable[];
 
 /** The catalog tables a backup document resolves references against. */
@@ -1453,6 +1473,7 @@ export const SHARE_TABLES: { readonly [N in ShareTable]: N } = {
   character_skill_grants: 'character_skill_grants',
   character_effects: 'character_effects',
   character_items: 'character_items',
+  character_attunement_slots: 'character_attunement_slots',
 };
 
 /**
@@ -1526,6 +1547,7 @@ export const AUDIT_ENTITY_TYPES = [
   // Added on the same terms once more (AC-1, D72): the items table is
   // snapshot-scoped, so `CharacterState.diff` emits a change per item row.
   'character_items',
+  'character_attunement_slots',
 ] as const satisfies readonly ('character' | AnyTableName)[];
 
 export type AuditEntityType = (typeof AUDIT_ENTITY_TYPES)[number];

@@ -1179,10 +1179,15 @@ const REFINEMENTS = {
   'character_items.name': nonEmptyText,
   'character_items.description': sqlText,
   'character_items.requires_attunement': sqlBool,
-  'character_items.attuned': sqlBool,
   'character_items.source_instance_id': positiveInt,
   'character_items.created_at': sqlTimestamp,
   'character_items.updated_at': sqlTimestamp,
+
+  // --- character_attunement_slots (D92) ----------------------------------
+  'character_attunement_slots.character_id': positiveInt,
+  'character_attunement_slots.slot_1_item_id': positiveInt,
+  'character_attunement_slots.slot_2_item_id': positiveInt,
+  'character_attunement_slots.slot_3_item_id': positiveInt,
 } as const satisfies Record<RequiredRefinementKey, z.ZodType> &
   Partial<Record<OptionalRefinementKey, z.ZodType>>;
 

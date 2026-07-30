@@ -6,6 +6,7 @@ import {
   sqliteTable,
   uniqueIndex,
 } from 'drizzle-orm/sqlite-core';
+import { sql } from 'drizzle-orm';
 import type { CharacterId, CharacterItemId, SourceInstanceId } from '../../src/domain/ids';
 import { datetime, sqlText, tinyint1, varchar } from './columns';
 import { character_source_instances, characters } from './character';
@@ -31,8 +32,8 @@ import { character_source_instances, characters } from './character';
  * ITEM, not which item owns an effect.
  *
  * NO `sort_order`. Unlike `character_effects` and `character_species_traits`,
- * the plan's own row shape names exactly five fields — name, description,
- * `requires_attunement`, `attuned`, `source_instance_id` — and does not ask
+ * the plan's own row shape names exactly four fields — name, description,
+ * `requires_attunement`, `source_instance_id` — and does not ask
  * for a display order; a display surface (AC-B) can sort by name or id
  * without this unit inventing a column nothing yet reads.
  */
@@ -66,14 +67,6 @@ export const character_items = sqliteTable(
       .notNull()
       .default(false),
     /**
-     * Whether the CHARACTER has attuned to it. NOT NULL with a `false`
-     * default, and deliberately NOT constrained to `requires_attunement`
-     * being true: D73 §2's attunement gate is AC-3's job (out of scope here),
-     * and a stray `attuned = true` on an item that does not require it is
-     * inert data, not a wrong number — nothing in this unit reads it.
-     */
-    attuned: tinyint1('attuned').notNull().default(false),
-    /**
      * WHAT GRANTED THIS, AS A LIVE REFERENCE — nullable on the identical D6b
      * limb 2 terms `character_effects.source_instance_id` carries at length
      * in `db/schema/origins.ts`: most items today are hand-added by a player,
@@ -100,5 +93,54 @@ export const character_items = sqliteTable(
         character_source_instances.character_id,
       ],
     }).onDelete('cascade'),
+  ],
+);
+
+/**
+ * D92: ATTUNEMENT IS THREE COLUMNS, NOT AN UNBOUNDED CHILD LIST.
+ *
+ * Each character can have at most one row and that row has exactly three
+ * nullable item positions. The three composite references prove that every
+ * occupant belongs to the same character. Pairwise CHECKs make one item
+ * occupying two slots unrepresentable as well.
+ *
+ * SQLite cannot apply `ON DELETE SET NULL` to only the item half of a
+ * composite foreign key (setting `character_id` null would violate this
+ * table's primary key), so `db/schema/triggers.sql` clears matching positions
+ * before an item is deleted.
+ */
+export const character_attunement_slots = sqliteTable(
+  'character_attunement_slots',
+  {
+    character_id: integer('character_id')
+      .primaryKey()
+      .notNull()
+      .$type<CharacterId>()
+      .references(() => characters.id, { onDelete: 'cascade' }),
+    slot_1_item_id: integer('slot_1_item_id').$type<CharacterItemId>(),
+    slot_2_item_id: integer('slot_2_item_id').$type<CharacterItemId>(),
+    slot_3_item_id: integer('slot_3_item_id').$type<CharacterItemId>(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.slot_1_item_id, table.character_id],
+      foreignColumns: [character_items.id, character_items.character_id],
+    }),
+    foreignKey({
+      columns: [table.slot_2_item_id, table.character_id],
+      foreignColumns: [character_items.id, character_items.character_id],
+    }),
+    foreignKey({
+      columns: [table.slot_3_item_id, table.character_id],
+      foreignColumns: [character_items.id, character_items.character_id],
+    }),
+    check(
+      'character_attunement_slots_distinct_check',
+      sql`
+        (slot_1_item_id IS NULL OR slot_2_item_id IS NULL OR slot_1_item_id <> slot_2_item_id)
+        AND (slot_1_item_id IS NULL OR slot_3_item_id IS NULL OR slot_1_item_id <> slot_3_item_id)
+        AND (slot_2_item_id IS NULL OR slot_3_item_id IS NULL OR slot_2_item_id <> slot_3_item_id)
+      `,
+    ),
   ],
 );

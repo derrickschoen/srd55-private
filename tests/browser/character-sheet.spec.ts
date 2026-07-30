@@ -245,14 +245,14 @@ async function armadilloItemsImage(): Promise<SheetImage> {
   ).lastInsertId;
   const cloakId = db.exec(
     `INSERT INTO character_items (
-       character_id, name, requires_attunement, attuned
-     ) VALUES (?, 'Cloak of the Armadillo', 1, 0)`,
+       character_id, name, requires_attunement
+     ) VALUES (?, 'Cloak of the Armadillo', 1)`,
     [characterId],
   ).lastInsertId;
   const ringId = db.exec(
     `INSERT INTO character_items (
-       character_id, name, requires_attunement, attuned
-     ) VALUES (?, 'Ring of Shell', 0, 0)`,
+       character_id, name, requires_attunement
+     ) VALUES (?, 'Ring of Shell', 0)`,
     [characterId],
   ).lastInsertId;
   db.exec(

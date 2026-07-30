@@ -2,10 +2,20 @@ import type { SqlValue } from '@sqlite.org/sqlite-wasm';
 import type { DatabaseContext } from '../db/database';
 import type {
   AddItemCommand as AddItemPayload,
+  AttuneItemCommand as AttuneItemPayload,
   ItemFields,
   RemoveItemCommand as RemoveItemPayload,
+  ReplaceAttunedItemCommand as ReplaceAttunedItemPayload,
+  RestoreAttunementSlotCommand as RestoreAttunementSlotPayload,
+  UnattuneItemCommand as UnattuneItemPayload,
   UpdateItemCommand as UpdateItemPayload,
 } from '../domain/command-contracts';
+import {
+  attunementSlots,
+  type AttunementOccupant,
+  type AttunementSlot,
+  type AttunementSlotsFullData,
+} from '../domain/attunement';
 import { rowContractError } from '../domain/contracts/rows';
 import type { ResolvesInverseAfterApply } from './weapons';
 import {
@@ -17,7 +27,6 @@ const ITEM_COLUMNS = [
   'name',
   'description',
   'requires_attunement',
-  'attuned',
   'source_instance_id',
 ] as const;
 
@@ -38,7 +47,6 @@ function itemValues(item: ItemFields): Record<string, SqlValue> {
     name: item.name.trim(),
     description: nullableText(item.description),
     requires_attunement: item.requires_attunement ? 1 : 0,
-    attuned: item.attuned ? 1 : 0,
     source_instance_id: item.source_instance_id,
   };
 }
@@ -49,12 +57,108 @@ function fieldsFromRow(row: ItemRow): ItemFields {
     description:
       row.description === null ? null : String(row.description),
     requires_attunement: Number(row.requires_attunement) === 1,
-    attuned: Number(row.attuned) === 1,
     source_instance_id:
       row.source_instance_id === null
         ? null
         : Number(row.source_instance_id),
   };
+}
+
+const slotColumn = (slot: AttunementSlot) =>
+  `slot_${String(slot)}_item_id` as const;
+
+function itemAttunementSlot(
+  db: DatabaseContext,
+  characterId: number,
+  itemId: number,
+): AttunementSlot | null {
+  const row = db.oneRaw(
+    `SELECT slot_1_item_id, slot_2_item_id, slot_3_item_id
+     FROM character_attunement_slots
+     WHERE character_id = ?`,
+    [characterId],
+  );
+  if (row === null) {
+    return null;
+  }
+  return attunementSlots.find(
+    (slot) => Number(row[slotColumn(slot)]) === itemId,
+  ) ?? null;
+}
+
+function ensureSlotRow(db: DatabaseContext, characterId: number): void {
+  db.exec(
+    `INSERT OR IGNORE INTO character_attunement_slots (character_id)
+     VALUES (?)`,
+    [characterId],
+  );
+}
+
+function restoreSlot(
+  db: DatabaseContext,
+  characterId: number,
+  slot: AttunementSlot,
+  itemId: number,
+): void {
+  readItem(db, characterId, itemId);
+  if (itemAttunementSlot(db, characterId, itemId) !== null) {
+    throw new TypeError('Item already holds an attunement slot.');
+  }
+  ensureSlotRow(db, characterId);
+  const column = slotColumn(slot);
+  const occupied = db.scalar(
+    `SELECT ${column} FROM character_attunement_slots WHERE character_id = ?`,
+    [characterId],
+  );
+  if (occupied !== null) {
+    throw new TypeError('Attunement slot is already occupied.');
+  }
+  db.exec(
+    `UPDATE character_attunement_slots SET ${column} = ?
+     WHERE character_id = ?`,
+    [itemId, characterId],
+  );
+}
+
+function occupants(
+  db: DatabaseContext,
+  characterId: number,
+): AttunementOccupant[] {
+  const row = db.oneRaw(
+    `SELECT slot_1_item_id, slot_2_item_id, slot_3_item_id
+     FROM character_attunement_slots
+     WHERE character_id = ?`,
+    [characterId],
+  );
+  if (row === null) {
+    return [];
+  }
+  return attunementSlots.flatMap((slot): AttunementOccupant[] => {
+    const itemIdValue = row[slotColumn(slot)];
+    if (itemIdValue === null || itemIdValue === undefined) {
+      return [];
+    }
+    const itemId = Number(itemIdValue);
+    const item = readItem(db, characterId, itemId);
+    return [{
+      slot,
+      item_id: itemId,
+      name: String(item.name),
+    }];
+  });
+}
+
+export class AttunementSlotsFull extends Error {
+  readonly data: AttunementSlotsFullData;
+
+  constructor(occupyingItems: readonly AttunementOccupant[]) {
+    super('All three attunement slots are occupied.');
+    this.name = 'AttunementSlotsFull';
+    this.data = {
+      reason: 'attunement_slots_full',
+      occupants: occupyingItems,
+    };
+  }
 }
 
 function readItem(
@@ -140,6 +244,14 @@ export class AddItemCommand implements ResolvesInverseAfterApply {
         this.#itemId,
         this.payload.item.source_instance_id,
         this.payload.item.effects,
+      );
+    }
+    if (this.payload.attunement_slot !== undefined) {
+      restoreSlot(
+        this.db,
+        characterId,
+        this.payload.attunement_slot,
+        this.#itemId,
       );
     }
   }
@@ -241,6 +353,11 @@ export class RemoveItemCommand implements ResolvesInverseAfterApply {
 
   apply(characterId: number): void {
     const existing = readItem(this.db, characterId, this.payload.item_id);
+    const attunementSlot = itemAttunementSlot(
+      this.db,
+      characterId,
+      this.payload.item_id,
+    );
     this.#removed = {
       type: 'add_item',
       item_id: Number(existing.id),
@@ -253,6 +370,9 @@ export class RemoveItemCommand implements ResolvesInverseAfterApply {
           this.payload.item_id,
         ),
       },
+      ...(attunementSlot === null
+        ? {}
+        : { attunement_slot: attunementSlot }),
     };
     this.db.exec(
       'DELETE FROM character_items WHERE character_id = ? AND id = ?',
@@ -265,5 +385,135 @@ export class RemoveItemCommand implements ResolvesInverseAfterApply {
       throw new Error('Cannot create an inverse before applying the command.');
     }
     return this.#removed;
+  }
+}
+
+export class AttuneItemCommand implements ResolvesInverseAfterApply {
+  readonly actionType = 'attune_item';
+  readonly invertsAfterApply = true;
+
+  constructor(
+    private readonly db: DatabaseContext,
+    private readonly payload: AttuneItemPayload,
+  ) {}
+
+  apply(characterId: number): void {
+    readItem(this.db, characterId, this.payload.item_id);
+    if (itemAttunementSlot(this.db, characterId, this.payload.item_id) !== null) {
+      throw new TypeError('Item already holds an attunement slot.');
+    }
+    const held = occupants(this.db, characterId);
+    const free = attunementSlots.find(
+      (slot) => !held.some((occupant) => occupant.slot === slot),
+    );
+    if (free === undefined) {
+      throw new AttunementSlotsFull(held);
+    }
+    restoreSlot(this.db, characterId, free, this.payload.item_id);
+  }
+
+  inverse(): UnattuneItemPayload {
+    return { type: 'unattune_item', item_id: this.payload.item_id };
+  }
+}
+
+export class UnattuneItemCommand implements ResolvesInverseAfterApply {
+  readonly actionType = 'unattune_item';
+  readonly invertsAfterApply = true;
+
+  #slot: AttunementSlot | undefined;
+
+  constructor(
+    private readonly db: DatabaseContext,
+    private readonly payload: UnattuneItemPayload,
+  ) {}
+
+  apply(characterId: number): void {
+    readItem(this.db, characterId, this.payload.item_id);
+    const slot = itemAttunementSlot(this.db, characterId, this.payload.item_id);
+    if (slot === null) {
+      throw new TypeError('Item does not hold an attunement slot.');
+    }
+    this.#slot = slot;
+    this.db.exec(
+      `UPDATE character_attunement_slots
+       SET ${slotColumn(slot)} = NULL
+       WHERE character_id = ?`,
+      [characterId],
+    );
+  }
+
+  inverse(): RestoreAttunementSlotPayload {
+    if (this.#slot === undefined) {
+      throw new Error('Cannot create an inverse before applying the command.');
+    }
+    return {
+      type: 'restore_attunement_slot',
+      slot: this.#slot,
+      item_id: this.payload.item_id,
+    };
+  }
+}
+
+export class RestoreAttunementSlotCommand implements ResolvesInverseAfterApply {
+  readonly actionType = 'restore_attunement_slot';
+  readonly invertsAfterApply = true;
+
+  constructor(
+    private readonly db: DatabaseContext,
+    private readonly payload: RestoreAttunementSlotPayload,
+  ) {}
+
+  apply(characterId: number): void {
+    restoreSlot(
+      this.db,
+      characterId,
+      this.payload.slot,
+      this.payload.item_id,
+    );
+  }
+
+  inverse(): UnattuneItemPayload {
+    return { type: 'unattune_item', item_id: this.payload.item_id };
+  }
+}
+
+export class ReplaceAttunedItemCommand implements ResolvesInverseAfterApply {
+  readonly actionType = 'replace_attuned_item';
+  readonly invertsAfterApply = true;
+
+  constructor(
+    private readonly db: DatabaseContext,
+    private readonly payload: ReplaceAttunedItemPayload,
+  ) {}
+
+  apply(characterId: number): void {
+    readItem(this.db, characterId, this.payload.item_id);
+    readItem(this.db, characterId, this.payload.replaced_item_id);
+    if (itemAttunementSlot(this.db, characterId, this.payload.item_id) !== null) {
+      throw new TypeError('Replacement item already holds an attunement slot.');
+    }
+    const slot = itemAttunementSlot(
+      this.db,
+      characterId,
+      this.payload.replaced_item_id,
+    );
+    if (slot === null) {
+      throw new TypeError('Item chosen for replacement is no longer attuned.');
+    }
+    this.db.exec(
+      `UPDATE character_attunement_slots
+       SET ${slotColumn(slot)} = ?
+       WHERE character_id = ? AND ${slotColumn(slot)} = ?`,
+      [this.payload.item_id, characterId, this.payload.replaced_item_id],
+    );
+  }
+
+  inverse(): ReplaceAttunedItemPayload {
+    return {
+      type: 'replace_attuned_item',
+      item_id: this.payload.replaced_item_id,
+      replaced_item_id: this.payload.item_id,
+    };
   }
 }

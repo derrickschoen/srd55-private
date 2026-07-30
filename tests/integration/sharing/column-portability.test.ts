@@ -795,7 +795,6 @@ const PROBES: { readonly [N in ProbedTable]: Probe<N> } = {
       name: { kind: 'verbatim' },
       description: { kind: 'verbatim' },
       requires_attunement: { kind: 'verbatim' },
-      attuned: { kind: 'verbatim' },
       source_instance_id: {
         kind: 'translated',
         key: '(SELECT display_name FROM character_source_instances WHERE id = t.source_instance_id)',
@@ -803,6 +802,27 @@ const PROBES: { readonly [N in ProbedTable]: Probe<N> } = {
       },
       created_at: OWNED_TIMESTAMP,
       updated_at: OWNED_TIMESTAMP,
+    },
+  },
+  character_attunement_slots: {
+    order: 't.character_id',
+    columns: {
+      character_id: RECIPIENT_OWNER_ID,
+      slot_1_item_id: {
+        kind: 'translated',
+        key: '(SELECT name FROM character_items WHERE id = t.slot_1_item_id)',
+        why: '`attunementSlots[0]` is an item-array reference, so the recipient resolves its own character_items id.',
+      },
+      slot_2_item_id: {
+        kind: 'translated',
+        key: '(SELECT name FROM character_items WHERE id = t.slot_2_item_id)',
+        why: '`attunementSlots[1]` is an item-array reference, so the recipient resolves its own character_items id.',
+      },
+      slot_3_item_id: {
+        kind: 'translated',
+        key: '(SELECT name FROM character_items WHERE id = t.slot_3_item_id)',
+        why: '`attunementSlots[2]` is an item-array reference, so the recipient resolves its own character_items id.',
+      },
     },
   },
 };
@@ -1319,11 +1339,31 @@ function seedSender(db: DatabaseContext, catalog: Catalog): number {
   );
   const ownedItemId = db.exec(
     `INSERT INTO character_items (
-       character_id, name, description, requires_attunement, attuned,
+       character_id, name, description, requires_attunement,
        source_instance_id, created_at, updated_at
-     ) VALUES (?, 'Sender Trinket', 'sender item description', 1, 1, ?, ?, ?)`,
+     ) VALUES (?, 'Sender Trinket', 'sender item description', 1, ?, ?, ?)`,
     [characterId, classSourceId, SENDER_TIME, SENDER_TIME],
   ).lastInsertId;
+  const secondItemId = db.exec(
+    `INSERT INTO character_items (
+       character_id, name, description, requires_attunement,
+       source_instance_id, created_at, updated_at
+     ) VALUES (?, 'Sender Ring', 'second attuned item', 1, ?, ?, ?)`,
+    [characterId, classSourceId, SENDER_TIME, SENDER_TIME],
+  ).lastInsertId;
+  const thirdItemId = db.exec(
+    `INSERT INTO character_items (
+       character_id, name, description, requires_attunement,
+       source_instance_id, created_at, updated_at
+     ) VALUES (?, 'Sender Boots', 'third attuned item', 1, ?, ?, ?)`,
+    [characterId, classSourceId, SENDER_TIME, SENDER_TIME],
+  ).lastInsertId;
+  db.exec(
+    `INSERT INTO character_attunement_slots (
+       character_id, slot_1_item_id, slot_2_item_id, slot_3_item_id
+     ) VALUES (?, ?, ?, ?)`,
+    [characterId, ownedItemId, secondItemId, thirdItemId],
+  );
   // Four effects, because the per-kind CHECK constraints refuse to let one row
   // carry a damage type, a hit point payload and a speed bonus at once. The
   // sort orders are 3, 6, 9 so the recipient's dense renumbering from 1 is
@@ -1751,14 +1791,14 @@ afterAll(() => {
 });
 
 describe('every column of every shared table is classified', () => {
-  it('probes the character root, all nineteen share tables, and spell references', () => {
+  it('probes the character root, all twenty share tables, and spell references', () => {
     expect([...PROBED_TABLES].sort()).toEqual(
       ['characters', 'spell_versions', ...Object.keys(SHARE_TABLES)].sort(),
     );
-    // The type already forces the nineteen current shared tables; AC-4 removed
+    // The type already forces the twenty current shared tables; AC-4 removed
     // the historical adjustment shell from that scope. The exact runtime
     // roster additionally pins the character root and reference-only spell row.
-    expect(PROBED_TABLES).toHaveLength(21);
+    expect(PROBED_TABLES).toHaveLength(22);
   });
 
   it('records why each deliberately retired column no longer travels', () => {
@@ -2013,6 +2053,21 @@ function everyRow(
       : table === 'spell_loadout_entries'
         ? 't.spell_loadout_id IN (SELECT id FROM spell_loadouts WHERE character_id = ?)'
         : 't.character_id = ?';
+  if (table === 'character_attunement_slots') {
+    return db.allRaw(
+      `SELECT
+         (SELECT name FROM character_items WHERE id = t.slot_1_item_id)
+           AS slot_1_item_name,
+         (SELECT name FROM character_items WHERE id = t.slot_2_item_id)
+           AS slot_2_item_name,
+         (SELECT name FROM character_items WHERE id = t.slot_3_item_id)
+           AS slot_3_item_name
+       FROM character_attunement_slots AS t
+       WHERE t.character_id = ?
+       ORDER BY t.character_id`,
+      [characterId],
+    );
+  }
   return db.allRaw(
     `SELECT ${columns.map((column) => `t."${column}"`).join(', ')}
      FROM "${table}" AS t WHERE ${scope} ORDER BY t.id`,

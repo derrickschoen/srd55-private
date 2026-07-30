@@ -20,6 +20,7 @@ import type {
 import type { WeaponRange } from './weapon-range';
 import type { EquipmentEffectInput } from './equipment-effects';
 import type { CharacterSnapshot, JsonObject } from './models';
+import type { AttunementSlot } from './attunement';
 
 interface CommandBase {
   reason?: string;
@@ -273,7 +274,6 @@ export interface ItemFields {
   name: string;
   description: string | null;
   requires_attunement: boolean;
-  attuned: boolean;
   source_instance_id: number | null;
   /**
    * Effects this item grants. Absent has the same preserve-on-update meaning
@@ -287,6 +287,8 @@ export interface AddItemCommand extends CommandBase {
   item: ItemFields;
   /** Present only on the inverse of `remove_item`. */
   item_id?: number;
+  /** Present only on an inverse restoring a removed attuned item. */
+  attunement_slot?: AttunementSlot;
 }
 
 export interface UpdateItemCommand extends CommandBase {
@@ -297,6 +299,29 @@ export interface UpdateItemCommand extends CommandBase {
 
 export interface RemoveItemCommand extends CommandBase {
   type: 'remove_item';
+  item_id: number;
+}
+
+export interface AttuneItemCommand extends CommandBase {
+  type: 'attune_item';
+  item_id: number;
+}
+
+export interface UnattuneItemCommand extends CommandBase {
+  type: 'unattune_item';
+  item_id: number;
+}
+
+export interface ReplaceAttunedItemCommand extends CommandBase {
+  type: 'replace_attuned_item';
+  item_id: number;
+  replaced_item_id: number;
+}
+
+/** Exact inverse of unattuning; ordinary UI callers never need this command. */
+export interface RestoreAttunementSlotCommand extends CommandBase {
+  type: 'restore_attunement_slot';
+  slot: AttunementSlot;
   item_id: number;
 }
 
@@ -388,6 +413,10 @@ export type CharacterCommandPayload =
   | AddItemCommand
   | UpdateItemCommand
   | RemoveItemCommand
+  | AttuneItemCommand
+  | UnattuneItemCommand
+  | ReplaceAttunedItemCommand
+  | RestoreAttunementSlotCommand
   | SetArmorCommand
   | SetHitPointRollCommand
   | FillSkillGrantCommand

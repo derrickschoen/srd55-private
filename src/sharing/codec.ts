@@ -103,6 +103,10 @@ const ROOT_SKILL_GRANTS_INDEX = fieldIndex(
   'skillGrants',
 );
 const ROOT_ITEMS_INDEX = fieldIndex(WIRE_SCHEMA.tuples.root.fields, 'items');
+const ROOT_ATTUNEMENT_SLOTS_INDEX = fieldIndex(
+  WIRE_SCHEMA.tuples.root.fields,
+  'attunementSlots',
+);
 
 const CHARACTER_TUPLE_LENGTHS = WIRE_SCHEMA.tuples.character.arities;
 const SHEET_TUPLE_LENGTH = WIRE_SCHEMA.tuples.sheet.arities[0];
@@ -138,6 +142,8 @@ const SPECIES_TRAIT_TUPLE_LENGTH =
 const BACKGROUND_TUPLE_LENGTH = WIRE_SCHEMA.tuples.background.arities[0];
 const EFFECT_TUPLE_LENGTH = WIRE_SCHEMA.tuples.effect.arities[0];
 const ITEM_TUPLE_LENGTH = WIRE_SCHEMA.tuples.item.arities[0];
+const ATTUNEMENT_SLOTS_TUPLE_LENGTH =
+  WIRE_SCHEMA.tuples.attunementSlots.arities[0];
 const ARMOR_TUPLE_LENGTH = WIRE_SCHEMA.tuples.armor.arities[0];
 const HIT_POINT_ROLL_TUPLE_LENGTH =
   WIRE_SCHEMA.tuples.hitPointRoll.arities[0];
@@ -576,6 +582,7 @@ export function shareDocumentToPositional(
       items: document.items?.map((row) =>
         objectToPositional(row, WIRE_SCHEMA.tuples.item.fields)
       ),
+      attunementSlots: document.attunementSlots,
     },
     WIRE_SCHEMA.tuples.root.fields,
   );
@@ -594,6 +601,14 @@ function decodeCurrentWire(input: unknown): CharacterShareDocument {
   const wirePlaceholders = root[ROOT_PLACEHOLDERS_INDEX];
   const wireSkillGrants = root[ROOT_SKILL_GRANTS_INDEX];
   const wireItems = root[ROOT_ITEMS_INDEX];
+  const wireAttunementSlots =
+    root[ROOT_ATTUNEMENT_SLOTS_INDEX] === null
+      ? null
+      : tuple(
+          root[ROOT_ATTUNEMENT_SLOTS_INDEX],
+          ATTUNEMENT_SLOTS_TUPLE_LENGTH,
+          'wire attunementSlots',
+        );
   const character = variableTuple(
     root[ROOT_CHARACTER_INDEX],
     CHARACTER_TUPLE_LENGTHS,
@@ -751,7 +766,6 @@ function decodeCurrentWire(input: unknown): CharacterShareDocument {
     }
     assertListLimit(wireItems, SHARE_LIMITS.items, 'items');
   }
-
   const rawCharacter = fromPositional(
     character,
     character.length,
@@ -808,6 +822,9 @@ function decodeCurrentWire(input: unknown): CharacterShareDocument {
       };
     }),
   };
+  if (wireAttunementSlots !== null) {
+    raw.attunementSlots = [...wireAttunementSlots];
+  }
   if (root[ROOT_ACKNOWLEDGEMENTS_INDEX] !== null) {
     raw.acknowledgements = root[ROOT_ACKNOWLEDGEMENTS_INDEX].map(
       (value, index) =>
@@ -1020,9 +1037,11 @@ export function positionalToShareDocument(
         'wire character',
       );
       return decodeCurrentWire(
-        MIGRATIONS[9](
-          MIGRATIONS[8](
-            MIGRATIONS[7](MIGRATIONS[6](MIGRATIONS[5](input))),
+        MIGRATIONS[10](
+          MIGRATIONS[9](
+            MIGRATIONS[8](
+              MIGRATIONS[7](MIGRATIONS[6](MIGRATIONS[5](input))),
+            ),
           ),
         ),
       );
@@ -1038,8 +1057,10 @@ export function positionalToShareDocument(
         'wire character',
       );
       return decodeCurrentWire(
-        MIGRATIONS[9](
-          MIGRATIONS[8](MIGRATIONS[7](MIGRATIONS[6](input))),
+        MIGRATIONS[10](
+          MIGRATIONS[9](
+            MIGRATIONS[8](MIGRATIONS[7](MIGRATIONS[6](input))),
+          ),
         ),
       );
     case 7:
@@ -1054,13 +1075,17 @@ export function positionalToShareDocument(
         'wire character',
       );
       return decodeCurrentWire(
-        MIGRATIONS[9](MIGRATIONS[8](MIGRATIONS[7](input))),
+        MIGRATIONS[10](MIGRATIONS[9](MIGRATIONS[8](MIGRATIONS[7](input)))),
       );
     case 8:
-      return decodeCurrentWire(MIGRATIONS[9](MIGRATIONS[8](input)));
+      return decodeCurrentWire(
+        MIGRATIONS[10](MIGRATIONS[9](MIGRATIONS[8](input))),
+      );
     case 9:
-      return decodeCurrentWire(MIGRATIONS[9](input));
+      return decodeCurrentWire(MIGRATIONS[10](MIGRATIONS[9](input)));
     case 10:
+      return decodeCurrentWire(MIGRATIONS[10](input));
+    case 11:
       return decodeCurrentWire(input);
     default:
       throw new ShareValidationError('version is unsupported.');

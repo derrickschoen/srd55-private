@@ -141,6 +141,22 @@ CREATE TABLE `character_armor` (
 );
 
 CREATE UNIQUE INDEX `character_armor_character_id_slot_unique` ON `character_armor` (`character_id`,`slot`);
+CREATE TABLE `character_attunement_slots` (
+	`character_id` integer PRIMARY KEY NOT NULL,
+	`slot_1_item_id` integer,
+	`slot_2_item_id` integer,
+	`slot_3_item_id` integer,
+	FOREIGN KEY (`character_id`) REFERENCES `characters`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`slot_1_item_id`,`character_id`) REFERENCES `character_items`(`id`,`character_id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`slot_2_item_id`,`character_id`) REFERENCES `character_items`(`id`,`character_id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`slot_3_item_id`,`character_id`) REFERENCES `character_items`(`id`,`character_id`) ON UPDATE no action ON DELETE no action,
+	CONSTRAINT "character_attunement_slots_distinct_check" CHECK(
+        (slot_1_item_id IS NULL OR slot_2_item_id IS NULL OR slot_1_item_id <> slot_2_item_id)
+        AND (slot_1_item_id IS NULL OR slot_3_item_id IS NULL OR slot_1_item_id <> slot_3_item_id)
+        AND (slot_2_item_id IS NULL OR slot_3_item_id IS NULL OR slot_2_item_id <> slot_3_item_id)
+      )
+);
+
 CREATE TABLE `character_background` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`character_id` integer NOT NULL,
@@ -261,7 +277,6 @@ CREATE TABLE `character_items` (
 	`name` VARCHAR NOT NULL,
 	`description` TEXT,
 	`requires_attunement` TINYINT(1) DEFAULT false NOT NULL,
-	`attuned` TINYINT(1) DEFAULT false NOT NULL,
 	`source_instance_id` integer,
 	`created_at` DATETIME,
 	`updated_at` DATETIME,
@@ -1362,6 +1377,24 @@ CREATE TRIGGER spell_slots_exclusive_assignment_insert
       AND NEW.current_spell_version_id IS NOT NULL
 BEGIN
     SELECT RAISE(ABORT, 'a spell slot cannot hold both a fixed grant and a user selection');
+END;
+
+-- D92's slot row uses composite ownership references. SQLite's SET NULL
+-- action would null both columns in each composite key, including the
+-- non-null character primary key, so clear only the matching item positions
+-- before the item delete reaches foreign-key enforcement.
+CREATE TRIGGER character_items_clear_attunement_slots_before_delete
+    BEFORE DELETE ON character_items
+BEGIN
+    UPDATE character_attunement_slots
+       SET slot_1_item_id = CASE
+             WHEN slot_1_item_id = OLD.id THEN NULL ELSE slot_1_item_id END,
+           slot_2_item_id = CASE
+             WHEN slot_2_item_id = OLD.id THEN NULL ELSE slot_2_item_id END,
+           slot_3_item_id = CASE
+             WHEN slot_3_item_id = OLD.id THEN NULL ELSE slot_3_item_id END
+     WHERE character_id = OLD.character_id
+       AND OLD.id IN (slot_1_item_id, slot_2_item_id, slot_3_item_id);
 END;
 
 CREATE TRIGGER spell_slots_exclusive_assignment_update

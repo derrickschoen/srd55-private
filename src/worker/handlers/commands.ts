@@ -1,6 +1,7 @@
 import { CharacterCommandExecutor } from '../../commands/character-command-executor';
 import { CharacterCommandIntegrity } from '../../commands/integrity';
 import { RevisionConflict } from '../../commands/revision-conflict';
+import { AttunementSlotsFull } from '../../commands/items';
 import type { CharacterCommandRequest } from '../../domain/command-contracts';
 import { RpcError } from '../../rpc/protocol';
 import {
@@ -52,6 +53,16 @@ export const handlers: readonly RpcHandler[] = Object.freeze([
         if (error instanceof RevisionConflict) {
           throw new RpcError('handler_error', error.message, {
             current_revision: error.currentRevision,
+          });
+        }
+        if (error instanceof AttunementSlotsFull) {
+          throw new RpcError('handler_error', error.message, {
+            reason: error.data.reason,
+            occupants: error.data.occupants.map((occupant) => ({
+              slot: occupant.slot,
+              item_id: occupant.item_id,
+              name: occupant.name,
+            })),
           });
         }
         throw error;
