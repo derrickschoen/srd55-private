@@ -1,5 +1,19 @@
 # Binding scope decisions
 
+## D105 — OWNER: parallel worktrees authorized, as many as needed (2026-07-30)
+
+The owner's directive: *"Do the parallel strategies you identified. Make as
+many worktrees as you need."* The identified strategies now standing:
+parallel codex implementation units in separate git worktrees with disjoint
+scopes; read-only reviews overlapped with writes; Claude subagent review
+lenses (cheap tier) on codex-authored plans; and — since it was among the
+identified strategies put to the owner — one browser suite per worktree on
+unique ports, relaxing the ONE-suite rule to per-tree. Standing
+constraints that do NOT relax: wire version mints serialize (exactly one
+mint-carrying unit in flight at a time); every merge passes the
+supervisor's gates one at a time; the merge queue is serial even when the
+work is not.
+
 ## D104 — OWNER: the flavor layer is TEXT FIELDS ONLY (2026-07-30)
 
 The owner's answer: **"Text fields only."** Optional alignment,
