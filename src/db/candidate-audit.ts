@@ -666,20 +666,21 @@ function auditSavePointSnapshots(db: Database): void {
           table === 'character_species_traits'
             ? splitLegacyTraitEffect(row as Record<string, unknown>)
             : null;
-        const migratedWeapon =
+        // Hold every row to the same reconciliation `CharacterState.restore`
+        // will apply. Otherwise the audit can refuse a historical row over a
+        // nullable column it predates even though restore accepts that row.
+        const migrated =
           table === 'character_weapons'
-            ? fillAddedNullableRowColumns(
-                table,
-                migrateLegacyWeaponRangeRow(
-                  migrateLegacyWeaponDamageRow(
-                    row as Record<string, unknown>,
-                  ),
+            ? migrateLegacyWeaponRangeRow(
+                migrateLegacyWeaponDamageRow(
+                  row as Record<string, unknown>,
                 ),
               )
-            : null;
+            : (row as Record<string, unknown>);
+        const reconciled = fillAddedNullableRowColumns(table, migrated);
         const error = rowContractError(
           table,
-          legacy?.row ?? migratedWeapon ?? row,
+          legacy?.row ?? reconciled,
           rowLabel,
         );
         if (error !== null) {
@@ -697,7 +698,7 @@ function auditSavePointSnapshots(db: Database): void {
         }
         if (table === 'character_effects') {
           const payload = effectPayloadKindError(
-            row as Record<string, unknown>,
+            reconciled,
             rowLabel,
           );
           if (payload !== null) {

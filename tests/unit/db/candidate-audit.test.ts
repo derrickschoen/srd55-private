@@ -871,6 +871,38 @@ describe('candidate database semantic audit', () => {
     ).toBeNull();
   });
 
+  it('accepts every save point restore accepts', () => {
+    const db = freshDatabase();
+    seedTwoCharacters(db);
+    db.exec(
+      `INSERT INTO character_effects (
+         id, character_id, sort_order, effect_kind, damage_type, label
+       ) VALUES (1, 1, 1, 'damage_resistance', 'Poison', 'Dwarven Resilience')`,
+    );
+    const snapshot = snapshotOf(db, 1);
+    snapshot.schema_version = 'a7-v9';
+    delete snapshot.character_items;
+    const effect = (snapshot.character_effects as Record<
+      string,
+      unknown
+    >[])[0]!;
+    for (const column of [
+      'ability',
+      'amount',
+      'maximum',
+      'base',
+      'ability_1',
+      'ability_2',
+      'allows_shield',
+      'weapon_scope',
+    ]) {
+      delete effect[column];
+    }
+    insertSavePoint(db, 1, snapshot);
+
+    expect(() => auditCandidateDatabase(quarantined(bytesOf(db)))).not.toThrow();
+  });
+
   it('still audits the rows inside an a7-v1 save point', () => {
     // The corollary of accepting the version: the five tables it does carry get
     // exactly the scrutiny they got before. An older version is not an escape
