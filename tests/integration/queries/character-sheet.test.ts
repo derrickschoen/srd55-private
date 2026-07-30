@@ -366,22 +366,28 @@ describe('the derived character sheet', () => {
     ).lastInsertId;
     const cloakId = db.exec(
       `INSERT INTO character_items (
-         character_id, name, requires_attunement, attuned
-       ) VALUES (?, 'Cloak of the Armadillo', 1, 0)`,
+         character_id, name, requires_attunement
+       ) VALUES (?, 'Cloak of the Armadillo', 1)`,
       [characterId],
     ).lastInsertId;
     const attunedId = db.exec(
       `INSERT INTO character_items (
-         character_id, name, requires_attunement, attuned
-       ) VALUES (?, 'Attuned Shell', 1, 1)`,
+         character_id, name, requires_attunement
+       ) VALUES (?, 'Attuned Shell', 1)`,
       [characterId],
     ).lastInsertId;
     const ringId = db.exec(
       `INSERT INTO character_items (
-         character_id, name, requires_attunement, attuned
-       ) VALUES (?, 'Ring of Shell', 0, 0)`,
+         character_id, name, requires_attunement
+       ) VALUES (?, 'Ring of Shell', 0)`,
       [characterId],
     ).lastInsertId;
+    db.exec(
+      `INSERT INTO character_attunement_slots (
+         character_id, slot_1_item_id
+       ) VALUES (?, ?)`,
+      [characterId, attunedId],
+    );
 
     db.exec(
       `INSERT INTO character_effects (
@@ -469,8 +475,9 @@ describe('the derived character sheet', () => {
     ).not.toContain('Amulet HP');
 
     db.exec(
-      'UPDATE character_items SET attuned = 1 WHERE id = ?',
-      [cloakId],
+      `UPDATE character_attunement_slots SET slot_2_item_id = ?
+       WHERE character_id = ?`,
+      [cloakId, characterId],
     );
     const attuned = builder.build(characterId);
     expect(attuned.armor_class.value).toBe(19);

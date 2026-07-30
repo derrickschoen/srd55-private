@@ -285,6 +285,10 @@ const RETIRED_ROW_COLUMNS: Readonly<
   character_weapons: ['source_instance_id'],
   character_armor: ['source_instance_id'],
   character_sheet_adjustments: RETIRED_ARMOR_CLASS_ADJUSTMENT_COLUMNS,
+  // D92 inverted this boolean into membership in
+  // `character_attunement_slots`. A document written while the boolean existed
+  // may still name it; the adjacent slot table carries the surviving state.
+  character_items: ['attuned'],
 };
 
 /**
@@ -438,17 +442,54 @@ function parseSnapshot(value: unknown, label: string): CharacterSnapshotData {
   const migratedVersion =
     version === 'a7-v4' && migratedArmorClassBonuses.length > 0
       ? 'a7-v5'
-      : version;
+      : version === 'a7-v10'
+        ? 'a7-v11'
+        : version;
+  const parsedRows = Object.fromEntries(
+    tables.map((table) => [
+      table,
+      rowList(snapshot[table], `${label}.${table}`, table),
+    ]),
+  ) as SnapshotRowMap;
+  let legacyAttunementRows: readonly BackupRow[] | undefined;
+  if (version === 'a7-v10') {
+    const rawItems = Array.isArray(snapshot.character_items)
+      ? snapshot.character_items
+      : [];
+    const attuned = rawItems
+      .filter(
+        (row): row is Record<string, unknown> =>
+          row !== null &&
+          typeof row === 'object' &&
+          !Array.isArray(row) &&
+          (row.attuned === true || row.attuned === 1),
+      )
+      .map((row) => Number(row.id))
+      .filter((id) => Number.isSafeInteger(id) && id >= 1)
+      .sort((left, right) => left - right)
+      .slice(0, 3);
+    legacyAttunementRows =
+      attuned.length === 0
+        ? []
+        : [{
+            character_id: Number(
+              (parsedRows.character_items ?? [])[0]?.character_id,
+            ),
+            slot_1_item_id: attuned[0] ?? null,
+            slot_2_item_id: attuned[1] ?? null,
+            slot_3_item_id: attuned[2] ?? null,
+          }];
+  }
   return {
     schema_version: version,
     tables: snapshotTablesFor(migratedVersion),
     character,
-    rows: Object.fromEntries(
-      tables.map((table) => [
-        table,
-        rowList(snapshot[table], `${label}.${table}`, table),
-      ]),
-    ) as SnapshotRowMap,
+    rows: {
+      ...parsedRows,
+      ...(legacyAttunementRows === undefined
+        ? {}
+        : { character_attunement_slots: legacyAttunementRows }),
+    },
     legacyArmorClassBonuses: migratedArmorClassBonuses,
   };
 }
@@ -597,7 +638,27 @@ function validateCharacterRows(
       }
     }
     assertOwnedRows(rows, characterId, `${label}.${table}`);
-    uniqueRowIds(rows, `${label}.${table}`);
+    if (table === 'character_attunement_slots') {
+      if (rows.length > 1) {
+        throw new BackupValidationError(
+          `${label}.${table} must contain at most one row.`,
+        );
+      }
+      const occupied = rows.flatMap((row) =>
+        [
+          row.slot_1_item_id,
+          row.slot_2_item_id,
+          row.slot_3_item_id,
+        ].filter((value): value is number => value !== null),
+      );
+      if (new Set(occupied).size !== occupied.length) {
+        throw new BackupValidationError(
+          `${label}.${table} cannot hold the same item twice.`,
+        );
+      }
+    } else {
+      uniqueRowIds(rows, `${label}.${table}`);
+    }
   }
 
   for (const [index, row] of (
@@ -732,6 +793,25 @@ function validateCharacterRows(
     tables.character_items ?? [],
     `${label}.character_items`,
   );
+  for (const [index, row] of (
+    tables.character_attunement_slots ?? []
+  ).entries()) {
+    for (const column of [
+      'slot_1_item_id',
+      'slot_2_item_id',
+      'slot_3_item_id',
+    ] as const) {
+      const itemId = nullablePositiveInteger(
+        row[column],
+        `${label}.character_attunement_slots[${index}].${column}`,
+      );
+      if (itemId !== null && !itemIds.has(itemId)) {
+        throw new BackupValidationError(
+          `${label}.character_attunement_slots[${index}].${column} references an item from another character.`,
+        );
+      }
+    }
+  }
   for (const [index, row] of (tables.character_effects ?? []).entries()) {
     const itemId = nullablePositiveInteger(
       row.character_item_id,
@@ -1065,7 +1145,7 @@ function validateDocument(input: unknown): ValidatedDocument {
     [...BACKUP_OPTIONAL_TABLES],
     'Character backup tables',
   );
-  const tables = Object.fromEntries(
+  const parsedTables = Object.fromEntries(
     backupTableNames.map((table) => [
       table,
       tableObject[table] === undefined && optionalBackupTables.has(table)
@@ -1073,6 +1153,36 @@ function validateDocument(input: unknown): ValidatedDocument {
         : rowList(tableObject[table], `Character backup tables.${table}`, table),
     ]),
   ) as unknown as CharacterBackupTables;
+  const rawItems = Array.isArray(tableObject.character_items)
+    ? tableObject.character_items
+    : [];
+  const legacyAttunedIds =
+    tableObject.character_attunement_slots === undefined
+      ? rawItems
+          .filter(
+            (row): row is Record<string, unknown> =>
+              row !== null &&
+              typeof row === 'object' &&
+              !Array.isArray(row) &&
+              (row.attuned === true || row.attuned === 1),
+          )
+          .map((row) => Number(row.id))
+          .filter((id) => Number.isSafeInteger(id) && id >= 1)
+          .sort((left, right) => left - right)
+          .slice(0, 3)
+      : [];
+  const tables: CharacterBackupTables = {
+    ...parsedTables,
+    character_attunement_slots:
+      legacyAttunedIds.length === 0
+        ? parsedTables.character_attunement_slots
+        : [{
+            character_id: characterId,
+            slot_1_item_id: legacyAttunedIds[0] ?? null,
+            slot_2_item_id: legacyAttunedIds[1] ?? null,
+            slot_3_item_id: legacyAttunedIds[2] ?? null,
+          }],
+  };
   const currentLegacyArmorClassBonuses = legacyArmorClassBonuses(
     tableObject.character_sheet_adjustments,
     'Character backup tables.character_sheet_adjustments',
@@ -1116,7 +1226,9 @@ function validateDocument(input: unknown): ValidatedDocument {
       characterId,
       `Character backup tables.${table}`,
     );
-    uniqueRowIds(tables[table], `Character backup tables.${table}`);
+    if (table !== 'character_attunement_slots') {
+      uniqueRowIds(tables[table], `Character backup tables.${table}`);
+    }
   }
   validateCharacterRows(
     tables,
@@ -1268,7 +1380,9 @@ function selectCharacterRows(
   // of storage — decoding it here would make the round trip assert through the
   // decoder instead of against the database.
   return db.allRaw(
-    `SELECT * FROM "${table}" WHERE character_id = ? ORDER BY id`,
+    `SELECT * FROM "${table}" WHERE character_id = ? ORDER BY ${
+      table === 'character_attunement_slots' ? 'character_id' : 'id'
+    }`,
     [characterId],
   );
 }
@@ -2062,6 +2176,34 @@ function importCurrentTables(
       }),
     );
   }
+  // D92's fixed slot row follows items so each old item id can be translated
+  // through the same map effects use.
+  for (const row of document.tables.character_attunement_slots) {
+    const remapSlot = (column: string): number | null => {
+      if (row[column] === null) {
+        return null;
+      }
+      const mapped = maps.character_items.get(Number(row[column]));
+      if (mapped === undefined) {
+        throw new BackupValidationError(
+          `Character backup attunement ${column} item is missing.`,
+        );
+      }
+      return mapped;
+    };
+    insertPortableRow(
+      db,
+      'character_attunement_slots',
+      row,
+      {
+        character_id: characterId,
+        slot_1_item_id: remapSlot('slot_1_item_id'),
+        slot_2_item_id: remapSlot('slot_2_item_id'),
+        slot_3_item_id: remapSlot('slot_3_item_id'),
+      },
+      new Set(),
+    );
+  }
   // The character's own effects. All three nullable character-owned
   // references are remapped through the rows this import has just minted.
   for (const row of document.tables.character_effects) {
@@ -2229,13 +2371,22 @@ function portableSnapshots(
     character_sheet_adjustments: new Map(current.character_sheet_adjustments),
     character_effects: new Map(current.character_effects),
     character_items: new Map(current.character_items),
+    character_attunement_slots: new Map(),
   };
   const next = Object.fromEntries(
     CHARACTER_STATE_TABLES.map((table) => [
       table,
       {
         value:
-          Number(db.scalar(`SELECT coalesce(max(id), 0) FROM ${quoted(table)}`)) +
+          Number(
+            db.scalar(
+              `SELECT coalesce(max(${
+                table === 'character_attunement_slots'
+                  ? 'character_id'
+                  : 'id'
+              }), 0) FROM ${quoted(table)}`,
+            ),
+          ) +
           1,
       },
     ]),
@@ -2265,6 +2416,9 @@ function portableSnapshots(
     // snapshot's own version says it carries is reserved here.
     for (const table of snapshot.tables) {
       if (table === 'character_source_instances') {
+        continue;
+      }
+      if (table === 'character_attunement_slots') {
         continue;
       }
       for (const row of rowsOf(table)) {
@@ -2459,6 +2613,22 @@ function portableSnapshots(
                     Number(row.source_instance_id),
                   ) ?? null,
           }));
+        case 'character_attunement_slots':
+          return rowsOf(table).map((row) => {
+            const remap = (column: string): number | null => {
+              if (row[column] === null) {
+                return null;
+              }
+              return ids.character_items.get(Number(row[column])) ?? null;
+            };
+            return {
+              ...row,
+              character_id: characterId,
+              slot_1_item_id: remap('slot_1_item_id'),
+              slot_2_item_id: remap('slot_2_item_id'),
+              slot_3_item_id: remap('slot_3_item_id'),
+            };
+          });
         // A skill grant's source is remapped like an effect's, with NO null
         // limb: the column is NOT NULL, so a snapshot grant whose source the
         // snapshot does not carry would restore into a composite-FK refusal
@@ -2493,7 +2663,9 @@ function portableSnapshots(
         snapshot.schema_version === 'a7-v4' &&
         snapshot.legacyArmorClassBonuses.length > 0
           ? 'a7-v5'
-          : snapshot.schema_version,
+          : snapshot.schema_version === 'a7-v10'
+            ? 'a7-v11'
+            : snapshot.schema_version,
       character: snapshot.character,
     };
     for (const table of snapshot.tables) {
@@ -2503,6 +2675,9 @@ function portableSnapshots(
   });
 
   for (const table of CHARACTER_STATE_TABLES) {
+    if (table === 'character_attunement_slots') {
+      continue;
+    }
     updateSequence(db, table, next[table].value - 1);
   }
   return transformed;

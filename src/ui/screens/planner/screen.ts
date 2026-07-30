@@ -50,6 +50,15 @@ import {
   type PlannerWeaponActions,
 } from './weapons';
 import type { WeaponFields } from '../../../domain/command-contracts';
+import type {
+  AttunementOccupant,
+  AttunementSlot,
+} from '../../../domain/attunement';
+import {
+  renderItems,
+  type AttunementReplacement,
+  type PlannerItemActions,
+} from './items';
 
 export interface PlannerCommandClient {
   execute(
@@ -79,6 +88,7 @@ export class PlannerSession {
   error: string | null = null;
   stale = false;
   previewWarnings: readonly CharacterCommandPreviewWarning[] = [];
+  attunementReplacement: AttunementReplacement | null = null;
   readonly #undo: CharacterCommandPayload[] = [];
   readonly #redo: CharacterCommandPayload[] = [];
 
@@ -114,14 +124,24 @@ export class PlannerSession {
       this.#undo.push(result.inverse);
       this.#redo.length = 0;
       this.previewWarnings = result.preview_warnings ?? [];
+      this.attunementReplacement = null;
       await this.#refresh();
       return true;
     } catch (error) {
+      const replacement = attunementReplacement(error, command);
+      if (replacement !== null) {
+        this.attunementReplacement = replacement;
+        return false;
+      }
       this.#recordError(error, 'The change could not be saved.');
       return false;
     } finally {
       this.saving = false;
     }
+  }
+
+  cancelAttunementReplacement(): void {
+    this.attunementReplacement = null;
   }
 
   async undo(): Promise<boolean> {
@@ -245,6 +265,46 @@ export class PlannerSession {
       this.stale = true;
     }
   }
+}
+
+function attunementReplacement(
+  error: unknown,
+  command: CharacterCommandPayload,
+): AttunementReplacement | null {
+  if (
+    command.type !== 'attune_item' ||
+    !(error instanceof RpcError) ||
+    error.code !== 'handler_error' ||
+    error.data === null ||
+    typeof error.data !== 'object' ||
+    Array.isArray(error.data) ||
+    error.data.reason !== 'attunement_slots_full' ||
+    !Array.isArray(error.data.occupants)
+  ) {
+    return null;
+  }
+  const occupants: AttunementOccupant[] = [];
+  for (const value of error.data.occupants) {
+    if (
+      value === null ||
+      typeof value !== 'object' ||
+      Array.isArray(value) ||
+      ![1, 2, 3].includes(Number(value.slot)) ||
+      !Number.isSafeInteger(value.item_id) ||
+      Number(value.item_id) < 1 ||
+      typeof value.name !== 'string'
+    ) {
+      return null;
+    }
+    occupants.push({
+      slot: Number(value.slot) as AttunementSlot,
+      item_id: Number(value.item_id),
+      name: value.name,
+    });
+  }
+  return occupants.length === 3
+    ? { item_id: command.item_id, occupants }
+    : null;
 }
 
 function routeCharacterId(context: ScreenContext): number {
@@ -585,6 +645,36 @@ function renderPlanner(
         view.weaponEditing = editing;
         rerender();
       },
+    }),
+  );
+  const itemActions: PlannerItemActions = {
+    attune: (itemId) =>
+      void mutate(() =>
+        session.execute({ type: 'attune_item', item_id: itemId }),
+      ),
+    unattune: (itemId) =>
+      void mutate(() =>
+        session.execute({ type: 'unattune_item', item_id: itemId }),
+      ),
+    replace: (itemId, replacedItemId) =>
+      void mutate(() =>
+        session.execute({
+          type: 'replace_attuned_item',
+          item_id: itemId,
+          replaced_item_id: replacedItemId,
+        }),
+      ),
+    cancelReplacement: () => {
+      session.cancelAttunementReplacement();
+      rerender();
+    },
+  };
+  primary.append(
+    renderItems({
+      panel: workspace.items,
+      replacement: session.attunementReplacement,
+      actions: itemActions,
+      disabled: session.saving,
     }),
   );
   const grid = renderPlannerGrid({

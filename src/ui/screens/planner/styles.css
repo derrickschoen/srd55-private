@@ -1097,3 +1097,33 @@ select:disabled {
   color: var(--planner-ink-soft);
   font-size: 0.76rem;
 }
+.item-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.item-table th,
+.item-table td {
+  padding: 0.55rem;
+  border-bottom: 1px solid var(--border-color, #d7d1c4);
+  text-align: left;
+}
+
+.attunement-replace-modal {
+  position: fixed;
+  inset: 50% auto auto 50%;
+  transform: translate(-50%, -50%);
+  max-width: min(32rem, calc(100vw - 2rem));
+  padding: 1.25rem;
+  border: 1px solid var(--border-color, #756f63);
+  border-radius: 0.5rem;
+  background: var(--surface, #fff);
+  box-shadow: 0 1rem 3rem rgb(0 0 0 / 30%);
+  z-index: 20;
+}
+
+.attunement-replace-choices {
+  display: grid;
+  gap: 0.5rem;
+  margin-block: 1rem;
+}

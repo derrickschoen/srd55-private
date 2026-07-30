@@ -36,6 +36,7 @@ import { CharacterNotFoundError } from './character-crud';
 import { orderSources } from './order-sources';
 import { SavePointQueries } from './save-points';
 import { WeaponQueries } from './weapons';
+import { ItemQueries } from './items';
 import { jsonRecord, type JsonRecord } from './source-config';
 
 interface SlotWithOrder extends WorkspaceSlot {
@@ -313,6 +314,7 @@ export class CharacterWorkspaceBuilder {
         scores,
         proficiency_bonus: report.character.proficiency_bonus,
       }),
+      items: new ItemQueries(this.db).panel(characterId),
       save_points: new SavePointQueries(this.db).list(characterId),
     };
   }

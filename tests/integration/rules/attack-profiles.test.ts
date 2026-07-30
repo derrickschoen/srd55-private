@@ -272,8 +272,8 @@ describe('the weapons panel derives attacks without storing them', () => {
     );
     const unattunedItemId = db.exec(
       `INSERT INTO character_items
-         (character_id, name, requires_attunement, attuned)
-       VALUES (?, 'Dormant weapon charm', 1, 0)`,
+         (character_id, name, requires_attunement)
+       VALUES (?, 'Dormant weapon charm', 1)`,
       [characterId],
     ).lastInsertId;
     db.exec(

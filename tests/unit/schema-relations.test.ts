@@ -133,7 +133,7 @@ afterAll(() => {
 });
 
 describe('declared relations match the foreign keys', () => {
-  it('budgets 73 constraints across 80 PRAGMA rows', () => {
+  it('budgets 77 constraints across 87 PRAGMA rows', () => {
     const tables = db
       .selectValues(
         `SELECT name FROM sqlite_schema
@@ -221,8 +221,10 @@ describe('declared relations match the foreign keys', () => {
     // AC-2a adds one parent edge for each of the three effect-template tables.
     // AC-2b adds two composite ownership edges from effects to items/weapons:
     // two constraints, four PRAGMA rows.
-    expect(constraintEdges(db)).toHaveLength(73);
-    expect(rowCount).toBe(80);
+    // D92 adds one character edge and three composite item/character guards:
+    // four constraints across seven PRAGMA rows.
+    expect(constraintEdges(db)).toHaveLength(77);
+    expect(rowCount).toBe(87);
   });
 
   it('declares a relation for every foreign key, and a foreign key for every relation', () => {
@@ -231,7 +233,7 @@ describe('declared relations match the foreign keys', () => {
     expect(declaredEdges()).toEqual(constraintEdges(db));
   });
 
-  it('keeps all seven composite foreign keys composite', () => {
+  it('keeps all ten composite foreign keys composite', () => {
     const edges = declaredEdges();
     expect(edges).toContain(
       'character_class_levels: subclass_definition_id,class_definition_id -> subclass_definitions.id,class_definition_id',
@@ -249,6 +251,11 @@ describe('declared relations match the foreign keys', () => {
     expect(edges).toContain(
       'character_skill_grants: source_instance_id,character_id -> character_source_instances.id,character_id',
     );
+    for (const slot of [1, 2, 3]) {
+      expect(edges).toContain(
+        `character_attunement_slots: slot_${String(slot)}_item_id,character_id -> character_items.id,character_id`,
+      );
+    }
     // The fifth (AC-1, D72), on the identical terms: an item's source is
     // remapped rather than resolved, and only the composite key stops one
     // from crossing characters.

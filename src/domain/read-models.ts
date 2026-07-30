@@ -1,4 +1,5 @@
 import type { WeaponFields } from './command-contracts';
+import type { AttunementSlot } from './attunement';
 import type { AttackProfileResult } from '../rules/attack-profiles';
 import type { CharacterMasteryAllowance } from '../rules/weapon-mastery-lookup';
 import type {
@@ -78,6 +79,19 @@ export interface WeaponsPanel {
   allowance: CharacterMasteryAllowance;
   selected_count: number;
   attacks: AttackProfileResult;
+}
+
+export interface CharacterItem {
+  readonly id: number;
+  readonly name: string;
+  readonly description: string | null;
+  readonly requires_attunement: boolean;
+  readonly source_instance_id: number | null;
+  readonly attunement_slot: AttunementSlot | null;
+}
+
+export interface ItemsPanel {
+  readonly items: readonly CharacterItem[];
 }
 
 export interface FreeCast {
@@ -301,6 +315,7 @@ export interface Workspace {
   }>;
   save_points: SavePoint[];
   weapons: WeaponsPanel;
+  items: ItemsPanel;
 }
 
 export interface EligibleSpell {

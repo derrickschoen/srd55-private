@@ -104,6 +104,12 @@ export const COLUMN_FACTS = {
     created_at: { base: 'degraded', notNull: false },
     updated_at: { base: 'degraded', notNull: false },
   },
+  character_attunement_slots: {
+    character_id: { base: 'integer', notNull: true },
+    slot_1_item_id: { base: 'integer', notNull: false },
+    slot_2_item_id: { base: 'integer', notNull: false },
+    slot_3_item_id: { base: 'integer', notNull: false },
+  },
   character_background: {
     id: { base: 'integer', notNull: true },
     character_id: { base: 'integer', notNull: true },
@@ -174,7 +180,6 @@ export const COLUMN_FACTS = {
     name: { base: 'degraded', notNull: true },
     description: { base: 'degraded', notNull: false },
     requires_attunement: { base: 'degraded', notNull: true },
-    attuned: { base: 'degraded', notNull: true },
     source_instance_id: { base: 'integer', notNull: false },
     created_at: { base: 'degraded', notNull: false },
     updated_at: { base: 'degraded', notNull: false },

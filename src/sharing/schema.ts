@@ -529,24 +529,27 @@ export interface ShareEffect {
  *
  * `character_items` is for things that only MODIFY and speak through
  * `character_effects`; this tuple carries exactly its five columns beyond the
- * row's own identity: `name`, `description`, `requires_attunement`,
- * `attuned`, and `sourceRef` — the SAME reference-space resolution
+ * row's own identity: `name`, `description`, `requires_attunement`, and
+ * `sourceRef` — the SAME reference-space resolution
  * `ShareEffect.sourceRef` gets, and on the identical "travels without its
  * provenance if the source is unreachable" terms, because no kind here has
  * `ability_increase`'s required-source CHECK.
  *
- * `requires_attunement` and `attuned` are REQUIRED, not optional: unlike a
- * nullable column, both are `NOT NULL DEFAULT false` — there is no absent
- * state to mirror, only a `false` a document must state plainly, matching
- * how a weapon's boolean flags travel.
+ * `requires_attunement` is REQUIRED, not optional: unlike a nullable column,
+ * it is `NOT NULL DEFAULT false`.
  */
 export interface ShareItem {
   readonly name: string;
   readonly description?: string;
   readonly requires_attunement: boolean;
-  readonly attuned: boolean;
   readonly sourceRef?: number;
 }
+
+export type ShareAttunementSlots = readonly [
+  number | null,
+  number | null,
+  number | null,
+];
 
 export interface ShareBackground {
   readonly name: string;
@@ -737,6 +740,8 @@ export interface CharacterShareDocument {
    * every link generated before this unit carries no such key.
    */
   readonly items?: readonly ShareItem[];
+  /** D92: exactly three nullable zero-based references into `items`. */
+  readonly attunementSlots?: ShareAttunementSlots;
 }
 
 export class ShareValidationError extends TypeError {
@@ -1770,7 +1775,7 @@ function shareItem(
   const row = record(value, label);
   exactKeys(
     row,
-    ['name', 'requires_attunement', 'attuned'],
+    ['name', 'requires_attunement'],
     ['description', 'sourceRef'],
     label,
   );
@@ -1779,15 +1784,11 @@ function shareItem(
       `${label}.requires_attunement must be boolean.`,
     );
   }
-  if (typeof row.attuned !== 'boolean') {
-    throw new ShareValidationError(`${label}.attuned must be boolean.`);
-  }
   const item: Record<string, unknown> = {
     // Non-empty, matching `character_effects.label`: an item nobody can name
     // is an item nobody can find to edit or delete.
     name: text(row.name, `${label}.name`, ORIGIN_TEXT_LIMITS.trait_name),
     requires_attunement: row.requires_attunement,
-    attuned: row.attuned,
   };
   if (row.description !== undefined) {
     item.description = text(
@@ -1868,6 +1869,7 @@ export function validateShareDocument(
       'effects',
       'skillGrants',
       'items',
+      'attunementSlots',
     ],
     'document',
   );
@@ -2391,6 +2393,35 @@ export function validateShareDocument(
       (item, index) => shareItem(item, `items[${index}]`, knownIds),
     );
   }
+  let attunementSlots: ShareAttunementSlots | undefined;
+  if (source.attunementSlots !== undefined) {
+    if (
+      !Array.isArray(source.attunementSlots) ||
+      source.attunementSlots.length !== 3
+    ) {
+      throw new ShareValidationError(
+        'attunementSlots must be a tuple of length 3.',
+      );
+    }
+    const maximum = (items?.length ?? 0) - 1;
+    const decoded = source.attunementSlots.map((value, index) =>
+      value === null
+        ? null
+        : integer(
+            value,
+            `attunementSlots[${index}]`,
+            0,
+            maximum,
+          ),
+    );
+    const occupied = decoded.filter((value): value is number => value !== null);
+    if (new Set(occupied).size !== occupied.length) {
+      throw new ShareValidationError(
+        'attunementSlots cannot name the same item twice.',
+      );
+    }
+    attunementSlots = [decoded[0]!, decoded[1]!, decoded[2]!];
+  }
 
   let effects: CharacterShareDocument['effects'] | undefined;
   if (source.effects !== undefined) {
@@ -2546,5 +2577,6 @@ export function validateShareDocument(
     ...(effects === undefined ? {} : { effects }),
     ...(skillGrants === undefined ? {} : { skillGrants }),
     ...(items === undefined ? {} : { items }),
+    ...(attunementSlots === undefined ? {} : { attunementSlots }),
   };
 }

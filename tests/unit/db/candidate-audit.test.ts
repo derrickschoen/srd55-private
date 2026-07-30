@@ -131,7 +131,9 @@ function snapshotOf(db: Database, characterId: number): Record<string, unknown> 
   };
   for (const table of CHARACTER_STATE_TABLES) {
     snapshot[table] = db.selectObjects(
-      `SELECT * FROM "${table}" WHERE character_id = ? ORDER BY id`,
+      `SELECT * FROM "${table}" WHERE character_id = ? ORDER BY ${
+        table === 'character_attunement_slots' ? 'character_id' : 'id'
+      }`,
       [characterId],
     );
   }
@@ -209,6 +211,7 @@ describe('candidate database semantic audit', () => {
     expect([...CHARACTER_OWNED_TABLES].sort()).toEqual([
       'change_log',
       'character_armor',
+      'character_attunement_slots',
       'character_background',
       'character_class_levels',
       'character_effects',

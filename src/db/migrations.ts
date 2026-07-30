@@ -17,6 +17,7 @@ import armorClassItemsAndEffects from '../../drizzle/0013_armor_class_items_and_
 import featureEffectProduction from '../../drizzle/0014_feature_effect_production.sql?raw';
 import effectEquipmentOwnership from '../../drizzle/0015_effect_equipment_ownership.sql?raw';
 import retireArmorClassAdjustment from '../../drizzle/0016_retire_armor_class_adjustment.sql?raw';
+import attunementSlots from '../../drizzle/0017_attunement_slots.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -193,6 +194,17 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
       '872df9e1828d1f36fa69aa491430a3f931be00606cc07ee4393bbbfd98d7731d',
     resultSchemaChecksum:
       '00b25ef999c033d70738ccc1d6e6e354735be9a8801acbef20dc3beeb7247c1d',
+  }),
+  // D92: invert the unbounded `character_items.attuned` boolean into the
+  // owner's exact three-column character-side slot row. Historical true rows
+  // fill slots by item id; only the first three survive by explicit ruling.
+  Object.freeze({
+    id: '0017_attunement_slots',
+    sql: attunementSlots,
+    checksum:
+      'c117e918be830185018ca14deb7b5587e65fd881c200a73e4f32333e44632514',
+    resultSchemaChecksum:
+      '7e9e69b3b95cffc9013db1b309fae0d033e8bdac806bce781232e0823560bb70',
   }),
 ]);
 
