@@ -55,6 +55,7 @@
 // minified away — is absent from every file, the scan is looking at the wrong
 // place and says so instead of passing.
 import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { basename, join, relative, resolve } from 'node:path';
 
 const FORBIDDEN = [
@@ -72,6 +73,20 @@ const FORBIDDEN = [
 ];
 const CONTROL = 'staticApp';
 const MIGRATION_CONTROL = 'migration-bundle-control:0000';
+const PWA_CACHE_PREFIX = 'spell-planner-shell-';
+const PWA_REQUIRED = [
+  'index.html',
+  'manifest.webmanifest',
+  'service-worker.js',
+  'icons/app-icon.svg',
+  'icons/app-icon-192.png',
+  'icons/app-icon-512.png',
+];
+const NOT_APP_SHELL = new Set([
+  '_headers',
+  '_redirects',
+  'service-worker.js',
+]);
 
 function walk(dir) {
   const found = [];
@@ -154,7 +169,75 @@ if (!migrationControlSeen) {
   );
 }
 
+const byName = new Map(
+  files.map((path) => [relative(root, path).replaceAll('\\', '/'), path]),
+);
+for (const required of PWA_REQUIRED) {
+  if (!byName.has(required)) {
+    fail(
+      `PWA control failed: required build artifact "${required}" is missing.`,
+    );
+  }
+}
+
+const index = readFileSync(byName.get('index.html'), 'utf8');
+if (!/<link\s+rel="manifest"\s+href="\.\/manifest\.webmanifest"\s*\/?>/.test(index)) {
+  fail(
+    'PWA control failed: index.html does not link the emitted manifest.',
+  );
+}
+
+const appShellFiles = [...byName.keys()]
+  .filter((name) => !NOT_APP_SHELL.has(name))
+  .sort((left, right) => left.localeCompare(right));
+const hash = createHash('sha256');
+for (const name of appShellFiles) {
+  hash.update(name);
+  hash.update('\0');
+  hash.update(readFileSync(byName.get(name)));
+  hash.update('\0');
+}
+const expectedCacheName = `${PWA_CACHE_PREFIX}${hash
+  .digest('hex')
+  .slice(0, 16)}`;
+const serviceWorker = readFileSync(
+  byName.get('service-worker.js'),
+  'utf8',
+);
+const cacheName =
+  /const CACHE_NAME = ("[^"]+");/.exec(serviceWorker)?.[1];
+if (cacheName === undefined || JSON.parse(cacheName) !== expectedCacheName) {
+  fail(
+    `PWA control failed: service-worker cache name is not the version ` +
+      `derived from the ${appShellFiles.length} emitted shell files.`,
+  );
+}
+
+const serializedShell =
+  /const APP_SHELL = (\[[^\n]+\]);/.exec(serviceWorker)?.[1];
+let cachedUrls;
+try {
+  cachedUrls =
+    serializedShell === undefined ? undefined : JSON.parse(serializedShell);
+} catch {
+  cachedUrls = undefined;
+}
+const expectedUrls = [
+  './',
+  ...appShellFiles.map((name) => `./${name}`),
+].sort();
+if (
+  !Array.isArray(cachedUrls) ||
+  JSON.stringify(cachedUrls) !== JSON.stringify(expectedUrls)
+) {
+  fail(
+    'PWA control failed: service-worker precache list does not exactly ' +
+      'transcribe the emitted app shell.',
+  );
+}
+
 process.stdout.write(
   `dist clean: ${files.length} files scanned, ` +
-    'control OK, migration control OK\n',
+    `control OK, migration control OK, ${appShellFiles.length} PWA shell ` +
+    'files transcribed\n',
 );
