@@ -1054,6 +1054,13 @@ const COMPLETE_V11_WIRE = [
   null,
 ];
 
+/** D86: item tuples append quantity; this complete fixture owns no items. */
+const COMPLETE_V12_WIRE = [
+  COMPLETE_V11_WIRE[0],
+  12,
+  ...COMPLETE_V11_WIRE.slice(2),
+];
+
 describe('character-share positional codec', () => {
   it('refuses the hand-authored complete version-1 positional golden BY NAME', () => {
     // D60: pre-v5 documents are RETIRED, not migrated. This fixture stays
@@ -1090,8 +1097,8 @@ describe('character-share positional codec', () => {
     expect(positionalToShareDocument(COMPLETE_V8_WIRE)).toEqual(complete);
   });
 
-  it('pins the hand-authored complete version-11 wire layout element by element', () => {
-    expect(shareDocumentToPositional(complete)).toEqual(COMPLETE_V11_WIRE);
+  it('pins the hand-authored complete version-12 wire layout element by element', () => {
+    expect(shareDocumentToPositional(complete)).toEqual(COMPLETE_V12_WIRE);
   });
 
   it('migrates v10 item booleans into exactly three slots and explicitly drops the fourth', () => {
@@ -1116,6 +1123,21 @@ describe('character-share positional codec', () => {
       ['Fourth loses attunement', null, true, null],
     ]);
     expect(migrated[18]).toEqual([0, 1, 2]);
+  });
+
+  it('migrates a v11 item without quantity to v12 quantity one', () => {
+    const v11 = new Array<unknown>(19).fill(null);
+    v11[0] = CHARACTER_SHARE_FORMAT;
+    v11[1] = 11;
+    v11[17] = [['Potion', null, false, null]];
+
+    const migrated = MIGRATIONS[11](v11) as unknown[];
+
+    expect(migrated).toHaveLength(19);
+    expect(migrated[1]).toBe(12);
+    expect(migrated[17]).toEqual([
+      ['Potion', null, false, null, 1],
+    ]);
   });
 
   it('round-trips object, positional, gzip, and base64url forms', async () => {
@@ -1257,7 +1279,7 @@ describe('character-share positional codec', () => {
     const positional = shareDocumentToPositional(minimal);
     expect(positional).toEqual([
       'dnd-multiclass-spells-character-share',
-      11,
+      12,
       [
         'Ten',
         null,

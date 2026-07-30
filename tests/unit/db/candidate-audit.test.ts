@@ -906,6 +906,30 @@ describe('candidate database semantic audit', () => {
     expect(() => auditCandidateDatabase(quarantined(bytesOf(db)))).not.toThrow();
   });
 
+  it('default-fills historical item quantity identically in audit and restore', () => {
+    const db = freshDatabase();
+    seedTwoCharacters(db);
+    db.exec(
+      `INSERT INTO character_items (id, character_id, name, quantity)
+       VALUES (7, 1, 'Potion', 5)`,
+    );
+    const snapshot = snapshotOf(db, 1);
+    snapshot.schema_version = 'a7-v11';
+    const item = (
+      snapshot.character_items as Record<string, unknown>[]
+    )[0]!;
+    delete item.quantity;
+    insertSavePoint(db, 1, snapshot);
+
+    expect(() => auditCandidateDatabase(quarantined(bytesOf(db)))).not.toThrow();
+
+    db.exec('UPDATE character_items SET quantity = 9 WHERE id = 7');
+    new CharacterState(new DatabaseContext(db)).restore(1, snapshot);
+    expect(
+      db.selectValue('SELECT quantity FROM character_items WHERE id = 7'),
+    ).toBe(1);
+  });
+
   it('accepts a pre-AC-4 save point carrying the retired adjustment columns', () => {
     const db = freshDatabase();
     seedTwoCharacters(db);

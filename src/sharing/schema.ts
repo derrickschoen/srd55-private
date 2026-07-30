@@ -529,8 +529,8 @@ export interface ShareEffect {
  *
  * `character_items` is for things that only MODIFY and speak through
  * `character_effects`; this tuple carries exactly its five columns beyond the
- * row's own identity: `name`, `description`, `requires_attunement`, and
- * `sourceRef` — the SAME reference-space resolution
+ * row's own identity: `name`, `description`, `requires_attunement`, `quantity`,
+ * and `sourceRef` — the SAME reference-space resolution
  * `ShareEffect.sourceRef` gets, and on the identical "travels without its
  * provenance if the source is unreachable" terms, because no kind here has
  * `ability_increase`'s required-source CHECK.
@@ -543,6 +543,7 @@ export interface ShareItem {
   readonly description?: string;
   readonly requires_attunement: boolean;
   readonly sourceRef?: number;
+  readonly quantity: number;
 }
 
 export type ShareAttunementSlots = readonly [
@@ -1775,7 +1776,7 @@ function shareItem(
   const row = record(value, label);
   exactKeys(
     row,
-    ['name', 'requires_attunement'],
+    ['name', 'requires_attunement', 'quantity'],
     ['description', 'sourceRef'],
     label,
   );
@@ -1784,11 +1785,17 @@ function shareItem(
       `${label}.requires_attunement must be boolean.`,
     );
   }
+  if (!Number.isSafeInteger(row.quantity) || Number(row.quantity) < 1) {
+    throw new ShareValidationError(
+      `${label}.quantity must be a positive integer.`,
+    );
+  }
   const item: Record<string, unknown> = {
     // Non-empty, matching `character_effects.label`: an item nobody can name
     // is an item nobody can find to edit or delete.
     name: text(row.name, `${label}.name`, ORIGIN_TEXT_LIMITS.trait_name),
     requires_attunement: row.requires_attunement,
+    quantity: Number(row.quantity),
   };
   if (row.description !== undefined) {
     item.description = text(

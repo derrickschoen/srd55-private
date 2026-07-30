@@ -794,6 +794,7 @@ const PROBES: { readonly [N in ProbedTable]: Probe<N> } = {
       character_id: RECIPIENT_OWNER_ID,
       name: { kind: 'verbatim' },
       description: { kind: 'verbatim' },
+      quantity: { kind: 'verbatim' },
       requires_attunement: { kind: 'verbatim' },
       source_instance_id: {
         kind: 'translated',
@@ -1339,23 +1340,23 @@ function seedSender(db: DatabaseContext, catalog: Catalog): number {
   );
   const ownedItemId = db.exec(
     `INSERT INTO character_items (
-       character_id, name, description, requires_attunement,
+       character_id, name, description, quantity, requires_attunement,
        source_instance_id, created_at, updated_at
-     ) VALUES (?, 'Sender Trinket', 'sender item description', 1, ?, ?, ?)`,
+     ) VALUES (?, 'Sender Trinket', 'sender item description', 4, 1, ?, ?, ?)`,
     [characterId, classSourceId, SENDER_TIME, SENDER_TIME],
   ).lastInsertId;
   const secondItemId = db.exec(
     `INSERT INTO character_items (
-       character_id, name, description, requires_attunement,
+       character_id, name, description, quantity, requires_attunement,
        source_instance_id, created_at, updated_at
-     ) VALUES (?, 'Sender Ring', 'second attuned item', 1, ?, ?, ?)`,
+     ) VALUES (?, 'Sender Ring', 'second attuned item', 2, 1, ?, ?, ?)`,
     [characterId, classSourceId, SENDER_TIME, SENDER_TIME],
   ).lastInsertId;
   const thirdItemId = db.exec(
     `INSERT INTO character_items (
-       character_id, name, description, requires_attunement,
+       character_id, name, description, quantity, requires_attunement,
        source_instance_id, created_at, updated_at
-     ) VALUES (?, 'Sender Boots', 'third attuned item', 1, ?, ?, ?)`,
+     ) VALUES (?, 'Sender Boots', 'third attuned item', 3, 1, ?, ?, ?)`,
     [characterId, classSourceId, SENDER_TIME, SENDER_TIME],
   ).lastInsertId;
   db.exec(

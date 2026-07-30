@@ -250,12 +250,12 @@ describe('capture and deterministic diff', () => {
       'character',
       ...CHARACTER_STATE_TABLES,
     ]);
-    // a7-v11 is the version that carries the fixed attunement row.
+    // a7-v12 is the version that carries D86 item quantities.
     // Written out rather than compared against the exported constant: a version
     // identifier is a wire fact that other stored data is matched against, so a
     // test that reads it from the module under test could never notice it
     // changing.
-    expect(snapshot.schema_version).toBe('a7-v11');
+    expect(snapshot.schema_version).toBe('a7-v12');
     expect(Object.keys(snapshot.character)).toEqual(CHARACTER_STATE_COLUMNS);
     expect(snapshot.character).toEqual({
       name: 'Snapshot Hero',
@@ -826,7 +826,7 @@ describe('restoring a snapshot written by an older build', () => {
     // oversight: a current snapshot DOES speak for weapons, so restoring it
     // removes one added afterwards.
     const snapshot = mutableCapture();
-    expect(snapshot.schema_version).toBe('a7-v11');
+    expect(snapshot.schema_version).toBe('a7-v12');
     db.exec(
       `INSERT INTO character_weapons (character_id, name)
        VALUES (?, 'Bought since')`,

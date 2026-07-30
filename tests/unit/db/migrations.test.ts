@@ -400,6 +400,50 @@ describe('database migration chain', () => {
     lifecycle.close();
   });
 
+  it('fills every pre-0018 item quantity with one and preserves it after reopen', async () => {
+    const beforeQuantity = DATABASE_MIGRATIONS
+      .slice(0, 18)
+      .map((entry) => entry.sql)
+      .join('\n');
+    const storage = await storageHolding(
+      `${beforeQuantity}
+       INSERT INTO characters (id, name) VALUES (1, 'Historical collector');
+       INSERT INTO character_items (id, character_id, name)
+       VALUES (4, 1, 'Potion'), (9, 1, 'Rope');`,
+    );
+
+    const migrated = new DatabaseLifecycle(sqlite3, storage, schema);
+    migrated.open();
+    expect(
+      migrated.database.allRaw(
+        'SELECT id, name, quantity FROM character_items ORDER BY id',
+      ),
+    ).toEqual([
+      { id: 4, name: 'Potion', quantity: 1 },
+      { id: 9, name: 'Rope', quantity: 1 },
+    ]);
+    expect(
+      migrated.database.exec(
+        `INSERT INTO character_items (character_id, name)
+         VALUES (1, 'New possession')`,
+      ).lastInsertId,
+    ).toBe(10);
+    migrated.close();
+
+    const reopened = new DatabaseLifecycle(sqlite3, storage, schema);
+    reopened.open();
+    expect(
+      reopened.database.allRaw(
+        'SELECT id, name, quantity FROM character_items ORDER BY id',
+      ),
+    ).toEqual([
+      { id: 4, name: 'Potion', quantity: 1 },
+      { id: 9, name: 'Rope', quantity: 1 },
+      { id: 10, name: 'New possession', quantity: 1 },
+    ]);
+    reopened.close();
+  });
+
   it('adds feat numbers without losing an existing definition', async () => {
     const storage = await storageHolding(
       `${SCHEMA_BEFORE_FEAT_MODEL}

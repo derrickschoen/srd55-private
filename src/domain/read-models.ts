@@ -85,6 +85,7 @@ export interface CharacterItem {
   readonly id: number;
   readonly name: string;
   readonly description: string | null;
+  readonly quantity: number;
   readonly requires_attunement: boolean;
   readonly source_instance_id: number | null;
   readonly attunement_slot: AttunementSlot | null;

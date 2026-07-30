@@ -596,6 +596,7 @@ function shareItemFromRow(
   const item: Record<string, unknown> = {
     name: String(row.name),
     requires_attunement: Number(row.requires_attunement) === 1,
+    quantity: Number(row.quantity),
   };
   if (row.description !== null && row.description !== undefined) {
     item.description = String(row.description);
@@ -1936,13 +1937,14 @@ export function importCharacterShare(
       }
       const inserted = db.exec(
         `INSERT INTO ${SHARE_TABLES.character_items} (
-           character_id, name, description, requires_attunement,
+           character_id, name, description, quantity, requires_attunement,
            source_instance_id, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           characterId,
           item.name,
           item.description ?? null,
+          item.quantity,
           item.requires_attunement ? 1 : 0,
           roots?.[0] ?? null,
           now,

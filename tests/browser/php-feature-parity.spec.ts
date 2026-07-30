@@ -371,6 +371,17 @@ test('builds the complete workspace editing contract for the seeded character', 
   expect(workspace.allow_legacy).toBe(false);
   expect(workspace.spell_lists).toEqual(['Cleric', 'Druid', 'Wizard']);
   expect(workspace.save_points).toEqual([]);
+  expect(workspace.items).toEqual({
+    items: [{
+      id: expect.any(Number),
+      name: 'Healing Potion',
+      description: 'Browser parity possession',
+      quantity: 4,
+      requires_attunement: false,
+      source_instance_id: null,
+      attunement_slot: null,
+    }],
+  });
   expect(workspace.report.summary).toEqual({
     unique_spells: 8,
     access_routes: 9,
@@ -548,6 +559,17 @@ test('captures every restorable character table and reports exact state differen
       forCharacter(await rows(page, table), workspaceImage.ids.character),
     );
   }
+  expect(Object.keys(document.tables.character_items[0])).toEqual([
+    'id',
+    'character_id',
+    'name',
+    'description',
+    'quantity',
+    'requires_attunement',
+    'source_instance_id',
+    'created_at',
+    'updated_at',
+  ]);
   expect(Object.keys(document.tables).sort()).toEqual([
     // Added when the four stored sheet inputs became portable, for exactly the
     // reason the weapons and origin keys were added: a backup without them
@@ -606,7 +628,6 @@ test('captures every restorable character table and reports exact state differen
     'character_sheet_adjustments',
     'character_effects',
     'character_attunement_slots',
-    'character_items',
   ]) {
     expect(document.tables[table], `${table} is captured exactly`).toEqual([]);
   }
@@ -885,10 +906,24 @@ test('round-trips a named save point through the mutation path', async ({
   )[0]!;
   expect(point).toMatchObject({
     label: 'Before experiment',
-    // a7-v11 adds character_attunement_slots; a7-v10 remains frozen as the
-    // first snapshot version that carried character_items.
-    schema_version: 'a7-v11',
+    // a7-v12 adds character_items.quantity; a7-v11 remains frozen as the
+    // first snapshot version that carried fixed attunement slots.
+    schema_version: 'a7-v12',
   });
+  const pointSnapshot = JSON.parse(String(point.snapshot)) as {
+    character_items: Array<Record<string, unknown>>;
+  };
+  expect(Object.keys(pointSnapshot.character_items[0]!)).toEqual([
+    'id',
+    'character_id',
+    'name',
+    'description',
+    'quantity',
+    'requires_attunement',
+    'source_instance_id',
+    'created_at',
+    'updated_at',
+  ]);
   await execute(
     page,
     workspaceImage.ids.character,
@@ -1145,7 +1180,7 @@ test('undoes a structural class change through its snapshot inverse', async ({
   );
   expect(changed.inverse).toMatchObject({
     type: 'restore_snapshot',
-    snapshot: { schema_version: 'a7-v11' },
+    snapshot: { schema_version: 'a7-v12' },
     integrity: expect.any(String),
   });
   await execute(

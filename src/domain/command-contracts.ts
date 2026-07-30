@@ -273,6 +273,7 @@ export interface SetWeaponMasteryCommand extends CommandBase {
 export interface ItemFields {
   name: string;
   description: string | null;
+  quantity: number;
   requires_attunement: boolean;
   source_instance_id: number | null;
   /**

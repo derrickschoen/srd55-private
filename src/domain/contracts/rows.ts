@@ -1178,6 +1178,7 @@ const REFINEMENTS = {
   // an item nobody can find to edit or delete.
   'character_items.name': nonEmptyText,
   'character_items.description': sqlText,
+  'character_items.quantity': positiveInt,
   'character_items.requires_attunement': sqlBool,
   'character_items.source_instance_id': positiveInt,
   'character_items.created_at': sqlTimestamp,
