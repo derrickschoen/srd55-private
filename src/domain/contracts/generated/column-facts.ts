@@ -103,6 +103,12 @@ export const COLUMN_FACTS = {
     target_content_key: { base: 'degraded', notNull: true },
     reviewed_at: { base: 'degraded', notNull: true },
   },
+  catalog_data_migrations: {
+    id: { base: 'degraded', notNull: true },
+    scheme: { base: 'degraded', notNull: true },
+    checksum: { base: 'degraded', notNull: true },
+    applied_at: { base: 'degraded', notNull: true },
+  },
   change_log: {
     id: { base: 'integer', notNull: true },
     character_id: { base: 'integer', notNull: true },

@@ -150,15 +150,17 @@ const allAutoIncrementTables = [
  * which therefore cannot carry AUTOINCREMENT.
  *
  * CI-2a's four recipient-local registry tables are keyed by their content or
- * fingerprint tuples, just as D92's one-row-per-character attunement slots are
- * keyed by character_id. A table added with a natural primary key fails here
- * and forces the decision to be made deliberately.
+ * fingerprint tuples, and CI-2b's applied marker is keyed by its immutable
+ * migration id, just as D92's one-row-per-character attunement slots are keyed
+ * by character_id. A table added with a natural primary key fails here and
+ * forces the decision to be made deliberately.
  */
 const naturalKeyTables = [
   'catalog_content_aliases',
   'catalog_content_fingerprints',
   'catalog_content_identities',
   'catalog_content_match_decisions',
+  'catalog_data_migrations',
   'character_attunement_slots',
 ] as const;
 
