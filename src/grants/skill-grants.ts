@@ -23,6 +23,8 @@ import {
   type SkillGrantRow,
   type UnfilledClassSkillGrant,
 } from '../builder/contracts';
+import { GrantRule } from './grant-rule';
+import { SourceRuleReader } from './source-rule-reader';
 
 /**
  * THE SKILL GRANTS — resolver, projection reconciler, and the generator's
@@ -711,6 +713,15 @@ function fillablePool(
       return null;
     }
     return plan.pool === 'any_skill' ? [...skills] : [...plan.pool];
+  }
+  const sourceRule = new SourceRuleReader(db)
+    .activeRulesForSource(grant.source_instance_id)
+    .find((rule) => rule.ruleKey === grant.grant_key);
+  if (
+    sourceRule?.kind === GrantRule.SKILL_PROFICIENCY &&
+    sourceRule.toObject().allows_tool_instead === true
+  ) {
+    return [...skills];
   }
   return null;
 }

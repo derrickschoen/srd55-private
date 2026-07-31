@@ -18,6 +18,7 @@
 import type {
   LevelUpAbilityIncrease,
   LevelUpClassCommand,
+  LevelUpPlannedGrantLocator,
 } from '../domain/command-contracts';
 
 export type { LevelUpAbilityIncrease, LevelUpClassCommand };
@@ -61,15 +62,40 @@ export const LEVEL_UP_REFUSAL_REASONS = Object.freeze({
   classNotHeld: 'class_not_held',
   abilityIncreaseRequired: 'ability_increase_required',
   levelNotAdjacent: 'level_not_adjacent',
+  plannedSubchoiceRefused: 'planned_subchoice_refused',
 } as const);
 
 export type LevelUpRefusalReason =
   (typeof LEVEL_UP_REFUSAL_REASONS)[keyof typeof LEVEL_UP_REFUSAL_REASONS];
 
 /** The wire data of a level-up refusal, `SkillGrantRefusalData`'s shape. */
-export interface LevelUpRefusalData {
-  readonly reason: LevelUpRefusalReason;
-}
+export type LevelUpSubchoiceRefusalIssue =
+  | 'locator_not_found'
+  | 'source_not_available'
+  | 'expected_unfilled'
+  | 'expected_filled'
+  | 'grant_not_found'
+  | 'grant_already_filled'
+  | 'skill_not_in_pool'
+  | 'skill_already_held'
+  | 'skill_not_proficient'
+  | 'skill_already_has_expertise'
+  | 'spell_not_eligible';
+
+export type LevelUpRefusalData =
+  | {
+      readonly reason: Exclude<
+        LevelUpRefusalReason,
+        'planned_subchoice_refused'
+      >;
+    }
+  | {
+      readonly reason: 'planned_subchoice_refused';
+      readonly subchoice_kind: 'skill' | 'expertise' | 'spell';
+      readonly index: number;
+      readonly issue: LevelUpSubchoiceRefusalIssue;
+      readonly locator: LevelUpPlannedGrantLocator;
+    };
 
 /**
  * Subclass choice arrives at level 3 for ALL TWELVE seeded 2024 classes —
