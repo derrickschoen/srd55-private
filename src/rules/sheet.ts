@@ -1592,10 +1592,16 @@ function subclassProgressionType(
   return 'invalid';
 }
 
-function spellAbsence(detail: string): SheetResourceMaximum {
+function spellAbsence(
+  detail: string,
+  entry: SheetResourceClassInput | null = null,
+  scope: 'base' | 'subclass' = 'base',
+): SheetResourceMaximum {
   return absentResource(
-    'resource:spell-progression-absent',
-    null,
+    entry === null
+      ? 'resource:spell-progression-absent'
+      : `resource:${String(entry.class_definition_id)}:${scope}-spell-progression-absent`,
+    entry?.class_name ?? null,
     null,
     'spell_progression_missing_or_invalid',
     detail,
@@ -1619,7 +1625,7 @@ export function resolveSheetResources(
           entry.class_name,
           null,
           'resource_catalog_not_recorded',
-          `Resource maxima are not recorded for ${entry.class_name}.`,
+          'Resource maxima are not recorded for this class.',
         ),
       );
       continue;
@@ -1750,14 +1756,24 @@ export function resolveSheetResources(
   for (const entry of classes) {
     const classLevel = sheetClassLevel(entry.class_level);
     if (!isProgressionType(entry.base_spellcasting.progression_type)) {
-      resolved.push(spellAbsence(`${entry.class_name} has a missing or invalid spell progression type.`));
-      return resolved;
+      resolved.push(
+        spellAbsence(
+          ' has a missing or invalid spell progression type.',
+          entry,
+        ),
+      );
+      continue;
     }
     const baseType = entry.base_spellcasting.progression_type;
     if (baseType !== 'none') {
       if (classLevel === null || entry.base_spellcasting.progression_row.status === 'missing') {
-        resolved.push(spellAbsence(`${entry.class_name} has a missing or invalid progression row at its current class level.`));
-        return resolved;
+        resolved.push(
+          spellAbsence(
+            ' has a missing or invalid progression row at its current class level.',
+            entry,
+          ),
+        );
+        continue;
       }
       const contribution = new CasterContribution(
         entry.class_name,
@@ -1767,8 +1783,13 @@ export function resolveSheetResources(
       if (baseType === 'pact') {
         const exact = decodedPact(entry.base_spellcasting.progression_row.pact_slots);
         if (exact.status === 'invalid') {
-          resolved.push(spellAbsence(`${entry.class_name} has missing or invalid Pact Magic slot content.`));
-          return resolved;
+          resolved.push(
+            spellAbsence(
+              ' has missing or invalid Pact Magic slot content.',
+              entry,
+            ),
+          );
+          continue;
         }
         pactContributions.push({
           class_definition_id: entry.class_definition_id,
@@ -1781,10 +1802,16 @@ export function resolveSheetResources(
         const exact = decodedSlots(entry.base_spellcasting.progression_row.slots);
         if (
           exact.status === 'invalid' ||
-          (contribution.casterLevels() > 0 && Object.keys(exact.value).length === 0)
+          (Object.keys(exact.value).length > 0) !==
+            (contribution.casterLevels() > 0)
         ) {
-          resolved.push(spellAbsence(`${entry.class_name} has missing or invalid shared spell-slot content.`));
-          return resolved;
+          resolved.push(
+            spellAbsence(
+              ' has missing or invalid shared spell-slot content.',
+              entry,
+            ),
+          );
+          continue;
         }
         sharedBase.push({ contribution, slots: exact.value });
       }
@@ -1796,13 +1823,25 @@ export function resolveSheetResources(
         entry.subclass_spellcasting.caster_rounding,
       );
       if (subclassType === 'invalid') {
-        resolved.push(spellAbsence(`${entry.class_name}'s subclass has a missing or invalid spell progression type.`));
-        return resolved;
+        resolved.push(
+          spellAbsence(
+            "'s subclass has a missing or invalid spell progression type.",
+            entry,
+            'subclass',
+          ),
+        );
+        continue;
       }
       if (subclassType !== 'none') {
         if (classLevel === null || entry.subclass_spellcasting.progression_row.status === 'missing') {
-          resolved.push(spellAbsence(`${entry.class_name}'s subclass has a missing or invalid progression row at its current class level.`));
-          return resolved;
+          resolved.push(
+            spellAbsence(
+              "'s subclass has a missing or invalid progression row at its current class level.",
+              entry,
+              'subclass',
+            ),
+          );
+          continue;
         }
         const contribution = new CasterContribution(
           `${entry.class_name} subclass`,
@@ -1812,10 +1851,17 @@ export function resolveSheetResources(
         const exact = decodedSlots(entry.subclass_spellcasting.progression_row.slots);
         if (
           exact.status === 'invalid' ||
-          (contribution.casterLevels() > 0 && Object.keys(exact.value).length === 0)
+          (Object.keys(exact.value).length > 0) !==
+            (contribution.casterLevels() > 0)
         ) {
-          resolved.push(spellAbsence(`${entry.class_name}'s subclass has missing or invalid shared spell-slot content.`));
-          return resolved;
+          resolved.push(
+            spellAbsence(
+              "'s subclass has missing or invalid shared spell-slot content.",
+              entry,
+              'subclass',
+            ),
+          );
+          continue;
         }
         sharedSubclass.push(contribution);
       }
@@ -1844,7 +1890,7 @@ export function resolveSheetResources(
     const maximum = positiveResourceMaximum(maximumValue);
     if (maximum === null || typedEffectiveLevel === null) {
       resolved.push(spellAbsence('The shared spell-slot result is missing or invalid.'));
-      return resolved;
+      break;
     }
     resolved.push({
       status: 'computed',

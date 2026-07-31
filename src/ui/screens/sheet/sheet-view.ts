@@ -384,6 +384,18 @@ function absentResourceCells(
       ],
     };
   }
+  if (
+    resource.reason === 'spell_progression_missing_or_invalid' &&
+    resource.class_name !== null
+  ) {
+    return {
+      label: plain('Resource maximum unavailable'),
+      detail: [
+        { text: resource.class_name, free_text: true },
+        { text: resource.detail },
+      ],
+    };
+  }
   if (resource.class_name !== null && resource.kind !== null) {
     return {
       label: [
