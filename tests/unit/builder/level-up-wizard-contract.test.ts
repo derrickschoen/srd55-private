@@ -40,9 +40,9 @@ describe('level-up wizard seam', () => {
     expect(LEVEL_UP_STATE_KINDS).toEqual({
       notFound: 'not_found',
       noHeldClass: 'no_held_class',
+      noGuideableClass: 'no_guideable_class',
       maximumLevel: 'maximum_level',
       ready: 'ready',
-      epicResolution: 'epic_resolution',
     });
 
     type HasLegacyTopLevelAbilityIncreases =

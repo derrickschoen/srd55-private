@@ -12,10 +12,13 @@ import {
   type FeatDefinitionForApplication,
   type LevelUpCharacterSummary,
   type LevelUpClassOption,
+  type LevelUpDisabledClassOption,
   type LevelUpFeatApplication,
   type LevelUpFeatCandidate,
   type LevelUpFeatOccurrence,
   type LevelUpHeldClass,
+  type LevelUpGuideableClassOption,
+  type LevelUpPendingEpicResolution,
   type LevelUpProjectedHitPoints,
   type LevelUpStateResult,
   type LevelUpSubclassOption,
@@ -288,68 +291,95 @@ export class LevelUpStateQuery {
       return { kind: 'no_held_class', character: summary };
     }
 
-    const deferred = this.#deferredEpicBoons(character.id);
-    if (deferred.length > 0) {
-      const selected = deferred[0];
-      if (selected === undefined || total === null) {
-        throw new Error('Deferred Epic Boon state lost its held class.');
-      }
-      const projected = this.#projectedFeatCharacter(
-        character,
-        held,
-        characterLevel(total, 'Deferred Epic Boon total level'),
-        null,
-      );
-      return {
-        kind: 'epic_resolution',
-        character: {
-          ...summary,
-          total_level: projected.total_level,
-        },
-        deferred_choice: selected,
-        additional_deferred_count: deferred.length - 1,
-        warning: levelUpWarningPresentation(
-          LEVEL_UP_WARNING_KEYS.epicBoonDeferred,
-        ),
-        candidates: this.#featCandidates(projected, 'epic_boon'),
-        applicable_steps: ['epic_boon', 'review', 'complete'],
-      };
+    if (total === null) {
+      throw new Error('Held-class state lost its total level.');
     }
+    // Imported totals above 20 are tolerated (F11). Feat prerequisites have
+    // no threshold above 20, so their effective level is capped without
+    // changing the actual total preserved in the character summary.
+    const featEligibilityLevel = characterLevel(
+      Math.min(total, 20),
+      'Feat eligibility total level',
+    );
+    const pendingEpicResolution = this.#pendingEpicResolution(
+      character,
+      held,
+      featEligibilityLevel,
+    );
 
-    if (total === null || total >= 20) {
+    if (total >= 20) {
       return {
         kind: 'maximum_level',
         character: summary,
         held_classes: held,
+        pending_epic_resolution: pendingEpicResolution,
       };
     }
 
     const currentTotal = characterLevel(total, 'Current total level');
     const targetTotal = characterLevel(total + 1, 'Target total level');
-    const sheet = new CharacterSheetBuilder(this.db).build(character.id);
-    const options = held
-      .filter((entry) => entry.current_level < 20)
-      .map((entry) =>
-        this.#classOption(
-          character,
-          held,
-          entry,
-          currentTotal,
-          targetTotal,
-          sheet,
-        ),
-      );
-    if (options.length === 0) {
+    const eligibleHeldClasses = held.filter(
+      (entry) => entry.current_level < 20,
+    );
+    if (eligibleHeldClasses.length === 0) {
       return {
         kind: 'maximum_level',
         character: summary,
         held_classes: held,
+        pending_epic_resolution: pendingEpicResolution,
       };
     }
+    const disabledOptions = eligibleHeldClasses
+      .filter(
+        (entry): entry is HeldClassRow & { readonly hit_die: null } =>
+          entry.hit_die === null,
+      )
+      .map((entry) => this.#disabledClassOption(entry));
+    const guideableHeldClasses = eligibleHeldClasses.filter(
+      (entry): entry is HeldClassRow & { readonly hit_die: HitDieSize } =>
+        entry.hit_die !== null,
+    );
+    if (guideableHeldClasses.length === 0) {
+      return {
+        kind: 'no_guideable_class',
+        character: { ...summary, total_level: currentTotal },
+        explanation:
+          'Fixed HP cannot be derived for any held class until its missing hit die is repaired or catalogued.',
+        class_options: disabledOptions,
+        pending_epic_resolution: pendingEpicResolution,
+      };
+    }
+    const sheet = new CharacterSheetBuilder(this.db).build(character.id);
+    const guideableOptions = guideableHeldClasses.map((entry) =>
+      this.#classOption(
+        character,
+        held,
+        entry,
+        currentTotal,
+        targetTotal,
+        sheet,
+      ),
+    );
+    const options = eligibleHeldClasses.map((entry): LevelUpClassOption => {
+      const disabled = disabledOptions.find(
+        (option) => option.class_definition_id === entry.class_definition_id,
+      );
+      if (disabled !== undefined) {
+        return disabled;
+      }
+      const guideable = guideableOptions.find(
+        (option) => option.class_definition_id === entry.class_definition_id,
+      );
+      if (guideable === undefined) {
+        throw new Error('Guideable held class lost its level-up projection.');
+      }
+      return guideable;
+    });
     return {
       kind: 'ready',
       character: { ...summary, total_level: currentTotal },
       class_options: options,
+      pending_epic_resolution: pendingEpicResolution,
     };
   }
 
@@ -468,14 +498,53 @@ export class LevelUpStateQuery {
     );
   }
 
+  #pendingEpicResolution(
+    character: CharacterRow,
+    held: readonly HeldClassRow[],
+    totalLevel: CharacterLevel,
+  ): LevelUpPendingEpicResolution | null {
+    const deferred = this.#deferredEpicBoons(character.id);
+    const selected = deferred[0];
+    if (selected === undefined) {
+      return null;
+    }
+    const projected = this.#projectedFeatCharacter(
+      character,
+      held,
+      totalLevel,
+      null,
+    );
+    return {
+      deferred_choice: selected,
+      additional_deferred_count: deferred.length - 1,
+      warning: levelUpWarningPresentation(
+        LEVEL_UP_WARNING_KEYS.epicBoonDeferred,
+      ),
+      candidates: this.#featCandidates(projected, 'epic_boon'),
+      applicable_steps: ['epic_boon', 'review', 'complete'],
+    };
+  }
+
+  #disabledClassOption(
+    selected: HeldClassRow & { readonly hit_die: null },
+  ): LevelUpDisabledClassOption {
+    return {
+      ...selected,
+      guideability: 'disabled',
+      reason: 'missing_hit_die',
+      explanation:
+        'Fixed HP cannot be derived until this class is repaired or catalogued with a hit die.',
+    };
+  }
+
   #classOption(
     character: CharacterRow,
     held: readonly HeldClassRow[],
-    selected: HeldClassRow,
+    selected: HeldClassRow & { readonly hit_die: HitDieSize },
     currentTotal: CharacterLevel,
     targetTotal: CharacterLevel,
     sheet: ReturnType<CharacterSheetBuilder['build']>,
-  ): LevelUpClassOption {
+  ): LevelUpGuideableClassOption {
     const targetLevel = classLevel(
       selected.current_level + 1,
       'Target class level',
@@ -526,6 +595,7 @@ export class LevelUpStateQuery {
     }
     return {
       ...selected,
+      guideability: 'guideable',
       target_level: targetLevel,
       gains: {
         current_class_level: selected.current_level,
@@ -636,7 +706,7 @@ export class LevelUpStateQuery {
     const currentMaximum = sheet.hit_points.value + speciesCurrent;
     return {
       kind: 'known',
-      hit_die: selected.hit_die as HitDieSize,
+      hit_die: selected.hit_die,
       fixed_class_base: fixedBase,
       constitution_modifier: constitutionModifier,
       class_hit_point_change: classChange,
