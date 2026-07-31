@@ -15,14 +15,18 @@ supervisor-verified (post-merge main vitest 192/3,132 exit 0).
 - TRACK M (wt/attunement at bb6dc0b): FF-A implementing (briefs/ff-a.md,
   log ffa.log, port 44480) — flavor mint: migration, backup version, wire
   version, D124 single toggle + size guard.
-- TRACK W (wt/print): W-B1 gate ran (touched-set exact, scans 0, build 0,
-  merged vitest 193/3,150, D119 control both directions). D135 review round
-  1: 1 High (terminal states drop pending_epic_resolution — D118 violation,
-  verified at level-up-wizard.ts:51 vs seam lines 431/437/445) + 3 Medium
-  (Cancel hardcoded vs launch surface; Gains not falsifiable; permissive
-  a11y tests) — ALL FOUR ACCEPTED, none rejected. W-B1-FIX dispatched (log
-  wb1-fix.log, port 44496). Re-gate after: vitest + control re-run +
-  Playwright 44496 + round-2 review. Then W-B2 (briefs/w-b2.md).
+- TRACK W (wt/print): W-B1+FIX fully gated EXCEPT one pending item: round-2
+  D135 review CLEAN; scans/build/vitest 193/3,154/control all green
+  (supervisor-run); full PW came back 87/88 with the single failure being
+  reports-and-print:83 — the KNOWN-MARGIN spec — while two other lanes ran
+  suites concurrently (classic contention signature; same spec has a real
+  durational finding only in wt/pwa where D91-R made print heavier, which
+  is NOT in this tree). REQUIRED before merge: ONE uncontended full PW
+  re-run in wt/print on port 44496; if green, merge via
+  orchestration/merge-to-main.sh (msgfile exists at scratchpad or write
+  fresh), post-merge vitest on main, fast-forward, dispatch W-B2
+  (briefs/w-b2.md). If it fails again uncontended, it is REAL - back to
+  codex with the failure detail.
 - TRACK S (wt/pwa): D91-R implemented + committed in-lane (supervisor).
   Scans 0 forbidden, no Unit-M files touched, 10 files in scope. Codex
   claims vitest 193/3,142, build 0; its full Playwright was 87/89 — one
