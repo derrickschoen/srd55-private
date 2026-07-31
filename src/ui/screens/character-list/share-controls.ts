@@ -475,6 +475,7 @@ export function createShareControls(
       announce(
         `Ready to create a link for ${character.name}. Optional private organization stays off by default.`,
       );
+      exportButton.focus();
     },
     cleanup: () => {
       for (const cleanup of cleanups.splice(0)) {
