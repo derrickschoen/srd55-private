@@ -26,6 +26,7 @@ import plannedSpellGrants from '../../drizzle/0022_planned_spell_grants.sql?raw'
 import skillExpertiseGrants from '../../drizzle/0023_skill_expertise_grants.sql?raw';
 import featApplicationModel from '../../drizzle/0024_feat_application_model.sql?raw';
 import characterLevelFeatChoices from '../../drizzle/0025_character_level_feat_choices.sql?raw';
+import classResources from '../../drizzle/0026_class_resources.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -299,6 +300,16 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
       '4321a4d797d147328b1b91d42422ff94082418d13ddc4bcde33401c0f56b6352',
     resultSchemaChecksum:
       'd6302b837b792ed57d222bce6fb20eee1eab945d38a5689ae25a4a88fc48d026',
+  }),
+  // D91/D120: sourced exact-level resource maxima and the closed formula
+  // catalog. Both are recipient-seeded class content, never character state.
+  Object.freeze({
+    id: '0026_class_resources',
+    sql: classResources,
+    checksum:
+      'f15587dba99fe80bb25a97d9624fadff61d1358619e05a919020692b3da34634',
+    resultSchemaChecksum:
+      '22fb86288181f29d95f6978ca021781e61ea0328af386a885a9cad939028fbfc',
   }),
 ]);
 

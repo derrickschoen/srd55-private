@@ -19,6 +19,10 @@ import {
   subclass_progressions,
 } from './catalog-classes';
 import {
+  class_resource_formulas,
+  class_resources,
+} from './class-resources';
+import {
   spell_identities,
   spell_identity_aliases,
   spell_list_memberships,
@@ -878,6 +882,8 @@ export const classDefinitionsRelations = relations(
     class_levels: many(character_class_levels),
     weapon_mastery_grant: many(class_weapon_mastery_grants),
     weapon_mastery_counts: many(class_weapon_mastery_counts),
+    resources: many(class_resources),
+    resource_formulas: many(class_resource_formulas),
     // Sheet core. `sheet_traits` is `many` and not `one` even though a unique
     // index makes it 1:0..1, matching how `weapon_mastery_grant` is declared
     // beside it: the reverse side of these is uniformly `many` in this file, and
@@ -1001,6 +1007,26 @@ export const classWeaponMasteryCountsRelations = relations(
   ({ one }) => ({
     class_definition: one(class_definitions, {
       fields: [class_weapon_mastery_counts.class_definition_id],
+      references: [class_definitions.id],
+    }),
+  }),
+);
+
+export const classResourcesRelations = relations(
+  class_resources,
+  ({ one }) => ({
+    class_definition: one(class_definitions, {
+      fields: [class_resources.class_definition_id],
+      references: [class_definitions.id],
+    }),
+  }),
+);
+
+export const classResourceFormulasRelations = relations(
+  class_resource_formulas,
+  ({ one }) => ({
+    class_definition: one(class_definitions, {
+      fields: [class_resource_formulas.class_definition_id],
       references: [class_definitions.id],
     }),
   }),
