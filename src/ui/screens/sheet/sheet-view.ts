@@ -534,6 +534,40 @@ export function sheetSections(sheet: CharacterSheet): readonly SheetSection[] {
   });
   sections.push({ caption: 'Attacks and movement', rows: combat });
 
+  // D102: PRINT THE WORDS, DO NOT TURN THEM INTO FACTS. Background tool text
+  // and species trait prose stay in the readable projection, marked as
+  // unverified free text, and are deliberately absent from `sheetFacts`.
+  // This is a normal sheet section, not a hover surface, so D89 carries it
+  // through the existing print stylesheet.
+  if (sheet.printed_features.length > 0) {
+    sections.push({
+      caption: 'Features and traits',
+      rows: sheet.printed_features.map((feature, index) => ({
+        id: `feature:${feature.source}:${String(index)}`,
+        label: [
+          {
+            text:
+              feature.source === 'background'
+                ? 'Background feature — '
+                : 'Species trait — ',
+          },
+          ...(feature.source_name === null
+            ? []
+            : [
+                { text: feature.source_name, free_text: true as const },
+                { text: ' — ' },
+              ]),
+          { text: feature.name, free_text: true },
+        ],
+        value: null,
+        detail:
+          feature.text === null
+            ? plain('No description is recorded.')
+            : [{ text: feature.text, free_text: true }],
+      })),
+    });
+  }
+
   const recorded: SheetRow[] = [];
   if (sheet.armor.length === 0) {
     recorded.push({

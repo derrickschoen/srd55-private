@@ -391,7 +391,7 @@ describe('catalog and backup entry points', () => {
     );
 
     expect(fixture.saved.map((file) => file.filename)).toEqual([
-      'spell-planner-database-2026-07-23.sqlite3',
+      'srd-55-database-2026-07-23.sqlite3',
       'backup-hero-character.json',
     ]);
     expect(fixture.persisted.characters).toEqual([

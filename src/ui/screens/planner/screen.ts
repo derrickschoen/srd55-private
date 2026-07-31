@@ -58,8 +58,7 @@ import type {
   AttunementSlot,
 } from '../../../domain/attunement';
 import {
-  renderItems,
-  type AttunementReplacement,
+  activateAttunementReplacementModal, renderItems, type AttunementReplacement,
   type PlannerItemActions,
 } from './items';
 
@@ -375,6 +374,7 @@ interface PlannerViewState {
   readonly filters: GridFilters;
   weaponEditing: WeaponEditing;
   itemEditing: ItemEditing;
+  attunementReplacementInvokerFocusKey: string | null;
 }
 
 function renderPlanner(
@@ -473,18 +473,33 @@ function renderPlanner(
   const mutate = async (
     operation: () => Promise<boolean>,
   ): Promise<void> => {
-    const mutationFocusKey = (
+    const activeFocusKey = (
       document.activeElement as HTMLElement | null
     )?.dataset.focusKey;
+    const replacingAttunedItem = session.attunementReplacement !== null;
+    const mutationFocusKey = replacingAttunedItem
+      ? view.attunementReplacementInvokerFocusKey ?? undefined
+      : activeFocusKey;
     const pending = operation();
     rerender();
     await pending;
+    if (
+      !replacingAttunedItem &&
+      session.attunementReplacement !== null &&
+      mutationFocusKey !== undefined
+    ) {
+      view.attunementReplacementInvokerFocusKey = mutationFocusKey;
+    }
     rerender();
     if (
       mutationFocusKey !== undefined &&
+      session.attunementReplacement === null &&
       context.root.querySelector('.planner-shell') !== null
     ) {
       restoreFocus(context.root, mutationFocusKey);
+      if (replacingAttunedItem) {
+        view.attunementReplacementInvokerFocusKey = null;
+      }
     }
   };
   primary.append(
@@ -795,7 +810,33 @@ function renderPlanner(
   if (focusKey !== undefined) {
     restoreFocus(context.root, focusKey);
   }
-  return grid.destroy;
+  const replacementDialog = context.root.querySelector<HTMLDialogElement>(
+    '[data-testid="attunement-replace-modal"]',
+  );
+  let destroyReplacementDialog = (): void => undefined;
+  if (replacementDialog !== null) {
+    view.attunementReplacementInvokerFocusKey ??= focusKey ?? null;
+    const invokerFocusKey = view.attunementReplacementInvokerFocusKey;
+    destroyReplacementDialog = activateAttunementReplacementModal(
+      replacementDialog,
+      {
+        cancel: () => {
+          session.cancelAttunementReplacement();
+          view.attunementReplacementInvokerFocusKey = null;
+          rerender();
+        },
+        restoreFocus: () => {
+          if (invokerFocusKey !== null) {
+            restoreFocus(context.root, invokerFocusKey);
+          }
+        },
+      },
+    );
+  }
+  return () => {
+    destroyReplacementDialog();
+    grid.destroy();
+  };
 }
 
 export const screen = defineScreen({
@@ -816,6 +857,7 @@ export const screen = defineScreen({
       filters: { ...defaultGridFilters },
       weaponEditing: null,
       itemEditing: null,
+      attunementReplacementInvokerFocusKey: null,
     };
     let destroyGrid: (() => void) | undefined;
     let active = true;

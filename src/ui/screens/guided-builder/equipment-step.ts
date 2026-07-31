@@ -36,6 +36,10 @@ import {
 } from '../../../builder/contracts';
 import { RpcError } from '../../../rpc/protocol';
 import { clear, element, listen, type Cleanup } from '../../dom';
+import {
+  createBackupHint,
+  type BackupHintDeps,
+} from './backup-hint';
 import { characterListLink, guidedShell } from './guided-builder';
 
 /**
@@ -96,6 +100,7 @@ function lineText(line: GuidedEquipmentItemLine): string {
 export interface EquipmentStepDeps {
   readonly characterId: number;
   readonly state: GuidedEquipmentStepState;
+  readonly backupHint?: BackupHintDeps;
   readonly applyEquipment: (
     params: GuidedApplyEquipmentParams,
   ) => Promise<GuidedApplyOriginResult>;
@@ -306,6 +311,14 @@ export function createEquipmentStep(deps: EquipmentStepDeps): EquipmentStep {
     );
   }
 
+  const backupHint =
+    deps.backupHint === undefined
+      ? null
+      : createBackupHint(deps.state.complete, deps.backupHint);
+  if (backupHint !== null) {
+    cleanups.push(backupHint.cleanup);
+  }
+
   const panel = element(
     'section',
     {
@@ -341,6 +354,10 @@ export function createEquipmentStep(deps: EquipmentStepDeps): EquipmentStep {
                 'Both equipment packages are recorded. Every level 1 step ' +
                 'is complete.',
             }),
+            ...(backupHint?.element === null ||
+            backupHint?.element === undefined
+              ? []
+              : [backupHint.element]),
           ]
         : []),
       errorMount,
