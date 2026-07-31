@@ -129,9 +129,12 @@ enforced somewhere else.
 
 **F4**, and the rule the sheet follows. `SHEET_GAPS`
 (`src/queries/character-sheet-builder.ts`) names, in prose a person reads, every
-thing the application does not hold. They are stated unconditionally because each
-is true of every character equally, and a check that happened to pass on a
-Fighter would hide that it fails on the other eleven classes.
+thing the application does not hold. Most are stated unconditionally because
+they are true of every character equally, and a check that happened to pass on a
+Fighter would hide that it fails on the other eleven classes. The
+languages/tools entry is conditional: it appears only when this character
+carries printed background or species prose that grants one, because warning a
+character with no such grant would be noise.
 
 The gaps, by their stable `kind` keys:
 
@@ -143,6 +146,10 @@ The gaps, by their stable `kind` keys:
   other class has none to choose.
 - `no_expertise` — Rogue and Bard Expertise does not double the proficiency
   bonus on a chosen skill.
+- `languages_and_tools_not_modelled` — printed background and species prose can
+  grant languages or tool proficiencies, but the application neither records
+  the choices as character facts nor applies them; the sheet keeps that prose
+  visible and emits this gap only for a character carrying such text.
 - `weapon_reach_not_recorded` — whether a weapon is MELEE or RANGED is not
   recorded, so an attack profile offers both formulas. Its simple/martial
   category IS recorded and its proficiency verdict IS derived — see D27, D28 and
