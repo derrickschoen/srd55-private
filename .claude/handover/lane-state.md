@@ -9,8 +9,12 @@ v1-v16; existing a7-v* assertions. Baseline + D91-M gates all
 supervisor-verified (post-merge main vitest 192/3,132 exit 0).
 
 ## In flight
-- TRACK M (wt/attunement at 5841448): EXP-URL dispatching (doc-only, log
-  expurl.log). Then FF-A (briefs/ff-a.md, port 44480) once EXP-URL merges.
+- Main now bb6dc0b (EXP-URL doc merged; post-merge vitest 192/3,132 on main
+  proper). SHARE_LIMITS.encodedCharacters = 131,072 recommended, fragment
+  transport (docs/design/2026-08-01-share-url-capacity.md).
+- TRACK M (wt/attunement at bb6dc0b): FF-A implementing (briefs/ff-a.md,
+  log ffa.log, port 44480) — flavor mint: migration, backup version, wire
+  version, D124 single toggle + size guard.
 - TRACK W (wt/print): W-B1 gate ran (touched-set exact, scans 0, build 0,
   merged vitest 193/3,150, D119 control both directions). D135 review round
   1: 1 High (terminal states drop pending_epic_resolution — D118 violation,
