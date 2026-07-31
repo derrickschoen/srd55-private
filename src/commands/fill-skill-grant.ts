@@ -4,6 +4,7 @@ import type {
   FillSkillGrantCommand as FillSkillGrantPayload,
 } from '../domain/command-contracts';
 import { fillSkillGrant } from '../grants/skill-grants';
+import { reconcileCharacterSkillExpertise } from '../grants/skill-expertise-grants';
 
 /**
  * THE GUIDED SKILLS STEP'S ONE WRITE (skills-with-provenance §3.3/§3.6).
@@ -37,6 +38,7 @@ export class FillSkillGrantCommand {
       this.payload.grant_id,
       this.payload.skill,
     );
+    reconcileCharacterSkillExpertise(this.db, characterId);
   }
 
   /**

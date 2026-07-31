@@ -17,6 +17,7 @@ import type {
   ClassLevel,
   SourceInstanceId,
 } from '../domain/ids';
+import { isEnumValue, skills, type Skill } from '../domain/enums';
 import type { JsonObject } from '../domain/models';
 import { GrantRule } from './grant-rule';
 import {
@@ -28,7 +29,12 @@ import {
   rebuildSkillProjection,
   syncClassSkillGrants,
   syncSpeciesSkillGrants,
+  syncToolAlternativeSkillGrants,
 } from './skill-grants';
+import {
+  orphanExpertiseGrantsForSource,
+  reconcileCharacterSkillExpertise,
+} from './skill-expertise-grants';
 import {
   decodeGrantJson,
   SourceRuleReader,
@@ -251,14 +257,38 @@ export class GrantRuleSlotGenerator {
           case GrantRule.CAPABILITY:
           case GrantRule.FIGHTING_STYLE:
           case GrantRule.WEAPON_MASTERY:
-          // DELIBERATELY still inert (plan §3.4): the Skilled feat's
-          // `skill_proficiency` rule stays entitlement data with no consumer
-          // in this unit — wiring feat-granted skills is its own unit, and
-          // the gap is a rendered D33 disclosure (S-C), not silence. The
-          // CLASS skill arm below does not ride this rule kind at all: class
-          // entitlement lives in `class_sheet_traits`, not in grant rules.
-          case GrantRule.SKILL_PROFICIENCY:
+          case GrantRule.SKILL_PROFICIENCY: {
+            const data = ruleData(rule);
+            if (data.allows_tool_instead !== true) {
+              break;
+            }
+            const configured = normalizedConfig['selected_skills'] ?? [];
+            if (
+              !Array.isArray(configured) ||
+              !configured.every(
+                (skill): skill is Skill | null =>
+                  skill === null || isEnumValue(skills, skill),
+              )
+            ) {
+              throw new TypeError(
+                `Grant rule '${rule.ruleKey}' config 'selected_skills' ` +
+                  'must contain only known skills.',
+              );
+            }
+            syncToolAlternativeSkillGrants(
+              this.db,
+              {
+                id: source.id,
+                characterId: source.characterId,
+                sourceType: source.sourceType,
+                sourceDefinitionId: source.sourceDefinitionId,
+              },
+              rule.ruleKey,
+              rule.count ?? 0,
+              configured,
+            );
             break;
+          }
         }
       }
 
@@ -291,6 +321,7 @@ export class GrantRuleSlotGenerator {
         sourceDefinitionId: source.sourceDefinitionId,
       });
       rebuildSkillProjection(this.db, source.characterId);
+      reconcileCharacterSkillExpertise(this.db, source.characterId);
     });
   }
 
@@ -907,6 +938,8 @@ export class GrantRuleSlotGenerator {
     // reconciled in the same pass so a removed class's skills leave the sheet.
     orphanSkillGrantsForSource(this.db, sourceInstanceId);
     rebuildSkillProjection(this.db, source.characterId);
+    orphanExpertiseGrantsForSource(this.db, sourceInstanceId);
+    reconcileCharacterSkillExpertise(this.db, source.characterId);
 
     if (source.state !== 'tombstoned') {
       this.db.exec(

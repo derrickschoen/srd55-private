@@ -44,6 +44,7 @@ import {
 } from '../domain/contracts/tables';
 import { fillHistoricalRowColumns } from '../domain/contracts/historical-row-columns';
 import { rebuildSkillProjection } from '../grants/skill-grants';
+import { reconcileCharacterSkillExpertise } from '../grants/skill-expertise-grants';
 import {
   rowContractError,
   type RowContractTable,
@@ -791,6 +792,19 @@ function validateCharacterRows(
     if (!sourceIds.has(sourceId)) {
       throw new BackupValidationError(
         `${label}.character_skill_grants[${index}] references a source from another character.`,
+      );
+    }
+  }
+  for (const [index, row] of (
+    tables.character_skill_expertise_grants ?? []
+  ).entries()) {
+    const sourceId = positiveInteger(
+      row.source_instance_id,
+      `${label}.character_skill_expertise_grants[${index}].source_instance_id`,
+    );
+    if (!sourceIds.has(sourceId)) {
+      throw new BackupValidationError(
+        `${label}.character_skill_expertise_grants[${index}] references a source from another character.`,
       );
     }
   }
@@ -1886,6 +1900,7 @@ interface CurrentImportMaps {
   readonly character_hit_point_rolls: Map<number, number>;
   readonly character_skill_proficiencies: Map<number, number>;
   readonly character_skill_grants: Map<number, number>;
+  readonly character_skill_expertise_grants: Map<number, number>;
   readonly character_sheet_adjustments: Map<number, number>;
   readonly character_effects: Map<number, number>;
   readonly character_items: Map<number, number>;
@@ -1915,6 +1930,7 @@ function importCurrentTables(
     character_hit_point_rolls: new Map(),
     character_skill_proficiencies: new Map(),
     character_skill_grants: new Map(),
+    character_skill_expertise_grants: new Map(),
     character_sheet_adjustments: new Map(),
     character_effects: new Map(),
     character_items: new Map(),
@@ -2169,6 +2185,23 @@ function importCurrentTables(
       }),
     );
   }
+  for (const row of document.tables.character_skill_expertise_grants) {
+    const sourceId = maps.character_source_instances.get(
+      Number(row.source_instance_id),
+    );
+    if (sourceId === undefined) {
+      throw new BackupValidationError(
+        'Character backup Expertise grant source is missing.',
+      );
+    }
+    maps.character_skill_expertise_grants.set(
+      Number(row.id),
+      insertPortableRow(db, 'character_skill_expertise_grants', row, {
+        character_id: characterId,
+        source_instance_id: sourceId,
+      }),
+    );
+  }
   // The character's own items (AC-1, D72). Inserted BEFORE effects since AC-2b:
   // an effect may name this row through its composite ownership FK.
   // `source_instance_id` is remapped rather than resolved on the same terms as
@@ -2386,6 +2419,9 @@ function portableSnapshots(
       current.character_skill_proficiencies,
     ),
     character_skill_grants: new Map(current.character_skill_grants),
+    character_skill_expertise_grants: new Map(
+      current.character_skill_expertise_grants,
+    ),
     character_sheet_adjustments: new Map(current.character_sheet_adjustments),
     character_effects: new Map(current.character_effects),
     character_items: new Map(current.character_items),
@@ -2658,6 +2694,7 @@ function portableSnapshots(
         // snapshot does not carry would restore into a composite-FK refusal
         // mid-undo. Refusing the document here names the problem instead.
         case 'character_skill_grants':
+        case 'character_skill_expertise_grants':
           return rowsOf(table).map((row) => {
             const sourceId = ids.character_source_instances.get(
               Number(row.source_instance_id),
@@ -2745,6 +2782,14 @@ export function importCharacterBackup(
     // user's skills, which is the one loss this format exists to prevent.
     if (validated.document.tables.character_skill_grants.length > 0) {
       rebuildSkillProjection(transaction, characterId);
+    }
+    // Historical backups may predate expertise storage. Reconcile after the
+    // complete source/skill restore so provable entitlements become honest
+    // unfilled grants, while imported filled rows retain their exact choice.
+    if (
+      validated.document.tables.character_skill_expertise_grants.length === 0
+    ) {
+      reconcileCharacterSkillExpertise(transaction, characterId);
     }
     const snapshots = portableSnapshots(
       transaction,

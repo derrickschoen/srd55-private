@@ -358,28 +358,16 @@ export function createSkillsStep(deps: SkillsStepDeps): SkillsStep {
 
   const disclosures = (): readonly HTMLElement[] => {
     const rendered: HTMLElement[] = [];
-    for (const source of deps.state.unapplied_skill_rule_sources) {
+    for (const source of deps.state.unmodelled_tool_alternative_sources) {
       rendered.push(
         element('p', {
           className: 'guided-skill-gap',
-          attributes: { [SKILL_STEP_ATTR.skilledFeatGap]: '' },
+          attributes: { [SKILL_STEP_ATTR.toolAlternativeGap]: '' },
           text:
-            `${source} grants skill proficiencies this application does ` +
-            'not apply yet, so those choices are not offered here. The ' +
-            'skills it would grant are missing from this character until ' +
-            'that is built.',
-        }),
-      );
-    }
-    if (deps.state.expertise_gap) {
-      rendered.push(
-        element('p', {
-          className: 'guided-skill-gap',
-          attributes: { [SKILL_STEP_ATTR.expertiseGap]: '' },
-          text:
-            'Expertise is not modelled: the Rogue chooses Expertise skills ' +
-            'at level 1 and this application cannot record that choice, so ' +
-            'every skill modifier adds the proficiency bonus at most once.',
+            `${source} allows each remaining choice to be a skill or a tool. ` +
+            'No skill is owed for an unrecorded ordinal, and this application ' +
+            'does not model tool choices; read the sourced feat text for that ' +
+            'unmodelled benefit.',
         }),
       );
     }

@@ -144,8 +144,6 @@ The gaps, by their stable `kind` keys:
   two Warlock invocations.
 - `partial_subclass_catalog` — two subclasses are bundled, so a character of any
   other class has none to choose.
-- `no_expertise` — Rogue and Bard Expertise does not double the proficiency
-  bonus on a chosen skill.
 - `languages_and_tools_not_modelled` — printed background and species prose can
   grant languages or tool proficiencies, but the application neither records
   the choices as character facts nor applies them; the sheet keeps that prose

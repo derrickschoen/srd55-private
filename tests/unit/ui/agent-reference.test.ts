@@ -734,13 +734,13 @@ describe('planner build reference JSON block', () => {
       'hit points',
       'armour class',
       'saving throw proficiencies',
+      'skills',
     ]) {
       expect(stateOf(concept)).toBe('modelled');
     }
     // Recorded and PARTLY derived — the note carries which half is which.
     for (const concept of [
       'hit dice',
-      'skills',
       'class features',
       'species traits',
       'speed',

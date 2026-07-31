@@ -124,6 +124,7 @@ function applyBackgroundNamed(
   characterId: number,
   backgroundName: string,
   featName?: string,
+  selectedSkills: readonly (Skill | null)[] = [],
 ): void {
   const options = listGuidedBackgroundChoiceOptions(db);
   const background = options.backgrounds.find(
@@ -153,7 +154,10 @@ function applyBackgroundNamed(
       { ability: 'intelligence', amount: 1 },
     ],
     origin_feat_content_key: feat.content_key,
-    origin_feat_config: {},
+    origin_feat_config:
+      feat.name === 'Skilled'
+        ? { selected_skills: selectedSkills }
+        : {},
   });
 }
 
@@ -303,8 +307,7 @@ describe('the S-C exit: a Fighter with a skill-granting background still owes tw
           { ordinal: 2, grant_id: expect.any(Number) as number },
         ],
         species_choices: [],
-        unapplied_skill_rule_sources: [],
-        expertise_gap: false,
+        unmodelled_tool_alternative_sources: [],
       },
     });
 
@@ -321,34 +324,82 @@ describe('the S-C exit: a Fighter with a skill-granting background still owes tw
   });
 });
 
-describe('the §3.7 disclosures, as step data', () => {
-  it('names a source whose skill_proficiency rule nothing consumes — the Skilled feat', async () => {
+describe('the D102 skill-or-tool boundary, as step data', () => {
+  it('names unrecorded tool-capable ordinals without minting owed-skill rows', async () => {
     const rpcHarness = await applicationDatabase();
     const db = rpcHarness.context.db;
     const characterId = createGuided(db, 'Fighter');
     applyBackgroundNamed(db, characterId, 'Acolyte', 'Skilled');
 
     const state = guidedSkillsStepState(db, characterId);
-    expect(state.unapplied_skill_rule_sources).toHaveLength(1);
-    expect(state.unapplied_skill_rule_sources[0]).toContain('Skilled');
-    // Detection is STRUCTURAL (the rule kind), so no Skilled feat means no
-    // disclosure — the mirror-image lie the species step's derivation rule
-    // exists to prevent.
+    expect(state.unmodelled_tool_alternative_sources).toHaveLength(1);
+    expect(state.unmodelled_tool_alternative_sources[0]).toContain('Skilled');
+    expect(
+      db.scalar(
+        `SELECT count(*) FROM character_skill_grants
+         WHERE character_id = ? AND grant_key = 'skilled-proficiencies'`,
+        [characterId],
+      ),
+    ).toBe(0);
+    // Detection is structural, so a character without the rule has no gap.
     const plainId = createGuided(db, 'Wizard');
     applyBackgroundNamed(db, plainId, 'Acolyte');
     expect(
-      guidedSkillsStepState(db, plainId).unapplied_skill_rule_sources,
+      guidedSkillsStepState(db, plainId)
+        .unmodelled_tool_alternative_sources,
     ).toEqual([]);
   });
 
-  it('names the level-1 Rogue Expertise gap, and only for the pinned population', async () => {
+  it('persists only selected Skilled skill ordinals and leaves the rest as the D102 gap', async () => {
+    const rpcHarness = await applicationDatabase();
+    const db = rpcHarness.context.db;
+    const characterId = createGuided(db, 'Fighter');
+    applyBackgroundNamed(
+      db,
+      characterId,
+      'Acolyte',
+      'Skilled',
+      ['arcana', null, 'stealth'],
+    );
+
+    expect(
+      db.allRaw(
+        `SELECT ordinal, skill, state
+         FROM character_skill_grants
+         WHERE character_id = ? AND grant_key = 'skilled-proficiencies'
+         ORDER BY ordinal`,
+        [characterId],
+      ),
+    ).toEqual([
+      { ordinal: 1, skill: 'arcana', state: 'active' },
+      { ordinal: 3, skill: 'stealth', state: 'active' },
+    ]);
+    expect(
+      guidedSkillsStepState(db, characterId)
+        .unmodelled_tool_alternative_sources,
+    ).toHaveLength(1);
+  });
+
+  it('mints level-1 Rogue Expertise as character state instead of a disclosure', async () => {
     const rpcHarness = await applicationDatabase();
     const db = rpcHarness.context.db;
     const rogueId = createGuided(db, 'Rogue');
-    expect(guidedSkillsStepState(db, rogueId).expertise_gap).toBe(true);
+    expect(
+      db.scalar(
+        `SELECT count(*) FROM character_skill_expertise_grants
+         WHERE character_id = ? AND state = 'active'`,
+        [rogueId],
+      ),
+    ).toBe(2);
 
     const fighterId = createGuided(db, 'Fighter');
-    expect(guidedSkillsStepState(db, fighterId).expertise_gap).toBe(false);
+    expect(
+      db.scalar(
+        `SELECT count(*) FROM character_skill_expertise_grants
+         WHERE character_id = ? AND state = 'active'`,
+        [fighterId],
+      ),
+    ).toBe(0);
   });
 });
 

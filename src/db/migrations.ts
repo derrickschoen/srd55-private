@@ -23,6 +23,7 @@ import abilityOverride from '../../drizzle/0019_ability_override.sql?raw';
 import contentIdentityRegistry from '../../drizzle/0020_content_identity_registry.sql?raw';
 import catalogDataMigrations from '../../drizzle/0021_catalog_data_migrations.sql?raw';
 import plannedSpellGrants from '../../drizzle/0022_planned_spell_grants.sql?raw';
+import skillExpertiseGrants from '../../drizzle/0023_skill_expertise_grants.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -266,6 +267,14 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
       'dc47c171ff21160be9dc07e80eedf3b62a0edbc6d12aa36bdb27b4ecc8fc4839',
     resultSchemaChecksum:
       '9726366cbd3e34d6378f17c95d9137c45d2cd897e2982c79237f32c363a4ac5d',
+  }),
+  Object.freeze({
+    id: '0023_skill_expertise_grants',
+    sql: skillExpertiseGrants,
+    checksum:
+      '252d36eaca2040d739010fcab191fc7dc2c9b5f91cad92c33104eb8eacd3bed4',
+    resultSchemaChecksum:
+      '077eb42c0459e9766ae01119de7baad086c8670364e4e6ed7092bda0e15023b5',
   }),
 ]);
 

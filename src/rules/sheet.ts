@@ -1087,20 +1087,20 @@ export function savingThrowModifier(input: {
  * the creature applies its Proficiency Bonus to ability checks involving that
  * skill", and the Skills table supplies which ability each skill uses.
  *
- * EXPERTISE IS NOT MODELLED. Rogue and Bard Expertise doubles the bonus for
- * chosen skills; that feature's text is not in `docs/srd/source/` and this
- * application says nothing about it rather than inventing it (F4's rule).
+ * Expertise applies the same proficiency bonus a second time. The caller may
+ * set it only for a trained skill backed by an active Expertise grant.
  */
 export function skillModifier(input: {
   readonly skill: Skill;
   readonly scores: AbilityScores;
   readonly proficiencyBonus: number | null;
   readonly proficient: boolean;
+  readonly expertise?: boolean;
 }): number | null {
   if (input.proficient && input.proficiencyBonus === null) {
     return null;
   }
-  return proficientModifier(
+  const ordinary = proficientModifier(
     input.scores,
     abilityForSkill(input.skill),
     // A non-proficient skill does not use proficiency at all, so the absent
@@ -1108,6 +1108,9 @@ export function skillModifier(input: {
     input.proficiencyBonus === null ? 0 : input.proficiencyBonus,
     input.proficient,
   );
+  return input.proficient && input.expertise
+    ? ordinary + (input.proficiencyBonus ?? 0)
+    : ordinary;
 }
 
 /**
@@ -1134,12 +1137,16 @@ export function passivePerception(input: {
   readonly scores: AbilityScores;
   readonly proficiencyBonus: number | null;
   readonly proficient: boolean;
+  readonly expertise?: boolean;
 }): number | null {
   const modifier = skillModifier({
     skill: 'perception',
     scores: input.scores,
     proficiencyBonus: input.proficiencyBonus,
     proficient: input.proficient,
+    ...(input.expertise === undefined
+      ? {}
+      : { expertise: input.expertise }),
   });
   return modifier === null ? null : 10 + modifier;
 }

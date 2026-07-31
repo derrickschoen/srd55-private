@@ -130,7 +130,7 @@ describe('guidedBuildState', () => {
     expect(guidedBuildState(db, characterId)).toEqual({
       kind: 'ready',
       character_id: characterId,
-      current_step: seamStep(5),
+      current_step: seamStep(7),
     } satisfies GuidedBuildStateResult);
 
     // An unfilled ACTIVE class grant is exactly what holds the step open.
@@ -162,7 +162,7 @@ describe('guidedBuildState', () => {
     expect(guidedBuildState(db, characterId)).toEqual({
       kind: 'ready',
       character_id: characterId,
-      current_step: seamStep(5),
+      current_step: seamStep(7),
     } satisfies GuidedBuildStateResult);
   });
 });

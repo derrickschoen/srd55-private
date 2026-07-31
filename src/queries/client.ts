@@ -13,6 +13,12 @@ import {
   type GuidedEquipmentStepState,
   type GuidedFillSkillGrantParams,
   type GuidedFillSkillGrantResult,
+  type GuidedExpertiseStepState,
+  type GuidedFillExpertiseGrantParams,
+  type GuidedSpellsStepState,
+  type GuidedAssignSpellParams,
+  type GuidedEligibleSpellsParams,
+  type GuidedEligibleSpellsResult,
   type GuidedOriginOption,
   type GuidedOriginOptionsParams,
   type GuidedOriginParams,
@@ -113,6 +119,17 @@ export interface QueriesClient extends CatalogClient {
   skillsStep(characterId: number): Promise<GuidedSkillsStepState>;
   fillSkillGrant(
     params: GuidedFillSkillGrantParams,
+  ): Promise<GuidedFillSkillGrantResult>;
+  expertiseStep(characterId: number): Promise<GuidedExpertiseStepState>;
+  fillExpertiseGrant(
+    params: GuidedFillExpertiseGrantParams,
+  ): Promise<GuidedFillSkillGrantResult>;
+  spellsStep(characterId: number): Promise<GuidedSpellsStepState>;
+  guidedEligibleSpells(
+    params: GuidedEligibleSpellsParams,
+  ): Promise<GuidedEligibleSpellsResult>;
+  assignGuidedSpell(
+    params: GuidedAssignSpellParams,
   ): Promise<GuidedFillSkillGrantResult>;
   equipmentStep(characterId: number): Promise<GuidedEquipmentStepState>;
   applyEquipment(
@@ -288,6 +305,31 @@ export function createQueriesClient(rpc: RpcClient): QueriesClient {
     fillSkillGrant: (params: GuidedFillSkillGrantParams) =>
       rpc.call<GuidedFillSkillGrantParams, GuidedFillSkillGrantResult>(
         GUIDED_RPC.fillSkillGrant,
+        params,
+      ),
+    expertiseStep: (characterId: number) =>
+      rpc.call<GuidedBuildStateParams, GuidedExpertiseStepState>(
+        GUIDED_RPC.expertiseStep,
+        characterParams(characterId),
+      ),
+    fillExpertiseGrant: (params: GuidedFillExpertiseGrantParams) =>
+      rpc.call<GuidedFillExpertiseGrantParams, GuidedFillSkillGrantResult>(
+        GUIDED_RPC.fillExpertiseGrant,
+        params,
+      ),
+    spellsStep: (characterId: number) =>
+      rpc.call<GuidedBuildStateParams, GuidedSpellsStepState>(
+        GUIDED_RPC.spellsStep,
+        characterParams(characterId),
+      ),
+    guidedEligibleSpells: (params: GuidedEligibleSpellsParams) =>
+      rpc.call<GuidedEligibleSpellsParams, GuidedEligibleSpellsResult>(
+        GUIDED_RPC.guidedEligibleSpells,
+        params,
+      ),
+    assignGuidedSpell: (params: GuidedAssignSpellParams) =>
+      rpc.call<GuidedAssignSpellParams, GuidedFillSkillGrantResult>(
+        GUIDED_RPC.assignSpell,
         params,
       ),
     equipmentStep: (characterId: number) =>

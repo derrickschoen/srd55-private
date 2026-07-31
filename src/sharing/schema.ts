@@ -135,6 +135,12 @@ export const SHARE_LIMITS = Object.freeze({
    */
   skillGrants: 200,
   /**
+   * How many live expertise grants one document may carry (wire v15). The
+   * printed classes grant only a handful; 200 leaves ample room for homebrew
+   * while bounding one independently decoded section.
+   */
+  expertiseGrants: 200,
+  /**
    * How many items one document may carry (wire v8, AC-1, D72). A real
    * character owns at most a few dozen modifying things; 200 matches
    * `effects` and exists for the same reason every other cap does: to stop a
@@ -240,6 +246,15 @@ export interface ShareSkillGrant {
   readonly ref: number;
   readonly grantKey: string;
   readonly ordinal: number;
+  readonly skill?: string;
+}
+
+/** One live, sourced expertise choice slot as it travels in wire v15. */
+export interface ShareExpertiseGrant {
+  readonly ref: number;
+  readonly grantKey: string;
+  readonly ordinal: number;
+  readonly grantedAtClassLevel: number;
   readonly skill?: string;
 }
 
@@ -746,6 +761,12 @@ export interface CharacterShareDocument {
    * strings.
    */
   readonly skillGrants?: readonly ShareSkillGrant[];
+  /**
+   * THE EXPERTISE GRANTS (wire v15). Like skill grants, an absent `skill`
+   * preserves an owed choice. Only live grants travel because orphaned sources
+   * are not part of a share document's active source tree.
+   */
+  readonly expertiseGrants?: readonly ShareExpertiseGrant[];
   /**
    * THE CHARACTER'S OWN ITEMS (wire v8, AC-1, D72). Optional on the same
    * terms as every appended section: absent means the character has none, and
@@ -1897,6 +1918,7 @@ export function validateShareDocument(
       'skillProficiencies',
       'effects',
       'skillGrants',
+      'expertiseGrants',
       'items',
       'attunementSlots',
     ],
@@ -2693,6 +2715,74 @@ export function validateShareDocument(
     );
   }
 
+  let expertiseGrants: CharacterShareDocument['expertiseGrants'] | undefined;
+  if (source.expertiseGrants !== undefined) {
+    expertiseGrants = list(
+      source.expertiseGrants,
+      'expertiseGrants',
+      SHARE_LIMITS.expertiseGrants,
+    ).map((item, index): ShareExpertiseGrant => {
+      const row = record(item, `expertiseGrants[${index}]`);
+      exactKeys(
+        row,
+        ['ref', 'grantKey', 'ordinal', 'grantedAtClassLevel'],
+        ['skill'],
+        `expertiseGrants[${index}]`,
+      );
+      const ref = integer(row.ref, `expertiseGrants[${index}].ref`, 0, 119);
+      if (!knownIds.has(ref)) {
+        throw new ShareValidationError(
+          `expertiseGrants[${index}].ref is unknown.`,
+        );
+      }
+      const skill =
+        row.skill === undefined
+          ? undefined
+          : text(row.skill, `expertiseGrants[${index}].skill`, 40);
+      if (
+        skill !== undefined &&
+        !skills.includes(skill as (typeof skills)[number])
+      ) {
+        throw new ShareValidationError(
+          `expertiseGrants[${index}].skill is unsupported.`,
+        );
+      }
+      return {
+        ref,
+        grantKey: text(
+          row.grantKey,
+          `expertiseGrants[${index}].grantKey`,
+          240,
+        ),
+        ordinal: integer(
+          row.ordinal,
+          `expertiseGrants[${index}].ordinal`,
+          1,
+          1_000,
+        ),
+        grantedAtClassLevel: integer(
+          row.grantedAtClassLevel,
+          `expertiseGrants[${index}].grantedAtClassLevel`,
+          1,
+          20,
+        ),
+        ...(skill === undefined ? {} : { skill }),
+      };
+    });
+    assertUnique(
+      expertiseGrants.map(
+        (item) => `${item.ref}\u0000${item.grantKey}\u0000${item.ordinal}`,
+      ),
+      'expertiseGrants',
+    );
+    assertUnique(
+      expertiseGrants
+        .filter((item) => item.skill !== undefined)
+        .map((item) => String(item.skill)),
+      'expertiseGrants',
+    );
+  }
+
   return {
     format: CHARACTER_SHARE_FORMAT,
     version: CHARACTER_SHARE_VERSION,
@@ -2715,6 +2805,7 @@ export function validateShareDocument(
     ...(skillProficiencies === undefined ? {} : { skillProficiencies }),
     ...(effects === undefined ? {} : { effects }),
     ...(skillGrants === undefined ? {} : { skillGrants }),
+    ...(expertiseGrants === undefined ? {} : { expertiseGrants }),
     ...(items === undefined ? {} : { items }),
     ...(attunementSlots === undefined ? {} : { attunementSlots }),
   };
