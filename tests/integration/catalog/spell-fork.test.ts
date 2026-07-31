@@ -257,8 +257,8 @@ describe('bundled spell forks', () => {
       ),
     );
     expect(shared.spellbook).toEqual([
-      fork.contentKey,
-      importedKey,
+      { spellKey: fork.contentKey },
+      { spellKey: importedKey },
     ]);
     expect(Object.hasOwn(shared, 'forks')).toBe(false);
     expect(JSON.stringify(shared)).not.toContain(

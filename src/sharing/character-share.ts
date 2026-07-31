@@ -864,19 +864,64 @@ export function exportCharacterShare(
           ...(row.state === 'kept_override'
             ? { keep: true as const }
             : {}),
+          ...(row.selection_acquired_at_class_level === null ||
+          row.selection_acquired_at_class_level === undefined
+            ? {}
+            : {
+                acquiredAtClassLevel: Number(
+                  row.selection_acquired_at_class_level,
+                ),
+              }),
         },
       ];
     });
 
   const spellbook = db.allRaw(
-    `SELECT version.content_key
+    `SELECT entry.*, version.content_key, version.provenance,
+            version.display_name
      FROM ${SHARE_TABLES.wizard_spellbook_entries} AS entry
-     INNER JOIN spell_versions AS version
+     LEFT JOIN spell_versions AS version
        ON version.id = entry.spell_version_id
-     WHERE entry.character_id = ?
-     ORDER BY version.content_key`,
+     WHERE entry.character_id = ? AND entry.state = 'active'
+     ORDER BY entry.source_instance_id, entry.rule_key, entry.ordinal, entry.id`,
     [characterId],
-  ).map((row) => String(row.content_key));
+  ).flatMap((row) => {
+    const ref =
+      row.source_instance_id === null ||
+      row.source_instance_id === undefined
+        ? undefined
+        : owners.get(Number(row.source_instance_id))?.ref;
+    if (
+      row.source_instance_id !== null &&
+      row.source_instance_id !== undefined &&
+      ref === undefined
+    ) {
+      return [];
+    }
+    return [{
+      ...(ref === undefined ? {} : { ref }),
+      ...(row.rule_key === null || row.rule_key === undefined
+        ? {}
+        : { ruleKey: String(row.rule_key) }),
+      ...(row.ordinal === null || row.ordinal === undefined
+        ? {}
+        : { ordinal: Number(row.ordinal) }),
+      ...(row.acquired_at_class_level === null ||
+      row.acquired_at_class_level === undefined
+        ? {}
+        : {
+            acquiredAtClassLevel: Number(
+              row.acquired_at_class_level,
+            ),
+          }),
+      ...(row.content_key === null || row.content_key === undefined
+        ? {}
+        : { spellKey: String(row.content_key) }),
+      ...(row.provenance === 'placeholder'
+        ? { spellName: String(row.display_name) }
+        : {}),
+    }];
+  });
   const preferences = db.allRaw(
     `SELECT version.content_key, preference.favourite
      FROM ${SHARE_TABLES.character_spell_preferences} AS preference
@@ -1089,7 +1134,11 @@ export function exportCharacterShare(
     });
   const sharedSpellKeys = new Set([
     ...selections.map((selection) => selection.spellKey),
-    ...spellbook,
+    ...spellbook.flatMap((acquisition) =>
+      acquisition.spellKey === undefined
+        ? []
+        : [acquisition.spellKey]
+    ),
     ...preferences.map((preference) => preference.spellKey),
     ...(loadouts ?? []).flatMap((loadout) =>
       loadout.entries.map((entry) => entry.spellKey),
@@ -1395,6 +1444,18 @@ function spellNameMap(
       names.set(selection.spellKey, selection.spellName);
     }
   }
+  for (const acquisition of document.spellbook) {
+    if (
+      acquisition.spellKey === undefined ||
+      acquisition.spellName === undefined
+    ) {
+      continue;
+    }
+    const current = names.get(acquisition.spellKey);
+    if (current === undefined || acquisition.spellName < current) {
+      names.set(acquisition.spellKey, acquisition.spellName);
+    }
+  }
   for (const placeholder of document.placeholders ?? []) {
     names.set(placeholder.spellKey, placeholder.spellName);
   }
@@ -1427,7 +1488,9 @@ export function previewCharacterShare(
   assertImportableWithoutMutation(db, document);
   const keys = new Set([
     ...document.selections.map((row) => row.spellKey),
-    ...document.spellbook,
+    ...document.spellbook.flatMap((row) =>
+      row.spellKey === undefined ? [] : [row.spellKey]
+    ),
     ...document.preferences.map((row) => row.spellKey),
     ...(document.loadouts ?? []).flatMap((row) =>
       row.entries.map((entry) => entry.spellKey),
@@ -1773,12 +1836,14 @@ export function importCharacterShare(
          SET current_spell_version_id = ?,
              state = ?,
              override_note = ?,
+             selection_acquired_at_class_level = ?,
              updated_at = ?
          WHERE id = ?`,
         [
           resolveSpell(selection.spellKey),
           selection.keep === true ? 'kept_override' : 'active',
           selection.keep === true ? 'Imported keep override.' : null,
+          selection.acquiredAtClassLevel ?? null,
           now,
           slotId,
         ],
@@ -1793,13 +1858,92 @@ export function importCharacterShare(
       throw new ShareImportCompatibilityError(selectionIssues);
     }
 
-    for (const key of document.spellbook) {
+    for (const acquisition of document.spellbook) {
+      const spellId =
+        acquisition.spellKey === undefined
+          ? null
+          : resolveSpell(acquisition.spellKey);
+      if (
+        acquisition.ref !== undefined &&
+        acquisition.ruleKey !== undefined &&
+        acquisition.ordinal !== undefined
+      ) {
+        const roots = rootsByRef.get(acquisition.ref);
+        if (roots === undefined) {
+          throw new ShareValidationError(
+            `spellbook ref ${acquisition.ref} is unavailable.`,
+          );
+        }
+        const sourceIds = [...descendants(roots)];
+        const rows = db.allRaw(
+          `SELECT id
+           FROM ${SHARE_TABLES.wizard_spellbook_entries}
+           WHERE character_id = ? AND rule_key = ? AND ordinal = ?
+             AND source_instance_id IN (${sourceIds.map(() => '?').join(', ')})
+             AND state = 'active'
+           ORDER BY id`,
+          [
+            characterId,
+            acquisition.ruleKey,
+            acquisition.ordinal,
+            ...sourceIds,
+          ],
+        );
+        if (rows.length !== 1) {
+          throw new ShareImportCompatibilityError([
+            selectionSlotIssue(
+              acquisition.ruleKey,
+              acquisition.ordinal,
+              rows.length,
+            ),
+          ]);
+        }
+        const entryId = Number((rows[0] as Row).id);
+        db.exec(
+          `UPDATE ${SHARE_TABLES.wizard_spellbook_entries}
+           SET spell_version_id = ?,
+               acquired_at_class_level = ?,
+               selection_eligibility = ?,
+               selection_invalid_reason = NULL,
+               updated_at = ?
+           WHERE id = ?`,
+          [
+            spellId,
+            acquisition.acquiredAtClassLevel ?? null,
+            spellId === null ? 'unselected' : 'valid',
+            now,
+            entryId,
+          ],
+        );
+        eligibility.refreshSpellbookAcquisition(entryId, now);
+        continue;
+      }
       db.exec(
         `INSERT OR IGNORE INTO ${SHARE_TABLES.wizard_spellbook_entries} (
-           character_id, spell_version_id, created_at, updated_at
-         ) VALUES (?, ?, ?, ?)`,
-        [characterId, resolveSpell(key), now, now],
+           character_id, acquired_at_class_level, spell_version_id,
+           selection_eligibility, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?)`,
+        [
+          characterId,
+          acquisition.acquiredAtClassLevel ?? null,
+          spellId,
+          spellId === null ? 'unselected' : 'valid',
+          now,
+          now,
+        ],
       );
+      if (spellId !== null) {
+        const entryId = db.scalar<number>(
+          `SELECT id
+           FROM ${SHARE_TABLES.wizard_spellbook_entries}
+           WHERE character_id = ? AND spell_version_id = ?
+             AND state = 'active'`,
+          [characterId, spellId],
+        );
+        if (entryId !== null) {
+          eligibility.refreshSpellbookAcquisition(entryId, now);
+        }
+      }
     }
     for (const preference of document.preferences) {
       db.exec(

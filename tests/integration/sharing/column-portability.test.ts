@@ -467,17 +467,70 @@ const PROBES: { readonly [N in ProbedTable]: Probe<N> } = {
         kind: 'omitted',
         why: 'With `selection_eligibility` — the reason belongs to whoever made the judgement.',
       },
+      selection_acquired_at_class_level: {
+        kind: 'verbatim',
+      },
     },
   },
   wizard_spellbook_entries: {
-    order: '(SELECT content_key FROM spell_versions WHERE id = t.spell_version_id)',
+    travels: "t.state = 'active'",
+    order: 't.source_instance_id, t.rule_key, t.ordinal',
     columns: {
       id: RECIPIENT_ROW_ID,
       character_id: RECIPIENT_OWNER_ID,
+      source_instance_id: {
+        kind: 'translated',
+        key: '(SELECT display_name FROM character_source_instances WHERE id = t.source_instance_id)',
+        why: '`spellbook[].ref` carries the granting source through the share-local reference space.',
+      },
+      rule_key: { kind: 'verbatim' },
+      ordinal: { kind: 'verbatim' },
+      acquired_at_class_level: { kind: 'verbatim' },
       spell_version_id: {
         kind: 'translated',
         key: '(SELECT content_key FROM spell_versions WHERE id = t.spell_version_id)',
-        why: '`spellbook[]` is a list of content keys; the recipient resolves each against their own catalog, minting a placeholder if they lack it.',
+        why: '`spellbook[].spellKey` resolves against the recipient catalog and remains nullable for an unfilled acquisition.',
+      },
+      spell_level_min: {
+        kind: 'omitted',
+        why: 'DERIVED ACQUISITION STATE: the grant rule owns its level window.',
+      },
+      spell_level_max: {
+        kind: 'omitted',
+        why: 'DERIVED ACQUISITION STATE, with spell_level_min.',
+      },
+      allowed_spell_lists: {
+        kind: 'omitted',
+        why: 'DERIVED ACQUISITION STATE: the grant rule owns its list constraint.',
+      },
+      allowed_schools: {
+        kind: 'omitted',
+        why: 'DERIVED ACQUISITION STATE, with allowed_spell_lists.',
+      },
+      allowed_tags: {
+        kind: 'omitted',
+        why: 'DERIVED ACQUISITION STATE, with allowed_spell_lists.',
+      },
+      state: {
+        kind: 'omitted',
+        provedByExcludedRow: true,
+        why: 'Only active acquisitions travel; orphaned acquisitions are sender history.',
+      },
+      orphan_reason_code: {
+        kind: 'omitted',
+        why: 'The recipient recomputes orphaning from its own effective rules.',
+      },
+      orphaned_at: {
+        kind: 'omitted',
+        why: 'With orphan_reason_code, and it is a sender timestamp.',
+      },
+      selection_eligibility: {
+        kind: 'omitted',
+        why: 'The recipient evaluates the selected spell against its own catalog.',
+      },
+      selection_invalid_reason: {
+        kind: 'omitted',
+        why: 'With selection_eligibility: the reason belongs to the catalog that performed the evaluation.',
       },
       created_at: OWNED_TIMESTAMP,
       updated_at: OWNED_TIMESTAMP,
@@ -854,6 +907,15 @@ const GRANT_RULES = JSON.stringify([
     level_max: 9,
   },
   {
+    kind: 'spellbook_acquisition',
+    rule_key: 'wizard-spellbook',
+    count: 1,
+    bucket: 'spellbook',
+    list: 'Wizard',
+    level_min: 0,
+    level_max: 9,
+  },
+  {
     kind: 'choice_from_query',
     rule_key: 'wizard-spare',
     count: 1,
@@ -878,13 +940,20 @@ function seedCatalog(db: DatabaseContext, includeFork = true): Catalog {
        VALUES (?, ?, ?)`,
       [`spell:${name.toLowerCase()}`, name, name.toLowerCase()],
     ).lastInsertId;
-    return db.exec(
+    const versionId = db.exec(
       `INSERT INTO spell_versions (
          content_key, spell_identity_id, display_name, rules_edition,
          level, school, is_active
        ) VALUES (?, ?, ?, '2024', ?, 'Abjuration', 1)`,
       [key, identityId, name, level],
     ).lastInsertId;
+    db.exec(
+      `INSERT INTO spell_list_memberships (
+         spell_version_id, spell_list_key
+       ) VALUES (?, 'Wizard')`,
+      [versionId],
+    );
+    return versionId;
   };
   const bundledSourceId = spell('2024:shield', 'Shield', 1);
   db.exec(
@@ -1115,6 +1184,7 @@ function seedSender(db: DatabaseContext, catalog: Catalog): number {
        selection_collection = 'sender-collection',
        selection_eligibility = 'invalid',
        selection_invalid_reason = 'sender invalid reason',
+       selection_acquired_at_class_level = 4,
        created_at = ?,
        updated_at = ?
      WHERE character_id = ?`,
@@ -1132,16 +1202,50 @@ function seedSender(db: DatabaseContext, catalog: Catalog): number {
   db.exec(
     `UPDATE spell_selection_slots
      SET fixed_spell_version_id = ?, current_spell_version_id = NULL,
-         state = 'active'
+         selection_acquired_at_class_level = NULL, state = 'active'
      WHERE character_id = ? AND rule_key = 'wizard-spare'`,
     [catalog.spareSpellId, characterId],
   );
 
   db.exec(
-    `INSERT INTO wizard_spellbook_entries
-       (character_id, spell_version_id, created_at, updated_at)
-     VALUES (?, ?, ?, ?)`,
-    [characterId, catalog.spareSpellId, SENDER_TIME, SENDER_TIME],
+    `UPDATE wizard_spellbook_entries
+     SET spell_version_id = ?,
+         spell_level_min = 3,
+         spell_level_max = 7,
+         allowed_spell_lists = '["sender-list"]',
+         allowed_schools = '["Sender School"]',
+         allowed_tags = '["sender-tag"]',
+         orphan_reason_code = 'sender_orphan_reason',
+         orphaned_at = ?,
+         selection_eligibility = 'invalid',
+         selection_invalid_reason = 'sender invalid reason',
+         created_at = ?,
+         updated_at = ?
+     WHERE character_id = ? AND rule_key = 'wizard-spellbook'`,
+    [
+      catalog.spareSpellId,
+      SENDER_TIME,
+      SENDER_TIME,
+      SENDER_TIME,
+      characterId,
+    ],
+  );
+  db.exec(
+    `INSERT INTO wizard_spellbook_entries (
+       character_id, spell_version_id, state, orphan_reason_code,
+       orphaned_at, selection_eligibility, selection_invalid_reason,
+       created_at, updated_at
+     ) VALUES (
+       ?, ?, 'orphaned', 'sender_retired_acquisition', ?, 'invalid',
+       'sender retired acquisition', ?, ?
+     )`,
+    [
+      characterId,
+      catalog.chosenSpellId,
+      SENDER_TIME,
+      SENDER_TIME,
+      SENDER_TIME,
+    ],
   );
   db.exec(
     `INSERT INTO character_spell_preferences

@@ -108,6 +108,10 @@ function slotRestoreState(row: SnapshotRow) {
       row.current_spell_version_id === null
         ? null
         : Number(row.current_spell_version_id),
+    selection_acquired_at_class_level:
+      row.selection_acquired_at_class_level === null
+        ? null
+        : Number(row.selection_acquired_at_class_level),
     selection_eligibility: String(row.selection_eligibility),
     selection_invalid_reason:
       row.selection_invalid_reason === null

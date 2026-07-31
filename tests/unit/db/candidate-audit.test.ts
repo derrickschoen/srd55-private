@@ -785,7 +785,7 @@ describe('candidate database semantic audit', () => {
     ).not.toThrow();
   });
 
-  it('audits and restores ability_override in the existing a7-v12 snapshot shape', () => {
+  it('audits and restores ability_override in the current a7-v13 snapshot shape', () => {
     const db = freshDatabase();
     seedTwoCharacters(db);
     db.exec(
@@ -798,7 +798,7 @@ describe('candidate database semantic audit', () => {
        )`,
     );
     const snapshot = snapshotOf(db, 1);
-    expect(snapshot.schema_version).toBe('a7-v12');
+    expect(snapshot.schema_version).toBe('a7-v13');
     insertSavePoint(db, 1, snapshot);
 
     expect(() => auditCandidateDatabase(quarantined(bytesOf(db)))).not.toThrow();

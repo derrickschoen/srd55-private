@@ -449,9 +449,13 @@ function classGrantRules(
     rules.push({
       kind: 'spellbook_acquisition',
       rule_key: 'wizard-spellbook',
+      count: 6 + Math.max(0, contribution.classLevel - 1) * 2,
+      initial_count: 6,
+      count_per_level: 2,
       bucket: 'spellbook',
       list: 'Wizard',
-      acquisitions_config: 'wizard_spellbook_acquisitions',
+      level_min: 1,
+      level_max: maxPreparableLevelForClass(contribution),
     });
     rules.push({
       kind: 'capability',

@@ -16,14 +16,14 @@ export interface SpellPicker {
 }
 
 export function createSpellPicker(options: {
-  characterId: number;
-  slotId: number;
+  addressKey: string;
+  label: string;
   value: string | null;
   /** The current value is a share-link name of unverified origin. */
   freeTextValue: boolean;
   invalid: boolean;
   disabled: boolean;
-  queries: EligibleSpellClient;
+  search(query: string): Promise<EligibleSpell[]>;
   onSelect(spell: EligibleSpell): void;
 }): SpellPicker {
   const wrapper = document.createElement('div');
@@ -38,7 +38,7 @@ export function createSpellPicker(options: {
   input.setAttribute('role', 'combobox');
   input.setAttribute(
     'aria-label',
-    `Spell selection for slot ${options.slotId}`,
+    options.label,
   );
   // An input's value cannot be wrapped, so the marker goes on the control. The
   // adjacent "Not imported" badge states the same thing in words.
@@ -46,9 +46,9 @@ export function createSpellPicker(options: {
   input.setAttribute('aria-autocomplete', 'list');
   input.setAttribute('aria-expanded', 'false');
   input.setAttribute('aria-invalid', String(options.invalid));
-  input.dataset.focusKey = `spell-${options.slotId}`;
+  input.dataset.focusKey = `spell-${options.addressKey}`;
   const list = document.createElement('div');
-  const listId = `spell-options-${options.slotId}`;
+  const listId = `spell-options-${options.addressKey}`;
   list.id = listId;
   list.className = 'spell-options';
   list.setAttribute('role', 'listbox');
@@ -82,7 +82,7 @@ export function createSpellPicker(options: {
     choices.forEach((spell, index) => {
       const choice = document.createElement('button');
       choice.type = 'button';
-      choice.id = `spell-option-${options.slotId}-${index}`;
+      choice.id = `spell-option-${options.addressKey}-${index}`;
       choice.className =
         index === active ? 'spell-option is-active' : 'spell-option';
       choice.setAttribute('role', 'option');
@@ -109,7 +109,7 @@ export function createSpellPicker(options: {
     if (activeChoice !== undefined) {
       input.setAttribute(
         'aria-activedescendant',
-        `spell-option-${options.slotId}-${active}`,
+        `spell-option-${options.addressKey}-${active}`,
       );
     }
   };
@@ -120,11 +120,7 @@ export function createSpellPicker(options: {
     input.setAttribute('aria-expanded', 'true');
     draw('Searching eligible spells…');
     try {
-      const spells = await options.queries.eligibleSpells(
-        options.characterId,
-        options.slotId,
-        input.value,
-      );
+      const spells = await options.search(input.value);
       if (destroyed || sequence !== requestSequence) return;
       choices = spells;
       active = 0;

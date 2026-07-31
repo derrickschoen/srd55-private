@@ -68,6 +68,7 @@ const complete: CharacterShareDocument = {
       ordinal: 1,
       spellKey: '2024:shield',
       keep: true,
+      acquiredAtClassLevel: 5,
     },
     {
       ref: 1,
@@ -77,7 +78,13 @@ const complete: CharacterShareDocument = {
       spellName: 'Starward Aegis',
     },
   ],
-  spellbook: ['2024:shield'],
+  spellbook: [{
+    ref: 0,
+    ruleKey: 'wizard-spellbook',
+    ordinal: 1,
+    acquiredAtClassLevel: 1,
+    spellKey: '2024:shield',
+  }],
   preferences: [{ spellKey: '2024:shield', favourite: true }],
   overrides: [{ ruleKey: 'prepared', value: { count: 7 } }],
   acknowledgements: [{ warning: 'warning:shield' }],
@@ -373,6 +380,21 @@ function migrateV1WireToV4(wire: unknown): unknown {
 function appendV9SourceMarker(root: unknown[]): void {
   root[4] = (root[4] as unknown[][]).map((source) => [...source, null]);
   root.push(null); // v11 attunementSlots
+}
+
+function rewriteV14SpellAcquisitions(root: unknown[]): void {
+  root[5] = (root[5] as unknown[]).map((selection) => [
+    ...(selection as unknown[]),
+    null,
+  ]);
+  root[6] = (root[6] as unknown[]).map((spell) => [
+    null,
+    null,
+    null,
+    null,
+    spell,
+    null,
+  ]);
 }
 
 interface StructuralTupleSchema {
@@ -1068,6 +1090,60 @@ const COMPLETE_V13_WIRE = [
   ...COMPLETE_V12_WIRE.slice(2),
 ];
 
+/** GF-1: selection level appended; spellbook strings become acquisitions. */
+const COMPLETE_V14_WIRE = [
+  COMPLETE_V13_WIRE[0],
+  14,
+  ...COMPLETE_V13_WIRE.slice(2, 5),
+  [
+    [
+      ...((COMPLETE_V13_WIRE[5] as unknown[][])[0] as unknown[]),
+      5,
+    ],
+    [
+      ...((COMPLETE_V13_WIRE[5] as unknown[][])[1] as unknown[]),
+      null,
+    ],
+  ],
+  [[0, 'wizard-spellbook', 1, 1, '2024:shield', null]],
+  ...COMPLETE_V13_WIRE.slice(7),
+];
+
+/** The honest v13 migration: old wire carried neither provenance field. */
+const MIGRATED_COMPLETE_V14_WIRE = [
+  COMPLETE_V13_WIRE[0],
+  14,
+  ...COMPLETE_V13_WIRE.slice(2, 5),
+  (COMPLETE_V13_WIRE[5] as unknown[][]).map((selection) => [
+    ...selection,
+    null,
+  ]),
+  [['2024:shield']].map(([spell]) => [
+    null,
+    null,
+    null,
+    null,
+    spell,
+    null,
+  ]),
+  ...COMPLETE_V13_WIRE.slice(7),
+];
+
+const migratedComplete: CharacterShareDocument = {
+  ...complete,
+  selections: complete.selections.map((selection) => ({
+    ref: selection.ref,
+    ruleKey: selection.ruleKey,
+    ordinal: selection.ordinal,
+    spellKey: selection.spellKey,
+    ...(selection.spellName === undefined
+      ? {}
+      : { spellName: selection.spellName }),
+    ...(selection.keep === undefined ? {} : { keep: selection.keep }),
+  })),
+  spellbook: [{ spellKey: '2024:shield' }],
+};
+
 const V13_ABILITY_OVERRIDE_WIRE = [
   CHARACTER_SHARE_FORMAT,
   13,
@@ -1127,28 +1203,36 @@ describe('character-share positional codec', () => {
     // Through the 5→6 null-pad and the 6→7 drop: a v5 document predates
     // equipment minting, so its rows arrive with no provenance anywhere —
     // the same document it always meant.
-    expect(positionalToShareDocument(COMPLETE_V5_WIRE)).toEqual(complete);
+    expect(positionalToShareDocument(COMPLETE_V5_WIRE)).toEqual(
+      migratedComplete,
+    );
   });
 
   it('keeps a hand-authored complete version-6 positional golden readable', () => {
     // Through the 6→7 drop (D69): the appended null sourceRef slots come
     // off, and the document decodes to the same plain rows.
-    expect(positionalToShareDocument(COMPLETE_V6_WIRE)).toEqual(complete);
+    expect(positionalToShareDocument(COMPLETE_V6_WIRE)).toEqual(
+      migratedComplete,
+    );
   });
 
   it('keeps a hand-authored complete version-7 positional golden readable', () => {
     // Through the 7→8 null-pad (AC-1, D72): five trailing nulls on every
     // effect tuple and a trailing null root element, decoding to the same
     // document it always meant.
-    expect(positionalToShareDocument(COMPLETE_V7_WIRE)).toEqual(complete);
+    expect(positionalToShareDocument(COMPLETE_V7_WIRE)).toEqual(
+      migratedComplete,
+    );
   });
 
   it('keeps a hand-authored complete version-8 positional golden readable', () => {
-    expect(positionalToShareDocument(COMPLETE_V8_WIRE)).toEqual(complete);
+    expect(positionalToShareDocument(COMPLETE_V8_WIRE)).toEqual(
+      migratedComplete,
+    );
   });
 
-  it('pins the hand-authored complete version-13 wire layout element by element', () => {
-    expect(shareDocumentToPositional(complete)).toEqual(COMPLETE_V13_WIRE);
+  it('pins the hand-authored complete version-14 wire layout element by element', () => {
+    expect(shareDocumentToPositional(complete)).toEqual(COMPLETE_V14_WIRE);
   });
 
   it('accepts ability_override only in a hand-frozen v13 document', () => {
@@ -1218,6 +1302,14 @@ describe('character-share positional codec', () => {
   it('migrates v12 to v13 without changing any existing tuple field', () => {
     const migrated = MIGRATIONS[12](COMPLETE_V12_WIRE) as unknown[];
     expect(migrated).toEqual(COMPLETE_V13_WIRE);
+  });
+
+  it('migrates v13 selections and spellbook rows to honest v14 acquisitions', () => {
+    const migrated = MIGRATIONS[13](COMPLETE_V13_WIRE) as unknown[];
+    expect(migrated).toEqual(MIGRATED_COMPLETE_V14_WIRE);
+    expect(positionalToShareDocument(COMPLETE_V13_WIRE)).toEqual(
+      migratedComplete,
+    );
   });
 
   it('round-trips object, positional, gzip, and base64url forms', async () => {
@@ -1359,7 +1451,7 @@ describe('character-share positional codec', () => {
     const positional = shareDocumentToPositional(minimal);
     expect(positional).toEqual([
       'dnd-multiclass-spells-character-share',
-      13,
+      14,
       [
         'Ten',
         null,
@@ -2021,6 +2113,7 @@ describe('a share link generated before the sheet inputs travelled', () => {
     const currentWithoutSheet = [...migratedRoot];
     currentWithoutSheet[1] = CHARACTER_SHARE_VERSION;
     appendV9SourceMarker(currentWithoutSheet);
+    rewriteV14SpellAcquisitions(currentWithoutSheet);
     currentWithoutSheet.push(null); // skillGrants, absent
     currentWithoutSheet.push(null); // items, absent (AC-1, D72)
     // NOT re-expressed at v6/v7: v6 appended a sourceRef slot to the weapon
@@ -2241,6 +2334,7 @@ describe('a share link generated before weapons travelled', () => {
     const baseline = [...migratedRoot];
     baseline[1] = CHARACTER_SHARE_VERSION;
     appendV9SourceMarker(baseline);
+    rewriteV14SpellAcquisitions(baseline);
     baseline.push(null); // skillGrants
     baseline.push(null); // items (AC-1, D72)
     const decodedBaseline = positionalToShareDocument(baseline);
@@ -2276,6 +2370,7 @@ describe('a share link generated before weapons travelled', () => {
     const withWeapons = [...migratedRoot];
     withWeapons[1] = CHARACTER_SHARE_VERSION;
     appendV9SourceMarker(withWeapons);
+    rewriteV14SpellAcquisitions(withWeapons);
     withWeapons[11] = []; // weapons: explicitly recorded as none
     withWeapons.push(null); // skillGrants
     withWeapons.push(null); // items (AC-1, D72)
@@ -2298,6 +2393,7 @@ describe('a share link generated before weapons travelled', () => {
     const withOrigin = [...migratedRoot];
     withOrigin[1] = CHARACTER_SHARE_VERSION;
     appendV9SourceMarker(withOrigin);
+    rewriteV14SpellAcquisitions(withOrigin);
     withOrigin[11] = []; // weapons: explicitly recorded as none
     withOrigin[12] = [null, null, null]; // origin: explicit null-tuple
     withOrigin.push(null); // skillGrants
@@ -2415,6 +2511,7 @@ describe('a share link generated before a character note could travel', () => {
     const migratedRoot = migrateV1WireToV4(withNote) as unknown[];
     migratedRoot[1] = CHARACTER_SHARE_VERSION;
     appendV9SourceMarker(migratedRoot);
+    rewriteV14SpellAcquisitions(migratedRoot);
     migratedRoot.push(null); // skillGrants
     migratedRoot.push(null); // items (AC-1, D72)
     const decoded = positionalToShareDocument(migratedRoot);

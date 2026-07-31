@@ -37,6 +37,11 @@ export type SpellIdentityId = Brand<number, 'SpellIdentityId'>;
 export type CharacterId = Brand<number, 'CharacterId'>;
 /** `spell_selection_slots.id`. */
 export type SlotId = Brand<number, 'SlotId'>;
+/** `wizard_spellbook_entries.id` — one addressable Wizard acquisition. */
+export type WizardSpellbookEntryId = Brand<
+  number,
+  'WizardSpellbookEntryId'
+>;
 /** `character_source_instances.id`. */
 export type SourceInstanceId = Brand<number, 'SourceInstanceId'>;
 /** `character_weapons.id` — a weapon a character owns, values and all. */

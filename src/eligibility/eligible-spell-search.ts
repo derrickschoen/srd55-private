@@ -10,9 +10,12 @@ import type { DatabaseContext } from '../db/database';
 import type { RulesEdition, SpellSchool } from '../domain/enums';
 import {
   SpellSelectionEligibility,
-  type EligibilityList,
   type EligibilitySlot,
 } from './spell-selection-eligibility';
+import {
+  spellSelectionConstraint,
+  type SpellSelectionConstraint,
+} from './spell-selection-constraint';
 
 export interface EligibleSpell {
   id: number;
@@ -33,17 +36,6 @@ export class EligibleSpellSearchNotFoundError extends Error {
     );
     this.name = 'EligibleSpellSearchNotFoundError';
   }
-}
-
-function stringList(value: EligibilityList | undefined): string[] {
-  if (value === null || value === undefined || value === '') {
-    return [];
-  }
-  if (Array.isArray(value)) {
-    return [...value];
-  }
-  const decoded: unknown = JSON.parse(value as string);
-  return Array.isArray(decoded) ? ([...decoded] as string[]) : [];
 }
 
 function decodeSlot(row: SqlRow): EligibilitySlot {
@@ -104,9 +96,21 @@ export class EligibleSpellSearch {
     query: string,
   ): EligibleSpell[] {
     const slot = this.#slot(characterId, slotId);
+    return this.searchConstraint(
+      characterId,
+      spellSelectionConstraint(slot),
+      query,
+    );
+  }
+
+  searchConstraint(
+    characterId: number,
+    constraint: SpellSelectionConstraint,
+    query: string,
+  ): EligibleSpell[] {
     const { clauses, bindings } = this.#candidatePredicate(
       characterId,
-      slot,
+      constraint,
       query,
     );
 
@@ -124,7 +128,11 @@ export class EligibleSpellSearch {
 
     return candidates.filter(
       (candidate) =>
-        this.#eligibility.evaluate(slot, candidate.id).status ===
+        this.#eligibility.evaluateConstraint(
+          characterId,
+          constraint,
+          candidate.id,
+        ).status ===
         'valid',
     );
   }
@@ -137,15 +145,22 @@ export class EligibleSpellSearch {
   // throws for those — so the answer there is a plain "nothing offerable".
   hasAny(characterId: number, slotId: number): boolean {
     const slot = this.#slot(characterId, slotId);
-    if (
-      slot.selection_collection !== null &&
-      slot.selection_collection !== undefined
-    ) {
+    return this.hasAnyConstraint(
+      characterId,
+      spellSelectionConstraint(slot),
+    );
+  }
+
+  hasAnyConstraint(
+    characterId: number,
+    constraint: SpellSelectionConstraint,
+  ): boolean {
+    if (constraint.selection_collection !== null) {
       return false;
     }
     const { clauses, bindings } = this.#candidatePredicate(
       characterId,
-      slot,
+      constraint,
       '',
     );
     return (
@@ -182,7 +197,7 @@ export class EligibleSpellSearch {
 
   #candidatePredicate(
     characterId: number,
-    slot: EligibilitySlot,
+    constraint: SpellSelectionConstraint,
     query: string,
   ): CandidatePredicate {
     const allowLegacy =
@@ -192,17 +207,17 @@ export class EligibleSpellSearch {
           [characterId],
         ) ?? 0,
       ) === 1;
-    const lists = stringList(slot.allowed_spell_lists);
-    const schools = stringList(slot.allowed_schools);
-    const tags = stringList(slot.allowed_tags);
+    const lists = constraint.allowed_spell_lists;
+    const schools = constraint.allowed_schools;
+    const tags = constraint.allowed_tags;
 
     const clauses = [
       'version.is_active = 1',
       'version.level BETWEEN ? AND ?',
     ];
     const bindings: Array<string | number> = [
-      slot.spell_level_min ?? 0,
-      slot.spell_level_max ?? 9,
+      constraint.spell_level_min,
+      constraint.spell_level_max,
     ];
 
     if (!allowLegacy) {

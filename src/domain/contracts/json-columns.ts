@@ -86,6 +86,22 @@ export const JSON_COLUMNS = {
     allowEmpty: true,
     reader: 'decodeStringList (src/eligibility/spell-selection-eligibility.ts)',
   },
+  'wizard_spellbook_entries.allowed_spell_lists': {
+    shape: 'array',
+    allowEmpty: true,
+    reader: 'decodeConstraint (src/eligibility/spell-selection-assignment.ts)',
+  },
+  'wizard_spellbook_entries.allowed_schools': {
+    shape: 'array',
+    allowEmpty: true,
+    items: 'string',
+    reader: 'decodeConstraint (src/eligibility/spell-selection-assignment.ts)',
+  },
+  'wizard_spellbook_entries.allowed_tags': {
+    shape: 'array',
+    allowEmpty: true,
+    reader: 'decodeConstraint (src/eligibility/spell-selection-assignment.ts)',
+  },
   'spell_selection_slots.free_cast': {
     shape: 'object',
     allowEmpty: false,

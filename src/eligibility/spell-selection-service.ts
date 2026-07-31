@@ -11,6 +11,7 @@ import {
   SpellSelectionEligibility,
   type EligibilitySlot,
 } from './spell-selection-eligibility';
+import { assignSpellSelection } from './spell-selection-assignment';
 
 interface SelectableSlot extends EligibilitySlot {
   isLocked: boolean;
@@ -83,23 +84,12 @@ export class SpellSelectionService {
         );
       }
 
-      const result = this.#eligibility.evaluate(
-        slot,
-        spellVersionId,
-      );
-      if (result.status !== 'valid') {
-        throw new Error(result.reason ?? 'Spell selection is not valid.');
-      }
-
-      transaction.exec(
-        `UPDATE spell_selection_slots
-         SET current_spell_version_id = ?,
-             selection_eligibility = 'valid',
-             selection_invalid_reason = NULL,
-             updated_at = ?
-         WHERE id = ?`,
-        [spellVersionId, new Date().toISOString(), slotId],
-      );
+      assignSpellSelection(transaction, {
+        address: { kind: 'slot_selection', id: slotId },
+        character_id: slot.character_id,
+        spell_version_id: spellVersionId,
+        eligibility: this.#eligibility,
+      });
     });
   }
 }

@@ -84,6 +84,7 @@ const warningModes = ['acknowledge', 'delete'] as const;
 const sourceTypes = ['class', 'feat', 'species', 'background'] as const;
 const slotRestoreKeys = [
   'current_spell_version_id',
+  'selection_acquired_at_class_level',
   'selection_eligibility',
   'selection_invalid_reason',
   'state',
@@ -191,6 +192,12 @@ function validateSlotRestoreState(value: unknown): void {
       'Slot restore spell_version_id must be a positive integer or null.',
     );
   }
+  nullableBoundedInteger(
+    state,
+    'selection_acquired_at_class_level',
+    1,
+    20,
+  );
 
   if (
     !isEnumValue(

@@ -223,6 +223,7 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
       'fixed_spell_version_id', 'current_spell_version_id', 'spell_level_min',
       'spell_level_max', 'always_prepared', 'with_slots',
       'counts_against_limit', 'required', 'is_locked', 'sort_order',
+      'selection_acquired_at_class_level',
     ],
     text: [
       'slot_key', 'rule_key', 'bucket', 'eligibility_kind', 'label',
@@ -307,8 +308,17 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
     numeric: ['invalidated_at', 'created_at', 'updated_at'],
   },
   wizard_spellbook_entries: {
-    integer: ['id', 'character_id', 'spell_version_id'],
-    numeric: ['created_at', 'updated_at'],
+    integer: [
+      'id', 'character_id', 'source_instance_id', 'ordinal',
+      'acquired_at_class_level', 'spell_version_id', 'spell_level_min',
+      'spell_level_max',
+    ],
+    text: [
+      'rule_key', 'allowed_spell_lists', 'allowed_schools', 'allowed_tags',
+      'state', 'orphan_reason_code', 'selection_eligibility',
+      'selection_invalid_reason',
+    ],
+    numeric: ['orphaned_at', 'created_at', 'updated_at'],
   },
 
   // --- TABLES THIS PROJECT ADDED -------------------------------------------
@@ -852,7 +862,10 @@ const expectedNotNull: Record<string, string[]> = {
     'prepared_count', 'max_spell_level',
   ],
   warning_acknowledgements: ['id', 'character_id', 'warning_fingerprint'],
-  wizard_spellbook_entries: ['id', 'character_id', 'spell_version_id'],
+  wizard_spellbook_entries: [
+    'id', 'character_id', 'spell_level_min', 'spell_level_max', 'state',
+    'selection_eligibility',
+  ],
 };
 
 const expectedNamedIndexes: Record<string, string> = {
@@ -1031,6 +1044,10 @@ const expectedNamedIndexes: Record<string, string> = {
     'spell_selection_slots:character_id,bucket',
   spell_selection_slots_character_id_state_index:
     'spell_selection_slots:character_id,state',
+  wizard_spellbook_entries_character_id_state_index:
+    'wizard_spellbook_entries:character_id,state',
+  wizard_spellbook_entries_source_rule_ordinal_unique:
+    'wizard_spellbook_entries:source_instance_id,rule_key,ordinal:unique',
   spell_version_attack_modes_attack_mode_index:
     'spell_version_attack_modes:attack_mode',
   spell_version_attack_modes_spell_version_id_attack_mode_unique:
@@ -1155,7 +1172,10 @@ const expectedUniqueGroups: Record<string, string[]> = {
   ],
   subclass_progressions: ['subclass_definition_id,class_level'],
   warning_acknowledgements: ['character_id,warning_fingerprint'],
-  wizard_spellbook_entries: ['character_id,spell_version_id'],
+  wizard_spellbook_entries: [
+    'character_id,spell_version_id',
+    'source_instance_id,rule_key,ordinal',
+  ],
 };
 
 /**
@@ -1222,6 +1242,12 @@ const expectedDefaults: Record<string, Record<string, string>> = {
     selection_eligibility: "'unselected'", sort_order: '0',
     spell_level_max: '9', spell_level_min: '0', state: "'active'",
     with_slots: 'true',
+  },
+  wizard_spellbook_entries: {
+    selection_eligibility: "'unselected'",
+    spell_level_max: '9',
+    spell_level_min: '1',
+    state: "'active'",
   },
   spell_versions: {
     concentration: 'false', effect_reliability_category: "'fixed_effect'",
@@ -1477,6 +1503,7 @@ const expectedForeignKeys: Record<string, string[]> = {
   warning_acknowledgements: ['character_id->characters.id|CASCADE'],
   wizard_spellbook_entries: [
     'character_id->characters.id|CASCADE',
+    'source_instance_id,character_id->character_source_instances.id,character_id|CASCADE',
     'spell_version_id->spell_versions.id|NO ACTION',
   ],
 };

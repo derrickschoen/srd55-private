@@ -446,12 +446,60 @@ const VERSION_FIXTURES = {
       }],
     },
   },
+  14: {
+    // Independently compressed from a hand-authored v14 positional tuple.
+    // It carries one level-stamped slot selection, one filled addressable
+    // Wizard acquisition, and one unfilled acquisition at the adjacent
+    // ordinal.
+    fragment:
+      'H4sIAAAAAAAAA3VQMQ7CMBD7SpX5IjVRB9SNjRewRBlCclIjjqZcWiHxegTNUEJZPFi2zz4jwhjkbaE5enI5yzwhUZZ-cOz8jCzz4BgFqA6MOKuuOfr7EnOcYxqbE3ISMC5EG1CHmtkBC8a0IHSru_5zuH_Ep-NQ0jSo2mDBFNPEODnGIECVhDxEpLBtom0Rr7HrrEtK17dpz2ZhX_3VpJSw9SLzM64m_v7hBf_6PryBAQAA',
+    expected: {
+      format: CHARACTER_SHARE_FORMAT,
+      version: CHARACTER_SHARE_VERSION,
+      character: {
+        name: 'V14 Acquisition Hero',
+        intelligence: 18,
+      },
+      classes: [{
+        id: 0,
+        classKey: '2024:class:wizard',
+        level: 2,
+        start: 1,
+      }],
+      sources: [],
+      selections: [{
+        ref: 0,
+        ruleKey: 'prepared',
+        ordinal: 1,
+        spellKey: '2024:shield',
+        acquiredAtClassLevel: 2,
+      }],
+      spellbook: [
+        {
+          ref: 0,
+          ruleKey: 'wizard-spellbook',
+          ordinal: 1,
+          acquiredAtClassLevel: 1,
+          spellKey: '2024:shield',
+        },
+        {
+          ref: 0,
+          ruleKey: 'wizard-spellbook',
+          ordinal: 2,
+          acquiredAtClassLevel: 1,
+        },
+      ],
+      preferences: [],
+      overrides: [],
+    },
+  },
 } satisfies Record<SupportedShareVersion, FrozenFixture>;
 
 const HISTORICAL_SCHEMA_MODULE_SHA256 = {
   'v1.ts': '8a87e9cd8ee49c2beb42f9747dc24025c485fccb63d822179202df29080af449',
   'v2.ts': '32e662f3db38f09da5b17320b059c917d26e031456fd0f2c4cefb196a872b269',
   'v8.ts': '1ac43e5dbc33e34ef025af12e80914a51daa8ecda5599a8c1143cbe2baf748af',
+  'v13.ts': 'ef1e06d92ca9e302b6bc148aad5ba2fba40110c5909c2a2e972628e992fd6435',
 } as const;
 
 function allObjects(root: object): object[] {
@@ -573,7 +621,7 @@ describe('the share-link wire schema registry', () => {
       'znYkjqpeGzGrT3uUmIzE6x6FACcM8J3cnM-udlExt5JUwNKZ32PDMOyhhaF4Ch-ERWprlN2PpLpSjWAbju76D1796GfoAAAA';
 
     await expect(decodeShareFragment(nonZero)).resolves.toMatchObject({
-      version: 13,
+      version: CHARACTER_SHARE_VERSION,
       effects: [{
         kind: 'armor_class_bonus',
         label: 'Manual Armor Class adjustment',
@@ -581,7 +629,7 @@ describe('the share-link wire schema registry', () => {
       }],
     });
     const zero = await decodeShareFragment(zeroWithNote);
-    expect(zero.version).toBe(13);
+    expect(zero.version).toBe(CHARACTER_SHARE_VERSION);
     expect(zero).not.toHaveProperty('effects');
     expect(zero).not.toHaveProperty('sheetAdjustment');
   });

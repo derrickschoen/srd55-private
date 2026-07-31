@@ -133,7 +133,7 @@ afterAll(() => {
 });
 
 describe('declared relations match the foreign keys', () => {
-  it('budgets 90 constraints across 103 PRAGMA rows', () => {
+  it('budgets 91 constraints across 105 PRAGMA rows', () => {
     const tables = db
       .selectValues(
         `SELECT name FROM sqlite_schema
@@ -225,8 +225,10 @@ describe('declared relations match the foreign keys', () => {
     // four constraints across seven PRAGMA rows.
     // CI-2a adds ten root-key constraints and three composite registry-child
     // constraints. The latter contribute six PRAGMA rows.
-    expect(constraintEdges(db)).toHaveLength(90);
-    expect(rowCount).toBe(103);
+    // GF-1 adds one composite Wizard-acquisition ownership edge, hence one
+    // constraint but two PRAGMA rows.
+    expect(constraintEdges(db)).toHaveLength(91);
+    expect(rowCount).toBe(105);
   });
 
   it('declares a relation for every foreign key, and a foreign key for every relation', () => {
@@ -235,13 +237,16 @@ describe('declared relations match the foreign keys', () => {
     expect(declaredEdges()).toEqual(constraintEdges(db));
   });
 
-  it('keeps all thirteen composite foreign keys composite', () => {
+  it('keeps all fourteen composite foreign keys composite', () => {
     const edges = declaredEdges();
     expect(edges).toContain(
       'character_class_levels: subclass_definition_id,class_definition_id -> subclass_definitions.id,class_definition_id',
     );
     expect(edges).toContain(
       'spell_selection_slots: source_instance_id,character_id -> character_source_instances.id,character_id',
+    );
+    expect(edges).toContain(
+      'wizard_spellbook_entries: source_instance_id,character_id -> character_source_instances.id,character_id',
     );
     // The third, and the one that matters most here: a relation declared on
     // `source_instance_id` alone would describe a constraint the database does

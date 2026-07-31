@@ -47,6 +47,7 @@ export interface AllocateAbilitiesCommand extends CommandBase {
 
 export interface SlotRestoreState {
   current_spell_version_id: number | null;
+  selection_acquired_at_class_level: number | null;
   selection_eligibility: SelectionEligibility;
   selection_invalid_reason: string | null;
   state: SlotState;

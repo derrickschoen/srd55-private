@@ -1,6 +1,6 @@
 {
   "format": "dnd-multiclass-spells-character-share",
-  "version": 13,
+  "version": 14,
   "character": {
     "name": "Mira Ashdown",
     "strength": 8,
@@ -49,34 +49,56 @@
       "ref": 0,
       "ruleKey": "2024:cleric-cantrips",
       "ordinal": 1,
-      "spellKey": "2024:guidance"
+      "spellKey": "2024:guidance",
+      "acquiredAtClassLevel": 1
     },
     {
       "ref": 0,
       "ruleKey": "2024:cleric-prepared-spells",
       "ordinal": 1,
       "spellKey": "2024:bless",
-      "keep": true
+      "keep": true,
+      "acquiredAtClassLevel": 1
     },
     {
       "ref": 1,
       "ruleKey": "2024:wizard-prepared-spells",
       "ordinal": 1,
       "spellKey": "2024:shield",
-      "keep": true
+      "keep": true,
+      "acquiredAtClassLevel": 5
     },
     {
       "ref": 2,
       "ruleKey": "2024:magic-initiate-wizard-level-1-known",
       "ordinal": 1,
       "spellKey": "2024:com.example.spells:starward-aegis",
-      "spellName": "Starward Aegis"
+      "spellName": "Starward Aegis",
+      "acquiredAtClassLevel": 1
     }
   ],
   "spellbook": [
-    "2024:detect-magic",
-    "2024:find-familiar",
-    "2024:shield"
+    {
+      "ref": 1,
+      "ruleKey": "wizard-spellbook",
+      "ordinal": 1,
+      "acquiredAtClassLevel": 1,
+      "spellKey": "2024:detect-magic"
+    },
+    {
+      "ref": 1,
+      "ruleKey": "wizard-spellbook",
+      "ordinal": 2,
+      "acquiredAtClassLevel": 1,
+      "spellKey": "2024:find-familiar"
+    },
+    {
+      "ref": 1,
+      "ruleKey": "wizard-spellbook",
+      "ordinal": 3,
+      "acquiredAtClassLevel": 1,
+      "spellKey": "2024:shield"
+    }
   ],
   "preferences": [
     {
