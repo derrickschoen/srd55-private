@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest';
 import {
   LEVEL_UP_PANEL,
   LEVEL_UP_RPC,
+  LEVEL_UP_STATE_KINDS,
   LEVEL_UP_STEP_ORDER,
   LEVEL_UP_WARNING_KEYS,
   levelUpPath,
   levelUpWarningPresentation,
   matchesLevelUpRoute,
+  type LevelUpClassOption,
 } from '../../../src/builder/contracts';
 
 describe('level-up wizard seam', () => {
@@ -32,6 +34,22 @@ describe('level-up wizard seam', () => {
         'queries.characters.levelUpPlannedEligibleSpells',
       preview: 'queries.characters.previewLevelUp',
     });
+  });
+
+  it('pins the state discriminants without restoring the old ASI-only shape', () => {
+    expect(LEVEL_UP_STATE_KINDS).toEqual({
+      notFound: 'not_found',
+      noHeldClass: 'no_held_class',
+      noGuideableClass: 'no_guideable_class',
+      maximumLevel: 'maximum_level',
+      ready: 'ready',
+    });
+
+    type HasLegacyTopLevelAbilityIncreases =
+      'ability_increases' extends keyof LevelUpClassOption ? true : false;
+    const hasLegacyTopLevelAbilityIncreases:
+      HasLegacyTopLevelAbilityIncreases = false;
+    expect(hasLegacyTopLevelAbilityIncreases).toBe(false);
   });
 
   it('round-trips only the exact positive-integer route', () => {
