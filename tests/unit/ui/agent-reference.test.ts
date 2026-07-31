@@ -751,6 +751,19 @@ describe('planner build reference JSON block', () => {
     }
     // Still genuinely absent: no column anywhere holds a language.
     expect(stateOf('languages')).toBe('not_modelled');
+    expect(factFor('languages')?.note).toContain(
+      'character sheet prints those words',
+    );
+    expect(factFor('languages')?.note).toContain('not modelled');
+
+    const backgroundFeatures = factFor('background features');
+    expect(backgroundFeatures?.state).toBe('partial');
+    expect(backgroundFeatures?.note).toContain(
+      'printed tool proficiency is retained',
+    );
+    expect(backgroundFeatures?.note).toContain(
+      'no tool proficiency fact or choice is modelled',
+    );
 
     // Subclass is neither absent nor complete: there are subclass tables and a
     // Subclass column on the page, covering 2 of 12 classes.

@@ -275,7 +275,15 @@ export const COVERAGE: readonly CoverageFact[] = [
       'type. NOTHING is derived from either, and neither is printed on the ' +
       'character sheet.',
   },
-  { concept: 'languages', state: 'not_modelled' },
+  {
+    concept: 'languages',
+    state: 'not_modelled',
+    note:
+      'No language fact or language-choice step exists. When stored ' +
+      'background notes or species trait prose mentions a language grant, ' +
+      'the character sheet prints those words and states that the grant is ' +
+      'not modelled; it does not interpret the prose as a proficiency.',
+  },
   {
     concept: 'equipment and weapons',
     state: 'partial',
@@ -296,10 +304,12 @@ export const COVERAGE: readonly CoverageFact[] = [
     concept: 'background features',
     state: 'partial',
     note:
-      'A background is recorded as the words it prints — its name, its three ' +
-      'ability scores, its feat, its two skill proficiencies, its tool and ' +
-      'its two equipment options. Every one of them is TEXT: none is counted ' +
-      'towards a skill modifier, an ability score, or a feat\u2019s effects.',
+      'A background\u2019s chosen ability increases, Origin feat and filled ' +
+      'skill grants are applied. Its printed tool proficiency is retained ' +
+      'and reproduced on the character sheet as feature text, but no tool ' +
+      'proficiency fact or choice is modelled and nothing mechanical is ' +
+      'derived from those words. Its recorded equipment package is handled ' +
+      'separately by the equipment step.',
   },
 ];
 
