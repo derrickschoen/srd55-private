@@ -35,12 +35,21 @@ import {
  *
  * - W-RPC-LIVE — `unregister-state-handler`: remove the LEVEL_UP_RPC.state
  *   handler; discovery/client dispatch and exact-param assertions fail.
- * - W-EPIC-SEAM — `ignore-epic-warning-in-state-projection`: omit the durable
- *   null feat-source row; the resolution-state assertions fail.
+ * - W-EPIC-SEAM — `short-circuit-deferred-to-resolution`: return the old
+ *   top-level resolution state; the simultaneous ready/resolution assertions
+ *   fail.
+ * - W-EPIC-DURABLE — `drop-resolution-from-terminal-states`: omit the pending
+ *   plan outside ready; the disabled-class and level-20 assertions fail.
+ * - W-EPIC-ABSENT — `invent-pending-epic-resolution`: return a plan without a
+ *   durable deferred row; the explicit null assertions fail.
  * - W-INCOMPLETE — `treat-any-warning-as-classless`: branch on warning count;
  *   the warned Wizard no longer returns ready and its repeated warning fails.
- * - W-HP-UNKNOWN — `fallback-hit-die-eight-in-state-projection`: insert d8
- *   arithmetic into the unknown arm; the absent-number assertions fail.
+ * - W-HP-DISABLED — `mark-missing-hit-die-guideable`: emit target/gains for a
+ *   null-die class; the terminal and absent-command-path assertions fail.
+ * - W-HP-MULTICLASS — `filter-disabled-class-from-ready`: omit null-die class
+ *   options when another class is guideable; the two-option assertion fails.
+ * - W-HP-NEGATIVE — `assume-disabled-sibling-has-d8`: derive a projected
+ *   maximum for the guideable class; its unknown/no-number assertions fail.
  * - W-HP-PENDING — `assume-feat-cannot-change-constitution`: emit a final HP
  *   maximum before the level-feat choice; the pending-choice assertion fails.
  * - W-HP-SCALED — `drop-level-scaled-effect-delta`: omit the existing
@@ -201,6 +210,7 @@ describe('level-up wizard state RPC', () => {
       kind: 'ready',
       character: { character_id: fighterId, total_level: 1 },
       class_options: [{
+        guideability: 'guideable',
         class_definition_id: fighterClassId,
         current_level: 1,
         target_level: 2,
@@ -217,6 +227,7 @@ describe('level-up wizard state RPC', () => {
           },
         },
       }],
+      pending_epic_resolution: null,
     });
 
     raiseClassLevelForTest(
@@ -280,8 +291,12 @@ describe('level-up wizard state RPC', () => {
     if (asiState.kind !== 'ready') {
       throw new Error('Fighter level 6 did not return ready state.');
     }
-    const occurrence = asiState.class_options[0]?.feat_occurrence;
-    expect(asiState.class_options[0]?.gains.hit_points).toMatchObject({
+    const asiOption = asiState.class_options[0];
+    if (asiOption?.guideability !== 'guideable') {
+      throw new Error('Fighter level 6 was not guideable.');
+    }
+    const occurrence = asiOption.feat_occurrence;
+    expect(asiOption.gains.hit_points).toMatchObject({
       kind: 'known',
       projected_maximum: {
         kind: 'pending_choice',
@@ -312,12 +327,13 @@ describe('level-up wizard state RPC', () => {
       kind: 'maximum_level',
       character: { character_id: fighterId, total_level: 20 },
       held_classes: [{ current_level: 20 }],
+      pending_epic_resolution: null,
     });
 
     rpc.close();
   });
 
-  it('keeps an unknown-hit-die class guideable while omitting every HP number', async () => {
+  it('makes an only unknown-hit-die class terminal with no command path', async () => {
     const characterId = createCharacter('Unknown Hit Die Fighter');
     const fighterId = enterClass(characterId, 'Fighter');
     harness.context.db.exec(
@@ -329,28 +345,149 @@ describe('level-up wizard state RPC', () => {
     const rpc = new RpcClient(transport);
     const state = await createQueriesClient(rpc).levelUpState(characterId);
     expect(state).toMatchObject({
-      kind: 'ready',
+      kind: 'no_guideable_class',
+      explanation:
+        'Fixed HP cannot be derived for any held class until its missing hit die is repaired or catalogued.',
       class_options: [{
+        guideability: 'disabled',
         class_definition_id: fighterId,
         hit_die: null,
-        gains: {
-          hit_points: {
-            kind: 'unknown',
-            reason: 'missing_hit_die',
-            missing_hit_dice: [{
-              class_definition_id: fighterId,
-              class_name: 'Fighter',
-            }],
+        reason: 'missing_hit_die',
+        explanation:
+          'Fixed HP cannot be derived until this class is repaired or catalogued with a hit die.',
+      }],
+      pending_epic_resolution: null,
+    });
+    if (state.kind !== 'no_guideable_class') {
+      throw new Error('Unknown hit die did not block guided level-up.');
+    }
+    const option = state.class_options[0];
+    expect(option).not.toHaveProperty('target_level');
+    expect(option).not.toHaveProperty('gains');
+    expect(option).not.toHaveProperty('applicable_steps');
+    rpc.close();
+  });
+
+  it('keeps known-die multiclass advancement ready and disables only the unknown class', async () => {
+    const characterId = createCharacter('Mixed Hit Dice');
+    const fighterId = enterClass(characterId, 'Fighter');
+    const wizardId = enterClass(characterId, 'Wizard');
+    harness.context.db.exec(
+      'DELETE FROM class_sheet_traits WHERE class_definition_id = ?',
+      [fighterId],
+    );
+
+    const transport = new RegistryTransport();
+    const rpc = new RpcClient(transport);
+    const state = await createQueriesClient(rpc).levelUpState(characterId);
+    expect(state).toMatchObject({
+      kind: 'ready',
+      class_options: [
+        {
+          guideability: 'disabled',
+          class_definition_id: fighterId,
+          reason: 'missing_hit_die',
+        },
+        {
+          guideability: 'guideable',
+          class_definition_id: wizardId,
+          target_level: 2,
+          gains: {
+            hit_points: {
+              kind: 'unknown',
+              reason: 'missing_hit_die',
+              missing_hit_dice: [{
+                class_definition_id: fighterId,
+                class_name: 'Fighter',
+              }],
+            },
           },
         },
-      }],
+      ],
+      pending_epic_resolution: null,
     });
     if (state.kind !== 'ready') {
-      throw new Error('Unknown hit die incorrectly blocked level-up.');
+      throw new Error('A known hit die did not keep multiclass level-up ready.');
     }
-    const hp = state.class_options[0]?.gains.hit_points;
-    expect(hp).not.toHaveProperty('fixed_class_base');
-    expect(hp).not.toHaveProperty('projected_maximum');
+    expect(state.class_options[0]).not.toHaveProperty('target_level');
+    expect(state.class_options[0]).not.toHaveProperty('gains');
+    const wizardOption = state.class_options.find(
+      (option) => option.class_definition_id === wizardId,
+    );
+    if (wizardOption?.guideability !== 'guideable') {
+      throw new Error('Wizard option was not guideable.');
+    }
+    expect(wizardOption.gains.hit_points).not.toHaveProperty(
+      'fixed_class_base',
+    );
+    expect(wizardOption.gains.hit_points).not.toHaveProperty(
+      'projected_maximum',
+    );
+    rpc.close();
+  });
+
+  it('keeps Boon resolution available when missing hit dice block class advancement', async () => {
+    const characterId = createCharacter('Deferred Unknown Hit Die');
+    const fighterId = enterClass(characterId, 'Fighter');
+    raiseClassLevelForTest(
+      harness.context.db,
+      characterId,
+      fighterId,
+      18,
+    );
+    new LevelUpClassCommand(
+      harness.context.db,
+      {
+        type: 'level_up_class',
+        class_definition_id: fighterId,
+        target_level: 19,
+        feat_choice: { kind: 'defer_epic_boon' },
+      },
+      integrity,
+    ).apply(characterId);
+    harness.context.db.exec(
+      'DELETE FROM class_sheet_traits WHERE class_definition_id = ?',
+      [fighterId],
+    );
+
+    const transport = new RegistryTransport();
+    const rpc = new RpcClient(transport);
+    const state = await createQueriesClient(rpc).levelUpState(characterId);
+    expect(state).toMatchObject({
+      kind: 'no_guideable_class',
+      class_options: [{
+        guideability: 'disabled',
+        class_definition_id: fighterId,
+        reason: 'missing_hit_die',
+      }],
+      pending_epic_resolution: {
+        deferred_choice: {
+          class_definition_id: fighterId,
+          class_level: 19,
+        },
+        warning: { key: 'epic_boon_deferred' },
+      },
+    });
+
+    const wizardId = enterClass(characterId, 'Wizard');
+    raiseClassLevelForTest(
+      harness.context.db,
+      characterId,
+      wizardId,
+      2,
+    );
+    await expect(
+      createQueriesClient(rpc).levelUpState(characterId),
+    ).resolves.toMatchObject({
+      kind: 'maximum_level',
+      character: { total_level: 21 },
+      pending_epic_resolution: {
+        deferred_choice: {
+          class_definition_id: fighterId,
+          class_level: 19,
+        },
+      },
+    });
     rpc.close();
   });
 
@@ -417,7 +554,7 @@ describe('level-up wizard state RPC', () => {
     }
   });
 
-  it('opens durable Epic Boon deferral as resolution first and clears it without changing level', async () => {
+  it('offers durable Epic Boon resolution and ordinary level-up at once', async () => {
     const characterId = createCharacter('Deferred Epic Fighter');
     const fighterId = enterClass(characterId, 'Fighter');
     raiseClassLevelForTest(
@@ -442,29 +579,67 @@ describe('level-up wizard state RPC', () => {
     const client = createQueriesClient(rpc);
     const deferred = await client.levelUpState(characterId);
     expect(deferred).toMatchObject({
-      kind: 'epic_resolution',
+      kind: 'ready',
       character: { character_id: characterId, total_level: 19 },
-      deferred_choice: {
+      class_options: [{
+        guideability: 'guideable',
         class_definition_id: fighterId,
-        class_name: 'Fighter',
-        class_level: 19,
+        current_level: 19,
+        target_level: 20,
+      }],
+      pending_epic_resolution: {
+        deferred_choice: {
+          class_definition_id: fighterId,
+          class_name: 'Fighter',
+          class_level: 19,
+        },
+        additional_deferred_count: 0,
+        warning: {
+          key: 'epic_boon_deferred',
+          title: 'Epic Boon choice still needed',
+        },
+        applicable_steps: ['epic_boon', 'review', 'complete'],
       },
-      additional_deferred_count: 0,
-      warning: {
-        key: 'epic_boon_deferred',
-        title: 'Epic Boon choice still needed',
-      },
-      applicable_steps: ['epic_boon', 'review', 'complete'],
     });
-    if (deferred.kind !== 'epic_resolution') {
-      throw new Error('Expected a durable Epic Boon resolution state.');
+    if (
+      deferred.kind !== 'ready' ||
+      deferred.pending_epic_resolution === null
+    ) {
+      throw new Error('Expected simultaneous level-up and Boon resolution.');
     }
-    expect(deferred.candidates).toHaveLength(7);
+    expect(deferred.pending_epic_resolution.candidates).toHaveLength(7);
     expect(
-      deferred.candidates.every(
+      deferred.pending_epic_resolution.candidates.every(
         (candidate) => candidate.definition.grouping === 'epic_boon',
       ),
     ).toBe(true);
+
+    new LevelUpClassCommand(
+      harness.context.db,
+      {
+        type: 'level_up_class',
+        class_definition_id: fighterId,
+        target_level: 20,
+      },
+      integrity,
+    ).apply(characterId);
+    const proceeded = await client.levelUpState(characterId);
+    expect(proceeded).toMatchObject({
+      kind: 'maximum_level',
+      character: { total_level: 20 },
+      pending_epic_resolution: {
+        deferred_choice: {
+          class_definition_id: fighterId,
+          class_level: 19,
+        },
+      },
+    });
+    if (
+      proceeded.kind !== 'maximum_level' ||
+      proceeded.pending_epic_resolution === null
+    ) {
+      throw new Error('Proceeding hid the durable Boon resolution option.');
+    }
 
     await new CharacterCommandExecutor(
       harness.context.db,
@@ -476,20 +651,24 @@ describe('level-up wizard state RPC', () => {
       command: {
         type: 'resolve_level_feat_choice',
         character_level_feat_choice_id:
-          deferred.deferred_choice.character_level_feat_choice_id,
+          proceeded.pending_epic_resolution.deferred_choice
+            .character_level_feat_choice_id,
         feat_choice: boonChoice('2024:feat:boon-of-fate'),
       },
     });
 
     const resolved = await client.levelUpState(characterId);
-    expect(resolved.kind).toBe('ready');
+    expect(resolved).toMatchObject({
+      kind: 'maximum_level',
+      pending_epic_resolution: null,
+    });
     expect(
       harness.context.db.scalar(
         `SELECT level FROM character_class_levels
          WHERE character_id = ? AND class_definition_id = ?`,
         [characterId, fighterId],
       ),
-    ).toBe(19);
+    ).toBe(20);
     rpc.close();
   });
 

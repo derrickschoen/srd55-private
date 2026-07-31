@@ -280,9 +280,9 @@ export type LevelUpPlannedEligibleSpellsResult =
 export const LEVEL_UP_STATE_KINDS = Object.freeze({
   notFound: 'not_found',
   noHeldClass: 'no_held_class',
+  noGuideableClass: 'no_guideable_class',
   maximumLevel: 'maximum_level',
   ready: 'ready',
-  epicResolution: 'epic_resolution',
 } as const);
 
 export type LevelUpStateKind =
@@ -403,12 +403,39 @@ export interface LevelUpSubclassChoice {
   readonly options: readonly LevelUpSubclassOption[];
 }
 
-export interface LevelUpClassOption extends LevelUpHeldClass {
+export interface LevelUpGuideableClassOption extends LevelUpHeldClass {
+  readonly guideability: 'guideable';
+  readonly hit_die: HitDieSize;
   readonly target_level: ClassLevel;
   readonly gains: LevelUpProjectedGains;
   readonly applicable_steps: readonly LevelUpStep[];
   readonly subclass_choice: LevelUpSubclassChoice | null;
   readonly feat_occurrence: LevelUpFeatOccurrence | null;
+}
+
+export interface LevelUpDisabledClassOption extends LevelUpHeldClass {
+  readonly guideability: 'disabled';
+  readonly hit_die: null;
+  readonly reason: 'missing_hit_die';
+  readonly explanation: string;
+}
+
+export type LevelUpClassOption =
+  | LevelUpGuideableClassOption
+  | LevelUpDisabledClassOption;
+
+export interface LevelUpPendingEpicResolution {
+  readonly deferred_choice: {
+    readonly character_level_feat_choice_id:
+      CharacterLevelFeatChoiceId;
+    readonly class_definition_id: ClassDefinitionId;
+    readonly class_name: string;
+    readonly class_level: ClassLevel;
+  };
+  readonly additional_deferred_count: number;
+  readonly warning: LevelUpWarningPresentation;
+  readonly candidates: readonly LevelUpFeatCandidate[];
+  readonly applicable_steps: readonly ['epic_boon', 'review', 'complete'];
 }
 
 export type LevelUpStateResult =
@@ -421,9 +448,19 @@ export type LevelUpStateResult =
       readonly character: LevelUpCharacterSummary;
     }
   | {
+      readonly kind: 'no_guideable_class';
+      readonly character: LevelUpCharacterSummary & {
+        readonly total_level: CharacterLevel;
+      };
+      readonly explanation: string;
+      readonly class_options: readonly LevelUpDisabledClassOption[];
+      readonly pending_epic_resolution: LevelUpPendingEpicResolution | null;
+    }
+  | {
       readonly kind: 'maximum_level';
       readonly character: LevelUpCharacterSummary;
       readonly held_classes: readonly LevelUpHeldClass[];
+      readonly pending_epic_resolution: LevelUpPendingEpicResolution | null;
     }
   | {
       readonly kind: 'ready';
@@ -431,23 +468,7 @@ export type LevelUpStateResult =
         readonly total_level: CharacterLevel;
       };
       readonly class_options: readonly LevelUpClassOption[];
-    }
-  | {
-      readonly kind: 'epic_resolution';
-      readonly character: LevelUpCharacterSummary & {
-        readonly total_level: CharacterLevel;
-      };
-      readonly deferred_choice: {
-        readonly character_level_feat_choice_id:
-          CharacterLevelFeatChoiceId;
-        readonly class_definition_id: ClassDefinitionId;
-        readonly class_name: string;
-        readonly class_level: ClassLevel;
-      };
-      readonly additional_deferred_count: number;
-      readonly warning: LevelUpWarningPresentation;
-      readonly candidates: readonly LevelUpFeatCandidate[];
-      readonly applicable_steps: readonly ['epic_boon', 'review', 'complete'];
+      readonly pending_epic_resolution: LevelUpPendingEpicResolution | null;
     };
 
 export const LEVEL_UP_RPC = Object.freeze({
