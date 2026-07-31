@@ -1082,7 +1082,7 @@ describe('minimal character sharing', () => {
         spellKey: unknownKey,
         spellName: 'Starward Aegis',
       })),
-      spellbook: [unknownKey],
+      spellbook: [{ spellKey: unknownKey, spellName: 'Starward Aegis' }],
       preferences: [{ spellKey: unknownKey, favourite: true }],
       loadouts: [
         {
@@ -1447,7 +1447,7 @@ const LEGACY_STYLE_DOCUMENT: CharacterShareDocument = validateShareDocument({
   classes: [{ id: 0, classKey: '2024:class:wizard', level: 3, start: 1 }],
   sources: [{ id: 1, type: 'feat', key: '2024:feat:alert', acquired: 2 }],
   selections: [],
-  spellbook: ['2024:shield'],
+  spellbook: [{ spellKey: '2024:shield' }],
   preferences: [],
   overrides: [],
 });
@@ -2118,7 +2118,7 @@ describe('B2 contribution sharing', () => {
 });
 
 describe('D83 ability override sharing', () => {
-  it('round-trips source- and item-owned SET payloads through wire v13', async () => {
+  it('round-trips source- and item-owned SET payloads through wire v14', async () => {
     const source = await database();
     const characterId = source.exec(
       `INSERT INTO characters (name, strength)
@@ -2158,7 +2158,7 @@ describe('D83 ability override sharing', () => {
     const decoded = await decodeShareFragment(
       await encodeShareFragment(exportCharacterShare(source, characterId)),
     );
-    expect(decoded.version).toBe(13);
+    expect(decoded.version).toBe(14);
     expect(decoded.effects).toMatchObject([
       {
         kind: 'ability_override',

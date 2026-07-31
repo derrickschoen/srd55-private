@@ -1,10 +1,16 @@
 import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DatabaseContext } from '../../../src/db/database';
+import { assignSpellSelection } from '../../../src/eligibility/spell-selection-assignment';
 import { GrantRuleSlotGenerator } from '../../../src/grants/grant-rule-slot-generator';
 import { openTestDatabase } from '../../helpers/open-db';
 
-describe('simplified Wizard acquisitions', () => {
+/**
+ * Strict superset replacement for the pre-GF-1 config-acquisition tests: it
+ * retains their identity, history, and eligibility controls while proving the
+ * addressable nullable acquisition model that replaced config authority.
+ */
+describe('planned Wizard acquisitions', () => {
   let connection: Database;
   let db: DatabaseContext;
   let generator: GrantRuleSlotGenerator;
@@ -47,9 +53,23 @@ describe('simplified Wizard acquisitions', () => {
     return versionId;
   }
 
+  function acquisitionRule(count: number): Record<string, unknown> {
+    return {
+      kind: 'spellbook_acquisition',
+      rule_key: 'wizard-spellbook',
+      count,
+      initial_count: 6,
+      count_per_level: 2,
+      bucket: 'spellbook',
+      list: 'Wizard',
+      level_min: 1,
+      level_max: 2,
+    };
+  }
+
   function wizardSource(
-    acquisitions: unknown,
-  ): { characterId: number; sourceId: number } {
+    count: number,
+  ): { characterId: number; definitionId: number; sourceId: number } {
     const characterId = db.exec(
       "INSERT INTO characters (name) VALUES ('Wizard Acquisition')",
     ).lastInsertId;
@@ -60,13 +80,7 @@ describe('simplified Wizard acquisitions', () => {
       [
         `wizard-source:${crypto.randomUUID()}`,
         JSON.stringify([
-          {
-            kind: 'spellbook_acquisition',
-            rule_key: 'wizard-spellbook',
-            bucket: 'spellbook',
-            list: 'Wizard',
-            acquisitions_config: 'wizard_spellbook_acquisitions',
-          },
+          acquisitionRule(count),
           {
             kind: 'capability',
             rule_key: 'ritual-adept',
@@ -88,171 +102,154 @@ describe('simplified Wizard acquisitions', () => {
         crypto.randomUUID(),
         definitionId,
         JSON.stringify({
-          wizard_spellbook_acquisitions: acquisitions,
+          class_level: 3,
+          // Legacy data is deliberately ignored by the planner.
+          wizard_spellbook_acquisitions: [{ spell_version_id: 999 }],
         }),
       ],
     ).lastInsertId;
-    return { characterId, sourceId };
+    return { characterId, definitionId, sourceId };
   }
 
-  it('persists a stable per-character spell set without minting slots or removing history', () => {
-    const firstId = spell('2024:first-book', { list: 'Wizard' });
-    const secondId = spell('2024:second-book', { list: 'Wizard' });
-    const fixture = wizardSource([
-      { spell_version_id: firstId },
-      { spell_version_key: '2024:second-book' },
-      { spell_version_id: firstId },
-    ]);
+  it('mints stable nullable logical rows with rule, ordinal, and acquisition-level provenance', () => {
+    const fixture = wizardSource(10);
 
     generator.generateForSource(fixture.sourceId);
     const before = db.allRaw(
-      `SELECT id, character_id, spell_version_id
-       FROM wizard_spellbook_entries ORDER BY id`,
+      `SELECT id, source_instance_id, rule_key, ordinal,
+              acquired_at_class_level, spell_version_id, state
+       FROM wizard_spellbook_entries ORDER BY ordinal`,
     );
-    expect(before).toEqual([
-      {
-        id: expect.any(Number),
-        character_id: fixture.characterId,
-        spell_version_id: firstId,
-      },
-      {
-        id: expect.any(Number),
-        character_id: fixture.characterId,
-        spell_version_id: secondId,
-      },
+    expect(before).toHaveLength(10);
+    expect(before.map((row) => row.acquired_at_class_level)).toEqual([
+      1, 1, 1, 1, 1, 1, 2, 2, 3, 3,
     ]);
+    expect(before[0]).toMatchObject({
+      source_instance_id: fixture.sourceId,
+      rule_key: 'wizard-spellbook',
+      ordinal: 1,
+      spell_version_id: null,
+      state: 'active',
+    });
     expect(db.scalar('SELECT count(*) FROM spell_selection_slots')).toBe(0);
-    expect(
-      generator.activeRulesForSource(fixture.sourceId).map(
-        (rule) => rule.kind,
-      ),
-    ).toEqual(['spellbook_acquisition', 'capability']);
 
-    db.exec(
-      `UPDATE character_source_instances SET config = ?
-       WHERE id = ?`,
-      [
-        JSON.stringify({ wizard_spellbook_acquisitions: [] }),
-        fixture.sourceId,
-      ],
-    );
     generator.generateForSource(fixture.sourceId);
     expect(
       db.allRaw(
-        `SELECT id, character_id, spell_version_id
-         FROM wizard_spellbook_entries ORDER BY id`,
+        `SELECT id, source_instance_id, rule_key, ordinal,
+                acquired_at_class_level, spell_version_id, state
+         FROM wizard_spellbook_entries ORDER BY ordinal`,
       ),
     ).toEqual(before);
   });
 
-  it('rejects bookkeeping fields and rolls back acquisitions earlier in the same regeneration', () => {
-    const existingId = spell('2024:existing-book', { list: 'Wizard' });
-    const newId = spell('2024:new-book', { list: 'Wizard' });
-    const rejectedId = spell('2024:rejected-book', { list: 'Wizard' });
-    const fixture = wizardSource([
-      { spell_version_id: existingId },
-    ]);
+  it('retains a selected spell while shrinking, orphaning, and reviving the identical acquisition', () => {
+    const selectedId = spell('2024:selected-book', { list: 'Wizard' });
+    const fixture = wizardSource(3);
     generator.generateForSource(fixture.sourceId);
-    const existingEntry = db.oneRaw(
-      `SELECT id, spell_version_id FROM wizard_spellbook_entries`,
+    const entryId = Number(
+      db.scalar(
+        `SELECT id FROM wizard_spellbook_entries
+         WHERE source_instance_id = ? AND ordinal = 3`,
+        [fixture.sourceId],
+      ),
     );
+    assignSpellSelection(db, {
+      address: { kind: 'spellbook_acquisition', id: entryId },
+      character_id: fixture.characterId,
+      spell_version_id: selectedId,
+    });
 
     db.exec(
-      `UPDATE character_source_instances SET config = ?
-       WHERE id = ?`,
+      'UPDATE feat_definitions SET grant_rules = ? WHERE id = ?',
       [
-        JSON.stringify({
-          wizard_spellbook_acquisitions: [
-            { spell_version_id: existingId },
-            { spell_version_id: newId },
-            {
-              spell_version_id: rejectedId,
-              acquisition: 'copied',
-              copy_cost_gp: 50,
-              copy_time_hours: 2,
-              notes: 'Removed metadata',
-            },
-          ],
-        }),
-        fixture.sourceId,
+        JSON.stringify([acquisitionRule(2)]),
+        fixture.definitionId,
       ],
     );
+    generator.generateForSource(fixture.sourceId);
+    expect(
+      db.oneRaw(
+        `SELECT id, spell_version_id, acquired_at_class_level, state
+         FROM wizard_spellbook_entries WHERE id = ?`,
+        [entryId],
+      ),
+    ).toEqual({
+      id: entryId,
+      spell_version_id: selectedId,
+      acquired_at_class_level: 1,
+      state: 'orphaned',
+    });
 
-    expect(() => generator.generateForSource(fixture.sourceId)).toThrow(
-      "Spellbook rule 'wizard-spellbook' acquisition 2 contains unsupported bookkeeping fields: acquisition, copy_cost_gp, copy_time_hours, notes.",
+    db.exec(
+      'UPDATE feat_definitions SET grant_rules = ? WHERE id = ?',
+      [
+        JSON.stringify([acquisitionRule(3)]),
+        fixture.definitionId,
+      ],
     );
+    generator.generateForSource(fixture.sourceId);
     expect(
-      db.allRaw(
-        `SELECT id, spell_version_id
-         FROM wizard_spellbook_entries ORDER BY id`,
+      db.oneRaw(
+        `SELECT id, spell_version_id, acquired_at_class_level, state
+         FROM wizard_spellbook_entries WHERE id = ?`,
+        [entryId],
       ),
-    ).toEqual([existingEntry]);
-    expect(
-      db.scalar(
-        `SELECT count(*) FROM wizard_spellbook_entries
-         WHERE spell_version_id IN (?, ?)`,
-        [newId, rejectedId],
-      ),
-    ).toBe(0);
+    ).toEqual({
+      id: entryId,
+      spell_version_id: selectedId,
+      acquired_at_class_level: 1,
+      state: 'active',
+    });
   });
 
-  it('rejects new inactive or off-list acquisitions but preserves an existing inactive entry', () => {
+  it('shares the strict constraint writer and leaves an invalid attempt byte-for-row unchanged', () => {
+    const validId = spell('2024:valid-book', { list: 'Wizard' });
+    const offListId = spell('2024:off-list-book', { list: 'Cleric' });
     const inactiveId = spell('2024:inactive-book', {
       list: 'Wizard',
       active: false,
     });
-    const offListId = spell('2024:off-list-book', {
-      list: 'Cleric',
+    const fixture = wizardSource(1);
+    generator.generateForSource(fixture.sourceId);
+    const entryId = Number(
+      db.scalar('SELECT id FROM wizard_spellbook_entries'),
+    );
+    const before = db.oneRaw(
+      'SELECT * FROM wizard_spellbook_entries WHERE id = ?',
+      [entryId],
+    );
+
+    for (const rejectedId of [offListId, inactiveId]) {
+      expect(() =>
+        assignSpellSelection(db, {
+          address: { kind: 'spellbook_acquisition', id: entryId },
+          character_id: fixture.characterId,
+          spell_version_id: rejectedId,
+        }),
+      ).toThrow(/Selected spell/);
+      expect(
+        db.oneRaw(
+          'SELECT * FROM wizard_spellbook_entries WHERE id = ?',
+          [entryId],
+        ),
+      ).toEqual(before);
+    }
+
+    assignSpellSelection(db, {
+      address: { kind: 'spellbook_acquisition', id: entryId },
+      character_id: fixture.characterId,
+      spell_version_id: validId,
     });
-    const fixture = wizardSource([
-      { spell_version_id: inactiveId },
-    ]);
-
-    expect(() => generator.generateForSource(fixture.sourceId)).toThrow(
-      "Spellbook rule 'wizard-spellbook' acquisition 0 references an inactive spell version.",
-    );
-    expect(db.scalar('SELECT count(*) FROM wizard_spellbook_entries')).toBe(0);
-
-    db.exec('UPDATE spell_versions SET is_active = 1 WHERE id = ?', [
-      inactiveId,
-    ]);
-    generator.generateForSource(fixture.sourceId);
-    const entry = db.oneRaw(
-      `SELECT id, character_id, spell_version_id
-       FROM wizard_spellbook_entries`,
-    );
-    db.exec('UPDATE spell_versions SET is_active = 0 WHERE id = ?', [
-      inactiveId,
-    ]);
-    generator.generateForSource(fixture.sourceId);
     expect(
       db.oneRaw(
-        `SELECT id, character_id, spell_version_id
-         FROM wizard_spellbook_entries`,
+        `SELECT spell_version_id, selection_eligibility
+         FROM wizard_spellbook_entries WHERE id = ?`,
+        [entryId],
       ),
-    ).toEqual(entry);
-
-    db.exec(
-      `UPDATE character_source_instances SET config = ?
-       WHERE id = ?`,
-      [
-        JSON.stringify({
-          wizard_spellbook_acquisitions: [
-            { spell_version_id: inactiveId },
-            { spell_version_id: offListId },
-          ],
-        }),
-        fixture.sourceId,
-      ],
-    );
-    expect(() => generator.generateForSource(fixture.sourceId)).toThrow(
-      "Spellbook rule 'wizard-spellbook' acquisition 1 is not on the Wizard list.",
-    );
-    expect(
-      db.allRaw(
-        `SELECT id, character_id, spell_version_id
-         FROM wizard_spellbook_entries`,
-      ),
-    ).toEqual([entry]);
+    ).toEqual({
+      spell_version_id: validId,
+      selection_eligibility: 'valid',
+    });
   });
 });

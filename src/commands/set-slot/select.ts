@@ -1,3 +1,5 @@
+import { assignSpellSelection } from '../../eligibility/spell-selection-assignment';
+import type { SlotRestoreState } from '../../domain/command-contracts';
 import type { SpellSelectionEligibility } from '../../eligibility/spell-selection-eligibility';
 import {
   SetSlotModeCommand,
@@ -8,16 +10,8 @@ import {
 export class SelectSlotCommand extends SetSlotModeCommand<'select'> {
   protected updates(
     slot: StoredSlot,
-    eligibility: SpellSelectionEligibility,
+    _eligibility: SpellSelectionEligibility,
   ): SlotUpdates {
-    const result = eligibility.evaluate(
-      slot,
-      this.payload.spell_version_id,
-    );
-    if (result.status !== 'valid') {
-      throw new Error(result.reason ?? 'Spell selection is not valid.');
-    }
-
     return {
       current_spell_version_id: this.payload.spell_version_id,
       selection_eligibility: 'valid',
@@ -25,5 +19,20 @@ export class SelectSlotCommand extends SetSlotModeCommand<'select'> {
       state: slot.state === 'kept_override' ? 'active' : slot.state,
       override_note: null,
     };
+  }
+
+  protected persist(
+    slot: StoredSlot,
+    _next: SlotRestoreState,
+    now: string,
+    eligibility: SpellSelectionEligibility,
+  ): void {
+    assignSpellSelection(this.db, {
+      address: { kind: 'slot_selection', id: slot.id },
+      character_id: slot.character_id,
+      spell_version_id: this.payload.spell_version_id,
+      now,
+      eligibility,
+    });
   }
 }

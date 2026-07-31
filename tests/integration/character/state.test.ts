@@ -250,12 +250,12 @@ describe('capture and deterministic diff', () => {
       'character',
       ...CHARACTER_STATE_TABLES,
     ]);
-    // a7-v12 is the version that carries D86 item quantities.
+    // a7-v13 is the version that carries GF-1 spell acquisition provenance.
     // Written out rather than compared against the exported constant: a version
     // identifier is a wire fact that other stored data is matched against, so a
     // test that reads it from the module under test could never notice it
     // changing.
-    expect(snapshot.schema_version).toBe('a7-v12');
+    expect(snapshot.schema_version).toBe('a7-v13');
     expect(Object.keys(snapshot.character)).toEqual(CHARACTER_STATE_COLUMNS);
     expect(snapshot.character).toEqual({
       name: 'Snapshot Hero',
@@ -432,8 +432,16 @@ describe('capture and deterministic diff', () => {
       ],
       character_source_instances: [],
       spell_selection_slots: [
-        { id: 12, state: 'active' },
-        { id: 6, state: 'active' },
+        {
+          id: 12,
+          state: 'active',
+          selection_acquired_at_class_level: null,
+        },
+        {
+          id: 6,
+          state: 'active',
+          selection_acquired_at_class_level: null,
+        },
       ],
       wizard_spellbook_entries: [{ id: 8, spell_version_id: 10 }],
       warning_acknowledgements: [],
@@ -480,13 +488,21 @@ describe('capture and deterministic diff', () => {
         entity_type: 'spell_selection_slots',
         entity_id: 6,
         previous_value: null,
-        new_value: { id: 6, state: 'active' },
+        new_value: {
+          id: 6,
+          state: 'active',
+          selection_acquired_at_class_level: null,
+        },
       },
       {
         entity_type: 'spell_selection_slots',
         entity_id: 12,
         previous_value: null,
-        new_value: { id: 12, state: 'active' },
+        new_value: {
+          id: 12,
+          state: 'active',
+          selection_acquired_at_class_level: null,
+        },
       },
     ]);
   });
@@ -826,7 +842,7 @@ describe('restoring a snapshot written by an older build', () => {
     // oversight: a current snapshot DOES speak for weapons, so restoring it
     // removes one added afterwards.
     const snapshot = mutableCapture();
-    expect(snapshot.schema_version).toBe('a7-v12');
+    expect(snapshot.schema_version).toBe('a7-v13');
     db.exec(
       `INSERT INTO character_weapons (character_id, name)
        VALUES (?, 'Bought since')`,

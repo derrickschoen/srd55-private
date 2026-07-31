@@ -45,6 +45,7 @@ import {
   materialCostKinds,
   rulesEditions,
   selectionEligibilities,
+  spellbookAcquisitionStates,
   skillGrantStates,
   slotBuckets,
   skills,
@@ -263,6 +264,7 @@ const sourceTypeEnum = z.enum(domainSourceTypes);
 const slotBucketEnum = z.enum(slotBuckets);
 const slotStateEnum = z.enum(slotStates);
 const skillGrantStateEnum = z.enum(skillGrantStates);
+const spellbookAcquisitionStateEnum = z.enum(spellbookAcquisitionStates);
 const selectionEligibilityEnum = z.enum(selectionEligibilities);
 const weaponMasteryPropertyEnum = z.enum(weaponMasteryProperties);
 const weaponMasteryGrantEnum = z.enum(weaponMasteryGrants);
@@ -399,6 +401,7 @@ export const COLUMN_REFINEMENTS = {
   slotBucketEnum,
   slotStateEnum,
   skillGrantStateEnum,
+  spellbookAcquisitionStateEnum,
   selectionEligibilityEnum,
   weaponMasteryPropertyEnum,
   weaponMasteryGrantEnum,
@@ -824,11 +827,24 @@ const REFINEMENTS = {
   'spell_selection_slots.selection_collection': sqlText,
   'spell_selection_slots.selection_eligibility': selectionEligibilityEnum,
   'spell_selection_slots.selection_invalid_reason': sqlText,
+  'spell_selection_slots.selection_acquired_at_class_level': classLevel,
 
   // --- wizard_spellbook_entries -------------------------------------------
   'wizard_spellbook_entries.id': positiveInt,
   'wizard_spellbook_entries.character_id': positiveInt,
+  'wizard_spellbook_entries.source_instance_id': positiveInt,
+  'wizard_spellbook_entries.rule_key': sqlText,
+  'wizard_spellbook_entries.ordinal': positiveInt,
+  'wizard_spellbook_entries.acquired_at_class_level': classLevel,
   'wizard_spellbook_entries.spell_version_id': positiveInt,
+  'wizard_spellbook_entries.spell_level_min': nonNegativeInt,
+  'wizard_spellbook_entries.spell_level_max': nonNegativeInt,
+  'wizard_spellbook_entries.state': spellbookAcquisitionStateEnum,
+  'wizard_spellbook_entries.orphan_reason_code': sqlText,
+  'wizard_spellbook_entries.orphaned_at': sqlTimestamp,
+  'wizard_spellbook_entries.selection_eligibility':
+    selectionEligibilityEnum,
+  'wizard_spellbook_entries.selection_invalid_reason': sqlText,
   'wizard_spellbook_entries.created_at': sqlTimestamp,
   'wizard_spellbook_entries.updated_at': sqlTimestamp,
 

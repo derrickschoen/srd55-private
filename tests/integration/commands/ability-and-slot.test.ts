@@ -151,7 +151,8 @@ async function fixture(): Promise<Fixture> {
 
 function storedSlot(db: DatabaseContext, slotId: number) {
   return db.oneRaw(
-    `SELECT current_spell_version_id, selection_eligibility,
+    `SELECT current_spell_version_id, selection_acquired_at_class_level,
+            selection_eligibility,
             selection_invalid_reason, state, override_note, updated_at
      FROM spell_selection_slots
      WHERE id = ?`,
@@ -286,6 +287,7 @@ describe('set_slot select and inverse', () => {
 
     expect(storedSlot(test.db, test.slotId)).toEqual({
       current_spell_version_id: test.replacementSpellId,
+      selection_acquired_at_class_level: null,
       selection_eligibility: 'valid',
       selection_invalid_reason: null,
       state: 'active',
@@ -321,6 +323,7 @@ describe('set_slot select and inverse', () => {
     const restore = await applyRestore(test, test.characterId, inverse);
     expect(storedSlot(test.db, test.slotId)).toEqual({
       current_spell_version_id: test.originalSpellId,
+      selection_acquired_at_class_level: null,
       selection_eligibility: 'valid',
       selection_invalid_reason: null,
       state: 'kept_override',
@@ -383,6 +386,7 @@ describe('set_slot clear and keep_override', () => {
     clear.apply(test.characterId);
     expect(storedSlot(test.db, test.slotId)).toEqual({
       current_spell_version_id: null,
+      selection_acquired_at_class_level: null,
       selection_eligibility: 'unselected',
       selection_invalid_reason: null,
       state: 'active',
@@ -428,6 +432,7 @@ describe('set_slot clear and keep_override', () => {
     keep.apply(test.characterId);
     expect(storedSlot(test.db, test.slotId)).toEqual({
       current_spell_version_id: test.originalSpellId,
+      selection_acquired_at_class_level: null,
       selection_eligibility: 'valid',
       selection_invalid_reason: null,
       state: 'kept_override',
@@ -436,6 +441,7 @@ describe('set_slot clear and keep_override', () => {
     });
     expect((await keep.inverse()).state).toEqual({
       current_spell_version_id: test.originalSpellId,
+      selection_acquired_at_class_level: null,
       selection_eligibility: 'valid',
       selection_invalid_reason: null,
       state: 'active',
@@ -494,6 +500,7 @@ describe('set_slot restore revalidation', () => {
 
     expect(storedSlot(test.db, test.slotId)).toEqual({
       current_spell_version_id: test.legacySpellId,
+      selection_acquired_at_class_level: null,
       selection_eligibility: 'invalid',
       selection_invalid_reason: eligibilityInvalidReasons.legacy,
       state: 'active',
@@ -506,6 +513,7 @@ describe('set_slot restore revalidation', () => {
     const test = await fixture();
     const restoreState = {
       current_spell_version_id: test.originalSpellId,
+      selection_acquired_at_class_level: null,
       selection_eligibility: 'valid',
       selection_invalid_reason: null,
       state: 'kept_override',
@@ -551,6 +559,7 @@ describe('set_slot restore revalidation', () => {
 
       expect(storedSlot(test.db, test.slotId)).toEqual({
         current_spell_version_id: test.originalSpellId,
+        selection_acquired_at_class_level: null,
         selection_eligibility: 'invalid',
         selection_invalid_reason: reason,
         state: 'orphaned',
@@ -615,6 +624,7 @@ describe('set_slot ownership, lock, and inactive inverse guards', () => {
         mode: 'restore',
         state: {
           current_spell_version_id: test.inactiveSpellId,
+          selection_acquired_at_class_level: null,
           selection_eligibility: 'valid',
           selection_invalid_reason: null,
           state: 'active',

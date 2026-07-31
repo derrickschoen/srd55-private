@@ -764,6 +764,8 @@ test('undo restores the prior spell selection', async ({ page }) => {
     mode: 'restore',
     state: {
       current_spell_version_id: workspaceImage.ids.originalSpell,
+      selection_acquired_at_class_level:
+        original.selection_acquired_at_class_level,
       selection_eligibility: original.selection_eligibility,
       selection_invalid_reason: original.selection_invalid_reason,
       state: original.state,
@@ -907,9 +909,9 @@ test('round-trips a named save point through the mutation path', async ({
   )[0]!;
   expect(point).toMatchObject({
     label: 'Before experiment',
-    // a7-v12 adds character_items.quantity; a7-v11 remains frozen as the
-    // first snapshot version that carried fixed attunement slots.
-    schema_version: 'a7-v12',
+    // a7-v13 adds spell acquisition provenance; a7-v12 remains frozen before
+    // the slot and Wizard spellbook row shapes changed.
+    schema_version: 'a7-v13',
   });
   const pointSnapshot = JSON.parse(String(point.snapshot)) as {
     character_items: Array<Record<string, unknown>>;
@@ -1181,7 +1183,7 @@ test('undoes a structural class change through its snapshot inverse', async ({
   );
   expect(changed.inverse).toMatchObject({
     type: 'restore_snapshot',
-    snapshot: { schema_version: 'a7-v12' },
+    snapshot: { schema_version: 'a7-v13' },
     integrity: expect.any(String),
   });
   await execute(
@@ -1550,7 +1552,7 @@ test('updates a standalone Magic Initiate source and regenerates its slot constr
   ).toMatchObject({ revision: 2 });
 });
 
-test('adds a class source through the command with its level, DSL slots, and spellbook atomically', async ({
+test('adds a class source with planned slots and addressed spellbook acquisitions atomically (strict superset of the replaced config-acquisition case)', async ({
   page,
 }) => {
   await install(page, workspaceImage);
@@ -1608,6 +1610,10 @@ test('adds a class source through the command with its level, DSL slots, and spe
       await rows(page, 'spell_selection_slots'),
       character.id,
     ),
+    spellbook: forCharacter(
+      await rows(page, 'wizard_spellbook_entries'),
+      character.id,
+    ),
   };
   const duplicate = await rejectedRpc(page, 'commands.execute', {
     character_id: character.id,
@@ -1634,6 +1640,10 @@ test('adds a class source through the command with its level, DSL slots, and spe
       await rows(page, 'spell_selection_slots'),
       character.id,
     ),
+    spellbook: forCharacter(
+      await rows(page, 'wizard_spellbook_entries'),
+      character.id,
+    ),
   }).toEqual(afterSorcerer);
 
   const invalid = await rejectedRpc(page, 'commands.execute', {
@@ -1644,12 +1654,10 @@ test('adds a class source through the command with its level, DSL slots, and spe
       type: 'add_source',
       source_type: 'class',
       source_definition_id: workspaceImage.ids.wizardClass,
-      config: { level: 1, wizard_spellbook_acquisitions: [{}] },
+      config: { level: 20 },
     },
   });
-  expect(invalid.message).toContain(
-    "Spellbook rule 'wizard-spellbook' acquisition 0",
-  );
+  expect(invalid.message).toBe('A character cannot exceed level 20.');
   expect({
     levels: forCharacter(
       await rows(page, 'character_class_levels'),
@@ -1663,6 +1671,10 @@ test('adds a class source through the command with its level, DSL slots, and spe
       await rows(page, 'spell_selection_slots'),
       character.id,
     ),
+    spellbook: forCharacter(
+      await rows(page, 'wizard_spellbook_entries'),
+      character.id,
+    ),
   }).toEqual(afterSorcerer);
 
   await execute(
@@ -1673,12 +1685,7 @@ test('adds a class source through the command with its level, DSL slots, and spe
       type: 'add_source',
       source_type: 'class',
       source_definition_id: workspaceImage.ids.wizardClass,
-      config: {
-        level: 1,
-        wizard_spellbook_acquisitions: [
-          { spell_version_key: '2024:parity-shield' },
-        ],
-      },
+      config: { level: 1 },
     },
     191,
   );
@@ -1691,17 +1698,40 @@ test('adds a class source through the command with its level, DSL slots, and spe
   expect(wizardSource).toMatchObject({
     display_name: 'Wizard 1',
     acquired_at_character_level: 2,
-    config:
-      '{"spellcasting_ability":"intelligence","wizard_spellbook_acquisitions":[{"spell_version_key":"2024:parity-shield"}]}',
+    config: '{"spellcasting_ability":"intelligence"}',
   });
-  expect(forCharacter(
+  const acquisitions = forCharacter(
     await rows(page, 'wizard_spellbook_entries'),
     character.id,
-  )).toEqual([
-    expect.objectContaining({
-      spell_version_id: workspaceImage.ids.acquisitionSpell,
-    }),
-  ]);
+  );
+  expect(acquisitions).toHaveLength(6);
+  expect(
+    acquisitions.map((entry) => ({
+      source_instance_id: entry.source_instance_id,
+      rule_key: entry.rule_key,
+      ordinal: entry.ordinal,
+      acquired_at_class_level: entry.acquired_at_class_level,
+      spell_version_id: entry.spell_version_id,
+      spell_level_min: entry.spell_level_min,
+      spell_level_max: entry.spell_level_max,
+      allowed_spell_lists: entry.allowed_spell_lists,
+      state: entry.state,
+      selection_eligibility: entry.selection_eligibility,
+    })),
+  ).toEqual(
+    [1, 2, 3, 4, 5, 6].map((ordinal) => ({
+      source_instance_id: wizardSource.id,
+      rule_key: 'wizard-spellbook',
+      ordinal,
+      acquired_at_class_level: 1,
+      spell_version_id: null,
+      spell_level_min: 1,
+      spell_level_max: 1,
+      allowed_spell_lists: '["Wizard"]',
+      state: 'active',
+      selection_eligibility: 'unselected',
+    })),
+  );
   expect(
     new Set(
       (await rows(page, 'change_log'))

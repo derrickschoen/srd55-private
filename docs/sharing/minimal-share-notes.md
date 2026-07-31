@@ -5,10 +5,12 @@ logical document used by the format benchmark and by an executable validator
 test. It contains catalog identifiers, user choices, and fallback names, but no
 spell rules text.
 
-The specimen follows the live v4 logical contract:
+The specimen follows the live v14 logical contract:
 
 - share-local numeric `id` values identify classes and standalone sources;
 - selections use `ref` to point into that shared identifier space;
+- selections and Wizard acquisitions carry their class-level provenance;
+- spellbook entries are addressable acquisitions and may be unfilled;
 - `acquired` is a numeric character-level position;
 - a standalone source may carry its fallback display `name`;
 - unknown-spell metadata is deduplicated in the root `placeholders` list;
@@ -26,7 +28,7 @@ The specimen follows the live v4 logical contract:
 
 The object form is intentionally keyed and readable. Production links do not
 embed this keyed JSON directly: the codec validates it, maps it to the
-versioned positional v4 layout, serializes compact JSON, compresses with gzip,
+versioned positional v14 layout, serializes compact JSON, compresses with gzip,
 and uses unpadded base64url in the fragment.
 
 ## Why each populated section remains
@@ -38,7 +40,7 @@ and uses unpadded base64url in the fragment.
 | `classes` | Preserves multiclass membership, levels, order, abilities, and configuration. |
 | `sources` | Preserves standalone grants such as feats and their configuration. |
 | `selections` | Preserves mutable spell choices and their source/rule/ordinal addresses. |
-| `spellbook` | Preserves the Wizard's learned spell set. |
+| `spellbook` | Preserves filled and unfilled Wizard acquisitions with source/rule/ordinal/level provenance. |
 | `preferences` | Preserves explicit user preference state. |
 | `overrides` | Preserves bounded table rulings that catalog rules cannot derive. |
 | `acknowledgements` | Preserves warnings the user has explicitly accepted. |

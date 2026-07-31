@@ -53,6 +53,11 @@ import type {
 } from './character-crud';
 import type { OperationHistory } from './operation-history';
 import type { CharacterSheet } from './character-sheet-builder';
+import {
+  LEVEL_UP_RPC,
+  type LevelUpPlannedEligibleSpellsParams,
+  type LevelUpPlannedEligibleSpellsResult,
+} from '../builder/level-up-wizard';
 
 export interface QueriesClient extends CatalogClient {
   listCharacters(): Promise<CharacterSummary[]>;
@@ -68,6 +73,9 @@ export interface QueriesClient extends CatalogClient {
     slotId: number,
     query?: string,
   ): Promise<EligibleSpell[]>;
+  levelUpPlannedEligibleSpells(
+    params: LevelUpPlannedEligibleSpellsParams,
+  ): Promise<LevelUpPlannedEligibleSpellsResult>;
   createSavePoint(
     characterId: number,
     label: string,
@@ -172,6 +180,13 @@ export function createQueriesClient(rpc: RpcClient): QueriesClient {
         slot_id: slotId,
         query,
       }),
+    levelUpPlannedEligibleSpells: (
+      params: LevelUpPlannedEligibleSpellsParams,
+    ) =>
+      rpc.call<
+        LevelUpPlannedEligibleSpellsParams,
+        LevelUpPlannedEligibleSpellsResult
+      >(LEVEL_UP_RPC.plannedEligibleSpells, params),
     createSavePoint: (characterId: number, label: string) =>
       rpc.call<
         { character_id: number; label: string },

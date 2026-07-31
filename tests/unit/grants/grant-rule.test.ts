@@ -84,9 +84,11 @@ describe('GrantRule', () => {
       {
         kind: 'spellbook_acquisition',
         rule_key: 'book',
+        count: 2,
         bucket: 'spellbook',
         list: 'Wizard',
-        acquisitions_config: 'wizard_spellbook_acquisitions',
+        initial_count: 1,
+        count_per_level: 1,
       },
       {
         kind: 'fighting_style',
@@ -168,12 +170,16 @@ describe('GrantRule', () => {
       {
         kind: 'spellbook_acquisition',
         rule_key: 'book',
+        count: 2,
         bucket: 'spellbook',
         list: 'Wizard',
-        acquisitions_config: 'wizard_spellbook_acquisitions',
+        initial_count: 1,
+        count_per_level: 1,
         always_prepared: false,
         with_slots: true,
         free_cast: null,
+        level_min: 0,
+        level_max: 9,
       },
       {
         kind: 'fighting_style',
@@ -511,14 +517,14 @@ describe('GrantRule', () => {
         "Grant rule 'capability' field 'tags' must be a non-empty string list.",
       ],
       [
-        'missing spellbook config',
+        'missing spellbook count',
         {
           kind: 'spellbook_acquisition',
           rule_key: 'book',
           bucket: 'spellbook',
           list: 'Wizard',
         },
-        "Grant rule field 'acquisitions_config' must be a non-empty string.",
+        "Grant rule 'book' field 'count' must be a positive integer.",
       ],
       [
         'free cast scalar',

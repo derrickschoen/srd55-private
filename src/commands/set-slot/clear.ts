@@ -12,6 +12,7 @@ export class ClearSlotCommand extends SetSlotModeCommand<'clear'> {
   ): SlotUpdates {
     return {
       current_spell_version_id: null,
+      selection_acquired_at_class_level: null,
       selection_eligibility: 'unselected',
       selection_invalid_reason: null,
       state:

@@ -1149,6 +1149,7 @@ CREATE TABLE `spell_selection_slots` (
 	`selection_collection` VARCHAR,
 	`selection_eligibility` VARCHAR DEFAULT 'unselected' NOT NULL,
 	`selection_invalid_reason` TEXT,
+	`selection_acquired_at_class_level` integer,
 	FOREIGN KEY (`character_id`) REFERENCES `characters`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`fixed_spell_version_id`) REFERENCES `spell_versions`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`current_spell_version_id`) REFERENCES `spell_versions`(`id`) ON UPDATE no action ON DELETE no action,
@@ -1476,14 +1477,50 @@ CREATE UNIQUE INDEX `weapon_templates_content_key_unique` ON `weapon_templates` 
 CREATE TABLE `wizard_spellbook_entries` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`character_id` integer NOT NULL,
-	`spell_version_id` integer NOT NULL,
+	`source_instance_id` integer,
+	`rule_key` VARCHAR,
+	`ordinal` integer,
+	`acquired_at_class_level` integer,
+	`spell_version_id` integer,
+	`spell_level_min` integer DEFAULT 1 NOT NULL,
+	`spell_level_max` integer DEFAULT 9 NOT NULL,
+	`allowed_spell_lists` TEXT,
+	`allowed_schools` TEXT,
+	`allowed_tags` TEXT,
+	`state` VARCHAR DEFAULT 'active' NOT NULL,
+	`orphan_reason_code` VARCHAR,
+	`orphaned_at` DATETIME,
+	`selection_eligibility` VARCHAR DEFAULT 'unselected' NOT NULL,
+	`selection_invalid_reason` TEXT,
 	`created_at` DATETIME,
 	`updated_at` DATETIME,
 	FOREIGN KEY (`character_id`) REFERENCES `characters`(`id`) ON UPDATE no action ON DELETE cascade,
-	FOREIGN KEY (`spell_version_id`) REFERENCES `spell_versions`(`id`) ON UPDATE no action ON DELETE no action
+	FOREIGN KEY (`spell_version_id`) REFERENCES `spell_versions`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`source_instance_id`,`character_id`) REFERENCES `character_source_instances`(`id`,`character_id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "wizard_spellbook_entries_logical_address_check" CHECK((
+        source_instance_id IS NULL
+        AND rule_key IS NULL
+        AND ordinal IS NULL
+      ) OR (
+        source_instance_id IS NOT NULL
+        AND rule_key IS NOT NULL
+        AND ordinal IS NOT NULL
+      )),
+	CONSTRAINT "wizard_spellbook_entries_ordinal_check" CHECK(ordinal IS NULL OR (typeof(ordinal) = 'integer' AND ordinal >= 1)),
+	CONSTRAINT "wizard_spellbook_entries_acquisition_level_check" CHECK(acquired_at_class_level IS NULL OR (
+        typeof(acquired_at_class_level) = 'integer'
+        AND acquired_at_class_level BETWEEN 1 AND 20
+      )),
+	CONSTRAINT "wizard_spellbook_entries_level_window_check" CHECK(spell_level_min BETWEEN 0 AND 9
+        AND spell_level_max BETWEEN 0 AND 9
+        AND spell_level_min <= spell_level_max),
+	CONSTRAINT "wizard_spellbook_entries_state_check" CHECK(`state` IN ('active', 'orphaned')),
+	CONSTRAINT "wizard_spellbook_entries_selection_eligibility_check" CHECK(`selection_eligibility` IN ('valid', 'invalid', 'unselected'))
 );
 
-CREATE UNIQUE INDEX `wizard_spellbook_entries_character_id_spell_version_id_unique` ON `wizard_spellbook_entries` (`character_id`,`spell_version_id`);
+CREATE UNIQUE INDEX `wizard_spellbook_entries_source_rule_ordinal_unique` ON `wizard_spellbook_entries` (`source_instance_id`,`rule_key`,`ordinal`);
+CREATE UNIQUE INDEX `wizard_spellbook_entries_character_id_spell_version_id_unique` ON `wizard_spellbook_entries` (`character_id`,`spell_version_id`) WHERE spell_version_id IS NOT NULL AND state = 'active';
+CREATE INDEX `wizard_spellbook_entries_character_id_state_index` ON `wizard_spellbook_entries` (`character_id`,`state`);
 
 -- Browser-product invariants that Drizzle cannot represent.
 --
