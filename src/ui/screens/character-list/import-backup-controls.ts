@@ -107,7 +107,7 @@ export class ImportBackupController {
   async exportDatabase(): Promise<void> {
     const backup = await this.services.backup.exportDatabase();
     this.services.save({
-      filename: `spell-planner-database-${backup.exported_at.slice(0, 10)}.sqlite3`,
+      filename: `srd-55-database-${backup.exported_at.slice(0, 10)}.sqlite3`,
       contents: new Blob([backup.sqlite.slice()], {
         type: 'application/vnd.sqlite3',
       }),

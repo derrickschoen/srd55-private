@@ -299,6 +299,12 @@ test('the build reference sections are collapsed, present in the DOM, and never 
   await expect(scope.locator('tr', { hasText: /^languages/u })).toContainText(
     'no',
   );
+  await expect(scope.locator('tr', { hasText: /^languages/u })).toContainText(
+    'character sheet prints those words',
+  );
+  await expect(
+    scope.locator('tr', { hasText: /^background features/u }),
+  ).toContainText('printed tool proficiency is retained');
   // Subclass is neither absent nor complete, and the page has a Subclass
   // column, so the coverage row must not claim it is unmodelled.
   await expect(scope.locator('tr', { hasText: /^subclass/u })).toContainText(

@@ -39,7 +39,9 @@ test('switching characters invalidates the previously generated share link', asy
   await page
     .getByRole('button', { name: 'Share Character A by link' })
     .click();
-  await page.getByRole('button', { name: 'Create share link' }).click();
+  const createLink = page.getByRole('button', { name: 'Create share link' });
+  await expect(createLink).toBeFocused();
+  await createLink.click();
   const output = page.getByLabel('Generated character share link');
   await expect(output).toBeVisible();
   const characterALink = await output.inputValue();

@@ -751,6 +751,19 @@ describe('planner build reference JSON block', () => {
     }
     // Still genuinely absent: no column anywhere holds a language.
     expect(stateOf('languages')).toBe('not_modelled');
+    expect(factFor('languages')?.note).toContain(
+      'character sheet prints those words',
+    );
+    expect(factFor('languages')?.note).toContain('not modelled');
+
+    const backgroundFeatures = factFor('background features');
+    expect(backgroundFeatures?.state).toBe('partial');
+    expect(backgroundFeatures?.note).toContain(
+      'printed tool proficiency is retained',
+    );
+    expect(backgroundFeatures?.note).toContain(
+      'no tool proficiency fact or choice is modelled',
+    );
 
     // Subclass is neither absent nor complete: there are subclass tables and a
     // Subclass column on the page, covering 2 of 12 classes.
@@ -778,7 +791,7 @@ describe('planner build reference JSON block', () => {
     // The scope sentence used to say the application is "not a character
     // sheet". There is a character sheet screen; it says where this reference
     // stops instead.
-    expect(reference.scope.statement).toContain('SPELL PLANNER');
+    expect(reference.scope.statement).toContain('SRD-55 planner screen');
     expect(reference.scope.statement).toContain('character sheet screen');
     expect(reference.scope.statement).not.toContain('not a character sheet');
   });

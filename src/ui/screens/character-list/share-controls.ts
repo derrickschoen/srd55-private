@@ -405,7 +405,7 @@ export function createShareControls(
       void browser
         .share({
           title: exporting.name,
-          text: `Add ${exporting.name} to Spell Planner`,
+          text: `Add ${exporting.name} to SRD-55`,
           url: linkOutput.value,
         })
         .catch((error: unknown) => {
@@ -475,6 +475,7 @@ export function createShareControls(
       announce(
         `Ready to create a link for ${character.name}. Optional private organization stays off by default.`,
       );
+      exportButton.focus();
     },
     cleanup: () => {
       for (const cleanup of cleanups.splice(0)) {
