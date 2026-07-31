@@ -104,7 +104,8 @@ export const LEVEL_UP_ABILITY_INCREASE_TOTAL = 2;
  * `null` for a class the tables do not print. It is NOT imported here: it
  * closes over a `?raw` extract, which the seam must stay free of.
  */
-export const CLASS_ASI_LEVELS_MODULE = 'src/rules/class-asi-levels-srd.ts';
+export const CLASS_ASI_LEVELS_MODULE =
+  'src/rules/class-level-features-srd.ts';
 
 /*
  * NO PERSISTENCE VERSIONS ARE MINTED BY THIS UNIT. §8c's wire mint and

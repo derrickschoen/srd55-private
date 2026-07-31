@@ -52,6 +52,7 @@
 import coreTraitsExtract from '../../docs/srd/source/class-core-traits.txt?raw';
 import attackFeaturesExtract from '../../docs/srd/source/attack-class-features.txt?raw';
 import {
+  abilities,
   hitDieSizes,
   isHitDieSize,
   isMartialArtsDieSize,
@@ -65,6 +66,7 @@ import {
   type Skill,
   type WeaponProficiencyCategory,
 } from '../domain/enums';
+import type { PrimaryAbilityExpression } from '../domain/primary-ability';
 
 export class SrdClassTraitsError extends Error {
   constructor(message: string) {
@@ -97,6 +99,7 @@ export interface SrdWeaponProficiency {
 
 export interface SrdClassTraits {
   readonly class_name: string;
+  readonly primary_ability_expression: PrimaryAbilityExpression;
   readonly hit_die: HitDieSize;
   readonly saving_throws: readonly Ability[];
   readonly skill_choice_count: number;
@@ -127,6 +130,7 @@ type FieldLabel = (typeof FIELD_LABELS)[number];
 
 /** Labels whose absence from a block is a parse failure rather than a variant. */
 const REQUIRED_FIELDS: readonly FieldLabel[] = [
+  'Primary Ability',
   'Hit Point Die',
   'Saving Throw',
   'Skill Proficiencies',
@@ -142,6 +146,57 @@ const ABILITY_WORDS: Readonly<Record<string, Ability>> = {
   Wisdom: 'wisdom',
   Charisma: 'charisma',
 };
+
+/**
+ * `Strength or Dexterity` -> `one_of`; `Dexterity and Wisdom` -> `all_of`.
+ * A scalar row is an `all_of` expression with one member, leaving exactly the
+ * two sourced logical forms in the type system.
+ */
+function primaryAbility(
+  className: string,
+  text: string,
+): PrimaryAbilityExpression {
+  const hasOr = /\s+or\s+/.test(text);
+  const hasAnd = /\s+and\s+/.test(text);
+  if (hasOr && hasAnd) {
+    throw new SrdClassTraitsError(
+      `${className} primary ability ${JSON.stringify(text)} mixes "and" and "or".`,
+    );
+  }
+  const words = text
+    .split(hasOr ? /\s+or\s+/ : /\s+and\s+/)
+    .map((word) => word.trim())
+    .filter((word) => word !== '');
+  const parsed = words.map((word) => {
+    const ability = ABILITY_WORDS[word];
+    if (ability === undefined) {
+      throw new SrdClassTraitsError(
+        `${className} primary ability ${JSON.stringify(word)} is not one of ${abilities.join(', ')}.`,
+      );
+    }
+    return ability;
+  });
+  if (parsed.length === 0 || new Set(parsed).size !== parsed.length) {
+    throw new SrdClassTraitsError(
+      `${className} primary ability ${JSON.stringify(text)} is empty or repeats an ability.`,
+    );
+  }
+  if (hasOr) {
+    if (parsed.length < 2) {
+      throw new SrdClassTraitsError(
+        `${className} primary ability "or" expression has fewer than two abilities.`,
+      );
+    }
+    return {
+      kind: 'one_of',
+      abilities: parsed as [Ability, Ability, ...Ability[]],
+    };
+  }
+  return {
+    kind: 'all_of',
+    abilities: parsed as [Ability, ...Ability[]],
+  };
+}
 
 /**
  * Display spelling to enum member. Built from `skills` so the two cannot drift:
@@ -508,6 +563,10 @@ export function parseSrdClassTraits(
     const skillChoiceResult = skillChoice(className, get('Skill Proficiencies'));
     return {
       class_name: className,
+      primary_ability_expression: primaryAbility(
+        className,
+        get('Primary Ability'),
+      ),
       hit_die: hitDie(className, get('Hit Point Die')),
       saving_throws: savingThrows(className, get('Saving Throw')),
       skill_choice_count: skillChoiceResult.count,

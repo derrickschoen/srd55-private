@@ -172,7 +172,7 @@ export interface LevelUpAbilityIncrease {
  * `subclass_content_key` is required exactly when the new level is 3 (all
  * twelve seeded 2024 classes subclass at 3); `ability_increases` is required
  * exactly when the new level is an ASI level READ FROM THE SEEDED TABLE
- * (`src/rules/class-asi-levels-srd.ts` — never a hardcoded list, which is
+ * (`src/rules/class-level-features-srd.ts` — never a hardcoded list, which is
  * the D15 mistake §5 names; D78 records that even the plan's own enumeration
  * of those levels was wrong). The increases field is a LIST of one or two
  * entries because a singular field cannot express the +1/+1 arm.
