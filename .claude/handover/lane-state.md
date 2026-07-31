@@ -10,19 +10,20 @@ migrations 0000-0026 (0027 minted unmerged in wt/attunement); wire v1-v16
 All lanes merged main in (wt/pwa needed a one-hunk timeout-comment union,
 resolved keeping BOTH measurements, tsc 0).
 
-## In flight
-- TRACK W (wt/print at 4312c3a): W-B2 dispatched from briefs/w-b2.md
-  (log wb2.log, port 44472). Then W-C (briefs/w-c.md, 44473).
-- TRACK M (wt/attunement): FF-A committed in-lane, mints 0027 + wire v17,
-  scans clean. OWED: supervisor full vitest, ONE negative control
-  (suggest the D124 single-toggle share gate or the size-guard refusal),
-  full PW on 44480 (now inherits hygiene annotations), D135 review, merge.
-- TRACK S (wt/pwa): D91-R + timeout fixlet committed; D91-R-FIX2 (four
-  review findings) was dispatched and its result must be read from
-  scratchpad d91r-fix2.log — if that session's scratchpad is gone, re-run
-  the four fixes from the review findings recorded below. Then re-gate:
-  vitest, shape control (mutate-d91r-shape.py pattern), full PW 44477,
-  round-2 review, merge.
+## In flight (supervisor = OPUS from this point; Fable credits exhausted)
+- TRACK M (wt/attunement): FF-A gates by OPUS: scans 0/no-config/no-frozen,
+  mints exactly 0027+v17, vitest 193/3,164 exit 0 (floor 3,154 + FF-A's 10,
+  reconciles), D124 consent-gate negative control PROVEN both directions
+  (mutate-ffa-toggle.py: killed 'flavor portability separates notes
+  privacy' +6, revert 81/81 clean). RUNNING: full PW on 44480 + D135
+  review (ffa-review.log). Then merge.
+- TRACK S (wt/pwa): D91-R + FIX + FIX2 all committed; main merged in.
+  OPUS gates: scans 0, no mint/UnitM files, build 0, vitest 194/3,169
+  exit 0, shape control re-proven (now kills the exhaustive-table test
+  too). RUNNING: round-2 review (d91r-review2.log). OWED: full PW on
+  44477 — QUEUE IT AFTER FF-A's 44480 finishes (avoid 3 concurrent
+  browser suites). Then merge.
+- TRACK W (wt/print): W-B2 implementing (log wb2.log, port 44472).
 
 ## D91-R review round 1 (D135) — all four ACCEPTED, FIX2 in flight
 - sheet.ts:1752 return-aborts whole slot resolver on one bad class (verified
