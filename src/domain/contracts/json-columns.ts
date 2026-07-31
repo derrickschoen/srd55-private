@@ -3,6 +3,7 @@ import {
   type AnyColumnKey,
   type FactTable,
 } from './generated/column-facts';
+import { abilities, isEnumValue } from '../enums';
 
 /**
  * WHICH TEXT COLUMNS HOLD SERIALIZED JSON, AND WHAT SHAPE EACH READER NEEDS.
@@ -59,6 +60,8 @@ export interface JsonColumnFact {
   readonly reader: string;
   /** Optional element contract for array readers that require scalar strings. */
   readonly items?: 'string';
+  /** Optional domain contract when JSON node shape alone is insufficient. */
+  readonly semantic?: 'feat_ability_options';
 }
 
 type EveryColumnKey = { [T in FactTable]: AnyColumnKey<T> }[FactTable];
@@ -182,6 +185,12 @@ export const JSON_COLUMNS = {
     allowEmpty: true,
     reader: 'decodeGrantJson (src/grants/source-rule-reader.ts:94)',
   },
+  'feat_definitions.ability_increase_abilities': {
+    shape: 'value',
+    allowEmpty: false,
+    semantic: 'feat_ability_options',
+    reader: 'decodeAbilityIncreaseAbilities (src/rules/feat-application.ts) — accepts only "any" or a distinct non-empty closed Ability list',
+  },
   'species_definitions.grant_rules': {
     shape: 'container',
     allowEmpty: true,
@@ -278,6 +287,22 @@ export function jsonColumnError(
     decoded.some((item) => typeof item !== 'string')
   ) {
     return 'must be a JSON array of strings';
+  }
+  if (fact.semantic === 'feat_ability_options') {
+    if (decoded === 'any') {
+      return null;
+    }
+    if (
+      !Array.isArray(decoded) ||
+      decoded.length === 0 ||
+      decoded.some(
+        (item) =>
+          typeof item !== 'string' || !isEnumValue(abilities, item),
+      ) ||
+      new Set(decoded).size !== decoded.length
+    ) {
+      return 'must be "any" or a distinct non-empty JSON array of abilities';
+    }
   }
   return null;
 }

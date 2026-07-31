@@ -11,11 +11,15 @@ import {
   characterLevels,
   type CharacterLevel,
 } from '../domain/enums';
+import type { ContentKey } from '../domain/ids';
+import type { FeatFeatureEvidence } from '../builder/level-up-wizard';
 
 export const classFeatureEntitlementKinds = [
   'ability_score_improvement',
   'epic_boon',
   'expertise',
+  'fighting_style_feature',
+  'spellcasting_feature',
 ] as const;
 export type ClassFeatureEntitlementKind =
   (typeof classFeatureEntitlementKinds)[number];
@@ -108,6 +112,10 @@ function entitlementForName(
       return 'epic_boon';
     case 'Expertise':
       return 'expertise';
+    case 'Fighting Style':
+      return 'fighting_style_feature';
+    case 'Spellcasting':
+      return 'spellcasting_feature';
     default:
       return null;
   }
@@ -241,4 +249,78 @@ export function epicBoonLevelsForClassName(
   className: string,
 ): ReadonlySet<number> | null {
   return levelsWithClassFeatureEntitlement(className, 'epic_boon');
+}
+
+export interface ProjectedBundledClass {
+  readonly class_name: string;
+  readonly class_level: CharacterLevel;
+  /**
+   * Null means no subclass. An unrecognised non-null key is imported content,
+   * so a negative feature claim becomes unprovable rather than absent.
+   */
+  readonly subclass_content_key: ContentKey | null;
+}
+
+const BUNDLED_SPELLCASTING_SUBCLASS_KEYS = new Set<string>([
+  '2024:subclass:ek',
+  '2024:subclass:at',
+]);
+
+/**
+ * Evidence for the only two feature prerequisites in the bundled feat corpus.
+ *
+ * Known classes and subclasses prove presence/absence from sourced bundled
+ * content. Imported content makes a negative unprovable, while any known
+ * positive remains proof.
+ */
+export function featFeatureEvidenceForProjectedClasses(
+  classes: readonly ProjectedBundledClass[],
+): FeatFeatureEvidence {
+  let hasUnknownFeatureSource = false;
+  let fightingStyle = false;
+  let spellcasting = false;
+  for (const held of classes) {
+    const table = classLevelFeaturesForClassName(held.class_name);
+    if (table === null) {
+      hasUnknownFeatureSource = true;
+      continue;
+    }
+    const cells = table.levels.filter(
+      (cell) => cell.class_level <= held.class_level,
+    );
+    fightingStyle ||= cells.some((cell) =>
+      cell.entitlements.includes('fighting_style_feature'),
+    );
+    spellcasting ||= cells.some((cell) =>
+      cell.entitlements.includes('spellcasting_feature'),
+    );
+    if (held.subclass_content_key !== null) {
+      if (
+        BUNDLED_SPELLCASTING_SUBCLASS_KEYS.has(
+          held.subclass_content_key,
+        ) &&
+        held.class_level >= 3
+      ) {
+        spellcasting = true;
+      } else if (
+        !BUNDLED_SPELLCASTING_SUBCLASS_KEYS.has(
+          held.subclass_content_key,
+        )
+      ) {
+        hasUnknownFeatureSource = true;
+      }
+    }
+  }
+  return {
+    fighting_style: fightingStyle
+      ? 'present'
+      : hasUnknownFeatureSource
+        ? 'unprovable'
+        : 'absent',
+    spellcasting: spellcasting
+      ? 'present'
+      : hasUnknownFeatureSource
+        ? 'unprovable'
+        : 'absent',
+  };
 }

@@ -531,6 +531,8 @@ export const COLUMN_FACTS = {
     category: { base: 'degraded', notNull: false },
     min_level: { base: 'integer', notNull: false },
     ability_points: { base: 'integer', notNull: true },
+    ability_increase_abilities: { base: 'degraded', notNull: false },
+    ability_increase_maximum: { base: 'integer', notNull: false },
     repeatable: { base: 'degraded', notNull: true },
     prerequisites: { base: 'degraded', notNull: false },
     grant_rules: { base: 'degraded', notNull: false },

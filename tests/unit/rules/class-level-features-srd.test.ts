@@ -3,9 +3,11 @@ import classLevelTables from '../../../docs/srd/source/class-level-tables.txt?ra
 import {
   asiLevelsForClassName,
   epicBoonLevelsForClassName,
+  featFeatureEvidenceForProjectedClasses,
   parseSrdClassLevelFeatures,
   SrdClassLevelFeaturesError,
 } from '../../../src/rules/class-level-features-srd';
+import type { ContentKey } from '../../../src/domain/ids';
 
 /**
  * Hand-transcribed from the twelve tables. This must never be regenerated from
@@ -102,6 +104,104 @@ describe('SRD class level feature cells', () => {
         .find((entry) => entry.class_name === 'Wizard')
         ?.levels.find((entry) => entry.class_level === 6)?.entitlements,
     ).toEqual([]);
+  });
+
+  it('proves feat feature possession through held bundled levels and preserves imported uncertainty', () => {
+    expect(
+      featFeatureEvidenceForProjectedClasses([
+        {
+          class_name: 'Fighter',
+          class_level: 1,
+          subclass_content_key: null,
+        },
+      ]),
+    ).toEqual({
+      fighting_style: 'present',
+      spellcasting: 'absent',
+    });
+    expect(
+      featFeatureEvidenceForProjectedClasses([
+        {
+          class_name: 'Wizard',
+          class_level: 1,
+          subclass_content_key: null,
+        },
+      ]),
+    ).toEqual({
+      fighting_style: 'absent',
+      spellcasting: 'present',
+    });
+    expect(
+      featFeatureEvidenceForProjectedClasses([
+        {
+          class_name: 'Chronomancer',
+          class_level: 4,
+          subclass_content_key: null,
+        },
+      ]),
+    ).toEqual({
+      fighting_style: 'unprovable',
+      spellcasting: 'unprovable',
+    });
+    expect(
+      featFeatureEvidenceForProjectedClasses([
+        {
+          class_name: 'Wizard',
+          class_level: 1,
+          subclass_content_key: null,
+        },
+        {
+          class_name: 'Chronomancer',
+          class_level: 4,
+          subclass_content_key: null,
+        },
+      ]),
+    ).toEqual({
+      fighting_style: 'unprovable',
+      spellcasting: 'present',
+    });
+  });
+
+  it('counts bundled subclass Spellcasting and withholds imported subclass negatives', () => {
+    expect(
+      featFeatureEvidenceForProjectedClasses([
+        {
+          class_name: 'Fighter',
+          class_level: 19,
+          subclass_content_key:
+            '2024:subclass:ek' as ContentKey,
+        },
+      ]),
+    ).toEqual({
+      fighting_style: 'present',
+      spellcasting: 'present',
+    });
+    expect(
+      featFeatureEvidenceForProjectedClasses([
+        {
+          class_name: 'Rogue',
+          class_level: 19,
+          subclass_content_key:
+            '2024:subclass:at' as ContentKey,
+        },
+      ]),
+    ).toEqual({
+      fighting_style: 'absent',
+      spellcasting: 'present',
+    });
+    expect(
+      featFeatureEvidenceForProjectedClasses([
+        {
+          class_name: 'Barbarian',
+          class_level: 19,
+          subclass_content_key:
+            'homebrew:subclass:rune-singer' as ContentKey,
+        },
+      ]),
+    ).toEqual({
+      fighting_style: 'unprovable',
+      spellcasting: 'unprovable',
+    });
   });
 
   it('fails a missing level rather than returning a plausible short table', () => {
