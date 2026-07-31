@@ -39,6 +39,8 @@ async function expectNoPlannerRouteAnchors(page: Page): Promise<void> {
 test('the empty-database front door chooses class first, persists once named, and survives reload without a planner escape', async ({
   page,
 }) => {
+  // Measured at 20.2s alone on Chromium; allow for concurrent-suite contention.
+  test.setTimeout(60_000);
   await resetHome(page);
 
   expect(
