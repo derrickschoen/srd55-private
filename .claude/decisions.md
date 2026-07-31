@@ -7,6 +7,12 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D140 — OWNER: supervision reporting is TERMINAL-ONLY (2026-07-31)
+
+No push notifications, not even for hard stops or the D106 gate. Everything
+lands in the session terminal and the committed state files; the owner
+checks in on their own cadence.
+
 ## D138 — OWNER: homebrew fix flow gets apply-to-all AND delete-with-characters (2026-07-31)
 
 Amends the HA design's strict lifecycle. (1) The fix-review screen gains an
