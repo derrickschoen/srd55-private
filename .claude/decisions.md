@@ -7,6 +7,31 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D134 — OWNER: Focus Points print as a Remaining-field (2026-07-31)
+
+Closes the S1 default. Monk focus_points joins lay_on_hands and
+sorcery_points on the point-pool list: "Remaining: ____ / N" at every level.
+Boxes-at-every-level list shrinks accordingly (D123 classification).
+
+## D135 — OWNER: EVERY unit gets a codex review pass before merge (2026-07-31)
+
+The gate ritual gains a mandatory step for the Opus supervision era: after
+the supervisor's personal gates and before merge, codex reviews the unit
+diff (read-only). Findings are arbitrated by verification; legitimate issues
+go back as a fix dispatch; rejected findings are recorded with reasons.
+
+## D136 — OWNER: no circuit breaker; stuck = multi-perspective analysis (2026-07-31)
+
+No automatic strike limit. When the supervisor judges itself stuck, it must
+FIRST run independent analyses from several perspectives (opus + sol
+read-only agents with different lenses), reconcile them, and only then
+decide: continue, re-dispatch, or stop and wait for the owner.
+
+## D137 — OWNER: Opus attempts the WHOLE queue including HA/CI (2026-07-31)
+
+No check-in gate before HA-1. The Opus supervisor drives the full queue to
+the D106 gate per the handover plan.
+
 ## D122 — OWNER: print pins US Letter (2026-07-31)
 
 The print stylesheet declares @page size: letter. Box grids stay inch-specified.
