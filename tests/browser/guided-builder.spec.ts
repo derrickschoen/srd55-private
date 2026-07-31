@@ -416,6 +416,22 @@ test('the empty-database front door chooses class first, persists once named, an
   ).toBeVisible();
   await expectNoPlannerRouteAnchors(page);
 
+  // D116's one-time hint is tied to this exact terminal read state. It is an
+  // inline hint, not a condition-bound warning or modal, and both actions are
+  // ordinary labelled buttons reachable by keyboard.
+  const backupHint = page.locator('[data-backup-hint]');
+  await expect(backupHint).toBeVisible();
+  await expect(backupHint).toContainText(
+    'characters live only in this browser — download a backup',
+  );
+  await expect(
+    backupHint.getByRole('button', { name: 'Download a backup' }),
+  ).toBeVisible();
+  await backupHint
+    .getByRole('button', { name: 'Dismiss backup hint' })
+    .click();
+  await expect(backupHint).toBeHidden();
+
   // The provenance is on disk, per grant: two FILLED background grants under
   // the background's source, two FILLED class grants under the Fighter's —
   // and the projection derived all four.
@@ -455,5 +471,6 @@ test('the empty-database front door chooses class first, persists once named, an
   await expect(
     page.locator(`[${persistedSeam.equipmentCompleteAttribute}]`),
   ).toBeVisible();
+  await expect(page.locator('[data-backup-hint]')).toHaveCount(0);
   await expectNoPlannerRouteAnchors(page);
 });
