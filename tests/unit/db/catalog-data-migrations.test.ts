@@ -109,6 +109,7 @@ describe('catalog data-migration registry', () => {
     }
   }, 20_000);
 
+  // Measured 2.2s alone; 20s leaves headroom for full-suite contention.
   it('rolls back semantic rows and the marker after an injected mid-migration failure', () => {
     const db = freshContext();
     const before = bytesOf(db.connection);
@@ -134,7 +135,7 @@ describe('catalog data-migration registry', () => {
     } finally {
       db.close();
     }
-  });
+  }, 20_000);
 
   it('refuses an edited applied migration by checksum and never re-runs it', () => {
     const db = freshContext();

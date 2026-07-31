@@ -263,6 +263,7 @@ describe('database migration chain', () => {
     lifecycle.close();
   });
 
+  // Measured 2.3s alone; 20s leaves headroom for full-suite contention.
   it('refuses a pre-0020 key shared by roots of different kinds without changing the image', async () => {
     const beforeContentRegistry = DATABASE_MIGRATIONS
       .slice(0, 20)
@@ -288,7 +289,7 @@ describe('database migration chain', () => {
       'UNIQUE constraint failed: catalog_content_identities.content_key',
     );
     expect(await storage.exportFile()).toEqual(before);
-  });
+  }, 20_000);
 
   it('moves every inline class-feature effect into its child table', async () => {
     const beforeAc2a = DATABASE_MIGRATIONS
@@ -776,6 +777,7 @@ describe('database migration chain', () => {
     lifecycle.close();
   }, 20_000);
 
+  // Measured 1.8s alone; 20s leaves headroom for full-suite contention.
   it('aborts on an unrenderable historical copper value, naming the row and preserving the image', async () => {
     const storage = await storageHolding(
       `${SCHEMA_BEFORE_COIN_RETIREMENT}
@@ -791,7 +793,7 @@ describe('database migration chain', () => {
       'background_equipment_items id 302 coin_copper=5050 cannot be rendered as whole GP',
     );
     expect(await storage.exportFile()).toEqual(before);
-  });
+  }, 20_000);
 
   it('renders a large whole-GP value without clamping it', async () => {
     const storage = await storageHolding(
