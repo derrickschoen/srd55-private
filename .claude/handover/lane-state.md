@@ -9,12 +9,24 @@ v1-v16; existing a7-v* assertions. Baseline + D91-M gates all
 supervisor-verified (post-merge main vitest 192/3,132 exit 0).
 
 ## In flight
-- Main now bb6dc0b (EXP-URL doc merged; post-merge vitest 192/3,132 on main
-  proper). SHARE_LIMITS.encodedCharacters = 131,072 recommended, fragment
-  transport (docs/design/2026-08-01-share-url-capacity.md).
-- TRACK M (wt/attunement at bb6dc0b): FF-A implementing (briefs/ff-a.md,
-  log ffa.log, port 44480) — flavor mint: migration, backup version, wire
-  version, D124 single toggle + size guard.
+- Main bb6dc0b. THREE lanes now hold gated-or-gating work:
+- TRACK M (wt/attunement): FF-A implemented + committed in-lane (48 files,
+  scans clean, mints = migration 0027 + wire v17 exactly as owned). Codex
+  claims vitest 192/3,142 exit 0, build 0, frozen zero-diffs; its full PW
+  87/88 with the one failure = php-parity 'captures every restorable'
+  timeout 31.4s vs 30s — the SAME machine-wide contention pattern (test
+  measured 21.0s alone). Supervisor gates still owed: full vitest, one
+  negative control (suggest: single-toggle share gate — option off carries
+  none of the four fields; or the size-guard refusal), full PW, D135
+  review, merge. NOTE: FF-A edited php-feature-parity.spec.ts — expect a
+  mechanical merge with the hygiene fixlet's timeout annotations.
+- SUITE-HYGIENE fixlet dispatched in wt/print (log hygiene.log, port
+  44496): measured 60_000 per-test timeouts for ALL >=15s-alone heavy
+  tests in php-parity + guided-builder specs, then a full PW. This ends
+  the four-instance flake rotation. On its green: merge W-B1 (+hygiene)
+  via merge-to-main.sh, post-merge vitest on main, fast-forward all lanes,
+  dispatch W-B2; then re-gate FF-A and D91-R(+FIX2) whose reruns inherit
+  the annotations via merge-main.
 - TRACK W (wt/print): W-B1+FIX all gates green EXCEPT the full-PW merge
   gate, which has flaked on a DIFFERENT single spec in each of two
   contended runs (reports-and-print:83 then guided-builder:39), both
