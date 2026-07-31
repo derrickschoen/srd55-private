@@ -34,9 +34,22 @@ resolved keeping BOTH measurements, tsc 0).
 - TRACK S (wt/pwa): D91-R + FIX + FIX2 all committed; main merged in.
   OPUS gates: scans 0, no mint/UnitM files, build 0, vitest 194/3,169
   exit 0, shape control re-proven (now kills the exhaustive-table test
-  too). RUNNING: round-2 review (d91r-review2.log) + full PW on 44477
-  (started in the window freed by stopping FF-A's invalidated run).
-  Then merge.
+  too).
+  D135 ROUND 2: fixes (2)(3)(4) verified real and complete; fix (1) found
+  INCOMPLETE and the supervisor CONFIRMED it at sheet.ts:1802/:1876 —
+  FIX2 discarded an invalid contributor and kept resolving the SAME
+  family, so invalid Wizard 3 + valid Cleric 2 falls into the
+  sole-base-caster branch and PRINTS CLERIC-ONLY SLOTS (effective level 2)
+  where the truth is effective level 5 -> 4/3/2. A plausible wrong number
+  presented as fact = D33 violation, higher severity than the round-1
+  finding. Rule now specified: any invalid contributor makes its WHOLE
+  family absent-and-stated (no partial totals); families stay independent
+  of each other. D91-R-FIX3 dispatched (log d91r-fix3.log, port 44477);
+  D91-R's PW run was STOPPED (tree changing). This is round 3 of 3 for
+  this unit under the D135 cap — if round-3 review is not CLEAN, invoke
+  D136 (multi-perspective analysis) rather than a fourth blind fix.
+  Re-gate after FIX3: vitest, shape control, full PW 44477, round-3
+  review, merge.
 - TRACK W (wt/print): W-B2 implementing (log wb2.log, port 44472).
 
 ## D91-R review round 1 (D135) — all four ACCEPTED, FIX2 in flight
