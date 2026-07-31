@@ -83,6 +83,8 @@ async function databaseState(page: Page): Promise<{
 test('build report route presents source, route, duplicate, and invalid annotations without persisted writes', async ({
   page,
 }) => {
+  // Measured alone at 34.9–35.8s after D91-R added the sheet projection.
+  test.setTimeout(60_000);
   const fixture = await fixtureImage('report');
   await installFixture(page, fixture);
   const before = await databaseState(page);
