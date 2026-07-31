@@ -8,6 +8,7 @@ import {
 import { element, type Cleanup } from '../../dom';
 import {
   createClassStep,
+  createPendingEpicPathChoice,
   createSubclassStep,
   renderGainsStep,
   type PendingEpicPath,
@@ -40,6 +41,100 @@ function guideableOptions(
   );
 }
 
+type TerminalEpicState = Extract<
+  LevelUpStateResult,
+  { readonly kind: 'no_guideable_class' | 'maximum_level' }
+> & { readonly pending_epic_resolution: NonNullable<
+  Extract<
+    LevelUpStateResult,
+    { readonly kind: 'no_guideable_class' | 'maximum_level' }
+  >['pending_epic_resolution']
+> };
+
+function isTerminalEpicState(
+  state: LevelUpStateResult,
+): state is TerminalEpicState {
+  return (
+    (state.kind === 'no_guideable_class' ||
+      state.kind === 'maximum_level') &&
+    state.pending_epic_resolution !== null
+  );
+}
+
+function createTerminalEpicResolutionWizard(options: {
+  readonly state: TerminalEpicState;
+  readonly cancel: () => void;
+}): LevelUpWizardController {
+  const host = element('div', { className: 'level-up-route' });
+  let currentCleanup: Cleanup = () => undefined;
+  let initialFocusTarget: HTMLElement | null = null;
+
+  const showPrompt = (focusPanel: boolean): void => {
+    currentCleanup();
+    const choice = createPendingEpicPathChoice({
+      pending: options.state.pending_epic_resolution,
+      selectedPath: 'resolve_now',
+      allowNextLevel: false,
+      onSelect: () => undefined,
+    });
+    const continueButton = element('button', {
+      text: 'Continue to Epic Boon',
+      attributes: { type: 'button', [LEVEL_UP_ATTR.next]: '' },
+    });
+    const continueCleanup = (() => {
+      const listener = (): void => showEpicStep();
+      continueButton.addEventListener('click', listener);
+      return () => continueButton.removeEventListener('click', listener);
+    })();
+    const surface = element('section', { className: 'level-up-terminal-resolution' }, [
+      choice.element,
+      element(
+        'nav',
+        { attributes: { 'aria-label': 'Deferred Epic Boon navigation' } },
+        [continueButton],
+      ),
+    ]);
+    const view = renderLevelUpTerminalState(options.state, [surface]);
+    host.replaceChildren(view);
+    initialFocusTarget = view.querySelector('h1');
+    currentCleanup = () => {
+      choice.cleanup();
+      continueCleanup();
+    };
+    if (focusPanel) view.querySelector('h2')?.focus();
+  };
+
+  const showEpicStep = (): void => {
+    currentCleanup();
+    const panel = renderUnimplementedLevelUpStep('epic_boon');
+    const frame = createLevelUpFrame({
+      characterName: options.state.character.name,
+      steps: orderedSteps(
+        options.state.pending_epic_resolution.applicable_steps,
+      ),
+      currentStep: 'epic_boon',
+      panel,
+      navigation: {
+        back: () => showPrompt(true),
+        cancel: options.cancel,
+      },
+      applicableStepStatus: null,
+      error: null,
+    });
+    host.replaceChildren(frame.element);
+    initialFocusTarget = frame.routeHeading;
+    currentCleanup = frame.cleanup;
+    frame.stepHeading.focus();
+  };
+
+  showPrompt(false);
+  return {
+    element: host,
+    cleanup: () => currentCleanup(),
+    focusInitial: () => initialFocusTarget?.focus(),
+  };
+}
+
 /**
  * The W-B1 controller. Every mutable value below is page-memory only; it has
  * no query, command, storage, worker, or database dependency.
@@ -48,6 +143,12 @@ export function createLevelUpWizard(options: {
   readonly state: LevelUpStateResult;
   readonly cancel: () => void;
 }): LevelUpWizardController {
+  if (isTerminalEpicState(options.state)) {
+    return createTerminalEpicResolutionWizard({
+      state: options.state,
+      cancel: options.cancel,
+    });
+  }
   if (options.state.kind !== 'ready') {
     const view = renderLevelUpTerminalState(options.state);
     const routeHeading = view.querySelector('h1');
