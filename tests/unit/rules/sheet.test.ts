@@ -1540,6 +1540,129 @@ describe('sheet resource maxima', () => {
     ).toEqual([['pact_slot', null, 5, 3, 2]]);
   });
 
+  it('invalid shared-caster content leaves valid Pact rows present', () => {
+    const invalidWizard = resourceClass(1, 'Wizard', 3, {
+      base_spellcasting: {
+        progression_type: 'full',
+        progression_row: {
+          status: 'present',
+          slots: '{}',
+          pact_slots: '[]',
+        },
+      },
+    });
+    const validWarlock = resourceClass(2, 'Warlock', 3, {
+      base_spellcasting: {
+        progression_type: 'pact',
+        progression_row: {
+          status: 'present',
+          slots: '[]',
+          pact_slots: '{"count":2,"level":2}',
+        },
+      },
+    });
+
+    expect(
+      resolveSheetResources(
+        [invalidWizard, validWarlock],
+        PRESENT_ABILITIES,
+      ).map((entry) =>
+        entry.status === 'computed'
+          ? [entry.kind, entry.spell_level, entry.maximum]
+          : [entry.reason, entry.class_name, entry.id],
+      ),
+    ).toEqual([
+      [
+        'spell_progression_missing_or_invalid',
+        'Wizard',
+        'resource:1:base-spell-progression-absent',
+      ],
+      ['pact_slot', 2, 2],
+    ]);
+  });
+
+  it('invalid zero-effective-level shared content leaves valid Pact rows present', () => {
+    const invalidRoundedDownCaster = resourceClass(1, 'Spellblade', 1, {
+      base_spellcasting: {
+        progression_type: 'half_down',
+        progression_row: {
+          status: 'present',
+          slots: '{"1":2}',
+          pact_slots: '[]',
+        },
+      },
+    });
+    const validWarlock = resourceClass(2, 'Warlock', 3, {
+      base_spellcasting: {
+        progression_type: 'pact',
+        progression_row: {
+          status: 'present',
+          slots: '[]',
+          pact_slots: '{"count":2,"level":2}',
+        },
+      },
+    });
+
+    expect(
+      resolveSheetResources(
+        [invalidRoundedDownCaster, validWarlock],
+        PRESENT_ABILITIES,
+      ).map((entry) =>
+        entry.status === 'computed'
+          ? [entry.kind, entry.spell_level, entry.maximum]
+          : [entry.reason, entry.class_name, entry.id],
+      ),
+    ).toEqual([
+      [
+        'spell_progression_missing_or_invalid',
+        'Spellblade',
+        'resource:1:base-spell-progression-absent',
+      ],
+      ['pact_slot', 2, 2],
+    ]);
+  });
+
+  it('invalid Pact content leaves valid shared-caster rows present', () => {
+    const invalidWarlock = resourceClass(1, 'Warlock', 3, {
+      base_spellcasting: {
+        progression_type: 'pact',
+        progression_row: {
+          status: 'present',
+          slots: '[]',
+          pact_slots: '{}',
+        },
+      },
+    });
+    const validWizard = resourceClass(2, 'Wizard', 2, {
+      base_spellcasting: {
+        progression_type: 'full',
+        progression_row: {
+          status: 'present',
+          slots: '{"1":3}',
+          pact_slots: '[]',
+        },
+      },
+    });
+
+    expect(
+      resolveSheetResources(
+        [invalidWarlock, validWizard],
+        PRESENT_ABILITIES,
+      ).map((entry) =>
+        entry.status === 'computed'
+          ? [entry.kind, entry.spell_level, entry.maximum]
+          : [entry.reason, entry.class_name, entry.id],
+      ),
+    ).toEqual([
+      [
+        'spell_progression_missing_or_invalid',
+        'Warlock',
+        'resource:1:base-spell-progression-absent',
+      ],
+      ['spell_slot', 1, 3],
+    ]);
+  });
+
   it('keeps unknown, missing resource, invalid formula inputs, and invalid spell content absent', () => {
     const unknown = resourceClass(1, 'Chronomancer', 4, {
       catalog: { status: 'not_recorded' },
