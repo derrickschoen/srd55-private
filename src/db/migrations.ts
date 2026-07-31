@@ -25,6 +25,7 @@ import catalogDataMigrations from '../../drizzle/0021_catalog_data_migrations.sq
 import plannedSpellGrants from '../../drizzle/0022_planned_spell_grants.sql?raw';
 import skillExpertiseGrants from '../../drizzle/0023_skill_expertise_grants.sql?raw';
 import featApplicationModel from '../../drizzle/0024_feat_application_model.sql?raw';
+import characterLevelFeatChoices from '../../drizzle/0025_character_level_feat_choices.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -287,6 +288,17 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
       'c461e1ade4138f8367ecb44cc070afdb9649a8094f6075639d73336abe53e97a',
     resultSchemaChecksum:
       'b42c12a14a2ea84a04719df186d1c54d7b503af9da0e0a11a2993749fa6d37fb',
+  }),
+  // LU-1: one durable class-level feat occurrence points at its granting class
+  // row and, when resolved, the same-character feat source that owns effects
+  // and grants. A null pointer is the D70 Epic Boon defer state.
+  Object.freeze({
+    id: '0025_character_level_feat_choices',
+    sql: characterLevelFeatChoices,
+    checksum:
+      '4321a4d797d147328b1b91d42422ff94082418d13ddc4bcde33401c0f56b6352',
+    resultSchemaChecksum:
+      'd6302b837b792ed57d222bce6fb20eee1eab945d38a5689ae25a4a88fc48d026',
   }),
 ]);
 

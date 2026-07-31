@@ -45,6 +45,7 @@ import {
   character_rule_overrides,
   character_save_points,
   character_skill_expertise_grants,
+  character_level_feat_choices,
   character_skill_grants,
   character_source_instances,
   character_spell_preferences,
@@ -130,6 +131,7 @@ export const charactersRelations = relations(characters, ({ many }) => ({
   skill_proficiencies: many(character_skill_proficiencies),
   skill_grants: many(character_skill_grants),
   expertise_grants: many(character_skill_expertise_grants),
+  level_feat_choices: many(character_level_feat_choices),
   sheet_adjustments: many(character_sheet_adjustments),
   effects: many(character_effects),
   items: many(character_items),
@@ -528,6 +530,33 @@ export const characterSkillExpertiseGrantsRelations = relations(
       fields: [
         character_skill_expertise_grants.source_instance_id,
         character_skill_expertise_grants.character_id,
+      ],
+      references: [
+        character_source_instances.id,
+        character_source_instances.character_id,
+      ],
+    }),
+  }),
+);
+
+export const characterLevelFeatChoicesRelations = relations(
+  character_level_feat_choices,
+  ({ one }) => ({
+    character: one(characters, {
+      fields: [character_level_feat_choices.character_id],
+      references: [characters.id],
+    }),
+    class_level: one(character_class_levels, {
+      fields: [
+        character_level_feat_choices.character_class_level_id,
+        character_level_feat_choices.character_id,
+      ],
+      references: [character_class_levels.id, character_class_levels.character_id],
+    }),
+    feat_source: one(character_source_instances, {
+      fields: [
+        character_level_feat_choices.feat_source_instance_id,
+        character_level_feat_choices.character_id,
       ],
       references: [
         character_source_instances.id,

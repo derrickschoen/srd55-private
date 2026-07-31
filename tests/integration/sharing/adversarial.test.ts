@@ -1810,8 +1810,8 @@ describe('adversarial character-share rejection', () => {
       null,
     ];
     const cases: Array<[unknown, RegExp]> = [
-      [[...positional.slice(0, 10)], /tuple of length 20/],
-      [[...positional, null], /tuple of length 20/],
+      [[...positional.slice(0, 10)], /tuple of length 21/],
+      [[...positional, null], /tuple of length 21/],
       [
         ['wrong-format', ...positional.slice(1)],
         /format is unsupported/,

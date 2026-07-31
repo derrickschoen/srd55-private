@@ -530,6 +530,48 @@ const VERSION_FIXTURES = {
       }],
     },
   },
+  16: {
+    // Independently compressed from the hand-authored v16 positional tuple
+    // above this fixture's expected object. Its final root member preserves an
+    // explicitly deferred Epic Boon occurrence without inventing a feat ref.
+    fragment:
+      'H4sIAAAAAAAAA41PzQqDMAx-Fck5BSvbQO-DPcEupUhXwyzLrLQV9vjDMkHdYYOQHL7fKOiGTjwnTs6yiVHEkZijsL0JxiYKIvYmEKA8oYKrPBbn10ghuUjFhYIHHCbmGc33z6VRqRKhKqtDk2Ob4O8TLWY1yr1Ao9rOzlV9BawwiIkMpx70Wpcr5PQ2PhwzoMSfTFq-b-XM3ypmnqwRaHS2vXk_wKe8fgNIOCXKZwEAAA',
+    expected: {
+      format: CHARACTER_SHARE_FORMAT,
+      version: CHARACTER_SHARE_VERSION,
+      character: { name: 'V15 Expertise Hero', dexterity: 16 },
+      classes: [{
+        id: 0,
+        classKey: '2024:class:rogue',
+        level: 19,
+        start: 1,
+      }],
+      sources: [],
+      selections: [],
+      spellbook: [],
+      preferences: [],
+      overrides: [],
+      skillProficiencies: ['stealth'],
+      skillGrants: [{
+        ref: 0,
+        grantKey: 'class_skill',
+        ordinal: 1,
+        skill: 'stealth',
+      }],
+      expertiseGrants: [{
+        ref: 0,
+        grantKey: 'class_expertise_1',
+        ordinal: 1,
+        grantedAtClassLevel: 1,
+        skill: 'stealth',
+      }],
+      levelFeatChoices: [{
+        classRef: 0,
+        classLevel: 19,
+        choiceKind: 'epic_boon',
+      }],
+    },
+  },
 } satisfies Record<SupportedShareVersion, FrozenFixture>;
 
 const HISTORICAL_SCHEMA_MODULE_SHA256 = {

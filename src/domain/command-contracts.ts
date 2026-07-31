@@ -161,6 +161,17 @@ export interface LevelUpAbilityIncrease {
   amount: number;
 }
 
+export interface LevelFeatSelection {
+  kind: 'feat';
+  feat_content_key: string;
+  config: JsonObject;
+  ability_increases: readonly LevelUpAbilityIncrease[];
+}
+
+export type LevelFeatChoice =
+  | LevelFeatSelection
+  | { kind: 'defer_epic_boon' };
+
 /**
  * THE ONE LEVELLING PATH (level-up plan §8b): one command, one payload, one
  * transaction, one snapshot inverse, one refusal set.
@@ -170,20 +181,27 @@ export interface LevelUpAbilityIncrease {
  * omission: hit points at every level past the first are the class's fixed
  * value (`die / 2 + 1`) plus the Constitution modifier, computed live by the
  * sheet — nothing per level is recorded, so there is nothing to carry.
- * `subclass_content_key` is required exactly when the new level is 3 (all
- * twelve seeded 2024 classes subclass at 3); `ability_increases` is required
+ * `subclass_content_key` is offered exactly when the new level is 3 (all
+ * twelve seeded 2024 classes subclass at 3); `feat_choice` is required
  * exactly when the new level is an ASI level READ FROM THE SEEDED TABLE
  * (`src/rules/class-level-features-srd.ts` — never a hardcoded list, which is
  * the D15 mistake §5 names; D78 records that even the plan's own enumeration
- * of those levels was wrong). The increases field is a LIST of one or two
- * entries because a singular field cannot express the +1/+1 arm.
+ * of those levels was wrong). ASI is one ordinary feat selection, and every
+ * selected feat carries its own typed point choices through the same arm.
  */
 export interface LevelUpClassCommand extends CommandBase {
   type: 'level_up_class';
   class_definition_id: number;
   target_level: number;
   subclass_content_key?: string;
-  ability_increases?: readonly LevelUpAbilityIncrease[];
+  feat_choice?: LevelFeatChoice;
+}
+
+/** Fill a durable deferred Epic Boon occurrence without moving a class level. */
+export interface ResolveLevelFeatChoiceCommand extends CommandBase {
+  type: 'resolve_level_feat_choice';
+  character_level_feat_choice_id: number;
+  feat_choice: LevelFeatSelection;
 }
 
 /**
@@ -408,6 +426,7 @@ export type CharacterCommandPayload =
   | AcknowledgeWarningCommand
   | UpdateClassCommand
   | LevelUpClassCommand
+  | ResolveLevelFeatChoiceCommand
   | AddWeaponCommand
   | UpdateWeaponCommand
   | RemoveWeaponCommand

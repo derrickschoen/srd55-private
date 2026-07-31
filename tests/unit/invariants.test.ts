@@ -250,6 +250,7 @@ describe(`ported persistence invariants (${sourceLabel})`, () => {
       'catalog_register_subclass_identity_before_insert',
       'catalog_register_weapon_identity_before_insert',
       'character_items_clear_attunement_slots_before_delete',
+      'character_sources_clear_level_feat_choices_before_delete',
       'spell_slots_exclusive_assignment_insert',
       'spell_slots_exclusive_assignment_update',
     ]);

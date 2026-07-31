@@ -63,6 +63,7 @@ function minimalCharacterBackup(): CharacterBackupDocument {
       character_skill_expertise_grants: [],
       character_items: [],
       character_attunement_slots: [],
+      character_level_feat_choices: [],
     },
     references: {
       class_definitions: [],
