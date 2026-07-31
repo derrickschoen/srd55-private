@@ -24,6 +24,7 @@ import contentIdentityRegistry from '../../drizzle/0020_content_identity_registr
 import catalogDataMigrations from '../../drizzle/0021_catalog_data_migrations.sql?raw';
 import plannedSpellGrants from '../../drizzle/0022_planned_spell_grants.sql?raw';
 import skillExpertiseGrants from '../../drizzle/0023_skill_expertise_grants.sql?raw';
+import featApplicationModel from '../../drizzle/0024_feat_application_model.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -275,6 +276,17 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
       '252d36eaca2040d739010fcab191fc7dc2c9b5f91cad92c33104eb8eacd3bed4',
     resultSchemaChecksum:
       '077eb42c0459e9766ae01119de7baad086c8670364e4e6ed7092bda0e15023b5',
+  }),
+  // LU-0: the recipient-seeded feat catalog gains all four source groupings,
+  // typed ability options/caps and the data needed by the pure eligibility and
+  // application planner. No character-owned or portable row changes.
+  Object.freeze({
+    id: '0024_feat_application_model',
+    sql: featApplicationModel,
+    checksum:
+      'c461e1ade4138f8367ecb44cc070afdb9649a8094f6075639d73336abe53e97a',
+    resultSchemaChecksum:
+      'b42c12a14a2ea84a04719df186d1c54d7b503af9da0e0a11a2993749fa6d37fb',
   }),
 ]);
 

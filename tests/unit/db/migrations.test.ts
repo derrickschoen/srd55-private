@@ -728,6 +728,8 @@ describe('database migration chain', () => {
       category: 'homebrew-group',
       min_level: null,
       ability_points: 0,
+      ability_increase_abilities: null,
+      ability_increase_maximum: null,
       repeatable: 1,
       prerequisites: '{"feature":"Migration Feature"}',
       grant_rules: '[{"kind":"migration-grant"}]',

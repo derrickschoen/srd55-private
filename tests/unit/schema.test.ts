@@ -177,10 +177,13 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
     numeric: ['created_at', 'updated_at'],
   },
   feat_definitions: {
-    integer: ['id', 'min_level', 'ability_points', 'repeatable'],
+    integer: [
+      'id', 'min_level', 'ability_points', 'ability_increase_maximum',
+      'repeatable',
+    ],
     text: [
-      'content_key', 'name', 'rules_edition', 'category', 'prerequisites',
-      'grant_rules', 'notes',
+      'content_key', 'name', 'rules_edition', 'category',
+      'ability_increase_abilities', 'prerequisites', 'grant_rules', 'notes',
     ],
     numeric: ['created_at', 'updated_at'],
   },

@@ -5,18 +5,190 @@
  * depend on them. Keep SRD readers out of this module so node-side RPC and
  * browser test processes can import the contract without a Vite `?raw` edge.
  */
-import type { Skill } from '../domain/enums';
+import type {
+  Ability,
+  CharacterLevel,
+  KnownFeatGrouping,
+  Skill,
+} from '../domain/enums';
 import type {
   CharacterId,
   CharacterRevision,
   ClassDefinitionId,
   ClassLevel,
+  ContentKey,
   GrantOrdinal,
   GrantRuleKey,
   SourceInstanceId,
   SpellVersionId,
 } from '../domain/ids';
+import type { EquipmentEffectInput } from '../domain/equipment-effects';
+import type { JsonObject } from '../domain/models';
 import type { EligibleSpell } from '../domain/read-models';
+import type { GrantRuleObject } from '../grants/grant-rule';
+
+export type AbilityIncreaseAbilities = 'any' | readonly Ability[];
+
+export const featPrerequisiteFeatures = [
+  'fighting_style',
+  'spellcasting',
+] as const;
+export type FeatPrerequisiteFeature =
+  (typeof featPrerequisiteFeatures)[number];
+
+export type FeatPrerequisite =
+  | {
+      readonly kind: 'ability_score';
+      readonly abilities: readonly Ability[];
+      readonly minimum: number;
+    }
+  | {
+      readonly kind: 'feature';
+      readonly feature: FeatPrerequisiteFeature;
+    };
+
+export type FeatFeatureEvidence = Readonly<
+  Record<FeatPrerequisiteFeature, 'present' | 'absent' | 'unprovable'>
+>;
+
+export interface ActiveFeatInstance {
+  readonly feat_content_key: ContentKey;
+  readonly config: JsonObject;
+}
+
+export interface ProjectedFeatCharacter {
+  readonly total_level: CharacterLevel;
+  readonly ability_scores: Readonly<Record<Ability, number | null>>;
+  readonly feature_evidence: FeatFeatureEvidence;
+  readonly active_feats: readonly ActiveFeatInstance[];
+}
+
+export type FeatUnmetReason =
+  | {
+      readonly kind: 'minimum_level';
+      readonly minimum: CharacterLevel;
+      readonly actual: CharacterLevel;
+    }
+  | {
+      readonly kind: 'ability_score_minimum';
+      readonly abilities: readonly Ability[];
+      readonly minimum: number;
+      readonly actual: readonly (number | null)[];
+    }
+  | {
+      readonly kind: 'feature_missing';
+      readonly feature: FeatPrerequisiteFeature;
+    }
+  | { readonly kind: 'already_taken' }
+  | {
+      readonly kind: 'repeat_configuration_unavailable';
+      readonly field: 'chosen_list';
+    }
+  | {
+      readonly kind: 'repeat_configuration_already_used';
+      readonly field: 'chosen_list';
+      readonly value: string;
+    };
+
+export type FeatUnprovableReason =
+  | {
+      readonly kind: 'ability_score_unknown';
+      readonly abilities: readonly Ability[];
+      readonly minimum: number;
+    }
+  | {
+      readonly kind: 'feature_unprovable';
+      readonly feature: FeatPrerequisiteFeature;
+    }
+  | {
+      readonly kind: 'repeat_configuration_unprovable';
+      readonly field: 'chosen_list';
+    };
+
+export type FeatEligibilityReason =
+  | FeatUnmetReason
+  | FeatUnprovableReason;
+
+export type FeatEligibilityResult =
+  | {
+      readonly status: 'qualified';
+      readonly reasons: readonly [];
+    }
+  | {
+      readonly status: 'unmet';
+      /**
+       * Definite failures come first, followed by any additional facts the
+       * projected character cannot prove. The unmet status wins without
+       * discarding useful card-level evidence.
+       */
+      readonly reasons: readonly FeatEligibilityReason[];
+    }
+  | {
+      readonly status: 'unprovable';
+      readonly reasons: readonly FeatUnprovableReason[];
+    };
+
+export type DerivedNumberId =
+  | 'initiative'
+  | 'ranged_weapon_attack_bonus'
+  | 'armor_class';
+
+export type FeatTextGap =
+  | 'initiative_proficiency_unmodelled'
+  | 'initiative_swap_text_only'
+  | 'spell_change_unmodelled'
+  | 'weapon_reroll_text_only'
+  | 'tool_alternative_unmodelled'
+  | 'grapple_benefit_text_only'
+  | 'ranged_weapon_predicate_unmodelled'
+  | 'armor_worn_predicate_unmodelled'
+  | 'damage_die_replacement_unmodelled'
+  | 'light_weapon_attack_predicate_unmodelled'
+  | 'epic_boon_benefit_text_only'
+  | 'conditional_resistance_unmodelled'
+  | 'senses_unmodelled';
+
+export interface FeatTextBenefit {
+  readonly benefit_key: string;
+  readonly label: string;
+  /** Exact sourced text, never a reconstructed summary. */
+  readonly text: string;
+  readonly gap: FeatTextGap;
+}
+
+export type PlannedCharacterEffect = EquipmentEffectInput;
+
+export interface FeatApplicationPlan {
+  readonly feat_content_key: ContentKey;
+  readonly eligibility: FeatEligibilityResult;
+  readonly config: JsonObject;
+  readonly effects: readonly PlannedCharacterEffect[];
+  readonly grant_rules: readonly GrantRuleObject[];
+  readonly text_benefits: readonly FeatTextBenefit[];
+  readonly undetermined_numbers: readonly DerivedNumberId[];
+}
+
+export interface FeatSpellReplacementEntitlement {
+  readonly feat_content_key: ContentKey;
+  readonly trigger: 'character_level';
+  readonly rule_keys: readonly GrantRuleKey[];
+  readonly replacement_constraint: 'same_list_and_level';
+  readonly list_config_key: 'chosen_list';
+}
+
+export interface FeatDefinitionForApplication {
+  readonly content_key: ContentKey;
+  readonly name: string;
+  readonly grouping: KnownFeatGrouping;
+  readonly min_level: CharacterLevel | null;
+  readonly ability_points: 0 | 1 | 2;
+  readonly ability_increase_abilities: AbilityIncreaseAbilities | null;
+  readonly ability_increase_maximum: number | null;
+  readonly repeatable: boolean;
+  readonly prerequisites: readonly FeatPrerequisite[];
+  readonly grant_rules: readonly GrantRuleObject[];
+  readonly notes: string;
+}
 
 export type LevelUpStep =
   | 'class'
