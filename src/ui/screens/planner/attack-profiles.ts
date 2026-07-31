@@ -32,8 +32,8 @@
  * option carries its own and the line follows the control.
  *
  * COPY CONSTRAINT: `tests/browser/attribution.spec.ts` asserts that
- * `/D&D|Dungeons|Wizards/` appears in neither the page title nor the body text.
- * Every string here is written under that rule.
+ * licensor wordmarks appear in neither the page title nor the body text. Every
+ * string here is written under that rule.
  */
 import type {
   AbilityOption,
