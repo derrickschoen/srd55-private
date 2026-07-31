@@ -35,4 +35,13 @@ analysis, no strike limit; D137 whole queue including HA/CI.
 - (none open — all prior defaults ratified or overridden by D118-D137)
 
 ## Codex-review rejection log (D135 step 5b)
-- (empty)
+- D91-M round 1: candidate-discovery pass for unknown formula features —
+  REJECTED (extract SHA-pinned by srd-extract-provenance.test.ts; formula
+  inventory design-time exhaustive). Defects 1-3 + 4a accepted and fixed.
+- D91-M round 2: word-overlap header-masking edge (Focus Uses/Focus Points)
+  — REJECTED (checksum test precedes the parser; realistic re-extract
+  failure covered by the fixed non-overlapping case; adversarial-input
+  construction, same rationale as round-1 4b). All four fixes verified
+  real by the reviewer. Round 2 otherwise CLEAN; unit proceeds to merge on
+  Playwright green (fix-gate: build 0, vitest 192/3,132, control 7-kill/
+  13-restore).
