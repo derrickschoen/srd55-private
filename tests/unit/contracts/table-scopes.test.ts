@@ -99,6 +99,11 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       // its parent because `e` precedes `t`.
       'background_equipment_items',
       'background_templates',
+      // CI-2a registry state is application data but not character-scoped.
+      'catalog_content_aliases',
+      'catalog_content_fingerprints',
+      'catalog_content_identities',
+      'catalog_content_match_decisions',
       'class_equipment_items',
       'change_log',
       'character_armor',
@@ -314,7 +319,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
 });
 
 describe('table scope classification', () => {
-  it('classifies all 66 tables exactly once', () => {
+  it('classifies all 70 tables exactly once', () => {
     const names = Object.keys(TABLE_SCOPES);
     // 30 Laravel-derived tables — 38 until the eight Laravel-only
     // infrastructure ones were dropped — plus the four native weapon tables,
@@ -326,11 +331,12 @@ describe('table scope classification', () => {
     // `spell_version_cantrip_upgrade_levels` (character levels), the ONE
     // skills-with-provenance table, `character_skill_grants` (S-A), and the
     // ONE items table, `character_items` (AC-1, D72), and D92's ONE
-    // fixed-capacity attunement table. Each group is named
+    // fixed-capacity attunement table, plus CI-2a's FOUR catalog registry
+    // tables. Each group is named
     // rather than folded into one total, so a group that vanishes while
     // another grows cannot pass unnoticed.
-    expect(names).toHaveLength(66);
-    expect(new Set(names).size).toBe(66);
+    expect(names).toHaveLength(70);
+    expect(new Set(names).size).toBe(70);
     expect([...names].sort()).toEqual([...APPLICATION_TABLES].sort());
   });
 

@@ -16,6 +16,8 @@ import type {
   TableFor,
 } from './tables';
 import {
+  catalogContentFingerprintInvariantError,
+  catalogContentIdentityInvariantError,
   weaponDamagePayloadError,
   weaponRangePayloadError,
 } from './row-rules';
@@ -59,6 +61,17 @@ import {
   weaponProficiencyCategories,
 } from '../enums';
 import { weaponRangeKinds } from '../weapon-range';
+import {
+  CONTENT_FINGERPRINT_SCHEME_V1,
+  contentKinds,
+} from '../../catalog/content-identity';
+import {
+  catalogContentAliasKinds,
+  catalogContentFingerprintRoles,
+  catalogContentKeyKinds,
+  catalogContentLayers,
+  catalogContentMatchDecisions,
+} from '../../catalog/content-registry';
 
 /**
  * PER-TABLE ROW CONTRACTS FOR UNTRUSTED ROWS.
@@ -348,6 +361,16 @@ const creatureSizeVocabulary = z.string().transform(creatureSize);
 const damageTypeEnum = z.enum(damageTypes);
 const creatureTypeEnum = z.enum(creatureTypes);
 const creatureSizeEnum = z.enum(creatureSizes);
+const contentKindEnum = z.enum(contentKinds);
+const contentKeyKindEnum = z.enum(catalogContentKeyKinds);
+const contentLayerEnum = z.enum(catalogContentLayers);
+const contentFingerprintSchemeEnum = z.literal(
+  CONTENT_FINGERPRINT_SCHEME_V1,
+);
+const contentFingerprintRoleEnum = z.enum(catalogContentFingerprintRoles);
+const contentAliasKindEnum = z.enum(catalogContentAliasKinds);
+const contentMatchDecisionEnum = z.enum(catalogContentMatchDecisions);
+const contentFingerprintDigest = z.string().regex(/^[0-9a-f]{64}$/);
 
 /**
  * THE CLOSED SET of shared refinements.
@@ -408,6 +431,14 @@ export const COLUMN_REFINEMENTS = {
   damageTypeEnum,
   creatureTypeEnum,
   creatureSizeEnum,
+  contentKindEnum,
+  contentKeyKindEnum,
+  contentLayerEnum,
+  contentFingerprintSchemeEnum,
+  contentFingerprintRoleEnum,
+  contentAliasKindEnum,
+  contentMatchDecisionEnum,
+  contentFingerprintDigest,
 } as const;
 
 /**
@@ -470,6 +501,12 @@ export const NARROWED_REFINEMENTS: readonly {
     reason:
       'What drizzle-zod itself established for an `integer()` column, and what the pre-existing validator asserted with `Number.isSafeInteger`.',
   },
+  {
+    name: 'contentFingerprintDigest',
+    rejects: 'not-a-sha256-digest',
+    reason:
+      'Matches the registry tables’ lowercase 64-hex CHECK constraints exactly.',
+  },
 ];
 
 // --- the tables that get a row contract ------------------------------------
@@ -513,6 +550,10 @@ export type RowContractTable =
  * fails to compile if any of these contracts refuses a value the column allows.
  */
 type NativeContractTable =
+  | 'catalog_content_identities'
+  | 'catalog_content_fingerprints'
+  | 'catalog_content_aliases'
+  | 'catalog_content_match_decisions'
   | 'feat_definitions'
   | 'character_weapons'
   | 'weapon_templates'
@@ -573,6 +614,38 @@ type OptionalRefinementKey = Exclude<
  * forbids.
  */
 const REFINEMENTS = {
+  // --- catalog content identity registry ---------------------------------
+  'catalog_content_identities.content_key': nonEmptyText,
+  'catalog_content_identities.content_kind': contentKindEnum,
+  'catalog_content_identities.key_kind': contentKeyKindEnum,
+  'catalog_content_identities.catalog_layer': contentLayerEnum,
+  'catalog_content_identities.normalized_name': nonEmptyText,
+  'catalog_content_identities.created_at': sqlTimestamp,
+
+  'catalog_content_fingerprints.content_kind': contentKindEnum,
+  'catalog_content_fingerprints.fingerprint_scheme':
+    contentFingerprintSchemeEnum,
+  'catalog_content_fingerprints.fingerprint_digest':
+    contentFingerprintDigest,
+  'catalog_content_fingerprints.canonical_json': sqlText,
+  'catalog_content_fingerprints.content_key': nonEmptyText,
+  'catalog_content_fingerprints.fingerprint_role':
+    contentFingerprintRoleEnum,
+
+  'catalog_content_aliases.content_kind': contentKindEnum,
+  'catalog_content_aliases.alias_key': nonEmptyText,
+  'catalog_content_aliases.content_key': nonEmptyText,
+  'catalog_content_aliases.alias_kind': contentAliasKindEnum,
+
+  'catalog_content_match_decisions.content_kind': contentKindEnum,
+  'catalog_content_match_decisions.incoming_fingerprint_scheme':
+    contentFingerprintSchemeEnum,
+  'catalog_content_match_decisions.incoming_fingerprint_digest':
+    contentFingerprintDigest,
+  'catalog_content_match_decisions.decision': contentMatchDecisionEnum,
+  'catalog_content_match_decisions.target_content_key': nonEmptyText,
+  'catalog_content_match_decisions.reviewed_at': sqlTimestamp,
+
   // --- bundled feat catalog -----------------------------------------------
   'feat_definitions.id': positiveInt,
   'feat_definitions.content_key': nonEmptyText,
@@ -1297,6 +1370,18 @@ export function rowContractError(
 ): string | null {
   const result = contractFor(table, only).safeParse(row);
   if (result.success) {
+    if (only === undefined && table === 'catalog_content_identities') {
+      return catalogContentIdentityInvariantError(
+        result.data as Readonly<Record<string, unknown>>,
+        label,
+      );
+    }
+    if (only === undefined && table === 'catalog_content_fingerprints') {
+      return catalogContentFingerprintInvariantError(
+        result.data as Readonly<Record<string, unknown>>,
+        label,
+      );
+    }
     if (
       only === undefined &&
       (table === 'character_weapons' || table === 'weapon_templates')

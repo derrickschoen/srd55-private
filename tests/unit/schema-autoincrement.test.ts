@@ -149,18 +149,18 @@ const allAutoIncrementTables = [
  * The tables whose primary key is a natural key rather than a rowid alias, and
  * which therefore cannot carry AUTOINCREMENT.
  *
- * EMPTY NOW, AND STILL WORTH ASSERTING. All five — `cache`, `cache_locks`,
- * `job_batches`, `password_reset_tokens`, `sessions` — were Laravel-only tables
- * and left with the other eight, so the "33 of 38 from both directions" framing
- * is genuinely gone and is not pretended otherwise. What the empty list still
- * says is a real, failable claim about the schema as it stands: EVERY table has
- * a surrogate autoincrementing key, the four native weapon tables and the six
- * native origins tables included. A
- * table added with a natural primary key fails here and forces the decision to
- * be made deliberately, which is the only thing the second direction ever
- * bought.
+ * CI-2a's four recipient-local registry tables are keyed by their content or
+ * fingerprint tuples, just as D92's one-row-per-character attunement slots are
+ * keyed by character_id. A table added with a natural primary key fails here
+ * and forces the decision to be made deliberately.
  */
-const naturalKeyTables = ['character_attunement_slots'] as const;
+const naturalKeyTables = [
+  'catalog_content_aliases',
+  'catalog_content_fingerprints',
+  'catalog_content_identities',
+  'catalog_content_match_decisions',
+  'character_attunement_slots',
+] as const;
 
 let sqlite3: Sqlite3Static;
 const openDatabases: Database[] = [];

@@ -42,9 +42,48 @@
  * already established.
  */
 import { WEAPON_RANGE_MAX_FEET } from '../weapon-limits';
+import { sha256 } from '../../crypto/sha256';
+import { parseDerivedContentKeyV1 } from '../../catalog/content-identity';
 
 /** A row as it arrives from JSON: keys are strings, values are not yet trusted. */
 type UntrustedRow = Readonly<Record<string, unknown>>;
+
+export function catalogContentIdentityInvariantError(
+  row: UntrustedRow,
+  label: string,
+): string | null {
+  const keyKind = row.key_kind;
+  const layer = row.catalog_layer;
+  if (
+    keyKind === 'derived' &&
+    layer === 'external' &&
+    typeof row.content_key === 'string' &&
+    parseDerivedContentKeyV1(row.content_key) !== null
+  ) {
+    return null;
+  }
+  if (keyKind === 'bundled-stable' && layer === 'bundled') {
+    return null;
+  }
+  if (keyKind === 'legacy-opaque' && layer === 'external') {
+    return null;
+  }
+  return `${label} has an invalid key-kind/catalog-layer identity combination.`;
+}
+
+export function catalogContentFingerprintInvariantError(
+  row: UntrustedRow,
+  label: string,
+): string | null {
+  if (
+    typeof row.canonical_json === 'string' &&
+    typeof row.fingerprint_digest === 'string' &&
+    sha256(row.canonical_json) === row.fingerprint_digest
+  ) {
+    return null;
+  }
+  return `${label} has canonical bytes that do not produce its fingerprint digest.`;
+}
 
 /**
  * Every row carries a positive integer `id`, and no two rows carry the same one.

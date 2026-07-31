@@ -1,4 +1,5 @@
 import type { Brand } from '../domain/ids';
+import type { ContentKey } from '../domain/ids';
 import { sha256 } from '../crypto/sha256';
 import { isCatalogKeyComponent } from './catalog-key';
 
@@ -41,22 +42,24 @@ export type ContentFingerprintDigest = Brand<
   string,
   'ContentFingerprintDigest'
 >;
-export type DerivedContentKey = Brand<string, 'DerivedContentKey'>;
+export type DerivedContentKey = Brand<ContentKey, 'DerivedContentKey'>;
 export type CanonicalContentIdentityJson = Brand<
   string,
   'CanonicalContentIdentityJson'
 >;
 
-export type ContentKind =
-  | 'class'
-  | 'subclass'
-  | 'feat'
-  | 'species'
-  | 'background'
-  | 'spell'
-  | 'weapon'
-  | 'armor'
-  | 'item';
+export const contentKinds = [
+  'class',
+  'subclass',
+  'feat',
+  'species',
+  'background',
+  'spell',
+  'weapon',
+  'armor',
+  'item',
+] as const;
+export type ContentKind = (typeof contentKinds)[number];
 
 export const CONTENT_FINGERPRINT_SCHEME_V1 =
   'content-v1' as ContentFingerprintScheme;

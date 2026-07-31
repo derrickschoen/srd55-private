@@ -133,7 +133,7 @@ afterAll(() => {
 });
 
 describe('declared relations match the foreign keys', () => {
-  it('budgets 77 constraints across 87 PRAGMA rows', () => {
+  it('budgets 90 constraints across 103 PRAGMA rows', () => {
     const tables = db
       .selectValues(
         `SELECT name FROM sqlite_schema
@@ -223,8 +223,10 @@ describe('declared relations match the foreign keys', () => {
     // two constraints, four PRAGMA rows.
     // D92 adds one character edge and three composite item/character guards:
     // four constraints across seven PRAGMA rows.
-    expect(constraintEdges(db)).toHaveLength(77);
-    expect(rowCount).toBe(87);
+    // CI-2a adds ten root-key constraints and three composite registry-child
+    // constraints. The latter contribute six PRAGMA rows.
+    expect(constraintEdges(db)).toHaveLength(90);
+    expect(rowCount).toBe(103);
   });
 
   it('declares a relation for every foreign key, and a foreign key for every relation', () => {
@@ -233,7 +235,7 @@ describe('declared relations match the foreign keys', () => {
     expect(declaredEdges()).toEqual(constraintEdges(db));
   });
 
-  it('keeps all ten composite foreign keys composite', () => {
+  it('keeps all thirteen composite foreign keys composite', () => {
     const edges = declaredEdges();
     expect(edges).toContain(
       'character_class_levels: subclass_definition_id,class_definition_id -> subclass_definitions.id,class_definition_id',
@@ -267,6 +269,15 @@ describe('declared relations match the foreign keys', () => {
     );
     expect(edges).toContain(
       'character_effects: character_weapon_id,character_id -> character_weapons.id,character_id',
+    );
+    expect(edges).toContain(
+      'catalog_content_fingerprints: content_kind,content_key -> catalog_content_identities.content_kind,content_key',
+    );
+    expect(edges).toContain(
+      'catalog_content_aliases: content_kind,content_key -> catalog_content_identities.content_kind,content_key',
+    );
+    expect(edges).toContain(
+      'catalog_content_match_decisions: content_kind,target_content_key -> catalog_content_identities.content_kind,content_key',
     );
   });
 

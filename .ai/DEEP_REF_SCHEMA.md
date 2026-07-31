@@ -77,7 +77,7 @@ artifact, keep the split.
 |---|---|
 | `generated/column-facts.ts` | GENERATED. Per-column facts: does the column exist, is it `notNull`, could drizzle-zod type it |
 | `generated/reference-facts.ts` | GENERATED. Catalog tables a backup resolves references against |
-| `rows.ts` | The Zod contracts. `COLUMN_REFINEMENTS` (`:360`), `NARROWED_REFINEMENTS` (`:426`), `rowContractError` (`:1292`) |
+| `rows.ts` | The Zod contracts. `COLUMN_REFINEMENTS` (`:383`), `NARROWED_REFINEMENTS` (`:457`), `rowContractError` (`:1365`) |
 | `row-rules.ts` | Cross-column rules a per-column contract cannot express |
 | `json-columns.ts` | WHICH text columns hold serialized JSON, and what SHAPE each reader needs |
 | `tables.ts` | The table inventory and scope classification — §3 below |
@@ -112,7 +112,7 @@ used to be hand-maintained in at least four places that did not know about each
 other, and adding a table told you nothing about whether it belonged in
 snapshots, backups, shares, both or neither.
 
-`TABLE_SCOPES` (`:165`) classifies EVERY table with:
+`TABLE_SCOPES` (`:167`) classifies EVERY table with:
 
 | Field | Meaning |
 |---|---|
@@ -137,10 +137,10 @@ Two mechanisms make this stick, and they are worth knowing by name:
    without that column is `Type 'true' is not assignable to type 'false'`. That
    fact previously lived only in a reviewer's head.
 
-Derived from the classification: `SnapshotTable` (`:1029`), `BackupTable` (`:1031`),
-`ShareTable` (`:1032`), and the ordered constants `CHARACTER_STATE_TABLES`
-(`:1221`), `DELETE_ORDER` (`:1302`), `BACKUP_TABLES` (`:1365`), `SHARE_TABLES`
-(`:1456`).
+Derived from the classification: `SnapshotTable` (`:1069`), `BackupTable` (`:1071`),
+`ShareTable` (`:1072`), and the ordered constants `CHARACTER_STATE_TABLES`
+(`:1265`), `DELETE_ORDER` (`:1346`), `BACKUP_TABLES` (`:1409`), `SHARE_TABLES`
+(`:1500`).
 
 **Classification is not the same as working.** That was Q8's bug, and D24 records
 the discipline that replaced it: each arm gets its own test — a column-for-column

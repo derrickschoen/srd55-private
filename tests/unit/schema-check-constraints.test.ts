@@ -3058,6 +3058,24 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
 const COVERED_ELSEWHERE = [
   'spell_slots_exclusive_assignment_check',
   'character_weapons_mastery_requires_property_check',
+  // CI-2a's closed vocabularies and correlated registry invariants are
+  // exercised together in content-registry.test.ts, where the resolver API
+  // and the stored rows are visible in the same control.
+  'catalog_content_aliases_alias_kind_check',
+  'catalog_content_aliases_content_kind_check',
+  'catalog_content_fingerprints_content_kind_check',
+  'catalog_content_fingerprints_digest_check',
+  'catalog_content_fingerprints_role_check',
+  'catalog_content_fingerprints_scheme_check',
+  'catalog_content_identities_catalog_layer_check',
+  'catalog_content_identities_content_kind_check',
+  'catalog_content_identities_key_kind_check',
+  'catalog_content_identities_key_layer_check',
+  'catalog_content_identities_normalized_name_check',
+  'catalog_content_match_decisions_content_kind_check',
+  'catalog_content_match_decisions_decision_check',
+  'catalog_content_match_decisions_digest_check',
+  'catalog_content_match_decisions_scheme_check',
 ];
 
 for (const [sourceLabel, schemaSql] of schemaSources) {

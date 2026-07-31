@@ -33,6 +33,12 @@ import {
   spell_versions,
 } from './catalog-spells';
 import {
+  catalog_content_aliases,
+  catalog_content_fingerprints,
+  catalog_content_identities,
+  catalog_content_match_decisions,
+} from './catalog-content';
+import {
   change_log,
   character_class_levels,
   character_operations,
@@ -206,7 +212,15 @@ export const characterWeaponsRelations = relations(
  * The weapon catalog points at nothing and nothing points at it. It is reached
  * by name from the picker and copied from; that is the whole of its coupling.
  */
-export const weaponTemplatesRelations = relations(weapon_templates, () => ({}));
+export const weaponTemplatesRelations = relations(
+  weapon_templates,
+  ({ one }) => ({
+    content_identity: one(catalog_content_identities, {
+      fields: [weapon_templates.content_key],
+      references: [catalog_content_identities.content_key],
+    }),
+  }),
+);
 
 export const classEquipmentItemsRelations = relations(
   class_equipment_items,
@@ -242,7 +256,11 @@ export const classEquipmentItemsRelations = relations(
  */
 export const speciesTemplatesRelations = relations(
   species_templates,
-  ({ many }) => ({
+  ({ one, many }) => ({
+    content_identity: one(catalog_content_identities, {
+      fields: [species_templates.content_key],
+      references: [catalog_content_identities.content_key],
+    }),
     traits: many(species_template_traits),
   }),
 );
@@ -261,7 +279,12 @@ export const speciesTemplateTraitsRelations = relations(
 /** Four flat columns and no children; nothing points at it either. */
 export const backgroundTemplatesRelations = relations(
   background_templates,
-  () => ({}),
+  ({ one }) => ({
+    content_identity: one(catalog_content_identities, {
+      fields: [background_templates.content_key],
+      references: [catalog_content_identities.content_key],
+    }),
+  }),
 );
 
 /**
@@ -672,6 +695,10 @@ export const spellIdentityAliasesRelations = relations(
 export const spellVersionsRelations = relations(
   spell_versions,
   ({ one, many }) => ({
+    content_identity: one(catalog_content_identities, {
+      fields: [spell_versions.content_key],
+      references: [catalog_content_identities.content_key],
+    }),
     // NOT NULL: a version ALWAYS resolves to an identity.
     identity: one(spell_identities, {
       fields: [spell_versions.spell_identity_id],
@@ -779,7 +806,11 @@ export const spellVersionSaveAbilitiesRelations = relations(
 
 export const classDefinitionsRelations = relations(
   class_definitions,
-  ({ many }) => ({
+  ({ one, many }) => ({
+    content_identity: one(catalog_content_identities, {
+      fields: [class_definitions.content_key],
+      references: [catalog_content_identities.content_key],
+    }),
     progressions: many(class_progressions),
     subclasses: many(subclass_definitions),
     class_levels: many(character_class_levels),
@@ -883,7 +914,15 @@ export const classMartialArtsDiceRelations = relations(
  * `weapon_templates`, and for the identical D1b reason: a character stores
  * VALUES copied from a template, so there is no column for an edge to sit on.
  */
-export const armorTemplatesRelations = relations(armor_templates, () => ({}));
+export const armorTemplatesRelations = relations(
+  armor_templates,
+  ({ one }) => ({
+    content_identity: one(catalog_content_identities, {
+      fields: [armor_templates.content_key],
+      references: [catalog_content_identities.content_key],
+    }),
+  }),
+);
 
 export const classWeaponMasteryGrantsRelations = relations(
   class_weapon_mastery_grants,
@@ -918,6 +957,10 @@ export const classProgressionsRelations = relations(
 export const subclassDefinitionsRelations = relations(
   subclass_definitions,
   ({ one, many }) => ({
+    content_identity: one(catalog_content_identities, {
+      fields: [subclass_definitions.content_key],
+      references: [catalog_content_identities.content_key],
+    }),
     class_definition: one(class_definitions, {
       fields: [subclass_definitions.class_definition_id],
       references: [class_definitions.id],
@@ -988,12 +1031,97 @@ export const classFeatureEffectsRelations = relations(
 
 // Standalone source definitions are pointed AT polymorphically and have no
 // foreign keys of their own, in either direction.
-export const featDefinitionsRelations = relations(feat_definitions, () => ({}));
+export const featDefinitionsRelations = relations(
+  feat_definitions,
+  ({ one }) => ({
+    content_identity: one(catalog_content_identities, {
+      fields: [feat_definitions.content_key],
+      references: [catalog_content_identities.content_key],
+    }),
+  }),
+);
 export const speciesDefinitionsRelations = relations(
   species_definitions,
-  () => ({}),
+  ({ one }) => ({
+    content_identity: one(catalog_content_identities, {
+      fields: [species_definitions.content_key],
+      references: [catalog_content_identities.content_key],
+    }),
+  }),
 );
 export const backgroundDefinitionsRelations = relations(
   background_definitions,
-  () => ({}),
+  ({ one }) => ({
+    content_identity: one(catalog_content_identities, {
+      fields: [background_definitions.content_key],
+      references: [catalog_content_identities.content_key],
+    }),
+  }),
+);
+
+export const catalogContentIdentitiesRelations = relations(
+  catalog_content_identities,
+  ({ many }) => ({
+    fingerprints: many(catalog_content_fingerprints),
+    aliases: many(catalog_content_aliases),
+    decisions: many(catalog_content_match_decisions),
+    classes: many(class_definitions),
+    subclasses: many(subclass_definitions),
+    feats: many(feat_definitions),
+    species_definitions: many(species_definitions),
+    species_templates: many(species_templates),
+    background_definitions: many(background_definitions),
+    background_templates: many(background_templates),
+    spell_versions: many(spell_versions),
+    weapon_templates: many(weapon_templates),
+    armor_templates: many(armor_templates),
+  }),
+);
+
+export const catalogContentFingerprintsRelations = relations(
+  catalog_content_fingerprints,
+  ({ one }) => ({
+    content_identity: one(catalog_content_identities, {
+      fields: [
+        catalog_content_fingerprints.content_kind,
+        catalog_content_fingerprints.content_key,
+      ],
+      references: [
+        catalog_content_identities.content_kind,
+        catalog_content_identities.content_key,
+      ],
+    }),
+  }),
+);
+
+export const catalogContentAliasesRelations = relations(
+  catalog_content_aliases,
+  ({ one }) => ({
+    content_identity: one(catalog_content_identities, {
+      fields: [
+        catalog_content_aliases.content_kind,
+        catalog_content_aliases.content_key,
+      ],
+      references: [
+        catalog_content_identities.content_kind,
+        catalog_content_identities.content_key,
+      ],
+    }),
+  }),
+);
+
+export const catalogContentMatchDecisionsRelations = relations(
+  catalog_content_match_decisions,
+  ({ one }) => ({
+    target_content_identity: one(catalog_content_identities, {
+      fields: [
+        catalog_content_match_decisions.content_kind,
+        catalog_content_match_decisions.target_content_key,
+      ],
+      references: [
+        catalog_content_identities.content_kind,
+        catalog_content_identities.content_key,
+      ],
+    }),
+  }),
 );

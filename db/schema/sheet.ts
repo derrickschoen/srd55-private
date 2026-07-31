@@ -41,6 +41,7 @@ import {
   tinyint1,
   varchar,
 } from './columns';
+import { catalog_content_identities } from './catalog-content';
 import { class_definitions } from './catalog-classes';
 
 /**
@@ -589,7 +590,9 @@ export const armor_templates = sqliteTable(
       .primaryKey({ autoIncrement: true })
       .notNull()
       .$type<ArmorTemplateId>(),
-    content_key: varchar<ContentKey>()('content_key').notNull(),
+    content_key: varchar<ContentKey>()('content_key')
+      .notNull()
+      .references(() => catalog_content_identities.content_key),
     rules_edition: varchar<RulesEdition>()('rules_edition')
       .notNull()
       .default('2024'),
