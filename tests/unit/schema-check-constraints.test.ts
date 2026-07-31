@@ -319,6 +319,34 @@ const masteryCount =
     });
   };
 
+const classResource =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'class_resources', {
+      class_definition_id: newClass(db),
+      class_level: 5,
+      resource_kind: 'rage',
+      maximum: 3,
+      ...values,
+    });
+  };
+
+const classResourceFormula =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'class_resource_formulas', {
+      class_definition_id: newClass(db),
+      resource_kind: 'bardic_inspiration',
+      formula_kind: 'fixed_count',
+      minimum_class_level: 1,
+      fixed_count: 1,
+      ability: null,
+      multiplier: null,
+      later_fixed_count_steps: null,
+      ...values,
+    });
+  };
+
 // --- sheet core (D11/D12) --------------------------------------------------
 
 const armorTemplate =
@@ -1535,6 +1563,119 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
       ['level 1', classProgression({ class_level: 1 })],
       ['level 20', classProgression({ class_level: 20 })],
     ],
+  },
+  {
+    constraint: 'class_resources_kind_check',
+    rejects: [['an unseeded ladder kind', classResource({ resource_kind: 'ki_points' })]],
+    accepts: [['Focus Points', classResource({ resource_kind: 'focus_points' })]],
+  },
+  {
+    constraint: 'class_resources_level_maximum_check',
+    rejects: [
+      ['class level 0', classResource({ class_level: 0 })],
+      ['class level 21', classResource({ class_level: 21 })],
+      ['fractional class level 1.5', classResource({ class_level: 1.5 })],
+      ['a negative maximum', classResource({ maximum: -1 })],
+      ['a text maximum', classResource({ maximum: 'three' })],
+    ],
+    accepts: [
+      ['the sourced zero before acquisition', classResource({ class_level: 1, maximum: 0 })],
+      ['level 20 with a positive maximum', classResource({ class_level: 20, maximum: 20 })],
+    ],
+  },
+  {
+    constraint: 'class_resource_formulas_resource_kind_check',
+    rejects: [['a feature outside the licensed inventory', classResourceFormula({ resource_kind: 'arcane_recovery' })]],
+    accepts: [['Lay On Hands', classResourceFormula({ resource_kind: 'lay_on_hands' })]],
+  },
+  {
+    constraint: 'class_resource_formulas_formula_kind_check',
+    rejects: [['an arbitrary expression discriminator', classResourceFormula({ formula_kind: 'expression' })]],
+    accepts: [['a sourced fixed count', classResourceFormula({})]],
+  },
+  {
+    constraint: 'class_resource_formulas_level_check',
+    rejects: [
+      ['acquisition level 0', classResourceFormula({ minimum_class_level: 0 })],
+      ['acquisition level 21', classResourceFormula({ minimum_class_level: 21 })],
+      ['fractional acquisition level 1.5', classResourceFormula({ minimum_class_level: 1.5 })],
+    ],
+    accepts: [
+      ['acquisition level 1', classResourceFormula({ minimum_class_level: 1 })],
+      ['acquisition level 20', classResourceFormula({ minimum_class_level: 20 })],
+    ],
+  },
+  {
+    constraint: 'class_resource_formulas_fixed_count_check',
+    rejects: [
+      ['a zero fixed count', classResourceFormula({ fixed_count: 0 })],
+      ['a text fixed count', classResourceFormula({ fixed_count: 'one' })],
+    ],
+    accepts: [['a one-use gate', classResourceFormula({ fixed_count: 1 })]],
+  },
+  {
+    constraint: 'class_resource_formulas_ability_check',
+    rejects: [['an unsupported ability', classResourceFormula({
+      formula_kind: 'ability_modifier_minimum_one',
+      fixed_count: null,
+      ability: 'strength',
+    })]],
+    accepts: [['Wisdom', classResourceFormula({
+      formula_kind: 'ability_modifier_minimum_one',
+      fixed_count: null,
+      ability: 'wisdom',
+    })]],
+  },
+  {
+    constraint: 'class_resource_formulas_multiplier_check',
+    rejects: [['a zero multiplier', classResourceFormula({
+      formula_kind: 'class_level_multiple',
+      fixed_count: null,
+      multiplier: 0,
+    })]],
+    accepts: [['the Lay On Hands multiplier', classResourceFormula({
+      formula_kind: 'class_level_multiple',
+      fixed_count: null,
+      multiplier: 5,
+    })]],
+  },
+  {
+    constraint: 'class_resource_formulas_payload_check',
+    rejects: [
+      ['a fixed count with a stray ability', classResourceFormula({ ability: 'charisma' })],
+      ['an ability formula without an ability', classResourceFormula({
+        formula_kind: 'ability_modifier_minimum_one',
+        fixed_count: null,
+      })],
+      ['a stepped formula without later steps', classResourceFormula({
+        formula_kind: 'fixed_count_by_class_level',
+      })],
+    ],
+    accepts: [['a complete stepped payload', classResourceFormula({
+      formula_kind: 'fixed_count_by_class_level',
+      later_fixed_count_steps: '[{"minimum_class_level":17,"count":2}]',
+    })]],
+  },
+  {
+    constraint: 'class_resource_formulas_steps_json_check',
+    rejects: [
+      ['malformed step JSON', classResourceFormula({
+        formula_kind: 'fixed_count_by_class_level',
+        later_fixed_count_steps: '[',
+      })],
+      ['an empty step array', classResourceFormula({
+        formula_kind: 'fixed_count_by_class_level',
+        later_fixed_count_steps: '[]',
+      })],
+      ['a JSON object instead of an array', classResourceFormula({
+        formula_kind: 'fixed_count_by_class_level',
+        later_fixed_count_steps: '{}',
+      })],
+    ],
+    accepts: [['a non-empty canonical step array', classResourceFormula({
+      formula_kind: 'fixed_count_by_class_level',
+      later_fixed_count_steps: '[{"minimum_class_level":17,"count":2}]',
+    })]],
   },
   {
     constraint: 'subclass_progressions_class_level_check',

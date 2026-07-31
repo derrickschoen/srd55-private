@@ -178,6 +178,10 @@ export type SubclassFeatureEffectId = Brand<
 >;
 export type NamedFeatureEffectId = Brand<number, 'NamedFeatureEffectId'>;
 export type ClassFeatureEffectId = Brand<number, 'ClassFeatureEffectId'>;
+/** One sourced absolute class-resource maximum row (D91). */
+export type ClassResourceId = Brand<number, 'ClassResourceId'>;
+/** One sourced base-class resource formula row (D120). */
+export type ClassResourceFormulaId = Brand<number, 'ClassResourceFormulaId'>;
 
 /**
  * A catalog content key: `<edition>:<slug>` (see `src/catalog/catalog-key.ts`).

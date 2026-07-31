@@ -103,6 +103,8 @@ const nativeAutoIncrementTables = [
   'class_armor_training',
   'class_extra_attack_grants',
   'class_martial_arts_dice',
+  'class_resource_formulas',
+  'class_resources',
   'class_saving_throw_proficiencies',
   'class_sheet_traits',
   'class_skill_options',
@@ -188,7 +190,7 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
       return db;
     }
 
-    it('declares AUTOINCREMENT on exactly the 30 Laravel and 37 native surrogate-key tables', () => {
+    it('declares AUTOINCREMENT on exactly the 30 Laravel and 39 native surrogate-key tables', () => {
       const db = openDb();
       const declared = db
         .selectValues(
@@ -213,9 +215,9 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
       // effect tables. Counted in parts so one group shrinking while another
       // grows cannot pass unnoticed. D92's slot row uses character_id as its
       // natural primary key and therefore belongs in `naturalKeyTables`.
-      expect(declared).toHaveLength(67);
+      expect(declared).toHaveLength(69);
       expect(autoIncrementTables).toHaveLength(30);
-      expect(nativeAutoIncrementTables).toHaveLength(37);
+      expect(nativeAutoIncrementTables).toHaveLength(39);
 
       const withoutAutoIncrement = db
         .selectValues(
