@@ -203,7 +203,21 @@ this project. Never hand-merge a lane.
     numbers pasted. Findings against our own work — including your own
     mistakes — at FULL LENGTH, always.
 
-## 4. Dispatch brief template
+## 4. Dispatch briefs — PRE-AUTHORED, use them
+
+`.claude/handover/briefs/` contains Fable-authored briefs for the
+intelligence-sensitive units: w-c, ff-a, ar-a, ha-1, ha-2, ci-3a, ci-5,
+w-b2, w-d, w-e, w-f, d91-r, exp-url, fix-attr, resp-1, banner, walk-2 —
+plus NOTES-remaining.md with per-unit author notes for the rest. Dispatch a
+pre-authored unit VERBATIM as:
+`cat .claude/handover/briefs/COMMON.md .claude/handover/briefs/<unit>.md |
+codex exec --sandbox workspace-write -C <worktree> - > <log> 2>&1`
+(the worktree must be fast-forwarded by YOU first; floors come from
+lane-state.md which COMMON.md tells codex to read — keep it accurate).
+For units without a pre-authored brief, write one from the template below
+plus NOTES-remaining.md; never dispatch from the design doc alone.
+
+## 4b. Dispatch brief template
 
 Copy the template exactly as it appears in `.claude/handover/`
 (brief-template.md, created in Step 0 from the block below), fill every <>:
