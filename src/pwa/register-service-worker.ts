@@ -1,5 +1,15 @@
 const UPDATE_MESSAGE = 'SKIP_WAITING';
 
+/**
+ * Vite's BASE_URL names the deployment root. Composing from it keeps
+ * registration stable on a client-side route such as
+ * `/characters/7/build/levels/1`; a document-relative worker URL would
+ * incorrectly look below that route.
+ */
+export function serviceWorkerRegistrationUrl(baseUrl: string): string {
+  return `${baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`}service-worker.js`;
+}
+
 export function registerAppServiceWorker(
   serviceWorkers: ServiceWorkerContainer,
   updatePrompt: HTMLElement | null,
@@ -51,7 +61,7 @@ export function registerAppServiceWorker(
 
   window.addEventListener('load', () => {
     void serviceWorkers
-      .register('/service-worker.js')
+      .register(serviceWorkerRegistrationUrl(import.meta.env.BASE_URL))
       .then((registration) => {
         if (registration.waiting !== null) {
           showUpdate(registration.waiting);
