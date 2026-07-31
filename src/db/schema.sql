@@ -906,6 +906,8 @@ CREATE TABLE `feat_definitions` (
 	`category` VARCHAR,
 	`min_level` integer,
 	`ability_points` integer DEFAULT 0 NOT NULL,
+	`ability_increase_abilities` TEXT,
+	`ability_increase_maximum` integer,
 	`repeatable` TINYINT(1) DEFAULT false NOT NULL,
 	`prerequisites` TEXT,
 	`grant_rules` TEXT,
@@ -914,7 +916,8 @@ CREATE TABLE `feat_definitions` (
 	`updated_at` DATETIME,
 	FOREIGN KEY (`content_key`) REFERENCES `catalog_content_identities`(`content_key`) ON UPDATE no action ON DELETE no action,
 	CONSTRAINT "feat_definitions_min_level_check" CHECK(`min_level` IS NULL OR (typeof(`min_level`) = 'integer' AND `min_level` BETWEEN 1 AND 20)),
-	CONSTRAINT "feat_definitions_ability_points_check" CHECK(typeof(`ability_points`) = 'integer' AND `ability_points` IN (0, 1, 2))
+	CONSTRAINT "feat_definitions_ability_points_check" CHECK(typeof(`ability_points`) = 'integer' AND `ability_points` IN (0, 1, 2)),
+	CONSTRAINT "feat_definitions_ability_increase_maximum_check" CHECK(`ability_increase_maximum` IS NULL OR (typeof(`ability_increase_maximum`) = 'integer' AND `ability_increase_maximum` BETWEEN 1 AND 30))
 );
 
 CREATE UNIQUE INDEX `feat_definitions_content_key_unique` ON `feat_definitions` (`content_key`);

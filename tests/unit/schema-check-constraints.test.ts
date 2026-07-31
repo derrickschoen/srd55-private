@@ -1473,6 +1473,20 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     ],
   },
   {
+    constraint: 'feat_definitions_ability_increase_maximum_check',
+    rejects: [
+      ['a zero cap', featDefinition({ ability_increase_maximum: 0 })],
+      ['a cap above the ability-score range', featDefinition({ ability_increase_maximum: 31 })],
+      ['a fractional cap', featDefinition({ ability_increase_maximum: 20.5 })],
+      ['a text cap', featDefinition({ ability_increase_maximum: 'twenty' })],
+    ],
+    accepts: [
+      ['an honestly unknown cap', featDefinition({ ability_increase_maximum: null })],
+      ['the ASI cap', featDefinition({ ability_increase_maximum: 20 })],
+      ['the Epic Boon cap', featDefinition({ ability_increase_maximum: 30 })],
+    ],
+  },
+  {
     constraint: 'class_definitions_progression_type_check',
     rejects: [
       ['a progression every caster-fraction branch would fall through', classDefinition({ progression_type: 'half' })],

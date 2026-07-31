@@ -77,7 +77,7 @@ artifact, keep the split.
 |---|---|
 | `generated/column-facts.ts` | GENERATED. Per-column facts: does the column exist, is it `notNull`, could drizzle-zod type it |
 | `generated/reference-facts.ts` | GENERATED. Catalog tables a backup resolves references against |
-| `rows.ts` | The Zod contracts. `COLUMN_REFINEMENTS` (`:385`), `NARROWED_REFINEMENTS` (`:460`), `rowContractError` (`:1394`) |
+| `rows.ts` | The Zod contracts. `COLUMN_REFINEMENTS` (`:385`), `NARROWED_REFINEMENTS` (`:460`), `rowContractError` (`:1396`) |
 | `row-rules.ts` | Cross-column rules a per-column contract cannot express |
 | `json-columns.ts` | WHICH text columns hold serialized JSON, and what SHAPE each reader needs |
 | `tables.ts` | The table inventory and scope classification — §3 below |

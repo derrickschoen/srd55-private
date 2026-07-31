@@ -33,6 +33,7 @@ export const RECORDED_SCHEMA_PREFIX_IDS = [
   '0021_catalog_data_migrations',
   '0022_planned_spell_grants',
   '0023_skill_expertise_grants',
+  '0024_feat_application_model',
 ] as const;
 
 export const PREFIX_MIGRATION_ID = 'test_catalog_prefix_probe';
