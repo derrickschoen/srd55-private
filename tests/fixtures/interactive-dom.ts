@@ -13,13 +13,18 @@ export class InteractiveTestElement {
   checked = false;
   selected = false;
   type = '';
+  id = '';
+  htmlFor = '';
   min = '';
   max = '';
   value = '';
 
   private readonly listeners = new Map<string, Set<Listener>>();
 
-  constructor(readonly tagName: string) {
+  constructor(
+    readonly tagName: string,
+    private readonly owner: InteractiveTestDocument,
+  ) {
     this.classList = {
       add: (...tokens) => {
         const names = new Set(this.className.split(/\s+/u).filter(Boolean));
@@ -95,7 +100,11 @@ export class InteractiveTestElement {
     }
   }
 
-  focus(): void {}
+  focus(): void {
+    if (!this.disabled && !this.hidden) {
+      this.owner.activeElement = this;
+    }
+  }
 
   querySelector(selector: string): InteractiveTestElement | null {
     return this.querySelectorAll(selector)[0] ?? null;
@@ -104,6 +113,9 @@ export class InteractiveTestElement {
   querySelectorAll(selector: string): InteractiveTestElement[] {
     const matches: InteractiveTestElement[] = [];
     const visit = (element: InteractiveTestElement): void => {
+      if (typeof element?.matches !== 'function') {
+        return;
+      }
       if (element.matches(selector)) {
         matches.push(element);
       }
@@ -134,12 +146,14 @@ export class InteractiveTestElement {
 }
 
 class InteractiveTestDocument {
+  activeElement: InteractiveTestElement | null = null;
+
   createElement(tagName: string): InteractiveTestElement {
-    return new InteractiveTestElement(tagName);
+    return new InteractiveTestElement(tagName, this);
   }
 
   createDocumentFragment(): InteractiveTestElement {
-    return new InteractiveTestElement('#document-fragment');
+    return new InteractiveTestElement('#document-fragment', this);
   }
 }
 

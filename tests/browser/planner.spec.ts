@@ -55,6 +55,35 @@ async function contributionPlannerFixture() {
   return { bytes, fixture };
 }
 
+async function attunementPlannerFixture() {
+  const sqlite3 = await sqlite3InitModule();
+  const connection = new sqlite3.oo1.DB(':memory:', 'c');
+  connection.exec(schema);
+  const db = new DatabaseContext(connection);
+  const characterId = db.exec(
+    "INSERT INTO characters (name) VALUES ('Attunement keyboard test')",
+  ).lastInsertId;
+  const itemIds = ['Crown', 'Cloak', 'Ring', 'Boots'].map((name) =>
+    db.exec(
+      `INSERT INTO character_items (
+         character_id, name, requires_attunement
+       ) VALUES (?, ?, 1)`,
+      [characterId, name],
+    ).lastInsertId,
+  );
+  db.exec(
+    `INSERT INTO character_attunement_slots (
+       character_id, slot_1_item_id, slot_2_item_id, slot_3_item_id
+     ) VALUES (?, ?, ?, ?)`,
+    [characterId, itemIds[0], itemIds[1], itemIds[2]],
+  );
+  const bytes = Array.from(
+    sqlite3.capi.sqlite3_js_db_export(connection),
+  );
+  connection.close();
+  return { bytes, characterId, itemIds };
+}
+
 async function persistedCharacter(
   page: import('@playwright/test').Page,
 ) {
@@ -293,6 +322,81 @@ test('the item editor authors an ability override that resolves on the sheet', a
   await expect(strength).toContainText(
     'Belt of Giant Strength sets the score to 24 and is the winning override.',
   );
+});
+
+test('the attunement replacement modal traps, cancels, and restores keyboard focus', async ({
+  page,
+}) => {
+  // Measured at 9.1s alone on Chromium; keep local contention below this test.
+  test.setTimeout(20_000);
+  const { bytes, characterId, itemIds } = await attunementPlannerFixture();
+  await page.goto('/');
+  await expect(page.locator('#status')).toHaveAttribute(
+    'data-ready',
+    'true',
+    { timeout: 30_000 },
+  );
+  await page.evaluate(
+    (database) =>
+      window.staticApp.replaceDatabase(Uint8Array.from(database)),
+    bytes,
+  );
+  await page.goto(`/characters/${characterId}`);
+  await expect(page.locator('#planner-status')).toHaveAttribute(
+    'data-ready',
+    'true',
+    { timeout: 30_000 },
+  );
+
+  const invoker = page.locator(
+    `[data-focus-key="item-attunement-${String(itemIds[3])}"]`,
+  );
+  await expect(invoker).toHaveAccessibleName('Attune Boots');
+  await invoker.focus();
+  await invoker.press('Enter');
+  const dialog = page.getByRole('dialog', {
+    name: 'Replace an attuned item',
+  });
+  await expect(dialog).toBeVisible();
+  const firstChoice = dialog.getByRole('button', {
+    name: 'Replace Crown with Boots',
+  });
+  const cancel = dialog.getByRole('button', { name: 'Cancel' });
+  await expect(firstChoice).toBeFocused();
+  await firstChoice.press('Shift+Tab');
+  await expect(cancel).toBeFocused();
+  await cancel.press('Tab');
+  await expect(firstChoice).toBeFocused();
+
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(invoker).toBeFocused();
+
+  await invoker.press('Enter');
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(invoker).toBeFocused();
+
+  await invoker.press('Enter');
+  await dialog
+    .getByRole('button', { name: 'Replace Cloak with Boots' })
+    .click();
+  await expect(dialog).toBeHidden();
+  await expect(invoker).toBeFocused();
+  await expect(invoker).toHaveAccessibleName('Unattune Boots');
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        window.staticApp.inspectRows('character_attunement_slots'),
+      ),
+    )
+    .toEqual([
+      expect.objectContaining({
+        slot_1_item_id: itemIds[0],
+        slot_2_item_id: itemIds[3],
+        slot_3_item_id: itemIds[2],
+      }),
+    ]);
 });
 
 test('planner parity flows persist override, clear, selection, acknowledgement, and source edits', async ({
