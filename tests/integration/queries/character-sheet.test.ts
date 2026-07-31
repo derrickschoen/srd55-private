@@ -748,7 +748,7 @@ describe('the derived character sheet', () => {
     expect(builder.build(characterId).walking_speed_feet).toBeNull();
   });
 
-  it('names what it cannot show, for every character equally', () => {
+  it('names application-wide gaps without adding language/tool noise', () => {
     // F4: a blank features box reads as "this character has no features",
     // which is false. These are stated on every sheet because they are true of
     // every character in this application.
@@ -766,6 +766,135 @@ describe('the derived character sheet', () => {
       'weapon_reach_not_recorded',
       'gear_not_itemised',
     ]);
+  });
+
+  it('shows granting feature text and adds the languages/tools gap only when it applies', () => {
+    db.exec(
+      `INSERT INTO character_species (character_id, name, base_speed_feet)
+       VALUES (?, 'Wayfarer', 30)`,
+      [characterId],
+    );
+    db.exec(
+      `INSERT INTO character_species_traits (
+         character_id, sort_order, name, description
+       ) VALUES (
+         ?, 1, 'Keen Senses', 'You have advantage on Perception checks.'
+       )`,
+      [characterId],
+    );
+
+    const withoutGrant = builder.build(characterId);
+    expect(
+      withoutGrant.gaps.map((gap) => gap.kind),
+    ).not.toContain('languages_and_tools_not_modelled');
+    expect(withoutGrant.printed_features).toEqual([
+      {
+        source: 'species_trait',
+        source_name: 'Wayfarer',
+        name: 'Keen Senses',
+        text: 'You have advantage on Perception checks.',
+      },
+    ]);
+
+    db.exec(
+      `INSERT INTO character_background (
+         character_id, name, tool_proficiency
+       ) VALUES (?, 'Sage', 'Calligrapher’s Supplies')`,
+      [characterId],
+    );
+    db.exec(
+      `INSERT INTO character_species_traits (
+         character_id, sort_order, name, description
+       ) VALUES (
+         ?, 2, 'Gift of Tongues', 'You know two languages of your choice.'
+       )`,
+      [characterId],
+    );
+
+    const granting = builder.build(characterId);
+    const gap = granting.gaps.find(
+      (entry) => entry.kind === 'languages_and_tools_not_modelled',
+    );
+    expect(gap).toEqual({
+      kind: 'languages_and_tools_not_modelled',
+      title: 'Languages and tool proficiencies are not modelled',
+      detail:
+        'This application does not record language or tool proficiency choices ' +
+        'as character facts and does not apply them mechanically. Read the ' +
+        'printed background and species feature text above for the grants this ' +
+        'character has.',
+    });
+    expect(granting.printed_features).toEqual([
+      {
+        source: 'background',
+        source_name: 'Sage',
+        name: 'Tool Proficiency',
+        text: 'Calligrapher’s Supplies',
+      },
+      {
+        source: 'species_trait',
+        source_name: 'Wayfarer',
+        name: 'Keen Senses',
+        text: 'You have advantage on Perception checks.',
+      },
+      {
+        source: 'species_trait',
+        source_name: 'Wayfarer',
+        name: 'Gift of Tongues',
+        text: 'You know two languages of your choice.',
+      },
+    ]);
+  });
+
+  it('detects granting words in background notes and a species trait name', () => {
+    db.exec(
+      `INSERT INTO character_background (
+         character_id, name, notes
+       ) VALUES (?, 'Traveller', 'Languages: choose Elvish or Dwarvish.')`,
+      [characterId],
+    );
+
+    const fromBackgroundNotes = builder.build(characterId);
+    expect(fromBackgroundNotes.printed_features).toEqual([
+      {
+        source: 'background',
+        source_name: 'Traveller',
+        name: 'Background notes',
+        text: 'Languages: choose Elvish or Dwarvish.',
+      },
+    ]);
+    expect(fromBackgroundNotes.gaps.map((gap) => gap.kind)).toContain(
+      'languages_and_tools_not_modelled',
+    );
+
+    db.exec(
+      'DELETE FROM character_background WHERE character_id = ?',
+      [characterId],
+    );
+    db.exec(
+      `INSERT INTO character_species (character_id, name, base_speed_feet)
+       VALUES (?, 'Tinkerkin', 30)`,
+      [characterId],
+    );
+    db.exec(
+      `INSERT INTO character_species_traits (
+         character_id, sort_order, name, description
+       ) VALUES (?, 1, 'Tools of the Trade', NULL)`,
+      [characterId],
+    );
+
+    const fromTraitName = builder.build(characterId);
+    expect(fromTraitName.printed_features).toEqual([
+      {
+        source: 'species_trait',
+        source_name: 'Tinkerkin',
+        name: 'Tools of the Trade',
+        text: null,
+      },
+    ]);
+    expect(fromTraitName.gaps.map((gap) => gap.kind)).toContain(
+      'languages_and_tools_not_modelled',
+    );
   });
 
   it('degrades rather than throwing when no class is the starting class', () => {
