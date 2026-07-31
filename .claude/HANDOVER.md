@@ -438,6 +438,11 @@ questions); record answers as D-numbers immediately (prepend; §0). Queued:
   re-run before believing it (it cleared W-A2's gate exactly this way).
 - ?raw flagged in a spec chain → check for `import type` before acting.
 - Codex 0-exit with no answer → resume the session; flags BEFORE `resume`.
+- Codex blocked with "cannot lock ref … Read-only file system" on a git
+  command → NEVER instruct codex to run git merge/branch ops in a worktree:
+  worktree metadata lives under the MAIN repo's .git/worktrees/, outside its
+  sandbox. The supervisor fast-forwards BEFORE dispatch; briefs say "already
+  fast-forwarded — do not run git merge/branch commands".
 - A negative control that "proves" robustness → verify the mutation landed
   in executed production code and the applied-assert ran; a control aimed at
   a test-side expectation or a comment is aimed at nothing (the original
