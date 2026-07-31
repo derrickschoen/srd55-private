@@ -1088,6 +1088,7 @@ export * from './equipment-choices';
  * `./level-up` rather than a new section of this level-one file (plan §8b).
  */
 export * from './level-up';
+export * from './level-up-wizard';
 
 /* ---------------- Armor Class, items and one effect vocabulary (AC-1, offered for ratification) */
 

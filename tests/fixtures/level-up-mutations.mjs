@@ -16,7 +16,7 @@ const edit = (path, from, to) => ({ path, from, to });
  * (`docs/design/2026-07-29-straight-class-level-up.md` §8, reduced by D77's
  * fixed-hit-points-only ruling and D80's strike of the level-3 subclass
  * refusal). The unit under test is `src/commands/level-up-class.ts` and
- * `src/rules/class-asi-levels-srd.ts`, exercised by
+ * `src/rules/class-level-features-srd.ts`, exercised by
  * `tests/integration/commands/level-up-class.test.ts`.
  *
  * Same apply/restore convention as `tests/fixtures/skills-provenance-mutations.mjs`:
@@ -56,11 +56,14 @@ const mutations = {
   // set.
   'asi-single': [
     edit(
-      'src/rules/class-asi-levels-srd.ts',
+      'src/rules/class-level-features-srd.ts',
       `export function asiLevelsForClassName(
   className: string,
 ): ReadonlySet<number> | null {
-  return ASI_LEVELS_BY_CLASS_NAME.get(className) ?? null;
+  return levelsWithClassFeatureEntitlement(
+    className,
+    'ability_score_improvement',
+  );
 }`,
       `export function asiLevelsForClassName(
   className: string,
@@ -77,11 +80,14 @@ const mutations = {
   // real ASI levels are 4/8/12/16 and 6 is only in Fighter's table.
   'asi-union': [
     edit(
-      'src/rules/class-asi-levels-srd.ts',
+      'src/rules/class-level-features-srd.ts',
       `export function asiLevelsForClassName(
   className: string,
 ): ReadonlySet<number> | null {
-  return ASI_LEVELS_BY_CLASS_NAME.get(className) ?? null;
+  return levelsWithClassFeatureEntitlement(
+    className,
+    'ability_score_improvement',
+  );
 }`,
       `export function asiLevelsForClassName(
   className: string,

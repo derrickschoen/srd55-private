@@ -22,6 +22,7 @@
  * not carry is not invented here.
  */
 import type { DatabaseContext } from '../db/database';
+import { encodePrimaryAbilityExpression } from '../domain/primary-ability';
 import {
   parseSrdClassTraits,
   parseSrdExtraAttackGrants,
@@ -109,12 +110,15 @@ export function hasBundledSheetContent(db: DatabaseContext): boolean {
   // How many of the parsed classes this database actually carries. Compared
   // against the traits rows so a database with a partial class catalog is not
   // permanently reported unhealthy.
-  const names = parseSrdClassTraits().map((traits) => traits.class_name);
+  const parsedTraits = parseSrdClassTraits();
+  const names = parsedTraits.map((traits) => traits.class_name);
   const namePlaceholders = names.map(() => '?').join(', ');
   const known = Number(
     db.scalar<number>(
-      `SELECT count(*) FROM class_definitions WHERE name IN (${namePlaceholders})`,
-      names,
+      `SELECT count(*) FROM class_definitions
+        WHERE rules_edition = ?
+          AND name IN (${namePlaceholders})`,
+      [BUNDLED_FEATURE_RULES_EDITION, ...names],
     ) ?? 0,
   );
   if (known === 0) {
@@ -125,6 +129,34 @@ export function hasBundledSheetContent(db: DatabaseContext): boolean {
   );
   if (traitRows < known) {
     return false;
+  }
+
+  const storedPrimaryAbilities = new Map(
+    db.all(
+      `SELECT name, primary_ability_expression
+         FROM class_definitions
+        WHERE rules_edition = ?
+          AND name IN (${namePlaceholders})`,
+      [BUNDLED_FEATURE_RULES_EDITION, ...names],
+      (row) => [
+        String(row.name),
+        row.primary_ability_expression === null
+          ? null
+          : String(row.primary_ability_expression),
+      ] as const,
+    ),
+  );
+  for (const traits of parsedTraits) {
+    const stored = storedPrimaryAbilities.get(traits.class_name);
+    if (
+      stored !== undefined &&
+      stored !==
+        encodePrimaryAbilityExpression(
+          traits.primary_ability_expression,
+        )
+    ) {
+      return false;
+    }
   }
 
   const gutted = Number(
@@ -327,6 +359,19 @@ function seedClassSheetContent(db: DatabaseContext, timestamp: string): void {
       // simply gets no sheet content for it, and the sheet says so.
       continue;
     }
+
+    db.exec(
+      `UPDATE class_definitions
+          SET primary_ability_expression = ?, updated_at = ?
+        WHERE id = ?`,
+      [
+        encodePrimaryAbilityExpression(
+          entry.primary_ability_expression,
+        ),
+        timestamp,
+        classId,
+      ],
+    );
 
     // Set tables are REPLACED wholesale rather than upserted row by row. An
     // extract that drops a skill from a class's list must remove that row, and
@@ -721,10 +766,16 @@ function nameSlotTaken(
 function classIdsByName(db: DatabaseContext): Map<string, number> {
   return new Map(
     db
-      .all('SELECT id, name FROM class_definitions', undefined, (row) => ({
-        id: Number(row.id),
-        name: String(row.name),
-      }))
+      .all(
+        `SELECT id, name
+           FROM class_definitions
+          WHERE rules_edition = ?`,
+        [BUNDLED_FEATURE_RULES_EDITION],
+        (row) => ({
+          id: Number(row.id),
+          name: String(row.name),
+        }),
+      )
       .map((row) => [row.name, row.id] as const),
   );
 }
