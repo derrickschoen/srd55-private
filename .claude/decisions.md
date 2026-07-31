@@ -7,6 +7,113 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D134 — OWNER: Focus Points print as a Remaining-field (2026-07-31)
+
+Closes the S1 default. Monk focus_points joins lay_on_hands and
+sorcery_points on the point-pool list: "Remaining: ____ / N" at every level.
+Boxes-at-every-level list shrinks accordingly (D123 classification).
+
+## D135 — OWNER: EVERY unit gets a codex review pass before merge (2026-07-31)
+
+The gate ritual gains a mandatory step for the Opus supervision era: after
+the supervisor's personal gates and before merge, codex reviews the unit
+diff (read-only). Findings are arbitrated by verification; legitimate issues
+go back as a fix dispatch; rejected findings are recorded with reasons.
+
+## D136 — OWNER: no circuit breaker; stuck = multi-perspective analysis (2026-07-31)
+
+No automatic strike limit. When the supervisor judges itself stuck, it must
+FIRST run independent analyses from several perspectives (opus + sol
+read-only agents with different lenses), reconcile them, and only then
+decide: continue, re-dispatch, or stop and wait for the owner.
+
+## D137 — OWNER: Opus attempts the WHOLE queue including HA/CI (2026-07-31)
+
+No check-in gate before HA-1. The Opus supervisor drives the full queue to
+the D106 gate per the handover plan.
+
+## D122 — OWNER: print pins US Letter (2026-07-31)
+
+The print stylesheet declares @page size: letter. Box grids stay inch-specified.
+
+## D123 — OWNER: resource print SHAPE-BY-TYPE (2026-07-31)
+
+Amends the D91 design's 30-box threshold and refines D120's tick-box letter.
+Discrete-use resources (Rage, Channel Divinity, Bardic Inspiration, ...) print
+numbered boxes at EVERY level. Point pools (Lay on Hands, Sorcery Points-style
+totals) print "Remaining: ____ / N" at EVERY level. A resource never changes
+print shape mid-career; boxes always mean uses, never points.
+
+## D124 — OWNER: flavor share is ONE opt-in toggle + size guard (2026-07-31)
+
+Amends the D104 design's verbatim/opt-in split. One "include my written text"
+share option covers alignment/appearance/backstory/notes, default OFF (D37
+generalized). The share flow shows an explicit error when the encoded link
+exceeds workable size — never a silently truncated or broken link. Before
+implementation: a Chromium experiment measuring practical URL capacity for
+?param vs #fragment transports, results recorded.
+
+## D125 — OWNER: print attribution = last page + origin line (2026-07-31)
+
+Closes the finding that printed sheets carry NO SRD notice while our own
+ATTRIBUTION.md requires one. The printout gains a notice block on the last
+page plus "Printed from SRD-55 <build id>". The same fixlet corrects
+legal.ts's false claim that spell text comes only from user-imported catalogs
+(bundled since D43/D45).
+
+## D126 — OWNER: code is MIT, SRD split stated (2026-07-31)
+
+LICENSE = MIT for our code; LICENSE and README state explicitly that
+docs/srd/** is CC-BY-4.0 with its own attribution obligations. One file must
+never imply the SRD was relicensed.
+
+## D127 — OWNER: public repo is a CURATED SQUASH (2026-07-31)
+
+Publication = a fresh repo with one initial commit: code + docs/srd +
+user-facing docs. The process record (.claude/, orchestration/, progress/,
+internal design docs, full history) stays in the private repo. Reversible
+upward only: more can be published later, never less.
+
+## D128 — OWNER: the D121 sitting runs on ngrok-tunneled localhost (2026-07-31)
+
+Publish prep creates NOTHING outward. The owner's manual walkthrough runs
+against a local server exposed via ngrok (walkable from any device, including
+a phone). Repo creation and the Cloudflare deploy happen only at the explicit
+go, via direct upload — Git-integration auto-publish is never wired.
+
+## D129 — OWNER: pre-alpha banner + NOINDEX until the flip (2026-07-31)
+
+The published app carries a persistent one-line banner ("Pre-alpha. Updates
+can break saved characters. Export a backup."), a visible build identifier in
+the footer, and robots/noindex until the owner announces the D60 flip —
+shareable by link, not discoverable.
+
+## D130 — OWNER: Chromium on ANY viewport; responsive pass enters the queue (2026-07-31)
+
+Resolves the D109/D98 contradiction toward support: a responsive unit for the
+guided builder and sheet enters the queue before the gate. The PWA install
+invitation stays honest; the ngrok phone walkthrough must work.
+
+## D131 — OWNER: a SECOND walkthrough script gates the queued features (2026-07-31)
+
+One added Playwright walkthrough — author a species, build a character with
+it, archive, duplicate, print — becomes part of the acceptance instrument.
+The D54/D112 script stays untouched.
+
+## D132 — OWNER: issues ON, PRs NOT ACCEPTED (2026-07-31)
+
+The public repo opens issues with a template (browser, build id, steps).
+CONTRIBUTING states PRs are not accepted and why (supervised protocol; every
+change needs a ruling). The app footer links to the repo. SRD stays pinned at
+5.2.1 until the owner rules otherwise.
+
+## D133 — OWNER: NO homebrew classes, ever in v1; subclasses stay (2026-07-31)
+
+Full-class authoring is out of scope ("too much going on") — which the HA
+design already pinned (classes bundled-only). Subclass authoring for existing
+classes stays in v1. With that explicit, D106's whole-queue gate stands with
+the HA chain as designed.
+
 ## D118 — OWNER: deferred Epic Boon = player's choice at Level Up (2026-07-31)
 
 Supersedes the OQ-1 taken-default (resolve-first pass). On Level Up with a

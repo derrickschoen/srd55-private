@@ -63,6 +63,8 @@ import {
   LEVEL_UP_RPC,
   type LevelUpPlannedEligibleSpellsParams,
   type LevelUpPlannedEligibleSpellsResult,
+  type LevelUpStateParams,
+  type LevelUpStateResult,
 } from '../builder/level-up-wizard';
 
 export interface QueriesClient extends CatalogClient {
@@ -82,6 +84,7 @@ export interface QueriesClient extends CatalogClient {
   levelUpPlannedEligibleSpells(
     params: LevelUpPlannedEligibleSpellsParams,
   ): Promise<LevelUpPlannedEligibleSpellsResult>;
+  levelUpState(characterId: number): Promise<LevelUpStateResult>;
   createSavePoint(
     characterId: number,
     label: string,
@@ -204,6 +207,11 @@ export function createQueriesClient(rpc: RpcClient): QueriesClient {
         LevelUpPlannedEligibleSpellsParams,
         LevelUpPlannedEligibleSpellsResult
       >(LEVEL_UP_RPC.plannedEligibleSpells, params),
+    levelUpState: (characterId: number) =>
+      rpc.call<LevelUpStateParams, LevelUpStateResult>(
+        LEVEL_UP_RPC.state,
+        characterParams(characterId) as LevelUpStateParams,
+      ),
     createSavePoint: (characterId: number, label: string) =>
       rpc.call<
         { character_id: number; label: string },

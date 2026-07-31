@@ -8,7 +8,10 @@
 import type {
   Ability,
   CharacterLevel,
+  HitDieSize,
   KnownFeatGrouping,
+  RulesEdition,
+  Skill,
 } from '../domain/enums';
 import type {
   LevelFeatChoice,
@@ -19,14 +22,21 @@ import type {
   LevelUpPlannedSpellChoice,
   LevelFeatSelection,
 } from '../domain/command-contracts';
-export type { LevelFeatChoice } from '../domain/command-contracts';
+export type {
+  LevelFeatChoice,
+  LevelFeatSelection,
+} from '../domain/command-contracts';
 import type {
   CharacterId,
+  CharacterLevelFeatChoiceId,
   CharacterRevision,
   ClassDefinitionId,
   ClassLevel,
   ContentKey,
   GrantRuleKey,
+  SourceInstanceId,
+  SpellVersionId,
+  SubclassDefinitionId,
 } from '../domain/ids';
 import type { EquipmentEffectInput } from '../domain/equipment-effects';
 import type { JsonObject } from '../domain/models';
@@ -240,6 +250,200 @@ export interface LevelUpPlannedEligibleSpellsParams {
 
 export type LevelUpPlannedEligibleSpellsResult =
   readonly EligibleSpell[];
+
+export const LEVEL_UP_STATE_KINDS = Object.freeze({
+  notFound: 'not_found',
+  noHeldClass: 'no_held_class',
+  noGuideableClass: 'no_guideable_class',
+  maximumLevel: 'maximum_level',
+  ready: 'ready',
+} as const);
+
+export type LevelUpStateKind =
+  (typeof LEVEL_UP_STATE_KINDS)[keyof typeof LEVEL_UP_STATE_KINDS];
+
+export interface LevelUpStateParams {
+  readonly character_id: CharacterId;
+}
+
+/** One durable D70 warning, repeated here without re-deriving its prose. */
+export interface LevelUpPermanentWarning {
+  readonly kind: string;
+  readonly title: string;
+  readonly detail: string;
+  readonly remedy: string;
+}
+
+export interface LevelUpCharacterSummary {
+  readonly character_id: CharacterId;
+  readonly name: string;
+  readonly revision: CharacterRevision;
+  /** May exceed 20 in an imported tolerated image; maximum state preserves it. */
+  readonly total_level: number | null;
+  readonly warnings: readonly LevelUpPermanentWarning[];
+}
+
+export interface LevelUpSubclassOption {
+  readonly subclass_definition_id: SubclassDefinitionId;
+  readonly content_key: ContentKey;
+  readonly name: string;
+  readonly rules_edition: RulesEdition;
+}
+
+export interface LevelUpHeldClass {
+  readonly class_definition_id: ClassDefinitionId;
+  readonly content_key: ContentKey;
+  readonly name: string;
+  readonly rules_edition: RulesEdition;
+  readonly current_level: ClassLevel;
+  readonly hit_die: HitDieSize | null;
+  readonly current_subclass: LevelUpSubclassOption | null;
+}
+
+export type LevelUpTargetFeatures =
+  | {
+      readonly kind: 'sourced';
+      readonly feature_names: readonly string[];
+    }
+  | { readonly kind: 'unavailable' };
+
+export interface LevelUpLevelScaledHitPointGain {
+  readonly label: string;
+  readonly current_contribution: number;
+  readonly projected_contribution: number;
+  readonly change: number;
+}
+
+export type LevelUpProjectedHitPoints =
+  | {
+      readonly kind: 'known';
+      readonly hit_die: HitDieSize;
+      readonly fixed_class_base: number;
+      readonly constitution_modifier: number;
+      readonly class_hit_point_change: number;
+      readonly level_scaled_effects:
+        readonly LevelUpLevelScaledHitPointGain[];
+      readonly current_maximum: number;
+      readonly projected_maximum:
+        | { readonly kind: 'known'; readonly value: number }
+        | {
+            readonly kind: 'pending_choice';
+            readonly choices: readonly ('subclass' | 'level_feat')[];
+          };
+    }
+  | {
+      readonly kind: 'unknown';
+      readonly reason:
+        | 'missing_hit_die'
+        | 'undetermined_level_scaled_effect';
+      readonly missing_hit_dice: readonly {
+        readonly class_definition_id: ClassDefinitionId;
+        readonly class_name: string;
+      }[];
+    };
+
+export interface LevelUpProjectedGains {
+  readonly current_class_level: ClassLevel;
+  readonly target_class_level: ClassLevel;
+  readonly current_total_level: CharacterLevel;
+  readonly target_total_level: CharacterLevel;
+  readonly hit_points: LevelUpProjectedHitPoints;
+  readonly proficiency_bonus_change: {
+    readonly current: number;
+    readonly projected: number;
+  } | null;
+  readonly target_features: LevelUpTargetFeatures;
+}
+
+/** One exact unified LU-1 selection and the LU-0 plan produced from it. */
+export interface LevelUpFeatApplication {
+  readonly selection: LevelFeatSelection;
+  readonly plan: FeatApplicationPlan;
+}
+
+export interface LevelUpFeatCandidate {
+  readonly definition: FeatDefinitionForApplication;
+  readonly eligibility: FeatEligibilityResult;
+  readonly is_class_default: boolean;
+  readonly applications: readonly LevelUpFeatApplication[];
+}
+
+export interface LevelUpFeatOccurrence {
+  readonly kind: 'asi_level_feat' | 'epic_boon';
+  readonly candidates: readonly LevelUpFeatCandidate[];
+}
+
+export interface LevelUpSubclassChoice {
+  readonly options: readonly LevelUpSubclassOption[];
+}
+
+export interface LevelUpGuideableClassOption extends LevelUpHeldClass {
+  readonly guideability: 'guideable';
+  readonly hit_die: HitDieSize;
+  readonly target_level: ClassLevel;
+  readonly gains: LevelUpProjectedGains;
+  readonly applicable_steps: readonly LevelUpStep[];
+  readonly subclass_choice: LevelUpSubclassChoice | null;
+  readonly feat_occurrence: LevelUpFeatOccurrence | null;
+}
+
+export interface LevelUpDisabledClassOption extends LevelUpHeldClass {
+  readonly guideability: 'disabled';
+  readonly hit_die: null;
+  readonly reason: 'missing_hit_die';
+  readonly explanation: string;
+}
+
+export type LevelUpClassOption =
+  | LevelUpGuideableClassOption
+  | LevelUpDisabledClassOption;
+
+export interface LevelUpPendingEpicResolution {
+  readonly deferred_choice: {
+    readonly character_level_feat_choice_id:
+      CharacterLevelFeatChoiceId;
+    readonly class_definition_id: ClassDefinitionId;
+    readonly class_name: string;
+    readonly class_level: ClassLevel;
+  };
+  readonly additional_deferred_count: number;
+  readonly warning: LevelUpWarningPresentation;
+  readonly candidates: readonly LevelUpFeatCandidate[];
+  readonly applicable_steps: readonly ['epic_boon', 'review', 'complete'];
+}
+
+export type LevelUpStateResult =
+  | {
+      readonly kind: 'not_found';
+      readonly character_id: CharacterId;
+    }
+  | {
+      readonly kind: 'no_held_class';
+      readonly character: LevelUpCharacterSummary;
+    }
+  | {
+      readonly kind: 'no_guideable_class';
+      readonly character: LevelUpCharacterSummary & {
+        readonly total_level: CharacterLevel;
+      };
+      readonly explanation: string;
+      readonly class_options: readonly LevelUpDisabledClassOption[];
+      readonly pending_epic_resolution: LevelUpPendingEpicResolution | null;
+    }
+  | {
+      readonly kind: 'maximum_level';
+      readonly character: LevelUpCharacterSummary;
+      readonly held_classes: readonly LevelUpHeldClass[];
+      readonly pending_epic_resolution: LevelUpPendingEpicResolution | null;
+    }
+  | {
+      readonly kind: 'ready';
+      readonly character: LevelUpCharacterSummary & {
+        readonly total_level: CharacterLevel;
+      };
+      readonly class_options: readonly LevelUpClassOption[];
+      readonly pending_epic_resolution: LevelUpPendingEpicResolution | null;
+    };
 
 export const LEVEL_UP_RPC = Object.freeze({
   state: 'queries.characters.levelUpState',
