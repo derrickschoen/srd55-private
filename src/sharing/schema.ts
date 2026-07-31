@@ -209,6 +209,17 @@ export interface ShareSelection {
   readonly spellKey: string;
   readonly spellName?: string;
   readonly keep?: true;
+  readonly acquiredAtClassLevel?: number;
+}
+
+/** One active Wizard acquisition, filled or still awaiting a spell. */
+export interface ShareSpellbookAcquisition {
+  readonly ref?: number;
+  readonly ruleKey?: string;
+  readonly ordinal?: number;
+  readonly acquiredAtClassLevel?: number;
+  readonly spellKey?: string;
+  readonly spellName?: string;
 }
 
 /**
@@ -664,7 +675,7 @@ export interface CharacterShareDocument {
   readonly classes: readonly ShareClass[];
   readonly sources: readonly ShareSource[];
   readonly selections: readonly ShareSelection[];
-  readonly spellbook: readonly string[];
+  readonly spellbook: readonly ShareSpellbookAcquisition[];
   readonly preferences: readonly SharePreference[];
   readonly overrides: readonly ShareOverride[];
   readonly acknowledgements?: readonly { readonly warning: string }[];
@@ -2150,7 +2161,7 @@ export function validateShareDocument(
     exactKeys(
       row,
       ['ref', 'ruleKey', 'ordinal', 'spellKey'],
-      ['spellName', 'keep'],
+      ['spellName', 'keep', 'acquiredAtClassLevel'],
       `selections[${index}]`,
     );
     const ref = integer(row.ref, `selections[${index}].ref`, 0, 119);
@@ -2191,6 +2202,16 @@ export function validateShareDocument(
             ),
           }),
       ...(row.keep === true ? { keep: true as const } : {}),
+      ...(row.acquiredAtClassLevel === undefined
+        ? {}
+        : {
+            acquiredAtClassLevel: integer(
+              row.acquiredAtClassLevel,
+              `selections[${index}].acquiredAtClassLevel`,
+              1,
+              20,
+            ),
+          }),
     };
   });
   assertUnique(
@@ -2205,8 +2226,108 @@ export function validateShareDocument(
     source.spellbook,
     'spellbook',
     SHARE_LIMITS.spellbook,
-  ).map((item, index) => spellKey(item, `spellbook[${index}]`));
-  assertUnique(spellbook, 'spellbook');
+  ).map((item, index): ShareSpellbookAcquisition => {
+    const row = record(item, `spellbook[${index}]`);
+    exactKeys(
+      row,
+      [],
+      [
+        'ref',
+        'ruleKey',
+        'ordinal',
+        'acquiredAtClassLevel',
+        'spellKey',
+        'spellName',
+      ],
+      `spellbook[${index}]`,
+    );
+    const hasRef = row.ref !== undefined;
+    const hasRule = row.ruleKey !== undefined;
+    const hasOrdinal = row.ordinal !== undefined;
+    if (!(hasRef === hasRule && hasRule === hasOrdinal)) {
+      throw new ShareValidationError(
+        `spellbook[${index}] must name ref, ruleKey, and ordinal together.`,
+      );
+    }
+    const ref =
+      row.ref === undefined
+        ? undefined
+        : integer(row.ref, `spellbook[${index}].ref`, 0, 119);
+    if (ref !== undefined && !knownIds.has(ref)) {
+      throw new ShareValidationError(
+        `spellbook[${index}].ref is unknown.`,
+      );
+    }
+    if (row.spellName !== undefined && row.spellKey === undefined) {
+      throw new ShareValidationError(
+        `spellbook[${index}].spellName requires spellKey.`,
+      );
+    }
+    return {
+      ...(ref === undefined ? {} : { ref }),
+      ...(row.ruleKey === undefined
+        ? {}
+        : {
+            ruleKey: text(
+              row.ruleKey,
+              `spellbook[${index}].ruleKey`,
+              240,
+            ),
+          }),
+      ...(row.ordinal === undefined
+        ? {}
+        : {
+            ordinal: integer(
+              row.ordinal,
+              `spellbook[${index}].ordinal`,
+              1,
+              1_000,
+            ),
+          }),
+      ...(row.acquiredAtClassLevel === undefined
+        ? {}
+        : {
+            acquiredAtClassLevel: integer(
+              row.acquiredAtClassLevel,
+              `spellbook[${index}].acquiredAtClassLevel`,
+              1,
+              20,
+            ),
+          }),
+      ...(row.spellKey === undefined
+        ? {}
+        : {
+            spellKey: spellKey(
+              row.spellKey,
+              `spellbook[${index}].spellKey`,
+            ),
+          }),
+      ...(row.spellName === undefined
+        ? {}
+        : {
+            spellName: text(
+              row.spellName,
+              `spellbook[${index}].spellName`,
+              120,
+            ),
+          }),
+    };
+  });
+  assertUnique(
+    spellbook
+      .filter((item) => item.ref !== undefined)
+      .map(
+        (item) =>
+          `${String(item.ref)}\u0000${String(item.ruleKey)}\u0000${String(item.ordinal)}`,
+      ),
+    'spellbook addresses',
+  );
+  assertUnique(
+    spellbook
+      .filter((item) => item.spellKey !== undefined)
+      .map((item) => String(item.spellKey)),
+    'spellbook spells',
+  );
   const preferences = list(
     source.preferences,
     'preferences',

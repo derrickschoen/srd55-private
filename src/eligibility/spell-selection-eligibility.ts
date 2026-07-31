@@ -13,6 +13,11 @@ import type {
   SelectionEligibility,
   SpellSchool,
 } from '../domain/enums';
+import {
+  spellSelectionConstraint,
+  type SpellSelectionConstraint,
+  type StoredSpellSelectionConstraint,
+} from './spell-selection-constraint';
 
 export const eligibilityInvalidReasons = {
   inactive: 'Selected spell version is not active in the catalog.',
@@ -35,16 +40,10 @@ export type SchoolEligibilityList =
   | readonly SpellSchool[]
   | null;
 
-export interface EligibilitySlot {
+export interface EligibilitySlot extends StoredSpellSelectionConstraint {
   character_id: number;
   fixed_spell_version_id: number | null;
   current_spell_version_id: number | null;
-  spell_level_min?: number;
-  spell_level_max?: number;
-  allowed_spell_lists?: EligibilityList;
-  allowed_schools?: SchoolEligibilityList;
-  allowed_tags?: EligibilityList;
-  selection_collection?: string | null;
 }
 
 interface SpellVersion {
@@ -59,21 +58,6 @@ interface SpellVersion {
 interface RefreshableSlot extends EligibilitySlot {
   selectionEligibility: SelectionEligibility;
   selectionInvalidReason: string | null;
-}
-
-function decodeStringList(value: EligibilityList | undefined): string[] {
-  if (value === null || value === undefined || value === '') {
-    return [];
-  }
-  if (Array.isArray(value)) {
-    return [...value];
-  }
-
-  const decoded: unknown = JSON.parse(value as string);
-  if (!Array.isArray(decoded)) {
-    return [];
-  }
-  return [...decoded] as string[];
 }
 
 function decodeVersion(row: SqlRow): SpellVersion {
@@ -131,7 +115,18 @@ export class SpellSelectionEligibility {
     if (spellVersionId === null) {
       return { status: 'unselected', reason: null };
     }
+    return this.evaluateConstraint(
+      slot.character_id,
+      spellSelectionConstraint(slot),
+      spellVersionId,
+    );
+  }
 
+  evaluateConstraint(
+    characterId: number,
+    constraint: SpellSelectionConstraint,
+    spellVersionId: number,
+  ): SpellSelectionEvaluation {
     const version = this.db.one(
       `SELECT id, spell_identity_id, rules_edition, level, school, is_active
        FROM spell_versions
@@ -147,15 +142,15 @@ export class SpellSelectionEligibility {
       Number(
         this.db.scalar(
           'SELECT allow_legacy FROM characters WHERE id = ?',
-          [slot.character_id],
+          [characterId],
         ) ?? 0,
       ) === 1;
     if (version.rulesEdition === '2014' && !legacyAllowed) {
       return invalid(eligibilityInvalidReasons.legacy);
     }
 
-    const minimumLevel = slot.spell_level_min ?? 0;
-    const maximumLevel = slot.spell_level_max ?? 9;
+    const minimumLevel = constraint.spell_level_min;
+    const maximumLevel = constraint.spell_level_max;
     if (
       version.level < minimumLevel ||
       version.level > maximumLevel
@@ -163,7 +158,7 @@ export class SpellSelectionEligibility {
       return invalid(eligibilityInvalidReasons.level);
     }
 
-    const lists = decodeStringList(slot.allowed_spell_lists);
+    const lists = constraint.allowed_spell_lists;
     if (lists.length > 0) {
       const placeholders = lists.map(() => '?').join(', ');
       const directMembership =
@@ -199,12 +194,12 @@ export class SpellSelectionEligibility {
       }
     }
 
-    const schools = decodeStringList(slot.allowed_schools);
+    const schools = constraint.allowed_schools;
     if (schools.length > 0 && !schools.includes(version.school)) {
       return invalid(eligibilityInvalidReasons.school);
     }
 
-    const requiredTags = decodeStringList(slot.allowed_tags);
+    const requiredTags = constraint.allowed_tags;
     if (requiredTags.length > 0) {
       const placeholders = requiredTags.map(() => '?').join(', ');
       const matchedTags = Number(
@@ -221,10 +216,9 @@ export class SpellSelectionEligibility {
       }
     }
 
-    if (slot.selection_collection !== null &&
-        slot.selection_collection !== undefined) {
+    if (constraint.selection_collection !== null) {
       throw new Error(
-        `Unsupported selection collection '${slot.selection_collection}'.`,
+        `Unsupported selection collection '${constraint.selection_collection}'.`,
       );
     }
 
@@ -262,6 +256,43 @@ export class SpellSelectionEligibility {
            updated_at = ?
        WHERE id = ?`,
       [result.status, result.reason, new Date().toISOString(), slotId],
+    );
+  }
+
+  refreshSpellbookAcquisition(
+    entryId: number,
+    updatedAt = new Date().toISOString(),
+  ): void {
+    const acquisition = this.db.one(
+      `SELECT character_id, NULL AS fixed_spell_version_id,
+              spell_version_id AS current_spell_version_id,
+              spell_level_min, spell_level_max, allowed_spell_lists,
+              allowed_schools, allowed_tags, NULL AS selection_collection,
+              selection_eligibility, selection_invalid_reason
+       FROM wizard_spellbook_entries
+       WHERE id = ?`,
+      [entryId],
+      decodeSlot,
+    );
+    if (acquisition === null) {
+      return;
+    }
+
+    const result = this.evaluate(acquisition);
+    if (
+      acquisition.selectionEligibility === result.status &&
+      acquisition.selectionInvalidReason === result.reason
+    ) {
+      return;
+    }
+
+    this.db.exec(
+      `UPDATE wizard_spellbook_entries
+       SET selection_eligibility = ?,
+           selection_invalid_reason = ?,
+           updated_at = ?
+       WHERE id = ?`,
+      [result.status, result.reason, updatedAt, entryId],
     );
   }
 }

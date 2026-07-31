@@ -44,6 +44,7 @@ export interface StoredSlot {
   readonly override_note: string | null;
   readonly selection_eligibility: SelectionEligibility;
   readonly selection_invalid_reason: string | null;
+  readonly selection_acquired_at_class_level: number | null;
 }
 
 export type SlotUpdates = Partial<SlotRestoreState>;
@@ -80,12 +81,18 @@ function decodeSlot(row: SqlRow): StoredSlot {
       row,
       'selection_invalid_reason',
     ),
+    selection_acquired_at_class_level: sqlNullableInteger(
+      row,
+      'selection_acquired_at_class_level',
+    ),
   };
 }
 
 export function previousSlotState(slot: StoredSlot): SlotRestoreState {
   return {
     current_spell_version_id: slot.current_spell_version_id,
+    selection_acquired_at_class_level:
+      slot.selection_acquired_at_class_level,
     selection_eligibility: slot.selection_eligibility,
     selection_invalid_reason: slot.selection_invalid_reason,
     state: slot.state,
@@ -118,7 +125,8 @@ export abstract class SetSlotModeCommand<Mode extends SlotMode> {
               allowed_spell_lists, allowed_schools, allowed_tags,
               selection_collection, is_locked, state, orphan_reason_code,
               override_note, selection_eligibility,
-              selection_invalid_reason
+              selection_invalid_reason,
+              selection_acquired_at_class_level
        FROM spell_selection_slots
        WHERE character_id = ? AND id = ?`,
       [characterId, this.payload.slot_id],
@@ -133,6 +141,23 @@ export abstract class SetSlotModeCommand<Mode extends SlotMode> {
 
     const previous = previousSlotState(slot);
     const next = { ...previous, ...this.updates(slot, this.#eligibility) };
+    this.persist(
+      slot,
+      next,
+      this.clock(),
+      this.#eligibility,
+    );
+
+    this.#characterId = characterId;
+    this.#previous = previous;
+  }
+
+  protected persist(
+    slot: StoredSlot,
+    next: SlotRestoreState,
+    now: string,
+    _eligibility: SpellSelectionEligibility,
+  ): void {
     this.db.exec(
       `UPDATE spell_selection_slots
        SET current_spell_version_id = ?,
@@ -140,6 +165,7 @@ export abstract class SetSlotModeCommand<Mode extends SlotMode> {
            selection_invalid_reason = ?,
            state = ?,
            override_note = ?,
+           selection_acquired_at_class_level = ?,
            updated_at = ?
        WHERE character_id = ? AND id = ?`,
       [
@@ -148,14 +174,12 @@ export abstract class SetSlotModeCommand<Mode extends SlotMode> {
         next.selection_invalid_reason,
         next.state,
         next.override_note,
-        this.clock(),
-        characterId,
+        next.selection_acquired_at_class_level,
+        now,
+        slot.character_id,
         slot.id,
       ],
     );
-
-    this.#characterId = characterId;
-    this.#previous = previous;
   }
 
   async inverse(): Promise<RestoreSlotPayload> {

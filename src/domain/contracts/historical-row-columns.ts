@@ -41,6 +41,19 @@ const ADDED_NULLABLE_ROW_COLUMNS: Readonly<
     'character_item_id',
     'character_weapon_id',
   ],
+  spell_selection_slots: ['selection_acquired_at_class_level'],
+  wizard_spellbook_entries: [
+    'source_instance_id',
+    'rule_key',
+    'ordinal',
+    'acquired_at_class_level',
+    'allowed_spell_lists',
+    'allowed_schools',
+    'allowed_tags',
+    'orphan_reason_code',
+    'orphaned_at',
+    'selection_invalid_reason',
+  ],
 };
 
 /**
@@ -54,6 +67,16 @@ const ADDED_DEFAULTED_ROW_COLUMNS: Readonly<
   // D86: every historical item row represented one possession because no
   // quantity could be recorded. Restore and candidate audit share this fill.
   character_items: { quantity: 1 },
+  // Before GF-1 every spellbook row was itself a selected Wizard spell. The
+  // generated address and constraint did not exist, but its active, selected
+  // status did. These values reconstruct only facts the old row necessarily
+  // asserted.
+  wizard_spellbook_entries: {
+    spell_level_min: 1,
+    spell_level_max: 9,
+    state: 'active',
+    selection_eligibility: 'valid',
+  },
 };
 
 /**

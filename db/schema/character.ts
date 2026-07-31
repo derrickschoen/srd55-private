@@ -16,6 +16,7 @@ import type {
   SourceInstanceId,
   SpellVersionId,
   SubclassDefinitionId,
+  WizardSpellbookEntryId,
 } from '../../src/domain/ids';
 import type {
   Ability,
@@ -25,6 +26,7 @@ import type {
   SelectionEligibility,
   Skill,
   SkillGrantState,
+  SpellbookAcquisitionState,
   SlotBucket,
   SlotState,
 } from '../../src/domain/enums';
@@ -33,6 +35,7 @@ import {
   abilityAllocationMethods,
   rulesEditions,
   selectionEligibilities,
+  spellbookAcquisitionStates,
   skillGrantStates,
   skills,
   slotBuckets,
@@ -395,6 +398,15 @@ export const spell_selection_slots = sqliteTable(
       .notNull()
       .default('unselected'),
     selection_invalid_reason: sqlText()('selection_invalid_reason'),
+    /**
+     * The class level at which the current non-fixed selection was acquired.
+     * NULL means no selection or provenance predating GF-1. The level-up
+     * transaction supplies its target level; the planner writer derives the
+     * owning class's current level when it changes a durable selection.
+     */
+    selection_acquired_at_class_level: integer(
+      'selection_acquired_at_class_level',
+    ),
   },
   (table) => [
     check(
@@ -568,28 +580,108 @@ export const character_skill_grants = sqliteTable(
 );
 
 /**
- * The final migration removed the provenance/cost/source columns: the
- * spellbook is now only a per-character set of acquired spell versions.
+ * One generated Wizard spellbook acquisition.
+ *
+ * The nullable logical address is deliberate. Generated rows carry the whole
+ * `(source, rule, ordinal)` relation; manually added and historical rows that
+ * cannot be attributed carry none of it. `spell_version_id` is nullable
+ * because an owed acquisition is valid durable character state (D70).
  */
 export const wizard_spellbook_entries = sqliteTable(
   'wizard_spellbook_entries',
   {
-    id: integer('id').primaryKey({ autoIncrement: true }).notNull(),
+    id: integer('id')
+      .primaryKey({ autoIncrement: true })
+      .notNull()
+      .$type<WizardSpellbookEntryId>(),
     character_id: integer('character_id')
       .notNull()
       .$type<CharacterId>()
       .references(() => characters.id, { onDelete: 'cascade' }),
+    source_instance_id: integer('source_instance_id')
+      .$type<SourceInstanceId>(),
+    rule_key: varchar()('rule_key'),
+    ordinal: integer('ordinal'),
+    acquired_at_class_level: integer('acquired_at_class_level'),
     spell_version_id: integer('spell_version_id')
-      .notNull()
       .$type<SpellVersionId>()
       .references(() => spell_versions.id),
+    spell_level_min: integer('spell_level_min').notNull().default(1),
+    spell_level_max: integer('spell_level_max').notNull().default(9),
+    allowed_spell_lists: sqlText()('allowed_spell_lists'),
+    allowed_schools: sqlText()('allowed_schools'),
+    allowed_tags: sqlText()('allowed_tags'),
+    state: varchar<SpellbookAcquisitionState>()('state')
+      .notNull()
+      .default('active'),
+    orphan_reason_code: varchar()('orphan_reason_code'),
+    orphaned_at: datetime()('orphaned_at'),
+    selection_eligibility: varchar<SelectionEligibility>()(
+      'selection_eligibility',
+    )
+      .notNull()
+      .default('unselected'),
+    selection_invalid_reason: sqlText()('selection_invalid_reason'),
     created_at: datetime()('created_at'),
     updated_at: datetime()('updated_at'),
   },
   (table) => [
+    foreignKey({
+      columns: [table.source_instance_id, table.character_id],
+      foreignColumns: [
+        character_source_instances.id,
+        character_source_instances.character_id,
+      ],
+    }).onDelete('cascade'),
+    check(
+      'wizard_spellbook_entries_logical_address_check',
+      sql`(
+        source_instance_id IS NULL
+        AND rule_key IS NULL
+        AND ordinal IS NULL
+      ) OR (
+        source_instance_id IS NOT NULL
+        AND rule_key IS NOT NULL
+        AND ordinal IS NOT NULL
+      )`,
+    ),
+    check(
+      'wizard_spellbook_entries_ordinal_check',
+      sql`ordinal IS NULL OR (typeof(ordinal) = 'integer' AND ordinal >= 1)`,
+    ),
+    check(
+      'wizard_spellbook_entries_acquisition_level_check',
+      sql`acquired_at_class_level IS NULL OR (
+        typeof(acquired_at_class_level) = 'integer'
+        AND acquired_at_class_level BETWEEN 1 AND 20
+      )`,
+    ),
+    check(
+      'wizard_spellbook_entries_level_window_check',
+      sql`spell_level_min BETWEEN 0 AND 9
+        AND spell_level_max BETWEEN 0 AND 9
+        AND spell_level_min <= spell_level_max`,
+    ),
+    check(
+      'wizard_spellbook_entries_state_check',
+      oneOf('state', spellbookAcquisitionStates),
+    ),
+    check(
+      'wizard_spellbook_entries_selection_eligibility_check',
+      oneOf('selection_eligibility', selectionEligibilities),
+    ),
+    uniqueIndex(
+      'wizard_spellbook_entries_source_rule_ordinal_unique',
+    ).on(table.source_instance_id, table.rule_key, table.ordinal),
     uniqueIndex(
       'wizard_spellbook_entries_character_id_spell_version_id_unique',
-    ).on(table.character_id, table.spell_version_id),
+    )
+      .on(table.character_id, table.spell_version_id)
+      .where(sql`spell_version_id IS NOT NULL AND state = 'active'`),
+    index('wizard_spellbook_entries_character_id_state_index').on(
+      table.character_id,
+      table.state,
+    ),
   ],
 );
 

@@ -8,11 +8,15 @@
 import type { Skill } from '../domain/enums';
 import type {
   CharacterId,
+  CharacterRevision,
+  ClassDefinitionId,
+  ClassLevel,
   GrantOrdinal,
   GrantRuleKey,
   SourceInstanceId,
   SpellVersionId,
 } from '../domain/ids';
+import type { EligibleSpell } from '../domain/read-models';
 
 export type LevelUpStep =
   | 'class'
@@ -76,6 +80,18 @@ export interface PlannedExpertiseChoice {
   readonly locator: PlannedGrantLocator;
   readonly skill: Skill;
 }
+
+export interface LevelUpPlannedEligibleSpellsParams {
+  readonly character_id: CharacterId;
+  readonly expected_revision: CharacterRevision;
+  readonly class_definition_id: ClassDefinitionId;
+  readonly target_class_level: ClassLevel;
+  readonly locator: PlannedGrantLocator;
+  readonly query: string;
+}
+
+export type LevelUpPlannedEligibleSpellsResult =
+  readonly EligibleSpell[];
 
 export const LEVEL_UP_RPC = Object.freeze({
   state: 'queries.characters.levelUpState',

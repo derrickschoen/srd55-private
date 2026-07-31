@@ -760,11 +760,21 @@ function validateCharacterRows(
   for (const [index, row] of (
     tables.wizard_spellbook_entries ?? []
   ).entries()) {
+    const sourceId = nullablePositiveInteger(
+      row.source_instance_id,
+      `${label}.wizard_spellbook_entries[${index}].source_instance_id`,
+    );
+    if (sourceId !== null && !sourceIds.has(sourceId)) {
+      throw new BackupValidationError(
+        `${label}.wizard_spellbook_entries[${index}] references a source from another character.`,
+      );
+    }
     requireReference(
       maps,
       'spell_versions',
       row.spell_version_id,
       `${label}.wizard_spellbook_entries[${index}].spell_version_id`,
+      true,
     );
   }
 
@@ -1997,10 +2007,18 @@ function importCurrentTables(
   }
 
   for (const row of document.tables.wizard_spellbook_entries) {
+    const oldSourceId =
+      row.source_instance_id === null
+        ? null
+        : Number(row.source_instance_id);
     maps.wizard_spellbook_entries.set(
       Number(row.id),
       insertPortableRow(db, 'wizard_spellbook_entries', row, {
         character_id: characterId,
+        source_instance_id:
+          oldSourceId === null
+            ? null
+            : maps.character_source_instances.get(oldSourceId),
         spell_version_id: resolvedId(
           references,
           'spell_versions',
@@ -2515,6 +2533,12 @@ function portableSnapshots(
             ...row,
             id: ids.wizard_spellbook_entries.get(Number(row.id)),
             character_id: characterId,
+            source_instance_id:
+              row.source_instance_id === null
+                ? null
+                : ids.character_source_instances.get(
+                    Number(row.source_instance_id),
+                  ),
             spell_version_id: resolvedId(
               references,
               'spell_versions',

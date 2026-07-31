@@ -589,6 +589,117 @@ describe('database migration chain', () => {
     lifecycle.close();
   });
 
+  it('migrates every pre-0022 selected Wizard spell byte-for-row with its logical acquisition provenance', async () => {
+    const beforePlannedGrants = DATABASE_MIGRATIONS
+      .slice(0, 22)
+      .map((entry) => entry.sql)
+      .join('\n');
+    const storage = await storageHolding(
+      `${beforePlannedGrants}
+       INSERT INTO catalog_content_identities (
+         content_key, content_kind, key_kind, catalog_layer, normalized_name
+       ) VALUES
+         ('class:wizard-migration', 'class', 'legacy-opaque', 'external',
+          'wizard'),
+         ('spell:one', 'spell', 'legacy-opaque', 'external', 'spell one'),
+         ('spell:two', 'spell', 'legacy-opaque', 'external', 'spell two');
+       INSERT INTO characters (id, name)
+       VALUES (1, 'Historical Wizard');
+       INSERT INTO class_definitions (
+         id, content_key, name, rules_edition, progression_type
+       ) VALUES (
+         2, 'class:wizard-migration', 'Wizard', '2024', 'full'
+       );
+       INSERT INTO character_class_levels (
+         id, character_id, class_definition_id, level
+       ) VALUES (3, 1, 2, 2);
+       INSERT INTO character_source_instances (
+         id, character_id, instance_uuid, source_type,
+         source_definition_id, display_name, config
+       ) VALUES (
+         4, 1, 'historical-wizard-source', 'class', 2, 'Wizard 2',
+         '{"wizard_spellbook_acquisitions":[
+           {"spell_version_id":12},{"spell_version_key":"spell:two"}
+         ]}'
+       );
+       INSERT INTO spell_identities (
+         id, content_key, canonical_name, normalized_name
+       ) VALUES
+         (10, 'identity:one', 'Spell One', 'spell one'),
+         (11, 'identity:two', 'Spell Two', 'spell two');
+       INSERT INTO spell_versions (
+         id, content_key, spell_identity_id, display_name, rules_edition,
+         level, school, is_active
+       ) VALUES
+         (12, 'spell:one', 10, 'Spell One', '2024', 1, 'Abjuration', 1),
+         (13, 'spell:two', 11, 'Spell Two', '2024', 1, 'Evocation', 1);
+       INSERT INTO spell_list_memberships (
+         spell_version_id, spell_list_key
+       ) VALUES (12, 'Wizard'), (13, 'Wizard');
+       INSERT INTO wizard_spellbook_entries (
+         id, character_id, spell_version_id, created_at, updated_at
+       ) VALUES
+         (20, 1, 12, '2030-01-01T00:00:00.000Z',
+          '2030-01-02T00:00:00.000Z'),
+         (21, 1, 13, '2030-02-01T00:00:00.000Z',
+          '2030-02-02T00:00:00.000Z');`,
+    );
+    const before = openDatabaseImage(
+      sqlite3,
+      await storage.exportFile(),
+    );
+    const selectedRowBytes = before.selectArrays(
+      `SELECT hex(CAST(json_array(
+         id, character_id, spell_version_id, created_at, updated_at
+       ) AS BLOB))
+       FROM wizard_spellbook_entries ORDER BY id`,
+    );
+    before.close();
+
+    const lifecycle = new DatabaseLifecycle(sqlite3, storage, schema);
+    lifecycle.open();
+    expect(
+      lifecycle.database.connection.selectArrays(
+        `SELECT hex(CAST(json_array(
+           id, character_id, spell_version_id, created_at, updated_at
+         ) AS BLOB))
+         FROM wizard_spellbook_entries
+         WHERE spell_version_id IS NOT NULL ORDER BY id`,
+      ),
+    ).toEqual(selectedRowBytes);
+    expect(
+      lifecycle.database.allRaw(
+        `SELECT id, source_instance_id, rule_key, ordinal,
+                acquired_at_class_level, spell_version_id
+         FROM wizard_spellbook_entries ORDER BY id`,
+      ),
+    ).toEqual([
+      {
+        id: 20,
+        source_instance_id: 4,
+        rule_key: 'wizard-spellbook',
+        ordinal: 1,
+        acquired_at_class_level: 1,
+        spell_version_id: 12,
+      },
+      {
+        id: 21,
+        source_instance_id: 4,
+        rule_key: 'wizard-spellbook',
+        ordinal: 2,
+        acquired_at_class_level: 1,
+        spell_version_id: 13,
+      },
+    ]);
+    expect(
+      lifecycle.database.scalar(
+        `SELECT json_type(config, '$.wizard_spellbook_acquisitions')
+         FROM character_source_instances WHERE id = 4`,
+      ),
+    ).toBeNull();
+    lifecycle.close();
+  });
+
   it('adds feat numbers without losing an existing definition', async () => {
     const storage = await storageHolding(
       `${SCHEMA_BEFORE_FEAT_MODEL}

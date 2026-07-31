@@ -307,7 +307,27 @@ function validateKindFields(
   }
 
   if (kind === 'spellbook_acquisition') {
-    nonEmptyString(input, 'acquisitions_config');
+    if (input.acquisitions_config !== undefined) {
+      nonEmptyString(input, 'acquisitions_config');
+    }
+    const initialCount = input.initial_count;
+    const countPerLevel = input.count_per_level;
+    if (
+      initialCount !== undefined &&
+      (!Number.isSafeInteger(initialCount) || (initialCount as number) < 0)
+    ) {
+      throw new TypeError(
+        `Grant rule '${ruleKey}' field 'initial_count' must be a non-negative integer.`,
+      );
+    }
+    if (
+      countPerLevel !== undefined &&
+      (!Number.isSafeInteger(countPerLevel) || (countPerLevel as number) < 1)
+    ) {
+      throw new TypeError(
+        `Grant rule '${ruleKey}' field 'count_per_level' must be a positive integer.`,
+      );
+    }
   }
 
   if (kind === 'fighting_style') {
@@ -385,6 +405,7 @@ export class GrantRule {
         break;
       case 'choice_from_list':
       case 'choice_from_query':
+      case 'spellbook_acquisition':
       case 'weapon_mastery':
       case 'skill_proficiency':
         count = positiveInteger(input, 'count', null, ruleKey);
@@ -470,7 +491,11 @@ export class GrantRule {
     if (distinctConfigBy !== null) {
       normalized.distinct_config_by = distinctConfigBy;
     }
-    if (kind === 'choice_from_list' || kind === 'choice_from_query') {
+    if (
+      kind === 'choice_from_list' ||
+      kind === 'choice_from_query' ||
+      kind === 'spellbook_acquisition'
+    ) {
       normalized.level_min = levelMin;
       normalized.level_max = levelMax;
     }

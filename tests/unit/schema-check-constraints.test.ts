@@ -200,6 +200,24 @@ const slot =
     newSlot(db, values);
   };
 
+const wizardAcquisition =
+  (
+    values: Values,
+    address: 'none' | 'complete' | 'source_only' = 'none',
+  ): Write =>
+  (db) => {
+    const characterId = newCharacter(db);
+    const sourceId =
+      address === 'none' ? null : newSource(db, characterId);
+    insert(db, 'wizard_spellbook_entries', {
+      character_id: characterId,
+      source_instance_id: sourceId,
+      rule_key: address === 'complete' ? 'wizard-spellbook' : null,
+      ordinal: address === 'complete' ? 1 : null,
+      ...values,
+    });
+  };
+
 const classDefinition =
   (values: Values): Write =>
   (db) => {
@@ -1295,6 +1313,120 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
       ['a single-level window in the interior', slot({ spell_level_min: 3, spell_level_max: 3 })],
       // The same one-column narrowing, in the direction that stays well-formed.
       ['a one-column narrowing that leaves the window well-formed', slotEdit({ spell_level_min: 0, spell_level_max: 9 }, { spell_level_min: 9 })],
+    ],
+  },
+  {
+    constraint: 'wizard_spellbook_entries_logical_address_check',
+    rejects: [
+      [
+        'a source without its rule and ordinal',
+        wizardAcquisition({}, 'source_only'),
+      ],
+    ],
+    accepts: [
+      ['a historical address-less acquisition', wizardAcquisition({})],
+      [
+        'a complete generated logical address',
+        wizardAcquisition({}, 'complete'),
+      ],
+    ],
+  },
+  {
+    constraint: 'wizard_spellbook_entries_ordinal_check',
+    rejects: [
+      [
+        'ordinal zero in a generated address',
+        wizardAcquisition({ ordinal: 0 }, 'complete'),
+      ],
+    ],
+    accepts: [
+      ['a nullable historical ordinal', wizardAcquisition({})],
+      [
+        'the first generated ordinal',
+        wizardAcquisition({ ordinal: 1 }, 'complete'),
+      ],
+    ],
+  },
+  {
+    constraint: 'wizard_spellbook_entries_acquisition_level_check',
+    rejects: [
+      [
+        'class level zero',
+        wizardAcquisition({ acquired_at_class_level: 0 }),
+      ],
+      [
+        'class level 21',
+        wizardAcquisition({ acquired_at_class_level: 21 }),
+      ],
+    ],
+    accepts: [
+      ['an unknown historical level', wizardAcquisition({})],
+      [
+        'the first class level',
+        wizardAcquisition({ acquired_at_class_level: 1 }),
+      ],
+      [
+        'the twentieth class level',
+        wizardAcquisition({ acquired_at_class_level: 20 }),
+      ],
+    ],
+  },
+  {
+    constraint: 'wizard_spellbook_entries_level_window_check',
+    rejects: [
+      [
+        'a minimum below cantrip level',
+        wizardAcquisition({ spell_level_min: -1 }),
+      ],
+      [
+        'a maximum above ninth level',
+        wizardAcquisition({ spell_level_max: 10 }),
+      ],
+      [
+        'an inverted acquisition window',
+        wizardAcquisition({ spell_level_min: 2, spell_level_max: 1 }),
+      ],
+    ],
+    accepts: [
+      ['the 1..9 defaults', wizardAcquisition({})],
+      [
+        'a cantrip-only acquisition window',
+        wizardAcquisition({ spell_level_min: 0, spell_level_max: 0 }),
+      ],
+      [
+        'a ninth-level-only acquisition window',
+        wizardAcquisition({ spell_level_min: 9, spell_level_max: 9 }),
+      ],
+    ],
+  },
+  {
+    constraint: 'wizard_spellbook_entries_state_check',
+    rejects: [
+      [
+        'a slot-only discarded state',
+        wizardAcquisition({ state: 'discarded' }),
+      ],
+    ],
+    accepts: [
+      ['the active default', wizardAcquisition({})],
+      ['the orphaned lifecycle state', wizardAcquisition({ state: 'orphaned' })],
+    ],
+  },
+  {
+    constraint: 'wizard_spellbook_entries_selection_eligibility_check',
+    rejects: [
+      [
+        'an unclassifiable eligibility',
+        wizardAcquisition({ selection_eligibility: 'unknown' }),
+      ],
+    ],
+    accepts: [
+      ['the unselected default', wizardAcquisition({})],
+      ['a valid selection', wizardAcquisition({ selection_eligibility: 'valid' })],
+      [
+        'an invalid retained selection',
+        wizardAcquisition({ selection_eligibility: 'invalid' }),
+      ],
     ],
   },
   {

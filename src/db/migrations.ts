@@ -22,6 +22,7 @@ import characterItemsQuantity from '../../drizzle/0018_character_items_quantity.
 import abilityOverride from '../../drizzle/0019_ability_override.sql?raw';
 import contentIdentityRegistry from '../../drizzle/0020_content_identity_registry.sql?raw';
 import catalogDataMigrations from '../../drizzle/0021_catalog_data_migrations.sql?raw';
+import plannedSpellGrants from '../../drizzle/0022_planned_spell_grants.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -254,6 +255,17 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
       '3f03fa0949716dc57ca4ee15ae360bbbefaf23837b78a736f0efc4129eff845b',
     resultSchemaChecksum:
       '293e75126e52dfae213ddd10b040d44c2ce60b24951f8f4d4ac6ad85f6ab0f17',
+  }),
+  // GF-1: generated spell choices now share one logical grant plan. Wizard
+  // spellbook acquisitions become nullable/addressable rows; legacy config
+  // selections are moved without dropping a selected spell.
+  Object.freeze({
+    id: '0022_planned_spell_grants',
+    sql: plannedSpellGrants,
+    checksum:
+      'dc47c171ff21160be9dc07e80eedf3b62a0edbc6d12aa36bdb27b4ecc8fc4839',
+    resultSchemaChecksum:
+      '9726366cbd3e34d6378f17c95d9137c45d2cd897e2982c79237f32c363a4ac5d',
   }),
 ]);
 

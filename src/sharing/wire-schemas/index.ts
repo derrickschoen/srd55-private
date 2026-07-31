@@ -11,6 +11,7 @@ import { WIRE_SCHEMA_V10 } from './v10';
 import { WIRE_SCHEMA_V11 } from './v11';
 import { WIRE_SCHEMA_V12 } from './v12';
 import { WIRE_SCHEMA_V13 } from './v13';
+import { WIRE_SCHEMA_V14 } from './v14';
 import {
   versatileWeaponDamageFromLegacy,
   weaponDamageFromLegacy,
@@ -27,7 +28,7 @@ import {
  * domain requires a new schema version, an adjacent migration, and a
  * hand-frozen fragment fixture. Never edit an existing version.
  */
-export const CURRENT_CHARACTER_SHARE_VERSION = 13 as const;
+export const CURRENT_CHARACTER_SHARE_VERSION = 14 as const;
 
 /**
  * Any change to tuple field order, meaning, membership, or accepted value
@@ -48,6 +49,7 @@ export const SHARE_SCHEMAS = Object.freeze({
   11: WIRE_SCHEMA_V11,
   12: WIRE_SCHEMA_V12,
   13: WIRE_SCHEMA_V13,
+  14: WIRE_SCHEMA_V14,
 } as const);
 
 export type SupportedShareVersion = keyof typeof SHARE_SCHEMAS;
@@ -831,6 +833,67 @@ function migrateV12ToV13(document: unknown): unknown {
 }
 
 /**
+ * V13 had no acquisition-level field on a selection and represented a
+ * spellbook as selected spell keys only. Null-padding is the only honest
+ * selection migration. Each spellbook key becomes an address-less acquisition:
+ * the spell survives, while provenance the old wire never recorded remains
+ * absent rather than fabricated.
+ */
+function migrateV13ToV14(document: unknown): unknown {
+  if (
+    !Array.isArray(document) ||
+    !WIRE_SCHEMA_V13.tuples.root.arities.some(
+      (arity) => arity === document.length,
+    )
+  ) {
+    throw new TypeError('wire document has an unsupported v13 tuple length.');
+  }
+  const versionIndex = WIRE_SCHEMA_V13.tuples.root.fields.findIndex(
+    (field) => field.key === 'version',
+  );
+  const selectionsIndex = WIRE_SCHEMA_V13.tuples.root.fields.findIndex(
+    (field) => field.key === 'selections',
+  );
+  const spellbookIndex = WIRE_SCHEMA_V13.tuples.root.fields.findIndex(
+    (field) => field.key === 'spellbook',
+  );
+  if (versionIndex < 0 || selectionsIndex < 0 || spellbookIndex < 0) {
+    throw new TypeError('wire v13 schema is missing a required field.');
+  }
+  const selections = document[selectionsIndex];
+  const spellbook = document[spellbookIndex];
+  if (!Array.isArray(selections) || !Array.isArray(spellbook)) {
+    throw new TypeError(
+      'wire v13 selections and spellbook must be lists.',
+    );
+  }
+  const migrated = [...document];
+  migrated[versionIndex] = 14;
+  migrated[selectionsIndex] = selections.map((selection: unknown) => {
+    if (
+      !Array.isArray(selection) ||
+      !WIRE_SCHEMA_V13.tuples.selection.arities.some(
+        (arity) => arity === selection.length,
+      )
+    ) {
+      throw new TypeError(
+        'wire selection has an unsupported v13 tuple length.',
+      );
+    }
+    return [...selection, null];
+  });
+  migrated[spellbookIndex] = spellbook.map((spell: unknown) => [
+    null,
+    null,
+    null,
+    null,
+    spell,
+    null,
+  ]);
+  return migrated;
+}
+
+/**
  * ADJACENT means each migration lifts exactly one version step; the decoder
  * composes them, so a v1 document runs 1→2, then 2→3, then 3→4, then 4→5 —
  * where every pre-v5 document is retired by the deliberate throw above — a
@@ -851,6 +914,7 @@ export const MIGRATIONS = Object.freeze({
   10: migrateV10ToV11,
   11: migrateV11ToV12,
   12: migrateV12ToV13,
+  13: migrateV13ToV14,
 }) satisfies AdjacentMigrations;
 
 export { WIRE_SCHEMA_V1 } from './v1';
@@ -866,8 +930,10 @@ export { WIRE_SCHEMA_V10 } from './v10';
 export { WIRE_SCHEMA_V11 } from './v11';
 export { WIRE_SCHEMA_V12 } from './v12';
 export { WIRE_SCHEMA_V13 } from './v13';
+export { WIRE_SCHEMA_V14 } from './v14';
 export type { WireField, WireSchemaV1 } from './v1';
 export type { WireSchemaV2 } from './v2';
+export type { WireSchemaV14 } from './v14';
 export type { WireSchemaV3 } from './v3';
 export type { WireSchemaV4 } from './v4';
 export type { WireSchemaV5 } from './v5';

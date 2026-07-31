@@ -583,6 +583,16 @@ export const wizardSpellbookEntriesRelations = relations(
       fields: [wizard_spellbook_entries.spell_version_id],
       references: [spell_versions.id],
     }),
+    source_instance: one(character_source_instances, {
+      fields: [
+        wizard_spellbook_entries.source_instance_id,
+        wizard_spellbook_entries.character_id,
+      ],
+      references: [
+        character_source_instances.id,
+        character_source_instances.character_id,
+      ],
+    }),
   }),
 );
 

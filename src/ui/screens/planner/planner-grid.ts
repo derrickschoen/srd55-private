@@ -338,13 +338,18 @@ export function renderPlannerGrid(options: {
       } else selection.textContent = slot.spell_name;
     } else {
       const picker = createSpellPicker({
-        characterId: options.workspace.report.character.id,
-        slotId: slot.id,
+        addressKey: `slot-${slot.id}`,
+        label: `Spell selection for slot ${slot.id}`,
         value: slot.spell_name,
         freeTextValue: slot.placeholder === true,
         invalid: attention,
         disabled: options.disabled,
-        queries: options.queries,
+        search: (query) =>
+          options.queries.eligibleSpells(
+            options.workspace.report.character.id,
+            slot.id,
+            query,
+          ),
         onSelect: (spell) => options.onSelect(slot, spell),
       });
       pickerForSlot = picker;

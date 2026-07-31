@@ -97,6 +97,7 @@ function slotRow(): Record<string, unknown> {
     created_at: null,
     updated_at: null,
     selection_collection: null,
+    selection_acquired_at_class_level: null,
     selection_eligibility: 'valid',
     selection_invalid_reason: null,
   };

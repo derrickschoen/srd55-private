@@ -105,6 +105,15 @@ export const slotStates = [
 export type SlotState = (typeof slotStates)[number];
 
 /**
+ * Addressable Wizard spellbook acquisitions have the same preserve-on-loss
+ * lifecycle as skill grants: a rule can stop applying without erasing the
+ * selected spell that row remembers.
+ */
+export const spellbookAcquisitionStates = ['active', 'orphaned'] as const;
+export type SpellbookAcquisitionState =
+  (typeof spellbookAcquisitionStates)[number];
+
+/**
  * The lifecycle of one skill grant (`character_skill_grants.state`).
  *
  * TWO members, not `slotStates`' four: a skill grant has no fixed/`discarded`

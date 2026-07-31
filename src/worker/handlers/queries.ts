@@ -14,6 +14,11 @@ import {
   OperationHistoryQueries,
 } from '../../queries/operation-history';
 import { SavePointQueries } from '../../queries/save-points';
+import { LevelUpPlannedEligibleSpells } from '../../queries/level-up-planned-eligible-spells';
+import type {
+  LevelUpPlannedEligibleSpellsParams,
+  PlannedGrantSource,
+} from '../../builder/level-up-wizard';
 import { BuildReportBuilder } from '../../reports/build-report-builder';
 import {
   PrintableSpellListBuilder,
@@ -61,6 +66,59 @@ function exactKeys(
 
 function positiveInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && Number(value) >= 1;
+}
+
+function plannedGrantSource(
+  value: unknown,
+): value is PlannedGrantSource {
+  if (!isRecord(value) || typeof value.kind !== 'string') {
+    return false;
+  }
+  if (value.kind === 'existing_source') {
+    return (
+      exactKeys(value, ['kind', 'source_instance_id']) &&
+      positiveInteger(value.source_instance_id)
+    );
+  }
+  return (
+    (value.kind === 'selected_class' ||
+      value.kind === 'selected_class_subclass' ||
+      value.kind === 'selected_feat') &&
+    exactKeys(value, ['kind'])
+  );
+}
+
+export function isLevelUpPlannedEligibleSpellsParams(
+  params: unknown,
+): params is LevelUpPlannedEligibleSpellsParams {
+  if (
+    !isRecord(params) ||
+    !exactKeys(params, [
+      'character_id',
+      'expected_revision',
+      'class_definition_id',
+      'target_class_level',
+      'locator',
+      'query',
+    ]) ||
+    !positiveInteger(params.character_id) ||
+    !Number.isSafeInteger(params.expected_revision) ||
+    Number(params.expected_revision) < 0 ||
+    !positiveInteger(params.class_definition_id) ||
+    !positiveInteger(params.target_class_level) ||
+    Number(params.target_class_level) > 20 ||
+    typeof params.query !== 'string' ||
+    !isRecord(params.locator) ||
+    !exactKeys(params.locator, ['source', 'rule_key', 'ordinal'])
+  ) {
+    return false;
+  }
+  return (
+    plannedGrantSource(params.locator.source) &&
+    typeof params.locator.rule_key === 'string' &&
+    params.locator.rule_key.trim() !== '' &&
+    positiveInteger(params.locator.ordinal)
+  );
 }
 
 export function isCharacterParams(
@@ -191,6 +249,12 @@ export const handlers: readonly RpcHandler[] = Object.freeze([
         params.slot_id,
         params.query.trim(),
       ),
+  ),
+  defineRpcHandler(
+    'queries.characters.levelUpPlannedEligibleSpells',
+    isLevelUpPlannedEligibleSpellsParams,
+    (context, params) =>
+      new LevelUpPlannedEligibleSpells(context.db).search(params),
   ),
   defineRpcHandler(
     'queries.savePoints.create',
