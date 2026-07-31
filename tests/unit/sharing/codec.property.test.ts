@@ -203,7 +203,7 @@ function generateDocument(seed: number): CharacterShareDocument {
   });
   const spellbook = Array.from(
     { length: integer(random, 7) },
-    (_, index) => spellKey(100 + index),
+    (_, index) => ({ spellKey: spellKey(100 + index) }),
   );
   const preferences = Array.from(
     { length: integer(random, 7) },

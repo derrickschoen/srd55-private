@@ -561,6 +561,12 @@ export const FOREIGN_KEY_FACTS = [
     target: 'spell_versions',
     targetColumns: ['id'],
   },
+  {
+    table: 'wizard_spellbook_entries',
+    columns: ['source_instance_id', 'character_id'],
+    target: 'character_source_instances',
+    targetColumns: ['id', 'character_id'],
+  },
 ] as const;
 
 export type ForeignKeyFact = (typeof FOREIGN_KEY_FACTS)[number];

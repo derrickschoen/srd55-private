@@ -12,7 +12,17 @@ import type { DatabaseContext } from '../db/database';
 import {
   SpellSelectionEligibility,
 } from '../eligibility/spell-selection-eligibility';
+import { storedSpellSelectionConstraint } from '../eligibility/spell-selection-constraint';
+import type {
+  ClassLevel,
+  SourceInstanceId,
+} from '../domain/ids';
+import type { JsonObject } from '../domain/models';
 import { GrantRule } from './grant-rule';
+import {
+  GrantRulePlanner,
+  type PlannedSpellGrant,
+} from './grant-rule-planner';
 import {
   orphanSkillGrantsForSource,
   rebuildSkillProjection,
@@ -91,10 +101,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function jsonList(value: unknown): string | null {
-  return Array.isArray(value) ? JSON.stringify([...value]) : null;
-}
-
 function scalarString(value: unknown): string {
   if (
     typeof value === 'string' ||
@@ -145,15 +151,18 @@ function ruleData(rule: GrantRule): Record<string, unknown> {
 export class GrantRuleSlotGenerator {
   readonly #eligibility: SpellSelectionEligibility;
   readonly #rules: SourceRuleReader;
+  readonly #planner: GrantRulePlanner;
 
   constructor(
     private readonly db: DatabaseContext,
     eligibility?: SpellSelectionEligibility,
     rules?: SourceRuleReader,
+    planner?: GrantRulePlanner,
   ) {
     this.#eligibility =
       eligibility ?? new SpellSelectionEligibility(db);
     this.#rules = rules ?? new SourceRuleReader(db);
+    this.#planner = planner ?? new GrantRulePlanner();
   }
 
   activeRulesForSource(sourceInstanceId: number): GrantRule[] {
@@ -174,34 +183,71 @@ export class GrantRuleSlotGenerator {
       }
 
       const desiredSlotKeys: string[] = [];
+      const desiredSpellbookAddresses: string[] = [];
       const desiredChildMarkers: string[] = [];
+      const activeRules: GrantRule[] = [];
       for (const rule of this.#rules.rulesForSource(source)) {
         this.assertDistinctConfiguration(source, rule);
         if (!this.#rules.ruleIsActiveForSource(source, rule)) {
           continue;
         }
+        activeRules.push(rule);
+      }
 
+      const decodedConfig = decodeGrantJson(source.config);
+      const normalizedConfig =
+        Array.isArray(decodedConfig) && decodedConfig.length === 0
+          ? {}
+          : decodedConfig;
+      if (!isRecord(normalizedConfig)) {
+        throw new TypeError(
+          `Grant source ${source.id} config must be an object.`,
+        );
+      }
+      const effectiveClassLevel = this.effectiveClassLevel(source);
+      const plannedSpells = this.#planner.plan({
+        source: {
+          kind: 'existing_source',
+          source_instance_id: source.id as SourceInstanceId,
+        },
+        configured_rules: activeRules.map((rule) => rule.toObject()),
+        config: normalizedConfig as JsonObject,
+        effective_class_level: effectiveClassLevel,
+      });
+      const ruleByKey = new Map(
+        activeRules.map((rule) => [rule.ruleKey, rule]),
+      );
+      for (const planned of plannedSpells) {
+        const rule = ruleByKey.get(planned.locator.rule_key);
+        if (rule === undefined) {
+          throw new Error(
+            `Planned grant rule '${planned.locator.rule_key}' disappeared before generation.`,
+          );
+        }
+        if (planned.kind === 'slot_selection') {
+          this.materializePlannedSlot(source, rule, planned);
+          desiredSlotKeys.push(
+            this.slotKey(source, rule, planned.locator.ordinal),
+          );
+        } else {
+          this.syncSpellbookAcquisition(source, rule, planned);
+          desiredSpellbookAddresses.push(
+            `${rule.ruleKey}:${planned.locator.ordinal}`,
+          );
+        }
+      }
+
+      for (const rule of activeRules) {
         switch (rule.kind) {
-          case GrantRule.FIXED_SPELL:
-            this.materializeFixedSpell(source, rule);
-            desiredSlotKeys.push(this.slotKey(source, rule, 1));
-            break;
-          case GrantRule.CHOICE_FROM_LIST:
-            this.materializeListChoices(source, rule);
-            this.appendDesiredSlotKeys(source, rule, desiredSlotKeys);
-            break;
-          case GrantRule.CHOICE_FROM_QUERY:
-            this.materializeQueryChoices(source, rule);
-            this.appendDesiredSlotKeys(source, rule, desiredSlotKeys);
-            break;
           case GrantRule.GRANT_SOURCE:
             desiredChildMarkers.push(
               ...this.materializeGrantedSources(source, rule),
             );
             break;
+          case GrantRule.FIXED_SPELL:
+          case GrantRule.CHOICE_FROM_LIST:
+          case GrantRule.CHOICE_FROM_QUERY:
           case GrantRule.SPELLBOOK_ACQUISITION:
-            this.materializeSpellbookEntries(source, rule);
-            break;
           case GrantRule.CAPABILITY:
           case GrantRule.FIGHTING_STYLE:
           case GrantRule.WEAPON_MASTERY:
@@ -217,6 +263,10 @@ export class GrantRuleSlotGenerator {
       }
 
       this.reconcileSlots(source, desiredSlotKeys);
+      this.reconcileSpellbookAcquisitions(
+        source,
+        desiredSpellbookAddresses,
+      );
       this.reconcileGrantedChildren(source, desiredChildMarkers);
       // THE SKILL-GRANT CLASS ARM (plan §3.8): sync/revive keyed on
       // (source_instance_id, grant_key, ordinal), mirroring syncSlot —
@@ -244,132 +294,90 @@ export class GrantRuleSlotGenerator {
     });
   }
 
-  private appendDesiredSlotKeys(
+  private effectiveClassLevel(
     source: GrantSourceInstance,
-    rule: GrantRule,
-    desired: string[],
-  ): void {
-    for (let ordinal = 1; ordinal <= (rule.count ?? 0); ordinal += 1) {
-      desired.push(this.slotKey(source, rule, ordinal));
+  ): ClassLevel | null {
+    if (
+      source.sourceType !== 'class' &&
+      source.sourceType !== 'subclass'
+    ) {
+      const configured = valueAtPath(
+        decodeGrantJson(source.config),
+        'class_level',
+      );
+      return Number.isSafeInteger(configured) &&
+        (configured as number) >= 1 &&
+        (configured as number) <= 20
+        ? (configured as ClassLevel)
+        : null;
     }
+    return this.#rules.classLevelForSource(source) as ClassLevel;
   }
 
-  private materializeFixedSpell(
+  private materializePlannedSlot(
     source: GrantSourceInstance,
     rule: GrantRule,
+    planned: Extract<PlannedSpellGrant, { kind: 'slot_selection' }>,
   ): void {
-    const data = ruleData(rule);
-    let spellVersionId = data.spell_version_id;
-    if (spellVersionId === null || spellVersionId === undefined) {
-      spellVersionId = this.db.scalar<number>(
+    let fixedSpellVersionId = planned.fixed_spell_version_id;
+    if (
+      fixedSpellVersionId === null &&
+      planned.fixed_spell_version_key !== null
+    ) {
+      fixedSpellVersionId = this.db.scalar<number>(
         'SELECT id FROM spell_versions WHERE content_key = ?',
-        [String(data.spell_version_key ?? '')],
-      );
+        [planned.fixed_spell_version_key],
+      ) as typeof fixedSpellVersionId;
     }
     const version =
-      spellVersionId === null || spellVersionId === undefined
+      fixedSpellVersionId === null
         ? null
         : this.db.one(
             'SELECT id, is_active FROM spell_versions WHERE id = ?',
-            [Number(spellVersionId)],
+            [fixedSpellVersionId],
             spellVersionActivity,
           );
-    if (version === null) {
+    if (planned.locked && version === null) {
       throw new Error(
         `Grant rule '${rule.ruleKey}' references a spell version that does not exist.`,
       );
     }
-
-    const key = this.slotKey(source, rule, 1);
-    const existingReference = Number(
-      this.db.scalar(
-        `SELECT EXISTS (
-           SELECT 1 FROM spell_selection_slots
-           WHERE character_id = ? AND slot_key = ?
-             AND fixed_spell_version_id = ?
-         )`,
-        [source.characterId, key, Number(spellVersionId)],
-      ) ?? 0,
-    ) === 1;
-    if (!version.is_active && !existingReference) {
+    const key = this.slotKey(
+      source,
+      rule,
+      planned.locator.ordinal,
+    );
+    const existingReference =
+      fixedSpellVersionId !== null &&
+      Number(
+        this.db.scalar(
+          `SELECT EXISTS (
+             SELECT 1 FROM spell_selection_slots
+             WHERE character_id = ? AND slot_key = ?
+               AND fixed_spell_version_id = ?
+           )`,
+          [source.characterId, key, fixedSpellVersionId],
+        ) ?? 0,
+      ) === 1;
+    if (
+      version !== null &&
+      !version.is_active &&
+      !existingReference
+    ) {
       throw new Error(
         `Grant rule '${rule.ruleKey}' references an inactive spell version.`,
       );
     }
 
-    this.syncSlot(source, rule, 1, {
-      fixed_spell_version_id: Number(spellVersionId),
-      current_spell_version_id: null,
-      spell_level_min: 0,
-      spell_level_max: 9,
-      allowed_spell_lists: null,
-      allowed_schools: null,
-      allowed_tags: null,
-      selection_collection: null,
-      counts_against_limit: data.counts_against_limit === true ? 1 : 0,
-      required: 1,
-      is_locked: 1,
+    const data = ruleData(rule);
+    this.syncSlot(source, rule, planned.locator.ordinal, {
+      fixed_spell_version_id: fixedSpellVersionId,
+      ...storedSpellSelectionConstraint(planned.constraint),
+      counts_against_limit:
+        data.counts_against_limit === false ? 0 : 1,
+      required: planned.required ? 1 : 0,
+      is_locked: planned.locked ? 1 : 0,
     });
-  }
-
-  private materializeListChoices(
-    source: GrantSourceInstance,
-    rule: GrantRule,
-  ): void {
-    const data = ruleData(rule);
-    let list = String(data.list ?? '');
-    if (list.startsWith('$config.')) {
-      list = String(
-        valueAtPath(
-          decodeGrantJson(source.config),
-          list.slice('$config.'.length),
-          '',
-        ),
-      );
-    }
-    if (list === '') {
-      throw new TypeError(
-        `Grant rule '${rule.ruleKey}' could not resolve its spell list.`,
-      );
-    }
-
-    for (let ordinal = 1; ordinal <= (rule.count ?? 0); ordinal += 1) {
-      this.syncSlot(source, rule, ordinal, {
-        fixed_spell_version_id: null,
-        spell_level_min: Number(data.level_min ?? 0),
-        spell_level_max: Number(data.level_max ?? 9),
-        allowed_spell_lists: JSON.stringify([list]),
-        allowed_schools: null,
-        allowed_tags: null,
-        selection_collection: null,
-        counts_against_limit:
-          data.counts_against_limit === false ? 0 : 1,
-        required: data.required === false ? 0 : 1,
-        is_locked: 0,
-      });
-    }
-  }
-
-  private materializeQueryChoices(
-    source: GrantSourceInstance,
-    rule: GrantRule,
-  ): void {
-    const data = ruleData(rule);
-    for (let ordinal = 1; ordinal <= (rule.count ?? 0); ordinal += 1) {
-      this.syncSlot(source, rule, ordinal, {
-        fixed_spell_version_id: null,
-        spell_level_min: Number(data.level_min ?? 0),
-        spell_level_max: Number(data.level_max ?? 9),
-        allowed_spell_lists: null,
-        allowed_schools: jsonList(data.schools),
-        allowed_tags: jsonList(data.tags),
-        selection_collection: null,
-        counts_against_limit:
-          data.counts_against_limit === false ? 0 : 1,
-        required: data.required === false ? 0 : 1,
-        is_locked: 0,
-      });
-    }
   }
 
   private materializeGrantedSources(
@@ -502,111 +510,81 @@ export class GrantRuleSlotGenerator {
     return markers;
   }
 
-  private materializeSpellbookEntries(
+  private syncSpellbookAcquisition(
     source: GrantSourceInstance,
     rule: GrantRule,
+    planned: Extract<
+      PlannedSpellGrant,
+      { kind: 'spellbook_acquisition' }
+    >,
   ): void {
-    const data = ruleData(rule);
-    const config = decodeGrantJson(source.config);
-    const configKey = String(data.acquisitions_config);
-    const acquisitions = valueAtPath(config, configKey, []);
-    if (!Array.isArray(acquisitions)) {
-      throw new TypeError(
-        `Spellbook rule '${rule.ruleKey}' config '${configKey}' must be a list.`,
-      );
-    }
-
-    for (const [index, acquisition] of acquisitions.entries()) {
-      if (!isRecord(acquisition)) {
-        throw new TypeError(
-          `Spellbook rule '${rule.ruleKey}' acquisition ${index} must be an object.`,
-        );
-      }
-      const unsupported = Object.keys(acquisition).filter(
-        (key) =>
-          key !== 'spell_version_id' &&
-          key !== 'spell_version_key',
-      );
-      if (unsupported.length > 0) {
-        throw new TypeError(
-          `Spellbook rule '${rule.ruleKey}' acquisition ${index} contains unsupported bookkeeping fields: ${unsupported.join(', ')}.`,
-        );
-      }
-
-      let spellVersionId = acquisition.spell_version_id;
-      if (
-        (spellVersionId === null || spellVersionId === undefined) &&
-        typeof acquisition.spell_version_key === 'string'
-      ) {
-        spellVersionId = this.db.scalar<number>(
-          'SELECT id FROM spell_versions WHERE content_key = ?',
-          [acquisition.spell_version_key],
-        );
-      }
-      if (spellVersionId === null || spellVersionId === undefined) {
-        throw new Error(
-          `Spellbook rule '${rule.ruleKey}' acquisition ${index} could not resolve its spell.`,
-        );
-      }
-
-      const version = this.db.one(
-        'SELECT id, is_active FROM spell_versions WHERE id = ?',
-        [Number(spellVersionId)],
-        spellVersionActivity,
-      );
-      if (version === null) {
-        throw new Error(
-          `Spellbook rule '${rule.ruleKey}' acquisition ${index} could not resolve its spell.`,
-        );
-      }
-      const existingEntry =
-        Number(
-          this.db.scalar(
-            `SELECT EXISTS (
-               SELECT 1 FROM wizard_spellbook_entries
-               WHERE character_id = ? AND spell_version_id = ?
-             )`,
-            [source.characterId, Number(spellVersionId)],
-          ) ?? 0,
-        ) === 1;
-      if (Number(version.is_active) !== 1 && !existingEntry) {
-        throw new Error(
-          `Spellbook rule '${rule.ruleKey}' acquisition ${index} references an inactive spell version.`,
-        );
-      }
-
-      const list = String(data.list);
-      const eligible =
-        Number(
-          this.db.scalar(
-            `SELECT EXISTS (
-               SELECT 1 FROM spell_list_memberships
-               WHERE spell_version_id = ? AND spell_list_key = ?
-             )`,
-            [Number(spellVersionId), list],
-          ) ?? 0,
-        ) === 1;
-      if (!eligible) {
-        throw new TypeError(
-          `Spellbook rule '${rule.ruleKey}' acquisition ${index} is not on the ${list} list.`,
-        );
-      }
-
-      if (!existingEntry) {
-        const timestamp = new Date().toISOString();
-        this.db.exec(
-          `INSERT INTO wizard_spellbook_entries (
-             character_id, spell_version_id, created_at, updated_at
-           ) VALUES (?, ?, ?, ?)`,
-          [
+    const ordinal = planned.locator.ordinal;
+    const existing = this.db.oneRaw(
+      `SELECT * FROM wizard_spellbook_entries
+       WHERE source_instance_id = ? AND rule_key = ? AND ordinal = ?`,
+      [source.id, rule.ruleKey, ordinal],
+    );
+    const spellVersionId =
+      existing === null || existing.spell_version_id === null
+        ? null
+        : Number(existing.spell_version_id);
+    const evaluation =
+      spellVersionId === null
+        ? { status: 'unselected' as const, reason: null }
+        : this.#eligibility.evaluateConstraint(
             source.characterId,
-            Number(spellVersionId),
-            timestamp,
-            timestamp,
-          ],
-        );
-      }
+            planned.constraint,
+            spellVersionId,
+          );
+    const attributes: Attributes = {
+      character_id: source.characterId,
+      source_instance_id: source.id,
+      rule_key: rule.ruleKey,
+      ordinal,
+      acquired_at_class_level: planned.acquired_at_class_level,
+      spell_level_min: planned.constraint.spell_level_min,
+      spell_level_max: planned.constraint.spell_level_max,
+      allowed_spell_lists:
+        storedSpellSelectionConstraint(planned.constraint)
+          .allowed_spell_lists,
+      allowed_schools:
+        storedSpellSelectionConstraint(planned.constraint)
+          .allowed_schools,
+      allowed_tags:
+        storedSpellSelectionConstraint(planned.constraint).allowed_tags,
+      state: 'active',
+      orphan_reason_code: null,
+      orphaned_at: null,
+      selection_eligibility: evaluation.status,
+      selection_invalid_reason: evaluation.reason,
+    };
+    if (existing === null) {
+      const timestamp = new Date().toISOString();
+      const columns = [
+        ...Object.keys(attributes),
+        'spell_version_id',
+        'created_at',
+        'updated_at',
+      ];
+      this.db.exec(
+        `INSERT INTO wizard_spellbook_entries
+           (${columns.join(', ')})
+         VALUES (${columns.map(() => '?').join(', ')})`,
+        [
+          ...Object.values(attributes),
+          null,
+          timestamp,
+          timestamp,
+        ],
+      );
+      return;
     }
+    this.updateChangedRow(
+      'wizard_spellbook_entries',
+      Number(existing.id),
+      existing,
+      attributes,
+    );
   }
 
   private syncSlot(
@@ -686,7 +664,10 @@ export class GrantRuleSlotGenerator {
   }
 
   private updateChangedRow(
-    table: 'character_source_instances' | 'spell_selection_slots',
+    table:
+      | 'character_source_instances'
+      | 'spell_selection_slots'
+      | 'wizard_spellbook_entries',
     id: number,
     existing: Readonly<Record<string, SqlValue>>,
     attributes: Attributes,
@@ -754,6 +735,56 @@ export class GrantRuleSlotGenerator {
           hasReference ? RULE_REMOVED_SELECTION_REASON : null,
           timestamp,
           slot.id,
+        ],
+      );
+    }
+  }
+
+  private reconcileSpellbookAcquisitions(
+    source: GrantSourceInstance,
+    desiredAddresses: readonly string[],
+  ): void {
+    const desired = new Set(desiredAddresses);
+    const existing = this.db.all(
+      `SELECT id, rule_key, ordinal, spell_version_id
+       FROM wizard_spellbook_entries
+       WHERE source_instance_id = ? AND state = 'active'`,
+      [source.id],
+      (row) => ({
+        id: sqlInteger(row, 'id'),
+        rule_key: sqlString(row, 'rule_key'),
+        ordinal: sqlInteger(row, 'ordinal'),
+        spell_version_id: sqlNullableInteger(row, 'spell_version_id'),
+      }),
+    );
+    for (const acquisition of existing) {
+      if (
+        desired.has(
+          `${acquisition.rule_key}:${acquisition.ordinal}`,
+        )
+      ) {
+        continue;
+      }
+      const timestamp = new Date().toISOString();
+      this.db.exec(
+        `UPDATE wizard_spellbook_entries
+         SET state = 'orphaned',
+             orphan_reason_code = 'rule_no_longer_active',
+             orphaned_at = ?,
+             selection_eligibility = ?,
+             selection_invalid_reason = ?,
+             updated_at = ?
+         WHERE id = ?`,
+        [
+          timestamp,
+          acquisition.spell_version_id === null
+            ? 'unselected'
+            : 'invalid',
+          acquisition.spell_version_id === null
+            ? null
+            : RULE_REMOVED_SELECTION_REASON,
+          timestamp,
+          acquisition.id,
         ],
       );
     }
@@ -828,6 +859,44 @@ export class GrantRuleSlotGenerator {
           hasReference ? SOURCE_REMOVED_SELECTION_REASON : null,
           timestamp,
           Number(slot.id),
+        ],
+      );
+    }
+
+    const acquisitions = this.db.all(
+      `SELECT id, spell_version_id
+       FROM wizard_spellbook_entries
+       WHERE source_instance_id = ? AND state = 'active'`,
+      [sourceInstanceId],
+      (row) => ({
+        id: sqlInteger(row, 'id'),
+        spell_version_id: sqlNullableInteger(
+          row,
+          'spell_version_id',
+        ),
+      }),
+    );
+    for (const acquisition of acquisitions) {
+      const timestamp = new Date().toISOString();
+      this.db.exec(
+        `UPDATE wizard_spellbook_entries
+         SET state = 'orphaned',
+             orphan_reason_code = 'parent_rule_removed',
+             orphaned_at = ?,
+             selection_eligibility = ?,
+             selection_invalid_reason = ?,
+             updated_at = ?
+         WHERE id = ?`,
+        [
+          timestamp,
+          acquisition.spell_version_id === null
+            ? 'unselected'
+            : 'invalid',
+          acquisition.spell_version_id === null
+            ? null
+            : SOURCE_REMOVED_SELECTION_REASON,
+          timestamp,
+          acquisition.id,
         ],
       );
     }

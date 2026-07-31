@@ -1,22 +1,22 @@
 # Character share wire schema
 
-> Generated from `SHARE_SCHEMAS` at commit `713bcc7`. Update this document
+> Transcribed from `SHARE_SCHEMAS` for the GF-1 v14 mint. Update this document
 > with every wire-version mint.
 
 The executable source of truth is
 `src/sharing/wire-schemas/index.ts` and its immutable version modules
-`v1.ts` through `v13.ts`. This guide describes that registry; it does not
-replace it. `CURRENT_CHARACTER_SHARE_VERSION` is **13**.
+`v1.ts` through `v14.ts`. This guide describes that registry; it does not
+replace it. `CURRENT_CHARACTER_SHARE_VERSION` is **14**.
 
 One version at `root[1]` governs the complete document. Nested tuples do not
 carry independent versions. Encoding always mints the current version.
 Decoding validates the frozen schema selected by `root[1]`, then composes
-one-version-at-a-time migrations until it reaches v13.
+one-version-at-a-time migrations until it reaches v14.
 
 Versions 1 through 4 remain in the registry as frozen history, but they are
 deliberately retired from import. Their migration path reaches v4→v5 and throws
 `ShareWireRetirementError` because their bare skill names cannot be given honest
-provenance. Versions 5 through 12 migrate to v13.
+provenance. Versions 5 through 13 migrate to v14.
 
 Tuple arity is exact. A nullable or omitted logical value still occupies its
 assigned wire position as `null`; it does not shorten a current tuple. The
@@ -237,12 +237,29 @@ absolute 1–30 SET score.
 so the new kind cannot be smuggled through a same-arity historical tuple, then
 rewrites the version.
 
-## Current v13 shape
+### Version 14 — spell acquisition provenance
+
+**Minted by:** GF-1's planned grant and spell-selection core.
+
+**Change:** `selection` appends `acquiredAtClassLevel`, increasing from arity
+**6 to 7**. Root position 6 remains the `spellbook` list, but its members
+change from bare spell-key strings into **6-position spellbook acquisition
+tuples**: nullable source `ref`, `ruleKey`, `ordinal`,
+`acquiredAtClassLevel`, nullable selected `spellKey`, and nullable placeholder
+`spellName`. An acquisition can therefore travel before it is filled.
+
+**Adjacent migration (v13→v14):** appends null to every selection because v13
+did not record selection acquisition level. Each v13 spellbook key becomes an
+address-less acquisition with that selected key. The selected spell survives;
+source/rule/ordinal/level remain null because inventing provenance would be a
+data corruption.
+
+## Current v14 shape
 
 Positions are zero-based. The keys, wire types, and arities in this section are
-exactly those of the resolved `WIRE_SCHEMA_V13.tuples` object. The tuple
-inventory is identical to v12—v13 reuses `WIRE_SCHEMA_V12.tuples`—with only the
-accepted `effect.kind` domain widened. The meanings faithfully restate the
+exactly those of the resolved `WIRE_SCHEMA_V14.tuples` object. The tuple
+inventory inherits v13, appends selection acquisition level, and adds the
+spellbook-acquisition tuple. The meanings faithfully restate the
 schema's meaning strings with minor prose normalization. The inventory includes
 tuples inherited from older frozen schema objects.
 
@@ -258,7 +275,7 @@ Arity: **19**.
 | 3 | `classes` | `list` | Ordered class levels |
 | 4 | `sources` | `list` | Standalone sources |
 | 5 | `selections` | `list` | Spell selections |
-| 6 | `spellbook` | `list` | Spell keys in the spellbook |
+| 6 | `spellbook` | `list` | Addressable Wizard spellbook acquisitions |
 | 7 | `preferences` | `list` | Spell preferences |
 | 8 | `overrides` | `list` | Grant-rule overrides |
 | 9 | `acknowledgements` | `list` | Warning acknowledgements |
@@ -326,7 +343,7 @@ Arity: **7**.
 
 #### `selection`
 
-Arity: **6**.
+Arity: **7**.
 
 | Position | Key | Wire type | Meaning |
 | ---: | --- | --- | --- |
@@ -336,6 +353,20 @@ Arity: **6**.
 | 3 | `spellKey` | `string` | Selected spell key |
 | 4 | `spellName` | `string` | Selected spell fallback name |
 | 5 | `keep` | `boolean` | Keep selection when invalidated |
+| 6 | `acquiredAtClassLevel` | `integer` | Class level at which this choice was acquired |
+
+#### `spellbookAcquisition`
+
+Arity: **6**.
+
+| Position | Key | Wire type | Meaning |
+| ---: | --- | --- | --- |
+| 0 | `ref` | `integer` | Share-local granting source reference |
+| 1 | `ruleKey` | `string` | Grant rule key |
+| 2 | `ordinal` | `integer` | Acquisition ordinal |
+| 3 | `acquiredAtClassLevel` | `integer` | Wizard class level at acquisition |
+| 4 | `spellKey` | `string` | Selected spell key when filled |
+| 5 | `spellName` | `string` | Selected placeholder fallback name |
 
 #### `placeholder`
 
@@ -556,7 +587,7 @@ Arity: **3**.
 
 #### `sheetAdjustment` (historical, unreachable from current `sheet`)
 
-Arity: **2**. This schema object is inherited into v13, but v10 removed the
+Arity: **2**. This schema object is inherited into v14, but v10 removed the
 only current tuple position that referred to it.
 
 | Position | Key | Wire type | Meaning |
@@ -641,7 +672,7 @@ D41 makes the registry an append-only historical contract:
 
 ## How to mint the next version
 
-The v9, v10, v11, v12, and v13 mints followed this discipline:
+The v9, v10, v11, v12, v13, and v14 mints followed this discipline:
 
 1. Add `src/sharing/wire-schemas/vN.ts`. Build the new schema from the previous
    frozen inventory, replacing only changed tuple objects. Do not edit any

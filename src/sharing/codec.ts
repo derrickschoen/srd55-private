@@ -545,7 +545,12 @@ export function shareDocumentToPositional(
       selections: document.selections.map((row) =>
         objectToPositional(row, WIRE_SCHEMA.tuples.selection.fields)
       ),
-      spellbook: [...document.spellbook],
+      spellbook: document.spellbook.map((row) =>
+        objectToPositional(
+          row,
+          WIRE_SCHEMA.tuples.spellbookAcquisition.fields,
+        )
+      ),
       preferences: document.preferences.map((row) =>
         objectToPositional(row, WIRE_SCHEMA.tuples.preference.fields)
       ),
@@ -801,7 +806,14 @@ function decodeCurrentWire(input: unknown): CharacterShareDocument {
         `wire selections[${index}]`,
       )
     ),
-    spellbook: [...root[ROOT_SPELLBOOK_INDEX]],
+    spellbook: root[ROOT_SPELLBOOK_INDEX].map((value, index) =>
+      fromPositional(
+        value,
+        WIRE_SCHEMA.tuples.spellbookAcquisition.arities[0],
+        fieldKeys(WIRE_SCHEMA.tuples.spellbookAcquisition.fields),
+        `wire spellbook[${index}]`,
+      )
+    ),
     preferences: root[ROOT_PREFERENCES_INDEX].map((value, index) =>
       fromPositional(
         value,
@@ -1037,12 +1049,14 @@ export function positionalToShareDocument(
         'wire character',
       );
       return decodeCurrentWire(
-        MIGRATIONS[12](
-          MIGRATIONS[11](
-            MIGRATIONS[10](
-              MIGRATIONS[9](
-                MIGRATIONS[8](
-                  MIGRATIONS[7](MIGRATIONS[6](MIGRATIONS[5](input))),
+        MIGRATIONS[13](
+          MIGRATIONS[12](
+            MIGRATIONS[11](
+              MIGRATIONS[10](
+                MIGRATIONS[9](
+                  MIGRATIONS[8](
+                    MIGRATIONS[7](MIGRATIONS[6](MIGRATIONS[5](input))),
+                  ),
                 ),
               ),
             ),
@@ -1061,11 +1075,13 @@ export function positionalToShareDocument(
         'wire character',
       );
       return decodeCurrentWire(
-        MIGRATIONS[12](
-          MIGRATIONS[11](
-            MIGRATIONS[10](
-              MIGRATIONS[9](
-                MIGRATIONS[8](MIGRATIONS[7](MIGRATIONS[6](input))),
+        MIGRATIONS[13](
+          MIGRATIONS[12](
+            MIGRATIONS[11](
+              MIGRATIONS[10](
+                MIGRATIONS[9](
+                  MIGRATIONS[8](MIGRATIONS[7](MIGRATIONS[6](input))),
+                ),
               ),
             ),
           ),
@@ -1083,37 +1099,51 @@ export function positionalToShareDocument(
         'wire character',
       );
       return decodeCurrentWire(
-        MIGRATIONS[12](
-          MIGRATIONS[11](
-            MIGRATIONS[10](
-              MIGRATIONS[9](MIGRATIONS[8](MIGRATIONS[7](input))),
+        MIGRATIONS[13](
+          MIGRATIONS[12](
+            MIGRATIONS[11](
+              MIGRATIONS[10](
+                MIGRATIONS[9](MIGRATIONS[8](MIGRATIONS[7](input))),
+              ),
             ),
           ),
         ),
       );
     case 8:
       return decodeCurrentWire(
-        MIGRATIONS[12](
-          MIGRATIONS[11](
-            MIGRATIONS[10](MIGRATIONS[9](MIGRATIONS[8](input))),
+        MIGRATIONS[13](
+          MIGRATIONS[12](
+            MIGRATIONS[11](
+              MIGRATIONS[10](MIGRATIONS[9](MIGRATIONS[8](input))),
+            ),
           ),
         ),
       );
     case 9:
       return decodeCurrentWire(
-        MIGRATIONS[12](
-          MIGRATIONS[11](MIGRATIONS[10](MIGRATIONS[9](input))),
+        MIGRATIONS[13](
+          MIGRATIONS[12](
+            MIGRATIONS[11](MIGRATIONS[10](MIGRATIONS[9](input))),
+          ),
         ),
       );
     case 10:
       return decodeCurrentWire(
-        MIGRATIONS[12](MIGRATIONS[11](MIGRATIONS[10](input))),
+        MIGRATIONS[13](
+          MIGRATIONS[12](MIGRATIONS[11](MIGRATIONS[10](input))),
+        ),
       );
     case 11:
-      return decodeCurrentWire(MIGRATIONS[12](MIGRATIONS[11](input)));
+      return decodeCurrentWire(
+        MIGRATIONS[13](MIGRATIONS[12](MIGRATIONS[11](input))),
+      );
     case 12:
-      return decodeCurrentWire(MIGRATIONS[12](input));
+      return decodeCurrentWire(
+        MIGRATIONS[13](MIGRATIONS[12](input)),
+      );
     case 13:
+      return decodeCurrentWire(MIGRATIONS[13](input));
+    case 14:
       return decodeCurrentWire(input);
     default:
       throw new ShareValidationError('version is unsupported.');

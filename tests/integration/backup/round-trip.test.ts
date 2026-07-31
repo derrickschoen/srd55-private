@@ -242,7 +242,7 @@ function seedCompleteCharacter(
   db.exec(
      `INSERT INTO character_save_points
        (character_id, label, snapshot, schema_version, created_at, updated_at)
-     VALUES (?, 'Before experiment', ?, 'a7-v12', ?, ?)`,
+     VALUES (?, 'Before experiment', ?, 'a7-v13', ?, ?)`,
     [characterId, JSON.stringify(snapshot), timestamp, timestamp],
   );
   // A SECOND SAVE POINT IN THE OLD SNAPSHOT FORMAT.
@@ -557,7 +557,7 @@ describe('portable character backup', () => {
     ) as Record<string, any>;
     // The current-format save point carries the weapons, re-keyed to the rows
     // that were just written, so restoring it puts back the same two weapons.
-    expect(saved.schema_version).toBe('a7-v12');
+    expect(saved.schema_version).toBe('a7-v13');
     expect(saved.character_weapons.map((row: { name: string }) => row.name)).toEqual([
       'Weathered Longsword',
       'Half-entered club',

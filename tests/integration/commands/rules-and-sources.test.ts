@@ -63,7 +63,7 @@ describe('character rule and source commands', () => {
 
   function classDefinition(
     name: string,
-    ability: string,
+    ability: string | null,
     rules: readonly Record<string, unknown>[],
   ): number {
     const classId = db.exec(
@@ -465,15 +465,8 @@ describe('character rule and source commands', () => {
     });
   });
 
-  it('adds a class with generated slots and spellbook entries, and atomically rolls back generator failure', async () => {
-    const shieldId = spell(
-      '2024:shield-c42',
-      'Shield C42',
-      '2024',
-      'Wizard',
-      1,
-    );
-    const wizardId = classDefinition('Wizard', 'intelligence', [
+  it('adds a class with addressed planned grants and atomically rolls back planner failure (strict superset of the replaced config-acquisition test)', async () => {
+    const commonRules = [
       {
         kind: 'choice_from_list',
         rule_key: 'wizard-cantrip',
@@ -483,11 +476,24 @@ describe('character rule and source commands', () => {
         level_min: 0,
         level_max: 0,
       },
+    ];
+    const invalidWizardId = classDefinition('Arcanist', null, [
+      ...commonRules,
       {
         kind: 'spellbook_acquisition',
         rule_key: 'wizard-spellbook',
         bucket: 'spellbook',
-        acquisitions_config: 'wizard_spellbook_acquisitions',
+        count: 1,
+        list: '$config.spellcasting_ability',
+      },
+    ]);
+    const wizardId = classDefinition('Wizard', 'intelligence', [
+      ...commonRules,
+      {
+        kind: 'spellbook_acquisition',
+        rule_key: 'wizard-spellbook',
+        bucket: 'spellbook',
+        count: 1,
         list: 'Wizard',
       },
     ]);
@@ -498,15 +504,12 @@ describe('character rule and source commands', () => {
       add(characterId, {
         type: 'add_source',
         source_type: 'class',
-        source_definition_id: wizardId,
+        source_definition_id: invalidWizardId,
         config: {
           level: 1,
-          wizard_spellbook_acquisitions: [{}],
         },
       }),
-    ).toThrow(
-      "Spellbook rule 'wizard-spellbook' acquisition 0 could not resolve its spell.",
-    );
+    ).toThrow('A configured spell list could not be resolved.');
     expect(state.capture(characterId)).toEqual(empty);
     expect(
       db.oneRaw(
@@ -527,9 +530,6 @@ describe('character rule and source commands', () => {
       source_definition_id: wizardId,
       config: {
         level: 1,
-        wizard_spellbook_acquisitions: [
-          { spell_version_id: shieldId },
-        ],
       },
     });
     expect(
@@ -551,9 +551,7 @@ describe('character rule and source commands', () => {
       ),
     ).toEqual({
       display_name: 'Wizard 1',
-      config:
-        `{"spellcasting_ability":"intelligence",` +
-        `"wizard_spellbook_acquisitions":[{"spell_version_id":${shieldId}}]}`,
+      config: '{"spellcasting_ability":"intelligence"}',
       acquired_at_character_level: 1,
       state: 'active',
     });
@@ -562,11 +560,24 @@ describe('character rule and source commands', () => {
         `SELECT
            (SELECT count(*) FROM spell_selection_slots
              WHERE character_id = ?) AS slots,
+           (SELECT source_instance_id IS NOT NULL
+              FROM wizard_spellbook_entries
+             WHERE character_id = ?) AS spellbook_addressed,
+           (SELECT rule_key FROM wizard_spellbook_entries
+             WHERE character_id = ?) AS spellbook_rule,
+           (SELECT ordinal FROM wizard_spellbook_entries
+             WHERE character_id = ?) AS spellbook_ordinal,
            (SELECT spell_version_id FROM wizard_spellbook_entries
              WHERE character_id = ?) AS spellbook_spell`,
-        [characterId, characterId],
+        [characterId, characterId, characterId, characterId, characterId],
       ),
-    ).toEqual({ slots: 1, spellbook_spell: shieldId });
+    ).toEqual({
+      slots: 1,
+      spellbook_addressed: 1,
+      spellbook_rule: 'wizard-spellbook',
+      spellbook_ordinal: 1,
+      spellbook_spell: null,
+    });
 
     const inverse = await added.inverse();
     expect(await integrity.isValid(characterId, inverse)).toBe(true);

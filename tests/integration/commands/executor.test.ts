@@ -56,6 +56,7 @@ describe('character command factory and executor', () => {
     const characterId = 41;
     const slotState = {
       current_spell_version_id: null,
+      selection_acquired_at_class_level: null,
       selection_eligibility: 'unselected' as const,
       selection_invalid_reason: null,
       state: 'active' as const,

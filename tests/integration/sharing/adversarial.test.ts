@@ -432,7 +432,10 @@ function semanticDocument(): CharacterShareDocument {
         keep: true,
       },
     ],
-    spellbook: ['2024:shield', '2024:misty-step'],
+    spellbook: [
+      { spellKey: '2024:shield' },
+      { spellKey: '2024:misty-step' },
+    ],
     preferences: [
       { spellKey: '2024:shield', favourite: true },
       { spellKey: '2024:guidance', favourite: false },
@@ -722,9 +725,9 @@ describe('adversarial character-share fidelity', () => {
       {
         kind: 'spellbook_acquisition',
         rule_key: 'wizard-spellbook',
+        count: 1,
         bucket: 'spellbook',
         list: 'Wizard',
-        acquisitions_config: 'wizard_spellbook_acquisitions',
       },
     ];
     const sourceDb = await database();
@@ -760,27 +763,30 @@ describe('adversarial character-share fidelity', () => {
       'Portable Wizard 1',
       {
         spellcasting_ability: 'intelligence',
-        wizard_spellbook_acquisitions: [
-          { spell_version_id: acquiredId },
-        ],
       },
       1,
     );
     new GrantRuleSlotGenerator(sourceDb).generateForSource(wizardSourceId);
+    sourceDb.exec(
+      `UPDATE wizard_spellbook_entries
+       SET spell_version_id = ?, selection_eligibility = 'valid'
+       WHERE source_instance_id = ? AND rule_key = 'wizard-spellbook'
+         AND ordinal = 1`,
+      [acquiredId, wizardSourceId],
+    );
     const document = await throughShareLink(
       exportCharacterShare(sourceDb, characterId),
     );
-    expect(document.classes[0]?.config).toMatchObject({
-      wizard_spellbook_acquisitions: [
-        { spell_version_key: '2024:portable-acquisition' },
-      ],
-    });
     expect(
-      (
-        document.classes[0]?.config
-          ?.wizard_spellbook_acquisitions as Record<string, unknown>[]
-      )[0],
-    ).not.toHaveProperty('spell_version_id');
+      document.classes[0]?.config?.wizard_spellbook_acquisitions,
+    ).toBeUndefined();
+    expect(document.spellbook).toEqual([{
+      ref: 0,
+      ruleKey: 'wizard-spellbook',
+      ordinal: 1,
+      acquiredAtClassLevel: 1,
+      spellKey: '2024:portable-acquisition',
+    }]);
 
     const targetDb = await database();
     const paddingId = spell(
@@ -825,6 +831,38 @@ describe('adversarial character-share fidelity', () => {
     expect(spellbookKeys(targetDb, imported.characterId)).toEqual(
       spellbookKeys(sourceDb, characterId),
     );
+
+    const invalidTargetDb = await database();
+    spell(
+      invalidTargetDb,
+      '2024:off-list-acquisition',
+      'Off-list Acquisition',
+    );
+    classDefinition(
+      invalidTargetDb,
+      '2024:class:portable-wizard',
+      'Portable Wizard',
+      rules,
+    );
+    const importedInvalid = importCharacterShare(invalidTargetDb, {
+      ...document,
+      spellbook: [{
+        ...document.spellbook[0]!,
+        spellKey: '2024:off-list-acquisition',
+      }],
+    });
+    expect(
+      invalidTargetDb.oneRaw(
+        `SELECT selection_eligibility, selection_invalid_reason
+         FROM wizard_spellbook_entries
+         WHERE character_id = ? AND spell_version_id IS NOT NULL`,
+        [importedInvalid.characterId],
+      ),
+    ).toEqual({
+      selection_eligibility: 'invalid',
+      selection_invalid_reason:
+        'Selected spell is not on an allowed spell list.',
+    });
   });
 
   it('round-trips the three-way Magic Initiate collision without losing source ability or slot identity', async () => {
@@ -2023,7 +2061,7 @@ describe('adversarial character-share rejection', () => {
       expect(() =>
         positionalToShareDocument([
           ...shareDocumentToPositional(base).slice(0, 5),
-          [[0, 'choice', ordinal, '2024:shield', null, null]],
+          [[0, 'choice', ordinal, '2024:shield', null, null, null]],
           ...shareDocumentToPositional(base).slice(6),
         ]),
       ).toThrow(/ordinal must be an integer from 1 to 1000/);
@@ -2113,7 +2151,7 @@ describe('adversarial character-share rejection', () => {
     ]) {
       expect(() =>
         encodeShareFragment(
-          minimalDocument({ spellbook: [key] }),
+          minimalDocument({ spellbook: [{ spellKey: key }] }),
         ),
       ).toThrow(/spell-key grammar/);
     }

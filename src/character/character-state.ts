@@ -83,9 +83,14 @@ import {
  * capture has the new table contract, while an older
  * capture keeps the numeric adjustment it actually recorded.
  *
- * D86 mints `a7-v12` for the NOT NULL `character_items.quantity` column.
+ * D86 minted `a7-v12` for the NOT NULL `character_items.quantity` column.
  * `a7-v11` is frozen before the column exists; restore fills one for every
  * historical item row, matching the quarantined-image audit.
+ *
+ * GF-1 mints `a7-v13` because spell-selection rows gain acquisition
+ * provenance and Wizard spellbook rows become nullable, addressable
+ * acquisitions. `a7-v12` remains readable through the historical-row fills;
+ * the new version identifies snapshots that actually recorded those facts.
  *
  * NOT BUMPING WOULD HAVE BEEN THE LOUDEST FAILURE IN THIS CHANGE.
  * `SNAPSHOT_TABLES_BY_VERSION` aliases the CURRENT version to the live
@@ -96,7 +101,7 @@ import {
  * containing one. Undo, save-point restore and `exportCharacterBackup` — which
  * re-parses its own stored save points on the way out — would break together.
  */
-export const CHARACTER_SNAPSHOT_SCHEMA_VERSION = 'a7-v12' as const;
+export const CHARACTER_SNAPSHOT_SCHEMA_VERSION = 'a7-v13' as const;
 
 /**
  * D83 does not mint a snapshot version. `ability_override` occupies the
@@ -234,6 +239,11 @@ const A7_V11_TABLES = [
   'character_attunement_slots',
 ] as const satisfies readonly SnapshotTable[];
 
+/** Frozen before GF-1 changed slot and spellbook row columns. */
+const A7_V12_TABLES = [
+  ...A7_V11_TABLES,
+] as const satisfies readonly SnapshotTable[];
+
 const SNAPSHOT_TABLES_BY_VERSION = {
   'a7-v1': A7_V1_TABLES,
   'a7-v2': A7_V2_TABLES,
@@ -246,7 +256,8 @@ const SNAPSHOT_TABLES_BY_VERSION = {
   'a7-v9': A7_V9_TABLES,
   'a7-v10': A7_V10_TABLES,
   'a7-v11': A7_V11_TABLES,
-  'a7-v12': CHARACTER_STATE_TABLES,
+  'a7-v12': A7_V12_TABLES,
+  'a7-v13': CHARACTER_STATE_TABLES,
 } as const satisfies Readonly<Record<string, readonly SnapshotTable[]>>;
 
 /**
@@ -273,6 +284,7 @@ export const CHARACTER_SNAPSHOT_SCHEMA_VERSIONS = [
   'a7-v10',
   'a7-v11',
   'a7-v12',
+  'a7-v13',
 ] as const satisfies readonly (keyof typeof SNAPSHOT_TABLES_BY_VERSION)[];
 
 export type CharacterSnapshotSchemaVersion =
@@ -366,7 +378,8 @@ const SNAPSHOT_CHARACTER_COLUMNS_BY_VERSION = {
   'a7-v9': [...PRE_V8_CHARACTER_COLUMNS, 'ability_allocation_method'] as const,
   'a7-v10': [...PRE_V8_CHARACTER_COLUMNS, 'ability_allocation_method'] as const,
   'a7-v11': [...PRE_V8_CHARACTER_COLUMNS, 'ability_allocation_method'] as const,
-  'a7-v12': CHARACTER_STATE_COLUMNS,
+  'a7-v12': [...PRE_V8_CHARACTER_COLUMNS, 'ability_allocation_method'] as const,
+  'a7-v13': CHARACTER_STATE_COLUMNS,
 } as const satisfies Readonly<
   Record<CharacterSnapshotSchemaVersion, readonly string[]>
 >;
@@ -933,12 +946,17 @@ export class CharacterState {
           }
         } else if (table === 'wizard_spellbook_entries') {
           const versionId = row.spell_version_id;
-          if (!isPositiveInteger(versionId)) {
+          if (
+            versionId !== null &&
+            !isPositiveInteger(versionId)
+          ) {
             throw new Error(
               `Snapshot table ${table} contains an invalid spell_version_id.`,
             );
           }
-          spellVersionIds.push(versionId);
+          if (versionId !== null) {
+            spellVersionIds.push(versionId);
+          }
         }
       }
     }

@@ -9,6 +9,7 @@ const signature = 'a'.repeat(64);
 function restoreState(): Record<string, unknown> {
   return {
     current_spell_version_id: 7,
+    selection_acquired_at_class_level: 3,
     selection_eligibility: 'valid',
     selection_invalid_reason: 'Still selected.',
     state: 'active',
@@ -436,6 +437,20 @@ describe('character command payload validation', () => {
       [
         { ...restoreState(), current_spell_version_id: 0 },
         'Slot restore spell_version_id must be a positive integer or null.',
+      ],
+      [
+        {
+          ...restoreState(),
+          selection_acquired_at_class_level: 0,
+        },
+        'selection_acquired_at_class_level must be an integer from 1 to 20.',
+      ],
+      [
+        {
+          ...restoreState(),
+          selection_acquired_at_class_level: 21,
+        },
+        'selection_acquired_at_class_level must be an integer from 1 to 20.',
       ],
       [
         { ...restoreState(), selection_eligibility: 'unknown' },
