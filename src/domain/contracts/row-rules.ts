@@ -44,9 +44,31 @@
 import { WEAPON_RANGE_MAX_FEET } from '../weapon-limits';
 import { sha256 } from '../../crypto/sha256';
 import { parseDerivedContentKeyV1 } from '../../catalog/content-identity';
+import { decodeClassResourceFormula } from '../class-resources';
 
 /** A row as it arrives from JSON: keys are strings, values are not yet trusted. */
 type UntrustedRow = Readonly<Record<string, unknown>>;
+
+export function classResourceFormulaInvariantError(
+  row: UntrustedRow,
+  label: string,
+): string | null {
+  try {
+    decodeClassResourceFormula({
+      formula_kind: row.formula_kind,
+      minimum_class_level: row.minimum_class_level,
+      fixed_count: row.fixed_count,
+      ability: row.ability,
+      multiplier: row.multiplier,
+      later_fixed_count_steps: row.later_fixed_count_steps,
+    });
+    return null;
+  } catch (error) {
+    return `${label} has an invalid formula payload: ${
+      error instanceof Error ? error.message : String(error)
+    }`;
+  }
+}
 
 export function catalogContentIdentityInvariantError(
   row: UntrustedRow,

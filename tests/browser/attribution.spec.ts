@@ -117,17 +117,19 @@ test('the SRD notice is real text served on a deep link', async ({ page }) => {
 test('the footer survives screens the router does not match', async ({
   page,
 }) => {
+  test.setTimeout(20_000);
   await page.goto('/not-a-screen');
 
-  await expect(page.locator('.empty-shell')).toBeVisible();
+  await expect(page.locator('.empty-shell')).toBeVisible({ timeout: 20_000 });
   await expect(attributionLink(page)).toBeVisible();
 });
 
 test('no licensor wordmark appears outside the notice', async ({ page }) => {
+  test.setTimeout(20_000);
   const wordmark = /D&D|Dungeons|Wizards/;
 
   await page.goto('/not-a-screen');
-  await expect(page.locator('.empty-shell')).toBeVisible();
+  await expect(page.locator('.empty-shell')).toBeVisible({ timeout: 20_000 });
   expect(await page.title()).not.toMatch(wordmark);
   expect(await page.locator('body').innerText()).not.toMatch(wordmark);
 

@@ -346,6 +346,18 @@ export const FOREIGN_KEY_FACTS = [
     targetColumns: ['id'],
   },
   {
+    table: 'class_resource_formulas',
+    columns: ['class_definition_id'],
+    target: 'class_definitions',
+    targetColumns: ['id'],
+  },
+  {
+    table: 'class_resources',
+    columns: ['class_definition_id'],
+    target: 'class_definitions',
+    targetColumns: ['id'],
+  },
+  {
     table: 'class_saving_throw_proficiencies',
     columns: ['class_definition_id'],
     target: 'class_definitions',
