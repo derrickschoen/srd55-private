@@ -17,7 +17,11 @@ import { CharacterSheetBuilder } from '../../../src/queries/character-sheet-buil
 import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
 import { seedSheetContent } from '../../../src/rules/sheet-srd';
 import { seedFeatContent } from '../../../src/rules/feats-srd';
+import { seedSpellContent } from '../../../src/rules/spells-srd';
 import { GrantRuleSlotGenerator } from '../../../src/grants/grant-rule-slot-generator';
+import { LevelUpPlannedEligibleSpells } from '../../../src/queries/level-up-planned-eligible-spells';
+import { CharacterCompletenessQueries } from '../../../src/queries/character-completeness';
+import { EligibleSpellSearch } from '../../../src/eligibility/eligible-spell-search';
 import { openTestDatabase } from '../../helpers/open-db';
 import { raiseClassLevelForTest } from '../../helpers/class-levels';
 
@@ -153,12 +157,27 @@ describe('level_up_class', () => {
     return level === null ? null : Number(level);
   }
 
+  function sourceId(name: string): number {
+    return Number(
+      db.scalar(
+        `SELECT source.id
+         FROM character_source_instances AS source
+         JOIN class_definitions AS definition
+           ON definition.id = source.source_definition_id
+         WHERE source.character_id = ? AND source.source_type = 'class'
+           AND definition.name = ? AND source.state = 'active'`,
+        [characterId, name],
+      ),
+    );
+  }
+
   beforeEach(async () => {
     connection = await openTestDatabase();
     db = new DatabaseContext(connection);
     seedClassProgressions(db);
     seedSheetContent(db);
     seedFeatContent(db);
+    seedSpellContent(db);
     integrity = new CharacterCommandIntegrity('level-up-class-test-key');
     // Constitution 14 (+2), so the computed hit points move with a real
     // modifier rather than a zero that hides a dropped term.
@@ -654,6 +673,428 @@ describe('level_up_class', () => {
         [characterId],
       ),
     ).toBe('Wizard 3');
+  });
+
+  it('commits logical skill, Expertise, and new-spell choices in the one level-up revision', async () => {
+    enterClass('Bard');
+    const bardId = classId('Bard');
+    const planned = new LevelUpPlannedEligibleSpells(db).search({
+      character_id: characterId as never,
+      expected_revision: 0 as never,
+      class_definition_id: bardId as never,
+      target_class_level: 2 as never,
+      locator: {
+        source: { kind: 'selected_class' },
+        rule_key: 'bard-prepared' as never,
+        ordinal: 5 as never,
+      },
+      query: '',
+    });
+    const offered = planned[0];
+    if (offered === undefined) throw new Error('No Bard spell was offered.');
+
+    const result = await new CharacterCommandExecutor(db, integrity).execute({
+      character_id: characterId,
+      operation_uuid: crypto.randomUUID(),
+      expected_revision: 0,
+      command: {
+        type: 'level_up_class',
+        class_definition_id: bardId,
+        target_level: 2,
+        planned_subchoices: {
+          skills: [{
+            locator: {
+              source: { kind: 'selected_class' },
+              rule_key: 'class_skill',
+              ordinal: 1,
+            },
+            skill: 'performance',
+          }],
+          expertise: [{
+            locator: {
+              source: { kind: 'selected_class' },
+              rule_key: 'class_expertise_2',
+              ordinal: 1,
+            },
+            skill: 'performance',
+          }],
+          spells: [{
+            kind: 'slot_selection',
+            locator: {
+              source: { kind: 'selected_class' },
+              rule_key: 'bard-prepared',
+              ordinal: 5,
+            },
+            spell_version_id: offered.id,
+            mode: 'new',
+          }],
+        },
+      },
+    });
+
+    expect(result.revision).toBe(1);
+    expect(storedLevel('Bard')).toBe(2);
+    expect(
+      db.oneRaw(
+        `SELECT skill FROM character_skill_grants
+         WHERE source_instance_id = ? AND grant_key = 'class_skill'
+           AND ordinal = 1`,
+        [sourceId('Bard')],
+      ),
+    ).toEqual({ skill: 'performance' });
+    expect(
+      db.oneRaw(
+        `SELECT skill FROM character_skill_expertise_grants
+         WHERE source_instance_id = ? AND grant_key = 'class_expertise_2'
+           AND ordinal = 1`,
+        [sourceId('Bard')],
+      ),
+    ).toEqual({ skill: 'performance' });
+    expect(
+      db.oneRaw(
+        `SELECT current_spell_version_id FROM spell_selection_slots
+         WHERE source_instance_id = ? AND rule_key = 'bard-prepared'
+           AND ordinal = 5`,
+        [sourceId('Bard')],
+      ),
+    ).toEqual({ current_spell_version_id: offered.id });
+    expect(
+      db.scalar(
+        `SELECT count(*) FROM character_operations
+         WHERE character_id = ? AND resulting_revision = 1`,
+        [characterId],
+      ),
+    ).toBe(1);
+
+    const replacements = new LevelUpPlannedEligibleSpells(db).search({
+      character_id: characterId as never,
+      expected_revision: 1 as never,
+      class_definition_id: bardId as never,
+      target_class_level: 3 as never,
+      locator: {
+        source: { kind: 'selected_class' },
+        rule_key: 'bard-prepared' as never,
+        ordinal: 5 as never,
+      },
+      query: '',
+    });
+    const replacement = replacements.find(
+      (candidate) => candidate.id !== offered.id,
+    );
+    if (replacement === undefined) {
+      throw new Error('No Bard replacement spell was offered.');
+    }
+    const replaced = await new CharacterCommandExecutor(db, integrity).execute({
+      character_id: characterId,
+      operation_uuid: crypto.randomUUID(),
+      expected_revision: 1,
+      command: {
+        type: 'level_up_class',
+        class_definition_id: bardId,
+        target_level: 3,
+        planned_subchoices: {
+          skills: [],
+          expertise: [],
+          spells: [{
+            kind: 'slot_selection',
+            locator: {
+              source: { kind: 'selected_class' },
+              rule_key: 'bard-prepared',
+              ordinal: 5,
+            },
+            spell_version_id: replacement.id,
+            mode: 'replace',
+          }],
+        },
+      },
+    });
+    expect(replaced.revision).toBe(2);
+    expect(
+      db.scalar(
+        `SELECT current_spell_version_id FROM spell_selection_slots
+         WHERE source_instance_id = ? AND rule_key = 'bard-prepared'
+           AND ordinal = 5`,
+        [sourceId('Bard')],
+      ),
+    ).toBe(replacement.id);
+  });
+
+  it('resolves and fills a new Wizard spellbook acquisition by logical locator', () => {
+    enterClass('Wizard');
+    const locator = {
+      source: { kind: 'selected_class' as const },
+      rule_key: 'wizard-spellbook',
+      ordinal: 7,
+    };
+    const planned = new LevelUpPlannedEligibleSpells(db).search({
+      character_id: characterId as never,
+      expected_revision: 0 as never,
+      class_definition_id: classId('Wizard') as never,
+      target_class_level: 2 as never,
+      locator: locator as never,
+      query: '',
+    });
+    const offered = planned[0];
+    if (offered === undefined) {
+      throw new Error('Wizard level 2 offered no spellbook acquisition.');
+    }
+
+    levelUp({
+      class_definition_id: classId('Wizard'),
+      target_level: 2,
+      planned_subchoices: {
+        skills: [],
+        expertise: [],
+        spells: [{
+          kind: 'spellbook_acquisition',
+          locator,
+          spell_version_id: offered.id,
+        }],
+      },
+    });
+
+    expect(
+      db.oneRaw(
+        `SELECT spell_version_id, acquired_at_class_level
+         FROM wizard_spellbook_entries
+         WHERE source_instance_id = ? AND rule_key = 'wizard-spellbook'
+           AND ordinal = 7`,
+        [sourceId('Wizard')],
+      ),
+    ).toEqual({
+      spell_version_id: offered.id,
+      acquired_at_class_level: 2,
+    });
+  });
+
+  it('rolls class level, feat, skill fills, and Expertise back on a late spell-locator refusal', () => {
+    enterClass('Fighter');
+    raiseClassLevelForTest(db, characterId, classId('Fighter'), 3);
+    enterClass('Fighter');
+    enterClass('Bard');
+    raiseClassLevelForTest(db, characterId, classId('Bard'), 2);
+    enterClass('Bard');
+    const bardSourceId = sourceId('Bard');
+    const before = stateBytes();
+
+    let refusal: unknown;
+    try {
+      levelUp({
+        class_definition_id: classId('Fighter'),
+        target_level: 4,
+        feat_choice: featChoice('2024:feat:skilled'),
+        planned_subchoices: {
+          skills: [
+            {
+              locator: {
+                source: { kind: 'existing_source', source_instance_id: bardSourceId },
+                rule_key: 'multiclass_skill',
+                ordinal: 1,
+              },
+              skill: 'performance',
+            },
+            {
+              locator: {
+                source: { kind: 'selected_feat' },
+                rule_key: 'skilled-proficiencies',
+                ordinal: 1,
+              },
+              skill: 'athletics',
+            },
+          ],
+          expertise: [{
+            locator: {
+              source: { kind: 'existing_source', source_instance_id: bardSourceId },
+              rule_key: 'class_expertise_2',
+              ordinal: 1,
+            },
+            skill: 'performance',
+          }],
+          spells: [{
+            kind: 'slot_selection',
+            locator: {
+              source: { kind: 'selected_feat' },
+              rule_key: 'late-missing-spell',
+              ordinal: 1,
+            },
+            spell_version_id: 1,
+            mode: 'new',
+          }],
+        },
+      });
+    } catch (error) {
+      refusal = error;
+    }
+
+    expect(refusal).toMatchObject({
+      data: {
+        reason: 'planned_subchoice_refused',
+        subchoice_kind: 'spell',
+        index: 0,
+        issue: 'locator_not_found',
+      },
+    });
+    expect(stateBytes()).toEqual(before);
+  });
+
+  it('uses the same selected-feat locator and eligibility before and after Magic Initiate is durable', () => {
+    enterClass('Fighter');
+    raiseClassLevelForTest(db, characterId, classId('Fighter'), 3);
+    enterClass('Fighter');
+    const selection = featChoice('2024:feat:magic-initiate');
+    const locator = {
+      source: { kind: 'selected_feat' as const },
+      rule_key: 'magic-initiate-cantrips',
+      ordinal: 1,
+    };
+    const planned = new LevelUpPlannedEligibleSpells(db).search({
+      character_id: characterId as never,
+      expected_revision: 0 as never,
+      class_definition_id: classId('Fighter') as never,
+      target_class_level: 4 as never,
+      feat_choice: selection,
+      locator: locator as never,
+      query: '',
+    });
+    const offered = planned[0];
+    if (offered === undefined) {
+      throw new Error('Magic Initiate offered no Wizard cantrip.');
+    }
+
+    levelUp({
+      class_definition_id: classId('Fighter'),
+      target_level: 4,
+      feat_choice: selection,
+      planned_subchoices: {
+        skills: [],
+        expertise: [],
+        spells: [{
+          kind: 'slot_selection',
+          locator,
+          spell_version_id: offered.id,
+          mode: 'new',
+        }],
+      },
+    });
+
+    const slotId = Number(
+      db.scalar(
+        `SELECT slot.id FROM spell_selection_slots AS slot
+         JOIN character_source_instances AS source
+           ON source.id = slot.source_instance_id
+         JOIN feat_definitions AS feat
+           ON feat.id = source.source_definition_id
+         WHERE source.character_id = ? AND source.source_type = 'feat'
+           AND feat.content_key = '2024:feat:magic-initiate'
+           AND slot.rule_key = 'magic-initiate-cantrips'
+           AND slot.ordinal = 1`,
+        [characterId],
+      ),
+    );
+    expect(new EligibleSpellSearch(db).search(characterId, slotId, '')).toEqual(
+      planned,
+    );
+    expect(
+      db.scalar(
+        'SELECT current_spell_version_id FROM spell_selection_slots WHERE id = ?',
+        [slotId],
+      ),
+    ).toBe(offered.id);
+  });
+
+  it('resolves a newly selected subclass by logical locator before its source row exists', () => {
+    enterClass('Fighter');
+    raiseClassLevelForTest(db, characterId, classId('Fighter'), 2);
+    enterClass('Fighter');
+    const locator = {
+      source: { kind: 'selected_class_subclass' as const },
+      rule_key: 'ek-cantrips',
+      ordinal: 1,
+    };
+    const planned = new LevelUpPlannedEligibleSpells(db).search({
+      character_id: characterId as never,
+      expected_revision: 0 as never,
+      class_definition_id: classId('Fighter') as never,
+      target_class_level: 3 as never,
+      subclass_content_key: '2024:subclass:ek' as never,
+      locator: locator as never,
+      query: '',
+    });
+    const offered = planned[0];
+    if (offered === undefined) {
+      throw new Error('EK offered no Wizard cantrip.');
+    }
+
+    levelUp({
+      class_definition_id: classId('Fighter'),
+      target_level: 3,
+      subclass_content_key: '2024:subclass:ek',
+      planned_subchoices: {
+        skills: [],
+        expertise: [],
+        spells: [{
+          kind: 'slot_selection',
+          locator,
+          spell_version_id: offered.id,
+          mode: 'new',
+        }],
+      },
+    });
+
+    const slotId = Number(
+      db.scalar(
+        `SELECT slot.id FROM spell_selection_slots AS slot
+         JOIN character_source_instances AS source
+           ON source.id = slot.source_instance_id
+         JOIN subclass_definitions AS subclass
+           ON subclass.id = source.source_definition_id
+         WHERE source.character_id = ? AND source.source_type = 'subclass'
+           AND subclass.content_key = '2024:subclass:ek'
+           AND slot.rule_key = 'ek-cantrips'
+           AND slot.ordinal = 1`,
+        [characterId],
+      ),
+    );
+    expect(new EligibleSpellSearch(db).search(characterId, slotId, '')).toEqual(
+      planned,
+    );
+  });
+
+  it('commits with omitted owed skill and spell choices and leaves named D70 warnings', () => {
+    enterClass('Ranger');
+    levelUp({
+      class_definition_id: classId('Ranger'),
+      target_level: 2,
+    });
+
+    expect(storedLevel('Ranger')).toBe(2);
+    expect(
+      db.scalar(
+        `SELECT skill FROM character_skill_grants
+         WHERE source_instance_id = ? AND grant_key = 'class_skill'
+           AND ordinal = 1`,
+        [sourceId('Ranger')],
+      ),
+    ).toBeNull();
+    expect(
+      db.scalar(
+        `SELECT current_spell_version_id FROM spell_selection_slots
+         WHERE source_instance_id = ? AND rule_key = 'ranger-prepared'
+           AND ordinal = 3`,
+        [sourceId('Ranger')],
+      ),
+    ).toBeNull();
+    const warnings = new CharacterCompletenessQueries(db).build(characterId);
+    expect(warnings.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: 'unfilled_skill_grants',
+        grant_key: 'class_skill',
+      }),
+      expect.objectContaining({
+        kind: 'unfilled_choices',
+        rule_key: 'ranger-prepared',
+      }),
+    ]));
   });
 
   it('copies automatic feature effects once on sync and preserves hand-written ASIs on re-sync', () => {

@@ -30,6 +30,7 @@ import {
   isRecord,
   type RpcHandler,
 } from '../handler';
+import { abilities, isEnumValue } from '../../domain/enums';
 
 interface CharacterParams {
   readonly character_id: number;
@@ -93,14 +94,20 @@ export function isLevelUpPlannedEligibleSpellsParams(
 ): params is LevelUpPlannedEligibleSpellsParams {
   if (
     !isRecord(params) ||
-    !exactKeys(params, [
+    !['character_id', 'expected_revision', 'class_definition_id',
+      'target_class_level', 'locator', 'query'].every((key) =>
+      Object.hasOwn(params, key),
+    ) ||
+    Object.keys(params).some((key) => ![
       'character_id',
       'expected_revision',
       'class_definition_id',
       'target_class_level',
+      'subclass_content_key',
+      'feat_choice',
       'locator',
       'query',
-    ]) ||
+    ].includes(key)) ||
     !positiveInteger(params.character_id) ||
     !Number.isSafeInteger(params.expected_revision) ||
     Number(params.expected_revision) < 0 ||
@@ -112,6 +119,42 @@ export function isLevelUpPlannedEligibleSpellsParams(
     !exactKeys(params.locator, ['source', 'rule_key', 'ordinal'])
   ) {
     return false;
+  }
+  if (
+    Object.hasOwn(params, 'subclass_content_key') &&
+    (typeof params.subclass_content_key !== 'string' ||
+      params.subclass_content_key.trim() === '')
+  ) {
+    return false;
+  }
+  if (Object.hasOwn(params, 'feat_choice')) {
+    const feat = params.feat_choice;
+    if (
+      !isRecord(feat) ||
+      !exactKeys(feat, [
+        'kind',
+        'feat_content_key',
+        'config',
+        'ability_increases',
+      ]) ||
+      feat.kind !== 'feat' ||
+      typeof feat.feat_content_key !== 'string' ||
+      feat.feat_content_key.trim() === '' ||
+      !isRecord(feat.config) ||
+      !Array.isArray(feat.ability_increases) ||
+      feat.ability_increases.length > 2 ||
+      !feat.ability_increases.every(
+        (value) =>
+          isRecord(value) &&
+          exactKeys(value, ['ability', 'amount']) &&
+          isEnumValue(abilities, value.ability) &&
+          Number.isSafeInteger(value.amount) &&
+          Number(value.amount) >= 1 &&
+          Number(value.amount) <= 2,
+      )
+    ) {
+      return false;
+    }
   }
   return (
     plannedGrantSource(params.locator.source) &&

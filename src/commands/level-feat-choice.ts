@@ -18,11 +18,13 @@ import type { JsonObject } from '../domain/models';
 import {
   buildFeatApplicationPlan,
   decodeAbilityIncreaseAbilities,
+  featSpellReplacementEntitlement,
   isBundledFeatContentKey,
   type BundledFeatContentKey,
 } from '../rules/feat-application';
 import type {
   ActiveFeatInstance,
+  FeatApplicationPlan,
   FeatDefinitionForApplication,
   FeatPrerequisite,
   ProjectedFeatCharacter,
@@ -249,12 +251,10 @@ export interface ApplyLevelFeatSelectionInput {
   readonly requiredGrouping?: KnownFeatGrouping;
 }
 
-/** Recheck, persist, apply effects, then generate every feat-owned grant. */
-export function applyLevelFeatSelection(
+function preparedLevelFeatSelection(
   db: DatabaseContext,
-  generator: GrantRuleSlotGenerator,
   input: ApplyLevelFeatSelectionInput,
-): SourceInstanceId {
+) {
   const definition = definitionFromDatabase(
     db,
     input.selection.feat_content_key,
@@ -280,6 +280,34 @@ export function applyLevelFeatSelection(
     config: input.selection.config,
     ability_increases: input.selection.ability_increases,
   });
+  return { definition, plan };
+}
+
+/** Trusted pure projection shared by planned search and final persistence. */
+export function planLevelFeatSelection(
+  db: DatabaseContext,
+  input: ApplyLevelFeatSelectionInput,
+): FeatApplicationPlan {
+  return preparedLevelFeatSelection(db, input).plan;
+}
+
+/** Sourced replacement entitlement for one persisted bundled feat. */
+export function levelFeatSpellReplacementEntitlement(
+  db: DatabaseContext,
+  contentKey: string,
+) {
+  return featSpellReplacementEntitlement(
+    definitionFromDatabase(db, contentKey),
+  );
+}
+
+/** Recheck, persist, apply effects, then generate every feat-owned grant. */
+export function applyLevelFeatSelection(
+  db: DatabaseContext,
+  generator: GrantRuleSlotGenerator,
+  input: ApplyLevelFeatSelectionInput,
+): SourceInstanceId {
+  const { definition, plan } = preparedLevelFeatSelection(db, input);
   if (plan.eligibility.status !== 'qualified') {
     throw new TypeError(
       `The selected feat is ${plan.eligibility.status} for this character.`,
