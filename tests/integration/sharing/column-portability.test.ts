@@ -97,7 +97,8 @@ import { openTestDatabase } from '../../helpers/open-db';
  *
  * THERE ARE THREE STATES, NOT TWO, AND THE THIRD ARRIVED WITH Q12.
  *
- * `characters.notes` travels only when the sharer asks for it. Neither of the
+ * The four character-authored text fields travel only when the sharer asks for
+ * them. Neither of the
  * original two classifications can say that without lying: `verbatim` claims a
  * column every link carries, and `omitted` claims one no link carries. So
  * `opt_in` was added, and it is deliberately the SMALLEST extension that can be
@@ -224,10 +225,25 @@ const PROBES: { readonly [N in ProbedTable]: Probe<N> } = {
         kind: 'omitted',
         why: 'The edit counter of the SENDER\'s database. The recipient\'s copy has been edited zero times and the import writes a literal 0.',
       },
+      alignment: {
+        kind: 'opt_in',
+        option: 'notes',
+        why: 'D124 puts every character-authored text field behind the single written-text option, default off.',
+      },
+      appearance: {
+        kind: 'opt_in',
+        option: 'notes',
+        why: 'D124 puts every character-authored text field behind the single written-text option, default off.',
+      },
+      backstory: {
+        kind: 'opt_in',
+        option: 'notes',
+        why: 'D124 puts every character-authored text field behind the single written-text option, default off.',
+      },
       notes: {
         kind: 'opt_in',
         option: 'notes',
-        why: "THE SHARER DECIDES, and the default is not to send it (Q12, ruled by the owner: 'Opt-in, like loadouts'). Every other note this format drops is WORKING STATE (a preference, an override, an acknowledgement, a loadout) and every note on the BUILD travels (a weapon, a species, a background, a suit of armour, an effect) — a character's own notes sit on the build side of that line, which is why they CAN travel, and they are the likeliest place in this application for genuinely private text, which is why they do not travel unasked. Off by default because a link minted before this existed carries no note, so the default has to mean what those links already mean.",
+        why: 'D124 puts every character-authored text field behind the single written-text option, default off.',
       },
       created_at: OWNED_TIMESTAMP,
       updated_at: OWNED_TIMESTAMP,
@@ -1116,11 +1132,13 @@ function seedSender(db: DatabaseContext, catalog: Catalog): number {
     `INSERT INTO characters (
        name, strength, dexterity, constitution, intelligence, wisdom,
        charisma, ability_allocation_method, proficiency_bonus_override,
-       rules_edition_preference, allow_legacy, revision, notes, created_at,
-       updated_at
+       rules_edition_preference, allow_legacy, revision, alignment, appearance,
+       backstory, notes, created_at, updated_at
      ) VALUES (
        'Portability Probe', 8, 14, 13, 18, 12, 11, 'manual', 4, 'expanded',
-       1, 7, 'sender private character note', ?, ?
+       1, 7, 'Chaotic Good', 'Silver scales and a blue cloak.',
+       'Left the northern watch to find a vanished mentor.',
+       'sender private character note', ?, ?
      )`,
     [SENDER_TIME, SENDER_TIME],
   ).lastInsertId;
@@ -2071,6 +2089,33 @@ describe('every column of every shared table is classified', () => {
 });
 
 describe('a share link carries every column it claims to', () => {
+  it('flavor portability separates notes privacy', () => {
+    const columns = 'alignment, appearance, backstory, notes';
+    const sender = trip.sender.oneRaw(
+      `SELECT ${columns} FROM characters WHERE id = ?`,
+      [trip.senderCharacterId],
+    );
+    expect(sender).toEqual({
+      alignment: 'Chaotic Good',
+      appearance: 'Silver scales and a blue cloak.',
+      backstory: 'Left the northern watch to find a vanished mentor.',
+      notes: 'sender private character note',
+    });
+    expect(trip.recipient.oneRaw(
+      `SELECT ${columns} FROM characters WHERE id = ?`,
+      [trip.recipientCharacterId],
+    )).toEqual(sender);
+    expect(trip.optedOut.oneRaw(
+      `SELECT ${columns} FROM characters WHERE id = ?`,
+      [trip.optedOutCharacterId],
+    )).toEqual({
+      alignment: null,
+      appearance: null,
+      backstory: null,
+      notes: null,
+    });
+  });
+
   it.each(PROBED_TABLES)('%s', (table) => {
     const probe = RUNTIME_PROBES[table] as RuntimeProbe;
     const sent = readRows(

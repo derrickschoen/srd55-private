@@ -572,6 +572,50 @@ const VERSION_FIXTURES = {
       }],
     },
   },
+  17: {
+    // Independently compressed from a hand-authored v17 positional tuple.
+    // The character tuple's final three members are alignment, appearance,
+    // and backstory; notes remains in its frozen v2 position.
+    fragment:
+      'H4sIAAAAAAAAA4WOwUoDQQyGX2XIOQudIhZ6LagHD57awzCUsBvdwbgzJNni44urQt2DQkggfD__l2CYhu5tFi-9kFlnjUWs60dS6p21s5GUAeMOExzjLtwJXaqGB9YKOM0iGG-_7t8LnrRcyDlM1dm-o3AYqXrpw32tAyAcamuswXqSTwYe-dnDiZx1YG6QMaUNwnazvdkvunutLzP_eGBcleaM6fespNKKv34kMGcSHyFf5xaDpfxsr0UEMOK_JL83Vi_G5wiL5zqRPwCiYLYkiQEAAA',
+    expected: {
+      format: CHARACTER_SHARE_FORMAT,
+      version: CHARACTER_SHARE_VERSION,
+      character: {
+        name: 'V17 Flavor Hero',
+        dexterity: 16,
+        notes: 'Private notes',
+        alignment: 'Chaotic Good',
+        appearance: 'Copper scales',
+        backstory: 'Left Waterdeep',
+      },
+      classes: [{
+        id: 0,
+        classKey: '2024:class:rogue',
+        level: 1,
+        start: 1,
+      }],
+      sources: [],
+      selections: [],
+      spellbook: [],
+      preferences: [],
+      overrides: [],
+      skillProficiencies: ['stealth'],
+      skillGrants: [{
+        ref: 0,
+        grantKey: 'class_skill',
+        ordinal: 1,
+        skill: 'stealth',
+      }],
+      expertiseGrants: [{
+        ref: 0,
+        grantKey: 'class_expertise_1',
+        ordinal: 1,
+        grantedAtClassLevel: 1,
+        skill: 'stealth',
+      }],
+    },
+  },
 } satisfies Record<SupportedShareVersion, FrozenFixture>;
 
 const HISTORICAL_SCHEMA_MODULE_SHA256 = {
@@ -579,6 +623,7 @@ const HISTORICAL_SCHEMA_MODULE_SHA256 = {
   'v2.ts': '32e662f3db38f09da5b17320b059c917d26e031456fd0f2c4cefb196a872b269',
   'v8.ts': '1ac43e5dbc33e34ef025af12e80914a51daa8ecda5599a8c1143cbe2baf748af',
   'v13.ts': 'ef1e06d92ca9e302b6bc148aad5ba2fba40110c5909c2a2e972628e992fd6435',
+  'v16.ts': '05b89733bfa8838a688506d56feae6fcf314ba7c0b46b2e3d93e5a1fe1995c02',
 } as const;
 
 function allObjects(root: object): object[] {

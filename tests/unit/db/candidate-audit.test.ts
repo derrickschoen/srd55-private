@@ -140,6 +140,17 @@ function snapshotOf(db: Database, characterId: number): Record<string, unknown> 
   return snapshot;
 }
 
+function markPreFlavorSnapshot(
+  snapshot: Record<string, unknown>,
+  version: 'a7-v4' | 'a7-v5' | 'a7-v9' | 'a7-v11',
+): void {
+  snapshot.schema_version = version;
+  const character = snapshot.character as Record<string, unknown>;
+  delete character.alignment;
+  delete character.appearance;
+  delete character.backstory;
+}
+
 /**
  * A snapshot as `capture` produced them BEFORE weapons were captured: five
  * table keys, no `character_weapons`.
@@ -830,7 +841,7 @@ describe('candidate database semantic audit', () => {
     ).not.toThrow();
   });
 
-  it('audits and restores ability_override in the current a7-v15 snapshot shape', () => {
+  it('audits and restores ability_override after the historical a7-v15 snapshot shape', () => {
     const db = freshDatabase();
     seedTwoCharacters(db);
     db.exec(
@@ -843,7 +854,8 @@ describe('candidate database semantic audit', () => {
        )`,
     );
     const snapshot = snapshotOf(db, 1);
-    expect(snapshot.schema_version).toBe('a7-v15');
+    expect(snapshot.schema_version).toBe('a7-v16');
+    expect(snapshot.schema_version).not.toBe('a7-v15');
     insertSavePoint(db, 1, snapshot);
 
     expect(() => auditCandidateDatabase(quarantined(bytesOf(db)))).not.toThrow();
@@ -873,7 +885,7 @@ describe('candidate database semantic audit', () => {
        ) VALUES (1, 1, 'Table Blade', 'dice', '1d8')`,
     );
     const snapshot = snapshotOf(db, 1);
-    snapshot.schema_version = 'a7-v5';
+    markPreFlavorSnapshot(snapshot, 'a7-v5');
     delete (snapshot.character as Record<string, unknown>)
       .ability_allocation_method;
     const weapon = (snapshot.character_weapons as Record<
@@ -962,7 +974,7 @@ describe('candidate database semantic audit', () => {
        ) VALUES (1, 1, 1, 'damage_resistance', 'Poison', 'Dwarven Resilience')`,
     );
     const snapshot = snapshotOf(db, 1);
-    snapshot.schema_version = 'a7-v9';
+    markPreFlavorSnapshot(snapshot, 'a7-v9');
     delete snapshot.character_items;
     const effect = (snapshot.character_effects as Record<
       string,
@@ -993,7 +1005,7 @@ describe('candidate database semantic audit', () => {
        VALUES (7, 1, 'Potion', 5)`,
     );
     const snapshot = snapshotOf(db, 1);
-    snapshot.schema_version = 'a7-v11';
+    markPreFlavorSnapshot(snapshot, 'a7-v11');
     const item = (
       snapshot.character_items as Record<string, unknown>[]
     )[0]!;
@@ -1126,7 +1138,7 @@ describe('candidate database semantic audit', () => {
     // `a7-v4` AND NOT THE CURRENT VERSION, because that is the last version
     // whose trait rows carried the payload — a save point on a real user's disk
     // rather than a shape this build could write.
-    snapshot.schema_version = 'a7-v4';
+    markPreFlavorSnapshot(snapshot, 'a7-v4');
     delete (snapshot.character as Record<string, unknown>)
       .ability_allocation_method;
     const trait = (

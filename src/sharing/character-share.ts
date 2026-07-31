@@ -83,15 +83,10 @@ export interface ShareExportOptions {
   readonly acknowledgements?: boolean;
   readonly loadouts?: boolean;
   /**
-   * `characters.notes` — Q12, ruled OPT-IN by the owner ("Opt-in, like
-   * loadouts").
-   *
-   * The other two flags guard WORKING STATE. This one guards the build: a
-   * character's own notes sit on the same side of that line as the note on
-   * their armour, which travels unconditionally. What makes it different is not
-   * where it sits but what it is likely to CONTAIN — a character's own notes
-   * are the likeliest place in this application for genuinely private text, so
-   * the sharer decides rather than the format.
+   * All four character-authored text fields: alignment, appearance, backstory,
+   * and notes. D124 generalizes the existing notes opt-in rather than adding
+   * per-field privacy controls. The stored key remains `notes` until FF-B owns
+   * the visible label; only an explicit `true` includes any written text.
    */
   readonly notes?: boolean;
 }
@@ -985,20 +980,25 @@ export function exportCharacterShare(
           })),
         }))
       : undefined;
-  // THE THIRD OPT-IN, and the only one that is a single column (Q12).
+  // THE THIRD OPT-IN. D124 makes this one option cover all character-authored
+  // text, with no independently selectable fields.
   //
-  // An EMPTY note is no note. `''` and NULL become the same absent field
+  // EMPTY text is no text. `''` and NULL become the same absent field
   // because the recipient's column cannot hold the difference in any way a
   // reader could see, and because `text()` refuses a zero-length string — so
   // exporting `''` would refuse to build the link at all over a note nobody
   // wrote.
-  const notes =
+  const writtenText = (value: unknown): string | undefined =>
     options.notes === true &&
-    character.notes !== null &&
-    character.notes !== undefined &&
-    String(character.notes) !== ''
-      ? String(character.notes)
+    value !== null &&
+    value !== undefined &&
+    String(value).trim() !== ''
+      ? String(value)
       : undefined;
+  const alignment = writtenText(character.alignment);
+  const appearance = writtenText(character.appearance);
+  const backstory = writtenText(character.backstory);
+  const notes = writtenText(character.notes);
   // Not behind an option flag. `acknowledgements` and `loadouts` are opt-in
   // because they are working state the recipient may not want; a weapon is part
   // of the build being shared, like the class levels and the spellbook.
@@ -1269,6 +1269,9 @@ export function exportCharacterShare(
       ...(Number(character.allow_legacy) === 1
         ? { allow_legacy: true as const }
         : {}),
+      ...(alignment === undefined ? {} : { alignment }),
+      ...(appearance === undefined ? {} : { appearance }),
+      ...(backstory === undefined ? {} : { backstory }),
       ...(notes === undefined ? {} : { notes }),
     },
     classes,
@@ -1592,7 +1595,11 @@ export function previewCharacterShare(
     includesAcknowledgements:
       document.acknowledgements !== undefined,
     includesLoadouts: document.loadouts !== undefined,
-    includesNotes: document.character.notes !== undefined,
+    includesNotes:
+      document.character.alignment !== undefined ||
+      document.character.appearance !== undefined ||
+      document.character.backstory !== undefined ||
+      document.character.notes !== undefined,
   };
 }
 
@@ -1612,9 +1619,10 @@ export function importCharacterShare(
       `INSERT INTO characters (
          name, strength, dexterity, constitution, intelligence, wisdom,
          charisma, ability_allocation_method, proficiency_bonus_override,
-         rules_edition_preference, allow_legacy, revision, notes,
+         rules_edition_preference, allow_legacy, revision,
+         alignment, appearance, backstory, notes,
          created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
       [
         c.name,
         // `?? 10` refills the scores the exporter compressed away — which is
@@ -1631,6 +1639,9 @@ export function importCharacterShare(
         c.proficiency_bonus_override ?? null,
         c.rules_edition_preference ?? '2024',
         c.allow_legacy === true ? 1 : 0,
+        c.alignment ?? null,
+        c.appearance ?? null,
+        c.backstory ?? null,
         // A document that carries no note leaves the recipient's column at its
         // own NULL, which is what a link minted before Q12 has always produced.
         c.notes ?? null,

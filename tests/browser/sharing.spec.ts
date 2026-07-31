@@ -122,16 +122,16 @@ test('creates, independently verifies, previews, and explicitly imports a durabl
   // six-field addressable acquisition tuples carrying ref, rule, ordinal,
   // acquisition level, nullable spell key, and nullable fallback name. GF-2
   // mints v15 by appending the Expertise-grant collection at the root. LU-1
-  // mints v16 by appending durable class-level feat occurrences.
-  expect(positional[1]).toBe(16);
+  // mints v16 by appending durable class-level feat occurrences. D104 mints
+  // v17 by appending alignment, appearance, and backstory to the character.
+  expect(positional[1]).toBe(17);
   expect((positional[2] as unknown[])[0]).toBe('Journey Hero 🧙');
-  // TWELVE since v3, with the notes slot still NULL when nobody ticks the
-  // notes box, and the appended ability_allocation_method NULL for a
-  // character whose scores were never allocated — every earlier position
-  // keeps its meaning; versions only append.
-  expect(positional[2]).toHaveLength(12);
+  // FIFTEEN since v17, with notes and the allocation signal still in their
+  // frozen positions, followed by three null flavor absences.
+  expect(positional[2]).toHaveLength(15);
   expect((positional[2] as unknown[])[10]).toBeNull();
   expect((positional[2] as unknown[])[11]).toBeNull();
+  expect((positional[2] as unknown[]).slice(12)).toEqual([null, null, null]);
   expect(positional.slice(3, 9)).toEqual([[], [], [], [], [], []]);
   // V10 always writes the three-field sheet tuple. This blank character has no
   // armour, hit point rolls, or skill proficiencies, so all three are NULL.

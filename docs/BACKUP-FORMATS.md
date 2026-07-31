@@ -31,19 +31,32 @@ storage replacement or reopen fails, that prior image is restored and reopened.
 ## Portable character document
 
 The Worker RPC methods are `backup.exportCharacter` and
-`backup.importCharacter`. Version 1 is JSON-compatible:
+`backup.importCharacter`. The current version 3 is JSON-compatible:
 
 ```text
 {
   format: "dnd-multiclass-spells/character",
-  version: 1,
+  version: 3,
   exported_at: "<ISO-8601 timestamp>",
   source_character_id: 17,
-  character: { ... },
+  character: {
+    ...,
+    alignment: string | null,
+    appearance: string | null,
+    backstory: string | null,
+    notes: string | null
+  },
   tables: { ... },
   references: { ... }
 }
 ```
+
+Version 3 requires the three flavor keys. Alignment is limited to 120 Unicode
+code points, appearance to 4,000, and backstory to 20,000. Notes remains
+type-only during backup validation so a grandfathered note longer than the
+2,000-character new-write limit can still be exported and restored losslessly.
+Historical v1 and v2 documents remain readable; their missing flavor fields
+migrate to `null`, never empty or invented text.
 
 `tables` contains:
 

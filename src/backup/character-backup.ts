@@ -30,7 +30,9 @@ import {
   CHARACTER_BACKUP_FORMAT,
   CHARACTER_BACKUP_VERSION,
   LEGACY_CHARACTER_BACKUP_VERSION,
+  PREVIOUS_CHARACTER_BACKUP_VERSION,
 } from './backup-version';
+import { CHARACTER_TEXT_LIMITS } from '../domain/character-limits';
 import {
   BACKUP_DIRECT_TABLES,
   BACKUP_OPTIONAL_TABLES,
@@ -120,6 +122,17 @@ export interface LegacyCharacterBackupDocument {
   readonly character: BackupRow;
   readonly tables: CharacterBackupTables;
   readonly references: CharacterBackupReferences;
+}
+
+export interface PreviousCharacterBackupDocument {
+  readonly format: typeof CHARACTER_BACKUP_FORMAT;
+  readonly version: typeof PREVIOUS_CHARACTER_BACKUP_VERSION;
+  readonly exported_at: string;
+  readonly source_character_id: number;
+  readonly character: BackupRow;
+  readonly tables: CharacterBackupTables;
+  readonly references: CharacterBackupReferences;
+  readonly spell_definitions: CharacterBackupSpellDefinitions;
 }
 
 export interface CharacterImportResult {
@@ -1065,6 +1078,7 @@ function validateDocument(input: unknown): ValidatedDocument {
   const version = document.version;
   if (
     version !== CHARACTER_BACKUP_VERSION &&
+    version !== PREVIOUS_CHARACTER_BACKUP_VERSION &&
     version !== LEGACY_CHARACTER_BACKUP_VERSION
   ) {
     assertBackupHeader(
@@ -1108,22 +1122,51 @@ function validateDocument(input: unknown): ValidatedDocument {
     document.source_character_id,
     'Character backup source_character_id',
   );
-  const character = backupRecord(
+  const rawCharacter = backupRecord(
     document.character,
     'Character backup character',
   );
-  const characterColumns = [
+  const currentCharacterColumns = [
     'id',
     ...CHARACTER_STATE_COLUMNS,
     'revision',
     'created_at',
     'updated_at',
   ] as const;
+  const preFlavorCharacterColumns = [
+    'id',
+    'name',
+    'strength',
+    'dexterity',
+    'constitution',
+    'intelligence',
+    'wisdom',
+    'charisma',
+    'proficiency_bonus_override',
+    'rules_edition_preference',
+    'allow_legacy',
+    'notes',
+    'ability_allocation_method',
+    'revision',
+    'created_at',
+    'updated_at',
+  ] as const;
   assertExactKeys(
-    character,
-    characterColumns,
+    rawCharacter,
+    version === CHARACTER_BACKUP_VERSION
+      ? currentCharacterColumns
+      : preFlavorCharacterColumns,
     'Character backup character',
   );
+  const character: MutableRow =
+    version === CHARACTER_BACKUP_VERSION
+      ? rawCharacter
+      : {
+          ...rawCharacter,
+          alignment: null,
+          appearance: null,
+          backstory: null,
+        };
   if (character.id !== characterId) {
     throw new BackupValidationError(
       'Character backup character belongs to another character.',
@@ -1186,6 +1229,21 @@ function validateDocument(input: unknown): ValidatedDocument {
     throw new BackupValidationError(
       'Character backup character.revision must be a non-negative integer.',
     );
+  }
+
+  for (const field of ['alignment', 'appearance', 'backstory'] as const) {
+    const value = character[field];
+    const maximum = CHARACTER_TEXT_LIMITS[field];
+    if (
+      value !== null &&
+      (typeof value !== 'string' ||
+        [...value].length < 1 ||
+        [...value].length > maximum)
+    ) {
+      throw new BackupValidationError(
+        `Character backup character.${field} must be null or text from 1 through ${maximum} characters.`,
+      );
+    }
   }
 
   assertRowShape(
@@ -1401,7 +1459,10 @@ function validateDocument(input: unknown): ValidatedDocument {
 
 export function validateCharacterBackup(
   input: unknown,
-): asserts input is CharacterBackupDocument | LegacyCharacterBackupDocument {
+): asserts input is
+  | CharacterBackupDocument
+  | PreviousCharacterBackupDocument
+  | LegacyCharacterBackupDocument {
   validateDocument(input);
 }
 

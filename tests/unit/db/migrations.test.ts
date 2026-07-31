@@ -190,6 +190,41 @@ describe('database migration chain', () => {
     expect(result.signature).toBe(schemaSignature(schema));
   });
 
+  it('adds nullable flavor without changing historical notes', async () => {
+    const beforeFlavor = DATABASE_MIGRATIONS
+      .slice(0, -1)
+      .map((entry) => entry.sql)
+      .join('\n');
+    const grandfathered = `private-${'n'.repeat(2_100)}`;
+    const storage = await storageHolding(beforeFlavor);
+    const old = storage.open();
+    old.exec({
+      sql: 'INSERT INTO characters (name, notes) VALUES (?, ?)',
+      bind: ['Flavor Migration Hero', grandfathered],
+    });
+    old.close();
+
+    const lifecycle = new DatabaseLifecycle(
+      sqlite3,
+      storage,
+      schema,
+      () => undefined,
+      DATABASE_MIGRATIONS,
+    );
+    lifecycle.open();
+    expect(lifecycle.database.oneRaw(
+      `SELECT alignment, appearance, backstory, notes
+       FROM characters WHERE name = ?`,
+      ['Flavor Migration Hero'],
+    )).toEqual({
+      alignment: null,
+      appearance: null,
+      backstory: null,
+      notes: grandfathered,
+    });
+    lifecycle.close();
+  });
+
   it('registers every pre-0020 root as legacy opaque before adding root foreign keys', async () => {
     const beforeContentRegistry = DATABASE_MIGRATIONS
       .slice(0, 20)

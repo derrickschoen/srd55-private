@@ -250,6 +250,9 @@ function seedCatalog(db: DatabaseContext, padding = false) {
  */
 const SENDER_NOTE =
   'Table politics 🎲\tdo NOT share:\nAsked "why?" about Rhea\'s arc \\ unresolved.';
+const SENDER_ALIGNMENT = 'Chaotic Good';
+const SENDER_APPEARANCE = 'Copper scales 🎲\nBlue cloak.';
+const SENDER_BACKSTORY = 'Left Waterdeep after the watch asked "why?" \\ twice.';
 
 function seedCharacter(
   db: DatabaseContext,
@@ -259,9 +262,10 @@ function seedCharacter(
   const characterId = db.exec(
     `INSERT INTO characters (
        name, strength, dexterity, constitution, intelligence, wisdom,
-       charisma, proficiency_bonus_override, allow_legacy, notes
-     ) VALUES ('Share Hero', 8, 14, 13, 18, 12, 10, 4, 1, ?)`,
-    [SENDER_NOTE],
+       charisma, proficiency_bonus_override, allow_legacy, alignment,
+       appearance, backstory, notes
+     ) VALUES ('Share Hero', 8, 14, 13, 18, 12, 10, 4, 1, ?, ?, ?, ?)`,
+    [SENDER_ALIGNMENT, SENDER_APPEARANCE, SENDER_BACKSTORY, SENDER_NOTE],
   ).lastInsertId;
   db.exec(
     `INSERT INTO character_class_levels (
@@ -1567,6 +1571,42 @@ describe('a character note travels only when the sharer opts in', () => {
     };
   }
 
+  it('flavor portability separates notes privacy', async () => {
+    const source = await database();
+    const catalog = seedCatalog(source);
+    const characterId = seedCharacter(source, catalog);
+    const fields = ['alignment', 'appearance', 'backstory', 'notes'] as const;
+
+    const without = await decodeShareFragment(await encodeShareFragment(
+      exportCharacterShare(source, characterId),
+    ));
+    for (const field of fields) {
+      expect(Object.hasOwn(without.character, field)).toBe(false);
+    }
+
+    const withText = await decodeShareFragment(await encodeShareFragment(
+      exportCharacterShare(source, characterId, { notes: true }),
+    ));
+    expect(withText.character).toMatchObject({
+      alignment: SENDER_ALIGNMENT,
+      appearance: SENDER_APPEARANCE,
+      backstory: SENDER_BACKSTORY,
+      notes: SENDER_NOTE,
+    });
+    const target = await recipient();
+    const imported = importCharacterShare(target, withText);
+    expect(target.oneRaw(
+      `SELECT alignment, appearance, backstory, notes
+       FROM characters WHERE id = ?`,
+      [imported.characterId],
+    )).toEqual({
+      alignment: SENDER_ALIGNMENT,
+      appearance: SENDER_APPEARANCE,
+      backstory: SENDER_BACKSTORY,
+      notes: SENDER_NOTE,
+    });
+  });
+
   it('carries nothing when nobody asks, and the sender still has the note', async () => {
     const source = await database();
     const catalog = seedCatalog(source);
@@ -2158,7 +2198,7 @@ describe('D83 ability override sharing', () => {
     const decoded = await decodeShareFragment(
       await encodeShareFragment(exportCharacterShare(source, characterId)),
     );
-    expect(decoded.version).toBe(16);
+    expect(decoded.version).toBe(17);
     expect(decoded.effects).toMatchObject([
       {
         kind: 'ability_override',
