@@ -7,16 +7,24 @@ Main HEAD: 6a114de + (uncommitted Step-0 artifacts being committed now).
 FLOORS: vitest 3,079 tests / 189 files; Playwright 88 tests / 20 specs;
 build exit 0; migrations 0000-0025; wire v1-v16; existing a7-v* assertions.
 
-## In flight / next actions (HANDOVER §5 queue positions)
-- Step 0: artifacts committed; BASELINE STILL PENDING (build + vitest +
-  Playwright on PLAYWRIGHT_PORT=44469 against main — run before any gate).
-- TRACK M (wt/attunement at e0a9726): D91-M awaiting gate = M0. Its codex
-  log lived in the old session scratchpad (d91m.log); if gone, gate stands
-  on your own runs (claims restated in HANDOVER §2).
-- TRACK W (wt/print at 6a114de): idle; W1 (W-B1) dispatches after M0 merges
-  and lanes fast-forward.
-- TRACK S (wt/pwa at 6a114de): idle; S1 (D91-R) dispatches after M0 merges
-  (needs migration 0026 in main).
+## In flight
+- Step 0 COMPLETE incl. baseline: build 0, vitest 189/3,079, Playwright
+  88/88 on 44469 — all verified by supervisor on main b7b498e.
+- TRACK M (wt/attunement): D91-M gate ran: touched-set 28 files OK, build 0,
+  vitest 192/3,126, parser negative control proven both directions
+  (mutate-d91m-parser.py). D135 codex review found 4 defects; 1-3 verified
+  by supervisor at the cited lines, 4a (owning-class check) accepted, 4b
+  (candidate-discovery pass) REJECTED — extract is SHA-pinned and the
+  formula inventory is design-time exhaustive. Fix dispatch D91-M-FIX
+  running (task bk7gwpon8, log d91m-fix.log, port 44470). Playwright gate
+  was stopped (tree changing) — full re-gate after the fix: vitest +
+  re-run negative control + Playwright 44470 + codex re-review round 2.
+- TRACK W (wt/print): W-B1 dispatched EARLY (deviation from "after M0" —
+  Taken for now: W-B1 depends only on merged W-A, not on migration 0026.
+  Seam: floors in its brief are main's 3,079/189+88. Cost to flip: none.)
+  Task <wb1>, log wb1.log, port 44471.
+- TRACK S (wt/pwa): idle at 6a114de; S1 (D91-R) needs 0026 in main — waits
+  for M0 merge.
 
 ## Rulings recorded this window
 D118-D137 (see decisions.md). Newest four: D134 focus_points = Remaining
