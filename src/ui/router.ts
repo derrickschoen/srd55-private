@@ -6,6 +6,26 @@ export interface Route {
 
 export type RouteListener = (route: Route) => void;
 
+const ROUTER_LAUNCH_URL_KEY = 'srd55RouterLaunchUrl';
+
+export function hasSameOriginInAppHistory(
+  state: unknown,
+  currentOrigin: string,
+): boolean {
+  if (typeof state !== 'object' || state === null) {
+    return false;
+  }
+  const launchUrl = Reflect.get(state, ROUTER_LAUNCH_URL_KEY);
+  if (typeof launchUrl !== 'string') {
+    return false;
+  }
+  try {
+    return new URL(launchUrl).origin === currentOrigin;
+  } catch {
+    return false;
+  }
+}
+
 export function parseRoute(url: URL): Route {
   const path = url.pathname.replace(/\/+/g, '/').replace(/\/$/, '') || '/';
   return Object.freeze({
@@ -50,7 +70,10 @@ export class Router {
       throw new Error('Router navigation must stay on the current origin.');
     }
     const method = options.replace ? 'replaceState' : 'pushState';
-    this.windowObject.history[method](null, '', url);
+    const state = options.replace
+      ? this.windowObject.history.state
+      : { [ROUTER_LAUNCH_URL_KEY]: this.windowObject.location.href };
+    this.windowObject.history[method](state, '', url);
     this.#emit();
   }
 
