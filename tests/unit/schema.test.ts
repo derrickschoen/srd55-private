@@ -66,6 +66,29 @@ type ColumnsByAffinity = Partial<Record<ColumnAffinity, string[]>>;
  * cannot fail.
  */
 const expectedColumns: Record<string, ColumnsByAffinity> = {
+  catalog_content_identities: {
+    text: [
+      'content_key', 'content_kind', 'key_kind', 'catalog_layer',
+      'normalized_name',
+    ],
+    numeric: ['created_at'],
+  },
+  catalog_content_fingerprints: {
+    text: [
+      'content_kind', 'fingerprint_scheme', 'fingerprint_digest',
+      'canonical_json', 'content_key', 'fingerprint_role',
+    ],
+  },
+  catalog_content_aliases: {
+    text: ['content_kind', 'alias_key', 'content_key', 'alias_kind'],
+  },
+  catalog_content_match_decisions: {
+    text: [
+      'content_kind', 'incoming_fingerprint_scheme',
+      'incoming_fingerprint_digest', 'decision', 'target_content_key',
+    ],
+    numeric: ['reviewed_at'],
+  },
   background_definitions: {
     integer: ['id', 'repeatable'],
     text: [
@@ -607,6 +630,22 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
  * a NOT NULL column occupies in the table is not something any caller can see.
  */
 const expectedNotNull: Record<string, string[]> = {
+  catalog_content_identities: [
+    'content_key', 'content_kind', 'key_kind', 'catalog_layer',
+    'normalized_name', 'created_at',
+  ],
+  catalog_content_fingerprints: [
+    'content_kind', 'fingerprint_scheme', 'fingerprint_digest',
+    'canonical_json', 'content_key', 'fingerprint_role',
+  ],
+  catalog_content_aliases: [
+    'content_kind', 'alias_key', 'content_key', 'alias_kind',
+  ],
+  catalog_content_match_decisions: [
+    'content_kind', 'incoming_fingerprint_scheme',
+    'incoming_fingerprint_digest', 'decision', 'target_content_key',
+    'reviewed_at',
+  ],
   // `damage_dice`, `damage_type` and `mastery_property` are NULLABLE here and
   // NOT NULL on the template: a half-entered user weapon is a first-class
   // state, and an invented weapon need not have a mastery property at all.
@@ -810,10 +849,22 @@ const expectedNotNull: Record<string, string[]> = {
 };
 
 const expectedNamedIndexes: Record<string, string> = {
+  catalog_content_identities_kind_key_unique:
+    'catalog_content_identities:content_kind,content_key:unique',
+  catalog_content_identities_layer_kind_index:
+    'catalog_content_identities:catalog_layer,content_kind',
+  catalog_content_identities_name_index:
+    'catalog_content_identities:content_kind,normalized_name',
+  catalog_content_fingerprints_current_scheme_unique:
+    'catalog_content_fingerprints:content_key,fingerprint_scheme:unique',
+  catalog_content_fingerprints_resolution_index:
+    'catalog_content_fingerprints:content_kind,fingerprint_scheme,fingerprint_digest',
+  catalog_content_aliases_resolution_index:
+    'catalog_content_aliases:content_kind,alias_key',
   background_definitions_content_key_unique:
     'background_definitions:content_key:unique',
-  background_definitions_name_rules_edition_unique:
-    'background_definitions:name,rules_edition:unique',
+  background_definitions_name_rules_edition_index:
+    'background_definitions:name,rules_edition',
   change_log_character_id_group_id_index: 'change_log:character_id,group_id',
   change_log_character_id_sequence_unique:
     'change_log:character_id,sequence:unique',
@@ -829,8 +880,8 @@ const expectedNamedIndexes: Record<string, string> = {
     'class_weapon_mastery_grants:class_definition_id:unique',
   weapon_templates_content_key_unique: 'weapon_templates:content_key:unique',
   species_templates_content_key_unique: 'species_templates:content_key:unique',
-  species_templates_name_rules_edition_unique:
-    'species_templates:name,rules_edition:unique',
+  species_templates_name_rules_edition_index:
+    'species_templates:name,rules_edition',
   species_template_traits_template_sort_unique:
     'species_template_traits:species_template_id,sort_order:unique',
   species_template_traits_template_name_unique:
@@ -856,8 +907,8 @@ const expectedNamedIndexes: Record<string, string> = {
     'subclass_feature_effects:subclass_feature_id,sort_order:unique',
   background_templates_content_key_unique:
     'background_templates:content_key:unique',
-  background_templates_name_rules_edition_unique:
-    'background_templates:name,rules_edition:unique',
+  background_templates_name_rules_edition_index:
+    'background_templates:name,rules_edition',
   background_equipment_items_template_option_sort_order_unique:
     'background_equipment_items:background_template_id,option,sort_order:unique',
   background_equipment_items_background_template_id_index:
@@ -943,19 +994,19 @@ const expectedNamedIndexes: Record<string, string> = {
     'character_spell_preferences:character_id,spell_version_id:unique',
   class_definitions_content_key_unique:
     'class_definitions:content_key:unique',
-  class_definitions_name_rules_edition_unique:
-    'class_definitions:name,rules_edition:unique',
+  class_definitions_name_rules_edition_index:
+    'class_definitions:name,rules_edition',
   class_progressions_class_definition_id_class_level_unique:
     'class_progressions:class_definition_id,class_level:unique',
   feat_definitions_content_key_unique: 'feat_definitions:content_key:unique',
-  feat_definitions_name_rules_edition_unique:
-    'feat_definitions:name,rules_edition:unique',
+  feat_definitions_name_rules_edition_index:
+    'feat_definitions:name,rules_edition',
   slots_character_collection_index:
     'spell_selection_slots:character_id,selection_collection',
   species_definitions_content_key_unique:
     'species_definitions:content_key:unique',
-  species_definitions_name_rules_edition_unique:
-    'species_definitions:name,rules_edition:unique',
+  species_definitions_name_rules_edition_index:
+    'species_definitions:name,rules_edition',
   spell_identities_content_key_unique: 'spell_identities:content_key:unique',
   spell_identities_normalized_name_index:
     'spell_identities:normalized_name',
@@ -1002,10 +1053,10 @@ const expectedNamedIndexes: Record<string, string> = {
   spell_versions_content_key_unique: 'spell_versions:content_key:unique',
   spell_versions_rules_edition_level_index:
     'spell_versions:rules_edition,level',
-  spell_versions_spell_identity_id_rules_edition_unique:
-    'spell_versions:spell_identity_id,rules_edition:unique',
-  subclass_definitions_class_definition_id_name_rules_edition_unique:
-    'subclass_definitions:class_definition_id,name,rules_edition:unique',
+  spell_versions_spell_identity_id_rules_edition_index:
+    'spell_versions:spell_identity_id,rules_edition',
+  subclass_definitions_class_definition_id_name_rules_edition_index:
+    'subclass_definitions:class_definition_id,name,rules_edition',
   subclass_definitions_content_key_unique:
     'subclass_definitions:content_key:unique',
   subclass_definitions_id_class_definition_id_unique:
@@ -1019,7 +1070,9 @@ const expectedNamedIndexes: Record<string, string> = {
 };
 
 const expectedUniqueGroups: Record<string, string[]> = {
-  background_definitions: ['content_key', 'name,rules_edition'],
+  catalog_content_identities: ['content_kind,content_key'],
+  catalog_content_fingerprints: ['content_key,fingerprint_scheme'],
+  background_definitions: ['content_key'],
   change_log: ['character_id,sequence'],
   character_class_levels: ['character_id,class_definition_id'],
   character_operations: ['operation_uuid'],
@@ -1028,17 +1081,17 @@ const expectedUniqueGroups: Record<string, string[]> = {
   character_items: ['id,character_id'],
   character_weapons: ['id,character_id'],
   character_spell_preferences: ['character_id,spell_version_id'],
-  class_definitions: ['content_key', 'name,rules_edition'],
+  class_definitions: ['content_key'],
   class_progressions: ['class_definition_id,class_level'],
   class_weapon_mastery_counts: ['class_definition_id,class_level'],
   class_weapon_mastery_grants: ['class_definition_id'],
   weapon_templates: ['content_key'],
-  species_templates: ['content_key', 'name,rules_edition'],
+  species_templates: ['content_key'],
   species_template_traits: [
     'species_template_id,name', 'species_template_id,sort_order',
   ],
   species_template_trait_effects: ['species_template_trait_id,sort_order'],
-  background_templates: ['content_key', 'name,rules_edition'],
+  background_templates: ['content_key'],
   background_equipment_items: ['background_template_id,option,sort_order'],
   class_equipment_items: ['class_definition_id,option,sort_order'],
   character_species: ['character_id'],
@@ -1074,8 +1127,8 @@ const expectedUniqueGroups: Record<string, string[]> = {
     'subclass_definition_id,name', 'subclass_definition_id,sort_order',
   ],
   subclass_feature_effects: ['subclass_feature_id,sort_order'],
-  feat_definitions: ['content_key', 'name,rules_edition'],
-  species_definitions: ['content_key', 'name,rules_edition'],
+  feat_definitions: ['content_key'],
+  species_definitions: ['content_key'],
   spell_identities: ['content_key'],
   spell_identity_aliases: ['normalized_alias'],
   spell_list_memberships: ['spell_version_id,spell_list_key'],
@@ -1089,10 +1142,9 @@ const expectedUniqueGroups: Record<string, string[]> = {
   spell_version_tags: ['spell_version_id,tag'],
   spell_version_upcast_levels: ['spell_version_id,level'],
   spell_version_cantrip_upgrade_levels: ['spell_version_id,level'],
-  spell_versions: ['content_key', 'spell_identity_id,rules_edition'],
+  spell_versions: ['content_key'],
   subclass_definitions: [
-    'class_definition_id,name,rules_edition', 'content_key',
-    'id,class_definition_id',
+    'content_key', 'id,class_definition_id',
   ],
   subclass_progressions: ['subclass_definition_id,class_level'],
   warning_acknowledgements: ['character_id,warning_fingerprint'],
@@ -1122,6 +1174,8 @@ const expectedUniqueGroups: Record<string, string[]> = {
  * anywhere fails until it is written down.
  */
 const expectedDefaults: Record<string, Record<string, string>> = {
+  catalog_content_identities: { created_at: 'CURRENT_TIMESTAMP' },
+  catalog_content_match_decisions: { reviewed_at: 'CURRENT_TIMESTAMP' },
   change_log: { reversible: 'true' },
   character_class_levels: { is_starting_class: 'false', level: '1' },
   character_skill_grants: { state: "'active'" },
@@ -1221,6 +1275,47 @@ const expectedDefaultedRow: Record<string, unknown> = {
 };
 
 const expectedForeignKeys: Record<string, string[]> = {
+  catalog_content_fingerprints: [
+    'content_kind,content_key->catalog_content_identities.content_kind,content_key|CASCADE',
+  ],
+  catalog_content_aliases: [
+    'content_kind,content_key->catalog_content_identities.content_kind,content_key|CASCADE',
+  ],
+  catalog_content_match_decisions: [
+    'content_kind,target_content_key->catalog_content_identities.content_kind,content_key|RESTRICT',
+  ],
+  class_definitions: [
+    'content_key->catalog_content_identities.content_key|NO ACTION',
+  ],
+  subclass_definitions: [
+    'class_definition_id->class_definitions.id|CASCADE',
+    'content_key->catalog_content_identities.content_key|NO ACTION',
+  ],
+  feat_definitions: [
+    'content_key->catalog_content_identities.content_key|NO ACTION',
+  ],
+  species_definitions: [
+    'content_key->catalog_content_identities.content_key|NO ACTION',
+  ],
+  background_definitions: [
+    'content_key->catalog_content_identities.content_key|NO ACTION',
+  ],
+  spell_versions: [
+    'content_key->catalog_content_identities.content_key|NO ACTION',
+    'spell_identity_id->spell_identities.id|CASCADE',
+  ],
+  species_templates: [
+    'content_key->catalog_content_identities.content_key|NO ACTION',
+  ],
+  background_templates: [
+    'content_key->catalog_content_identities.content_key|NO ACTION',
+  ],
+  armor_templates: [
+    'content_key->catalog_content_identities.content_key|NO ACTION',
+  ],
+  weapon_templates: [
+    'content_key->catalog_content_identities.content_key|NO ACTION',
+  ],
   // RESTRICT rather than CASCADE on the two template links, and the asymmetry
   // is deliberate: deleting a background template should take its equipment
   // lines with it, but deleting a WEAPON template must not silently shorten
@@ -1309,8 +1404,6 @@ const expectedForeignKeys: Record<string, string[]> = {
   spell_version_cantrip_upgrade_levels: [
     'spell_version_id->spell_versions.id|CASCADE',
   ],
-  spell_versions: ['spell_identity_id->spell_identities.id|CASCADE'],
-  subclass_definitions: ['class_definition_id->class_definitions.id|CASCADE'],
   subclass_progressions: [
     'subclass_definition_id->subclass_definitions.id|CASCADE',
   ],

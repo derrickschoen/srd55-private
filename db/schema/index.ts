@@ -14,6 +14,7 @@
  * imports is a failing test rather than silence.
  */
 export * from './catalog-classes';
+export * from './catalog-content';
 export * from './catalog-sources';
 export * from './catalog-spells';
 export * from './character';

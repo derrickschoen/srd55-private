@@ -35,6 +35,7 @@ import {
   tinyint1,
   varchar,
 } from './columns';
+import { catalog_content_identities } from './catalog-content';
 
 /**
  * THE SPELL CATALOG.
@@ -111,7 +112,9 @@ export const spell_versions = sqliteTable(
       .primaryKey({ autoIncrement: true })
       .notNull()
       .$type<SpellVersionId>(),
-    content_key: varchar<ContentKey>()('content_key').notNull(),
+    content_key: varchar<ContentKey>()('content_key')
+      .notNull()
+      .references(() => catalog_content_identities.content_key),
     spell_identity_id: integer('spell_identity_id')
       .notNull()
       .$type<SpellIdentityId>()
@@ -373,7 +376,7 @@ export const spell_versions = sqliteTable(
         AND ((\`material_cost_copper\` IS NULL) = (\`material_cost_kind\` IS NULL))`,
     ),
     uniqueIndex('spell_versions_content_key_unique').on(table.content_key),
-    uniqueIndex('spell_versions_spell_identity_id_rules_edition_unique').on(
+    index('spell_versions_spell_identity_id_rules_edition_index').on(
       table.spell_identity_id,
       table.rules_edition,
     ),

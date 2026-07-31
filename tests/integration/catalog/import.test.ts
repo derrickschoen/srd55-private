@@ -635,14 +635,22 @@ describe('catalog import persistence', () => {
 
   it('rolls back database errors and exposes the typed self-registering RPC handler', async () => {
     const test = await database();
+    test.db.exec(
+      `CREATE TRIGGER test_catalog_import_abort
+       BEFORE INSERT ON spell_versions
+       WHEN NEW.content_key = '2024:second'
+       BEGIN
+         SELECT RAISE(ABORT, 'induced catalog import failure');
+       END`,
+    );
     const conflicting = document(
       record({
-        identityKey: 'same-identity',
+        identityKey: 'first-identity',
         versionKey: '2024:first',
         name: 'First',
       }),
       record({
-        identityKey: 'same-identity',
+        identityKey: 'second-identity',
         versionKey: '2024:second',
         name: 'Second',
       }),

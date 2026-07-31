@@ -63,6 +63,7 @@ import {
   tinyint1,
   varchar,
 } from './columns';
+import { catalog_content_identities } from './catalog-content';
 import { character_source_instances, characters } from './character';
 import { character_items } from './items';
 import { armor_templates } from './sheet';
@@ -143,7 +144,9 @@ export const species_templates = sqliteTable(
       .primaryKey({ autoIncrement: true })
       .notNull()
       .$type<SpeciesTemplateId>(),
-    content_key: varchar<ContentKey>()('content_key').notNull(),
+    content_key: varchar<ContentKey>()('content_key')
+      .notNull()
+      .references(() => catalog_content_identities.content_key),
     rules_edition: varchar<RulesEdition>()('rules_edition')
       .notNull()
       .default('2024'),
@@ -213,7 +216,7 @@ export const species_templates = sqliteTable(
      */
     check('species_templates_base_speed_check', integerAtLeast('base_speed_feet', 1)),
     uniqueIndex('species_templates_content_key_unique').on(table.content_key),
-    uniqueIndex('species_templates_name_rules_edition_unique').on(
+    index('species_templates_name_rules_edition_index').on(
       table.name,
       table.rules_edition,
     ),
@@ -1094,7 +1097,9 @@ export const background_templates = sqliteTable(
       .primaryKey({ autoIncrement: true })
       .notNull()
       .$type<BackgroundTemplateId>(),
-    content_key: varchar<ContentKey>()('content_key').notNull(),
+    content_key: varchar<ContentKey>()('content_key')
+      .notNull()
+      .references(() => catalog_content_identities.content_key),
     rules_edition: varchar<RulesEdition>()('rules_edition')
       .notNull()
       .default('2024'),
@@ -1151,7 +1156,7 @@ export const background_templates = sqliteTable(
       oneOf('rules_edition', rulesEditions),
     ),
     uniqueIndex('background_templates_content_key_unique').on(table.content_key),
-    uniqueIndex('background_templates_name_rules_edition_unique').on(
+    index('background_templates_name_rules_edition_index').on(
       table.name,
       table.rules_edition,
     ),

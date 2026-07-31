@@ -190,6 +190,106 @@ describe('database migration chain', () => {
     expect(result.signature).toBe(schemaSignature(schema));
   });
 
+  it('registers every pre-0020 root as legacy opaque before adding root foreign keys', async () => {
+    const beforeContentRegistry = DATABASE_MIGRATIONS
+      .slice(0, 20)
+      .map((entry) => entry.sql)
+      .join('\n');
+    const storage = await storageHolding(
+      `${beforeContentRegistry}
+       INSERT INTO class_definitions (
+         id, content_key, name, rules_edition
+       ) VALUES (1, '2024:class:test', 'Test Class', '2024');
+       INSERT INTO species_definitions (
+         id, content_key, name, rules_edition
+       ) VALUES (2, '2024:species:test', 'Test Species', '2024');
+       INSERT INTO species_templates (
+         id, content_key, rules_edition, name, creature_type, size,
+         base_speed_feet
+       ) VALUES (
+         3, '2024:species:test', '2024', 'Test Species', 'Humanoid',
+         'Medium', 30
+       );
+       INSERT INTO spell_identities (
+         id, content_key, canonical_name, normalized_name
+       ) VALUES (4, 'test-spell-group', 'Test Spell', 'test spell');
+       INSERT INTO spell_versions (
+         id, content_key, spell_identity_id, display_name, rules_edition,
+         level, school, provenance
+       ) VALUES (
+         5, '2024:test-spell', 4, 'Test Spell', '2024', 1, 'Evocation',
+         'srd'
+       );`,
+    );
+
+    const lifecycle = new DatabaseLifecycle(sqlite3, storage, schema);
+    const db = lifecycle.open();
+
+    expect(
+      db.allRaw(
+        `SELECT
+           content_key, content_kind, key_kind, catalog_layer, normalized_name
+         FROM catalog_content_identities
+         ORDER BY content_key`,
+      ),
+    ).toEqual([
+      {
+        content_key: '2024:class:test',
+        content_kind: 'class',
+        key_kind: 'legacy-opaque',
+        catalog_layer: 'external',
+        normalized_name: 'test class',
+      },
+      {
+        content_key: '2024:species:test',
+        content_kind: 'species',
+        key_kind: 'legacy-opaque',
+        catalog_layer: 'external',
+        normalized_name: 'test species',
+      },
+      {
+        content_key: '2024:test-spell',
+        content_kind: 'spell',
+        key_kind: 'legacy-opaque',
+        catalog_layer: 'external',
+        normalized_name: 'test spell',
+      },
+    ]);
+    expect(
+      db.scalar<number>(
+        `SELECT count(*) FROM pragma_foreign_key_check`,
+      ),
+    ).toBe(0);
+    lifecycle.close();
+  });
+
+  it('refuses a pre-0020 key shared by roots of different kinds without changing the image', async () => {
+    const beforeContentRegistry = DATABASE_MIGRATIONS
+      .slice(0, 20)
+      .map((entry) => entry.sql)
+      .join('\n');
+    const storage = await storageHolding(
+      `${beforeContentRegistry}
+       INSERT INTO class_definitions (
+         id, content_key, name, rules_edition
+       ) VALUES (1, '2024:shared-key', 'Collision Class', '2024');
+       INSERT INTO species_templates (
+         id, content_key, rules_edition, name, creature_type, size,
+         base_speed_feet
+       ) VALUES (
+         2, '2024:shared-key', '2024', 'Collision Species', 'Humanoid',
+         'Medium', 30
+       );`,
+    );
+    const before = await storage.exportFile();
+    const lifecycle = new DatabaseLifecycle(sqlite3, storage, schema);
+
+    expect(() => lifecycle.open()).toThrow(
+      'UNIQUE constraint failed: catalog_content_identities.content_key',
+    );
+    expect(await storage.exportFile()).toEqual(before);
+  });
+
   it('moves every inline class-feature effect into its child table', async () => {
     const beforeAc2a = DATABASE_MIGRATIONS
       .slice(0, 14)
