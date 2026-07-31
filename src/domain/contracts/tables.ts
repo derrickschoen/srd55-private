@@ -470,6 +470,14 @@ export const TABLE_SCOPES = {
     share: false,
     backupReference: false,
   },
+  catalog_data_migrations: {
+    role: 'catalog_registry',
+    snapshot: false,
+    backupDirect: false,
+    backup: false,
+    share: false,
+    backupReference: false,
+  },
 
   // --- the spell catalog -------------------------------------------------
   spell_identities: {
@@ -1197,6 +1205,7 @@ export const APPLICATION_TABLES = order<AnyTableName>()([
   'catalog_content_fingerprints',
   'catalog_content_identities',
   'catalog_content_match_decisions',
+  'catalog_data_migrations',
   'class_equipment_items',
   'change_log',
   'character_armor',
