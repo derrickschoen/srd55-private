@@ -251,6 +251,8 @@ async function portableTableCounts(
 test('serves the seeded character list and editable workspace', async ({
   page,
 }) => {
+  // Measured at 21.9s alone on Chromium; allow for concurrent-suite contention.
+  test.setTimeout(60_000);
   await install(page, workspaceImage);
   const before = await databaseBytes(page);
   const cards = await rpc<any[]>(page, 'queries.characters.list', {});
@@ -326,6 +328,8 @@ test('serves the seeded character list and editable workspace', async ({
 test('builds the complete character list card contract in deterministic order', async ({
   page,
 }) => {
+  // Measured at 22.6s alone on Chromium; allow for concurrent-suite contention.
+  test.setTimeout(60_000);
   await install(page, workspaceImage);
   const before = await databaseBytes(page);
   const first = await rpc<any[]>(page, 'queries.characters.list', {});
@@ -351,6 +355,8 @@ test('builds the complete character list card contract in deterministic order', 
 test('builds the complete workspace editing contract for the seeded character', async ({
   page,
 }) => {
+  // Measured at 21.5s alone on Chromium; allow for concurrent-suite contention.
+  test.setTimeout(60_000);
   await install(page, workspaceImage);
   const before = await databaseBytes(page);
   const workspace = await rpc<any>(
@@ -489,6 +495,8 @@ test('builds the complete workspace editing contract for the seeded character', 
 test('returns an exact eligible-spell DTO and treats wildcard characters literally', async ({
   page,
 }) => {
+  // Measured at 21.6s alone on Chromium; allow for concurrent-suite contention.
+  test.setTimeout(60_000);
   await install(page, workspaceImage);
   const before = await databaseBytes(page);
   const exact = await rpc<any[]>(
@@ -535,6 +543,8 @@ test('returns an exact eligible-spell DTO and treats wildcard characters literal
 test('captures every restorable character table and reports exact state differences', async ({
   page,
 }) => {
+  // Measured at 21.0s alone on Chromium; reached 31.4s under three-suite load.
+  test.setTimeout(60_000);
   await install(page, workspaceImage);
   const before = await databaseBytes(page);
   const document = await rpc<any>(page, 'backup.exportCharacter', {
@@ -686,6 +696,8 @@ test('captures every restorable character table and reports exact state differen
 test('creates and opens an empty character without additional setup', async ({
   page,
 }) => {
+  // Measured at 18.2s alone on Chromium; allow for concurrent-suite contention.
+  test.setTimeout(60_000);
   await install(page, catalogImage);
   const created = await rpc<any>(page, 'queries.characters.create', {
     name: 'Fresh Build',
@@ -819,6 +831,8 @@ test('undo restores the prior spell selection', async ({ page }) => {
 test('clears, overrides, and reselects a slot with exact persisted state', async ({
   page,
 }) => {
+  // Measured at 16.0s alone on Chromium; allow for concurrent-suite contention.
+  test.setTimeout(60_000);
   await install(page, workspaceImage);
   await execute(
     page,
@@ -909,6 +923,8 @@ test('clears, overrides, and reselects a slot with exact persisted state', async
 test('round-trips a named save point through the mutation path', async ({
   page,
 }) => {
+  // Measured at 16.1s alone on Chromium; allow for concurrent-suite contention.
+  test.setTimeout(60_000);
   await install(page, workspaceImage);
   const saved = await rpc<any>(page, 'queries.savePoints.create', {
     character_id: workspaceImage.ids.character,
@@ -2134,7 +2150,8 @@ test('merges a stale slot edit only when intervening operations left that slot u
 test('builds the golden read-only report values and duplicate classifications', async ({
   page,
 }) => {
-  // Measured alone at 28.0s after D91-R added the sheet projection.
+  // Measured at 23.0s alone on Chromium (28.0s after D91-R added the sheet
+  // projection); allow for concurrent-suite contention.
   test.setTimeout(60_000);
   await install(page, reportImage);
   const before = await databaseBytes(page);
@@ -2333,6 +2350,8 @@ test('builds the golden read-only report values and duplicate classifications', 
 test('builds Mutt printable sources with complete facts and only the mechanically relevant number', async ({
   page,
 }) => {
+  // Measured at 23.4s alone on Chromium; allow for concurrent-suite contention.
+  test.setTimeout(60_000);
   await install(page, printableImage);
   const before = await databaseBytes(page);
   const printable = await rpc<any>(page, 'queries.reports.printable', {
@@ -2475,6 +2494,8 @@ test('builds Mutt printable sources with complete facts and only the mechanicall
 test('imports the real index into identities versions publications and normalized pivots idempotently', async ({
   page,
 }) => {
+  // Measured at 16.7s alone on Chromium; allow for concurrent-suite contention.
+  test.setTimeout(60_000);
   await install(page, catalogImage);
   const legacy = catalogRecord({
     versionKey: '2014:php-parity-spell',
@@ -2646,6 +2667,8 @@ test('imports the real index into identities versions publications and normalize
 test('whole-database and portable-character export/import round-trip, corrupt-version rollback, and reload', async ({
   page,
 }) => {
+  // Measured at 28.2s alone on Chromium; allow for concurrent-suite contention.
+  test.setTimeout(60_000);
   await install(page, workspaceImage);
   const initialRows = await rows(page, 'characters');
   const exported = await page.evaluate(async (characterId) => {
@@ -2739,6 +2762,8 @@ test('whole-database and portable-character export/import round-trip, corrupt-ve
 test('fresh-profile catalog import → create/use → export → reload durability journey', async ({
   page,
 }) => {
+  // Measured at 16.4s alone on Chromium; allow for concurrent-suite contention.
+  test.setTimeout(60_000);
   await install(page, catalogImage);
   const imported = await rpc<any>(page, 'catalog.import', {
     documents: [
