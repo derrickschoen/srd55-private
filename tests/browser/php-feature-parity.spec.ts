@@ -2134,6 +2134,8 @@ test('merges a stale slot edit only when intervening operations left that slot u
 test('builds the golden read-only report values and duplicate classifications', async ({
   page,
 }) => {
+  // Measured alone at 28.0s after D91-R added the sheet projection.
+  test.setTimeout(60_000);
   await install(page, reportImage);
   const before = await databaseBytes(page);
   const report = await rpc<any>(page, 'queries.reports.build', {
