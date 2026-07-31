@@ -117,11 +117,12 @@ test('creates, independently verifies, previews, and explicitly imports a durabl
   // appends a fixed three-position attunement tuple and has arity 19. D86
   // minted v12: item tuples append positive-integer quantity at arity 5. D83
   // minted v13 for the newly accepted ability_override kind without changing
-  // every tuple arity. GF-1 mints v14: selection tuples append
+  // every tuple arity. GF-1 minted v14: selection tuples append
   // acquiredAtClassLevel at arity 7, and root spellbook members become
   // six-field addressable acquisition tuples carrying ref, rule, ordinal,
-  // acquisition level, nullable spell key, and nullable fallback name.
-  expect(positional[1]).toBe(14);
+  // acquisition level, nullable spell key, and nullable fallback name. GF-2
+  // mints v15 by appending the Expertise-grant collection at the root.
+  expect(positional[1]).toBe(15);
   expect((positional[2] as unknown[])[0]).toBe('Journey Hero 🧙');
   // TWELVE since v3, with the notes slot still NULL when nobody ticks the
   // notes box, and the appended ability_allocation_method NULL for a
@@ -139,13 +140,15 @@ test('creates, independently verifies, previews, and explicitly imports a durabl
   // `items` as the eighteenth, NULL for a character with none. V9 grows the
   // nested effect and source tuples; v10 shrinks only the nested sheet tuple
   // from arity 4 to 3. V11 appends `attunementSlots` as the nineteenth root
-  // position, NULL when all three fixed positions are empty. Absent data is
-  // an occupied null slot, never a shorter tuple.
-  expect(positional).toHaveLength(19);
+  // position, NULL when all three fixed positions are empty. V15 appends
+  // Expertise grants as the twentieth root position. Absent data is an
+  // occupied null slot, never a shorter tuple.
+  expect(positional).toHaveLength(20);
   expect(positional[15]).toBeNull();
   expect(positional[16]).toBeNull();
   expect(positional[17]).toBeNull();
   expect(positional[18]).toBeNull();
+  expect(positional[19]).toBeNull();
 
   const freshProfile = await browser.newContext();
   try {

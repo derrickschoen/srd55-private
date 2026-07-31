@@ -33,7 +33,7 @@ const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
  * because an overclaimed guard is worse than a narrow one:
  *
  *  1. **A gloss can be false and this test passes.** Writing
- *     `` `no_expertise` — Expertise doubles every skill bonus `` satisfies
+ *     `` `gear_not_itemised` — every item is fully tracked `` satisfies
  *     every check here. What the guard forces is that the gloss SITS BESIDE the
  *     key it describes and is touched in the diff that changes the gap. Nothing
  *     compares a sentence to behaviour, and nothing here could.

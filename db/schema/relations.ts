@@ -44,6 +44,7 @@ import {
   character_operations,
   character_rule_overrides,
   character_save_points,
+  character_skill_expertise_grants,
   character_skill_grants,
   character_source_instances,
   character_spell_preferences,
@@ -128,6 +129,7 @@ export const charactersRelations = relations(characters, ({ many }) => ({
   hit_point_rolls: many(character_hit_point_rolls),
   skill_proficiencies: many(character_skill_proficiencies),
   skill_grants: many(character_skill_grants),
+  expertise_grants: many(character_skill_expertise_grants),
   sheet_adjustments: many(character_sheet_adjustments),
   effects: many(character_effects),
   items: many(character_items),
@@ -483,6 +485,7 @@ export const characterSourceInstancesRelations = relations(
     }),
     slots: many(spell_selection_slots),
     skill_grants: many(character_skill_grants),
+    expertise_grants: many(character_skill_expertise_grants),
   }),
 );
 
@@ -505,6 +508,26 @@ export const characterSkillGrantsRelations = relations(
       fields: [
         character_skill_grants.source_instance_id,
         character_skill_grants.character_id,
+      ],
+      references: [
+        character_source_instances.id,
+        character_source_instances.character_id,
+      ],
+    }),
+  }),
+);
+
+export const characterSkillExpertiseGrantsRelations = relations(
+  character_skill_expertise_grants,
+  ({ one }) => ({
+    character: one(characters, {
+      fields: [character_skill_expertise_grants.character_id],
+      references: [characters.id],
+    }),
+    source_instance: one(character_source_instances, {
+      fields: [
+        character_skill_expertise_grants.source_instance_id,
+        character_skill_expertise_grants.character_id,
       ],
       references: [
         character_source_instances.id,

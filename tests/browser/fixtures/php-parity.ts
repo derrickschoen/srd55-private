@@ -6,8 +6,6 @@ import {
 import {
   registerBundledStableContentIdentity,
 } from '../../../src/catalog/content-registry';
-import { AddSourceCommand } from '../../../src/commands/add-source';
-import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import { sqlInteger, sqlNullableInteger } from '../../../src/db/codecs';
 import { DatabaseContext } from '../../../src/db/database';
 import type { ContentKey } from '../../../src/domain/ids';
@@ -174,6 +172,134 @@ function seedSourceCatalog(
     [nestedRule('background-origin-feat')],
   ).lastInsertId;
   return { magicInitiate, human, background };
+}
+
+function seedNestedMagicInitiateFixture(
+  db: DatabaseContext,
+  characterId: number,
+  root: {
+    readonly type: 'species' | 'background';
+    readonly definitionId: number;
+    readonly displayName: string;
+    readonly ruleKey: string;
+  },
+  magicInitiateDefinitionId: number,
+  chosenList: 'Cleric' | 'Druid' | 'Wizard',
+  spellcastingAbility: 'intelligence' | 'wisdom' | 'charisma',
+): { readonly rootId: number; readonly childId: number } {
+  const acquiredAtCharacterLevel = Number(
+    db.scalar(
+      `SELECT COALESCE(SUM(level), 0)
+       FROM character_class_levels
+       WHERE character_id = ?`,
+      [characterId],
+    ),
+  );
+  const childConfig = {
+    chosen_list: chosenList,
+    spellcasting_ability: spellcastingAbility,
+  };
+  const magicInitiateName = String(
+    db.scalar(
+      'SELECT name FROM feat_definitions WHERE id = ?',
+      [magicInitiateDefinitionId],
+    ),
+  );
+  const now = new Date().toISOString();
+  const rootId = db.exec(
+    `INSERT INTO character_source_instances (
+       character_id, instance_uuid, source_type, source_definition_id,
+       display_name, config, acquired_at_character_level, state,
+       created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
+    [
+      characterId,
+      crypto.randomUUID(),
+      root.type,
+      root.definitionId,
+      root.displayName,
+      JSON.stringify({
+        origin_feat_key: '2024:feat:magic-initiate',
+        origin_feat_config: childConfig,
+      }),
+      acquiredAtCharacterLevel,
+      now,
+      now,
+    ],
+  ).lastInsertId;
+  const childUuid = crypto.randomUUID();
+  const childId = db.exec(
+    `INSERT INTO character_source_instances (
+       character_id, instance_uuid, parent_source_instance_id, source_type,
+       source_definition_id, display_name, config,
+       acquired_at_character_level, state, notes, created_at, updated_at
+     ) VALUES (?, ?, ?, 'feat', ?, ?, ?, ?, 'active', ?, ?, ?)`,
+    [
+      characterId,
+      childUuid,
+      rootId,
+      magicInitiateDefinitionId,
+      `${magicInitiateName}: ${chosenList}`,
+      JSON.stringify(childConfig),
+      acquiredAtCharacterLevel,
+      `grant_rule:${root.ruleKey}:1`,
+      now,
+      now,
+    ],
+  ).lastInsertId;
+
+  for (let ordinal = 1; ordinal <= 2; ordinal += 1) {
+    const slotId = createSlot(
+      db,
+      characterId,
+      childId,
+      null,
+      `${childUuid}:magic-initiate-cantrips:${String(ordinal)}`,
+      ordinal,
+      {
+        bucket: 'cantrip_known',
+        levelMax: 0,
+        withSlots: false,
+        allowedSpellLists: [chosenList],
+      },
+    );
+    db.exec(
+      `UPDATE spell_selection_slots
+       SET rule_key = 'magic-initiate-cantrips'
+       WHERE id = ?`,
+      [slotId],
+    );
+  }
+  const levelOneSlotId = createSlot(
+    db,
+    characterId,
+    childId,
+    null,
+    `${childUuid}:magic-initiate-level-one:1`,
+    1,
+    {
+      bucket: 'known',
+      levelMin: 1,
+      levelMax: 1,
+      allowedSpellLists: [chosenList],
+    },
+  );
+  db.exec(
+    `UPDATE spell_selection_slots
+     SET rule_key = 'magic-initiate-level-one',
+         free_cast = ?
+     WHERE id = ?`,
+    [
+      JSON.stringify({
+        uses: 1,
+        recovery: 'long_rest',
+        pool_scope: 'per_spell',
+      }),
+      levelOneSlotId,
+    ],
+  );
+
+  return { rootId, childId };
 }
 
 function addListMembership(
@@ -357,72 +483,36 @@ export async function workspaceFixtureImage(): Promise<
       { bucket: 'cantrip_known', levelMax: 0, withSlots: false },
     );
 
-    const integrity = new CharacterCommandIntegrity(
-      'php-feature-parity-fixture',
-    );
-    new AddSourceCommand(
+    const nestedSpecies = seedNestedMagicInitiateFixture(
       db,
+      fixture.characterId,
       {
-        type: 'add_source',
-        source_type: 'species',
-        source_definition_id: catalog.human,
-        config: {
-          origin_feat_key: '2024:feat:magic-initiate',
-          origin_feat_config: {
-            chosen_list: 'Cleric',
-            spellcasting_ability: 'wisdom',
-          },
-        },
+        type: 'species',
+        definitionId: catalog.human,
+        displayName: 'Parity Human',
+        ruleKey: 'human-origin-feat',
       },
-      integrity,
-    ).apply(fixture.characterId);
-    new AddSourceCommand(
+      catalog.magicInitiate,
+      'Cleric',
+      'wisdom',
+    );
+    const nestedBackground = seedNestedMagicInitiateFixture(
       db,
+      fixture.characterId,
       {
-        type: 'add_source',
-        source_type: 'background',
-        source_definition_id: catalog.background,
-        config: {
-          origin_feat_key: '2024:feat:magic-initiate',
-          origin_feat_config: {
-            chosen_list: 'Druid',
-            spellcasting_ability: 'intelligence',
-          },
-        },
+        type: 'background',
+        definitionId: catalog.background,
+        displayName: 'Custom Background',
+        ruleKey: 'background-origin-feat',
       },
-      integrity,
-    ).apply(fixture.characterId);
-
-    const nestedRoot = Number(
-      db.scalar(
-        `SELECT id FROM character_source_instances
-         WHERE character_id = ? AND source_type = 'species'
-         ORDER BY id LIMIT 1`,
-        [fixture.characterId],
-      ),
+      catalog.magicInitiate,
+      'Druid',
+      'intelligence',
     );
-    const nestedChild = Number(
-      db.scalar(
-        `SELECT id FROM character_source_instances
-         WHERE parent_source_instance_id = ?`,
-        [nestedRoot],
-      ),
-    );
-    const backgroundRoot = Number(
-      db.scalar(
-        `SELECT id FROM character_source_instances
-         WHERE character_id = ? AND source_type = 'background'
-         ORDER BY id LIMIT 1`,
-        [fixture.characterId],
-      ),
-    );
-    const backgroundChild = Number(
-      db.scalar(
-        `SELECT id FROM character_source_instances
-         WHERE parent_source_instance_id = ?`,
-        [backgroundRoot],
-      ),
-    );
+    const nestedRoot = nestedSpecies.rootId;
+    const nestedChild = nestedSpecies.childId;
+    const backgroundRoot = nestedBackground.rootId;
+    const backgroundChild = nestedBackground.childId;
     const wizardSlots = db.all(
       `SELECT id, current_spell_version_id
        FROM spell_selection_slots

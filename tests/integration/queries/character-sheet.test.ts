@@ -684,11 +684,17 @@ describe('the derived character sheet', () => {
     expect(now('athletics')).toBe(2);
     // Passive Perception moves with it: 10 + 3 = 13.
     expect(after.passive_perception.value).toBe(13);
-    // EXPERTISE IS NOT APPLIED: doubling would have given Stealth +8. That
-    // feature's text is not among this application's sources, and the sheet
-    // says so rather than guessing.
-    expect(now('stealth')).not.toBe(8);
-    expect(after.gaps.map((gap) => gap.kind)).toContain('no_expertise');
+    db.exec(
+      `INSERT INTO character_skill_expertise_grants
+         (character_id, source_instance_id, grant_key, ordinal,
+          granted_at_class_level, skill, state)
+       VALUES (?, ?, 'class_expertise_1', 1, 1, 'stealth', 'active')`,
+      [characterId, sourceInstanceId],
+    );
+    const withExpertise = builder.build(characterId);
+    expect(
+      withExpertise.skills.find((entry) => entry.skill === 'stealth'),
+    ).toMatchObject({ proficient: true, expertise: true, value: 8 });
 
     // All eighteen skills are listed, always — a skill missing from a sheet
     // reads as a skill the character cannot use.
@@ -762,7 +768,6 @@ describe('the derived character sheet', () => {
     expect(builder.build(characterId).gaps.map((gap) => gap.kind)).toEqual([
       'no_class_feature_text',
       'partial_subclass_catalog',
-      'no_expertise',
       'weapon_reach_not_recorded',
       'gear_not_itemised',
     ]);

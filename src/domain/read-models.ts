@@ -202,7 +202,7 @@ export interface RemovableSource {
   id: number;
   parent_source_instance_id: number | null;
   source_type: StandaloneSourceType;
-  source_definition_id: number;
+  source_definition_id: number | null;
   display_name: string;
 }
 

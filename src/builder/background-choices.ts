@@ -28,7 +28,12 @@
  * (D68; see the note at the locators below).
  */
 
-import { abilities, isEnumValue, type Ability } from '../domain/enums';
+import {
+  abilities,
+  isEnumValue,
+  skills,
+  type Ability,
+} from '../domain/enums';
 import { hasExactKeys } from './contracts';
 
 /**
@@ -72,6 +77,7 @@ export const BACKGROUND_ABILITY_INCREASE_MAXIMUM = 20;
  * the literal already hardcoded in `add-source.ts` and `editors.ts`.
  */
 export const MAGIC_INITIATE_FEAT_CONTENT_KEY = '2024:feat:magic-initiate';
+export const SKILLED_FEAT_CONTENT_KEY = '2024:feat:skilled';
 
 /* ---------------------------------------------------------------- options */
 
@@ -186,7 +192,22 @@ function isValidOriginFeatConfig(
     return false;
   }
   if (featContentKey !== MAGIC_INITIATE_FEAT_CONTENT_KEY) {
-    return Object.keys(config).length === 0;
+    if (featContentKey !== SKILLED_FEAT_CONTENT_KEY) {
+      return Object.keys(config).length === 0;
+    }
+    if (!hasExactKeys(config, ['selected_skills'])) {
+      return false;
+    }
+    const selected = config['selected_skills'];
+    return (
+      Array.isArray(selected) &&
+      selected.length <= 3 &&
+      new Set(selected.filter((skill) => skill !== null)).size ===
+        selected.filter((skill) => skill !== null).length &&
+      selected.every(
+        (skill) => skill === null || isEnumValue(skills, skill),
+      )
+    );
   }
   if (!hasExactKeys(config, ['chosen_list', 'spellcasting_ability'])) {
     return false;
@@ -351,6 +372,8 @@ export const BACKGROUND_STEP_ATTR = Object.freeze({
   magicInitiateList: 'data-background-feat-list',
   /** Magic Initiate's casting ability select. */
   magicInitiateAbility: 'data-background-feat-ability',
+  /** Each optional Skilled skill arm, valued with its zero-based ordinal. */
+  skilledSkill: 'data-background-feat-skilled-skill',
   /** The line naming the selected background's printed default pairing. */
   suggestion: 'data-background-suggestion',
   /** The one submit button. */

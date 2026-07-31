@@ -105,8 +105,7 @@ function acolyteFighterState(): GuidedSkillsStepState {
         available: fighterPoolMinusHeld,
       },
     ],
-    unapplied_skill_rule_sources: [],
-    expertise_gap: false,
+    unmodelled_tool_alternative_sources: [],
   };
 }
 
@@ -282,39 +281,30 @@ describe('the addressed fill', () => {
   });
 });
 
-describe('the §3.7 disclosures', () => {
-  it('renders both gaps from result data, with their pinned locators', () => {
+describe('the D102 skill-or-tool disclosure', () => {
+  it('renders unmodelled tool-capable ordinals from result data', () => {
     const state: GuidedSkillsStepState = {
       ...acolyteFighterState(),
-      unapplied_skill_rule_sources: ['Skilled'],
-      expertise_gap: true,
+      unmodelled_tool_alternative_sources: ['Skilled'],
     };
     const { step } = stepWith(state);
     const view = interactiveElement(step.element);
     const skilled = view.querySelector(
-      selector(SKILL_STEP_ATTR.skilledFeatGap),
+      selector(SKILL_STEP_ATTR.toolAlternativeGap),
     );
     expect(skilled).not.toBeNull();
     expect(elementText(skilled as unknown as Node)).toContain('Skilled');
     expect(elementText(skilled as unknown as Node)).toContain(
-      'does not apply yet',
+      'does not model tool choices',
     );
-    const expertise = view.querySelector(
-      selector(SKILL_STEP_ATTR.expertiseGap),
-    );
-    expect(expertise).not.toBeNull();
-    expect(elementText(expertise as unknown as Node)).toContain('Expertise');
     step.cleanup();
   });
 
-  it('renders neither disclosure when the state carries neither gap', () => {
+  it('renders no disclosure when no unmodelled rule source exists', () => {
     const { step } = stepWith(acolyteFighterState());
     const view = interactiveElement(step.element);
     expect(
-      view.querySelectorAll(selector(SKILL_STEP_ATTR.skilledFeatGap)),
-    ).toHaveLength(0);
-    expect(
-      view.querySelectorAll(selector(SKILL_STEP_ATTR.expertiseGap)),
+      view.querySelectorAll(selector(SKILL_STEP_ATTR.toolAlternativeGap)),
     ).toHaveLength(0);
     step.cleanup();
   });

@@ -32,6 +32,7 @@ import {
   MAGIC_INITIATE_ABILITIES,
   MAGIC_INITIATE_FEAT_CONTENT_KEY,
   MAGIC_INITIATE_LISTS,
+  SKILLED_FEAT_CONTENT_KEY,
   type GuidedApplyBackgroundParams,
   type GuidedBackgroundChoiceOptions,
   type GuidedBackgroundIncrease,
@@ -42,7 +43,13 @@ import {
   GUIDED_PANEL_ATTRIBUTE,
 } from '../../../builder/contracts';
 import type { GuidedApplyOriginResult } from '../../../builder/guided-creation';
-import { abilities, type Ability } from '../../../domain/enums';
+import {
+  abilities,
+  skills,
+  type Ability,
+  type Skill,
+} from '../../../domain/enums';
+import { SKILL_LABELS } from '../../../rules/skills';
 import { RpcError } from '../../../rpc/protocol';
 import { clear, element, listen, type Cleanup } from '../../dom';
 import { characterListLink, guidedShell } from './guided-builder';
@@ -159,6 +166,7 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
     deps.options.origin_feats[0]?.content_key ?? '';
   let magicInitiateList: string = MAGIC_INITIATE_LISTS[0];
   let magicInitiateAbility: string = MAGIC_INITIATE_ABILITIES[0];
+  const skilledSkills: Array<Skill | null> = [null, null, null];
 
   const errorMount = element('div', { className: 'guided-error-mount' });
   const setError = (message: string | null): void => {
@@ -408,11 +416,72 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
       ]),
     );
   };
+  const skilledFields = element(
+    'fieldset',
+    { className: 'guided-background-skilled' },
+    [],
+  );
+  const renderSkilledFields = (): void => {
+    clear(skilledFields);
+    if (featKey !== SKILLED_FEAT_CONTENT_KEY) {
+      skilledFields.hidden = true;
+      return;
+    }
+    skilledFields.hidden = false;
+    skilledFields.append(
+      element('legend', { text: 'Skilled choices' }),
+      element('p', {
+        text:
+          'Each choice may be a skill or a tool. Tool choices remain ' +
+          'unrecorded because this application does not model tools.',
+      }),
+    );
+    skilledSkills.forEach((selectedSkill, index) => {
+      const select = element(
+        'select',
+        {
+          attributes: {
+            [BACKGROUND_STEP_ATTR.skilledSkill]: String(index),
+            'aria-label': `Skilled choice ${String(index + 1)}`,
+          },
+        },
+        [
+          element('option', {
+            text: 'Tool choice / leave unrecorded',
+            attributes: { value: '' },
+          }),
+          ...skills.map((skill) =>
+            element('option', {
+              text: SKILL_LABELS[skill],
+              attributes: { value: skill },
+            }),
+          ),
+        ],
+      );
+      select.value = selectedSkill ?? '';
+      cleanups.push(
+        listen(select, 'change', () => {
+          skilledSkills[index] =
+            select.value === '' ? null : (select.value as Skill);
+          setError(null);
+        }),
+      );
+      skilledFields.append(
+        element('label', { className: 'guided-background-feat-config' }, [
+          element('span', {
+            text: `Skilled choice ${String(index + 1)}`,
+          }),
+          select,
+        ]),
+      );
+    });
+  };
   cleanups.push(
     listen(featSelect, 'change', () => {
       featKey = featSelect.value;
       setError(null);
       renderMagicInitiateFields();
+      renderSkilledFields();
     }),
   );
 
@@ -440,6 +509,7 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
     renderSlots();
     renderFeatOptions();
     renderMagicInitiateFields();
+    renderSkilledFields();
     renderSuggestion();
   };
 
@@ -496,6 +566,12 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
     if (featKey === '') {
       return 'Choose an Origin feat.';
     }
+    const chosenSkills = skilledSkills.filter(
+      (skill): skill is Skill => skill !== null,
+    );
+    if (new Set(chosenSkills).size !== chosenSkills.length) {
+      return 'Each Skilled skill choice must be different.';
+    }
     return null;
   };
 
@@ -529,7 +605,9 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
                 chosen_list: magicInitiateList,
                 spellcasting_ability: magicInitiateAbility,
               }
-            : {},
+            : featKey === SKILLED_FEAT_CONTENT_KEY
+              ? { selected_skills: skilledSkills }
+              : {},
       });
       // The background is applied; the build route re-derives the step from
       // the database and renders whatever comes next.
@@ -576,6 +654,7 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
               featSelect,
             ]),
             magicInitiateFields,
+            skilledFields,
             element('div', { className: 'guided-background-unapplied' }, [
               element('p', {
                 text:
@@ -601,6 +680,7 @@ export function createBackgroundStep(deps: BackgroundStepDeps): BackgroundStep {
   renderSlots();
   renderFeatOptions();
   renderMagicInitiateFields();
+  renderSkilledFields();
   renderSuggestion();
 
   return {

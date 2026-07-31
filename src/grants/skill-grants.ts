@@ -121,6 +121,119 @@ export function rebuildSkillProjection(
   );
 }
 
+/**
+ * Materialise only the skill arms a player actually selected from a
+ * skill-or-tool rule.
+ *
+ * An absent ordinal may be a tool choice, which D102 deliberately does not
+ * model, so this writer never creates a null `character_skill_grants` row.
+ * Removing a configured selection retains its former row as an orphan.
+ */
+export function syncToolAlternativeSkillGrants(
+  db: DatabaseContext,
+  source: SkillGrantSource,
+  grantKey: string,
+  count: number,
+  selectedSkills: readonly (Skill | null)[],
+): void {
+  if (selectedSkills.length > count) {
+    throw new RangeError(
+      `Grant rule '${grantKey}' accepts at most ${String(count)} selections.`,
+    );
+  }
+  const recordedSkills = selectedSkills.filter(
+    (skill): skill is Skill => skill !== null,
+  );
+  if (new Set(recordedSkills).size !== recordedSkills.length) {
+    throw new TypeError(
+      `Grant rule '${grantKey}' cannot select the same skill twice.`,
+    );
+  }
+  const existing = db.all(
+    `SELECT id, character_id, source_instance_id, grant_key, ordinal,
+            skill, state, orphan_reason_code, orphaned_at
+     FROM character_skill_grants
+     WHERE source_instance_id = ? AND grant_key = ?
+     ORDER BY ordinal`,
+    [source.id, grantKey],
+    skillGrantRow,
+  );
+  const byOrdinal = new Map(existing.map((row) => [row.ordinal, row]));
+  for (const [index, skill] of selectedSkills.entries()) {
+    const ordinal = index + 1;
+    const row = byOrdinal.get(ordinal);
+    if (skill === null) {
+      continue;
+    }
+    const heldElsewhere = db.scalar<number>(
+      `SELECT 1
+       FROM character_skill_grants
+       WHERE character_id = ? AND state = 'active' AND skill = ?
+         AND id != ?
+       LIMIT 1`,
+      [source.characterId, skill, row?.id ?? 0],
+    );
+    if (heldElsewhere !== null) {
+      throw new SkillGrantRefusal(
+        'skill_already_held',
+        skill,
+        `The skill '${skill}' is already held by another active grant.`,
+      );
+    }
+    const now = timestamp();
+    if (row === undefined) {
+      db.exec(
+        `INSERT INTO character_skill_grants (
+           character_id, source_instance_id, grant_key, ordinal, skill,
+           state, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?)`,
+        [
+          source.characterId,
+          source.id,
+          grantKey,
+          ordinal,
+          skill,
+          now,
+          now,
+        ],
+      );
+      continue;
+    }
+    if (
+      row.state !== 'active' ||
+      row.skill !== skill ||
+      row.orphan_reason_code !== null ||
+      row.orphaned_at !== null
+    ) {
+      db.exec(
+        `UPDATE character_skill_grants
+         SET skill = ?, state = 'active', orphan_reason_code = NULL,
+             orphaned_at = NULL, updated_at = ?
+         WHERE id = ?`,
+        [skill, now, row.id],
+      );
+    }
+  }
+  for (const row of existing) {
+    if (
+      selectedSkills[row.ordinal - 1] !== null &&
+      selectedSkills[row.ordinal - 1] !== undefined &&
+      row.state === 'active'
+    ) {
+      continue;
+    }
+    const now = timestamp();
+    db.exec(
+      `UPDATE character_skill_grants
+       SET state = 'orphaned', orphan_reason_code = ?, orphaned_at = ?,
+           updated_at = ?
+       WHERE id = ? AND state = 'active'`,
+      [SKILL_GRANT_ORPHAN_REASONS.ruleNoLongerActive, now, now, row.id],
+    );
+  }
+  rebuildSkillProjection(db, source.characterId);
+}
+
 interface ClassEntitlement {
   readonly grantKey: string;
   readonly count: number;
