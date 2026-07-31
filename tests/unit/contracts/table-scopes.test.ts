@@ -74,6 +74,8 @@ const SNAPSHOT_ADDITIONS = [
   'character_items',
   // D92's exact three-column, one-row capacity boundary.
   'character_attunement_slots',
+  // LU-1 durable ASI/Epic Boon occurrences.
+  'character_level_feat_choices',
 ] as const;
 const BACKUP_DIRECT_ADDITIONS = [
   'character_weapons',
@@ -89,6 +91,7 @@ const BACKUP_DIRECT_ADDITIONS = [
   'character_skill_expertise_grants',
   'character_items',
   'character_attunement_slots',
+  'character_level_feat_choices',
 ] as const;
 describe('derived table scopes reproduce the hand-maintained lists', () => {
   it('reproduces applicationTables exactly (database-lifecycle.ts)', () => {
@@ -116,6 +119,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       'character_effects',
       'character_hit_point_rolls',
       'character_items',
+      'character_level_feat_choices',
       'character_operations',
       'character_rule_overrides',
       'character_save_points',
@@ -211,6 +215,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       // key, so it deletes here with the other leaves.
       'character_skill_grants',
       'character_skill_expertise_grants',
+      'character_level_feat_choices',
       'character_species_traits',
       'character_species',
       'character_background',
@@ -281,6 +286,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       'character_skill_expertise_grants',
       'character_items',
       'character_attunement_slots',
+      'character_level_feat_choices',
     ]);
     for (const table of BACKUP_OPTIONAL_TABLES) {
       expect([...BACKUP_TABLES]).toContain(table);
@@ -325,7 +331,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
 });
 
 describe('table scope classification', () => {
-  it('classifies all 71 tables exactly once', () => {
+  it('classifies all 73 tables exactly once', () => {
     const names = Object.keys(TABLE_SCOPES);
     // 30 Laravel-derived tables — 38 until the eight Laravel-only
     // infrastructure ones were dropped — plus the four native weapon tables,
@@ -342,8 +348,8 @@ describe('table scope classification', () => {
     // tables and CI-2b's ONE applied data-migration marker table. Each group is named
     // rather than folded into one total, so a group that vanishes while
     // another grows cannot pass unnoticed.
-    expect(names).toHaveLength(72);
-    expect(new Set(names).size).toBe(72);
+    expect(names).toHaveLength(73);
+    expect(new Set(names).size).toBe(73);
     expect([...names].sort()).toEqual([...APPLICATION_TABLES].sort());
   });
 

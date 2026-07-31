@@ -144,16 +144,36 @@ describe('character command payload validation', () => {
         type: 'level_up_class',
         class_definition_id: 9,
         target_level: 4,
-        ability_increases: [{ ability: 'strength', amount: 2 }],
+        feat_choice: {
+          kind: 'feat',
+          feat_content_key: '2024:feat:ability-score-improvement',
+          config: {},
+          ability_increases: [{ ability: 'strength', amount: 2 }],
+        },
       },
       {
         type: 'level_up_class',
         class_definition_id: 9,
         target_level: 6,
-        ability_increases: [
-          { ability: 'strength', amount: 1 },
-          { ability: 'constitution', amount: 1 },
-        ],
+        feat_choice: {
+          kind: 'feat',
+          feat_content_key: '2024:feat:ability-score-improvement',
+          config: {},
+          ability_increases: [
+            { ability: 'strength', amount: 1 },
+            { ability: 'constitution', amount: 1 },
+          ],
+        },
+      },
+      {
+        type: 'resolve_level_feat_choice',
+        character_level_feat_choice_id: 4,
+        feat_choice: {
+          kind: 'feat',
+          feat_content_key: '2024:feat:boon-of-fate',
+          config: {},
+          ability_increases: [{ ability: 'wisdom', amount: 1 }],
+        },
       },
       {
         type: 'restore_snapshot',
@@ -276,42 +296,64 @@ describe('character command payload validation', () => {
           type: 'level_up_class',
           class_definition_id: 1,
           target_level: 4,
-          ability_increases: [],
+          feat_choice: {
+            kind: 'feat',
+            feat_content_key: '2024:feat:alert',
+            config: {},
+            ability_increases: [
+              { ability: 'strength', amount: 1 },
+              { ability: 'dexterity', amount: 1 },
+              { ability: 'constitution', amount: 1 },
+            ],
+          },
         },
-        'ability_increases must hold one or two increases.',
+        'feat_choice.ability_increases may hold at most two increases.',
       ],
       [
         {
           type: 'level_up_class',
           class_definition_id: 1,
           target_level: 4,
-          ability_increases: [{ ability: 'strength', amount: 1 }],
+          feat_choice: {
+            kind: 'defer_epic_boon',
+            ability_increases: [],
+          },
         },
-        'Ability increases must total exactly 2 (+2, or +1 and +1).',
+        'Unknown feat choice field: ability_increases.',
       ],
       [
         {
           type: 'level_up_class',
           class_definition_id: 1,
           target_level: 4,
-          ability_increases: [
-            { ability: 'strength', amount: 1 },
-            { ability: 'strength', amount: 1 },
-          ],
+          feat_choice: {
+            kind: 'feat',
+            feat_content_key: '2024:feat:ability-score-improvement',
+            config: {},
+            ability_increases: [
+              { ability: 'strength', amount: 1 },
+              { ability: 'strength', amount: 1 },
+            ],
+          },
         },
-        'An ability cannot be increased twice in one improvement.',
+        'An ability cannot be increased twice in one feat.',
       ],
       [
         {
           type: 'level_up_class',
           class_definition_id: 1,
           target_level: 4,
-          ability_increases: [
-            { ability: 'strength', amount: 2 },
-            { ability: 'constitution', amount: 2 },
-          ],
+          feat_choice: {
+            kind: 'feat',
+            feat_content_key: '2024:feat:ability-score-improvement',
+            config: {},
+            ability_increases: [
+              { ability: 'strength', amount: 2 },
+              { ability: 'constitution', amount: 2 },
+            ],
+          },
         },
-        'Ability increases must total exactly 2 (+2, or +1 and +1).',
+        'Feat ability increases cannot total more than 2.',
       ],
       [
         {

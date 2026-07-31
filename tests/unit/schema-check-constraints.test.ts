@@ -404,6 +404,25 @@ const expertiseGrant =
     });
   };
 
+const levelFeatChoice =
+  (values: Values): Write =>
+  (db) => {
+    const characterId = newCharacter(db);
+    const classLevelId = insert(db, 'character_class_levels', {
+      character_id: characterId,
+      class_definition_id: newClass(db),
+      level: 20,
+      is_starting_class: 1,
+    });
+    insert(db, 'character_level_feat_choices', {
+      character_id: characterId,
+      character_class_level_id: classLevelId,
+      class_level: 4,
+      choice_kind: 'asi_level_feat',
+      ...values,
+    });
+  };
+
 const characterItem =
   (values: Values): Write =>
   (db) => {
@@ -3185,6 +3204,30 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     accepts: [
       ['level one', expertiseGrant({ granted_at_class_level: 1 })],
       ['level twenty', expertiseGrant({ granted_at_class_level: 20 })],
+    ],
+  },
+  {
+    constraint: 'character_level_feat_choices_class_level_check',
+    rejects: [
+      ['level zero', levelFeatChoice({ class_level: 0 })],
+      ['level twenty-one', levelFeatChoice({ class_level: 21 })],
+      ['a fractional level', levelFeatChoice({ class_level: 4.5 })],
+      ['a text level', levelFeatChoice({ class_level: 'fourth' })],
+    ],
+    accepts: [
+      ['level one', levelFeatChoice({ class_level: 1 })],
+      ['level twenty', levelFeatChoice({ class_level: 20 })],
+    ],
+  },
+  {
+    constraint: 'character_level_feat_choices_choice_kind_check',
+    rejects: [
+      ['an unknown occurrence', levelFeatChoice({ choice_kind: 'general' })],
+      ['an empty occurrence', levelFeatChoice({ choice_kind: '' })],
+    ],
+    accepts: [
+      ['an ASI-level feat', levelFeatChoice({ choice_kind: 'asi_level_feat' })],
+      ['an Epic Boon', levelFeatChoice({ choice_kind: 'epic_boon' })],
     ],
   },
   {

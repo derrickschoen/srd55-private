@@ -229,8 +229,10 @@ describe('declared relations match the foreign keys', () => {
     // constraint but two PRAGMA rows.
     // GF-2 adds the direct character edge and the composite source ownership
     // edge for Expertise: two constraints across three PRAGMA rows.
-    expect(constraintEdges(db)).toHaveLength(93);
-    expect(rowCount).toBe(108);
+    // LU-1 adds three constraints across five PRAGMA rows: character, held
+    // class (composite), and nullable feat source (composite).
+    expect(constraintEdges(db)).toHaveLength(96);
+    expect(rowCount).toBe(113);
   });
 
   it('declares a relation for every foreign key, and a foreign key for every relation', () => {

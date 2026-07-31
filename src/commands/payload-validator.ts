@@ -44,6 +44,7 @@ const commandTypes = [
   'acknowledge_warning',
   'update_class',
   'level_up_class',
+  'resolve_level_feat_choice',
   'add_weapon',
   'update_weapon',
   'remove_weapon',
@@ -430,13 +431,69 @@ function validateUpdateClass(record: UnknownRecord): void {
  * refusals (class held, adjacency, subclass at 3, ASI required) belong to
  * the command, which is the layer every caller shares.
  */
+function validateLevelFeatSelection(value: unknown): void {
+  const choice = objectValue(value, 'feat_choice must be an object.');
+  const kind = requiredString(choice, 'kind', 32);
+  if (kind !== 'feat') {
+    invalid('A resolved feat choice must use kind feat.');
+  }
+  rejectUnknown(choice, [
+    'kind',
+    'feat_content_key',
+    'config',
+    'ability_increases',
+  ], 'feat choice');
+  nonEmptyString(choice, 'feat_content_key', 255);
+  const config = objectValue(
+    choice.config,
+    'feat_choice.config must be an object.',
+  );
+  canonicalizeJson(config);
+  if (!Array.isArray(choice.ability_increases)) {
+    invalid('feat_choice.ability_increases must be a list.');
+  }
+  if (choice.ability_increases.length > 2) {
+    invalid('feat_choice.ability_increases may hold at most two increases.');
+  }
+  const seen = new Set<string>();
+  let total = 0;
+  for (const entry of choice.ability_increases) {
+    const increase = objectValue(
+      entry,
+      'Each ability increase must be an object.',
+    );
+    rejectUnknown(increase, ['ability', 'amount'], 'ability increase');
+    if (!isEnumValue(abilities, increase.ability)) {
+      invalid('Unknown ability.');
+    }
+    if (seen.has(increase.ability as string)) {
+      invalid('An ability cannot be increased twice in one feat.');
+    }
+    seen.add(increase.ability as string);
+    boundedInteger(increase, 'amount', 1, 2);
+    total += increase.amount as number;
+  }
+  if (total > 2) {
+    invalid('Feat ability increases cannot total more than 2.');
+  }
+}
+
+function validateLevelFeatChoice(value: unknown): void {
+  const choice = objectValue(value, 'feat_choice must be an object.');
+  if (choice.kind === 'defer_epic_boon') {
+    rejectUnknown(choice, ['kind'], 'feat choice');
+    return;
+  }
+  validateLevelFeatSelection(choice);
+}
+
 function validateLevelUpClass(record: UnknownRecord): void {
   rejectUnknown(record, [
     'type',
     'class_definition_id',
     'target_level',
     'subclass_content_key',
-    'ability_increases',
+    'feat_choice',
     'reason',
   ]);
   positiveInteger(record, 'class_definition_id');
@@ -447,40 +504,20 @@ function validateLevelUpClass(record: UnknownRecord): void {
     nonEmptyString(record, 'subclass_content_key', 255);
   }
 
-  if (hasOwn(record, 'ability_increases')) {
-    const increases = record.ability_increases;
-    if (!Array.isArray(increases)) {
-      invalid('ability_increases must be a list.');
-    }
-    // SRD 2024 ASI: +2 to one ability, or +1 to each of two DIFFERENT
-    // abilities. One or two entries, each amount 1 or 2, summing to exactly
-    // 2 — a singular field cannot express the +1/+1 arm, which is why the
-    // seam pins a LIST.
-    if (increases.length < 1 || increases.length > 2) {
-      invalid('ability_increases must hold one or two increases.');
-    }
-    const seen = new Set<string>();
-    let total = 0;
-    for (const entry of increases) {
-      const increase = objectValue(
-        entry,
-        'Each ability increase must be an object.',
-      );
-      rejectUnknown(increase, ['ability', 'amount'], 'ability increase');
-      if (!isEnumValue(abilities, increase.ability)) {
-        invalid('Unknown ability.');
-      }
-      if (seen.has(increase.ability as string)) {
-        invalid('An ability cannot be increased twice in one improvement.');
-      }
-      seen.add(increase.ability as string);
-      boundedInteger(increase, 'amount', 1, 2);
-      total += increase.amount as number;
-    }
-    if (total !== 2) {
-      invalid('Ability increases must total exactly 2 (+2, or +1 and +1).');
-    }
+  if (hasOwn(record, 'feat_choice')) {
+    validateLevelFeatChoice(record.feat_choice);
   }
+}
+
+function validateResolveLevelFeatChoice(record: UnknownRecord): void {
+  rejectUnknown(record, [
+    'type',
+    'character_level_feat_choice_id',
+    'feat_choice',
+    'reason',
+  ]);
+  positiveInteger(record, 'character_level_feat_choice_id');
+  validateLevelFeatSelection(record.feat_choice);
 }
 
 const weaponToggles = [
@@ -1187,6 +1224,9 @@ function validateByType(
       return record;
     case 'level_up_class':
       validateLevelUpClass(record);
+      return record;
+    case 'resolve_level_feat_choice':
+      validateResolveLevelFeatChoice(record);
       return record;
     case 'add_weapon':
       validateAddWeapon(record);

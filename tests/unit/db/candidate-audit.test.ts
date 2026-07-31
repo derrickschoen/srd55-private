@@ -217,6 +217,7 @@ describe('candidate database semantic audit', () => {
       'character_effects',
       'character_hit_point_rolls',
       'character_items',
+      'character_level_feat_choices',
       'character_operations',
       'character_rule_overrides',
       'character_save_points',
@@ -342,6 +343,49 @@ describe('candidate database semantic audit', () => {
     );
     expect(() => auditCandidateDatabase(quarantined(bytesOf(db)))).toThrow(
       'character_source_instances id 1 with unsupported source_type "artifact".',
+    );
+  });
+
+  it('refuses a level-feat occurrence beyond the referenced held class level', () => {
+    const db = freshDatabase();
+    seedTwoCharacters(db);
+    db.exec(
+      `INSERT INTO character_class_levels
+         (id, character_id, class_definition_id, level, is_starting_class)
+       VALUES (1, 1, 1, 3, 1)`,
+    );
+    db.exec(
+      `INSERT INTO character_level_feat_choices
+         (character_id, character_class_level_id, class_level, choice_kind)
+       VALUES (1, 1, 4, 'asi_level_feat')`,
+    );
+    expect(db.selectObject('PRAGMA foreign_key_check')).toBeUndefined();
+
+    expect(() => auditCandidateDatabase(quarantined(bytesOf(db)))).toThrow(
+      'character_level_feat_choices id 1 at class level 4, but the referenced ' +
+        'class is held only at level 3.',
+    );
+  });
+
+  it('refuses a level-feat occurrence pointing at a non-feat source', () => {
+    const db = freshDatabase();
+    seedTwoCharacters(db);
+    db.exec(
+      `INSERT INTO character_class_levels
+         (id, character_id, class_definition_id, level, is_starting_class)
+       VALUES (1, 1, 1, 4, 1)`,
+    );
+    db.exec(
+      `INSERT INTO character_level_feat_choices
+         (character_id, character_class_level_id, class_level, choice_kind,
+          feat_source_instance_id)
+       VALUES (1, 1, 4, 'asi_level_feat', 1)`,
+    );
+    expect(db.selectObject('PRAGMA foreign_key_check')).toBeUndefined();
+
+    expect(() => auditCandidateDatabase(quarantined(bytesOf(db)))).toThrow(
+      'character_level_feat_choices id 1 referencing a class source instead ' +
+        'of a feat source.',
     );
   });
 
@@ -786,7 +830,7 @@ describe('candidate database semantic audit', () => {
     ).not.toThrow();
   });
 
-  it('audits and restores ability_override in the current a7-v14 snapshot shape', () => {
+  it('audits and restores ability_override in the current a7-v15 snapshot shape', () => {
     const db = freshDatabase();
     seedTwoCharacters(db);
     db.exec(
@@ -799,7 +843,7 @@ describe('candidate database semantic audit', () => {
        )`,
     );
     const snapshot = snapshotOf(db, 1);
-    expect(snapshot.schema_version).toBe('a7-v14');
+    expect(snapshot.schema_version).toBe('a7-v15');
     insertSavePoint(db, 1, snapshot);
 
     expect(() => auditCandidateDatabase(quarantined(bytesOf(db)))).not.toThrow();

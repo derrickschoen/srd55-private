@@ -69,7 +69,7 @@ function seedFixture(): void {
     `INSERT INTO character_class_levels (
        character_id, class_definition_id, level, is_starting_class,
        notes, created_at, updated_at
-     ) VALUES (?, ?, 2, 1, 'class row', ?, ?)`,
+     ) VALUES (?, ?, 4, 1, 'class row', ?, ?)`,
     [characterId, classDefinitionId, createdAt, updatedAt],
   );
 
@@ -77,7 +77,7 @@ function seedFixture(): void {
     `INSERT INTO character_source_instances (
        character_id, instance_uuid, source_type, display_name, config,
        acquired_at_character_level, notes, created_at, updated_at
-     ) VALUES (?, 'source-root', 'class', 'Wizard 2', '{"school":"abjuration"}',
+     ) VALUES (?, 'source-root', 'class', 'Wizard 4', '{"school":"abjuration"}',
        1, 'root row', ?, ?)`,
     [characterId, createdAt, updatedAt],
   ).lastInsertId;
@@ -89,6 +89,13 @@ function seedFixture(): void {
      ) VALUES (?, 'source-child', ?, 'feat', 'Magic Initiate',
        '{"ability":"intelligence"}', 2, 'child row', ?, ?)`,
     [characterId, rootSourceId, createdAt, updatedAt],
+  );
+  db.exec(
+    `INSERT INTO character_level_feat_choices (
+       character_id, character_class_level_id, class_level, choice_kind,
+       feat_source_instance_id, created_at, updated_at
+     ) VALUES (?, 1, 4, 'asi_level_feat', 2, ?, ?)`,
+    [characterId, createdAt, updatedAt],
   );
   db.exec(
     `INSERT INTO spell_selection_slots (
@@ -257,12 +264,12 @@ describe('capture and deterministic diff', () => {
       'character',
       ...CHARACTER_STATE_TABLES,
     ]);
-    // a7-v14 is the version that carries GF-2 Expertise grant provenance.
+    // a7-v15 is the version that carries LU-1 level-feat provenance.
     // Written out rather than compared against the exported constant: a version
     // identifier is a wire fact that other stored data is matched against, so a
     // test that reads it from the module under test could never notice it
     // changing.
-    expect(snapshot.schema_version).toBe('a7-v14');
+    expect(snapshot.schema_version).toBe('a7-v15');
     expect(Object.keys(snapshot.character)).toEqual(CHARACTER_STATE_COLUMNS);
     expect(snapshot.character).toEqual({
       name: 'Snapshot Hero',
@@ -279,6 +286,14 @@ describe('capture and deterministic diff', () => {
       notes: 'preserve this note',
     });
     expect(snapshot.character_class_levels).toHaveLength(1);
+    expect(snapshot.character_level_feat_choices).toEqual([
+      expect.objectContaining({
+        character_class_level_id: 1,
+        class_level: 4,
+        choice_kind: 'asi_level_feat',
+        feat_source_instance_id: 2,
+      }),
+    ]);
     expect(snapshot.character_source_instances.map((row) => row.id)).toEqual([
       1, 2,
     ]);
@@ -420,6 +435,7 @@ describe('capture and deterministic diff', () => {
       character_effects: [],
       character_skill_grants: [],
       character_skill_expertise_grants: [],
+      character_level_feat_choices: [],
       character_items: [],
       character_attunement_slots: [],
     };
@@ -464,6 +480,7 @@ describe('capture and deterministic diff', () => {
       character_effects: [],
       character_skill_grants: [],
       character_skill_expertise_grants: [],
+      character_level_feat_choices: [],
       character_items: [],
       character_attunement_slots: [],
     };
@@ -851,7 +868,7 @@ describe('restoring a snapshot written by an older build', () => {
     // oversight: a current snapshot DOES speak for weapons, so restoring it
     // removes one added afterwards.
     const snapshot = mutableCapture();
-    expect(snapshot.schema_version).toBe('a7-v14');
+    expect(snapshot.schema_version).toBe('a7-v15');
     db.exec(
       `INSERT INTO character_weapons (character_id, name)
        VALUES (?, 'Bought since')`,

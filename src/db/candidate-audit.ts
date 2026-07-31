@@ -358,6 +358,55 @@ function auditPolymorphicSources(db: Database): void {
 }
 
 /**
+ * Relations whose existence/ownership SQLite can prove, but whose domain
+ * meaning it cannot: an occurrence may only name a class level already held,
+ * and its optional source must actually be a feat source.
+ */
+function auditLevelFeatChoices(db: Database): void {
+  const futureOccurrence = firstRow(
+    db,
+    `SELECT choice.id AS id, choice.class_level AS class_level,
+            held.level AS held_level
+     FROM character_level_feat_choices AS choice
+     JOIN character_class_levels AS held
+       ON held.id = choice.character_class_level_id
+      AND held.character_id = choice.character_id
+     WHERE choice.class_level > held.level
+     LIMIT 1`,
+  );
+  if (futureOccurrence !== undefined) {
+    throw new CandidateAuditError(
+      `Candidate database has character_level_feat_choices id ${String(
+        futureOccurrence.id,
+      )} at class level ${String(futureOccurrence.class_level)}, but the ` +
+        `referenced class is held only at level ${String(
+          futureOccurrence.held_level,
+        )}.`,
+    );
+  }
+
+  const nonFeatSource = firstRow(
+    db,
+    `SELECT choice.id AS id, source.source_type AS source_type
+     FROM character_level_feat_choices AS choice
+     JOIN character_source_instances AS source
+       ON source.id = choice.feat_source_instance_id
+      AND source.character_id = choice.character_id
+     WHERE choice.feat_source_instance_id IS NOT NULL
+       AND source.source_type != 'feat'
+     LIMIT 1`,
+  );
+  if (nonFeatSource !== undefined) {
+    throw new CandidateAuditError(
+      `Candidate database has character_level_feat_choices id ${String(
+        nonFeatSource.id,
+      )} referencing a ${String(nonFeatSource.source_type)} source instead of ` +
+        `a feat source.`,
+    );
+  }
+}
+
+/**
  * Walks a child → parent map looking for a node that is its own ancestor.
  *
  * Shared by the live-table pass and the in-snapshot pass so the two cannot
@@ -792,6 +841,7 @@ export const AUDIT_PASSES = [
   { name: 'character-ownership', run: auditCharacterOwnership },
   { name: 'cross-character-references', run: auditCrossCharacterReferences },
   { name: 'polymorphic-sources', run: auditPolymorphicSources },
+  { name: 'level-feat-choices', run: auditLevelFeatChoices },
   { name: 'source-parent-graph', run: auditSourceParentGraph },
   { name: 'json-columns', run: auditJsonColumns },
   { name: 'save-point-snapshots', run: auditSavePointSnapshots },

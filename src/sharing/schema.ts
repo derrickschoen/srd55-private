@@ -7,6 +7,7 @@ import {
   armorSlots,
   characterEffectKinds,
   extraAttackWeaponScopes,
+  levelFeatChoiceKinds,
   rulesEditions,
   skills,
   weaponMasteryProperties,
@@ -140,6 +141,7 @@ export const SHARE_LIMITS = Object.freeze({
    * while bounding one independently decoded section.
    */
   expertiseGrants: 200,
+  levelFeatChoices: 40,
   /**
    * How many items one document may carry (wire v8, AC-1, D72). A real
    * character owns at most a few dozen modifying things; 200 matches
@@ -256,6 +258,14 @@ export interface ShareExpertiseGrant {
   readonly ordinal: number;
   readonly grantedAtClassLevel: number;
   readonly skill?: string;
+}
+
+/** One durable class-level feat or Epic Boon occurrence (wire v16). */
+export interface ShareLevelFeatChoice {
+  readonly classRef: number;
+  readonly classLevel: number;
+  readonly choiceKind: 'asi_level_feat' | 'epic_boon';
+  readonly featRef?: number;
 }
 
 export interface SharePreference {
@@ -767,6 +777,8 @@ export interface CharacterShareDocument {
    * are not part of a share document's active source tree.
    */
   readonly expertiseGrants?: readonly ShareExpertiseGrant[];
+  /** Durable level feat/Epic Boon occurrences; absent for pre-v16 links. */
+  readonly levelFeatChoices?: readonly ShareLevelFeatChoice[];
   /**
    * THE CHARACTER'S OWN ITEMS (wire v8, AC-1, D72). Optional on the same
    * terms as every appended section: absent means the character has none, and
@@ -1919,6 +1931,7 @@ export function validateShareDocument(
       'effects',
       'skillGrants',
       'expertiseGrants',
+      'levelFeatChoices',
       'items',
       'attunementSlots',
     ],
@@ -2783,6 +2796,90 @@ export function validateShareDocument(
     );
   }
 
+  let levelFeatChoices: CharacterShareDocument['levelFeatChoices'] | undefined;
+  if (source.levelFeatChoices !== undefined) {
+    const classIds = new Set(classes.map((item) => item.id));
+    const classById = new Map(classes.map((item) => [item.id, item]));
+    const featSourceIds = new Set(
+      sources.filter((item) => item.type === 'feat').map((item) => item.id),
+    );
+    levelFeatChoices = list(
+      source.levelFeatChoices,
+      'levelFeatChoices',
+      SHARE_LIMITS.levelFeatChoices,
+    ).map((item, index): ShareLevelFeatChoice => {
+      const row = record(item, `levelFeatChoices[${index}]`);
+      exactKeys(
+        row,
+        ['classRef', 'classLevel', 'choiceKind'],
+        ['featRef'],
+        `levelFeatChoices[${index}]`,
+      );
+      const classRef = integer(
+        row.classRef,
+        `levelFeatChoices[${index}].classRef`,
+        0,
+        119,
+      );
+      if (!classIds.has(classRef)) {
+        throw new ShareValidationError(
+          `levelFeatChoices[${index}].classRef is not a class reference.`,
+        );
+      }
+      const featRef = row.featRef === undefined
+        ? undefined
+        : integer(
+            row.featRef,
+            `levelFeatChoices[${index}].featRef`,
+            0,
+            119,
+          );
+      if (featRef !== undefined && !featSourceIds.has(featRef)) {
+        throw new ShareValidationError(
+          `levelFeatChoices[${index}].featRef is not a feat source reference.`,
+        );
+      }
+      const choiceKind = text(
+        row.choiceKind,
+        `levelFeatChoices[${index}].choiceKind`,
+        40,
+      );
+      if (
+        !levelFeatChoiceKinds.includes(
+          choiceKind as (typeof levelFeatChoiceKinds)[number],
+        )
+      ) {
+        throw new ShareValidationError(
+          `levelFeatChoices[${index}].choiceKind is unsupported.`,
+        );
+      }
+      const classLevel = integer(
+        row.classLevel,
+        `levelFeatChoices[${index}].classLevel`,
+        1,
+        20,
+      );
+      if (classLevel > (classById.get(classRef)?.level ?? 0)) {
+        throw new ShareValidationError(
+          `levelFeatChoices[${index}].classLevel exceeds the held class level.`,
+        );
+      }
+      return {
+        classRef,
+        classLevel,
+        choiceKind: choiceKind as ShareLevelFeatChoice['choiceKind'],
+        ...(featRef === undefined ? {} : { featRef }),
+      };
+    });
+    assertUnique(
+      levelFeatChoices.map(
+        (item) =>
+          `${item.classRef}\u0000${item.classLevel}\u0000${item.choiceKind}`,
+      ),
+      'levelFeatChoices',
+    );
+  }
+
   return {
     format: CHARACTER_SHARE_FORMAT,
     version: CHARACTER_SHARE_VERSION,
@@ -2806,6 +2903,7 @@ export function validateShareDocument(
     ...(effects === undefined ? {} : { effects }),
     ...(skillGrants === undefined ? {} : { skillGrants }),
     ...(expertiseGrants === undefined ? {} : { expertiseGrants }),
+    ...(levelFeatChoices === undefined ? {} : { levelFeatChoices }),
     ...(items === undefined ? {} : { items }),
     ...(attunementSlots === undefined ? {} : { attunementSlots }),
   };

@@ -121,8 +121,9 @@ test('creates, independently verifies, previews, and explicitly imports a durabl
   // acquiredAtClassLevel at arity 7, and root spellbook members become
   // six-field addressable acquisition tuples carrying ref, rule, ordinal,
   // acquisition level, nullable spell key, and nullable fallback name. GF-2
-  // mints v15 by appending the Expertise-grant collection at the root.
-  expect(positional[1]).toBe(15);
+  // mints v15 by appending the Expertise-grant collection at the root. LU-1
+  // mints v16 by appending durable class-level feat occurrences.
+  expect(positional[1]).toBe(16);
   expect((positional[2] as unknown[])[0]).toBe('Journey Hero 🧙');
   // TWELVE since v3, with the notes slot still NULL when nobody ticks the
   // notes box, and the appended ability_allocation_method NULL for a
@@ -141,14 +142,16 @@ test('creates, independently verifies, previews, and explicitly imports a durabl
   // nested effect and source tuples; v10 shrinks only the nested sheet tuple
   // from arity 4 to 3. V11 appends `attunementSlots` as the nineteenth root
   // position, NULL when all three fixed positions are empty. V15 appends
-  // Expertise grants as the twentieth root position. Absent data is an
+  // Expertise grants as the twentieth root position. V16 appends level feat
+  // choices as the twenty-first. Absent data is an
   // occupied null slot, never a shorter tuple.
-  expect(positional).toHaveLength(20);
+  expect(positional).toHaveLength(21);
   expect(positional[15]).toBeNull();
   expect(positional[16]).toBeNull();
   expect(positional[17]).toBeNull();
   expect(positional[18]).toBeNull();
   expect(positional[19]).toBeNull();
+  expect(positional[20]).toBeNull();
 
   const freshProfile = await browser.newContext();
   try {
