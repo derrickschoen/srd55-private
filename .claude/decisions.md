@@ -1,5 +1,109 @@
 # Binding scope decisions
 
+## D117 — OWNER: the v1-vs-v2 comparison artifact is the SAME CHARACTER BUILT IN BOTH (2026-07-30)
+
+The owner's answer to "what do you want in hand for the comparison":
+**"Same character in both."** When v2 is done, an identical character is
+built in v1 and v2 and every divergence — experience, flow, and numbers —
+is recorded. Not in the v1 gate (it cannot be; it needs v2). Nothing else
+is produced for the comparison during v1; decisions.md remains the record.
+
+## D116 — OWNER: backup nudge is a ONE-TIME HINT (2026-07-30)
+
+The owner chose the middle option: **a single dismissible prompt after the
+first character completes level 1** — "characters live only in this
+browser — download a backup." One nudge, never repeats. No staleness
+reminders, no recurring banners. This is a new small unit and, per D106,
+it is inside the v1 gate.
+
+## D115 — OWNER: SRD 5.1 stays IMPORT-ONLY (2026-07-30)
+
+**"Import-only."** Confirms the D49 interim explicitly, closing the
+question D49 itself flagged ("worth asking explicitly if you meant
+more"): we bundle 5.2 only; imported 2014 spells and subclasses are
+supported and edition-tagged. No second extraction pipeline.
+
+## D114 — OWNER: the app is named SRD-55 (2026-07-30)
+
+The owner's answer, verbatim: **"Call it SRD-55."** The manifest, title,
+package name and any public domain adopt SRD-55; "D&D" and "Dungeons &
+Dragons" stay out of the name, manifest and domain (CC-BY licenses the
+SRD content, not the marks) and appear only inside the required SRD
+attribution text. The rename pass is a unit inside the v1 gate.
+
+## D113 — OWNER: v1 publishes as a CLOUDFLARE STATIC SITE from a PUBLIC GITHUB REPOSITORY (2026-07-30)
+
+The owner's answer: **"Cloudflare static site, public GitHub repository."**
+This decides the destination, not the moment: pushing and publishing
+remain outward-facing hard stops requiring the owner's action. Cloudflare
+Pages serves at the site root, so the root-absolute service-worker
+registration works as-is; the `import.meta.env.BASE_URL` registration fix
+is taken anyway as a reversible default so both URL shapes work. The
+repository going public makes D58/D59 licensing discipline load-bearing
+retroactively — it already only ever allowed what we may redistribute.
+
+## D112 — OWNER: the acceptance gate is the SCRIPTED WALKTHROUGH (2026-07-30)
+
+The owner's answer: **"Scripted walkthrough counts."** An unassisted
+Playwright walkthrough of the five D54 items — class-first create,
+complete level 1, level up, right-numbered sheet, survive reload —
+passing end-to-end IS the acceptance gate. The owner's personal sitting
+is not required for v1 to be done. Combined with D106: v1 is done when
+the queue drains AND the scripted walkthrough passes.
+
+## D111 — OWNER: the planner is an ADVANCED DOOR, not a peer surface (2026-07-30)
+
+The owner took the recommendation: the planner grid stays fully
+functional but is labelled and positioned as advanced; the guided flows
+and the sheet are the primary surfaces. Consistent with D49's "advanced
+players" framing — and multiclass entry now lives behind that door for
+v1 (D107).
+
+## D110 — OWNER: D60 flips ONLY on explicit announcement (2026-07-30)
+
+The owner's answer: **"Only when I say so."** Pre-alpha data-loss
+tolerance (D60) holds regardless of deploys, sittings, or the queue
+draining, until the owner explicitly announces the flip. No inferred
+expiry. The supervisor asks before treating any migration as
+destructive-forbidden.
+
+## D109 — OWNER: the browser matrix is CHROMIUM ONLY, TESTED (2026-07-30)
+
+The owner's answer: **"Chromium only, tested."** The Playwright matrix
+stays as it is — honest about what is tested; no Firefox or WebKit
+project is added for v1. Firefox/Safari/mobile behavior is explicitly
+unsupported, not best-effort-implied.
+
+## D108 — OWNER: the a11y bar is KEYBOARD + LABELS, NO AUDIT (2026-07-30)
+
+The owner took the recommendation: everything keyboard-operable, every
+control labelled, focus trapped and restored in modals, no colour-only
+signalling — built into the queued UI (wizard steps, attunement replace
+modal, D82 match-review modal, three authoring forms) as it is written,
+not retrofitted. No formal WCAG audit, contrast tooling, or
+screen-reader matrix in v1.
+
+## D107 — OWNER: D54.3 is AMENDED — planner-only multiclass satisfies v1 (2026-07-30)
+
+The owner's answer: **"Amend D54.3, planner is fine."** The straight-class
+level-up wizard satisfies the bar; multiclass entry stays a planner-grid
+operation for v1. D49's "level up wizard should handle multiclass, but
+warn" is deferred beyond v1 — the wizard plan's existing deferral ("no
+Add class card", its own future unit) is now the ruled state, not a gap.
+The D54.3 text "including a multiclass level" is struck for v1.
+
+## D106 — OWNER: the v1 gate is the WHOLE QUEUE, not the five items (2026-07-30)
+
+The owner's answer: **"Whole queue drains."** v1 is done when every
+currently-queued unit is merged — identity chain CI-2a..CI-8, wizard
+GF-0/GF-1 and the wizard itself, D90 Expertise, D91 resource maxima,
+D104 flavor fields, D99 archive/duplicate, D102 gap disclosure, D103
+authoring forms — plus the units minted by this ruling batch (D114
+rename, D116 one-time hint, D113 BASE_URL default) — AND the D112
+scripted walkthrough passes. D54's "anything not on that list is polish"
+no longer defines the gate; the five items remain the usability core the
+walkthrough proves.
+
 ## D105 — OWNER: parallel worktrees authorized, as many as needed (2026-07-30)
 
 The owner's directive: *"Do the parallel strategies you identified. Make as
