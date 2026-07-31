@@ -390,6 +390,20 @@ const skillGrant =
     });
   };
 
+const expertiseGrant =
+  (values: Values): Write =>
+  (db) => {
+    const characterId = newCharacter(db);
+    insert(db, 'character_skill_expertise_grants', {
+      character_id: characterId,
+      source_instance_id: newSource(db, characterId),
+      grant_key: 'class_expertise_1',
+      ordinal: 1,
+      granted_at_class_level: 1,
+      ...values,
+    });
+  };
+
 const characterItem =
   (values: Values): Write =>
   (db) => {
@@ -3111,6 +3125,52 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     accepts: [
       ['the first ordinal', skillGrant({ ordinal: 1 })],
       ['a later ordinal', skillGrant({ ordinal: 3 })],
+    ],
+  },
+  {
+    constraint: 'character_skill_expertise_grants_skill_check',
+    rejects: [
+      ['a skill outside the eighteen', expertiseGrant({ skill: 'lockpicking' })],
+      ['the printed display form', expertiseGrant({ skill: 'Sleight of Hand' })],
+    ],
+    accepts: [
+      ['an unfilled Expertise grant', expertiseGrant({})],
+      ['a filled Expertise grant', expertiseGrant({ skill: 'athletics' })],
+    ],
+  },
+  {
+    constraint: 'character_skill_expertise_grants_state_check',
+    rejects: [
+      ['the slot discarded state', expertiseGrant({ state: 'discarded' })],
+      ['the source tombstoned state', expertiseGrant({ state: 'tombstoned' })],
+    ],
+    accepts: [
+      ['the default active state', expertiseGrant({})],
+      ['an orphaned grant', expertiseGrant({ state: 'orphaned' })],
+    ],
+  },
+  {
+    constraint: 'character_skill_expertise_grants_ordinal_check',
+    rejects: [
+      ['a zero ordinal', expertiseGrant({ ordinal: 0 })],
+      ['a negative ordinal', expertiseGrant({ ordinal: -1 })],
+      ['a text ordinal', expertiseGrant({ ordinal: 'first' })],
+    ],
+    accepts: [
+      ['the first ordinal', expertiseGrant({ ordinal: 1 })],
+      ['a later ordinal', expertiseGrant({ ordinal: 3 })],
+    ],
+  },
+  {
+    constraint: 'character_skill_expertise_grants_level_check',
+    rejects: [
+      ['level zero', expertiseGrant({ granted_at_class_level: 0 })],
+      ['level twenty-one', expertiseGrant({ granted_at_class_level: 21 })],
+      ['a text level', expertiseGrant({ granted_at_class_level: 'first' })],
+    ],
+    accepts: [
+      ['level one', expertiseGrant({ granted_at_class_level: 1 })],
+      ['level twenty', expertiseGrant({ granted_at_class_level: 20 })],
     ],
   },
   {

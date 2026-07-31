@@ -2118,7 +2118,7 @@ describe('B2 contribution sharing', () => {
 });
 
 describe('D83 ability override sharing', () => {
-  it('round-trips source- and item-owned SET payloads through wire v14', async () => {
+  it('round-trips source- and item-owned SET payloads through wire v15', async () => {
     const source = await database();
     const characterId = source.exec(
       `INSERT INTO characters (name, strength)
@@ -2158,7 +2158,7 @@ describe('D83 ability override sharing', () => {
     const decoded = await decodeShareFragment(
       await encodeShareFragment(exportCharacterShare(source, characterId)),
     );
-    expect(decoded.version).toBe(14);
+    expect(decoded.version).toBe(15);
     expect(decoded.effects).toMatchObject([
       {
         kind: 'ability_override',

@@ -130,6 +130,7 @@ function sheet(changes: Partial<CharacterSheet> = {}): CharacterSheet {
         skill: 'stealth',
         ability: 'dexterity',
         proficient: true,
+        expertise: false,
         value: 5,
         formula: 'dexterity modifier + proficiency bonus.',
       },

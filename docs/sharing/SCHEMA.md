@@ -1,22 +1,22 @@
 # Character share wire schema
 
-> Transcribed from `SHARE_SCHEMAS` for the GF-1 v14 mint. Update this document
+> Transcribed from `SHARE_SCHEMAS` for the GF-2 v15 mint. Update this document
 > with every wire-version mint.
 
 The executable source of truth is
 `src/sharing/wire-schemas/index.ts` and its immutable version modules
-`v1.ts` through `v14.ts`. This guide describes that registry; it does not
-replace it. `CURRENT_CHARACTER_SHARE_VERSION` is **14**.
+`v1.ts` through `v15.ts`. This guide describes that registry; it does not
+replace it. `CURRENT_CHARACTER_SHARE_VERSION` is **15**.
 
 One version at `root[1]` governs the complete document. Nested tuples do not
 carry independent versions. Encoding always mints the current version.
 Decoding validates the frozen schema selected by `root[1]`, then composes
-one-version-at-a-time migrations until it reaches v14.
+one-version-at-a-time migrations until it reaches v15.
 
 Versions 1 through 4 remain in the registry as frozen history, but they are
 deliberately retired from import. Their migration path reaches v4→v5 and throws
 `ShareWireRetirementError` because their bare skill names cannot be given honest
-provenance. Versions 5 through 13 migrate to v14.
+provenance. Versions 5 through 14 migrate to v15.
 
 Tuple arity is exact. A nullable or omitted logical value still occupies its
 assigned wire position as `null`; it does not shorten a current tuple. The
@@ -254,18 +254,32 @@ address-less acquisition with that selected key. The selected spell survives;
 source/rule/ordinal/level remain null because inventing provenance would be a
 data corruption.
 
-## Current v14 shape
+### Version 15 — skill Expertise grant provenance
+
+**Minted by:** GF-2's Expertise model and guided-creation adoption.
+
+**Change:** `root` appends `expertiseGrants`, increasing from arity **19 to
+20**. Each entry is a **5-position expertise-grant tuple**: source `ref`,
+stable `grantKey`, `ordinal`, `grantedAtClassLevel`, and nullable selected
+`skill`. An unfilled earned choice therefore survives a share without being
+silently completed.
+
+**Adjacent migration (v14→v15):** appends null to the root. A v14 document
+could not prove an Expertise grant, so the migration preserves absence rather
+than deriving one from a class name.
+
+## Current v15 shape
 
 Positions are zero-based. The keys, wire types, and arities in this section are
-exactly those of the resolved `WIRE_SCHEMA_V14.tuples` object. The tuple
-inventory inherits v13, appends selection acquisition level, and adds the
-spellbook-acquisition tuple. The meanings faithfully restate the
+exactly those of the resolved `WIRE_SCHEMA_V15.tuples` object. The tuple
+inventory inherits v14, appends the Expertise-grant root section, and adds its
+tuple. The meanings faithfully restate the
 schema's meaning strings with minor prose normalization. The inventory includes
 tuples inherited from older frozen schema objects.
 
 ### Root tuple
 
-Arity: **19**.
+Arity: **20**.
 
 | Position | Key | Wire type | Meaning |
 | ---: | --- | --- | --- |
@@ -288,6 +302,19 @@ Arity: **19**.
 | 16 | `skillGrants` | `list` | Skill-choice slots with provenance; null when none |
 | 17 | `items` | `list` | Character-owned items; null when none |
 | 18 | `attunementSlots` | `tuple` | Exactly three nullable zero-based item references; null when empty |
+| 19 | `expertiseGrants` | `list` | Live sourced skill Expertise choice slots; null when none |
+
+#### `expertiseGrant`
+
+Arity: **5**.
+
+| Position | Key | Wire type | Meaning |
+| ---: | --- | --- | --- |
+| 0 | `ref` | `integer` | Share-local granting-source reference |
+| 1 | `grantKey` | `string` | Stable Expertise grant key |
+| 2 | `ordinal` | `integer` | One-based ordinal within the grant key |
+| 3 | `grantedAtClassLevel` | `integer` | Class level at which the grant was earned |
+| 4 | `skill` | `string` | Selected proficient skill; null while unfilled |
 
 ### Character, class, and source tuples
 
@@ -672,7 +699,7 @@ D41 makes the registry an append-only historical contract:
 
 ## How to mint the next version
 
-The v9, v10, v11, v12, v13, and v14 mints followed this discipline:
+The v9, v10, v11, v12, v13, v14, and v15 mints followed this discipline:
 
 1. Add `src/sharing/wire-schemas/vN.ts`. Build the new schema from the previous
    frozen inventory, replacing only changed tuple objects. Do not edit any

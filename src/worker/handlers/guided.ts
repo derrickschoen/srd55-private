@@ -24,6 +24,9 @@ import {
   type AbilityAllocationMethod,
   type GuidedAllocateAbilitiesParams,
   type GuidedBuildStateParams,
+  type GuidedFillExpertiseGrantParams,
+  type GuidedAssignSpellParams,
+  type GuidedEligibleSpellsParams,
   type GuidedOriginOptionsParams,
 } from '../../builder/contracts';
 import {
@@ -43,6 +46,11 @@ import {
   applyGuidedOrigin,
   createGuidedCharacter,
   fillGuidedSkillGrant,
+  fillGuidedExpertiseGrant,
+  assignGuidedSpell,
+  guidedEligibleSpells,
+  guidedExpertiseStepState,
+  guidedSpellsStepState,
   guidedBuildState,
   guidedSkillsStepState,
   listGuidedBackgroundChoiceOptions,
@@ -50,9 +58,10 @@ import {
   listGuidedOriginOptions,
 } from '../../builder/guided-creation';
 import { SkillGrantRefusal } from '../../grants/skill-grants';
+import { SkillExpertiseGrantRefusal } from '../../grants/skill-expertise-grants';
 import { CharacterCommandIntegrity } from '../../commands/integrity';
 import { RevisionConflict } from '../../commands/revision-conflict';
-import { abilities } from '../../domain/enums';
+import { abilities, skills } from '../../domain/enums';
 import { RpcError } from '../../rpc/protocol';
 import {
   defineRpcHandler,
@@ -86,6 +95,70 @@ function isGuidedOriginOptionsParams(
   value: unknown,
 ): value is GuidedOriginOptionsParams {
   return hasExactKeys(value, ['kind']) && isOriginKind(value['kind']);
+}
+
+function isPositiveInteger(value: unknown): boolean {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
+}
+
+function isGuidedAddress(value: unknown): boolean {
+  return (
+    hasExactKeys(value, ['kind', 'id']) &&
+    (value['kind'] === 'slot_selection' ||
+      value['kind'] === 'spellbook_acquisition') &&
+    isPositiveInteger(value['id'])
+  );
+}
+
+function isGuidedFillExpertiseParams(
+  value: unknown,
+): value is GuidedFillExpertiseGrantParams {
+  return (
+    hasExactKeys(value, [
+      'character_id',
+      'grant_id',
+      'skill',
+      'operation_uuid',
+      'expected_revision',
+    ]) &&
+    isPositiveInteger(value['character_id']) &&
+    isPositiveInteger(value['grant_id']) &&
+    (value['skill'] === null || skills.includes(value['skill'] as never)) &&
+    typeof value['operation_uuid'] === 'string' &&
+    typeof value['expected_revision'] === 'number' &&
+    Number.isSafeInteger(value['expected_revision'])
+  );
+}
+
+function isGuidedAssignSpellParams(
+  value: unknown,
+): value is GuidedAssignSpellParams {
+  return (
+    hasExactKeys(value, [
+      'character_id',
+      'address',
+      'spell_version_id',
+      'operation_uuid',
+      'expected_revision',
+    ]) &&
+    isPositiveInteger(value['character_id']) &&
+    isGuidedAddress(value['address']) &&
+    isPositiveInteger(value['spell_version_id']) &&
+    typeof value['operation_uuid'] === 'string' &&
+    typeof value['expected_revision'] === 'number' &&
+    Number.isSafeInteger(value['expected_revision'])
+  );
+}
+
+function isGuidedEligibleSpellsParams(
+  value: unknown,
+): value is GuidedEligibleSpellsParams {
+  return (
+    hasExactKeys(value, ['character_id', 'address', 'query']) &&
+    isPositiveInteger(value['character_id']) &&
+    isGuidedAddress(value['address']) &&
+    typeof value['query'] === 'string'
+  );
 }
 
 function isAllocationMethod(
@@ -177,6 +250,12 @@ function translatingRefusals<T>(operation: () => T): T {
     // background collision NAMES the conflicting skill so the step can offer
     // to clear it.
     if (error instanceof SkillGrantRefusal) {
+      throw new RpcError('handler_error', error.message, {
+        reason: error.reason,
+        skill: error.skill,
+      });
+    }
+    if (error instanceof SkillExpertiseGrantRefusal) {
       throw new RpcError('handler_error', error.message, {
         reason: error.reason,
         skill: error.skill,
@@ -285,6 +364,37 @@ export const handlers: readonly RpcHandler[] = Object.freeze([
     isGuidedBuildStateParams,
     (context, params) =>
       guidedSkillsStepState(context.db, params.character_id),
+  ),
+  defineRpcHandler(
+    GUIDED_RPC.expertiseStep,
+    isGuidedBuildStateParams,
+    (context, params) =>
+      guidedExpertiseStepState(context.db, params.character_id),
+  ),
+  defineRpcHandler(
+    GUIDED_RPC.fillExpertiseGrant,
+    isGuidedFillExpertiseParams,
+    (context, params) =>
+      translatingRefusals(() =>
+        fillGuidedExpertiseGrant(context.db, params),
+      ),
+  ),
+  defineRpcHandler(
+    GUIDED_RPC.spellsStep,
+    isGuidedBuildStateParams,
+    (context, params) =>
+      guidedSpellsStepState(context.db, params.character_id),
+  ),
+  defineRpcHandler(
+    GUIDED_RPC.guidedEligibleSpells,
+    isGuidedEligibleSpellsParams,
+    (context, params) => guidedEligibleSpells(context.db, params),
+  ),
+  defineRpcHandler(
+    GUIDED_RPC.assignSpell,
+    isGuidedAssignSpellParams,
+    (context, params) =>
+      translatingRefusals(() => assignGuidedSpell(context.db, params)),
   ),
   /**
    * The S-B fill command (§3.6). Rides the executor like `allocateAbilities`,

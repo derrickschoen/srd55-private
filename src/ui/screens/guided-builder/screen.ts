@@ -15,9 +15,11 @@ import { createAbilitiesStep } from './abilities-step';
 import { createBackgroundStep } from './background-step';
 import { createClassChooser } from './class-chooser';
 import { createEquipmentStep } from './equipment-step';
+import { createExpertiseStep } from './expertise-step';
 import { renderGuidedBuildState } from './guided-builder';
 import { createSkillsStep } from './skills-step';
 import { createSpeciesStep } from './species-step';
+import { createSpellsStep } from './spells-step';
 import './styles.css';
 
 /**
@@ -146,6 +148,46 @@ async function render(context: ScreenContext): Promise<() => void> {
               },
             }),
         applyEquipment: (params) => client.applyEquipment(params),
+        navigate: (path) => context.router.navigate(path),
+      });
+      view = step.element;
+      cleanups.push(step.cleanup);
+    } else if (state.kind === 'ready' && state.current_step === 'expertise') {
+      const expertiseState = await client.expertiseStep(characterId);
+      const step = createExpertiseStep({
+        characterId,
+        state: expertiseState,
+        fill: (grantId, skill, operationUuid) =>
+          client.fillExpertiseGrant({
+            character_id: characterId,
+            grant_id: grantId,
+            skill,
+            operation_uuid: operationUuid,
+            expected_revision: expertiseState.revision,
+          }),
+        navigate: (path) => context.router.navigate(path),
+      });
+      view = step.element;
+      cleanups.push(step.cleanup);
+    } else if (state.kind === 'ready' && state.current_step === 'spells') {
+      const spellsState = await client.spellsStep(characterId);
+      const step = createSpellsStep({
+        characterId,
+        state: spellsState,
+        search: (address, query) =>
+          client.guidedEligibleSpells({
+            character_id: characterId,
+            address: { kind: address.kind, id: address.id },
+            query,
+          }),
+        assign: (address, spell, operationUuid) =>
+          client.assignGuidedSpell({
+            character_id: characterId,
+            address: { kind: address.kind, id: address.id },
+            spell_version_id: spell.id,
+            operation_uuid: operationUuid,
+            expected_revision: spellsState.revision,
+          }),
         navigate: (path) => context.router.navigate(path),
       });
       view = step.element;

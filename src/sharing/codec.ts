@@ -107,6 +107,10 @@ const ROOT_ATTUNEMENT_SLOTS_INDEX = fieldIndex(
   WIRE_SCHEMA.tuples.root.fields,
   'attunementSlots',
 );
+const ROOT_EXPERTISE_GRANTS_INDEX = fieldIndex(
+  WIRE_SCHEMA.tuples.root.fields,
+  'expertiseGrants',
+);
 
 const CHARACTER_TUPLE_LENGTHS = WIRE_SCHEMA.tuples.character.arities;
 const SHEET_TUPLE_LENGTH = WIRE_SCHEMA.tuples.sheet.arities[0];
@@ -588,6 +592,9 @@ export function shareDocumentToPositional(
         objectToPositional(row, WIRE_SCHEMA.tuples.item.fields)
       ),
       attunementSlots: document.attunementSlots,
+      expertiseGrants: document.expertiseGrants?.map((row) =>
+        objectToPositional(row, WIRE_SCHEMA.tuples.expertiseGrant.fields)
+      ),
     },
     WIRE_SCHEMA.tuples.root.fields,
   );
@@ -606,6 +613,7 @@ function decodeCurrentWire(input: unknown): CharacterShareDocument {
   const wirePlaceholders = root[ROOT_PLACEHOLDERS_INDEX];
   const wireSkillGrants = root[ROOT_SKILL_GRANTS_INDEX];
   const wireItems = root[ROOT_ITEMS_INDEX];
+  const wireExpertiseGrants = root[ROOT_EXPERTISE_GRANTS_INDEX];
   const wireAttunementSlots =
     root[ROOT_ATTUNEMENT_SLOTS_INDEX] === null
       ? null
@@ -770,6 +778,18 @@ function decodeCurrentWire(input: unknown): CharacterShareDocument {
       throw new ShareValidationError('wire items must be null or a list.');
     }
     assertListLimit(wireItems, SHARE_LIMITS.items, 'items');
+  }
+  if (wireExpertiseGrants !== null) {
+    if (!Array.isArray(wireExpertiseGrants)) {
+      throw new ShareValidationError(
+        'wire expertiseGrants must be null or a list.',
+      );
+    }
+    assertListLimit(
+      wireExpertiseGrants,
+      SHARE_LIMITS.expertiseGrants,
+      'expertiseGrants',
+    );
   }
   const rawCharacter = fromPositional(
     character,
@@ -961,6 +981,16 @@ function decodeCurrentWire(input: unknown): CharacterShareDocument {
       ),
     );
   }
+  if (Array.isArray(wireExpertiseGrants)) {
+    raw.expertiseGrants = wireExpertiseGrants.map((value, index) =>
+      fromPositional(
+        value,
+        WIRE_SCHEMA.tuples.expertiseGrant.arities[0],
+        fieldKeys(WIRE_SCHEMA.tuples.expertiseGrant.fields),
+        `wire expertiseGrants[${index}]`,
+      )
+    );
+  }
   return validateShareDocument(raw);
 }
 
@@ -984,7 +1014,8 @@ export function positionalToShareDocument(
   // provenance, and migrating one would mean fabricating attribution. The
   // per-version tuple checks still run first, so a MALFORMED old document is
   // still refused as malformed rather than dignified as retired.
-  switch (input[1]) {
+  const version = input[1];
+  switch (version) {
     case 1:
       variableTuple(
         input,
@@ -1038,113 +1069,24 @@ export function positionalToShareDocument(
       );
       return decodeCurrentWire(MIGRATIONS[4](input));
     case 5:
-      variableTuple(
-        input,
-        SHARE_SCHEMAS[5].tuples.root.arities,
-        'wire document',
-      );
-      variableTuple(
-        input[2],
-        SHARE_SCHEMAS[5].tuples.character.arities,
-        'wire character',
-      );
-      return decodeCurrentWire(
-        MIGRATIONS[13](
-          MIGRATIONS[12](
-            MIGRATIONS[11](
-              MIGRATIONS[10](
-                MIGRATIONS[9](
-                  MIGRATIONS[8](
-                    MIGRATIONS[7](MIGRATIONS[6](MIGRATIONS[5](input))),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
     case 6:
-      variableTuple(
-        input,
-        SHARE_SCHEMAS[6].tuples.root.arities,
-        'wire document',
-      );
-      variableTuple(
-        input[2],
-        SHARE_SCHEMAS[6].tuples.character.arities,
-        'wire character',
-      );
-      return decodeCurrentWire(
-        MIGRATIONS[13](
-          MIGRATIONS[12](
-            MIGRATIONS[11](
-              MIGRATIONS[10](
-                MIGRATIONS[9](
-                  MIGRATIONS[8](MIGRATIONS[7](MIGRATIONS[6](input))),
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
     case 7:
-      variableTuple(
-        input,
-        SHARE_SCHEMAS[7].tuples.root.arities,
-        'wire document',
-      );
-      variableTuple(
-        input[2],
-        SHARE_SCHEMAS[7].tuples.character.arities,
-        'wire character',
-      );
-      return decodeCurrentWire(
-        MIGRATIONS[13](
-          MIGRATIONS[12](
-            MIGRATIONS[11](
-              MIGRATIONS[10](
-                MIGRATIONS[9](MIGRATIONS[8](MIGRATIONS[7](input))),
-              ),
-            ),
-          ),
-        ),
-      );
     case 8:
-      return decodeCurrentWire(
-        MIGRATIONS[13](
-          MIGRATIONS[12](
-            MIGRATIONS[11](
-              MIGRATIONS[10](MIGRATIONS[9](MIGRATIONS[8](input))),
-            ),
-          ),
-        ),
-      );
     case 9:
-      return decodeCurrentWire(
-        MIGRATIONS[13](
-          MIGRATIONS[12](
-            MIGRATIONS[11](MIGRATIONS[10](MIGRATIONS[9](input))),
-          ),
-        ),
-      );
     case 10:
-      return decodeCurrentWire(
-        MIGRATIONS[13](
-          MIGRATIONS[12](MIGRATIONS[11](MIGRATIONS[10](input))),
-        ),
-      );
     case 11:
-      return decodeCurrentWire(
-        MIGRATIONS[13](MIGRATIONS[12](MIGRATIONS[11](input))),
-      );
     case 12:
-      return decodeCurrentWire(
-        MIGRATIONS[13](MIGRATIONS[12](input)),
-      );
     case 13:
-      return decodeCurrentWire(MIGRATIONS[13](input));
     case 14:
-      return decodeCurrentWire(input);
+    case 15: {
+      let migrated: unknown = input;
+      for (const [from, migration] of Object.entries(MIGRATIONS)) {
+        if (Number(from) >= version) {
+          migrated = migration(migrated);
+        }
+      }
+      return decodeCurrentWire(migrated);
+    }
     default:
       throw new ShareValidationError('version is unsupported.');
   }

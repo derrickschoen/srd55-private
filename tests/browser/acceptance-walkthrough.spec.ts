@@ -8,6 +8,8 @@ export const LEVEL_UP_WIZARD_ROUTE_SEAM =
 test('an unassisted sitting creates a caster through the current guided level 1 journey', async ({
   page,
 }) => {
+  // Measured at 9.9s through fifteen real picker writes, sheet, and reload.
+  test.setTimeout(30_000);
   await page.goto('/');
   await expect(page.locator('#status')).toHaveAttribute(
     'data-ready',
@@ -91,6 +93,68 @@ test('an unassisted sitting creates a caster through the current guided level 1 
     .click();
 
   await expect(
+    page.getByRole('heading', { name: 'Choose level 1 spells' }),
+  ).toBeVisible();
+  const cantrips = [
+    'Mage Hand',
+    'Ray of Frost',
+    'Light',
+    'True Strike',
+    'Dancing Lights',
+    'Fire Bolt',
+    'Mending',
+    'Message',
+  ];
+  const preparedSpells = [
+    'Mage Armor',
+    'Magic Missile',
+    'Shield',
+    'Sleep',
+    'Thunderwave',
+  ];
+  const spellbookSpells = [
+    'Detect Magic',
+    'Feather Fall',
+    'Find Familiar',
+    'Grease',
+    'Jump',
+    'Longstrider',
+  ];
+  let spellChoicesMade = 0;
+  while (
+    await page
+      .getByRole('heading', { name: 'Choose level 1 spells' })
+      .isVisible()
+      .catch(() => false)
+  ) {
+    const pickers = page.getByRole('combobox');
+    const choiceCount = await pickers.count();
+    const picker = pickers.first();
+    const label = await picker.getAttribute('aria-label');
+    const search =
+      label?.includes('cantrips') === true
+        ? cantrips.shift()
+        : label?.startsWith('Wizard spellbook') === true
+          ? spellbookSpells.shift()
+          : preparedSpells.shift();
+    if (search === undefined) {
+      throw new Error(`No walkthrough spell remains for ${label ?? 'choice'}.`);
+    }
+    await picker.fill(search);
+    const option = page.getByRole('option', {
+      name: new RegExp(`^${search}\\b`),
+    });
+    await expect(option).toBeVisible();
+    await option.click();
+    await expect(pickers).toHaveCount(choiceCount - 1);
+    spellChoicesMade += 1;
+    if (spellChoicesMade > 20) {
+      throw new Error('Guided spell choices did not converge.');
+    }
+  }
+  expect(spellChoicesMade).toBeGreaterThan(0);
+
+  await expect(
     page.getByRole('heading', { name: 'Confirm starting equipment' }),
   ).toBeVisible();
   const takePackage = page.getByRole('button', {
@@ -121,10 +185,51 @@ test('an unassisted sitting creates a caster through the current guided level 1 
     page.getByRole('heading', { name: CHARACTER_NAME }),
   ).toBeVisible();
   await expect(page.getByText('Level 1', { exact: true })).toBeVisible();
+  await expect(page.getByText('nothing outstanding')).toBeVisible();
 
-  // FINDING — D87 dead-end. No spell-choice screen appeared before the guide
-  // declared level 1 complete. The front door now says four choices remain,
-  // with no guided continuation. Stop here rather than escaping into the
-  // advanced planner or navigating directly to a hidden route.
-  await expect(page.getByText('4 unfinished choices')).toBeVisible();
+  await page.getByRole('link', { name: 'Open workspace' }).click();
+  await page.getByRole('link', { name: 'Character sheet' }).click();
+  await expect(
+    page.getByRole('heading', {
+      name: `Character sheet — ${CHARACTER_NAME}`,
+    }),
+  ).toBeVisible();
+
+  const numericIds = [
+    'armor_class',
+    'hit_points',
+    'initiative',
+    'proficiency_bonus',
+  ] as const;
+  const sheetNumbers: string[] = [];
+  for (const id of numericIds) {
+    const figure = page.locator(`[data-sheet-value="${id}"]`);
+    await expect(figure).toHaveText(/^[+-]?\d+$/);
+    sheetNumbers.push((await figure.textContent()) ?? '');
+  }
+  await expect(page.locator('[data-screen="character-sheet"]')).not.toContainText(
+    /NaN|undefined/,
+  );
+  await expect(
+    page.locator('[data-sheet-id="damage_resistances"]'),
+  ).toContainText('Poison');
+  await expect(
+    page.getByRole('heading', { name: 'Features and traits' }),
+  ).toBeVisible();
+  await expect(page.getByText(/Sage — Tool Proficiency/)).toBeVisible();
+  await expect(
+    page.getByText('Languages and tool proficiencies are not modelled'),
+  ).toBeVisible();
+
+  await page.reload();
+  await expect(
+    page.getByRole('heading', {
+      name: `Character sheet — ${CHARACTER_NAME}`,
+    }),
+  ).toBeVisible();
+  for (const [index, id] of numericIds.entries()) {
+    await expect(page.locator(`[data-sheet-value="${id}"]`)).toHaveText(
+      sheetNumbers[index] ?? '',
+    );
+  }
 });

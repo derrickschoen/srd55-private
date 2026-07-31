@@ -565,7 +565,10 @@ export class CharacterWorkspaceBuilder {
           row,
           'source_type',
         ) as StandaloneSourceType,
-        source_definition_id: sqlInteger(row, 'source_definition_id'),
+        source_definition_id: sqlNullableInteger(
+          row,
+          'source_definition_id',
+        ),
         display_name: sqlString(row, 'display_name'),
       }),
     );

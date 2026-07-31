@@ -267,6 +267,13 @@ const complete: CharacterShareDocument = {
     { ref: 0, grantKey: 'class_skill', ordinal: 1, skill: 'arcana' },
     { ref: 0, grantKey: 'class_skill', ordinal: 2 },
   ],
+  expertiseGrants: [{
+    ref: 0,
+    grantKey: 'class_expertise_1',
+    ordinal: 1,
+    grantedAtClassLevel: 1,
+    skill: 'arcana',
+  }],
 };
 
 async function arbitraryFragment(value: unknown): Promise<string> {
@@ -1109,10 +1116,18 @@ const COMPLETE_V14_WIRE = [
   ...COMPLETE_V13_WIRE.slice(7),
 ];
 
+/** GF-2: append Expertise grants; this fixture has none. */
+const COMPLETE_V15_WIRE = [
+  COMPLETE_V14_WIRE[0],
+  15,
+  ...COMPLETE_V14_WIRE.slice(2),
+  [[0, 'class_expertise_1', 1, 1, 'arcana']],
+];
+
 /** The honest v13 migration: old wire carried neither provenance field. */
-const MIGRATED_COMPLETE_V14_WIRE = [
+const MIGRATED_COMPLETE_V15_WIRE = [
   COMPLETE_V13_WIRE[0],
-  14,
+  15,
   ...COMPLETE_V13_WIRE.slice(2, 5),
   (COMPLETE_V13_WIRE[5] as unknown[][]).map((selection) => [
     ...selection,
@@ -1127,10 +1142,17 @@ const MIGRATED_COMPLETE_V14_WIRE = [
     null,
   ]),
   ...COMPLETE_V13_WIRE.slice(7),
+  null,
 ];
 
+const {
+  expertiseGrants: currentExpertiseGrants,
+  ...completeBeforeExpertise
+} = complete;
+void currentExpertiseGrants;
+
 const migratedComplete: CharacterShareDocument = {
-  ...complete,
+  ...completeBeforeExpertise,
   selections: complete.selections.map((selection) => ({
     ref: selection.ref,
     ruleKey: selection.ruleKey,
@@ -1231,8 +1253,8 @@ describe('character-share positional codec', () => {
     );
   });
 
-  it('pins the hand-authored complete version-14 wire layout element by element', () => {
-    expect(shareDocumentToPositional(complete)).toEqual(COMPLETE_V14_WIRE);
+  it('pins the hand-authored complete version-15 wire layout element by element', () => {
+    expect(shareDocumentToPositional(complete)).toEqual(COMPLETE_V15_WIRE);
   });
 
   it('accepts ability_override only in a hand-frozen v13 document', () => {
@@ -1304,9 +1326,11 @@ describe('character-share positional codec', () => {
     expect(migrated).toEqual(COMPLETE_V13_WIRE);
   });
 
-  it('migrates v13 selections and spellbook rows to honest v14 acquisitions', () => {
-    const migrated = MIGRATIONS[13](COMPLETE_V13_WIRE) as unknown[];
-    expect(migrated).toEqual(MIGRATED_COMPLETE_V14_WIRE);
+  it('migrates v13 acquisitions through v15 without inventing Expertise', () => {
+    const migrated = MIGRATIONS[14](
+      MIGRATIONS[13](COMPLETE_V13_WIRE),
+    ) as unknown[];
+    expect(migrated).toEqual(MIGRATED_COMPLETE_V15_WIRE);
     expect(positionalToShareDocument(COMPLETE_V13_WIRE)).toEqual(
       migratedComplete,
     );
@@ -1451,7 +1475,7 @@ describe('character-share positional codec', () => {
     const positional = shareDocumentToPositional(minimal);
     expect(positional).toEqual([
       'dnd-multiclass-spells-character-share',
-      14,
+      15,
       [
         'Ten',
         null,
@@ -1514,8 +1538,10 @@ describe('character-share positional codec', () => {
       null,
       // Element 18: D92's exact three attunement positions.
       null,
+      // Element 19: GF-2's expertise grant section.
+      null,
     ]);
-    expect(positional).toHaveLength(19);
+    expect(positional).toHaveLength(20);
     expect((positional[2] as unknown[]).length).toBe(12);
     expect((positional[3] as unknown[][])[0]).toHaveLength(8);
     expect((positional[4] as unknown[][])[0]).toHaveLength(7);
@@ -2116,6 +2142,7 @@ describe('a share link generated before the sheet inputs travelled', () => {
     rewriteV14SpellAcquisitions(currentWithoutSheet);
     currentWithoutSheet.push(null); // skillGrants, absent
     currentWithoutSheet.push(null); // items, absent (AC-1, D72)
+    currentWithoutSheet.push(null); // expertiseGrants, absent (GF-2)
     // NOT re-expressed at v6/v7: v6 appended a sourceRef slot to the weapon
     // tuples and v7 (D69) removed it again, so the current weapon tuple is
     // the v5 shape this migrated root already carries.
@@ -2337,6 +2364,7 @@ describe('a share link generated before weapons travelled', () => {
     rewriteV14SpellAcquisitions(baseline);
     baseline.push(null); // skillGrants
     baseline.push(null); // items (AC-1, D72)
+    baseline.push(null); // expertiseGrants (GF-2)
     const decodedBaseline = positionalToShareDocument(baseline);
 
     const withNullTupleOrigin = [...baseline];
@@ -2374,6 +2402,7 @@ describe('a share link generated before weapons travelled', () => {
     withWeapons[11] = []; // weapons: explicitly recorded as none
     withWeapons.push(null); // skillGrants
     withWeapons.push(null); // items (AC-1, D72)
+    withWeapons.push(null); // expertiseGrants (GF-2)
     const decoded = positionalToShareDocument(withWeapons);
     expect(decoded.weapons).toEqual([]);
     expect(decoded).not.toHaveProperty('species');
@@ -2398,6 +2427,7 @@ describe('a share link generated before weapons travelled', () => {
     withOrigin[12] = [null, null, null]; // origin: explicit null-tuple
     withOrigin.push(null); // skillGrants
     withOrigin.push(null); // items (AC-1, D72)
+    withOrigin.push(null); // expertiseGrants (GF-2)
     const decoded = positionalToShareDocument(withOrigin);
     expect(decoded.weapons).toEqual([]);
     expect(decoded).not.toHaveProperty('armor');
@@ -2514,6 +2544,7 @@ describe('a share link generated before a character note could travel', () => {
     rewriteV14SpellAcquisitions(migratedRoot);
     migratedRoot.push(null); // skillGrants
     migratedRoot.push(null); // items (AC-1, D72)
+    migratedRoot.push(null); // expertiseGrants (GF-2)
     const decoded = positionalToShareDocument(migratedRoot);
     expect(decoded.character.notes).toBe(
       'Sent on purpose, by a sharer who opted in.',

@@ -493,6 +493,43 @@ const VERSION_FIXTURES = {
       overrides: [],
     },
   },
+  15: {
+    // Independently compressed from a hand-authored v15 positional tuple.
+    // Its final root member is one filled Expertise grant whose source and
+    // underlying proficiency are both explicit.
+    fragment:
+      'H4sIAAAAAAAAA41PzQqDMAx-Fck5BStzB--DPcEupUjRsMoylaYFH3_QIXTusEFIDt9vDIzzqJ6J4zSwE1GyErOowbvghkhBiXeBAHWLBm66rS7bSiFOQtWVwgI4J2bU5_f9c1k0pkZo6ubU5dguLPdEuxnqI9-i-ZyDqfnyLzCQSI6jB1vqcoMc3stjYgbU-JNJ-_O9htyzUNgX4DQo2EwBAAA',
+    expected: {
+      format: CHARACTER_SHARE_FORMAT,
+      version: CHARACTER_SHARE_VERSION,
+      character: { name: 'V15 Expertise Hero', dexterity: 16 },
+      classes: [{
+        id: 0,
+        classKey: '2024:class:rogue',
+        level: 1,
+        start: 1,
+      }],
+      sources: [],
+      selections: [],
+      spellbook: [],
+      preferences: [],
+      overrides: [],
+      skillProficiencies: ['stealth'],
+      skillGrants: [{
+        ref: 0,
+        grantKey: 'class_skill',
+        ordinal: 1,
+        skill: 'stealth',
+      }],
+      expertiseGrants: [{
+        ref: 0,
+        grantKey: 'class_expertise_1',
+        ordinal: 1,
+        grantedAtClassLevel: 1,
+        skill: 'stealth',
+      }],
+    },
+  },
 } satisfies Record<SupportedShareVersion, FrozenFixture>;
 
 const HISTORICAL_SCHEMA_MODULE_SHA256 = {

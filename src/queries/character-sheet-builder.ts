@@ -35,6 +35,10 @@ import { SheetContentLookup } from '../rules/sheet-content-lookup';
 import { SKILL_LABELS, abilityForSkill } from '../rules/skills';
 import { activeGrantedSkills } from '../grants/skill-grants';
 import {
+  activeExpertiseSkills,
+  resolveSkillExpertiseGrants,
+} from '../grants/skill-expertise-grants';
+import {
   armorClass,
   attacksPerAction,
   hitDieOrAbsent,
@@ -139,6 +143,7 @@ export interface SheetSkill extends UndeterminedSheetNumber {
   readonly skill: Skill;
   readonly ability: Ability;
   readonly proficient: boolean;
+  readonly expertise: boolean;
 }
 
 export interface SheetSave extends UndeterminedSheetNumber {
@@ -293,7 +298,8 @@ export interface SheetGap {
   readonly kind:
     | 'no_class_feature_text'
     | 'partial_subclass_catalog'
-    | 'no_expertise'
+    | 'expertise_choice_unfilled'
+    | 'expertise_proficiency_removed'
     | 'languages_and_tools_not_modelled'
     | 'weapon_reach_not_recorded'
     | 'gear_not_itemised';
@@ -494,14 +500,6 @@ export const SHEET_GAPS: readonly SheetGap[] = Object.freeze([
       '"no subclass taken".',
   },
   {
-    kind: 'no_expertise',
-    title: 'Expertise is not applied',
-    detail:
-      'Rogue and Bard Expertise doubles the proficiency bonus on chosen ' +
-      'skills. That feature text is not among this application’s ' +
-      'sources, so every skill below adds the plain bonus once.',
-  },
-  {
     kind: 'languages_and_tools_not_modelled',
     title: 'Languages and tool proficiencies are not modelled',
     detail:
@@ -575,6 +573,39 @@ export function sheetGaps(
       );
 }
 
+function expertiseGaps(
+  db: DatabaseContext,
+  characterId: number,
+): readonly SheetGap[] {
+  const grants = resolveSkillExpertiseGrants(db, characterId);
+  const gaps: SheetGap[] = [];
+  if (grants.some((grant) => grant.state === 'active' && grant.skill === null)) {
+    gaps.push({
+      kind: 'expertise_choice_unfilled',
+      title: 'Expertise choice still needed',
+      detail:
+        'A sourced Expertise choice is still unfilled. The character remains ' +
+        'saved, and no skill receives the extra proficiency bonus yet.',
+    });
+  }
+  if (
+    grants.some(
+      (grant) =>
+        grant.state === 'orphaned' &&
+        grant.orphan_reason_code === 'underlying_proficiency_removed',
+    )
+  ) {
+    gaps.push({
+      kind: 'expertise_proficiency_removed',
+      title: 'Expertise no longer has an underlying proficiency',
+      detail:
+        'A chosen Expertise skill lost its last active proficiency grant. ' +
+        'The choice is retained, warned, and no longer doubles the bonus.',
+    });
+  }
+  return gaps;
+}
+
 /**
  * Reads one stored enum column, SAYING SO when the stored value is not in the
  * vocabulary.
@@ -641,6 +672,9 @@ export class CharacterSheetBuilder {
     const rolls = this.#rolls(characterId);
     const printedFeatures = this.#printedFeatures(characterId);
     const proficientSkills = this.#skillProficiencies(characterId);
+    const expertiseSkills = new Set(
+      activeExpertiseSkills(this.db, characterId),
+    );
     const stored = this.#armor(characterId);
     const armorRows = stored.rows;
 
@@ -813,6 +847,7 @@ export class CharacterSheetBuilder {
           scores,
           proficiencyBonus: bonus,
           proficient: proficientSkills.has('perception'),
+          expertise: expertiseSkills.has('perception'),
         }),
         formula: '10 + the Wisdom (Perception) check modifier.',
       },
@@ -836,6 +871,7 @@ export class CharacterSheetBuilder {
       }),
       skills: skills.map((skill): SheetSkill => {
         const proficient = proficientSkills.has(skill);
+        const expertise = expertiseSkills.has(skill);
         const ability = abilityForSkill(skill);
         return {
           id: `skill:${skill}`,
@@ -843,14 +879,18 @@ export class CharacterSheetBuilder {
           skill,
           ability,
           proficient,
+          expertise,
           value: skillModifier({
             skill,
             scores,
             proficiencyBonus: bonus,
             proficient,
+            expertise,
           }),
-          formula: proficient
-            ? `${ability} modifier + proficiency bonus.`
+          formula: expertise
+            ? `${ability} modifier + twice the proficiency bonus.`
+            : proficient
+              ? `${ability} modifier + proficiency bonus.`
             : `${ability} modifier only.`,
         };
       }),
@@ -923,7 +963,10 @@ export class CharacterSheetBuilder {
         ...saves.warnings,
         ...proficiencies.warnings,
       ]),
-      gaps: sheetGaps(printedFeatures.has_language_or_tool_grant_text),
+      gaps: [
+        ...sheetGaps(printedFeatures.has_language_or_tool_grant_text),
+        ...expertiseGaps(this.db, characterId),
+      ],
     };
   }
 

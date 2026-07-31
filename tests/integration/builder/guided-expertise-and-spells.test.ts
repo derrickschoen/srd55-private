@@ -1,0 +1,231 @@
+import { afterEach, describe, expect, it } from 'vitest';
+import {
+  allocateGuidedAbilities,
+  applyGuidedBackgroundChoices,
+  applyGuidedOrigin,
+  assignGuidedSpell,
+  createGuidedCharacter,
+  fillGuidedExpertiseGrant,
+  fillGuidedSkillGrant,
+  guidedBuildState,
+  guidedEligibleSpells,
+  guidedExpertiseStepState,
+  guidedSkillsStepState,
+  guidedSpellsStepState,
+  listGuidedBackgroundChoiceOptions,
+  listGuidedClassOptions,
+  listGuidedOriginOptions,
+} from '../../../src/builder/guided-creation';
+import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
+import type { DatabaseContext } from '../../../src/db/database';
+import type { Skill } from '../../../src/domain/enums';
+import {
+  createRpcHarness,
+  type RpcHarness,
+} from '../../helpers/rpc-harness';
+
+let harness: RpcHarness | undefined;
+
+afterEach(() => {
+  harness?.close();
+  harness = undefined;
+});
+
+const integrity = () =>
+  new CharacterCommandIntegrity('guided-expertise-spells-test-key');
+
+function revision(db: DatabaseContext, characterId: number): number {
+  return Number(
+    db.scalar('SELECT revision FROM characters WHERE id = ?', [characterId]),
+  );
+}
+
+async function characterReadyForSkills(
+  db: DatabaseContext,
+  className: 'Rogue' | 'Wizard',
+): Promise<number> {
+  const classOption = listGuidedClassOptions(db).find(
+    (candidate) => candidate.name === className,
+  );
+  const species = listGuidedOriginOptions(db, 'species').find(
+    (candidate) => candidate.name === 'Dwarf',
+  );
+  const backgroundOptions = listGuidedBackgroundChoiceOptions(db);
+  const background = backgroundOptions.backgrounds.find(
+    (candidate) => candidate.name === 'Acolyte',
+  );
+  const feat = backgroundOptions.origin_feats.find(
+    (candidate) => candidate.name === 'Alert',
+  );
+  if (
+    classOption === undefined ||
+    species === undefined ||
+    background === undefined ||
+    feat === undefined
+  ) {
+    throw new Error('A required bundled guided option is absent.');
+  }
+  const characterId = createGuidedCharacter(
+    db,
+    {
+      name: `${className} Guided Hero`,
+      class_content_key: classOption.content_key,
+    },
+    integrity(),
+  ).id;
+  await allocateGuidedAbilities(
+    db,
+    {
+      character_id: characterId,
+      method: 'standard_array',
+      scores: {
+        strength: 8,
+        dexterity: 15,
+        constitution: 14,
+        intelligence: 13,
+        wisdom: 12,
+        charisma: 10,
+      },
+      operation_uuid: crypto.randomUUID(),
+      expected_revision: revision(db, characterId),
+    },
+    integrity(),
+  );
+  applyGuidedOrigin(db, {
+    character_id: characterId,
+    kind: 'species',
+    content_key: species.content_key,
+  });
+  applyGuidedBackgroundChoices(db, {
+    character_id: characterId,
+    content_key: background.content_key,
+    increases: [
+      { ability: 'wisdom', amount: 2 },
+      { ability: 'intelligence', amount: 1 },
+    ],
+    origin_feat_content_key: feat.content_key,
+    origin_feat_config: {},
+  });
+  return characterId;
+}
+
+async function fillAllSkills(
+  db: DatabaseContext,
+  characterId: number,
+): Promise<void> {
+  while (true) {
+    const state = guidedSkillsStepState(db, characterId);
+    const choice = [...state.class_choices, ...state.species_choices][0];
+    if (choice === undefined) return;
+    const skill = choice.available[0];
+    if (skill === undefined) {
+      throw new Error('A guided skill choice has no available skill.');
+    }
+    await fillGuidedSkillGrant(
+      db,
+      {
+        character_id: characterId,
+        grant_id: choice.grant_id,
+        skill: skill as Skill,
+        operation_uuid: crypto.randomUUID(),
+        expected_revision: revision(db, characterId),
+      },
+      integrity(),
+    );
+  }
+}
+
+describe('GF-2 guided Expertise and spell adoption', () => {
+  it('places Rogue Expertise after every skill source and fills sourced grants', async () => {
+    harness = await createRpcHarness([]);
+    const db = harness.context.db;
+    const characterId = await characterReadyForSkills(db, 'Rogue');
+
+    expect(guidedBuildState(db, characterId)).toMatchObject({
+      current_step: 'skills',
+    });
+    await fillAllSkills(db, characterId);
+    expect(guidedBuildState(db, characterId)).toMatchObject({
+      current_step: 'expertise',
+    });
+
+    while (true) {
+      const state = guidedExpertiseStepState(db, characterId);
+      const choice = state.choices[0];
+      if (choice === undefined) break;
+      const skill = choice.available[0];
+      if (skill === undefined) {
+        throw new Error('A guided Expertise choice has no available skill.');
+      }
+      fillGuidedExpertiseGrant(db, {
+        character_id: characterId,
+        grant_id: choice.grant_id,
+        skill,
+        operation_uuid: crypto.randomUUID(),
+        expected_revision: state.revision,
+      });
+    }
+
+    expect(
+      db.allRaw(
+        `SELECT skill, state FROM character_skill_expertise_grants
+         WHERE character_id = ? ORDER BY ordinal`,
+        [characterId],
+      ),
+    ).toHaveLength(2);
+    expect(guidedBuildState(db, characterId)).toMatchObject({
+      current_step: 'equipment',
+    });
+  });
+
+  it('records every level-1 Wizard spell choice through the shared durable assignment writer', async () => {
+    harness = await createRpcHarness([]);
+    const db = harness.context.db;
+    const characterId = await characterReadyForSkills(db, 'Wizard');
+    await fillAllSkills(db, characterId);
+
+    expect(guidedBuildState(db, characterId)).toMatchObject({
+      current_step: 'spells',
+    });
+    const owed = guidedSpellsStepState(db, characterId).choices.length;
+    expect(owed).toBeGreaterThan(0);
+
+    while (true) {
+      const state = guidedSpellsStepState(db, characterId);
+      const choice = state.choices[0];
+      if (choice === undefined) break;
+      const eligible = guidedEligibleSpells(db, {
+        character_id: characterId,
+        address: { kind: choice.kind, id: choice.id },
+        query: '',
+      });
+      const spell = eligible[0];
+      if (spell === undefined) {
+        throw new Error(`No eligible spell exists for ${choice.label}.`);
+      }
+      assignGuidedSpell(db, {
+        character_id: characterId,
+        address: { kind: choice.kind, id: choice.id },
+        spell_version_id: spell.id,
+        operation_uuid: crypto.randomUUID(),
+        expected_revision: state.revision,
+      });
+    }
+
+    expect(guidedSpellsStepState(db, characterId).choices).toEqual([]);
+    const recorded = Number(
+      db.scalar(
+        `SELECT
+           (SELECT count(*) FROM spell_selection_slots
+            WHERE character_id = ? AND current_spell_version_id IS NOT NULL) +
+           (SELECT count(*) FROM wizard_spellbook_entries
+            WHERE character_id = ? AND spell_version_id IS NOT NULL)`,
+        [characterId, characterId],
+      ),
+    );
+    expect(recorded).toBe(owed);
+    expect(guidedBuildState(db, characterId)).toMatchObject({
+      current_step: 'equipment',
+    });
+  });
+});

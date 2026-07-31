@@ -80,7 +80,7 @@ describe('pre-Drizzle database images', () => {
     const tableCount = (sql: string) =>
       [...sql.matchAll(/CREATE TABLE/g)].length;
     expect(tableCount(preDrizzleSchema)).toBe(38);
-    expect(tableCount(schema)).toBe(71);
+    expect(tableCount(schema)).toBe(72);
   });
 
   it('rejects a pre-Drizzle image at open instead of half-working', async () => {
@@ -115,6 +115,7 @@ describe('pre-Drizzle database images', () => {
         'character_effects, character_hit_point_rolls, character_items, ' +
         'character_sheet_adjustments, ' +
         'character_skill_grants, ' +
+        'character_skill_expertise_grants, ' +
         'character_skill_proficiencies, character_species, ' +
         'character_species_traits, character_weapons, class_armor_training, ' +
         'class_extra_attack_grants, class_feature_effects, ' +
