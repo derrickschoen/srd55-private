@@ -34,15 +34,33 @@ import {
 } from '../rules/class-level-features-srd';
 import type {
   LevelUpClassCommand as LevelUpClassPayload,
+  LevelFeatSelection,
+  LevelUpPlannedGrantLocator,
+  LevelUpPlannedGrantSource,
+  LevelUpPlannedSpellChoice,
   RestoreSnapshotCommand as RestoreSnapshotPayload,
 } from '../domain/command-contracts';
+import type { GrantRuleKey } from '../domain/ids';
 import {
   LEVEL_UP_REFUSAL_REASONS,
   LEVEL_UP_SUBCLASS_LEVEL,
   type LevelUpRefusalData,
   type LevelUpRefusalReason,
+  type LevelUpSubchoiceRefusalIssue,
 } from '../builder/level-up';
 import { GrantRuleSlotGenerator } from '../grants/grant-rule-slot-generator';
+import {
+  fillSkillGrant,
+  SkillGrantRefusal,
+} from '../grants/skill-grants';
+import {
+  fillSkillExpertiseGrant,
+  reconcileCharacterSkillExpertise,
+  SkillExpertiseGrantRefusal,
+} from '../grants/skill-expertise-grants';
+import { assignSpellSelection } from '../eligibility/spell-selection-assignment';
+import { spellReplacementPolicyForClassName } from '../rules/class-choice-entitlements-srd';
+import { levelFeatSpellReplacementEntitlement } from './level-feat-choice';
 import { syncClassSourceState } from './update-class';
 import type { CharacterCommandIntegrity } from './integrity';
 import { applyLevelFeatSelection } from './level-feat-choice';
@@ -63,7 +81,68 @@ export class LevelUpRefusal extends Error {
 }
 
 function refuse(reason: LevelUpRefusalReason, message: string): never {
+  if (reason === LEVEL_UP_REFUSAL_REASONS.plannedSubchoiceRefused) {
+    throw new Error('A planned subchoice refusal requires locator data.');
+  }
   throw new LevelUpRefusal(message, { reason });
+}
+
+function refuseSubchoice(
+  kind: 'skill' | 'expertise' | 'spell',
+  index: number,
+  issue: LevelUpSubchoiceRefusalIssue,
+  locator: LevelUpPlannedGrantLocator,
+  message: string,
+): never {
+  throw new LevelUpRefusal(message, {
+    reason: LEVEL_UP_REFUSAL_REASONS.plannedSubchoiceRefused,
+    subchoice_kind: kind,
+    index,
+    issue,
+    locator,
+  });
+}
+
+function sourceIdFor(
+  db: DatabaseContext,
+  characterId: number,
+  source: LevelUpPlannedGrantSource,
+  advancedClassDefinitionId: number,
+  selectedSubclassDefinitionId: number | null,
+  selectedFeatSourceId: number | null,
+): number | null {
+  switch (source.kind) {
+    case 'selected_class':
+      return db.scalar<number>(
+        `SELECT id FROM character_source_instances
+         WHERE character_id = ? AND source_type = 'class'
+           AND source_definition_id = ? AND state = 'active'`,
+        [characterId, advancedClassDefinitionId],
+      );
+    case 'selected_class_subclass':
+      return selectedSubclassDefinitionId === null
+        ? null
+        : db.scalar<number>(
+            `SELECT id FROM character_source_instances
+             WHERE character_id = ? AND source_type = 'subclass'
+               AND source_definition_id = ? AND state = 'active'`,
+            [characterId, selectedSubclassDefinitionId],
+          );
+    case 'selected_feat':
+      return selectedFeatSourceId;
+    case 'existing_source':
+      return db.scalar<number>(
+        `SELECT id FROM character_source_instances
+         WHERE id = ? AND character_id = ? AND state = 'active'`,
+        [source.source_instance_id, characterId],
+      );
+  }
+}
+
+function refusalIssue(
+  error: SkillGrantRefusal | SkillExpertiseGrantRefusal,
+): LevelUpSubchoiceRefusalIssue {
+  return error.reason;
 }
 
 export class LevelUpClassCommand {
@@ -219,9 +298,10 @@ export class LevelUpClassCommand {
 
       let featSourceId: number | null = null;
       if (featChoice?.kind === 'feat') {
+        const plannedFeatChoice = this.withPlannedFeatSkills(featChoice);
         featSourceId = applyLevelFeatSelection(this.db, this.#generator, {
           characterId,
-          selection: featChoice,
+          selection: plannedFeatChoice,
           projectedTotalLevel: (otherLevels ?? 0) + targetLevel,
           advancedClassDefinitionId: classId,
           targetClassLevel: targetLevel,
@@ -261,9 +341,350 @@ export class LevelUpClassCommand {
         otherLevels === null ? 1 : otherLevels + 1,
       );
 
+      this.applyPlannedSubchoices(
+        characterId,
+        classId,
+        subclassId,
+        featSourceId,
+      );
+
       this.#before = before;
       this.#characterId = characterId;
     });
+  }
+
+  private applyPlannedSubchoices(
+    characterId: number,
+    classDefinitionId: number,
+    subclassDefinitionId: number | null,
+    featSourceId: number | null,
+  ): void {
+    const planned = this.payload.planned_subchoices;
+    if (planned === undefined) {
+      return;
+    }
+    const resolveSource = (
+      locator: LevelUpPlannedGrantLocator,
+      kind: 'skill' | 'expertise' | 'spell',
+      index: number,
+    ): number => {
+      const sourceId = sourceIdFor(
+        this.db,
+        characterId,
+        locator.source,
+        classDefinitionId,
+        subclassDefinitionId,
+        featSourceId,
+      );
+      if (sourceId === null) {
+        refuseSubchoice(
+          kind,
+          index,
+          'source_not_available',
+          locator,
+          'The planned subchoice source is not active for this character.',
+        );
+      }
+      return Number(sourceId);
+    };
+
+    planned.skills.forEach((choice, index) => {
+      const sourceId = resolveSource(choice.locator, 'skill', index);
+      const grantId = this.logicalRowId(
+        'character_skill_grants',
+        characterId,
+        sourceId,
+        choice.locator,
+      );
+      if (grantId === null) {
+        refuseSubchoice(
+          'skill',
+          index,
+          'locator_not_found',
+          choice.locator,
+          'The planned skill locator did not resolve to an active grant.',
+        );
+      }
+      const generatedSelection = this.db.scalar<string>(
+        `SELECT skill FROM character_skill_grants
+         WHERE id = ? AND character_id = ?`,
+        [grantId, characterId],
+      );
+      if (
+        choice.locator.source.kind === 'selected_feat' &&
+        generatedSelection === choice.skill
+      ) {
+        return;
+      }
+      try {
+        fillSkillGrant(this.db, characterId, grantId, choice.skill);
+      } catch (error) {
+        if (error instanceof SkillGrantRefusal) {
+          refuseSubchoice(
+            'skill',
+            index,
+            refusalIssue(error),
+            choice.locator,
+            error.message,
+          );
+        }
+        throw error;
+      }
+    });
+
+    // Expertise is offered after every skill choice (D90). Reconciliation at
+    // this boundary revives any preserved Expertise whose proficiency was
+    // restored by one of the fills above.
+    reconcileCharacterSkillExpertise(this.db, characterId);
+    planned.expertise.forEach((choice, index) => {
+      const sourceId = resolveSource(choice.locator, 'expertise', index);
+      const grantId = this.logicalRowId(
+        'character_skill_expertise_grants',
+        characterId,
+        sourceId,
+        choice.locator,
+      );
+      if (grantId === null) {
+        refuseSubchoice(
+          'expertise',
+          index,
+          'locator_not_found',
+          choice.locator,
+          'The planned Expertise locator did not resolve to an active grant.',
+        );
+      }
+      try {
+        fillSkillExpertiseGrant(
+          this.db,
+          characterId,
+          grantId,
+          choice.skill,
+        );
+      } catch (error) {
+        if (error instanceof SkillExpertiseGrantRefusal) {
+          refuseSubchoice(
+            'expertise',
+            index,
+            refusalIssue(error),
+            choice.locator,
+            error.message,
+          );
+        }
+        throw error;
+      }
+    });
+
+    planned.spells.forEach((choice, index) => {
+      const sourceId = resolveSource(choice.locator, 'spell', index);
+      this.applyPlannedSpell(
+        characterId,
+        sourceId,
+        choice,
+        index,
+      );
+    });
+  }
+
+  private withPlannedFeatSkills(
+    selection: LevelFeatSelection,
+  ): LevelFeatSelection {
+    const configured = selection.config.selected_skills;
+    if (!Array.isArray(configured)) return selection;
+    const selectedSkills = [...configured];
+    for (const choice of this.payload.planned_subchoices?.skills ?? []) {
+      if (
+        choice.locator.source.kind !== 'selected_feat' ||
+        choice.locator.ordinal > selectedSkills.length
+      ) {
+        continue;
+      }
+      selectedSkills[choice.locator.ordinal - 1] = choice.skill;
+    }
+    return {
+      ...selection,
+      config: { ...selection.config, selected_skills: selectedSkills },
+    };
+  }
+
+  private logicalRowId(
+    table:
+      | 'character_skill_grants'
+      | 'character_skill_expertise_grants',
+    characterId: number,
+    sourceId: number,
+    locator: LevelUpPlannedGrantLocator,
+  ): number | null {
+    return this.db.scalar<number>(
+      `SELECT id FROM ${table}
+       WHERE character_id = ? AND source_instance_id = ?
+         AND grant_key = ? AND ordinal = ? AND state = 'active'`,
+      [characterId, sourceId, locator.rule_key, locator.ordinal],
+    );
+  }
+
+  private applyPlannedSpell(
+    characterId: number,
+    sourceId: number,
+    choice: LevelUpPlannedSpellChoice,
+    index: number,
+  ): void {
+    const address = choice.kind === 'slot_selection'
+      ? this.db.oneRaw(
+          `SELECT id, fixed_spell_version_id, current_spell_version_id
+           FROM spell_selection_slots
+           WHERE character_id = ? AND source_instance_id = ?
+             AND rule_key = ? AND ordinal = ?
+             AND state IN ('active', 'kept_override')`,
+          [
+            characterId,
+            sourceId,
+            choice.locator.rule_key,
+            choice.locator.ordinal,
+          ],
+        )
+      : this.db.oneRaw(
+          `SELECT id, NULL AS fixed_spell_version_id,
+                  spell_version_id AS current_spell_version_id
+           FROM wizard_spellbook_entries
+           WHERE character_id = ? AND source_instance_id = ?
+             AND rule_key = ? AND ordinal = ? AND state = 'active'`,
+          [
+            characterId,
+            sourceId,
+            choice.locator.rule_key,
+            choice.locator.ordinal,
+          ],
+        );
+    if (address === null) {
+      refuseSubchoice(
+        'spell',
+        index,
+        'locator_not_found',
+        choice.locator,
+        'The planned spell locator did not resolve to an active occurrence.',
+      );
+    }
+    const occupied =
+      address.fixed_spell_version_id !== null ||
+      address.current_spell_version_id !== null;
+    if (choice.kind === 'slot_selection' && choice.mode === 'new' && occupied) {
+      refuseSubchoice(
+        'spell',
+        index,
+        'expected_unfilled',
+        choice.locator,
+        'A new spell choice must address an unfilled occurrence.',
+      );
+    }
+    if (
+      choice.kind === 'slot_selection' &&
+      choice.mode === 'replace' &&
+      !occupied
+    ) {
+      refuseSubchoice(
+        'spell',
+        index,
+        'expected_filled',
+        choice.locator,
+        'A spell replacement must address a filled occurrence.',
+      );
+    }
+    if (
+      choice.kind === 'slot_selection' &&
+      choice.mode === 'replace' &&
+      !this.replacementAllowed(
+        sourceId,
+        choice.locator.rule_key,
+        choice.locator.ordinal,
+      )
+    ) {
+      refuseSubchoice(
+        'spell',
+        index,
+        'spell_not_eligible',
+        choice.locator,
+        'This source has no spell-replacement entitlement on this class level.',
+      );
+    }
+    if (choice.kind === 'spellbook_acquisition' && occupied) {
+      refuseSubchoice(
+        'spell',
+        index,
+        'expected_unfilled',
+        choice.locator,
+        'A spellbook acquisition must address an unfilled occurrence.',
+      );
+    }
+    try {
+      if (choice.kind === 'slot_selection') {
+        assignSpellSelection(this.db, {
+          address: {
+            kind: 'slot_selection',
+            id: Number(address.id),
+          },
+          character_id: characterId,
+          spell_version_id: choice.spell_version_id,
+        });
+      } else {
+        assignSpellSelection(this.db, {
+          address: {
+            kind: 'spellbook_acquisition',
+            id: Number(address.id),
+          },
+          character_id: characterId,
+          spell_version_id: choice.spell_version_id,
+        });
+      }
+    } catch (error) {
+      refuseSubchoice(
+        'spell',
+        index,
+        'spell_not_eligible',
+        choice.locator,
+        error instanceof Error ? error.message : 'Spell selection was refused.',
+      );
+    }
+  }
+
+  private replacementAllowed(
+    sourceId: number,
+    ruleKey: string,
+    ordinal: number,
+  ): boolean {
+    const source = this.db.oneRaw(
+      `SELECT source.source_type, class.name AS class_name,
+              feat.content_key AS feat_content_key,
+              slot.bucket
+       FROM character_source_instances AS source
+       LEFT JOIN class_definitions AS class
+         ON source.source_type = 'class'
+        AND class.id = source.source_definition_id
+       LEFT JOIN feat_definitions AS feat
+         ON source.source_type = 'feat'
+        AND feat.id = source.source_definition_id
+       LEFT JOIN spell_selection_slots AS slot
+         ON slot.source_instance_id = source.id
+        AND slot.rule_key = ? AND slot.ordinal = ?
+       WHERE source.id = ?`,
+      [ruleKey, ordinal, sourceId],
+    );
+    if (source === null) return false;
+    if (source.source_type === 'class' && typeof source.class_name === 'string') {
+      const policy = spellReplacementPolicyForClassName(source.class_name);
+      return policy?.on_class_level.some(
+        (entry) => entry.bucket === source.bucket,
+      ) ?? false;
+    }
+    if (
+      source.source_type === 'feat' &&
+      typeof source.feat_content_key === 'string'
+    ) {
+      return levelFeatSpellReplacementEntitlement(
+        this.db,
+        source.feat_content_key,
+      )?.rule_keys.includes(ruleKey as GrantRuleKey) ?? false;
+    }
+    return false;
   }
 
   /**

@@ -15,6 +15,11 @@ import type {
 } from '../domain/enums';
 import type {
   LevelFeatChoice,
+  LevelUpPlannedExpertiseChoice,
+  LevelUpPlannedGrantLocator,
+  LevelUpPlannedGrantSource,
+  LevelUpPlannedSkillChoice,
+  LevelUpPlannedSpellChoice,
   LevelFeatSelection,
 } from '../domain/command-contracts';
 export type {
@@ -28,7 +33,6 @@ import type {
   ClassDefinitionId,
   ClassLevel,
   ContentKey,
-  GrantOrdinal,
   GrantRuleKey,
   SourceInstanceId,
   SpellVersionId,
@@ -227,49 +231,19 @@ export const LEVEL_UP_STEP_ORDER: readonly LevelUpStep[] = Object.freeze([
   'complete',
 ]);
 
-export type PlannedGrantSource =
-  | { readonly kind: 'selected_class' }
-  | { readonly kind: 'selected_class_subclass' }
-  | { readonly kind: 'selected_feat' }
-  | {
-      readonly kind: 'existing_source';
-      readonly source_instance_id: SourceInstanceId;
-    };
-
-export interface PlannedGrantLocator {
-  readonly source: PlannedGrantSource;
-  readonly rule_key: GrantRuleKey;
-  readonly ordinal: GrantOrdinal;
-}
-
-export type PlannedSpellChoice =
-  | {
-      readonly kind: 'slot_selection';
-      readonly locator: PlannedGrantLocator;
-      readonly spell_version_id: SpellVersionId;
-      readonly mode: 'new' | 'replace';
-    }
-  | {
-      readonly kind: 'spellbook_acquisition';
-      readonly locator: PlannedGrantLocator;
-      readonly spell_version_id: SpellVersionId;
-    };
-
-export interface PlannedSkillChoice {
-  readonly locator: PlannedGrantLocator;
-  readonly skill: Skill;
-}
-
-export interface PlannedExpertiseChoice {
-  readonly locator: PlannedGrantLocator;
-  readonly skill: Skill;
-}
+export type PlannedGrantSource = LevelUpPlannedGrantSource;
+export type PlannedGrantLocator = LevelUpPlannedGrantLocator;
+export type PlannedSpellChoice = LevelUpPlannedSpellChoice;
+export type PlannedSkillChoice = LevelUpPlannedSkillChoice;
+export type PlannedExpertiseChoice = LevelUpPlannedExpertiseChoice;
 
 export interface LevelUpPlannedEligibleSpellsParams {
   readonly character_id: CharacterId;
   readonly expected_revision: CharacterRevision;
   readonly class_definition_id: ClassDefinitionId;
   readonly target_class_level: ClassLevel;
+  readonly subclass_content_key?: ContentKey;
+  readonly feat_choice?: LevelFeatSelection;
   readonly locator: PlannedGrantLocator;
   readonly query: string;
 }

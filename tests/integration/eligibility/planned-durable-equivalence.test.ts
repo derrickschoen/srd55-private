@@ -13,6 +13,9 @@ import { EligibleSpellSearch } from '../../../src/eligibility/eligible-spell-sea
 import { GrantRuleSlotGenerator } from '../../../src/grants/grant-rule-slot-generator';
 import { LevelUpPlannedEligibleSpells } from '../../../src/queries/level-up-planned-eligible-spells';
 import { openTestDatabase } from '../../helpers/open-db';
+import { LevelUpClassCommand, LevelUpRefusal } from '../../../src/commands/level-up-class';
+import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
+import { CharacterState } from '../../../src/character/character-state';
 
 describe('planned and durable spell eligibility', () => {
   let connection: Database;
@@ -39,7 +42,7 @@ describe('planned and durable spell eligibility', () => {
     const rules = [{
       kind: 'choice_from_list',
       rule_key: 'stable-prepared',
-      count: 1,
+      count: 2,
       bucket: 'prepared',
       list: 'Wizard',
       level_min: 1,
@@ -123,5 +126,91 @@ describe('planned and durable spell eligibility', () => {
       'Alpha Ward',
       'Beta Ward',
     ]);
+
+    const selected = planned[0];
+    if (selected === undefined) throw new Error('Expected an offered spell.');
+    new LevelUpClassCommand(
+      db,
+      {
+        type: 'level_up_class',
+        class_definition_id: classId,
+        target_level: 2,
+        planned_subchoices: {
+          skills: [],
+          expertise: [],
+          spells: [{
+            kind: 'slot_selection',
+            locator: {
+              source: { kind: 'selected_class' },
+              rule_key: 'stable-prepared',
+              ordinal: 1,
+            },
+            spell_version_id: selected.id,
+            mode: 'new',
+          }],
+        },
+      },
+      new CharacterCommandIntegrity('planned-durable-test-key'),
+    ).apply(characterId);
+    expect(
+      new EligibleSpellSearch(db).search(characterId, slotId, 'Ward'),
+    ).toEqual(planned);
+
+    const clericId = Number(
+      db.scalar(
+        `SELECT id FROM spell_versions WHERE content_key = 'spell:cleric'`,
+      ),
+    );
+    const nextPlanned = new LevelUpPlannedEligibleSpells(db).search({
+      character_id: characterId as CharacterId,
+      expected_revision: 0 as CharacterRevision,
+      class_definition_id: classId as ClassDefinitionId,
+      target_class_level: 3 as ClassLevel,
+      locator: {
+        source: { kind: 'selected_class' },
+        rule_key: 'stable-prepared' as GrantRuleKey,
+        ordinal: 2 as GrantOrdinal,
+      },
+      query: 'Cleric',
+    });
+    expect(nextPlanned).toEqual([]);
+    const state = new CharacterState(db);
+    const beforeRefusal = state.capture(characterId);
+    let refusal: unknown;
+    try {
+      new LevelUpClassCommand(
+        db,
+        {
+          type: 'level_up_class',
+          class_definition_id: classId,
+          target_level: 3,
+          planned_subchoices: {
+            skills: [],
+            expertise: [],
+            spells: [{
+              kind: 'slot_selection',
+              locator: {
+                source: { kind: 'selected_class' },
+                rule_key: 'stable-prepared',
+                ordinal: 2,
+              },
+              spell_version_id: clericId,
+              mode: 'new',
+            }],
+          },
+        },
+        new CharacterCommandIntegrity('planned-durable-test-key'),
+      ).apply(characterId);
+    } catch (error) {
+      refusal = error;
+    }
+    expect(refusal).toBeInstanceOf(LevelUpRefusal);
+    expect(refusal).toMatchObject({
+      data: {
+        reason: 'planned_subchoice_refused',
+        issue: 'spell_not_eligible',
+      },
+    });
+    expect(state.capture(characterId)).toEqual(beforeRefusal);
   });
 });

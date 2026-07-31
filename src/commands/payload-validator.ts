@@ -92,10 +92,39 @@ const slotRestoreKeys = [
   'override_note',
 ] as const;
 
-export class CharacterCommandPayloadError extends TypeError {}
+export interface MalformedPlannedSubchoiceData {
+  readonly reason: 'malformed_planned_subchoice';
+  readonly subchoice_kind: 'section' | 'skill' | 'expertise' | 'spell';
+  readonly index: number | null;
+  readonly field: string;
+}
+
+export class CharacterCommandPayloadError extends TypeError {
+  constructor(
+    message: string,
+    readonly data: MalformedPlannedSubchoiceData | null = null,
+  ) {
+    super(message);
+    this.name = 'CharacterCommandPayloadError';
+  }
+}
 
 function invalid(message: string): never {
   throw new CharacterCommandPayloadError(message);
+}
+
+function malformedPlannedSubchoice(
+  message: string,
+  subchoiceKind: MalformedPlannedSubchoiceData['subchoice_kind'],
+  index: number | null,
+  field: string,
+): never {
+  throw new CharacterCommandPayloadError(message, {
+    reason: 'malformed_planned_subchoice',
+    subchoice_kind: subchoiceKind,
+    index,
+    field,
+  });
 }
 
 function hasOwn(record: UnknownRecord, key: string): boolean {
@@ -487,6 +516,288 @@ function validateLevelFeatChoice(value: unknown): void {
   validateLevelFeatSelection(choice);
 }
 
+type PlannedSubchoiceKind = Exclude<
+  MalformedPlannedSubchoiceData['subchoice_kind'],
+  'section'
+>;
+
+function plannedRecord(
+  value: unknown,
+  kind: MalformedPlannedSubchoiceData['subchoice_kind'],
+  index: number | null,
+  field: string,
+): UnknownRecord {
+  if (
+    value === null ||
+    Array.isArray(value) ||
+    typeof value !== 'object' ||
+    (Object.getPrototypeOf(value) !== Object.prototype &&
+      Object.getPrototypeOf(value) !== null)
+  ) {
+    return malformedPlannedSubchoice(
+      `${field} must be an object.`,
+      kind,
+      index,
+      field,
+    );
+  }
+  return value as UnknownRecord;
+}
+
+function exactPlannedKeys(
+  record: UnknownRecord,
+  allowed: readonly string[],
+  kind: MalformedPlannedSubchoiceData['subchoice_kind'],
+  index: number | null,
+  field: string,
+): void {
+  const unexpected = Object.keys(record).find(
+    (key) => !allowed.includes(key),
+  );
+  if (unexpected !== undefined) {
+    malformedPlannedSubchoice(
+      `Unknown ${field} field: ${unexpected}.`,
+      kind,
+      index,
+      field,
+    );
+  }
+  const missing = allowed.find((key) => !hasOwn(record, key));
+  if (missing !== undefined) {
+    malformedPlannedSubchoice(
+      `${field}.${missing} is required.`,
+      kind,
+      index,
+      `${field}.${missing}`,
+    );
+  }
+}
+
+function validatePlannedLocator(
+  value: unknown,
+  kind: PlannedSubchoiceKind,
+  index: number,
+): string {
+  const locator = plannedRecord(value, kind, index, 'locator');
+  exactPlannedKeys(
+    locator,
+    ['source', 'rule_key', 'ordinal'],
+    kind,
+    index,
+    'locator',
+  );
+  const source = plannedRecord(
+    locator.source,
+    kind,
+    index,
+    'locator.source',
+  );
+  const sourceKind = source.kind;
+  if (sourceKind === 'existing_source') {
+    exactPlannedKeys(
+      source,
+      ['kind', 'source_instance_id'],
+      kind,
+      index,
+      'locator.source',
+    );
+    if (
+      !Number.isSafeInteger(source.source_instance_id) ||
+      Number(source.source_instance_id) < 1
+    ) {
+      malformedPlannedSubchoice(
+        'locator.source.source_instance_id must be a positive integer.',
+        kind,
+        index,
+        'locator.source.source_instance_id',
+      );
+    }
+  } else if (
+    sourceKind === 'selected_class' ||
+    sourceKind === 'selected_class_subclass' ||
+    sourceKind === 'selected_feat'
+  ) {
+    exactPlannedKeys(
+      source,
+      ['kind'],
+      kind,
+      index,
+      'locator.source',
+    );
+  } else {
+    malformedPlannedSubchoice(
+      'locator.source.kind is unknown.',
+      kind,
+      index,
+      'locator.source.kind',
+    );
+  }
+  if (
+    typeof locator.rule_key !== 'string' ||
+    locator.rule_key.trim() === '' ||
+    [...locator.rule_key].length > 255
+  ) {
+    malformedPlannedSubchoice(
+      'locator.rule_key must be a non-empty string of at most 255 characters.',
+      kind,
+      index,
+      'locator.rule_key',
+    );
+  }
+  if (!Number.isSafeInteger(locator.ordinal) || Number(locator.ordinal) < 1) {
+    malformedPlannedSubchoice(
+      'locator.ordinal must be a positive integer.',
+      kind,
+      index,
+      'locator.ordinal',
+    );
+  }
+  const sourceIdentity = sourceKind === 'existing_source'
+    ? `existing_source:${String(source.source_instance_id)}`
+    : String(sourceKind);
+  return `${sourceIdentity}:${locator.rule_key}:${String(locator.ordinal)}`;
+}
+
+function plannedList(
+  value: unknown,
+  kind: PlannedSubchoiceKind,
+): readonly unknown[] {
+  if (!Array.isArray(value)) {
+    const section = kind === 'expertise' ? 'expertise' : `${kind}s`;
+    return malformedPlannedSubchoice(
+      `planned_subchoices.${section} must be a list.`,
+      kind,
+      null,
+      `planned_subchoices.${section}`,
+    );
+  }
+  return value;
+}
+
+function validatePlannedSubchoices(value: unknown): void {
+  const section = plannedRecord(
+    value,
+    'section',
+    null,
+    'planned_subchoices',
+  );
+  exactPlannedKeys(
+    section,
+    ['skills', 'expertise', 'spells'],
+    'section',
+    null,
+    'planned_subchoices',
+  );
+  const seen = new Set<string>();
+  const validateUnique = (
+    locator: unknown,
+    kind: PlannedSubchoiceKind,
+    index: number,
+  ) => {
+    const identity = `${kind}:${validatePlannedLocator(locator, kind, index)}`;
+    if (seen.has(identity)) {
+      malformedPlannedSubchoice(
+        'A planned subchoice locator may be supplied only once.',
+        kind,
+        index,
+        'locator',
+      );
+    }
+    seen.add(identity);
+  };
+
+  plannedList(section.skills, 'skill').forEach((value, index) => {
+    const choice = plannedRecord(value, 'skill', index, 'skill choice');
+    exactPlannedKeys(
+      choice,
+      ['locator', 'skill'],
+      'skill',
+      index,
+      'skill choice',
+    );
+    validateUnique(choice.locator, 'skill', index);
+    if (!isEnumValue(skills, choice.skill)) {
+      malformedPlannedSubchoice(
+        'A planned skill choice must name a known skill.',
+        'skill',
+        index,
+        'skill',
+      );
+    }
+  });
+  plannedList(section.expertise, 'expertise').forEach((value, index) => {
+    const choice = plannedRecord(
+      value,
+      'expertise',
+      index,
+      'expertise choice',
+    );
+    exactPlannedKeys(
+      choice,
+      ['locator', 'skill'],
+      'expertise',
+      index,
+      'expertise choice',
+    );
+    validateUnique(choice.locator, 'expertise', index);
+    if (!isEnumValue(skills, choice.skill)) {
+      malformedPlannedSubchoice(
+        'A planned Expertise choice must name a known skill.',
+        'expertise',
+        index,
+        'skill',
+      );
+    }
+  });
+  plannedList(section.spells, 'spell').forEach((value, index) => {
+    const choice = plannedRecord(value, 'spell', index, 'spell choice');
+    if (choice.kind === 'slot_selection') {
+      exactPlannedKeys(
+        choice,
+        ['kind', 'locator', 'spell_version_id', 'mode'],
+        'spell',
+        index,
+        'spell choice',
+      );
+      if (choice.mode !== 'new' && choice.mode !== 'replace') {
+        malformedPlannedSubchoice(
+          'A slot spell choice mode must be new or replace.',
+          'spell',
+          index,
+          'mode',
+        );
+      }
+    } else if (choice.kind === 'spellbook_acquisition') {
+      exactPlannedKeys(
+        choice,
+        ['kind', 'locator', 'spell_version_id'],
+        'spell',
+        index,
+        'spell choice',
+      );
+    } else {
+      malformedPlannedSubchoice(
+        'A planned spell choice kind is unknown.',
+        'spell',
+        index,
+        'kind',
+      );
+    }
+    validateUnique(choice.locator, 'spell', index);
+    if (
+      !Number.isSafeInteger(choice.spell_version_id) ||
+      Number(choice.spell_version_id) < 1
+    ) {
+      malformedPlannedSubchoice(
+        'spell_version_id must be a positive integer.',
+        'spell',
+        index,
+        'spell_version_id',
+      );
+    }
+  });
+}
+
 function validateLevelUpClass(record: UnknownRecord): void {
   rejectUnknown(record, [
     'type',
@@ -494,6 +805,7 @@ function validateLevelUpClass(record: UnknownRecord): void {
     'target_level',
     'subclass_content_key',
     'feat_choice',
+    'planned_subchoices',
     'reason',
   ]);
   positiveInteger(record, 'class_definition_id');
@@ -506,6 +818,9 @@ function validateLevelUpClass(record: UnknownRecord): void {
 
   if (hasOwn(record, 'feat_choice')) {
     validateLevelFeatChoice(record.feat_choice);
+  }
+  if (hasOwn(record, 'planned_subchoices')) {
+    validatePlannedSubchoices(record.planned_subchoices);
   }
 }
 
