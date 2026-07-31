@@ -20,7 +20,14 @@ import {
   catalogContentIdentityInvariantError,
   weaponDamagePayloadError,
   weaponRangePayloadError,
+  classResourceFormulaInvariantError,
 } from './row-rules';
+import {
+  classFormulaResourceKinds,
+  classResourceFormulaKinds,
+  classResourceKinds,
+  resourceFormulaAbilities,
+} from '../class-resources';
 import {
   abilities,
   abilityAllocationMethods,
@@ -272,6 +279,10 @@ const weaponMasteryPropertyEnum = z.enum(weaponMasteryProperties);
 const weaponMasteryGrantEnum = z.enum(weaponMasteryGrants);
 const srdWeaponGroupEnum = z.enum(srdWeaponGroups);
 const weaponAttackKindEnum = z.enum(weaponAttackKinds);
+const classResourceKindEnum = z.enum(classResourceKinds);
+const classFormulaResourceKindEnum = z.enum(classFormulaResourceKinds);
+const classResourceFormulaKindEnum = z.enum(classResourceFormulaKinds);
+const resourceFormulaAbilityEnum = z.enum(resourceFormulaAbilities);
 /**
  * D27's `simple | martial` on a character's weapon.
  *
@@ -410,6 +421,10 @@ export const COLUMN_REFINEMENTS = {
   weaponMasteryGrantEnum,
   srdWeaponGroupEnum,
   weaponAttackKindEnum,
+  classResourceKindEnum,
+  classFormulaResourceKindEnum,
+  classResourceFormulaKindEnum,
+  resourceFormulaAbilityEnum,
   weaponProficiencyCategoryEnum,
   weaponDamageKindEnum,
   versatileWeaponDamageKindEnum,
@@ -565,6 +580,8 @@ type NativeContractTable =
   | 'weapon_templates'
   | 'class_weapon_mastery_grants'
   | 'class_weapon_mastery_counts'
+  | 'class_resources'
+  | 'class_resource_formulas'
   // The origins TEMPLATE tables. Same reason `weapon_templates` is here: their
   // rows are PARSED out of `docs/srd/source/species-descriptions.txt` and
   // `docs/srd/source/backgrounds.txt` by `src/rules/origins-srd.ts`, and a
@@ -1095,6 +1112,26 @@ const REFINEMENTS = {
   'class_weapon_mastery_counts.created_at': sqlTimestamp,
   'class_weapon_mastery_counts.updated_at': sqlTimestamp,
 
+  // --- class resource catalogs (D91/D120) ---------------------------------
+  'class_resources.id': positiveInt,
+  'class_resources.class_definition_id': positiveInt,
+  'class_resources.class_level': classLevel,
+  'class_resources.resource_kind': classResourceKindEnum,
+  'class_resources.maximum': nonNegativeInt,
+  'class_resources.created_at': sqlTimestamp,
+  'class_resources.updated_at': sqlTimestamp,
+  'class_resource_formulas.id': positiveInt,
+  'class_resource_formulas.class_definition_id': positiveInt,
+  'class_resource_formulas.resource_kind': classFormulaResourceKindEnum,
+  'class_resource_formulas.formula_kind': classResourceFormulaKindEnum,
+  'class_resource_formulas.minimum_class_level': classLevel,
+  'class_resource_formulas.fixed_count': positiveInt,
+  'class_resource_formulas.ability': resourceFormulaAbilityEnum,
+  'class_resource_formulas.multiplier': positiveInt,
+  'class_resource_formulas.later_fixed_count_steps': sqlText,
+  'class_resource_formulas.created_at': sqlTimestamp,
+  'class_resource_formulas.updated_at': sqlTimestamp,
+
   // --- species_templates ---------------------------------------------------
   'species_templates.id': positiveInt,
   'species_templates.content_key': nonEmptyText,
@@ -1438,6 +1475,12 @@ export function rowContractError(
           label,
           table === 'character_weapons',
         )
+      );
+    }
+    if (only === undefined && table === 'class_resource_formulas') {
+      return classResourceFormulaInvariantError(
+        result.data as Readonly<Record<string, unknown>>,
+        label,
       );
     }
     return null;

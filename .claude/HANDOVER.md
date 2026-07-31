@@ -203,7 +203,21 @@ this project. Never hand-merge a lane.
     numbers pasted. Findings against our own work — including your own
     mistakes — at FULL LENGTH, always.
 
-## 4. Dispatch brief template
+## 4. Dispatch briefs — PRE-AUTHORED, use them
+
+`.claude/handover/briefs/` contains Fable-authored briefs for the
+intelligence-sensitive units: w-c, ff-a, ar-a, ha-1, ha-2, ci-3a, ci-5,
+w-b2, w-d, w-e, w-f, d91-r, exp-url, fix-attr, resp-1, banner, walk-2 —
+plus NOTES-remaining.md with per-unit author notes for the rest. Dispatch a
+pre-authored unit VERBATIM as:
+`cat .claude/handover/briefs/COMMON.md .claude/handover/briefs/<unit>.md |
+codex exec --sandbox workspace-write -C <worktree> - > <log> 2>&1`
+(the worktree must be fast-forwarded by YOU first; floors come from
+lane-state.md which COMMON.md tells codex to read — keep it accurate).
+For units without a pre-authored brief, write one from the template below
+plus NOTES-remaining.md; never dispatch from the design doc alone.
+
+## 4b. Dispatch brief template
 
 Copy the template exactly as it appears in `.claude/handover/`
 (brief-template.md, created in Step 0 from the block below), fill every <>:
@@ -417,14 +431,15 @@ owner-triggered only.
 ## 7. Owner questions — protocol and queued items
 
 Ask context-rich via AskUserQuestion (terse is for reports, never for
-questions); record answers as D-numbers immediately (prepend; §0). Queued:
-1. At HA-2 dispatch: homebrew publish lifecycle — may an author delete
-   unreferenced published content, and does the fix-review screen get an
-   explicit "apply to all listed characters" action? (Design: no deletion,
-   per-character review only.)
-2. At CI-5 dispatch: D81 export scope — reference closure vs whole local
-   library (the CI design flags its own reading as resting on one word).
-3. When upstream SRD moves (not before): errata semantics — in-place with
+questions); record answers as D-numbers immediately (prepend; §0).
+ANSWERED 2026-07-31 (bake into briefs): D138 — HA fix-review gains
+apply-to-all; homebrew creations deletable INCLUDING with attached
+characters (reconcile with D99 archive-first — taken-for-now: cascade
+archives creation+characters as one restorable set; HA-11 design pins it).
+D139 — character export = own reference closure only; separate
+library-export (whole or selected subset). CI-5 and HA-2/HA-11/HA-12
+briefs MUST carry both as amendments. Queued:
+1. When upstream SRD moves (not before): errata semantics — in-place with
    D95-style notices vs version-pinned coexistence.
 
 ## 8. Trap encyclopedia (every one fired for real; know the signatures)
@@ -438,6 +453,11 @@ questions); record answers as D-numbers immediately (prepend; §0). Queued:
   re-run before believing it (it cleared W-A2's gate exactly this way).
 - ?raw flagged in a spec chain → check for `import type` before acting.
 - Codex 0-exit with no answer → resume the session; flags BEFORE `resume`.
+- Codex blocked with "cannot lock ref … Read-only file system" on a git
+  command → NEVER instruct codex to run git merge/branch ops in a worktree:
+  worktree metadata lives under the MAIN repo's .git/worktrees/, outside its
+  sandbox. The supervisor fast-forwards BEFORE dispatch; briefs say "already
+  fast-forwarded — do not run git merge/branch commands".
 - A negative control that "proves" robustness → verify the mutation landed
   in executed production code and the applied-assert ran; a control aimed at
   a test-side expectation or a comment is aimed at nothing (the original

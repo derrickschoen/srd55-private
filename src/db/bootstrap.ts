@@ -15,6 +15,7 @@ import { ensureBundledSpellContent } from '../rules/spells-srd';
 import { ensureBundledClassEquipment } from '../rules/class-equipment-srd';
 import { ensureBundledFeatContent } from '../rules/feats-srd';
 import { reconcileLegacyLevelFeatChoices } from '../rules/legacy-level-feat-choices';
+import { ensureBundledClassResources } from '../rules/class-resources-srd';
 
 /**
  * The bundled content every application database is expected to carry: the SRD
@@ -24,7 +25,7 @@ import { reconcileLegacyLevelFeatChoices } from '../rules/legacy-level-feat-choi
  * per-class hit dice, saving throws, skill and proficiency lists, plus the
  * armour templates.
  *
- * ORDER MATTERS, AND IT NOW MATTERS IN THREE PLACES RATHER THAN TWO.
+ * ORDER MATTERS, AND IT NOW MATTERS IN FOUR PLACES RATHER THAN THREE.
  *
  * 1. Weapon mastery writes one row per `class_definitions` row, so the classes
  *    must exist first. Seeding weapons into a database with no classes would
@@ -33,7 +34,9 @@ import { reconcileLegacyLevelFeatChoices } from '../rules/legacy-level-feat-choi
  *    still a repair the boot path should not need.
  * 2. The sheet core has the same dependency and for the same reason: it joins
  *    its parsed class names to `class_definitions.name`.
- * 3. THE ORIGINS CATALOG IS NO LONGER ORDER-INDEPENDENT. Its comment here used
+ * 3. Class resources are keyed to `class_definitions.content_key`, so their
+ *    exact ladder and formula manifests must be repaired after classes exist.
+ * 4. THE ORIGINS CATALOG IS NO LONGER ORDER-INDEPENDENT. Its comment here used
  *    to read "the origins catalog references no other table", and that stopped
  *    being true when `background_equipment_items` gained real foreign keys into
  *    `weapon_templates` and `armor_templates`: a background's Spear is a
@@ -48,6 +51,7 @@ import { reconcileLegacyLevelFeatChoices } from '../rules/legacy-level-feat-choi
  */
 export const applicationSeed: DatabaseSeed = (db) => {
   ensureBundledClassContent(db);
+  ensureBundledClassResources(db);
   ensureBundledWeaponContent(db);
   ensureBundledSheetContent(db);
   ensureBundledClassEquipment(db);

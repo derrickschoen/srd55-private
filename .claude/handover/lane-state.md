@@ -3,28 +3,18 @@
 READ .claude/HANDOVER.md FIRST — it is the operating manual; this file is
 only the fast-moving state it references.
 
-Main HEAD: 6a114de + (uncommitted Step-0 artifacts being committed now).
-FLOORS: vitest 3,079 tests / 189 files; Playwright 88 tests / 20 specs;
-build exit 0; migrations 0000-0025; wire v1-v16; existing a7-v* assertions.
+Main HEAD: 5841448 (D91-M merged). FLOORS: vitest 3,132 tests / 192 files;
+Playwright 88 tests / 20 specs; build exit 0; migrations 0000-0026; wire
+v1-v16; existing a7-v* assertions. Baseline + D91-M gates all
+supervisor-verified (post-merge main vitest 192/3,132 exit 0).
 
 ## In flight
-- Step 0 COMPLETE incl. baseline: build 0, vitest 189/3,079, Playwright
-  88/88 on 44469 — all verified by supervisor on main b7b498e.
-- TRACK M (wt/attunement): D91-M gate ran: touched-set 28 files OK, build 0,
-  vitest 192/3,126, parser negative control proven both directions
-  (mutate-d91m-parser.py). D135 codex review found 4 defects; 1-3 verified
-  by supervisor at the cited lines, 4a (owning-class check) accepted, 4b
-  (candidate-discovery pass) REJECTED — extract is SHA-pinned and the
-  formula inventory is design-time exhaustive. Fix dispatch D91-M-FIX
-  running (task bk7gwpon8, log d91m-fix.log, port 44470). Playwright gate
-  was stopped (tree changing) — full re-gate after the fix: vitest +
-  re-run negative control + Playwright 44470 + codex re-review round 2.
-- TRACK W (wt/print): W-B1 dispatched EARLY (deviation from "after M0" —
-  Taken for now: W-B1 depends only on merged W-A, not on migration 0026.
-  Seam: floors in its brief are main's 3,079/189+88. Cost to flip: none.)
-  Task <wb1>, log wb1.log, port 44471.
-- TRACK S (wt/pwa): idle at 6a114de; S1 (D91-R) needs 0026 in main — waits
-  for M0 merge.
+- TRACK M (wt/attunement at 5841448): EXP-URL dispatching (doc-only, log
+  expurl.log). Then FF-A (briefs/ff-a.md, port 44480) once EXP-URL merges.
+- TRACK W (wt/print): W-B1 implementing (task bn5hhjof9, log wb1.log, port
+  44471). Gate on landing; then W-B2 (briefs/w-b2.md).
+- TRACK S (wt/pwa at 5841448): D91-R dispatching (briefs/d91-r.md, port
+  44477, log d91r.log). Then FIX-ATTR, RESP-1, BANNER per HANDOVER §5.
 
 ## Rulings recorded this window
 D118-D137 (see decisions.md). Newest four: D134 focus_points = Remaining
@@ -35,4 +25,13 @@ analysis, no strike limit; D137 whole queue including HA/CI.
 - (none open — all prior defaults ratified or overridden by D118-D137)
 
 ## Codex-review rejection log (D135 step 5b)
-- (empty)
+- D91-M round 1: candidate-discovery pass for unknown formula features —
+  REJECTED (extract SHA-pinned by srd-extract-provenance.test.ts; formula
+  inventory design-time exhaustive). Defects 1-3 + 4a accepted and fixed.
+- D91-M round 2: word-overlap header-masking edge (Focus Uses/Focus Points)
+  — REJECTED (checksum test precedes the parser; realistic re-extract
+  failure covered by the fixed non-overlapping case; adversarial-input
+  construction, same rationale as round-1 4b). All four fixes verified
+  real by the reviewer. Round 2 otherwise CLEAN; unit proceeds to merge on
+  Playwright green (fix-gate: build 0, vitest 192/3,132, control 7-kill/
+  13-restore).
