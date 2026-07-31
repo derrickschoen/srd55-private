@@ -55,6 +55,7 @@ function terminalShell(
     text: heading,
     attributes: { tabindex: '-1' },
   });
+  panel.querySelector('h2')?.setAttribute('tabindex', '-1');
   return element('main', { className: 'level-up-shell' }, [
     element('header', { className: 'level-up-header' }, [routeHeading]),
     panel,
@@ -125,6 +126,7 @@ function disabledClassExplanations(
 /** Static route states. None of these panels exposes a command control. */
 export function renderLevelUpTerminalState(
   state: Exclude<LevelUpStateResult, { readonly kind: 'ready' }>,
+  resolutionSurface: readonly Node[] = [],
 ): HTMLElement {
   if (state.kind === 'not_found') {
     return terminalShell(
@@ -164,7 +166,7 @@ export function renderLevelUpTerminalState(
         'No held class can be guided',
         state.explanation,
         [characterListLink()],
-        [disabledClassExplanations(state)],
+        [disabledClassExplanations(state), ...resolutionSurface],
       ),
     );
   }
@@ -181,6 +183,7 @@ export function renderLevelUpTerminalState(
           `/characters/${String(state.character.character_id)}/sheet`,
         ),
       ],
+      resolutionSurface,
     ),
   );
 }

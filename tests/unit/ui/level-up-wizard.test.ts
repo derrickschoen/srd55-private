@@ -6,6 +6,7 @@ import {
   LEVEL_UP_RPC,
   matchesLevelUpRoute,
   type LevelUpGuideableClassOption,
+  type LevelUpPendingEpicResolution,
   type LevelUpPermanentWarning,
   type LevelUpStateResult,
   type LevelUpStep,
@@ -21,14 +22,17 @@ import type {
 } from '../../../src/domain/ids';
 import type { CharacterLevel } from '../../../src/domain/enums';
 import type { RpcClient } from '../../../src/rpc/client';
-import { parseRoute, type Router } from '../../../src/ui/router';
+import { parseRoute, Router } from '../../../src/ui/router';
 import {
   renderGainsStep,
 } from '../../../src/ui/screens/level-up/class-gains-steps';
 import {
   createLevelUpWizard,
 } from '../../../src/ui/screens/level-up/level-up-wizard';
-import { screen } from '../../../src/ui/screens/level-up/screen';
+import {
+  returnToLevelUpLaunchSurface,
+  screen,
+} from '../../../src/ui/screens/level-up/screen';
 import {
   elementText,
   installInteractiveDocument,
@@ -125,6 +129,25 @@ function classOption(options: {
   };
 }
 
+function pendingEpicResolution(): LevelUpPendingEpicResolution {
+  return {
+    deferred_choice: {
+      character_level_feat_choice_id: 19 as CharacterLevelFeatChoiceId,
+      class_definition_id: 11 as ClassDefinitionId,
+      class_name: 'Wizard',
+      class_level: 19 as ClassLevel,
+    },
+    additional_deferred_count: 0,
+    warning: {
+      key: 'epic_boon_deferred',
+      category: 'outstanding_choice',
+      title: 'Epic Boon choice still needed',
+    },
+    candidates: [],
+    applicable_steps: ['epic_boon', 'review', 'complete'],
+  };
+}
+
 function ready(options: {
   readonly classes?: Extract<LevelUpStateResult, { readonly kind: 'ready' }>['class_options'];
   readonly warnings?: readonly LevelUpPermanentWarning[];
@@ -141,22 +164,7 @@ function ready(options: {
     },
     class_options: options.classes ?? [classOption()],
     pending_epic_resolution: options.pendingEpic
-      ? {
-          deferred_choice: {
-            character_level_feat_choice_id: 19 as CharacterLevelFeatChoiceId,
-            class_definition_id: 11 as ClassDefinitionId,
-            class_name: 'Wizard',
-            class_level: 19 as ClassLevel,
-          },
-          additional_deferred_count: 0,
-          warning: {
-            key: 'epic_boon_deferred',
-            category: 'outstanding_choice',
-            title: 'Epic Boon choice still needed',
-          },
-          candidates: [],
-          applicable_steps: ['epic_boon', 'review', 'complete'],
-        }
+      ? pendingEpicResolution()
       : null,
   };
 }
@@ -182,6 +190,12 @@ function stepNames(view: HTMLElement): readonly string[] {
   return interactiveElement(view)
     .querySelectorAll(`[${LEVEL_UP_ATTR.step}]`)
     .map((item) => item.getAttribute(LEVEL_UP_ATTR.step) ?? '');
+}
+
+function currentRailStep(view: HTMLElement): string | null {
+  return interactiveElement(view)
+    .querySelector('[aria-current="step"]')
+    ?.getAttribute(LEVEL_UP_ATTR.step) ?? null;
 }
 
 describe('W-ROUTE-EXACT level-up route', () => {
@@ -300,6 +314,73 @@ describe('W-HP-UNKNOWN projected Gains', () => {
     expect(text).not.toContain('Projected maximum HP');
     expect(text).not.toContain('16');
   });
+
+  it('renders every asymmetric known Gains fixture field verbatim', () => {
+    const fixture = {
+      ...classOption({ name: 'Sentinel', current: 2 }),
+      hit_die: 12,
+      target_level: 4 as ClassLevel,
+      gains: {
+        current_class_level: 2 as ClassLevel,
+        target_class_level: 4 as ClassLevel,
+        current_total_level: 8 as CharacterLevel,
+        target_total_level: 9 as CharacterLevel,
+        hit_points: {
+          kind: 'known',
+          hit_die: 12,
+          fixed_class_base: 17,
+          constitution_modifier: -3,
+          class_hit_point_change: 23,
+          level_scaled_effects: [{
+            label: 'Sentinel level-scaled effect',
+            current_contribution: 29,
+            projected_contribution: 31,
+            change: -7,
+          }],
+          current_maximum: 37,
+          projected_maximum: { kind: 'known', value: 41 },
+        },
+        proficiency_bonus_change: { current: 5, projected: 11 },
+        target_features: {
+          kind: 'sourced',
+          feature_names: ['Sentinel feature alpha', 'Sentinel feature omega'],
+        },
+      },
+    } satisfies LevelUpGuideableClassOption;
+    const view = renderGainsStep(fixture);
+    const facts = interactiveElement(view).querySelector('dl');
+    expect(facts).not.toBeNull();
+    const rows: string[][] = [];
+    for (let index = 0; index < (facts?.children.length ?? 0); index += 2) {
+      rows.push([
+        elementText(facts!.children[index] as unknown as Node),
+        elementText(facts!.children[index + 1] as unknown as Node),
+      ]);
+    }
+
+    expect(
+      elementText(interactiveElement(view).children[1] as unknown as Node),
+    ).toBe('Sentinel 2 → 4; total level 8 → 9.');
+    expect(rows).toEqual([
+      ['Hit die', 'd12'],
+      ['Fixed class base', '17'],
+      ['Constitution modifier', '-3'],
+      ['Class HP change (minimum 1)', '+23'],
+      ['Sentinel level-scaled effect', '29 → 31 (-7)'],
+      ['Current maximum HP', '37'],
+      ['Projected maximum HP', '41'],
+    ]);
+    expect(
+      interactiveElement(view)
+        .querySelectorAll('p')
+        .map((paragraph) => elementText(paragraph as unknown as Node)),
+    ).toContain('Proficiency bonus: +5 → +11');
+    expect(
+      interactiveElement(view)
+        .querySelectorAll('li')
+        .map((item) => elementText(item as unknown as Node)),
+    ).toEqual(['Sentinel feature alpha', 'Sentinel feature omega']);
+  });
 });
 
 describe('W-FOCUS navigation and errors', () => {
@@ -307,15 +388,25 @@ describe('W-FOCUS navigation and errors', () => {
     const wizard = createLevelUpWizard({ state: ready(), cancel: () => undefined });
     wizard.focusInitial();
     expect(interactiveElement(document.activeElement as unknown as Node).tagName).toBe('h1');
+    expect(
+      interactiveElement(document.activeElement as unknown as Node).getAttribute('tabindex'),
+    ).toBe('-1');
+    expect(currentRailStep(wizard.element)).toBe('class');
 
     click(wizard.element, LEVEL_UP_ATTR.next);
     expect(elementText(document.activeElement as unknown as Node)).toBe('Review level gains');
+    expect(
+      interactiveElement(document.activeElement as unknown as Node).getAttribute('tabindex'),
+    ).toBe('-1');
+    expect(currentRailStep(wizard.element)).toBe('gains');
 
     click(wizard.element, LEVEL_UP_ATTR.next);
     expect(elementText(document.activeElement as unknown as Node)).toBe('Review');
+    expect(currentRailStep(wizard.element)).toBe('review');
 
     click(wizard.element, LEVEL_UP_ATTR.back);
     expect(elementText(document.activeElement as unknown as Node)).toBe('Review level gains');
+    expect(currentRailStep(wizard.element)).toBe('gains');
     wizard.cleanup();
   });
 
@@ -329,6 +420,7 @@ describe('W-FOCUS navigation and errors', () => {
     const alert = interactiveElement(wizard.element).querySelector('[role="alert"]');
     expect(alert).not.toBeNull();
     expect(document.activeElement).toBe(alert);
+    expect(alert?.getAttribute('tabindex')).toBe('-1');
     expect(elementText(alert as unknown as Node)).toContain('Choose a guideable held class');
     expect(
       wizard.element.querySelector(
@@ -343,7 +435,7 @@ describe('W-FOCUS navigation and errors', () => {
     wizard.cleanup();
   });
 
-  it('labels class and subclass radios through native labels', () => {
+  it('gives class and subclass controls exact accessible names', () => {
     const option = classOption({
       steps: ['class', 'gains', 'subclass', 'review', 'complete'],
       subclass: true,
@@ -355,20 +447,20 @@ describe('W-FOCUS navigation and errors', () => {
     const classRadio = interactiveElement(wizard.element).querySelector('[type="radio"]');
     expect(classRadio).not.toBeNull();
     expect(classRadio?.tagName).toBe('input');
-    expect(
-      interactiveElement(wizard.element)
-        .querySelectorAll('label')
-        .flatMap((label) => label.querySelectorAll('[type="radio"]')),
-    ).toContain(classRadio);
+    expect(classRadio?.getAttribute('aria-label')).toBe(
+      'Wizard 1 → 2, 2024 rules, d6 hit die',
+    );
 
     click(wizard.element, LEVEL_UP_ATTR.next);
     click(wizard.element, LEVEL_UP_ATTR.next);
     const subclassRadios = interactiveElement(wizard.element).querySelectorAll('[type="radio"]');
     expect(subclassRadios).toHaveLength(2);
-    const labelledSubclassRadios = interactiveElement(wizard.element)
-      .querySelectorAll('label')
-      .flatMap((label) => label.querySelectorAll('[type="radio"]'));
-    expect(labelledSubclassRadios).toHaveLength(2);
+    expect(
+      subclassRadios.map((radio) => radio.getAttribute('aria-label')),
+    ).toEqual([
+      'Abjurer — Wizard, 2024 rules',
+      'Decide later',
+    ]);
     expect(elementText(wizard.element)).toContain('Abjurer — Wizard, 2024 rules');
     expect(elementText(wizard.element)).toContain('Decide later');
     wizard.cleanup();
@@ -484,6 +576,121 @@ describe('D118 and D119 route choices', () => {
     expect(wizard.element.querySelector('input')).toBeNull();
     expect(wizard.element.querySelector(`[${LEVEL_UP_ATTR.next}]`)).toBeNull();
     wizard.cleanup();
+  });
+
+  it.each([
+    {
+      label: 'no-guideable-class',
+      state: {
+        kind: 'no_guideable_class',
+        character: {
+          character_id: 7 as CharacterId,
+          name: 'No Die Epic Character',
+          revision: 1 as CharacterRevision,
+          total_level: 19 as CharacterLevel,
+          warnings: [],
+        },
+        explanation: 'No held class has a recorded hit die.',
+        class_options: [{
+          guideability: 'disabled',
+          class_definition_id: 44 as ClassDefinitionId,
+          content_key: 'test:class:no-die' as ContentKey,
+          name: 'Unrecorded Class',
+          rules_edition: '2024',
+          current_level: 19 as ClassLevel,
+          hit_die: null,
+          current_subclass: null,
+          reason: 'missing_hit_die',
+          explanation: 'Fixed HP cannot be derived.',
+        }],
+        pending_epic_resolution: pendingEpicResolution(),
+      } satisfies LevelUpStateResult,
+    },
+    {
+      label: 'maximum-level',
+      state: {
+        kind: 'maximum_level',
+        character: {
+          character_id: 7 as CharacterId,
+          name: 'Maximum Epic Character',
+          revision: 20 as CharacterRevision,
+          total_level: 20,
+          warnings: [],
+        },
+        held_classes: [],
+        pending_epic_resolution: pendingEpicResolution(),
+      } satisfies LevelUpStateResult,
+    },
+  ])('keeps the deferred Epic resolution path reachable from $label without rendering boon cards', ({ state }) => {
+    const wizard = createLevelUpWizard({ state, cancel: () => undefined });
+
+    expect(elementText(wizard.element)).toContain('Resolve the Epic Boon now');
+    expect(
+      interactiveElement(wizard.element)
+        .querySelector('[name="pending-epic-path"]')
+        ?.getAttribute('value'),
+    ).toBe('resolve_now');
+    expect(
+      interactiveElement(wizard.element).querySelector('[value="next_level"]'),
+    ).toBeNull();
+    expect(wizard.element.querySelector(`[${LEVEL_UP_ATTR.featOption}]`)).toBeNull();
+
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    expect(
+      wizard.element.querySelector(
+        `[${LEVEL_UP_PANEL_ATTRIBUTE}="${LEVEL_UP_PANEL.epicBoon}"]`,
+      ),
+    ).not.toBeNull();
+    expect(wizard.element.querySelector(`[${LEVEL_UP_ATTR.featOption}]`)).toBeNull();
+    wizard.cleanup();
+  });
+});
+
+describe('§3.1 Cancel returns to its launch surface', () => {
+  it('uses browser Back for a same-origin in-app launch and the sheet fallback for direct entry', () => {
+    const back = vi.fn();
+    const fallback = vi.fn();
+    const location = {
+      href: 'https://level-up.test/characters/7/sheet',
+      origin: 'https://level-up.test',
+    };
+    const history = {
+      state: null as unknown,
+      pushState(state: unknown, _unused: string, url: URL): void {
+        this.state = state;
+        location.href = String(url);
+      },
+      replaceState(state: unknown, _unused: string, url: URL): void {
+        this.state = state;
+        location.href = String(url);
+      },
+      back,
+    };
+    const router = new Router({
+      location,
+      history,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    } as unknown as Window);
+    router.navigate('/characters/7/level-up');
+    returnToLevelUpLaunchSurface({
+      historyState: history.state,
+      currentOrigin: location.origin,
+      back: () => history.back(),
+      fallback,
+    });
+    expect(back).toHaveBeenCalledOnce();
+    expect(fallback).not.toHaveBeenCalled();
+
+    back.mockClear();
+    returnToLevelUpLaunchSurface({
+      historyState: null,
+      currentOrigin: 'https://level-up.test',
+      back,
+      fallback,
+    });
+    expect(back).not.toHaveBeenCalled();
+    expect(fallback).toHaveBeenCalledOnce();
   });
 });
 

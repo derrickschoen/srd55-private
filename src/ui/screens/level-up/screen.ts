@@ -1,9 +1,23 @@
 import { matchesLevelUpRoute } from '../../../builder/level-up-wizard';
 import { createQueriesClient } from '../../../queries/client';
+import { hasSameOriginInAppHistory } from '../../router';
 import { defineScreen, type ScreenContext } from '../../screen';
 import { renderLevelUpLoading } from './level-up-shell';
 import { createLevelUpWizard } from './level-up-wizard';
 import './styles.css';
+
+export function returnToLevelUpLaunchSurface(options: {
+  readonly historyState: unknown;
+  readonly currentOrigin: string;
+  readonly back: () => void;
+  readonly fallback: () => void;
+}): void {
+  if (hasSameOriginInAppHistory(options.historyState, options.currentOrigin)) {
+    options.back();
+    return;
+  }
+  options.fallback();
+}
 
 async function render(context: ScreenContext): Promise<() => void> {
   const characterId = matchesLevelUpRoute(context.route.path);
@@ -15,9 +29,14 @@ async function render(context: ScreenContext): Promise<() => void> {
   const state = await createQueriesClient(context.rpc).levelUpState(characterId);
   const wizard = createLevelUpWizard({
     state,
-    cancel: () => context.router.navigate(
-      `/characters/${String(characterId)}/sheet`,
-    ),
+    cancel: () => returnToLevelUpLaunchSurface({
+      historyState: window.history.state,
+      currentOrigin: window.location.origin,
+      back: () => window.history.back(),
+      fallback: () => context.router.navigate(
+        `/characters/${String(characterId)}/sheet`,
+      ),
+    }),
   });
   context.root.replaceChildren(wizard.element);
   document.title = state.kind === 'not_found'

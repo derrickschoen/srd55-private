@@ -4,6 +4,7 @@ import {
   LEVEL_UP_PANEL_ATTRIBUTE,
   type LevelUpGuideableClassOption,
   type LevelUpDisabledClassOption,
+  type LevelUpPendingEpicResolution,
   type LevelUpPermanentWarning,
   type LevelUpStateResult,
 } from '../../../builder/level-up-wizard';
@@ -21,6 +22,69 @@ export type SubclassDraft =
 export interface LevelUpStepView {
   readonly element: HTMLElement;
   readonly cleanup: Cleanup;
+}
+
+export function createPendingEpicPathChoice(options: {
+  readonly pending: LevelUpPendingEpicResolution;
+  readonly selectedPath: PendingEpicPath | null;
+  readonly allowNextLevel: boolean;
+  readonly onSelect: (path: PendingEpicPath) => void;
+}): LevelUpStepView {
+  const cleanups: Cleanup[] = [];
+  const resolve = element('input', {
+    attributes: {
+      id: 'level-up-resolve-epic-now',
+      type: 'radio',
+      name: 'pending-epic-path',
+      value: 'resolve_now',
+      ...checkedAttributes(options.selectedPath === 'resolve_now'),
+    },
+  });
+  cleanups.push(
+    listen(resolve, 'change', () => {
+      if (resolve.checked) options.onSelect('resolve_now');
+    }),
+  );
+
+  const nextLevel = options.allowNextLevel
+    ? (() => {
+        const proceed = element('input', {
+          attributes: {
+            id: 'level-up-proceed-next-level',
+            type: 'radio',
+            name: 'pending-epic-path',
+            value: 'next_level',
+            ...checkedAttributes(options.selectedPath === 'next_level'),
+          },
+        });
+        cleanups.push(
+          listen(proceed, 'change', () => {
+            if (proceed.checked) options.onSelect('next_level');
+          }),
+        );
+        return element('label', {}, [
+          proceed,
+          element('span', { text: 'Proceed to the next level' }),
+        ]);
+      })()
+    : null;
+
+  return {
+    element: element('fieldset', { className: 'level-up-epic-paths' }, [
+      element('legend', { text: options.pending.warning.title }),
+      element('p', {
+        text: options.allowNextLevel
+          ? 'Choose what this visit should do. The deferred warning remains until the boon is resolved.'
+          : 'Further level progression is unavailable, but the deferred Epic Boon can still be resolved.',
+      }),
+      element('label', {}, [
+        resolve,
+        element('span', { text: 'Resolve the Epic Boon now' }),
+      ]),
+      ...(nextLevel === null ? [] : [nextLevel]),
+    ]),
+    cleanup: () => cleanups.forEach((cleanup) => cleanup()),
+  };
 }
 
 function checkedAttributes(checked: boolean): Readonly<Record<string, string>> {
@@ -113,6 +177,7 @@ export function createClassStep(options: {
         type: 'radio',
         name: 'level-up-class',
         value: String(classOption.class_definition_id),
+        'aria-label': `${classOption.name} ${String(classOption.current_level)} → ${String(classOption.target_level)}, ${classOption.rules_edition} rules, d${String(classOption.hit_die)} hit die`,
         [LEVEL_UP_ATTR.classOption]: String(classOption.class_definition_id),
         ...checkedAttributes(
           classOption.class_definition_id === options.selectedClassId,
@@ -142,42 +207,15 @@ export function createClassStep(options: {
   const pending = options.state.pending_epic_resolution;
   const epicChoice = pending === null
     ? null
-    : (() => {
-        const resolve = element('input', {
-          attributes: {
-            id: 'level-up-resolve-epic-now',
-            type: 'radio',
-            name: 'pending-epic-path',
-            value: 'resolve_now',
-            ...checkedAttributes(options.pendingEpicPath === 'resolve_now'),
-          },
-        });
-        const proceed = element('input', {
-          attributes: {
-            id: 'level-up-proceed-next-level',
-            type: 'radio',
-            name: 'pending-epic-path',
-            value: 'next_level',
-            ...checkedAttributes(options.pendingEpicPath === 'next_level'),
-          },
-        });
-        cleanups.push(
-          listen(resolve, 'change', () => {
-            if (resolve.checked) options.onSelectPendingEpicPath('resolve_now');
-          }),
-          listen(proceed, 'change', () => {
-            if (proceed.checked) options.onSelectPendingEpicPath('next_level');
-          }),
-        );
-        return element('fieldset', { className: 'level-up-epic-paths' }, [
-          element('legend', { text: pending.warning.title }),
-          element('p', {
-            text: 'Choose what this visit should do. The deferred warning remains until the boon is resolved.',
-          }),
-          element('label', {}, [resolve, element('span', { text: 'Resolve the Epic Boon now' })]),
-          element('label', {}, [proceed, element('span', { text: 'Proceed to the next level' })]),
-        ]);
-      })();
+    : createPendingEpicPathChoice({
+        pending,
+        selectedPath: options.pendingEpicPath,
+        allowNextLevel: true,
+        onSelect: options.onSelectPendingEpicPath,
+      });
+  if (epicChoice !== null) {
+    cleanups.push(epicChoice.cleanup);
+  }
   const warnings = warningList(options.state.character.warnings);
 
   return {
@@ -196,7 +234,7 @@ export function createClassStep(options: {
           element('legend', { text: 'Class to advance' }),
           ...classCards,
         ]),
-        ...(epicChoice === null ? [] : [epicChoice]),
+        ...(epicChoice === null ? [] : [epicChoice.element]),
         ...(warnings === null ? [] : [warnings]),
         element('p', { className: 'level-up-advanced-link' }, [
           element('a', {
@@ -321,6 +359,7 @@ export function createSubclassStep(options: {
         type: 'radio',
         name: 'level-up-subclass',
         value: String(subclass.subclass_definition_id),
+        'aria-label': `${subclass.name} — ${selectedClassName(options.selectedClass)}, ${subclass.rules_edition} rules`,
         ...checkedAttributes(
           options.draft.kind === 'selected' &&
           options.draft.subclass_definition_id === subclass.subclass_definition_id,
@@ -350,6 +389,7 @@ export function createSubclassStep(options: {
       type: 'radio',
       name: 'level-up-subclass',
       value: 'decide_later',
+      'aria-label': 'Decide later',
       ...checkedAttributes(options.draft.kind === 'decide_later'),
     },
   });
