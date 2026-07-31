@@ -11,8 +11,14 @@ supervisor-verified (post-merge main vitest 192/3,132 exit 0).
 ## In flight
 - TRACK M (wt/attunement at 5841448): EXP-URL dispatching (doc-only, log
   expurl.log). Then FF-A (briefs/ff-a.md, port 44480) once EXP-URL merges.
-- TRACK W (wt/print): W-B1 implementing (task bn5hhjof9, log wb1.log, port
-  44471). Gate on landing; then W-B2 (briefs/w-b2.md).
+- TRACK W (wt/print): W-B1 gate ran (touched-set exact, scans 0, build 0,
+  merged vitest 193/3,150, D119 control both directions). D135 review round
+  1: 1 High (terminal states drop pending_epic_resolution — D118 violation,
+  verified at level-up-wizard.ts:51 vs seam lines 431/437/445) + 3 Medium
+  (Cancel hardcoded vs launch surface; Gains not falsifiable; permissive
+  a11y tests) — ALL FOUR ACCEPTED, none rejected. W-B1-FIX dispatched (log
+  wb1-fix.log, port 44496). Re-gate after: vitest + control re-run +
+  Playwright 44496 + round-2 review. Then W-B2 (briefs/w-b2.md).
 - TRACK S (wt/pwa at 5841448): D91-R dispatching (briefs/d91-r.md, port
   44477, log d91r.log). Then FIX-ATTR, RESP-1, BANNER per HANDOVER §5.
 
