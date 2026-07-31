@@ -307,9 +307,9 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
     id: '0026_class_resources',
     sql: classResources,
     checksum:
-      'f15587dba99fe80bb25a97d9624fadff61d1358619e05a919020692b3da34634',
+      'c34ec3c9475ce1d23e0b567164c2748a2c736d5fe62279e5073fc9ee13b818c0',
     resultSchemaChecksum:
-      '22fb86288181f29d95f6978ca021781e61ea0328af386a885a9cad939028fbfc',
+      'b3996db678f8633730fc0c399c42b5073098fbd2f978caa054c9523c3c5e10d3',
   }),
 ]);
 

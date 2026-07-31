@@ -89,7 +89,27 @@ describe('SRD class resource source parsers', () => {
       monkLevelTwo.replace('1d6           2          +10 ft.', '1d6         two          +10 ft.'),
     );
     expect(() => parseSrdClassResourceManifest(nonInteger)).toThrow(
-      'Monk level 2 has no Focus Points value',
+      'Monk level 2 Focus Points is not an integer count',
+    );
+  });
+
+  it('rejects a decimal resource cell as a non-integer complete cell token', () => {
+    const mutated = classLevelTables.replace(
+      '1d6           2          +10 ft.',
+      '1d6         2.5          +10 ft.',
+    );
+    expect(() => parseSrdClassResourceManifest(mutated)).toThrow(
+      'Monk level 2 Focus Points is not an integer count',
+    );
+  });
+
+  it('rejects a literal zero where only a pre-acquisition dash is valid', () => {
+    const mutated = classLevelTables.replace(
+      '1d6          —             —',
+      '1d6          0             —',
+    );
+    expect(() => parseSrdClassResourceManifest(mutated)).toThrow(
+      'Monk level 1 must use a dash before Focus Points is acquired',
     );
   });
 
@@ -100,6 +120,16 @@ describe('SRD class resource source parsers', () => {
     );
     expect(() => parseSrdClassResourceManifest(mutated)).toThrow(
       'Rogue has unexpected resource-like headers',
+    );
+  });
+
+  it('rejects a known and unexpected resource-like header on the same class table', () => {
+    const mutated = classLevelTables.replace(
+      'Rages      Damage',
+      'Rages      Fury Uses      Damage',
+    );
+    expect(() => parseSrdClassResourceManifest(mutated)).toThrow(
+      'Barbarian table resource headers are ["Rages","Fury Uses"]',
     );
   });
 
@@ -141,6 +171,23 @@ describe('SRD class resource source parsers', () => {
     const mutated = srdFullText.replace('(minimum of once)', '(at least once)');
     expect(() => parseSrdClassResourceFormulaManifest(mutated)).toThrow(
       'Level 1: Bardic Inspiration no longer matches its cited source phrase',
+    );
+  });
+
+  it('rejects Bardic Inspiration when its feature heading moves under Cleric', () => {
+    const withoutBardicHeading = srdFullText.replace(
+      'Level 1: Bardic Inspiration',
+      'Level 1: Displaced Inspiration',
+    );
+    const clericStart = withoutBardicHeading.indexOf('Cleric Class Features');
+    expect(clericStart).toBeGreaterThanOrEqual(0);
+    const mutated = withoutBardicHeading.slice(0, clericStart) +
+      withoutBardicHeading.slice(clericStart).replace(
+        'Level 1: Spellcasting',
+        'Level 1: Bardic Inspiration',
+      );
+    expect(() => parseSrdClassResourceFormulaManifest(mutated)).toThrow(
+      'Level 1: Bardic Inspiration occurs outside the Bard class section',
     );
   });
 

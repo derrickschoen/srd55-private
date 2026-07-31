@@ -56,7 +56,7 @@ export const class_resources = sqliteTable(
     ),
     check(
       'class_resources_level_maximum_check',
-      sql`class_level BETWEEN 1 AND 20 AND ${integerAtLeast('maximum', 0)}`,
+      sql`typeof(class_level) = 'integer' AND class_level BETWEEN 1 AND 20 AND ${integerAtLeast('maximum', 0)}`,
     ),
     uniqueIndex(
       'class_resources_class_definition_id_class_level_resource_kind_unique',
@@ -99,7 +99,7 @@ export const class_resource_formulas = sqliteTable(
     ),
     check(
       'class_resource_formulas_level_check',
-      sql`minimum_class_level BETWEEN 1 AND 20`,
+      sql`typeof(minimum_class_level) = 'integer' AND minimum_class_level BETWEEN 1 AND 20`,
     ),
     check(
       'class_resource_formulas_fixed_count_check',
