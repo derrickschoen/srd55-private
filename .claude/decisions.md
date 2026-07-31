@@ -7,6 +7,25 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D138 — OWNER: homebrew fix flow gets apply-to-all AND delete-with-characters (2026-07-31)
+
+Amends the HA design's strict lifecycle. (1) The fix-review screen gains an
+explicit "apply to all listed characters" action (before/after still shown;
+nothing silent). (2) A user may DELETE a homebrew creation along with all
+characters attached to it. Mechanism must reconcile with D99
+archive-before-purge: the supervisor's taken-for-now reading is that the
+cascade archives the creation and its attached characters as one restorable
+set, and permanent purge from the archive view purges the set; the HA-11
+design work pins the details. Unreferenced published content is deletable.
+
+## D139 — OWNER: character export carries its OWN closure; library export is separate (2026-07-31)
+
+Resolves D81's "all". A single-character export carries exactly the
+character's homebrew reference closure — unrelated library content stays
+home. A SEPARATE library-export feature allows exporting the whole library
+or a selected subset of creations. CI-5's backup format and the HA
+portability units implement both.
+
 ## D134 — OWNER: Focus Points print as a Remaining-field (2026-07-31)
 
 Closes the S1 default. Monk focus_points joins lay_on_hands and
