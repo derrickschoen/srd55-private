@@ -310,10 +310,10 @@ export const COVERAGE: readonly CoverageFact[] = [
  * built a character sheet screen with derived hit points, Armor Class, skills
  * and saves, so the statement outlived its subject (D29's shape) while a test
  * pinned it. What is still true is the SCOPE OF THIS REFERENCE — it projects
- * the planner — and that is what the sentence says now.
+ * the SRD-55 planner screen — and that is what the sentence says now.
  */
 const SCOPE_STATEMENT =
-  'This reference is a projection of the SPELL PLANNER screen. The same ' +
+  'This reference is a projection of the SRD-55 planner screen. The same ' +
   'database also feeds a character sheet screen, which is a different ' +
   'projection and is not carried here. The coverage table below is therefore a ' +
   'claim about the APPLICATION rather than about this page: a concept marked ' +

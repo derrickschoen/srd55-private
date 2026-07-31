@@ -25,7 +25,7 @@ lines in `_headers` show how to enable `SharedArrayBuffer` later if ever needed.
 ### Option B — Direct upload via Wrangler CLI (no GitHub needed)
 ```bash
 npm run build
-npx wrangler pages deploy dist --project-name dnd-multiclass-spells-static
+npx wrangler pages deploy dist --project-name srd-55
 ```
 First run prompts a Cloudflare login and creates the project.
 

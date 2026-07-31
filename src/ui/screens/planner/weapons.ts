@@ -40,10 +40,10 @@ import {
  * by accessible name must be able to do everything a mouse can.
  *
  * COPY CONSTRAINT, NOT A STYLE PREFERENCE. `tests/browser/attribution.spec.ts`
- * asserts that `/D&D|Dungeons|Wizards/` appears in neither the page title nor
- * the body text, because the licence asks that no attribution to the licensor
- * appear beyond the required notice. Every string in this file is written under
- * that rule: the picker says "Simple Melee", never anything carrying a
+ * asserts that licensor wordmarks appear in neither the page title nor the body
+ * text, because the licence asks that no attribution to the licensor appear
+ * beyond the required notice. Every string in this file is written under that
+ * rule: the picker says "Simple Melee", never anything carrying a
  * wordmark.
  */
 
