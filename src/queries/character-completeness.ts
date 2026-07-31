@@ -581,9 +581,10 @@ export const noClass: CompletenessCheck = {
  * but the player knows what they rolled, which skills they picked, or which
  * class a stale roll belonged to. What the application itself does not hold —
  * class feature text, subclass coverage, Expertise — is stated by `SHEET_GAPS`
- * in `src/queries/character-sheet-builder.ts` and printed on the sheet, because
- * it is true of every character equally and would otherwise put six permanent
- * entries in everybody's outstanding list forever.
+ * in `src/queries/character-sheet-builder.ts` and printed on the sheet. Those
+ * application-wide gaps would otherwise put permanent entries in everybody's
+ * outstanding list forever; the one character-dependent D102 disclosure is
+ * selected beside the stored feature prose that makes it relevant.
  */
 export const orphanHitPointRolls: CompletenessCheck = {
   id: 'orphan_hit_point_roll',

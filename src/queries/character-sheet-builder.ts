@@ -99,10 +99,11 @@ import {
  * Every displayed value and its adjacent control comes from here.
  *
  * IT STATES WHAT IT LACKS. `gaps` is not decoration and not an error list: F4
- * forbids rendering a blank box that reads as "none", and this application has
- * no class feature text at all, subclass content for two classes of twelve, and
- * no way to know whether a character is proficient with a weapon. Each of those
- * is named here so the page can print the sentence rather than the silence.
+ * forbids rendering a blank box that reads as "none". Most gaps are
+ * application-wide; the languages/tools gap is selected only when this
+ * character carries printed prose that grants one, because D102 says a
+ * disclosure on an unaffected character is noise. Each selected gap is named
+ * here so the page can print the sentence rather than the silence.
  */
 
 export interface SheetNumber {
@@ -164,6 +165,20 @@ export interface SheetItemRow {
   readonly description: string | null;
   readonly requires_attunement: boolean;
   readonly attuned: boolean;
+}
+
+/**
+ * Printed source prose the sheet preserves without interpreting.
+ *
+ * D102 deliberately keeps language and tool proficiencies out of the character
+ * model. This is therefore readable free text only: it never enters
+ * `sheetFacts`, never appears as a proficiency line, and never drives a number.
+ */
+export interface SheetPrintedFeature {
+  readonly source: 'background' | 'species_trait';
+  readonly source_name: string | null;
+  readonly name: string;
+  readonly text: string | null;
 }
 
 export interface SheetArmorClassFormula {
@@ -279,6 +294,7 @@ export interface SheetGap {
     | 'no_class_feature_text'
     | 'partial_subclass_catalog'
     | 'no_expertise'
+    | 'languages_and_tools_not_modelled'
     | 'weapon_reach_not_recorded'
     | 'gear_not_itemised';
   readonly title: string;
@@ -342,6 +358,8 @@ export interface CharacterSheet {
   readonly proficiencies: SheetProficiencies;
   readonly armor: readonly SheetArmorRow[];
   readonly items: readonly SheetItemRow[];
+  /** Printed background/species prose; deliberately absent from `sheetFacts`. */
+  readonly printed_features: readonly SheetPrintedFeature[];
   readonly hit_point_rolls: readonly SheetHitPointRoll[];
   /** The recorded package choices, D33's answer to a blank inventory (D65). */
   readonly equipment_packages: readonly SheetEquipmentPackage[];
@@ -448,14 +466,13 @@ const sheetClassRow: RowCodec<SheetClassJoinRow> = (row) => ({
 });
 
 /**
- * The gaps, stated once.
+ * The gap vocabulary, stated once.
  *
- * EVERY ONE IS TRUE OF EVERY CHARACTER, which is why they are a constant rather
- * than a query: none depends on what this character has done. The two that
- * depend on the CATALOG — feature text and subclass coverage — are stated
- * unconditionally because both are absent for every character in every install
- * that has not imported extra content, and a check that happened to pass on a
- * Fighter would hide the fact that it fails on the other ten classes.
+ * Most entries are true of every character. The D102 languages/tools entry is
+ * the one conditional member: it is selected only when stored background or
+ * species feature prose actually mentions such a grant. `SHEET_GAPS` remains
+ * the complete vocabulary so F15 can bind every agent-facing enumeration to
+ * these stable kinds; `sheetGaps` chooses which entries this character reads.
  */
 export const SHEET_GAPS: readonly SheetGap[] = Object.freeze([
   {
@@ -483,6 +500,15 @@ export const SHEET_GAPS: readonly SheetGap[] = Object.freeze([
       'Rogue and Bard Expertise doubles the proficiency bonus on chosen ' +
       'skills. That feature text is not among this application’s ' +
       'sources, so every skill below adds the plain bonus once.',
+  },
+  {
+    kind: 'languages_and_tools_not_modelled',
+    title: 'Languages and tool proficiencies are not modelled',
+    detail:
+      'This application does not record language or tool proficiency choices ' +
+      'as character facts and does not apply them mechanically. Read the ' +
+      'printed background and species feature text above for the grants this ' +
+      'character has.',
   },
   {
     // RENAMED AND REWRITTEN BY D27/D28, NOT DELETED. Half of what this gap said
@@ -522,6 +548,32 @@ export const SHEET_GAPS: readonly SheetGap[] = Object.freeze([
       'equipment is the package only, with no gold alternative.',
   },
 ]);
+
+const LANGUAGE_OR_TOOL_GAP_KIND =
+  'languages_and_tools_not_modelled' as const;
+const LANGUAGE_OR_TOOL_WORD = /\b(?:languages?|tools?)\b/iu;
+
+/**
+ * Select the D102 disclosure without turning its source prose into a fact.
+ *
+ * The text check is intentionally narrow and local. D102 forbids minting a
+ * structured language/tool grant, while also requiring the gap only when the
+ * character carries granting prose. This predicate decides disclosure
+ * presence; it never awards a proficiency or changes a derived value.
+ */
+function mentionsLanguageOrTool(text: string | null): boolean {
+  return text !== null && LANGUAGE_OR_TOOL_WORD.test(text);
+}
+
+export function sheetGaps(
+  hasLanguageOrToolGrantText: boolean,
+): readonly SheetGap[] {
+  return hasLanguageOrToolGrantText
+    ? SHEET_GAPS
+    : SHEET_GAPS.filter(
+        (gap) => gap.kind !== LANGUAGE_OR_TOOL_GAP_KIND,
+      );
+}
 
 /**
  * Reads one stored enum column, SAYING SO when the stored value is not in the
@@ -587,6 +639,7 @@ export class CharacterSheetBuilder {
     const content = this.#content.forCharacter(characterId);
     const classes = this.#classes(characterId, content);
     const rolls = this.#rolls(characterId);
+    const printedFeatures = this.#printedFeatures(characterId);
     const proficientSkills = this.#skillProficiencies(characterId);
     const stored = this.#armor(characterId);
     const armorRows = stored.rows;
@@ -836,6 +889,7 @@ export class CharacterSheetBuilder {
       })),
       armor: armorRows,
       items: this.#items(characterId),
+      printed_features: printedFeatures.features,
       hit_point_rolls: rolls.list,
       // Read through E-B's one recorded-package reader — the same source
       // resolution, choice reader and coin-line display filter the equipment
@@ -869,7 +923,7 @@ export class CharacterSheetBuilder {
         ...saves.warnings,
         ...proficiencies.warnings,
       ]),
-      gaps: SHEET_GAPS,
+      gaps: sheetGaps(printedFeatures.has_language_or_tool_grant_text),
     };
   }
 
@@ -1147,6 +1201,83 @@ export class CharacterSheetBuilder {
         attuned: sqlBoolean(row, 'attuned'),
       }),
     );
+  }
+
+  #printedFeatures(characterId: number): {
+    readonly features: readonly SheetPrintedFeature[];
+    readonly has_language_or_tool_grant_text: boolean;
+  } {
+    const features: SheetPrintedFeature[] = [];
+    let hasLanguageOrToolGrantText = false;
+    const background = this.db.one(
+      `SELECT name, tool_proficiency, notes
+       FROM character_background
+       WHERE character_id = ?`,
+      [characterId],
+      (row) => ({
+        name: sqlString(row, 'name'),
+        tool_proficiency: sqlNullableString(row, 'tool_proficiency'),
+        notes: sqlNullableString(row, 'notes'),
+      }),
+    );
+    if (background !== null) {
+      if (
+        background.tool_proficiency !== null &&
+        background.tool_proficiency.trim() !== ''
+      ) {
+        features.push({
+          source: 'background',
+          source_name: background.name,
+          name: 'Tool Proficiency',
+          text: background.tool_proficiency,
+        });
+        hasLanguageOrToolGrantText = true;
+      }
+      if (background.notes !== null && background.notes.trim() !== '') {
+        features.push({
+          source: 'background',
+          source_name: background.name,
+          name: 'Background notes',
+          text: background.notes,
+        });
+        hasLanguageOrToolGrantText ||= mentionsLanguageOrTool(
+          background.notes,
+        );
+      }
+    }
+
+    const speciesTraits = this.db.all(
+      `SELECT species.name AS species_name,
+              trait.name AS trait_name,
+              trait.description AS trait_description
+       FROM character_species_traits AS trait
+       LEFT JOIN character_species AS species
+         ON species.character_id = trait.character_id
+       WHERE trait.character_id = ?
+       ORDER BY trait.sort_order, trait.id`,
+      [characterId],
+      (row) => ({
+        species_name: sqlNullableString(row, 'species_name'),
+        trait_name: sqlString(row, 'trait_name'),
+        trait_description: sqlNullableString(row, 'trait_description'),
+      }),
+    );
+    for (const trait of speciesTraits) {
+      features.push({
+        source: 'species_trait',
+        source_name: trait.species_name,
+        name: trait.trait_name,
+        text: trait.trait_description,
+      });
+      hasLanguageOrToolGrantText ||=
+        mentionsLanguageOrTool(trait.trait_name) ||
+        mentionsLanguageOrTool(trait.trait_description);
+    }
+
+    return {
+      features,
+      has_language_or_tool_grant_text: hasLanguageOrToolGrantText,
+    };
   }
 }
 

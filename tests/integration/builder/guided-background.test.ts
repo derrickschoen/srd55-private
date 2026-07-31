@@ -111,7 +111,7 @@ function selectedBackgroundColumns(
 }
 
 describe('guided background application', () => {
-  it('copies exactly one template row while leaving the real sheet unchanged', async () => {
+  it('copies exactly one template row while changing only the sheet’s printed prose and applicable gap', async () => {
     const rpcHarness = await applicationDatabase();
     const db = rpcHarness.context.db;
     const background = backgroundAt(backgrounds(rpcHarness), 0);
@@ -151,7 +151,33 @@ describe('guided background application', () => {
         characterId,
       ),
     ).toEqual(template);
-    expect(new CharacterSheetBuilder(db).build(characterId)).toEqual(before);
+    const after = new CharacterSheetBuilder(db).build(characterId);
+    const {
+      printed_features: beforePrintedFeatures,
+      gaps: beforeGaps,
+      ...beforeMechanical
+    } = before;
+    const {
+      printed_features: afterPrintedFeatures,
+      gaps: afterGaps,
+      ...afterMechanical
+    } = after;
+    expect(afterMechanical).toEqual(beforeMechanical);
+    expect(beforePrintedFeatures).toEqual([]);
+    expect(afterPrintedFeatures).toEqual([
+      {
+        source: 'background',
+        source_name: 'Acolyte',
+        name: 'Tool Proficiency',
+        text: 'Calligrapher’s Supplies',
+      },
+    ]);
+    expect(beforeGaps.map((gap) => gap.kind)).not.toContain(
+      'languages_and_tools_not_modelled',
+    );
+    expect(afterGaps.map((gap) => gap.kind)).toContain(
+      'languages_and_tools_not_modelled',
+    );
   });
 
   it('replaces the background and spares species, effects, and proficiencies that background apply never wrote', async () => {
