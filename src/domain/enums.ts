@@ -56,14 +56,22 @@ export const featAbilityPoints = [0, 1, 2] as const;
 export type FeatAbilityPoints = (typeof featAbilityPoints)[number];
 
 /**
- * The one grouping the product needs to distinguish on bundled feats.
+ * The four source-shaped feat groupings.
  *
- * Open for homebrew on the same known-plus-passthrough terms as spell schools:
- * a user-authored grouping must survive even though bundled content writes only
- * `origin`.
+ * The known set is closed for bundled mechanics, while `FeatGrouping` retains
+ * the project's known-plus-passthrough rule for imported/homebrew content.
+ * Rejecting a fifth authored grouping would be the enum data-loss trap called
+ * out in AGENTS.md.
  */
+export const featGroupings = [
+  'origin',
+  'general',
+  'fighting_style',
+  'epic_boon',
+] as const;
+export type KnownFeatGrouping = (typeof featGroupings)[number];
 export type FeatGrouping =
-  | 'origin'
+  | KnownFeatGrouping
   | PassthroughVocabulary<'FeatGrouping'>;
 
 export const slotBuckets = [

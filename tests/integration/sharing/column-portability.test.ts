@@ -1687,6 +1687,16 @@ const RECIPIENT_SEEDED_CATALOG_COLUMNS = {
       fixture: 2,
       why: 'Recipient-seeded feat ability-point grant; the recipient rebuilds this catalog rule and no character-owned value travels.',
     },
+    ability_increase_abilities: {
+      kind: 'omitted',
+      fixture: '["strength","dexterity"]',
+      why: 'Recipient-seeded feat ability options; the recipient rebuilds this catalog rule from its own sourced definition and no sender definition row travels.',
+    },
+    ability_increase_maximum: {
+      kind: 'omitted',
+      fixture: 27,
+      why: 'Recipient-seeded feat ability cap; the recipient rebuilds this catalog rule and no character-owned value travels.',
+    },
     repeatable: {
       kind: 'omitted',
       fixture: 1,

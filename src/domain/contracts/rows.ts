@@ -654,10 +654,12 @@ const REFINEMENTS = {
   'feat_definitions.content_key': nonEmptyText,
   'feat_definitions.name': nonEmptyText,
   'feat_definitions.rules_edition': rulesEditionEnum,
-  // Open for homebrew grouping names; bundled content writes only `origin`.
+  // Open for homebrew grouping names; bundled content writes the four known
+  // source-shaped groupings.
   'feat_definitions.category': sqlText,
   'feat_definitions.min_level': classLevel,
   'feat_definitions.ability_points': featAbilityPointsEnum,
+  'feat_definitions.ability_increase_maximum': abilityScore,
   'feat_definitions.repeatable': sqlBool,
   'feat_definitions.notes': sqlText,
   'feat_definitions.created_at': sqlTimestamp,

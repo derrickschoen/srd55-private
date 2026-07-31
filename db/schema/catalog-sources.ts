@@ -57,6 +57,17 @@ export const feat_definitions = sqliteTable(
       .$type<FeatAbilityPoints>()
       .notNull()
       .default(0),
+    /**
+     * JSON-encoded `AbilityIncreaseAbilities`: either the literal `"any"` or
+     * a non-empty closed Ability list. Nullable is an honest unprovable state
+     * for pre-0024 and imported/homebrew definitions.
+     */
+    ability_increase_abilities: sqlText()('ability_increase_abilities'),
+    /**
+     * This feat contribution's own cap (20 or 30 in the bundled corpus).
+     * Nullable for definitions whose ability options cannot be proved.
+     */
+    ability_increase_maximum: integer('ability_increase_maximum'),
     repeatable: tinyint1('repeatable').notNull().default(false),
     prerequisites: sqlText()('prerequisites'),
     grant_rules: sqlText()('grant_rules'),
@@ -72,6 +83,10 @@ export const feat_definitions = sqliteTable(
     check(
       'feat_definitions_ability_points_check',
       integerOneOf('ability_points', featAbilityPoints),
+    ),
+    check(
+      'feat_definitions_ability_increase_maximum_check',
+      sql`\`ability_increase_maximum\` IS NULL OR (typeof(\`ability_increase_maximum\`) = 'integer' AND \`ability_increase_maximum\` BETWEEN 1 AND 30)`,
     ),
     uniqueIndex('feat_definitions_content_key_unique').on(table.content_key),
     index('feat_definitions_name_rules_edition_index').on(

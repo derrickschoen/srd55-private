@@ -1,12 +1,19 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import schema from '../../../src/db/schema.sql?raw';
 import { DatabaseContext } from '../../../src/db/database';
+import { DatabaseLifecycle } from '../../../src/db/database-lifecycle';
+import { DATABASE_MIGRATIONS } from '../../../src/db/migrations';
 import {
   bundledFeatDefinitions,
   ensureBundledFeatContent,
   seedFeatContent,
 } from '../../../src/rules/feats-srd';
-import { openTestDatabase } from '../../helpers/open-db';
+import {
+  getSqlite3,
+  MemoryDatabaseStorage,
+  openTestDatabase,
+} from '../../helpers/open-db';
 
 const VERBATIM_ATTRIBUTION = `This work includes material from the System Reference Document 5.2
 ("SRD 5.2") by Wizards of the Coast LLC, available at
@@ -85,6 +92,13 @@ const EXPECTED_CATEGORIES = [
   'Fighting Style',
   'Epic Boon',
 ] as const;
+
+const EXPECTED_GROUPINGS = {
+  Origin: 'origin',
+  General: 'general',
+  'Fighting Style': 'fighting_style',
+  'Epic Boon': 'epic_boon',
+} as const;
 
 const EXPECTED_ABILITY_SCORE_IMPROVEMENT_BENEFIT = `Increase one ability score of your choice by 2, or increase two ability scores of your choice by 1. This feat can’t increase an ability score above 20.
 
@@ -245,6 +259,32 @@ const EXPECTED_ABILITY_POINTS = {
   'Boon of Truesight': 1,
 } as const;
 
+const EXPECTED_ABILITY_OPTIONS_AND_CAPS = {
+  Alert: { options: null, maximum: null },
+  'Magic Initiate': { options: null, maximum: null },
+  'Savage Attacker': { options: null, maximum: null },
+  Skilled: { options: null, maximum: null },
+  'Ability Score Improvement': { options: 'any', maximum: 20 },
+  Grappler: { options: ['strength', 'dexterity'], maximum: 20 },
+  Archery: { options: null, maximum: null },
+  Defense: { options: null, maximum: null },
+  'Great Weapon Fighting': { options: null, maximum: null },
+  'Two-Weapon Fighting': { options: null, maximum: null },
+  'Boon of Combat Prowess': { options: 'any', maximum: 30 },
+  'Boon of Dimensional Travel': { options: 'any', maximum: 30 },
+  'Boon of Fate': { options: 'any', maximum: 30 },
+  'Boon of Irresistible Offense': {
+    options: ['strength', 'dexterity'],
+    maximum: 30,
+  },
+  'Boon of Spell Recall': {
+    options: ['intelligence', 'wisdom', 'charisma'],
+    maximum: 30,
+  },
+  'Boon of the Night Spirit': { options: 'any', maximum: 30 },
+  'Boon of Truesight': { options: 'any', maximum: 30 },
+} as const;
+
 describe('bundled SRD feats', () => {
   it('parses and seeds exactly the seventeen oracle names and source categories', async () => {
     const parsed = bundledFeatDefinitions();
@@ -273,7 +313,7 @@ describe('bundled SRD feats', () => {
       for (const row of seeded) {
         const name = String(row.name) as keyof typeof EXPECTED_FEATS;
         expect(row.category, `${name} stored grouping`).toBe(
-          EXPECTED_FEATS[name].category === 'Origin' ? 'origin' : null,
+          EXPECTED_GROUPINGS[EXPECTED_FEATS[name].category],
         );
       }
     } finally {
@@ -281,13 +321,14 @@ describe('bundled SRD feats', () => {
     }
   });
 
-  it('stores every feat level and ability-point value by name', async () => {
+  it('stores every feat level, ability-point value, option set and cap by name', async () => {
     const connection = await openTestDatabase();
     try {
       const db = new DatabaseContext(connection);
       seedFeatContent(db);
       const rows = db.allRaw(
-        `SELECT name, min_level, ability_points
+        `SELECT name, min_level, ability_points,
+                ability_increase_abilities, ability_increase_maximum
          FROM feat_definitions ORDER BY id`,
       );
       expect(rows).toHaveLength(17);
@@ -299,13 +340,29 @@ describe('bundled SRD feats', () => {
         expect(row.ability_points, `${name} ability_points`).toBe(
           EXPECTED_ABILITY_POINTS[name],
         );
+        const expected =
+          EXPECTED_ABILITY_OPTIONS_AND_CAPS[
+            name as keyof typeof EXPECTED_ABILITY_OPTIONS_AND_CAPS
+          ];
+        expect(
+          row.ability_increase_abilities,
+          `${name} ability options`,
+        ).toBe(
+          expected.options === null
+            ? null
+            : JSON.stringify(expected.options),
+        );
+        expect(
+          row.ability_increase_maximum,
+          `${name} ability cap`,
+        ).toBe(expected.maximum);
       }
     } finally {
       connection.close();
     }
   });
 
-  it('keeps non-level gates in prerequisites and never groups Fighting Style feats by that gate', async () => {
+  it('keeps non-level gates typed in prerequisites without confusing them with the four-value grouping', async () => {
     const connection = await openTestDatabase();
     try {
       const db = new DatabaseContext(connection);
@@ -321,11 +378,13 @@ describe('bundled SRD feats', () => {
       );
       expect(styles).toHaveLength(4);
       for (const style of styles) {
-        expect(style.category, `${String(style.name)} grouping`).toBeNull();
+        expect(style.category, `${String(style.name)} grouping`).toBe(
+          'fighting_style',
+        );
         expect(JSON.parse(String(style.prerequisites))).toEqual([
           {
             kind: 'feature',
-            feature: 'Fighting Style Feature',
+            feature: 'fighting_style',
           },
         ]);
       }
@@ -348,7 +407,7 @@ describe('bundled SRD feats', () => {
     }
   });
 
-  it('models the spell, skill, and Fighting Style effects while leaving adjudication as text', async () => {
+  it('models only spell and supported skill grants while retaining unsafe Fighting Style mechanics as text', async () => {
     const connection = await openTestDatabase();
     try {
       const db = new DatabaseContext(connection);
@@ -376,12 +435,10 @@ describe('bundled SRD feats', () => {
           allows_tool_instead: true,
         }),
       ]);
-      expect(rules('Archery')).toEqual([
-        expect.objectContaining({
-          kind: 'fighting_style',
-          style_key: 'archery',
-        }),
-      ]);
+      expect(rules('Archery')).toEqual([]);
+      expect(rules('Defense')).toEqual([]);
+      expect(rules('Great Weapon Fighting')).toEqual([]);
+      expect(rules('Two-Weapon Fighting')).toEqual([]);
       expect(rules('Grappler')).toEqual([]);
       expect(
         db.scalar<string>(
@@ -408,6 +465,104 @@ describe('bundled SRD feats', () => {
       ).toEqual(before);
     } finally {
       connection.close();
+    }
+  });
+
+  it('repairs the complete 0023-era feat seed after migration 0024', async () => {
+    const sqlite3 = await getSqlite3();
+    const oldConnection = new sqlite3.oo1.DB(':memory:', 'c');
+    oldConnection.exec(
+      DATABASE_MIGRATIONS.slice(0, -1)
+        .map((migration) => migration.sql)
+        .join('\n'),
+    );
+    const oldDb = new DatabaseContext(oldConnection);
+    for (const feat of bundledFeatDefinitions()) {
+      const styleKey = feat.content_key.split(':').at(-1) ?? '';
+      const legacyRules =
+        feat.source_category === 'Fighting Style'
+          ? [
+              {
+                kind: 'fighting_style',
+                rule_key: `fighting-style-${styleKey}`,
+                style_key: styleKey,
+              },
+            ]
+          : feat.grant_rules;
+      oldDb.exec(
+        `INSERT INTO feat_definitions (
+           content_key, name, rules_edition, category, min_level,
+           ability_points, repeatable, prerequisites, grant_rules, notes
+         ) VALUES (?, ?, '2024', ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          feat.content_key,
+          feat.name,
+          feat.source_category === 'Origin' ? 'origin' : null,
+          feat.min_level,
+          feat.ability_points,
+          feat.repeatable ? 1 : 0,
+          feat.prerequisites.length === 0
+            ? null
+            : JSON.stringify(feat.prerequisites),
+          JSON.stringify(legacyRules),
+          feat.notes,
+        ],
+      );
+    }
+    const oldBytes =
+      sqlite3.capi.sqlite3_js_db_export(oldConnection).slice();
+    oldConnection.close();
+
+    const storage = new MemoryDatabaseStorage(sqlite3);
+    await storage.replaceFile(oldBytes);
+    const lifecycle = new DatabaseLifecycle(
+      sqlite3,
+      storage,
+      schema,
+      (db) => {
+        ensureBundledFeatContent(db);
+      },
+    );
+    const migrated = lifecycle.open();
+    try {
+      expect(
+        migrated.allRaw(
+          `SELECT name, category, ability_increase_abilities,
+                  ability_increase_maximum, grant_rules
+           FROM feat_definitions
+           WHERE content_key LIKE '2024:feat:%'
+           ORDER BY name`,
+        ),
+      ).toEqual(
+        [...bundledFeatDefinitions()]
+          .sort((left, right) =>
+            left.name < right.name
+              ? -1
+              : left.name > right.name
+                ? 1
+                : 0,
+          )
+          .map((feat) => ({
+            name: feat.name,
+            category: feat.grouping,
+            ability_increase_abilities:
+              feat.ability_increase_abilities === null
+                ? null
+                : JSON.stringify(feat.ability_increase_abilities),
+            ability_increase_maximum:
+              feat.ability_increase_maximum,
+            grant_rules: JSON.stringify(feat.grant_rules),
+          })),
+      );
+      expect(
+        migrated.scalar<number>(
+          `SELECT count(*) FROM feat_definitions
+           WHERE category = 'fighting_style'
+             AND grant_rules <> '[]'`,
+        ),
+      ).toBe(0);
+    } finally {
+      lifecycle.close();
     }
   });
 

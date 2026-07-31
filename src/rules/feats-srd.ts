@@ -7,21 +7,33 @@
  *
  * Feat rows are parsed from the complete Feat Descriptions extract. The parser
  * keeps the printed benefit as text and promotes only the mechanics the rules
- * engine consumes or searches: spell choices, fighting styles and skill
- * proficiencies. Level and ability-score points have dedicated columns.
+ * engine consumes or searches: spell choices and skill proficiencies.
+ * Fighting Style benefits remain sourced text because today's predicates
+ * cannot express their weapon/equipment conditions safely. Level,
+ * ability-score points, choices and caps have dedicated columns.
  */
 import featsExtract from '../../docs/srd/source/feats.txt?raw';
 import type { BindableValue } from '@sqlite.org/sqlite-wasm';
 import type { DatabaseContext } from '../db/database';
 import { rowContractError } from '../domain/contracts/rows';
+import type {
+  AbilityIncreaseAbilities,
+  FeatPrerequisite,
+} from '../builder/level-up-wizard';
 import {
   abilities,
   isEnumValue,
   type Ability,
   type CharacterLevel,
   type FeatAbilityPoints,
+  type KnownFeatGrouping,
 } from '../domain/enums';
+import type { ContentKey } from '../domain/ids';
 import { GrantRule, type GrantRuleObject } from '../grants/grant-rule';
+import {
+  isBundledFeatContentKey,
+  type BundledFeatContentKey,
+} from './feat-application';
 
 export const BUNDLED_FEAT_RULES_EDITION = '2024';
 
@@ -38,24 +50,15 @@ export type SrdFeatCategory =
   | 'Fighting Style'
   | 'Epic Boon';
 
-export type FeatPrerequisite =
-  | {
-      readonly kind: 'ability_score';
-      readonly abilities: readonly Ability[];
-      readonly minimum: number;
-    }
-  | {
-      readonly kind: 'feature';
-      readonly feature: string;
-    };
-
 export interface SrdFeatDefinition {
-  readonly content_key: string;
+  readonly content_key: BundledFeatContentKey & ContentKey;
   readonly name: string;
   readonly source_category: SrdFeatCategory;
-  readonly category: 'origin' | null;
+  readonly grouping: KnownFeatGrouping;
   readonly min_level: CharacterLevel | null;
   readonly ability_points: FeatAbilityPoints;
+  readonly ability_increase_abilities: AbilityIncreaseAbilities | null;
+  readonly ability_increase_maximum: number | null;
   readonly repeatable: boolean;
   readonly prerequisites: readonly FeatPrerequisite[];
   readonly grant_rules: readonly GrantRuleObject[];
@@ -70,6 +73,15 @@ const EXPECTED_CATEGORY_COUNTS: Readonly<Record<SrdFeatCategory, number>> = {
   General: 2,
   'Fighting Style': 4,
   'Epic Boon': 7,
+};
+
+const GROUPING_BY_SOURCE_CATEGORY: Readonly<
+  Record<SrdFeatCategory, KnownFeatGrouping>
+> = {
+  Origin: 'origin',
+  General: 'general',
+  'Fighting Style': 'fighting_style',
+  'Epic Boon': 'epic_boon',
 };
 
 const ABILITY_BY_PRINTED_NAME = new Map<string, Ability>(
@@ -144,8 +156,12 @@ function parsePrintedPrerequisites(
       continue;
     }
 
-    if (/^[A-Z][A-Za-z ]+ Feature$/u.test(part)) {
-      prerequisites.push({ kind: 'feature', feature: part });
+    if (part === 'Fighting Style Feature') {
+      prerequisites.push({ kind: 'feature', feature: 'fighting_style' });
+      continue;
+    }
+    if (part === 'Spellcasting Feature') {
+      prerequisites.push({ kind: 'feature', feature: 'spellcasting' });
       continue;
     }
 
@@ -183,6 +199,64 @@ function abilityPoints(
     );
   }
   return points;
+}
+
+function abilityIncreaseOptions(
+  featName: string,
+  points: FeatAbilityPoints,
+  benefit: string,
+): {
+  readonly abilities: AbilityIncreaseAbilities | null;
+  readonly maximum: number | null;
+} {
+  if (points === 0) {
+    return { abilities: null, maximum: null };
+  }
+  if (
+    /^Increase one ability score of your choice by 2, or increase two ability scores of your choice by 1\. This feat can’t increase an ability score above 20\./u.test(
+      benefit,
+    )
+  ) {
+    return { abilities: 'any', maximum: 20 };
+  }
+
+  const increase =
+    /(?:^|\n\n)Ability Score Increase\. Increase (?<choice>one ability score of your choice|your [^.]+ score) by 1, to a maximum of (?<maximum>20|30)\./u.exec(
+      benefit,
+    )?.groups;
+  if (increase === undefined) {
+    throw new SrdFeatError(
+      `${featName} has points but no readable ability options and cap.`,
+    );
+  }
+  const maximum = Number(increase.maximum);
+  if (increase.choice === 'one ability score of your choice') {
+    return { abilities: 'any', maximum };
+  }
+
+  const printed = increase.choice
+    ?.replace(/^your /u, '')
+    .replace(/ score$/u, '');
+  if (printed === undefined) {
+    throw new SrdFeatError(`${featName} has unreadable ability options.`);
+  }
+  const selected = printed
+    .replace(/, or /u, ', ')
+    .replace(/ or /u, ', ')
+    .split(',')
+    .map((name) => ABILITY_BY_PRINTED_NAME.get(name.trim()));
+  if (
+    selected.length === 0 ||
+    selected.some((ability) => ability === undefined)
+  ) {
+    throw new SrdFeatError(
+      `${featName} names an unsupported ability increase option.`,
+    );
+  }
+  return {
+    abilities: selected as readonly Ability[],
+    maximum,
+  };
 }
 
 function magicInitiateRules(
@@ -227,11 +301,7 @@ function magicInitiateRules(
   ].map((rule) => GrantRule.fromObject(rule).toObject());
 }
 
-function grantRules(
-  name: string,
-  category: SrdFeatCategory,
-  benefit: string,
-): readonly GrantRuleObject[] {
+function grantRules(benefit: string): readonly GrantRuleObject[] {
   const spellRules = magicInitiateRules(benefit);
   if (spellRules !== null) {
     return spellRules;
@@ -252,15 +322,6 @@ function grantRules(
     ];
   }
 
-  if (category === 'Fighting Style') {
-    return [
-      GrantRule.fromObject({
-        kind: 'fighting_style',
-        rule_key: `fighting-style-${slug(name)}`,
-        style_key: slug(name),
-      }).toObject(),
-    ];
-  }
   return [];
 }
 
@@ -294,16 +355,26 @@ export function parseSrdFeatDefinitions(
       match.groups?.prerequisites,
     );
     categoryCounts[category] += 1;
+    const contentKey = `${BUNDLED_FEAT_RULES_EDITION}:feat:${slug(name)}`;
+    if (!isBundledFeatContentKey(contentKey)) {
+      throw new SrdFeatError(
+        `${name} produced an unregistered bundled content key ${contentKey}.`,
+      );
+    }
+    const points = abilityPoints(name, category, benefit);
+    const increase = abilityIncreaseOptions(name, points, benefit);
     feats.push({
-      content_key: `${BUNDLED_FEAT_RULES_EDITION}:feat:${slug(name)}`,
+      content_key: contentKey as BundledFeatContentKey & ContentKey,
       name,
       source_category: category,
-      category: category === 'Origin' ? 'origin' : null,
+      grouping: GROUPING_BY_SOURCE_CATEGORY[category],
       min_level: parsedPrerequisites.min_level,
-      ability_points: abilityPoints(name, category, benefit),
+      ability_points: points,
+      ability_increase_abilities: increase.abilities,
+      ability_increase_maximum: increase.maximum,
       repeatable: /(?:^|\n\n)Repeatable\./u.test(benefit),
       prerequisites: parsedPrerequisites.prerequisites,
-      grant_rules: grantRules(name, category, benefit),
+      grant_rules: grantRules(benefit),
       notes: benefit,
     });
   }
@@ -339,6 +410,8 @@ function persistedValues(feat: SrdFeatDefinition): {
   readonly category: string | null;
   readonly min_level: number | null;
   readonly ability_points: number;
+  readonly ability_increase_abilities: string | null;
+  readonly ability_increase_maximum: number | null;
   readonly repeatable: number;
   readonly prerequisites: string | null;
   readonly grant_rules: string;
@@ -348,9 +421,14 @@ function persistedValues(feat: SrdFeatDefinition): {
     content_key: feat.content_key,
     name: feat.name,
     rules_edition: BUNDLED_FEAT_RULES_EDITION,
-    category: feat.category,
+    category: feat.grouping,
     min_level: feat.min_level,
     ability_points: feat.ability_points,
+    ability_increase_abilities:
+      feat.ability_increase_abilities === null
+        ? null
+        : JSON.stringify(feat.ability_increase_abilities),
+    ability_increase_maximum: feat.ability_increase_maximum,
     repeatable: feat.repeatable ? 1 : 0,
     prerequisites:
       feat.prerequisites.length === 0
@@ -368,7 +446,9 @@ function storedFeatMatches(
   const expected = persistedValues(feat);
   const actual = db.oneRaw(
     `SELECT content_key, name, rules_edition, category, min_level,
-            ability_points, repeatable, prerequisites, grant_rules, notes
+            ability_points, ability_increase_abilities,
+            ability_increase_maximum, repeatable, prerequisites, grant_rules,
+            notes
      FROM feat_definitions WHERE content_key = ?`,
     [feat.content_key],
   );
@@ -458,6 +538,8 @@ export function seedFeatContent(db: DatabaseContext): boolean {
            category = excluded.category,
            min_level = excluded.min_level,
            ability_points = excluded.ability_points,
+           ability_increase_abilities = excluded.ability_increase_abilities,
+           ability_increase_maximum = excluded.ability_increase_maximum,
            repeatable = excluded.repeatable,
            prerequisites = excluded.prerequisites,
            grant_rules = excluded.grant_rules,

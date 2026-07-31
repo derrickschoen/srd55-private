@@ -63,6 +63,27 @@ function sourceRow(): Record<string, unknown> {
   };
 }
 
+function featDefinitionRow(): Record<string, unknown> {
+  return {
+    id: 31,
+    content_key: '2024:feat:grappler',
+    name: 'Grappler',
+    rules_edition: '2024',
+    category: 'general',
+    min_level: 4,
+    ability_points: 1,
+    ability_increase_abilities: '["strength","dexterity"]',
+    ability_increase_maximum: 20,
+    repeatable: 0,
+    prerequisites:
+      '[{"kind":"ability_score","abilities":["strength","dexterity"],"minimum":13}]',
+    grant_rules: '[]',
+    notes: 'Sourced benefit text',
+    created_at: null,
+    updated_at: null,
+  };
+}
+
 function slotRow(): Record<string, unknown> {
   return {
     id: 12,
@@ -457,6 +478,47 @@ describe('JSON column shapes', () => {
         slotLabel,
       ),
     ).toBe(`${slotLabel}.free_cast: must be a JSON object.`);
+  });
+
+  it('holds feat ability options to the typed any-or-closed-list row contract', () => {
+    const label = 'Catalog feat row';
+    expect(
+      rowContractError('feat_definitions', featDefinitionRow(), label),
+    ).toBeNull();
+    expect(
+      rowContractError(
+        'feat_definitions',
+        {
+          ...featDefinitionRow(),
+          ability_increase_abilities: '"any"',
+        },
+        label,
+      ),
+    ).toBeNull();
+    expect(
+      rowContractError(
+        'feat_definitions',
+        {
+          ...featDefinitionRow(),
+          ability_increase_abilities: '["strength","luck"]',
+        },
+        label,
+      ),
+    ).toBe(
+      `${label}.ability_increase_abilities: must be "any" or a distinct non-empty JSON array of abilities.`,
+    );
+    expect(
+      rowContractError(
+        'feat_definitions',
+        {
+          ...featDefinitionRow(),
+          ability_increase_abilities: '["strength","strength"]',
+        },
+        label,
+      ),
+    ).toBe(
+      `${label}.ability_increase_abilities: must be "any" or a distinct non-empty JSON array of abilities.`,
+    );
   });
 
   it('classifies only real columns, and every classification names its reader', () => {
