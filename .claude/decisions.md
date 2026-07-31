@@ -7,6 +7,36 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D118 — OWNER: deferred Epic Boon = player's choice at Level Up (2026-07-31)
+
+Supersedes the OQ-1 taken-default (resolve-first pass). On Level Up with a
+deferred Epic Boon, present BOTH options: resolve it now, or proceed to the
+next level with the warning intact. Neither is forced. W-A's epic_resolution
+state variant needs rework: expose both availabilities; the UI offers a choice.
+
+## D119 — OWNER: unknown hit die DISABLES the class in guided level-up (2026-07-31)
+
+Supersedes the OQ-2 taken-default (allow with absent HP). A class with no
+recorded hit die is NOT guideable: its option is disabled with the explanation
+that fixed HP cannot be derived until the class is repaired/catalogued. The
+never-display-a-guessed-die rule stands (D33). W-A rework required.
+
+## D120 — OWNER: D91 EXTENDS to formula resources (2026-07-31)
+
+Amends D91's scope. Beyond the eight level-table ladders, model typed formula
+maxima so they too print numbered tick-boxes: ability-modifier forms
+(Bardic Inspiration max(1, Cha mod), Tireless/Nature's Veil max(1, Wis mod)),
+per-level forms (Lay on Hands 5 x Paladin level), and fixed feature counts in
+the licensed inventory (design doc section 2.4). Computed-or-absent (D33)
+still governs; nothing outside licensed sources. D91 design doc needs a
+formula-vocabulary addendum before Unit M dispatches.
+
+## D121 — OWNER: publish waits for the owner's manual walkthrough (2026-07-31)
+
+After the D106 gate (queue drained + D112 walkthrough green), prep the D113
+publish completely and STOP. The owner does a manual sitting first. Publishing
+remains outward-facing and needs the explicit go.
+
 ## D117 — OWNER: v1-vs-v2 comparison = the SAME CHARACTER BUILT IN BOTH (2026-07-30)
 
 When v2 is done, build an identical character in both and record every
