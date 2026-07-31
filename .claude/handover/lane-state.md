@@ -23,8 +23,18 @@ supervisor-verified (post-merge main vitest 192/3,132 exit 0).
   a11y tests) — ALL FOUR ACCEPTED, none rejected. W-B1-FIX dispatched (log
   wb1-fix.log, port 44496). Re-gate after: vitest + control re-run +
   Playwright 44496 + round-2 review. Then W-B2 (briefs/w-b2.md).
-- TRACK S (wt/pwa at 5841448): D91-R dispatching (briefs/d91-r.md, port
-  44477, log d91r.log). Then FIX-ATTR, RESP-1, BANNER per HANDOVER §5.
+- TRACK S (wt/pwa): D91-R implemented + committed in-lane (supervisor).
+  Scans 0 forbidden, no Unit-M files touched, 10 files in scope. Codex
+  claims vitest 193/3,142, build 0; its full Playwright was 87/89 — one
+  contention flake (28.0s isolated green) and ONE REAL durational finding:
+  reports-and-print exceeds its 30s per-test timeout even isolated
+  (34.9-35.8s) because the print render got heavier. Codex correctly
+  refused the out-of-scope edit; supervisor lifted the fence for exactly
+  that spec — D91-R-FIX dispatched (log d91r-fix.log, port 44477):
+  measured per-test timeout amendment, full PW re-run. Remaining gate
+  after: supervisor full vitest + one negative control (pick from the
+  20-row table in d91r.log) + full PW + D135 review + merge.
+  Then FIX-ATTR, RESP-1, BANNER per HANDOVER §5.
 
 ## Rulings recorded this window
 D118-D137 (see decisions.md). Newest four: D134 focus_points = Remaining
