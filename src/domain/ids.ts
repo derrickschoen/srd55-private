@@ -1,4 +1,5 @@
 import type { core } from 'zod';
+import type { CharacterLevel } from './enums';
 
 /**
  * Branded identifier types.
@@ -169,6 +170,15 @@ export type ClassFeatureEffectId = Brand<number, 'ClassFeatureEffectId'>;
  * genuinely confusable.
  */
 export type ContentKey = Brand<string, 'ContentKey'>;
+
+/** One class's level in the closed 1..20 ladder. */
+export type ClassLevel = Brand<CharacterLevel, 'ClassLevel'>;
+/** `characters.revision`, kept distinct from ids and ordinary counts. */
+export type CharacterRevision = Brand<number, 'CharacterRevision'>;
+/** Stable `rule_key` carried by generated grant rows. */
+export type GrantRuleKey = Brand<string, 'GrantRuleKey'>;
+/** One 1-based occurrence within a grant rule. */
+export type GrantOrdinal = Brand<number, 'GrantOrdinal'>;
 
 /**
  * A SQL `DATETIME` value as SQLite stores and returns it.
