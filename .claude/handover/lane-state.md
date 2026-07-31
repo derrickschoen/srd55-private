@@ -20,9 +20,9 @@ resolved keeping BOTH measurements, tsc 0).
 - TRACK S (wt/pwa): D91-R + FIX + FIX2 all committed; main merged in.
   OPUS gates: scans 0, no mint/UnitM files, build 0, vitest 194/3,169
   exit 0, shape control re-proven (now kills the exhaustive-table test
-  too). RUNNING: round-2 review (d91r-review2.log). OWED: full PW on
-  44477 — QUEUE IT AFTER FF-A's 44480 finishes (avoid 3 concurrent
-  browser suites). Then merge.
+  too). RUNNING: round-2 review (d91r-review2.log) + full PW on 44477
+  (started in the window freed by stopping FF-A's invalidated run).
+  Then merge.
 - TRACK W (wt/print): W-B2 implementing (log wb2.log, port 44472).
 
 ## D91-R review round 1 (D135) — all four ACCEPTED, FIX2 in flight
