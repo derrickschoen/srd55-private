@@ -17,6 +17,7 @@ import { RestoreSlotCommand } from './set-slot/restore';
 import { SelectSlotCommand } from './set-slot/select';
 import { FillSkillGrantCommand } from './fill-skill-grant';
 import { LevelUpClassCommand } from './level-up-class';
+import { ResolveLevelFeatChoiceCommand } from './resolve-level-feat-choice';
 import { UpdateAbilityCommand } from './update-ability';
 import { UpdateCharacterRulesCommand } from './update-character-rules';
 import { UpdateClassCommand } from './update-class';
@@ -138,6 +139,12 @@ export class CharacterCommandFactory {
         return new UpdateClassCommand(this.db, payload, this.integrity);
       case 'level_up_class':
         return new LevelUpClassCommand(this.db, payload, this.integrity);
+      case 'resolve_level_feat_choice':
+        return new ResolveLevelFeatChoiceCommand(
+          this.db,
+          payload,
+          this.integrity,
+        );
       case 'add_weapon':
         return new AddWeaponCommand(this.db, payload);
       case 'update_weapon':

@@ -28,13 +28,15 @@ import {
 import { sqlInteger, sqlNullableString, sqlString } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import { characterLevel } from '../rules/character-level';
-import { asiLevelsForClassName } from '../rules/class-level-features-srd';
+import {
+  asiLevelsForClassName,
+  epicBoonLevelsForClassName,
+} from '../rules/class-level-features-srd';
 import type {
   LevelUpClassCommand as LevelUpClassPayload,
   RestoreSnapshotCommand as RestoreSnapshotPayload,
 } from '../domain/command-contracts';
 import {
-  LEVEL_UP_ABILITY_INCREASE_MAXIMUM,
   LEVEL_UP_REFUSAL_REASONS,
   LEVEL_UP_SUBCLASS_LEVEL,
   type LevelUpRefusalData,
@@ -43,6 +45,7 @@ import {
 import { GrantRuleSlotGenerator } from '../grants/grant-rule-slot-generator';
 import { syncClassSourceState } from './update-class';
 import type { CharacterCommandIntegrity } from './integrity';
+import { applyLevelFeatSelection } from './level-feat-choice';
 
 /**
  * The named refusal, carrying the seam's `LevelUpRefusalData` so a surface
@@ -168,28 +171,37 @@ export class LevelUpClassCommand {
       subclassId = Number(resolved);
     }
 
-    // L-ASI-LEVELS: the levels that require an increase are READ FROM THE
+    // L-ASI-LEVELS: the levels that require a feat are READ FROM THE
     // SEEDED TABLE, per class — 4/8/12/16 everywhere, plus Fighter 6 and 14
     // and Rogue 10. A hardcoded `[4]` is the D15 mistake §5 names. A class
     // the bundled tables do not print has no ASI data (`null`), and no
     // refusal is raised on the strength of data the app does not have (D33).
     const asiLevels = asiLevelsForClassName(definition.name);
-    const increases = this.payload.ability_increases ?? null;
+    const featChoice = this.payload.feat_choice ?? null;
     const isAsiLevel = asiLevels !== null && asiLevels.has(targetLevel);
-    if (isAsiLevel && (increases === null || increases.length === 0)) {
+    const epicBoonLevels = epicBoonLevelsForClassName(definition.name);
+    const isEpicBoonLevel =
+      epicBoonLevels !== null && epicBoonLevels.has(targetLevel);
+    if (
+      isAsiLevel &&
+      (featChoice === null || featChoice.kind !== 'feat')
+    ) {
       refuse(
         LEVEL_UP_REFUSAL_REASONS.abilityIncreaseRequired,
-        `${definition.name} level ${String(targetLevel)} grants an Ability ` +
-          'Score Improvement; no increase was chosen.',
+        `${definition.name} level ${String(targetLevel)} requires a feat choice.`,
       );
     }
-    if (!isAsiLevel && increases !== null && increases.length > 0) {
+    if (isEpicBoonLevel && featChoice === null) {
+      throw new TypeError(
+        `${definition.name} level ${String(targetLevel)} requires an Epic Boon choice or explicit deferral.`,
+      );
+    }
+    if (!isAsiLevel && !isEpicBoonLevel && featChoice !== null) {
       throw new TypeError(
         `${definition.name} level ${String(targetLevel)} does not grant an ` +
-          'Ability Score Improvement.',
+          'ASI-level feat or Epic Boon.',
       );
     }
-
     // ---- One transaction (§8b). -------------------------------------------
     this.db.transaction(() => {
       const before = this.#state.capture(characterId);
@@ -205,52 +217,35 @@ export class LevelUpClassCommand {
       // are `die / 2 + 1` plus the Constitution modifier, derived live —
       // `character_hit_point_rolls` is untouched by this path.
 
-      // The increases, through the EXISTING contribution machinery (§5):
-      // additive `ability_increase` effect rows owned by the class source
-      // instance, ordered after the character's surviving effects — the
-      // `applyGuidedBackgroundChoices` pattern. The class source instance
-      // exists because the class is held; it is re-synced just below.
-      if (increases !== null && increases.length > 0) {
-        const sourceId = this.db.scalar<number>(
-          `SELECT id FROM character_source_instances
-           WHERE character_id = ? AND source_type = 'class'
-             AND source_definition_id = ?
-           LIMIT 1`,
-          [characterId, classId],
+      let featSourceId: number | null = null;
+      if (featChoice?.kind === 'feat') {
+        featSourceId = applyLevelFeatSelection(this.db, this.#generator, {
+          characterId,
+          selection: featChoice,
+          projectedTotalLevel: (otherLevels ?? 0) + targetLevel,
+          advancedClassDefinitionId: classId,
+          targetClassLevel: targetLevel,
+          targetSubclassContentKey: subclassKey,
+          ...(isEpicBoonLevel ? { requiredGrouping: 'epic_boon' } : {}),
+        });
+      }
+
+      if (isAsiLevel || isEpicBoonLevel) {
+        this.db.exec(
+          `INSERT INTO character_level_feat_choices (
+             character_id, character_class_level_id, class_level,
+             choice_kind, feat_source_instance_id, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [
+            characterId,
+            held.id,
+            targetLevel,
+            isAsiLevel ? 'asi_level_feat' : 'epic_boon',
+            featSourceId,
+            timestamp,
+            timestamp,
+          ],
         );
-        if (sourceId === null) {
-          throw new TypeError(
-            'The levelled class has no source instance to own its increases.',
-          );
-        }
-        const baseOrder =
-          this.db.one(
-            `SELECT COALESCE(MAX(sort_order), 0) AS base
-             FROM character_effects
-             WHERE character_id = ?`,
-            [characterId],
-            (row) => sqlInteger(row, 'base'),
-          ) ?? 0;
-        let effectOrder = baseOrder;
-        for (const increase of increases) {
-          effectOrder += 1;
-          this.db.exec(
-            `INSERT INTO character_effects (
-               character_id, sort_order, effect_kind, ability, amount,
-               maximum, source_instance_id, label
-             ) VALUES (?, ?, 'ability_increase', ?, ?, ?, ?, ?)`,
-            [
-              characterId,
-              effectOrder,
-              increase.ability,
-              increase.amount,
-              LEVEL_UP_ABILITY_INCREASE_MAXIMUM,
-              Number(sourceId),
-              `${definition.name} ${String(targetLevel)} ` +
-                '(Ability Score Improvement)',
-            ],
-          );
-        }
       }
 
       // Features and spell slots at the new level need no new machinery
@@ -273,7 +268,7 @@ export class LevelUpClassCommand {
 
   /**
    * A SNAPSHOT inverse (§8b), the shape `update_class` already uses: the
-   * write touches the level row, the hit-point row, the effect rows and the
+   * write touches the level row, feat occurrence, effect rows, grants and
    * source instances together, and a field-by-field inverse cannot express
    * that set.
    */

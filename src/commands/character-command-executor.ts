@@ -509,15 +509,16 @@ export class CharacterCommandExecutor {
       // signal standing — a character that reads as allocated to scores nobody
       // allocated.
       // `level_up_class` is PINNED to a snapshot inverse (level-up plan
-      // §8b): the write moves the level row, the ASI effect rows and the
-      // source instances together, and a field-by-field inverse cannot
-      // express that set.
+      // §8b): the write moves the level row, feat occurrence/effect rows,
+      // grants and source instances together, and a field-by-field inverse
+      // cannot express that set.
       case 'allocate_abilities':
       case 'update_source_config':
       case 'add_source':
       case 'remove_source':
       case 'update_class':
       case 'level_up_class':
+      case 'resolve_level_feat_choice':
       case 'restore_snapshot':
         return this.integrity.attach(characterId, {
           type: 'restore_snapshot',

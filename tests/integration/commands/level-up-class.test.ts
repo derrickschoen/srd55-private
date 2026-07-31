@@ -9,10 +9,15 @@ import {
 import { UpdateClassCommand } from '../../../src/commands/update-class';
 import { CharacterState } from '../../../src/character/character-state';
 import { DatabaseContext } from '../../../src/db/database';
-import type { LevelUpClassCommand as LevelUpClassPayload } from '../../../src/domain/command-contracts';
+import type {
+  LevelUpAbilityIncrease,
+  LevelUpClassCommand as LevelUpClassPayload,
+} from '../../../src/domain/command-contracts';
 import { CharacterSheetBuilder } from '../../../src/queries/character-sheet-builder';
 import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
 import { seedSheetContent } from '../../../src/rules/sheet-srd';
+import { seedFeatContent } from '../../../src/rules/feats-srd';
+import { GrantRuleSlotGenerator } from '../../../src/grants/grant-rule-slot-generator';
 import { openTestDatabase } from '../../helpers/open-db';
 import { raiseClassLevelForTest } from '../../helpers/class-levels';
 
@@ -76,6 +81,55 @@ describe('level_up_class', () => {
     return command;
   }
 
+  function asiChoice(
+    abilityIncreases: readonly LevelUpAbilityIncrease[],
+  ): NonNullable<LevelUpClassPayload['feat_choice']> {
+    return {
+      kind: 'feat',
+      feat_content_key: '2024:feat:ability-score-improvement',
+      config: {},
+      ability_increases: abilityIncreases,
+    };
+  }
+
+  function featChoice(
+    contentKey: string,
+  ): NonNullable<LevelUpClassPayload['feat_choice']> & { kind: 'feat' } {
+    const row = db.oneRaw(
+      `SELECT ability_points, ability_increase_abilities
+       FROM feat_definitions WHERE content_key = ?`,
+      [contentKey],
+    );
+    if (row === null) throw new Error(`Missing feat fixture ${contentKey}.`);
+    const points = Number(row.ability_points);
+    const options = row.ability_increase_abilities === null
+      ? null
+      : JSON.parse(String(row.ability_increase_abilities)) as unknown;
+    const ability = options === 'any'
+      ? 'strength'
+      : Array.isArray(options)
+        ? String(options[0])
+        : null;
+    return {
+      kind: 'feat',
+      feat_content_key: contentKey,
+      config: contentKey === '2024:feat:magic-initiate'
+        ? { chosen_list: 'Wizard', spellcasting_ability: 'intelligence' }
+        : contentKey === '2024:feat:skilled'
+          ? { selected_skills: [null, null, null] }
+          : {},
+      ability_increases: points === 0 || ability === null
+        ? []
+        : [{ ability: ability as LevelUpAbilityIncrease['ability'], amount: points }],
+    };
+  }
+
+  function stateBytes(): readonly number[] {
+    return [...new TextEncoder().encode(
+      JSON.stringify(new CharacterState(db).capture(characterId)),
+    )];
+  }
+
   function refusalOf(
     payload: Omit<LevelUpClassPayload, 'type'>,
   ): LevelUpRefusal {
@@ -104,6 +158,7 @@ describe('level_up_class', () => {
     db = new DatabaseContext(connection);
     seedClassProgressions(db);
     seedSheetContent(db);
+    seedFeatContent(db);
     integrity = new CharacterCommandIntegrity('level-up-class-test-key');
     // Constitution 14 (+2), so the computed hit points move with a real
     // modifier rather than a zero that hides a dropped term.
@@ -117,6 +172,7 @@ describe('level_up_class', () => {
 
   it('refuses a class the character does not have, by name (L-STRAIGHT)', () => {
     enterClass('Fighter');
+    const before = stateBytes();
     const refusal = refusalOf({
       class_definition_id: classId('Wizard'),
       target_level: 2,
@@ -125,11 +181,13 @@ describe('level_up_class', () => {
     // Nothing was written: no Wizard row appeared and the Fighter is intact.
     expect(storedLevel('Wizard')).toBeNull();
     expect(storedLevel('Fighter')).toBe(1);
+    expect(stateBytes()).toEqual(before);
   });
 
   it('refuses a non-adjacent target level, by name (L-ADJACENT)', () => {
     enterClass('Fighter');
     raiseClassLevelForTest(db, characterId, classId('Fighter'), 2);
+    const before = stateBytes();
     const skip = refusalOf({
       class_definition_id: classId('Fighter'),
       target_level: 7,
@@ -143,6 +201,7 @@ describe('level_up_class', () => {
     });
     expect(still.data).toEqual({ reason: 'level_not_adjacent' });
     expect(storedLevel('Fighter')).toBe(2);
+    expect(stateBytes()).toEqual(before);
   });
 
   it('computes the new level’s hit points as die/2+1 plus Constitution, writing nothing (D77)', () => {
@@ -260,6 +319,7 @@ describe('level_up_class', () => {
   it('requires an increase at a level the SEEDED table names — Fighter 6, not only 4 (L-ASI-LEVELS)', () => {
     enterClass('Fighter');
     raiseClassLevelForTest(db, characterId, classId('Fighter'), 5);
+    const beforeRefusal = stateBytes();
     // The fixture level is DELIBERATELY 6 (§8): a mutation that hardcodes
     // the ASI levels back to `[4]` makes this refusal vanish, and nothing
     // else would notice.
@@ -269,14 +329,15 @@ describe('level_up_class', () => {
     });
     expect(refusal.data).toEqual({ reason: 'ability_increase_required' });
     expect(storedLevel('Fighter')).toBe(5);
+    expect(stateBytes()).toEqual(beforeRefusal);
 
     levelUp({
       class_definition_id: classId('Fighter'),
       target_level: 6,
-      ability_increases: [
+      feat_choice: asiChoice([
         { ability: 'strength', amount: 1 },
         { ability: 'constitution', amount: 1 },
-      ],
+      ]),
     });
     expect(storedLevel('Fighter')).toBe(6);
   });
@@ -295,12 +356,12 @@ describe('level_up_class', () => {
       levelUp({
         class_definition_id: classId('Wizard'),
         target_level: 7,
-        ability_increases: [{ ability: 'intelligence', amount: 2 }],
+        feat_choice: asiChoice([{ ability: 'intelligence', amount: 2 }]),
       }),
-    ).toThrow('does not grant an Ability Score Improvement');
+    ).toThrow('does not grant an ASI-level feat or Epic Boon');
   });
 
-  it('writes the ASI as ability_increase effects owned by the class source, and the totals move', () => {
+  it('writes ASI as one ordinary feat source with a durable occurrence pointer', () => {
     enterClass('Fighter');
     raiseClassLevelForTest(db, characterId, classId('Fighter'), 3);
     const builder = new CharacterSheetBuilder(db);
@@ -313,15 +374,14 @@ describe('level_up_class', () => {
     levelUp({
       class_definition_id: classId('Fighter'),
       target_level: 4,
-      ability_increases: [{ ability: 'strength', amount: 2 }],
+      feat_choice: asiChoice([{ ability: 'strength', amount: 2 }]),
     });
 
     const sourceId = Number(
       db.scalar(
         `SELECT id FROM character_source_instances
-         WHERE character_id = ? AND source_type = 'class'
-           AND source_definition_id = ?`,
-        [characterId, classId('Fighter')],
+         WHERE character_id = ? AND source_type = 'feat'`,
+        [characterId],
       ),
     );
     expect(
@@ -340,14 +400,27 @@ describe('level_up_class', () => {
         source_instance_id: sourceId,
       },
     ]);
+    expect(
+      db.oneRaw(
+        `SELECT class_level, choice_kind, feat_source_instance_id
+         FROM character_level_feat_choices WHERE character_id = ?`,
+        [characterId],
+      ),
+    ).toEqual({
+      class_level: 4,
+      choice_kind: 'asi_level_feat',
+      feat_source_instance_id: sourceId,
+    });
     // The contribution reaches the sheet: base 10 + 2.
     expect(strengthScore()).toBe(12);
   });
 
   it('runs through the real executor with a snapshot inverse, and undo restores everything', async () => {
     enterClass('Fighter');
+    raiseClassLevelForTest(db, characterId, classId('Fighter'), 3);
     const state = new CharacterState(db);
     const before = state.capture(characterId);
+    const beforeBytes = stateBytes();
 
     const executor = new CharacterCommandExecutor(db, integrity);
     const result = await executor.execute({
@@ -361,10 +434,17 @@ describe('level_up_class', () => {
       command: {
         type: 'level_up_class',
         class_definition_id: classId('Fighter'),
-        target_level: 2,
+        target_level: 4,
+        feat_choice: asiChoice([{ ability: 'strength', amount: 2 }]),
       },
     });
-    expect(storedLevel('Fighter')).toBe(2);
+    expect(storedLevel('Fighter')).toBe(4);
+    expect(
+      db.scalar(
+        'SELECT count(*) FROM character_level_feat_choices WHERE character_id = ?',
+        [characterId],
+      ),
+    ).toBe(1);
     // The inverse is a SNAPSHOT (§8b), the shape `update_class` uses.
     expect(result.inverse).toMatchObject({ type: 'restore_snapshot' });
 
@@ -379,6 +459,161 @@ describe('level_up_class', () => {
       command: result.inverse,
     });
     expect(state.capture(characterId)).toEqual(before);
+    expect(stateBytes()).toEqual(beforeBytes);
+  });
+
+  const everyBundledFeat = [
+    '2024:feat:alert',
+    '2024:feat:magic-initiate',
+    '2024:feat:savage-attacker',
+    '2024:feat:skilled',
+    '2024:feat:ability-score-improvement',
+    '2024:feat:grappler',
+    '2024:feat:archery',
+    '2024:feat:defense',
+    '2024:feat:great-weapon-fighting',
+    '2024:feat:two-weapon-fighting',
+    '2024:feat:boon-of-combat-prowess',
+    '2024:feat:boon-of-dimensional-travel',
+    '2024:feat:boon-of-fate',
+    '2024:feat:boon-of-irresistible-offense',
+    '2024:feat:boon-of-spell-recall',
+    '2024:feat:boon-of-the-night-spirit',
+    '2024:feat:boon-of-truesight',
+  ] as const;
+
+  it.each(everyBundledFeat)(
+    'uses the identical ASI command arm for qualified feat %s',
+    (contentKey) => {
+      db.exec(
+        `UPDATE characters SET strength = 18, dexterity = 18,
+           constitution = 18, intelligence = 18, wisdom = 18, charisma = 18
+         WHERE id = ?`,
+        [characterId],
+      );
+      enterClass('Fighter');
+      raiseClassLevelForTest(db, characterId, classId('Fighter'), 13);
+      enterClass('Wizard');
+      raiseClassLevelForTest(db, characterId, classId('Wizard'), 5);
+
+      levelUp({
+        class_definition_id: classId('Fighter'),
+        target_level: 14,
+        feat_choice: featChoice(contentKey),
+      });
+
+      expect(
+        db.oneRaw(
+          `SELECT definition.content_key, choice.choice_kind
+           FROM character_level_feat_choices AS choice
+           JOIN character_source_instances AS source
+             ON source.id = choice.feat_source_instance_id
+           JOIN feat_definitions AS definition
+             ON definition.id = source.source_definition_id
+           WHERE choice.character_id = ?`,
+          [characterId],
+        ),
+      ).toEqual({
+        content_key: contentKey,
+        choice_kind: 'asi_level_feat',
+      });
+    },
+  );
+
+  it('saves, reloads, and later resolves an explicitly deferred Epic Boon', async () => {
+    enterClass('Fighter');
+    raiseClassLevelForTest(db, characterId, classId('Fighter'), 18);
+    levelUp({
+      class_definition_id: classId('Fighter'),
+      target_level: 19,
+      feat_choice: { kind: 'defer_epic_boon' },
+    });
+    const choiceId = Number(
+      db.scalar(
+        `SELECT id FROM character_level_feat_choices
+         WHERE character_id = ? AND choice_kind = 'epic_boon'`,
+        [characterId],
+      ),
+    );
+    expect(
+      db.scalar(
+        'SELECT feat_source_instance_id FROM character_level_feat_choices WHERE id = ?',
+        [choiceId],
+      ),
+    ).toBeNull();
+
+    const state = new CharacterState(db);
+    const saved = state.capture(characterId);
+    db.exec('DELETE FROM character_level_feat_choices WHERE id = ?', [choiceId]);
+    state.restore(characterId, saved);
+    expect(
+      db.scalar(
+        `SELECT feat_source_instance_id FROM character_level_feat_choices
+         WHERE character_id = ? AND choice_kind = 'epic_boon'`,
+        [characterId],
+      ),
+    ).toBeNull();
+
+    const executor = new CharacterCommandExecutor(db, integrity);
+    const resolved = await executor.execute({
+      character_id: characterId,
+      operation_uuid: crypto.randomUUID(),
+      expected_revision: 0,
+      command: {
+        type: 'resolve_level_feat_choice',
+        character_level_feat_choice_id: choiceId,
+        feat_choice: featChoice('2024:feat:boon-of-fate'),
+      },
+    });
+    expect(
+      db.oneRaw(
+        `SELECT choice.feat_source_instance_id, effect.maximum
+         FROM character_level_feat_choices AS choice
+         JOIN character_effects AS effect
+           ON effect.source_instance_id = choice.feat_source_instance_id
+         WHERE choice.id = ?`,
+        [choiceId],
+      ),
+    ).toMatchObject({ maximum: 30 });
+    await executor.execute({
+      character_id: characterId,
+      operation_uuid: crypto.randomUUID(),
+      expected_revision: 1,
+      command: resolved.inverse,
+    });
+    expect(
+      db.scalar(
+        'SELECT feat_source_instance_id FROM character_level_feat_choices WHERE id = ?',
+        [choiceId],
+      ),
+    ).toBeNull();
+  });
+
+  it('rolls the class, feat source, effects, choice, and grants back together', () => {
+    enterClass('Fighter');
+    raiseClassLevelForTest(db, characterId, classId('Fighter'), 3);
+    const before = stateBytes();
+    const failingGenerator = {
+      generateForSource(): never {
+        throw new Error('induced feat grant failure');
+      },
+    } as unknown as GrantRuleSlotGenerator;
+    const command = new LevelUpClassCommand(
+      db,
+      {
+        type: 'level_up_class',
+        class_definition_id: classId('Fighter'),
+        target_level: 4,
+        feat_choice: asiChoice([{ ability: 'strength', amount: 2 }]),
+      },
+      integrity,
+      undefined,
+      failingGenerator,
+    );
+    expect(() => command.apply(characterId)).toThrow(
+      'induced feat grant failure',
+    );
+    expect(stateBytes()).toEqual(before);
   });
 
   it('refuses the 21st character level even when the step itself is adjacent', () => {
@@ -437,7 +672,7 @@ describe('level_up_class', () => {
     levelUp({
       class_definition_id: fighterId,
       target_level: 4,
-      ability_increases: [{ ability: 'strength', amount: 2 }],
+      feat_choice: asiChoice([{ ability: 'strength', amount: 2 }]),
     });
 
     // An ordinary update_class apply is a second sync of the same level. It

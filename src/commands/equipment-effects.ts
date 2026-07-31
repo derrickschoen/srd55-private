@@ -315,3 +315,82 @@ export function replaceOwnedEffects(
     );
   }
 }
+
+/** Append effects owned directly by one character source (LU-1 feat path). */
+export function appendSourceEffects(
+  db: DatabaseContext,
+  characterId: number,
+  sourceInstanceId: number,
+  effects: readonly EquipmentEffectInput[],
+): void {
+  let nextOrder =
+    Number(
+      db.scalar<number>(
+        `SELECT coalesce(max(sort_order), 0) FROM character_effects
+         WHERE character_id = ?`,
+        [characterId],
+      ),
+    ) + 1;
+  const timestamp = new Date().toISOString();
+  for (const effect of effects) {
+    const values = effectValues(effect);
+    const row = {
+      id: effect.effect_id ?? 1,
+      character_id: characterId,
+      sort_order: effect.sort_order ?? nextOrder++,
+      effect_kind: effect.effect_kind,
+      ...values,
+      source_instance_id: sourceInstanceId,
+      character_item_id: null,
+      character_weapon_id: null,
+      template_ref: null,
+      label: effect.label.trim(),
+      notes: effect.notes?.trim() || null,
+      created_at: timestamp,
+      updated_at: timestamp,
+    };
+    const shape = rowContractError('character_effects', row, 'Feat effect');
+    if (shape !== null) {
+      throw new TypeError(shape);
+    }
+    const payload = effectPayloadKindError(row, 'Feat effect');
+    if (payload !== null) {
+      throw new TypeError(payload);
+    }
+    const columns = [
+      ...(effect.effect_id === undefined ? [] : ['id']),
+      'character_id',
+      'sort_order',
+      'effect_kind',
+      ...PAYLOAD_COLUMNS,
+      'source_instance_id',
+      'character_item_id',
+      'character_weapon_id',
+      'template_ref',
+      'label',
+      'notes',
+      'created_at',
+      'updated_at',
+    ];
+    const bindings: SqlValue[] = [
+      ...(effect.effect_id === undefined ? [] : [effect.effect_id]),
+      characterId,
+      row.sort_order,
+      effect.effect_kind,
+      ...PAYLOAD_COLUMNS.map((column) => values[column] as SqlValue),
+      sourceInstanceId,
+      null,
+      null,
+      null,
+      row.label,
+      row.notes,
+      timestamp,
+      timestamp,
+    ];
+    db.exec(
+      `INSERT INTO character_effects (${columns.join(', ')})
+       VALUES (${columns.map(() => '?').join(', ')})`,
+      bindings,
+    );
+  }
+}

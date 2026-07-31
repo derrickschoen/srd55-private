@@ -140,6 +140,10 @@ async function portableTableCounts(
       await rows(page, 'character_class_levels'),
       characterId,
     ).length,
+    character_level_feat_choices: forCharacter(
+      await rows(page, 'character_level_feat_choices'),
+      characterId,
+    ).length,
     character_rule_overrides: forCharacter(
       await rows(page, 'character_rule_overrides'),
       characterId,
@@ -544,6 +548,7 @@ test('captures every restorable character table and reports exact state differen
   });
   for (const table of [
     'character_class_levels',
+    'character_level_feat_choices',
     'character_source_instances',
     'spell_selection_slots',
     'wizard_spellbook_entries',
@@ -597,6 +602,9 @@ test('captures every restorable character table and reports exact state differen
     // backup without this key silently loses every thing the player owns
     // that only modifies.
     'character_items',
+    // LU-1 provenance is character state; omitting it turns a resolved feat
+    // back into an owed choice (or loses the occurrence entirely).
+    'character_level_feat_choices',
     'character_rule_overrides',
     'character_save_points',
     'character_sheet_adjustments',
@@ -915,9 +923,9 @@ test('round-trips a named save point through the mutation path', async ({
   )[0]!;
   expect(point).toMatchObject({
     label: 'Before experiment',
-    // a7-v14 adds durable Expertise grant provenance; a7-v13 remains frozen
-    // before that table became character state.
-    schema_version: 'a7-v14',
+    // a7-v15 adds durable level-feat provenance; a7-v14 remains frozen before
+    // that table became character state.
+    schema_version: 'a7-v15',
   });
   const pointSnapshot = JSON.parse(String(point.snapshot)) as {
     character_items: Array<Record<string, unknown>>;
@@ -1189,7 +1197,7 @@ test('undoes a structural class change through its snapshot inverse', async ({
   );
   expect(changed.inverse).toMatchObject({
     type: 'restore_snapshot',
-    snapshot: { schema_version: 'a7-v14' },
+    snapshot: { schema_version: 'a7-v15' },
     integrity: expect.any(String),
   });
   await execute(

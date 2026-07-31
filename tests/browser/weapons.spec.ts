@@ -115,13 +115,18 @@ async function levelClassTo(
         } catch (error) {
           if (
             !(error instanceof Error) ||
-            !error.message.includes('Ability Score Improvement')
+            !error.message.includes('requires a feat choice')
           ) {
             throw error;
           }
           await execute({
             ...command,
-            ability_increases: [{ ability, amount: 2 }],
+            feat_choice: {
+              kind: 'feat',
+              feat_content_key: '2024:feat:ability-score-improvement',
+              config: {},
+              ability_increases: [{ ability, amount: 2 }],
+            },
           });
         }
       }

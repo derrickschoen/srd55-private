@@ -1,22 +1,22 @@
 # Character share wire schema
 
-> Transcribed from `SHARE_SCHEMAS` for the GF-2 v15 mint. Update this document
+> Transcribed from `SHARE_SCHEMAS` for the LU-1 v16 mint. Update this document
 > with every wire-version mint.
 
 The executable source of truth is
 `src/sharing/wire-schemas/index.ts` and its immutable version modules
-`v1.ts` through `v15.ts`. This guide describes that registry; it does not
-replace it. `CURRENT_CHARACTER_SHARE_VERSION` is **15**.
+`v1.ts` through `v16.ts`. This guide describes that registry; it does not
+replace it. `CURRENT_CHARACTER_SHARE_VERSION` is **16**.
 
 One version at `root[1]` governs the complete document. Nested tuples do not
 carry independent versions. Encoding always mints the current version.
 Decoding validates the frozen schema selected by `root[1]`, then composes
-one-version-at-a-time migrations until it reaches v15.
+one-version-at-a-time migrations until it reaches v16.
 
 Versions 1 through 4 remain in the registry as frozen history, but they are
 deliberately retired from import. Their migration path reaches v4→v5 and throws
 `ShareWireRetirementError` because their bare skill names cannot be given honest
-provenance. Versions 5 through 14 migrate to v15.
+provenance. Versions 5 through 15 migrate to v16.
 
 Tuple arity is exact. A nullable or omitted logical value still occupies its
 assigned wire position as `null`; it does not shorten a current tuple. The
@@ -268,18 +268,31 @@ silently completed.
 could not prove an Expertise grant, so the migration preserves absence rather
 than deriving one from a class name.
 
-## Current v15 shape
+### Version 16 — class-level feat choice provenance
+
+**Minted by:** LU-1's unified level-feat command core.
+
+**Change:** `root` appends `levelFeatChoices`, increasing from arity **20 to
+21**. Each entry is a **4-position tuple**: class `classRef`, `classLevel`,
+`choiceKind`, and nullable feat-source `featRef`. A null feat reference records
+an explicitly deferred Epic Boon or another outstanding occurrence.
+
+**Adjacent migration (v15→v16):** appends null to the root. A v15 document
+could not prove any durable level-feat occurrence, so migration preserves
+absence and never infers a choice from a feat source or an ability effect.
+
+## Current v16 shape
 
 Positions are zero-based. The keys, wire types, and arities in this section are
-exactly those of the resolved `WIRE_SCHEMA_V15.tuples` object. The tuple
-inventory inherits v14, appends the Expertise-grant root section, and adds its
-tuple. The meanings faithfully restate the
+exactly those of the resolved `WIRE_SCHEMA_V16.tuples` object. The tuple
+inventory inherits v15, appends the level-feat-choice root section, and adds
+its tuple. The meanings faithfully restate the
 schema's meaning strings with minor prose normalization. The inventory includes
 tuples inherited from older frozen schema objects.
 
 ### Root tuple
 
-Arity: **20**.
+Arity: **21**.
 
 | Position | Key | Wire type | Meaning |
 | ---: | --- | --- | --- |
@@ -303,6 +316,18 @@ Arity: **20**.
 | 17 | `items` | `list` | Character-owned items; null when none |
 | 18 | `attunementSlots` | `tuple` | Exactly three nullable zero-based item references; null when empty |
 | 19 | `expertiseGrants` | `list` | Live sourced skill Expertise choice slots; null when none |
+| 20 | `levelFeatChoices` | `list` | Durable class-level feat and Epic Boon occurrences; null when none |
+
+#### `levelFeatChoice`
+
+Arity: **4**.
+
+| Position | Key | Wire type | Meaning |
+| ---: | --- | --- | --- |
+| 0 | `classRef` | `integer` | Share-local class reference |
+| 1 | `classLevel` | `integer` | Class level at which the occurrence was earned |
+| 2 | `choiceKind` | `string` | `asi_level_feat` or `epic_boon` |
+| 3 | `featRef` | `integer` | Share-local feat source reference; null while deferred |
 
 #### `expertiseGrant`
 
@@ -699,7 +724,7 @@ D41 makes the registry an append-only historical contract:
 
 ## How to mint the next version
 
-The v9, v10, v11, v12, v13, v14, and v15 mints followed this discipline:
+The v9, v10, v11, v12, v13, v14, v15, and v16 mints followed this discipline:
 
 1. Add `src/sharing/wire-schemas/vN.ts`. Build the new schema from the previous
    frozen inventory, replacing only changed tuple objects. Do not edit any

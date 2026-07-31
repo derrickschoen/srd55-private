@@ -111,6 +111,10 @@ const ROOT_EXPERTISE_GRANTS_INDEX = fieldIndex(
   WIRE_SCHEMA.tuples.root.fields,
   'expertiseGrants',
 );
+const ROOT_LEVEL_FEAT_CHOICES_INDEX = fieldIndex(
+  WIRE_SCHEMA.tuples.root.fields,
+  'levelFeatChoices',
+);
 
 const CHARACTER_TUPLE_LENGTHS = WIRE_SCHEMA.tuples.character.arities;
 const SHEET_TUPLE_LENGTH = WIRE_SCHEMA.tuples.sheet.arities[0];
@@ -151,6 +155,8 @@ const ATTUNEMENT_SLOTS_TUPLE_LENGTH =
 const ARMOR_TUPLE_LENGTH = WIRE_SCHEMA.tuples.armor.arities[0];
 const HIT_POINT_ROLL_TUPLE_LENGTH =
   WIRE_SCHEMA.tuples.hitPointRoll.arities[0];
+const LEVEL_FEAT_CHOICE_TUPLE_LENGTH =
+  WIRE_SCHEMA.tuples.levelFeatChoice.arities[0];
 
 const WEAPON_TUPLE_LENGTH =
   WIRE_SCHEMA.tuples.weapon.variants[0].arity;
@@ -595,6 +601,9 @@ export function shareDocumentToPositional(
       expertiseGrants: document.expertiseGrants?.map((row) =>
         objectToPositional(row, WIRE_SCHEMA.tuples.expertiseGrant.fields)
       ),
+      levelFeatChoices: document.levelFeatChoices?.map((row) =>
+        objectToPositional(row, WIRE_SCHEMA.tuples.levelFeatChoice.fields)
+      ),
     },
     WIRE_SCHEMA.tuples.root.fields,
   );
@@ -614,6 +623,7 @@ function decodeCurrentWire(input: unknown): CharacterShareDocument {
   const wireSkillGrants = root[ROOT_SKILL_GRANTS_INDEX];
   const wireItems = root[ROOT_ITEMS_INDEX];
   const wireExpertiseGrants = root[ROOT_EXPERTISE_GRANTS_INDEX];
+  const wireLevelFeatChoices = root[ROOT_LEVEL_FEAT_CHOICES_INDEX];
   const wireAttunementSlots =
     root[ROOT_ATTUNEMENT_SLOTS_INDEX] === null
       ? null
@@ -789,6 +799,18 @@ function decodeCurrentWire(input: unknown): CharacterShareDocument {
       wireExpertiseGrants,
       SHARE_LIMITS.expertiseGrants,
       'expertiseGrants',
+    );
+  }
+  if (wireLevelFeatChoices !== null) {
+    if (!Array.isArray(wireLevelFeatChoices)) {
+      throw new ShareValidationError(
+        'wire levelFeatChoices must be null or a list.',
+      );
+    }
+    assertListLimit(
+      wireLevelFeatChoices,
+      SHARE_LIMITS.levelFeatChoices,
+      'levelFeatChoices',
     );
   }
   const rawCharacter = fromPositional(
@@ -991,6 +1013,16 @@ function decodeCurrentWire(input: unknown): CharacterShareDocument {
       )
     );
   }
+  if (Array.isArray(wireLevelFeatChoices)) {
+    raw.levelFeatChoices = wireLevelFeatChoices.map((value, index) =>
+      fromPositional(
+        value,
+        LEVEL_FEAT_CHOICE_TUPLE_LENGTH,
+        fieldKeys(WIRE_SCHEMA.tuples.levelFeatChoice.fields),
+        `wire levelFeatChoices[${index}]`,
+      )
+    );
+  }
   return validateShareDocument(raw);
 }
 
@@ -1078,7 +1110,8 @@ export function positionalToShareDocument(
     case 12:
     case 13:
     case 14:
-    case 15: {
+    case 15:
+    case 16: {
       let migrated: unknown = input;
       for (const [from, migration] of Object.entries(MIGRATIONS)) {
         if (Number(from) >= version) {

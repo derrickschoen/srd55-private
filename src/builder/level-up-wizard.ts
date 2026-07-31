@@ -11,6 +11,8 @@ import type {
   KnownFeatGrouping,
   Skill,
 } from '../domain/enums';
+import type { LevelFeatChoice } from '../domain/command-contracts';
+export type { LevelFeatChoice } from '../domain/command-contracts';
 import type {
   CharacterId,
   CharacterRevision,

@@ -42,6 +42,7 @@ import {
   effectReliabilityCategories,
   extraAttackWeaponScopes,
   featAbilityPoints,
+  levelFeatChoiceKinds,
   materialCostKinds,
   rulesEditions,
   selectionEligibilities,
@@ -264,6 +265,7 @@ const sourceTypeEnum = z.enum(domainSourceTypes);
 const slotBucketEnum = z.enum(slotBuckets);
 const slotStateEnum = z.enum(slotStates);
 const skillGrantStateEnum = z.enum(skillGrantStates);
+const levelFeatChoiceKindEnum = z.enum(levelFeatChoiceKinds);
 const spellbookAcquisitionStateEnum = z.enum(spellbookAcquisitionStates);
 const selectionEligibilityEnum = z.enum(selectionEligibilities);
 const weaponMasteryPropertyEnum = z.enum(weaponMasteryProperties);
@@ -401,6 +403,7 @@ export const COLUMN_REFINEMENTS = {
   slotBucketEnum,
   slotStateEnum,
   skillGrantStateEnum,
+  levelFeatChoiceKindEnum,
   spellbookAcquisitionStateEnum,
   selectionEligibilityEnum,
   weaponMasteryPropertyEnum,
@@ -1033,6 +1036,15 @@ const REFINEMENTS = {
   'character_skill_expertise_grants.orphaned_at': sqlTimestamp,
   'character_skill_expertise_grants.created_at': sqlTimestamp,
   'character_skill_expertise_grants.updated_at': sqlTimestamp,
+
+  'character_level_feat_choices.id': positiveInt,
+  'character_level_feat_choices.character_id': positiveInt,
+  'character_level_feat_choices.character_class_level_id': positiveInt,
+  'character_level_feat_choices.class_level': classLevel,
+  'character_level_feat_choices.choice_kind': levelFeatChoiceKindEnum,
+  'character_level_feat_choices.feat_source_instance_id': positiveInt,
+  'character_level_feat_choices.created_at': sqlTimestamp,
+  'character_level_feat_choices.updated_at': sqlTimestamp,
 
   'character_sheet_adjustments.id': positiveInt,
   'character_sheet_adjustments.character_id': positiveInt,

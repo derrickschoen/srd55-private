@@ -184,6 +184,14 @@ export const TABLE_SCOPES = {
     share: true,
     backupReference: false,
   },
+  character_level_feat_choices: {
+    role: 'character_owned',
+    snapshot: true,
+    backupDirect: true,
+    backup: true,
+    share: true,
+    backupReference: false,
+  },
   character_source_instances: {
     role: 'character_owned',
     snapshot: true,
@@ -1223,6 +1231,7 @@ export const APPLICATION_TABLES = order<AnyTableName>()([
   'character_effects',
   'character_hit_point_rolls',
   'character_items',
+  'character_level_feat_choices',
   'character_operations',
   'character_rule_overrides',
   'character_save_points',
@@ -1324,6 +1333,7 @@ export const CHARACTER_STATE_TABLES = order<SnapshotTable>()([
   // the existing order already inserts before this on restore.
   'character_items',
   'character_attunement_slots',
+  'character_level_feat_choices',
 ]);
 
 /**
@@ -1337,6 +1347,7 @@ export const CHARACTER_STATE_TABLES = order<SnapshotTable>()([
 export const CHARACTER_STATE_INSERT_ORDER = order<SnapshotTable>()([
   'character_class_levels',
   'character_source_instances',
+  'character_level_feat_choices',
   'spell_selection_slots',
   'wizard_spellbook_entries',
   'warning_acknowledgements',
@@ -1387,6 +1398,7 @@ export const DELETE_ORDER = order<SnapshotTable>()([
   // it must be deleted before that table — which this position guarantees.
   'character_skill_grants',
   'character_skill_expertise_grants',
+  'character_level_feat_choices',
   // Leaves too. `character_species_traits` is keyed on `character_id` and NOT
   // on `character_species.id` — see `db/schema/origins.ts` — so there is no
   // parent-before-child edge between the two and the order between them is
@@ -1425,6 +1437,7 @@ export const BACKUP_DIRECT_TABLES = order<BackupDirectTable>()([
   'character_skill_expertise_grants',
   'character_items',
   'character_attunement_slots',
+  'character_level_feat_choices',
 ]);
 
 /** Every table in the portable-character backup document. */
@@ -1483,6 +1496,7 @@ export const BACKUP_OPTIONAL_TABLES = [
   // defaulting this key to empty.
   'character_items',
   'character_attunement_slots',
+  'character_level_feat_choices',
 ] as const satisfies readonly BackupTable[];
 
 /** The catalog tables a backup document resolves references against. */
@@ -1542,6 +1556,7 @@ export const SHARE_TABLES: { readonly [N in ShareTable]: N } = {
   character_effects: 'character_effects',
   character_items: 'character_items',
   character_attunement_slots: 'character_attunement_slots',
+  character_level_feat_choices: 'character_level_feat_choices',
 };
 
 /**
@@ -1617,6 +1632,7 @@ export const AUDIT_ENTITY_TYPES = [
   // snapshot-scoped, so `CharacterState.diff` emits a change per item row.
   'character_items',
   'character_attunement_slots',
+  'character_level_feat_choices',
 ] as const satisfies readonly ('character' | AnyTableName)[];
 
 export type AuditEntityType = (typeof AUDIT_ENTITY_TYPES)[number];

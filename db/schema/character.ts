@@ -10,9 +10,11 @@ import {
 import { sql } from 'drizzle-orm';
 import type {
   CharacterId,
+  CharacterLevelFeatChoiceId,
   CharacterSkillExpertiseGrantId,
   CharacterSkillGrantId,
   ClassDefinitionId,
+  ClassLevel,
   SlotId,
   SourceInstanceId,
   SpellVersionId,
@@ -23,6 +25,7 @@ import type {
   Ability,
   DomainSourceType,
   KnownAbilityAllocationMethod,
+  LevelFeatChoiceKind,
   RulesEdition,
   SelectionEligibility,
   Skill,
@@ -36,6 +39,7 @@ import {
   abilityAllocationMethods,
   rulesEditions,
   selectionEligibilities,
+  levelFeatChoiceKinds,
   spellbookAcquisitionStates,
   skillGrantStates,
   skills,
@@ -300,6 +304,10 @@ export const character_class_levels = sqliteTable(
     uniqueIndex(
       'character_class_levels_character_id_class_definition_id_unique',
     ).on(table.character_id, table.class_definition_id),
+    uniqueIndex('character_class_levels_id_character_id_unique').on(
+      table.id,
+      table.character_id,
+    ),
     foreignKey({
       columns: [table.subclass_definition_id, table.class_definition_id],
       foreignColumns: [
@@ -307,6 +315,67 @@ export const character_class_levels = sqliteTable(
         subclass_definitions.class_definition_id,
       ],
     }),
+  ],
+);
+
+/**
+ * One feat opportunity granted by one held class at one class level.
+ *
+ * `feat_source_instance_id = NULL` is a durable owed choice (currently the
+ * D70 Epic Boon defer state). The source relation is composite so a row can
+ * never point at another character's feat. The same ownership guard applies
+ * to the granting class row.
+ */
+export const character_level_feat_choices = sqliteTable(
+  'character_level_feat_choices',
+  {
+    id: integer('id')
+      .primaryKey({ autoIncrement: true })
+      .notNull()
+      .$type<CharacterLevelFeatChoiceId>(),
+    character_id: integer('character_id')
+      .notNull()
+      .$type<CharacterId>()
+      .references(() => characters.id, { onDelete: 'cascade' }),
+    character_class_level_id: integer('character_class_level_id')
+      .notNull(),
+    class_level: integer('class_level').notNull().$type<ClassLevel>(),
+    choice_kind: varchar<LevelFeatChoiceKind>()('choice_kind').notNull(),
+    feat_source_instance_id: integer('feat_source_instance_id')
+      .$type<SourceInstanceId>(),
+    created_at: datetime()('created_at'),
+    updated_at: datetime()('updated_at'),
+  },
+  (table) => [
+    check(
+      'character_level_feat_choices_class_level_check',
+      sql`typeof(${table.class_level}) = 'integer' AND ${table.class_level} BETWEEN 1 AND 20`,
+    ),
+    check(
+      'character_level_feat_choices_choice_kind_check',
+      oneOf('choice_kind', levelFeatChoiceKinds),
+    ),
+    uniqueIndex(
+      'character_level_feat_choices_class_level_kind_unique',
+    ).on(
+      table.character_class_level_id,
+      table.class_level,
+      table.choice_kind,
+    ),
+    foreignKey({
+      columns: [table.character_class_level_id, table.character_id],
+      foreignColumns: [character_class_levels.id, character_class_levels.character_id],
+    }).onDelete('cascade'),
+    foreignKey({
+      columns: [table.feat_source_instance_id, table.character_id],
+      foreignColumns: [
+        character_source_instances.id,
+        character_source_instances.character_id,
+      ],
+    }),
+    index('character_level_feat_choices_character_id_index').on(
+      table.character_id,
+    ),
   ],
 );
 

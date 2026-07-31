@@ -74,6 +74,14 @@ export type FeatGrouping =
   | KnownFeatGrouping
   | PassthroughVocabulary<'FeatGrouping'>;
 
+/** The two sourced class-level occurrences that can grant a feat. */
+export const levelFeatChoiceKinds = [
+  'asi_level_feat',
+  'epic_boon',
+] as const;
+export type LevelFeatChoiceKind =
+  (typeof levelFeatChoiceKinds)[number];
+
 export const slotBuckets = [
   'cantrip_known',
   'prepared',

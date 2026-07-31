@@ -679,11 +679,24 @@ function validateCharacterRows(
       true,
     );
   }
+  const classLevelIds = uniqueRowIds(
+    tables.character_class_levels ?? [],
+    `${label}.character_class_levels`,
+  );
+  const classLevelById = new Map(
+    (tables.character_class_levels ?? []).map((row) => [
+      Number(row.id),
+      Number(row.level),
+    ]),
+  );
 
   const sourceInstances = tables.character_source_instances ?? [];
   const sourceIds = uniqueRowIds(
     sourceInstances,
     `${label}.character_source_instances`,
+  );
+  const sourceById = new Map(
+    sourceInstances.map((row) => [Number(row.id), row]),
   );
   const instanceUuids = new Set<string>();
   for (const [index, row] of sourceInstances.entries()) {
@@ -722,6 +735,42 @@ function validateCharacterRows(
       `${label}.character_source_instances[${index}].source_definition_id`,
       true,
     );
+  }
+
+  for (const [index, row] of (
+    tables.character_level_feat_choices ?? []
+  ).entries()) {
+    const classLevelId = positiveInteger(
+      row.character_class_level_id,
+      `${label}.character_level_feat_choices[${index}].character_class_level_id`,
+    );
+    if (!classLevelIds.has(classLevelId)) {
+      throw new BackupValidationError(
+        `${label}.character_level_feat_choices[${index}] references a class row from another character.`,
+      );
+    }
+    if (Number(row.class_level) > (classLevelById.get(classLevelId) ?? 0)) {
+      throw new BackupValidationError(
+        `${label}.character_level_feat_choices[${index}].class_level exceeds the held class level.`,
+      );
+    }
+    const sourceId = nullablePositiveInteger(
+      row.feat_source_instance_id,
+      `${label}.character_level_feat_choices[${index}].feat_source_instance_id`,
+    );
+    if (sourceId !== null && !sourceIds.has(sourceId)) {
+      throw new BackupValidationError(
+        `${label}.character_level_feat_choices[${index}] references a feat source from another character.`,
+      );
+    }
+    if (
+      sourceId !== null &&
+      sourceById.get(sourceId)?.source_type !== 'feat'
+    ) {
+      throw new BackupValidationError(
+        `${label}.character_level_feat_choices[${index}] must reference a feat source.`,
+      );
+    }
   }
 
   for (const [index, row] of (tables.spell_selection_slots ?? []).entries()) {
@@ -1888,6 +1937,7 @@ function remappedSlotKey(
 
 interface CurrentImportMaps {
   readonly character_class_levels: Map<number, number>;
+  readonly character_level_feat_choices: Map<number, number>;
   readonly character_source_instances: Map<number, number>;
   readonly spell_selection_slots: Map<number, number>;
   readonly wizard_spellbook_entries: Map<number, number>;
@@ -1918,6 +1968,7 @@ function importCurrentTables(
 ): CurrentImportMaps {
   const maps: CurrentImportMaps = {
     character_class_levels: new Map(),
+    character_level_feat_choices: new Map(),
     character_source_instances: new Map(),
     spell_selection_slots: new Map(),
     wizard_spellbook_entries: new Map(),
@@ -1986,6 +2037,34 @@ function importCurrentTables(
           sourceReferenceKind(sourceType),
           row.source_definition_id,
         ),
+      }),
+    );
+  }
+
+  for (const row of document.tables.character_level_feat_choices) {
+    const classLevelId = maps.character_class_levels.get(
+      Number(row.character_class_level_id),
+    );
+    const featSourceId =
+      row.feat_source_instance_id === null
+        ? null
+        : maps.character_source_instances.get(
+            Number(row.feat_source_instance_id),
+          );
+    if (
+      classLevelId === undefined ||
+      (row.feat_source_instance_id !== null && featSourceId === undefined)
+    ) {
+      throw new BackupValidationError(
+        'Character backup level feat choice reference is missing.',
+      );
+    }
+    maps.character_level_feat_choices.set(
+      Number(row.id),
+      insertPortableRow(db, 'character_level_feat_choices', row, {
+        character_id: characterId,
+        character_class_level_id: classLevelId,
+        feat_source_instance_id: featSourceId ?? null,
       }),
     );
   }
@@ -2403,6 +2482,9 @@ function portableSnapshots(
 ): string[] {
   const ids: Record<SnapshotTable, Map<number, number>> = {
     character_class_levels: new Map(current.character_class_levels),
+    character_level_feat_choices: new Map(
+      current.character_level_feat_choices,
+    ),
     character_source_instances: new Map(
       current.character_source_instances,
     ),
@@ -2563,6 +2645,21 @@ function portableSnapshots(
               'subclass_definitions',
               row.subclass_definition_id,
             ),
+          }));
+        case 'character_level_feat_choices':
+          return rowsOf(table).map((row) => ({
+            ...row,
+            id: ids.character_level_feat_choices.get(Number(row.id)),
+            character_id: characterId,
+            character_class_level_id: ids.character_class_levels.get(
+              Number(row.character_class_level_id),
+            ),
+            feat_source_instance_id:
+              row.feat_source_instance_id === null
+                ? null
+                : ids.character_source_instances.get(
+                    Number(row.feat_source_instance_id),
+                  ) ?? null,
           }));
         case 'wizard_spellbook_entries':
           return rowsOf(table).map((row) => ({
