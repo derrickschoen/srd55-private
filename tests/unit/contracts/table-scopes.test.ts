@@ -139,6 +139,8 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       'class_feature_effects',
       'class_martial_arts_dice',
       'class_progressions',
+      'class_resource_formulas',
+      'class_resources',
       'class_saving_throw_proficiencies',
       'class_sheet_traits',
       'class_skill_options',
@@ -331,7 +333,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
 });
 
 describe('table scope classification', () => {
-  it('classifies all 73 tables exactly once', () => {
+  it('classifies all 75 tables exactly once', () => {
     const names = Object.keys(TABLE_SCOPES);
     // 30 Laravel-derived tables — 38 until the eight Laravel-only
     // infrastructure ones were dropped — plus the four native weapon tables,
@@ -348,8 +350,8 @@ describe('table scope classification', () => {
     // tables and CI-2b's ONE applied data-migration marker table. Each group is named
     // rather than folded into one total, so a group that vanishes while
     // another grows cannot pass unnoticed.
-    expect(names).toHaveLength(73);
-    expect(new Set(names).size).toBe(73);
+    expect(names).toHaveLength(75);
+    expect(new Set(names).size).toBe(75);
     expect([...names].sort()).toEqual([...APPLICATION_TABLES].sort());
   });
 
@@ -472,6 +474,19 @@ describe('table scope classification', () => {
       'class_weapon_mastery_counts',
     ] as const) {
       expect([...APPLICATION_TABLES]).toContain(table);
+    }
+  });
+
+  it('keeps both class resource catalogs out of every portability scope', () => {
+    for (const table of ['class_resources', 'class_resource_formulas'] as const) {
+      expect(TABLE_SCOPES[table]).toEqual({
+        role: 'catalog_class',
+        snapshot: false,
+        backupDirect: false,
+        backup: false,
+        share: false,
+        backupReference: false,
+      });
     }
   });
 });
