@@ -42,6 +42,93 @@ interface AbilityOverrideDraft {
   readonly notes: string | null;
 }
 
+interface ReplacementModalActivation {
+  readonly cancel: () => void;
+  readonly restoreFocus: () => void;
+}
+
+/**
+ * Put the replacement dialog in the modal top layer and retain an explicit
+ * keyboard loop. The browser's modal dialog semantics make the rest of the
+ * page inert; the loop also makes first/last Tab behaviour deterministic.
+ */
+export function activateAttunementReplacementModal(
+  dialog: HTMLDialogElement,
+  activation: ReplacementModalActivation,
+): () => void {
+  const controls = Array.from(
+    dialog.querySelectorAll<HTMLElement>('button'),
+  )
+    .filter((control) => !(control as HTMLButtonElement).disabled);
+  const cancel = dialog.querySelector<HTMLButtonElement>(
+    '[data-attunement-replacement-cancel]',
+  );
+  let dismissed = false;
+
+  const dismiss = (): void => {
+    if (dismissed || cancel?.disabled === true) {
+      return;
+    }
+    dismissed = true;
+    activation.cancel();
+    activation.restoreFocus();
+  };
+  const onKeydown = (event: KeyboardEvent): void => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      dismiss();
+      return;
+    }
+    if (event.key !== 'Tab' || controls.length === 0) {
+      return;
+    }
+    const first = controls[0];
+    const last = controls.at(-1);
+    if (first === undefined || last === undefined) {
+      return;
+    }
+    const active = document.activeElement;
+    if (
+      event.shiftKey &&
+      (active === first || !controls.includes(active as HTMLElement))
+    ) {
+      event.preventDefault();
+      last.focus();
+    } else if (
+      !event.shiftKey &&
+      (active === last || !controls.includes(active as HTMLElement))
+    ) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+  const onCancel = (event: Event): void => {
+    event.preventDefault();
+    dismiss();
+  };
+  const onCancelClick = (): void => dismiss();
+
+  dialog.addEventListener('keydown', onKeydown);
+  dialog.addEventListener('cancel', onCancel);
+  cancel?.addEventListener('click', onCancelClick);
+  if (typeof dialog.showModal === 'function') {
+    if (!dialog.open) {
+      dialog.showModal();
+    }
+  } else {
+    // The unit-test DOM has no top-layer implementation but retains the
+    // observable open state used by the focus-loop tests.
+    dialog.setAttribute('open', '');
+  }
+  controls[0]?.focus();
+
+  return () => {
+    dialog.removeEventListener('keydown', onKeydown);
+    dialog.removeEventListener('cancel', onCancel);
+    cancel?.removeEventListener('click', onCancelClick);
+  };
+}
+
 function blankItem(): ItemFields {
   return {
     name: '',
@@ -93,12 +180,15 @@ function replacementModal(options: ItemsPanelOptions): HTMLDialogElement | null 
   }
   const dialog = document.createElement('dialog');
   dialog.className = 'attunement-replace-modal';
-  dialog.open = true;
   dialog.setAttribute('aria-modal', 'true');
+  dialog.setAttribute('aria-labelledby', 'attunement-replace-heading');
+  dialog.setAttribute('aria-describedby', 'attunement-replace-explanation');
   dialog.dataset.testid = 'attunement-replace-modal';
   const heading = document.createElement('h3');
+  heading.id = 'attunement-replace-heading';
   heading.textContent = 'Replace an attuned item';
   const explanation = document.createElement('p');
+  explanation.id = 'attunement-replace-explanation';
   explanation.append(
     'All three attunement slots are full. Choose which item ',
     freeTextSpan(incoming.name),
@@ -127,7 +217,7 @@ function replacementModal(options: ItemsPanelOptions): HTMLDialogElement | null 
   cancel.className = 'button-secondary';
   cancel.textContent = 'Cancel';
   cancel.disabled = options.disabled;
-  cancel.addEventListener('click', options.actions.cancelReplacement);
+  cancel.dataset.attunementReplacementCancel = '';
   dialog.append(heading, explanation, choices, cancel);
   return dialog;
 }
@@ -209,6 +299,7 @@ export function renderItems(options: ItemsPanelOptions): HTMLElement {
         button.className = 'button-secondary';
         button.textContent = 'Unattune';
         button.disabled = options.disabled;
+        button.dataset.focusKey = `item-attunement-${String(item.id)}`;
         button.setAttribute('aria-label', `Unattune ${item.name}`);
         button.addEventListener('click', () =>
           options.actions.unattune(item.id),
@@ -220,6 +311,7 @@ export function renderItems(options: ItemsPanelOptions): HTMLElement {
         button.className = 'button-secondary';
         button.textContent = 'Attune';
         button.disabled = options.disabled;
+        button.dataset.focusKey = `item-attunement-${String(item.id)}`;
         button.setAttribute('aria-label', `Attune ${item.name}`);
         button.addEventListener('click', () => options.actions.attune(item.id));
         action.append(button);
@@ -415,6 +507,10 @@ function renderItemForm(
       remove.type = 'button';
       remove.className = 'button-secondary';
       remove.textContent = 'Remove effect';
+      remove.setAttribute(
+        'aria-label',
+        `Remove effect ${String(index + 1)}`,
+      );
       remove.addEventListener('click', () => {
         overrides = overrides.filter((_, candidate) => candidate !== index);
         rebuildEffects();
