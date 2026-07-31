@@ -172,6 +172,52 @@ export type LevelFeatChoice =
   | LevelFeatSelection
   | { kind: 'defer_epic_boon' };
 
+/** A generated level-up source addressed before its durable child rows exist. */
+export type LevelUpPlannedGrantSource =
+  | { readonly kind: 'selected_class' }
+  | { readonly kind: 'selected_class_subclass' }
+  | { readonly kind: 'selected_feat' }
+  | {
+      readonly kind: 'existing_source';
+      readonly source_instance_id: number;
+    };
+
+/** Stable logical identity shared by planning and post-generation lookup. */
+export interface LevelUpPlannedGrantLocator {
+  readonly source: LevelUpPlannedGrantSource;
+  readonly rule_key: string;
+  readonly ordinal: number;
+}
+
+export interface LevelUpPlannedSkillChoice {
+  readonly locator: LevelUpPlannedGrantLocator;
+  readonly skill: Skill;
+}
+
+export interface LevelUpPlannedExpertiseChoice {
+  readonly locator: LevelUpPlannedGrantLocator;
+  readonly skill: Skill;
+}
+
+export type LevelUpPlannedSpellChoice =
+  | {
+      readonly kind: 'slot_selection';
+      readonly locator: LevelUpPlannedGrantLocator;
+      readonly spell_version_id: number;
+      readonly mode: 'new' | 'replace';
+    }
+  | {
+      readonly kind: 'spellbook_acquisition';
+      readonly locator: LevelUpPlannedGrantLocator;
+      readonly spell_version_id: number;
+    };
+
+export interface LevelUpPlannedSubchoices {
+  readonly skills: readonly LevelUpPlannedSkillChoice[];
+  readonly expertise: readonly LevelUpPlannedExpertiseChoice[];
+  readonly spells: readonly LevelUpPlannedSpellChoice[];
+}
+
 /**
  * THE ONE LEVELLING PATH (level-up plan §8b): one command, one payload, one
  * transaction, one snapshot inverse, one refusal set.
@@ -195,6 +241,8 @@ export interface LevelUpClassCommand extends CommandBase {
   target_level: number;
   subclass_content_key?: string;
   feat_choice?: LevelFeatChoice;
+  /** Omission is explicit D70 deferral; generated occurrences remain empty. */
+  planned_subchoices?: LevelUpPlannedSubchoices;
 }
 
 /** Fill a durable deferred Epic Boon occurrence without moving a class level. */

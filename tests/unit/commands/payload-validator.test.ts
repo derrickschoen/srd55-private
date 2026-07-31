@@ -139,6 +139,52 @@ describe('character command payload validation', () => {
         class_definition_id: 9,
         target_level: 3,
         subclass_content_key: '2024:subclass:ek',
+        planned_subchoices: {
+          skills: [
+            {
+              locator: {
+                source: { kind: 'selected_class' },
+                rule_key: 'class_skill',
+                ordinal: 1,
+              },
+              skill: 'arcana',
+            },
+          ],
+          expertise: [
+            {
+              locator: {
+                source: {
+                  kind: 'existing_source',
+                  source_instance_id: 7,
+                },
+                rule_key: 'class_expertise_2',
+                ordinal: 1,
+              },
+              skill: 'arcana',
+            },
+          ],
+          spells: [
+            {
+              kind: 'slot_selection',
+              locator: {
+                source: { kind: 'selected_class_subclass' },
+                rule_key: 'ek-spells',
+                ordinal: 1,
+              },
+              spell_version_id: 11,
+              mode: 'new',
+            },
+            {
+              kind: 'spellbook_acquisition',
+              locator: {
+                source: { kind: 'selected_feat' },
+                rule_key: 'magic-initiate-level-one',
+                ordinal: 1,
+              },
+              spell_version_id: 12,
+            },
+          ],
+        },
       },
       {
         type: 'level_up_class',
@@ -620,5 +666,66 @@ describe('character command payload validation', () => {
     for (const [payload, message] of cases) {
       expectInvalid(payload, message);
     }
+    });
   });
-});
+
+  it('rejects malformed planned subchoices with transportable structured data', () => {
+    let refusal: unknown;
+    try {
+      validateCharacterCommandPayload({
+        type: 'level_up_class',
+        class_definition_id: 1,
+        target_level: 2,
+        planned_subchoices: {
+          skills: [],
+          expertise: [],
+          spells: [
+            {
+              kind: 'slot_selection',
+              locator: {
+                source: { kind: 'selected_class', durable_row_id: 99 },
+                rule_key: 'prepared',
+                ordinal: 1,
+              },
+              spell_version_id: 4,
+              mode: 'new',
+            },
+          ],
+        },
+      });
+    } catch (error) {
+      refusal = error;
+    }
+    expect(refusal).toMatchObject({
+      data: {
+        reason: 'malformed_planned_subchoice',
+        subchoice_kind: 'spell',
+        index: 0,
+        field: 'locator.source',
+      },
+    });
+
+    let malformedSkills: unknown;
+    try {
+      validateCharacterCommandPayload({
+        type: 'level_up_class',
+        class_definition_id: 1,
+        target_level: 2,
+        planned_subchoices: {
+          skills: {},
+          expertise: [],
+          spells: [],
+        },
+      });
+    } catch (error) {
+      malformedSkills = error;
+    }
+    expect(malformedSkills).toMatchObject({
+      data: {
+        reason: 'malformed_planned_subchoice',
+        subchoice_kind: 'skill',
+        index: null,
+        field: 'planned_subchoices.skills',
+      },
+    });
+  });

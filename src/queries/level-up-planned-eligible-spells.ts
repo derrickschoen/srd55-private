@@ -20,12 +20,20 @@ import {
 import { GrantRule, type GrantRuleObject } from '../grants/grant-rule';
 import type { JsonObject } from '../domain/models';
 import type { ClassLevel } from '../domain/ids';
+import { characterLevel } from '../rules/character-level';
+import { planLevelFeatSelection } from '../commands/level-feat-choice';
+import {
+  asiLevelsForClassName,
+  epicBoonLevelsForClassName,
+} from '../rules/class-level-features-srd';
 
 interface HeldClassPlan {
   readonly level: number;
   readonly source_id: number;
   readonly config: string | null;
   readonly subclass_source_id: number | null;
+  readonly subclass_definition_id: number | null;
+  readonly subclass_content_key: string | null;
 }
 
 function heldClassPlan(row: SqlRow): HeldClassPlan {
@@ -34,6 +42,11 @@ function heldClassPlan(row: SqlRow): HeldClassPlan {
     source_id: sqlInteger(row, 'source_id'),
     config: sqlNullableString(row, 'config'),
     subclass_source_id: sqlNullableInteger(row, 'subclass_source_id'),
+    subclass_definition_id: sqlNullableInteger(
+      row,
+      'subclass_definition_id',
+    ),
+    subclass_content_key: sqlNullableString(row, 'subclass_content_key'),
   };
 }
 
@@ -166,7 +179,9 @@ export class LevelUpPlannedEligibleSpells {
     const held = this.db.one(
       `SELECT level.level, class_source.id AS source_id,
               class_source.config,
-              subclass_source.id AS subclass_source_id
+              subclass_source.id AS subclass_source_id,
+              level.subclass_definition_id,
+              subclass.content_key AS subclass_content_key
        FROM character_class_levels AS level
        INNER JOIN character_source_instances AS class_source
          ON class_source.character_id = level.character_id
@@ -179,13 +194,17 @@ export class LevelUpPlannedEligibleSpells {
         AND subclass_source.source_definition_id =
             level.subclass_definition_id
         AND subclass_source.state = 'active'
+       LEFT JOIN subclass_definitions AS subclass
+         ON subclass.id = level.subclass_definition_id
        WHERE level.character_id = ? AND level.class_definition_id = ?`,
       [params.character_id, params.class_definition_id],
       heldClassPlan,
     );
     if (
       held === null ||
-      params.target_class_level !== held.level + 1
+      params.target_class_level !== held.level + 1 ||
+      (params.subclass_content_key !== undefined &&
+        params.target_class_level !== 3)
     ) {
       throw new PlannedSpellEligibilityNotFoundError(
         'The requested adjacent held-class plan does not exist.',
@@ -238,12 +257,46 @@ export class LevelUpPlannedEligibleSpells {
       params.locator.source.kind ===
       'selected_class_subclass'
     ) {
-      if (held.subclass_source_id === null) {
-        return [];
+      if (params.subclass_content_key !== undefined) {
+        const selectedSubclassId = this.db.scalar<number>(
+          `SELECT id FROM subclass_definitions
+           WHERE content_key = ? AND class_definition_id = ?`,
+          [params.subclass_content_key, params.class_definition_id],
+        );
+        if (selectedSubclassId === null) {
+          return [];
+        }
+        if (
+          held.subclass_source_id !== null &&
+          held.subclass_definition_id === Number(selectedSubclassId)
+        ) {
+          return this.planExisting(
+            held.subclass_source_id,
+            { kind: 'selected_class_subclass' },
+            params.character_id,
+            params.target_class_level,
+          );
+        }
+        const ability = this.db.scalar<string>(
+          'SELECT spellcasting_ability FROM subclass_definitions WHERE id = ?',
+          [Number(selectedSubclassId)],
+        );
+        return this.#planner.plan({
+          source: { kind: 'selected_class_subclass' },
+          configured_rules: rulesFromSubclassProgressions(
+            this.db,
+            Number(selectedSubclassId),
+            params.target_class_level,
+          ),
+          config: { spellcasting_ability: ability },
+          effective_class_level: params.target_class_level,
+        });
       }
+      if (held.subclass_source_id === null) return [];
       return this.planExisting(
         held.subclass_source_id,
         { kind: 'selected_class_subclass' },
+        params.character_id,
         params.target_class_level,
       );
     }
@@ -252,29 +305,59 @@ export class LevelUpPlannedEligibleSpells {
       return this.planExisting(
         params.locator.source.source_instance_id,
         params.locator.source,
-        params.target_class_level,
+        params.character_id,
       );
     }
-
-    // LU-0 supplies selected-feat rules through FeatApplicationPlan to the
-    // planner in-process. Until that builder exists, the public RPC has no
-    // trusted feat definition/config projection from which to recompute them.
-    return [];
+    if (params.feat_choice === undefined) return [];
+    const className = this.db.scalar<string>(
+      'SELECT name FROM class_definitions WHERE id = ?',
+      [params.class_definition_id],
+    );
+    if (className === null) return [];
+    const asiLevels = asiLevelsForClassName(className);
+    const epicBoonLevels = epicBoonLevelsForClassName(className);
+    const isAsiLevel = asiLevels?.has(params.target_class_level) ?? false;
+    const isEpicBoonLevel =
+      epicBoonLevels?.has(params.target_class_level) ?? false;
+    if (!isAsiLevel && !isEpicBoonLevel) return [];
+    const otherLevels = characterLevel(this.db, params.character_id, {
+      excludingClassDefinitionId: params.class_definition_id,
+    });
+    const featPlan = planLevelFeatSelection(this.db, {
+      characterId: params.character_id,
+      selection: params.feat_choice,
+      projectedTotalLevel:
+        (otherLevels ?? 0) + params.target_class_level,
+      advancedClassDefinitionId: params.class_definition_id,
+      targetClassLevel: params.target_class_level,
+      targetSubclassContentKey:
+        params.subclass_content_key ?? held.subclass_content_key,
+      ...(isEpicBoonLevel ? { requiredGrouping: 'epic_boon' } : {}),
+    });
+    if (featPlan.eligibility.status !== 'qualified') return [];
+    return this.#planner.plan({
+      source: { kind: 'selected_feat' },
+      configured_rules: featPlan.grant_rules,
+      config: featPlan.config,
+      effective_class_level: null,
+    });
   }
 
   private planExisting(
     sourceId: number,
     sourceAddress: PlannedGrantSource,
-    targetClassLevel: ClassLevel,
+    characterId: number,
+    projectedClassLevel?: ClassLevel,
   ) {
     const source = this.#rules.findSource(sourceId);
-    if (source === null || source.state !== 'active') {
+    if (
+      source === null ||
+      source.characterId !== characterId ||
+      source.state !== 'active'
+    ) {
       return [];
     }
-    const effectiveLevel = this.effectiveLevel(
-      source,
-      targetClassLevel,
-    );
+    const effectiveLevel = projectedClassLevel ?? this.effectiveLevel(source);
     return this.#planner.plan({
       source: sourceAddress,
       configured_rules:
@@ -283,7 +366,7 @@ export class LevelUpPlannedEligibleSpells {
           ? rulesFromSubclassProgressions(
               this.db,
               source.sourceDefinitionId,
-              targetClassLevel,
+              effectiveLevel ?? 0,
             )
           : this.#rules
               .activeRulesForSource(sourceId)
@@ -295,11 +378,10 @@ export class LevelUpPlannedEligibleSpells {
 
   private effectiveLevel(
     source: GrantSourceInstance,
-    targetClassLevel: ClassLevel,
   ): ClassLevel | null {
     return source.sourceType === 'class' ||
       source.sourceType === 'subclass'
-      ? targetClassLevel
+      ? this.#rules.classLevelForSource(source) as ClassLevel
       : null;
   }
 }
