@@ -18,6 +18,7 @@ import {
   seedClassProgressions,
 } from '../../../src/rules/class-progression-lookup';
 import { getSqlite3, MemoryDatabaseStorage } from '../../helpers/open-db';
+import { hasBundledClassResourceContent } from '../../../src/rules/class-resources-srd';
 
 const SRD_CLASSES = [
   'Barbarian',
@@ -332,6 +333,61 @@ describe('application database bootstrap', () => {
     expect(
       lifecycle.database.allRaw('SELECT name FROM characters'),
     ).toEqual([{ name: 'Survivor' }]);
+  });
+
+  it('boot repair compares exact class-resource tuples and formulas, not counts alone', async () => {
+    const { lifecycle } = await freshApplicationLifecycle();
+    const db = lifecycle.database;
+    const barbarianId = Number(
+      db.scalar("SELECT id FROM class_definitions WHERE content_key = '2024:class:barbarian'"),
+    );
+    const bardId = Number(
+      db.scalar("SELECT id FROM class_definitions WHERE content_key = '2024:class:bard'"),
+    );
+    const wizardId = Number(
+      db.scalar("SELECT id FROM class_definitions WHERE content_key = '2024:class:wizard'"),
+    );
+
+    db.exec('DELETE FROM class_resources WHERE class_definition_id = ?', [barbarianId]);
+    for (let level = 1; level <= 20; level += 1) {
+      db.exec(
+        `INSERT INTO class_resources (
+           class_definition_id, class_level, resource_kind, maximum
+         ) VALUES (?, ?, 'rage', 1)`,
+        [bardId, level],
+      );
+    }
+    db.exec(
+      `UPDATE class_resource_formulas
+          SET class_definition_id = ?
+        WHERE class_definition_id = ? AND resource_kind = 'bardic_inspiration'`,
+      [wizardId, bardId],
+    );
+    expect(db.scalar('SELECT count(*) FROM class_resources')).toBe(160);
+    expect(db.scalar('SELECT count(*) FROM class_resource_formulas')).toBe(18);
+    expect(hasBundledClassResourceContent(db)).toBe(false);
+
+    lifecycle.reopen();
+
+    expect(hasBundledClassResourceContent(lifecycle.database)).toBe(true);
+    expect(
+      lifecycle.database.scalar(
+        `SELECT count(*) FROM class_resources AS resource
+          JOIN class_definitions AS definition
+            ON definition.id = resource.class_definition_id
+         WHERE definition.content_key = '2024:class:barbarian'
+           AND resource.resource_kind = 'rage'`,
+      ),
+    ).toBe(20);
+    expect(
+      lifecycle.database.scalar(
+        `SELECT definition.content_key
+           FROM class_resource_formulas AS formula
+           JOIN class_definitions AS definition
+             ON definition.id = formula.class_definition_id
+          WHERE formula.resource_kind = 'bardic_inspiration'`,
+      ),
+    ).toBe('2024:class:bard');
   });
 
   it('yields a class name already claimed by user content instead of failing the boot', async () => {

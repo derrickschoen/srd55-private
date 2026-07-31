@@ -176,6 +176,22 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
     text: ['slots', 'pact_slots', 'grant_rules'],
     numeric: ['created_at', 'updated_at'],
   },
+  class_resources: {
+    integer: ['id', 'class_definition_id', 'class_level', 'maximum'],
+    text: ['resource_kind'],
+    numeric: ['created_at', 'updated_at'],
+  },
+  class_resource_formulas: {
+    integer: [
+      'id', 'class_definition_id', 'minimum_class_level', 'fixed_count',
+      'multiplier',
+    ],
+    text: [
+      'resource_kind', 'formula_kind', 'ability',
+      'later_fixed_count_steps',
+    ],
+    numeric: ['created_at', 'updated_at'],
+  },
   feat_definitions: {
     integer: [
       'id', 'min_level', 'ability_points', 'ability_increase_maximum',
@@ -852,6 +868,13 @@ const expectedNotNull: Record<string, string[]> = {
     'supports_ritual_casting',
   ],
   class_progressions: ['id', 'class_definition_id', 'class_level', 'cantrips_known', 'prepared_count'],
+  class_resources: [
+    'id', 'class_definition_id', 'class_level', 'resource_kind', 'maximum',
+  ],
+  class_resource_formulas: [
+    'id', 'class_definition_id', 'resource_kind', 'formula_kind',
+    'minimum_class_level',
+  ],
   feat_definitions: [
     'id', 'content_key', 'name', 'rules_edition', 'ability_points',
     'repeatable',
@@ -1057,6 +1080,10 @@ const expectedNamedIndexes: Record<string, string> = {
     'class_definitions:name,rules_edition',
   class_progressions_class_definition_id_class_level_unique:
     'class_progressions:class_definition_id,class_level:unique',
+  class_resources_class_definition_id_class_level_resource_kind_unique:
+    'class_resources:class_definition_id,class_level,resource_kind:unique',
+  class_resource_formulas_class_definition_id_resource_kind_unique:
+    'class_resource_formulas:class_definition_id,resource_kind:unique',
   feat_definitions_content_key_unique: 'feat_definitions:content_key:unique',
   feat_definitions_name_rules_edition_index:
     'feat_definitions:name,rules_edition',
@@ -1151,6 +1178,8 @@ const expectedUniqueGroups: Record<string, string[]> = {
   character_spell_preferences: ['character_id,spell_version_id'],
   class_definitions: ['content_key'],
   class_progressions: ['class_definition_id,class_level'],
+  class_resources: ['class_definition_id,class_level,resource_kind'],
+  class_resource_formulas: ['class_definition_id,resource_kind'],
   class_weapon_mastery_counts: ['class_definition_id,class_level'],
   class_weapon_mastery_grants: ['class_definition_id'],
   weapon_templates: ['content_key'],
@@ -1459,6 +1488,10 @@ const expectedForeignKeys: Record<string, string[]> = {
     'spell_version_id->spell_versions.id|NO ACTION',
   ],
   class_progressions: ['class_definition_id->class_definitions.id|CASCADE'],
+  class_resources: ['class_definition_id->class_definitions.id|CASCADE'],
+  class_resource_formulas: [
+    'class_definition_id->class_definitions.id|CASCADE',
+  ],
   spell_identity_aliases: [
     'spell_identity_id->spell_identities.id|CASCADE',
   ],
