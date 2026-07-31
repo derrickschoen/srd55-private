@@ -28,7 +28,7 @@ import {
 import { sqlInteger, sqlNullableString, sqlString } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import { characterLevel } from '../rules/character-level';
-import { asiLevelsForClassName } from '../rules/class-asi-levels-srd';
+import { asiLevelsForClassName } from '../rules/class-level-features-srd';
 import type {
   LevelUpClassCommand as LevelUpClassPayload,
   RestoreSnapshotCommand as RestoreSnapshotPayload,
