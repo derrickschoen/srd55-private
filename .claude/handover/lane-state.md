@@ -40,6 +40,15 @@ supervisor-verified (post-merge main vitest 192/3,132 exit 0).
   20-row table in d91r.log) + full PW + D135 review + merge.
   Then FIX-ATTR, RESP-1, BANNER per HANDOVER §5.
 
+## D91-R review round 1 (D135) — all four ACCEPTED, FIX2 in flight
+- sheet.ts:1752 return-aborts whole slot resolver on one bad class (verified
+  by supervisor at the line) -> families must resolve independently.
+- Unmarked class-name interpolation in absence details (D4 free-text).
+- Classification-map test not exhaustive (flip wild_shape stays green).
+- break-inside not asserted in print test.
+FIX2 dispatched (log d91r-fix2.log, port 44477). After it: supervisor
+re-gate (vitest + shape control re-run + full PW) + round-2 review + merge.
+
 ## Rulings recorded this window
 D118-D137 (see decisions.md). Newest four: D134 focus_points = Remaining
 field; D135 codex review every unit; D136 stuck = multi-perspective
