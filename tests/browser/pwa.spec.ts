@@ -19,7 +19,8 @@ test('links the install manifest, registers the worker, and reports refused pers
   const manifestResponse = await page.request.get('/manifest.webmanifest');
   expect(manifestResponse.ok()).toBe(true);
   await expect(manifestResponse.json()).resolves.toMatchObject({
-    name: 'Multiclass Spell Planner',
+    name: 'SRD-55',
+    short_name: 'SRD-55',
     display: 'standalone',
     start_url: './',
   });

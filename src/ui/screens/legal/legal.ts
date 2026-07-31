@@ -33,7 +33,7 @@ export function renderLegalPage(): string {
           <h2>System Reference Document 5.2</h2>
           <p class="srd-attribution" data-testid="srd-attribution">${attributionNotice()}</p>
           <p>The class list, the cantrip and spell-slot progressions, and the
-            multiclass spellcaster slot table this planner calculates with are
+            multiclass spellcaster slot table SRD-55 calculates with are
             derived from that document.</p>
           <p>Spell descriptions and other rules text come from catalogs you
             import from your own copies. They stay in your browser: nothing you

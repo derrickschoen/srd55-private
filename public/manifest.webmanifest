@@ -1,7 +1,7 @@
 {
-  "name": "Multiclass Spell Planner",
-  "short_name": "Spell Planner",
-  "description": "A local-first multiclass spell planner",
+  "name": "SRD-55",
+  "short_name": "SRD-55",
+  "description": "SRD-55 is a local-first character builder",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

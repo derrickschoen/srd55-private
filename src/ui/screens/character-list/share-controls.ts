@@ -405,7 +405,7 @@ export function createShareControls(
       void browser
         .share({
           title: exporting.name,
-          text: `Add ${exporting.name} to Spell Planner`,
+          text: `Add ${exporting.name} to SRD-55`,
           url: linkOutput.value,
         })
         .catch((error: unknown) => {
