@@ -18,6 +18,12 @@ import {
   type DatabaseMigration,
   validateMigrationRegistry,
 } from './migrations';
+import {
+  CATALOG_DATA_MIGRATIONS,
+  runCatalogDataMigrations,
+  type CatalogDataMigration,
+  validateCatalogDataMigrationRegistry,
+} from '../catalog/catalog-data-migrations';
 
 /**
  * Every table an application database image must contain.
@@ -191,6 +197,8 @@ export class DatabaseLifecycle {
     private readonly seed: DatabaseSeed = () => undefined,
     private readonly migrations: readonly DatabaseMigration[] =
       DATABASE_MIGRATIONS,
+    private readonly catalogDataMigrations: readonly CatalogDataMigration[] =
+      CATALOG_DATA_MIGRATIONS,
   ) {}
 
   get database(): DatabaseContext {
@@ -221,6 +229,7 @@ export class DatabaseLifecycle {
     try {
       prepareConnection(connection);
       validateMigrationRegistry(this.migrations);
+      validateCatalogDataMigrationRegistry(this.catalogDataMigrations);
       const isNewImage = !hasApplicationSchema(connection);
       if (isNewImage) {
         connection.exec(this.schema);
@@ -229,6 +238,7 @@ export class DatabaseLifecycle {
       }
       this.#validateApplicationDatabase(connection);
       const context = new DatabaseContext(connection);
+      runCatalogDataMigrations(context, this.catalogDataMigrations);
       this.#applySeed(context);
       this.#context = context;
       return this.#context;
@@ -303,8 +313,13 @@ export class DatabaseLifecycle {
     try {
       prepareConnection(candidate);
       validateMigrationRegistry(this.migrations);
+      validateCatalogDataMigrationRegistry(this.catalogDataMigrations);
       this.#migrateKnownSchema(candidate);
       this.#validateApplicationDatabase(candidate);
+      runCatalogDataMigrations(
+        new DatabaseContext(candidate),
+        this.catalogDataMigrations,
+      );
       auditCandidateDatabase(candidate);
     } finally {
       candidate.close();
@@ -363,8 +378,13 @@ export class DatabaseLifecycle {
     try {
       prepareConnection(candidate);
       validateMigrationRegistry(this.migrations);
+      validateCatalogDataMigrationRegistry(this.catalogDataMigrations);
       this.#migrateKnownSchema(candidate);
       this.#validateApplicationDatabase(candidate);
+      runCatalogDataMigrations(
+        new DatabaseContext(candidate),
+        this.catalogDataMigrations,
+      );
       auditCandidateDatabase(candidate);
       return this.sqlite3.capi.sqlite3_js_db_export(candidate).slice();
     } finally {

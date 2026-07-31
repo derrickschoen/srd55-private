@@ -21,6 +21,7 @@ import attunementSlots from '../../drizzle/0017_attunement_slots.sql?raw';
 import characterItemsQuantity from '../../drizzle/0018_character_items_quantity.sql?raw';
 import abilityOverride from '../../drizzle/0019_ability_override.sql?raw';
 import contentIdentityRegistry from '../../drizzle/0020_content_identity_registry.sql?raw';
+import catalogDataMigrations from '../../drizzle/0021_catalog_data_migrations.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -242,6 +243,17 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
       '5b4e5759d14c31cb1c8dfe904222fd07a6a2d56047119079e5047e54f7732492',
     resultSchemaChecksum:
       'c9c571816a0fd85bd6ca5ee26f7b03bc898421e273f93992bc5005eb3ea9e942',
+  }),
+  // CI-2b: applied markers for append-only TypeScript catalog data migrations.
+  // No semantic entry is registered yet; CI-4b adds the first only after every
+  // content-v1 aggregate projector it calls exists.
+  Object.freeze({
+    id: '0021_catalog_data_migrations',
+    sql: catalogDataMigrations,
+    checksum:
+      '3f03fa0949716dc57ca4ee15ae360bbbefaf23837b78a736f0efc4129eff845b',
+    resultSchemaChecksum:
+      '293e75126e52dfae213ddd10b040d44c2ce60b24951f8f4d4ac6ad85f6ab0f17',
   }),
 ]);
 

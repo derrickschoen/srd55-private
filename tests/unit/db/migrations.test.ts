@@ -722,6 +722,7 @@ describe('database migration chain', () => {
     lifecycle.close();
   });
 
+  // Measured 2.2-2.9s alone; 20s leaves headroom for full-suite contention.
   it('renders every historical background coin row as its exact GP gear line and round-trips the migrated database', async () => {
     const storage = await storageHolding(
       `${SCHEMA_BEFORE_COIN_RETIREMENT}\n${HISTORICAL_BACKGROUND_ROWS}`,
@@ -773,7 +774,7 @@ describe('database migration chain', () => {
     expect(await imported.exportBytes()).toEqual(migratedBytes);
     imported.close();
     lifecycle.close();
-  }, 15_000);
+  }, 20_000);
 
   it('aborts on an unrenderable historical copper value, naming the row and preserving the image', async () => {
     const storage = await storageHolding(

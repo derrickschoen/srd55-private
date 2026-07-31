@@ -89,6 +89,10 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
     ],
     numeric: ['reviewed_at'],
   },
+  catalog_data_migrations: {
+    text: ['id', 'scheme', 'checksum'],
+    numeric: ['applied_at'],
+  },
   background_definitions: {
     integer: ['id', 'repeatable'],
     text: [
@@ -646,6 +650,9 @@ const expectedNotNull: Record<string, string[]> = {
     'incoming_fingerprint_digest', 'decision', 'target_content_key',
     'reviewed_at',
   ],
+  catalog_data_migrations: [
+    'id', 'scheme', 'checksum', 'applied_at',
+  ],
   // `damage_dice`, `damage_type` and `mastery_property` are NULLABLE here and
   // NOT NULL on the template: a half-entered user weapon is a first-class
   // state, and an invented weapon need not have a mastery property at all.
@@ -1176,6 +1183,7 @@ const expectedUniqueGroups: Record<string, string[]> = {
 const expectedDefaults: Record<string, Record<string, string>> = {
   catalog_content_identities: { created_at: 'CURRENT_TIMESTAMP' },
   catalog_content_match_decisions: { reviewed_at: 'CURRENT_TIMESTAMP' },
+  catalog_data_migrations: { applied_at: 'CURRENT_TIMESTAMP' },
   change_log: { reversible: 'true' },
   character_class_levels: { is_starting_class: 'false', level: '1' },
   character_skill_grants: { state: "'active'" },

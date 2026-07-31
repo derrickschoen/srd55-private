@@ -904,6 +904,17 @@ const abilityOverrideEffect =
     });
   };
 
+const catalogDataMigration =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'catalog_data_migrations', {
+      id: uid('catalog-data-migration'),
+      scheme: 'content-v1',
+      checksum: 'a'.repeat(64),
+      ...values,
+    });
+  };
+
 interface ConstraintCase {
   readonly constraint: string;
   /** Writes that MUST be refused, each with the corruption it would have made. */
@@ -1085,6 +1096,47 @@ function featureEffectConstraintCases(
 }
 
 const CONSTRAINT_CASES: readonly ConstraintCase[] = [
+  {
+    constraint: 'catalog_data_migrations_id_check',
+    rejects: [
+      ['an empty migration id', catalogDataMigration({ id: '' })],
+    ],
+    accepts: [
+      ['a stable non-empty migration id', catalogDataMigration({})],
+    ],
+  },
+  {
+    constraint: 'catalog_data_migrations_scheme_check',
+    rejects: [
+      [
+        'an unregistered projector scheme',
+        catalogDataMigration({ scheme: 'content-v2' }),
+      ],
+    ],
+    accepts: [
+      ['the frozen content-v1 projector scheme', catalogDataMigration({})],
+    ],
+  },
+  {
+    constraint: 'catalog_data_migrations_checksum_check',
+    rejects: [
+      ['a truncated checksum', catalogDataMigration({ checksum: 'abc' })],
+      [
+        'uppercase hexadecimal',
+        catalogDataMigration({ checksum: 'A'.repeat(64) }),
+      ],
+      [
+        'a non-hexadecimal character',
+        catalogDataMigration({ checksum: `${'a'.repeat(63)}g` }),
+      ],
+    ],
+    accepts: [
+      [
+        'exactly 64 lowercase hexadecimal characters',
+        catalogDataMigration({}),
+      ],
+    ],
+  },
   {
     constraint: 'characters_ability_scores_check',
     // One reject per column, so dropping a column from the six-way expression
