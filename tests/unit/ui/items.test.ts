@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ItemsPanel } from '../../../src/domain/read-models';
 import {
+  activateAttunementReplacementModal,
   renderItems,
   type PlannerItemActions,
 } from '../../../src/ui/screens/planner/items';
@@ -103,10 +104,12 @@ describe('the item attunement surface', () => {
     }
   });
 
-  it('opens a three-choice replacement dialog and can replace or cancel', () => {
+  it('traps modal focus, cancels on Escape, and restores the invoking control', () => {
     const restoreDocument = installInteractiveDocument();
     try {
       const calls: string[] = [];
+      const invoker = document.createElement('button');
+      invoker.focus();
       const actions: PlannerItemActions = {
         addItem: () => undefined,
         updateItem: () => undefined,
@@ -143,12 +146,45 @@ describe('the item attunement surface', () => {
         'attunement-replace-modal',
       );
       expect(dialog?.getAttribute('aria-modal')).toBe('true');
+      expect(dialog?.getAttribute('aria-labelledby')).toBe(
+        'attunement-replace-heading',
+      );
+      expect(dialog?.getAttribute('aria-describedby')).toBe(
+        'attunement-replace-explanation',
+      );
       expect(choices?.children).toHaveLength(3);
+      if (dialog === undefined) {
+        throw new Error('Attunement replacement dialog did not render.');
+      }
+      const destroy = activateAttunementReplacementModal(
+        dialog as unknown as HTMLDialogElement,
+        {
+          cancel: actions.cancelReplacement,
+          restoreFocus: () => invoker.focus(),
+        },
+      );
+      const buttons = dialog.querySelectorAll('button');
+      expect(document.activeElement).toBe(buttons[0]);
+      expect(
+        buttons.map((button) => button.getAttribute('aria-label')),
+      ).toEqual([
+        'Replace Crown with Boots',
+        'Replace Cloak with Boots',
+        'Replace Ring with Boots',
+        null,
+      ]);
+
+      dialog.dispatchEvent(keydown('Tab', true));
+      expect(document.activeElement).toBe(buttons.at(-1));
+      dialog.dispatchEvent(keydown('Tab'));
+      expect(document.activeElement).toBe(buttons[0]);
+
       choices?.children[1]?.click();
       expect(calls[0]).toBe('replace:40:20');
-
-      dialog?.children.at(-1)?.click();
+      dialog.dispatchEvent(keydown('Escape'));
       expect(calls).toEqual(['replace:40:20', 'cancel']);
+      expect(document.activeElement).toBe(invoker);
+      destroy();
     } finally {
       restoreDocument();
     }
@@ -185,6 +221,24 @@ describe('the item attunement surface', () => {
       expect(rendered.querySelectorAll('select')[0]?.children[0]?.value).toBe(
         'ability_override',
       );
+      const form = rendered.querySelector('[data-testid="item-form"]');
+      if (form === null) {
+        throw new Error('Item form did not render.');
+      }
+      expect(unlabelledFormControls(form)).toEqual([]);
+      expect(
+        form.querySelectorAll('button').map((button) => button.textContent),
+      ).toEqual(['Add effect', 'Add item', 'Cancel']);
+      form
+        .querySelectorAll('button')
+        .find((button) => button.textContent === 'Add effect')
+        ?.click();
+      expect(unlabelledFormControls(form)).toEqual([]);
+      expect(
+        form
+          .querySelector('[aria-label="Remove effect 1"]')
+          ?.textContent,
+      ).toBe('Remove effect');
     } finally {
       restoreDocument();
     }
@@ -224,3 +278,34 @@ describe('the item attunement surface', () => {
     }
   });
 });
+
+function keydown(key: string, shiftKey = false): KeyboardEvent {
+  const event = new Event('keydown', { cancelable: true });
+  Object.defineProperties(event, {
+    key: { value: key },
+    shiftKey: { value: shiftKey },
+  });
+  return event as KeyboardEvent;
+}
+
+function unlabelledFormControls(
+  form: ReturnType<typeof interactiveElement>,
+): string[] {
+  const labels = form.querySelectorAll('label');
+  return [
+    ...form.querySelectorAll('input'),
+    ...form.querySelectorAll('select'),
+    ...form.querySelectorAll('textarea'),
+  ]
+    .filter((control) => {
+      if (control.getAttribute('aria-label') !== null) {
+        return false;
+      }
+      return !labels.some(
+        (label) =>
+          (control.id !== '' && label.htmlFor === control.id) ||
+          label.children.includes(control),
+      );
+    })
+    .map((control) => `${control.tagName}#${control.id}`);
+}
