@@ -34,6 +34,19 @@ BEGIN
        AND OLD.id IN (slot_1_item_id, slot_2_item_id, slot_3_item_id);
 END;
 
+-- LU-1's feat pointer uses the same composite ownership guard. Clear only the
+-- nullable source half before deletion; the character half remains the row's
+-- non-null aggregate owner.
+CREATE TRIGGER character_sources_clear_level_feat_choices_before_delete
+    BEFORE DELETE ON character_source_instances
+BEGIN
+    UPDATE character_level_feat_choices
+       SET feat_source_instance_id = NULL,
+           updated_at = CURRENT_TIMESTAMP
+     WHERE character_id = OLD.character_id
+       AND feat_source_instance_id = OLD.id;
+END;
+
 CREATE TRIGGER spell_slots_exclusive_assignment_update
     BEFORE UPDATE ON spell_selection_slots
     WHEN NEW.fixed_spell_version_id IS NOT NULL

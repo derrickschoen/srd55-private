@@ -221,6 +221,16 @@ export const COLUMN_FACTS = {
     created_at: { base: 'degraded', notNull: false },
     updated_at: { base: 'degraded', notNull: false },
   },
+  character_level_feat_choices: {
+    id: { base: 'integer', notNull: true },
+    character_id: { base: 'integer', notNull: true },
+    character_class_level_id: { base: 'integer', notNull: true },
+    class_level: { base: 'integer', notNull: true },
+    choice_kind: { base: 'degraded', notNull: true },
+    feat_source_instance_id: { base: 'integer', notNull: false },
+    created_at: { base: 'degraded', notNull: false },
+    updated_at: { base: 'degraded', notNull: false },
+  },
   character_operations: {
     id: { base: 'integer', notNull: true },
     character_id: { base: 'integer', notNull: true },

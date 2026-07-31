@@ -132,6 +132,7 @@ const nativeAutoIncrementTables = [
   // key would change under the row when the skill is chosen.
   'character_skill_grants',
   'character_skill_expertise_grants',
+  'character_level_feat_choices',
   'character_skill_proficiencies',
   // The two progression ladders — SLOT levels and the Cantrip Upgrade's
   // CHARACTER levels. A surrogate key each, for the reason
@@ -187,7 +188,7 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
       return db;
     }
 
-    it('declares AUTOINCREMENT on exactly the 30 Laravel and 35 native surrogate-key tables', () => {
+    it('declares AUTOINCREMENT on exactly the 30 Laravel and 37 native surrogate-key tables', () => {
       const db = openDb();
       const declared = db
         .selectValues(
@@ -212,9 +213,9 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
       // effect tables. Counted in parts so one group shrinking while another
       // grows cannot pass unnoticed. D92's slot row uses character_id as its
       // natural primary key and therefore belongs in `naturalKeyTables`.
-      expect(declared).toHaveLength(66);
+      expect(declared).toHaveLength(67);
       expect(autoIncrementTables).toHaveLength(30);
-      expect(nativeAutoIncrementTables).toHaveLength(36);
+      expect(nativeAutoIncrementTables).toHaveLength(37);
 
       const withoutAutoIncrement = db
         .selectValues(

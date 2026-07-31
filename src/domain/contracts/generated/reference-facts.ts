@@ -178,6 +178,24 @@ export const FOREIGN_KEY_FACTS = [
     targetColumns: ['id', 'character_id'],
   },
   {
+    table: 'character_level_feat_choices',
+    columns: ['character_id'],
+    target: 'characters',
+    targetColumns: ['id'],
+  },
+  {
+    table: 'character_level_feat_choices',
+    columns: ['character_class_level_id', 'character_id'],
+    target: 'character_class_levels',
+    targetColumns: ['id', 'character_id'],
+  },
+  {
+    table: 'character_level_feat_choices',
+    columns: ['feat_source_instance_id', 'character_id'],
+    target: 'character_source_instances',
+    targetColumns: ['id', 'character_id'],
+  },
+  {
     table: 'character_operations',
     columns: ['character_id'],
     target: 'characters',

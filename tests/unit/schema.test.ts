@@ -455,6 +455,14 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
     text: [],
     numeric: [],
   },
+  character_level_feat_choices: {
+    integer: [
+      'id', 'character_id', 'character_class_level_id', 'class_level',
+      'feat_source_instance_id',
+    ],
+    text: ['choice_kind'],
+    numeric: ['created_at', 'updated_at'],
+  },
   background_templates: {
     integer: ['id'],
     text: [
@@ -723,6 +731,10 @@ const expectedNotNull: Record<string, string[]> = {
     'id', 'character_id', 'name', 'quantity', 'requires_attunement',
   ],
   character_attunement_slots: ['character_id'],
+  character_level_feat_choices: [
+    'id', 'character_id', 'character_class_level_id', 'class_level',
+    'choice_kind',
+  ],
   background_templates: [
     'id', 'content_key', 'rules_edition', 'name', 'ability_score_1',
     'ability_score_2', 'ability_score_3', 'feat_name', 'skill_proficiency_1',
@@ -998,6 +1010,10 @@ const expectedNamedIndexes: Record<string, string> = {
     'character_skill_expertise_grants:character_id,skill:unique',
   character_skill_expertise_grants_character_state_index:
     'character_skill_expertise_grants:character_id,state',
+  character_level_feat_choices_class_level_kind_unique:
+    'character_level_feat_choices:character_class_level_id,class_level,choice_kind:unique',
+  character_level_feat_choices_character_id_index:
+    'character_level_feat_choices:character_id',
   character_sheet_adjustments_character_id_unique:
     'character_sheet_adjustments:character_id:unique',
   // --- SHEET CORE (D11/D12) -----------------------------------------------
@@ -1025,6 +1041,8 @@ const expectedNamedIndexes: Record<string, string> = {
     'character_rule_overrides:character_id,rule_key:unique',
   character_class_levels_character_id_class_definition_id_unique:
     'character_class_levels:character_id,class_definition_id:unique',
+  character_class_levels_id_character_id_unique:
+    'character_class_levels:id,character_id:unique',
   character_source_instances_character_id_state_index:
     'character_source_instances:character_id,state',
   character_source_instances_id_character_id_unique:
@@ -1119,7 +1137,12 @@ const expectedUniqueGroups: Record<string, string[]> = {
   catalog_content_fingerprints: ['content_key,fingerprint_scheme'],
   background_definitions: ['content_key'],
   change_log: ['character_id,sequence'],
-  character_class_levels: ['character_id,class_definition_id'],
+  character_class_levels: [
+    'character_id,class_definition_id', 'id,character_id',
+  ],
+  character_level_feat_choices: [
+    'character_class_level_id,class_level,choice_kind',
+  ],
   character_operations: ['operation_uuid'],
   character_rule_overrides: ['character_id,rule_key'],
   character_source_instances: ['id,character_id', 'instance_uuid'],
@@ -1507,6 +1530,11 @@ const expectedForeignKeys: Record<string, string[]> = {
     'slot_1_item_id,character_id->character_items.id,character_id|NO ACTION',
     'slot_2_item_id,character_id->character_items.id,character_id|NO ACTION',
     'slot_3_item_id,character_id->character_items.id,character_id|NO ACTION',
+  ],
+  character_level_feat_choices: [
+    'character_id->characters.id|CASCADE',
+    'character_class_level_id,character_id->character_class_levels.id,character_id|CASCADE',
+    'feat_source_instance_id,character_id->character_source_instances.id,character_id|NO ACTION',
   ],
   character_background: ['character_id->characters.id|CASCADE'],
   // ONE EDGE EACH, and `character_hit_point_rolls` having only this one is the

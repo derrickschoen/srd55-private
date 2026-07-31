@@ -92,6 +92,11 @@ export type CharacterSkillExpertiseGrantId = Brand<
   number,
   'CharacterSkillExpertiseGrantId'
 >;
+/** `character_level_feat_choices.id` — one class-level feat occurrence. */
+export type CharacterLevelFeatChoiceId = Brand<
+  number,
+  'CharacterLevelFeatChoiceId'
+>;
 export type CharacterSheetAdjustmentId = Brand<
   number,
   'CharacterSheetAdjustmentId'

@@ -709,8 +709,10 @@ export function exportCharacterShare(
 
   let nextId = 0;
   const directOwners = new Map<number, ShareSourceOwner>();
+  const classRefsByLevelId = new Map<number, number>();
   const classes = classLevels.map((row): ShareClass => {
     const id = nextId++;
+    classRefsByLevelId.set(Number(row.id), id);
     directOwners.set(Number(row.source_instance_id), {
       ref: id,
       subclass: false,
@@ -1157,6 +1159,41 @@ export function exportCharacterShare(
         },
       ];
     });
+  const levelFeatChoices = db
+    .allRaw(
+      `SELECT * FROM ${SHARE_TABLES.character_level_feat_choices}
+       WHERE character_id = ?
+       ORDER BY character_class_level_id, class_level, choice_kind, id`,
+      [characterId],
+    )
+    .map((row) => {
+      const classRef = classRefsByLevelId.get(
+        Number(row.character_class_level_id),
+      );
+      if (classRef === undefined) {
+        throw new ShareValidationError(
+          'a level feat choice names an unavailable class level.',
+        );
+      }
+      const featRef = row.feat_source_instance_id === null
+        ? undefined
+        : directOwners.get(Number(row.feat_source_instance_id))?.ref;
+      if (
+        row.feat_source_instance_id !== null &&
+        featRef === undefined
+      ) {
+        throw new ShareValidationError(
+          'a level feat choice names an unavailable feat source.',
+        );
+      }
+      return {
+        classRef,
+        classLevel: Number(row.class_level),
+        choiceKind: String(row.choice_kind) as
+          'asi_level_feat' | 'epic_boon',
+        ...(featRef === undefined ? {} : { featRef }),
+      };
+    });
   const sharedSpellKeys = new Set([
     ...selections.map((selection) => selection.spellKey),
     ...spellbook.flatMap((acquisition) =>
@@ -1265,6 +1302,7 @@ export function exportCharacterShare(
     ...(effects.length === 0 ? {} : { effects }),
     ...(skillGrants.length === 0 ? {} : { skillGrants }),
     ...(expertiseGrants.length === 0 ? {} : { expertiseGrants }),
+    ...(levelFeatChoices.length === 0 ? {} : { levelFeatChoices }),
     ...(items.length === 0 ? {} : { items }),
     ...(attunementSlots === undefined ||
     attunementSlots.every((slot) => slot === null)
@@ -1602,6 +1640,7 @@ export function importCharacterShare(
     ).lastInsertId;
     const generator = new GrantRuleSlotGenerator(db);
     const rootsByRef = new Map<number, number[]>();
+    const classLevelIdsByRef = new Map<number, number>();
 
     for (const item of [...document.classes].sort(
       (left, right) => left.start - right.start || left.id - right.id,
@@ -1623,7 +1662,7 @@ export function importCharacterShare(
           `subclass '${item.subclassKey}' does not belong to '${item.classKey}'.`,
         );
       }
-      db.exec(
+      const classLevelId = db.exec(
         `INSERT INTO ${SHARE_TABLES.character_class_levels} (
            character_id, class_definition_id, subclass_definition_id,
            level, is_starting_class, spellcasting_ability_override,
@@ -1639,7 +1678,8 @@ export function importCharacterShare(
           now,
           now,
         ],
-      );
+      ).lastInsertId;
+      classLevelIdsByRef.set(item.id, classLevelId);
       const classConfig = {
         spellcasting_ability:
           item.ability ?? classRow.spellcasting_ability ?? null,
@@ -1723,6 +1763,33 @@ export function importCharacterShare(
       );
       rootsByRef.set(item.id, [sourceId]);
       generator.generateForSource(sourceId);
+    }
+
+    for (const choice of document.levelFeatChoices ?? []) {
+      const classLevelId = classLevelIdsByRef.get(choice.classRef);
+      const featSourceId = choice.featRef === undefined
+        ? null
+        : rootsByRef.get(choice.featRef)?.[0];
+      if (classLevelId === undefined || featSourceId === undefined) {
+        throw new ShareValidationError(
+          'a level feat choice reference is unavailable.',
+        );
+      }
+      db.exec(
+        `INSERT INTO ${SHARE_TABLES.character_level_feat_choices} (
+           character_id, character_class_level_id, class_level, choice_kind,
+           feat_source_instance_id, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [
+          characterId,
+          classLevelId,
+          choice.classLevel,
+          choice.choiceKind,
+          featSourceId,
+          now,
+          now,
+        ],
+      );
     }
 
     const sources = db.allRaw(

@@ -827,6 +827,31 @@ const PROBES: { readonly [N in ProbedTable]: Probe<N> } = {
       updated_at: OWNED_TIMESTAMP,
     },
   },
+  character_level_feat_choices: {
+    order: 't.class_level, t.choice_kind',
+    columns: {
+      id: RECIPIENT_ROW_ID,
+      character_id: RECIPIENT_OWNER_ID,
+      character_class_level_id: {
+        kind: 'translated',
+        key: `(SELECT definition.content_key
+               FROM character_class_levels AS level
+               INNER JOIN class_definitions AS definition
+                 ON definition.id = level.class_definition_id
+               WHERE level.id = t.character_class_level_id)`,
+        why: 'The v16 tuple carries the granting class in the share-local class reference space; recipient class-row ids are local.',
+      },
+      class_level: { kind: 'verbatim' },
+      choice_kind: { kind: 'verbatim' },
+      feat_source_instance_id: {
+        kind: 'translated',
+        key: '(SELECT display_name FROM character_source_instances WHERE id = t.feat_source_instance_id)',
+        why: 'A resolved v16 choice carries its feat source in the share-local source reference space; null remains the durable deferred state.',
+      },
+      created_at: OWNED_TIMESTAMP,
+      updated_at: OWNED_TIMESTAMP,
+    },
+  },
   character_effects: {
     order: 't.sort_order',
     columns: {
@@ -1100,14 +1125,14 @@ function seedSender(db: DatabaseContext, catalog: Catalog): number {
     [SENDER_TIME, SENDER_TIME],
   ).lastInsertId;
 
-  db.exec(
+  const classLevelId = db.exec(
     `INSERT INTO character_class_levels (
        character_id, class_definition_id, subclass_definition_id, level,
        is_starting_class, spellcasting_ability_override, notes,
        created_at, updated_at
      ) VALUES (?, ?, ?, 4, 1, 'intelligence', 'sender class-level note', ?, ?)`,
     [characterId, catalog.classId, catalog.subclassId, SENDER_TIME, SENDER_TIME],
-  );
+  ).lastInsertId;
 
   const source = (
     type: string,
@@ -1159,6 +1184,13 @@ function seedSender(db: DatabaseContext, catalog: Catalog): number {
     '{"feat_choice":"initiative"}',
     4,
     'sender-feat-source',
+  );
+  db.exec(
+    `INSERT INTO character_level_feat_choices (
+       character_id, character_class_level_id, class_level, choice_kind,
+       feat_source_instance_id, created_at, updated_at
+     ) VALUES (?, ?, 4, 'asi_level_feat', ?, ?, ?)`,
+    [characterId, classLevelId, featSourceId, SENDER_TIME, SENDER_TIME],
   );
 
   const generator = new GrantRuleSlotGenerator(db);
@@ -1956,14 +1988,14 @@ afterAll(() => {
 });
 
 describe('every column of every shared table is classified', () => {
-  it('probes the character root, all twenty-one share tables, and spell references', () => {
+  it('probes the character root, all twenty-two share tables, and spell references', () => {
     expect([...PROBED_TABLES].sort()).toEqual(
       ['characters', 'spell_versions', ...Object.keys(SHARE_TABLES)].sort(),
     );
-    // The type already forces the twenty-one current shared tables; AC-4 removed
+    // The type already forces the twenty-two current shared tables; AC-4 removed
     // the historical adjustment shell from that scope. The exact runtime
     // roster additionally pins the character root and reference-only spell row.
-    expect(PROBED_TABLES).toHaveLength(23);
+    expect(PROBED_TABLES).toHaveLength(24);
   });
 
   it('records why each deliberately retired column no longer travels', () => {

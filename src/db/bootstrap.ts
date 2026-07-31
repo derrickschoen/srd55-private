@@ -14,6 +14,7 @@ import { ensureBundledSheetContent } from '../rules/sheet-srd';
 import { ensureBundledSpellContent } from '../rules/spells-srd';
 import { ensureBundledClassEquipment } from '../rules/class-equipment-srd';
 import { ensureBundledFeatContent } from '../rules/feats-srd';
+import { reconcileLegacyLevelFeatChoices } from '../rules/legacy-level-feat-choices';
 
 /**
  * The bundled content every application database is expected to carry: the SRD
@@ -61,6 +62,7 @@ export const applicationSeed: DatabaseSeed = (db) => {
   ensureBundledBackgroundDefinitions(db);
   ensureBundledFeatContent(db);
   ensureBundledSpellContent(db);
+  reconcileLegacyLevelFeatChoices(db);
 };
 
 /**

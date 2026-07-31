@@ -309,6 +309,7 @@ CREATE TABLE `character_class_levels` (
 );
 
 CREATE UNIQUE INDEX `character_class_levels_character_id_class_definition_id_unique` ON `character_class_levels` (`character_id`,`class_definition_id`);
+CREATE UNIQUE INDEX `character_class_levels_id_character_id_unique` ON `character_class_levels` (`id`,`character_id`);
 CREATE TABLE `character_effects` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`character_id` integer NOT NULL,
@@ -403,6 +404,24 @@ CREATE TABLE `character_items` (
 
 CREATE INDEX `character_items_character_id_index` ON `character_items` (`character_id`);
 CREATE UNIQUE INDEX `character_items_id_character_id_unique` ON `character_items` (`id`,`character_id`);
+CREATE TABLE `character_level_feat_choices` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`character_id` integer NOT NULL,
+	`character_class_level_id` integer NOT NULL,
+	`class_level` integer NOT NULL,
+	`choice_kind` VARCHAR NOT NULL,
+	`feat_source_instance_id` integer,
+	`created_at` DATETIME,
+	`updated_at` DATETIME,
+	FOREIGN KEY (`character_id`) REFERENCES `characters`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`character_class_level_id`,`character_id`) REFERENCES `character_class_levels`(`id`,`character_id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`feat_source_instance_id`,`character_id`) REFERENCES `character_source_instances`(`id`,`character_id`) ON UPDATE no action ON DELETE no action,
+	CONSTRAINT "character_level_feat_choices_class_level_check" CHECK(typeof("character_level_feat_choices"."class_level") = 'integer' AND "character_level_feat_choices"."class_level" BETWEEN 1 AND 20),
+	CONSTRAINT "character_level_feat_choices_choice_kind_check" CHECK(`choice_kind` IN ('asi_level_feat', 'epic_boon'))
+);
+
+CREATE UNIQUE INDEX `character_level_feat_choices_class_level_kind_unique` ON `character_level_feat_choices` (`character_class_level_id`,`class_level`,`choice_kind`);
+CREATE INDEX `character_level_feat_choices_character_id_index` ON `character_level_feat_choices` (`character_id`);
 CREATE TABLE `character_operations` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`character_id` integer NOT NULL,
@@ -1584,6 +1603,19 @@ BEGIN
              WHEN slot_3_item_id = OLD.id THEN NULL ELSE slot_3_item_id END
      WHERE character_id = OLD.character_id
        AND OLD.id IN (slot_1_item_id, slot_2_item_id, slot_3_item_id);
+END;
+
+-- LU-1's feat pointer uses the same composite ownership guard. Clear only the
+-- nullable source half before deletion; the character half remains the row's
+-- non-null aggregate owner.
+CREATE TRIGGER character_sources_clear_level_feat_choices_before_delete
+    BEFORE DELETE ON character_source_instances
+BEGIN
+    UPDATE character_level_feat_choices
+       SET feat_source_instance_id = NULL,
+           updated_at = CURRENT_TIMESTAMP
+     WHERE character_id = OLD.character_id
+       AND feat_source_instance_id = OLD.id;
 END;
 
 CREATE TRIGGER spell_slots_exclusive_assignment_update
