@@ -15,9 +15,11 @@ import {
 } from '../../queries/operation-history';
 import { SavePointQueries } from '../../queries/save-points';
 import { LevelUpPlannedEligibleSpells } from '../../queries/level-up-planned-eligible-spells';
-import type {
-  LevelUpPlannedEligibleSpellsParams,
-  PlannedGrantSource,
+import { LevelUpStateQuery } from '../../queries/level-up-state';
+import {
+  LEVEL_UP_RPC,
+  type LevelUpPlannedEligibleSpellsParams,
+  type PlannedGrantSource,
 } from '../../builder/level-up-wizard';
 import { BuildReportBuilder } from '../../reports/build-report-builder';
 import {
@@ -298,6 +300,12 @@ export const handlers: readonly RpcHandler[] = Object.freeze([
     isLevelUpPlannedEligibleSpellsParams,
     (context, params) =>
       new LevelUpPlannedEligibleSpells(context.db).search(params),
+  ),
+  defineRpcHandler(
+    LEVEL_UP_RPC.state,
+    isCharacterParams,
+    (context, params) =>
+      new LevelUpStateQuery(context.db).build(params.character_id),
   ),
   defineRpcHandler(
     'queries.savePoints.create',
