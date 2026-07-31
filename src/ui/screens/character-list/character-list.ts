@@ -129,7 +129,7 @@ function createShell(
   applyTheme(dark);
   const home = element('a', {
     className: 'brand-link',
-    text: 'Spell Planner',
+    text: 'SRD-55',
     attributes: { href: '/' },
   });
   cleanups.push(
@@ -190,7 +190,7 @@ function createShell(
             home,
             element('h1', { text: 'Characters' }),
             element('p', {
-              text: 'Open a build or start a new multiclass spell plan.',
+              text: 'Open a character or start a new character build.',
             }),
           ]),
           element('div', { className: 'header-actions' }, [status, theme]),

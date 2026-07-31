@@ -89,7 +89,7 @@ describe('SRD attribution in the running application', () => {
 
   it('keeps the licensor wordmarks out of the shipped shell', () => {
     const markup = shellMarkup();
-    expect(markup).toContain('<title>Multiclass Spell Planner</title>');
+    expect(markup).toContain('<title>SRD-55</title>');
     for (const forbidden of FORBIDDEN_OUTSIDE_THE_NOTICE) {
       expect(markup).not.toContain(forbidden);
     }

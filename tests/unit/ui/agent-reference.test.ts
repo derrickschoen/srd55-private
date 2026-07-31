@@ -778,7 +778,7 @@ describe('planner build reference JSON block', () => {
     // The scope sentence used to say the application is "not a character
     // sheet". There is a character sheet screen; it says where this reference
     // stops instead.
-    expect(reference.scope.statement).toContain('SPELL PLANNER');
+    expect(reference.scope.statement).toContain('SRD-55 planner screen');
     expect(reference.scope.statement).toContain('character sheet screen');
     expect(reference.scope.statement).not.toContain('not a character sheet');
   });
