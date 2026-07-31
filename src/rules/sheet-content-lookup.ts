@@ -39,13 +39,53 @@ import {
   sqlString,
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
+import {
+  decodeClassResourceFormula,
+  type ClassFormulaResourceKind,
+  type ClassResourceKind,
+} from '../domain/class-resources';
 import { isMartialArtsDieSize } from '../domain/enums';
 import type { MartialArtsDieSize } from '../domain/enums';
 import type { ClassFeatureEffect } from './class-feature-effects';
 import { classFeatureEffect } from './class-feature-effects';
 import type { ExtraAttackGrant } from './extra-attack';
 import { selectionUnresolved } from './extra-attack';
-import type { SheetClassLevels } from './sheet';
+import type { ClassDefinitionId } from '../domain/ids';
+import {
+  parseSrdClassResourceFormulaManifest,
+  parseSrdClassResourceManifest,
+} from './class-resources-srd';
+import type {
+  SheetClassLevels,
+  SheetResourceCatalog,
+  SheetResourceClassInput,
+  SheetSpellProgressionRow,
+} from './sheet';
+
+interface BundledResourceExpectation {
+  readonly expected_ladder_kinds: readonly ClassResourceKind[];
+  readonly expected_formula_kinds: readonly ClassFormulaResourceKind[];
+  readonly has_unmodelled_feature_maxima: boolean;
+}
+
+const BUNDLED_RESOURCE_EXPECTATIONS = (() => {
+  const ladders = parseSrdClassResourceManifest();
+  const formulas = parseSrdClassResourceFormulaManifest();
+  return new Map(
+    ladders.map((entry) => [
+      String(entry.content_key),
+      {
+        expected_ladder_kinds: entry.expected_resource_kinds,
+        expected_formula_kinds: formulas.formulas
+          .filter((formula) => formula.content_key === entry.content_key)
+          .map((formula) => formula.resource_kind),
+        has_unmodelled_feature_maxima: formulas.unmodelled.some(
+          (unmodelled) => unmodelled.content_key === entry.content_key,
+        ),
+      } satisfies BundledResourceExpectation,
+    ] as const),
+  );
+})();
 
 /**
  * One printed feature of the subclass a character has chosen.
@@ -78,8 +118,10 @@ export interface NamedFeature {
 }
 
 /** A character's class levels, joined to the per-level content of each class. */
-export interface SheetClassContent extends SheetClassLevels {
-  readonly class_definition_id: number;
+export interface SheetClassContent
+  extends SheetClassLevels,
+    SheetResourceClassInput {
+  readonly class_definition_id: ClassDefinitionId;
   /**
    * The subclass chosen for THIS class, or `null`.
    *
@@ -267,6 +309,68 @@ export class SheetContentLookup {
     );
   }
 
+  private resourceCatalog(contentKey: string): SheetResourceCatalog {
+    const expected = BUNDLED_RESOURCE_EXPECTATIONS.get(contentKey);
+    return expected === undefined
+      ? { status: 'not_recorded' }
+      : { status: 'recorded', ...expected };
+  }
+
+  private ladderRows(
+    classDefinitionId: ClassDefinitionId,
+    classLevel: number,
+  ): SheetResourceClassInput['ladder_rows'] {
+    return this.db.allRaw(
+      `SELECT resource_kind, maximum
+       FROM class_resources
+       WHERE class_definition_id = ? AND class_level = ?
+       ORDER BY resource_kind`,
+      [classDefinitionId, classLevel],
+    ).map((row) => ({
+      resource_kind: row.resource_kind,
+      maximum: row.maximum,
+    }));
+  }
+
+  private formulaRows(
+    classDefinitionId: ClassDefinitionId,
+  ): SheetResourceClassInput['formula_rows'] {
+    return this.db.allRaw(
+      `SELECT resource_kind, formula_kind, minimum_class_level, fixed_count,
+              ability, multiplier, later_fixed_count_steps
+       FROM class_resource_formulas
+       WHERE class_definition_id = ?
+       ORDER BY resource_kind`,
+      [classDefinitionId],
+    ).map((row) => {
+      try {
+        return {
+          resource_kind: row.resource_kind,
+          formula: decodeClassResourceFormula({
+            formula_kind: row.formula_kind,
+            minimum_class_level: row.minimum_class_level,
+            fixed_count: row.fixed_count,
+            ability: row.ability,
+            multiplier: row.multiplier,
+            later_fixed_count_steps: row.later_fixed_count_steps,
+          }),
+        };
+      } catch {
+        return { resource_kind: row.resource_kind, formula: null };
+      }
+    });
+  }
+
+  private progressionRow(
+    rowId: number | null,
+    slots: unknown,
+    pactSlots: unknown,
+  ): SheetSpellProgressionRow {
+    return rowId === null
+      ? { status: 'missing' }
+      : { status: 'present', slots, pact_slots: pactSlots };
+  }
+
   /**
    * Every class the character has levels in, each carrying its own content.
    *
@@ -285,23 +389,73 @@ export class SheetContentLookup {
       `SELECT level.class_definition_id AS class_definition_id,
               level.level AS class_level,
               definition.name AS class_name,
+              definition.content_key AS class_content_key,
+              definition.progression_type AS base_progression_type,
+              base_progression.id AS base_progression_id,
+              base_progression.slots AS base_slots,
+              base_progression.pact_slots AS base_pact_slots,
               level.subclass_definition_id AS subclass_definition_id,
-              subclass.name AS subclass_name
+              subclass.name AS subclass_name,
+              subclass.caster_fraction AS subclass_caster_fraction,
+              subclass.caster_rounding AS subclass_caster_rounding,
+              subclass_progression.id AS subclass_progression_id,
+              subclass_progression.slots AS subclass_slots
        FROM character_class_levels AS level
        JOIN class_definitions AS definition
          ON definition.id = level.class_definition_id
+       LEFT JOIN class_progressions AS base_progression
+         ON base_progression.class_definition_id = level.class_definition_id
+        AND base_progression.class_level = level.level
        LEFT JOIN subclass_definitions AS subclass
          ON subclass.id = level.subclass_definition_id
+       LEFT JOIN subclass_progressions AS subclass_progression
+         ON subclass_progression.subclass_definition_id = level.subclass_definition_id
+        AND subclass_progression.class_level = level.level
        WHERE level.character_id = ?
        ORDER BY definition.name, level.id`,
       [characterId],
       (row) => {
+        const classDefinitionId = sqlInteger(
+          row,
+          'class_definition_id',
+        ) as ClassDefinitionId;
+        const classLevel = sqlInteger(row, 'class_level');
+        const contentKey = sqlString(row, 'class_content_key');
         const subclassId = sqlNullableInteger(row, 'subclass_definition_id');
         const subclassName = sqlNullableString(row, 'subclass_name');
+        const baseProgressionId = sqlNullableInteger(row, 'base_progression_id');
+        const subclassProgressionId = sqlNullableInteger(
+          row,
+          'subclass_progression_id',
+        );
         return {
-          class_definition_id: sqlInteger(row, 'class_definition_id'),
+          class_definition_id: classDefinitionId,
           class_name: sqlString(row, 'class_name'),
-          level: sqlInteger(row, 'class_level'),
+          level: classLevel,
+          class_level: classLevel,
+          catalog: this.resourceCatalog(contentKey),
+          ladder_rows: this.ladderRows(classDefinitionId, classLevel),
+          formula_rows: this.formulaRows(classDefinitionId),
+          base_spellcasting: {
+            progression_type: row.base_progression_type,
+            progression_row: this.progressionRow(
+              baseProgressionId,
+              row.base_slots,
+              row.base_pact_slots,
+            ),
+          },
+          subclass_spellcasting:
+            subclassId === null
+              ? null
+              : {
+                  caster_fraction: row.subclass_caster_fraction,
+                  caster_rounding: row.subclass_caster_rounding,
+                  progression_row: this.progressionRow(
+                    subclassProgressionId,
+                    row.subclass_slots,
+                    null,
+                  ),
+                },
           // Both halves come from the same LEFT JOIN, so they are absent
           // together or present together; the pair is collapsed here rather
           // than carried as two independently nullable fields.
