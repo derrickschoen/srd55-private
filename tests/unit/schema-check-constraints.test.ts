@@ -1574,6 +1574,7 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     rejects: [
       ['class level 0', classResource({ class_level: 0 })],
       ['class level 21', classResource({ class_level: 21 })],
+      ['fractional class level 1.5', classResource({ class_level: 1.5 })],
       ['a negative maximum', classResource({ maximum: -1 })],
       ['a text maximum', classResource({ maximum: 'three' })],
     ],
@@ -1597,6 +1598,7 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     rejects: [
       ['acquisition level 0', classResourceFormula({ minimum_class_level: 0 })],
       ['acquisition level 21', classResourceFormula({ minimum_class_level: 21 })],
+      ['fractional acquisition level 1.5', classResourceFormula({ minimum_class_level: 1.5 })],
     ],
     accepts: [
       ['acquisition level 1', classResourceFormula({ minimum_class_level: 1 })],

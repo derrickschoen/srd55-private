@@ -134,7 +134,7 @@ interface ClassTableSection {
 const SECTION_MARKER =
   /^=== (?<className>[A-Za-z]+) Features table — printed page \d+ ===$/gm;
 const LEVEL_ROW = /^\s*(?<level>[1-9]|1\d|20)\s+\+[2-6]\s+(?<cells>.*)$/;
-const TABLE_VALUE = /—|\d+d\d+|\+\d+\s*ft\.?|\d+/g;
+const TABLE_CELL = /\S+/g;
 const KNOWN_RESOURCE_HEADERS = [
   ['Rages', /\bRages\b/],
   ['Channel Divinity', /\bChannel\b.*\bDivinity\b/],
@@ -146,14 +146,18 @@ const KNOWN_RESOURCE_HEADERS = [
 ] as const;
 
 function resourceLikeHeaders(header: string): string[] {
-  const known = KNOWN_RESOURCE_HEADERS.flatMap(([label, pattern]) =>
-    pattern.test(header) ? [label] : [],
-  );
-  if (known.length > 0) {
-    return known;
+  const known: string[] = [];
+  let remainder = header;
+  for (const [label, pattern] of KNOWN_RESOURCE_HEADERS) {
+    if (pattern.test(header)) {
+      known.push(label);
+      for (const word of label.split(' ')) {
+        remainder = remainder.replace(new RegExp(`\\b${word}\\b`), ' ');
+      }
+    }
   }
-  const generic = header.match(/\b[A-Za-z]+ (?:Points|Uses)\b/g) ?? [];
-  return [...new Set(generic)];
+  const generic = remainder.match(/\b[A-Za-z]+ (?:Points|Uses)\b/g) ?? [];
+  return [...new Set([...known, ...generic])];
 }
 
 function sections(source: string): ClassTableSection[] {
@@ -230,7 +234,7 @@ function parseLadder(
     if (cellText === undefined) {
       throw new SrdClassResourcesError(`${className} level ${String(level)} has no table cells.`);
     }
-    const values = [...cellText.matchAll(TABLE_VALUE)].map((match) => ({
+    const values = [...cellText.matchAll(TABLE_CELL)].map((match) => ({
       value: match[0],
       position: (match.index ?? 0) + line.indexOf(cellText),
     }));
@@ -243,17 +247,17 @@ function parseLadder(
       throw new SrdClassResourcesError(`${className} level ${String(level)} has no ${configuration.header} value.`);
     }
     const rawMaximum = selected.value;
-    const maximum = rawMaximum === '—' ? 0 : Number(rawMaximum);
-    if (!Number.isInteger(maximum)) {
+    if (rawMaximum !== '—' && !/^\d+$/.test(rawMaximum)) {
       throw new SrdClassResourcesError(
         `${className} level ${String(level)} ${configuration.header} is not an integer count.`,
       );
     }
-    if (level < configuration.acquisition_level && maximum !== 0) {
+    if (level < configuration.acquisition_level && rawMaximum !== '—') {
       throw new SrdClassResourcesError(
         `${className} level ${String(level)} must use a dash before ${configuration.header} is acquired.`,
       );
     }
+    const maximum = rawMaximum === '—' ? 0 : Number(rawMaximum);
     if (level >= configuration.acquisition_level && maximum <= 0) {
       throw new SrdClassResourcesError(
         `${className} level ${String(level)} must have a positive ${configuration.header} count after acquisition.`,
@@ -344,15 +348,51 @@ function occurrenceCount(source: string, needle: string): number {
   }
 }
 
-function featureBlock(source: string, heading: string): string {
+const FULL_TEXT_CLASS_SECTION_MARKER =
+  /\b(?<className>Barbarian|Bard|Cleric|Druid|Fighter|Monk|Paladin|Ranger|Rogue|Sorcerer|Warlock|Wizard) Class Features\b/g;
+
+function fullTextClassSections(source: string): ReadonlyMap<BundledClassName, string> {
+  const markers = [...source.matchAll(FULL_TEXT_CLASS_SECTION_MARKER)];
+  if (
+    markers.length !== CLASS_NAMES.length ||
+    markers.some((marker, index) => marker.groups?.className !== CLASS_NAMES[index])
+  ) {
+    throw new SrdClassResourcesError(
+      `expected the twelve full-text class sections in source order; found ${markers.map((marker) => marker.groups?.className ?? '?').join(', ')}.`,
+    );
+  }
+  return new Map(
+    markers.map((marker, index): [BundledClassName, string] => {
+      const className = marker.groups?.className as BundledClassName;
+      const start = (marker.index as number) + marker[0].length;
+      const end = markers[index + 1]?.index ?? source.length;
+      return [className, source.slice(start, end)];
+    }),
+  );
+}
+
+function featureBlock(
+  source: string,
+  classSections: ReadonlyMap<BundledClassName, string>,
+  className: BundledClassName,
+  heading: string,
+): string {
   const count = occurrenceCount(source, heading);
   if (count !== 1) {
     throw new SrdClassResourcesError(`${heading} occurs ${String(count)} times, expected once.`);
   }
-  const start = source.indexOf(heading);
-  const next = / Level (?:[1-9]|1\d|20): /.exec(source.slice(start + heading.length));
-  const end = next === null ? source.length : start + heading.length + next.index;
-  return source.slice(start, end);
+  const classSection = classSections.get(className);
+  if (classSection === undefined || !classSection.includes(heading)) {
+    throw new SrdClassResourcesError(`${heading} occurs outside the ${className} class section.`);
+  }
+  const start = classSection.indexOf(heading);
+  const next = / Level (?:[1-9]|1\d|20): /.exec(
+    classSection.slice(start + heading.length),
+  );
+  const end = next === null
+    ? classSection.length
+    : start + heading.length + next.index;
+  return classSection.slice(start, end);
 }
 
 function requireEvidence(block: string, pattern: RegExp, label: string): RegExpExecArray {
@@ -500,10 +540,16 @@ export function parseSrdClassResourceFormulaManifest(
   tableSource: string = classLevelTables,
 ): SrdClassResourceFormulaManifest {
   const source = sourceReadingOrder(fullSource);
+  const classSections = fullTextClassSections(source);
   const formulas: SrdClassResourceFormulaEntry[] = [];
 
   for (const fixed of FIXED_FORMULAS) {
-    const block = featureBlock(source, fixed.heading);
+    const block = featureBlock(
+      source,
+      classSections,
+      fixed.class_name,
+      fixed.heading,
+    );
     const evidence = requireEvidence(block, fixed.evidence, fixed.heading);
     const count = fixed.count_group === undefined
       ? maximum(1)
@@ -522,7 +568,12 @@ export function parseSrdClassResourceFormulaManifest(
   }
 
   for (const abilitySource of ABILITY_FORMULAS) {
-    const block = featureBlock(source, abilitySource.heading);
+    const block = featureBlock(
+      source,
+      classSections,
+      abilitySource.class_name,
+      abilitySource.heading,
+    );
     const evidence = requireEvidence(
       block,
       /number of times equal to your (Charisma|Wisdom) modifier \(minimum of once\)/,
@@ -547,7 +598,7 @@ export function parseSrdClassResourceFormulaManifest(
 
   const layOnHandsHeading = 'Level 1: Lay On Hands';
   const layOnHands = requireEvidence(
-    featureBlock(source, layOnHandsHeading),
+    featureBlock(source, classSections, 'Paladin', layOnHandsHeading),
     /equal to (five) times your Paladin level/,
     layOnHandsHeading,
   );
@@ -580,7 +631,11 @@ export function parseSrdClassResourceFormulaManifest(
     },
   ];
   for (const entry of stepped) {
-    requireEvidence(featureBlock(source, entry.heading), entry.evidence, entry.heading);
+    requireEvidence(
+      featureBlock(source, classSections, 'Fighter', entry.heading),
+      entry.evidence,
+      entry.heading,
+    );
     formulas.push({
       content_key: contentKey('Fighter'),
       class_name: 'Fighter',
@@ -596,12 +651,16 @@ export function parseSrdClassResourceFormulaManifest(
     { content_key: contentKey('Wizard'), class_name: 'Wizard', resource_kind: 'signature_spells', citation: 'srd-5.2.1.txt:4763-4771' },
   ];
   const absentEvidence = [
-    ['Level 1: Arcane Recovery', /combined level equal to no more than half your Wizard level/],
-    ['Level 11: Mystic Arcanum', /Choose one level 6 Warlock spell.*?cast your arcanum spell once/],
-    ['Level 20: Signature Spells', /Choose two level 3 spells.*?cast each of them once/],
+    ['Wizard', 'Level 1: Arcane Recovery', /combined level equal to no more than half your Wizard level/],
+    ['Warlock', 'Level 11: Mystic Arcanum', /Choose one level 6 Warlock spell.*?cast your arcanum spell once/],
+    ['Wizard', 'Level 20: Signature Spells', /Choose two level 3 spells.*?cast each of them once/],
   ] as const;
-  for (const [heading, evidence] of absentEvidence) {
-    requireEvidence(featureBlock(source, heading), evidence, heading);
+  for (const [className, heading, evidence] of absentEvidence) {
+    requireEvidence(
+      featureBlock(source, classSections, className, heading),
+      evidence,
+      heading,
+    );
   }
 
   if (formulas.length !== 18) {
