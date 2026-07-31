@@ -38,6 +38,9 @@ const complete: CharacterShareDocument = {
     // below pins the position AND what occupies it — a `null` here would pin
     // only the arity, and the arity is the half that was never in doubt.
     notes: 'Retired the staff after Waterdeep.',
+    alignment: 'Neutral Good',
+    appearance: 'A silver cloak and a weathered staff.',
+    backstory: 'Studied the old wards beneath Waterdeep.',
   },
   classes: [
     {
@@ -402,6 +405,11 @@ function rewriteV14SpellAcquisitions(root: unknown[]): void {
     spell,
     null,
   ]);
+}
+
+/** Hand-lifts the frozen v16 character tuple with D104's three null absences. */
+function appendV17Flavor(root: unknown[]): void {
+  root[2] = [...(root[2] as unknown[]), null, null, null];
 }
 
 interface StructuralTupleSchema {
@@ -1132,6 +1140,19 @@ const COMPLETE_V16_WIRE = [
   null,
 ];
 
+/** D104: append flavor after every frozen v16 character position. */
+const COMPLETE_V17_WIRE = [
+  COMPLETE_V16_WIRE[0],
+  17,
+  [
+    ...((COMPLETE_V16_WIRE[2] as unknown[]) ?? []),
+    'Neutral Good',
+    'A silver cloak and a weathered staff.',
+    'Studied the old wards beneath Waterdeep.',
+  ],
+  ...COMPLETE_V16_WIRE.slice(3),
+];
+
 /** The honest v13 migration: old wire carried neither provenance field. */
 const MIGRATED_COMPLETE_V15_WIRE = [
   COMPLETE_V13_WIRE[0],
@@ -1158,15 +1179,37 @@ const MIGRATED_COMPLETE_V16_WIRE = [
   ...MIGRATED_COMPLETE_V15_WIRE.slice(2),
   null,
 ];
+const MIGRATED_COMPLETE_V17_WIRE = [
+  MIGRATED_COMPLETE_V16_WIRE[0],
+  17,
+  [
+    ...((MIGRATED_COMPLETE_V16_WIRE[2] as unknown[]) ?? []),
+    null,
+    null,
+    null,
+  ],
+  ...MIGRATED_COMPLETE_V16_WIRE.slice(3),
+];
 
 const {
   expertiseGrants: currentExpertiseGrants,
+  character: currentCharacter,
   ...completeBeforeExpertise
 } = complete;
 void currentExpertiseGrants;
+const {
+  alignment: currentAlignment,
+  appearance: currentAppearance,
+  backstory: currentBackstory,
+  ...characterBeforeFlavor
+} = currentCharacter;
+void currentAlignment;
+void currentAppearance;
+void currentBackstory;
 
 const migratedComplete: CharacterShareDocument = {
   ...completeBeforeExpertise,
+  character: characterBeforeFlavor,
   selections: complete.selections.map((selection) => ({
     ref: selection.ref,
     ruleKey: selection.ruleKey,
@@ -1267,8 +1310,8 @@ describe('character-share positional codec', () => {
     );
   });
 
-  it('pins v16 as the frozen version-15 layout plus one appended choice section', () => {
-    expect(shareDocumentToPositional(complete)).toEqual(COMPLETE_V16_WIRE);
+  it('pins v17 as the frozen version-16 layout plus three appended flavor members', () => {
+    expect(shareDocumentToPositional(complete)).toEqual(COMPLETE_V17_WIRE);
   });
 
   it('accepts ability_override only in a hand-frozen v13 document', () => {
@@ -1340,11 +1383,11 @@ describe('character-share positional codec', () => {
     expect(migrated).toEqual(COMPLETE_V13_WIRE);
   });
 
-  it('migrates v13 acquisitions through v16 without inventing later rows', () => {
-    const migrated = MIGRATIONS[15](MIGRATIONS[14](
+  it('migrates v13 acquisitions through v17 without inventing later rows', () => {
+    const migrated = MIGRATIONS[16](MIGRATIONS[15](MIGRATIONS[14](
       MIGRATIONS[13](COMPLETE_V13_WIRE),
-    )) as unknown[];
-    expect(migrated).toEqual(MIGRATED_COMPLETE_V16_WIRE);
+    ))) as unknown[];
+    expect(migrated).toEqual(MIGRATED_COMPLETE_V17_WIRE);
     expect(positionalToShareDocument(COMPLETE_V13_WIRE)).toEqual(
       migratedComplete,
     );
@@ -1358,6 +1401,16 @@ describe('character-share positional codec', () => {
     expect(positionalToShareDocument(COMPLETE_V15_WIRE)).not.toHaveProperty(
       'levelFeatChoices',
     );
+  });
+
+  it('current wire migrates flavor by trailing nulls only', () => {
+    const migrated = MIGRATIONS[16](COMPLETE_V16_WIRE) as unknown[];
+    expect(migrated).toEqual([
+      COMPLETE_V16_WIRE[0],
+      17,
+      [...(COMPLETE_V16_WIRE[2] as unknown[]), null, null, null],
+      ...COMPLETE_V16_WIRE.slice(3),
+    ]);
   });
 
   it('accepts only an explicit feat source ref for a level-feat choice', () => {
@@ -1528,7 +1581,7 @@ describe('character-share positional codec', () => {
     const positional = shareDocumentToPositional(minimal);
     expect(positional).toEqual([
       'dnd-multiclass-spells-character-share',
-      16,
+      17,
       [
         'Ten',
         null,
@@ -1545,6 +1598,9 @@ describe('character-share positional codec', () => {
         // send, decoding to an absent key.
         null,
         null, // v3 allocation signal retained by v4: absent means never allocated.
+        null, // alignment
+        null, // appearance
+        null, // backstory
       ],
       [
         [
@@ -1597,7 +1653,7 @@ describe('character-share positional codec', () => {
       null,
     ]);
     expect(positional).toHaveLength(21);
-    expect((positional[2] as unknown[]).length).toBe(12);
+    expect((positional[2] as unknown[]).length).toBe(15);
     expect((positional[3] as unknown[][])[0]).toHaveLength(8);
     expect((positional[4] as unknown[][])[0]).toHaveLength(7);
     expect(positional[12]).toHaveLength(3);
@@ -1621,8 +1677,8 @@ describe('character-share positional codec', () => {
   it('rejects every non-version-4 character, class, and source arity', () => {
     const positional = shareDocumentToPositional(complete);
     const cases: Array<[number, number, RegExp]> = [
-      [2, 11, /wire character must be a tuple of length 12/],
-      [2, 13, /wire character must be a tuple of length 12/],
+      [2, 14, /wire character must be a tuple of length 15/],
+      [2, 16, /wire character must be a tuple of length 15/],
       [3, 7, /wire classes\[0\] must be a tuple of length 8/],
       [3, 9, /wire classes\[0\] must be a tuple of length 8/],
       [4, 6, /wire sources\[0\] must be a tuple of length 7/],
@@ -1692,7 +1748,7 @@ describe('character-share positional codec', () => {
     wrongTuple[2] = ['Mira'];
     await expect(
       decodeShareFragment(await arbitraryFragment(wrongTuple)),
-    ).rejects.toThrow(/wire character must be a tuple of length 12/);
+    ).rejects.toThrow(/wire character must be a tuple of length 15/);
 
     const overCount = [...positional];
     overCount[6] = Array.from(
@@ -2193,6 +2249,7 @@ describe('a share link generated before the sheet inputs travelled', () => {
     ) as unknown[];
     const currentWithoutSheet = [...migratedRoot];
     currentWithoutSheet[1] = CHARACTER_SHARE_VERSION;
+    appendV17Flavor(currentWithoutSheet);
     appendV9SourceMarker(currentWithoutSheet);
     rewriteV14SpellAcquisitions(currentWithoutSheet);
     currentWithoutSheet.push(null); // skillGrants, absent
@@ -2416,6 +2473,7 @@ describe('a share link generated before weapons travelled', () => {
     ) as unknown[];
     const baseline = [...migratedRoot];
     baseline[1] = CHARACTER_SHARE_VERSION;
+    appendV17Flavor(baseline);
     appendV9SourceMarker(baseline);
     rewriteV14SpellAcquisitions(baseline);
     baseline.push(null); // skillGrants
@@ -2454,6 +2512,7 @@ describe('a share link generated before weapons travelled', () => {
     ) as unknown[];
     const withWeapons = [...migratedRoot];
     withWeapons[1] = CHARACTER_SHARE_VERSION;
+    appendV17Flavor(withWeapons);
     appendV9SourceMarker(withWeapons);
     rewriteV14SpellAcquisitions(withWeapons);
     withWeapons[11] = []; // weapons: explicitly recorded as none
@@ -2479,6 +2538,7 @@ describe('a share link generated before weapons travelled', () => {
     ) as unknown[];
     const withOrigin = [...migratedRoot];
     withOrigin[1] = CHARACTER_SHARE_VERSION;
+    appendV17Flavor(withOrigin);
     appendV9SourceMarker(withOrigin);
     rewriteV14SpellAcquisitions(withOrigin);
     withOrigin[11] = []; // weapons: explicitly recorded as none
@@ -2599,6 +2659,7 @@ describe('a share link generated before a character note could travel', () => {
     ];
     const migratedRoot = migrateV1WireToV4(withNote) as unknown[];
     migratedRoot[1] = CHARACTER_SHARE_VERSION;
+    appendV17Flavor(migratedRoot);
     appendV9SourceMarker(migratedRoot);
     rewriteV14SpellAcquisitions(migratedRoot);
     migratedRoot.push(null); // skillGrants

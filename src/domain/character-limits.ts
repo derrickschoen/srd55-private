@@ -9,12 +9,9 @@
  * app lets you build and then refuses to share, with the only remedy being to
  * delete text you deliberately typed.
  *
- * TODAY `validateShareDocument` IS THE ONLY CONSUMER, because there is no
- * command that writes `characters.notes` at all — the column is read into
- * `CharacterRecord` and restored by backup and undo, and nothing else touches
- * it. That is exactly why the number lives here rather than inline in the share
- * validator: the day a write command appears it must derive from this rather
- * than invent its own, and the two would then be unable to drift apart.
+ * Today share and portable-backup validation consume these values. FF-B will
+ * make the authoring command consume them too. Keeping the limits here makes
+ * those boundaries share one definition instead of drifting independently.
  *
  * THE VALUE IS A BOUNDARY JUDGEMENT, NOT A RESTATEMENT OF THE COLUMN. 2,000 is
  * what every other user-typed `notes` field in this application already allows
@@ -30,5 +27,8 @@
  * truncating text the user typed and telling them nothing.
  */
 export const CHARACTER_TEXT_LIMITS = Object.freeze({
+  alignment: 120,
+  appearance: 4_000,
+  backstory: 20_000,
   notes: 2_000,
 });

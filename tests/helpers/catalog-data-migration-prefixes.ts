@@ -36,6 +36,7 @@ export const RECORDED_SCHEMA_PREFIX_IDS = [
   '0024_feat_application_model',
   '0025_character_level_feat_choices',
   '0026_class_resources',
+  '0027_character_flavor',
 ] as const;
 
 export const PREFIX_MIGRATION_ID = 'test_catalog_prefix_probe';

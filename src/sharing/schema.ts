@@ -172,6 +172,9 @@ export interface ShareCharacter {
   readonly proficiency_bonus_override?: number;
   readonly rules_edition_preference?: string;
   readonly allow_legacy?: true;
+  readonly alignment?: string;
+  readonly appearance?: string;
+  readonly backstory?: string;
   /**
    * `characters.notes` — THE ONLY FIELD IN THIS DOCUMENT THE SHARER CHOOSES
    * WHETHER TO SEND (Q12, ruled opt-in by the owner).
@@ -851,6 +854,23 @@ function text(
     typeof value !== 'string' ||
     value.length < 1 ||
     value.length > maximum
+  ) {
+    throw new ShareValidationError(
+      `${label} must be a string of 1-${maximum} characters.`,
+    );
+  }
+  return value;
+}
+
+function codePointText(
+  value: unknown,
+  label: string,
+  maximum: number,
+): string {
+  if (
+    typeof value !== 'string' ||
+    [...value].length < 1 ||
+    [...value].length > maximum
   ) {
     throw new ShareValidationError(
       `${label} must be a string of 1-${maximum} characters.`,
@@ -1959,6 +1979,9 @@ export function validateShareDocument(
       'proficiency_bonus_override',
       'rules_edition_preference',
       'allow_legacy',
+      'alignment',
+      'appearance',
+      'backstory',
       'notes',
     ],
     'character',
@@ -2028,6 +2051,15 @@ export function validateShareDocument(
       );
     }
     character.allow_legacy = true;
+  }
+  for (const field of ['alignment', 'appearance', 'backstory'] as const) {
+    if (rawCharacter[field] !== undefined) {
+      character[field] = codePointText(
+        rawCharacter[field],
+        `character.${field}`,
+        CHARACTER_TEXT_LIMITS[field],
+      );
+    }
   }
   // Validated exactly as every other optional free-text field in this document
   // is — `text()` with a bound owned outside this module, so the share boundary

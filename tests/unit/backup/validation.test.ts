@@ -35,6 +35,9 @@ function minimalCharacterBackup(): CharacterBackupDocument {
       rules_edition_preference: '2024',
       allow_legacy: 0,
       revision: 0,
+      alignment: null,
+      appearance: null,
+      backstory: null,
       notes: null,
       created_at: null,
       updated_at: null,
@@ -685,6 +688,32 @@ describe('portable character validation', () => {
     expect(() =>
       validateCharacterBackup({ ...document, version: 0 }),
     ).toThrow('Unsupported character backup version 0.');
+  });
+
+  it('requires and bounds current flavor root fields without bounding notes', () => {
+    const document = minimalCharacterBackup();
+    const hostile = structuredClone(document);
+    Object.assign(hostile.character as Record<string, unknown>, {
+      alignment: 'x'.repeat(120),
+      appearance: 'line one\nline two',
+      backstory: '🧙'.repeat(20_000),
+      notes: 'n'.repeat(2_001),
+    });
+    expect(() => validateCharacterBackup(hostile)).not.toThrow();
+
+    const overlong = structuredClone(hostile);
+    Object.assign(overlong.character as Record<string, unknown>, {
+      backstory: '🧙'.repeat(20_001),
+    });
+    expect(() => validateCharacterBackup(overlong)).toThrow(
+      'Character backup character.backstory must be null or text from 1 through 20000 characters.',
+    );
+
+    const missing = structuredClone(document);
+    delete (missing.character as Record<string, unknown>).appearance;
+    expect(() => validateCharacterBackup(missing)).toThrow(
+      'Character backup character must contain exactly:',
+    );
   });
 
   it('rejects direct cross-character rows before import', () => {

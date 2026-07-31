@@ -27,6 +27,7 @@ import skillExpertiseGrants from '../../drizzle/0023_skill_expertise_grants.sql?
 import featApplicationModel from '../../drizzle/0024_feat_application_model.sql?raw';
 import characterLevelFeatChoices from '../../drizzle/0025_character_level_feat_choices.sql?raw';
 import classResources from '../../drizzle/0026_class_resources.sql?raw';
+import characterFlavor from '../../drizzle/0027_character_flavor.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -310,6 +311,16 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
       'c34ec3c9475ce1d23e0b567164c2748a2c736d5fe62279e5073fc9ee13b818c0',
     resultSchemaChecksum:
       'b3996db678f8633730fc0c399c42b5073098fbd2f978caa054c9523c3c5e10d3',
+  }),
+  // D104: nullable, bounded character flavor text. Existing notes remain
+  // unconstrained so every previously accepted note survives the rebuild.
+  Object.freeze({
+    id: '0027_character_flavor',
+    sql: characterFlavor,
+    checksum:
+      '0c482287be0043139053c06ae9110d5d8ac8ccf113310b839fe1709adbb633e3',
+    resultSchemaChecksum:
+      '491aacb86b33ac48e3d3ca3a7da3481d2e8c4915b4c47d500c8afe9e113902fd',
   }),
 ]);
 

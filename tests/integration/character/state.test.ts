@@ -4,6 +4,7 @@ import {
   CharacterState,
   CHARACTER_STATE_COLUMNS,
   CHARACTER_STATE_TABLES,
+  snapshotSchemaVersion,
   type CharacterStateSnapshot,
 } from '../../../src/character/character-state';
 import { DatabaseContext } from '../../../src/db/database';
@@ -264,12 +265,13 @@ describe('capture and deterministic diff', () => {
       'character',
       ...CHARACTER_STATE_TABLES,
     ]);
-    // a7-v15 is the version that carries LU-1 level-feat provenance.
+    // a7-v15 is still accepted as the frozen LU-1 shape. D104 writes v16.
     // Written out rather than compared against the exported constant: a version
     // identifier is a wire fact that other stored data is matched against, so a
     // test that reads it from the module under test could never notice it
     // changing.
-    expect(snapshot.schema_version).toBe('a7-v15');
+    expect(snapshotSchemaVersion('a7-v15')).toBe('a7-v15');
+    expect(snapshot.schema_version).toBe('a7-v16');
     expect(Object.keys(snapshot.character)).toEqual(CHARACTER_STATE_COLUMNS);
     expect(snapshot.character).toEqual({
       name: 'Snapshot Hero',
@@ -283,6 +285,9 @@ describe('capture and deterministic diff', () => {
       proficiency_bonus_override: 4,
       rules_edition_preference: '2024',
       allow_legacy: 1,
+      alignment: null,
+      appearance: null,
+      backstory: null,
       notes: 'preserve this note',
     });
     expect(snapshot.character_class_levels).toHaveLength(1);
@@ -828,6 +833,9 @@ describe('restoring a snapshot written by an older build', () => {
     const snapshot = mutableCapture();
     snapshot.schema_version = 'a7-v1';
     delete snapshot.character.ability_allocation_method;
+    delete snapshot.character.alignment;
+    delete snapshot.character.appearance;
+    delete snapshot.character.backstory;
     delete snapshot.character_weapons;
     return snapshot;
   }
@@ -863,12 +871,34 @@ describe('restoring a snapshot written by an older build', () => {
     ).toEqual([{ name: 'Shortsword' }, { name: 'Bought since' }]);
   });
 
+  it('historical flavor absence remains null', () => {
+    const snapshot = legacySnapshot();
+    db.exec(
+      `UPDATE characters
+       SET alignment = 'Chaotic Good',
+           appearance = 'Silver hair',
+           backstory = 'Invented after the snapshot'
+       WHERE id = ?`,
+      [characterId],
+    );
+
+    state.restore(characterId, snapshot);
+
+    expect(
+      db.oneRaw(
+        `SELECT alignment, appearance, backstory
+         FROM characters WHERE id = ?`,
+        [characterId],
+      ),
+    ).toEqual({ alignment: null, appearance: null, backstory: null });
+  });
+
   it('still replaces weapons when the snapshot did record them', () => {
     // The contrast that makes the case above a decision rather than an
     // oversight: a current snapshot DOES speak for weapons, so restoring it
     // removes one added afterwards.
     const snapshot = mutableCapture();
-    expect(snapshot.schema_version).toBe('a7-v15');
+    expect(snapshot.schema_version).toBe('a7-v16');
     db.exec(
       `INSERT INTO character_weapons (character_id, name)
        VALUES (?, 'Bought since')`,
