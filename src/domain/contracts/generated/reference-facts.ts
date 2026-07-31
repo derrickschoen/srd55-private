@@ -22,6 +22,18 @@
  */
 export const FOREIGN_KEY_FACTS = [
   {
+    table: 'armor_templates',
+    columns: ['content_key'],
+    target: 'catalog_content_identities',
+    targetColumns: ['content_key'],
+  },
+  {
+    table: 'background_definitions',
+    columns: ['content_key'],
+    target: 'catalog_content_identities',
+    targetColumns: ['content_key'],
+  },
+  {
     table: 'background_equipment_items',
     columns: ['background_template_id'],
     target: 'background_templates',
@@ -38,6 +50,30 @@ export const FOREIGN_KEY_FACTS = [
     columns: ['armor_template_id'],
     target: 'armor_templates',
     targetColumns: ['id'],
+  },
+  {
+    table: 'background_templates',
+    columns: ['content_key'],
+    target: 'catalog_content_identities',
+    targetColumns: ['content_key'],
+  },
+  {
+    table: 'catalog_content_aliases',
+    columns: ['content_kind', 'content_key'],
+    target: 'catalog_content_identities',
+    targetColumns: ['content_kind', 'content_key'],
+  },
+  {
+    table: 'catalog_content_fingerprints',
+    columns: ['content_kind', 'content_key'],
+    target: 'catalog_content_identities',
+    targetColumns: ['content_kind', 'content_key'],
+  },
+  {
+    table: 'catalog_content_match_decisions',
+    columns: ['content_kind', 'target_content_key'],
+    target: 'catalog_content_identities',
+    targetColumns: ['content_kind', 'content_key'],
   },
   {
     table: 'change_log',
@@ -232,6 +268,12 @@ export const FOREIGN_KEY_FACTS = [
     targetColumns: ['id'],
   },
   {
+    table: 'class_definitions',
+    columns: ['content_key'],
+    target: 'catalog_content_identities',
+    targetColumns: ['content_key'],
+  },
+  {
     table: 'class_equipment_items',
     columns: ['class_definition_id'],
     target: 'class_definitions',
@@ -310,6 +352,12 @@ export const FOREIGN_KEY_FACTS = [
     targetColumns: ['id'],
   },
   {
+    table: 'feat_definitions',
+    columns: ['content_key'],
+    target: 'catalog_content_identities',
+    targetColumns: ['content_key'],
+  },
+  {
     table: 'named_feature_effects',
     columns: ['named_feature_id'],
     target: 'named_features',
@@ -322,6 +370,12 @@ export const FOREIGN_KEY_FACTS = [
     targetColumns: ['id'],
   },
   {
+    table: 'species_definitions',
+    columns: ['content_key'],
+    target: 'catalog_content_identities',
+    targetColumns: ['content_key'],
+  },
+  {
     table: 'species_template_trait_effects',
     columns: ['species_template_trait_id'],
     target: 'species_template_traits',
@@ -332,6 +386,12 @@ export const FOREIGN_KEY_FACTS = [
     columns: ['species_template_id'],
     target: 'species_templates',
     targetColumns: ['id'],
+  },
+  {
+    table: 'species_templates',
+    columns: ['content_key'],
+    target: 'catalog_content_identities',
+    targetColumns: ['content_key'],
   },
   {
     table: 'spell_identity_aliases',
@@ -437,9 +497,21 @@ export const FOREIGN_KEY_FACTS = [
   },
   {
     table: 'spell_versions',
+    columns: ['content_key'],
+    target: 'catalog_content_identities',
+    targetColumns: ['content_key'],
+  },
+  {
+    table: 'spell_versions',
     columns: ['spell_identity_id'],
     target: 'spell_identities',
     targetColumns: ['id'],
+  },
+  {
+    table: 'subclass_definitions',
+    columns: ['content_key'],
+    target: 'catalog_content_identities',
+    targetColumns: ['content_key'],
   },
   {
     table: 'subclass_definitions',
@@ -470,6 +542,12 @@ export const FOREIGN_KEY_FACTS = [
     columns: ['character_id'],
     target: 'characters',
     targetColumns: ['id'],
+  },
+  {
+    table: 'weapon_templates',
+    columns: ['content_key'],
+    target: 'catalog_content_identities',
+    targetColumns: ['content_key'],
   },
   {
     table: 'wizard_spellbook_entries',

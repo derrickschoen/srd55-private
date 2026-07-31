@@ -20,6 +20,7 @@ import retireArmorClassAdjustment from '../../drizzle/0016_retire_armor_class_ad
 import attunementSlots from '../../drizzle/0017_attunement_slots.sql?raw';
 import characterItemsQuantity from '../../drizzle/0018_character_items_quantity.sql?raw';
 import abilityOverride from '../../drizzle/0019_ability_override.sql?raw';
+import contentIdentityRegistry from '../../drizzle/0020_content_identity_registry.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -229,6 +230,18 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
       '373193882ed11de782d6a44c480c7b33a5204bcc2d1cd5076201f532f09a029c',
     resultSchemaChecksum:
       '7279592c33987032e30b1421781fe3e7cfe06bba3c5af01077794ecef3e5c05f',
+  }),
+  // CI-2a (D81/D82/D84): recipient-local identity, fingerprint, alias and
+  // reviewed-match registries. Existing roots are registered without semantic
+  // projection before their content-key foreign keys are added; semantic
+  // rekeying remains the separate CI-4b data migration.
+  Object.freeze({
+    id: '0020_content_identity_registry',
+    sql: contentIdentityRegistry,
+    checksum:
+      '5b4e5759d14c31cb1c8dfe904222fd07a6a2d56047119079e5047e54f7732492',
+    resultSchemaChecksum:
+      'c9c571816a0fd85bd6ca5ee26f7b03bc898421e273f93992bc5005eb3ea9e942',
   }),
 ]);
 

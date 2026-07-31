@@ -46,6 +46,7 @@ import {
   tinyint1,
   varchar,
 } from './columns';
+import { catalog_content_identities } from './catalog-content';
 import { characters } from './character';
 import { class_definitions } from './catalog-classes';
 
@@ -320,7 +321,9 @@ export const weapon_templates = sqliteTable(
       .primaryKey({ autoIncrement: true })
       .notNull()
       .$type<WeaponTemplateId>(),
-    content_key: varchar<ContentKey>()('content_key').notNull(),
+    content_key: varchar<ContentKey>()('content_key')
+      .notNull()
+      .references(() => catalog_content_identities.content_key),
     rules_edition: varchar<RulesEdition>()('rules_edition')
       .notNull()
       .default('2024'),
