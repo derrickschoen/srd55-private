@@ -15,8 +15,22 @@ resolved keeping BOTH measurements, tsc 0).
   mints exactly 0027+v17, vitest 193/3,164 exit 0 (floor 3,154 + FF-A's 10,
   reconciles), D124 consent-gate negative control PROVEN both directions
   (mutate-ffa-toggle.py: killed 'flavor portability separates notes
-  privacy' +6, revert 81/81 clean). RUNNING: full PW on 44480 + D135
-  review (ffa-review.log). Then merge.
+  privacy' +6, revert 81/81 clean).
+  D135 review round 1: FOUR defects, ALL VERIFIED BY SUPERVISOR AT THE
+  CITED LINES AND ACCEPTED, none rejected:
+  (P1) the share checkbox still reads 'Include my notes about this
+  character' while the toggle exports alignment+appearance+backstory too —
+  a real consent defect against D124 that would have shipped to main;
+  (P1) notes validated with text() UTF-16 length while the three new
+  fields use codePointText() — one toggle counting two ways;
+  (P2) the typed too_large refusal exists in the client but the UI still
+  calls createFragment(), so nothing consumes it (D124 requires an
+  explicit error);
+  (P2) the a7-v15 predecessor freeze is not falsifiably tested.
+  FF-A-FIX dispatched (log ffa-fix.log, port 44480); FF-A's own PW run was
+  STOPPED mid-flight because the tree is changing. Re-gate after: vitest,
+  re-run mutate-ffa-toggle.py control, full PW 44480, round-2 review,
+  merge.
 - TRACK S (wt/pwa): D91-R + FIX + FIX2 all committed; main merged in.
   OPUS gates: scans 0, no mint/UnitM files, build 0, vitest 194/3,169
   exit 0, shape control re-proven (now kills the exhaustive-table test
