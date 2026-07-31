@@ -41,3 +41,167 @@ CREATE TRIGGER spell_slots_exclusive_assignment_update
 BEGIN
     SELECT RAISE(ABORT, 'a spell slot cannot hold both a fixed grant and a user selection');
 END;
+
+-- CI-2a registry guards. Aggregate roots cannot outrun their content-key
+-- parent. These BEFORE INSERT triggers are the SQL boundary for the existing
+-- seed/import writers while CI-3x replaces those writers with semantic
+-- projectors. Every identity minted here is deliberately legacy-opaque:
+-- neither a key's spelling nor a legacy row's source metadata proves its
+-- provenance, and these triggers create no fingerprint.
+CREATE TRIGGER catalog_register_class_identity_before_insert
+BEFORE INSERT ON class_definitions
+BEGIN
+  SELECT RAISE(ABORT, 'class content key is registered for another kind')
+  WHERE EXISTS (
+    SELECT 1 FROM catalog_content_identities
+    WHERE content_key = NEW.content_key AND content_kind <> 'class'
+  );
+  INSERT OR IGNORE INTO catalog_content_identities (
+    content_key, content_kind, key_kind, catalog_layer, normalized_name
+  ) VALUES (
+    NEW.content_key, 'class', 'legacy-opaque', 'external',
+    lower(NEW.name)
+  );
+END;
+
+CREATE TRIGGER catalog_register_subclass_identity_before_insert
+BEFORE INSERT ON subclass_definitions
+BEGIN
+  SELECT RAISE(ABORT, 'subclass content key is registered for another kind')
+  WHERE EXISTS (
+    SELECT 1 FROM catalog_content_identities
+    WHERE content_key = NEW.content_key AND content_kind <> 'subclass'
+  );
+  INSERT OR IGNORE INTO catalog_content_identities (
+    content_key, content_kind, key_kind, catalog_layer, normalized_name
+  ) VALUES (
+    NEW.content_key, 'subclass', 'legacy-opaque', 'external',
+    lower(NEW.name)
+  );
+END;
+
+CREATE TRIGGER catalog_register_feat_identity_before_insert
+BEFORE INSERT ON feat_definitions
+BEGIN
+  SELECT RAISE(ABORT, 'feat content key is registered for another kind')
+  WHERE EXISTS (
+    SELECT 1 FROM catalog_content_identities
+    WHERE content_key = NEW.content_key AND content_kind <> 'feat'
+  );
+  INSERT OR IGNORE INTO catalog_content_identities (
+    content_key, content_kind, key_kind, catalog_layer, normalized_name
+  ) VALUES (
+    NEW.content_key, 'feat', 'legacy-opaque', 'external',
+    lower(NEW.name)
+  );
+END;
+
+CREATE TRIGGER catalog_register_species_definition_identity_before_insert
+BEFORE INSERT ON species_definitions
+BEGIN
+  SELECT RAISE(ABORT, 'species content key is registered for another kind')
+  WHERE EXISTS (
+    SELECT 1 FROM catalog_content_identities
+    WHERE content_key = NEW.content_key AND content_kind <> 'species'
+  );
+  INSERT OR IGNORE INTO catalog_content_identities (
+    content_key, content_kind, key_kind, catalog_layer, normalized_name
+  ) VALUES (
+    NEW.content_key, 'species', 'legacy-opaque', 'external',
+    lower(NEW.name)
+  );
+END;
+
+CREATE TRIGGER catalog_register_background_definition_identity_before_insert
+BEFORE INSERT ON background_definitions
+BEGIN
+  SELECT RAISE(ABORT, 'background content key is registered for another kind')
+  WHERE EXISTS (
+    SELECT 1 FROM catalog_content_identities
+    WHERE content_key = NEW.content_key AND content_kind <> 'background'
+  );
+  INSERT OR IGNORE INTO catalog_content_identities (
+    content_key, content_kind, key_kind, catalog_layer, normalized_name
+  ) VALUES (
+    NEW.content_key, 'background', 'legacy-opaque', 'external',
+    lower(NEW.name)
+  );
+END;
+
+CREATE TRIGGER catalog_register_spell_identity_before_insert
+BEFORE INSERT ON spell_versions
+BEGIN
+  SELECT RAISE(ABORT, 'spell content key is registered for another kind')
+  WHERE EXISTS (
+    SELECT 1 FROM catalog_content_identities
+    WHERE content_key = NEW.content_key AND content_kind <> 'spell'
+  );
+  INSERT OR IGNORE INTO catalog_content_identities (
+    content_key, content_kind, key_kind, catalog_layer, normalized_name
+  )
+  SELECT
+    NEW.content_key, 'spell', 'legacy-opaque', 'external',
+    normalized_name
+  FROM spell_identities
+  WHERE id = NEW.spell_identity_id;
+END;
+
+CREATE TRIGGER catalog_register_species_template_identity_before_insert
+BEFORE INSERT ON species_templates
+BEGIN
+  SELECT RAISE(ABORT, 'species content key is registered for another kind')
+  WHERE EXISTS (
+    SELECT 1 FROM catalog_content_identities
+    WHERE content_key = NEW.content_key AND content_kind <> 'species'
+  );
+  INSERT OR IGNORE INTO catalog_content_identities (
+    content_key, content_kind, key_kind, catalog_layer, normalized_name
+  ) VALUES (
+    NEW.content_key, 'species', 'legacy-opaque', 'external', lower(NEW.name)
+  );
+END;
+
+CREATE TRIGGER catalog_register_background_template_identity_before_insert
+BEFORE INSERT ON background_templates
+BEGIN
+  SELECT RAISE(ABORT, 'background content key is registered for another kind')
+  WHERE EXISTS (
+    SELECT 1 FROM catalog_content_identities
+    WHERE content_key = NEW.content_key AND content_kind <> 'background'
+  );
+  INSERT OR IGNORE INTO catalog_content_identities (
+    content_key, content_kind, key_kind, catalog_layer, normalized_name
+  ) VALUES (
+    NEW.content_key, 'background', 'legacy-opaque', 'external', lower(NEW.name)
+  );
+END;
+
+CREATE TRIGGER catalog_register_armor_identity_before_insert
+BEFORE INSERT ON armor_templates
+BEGIN
+  SELECT RAISE(ABORT, 'armor content key is registered for another kind')
+  WHERE EXISTS (
+    SELECT 1 FROM catalog_content_identities
+    WHERE content_key = NEW.content_key AND content_kind <> 'armor'
+  );
+  INSERT OR IGNORE INTO catalog_content_identities (
+    content_key, content_kind, key_kind, catalog_layer, normalized_name
+  ) VALUES (
+    NEW.content_key, 'armor', 'legacy-opaque', 'external', lower(NEW.name)
+  );
+END;
+
+CREATE TRIGGER catalog_register_weapon_identity_before_insert
+BEFORE INSERT ON weapon_templates
+BEGIN
+  SELECT RAISE(ABORT, 'weapon content key is registered for another kind')
+  WHERE EXISTS (
+    SELECT 1 FROM catalog_content_identities
+    WHERE content_key = NEW.content_key AND content_kind <> 'weapon'
+  );
+  INSERT OR IGNORE INTO catalog_content_identities (
+    content_key, content_kind, key_kind, catalog_layer, normalized_name
+  ) VALUES (
+    NEW.content_key, 'weapon', 'legacy-opaque', 'external', lower(NEW.name)
+  );
+END;

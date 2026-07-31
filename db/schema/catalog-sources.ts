@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
   check,
+  index,
   integer,
   sqliteTable,
   uniqueIndex,
@@ -25,6 +26,7 @@ import {
   tinyint1,
   varchar,
 } from './columns';
+import { catalog_content_identities } from './catalog-content';
 
 /**
  * STANDALONE SOURCE DEFINITIONS: feats, species, backgrounds.
@@ -44,7 +46,9 @@ export const feat_definitions = sqliteTable(
       .primaryKey({ autoIncrement: true })
       .notNull()
       .$type<FeatDefinitionId>(),
-    content_key: varchar<ContentKey>()('content_key').notNull(),
+    content_key: varchar<ContentKey>()('content_key')
+      .notNull()
+      .references(() => catalog_content_identities.content_key),
     name: varchar()('name').notNull(),
     rules_edition: varchar<RulesEdition>()('rules_edition').notNull(),
     category: varchar<FeatGrouping>()('category'),
@@ -70,7 +74,7 @@ export const feat_definitions = sqliteTable(
       integerOneOf('ability_points', featAbilityPoints),
     ),
     uniqueIndex('feat_definitions_content_key_unique').on(table.content_key),
-    uniqueIndex('feat_definitions_name_rules_edition_unique').on(
+    index('feat_definitions_name_rules_edition_index').on(
       table.name,
       table.rules_edition,
     ),
@@ -84,7 +88,9 @@ export const species_definitions = sqliteTable(
       .primaryKey({ autoIncrement: true })
       .notNull()
       .$type<SpeciesDefinitionId>(),
-    content_key: varchar<ContentKey>()('content_key').notNull(),
+    content_key: varchar<ContentKey>()('content_key')
+      .notNull()
+      .references(() => catalog_content_identities.content_key),
     name: varchar()('name').notNull(),
     rules_edition: varchar<RulesEdition>()('rules_edition').notNull(),
     category: varchar()('category'),
@@ -97,7 +103,7 @@ export const species_definitions = sqliteTable(
   },
   (table) => [
     uniqueIndex('species_definitions_content_key_unique').on(table.content_key),
-    uniqueIndex('species_definitions_name_rules_edition_unique').on(
+    index('species_definitions_name_rules_edition_index').on(
       table.name,
       table.rules_edition,
     ),
@@ -111,7 +117,9 @@ export const background_definitions = sqliteTable(
       .primaryKey({ autoIncrement: true })
       .notNull()
       .$type<BackgroundDefinitionId>(),
-    content_key: varchar<ContentKey>()('content_key').notNull(),
+    content_key: varchar<ContentKey>()('content_key')
+      .notNull()
+      .references(() => catalog_content_identities.content_key),
     name: varchar()('name').notNull(),
     rules_edition: varchar<RulesEdition>()('rules_edition').notNull(),
     category: varchar()('category'),
@@ -126,7 +134,7 @@ export const background_definitions = sqliteTable(
     uniqueIndex('background_definitions_content_key_unique').on(
       table.content_key,
     ),
-    uniqueIndex('background_definitions_name_rules_edition_unique').on(
+    index('background_definitions_name_rules_edition_index').on(
       table.name,
       table.rules_edition,
     ),

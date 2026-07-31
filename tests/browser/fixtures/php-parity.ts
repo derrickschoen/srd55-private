@@ -1,9 +1,16 @@
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
 import { readFileSync } from 'node:fs';
+import {
+  normalizeContentIdentityName,
+} from '../../../src/catalog/content-identity';
+import {
+  registerBundledStableContentIdentity,
+} from '../../../src/catalog/content-registry';
 import { AddSourceCommand } from '../../../src/commands/add-source';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import { sqlInteger, sqlNullableInteger } from '../../../src/db/codecs';
 import { DatabaseContext } from '../../../src/db/database';
+import type { ContentKey } from '../../../src/domain/ids';
 import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
 import {
   createBuildReportFixture,
@@ -121,6 +128,11 @@ function seedSourceCatalog(
     ).lastInsertId;
 
   if (existingMagicInitiateId !== undefined) {
+    registerBundledStableContentIdentity(db, {
+      kind: 'feat',
+      contentKey: '2024:feat:magic-initiate' as ContentKey,
+      normalizedName: normalizeContentIdentityName('Magic Initiate'),
+    });
     db.exec(
       `UPDATE feat_definitions
        SET content_key = '2024:feat:magic-initiate',
@@ -192,6 +204,11 @@ function controlledSpell(
   const id = createSpell(db, name, {
     level: options.level ?? 0,
     edition: options.edition ?? '2024',
+  });
+  registerBundledStableContentIdentity(db, {
+    kind: 'spell',
+    contentKey: key as ContentKey,
+    normalizedName: normalizeContentIdentityName(name),
   });
   db.exec(
     'UPDATE spell_versions SET content_key = ? WHERE id = ?',

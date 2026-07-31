@@ -1,5 +1,6 @@
 import {
   check,
+  index,
   integer,
   sqliteTable,
   uniqueIndex,
@@ -40,6 +41,7 @@ import {
   tinyint1,
   varchar,
 } from './columns';
+import { catalog_content_identities } from './catalog-content';
 
 function featureEffectColumns() {
   return {
@@ -194,7 +196,9 @@ export const class_definitions = sqliteTable(
       .primaryKey({ autoIncrement: true })
       .notNull()
       .$type<ClassDefinitionId>(),
-    content_key: varchar<ContentKey>()('content_key').notNull(),
+    content_key: varchar<ContentKey>()('content_key')
+      .notNull()
+      .references(() => catalog_content_identities.content_key),
     name: varchar()('name').notNull(),
     rules_edition: varchar<RulesEdition>()('rules_edition').notNull(),
     spellcasting_ability: varchar<Ability>()('spellcasting_ability'),
@@ -241,7 +245,7 @@ export const class_definitions = sqliteTable(
       nullOrOneOf('spellcasting_ability', abilities),
     ),
     uniqueIndex('class_definitions_content_key_unique').on(table.content_key),
-    uniqueIndex('class_definitions_name_rules_edition_unique').on(
+    index('class_definitions_name_rules_edition_index').on(
       table.name,
       table.rules_edition,
     ),
@@ -293,7 +297,9 @@ export const subclass_definitions = sqliteTable(
       .primaryKey({ autoIncrement: true })
       .notNull()
       .$type<SubclassDefinitionId>(),
-    content_key: varchar<ContentKey>()('content_key').notNull(),
+    content_key: varchar<ContentKey>()('content_key')
+      .notNull()
+      .references(() => catalog_content_identities.content_key),
     class_definition_id: integer('class_definition_id')
       .notNull()
       .$type<ClassDefinitionId>()
@@ -311,8 +317,8 @@ export const subclass_definitions = sqliteTable(
     uniqueIndex('subclass_definitions_content_key_unique').on(
       table.content_key,
     ),
-    uniqueIndex(
-      'subclass_definitions_class_definition_id_name_rules_edition_unique',
+    index(
+      'subclass_definitions_class_definition_id_name_rules_edition_index',
     ).on(table.class_definition_id, table.name, table.rules_edition),
     // The composite-FK companion: without this unique key the composite
     // reference from character_class_levels cannot be declared at all.

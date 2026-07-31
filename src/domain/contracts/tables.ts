@@ -82,6 +82,8 @@ export type TableRole =
   | 'character_owned'
   /** The spell catalog. */
   | 'catalog_spell'
+  /** Recipient-local catalog identity and match-review registry state. */
+  | 'catalog_registry'
   /** Classes, subclasses and their progressions. */
   | 'catalog_class'
   /** Feats, species, backgrounds. */
@@ -427,6 +429,44 @@ export const TABLE_SCOPES = {
     backup: true,
     // Historical shell only. AC-4 migrates its retired payload into effects;
     // current share documents carry those effects and never this table.
+    share: false,
+    backupReference: false,
+  },
+
+  // --- catalog identity registry -----------------------------------------
+  // Registry rows describe catalog content and recipient-local review
+  // receipts. They are deliberately absent from every character-scoped
+  // portability surface: a whole-database image retains them because it
+  // retains every application table, while character JSON and shares do not.
+  catalog_content_identities: {
+    role: 'catalog_registry',
+    snapshot: false,
+    backupDirect: false,
+    backup: false,
+    share: false,
+    backupReference: false,
+  },
+  catalog_content_fingerprints: {
+    role: 'catalog_registry',
+    snapshot: false,
+    backupDirect: false,
+    backup: false,
+    share: false,
+    backupReference: false,
+  },
+  catalog_content_aliases: {
+    role: 'catalog_registry',
+    snapshot: false,
+    backupDirect: false,
+    backup: false,
+    share: false,
+    backupReference: false,
+  },
+  catalog_content_match_decisions: {
+    role: 'catalog_registry',
+    snapshot: false,
+    backupDirect: false,
+    backup: false,
     share: false,
     backupReference: false,
   },
@@ -1153,6 +1193,10 @@ export const APPLICATION_TABLES = order<AnyTableName>()([
   'background_definitions',
   'background_equipment_items',
   'background_templates',
+  'catalog_content_aliases',
+  'catalog_content_fingerprints',
+  'catalog_content_identities',
+  'catalog_content_match_decisions',
   'class_equipment_items',
   'change_log',
   'character_armor',

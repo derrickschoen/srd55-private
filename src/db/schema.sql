@@ -18,6 +18,7 @@ CREATE TABLE `armor_templates` (
 	`stealth_disadvantage` TINYINT(1) DEFAULT false NOT NULL,
 	`created_at` DATETIME,
 	`updated_at` DATETIME,
+	FOREIGN KEY (`content_key`) REFERENCES `catalog_content_identities`(`content_key`) ON UPDATE no action ON DELETE no action,
 	CONSTRAINT "armor_templates_category_check" CHECK(`category` IN ('light', 'medium', 'heavy', 'shield')),
 	CONSTRAINT "armor_templates_dex_bonus_check" CHECK(`dex_bonus` IN ('full', 'capped', 'none')),
 	CONSTRAINT "armor_templates_dex_bonus_max_check" CHECK((`dex_bonus` = 'capped') = (`dex_bonus_max` IS NOT NULL) AND (`dex_bonus_max` IS NULL OR (typeof(`dex_bonus_max`) = 'integer' AND `dex_bonus_max` >= 0))),
@@ -39,11 +40,12 @@ CREATE TABLE `background_definitions` (
 	`grant_rules` TEXT,
 	`notes` TEXT,
 	`created_at` DATETIME,
-	`updated_at` DATETIME
+	`updated_at` DATETIME,
+	FOREIGN KEY (`content_key`) REFERENCES `catalog_content_identities`(`content_key`) ON UPDATE no action ON DELETE no action
 );
 
 CREATE UNIQUE INDEX `background_definitions_content_key_unique` ON `background_definitions` (`content_key`);
-CREATE UNIQUE INDEX `background_definitions_name_rules_edition_unique` ON `background_definitions` (`name`,`rules_edition`);
+CREATE INDEX `background_definitions_name_rules_edition_index` ON `background_definitions` (`name`,`rules_edition`);
 CREATE TABLE `background_equipment_items` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`background_template_id` integer NOT NULL,
@@ -90,11 +92,112 @@ CREATE TABLE `background_templates` (
 	`equipment_option_b` TEXT NOT NULL,
 	`created_at` DATETIME,
 	`updated_at` DATETIME,
+	FOREIGN KEY (`content_key`) REFERENCES `catalog_content_identities`(`content_key`) ON UPDATE no action ON DELETE no action,
 	CONSTRAINT "background_templates_rules_edition_check" CHECK(`rules_edition` IN ('2014', '2024', 'expanded'))
 );
 
 CREATE UNIQUE INDEX `background_templates_content_key_unique` ON `background_templates` (`content_key`);
-CREATE UNIQUE INDEX `background_templates_name_rules_edition_unique` ON `background_templates` (`name`,`rules_edition`);
+CREATE INDEX `background_templates_name_rules_edition_index` ON `background_templates` (`name`,`rules_edition`);
+CREATE TABLE `catalog_content_aliases` (
+	`content_kind` VARCHAR NOT NULL,
+	`alias_key` VARCHAR NOT NULL,
+	`content_key` VARCHAR NOT NULL,
+	`alias_kind` VARCHAR NOT NULL,
+	PRIMARY KEY(`content_kind`, `alias_key`, `content_key`),
+	FOREIGN KEY (`content_kind`,`content_key`) REFERENCES `catalog_content_identities`(`content_kind`,`content_key`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "catalog_content_aliases_content_kind_check" CHECK(`content_kind` IN ('class', 'subclass', 'feat', 'species', 'background', 'spell', 'weapon', 'armor', 'item')),
+	CONSTRAINT "catalog_content_aliases_alias_kind_check" CHECK("catalog_content_aliases"."alias_kind"
+        IN ('declared-legacy', 'rekeyed-primary', 'bundled-legacy'))
+);
+
+CREATE INDEX `catalog_content_aliases_resolution_index` ON `catalog_content_aliases` (`content_kind`,`alias_key`);
+CREATE TABLE `catalog_content_fingerprints` (
+	`content_kind` VARCHAR NOT NULL,
+	`fingerprint_scheme` VARCHAR NOT NULL,
+	`fingerprint_digest` VARCHAR NOT NULL,
+	`canonical_json` VARCHAR NOT NULL,
+	`content_key` VARCHAR NOT NULL,
+	`fingerprint_role` VARCHAR NOT NULL,
+	PRIMARY KEY(`content_kind`, `fingerprint_scheme`, `fingerprint_digest`, `content_key`),
+	FOREIGN KEY (`content_kind`,`content_key`) REFERENCES `catalog_content_identities`(`content_kind`,`content_key`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "catalog_content_fingerprints_content_kind_check" CHECK(`content_kind` IN ('class', 'subclass', 'feat', 'species', 'background', 'spell', 'weapon', 'armor', 'item')),
+	CONSTRAINT "catalog_content_fingerprints_scheme_check" CHECK("catalog_content_fingerprints"."fingerprint_scheme" IN ('content-v1')),
+	CONSTRAINT "catalog_content_fingerprints_digest_check" CHECK(length("catalog_content_fingerprints"."fingerprint_digest") = 64
+        AND "catalog_content_fingerprints"."fingerprint_digest" NOT GLOB '*[^0-9a-f]*'),
+	CONSTRAINT "catalog_content_fingerprints_role_check" CHECK("catalog_content_fingerprints"."fingerprint_role"
+        IN ('current', 'compatible', 'bundled-historical'))
+);
+
+CREATE UNIQUE INDEX `catalog_content_fingerprints_current_scheme_unique` ON `catalog_content_fingerprints` (`content_key`,`fingerprint_scheme`) WHERE "catalog_content_fingerprints"."fingerprint_role" = 'current';
+CREATE INDEX `catalog_content_fingerprints_resolution_index` ON `catalog_content_fingerprints` (`content_kind`,`fingerprint_scheme`,`fingerprint_digest`);
+CREATE TABLE `catalog_content_identities` (
+	`content_key` VARCHAR PRIMARY KEY NOT NULL,
+	`content_kind` VARCHAR NOT NULL,
+	`key_kind` VARCHAR NOT NULL,
+	`catalog_layer` VARCHAR NOT NULL,
+	`normalized_name` VARCHAR NOT NULL,
+	`created_at` DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	CONSTRAINT "catalog_content_identities_content_kind_check" CHECK(`content_kind` IN ('class', 'subclass', 'feat', 'species', 'background', 'spell', 'weapon', 'armor', 'item')),
+	CONSTRAINT "catalog_content_identities_key_kind_check" CHECK("catalog_content_identities"."key_kind" IN ('derived', 'bundled-stable', 'legacy-opaque')),
+	CONSTRAINT "catalog_content_identities_catalog_layer_check" CHECK("catalog_content_identities"."catalog_layer" IN ('bundled', 'external')),
+	CONSTRAINT "catalog_content_identities_normalized_name_check" CHECK(length("catalog_content_identities"."normalized_name") > 0),
+	CONSTRAINT "catalog_content_identities_key_layer_check" CHECK((
+        ("catalog_content_identities"."key_kind" = 'derived'
+          AND "catalog_content_identities"."catalog_layer" = 'external'
+          AND instr("catalog_content_identities"."content_key", ':content.v1:') > 1
+          AND substr(
+            "catalog_content_identities"."content_key",
+            1,
+            instr("catalog_content_identities"."content_key", ':content.v1:') - 1
+          ) NOT GLOB '*[^a-z0-9-]*'
+          AND substr("catalog_content_identities"."content_key", 1, 1) <> '-'
+          AND substr(
+            "catalog_content_identities"."content_key",
+            instr("catalog_content_identities"."content_key", ':content.v1:') - 1,
+            1
+          ) <> '-'
+          AND instr(
+            substr(
+              "catalog_content_identities"."content_key",
+              1,
+              instr("catalog_content_identities"."content_key", ':content.v1:') - 1
+            ),
+            '--'
+          ) = 0
+          AND length(substr(
+            "catalog_content_identities"."content_key",
+            instr("catalog_content_identities"."content_key", ':content.v1:') + 12
+          )) = 64
+          AND substr(
+            "catalog_content_identities"."content_key",
+            instr("catalog_content_identities"."content_key", ':content.v1:') + 12
+          ) NOT GLOB '*[^0-9a-f]*')
+        OR ("catalog_content_identities"."key_kind" = 'bundled-stable'
+          AND "catalog_content_identities"."catalog_layer" = 'bundled')
+        OR ("catalog_content_identities"."key_kind" = 'legacy-opaque'
+          AND "catalog_content_identities"."catalog_layer" = 'external')
+      ))
+);
+
+CREATE UNIQUE INDEX `catalog_content_identities_kind_key_unique` ON `catalog_content_identities` (`content_kind`,`content_key`);
+CREATE INDEX `catalog_content_identities_layer_kind_index` ON `catalog_content_identities` (`catalog_layer`,`content_kind`);
+CREATE INDEX `catalog_content_identities_name_index` ON `catalog_content_identities` (`content_kind`,`normalized_name`);
+CREATE TABLE `catalog_content_match_decisions` (
+	`content_kind` VARCHAR NOT NULL,
+	`incoming_fingerprint_scheme` VARCHAR NOT NULL,
+	`incoming_fingerprint_digest` VARCHAR NOT NULL,
+	`decision` VARCHAR NOT NULL,
+	`target_content_key` VARCHAR NOT NULL,
+	`reviewed_at` DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	PRIMARY KEY(`content_kind`, `incoming_fingerprint_scheme`, `incoming_fingerprint_digest`),
+	FOREIGN KEY (`content_kind`,`target_content_key`) REFERENCES `catalog_content_identities`(`content_kind`,`content_key`) ON UPDATE no action ON DELETE restrict,
+	CONSTRAINT "catalog_content_match_decisions_content_kind_check" CHECK(`content_kind` IN ('class', 'subclass', 'feat', 'species', 'background', 'spell', 'weapon', 'armor', 'item')),
+	CONSTRAINT "catalog_content_match_decisions_scheme_check" CHECK("catalog_content_match_decisions"."incoming_fingerprint_scheme" IN ('content-v1')),
+	CONSTRAINT "catalog_content_match_decisions_digest_check" CHECK(length("catalog_content_match_decisions"."incoming_fingerprint_digest") = 64
+        AND "catalog_content_match_decisions"."incoming_fingerprint_digest" NOT GLOB '*[^0-9a-f]*'),
+	CONSTRAINT "catalog_content_match_decisions_decision_check" CHECK("catalog_content_match_decisions"."decision" IN ('match', 'clone'))
+);
+
 CREATE TABLE `change_log` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`character_id` integer NOT NULL,
@@ -551,12 +654,13 @@ CREATE TABLE `class_definitions` (
 	`notes` TEXT,
 	`created_at` DATETIME,
 	`updated_at` DATETIME,
+	FOREIGN KEY (`content_key`) REFERENCES `catalog_content_identities`(`content_key`) ON UPDATE no action ON DELETE no action,
 	CONSTRAINT "class_definitions_progression_type_check" CHECK(`progression_type` IN ('full', 'half_up', 'half_down', 'third_up', 'third_down', 'pact', 'none')),
 	CONSTRAINT "class_definitions_spellcasting_ability_check" CHECK((`spellcasting_ability` IS NULL OR `spellcasting_ability` IN ('strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma')))
 );
 
 CREATE UNIQUE INDEX `class_definitions_content_key_unique` ON `class_definitions` (`content_key`);
-CREATE UNIQUE INDEX `class_definitions_name_rules_edition_unique` ON `class_definitions` (`name`,`rules_edition`);
+CREATE INDEX `class_definitions_name_rules_edition_index` ON `class_definitions` (`name`,`rules_edition`);
 CREATE TABLE `class_equipment_items` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`class_definition_id` integer NOT NULL,
@@ -772,12 +876,13 @@ CREATE TABLE `feat_definitions` (
 	`notes` TEXT,
 	`created_at` DATETIME,
 	`updated_at` DATETIME,
+	FOREIGN KEY (`content_key`) REFERENCES `catalog_content_identities`(`content_key`) ON UPDATE no action ON DELETE no action,
 	CONSTRAINT "feat_definitions_min_level_check" CHECK(`min_level` IS NULL OR (typeof(`min_level`) = 'integer' AND `min_level` BETWEEN 1 AND 20)),
 	CONSTRAINT "feat_definitions_ability_points_check" CHECK(typeof(`ability_points`) = 'integer' AND `ability_points` IN (0, 1, 2))
 );
 
 CREATE UNIQUE INDEX `feat_definitions_content_key_unique` ON `feat_definitions` (`content_key`);
-CREATE UNIQUE INDEX `feat_definitions_name_rules_edition_unique` ON `feat_definitions` (`name`,`rules_edition`);
+CREATE INDEX `feat_definitions_name_rules_edition_index` ON `feat_definitions` (`name`,`rules_edition`);
 CREATE TABLE `named_feature_effects` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`named_feature_id` integer NOT NULL,
@@ -862,11 +967,12 @@ CREATE TABLE `species_definitions` (
 	`grant_rules` TEXT,
 	`notes` TEXT,
 	`created_at` DATETIME,
-	`updated_at` DATETIME
+	`updated_at` DATETIME,
+	FOREIGN KEY (`content_key`) REFERENCES `catalog_content_identities`(`content_key`) ON UPDATE no action ON DELETE no action
 );
 
 CREATE UNIQUE INDEX `species_definitions_content_key_unique` ON `species_definitions` (`content_key`);
-CREATE UNIQUE INDEX `species_definitions_name_rules_edition_unique` ON `species_definitions` (`name`,`rules_edition`);
+CREATE INDEX `species_definitions_name_rules_edition_index` ON `species_definitions` (`name`,`rules_edition`);
 CREATE TABLE `species_template_trait_effects` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`species_template_trait_id` integer NOT NULL,
@@ -931,6 +1037,7 @@ CREATE TABLE `species_templates` (
 	`base_speed_feet` integer NOT NULL,
 	`created_at` DATETIME,
 	`updated_at` DATETIME,
+	FOREIGN KEY (`content_key`) REFERENCES `catalog_content_identities`(`content_key`) ON UPDATE no action ON DELETE no action,
 	CONSTRAINT "species_templates_rules_edition_check" CHECK(`rules_edition` IN ('2014', '2024', 'expanded')),
 	CONSTRAINT "species_templates_creature_type_check" CHECK(`creature_type` IN ('Aberration', 'Beast', 'Celestial', 'Construct', 'Dragon', 'Elemental', 'Fey', 'Fiend', 'Giant', 'Humanoid', 'Monstrosity', 'Ooze', 'Plant', 'Undead')),
 	CONSTRAINT "species_templates_size_check" CHECK(`size` IN ('Tiny', 'Small', 'Medium', 'Large', 'Huge', 'Gargantuan')),
@@ -939,7 +1046,7 @@ CREATE TABLE `species_templates` (
 );
 
 CREATE UNIQUE INDEX `species_templates_content_key_unique` ON `species_templates` (`content_key`);
-CREATE UNIQUE INDEX `species_templates_name_rules_edition_unique` ON `species_templates` (`name`,`rules_edition`);
+CREATE INDEX `species_templates_name_rules_edition_index` ON `species_templates` (`name`,`rules_edition`);
 CREATE TABLE `spell_identities` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`content_key` VARCHAR NOT NULL,
@@ -1157,6 +1264,7 @@ CREATE TABLE `spell_versions` (
 	`created_at` DATETIME,
 	`updated_at` DATETIME,
 	`forked_from_content_key` VARCHAR,
+	FOREIGN KEY (`content_key`) REFERENCES `catalog_content_identities`(`content_key`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`spell_identity_id`) REFERENCES `spell_identities`(`id`) ON UPDATE no action ON DELETE cascade,
 	CONSTRAINT "spell_versions_level_check" CHECK(provenance IS 'placeholder' OR level BETWEEN 0 AND 9),
 	CONSTRAINT "spell_versions_effect_reliability_category_check" CHECK(`effect_reliability_category` IN ('attack_roll', 'saving_throw', 'fixed_effect', 'modifier_scaled', 'ritual_utility', 'mixed')),
@@ -1172,7 +1280,7 @@ CREATE TABLE `spell_versions` (
 );
 
 CREATE UNIQUE INDEX `spell_versions_content_key_unique` ON `spell_versions` (`content_key`);
-CREATE UNIQUE INDEX `spell_versions_spell_identity_id_rules_edition_unique` ON `spell_versions` (`spell_identity_id`,`rules_edition`);
+CREATE INDEX `spell_versions_spell_identity_id_rules_edition_index` ON `spell_versions` (`spell_identity_id`,`rules_edition`);
 CREATE INDEX `spell_versions_rules_edition_level_index` ON `spell_versions` (`rules_edition`,`level`);
 CREATE INDEX `spell_versions_is_active_index` ON `spell_versions` (`is_active`);
 CREATE TABLE `subclass_definitions` (
@@ -1187,11 +1295,12 @@ CREATE TABLE `subclass_definitions` (
 	`grant_rules` TEXT,
 	`created_at` DATETIME,
 	`updated_at` DATETIME,
+	FOREIGN KEY (`content_key`) REFERENCES `catalog_content_identities`(`content_key`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`class_definition_id`) REFERENCES `class_definitions`(`id`) ON UPDATE no action ON DELETE cascade
 );
 
 CREATE UNIQUE INDEX `subclass_definitions_content_key_unique` ON `subclass_definitions` (`content_key`);
-CREATE UNIQUE INDEX `subclass_definitions_class_definition_id_name_rules_edition_unique` ON `subclass_definitions` (`class_definition_id`,`name`,`rules_edition`);
+CREATE INDEX `subclass_definitions_class_definition_id_name_rules_edition_index` ON `subclass_definitions` (`class_definition_id`,`name`,`rules_edition`);
 CREATE UNIQUE INDEX `subclass_definitions_id_class_definition_id_unique` ON `subclass_definitions` (`id`,`class_definition_id`);
 CREATE TABLE `subclass_feature_effects` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
@@ -1325,6 +1434,7 @@ CREATE TABLE `weapon_templates` (
 	`other_properties` TEXT,
 	`created_at` DATETIME,
 	`updated_at` DATETIME,
+	FOREIGN KEY (`content_key`) REFERENCES `catalog_content_identities`(`content_key`) ON UPDATE no action ON DELETE no action,
 	CONSTRAINT "weapon_templates_damage_check" CHECK((
         (damage_kind = 'dice' AND damage_dice IS NOT NULL AND damage_flat IS NULL AND damage_custom IS NULL)
         OR (damage_kind = 'flat' AND damage_dice IS NULL AND damage_flat IS NOT NULL AND damage_flat >= 0 AND damage_custom IS NULL)
@@ -1406,4 +1516,168 @@ CREATE TRIGGER spell_slots_exclusive_assignment_update
       AND NEW.current_spell_version_id IS NOT NULL
 BEGIN
     SELECT RAISE(ABORT, 'a spell slot cannot hold both a fixed grant and a user selection');
+END;
+
+-- CI-2a registry guards. Aggregate roots cannot outrun their content-key
+-- parent. These BEFORE INSERT triggers are the SQL boundary for the existing
+-- seed/import writers while CI-3x replaces those writers with semantic
+-- projectors. Every identity minted here is deliberately legacy-opaque:
+-- neither a key's spelling nor a legacy row's source metadata proves its
+-- provenance, and these triggers create no fingerprint.
+CREATE TRIGGER catalog_register_class_identity_before_insert
+BEFORE INSERT ON class_definitions
+BEGIN
+  SELECT RAISE(ABORT, 'class content key is registered for another kind')
+  WHERE EXISTS (
+    SELECT 1 FROM catalog_content_identities
+    WHERE content_key = NEW.content_key AND content_kind <> 'class'
+  );
+  INSERT OR IGNORE INTO catalog_content_identities (
+    content_key, content_kind, key_kind, catalog_layer, normalized_name
+  ) VALUES (
+    NEW.content_key, 'class', 'legacy-opaque', 'external',
+    lower(NEW.name)
+  );
+END;
+
+CREATE TRIGGER catalog_register_subclass_identity_before_insert
+BEFORE INSERT ON subclass_definitions
+BEGIN
+  SELECT RAISE(ABORT, 'subclass content key is registered for another kind')
+  WHERE EXISTS (
+    SELECT 1 FROM catalog_content_identities
+    WHERE content_key = NEW.content_key AND content_kind <> 'subclass'
+  );
+  INSERT OR IGNORE INTO catalog_content_identities (
+    content_key, content_kind, key_kind, catalog_layer, normalized_name
+  ) VALUES (
+    NEW.content_key, 'subclass', 'legacy-opaque', 'external',
+    lower(NEW.name)
+  );
+END;
+
+CREATE TRIGGER catalog_register_feat_identity_before_insert
+BEFORE INSERT ON feat_definitions
+BEGIN
+  SELECT RAISE(ABORT, 'feat content key is registered for another kind')
+  WHERE EXISTS (
+    SELECT 1 FROM catalog_content_identities
+    WHERE content_key = NEW.content_key AND content_kind <> 'feat'
+  );
+  INSERT OR IGNORE INTO catalog_content_identities (
+    content_key, content_kind, key_kind, catalog_layer, normalized_name
+  ) VALUES (
+    NEW.content_key, 'feat', 'legacy-opaque', 'external',
+    lower(NEW.name)
+  );
+END;
+
+CREATE TRIGGER catalog_register_species_definition_identity_before_insert
+BEFORE INSERT ON species_definitions
+BEGIN
+  SELECT RAISE(ABORT, 'species content key is registered for another kind')
+  WHERE EXISTS (
+    SELECT 1 FROM catalog_content_identities
+    WHERE content_key = NEW.content_key AND content_kind <> 'species'
+  );
+  INSERT OR IGNORE INTO catalog_content_identities (
+    content_key, content_kind, key_kind, catalog_layer, normalized_name
+  ) VALUES (
+    NEW.content_key, 'species', 'legacy-opaque', 'external',
+    lower(NEW.name)
+  );
+END;
+
+CREATE TRIGGER catalog_register_background_definition_identity_before_insert
+BEFORE INSERT ON background_definitions
+BEGIN
+  SELECT RAISE(ABORT, 'background content key is registered for another kind')
+  WHERE EXISTS (
+    SELECT 1 FROM catalog_content_identities
+    WHERE content_key = NEW.content_key AND content_kind <> 'background'
+  );
+  INSERT OR IGNORE INTO catalog_content_identities (
+    content_key, content_kind, key_kind, catalog_layer, normalized_name
+  ) VALUES (
+    NEW.content_key, 'background', 'legacy-opaque', 'external',
+    lower(NEW.name)
+  );
+END;
+
+CREATE TRIGGER catalog_register_spell_identity_before_insert
+BEFORE INSERT ON spell_versions
+BEGIN
+  SELECT RAISE(ABORT, 'spell content key is registered for another kind')
+  WHERE EXISTS (
+    SELECT 1 FROM catalog_content_identities
+    WHERE content_key = NEW.content_key AND content_kind <> 'spell'
+  );
+  INSERT OR IGNORE INTO catalog_content_identities (
+    content_key, content_kind, key_kind, catalog_layer, normalized_name
+  )
+  SELECT
+    NEW.content_key, 'spell', 'legacy-opaque', 'external',
+    normalized_name
+  FROM spell_identities
+  WHERE id = NEW.spell_identity_id;
+END;
+
+CREATE TRIGGER catalog_register_species_template_identity_before_insert
+BEFORE INSERT ON species_templates
+BEGIN
+  SELECT RAISE(ABORT, 'species content key is registered for another kind')
+  WHERE EXISTS (
+    SELECT 1 FROM catalog_content_identities
+    WHERE content_key = NEW.content_key AND content_kind <> 'species'
+  );
+  INSERT OR IGNORE INTO catalog_content_identities (
+    content_key, content_kind, key_kind, catalog_layer, normalized_name
+  ) VALUES (
+    NEW.content_key, 'species', 'legacy-opaque', 'external', lower(NEW.name)
+  );
+END;
+
+CREATE TRIGGER catalog_register_background_template_identity_before_insert
+BEFORE INSERT ON background_templates
+BEGIN
+  SELECT RAISE(ABORT, 'background content key is registered for another kind')
+  WHERE EXISTS (
+    SELECT 1 FROM catalog_content_identities
+    WHERE content_key = NEW.content_key AND content_kind <> 'background'
+  );
+  INSERT OR IGNORE INTO catalog_content_identities (
+    content_key, content_kind, key_kind, catalog_layer, normalized_name
+  ) VALUES (
+    NEW.content_key, 'background', 'legacy-opaque', 'external', lower(NEW.name)
+  );
+END;
+
+CREATE TRIGGER catalog_register_armor_identity_before_insert
+BEFORE INSERT ON armor_templates
+BEGIN
+  SELECT RAISE(ABORT, 'armor content key is registered for another kind')
+  WHERE EXISTS (
+    SELECT 1 FROM catalog_content_identities
+    WHERE content_key = NEW.content_key AND content_kind <> 'armor'
+  );
+  INSERT OR IGNORE INTO catalog_content_identities (
+    content_key, content_kind, key_kind, catalog_layer, normalized_name
+  ) VALUES (
+    NEW.content_key, 'armor', 'legacy-opaque', 'external', lower(NEW.name)
+  );
+END;
+
+CREATE TRIGGER catalog_register_weapon_identity_before_insert
+BEFORE INSERT ON weapon_templates
+BEGIN
+  SELECT RAISE(ABORT, 'weapon content key is registered for another kind')
+  WHERE EXISTS (
+    SELECT 1 FROM catalog_content_identities
+    WHERE content_key = NEW.content_key AND content_kind <> 'weapon'
+  );
+  INSERT OR IGNORE INTO catalog_content_identities (
+    content_key, content_kind, key_kind, catalog_layer, normalized_name
+  ) VALUES (
+    NEW.content_key, 'weapon', 'legacy-opaque', 'external', lower(NEW.name)
+  );
 END;

@@ -1,6 +1,8 @@
 import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { registerBundledStableContentIdentity } from '../../../src/catalog/content-registry';
 import { DatabaseContext } from '../../../src/db/database';
+import type { ContentKey } from '../../../src/domain/ids';
 import { CharacterListBuilder } from '../../../src/queries/character-list-builder';
 import {
   CharacterWorkspaceBuilder,
@@ -98,6 +100,11 @@ describe('character list and workspace query builders', () => {
        WHERE character_id = ? AND class_definition_id = ?`,
       [subclassId, fixture.characterId, wizardId],
     );
+    registerBundledStableContentIdentity(db, {
+      kind: 'feat',
+      contentKey: '2024:feat:magic-initiate' as ContentKey,
+      normalizedName: 'magicinitiate',
+    });
     db.exec(
       `UPDATE feat_definitions
        SET content_key = '2024:feat:magic-initiate',

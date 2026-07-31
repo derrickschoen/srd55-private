@@ -100,9 +100,9 @@ test('catalog RPC dry-runs, commits atomically, tombstones, and persists across 
         name: 'Conflict A',
       }),
       record({
-        identityKey: 'conflict',
-        versionKey: '2024:conflict-b',
-        name: 'Conflict B',
+        identityKey: 'magic-missile',
+        versionKey: '2024:magic-missile',
+        name: 'Magic Missile',
       }),
     ]),
   ]);
