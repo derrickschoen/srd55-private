@@ -414,3 +414,51 @@
   cursor: not-allowed;
   opacity: 0.5;
 }
+
+.guided-backup-hint {
+  margin-top: 1rem;
+  border: 1px solid var(--accent, #333);
+  border-radius: 0.55rem;
+  padding: 0.85rem;
+}
+
+.guided-backup-hint p {
+  margin: 0;
+}
+
+.guided-backup-hint-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 0.7rem;
+}
+
+.guided-backup-hint-download,
+.guided-backup-hint-dismiss {
+  min-height: 2.4rem;
+  border: 1px solid var(--accent, #333);
+  border-radius: 0.45rem;
+  padding: 0.5rem 0.9rem;
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.guided-backup-hint-download {
+  color: #fff;
+  background: var(--accent, #333);
+}
+
+.guided-backup-hint-dismiss {
+  color: inherit;
+  background: transparent;
+}
+
+.guided-backup-hint-download:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.guided-backup-hint .guided-backup-hint-status {
+  margin-top: 0.6rem;
+}
