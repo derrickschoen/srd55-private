@@ -417,14 +417,15 @@ owner-triggered only.
 ## 7. Owner questions — protocol and queued items
 
 Ask context-rich via AskUserQuestion (terse is for reports, never for
-questions); record answers as D-numbers immediately (prepend; §0). Queued:
-1. At HA-2 dispatch: homebrew publish lifecycle — may an author delete
-   unreferenced published content, and does the fix-review screen get an
-   explicit "apply to all listed characters" action? (Design: no deletion,
-   per-character review only.)
-2. At CI-5 dispatch: D81 export scope — reference closure vs whole local
-   library (the CI design flags its own reading as resting on one word).
-3. When upstream SRD moves (not before): errata semantics — in-place with
+questions); record answers as D-numbers immediately (prepend; §0).
+ANSWERED 2026-07-31 (bake into briefs): D138 — HA fix-review gains
+apply-to-all; homebrew creations deletable INCLUDING with attached
+characters (reconcile with D99 archive-first — taken-for-now: cascade
+archives creation+characters as one restorable set; HA-11 design pins it).
+D139 — character export = own reference closure only; separate
+library-export (whole or selected subset). CI-5 and HA-2/HA-11/HA-12
+briefs MUST carry both as amendments. Queued:
+1. When upstream SRD moves (not before): errata semantics — in-place with
    D95-style notices vs version-pinned coexistence.
 
 ## 8. Trap encyclopedia (every one fired for real; know the signatures)
