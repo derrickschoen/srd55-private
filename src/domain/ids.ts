@@ -87,6 +87,11 @@ export type CharacterSkillProficiencyId = Brand<
  * grant id belongs means the code is about to fill or orphan the wrong table.
  */
 export type CharacterSkillGrantId = Brand<number, 'CharacterSkillGrantId'>;
+/** `character_skill_expertise_grants.id` — one addressable Expertise choice. */
+export type CharacterSkillExpertiseGrantId = Brand<
+  number,
+  'CharacterSkillExpertiseGrantId'
+>;
 export type CharacterSheetAdjustmentId = Brand<
   number,
   'CharacterSheetAdjustmentId'

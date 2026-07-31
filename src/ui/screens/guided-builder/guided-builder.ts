@@ -32,6 +32,8 @@ const STEP_LABELS: Readonly<Record<BuildStep, string>> = {
   species: 'Species',
   background: 'Background',
   skills: 'Skills',
+  expertise: 'Expertise',
+  spells: 'Spells',
   equipment: 'Equipment',
 };
 

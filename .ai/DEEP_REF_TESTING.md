@@ -96,7 +96,7 @@ than copying it from here — it moves every time a table does. `decisions.md`
 
 The same rule with the share format:
 In `tests/unit/sharing/codec.test.ts`, the frozen pre-sheet-inputs wire tuple is
-declared as `PRE_SHEET_WIRE` (`:2022`) and is THIRTEEN elements. Regenerating
+declared as `PRE_SHEET_WIRE` (`:2048`) and is THIRTEEN elements. Regenerating
 that literal from current code would
 make it fourteen, and this guard fails rather than letting the suite quietly
 start testing the new format against itself. (There is an eleven-element suite

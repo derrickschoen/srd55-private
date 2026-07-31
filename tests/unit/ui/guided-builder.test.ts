@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   BACKGROUND_STEP_ATTR,
   MAGIC_INITIATE_FEAT_CONTENT_KEY,
+  SKILLED_FEAT_CONTENT_KEY,
+  type GuidedApplyBackgroundParams,
   type GuidedBackgroundChoiceOptions,
 } from '../../../src/builder/background-choices';
 import {
@@ -455,6 +457,10 @@ describe('guided background step', () => {
         content_key: '2024:feat:lucky',
         name: 'Lucky',
       },
+      {
+        content_key: SKILLED_FEAT_CONTENT_KEY,
+        name: 'Skilled',
+      },
     ],
   };
 
@@ -613,6 +619,62 @@ describe('guided background step', () => {
     expect(elementText(step.element)).not.toMatch(
       /house rule|homebrew|departure/i,
     );
+    step.cleanup();
+  });
+
+  it('records exact Skilled skill ordinals while leaving tool alternatives null', async () => {
+    const submitted: GuidedApplyBackgroundParams[] = [];
+    const step = createBackgroundStep({
+      characterId: 1,
+      options: backgroundChoices,
+      applyBackground: (params) => {
+        submitted.push(params);
+        return Promise.resolve({
+          character_id: 1,
+          current_step: 'skills',
+        });
+      },
+      navigate: () => undefined,
+    });
+    const background = interactiveElement(
+      elementsWithAttribute(
+        step.element,
+        BACKGROUND_STEP_ATTR.option,
+        'test:background:honesty',
+      )[0] as unknown as Node,
+    );
+    background.checked = true;
+    background.dispatchEvent(new Event('change'));
+    const feat = interactiveElement(
+      elementsWithAttribute(
+        step.element,
+        BACKGROUND_STEP_ATTR.feat,
+        '',
+      )[0] as unknown as Node,
+    );
+    feat.value = SKILLED_FEAT_CONTENT_KEY;
+    feat.dispatchEvent(new Event('change'));
+    const choices = elementsWithAttribute(
+      step.element,
+      BACKGROUND_STEP_ATTR.skilledSkill,
+    ).map((choice) => interactiveElement(choice as unknown as Node));
+    expect(choices).toHaveLength(3);
+    choices[0]!.value = 'arcana';
+    choices[0]!.dispatchEvent(new Event('change'));
+    choices[2]!.value = 'stealth';
+    choices[2]!.dispatchEvent(new Event('change'));
+    interactiveElement(
+      elementsWithAttribute(
+        step.element,
+        BACKGROUND_STEP_ATTR.submit,
+        '',
+      )[0] as unknown as Node,
+    ).click();
+    await Promise.resolve();
+
+    expect(submitted[0]?.origin_feat_config).toEqual({
+      selected_skills: ['arcana', null, 'stealth'],
+    });
     step.cleanup();
   });
 });

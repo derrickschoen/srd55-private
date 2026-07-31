@@ -56,6 +56,15 @@ export { GUIDED_SPECIES_SOURCE_MARKER } from '../domain/source-markers';
 import type { CharacterRow } from '../domain/models';
 import { GrantRuleSlotGenerator } from '../grants/grant-rule-slot-generator';
 import {
+  availableSkillsForExpertiseGrant,
+  fillSkillExpertiseGrant,
+  reconcileCharacterSkillExpertise,
+  resolveSkillExpertiseGrants,
+} from '../grants/skill-expertise-grants';
+import { assignSpellSelection } from '../eligibility/spell-selection-assignment';
+import { EligibleSpellSearch } from '../eligibility/eligible-spell-search';
+import { spellSelectionConstraint } from '../eligibility/spell-selection-constraint';
+import {
   classSkillGrantsFilled,
   mintFilledSkillGrants,
   rebuildSkillProjection,
@@ -96,7 +105,6 @@ import { SourceRuleReader } from '../grants/source-rule-reader';
 import {
   countAbilitiesAtLeastPlusTwo,
   EQUIPMENT_CHOICE_CONFIG_KEY,
-  EXPERTISE_AT_LEVEL_ONE_CLASS_CONTENT_KEYS,
   grantsLineageSpells,
   GUIDED_LEVEL_ONE_STEP_ORDER,
   hasWeakScores,
@@ -113,6 +121,12 @@ import {
   type GuidedCreateParams,
   type GuidedFillSkillGrantParams,
   type GuidedFillSkillGrantResult,
+  type GuidedExpertiseStepState,
+  type GuidedFillExpertiseGrantParams,
+  type GuidedAssignSpellParams,
+  type GuidedEligibleSpellsParams,
+  type GuidedEligibleSpellsResult,
+  type GuidedSpellsStepState,
   type GuidedOriginOption,
   type GuidedOriginParams,
   type GuidedRefusalReason,
@@ -169,6 +183,8 @@ export interface GuidedStepEvidence {
   readonly speciesChosen: boolean;
   readonly backgroundChosen: boolean;
   readonly skillsFilled: boolean;
+  readonly expertiseFilled: boolean;
+  readonly spellsFilled: boolean;
   readonly equipmentChosen: boolean;
 }
 
@@ -193,6 +209,8 @@ export function deriveBuildStep(evidence: GuidedStepEvidence): BuildStep {
     species: evidence.speciesChosen,
     background: evidence.backgroundChosen,
     skills: evidence.skillsFilled,
+    expertise: evidence.expertiseFilled,
+    spells: evidence.spellsFilled,
     equipment: evidence.equipmentChosen,
   };
   for (const step of GUIDED_LEVEL_ONE_STEP_ORDER) {
@@ -417,6 +435,33 @@ export function readGuidedStepEvidence(
         (row) => sqlInteger(row, 'id'),
       ) !== null,
     skillsFilled: classSkillGrantsFilled(db, characterId),
+    expertiseFilled:
+      resolveSkillExpertiseGrants(db, characterId).every(
+        (grant) => grant.state !== 'active' || grant.skill !== null,
+      ),
+    spellsFilled:
+      Number(
+        db.scalar(
+          `SELECT (
+             SELECT count(*) FROM spell_selection_slots AS slot
+             INNER JOIN character_source_instances AS source
+               ON source.id = slot.source_instance_id
+              AND source.character_id = slot.character_id
+             WHERE slot.character_id = ? AND source.state = 'active'
+               AND slot.state = 'active' AND slot.is_locked = 0
+               AND slot.fixed_spell_version_id IS NULL
+               AND slot.current_spell_version_id IS NULL
+           ) + (
+             SELECT count(*) FROM wizard_spellbook_entries AS entry
+             INNER JOIN character_source_instances AS source
+               ON source.id = entry.source_instance_id
+              AND source.character_id = entry.character_id
+             WHERE entry.character_id = ? AND source.state = 'active'
+               AND entry.state = 'active' AND entry.spell_version_id IS NULL
+           )`,
+          [characterId, characterId],
+        ) ?? 0,
+      ) === 0,
     equipmentChosen:
       recordedEquipmentChoiceOption(db, characterId, 'class') !== null &&
       recordedEquipmentChoiceOption(db, characterId, 'background') !== null,
@@ -1752,18 +1797,15 @@ export async function allocateGuidedAbilities(
  * planner cannot disagree about what is outstanding (§5's trap is exactly
  * three surfaces with three predicates).
  *
- * THE TWO §3.7 DISCLOSURES ARE COMPUTED HERE, AS DATA:
+ * THE D102 SKILL-OR-TOOL DISCLOSURE IS COMPUTED HERE, AS DATA:
  *
- *  - `unapplied_skill_rule_sources` — every ACTIVE source whose active rules
- *    include a `skill_proficiency` grant rule. S6 proved the Skilled feat
- *    seeds one and the generator explicitly does nothing with it; a guided
- *    player can pick Skilled in the REQUIRED background step and receive
- *    nothing, so the step must name the gap rather than stay silent (D33).
- *    Detection is STRUCTURAL (the rule kind), never feat-name text.
- *  - `expertise_gap` — the character has a class in the seam's
- *    `EXPERTISE_AT_LEVEL_ONE_CLASS_CONTENT_KEYS` (the Rogue): Expertise is a
- *    level-1 choice D54's bar names, this application does not model it, and
- *    the step says so instead of inheriting a sheet footnote.
+ *  - `unmodelled_tool_alternative_sources` — every ACTIVE source with an
+ *    `allows_tool_instead` skill rule whose configured skill selections do
+ *    not occupy every ordinal. Filled skill arms are ordinary durable grant
+ *    rows; missing ordinals are not false owed-skill rows because they may be
+ *    tools, which D102 deliberately leaves unmodelled.
+ * Expertise is no longer a disclosure: GF-2 models it as sourced grant state
+ * in the dedicated step that follows every skill source.
  */
 export function guidedSkillsStepState(
   db: DatabaseContext,
@@ -1826,34 +1868,30 @@ export function guidedSkillsStepState(
     [characterId],
     rowId,
   );
-  const unappliedRuleSources: string[] = [];
+  const unmodelledToolAlternativeSources: string[] = [];
   for (const sourceInstanceId of activeSourceIds) {
-    const hasSkillRule = reader
-      .activeRulesForSource(sourceInstanceId)
-      .some((rule) => rule.kind === GrantRule.SKILL_PROFICIENCY);
-    if (hasSkillRule) {
-      unappliedRuleSources.push(sourceName(sourceInstanceId));
+    for (const rule of reader.activeRulesForSource(sourceInstanceId)) {
+      if (rule.kind !== GrantRule.SKILL_PROFICIENCY) {
+        continue;
+      }
+      const data = rule.toObject() as Readonly<Record<string, unknown>>;
+      if (data['allows_tool_instead'] !== true) {
+        continue;
+      }
+      const recorded = Number(
+        db.scalar(
+          `SELECT count(*) FROM character_skill_grants
+           WHERE source_instance_id = ? AND grant_key = ?
+             AND state = 'active' AND skill IS NOT NULL`,
+          [sourceInstanceId, rule.ruleKey],
+        ),
+      );
+      if (recorded < (rule.count ?? 0)) {
+        unmodelledToolAlternativeSources.push(sourceName(sourceInstanceId));
+        break;
+      }
     }
   }
-
-  const expertiseKeys = [...EXPERTISE_AT_LEVEL_ONE_CLASS_CONTENT_KEYS];
-  const expertiseGap =
-    expertiseKeys.length > 0 &&
-    Number(
-      db.scalar(
-        `SELECT EXISTS (
-           SELECT 1
-           FROM character_class_levels AS level
-           JOIN class_definitions AS definition
-             ON definition.id = level.class_definition_id
-           WHERE level.character_id = ?
-             AND definition.content_key IN (${expertiseKeys
-               .map(() => '?')
-               .join(', ')})
-         )`,
-        [characterId, ...expertiseKeys],
-      ) ?? 0,
-    ) === 1;
 
   return {
     character_id: characterId,
@@ -1861,8 +1899,8 @@ export function guidedSkillsStepState(
     granted,
     class_choices: resolved.unfilledClassGrants,
     species_choices: speciesChoices,
-    unapplied_skill_rule_sources: unappliedRuleSources,
-    expertise_gap: expertiseGap,
+    unmodelled_tool_alternative_sources:
+      unmodelledToolAlternativeSources,
   };
 }
 
@@ -1888,4 +1926,214 @@ export async function fillGuidedSkillGrant(
       readGuidedStepEvidence(db, params.character_id),
     ),
   };
+}
+
+export function guidedExpertiseStepState(
+  db: DatabaseContext,
+  characterId: number,
+): GuidedExpertiseStepState {
+  reconcileCharacterSkillExpertise(db, characterId);
+  const revision = Number(
+    db.scalar('SELECT revision FROM characters WHERE id = ?', [characterId]),
+  );
+  const choices = resolveSkillExpertiseGrants(db, characterId)
+    .filter((grant) => grant.state === 'active' && grant.skill === null)
+    .map((grant) => {
+      const sourceName =
+        db.scalar<string>(
+          `SELECT display_name FROM character_source_instances WHERE id = ?`,
+          [grant.source_instance_id],
+        ) ?? 'Unknown source';
+      return {
+        grant_id: grant.id,
+        source_name: String(sourceName),
+        ordinal: grant.ordinal,
+        available: availableSkillsForExpertiseGrant(
+          db,
+          characterId,
+          grant,
+        ),
+      };
+    });
+  return { character_id: characterId, revision, choices };
+}
+
+export function fillGuidedExpertiseGrant(
+  db: DatabaseContext,
+  params: GuidedFillExpertiseGrantParams,
+): { readonly character_id: number; readonly current_step: BuildStep } {
+  db.transaction(() => {
+    const revision = Number(
+      db.scalar('SELECT revision FROM characters WHERE id = ?', [
+        params.character_id,
+      ]),
+    );
+    if (revision !== params.expected_revision) {
+      throw new Error('The character changed; reload this Expertise step.');
+    }
+    fillSkillExpertiseGrant(
+      db,
+      params.character_id,
+      params.grant_id,
+      params.skill,
+    );
+    db.exec(
+      `UPDATE characters SET revision = revision + 1, updated_at = ?
+       WHERE id = ?`,
+      [new Date().toISOString(), params.character_id],
+    );
+  });
+  return {
+    character_id: params.character_id,
+    current_step: deriveBuildStep(
+      readGuidedStepEvidence(db, params.character_id),
+    ),
+  };
+}
+
+export function guidedSpellsStepState(
+  db: DatabaseContext,
+  characterId: number,
+): GuidedSpellsStepState {
+  const revision = Number(
+    db.scalar('SELECT revision FROM characters WHERE id = ?', [characterId]),
+  );
+  const slots = db.all(
+    `SELECT slot.id, COALESCE(slot.label, slot.rule_key) AS label
+     FROM spell_selection_slots AS slot
+     INNER JOIN character_source_instances AS source
+       ON source.id = slot.source_instance_id
+      AND source.character_id = slot.character_id
+     WHERE slot.character_id = ? AND source.state = 'active'
+       AND slot.state = 'active' AND slot.is_locked = 0
+       AND slot.fixed_spell_version_id IS NULL
+       AND slot.current_spell_version_id IS NULL
+     ORDER BY source.id, slot.sort_order, slot.ordinal`,
+    [characterId],
+    (row) => ({
+      kind: 'slot_selection' as const,
+      id: sqlInteger(row, 'id'),
+      label: sqlString(row, 'label'),
+    }),
+  );
+  const acquisitions = db.all(
+    `SELECT entry.id,
+            'Wizard spellbook spell ' || entry.ordinal AS label
+     FROM wizard_spellbook_entries AS entry
+     INNER JOIN character_source_instances AS source
+       ON source.id = entry.source_instance_id
+      AND source.character_id = entry.character_id
+     WHERE entry.character_id = ? AND source.state = 'active'
+       AND entry.state = 'active' AND entry.spell_version_id IS NULL
+     ORDER BY source.id, entry.ordinal`,
+    [characterId],
+    (row) => ({
+      kind: 'spellbook_acquisition' as const,
+      id: sqlInteger(row, 'id'),
+      label: sqlString(row, 'label'),
+    }),
+  );
+  return {
+    character_id: characterId,
+    revision,
+    choices: [...slots, ...acquisitions],
+  };
+}
+
+export function assignGuidedSpell(
+  db: DatabaseContext,
+  params: GuidedAssignSpellParams,
+): { readonly character_id: number; readonly current_step: BuildStep } {
+  db.transaction(() => {
+    const revision = Number(
+      db.scalar('SELECT revision FROM characters WHERE id = ?', [
+        params.character_id,
+      ]),
+    );
+    if (revision !== params.expected_revision) {
+      throw new Error('The character changed; reload this spell step.');
+    }
+    if (params.address.kind === 'slot_selection') {
+      assignSpellSelection(db, {
+        address: { kind: 'slot_selection', id: params.address.id },
+        character_id: params.character_id,
+        spell_version_id: params.spell_version_id,
+      });
+    } else {
+      assignSpellSelection(db, {
+        address: {
+          kind: 'spellbook_acquisition',
+          id: params.address.id,
+        },
+        character_id: params.character_id,
+        spell_version_id: params.spell_version_id,
+      });
+    }
+    db.exec(
+      `UPDATE characters SET revision = revision + 1, updated_at = ?
+       WHERE id = ?`,
+      [new Date().toISOString(), params.character_id],
+    );
+  });
+  return {
+    character_id: params.character_id,
+    current_step: deriveBuildStep(
+      readGuidedStepEvidence(db, params.character_id),
+    ),
+  };
+}
+
+export function guidedEligibleSpells(
+  db: DatabaseContext,
+  params: GuidedEligibleSpellsParams,
+): GuidedEligibleSpellsResult {
+  const table =
+    params.address.kind === 'slot_selection'
+      ? 'spell_selection_slots'
+      : 'wizard_spellbook_entries';
+  const row = db.oneRaw(
+    `SELECT spell_level_min, spell_level_max, allowed_spell_lists,
+            allowed_schools, allowed_tags,
+            ${params.address.kind === 'slot_selection' ? 'selection_collection' : 'NULL AS selection_collection'}
+     FROM ${table}
+     WHERE id = ? AND character_id = ?`,
+    [params.address.id, params.character_id],
+  );
+  if (row === null) {
+    throw new Error('That guided spell choice no longer exists.');
+  }
+  const eligible = new EligibleSpellSearch(db).searchConstraint(
+    params.character_id,
+    spellSelectionConstraint({
+      spell_level_min: Number(row.spell_level_min),
+      spell_level_max: Number(row.spell_level_max),
+      allowed_spell_lists:
+        row.allowed_spell_lists === null
+          ? null
+          : String(row.allowed_spell_lists),
+      allowed_schools:
+        row.allowed_schools === null ? null : String(row.allowed_schools),
+      allowed_tags:
+        row.allowed_tags === null ? null : String(row.allowed_tags),
+      selection_collection:
+        row.selection_collection === null
+          ? null
+          : String(row.selection_collection),
+    }),
+    params.query,
+  );
+  if (params.address.kind === 'slot_selection') {
+    return eligible;
+  }
+  const held = new Set(
+    db.all(
+      `SELECT spell_version_id
+       FROM wizard_spellbook_entries
+       WHERE character_id = ? AND state = 'active'
+         AND spell_version_id IS NOT NULL AND id <> ?`,
+      [params.character_id, params.address.id],
+      (candidate) => sqlInteger(candidate, 'spell_version_id'),
+    ),
+  );
+  return eligible.filter((spell) => !held.has(spell.id));
 }

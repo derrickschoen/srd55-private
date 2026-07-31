@@ -21,6 +21,7 @@ import {
 } from '../domain/contracts/tables';
 import { GrantRuleSlotGenerator } from '../grants/grant-rule-slot-generator';
 import { rebuildSkillProjection } from '../grants/skill-grants';
+import { reconcileCharacterSkillExpertise } from '../grants/skill-expertise-grants';
 import { SpellSelectionEligibility } from '../eligibility/spell-selection-eligibility';
 import {
   CHARACTER_SHARE_FORMAT,
@@ -1132,6 +1133,30 @@ export function exportCharacterShare(
         },
       ];
     });
+  const expertiseGrants = db
+    .allRaw(
+      `SELECT * FROM ${SHARE_TABLES.character_skill_expertise_grants}
+       WHERE character_id = ? AND state = 'active'
+       ORDER BY source_instance_id, grant_key, ordinal, id`,
+      [characterId],
+    )
+    .flatMap((row) => {
+      const ref = owners.get(Number(row.source_instance_id))?.ref;
+      if (ref === undefined) {
+        return [];
+      }
+      return [
+        {
+          ref,
+          grantKey: String(row.grant_key),
+          ordinal: Number(row.ordinal),
+          grantedAtClassLevel: Number(row.granted_at_class_level),
+          ...(row.skill === null || row.skill === undefined
+            ? {}
+            : { skill: String(row.skill) }),
+        },
+      ];
+    });
   const sharedSpellKeys = new Set([
     ...selections.map((selection) => selection.spellKey),
     ...spellbook.flatMap((acquisition) =>
@@ -1239,6 +1264,7 @@ export function exportCharacterShare(
     // effect model existed.
     ...(effects.length === 0 ? {} : { effects }),
     ...(skillGrants.length === 0 ? {} : { skillGrants }),
+    ...(expertiseGrants.length === 0 ? {} : { expertiseGrants }),
     ...(items.length === 0 ? {} : { items }),
     ...(attunementSlots === undefined ||
     attunementSlots.every((slot) => slot === null)
@@ -1777,6 +1803,57 @@ export function importCharacterShare(
           roots[0] as number,
           grant.grantKey,
           grant.ordinal,
+          grant.skill ?? null,
+          now,
+          now,
+        ],
+      );
+    }
+    for (const grant of document.expertiseGrants ?? []) {
+      const roots = rootsByRef.get(grant.ref);
+      if (roots === undefined) {
+        throw new ShareValidationError(
+          `expertise grant ref ${grant.ref} is unavailable.`,
+        );
+      }
+      const sourceIds = [...descendants(roots)];
+      const minted = db.allRaw(
+        `SELECT id FROM ${SHARE_TABLES.character_skill_expertise_grants}
+         WHERE character_id = ? AND grant_key = ? AND ordinal = ?
+           AND source_instance_id IN (${sourceIds.map(() => '?').join(', ')})
+         ORDER BY id`,
+        [characterId, grant.grantKey, grant.ordinal, ...sourceIds],
+      );
+      if (minted.length > 1) {
+        throw new ShareValidationError(
+          `expertise grant ${grant.grantKey} #${grant.ordinal} is ambiguous.`,
+        );
+      }
+      if (minted.length === 1) {
+        db.exec(
+          `UPDATE ${SHARE_TABLES.character_skill_expertise_grants}
+           SET skill = ?, granted_at_class_level = ?, updated_at = ?
+           WHERE id = ?`,
+          [
+            grant.skill ?? null,
+            grant.grantedAtClassLevel,
+            now,
+            Number((minted[0] as Row).id),
+          ],
+        );
+        continue;
+      }
+      db.exec(
+        `INSERT INTO ${SHARE_TABLES.character_skill_expertise_grants} (
+           character_id, source_instance_id, grant_key, ordinal,
+           granted_at_class_level, skill, state, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
+        [
+          characterId,
+          roots[0] as number,
+          grant.grantKey,
+          grant.ordinal,
+          grant.grantedAtClassLevel,
           grant.skill ?? null,
           now,
           now,
@@ -2360,6 +2437,7 @@ export function importCharacterShare(
     if ((document.skillGrants ?? []).length > 0) {
       rebuildSkillProjection(db, characterId);
     }
+    reconcileCharacterSkillExpertise(db, characterId);
     return { characterId };
   });
 }

@@ -422,6 +422,14 @@ export const TABLE_SCOPES = {
     share: true,
     backupReference: false,
   },
+  character_skill_expertise_grants: {
+    role: 'character_owned',
+    snapshot: true,
+    backupDirect: true,
+    backup: true,
+    share: true,
+    backupReference: false,
+  },
   character_sheet_adjustments: {
     role: 'character_owned',
     snapshot: true,
@@ -1220,6 +1228,7 @@ export const APPLICATION_TABLES = order<AnyTableName>()([
   'character_save_points',
   'character_sheet_adjustments',
   'character_skill_grants',
+  'character_skill_expertise_grants',
   'character_skill_proficiencies',
   'character_source_instances',
   'character_species',
@@ -1308,6 +1317,7 @@ export const CHARACTER_STATE_TABLES = order<SnapshotTable>()([
   // last because it references `character_source_instances` (composite key),
   // which the existing order already inserts before this on restore.
   'character_skill_grants',
+  'character_skill_expertise_grants',
   // Appended, never inserted, for the sixth time and the same reason
   // (AC-1, D72). It sits last for the identical reason `character_skill_grants`
   // does: it references `character_source_instances` (composite key), which
@@ -1339,6 +1349,7 @@ export const CHARACTER_STATE_INSERT_ORDER = order<SnapshotTable>()([
   'character_skill_proficiencies',
   'character_sheet_adjustments',
   'character_skill_grants',
+  'character_skill_expertise_grants',
   'character_items',
   'character_attunement_slots',
   'character_effects',
@@ -1375,6 +1386,7 @@ export const DELETE_ORDER = order<SnapshotTable>()([
   // references `character_source_instances` through the same composite key, so
   // it must be deleted before that table — which this position guarantees.
   'character_skill_grants',
+  'character_skill_expertise_grants',
   // Leaves too. `character_species_traits` is keyed on `character_id` and NOT
   // on `character_species.id` — see `db/schema/origins.ts` — so there is no
   // parent-before-child edge between the two and the order between them is
@@ -1410,6 +1422,7 @@ export const BACKUP_DIRECT_TABLES = order<BackupDirectTable>()([
   'character_sheet_adjustments',
   'character_effects',
   'character_skill_grants',
+  'character_skill_expertise_grants',
   'character_items',
   'character_attunement_slots',
 ]);
@@ -1463,6 +1476,7 @@ export const BACKUP_OPTIONAL_TABLES = [
   // restored as-is rather than being reconciled against grants that were
   // never recorded (plan §3.2).
   'character_skill_grants',
+  'character_skill_expertise_grants',
   // The character's own items (AC-1, D72). Every backup file a user already
   // holds predates the table, and `[]` is the honest reading of one: no
   // character owned an item before this unit, so there is nothing lost by
@@ -1524,6 +1538,7 @@ export const SHARE_TABLES: { readonly [N in ShareTable]: N } = {
   character_hit_point_rolls: 'character_hit_point_rolls',
   character_skill_proficiencies: 'character_skill_proficiencies',
   character_skill_grants: 'character_skill_grants',
+  character_skill_expertise_grants: 'character_skill_expertise_grants',
   character_effects: 'character_effects',
   character_items: 'character_items',
   character_attunement_slots: 'character_attunement_slots',
@@ -1597,6 +1612,7 @@ export const AUDIT_ENTITY_TYPES = [
   // Added on the same terms once more: the grants table is snapshot-scoped, so
   // `CharacterState.diff` emits a change per grant row.
   'character_skill_grants',
+  'character_skill_expertise_grants',
   // Added on the same terms once more (AC-1, D72): the items table is
   // snapshot-scoped, so `CharacterState.diff` emits a change per item row.
   'character_items',

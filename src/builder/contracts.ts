@@ -20,6 +20,7 @@ import type {
   Skill,
   SkillGrantState,
 } from '../domain/enums';
+import type { EligibleSpell } from '../domain/read-models';
 // From the EXTRACT-FREE module, never `origins-srd` (which imports the SRD
 // text via Vite's `?raw`): the seam is loaded by node-side test processes
 // through the command layer, and a `?raw` in its closure breaks their
@@ -46,6 +47,8 @@ export type BuildStep =
   | 'species'
   | 'background'
   | 'skills'
+  | 'expertise'
+  | 'spells'
   | 'equipment';
 
 export const GUIDED_LEVEL_ONE_STEP_ORDER: readonly BuildStep[] = Object.freeze([
@@ -54,6 +57,8 @@ export const GUIDED_LEVEL_ONE_STEP_ORDER: readonly BuildStep[] = Object.freeze([
   'species',
   'background',
   'skills',
+  'expertise',
+  'spells',
   'equipment',
 ]);
 
@@ -342,6 +347,8 @@ export const GUIDED_PANEL = Object.freeze({
   abilitiesStep: 'abilities-step',
   /** The skills step (S-C, skills-with-provenance §3.6). */
   skillsStep: 'skills-step',
+  expertiseStep: 'expertise-step',
+  spellsStep: 'spells-step',
 } as const);
 
 /** The attribute the panels above are selected by: `data-panel="…"`. */
@@ -373,6 +380,11 @@ export const GUIDED_RPC = Object.freeze({
   fillSkillGrant: 'queries.characters.fillSkillGrant',
   /** The skills step's read (S-C): everything the step renders, in one query. */
   skillsStep: 'queries.characters.skillsStep',
+  expertiseStep: 'queries.characters.expertiseStep',
+  fillExpertiseGrant: 'queries.characters.fillExpertiseGrant',
+  spellsStep: 'queries.characters.spellsStep',
+  guidedEligibleSpells: 'queries.characters.guidedEligibleSpells',
+  assignSpell: 'queries.characters.assignGuidedSpell',
 } as const);
 
 /* --------------------------------------------------------------- abilities */
@@ -918,9 +930,7 @@ export const SKILL_STEP_ATTR = Object.freeze({
   /** The clear button on a clearable filled grant; the value is the grant id. */
   clear: 'data-skill-clear',
   /** The §3.7 Skilled-feat disclosure: skill grants the app does not apply. */
-  skilledFeatGap: 'data-skill-gap-unapplied-rule',
-  /** The §3.7 Expertise disclosure for a level-1 Rogue. */
-  expertiseGap: 'data-skill-gap-expertise',
+  toolAlternativeGap: 'data-skill-gap-tool-alternative',
 } as const);
 
 /**
@@ -932,11 +942,6 @@ export const SKILL_STEP_ATTR = Object.freeze({
  * agents invent two lists. Reviewed by eye against
  * `docs/srd/source/`'s Rogue and Bard core traits.
  */
-export const EXPERTISE_AT_LEVEL_ONE_CLASS_CONTENT_KEYS: ReadonlySet<string> =
-  Object.freeze(
-    new Set([`${BUNDLED_ORIGIN_RULES_EDITION}:class:rogue`]),
-  ) as ReadonlySet<string>;
-
 /** One FILLED active grant, as the step's already-granted display shows it. */
 export interface GuidedGrantedSkillDisplay {
   readonly grant_id: number;
@@ -967,11 +972,9 @@ export interface GuidedSpeciesSkillChoice {
  * `expected_revision`, and the step re-derives after each successful write —
  * the same read-then-command shape the abilities step uses.
  *
- * The two §3.7 gaps are DATA here, never inferred in the UI:
- * `unapplied_skill_rule_sources` names every ACTIVE source whose definition
- * carries a `skill_proficiency` grant rule nothing consumes (the Skilled
- * feat, S6), and `expertise_gap` is true for the
- * `EXPERTISE_AT_LEVEL_ONE_CLASS_CONTENT_KEYS` population.
+ * D102's skill-or-tool boundary is DATA here, never inferred in the UI:
+ * `unmodelled_tool_alternative_sources` names ACTIVE sources with at least
+ * one tool-capable ordinal that has no recorded skill arm.
  */
 export interface GuidedSkillsStepState {
   readonly character_id: number;
@@ -979,9 +982,63 @@ export interface GuidedSkillsStepState {
   readonly granted: readonly GuidedGrantedSkillDisplay[];
   readonly class_choices: readonly UnfilledClassSkillGrant[];
   readonly species_choices: readonly GuidedSpeciesSkillChoice[];
-  readonly unapplied_skill_rule_sources: readonly string[];
-  readonly expertise_gap: boolean;
+  readonly unmodelled_tool_alternative_sources: readonly string[];
 }
+
+export interface GuidedExpertiseChoice {
+  readonly grant_id: number;
+  readonly source_name: string;
+  readonly ordinal: number;
+  readonly available: readonly Skill[];
+}
+
+export interface GuidedExpertiseStepState {
+  readonly character_id: number;
+  readonly revision: number;
+  readonly choices: readonly GuidedExpertiseChoice[];
+}
+
+export interface GuidedFillExpertiseGrantParams {
+  readonly character_id: number;
+  readonly grant_id: number;
+  readonly skill: Skill | null;
+  readonly operation_uuid: string;
+  readonly expected_revision: number;
+}
+
+export interface GuidedSpellChoice {
+  readonly kind: 'slot_selection' | 'spellbook_acquisition';
+  readonly id: number;
+  readonly label: string;
+}
+
+export interface GuidedSpellsStepState {
+  readonly character_id: number;
+  readonly revision: number;
+  readonly choices: readonly GuidedSpellChoice[];
+}
+
+export interface GuidedAssignSpellParams {
+  readonly character_id: number;
+  readonly address: {
+    readonly kind: 'slot_selection' | 'spellbook_acquisition';
+    readonly id: number;
+  };
+  readonly spell_version_id: number;
+  readonly operation_uuid: string;
+  readonly expected_revision: number;
+}
+
+export interface GuidedEligibleSpellsParams {
+  readonly character_id: number;
+  readonly address: {
+    readonly kind: 'slot_selection' | 'spellbook_acquisition';
+    readonly id: number;
+  };
+  readonly query: string;
+}
+
+export type GuidedEligibleSpellsResult = readonly EligibleSpell[];
 
 /* --------------------------------- starting equipment (E-A, offered for ratification) */
 

@@ -221,6 +221,7 @@ describe('candidate database semantic audit', () => {
       'character_rule_overrides',
       'character_save_points',
       'character_sheet_adjustments',
+      'character_skill_expertise_grants',
       'character_skill_grants',
       'character_skill_proficiencies',
       'character_source_instances',
@@ -785,7 +786,7 @@ describe('candidate database semantic audit', () => {
     ).not.toThrow();
   });
 
-  it('audits and restores ability_override in the current a7-v13 snapshot shape', () => {
+  it('audits and restores ability_override in the current a7-v14 snapshot shape', () => {
     const db = freshDatabase();
     seedTwoCharacters(db);
     db.exec(
@@ -798,7 +799,7 @@ describe('candidate database semantic audit', () => {
        )`,
     );
     const snapshot = snapshotOf(db, 1);
-    expect(snapshot.schema_version).toBe('a7-v13');
+    expect(snapshot.schema_version).toBe('a7-v14');
     insertSavePoint(db, 1, snapshot);
 
     expect(() => auditCandidateDatabase(quarantined(bytesOf(db)))).not.toThrow();

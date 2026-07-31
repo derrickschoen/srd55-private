@@ -629,6 +629,14 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
     text: ['grant_key', 'skill', 'state', 'orphan_reason_code'],
     numeric: ['orphaned_at', 'created_at', 'updated_at'],
   },
+  character_skill_expertise_grants: {
+    integer: [
+      'id', 'character_id', 'source_instance_id', 'ordinal',
+      'granted_at_class_level',
+    ],
+    text: ['grant_key', 'skill', 'state', 'orphan_reason_code'],
+    numeric: ['orphaned_at', 'created_at', 'updated_at'],
+  },
   character_sheet_adjustments: {
     integer: ['id', 'character_id'],
     numeric: ['created_at', 'updated_at'],
@@ -776,6 +784,10 @@ const expectedNotNull: Record<string, string[]> = {
   character_skill_grants: [
     'id', 'character_id', 'source_instance_id', 'grant_key', 'ordinal',
     'state',
+  ],
+  character_skill_expertise_grants: [
+    'id', 'character_id', 'source_instance_id', 'grant_key', 'ordinal',
+    'granted_at_class_level', 'state',
   ],
   character_sheet_adjustments: [
     'id', 'character_id',
@@ -977,6 +989,12 @@ const expectedNamedIndexes: Record<string, string> = {
     'character_skill_grants:character_id,skill:unique',
   character_skill_grants_character_id_state_index:
     'character_skill_grants:character_id,state',
+  character_skill_expertise_grants_source_grant_ordinal_unique:
+    'character_skill_expertise_grants:source_instance_id,grant_key,ordinal:unique',
+  character_skill_expertise_grants_character_skill_unique:
+    'character_skill_expertise_grants:character_id,skill:unique',
+  character_skill_expertise_grants_character_state_index:
+    'character_skill_expertise_grants:character_id,state',
   character_sheet_adjustments_character_id_unique:
     'character_sheet_adjustments:character_id:unique',
   // --- SHEET CORE (D11/D12) -----------------------------------------------
@@ -1126,6 +1144,9 @@ const expectedUniqueGroups: Record<string, string[]> = {
   character_skill_grants: [
     'source_instance_id,grant_key,ordinal', 'character_id,skill',
   ],
+  character_skill_expertise_grants: [
+    'source_instance_id,grant_key,ordinal', 'character_id,skill',
+  ],
   character_sheet_adjustments: ['character_id'],
   // Sheet core. The set tables are keyed on (class, member) so a class cannot
   // hold the same saving throw, skill or category twice; the two progressions
@@ -1207,6 +1228,7 @@ const expectedDefaults: Record<string, Record<string, string>> = {
   change_log: { reversible: 'true' },
   character_class_levels: { is_starting_class: 'false', level: '1' },
   character_skill_grants: { state: "'active'" },
+  character_skill_expertise_grants: { state: "'active'" },
   character_source_instances: { state: "'active'" },
   character_spell_preferences: { favourite: 'false' },
   characters: {
@@ -1496,6 +1518,10 @@ const expectedForeignKeys: Record<string, string[]> = {
   // TWO edges, on `character_effects`' terms: the composite one is what stops
   // a grant being attached to another character's source instance.
   character_skill_grants: [
+    'character_id->characters.id|CASCADE',
+    'source_instance_id,character_id->character_source_instances.id,character_id|CASCADE',
+  ],
+  character_skill_expertise_grants: [
     'character_id->characters.id|CASCADE',
     'source_instance_id,character_id->character_source_instances.id,character_id|CASCADE',
   ],

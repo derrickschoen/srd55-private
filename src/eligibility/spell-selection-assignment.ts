@@ -210,6 +210,21 @@ export function assignSpellSelection(
     return;
   }
 
+  const duplicate = db.scalar<number>(
+    `SELECT id FROM wizard_spellbook_entries
+     WHERE character_id = ? AND spell_version_id = ?
+       AND state = 'active' AND id <> ?
+     LIMIT 1`,
+    [
+      input.character_id,
+      input.spell_version_id,
+      input.address.id,
+    ],
+  );
+  if (duplicate !== null) {
+    throw new Error('That spell is already in this character’s spellbook.');
+  }
+
   db.exec(
     `UPDATE wizard_spellbook_entries
      SET spell_version_id = ?,

@@ -10,6 +10,7 @@ import {
 import { sql } from 'drizzle-orm';
 import type {
   CharacterId,
+  CharacterSkillExpertiseGrantId,
   CharacterSkillGrantId,
   ClassDefinitionId,
   SlotId,
@@ -576,6 +577,74 @@ export const character_skill_grants = sqliteTable(
       table.character_id,
       table.state,
     ),
+  ],
+);
+
+/**
+ * One sourced Expertise choice. The nullable skill is the owed choice; an
+ * orphaned row retains the selection and provenance so removing the last
+ * underlying proficiency never silently discards what the person chose.
+ */
+export const character_skill_expertise_grants = sqliteTable(
+  'character_skill_expertise_grants',
+  {
+    id: integer('id')
+      .primaryKey({ autoIncrement: true })
+      .notNull()
+      .$type<CharacterSkillExpertiseGrantId>(),
+    character_id: integer('character_id')
+      .notNull()
+      .$type<CharacterId>()
+      .references(() => characters.id, { onDelete: 'cascade' }),
+    source_instance_id: integer('source_instance_id')
+      .notNull()
+      .$type<SourceInstanceId>(),
+    grant_key: varchar()('grant_key').notNull(),
+    ordinal: integer('ordinal').notNull(),
+    granted_at_class_level: integer('granted_at_class_level').notNull(),
+    skill: varchar<Skill>()('skill'),
+    state: varchar<SkillGrantState>()('state').notNull().default('active'),
+    orphan_reason_code: varchar()('orphan_reason_code'),
+    orphaned_at: datetime()('orphaned_at'),
+    created_at: datetime()('created_at'),
+    updated_at: datetime()('updated_at'),
+  },
+  (table) => [
+    check(
+      'character_skill_expertise_grants_skill_check',
+      nullOrOneOf('skill', skills),
+    ),
+    check(
+      'character_skill_expertise_grants_state_check',
+      oneOf('state', skillGrantStates),
+    ),
+    check(
+      'character_skill_expertise_grants_ordinal_check',
+      integerAtLeast('ordinal', 1),
+    ),
+    check(
+      'character_skill_expertise_grants_level_check',
+      sql`typeof(granted_at_class_level) = 'integer'
+        AND granted_at_class_level BETWEEN 1 AND 20`,
+    ),
+    foreignKey({
+      columns: [table.source_instance_id, table.character_id],
+      foreignColumns: [
+        character_source_instances.id,
+        character_source_instances.character_id,
+      ],
+    }).onDelete('cascade'),
+    uniqueIndex(
+      'character_skill_expertise_grants_source_grant_ordinal_unique',
+    ).on(table.source_instance_id, table.grant_key, table.ordinal),
+    uniqueIndex(
+      'character_skill_expertise_grants_character_skill_unique',
+    )
+      .on(table.character_id, table.skill)
+      .where(sql`skill IS NOT NULL AND state = 'active'`),
+    index(
+      'character_skill_expertise_grants_character_state_index',
+    ).on(table.character_id, table.state),
   ],
 );
 

@@ -11,6 +11,8 @@ describe('deriveBuildStep', () => {
         speciesChosen: false,
         backgroundChosen: false,
         skillsFilled: false,
+        expertiseFilled: false,
+        spellsFilled: false,
         equipmentChosen: false,
       }),
     ).toBe(
@@ -26,6 +28,8 @@ describe('deriveBuildStep', () => {
         speciesChosen: false,
         backgroundChosen: false,
         skillsFilled: false,
+        expertiseFilled: false,
+        spellsFilled: false,
         equipmentChosen: false,
       }),
     ).toBe(
@@ -41,6 +45,8 @@ describe('deriveBuildStep', () => {
         speciesChosen: true,
         backgroundChosen: false,
         skillsFilled: false,
+        expertiseFilled: false,
+        spellsFilled: false,
         equipmentChosen: false,
       }),
     ).toBe(
@@ -56,6 +62,8 @@ describe('deriveBuildStep', () => {
         speciesChosen: true,
         backgroundChosen: true,
         skillsFilled: false,
+        expertiseFilled: false,
+        spellsFilled: false,
         equipmentChosen: false,
       }),
     ).toBe(
@@ -63,7 +71,7 @@ describe('deriveBuildStep', () => {
     );
   });
 
-  it('selects equipment once every class skill ordinal is filled (S-C)', () => {
+  it('refuses expertise until every skill source is complete, then selects it (D90)', () => {
     // The `skills: false` literal is DELETED, not reworded: the evidence
     // field is the per-grant predicate, so a fully-filled character rests on
     // the equipment step rather than being pinned to skills forever.
@@ -74,10 +82,29 @@ describe('deriveBuildStep', () => {
         speciesChosen: true,
         backgroundChosen: true,
         skillsFilled: true,
+        expertiseFilled: false,
+        spellsFilled: false,
         equipmentChosen: false,
       }),
     ).toBe(
       GUIDED_LEVEL_ONE_STEP_ORDER[5],
+    );
+  });
+
+  it('selects spells after expertise and before equipment (D87)', () => {
+    expect(
+      deriveBuildStep({
+        classChosen: true,
+        abilitiesAllocated: true,
+        speciesChosen: true,
+        backgroundChosen: true,
+        skillsFilled: true,
+        expertiseFilled: true,
+        spellsFilled: false,
+        equipmentChosen: false,
+      }),
+    ).toBe(
+      GUIDED_LEVEL_ONE_STEP_ORDER[6],
     );
   });
 
@@ -93,10 +120,12 @@ describe('deriveBuildStep', () => {
         speciesChosen: true,
         backgroundChosen: true,
         skillsFilled: true,
+        expertiseFilled: true,
+        spellsFilled: true,
         equipmentChosen: true,
       }),
     ).toBe(
-      GUIDED_LEVEL_ONE_STEP_ORDER[5],
+      GUIDED_LEVEL_ONE_STEP_ORDER[7],
     );
   });
 
@@ -110,6 +139,8 @@ describe('deriveBuildStep', () => {
         speciesChosen: true,
         backgroundChosen: true,
         skillsFilled: false,
+        expertiseFilled: true,
+        spellsFilled: true,
         equipmentChosen: true,
       }),
     ).toBe(

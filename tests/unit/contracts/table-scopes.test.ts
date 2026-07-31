@@ -68,6 +68,7 @@ const SNAPSHOT_ADDITIONS = [
   // of (skills plan, S-A). Snapshot-scoped so undo restores a grant WITH its
   // lifecycle state.
   'character_skill_grants',
+  'character_skill_expertise_grants',
   // The character's own items (AC-1, D72): things that only modify, speaking
   // through `character_effects` rather than carrying their own columns.
   'character_items',
@@ -85,6 +86,7 @@ const BACKUP_DIRECT_ADDITIONS = [
   'character_sheet_adjustments',
   'character_effects',
   'character_skill_grants',
+  'character_skill_expertise_grants',
   'character_items',
   'character_attunement_slots',
 ] as const;
@@ -119,6 +121,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       'character_save_points',
       'character_sheet_adjustments',
       'character_skill_grants',
+      'character_skill_expertise_grants',
       'character_skill_proficiencies',
       'character_source_instances',
       'character_species',
@@ -207,6 +210,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       // references `character_source_instances` through the same composite
       // key, so it deletes here with the other leaves.
       'character_skill_grants',
+      'character_skill_expertise_grants',
       'character_species_traits',
       'character_species',
       'character_background',
@@ -274,6 +278,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       'character_sheet_adjustments',
       'character_effects',
       'character_skill_grants',
+      'character_skill_expertise_grants',
       'character_items',
       'character_attunement_slots',
     ]);
@@ -330,14 +335,15 @@ describe('table scope classification', () => {
     // progression-ladder tables the spell catalog gained,
     // `spell_version_upcast_levels` (slot levels) and
     // `spell_version_cantrip_upgrade_levels` (character levels), the ONE
-    // skills-with-provenance table, `character_skill_grants` (S-A), and the
+    // skills-with-provenance table, `character_skill_grants` (S-A), GF-2's
+    // ONE Expertise grant table, and the
     // ONE items table, `character_items` (AC-1, D72), and D92's ONE
     // fixed-capacity attunement table, plus CI-2a's FOUR catalog registry
     // tables and CI-2b's ONE applied data-migration marker table. Each group is named
     // rather than folded into one total, so a group that vanishes while
     // another grows cannot pass unnoticed.
-    expect(names).toHaveLength(71);
-    expect(new Set(names).size).toBe(71);
+    expect(names).toHaveLength(72);
+    expect(new Set(names).size).toBe(72);
     expect([...names].sort()).toEqual([...APPLICATION_TABLES].sort());
   });
 

@@ -384,14 +384,12 @@ test('the sheet prints the derived numbers, and prints what it lacks', async ({
   // before that, since E-B added `gear_not_itemised` (D65: only a package's
   // weapons and armour are tracked; gear renders from the rules and no gold
   // is granted). D102 makes this fixture SIX again because its background
-  // carries printed tool-proficiency text.
-  await expect(page.locator('[data-sheet-id^="gap:"]')).toHaveCount(6);
+  // carries printed tool-proficiency text. GF-2 deletes the obsolete
+  // no-expertise disclosure, leaving five honest gaps.
+  await expect(page.locator('[data-sheet-id^="gap:"]')).toHaveCount(5);
   await expect(
     page.locator('[data-sheet-id="gap:no_unarmored_defense"]'),
   ).toHaveCount(0);
-  await expect(
-    page.locator('[data-sheet-id="gap:no_expertise"]'),
-  ).toContainText('Expertise');
   await expect(
     page.locator('[data-sheet-id="gap:gear_not_itemised"]'),
   ).toContainText('not tracked individually');

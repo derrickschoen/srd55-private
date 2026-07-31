@@ -11,6 +11,7 @@ import {
   resolveSkillGrants,
   unfilledSpeciesSkillGrants,
 } from '../grants/skill-grants';
+import { resolveSkillExpertiseGrants } from '../grants/skill-expertise-grants';
 import { EligibleSpellSearch } from '../eligibility/eligible-spell-search';
 import { CharacterNotFoundError } from './character-crud';
 import { orderSources } from './order-sources';
@@ -110,6 +111,19 @@ export interface UnfilledSkillGrantsItem {
   readonly grants: readonly UnfilledSkillGrantChoice[];
 }
 
+export interface ExpertiseGrantItem {
+  readonly kind: 'expertise_grant';
+  readonly title: string;
+  readonly detail: string;
+  readonly remedy: string;
+  readonly source_instance_id: number;
+  readonly source_name: string;
+  readonly grant_key: string;
+  readonly ordinal: number;
+  readonly grant_id: number;
+  readonly orphaned: boolean;
+}
+
 export interface NoClassItem {
   readonly kind: 'no_class';
   readonly title: string;
@@ -135,7 +149,8 @@ export type CompletenessItem =
   | UnchosenOptionItem
   | NoClassItem
   | OrphanHitPointRollItem
-  | UnfilledSkillGrantsItem;
+  | UnfilledSkillGrantsItem
+  | ExpertiseGrantItem;
 
 export type CompletenessFinding = CompletenessItem | CatalogGapItem;
 
@@ -778,12 +793,50 @@ export const unfilledSkillGrants: CompletenessCheck = {
   },
 };
 
+/** D70: both an unmade expertise choice and a tombstoned choice stay visible. */
+export const expertiseGrantWarnings: CompletenessCheck = {
+  id: 'expertise_grants',
+  run(context) {
+    return resolveSkillExpertiseGrants(context.db, context.characterId)
+      .filter((grant) => grant.state === 'orphaned' || grant.skill === null)
+      .map((grant): ExpertiseGrantItem => {
+        const sourceName =
+          context.db.scalar<string>(
+            'SELECT display_name FROM character_source_instances WHERE id = ?',
+            [grant.source_instance_id],
+          ) ?? 'Unknown source';
+        const orphaned = grant.state === 'orphaned';
+        return {
+          kind: 'expertise_grant',
+          title: orphaned
+            ? `${String(sourceName)} — expertise choice needs attention`
+            : `${String(sourceName)} — expertise choice not chosen`,
+          detail: orphaned
+            ? grant.orphan_reason_code === 'underlying_proficiency_removed'
+              ? 'The skill chosen for expertise is no longer proficient, so the choice was preserved as an orphan instead of silently changing the sheet.'
+              : 'The source or entitlement for this expertise choice is no longer active, so the previous choice was preserved as an orphan.'
+            : 'This source grants expertise, but its skill has not been chosen yet.',
+          remedy: orphaned
+            ? 'Restore the source and underlying proficiency, or make a current expertise choice.'
+            : 'Choose one of this source’s skills you are already proficient in.',
+          source_instance_id: grant.source_instance_id,
+          source_name: String(sourceName),
+          grant_key: grant.grant_key,
+          ordinal: grant.ordinal,
+          grant_id: grant.id,
+          orphaned,
+        };
+      });
+  },
+};
+
 export const completenessChecks: readonly CompletenessCheck[] = Object.freeze([
   unfilledChoices,
   unchosenOrder,
   noClass,
   orphanHitPointRolls,
   unfilledSkillGrants,
+  expertiseGrantWarnings,
 ]);
 
 const kindRank: Readonly<Record<CompletenessItem['kind'], number>> = {
@@ -802,6 +855,7 @@ const kindRank: Readonly<Record<CompletenessItem['kind'], number>> = {
   // source's spell choices: a class's skill choices sit beside its cantrips
   // rather than in a global bucket at the bottom.
   unfilled_skill_grants: 4,
+  expertise_grant: 5,
 };
 
 function sortKey(item: CompletenessItem): readonly [string, number, string] {
@@ -816,6 +870,13 @@ function sortKey(item: CompletenessItem): readonly [string, number, string] {
   }
   if (item.kind === 'unfilled_skill_grants') {
     return [item.source_name, kindRank.unfilled_skill_grants, item.grant_key];
+  }
+  if (item.kind === 'expertise_grant') {
+    return [
+      item.source_name,
+      kindRank.expertise_grant,
+      `${item.grant_key}:${String(item.ordinal)}`,
+    ];
   }
   return [
     item.source_name,

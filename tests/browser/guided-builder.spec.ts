@@ -340,6 +340,40 @@ test('the empty-database front door chooses class first, persists once named, an
     .locator(`[${persistedSeam.skillFillAttribute}]`)
     .click();
 
+  // GF-2: Acolyte's default Magic Initiate (Cleric) choices are part of the
+  // guided journey, using the same search and durable assignment path as the
+  // planner.
+  await expect(
+    page.getByRole('heading', { name: 'Choose level 1 spells' }),
+  ).toBeVisible();
+  const cantrips = ['Guidance', 'Light'];
+  const levelOne = ['Bless'];
+  while (
+    await page
+      .getByRole('heading', { name: 'Choose level 1 spells' })
+      .isVisible()
+      .catch(() => false)
+  ) {
+    const pickers = page.getByRole('combobox');
+    const count = await pickers.count();
+    const picker = pickers.first();
+    const label = await picker.getAttribute('aria-label');
+    const search =
+      label?.includes('cantrips') === true
+        ? cantrips.shift()
+        : levelOne.shift();
+    if (search === undefined) {
+      throw new Error(`No guided spell remains for ${label ?? 'choice'}.`);
+    }
+    await picker.fill(search);
+    const option = page.getByRole('option', {
+      name: new RegExp(`^${search}\\b`),
+    });
+    await expect(option).toBeVisible();
+    await option.click();
+    await expect(pickers).toHaveCount(count - 1);
+  }
+
   // E-B: every class ordinal is filled and the REAL equipment step renders —
   // the terminal "not built" panel for this step is retired.
   const equipmentPanel = page.locator(

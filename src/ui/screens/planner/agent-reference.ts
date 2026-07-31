@@ -220,12 +220,13 @@ export const COVERAGE: readonly CoverageFact[] = [
   },
   {
     concept: 'skills',
-    state: 'partial',
+    state: 'modelled',
     note:
       'The character sheet derives a modifier for every skill, adding the ' +
-      'proficiency bonus to the ones ticked as proficient. Expertise is NOT ' +
-      'applied, and the two skills a background prints are stored as words ' +
-      'and are not counted — the skill itself has to be ticked to count.',
+      'proficiency bonus to proficient skills and a second proficiency bonus ' +
+      'to skills with a live sourced Expertise grant. Removing the underlying ' +
+      'proficiency tombstones the choice and reports it instead of silently ' +
+      'keeping doubled math.',
   },
   {
     concept: 'saving throw proficiencies',
@@ -467,6 +468,14 @@ export type ReferenceOutstandingItem =
         readonly ordinal: number;
         readonly available_skills: readonly string[];
       }[];
+    }
+  | {
+      readonly kind: 'expertise_grant';
+      readonly source_ref: number;
+      readonly grant_key: string;
+      readonly ordinal: number;
+      readonly grant_id: number;
+      readonly orphaned: boolean;
     };
 
 export interface ReferenceCatalogGap {
@@ -894,6 +903,16 @@ export function buildAgentReference(
             ordinal: grant.ordinal,
             available_skills: [...grant.available_skills],
           })),
+        };
+      }
+      if (item.kind === 'expertise_grant') {
+        return {
+          kind: 'expertise_grant',
+          source_ref: registry.register(item.source_name, null),
+          grant_key: item.grant_key,
+          ordinal: item.ordinal,
+          grant_id: item.grant_id,
+          orphaned: item.orphaned,
         };
       }
       return {
@@ -1687,6 +1706,17 @@ export function agentReferenceSections(
                   } ${item.grants
                     .map((grant) => String(grant.grant_id))
                     .join(', ')})`,
+              ),
+            ];
+          }
+          if (item.kind === 'expertise_grant') {
+            return [
+              cell('expertise_grant'),
+              sourceCell(projection, item.source_ref),
+              cell(
+                `${item.orphaned ? 'orphaned' : 'unchosen'} expertise ` +
+                  `grant ${item.grant_key} #${String(item.ordinal)} ` +
+                  `(grant id ${String(item.grant_id)})`,
               ),
             ];
           }
