@@ -36,6 +36,38 @@ export type CatalogContentAliasKind =
   | 'bundled-legacy';
 export type CatalogContentMatchDecision = 'match' | 'clone';
 
+/**
+ * Applied markers for the append-only TypeScript catalog data-migration
+ * registry. Schema migrations create structure; these markers record the
+ * separately frozen semantic projector passes that have reached this image.
+ */
+export const catalog_data_migrations = sqliteTable(
+  'catalog_data_migrations',
+  {
+    id: varchar()('id').primaryKey().notNull(),
+    scheme: varchar<ContentFingerprintScheme>()('scheme').notNull(),
+    checksum: varchar()('checksum').notNull(),
+    applied_at: datetime<Timestamp>()('applied_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    check(
+      'catalog_data_migrations_id_check',
+      sql`length(${table.id}) > 0`,
+    ),
+    check(
+      'catalog_data_migrations_scheme_check',
+      sql`${table.scheme} IN ('content-v1')`,
+    ),
+    check(
+      'catalog_data_migrations_checksum_check',
+      sql`length(${table.checksum}) = 64
+        AND ${table.checksum} NOT GLOB '*[^0-9a-f]*'`,
+    ),
+  ],
+);
+
 export const catalog_content_identities = sqliteTable(
   'catalog_content_identities',
   {
