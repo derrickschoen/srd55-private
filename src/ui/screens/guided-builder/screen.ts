@@ -3,9 +3,14 @@ import {
   matchesGuidedBuildRoute,
   matchesGuidedNewRoute,
 } from '../../../builder/contracts';
+import { browserProfileStorage } from '../../../pwa/browser-profile-storage';
 import { createQueriesClient } from '../../../queries/client';
 import type { Route } from '../../router';
 import { defineScreen, type ScreenContext } from '../../screen';
+import {
+  defaultImportBackupServices,
+  ImportBackupController,
+} from '../character-list/import-backup-controls';
 import { createAbilitiesStep } from './abilities-step';
 import { createBackgroundStep } from './background-step';
 import { createClassChooser } from './class-chooser';
@@ -116,9 +121,30 @@ async function render(context: ScreenContext): Promise<() => void> {
       // finished character rests here). One read supplies both sources'
       // offerable options, the recorded choices and the completion flag.
       const equipmentState = await client.equipmentStep(characterId);
+      const character = equipmentState.complete
+        ? await client.getCharacter(characterId)
+        : null;
+      const backupController =
+        character === null
+          ? null
+          : new ImportBackupController(
+              defaultImportBackupServices(context.rpc),
+            );
+      const hintStorage = browserProfileStorage();
       const step = createEquipmentStep({
         characterId,
         state: equipmentState,
+        ...(character === null ||
+        backupController === null ||
+        hintStorage === null
+          ? {}
+          : {
+              backupHint: {
+                storage: hintStorage,
+                exportBackup: () =>
+                  backupController.exportCharacter(character),
+              },
+            }),
         applyEquipment: (params) => client.applyEquipment(params),
         navigate: (path) => context.router.navigate(path),
       });
