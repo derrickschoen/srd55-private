@@ -15,18 +15,18 @@ supervisor-verified (post-merge main vitest 192/3,132 exit 0).
 - TRACK M (wt/attunement at bb6dc0b): FF-A implementing (briefs/ff-a.md,
   log ffa.log, port 44480) — flavor mint: migration, backup version, wire
   version, D124 single toggle + size guard.
-- TRACK W (wt/print): W-B1+FIX fully gated EXCEPT one pending item: round-2
-  D135 review CLEAN; scans/build/vitest 193/3,154/control all green
-  (supervisor-run); full PW came back 87/88 with the single failure being
-  reports-and-print:83 — the KNOWN-MARGIN spec — while two other lanes ran
-  suites concurrently (classic contention signature; same spec has a real
-  durational finding only in wt/pwa where D91-R made print heavier, which
-  is NOT in this tree). REQUIRED before merge: ONE uncontended full PW
-  re-run in wt/print on port 44496; if green, merge via
-  orchestration/merge-to-main.sh (msgfile exists at scratchpad or write
-  fresh), post-merge vitest on main, fast-forward, dispatch W-B2
-  (briefs/w-b2.md). If it fails again uncontended, it is REAL - back to
-  codex with the failure detail.
+- TRACK W (wt/print): W-B1+FIX all gates green EXCEPT the full-PW merge
+  gate, which has flaked on a DIFFERENT single spec in each of two
+  contended runs (reports-and-print:83 then guided-builder:39), both
+  timeout-signature, both proven isolated-green by the supervisor (35s-fix
+  applied to the first in wt/pwa; guided-builder:39 measured 20.2s alone vs
+  its 30s ceiling = thin margin under 3-lane load). NEXT STEP (when FF-A
+  and D91-R-FIX2 codex runs finish): dispatch a one-line codex fixlet
+  adding a measured per-test timeout (60_000, comment '20.2s alone') to
+  guided-builder.spec.ts:39 in wt/print, then ONE quiet full PW on 44496;
+  green -> merge via merge-to-main.sh, post-merge vitest on main,
+  fast-forward, dispatch W-B2 (briefs/w-b2.md). Round-2 review already
+  CLEAN; vitest 193/3,154 and controls already supervisor-verified.
 - TRACK S (wt/pwa): D91-R implemented + committed in-lane (supervisor).
   Scans 0 forbidden, no Unit-M files touched, 10 files in scope. Codex
   claims vitest 193/3,142, build 0; its full Playwright was 87/89 — one
