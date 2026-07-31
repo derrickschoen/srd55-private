@@ -48,6 +48,23 @@ import type {
 import { isHitDieSize } from '../domain/enums';
 import type { AttacksPerAction, ExtraAttackGrant } from './extra-attack';
 import { resolveAttacksPerAction } from './extra-attack';
+import {
+  classFormulaResourceLabel,
+  classResourceLabel,
+  type ClassFormulaResourceKind,
+  type ClassResourceFormula,
+  type ClassResourceKind,
+  type PositiveResourceMaximum,
+  type ResourceFormulaAbility,
+} from '../domain/class-resources';
+import type {
+  ClassDefinitionId,
+  ClassLevel,
+  SpellLevel,
+} from '../domain/ids';
+import { CasterContribution } from './caster-contribution';
+import { isProgressionType } from './progression-type';
+import { casterLevel, pactMagic, slots } from './spell-slots';
 
 /**
  * A class NAME, a LEVEL in it, and the per-level content keyed on that level.
@@ -1239,6 +1256,664 @@ export function martialArtsDice(
       });
     }
   }
+  return resolved;
+}
+
+export type SheetResourceKind =
+  | ClassResourceKind
+  | ClassFormulaResourceKind
+  | 'spell_slot'
+  | 'pact_slot';
+
+export type SheetResourceComputation =
+  | {
+      readonly kind: 'level_table';
+      readonly class_level: ClassLevel;
+    }
+  | Extract<ClassResourceFormula, { readonly kind: 'fixed_count' }>
+  | Extract<
+      ClassResourceFormula,
+      { readonly kind: 'fixed_count_by_class_level' }
+    >
+  | (Extract<
+      ClassResourceFormula,
+      { readonly kind: 'ability_modifier_minimum_one' }
+    > & { readonly resolved_modifier: number })
+  | Extract<ClassResourceFormula, { readonly kind: 'class_level_multiple' }>
+  | {
+      readonly kind: 'shared_spell_slots';
+      readonly effective_caster_level: ClassLevel;
+    }
+  | {
+      readonly kind: 'pact_magic';
+      readonly class_level: ClassLevel;
+      readonly spell_level: SpellLevel;
+    };
+
+export type SheetResourceMaximum =
+  | {
+      readonly status: 'computed';
+      readonly id: string;
+      readonly kind: SheetResourceKind;
+      readonly class_definition_id: ClassDefinitionId | null;
+      /** Catalog display text. It remains free text in the readable projection. */
+      readonly class_name: string | null;
+      readonly class_level: ClassLevel | null;
+      readonly spell_level: SpellLevel | null;
+      readonly maximum: PositiveResourceMaximum;
+      readonly computation: SheetResourceComputation;
+    }
+  | {
+      readonly status: 'absent';
+      readonly id: string;
+      readonly kind: SheetResourceKind | null;
+      /** Present only when the detail names one catalog class. */
+      readonly class_name: string | null;
+      readonly reason:
+        | 'resource_catalog_not_recorded'
+        | 'resource_level_row_missing_or_invalid'
+        | 'resource_formula_missing_or_invalid'
+        | 'resource_formula_class_level_missing_or_invalid'
+        | 'resource_formula_ability_input_missing_or_invalid'
+        | 'feature_text_maximum_not_modelled'
+        | 'spell_progression_missing_or_invalid';
+      readonly detail: string;
+    };
+
+export type SheetResourceCatalog =
+  | { readonly status: 'not_recorded' }
+  | {
+      readonly status: 'recorded';
+      readonly expected_ladder_kinds: readonly ClassResourceKind[];
+      readonly expected_formula_kinds: readonly ClassFormulaResourceKind[];
+      readonly has_unmodelled_feature_maxima: boolean;
+    };
+
+export type SheetSpellProgressionRow =
+  | { readonly status: 'missing' }
+  | {
+      readonly status: 'present';
+      readonly slots: unknown;
+      readonly pact_slots: unknown;
+    };
+
+/** The corruption-preserving catalog input to the pure resource resolver. */
+export interface SheetResourceClassInput {
+  readonly class_definition_id: ClassDefinitionId;
+  readonly class_name: string;
+  readonly class_level: unknown;
+  readonly catalog: SheetResourceCatalog;
+  readonly ladder_rows: readonly {
+    readonly resource_kind: unknown;
+    readonly maximum: unknown;
+  }[];
+  readonly formula_rows: readonly {
+    readonly resource_kind: unknown;
+    /** `null` means the stored discriminator/payload failed closed decoding. */
+    readonly formula: ClassResourceFormula | null;
+  }[];
+  readonly base_spellcasting: {
+    readonly progression_type: unknown;
+    readonly progression_row: SheetSpellProgressionRow;
+  };
+  readonly subclass_spellcasting: {
+    readonly caster_fraction: unknown;
+    readonly caster_rounding: unknown;
+    readonly progression_row: SheetSpellProgressionRow;
+  } | null;
+}
+
+export type SheetResourceAbilityInput =
+  | { readonly status: 'present'; readonly modifier: unknown }
+  | { readonly status: 'absent' };
+
+export type SheetResourceAbilityInputs = Readonly<
+  Record<ResourceFormulaAbility, SheetResourceAbilityInput>
+>;
+
+function sheetClassLevel(value: unknown): ClassLevel | null {
+  return Number.isSafeInteger(value) && Number(value) >= 1 && Number(value) <= 20
+    ? (value as ClassLevel)
+    : null;
+}
+
+function positiveResourceMaximum(
+  value: unknown,
+): PositiveResourceMaximum | null {
+  return Number.isSafeInteger(value) && Number(value) >= 1
+    ? (value as PositiveResourceMaximum)
+    : null;
+}
+
+function storedResourceMaximum(value: unknown): number | null {
+  return Number.isSafeInteger(value) && Number(value) >= 0
+    ? Number(value)
+    : null;
+}
+
+function spellLevel(value: number): SpellLevel {
+  if (!Number.isSafeInteger(value) || value < 1 || value > 9) {
+    throw new TypeError(`Spell level ${String(value)} is outside 1..9.`);
+  }
+  return value as SpellLevel;
+}
+
+function absentResource(
+  id: string,
+  className: string | null,
+  kind: SheetResourceKind | null,
+  reason: Extract<SheetResourceMaximum, { status: 'absent' }>['reason'],
+  detail: string,
+): SheetResourceMaximum {
+  return {
+    status: 'absent',
+    id,
+    kind,
+    class_name: className,
+    reason,
+    detail,
+  };
+}
+
+function formulaMinimumLevel(formula: ClassResourceFormula): ClassLevel {
+  switch (formula.kind) {
+    case 'fixed_count':
+    case 'ability_modifier_minimum_one':
+    case 'class_level_multiple':
+      return formula.minimum_class_level;
+    case 'fixed_count_by_class_level':
+      return formula.steps[0].minimum_class_level;
+  }
+}
+
+function resolvedFormula(
+  formula: ClassResourceFormula,
+  classLevel: ClassLevel,
+  abilities: SheetResourceAbilityInputs,
+):
+  | { readonly status: 'not_acquired' }
+  | {
+      readonly status: 'computed';
+      readonly maximum: PositiveResourceMaximum;
+      readonly computation: SheetResourceComputation;
+    }
+  | { readonly status: 'ability_absent'; readonly ability: ResourceFormulaAbility } {
+  if (classLevel < formulaMinimumLevel(formula)) {
+    return { status: 'not_acquired' };
+  }
+  switch (formula.kind) {
+    case 'fixed_count':
+      return {
+        status: 'computed',
+        maximum: formula.count,
+        computation: formula,
+      };
+    case 'fixed_count_by_class_level': {
+      let acquired = formula.steps[0];
+      for (const step of formula.steps) {
+        if (step.minimum_class_level <= classLevel) {
+          acquired = step;
+        }
+      }
+      return {
+        status: 'computed',
+        maximum: acquired.count,
+        computation: formula,
+      };
+    }
+    case 'ability_modifier_minimum_one': {
+      const input = abilities[formula.ability];
+      if (
+        input.status === 'absent' ||
+        !Number.isSafeInteger(input.modifier)
+      ) {
+        return { status: 'ability_absent', ability: formula.ability };
+      }
+      const maximum = positiveResourceMaximum(
+        Math.max(1, Number(input.modifier)),
+      );
+      if (maximum === null) {
+        return { status: 'ability_absent', ability: formula.ability };
+      }
+      return {
+        status: 'computed',
+        maximum,
+        computation: {
+          ...formula,
+          resolved_modifier: Number(input.modifier),
+        },
+      };
+    }
+    case 'class_level_multiple': {
+      const maximum = positiveResourceMaximum(
+        Number(formula.multiplier) * Number(classLevel),
+      );
+      if (maximum === null) {
+        throw new TypeError('A valid class-level multiplier produced an invalid maximum.');
+      }
+      return { status: 'computed', maximum, computation: formula };
+    }
+  }
+}
+
+type DecodedSlots =
+  | { readonly status: 'valid'; readonly value: Readonly<Record<number, number>> }
+  | { readonly status: 'invalid' };
+
+function decodedSlots(stored: unknown): DecodedSlots {
+  if (typeof stored !== 'string') {
+    return { status: 'invalid' };
+  }
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(stored);
+  } catch {
+    return { status: 'invalid' };
+  }
+  if (Array.isArray(decoded)) {
+    return decoded.length === 0
+      ? { status: 'valid', value: {} }
+      : { status: 'invalid' };
+  }
+  if (decoded === null || typeof decoded !== 'object') {
+    return { status: 'invalid' };
+  }
+  const value: Record<number, number> = {};
+  for (const [key, count] of Object.entries(decoded)) {
+    if (!/^[1-9]$/.test(key) || !Number.isSafeInteger(count) || Number(count) < 1) {
+      return { status: 'invalid' };
+    }
+    value[Number(key)] = Number(count);
+  }
+  return { status: 'valid', value };
+}
+
+type DecodedPact =
+  | { readonly status: 'valid'; readonly count: number; readonly level: SpellLevel }
+  | { readonly status: 'invalid' };
+
+function decodedPact(stored: unknown): DecodedPact {
+  if (typeof stored !== 'string') {
+    return { status: 'invalid' };
+  }
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(stored);
+  } catch {
+    return { status: 'invalid' };
+  }
+  if (
+    decoded === null ||
+    Array.isArray(decoded) ||
+    typeof decoded !== 'object' ||
+    Object.keys(decoded).sort().join(',') !== 'count,level'
+  ) {
+    return { status: 'invalid' };
+  }
+  const record = decoded as Record<string, unknown>;
+  if (
+    !Number.isSafeInteger(record.count) ||
+    Number(record.count) < 1 ||
+    !Number.isSafeInteger(record.level) ||
+    Number(record.level) < 1 ||
+    Number(record.level) > 5
+  ) {
+    return { status: 'invalid' };
+  }
+  return {
+    status: 'valid',
+    count: Number(record.count),
+    level: spellLevel(Number(record.level)),
+  };
+}
+
+function subclassProgressionType(
+  fraction: unknown,
+  rounding: unknown,
+): 'none' | 'invalid' | 'full' | 'half_up' | 'half_down' | 'third_up' | 'third_down' {
+  if (fraction === null && rounding === null) {
+    return 'none';
+  }
+  if (fraction === '1' && rounding === null) {
+    return 'full';
+  }
+  if (fraction === '1/2' && rounding === 'up') {
+    return 'half_up';
+  }
+  if (fraction === '1/2' && rounding === 'down') {
+    return 'half_down';
+  }
+  if (fraction === '1/3' && rounding === 'up') {
+    return 'third_up';
+  }
+  if (fraction === '1/3' && rounding === 'down') {
+    return 'third_down';
+  }
+  return 'invalid';
+}
+
+function spellAbsence(detail: string): SheetResourceMaximum {
+  return absentResource(
+    'resource:spell-progression-absent',
+    null,
+    null,
+    'spell_progression_missing_or_invalid',
+    detail,
+  );
+}
+
+/** Compute every sourced resource maximum without storing spending state. */
+export function resolveSheetResources(
+  classes: readonly SheetResourceClassInput[],
+  abilities: SheetResourceAbilityInputs,
+): readonly SheetResourceMaximum[] {
+  const resolved: SheetResourceMaximum[] = [];
+  let showFeatureTextDisclosure = false;
+
+  for (const entry of classes) {
+    const classLevel = sheetClassLevel(entry.class_level);
+    if (entry.catalog.status === 'not_recorded') {
+      resolved.push(
+        absentResource(
+          `resource:${String(entry.class_definition_id)}:catalog`,
+          entry.class_name,
+          null,
+          'resource_catalog_not_recorded',
+          `Resource maxima are not recorded for ${entry.class_name}.`,
+        ),
+      );
+      continue;
+    }
+    showFeatureTextDisclosure ||= entry.catalog.has_unmodelled_feature_maxima;
+
+    for (const kind of entry.catalog.expected_ladder_kinds) {
+      const id = `resource:${String(entry.class_definition_id)}:${kind}`;
+      const row = entry.ladder_rows.find((candidate) => candidate.resource_kind === kind);
+      const storedMaximum =
+        row === undefined ? null : storedResourceMaximum(row.maximum);
+      if (classLevel === null || storedMaximum === null) {
+        resolved.push(
+          absentResource(
+            id,
+            entry.class_name,
+            kind,
+            'resource_level_row_missing_or_invalid',
+            `${classResourceLabel(kind)} maximum is unavailable because the level ${String(entry.class_level)} source row is missing or invalid.`,
+          ),
+        );
+        continue;
+      }
+      if (storedMaximum === 0) {
+        continue;
+      }
+      const maximum = positiveResourceMaximum(storedMaximum);
+      if (maximum === null) {
+        throw new TypeError('A positive stored resource maximum failed validation.');
+      }
+      resolved.push({
+        status: 'computed',
+        id,
+        kind,
+        class_definition_id: entry.class_definition_id,
+        class_name: entry.class_name,
+        class_level: classLevel,
+        spell_level: null,
+        maximum,
+        computation: { kind: 'level_table', class_level: classLevel },
+      });
+    }
+
+    for (const kind of entry.catalog.expected_formula_kinds) {
+      const id = `resource:${String(entry.class_definition_id)}:${kind}`;
+      if (classLevel === null) {
+        resolved.push(
+          absentResource(
+            id,
+            entry.class_name,
+            kind,
+            'resource_formula_class_level_missing_or_invalid',
+            `${classFormulaResourceLabel(kind)} maximum is unavailable because its owning class level is missing or invalid.`,
+          ),
+        );
+        continue;
+      }
+      const row = entry.formula_rows.find((candidate) => candidate.resource_kind === kind);
+      if (row === undefined || row.formula === null) {
+        resolved.push(
+          absentResource(
+            id,
+            entry.class_name,
+            kind,
+            'resource_formula_missing_or_invalid',
+            `${classFormulaResourceLabel(kind)} maximum is unavailable because its formula is missing or invalid.`,
+          ),
+        );
+        continue;
+      }
+      const formula = resolvedFormula(row.formula, classLevel, abilities);
+      if (formula.status === 'not_acquired') {
+        continue;
+      }
+      if (formula.status === 'ability_absent') {
+        const ability =
+          formula.ability === 'charisma' ? 'Charisma' : 'Wisdom';
+        resolved.push(
+          absentResource(
+            id,
+            entry.class_name,
+            kind,
+            'resource_formula_ability_input_missing_or_invalid',
+            `${classFormulaResourceLabel(kind)} maximum is unavailable because the resolved ${ability} modifier is missing or invalid.`,
+          ),
+        );
+        continue;
+      }
+      resolved.push({
+        status: 'computed',
+        id,
+        kind,
+        class_definition_id: entry.class_definition_id,
+        class_name: entry.class_name,
+        class_level: classLevel,
+        spell_level: null,
+        maximum: formula.maximum,
+        computation: formula.computation,
+      });
+    }
+  }
+
+  if (showFeatureTextDisclosure) {
+    resolved.push(
+      absentResource(
+        'resource:feature-text-not-modelled',
+        null,
+        null,
+        'feature_text_maximum_not_modelled',
+        'Arcane Recovery is a slot-level budget, while Mystic Arcanum and Signature Spells are per-spell single uses; use their printed feature text.',
+      ),
+    );
+  }
+
+  const sharedBase: Array<{
+    readonly contribution: CasterContribution;
+    readonly slots: Readonly<Record<number, number>>;
+  }> = [];
+  const sharedSubclass: CasterContribution[] = [];
+  const pactContributions: Array<{
+    readonly class_definition_id: ClassDefinitionId;
+    readonly class_name: string;
+    readonly class_level: ClassLevel;
+    readonly contribution: CasterContribution;
+    readonly exact: DecodedPact;
+  }> = [];
+
+  for (const entry of classes) {
+    const classLevel = sheetClassLevel(entry.class_level);
+    if (!isProgressionType(entry.base_spellcasting.progression_type)) {
+      resolved.push(spellAbsence(`${entry.class_name} has a missing or invalid spell progression type.`));
+      return resolved;
+    }
+    const baseType = entry.base_spellcasting.progression_type;
+    if (baseType !== 'none') {
+      if (classLevel === null || entry.base_spellcasting.progression_row.status === 'missing') {
+        resolved.push(spellAbsence(`${entry.class_name} has a missing or invalid progression row at its current class level.`));
+        return resolved;
+      }
+      const contribution = new CasterContribution(
+        entry.class_name,
+        classLevel,
+        baseType,
+      );
+      if (baseType === 'pact') {
+        const exact = decodedPact(entry.base_spellcasting.progression_row.pact_slots);
+        if (exact.status === 'invalid') {
+          resolved.push(spellAbsence(`${entry.class_name} has missing or invalid Pact Magic slot content.`));
+          return resolved;
+        }
+        pactContributions.push({
+          class_definition_id: entry.class_definition_id,
+          class_name: entry.class_name,
+          class_level: classLevel,
+          contribution,
+          exact,
+        });
+      } else {
+        const exact = decodedSlots(entry.base_spellcasting.progression_row.slots);
+        if (
+          exact.status === 'invalid' ||
+          (contribution.casterLevels() > 0 && Object.keys(exact.value).length === 0)
+        ) {
+          resolved.push(spellAbsence(`${entry.class_name} has missing or invalid shared spell-slot content.`));
+          return resolved;
+        }
+        sharedBase.push({ contribution, slots: exact.value });
+      }
+    }
+
+    if (entry.subclass_spellcasting !== null) {
+      const subclassType = subclassProgressionType(
+        entry.subclass_spellcasting.caster_fraction,
+        entry.subclass_spellcasting.caster_rounding,
+      );
+      if (subclassType === 'invalid') {
+        resolved.push(spellAbsence(`${entry.class_name}'s subclass has a missing or invalid spell progression type.`));
+        return resolved;
+      }
+      if (subclassType !== 'none') {
+        if (classLevel === null || entry.subclass_spellcasting.progression_row.status === 'missing') {
+          resolved.push(spellAbsence(`${entry.class_name}'s subclass has a missing or invalid progression row at its current class level.`));
+          return resolved;
+        }
+        const contribution = new CasterContribution(
+          `${entry.class_name} subclass`,
+          classLevel,
+          subclassType,
+        );
+        const exact = decodedSlots(entry.subclass_spellcasting.progression_row.slots);
+        if (
+          exact.status === 'invalid' ||
+          (contribution.casterLevels() > 0 && Object.keys(exact.value).length === 0)
+        ) {
+          resolved.push(spellAbsence(`${entry.class_name}'s subclass has missing or invalid shared spell-slot content.`));
+          return resolved;
+        }
+        sharedSubclass.push(contribution);
+      }
+    }
+  }
+
+  const sharedContributions = [
+    ...sharedBase.map((entry) => entry.contribution),
+    ...sharedSubclass,
+  ];
+  let sharedSlots: Readonly<Record<number, number>>;
+  if (sharedBase.length === 1 && sharedSubclass.length === 0) {
+    const soleBase = sharedBase[0];
+    if (soleBase === undefined) {
+      throw new TypeError('The sole shared caster contribution is missing.');
+    }
+    sharedSlots = soleBase.slots;
+  } else {
+    sharedSlots = slots(sharedContributions);
+  }
+  const effectiveLevel = casterLevel(sharedContributions);
+  const typedEffectiveLevel =
+    effectiveLevel === 0 ? null : sheetClassLevel(effectiveLevel);
+  for (const [levelText, maximumValue] of Object.entries(sharedSlots)) {
+    const level = spellLevel(Number(levelText));
+    const maximum = positiveResourceMaximum(maximumValue);
+    if (maximum === null || typedEffectiveLevel === null) {
+      resolved.push(spellAbsence('The shared spell-slot result is missing or invalid.'));
+      return resolved;
+    }
+    resolved.push({
+      status: 'computed',
+      id: `resource:spell-slot:${String(level)}`,
+      kind: 'spell_slot',
+      class_definition_id: null,
+      class_name: null,
+      class_level: null,
+      spell_level: level,
+      maximum,
+      computation: {
+        kind: 'shared_spell_slots',
+        effective_caster_level: typedEffectiveLevel,
+      },
+    });
+  }
+
+  if (pactContributions.length === 1) {
+    const pact = pactContributions[0];
+    if (pact === undefined) {
+      throw new TypeError('The sole Pact caster contribution is missing.');
+    }
+    if (pact.exact.status === 'invalid') {
+      throw new TypeError('An invalid Pact result crossed its validation branch.');
+    }
+    const maximum = positiveResourceMaximum(pact.exact.count);
+    if (maximum === null) {
+      resolved.push(spellAbsence('The Pact Magic slot count is invalid.'));
+      return resolved;
+    }
+    resolved.push({
+      status: 'computed',
+      id: 'resource:pact-slot',
+      kind: 'pact_slot',
+      class_definition_id: pact.class_definition_id,
+      class_name: pact.class_name,
+      class_level: pact.class_level,
+      spell_level: pact.exact.level,
+      maximum,
+      computation: {
+        kind: 'pact_magic',
+        class_level: pact.class_level,
+        spell_level: pact.exact.level,
+      },
+    });
+  } else if (pactContributions.length > 1) {
+    const combined = pactMagic(pactContributions.map((entry) => entry.contribution));
+    const combinedLevel = sheetClassLevel(
+      pactContributions.reduce((sum, entry) => sum + Number(entry.class_level), 0),
+    );
+    const maximum = positiveResourceMaximum(combined?.count);
+    if (combined === null || combinedLevel === null || maximum === null) {
+      resolved.push(spellAbsence('The combined Pact Magic result is missing or invalid.'));
+      return resolved;
+    }
+    const level = spellLevel(combined.level);
+    resolved.push({
+      status: 'computed',
+      id: 'resource:pact-slot',
+      kind: 'pact_slot',
+      class_definition_id: null,
+      class_name: null,
+      class_level: combinedLevel,
+      spell_level: level,
+      maximum,
+      computation: { kind: 'pact_magic', class_level: combinedLevel, spell_level: level },
+    });
+  }
+
   return resolved;
 }
 

@@ -9,6 +9,7 @@ import {
   initiative,
   MAXIMUM_CHARACTER_LEVEL,
   passivePerception,
+  resolveSheetResources,
   savingThrowModifier,
   savingThrowProficiencies,
   sheetProficiencyBonus,
@@ -19,12 +20,19 @@ import {
   type ArmorClassBonusCandidate,
   type ArmorClassFormulaCandidate,
   type EquippedArmor,
+  type SheetResourceClassInput,
 } from '../../../src/rules/sheet';
 import { characterLevel } from '../../../src/rules/character-level';
 import type { ExtraAttackGrant } from '../../../src/rules/extra-attack';
 import { hitDieSizes } from '../../../src/domain/enums';
 import { parseSkillAbilities } from '../../../src/rules/skills';
 import { parseSrdArmorTemplates } from '../../../src/rules/armor-srd';
+import type { ClassDefinitionId, ClassLevel } from '../../../src/domain/ids';
+import type {
+  ClassResourceFormula,
+  PositiveInteger,
+  PositiveResourceMaximum,
+} from '../../../src/domain/class-resources';
 
 /**
  * EVERY NUMBER HERE IS COMPUTED BY HAND AND WRITTEN AS A LITERAL.
@@ -51,6 +59,38 @@ function scores(values: Partial<Record<string, number>>): AbilityScores {
     ...values,
   });
 }
+
+function resourceClass(
+  id: number,
+  className: string,
+  classLevel: unknown,
+  changes: Partial<SheetResourceClassInput> = {},
+): SheetResourceClassInput {
+  return {
+    class_definition_id: id as ClassDefinitionId,
+    class_name: className,
+    class_level: classLevel,
+    catalog: {
+      status: 'recorded',
+      expected_ladder_kinds: [],
+      expected_formula_kinds: [],
+      has_unmodelled_feature_maxima: false,
+    },
+    ladder_rows: [],
+    formula_rows: [],
+    base_spellcasting: {
+      progression_type: 'none',
+      progression_row: { status: 'missing' },
+    },
+    subclass_spellcasting: null,
+    ...changes,
+  };
+}
+
+const PRESENT_ABILITIES = {
+  charisma: { status: 'present' as const, modifier: 2 },
+  wisdom: { status: 'present' as const, modifier: 3 },
+};
 
 /**
  * Mechanical adapter for the pre-AC-3 fixtures below. Their hand-computed
@@ -1246,5 +1286,316 @@ describe('extra attack across a multiclass', () => {
     expect(attacksPerAction([{ ...FIGHTER, level: 15 }]).count).toBe(3);
     expect(attacksPerAction([{ ...FIGHTER, level: 10 }]).count).toBe(2);
     expect(attacksPerAction([{ ...FIGHTER, level: 20 }]).count).toBe(4);
+  });
+});
+
+describe('sheet resource maxima', () => {
+  it('uses each owning class level and keeps Channel Divinity class-qualified', () => {
+    const resources = resolveSheetResources(
+      [
+        resourceClass(1, 'Barbarian', 3, {
+          catalog: {
+            status: 'recorded',
+            expected_ladder_kinds: ['rage'],
+            expected_formula_kinds: [],
+            has_unmodelled_feature_maxima: false,
+          },
+          ladder_rows: [{ resource_kind: 'rage', maximum: 3 }],
+        }),
+        resourceClass(2, 'Monk', 2, {
+          catalog: {
+            status: 'recorded',
+            expected_ladder_kinds: ['focus_points'],
+            expected_formula_kinds: [],
+            has_unmodelled_feature_maxima: false,
+          },
+          ladder_rows: [{ resource_kind: 'focus_points', maximum: 2 }],
+        }),
+        resourceClass(3, 'Cleric', 6, {
+          catalog: {
+            status: 'recorded',
+            expected_ladder_kinds: ['channel_divinity'],
+            expected_formula_kinds: [],
+            has_unmodelled_feature_maxima: false,
+          },
+          ladder_rows: [{ resource_kind: 'channel_divinity', maximum: 3 }],
+        }),
+        resourceClass(4, 'Paladin', 3, {
+          catalog: {
+            status: 'recorded',
+            expected_ladder_kinds: ['channel_divinity'],
+            expected_formula_kinds: [],
+            has_unmodelled_feature_maxima: false,
+          },
+          ladder_rows: [{ resource_kind: 'channel_divinity', maximum: 2 }],
+        }),
+      ],
+      PRESENT_ABILITIES,
+    );
+
+    expect(
+      resources.map((entry) =>
+        entry.status === 'computed'
+          ? [entry.class_definition_id, entry.kind, entry.maximum]
+          : [entry.reason],
+      ),
+    ).toEqual([
+      [1, 'rage', 3],
+      [2, 'focus_points', 2],
+      [3, 'channel_divinity', 3],
+      [4, 'channel_divinity', 2],
+    ]);
+  });
+
+  it('evaluates live ability, multiplier, fixed, and stepped formulas without guesses', () => {
+    const bardFormula: ClassResourceFormula = {
+      kind: 'ability_modifier_minimum_one',
+      minimum_class_level: 1 as ClassLevel,
+      ability: 'charisma',
+    };
+    const paladinFormula: ClassResourceFormula = {
+      kind: 'class_level_multiple',
+      minimum_class_level: 1 as ClassLevel,
+      multiplier: 5 as PositiveInteger,
+    };
+    const fighterFormula: ClassResourceFormula = {
+      kind: 'fixed_count_by_class_level',
+      steps: [
+        { minimum_class_level: 9 as ClassLevel, count: 1 as PositiveResourceMaximum },
+        { minimum_class_level: 13 as ClassLevel, count: 2 as PositiveResourceMaximum },
+        { minimum_class_level: 17 as ClassLevel, count: 3 as PositiveResourceMaximum },
+      ],
+    };
+    const innateFormula: ClassResourceFormula = {
+      kind: 'fixed_count',
+      minimum_class_level: 1 as ClassLevel,
+      count: 2 as PositiveResourceMaximum,
+    };
+    const classes = [
+      resourceClass(1, 'Bard', 5, {
+        catalog: {
+          status: 'recorded', expected_ladder_kinds: [],
+          expected_formula_kinds: ['bardic_inspiration'],
+          has_unmodelled_feature_maxima: false,
+        },
+        formula_rows: [{ resource_kind: 'bardic_inspiration', formula: bardFormula }],
+      }),
+      resourceClass(2, 'Paladin', 5, {
+        catalog: {
+          status: 'recorded', expected_ladder_kinds: [],
+          expected_formula_kinds: ['lay_on_hands'],
+          has_unmodelled_feature_maxima: false,
+        },
+        formula_rows: [{ resource_kind: 'lay_on_hands', formula: paladinFormula }],
+      }),
+      resourceClass(3, 'Fighter', 13, {
+        catalog: {
+          status: 'recorded', expected_ladder_kinds: [],
+          expected_formula_kinds: ['indomitable'],
+          has_unmodelled_feature_maxima: false,
+        },
+        formula_rows: [{ resource_kind: 'indomitable', formula: fighterFormula }],
+      }),
+      resourceClass(4, 'Sorcerer', 1, {
+        catalog: {
+          status: 'recorded', expected_ladder_kinds: [],
+          expected_formula_kinds: ['innate_sorcery'],
+          has_unmodelled_feature_maxima: false,
+        },
+        formula_rows: [{ resource_kind: 'innate_sorcery', formula: innateFormula }],
+      }),
+      resourceClass(5, 'Ranger', 10, {
+        catalog: {
+          status: 'recorded', expected_ladder_kinds: [],
+          expected_formula_kinds: ['tireless'],
+          has_unmodelled_feature_maxima: false,
+        },
+        formula_rows: [{
+          resource_kind: 'tireless',
+          formula: {
+            kind: 'ability_modifier_minimum_one',
+            minimum_class_level: 10 as ClassLevel,
+            ability: 'wisdom',
+          },
+        }],
+      }),
+    ];
+
+    const atCharisma14 = resolveSheetResources(classes, PRESENT_ABILITIES);
+    const atCharisma18 = resolveSheetResources(classes, {
+      ...PRESENT_ABILITIES,
+      charisma: { status: 'present', modifier: 4 },
+    });
+    const atWisdom18 = resolveSheetResources(classes, {
+      ...PRESENT_ABILITIES,
+      wisdom: { status: 'present', modifier: 4 },
+    });
+    const maxima = (resources: ReturnType<typeof resolveSheetResources>) =>
+      resources.flatMap((entry) =>
+        entry.status === 'computed' ? [[entry.kind, entry.maximum] as const] : [],
+      );
+    expect(maxima(atCharisma14)).toEqual([
+      ['bardic_inspiration', 2],
+      ['lay_on_hands', 25],
+      ['indomitable', 2],
+      ['innate_sorcery', 2],
+      ['tireless', 3],
+    ]);
+    expect(maxima(atCharisma18)[0]).toEqual(['bardic_inspiration', 4]);
+    expect(maxima(atWisdom18)[4]).toEqual(['tireless', 4]);
+
+    const missing = resolveSheetResources([classes[0]!], {
+      ...PRESENT_ABILITIES,
+      charisma: { status: 'absent' },
+    });
+    expect(missing).toMatchObject([
+      {
+        status: 'absent',
+        reason: 'resource_formula_ability_input_missing_or_invalid',
+      },
+    ]);
+    expect('maximum' in missing[0]!).toBe(false);
+  });
+
+  it('uses combined shared slots, guards sole subclass casters, and keeps Pact separate', () => {
+    const wizard = resourceClass(1, 'Wizard', 3, {
+      base_spellcasting: {
+        progression_type: 'full',
+        progression_row: { status: 'present', slots: '{"1":4,"2":2}', pact_slots: '[]' },
+      },
+    });
+    const cleric = resourceClass(2, 'Cleric', 2, {
+      base_spellcasting: {
+        progression_type: 'full',
+        progression_row: { status: 'present', slots: '{"1":3}', pact_slots: '[]' },
+      },
+    });
+    const multiclass = resolveSheetResources([wizard, cleric], PRESENT_ABILITIES);
+    expect(
+      multiclass.flatMap((entry) =>
+        entry.status === 'computed' && entry.kind === 'spell_slot'
+          ? [[entry.spell_level, entry.maximum] as const]
+          : [],
+      ),
+    ).toEqual([[1, 4], [2, 3], [3, 2]]);
+
+    const ek = resourceClass(3, 'Fighter', 3, {
+      subclass_spellcasting: {
+        caster_fraction: '1/3',
+        caster_rounding: 'down',
+        progression_row: { status: 'present', slots: '{"1":2}', pact_slots: null },
+      },
+    });
+    expect(
+      resolveSheetResources([ek], PRESENT_ABILITIES).map((entry) =>
+        entry.status === 'computed' ? [entry.kind, entry.spell_level, entry.maximum] : [entry.reason],
+      ),
+    ).toEqual([['spell_slot', 1, 2]]);
+
+    const wizard2 = {
+      ...wizard,
+      class_level: 2,
+      base_spellcasting: {
+        progression_type: 'full',
+        progression_row: { status: 'present', slots: '{"1":3}', pact_slots: '[]' },
+      },
+    } satisfies SheetResourceClassInput;
+    const warlock = resourceClass(4, 'Warlock', 3, {
+      base_spellcasting: {
+        progression_type: 'pact',
+        progression_row: { status: 'present', slots: '[]', pact_slots: '{"count":2,"level":2}' },
+      },
+    });
+    expect(
+      resolveSheetResources([wizard2, warlock], PRESENT_ABILITIES).map((entry) =>
+        entry.status === 'computed' ? [entry.kind, entry.spell_level, entry.maximum] : [entry.reason],
+      ),
+    ).toEqual([['spell_slot', 1, 3], ['pact_slot', 2, 2]]);
+
+    const secondPactCaster = resourceClass(5, 'Hexbinder', 2, {
+      base_spellcasting: {
+        progression_type: 'pact',
+        progression_row: {
+          status: 'present',
+          slots: '[]',
+          pact_slots: '{"count":2,"level":1}',
+        },
+      },
+    });
+    expect(
+      resolveSheetResources(
+        [warlock, secondPactCaster],
+        PRESENT_ABILITIES,
+      ).map((entry) =>
+        entry.status === 'computed'
+          ? [
+              entry.kind,
+              entry.class_definition_id,
+              entry.class_level,
+              entry.spell_level,
+              entry.maximum,
+            ]
+          : [entry.reason],
+      ),
+    ).toEqual([['pact_slot', null, 5, 3, 2]]);
+  });
+
+  it('keeps unknown, missing resource, invalid formula inputs, and invalid spell content absent', () => {
+    const unknown = resourceClass(1, 'Chronomancer', 4, {
+      catalog: { status: 'not_recorded' },
+    });
+    const missingLadder = resourceClass(2, 'Barbarian', 4, {
+      catalog: {
+        status: 'recorded', expected_ladder_kinds: ['rage'],
+        expected_formula_kinds: [], has_unmodelled_feature_maxima: false,
+      },
+    });
+    const invalidFormula = resourceClass(3, 'Bard', 4, {
+      catalog: {
+        status: 'recorded', expected_ladder_kinds: [],
+        expected_formula_kinds: ['bardic_inspiration'],
+        has_unmodelled_feature_maxima: false,
+      },
+      formula_rows: [{ resource_kind: 'bardic_inspiration', formula: null }],
+    });
+    const invalidSpell = resourceClass(4, 'Wizard', 3, {
+      base_spellcasting: {
+        progression_type: 'full',
+        progression_row: { status: 'present', slots: '{}', pact_slots: '[]' },
+      },
+    });
+    const invalidFormulaClassLevel = resourceClass(5, 'Sorcerer', 0, {
+      catalog: {
+        status: 'recorded', expected_ladder_kinds: [],
+        expected_formula_kinds: ['innate_sorcery'],
+        has_unmodelled_feature_maxima: false,
+      },
+      formula_rows: [{
+        resource_kind: 'innate_sorcery',
+        formula: {
+          kind: 'fixed_count',
+          minimum_class_level: 1 as ClassLevel,
+          count: 2 as PositiveResourceMaximum,
+        },
+      }],
+    });
+    expect(
+      resolveSheetResources(
+        [
+          unknown,
+          missingLadder,
+          invalidFormula,
+          invalidFormulaClassLevel,
+          invalidSpell,
+        ],
+        PRESENT_ABILITIES,
+      ).map((entry) => entry.status === 'absent' ? entry.reason : entry.kind),
+    ).toEqual([
+      'resource_catalog_not_recorded',
+      'resource_level_row_missing_or_invalid',
+      'resource_formula_missing_or_invalid',
+      'resource_formula_class_level_missing_or_invalid',
+      'spell_progression_missing_or_invalid',
+    ]);
   });
 });
