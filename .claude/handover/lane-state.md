@@ -68,6 +68,16 @@ after SUITE-HYGIENE-2's 90s ceiling merges, that is a REAL defect in the
 build-report route and must be dispatched as one — do not raise the ceiling
 again.
 
+NEXT HYGIENE TARGET (do this before the cascade's later suites):
+tests/browser/ai-chat.spec.ts:215 "a hostile page on another loopback origin
+cannot reach the bridge, even holding the secret" — measured 22.5s ALONE
+against the 30s default, i.e. ~25% margin, and it timed out at 30.3s in a
+loaded full run. The supervisor re-ran it isolated and the SECURITY PROPERTY
+HOLDS; the failure was contention. It qualifies for the same measured
+annotation as the hygiene-2 tests (rule: >=15s alone gets one). Annotate it
+before it costs another lane a false red. NOTE: this spec starts a second
+loopback origin, so it may be more load-sensitive than its runtime suggests.
+
 MERGE CASCADE once hyg2 is on main (four units are committed and scanned
 clean, awaiting only a trustworthy suite):
   wt/print  W-C      14 files  vitest 195/3,168 (codex), review CLEAN
