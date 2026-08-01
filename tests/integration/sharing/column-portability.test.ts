@@ -227,22 +227,22 @@ const PROBES: { readonly [N in ProbedTable]: Probe<N> } = {
       },
       alignment: {
         kind: 'opt_in',
-        option: 'notes',
+        option: 'writtenText',
         why: 'D124 puts every character-authored text field behind the single written-text option, default off.',
       },
       appearance: {
         kind: 'opt_in',
-        option: 'notes',
+        option: 'writtenText',
         why: 'D124 puts every character-authored text field behind the single written-text option, default off.',
       },
       backstory: {
         kind: 'opt_in',
-        option: 'notes',
+        option: 'writtenText',
         why: 'D124 puts every character-authored text field behind the single written-text option, default off.',
       },
       notes: {
         kind: 'opt_in',
-        option: 'notes',
+        option: 'writtenText',
         why: 'D124 puts every character-authored text field behind the single written-text option, default off.',
       },
       created_at: OWNED_TIMESTAMP,
@@ -1965,7 +1965,7 @@ beforeAll(async () => {
   const document = exportCharacterShare(sender, senderCharacterId, {
     acknowledgements: true,
     loadouts: true,
-    notes: true,
+    writtenText: true,
   });
   const decoded = await decodeShareFragment(
     await encodeShareFragment(document),
@@ -2089,7 +2089,7 @@ describe('every column of every shared table is classified', () => {
 });
 
 describe('a share link carries every column it claims to', () => {
-  it('flavor portability separates notes privacy', () => {
+  it('written-text consent ports all four flavor columns together', () => {
     const columns = 'alignment, appearance, backstory, notes';
     const sender = trip.sender.oneRaw(
       `SELECT ${columns} FROM characters WHERE id = ?`,

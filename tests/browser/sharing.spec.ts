@@ -1,5 +1,45 @@
+import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
+import { readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { expect, test } from '@playwright/test';
+import { DatabaseContext } from '../../src/db/database';
+
+const schema = readFileSync(
+  new URL('../../src/db/schema.sql', import.meta.url),
+  'utf8',
+);
+
+async function oversizedShareImage(): Promise<readonly number[]> {
+  const sqlite3 = await sqlite3InitModule();
+  const connection = new sqlite3.oo1.DB(':memory:', 'c');
+  connection.exec(schema);
+  const db = new DatabaseContext(connection);
+  const characterId = db.exec(
+    `INSERT INTO characters (name) VALUES ('Oversized Hero')`,
+  ).lastInsertId;
+  let seed = 0x2f6e2b1;
+  const noise = (length: number): string => {
+    let result = '';
+    for (let index = 0; index < length; index += 1) {
+      seed ^= seed << 13;
+      seed ^= seed >>> 17;
+      seed ^= seed << 5;
+      result += String.fromCharCode(33 + (Math.abs(seed) % 94));
+    }
+    return result;
+  };
+  for (let index = 0; index < 60; index += 1) {
+    db.exec(
+      `INSERT INTO character_weapons
+       (character_id, name, other_properties, notes)
+       VALUES (?, ?, ?, ?)`,
+      [characterId, `Blade ${index}`, noise(500), noise(2_000)],
+    );
+  }
+  const bytes = Array.from(sqlite3.capi.sqlite3_js_db_export(connection));
+  connection.close();
+  return bytes;
+}
 
 async function ready(page: import('@playwright/test').Page): Promise<void> {
   await expect(page.locator('#status')).toHaveAttribute(
@@ -82,13 +122,12 @@ test('creates, independently verifies, previews, and explicitly imports a durabl
 
   // ALL THREE OPT-INS ARE PRESENT AND ALL THREE START OFF. The default is not
   // cosmetic: a link minted before any of them existed carries none of them, so
-  // the box a user never touches has to produce that same link. The notes box
-  // is the one this asserts hardest, because it is the only option guarding
-  // text a person wrote about themselves.
+  // the box a user never touches has to produce that same link. The written
+  // text box names everything its consent can expose.
   for (const label of [
     'Include warning acknowledgements',
     'Include loadouts',
-    'Include my notes about this character',
+    'Include my written text (alignment, appearance, backstory, notes)',
   ]) {
     await expect(page.getByLabel(label)).not.toBeChecked();
   }
@@ -219,4 +258,34 @@ test('creates, independently verifies, previews, and explicitly imports a durabl
   } finally {
     await freshProfile.close();
   }
+});
+
+test('oversized share refusal exposes no link, copy, share, or QR output', async ({
+  page,
+}) => {
+  const bytes = await oversizedShareImage();
+  await page.goto('/');
+  await ready(page);
+  await page.evaluate(
+    (image) => window.staticApp.replaceDatabase(Uint8Array.from(image)),
+    bytes,
+  );
+  await page.reload();
+  await ready(page);
+
+  await page
+    .getByRole('button', { name: 'Share Oversized Hero by link' })
+    .click();
+  await page.getByRole('button', { name: 'Create share link' }).click();
+
+  await expect(page.locator('.share-status')).toHaveText(
+    'This character is too large to share as a link. Share links are limited to 131,072 encoded characters.',
+  );
+  const output = page.getByLabel('Generated character share link');
+  await expect.soft(output).toBeHidden();
+  await expect.soft(output).toHaveValue('');
+  await expect.soft(page.getByRole('button', { name: 'Copy link' })).toBeHidden();
+  await expect.soft(page.getByRole('button', { name: 'Share…' })).toBeHidden();
+  await expect.soft(page.locator('.share-qr')).toBeHidden();
+  await expect.soft(page.locator('.share-qr')).not.toHaveAttribute('src');
 });

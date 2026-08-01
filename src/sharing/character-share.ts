@@ -85,10 +85,10 @@ export interface ShareExportOptions {
   /**
    * All four character-authored text fields: alignment, appearance, backstory,
    * and notes. D124 generalizes the existing notes opt-in rather than adding
-   * per-field privacy controls. The stored key remains `notes` until FF-B owns
-   * the visible label; only an explicit `true` includes any written text.
+   * per-field privacy controls. Only an explicit `true` includes any written
+   * text.
    */
-  readonly notes?: boolean;
+  readonly writtenText?: boolean;
 }
 
 export interface ShareImportResult {
@@ -989,7 +989,7 @@ export function exportCharacterShare(
   // exporting `''` would refuse to build the link at all over a note nobody
   // wrote.
   const writtenText = (value: unknown): string | undefined =>
-    options.notes === true &&
+    options.writtenText === true &&
     value !== null &&
     value !== undefined &&
     String(value).trim() !== ''
