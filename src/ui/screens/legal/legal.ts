@@ -35,10 +35,10 @@ export function renderLegalPage(): string {
           <p>The class list, the cantrip and spell-slot progressions, and the
             multiclass spellcaster slot table SRD-55 calculates with are
             derived from that document.</p>
-          <p>Spell descriptions and other rules text come from catalogs you
-            import from your own copies. They stay in your browser: nothing you
-            import is uploaded, and a share link carries your own choices —
-            spell identifiers and names — never rules text.</p>
+          <p>Spell descriptions and other rules text include bundled SRD 5.2.1
+            content. Catalogs you import from your own copies stay in your
+            browser: nothing you import is uploaded, and a share link carries
+            your own choices — spell identifiers and names — never rules text.</p>
         </section>
       </main>
     </div>`;
