@@ -5,6 +5,9 @@ import {
   LEVEL_UP_PANEL_ATTRIBUTE,
   LEVEL_UP_RPC,
   matchesLevelUpRoute,
+  type LevelUpFeatApplication,
+  type LevelUpFeatCandidate,
+  type LevelUpFeatOccurrence,
   type LevelUpGuideableClassOption,
   type LevelUpPendingEpicResolution,
   type LevelUpPermanentWarning,
@@ -72,6 +75,7 @@ function classOption(options: {
   readonly steps?: readonly LevelUpStep[];
   readonly hp?: LevelUpGuideableClassOption['gains']['hit_points'];
   readonly subclass?: boolean;
+  readonly featOccurrence?: LevelUpFeatOccurrence | null;
 } = {}): LevelUpGuideableClassOption {
   const current = options.current ?? 1;
   return {
@@ -125,11 +129,13 @@ function classOption(options: {
           ],
         }
       : null,
-    feat_occurrence: null,
+    feat_occurrence: options.featOccurrence ?? null,
   };
 }
 
-function pendingEpicResolution(): LevelUpPendingEpicResolution {
+function pendingEpicResolution(
+  candidates: readonly LevelUpFeatCandidate[] = [],
+): LevelUpPendingEpicResolution {
   return {
     deferred_choice: {
       character_level_feat_choice_id: 19 as CharacterLevelFeatChoiceId,
@@ -143,8 +149,75 @@ function pendingEpicResolution(): LevelUpPendingEpicResolution {
       category: 'outstanding_choice',
       title: 'Epic Boon choice still needed',
     },
-    candidates: [],
+    candidates,
     applicable_steps: ['epic_boon', 'review', 'complete'],
+  };
+}
+
+function boonCandidate(options: {
+  readonly key?: string;
+  readonly name?: string;
+  readonly status?: 'qualified' | 'unmet' | 'unprovable';
+} = {}): LevelUpFeatCandidate {
+  const key = options.key ?? '2024:feat:boon-of-fate';
+  const status = options.status ?? 'qualified';
+  const eligibility = status === 'qualified'
+    ? { status, reasons: [] } as const
+    : status === 'unmet'
+      ? {
+          status,
+          reasons: [{ kind: 'minimum_level', minimum: 19 as CharacterLevel, actual: 18 as CharacterLevel }],
+        } as const
+      : {
+          status,
+          reasons: [{ kind: 'ability_score_unknown', abilities: ['wisdom'] as const, minimum: 13 }],
+        } as const;
+  const application: LevelUpFeatApplication = {
+    selection: {
+      kind: 'feat',
+      feat_content_key: key,
+      config: {},
+      ability_increases: [{ ability: 'wisdom', amount: 1 }],
+    },
+    plan: {
+      feat_content_key: key as ContentKey,
+      eligibility,
+      config: {},
+      effects: [{
+        effect_kind: 'ability_increase',
+        ability: 'wisdom',
+        amount: 1,
+        maximum: 30,
+        label: 'Boon of Fate: Ability Score Increase',
+        notes: null,
+      }],
+      grant_rules: [],
+      text_benefits: [{
+        benefit_key: 'improve-fate',
+        label: 'Improve Fate',
+        text: 'Returned Boon benefit text.',
+        gap: 'epic_boon_benefit_text_only',
+      }],
+      undetermined_numbers: [],
+    },
+  };
+  return {
+    definition: {
+      content_key: key as ContentKey,
+      name: options.name ?? 'Boon of Fate',
+      grouping: 'epic_boon',
+      min_level: 19 as CharacterLevel,
+      ability_points: 1,
+      ability_increase_abilities: 'any',
+      ability_increase_maximum: 30,
+      repeatable: false,
+      prerequisites: [],
+      grant_rules: [],
+      notes: 'Returned Boon benefit text.',
+    },
+    eligibility,
+    is_class_default: false,
+    applications: [application],
   };
 }
 
@@ -152,6 +225,7 @@ function ready(options: {
   readonly classes?: Extract<LevelUpStateResult, { readonly kind: 'ready' }>['class_options'];
   readonly warnings?: readonly LevelUpPermanentWarning[];
   readonly pendingEpic?: boolean;
+  readonly pendingEpicCandidates?: readonly LevelUpFeatCandidate[];
 } = {}): Extract<LevelUpStateResult, { readonly kind: 'ready' }> {
   return {
     kind: 'ready',
@@ -164,7 +238,7 @@ function ready(options: {
     },
     class_options: options.classes ?? [classOption()],
     pending_epic_resolution: options.pendingEpic
-      ? pendingEpicResolution()
+      ? pendingEpicResolution(options.pendingEpicCandidates)
       : null,
   };
 }
@@ -383,6 +457,48 @@ describe('W-HP-UNKNOWN projected Gains', () => {
   });
 });
 
+describe('W-FEAT-17 controller selection', () => {
+  it('requires one qualified returned application before leaving an ASI occurrence', () => {
+    const base = boonCandidate({
+      key: '2024:feat:ability-score-improvement',
+      name: 'Ability Score Improvement',
+    });
+    const asi: LevelUpFeatCandidate = {
+      ...base,
+      definition: {
+        ...base.definition,
+        grouping: 'general',
+        min_level: 4 as CharacterLevel,
+        ability_points: 2,
+        ability_increase_maximum: 20,
+      },
+      is_class_default: true,
+    };
+    const wizard = createLevelUpWizard({
+      state: ready({
+        classes: [classOption({
+          current: 3,
+          steps: ['class', 'gains', 'feat', 'review', 'complete'],
+          featOccurrence: { kind: 'asi_level_feat', candidates: [asi] },
+        })],
+      }),
+      cancel: () => undefined,
+    });
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    expect(currentRailStep(wizard.element)).toBe('feat');
+    click(wizard.element, LEVEL_UP_ATTR.next);
+
+    expect(elementText(document.activeElement as unknown as Node)).toBe(
+      'Choose a feat for this class level.',
+    );
+    chooseRadio(wizard.element, '2024:feat:ability-score-improvement:0');
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    expect(currentRailStep(wizard.element)).toBe('review');
+    wizard.cleanup();
+  });
+});
+
 describe('W-FOCUS navigation and errors', () => {
   it('moves focus to each new heading after Next and Back', () => {
     const wizard = createLevelUpWizard({ state: ready(), cancel: () => undefined });
@@ -509,6 +625,93 @@ describe('D118 and D119 route choices', () => {
         `[${LEVEL_UP_PANEL_ATTRIBUTE}="${LEVEL_UP_PANEL.epicBoon}"]`,
       ),
     ).not.toBeNull();
+    wizard.cleanup();
+  });
+
+  it('W-EPIC-DEFER carries an explicit defer choice and pinned warning into Review', () => {
+    const occurrence: LevelUpFeatOccurrence = {
+      kind: 'epic_boon',
+      candidates: [boonCandidate()],
+    };
+    const wizard = createLevelUpWizard({
+      state: ready({
+        classes: [classOption({
+          current: 18,
+          steps: ['class', 'gains', 'epic_boon', 'review', 'complete'],
+          featOccurrence: occurrence,
+        })],
+      }),
+      cancel: () => undefined,
+    });
+
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    expect(elementText(wizard.element)).toContain('Choose an Epic Boon');
+    expect(elementText(wizard.element)).toContain('Decide later');
+    chooseRadio(wizard.element, 'defer_epic_boon');
+    expect(elementText(wizard.element)).toContain('Epic Boon choice still needed');
+    click(wizard.element, LEVEL_UP_ATTR.next);
+
+    expect(currentRailStep(wizard.element)).toBe('review');
+    expect(
+      wizard.element.querySelector(
+        `[${LEVEL_UP_ATTR.warning}="epic_boon_deferred"]`,
+      ),
+    ).not.toBeNull();
+    expect(elementText(wizard.element)).toContain('Epic Boon choice still needed');
+    wizard.cleanup();
+  });
+
+  it('renders qualified Boon cards in the no-level resolution pass with the exact rail', () => {
+    const qualifiedBoon = boonCandidate();
+    const unprovableBoon = boonCandidate({
+      key: '2024:feat:boon-of-truesight',
+      name: 'Boon of Truesight',
+      status: 'unprovable',
+    });
+    const wizard = createLevelUpWizard({
+      state: ready({
+        pendingEpic: true,
+        pendingEpicCandidates: [qualifiedBoon, unprovableBoon],
+      }),
+      cancel: () => undefined,
+    });
+    chooseRadio(wizard.element, 'resolve_now');
+    click(wizard.element, LEVEL_UP_ATTR.next);
+
+    expect(stepNames(wizard.element)).toEqual(['epic_boon', 'review', 'complete']);
+    expect(stepNames(wizard.element)).not.toContain('class');
+    expect(stepNames(wizard.element)).not.toContain('gains');
+    expect(elementText(wizard.element)).toContain('Returned Boon benefit text.');
+    const unprovableCard = interactiveElement(wizard.element).querySelector(
+      '[data-level-up-feat-card="2024:feat:boon-of-truesight"]',
+    );
+    expect(unprovableCard).toBeNull();
+    chooseRadio(wizard.element, '2024:feat:boon-of-fate:0');
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    expect(currentRailStep(wizard.element)).toBe('review');
+    expect(elementText(wizard.element)).not.toContain('level 20 complete');
+    wizard.cleanup();
+  });
+
+  it('keeps the pinned deferred warning visible while proceeding to the next level', () => {
+    const wizard = createLevelUpWizard({
+      state: ready({
+        pendingEpic: true,
+        pendingEpicCandidates: [boonCandidate()],
+      }),
+      cancel: () => undefined,
+    });
+    chooseRadio(wizard.element, 'next_level');
+    click(wizard.element, LEVEL_UP_ATTR.next);
+
+    expect(currentRailStep(wizard.element)).toBe('gains');
+    expect(
+      wizard.element.querySelector(
+        `[${LEVEL_UP_ATTR.warning}="epic_boon_deferred"]`,
+      ),
+    ).not.toBeNull();
+    expect(elementText(wizard.element)).toContain('Epic Boon choice still needed');
     wizard.cleanup();
   });
 
