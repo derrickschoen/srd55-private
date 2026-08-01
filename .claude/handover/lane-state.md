@@ -39,6 +39,23 @@ v1) cannot land until most of the CI chain lands.
 - Briefs ready and unblocked-when-their-deps-land: p1-gh/gl/cb, p2..p7,
   ff-b, ff-c, doc-c (do NOT dispatch until CI-4b merges), ar-* per NOTES.
 
+## MACHINE-WIDE GATE BLOCKER (2026-08-01) — and its evidence
+Eight concurrent lanes exceeded what main's per-test timeouts tolerate. THREE
+independent lanes failed their full Playwright on the SAME one or two tests:
+  tests/browser/reports-and-print.spec.ts:83  — 36.3s ALONE (W-C), 34.9-35.8s
+    (D91-R), i.e. over the 30s default even uncontended
+  tests/browser/php-feature-parity.spec.ts:1520 — 25.2s alone, <20% margin
+PROVEN NOT CAUSED BY THE UNITS: in wt/resp the supervisor stashed RESP-1's
+entire diff and the same test failed identically, then restored it. So the
+failure is attributable to load and to alone-times near the ceiling, not to
+any lane's changes.
+FIX IN FLIGHT: SUITE-HYGIENE-2 in wt/hyg2 (branched from main, log hyg2.log,
+port 44493) adds measured per-test timeouts to both, plus any other test in
+those two files at/over 15s alone. MERGE IT FIRST; every other lane then
+merges main and re-runs its full Playwright ONCE for a clean signal.
+DO NOT merge a unit on a red suite. DO NOT accept a global --timeout override
+as a gate result (rejected once already this session).
+
 ## D91-R: D143a fallback taken (round 3 of 3)
 Round 3 found the last per-family gap at sheet.ts:1760 — an invalid base
 progression_type IS the family discriminator, so neither family is knowable,
