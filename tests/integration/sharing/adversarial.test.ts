@@ -1570,6 +1570,7 @@ describe('adversarial character-share fidelity', () => {
     expectDatabaseIntegrity(target);
   });
 
+  // Measured at 1.986s alone on this worktree; full-suite contention can exceed 5s.
   it('keeps preview and induced import failures byte-isolated and checks successful images', async () => {
     const target = await database();
     seedSemanticCatalog(target);
@@ -1663,7 +1664,7 @@ describe('adversarial character-share fidelity', () => {
       semanticProjection(target, imported.characterId).character.name,
     ).toBe('Semantic Hero');
     expectDatabaseIntegrity(target);
-  });
+  }, 20_000);
 });
 
 describe('adversarial character-share rejection', () => {
