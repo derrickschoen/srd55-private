@@ -1404,7 +1404,7 @@ function absentResource(
   kind: SheetResourceKind | null,
   reason: Extract<SheetResourceMaximum, { status: 'absent' }>['reason'],
   detail: string,
-): SheetResourceMaximum {
+): Extract<SheetResourceMaximum, { status: 'absent' }> {
   return {
     status: 'absent',
     id,
@@ -1529,7 +1529,11 @@ function decodedSlots(stored: unknown): DecodedSlots {
 }
 
 type DecodedPact =
-  | { readonly status: 'valid'; readonly count: number; readonly level: SpellLevel }
+  | {
+      readonly status: 'valid';
+      readonly count: PositiveResourceMaximum;
+      readonly level: SpellLevel;
+    }
   | { readonly status: 'invalid' };
 
 function decodedPact(stored: unknown): DecodedPact {
@@ -1551,9 +1555,9 @@ function decodedPact(stored: unknown): DecodedPact {
     return { status: 'invalid' };
   }
   const record = decoded as Record<string, unknown>;
+  const count = positiveResourceMaximum(record.count);
   if (
-    !Number.isSafeInteger(record.count) ||
-    Number(record.count) < 1 ||
+    count === null ||
     !Number.isSafeInteger(record.level) ||
     Number(record.level) < 1 ||
     Number(record.level) > 5
@@ -1562,7 +1566,7 @@ function decodedPact(stored: unknown): DecodedPact {
   }
   return {
     status: 'valid',
-    count: Number(record.count),
+    count,
     level: spellLevel(Number(record.level)),
   };
 }
@@ -1596,7 +1600,7 @@ function spellAbsence(
   detail: string,
   entry: SheetResourceClassInput | null = null,
   scope: 'base' | 'subclass' = 'base',
-): SheetResourceMaximum {
+): Extract<SheetResourceMaximum, { readonly status: 'absent' }> {
   return absentResource(
     entry === null
       ? 'resource:spell-progression-absent'
@@ -1606,6 +1610,264 @@ function spellAbsence(
     'spell_progression_missing_or_invalid',
     detail,
   );
+}
+
+type ComputedSheetResourceMaximum = Extract<
+  SheetResourceMaximum,
+  { readonly status: 'computed' }
+>;
+
+type SpellSlotSection =
+  | {
+      readonly status: 'computed';
+      readonly rows: readonly ComputedSheetResourceMaximum[];
+    }
+  | {
+      readonly status: 'absent';
+      readonly absence: Extract<
+        SheetResourceMaximum,
+        { readonly status: 'absent' }
+      >;
+    };
+
+function resolveSpellSlotSection(
+  classes: readonly SheetResourceClassInput[],
+): SpellSlotSection {
+  const sharedBase: Array<{
+    readonly contribution: CasterContribution;
+    readonly slots: Readonly<Record<number, number>>;
+  }> = [];
+  const sharedSubclass: CasterContribution[] = [];
+  const pactContributions: Array<{
+    readonly class_definition_id: ClassDefinitionId;
+    readonly class_name: string;
+    readonly class_level: ClassLevel;
+    readonly contribution: CasterContribution;
+    readonly exact: Extract<DecodedPact, { readonly status: 'valid' }>;
+  }> = [];
+  let absence: Extract<
+    SheetResourceMaximum,
+    { readonly status: 'absent' }
+  > | null = null;
+
+  for (const entry of classes) {
+    const classLevel = sheetClassLevel(entry.class_level);
+    if (!isProgressionType(entry.base_spellcasting.progression_type)) {
+      absence ??= spellAbsence(
+        ' has a missing or invalid spell progression type.',
+        entry,
+      );
+    } else {
+      const baseType = entry.base_spellcasting.progression_type;
+      if (baseType !== 'none') {
+        if (
+          classLevel === null ||
+          entry.base_spellcasting.progression_row.status === 'missing'
+        ) {
+          absence ??= spellAbsence(
+            ' has a missing or invalid progression row at its current class level.',
+            entry,
+          );
+        } else {
+          const contribution = new CasterContribution(
+            entry.class_name,
+            classLevel,
+            baseType,
+          );
+          if (baseType === 'pact') {
+            const exact = decodedPact(
+              entry.base_spellcasting.progression_row.pact_slots,
+            );
+            if (exact.status === 'invalid') {
+              absence ??= spellAbsence(
+                ' has missing or invalid Pact Magic slot content.',
+                entry,
+              );
+            } else {
+              pactContributions.push({
+                class_definition_id: entry.class_definition_id,
+                class_name: entry.class_name,
+                class_level: classLevel,
+                contribution,
+                exact,
+              });
+            }
+          } else {
+            const exact = decodedSlots(
+              entry.base_spellcasting.progression_row.slots,
+            );
+            if (
+              exact.status === 'invalid' ||
+              (Object.keys(exact.value).length > 0) !==
+                (contribution.casterLevels() > 0)
+            ) {
+              absence ??= spellAbsence(
+                ' has missing or invalid shared spell-slot content.',
+                entry,
+              );
+            } else {
+              sharedBase.push({ contribution, slots: exact.value });
+            }
+          }
+        }
+      }
+    }
+
+    if (entry.subclass_spellcasting !== null) {
+      const subclassType = subclassProgressionType(
+        entry.subclass_spellcasting.caster_fraction,
+        entry.subclass_spellcasting.caster_rounding,
+      );
+      if (subclassType === 'invalid') {
+        absence ??= spellAbsence(
+          "'s subclass has a missing or invalid spell progression type.",
+          entry,
+          'subclass',
+        );
+      } else if (subclassType !== 'none') {
+        if (
+          classLevel === null ||
+          entry.subclass_spellcasting.progression_row.status === 'missing'
+        ) {
+          absence ??= spellAbsence(
+            "'s subclass has a missing or invalid progression row at its current class level.",
+            entry,
+            'subclass',
+          );
+        } else {
+          const contribution = new CasterContribution(
+            `${entry.class_name} subclass`,
+            classLevel,
+            subclassType,
+          );
+          const exact = decodedSlots(
+            entry.subclass_spellcasting.progression_row.slots,
+          );
+          if (
+            exact.status === 'invalid' ||
+            (Object.keys(exact.value).length > 0) !==
+              (contribution.casterLevels() > 0)
+          ) {
+            absence ??= spellAbsence(
+              "'s subclass has missing or invalid shared spell-slot content.",
+              entry,
+              'subclass',
+            );
+          } else {
+            sharedSubclass.push(contribution);
+          }
+        }
+      }
+    }
+  }
+
+  if (absence !== null) {
+    return { status: 'absent', absence };
+  }
+
+  const rows: ComputedSheetResourceMaximum[] = [];
+  const sharedContributions = [
+    ...sharedBase.map((entry) => entry.contribution),
+    ...sharedSubclass,
+  ];
+  let sharedSlots: Readonly<Record<number, number>>;
+  if (sharedBase.length === 1 && sharedSubclass.length === 0) {
+    const soleBase = sharedBase[0];
+    if (soleBase === undefined) {
+      throw new TypeError('The sole shared caster contribution is missing.');
+    }
+    sharedSlots = soleBase.slots;
+  } else {
+    sharedSlots = slots(sharedContributions);
+  }
+  const effectiveLevel = casterLevel(sharedContributions);
+  const typedEffectiveLevel =
+    effectiveLevel === 0 ? null : sheetClassLevel(effectiveLevel);
+  for (const [levelText, maximumValue] of Object.entries(sharedSlots)) {
+    const level = spellLevel(Number(levelText));
+    const maximum = positiveResourceMaximum(maximumValue);
+    if (maximum === null || typedEffectiveLevel === null) {
+      return {
+        status: 'absent',
+        absence: spellAbsence(
+          'The shared spell-slot result is missing or invalid.',
+        ),
+      };
+    }
+    rows.push({
+      status: 'computed',
+      id: `resource:spell-slot:${String(level)}`,
+      kind: 'spell_slot',
+      class_definition_id: null,
+      class_name: null,
+      class_level: null,
+      spell_level: level,
+      maximum,
+      computation: {
+        kind: 'shared_spell_slots',
+        effective_caster_level: typedEffectiveLevel,
+      },
+    });
+  }
+
+  if (pactContributions.length === 1) {
+    const pact = pactContributions[0];
+    if (pact === undefined) {
+      throw new TypeError('The sole Pact caster contribution is missing.');
+    }
+    rows.push({
+      status: 'computed',
+      id: 'resource:pact-slot',
+      kind: 'pact_slot',
+      class_definition_id: pact.class_definition_id,
+      class_name: pact.class_name,
+      class_level: pact.class_level,
+      spell_level: pact.exact.level,
+      maximum: pact.exact.count,
+      computation: {
+        kind: 'pact_magic',
+        class_level: pact.class_level,
+        spell_level: pact.exact.level,
+      },
+    });
+  } else if (pactContributions.length > 1) {
+    const combined = pactMagic(
+      pactContributions.map((entry) => entry.contribution),
+    );
+    const combinedLevel = sheetClassLevel(
+      pactContributions.reduce(
+        (sum, entry) => sum + Number(entry.class_level),
+        0,
+      ),
+    );
+    const maximum = positiveResourceMaximum(combined?.count);
+    if (combined === null || combinedLevel === null || maximum === null) {
+      return {
+        status: 'absent',
+        absence: spellAbsence(
+          'The combined Pact Magic result is missing or invalid.',
+        ),
+      };
+    }
+    const level = spellLevel(combined.level);
+    rows.push({
+      status: 'computed',
+      id: 'resource:pact-slot',
+      kind: 'pact_slot',
+      class_definition_id: null,
+      class_name: null,
+      class_level: combinedLevel,
+      spell_level: level,
+      maximum,
+      computation: {
+        kind: 'pact_magic',
+        class_level: combinedLevel,
+        spell_level: level,
+      },
+    });
+  }
+
+  return { status: 'computed', rows };
 }
 
 /** Compute every sourced resource maximum without storing spending state. */
@@ -1740,239 +2002,11 @@ export function resolveSheetResources(
     );
   }
 
-  const sharedBase: Array<{
-    readonly contribution: CasterContribution;
-    readonly slots: Readonly<Record<number, number>>;
-  }> = [];
-  const sharedSubclass: CasterContribution[] = [];
-  const pactContributions: Array<{
-    readonly class_definition_id: ClassDefinitionId;
-    readonly class_name: string;
-    readonly class_level: ClassLevel;
-    readonly contribution: CasterContribution;
-    readonly exact: DecodedPact;
-  }> = [];
-  let sharedFamilyValid = true;
-  let pactFamilyValid = true;
-
-  for (const entry of classes) {
-    const classLevel = sheetClassLevel(entry.class_level);
-    if (!isProgressionType(entry.base_spellcasting.progression_type)) {
-      resolved.push(
-        spellAbsence(
-          ' has a missing or invalid spell progression type.',
-          entry,
-        ),
-      );
-    } else {
-      const baseType = entry.base_spellcasting.progression_type;
-      if (baseType !== 'none') {
-        if (classLevel === null || entry.base_spellcasting.progression_row.status === 'missing') {
-          resolved.push(
-            spellAbsence(
-              ' has a missing or invalid progression row at its current class level.',
-              entry,
-            ),
-          );
-          if (baseType === 'pact') {
-            pactFamilyValid = false;
-          } else {
-            sharedFamilyValid = false;
-          }
-        } else {
-          const contribution = new CasterContribution(
-            entry.class_name,
-            classLevel,
-            baseType,
-          );
-          if (baseType === 'pact') {
-            const exact = decodedPact(entry.base_spellcasting.progression_row.pact_slots);
-            if (exact.status === 'invalid') {
-              resolved.push(
-                spellAbsence(
-                  ' has missing or invalid Pact Magic slot content.',
-                  entry,
-                ),
-              );
-              pactFamilyValid = false;
-            } else {
-              pactContributions.push({
-                class_definition_id: entry.class_definition_id,
-                class_name: entry.class_name,
-                class_level: classLevel,
-                contribution,
-                exact,
-              });
-            }
-          } else {
-            const exact = decodedSlots(entry.base_spellcasting.progression_row.slots);
-            if (
-              exact.status === 'invalid' ||
-              (Object.keys(exact.value).length > 0) !==
-                (contribution.casterLevels() > 0)
-            ) {
-              resolved.push(
-                spellAbsence(
-                  ' has missing or invalid shared spell-slot content.',
-                  entry,
-                ),
-              );
-              sharedFamilyValid = false;
-            } else {
-              sharedBase.push({ contribution, slots: exact.value });
-            }
-          }
-        }
-      }
-    }
-
-    if (entry.subclass_spellcasting !== null) {
-      const subclassType = subclassProgressionType(
-        entry.subclass_spellcasting.caster_fraction,
-        entry.subclass_spellcasting.caster_rounding,
-      );
-      if (subclassType === 'invalid') {
-        resolved.push(
-          spellAbsence(
-            "'s subclass has a missing or invalid spell progression type.",
-            entry,
-            'subclass',
-          ),
-        );
-        sharedFamilyValid = false;
-      } else if (subclassType !== 'none') {
-        if (classLevel === null || entry.subclass_spellcasting.progression_row.status === 'missing') {
-          resolved.push(
-            spellAbsence(
-              "'s subclass has a missing or invalid progression row at its current class level.",
-              entry,
-              'subclass',
-            ),
-          );
-          sharedFamilyValid = false;
-        } else {
-          const contribution = new CasterContribution(
-            `${entry.class_name} subclass`,
-            classLevel,
-            subclassType,
-          );
-          const exact = decodedSlots(entry.subclass_spellcasting.progression_row.slots);
-          if (
-            exact.status === 'invalid' ||
-            (Object.keys(exact.value).length > 0) !==
-              (contribution.casterLevels() > 0)
-          ) {
-            resolved.push(
-              spellAbsence(
-                "'s subclass has missing or invalid shared spell-slot content.",
-                entry,
-                'subclass',
-              ),
-            );
-            sharedFamilyValid = false;
-          } else {
-            sharedSubclass.push(contribution);
-          }
-        }
-      }
-    }
-  }
-
-  const sharedContributions = [
-    ...sharedBase.map((entry) => entry.contribution),
-    ...sharedSubclass,
-  ];
-  if (sharedFamilyValid) {
-    let sharedSlots: Readonly<Record<number, number>>;
-    if (sharedBase.length === 1 && sharedSubclass.length === 0) {
-      const soleBase = sharedBase[0];
-      if (soleBase === undefined) {
-        throw new TypeError('The sole shared caster contribution is missing.');
-      }
-      sharedSlots = soleBase.slots;
-    } else {
-      sharedSlots = slots(sharedContributions);
-    }
-    const effectiveLevel = casterLevel(sharedContributions);
-    const typedEffectiveLevel =
-      effectiveLevel === 0 ? null : sheetClassLevel(effectiveLevel);
-    for (const [levelText, maximumValue] of Object.entries(sharedSlots)) {
-      const level = spellLevel(Number(levelText));
-      const maximum = positiveResourceMaximum(maximumValue);
-      if (maximum === null || typedEffectiveLevel === null) {
-        resolved.push(spellAbsence('The shared spell-slot result is missing or invalid.'));
-        break;
-      }
-      resolved.push({
-        status: 'computed',
-        id: `resource:spell-slot:${String(level)}`,
-        kind: 'spell_slot',
-        class_definition_id: null,
-        class_name: null,
-        class_level: null,
-        spell_level: level,
-        maximum,
-        computation: {
-          kind: 'shared_spell_slots',
-          effective_caster_level: typedEffectiveLevel,
-        },
-      });
-    }
-  }
-
-  if (!pactFamilyValid) {
-    return resolved;
-  }
-  if (pactContributions.length === 1) {
-    const pact = pactContributions[0];
-    if (pact === undefined) {
-      throw new TypeError('The sole Pact caster contribution is missing.');
-    }
-    if (pact.exact.status === 'invalid') {
-      throw new TypeError('An invalid Pact result crossed its validation branch.');
-    }
-    const maximum = positiveResourceMaximum(pact.exact.count);
-    if (maximum === null) {
-      resolved.push(spellAbsence('The Pact Magic slot count is invalid.'));
-      return resolved;
-    }
-    resolved.push({
-      status: 'computed',
-      id: 'resource:pact-slot',
-      kind: 'pact_slot',
-      class_definition_id: pact.class_definition_id,
-      class_name: pact.class_name,
-      class_level: pact.class_level,
-      spell_level: pact.exact.level,
-      maximum,
-      computation: {
-        kind: 'pact_magic',
-        class_level: pact.class_level,
-        spell_level: pact.exact.level,
-      },
-    });
-  } else if (pactContributions.length > 1) {
-    const combined = pactMagic(pactContributions.map((entry) => entry.contribution));
-    const combinedLevel = sheetClassLevel(
-      pactContributions.reduce((sum, entry) => sum + Number(entry.class_level), 0),
-    );
-    const maximum = positiveResourceMaximum(combined?.count);
-    if (combined === null || combinedLevel === null || maximum === null) {
-      resolved.push(spellAbsence('The combined Pact Magic result is missing or invalid.'));
-      return resolved;
-    }
-    const level = spellLevel(combined.level);
-    resolved.push({
-      status: 'computed',
-      id: 'resource:pact-slot',
-      kind: 'pact_slot',
-      class_definition_id: null,
-      class_name: null,
-      class_level: combinedLevel,
-      spell_level: level,
-      maximum,
-      computation: { kind: 'pact_magic', class_level: combinedLevel, spell_level: level },
-    });
+  const spellSection = resolveSpellSlotSection(classes);
+  if (spellSection.status === 'absent') {
+    resolved.push(spellSection.absence);
+  } else {
+    resolved.push(...spellSection.rows);
   }
 
   return resolved;

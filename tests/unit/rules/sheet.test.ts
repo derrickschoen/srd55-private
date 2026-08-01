@@ -1540,7 +1540,7 @@ describe('sheet resource maxima', () => {
     ).toEqual([['pact_slot', null, 5, 3, 2]]);
   });
 
-  it('invalid shared-caster content leaves valid Pact rows present', () => {
+  it('invalid shared-caster content suppresses the whole spell-slot section', () => {
     const invalidWizard = resourceClass(1, 'Wizard', 3, {
       base_spellcasting: {
         progression_type: 'full',
@@ -1577,11 +1577,10 @@ describe('sheet resource maxima', () => {
         'Wizard',
         'resource:1:base-spell-progression-absent',
       ],
-      ['pact_slot', 2, 2],
     ]);
   });
 
-  it('invalid zero-effective-level shared content leaves valid Pact rows present', () => {
+  it('invalid zero-effective-level shared content suppresses the whole spell-slot section', () => {
     const invalidRoundedDownCaster = resourceClass(1, 'Spellblade', 1, {
       base_spellcasting: {
         progression_type: 'half_down',
@@ -1618,11 +1617,10 @@ describe('sheet resource maxima', () => {
         'Spellblade',
         'resource:1:base-spell-progression-absent',
       ],
-      ['pact_slot', 2, 2],
     ]);
   });
 
-  it('invalid Pact content leaves valid shared-caster rows present', () => {
+  it('invalid Pact content suppresses the whole spell-slot section', () => {
     const invalidWarlock = resourceClass(1, 'Warlock', 3, {
       base_spellcasting: {
         progression_type: 'pact',
@@ -1659,11 +1657,10 @@ describe('sheet resource maxima', () => {
         'Warlock',
         'resource:1:base-spell-progression-absent',
       ],
-      ['spell_slot', 1, 3],
     ]);
   });
 
-  it('invalid Wizard plus valid Cleric makes shared slots absent while Pact remains present', () => {
+  it('invalid Wizard plus valid Cleric and Warlock suppresses the whole spell-slot section', () => {
     const invalidWizard = resourceClass(1, 'Wizard', 3, {
       base_spellcasting: {
         progression_type: 'full',
@@ -1687,8 +1684,8 @@ describe('sheet resource maxima', () => {
       },
     });
 
-    // Negative control: discard the invalid Wizard and continue with the
-    // reduced shared set; the extra Cleric-only spell-slot row fails this test.
+    // Negative control: suppress only the invalid Wizard's shared family; the
+    // valid Warlock Pact row would survive and fail this whole-section ruling.
     expect(
       resolveSheetResources(
         [invalidWizard, validCleric, validWarlock],
@@ -1704,11 +1701,10 @@ describe('sheet resource maxima', () => {
         'Wizard',
         'resource:1:base-spell-progression-absent',
       ],
-      ['pact_slot', 2, 2],
     ]);
   });
 
-  it('one invalid Pact contributor makes Pact absent while shared slots remain present', () => {
+  it('one invalid Pact contributor suppresses the whole spell-slot section', () => {
     const invalidWarlock = resourceClass(1, 'Warlock', 3, {
       base_spellcasting: {
         progression_type: 'pact',
@@ -1732,8 +1728,8 @@ describe('sheet resource maxima', () => {
       },
     });
 
-    // Negative control: discard the invalid Warlock and continue with the
-    // reduced Pact set; the extra Hexbinder Pact row fails this test.
+    // Negative control: suppress only the invalid Warlock's Pact family; the
+    // valid Wizard shared row would survive and fail this whole-section ruling.
     expect(
       resolveSheetResources(
         [invalidWarlock, validHexbinder, validWizard],
@@ -1749,7 +1745,218 @@ describe('sheet resource maxima', () => {
         'Warlock',
         'resource:1:base-spell-progression-absent',
       ],
-      ['spell_slot', 1, 3],
+    ]);
+  });
+
+  it('round 3: invalid progression_type beside valid Cleric and Warlock suppresses the whole section', () => {
+    const invalidDiscriminator = resourceClass(1, 'Broken Mage', 3, {
+      base_spellcasting: {
+        progression_type: 'corrupt',
+        progression_row: {
+          status: 'present',
+          slots: '{"1":4,"2":2}',
+          pact_slots: '[]',
+        },
+      },
+    });
+    const validCleric = resourceClass(2, 'Cleric', 2, {
+      base_spellcasting: {
+        progression_type: 'full',
+        progression_row: {
+          status: 'present',
+          slots: '{"1":3}',
+          pact_slots: '[]',
+        },
+      },
+    });
+    const validWarlock = resourceClass(3, 'Warlock', 3, {
+      base_spellcasting: {
+        progression_type: 'pact',
+        progression_row: {
+          status: 'present',
+          slots: '[]',
+          pact_slots: '{"count":2,"level":2}',
+        },
+      },
+    });
+
+    // Mutation killed: record the invalid discriminator but continue with the
+    // remaining contributors, restoring partial shared and Pact printing.
+    expect(
+      resolveSheetResources(
+        [invalidDiscriminator, validCleric, validWarlock],
+        PRESENT_ABILITIES,
+      ),
+    ).toEqual([
+      {
+        status: 'absent',
+        id: 'resource:1:base-spell-progression-absent',
+        kind: null,
+        class_name: 'Broken Mage',
+        reason: 'spell_progression_missing_or_invalid',
+        detail: ' has a missing or invalid spell progression type.',
+      },
+    ]);
+  });
+
+  it('a missing progression row suppresses valid Pact rows', () => {
+    const missingWizardRow = resourceClass(1, 'Wizard', 3, {
+      base_spellcasting: {
+        progression_type: 'full',
+        progression_row: { status: 'missing' },
+      },
+    });
+    const validWarlock = resourceClass(2, 'Warlock', 3, {
+      base_spellcasting: {
+        progression_type: 'pact',
+        progression_row: {
+          status: 'present',
+          slots: '[]',
+          pact_slots: '{"count":2,"level":2}',
+        },
+      },
+    });
+
+    expect(
+      resolveSheetResources(
+        [missingWizardRow, validWarlock],
+        PRESENT_ABILITIES,
+      ).map((entry) =>
+        entry.status === 'computed'
+          ? [entry.kind, entry.spell_level, entry.maximum]
+          : [entry.reason, entry.class_name, entry.detail],
+      ),
+    ).toEqual([
+      [
+        'spell_progression_missing_or_invalid',
+        'Wizard',
+        ' has a missing or invalid progression row at its current class level.',
+      ],
+    ]);
+  });
+
+  it('reports only the first invalid spell contributor and suppresses all slot rows', () => {
+    const invalidWizard = resourceClass(1, 'Wizard', 3, {
+      base_spellcasting: {
+        progression_type: 'full',
+        progression_row: { status: 'present', slots: '{}', pact_slots: '[]' },
+      },
+    });
+    const invalidWarlock = resourceClass(2, 'Warlock', 3, {
+      base_spellcasting: {
+        progression_type: 'pact',
+        progression_row: { status: 'present', slots: '[]', pact_slots: '{}' },
+      },
+    });
+    const validCleric = resourceClass(3, 'Cleric', 2, {
+      base_spellcasting: {
+        progression_type: 'full',
+        progression_row: { status: 'present', slots: '{"1":3}', pact_slots: '[]' },
+      },
+    });
+
+    // Negative controls: pushing every invalid contributor emits two absences;
+    // overwriting the first reason reports Warlock instead of Wizard.
+    expect(
+      resolveSheetResources(
+        [invalidWizard, invalidWarlock, validCleric],
+        PRESENT_ABILITIES,
+      ).map((entry) =>
+        entry.status === 'computed'
+          ? [entry.status, entry.kind, entry.id, entry.maximum]
+          : [entry.status, entry.class_name, entry.id, entry.detail],
+      ),
+    ).toEqual([
+      [
+        'absent',
+        'Wizard',
+        'resource:1:base-spell-progression-absent',
+        ' has missing or invalid shared spell-slot content.',
+      ],
+    ]);
+  });
+
+  it('invalid shared aggregation suppresses valid Pact rows', () => {
+    const wizard = resourceClass(1, 'Wizard', 20, {
+      base_spellcasting: {
+        progression_type: 'full',
+        progression_row: { status: 'present', slots: '{"1":4}', pact_slots: '[]' },
+      },
+    });
+    const cleric = resourceClass(2, 'Cleric', 20, {
+      base_spellcasting: {
+        progression_type: 'full',
+        progression_row: { status: 'present', slots: '{"1":4}', pact_slots: '[]' },
+      },
+    });
+    const warlock = resourceClass(3, 'Warlock', 3, {
+      base_spellcasting: {
+        progression_type: 'pact',
+        progression_row: {
+          status: 'present',
+          slots: '[]',
+          pact_slots: '{"count":2,"level":2}',
+        },
+      },
+    });
+
+    expect(
+      resolveSheetResources([wizard, cleric, warlock], PRESENT_ABILITIES).map(
+        (entry) =>
+          entry.status === 'computed'
+            ? [entry.status, entry.kind, entry.maximum]
+            : [entry.status, entry.kind, entry.detail],
+      ),
+    ).toEqual([
+      [
+        'absent',
+        null,
+        'The shared spell-slot result is missing or invalid.',
+      ],
+    ]);
+  });
+
+  it('invalid Pact aggregation discards staged valid shared rows', () => {
+    const wizard = resourceClass(1, 'Wizard', 2, {
+      base_spellcasting: {
+        progression_type: 'full',
+        progression_row: { status: 'present', slots: '{"1":3}', pact_slots: '[]' },
+      },
+    });
+    const warlock = resourceClass(2, 'Warlock', 15, {
+      base_spellcasting: {
+        progression_type: 'pact',
+        progression_row: {
+          status: 'present',
+          slots: '[]',
+          pact_slots: '{"count":3,"level":5}',
+        },
+      },
+    });
+    const hexbinder = resourceClass(3, 'Hexbinder', 15, {
+      base_spellcasting: {
+        progression_type: 'pact',
+        progression_row: {
+          status: 'present',
+          slots: '[]',
+          pact_slots: '{"count":3,"level":5}',
+        },
+      },
+    });
+
+    expect(
+      resolveSheetResources([wizard, warlock, hexbinder], PRESENT_ABILITIES).map(
+        (entry) =>
+          entry.status === 'computed'
+            ? [entry.status, entry.kind, entry.maximum]
+            : [entry.status, entry.kind, entry.detail],
+      ),
+    ).toEqual([
+      [
+        'absent',
+        null,
+        'The combined Pact Magic result is missing or invalid.',
+      ],
     ]);
   });
 
@@ -1767,6 +1974,16 @@ describe('sheet resource maxima', () => {
         progression_row: { status: 'present', slots: '{}', pact_slots: null },
       },
     });
+    const validWarlock = resourceClass(3, 'Warlock', 3, {
+      base_spellcasting: {
+        progression_type: 'pact',
+        progression_row: {
+          status: 'present',
+          slots: '[]',
+          pact_slots: '{"count":2,"level":2}',
+        },
+      },
+    });
 
     expect(
       resolveSheetResources([validCleric], PRESENT_ABILITIES).map((entry) =>
@@ -1777,10 +1994,10 @@ describe('sheet resource maxima', () => {
     ).toEqual([['spell_slot', 1, 3]]);
 
     // Negative control: discard the invalid subclass contributor and continue;
-    // the sole-base shortcut emits the Cleric row and fails this expectation.
+    // the Cleric shortcut and Warlock Pact row both fail this expectation.
     expect(
       resolveSheetResources(
-        [validCleric, invalidSubclassCaster],
+        [validCleric, invalidSubclassCaster, validWarlock],
         PRESENT_ABILITIES,
       ).map((entry) =>
         entry.status === 'computed'
