@@ -11,29 +11,38 @@ All lanes merged main in (wt/pwa needed a one-hunk timeout-comment union,
 resolved keeping BOTH measurements, tsc 0).
 
 ## In flight (supervisor = OPUS)
-- TRACK M (wt/attunement): FF-A + FF-A-FIX committed in-lane (50 files vs
-  main; scans 0 forbidden, NO config touched, mints 0027+v17 only).
-  FF-A-FIX closed all four round-1 defects incl. the consent-label privacy
-  defect. FINDING AGAINST THE WORK: codex's own Playwright claim (89 pass)
-  used a GLOBAL `--timeout=60000` CLI override; its unmodified run was
-  87/89 with two 30s timeouts. A global override is not an acceptable gate
-  result — the sanctioned remedy is per-test timeouts with measured
-  alone-times. SUPERVISOR MUST re-run full PW on 44480 with NO override;
-  if the same two tests time out, dispatch a measured per-test annotation
-  fixlet (identical pattern to the merged suite-hygiene unit), never a
-  global flag. Then: vitest, re-run mutate-ffa-toggle.py control, round-2
-  review, merge.
-- TRACK S (wt/pwa): D91-R + FIX + FIX2 + FIX3 all committed. FIX3
-  implements D143 (per-family absence, no partial totals). Codex claims
-  vitest 194/3,172, PW 89 on 44477, build 0, its own re-review CLEAN.
-  OWED by supervisor: vitest, shape control re-run, full PW 44477,
-  round-3 D135 review, merge. D143 pre-authorizes the whole-section
-  fallback if round 3 still finds it wrong — take it WITHOUT asking.
-- TRACK W (wt/print): W-B2 complete, uncommitted, awaiting gate. Codex
-  reports named controls verified + clean second-agent review; it modified
-  NO Playwright specs. Gate: commit, merge main in, scans, build, vitest,
-  one negative control (suggest add-radio-to-refused-card), full PW on
-  44472, D135 review, merge. Then W-C (briefs/w-c.md, port 44473).
+MAIN 652a1a0. FLOORS: vitest 3,162 / 194 files; Playwright 88 / 20 specs;
+build 0; migrations 0000-0026; wire v1-v16; existing a7-v* assertions.
+MERGED THIS WINDOW: W-B2 (feat/Epic cards) — first unit to pass its D135
+review CLEAN on the first round.
+
+- TRACK M (wt/attunement): FF-A + FIX committed. My gates: scans clean,
+  vitest 193/3,167, consent control re-proven on the RENAMED contract,
+  Playwright 89/89 with NO override (codex's earlier 89 used a global
+  --timeout=60000 and was rejected; the clean re-run vindicated the code,
+  not the claim). Round-2 review: TWO defects accepted — (a) D142's raise
+  of the notes cap to 20,000 is unimplemented (limit still 2,000; that
+  ruling postdates the first fix, so it is new work), (b) the consent
+  rename missed SharePreview.includesNotes, which now computes "any of the
+  four" while still named for notes alone — a name that lies, same defect
+  class as the checkbox label. FF-A-FIX2 dispatched (log ffa-fix2.log).
+  Re-gate after: vitest, consent control, PW 44480 with NO override,
+  round-3 review, merge.
+- TRACK W (wt/print at main): FREE. Next: W-C from briefs/w-c.md, port
+  44473 (LU-2 projection + identity-sentinel rollback preview).
+- TRACK S (wt/pwa): D91-R + FIX + FIX2 + FIX3 committed; my gates done
+  except the FINAL full PW on 44477 (the earlier run was stopped when FIX3
+  changed the tree) and the round-3 D135 review. D143 pre-authorizes the
+  whole-section fallback if that review still finds it wrong — take it
+  WITHOUT asking.
+- TRACK P (wt/party, NEW 4th worktree): PARTY-0 design committed
+  (docs/design/2026-08-01-party-storage.md, 719 lines, 10 units).
+  Sentinel gate PARTY-TOKEN-NEVER-TRAVELS specified. D146 settles scope
+  (library AND characters) and sessionStorage credentials. Next: DOC-C and
+  DOC-L are the mint prerequisites and belong to TRACK M's serial mint
+  lane; P0 (contracts + recorded-fixture harness) is mint-free and can
+  start in wt/party immediately after a brief is written from the design's
+  section 12 unit table.
 
 ## D91-R review round 1 (D135) — all four ACCEPTED, FIX2 in flight
 - sheet.ts:1752 return-aborts whole slot resolver on one bad class (verified
