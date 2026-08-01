@@ -1,6 +1,6 @@
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
 import type { Database } from '@sqlite.org/sqlite-wasm';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { DatabaseContext } from '../../src/db/database';
 
@@ -344,6 +344,58 @@ async function navigateWithinApp(page: Page, path: string): Promise<void> {
     window.dispatchEvent(new PopStateEvent('popstate'));
   }, path);
 }
+
+async function expectPhoneWidth(page: Page): Promise<void> {
+  const widths = await page.evaluate(() => ({
+    innerWidth: window.innerWidth,
+    scrollWidth: document.scrollingElement?.scrollWidth ?? 0,
+  }));
+  expect(widths.innerWidth).toBe(390);
+  expect(widths.scrollWidth).toBeLessThanOrEqual(widths.innerWidth);
+}
+
+async function expectHorizontallyContained(
+  page: Page,
+  control: Locator,
+): Promise<void> {
+  await expect(control).toBeVisible();
+  const box = await control.boundingBox();
+  expect(box).not.toBeNull();
+  if (box === null) {
+    return;
+  }
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(
+    await page.evaluate(() => window.innerWidth),
+  );
+}
+
+test('a phone-width character sheet keeps its warnings, numbers, and controls usable', async ({
+  page,
+}) => {
+  // Measured at 13.8s alone on Chromium at 390x844.
+  test.setTimeout(20_000);
+  await page.setViewportSize({ width: 390, height: 844 });
+  const image = await sheetImage();
+  await install(page, image);
+  await page.goto(`/characters/${image.characterId}/sheet`);
+
+  const sheet = page.locator('[data-screen="character-sheet"]');
+  await expect(sheet).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: new RegExp(`^Character sheet`) }),
+  ).toBeVisible();
+  await expect(sheet.locator('[role="alert"]')).toBeVisible();
+  await expect(sheet.locator('[data-sheet-value="armor_class"]')).toBeVisible();
+  await expectPhoneWidth(page);
+
+  const allCharacters = page.getByRole('link', { name: 'All characters' });
+  const planner = page.getByRole('link', { name: 'Open planner' });
+  await expectHorizontallyContained(page, allCharacters);
+  await expectHorizontallyContained(page, planner);
+  await planner.click();
+  await expect(page).toHaveURL(`/characters/${String(image.characterId)}`);
+});
 
 test('the sheet prints the derived numbers, and prints what it lacks', async ({
   page,
