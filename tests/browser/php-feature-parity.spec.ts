@@ -729,6 +729,8 @@ test('creates and opens an empty character without additional setup', async ({
 test('changes one slot while leaving every other slot byte-identical', async ({
   page,
 }) => {
+  // Measured at 15.9s alone on Chromium; this ceiling is for concurrent-lane contention.
+  test.setTimeout(60_000);
   await install(page, workspaceImage);
   const before = forCharacter(
     await rows(page, 'spell_selection_slots'),
@@ -768,6 +770,8 @@ test('changes one slot while leaving every other slot byte-identical', async ({
 });
 
 test('undo restores the prior spell selection', async ({ page }) => {
+  // Measured at 16.1s alone on Chromium; this ceiling is for concurrent-lane contention.
+  test.setTimeout(60_000);
   await install(page, workspaceImage);
   const original = (await rows(page, 'spell_selection_slots')).find(
     (row) => row.id === workspaceImage.ids.targetSlot,
@@ -1001,6 +1005,8 @@ test('round-trips a named save point through the mutation path', async ({
 test('changing an ability score recomputes only mechanically relevant casting math', async ({
   page,
 }) => {
+  // Measured at 15.2s alone on Chromium; this ceiling is for concurrent-lane contention.
+  test.setTimeout(60_000);
   await install(page, workspaceImage);
   const beforeSlots = forCharacter(
     await rows(page, 'spell_selection_slots'),
@@ -1064,6 +1070,8 @@ test('changing an ability score recomputes only mechanically relevant casting ma
 test('returns the exact mutation envelope, inverse, operation, and reversible audit contract', async ({
   page,
 }) => {
+  // Measured at 15.3s alone on Chromium; this ceiling is for concurrent-lane contention.
+  test.setTimeout(60_000);
   await install(page, workspaceImage);
   const result = await execute(
     page,
@@ -1116,6 +1124,8 @@ test('returns the exact mutation envelope, inverse, operation, and reversible au
 test('adding a class level generates new slots without disturbing existing slots', async ({
   page,
 }) => {
+  // Measured at 15.5s alone on Chromium; this ceiling is for concurrent-lane contention.
+  test.setTimeout(60_000);
   await install(page, workspaceImage);
   const before = forCharacter(
     await rows(page, 'spell_selection_slots'),
@@ -1185,6 +1195,8 @@ test('adding a class level generates new slots without disturbing existing slots
 test('undoes a structural class change through its snapshot inverse', async ({
   page,
 }) => {
+  // Measured at 15.2s alone on Chromium; this ceiling is for concurrent-lane contention.
+  test.setTimeout(60_000);
   await install(page, workspaceImage);
   const before = {
     levels: forCharacter(
@@ -1247,6 +1259,8 @@ test('undoes a structural class change through its snapshot inverse', async ({
 test('rejects stale revisions and replays an operation idempotently', async ({
   page,
 }) => {
+  // Measured at 15.3s alone on Chromium; this ceiling is for concurrent-lane contention.
+  test.setTimeout(60_000);
   await install(page, workspaceImage);
   const command = {
     type: 'update_ability',
@@ -1301,6 +1315,8 @@ test('rejects stale revisions and replays an operation idempotently', async ({
 test('round-trips character rules and rejects legacy selection while legacy rules are disabled', async ({
   page,
 }) => {
+  // Measured at 15.1s alone on Chromium; this ceiling is for concurrent-lane contention.
+  test.setTimeout(60_000);
   await install(page, workspaceImage);
   const enabled = await execute(
     page,
@@ -1371,6 +1387,8 @@ test('round-trips character rules and rejects legacy selection while legacy rule
 test('round-trips source configuration with one audit group and rejects unsupported Magic Initiate lists', async ({
   page,
 }) => {
+  // Measured at 15.5s alone on Chromium; this ceiling is for concurrent-lane contention.
+  test.setTimeout(60_000);
   await install(page, workspaceImage);
   const before = {
     sources: forCharacter(
@@ -1520,6 +1538,8 @@ test('round-trips source configuration with one audit group and rejects unsuppor
 test('updates a standalone Magic Initiate source and regenerates its slot constraints', async ({
   page,
 }) => {
+  // Measured at 15.6s alone on Chromium; this ceiling is for concurrent-lane contention.
+  test.setTimeout(60_000);
   await install(page, workspaceImage);
   const character = await rpc<any>(page, 'queries.characters.create', {
     name: 'Standalone Magic Initiate',
@@ -1585,6 +1605,8 @@ test('updates a standalone Magic Initiate source and regenerates its slot constr
 test('adds a class source with planned slots and addressed spellbook acquisitions atomically (strict superset of the replaced config-acquisition case)', async ({
   page,
 }) => {
+  // Measured at 15.4s alone on Chromium; this ceiling is for concurrent-lane contention.
+  test.setTimeout(60_000);
   await install(page, workspaceImage);
   const character = await rpc<any>(page, 'queries.characters.create', {
     name: 'Class Source Command',
@@ -1790,6 +1812,8 @@ test('adds a class source with planned slots and addressed spellbook acquisition
 test('adds species and background roots with nested Magic Initiate chains and rejects non-repeatable duplicates', async ({
   page,
 }) => {
+  // Measured at 15.1s alone on Chromium; this ceiling is for concurrent-lane contention.
+  test.setTimeout(60_000);
   await install(page, workspaceImage);
   const character = await rpc<any>(page, 'queries.characters.create', {
     name: 'Nested Source Test',
@@ -1905,6 +1929,8 @@ test('adds species and background roots with nested Magic Initiate chains and re
 test('removes a root source through the command and cascades to its nested feat', async ({
   page,
 }) => {
+  // Measured at 15.6s alone on Chromium; this ceiling is for concurrent-lane contention.
+  test.setTimeout(60_000);
   await install(page, workspaceImage);
   for (const [index, rootId, childId] of [
     [
@@ -1967,6 +1993,8 @@ test('removes a root source through the command and cascades to its nested feat'
 test('round-trips warning acknowledgement with idempotent replay and grouped audit rows', async ({
   page,
 }) => {
+  // Measured at 15.4s alone on Chromium; this ceiling is for concurrent-lane contention.
+  test.setTimeout(60_000);
   await install(page, workspaceImage);
   await execute(
     page,
