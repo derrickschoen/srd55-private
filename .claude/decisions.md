@@ -7,6 +7,19 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D146 — OWNER: party v1 = library AND characters; token lives in the session (2026-08-01)
+
+Confirms D145's full reading against the design's scoping alternatives: v1
+ships shared library plus player character publish/refresh (all 10 units of
+docs/design/2026-08-01-party-storage.md). Pasted tokens live in
+sessionStorage with an explicit Forget control — reload survives, ending the
+browser session forgets. Durable at-rest storage is NOT taken.
+
+Supervisor took the design's other recommended defaults: a designated
+librarian writes library/ while each player writes only their own character
+path; one repo per party with top-level library/ and characters/; default
+branch only.
+
 ## D144 — OWNER: Cloudflare Pages stays the host; NO server-side secret (2026-08-01)
 
 Reaffirms D113 against the GitHub Pages alternative. No Cloudflare Worker, no
