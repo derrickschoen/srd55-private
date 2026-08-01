@@ -52,6 +52,12 @@ export const FOREIGN_KEY_FACTS = [
     targetColumns: ['id'],
   },
   {
+    table: 'background_template_effects',
+    columns: ['background_template_id'],
+    target: 'background_templates',
+    targetColumns: ['id'],
+  },
+  {
     table: 'background_templates',
     columns: ['content_key'],
     target: 'catalog_content_identities',

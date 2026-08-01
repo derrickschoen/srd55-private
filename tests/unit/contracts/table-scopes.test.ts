@@ -103,6 +103,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       // The structured equipment lines of a background template, sorted before
       // its parent because `e` precedes `t`.
       'background_equipment_items',
+      'background_template_effects',
       'background_templates',
       // CI-2a registry state is application data but not character-scoped.
       'catalog_content_aliases',
@@ -333,7 +334,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
 });
 
 describe('table scope classification', () => {
-  it('classifies all 75 tables exactly once', () => {
+  it('classifies all 76 tables exactly once', () => {
     const names = Object.keys(TABLE_SCOPES);
     // 30 Laravel-derived tables — 38 until the eight Laravel-only
     // infrastructure ones were dropped — plus the four native weapon tables,
@@ -350,8 +351,8 @@ describe('table scope classification', () => {
     // tables and CI-2b's ONE applied data-migration marker table. Each group is named
     // rather than folded into one total, so a group that vanishes while
     // another grows cannot pass unnoticed.
-    expect(names).toHaveLength(75);
-    expect(new Set(names).size).toBe(75);
+    expect(names).toHaveLength(76);
+    expect(new Set(names).size).toBe(76);
     expect([...names].sort()).toEqual([...APPLICATION_TABLES].sort());
   });
 

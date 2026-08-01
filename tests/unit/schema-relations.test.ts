@@ -231,8 +231,9 @@ describe('declared relations match the foreign keys', () => {
     // edge for Expertise: two constraints across three PRAGMA rows.
     // LU-1 adds three constraints across five PRAGMA rows: character, held
     // class (composite), and nullable feat source (composite).
-    expect(constraintEdges(db)).toHaveLength(98);
-    expect(rowCount).toBe(115);
+    // HA-1 adds the background effect table's one parent constraint/row.
+    expect(constraintEdges(db)).toHaveLength(99);
+    expect(rowCount).toBe(116);
   });
 
   it('declares a relation for every foreign key, and a foreign key for every relation', () => {

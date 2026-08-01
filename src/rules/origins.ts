@@ -1,12 +1,5 @@
 import type { DatabaseContext } from '../db/database';
-import type {
-  CreatureSize,
-  CreatureType,
-  DamageType,
-  KnownCreatureSize,
-  KnownCreatureType,
-  KnownDamageType,
-} from '../domain/enums';
+import type { CreatureSize, CreatureType, DamageType } from '../domain/enums';
 import type { EffectRow } from './species-effects';
 import { readEligibleCharacterEffects } from './eligible-character-effects';
 
@@ -47,9 +40,9 @@ export interface SpeciesTemplateRow {
   readonly content_key: string;
   readonly rules_edition: string;
   readonly name: string;
-  readonly creature_type: KnownCreatureType;
-  readonly size: KnownCreatureSize;
-  readonly alternate_size: KnownCreatureSize | null;
+  readonly creature_type: CreatureType;
+  readonly size: CreatureSize;
+  readonly alternate_size: CreatureSize | null;
   readonly base_speed_feet: number;
   readonly created_at: string | null;
   readonly updated_at: string | null;
@@ -68,25 +61,28 @@ export interface SpeciesTemplateTraitRow {
 /**
  * One row of `species_template_trait_effects` — what a catalog trait GRANTS.
  *
- * It carries no `label`: on the catalog side the granting trait IS the parent
- * row, so there is nothing to name. The label appears at the moment of the
- * copy, taken from the trait's own name, which is why `effectsFromTemplate`
- * takes both.
+ * Bundled rows leave `label` null and inherit the granting trait's name during
+ * copy. Authored rows may preserve a distinct label and notes.
  */
 export interface SpeciesTemplateTraitEffectRow {
   readonly id: number;
   readonly species_template_trait_id: number;
   readonly sort_order: number;
   readonly effect_kind: string;
-  readonly damage_type: KnownDamageType | null;
+  readonly damage_type: DamageType | null;
   readonly hit_points_flat: number | null;
   readonly hit_points_per_level: number | null;
   readonly speed_bonus_feet: number | null;
+  readonly ability: string | null;
+  readonly amount: number | null;
+  readonly maximum: number | null;
   readonly base: number | null;
   readonly ability_1: string | null;
   readonly ability_2: string | null;
   readonly allows_shield: number | null;
   readonly weapon_scope: string | null;
+  readonly label: string;
+  readonly notes: string | null;
   readonly created_at: string | null;
   readonly updated_at: string | null;
 }
@@ -129,12 +125,8 @@ export interface CharacterSpeciesTraitFields {
 /**
  * The fillable columns of `character_effects`, values only.
  *
- * `source_instance_id` is NOT here and is not an oversight. The copy has no
- * source instance to point at: nothing in `src/` writes `species_definitions`,
- * so a character who picked a bundled SRD species has no species
- * `character_source_instances` row, and one who typed their own species never
- * will. The column is nullable exactly so this copy can leave it alone, and an
- * effect minted later can be given one without this function changing.
+ * `source_instance_id` is not a payload property: the apply transaction owns
+ * provenance and supplies the selected species source after this projection.
  */
 export interface CharacterEffectFields {
   readonly sort_order: number;
@@ -143,6 +135,9 @@ export interface CharacterEffectFields {
   readonly hit_points_flat: number | null;
   readonly hit_points_per_level: number | null;
   readonly speed_bonus_feet: number | null;
+  readonly ability: string | null;
+  readonly amount: number | null;
+  readonly maximum: number | null;
   readonly base: number | null;
   readonly ability_1: string | null;
   readonly ability_2: string | null;
@@ -254,8 +249,8 @@ export function effectsFromTemplate(
     return {
       ...profile,
       template_ref: `species_template_trait_effects:${String(id)}`,
-      label: traitName,
-      notes: null,
+      label: effect.label,
+      notes: effect.notes,
     };
   });
 }
