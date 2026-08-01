@@ -83,6 +83,9 @@ async function databaseState(page: Page): Promise<{
 test('build report route presents source, route, duplicate, and invalid annotations without persisted writes', async ({
   page,
 }) => {
+  // Measured alone at 33.8s on 2026-08-01; fixture boot and the full report
+  // render legitimately exceed Playwright's 30s default on this machine.
+  test.setTimeout(45_000);
   const fixture = await fixtureImage('report');
   await installFixture(page, fixture);
   const before = await databaseState(page);
