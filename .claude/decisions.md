@@ -7,6 +7,28 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D144 — OWNER: Cloudflare Pages stays the host; NO server-side secret (2026-08-01)
+
+Reaffirms D113 against the GitHub Pages alternative. No Cloudflare Worker, no
+OAuth exchange endpoint, no secret to rotate: the site remains pure static
+assets. Party-storage authentication is therefore user-pasted tokens only.
+
+## D145 — OWNER: party storage = user tokens against GitHub / GitLab / Codeberg (2026-08-01)
+
+A table shares a library and characters through a repo THEY own, on any of
+the three forges, public or private, authenticated by a token the user pastes.
+One storage port, three adapters. SHIPS INSIDE v1 — this extends D106's queue
+and therefore the gate; publication waits for it.
+
+SUPERVISOR-PROVEN 2026-08-01 (curl with an Origin header, all three returned
+`access-control-allow-origin: *`, so a static page can call them):
+  api.github.com/rate_limit        HTTP 200
+  codeberg.org/api/v1/version      HTTP 200
+  gitlab.com/api/v4/version        HTTP 401 (auth required; CORS header present)
+Dialects differ and need separate adapters: GitHub and Gitea/Codeberg use
+`contents/{path}` with a blob `sha` for optimistic concurrency; GitLab uses
+`repository/files/{path}` with `last_commit_id` and a PRIVATE-TOKEN header.
+
 ## D143 — OWNER: per-family slot absence, with a pre-authorized simple fallback (2026-07-31)
 
 When catalog content behind one class is invalid, the sheet suppresses only
