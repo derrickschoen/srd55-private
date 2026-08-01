@@ -82,6 +82,7 @@ const nativeAutoIncrementTables = [
   // seeder deletes and re-inserts rather than upserting, and a natural key
   // would invite the upsert that leaves a shortened package carrying its tail.
   'background_equipment_items',
+  'background_template_effects',
   'class_equipment_items',
   'background_templates',
   'character_background',
@@ -190,7 +191,7 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
       return db;
     }
 
-    it('declares AUTOINCREMENT on exactly the 30 Laravel and 39 native surrogate-key tables', () => {
+    it('declares AUTOINCREMENT on exactly the 30 Laravel and 40 native surrogate-key tables', () => {
       const db = openDb();
       const declared = db
         .selectValues(
@@ -215,9 +216,9 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
       // effect tables. Counted in parts so one group shrinking while another
       // grows cannot pass unnoticed. D92's slot row uses character_id as its
       // natural primary key and therefore belongs in `naturalKeyTables`.
-      expect(declared).toHaveLength(69);
+      expect(declared).toHaveLength(70);
       expect(autoIncrementTables).toHaveLength(30);
-      expect(nativeAutoIncrementTables).toHaveLength(39);
+      expect(nativeAutoIncrementTables).toHaveLength(40);
 
       const withoutAutoIncrement = db
         .selectValues(

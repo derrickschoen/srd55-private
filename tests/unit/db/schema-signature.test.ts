@@ -80,7 +80,7 @@ describe('pre-Drizzle database images', () => {
     const tableCount = (sql: string) =>
       [...sql.matchAll(/CREATE TABLE/g)].length;
     expect(tableCount(preDrizzleSchema)).toBe(38);
-    expect(tableCount(schema)).toBe(75);
+    expect(tableCount(schema)).toBe(76);
   });
 
   it('rejects a pre-Drizzle image at open instead of half-working', async () => {
@@ -105,6 +105,7 @@ describe('pre-Drizzle database images', () => {
       // `spell_version_upcast_levels`. A pre-Drizzle image has none of them.
       'Database image is missing application tables: armor_templates, ' +
         'background_equipment_items, ' +
+        'background_template_effects, ' +
         'background_templates, ' +
         'catalog_content_aliases, catalog_content_fingerprints, ' +
         'catalog_content_identities, catalog_content_match_decisions, ' +
