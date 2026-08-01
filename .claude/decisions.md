@@ -42,6 +42,18 @@ Dialects differ and need separate adapters: GitHub and Gitea/Codeberg use
 `contents/{path}` with a blob `sha` for optimistic concurrency; GitLab uses
 `repository/files/{path}` with `last_commit_id` and a PRIVATE-TOKEN header.
 
+## D143a — SUPERVISOR: the D143 fallback is TAKEN (2026-08-01)
+
+Trigger met. Three D135 review rounds found per-family absence incomplete;
+round 3 found the last gap at src/rules/sheet.ts:1760 — the invalid value was
+the FAMILY DISCRIMINATOR (base progression_type), so no family could be
+trusted, yet both still printed. Per D143's pre-authorization the supervisor
+switched WITHOUT asking to the simple rule: ANY invalid or missing spell
+content suppresses the ENTIRE spell-slot section, absent-and-stated, one
+message. Slots print only when every contributor is complete and valid.
+Per-family independence is withdrawn. Tests asserting the superseded rule are
+replaced as RULING-DRIVEN changes, not deletions to reach green.
+
 ## D143 — OWNER: per-family slot absence, with a pre-authorized simple fallback (2026-07-31)
 
 When catalog content behind one class is invalid, the sheet suppresses only
