@@ -2178,7 +2178,8 @@ test('merges a stale slot edit only when intervening operations left that slot u
 test('builds the golden read-only report values and duplicate classifications', async ({
   page,
 }) => {
-  // Measured at 23.0s alone on Chromium; allow for concurrent-suite contention.
+  // Measured at 23.0s alone on Chromium (28.0s after D91-R added the sheet
+  // projection); allow for concurrent-suite contention.
   test.setTimeout(60_000);
   await install(page, reportImage);
   const before = await databaseBytes(page);
