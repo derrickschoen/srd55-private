@@ -7,6 +7,21 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D141 — OWNER: long flavor text TRUNCATES on the sheet; appendix pages optional (2026-07-31)
+
+Refines D104's "printed when present". The main character sheet prints
+alignment and appearance in full and TRUNCATES backstory/notes with a visible
+continuation marker, so the play aid stays short. A separate opt-in prints
+the full written text as appendix page(s) after the sheet. Truncation on the
+main sheet must always be visibly marked, never silent.
+
+## D142 — OWNER: notes cap rises to 20,000 code points (2026-07-31)
+
+Amends the D104 design's limit table. notes now matches backstory at 20,000
+code points; appearance stays 4,000, alignment 120. One toggle, one generous
+long-form cap. Raising a cap breaks no stored character; the existing
+grandfathered-longer-notes rule is unaffected.
+
 ## D140 — OWNER: supervision reporting is TERMINAL-ONLY (2026-07-31)
 
 No push notifications, not even for hard stops or the D106 gate. Everything
