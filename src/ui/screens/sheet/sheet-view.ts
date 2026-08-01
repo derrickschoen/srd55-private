@@ -8,9 +8,20 @@ import type {
 import type {
   ArmorClassExclusionReason,
   ArmorClassSourceCategory,
+  SheetResourceComputation,
+  SheetResourceKind,
+  SheetResourceMaximum,
 } from '../../../rules/sheet';
 import type { WeaponProficiencyVerdict } from '../../../rules/multiclass-proficiency';
 import { SRD_ATTRIBUTION_NOTICE } from '../../../rules/srd-attribution';
+import {
+  classFormulaResourceKinds,
+  classFormulaResourceLabel,
+  classResourceKinds,
+  classResourceLabel,
+  type ClassFormulaResourceKind,
+  type ClassResourceKind,
+} from '../../../domain/class-resources';
 
 /**
  * THE CHARACTER SHEET, PROJECTED ONCE AND RENDERED TWICE.
@@ -60,6 +71,10 @@ export interface SheetRow {
   readonly value: string | null;
   /** How the number was reached, in the source's own terms. */
   readonly detail: readonly SheetCell[];
+  readonly resource_marking?: {
+    readonly shape: ResourceMarkingShape;
+    readonly maximum: number;
+  };
 }
 
 export interface SheetSection {
@@ -74,6 +89,39 @@ function plain(text: string): SheetCell[] {
 function signed(value: number): string {
   return value >= 0 ? `+${String(value)}` : String(value);
 }
+
+export type ResourceMarkingShape = 'boxes' | 'remaining';
+
+/** D123/D134: one exhaustive, level-independent classification. */
+export const RESOURCE_MARKING_SHAPES = {
+  rage: 'boxes',
+  channel_divinity: 'boxes',
+  wild_shape: 'boxes',
+  second_wind: 'boxes',
+  focus_points: 'remaining',
+  favored_enemy: 'boxes',
+  sorcery_points: 'remaining',
+  persistent_rage_recovery: 'boxes',
+  bardic_inspiration: 'boxes',
+  divine_intervention: 'boxes',
+  wild_resurgence_conversion: 'boxes',
+  nature_magician_conversion: 'boxes',
+  action_surge: 'boxes',
+  indomitable: 'boxes',
+  uncanny_metabolism: 'boxes',
+  lay_on_hands: 'remaining',
+  paladins_smite: 'boxes',
+  faithful_steed: 'boxes',
+  tireless: 'boxes',
+  natures_veil: 'boxes',
+  stroke_of_luck: 'boxes',
+  innate_sorcery: 'boxes',
+  sorcerous_restoration: 'boxes',
+  magical_cunning: 'boxes',
+  contact_patron: 'boxes',
+  spell_slot: 'boxes',
+  pact_slot: 'boxes',
+} as const satisfies Readonly<Record<SheetResourceKind, ResourceMarkingShape>>;
 
 function numberRow(
   entry: {
@@ -261,6 +309,142 @@ function abilitySourceCells(entry: SheetAbilityScore): SheetCell[] {
   return cells;
 }
 
+function resourceKindLabel(kind: SheetResourceKind): string {
+  if (kind === 'spell_slot') {
+    return 'Spell slots';
+  }
+  if (kind === 'pact_slot') {
+    return 'Pact slots';
+  }
+  if ((classResourceKinds as readonly string[]).includes(kind)) {
+    return classResourceLabel(kind as ClassResourceKind);
+  }
+  if ((classFormulaResourceKinds as readonly string[]).includes(kind)) {
+    return classFormulaResourceLabel(kind as ClassFormulaResourceKind);
+  }
+  throw new TypeError(`Unlabelled resource kind ${kind}.`);
+}
+
+function resourceComputationText(
+  computation: SheetResourceComputation,
+  maximum: number,
+): string {
+  switch (computation.kind) {
+    case 'level_table':
+      return `Exact sourced table row at class level ${String(computation.class_level)}.`;
+    case 'fixed_count':
+      return `Fixed count ${String(computation.count)}, acquired at class level ${String(computation.minimum_class_level)}.`;
+    case 'fixed_count_by_class_level':
+      return `Sourced class-level steps ${computation.steps
+        .map((step) => `${String(step.minimum_class_level)} → ${String(step.count)}`)
+        .join(', ')}; current maximum ${String(maximum)}.`;
+    case 'ability_modifier_minimum_one': {
+      const ability =
+        computation.ability === 'charisma' ? 'Charisma' : 'Wisdom';
+      return `Live resolved ${ability} modifier ${signed(computation.resolved_modifier)}, with a minimum of one.`;
+    }
+    case 'class_level_multiple':
+      return `${String(computation.multiplier)} × owning class level; current maximum ${String(maximum)}.`;
+    case 'shared_spell_slots':
+      return `Shared spell-slot table at effective caster level ${String(computation.effective_caster_level)}.`;
+    case 'pact_magic':
+      return `Pact Magic at class level ${String(computation.class_level)}; these are level ${String(computation.spell_level)} slots.`;
+  }
+}
+
+function computedResourceLabel(
+  resource: Extract<SheetResourceMaximum, { status: 'computed' }>,
+): SheetCell[] {
+  if (resource.kind === 'spell_slot') {
+    return plain(`Level ${String(resource.spell_level)} spell slots`);
+  }
+  if (resource.kind === 'pact_slot') {
+    return plain(`Pact slots — level ${String(resource.spell_level)}`);
+  }
+  if (resource.class_name === null) {
+    throw new TypeError(`Class resource ${resource.id} has no class name.`);
+  }
+  return [
+    { text: resource.class_name, free_text: true },
+    { text: ` — ${resourceKindLabel(resource.kind)}` },
+  ];
+}
+
+function absentResourceCells(
+  resource: Extract<SheetResourceMaximum, { status: 'absent' }>,
+): { readonly label: SheetCell[]; readonly detail: SheetCell[] } {
+  if (
+    resource.reason === 'resource_catalog_not_recorded' &&
+    resource.class_name !== null
+  ) {
+    return {
+      label: plain('Resource maxima not recorded'),
+      detail: [
+        { text: 'Resource maxima are not recorded for ' },
+        { text: resource.class_name, free_text: true },
+        { text: '.' },
+      ],
+    };
+  }
+  if (
+    resource.reason === 'spell_progression_missing_or_invalid' &&
+    resource.class_name !== null
+  ) {
+    return {
+      label: plain('Resource maximum unavailable'),
+      detail: [
+        { text: resource.class_name, free_text: true },
+        { text: resource.detail },
+      ],
+    };
+  }
+  if (resource.class_name !== null && resource.kind !== null) {
+    return {
+      label: [
+        { text: resource.class_name, free_text: true },
+        { text: ` — ${resourceKindLabel(resource.kind)}` },
+      ],
+      detail: plain(resource.detail),
+    };
+  }
+  return {
+    label: plain(
+      resource.reason === 'feature_text_maximum_not_modelled'
+        ? 'Feature-text resource limits'
+        : 'Resource maximum unavailable',
+    ),
+    detail: plain(resource.detail),
+  };
+}
+
+function resourceRows(
+  resources: readonly SheetResourceMaximum[],
+): readonly SheetRow[] {
+  return resources.map((resource): SheetRow => {
+    if (resource.status === 'absent') {
+      const cells = absentResourceCells(resource);
+      return {
+        id: resource.id,
+        label: cells.label,
+        value: null,
+        detail: cells.detail,
+      };
+    }
+    return {
+      id: resource.id,
+      label: computedResourceLabel(resource),
+      value: String(resource.maximum),
+      detail: plain(
+        resourceComputationText(resource.computation, resource.maximum),
+      ),
+      resource_marking: {
+        shape: RESOURCE_MARKING_SHAPES[resource.kind],
+        maximum: resource.maximum,
+      },
+    };
+  });
+}
+
 /**
  * The readable projection: every number on the sheet as a labelled row.
  *
@@ -350,6 +534,8 @@ export function sheetSections(sheet: CharacterSheet): readonly SheetSection[] {
   core.push(numberRow(sheet.initiative, true));
   core.push(numberRow(sheet.passive_perception, false));
   sections.push({ caption: 'Core numbers', rows: core });
+
+  sections.push({ caption: 'Resources', rows: resourceRows(sheet.resources) });
 
   sections.push({
     caption: 'Ability scores',
@@ -782,6 +968,18 @@ export function sheetFacts(sheet: CharacterSheet): Record<string, unknown> {
       proficient: skill.proficient,
     })),
     attacks_per_action: sheet.attacks_per_action.count,
+    resources: sheet.resources.flatMap((resource) =>
+      resource.status === 'computed'
+        ? [
+            {
+              kind: resource.kind,
+              maximum: resource.maximum,
+              class_level: resource.class_level,
+              spell_level: resource.spell_level,
+            },
+          ]
+        : [],
+    ),
     unresolved_attack_grants: sheet.attacks_per_action.unresolved.flatMap(
       (grant) => grant.unresolved,
     ).length,
@@ -949,6 +1147,44 @@ function cells(parts: readonly SheetCell[], into: HTMLElement): void {
   }
 }
 
+function resourceTrack(
+  marking: NonNullable<SheetRow['resource_marking']>,
+): HTMLSpanElement {
+  const track = document.createElement('span');
+  track.className = 'sheet-resource-track';
+  track.dataset.resourceShape = marking.shape;
+  track.setAttribute('role', 'group');
+  switch (marking.shape) {
+    case 'boxes':
+      track.classList.add('sheet-resource-boxes');
+      track.setAttribute(
+        'aria-label',
+        `${String(marking.maximum)} empty boxes; mark spending on paper`,
+      );
+      for (let index = 0; index < marking.maximum; index += 1) {
+        const box = document.createElement('span');
+        box.className = 'sheet-resource-box';
+        box.setAttribute('role', 'presentation');
+        track.append(box);
+      }
+      break;
+    case 'remaining': {
+      track.classList.add('sheet-resource-remaining');
+      track.setAttribute(
+        'aria-label',
+        `Remaining amount out of ${String(marking.maximum)}; fill in on paper`,
+      );
+      track.append('Remaining: ');
+      const line = document.createElement('span');
+      line.className = 'sheet-resource-remaining-line';
+      line.setAttribute('role', 'presentation');
+      track.append(line, ` / ${String(marking.maximum)}`);
+      break;
+    }
+  }
+  return track;
+}
+
 export function renderSheet(sheet: CharacterSheet): HTMLElement {
   const shell = document.createElement('div');
   shell.className = 'sheet-shell';
@@ -1013,6 +1249,9 @@ export function renderSheet(sheet: CharacterSheet): HTMLElement {
         figure.dataset.sheetValue = row.id;
         figure.textContent = row.value;
         value.append(figure);
+      }
+      if (row.resource_marking !== undefined) {
+        value.append(resourceTrack(row.resource_marking));
       }
       const detail = document.createElement('p');
       detail.className = 'sheet-formula';
