@@ -10,19 +10,30 @@ migrations 0000-0026 (0027 minted unmerged in wt/attunement); wire v1-v16
 All lanes merged main in (wt/pwa needed a one-hunk timeout-comment union,
 resolved keeping BOTH measurements, tsc 0).
 
-## In flight
-- TRACK W (wt/print at 4312c3a): W-B2 dispatched from briefs/w-b2.md
-  (log wb2.log, port 44472). Then W-C (briefs/w-c.md, 44473).
-- TRACK M (wt/attunement): FF-A committed in-lane, mints 0027 + wire v17,
-  scans clean. OWED: supervisor full vitest, ONE negative control
-  (suggest the D124 single-toggle share gate or the size-guard refusal),
-  full PW on 44480 (now inherits hygiene annotations), D135 review, merge.
-- TRACK S (wt/pwa): D91-R + timeout fixlet committed; D91-R-FIX2 (four
-  review findings) was dispatched and its result must be read from
-  scratchpad d91r-fix2.log — if that session's scratchpad is gone, re-run
-  the four fixes from the review findings recorded below. Then re-gate:
-  vitest, shape control (mutate-d91r-shape.py pattern), full PW 44477,
-  round-2 review, merge.
+## In flight (supervisor = OPUS)
+- TRACK M (wt/attunement): FF-A + FF-A-FIX committed in-lane (50 files vs
+  main; scans 0 forbidden, NO config touched, mints 0027+v17 only).
+  FF-A-FIX closed all four round-1 defects incl. the consent-label privacy
+  defect. FINDING AGAINST THE WORK: codex's own Playwright claim (89 pass)
+  used a GLOBAL `--timeout=60000` CLI override; its unmodified run was
+  87/89 with two 30s timeouts. A global override is not an acceptable gate
+  result — the sanctioned remedy is per-test timeouts with measured
+  alone-times. SUPERVISOR MUST re-run full PW on 44480 with NO override;
+  if the same two tests time out, dispatch a measured per-test annotation
+  fixlet (identical pattern to the merged suite-hygiene unit), never a
+  global flag. Then: vitest, re-run mutate-ffa-toggle.py control, round-2
+  review, merge.
+- TRACK S (wt/pwa): D91-R + FIX + FIX2 + FIX3 all committed. FIX3
+  implements D143 (per-family absence, no partial totals). Codex claims
+  vitest 194/3,172, PW 89 on 44477, build 0, its own re-review CLEAN.
+  OWED by supervisor: vitest, shape control re-run, full PW 44477,
+  round-3 D135 review, merge. D143 pre-authorizes the whole-section
+  fallback if round 3 still finds it wrong — take it WITHOUT asking.
+- TRACK W (wt/print): W-B2 complete, uncommitted, awaiting gate. Codex
+  reports named controls verified + clean second-agent review; it modified
+  NO Playwright specs. Gate: commit, merge main in, scans, build, vitest,
+  one negative control (suggest add-radio-to-refused-card), full PW on
+  44472, D135 review, merge. Then W-C (briefs/w-c.md, port 44473).
 
 ## D91-R review round 1 (D135) — all four ACCEPTED, FIX2 in flight
 - sheet.ts:1752 return-aborts whole slot resolver on one bad class (verified
