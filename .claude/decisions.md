@@ -7,6 +7,17 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D143 — OWNER: per-family slot absence, with a pre-authorized simple fallback (2026-07-31)
+
+When catalog content behind one class is invalid, the sheet suppresses only
+that spell-slot FAMILY (shared vs Pact) and states why; the other family's
+valid rows still print. Partial totals within a family are forbidden — a
+broken contributor makes its whole family absent, never a smaller number
+(D33). PRE-AUTHORIZED: if the next review round still finds this wrong, the
+supervisor switches immediately, without asking again, to the simple rule —
+any invalid spell content suppresses the entire spell-slot section with one
+stated message.
+
 ## D141 — OWNER: long flavor text TRUNCATES on the sheet; appendix pages optional (2026-07-31)
 
 Refines D104's "printed when present". The main character sheet prints
