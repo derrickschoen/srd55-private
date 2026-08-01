@@ -56,6 +56,30 @@ merges main and re-runs its full Playwright ONCE for a clean signal.
 DO NOT merge a unit on a red suite. DO NOT accept a global --timeout override
 as a gate result (rejected once already this session).
 
+CORROBORATION: codex independently ran the same diagnostic in wt/party —
+removed P0's own integration, watched the test fail identically. Two
+independent parties, same conclusion.
+
+TRIPWIRE: P0 described the failure as "the build-report screen does not
+return after reload", which is hang-shaped rather than slow-shaped. The test
+DOES pass on a quiet machine (88 green in W-B2's run, 89 in FF-A's and
+D91-R's), so timing is the current best explanation. BUT if it still fails
+after SUITE-HYGIENE-2's 90s ceiling merges, that is a REAL defect in the
+build-report route and must be dispatched as one — do not raise the ceiling
+again.
+
+MERGE CASCADE once hyg2 is on main (four units are committed and scanned
+clean, awaiting only a trustworthy suite):
+  wt/print  W-C      14 files  vitest 195/3,168 (codex), review CLEAN
+  wt/resp   RESP-1    4 files  vitest 194/3,162, review CLEAN
+  wt/attr   FIX-ATTR  6 files  vitest 194/3,162, review CLEAN
+  wt/party  P0       (mint-free) vitest 199/3,189, review CLEAN round 2
+For each: merge main, full PW ONCE, D135 review, then merge-to-main.sh.
+Run the four D135 reviews concurrently (read-only, cheap); run at most TWO
+Playwright suites at a time — eight lanes is what caused this blocker.
+
+
+
 ## D91-R: D143a fallback taken (round 3 of 3)
 Round 3 found the last per-family gap at sheet.ts:1760 — an invalid base
 progression_type IS the family discriminator, so neither family is knowable,
