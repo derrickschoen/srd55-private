@@ -7,6 +7,19 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D146 — OWNER: party v1 = library AND characters; token lives in the session (2026-08-01)
+
+Confirms D145's full reading against the design's scoping alternatives: v1
+ships shared library plus player character publish/refresh (all 10 units of
+docs/design/2026-08-01-party-storage.md). Pasted tokens live in
+sessionStorage with an explicit Forget control — reload survives, ending the
+browser session forgets. Durable at-rest storage is NOT taken.
+
+Supervisor took the design's other recommended defaults: a designated
+librarian writes library/ while each player writes only their own character
+path; one repo per party with top-level library/ and characters/; default
+branch only.
+
 ## D144 — OWNER: Cloudflare Pages stays the host; NO server-side secret (2026-08-01)
 
 Reaffirms D113 against the GitHub Pages alternative. No Cloudflare Worker, no
@@ -28,6 +41,18 @@ SUPERVISOR-PROVEN 2026-08-01 (curl with an Origin header, all three returned
 Dialects differ and need separate adapters: GitHub and Gitea/Codeberg use
 `contents/{path}` with a blob `sha` for optimistic concurrency; GitLab uses
 `repository/files/{path}` with `last_commit_id` and a PRIVATE-TOKEN header.
+
+## D143a — SUPERVISOR: the D143 fallback is TAKEN (2026-08-01)
+
+Trigger met. Three D135 review rounds found per-family absence incomplete;
+round 3 found the last gap at src/rules/sheet.ts:1760 — the invalid value was
+the FAMILY DISCRIMINATOR (base progression_type), so no family could be
+trusted, yet both still printed. Per D143's pre-authorization the supervisor
+switched WITHOUT asking to the simple rule: ANY invalid or missing spell
+content suppresses the ENTIRE spell-slot section, absent-and-stated, one
+message. Slots print only when every contributor is complete and valid.
+Per-family independence is withdrawn. Tests asserting the superseded rule are
+replaced as RULING-DRIVEN changes, not deletions to reach green.
 
 ## D143 — OWNER: per-family slot absence, with a pre-authorized simple fallback (2026-07-31)
 
