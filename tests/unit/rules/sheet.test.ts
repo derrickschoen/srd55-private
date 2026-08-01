@@ -1663,6 +1663,139 @@ describe('sheet resource maxima', () => {
     ]);
   });
 
+  it('invalid Wizard plus valid Cleric makes shared slots absent while Pact remains present', () => {
+    const invalidWizard = resourceClass(1, 'Wizard', 3, {
+      base_spellcasting: {
+        progression_type: 'full',
+        progression_row: { status: 'present', slots: '{}', pact_slots: '[]' },
+      },
+    });
+    const validCleric = resourceClass(2, 'Cleric', 2, {
+      base_spellcasting: {
+        progression_type: 'full',
+        progression_row: { status: 'present', slots: '{"1":3}', pact_slots: '[]' },
+      },
+    });
+    const validWarlock = resourceClass(3, 'Warlock', 3, {
+      base_spellcasting: {
+        progression_type: 'pact',
+        progression_row: {
+          status: 'present',
+          slots: '[]',
+          pact_slots: '{"count":2,"level":2}',
+        },
+      },
+    });
+
+    // Negative control: discard the invalid Wizard and continue with the
+    // reduced shared set; the extra Cleric-only spell-slot row fails this test.
+    expect(
+      resolveSheetResources(
+        [invalidWizard, validCleric, validWarlock],
+        PRESENT_ABILITIES,
+      ).map((entry) =>
+        entry.status === 'computed'
+          ? [entry.kind, entry.spell_level, entry.maximum]
+          : [entry.reason, entry.class_name, entry.id],
+      ),
+    ).toEqual([
+      [
+        'spell_progression_missing_or_invalid',
+        'Wizard',
+        'resource:1:base-spell-progression-absent',
+      ],
+      ['pact_slot', 2, 2],
+    ]);
+  });
+
+  it('one invalid Pact contributor makes Pact absent while shared slots remain present', () => {
+    const invalidWarlock = resourceClass(1, 'Warlock', 3, {
+      base_spellcasting: {
+        progression_type: 'pact',
+        progression_row: { status: 'present', slots: '[]', pact_slots: '{}' },
+      },
+    });
+    const validHexbinder = resourceClass(2, 'Hexbinder', 2, {
+      base_spellcasting: {
+        progression_type: 'pact',
+        progression_row: {
+          status: 'present',
+          slots: '[]',
+          pact_slots: '{"count":2,"level":1}',
+        },
+      },
+    });
+    const validWizard = resourceClass(3, 'Wizard', 2, {
+      base_spellcasting: {
+        progression_type: 'full',
+        progression_row: { status: 'present', slots: '{"1":3}', pact_slots: '[]' },
+      },
+    });
+
+    // Negative control: discard the invalid Warlock and continue with the
+    // reduced Pact set; the extra Hexbinder Pact row fails this test.
+    expect(
+      resolveSheetResources(
+        [invalidWarlock, validHexbinder, validWizard],
+        PRESENT_ABILITIES,
+      ).map((entry) =>
+        entry.status === 'computed'
+          ? [entry.kind, entry.spell_level, entry.maximum]
+          : [entry.reason, entry.class_name, entry.id],
+      ),
+    ).toEqual([
+      [
+        'spell_progression_missing_or_invalid',
+        'Warlock',
+        'resource:1:base-spell-progression-absent',
+      ],
+      ['spell_slot', 1, 3],
+    ]);
+  });
+
+  it('uses the sole-base-caster shortcut only for a complete valid shared contributor set', () => {
+    const validCleric = resourceClass(1, 'Cleric', 2, {
+      base_spellcasting: {
+        progression_type: 'full',
+        progression_row: { status: 'present', slots: '{"1":3}', pact_slots: '[]' },
+      },
+    });
+    const invalidSubclassCaster = resourceClass(2, 'Fighter', 3, {
+      subclass_spellcasting: {
+        caster_fraction: '1/3',
+        caster_rounding: 'down',
+        progression_row: { status: 'present', slots: '{}', pact_slots: null },
+      },
+    });
+
+    expect(
+      resolveSheetResources([validCleric], PRESENT_ABILITIES).map((entry) =>
+        entry.status === 'computed'
+          ? [entry.kind, entry.spell_level, entry.maximum]
+          : [entry.reason, entry.class_name, entry.id],
+      ),
+    ).toEqual([['spell_slot', 1, 3]]);
+
+    // Negative control: discard the invalid subclass contributor and continue;
+    // the sole-base shortcut emits the Cleric row and fails this expectation.
+    expect(
+      resolveSheetResources(
+        [validCleric, invalidSubclassCaster],
+        PRESENT_ABILITIES,
+      ).map((entry) =>
+        entry.status === 'computed'
+          ? [entry.kind, entry.spell_level, entry.maximum]
+          : [entry.reason, entry.class_name, entry.id],
+      ),
+    ).toEqual([
+      [
+        'spell_progression_missing_or_invalid',
+        'Fighter',
+        'resource:2:subclass-spell-progression-absent',
+      ],
+    ]);
+  });
+
   it('keeps unknown, missing resource, invalid formula inputs, and invalid spell content absent', () => {
     const unknown = resourceClass(1, 'Chronomancer', 4, {
       catalog: { status: 'not_recorded' },
