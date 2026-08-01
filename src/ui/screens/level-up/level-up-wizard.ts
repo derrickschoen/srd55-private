@@ -1,7 +1,9 @@
 import {
   LEVEL_UP_ATTR,
   LEVEL_UP_STEP_ORDER,
+  levelUpWarningPresentation,
   type LevelUpGuideableClassOption,
+  type LevelUpWarningPresentation,
   type LevelUpStateResult,
   type LevelUpStep,
 } from '../../../builder/level-up-wizard';
@@ -20,6 +22,11 @@ import {
   renderUnimplementedLevelUpStep,
   type LevelUpFrame,
 } from './level-up-shell';
+import {
+  createFeatStep,
+  renderDeferredEpicWarning,
+  type FeatStepDraft,
+} from './feat-steps';
 
 export interface LevelUpWizardController {
   readonly element: HTMLElement;
@@ -68,6 +75,9 @@ function createTerminalEpicResolutionWizard(options: {
   const host = element('div', { className: 'level-up-route' });
   let currentCleanup: Cleanup = () => undefined;
   let initialFocusTarget: HTMLElement | null = null;
+  let draft: FeatStepDraft = null;
+  let error: string | null = null;
+  let activeFrame: LevelUpFrame | null = null;
 
   const showPrompt = (focusPanel: boolean): void => {
     currentCleanup();
@@ -104,28 +114,70 @@ function createTerminalEpicResolutionWizard(options: {
     if (focusPanel) view.querySelector('h2')?.focus();
   };
 
-  const showEpicStep = (): void => {
+  const showStep = (step: 'epic_boon' | 'review'): void => {
     currentCleanup();
-    const panel = renderUnimplementedLevelUpStep('epic_boon');
+    const featView = step === 'epic_boon'
+      ? createFeatStep({
+          step: 'epic_boon',
+          candidates: options.state.pending_epic_resolution.candidates,
+          draft,
+          allowDefer: false,
+          deferredWarning: options.state.pending_epic_resolution.warning,
+          onSelect: (selection) => {
+            draft = selection;
+            error = null;
+            showStep('epic_boon');
+            host.querySelector<HTMLInputElement>('[checked]')?.focus();
+          },
+        })
+      : null;
+    const panel = featView?.element ?? renderUnimplementedLevelUpStep('review');
     const frame = createLevelUpFrame({
       characterName: options.state.character.name,
       steps: orderedSteps(
         options.state.pending_epic_resolution.applicable_steps,
       ),
-      currentStep: 'epic_boon',
+      currentStep: step,
       panel,
       navigation: {
-        back: () => showPrompt(true),
+        back: () => {
+          if (step === 'epic_boon') showPrompt(true);
+          else showStep('epic_boon');
+        },
         cancel: options.cancel,
+        ...(step === 'epic_boon'
+          ? {
+              next: () => {
+                if (
+                  draft?.kind !== 'selected' ||
+                  draft.application.plan.eligibility.status !== 'qualified'
+                ) {
+                  error = 'Choose an Epic Boon to resolve the deferred choice.';
+                  showStep('epic_boon');
+                  activeFrame?.alert?.focus();
+                  return;
+                }
+                error = null;
+                showStep('review');
+                activeFrame?.stepHeading.focus();
+              },
+            }
+          : {}),
       },
       applicableStepStatus: null,
-      error: null,
+      error,
     });
     host.replaceChildren(frame.element);
+    activeFrame = frame;
     initialFocusTarget = frame.routeHeading;
-    currentCleanup = frame.cleanup;
+    currentCleanup = () => {
+      featView?.cleanup();
+      frame.cleanup();
+    };
     frame.stepHeading.focus();
   };
+
+  const showEpicStep = (): void => showStep('epic_boon');
 
   showPrompt(false);
   return {
@@ -166,6 +218,8 @@ export function createLevelUpWizard(options: {
   let pendingEpicPath: PendingEpicPath | null =
     state.pending_epic_resolution === null ? 'next_level' : null;
   let subclassDraft: SubclassDraft = { kind: 'decide_later' };
+  let levelFeatDraft: FeatStepDraft = null;
+  let epicResolutionDraft: FeatStepDraft = null;
   let currentStep: LevelUpStep = 'class';
   let error: string | null = null;
   let applicableStepStatus: string | null = null;
@@ -188,6 +242,29 @@ export function createLevelUpWizard(options: {
     return selected === null
       ? ['class']
       : orderedSteps(selected.applicable_steps);
+  };
+
+  const isEpicResolutionPass = (): boolean =>
+    pendingEpicPath === 'resolve_now' && state.pending_epic_resolution !== null;
+
+  const activeFeatDraft = (): FeatStepDraft =>
+    isEpicResolutionPass() ? epicResolutionDraft : levelFeatDraft;
+
+  const selectedFeatIsQualified = (draft: FeatStepDraft): boolean =>
+    draft?.kind === 'selected' &&
+    draft.application.plan.eligibility.status === 'qualified';
+
+  const deferredEpicWarning = (): LevelUpWarningPresentation | null => {
+    if (
+      pendingEpicPath === 'next_level' &&
+      state.pending_epic_resolution !== null
+    ) {
+      return state.pending_epic_resolution.warning;
+    }
+    if (levelFeatDraft?.kind === 'defer_epic_boon') {
+      return levelUpWarningPresentation('epic_boon_deferred');
+    }
+    return null;
   };
 
   const moveTo = (step: LevelUpStep): void => {
@@ -221,6 +298,25 @@ export function createLevelUpWizard(options: {
       moveTo(first === 'class' ? applicableSteps()[1] ?? 'class' : first);
       return;
     }
+    if (currentStep === 'feat' && !selectedFeatIsQualified(levelFeatDraft)) {
+      showError('Choose a feat for this class level.');
+      return;
+    }
+    if (currentStep === 'epic_boon') {
+      const draft = activeFeatDraft();
+      if (isEpicResolutionPass()) {
+        if (!selectedFeatIsQualified(draft)) {
+          showError('Choose an Epic Boon to resolve the deferred choice.');
+          return;
+        }
+      } else if (
+        draft === null ||
+        (draft.kind === 'selected' && !selectedFeatIsQualified(draft))
+      ) {
+        showError('Choose an Epic Boon or choose Decide later.');
+        return;
+      }
+    }
     const steps = applicableSteps();
     const index = steps.indexOf(currentStep);
     const following = index < 0 ? undefined : steps[index + 1];
@@ -243,11 +339,15 @@ export function createLevelUpWizard(options: {
         onSelectClass: (classDefinitionId) => {
           selectedClassId = classDefinitionId;
           subclassDraft = { kind: 'decide_later' };
+          levelFeatDraft = null;
           error = null;
           applicableStepStatus = `${String(applicableSteps().length)} applicable level-up steps.`;
           render(false);
         },
         onSelectPendingEpicPath: (path) => {
+          if (pendingEpicPath !== path && path === 'resolve_now') {
+            epicResolutionDraft = null;
+          }
           pendingEpicPath = path;
           error = null;
           applicableStepStatus = `${String(applicableSteps().length)} applicable level-up steps.`;
@@ -277,6 +377,64 @@ export function createLevelUpWizard(options: {
         },
       });
     }
+    if (currentStep === 'feat') {
+      if (
+        selected?.feat_occurrence === null ||
+        selected?.feat_occurrence.kind !== 'asi_level_feat'
+      ) {
+        throw new Error('The Feat step requires a returned ASI feat occurrence.');
+      }
+      return createFeatStep({
+        step: 'feat',
+        candidates: selected.feat_occurrence.candidates,
+        draft: levelFeatDraft,
+        allowDefer: false,
+        deferredWarning: levelUpWarningPresentation('epic_boon_deferred'),
+        onSelect: (draft) => {
+          levelFeatDraft = draft;
+          error = null;
+          render(false);
+          if (draft.kind === 'selected') {
+            host.querySelector<HTMLInputElement>('[checked]')?.focus();
+          }
+        },
+      });
+    }
+    if (currentStep === 'epic_boon') {
+      const resolution = isEpicResolutionPass();
+      const occurrence = selected?.feat_occurrence;
+      if (
+        !resolution &&
+        (occurrence === null || occurrence === undefined || occurrence.kind !== 'epic_boon')
+      ) {
+        throw new Error('The Epic Boon step requires a returned Epic Boon occurrence.');
+      }
+      const warning = state.pending_epic_resolution?.warning ??
+        levelUpWarningPresentation('epic_boon_deferred');
+      return createFeatStep({
+        step: 'epic_boon',
+        candidates: resolution
+          ? state.pending_epic_resolution?.candidates ?? []
+          : occurrence?.candidates ?? [],
+        draft: resolution ? epicResolutionDraft : levelFeatDraft,
+        allowDefer: !resolution,
+        deferredWarning: warning,
+        onSelect: (draft) => {
+          if (resolution) epicResolutionDraft = draft;
+          else levelFeatDraft = draft;
+          error = null;
+          render(false);
+          const value = draft.kind === 'selected'
+            ? String(draft.application.selection.feat_content_key)
+            : null;
+          if (value === null) {
+            host.querySelector<HTMLInputElement>('[value="defer_epic_boon"]')?.focus();
+          } else {
+            host.querySelector<HTMLInputElement>('[checked]')?.focus();
+          }
+        },
+      });
+    }
     return {
       element: renderUnimplementedLevelUpStep(currentStep),
       cleanup: () => undefined,
@@ -286,6 +444,16 @@ export function createLevelUpWizard(options: {
   const render = (initial: boolean): void => {
     frame?.cleanup();
     const panel = renderPanel();
+    const warning = deferredEpicWarning();
+    if (
+      currentStep !== 'class' &&
+      warning !== null &&
+      panel.element.querySelector(
+        `[${LEVEL_UP_ATTR.warning}="${warning.key}"]`,
+      ) === null
+    ) {
+      panel.element.append(renderDeferredEpicWarning(warning));
+    }
     const steps = applicableSteps();
     const displayedSteps =
       currentStep === 'class' && !steps.includes('class')
@@ -295,7 +463,9 @@ export function createLevelUpWizard(options: {
     const implementedStep =
       currentStep === 'class' ||
       currentStep === 'gains' ||
-      currentStep === 'subclass';
+      currentStep === 'subclass' ||
+      currentStep === 'feat' ||
+      currentStep === 'epic_boon';
     const hasNext = implementedStep &&
       (currentStep === 'class' ||
         (nextIndex > 0 && nextIndex < steps.length));
