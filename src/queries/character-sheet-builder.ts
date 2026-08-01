@@ -46,6 +46,7 @@ import {
   initiative,
   martialArtsDice,
   passivePerception,
+  resolveSheetResources,
   savingThrowModifier,
   savingThrowProficiencies,
   sheetProficiencyBonus,
@@ -62,6 +63,7 @@ import {
   type SheetArmor,
   type SheetClass,
   type SheetWarning,
+  type SheetResourceMaximum,
 } from '../rules/sheet';
 import {
   readEligibleCharacterEffects,
@@ -339,6 +341,7 @@ export interface CharacterSheet {
   readonly saves: readonly SheetSave[];
   readonly skills: readonly SheetSkill[];
   readonly attacks_per_action: AttacksPerAction;
+  readonly resources: readonly SheetResourceMaximum[];
   readonly martial_arts: readonly {
     readonly class_name: string;
     readonly class_level: number;
@@ -683,6 +686,16 @@ export class CharacterSheetBuilder {
       character.proficiency_bonus_override,
     );
     const totalLevel = characterLevel(classes.map((entry) => entry.level));
+    const resources = resolveSheetResources(content, {
+      charisma: {
+        status: 'present',
+        modifier: scores.score('charisma').modifier(),
+      },
+      wisdom: {
+        status: 'present',
+        modifier: scores.score('wisdom').modifier(),
+      },
+    });
 
     const hitPoints = hitPointMaximum({ classes, scores, rolls: rolls.map });
     const eligibleEffectRows = readEligibleCharacterEffects(
@@ -895,6 +908,7 @@ export class CharacterSheetBuilder {
         };
       }),
       attacks_per_action: attacksPerAction(content),
+      resources,
       martial_arts: martialArtsDice(content).map((die) => ({ ...die })),
       walking_speed_feet:
         baseSpeed === null
