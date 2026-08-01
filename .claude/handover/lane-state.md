@@ -10,39 +10,84 @@ migrations 0000-0026 (0027 minted unmerged in wt/attunement); wire v1-v16
 All lanes merged main in (wt/pwa needed a one-hunk timeout-comment union,
 resolved keeping BOTH measurements, tsc 0).
 
-## In flight (supervisor = OPUS)
-MAIN 652a1a0. FLOORS: vitest 3,162 / 194 files; Playwright 88 / 20 specs;
-build 0; migrations 0000-0026; wire v1-v16; existing a7-v* assertions.
-MERGED THIS WINDOW: W-B2 (feat/Epic cards) — first unit to pass its D135
-review CLEAN on the first round.
+## In flight (supervisor = OPUS) — EIGHT LANES
+MAIN 33a8693. FLOORS: vitest 3,162 / 194 files; Playwright 88 / 20 specs;
+build 0; migrations 0000-0026; wire v1-v16; a7-v* assertions.
 
-- TRACK M (wt/attunement): FF-A + FIX committed. My gates: scans clean,
-  vitest 193/3,167, consent control re-proven on the RENAMED contract,
-  Playwright 89/89 with NO override (codex's earlier 89 used a global
-  --timeout=60000 and was rejected; the clean re-run vindicated the code,
-  not the claim). Round-2 review: TWO defects accepted — (a) D142's raise
-  of the notes cap to 20,000 is unimplemented (limit still 2,000; that
-  ruling postdates the first fix, so it is new work), (b) the consent
-  rename missed SharePreview.includesNotes, which now computes "any of the
-  four" while still named for notes alone — a name that lies, same defect
-  class as the checkbox label. FF-A-FIX2 dispatched (log ffa-fix2.log).
-  Re-gate after: vitest, consent control, PW 44480 with NO override,
-  round-3 review, merge.
-- TRACK W (wt/print at main): FREE. Next: W-C from briefs/w-c.md, port
-  44473 (LU-2 projection + identity-sentinel rollback preview).
-- TRACK S (wt/pwa): D91-R + FIX + FIX2 + FIX3 committed; my gates done
-  except the FINAL full PW on 44477 (the earlier run was stopped when FIX3
-  changed the tree) and the round-3 D135 review. D143 pre-authorizes the
-  whole-section fallback if that review still finds it wrong — take it
-  WITHOUT asking.
-- TRACK P (wt/party, NEW 4th worktree): PARTY-0 design committed
-  (docs/design/2026-08-01-party-storage.md, 719 lines, 10 units).
-  Sentinel gate PARTY-TOKEN-NEVER-TRAVELS specified. D146 settles scope
-  (library AND characters) and sessionStorage credentials. Next: DOC-C and
-  DOC-L are the mint prerequisites and belong to TRACK M's serial mint
-  lane; P0 (contracts + recorded-fixture harness) is mint-free and can
-  start in wt/party immediately after a brief is written from the design's
-  section 12 unit table.
+**MINT ORDER CORRECTED 2026-08-01 (a real dependency finding).** DOC-C was
+dispatched into the chained mint lane and codex STOPPED under process rule 6:
+DOC-C's reference closure needs the semantic projectors and the CI-2a
+plan/commit importer (planContentImport / commitContentImport /
+installContentAggregate / PortableContentAggregate) — none of which exist.
+Those come from CI-3a/CI-3b/CI-4a. So the party document formats sit DEEP in
+the mint chain, not at its head. TRUE MINT ORDER:
+  FF-A (in flight) -> HA-1 -> CI-3a -> CI-3c -> CI-3b -> CI-3s -> CI-4a ->
+  CI-4b -> DOC-C -> DOC-L -> AR-A -> HA-2 -> CI-5 -> HA-3/4/5 -> CI-6/7/8
+Consequence worth carrying to the owner: party storage (D145/D146, inside
+v1) cannot land until most of the CI chain lands.
+
+- wt/attunement (MINT HEAD): FF-A-FIX2 (D142 notes cap 20,000 + the
+  SharePreview.includesNotes rename the round-2 review caught).
+- wt/mint2 (MINT CHAIN, branched from mint tip, inherits 0027/v17): HA-1
+  authorable effect storage + fingerprint inventory, port 44482. Deps
+  verified merged: HA-0 3ff299a, CI-2a e121b4c.
+- wt/print: W-C rollback preview adapter, port 44473.
+- wt/pwa: D91-R-FIX4 — the D143a whole-section fallback (see below).
+- wt/attr: FIX-ATTR print attribution + build id, port 44478.
+- wt/resp: RESP-1 responsive pass, port 44484.
+- wt/party: P0 storage contracts + recorded-fixture harness, port 44510.
+- Briefs ready and unblocked-when-their-deps-land: p1-gh/gl/cb, p2..p7,
+  ff-b, ff-c, doc-c (do NOT dispatch until CI-4b merges), ar-* per NOTES.
+
+## MACHINE-WIDE GATE BLOCKER (2026-08-01) — and its evidence
+Eight concurrent lanes exceeded what main's per-test timeouts tolerate. THREE
+independent lanes failed their full Playwright on the SAME one or two tests:
+  tests/browser/reports-and-print.spec.ts:83  — 36.3s ALONE (W-C), 34.9-35.8s
+    (D91-R), i.e. over the 30s default even uncontended
+  tests/browser/php-feature-parity.spec.ts:1520 — 25.2s alone, <20% margin
+PROVEN NOT CAUSED BY THE UNITS: in wt/resp the supervisor stashed RESP-1's
+entire diff and the same test failed identically, then restored it. So the
+failure is attributable to load and to alone-times near the ceiling, not to
+any lane's changes.
+FIX IN FLIGHT: SUITE-HYGIENE-2 in wt/hyg2 (branched from main, log hyg2.log,
+port 44493) adds measured per-test timeouts to both, plus any other test in
+those two files at/over 15s alone. MERGE IT FIRST; every other lane then
+merges main and re-runs its full Playwright ONCE for a clean signal.
+DO NOT merge a unit on a red suite. DO NOT accept a global --timeout override
+as a gate result (rejected once already this session).
+
+CORROBORATION: codex independently ran the same diagnostic in wt/party —
+removed P0's own integration, watched the test fail identically. Two
+independent parties, same conclusion.
+
+TRIPWIRE: P0 described the failure as "the build-report screen does not
+return after reload", which is hang-shaped rather than slow-shaped. The test
+DOES pass on a quiet machine (88 green in W-B2's run, 89 in FF-A's and
+D91-R's), so timing is the current best explanation. BUT if it still fails
+after SUITE-HYGIENE-2's 90s ceiling merges, that is a REAL defect in the
+build-report route and must be dispatched as one — do not raise the ceiling
+again.
+
+MERGE CASCADE once hyg2 is on main (four units are committed and scanned
+clean, awaiting only a trustworthy suite):
+  wt/print  W-C      14 files  vitest 195/3,168 (codex), review CLEAN
+  wt/resp   RESP-1    4 files  vitest 194/3,162, review CLEAN
+  wt/attr   FIX-ATTR  6 files  vitest 194/3,162, review CLEAN
+  wt/party  P0       (mint-free) vitest 199/3,189, review CLEAN round 2
+For each: merge main, full PW ONCE, D135 review, then merge-to-main.sh.
+Run the four D135 reviews concurrently (read-only, cheap); run at most TWO
+Playwright suites at a time — eight lanes is what caused this blocker.
+
+
+
+## D91-R: D143a fallback taken (round 3 of 3)
+Round 3 found the last per-family gap at sheet.ts:1760 — an invalid base
+progression_type IS the family discriminator, so neither family is knowable,
+yet both still printed. D143's pre-authorization triggered; supervisor took
+the whole-section rule WITHOUT asking. FIX4 in flight. Gate after: vitest,
+shape control, full PW 44477, ONE more review, merge. When gating, CHECK
+that replaced assertions carry their ruling justification (D143a) rather
+than reading as deletions-to-green.
 
 ## D91-R review round 1 (D135) — all four ACCEPTED, FIX2 in flight
 - sheet.ts:1752 return-aborts whole slot resolver on one bad class (verified
