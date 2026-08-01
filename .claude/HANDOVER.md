@@ -415,6 +415,32 @@ no wizard multiclass D107, no XP D88, no class authoring D133). Then report
 the gate is reached and STOP (D121/D128). Repo creation, tunnel, deploy:
 owner-triggered only.
 
+## 5b. THE PARALLELISM CEILING (measured 2026-08-01, learned the hard way)
+
+Every dispatch brief MANDATES that codex run the FULL Playwright suite. So
+**N concurrent dispatches means N concurrent browser suites**, no matter how
+disciplined the supervisor is about their own gate runs. At eight lanes this
+machine (24 cores) reached load ~13 with five simultaneous Playwright
+processes, and the symptoms were:
+  - four separate lanes failing their full suite on the same one or two
+    heavy browser tests, each looking like a unit defect until disproven;
+  - vitest failures appearing too — heavy database tests taking 64s and 70s
+    where they normally take seconds;
+  - a supervisor vitest run reporting 3 failures where the lane's own run,
+    made at a quieter moment, was green.
+None of it was a unit defect. Proven twice: the supervisor stashed a whole
+unit diff and the failure reproduced; codex independently removed its own
+integration and reproduced it too.
+
+RULE: keep CONCURRENT DISPATCHES to about 4, and expect that to be ~4
+browser suites. Read-only review dispatches and doc-only/brief-writing
+work are cheap — those can fan out much wider (a 12-agent brief-writing
+workflow cost nothing in contention). Before believing ANY red suite,
+check `uptime` and `ps -eo args | grep -c "[p]laywright test"`; a
+timeout-shaped failure under load is contention until proven otherwise,
+and the remedy is a quieter re-run, never a config edit or a global
+--timeout flag.
+
 ## 6. Database isolation (why parallel suites are state-safe)
 
 - Browser (Playwright): the app's SQLite lives in OPFS inside each browser
