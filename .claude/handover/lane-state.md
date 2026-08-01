@@ -10,30 +10,84 @@ migrations 0000-0026 (0027 minted unmerged in wt/attunement); wire v1-v16
 All lanes merged main in (wt/pwa needed a one-hunk timeout-comment union,
 resolved keeping BOTH measurements, tsc 0).
 
-## In flight (supervisor = OPUS)
-- TRACK M (wt/attunement): FF-A + FF-A-FIX committed in-lane (50 files vs
-  main; scans 0 forbidden, NO config touched, mints 0027+v17 only).
-  FF-A-FIX closed all four round-1 defects incl. the consent-label privacy
-  defect. FINDING AGAINST THE WORK: codex's own Playwright claim (89 pass)
-  used a GLOBAL `--timeout=60000` CLI override; its unmodified run was
-  87/89 with two 30s timeouts. A global override is not an acceptable gate
-  result — the sanctioned remedy is per-test timeouts with measured
-  alone-times. SUPERVISOR MUST re-run full PW on 44480 with NO override;
-  if the same two tests time out, dispatch a measured per-test annotation
-  fixlet (identical pattern to the merged suite-hygiene unit), never a
-  global flag. Then: vitest, re-run mutate-ffa-toggle.py control, round-2
-  review, merge.
-- TRACK S (wt/pwa): D91-R + FIX + FIX2 + FIX3 all committed. FIX3
-  implements D143 (per-family absence, no partial totals). Codex claims
-  vitest 194/3,172, PW 89 on 44477, build 0, its own re-review CLEAN.
-  OWED by supervisor: vitest, shape control re-run, full PW 44477,
-  round-3 D135 review, merge. D143 pre-authorizes the whole-section
-  fallback if round 3 still finds it wrong — take it WITHOUT asking.
-- TRACK W (wt/print): W-B2 complete, uncommitted, awaiting gate. Codex
-  reports named controls verified + clean second-agent review; it modified
-  NO Playwright specs. Gate: commit, merge main in, scans, build, vitest,
-  one negative control (suggest add-radio-to-refused-card), full PW on
-  44472, D135 review, merge. Then W-C (briefs/w-c.md, port 44473).
+## In flight (supervisor = OPUS) — EIGHT LANES
+MAIN 33a8693. FLOORS: vitest 3,162 / 194 files; Playwright 88 / 20 specs;
+build 0; migrations 0000-0026; wire v1-v16; a7-v* assertions.
+
+**MINT ORDER CORRECTED 2026-08-01 (a real dependency finding).** DOC-C was
+dispatched into the chained mint lane and codex STOPPED under process rule 6:
+DOC-C's reference closure needs the semantic projectors and the CI-2a
+plan/commit importer (planContentImport / commitContentImport /
+installContentAggregate / PortableContentAggregate) — none of which exist.
+Those come from CI-3a/CI-3b/CI-4a. So the party document formats sit DEEP in
+the mint chain, not at its head. TRUE MINT ORDER:
+  FF-A (in flight) -> HA-1 -> CI-3a -> CI-3c -> CI-3b -> CI-3s -> CI-4a ->
+  CI-4b -> DOC-C -> DOC-L -> AR-A -> HA-2 -> CI-5 -> HA-3/4/5 -> CI-6/7/8
+Consequence worth carrying to the owner: party storage (D145/D146, inside
+v1) cannot land until most of the CI chain lands.
+
+- wt/attunement (MINT HEAD): FF-A-FIX2 (D142 notes cap 20,000 + the
+  SharePreview.includesNotes rename the round-2 review caught).
+- wt/mint2 (MINT CHAIN, branched from mint tip, inherits 0027/v17): HA-1
+  authorable effect storage + fingerprint inventory, port 44482. Deps
+  verified merged: HA-0 3ff299a, CI-2a e121b4c.
+- wt/print: W-C rollback preview adapter, port 44473.
+- wt/pwa: D91-R-FIX4 — the D143a whole-section fallback (see below).
+- wt/attr: FIX-ATTR print attribution + build id, port 44478.
+- wt/resp: RESP-1 responsive pass, port 44484.
+- wt/party: P0 storage contracts + recorded-fixture harness, port 44510.
+- Briefs ready and unblocked-when-their-deps-land: p1-gh/gl/cb, p2..p7,
+  ff-b, ff-c, doc-c (do NOT dispatch until CI-4b merges), ar-* per NOTES.
+
+## MACHINE-WIDE GATE BLOCKER (2026-08-01) — and its evidence
+Eight concurrent lanes exceeded what main's per-test timeouts tolerate. THREE
+independent lanes failed their full Playwright on the SAME one or two tests:
+  tests/browser/reports-and-print.spec.ts:83  — 36.3s ALONE (W-C), 34.9-35.8s
+    (D91-R), i.e. over the 30s default even uncontended
+  tests/browser/php-feature-parity.spec.ts:1520 — 25.2s alone, <20% margin
+PROVEN NOT CAUSED BY THE UNITS: in wt/resp the supervisor stashed RESP-1's
+entire diff and the same test failed identically, then restored it. So the
+failure is attributable to load and to alone-times near the ceiling, not to
+any lane's changes.
+FIX IN FLIGHT: SUITE-HYGIENE-2 in wt/hyg2 (branched from main, log hyg2.log,
+port 44493) adds measured per-test timeouts to both, plus any other test in
+those two files at/over 15s alone. MERGE IT FIRST; every other lane then
+merges main and re-runs its full Playwright ONCE for a clean signal.
+DO NOT merge a unit on a red suite. DO NOT accept a global --timeout override
+as a gate result (rejected once already this session).
+
+CORROBORATION: codex independently ran the same diagnostic in wt/party —
+removed P0's own integration, watched the test fail identically. Two
+independent parties, same conclusion.
+
+TRIPWIRE: P0 described the failure as "the build-report screen does not
+return after reload", which is hang-shaped rather than slow-shaped. The test
+DOES pass on a quiet machine (88 green in W-B2's run, 89 in FF-A's and
+D91-R's), so timing is the current best explanation. BUT if it still fails
+after SUITE-HYGIENE-2's 90s ceiling merges, that is a REAL defect in the
+build-report route and must be dispatched as one — do not raise the ceiling
+again.
+
+MERGE CASCADE once hyg2 is on main (four units are committed and scanned
+clean, awaiting only a trustworthy suite):
+  wt/print  W-C      14 files  vitest 195/3,168 (codex), review CLEAN
+  wt/resp   RESP-1    4 files  vitest 194/3,162, review CLEAN
+  wt/attr   FIX-ATTR  6 files  vitest 194/3,162, review CLEAN
+  wt/party  P0       (mint-free) vitest 199/3,189, review CLEAN round 2
+For each: merge main, full PW ONCE, D135 review, then merge-to-main.sh.
+Run the four D135 reviews concurrently (read-only, cheap); run at most TWO
+Playwright suites at a time — eight lanes is what caused this blocker.
+
+
+
+## D91-R: D143a fallback taken (round 3 of 3)
+Round 3 found the last per-family gap at sheet.ts:1760 — an invalid base
+progression_type IS the family discriminator, so neither family is knowable,
+yet both still printed. D143's pre-authorization triggered; supervisor took
+the whole-section rule WITHOUT asking. FIX4 in flight. Gate after: vitest,
+shape control, full PW 44477, ONE more review, merge. When gating, CHECK
+that replaced assertions carry their ruling justification (D143a) rather
+than reading as deletions-to-green.
 
 ## D91-R review round 1 (D135) — all four ACCEPTED, FIX2 in flight
 - sheet.ts:1752 return-aborts whole slot resolver on one bad class (verified
