@@ -176,8 +176,8 @@ export interface ShareCharacter {
   readonly appearance?: string;
   readonly backstory?: string;
   /**
-   * `characters.notes` — THE ONLY FIELD IN THIS DOCUMENT THE SHARER CHOOSES
-   * WHETHER TO SEND (Q12, ruled opt-in by the owner).
+   * `characters.notes` is one of the four fields governed by D124's single
+   * written-text consent option.
    *
    * Absent means the sharer did not opt in, OR the character has no note. The
    * two are deliberately the same on the wire: a document that distinguished
@@ -2061,11 +2061,8 @@ export function validateShareDocument(
       );
     }
   }
-  // Validated exactly as every other optional free-text field in this document
-  // is — `text()` with a bound owned outside this module, so the share boundary
-  // cannot drift below whatever write boundary the column eventually gets.
   if (rawCharacter.notes !== undefined) {
-    character.notes = text(
+    character.notes = codePointText(
       rawCharacter.notes,
       'character.notes',
       CHARACTER_TEXT_LIMITS.notes,

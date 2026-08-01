@@ -33,7 +33,7 @@ interface ExportParams {
   readonly characterId: number;
   readonly acknowledgements: boolean;
   readonly loadouts: boolean;
-  readonly notes: boolean;
+  readonly writtenText: boolean;
 }
 
 interface FragmentParams {
@@ -48,7 +48,7 @@ function isExportParams(params: unknown): params is ExportParams {
     Number(params.characterId) >= 1 &&
     typeof params.acknowledgements === 'boolean' &&
     typeof params.loadouts === 'boolean' &&
-    typeof params.notes === 'boolean'
+    typeof params.writtenText === 'boolean'
   );
 }
 
@@ -68,7 +68,7 @@ export const handlers: readonly RpcHandler[] = Object.freeze([
       exportCharacterShare(context.db, params.characterId, {
         acknowledgements: params.acknowledgements,
         loadouts: params.loadouts,
-        notes: params.notes,
+        writtenText: params.writtenText,
       }),
   ),
   defineRpcHandler(
@@ -102,4 +102,3 @@ export const handlers: readonly RpcHandler[] = Object.freeze([
     },
   ),
 ]);
-

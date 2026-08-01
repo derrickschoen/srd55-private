@@ -1246,14 +1246,14 @@ describe('minimal character sharing', () => {
         characterId: number;
         acknowledgements: boolean;
         loadouts: boolean;
-        notes: boolean;
+        writtenText: boolean;
       },
       ReturnType<typeof exportCharacterShare>
     >('share.exportCharacter', {
       characterId,
       acknowledgements: false,
       loadouts: true,
-      notes: false,
+      writtenText: false,
     });
     if (!exported.ok) {
       throw new Error(exported.error.message);
@@ -1312,7 +1312,7 @@ describe('minimal character sharing', () => {
     const optedIn = await client.exportDebug(characterId, {
       acknowledgements: true,
       loadouts: true,
-      notes: true,
+      writtenText: true,
     });
     expect(optedIn.character.notes).toBe(SENDER_NOTE);
     expect(optedIn.acknowledgements).toEqual([
@@ -1328,7 +1328,7 @@ describe('minimal character sharing', () => {
     const fragment = await client.createFragment(characterId, {
       acknowledgements: true,
       loadouts: true,
-      notes: true,
+      writtenText: true,
     });
     await expect(decodeShareFragment(fragment)).resolves.toEqual(optedIn);
     await expect(client.preview(fragment)).resolves.toMatchObject({
@@ -1361,7 +1361,7 @@ describe('minimal character sharing', () => {
           characterId: 0,
           acknowledgements: false,
           loadouts: false,
-          notes: false,
+          writtenText: false,
         },
       },
       // THE THIRD FLAG IS REQUIRED, NOT DEFAULTED. A caller that omits it is
@@ -1383,7 +1383,7 @@ describe('minimal character sharing', () => {
           characterId,
           acknowledgements: false,
           loadouts: false,
-          notes: 'yes',
+          writtenText: 'yes',
         },
       },
       { method: 'share.preview', params: { fragment: 42 } },
@@ -1527,7 +1527,7 @@ describe('a share link that predates weapons', () => {
 });
 
 /**
- * A CHARACTER'S OWN NOTES, WHICH TRAVEL ONLY WHEN THE SHARER ASKS (Q12).
+ * A CHARACTER'S OWN NOTES, GOVERNED BY D124'S WRITTEN-TEXT CONSENT.
  *
  * The owner's ruling was "opt-in, like loadouts", and these are the two halves
  * that ruling has to mean: with the option off — which is the default, and what
@@ -1539,7 +1539,7 @@ describe('a share link that predates weapons', () => {
  * dropped by the encoder and a value dropped by the INSERT are equally lost and
  * only the recipient's table can tell you which happened.
  */
-describe('a character note travels only when the sharer opts in', () => {
+describe('written-text consent governs a character note', () => {
   async function recipient(): Promise<DatabaseContext> {
     const db = await database();
     seedCatalog(db);
@@ -1571,7 +1571,7 @@ describe('a character note travels only when the sharer opts in', () => {
     };
   }
 
-  it('flavor portability separates notes privacy', async () => {
+  it('written-text consent gates all four flavor fields', async () => {
     const source = await database();
     const catalog = seedCatalog(source);
     const characterId = seedCharacter(source, catalog);
@@ -1585,7 +1585,7 @@ describe('a character note travels only when the sharer opts in', () => {
     }
 
     const withText = await decodeShareFragment(await encodeShareFragment(
-      exportCharacterShare(source, characterId, { notes: true }),
+      exportCharacterShare(source, characterId, { writtenText: true }),
     ));
     expect(withText.character).toMatchObject({
       alignment: SENDER_ALIGNMENT,
@@ -1631,7 +1631,7 @@ describe('a character note travels only when the sharer opts in', () => {
     const characterId = seedCharacter(source, catalog);
 
     for (const options of [
-      { notes: false },
+      { writtenText: false },
       { acknowledgements: true, loadouts: true },
     ] as const) {
       const { document, stored } = await through(source, characterId, options);
@@ -1646,7 +1646,7 @@ describe('a character note travels only when the sharer opts in', () => {
     const characterId = seedCharacter(source, catalog);
 
     const { document, stored } = await through(source, characterId, {
-      notes: true,
+      writtenText: true,
     });
     expect(document.character.notes).toBe(SENDER_NOTE);
     expect(stored).toBe(SENDER_NOTE);
@@ -1667,7 +1667,7 @@ describe('a character note travels only when the sharer opts in', () => {
 
     for (const [options, expected] of [
       [undefined, false],
-      [{ notes: true }, true],
+      [{ writtenText: true }, true],
     ] as const) {
       const document = await decodeShareFragment(
         await encodeShareFragment(
@@ -1699,7 +1699,7 @@ describe('a character note travels only when the sharer opts in', () => {
         characterId,
       ]);
       const { document, stored } = await through(source, characterId, {
-        notes: true,
+        writtenText: true,
       });
       expect(Object.hasOwn(document.character, 'notes')).toBe(false);
       expect(stored).toBeNull();

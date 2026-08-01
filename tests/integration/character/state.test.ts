@@ -893,6 +893,76 @@ describe('restoring a snapshot written by an older build', () => {
     ).toEqual({ alignment: null, appearance: null, backstory: null });
   });
 
+  it('hand-authored a7-v15 predecessor restores absent flavor as null', () => {
+    // A literal predecessor document, not a current capture with keys removed.
+    // If the v15 registry entry follows the live root-column list, validation
+    // rejects this real historical shape for missing the three D104 fields.
+    const snapshot: MutableSnapshot = {
+      schema_version: 'a7-v15',
+      character: {
+        name: 'Frozen v15 Hero',
+        strength: 15,
+        dexterity: 14,
+        constitution: 13,
+        intelligence: 12,
+        wisdom: 11,
+        charisma: 10,
+        proficiency_bonus_override: 4,
+        rules_edition_preference: '2024',
+        allow_legacy: 1,
+        notes: 'Written before flavor fields existed',
+        ability_allocation_method: null,
+      },
+      character_class_levels: [],
+      character_source_instances: [],
+      spell_selection_slots: [],
+      wizard_spellbook_entries: [],
+      warning_acknowledgements: [],
+      character_weapons: [],
+      character_species: [],
+      character_species_traits: [],
+      character_background: [],
+      character_armor: [],
+      character_hit_point_rolls: [],
+      character_skill_proficiencies: [],
+      character_sheet_adjustments: [],
+      character_effects: [],
+      character_skill_grants: [],
+      character_skill_expertise_grants: [],
+      character_items: [],
+      character_attunement_slots: [],
+      character_level_feat_choices: [],
+    };
+    for (const field of ['alignment', 'appearance', 'backstory']) {
+      expect(Object.hasOwn(snapshot.character, field)).toBe(false);
+    }
+
+    db.exec(
+      `UPDATE characters
+       SET alignment = 'Lawful Evil',
+           appearance = 'Changed after v15',
+           backstory = 'Changed after v15'
+       WHERE id = ?`,
+      [characterId],
+    );
+
+    state.restore(characterId, snapshot);
+
+    expect(
+      db.oneRaw(
+        `SELECT name, alignment, appearance, backstory, notes
+         FROM characters WHERE id = ?`,
+        [characterId],
+      ),
+    ).toEqual({
+      name: 'Frozen v15 Hero',
+      alignment: null,
+      appearance: null,
+      backstory: null,
+      notes: 'Written before flavor fields existed',
+    });
+  });
+
   it('still replaces weapons when the snapshot did record them', () => {
     // The contrast that makes the case above a decision rather than an
     // oversight: a current snapshot DOES speak for weapons, so restoring it

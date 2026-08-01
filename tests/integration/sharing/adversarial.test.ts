@@ -2291,7 +2291,7 @@ describe('adversarial character-share rejection', () => {
 });
 
 /**
- * THE ONE FIELD A SHARER CHOOSES TO SEND, VALIDATED LIKE EVERY OTHER (Q12).
+ * ONE OF THE FOUR WRITTEN-TEXT FIELDS, VALIDATED AT ITS OWN BOUNDARY.
  *
  * `character.notes` is optional free text on the character root, and the whole
  * risk of a NEW optional string on an attacker-controlled document is that the
@@ -2303,6 +2303,21 @@ describe('a hostile or over-long character note', () => {
     minimalDocument({
       character: { name: 'Adversary', notes },
     } as unknown as Partial<CharacterShareDocument>);
+
+  it('accepts exactly 2,000 astral note code points', () => {
+    const exact = '🧙'.repeat(CHARACTER_TEXT_LIMITS.notes);
+    expect([...exact]).toHaveLength(CHARACTER_TEXT_LIMITS.notes);
+    expect(exact.length).toBe(CHARACTER_TEXT_LIMITS.notes * 2);
+    expect(() => validateShareDocument(withNote(exact))).not.toThrow();
+  });
+
+  it('refuses 2,001 astral note code points', () => {
+    const overlong = '🧙'.repeat(CHARACTER_TEXT_LIMITS.notes + 1);
+    expect([...overlong]).toHaveLength(CHARACTER_TEXT_LIMITS.notes + 1);
+    expect(() => validateShareDocument(withNote(overlong))).toThrow(
+      /character\.notes must be a string of 1-2000/,
+    );
+  });
 
   it('names the field rather than reporting a byte-limit overflow', () => {
     expect(() =>
