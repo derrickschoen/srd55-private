@@ -51,7 +51,9 @@
 
 .level-up-class-options,
 .level-up-epic-paths,
-.level-up-subclass-options {
+.level-up-subclass-options,
+.level-up-feat-applications,
+.level-up-feat-defer-fieldset {
   display: grid;
   gap: 0.75rem;
   margin: 1rem 0;
@@ -65,14 +67,18 @@
 
 .level-up-class-options > legend,
 .level-up-epic-paths > legend,
-.level-up-subclass-options > legend {
+.level-up-subclass-options > legend,
+.level-up-feat-applications > legend,
+.level-up-feat-defer-fieldset > legend {
   grid-column: 1 / -1;
   font-weight: 700;
 }
 
 .level-up-class-card,
 .level-up-subclass-option,
-.level-up-epic-paths label {
+.level-up-epic-paths label,
+.level-up-feat-application,
+.level-up-feat-defer {
   display: flex;
   align-items: flex-start;
   gap: 0.55rem;
@@ -103,6 +109,88 @@
 .level-up-class-disabled h3,
 .level-up-class-disabled p {
   margin: 0;
+}
+
+.level-up-feat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+
+.level-up-feat-card {
+  display: grid;
+  gap: 0.75rem;
+  border: 1px solid var(--border, #c9c9c9);
+  border-radius: 0.55rem;
+  padding: 1rem;
+}
+
+.level-up-feat-card-unmet,
+.level-up-feat-card-unprovable {
+  border-style: dashed;
+}
+
+.level-up-feat-card header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.level-up-feat-card h3,
+.level-up-feat-card h4,
+.level-up-feat-card h5,
+.level-up-feat-card p {
+  margin: 0;
+}
+
+.level-up-feat-default,
+.level-up-feat-status {
+  font-weight: 700;
+}
+
+.level-up-feat-status-unmet::before,
+.level-up-feat-status-unprovable::before,
+.level-up-epic-deferred-warning strong::before {
+  content: 'Warning: ';
+}
+
+.level-up-feat-metadata,
+.level-up-feat-rule {
+  display: grid;
+  grid-template-columns: minmax(7rem, auto) 1fr;
+  gap: 0.25rem 0.75rem;
+  margin: 0;
+}
+
+.level-up-feat-metadata dt,
+.level-up-feat-rule dt {
+  font-weight: 650;
+}
+
+.level-up-feat-metadata dd,
+.level-up-feat-rule dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.level-up-feat-plan,
+.level-up-feat-plan-section,
+.level-up-feat-source-text {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.level-up-feat-plan-section {
+  border-top: 1px solid var(--border, #c9c9c9);
+  padding-top: 0.75rem;
+}
+
+.level-up-feat-application,
+.level-up-feat-defer {
+  cursor: pointer;
 }
 
 .level-up-warnings,
@@ -175,6 +263,9 @@
 
 @media (max-width: 40rem) {
   .level-up-class-options,
+  .level-up-feat-grid,
+  .level-up-feat-metadata,
+  .level-up-feat-rule,
   .level-up-facts {
     grid-template-columns: 1fr;
   }

@@ -7,6 +7,54 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D144 — OWNER: Cloudflare Pages stays the host; NO server-side secret (2026-08-01)
+
+Reaffirms D113 against the GitHub Pages alternative. No Cloudflare Worker, no
+OAuth exchange endpoint, no secret to rotate: the site remains pure static
+assets. Party-storage authentication is therefore user-pasted tokens only.
+
+## D145 — OWNER: party storage = user tokens against GitHub / GitLab / Codeberg (2026-08-01)
+
+A table shares a library and characters through a repo THEY own, on any of
+the three forges, public or private, authenticated by a token the user pastes.
+One storage port, three adapters. SHIPS INSIDE v1 — this extends D106's queue
+and therefore the gate; publication waits for it.
+
+SUPERVISOR-PROVEN 2026-08-01 (curl with an Origin header, all three returned
+`access-control-allow-origin: *`, so a static page can call them):
+  api.github.com/rate_limit        HTTP 200
+  codeberg.org/api/v1/version      HTTP 200
+  gitlab.com/api/v4/version        HTTP 401 (auth required; CORS header present)
+Dialects differ and need separate adapters: GitHub and Gitea/Codeberg use
+`contents/{path}` with a blob `sha` for optimistic concurrency; GitLab uses
+`repository/files/{path}` with `last_commit_id` and a PRIVATE-TOKEN header.
+
+## D143 — OWNER: per-family slot absence, with a pre-authorized simple fallback (2026-07-31)
+
+When catalog content behind one class is invalid, the sheet suppresses only
+that spell-slot FAMILY (shared vs Pact) and states why; the other family's
+valid rows still print. Partial totals within a family are forbidden — a
+broken contributor makes its whole family absent, never a smaller number
+(D33). PRE-AUTHORIZED: if the next review round still finds this wrong, the
+supervisor switches immediately, without asking again, to the simple rule —
+any invalid spell content suppresses the entire spell-slot section with one
+stated message.
+
+## D141 — OWNER: long flavor text TRUNCATES on the sheet; appendix pages optional (2026-07-31)
+
+Refines D104's "printed when present". The main character sheet prints
+alignment and appearance in full and TRUNCATES backstory/notes with a visible
+continuation marker, so the play aid stays short. A separate opt-in prints
+the full written text as appendix page(s) after the sheet. Truncation on the
+main sheet must always be visibly marked, never silent.
+
+## D142 — OWNER: notes cap rises to 20,000 code points (2026-07-31)
+
+Amends the D104 design's limit table. notes now matches backstory at 20,000
+code points; appearance stays 4,000, alignment 120. One toggle, one generous
+long-form cap. Raising a cap breaks no stored character; the existing
+grandfathered-longer-notes rule is unaffected.
+
 ## D140 — OWNER: supervision reporting is TERMINAL-ONLY (2026-07-31)
 
 No push notifications, not even for hard stops or the D106 gate. Everything
