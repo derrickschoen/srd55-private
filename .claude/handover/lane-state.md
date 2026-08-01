@@ -3,54 +3,37 @@
 READ .claude/HANDOVER.md FIRST — it is the operating manual; this file is
 only the fast-moving state it references.
 
-Main HEAD: 5841448 (D91-M merged). FLOORS: vitest 3,132 tests / 192 files;
-Playwright 88 tests / 20 specs; build exit 0; migrations 0000-0026; wire
-v1-v16; existing a7-v* assertions. Baseline + D91-M gates all
-supervisor-verified (post-merge main vitest 192/3,132 exit 0).
+Main HEAD: 4312c3a (W-B1 wizard shell + suite hygiene merged). FLOORS:
+vitest 3,154 tests / 193 files; Playwright 88 / 20 specs; build 0;
+migrations 0000-0026 (0027 minted unmerged in wt/attunement); wire v1-v16
+(v17 minted unmerged); existing a7-v* assertions.
+All lanes merged main in (wt/pwa needed a one-hunk timeout-comment union,
+resolved keeping BOTH measurements, tsc 0).
 
-## In flight
-- Main bb6dc0b. THREE lanes now hold gated-or-gating work:
-- TRACK M (wt/attunement): FF-A implemented + committed in-lane (48 files,
-  scans clean, mints = migration 0027 + wire v17 exactly as owned). Codex
-  claims vitest 192/3,142 exit 0, build 0, frozen zero-diffs; its full PW
-  87/88 with the one failure = php-parity 'captures every restorable'
-  timeout 31.4s vs 30s — the SAME machine-wide contention pattern (test
-  measured 21.0s alone). Supervisor gates still owed: full vitest, one
-  negative control (suggest: single-toggle share gate — option off carries
-  none of the four fields; or the size-guard refusal), full PW, D135
-  review, merge. NOTE: FF-A edited php-feature-parity.spec.ts — expect a
-  mechanical merge with the hygiene fixlet's timeout annotations.
-- SUITE-HYGIENE fixlet dispatched in wt/print (log hygiene.log, port
-  44496): measured 60_000 per-test timeouts for ALL >=15s-alone heavy
-  tests in php-parity + guided-builder specs, then a full PW. This ends
-  the four-instance flake rotation. On its green: merge W-B1 (+hygiene)
-  via merge-to-main.sh, post-merge vitest on main, fast-forward all lanes,
-  dispatch W-B2; then re-gate FF-A and D91-R(+FIX2) whose reruns inherit
-  the annotations via merge-main.
-- TRACK W (wt/print): W-B1+FIX all gates green EXCEPT the full-PW merge
-  gate, which has flaked on a DIFFERENT single spec in each of two
-  contended runs (reports-and-print:83 then guided-builder:39), both
-  timeout-signature, both proven isolated-green by the supervisor (35s-fix
-  applied to the first in wt/pwa; guided-builder:39 measured 20.2s alone vs
-  its 30s ceiling = thin margin under 3-lane load). NEXT STEP (when FF-A
-  and D91-R-FIX2 codex runs finish): dispatch a one-line codex fixlet
-  adding a measured per-test timeout (60_000, comment '20.2s alone') to
-  guided-builder.spec.ts:39 in wt/print, then ONE quiet full PW on 44496;
-  green -> merge via merge-to-main.sh, post-merge vitest on main,
-  fast-forward, dispatch W-B2 (briefs/w-b2.md). Round-2 review already
-  CLEAN; vitest 193/3,154 and controls already supervisor-verified.
-- TRACK S (wt/pwa): D91-R implemented + committed in-lane (supervisor).
-  Scans 0 forbidden, no Unit-M files touched, 10 files in scope. Codex
-  claims vitest 193/3,142, build 0; its full Playwright was 87/89 — one
-  contention flake (28.0s isolated green) and ONE REAL durational finding:
-  reports-and-print exceeds its 30s per-test timeout even isolated
-  (34.9-35.8s) because the print render got heavier. Codex correctly
-  refused the out-of-scope edit; supervisor lifted the fence for exactly
-  that spec — D91-R-FIX dispatched (log d91r-fix.log, port 44477):
-  measured per-test timeout amendment, full PW re-run. Remaining gate
-  after: supervisor full vitest + one negative control (pick from the
-  20-row table in d91r.log) + full PW + D135 review + merge.
-  Then FIX-ATTR, RESP-1, BANNER per HANDOVER §5.
+## In flight (supervisor = OPUS)
+- TRACK M (wt/attunement): FF-A + FF-A-FIX committed in-lane (50 files vs
+  main; scans 0 forbidden, NO config touched, mints 0027+v17 only).
+  FF-A-FIX closed all four round-1 defects incl. the consent-label privacy
+  defect. FINDING AGAINST THE WORK: codex's own Playwright claim (89 pass)
+  used a GLOBAL `--timeout=60000` CLI override; its unmodified run was
+  87/89 with two 30s timeouts. A global override is not an acceptable gate
+  result — the sanctioned remedy is per-test timeouts with measured
+  alone-times. SUPERVISOR MUST re-run full PW on 44480 with NO override;
+  if the same two tests time out, dispatch a measured per-test annotation
+  fixlet (identical pattern to the merged suite-hygiene unit), never a
+  global flag. Then: vitest, re-run mutate-ffa-toggle.py control, round-2
+  review, merge.
+- TRACK S (wt/pwa): D91-R + FIX + FIX2 + FIX3 all committed. FIX3
+  implements D143 (per-family absence, no partial totals). Codex claims
+  vitest 194/3,172, PW 89 on 44477, build 0, its own re-review CLEAN.
+  OWED by supervisor: vitest, shape control re-run, full PW 44477,
+  round-3 D135 review, merge. D143 pre-authorizes the whole-section
+  fallback if round 3 still finds it wrong — take it WITHOUT asking.
+- TRACK W (wt/print): W-B2 complete, uncommitted, awaiting gate. Codex
+  reports named controls verified + clean second-agent review; it modified
+  NO Playwright specs. Gate: commit, merge main in, scans, build, vitest,
+  one negative control (suggest add-radio-to-refused-card), full PW on
+  44472, D135 review, merge. Then W-C (briefs/w-c.md, port 44473).
 
 ## D91-R review round 1 (D135) — all four ACCEPTED, FIX2 in flight
 - sheet.ts:1752 return-aborts whole slot resolver on one bad class (verified
