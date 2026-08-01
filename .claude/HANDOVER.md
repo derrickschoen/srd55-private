@@ -453,6 +453,11 @@ briefs MUST carry both as amendments. Queued:
   re-run before believing it (it cleared W-A2's gate exactly this way).
 - ?raw flagged in a spec chain → check for `import type` before acting.
 - Codex 0-exit with no answer → resume the session; flags BEFORE `resume`.
+- Codex stops with "the binding plan is absent from this worktree" → you
+  dispatched a unit whose design doc lives only in an UNMERGED lane branch.
+  A design doc must be MERGED TO MAIN before any unit binds to it; branching
+  a lane from another lane's tip inherits that lane's code, not other
+  branches' docs. Merge the doc, merge main into the lane, re-dispatch.
 - Codex blocked with "cannot lock ref … Read-only file system" on a git
   command → NEVER instruct codex to run git merge/branch ops in a worktree:
   worktree metadata lives under the MAIN repo's .git/worktrees/, outside its
