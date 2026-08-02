@@ -7,6 +7,43 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D160 — OWNER: forge spike = GitHub only, via the owner's gh CLI (2026-08-01)
+
+Narrows D150's execution: "Use gh with my account to test GitHub and leave
+the rest roughed in for now. I do not have other accounts." The live spike
+runs against GitHub only, authenticated through the owner's existing `gh`
+CLI session on this machine (a throwaway repo created and destroyed under
+that account); the exact request list is still shown to the owner before it
+runs. GitLab and Codeberg adapters ship fixtures-roughed-in ONLY —
+explicitly marked unverified-against-live in their disclosure — until the
+owner has accounts there.
+
+## D159 — OWNER: print compacts ordinary numbers; verbose audit moves to an OPTIONAL appendix (2026-08-01)
+
+Supersedes the print-everything default within D89's constraint: on paper,
+CORRECT ordinary numbers drop their per-row reasoning; warnings and
+absence statements keep full sentences; the sheet prints one stated line
+that source breakdowns are on screen (D89's stated-absence rule). NEW:
+printing offers an OPTION to append the verbose text — calculations and
+source disclosures — as appendix pages, joining the D141 flavor and D149
+spell appendices. D67 exception recorded: on paper the sources are in the
+optional appendix, not beside the number; on screen nothing changes.
+
+## D158 — OWNER: homebrew spells get ALL THREE surfaces in v1 (2026-08-01)
+
+Asked fork-button vs full form vs JSON-only; the owner chose ALL of them:
+a from-scratch spell authoring form, a "fork this spell" copy-then-edit
+button on bundled spells (D45 semantics, new identity), and JSON import
+stays. Extends D103's kind list with spells; D133 (no classes) unaffected.
+Units join the HA chain after its backend lands.
+
+## D157 — OWNER: party ROSTER view ships in v1 (2026-08-01)
+
+Overrides the taken-for-now deferral: the party page (D156) gains a
+read-only roster — every imported party character with name, class/level,
+AC, HP max, passive Perception, spell save DC — as a unit after P5. P3's
+index carries what the roster needs.
+
 ## D156 — OWNER: party features live on their OWN page (2026-08-01)
 
 "Party stuff will need its own page." Pins the party design's existing P5
