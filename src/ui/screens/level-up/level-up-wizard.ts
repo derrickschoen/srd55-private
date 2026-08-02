@@ -2,11 +2,19 @@ import {
   LEVEL_UP_ATTR,
   LEVEL_UP_STEP_ORDER,
   levelUpWarningPresentation,
+  type LevelUpPlannedChoiceProjection,
+  type LevelUpPlannedEligibleSpellsParams,
+  type LevelUpPlannedExpertiseProjection,
   type LevelUpGuideableClassOption,
+  type LevelUpPlannedSkillProjection,
+  type LevelUpPlannedSpellProjection,
   type LevelUpWarningPresentation,
   type LevelUpStateResult,
   type LevelUpStep,
 } from '../../../builder/level-up-wizard';
+import type { LevelUpPlannedSubchoices } from '../../../domain/command-contracts';
+import type { Skill } from '../../../domain/enums';
+import type { EligibleSpell } from '../../../domain/read-models';
 import { element, type Cleanup } from '../../dom';
 import {
   createClassStep,
@@ -27,11 +35,23 @@ import {
   renderDeferredEpicWarning,
   type FeatStepDraft,
 } from './feat-steps';
+import {
+  createPlannedExpertiseStep,
+  createPlannedSkillsStep,
+  createPlannedSpellsStep,
+  EMPTY_PLANNED_SUBCHOICE_DRAFT,
+  mergePlannedChoiceProjections,
+  plannedGrantLocatorKey,
+  type PlannedSpellDraft,
+  type PlannedSubchoiceDraft,
+  type SpellPickerFactory,
+} from './planned-choice-steps';
 
 export interface LevelUpWizardController {
   readonly element: HTMLElement;
   readonly cleanup: Cleanup;
   focusInitial(): void;
+  plannedSubchoices(): LevelUpPlannedSubchoices;
 }
 
 function orderedSteps(steps: readonly LevelUpStep[]): readonly LevelUpStep[] {
@@ -184,16 +204,22 @@ function createTerminalEpicResolutionWizard(options: {
     element: host,
     cleanup: () => currentCleanup(),
     focusInitial: () => initialFocusTarget?.focus(),
+    plannedSubchoices: () => ({ skills: [], expertise: [], spells: [] }),
   };
 }
 
 /**
- * The W-B1 controller. Every mutable value below is page-memory only; it has
- * no query, command, storage, worker, or database dependency.
+ * The W-D controller. Every mutable draft value below is page-memory only.
+ * Planned spell search is injected as a read; no command, storage, worker, or
+ * database writer crosses this UI boundary.
  */
 export function createLevelUpWizard(options: {
   readonly state: LevelUpStateResult;
   readonly cancel: () => void;
+  readonly searchPlannedSpells?: (
+    params: LevelUpPlannedEligibleSpellsParams,
+  ) => Promise<readonly EligibleSpell[]>;
+  readonly spellPickerFactory?: SpellPickerFactory;
 }): LevelUpWizardController {
   if (isTerminalEpicState(options.state)) {
     return createTerminalEpicResolutionWizard({
@@ -208,6 +234,7 @@ export function createLevelUpWizard(options: {
       element: view,
       cleanup: () => undefined,
       focusInitial: () => routeHeading?.focus(),
+      plannedSubchoices: () => ({ skills: [], expertise: [], spells: [] }),
     };
   }
 
@@ -220,6 +247,8 @@ export function createLevelUpWizard(options: {
   let subclassDraft: SubclassDraft = { kind: 'decide_later' };
   let levelFeatDraft: FeatStepDraft = null;
   let epicResolutionDraft: FeatStepDraft = null;
+  let plannedDraft: PlannedSubchoiceDraft = EMPTY_PLANNED_SUBCHOICE_DRAFT;
+  let replacementLocators = new Set<string>();
   let currentStep: LevelUpStep = 'class';
   let error: string | null = null;
   let applicableStepStatus: string | null = null;
@@ -231,6 +260,34 @@ export function createLevelUpWizard(options: {
       (candidate) => candidate.class_definition_id === selectedClassId,
     ) ?? null;
 
+  const selectedSubclassProjection = (
+    selected: LevelUpGuideableClassOption,
+  ): LevelUpPlannedChoiceProjection | undefined => {
+    if (subclassDraft.kind !== 'selected') return undefined;
+    const subclassDefinitionId = subclassDraft.subclass_definition_id;
+    return selected.subclass_choice?.options.find(
+      (option) =>
+        option.subclass_definition_id === subclassDefinitionId,
+    )?.planned_choices;
+  };
+
+  const selectedFeatProjection = (): LevelUpPlannedChoiceProjection | undefined =>
+    levelFeatDraft?.kind === 'selected'
+      ? levelFeatDraft.application.planned_choices
+      : undefined;
+
+  const plannedProjection = (): LevelUpPlannedChoiceProjection => {
+    const selected = selectedClass();
+    if (selected === null) {
+      return mergePlannedChoiceProjections([]);
+    }
+    return mergePlannedChoiceProjections([
+      selected.planned_choices,
+      selectedSubclassProjection(selected),
+      selectedFeatProjection(),
+    ]);
+  };
+
   const applicableSteps = (): readonly LevelUpStep[] => {
     if (
       pendingEpicPath === 'resolve_now' &&
@@ -239,9 +296,17 @@ export function createLevelUpWizard(options: {
       return orderedSteps(state.pending_epic_resolution.applicable_steps);
     }
     const selected = selectedClass();
-    return selected === null
-      ? ['class']
-      : orderedSteps(selected.applicable_steps);
+    if (selected === null) return ['class'];
+    const planned = plannedProjection();
+    return orderedSteps([
+      ...selected.applicable_steps.filter(
+        (step) =>
+          step !== 'skills' && step !== 'expertise' && step !== 'spells',
+      ),
+      ...(planned.skills.length > 0 ? ['skills' as const] : []),
+      ...(planned.expertise.length > 0 ? ['expertise' as const] : []),
+      ...(planned.spells.length > 0 ? ['spells' as const] : []),
+    ]);
   };
 
   const isEpicResolutionPass = (): boolean =>
@@ -267,6 +332,71 @@ export function createLevelUpWizard(options: {
     return null;
   };
 
+  const clearAllPlannedChoices = (): void => {
+    plannedDraft = EMPTY_PLANNED_SUBCHOICE_DRAFT;
+    replacementLocators = new Set<string>();
+  };
+
+  const replaceSkillChoice = (
+    projection: LevelUpPlannedSkillProjection,
+    skill: Skill | null,
+  ): void => {
+    const key = plannedGrantLocatorKey(projection.locator);
+    const current = plannedDraft.skills.find(
+      (choice) => plannedGrantLocatorKey(choice.locator) === key,
+    )?.skill ?? null;
+    if (current === skill) return;
+    plannedDraft = {
+      skills: [
+        ...plannedDraft.skills.filter(
+          (choice) => plannedGrantLocatorKey(choice.locator) !== key,
+        ),
+        ...(skill === null ? [] : [{ locator: projection.locator, skill }]),
+      ],
+      expertise: [],
+      spells: [],
+    };
+    replacementLocators = new Set<string>();
+  };
+
+  const replaceExpertiseChoice = (
+    projection: LevelUpPlannedExpertiseProjection,
+    skill: Skill | null,
+  ): void => {
+    const key = plannedGrantLocatorKey(projection.locator);
+    const current = plannedDraft.expertise.find(
+      (choice) => plannedGrantLocatorKey(choice.locator) === key,
+    )?.skill ?? null;
+    if (current === skill) return;
+    plannedDraft = {
+      skills: plannedDraft.skills,
+      expertise: [
+        ...plannedDraft.expertise.filter(
+          (choice) => plannedGrantLocatorKey(choice.locator) !== key,
+        ),
+        ...(skill === null ? [] : [{ locator: projection.locator, skill }]),
+      ],
+      spells: [],
+    };
+    replacementLocators = new Set<string>();
+  };
+
+  const replaceSpellChoice = (
+    projection: LevelUpPlannedSpellProjection,
+    spell: PlannedSpellDraft | null,
+  ): void => {
+    const key = plannedGrantLocatorKey(projection.locator);
+    plannedDraft = {
+      ...plannedDraft,
+      spells: [
+        ...plannedDraft.spells.filter(
+          (entry) => plannedGrantLocatorKey(entry.choice.locator) !== key,
+        ),
+        ...(spell === null ? [] : [spell]),
+      ],
+    };
+  };
+
   const moveTo = (step: LevelUpStep): void => {
     currentStep = step;
     error = null;
@@ -278,6 +408,18 @@ export function createLevelUpWizard(options: {
     error = message;
     render(false);
     frame?.alert?.focus();
+  };
+
+  const focusSpellControl = (locatorKey: string, label: string): void => {
+    const card = Array.from(
+      host.querySelectorAll<HTMLElement>(`[${LEVEL_UP_ATTR.spellChoice}]`),
+    ).find(
+      (candidate) =>
+        candidate.getAttribute(LEVEL_UP_ATTR.spellChoice) === locatorKey,
+    );
+    Array.from(card?.querySelectorAll<HTMLElement>('[aria-label]') ?? []).find(
+      (control) => control.getAttribute('aria-label') === label,
+    )?.focus();
   };
 
   const next = (): void => {
@@ -340,13 +482,17 @@ export function createLevelUpWizard(options: {
           selectedClassId = classDefinitionId;
           subclassDraft = { kind: 'decide_later' };
           levelFeatDraft = null;
+          clearAllPlannedChoices();
           error = null;
           applicableStepStatus = `${String(applicableSteps().length)} applicable level-up steps.`;
           render(false);
         },
         onSelectPendingEpicPath: (path) => {
-          if (pendingEpicPath !== path && path === 'resolve_now') {
-            epicResolutionDraft = null;
+          if (pendingEpicPath !== path) {
+            if (path === 'resolve_now') epicResolutionDraft = null;
+            subclassDraft = { kind: 'decide_later' };
+            levelFeatDraft = null;
+            clearAllPlannedChoices();
           }
           pendingEpicPath = path;
           error = null;
@@ -373,7 +519,15 @@ export function createLevelUpWizard(options: {
         warnings: state.character.warnings,
         onSelect: (draft) => {
           subclassDraft = draft;
+          levelFeatDraft = null;
+          clearAllPlannedChoices();
           error = null;
+          applicableStepStatus = `${String(applicableSteps().length)} applicable level-up steps.`;
+          render(false);
+          const focusValue = draft.kind === 'selected'
+            ? String(draft.subclass_definition_id)
+            : 'decide_later';
+          host.querySelector<HTMLInputElement>(`[value="${focusValue}"]`)?.focus();
         },
       });
     }
@@ -392,7 +546,9 @@ export function createLevelUpWizard(options: {
         deferredWarning: levelUpWarningPresentation('epic_boon_deferred'),
         onSelect: (draft) => {
           levelFeatDraft = draft;
+          clearAllPlannedChoices();
           error = null;
+          applicableStepStatus = `${String(applicableSteps().length)} applicable level-up steps.`;
           render(false);
           if (draft.kind === 'selected') {
             host.querySelector<HTMLInputElement>('[checked]')?.focus();
@@ -422,6 +578,7 @@ export function createLevelUpWizard(options: {
         onSelect: (draft) => {
           if (resolution) epicResolutionDraft = draft;
           else levelFeatDraft = draft;
+          clearAllPlannedChoices();
           error = null;
           render(false);
           const value = draft.kind === 'selected'
@@ -433,6 +590,73 @@ export function createLevelUpWizard(options: {
             host.querySelector<HTMLInputElement>('[checked]')?.focus();
           }
         },
+      });
+    }
+    if (currentStep === 'skills') {
+      return createPlannedSkillsStep({
+        projections: plannedProjection().skills,
+        draft: plannedDraft,
+        onSelect: replaceSkillChoice,
+      });
+    }
+    if (currentStep === 'expertise') {
+      return createPlannedExpertiseStep({
+        projections: plannedProjection().expertise,
+        draft: plannedDraft,
+        onSelect: replaceExpertiseChoice,
+      });
+    }
+    if (currentStep === 'spells') {
+      if (selected === null) {
+        throw new Error('The Spells step requires a selected guideable class.');
+      }
+      const search = options.searchPlannedSpells ?? (() =>
+        Promise.reject(new Error('Planned spell search is unavailable.')));
+      const selectedSubclassId = subclassDraft.kind === 'selected'
+        ? subclassDraft.subclass_definition_id
+        : null;
+      const selectedSubclass = selectedSubclassId === null
+        ? undefined
+        : selected.subclass_choice?.options.find(
+            (option) => option.subclass_definition_id === selectedSubclassId,
+          );
+      return createPlannedSpellsStep({
+        projections: plannedProjection().spells,
+        draft: plannedDraft,
+        replacementLocators,
+        searchParams: {
+          character_id: state.character.character_id,
+          expected_revision: state.character.revision,
+          class_definition_id: selected.class_definition_id,
+          target_class_level: selected.target_level,
+          ...(selectedSubclass === undefined
+            ? {}
+            : { subclass_content_key: selectedSubclass.content_key }),
+          ...(levelFeatDraft?.kind === 'selected'
+            ? { feat_choice: levelFeatDraft.application.selection }
+            : {}),
+        },
+        search,
+        onSelect: replaceSpellChoice,
+        onReplacementMode: (projection, replacing) => {
+          const key = plannedGrantLocatorKey(projection.locator);
+          replacementLocators = new Set(replacementLocators);
+          if (replacing) replacementLocators.add(key);
+          else {
+            replacementLocators.delete(key);
+            replaceSpellChoice(projection, null);
+          }
+          render(false);
+          focusSpellControl(
+            key,
+            replacing
+              ? `Replace ${projection.current_spell_name}`
+              : `Keep ${projection.current_spell_name}`,
+          );
+        },
+        ...(options.spellPickerFactory === undefined
+          ? {}
+          : { pickerFactory: options.spellPickerFactory }),
       });
     }
     return {
@@ -465,7 +689,10 @@ export function createLevelUpWizard(options: {
       currentStep === 'gains' ||
       currentStep === 'subclass' ||
       currentStep === 'feat' ||
-      currentStep === 'epic_boon';
+      currentStep === 'epic_boon' ||
+      currentStep === 'skills' ||
+      currentStep === 'expertise' ||
+      currentStep === 'spells';
     const hasNext = implementedStep &&
       (currentStep === 'class' ||
         (nextIndex > 0 && nextIndex < steps.length));
@@ -514,5 +741,10 @@ export function createLevelUpWizard(options: {
       frame = null;
     },
     focusInitial: () => frame?.routeHeading.focus(),
+    plannedSubchoices: () => ({
+      skills: plannedDraft.skills,
+      expertise: plannedDraft.expertise,
+      spells: plannedDraft.spells.map((entry) => entry.choice),
+    }),
   };
 }
