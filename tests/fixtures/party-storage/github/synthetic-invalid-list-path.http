@@ -1,0 +1,10 @@
+# Endpoint: GET /repos/{owner}/{repo}/contents/{path}
+# Documented source: https://docs.github.com/rest/repos/contents#get-repository-content
+# Read: 2026-08-02
+# Provenance: SYNTHETIC invalid-provider-payload edge derived from the captured list body keys
+# Source file: none (synthetic non-conformant remote path)
+# Evidence: SYNTHETIC
+# Sanitized fields: none
+HTTP/2 200
+
+[{"name":"nested.json","path":"library/nested/not-allowed.json","sha":"synthetic-sha","size":1,"type":"file"}]

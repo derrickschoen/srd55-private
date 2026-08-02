@@ -1,0 +1,29 @@
+# Endpoint: GET /repos/{owner}/{repo}/contents/{path} (invalid credential)
+# Documented source: https://docs.github.com/rest/authentication/authenticating-to-the-rest-api
+# Read: 2026-08-02
+# Provenance: sanitized D150/D160 live capture; no test contacts GitHub
+# Source file: spike/20-bad-token-401.txt
+# Evidence: CAPTURED
+# Sanitized fields: repository owner/name; request path; request default-branch identifier
+HTTP/2 401
+content-type: application/json; charset=utf-8
+x-github-media-type: github.v3; format=json
+access-control-expose-headers: ETag, Link, Location, Retry-After, X-GitHub-OTP, X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Used, X-RateLimit-Resource, X-RateLimit-Reset, X-OAuth-Scopes, X-Accepted-OAuth-Scopes, X-Poll-Interval, X-GitHub-Media-Type, X-GitHub-SSO, X-GitHub-Request-Id, X-GitHub-Edge-Region, Deprecation, Sunset
+access-control-allow-origin: *
+strict-transport-security: max-age=31536000; includeSubdomains; preload
+x-frame-options: deny
+x-content-type-options: nosniff
+x-xss-protection: 0
+referrer-policy: origin-when-cross-origin, strict-origin-when-cross-origin
+content-security-policy: default-src 'none'
+vary: Accept-Encoding, Accept, X-Requested-With
+server: github.com
+x-github-request-id: FF8D:2FAFA:E572B0:32C639E:6A6F4E72
+x-github-edge-region: iad
+date: Sun, 02 Aug 2026 14:04:34 GMT
+
+{
+  "message": "Bad credentials",
+  "documentation_url": "https://docs.github.com/rest",
+  "status": "401"
+}
