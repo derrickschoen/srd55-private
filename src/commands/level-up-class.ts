@@ -40,7 +40,6 @@ import type {
   LevelUpPlannedSpellChoice,
   RestoreSnapshotCommand as RestoreSnapshotPayload,
 } from '../domain/command-contracts';
-import type { GrantRuleKey } from '../domain/ids';
 import {
   LEVEL_UP_REFUSAL_REASONS,
   LEVEL_UP_SUBCLASS_LEVEL,
@@ -59,8 +58,7 @@ import {
   SkillExpertiseGrantRefusal,
 } from '../grants/skill-expertise-grants';
 import { assignSpellSelection } from '../eligibility/spell-selection-assignment';
-import { spellReplacementPolicyForClassName } from '../rules/class-choice-entitlements-srd';
-import { levelFeatSpellReplacementEntitlement } from './level-feat-choice';
+import { levelUpSpellReplacementAllowed } from './level-up-spell-replacement';
 import { syncClassSourceState } from './update-class';
 import type { CharacterCommandIntegrity } from './integrity';
 import { applyLevelFeatSelection } from './level-feat-choice';
@@ -592,7 +590,8 @@ export class LevelUpClassCommand {
     if (
       choice.kind === 'slot_selection' &&
       choice.mode === 'replace' &&
-      !this.replacementAllowed(
+      !levelUpSpellReplacementAllowed(
+        this.db,
         sourceId,
         choice.locator.rule_key,
         choice.locator.ordinal,
@@ -644,47 +643,6 @@ export class LevelUpClassCommand {
         error instanceof Error ? error.message : 'Spell selection was refused.',
       );
     }
-  }
-
-  private replacementAllowed(
-    sourceId: number,
-    ruleKey: string,
-    ordinal: number,
-  ): boolean {
-    const source = this.db.oneRaw(
-      `SELECT source.source_type, class.name AS class_name,
-              feat.content_key AS feat_content_key,
-              slot.bucket
-       FROM character_source_instances AS source
-       LEFT JOIN class_definitions AS class
-         ON source.source_type = 'class'
-        AND class.id = source.source_definition_id
-       LEFT JOIN feat_definitions AS feat
-         ON source.source_type = 'feat'
-        AND feat.id = source.source_definition_id
-       LEFT JOIN spell_selection_slots AS slot
-         ON slot.source_instance_id = source.id
-        AND slot.rule_key = ? AND slot.ordinal = ?
-       WHERE source.id = ?`,
-      [ruleKey, ordinal, sourceId],
-    );
-    if (source === null) return false;
-    if (source.source_type === 'class' && typeof source.class_name === 'string') {
-      const policy = spellReplacementPolicyForClassName(source.class_name);
-      return policy?.on_class_level.some(
-        (entry) => entry.bucket === source.bucket,
-      ) ?? false;
-    }
-    if (
-      source.source_type === 'feat' &&
-      typeof source.feat_content_key === 'string'
-    ) {
-      return levelFeatSpellReplacementEntitlement(
-        this.db,
-        source.feat_content_key,
-      )?.rule_keys.includes(ruleKey as GrantRuleKey) ?? false;
-    }
-    return false;
   }
 
   /**
