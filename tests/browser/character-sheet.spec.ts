@@ -541,7 +541,8 @@ test('the sheet prints the derived numbers, and prints what it lacks', async ({
   ).toContainText('Read the printed background and species feature text above');
 });
 
-test('print media keeps the sheet and full-size warnings, hides chrome, and adds empty paper fields', async ({
+// Measured alone at 10.3s on this worktree; fixture construction dominates.
+test('print media keeps the sheet and warnings, adds paper fields, and ends with attribution', async ({
   page,
 }, testInfo) => {
   // Measured alone at 10.1s on 2026-07-31; full SRD boot repair dominates.
@@ -568,6 +569,7 @@ test('print media keeps the sheet and full-size warnings, hides chrome, and adds
   await expect(
     sheet.locator('[data-sheet-print-field="experience-points"]'),
   ).toHaveCount(0);
+  await expect(sheet.locator('[data-sheet-print-notice]')).toHaveCount(0);
 
   await page.emulateMedia({ media: 'print' });
 
@@ -672,9 +674,39 @@ test('print media keeps the sheet and full-size warnings, hides chrome, and adds
     experiencePoints.locator('[data-sheet-print-entry="line"]'),
   ).toHaveText('');
 
+  const notice = sheet.locator('[data-sheet-print-notice]');
+  await expect(notice).toBeVisible();
+  await expect(notice).toContainText(
+    'This work includes material from the System Reference Document 5.2 ' +
+      '("SRD 5.2") by Wizards of the Coast LLC, available at ' +
+      'https://www.dndbeyond.com/srd. The SRD 5.2 is licensed under the ' +
+      'Creative Commons Attribution 4.0 International License, available at ' +
+      'https://creativecommons.org/licenses/by/4.0/legalcode.',
+  );
+  await expect(notice).toContainText(
+    'Printed from SRD-55 srd55-2026-08-01-1',
+  );
+  await expect(notice).toHaveCSS('break-before', 'page');
+  expect(
+    await notice.evaluate(
+      (element) => element.parentElement?.lastElementChild === element,
+    ),
+  ).toBe(true);
+
   await page.emulateMedia({ media: 'screen' });
   await expect(currentHitPoints).toHaveCount(0);
   await expect(experiencePoints).toHaveCount(0);
+  await expect(notice).toHaveCount(0);
+});
+
+test('the legal screen identifies bundled SRD 5.2.1 rules text', async ({
+  page,
+}) => {
+  await page.goto('/legal');
+
+  await expect(page.locator('[data-screen="legal"]')).toContainText(
+    'Spell descriptions and other rules text include bundled SRD 5.2.1 content.',
+  );
 });
 
 test('resource print shape is fixed by type and a hostile absence class name renders inert and marked', async ({ page }, testInfo) => {

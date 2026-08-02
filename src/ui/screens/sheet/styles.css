@@ -283,4 +283,9 @@
     height: 1.35rem;
     border-bottom: 1px solid #000;
   }
+
+  .sheet-print-notice {
+    break-before: page;
+    font-size: 0.8rem;
+  }
 }
