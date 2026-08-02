@@ -17,9 +17,16 @@ Design docs merged: W-MC multiclass (37d373f), SPELL-SEC (e29cd35, SS-3
 gated on FF-C), GitHub spike evidence (a90c16f — real 409/404/CORS/
 rate-limit shapes + the identical-bytes sha trap; two throwaway repos
 remain under the owner's account pending delete_repo scope).
-FLOORS: vitest 3,218 / 201 files; Playwright 92 / 22 specs; build 0;
-migrations 0000-0026 (0027 in FF-A, ungated-merged); wire v1-v16 (v17 in
-FF-A); a7-v* assertions.
+FLOORS: vitest 3,218 / 201 files; Playwright 92 tests / 20 spec FILES
+(SUPERVISOR CORRECTION: an earlier line here said 22 specs — wrong, caught
+by codex's P1-GH floor check; the spec-file count is 20 on main, the
+92-test floor was and is verified); build 0; migrations 0000-0026 (0027 in
+FF-A, ungated-merged); wire v1-v16 (v17 in FF-A); a7-v* assertions.
+P1-GH GATE STOP (2026-08-01, ratified): D154's remaining-rate-budget
+cannot pass through the P0 port (no success-arm observation metadata;
+exact-shape type tests pin it). P0B dispatched in wt/party (log p0b.log,
+port 44521) to widen the port; P1-GH re-dispatches after P0B merges. The
+finding was codex's; the defective amendment was the supervisor's.
 Rulings D147-D160 recorded (see decisions.md). New unit queue additions:
 W-MC-1..6 (after W-F), SS-1..5 (SS-3 after FF-C), SUBCL-SEED (D151),
 PARTY roster (D157, after P5), spell form + fork (D158, after HA backend),
