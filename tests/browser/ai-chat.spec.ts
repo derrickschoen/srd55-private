@@ -82,7 +82,9 @@ async function ask(page: Page, question: string): Promise<string> {
 
 test('the panel streams a reply and renders it as text, never as markup', async ({
   page,
-}) => {
+}, testInfo) => {
+  // 12.6s quiet, 22.4s beside a concurrent full vitest (2026-08-01); full SRD boot repair dominates.
+  testInfo.setTimeout(60_000);
   await openPlanner(page);
   await expect(page.locator(PANEL)).toBeVisible();
 
@@ -100,7 +102,9 @@ test('the panel streams a reply and renders it as text, never as markup', async 
 
 test('the reference it sends is the planner’s own JSON island, withholding imported text', async ({
   page,
-}) => {
+}, testInfo) => {
+  // 11.9s quiet, 19.8s beside a concurrent full vitest (2026-08-01); full SRD boot repair dominates.
+  testInfo.setTimeout(60_000);
   await openPlanner(page);
   const island = await page.locator('#planner-build-reference').textContent();
   expect(island).not.toBeNull();
@@ -120,7 +124,9 @@ test('the reference it sends is the planner’s own JSON island, withholding imp
 
 test('the panel never gains a control that could change the character', async ({
   page,
-}) => {
+}, testInfo) => {
+  // 12.0s quiet, 17.9s beside a concurrent full vitest (2026-08-01); full SRD boot repair dominates.
+  testInfo.setTimeout(60_000);
   await openPlanner(page);
   await page.locator(`${PANEL} details`).evaluate((element) => {
     (element as HTMLDetailsElement).open = true;
@@ -215,7 +221,9 @@ test('with the endpoint unreachable, nothing is mounted and nothing throws', asy
 test('a hostile page on another loopback origin cannot reach the bridge, even holding the secret', async ({
   page,
   baseURL,
-}) => {
+}, testInfo) => {
+  // Measured alone at 22.5s on 2026-07-31; its second loopback server increases contention sensitivity.
+  testInfo.setTimeout(60_000);
   await openPlanner(page);
   const secret = await page
     .locator('meta[name="ai-bridge-token"]')
