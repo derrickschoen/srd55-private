@@ -415,6 +415,203 @@
   opacity: 0.5;
 }
 
+/* Later steps share the same labelled, flow-first shell. Their desktop rows
+   become one-column controls at the phone breakpoint below; min-width: 0 is
+   load-bearing for selects and spell search results with intrinsic widths. */
+@media screen {
+  .guided-shell,
+  .guided-panel,
+  .guided-class-options,
+  .guided-species-options,
+  .guided-ability-scores,
+  .guided-background-options,
+  .guided-skill-choice,
+  .guided-expertise-choice,
+  .guided-equipment-source,
+  .guided-equipment-option,
+  .guided-panel .spell-picker {
+    min-width: 0;
+  }
+
+  .guided-panel :is(h2, h3, h4, p, li, label) {
+    overflow-wrap: anywhere;
+  }
+
+  .guided-skill-choice,
+  .guided-expertise-choice {
+    display: grid;
+    grid-template-columns: minmax(14rem, 1fr) max-content;
+    align-items: end;
+    gap: 0.65rem;
+    margin-top: 0.75rem;
+  }
+
+  .guided-skill-choice-label,
+  .guided-expertise-choice label {
+    display: grid;
+    min-width: 0;
+    gap: 0.3rem;
+    font-size: 0.9rem;
+    font-weight: 650;
+  }
+
+  .guided-skill-choice select,
+  .guided-expertise-choice select {
+    min-width: 0;
+    width: 100%;
+    min-height: 2.4rem;
+  }
+
+  .guided-skill-fill,
+  .guided-skill-clear,
+  .guided-expertise-choice button,
+  .guided-equipment-choose {
+    min-height: 2.4rem;
+    border: 1px solid var(--accent, #333);
+    border-radius: 0.45rem;
+    padding: 0.5rem 0.75rem;
+    color: inherit;
+    background: transparent;
+    font: inherit;
+    font-weight: 650;
+    cursor: pointer;
+  }
+
+  .guided-skill-choice-empty {
+    grid-column: 1 / -1;
+    margin: 0;
+  }
+
+  .guided-skills-granted {
+    display: grid;
+    gap: 0.55rem;
+    padding-left: 1.25rem;
+  }
+
+  .guided-skill-granted {
+    min-width: 0;
+  }
+
+  .guided-skill-clear {
+    margin: 0.35rem 0 0 0.5rem;
+  }
+
+  .guided-panel .spell-picker {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .guided-panel .spell-picker + .spell-picker {
+    margin-top: 0.75rem;
+  }
+
+  .guided-panel .spell-options {
+    max-width: 100%;
+  }
+
+  .guided-equipment-source {
+    margin-top: 1rem;
+    border: 1px solid var(--border, #c9c9c9);
+    border-radius: 0.5rem;
+    padding: 0.75rem;
+  }
+
+  .guided-equipment-source > h3,
+  .guided-equipment-option > h4 {
+    margin-top: 0;
+  }
+
+  .guided-equipment-option {
+    margin-top: 0.75rem;
+    border-top: 1px solid var(--border, #c9c9c9);
+    padding-top: 0.75rem;
+  }
+
+  .guided-equipment-contents {
+    padding-left: 1.25rem;
+  }
+}
+
+@media screen and (max-width: 34rem) {
+  .guided-shell {
+    gap: 1rem;
+    padding: 0.75rem 0.5rem 2rem;
+  }
+
+  .guided-panel {
+    padding: 0.75rem;
+  }
+
+  .guided-header h1 {
+    font-size: clamp(1.5rem, 8vw, 2rem);
+  }
+
+  .guided-step {
+    padding-inline: 0.5rem;
+  }
+
+  .guided-class-options,
+  .guided-species-options,
+  .guided-ability-scores,
+  .guided-background-options {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .guided-name-form,
+  .guided-background-increase-modes,
+  .guided-background-increase-slots,
+  .guided-background-magic-initiate,
+  .guided-backup-hint-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .guided-name-form label {
+    flex-basis: auto;
+  }
+
+  .guided-ability-methods {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .guided-ability-method,
+  .guided-background-mode,
+  .guided-background-choice {
+    min-height: 2.4rem;
+  }
+
+  .guided-skill-choice,
+  .guided-expertise-choice {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  .guided-skill-choice-empty {
+    grid-column: auto;
+  }
+
+  .guided-skill-clear {
+    display: block;
+    width: 100%;
+    margin: 0.5rem 0 0;
+  }
+
+  .guided-submit,
+  .guided-ability-submit,
+  .guided-species-apply,
+  .guided-background-submit,
+  .guided-skill-fill,
+  .guided-expertise-choice button,
+  .guided-equipment-choose,
+  .guided-backup-hint-download,
+  .guided-backup-hint-dismiss {
+    width: 100%;
+    max-width: 100%;
+  }
+}
+
 .guided-backup-hint {
   margin-top: 1rem;
   border: 1px solid var(--accent, #333);
