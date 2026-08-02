@@ -11,9 +11,33 @@ All lanes merged main in (wt/pwa needed a one-hunk timeout-comment union,
 resolved keeping BOTH measurements, tsc 0).
 
 ## In flight (supervisor = FABLE again, 2026-08-01) — CASCADE PHASE
-MAIN bd09ba7 (D91-R merged; post-merge vitest 195 files / 3,185 exit 0).
-FLOORS: vitest 3,185 / 195 files; Playwright 89 / 21 specs; build 0;
+MAIN 2c52cd4 (W-C merged c92051c; HYG-3 merged 514d431; D147-D155 recorded).
+FLOORS: vitest 3,191 / 196 files; Playwright 89 / 21 specs; build 0;
 migrations 0000-0026; wire v1-v16; a7-v* assertions.
+
+## Owner rulings 2026-08-01 (D147-D155) — queue consequences
+- D147 wizard multiclass (BG3 flow, SRD prereqs + house-rule toggle):
+  design doc AUTHORED by codex in wt/pwa (2026-08-01-wizard-multiclass-entry
+  .md, claims MINT-FREE via character_rule_overrides) — SUPERVISOR REVIEW
+  PENDING before commit. Implementation only after W-F merges. INSIDE the
+  gate per D148.
+- D148 gate HOLDS in full, no early sitting.
+- D149 NEW UNIT(s): sheet spell section + print appendix (multiclass
+  grouped by class, ordered level then name); legacy /characters/:id/print
+  route retires. Design doc needed.
+- D150 LIVE FORGE SPIKE authorized — BLOCKED ON OWNER creating three
+  throwaway repos + tokens; request list must be shown to owner pre-run.
+- D151 NEW UNIT: seed ALL SRD 5.2.1 subclasses (pinned extract).
+- D152 numbers-only print (no feature-text unit).
+- D153 SUPERVISOR TASK: local WebKit feasibility spike (playwright webkit
+  project, owner-ordered config scope); then iOS Safari support decision;
+  probe+banner unit for other browsers either way.
+- D154 party = anon-primary participation (P5 reshaped).
+- D155 warn-once public permanence (P5 addition).
+Taken-for-now (D7 register): P3 index carries roster-needed fields, roster
+page deferred; forward-migration-over-existing-OPFS proof unit joins
+publish-prep; update-prompt backup offer deferred (D116 tension — ask owner
+at publish prep).
 All four cascade lanes (print/attr/party/resp) carry main bd09ba7; wt/attr
 needed two conflict hunks vs D91-R (import union in sheet-view.ts; kept
 main's measured-timeout form in character-sheet.spec.ts:495), resolved
