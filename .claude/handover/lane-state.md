@@ -23,6 +23,17 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
+## MINT COLLISION 2026-08-02 (supervisor scheduling miss, full length)
+P3 (dispatched to wt/party with a MINT brief) minted 0028_party_document_
+states while HA-1's committed-but-ungated 0028 sat in wt/mint2. The brief
+told codex to verify the tail; it verified against MAIN, where 0028 was
+free - the collision is the supervisor's for dispatching a mint outside
+the mint-lane serialization with a mint outstanding. RESOLUTION: HA-1's
+0028 wins (mint lane, minted first). Order: HA-1 full gate + merge NOW,
+then P3 fix-dispatch renumbers its migration to 0029 (file + registry +
+schema-signature test), then P3 gate. P3's numbers (vitest 209/3,347, PW
+100 claimed) will need re-verification after the renumber.
+
 ## SEAM RULING 2026-08-02 (taken-for-now, D7 register)
 W-F round 2 stop, ratified: LU-W §7.4 (every acquired spell on the sheet)
 vs SS-2 (unprepared spellbook entries excluded from Prepared/Known).
