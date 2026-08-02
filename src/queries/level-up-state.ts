@@ -87,6 +87,10 @@ import {
   CharacterCompletenessQueries,
 } from './character-completeness';
 import { CharacterSheetBuilder } from './character-sheet-builder';
+import {
+  LevelUpPlannedChoicesQuery,
+  type LevelUpPlannedChoiceContext,
+} from './level-up-planned-choices';
 
 interface CharacterRow {
   readonly id: CharacterId;
@@ -576,14 +580,36 @@ export class LevelUpStateQuery {
         ? null
         : {
             kind: occurrenceKind,
-            candidates: this.#featCandidates(projected, occurrenceKind),
+            candidates: this.#featCandidates(
+              projected,
+              occurrenceKind,
+              {
+                character_id: character.id,
+                expected_revision: character.revision,
+                class_definition_id: selected.class_definition_id,
+                target_class_level: targetLevel,
+                class_name: selected.name,
+              },
+            ),
           };
+    const choiceContext: LevelUpPlannedChoiceContext = {
+      character_id: character.id,
+      expected_revision: character.revision,
+      class_definition_id: selected.class_definition_id,
+      target_class_level: targetLevel,
+      class_name: selected.name,
+    };
+    const choiceQuery = new LevelUpPlannedChoicesQuery(this.db);
+    const plannedChoices = choiceQuery.forSelectedClass(choiceContext);
     const steps = [
       'class' as const,
       'gains' as const,
       ...(owesSubclass ? ['subclass' as const] : []),
       ...(occurrenceKind === 'asi_level_feat' ? ['feat' as const] : []),
       ...(occurrenceKind === 'epic_boon' ? ['epic_boon' as const] : []),
+      ...(plannedChoices.skills.length > 0 ? ['skills' as const] : []),
+      ...(plannedChoices.expertise.length > 0 ? ['expertise' as const] : []),
+      ...(plannedChoices.spells.length > 0 ? ['spells' as const] : []),
       'review' as const,
       'complete' as const,
     ];
@@ -621,9 +647,21 @@ export class LevelUpStateQuery {
       },
       applicable_steps: steps,
       subclass_choice: owesSubclass
-        ? { options: this.#subclassOptions(selected.class_definition_id) }
+        ? {
+            options: this.#subclassOptions(selected.class_definition_id).map(
+              (option) => ({
+                ...option,
+                planned_choices: choiceQuery.forSelectedSubclass({
+                  ...choiceContext,
+                  subclass_content_key: option.content_key,
+                  subclass_name: option.name,
+                }),
+              }),
+            ),
+          }
         : null,
       feat_occurrence: featOccurrence,
+      planned_choices: plannedChoices,
     };
   }
 
@@ -780,6 +818,7 @@ export class LevelUpStateQuery {
   #featCandidates(
     projected: ProjectedFeatCharacter,
     occurrence: 'asi_level_feat' | 'epic_boon',
+    choiceContext?: LevelUpPlannedChoiceContext,
   ): readonly LevelUpFeatCandidate[] {
     const available = new Set(
       this.db.all(
@@ -795,13 +834,27 @@ export class LevelUpStateQuery {
           occurrence === 'asi_level_feat' ||
           definition.grouping === 'epic_boon',
       )
-      .map((definition): LevelUpFeatCandidate => ({
-        definition,
-        eligibility: evaluateFeatEligibility(definition, projected),
-        is_class_default:
-          definition.content_key ===
-          '2024:feat:ability-score-improvement',
-        applications: applicationsForFeat(definition, projected),
-      }));
+      .map((definition): LevelUpFeatCandidate => {
+        const applications = applicationsForFeat(definition, projected);
+        return {
+          definition,
+          eligibility: evaluateFeatEligibility(definition, projected),
+          is_class_default:
+            definition.content_key ===
+            '2024:feat:ability-score-improvement',
+          applications: choiceContext === undefined
+            ? applications
+            : applications.map((application) => ({
+                ...application,
+                planned_choices: new LevelUpPlannedChoicesQuery(this.db)
+                  .forSelectedFeat(
+                    choiceContext,
+                    definition.name,
+                    application.selection,
+                    application.plan,
+                  ),
+              })),
+        };
+      });
   }
 }
