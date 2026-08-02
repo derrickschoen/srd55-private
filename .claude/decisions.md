@@ -7,6 +7,42 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D155 — OWNER: public-repo permanence = warn once at first public publish (2026-08-01)
+
+One-time, per-party plain statement ("public means permanent — git history
+survives deletion") before the first publish to a PUBLIC repo. No
+per-publish confirm; private-only was not taken. P5 carries it.
+
+## D154 — OWNER: party participation is anon-primary (2026-08-01)
+
+Public repo + tokenless anonymous read is the PRIMARY player path (zero
+setup); tokens are for the librarian/owner and any player who wants to
+self-publish. The D150 spike's measured anonymous rate limits size the
+refresh batching; if the spike shows unlivable limits, that finding comes
+back to the owner before the design changes.
+
+## D153 — OWNER: target iOS Safari; probe + banner for the rest (2026-08-01)
+
+Owner's words: "Can we make the app work on iOS Safari as well? (probe+
+banner for Firefox and others)". Ruling as taken: iOS Safari becomes a
+SUPPORT TARGET pending a local WebKit feasibility spike — the supervisor
+runs the existing Playwright suite under the WebKit engine (a local run,
+nothing outward; the project addition to playwright config is owner-ordered
+scope, not a forbidden path-to-green edit) and reports what breaks. If
+feasible, WebKit joins the tested matrix for core flows (amends D109's
+chromium-only) and the iOS story is documented as install-to-home-screen
+plus backup exports (Safari's 7-day eviction exemption). Every OTHER
+non-Chromium browser gets a boot-time capability probe + honest banner
+("tested only in Chromium/WebKit; your browser may not work and may lose
+data") with a proceed-anyway path. A silent broken page is outlawed (D33).
+
+## D152 — OWNER: printed feature text stays NUMBERS ONLY (2026-08-01)
+
+Chosen over full extraction and over modeled-features-only. No class or
+subclass feature text is extracted for v1; the sheet's stated-gap sentence
+remains the honest answer. The printout is a numbers reference; the rules
+text lives in the player's own materials.
+
 ## D151 — OWNER: seed ALL SRD subclasses before the gate (2026-08-01)
 
 Chosen over ship-with-two and table-subset. The SRD 5.2.1 subclass for every
