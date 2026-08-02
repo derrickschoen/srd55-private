@@ -23,6 +23,32 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
+## RESTART POINT 2026-08-02-c (read this first after any context loss)
+MAIN c1830df (W-E merged; post-merge vitest 3,292; PW floor 97; mirror
+pushed). MERGED since -b: SS-1 eafbd68 amendment note, W-D 9a00a8d,
+P1-GH a0a5382, D173 e2ca90b, W-E c1830df.
+OWNER QUESTION IN FLIGHT - MUST BE ANSWERED WHEN AGENTS RETURN: the owner
+asked for (1) subclasses in older SRDs absent from SRD 5.2.1 with
+2024-PHB markings, and (2) spells in older SRDs absent from 5.2.1 plus
+old-vs-2024 mechanical differences. Two sonnet agents are researching
+(logs land as task notifications). Synthesize + sanity-check their
+VERIFIED-vs-RECALLED labels, then answer the owner context-rich.
+IN FLIGHT: SS-2 full gate (wt/pwa, task running: merge+tscb+build+vitest+
+PW 44532; on green: noncanonical-order control from ss2-fix, then merge,
+THEN re-dispatch W-F which correctly gate-stopped on SS-2's files);
+SC-1 (wt/resp, sc1.log); FF-C (wt/attunement, ffc.log, D162 amendment,
+exports appendix machinery SS-3 needs).
+STILL QUEUED: P2 gate (wt/party - ADJUDICATE codex's contradicted
+full-suite claim: log showed 8 fails/5 files in known contention set vs
+claimed 1; typecheck absent from its transcript - my solo numbers decide;
+record claimed-vs-verified either way); BROWSER-PROBE gate (wt/hyg2,
+digest verdict GATE-READY); HA-1 full gate (wt/mint2, mint-lane blocker);
+then CI-3a. Sol-digest precedent: fix-log digestion via model:sonnet
+agent worked well (caught the P2 claim discrepancy).
+LOOP: dynamic heartbeat re-arms each turn with the owner's amended
+prompt (parallelize + delegate-to-sol language). Fix rounds W-E/SS-2/P2/
+BROWSER-PROBE all returned; W-E fully gated with TWO supervisor controls.
+
 ## RESTART POINT 2026-08-02-b (read this first after any context loss)
 MAIN a0a5382. Mirror derrickschoen/srd55-private: push after EVERY merge.
 MERGED TODAY: FF-A a00455a, P0B 582a175, SS-1 eafbd68, W-D 9a00a8d,
