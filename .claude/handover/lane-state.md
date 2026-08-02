@@ -10,9 +10,24 @@ migrations 0000-0026 (0027 minted unmerged in wt/attunement); wire v1-v16
 All lanes merged main in (wt/pwa needed a one-hunk timeout-comment union,
 resolved keeping BOTH measurements, tsc 0).
 
-## In flight (supervisor = OPUS) — EIGHT LANES
-MAIN 33a8693. FLOORS: vitest 3,162 / 194 files; Playwright 88 / 20 specs;
-build 0; migrations 0000-0026; wire v1-v16; a7-v* assertions.
+## In flight (supervisor = FABLE again, 2026-08-01) — CASCADE PHASE
+MAIN bd09ba7 (D91-R merged; post-merge vitest 195 files / 3,185 exit 0).
+FLOORS: vitest 3,185 / 195 files; Playwright 89 / 21 specs; build 0;
+migrations 0000-0026; wire v1-v16; a7-v* assertions.
+All four cascade lanes (print/attr/party/resp) carry main bd09ba7; wt/attr
+needed two conflict hunks vs D91-R (import union in sheet-view.ts; kept
+main's measured-timeout form in character-sheet.spec.ts:495), resolved
+mechanically by the supervisor, tsc 0.
+HYG-3 dispatched in wt/hyg2 (log hyg3.log, port 44494): the ai-chat
+loopback annotation from the "NEXT HYGIENE TARGET" note below. Merge it
+before running further full suites where possible.
+CONCURRENCY RULE EXTENDED 2026-08-01: TWO FULL VITEST SUITES CONTEND WITH
+EACH OTHER exactly as Playwright suites do — each spawns a full worker
+pool. Evidence: W-C + FIX-ATTR vitest launched together at machine load
+0.06; W-C came back 4 red, ALL FOUR pure timeouts (60s/5s limits) in
+migration-chain DB tests W-C never touched (migrations.test.ts,
+catalog-data-migration-prefix-*-late.test.ts — the same files measured
+60s+ under load before). Run ONE full vitest at a time, same as Playwright.
 
 **MINT ORDER CORRECTED 2026-08-01 (a real dependency finding).** DOC-C was
 dispatched into the chained mint lane and codex STOPPED under process rule 6:

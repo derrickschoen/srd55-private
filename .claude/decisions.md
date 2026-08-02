@@ -7,6 +7,24 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D147 — OWNER: wizard multiclass, BG3-style flow, SRD prereqs + house-rule toggle (2026-08-01)
+
+Supersedes D107's deferral: the level-up wizard SHALL support adding a level
+in a new class, with a BG3-like add-class surface on the class step. Rules
+posture, owner-chosen from three options: ENFORCE the SRD 5.2 multiclass
+prerequisites by default (13+ in the new class's primary ability AND 13+ in
+the current class's primary ability; a failing class appears disabled with
+the exact shortfall shown, the D119 pattern), plus a per-character
+"ignore multiclass prerequisites" HOUSE-RULE TOGGLE that unlocks BG3
+behavior — default off, and when on it is recorded visibly on the sheet as a
+house rule. Entry proficiencies come from the already-parsed
+multiclass-entry-srd.ts grants; slots stay on the effective-caster-level
+computation.
+
+Sequencing, owner-chosen: design doc authored and reviewed NOW (parallel
+with the cascade); implementation dispatches only after W-D/W-E/W-F merge so
+multiclass lands on a complete wizard. Bar item 3 still closes at W-F.
+
 ## D146 — OWNER: party v1 = library AND characters; token lives in the session (2026-08-01)
 
 Confirms D145's full reading against the design's scoping alternatives: v1
