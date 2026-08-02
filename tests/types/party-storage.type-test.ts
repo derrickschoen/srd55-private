@@ -3,6 +3,7 @@ import type {
   CredentialState,
   Forge,
   PartyStorage,
+  RateLimitObservation,
   RepositoryConfig,
   RepositoryRevision,
   StorageResult,
@@ -23,6 +24,11 @@ type AnonymousLease = Extract<CredentialLease, { readonly kind: 'anonymous' }>;
 type AuthenticatedLease = Extract<
   CredentialLease,
   { readonly kind: 'authenticated' }
+>;
+type SuccessResult<T> = Extract<StorageResult<T>, { readonly kind: 'success' }>;
+type RateLimitedResult = Extract<
+  StorageResult<unknown>,
+  { readonly kind: 'rate-limited' }
 >;
 
 type _ForgeSetIsClosed = Assert<
@@ -51,7 +57,11 @@ type _StorageResultHasExactlySevenKinds = Assert<
   >
 >;
 type ExpectedStorageResult<T> =
-  | { readonly kind: 'success'; readonly value: T }
+  | {
+      readonly kind: 'success';
+      readonly value: T;
+      readonly rateObservation?: RateLimitObservation;
+    }
   | {
       readonly kind: 'not-found';
       readonly at: 'repository' | 'object' | 'unknown';
@@ -74,6 +84,27 @@ type ExpectedStorageResult<T> =
     };
 type _StorageResultPayloadsAreExact = Assert<
   Exact<StorageResult<unknown>, ExpectedStorageResult<unknown>>
+>;
+type _RateLimitObservationIsExactlyTwoNumbers = Assert<
+  Exact<
+    RateLimitObservation,
+    { readonly remaining: number; readonly limit: number }
+  >
+>;
+type _SuccessResultAddsOnlyOptionalRateObservation = Assert<
+  Exact<keyof SuccessResult<unknown>, 'kind' | 'value' | 'rateObservation'>
+>;
+type _RateObservationIsOptionalAndNeverNullable = Assert<
+  Exact<
+    SuccessResult<unknown>['rateObservation'],
+    RateLimitObservation | undefined
+  >
+>;
+type _RateLimitedFailureArmIsUnchanged = Assert<
+  Exact<
+    RateLimitedResult,
+    { readonly kind: 'rate-limited'; readonly retryAt: string | null }
+  >
 >;
 type _WriteConditionHasOnlyGuardedKinds = Assert<
   Exact<WriteCondition['kind'], 'create-only' | 'replace'>
