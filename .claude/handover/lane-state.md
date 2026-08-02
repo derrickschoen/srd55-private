@@ -10,6 +10,32 @@ migrations 0000-0026 (0027 minted unmerged in wt/attunement); wire v1-v16
 All lanes merged main in (wt/pwa needed a one-hunk timeout-comment union,
 resolved keeping BOTH measurements, tsc 0).
 
+## RESTART POINT 2026-08-02 (read this first after any context loss)
+MAIN a00455a+ (FF-A merged; post-merge vitest 201/3,232; PW floor 93).
+0027/v17 now FROZEN. Mirror: push `git push mirror main` AFTER EVERY MERGE
+(D161, remote already configured).
+GATES IN FLIGHT:
+- P0B (wt/party): tsc 0 + vitest 201/3,234 DONE (supervisor, post-FF-A
+  merge); NEXT: full PW 44521, control from its report (fixture header
+  mutations + absent-not-zero), D135 review, merge, THEN re-dispatch
+  P1-GH (amendment file p1gh-amendment.md in scratchpad still applies).
+- W-D (wt/print): codex claims 202/3,224 + PW 92 + build 0; needs merge
+  main (FF-A), full supervisor gate on 44474, review, merge.
+- SS-1 (wt/pwa): codex claims 202/3,226 + PW 92 + build 0; same gate on
+  44531. Its controls are listed in ss1.log.
+- SUBCL-SEED design (wt/resp): doc written, AWAITING supervisor review.
+  Owner question found: retire EK/AT legacy subclasses later? UNASKED.
+- ss-2 brief EXISTS but its author died on output-format — brief content
+  UNVERIFIED; spot-check before dispatching SS-2.
+QUESTION ROUND 3 UNASKED: update-prompt backup/changelog; bug-report
+channel (in-app copy button?); AI-chat panel's shipped fate (unruled —
+D140 is about supervision, not the panel); party-demo-at-sitting (moot?
+D164 solo sitting may answer it).
+D168 OPEN ITEM: org name (srd55 username TAKEN on GitHub); spike-repo
+deletion still pending owner scope grant.
+NEW UNITS from D165-D167: three walkthrough scripts, librarian guided
+checklist (P5), weapons/armor authoring forms (HA chain).
+
 ## In flight (supervisor = FABLE, 2026-08-01) — CASCADE COMPLETE, MINT LANE CLOSING
 MAIN e29cd35. CASCADE DONE: W-C c92051c, FIX-ATTR 5e76552, P0 e0c046b,
 RESP-1 802658a all merged with full supervisor gates (controls + suites).

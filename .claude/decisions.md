@@ -7,6 +7,41 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D168 — OWNER: publish under an ORG (2026-08-02) — NAME OPEN
+
+Chosen over derrickschoen/srd55. The public squash lands in an org repo;
+org creation happens at publish prep (outward, covered by this grant).
+SUPERVISOR FINDING at recording time: the GitHub USERNAME `srd55` is
+taken (users/srd55 = HTTP 200; orgs share the user namespace), so the org
+cannot be literally `srd55`. OPEN: the owner picks the org name (e.g.
+srd-55, srd55-app, srd55-project) — ask at publish prep or sooner.
+Spike-repo deletion was NOT covered by this answer; still pending.
+
+## D167 — OWNER: homebrew WEAPONS/ARMOR forms join v1; feats and magic items do NOT (2026-08-02)
+
+Multi-select answer: exactly "Weapons/armor". Weapon and armor definition
+authoring forms join the HA chain (proficiency + AC surfaces); feats stay
+at the 17 sourced SRD feats; magic items stay planner-panel-only (D72
+one-off effects), no item form in v1. Extends D103's kind list; D133
+unaffected.
+
+## D166 — OWNER: librarian setup = guided checklist + outbound link (2026-08-02)
+
+The party page walks the librarian through repo creation: an outbound
+github.com/new link, exact settings listed, then paste-the-URL-back. The
+answer GRANTS the mini-ruling that a USER-CLICKED external navigation link
+is not an outward action under hard stop 3 (the app itself still makes no
+un-consented request). App-created repos were not taken; documentation-only
+was not taken. P5 carries it.
+
+## D165 — OWNER: walkthroughs extend + a THIRD party script (2026-08-02)
+
+Script 1 gains multiclass entry, the spell section, and a subclass choice;
+script 2 gains spell fork authoring; a NEW third script certifies the
+party path end-to-end (librarian publishes -> anonymous join by URL ->
+refresh -> roster), fixture-backed under PARTY-NO-LIVE-NETWORK. All three
+gate before D106. Amends D131's two-script instrument.
+
 ## D164 — OWNER: the sitting is a SOLO DISPOSABLE dry run (2026-08-02)
 
 Chosen over table-present-with-export-ritual and reserved-domain. The owner
