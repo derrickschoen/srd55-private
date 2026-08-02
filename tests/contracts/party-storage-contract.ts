@@ -31,6 +31,7 @@ function expectedResult(
           bytes: new Uint8Array([123, 125, 10]),
           revision: expectedRevision,
         },
+        rateObservation: { remaining: 41, limit: 60 },
       };
     case 'not-found':
       return { kind: 'not-found', at: 'unknown' };

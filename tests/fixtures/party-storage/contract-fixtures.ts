@@ -25,7 +25,11 @@ export const partyStorageContractFixtures = [
     response: {
       kind: 'response',
       status: 200,
-      headers: { etag: '"synthetic-success"' },
+      headers: {
+        etag: '"synthetic-success"',
+        'x-ratelimit-remaining': '41',
+        'x-ratelimit-limit': '60',
+      },
       body: '{"bytes":[123,125,10],"revision":"revision-001"}',
     },
     operation: 'read',

@@ -36,6 +36,12 @@ export interface WriteReceipt {
   readonly revision: RepositoryRevision | null;
 }
 
+/** Provider-exposed request budget at the moment a successful response arrived. */
+export interface RateLimitObservation {
+  readonly remaining: number;
+  readonly limit: number;
+}
+
 export type CredentialState =
   | 'missing'
   | 'expired'
@@ -44,7 +50,11 @@ export type CredentialState =
   | 'insufficient-scope';
 
 export type StorageResult<T> =
-  | { readonly kind: 'success'; readonly value: T }
+  | {
+      readonly kind: 'success';
+      readonly value: T;
+      readonly rateObservation?: RateLimitObservation;
+    }
   | {
       readonly kind: 'not-found';
       readonly at: 'repository' | 'object' | 'unknown';
