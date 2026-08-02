@@ -20,6 +20,8 @@ import type {
   LevelUpPlannedGrantSource,
   LevelUpPlannedSkillChoice,
   LevelUpPlannedSpellChoice,
+  LevelUpClassCommand,
+  ResolveLevelFeatChoiceCommand,
   LevelFeatSelection,
 } from '../domain/command-contracts';
 export type {
@@ -42,6 +44,7 @@ import type { EquipmentEffectInput } from '../domain/equipment-effects';
 import type { JsonObject } from '../domain/models';
 import type { EligibleSpell } from '../domain/read-models';
 import type { GrantRuleObject } from '../grants/grant-rule';
+import type { CharacterSheet } from '../queries/character-sheet-builder';
 
 export type AbilityIncreaseAbilities = 'any' | readonly Ability[];
 
@@ -237,6 +240,45 @@ export type PlannedSpellChoice = LevelUpPlannedSpellChoice;
 export type PlannedSkillChoice = LevelUpPlannedSkillChoice;
 export type PlannedExpertiseChoice = LevelUpPlannedExpertiseChoice;
 
+export interface LevelUpPlannedSkillProjection {
+  readonly locator: PlannedGrantLocator;
+  readonly source_label: string;
+  readonly available_skills: readonly Skill[];
+}
+
+export interface LevelUpPlannedExpertiseProjection {
+  readonly locator: PlannedGrantLocator;
+  readonly source_label: string;
+  readonly available_skills: readonly Skill[];
+}
+
+export type LevelUpPlannedSpellProjection =
+  | {
+      readonly kind: 'new_slot';
+      readonly locator: PlannedGrantLocator;
+      readonly source_label: string;
+      readonly required: boolean;
+    }
+  | {
+      readonly kind: 'spellbook_acquisition';
+      readonly locator: PlannedGrantLocator;
+      readonly source_label: string;
+    }
+  | {
+      readonly kind: 'optional_swap';
+      readonly locator: PlannedGrantLocator;
+      readonly source_label: string;
+      readonly current_spell_version_id: SpellVersionId;
+      readonly current_spell_name: string;
+    };
+
+/** Logical LU-2 work only; no future durable child-row id crosses this seam. */
+export interface LevelUpPlannedChoiceProjection {
+  readonly skills: readonly LevelUpPlannedSkillProjection[];
+  readonly expertise: readonly LevelUpPlannedExpertiseProjection[];
+  readonly spells: readonly LevelUpPlannedSpellProjection[];
+}
+
 export interface LevelUpPlannedEligibleSpellsParams {
   readonly character_id: CharacterId;
   readonly expected_revision: CharacterRevision;
@@ -359,6 +401,7 @@ export interface LevelUpProjectedGains {
 export interface LevelUpFeatApplication {
   readonly selection: LevelFeatSelection;
   readonly plan: FeatApplicationPlan;
+  readonly planned_choices?: LevelUpPlannedChoiceProjection;
 }
 
 export interface LevelUpFeatCandidate {
@@ -374,7 +417,9 @@ export interface LevelUpFeatOccurrence {
 }
 
 export interface LevelUpSubclassChoice {
-  readonly options: readonly LevelUpSubclassOption[];
+  readonly options: readonly (LevelUpSubclassOption & {
+    readonly planned_choices?: LevelUpPlannedChoiceProjection;
+  })[];
 }
 
 export interface LevelUpGuideableClassOption extends LevelUpHeldClass {
@@ -385,6 +430,7 @@ export interface LevelUpGuideableClassOption extends LevelUpHeldClass {
   readonly applicable_steps: readonly LevelUpStep[];
   readonly subclass_choice: LevelUpSubclassChoice | null;
   readonly feat_occurrence: LevelUpFeatOccurrence | null;
+  readonly planned_choices?: LevelUpPlannedChoiceProjection;
 }
 
 export interface LevelUpDisabledClassOption extends LevelUpHeldClass {
@@ -444,6 +490,23 @@ export type LevelUpStateResult =
       readonly class_options: readonly LevelUpClassOption[];
       readonly pending_epic_resolution: LevelUpPendingEpicResolution | null;
     };
+
+export type LevelUpPreviewCommand =
+  | LevelUpClassCommand
+  | ResolveLevelFeatChoiceCommand;
+
+export interface LevelUpPreviewParams {
+  readonly character_id: CharacterId;
+  readonly expected_revision: CharacterRevision;
+  readonly command: LevelUpPreviewCommand;
+}
+
+export interface LevelUpPreviewResult {
+  readonly before: CharacterSheet;
+  readonly after: CharacterSheet;
+  readonly new_outstanding_choices: readonly LevelUpPermanentWarning[];
+  readonly command_fingerprint: string;
+}
 
 export const LEVEL_UP_RPC = Object.freeze({
   state: 'queries.characters.levelUpState',
