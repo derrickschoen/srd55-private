@@ -23,6 +23,16 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
+## SEAM RULING 2026-08-02 (taken-for-now, D7 register)
+W-F round 2 stop, ratified: LU-W §7.4 (every acquired spell on the sheet)
+vs SS-2 (unprepared spellbook entries excluded from Prepared/Known).
+Resolution: SS-2B dispatched (wt/pwa, ss2b.log, port 44537) - distinct
+"Spellbook" marker rows under the class group, after prepared/known,
+same comparator, screen+print. Seam: marker vocabulary; flip cost: a
+display toggle. W-F re-dispatches (third time) after SS-2B merges.
+Owner note: this extends D149's marker set; flagged for the owner's
+next question round rather than blocking.
+
 ## RESTART POINT 2026-08-02-c (read this first after any context loss)
 MAIN c1830df (W-E merged; post-merge vitest 3,292; PW floor 97; mirror
 pushed). MERGED since -b: SS-1 eafbd68 amendment note, W-D 9a00a8d,

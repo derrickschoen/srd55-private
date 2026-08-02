@@ -9,6 +9,7 @@ import type {
 import type {
   CharacterSpellSection,
   SheetSpell,
+  SheetSpellbookEntry,
   SheetSpellGroup,
   SheetSpellcastingStatistic,
 } from '../../../queries/character-spell-section-builder';
@@ -128,6 +129,7 @@ export interface SheetSpellDisplayGroup {
   readonly heading: readonly SheetCell[] | null;
   readonly statistics: SheetSpellStatisticsBlock;
   readonly rows: readonly SheetRow[];
+  readonly spellbook_rows: readonly SheetRow[];
 }
 
 export interface SheetSpellSection {
@@ -178,7 +180,7 @@ function spellStatisticText(statistic: SheetSpellcastingStatistic): string {
   return unhandled;
 }
 
-function spellLevelText(spell: SheetSpell): string {
+function spellLevelText(spell: SheetSpellbookEntry): string {
   switch (spell.level.status) {
     case 'known':
       return spell.level.value === 0
@@ -258,6 +260,15 @@ function spellSection(spells: CharacterSpellSection): SheetSpellSection {
           value: spellLevelText(spell),
           detail: plain(spellMarkerText(spell)),
         })),
+        spellbook_rows:
+          group.kind === 'class'
+            ? group.spellbook.map((spell) => ({
+                id: `spellbook:${id}:${String(spell.spell_version_id)}`,
+                label: [{ text: spell.name, free_text: true }],
+                value: spellLevelText(spell),
+                detail: plain('Spellbook'),
+              }))
+            : [],
       };
     }),
   };
@@ -1390,6 +1401,15 @@ function renderSpellGroup(group: SheetSpellDisplayGroup): HTMLDivElement {
     list.append(renderSheetRow(row));
   }
   element.append(list);
+  if (group.spellbook_rows.length > 0) {
+    const spellbook = document.createElement('dl');
+    spellbook.className = 'sheet-numbers sheet-spells sheet-spellbook';
+    spellbook.setAttribute('aria-label', 'Spellbook');
+    for (const row of group.spellbook_rows) {
+      spellbook.append(renderSheetRow(row));
+    }
+    element.append(spellbook);
+  }
   return element;
 }
 

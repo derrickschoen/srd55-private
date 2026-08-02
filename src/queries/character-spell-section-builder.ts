@@ -69,12 +69,15 @@ export interface SheetSpellReference {
   readonly description: string | null;
 }
 
-export interface SheetSpell {
+export interface SheetSpellbookEntry {
   readonly spell_version_id: SpellVersionId;
   readonly name: string;
   readonly level: SheetSpellLevel;
-  readonly marker: SheetSpellMarker;
   readonly reference: SheetSpellReference;
+}
+
+export interface SheetSpell extends SheetSpellbookEntry {
+  readonly marker: SheetSpellMarker;
 }
 
 export type SheetSpellGroup =
@@ -84,6 +87,7 @@ export type SheetSpellGroup =
       readonly class_name: string;
       readonly statistics: readonly SheetSpellcastingStatistic[];
       readonly spells: readonly SheetSpell[];
+      readonly spellbook: readonly SheetSpellbookEntry[];
     }
   | {
       readonly kind: 'other_source';
@@ -109,12 +113,18 @@ interface ClassAttribution {
   readonly class_name: string;
 }
 
+interface SpellbookAcquisition {
+  readonly source_instance_id: SourceInstanceId;
+  readonly spell_version_id: SpellVersionId;
+}
+
 interface MutableClassGroup {
   readonly kind: 'class';
   readonly class_definition_id: ClassDefinitionId;
   readonly class_name: string;
   readonly statistics: Map<string, SheetSpellcastingStatistic>;
   readonly spells: Map<SpellVersionId, SheetSpell>;
+  readonly spellbook: Map<SpellVersionId, SheetSpellbookEntry>;
 }
 
 interface MutableOtherSourceGroup {
@@ -161,8 +171,8 @@ function levelOrder(level: SheetSpellLevel): number {
 
 /** D149's sole spell-row comparator: level, exact name, then branded id. */
 export function compareSheetSpells(
-  left: SheetSpell,
-  right: SheetSpell,
+  left: SheetSpellbookEntry,
+  right: SheetSpellbookEntry,
 ): number {
   const byLevel = levelOrder(left.level) - levelOrder(right.level);
   if (byLevel !== 0) {
@@ -214,6 +224,19 @@ function decodeClassAttribution(row: SqlRow): ClassAttribution {
       'class_definition_id',
     ) as ClassDefinitionId,
     class_name: sqlString(row, 'class_name'),
+  };
+}
+
+function decodeSpellbookAcquisition(row: SqlRow): SpellbookAcquisition {
+  return {
+    source_instance_id: sqlInteger(
+      row,
+      'source_instance_id',
+    ) as SourceInstanceId,
+    spell_version_id: sqlInteger(
+      row,
+      'spell_version_id',
+    ) as SpellVersionId,
   };
 }
 
@@ -330,6 +353,7 @@ export class CharacterSpellSectionBuilder {
   }
 
   build(characterId: number): CharacterSpellSection {
+    const spellbook = this.spellbookAcquisitions(characterId);
     const hasStoredAssignment = this.db.scalar<number>(
       `SELECT 1
        FROM spell_selection_slots
@@ -339,37 +363,43 @@ export class CharacterSpellSectionBuilder {
        LIMIT 1`,
       [characterId],
     );
-    if (hasStoredAssignment === null) {
-      return [];
-    }
-
-    const selected = this.#access
-      .buildForCharacter(characterId)
-      .map((route) => ({ route, marker: sheetSpellMarker(route) }))
-      .filter(
-        (
-          entry,
-        ): entry is {
-          readonly route: SpellAccessRoute;
-          readonly marker: SheetSpellMarker;
-        } => entry.marker !== null,
-      );
-    if (selected.length === 0) {
+    const selected = hasStoredAssignment === null
+      ? []
+      : this.#access
+          .buildForCharacter(characterId)
+          .map((route) => ({ route, marker: sheetSpellMarker(route) }))
+          .filter(
+            (
+              entry,
+            ): entry is {
+              readonly route: SpellAccessRoute;
+              readonly marker: SheetSpellMarker;
+            } => entry.marker !== null,
+          );
+    if (selected.length === 0 && spellbook.length === 0) {
       return [];
     }
 
     const sourceIds = [
       ...new Set(
-        selected.map(
-          ({ route }) => route.source_instance_id as SourceInstanceId,
-        ),
+        [
+          ...selected.map(
+            ({ route }) => route.source_instance_id as SourceInstanceId,
+          ),
+          ...spellbook.map((entry) => entry.source_instance_id),
+        ],
       ),
     ];
     const attributions = this.classAttributions(characterId, sourceIds);
     const facts = this.spellFacts(
-      [...new Set(selected.map(({ route }) => route.spell_version_id))].map(
-        (id) => id as SpellVersionId,
-      ),
+      [
+        ...new Set([
+          ...selected.map(
+            ({ route }) => route.spell_version_id as SpellVersionId,
+          ),
+          ...spellbook.map((entry) => entry.spell_version_id),
+        ]),
+      ],
     );
     const groups = new Map<string, MutableGroup>();
 
@@ -397,6 +427,7 @@ export class CharacterSpellSectionBuilder {
                 class_name: attribution.class_name,
                 statistics: new Map(),
                 spells: new Map(),
+                spellbook: new Map(),
               };
         groups.set(key, group);
       }
@@ -419,6 +450,38 @@ export class CharacterSpellSectionBuilder {
       group.spells.set(versionId, { ...spellFacts, marker });
     }
 
+    for (const entry of spellbook) {
+      const attribution = attributions.get(entry.source_instance_id);
+      if (attribution === undefined) {
+        // A legacy row without class attribution stays stored, but the sheet
+        // does not invent a class heading for it (D33).
+        continue;
+      }
+      const key = `class:${attribution.class_definition_id}`;
+      let group = groups.get(key);
+      if (group === undefined) {
+        group = {
+          kind: 'class',
+          class_definition_id: attribution.class_definition_id,
+          class_name: attribution.class_name,
+          statistics: new Map(),
+          spells: new Map(),
+          spellbook: new Map(),
+        };
+        groups.set(key, group);
+      }
+      if (group.kind !== 'class' || group.spells.has(entry.spell_version_id)) {
+        continue;
+      }
+      const spellFacts = facts.get(entry.spell_version_id);
+      if (spellFacts === undefined) {
+        throw new Error(
+          `Missing sheet facts for spellbook version ${entry.spell_version_id}.`,
+        );
+      }
+      group.spellbook.set(entry.spell_version_id, spellFacts);
+    }
+
     return [...groups.values()].sort(compareGroups).map((group) => {
       const common = {
         statistics: [...group.statistics.values()],
@@ -429,6 +492,7 @@ export class CharacterSpellSectionBuilder {
           kind: group.kind,
           class_definition_id: group.class_definition_id,
           class_name: group.class_name,
+          spellbook: [...group.spellbook.values()].sort(compareSheetSpells),
           ...common,
         };
       }
@@ -439,6 +503,28 @@ export class CharacterSpellSectionBuilder {
         ...common,
       };
     });
+  }
+
+  private spellbookAcquisitions(
+    characterId: number,
+  ): SpellbookAcquisition[] {
+    return this.db.all(
+      `SELECT entry.source_instance_id, entry.spell_version_id
+       FROM wizard_spellbook_entries AS entry
+       INNER JOIN character_source_instances AS source
+         ON source.id = entry.source_instance_id
+        AND source.character_id = entry.character_id
+        AND source.state = 'active'
+       INNER JOIN spell_versions AS version
+         ON version.id = entry.spell_version_id
+        AND version.is_active = 1
+       WHERE entry.character_id = ?
+         AND entry.state = 'active'
+         AND entry.spell_version_id IS NOT NULL
+       ORDER BY entry.id`,
+      [characterId],
+      decodeSpellbookAcquisition,
+    );
   }
 
   private classAttributions(
