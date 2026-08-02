@@ -275,6 +275,28 @@
   margin: 0;
 }
 
+.level-up-review-change {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+}
+
+.level-up-review-warnings,
+.level-up-complete ul {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.level-up-review-warnings p {
+  margin: 0.25rem 0 0;
+}
+
+.level-up-submitting {
+  border-left: 0.3rem solid var(--accent, #333);
+  padding: 0.75rem 1rem;
+  font-weight: 700;
+}
+
 .level-up-navigation,
 .level-up-terminal-nav {
   display: flex;
@@ -319,6 +341,10 @@
 
   .level-up-facts dd {
     margin-bottom: 0.5rem;
+  }
+
+  .level-up-review-change {
+    grid-template-columns: 1fr;
   }
 
   .level-up-navigation {
