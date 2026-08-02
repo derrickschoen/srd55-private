@@ -1,4 +1,5 @@
 import { freeTextSpan } from '../../free-text';
+import { BUILD_ID } from '../../../build-id';
 import type {
   CharacterSheet,
   SheetAbilityScore,
@@ -12,6 +13,7 @@ import type {
   SheetResourceMaximum,
 } from '../../../rules/sheet';
 import type { WeaponProficiencyVerdict } from '../../../rules/multiclass-proficiency';
+import { SRD_ATTRIBUTION_NOTICE } from '../../../rules/srd-attribution';
 import {
   classFormulaResourceKinds,
   classFormulaResourceLabel,
@@ -1282,6 +1284,7 @@ export function renderSheet(sheet: CharacterSheet): HTMLElement {
 }
 
 const PRINT_FIELD_SELECTOR = '[data-sheet-print-field]';
+const PRINT_NOTICE_SELECTOR = '[data-sheet-print-notice]';
 
 function emptyPaperEntry(kind: 'box' | 'line'): HTMLSpanElement {
   const entry = document.createElement('span');
@@ -1292,12 +1295,12 @@ function emptyPaperEntry(kind: 'box' | 'line'): HTMLSpanElement {
 }
 
 /**
- * D88/D89/D104: play-state is paper state. These two empty writing surfaces
- * exist only while print media is active; they are deliberately not hidden
- * screen DOM, because the sheet's D4 invariant says its screen subtree contains
- * no concealed content.
+ * D88/D89/D104/D125: play-state is paper state. The empty writing surfaces and
+ * attribution notice exist only while print media is active; they are
+ * deliberately not hidden screen DOM, because the sheet's D4 invariant says
+ * its screen subtree contains no concealed content.
  */
-export function setSheetPrintFields(
+export function setSheetPrintContent(
   shell: HTMLElement,
   printMedia: boolean,
 ): void {
@@ -1306,6 +1309,7 @@ export function setSheetPrintFields(
   )) {
     field.remove();
   }
+  shell.querySelector(PRINT_NOTICE_SELECTOR)?.remove();
   if (!printMedia) {
     return;
   }
@@ -1345,4 +1349,16 @@ export function setSheetPrintFields(
   experiencePointsValue.append(emptyPaperEntry('line'));
   experiencePoints.append(experiencePointsLabel, experiencePointsValue);
   totalLevel.after(experiencePoints);
+
+  const notice = document.createElement('section');
+  notice.className = 'sheet-print-notice';
+  notice.dataset.sheetPrintNotice = 'true';
+  const noticeHeading = document.createElement('h2');
+  noticeHeading.textContent = 'SRD 5.2 attribution';
+  const attribution = document.createElement('p');
+  attribution.textContent = SRD_ATTRIBUTION_NOTICE;
+  const origin = document.createElement('p');
+  origin.textContent = `Printed from SRD-55 ${BUILD_ID}`;
+  notice.append(noticeHeading, attribution, origin);
+  shell.append(notice);
 }
