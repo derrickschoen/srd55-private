@@ -9,6 +9,7 @@ import {
 import {
   CHARACTER_BACKUP_FORMAT,
   CHARACTER_BACKUP_VERSION,
+  PREVIOUS_CHARACTER_BACKUP_VERSION,
 } from '../../../src/backup/backup-version';
 import {
   exportDatabaseBackup,
@@ -90,10 +91,12 @@ function seedCompleteCharacter(
     `INSERT INTO characters (
        name, strength, dexterity, constitution, intelligence, wisdom,
        charisma, proficiency_bonus_override, rules_edition_preference,
-       allow_legacy, revision, notes, created_at, updated_at
+       allow_legacy, revision, alignment, appearance, backstory, notes,
+       created_at, updated_at
      ) VALUES (
        'Backup Hero', 8, 14, 13, 18, 12, 10, 4, '2024', 1, 9,
-       'character note', ?, ?
+       'Chaotic Good', 'Silver hair\nGreen eyes',
+       'Raised near </script><the old tower>.', 'character note', ?, ?
      )`,
     [timestamp, timestamp],
   ).lastInsertId;
@@ -242,9 +245,17 @@ function seedCompleteCharacter(
   db.exec(
      `INSERT INTO character_save_points
        (character_id, label, snapshot, schema_version, created_at, updated_at)
-     VALUES (?, 'Before experiment', ?, 'a7-v15', ?, ?)`,
-    [characterId, JSON.stringify(snapshot), timestamp, timestamp],
+     VALUES (?, 'Before experiment', ?, ?, ?, ?)`,
+    [
+      characterId,
+      JSON.stringify(snapshot),
+      snapshot.schema_version,
+      timestamp,
+      timestamp,
+    ],
   );
+  // The prior a7-v15 boundary stays historical; this fixture follows the
+  // current snapshot value so the backup exercises the newly appended flavor.
   // A SECOND SAVE POINT IN THE OLD SNAPSHOT FORMAT.
   //
   // Built by REMOVING the weapons key from a live capture and relabelling it,
@@ -264,6 +275,9 @@ function seedCompleteCharacter(
   }
   delete (legacyCharacter as Record<string, unknown>)
     .ability_allocation_method;
+  delete (legacyCharacter as Record<string, unknown>).alignment;
+  delete (legacyCharacter as Record<string, unknown>).appearance;
+  delete (legacyCharacter as Record<string, unknown>).backstory;
   delete legacySnapshot.character_weapons;
   delete legacySnapshot.character_species;
   delete legacySnapshot.character_species_traits;
@@ -388,6 +402,67 @@ describe('portable character backup', () => {
     });
   });
 
+  it('current flavor backup round-trips root text', async () => {
+    const source = await database();
+    const sourceCatalog = seedCatalog(source);
+    const sourceCharacterId = seedCompleteCharacter(source, sourceCatalog);
+    const first = exportCharacterBackup(
+      source,
+      sourceCharacterId,
+      '2026-07-31T12:00:00.000Z',
+    );
+
+    const target = await database();
+    seedCatalog(target, true);
+    const imported = importCharacterBackup(target, first);
+    const second = exportCharacterBackup(
+      target,
+      imported.characterId,
+      '2026-07-31T12:01:00.000Z',
+    );
+
+    expect({
+      alignment: second.character.alignment,
+      appearance: second.character.appearance,
+      backstory: second.character.backstory,
+      notes: second.character.notes,
+    }).toEqual({
+      alignment: 'Chaotic Good',
+      appearance: 'Silver hair\nGreen eyes',
+      backstory: 'Raised near </script><the old tower>.',
+      notes: 'character note',
+    });
+  });
+
+  it('historical v2 flavor absence remains null', async () => {
+    const source = await database();
+    const sourceCatalog = seedCatalog(source);
+    const sourceCharacterId = seedCompleteCharacter(source, sourceCatalog);
+    const historical = structuredClone(
+      exportCharacterBackup(
+        source,
+        sourceCharacterId,
+        '2026-07-30T12:00:00.000Z',
+      ),
+    ) as unknown as Record<string, unknown>;
+    historical.version = PREVIOUS_CHARACTER_BACKUP_VERSION;
+    const root = historical.character as Record<string, unknown>;
+    delete root.alignment;
+    delete root.appearance;
+    delete root.backstory;
+
+    const target = await database();
+    seedCatalog(target, true);
+    const imported = importCharacterBackup(target, historical);
+    expect(
+      target.oneRaw(
+        `SELECT alignment, appearance, backstory
+         FROM characters WHERE id = ?`,
+        [imported.characterId],
+      ),
+    ).toEqual({ alignment: null, appearance: null, backstory: null });
+  });
+
   it('round-trips every user-authored surface using target catalog keys and restorable save points', async () => {
     const source = await database();
     const sourceCatalog = seedCatalog(source);
@@ -420,6 +495,9 @@ describe('portable character backup', () => {
       intelligence: 18,
       allow_legacy: 1,
       revision: 9,
+      alignment: 'Chaotic Good',
+      appearance: 'Silver hair\nGreen eyes',
+      backstory: 'Raised near </script><the old tower>.',
       notes: 'character note',
       created_at: timestamp,
     });
@@ -559,7 +637,8 @@ describe('portable character backup', () => {
     ) as Record<string, any>;
     // The current-format save point carries the weapons, re-keyed to the rows
     // that were just written, so restoring it puts back the same two weapons.
-    expect(saved.schema_version).toBe('a7-v15');
+    expect(saved.schema_version).not.toBe('a7-v15');
+    expect(saved.schema_version).toBe('a7-v16');
     expect(saved.character_weapons.map((row: { name: string }) => row.name)).toEqual([
       'Weathered Longsword',
       'Half-entered club',
@@ -1040,11 +1119,16 @@ describe('an already-downloaded backup file', () => {
     const { characterId } = importCharacterBackup(target, archived);
 
     expect(
-      target.oneRaw('SELECT name, notes, revision FROM characters WHERE id = ?', [
-        characterId,
-      ]),
+      target.oneRaw(
+        `SELECT name, alignment, appearance, backstory, notes, revision
+         FROM characters WHERE id = ?`,
+        [characterId],
+      ),
     ).toEqual({
       name: 'Archived Hero',
+      alignment: null,
+      appearance: null,
+      backstory: null,
       notes: 'written before weapons travelled',
       revision: 4,
     });
@@ -1249,6 +1333,9 @@ describe('a backup file written while the dormant orphan column existed', () => 
         rules_edition_preference: '2024',
         allow_legacy: 0,
         revision: 0,
+        alignment: null,
+        appearance: null,
+        backstory: null,
         notes: null,
         created_at: null,
         updated_at: null,

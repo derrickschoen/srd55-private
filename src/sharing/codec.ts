@@ -1111,7 +1111,8 @@ export function positionalToShareDocument(
     case 13:
     case 14:
     case 15:
-    case 16: {
+    case 16:
+    case 17: {
       let migrated: unknown = input;
       for (const [from, migration] of Object.entries(MIGRATIONS)) {
         if (Number(from) >= version) {
@@ -1218,9 +1219,15 @@ function assertJsonNesting(text: string): void {
   }
 }
 
-export function encodeShareFragment(
-  document: CharacterShareDocument,
-): Promise<string> {
+export type ShareEncodeResult =
+  | { readonly kind: 'encoded'; readonly fragment: string }
+  | {
+      readonly kind: 'too_large';
+      readonly maximumEncodedCharacters: number;
+      readonly limit: 'compressed' | 'encoded';
+    };
+
+function encodedInput(document: CharacterShareDocument): Uint8Array {
   const json = JSON.stringify(shareDocumentToPositional(document));
   const input = new TextEncoder().encode(json);
   if (input.byteLength > SHARE_LIMITS.decompressedBytes) {
@@ -1228,24 +1235,61 @@ export function encodeShareFragment(
       `wire document exceeds the ${SHARE_LIMITS.decompressedBytes}-byte limit.`,
     );
   }
-  const stream = new Blob([input])
-    .stream()
-    .pipeThrough(new CompressionStream('gzip'));
+  return input;
+}
+
+function tryEncodeInput(
+  input: Uint8Array,
+): Promise<ShareEncodeResult> {
   return collectStream(
-    stream,
+    new Blob([new Uint8Array(input).buffer])
+      .stream()
+      .pipeThrough(new CompressionStream('gzip')),
     SHARE_LIMITS.compressedBytes,
     'compressed document',
-  ).then((compressed) => {
+  ).then((compressed): ShareEncodeResult => {
     const encoded = bytesToBase64(compressed)
       .replaceAll('+', '-')
       .replaceAll('/', '_')
       .replace(/=+$/g, '');
     if (encoded.length > SHARE_LIMITS.encodedCharacters) {
+      return {
+        kind: 'too_large',
+        maximumEncodedCharacters: SHARE_LIMITS.encodedCharacters,
+        limit: 'encoded',
+      };
+    }
+    return { kind: 'encoded', fragment: encoded };
+  }).catch((error: unknown): ShareEncodeResult => {
+    if (error instanceof ShareValidationError) {
+      return {
+        kind: 'too_large',
+        maximumEncodedCharacters: SHARE_LIMITS.encodedCharacters,
+        limit: 'compressed',
+      };
+    }
+    throw error;
+  });
+}
+
+export function tryEncodeShareFragment(
+  document: CharacterShareDocument,
+): Promise<ShareEncodeResult> {
+  return tryEncodeInput(encodedInput(document));
+}
+
+export function encodeShareFragment(
+  document: CharacterShareDocument,
+): Promise<string> {
+  return tryEncodeInput(encodedInput(document)).then((result) => {
+    if (result.kind === 'too_large') {
       throw new ShareValidationError(
-        `fragment exceeds the ${SHARE_LIMITS.encodedCharacters}-character limit.`,
+        result.limit === 'compressed'
+          ? `compressed document exceeds the ${SHARE_LIMITS.compressedBytes}-byte limit.`
+          : `fragment exceeds the ${result.maximumEncodedCharacters}-character limit.`,
       );
     }
-    return encoded;
+    return result.fragment;
   });
 }
 

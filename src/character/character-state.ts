@@ -98,6 +98,10 @@ import {
  * LU-1 mints `a7-v15` because class-level feat choices are durable character
  * state. `a7-v14` is frozen before that table joins the live scope.
  *
+ * D104 mints `a7-v16` because the root projection gains alignment, appearance,
+ * and backstory. `a7-v15` is frozen before those columns exist; restoring it
+ * writes NULL for each absence rather than inventing text.
+ *
  * NOT BUMPING WOULD HAVE BEEN THE LOUDEST FAILURE IN THIS CHANGE.
  * `SNAPSHOT_TABLES_BY_VERSION` aliases the CURRENT version to the live
  * `CHARACTER_STATE_TABLES`, so adding four tables without minting `a7-v4` would
@@ -107,7 +111,7 @@ import {
  * containing one. Undo, save-point restore and `exportCharacterBackup` — which
  * re-parses its own stored save points on the way out — would break together.
  */
-export const CHARACTER_SNAPSHOT_SCHEMA_VERSION = 'a7-v15' as const;
+export const CHARACTER_SNAPSHOT_SCHEMA_VERSION = 'a7-v16' as const;
 
 /**
  * D83 does not mint a snapshot version. `ability_override` occupies the
@@ -261,6 +265,12 @@ const A7_V14_TABLES = [
   'character_skill_expertise_grants',
 ] as const satisfies readonly SnapshotTable[];
 
+/** Frozen before D104 added root flavor columns; the table set is unchanged. */
+const A7_V15_TABLES = [
+  ...A7_V14_TABLES,
+  'character_level_feat_choices',
+] as const satisfies readonly SnapshotTable[];
+
 const SNAPSHOT_TABLES_BY_VERSION = {
   'a7-v1': A7_V1_TABLES,
   'a7-v2': A7_V2_TABLES,
@@ -276,7 +286,8 @@ const SNAPSHOT_TABLES_BY_VERSION = {
   'a7-v12': A7_V12_TABLES,
   'a7-v13': A7_V13_TABLES,
   'a7-v14': A7_V14_TABLES,
-  'a7-v15': CHARACTER_STATE_TABLES,
+  'a7-v15': A7_V15_TABLES,
+  'a7-v16': CHARACTER_STATE_TABLES,
 } as const satisfies Readonly<Record<string, readonly SnapshotTable[]>>;
 
 /**
@@ -306,6 +317,7 @@ export const CHARACTER_SNAPSHOT_SCHEMA_VERSIONS = [
   'a7-v13',
   'a7-v14',
   'a7-v15',
+  'a7-v16',
 ] as const satisfies readonly (keyof typeof SNAPSHOT_TABLES_BY_VERSION)[];
 
 export type CharacterSnapshotSchemaVersion =
@@ -369,7 +381,7 @@ export type _SnapshotVersionsAreSubsets = [
   ? true
   : never;
 
-export const CHARACTER_STATE_COLUMNS = [
+const PRE_V16_CHARACTER_COLUMNS = [
   ...PRE_V8_CHARACTER_COLUMNS,
   /**
    * The D64 allocation signal, added at `a7-v8`. In this list so that a
@@ -378,6 +390,13 @@ export const CHARACTER_STATE_COLUMNS = [
    * through a snapshot whose projection includes the column.
    */
   'ability_allocation_method',
+] as const;
+
+export const CHARACTER_STATE_COLUMNS = [
+  ...PRE_V16_CHARACTER_COLUMNS,
+  'alignment',
+  'appearance',
+  'backstory',
 ] as const;
 
 const SNAPSHOT_CHARACTER_COLUMNS_BY_VERSION = {
@@ -402,7 +421,8 @@ const SNAPSHOT_CHARACTER_COLUMNS_BY_VERSION = {
   'a7-v12': [...PRE_V8_CHARACTER_COLUMNS, 'ability_allocation_method'] as const,
   'a7-v13': [...PRE_V8_CHARACTER_COLUMNS, 'ability_allocation_method'] as const,
   'a7-v14': [...PRE_V8_CHARACTER_COLUMNS, 'ability_allocation_method'] as const,
-  'a7-v15': CHARACTER_STATE_COLUMNS,
+  'a7-v15': PRE_V16_CHARACTER_COLUMNS,
+  'a7-v16': CHARACTER_STATE_COLUMNS,
 } as const satisfies Readonly<
   Record<CharacterSnapshotSchemaVersion, readonly string[]>
 >;

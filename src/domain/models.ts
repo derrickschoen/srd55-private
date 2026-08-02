@@ -114,6 +114,9 @@ export interface CharacterRow extends TimestampedRow {
   rules_edition_preference: RulesEdition;
   allow_legacy: boolean;
   revision: number;
+  alignment: string | null;
+  appearance: string | null;
+  backstory: string | null;
   notes: string | null;
 }
 

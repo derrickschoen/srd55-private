@@ -552,7 +552,7 @@ test('captures every restorable character table and reports exact state differen
   });
   expect(document).toMatchObject({
     format: 'dnd-multiclass-spells/character',
-    version: 2,
+    version: 3,
     source_character_id: workspaceImage.ids.character,
     character: { name: 'R40 Golden', revision: 0 },
   });
@@ -945,8 +945,9 @@ test('round-trips a named save point through the mutation path', async ({
     label: 'Before experiment',
     // a7-v15 adds durable level-feat provenance; a7-v14 remains frozen before
     // that table became character state.
-    schema_version: 'a7-v15',
+    schema_version: 'a7-v16',
   });
+  expect(point.schema_version).not.toBe('a7-v15');
   const pointSnapshot = JSON.parse(String(point.snapshot)) as {
     character_items: Array<Record<string, unknown>>;
   };
@@ -1225,9 +1226,10 @@ test('undoes a structural class change through its snapshot inverse', async ({
   );
   expect(changed.inverse).toMatchObject({
     type: 'restore_snapshot',
-    snapshot: { schema_version: 'a7-v15' },
+    snapshot: { schema_version: 'a7-v16' },
     integrity: expect.any(String),
   });
+  expect(changed.inverse.snapshot.schema_version).not.toBe('a7-v15');
   await execute(
     page,
     workspaceImage.ids.character,
@@ -2712,7 +2714,7 @@ test('whole-database and portable-character export/import round-trip, corrupt-ve
   }, workspaceImage.ids.character);
   expect(exported.character).toMatchObject({
     format: 'dnd-multiclass-spells/character',
-    version: 2,
+    version: 3,
     source_character_id: workspaceImage.ids.character,
   });
   expect(exported.database).toMatchObject({

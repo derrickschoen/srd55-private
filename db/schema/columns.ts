@@ -346,6 +346,17 @@ export const nullOrIntegerAtLeast = (column: string, minimum: number) =>
       `AND ${columnRef(column)} >= ${bound(minimum)}))`,
   );
 
+/** Nullable TEXT whose non-null representation is non-empty and bounded. */
+export const nullOrTextLengthAtMost = (
+  column: string,
+  maximum: number,
+) =>
+  sql.raw(
+    `(${columnRef(column)} IS NULL OR (` +
+      `typeof(${columnRef(column)}) = 'text' AND ` +
+      `length(${columnRef(column)}) BETWEEN 1 AND ${bound(maximum)}))`,
+  );
+
 /**
  * An integer bound, refused if it is not one. A float or a `NaN` inlined here
  * would produce a CHECK that parses and silently means something else, which is

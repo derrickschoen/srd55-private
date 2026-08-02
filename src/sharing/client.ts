@@ -4,7 +4,11 @@ import type {
   ShareImportResult,
   SharePreview,
 } from './character-share';
-import { encodeShareFragment } from './codec';
+import {
+  encodeShareFragment,
+  tryEncodeShareFragment,
+  type ShareEncodeResult,
+} from './codec';
 import type { CharacterShareDocument } from './schema';
 
 export interface ShareClient {
@@ -16,6 +20,10 @@ export interface ShareClient {
     characterId: number,
     options?: ShareExportOptions,
   ): Promise<string>;
+  createFragmentResult(
+    characterId: number,
+    options?: ShareExportOptions,
+  ): Promise<ShareEncodeResult>;
   preview(fragment: string): Promise<SharePreview>;
   importCharacter(fragment: string): Promise<ShareImportResult>;
 }
@@ -30,14 +38,14 @@ export function createShareClient(rpc: RpcClient): ShareClient {
         characterId: number;
         acknowledgements: boolean;
         loadouts: boolean;
-        notes: boolean;
+        writtenText: boolean;
       },
       CharacterShareDocument
     >('share.exportCharacter', {
       characterId,
       acknowledgements: options.acknowledgements === true,
       loadouts: options.loadouts === true,
-      notes: options.notes === true,
+      writtenText: options.writtenText === true,
     });
   return Object.freeze({
     exportDebug,
@@ -45,6 +53,10 @@ export function createShareClient(rpc: RpcClient): ShareClient {
       characterId: number,
       options: ShareExportOptions = {},
     ) => encodeShareFragment(await exportDebug(characterId, options)),
+    createFragmentResult: async (
+      characterId: number,
+      options: ShareExportOptions = {},
+    ) => tryEncodeShareFragment(await exportDebug(characterId, options)),
     preview: (fragment: string) =>
       rpc.call<{ fragment: string }, SharePreview>('share.preview', {
         fragment,
@@ -56,4 +68,3 @@ export function createShareClient(rpc: RpcClient): ShareClient {
       ),
   });
 }
-

@@ -14,6 +14,7 @@ import { WIRE_SCHEMA_V13 } from './v13';
 import { WIRE_SCHEMA_V14 } from './v14';
 import { WIRE_SCHEMA_V15 } from './v15';
 import { WIRE_SCHEMA_V16 } from './v16';
+import { WIRE_SCHEMA_V17 } from './v17';
 import {
   versatileWeaponDamageFromLegacy,
   weaponDamageFromLegacy,
@@ -30,7 +31,7 @@ import {
  * domain requires a new schema version, an adjacent migration, and a
  * hand-frozen fragment fixture. Never edit an existing version.
  */
-export const CURRENT_CHARACTER_SHARE_VERSION = 16 as const;
+export const CURRENT_CHARACTER_SHARE_VERSION = 17 as const;
 
 /**
  * Any change to tuple field order, meaning, membership, or accepted value
@@ -54,6 +55,7 @@ export const SHARE_SCHEMAS = Object.freeze({
   14: WIRE_SCHEMA_V14,
   15: WIRE_SCHEMA_V15,
   16: WIRE_SCHEMA_V16,
+  17: WIRE_SCHEMA_V17,
 } as const);
 
 export type SupportedShareVersion = keyof typeof SHARE_SCHEMAS;
@@ -946,6 +948,31 @@ function migrateV15ToV16(document: unknown): unknown {
   return migrated;
 }
 
+/** V16 predates root flavor text; the three appended absences are SQL NULL. */
+function migrateV16ToV17(document: unknown): unknown {
+  if (
+    !Array.isArray(document) ||
+    !WIRE_SCHEMA_V16.tuples.root.arities.some(
+      (arity) => arity === document.length,
+    )
+  ) {
+    throw new TypeError('wire document has an unsupported v16 tuple length.');
+  }
+  const character = document[2];
+  if (
+    !Array.isArray(character) ||
+    !WIRE_SCHEMA_V16.tuples.character.arities.some(
+      (arity) => arity === character.length,
+    )
+  ) {
+    throw new TypeError('wire character has an unsupported v16 tuple length.');
+  }
+  const migrated = [...document];
+  migrated[1] = 17;
+  migrated[2] = [...character, null, null, null];
+  return migrated;
+}
+
 /**
  * ADJACENT means each migration lifts exactly one version step; the decoder
  * composes them, so a v1 document runs 1→2, then 2→3, then 3→4, then 4→5 —
@@ -970,6 +997,7 @@ export const MIGRATIONS = Object.freeze({
   13: migrateV13ToV14,
   14: migrateV14ToV15,
   15: migrateV15ToV16,
+  16: migrateV16ToV17,
 }) satisfies AdjacentMigrations;
 
 export { WIRE_SCHEMA_V1 } from './v1';
@@ -988,11 +1016,13 @@ export { WIRE_SCHEMA_V13 } from './v13';
 export { WIRE_SCHEMA_V14 } from './v14';
 export { WIRE_SCHEMA_V15 } from './v15';
 export { WIRE_SCHEMA_V16 } from './v16';
+export { WIRE_SCHEMA_V17 } from './v17';
 export type { WireField, WireSchemaV1 } from './v1';
 export type { WireSchemaV2 } from './v2';
 export type { WireSchemaV14 } from './v14';
 export type { WireSchemaV15 } from './v15';
 export type { WireSchemaV16 } from './v16';
+export type { WireSchemaV17 } from './v17';
 export type { WireSchemaV3 } from './v3';
 export type { WireSchemaV4 } from './v4';
 export type { WireSchemaV5 } from './v5';
