@@ -62,12 +62,13 @@ export function createSpellPicker(options: {
   let debounce: number | undefined;
   let blurTimer: number | undefined;
   let destroyed = false;
+  let acceptedValue = options.value;
 
   const close = (restore: boolean): void => {
     list.hidden = true;
     input.setAttribute('aria-expanded', 'false');
     input.removeAttribute('aria-activedescendant');
-    if (restore) input.value = options.value ?? '';
+    if (restore) input.value = acceptedValue ?? '';
   };
 
   const draw = (message?: string): void => {
@@ -94,11 +95,14 @@ export function createSpellPicker(options: {
         ...(spell.ritual ? ['Ritual'] : []),
         ...(spell.concentration ? ['Concentration'] : []),
       ];
-      choice.innerHTML = `<strong></strong><small></small>`;
-      choice.querySelector('strong')!.textContent = spell.name;
-      choice.querySelector('small')!.textContent = traits.join(' · ');
+      const name = document.createElement('strong');
+      name.textContent = spell.name;
+      const details = document.createElement('small');
+      details.textContent = traits.join(' · ');
+      choice.append(name, details);
       choice.addEventListener('mousedown', (event) => {
         event.preventDefault();
+        acceptedValue = spell.name;
         input.value = spell.name;
         close(false);
         options.onSelect(spell);
@@ -160,6 +164,7 @@ export function createSpellPicker(options: {
       const spell = choices[active];
       if (spell !== undefined) {
         event.preventDefault();
+        acceptedValue = spell.name;
         input.value = spell.name;
         close(false);
         options.onSelect(spell);
