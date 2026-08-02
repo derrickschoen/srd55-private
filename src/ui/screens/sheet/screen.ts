@@ -1,7 +1,7 @@
 import { createQueriesClient } from '../../../queries/client';
 import type { Route } from '../../router';
 import { defineScreen, type ScreenContext } from '../../screen';
-import { renderSheet, setSheetPrintFields } from './sheet-view';
+import { renderSheet, setSheetPrintContent } from './sheet-view';
 import './styles.css';
 
 /**
@@ -75,13 +75,13 @@ async function render(context: ScreenContext): Promise<() => void> {
    */
   const printMedia = window.matchMedia('print');
   const syncPrintFields = (): void => {
-    setSheetPrintFields(sheetElement, printMedia.matches);
+    setSheetPrintContent(sheetElement, printMedia.matches);
   };
   const beforePrint = (): void => {
-    setSheetPrintFields(sheetElement, true);
+    setSheetPrintContent(sheetElement, true);
   };
   const afterPrint = (): void => {
-    setSheetPrintFields(sheetElement, printMedia.matches);
+    setSheetPrintContent(sheetElement, printMedia.matches);
   };
   syncPrintFields();
   printMedia.addEventListener('change', syncPrintFields);
