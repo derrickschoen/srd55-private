@@ -988,8 +988,8 @@ test('resource print shape is fixed by type and a hostile absence class name ren
 test('the structured block says exactly what the page says, and hides nothing', async ({
   page,
 }, testInfo) => {
-  // Measured alone at 12.7s on 2026-07-31; full SRD boot repair dominates.
-  testInfo.setTimeout(20_000);
+  // Measured alone at 14.3s on 2026-08-02; SS-2's spell section made sheet boots heavier.
+  testInfo.setTimeout(40_000);
   const image = await sheetImage();
   await install(page, image);
   await page.goto(`/characters/${image.characterId}/sheet`);
@@ -1178,8 +1178,8 @@ test('a Monk equipping Shell Shield walks from AC 16 to 15 with a strict-reducti
 test('Scute Wrap is honoured over the higher Armadillo formula and the exclusion is stated', async ({
   page,
 }, testInfo) => {
-  // Measured alone at 10.0s on 2026-07-31; full SRD boot repair dominates.
-  testInfo.setTimeout(20_000);
+  // Measured alone at 12.2s on 2026-08-02; SS-2's spell section made sheet boots heavier.
+  testInfo.setTimeout(35_000);
   const image = await armadilloArmorImage();
   await install(page, image);
   await navigateWithinApp(page, `/characters/${image.characterId}/sheet`);
@@ -1286,8 +1286,8 @@ test('ability overrides render the winning source and the floored source term', 
 test('the planner links to the sheet, and the sheet links back', async ({
   page,
 }, testInfo) => {
-  // Measured alone at 14.6s on 2026-07-31; full SRD boot repair dominates.
-  testInfo.setTimeout(20_000);
+  // Measured alone at 16.2s on 2026-08-02; SS-2's spell section made sheet boots heavier.
+  testInfo.setTimeout(45_000);
   const image = await sheetImage();
   await install(page, image);
   await page.goto(`/characters/${image.characterId}`);
@@ -1307,8 +1307,8 @@ test('the planner links to the sheet, and the sheet links back', async ({
 test('the sheet route is not shadowed by the printable-list route', async ({
   page,
 }, testInfo) => {
-  // Measured alone at 14.7s on 2026-07-31; full SRD boot repair dominates.
-  testInfo.setTimeout(20_000);
+  // Measured alone at 16.1s on 2026-08-02; SS-2's spell section made sheet boots heavier.
+  testInfo.setTimeout(45_000);
   // Screen modules are sorted by PATH and the first match wins, so `print`
   // is tested before `sheet`. Both matchers are exact; a loose one on either
   // side would make one of these two pages unreachable.
