@@ -88,6 +88,10 @@ import {
   ClassProficiencyLookup,
   EMPTY_CLASS_PROFICIENCIES,
 } from './class-proficiency-lookup';
+import {
+  CharacterSpellSectionBuilder,
+  type CharacterSpellSection,
+} from './character-spell-section-builder';
 
 /**
  * THE CHARACTER SHEET, ASSEMBLED AND THROWN AWAY.
@@ -342,6 +346,7 @@ export interface CharacterSheet {
   readonly skills: readonly SheetSkill[];
   readonly attacks_per_action: AttacksPerAction;
   readonly resources: readonly SheetResourceMaximum[];
+  readonly spells: CharacterSpellSection;
   readonly martial_arts: readonly {
     readonly class_name: string;
     readonly class_level: number;
@@ -638,9 +643,11 @@ function enumOr<T extends string>(
 
 export class CharacterSheetBuilder {
   readonly #content: SheetContentLookup;
+  readonly #spells: CharacterSpellSectionBuilder;
 
   constructor(private readonly db: DatabaseContext) {
     this.#content = new SheetContentLookup(db);
+    this.#spells = new CharacterSpellSectionBuilder(db);
   }
 
   /**
@@ -696,6 +703,7 @@ export class CharacterSheetBuilder {
         modifier: scores.score('wisdom').modifier(),
       },
     });
+    const spells = this.#spells.build(characterId);
 
     const hitPoints = hitPointMaximum({ classes, scores, rolls: rolls.map });
     const eligibleEffectRows = readEligibleCharacterEffects(
@@ -909,6 +917,7 @@ export class CharacterSheetBuilder {
       }),
       attacks_per_action: attacksPerAction(content),
       resources,
+      spells,
       martial_arts: martialArtsDice(content).map((die) => ({ ...die })),
       walking_speed_feet:
         baseSpeed === null
