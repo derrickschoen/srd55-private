@@ -7,6 +7,20 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D174 — OWNER: conversion collision policy = rename + mechanical distance (2026-08-02)
+
+On the 3.5-SRD conversion research: "Differentiating by renaming is fine
+as long as the converted subclass is not too similar to the 5e/5.5
+version of the same name." Policy for any future prestige-class
+conversion: a name collision with an existing 5e/2024 subclass does NOT
+disqualify a candidate - rename the conversion AND keep its mechanics
+sufficiently distinct from the official subclass it collided with. The
+similarity test is against the official 5e/5.5 subclass, judged at
+design review. Unblocks the collision-flagged candidates (Dragon
+Disciple, Blackguard, Assassin, Shadowdancer lineages) whenever
+conversion units are ordered; no conversion unit is IN the queue yet -
+this is standing policy, not a scope addition.
+
 ## D173 — OWNER: Magic Weapon stays TEXT-ONLY; the banded upcast is proven modelable (2026-08-02)
 
 Asked whether to build a spell-effect layer (the weapon_attack_bonus/
