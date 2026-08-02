@@ -10,10 +10,24 @@ migrations 0000-0026 (0027 minted unmerged in wt/attunement); wire v1-v16
 All lanes merged main in (wt/pwa needed a one-hunk timeout-comment union,
 resolved keeping BOTH measurements, tsc 0).
 
-## In flight (supervisor = FABLE again, 2026-08-01) — CASCADE PHASE
-MAIN 2c52cd4 (W-C merged c92051c; HYG-3 merged 514d431; D147-D155 recorded).
-FLOORS: vitest 3,191 / 196 files; Playwright 89 / 21 specs; build 0;
-migrations 0000-0026; wire v1-v16; a7-v* assertions.
+## In flight (supervisor = FABLE, 2026-08-01) — CASCADE COMPLETE, MINT LANE CLOSING
+MAIN e29cd35. CASCADE DONE: W-C c92051c, FIX-ATTR 5e76552, P0 e0c046b,
+RESP-1 802658a all merged with full supervisor gates (controls + suites).
+Design docs merged: W-MC multiclass (37d373f), SPELL-SEC (e29cd35, SS-3
+gated on FF-C), GitHub spike evidence (a90c16f — real 409/404/CORS/
+rate-limit shapes + the identical-bytes sha trap; two throwaway repos
+remain under the owner's account pending delete_repo scope).
+FLOORS: vitest 3,218 / 201 files; Playwright 92 / 22 specs; build 0;
+migrations 0000-0026 (0027 in FF-A, ungated-merged); wire v1-v16 (v17 in
+FF-A); a7-v* assertions.
+Rulings D147-D160 recorded (see decisions.md). New unit queue additions:
+W-MC-1..6 (after W-F), SS-1..5 (SS-3 after FF-C), SUBCL-SEED (D151),
+PARTY roster (D157, after P5), spell form + fork (D158, after HA backend),
+compact-print + verbose appendix (D159, design needed), WebKit spike
+(D153, supervisor, next quiet browser slot), BROWSER probe+banner unit.
+IN FLIGHT NOW: FF-A final full PW on 44480 (build 0 + vitest 201/3,232
+verified on merged tree; scans clean — only 0027/v17 minted). Then HA-1
+full gate in wt/mint2.
 
 ## Owner rulings 2026-08-01 (D147-D155) — queue consequences
 - D147 wizard multiclass (BG3 flow, SRD prereqs + house-rule toggle):
