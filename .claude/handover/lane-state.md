@@ -10,6 +10,19 @@ migrations 0000-0026 (0027 minted unmerged in wt/attunement); wire v1-v16
 All lanes merged main in (wt/pwa needed a one-hunk timeout-comment union,
 resolved keeping BOTH measurements, tsc 0).
 
+## FINDING AGAINST SUPERVISOR WORK (2026-08-02, full length per protocol)
+The D150 spike's repo layout was IMPROVISED by the supervisor
+(library/species/<file>.json, characters/<player>/<file>.json) and does
+NOT conform to the party design's flat layout that P0 implements
+(library/party-library.json + two-segment publication-ID paths). The
+P1-GH review caught the collision when adapter fixtures built on spike
+captures either bypassed the RepositoryPath brand or carried rejected
+paths. Ruling recorded in the fix brief: captured response SHAPES are
+law; path/identifier VALUES are sanitizable when renamed consistently per
+request/response pair with disclosure. A real 401 was captured
+post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
+SYNTHETIC with port-level assertions only.
+
 ## RESTART POINT 2026-08-02 (read this first after any context loss)
 MAIN a00455a+ (FF-A merged; post-merge vitest 201/3,232; PW floor 93).
 0027/v17 now FROZEN. Mirror: push `git push mirror main` AFTER EVERY MERGE
