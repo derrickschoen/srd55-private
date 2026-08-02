@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { readGuidedSeam } from './fixtures/guided-seam';
 
 async function ready(page: Page): Promise<void> {
@@ -36,11 +36,116 @@ async function expectNoPlannerRouteAnchors(page: Page): Promise<void> {
   }
 }
 
+async function expectPhoneWidth(page: Page): Promise<void> {
+  const widths = await page.evaluate(() => ({
+    innerWidth: window.innerWidth,
+    scrollWidth: document.scrollingElement?.scrollWidth ?? 0,
+  }));
+  expect(widths.innerWidth).toBe(390);
+  expect(widths.scrollWidth).toBeLessThanOrEqual(widths.innerWidth);
+}
+
+async function expectHorizontallyContained(
+  page: Page,
+  control: Locator,
+): Promise<void> {
+  await expect(control).toBeVisible();
+  const box = await control.boundingBox();
+  expect(box).not.toBeNull();
+  if (box === null) {
+    return;
+  }
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(
+    await page.evaluate(() => window.innerWidth),
+  );
+}
+
+test('a phone-width guided journey keeps the first level 1 screens and controls usable', async ({
+  page,
+}) => {
+  // Measured at 10.1s alone on Chromium at 390x844.
+  test.setTimeout(20_000);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await resetHome(page);
+
+  const seam = await readGuidedSeam(page);
+  await page.getByRole('link', { name: 'Create a character' }).click();
+  await expect(
+    page.locator(`[${seam.panelAttribute}="${seam.classChooserPanel}"]`),
+  ).toBeVisible();
+  await expectPhoneWidth(page);
+
+  const fighter = page
+    .locator('[data-class-option]')
+    .filter({ hasText: 'Fighter' })
+    .first();
+  await expectHorizontallyContained(page, fighter);
+  await fighter.click();
+
+  const name = page.getByLabel('Character name');
+  const create = page.getByRole('button', { name: 'Create character' });
+  await expectHorizontallyContained(page, name);
+  await expectHorizontallyContained(page, create);
+  await expectPhoneWidth(page);
+  await name.fill('Phone Hero');
+  await create.click();
+
+  const persisted = await page.evaluate(() =>
+    window.staticApp.inspectRows('characters'),
+  );
+  const characterId = Number(persisted[0]?.['id']);
+  expect(Number.isSafeInteger(characterId)).toBe(true);
+  const persistedSeam = await readGuidedSeam(page, characterId);
+  await expect(
+    page.locator(
+      `[${persistedSeam.panelAttribute}="${persistedSeam.abilitiesStepPanel}"]`,
+    ),
+  ).toBeVisible();
+
+  const manual = page.locator(
+    `[${persistedSeam.abilityMethodAttribute}="manual"]`,
+  );
+  await expectHorizontallyContained(page, manual);
+  await manual.check();
+  const warning = page.locator(
+    `[${persistedSeam.abilityWarningAttribute}="weak_scores"]`,
+  );
+  const abilitySubmit = page.locator(
+    `[${persistedSeam.abilitySubmitAttribute}]`,
+  );
+  await expect(warning).toBeVisible();
+  await expectHorizontallyContained(page, abilitySubmit);
+  await expectPhoneWidth(page);
+  await abilitySubmit.click();
+
+  await expect(
+    page.locator(
+      `[${persistedSeam.panelAttribute}="${persistedSeam.speciesStepPanel}"]`,
+    ),
+  ).toBeVisible();
+  const dwarf = page.getByRole('button', { name: 'Choose Dwarf' });
+  await expectHorizontallyContained(page, dwarf);
+  await expectPhoneWidth(page);
+  await dwarf.click();
+
+  await expect(
+    page.locator(
+      `[${persistedSeam.panelAttribute}="${persistedSeam.backgroundStepPanel}"]`,
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Choose a background' }),
+  ).toBeVisible();
+  await expectPhoneWidth(page);
+});
+
 test('the empty-database front door chooses class first, persists once named, and survives reload without a planner escape', async ({
   page,
 }) => {
   // Measured at 20.2s alone on Chromium; allow for concurrent-suite contention.
   test.setTimeout(60_000);
+  await page.setViewportSize({ width: 390, height: 844 });
   await resetHome(page);
 
   expect(
@@ -75,6 +180,7 @@ test('the empty-database front door chooses class first, persists once named, an
       `[${seam.panelAttribute}="${seam.classChooserPanel}"]`,
     ),
   ).toBeVisible();
+  await expectPhoneWidth(page);
 
   await expect(page.locator('input')).toHaveCount(0);
   await expectNoPlannerRouteAnchors(page);
@@ -124,6 +230,7 @@ test('the empty-database front door chooses class first, persists once named, an
       `[${persistedSeam.panelAttribute}="${persistedSeam.abilitiesStepPanel}"]`,
     ),
   ).toBeVisible();
+  await expectPhoneWidth(page);
   await expect(
     page.locator(
       `[${persistedSeam.abilityMethodAttribute}="standard_array"]`,
@@ -165,6 +272,7 @@ test('the empty-database front door chooses class first, persists once named, an
       `[${persistedSeam.panelAttribute}="${persistedSeam.speciesStepPanel}"]`,
     ),
   ).toBeVisible();
+  await expectPhoneWidth(page);
   expect(
     await page.evaluate(() => window.staticApp.inspectRows('characters')),
   ).toEqual([
@@ -230,6 +338,7 @@ test('the empty-database front door chooses class first, persists once named, an
       `[${persistedSeam.panelAttribute}="${persistedSeam.backgroundStepPanel}"]`,
     ),
   ).toBeVisible();
+  await expectPhoneWidth(page);
   await expectNoPlannerRouteAnchors(page);
   expect(
     await page.evaluate(() =>
@@ -284,6 +393,7 @@ test('the empty-database front door chooses class first, persists once named, an
     `[${persistedSeam.panelAttribute}="${persistedSeam.skillsStepPanel}"]`,
   );
   await expect(skillsPanel).toBeVisible();
+  await expectPhoneWidth(page);
   await expectNoPlannerRouteAnchors(page);
   expect(
     await page.evaluate(() =>
@@ -348,6 +458,7 @@ test('the empty-database front door chooses class first, persists once named, an
   await expect(
     page.getByRole('heading', { name: 'Choose level 1 spells' }),
   ).toBeVisible();
+  await expectPhoneWidth(page);
   const cantrips = ['Guidance', 'Light'];
   const levelOne = ['Bless'];
   while (
@@ -382,6 +493,7 @@ test('the empty-database front door chooses class first, persists once named, an
     `[${persistedSeam.panelAttribute}="${persistedSeam.equipmentStepPanel}"]`,
   );
   await expect(equipmentPanel).toBeVisible();
+  await expectPhoneWidth(page);
   await expectNoPlannerRouteAnchors(page);
 
   // FIGHTER IS THE ONLY CLASS WITH A REAL CHOICE (§0c): options A and B are

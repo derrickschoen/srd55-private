@@ -30,10 +30,8 @@ import {
   CharacterCommandFactory,
   type ConstructedCharacterCommand,
 } from './character-command-factory';
+import { CharacterCommandPreflight } from './character-command-preflight';
 import type { CharacterCommandIntegrity } from './integrity';
-import {
-  CharacterCommandPayloadValidator,
-} from './payload-validator';
 import { RevisionConflict } from './revision-conflict';
 import {
   resolvesInverseAfterApply,
@@ -171,10 +169,9 @@ function armorClassReductionWarnings(
 }
 
 export class CharacterCommandExecutor {
-  readonly #factory: CharacterCommandFactory;
+  readonly #preflight: CharacterCommandPreflight;
   readonly #state: CharacterState;
   readonly #audit: CharacterAuditWriter;
-  readonly #validator = new CharacterCommandPayloadValidator();
   readonly #clock: () => string;
 
   constructor(
@@ -183,8 +180,9 @@ export class CharacterCommandExecutor {
     options: CharacterCommandExecutorOptions = {},
   ) {
     this.#state = options.state ?? new CharacterState(db);
-    this.#factory =
-      options.factory ?? new CharacterCommandFactory(db, integrity);
+    this.#preflight = new CharacterCommandPreflight(db, integrity, {
+      ...(options.factory === undefined ? {} : { factory: options.factory }),
+    });
     this.#audit =
       options.audit ?? new CharacterAuditLog(db, this.#state);
     this.#clock = options.clock ?? systemClock;
@@ -198,24 +196,7 @@ export class CharacterCommandExecutor {
       return replay;
     }
 
-    const currentRevision = this.currentRevision(request.character_id);
-    if (
-      currentRevision !== request.expected_revision &&
-      !this.canMergeStaleSlotCommand(
-        request.character_id,
-        request.command,
-        request.expected_revision,
-        currentRevision,
-      )
-    ) {
-      throw new RevisionConflict(currentRevision);
-    }
-
-    const payload = this.#validator.validate(request.command);
-    const command = await this.#factory.make(
-      request.character_id,
-      payload,
-    );
+    const { payload, command } = await this.#preflight.prepare(request);
     const before = this.#state.capture(request.character_id);
     const inverse = await this.prepareInverse(
       request.character_id,
@@ -240,18 +221,10 @@ export class CharacterCommandExecutor {
       return replay;
     }
 
-    const currentRevision = this.currentRevision(request.character_id);
-    if (
-      currentRevision !== request.expected_revision &&
-      !this.canMergeStaleSlotCommand(
-        request.character_id,
-        payload,
-        request.expected_revision,
-        currentRevision,
-      )
-    ) {
-      throw new RevisionConflict(currentRevision);
-    }
+    this.#preflight.assertExpectedRevision(request, payload);
+    const currentRevision = this.#preflight.currentRevision(
+      request.character_id,
+    );
 
     // D76: the warning is a PREVIEW, not persisted character state. Resolve
     // against the current equipment, apply the pending equip below, then resolve
@@ -340,20 +313,9 @@ export class CharacterCommandExecutor {
     }
     return {
       inverse: parseInverse(operation.inverse_command),
-      revision: this.currentRevision(characterId),
+      revision: this.#preflight.currentRevision(characterId),
       idempotent_replay: true,
     };
-  }
-
-  private currentRevision(characterId: number): number {
-    const revision = this.db.scalar(
-      'SELECT revision FROM characters WHERE id = ?',
-      [characterId],
-    );
-    if (revision === null) {
-      throw new Error(`Character ${characterId} does not exist.`);
-    }
-    return Number(revision);
   }
 
   private currentRevisionOrZero(characterId: number): number {
@@ -362,58 +324,6 @@ export class CharacterCommandExecutor {
         'SELECT revision FROM characters WHERE id = ?',
         [characterId],
       ) ?? 0,
-    );
-  }
-
-  private canMergeStaleSlotCommand(
-    characterId: number,
-    input: unknown,
-    expectedRevision: number,
-    currentRevision: number,
-  ): boolean {
-    if (
-      expectedRevision >= currentRevision ||
-      input === null ||
-      typeof input !== 'object' ||
-      Array.isArray(input) ||
-      (input as { type?: unknown }).type !== 'set_slot'
-    ) {
-      return false;
-    }
-    const slotId = (input as { slot_id?: unknown }).slot_id;
-    if (
-      !Number.isSafeInteger(slotId) ||
-      Number(slotId) < 1 ||
-      Number(
-        this.db.scalar(
-          `SELECT EXISTS (
-             SELECT 1
-             FROM spell_selection_slots
-             WHERE character_id = ? AND id = ?
-           )`,
-          [characterId, Number(slotId)],
-        ) ?? 0,
-      ) !== 1
-    ) {
-      return false;
-    }
-
-    return (
-      Number(
-        this.db.scalar(
-          `SELECT EXISTS (
-             SELECT 1
-             FROM change_log AS change
-             INNER JOIN character_operations AS operation
-               ON operation.operation_uuid = change.operation_uuid
-             WHERE operation.character_id = ?
-               AND operation.resulting_revision > ?
-               AND change.entity_type = 'spell_selection_slots'
-               AND change.entity_id = ?
-           )`,
-          [characterId, expectedRevision, Number(slotId)],
-        ) ?? 0,
-      ) === 0
     );
   }
 
