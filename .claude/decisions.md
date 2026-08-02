@@ -7,6 +7,291 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D174 — OWNER: conversion collision policy = rename + mechanical distance (2026-08-02)
+
+On the 3.5-SRD conversion research: "Differentiating by renaming is fine
+as long as the converted subclass is not too similar to the 5e/5.5
+version of the same name." Policy for any future prestige-class
+conversion: a name collision with an existing 5e/2024 subclass does NOT
+disqualify a candidate - rename the conversion AND keep its mechanics
+sufficiently distinct from the official subclass it collided with. The
+similarity test is against the official 5e/5.5 subclass, judged at
+design review. Unblocks the collision-flagged candidates (Dragon
+Disciple, Blackguard, Assassin, Shadowdancer lineages) whenever
+conversion units are ordered; no conversion unit is IN the queue yet -
+this is standing policy, not a scope addition.
+
+## D173 — OWNER: Magic Weapon stays TEXT-ONLY; the banded upcast is proven modelable (2026-08-02)
+
+Asked whether to build a spell-effect layer (the weapon_attack_bonus/
+weapon_damage_bonus effect kinds already flow into attack profiles, so
+hand-modeling via planner effects works today). Owner: "Text only is
+enough, but I want to know if we can model the weird upcast." Ruling: no
+spell-effect unit in v1; players hand-attach effects if they want the
+numbers. The upcast question is ANSWERED and recorded: the 2024 banded
+scaling (slot 2 -> +1, 3-5 -> +2, 6+ -> +3) is a closed hand-authored
+band table keyed on CHOSEN SLOT LEVEL - a new input concept (slot-level
+picker) but no formula engine; type-closeable; Pact Magic compatible.
+Not a blocker if a spell-effect layer is ever wanted.
+
+## D172 — OWNER: AI panel ships in the public repo, documented for cloners (2026-08-02)
+
+Owner's words: "Let anyone who clones the repo run their own localist with
+Claude code integration." The chat panel and bridge client STAY in the
+published code (not stripped); the public site keeps mounting nothing (no
+bridge). NEW publish-prep item: user-facing docs in the public repo
+explaining how a cloner runs the local bridge with Claude Code to get the
+panel. The bridge server itself: verify what exists in-repo vs. supervisor
+tooling before promising it — the doc must only describe what the public
+repo actually contains.
+
+## D171 — OWNER: in-app "Copy a bug report" button + GitHub issues (2026-08-02)
+
+Footer control pre-fills build id, browser, current screen, character id
+into the clipboard for pasting into chat; the D132 issue channel stays for
+account-holders. Small unit joins the queue.
+
+## D170 — OWNER: update prompt offers backup + one changelog line (2026-08-02)
+
+The refresh-to-update prompt gains "Download a backup first" and a
+one-line what-changed keyed to the build id; the owner writes that line
+per deploy (deploys are manual). Does not contradict D116 (first-character
+hint) — recorded as its own surface.
+
+## D169 — OWNER: EK/AT retire, REPLACED by an invented third-caster MONK subclass (2026-08-02)
+
+Owner's words: "Replace eldrich knight and trickster rogue with a made up
+third caster monk sub." Amends the SUBCL-SEED design's OQ-1 and its
+additive-14 shape: final bundled set = the twelve SRD subclasses PLUS ONE
+owner-original Monk subclass carrying a dense third-caster progression
+(keeping the third-caster machinery exercised, which was the argument for
+keeping EK/AT). Eldritch Knight and Arcane Trickster retire in the same
+unit that lands the replacement — retirement is a strict content swap, not
+a deletion-first. The invented subclass is original content (no licensing
+issue, D59). Its NAME, features, and spell list are DRAFTED by us and
+PRESENTED TO THE OWNER for approval before seeding — invented game content
+is owner-taste, not supervisor discretion. D80 covers characters left on
+EK/AT after retirement (unmade-subclass warning, sheet gap).
+
+## D168 — OWNER: publish under an ORG (2026-08-02) — NAME OPEN
+
+Chosen over derrickschoen/srd55. The public squash lands in an org repo;
+org creation happens at publish prep (outward, covered by this grant).
+SUPERVISOR FINDING at recording time: the GitHub USERNAME `srd55` is
+taken (users/srd55 = HTTP 200; orgs share the user namespace), so the org
+cannot be literally `srd55`. OPEN: the owner picks the org name (e.g.
+srd-55, srd55-app, srd55-project) — ask at publish prep or sooner.
+Spike-repo deletion was NOT covered by this answer; still pending.
+
+## D167 — OWNER: homebrew WEAPONS/ARMOR forms join v1; feats and magic items do NOT (2026-08-02)
+
+Multi-select answer: exactly "Weapons/armor". Weapon and armor definition
+authoring forms join the HA chain (proficiency + AC surfaces); feats stay
+at the 17 sourced SRD feats; magic items stay planner-panel-only (D72
+one-off effects), no item form in v1. Extends D103's kind list; D133
+unaffected.
+
+## D166 — OWNER: librarian setup = guided checklist + outbound link (2026-08-02)
+
+The party page walks the librarian through repo creation: an outbound
+github.com/new link, exact settings listed, then paste-the-URL-back. The
+answer GRANTS the mini-ruling that a USER-CLICKED external navigation link
+is not an outward action under hard stop 3 (the app itself still makes no
+un-consented request). App-created repos were not taken; documentation-only
+was not taken. P5 carries it.
+
+## D165 — OWNER: walkthroughs extend + a THIRD party script (2026-08-02)
+
+Script 1 gains multiclass entry, the spell section, and a subclass choice;
+script 2 gains spell fork authoring; a NEW third script certifies the
+party path end-to-end (librarian publishes -> anonymous join by URL ->
+refresh -> roster), fixture-backed under PARTY-NO-LIVE-NETWORK. All three
+gate before D106. Amends D131's two-script instrument.
+
+## D164 — OWNER: the sitting is a SOLO DISPOSABLE dry run (2026-08-02)
+
+Chosen over table-present-with-export-ritual and reserved-domain. The owner
+walks the walkthrough journeys alone through the ngrok tunnel; nothing
+built there is kept (browser storage is origin-scoped and dies with the
+tunnel URL — the trap is accepted, not worked around). First player hands
+touch the app post-publish. sitting.sh's checklist encodes this: no
+install-to-home-screen during the sitting, no backup-export ritual.
+
+## D163 — OWNER: roster row = one per PUBLISHED character, newest clone (2026-08-02)
+
+The roster is keyed on the repository publication path and shows the
+NEWEST imported clone; superseded clones remain in the character list but
+leave the roster. Never-published members get no row (the option was
+offered and not taken). Resolves the D157/D62 collision (refresh-clones
+would otherwise multiply roster rows). P3's index must therefore map
+publication path -> newest local clone.
+
+## D162 — OWNER: all three print appendices OPTIONAL; choices REMEMBERED per character (2026-08-02)
+
+Owner's words: "All optional. Remember preferences per character so
+subsequent prints have the same choice." Flavor (D141), full spell text
+(D149 — its always-on literal reading is superseded), and verbose audit
+(D159) are each opt-in at print time, and the three choices PERSIST per
+character (storage rides character_rule_overrides per the W-MC precedent
+unless implementation proves otherwise — mint-free expected). CONSEQUENCE,
+recorded before implementation: the merged SPELL-SEC design's
+SS-BROWSER-NO-WRITE negative control ('persist-print-preference' must
+fail) is AMENDED by this ruling — printing may write exactly the
+preference rows and nothing else; the control narrows to "no character
+mutation beyond the named preference keys", stated in the test, never
+silently.
+
+## D161 — OWNER: PRIVATE GITHUB MIRROR authorized (2026-08-02)
+
+Standing outward grant, the second after D150/D160: the supervisor creates
+ONE private repository under the owner's account via their gh session and
+pushes the FULL private repo (including .claude/) to it, then keeps it
+pushed at every merge to main. Scope is exactly this mirror; no other
+push, publish, or repo creation is covered. This does not create the D127
+public repo and publishes nothing.
+
+## D160 — OWNER: forge spike = GitHub only, via the owner's gh CLI (2026-08-01)
+
+Narrows D150's execution: "Use gh with my account to test GitHub and leave
+the rest roughed in for now. I do not have other accounts." The live spike
+runs against GitHub only, authenticated through the owner's existing `gh`
+CLI session on this machine (a throwaway repo created and destroyed under
+that account); the exact request list is still shown to the owner before it
+runs. GitLab and Codeberg adapters ship fixtures-roughed-in ONLY —
+explicitly marked unverified-against-live in their disclosure — until the
+owner has accounts there.
+
+## D159 — OWNER: print compacts ordinary numbers; verbose audit moves to an OPTIONAL appendix (2026-08-01)
+
+Supersedes the print-everything default within D89's constraint: on paper,
+CORRECT ordinary numbers drop their per-row reasoning; warnings and
+absence statements keep full sentences; the sheet prints one stated line
+that source breakdowns are on screen (D89's stated-absence rule). NEW:
+printing offers an OPTION to append the verbose text — calculations and
+source disclosures — as appendix pages, joining the D141 flavor and D149
+spell appendices. D67 exception recorded: on paper the sources are in the
+optional appendix, not beside the number; on screen nothing changes.
+
+## D158 — OWNER: homebrew spells get ALL THREE surfaces in v1 (2026-08-01)
+
+Asked fork-button vs full form vs JSON-only; the owner chose ALL of them:
+a from-scratch spell authoring form, a "fork this spell" copy-then-edit
+button on bundled spells (D45 semantics, new identity), and JSON import
+stays. Extends D103's kind list with spells; D133 (no classes) unaffected.
+Units join the HA chain after its backend lands.
+
+## D157 — OWNER: party ROSTER view ships in v1 (2026-08-01)
+
+Overrides the taken-for-now deferral: the party page (D156) gains a
+read-only roster — every imported party character with name, class/level,
+AC, HP max, passive Perception, spell save DC — as a unit after P5. P3's
+index carries what the roster needs.
+
+## D156 — OWNER: party features live on their OWN page (2026-08-01)
+
+"Party stuff will need its own page." Pins the party design's existing P5
+shape: a dedicated party screen with its own routes
+(src/ui/screens/party/ — setup, token paste/forget, publish, refresh,
+review, public-reader), never folded into the character list or another
+screen. The anon-primary mode (D154), warn-once permanence (D155), and any
+future roster view all live there.
+
+## D155 — OWNER: public-repo permanence = warn once at first public publish (2026-08-01)
+
+One-time, per-party plain statement ("public means permanent — git history
+survives deletion") before the first publish to a PUBLIC repo. No
+per-publish confirm; private-only was not taken. P5 carries it.
+
+## D154 — OWNER: party participation is anon-primary (2026-08-01)
+
+Public repo + tokenless anonymous read is the PRIMARY player path (zero
+setup); tokens are for the librarian/owner and any player who wants to
+self-publish. The D150 spike's measured anonymous rate limits size the
+refresh batching; if the spike shows unlivable limits, that finding comes
+back to the owner before the design changes.
+
+## D153 — OWNER: target iOS Safari; probe + banner for the rest (2026-08-01)
+
+Owner's words: "Can we make the app work on iOS Safari as well? (probe+
+banner for Firefox and others)". Ruling as taken: iOS Safari becomes a
+SUPPORT TARGET pending a local WebKit feasibility spike — the supervisor
+runs the existing Playwright suite under the WebKit engine (a local run,
+nothing outward; the project addition to playwright config is owner-ordered
+scope, not a forbidden path-to-green edit) and reports what breaks. If
+feasible, WebKit joins the tested matrix for core flows (amends D109's
+chromium-only) and the iOS story is documented as install-to-home-screen
+plus backup exports (Safari's 7-day eviction exemption). Every OTHER
+non-Chromium browser gets a boot-time capability probe + honest banner
+("tested only in Chromium/WebKit; your browser may not work and may lose
+data") with a proceed-anyway path. A silent broken page is outlawed (D33).
+
+## D152 — OWNER: printed feature text stays NUMBERS ONLY (2026-08-01)
+
+Chosen over full extraction and over modeled-features-only. No class or
+subclass feature text is extracted for v1; the sheet's stated-gap sentence
+remains the honest answer. The printout is a numbers reference; the rules
+text lives in the player's own materials.
+
+## D151 — OWNER: seed ALL SRD subclasses before the gate (2026-08-01)
+
+Chosen over ship-with-two and table-subset. The SRD 5.2.1 subclass for every
+class is extracted and seeded before the D106 gate, as a normal
+pinned-extract unit (F6/F27 discipline). Kills the empty-list-at-level-3
+experience for ten of twelve classes. D80's proceed-with-warning semantics
+stay for genuinely unmade subclasses (homebrew, future content).
+
+## D150 — OWNER: bounded live forge spike AUTHORIZED (2026-08-01)
+
+One outward-facing exception to hard stop 3, owner-granted: a live fixture
+spike against THROWAWAY repos on GitHub/GitLab/Codeberg using tokens the
+owner creates, to record real API responses (pagination, conflict statuses,
+rate-limit headers, error bodies) which are then sanitized into the pinned
+adapter fixtures. Conditions: the spike touches only the throwaway repos;
+its exact request list is shown to the owner BEFORE it runs; anonymous-read
+rate limits get measured in the same spike. Everything else outward remains
+stopped.
+
+## D149 — OWNER: caster spell section = sheet section + spell-text appendix; multiclass grouped by class (2026-08-01)
+
+Closes the D87/D54.4 bar gap the panel found (no queued unit built the
+spell section). Chosen shape: a compact section on the sheet (name, level,
+prepared/known marker, save DC and spell attack stated once); PRINTING
+appends full spell text as appendix pages after the sheet, the same
+pattern D141 gave long flavor text — one stapled document per player.
+OWNER ADDITION, verbatim requirement: "print multiclass spells grouped by
+class, order by level and name" — the printed spell section and appendix
+group by contributing class, ordered by level then name within each class.
+The legacy /characters/:id/print route RETIRES (its stale PHP-era import
+instruction dies with it).
+
+## D148 — OWNER: the D106 gate HOLDS in full; no early sitting (2026-08-01)
+
+Asked directly after the panel proved party storage lands at the tail of
+the CI mint chain: the owner chose "Hold everything, no early sitting" over
+re-cutting v1 and over an early informal sitting. The whole queue drains —
+party storage (D145/D146), wizard multiclass (D147, now explicitly INSIDE
+the gate), the HA/CI chains, and the new D149/D151 units — then the D128
+sitting, then publish. First hands-on use waits for the full queue by the
+owner's explicit choice.
+
+## D147 — OWNER: wizard multiclass, BG3-style flow, SRD prereqs + house-rule toggle (2026-08-01)
+
+Supersedes D107's deferral: the level-up wizard SHALL support adding a level
+in a new class, with a BG3-like add-class surface on the class step. Rules
+posture, owner-chosen from three options: ENFORCE the SRD 5.2 multiclass
+prerequisites by default (13+ in the new class's primary ability AND 13+ in
+the current class's primary ability; a failing class appears disabled with
+the exact shortfall shown, the D119 pattern), plus a per-character
+"ignore multiclass prerequisites" HOUSE-RULE TOGGLE that unlocks BG3
+behavior — default off, and when on it is recorded visibly on the sheet as a
+house rule. Entry proficiencies come from the already-parsed
+multiclass-entry-srd.ts grants; slots stay on the effective-caster-level
+computation.
+
+Sequencing, owner-chosen: design doc authored and reviewed NOW (parallel
+with the cascade); implementation dispatches only after W-D/W-E/W-F merge so
+multiclass lands on a complete wizard. Bar item 3 still closes at W-F.
+
 ## D146 — OWNER: party v1 = library AND characters; token lives in the session (2026-08-01)
 
 Confirms D145's full reading against the design's scoping alternatives: v1
@@ -41,6 +326,18 @@ SUPERVISOR-PROVEN 2026-08-01 (curl with an Origin header, all three returned
 Dialects differ and need separate adapters: GitHub and Gitea/Codeberg use
 `contents/{path}` with a blob `sha` for optimistic concurrency; GitLab uses
 `repository/files/{path}` with `last_commit_id` and a PRIVATE-TOKEN header.
+
+## D143a — SUPERVISOR: the D143 fallback is TAKEN (2026-08-01)
+
+Trigger met. Three D135 review rounds found per-family absence incomplete;
+round 3 found the last gap at src/rules/sheet.ts:1760 — the invalid value was
+the FAMILY DISCRIMINATOR (base progression_type), so no family could be
+trusted, yet both still printed. Per D143's pre-authorization the supervisor
+switched WITHOUT asking to the simple rule: ANY invalid or missing spell
+content suppresses the ENTIRE spell-slot section, absent-and-stated, one
+message. Slots print only when every contributor is complete and valid.
+Per-family independence is withdrawn. Tests asserting the superseded rule are
+replaced as RULING-DRIVEN changes, not deletions to reach green.
 
 ## D143 — OWNER: per-family slot absence, with a pre-authorized simple fallback (2026-07-31)
 

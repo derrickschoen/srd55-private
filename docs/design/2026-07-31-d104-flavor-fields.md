@@ -11,10 +11,9 @@ when present. It excludes portraits and XP tracking; D88 separately keeps play
 state off the stored character. D4 governs every rendering: hostile text remains
 visible and is marked as unverified, but it never enters structured facts.
 
-This design also preserves D37: character `notes` remains opt-in for a share
-link. D104 does not repeal that privacy decision. The three new flavor fields
-travel in a share when present; notes travels only when the existing `notes`
-option is true.
+D124 generalizes D37's privacy rule: one “Include my written text” share option
+covers `alignment`, `appearance`, `backstory`, and `notes`, and defaults OFF.
+Without that opt-in, none of the four fields travels in a share.
 
 ## 2. Assumptions proved from the current code
 
@@ -24,10 +23,10 @@ option is true.
 | `notes` already exists; D104 requires three new columns, not four. | `db/schema/character.ts:100` declares nullable `notes: sqlText()('notes')`. `src/domain/models.ts:99-118` and `src/queries/character-crud.ts:57-84` already carry it as `string | null`. Add `alignment`, `appearance`, and `backstory`; retain and regularize `notes`. |
 | Nullable prose uses `sqlText()` with no `.notNull()`. | `db/schema/columns.ts:38-42` defines the `TEXT` custom type. Character/source notes use it at `db/schema/character.ts:100,200,226`. The custom type is build-time typing, not runtime validation (`db/schema/columns.ts:18-24`). |
 | There is no existing nullable-text length-CHECK helper. | Existing nullable CHECK helpers are integer/enum-oriented (`db/schema/columns.ts:166-167,345`); nonempty SQL text uses `length(...)` directly (`db/schema/catalog-content.ts:54-67,98-100`). The new fields therefore need one shared nullable-text helper rather than three handwritten predicates. Existing `characters.notes` has no length CHECK. |
-| Text limits are owned in one domain module and reused by every boundary. | `src/authoring/limits.ts:3-22` says a form, RPC validator, projector, and exporter must read the same limit. `src/domain/character-limits.ts:1-34` already owns the 2,000-character `notes` limit and explains why an inline share-only cap is invalid. Extend this module rather than placing numbers in UI or wire code. |
+| Text limits are owned in one domain module and reused by every boundary. | `src/authoring/limits.ts:3-22` says a form, RPC validator, projector, and exporter must read the same limit. `src/domain/character-limits.ts:1-34` owns the 20,000-code-point `notes` limit and explains why an inline share-only cap is invalid. Extend this module rather than placing numbers in UI or wire code. |
 | Portable character backup serializes the whole root row and validates a closed root shape. | `exportCharacterBackup()` reads `SELECT * FROM characters` at `src/backup/character-backup.ts:1522-1533`, puts that row in `document.character` at `:1618-1632`, and validates its own output. Import validates exact root keys at `:1014-1077`, applies the generated row contract at `:1142-1146`, and inserts a fresh root in `importCharacterBackup()` at `:2748-2769`. A root-column addition therefore forces an explicit backup schema evolution. |
 | Old documents distinguish absence from an asserted empty value. | Snapshot parsing requires the columns owned by that historical version (`src/backup/character-backup.ts:414-434`). Its sparse-table commentary states that absent is not empty (`:136-155`). D104 migrations must map fields an old format could not carry to `NULL`, never `''` or invented prose. |
-| Share already carries optional root text and has an opt-in precedent. | `ShareCharacter.notes?: string` is defined at `src/sharing/schema.ts:153-188`; validation uses the shared character limit at `:2019-2027`. Export sends a nonempty note only when `options.notes === true` (`src/sharing/character-share.ts:986-999`) and import maps absence to SQL `NULL` (`:1572-1601`). `src/sharing/client.ts:23-47` and `src/worker/handlers/sharing.ts:32-72` carry the flag across RPC. |
+| Share already carries optional root text and has an opt-in precedent. | `ShareCharacter.notes?: string` is defined at `src/sharing/schema.ts:153-188`; validation uses the shared character limit at `:2019-2027`. Export sends nonempty alignment, appearance, backstory, and notes only when `options.writtenText === true` (`src/sharing/character-share.ts:986-999`) and import maps absence to SQL `NULL` (`:1572-1601`). `src/sharing/client.ts:23-47` and `src/worker/handlers/sharing.ts:32-72` carry the flag across RPC. |
 | The compact share wire is an append-only frozen registry, currently through v15. | `src/sharing/wire-schemas/index.ts:27-55` forbids editing an existing tuple and registers versions 1–15. v13 changes an accepted value without changing positions (`v13.ts:12-23`); v14 appends/replaces tuple structure (`v14.ts:12-71`); v15 appends a root section (`v15.ts:12-65`). Adjacent migrations preserve absence with null padding at `index.ts:837-920`; every historical step is composed through `MIGRATIONS` at `:923-946`. Historical module bytes are SHA-256 checked at `tests/unit/sharing/wire-schema-registry.test.ts:535-540,845-856`, as required by F24. |
 | Character-root snapshot columns are versioned independently of table membership. | `src/character/character-state.ts:320-370` freezes historical root column sets and declares live `CHARACTER_STATE_COLUMNS`; the per-version registry is at `:372-407`. Adding undoable flavor fields requires the next free snapshot schema version and a frozen predecessor, even though no owned table is added. |
 | The sheet is read-only; the planner is the established editing surface. | `src/ui/screens/sheet/screen.ts:7-15` explicitly says every displayed input is edited in the planner and rejects a second sheet writer. The planner already writes through the command session (`src/ui/screens/planner/screen.ts:533-542`). Flavor editing belongs in a planner “Character details” panel. |
@@ -62,13 +61,13 @@ characters.alignment / appearance / backstory / notes
 | `alignment` | new nullable `TEXT` | 120 | `NULL` | Alignment is deliberately open prose, not an enum. A short-label bound matches names/open vocabularies without closing homebrew. |
 | `appearance` | new nullable `TEXT` | 4,000 | `NULL` | Long-form prose; use the established authored-description ceiling. |
 | `backstory` | new nullable `TEXT` | 20,000 | `NULL` | This is the one genuinely long narrative field. The cap bounds hostile documents while remaining well inside the existing character-document budgets. |
-| `notes` | existing nullable `TEXT` | 2,000 for every new write/share | `NULL` | Retain `CHARACTER_TEXT_LIMITS.notes` and D37 opt-in sharing. Do not create a second notes column. |
+| `notes` | existing nullable `TEXT` | 20,000 for every new write/share | `NULL` | D142 gives notes the same generous long-form cap as backstory. Retain D124 opt-in written-text sharing; do not create a second notes column. |
 
 Extend `CHARACTER_TEXT_LIMITS` in `src/domain/character-limits.ts`; UI
 `maxlength`, command validation, and share validation must import those values.
 The current backup validator applies these limits to the three new fields, but
 `notes` remains type-only (`string | null`) there so a grandfathered note longer
-than 2,000 characters can still be exported and restored. Count code points with
+than 20,000 characters can still be exported and restored. Count code points with
 `[...value].length`, matching the existing name boundary
 (`src/queries/character-crud.ts:87-94`) and SQLite `length()` for these strings.
 A nonblank value is stored byte-for-byte; trimming is used only to decide whether
@@ -90,13 +89,13 @@ field IS NULL OR (
 This rejects non-text SQLite values and forbids the duplicate absence state
 `''`; the write command maps blank/whitespace-only input to `NULL` first.
 
-Do **not** retroactively add a 2,000-character length CHECK to existing
+Do **not** retroactively add a 20,000-character length CHECK to existing
 `characters.notes`. The current column and portable-backup row contract permit a
 longer string (`src/domain/character-limits.ts:26-30`; `src/domain/contracts/rows.ts:127-138`).
 Tightening the column would make a previously accepted user's own data
-unmigratable, which D25 forbids. New writes remain capped at 2,000; backup remains
-lossless for a grandfathered longer note; opted-in share continues to refuse it
-loudly instead of truncating it. A type-only `notes IS NULL OR
+unmigratable, which D25 forbids. New writes and shares are capped at 20,000 code
+points; backup remains lossless for a grandfathered longer note. Sharing refuses
+an over-limit value loudly instead of truncating it. A type-only `notes IS NULL OR
 typeof(notes) = 'text'` CHECK may be added only if the generated migration proves
 every accepted old row survives.
 
@@ -133,7 +132,7 @@ not reserve a number across parallel mint lanes.
 The new version's `character` object requires all three new keys, each containing
 `string | null`; `notes` remains required and type-only as it is today. The new
 field validators enforce their shared length limits, while current-backup
-validation deliberately does not impose the new-write 2,000-character limit on
+validation deliberately does not impose the new-write 20,000-code-point limit on
 `notes`. Freeze the v1/v2 root key sets before widening the live set.
 Validation/import behavior is:
 
@@ -168,13 +167,12 @@ chosen in this document. The implementation must:
   export projection, import SQL, preview, and the compile-exhaustive column
   portability map.
 
-`alignment`, `appearance`, and `backstory` are `verbatim` portability entries:
-present nonempty text travels, `NULL`/blank is absent, and import absence becomes
-SQL `NULL`. `notes` remains the existing `opt_in` entry keyed to the `notes`
-share option (`tests/integration/sharing/column-portability.test.ts:98-117,206-234`).
-No new “flavor” boolean is needed. The share UI should state that the link
-contains unverified user-written alignment/appearance/backstory when any are
-present, while keeping the current separate notes opt-in control.
+All four fields are `opt_in` portability entries keyed to the single D124
+`writtenText` option. Present nonempty text travels only when that option is
+true; `NULL`/blank is absent, and import absence becomes SQL `NULL`. The share UI
+defaults the option OFF and identifies all four covered fields. If encoding
+returns the typed `too_large` refusal, the UI shows an explicit size error; it
+never emits a truncated or broken link.
 
 ## 6. Authoring and presentation
 
@@ -186,13 +184,14 @@ before rules/equipment panels. It contains four labelled controls:
 - `Alignment` — text input, not a select;
 - `Appearance` — textarea;
 - `Backstory` — textarea;
-- `Notes` — textarea with “Included in share links only when you opt in.”
+- `Notes` — textarea.
 
 The panel says: “Free text only. These words are stored and printed, but never
 used to calculate character facts.” Each control uses the shared max length and
 shows remaining/maximum characters. One Save button submits the complete four-
-field value. Disable it synchronously until the command settles; do not send four
-independent writes.
+field value. The separate share control offers one default-off “Include my
+written text” option covering all four fields. Disable Save synchronously until
+the command settles; do not send four independent writes.
 
 `update_character_flavor` belongs in the existing command union, payload
 validator, exhaustive factory, executor inverse switch, and operation history.
@@ -259,7 +258,8 @@ test fail; a green retained test generated from current output is not acceptable
 | Historical snapshots/backups invent no flavor. | Frozen pre-D104 snapshot and v1/v2 backup restore all three new fields as `NULL`. | **D104-ABSENT-NOT-INVENTED** — replace one migration null with `''` or “Unspecified”; `historical flavor absence remains null` must fail. |
 | Current backup round-trips every value losslessly. | Export/import/re-export compares all four fields, including newlines and hostile punctuation. | **D104-BACKUP-ROOT** — omit `appearance` from the current exact-key list or import insert; `current flavor backup round-trips root text` must fail. |
 | The next wire appends fields without changing old positions. | Hand-authored current frozen fragment migrates through next; old members compare position-for-position and new members decode absent. | **D104-WIRE-NULLPAD** — append `''` or insert before notes; `current wire migrates flavor by trailing nulls only` must fail. |
-| Notes remains opt-in while other flavor travels. | Two real share round trips with notes off/on; alignment/appearance/backstory equal in both, notes only in the opted-in recipient. | **D104-NOTES-OPT-IN** — export notes unconditionally or gate backstory on notes; `flavor portability separates notes privacy` must fail. |
+| Written text is one default-off share unit. | Two real share round trips with `writtenText` off/on; all four fields are absent when off and equal when on. | **D124-WRITTEN-TEXT-OPT-IN** — export any field unconditionally or gate only notes; `written text sharing is one opt-in portability group` must fail. |
+| Oversized share links fail visibly. | The encoder returns the typed `too_large` refusal and the share UI renders its explicit size error without producing a link. | **D124-SHARE-SIZE-REFUSAL** — coerce the refusal into a link or omit the UI branch; `typed too-large share refusal is surfaced in the UI` must fail. |
 | Hostile prose is text, never markup. | Browser/unit render backstory `</script><img src=x onerror=...>` and assert the literal is visible, marked, and creates no image/script/event. | **D104-BACKSTORY-DOM-SINK** — replace `textContent`/`freeTextSpan` with `innerHTML`; `hostile backstory remains visible inert text` must fail. |
 | Flavor never enters structured facts. | Parse `#character-sheet-facts`; assert none of the four keys or hostile sentinel appears. | **D104-NO-FLAVOR-FACTS** — add `backstory` to `sheetFacts`; `sheet JSON excludes all flavor text` must fail. |
 | Print is presence-sensitive and keeps the warning. | Print-media browser test covers one populated plus one blank/whitespace field in the same character, and a second all-null character; it asserts only the populated row and section print. | **D104-PRINT-PRESENCE** — remove the section or per-row presence guard, or add the section to `.sheet-chrome`; `print shows only present flavor with unverified label` must fail. |
@@ -285,6 +285,5 @@ first, FF-A rebases and takes the then-next free identifiers.
 
 ## 10. Open questions
 
-None blocks implementation. The only privacy exception is already decided:
-notes remains D37 opt-in; the other three D104 fields are ordinary exported
-character flavor.
+None blocks implementation. D124 settles privacy with one default-off written-
+text share option covering all four flavor fields.

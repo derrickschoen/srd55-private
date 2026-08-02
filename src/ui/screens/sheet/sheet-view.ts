@@ -1,14 +1,34 @@
 import { freeTextSpan } from '../../free-text';
+import { BUILD_ID } from '../../../build-id';
 import type {
   CharacterSheet,
   SheetAbilityScore,
   SheetArmorClassFormula,
 } from '../../../queries/character-sheet-builder';
 import type {
+  CharacterSpellSection,
+  SheetSpell,
+  SheetSpellbookEntry,
+  SheetSpellGroup,
+  SheetSpellcastingStatistic,
+} from '../../../queries/character-spell-section-builder';
+import type {
   ArmorClassExclusionReason,
   ArmorClassSourceCategory,
+  SheetResourceComputation,
+  SheetResourceKind,
+  SheetResourceMaximum,
 } from '../../../rules/sheet';
 import type { WeaponProficiencyVerdict } from '../../../rules/multiclass-proficiency';
+import { SRD_ATTRIBUTION_NOTICE } from '../../../rules/srd-attribution';
+import {
+  classFormulaResourceKinds,
+  classFormulaResourceLabel,
+  classResourceKinds,
+  classResourceLabel,
+  type ClassFormulaResourceKind,
+  type ClassResourceKind,
+} from '../../../domain/class-resources';
 
 /**
  * THE CHARACTER SHEET, PROJECTED ONCE AND RENDERED TWICE.
@@ -58,12 +78,38 @@ export interface SheetRow {
   readonly value: string | null;
   /** How the number was reached, in the source's own terms. */
   readonly detail: readonly SheetCell[];
+  readonly resource_marking?: {
+    readonly shape: ResourceMarkingShape;
+    readonly maximum: number;
+  };
 }
 
-export interface SheetSection {
+export interface SheetRowSection {
   readonly caption: string;
   readonly rows: readonly SheetRow[];
+  readonly spell_groups?: never;
 }
+
+export interface SheetSpellStatisticsBlock {
+  readonly label: string | null;
+  readonly lines: readonly (readonly SheetCell[])[];
+}
+
+export interface SheetSpellDisplayGroup {
+  readonly id: string;
+  readonly heading: readonly SheetCell[] | null;
+  readonly statistics: SheetSpellStatisticsBlock;
+  readonly rows: readonly SheetRow[];
+  readonly spellbook_rows: readonly SheetRow[];
+}
+
+export interface SheetSpellSection {
+  readonly caption: 'Spells';
+  readonly spell_groups: readonly SheetSpellDisplayGroup[];
+  readonly rows?: never;
+}
+
+export type SheetSection = SheetRowSection | SheetSpellSection;
 
 function plain(text: string): SheetCell[] {
   return [{ text }];
@@ -72,6 +118,165 @@ function plain(text: string): SheetCell[] {
 function signed(value: number): string {
   return value >= 0 ? `+${String(value)}` : String(value);
 }
+
+function abilityLabel(
+  statistic: SheetSpellcastingStatistic & { readonly status: 'computed' },
+): string {
+  switch (statistic.ability) {
+    case 'strength':
+      return 'Strength';
+    case 'dexterity':
+      return 'Dexterity';
+    case 'constitution':
+      return 'Constitution';
+    case 'intelligence':
+      return 'Intelligence';
+    case 'wisdom':
+      return 'Wisdom';
+    case 'charisma':
+      return 'Charisma';
+  }
+  const unhandled: never = statistic.ability;
+  return unhandled;
+}
+
+function spellStatisticText(statistic: SheetSpellcastingStatistic): string {
+  switch (statistic.status) {
+    case 'computed':
+      return `Save DC ${String(statistic.save_dc)} · Spell attack ${signed(statistic.attack_bonus)}`;
+    case 'absent':
+      return 'Save DC and spell attack are unknown because this source has no spellcasting ability recorded.';
+  }
+  const unhandled: never = statistic;
+  return unhandled;
+}
+
+function spellLevelText(spell: SheetSpellbookEntry): string {
+  switch (spell.level.status) {
+    case 'known':
+      return spell.level.value === 0
+        ? 'Cantrip'
+        : `Level ${String(spell.level.value)}`;
+    case 'unknown':
+      return 'Level unknown';
+  }
+  const unhandled: never = spell.level;
+  return unhandled;
+}
+
+function spellMarkerText(spell: SheetSpell): string {
+  switch (spell.marker) {
+    case 'prepared':
+      return 'Prepared';
+    case 'known':
+      return 'Known';
+  }
+  const unhandled: never = spell.marker;
+  return unhandled;
+}
+
+function spellGroupId(group: SheetSpellGroup): string {
+  switch (group.kind) {
+    case 'class':
+      return `class:${String(group.class_definition_id)}`;
+    case 'other_source':
+      return `source:${String(group.source_instance_id)}`;
+  }
+  const unhandled: never = group;
+  return unhandled;
+}
+
+function spellSection(spells: CharacterSpellSection): SheetSpellSection {
+  let contributingClassGroups = 0;
+  for (const group of spells) {
+    if (group.kind === 'class') {
+      contributingClassGroups += 1;
+    }
+  }
+  return {
+    caption: 'Spells',
+    spell_groups: spells.map((group): SheetSpellDisplayGroup => {
+      const id = spellGroupId(group);
+      const heading =
+        group.kind === 'other_source'
+          ? [{ text: group.source_name, free_text: true as const }]
+          : contributingClassGroups >= 2
+            ? [{ text: group.class_name, free_text: true as const }]
+            : null;
+      const mixedStatistics = group.statistics.length > 1;
+      const sourceName =
+        group.kind === 'class' ? group.class_name : group.source_name;
+      return {
+        id,
+        heading,
+        statistics: {
+          label: mixedStatistics ? 'Spellcasting statistics' : null,
+          lines: group.statistics.map((statistic) =>
+            mixedStatistics
+              ? [
+                  { text: sourceName, free_text: true as const },
+                  {
+                    text:
+                      statistic.status === 'computed'
+                        ? ` (${abilityLabel(statistic)}) — ${spellStatisticText(statistic)}`
+                        : ` — ${spellStatisticText(statistic)}`,
+                  },
+                ]
+              : [{ text: spellStatisticText(statistic) }],
+          ),
+        },
+        rows: group.spells.map((spell) => ({
+          id: `spell:${id}:${String(spell.spell_version_id)}`,
+          label: [{ text: spell.name, free_text: true }],
+          value: spellLevelText(spell),
+          detail: plain(spellMarkerText(spell)),
+        })),
+        spellbook_rows:
+          group.kind === 'class'
+            ? group.spellbook.map((spell) => ({
+                id: `spellbook:${id}:${String(spell.spell_version_id)}`,
+                label: [{ text: spell.name, free_text: true }],
+                value: spellLevelText(spell),
+                detail: plain('Spellbook'),
+              }))
+            : [],
+      };
+    }),
+  };
+}
+
+export type ResourceMarkingShape = 'boxes' | 'remaining';
+
+/** D123/D134: one exhaustive, level-independent classification. */
+export const RESOURCE_MARKING_SHAPES = {
+  rage: 'boxes',
+  channel_divinity: 'boxes',
+  wild_shape: 'boxes',
+  second_wind: 'boxes',
+  focus_points: 'remaining',
+  favored_enemy: 'boxes',
+  sorcery_points: 'remaining',
+  persistent_rage_recovery: 'boxes',
+  bardic_inspiration: 'boxes',
+  divine_intervention: 'boxes',
+  wild_resurgence_conversion: 'boxes',
+  nature_magician_conversion: 'boxes',
+  action_surge: 'boxes',
+  indomitable: 'boxes',
+  uncanny_metabolism: 'boxes',
+  lay_on_hands: 'remaining',
+  paladins_smite: 'boxes',
+  faithful_steed: 'boxes',
+  tireless: 'boxes',
+  natures_veil: 'boxes',
+  stroke_of_luck: 'boxes',
+  innate_sorcery: 'boxes',
+  sorcerous_restoration: 'boxes',
+  magical_cunning: 'boxes',
+  contact_patron: 'boxes',
+  spell_slot: 'boxes',
+  pact_slot: 'boxes',
+} as const satisfies Readonly<Record<SheetResourceKind, ResourceMarkingShape>>;
 
 function numberRow(
   entry: {
@@ -259,6 +464,142 @@ function abilitySourceCells(entry: SheetAbilityScore): SheetCell[] {
   return cells;
 }
 
+function resourceKindLabel(kind: SheetResourceKind): string {
+  if (kind === 'spell_slot') {
+    return 'Spell slots';
+  }
+  if (kind === 'pact_slot') {
+    return 'Pact slots';
+  }
+  if ((classResourceKinds as readonly string[]).includes(kind)) {
+    return classResourceLabel(kind as ClassResourceKind);
+  }
+  if ((classFormulaResourceKinds as readonly string[]).includes(kind)) {
+    return classFormulaResourceLabel(kind as ClassFormulaResourceKind);
+  }
+  throw new TypeError(`Unlabelled resource kind ${kind}.`);
+}
+
+function resourceComputationText(
+  computation: SheetResourceComputation,
+  maximum: number,
+): string {
+  switch (computation.kind) {
+    case 'level_table':
+      return `Exact sourced table row at class level ${String(computation.class_level)}.`;
+    case 'fixed_count':
+      return `Fixed count ${String(computation.count)}, acquired at class level ${String(computation.minimum_class_level)}.`;
+    case 'fixed_count_by_class_level':
+      return `Sourced class-level steps ${computation.steps
+        .map((step) => `${String(step.minimum_class_level)} → ${String(step.count)}`)
+        .join(', ')}; current maximum ${String(maximum)}.`;
+    case 'ability_modifier_minimum_one': {
+      const ability =
+        computation.ability === 'charisma' ? 'Charisma' : 'Wisdom';
+      return `Live resolved ${ability} modifier ${signed(computation.resolved_modifier)}, with a minimum of one.`;
+    }
+    case 'class_level_multiple':
+      return `${String(computation.multiplier)} × owning class level; current maximum ${String(maximum)}.`;
+    case 'shared_spell_slots':
+      return `Shared spell-slot table at effective caster level ${String(computation.effective_caster_level)}.`;
+    case 'pact_magic':
+      return `Pact Magic at class level ${String(computation.class_level)}; these are level ${String(computation.spell_level)} slots.`;
+  }
+}
+
+function computedResourceLabel(
+  resource: Extract<SheetResourceMaximum, { status: 'computed' }>,
+): SheetCell[] {
+  if (resource.kind === 'spell_slot') {
+    return plain(`Level ${String(resource.spell_level)} spell slots`);
+  }
+  if (resource.kind === 'pact_slot') {
+    return plain(`Pact slots — level ${String(resource.spell_level)}`);
+  }
+  if (resource.class_name === null) {
+    throw new TypeError(`Class resource ${resource.id} has no class name.`);
+  }
+  return [
+    { text: resource.class_name, free_text: true },
+    { text: ` — ${resourceKindLabel(resource.kind)}` },
+  ];
+}
+
+function absentResourceCells(
+  resource: Extract<SheetResourceMaximum, { status: 'absent' }>,
+): { readonly label: SheetCell[]; readonly detail: SheetCell[] } {
+  if (
+    resource.reason === 'resource_catalog_not_recorded' &&
+    resource.class_name !== null
+  ) {
+    return {
+      label: plain('Resource maxima not recorded'),
+      detail: [
+        { text: 'Resource maxima are not recorded for ' },
+        { text: resource.class_name, free_text: true },
+        { text: '.' },
+      ],
+    };
+  }
+  if (
+    resource.reason === 'spell_progression_missing_or_invalid' &&
+    resource.class_name !== null
+  ) {
+    return {
+      label: plain('Resource maximum unavailable'),
+      detail: [
+        { text: resource.class_name, free_text: true },
+        { text: resource.detail },
+      ],
+    };
+  }
+  if (resource.class_name !== null && resource.kind !== null) {
+    return {
+      label: [
+        { text: resource.class_name, free_text: true },
+        { text: ` — ${resourceKindLabel(resource.kind)}` },
+      ],
+      detail: plain(resource.detail),
+    };
+  }
+  return {
+    label: plain(
+      resource.reason === 'feature_text_maximum_not_modelled'
+        ? 'Feature-text resource limits'
+        : 'Resource maximum unavailable',
+    ),
+    detail: plain(resource.detail),
+  };
+}
+
+function resourceRows(
+  resources: readonly SheetResourceMaximum[],
+): readonly SheetRow[] {
+  return resources.map((resource): SheetRow => {
+    if (resource.status === 'absent') {
+      const cells = absentResourceCells(resource);
+      return {
+        id: resource.id,
+        label: cells.label,
+        value: null,
+        detail: cells.detail,
+      };
+    }
+    return {
+      id: resource.id,
+      label: computedResourceLabel(resource),
+      value: String(resource.maximum),
+      detail: plain(
+        resourceComputationText(resource.computation, resource.maximum),
+      ),
+      resource_marking: {
+        shape: RESOURCE_MARKING_SHAPES[resource.kind],
+        maximum: resource.maximum,
+      },
+    };
+  });
+}
+
 /**
  * The readable projection: every number on the sheet as a labelled row.
  *
@@ -348,6 +689,8 @@ export function sheetSections(sheet: CharacterSheet): readonly SheetSection[] {
   core.push(numberRow(sheet.initiative, true));
   core.push(numberRow(sheet.passive_perception, false));
   sections.push({ caption: 'Core numbers', rows: core });
+
+  sections.push({ caption: 'Resources', rows: resourceRows(sheet.resources) });
 
   sections.push({
     caption: 'Ability scores',
@@ -533,6 +876,10 @@ export function sheetSections(sheet: CharacterSheet): readonly SheetSection[] {
     ),
   });
   sections.push({ caption: 'Attacks and movement', rows: combat });
+
+  if (sheet.spells.length > 0) {
+    sections.push(spellSection(sheet.spells));
+  }
 
   // D102: PRINT THE WORDS, DO NOT TURN THEM INTO FACTS. Background tool text
   // and species trait prose stay in the readable projection, marked as
@@ -780,6 +1127,18 @@ export function sheetFacts(sheet: CharacterSheet): Record<string, unknown> {
       proficient: skill.proficient,
     })),
     attacks_per_action: sheet.attacks_per_action.count,
+    resources: sheet.resources.flatMap((resource) =>
+      resource.status === 'computed'
+        ? [
+            {
+              kind: resource.kind,
+              maximum: resource.maximum,
+              class_level: resource.class_level,
+              spell_level: resource.spell_level,
+            },
+          ]
+        : [],
+    ),
     unresolved_attack_grants: sheet.attacks_per_action.unresolved.flatMap(
       (grant) => grant.unresolved,
     ).length,
@@ -947,6 +1306,114 @@ function cells(parts: readonly SheetCell[], into: HTMLElement): void {
   }
 }
 
+function renderSheetRow(row: SheetRow): HTMLDivElement {
+  const container = document.createElement('div');
+  container.className = 'sheet-number';
+  container.dataset.sheetId = row.id;
+  const label = document.createElement('dt');
+  cells(row.label, label);
+  const value = document.createElement('dd');
+  if (row.value !== null) {
+    const figure = document.createElement('span');
+    figure.className = 'sheet-figure';
+    figure.dataset.sheetValue = row.id;
+    figure.textContent = row.value;
+    value.append(figure);
+  }
+  if (row.resource_marking !== undefined) {
+    value.append(resourceTrack(row.resource_marking));
+  }
+  const detail = document.createElement('p');
+  detail.className = 'sheet-formula';
+  cells(row.detail, detail);
+  value.append(detail);
+  container.append(label, value);
+  return container;
+}
+
+function renderSpellGroup(group: SheetSpellDisplayGroup): HTMLDivElement {
+  const element = document.createElement('div');
+  element.className = 'sheet-spell-group';
+  element.dataset.spellGroup = group.id;
+  if (group.heading !== null) {
+    const heading = document.createElement('h3');
+    heading.className = 'sheet-spell-group-heading';
+    cells(group.heading, heading);
+    element.append(heading);
+  }
+
+  const statistics = document.createElement('div');
+  statistics.className = 'sheet-spell-statistics';
+  if (group.statistics.label !== null) {
+    const statisticsLabel = document.createElement('p');
+    statisticsLabel.className = 'sheet-spell-statistics-label';
+    statisticsLabel.textContent = group.statistics.label;
+    statistics.append(statisticsLabel);
+  }
+  for (const line of group.statistics.lines) {
+    const statistic = document.createElement('p');
+    statistic.className = 'sheet-spell-statistic';
+    cells(line, statistic);
+    statistics.append(statistic);
+  }
+  element.append(statistics);
+
+  const list = document.createElement('dl');
+  list.className = 'sheet-numbers sheet-spells';
+  for (const row of group.rows) {
+    list.append(renderSheetRow(row));
+  }
+  element.append(list);
+  if (group.spellbook_rows.length > 0) {
+    const spellbook = document.createElement('dl');
+    spellbook.className = 'sheet-numbers sheet-spells sheet-spellbook';
+    spellbook.setAttribute('aria-label', 'Spellbook');
+    for (const row of group.spellbook_rows) {
+      spellbook.append(renderSheetRow(row));
+    }
+    element.append(spellbook);
+  }
+  return element;
+}
+
+function resourceTrack(
+  marking: NonNullable<SheetRow['resource_marking']>,
+): HTMLSpanElement {
+  const track = document.createElement('span');
+  track.className = 'sheet-resource-track';
+  track.dataset.resourceShape = marking.shape;
+  track.setAttribute('role', 'group');
+  switch (marking.shape) {
+    case 'boxes':
+      track.classList.add('sheet-resource-boxes');
+      track.setAttribute(
+        'aria-label',
+        `${String(marking.maximum)} empty boxes; mark spending on paper`,
+      );
+      for (let index = 0; index < marking.maximum; index += 1) {
+        const box = document.createElement('span');
+        box.className = 'sheet-resource-box';
+        box.setAttribute('role', 'presentation');
+        track.append(box);
+      }
+      break;
+    case 'remaining': {
+      track.classList.add('sheet-resource-remaining');
+      track.setAttribute(
+        'aria-label',
+        `Remaining amount out of ${String(marking.maximum)}; fill in on paper`,
+      );
+      track.append('Remaining: ');
+      const line = document.createElement('span');
+      line.className = 'sheet-resource-remaining-line';
+      line.setAttribute('role', 'presentation');
+      track.append(line, ` / ${String(marking.maximum)}`);
+      break;
+    }
+  }
+  return track;
+}
+
 export function renderSheet(sheet: CharacterSheet): HTMLElement {
   const shell = document.createElement('div');
   shell.className = 'sheet-shell';
@@ -964,10 +1431,15 @@ export function renderSheet(sheet: CharacterSheet): HTMLElement {
   planner.dataset.routerLink = 'true';
   planner.className = 'button-secondary sheet-chrome';
   planner.textContent = 'Open planner';
+  const print = document.createElement('button');
+  print.type = 'button';
+  print.className = 'button-secondary sheet-chrome';
+  print.dataset.sheetPrint = 'true';
+  print.textContent = 'Print character sheet';
   const heading = document.createElement('h1');
   heading.append('Character sheet — ');
   heading.append(freeTextSpan(sheet.name));
-  header.append(home, planner, heading);
+  header.append(home, planner, print, heading);
   shell.append(header);
 
   // THE WARNINGS COME FIRST AND ARE NOT COLLAPSIBLE. Each describes a
@@ -996,30 +1468,19 @@ export function renderSheet(sheet: CharacterSheet): HTMLElement {
     element.className = 'sheet-panel';
     const caption = document.createElement('h2');
     caption.textContent = section.caption;
-    const list = document.createElement('dl');
-    list.className = 'sheet-numbers';
-    for (const row of section.rows) {
-      const container = document.createElement('div');
-      container.className = 'sheet-number';
-      container.dataset.sheetId = row.id;
-      const label = document.createElement('dt');
-      cells(row.label, label);
-      const value = document.createElement('dd');
-      if (row.value !== null) {
-        const figure = document.createElement('span');
-        figure.className = 'sheet-figure';
-        figure.dataset.sheetValue = row.id;
-        figure.textContent = row.value;
-        value.append(figure);
+    if ('rows' in section) {
+      const list = document.createElement('dl');
+      list.className = 'sheet-numbers';
+      for (const row of section.rows) {
+        list.append(renderSheetRow(row));
       }
-      const detail = document.createElement('p');
-      detail.className = 'sheet-formula';
-      cells(row.detail, detail);
-      value.append(detail);
-      container.append(label, value);
-      list.append(container);
+      element.append(caption, list);
+    } else {
+      element.append(caption);
+      for (const group of section.spell_groups) {
+        element.append(renderSpellGroup(group));
+      }
     }
-    element.append(caption, list);
     shell.append(element);
   }
 
@@ -1043,6 +1504,7 @@ export function renderSheet(sheet: CharacterSheet): HTMLElement {
 }
 
 const PRINT_FIELD_SELECTOR = '[data-sheet-print-field]';
+const PRINT_NOTICE_SELECTOR = '[data-sheet-print-notice]';
 
 function emptyPaperEntry(kind: 'box' | 'line'): HTMLSpanElement {
   const entry = document.createElement('span');
@@ -1053,12 +1515,12 @@ function emptyPaperEntry(kind: 'box' | 'line'): HTMLSpanElement {
 }
 
 /**
- * D88/D89/D104: play-state is paper state. These two empty writing surfaces
- * exist only while print media is active; they are deliberately not hidden
- * screen DOM, because the sheet's D4 invariant says its screen subtree contains
- * no concealed content.
+ * D88/D89/D104/D125: play-state is paper state. The empty writing surfaces and
+ * attribution notice exist only while print media is active; they are
+ * deliberately not hidden screen DOM, because the sheet's D4 invariant says
+ * its screen subtree contains no concealed content.
  */
-export function setSheetPrintFields(
+export function setSheetPrintContent(
   shell: HTMLElement,
   printMedia: boolean,
 ): void {
@@ -1067,6 +1529,7 @@ export function setSheetPrintFields(
   )) {
     field.remove();
   }
+  shell.querySelector(PRINT_NOTICE_SELECTOR)?.remove();
   if (!printMedia) {
     return;
   }
@@ -1106,4 +1569,16 @@ export function setSheetPrintFields(
   experiencePointsValue.append(emptyPaperEntry('line'));
   experiencePoints.append(experiencePointsLabel, experiencePointsValue);
   totalLevel.after(experiencePoints);
+
+  const notice = document.createElement('section');
+  notice.className = 'sheet-print-notice';
+  notice.dataset.sheetPrintNotice = 'true';
+  const noticeHeading = document.createElement('h2');
+  noticeHeading.textContent = 'SRD 5.2 attribution';
+  const attribution = document.createElement('p');
+  attribution.textContent = SRD_ATTRIBUTION_NOTICE;
+  const origin = document.createElement('p');
+  origin.textContent = `Printed from SRD-55 ${BUILD_ID}`;
+  notice.append(noticeHeading, attribution, origin);
+  shell.append(notice);
 }

@@ -83,6 +83,10 @@ async function databaseState(page: Page): Promise<{
 test('build report route presents source, route, duplicate, and invalid annotations without persisted writes', async ({
   page,
 }) => {
+  // Measured at 40.2s alone on Chromium (34.9–35.8s before D91-R added the
+  // sheet resource projection, which made it heavier); this ceiling is for
+  // concurrent-lane contention.
+  test.setTimeout(90_000);
   const fixture = await fixtureImage('report');
   await installFixture(page, fixture);
   const before = await databaseState(page);
@@ -169,6 +173,8 @@ test('build report route presents source, route, duplicate, and invalid annotati
 test('reference and full printable routes preserve data and expose accessible print CSS', async ({
   page,
 }) => {
+  // Measured at 30.9s alone on Chromium; this ceiling is for concurrent-lane contention.
+  test.setTimeout(90_000);
   const fixture = await fixtureImage('print');
   await installFixture(page, fixture);
   const before = await databaseState(page);

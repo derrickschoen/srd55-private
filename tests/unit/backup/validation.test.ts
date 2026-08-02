@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  exportCharacterBackup,
+  importCharacterBackup,
   validateCharacterBackup,
   type CharacterBackupDocument,
 } from '../../../src/backup/character-backup';
@@ -14,6 +16,8 @@ import {
   validateDatabaseBackup,
   type DatabaseBackup,
 } from '../../../src/backup/database-backup';
+import { DatabaseContext } from '../../../src/db/database';
+import { openTestDatabase } from '../../helpers/open-db';
 
 function minimalCharacterBackup(): CharacterBackupDocument {
   return {
@@ -690,14 +694,13 @@ describe('portable character validation', () => {
     ).toThrow('Unsupported character backup version 0.');
   });
 
-  it('requires and bounds current flavor root fields without bounding notes', () => {
+  it('requires and bounds current flavor root fields', () => {
     const document = minimalCharacterBackup();
     const hostile = structuredClone(document);
     Object.assign(hostile.character as Record<string, unknown>, {
       alignment: 'x'.repeat(120),
       appearance: 'line one\nline two',
       backstory: '🧙'.repeat(20_000),
-      notes: 'n'.repeat(2_001),
     });
     expect(() => validateCharacterBackup(hostile)).not.toThrow();
 
@@ -714,6 +717,36 @@ describe('portable character validation', () => {
     expect(() => validateCharacterBackup(missing)).toThrow(
       'Character backup character must contain exactly:',
     );
+  });
+
+  it('portable backup round-trips grandfathered notes above the 20,000-code-point new-write cap', async () => {
+    const grandfatheredNotes = '🧙'.repeat(25_000);
+    expect([...grandfatheredNotes]).toHaveLength(25_000);
+
+    const sourceConnection = await openTestDatabase();
+    const targetConnection = await openTestDatabase();
+    try {
+      const source = new DatabaseContext(sourceConnection);
+      const sourceCharacterId = source.exec(
+        'INSERT INTO characters (name, notes) VALUES (?, ?)',
+        ['Grandfathered Notes', grandfatheredNotes],
+      ).lastInsertId;
+      const exported = exportCharacterBackup(source, sourceCharacterId);
+
+      const target = new DatabaseContext(targetConnection);
+      const { characterId } = importCharacterBackup(target, exported);
+      const reexported = exportCharacterBackup(target, characterId);
+      const restoredNotes = reexported.character.notes;
+
+      expect(restoredNotes).toBe(grandfatheredNotes);
+      if (typeof restoredNotes !== 'string') {
+        throw new TypeError('Re-exported grandfathered notes must be text.');
+      }
+      expect([...restoredNotes]).toHaveLength(25_000);
+    } finally {
+      sourceConnection.close();
+      targetConnection.close();
+    }
   });
 
   it('rejects direct cross-character rows before import', () => {
