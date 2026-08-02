@@ -7,6 +7,48 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D164 — OWNER: the sitting is a SOLO DISPOSABLE dry run (2026-08-02)
+
+Chosen over table-present-with-export-ritual and reserved-domain. The owner
+walks the walkthrough journeys alone through the ngrok tunnel; nothing
+built there is kept (browser storage is origin-scoped and dies with the
+tunnel URL — the trap is accepted, not worked around). First player hands
+touch the app post-publish. sitting.sh's checklist encodes this: no
+install-to-home-screen during the sitting, no backup-export ritual.
+
+## D163 — OWNER: roster row = one per PUBLISHED character, newest clone (2026-08-02)
+
+The roster is keyed on the repository publication path and shows the
+NEWEST imported clone; superseded clones remain in the character list but
+leave the roster. Never-published members get no row (the option was
+offered and not taken). Resolves the D157/D62 collision (refresh-clones
+would otherwise multiply roster rows). P3's index must therefore map
+publication path -> newest local clone.
+
+## D162 — OWNER: all three print appendices OPTIONAL; choices REMEMBERED per character (2026-08-02)
+
+Owner's words: "All optional. Remember preferences per character so
+subsequent prints have the same choice." Flavor (D141), full spell text
+(D149 — its always-on literal reading is superseded), and verbose audit
+(D159) are each opt-in at print time, and the three choices PERSIST per
+character (storage rides character_rule_overrides per the W-MC precedent
+unless implementation proves otherwise — mint-free expected). CONSEQUENCE,
+recorded before implementation: the merged SPELL-SEC design's
+SS-BROWSER-NO-WRITE negative control ('persist-print-preference' must
+fail) is AMENDED by this ruling — printing may write exactly the
+preference rows and nothing else; the control narrows to "no character
+mutation beyond the named preference keys", stated in the test, never
+silently.
+
+## D161 — OWNER: PRIVATE GITHUB MIRROR authorized (2026-08-02)
+
+Standing outward grant, the second after D150/D160: the supervisor creates
+ONE private repository under the owner's account via their gh session and
+pushes the FULL private repo (including .claude/) to it, then keeps it
+pushed at every merge to main. Scope is exactly this mirror; no other
+push, publish, or repo creation is covered. This does not create the D127
+public repo and publishes nothing.
+
 ## D160 — OWNER: forge spike = GitHub only, via the owner's gh CLI (2026-08-01)
 
 Narrows D150's execution: "Use gh with my account to test GitHub and leave
