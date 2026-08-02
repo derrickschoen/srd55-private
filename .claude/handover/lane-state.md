@@ -105,6 +105,12 @@ mechanically by the supervisor, tsc 0.
 HYG-3 dispatched in wt/hyg2 (log hyg3.log, port 44494): the ai-chat
 loopback annotation from the "NEXT HYGIENE TARGET" note below. Merge it
 before running further full suites where possible.
+CONCURRENCY RULE TIGHTENED 2026-08-02: a FULL vitest beside a FULL
+Playwright suite ALSO produces false reds — W-D's solo-green vitest went
+3-red (authoring-contracts 10s probe + both 0011-0021 prefix tests at
+60s, pure timeouts, none in W-D's files) while SS-1's suite ran. FINAL
+RULE: at most ONE full suite of ANY kind machine-wide; single-FILE vitest
+runs are the only thing allowed beside a running suite.
 CONCURRENCY RULE EXTENDED 2026-08-01: TWO FULL VITEST SUITES CONTEND WITH
 EACH OTHER exactly as Playwright suites do — each spawns a full worker
 pool. Evidence: W-C + FIX-ATTR vitest launched together at machine load
