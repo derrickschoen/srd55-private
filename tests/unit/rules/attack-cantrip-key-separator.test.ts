@@ -57,6 +57,7 @@ function route(overrides: Partial<SpellAccessRoute>): SpellAccessRoute {
     slot_key: 'cantrip-1',
     selection_key: null,
     bucket: 'cantrip_known',
+    always_prepared: false,
     is_selection: true,
     counts_against_limit: true,
     free_cast: null,
