@@ -142,6 +142,7 @@ function sheet(changes: Partial<CharacterSheet> = {}): CharacterSheet {
     ],
     attacks_per_action: { count: 2, unresolved: [] },
     resources: [],
+    spells: [],
     martial_arts: [],
     walking_speed_feet: 30,
     damage_resistances: ['Poison'],
