@@ -7,6 +7,19 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D173 — OWNER: Magic Weapon stays TEXT-ONLY; the banded upcast is proven modelable (2026-08-02)
+
+Asked whether to build a spell-effect layer (the weapon_attack_bonus/
+weapon_damage_bonus effect kinds already flow into attack profiles, so
+hand-modeling via planner effects works today). Owner: "Text only is
+enough, but I want to know if we can model the weird upcast." Ruling: no
+spell-effect unit in v1; players hand-attach effects if they want the
+numbers. The upcast question is ANSWERED and recorded: the 2024 banded
+scaling (slot 2 -> +1, 3-5 -> +2, 6+ -> +3) is a closed hand-authored
+band table keyed on CHOSEN SLOT LEVEL - a new input concept (slot-level
+picker) but no formula engine; type-closeable; Pact Magic compatible.
+Not a blocker if a spell-effect layer is ever wanted.
+
 ## D172 — OWNER: AI panel ships in the public repo, documented for cloners (2026-08-02)
 
 Owner's words: "Let anyone who clones the repo run their own localist with
