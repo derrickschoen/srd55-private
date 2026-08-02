@@ -26,9 +26,12 @@ async function render(context: ScreenContext): Promise<() => void> {
   }
 
   context.root.replaceChildren(renderLevelUpLoading());
-  const state = await createQueriesClient(context.rpc).levelUpState(characterId);
+  const queries = createQueriesClient(context.rpc);
+  const state = await queries.levelUpState(characterId);
   const wizard = createLevelUpWizard({
     state,
+    searchPlannedSpells: (params) =>
+      queries.levelUpPlannedEligibleSpells(params),
     cancel: () => returnToLevelUpLaunchSurface({
       historyState: window.history.state,
       currentOrigin: window.location.origin,
