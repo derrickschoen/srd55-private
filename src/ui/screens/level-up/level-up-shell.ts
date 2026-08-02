@@ -25,7 +25,8 @@ export interface LevelUpNavigation {
   readonly back?: () => void;
   readonly next?: () => void;
   readonly nextLabel?: string;
-  readonly cancel: () => void;
+  readonly nextKind?: 'next' | 'confirm';
+  readonly cancel?: () => void;
 }
 
 export interface LevelUpFrame {
@@ -259,16 +260,21 @@ export function createLevelUpFrame(options: {
     cleanups.push(listen(back, 'click', options.navigation.back));
     navigationChildren.push(back);
   }
-  const cancel = element('button', {
-    text: 'Cancel',
-    attributes: { type: 'button', [LEVEL_UP_ATTR.cancel]: '' },
-  });
-  cleanups.push(listen(cancel, 'click', options.navigation.cancel));
-  navigationChildren.push(cancel);
+  if (options.navigation.cancel !== undefined) {
+    const cancel = element('button', {
+      text: 'Cancel',
+      attributes: { type: 'button', [LEVEL_UP_ATTR.cancel]: '' },
+    });
+    cleanups.push(listen(cancel, 'click', options.navigation.cancel));
+    navigationChildren.push(cancel);
+  }
   if (options.navigation.next !== undefined) {
+    const actionAttribute = options.navigation.nextKind === 'confirm'
+      ? LEVEL_UP_ATTR.confirm
+      : LEVEL_UP_ATTR.next;
     const next = element('button', {
       text: options.navigation.nextLabel ?? 'Next',
-      attributes: { type: 'button', [LEVEL_UP_ATTR.next]: '' },
+      attributes: { type: 'button', [actionAttribute]: '' },
     });
     cleanups.push(listen(next, 'click', options.navigation.next));
     navigationChildren.push(next);
