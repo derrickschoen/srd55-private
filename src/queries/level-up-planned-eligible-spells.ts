@@ -12,6 +12,7 @@ import {
 import type { DatabaseContext } from '../db/database';
 import { EligibleSpellSearch } from '../eligibility/eligible-spell-search';
 import { GrantRulePlanner } from '../grants/grant-rule-planner';
+import type { PlannedSpellGrant } from '../grants/grant-rule-planner';
 import {
   decodeGrantJson,
   SourceRuleReader,
@@ -35,6 +36,11 @@ interface HeldClassPlan {
   readonly subclass_definition_id: number | null;
   readonly subclass_content_key: string | null;
 }
+
+export type LevelUpPlannedSpellPlanParams = Omit<
+  LevelUpPlannedEligibleSpellsParams,
+  'locator' | 'query'
+>;
 
 function heldClassPlan(row: SqlRow): HeldClassPlan {
   return {
@@ -167,6 +173,36 @@ export class LevelUpPlannedEligibleSpells {
   search(
     params: LevelUpPlannedEligibleSpellsParams,
   ): LevelUpPlannedEligibleSpellsResult {
+    const planned = this.planSource(params, params.locator.source);
+    const match = planned.filter(
+      (grant) =>
+        sameSource(grant.locator.source, params.locator.source) &&
+        grant.locator.rule_key === params.locator.rule_key &&
+        grant.locator.ordinal === params.locator.ordinal,
+    );
+    if (match.length !== 1) {
+      throw new PlannedSpellEligibilityNotFoundError(
+        'The planned spell locator does not resolve exactly once.',
+      );
+    }
+    const grant = match[0];
+    if (grant === undefined) {
+      throw new PlannedSpellEligibilityNotFoundError(
+        'The planned spell locator does not exist.',
+      );
+    }
+    return this.#search.searchConstraint(
+      params.character_id,
+      grant.constraint,
+      params.query.trim(),
+    );
+  }
+
+  /** The same normalized source plan consumed by state projection and search. */
+  planSource(
+    params: LevelUpPlannedSpellPlanParams,
+    source: PlannedGrantSource,
+  ): readonly PlannedSpellGrant[] {
     const revision = this.db.scalar<number>(
       'SELECT revision FROM characters WHERE id = ?',
       [params.character_id],
@@ -211,36 +247,15 @@ export class LevelUpPlannedEligibleSpells {
       );
     }
 
-    const planned = this.planFor(params, held);
-    const match = planned.filter(
-      (grant) =>
-        sameSource(grant.locator.source, params.locator.source) &&
-        grant.locator.rule_key === params.locator.rule_key &&
-        grant.locator.ordinal === params.locator.ordinal,
-    );
-    if (match.length !== 1) {
-      throw new PlannedSpellEligibilityNotFoundError(
-        'The planned spell locator does not resolve exactly once.',
-      );
-    }
-    const grant = match[0];
-    if (grant === undefined) {
-      throw new PlannedSpellEligibilityNotFoundError(
-        'The planned spell locator does not exist.',
-      );
-    }
-    return this.#search.searchConstraint(
-      params.character_id,
-      grant.constraint,
-      params.query.trim(),
-    );
+    return this.planFor(params, source, held);
   }
 
   private planFor(
-    params: LevelUpPlannedEligibleSpellsParams,
+    params: LevelUpPlannedSpellPlanParams,
+    source: PlannedGrantSource,
     held: HeldClassPlan,
   ) {
-    if (params.locator.source.kind === 'selected_class') {
+    if (source.kind === 'selected_class') {
       return this.#planner.plan({
         source: { kind: 'selected_class' },
         configured_rules: rulesFromProgressions(
@@ -254,7 +269,7 @@ export class LevelUpPlannedEligibleSpells {
     }
 
     if (
-      params.locator.source.kind ===
+      source.kind ===
       'selected_class_subclass'
     ) {
       if (params.subclass_content_key !== undefined) {
@@ -301,10 +316,10 @@ export class LevelUpPlannedEligibleSpells {
       );
     }
 
-    if (params.locator.source.kind === 'existing_source') {
+    if (source.kind === 'existing_source') {
       return this.planExisting(
-        params.locator.source.source_instance_id,
-        params.locator.source,
+        source.source_instance_id,
+        source,
         params.character_id,
       );
     }
