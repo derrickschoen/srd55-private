@@ -14,6 +14,7 @@ import {
 import type { DatabaseBackup } from '../../../backup/database-backup';
 import type { CharacterSummary } from '../../../domain/read-models';
 import type { RpcClient } from '../../../rpc/client';
+import { encodePartyDocument } from '../../../party/storage/document-bytes';
 import { element, listen, type Cleanup } from '../../dom';
 
 export interface ReadableFile {
@@ -138,7 +139,7 @@ export class ImportBackupController {
     const document = await this.services.backup.exportCharacter(character.id);
     this.services.save({
       filename: `${safeFilename(character.name)}-character.json`,
-      contents: new Blob([JSON.stringify(document, null, 2)], {
+      contents: new Blob([encodePartyDocument(document).slice()], {
         type: 'application/json',
       }),
     });
