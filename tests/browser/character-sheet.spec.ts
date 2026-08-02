@@ -274,6 +274,18 @@ async function sheetImage(): Promise<SheetImage> {
   );
   const fireBolt = defineSpell(db, 'Fire Bolt', 0, 'Appendix-only fire prose.');
   const gift = defineSpell(db, 'Gift Flame', 1, 'Appendix-only gift prose.');
+  const comprehendLanguages = defineSpell(
+    db,
+    'Comprehend Languages',
+    1,
+    'Appendix-only comprehension prose.',
+  );
+  const chromaticOrb = defineSpell(
+    db,
+    'Chromatic Orb',
+    1,
+    'Appendix-only orb prose.',
+  );
   assignSpell(
     db,
     characterId,
@@ -292,6 +304,19 @@ async function sheetImage(): Promise<SheetImage> {
     'prepared',
     1,
   );
+  for (const [ordinal, spellVersionId] of [
+    comprehendLanguages,
+    chromaticOrb,
+  ].entries()) {
+    db.exec(
+      `INSERT INTO wizard_spellbook_entries (
+         character_id, source_instance_id, rule_key, ordinal,
+         acquired_at_class_level, spell_version_id,
+         spell_level_min, spell_level_max, state, selection_eligibility
+       ) VALUES (?, ?, 'wizard-spellbook', ?, 2, ?, 1, 1, 'active', 'valid')`,
+      [characterId, wizardSource, ordinal + 7, spellVersionId],
+    );
+  }
   assignSpell(
     db,
     characterId,
@@ -721,6 +746,32 @@ test('hostile spell text is visible inert and absent from sheet facts', async ({
   await expect(facts).not.toContainText(HOSTILE_SPELL_PROSE);
 });
 
+test('spellbook entries render distinctly and are never labeled Prepared or Known', async ({
+  page,
+}, testInfo) => {
+  // Measured alone at 12.3s on Chromium; fixture construction dominates.
+  testInfo.setTimeout(20_000);
+  const image = await sheetImage();
+  await install(page, image);
+  await page.goto(`/characters/${image.characterId}/sheet`);
+
+  const wizard = page.locator('[data-spell-group^="class:"]');
+  const regular = wizard.locator('.sheet-spells:not(.sheet-spellbook)');
+  const spellbook = wizard.locator('.sheet-spellbook');
+  await expect(regular).toContainText(`${HOSTILE_SPELL_NAME}Level 1Prepared`);
+  await expect(spellbook).toContainText('Chromatic OrbLevel 1Spellbook');
+  await expect(spellbook).toContainText('Comprehend LanguagesLevel 1Spellbook');
+  await expect(spellbook).not.toContainText('Prepared');
+  await expect(spellbook).not.toContainText('Known');
+  expect(await wizard.locator('.sheet-spells').evaluateAll((lists) =>
+    lists.map((list) => list.classList.contains('sheet-spellbook')),
+  )).toEqual([false, true]);
+
+  await page.emulateMedia({ media: 'print' });
+  await expect(spellbook).toBeVisible();
+  await expect(spellbook).toHaveCSS('border-top-style', 'solid');
+});
+
 test('print character sheet button calls window.print and writes nothing', async ({
   page,
 }, testInfo) => {
@@ -989,8 +1040,8 @@ test('resource print shape is fixed by type and a hostile absence class name ren
 test('the structured block says exactly what the page says, and hides nothing', async ({
   page,
 }, testInfo) => {
-  // Measured alone at 12.7s on 2026-07-31; full SRD boot repair dominates.
-  testInfo.setTimeout(20_000);
+  // Measured alone at 14.3s on 2026-08-02; SS-2's spell section made sheet boots heavier.
+  testInfo.setTimeout(40_000);
   const image = await sheetImage();
   await install(page, image);
   await page.goto(`/characters/${image.characterId}/sheet`);
@@ -1179,8 +1230,8 @@ test('a Monk equipping Shell Shield walks from AC 16 to 15 with a strict-reducti
 test('Scute Wrap is honoured over the higher Armadillo formula and the exclusion is stated', async ({
   page,
 }, testInfo) => {
-  // Measured alone at 10.0s on 2026-07-31; full SRD boot repair dominates.
-  testInfo.setTimeout(20_000);
+  // Measured alone at 12.2s on 2026-08-02; SS-2's spell section made sheet boots heavier.
+  testInfo.setTimeout(35_000);
   const image = await armadilloArmorImage();
   await install(page, image);
   await navigateWithinApp(page, `/characters/${image.characterId}/sheet`);
@@ -1287,8 +1338,8 @@ test('ability overrides render the winning source and the floored source term', 
 test('the planner links to the sheet, and the sheet links back', async ({
   page,
 }, testInfo) => {
-  // Measured alone at 14.6s on 2026-07-31; full SRD boot repair dominates.
-  testInfo.setTimeout(20_000);
+  // Measured alone at 16.2s on 2026-08-02; SS-2's spell section made sheet boots heavier.
+  testInfo.setTimeout(45_000);
   const image = await sheetImage();
   await install(page, image);
   await page.goto(`/characters/${image.characterId}`);
@@ -1308,8 +1359,10 @@ test('the planner links to the sheet, and the sheet links back', async ({
 test('W-NO-SHADOW level-up, sheet, print, and planner routes mount only their intended screen', async ({
   page,
 }, testInfo) => {
-  // Measured alone at 14.7s on 2026-07-31; full SRD boot repair dominates.
-  testInfo.setTimeout(20_000);
+  // Measured alone at 16.1s on 2026-08-02; SS-2's spell section made sheet
+  // boots heavier. W-F widened this test to four routes, so the 45s ceiling
+  // is sized for the heavier body too.
+  testInfo.setTimeout(45_000);
   // Screen modules are sorted by PATH and the first match wins. All four
   // matchers must remain exact or one of these intended screens is shadowed.
   const image = await sheetImage();
