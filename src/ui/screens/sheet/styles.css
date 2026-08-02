@@ -112,6 +112,61 @@
   padding: 0.5rem;
 }
 
+@media screen {
+  .sheet-shell,
+  .sheet-header,
+  .sheet-panel,
+  .sheet-number,
+  .sheet-numbers dt,
+  .sheet-numbers dd {
+    min-width: 0;
+  }
+
+  .sheet-header {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(14rem, 1fr));
+    gap: 0.65rem;
+  }
+
+  .sheet-header h1 {
+    grid-column: 1 / -1;
+    overflow-wrap: anywhere;
+  }
+
+  .sheet-panel :is(h2, p, li, dt, dd) {
+    overflow-wrap: anywhere;
+  }
+}
+
+@media screen and (max-width: 34rem) {
+  .sheet-shell {
+    gap: 1rem;
+    padding: 0.75rem 0.5rem 2rem;
+  }
+
+  .sheet-header {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sheet-header h1 {
+    grid-column: auto;
+    font-size: clamp(1.5rem, 8vw, 2rem);
+  }
+
+  .sheet-header .sheet-chrome {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .sheet-panel {
+    padding: 0.75rem;
+  }
+
+  #character-sheet-facts {
+    max-width: 100%;
+  }
+}
+
 @media (max-width: 40rem) {
   .sheet-numbers {
     grid-template-columns: 1fr;
