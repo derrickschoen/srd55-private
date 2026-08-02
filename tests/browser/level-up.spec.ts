@@ -1,7 +1,8 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import {
   ACCEPTANCE_WIZARD_2_CHOICES,
 } from './fixtures/level-up-characters';
+import { readLevelUpSeam } from './fixtures/level-up-seam';
 
 interface CreatedCharacter {
   readonly id: number;
@@ -148,6 +149,58 @@ async function completeWizardLevelOneChoices(
   }, characterId);
 }
 
+async function advanceCharacterClassTo(
+  page: Page,
+  characterId: number,
+  className: string,
+  targetLevel: number,
+): Promise<void> {
+  await page.evaluate(async ({ id, requestedClass, target }) => {
+    const classRows = await window.staticApp.inspectRows(
+      'class_definitions',
+      { name: requestedClass },
+    );
+    const classId = Number(classRows[0]?.['id']);
+    if (!Number.isSafeInteger(classId)) {
+      throw new Error(`No class definition named ${requestedClass}.`);
+    }
+    for (let level = 1; level < target; level += 1) {
+      const characterRows = await window.staticApp.inspectRows(
+        'characters',
+        { id },
+      );
+      const revision = Number(characterRows[0]?.['revision']);
+      if (!Number.isSafeInteger(revision)) {
+        throw new Error(`Character ${String(id)} has no valid revision.`);
+      }
+      await window.appRpc.call('commands.execute', {
+        character_id: id,
+        operation_uuid: crypto.randomUUID(),
+        expected_revision: revision,
+        command: {
+          type: 'level_up_class',
+          class_definition_id: classId,
+          target_level: level + 1,
+        },
+      });
+    }
+  }, { id: characterId, requestedClass: className, target: targetLevel });
+}
+
+async function pressTabUntilFocused(
+  page: Page,
+  target: Locator,
+  maximumTabs: number,
+): Promise<void> {
+  for (let index = 0; index < maximumTabs; index += 1) {
+    await page.keyboard.press('Tab');
+    if (await target.evaluate((element) => document.activeElement === element)) {
+      return;
+    }
+  }
+  throw new Error(`Target was not reached after ${String(maximumTabs)} Tab presses.`);
+}
+
 async function openWizardPlannedReview(
   page: Page,
   character: CreatedCharacter,
@@ -229,6 +282,124 @@ async function rows(page: Page, table: string): Promise<readonly StoredRow[]> {
     table,
   );
 }
+
+test('W-KEYBOARD Tab order, reverse travel, native choice keys, and moved focus complete a feat journey at an ASI level', async ({
+  page,
+}) => {
+  const character = await createFighter(page, 'Keyboard Fighter');
+  await advanceCharacterClassTo(page, character.id, 'Fighter', 3);
+  const seam = await readLevelUpSeam(page, character.id);
+  await page.goto(seam.path);
+
+  const routeHeading = page.getByRole('heading', {
+    name: `Level up — ${character.name}`,
+  });
+  await expect(routeHeading).toBeFocused({ timeout: 30_000 });
+  const classChoice = page.getByRole('radio', { name: /Fighter 3 → 4/ });
+  const advancedPlanner = page.getByRole('link', {
+    name: 'Advanced: open planner',
+  });
+  const cancel = page.getByRole('button', { name: 'Cancel' });
+  const next = page.getByRole('button', { name: 'Next' });
+
+  await page.keyboard.press('Tab');
+  await expect(classChoice).toBeFocused();
+  await expect(classChoice).toBeChecked();
+  expect(await classChoice.evaluate((control) => {
+    const style = window.getComputedStyle(control);
+    return `${style.outlineStyle} ${style.outlineWidth}`;
+  })).not.toMatch(/^none| 0px$/u);
+  await page.keyboard.press('Tab');
+  await expect(advancedPlanner).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(cancel).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(next).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(cancel).toBeFocused();
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('heading', { name: 'Review level gains' })).toBeFocused();
+
+  await page.keyboard.press('Tab');
+  await expect(page.getByRole('button', { name: 'Back' })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(page.getByRole('button', { name: 'Cancel' })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(page.getByRole('button', { name: 'Next' })).toBeFocused();
+  await page.keyboard.press('Space');
+  await expect(page.getByRole('heading', { name: 'Choose a feat' })).toBeFocused();
+
+  const zeroPointFeat = page.getByRole('radio', {
+    name: 'Alert: No ability increase',
+  });
+  await pressTabUntilFocused(page, zeroPointFeat, 10);
+  await page.keyboard.press('Space');
+  await expect(zeroPointFeat).toBeChecked();
+  const featNext = page.getByRole('button', { name: 'Next' });
+  await pressTabUntilFocused(page, featNext, 80);
+  await page.keyboard.press('Enter');
+  await expect(
+    page.getByRole('heading', { name: 'Review', exact: true }),
+  ).toBeFocused();
+});
+
+test('W-INCOMPLETE classless cards explain the advanced door while held-class warnings repeat without blocking', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await ready(page);
+  const classlessId = await page.evaluate(async () => {
+    await window.staticApp.reset();
+    const row = await window.staticApp.writeCharacter('Classless Entry');
+    return Number(row.id);
+  });
+  await page.reload();
+  await ready(page);
+  const classlessSeam = await readLevelUpSeam(page, classlessId);
+  await page
+    .locator('.character-card')
+    .filter({ has: page.getByRole('heading', { name: 'Classless Entry' }) })
+    .getByRole('link', { name: 'Level Up' })
+    .click();
+  await expect(page).toHaveURL(new URL(classlessSeam.path, page.url()).href);
+  await expect(
+    page.getByRole('heading', { name: 'This character has no held class' }),
+  ).toBeVisible();
+  await expect(page.getByRole('link', {
+    name: 'Advanced: open planner',
+  })).toHaveAttribute('href', `/characters/${String(classlessId)}`);
+  await expect(page.locator('[data-level-up-confirm]')).toHaveCount(0);
+
+  const held = await createFighter(page, 'Unfinished Fighter');
+  const heldSeam = await readLevelUpSeam(page, held.id);
+  await page.goto(heldSeam.path);
+  await expect(
+    page.getByRole('heading', { name: `Level up — ${held.name}` }),
+  ).toBeFocused({ timeout: 30_000 });
+  await expect(
+    page.getByRole('heading', { name: 'Choose a held class' }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'This character has no held class' }),
+  ).toHaveCount(0);
+  const classWarnings = await page
+    .locator('[data-level-up-warning] strong')
+    .allTextContents();
+  expect(classWarnings.length).toBeGreaterThan(0);
+
+  await page.locator('[data-level-up-next]').click();
+  await page.locator('[data-level-up-next]').click();
+  await expect(
+    page.getByRole('heading', { name: 'Review', exact: true }),
+  ).toBeFocused();
+  await expect(page.locator('[data-level-up-confirm]')).toBeEnabled({
+    timeout: 30_000,
+  });
+  expect(
+    await page.locator('[data-level-up-warning] strong').allTextContents(),
+  ).toEqual(expect.arrayContaining(classWarnings));
+});
 
 test('W-DOUBLE-CONFIRM two rapid activations create one level, revision, history operation, and UUID', async ({
   page,

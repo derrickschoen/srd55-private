@@ -4,6 +4,7 @@ import type { CharacterSummary } from '../../../src/domain/read-models';
 import {
   CharacterListController,
   catalogGapLabel,
+  characterCardRouteActions,
   classSummary,
   completenessByCharacter,
   outstandingLabel,
@@ -85,6 +86,21 @@ describe('character share links', () => {
 });
 
 describe('character list behavior', () => {
+  it('puts the seam-generated primary Level Up action before the secondary workspace action on every card', () => {
+    expect(characterCardRouteActions(73)).toEqual([
+      {
+        label: 'Level Up',
+        href: '/characters/73/level-up',
+        className: 'button-primary',
+      },
+      {
+        label: 'Open workspace',
+        href: '/characters/73',
+        className: 'button-secondary',
+      },
+    ]);
+  });
+
   it('creates the trimmed character in durable data before opening it', async () => {
     const persisted: CharacterRow[] = [];
     const routes: string[] = [];

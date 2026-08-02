@@ -1,5 +1,6 @@
 import { freeTextSpan } from '../../free-text';
 import { BUILD_ID } from '../../../build-id';
+import { levelUpPath } from '../../../builder/level-up-wizard';
 import type {
   CharacterSheet,
   SheetAbilityScore,
@@ -28,6 +29,34 @@ import {
   type ClassFormulaResourceKind,
   type ClassResourceKind,
 } from '../../../domain/class-resources';
+
+export interface SheetHeaderRouteAction {
+  readonly label: 'All characters' | 'Level Up' | 'Open planner';
+  readonly href: string;
+  readonly className: 'button-primary sheet-chrome' | 'button-secondary sheet-chrome';
+}
+
+export function sheetHeaderRouteActions(
+  characterId: number,
+): readonly SheetHeaderRouteAction[] {
+  return [
+    {
+      label: 'All characters',
+      href: '/',
+      className: 'button-secondary sheet-chrome',
+    },
+    {
+      label: 'Level Up',
+      href: levelUpPath(characterId),
+      className: 'button-primary sheet-chrome',
+    },
+    {
+      label: 'Open planner',
+      href: `/characters/${String(characterId)}`,
+      className: 'button-secondary sheet-chrome',
+    },
+  ];
+}
 
 /**
  * THE CHARACTER SHEET, PROJECTED ONCE AND RENDERED TWICE.
@@ -705,7 +734,15 @@ export function sheetSections(sheet: CharacterSheet): readonly SheetSection[] {
     caption: 'Skills',
     rows: sheet.skills.map((skill) => ({
       id: skill.id,
-      label: plain(`${skill.label}${skill.proficient ? ' (proficient)' : ''}`),
+      label: plain(
+        `${skill.label}${
+          skill.expertise
+            ? ' (Expertise)'
+            : skill.proficient
+              ? ' (proficient)'
+              : ''
+        }`,
+      ),
       value: skill.value === null ? 'undetermined' : signed(skill.value),
       detail: plain(skill.formula),
     })),
@@ -1401,16 +1438,16 @@ export function renderSheet(sheet: CharacterSheet): HTMLElement {
 
   const header = document.createElement('header');
   header.className = 'sheet-header';
-  const home = document.createElement('a');
-  home.href = '/';
-  home.dataset.routerLink = 'true';
-  home.className = 'button-secondary sheet-chrome';
-  home.textContent = 'All characters';
-  const planner = document.createElement('a');
-  planner.href = `/characters/${String(sheet.character_id)}`;
-  planner.dataset.routerLink = 'true';
-  planner.className = 'button-secondary sheet-chrome';
-  planner.textContent = 'Open planner';
+  const routeActions = sheetHeaderRouteActions(sheet.character_id).map(
+    (action) => {
+      const link = document.createElement('a');
+      link.href = action.href;
+      link.dataset.routerLink = 'true';
+      link.className = action.className;
+      link.textContent = action.label;
+      return link;
+    },
+  );
   const print = document.createElement('button');
   print.type = 'button';
   print.className = 'button-secondary sheet-chrome';
@@ -1419,7 +1456,7 @@ export function renderSheet(sheet: CharacterSheet): HTMLElement {
   const heading = document.createElement('h1');
   heading.append('Character sheet — ');
   heading.append(freeTextSpan(sheet.name));
-  header.append(home, planner, print, heading);
+  header.append(...routeActions, print, heading);
   shell.append(header);
 
   // THE WARNINGS COME FIRST AND ARE NOT COLLAPSIBLE. Each describes a
