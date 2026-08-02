@@ -1,0 +1,37 @@
+# Endpoint: PUT /repos/{owner}/{repo}/contents/{path} (Unicode/space path)
+# Documented source: https://docs.github.com/rest/repos/contents#create-or-update-file-contents
+# Read: 2026-08-02
+# Provenance: sanitized D150/D160 live capture; no test contacts GitHub
+# Source file: spike/13-put-unicode-path.txt
+# Evidence: CAPTURED
+# Sanitized fields: repository owner/name; request path; request and response commit message; response name/path and path-bearing URLs; response content-length and ETag identifiers
+HTTP/2.0 201 Created
+Access-Control-Allow-Origin: *
+Access-Control-Expose-Headers: ETag, Link, Location, Retry-After, X-GitHub-OTP, X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Used, X-RateLimit-Resource, X-RateLimit-Reset, X-OAuth-Scopes, X-Accepted-OAuth-Scopes, X-Poll-Interval, X-GitHub-Media-Type, X-GitHub-SSO, X-GitHub-Request-Id, Deprecation, Sunset, Warning
+Cache-Control: private, max-age=60, s-maxage=60
+content-length: 2249
+Content-Security-Policy: default-src 'none'
+Content-Type: application/json; charset=utf-8
+Date: Sun, 02 Aug 2026 02:14:29 GMT
+Etag: "46ab021474864da275dba715734de4b41a9eba45b662779d26bad9118df73438"
+Referrer-Policy: origin-when-cross-origin, strict-origin-when-cross-origin
+Server: github.com
+Strict-Transport-Security: max-age=31536000; includeSubdomains; preload
+Vary: Accept, Authorization, Cookie, X-GitHub-OTP,Accept-Encoding, Accept, X-Requested-With
+X-Accepted-Oauth-Scopes: 
+X-Content-Type-Options: nosniff
+X-Frame-Options: deny
+X-Github-Api-Version-Selected: 2022-11-28
+X-Github-Edge-Region: iad
+X-Github-Media-Type: github.v3; format=json
+X-Github-Request-Id: FFCB:BFDC1:2581169:82819E1:6A6EA805
+X-Oauth-Client-Id: 178c6fc778ccc68e1d6a
+X-Oauth-Scopes: gist, read:org, repo, workflow
+X-Ratelimit-Limit: 5000
+X-Ratelimit-Remaining: 4974
+X-Ratelimit-Reset: 1785637119
+X-Ratelimit-Resource: core
+X-Ratelimit-Used: 26
+X-Xss-Protection: 0
+
+{"content":{"name":"aelfric-the-bold--pub-0002.json","path":"characters/aelfric-the-bold--pub-0002.json","sha":"d51252ae37ba29aba71b96d0ad3c3f5caa9cf920","size":112,"url":"https://api.github.com/repos/example-owner/party-fixture/contents/characters/aelfric-the-bold--pub-0002.json?ref=main","html_url":"https://github.com/example-owner/party-fixture/blob/main/characters/aelfric-the-bold--pub-0002.json","git_url":"https://api.github.com/repos/example-owner/party-fixture/git/blobs/d51252ae37ba29aba71b96d0ad3c3f5caa9cf920","download_url":"https://raw.githubusercontent.com/example-owner/party-fixture/main/characters/aelfric-the-bold--pub-0002.json","type":"file","_links":{"self":"https://api.github.com/repos/example-owner/party-fixture/contents/characters/aelfric-the-bold--pub-0002.json?ref=main","git":"https://api.github.com/repos/example-owner/party-fixture/git/blobs/d51252ae37ba29aba71b96d0ad3c3f5caa9cf920","html":"https://github.com/example-owner/party-fixture/blob/main/characters/aelfric-the-bold--pub-0002.json"}},"commit":{"sha":"898a4a392a27454bd386dbd388af02ccbf046ff9","node_id":"C_kwDOTqnGlNoAKDg5OGE0YTM5MmEyNzQ1NGJkMzg2ZGJkMzg4YWYwMmNjYmYwNDZmZjk","url":"https://api.github.com/repos/example-owner/party-fixture/git/commits/898a4a392a27454bd386dbd388af02ccbf046ff9","html_url":"https://github.com/example-owner/party-fixture/commit/898a4a392a27454bd386dbd388af02ccbf046ff9","author":{"name":"example-owner","email":"1001+example-owner@users.noreply.github.com","date":"2026-08-02T02:14:29Z"},"committer":{"name":"example-owner","email":"1001+example-owner@users.noreply.github.com","date":"2026-08-02T02:14:29Z"},"tree":{"sha":"650af32f50893d0638a5e1d5808fba740e8bd7e5","url":"https://api.github.com/repos/example-owner/party-fixture/git/trees/650af32f50893d0638a5e1d5808fba740e8bd7e5"},"message":"Publish party character document","parents":[{"sha":"3d4f08e4c4d4ebe48f797be29267ce52f766974d","url":"https://api.github.com/repos/example-owner/party-fixture/git/commits/3d4f08e4c4d4ebe48f797be29267ce52f766974d","html_url":"https://github.com/example-owner/party-fixture/commit/3d4f08e4c4d4ebe48f797be29267ce52f766974d"}],"verification":{"verified":false,"reason":"unsigned","signature":null,"payload":null,"verified_at":null}}}

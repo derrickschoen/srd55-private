@@ -1,0 +1,11 @@
+# Endpoint: GET /repos/{owner}/{repo}/contents/{path}
+# Documented source: https://docs.github.com/rest/authentication/authenticating-to-the-rest-api
+# Read: 2026-08-02
+# Provenance: SYNTHETIC; no matching live capture exists; assert only the port result
+# Source file: none (synthetic non-rate 403 edge)
+# Evidence: SYNTHETIC
+# Sanitized fields: none
+HTTP/2 403
+x-ratelimit-remaining: 1
+
+{"synthetic":true}

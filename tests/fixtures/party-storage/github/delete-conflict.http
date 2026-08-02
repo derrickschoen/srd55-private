@@ -1,0 +1,35 @@
+# Endpoint: DELETE /repos/{owner}/{repo}/contents/{path} (stale sha)
+# Documented source: https://docs.github.com/rest/repos/contents#delete-a-file
+# Read: 2026-08-02
+# Provenance: sanitized D150/D160 live capture; no test contacts GitHub
+# Source file: spike/15-delete-stale-sha.txt
+# Evidence: CAPTURED
+# Sanitized fields: repository owner/name; request path; request commit message; response message path; response content-length
+HTTP/2.0 409 Conflict
+Access-Control-Allow-Origin: *
+Access-Control-Expose-Headers: ETag, Link, Location, Retry-After, X-GitHub-OTP, X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Used, X-RateLimit-Resource, X-RateLimit-Reset, X-OAuth-Scopes, X-Accepted-OAuth-Scopes, X-Poll-Interval, X-GitHub-Media-Type, X-GitHub-SSO, X-GitHub-Request-Id, Deprecation, Sunset, Warning
+content-length: 191
+Content-Security-Policy: default-src 'none'
+Content-Type: application/json; charset=utf-8
+Date: Sun, 02 Aug 2026 02:14:46 GMT
+Referrer-Policy: origin-when-cross-origin, strict-origin-when-cross-origin
+Server: github.com
+Strict-Transport-Security: max-age=31536000; includeSubdomains; preload
+Vary: Accept-Encoding, Accept, X-Requested-With
+X-Accepted-Oauth-Scopes: 
+X-Content-Type-Options: nosniff
+X-Frame-Options: deny
+X-Github-Api-Version-Selected: 2022-11-28
+X-Github-Edge-Region: iad
+X-Github-Media-Type: github.v3; format=json
+X-Github-Request-Id: FFD9:E59A8:2A14D41:91A7B9D:6A6EA816
+X-Oauth-Client-Id: 178c6fc778ccc68e1d6a
+X-Oauth-Scopes: gist, read:org, repo, workflow
+X-Ratelimit-Limit: 5000
+X-Ratelimit-Remaining: 4972
+X-Ratelimit-Reset: 1785637119
+X-Ratelimit-Resource: core
+X-Ratelimit-Used: 28
+X-Xss-Protection: 0
+
+{"message":"library/party-library.json does not match d51252ae37ba29aba71b96d0ad3c3f5caa9cf920","documentation_url":"https://docs.github.com/rest/repos/contents#delete-a-file","status":"409"}
