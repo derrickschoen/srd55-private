@@ -2305,18 +2305,18 @@ describe('a hostile or over-long character note', () => {
       character: { name: 'Adversary', notes },
     } as unknown as Partial<CharacterShareDocument>);
 
-  it('accepts exactly 2,000 astral note code points', () => {
+  it('accepts exactly 20,000 astral note code points', () => {
     const exact = '🧙'.repeat(CHARACTER_TEXT_LIMITS.notes);
     expect([...exact]).toHaveLength(CHARACTER_TEXT_LIMITS.notes);
     expect(exact.length).toBe(CHARACTER_TEXT_LIMITS.notes * 2);
     expect(() => validateShareDocument(withNote(exact))).not.toThrow();
   });
 
-  it('refuses 2,001 astral note code points', () => {
+  it('refuses 20,001 astral note code points', () => {
     const overlong = '🧙'.repeat(CHARACTER_TEXT_LIMITS.notes + 1);
     expect([...overlong]).toHaveLength(CHARACTER_TEXT_LIMITS.notes + 1);
     expect(() => validateShareDocument(withNote(overlong))).toThrow(
-      /character\.notes must be a string of 1-2000/,
+      /character\.notes must be a string of 1-20000/,
     );
   });
 
@@ -2325,7 +2325,7 @@ describe('a hostile or over-long character note', () => {
       validateShareDocument(
         withNote('x'.repeat(CHARACTER_TEXT_LIMITS.notes + 1)),
       ),
-    ).toThrow(/character\.notes must be a string of 1-2000/);
+    ).toThrow(/character\.notes must be a string of 1-20000/);
     // Thrown synchronously, before any compression happens, exactly as the
     // weapon fields are: the message a user sees names the field.
     expect(() =>

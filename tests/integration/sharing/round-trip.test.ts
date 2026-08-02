@@ -1335,7 +1335,7 @@ describe('minimal character sharing', () => {
       name: 'Share Hero',
       includesAcknowledgements: true,
       includesLoadouts: true,
-      includesNotes: true,
+      includesWrittenText: true,
     });
     expect(harness.context.db.scalar('SELECT count(*) FROM characters')).toBe(
       1,
@@ -1512,7 +1512,7 @@ describe('a share link that predates weapons', () => {
     expect(Object.hasOwn(shared.character, 'notes')).toBe(false);
     expect(previewCharacterShare(target, shared)).toMatchObject({
       name: 'Old Link Hero',
-      includesNotes: false,
+      includesWrittenText: false,
     });
 
     const imported = importCharacterShare(target, shared);
@@ -1677,7 +1677,7 @@ describe('written-text consent governs a character note', () => {
         ),
       );
       expect(previewCharacterShare(target, document)).toMatchObject({
-        includesNotes: expected,
+        includesWrittenText: expected,
       });
     }
     // Preview writes nothing, here as everywhere else.

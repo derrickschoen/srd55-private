@@ -13,22 +13,19 @@
  * make the authoring command consume them too. Keeping the limits here makes
  * those boundaries share one definition instead of drifting independently.
  *
- * THE VALUE IS A BOUNDARY JUDGEMENT, NOT A RESTATEMENT OF THE COLUMN. 2,000 is
- * what every other user-typed `notes` field in this application already allows
- * (`WEAPON_TEXT_LIMITS.notes`, `ORIGIN_TEXT_LIMITS.notes`,
- * `SHEET_TEXT_LIMITS.armor_notes`), and a character's own note is the same kind
- * of writing as a note about their armour. Choosing a different number for this
- * one would be a claim that it is a different kind of field, and it is not.
+ * THE VALUE IS A BOUNDARY JUDGEMENT, NOT A RESTATEMENT OF THE COLUMN. D142
+ * makes a character's own notes the same generous long-form field as their
+ * backstory: one written-text consent toggle, one 20,000-code-point cap.
  *
  * THE RESIDUAL RISK, STATED: a longer note can still reach the column through a
  * backup document, whose row contract is an unbounded `z.string()`. Such a
- * character exports fine with the notes option OFF and is REFUSED — loudly,
- * naming the field — with it ON. That is the honest failure: the alternative is
- * truncating text the user typed and telling them nothing.
+ * character exports fine with written-text consent OFF and is REFUSED —
+ * loudly, naming the field — with it ON. That is the honest failure: the
+ * alternative is truncating text the user typed and telling them nothing.
  */
 export const CHARACTER_TEXT_LIMITS = Object.freeze({
   alignment: 120,
   appearance: 4_000,
   backstory: 20_000,
-  notes: 2_000,
+  notes: 20_000,
 });

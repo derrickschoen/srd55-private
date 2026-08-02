@@ -59,6 +59,10 @@ export class InteractiveTestElement {
     return this.attributes.get(name) ?? null;
   }
 
+  removeAttribute(name: string): void {
+    this.attributes.delete(name);
+  }
+
   append(...nodes: InteractiveTestElement[]): void {
     this.children.push(...nodes);
   }

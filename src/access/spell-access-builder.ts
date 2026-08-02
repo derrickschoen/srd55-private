@@ -10,6 +10,7 @@ import type { DatabaseContext } from '../db/database';
 import {
   abilities,
   isEnumValue,
+  slotBuckets,
   type Ability,
   type CastingMode,
   type RulesEdition,
@@ -73,6 +74,7 @@ interface SlotRouteRow {
   readonly identityName: string;
   readonly slotKey: string;
   readonly bucket: SlotBucket;
+  readonly alwaysPrepared: boolean;
   readonly withSlots: boolean;
   readonly countsAgainstLimit: boolean;
   readonly freeCastJson: string | null;
@@ -128,6 +130,7 @@ export interface SpellAccessRoute {
   readonly slot_key: string | null;
   readonly selection_key: string | null;
   readonly bucket: SlotBucket | null;
+  readonly always_prepared: boolean;
   readonly selection_collection?: string | null;
   readonly is_selection: boolean;
   readonly counts_against_limit: boolean;
@@ -150,6 +153,10 @@ function decodeCharacter(row: SqlRow): CharacterRow {
 }
 
 function decodeSlotRoute(row: SqlRow): SlotRouteRow {
+  const bucket = sqlString(row, 'bucket');
+  if (!isEnumValue(slotBuckets, bucket)) {
+    throw new TypeError(`Unknown spell selection bucket ${bucket}.`);
+  }
   return {
     id: sqlInteger(row, 'id'),
     character_id: sqlInteger(row, 'character_id'),
@@ -184,7 +191,8 @@ function decodeSlotRoute(row: SqlRow): SlotRouteRow {
     spellLevel: sqlInteger(row, 'spell_level'),
     identityName: sqlString(row, 'identity_name'),
     slotKey: sqlString(row, 'slot_key'),
-    bucket: sqlString(row, 'bucket') as SlotBucket,
+    bucket,
+    alwaysPrepared: sqlBoolean(row, 'always_prepared'),
     withSlots: sqlBoolean(row, 'with_slots'),
     countsAgainstLimit: sqlBoolean(row, 'counts_against_limit'),
     freeCastJson: sqlNullableString(row, 'free_cast'),
@@ -354,7 +362,8 @@ export class SpellAccessBuilder {
               slot.spell_level_max, slot.allowed_spell_lists,
               slot.allowed_schools, slot.allowed_tags,
               slot.selection_collection, slot.state, slot.slot_key,
-              slot.bucket, slot.with_slots, slot.counts_against_limit,
+              slot.bucket, slot.always_prepared, slot.with_slots,
+              slot.counts_against_limit,
               slot.free_cast, source.display_name AS source_name,
               source.source_type, source.source_definition_id,
               source.config AS source_config,
@@ -419,6 +428,7 @@ export class SpellAccessBuilder {
           slot_key: row.slotKey,
           selection_key: row.slotKey,
           bucket: row.bucket,
+          always_prepared: row.alwaysPrepared,
           selection_collection: row.selection_collection,
           is_selection: true,
           counts_against_limit: row.countsAgainstLimit,
@@ -517,6 +527,7 @@ export class SpellAccessBuilder {
           slot_key: null,
           selection_key: null,
           bucket: null,
+          always_prepared: false,
           is_selection: false,
           counts_against_limit: false,
           free_cast: null,

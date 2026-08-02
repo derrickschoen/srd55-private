@@ -53,10 +53,64 @@
   font-weight: 700;
 }
 
+.sheet-resource-track {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  margin-left: 0.65rem;
+  vertical-align: middle;
+}
+
+.sheet-resource-box {
+  width: 1rem;
+  height: 1rem;
+  box-sizing: border-box;
+  border: 1px solid currentColor;
+  background: #fff;
+}
+
+.sheet-resource-remaining {
+  font-weight: 600;
+}
+
+.sheet-resource-remaining-line {
+  width: 4rem;
+  height: 1em;
+  border-bottom: 1px solid currentColor;
+}
+
 .sheet-formula {
   margin: 0.15rem 0 0;
   font-size: 0.85rem;
   opacity: 0.8;
+}
+
+.sheet-spell-group + .sheet-spell-group {
+  margin-top: 1rem;
+}
+
+.sheet-spell-group-heading {
+  margin: 0 0 0.5rem;
+  font-size: 1.05rem;
+}
+
+.sheet-spell-statistics {
+  margin-bottom: 0.65rem;
+}
+
+.sheet-spell-statistics p {
+  margin: 0.15rem 0;
+}
+
+.sheet-spell-statistics-label {
+  font-weight: 600;
+}
+
+.sheet-spellbook {
+  padding-top: 0.65rem;
+  margin-top: 0.65rem;
+  border-top: 1px solid var(--border, #c9c9c9);
 }
 
 .sheet-note,
@@ -85,6 +139,61 @@
   padding: 0.5rem;
 }
 
+@media screen {
+  .sheet-shell,
+  .sheet-header,
+  .sheet-panel,
+  .sheet-number,
+  .sheet-numbers dt,
+  .sheet-numbers dd {
+    min-width: 0;
+  }
+
+  .sheet-header {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(14rem, 1fr));
+    gap: 0.65rem;
+  }
+
+  .sheet-header h1 {
+    grid-column: 1 / -1;
+    overflow-wrap: anywhere;
+  }
+
+  .sheet-panel :is(h2, p, li, dt, dd) {
+    overflow-wrap: anywhere;
+  }
+}
+
+@media screen and (max-width: 34rem) {
+  .sheet-shell {
+    gap: 1rem;
+    padding: 0.75rem 0.5rem 2rem;
+  }
+
+  .sheet-header {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sheet-header h1 {
+    grid-column: auto;
+    font-size: clamp(1.5rem, 8vw, 2rem);
+  }
+
+  .sheet-header .sheet-chrome {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .sheet-panel {
+    padding: 0.75rem;
+  }
+
+  #character-sheet-facts {
+    max-width: 100%;
+  }
+}
+
 @media (max-width: 40rem) {
   .sheet-numbers {
     grid-template-columns: 1fr;
@@ -95,6 +204,7 @@
     border-bottom: 1px solid var(--border, #e3e3e3);
     padding-bottom: 0.4rem;
   }
+
 }
 
 /**
@@ -145,6 +255,29 @@
     break-inside: avoid;
   }
 
+  .sheet-resource-track {
+    break-inside: avoid;
+    color: #000;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .sheet-spellbook {
+    border-top-color: #000;
+  }
+
+  .sheet-resource-box {
+    width: 0.2in;
+    height: 0.2in;
+    border: 1.5px solid #000;
+    background: #fff;
+  }
+
+  .sheet-resource-remaining-line {
+    width: 0.8in;
+    border-bottom: 1.5px solid #000;
+  }
+
   .sheet-number + .sheet-number {
     margin-top: 0.6rem;
   }
@@ -180,5 +313,10 @@
     min-width: 8rem;
     height: 1.35rem;
     border-bottom: 1px solid #000;
+  }
+
+  .sheet-print-notice {
+    break-before: page;
+    font-size: 0.8rem;
   }
 }

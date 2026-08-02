@@ -128,11 +128,12 @@ export interface SharePreview {
   readonly includesAcknowledgements: boolean;
   readonly includesLoadouts: boolean;
   /**
-   * Whether the sharer opted their own notes in. Declared on the same terms as
-   * its two siblings: the recipient is told which optional sections a link
-   * carries before anything is written.
+   * Whether the link carries any of the sharer's alignment, appearance,
+   * backstory, or notes. Declared on the same terms as its two siblings: the
+   * recipient is told which optional sections a link carries before anything
+   * is written.
    */
-  readonly includesNotes: boolean;
+  readonly includesWrittenText: boolean;
 }
 
 /**
@@ -1595,7 +1596,7 @@ export function previewCharacterShare(
     includesAcknowledgements:
       document.acknowledgements !== undefined,
     includesLoadouts: document.loadouts !== undefined,
-    includesNotes:
+    includesWrittenText:
       document.character.alignment !== undefined ||
       document.character.appearance !== undefined ||
       document.character.backstory !== undefined ||

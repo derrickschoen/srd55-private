@@ -1,0 +1,37 @@
+# Endpoint: PUT /repos/{owner}/{repo}/contents/{path} (create)
+# Documented source: https://docs.github.com/rest/repos/contents#create-or-update-file-contents
+# Read: 2026-08-02
+# Provenance: sanitized D150/D160 live capture; no test contacts GitHub
+# Source file: spike/04-put-create.txt
+# Evidence: CAPTURED
+# Sanitized fields: repository owner/name; request path; request and response commit message; response name/path and path-bearing URLs; response content-length and ETag identifiers
+HTTP/2.0 201 Created
+Access-Control-Allow-Origin: *
+Access-Control-Expose-Headers: ETag, Link, Location, Retry-After, X-GitHub-OTP, X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Used, X-RateLimit-Resource, X-RateLimit-Reset, X-OAuth-Scopes, X-Accepted-OAuth-Scopes, X-Poll-Interval, X-GitHub-Media-Type, X-GitHub-SSO, X-GitHub-Request-Id, Deprecation, Sunset, Warning
+Cache-Control: private, max-age=60, s-maxage=60
+content-length: 2138
+Content-Security-Policy: default-src 'none'
+Content-Type: application/json; charset=utf-8
+Date: Sun, 02 Aug 2026 02:13:57 GMT
+Etag: "761a880f65ce494dc908cfd527265cff79d11641eca775598428298e07601256"
+Referrer-Policy: origin-when-cross-origin, strict-origin-when-cross-origin
+Server: github.com
+Strict-Transport-Security: max-age=31536000; includeSubdomains; preload
+Vary: Accept, Authorization, Cookie, X-GitHub-OTP,Accept-Encoding, Accept, X-Requested-With
+X-Accepted-Oauth-Scopes: 
+X-Content-Type-Options: nosniff
+X-Frame-Options: deny
+X-Github-Api-Version-Selected: 2022-11-28
+X-Github-Edge-Region: iad
+X-Github-Media-Type: github.v3; format=json
+X-Github-Request-Id: FF85:C9B11:2E22FE3:9FDAC1A:6A6EA7E4
+X-Oauth-Client-Id: 178c6fc778ccc68e1d6a
+X-Oauth-Scopes: gist, read:org, repo, workflow
+X-Ratelimit-Limit: 5000
+X-Ratelimit-Remaining: 4980
+X-Ratelimit-Reset: 1785637119
+X-Ratelimit-Resource: core
+X-Ratelimit-Used: 20
+X-Xss-Protection: 0
+
+{"content":{"name":"party-library.json","path":"library/party-library.json","sha":"d51252ae37ba29aba71b96d0ad3c3f5caa9cf920","size":112,"url":"https://api.github.com/repos/example-owner/party-fixture/contents/library/party-library.json?ref=main","html_url":"https://github.com/example-owner/party-fixture/blob/main/library/party-library.json","git_url":"https://api.github.com/repos/example-owner/party-fixture/git/blobs/d51252ae37ba29aba71b96d0ad3c3f5caa9cf920","download_url":"https://raw.githubusercontent.com/example-owner/party-fixture/main/library/party-library.json","type":"file","_links":{"self":"https://api.github.com/repos/example-owner/party-fixture/contents/library/party-library.json?ref=main","git":"https://api.github.com/repos/example-owner/party-fixture/git/blobs/d51252ae37ba29aba71b96d0ad3c3f5caa9cf920","html":"https://github.com/example-owner/party-fixture/blob/main/library/party-library.json"}},"commit":{"sha":"296b0fef31e7ad82b78ad07f4954fac1644bce59","node_id":"C_kwDOTqnGlNoAKDI5NmIwZmVmMzFlN2FkODJiNzhhZDA3ZjQ5NTRmYWMxNjQ0YmNlNTk","url":"https://api.github.com/repos/example-owner/party-fixture/git/commits/296b0fef31e7ad82b78ad07f4954fac1644bce59","html_url":"https://github.com/example-owner/party-fixture/commit/296b0fef31e7ad82b78ad07f4954fac1644bce59","author":{"name":"example-owner","email":"1001+example-owner@users.noreply.github.com","date":"2026-08-02T02:13:56Z"},"committer":{"name":"example-owner","email":"1001+example-owner@users.noreply.github.com","date":"2026-08-02T02:13:56Z"},"tree":{"sha":"2f4e75d0f664768e9911cbed1d114c77f82264b3","url":"https://api.github.com/repos/example-owner/party-fixture/git/trees/2f4e75d0f664768e9911cbed1d114c77f82264b3"},"message":"Publish party library document","parents":[{"sha":"bb6ca3663bef0c38e4c5145fea3b927e0060c617","url":"https://api.github.com/repos/example-owner/party-fixture/git/commits/bb6ca3663bef0c38e4c5145fea3b927e0060c617","html_url":"https://github.com/example-owner/party-fixture/commit/bb6ca3663bef0c38e4c5145fea3b927e0060c617"}],"verification":{"verified":false,"reason":"unsigned","signature":null,"payload":null,"verified_at":null}}}
