@@ -1,5 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import type { CharacterSheet } from '../../../src/queries/character-sheet-builder';
+import type {
+  SheetSpell,
+  SheetSpellGroup,
+} from '../../../src/queries/character-spell-section-builder';
+import type {
+  ClassDefinitionId,
+  ClassLevel,
+  SourceInstanceId,
+  SpellLevel,
+  SpellVersionId,
+} from '../../../src/domain/ids';
+import type { PositiveResourceMaximum } from '../../../src/domain/class-resources';
 import {
   SHEET_GAPS,
   sheetGaps,
@@ -10,6 +22,7 @@ import {
   sheetSections,
   type SheetCell,
   type SheetRow,
+  type SheetSpellSection,
 } from '../../../src/ui/screens/sheet/sheet-view';
 import type {
   SheetResourceKind,
@@ -247,7 +260,11 @@ function sheet(changes: Partial<CharacterSheet> = {}): CharacterSheet {
 }
 
 function rowsOf(value: CharacterSheet): readonly SheetRow[] {
-  return sheetSections(value).flatMap((section) => section.rows);
+  return sheetSections(value).flatMap((section) =>
+    'rows' in section
+      ? section.rows
+      : section.spell_groups.flatMap((group) => group.rows),
+  );
 }
 
 function row(value: CharacterSheet, id: string): SheetRow {
@@ -264,17 +281,378 @@ function textOf(parts: readonly SheetCell[]): string {
 
 function readableText(value: CharacterSheet): string {
   return sheetSections(value)
-    .flatMap((section) => [
-      section.caption,
-      ...section.rows.map(
-        (entry) =>
-          `${textOf(entry.label)} ${entry.value ?? ''} ${textOf(entry.detail)}`,
-      ),
-    ])
+    .flatMap((section) => {
+      if ('rows' in section) {
+        return [
+          section.caption,
+          ...section.rows.map(
+            (entry) =>
+              `${textOf(entry.label)} ${entry.value ?? ''} ${textOf(entry.detail)}`,
+          ),
+        ];
+      }
+      return [
+        section.caption,
+        ...section.spell_groups.flatMap((group) => [
+          ...(group.heading === null ? [] : [textOf(group.heading)]),
+          ...(group.statistics.label === null
+            ? []
+            : [group.statistics.label]),
+          ...group.statistics.lines.map(textOf),
+          ...group.rows.map(
+            (entry) =>
+              `${textOf(entry.label)} ${entry.value ?? ''} ${textOf(entry.detail)}`,
+          ),
+        ]),
+      ];
+    })
     .join('\n');
 }
 
+function spell(
+  id: number,
+  name: string,
+  changes: Partial<SheetSpell> = {},
+): SheetSpell {
+  return {
+    spell_version_id: id as SpellVersionId,
+    name,
+    level: { status: 'known', value: 1 as SpellLevel },
+    marker: 'known',
+    reference: {
+      edition: '2024',
+      school: 'Abjuration',
+      casting_time: null,
+      action_type: null,
+      range: null,
+      duration: null,
+      components: null,
+      concentration: false,
+      ritual: false,
+      upcast_levels: [],
+      upcast_summary: null,
+      cantrip_upgrade_levels: [],
+      cantrip_upgrade_summary: null,
+      attack_modes: [],
+      save_abilities: [],
+      description: null,
+    },
+    ...changes,
+  };
+}
+
+function classSpellGroup(
+  id: number,
+  name: string,
+  spells: readonly SheetSpell[],
+  changes: Partial<Extract<SheetSpellGroup, { readonly kind: 'class' }>> = {},
+): Extract<SheetSpellGroup, { readonly kind: 'class' }> {
+  return {
+    kind: 'class',
+    class_definition_id: id as ClassDefinitionId,
+    class_name: name,
+    statistics: [
+      {
+        status: 'computed',
+        ability: 'intelligence',
+        save_dc: 15,
+        attack_bonus: 7,
+      },
+    ],
+    spells,
+    ...changes,
+  };
+}
+
+function spellSectionOf(value: CharacterSheet): SheetSpellSection {
+  const section = sheetSections(value).find(
+    (candidate): candidate is SheetSpellSection =>
+      'spell_groups' in candidate,
+  );
+  if (section === undefined) {
+    throw new Error('No readable Spells section.');
+  }
+  return section;
+}
+
+function spellReadableText(value: CharacterSheet): string {
+  const section = spellSectionOf(value);
+  return [
+    section.caption,
+    ...section.spell_groups.flatMap((group) => [
+      ...(group.heading === null ? [] : [textOf(group.heading)]),
+      ...(group.statistics.label === null ? [] : [group.statistics.label]),
+      ...group.statistics.lines.map(textOf),
+      ...group.rows.map(
+        (entry) =>
+          `${textOf(entry.label)} ${entry.value ?? ''} ${textOf(entry.detail)}`,
+      ),
+    ]),
+  ].join('\n');
+}
+
 describe('the character sheet is projected twice from one value', () => {
+  it('single-class spells omit only the redundant class group header', () => {
+    const wizard = classSpellGroup(11, 'Wizard', [spell(101, 'Alarm')]);
+    const otherSource: Extract<
+      SheetSpellGroup,
+      { readonly kind: 'other_source' }
+    > = {
+      kind: 'other_source',
+      source_instance_id: 31 as SourceInstanceId,
+      source_name: 'Magic Initiate',
+      statistics: [
+        {
+          status: 'computed',
+          ability: 'wisdom',
+          save_dc: 13,
+          attack_bonus: 5,
+        },
+      ],
+      spells: [spell(102, 'Guidance', {
+        level: { status: 'known', value: 0 as SpellLevel },
+      })],
+    };
+
+    const oneClass = spellSectionOf(sheet({ spells: [wizard, otherSource] }));
+    expect(oneClass.spell_groups.map((group) => group.heading)).toEqual([
+      null,
+      [{ text: 'Magic Initiate', free_text: true }],
+    ]);
+  });
+
+  it("preserves the query's deliberately noncanonical group and spell order", () => {
+    const wizard = classSpellGroup(11, 'Wizard', [
+      spell(104, 'Shield'),
+      spell(101, 'Alarm'),
+      spell(105, 'Fire Bolt', {
+        level: { status: 'known', value: 0 as SpellLevel },
+      }),
+    ]);
+    const otherSource: Extract<
+      SheetSpellGroup,
+      { readonly kind: 'other_source' }
+    > = {
+      kind: 'other_source',
+      source_instance_id: 31 as SourceInstanceId,
+      source_name: 'Magic Initiate',
+      statistics: [
+        {
+          status: 'computed',
+          ability: 'wisdom',
+          save_dc: 13,
+          attack_bonus: 5,
+        },
+      ],
+      spells: [
+        spell(102, 'Resistance', {
+          level: { status: 'known', value: 0 as SpellLevel },
+        }),
+        spell(106, 'Guidance', {
+          level: { status: 'known', value: 0 as SpellLevel },
+        }),
+      ],
+    };
+
+    const cleric = classSpellGroup(12, 'Cleric', [spell(103, 'Bless')], {
+      statistics: [
+        {
+          status: 'computed',
+          ability: 'wisdom',
+          save_dc: 14,
+          attack_bonus: 6,
+        },
+      ],
+    });
+    const multiclass = spellSectionOf(sheet({
+      spells: [otherSource, wizard, cleric],
+    }));
+    expect(multiclass.spell_groups.map((group) => ({
+      heading: group.heading === null ? null : textOf(group.heading),
+      spells: group.rows.map((row) => textOf(row.label)),
+    }))).toEqual([
+      { heading: 'Magic Initiate', spells: ['Resistance', 'Guidance'] },
+      { heading: 'Wizard', spells: ['Shield', 'Alarm', 'Fire Bolt'] },
+      { heading: 'Cleric', spells: ['Bless'] },
+    ]);
+  });
+
+  it('normal spellcasting statistics render once at group level', () => {
+    const value = sheet({
+      spells: [
+        classSpellGroup(11, 'Wizard', [
+          spell(101, 'Alarm'),
+          spell(102, 'Shield', { marker: 'prepared' }),
+        ]),
+      ],
+    });
+    const group = spellSectionOf(value).spell_groups[0]!;
+
+    expect(group.statistics.lines).toEqual([
+      [{ text: 'Save DC 15 · Spell attack +7' }],
+    ]);
+    expect(group.rows).toHaveLength(2);
+    expect(group.rows.flatMap((entry) => entry.detail)).not.toContainEqual(
+      expect.objectContaining({ text: expect.stringContaining('Save DC') }),
+    );
+    expect(
+      readableText(value).match(/Save DC 15 · Spell attack \+7/g),
+    ).toHaveLength(1);
+  });
+
+  it('mixed spellcasting bases remain distinct and render once each', () => {
+    const value = sheet({
+      spells: [
+        classSpellGroup(11, 'Homebrew Arcanist', [spell(101, 'Echo')], {
+          statistics: [
+            {
+              status: 'computed',
+              ability: 'intelligence',
+              save_dc: 15,
+              attack_bonus: 7,
+            },
+            {
+              status: 'computed',
+              ability: 'wisdom',
+              save_dc: 13,
+              attack_bonus: 5,
+            },
+          ],
+        }),
+      ],
+    });
+    const group = spellSectionOf(value).spell_groups[0]!;
+
+    expect(group.statistics.label).toBe('Spellcasting statistics');
+    expect(group.statistics.lines).toEqual([
+      [
+        { text: 'Homebrew Arcanist', free_text: true },
+        { text: ' (Intelligence) — Save DC 15 · Spell attack +7' },
+      ],
+      [
+        { text: 'Homebrew Arcanist', free_text: true },
+        { text: ' (Wisdom) — Save DC 13 · Spell attack +5' },
+      ],
+    ]);
+    expect(readableText(value).match(/Save DC 15/g)).toHaveLength(1);
+    expect(readableText(value).match(/Save DC 13/g)).toHaveLength(1);
+  });
+
+  it('compact spell rows contain only D149 fields', () => {
+    const compact = spell(101, 'Hostile Bolt', {
+      level: { status: 'unknown', reason: 'placeholder_level' },
+      marker: 'prepared',
+      reference: {
+        edition: '2014',
+        school: 'Abjuration',
+        casting_time: 'ONE ACTION SENTINEL',
+        action_type: 'Action',
+        range: 'RANGE SENTINEL',
+        duration: 'DURATION SENTINEL',
+        components: 'COMPONENT SENTINEL',
+        concentration: true,
+        ritual: true,
+        upcast_levels: [2],
+        upcast_summary: 'UPCAST SENTINEL',
+        cantrip_upgrade_levels: [5],
+        cantrip_upgrade_summary: 'CANTRIP UPGRADE SENTINEL',
+        attack_modes: ['ranged_spell'],
+        save_abilities: ['dexterity'],
+        description: 'DESCRIPTION SENTINEL',
+      },
+    });
+    const value = sheet({
+      spells: [classSpellGroup(11, 'Wizard', [compact])],
+    });
+    const text = spellReadableText(value);
+
+    expect(text).toContain('Hostile Bolt Level unknown Prepared');
+    expect(text).toContain('Save DC 15 · Spell attack +7');
+    for (const excluded of [
+      'ONE ACTION SENTINEL',
+      'RANGE SENTINEL',
+      'DURATION SENTINEL',
+      'COMPONENT SENTINEL',
+      'UPCAST SENTINEL',
+      'CANTRIP UPGRADE SENTINEL',
+      'DESCRIPTION SENTINEL',
+      'ranged_spell',
+      'dexterity',
+    ]) {
+      expect(text).not.toContain(excluded);
+    }
+  });
+
+  it('hostile spell text is visible inert and absent from sheet facts', () => {
+    const hostileSpell = '</span><img src=x onerror=spell-payload>';
+    const hostileSource = '</span><img src=x onerror=source-payload>';
+    const hostileProse = '</p><script>appendix-payload</script>';
+    const source: Extract<
+      SheetSpellGroup,
+      { readonly kind: 'other_source' }
+    > = {
+      kind: 'other_source',
+      source_instance_id: 31 as SourceInstanceId,
+      source_name: hostileSource,
+      statistics: [
+        {
+          status: 'absent',
+          reason: 'spellcasting_ability_not_recorded',
+          detail: `${hostileSource} has no spellcasting ability recorded.`,
+        },
+      ],
+      spells: [
+        spell(101, hostileSpell, {
+          level: { status: 'known', value: 0 as SpellLevel },
+          reference: {
+            ...spell(999, 'reference').reference,
+            description: hostileProse,
+          },
+        }),
+      ],
+    };
+    const value = sheet({ spells: [source] });
+    const group = spellSectionOf(value).spell_groups[0]!;
+
+    expect(group.heading).toEqual([{ text: hostileSource, free_text: true }]);
+    expect(group.rows[0]?.label).toEqual([
+      { text: hostileSpell, free_text: true },
+    ]);
+    expect(readableText(value)).toContain(hostileSource);
+    expect(readableText(value)).toContain(hostileSpell);
+    expect(readableText(value)).not.toContain(hostileProse);
+    const facts = JSON.stringify(sheetFacts(value));
+    expect(facts).not.toContain(hostileSource);
+    expect(facts).not.toContain(hostileSpell);
+    expect(facts).not.toContain(hostileProse);
+  });
+
+  it('spell section does not alter D91 resource maxima', () => {
+    const resource: SheetResourceMaximum = {
+      status: 'computed',
+      id: 'resource:1:sorcery_points',
+      kind: 'sorcery_points',
+      class_definition_id: 1 as ClassDefinitionId,
+      class_name: 'Sorcerer',
+      class_level: 5 as ClassLevel,
+      spell_level: null,
+      maximum: 5 as PositiveResourceMaximum,
+      computation: { kind: 'level_table', class_level: 5 as ClassLevel },
+    };
+    const withoutSpells = sheet({ resources: [resource], spells: [] });
+    const withSpells = sheet({
+      resources: [resource],
+      spells: [classSpellGroup(11, 'Sorcerer', [spell(101, 'Fire Bolt')])],
+    });
+
+    expect(row(withSpells, resource.id)).toEqual(
+      row(withoutSpells, resource.id),
+    );
+    expect(sheetFacts(withSpells).resources).toEqual(
+      sheetFacts(withoutSpells).resources,
+    );
+  });
+
   it('prints an undetermined total and proficiency without inventing JSON numbers', () => {
     const value = sheet({
       total_level: null,
