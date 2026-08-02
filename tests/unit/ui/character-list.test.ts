@@ -385,6 +385,7 @@ describe('catalog and backup entry points', () => {
     await controller.exportCharacter(summary(7, 'Backup Hero'));
     const characterJson = await fixture.saved[1]?.contents.text();
     expect(characterJson).toContain('"source_character_id": 7');
+    expect(characterJson?.endsWith('\n')).toBe(true);
 
     await controller.importCharacter(
       readableFile('backup-hero.json', characterJson ?? ''),
