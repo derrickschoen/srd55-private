@@ -7,6 +7,45 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D172 — OWNER: AI panel ships in the public repo, documented for cloners (2026-08-02)
+
+Owner's words: "Let anyone who clones the repo run their own localist with
+Claude code integration." The chat panel and bridge client STAY in the
+published code (not stripped); the public site keeps mounting nothing (no
+bridge). NEW publish-prep item: user-facing docs in the public repo
+explaining how a cloner runs the local bridge with Claude Code to get the
+panel. The bridge server itself: verify what exists in-repo vs. supervisor
+tooling before promising it — the doc must only describe what the public
+repo actually contains.
+
+## D171 — OWNER: in-app "Copy a bug report" button + GitHub issues (2026-08-02)
+
+Footer control pre-fills build id, browser, current screen, character id
+into the clipboard for pasting into chat; the D132 issue channel stays for
+account-holders. Small unit joins the queue.
+
+## D170 — OWNER: update prompt offers backup + one changelog line (2026-08-02)
+
+The refresh-to-update prompt gains "Download a backup first" and a
+one-line what-changed keyed to the build id; the owner writes that line
+per deploy (deploys are manual). Does not contradict D116 (first-character
+hint) — recorded as its own surface.
+
+## D169 — OWNER: EK/AT retire, REPLACED by an invented third-caster MONK subclass (2026-08-02)
+
+Owner's words: "Replace eldrich knight and trickster rogue with a made up
+third caster monk sub." Amends the SUBCL-SEED design's OQ-1 and its
+additive-14 shape: final bundled set = the twelve SRD subclasses PLUS ONE
+owner-original Monk subclass carrying a dense third-caster progression
+(keeping the third-caster machinery exercised, which was the argument for
+keeping EK/AT). EK and AT retire in the same
+unit that lands the replacement — retirement is a strict content swap, not
+a deletion-first. The invented subclass is original content (no licensing
+issue, D59). Its NAME, features, and spell list are DRAFTED by us and
+PRESENTED TO THE OWNER for approval before seeding — invented game content
+is owner-taste, not supervisor discretion. D80 covers characters left on
+EK/AT after retirement (unmade-subclass warning, sheet gap).
+
 ## D168 — OWNER: publish under an ORG (2026-08-02) — NAME OPEN
 
 Chosen over derrickschoen/srd55. The public squash lands in an org repo;
