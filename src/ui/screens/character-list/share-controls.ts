@@ -223,10 +223,9 @@ export function createShareControls(
   const includeLoadouts = element('input', {
     attributes: { type: 'checkbox' },
   });
-  // Q12's opt-in, exposed exactly like the two above it: an unchecked box, so
-  // the default the UI produces is the default a link minted before this
-  // existed already carries.
-  const includeNotes = element('input', {
+  // D124's single written-text opt-in is unchecked by default. That consent
+  // covers all four authored fields; the label names every field it can send.
+  const includeWrittenText = element('input', {
     attributes: { type: 'checkbox' },
   });
   const exportButton = element('button', {
@@ -346,18 +345,26 @@ export function createShareControls(
       exportButton.disabled = true;
       announce('Creating share link…');
       void client
-        .createFragment(requestedCharacter.id, {
+        .createFragmentResult(requestedCharacter.id, {
           acknowledgements: includeAcks.checked,
           loadouts: includeLoadouts.checked,
-          notes: includeNotes.checked,
+          writtenText: includeWrittenText.checked,
         })
-        .then(async (fragment) => {
+        .then(async (result) => {
           if (
             generation !== exportGeneration ||
             exporting?.id !== requestedCharacter.id
           ) {
             return;
           }
+          if (result.kind === 'too_large') {
+            announce(
+              `This character is too large to share as a link. Share links are limited to ${result.maximumEncodedCharacters.toLocaleString('en-US')} encoded characters.`,
+              true,
+            );
+            return;
+          }
+          const fragment = result.fragment;
           const link = `${browser.baseUrl}#${fragment}`;
           linkOutput.value = link;
           linkOutput.hidden = false;
@@ -435,8 +442,10 @@ export function createShareControls(
           element('span', { text: 'Include loadouts' }),
         ]),
         element('label', { className: 'share-option' }, [
-          includeNotes,
-          element('span', { text: 'Include my notes about this character' }),
+          includeWrittenText,
+          element('span', {
+            text: 'Include my written text (alignment, appearance, backstory, notes)',
+          }),
         ]),
         exportButton,
         linkOutput,

@@ -112,11 +112,12 @@ describe('character CRUD, catalog, save points, and operation history', () => {
       // The column and the JSON inside it must agree — the backup validator
       // refuses a save point that disagrees with itself, so both are asserted
       // here.
-      schema_version: 'a7-v15',
+      schema_version: 'a7-v16',
       created_at: '2026-07-23T11:00:00.000Z',
     });
+    expect(stored?.schema_version).not.toBe('a7-v15');
     expect(JSON.parse(String(stored?.snapshot))).toMatchObject({
-      schema_version: 'a7-v15',
+      schema_version: 'a7-v16',
       character: { name: 'Snapshot Hero', intelligence: 17 },
       character_class_levels: [],
       character_source_instances: [],
@@ -126,6 +127,8 @@ describe('character CRUD, catalog, save points, and operation history', () => {
       character_weapons: [],
       character_attunement_slots: [],
     });
+    expect(JSON.parse(String(stored?.snapshot)).schema_version)
+      .not.toBe('a7-v15');
 
     const command = await savePoints.restoreCommand(
       characterId,

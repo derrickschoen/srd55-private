@@ -250,6 +250,9 @@ function seedCatalog(db: DatabaseContext, padding = false) {
  */
 const SENDER_NOTE =
   'Table politics 🎲\tdo NOT share:\nAsked "why?" about Rhea\'s arc \\ unresolved.';
+const SENDER_ALIGNMENT = 'Chaotic Good';
+const SENDER_APPEARANCE = 'Copper scales 🎲\nBlue cloak.';
+const SENDER_BACKSTORY = 'Left Waterdeep after the watch asked "why?" \\ twice.';
 
 function seedCharacter(
   db: DatabaseContext,
@@ -259,9 +262,10 @@ function seedCharacter(
   const characterId = db.exec(
     `INSERT INTO characters (
        name, strength, dexterity, constitution, intelligence, wisdom,
-       charisma, proficiency_bonus_override, allow_legacy, notes
-     ) VALUES ('Share Hero', 8, 14, 13, 18, 12, 10, 4, 1, ?)`,
-    [SENDER_NOTE],
+       charisma, proficiency_bonus_override, allow_legacy, alignment,
+       appearance, backstory, notes
+     ) VALUES ('Share Hero', 8, 14, 13, 18, 12, 10, 4, 1, ?, ?, ?, ?)`,
+    [SENDER_ALIGNMENT, SENDER_APPEARANCE, SENDER_BACKSTORY, SENDER_NOTE],
   ).lastInsertId;
   db.exec(
     `INSERT INTO character_class_levels (
@@ -1242,14 +1246,14 @@ describe('minimal character sharing', () => {
         characterId: number;
         acknowledgements: boolean;
         loadouts: boolean;
-        notes: boolean;
+        writtenText: boolean;
       },
       ReturnType<typeof exportCharacterShare>
     >('share.exportCharacter', {
       characterId,
       acknowledgements: false,
       loadouts: true,
-      notes: false,
+      writtenText: false,
     });
     if (!exported.ok) {
       throw new Error(exported.error.message);
@@ -1308,7 +1312,7 @@ describe('minimal character sharing', () => {
     const optedIn = await client.exportDebug(characterId, {
       acknowledgements: true,
       loadouts: true,
-      notes: true,
+      writtenText: true,
     });
     expect(optedIn.character.notes).toBe(SENDER_NOTE);
     expect(optedIn.acknowledgements).toEqual([
@@ -1324,14 +1328,14 @@ describe('minimal character sharing', () => {
     const fragment = await client.createFragment(characterId, {
       acknowledgements: true,
       loadouts: true,
-      notes: true,
+      writtenText: true,
     });
     await expect(decodeShareFragment(fragment)).resolves.toEqual(optedIn);
     await expect(client.preview(fragment)).resolves.toMatchObject({
       name: 'Share Hero',
       includesAcknowledgements: true,
       includesLoadouts: true,
-      includesNotes: true,
+      includesWrittenText: true,
     });
     expect(harness.context.db.scalar('SELECT count(*) FROM characters')).toBe(
       1,
@@ -1357,7 +1361,7 @@ describe('minimal character sharing', () => {
           characterId: 0,
           acknowledgements: false,
           loadouts: false,
-          notes: false,
+          writtenText: false,
         },
       },
       // THE THIRD FLAG IS REQUIRED, NOT DEFAULTED. A caller that omits it is
@@ -1379,7 +1383,7 @@ describe('minimal character sharing', () => {
           characterId,
           acknowledgements: false,
           loadouts: false,
-          notes: 'yes',
+          writtenText: 'yes',
         },
       },
       { method: 'share.preview', params: { fragment: 42 } },
@@ -1508,7 +1512,7 @@ describe('a share link that predates weapons', () => {
     expect(Object.hasOwn(shared.character, 'notes')).toBe(false);
     expect(previewCharacterShare(target, shared)).toMatchObject({
       name: 'Old Link Hero',
-      includesNotes: false,
+      includesWrittenText: false,
     });
 
     const imported = importCharacterShare(target, shared);
@@ -1523,7 +1527,7 @@ describe('a share link that predates weapons', () => {
 });
 
 /**
- * A CHARACTER'S OWN NOTES, WHICH TRAVEL ONLY WHEN THE SHARER ASKS (Q12).
+ * A CHARACTER'S OWN NOTES, GOVERNED BY D124'S WRITTEN-TEXT CONSENT.
  *
  * The owner's ruling was "opt-in, like loadouts", and these are the two halves
  * that ruling has to mean: with the option off — which is the default, and what
@@ -1535,7 +1539,7 @@ describe('a share link that predates weapons', () => {
  * dropped by the encoder and a value dropped by the INSERT are equally lost and
  * only the recipient's table can tell you which happened.
  */
-describe('a character note travels only when the sharer opts in', () => {
+describe('written-text consent governs a character note', () => {
   async function recipient(): Promise<DatabaseContext> {
     const db = await database();
     seedCatalog(db);
@@ -1567,6 +1571,42 @@ describe('a character note travels only when the sharer opts in', () => {
     };
   }
 
+  it('written-text consent gates all four flavor fields', async () => {
+    const source = await database();
+    const catalog = seedCatalog(source);
+    const characterId = seedCharacter(source, catalog);
+    const fields = ['alignment', 'appearance', 'backstory', 'notes'] as const;
+
+    const without = await decodeShareFragment(await encodeShareFragment(
+      exportCharacterShare(source, characterId),
+    ));
+    for (const field of fields) {
+      expect(Object.hasOwn(without.character, field)).toBe(false);
+    }
+
+    const withText = await decodeShareFragment(await encodeShareFragment(
+      exportCharacterShare(source, characterId, { writtenText: true }),
+    ));
+    expect(withText.character).toMatchObject({
+      alignment: SENDER_ALIGNMENT,
+      appearance: SENDER_APPEARANCE,
+      backstory: SENDER_BACKSTORY,
+      notes: SENDER_NOTE,
+    });
+    const target = await recipient();
+    const imported = importCharacterShare(target, withText);
+    expect(target.oneRaw(
+      `SELECT alignment, appearance, backstory, notes
+       FROM characters WHERE id = ?`,
+      [imported.characterId],
+    )).toEqual({
+      alignment: SENDER_ALIGNMENT,
+      appearance: SENDER_APPEARANCE,
+      backstory: SENDER_BACKSTORY,
+      notes: SENDER_NOTE,
+    });
+  });
+
   it('carries nothing when nobody asks, and the sender still has the note', async () => {
     const source = await database();
     const catalog = seedCatalog(source);
@@ -1591,7 +1631,7 @@ describe('a character note travels only when the sharer opts in', () => {
     const characterId = seedCharacter(source, catalog);
 
     for (const options of [
-      { notes: false },
+      { writtenText: false },
       { acknowledgements: true, loadouts: true },
     ] as const) {
       const { document, stored } = await through(source, characterId, options);
@@ -1606,7 +1646,7 @@ describe('a character note travels only when the sharer opts in', () => {
     const characterId = seedCharacter(source, catalog);
 
     const { document, stored } = await through(source, characterId, {
-      notes: true,
+      writtenText: true,
     });
     expect(document.character.notes).toBe(SENDER_NOTE);
     expect(stored).toBe(SENDER_NOTE);
@@ -1627,7 +1667,7 @@ describe('a character note travels only when the sharer opts in', () => {
 
     for (const [options, expected] of [
       [undefined, false],
-      [{ notes: true }, true],
+      [{ writtenText: true }, true],
     ] as const) {
       const document = await decodeShareFragment(
         await encodeShareFragment(
@@ -1637,7 +1677,7 @@ describe('a character note travels only when the sharer opts in', () => {
         ),
       );
       expect(previewCharacterShare(target, document)).toMatchObject({
-        includesNotes: expected,
+        includesWrittenText: expected,
       });
     }
     // Preview writes nothing, here as everywhere else.
@@ -1659,7 +1699,7 @@ describe('a character note travels only when the sharer opts in', () => {
         characterId,
       ]);
       const { document, stored } = await through(source, characterId, {
-        notes: true,
+        writtenText: true,
       });
       expect(Object.hasOwn(document.character, 'notes')).toBe(false);
       expect(stored).toBeNull();
@@ -2158,7 +2198,7 @@ describe('D83 ability override sharing', () => {
     const decoded = await decodeShareFragment(
       await encodeShareFragment(exportCharacterShare(source, characterId)),
     );
-    expect(decoded.version).toBe(16);
+    expect(decoded.version).toBe(17);
     expect(decoded.effects).toMatchObject([
       {
         kind: 'ability_override',

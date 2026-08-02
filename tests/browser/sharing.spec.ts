@@ -1,5 +1,45 @@
+import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
+import { readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { expect, test } from '@playwright/test';
+import { DatabaseContext } from '../../src/db/database';
+
+const schema = readFileSync(
+  new URL('../../src/db/schema.sql', import.meta.url),
+  'utf8',
+);
+
+async function oversizedShareImage(): Promise<readonly number[]> {
+  const sqlite3 = await sqlite3InitModule();
+  const connection = new sqlite3.oo1.DB(':memory:', 'c');
+  connection.exec(schema);
+  const db = new DatabaseContext(connection);
+  const characterId = db.exec(
+    `INSERT INTO characters (name) VALUES ('Oversized Hero')`,
+  ).lastInsertId;
+  let seed = 0x2f6e2b1;
+  const noise = (length: number): string => {
+    let result = '';
+    for (let index = 0; index < length; index += 1) {
+      seed ^= seed << 13;
+      seed ^= seed >>> 17;
+      seed ^= seed << 5;
+      result += String.fromCharCode(33 + (Math.abs(seed) % 94));
+    }
+    return result;
+  };
+  for (let index = 0; index < 60; index += 1) {
+    db.exec(
+      `INSERT INTO character_weapons
+       (character_id, name, other_properties, notes)
+       VALUES (?, ?, ?, ?)`,
+      [characterId, `Blade ${index}`, noise(500), noise(2_000)],
+    );
+  }
+  const bytes = Array.from(sqlite3.capi.sqlite3_js_db_export(connection));
+  connection.close();
+  return bytes;
+}
 
 async function ready(page: import('@playwright/test').Page): Promise<void> {
   await expect(page.locator('#status')).toHaveAttribute(
@@ -82,13 +122,12 @@ test('creates, independently verifies, previews, and explicitly imports a durabl
 
   // ALL THREE OPT-INS ARE PRESENT AND ALL THREE START OFF. The default is not
   // cosmetic: a link minted before any of them existed carries none of them, so
-  // the box a user never touches has to produce that same link. The notes box
-  // is the one this asserts hardest, because it is the only option guarding
-  // text a person wrote about themselves.
+  // the box a user never touches has to produce that same link. The written
+  // text box names everything its consent can expose.
   for (const label of [
     'Include warning acknowledgements',
     'Include loadouts',
-    'Include my notes about this character',
+    'Include my written text (alignment, appearance, backstory, notes)',
   ]) {
     await expect(page.getByLabel(label)).not.toBeChecked();
   }
@@ -122,16 +161,16 @@ test('creates, independently verifies, previews, and explicitly imports a durabl
   // six-field addressable acquisition tuples carrying ref, rule, ordinal,
   // acquisition level, nullable spell key, and nullable fallback name. GF-2
   // mints v15 by appending the Expertise-grant collection at the root. LU-1
-  // mints v16 by appending durable class-level feat occurrences.
-  expect(positional[1]).toBe(16);
+  // mints v16 by appending durable class-level feat occurrences. D104 mints
+  // v17 by appending alignment, appearance, and backstory to the character.
+  expect(positional[1]).toBe(17);
   expect((positional[2] as unknown[])[0]).toBe('Journey Hero 🧙');
-  // TWELVE since v3, with the notes slot still NULL when nobody ticks the
-  // notes box, and the appended ability_allocation_method NULL for a
-  // character whose scores were never allocated — every earlier position
-  // keeps its meaning; versions only append.
-  expect(positional[2]).toHaveLength(12);
+  // FIFTEEN since v17, with notes and the allocation signal still in their
+  // frozen positions, followed by three null flavor absences.
+  expect(positional[2]).toHaveLength(15);
   expect((positional[2] as unknown[])[10]).toBeNull();
   expect((positional[2] as unknown[])[11]).toBeNull();
+  expect((positional[2] as unknown[]).slice(12)).toEqual([null, null, null]);
   expect(positional.slice(3, 9)).toEqual([[], [], [], [], [], []]);
   // V10 always writes the three-field sheet tuple. This blank character has no
   // armour, hit point rolls, or skill proficiencies, so all three are NULL.
@@ -219,4 +258,34 @@ test('creates, independently verifies, previews, and explicitly imports a durabl
   } finally {
     await freshProfile.close();
   }
+});
+
+test('oversized share refusal exposes no link, copy, share, or QR output', async ({
+  page,
+}) => {
+  const bytes = await oversizedShareImage();
+  await page.goto('/');
+  await ready(page);
+  await page.evaluate(
+    (image) => window.staticApp.replaceDatabase(Uint8Array.from(image)),
+    bytes,
+  );
+  await page.reload();
+  await ready(page);
+
+  await page
+    .getByRole('button', { name: 'Share Oversized Hero by link' })
+    .click();
+  await page.getByRole('button', { name: 'Create share link' }).click();
+
+  await expect(page.locator('.share-status')).toHaveText(
+    'This character is too large to share as a link. Share links are limited to 131,072 encoded characters.',
+  );
+  const output = page.getByLabel('Generated character share link');
+  await expect.soft(output).toBeHidden();
+  await expect.soft(output).toHaveValue('');
+  await expect.soft(page.getByRole('button', { name: 'Copy link' })).toBeHidden();
+  await expect.soft(page.getByRole('button', { name: 'Share…' })).toBeHidden();
+  await expect.soft(page.locator('.share-qr')).toBeHidden();
+  await expect.soft(page.locator('.share-qr')).not.toHaveAttribute('src');
 });

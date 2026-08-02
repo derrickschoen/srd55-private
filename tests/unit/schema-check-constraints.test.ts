@@ -3500,6 +3500,11 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
 const COVERED_ELSEWHERE = [
   'spell_slots_exclusive_assignment_check',
   'character_weapons_mastery_requires_property_check',
+  // D104's three identical nullable-text shapes are exercised together by
+  // `character flavor CHECKs reject non-text and limit+1` above.
+  'characters_alignment_check',
+  'characters_appearance_check',
+  'characters_backstory_check',
   // CI-2a's closed vocabularies and correlated registry invariants are
   // exercised together in content-registry.test.ts, where the resolver API
   // and the stored rows are visible in the same control.
@@ -3553,6 +3558,46 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
         }
       });
     }
+
+    it('character flavor CHECKs reject non-text and limit+1', () => {
+      const exactLimits = {
+        alignment: 120,
+        appearance: 4_000,
+        backstory: 20_000,
+      } as const;
+
+      for (const [column, maximum] of Object.entries(exactLimits)) {
+        expect(
+          caughtErrorMessage(() =>
+            character({ [column]: '' })(db)
+          ),
+          `${column}: empty text`,
+        ).toBe(checkError(`characters_${column}_check`));
+        expect(
+          caughtErrorMessage(() =>
+            character({ [column]: new Uint8Array([65]) as unknown as string })(
+              db,
+            )
+          ),
+          `${column}: non-text`,
+        ).toBe(checkError(`characters_${column}_check`));
+        expect(
+          caughtErrorMessage(() =>
+            character({ [column]: 'x'.repeat(maximum + 1) })(db)
+          ),
+          `${column}: limit + 1`,
+        ).toBe(checkError(`characters_${column}_check`));
+
+        expect(
+          () => character({ [column]: null })(db),
+          `${column}: defended null`,
+        ).not.toThrow();
+        expect(
+          () => character({ [column]: 'x'.repeat(maximum) })(db),
+          `${column}: exact limit`,
+        ).not.toThrow();
+      }
+    });
 
     /**
      * THE NULL LIMB THAT WENT AWAY, ASSERTED RATHER THAN ASSUMED.

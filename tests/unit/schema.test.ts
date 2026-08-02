@@ -154,7 +154,8 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
       'charisma', 'proficiency_bonus_override', 'allow_legacy', 'revision',
     ],
     text: [
-      'name', 'ability_allocation_method', 'rules_edition_preference', 'notes',
+      'name', 'ability_allocation_method', 'rules_edition_preference',
+      'alignment', 'appearance', 'backstory', 'notes',
     ],
     numeric: ['created_at', 'updated_at'],
   },

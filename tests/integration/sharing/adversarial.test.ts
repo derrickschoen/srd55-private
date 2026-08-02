@@ -18,6 +18,7 @@ import {
   encodeShareFragment,
   positionalToShareDocument,
   shareDocumentToPositional,
+  tryEncodeShareFragment,
 } from '../../../src/sharing/codec';
 import {
   CHARACTER_SHARE_FORMAT,
@@ -1823,7 +1824,7 @@ describe('adversarial character-share rejection', () => {
       ],
       [
         [positional[0], positional[1], ['short'], ...positional.slice(3)],
-        /wire character must be a tuple of length 12/,
+        /wire character must be a tuple of length 15/,
       ],
       [shortEffect, /wire effects\[0\] must be a tuple of length 20/],
       [longEffect, /wire effects\[0\] must be a tuple of length 20/],
@@ -2291,7 +2292,7 @@ describe('adversarial character-share rejection', () => {
 });
 
 /**
- * THE ONE FIELD A SHARER CHOOSES TO SEND, VALIDATED LIKE EVERY OTHER (Q12).
+ * ONE OF THE FOUR WRITTEN-TEXT FIELDS, VALIDATED AT ITS OWN BOUNDARY.
  *
  * `character.notes` is optional free text on the character root, and the whole
  * risk of a NEW optional string on an attacker-controlled document is that the
@@ -2304,12 +2305,27 @@ describe('a hostile or over-long character note', () => {
       character: { name: 'Adversary', notes },
     } as unknown as Partial<CharacterShareDocument>);
 
+  it('accepts exactly 20,000 astral note code points', () => {
+    const exact = '🧙'.repeat(CHARACTER_TEXT_LIMITS.notes);
+    expect([...exact]).toHaveLength(CHARACTER_TEXT_LIMITS.notes);
+    expect(exact.length).toBe(CHARACTER_TEXT_LIMITS.notes * 2);
+    expect(() => validateShareDocument(withNote(exact))).not.toThrow();
+  });
+
+  it('refuses 20,001 astral note code points', () => {
+    const overlong = '🧙'.repeat(CHARACTER_TEXT_LIMITS.notes + 1);
+    expect([...overlong]).toHaveLength(CHARACTER_TEXT_LIMITS.notes + 1);
+    expect(() => validateShareDocument(withNote(overlong))).toThrow(
+      /character\.notes must be a string of 1-20000/,
+    );
+  });
+
   it('names the field rather than reporting a byte-limit overflow', () => {
     expect(() =>
       validateShareDocument(
         withNote('x'.repeat(CHARACTER_TEXT_LIMITS.notes + 1)),
       ),
-    ).toThrow(/character\.notes must be a string of 1-2000/);
+    ).toThrow(/character\.notes must be a string of 1-20000/);
     // Thrown synchronously, before any compression happens, exactly as the
     // weapon fields are: the message a user sees names the field.
     expect(() =>
@@ -2395,9 +2411,24 @@ describe('hostile and over-long weapon sections', () => {
         ),
       ).not.toThrow();
     }
-  });
+});
 
-  /**
+describe('character flavor text bounds', () => {
+  it('counts backstory Unicode code points at the share boundary', () => {
+    const withBackstory = (backstory: string) => minimalDocument({
+      character: { name: 'Adversary', backstory },
+    } as unknown as Partial<CharacterShareDocument>);
+
+    expect(() => validateShareDocument(
+      withBackstory('🧙'.repeat(CHARACTER_TEXT_LIMITS.backstory)),
+    )).not.toThrow();
+    expect(() => validateShareDocument(
+      withBackstory('🧙'.repeat(CHARACTER_TEXT_LIMITS.backstory + 1)),
+    )).toThrow(/character\.backstory must be a string of 1-20000/);
+  });
+});
+
+/**
    * THE ORACLE THE PREVIOUS TEST IS NOT.
    *
    * Asserting that exactly-the-cap is accepted cannot notice a cap set BELOW
@@ -2478,7 +2509,7 @@ describe('hostile and over-long weapon sections', () => {
     expect(weapon?.name).toBe(maximal.name);
   });
 
-  it('reports the aggregate overflow as a byte limit, which is what it is', async () => {
+  it('share encoder returns a typed too-large refusal', async () => {
     // HONEST ABOUT WHAT THE CAPS DO NOT BUY. A per-field cap names a field; a
     // count cap names a section. Neither promises that 100 permitted weapons
     // fit in a URL, and they do not: maximum-length high-entropy prose does not
@@ -2510,6 +2541,11 @@ describe('hostile and over-long weapon sections', () => {
 
     // Every weapon is inside every cap: nothing here is a validation failure.
     expect(() => validateShareDocument(heavy)).not.toThrow();
+    await expect(tryEncodeShareFragment(heavy)).resolves.toEqual({
+      kind: 'too_large',
+      maximumEncodedCharacters: SHARE_LIMITS.encodedCharacters,
+      limit: 'compressed',
+    });
     await expect(encodeShareFragment(heavy)).rejects.toThrow(
       `compressed document exceeds the ${SHARE_LIMITS.compressedBytes}-byte limit.`,
     );

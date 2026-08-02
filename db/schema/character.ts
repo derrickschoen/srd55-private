@@ -51,11 +51,13 @@ import {
   integerAtLeast,
   nullOrIntegerAtLeast,
   nullOrOneOf,
+  nullOrTextLengthAtMost,
   oneOf,
   sqlText,
   tinyint1,
   varchar,
 } from './columns';
+import { CHARACTER_TEXT_LIMITS } from '../../src/domain/character-limits';
 import { class_definitions, subclass_definitions } from './catalog-classes';
 import { spell_versions } from './catalog-spells';
 
@@ -101,6 +103,9 @@ export const characters = sqliteTable('characters', {
     .default('2024'),
   allow_legacy: tinyint1('allow_legacy').notNull().default(false),
   revision: integer('revision').notNull().default(0),
+  alignment: sqlText()('alignment'),
+  appearance: sqlText()('appearance'),
+  backstory: sqlText()('backstory'),
   notes: sqlText()('notes'),
   created_at: datetime()('created_at'),
   updated_at: datetime()('updated_at'),
@@ -164,6 +169,18 @@ export const characters = sqliteTable('characters', {
    * rather than decorative.
    */
   check('characters_revision_check', integerAtLeast('revision', 0)),
+  check(
+    'characters_alignment_check',
+    nullOrTextLengthAtMost('alignment', CHARACTER_TEXT_LIMITS.alignment),
+  ),
+  check(
+    'characters_appearance_check',
+    nullOrTextLengthAtMost('appearance', CHARACTER_TEXT_LIMITS.appearance),
+  ),
+  check(
+    'characters_backstory_check',
+    nullOrTextLengthAtMost('backstory', CHARACTER_TEXT_LIMITS.backstory),
+  ),
 ]);
 
 /**

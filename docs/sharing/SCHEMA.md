@@ -1,22 +1,22 @@
 # Character share wire schema
 
-> Transcribed from `SHARE_SCHEMAS` for the LU-1 v16 mint. Update this document
+> Transcribed from `SHARE_SCHEMAS` for the D104 v17 mint. Update this document
 > with every wire-version mint.
 
 The executable source of truth is
 `src/sharing/wire-schemas/index.ts` and its immutable version modules
-`v1.ts` through `v16.ts`. This guide describes that registry; it does not
-replace it. `CURRENT_CHARACTER_SHARE_VERSION` is **16**.
+`v1.ts` through `v17.ts`. This guide describes that registry; it does not
+replace it. `CURRENT_CHARACTER_SHARE_VERSION` is **17**.
 
 One version at `root[1]` governs the complete document. Nested tuples do not
 carry independent versions. Encoding always mints the current version.
 Decoding validates the frozen schema selected by `root[1]`, then composes
-one-version-at-a-time migrations until it reaches v16.
+one-version-at-a-time migrations until it reaches v17.
 
 Versions 1 through 4 remain in the registry as frozen history, but they are
 deliberately retired from import. Their migration path reaches v4→v5 and throws
 `ShareWireRetirementError` because their bare skill names cannot be given honest
-provenance. Versions 5 through 15 migrate to v16.
+provenance. Versions 5 through 16 migrate to v17.
 
 Tuple arity is exact. A nullable or omitted logical value still occupies its
 assigned wire position as `null`; it does not shorten a current tuple. The
@@ -281,12 +281,27 @@ an explicitly deferred Epic Boon or another outstanding occurrence.
 could not prove any durable level-feat occurrence, so migration preserves
 absence and never infers a choice from a feat source or an ability effect.
 
-## Current v16 shape
+### Version 17 — character flavor text
+
+**Minted by:** D104's flavor persistence contracts.
+
+**Change:** `character` appends `alignment`, `appearance`, and `backstory`,
+increasing from arity **12 to 15**. The existing notes position remains 10 and
+the ability-allocation position remains 11. All four authored-text members are
+included only when the single written-text option is explicitly enabled; it is
+off by default.
+
+**Adjacent migration (v16→v17):** validates the frozen v16 root and character
+arities, changes only the root version, and appends exactly three nulls to the
+character tuple. Older links therefore carry honest absence, not empty or
+invented prose.
+
+## Current v17 shape
 
 Positions are zero-based. The keys, wire types, and arities in this section are
-exactly those of the resolved `WIRE_SCHEMA_V16.tuples` object. The tuple
-inventory inherits v15, appends the level-feat-choice root section, and adds
-its tuple. The meanings faithfully restate the
+exactly those of the resolved `WIRE_SCHEMA_V17.tuples` object. The tuple
+inventory inherits v16 and replaces only the character tuple with its three
+appended members. The meanings faithfully restate the
 schema's meaning strings with minor prose normalization. The inventory includes
 tuples inherited from older frozen schema objects.
 
@@ -345,7 +360,7 @@ Arity: **5**.
 
 #### `character`
 
-Arity: **12**.
+Arity: **15**.
 
 | Position | Key | Wire type | Meaning |
 | ---: | --- | --- | --- |
@@ -361,6 +376,13 @@ Arity: **12**.
 | 9 | `allow_legacy` | `boolean` | Legacy-content opt-in |
 | 10 | `notes` | `string` | Opt-in character note |
 | 11 | `ability_allocation_method` | `string` | How the six base scores were allocated; null when never allocated |
+| 12 | `alignment` | `string` | Opt-in open-text alignment; null when absent |
+| 13 | `appearance` | `string` | Opt-in appearance prose; null when absent |
+| 14 | `backstory` | `string` | Opt-in backstory prose; null when absent |
+
+The one written-text option gates positions 10 and 12–14 together. The encoder
+returns a structured `too_large` result instead of a truncated link whenever
+compression or the **131,072 encoded-character** URL guard is exceeded.
 
 #### `class`
 
@@ -724,7 +746,7 @@ D41 makes the registry an append-only historical contract:
 
 ## How to mint the next version
 
-The v9, v10, v11, v12, v13, v14, v15, and v16 mints followed this discipline:
+The v9, v10, v11, v12, v13, v14, v15, v16, and v17 mints followed this discipline:
 
 1. Add `src/sharing/wire-schemas/vN.ts`. Build the new schema from the previous
    frozen inventory, replacing only changed tuple objects. Do not edit any
