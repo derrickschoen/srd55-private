@@ -297,6 +297,7 @@ test('W-DOUBLE-CONFIRM two rapid activations create one level, revision, history
 test('W-BROWSER-PLANNED-DRAFT carries planned_subchoices from UI through Review and Complete', async ({
   page,
 }) => {
+  // Measured alone at 12.0s on Chromium including the post-commit sheet.
   test.setTimeout(40_000);
   const character = await createCharacter(page, 'Planned Wizard', 'Wizard');
   await completeWizardLevelOneChoices(page, character.id);
@@ -347,6 +348,24 @@ test('W-BROWSER-PLANNED-DRAFT carries planned_subchoices from UI through Review 
       spell_version_id: expect.any(Number),
     }),
   ]));
+
+  await page.goto(`/characters/${String(character.id)}/sheet`);
+  const spellSection = page.getByRole('heading', {
+    name: 'Spells',
+    exact: true,
+  }).locator('..');
+  for (const choice of ACCEPTANCE_WIZARD_2_CHOICES.spells) {
+    const bucket = choice.kind === 'spellbook_acquisition'
+      ? spellSection.locator('[data-sheet-id^="spellbook:class:"]', {
+          hasText: choice.spell_name,
+        })
+      : spellSection.locator('[data-sheet-id^="spell:class:"]', {
+          hasText: choice.spell_name,
+        });
+    await expect(bucket).toContainText(
+      `${choice.spell_name}Level 1${choice.kind === 'spellbook_acquisition' ? 'Spellbook' : 'Prepared'}`,
+    );
+  }
 });
 
 test('W-BROWSER-LU2-ROLLBACK a UI draft refused at its locator restores every database byte', async ({

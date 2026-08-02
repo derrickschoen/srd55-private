@@ -47,6 +47,12 @@ function spellNames(group: SheetSpellGroup): string[] {
   return group.spells.map((spell) => spell.name);
 }
 
+function spellbookNames(
+  group: Extract<SheetSpellGroup, { readonly kind: 'class' }>,
+): string[] {
+  return group.spellbook.map((spell) => spell.name);
+}
+
 describe('typed character spell section projection', () => {
   let sqlite3: Sqlite3Static;
   let connection: Database;
@@ -215,6 +221,37 @@ describe('typed character spell section projection', () => {
       );
     expect(alwaysRoute?.bucket).toBe('automatic');
     expect(alwaysRoute?.always_prepared).toBe(true);
+  });
+
+  it('spellbook entries project in a typed distinct bucket without Prepared or Known markers', () => {
+    const section = builder.build(fixture.characterId);
+    const wizard = classGroup(section, 'Wizard');
+
+    expect(spellbookNames(wizard)).toEqual([
+      'Chromatic Orb',
+      'Comprehend Languages',
+    ]);
+    expect(wizard.spellbook).toEqual([
+      expect.objectContaining({
+        spell_version_id: fixture.spellIds.chromaticOrb,
+        name: 'Chromatic Orb',
+        level: { status: 'known', value: 1 },
+      }),
+      expect.objectContaining({
+        spell_version_id: fixture.spellIds.comprehendLanguages,
+        name: 'Comprehend Languages',
+        level: { status: 'known', value: 1 },
+      }),
+    ]);
+    expect(wizard.spellbook.every((spell) => !('marker' in spell))).toBe(true);
+    expect(spellNames(wizard)).toContain('Echo Ward');
+    expect(spellbookNames(wizard)).not.toContain('Echo Ward');
+  });
+
+  it('a class with no spellbook mechanic shows nothing new', () => {
+    const cleric = classGroup(builder.build(fixture.characterId), 'Cleric');
+
+    expect(cleric.spellbook).toEqual([]);
   });
 
   it('class spell order is level then name with unknown level last', () => {

@@ -303,6 +303,10 @@ function readableText(value: CharacterSheet): string {
             (entry) =>
               `${textOf(entry.label)} ${entry.value ?? ''} ${textOf(entry.detail)}`,
           ),
+          ...group.spellbook_rows.map(
+            (entry) =>
+              `${textOf(entry.label)} ${entry.value ?? ''} ${textOf(entry.detail)}`,
+          ),
         ]),
       ];
     })
@@ -360,6 +364,7 @@ function classSpellGroup(
       },
     ],
     spells,
+    spellbook: [],
     ...changes,
   };
 }
@@ -384,6 +389,10 @@ function spellReadableText(value: CharacterSheet): string {
       ...(group.statistics.label === null ? [] : [group.statistics.label]),
       ...group.statistics.lines.map(textOf),
       ...group.rows.map(
+        (entry) =>
+          `${textOf(entry.label)} ${entry.value ?? ''} ${textOf(entry.detail)}`,
+      ),
+      ...group.spellbook_rows.map(
         (entry) =>
           `${textOf(entry.label)} ${entry.value ?? ''} ${textOf(entry.detail)}`,
       ),
@@ -475,6 +484,50 @@ describe('the character sheet is projected twice from one value', () => {
       { heading: 'Wizard', spells: ['Shield', 'Alarm', 'Fire Bolt'] },
       { heading: 'Cleric', spells: ['Bless'] },
     ]);
+  });
+
+  it('preserves noncanonical prepared-known and spellbook bucket order while keeping spellbook last', () => {
+    const wizard = classSpellGroup(11, 'Wizard', [
+      spell(104, 'Shield'),
+      spell(101, 'Alarm'),
+    ], {
+      spellbook: [
+        spell(108, 'Detect Magic'),
+        spell(107, 'Chromatic Orb'),
+      ].map(({ marker: _marker, ...entry }) => entry),
+    });
+
+    const group = spellSectionOf(sheet({ spells: [wizard] })).spell_groups[0]!;
+    expect(group.rows.map((row) => textOf(row.label))).toEqual([
+      'Shield',
+      'Alarm',
+    ]);
+    expect(group.spellbook_rows.map((row) => textOf(row.label))).toEqual([
+      'Detect Magic',
+      'Chromatic Orb',
+    ]);
+    expect([
+      ...group.rows.map((row) => textOf(row.detail)),
+      ...group.spellbook_rows.map((row) => textOf(row.detail)),
+    ]).toEqual(['Known', 'Known', 'Spellbook', 'Spellbook']);
+  });
+
+  it('spellbook entries render distinctly and are never labeled Prepared or Known', () => {
+    const wizard = classSpellGroup(11, 'Wizard', [
+      spell(101, 'Shield', { marker: 'prepared' }),
+    ], {
+      spellbook: [spell(102, 'Chromatic Orb')].map(
+        ({ marker: _marker, ...entry }) => entry,
+      ),
+    });
+
+    const group = spellSectionOf(sheet({ spells: [wizard] })).spell_groups[0]!;
+    expect(group.rows.map((row) => textOf(row.detail))).toEqual(['Prepared']);
+    expect(group.spellbook_rows.map((row) => textOf(row.detail))).toEqual([
+      'Spellbook',
+    ]);
+    expect(group.spellbook_rows.map((row) => textOf(row.detail)).join(' '))
+      .not.toMatch(/Prepared|Known/);
   });
 
   it('normal spellcasting statistics render once at group level', () => {
