@@ -7,6 +7,15 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D156 — OWNER: party features live on their OWN page (2026-08-01)
+
+"Party stuff will need its own page." Pins the party design's existing P5
+shape: a dedicated party screen with its own routes
+(src/ui/screens/party/ — setup, token paste/forget, publish, refresh,
+review, public-reader), never folded into the character list or another
+screen. The anon-primary mode (D154), warn-once permanence (D155), and any
+future roster view all live there.
+
 ## D155 — OWNER: public-repo permanence = warn once at first public publish (2026-08-01)
 
 One-time, per-party plain statement ("public means permanent — git history
