@@ -23,6 +23,30 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
+## RESTART POINT 2026-08-02-b (read this first after any context loss)
+MAIN a0a5382. Mirror derrickschoen/srd55-private: push after EVERY merge.
+MERGED TODAY: FF-A a00455a, P0B 582a175, SS-1 eafbd68, W-D 9a00a8d,
+P1-GH a0a5382, + design docs (W-MC, SPELL-SEC, SUBCL-SEED, spike
+evidence). FLOORS: vitest 3,280 / 204 files; PW 93 tests / 20 spec files;
+build 0; migrations 0000-0027 frozen; wire v1-v17 frozen.
+CONCURRENCY LAW: ONE full suite of any kind machine-wide; ~4 codex
+dispatches max; codex CLI --testTimeout/--timeout flags are NOT gate
+results.
+IN FLIGHT: W-E (wt/print, log we.log); SS-2 (wt/pwa, ss2.log, amendment:
+SS-1 already attached CharacterSheet.spells); P2 (wt/party, p2.log,
+amendment: D154/D155/D156/D163 win); BROWSER-PROBE (wt/hyg2,
+browser-probe.log); brief workflow authoring sc-1..6, walk-3,
+update-prompt, bug-report.
+NEXT GATES WAITING: HA-1 in wt/mint2 (committed long ago, needs merge
+main + FULL gate + review - THE MINT LANE IS BLOCKED ON IT: after it,
+CI-3a per the recorded mint order). Also pending: SUBCL invented-monk
+draft for owner approval (D169); WebKit spike (D153); org name (D168);
+spike-repo deletion (needs delete_repo grant); P1-GL/P1-CB briefs exist
+(fixtures-only per D160).
+QUESTION ROUNDS: 1-3 done (D161-D172). Codex review rejection log
+addition - P1-GH round 2 read()-equality finding REJECTED (equality
+against a parsed brand refuses mismatch; verified github.ts:331).
+
 ## RESTART POINT 2026-08-02 (read this first after any context loss)
 MAIN a00455a+ (FF-A merged; post-merge vitest 201/3,232; PW floor 93).
 0027/v17 now FROZEN. Mirror: push `git push mirror main` AFTER EVERY MERGE
