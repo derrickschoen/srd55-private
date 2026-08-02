@@ -7,6 +7,48 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D151 — OWNER: seed ALL SRD subclasses before the gate (2026-08-01)
+
+Chosen over ship-with-two and table-subset. The SRD 5.2.1 subclass for every
+class is extracted and seeded before the D106 gate, as a normal
+pinned-extract unit (F6/F27 discipline). Kills the empty-list-at-level-3
+experience for ten of twelve classes. D80's proceed-with-warning semantics
+stay for genuinely unmade subclasses (homebrew, future content).
+
+## D150 — OWNER: bounded live forge spike AUTHORIZED (2026-08-01)
+
+One outward-facing exception to hard stop 3, owner-granted: a live fixture
+spike against THROWAWAY repos on GitHub/GitLab/Codeberg using tokens the
+owner creates, to record real API responses (pagination, conflict statuses,
+rate-limit headers, error bodies) which are then sanitized into the pinned
+adapter fixtures. Conditions: the spike touches only the throwaway repos;
+its exact request list is shown to the owner BEFORE it runs; anonymous-read
+rate limits get measured in the same spike. Everything else outward remains
+stopped.
+
+## D149 — OWNER: caster spell section = sheet section + spell-text appendix; multiclass grouped by class (2026-08-01)
+
+Closes the D87/D54.4 bar gap the panel found (no queued unit built the
+spell section). Chosen shape: a compact section on the sheet (name, level,
+prepared/known marker, save DC and spell attack stated once); PRINTING
+appends full spell text as appendix pages after the sheet, the same
+pattern D141 gave long flavor text — one stapled document per player.
+OWNER ADDITION, verbatim requirement: "print multiclass spells grouped by
+class, order by level and name" — the printed spell section and appendix
+group by contributing class, ordered by level then name within each class.
+The legacy /characters/:id/print route RETIRES (its stale PHP-era import
+instruction dies with it).
+
+## D148 — OWNER: the D106 gate HOLDS in full; no early sitting (2026-08-01)
+
+Asked directly after the panel proved party storage lands at the tail of
+the CI mint chain: the owner chose "Hold everything, no early sitting" over
+re-cutting v1 and over an early informal sitting. The whole queue drains —
+party storage (D145/D146), wizard multiclass (D147, now explicitly INSIDE
+the gate), the HA/CI chains, and the new D149/D151 units — then the D128
+sitting, then publish. First hands-on use waits for the full queue by the
+owner's explicit choice.
+
 ## D147 — OWNER: wizard multiclass, BG3-style flow, SRD prereqs + house-rule toggle (2026-08-01)
 
 Supersedes D107's deferral: the level-up wizard SHALL support adding a level
