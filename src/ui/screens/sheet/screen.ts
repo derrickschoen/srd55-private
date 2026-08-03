@@ -4,18 +4,15 @@ import { defineScreen, type ScreenContext } from '../../screen';
 import { renderSheet, setSheetPrintContent } from './sheet-view';
 import './styles.css';
 
-const flavorAppendixPreferenceKey = (characterId: number): string =>
-  `srd55:character:${String(characterId)}:print-option:flavor-appendix`;
-
 /**
  * THE SHEET SCREEN.
  *
  * SHAPED AFTER `print/screen.ts` AND DELIBERATELY NOT AFTER THE PLANNER: parse
  * the id, one awaited query, one pure render, a few listeners, a composed
- * cleanup. It holds no session, no undo stack and no focus restoration, because
- * it does not write — every input it displays is edited in the planner, and a
- * read-only screen that invented a second editing surface would be a second
- * place for the same data to be written from.
+ * cleanup. It holds no command session, undo stack or focus restoration,
+ * because every character input it displays is edited in the planner. D162's
+ * three print-appendix preferences are the sole exception: their named
+ * character_rule_overrides rows are UI state, not character revisions.
  *
  * `matches` IS EXACT, AND THAT IS LOAD-BEARING. `src/ui/app.ts` sorts screen
  * modules by PATH and renders the FIRST match, so `print` (p) is tested before
@@ -43,7 +40,8 @@ async function render(context: ScreenContext): Promise<() => void> {
   if (id === null) {
     throw new Error('The character sheet route requires a valid character ID.');
   }
-  const sheet = await createQueriesClient(context.rpc).sheet(id);
+  const queries = createQueriesClient(context.rpc);
+  const sheet = await queries.sheet(id);
   const sheetElement = renderSheet(sheet);
   context.root.replaceChildren(sheetElement);
   document.title = `${sheet.name} character sheet`;
@@ -52,8 +50,7 @@ async function render(context: ScreenContext): Promise<() => void> {
     '[data-sheet-print-option="flavor-appendix"]',
   );
   if (flavorAppendix !== null) {
-    flavorAppendix.checked =
-      localStorage.getItem(flavorAppendixPreferenceKey(id)) === 'true';
+    flavorAppendix.checked = sheet.print_appendix_preferences.flavor;
   }
 
   const cleanups: Array<() => void> = [];
@@ -112,11 +109,26 @@ async function render(context: ScreenContext): Promise<() => void> {
     if (flavorAppendix === null) {
       return;
     }
-    localStorage.setItem(
-      flavorAppendixPreferenceKey(id),
-      String(flavorAppendix.checked),
-    );
+    const enabled = flavorAppendix.checked;
+    flavorAppendix.setCustomValidity('');
+    flavorAppendix.disabled = true;
     syncPrintFields();
+    void queries
+      .setPrintAppendixPreference(id, 'flavor', enabled)
+      .then(() => {
+        flavorAppendix.disabled = false;
+      })
+      .catch((error: unknown) => {
+        flavorAppendix.checked = !enabled;
+        flavorAppendix.disabled = false;
+        flavorAppendix.setCustomValidity(
+          error instanceof Error
+            ? error.message
+            : 'The print preference could not be saved.',
+        );
+        flavorAppendix.reportValidity();
+        syncPrintFields();
+      });
   };
   syncPrintFields();
   flavorAppendix?.addEventListener('change', flavorPreferenceChanged);

@@ -326,6 +326,11 @@ function sheet(options: {
       backstory: null,
       notes: null,
     },
+    print_appendix_preferences: {
+      flavor: false,
+      spells: false,
+      audit: false,
+    },
     hit_point_rolls: [],
     equipment_packages: [],
     warnings: [],

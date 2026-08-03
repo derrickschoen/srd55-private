@@ -33,6 +33,11 @@ import {
   type RpcHandler,
 } from '../handler';
 import { abilities, isEnumValue } from '../../domain/enums';
+import {
+  PRINT_APPENDIX_KINDS,
+  PrintAppendixPreferenceQueries,
+  type PrintAppendixKind,
+} from '../../queries/print-appendix-preferences';
 
 interface CharacterParams {
   readonly character_id: number;
@@ -53,6 +58,11 @@ interface SavePointCommandParams extends CharacterParams {
 
 interface PrintableParams extends CharacterParams {
   readonly variant: 'reference' | 'full';
+}
+
+interface SetPrintAppendixPreferenceParams extends CharacterParams {
+  readonly kind: PrintAppendixKind;
+  readonly enabled: boolean;
 }
 
 function exactKeys(
@@ -173,6 +183,18 @@ export function isCharacterParams(
     isRecord(params) &&
     exactKeys(params, ['character_id']) &&
     positiveInteger(params.character_id)
+  );
+}
+
+export function isSetPrintAppendixPreferenceParams(
+  params: unknown,
+): params is SetPrintAppendixPreferenceParams {
+  return (
+    isRecord(params) &&
+    exactKeys(params, ['character_id', 'kind', 'enabled']) &&
+    positiveInteger(params.character_id) &&
+    isEnumValue(PRINT_APPENDIX_KINDS, params.kind) &&
+    typeof params.enabled === 'boolean'
   );
 }
 
@@ -335,6 +357,16 @@ export const handlers: readonly RpcHandler[] = Object.freeze([
     isCharacterParams,
     (context, params) =>
       new CharacterSheetBuilder(context.db).build(params.character_id),
+  ),
+  defineRpcHandler(
+    'queries.characters.setPrintAppendixPreference',
+    isSetPrintAppendixPreferenceParams,
+    (context, params) =>
+      new PrintAppendixPreferenceQueries(context.db).set(
+        params.character_id,
+        params.kind,
+        params.enabled,
+      ),
   ),
   defineRpcHandler(
     'queries.reports.build',

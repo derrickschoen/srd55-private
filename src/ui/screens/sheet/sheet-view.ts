@@ -1760,12 +1760,18 @@ export function composeSheetPrintAppendices(
     appendix.remove();
   }
   const notice = shell.querySelector(PRINT_NOTICE_SELECTOR);
-  for (const registration of [...registrations].sort(
-    (left, right) => left.order - right.order || left.id.localeCompare(right.id),
-  )) {
+  for (const registration of orderedSheetPrintAppendices(registrations)) {
     registration.element.dataset.sheetPrintAppendix = registration.id;
     shell.insertBefore(registration.element, notice);
   }
+}
+
+export function orderedSheetPrintAppendices(
+  registrations: readonly SheetPrintAppendixRegistration[],
+): readonly SheetPrintAppendixRegistration[] {
+  return [...registrations].sort(
+    (left, right) => left.order - right.order || left.id.localeCompare(right.id),
+  );
 }
 
 /**
