@@ -23,7 +23,24 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-03-f (newest - read first)
+## RESTART POINT 2026-08-03-g (newest - read first)
+MAIN 9ecdff5 (CI-3b merged - the XL unit; mirror pushed). FLOORS: vitest
+222/3,707; PW 124 (22 spec files); build 0; migrations 0000-0031 FROZEN;
+wire v1-v17. TEN merges today (guidelines, SC-1, FF-C, BROWSER-PROBE,
+HA-1b/0030, CI-3a, CI-3c/0031, SS-3, CI-3b + rulings D188-D194).
+CI-3b lesson (full length in merge msg): the vitest "real-boot" proof was
+NOT the real boot - only the supervisor's full Playwright caught the
+4-species catalog; fix constructs bundled membership from the seeded
+aggregates themselves (two-half union). Gate failures bypass the review
+cap - gates always must pass.
+MINT LANE NEXT: CI-3s (bundled stable keys; after it, CI-4a adoption
+discipline). Side lanes free: SS-4, SC-2, FF-B, AR-A dispatchable.
+HOMEBREW: 7 subclass docs in wt/party awaiting owner rulings (oath,
+4 monks incl Waking Will, Pursuer ranger, rebuilt Executioner rogue per
+D194 - once-per-round doubling, 19-20 crit, Vanishing Point, Practiced
+Certainty). After rulings: D191 polish passes + review round per doc.
+
+## RESTART POINT 2026-08-03-f (superseded by -g)
 MAIN 790e980 (CI-3c merged; mirror pushed). FLOORS: vitest 218/3,664; PW
 122 (22 spec files); build 0; migrations 0000-0031 FROZEN; wire v1-v17.
 CI-3c: 3 review rounds, 2 fix rounds (r2 = shared authoritative limit
