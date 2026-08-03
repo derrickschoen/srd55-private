@@ -868,6 +868,7 @@ export const COLUMN_FACTS = {
     grant_rules: { base: 'degraded', notNull: false },
     created_at: { base: 'degraded', notNull: false },
     updated_at: { base: 'degraded', notNull: false },
+    notes: { base: 'degraded', notNull: false },
   },
   subclass_feature_effects: {
     id: { base: 'integer', notNull: true },
