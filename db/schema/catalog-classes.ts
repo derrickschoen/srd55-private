@@ -368,6 +368,7 @@ export const subclass_definitions = sqliteTable(
     grant_rules: sqlText()('grant_rules'),
     created_at: datetime()('created_at'),
     updated_at: datetime()('updated_at'),
+    notes: sqlText()('notes'),
   },
   (table) => [
     uniqueIndex('subclass_definitions_content_key_unique').on(
