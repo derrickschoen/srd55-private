@@ -159,6 +159,8 @@ export type CharacterEffectId = Brand<number, 'CharacterEffectId'>;
  * see `db/schema/items.ts`.
  */
 export type CharacterItemId = Brand<number, 'CharacterItemId'>;
+export type ItemDefinitionId = Brand<number, 'ItemDefinitionId'>;
+export type ItemDefinitionEffectId = Brand<number, 'ItemDefinitionEffectId'>;
 
 /** One `*_definitions.id` brand per definition table, so they cannot cross. */
 export type ClassDefinitionId = Brand<number, 'ClassDefinitionId'>;

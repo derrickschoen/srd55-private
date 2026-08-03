@@ -20,10 +20,12 @@ import {
   WEAPON_TEXT_LIMITS,
 } from '../domain/weapon-limits';
 import {
+  SHEET_ARMOR_MIN,
   SHEET_ARMOR_MAX,
   SHEET_ROLL_BOUNDS,
   SHEET_TEXT_LIMITS,
 } from '../domain/sheet-limits';
+import { EQUIPMENT_EFFECT_COUNT_MAX } from '../domain/equipment-effects';
 import { canonicalizeJson } from './canonical-json';
 import {
   ORIGIN_EFFECT_MAGNITUDE_MAX,
@@ -1254,8 +1256,10 @@ function validateEquipmentEffects(value: unknown): void {
   if (!Array.isArray(value)) {
     invalid('effects must be a list.');
   }
-  if (value.length > 200) {
-    invalid('effects must not contain more than 200 rows.');
+  if (value.length > EQUIPMENT_EFFECT_COUNT_MAX) {
+    invalid(
+      `effects must not contain more than ${String(EQUIPMENT_EFFECT_COUNT_MAX)} rows.`,
+    );
   }
   for (const effect of value) {
     validateEquipmentEffect(effect);
@@ -1417,19 +1421,24 @@ function validateArmorFields(value: unknown): void {
   if (!isEnumValue(armorDexBonuses, armor.dex_bonus)) {
     invalid('Unknown armor Dexterity bonus.');
   }
-  boundedInteger(armor, 'armor_class', 1, SHEET_ARMOR_MAX.armor_class);
+  boundedInteger(
+    armor,
+    'armor_class',
+    SHEET_ARMOR_MIN.armor_class,
+    SHEET_ARMOR_MAX.armor_class,
+  );
   // Lower bound 0, not 1: a cap of zero is a coherent house rule, and it is the
   // PAIRING below — not the magnitude — that the schema constrains.
   nullableBoundedInteger(
     armor,
     'dex_bonus_max',
-    0,
+    SHEET_ARMOR_MIN.dex_bonus_max,
     SHEET_ARMOR_MAX.dex_bonus_max,
   );
   nullableBoundedInteger(
     armor,
     'strength_requirement',
-    1,
+    SHEET_ARMOR_MIN.strength_requirement,
     SHEET_ARMOR_MAX.strength_requirement,
   );
   requiredBoolean(armor, 'stealth_disadvantage');

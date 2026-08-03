@@ -234,8 +234,8 @@ describe('declared relations match the foreign keys', () => {
     // HA-1 adds the background effect table's one parent constraint/row.
     // P3 adds one nullable SET NULL association from the observation index to
     // the newest local clone. The row survives local character deletion.
-    expect(constraintEdges(db)).toHaveLength(100);
-    expect(rowCount).toBe(117);
+    expect(constraintEdges(db)).toHaveLength(102);
+    expect(rowCount).toBe(119);
   });
 
   it('declares a relation for every foreign key, and a foreign key for every relation', () => {

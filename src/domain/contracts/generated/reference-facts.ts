@@ -406,6 +406,18 @@ export const FOREIGN_KEY_FACTS = [
     targetColumns: ['content_key'],
   },
   {
+    table: 'item_definition_effects',
+    columns: ['item_definition_id'],
+    target: 'item_definitions',
+    targetColumns: ['id'],
+  },
+  {
+    table: 'item_definitions',
+    columns: ['content_key'],
+    target: 'catalog_content_identities',
+    targetColumns: ['content_key'],
+  },
+  {
     table: 'named_feature_effects',
     columns: ['named_feature_id'],
     target: 'named_features',

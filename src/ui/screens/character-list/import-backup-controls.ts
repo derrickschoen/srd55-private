@@ -190,6 +190,16 @@ export function catalogSummary(summary: CatalogImportSummary): string {
       `${subclasses(summary.subclasses_updated)} updated`,
     );
   }
+  const equipmentCreated =
+    summary.weapons_created + summary.armors_created + summary.items_created;
+  const equipmentMatched =
+    summary.weapons_matched + summary.armors_matched + summary.items_matched;
+  if (equipmentCreated > 0 || equipmentMatched > 0) {
+    parts.push(
+      `${String(equipmentCreated)} equipment definitions created`,
+      `${String(equipmentMatched)} equipment definitions matched`,
+    );
+  }
   return parts.join(', ');
 }
 
