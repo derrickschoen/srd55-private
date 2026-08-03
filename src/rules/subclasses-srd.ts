@@ -84,6 +84,13 @@ const STANDALONE_TABLE_TITLES = new Set([
   'Fiend Spells',
 ]);
 
+const REQUIRED_LAND_TABLE_TITLES = [
+  'Arid Land',
+  'Polar Land',
+  'Temperate Land',
+  'Tropical Land',
+] as const;
+
 const LOGICAL_TABLE_BY_TITLE = new Map<string, string>([
   ['Life Domain Spells', 'Life Domain Spells'],
   ['Arid Land', 'Circle of the Land Spells'],
@@ -114,6 +121,17 @@ const TABLE_HEADERS = new Set([
   'Sorcerer',
   'Level Spells',
   'Warlock Level Spells',
+]);
+
+const TABLE_HEADERS_BY_TITLE = new Map<string, ReadonlySet<string>>([
+  ['Life Domain Spells', new Set(['Cleric Prepared Spells', 'Level'])],
+  ['Arid Land', new Set(['Druid Level Circle Spells'])],
+  ['Polar Land', new Set(['Druid Level Circle Spells'])],
+  ['Temperate Land', new Set(['Druid Level Circle Spells'])],
+  ['Tropical Land', new Set(['Druid Level Circle Spells'])],
+  ['Oath of Devotion Spells', new Set(['Paladin Level Spells'])],
+  ['Draconic Spells', new Set(['Sorcerer', 'Level Spells'])],
+  ['Fiend Spells', new Set(['Warlock Level Spells'])],
 ]);
 
 const SUBCLASS_HEADING =
@@ -150,6 +168,26 @@ function tableMarkerForFeature(featureName: string): string | null {
   return featureName === 'Circle of the Land Spells' ? featureName : null;
 }
 
+function requireTableHeaders(
+  tableTitle: string | null,
+  seenHeaders: ReadonlySet<string>,
+): void {
+  if (tableTitle === null) {
+    return;
+  }
+  const requiredHeaders = TABLE_HEADERS_BY_TITLE.get(tableTitle);
+  if (requiredHeaders === undefined) {
+    throw new SrdSubclassError(`unknown physical table ${tableTitle}.`);
+  }
+  for (const header of requiredHeaders) {
+    if (!seenHeaders.has(header)) {
+      throw new SrdSubclassError(
+        `${tableTitle} table is missing required header ${JSON.stringify(header)}.`,
+      );
+    }
+  }
+}
+
 /**
  * Parse and validate the selective extract. The return value intentionally has
  * only class and subclass names; ordered feature/table manifests belong to
@@ -173,21 +211,43 @@ export function parseSrdSubclassSections(
   const parsed: ParsedSubclass[] = [];
   const seenClasses = new Set<string>();
   const seenTableMarkers = new Set<string>();
+  const seenTableTitles = new Set<string>();
   const tableRowCounts = new Map<string, number>();
-  let seenFeatureHeadings = new Set<string>();
+  let seenFeatureNames = new Set<string>();
   let currentClass: string | null = null;
   let inSpellTable = false;
   let currentTable: string | null = null;
+  let currentTableTitle: string | null = null;
+  let currentTableLevels = new Set<number>();
+  let currentTableHeaders = new Set<string>();
+  let currentTableHasRows = false;
   let continuationExpected = false;
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index]?.trim() ?? '';
+    if (continuationExpected) {
+      const continuation = normalizedTableLine(line);
+      const isStructuralLine =
+        STANDALONE_TABLE_TITLES.has(line) ||
+        TABLE_HEADERS.has(continuation) ||
+        SUBCLASS_HEADING.test(line) ||
+        FEATURE_HEADING.test(line) ||
+        TABLE_ROW.test(continuation);
+      if (line !== '' && !isStructuralLine && SPELL_LIST.test(continuation)) {
+        continuationExpected = continuation.endsWith(',');
+        continue;
+      }
+      throw new SrdSubclassError(
+        `${String(currentTableTitle)} table row ending in a comma is missing its continuation.`,
+      );
+    }
     if (line === '') {
       continue;
     }
 
     const subclass = SUBCLASS_HEADING.exec(line)?.groups;
     if (subclass !== undefined) {
+      requireTableHeaders(currentTableTitle, currentTableHeaders);
       const className = subclass.className;
       let subclassName = subclass.subclassName;
       if (className === undefined || subclassName === undefined) {
@@ -220,16 +280,20 @@ export function parseSrdSubclassSections(
 
       seenClasses.add(className);
       currentClass = className;
-      seenFeatureHeadings = new Set<string>();
+      seenFeatureNames = new Set<string>();
       inSpellTable = false;
       currentTable = null;
-      continuationExpected = false;
+      currentTableTitle = null;
+      currentTableLevels = new Set<number>();
+      currentTableHeaders = new Set<string>();
+      currentTableHasRows = false;
       parsed.push({ className, subclassName });
       continue;
     }
 
     const feature = FEATURE_HEADING.exec(line)?.groups;
     if (feature !== undefined) {
+      requireTableHeaders(currentTableTitle, currentTableHeaders);
       if (currentClass === null) {
         throw new SrdSubclassError('feature heading appears before a subclass.');
       }
@@ -242,13 +306,12 @@ export function parseSrdSubclassSections(
       if (!Number.isSafeInteger(level) || level < 1 || level > 20) {
         throw new SrdSubclassError(`feature level ${printedLevel} is outside 1-20.`);
       }
-      const featureHeadingKey = `${printedLevel}\u0000${featureName}`;
-      if (seenFeatureHeadings.has(featureHeadingKey)) {
+      if (seenFeatureNames.has(featureName)) {
         throw new SrdSubclassError(
-          `duplicate feature heading Level ${printedLevel}: ${featureName} in ${currentClass}.`,
+          `duplicate feature name ${featureName} in ${currentClass}.`,
         );
       }
-      seenFeatureHeadings.add(featureHeadingKey);
+      seenFeatureNames.add(featureName);
       const tableMarker = tableMarkerForFeature(featureName);
       if (tableMarker !== null) {
         if (seenTableMarkers.has(tableMarker)) {
@@ -258,11 +321,15 @@ export function parseSrdSubclassSections(
       }
       inSpellTable = false;
       currentTable = null;
-      continuationExpected = false;
+      currentTableTitle = null;
+      currentTableLevels = new Set<number>();
+      currentTableHeaders = new Set<string>();
+      currentTableHasRows = false;
       continue;
     }
 
     if (STANDALONE_TABLE_TITLES.has(line)) {
+      requireTableHeaders(currentTableTitle, currentTableHeaders);
       const expectedClass = TABLE_CLASS_BY_TITLE.get(line);
       if (currentClass !== expectedClass) {
         throw new SrdSubclassError(
@@ -272,12 +339,19 @@ export function parseSrdSubclassSections(
       if (seenTableMarkers.has(line)) {
         throw new SrdSubclassError(`duplicate ${line} table.`);
       }
+      if (seenTableTitles.has(line)) {
+        throw new SrdSubclassError(`duplicate physical table title ${line}.`);
+      }
+      seenTableTitles.add(line);
       if (REQUIRED_TABLE_MARKERS.includes(line as (typeof REQUIRED_TABLE_MARKERS)[number])) {
         seenTableMarkers.add(line);
       }
       inSpellTable = true;
       currentTable = LOGICAL_TABLE_BY_TITLE.get(line) ?? null;
-      continuationExpected = false;
+      currentTableTitle = line;
+      currentTableLevels = new Set<number>();
+      currentTableHeaders = new Set<string>();
+      currentTableHasRows = false;
       continue;
     }
 
@@ -287,7 +361,23 @@ export function parseSrdSubclassSections(
 
     const normalized = normalizedTableLine(line);
     if (TABLE_HEADERS.has(normalized)) {
-      continuationExpected = false;
+      const matchingHeaders = TABLE_HEADERS_BY_TITLE.get(String(currentTableTitle));
+      if (matchingHeaders === undefined || !matchingHeaders.has(normalized)) {
+        throw new SrdSubclassError(
+          `table header ${JSON.stringify(normalized)} does not match ${String(currentTableTitle)}.`,
+        );
+      }
+      if (currentTableHasRows) {
+        throw new SrdSubclassError(
+          `table header ${JSON.stringify(normalized)} appears after the first spell row in ${String(currentTableTitle)}.`,
+        );
+      }
+      if (currentTableHeaders.has(normalized)) {
+        throw new SrdSubclassError(
+          `duplicate table header ${JSON.stringify(normalized)} in ${String(currentTableTitle)}.`,
+        );
+      }
+      currentTableHeaders.add(normalized);
       continue;
     }
     const tableRow = TABLE_ROW.exec(normalized)?.groups;
@@ -304,16 +394,26 @@ export function parseSrdSubclassSections(
       if (currentTable === null) {
         throw new SrdSubclassError('spell-table row has no table heading.');
       }
+      if (currentTableLevels.has(level)) {
+        throw new SrdSubclassError(
+          `duplicate level ${level} in ${String(currentTableTitle)} table.`,
+        );
+      }
+      currentTableLevels.add(level);
+      currentTableHasRows = true;
       tableRowCounts.set(currentTable, (tableRowCounts.get(currentTable) ?? 0) + 1);
       continuationExpected = spells.endsWith(',');
       continue;
     }
-    if (continuationExpected && SPELL_LIST.test(normalized)) {
-      continuationExpected = false;
-      continue;
-    }
     throw new SrdSubclassError(`unrecognised spell-table line ${JSON.stringify(line)}.`);
   }
+
+  if (continuationExpected) {
+    throw new SrdSubclassError(
+      `${String(currentTableTitle)} table row ending in a comma is missing its continuation.`,
+    );
+  }
+  requireTableHeaders(currentTableTitle, currentTableHeaders);
 
   if (parsed.length !== BASE_CLASSES.length) {
     const missing = BASE_CLASSES.filter((className) => !seenClasses.has(className));
@@ -325,6 +425,11 @@ export function parseSrdSubclassSections(
     }
     if ((tableRowCounts.get(marker) ?? 0) === 0) {
       throw new SrdSubclassError(`${marker} table has no spell rows.`);
+    }
+  }
+  for (const title of REQUIRED_LAND_TABLE_TITLES) {
+    if (!seenTableTitles.has(title)) {
+      throw new SrdSubclassError(`missing ${title} table.`);
     }
   }
 
