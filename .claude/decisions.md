@@ -7,6 +7,22 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D178 — OWNER: Blackguard distance set includes 2014 DMG Oathbreaker AND BG3's version (2026-08-03)
+
+The converted Blackguard must keep D174-style mechanical distance from
+the 2014 DMG Oathbreaker and from Baldur's Gate 3's Oathbreaker — and
+since the DMG is NOT open content, no feature name or feature shape from
+it may be reproduced at all (a stricter bar than distance). SUPERVISOR
+FINDING at recording time: the draft outline's level-3 Channel Divinity
+was named "Dreadful Aspect" - the literal name of a 2014 DMG Oathbreaker
+Channel Divinity (also in BG3). Struck and reworked. Distance checklist
+for the design doc: no fallen/broken-oath framing (BG3's core mechanic;
+ours is a CHOSEN oath with tenets), no undead-command features, no
+aura-of-hate shape (Cha-to-melee-damage shared with fiend/undead allies),
+no one-burst fear Channel Divinity, and no DMG/BG3 feature names. The
+oath's differentiated identity: DOMINATION AND COMMAND, with fear only
+as a late accent.
+
 ## D177 — OWNER: clean-room subclass creation guidelines (2026-08-03)
 
 Codex and opus collaborate on research producing SUBCLASS CREATION
