@@ -239,7 +239,7 @@ function workspace(): Workspace {
         has_extra_attack: false,
       },
     },
-    items: { items: [] },
+    items: { items: [], definitions: [] },
   };
 }
 

@@ -84,6 +84,34 @@ async function attunementPlannerFixture() {
   return { bytes, characterId, itemIds };
 }
 
+async function catalogItemPlannerFixture() {
+  const sqlite3 = await sqlite3InitModule();
+  const connection = new sqlite3.oo1.DB(':memory:', 'c');
+  connection.exec(schema);
+  const db = new DatabaseContext(connection);
+  const characterId = db.exec(
+    "INSERT INTO characters (name) VALUES ('Catalog item picker')",
+  ).lastInsertId;
+  db.exec(
+    `INSERT INTO item_definitions (
+       content_key, name, rules_edition, description, requires_attunement
+     ) VALUES (
+       'expanded:legacy:browser-belt', 'Browser Giant Belt', 'expanded',
+       'Catalog-only definition', 1
+     );
+     INSERT INTO item_definition_effects (
+       item_definition_id, sort_order, effect_kind, ability, maximum,
+       label, notes
+     ) VALUES (
+       1, 1, 'ability_override', 'strength', 23,
+       'Browser giant strength', 'Copied effect'
+     );`,
+  );
+  const bytes = Array.from(sqlite3.capi.sqlite3_js_db_export(connection));
+  connection.close();
+  return { bytes, characterId };
+}
+
 async function persistedCharacter(
   page: import('@playwright/test').Page,
 ) {
@@ -322,6 +350,58 @@ test('the item editor authors an ability override that resolves on the sheet', a
   await expect(strength).toContainText(
     'Belt of Giant Strength sets the score to 24 and is the winning override.',
   );
+});
+
+test('the item picker copies catalog values and effects without a live definition link', async ({
+  page,
+}) => {
+  // Measured at 12.2s alone on Chromium; database replacement dominates.
+  test.setTimeout(20_000);
+  const { bytes, characterId } = await catalogItemPlannerFixture();
+  await page.goto('/');
+  await expect(page.locator('#status')).toHaveAttribute('data-ready', 'true', {
+    timeout: 30_000,
+  });
+  await page.evaluate(
+    (database) => window.staticApp.replaceDatabase(Uint8Array.from(database)),
+    bytes,
+  );
+  await page.goto(`/characters/${String(characterId)}`);
+  await expect(page.locator('#planner-status')).toHaveAttribute(
+    'data-ready',
+    'true',
+    { timeout: 30_000 },
+  );
+
+  const picker = page.locator('[data-testid="item-catalog-picker"]');
+  await expect(picker.getByLabel('Item definition')).toHaveValue(
+    'expanded:legacy:browser-belt',
+  );
+  await picker.getByRole('button', { name: 'Add catalog item' }).click();
+
+  await expect.poll(() => page.evaluate(async () => ({
+    items: await window.staticApp.inspectRows('character_items'),
+    effects: await window.staticApp.inspectRows('character_effects'),
+  }))).toEqual({
+    items: [expect.objectContaining({
+      name: 'Browser Giant Belt',
+      description: 'Catalog-only definition',
+      quantity: 1,
+      requires_attunement: 1,
+    })],
+    effects: [expect.objectContaining({
+      effect_kind: 'ability_override',
+      ability: 'strength',
+      maximum: 23,
+      label: 'Browser giant strength',
+      template_ref: null,
+    })],
+  });
+  expect(
+    await page.evaluate(async () =>
+      Object.keys((await window.staticApp.inspectRows('character_items'))[0] ?? {}),
+    ),
+  ).not.toContain('item_definition_id');
 });
 
 test('the attunement replacement modal traps, cancels, and restores keyboard focus', async ({

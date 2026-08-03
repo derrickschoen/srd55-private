@@ -136,6 +136,13 @@ describe('catalog import persistence', () => {
       subclasses_created: 0,
       subclasses_updated: 0,
       subclass_features_created: 0,
+      weapons_created: 0,
+      weapons_matched: 0,
+      armors_created: 0,
+      armors_matched: 0,
+      items_created: 0,
+      items_matched: 0,
+      item_definition_effects_created: 0,
       text_available: false,
       descriptions_loaded: 0,
     });

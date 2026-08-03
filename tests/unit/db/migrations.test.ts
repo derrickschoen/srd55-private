@@ -120,6 +120,11 @@ const SCHEMA_BEFORE_FEAT_MODEL = DATABASE_MIGRATIONS
   .map((entry) => entry.sql)
   .join('\n');
 
+const SCHEMA_BEFORE_ITEM_DEFINITIONS = DATABASE_MIGRATIONS
+  .slice(0, DATABASE_MIGRATIONS.findIndex((entry) => entry.id === '0031_item_definitions'))
+  .map((entry) => entry.sql)
+  .join('\n');
+
 const HISTORICAL_BACKGROUND_ROWS = `
 INSERT INTO background_templates (
   id, content_key, rules_edition, name,
@@ -183,6 +188,60 @@ function probedRegistry(targetSchema: string): readonly DatabaseMigration[] {
 }
 
 describe('database migration chain', () => {
+  it('0031 preserves weapon rows while opening item definitions and passthrough damage', async () => {
+    const storage = await storageHolding(
+      `${SCHEMA_BEFORE_ITEM_DEFINITIONS}
+       INSERT INTO weapon_templates (
+         id, content_key, rules_edition, name, srd_group,
+         damage_kind, damage_dice, damage_type, versatile_damage_kind,
+         finesse, heavy, light, loading, reach, thrown, two_handed,
+         ammunition, range_kind, mastery_property, other_properties,
+         created_at, updated_at
+       ) VALUES (
+         731, 'expanded:legacy:preserved-pike', 'expanded', 'Preserved Pike',
+         'martial_melee', 'dice', '1d8', 'Piercing', 'not_applicable',
+         0, 0, 0, 0, 1, 0, 0, 0, 'none', 'Vex', 'Keep every byte.',
+         '2040-01-02T03:04:05.000Z', '2041-02-03T04:05:06.000Z'
+       );`,
+    );
+    const lifecycle = new DatabaseLifecycle(sqlite3, storage, schema);
+    lifecycle.open();
+
+    expect(lifecycle.database.oneRaw(
+      `SELECT id, content_key, rules_edition, name, damage_kind, damage_dice,
+              damage_type, reach, mastery_property, other_properties,
+              created_at, updated_at
+       FROM weapon_templates WHERE id = 731`,
+    )).toEqual({
+      id: 731,
+      content_key: 'expanded:legacy:preserved-pike',
+      rules_edition: 'expanded',
+      name: 'Preserved Pike',
+      damage_kind: 'dice',
+      damage_dice: '1d8',
+      damage_type: 'Piercing',
+      reach: 1,
+      mastery_property: 'Vex',
+      other_properties: 'Keep every byte.',
+      created_at: '2040-01-02T03:04:05.000Z',
+      updated_at: '2041-02-03T04:05:06.000Z',
+    });
+    lifecycle.database.exec(
+      `INSERT INTO weapon_templates (
+         content_key, name, srd_group, damage_kind, damage_dice, damage_type,
+         range_kind, mastery_property
+       ) VALUES (
+         'expanded:legacy:storm-pike', 'Storm Pike', 'martial_melee',
+         'dice', '1d8', 'Storm Fire', 'none', 'Vex'
+       )`,
+    );
+    expect(lifecycle.database.scalar(
+      `SELECT count(*) FROM sqlite_schema
+       WHERE type = 'table' AND name IN ('item_definitions', 'item_definition_effects')`,
+    )).toBe(2);
+    lifecycle.close();
+  });
+
   it('builds the exact fresh-schema signature from empty', async () => {
     const result = await verifyMigrations(sqlite3);
 
@@ -192,7 +251,7 @@ describe('database migration chain', () => {
 
   it('preserves pre-0028 effects while opening authored storage', async () => {
     const beforeAuthorableEffects = DATABASE_MIGRATIONS
-      .slice(0, -3)
+      .slice(0, DATABASE_MIGRATIONS.findIndex((entry) => entry.id === '0028_authorable_effect_storage'))
       .map((entry) => entry.sql)
       .join('\n');
     const storage = await storageHolding(beforeAuthorableEffects);
@@ -315,7 +374,7 @@ describe('database migration chain', () => {
 
   it('adds nullable subclass reference text while preserving existing rows', async () => {
     const beforeSubclassReferenceText = DATABASE_MIGRATIONS
-      .slice(0, -1)
+      .slice(0, DATABASE_MIGRATIONS.findIndex((entry) => entry.id === '0030_subclass_reference_text'))
       .map((entry) => entry.sql)
       .join('\n');
     const storage = await storageHolding(`${beforeSubclassReferenceText}

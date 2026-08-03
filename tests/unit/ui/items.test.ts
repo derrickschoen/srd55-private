@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ItemsPanel } from '../../../src/domain/read-models';
+import type { ContentKey } from '../../../src/domain/ids';
 import {
   activateAttunementReplacementModal,
   renderItems,
@@ -12,6 +13,7 @@ import {
 } from '../../fixtures/interactive-dom';
 
 const panel: ItemsPanel = {
+  definitions: [],
   items: [
     {
       id: 10,
@@ -57,6 +59,74 @@ const panel: ItemsPanel = {
 };
 
 describe('the item attunement surface', () => {
+  it('copies a catalog definition into a quantity-one character item without a live key', () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const added: Parameters<PlannerItemActions['addItem']>[0][] = [];
+      const rendered = interactiveElement(renderItems({
+        panel: {
+          items: [],
+          definitions: [{
+            content_key: 'expanded:content.v1:definition' as ContentKey,
+            name: 'Giant Belt',
+            description: 'Sets Strength.',
+            requires_attunement: true,
+            effects: [{
+              effect_kind: 'ability_override',
+              ability: 'strength',
+              maximum: 23,
+              label: 'Giant strength',
+              notes: 'While worn.',
+            }],
+          }],
+        },
+        replacement: null,
+        actions: {
+          addItem: (item) => added.push(item),
+          updateItem: () => undefined,
+          removeItem: () => undefined,
+          updateQuantity: () => undefined,
+          attune: () => undefined,
+          unattune: () => undefined,
+          replace: () => undefined,
+          cancelReplacement: () => undefined,
+        },
+        disabled: false,
+        editing: null,
+        onEditingChanged: () => undefined,
+      }));
+
+      const catalogButton = rendered
+        .querySelectorAll('button')
+        .find((button) => button.textContent === 'Add catalog item');
+      if (catalogButton === undefined) {
+        throw new Error(`Catalog button missing from: ${elementText(rendered as unknown as Node)}`);
+      }
+      const definitionSelect = rendered.querySelector('select');
+      if (definitionSelect === null) throw new Error('Catalog select missing.');
+      definitionSelect.value = 'expanded:content.v1:definition';
+      catalogButton.click();
+
+      expect(added).toEqual([{
+        name: 'Giant Belt',
+        description: 'Sets Strength.',
+        quantity: 1,
+        requires_attunement: true,
+        source_instance_id: null,
+        effects: [{
+          effect_kind: 'ability_override',
+          ability: 'strength',
+          maximum: 23,
+          label: 'Giant strength',
+          notes: 'While worn.',
+        }],
+      }]);
+      expect(JSON.stringify(added)).not.toContain('content_key');
+    } finally {
+      restoreDocument();
+    }
+  });
+
   it('renders all three structural slots and dispatches the ordinary controls', () => {
     const restoreDocument = installInteractiveDocument();
     try {

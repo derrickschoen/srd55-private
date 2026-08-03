@@ -581,6 +581,8 @@ type NativeContractTable =
   | 'feat_definitions'
   | 'character_weapons'
   | 'weapon_templates'
+  | 'item_definitions'
+  | 'item_definition_effects'
   | 'class_weapon_mastery_grants'
   | 'class_weapon_mastery_counts'
   | 'class_resources'
@@ -1086,7 +1088,9 @@ const REFINEMENTS = {
   'weapon_templates.damage_kind': weaponDamageKindEnum,
   'weapon_templates.damage_dice': sqlText,
   'weapon_templates.damage_custom': sqlText,
-  'weapon_templates.damage_type': damageTypeEnum,
+  // CI-3c makes the catalog user-writable, so D12/Q4's known-plus-passthrough
+  // rule now applies here exactly as it already does on character weapons.
+  'weapon_templates.damage_type': damageTypeVocabulary,
   'weapon_templates.versatile_damage_kind': versatileWeaponDamageKindEnum,
   'weapon_templates.versatile_damage_dice': sqlText,
   'weapon_templates.versatile_damage_custom': sqlText,
@@ -1104,6 +1108,33 @@ const REFINEMENTS = {
   'weapon_templates.other_properties': sqlText,
   'weapon_templates.created_at': sqlTimestamp,
   'weapon_templates.updated_at': sqlTimestamp,
+
+  // --- item definitions (CI-3c) ------------------------------------------
+  'item_definitions.id': positiveInt,
+  'item_definitions.content_key': nonEmptyText,
+  'item_definitions.name': nonEmptyText,
+  'item_definitions.rules_edition': rulesEditionEnum,
+  'item_definitions.description': sqlText,
+  'item_definitions.requires_attunement': sqlBool,
+  'item_definitions.created_at': sqlTimestamp,
+  'item_definitions.updated_at': sqlTimestamp,
+  'item_definition_effects.id': positiveInt,
+  'item_definition_effects.item_definition_id': positiveInt,
+  'item_definition_effects.sort_order': positiveInt,
+  'item_definition_effects.effect_kind': characterEffectKindEnum,
+  'item_definition_effects.damage_type': damageTypeVocabulary,
+  'item_definition_effects.ability': abilityEnum,
+  'item_definition_effects.amount': nonZeroInt,
+  'item_definition_effects.maximum': abilityScore,
+  'item_definition_effects.base': positiveInt,
+  'item_definition_effects.ability_1': abilityEnum,
+  'item_definition_effects.ability_2': abilityEnum,
+  'item_definition_effects.allows_shield': sqlBool,
+  'item_definition_effects.weapon_scope': extraAttackWeaponScopeEnum,
+  'item_definition_effects.label': nonEmptyText,
+  'item_definition_effects.notes': sqlText,
+  'item_definition_effects.created_at': sqlTimestamp,
+  'item_definition_effects.updated_at': sqlTimestamp,
 
   // --- class weapon mastery content ---------------------------------------
   'class_weapon_mastery_grants.id': positiveInt,
