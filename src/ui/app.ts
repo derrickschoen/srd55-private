@@ -43,6 +43,7 @@ export class Application {
     private readonly root: HTMLElement,
     private readonly rpc: RpcClient,
     private readonly router = new Router(),
+    private readonly canRender: (route: Route) => boolean = () => true,
     private readonly screens = screensFromModules(discoveredScreens),
   ) {}
 
@@ -63,10 +64,17 @@ export class Application {
     this.router.stop();
   }
 
+  renderCurrent(): void {
+    void this.#render(this.router.current);
+  }
+
   async #render(route: Route): Promise<void> {
     const sequence = ++this.#renderSequence;
     this.#cleanup?.();
     this.#cleanup = undefined;
+    if (!this.canRender(route)) {
+      return;
+    }
     const screen = this.screens.find((candidate) => candidate.matches(route));
     if (screen === undefined) {
       clear(this.root);

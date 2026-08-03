@@ -1564,7 +1564,7 @@ describe('a backup file written while the dormant orphan column existed', () => 
 });
 
 describe('complete database backup', () => {
-  it('restores the complete image and rejects corrupt bytes without changing the live connection', async () => {
+  it('restores the complete image including subclass reference text and rejects corrupt bytes without changing the live connection', async () => {
     const sqlite3 = await getSqlite3();
     const lifecycle = new DatabaseLifecycle(
       sqlite3,
@@ -1584,12 +1584,27 @@ describe('complete database backup', () => {
       `INSERT INTO spell_identities (content_key, canonical_name, normalized_name)
        VALUES ('spell:fireball', 'Fireball', 'fireball')`,
     );
+    lifecycle.database.exec(`
+      INSERT INTO class_definitions (
+        content_key, name, rules_edition, progression_type
+      ) VALUES ('expanded:class:image', 'Image Class', 'expanded', 'none');
+      INSERT INTO subclass_definitions (
+        content_key, class_definition_id, name, rules_edition, notes
+      ) VALUES (
+        'expanded:subclass:image',
+        (SELECT id FROM class_definitions WHERE content_key = 'expanded:class:image'),
+        'Image Subclass', 'expanded', 'Non-empty subclass reference.'
+      );
+    `);
     const backup = await exportDatabaseBackup(
       lifecycle,
       '2026-07-23T12:00:00.000Z',
     );
     lifecycle.database.exec('DELETE FROM characters');
     lifecycle.database.exec('DELETE FROM spell_identities');
+    lifecycle.database.exec(
+      "DELETE FROM class_definitions WHERE content_key = 'expanded:class:image'",
+    );
 
     await importDatabaseBackup(lifecycle, backup);
     expect(lifecycle.database.allRaw('SELECT name, notes FROM characters')).toEqual(
@@ -1606,6 +1621,13 @@ describe('complete database backup', () => {
         normalized_name: 'fireball',
       },
     ]);
+    expect(lifecycle.database.allRaw(`
+      SELECT name, notes FROM subclass_definitions
+      WHERE content_key = 'expanded:subclass:image'
+    `)).toEqual([{
+      name: 'Image Subclass',
+      notes: 'Non-empty subclass reference.',
+    }]);
 
     const connection = lifecycle.database.connection;
     await expect(

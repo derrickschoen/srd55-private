@@ -1,5 +1,9 @@
 import './ui/styles/base.css';
-import { RpcClient } from './rpc/client';
+import {
+  RpcClient,
+  type RpcTransport,
+} from './rpc/client';
+import type { RpcRequest, RpcResponse } from './rpc/protocol';
 import type { SqlRow } from './db/codecs';
 import type { SystemInfo } from './worker/handlers/system';
 import { Application } from './ui/app';
@@ -10,6 +14,20 @@ import {
   requestPersistentStorage,
 } from './pwa/storage-persistence';
 import { registerAppServiceWorker } from './pwa/register-service-worker';
+import {
+  BROWSER_CAPABILITY_DEADLINE_MS,
+  classifyBrowserSupport,
+  observeBrowserCapability,
+  type BrowserCapabilityProbe,
+  type BrowserSupportDecision,
+} from './pwa/browser-capability';
+import { probeBrowserCapabilityInWorker } from './pwa/browser-capability-worker-port';
+import {
+  browserSupportNoticeElements,
+  hideBrowserSupportNotice,
+  readBrowserEngineProfile,
+  showBrowserSupportNotice,
+} from './pwa/browser-support-notice';
 
 const persistenceStatus =
   document.querySelector<HTMLOutputElement>('#persistence-status');
@@ -31,10 +49,122 @@ if ('serviceWorker' in navigator) {
   );
 }
 
-const worker = new Worker(new URL('./db/worker.ts', import.meta.url), {
-  type: 'module',
-});
-const rpc = new RpcClient(worker);
+let browserCapabilityProbe: BrowserCapabilityProbe =
+  probeBrowserCapabilityInWorker;
+if (import.meta.env.DEV) {
+  const injectedFailure = Reflect.get(
+    window,
+    '__SRD55_BROWSER_CAPABILITY_PROBE_FAILURE__',
+  );
+  if (injectedFailure === 'unavailable') {
+    browserCapabilityProbe = async () => 'unavailable';
+  } else if (injectedFailure === 'never') {
+    browserCapabilityProbe = () =>
+      new Promise(() => {
+        // An intentionally unanswered DEV-only probe proves the deadline path.
+      });
+  } else if (
+    injectedFailure !== null &&
+    typeof injectedFailure === 'object' &&
+    Reflect.get(injectedFailure, 'kind') === 'late-available'
+  ) {
+    const release = Reflect.get(injectedFailure, 'release');
+    if (release instanceof Promise) {
+      browserCapabilityProbe = async () => {
+        await release;
+        return 'available';
+      };
+    }
+  }
+}
+const browserCapability = observeBrowserCapability(
+  browserCapabilityProbe,
+  BROWSER_CAPABILITY_DEADLINE_MS,
+);
+
+/**
+ * The legal screen needs an Application before database access is allowed, but
+ * constructing the sqlite worker starts its database boot immediately. This
+ * transport lets the RPC client exist without constructing that worker. The
+ * capability decision is the only path to activate(), apart from the explicit
+ * Continue action.
+ */
+class DatabaseWorkerTransport implements RpcTransport {
+  readonly #messageListeners = new Set<
+    (event: MessageEvent<RpcResponse>) => void
+  >();
+  readonly #errorListeners = new Set<(event: ErrorEvent) => void>();
+  #worker: Worker | undefined;
+
+  activate(): void {
+    if (this.#worker !== undefined) {
+      return;
+    }
+    const worker = new Worker(new URL('./db/worker.ts', import.meta.url), {
+      type: 'module',
+    });
+    for (const listener of this.#messageListeners) {
+      worker.addEventListener('message', listener);
+    }
+    for (const listener of this.#errorListeners) {
+      worker.addEventListener('error', listener);
+    }
+    this.#worker = worker;
+  }
+
+  postMessage(message: RpcRequest, transfer: Transferable[] = []): void {
+    if (this.#worker === undefined) {
+      throw new Error('Database worker is held behind browser support gate.');
+    }
+    this.#worker.postMessage(message, transfer);
+  }
+
+  addEventListener(
+    type: 'message' | 'error',
+    listener:
+      | ((event: MessageEvent<RpcResponse>) => void)
+      | ((event: ErrorEvent) => void),
+  ): void {
+    if (type === 'message') {
+      const messageListener = listener as (
+        event: MessageEvent<RpcResponse>,
+      ) => void;
+      this.#messageListeners.add(messageListener);
+      this.#worker?.addEventListener('message', messageListener);
+      return;
+    }
+    const errorListener = listener as (event: ErrorEvent) => void;
+    this.#errorListeners.add(errorListener);
+    this.#worker?.addEventListener('error', errorListener);
+  }
+
+  removeEventListener(
+    type: 'message' | 'error',
+    listener:
+      | ((event: MessageEvent<RpcResponse>) => void)
+      | ((event: ErrorEvent) => void),
+  ): void {
+    if (type === 'message') {
+      const messageListener = listener as (
+        event: MessageEvent<RpcResponse>,
+      ) => void;
+      this.#messageListeners.delete(messageListener);
+      this.#worker?.removeEventListener('message', messageListener);
+      return;
+    }
+    const errorListener = listener as (event: ErrorEvent) => void;
+    this.#errorListeners.delete(errorListener);
+    this.#worker?.removeEventListener('error', errorListener);
+  }
+
+  terminate(): void {
+    this.#worker?.terminate();
+    this.#worker = undefined;
+  }
+}
+
+const databaseWorkerTransport = new DatabaseWorkerTransport();
+const rpc = new RpcClient(databaseWorkerTransport);
 
 const system = {
   info: () => rpc.call<Record<string, never>, SystemInfo>('system.info', {}),
@@ -144,10 +274,109 @@ function routeFooterLinks(router: Router, start: () => void): void {
   });
 }
 
-const status = document.querySelector<HTMLOutputElement>('#status');
 const router = new Router();
 
 let application: Application | undefined;
+let browserSupportDecision: BrowserSupportDecision | undefined;
+let browserSupportWarningAcknowledged = false;
+let databaseBootStarted = false;
+let databaseReady = false;
+
+const showDatabaseBootStatus = (message: string): HTMLOutputElement => {
+  const shell = document.createElement('main');
+  shell.className = 'loading-shell';
+  const heading = document.createElement('h1');
+  heading.textContent = 'SRD-55';
+  const output = document.createElement('output');
+  output.id = 'status';
+  output.setAttribute('role', 'status');
+  output.value = message;
+  shell.append(heading, output);
+  root.replaceChildren(shell);
+  root.setAttribute('aria-busy', 'true');
+  return output;
+};
+
+const showBrowserBootHold = (): void => {
+  if (databaseBootStarted) {
+    return;
+  }
+  const shell = document.createElement('main');
+  shell.className = 'browser-support-hold';
+  const heading = document.createElement('h1');
+  heading.textContent = 'Browser support check needs your decision';
+  const explanation = document.createElement('output');
+  explanation.id = 'status';
+  explanation.value =
+    'Application start is paused. Review the browser support warning and choose Continue anyway to try opening your data.';
+  explanation.dataset.ready = 'false';
+  explanation.setAttribute('role', 'status');
+  shell.append(heading, explanation);
+  root.replaceChildren(shell);
+  root.setAttribute('aria-busy', 'false');
+};
+
+const startDatabaseBoot = (): void => {
+  if (databaseBootStarted) {
+    return;
+  }
+  // This is ordinary boot idempotence, not warning acknowledgement state. It
+  // is never persisted and never changes whether the notice is rendered.
+  databaseBootStarted = true;
+  const bootStatus = showDatabaseBootStatus('Starting local database…');
+  try {
+    databaseWorkerTransport.activate();
+  } catch (error) {
+    bootStatus.value =
+      error instanceof Error
+        ? `Failed: ${error.message}`
+        : `Failed: ${String(error)}`;
+    bootStatus.dataset.ready = 'false';
+    root.setAttribute('aria-busy', 'false');
+    return;
+  }
+  system
+    .info()
+    .then(() => {
+      databaseReady = true;
+      if (application === undefined) {
+        startApplication();
+      } else {
+        application.renderCurrent();
+      }
+    })
+    .catch((error: unknown) => {
+      bootStatus.value =
+        error instanceof Error
+          ? `Failed: ${error.message}`
+          : `Failed: ${String(error)}`;
+      bootStatus.dataset.ready = 'false';
+      root.setAttribute('aria-busy', 'false');
+    });
+};
+
+const canRenderRoute = (route: Router['current']): boolean => {
+  if (legalScreen.matches(route) || databaseReady) {
+    return true;
+  }
+  switch (browserSupportDecision?.kind) {
+    case 'supported':
+    case 'untested-engine':
+      startDatabaseBoot();
+      break;
+    case 'capability-warning':
+      if (browserSupportWarningAcknowledged) {
+        startDatabaseBoot();
+      } else {
+        showBrowserBootHold();
+      }
+      break;
+    case undefined:
+      showDatabaseBootStatus('Checking browser support…');
+      break;
+  }
+  return false;
+};
 
 /**
  * Idempotent, because it now has two callers that do not know about each other:
@@ -159,7 +388,7 @@ const startApplication = (): void => {
   if (application !== undefined) {
     return;
   }
-  application = new Application(root, rpc, router);
+  application = new Application(root, rpc, router, canRenderRoute);
   application.start();
 };
 
@@ -201,18 +430,43 @@ if (import.meta.env.DEV) {
  */
 if (legalScreen.matches(router.current)) {
   startApplication();
-} else {
-  system
-    .info()
-    .then(startApplication)
-    .catch((error: unknown) => {
-      if (status !== null) {
-        status.value =
-          error instanceof Error
-            ? `Failed: ${error.message}`
-            : `Failed: ${error}`;
-        status.dataset.ready = 'false';
-        root.setAttribute('aria-busy', 'false');
-      }
-    });
 }
+
+const supportNotice = browserSupportNoticeElements();
+const browserProfile = readBrowserEngineProfile();
+supportNotice.continueButton.addEventListener('click', () => {
+  browserSupportWarningAcknowledged = true;
+  if (!legalScreen.matches(router.current)) {
+    canRenderRoute(router.current);
+  }
+});
+
+const applyBrowserCapability = (
+  outcome: Awaited<typeof browserCapability.initial>,
+): void => {
+  const decision = classifyBrowserSupport(outcome, browserProfile.knownTested);
+  browserSupportDecision = decision;
+  switch (decision.kind) {
+    case 'supported':
+      hideBrowserSupportNotice(supportNotice);
+      break;
+    case 'untested-engine':
+      showBrowserSupportNotice(supportNotice, decision, browserProfile.noun);
+      break;
+    case 'capability-warning':
+      showBrowserSupportNotice(supportNotice, decision, browserProfile.noun);
+      break;
+  }
+  if (!legalScreen.matches(router.current)) {
+    canRenderRoute(router.current);
+  }
+};
+
+void browserCapability.initial.then((initialOutcome) => {
+  applyBrowserCapability(initialOutcome);
+  void browserCapability.settled.then((settledOutcome) => {
+    if (settledOutcome !== initialOutcome) {
+      applyBrowserCapability(settledOutcome);
+    }
+  });
+});

@@ -505,6 +505,17 @@ describe('GrantRule', () => {
         "Grant-source rule 'source' requires a source definition reference.",
       ],
       [
+        'invalid definition key config type',
+        {
+          kind: 'grant_source',
+          rule_key: 'source',
+          source_type: 'feat',
+          source_definition_key: '2024:feat:magic-initiate',
+          definition_key_config: false,
+        },
+        "Grant-source rule 'source' field 'definition_key_config' must be a string or null.",
+      ],
+      [
         'missing capability tags',
         {
           kind: 'capability',

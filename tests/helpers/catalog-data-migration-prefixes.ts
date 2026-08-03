@@ -39,6 +39,7 @@ export const RECORDED_SCHEMA_PREFIX_IDS = [
   '0027_character_flavor',
   '0028_authorable_effect_storage',
   '0029_party_document_states',
+  '0030_subclass_reference_text',
 ] as const;
 
 export const PREFIX_MIGRATION_ID = 'test_catalog_prefix_probe';

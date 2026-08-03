@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -111,5 +111,44 @@ describe('tracked source is greppable', () => {
     const withNul = Buffer.from([0x61, 0x0a, 0x62, 0x00, 0x63]);
     expect(nulLines(withNul)).toEqual([2]);
     expect(nulLines(Buffer.from('a\nb\\u0000c', 'utf8'))).toEqual([]);
+  });
+});
+
+describe('browser capability is decided before user-agent identification', () => {
+  const sourceFiles = (function filesUnder(directory: string): string[] {
+    return readdirSync(join(repoRoot, directory), { withFileTypes: true })
+      .flatMap((entry) => {
+        const relative = join(directory, entry.name);
+        return entry.isDirectory()
+          ? filesUnder(relative)
+          : entry.name.endsWith('.ts')
+            ? [relative]
+            : [];
+      });
+  })('src');
+
+  it('BROWSER-PROBE-CAPABILITY-FIRST: keeps navigator and UA reads out of the decision module', () => {
+    const capability = readFileSync(
+      join(repoRoot, 'src/pwa/browser-capability.ts'),
+      'utf8',
+    );
+    expect(capability).not.toMatch(/\bnavigator\b|\bwindow\b|userAgent/iu);
+  });
+
+  it('permits UA reads only at the module that feeds the capability classifier', () => {
+    const uaReaders = sourceFiles.flatMap((file) => {
+      const source = readFileSync(join(repoRoot, file), 'utf8');
+      return /\.(?:userAgent|userAgentData)\b/u.test(source)
+        ? [{ file, source }]
+        : [];
+    });
+    expect(uaReaders).toHaveLength(1);
+    const boundary = uaReaders[0];
+    expect(boundary).toBeDefined();
+    expect(boundary?.source).toContain(
+      'BROWSER_ENGINE_IDENTIFICATION_BOUNDARY',
+    );
+    expect(boundary?.source).toContain("from './browser-capability'");
+    expect(boundary?.source).toContain('BrowserSupportDecision');
   });
 });
