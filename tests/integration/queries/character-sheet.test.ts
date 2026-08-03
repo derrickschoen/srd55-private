@@ -82,6 +82,27 @@ describe('the derived character sheet', () => {
     expect(sheet.proficiency_bonus.value).toBeNull();
   });
 
+  it('projects all four flavor fields losslessly as one nested object', () => {
+    const alignment = '  Chaotic Good  ';
+    const appearance = 'Silver eyes\nBlue cloak';
+    const backstory =
+      '</script><img src=x onerror="globalThis.flavorWasMarkup=true"> 🪐';
+    const notes = `leading space \n${'long note '.repeat(500)}\n trailing space `;
+    db.exec(
+      `UPDATE characters
+       SET alignment = ?, appearance = ?, backstory = ?, notes = ?
+       WHERE id = ?`,
+      [alignment, appearance, backstory, notes, characterId],
+    );
+
+    expect(builder.build(characterId).flavor).toEqual({
+      alignment,
+      appearance,
+      backstory,
+      notes,
+    });
+  });
+
   it('takes the proficiency bonus from TOTAL level, not from either class', () => {
     const sheet = builder.build(characterId);
     expect(sheet.total_level).toBe(8);

@@ -232,6 +232,12 @@ function sheet(level: number): CharacterSheet {
     armor: [],
     items: [],
     printed_features: [],
+    flavor: {
+      alignment: null,
+      appearance: null,
+      backstory: null,
+      notes: null,
+    },
     hit_point_rolls: [],
     equipment_packages: [],
     warnings: [],
