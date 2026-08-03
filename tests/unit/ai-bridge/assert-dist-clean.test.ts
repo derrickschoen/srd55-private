@@ -140,6 +140,10 @@ describe('the dist guard FAILS on every way the bridge could leak', () => {
     'the route prefix': 'fetch("/__ai/chat")',
     'the admission header': 'h["x-ai-bridge-token"]=t',
     'the spawn import': 'require("child_process")',
+    'the browser probe seam':
+      'window.__SRD55_BROWSER_CAPABILITY_PROBE_FAILURE__="never"',
+    'the pending D153 iOS claim wording':
+      'SRD-55 is tested only in Chromium/WebKit; on iOS, keep backup exports.',
   };
 
   for (const [what, leaked] of Object.entries(leaks)) {
