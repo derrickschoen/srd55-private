@@ -20,6 +20,7 @@ import type {
   SpellVersionId,
 } from '../../../src/domain/ids';
 import type { EligibleSpell } from '../../../src/domain/read-models';
+import type { CharacterSheet } from '../../../src/queries/character-sheet-builder';
 import type { RpcClient } from '../../../src/rpc/client';
 import { parseRoute, type Router } from '../../../src/ui/router';
 import { createLevelUpWizard } from '../../../src/ui/screens/level-up/level-up-wizard';
@@ -180,6 +181,81 @@ function ready(
   };
 }
 
+function sheet(level: number): CharacterSheet {
+  const number = (id: string, label: string, value: number) => ({
+    id,
+    label,
+    value,
+    formula: 'Hand-authored W-DRAFT-FIDELITY fixture.',
+  });
+  return {
+    character_id: 7,
+    name: 'Planned Mage',
+    total_level: level,
+    proficiency_bonus: number('proficiency_bonus', 'Proficiency bonus', 2),
+    ability_scores: [],
+    hit_points: number('hit_points', 'Hit point maximum', level === 1 ? 9 : 15),
+    species_hit_points: null,
+    armor_class: {
+      ...number('armor_class', 'Armor Class', 10),
+      winner: { label: 'Unarmored', source: 'manual', expression: '10 + DEX', total: 10 },
+      shields: [],
+      bonuses: [],
+      excluded: [],
+      tie_break: null,
+    },
+    initiative: number('initiative', 'Initiative', 0),
+    passive_perception: number('passive_perception', 'Passive Perception', 10),
+    saves: [],
+    skills: [],
+    attacks_per_action: { count: 1, unresolved: [] },
+    resources: [],
+    spells: [],
+    martial_arts: [],
+    walking_speed_feet: 30,
+    damage_resistances: [],
+    unchosen_damage_resistances: [],
+    classes: [{
+      class_name: 'Wizard',
+      level,
+      hit_die: 6,
+      is_starting_class: true,
+      subclass_name: null,
+      saving_throws: ['intelligence', 'wisdom'],
+    }],
+    proficiencies: {
+      armor_training: [],
+      weapon_proficiencies: [],
+      classes: [{ class_name: 'Wizard', via: 'initial' }],
+      weapons: [],
+    },
+    armor: [],
+    items: [],
+    printed_features: [],
+    flavor: {
+      alignment: null,
+      appearance: null,
+      backstory: null,
+      notes: null,
+    },
+    print_appendix_preferences: {
+      flavor: false,
+      spells: false,
+      audit: false,
+    },
+    hit_point_rolls: [],
+    equipment_packages: [],
+    warnings: [],
+    gaps: [],
+  };
+}
+
+async function settle(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 function click(view: HTMLElement, attribute: string): void {
   const control = interactiveElement(view).querySelector(`[${attribute}]`);
   if (control === null) throw new Error(`No control has ${attribute}.`);
@@ -304,6 +380,99 @@ function epicBoonCandidate(key: string, name: string): LevelUpFeatCandidate {
 }
 
 describe('W-LU2-DRAFT planned Skills, Expertise, and Spells', () => {
+  it('W-DRAFT-FIDELITY carries named planned_subchoices through Review, Confirm, and Complete', async () => {
+    const before = sheet(1);
+    const after = sheet(2);
+    const preview = vi.fn().mockResolvedValue({
+      before,
+      after,
+      new_outstanding_choices: [],
+      command_fingerprint: 'server-reviewed-planned-command',
+    });
+    const submit = vi.fn().mockResolvedValue({
+      inverse: { type: 'restore_snapshot', snapshot: {}, integrity: 'test' },
+      revision: 5,
+      idempotent_replay: false,
+    });
+    const wizard = createLevelUpWizard({
+      state: ready(),
+      cancel: () => undefined,
+      spellPickerFactory: pickerFactory,
+      preview,
+      submit,
+      loadSheet: vi.fn().mockResolvedValue(after),
+      randomUuid: () => '51515151-5151-4151-8151-515151515151',
+    });
+
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    chooseSelect(wizard.element, LEVEL_UP_ATTR.skillChoice, 'arcana');
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    chooseSelect(wizard.element, LEVEL_UP_ATTR.expertiseChoice, 'history');
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    for (const locator of [
+      classLocator('wizard-prepared', 5),
+      classLocator('wizard-spellbook', 7),
+    ]) {
+      spellCard(wizard.element, locator).querySelector('button')?.click();
+    }
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    await settle();
+
+    const plannedSubchoices = {
+      skills: [{ locator: classLocator('scholar-skill', 1), skill: 'arcana' }],
+      expertise: [{
+        locator: classLocator('class_expertise_2', 1),
+        skill: 'history',
+      }],
+      spells: [
+        {
+          kind: 'slot_selection',
+          locator: classLocator('wizard-prepared', 5),
+          spell_version_id: 91,
+          mode: 'new',
+        },
+        {
+          kind: 'spellbook_acquisition',
+          locator: classLocator('wizard-spellbook', 7),
+          spell_version_id: 91,
+        },
+      ],
+    } as const;
+    expect(preview).toHaveBeenCalledWith(4, {
+      type: 'level_up_class',
+      class_definition_id: 11,
+      target_level: 2,
+      planned_subchoices: plannedSubchoices,
+    });
+    for (const text of [
+      'Skill proficiency Arcana — Wizard — Scholar',
+      'Expertise History — Wizard — Scholar',
+      'Spell Thunderwave — Wizard',
+      'New class feature Scholar',
+    ]) {
+      expect(elementText(wizard.element)).toContain(text);
+    }
+
+    click(wizard.element, LEVEL_UP_ATTR.confirm);
+    await settle();
+    expect(submit).toHaveBeenCalledWith(
+      4,
+      expect.objectContaining({ planned_subchoices: plannedSubchoices }),
+      '51515151-5151-4151-8151-515151515151',
+    );
+    for (const text of [
+      'Skill proficiency: Arcana — Wizard — Scholar.',
+      'Expertise: History — Wizard — Scholar.',
+      'Spell: Thunderwave — Wizard.',
+      'New class feature: Scholar.',
+    ]) {
+      expect(elementText(wizard.element)).toContain(text);
+    }
+    expect(wizard.element.getAttribute('aria-busy')).toBe('false');
+    wizard.cleanup();
+  });
+
   it('keeps colliding rule and ordinal locators distinct across source kinds and existing sources', () => {
     const locators: readonly PlannedGrantLocator[] = [
       sourceLocator({ kind: 'selected_class' }, 'colliding-grant', 1),

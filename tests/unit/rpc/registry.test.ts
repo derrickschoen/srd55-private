@@ -21,6 +21,8 @@ afterEach(() => {
 
 describe('RPC registry', () => {
   it('eagerly discovers convention modules and exposes sorted methods', () => {
+    expect(rpcRegistry.methods).toContain('party.listDocumentStates');
+    expect(rpcRegistry.methods).toContain('party.saveDocumentState');
     expect(rpcRegistry.methods).toContain('system.info');
     expect(rpcRegistry.methods).toContain('system.inspectRows');
     expect(rpcRegistry.methods).toEqual([...rpcRegistry.methods].sort());

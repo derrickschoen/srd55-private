@@ -601,9 +601,9 @@ describe('the grants a character actually has, read from the database', () => {
     db.exec(
       `INSERT INTO subclass_feature_effects
          (subclass_feature_id, sort_order, effect_kind, attack_count,
-          weapon_scope)
+          weapon_scope, label)
        VALUES (last_insert_rowid(), 1, 'extra_attack', 3,
-               'one_bonded_weapon')`,
+               'one_bonded_weapon', 'Bound Refrain')`,
     );
     addLevels('Bard', 6, { starting: true, subclassId });
 

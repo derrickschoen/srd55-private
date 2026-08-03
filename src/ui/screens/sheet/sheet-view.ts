@@ -1,10 +1,18 @@
 import { freeTextSpan } from '../../free-text';
 import { BUILD_ID } from '../../../build-id';
+import { levelUpPath } from '../../../builder/level-up-wizard';
 import type {
   CharacterSheet,
   SheetAbilityScore,
   SheetArmorClassFormula,
 } from '../../../queries/character-sheet-builder';
+import type {
+  CharacterSpellSection,
+  SheetSpell,
+  SheetSpellbookEntry,
+  SheetSpellGroup,
+  SheetSpellcastingStatistic,
+} from '../../../queries/character-spell-section-builder';
 import type {
   ArmorClassExclusionReason,
   ArmorClassSourceCategory,
@@ -22,6 +30,34 @@ import {
   type ClassFormulaResourceKind,
   type ClassResourceKind,
 } from '../../../domain/class-resources';
+
+export interface SheetHeaderRouteAction {
+  readonly label: 'All characters' | 'Level Up' | 'Open planner';
+  readonly href: string;
+  readonly className: 'button-primary sheet-chrome' | 'button-secondary sheet-chrome';
+}
+
+export function sheetHeaderRouteActions(
+  characterId: number,
+): readonly SheetHeaderRouteAction[] {
+  return [
+    {
+      label: 'All characters',
+      href: '/',
+      className: 'button-secondary sheet-chrome',
+    },
+    {
+      label: 'Level Up',
+      href: levelUpPath(characterId),
+      className: 'button-primary sheet-chrome',
+    },
+    {
+      label: 'Open planner',
+      href: `/characters/${String(characterId)}`,
+      className: 'button-secondary sheet-chrome',
+    },
+  ];
+}
 
 /**
  * THE CHARACTER SHEET, PROJECTED ONCE AND RENDERED TWICE.
@@ -57,6 +93,87 @@ import {
 
 export const SHEET_JSON_SCRIPT_ID = 'character-sheet-facts';
 
+export const FLAVOR_PRINT_CODE_POINT_LIMIT = 400;
+export const FLAVOR_APPENDIX_ORDER = 100;
+export const SHEET_PRINT_APPENDIX_CLASS = 'sheet-print-appendix';
+export const SHEET_PRINT_APPENDIX_PROSE_CLASS =
+  'sheet-print-appendix-prose';
+
+export interface FlavorAppendixContent {
+  readonly id: 'flavor';
+  readonly order: number;
+  readonly title: string;
+  readonly entries: readonly {
+    readonly id: 'backstory' | 'notes';
+    readonly label: string;
+    readonly text: string;
+  }[];
+}
+
+export interface SheetPrintAppendixRegistration {
+  readonly id: string;
+  readonly order: number;
+  readonly element: HTMLElement;
+}
+
+export interface FlavorPrintProjection {
+  readonly text: string;
+  readonly total_code_points: number;
+  readonly printed_code_points: number;
+  readonly continuation: string | null;
+}
+
+function presentFlavorText(value: string | null): value is string {
+  return value !== null && value.trim().length > 0;
+}
+
+/** Pure, code-point-aware projection used by the transient print DOM. */
+export function flavorPrintProjection(value: string): FlavorPrintProjection {
+  const codePoints = [...value];
+  if (codePoints.length <= FLAVOR_PRINT_CODE_POINT_LIMIT) {
+    return {
+      text: value,
+      total_code_points: codePoints.length,
+      printed_code_points: codePoints.length,
+      continuation: null,
+    };
+  }
+  return {
+    text: codePoints.slice(0, FLAVOR_PRINT_CODE_POINT_LIMIT).join(''),
+    total_code_points: codePoints.length,
+    printed_code_points: FLAVOR_PRINT_CODE_POINT_LIMIT,
+    continuation:
+      `Text cut for the main sheet: the first ${String(FLAVOR_PRINT_CODE_POINT_LIMIT)} ` +
+      `of ${String(codePoints.length)} code points are printed here. The full ` +
+      'written-text appendix option prints the rest.',
+  };
+}
+
+/** Pure appendix factory: stored text enters unchanged and no DOM is required. */
+export function flavorAppendix(
+  sheet: CharacterSheet,
+): FlavorAppendixContent | null {
+  const entries: FlavorAppendixContent['entries'][number][] = [];
+  if (presentFlavorText(sheet.flavor.backstory)) {
+    entries.push({
+      id: 'backstory',
+      label: 'Backstory',
+      text: sheet.flavor.backstory,
+    });
+  }
+  if (presentFlavorText(sheet.flavor.notes)) {
+    entries.push({ id: 'notes', label: 'Notes', text: sheet.flavor.notes });
+  }
+  return entries.length === 0
+    ? null
+    : {
+        id: 'flavor',
+        order: FLAVOR_APPENDIX_ORDER,
+        title: 'Full character written text',
+        entries,
+      };
+}
+
 /** One run of text in the readable form. `free_text` means the author is unverified. */
 export interface SheetCell {
   readonly text: string;
@@ -77,10 +194,32 @@ export interface SheetRow {
   };
 }
 
-export interface SheetSection {
+export interface SheetRowSection {
   readonly caption: string;
   readonly rows: readonly SheetRow[];
+  readonly spell_groups?: never;
 }
+
+export interface SheetSpellStatisticsBlock {
+  readonly label: string | null;
+  readonly lines: readonly (readonly SheetCell[])[];
+}
+
+export interface SheetSpellDisplayGroup {
+  readonly id: string;
+  readonly heading: readonly SheetCell[] | null;
+  readonly statistics: SheetSpellStatisticsBlock;
+  readonly rows: readonly SheetRow[];
+  readonly spellbook_rows: readonly SheetRow[];
+}
+
+export interface SheetSpellSection {
+  readonly caption: 'Spells';
+  readonly spell_groups: readonly SheetSpellDisplayGroup[];
+  readonly rows?: never;
+}
+
+export type SheetSection = SheetRowSection | SheetSpellSection;
 
 function plain(text: string): SheetCell[] {
   return [{ text }];
@@ -88,6 +227,132 @@ function plain(text: string): SheetCell[] {
 
 function signed(value: number): string {
   return value >= 0 ? `+${String(value)}` : String(value);
+}
+
+function abilityLabel(
+  statistic: SheetSpellcastingStatistic & { readonly status: 'computed' },
+): string {
+  switch (statistic.ability) {
+    case 'strength':
+      return 'Strength';
+    case 'dexterity':
+      return 'Dexterity';
+    case 'constitution':
+      return 'Constitution';
+    case 'intelligence':
+      return 'Intelligence';
+    case 'wisdom':
+      return 'Wisdom';
+    case 'charisma':
+      return 'Charisma';
+  }
+  const unhandled: never = statistic.ability;
+  return unhandled;
+}
+
+function spellStatisticText(statistic: SheetSpellcastingStatistic): string {
+  switch (statistic.status) {
+    case 'computed':
+      return `Save DC ${String(statistic.save_dc)} · Spell attack ${signed(statistic.attack_bonus)}`;
+    case 'absent':
+      return 'Save DC and spell attack are unknown because this source has no spellcasting ability recorded.';
+  }
+  const unhandled: never = statistic;
+  return unhandled;
+}
+
+function spellLevelText(spell: SheetSpellbookEntry): string {
+  switch (spell.level.status) {
+    case 'known':
+      return spell.level.value === 0
+        ? 'Cantrip'
+        : `Level ${String(spell.level.value)}`;
+    case 'unknown':
+      return 'Level unknown';
+  }
+  const unhandled: never = spell.level;
+  return unhandled;
+}
+
+function spellMarkerText(spell: SheetSpell): string {
+  switch (spell.marker) {
+    case 'prepared':
+      return 'Prepared';
+    case 'known':
+      return 'Known';
+  }
+  const unhandled: never = spell.marker;
+  return unhandled;
+}
+
+function spellGroupId(group: SheetSpellGroup): string {
+  switch (group.kind) {
+    case 'class':
+      return `class:${String(group.class_definition_id)}`;
+    case 'other_source':
+      return `source:${String(group.source_instance_id)}`;
+  }
+  const unhandled: never = group;
+  return unhandled;
+}
+
+function spellSection(spells: CharacterSpellSection): SheetSpellSection {
+  let contributingClassGroups = 0;
+  for (const group of spells) {
+    if (group.kind === 'class') {
+      contributingClassGroups += 1;
+    }
+  }
+  return {
+    caption: 'Spells',
+    spell_groups: spells.map((group): SheetSpellDisplayGroup => {
+      const id = spellGroupId(group);
+      const heading =
+        group.kind === 'other_source'
+          ? [{ text: group.source_name, free_text: true as const }]
+          : contributingClassGroups >= 2
+            ? [{ text: group.class_name, free_text: true as const }]
+            : null;
+      const mixedStatistics = group.statistics.length > 1;
+      const sourceName =
+        group.kind === 'class' ? group.class_name : group.source_name;
+      return {
+        id,
+        heading,
+        statistics: {
+          label: mixedStatistics ? 'Spellcasting statistics' : null,
+          lines: group.statistics.map((statistic) =>
+            mixedStatistics
+              ? [
+                  { text: sourceName, free_text: true as const },
+                  {
+                    text:
+                      statistic.status === 'computed'
+                        ? ` (${abilityLabel(statistic)}) — ${spellStatisticText(statistic)}`
+                        : ` — ${spellStatisticText(statistic)}`,
+                  },
+                ]
+              : [{ text: spellStatisticText(statistic) }],
+          ),
+        },
+        rows: group.spells.map((spell) => ({
+          id: `spell:${id}:${String(spell.spell_version_id)}`,
+          label: [{ text: spell.name, free_text: true }],
+          value: spellLevelText(spell),
+          detail: plain(spellMarkerText(spell)),
+        })),
+        spellbook_rows:
+          group.kind === 'class'
+            ? group.spellbook.map((spell) => ({
+                id: `spellbook:${id}:${String(spell.spell_version_id)}`,
+                label: [{ text: spell.name, free_text: true }],
+                value: spellLevelText(spell),
+                detail: plain('Spellbook'),
+              }))
+            : [],
+      };
+    }),
+  };
 }
 
 export type ResourceMarkingShape = 'boxes' | 'remaining';
@@ -561,7 +826,15 @@ export function sheetSections(sheet: CharacterSheet): readonly SheetSection[] {
     caption: 'Skills',
     rows: sheet.skills.map((skill) => ({
       id: skill.id,
-      label: plain(`${skill.label}${skill.proficient ? ' (proficient)' : ''}`),
+      label: plain(
+        `${skill.label}${
+          skill.expertise
+            ? ' (Expertise)'
+            : skill.proficient
+              ? ' (proficient)'
+              : ''
+        }`,
+      ),
       value: skill.value === null ? 'undetermined' : signed(skill.value),
       detail: plain(skill.formula),
     })),
@@ -722,6 +995,10 @@ export function sheetSections(sheet: CharacterSheet): readonly SheetSection[] {
   });
   sections.push({ caption: 'Attacks and movement', rows: combat });
 
+  if (sheet.spells.length > 0) {
+    sections.push(spellSection(sheet.spells));
+  }
+
   // D102: PRINT THE WORDS, DO NOT TURN THEM INTO FACTS. Background tool text
   // and species trait prose stay in the readable projection, marked as
   // unverified free text, and are deliberately absent from `sheetFacts`.
@@ -754,6 +1031,28 @@ export function sheetSections(sheet: CharacterSheet): readonly SheetSection[] {
             : [{ text: feature.text, free_text: true }],
       })),
     });
+  }
+
+  const flavorRows: SheetRow[] = [];
+  const flavorFields = [
+    ['alignment', 'Alignment', sheet.flavor.alignment],
+    ['appearance', 'Appearance', sheet.flavor.appearance],
+    ['backstory', 'Backstory', sheet.flavor.backstory],
+    ['notes', 'Notes', sheet.flavor.notes],
+  ] as const;
+  for (const [id, label, value] of flavorFields) {
+    if (!presentFlavorText(value)) {
+      continue;
+    }
+    flavorRows.push({
+      id: `flavor:${id}`,
+      label: plain(`${label} — unverified free text`),
+      value: null,
+      detail: [{ text: value, free_text: true }],
+    });
+  }
+  if (flavorRows.length > 0) {
+    sections.push({ caption: 'Character details', rows: flavorRows });
   }
 
   const recorded: SheetRow[] = [];
@@ -1147,6 +1446,79 @@ function cells(parts: readonly SheetCell[], into: HTMLElement): void {
   }
 }
 
+function renderSheetRow(row: SheetRow): HTMLDivElement {
+  const container = document.createElement('div');
+  container.className = 'sheet-number';
+  container.dataset.sheetId = row.id;
+  const label = document.createElement('dt');
+  cells(row.label, label);
+  const value = document.createElement('dd');
+  if (row.value !== null) {
+    const figure = document.createElement('span');
+    figure.className = 'sheet-figure';
+    figure.dataset.sheetValue = row.id;
+    figure.textContent = row.value;
+    value.append(figure);
+  }
+  if (row.resource_marking !== undefined) {
+    value.append(resourceTrack(row.resource_marking));
+  }
+  const detail = document.createElement('p');
+  detail.className = 'sheet-formula';
+  if (row.id.startsWith('flavor:')) {
+    detail.classList.add('sheet-flavor-value');
+  }
+  cells(row.detail, detail);
+  value.append(detail);
+  container.append(label, value);
+  return container;
+}
+
+function renderSpellGroup(group: SheetSpellDisplayGroup): HTMLDivElement {
+  const element = document.createElement('div');
+  element.className = 'sheet-spell-group';
+  element.dataset.spellGroup = group.id;
+  if (group.heading !== null) {
+    const heading = document.createElement('h3');
+    heading.className = 'sheet-spell-group-heading';
+    cells(group.heading, heading);
+    element.append(heading);
+  }
+
+  const statistics = document.createElement('div');
+  statistics.className = 'sheet-spell-statistics';
+  if (group.statistics.label !== null) {
+    const statisticsLabel = document.createElement('p');
+    statisticsLabel.className = 'sheet-spell-statistics-label';
+    statisticsLabel.textContent = group.statistics.label;
+    statistics.append(statisticsLabel);
+  }
+  for (const line of group.statistics.lines) {
+    const statistic = document.createElement('p');
+    statistic.className = 'sheet-spell-statistic';
+    cells(line, statistic);
+    statistics.append(statistic);
+  }
+  element.append(statistics);
+
+  const list = document.createElement('dl');
+  list.className = 'sheet-numbers sheet-spells';
+  for (const row of group.rows) {
+    list.append(renderSheetRow(row));
+  }
+  element.append(list);
+  if (group.spellbook_rows.length > 0) {
+    const spellbook = document.createElement('dl');
+    spellbook.className = 'sheet-numbers sheet-spells sheet-spellbook';
+    spellbook.setAttribute('aria-label', 'Spellbook');
+    for (const row of group.spellbook_rows) {
+      spellbook.append(renderSheetRow(row));
+    }
+    element.append(spellbook);
+  }
+  return element;
+}
+
 function resourceTrack(
   marking: NonNullable<SheetRow['resource_marking']>,
 ): HTMLSpanElement {
@@ -1192,20 +1564,40 @@ export function renderSheet(sheet: CharacterSheet): HTMLElement {
 
   const header = document.createElement('header');
   header.className = 'sheet-header';
-  const home = document.createElement('a');
-  home.href = '/';
-  home.dataset.routerLink = 'true';
-  home.className = 'button-secondary sheet-chrome';
-  home.textContent = 'All characters';
-  const planner = document.createElement('a');
-  planner.href = `/characters/${String(sheet.character_id)}`;
-  planner.dataset.routerLink = 'true';
-  planner.className = 'button-secondary sheet-chrome';
-  planner.textContent = 'Open planner';
+  const routeActions = sheetHeaderRouteActions(sheet.character_id).map(
+    (action) => {
+      const link = document.createElement('a');
+      link.href = action.href;
+      link.dataset.routerLink = 'true';
+      link.className = action.className;
+      link.textContent = action.label;
+      return link;
+    },
+  );
+  const print = document.createElement('button');
+  print.type = 'button';
+  print.className = 'button-secondary sheet-chrome';
+  print.dataset.sheetPrint = 'true';
+  print.textContent = 'Print character sheet';
   const heading = document.createElement('h1');
   heading.append('Character sheet — ');
   heading.append(freeTextSpan(sheet.name));
-  header.append(home, planner, heading);
+  header.append(...routeActions, print, heading);
+  if (flavorAppendix(sheet) !== null) {
+    const options = document.createElement('fieldset');
+    options.className = 'sheet-print-options sheet-chrome';
+    const legend = document.createElement('legend');
+    legend.textContent = 'Print options';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.id = `sheet-print-flavor-${String(sheet.character_id)}`;
+    input.dataset.sheetPrintOption = 'flavor-appendix';
+    const label = document.createElement('label');
+    label.htmlFor = input.id;
+    label.textContent = 'Include full backstory and notes appendix';
+    options.append(legend, input, label);
+    header.append(options);
+  }
   shell.append(header);
 
   // THE WARNINGS COME FIRST AND ARE NOT COLLAPSIBLE. Each describes a
@@ -1234,33 +1626,19 @@ export function renderSheet(sheet: CharacterSheet): HTMLElement {
     element.className = 'sheet-panel';
     const caption = document.createElement('h2');
     caption.textContent = section.caption;
-    const list = document.createElement('dl');
-    list.className = 'sheet-numbers';
-    for (const row of section.rows) {
-      const container = document.createElement('div');
-      container.className = 'sheet-number';
-      container.dataset.sheetId = row.id;
-      const label = document.createElement('dt');
-      cells(row.label, label);
-      const value = document.createElement('dd');
-      if (row.value !== null) {
-        const figure = document.createElement('span');
-        figure.className = 'sheet-figure';
-        figure.dataset.sheetValue = row.id;
-        figure.textContent = row.value;
-        value.append(figure);
+    if ('rows' in section) {
+      const list = document.createElement('dl');
+      list.className = 'sheet-numbers';
+      for (const row of section.rows) {
+        list.append(renderSheetRow(row));
       }
-      if (row.resource_marking !== undefined) {
-        value.append(resourceTrack(row.resource_marking));
+      element.append(caption, list);
+    } else {
+      element.append(caption);
+      for (const group of section.spell_groups) {
+        element.append(renderSpellGroup(group));
       }
-      const detail = document.createElement('p');
-      detail.className = 'sheet-formula';
-      cells(row.detail, detail);
-      value.append(detail);
-      container.append(label, value);
-      list.append(container);
     }
-    element.append(caption, list);
     shell.append(element);
   }
 
@@ -1285,6 +1663,12 @@ export function renderSheet(sheet: CharacterSheet): HTMLElement {
 
 const PRINT_FIELD_SELECTOR = '[data-sheet-print-field]';
 const PRINT_NOTICE_SELECTOR = '[data-sheet-print-notice]';
+const PRINT_APPENDIX_SELECTOR = '[data-sheet-print-appendix]';
+
+export interface SheetPrintOptions {
+  readonly flavor_appendix: boolean;
+  readonly [option: string]: boolean;
+}
 
 function emptyPaperEntry(kind: 'box' | 'line'): HTMLSpanElement {
   const entry = document.createElement('span');
@@ -1292,6 +1676,102 @@ function emptyPaperEntry(kind: 'box' | 'line'): HTMLSpanElement {
   entry.dataset.sheetPrintEntry = kind;
   entry.setAttribute('aria-label', 'Empty; fill in on paper');
   return entry;
+}
+
+function setFlavorPrintRows(
+  shell: HTMLElement,
+  sheet: CharacterSheet,
+  printMedia: boolean,
+): void {
+  const values = [
+    ['alignment', sheet.flavor.alignment, false],
+    ['appearance', sheet.flavor.appearance, false],
+    ['backstory', sheet.flavor.backstory, true],
+    ['notes', sheet.flavor.notes, true],
+  ] as const;
+  for (const [id, value, truncatable] of values) {
+    if (!presentFlavorText(value)) {
+      continue;
+    }
+    const container = shell.querySelector<HTMLElement>(
+      `[data-sheet-id="flavor:${id}"] .sheet-flavor-value`,
+    );
+    if (container === null) {
+      throw new Error(`The printable sheet requires its ${id} flavor row.`);
+    }
+    const projection =
+      printMedia && truncatable
+        ? flavorPrintProjection(value)
+        : {
+            text: value,
+            total_code_points: [...value].length,
+            printed_code_points: [...value].length,
+            continuation: null,
+          };
+    container.replaceChildren(freeTextSpan(projection.text));
+    if (projection.continuation !== null) {
+      const marker = document.createElement('span');
+      marker.className = 'sheet-flavor-continuation';
+      marker.dataset.sheetFlavorContinuation = id;
+      marker.textContent = projection.continuation;
+      container.append(marker);
+    }
+  }
+}
+
+function renderFlavorAppendix(
+  content: FlavorAppendixContent,
+): SheetPrintAppendixRegistration {
+  const appendix = document.createElement('section');
+  appendix.className = `${SHEET_PRINT_APPENDIX_CLASS} sheet-flavor-appendix`;
+  const heading = document.createElement('h2');
+  heading.textContent = content.title;
+  appendix.append(heading);
+  for (const entry of content.entries) {
+    const section = document.createElement('section');
+    section.className = 'sheet-print-appendix-section';
+    section.dataset.flavorAppendixEntry = entry.id;
+    const label = document.createElement('h3');
+    label.textContent = `${entry.label} — unverified free text`;
+    const prose = document.createElement('p');
+    prose.className = `${SHEET_PRINT_APPENDIX_PROSE_CLASS} sheet-flavor-value`;
+    prose.append(freeTextSpan(entry.text));
+    section.append(label, prose);
+    appendix.append(section);
+  }
+  return {
+    id: content.id,
+    order: content.order,
+    element: appendix,
+  };
+}
+
+/**
+ * Shared relative-order compositor. Future appendix producers register an
+ * order and element; no producer owns a closed list of appendix kinds.
+ */
+export function composeSheetPrintAppendices(
+  shell: HTMLElement,
+  registrations: readonly SheetPrintAppendixRegistration[],
+): void {
+  for (const appendix of Array.from(
+    shell.querySelectorAll(PRINT_APPENDIX_SELECTOR),
+  )) {
+    appendix.remove();
+  }
+  const notice = shell.querySelector(PRINT_NOTICE_SELECTOR);
+  for (const registration of orderedSheetPrintAppendices(registrations)) {
+    registration.element.dataset.sheetPrintAppendix = registration.id;
+    shell.insertBefore(registration.element, notice);
+  }
+}
+
+export function orderedSheetPrintAppendices(
+  registrations: readonly SheetPrintAppendixRegistration[],
+): readonly SheetPrintAppendixRegistration[] {
+  return [...registrations].sort(
+    (left, right) => left.order - right.order || left.id.localeCompare(right.id),
+  );
 }
 
 /**
@@ -1302,14 +1782,18 @@ function emptyPaperEntry(kind: 'box' | 'line'): HTMLSpanElement {
  */
 export function setSheetPrintContent(
   shell: HTMLElement,
+  sheet: CharacterSheet,
   printMedia: boolean,
+  options: SheetPrintOptions,
 ): void {
   for (const field of Array.from(
     shell.querySelectorAll(PRINT_FIELD_SELECTOR),
   )) {
     field.remove();
   }
+  composeSheetPrintAppendices(shell, []);
   shell.querySelector(PRINT_NOTICE_SELECTOR)?.remove();
+  setFlavorPrintRows(shell, sheet, printMedia);
   if (!printMedia) {
     return;
   }
@@ -1349,6 +1833,13 @@ export function setSheetPrintContent(
   experiencePointsValue.append(emptyPaperEntry('line'));
   experiencePoints.append(experiencePointsLabel, experiencePointsValue);
   totalLevel.after(experiencePoints);
+
+  const appendices: SheetPrintAppendixRegistration[] = [];
+  const flavorContent = flavorAppendix(sheet);
+  if (options.flavor_appendix && flavorContent !== null) {
+    appendices.push(renderFlavorAppendix(flavorContent));
+  }
+  composeSheetPrintAppendices(shell, appendices);
 
   const notice = document.createElement('section');
   notice.className = 'sheet-print-notice';

@@ -23,6 +23,135 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
+## RESTART POINT 2026-08-03-c (newest - read first)
+MAIN d749f15 (FF-C merged; mirror pushed). FLOORS: vitest 211/3,470; PW
+107/24 specs; build 0; migrations 0000-0029; wire v1-v17.
+FF-C landed with D162 persistence in character_rule_overrides (new
+preference RPC), 2 review rounds, 2 supervisor controls. REJECTED review
+findings on record: share-cap edge (typed refusal at capacity = D124
+design; FLAG FOR OWNER question round), SC-1 exact-level-set (provenance
+SHA owns content).
+GATE QUEUE NEXT: BROWSER-PROBE (wt/hyg2, digest GATE-READY), then CI-3a
+dispatch (mint lane wt/attunement now free, strictly serial). OATH DOC
+still awaiting owner (wt/party 922052f). Idle lanes fast-forwarded.
+
+## RESTART POINT 2026-08-03-b (superseded by -c)
+MAIN e8274e2 (SC-1 merged; mirror pushed). FLOORS: vitest 211/3,462; PW
+104/24; build 0; migrations 0000-0029; wire v1-v17.
+MERGED THIS MORNING: D177 guidelines f15fd1b (opus hygiene audit SAFE,
+CC-BY notice appended to 01/02; manager deviation: it did not commit its
+own deliverable), SC-1 e8274e2 (2 review rounds, 9 mutation vectors;
+exact-level-set ask REJECTED - provenance SHA owns content).
+IN FLIGHT: FF-C (wt/attunement, fix round 1 committed - D162 persistence
+moved off localStorage into character_rule_overrides via new RPC; review
+round 2 + full vitest running; then control + full PW + merge).
+OATH DOC: draft committed in wt/party 922052f, sent to owner, 9
+OWNER-APPROVAL markers OPEN - do not merge until the owner rules.
+FINDING (codex process): during FF-C review round 1 codex piped the diff
+to `claude -p` as a sub-reviewer (timed out, exit 124). Claude-credit
+substitution inside the codex role - review briefs now carry an explicit
+"no other agents/CLIs" line.
+CONTENTION NOTE: full vitest beside a codex single-file-PW fix round
+produced a worker-RPC-timeout exit 1 with all tests green; uncontended
+re-run exit 0. The one-suite law now also means: prefer a quiet machine
+for the FINAL pre-merge run.
+NEXT AFTER FF-C: BROWSER-PROBE gate (wt/hyg2, digest GATE-READY), then
+CI-3a dispatch (mint lane, strictly serial).
+
+## RESTART POINT 2026-08-03 (superseded by -b above)
+MAIN 4314313 (D177). MERGED TODAY: W-F 9af49bd (BAR ITEM 3 CLOSED - the
+whole wizard chain is done), HA-1 ff31fe4 (migration 0028; mint lane
+OPEN). FLOORS: vitest 3,414+ / 208 files; PW 104 / 24 specs; build 0;
+migrations 0000-0028 frozen; wire v1-v17.
+GATE QUEUE: P3 in wt/party (fix round for 3 review findings running -
+log p3-fix.log; pre-fix suite was INVALIDATED by fix-round overlap, HMR
+navigation signature; after fix: full re-gate, control, merge as 0029,
+drop residual stash@{0}); then FF-C (wt/attunement, done+ungated), SC-1
+(wt/resp, fixed+ungated), BROWSER-PROBE (wt/hyg2, digest GATE-READY).
+After P3 merges: CI-3a dispatches (mint lane, STRICTLY serial now).
+D177 GUIDELINE PROJECT: an ISOLATED FABLE MANAGER agent owns it (spawns
+its own fable researchers + codex synthesis + opus hygiene audit,
+commits docs/design/subclass-guidelines/ itself, reports SANITIZED).
+CLEAN-ROOM RULE FOR THIS SESSION: do NOT read the research task outputs
+(tasks/a14f5*, tasks/a4b95*, scratchpad/subclass-anatomy.log) - the main
+session stays unpolluted; consume only the committed guideline files.
+BLACKGUARD (D175): outline presented to owner; awaiting their taste on
+name / level-10 slot / fiendish-vs-subtle. Then codex design doc on the
+parallel track (does NOT block publication). OGL quarantine = D176.
+Open owner items: org name (D168), spike-repo deletion, invented-monk
+draft (D169), SS-2B marker extension flagged for next question round.
+
+## MINT COLLISION 2026-08-02 (supervisor scheduling miss, full length)
+P3 (dispatched to wt/party with a MINT brief) minted 0028_party_document_
+states while HA-1's committed-but-ungated 0028 sat in wt/mint2. The brief
+told codex to verify the tail; it verified against MAIN, where 0028 was
+free - the collision is the supervisor's for dispatching a mint outside
+the mint-lane serialization with a mint outstanding. RESOLUTION: HA-1's
+0028 wins (mint lane, minted first). Order: HA-1 full gate + merge NOW,
+then P3 fix-dispatch renumbers its migration to 0029 (file + registry +
+schema-signature test), then P3 gate. P3's numbers (vitest 209/3,347, PW
+100 claimed) will need re-verification after the renumber.
+
+## SEAM RULING 2026-08-02 (taken-for-now, D7 register)
+W-F round 2 stop, ratified: LU-W §7.4 (every acquired spell on the sheet)
+vs SS-2 (unprepared spellbook entries excluded from Prepared/Known).
+Resolution: SS-2B dispatched (wt/pwa, ss2b.log, port 44537) - distinct
+"Spellbook" marker rows under the class group, after prepared/known,
+same comparator, screen+print. Seam: marker vocabulary; flip cost: a
+display toggle. W-F re-dispatches (third time) after SS-2B merges.
+Owner note: this extends D149's marker set; flagged for the owner's
+next question round rather than blocking.
+
+## RESTART POINT 2026-08-02-c (read this first after any context loss)
+MAIN c1830df (W-E merged; post-merge vitest 3,292; PW floor 97; mirror
+pushed). MERGED since -b: SS-1 eafbd68 amendment note, W-D 9a00a8d,
+P1-GH a0a5382, D173 e2ca90b, W-E c1830df.
+OWNER QUESTION IN FLIGHT - MUST BE ANSWERED WHEN AGENTS RETURN: the owner
+asked for (1) subclasses in older SRDs absent from SRD 5.2.1 with
+2024-PHB markings, and (2) spells in older SRDs absent from 5.2.1 plus
+old-vs-2024 mechanical differences. Two sonnet agents are researching
+(logs land as task notifications). Synthesize + sanity-check their
+VERIFIED-vs-RECALLED labels, then answer the owner context-rich.
+IN FLIGHT: SS-2 full gate (wt/pwa, task running: merge+tscb+build+vitest+
+PW 44532; on green: noncanonical-order control from ss2-fix, then merge,
+THEN re-dispatch W-F which correctly gate-stopped on SS-2's files);
+SC-1 (wt/resp, sc1.log); FF-C (wt/attunement, ffc.log, D162 amendment,
+exports appendix machinery SS-3 needs).
+STILL QUEUED: P2 gate (wt/party - ADJUDICATE codex's contradicted
+full-suite claim: log showed 8 fails/5 files in known contention set vs
+claimed 1; typecheck absent from its transcript - my solo numbers decide;
+record claimed-vs-verified either way); BROWSER-PROBE gate (wt/hyg2,
+digest verdict GATE-READY); HA-1 full gate (wt/mint2, mint-lane blocker);
+then CI-3a. Sol-digest precedent: fix-log digestion via model:sonnet
+agent worked well (caught the P2 claim discrepancy).
+LOOP: dynamic heartbeat re-arms each turn with the owner's amended
+prompt (parallelize + delegate-to-sol language). Fix rounds W-E/SS-2/P2/
+BROWSER-PROBE all returned; W-E fully gated with TWO supervisor controls.
+
+## RESTART POINT 2026-08-02-b (read this first after any context loss)
+MAIN a0a5382. Mirror derrickschoen/srd55-private: push after EVERY merge.
+MERGED TODAY: FF-A a00455a, P0B 582a175, SS-1 eafbd68, W-D 9a00a8d,
+P1-GH a0a5382, + design docs (W-MC, SPELL-SEC, SUBCL-SEED, spike
+evidence). FLOORS: vitest 3,280 / 204 files; PW 93 tests / 20 spec files;
+build 0; migrations 0000-0027 frozen; wire v1-v17 frozen.
+CONCURRENCY LAW: ONE full suite of any kind machine-wide; ~4 codex
+dispatches max; codex CLI --testTimeout/--timeout flags are NOT gate
+results.
+IN FLIGHT: W-E (wt/print, log we.log); SS-2 (wt/pwa, ss2.log, amendment:
+SS-1 already attached CharacterSheet.spells); P2 (wt/party, p2.log,
+amendment: D154/D155/D156/D163 win); BROWSER-PROBE (wt/hyg2,
+browser-probe.log); brief workflow authoring sc-1..6, walk-3,
+update-prompt, bug-report.
+NEXT GATES WAITING: HA-1 in wt/mint2 (committed long ago, needs merge
+main + FULL gate + review - THE MINT LANE IS BLOCKED ON IT: after it,
+CI-3a per the recorded mint order). Also pending: SUBCL invented-monk
+draft for owner approval (D169); WebKit spike (D153); org name (D168);
+spike-repo deletion (needs delete_repo grant); P1-GL/P1-CB briefs exist
+(fixtures-only per D160).
+QUESTION ROUNDS: 1-3 done (D161-D172). Codex review rejection log
+addition - P1-GH round 2 read()-equality finding REJECTED (equality
+against a parsed brand refuses mismatch; verified github.ts:331).
+
 ## RESTART POINT 2026-08-02 (read this first after any context loss)
 MAIN a00455a+ (FF-A merged; post-merge vitest 201/3,232; PW floor 93).
 0027/v17 now FROZEN. Mirror: push `git push mirror main` AFTER EVERY MERGE

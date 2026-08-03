@@ -11,6 +11,7 @@ import {
   type LevelUpGuideableClassOption,
   type LevelUpPendingEpicResolution,
   type LevelUpPermanentWarning,
+  type LevelUpPreviewResult,
   type LevelUpStateResult,
   type LevelUpStep,
 } from '../../../src/builder/level-up-wizard';
@@ -24,6 +25,7 @@ import type {
   SubclassDefinitionId,
 } from '../../../src/domain/ids';
 import type { CharacterLevel } from '../../../src/domain/enums';
+import type { CharacterSheet } from '../../../src/queries/character-sheet-builder';
 import type { RpcClient } from '../../../src/rpc/client';
 import { parseRoute, Router } from '../../../src/ui/router';
 import {
@@ -43,9 +45,15 @@ import {
   type InteractiveTestElement,
 } from '../../fixtures/interactive-dom';
 
+const createBackupHintSpy = vi.hoisted(() => vi.fn());
+vi.mock('../../../src/ui/screens/guided-builder/backup-hint', () => ({
+  createBackupHint: createBackupHintSpy,
+}));
+
 let restoreDocument: (() => void) | undefined;
 
 beforeEach(() => {
+  createBackupHintSpy.mockClear();
   restoreDocument = installInteractiveDocument();
 });
 
@@ -224,6 +232,7 @@ function boonCandidate(options: {
 function ready(options: {
   readonly classes?: Extract<LevelUpStateResult, { readonly kind: 'ready' }>['class_options'];
   readonly warnings?: readonly LevelUpPermanentWarning[];
+  readonly totalLevel?: number;
   readonly pendingEpic?: boolean;
   readonly pendingEpicCandidates?: readonly LevelUpFeatCandidate[];
 } = {}): Extract<LevelUpStateResult, { readonly kind: 'ready' }> {
@@ -233,7 +242,7 @@ function ready(options: {
       character_id: 7 as CharacterId,
       name: 'Fixture Mage',
       revision: 4 as CharacterRevision,
-      total_level: 1 as CharacterLevel,
+      total_level: (options.totalLevel ?? 1) as CharacterLevel,
       warnings: options.warnings ?? [],
     },
     class_options: options.classes ?? [classOption()],
@@ -241,6 +250,110 @@ function ready(options: {
       ? pendingEpicResolution(options.pendingEpicCandidates)
       : null,
   };
+}
+
+function sheet(options: {
+  readonly totalLevel: number;
+  readonly classLevel: number;
+  readonly hp: number;
+  readonly speciesHp?: number;
+  readonly revisionName?: string;
+}): CharacterSheet {
+  const number = (id: string, label: string, value: number) => ({
+    id,
+    label,
+    value,
+    formula: 'Hand-authored W-E fixture.',
+  });
+  return {
+    character_id: 7,
+    name: options.revisionName ?? 'Fixture Mage',
+    total_level: options.totalLevel,
+    proficiency_bonus: number('proficiency_bonus', 'Proficiency bonus', 2),
+    ability_scores: [],
+    hit_points: number('hit_points', 'Hit point maximum', options.hp),
+    species_hit_points: options.speciesHp === undefined
+      ? null
+      : number(
+          'species_hit_points',
+          'Species hit points',
+          options.speciesHp,
+        ),
+    armor_class: {
+      ...number('armor_class', 'Armor Class', 10),
+      winner: {
+        label: 'Unarmored',
+        source: 'manual',
+        expression: '10 + DEX',
+        total: 10,
+      },
+      shields: [],
+      bonuses: [],
+      excluded: [],
+      tie_break: null,
+    },
+    initiative: number('initiative', 'Initiative', 0),
+    passive_perception: number('passive_perception', 'Passive Perception', 10),
+    saves: [],
+    skills: [],
+    attacks_per_action: { count: 1, unresolved: [] },
+    resources: [],
+    spells: [],
+    martial_arts: [],
+    walking_speed_feet: 30,
+    damage_resistances: [],
+    unchosen_damage_resistances: [],
+    classes: [{
+      class_name: 'Wizard',
+      level: options.classLevel,
+      hit_die: 6,
+      is_starting_class: true,
+      subclass_name: null,
+      saving_throws: ['intelligence', 'wisdom'],
+    }],
+    proficiencies: {
+      armor_training: [],
+      weapon_proficiencies: [],
+      classes: [{ class_name: 'Wizard', via: 'initial' }],
+      weapons: [],
+    },
+    armor: [],
+    items: [],
+    printed_features: [],
+    flavor: {
+      alignment: null,
+      appearance: null,
+      backstory: null,
+      notes: null,
+    },
+    print_appendix_preferences: {
+      flavor: false,
+      spells: false,
+      audit: false,
+    },
+    hit_point_rolls: [],
+    equipment_packages: [],
+    warnings: [],
+    gaps: [],
+  };
+}
+
+function preview(
+  before: CharacterSheet,
+  after: CharacterSheet,
+): LevelUpPreviewResult {
+  return {
+    before,
+    after,
+    new_outstanding_choices: [],
+    command_fingerprint: 'hand-reviewed-preview-fingerprint',
+  };
+}
+
+async function settle(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
 }
 
 function click(view: HTMLElement, attribute: string): void {
@@ -1018,6 +1131,477 @@ describe('in-memory draft loss', () => {
     expect(elementText(next as unknown as Node)).toBe('Continue');
     next?.click();
     expect(elementText(document.activeElement as unknown as Node)).toBe('Review');
+    wizard.cleanup();
+  });
+});
+
+describe('W-E review, atomic confirm, and complete', () => {
+  it('W-SUBCLASS-DRAFT names a selected subclass on Review and Complete', async () => {
+    const before = sheet({ totalLevel: 2, classLevel: 2, hp: 14 });
+    const after = sheet({ totalLevel: 3, classLevel: 3, hp: 20 });
+    const selectedClass = classOption({
+      current: 2,
+      subclass: true,
+      steps: ['class', 'gains', 'subclass', 'review', 'complete'],
+    });
+    const submit = vi.fn().mockResolvedValue({
+      inverse: { type: 'restore_snapshot', snapshot: {}, integrity: 'test' },
+      revision: 5,
+      idempotent_replay: false,
+    });
+    const wizard = createLevelUpWizard({
+      state: ready({ classes: [selectedClass], totalLevel: 2 }),
+      cancel: () => undefined,
+      preview: vi.fn().mockResolvedValue(preview(before, after)),
+      submit,
+      loadSheet: vi.fn().mockResolvedValue({
+        ...after,
+        classes: [{ ...after.classes[0]!, subclass_name: 'Abjurer' }],
+      }),
+      randomUuid: () => '61616161-6161-4161-8161-616161616161',
+    });
+
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    chooseRadio(wizard.element, '31');
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    await settle();
+    expect(elementText(wizard.element)).toContain('Subclass Abjurer');
+    expect(elementText(wizard.element)).toContain('New class feature Scholar');
+
+    click(wizard.element, LEVEL_UP_ATTR.confirm);
+    await settle();
+    expect(submit).toHaveBeenCalledWith(
+      4,
+      expect.objectContaining({ subclass_content_key: 'test:subclass:abjurer' }),
+      '61616161-6161-4161-8161-616161616161',
+    );
+    expect(elementText(wizard.element)).toContain('Subclass: Abjurer.');
+    expect(elementText(wizard.element)).toContain('New class feature: Scholar.');
+    wizard.cleanup();
+  });
+
+  it('W-SUBCLASS-DEFER synthesizes the D70 warning from the reviewed draft through Complete', async () => {
+    const before = sheet({ totalLevel: 2, classLevel: 2, hp: 14 });
+    const after = sheet({ totalLevel: 3, classLevel: 3, hp: 20 });
+    const wizard = createLevelUpWizard({
+      state: ready({
+        classes: [classOption({
+          current: 2,
+          subclass: true,
+          steps: ['class', 'gains', 'subclass', 'review', 'complete'],
+        })],
+        totalLevel: 2,
+      }),
+      cancel: () => undefined,
+      preview: vi.fn().mockResolvedValue(preview(before, after)),
+      submit: vi.fn().mockResolvedValue({
+        inverse: { type: 'restore_snapshot', snapshot: {}, integrity: 'test' },
+        revision: 5,
+        idempotent_replay: false,
+      }),
+      loadSheet: vi.fn().mockResolvedValue(after),
+      randomUuid: () => '62626262-6262-4262-8262-626262626262',
+    });
+
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    chooseRadio(wizard.element, 'decide_later');
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    await settle();
+    expect(
+      wizard.element.querySelector(
+        `[${LEVEL_UP_ATTR.warning}="subclass_unselected"]`,
+      ),
+    ).not.toBeNull();
+    expect(elementText(wizard.element)).toContain(
+      'Wizard level 3 will be saved without a subclass selection',
+    );
+
+    click(wizard.element, LEVEL_UP_ATTR.confirm);
+    await settle();
+    expect(elementText(wizard.element)).toContain('Subclass: Decide later.');
+    expect(elementText(wizard.element)).toContain('Subclass choice still needed');
+    expect(elementText(wizard.element)).toContain(
+      'Wizard level 3 will be saved without a subclass selection',
+    );
+    wizard.cleanup();
+  });
+
+  it('W-LU2-REFUSAL renders every structured locator field and clears aria-busy', async () => {
+    const before = sheet({ totalLevel: 1, classLevel: 1, hp: 9 });
+    const after = sheet({ totalLevel: 2, classLevel: 2, hp: 16 });
+    const refusal = Object.assign(new Error('Generic locator refusal.'), {
+      data: {
+        reason: 'planned_subchoice_refused',
+        subchoice_kind: 'spell',
+        index: 2,
+        issue: 'spell_not_eligible',
+        locator: {
+          source: { kind: 'existing_source', source_instance_id: 47 },
+          rule_key: 'wizard-spellbook',
+          ordinal: 8,
+        },
+      },
+    });
+    const wizard = createLevelUpWizard({
+      state: ready(),
+      cancel: () => undefined,
+      preview: vi.fn().mockResolvedValue(preview(before, after)),
+      submit: vi.fn().mockRejectedValue(refusal),
+      loadSheet: vi.fn().mockResolvedValue(after),
+      randomUuid: () => '63636363-6363-4363-8363-636363636363',
+    });
+
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    await settle();
+    click(wizard.element, LEVEL_UP_ATTR.confirm);
+    await settle();
+
+    const text = elementText(wizard.element);
+    expect(text).toContain('subchoice_kind: spell');
+    expect(text).toContain('index: 2');
+    expect(text).toContain('issue: spell_not_eligible');
+    expect(text).toContain(
+      'locator: source=existing_source(47), rule_key=wizard-spellbook, ordinal=8',
+    );
+    expect(text).not.toContain('Generic locator refusal');
+    expect(wizard.element.getAttribute('aria-busy')).toBe('false');
+    wizard.cleanup();
+  });
+
+  it('W-ONE-UUID and W-LOAD-ANNOUNCE retain one UUID across an ambiguous retry and focus before disabling', async () => {
+    const before = sheet({
+      totalLevel: 1,
+      classLevel: 1,
+      hp: 8,
+      speciesHp: 1,
+    });
+    const after = sheet({
+      totalLevel: 2,
+      classLevel: 2,
+      hp: 14,
+      speciesHp: 2,
+    });
+    const previewCall = vi.fn().mockResolvedValue(preview(before, after));
+    const ambiguous = Object.assign(new Error('Worker response was lost.'), {
+      code: 'transport_error',
+    });
+    const submit = vi.fn()
+      .mockRejectedValueOnce(ambiguous)
+      .mockResolvedValueOnce({
+        inverse: { type: 'restore_snapshot', snapshot: {}, integrity: 'test' },
+        revision: 5,
+        idempotent_replay: true,
+      });
+    const loadSheet = vi.fn().mockResolvedValue(after);
+    const wizard = createLevelUpWizard({
+      state: ready(),
+      cancel: () => undefined,
+      preview: previewCall,
+      submit,
+      loadSheet,
+      randomUuid: () => '10101010-1010-4010-8010-101010101010',
+    });
+
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    await settle();
+    expect(previewCall).toHaveBeenCalledWith(4, {
+      type: 'level_up_class',
+      class_definition_id: 11,
+      target_level: 2,
+    });
+    expect(elementText(wizard.element)).toContain('Hit point maximum 9 → 16');
+
+    const firstConfirm = interactiveElement(wizard.element).querySelector(
+      `[${LEVEL_UP_ATTR.confirm}]`,
+    );
+    if (firstConfirm === null) throw new Error('Review had no Confirm control.');
+    firstConfirm.focus();
+    firstConfirm.click();
+    firstConfirm.click();
+    expect(elementText(document.activeElement as unknown as Node)).toContain(
+      'Submitting this level-up operation',
+    );
+    expect(
+      interactiveElement(wizard.element)
+        .querySelectorAll('button')
+        .every((control) => control.disabled),
+    ).toBe(true);
+    expect(submit).toHaveBeenCalledTimes(1);
+    await settle();
+
+    expect(elementText(wizard.element)).toContain(
+      'Retry submission to check the same operation safely',
+    );
+    click(wizard.element, LEVEL_UP_ATTR.confirm);
+    await settle();
+
+    expect(submit).toHaveBeenCalledTimes(2);
+    expect(submit.mock.calls.map((call) => call[2])).toEqual([
+      '10101010-1010-4010-8010-101010101010',
+      '10101010-1010-4010-8010-101010101010',
+    ]);
+    expect(loadSheet).toHaveBeenCalledOnce();
+    expect(currentRailStep(wizard.element)).toBe('complete');
+    expect(elementText(wizard.element)).toContain('Wizard level 2 complete');
+    expect(elementText(wizard.element)).toContain('Hit point maximum is now 16');
+    // W-NO-BACKUP-HINT: Complete is not level-1 creation and must never mount it.
+    expect(elementText(wizard.element)).not.toContain('Download a backup');
+    expect(createBackupHintSpy).not.toHaveBeenCalled();
+    expect(elementText(document.activeElement as unknown as Node)).toBe(
+      'Wizard level 2 complete',
+    );
+    wizard.cleanup();
+  });
+
+  it('invalidates Review when an earlier class edit changes the draft fingerprint', async () => {
+    const before = sheet({ totalLevel: 1, classLevel: 1, hp: 9 });
+    const after = sheet({ totalLevel: 2, classLevel: 2, hp: 16 });
+    const previewCall = vi.fn().mockResolvedValue(preview(before, after));
+    const wizard = createLevelUpWizard({
+      state: ready({
+        classes: [classOption({ id: 11 }), classOption({ id: 12, name: 'Fighter' })],
+      }),
+      cancel: () => undefined,
+      preview: previewCall,
+    });
+
+    chooseRadio(wizard.element, '11');
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    await settle();
+    click(wizard.element, LEVEL_UP_ATTR.back);
+    click(wizard.element, LEVEL_UP_ATTR.back);
+    chooseRadio(wizard.element, '12');
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    await settle();
+
+    expect(previewCall).toHaveBeenCalledTimes(2);
+    expect(previewCall.mock.calls.map((call) => call[1])).toMatchObject([
+      { class_definition_id: 11 },
+      { class_definition_id: 12 },
+    ]);
+    wizard.cleanup();
+  });
+
+  it('W-STALE keeps the draft, refuses blind retry, and offers explicit state reload', async () => {
+    const before = sheet({ totalLevel: 1, classLevel: 1, hp: 9 });
+    const after = sheet({ totalLevel: 2, classLevel: 2, hp: 16 });
+    const submit = vi.fn().mockRejectedValue(Object.assign(
+      new Error('This character changed in another tab.'),
+      { data: { current_revision: 5 } },
+    ));
+    const reloadState = vi.fn();
+    const wizard = createLevelUpWizard({
+      state: ready(),
+      cancel: () => undefined,
+      preview: vi.fn().mockResolvedValue(preview(before, after)),
+      submit,
+      loadSheet: vi.fn().mockResolvedValue(after),
+      reloadState,
+      randomUuid: () => '20202020-2020-4020-8020-202020202020',
+    });
+
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    await settle();
+    click(wizard.element, LEVEL_UP_ATTR.confirm);
+    await settle();
+
+    expect(submit).toHaveBeenCalledOnce();
+    expect(currentRailStep(wizard.element)).toBe('review');
+    expect(elementText(wizard.element)).toContain('changed elsewhere');
+    expect(wizard.element.querySelector(`[${LEVEL_UP_ATTR.confirm}]`)).toBeNull();
+    const reload = interactiveElement(wizard.element).querySelector(
+      '[data-level-up-reload-state]',
+    );
+    if (reload === null) throw new Error('Stale Review had no reload action.');
+    reload.click();
+    expect(reloadState).toHaveBeenCalledOnce();
+    expect(submit).toHaveBeenCalledOnce();
+    wizard.cleanup();
+  });
+
+  it('lets a non-stale Preview failure retry the same unchanged draft', async () => {
+    const before = sheet({ totalLevel: 1, classLevel: 1, hp: 9 });
+    const after = sheet({ totalLevel: 2, classLevel: 2, hp: 16 });
+    const previewCall = vi.fn()
+      .mockRejectedValueOnce(new Error('Temporary preview failure.'))
+      .mockResolvedValueOnce(preview(before, after));
+    const wizard = createLevelUpWizard({
+      state: ready(),
+      cancel: () => undefined,
+      preview: previewCall,
+    });
+
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    await settle();
+    expect(elementText(wizard.element)).toContain('Temporary preview failure');
+    click(wizard.element, 'data-level-up-retry-preview');
+    await settle();
+
+    expect(previewCall).toHaveBeenCalledTimes(2);
+    expect(wizard.element.querySelector(`[${LEVEL_UP_ATTR.confirm}]`)).not.toBeNull();
+    wizard.cleanup();
+  });
+
+  it('previews the unchanged ordinary draft again after Back leaves a failed Review', async () => {
+    const before = sheet({ totalLevel: 1, classLevel: 1, hp: 9 });
+    const after = sheet({ totalLevel: 2, classLevel: 2, hp: 16 });
+    const previewCall = vi.fn()
+      .mockRejectedValueOnce(new Error('Temporary ordinary preview failure.'))
+      .mockResolvedValueOnce(preview(before, after));
+    const wizard = createLevelUpWizard({
+      state: ready(),
+      cancel: () => undefined,
+      preview: previewCall,
+    });
+
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    await settle();
+    click(wizard.element, LEVEL_UP_ATTR.back);
+    expect(currentRailStep(wizard.element)).toBe('gains');
+    expect(elementText(wizard.element)).not.toContain(
+      'Temporary ordinary preview failure',
+    );
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    await settle();
+
+    expect(previewCall).toHaveBeenCalledTimes(2);
+    expect(wizard.element.querySelector(`[${LEVEL_UP_ATTR.confirm}]`)).not.toBeNull();
+    wizard.cleanup();
+  });
+
+  it('offers explicit reload when the Epic-resolution Preview is stale', async () => {
+    const state: LevelUpStateResult = {
+      kind: 'maximum_level',
+      character: {
+        character_id: 7 as CharacterId,
+        name: 'Stale Boon Mage',
+        revision: 20 as CharacterRevision,
+        total_level: 20,
+        warnings: [],
+      },
+      held_classes: [],
+      pending_epic_resolution: pendingEpicResolution([boonCandidate()]),
+    };
+    const reloadState = vi.fn();
+    const wizard = createLevelUpWizard({
+      state,
+      cancel: () => undefined,
+      preview: vi.fn().mockRejectedValue(Object.assign(
+        new Error('Stale Epic preview.'),
+        { data: { current_revision: 21 } },
+      )),
+      reloadState,
+    });
+
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    chooseRadio(wizard.element, '2024:feat:boon-of-fate:0');
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    await settle();
+    const reload = interactiveElement(wizard.element).querySelector(
+      '[data-level-up-reload-state]',
+    );
+    if (reload === null) throw new Error('Stale Epic preview had no reload action.');
+    reload.click();
+
+    expect(reloadState).toHaveBeenCalledOnce();
+    expect(wizard.element.querySelector(`[${LEVEL_UP_ATTR.confirm}]`)).toBeNull();
+    wizard.cleanup();
+  });
+
+  it('clears an Epic Preview failure on Back and previews the unchanged choice again', async () => {
+    const unchanged = sheet({ totalLevel: 20, classLevel: 20, hp: 120 });
+    const state: LevelUpStateResult = {
+      kind: 'maximum_level',
+      character: {
+        character_id: 7 as CharacterId,
+        name: 'Retry Boon Mage',
+        revision: 20 as CharacterRevision,
+        total_level: 20,
+        warnings: [],
+      },
+      held_classes: [],
+      pending_epic_resolution: pendingEpicResolution([boonCandidate()]),
+    };
+    const previewCall = vi.fn()
+      .mockRejectedValueOnce(new Error('Temporary Epic preview failure.'))
+      .mockResolvedValueOnce(preview(unchanged, unchanged));
+    const wizard = createLevelUpWizard({
+      state,
+      cancel: () => undefined,
+      preview: previewCall,
+    });
+
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    chooseRadio(wizard.element, '2024:feat:boon-of-fate:0');
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    await settle();
+    expect(elementText(wizard.element)).toContain('Temporary Epic preview failure');
+    click(wizard.element, LEVEL_UP_ATTR.back);
+    expect(elementText(wizard.element)).not.toContain('Temporary Epic preview failure');
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    await settle();
+
+    expect(previewCall).toHaveBeenCalledTimes(2);
+    expect(wizard.element.querySelector(`[${LEVEL_UP_ATTR.confirm}]`)).not.toBeNull();
+    wizard.cleanup();
+  });
+
+  it('D118 completes a resolution pass without claiming any level changed', async () => {
+    const unchanged = sheet({ totalLevel: 20, classLevel: 20, hp: 120 });
+    const state: LevelUpStateResult = {
+      kind: 'maximum_level',
+      character: {
+        character_id: 7 as CharacterId,
+        name: 'Maximum Boon Mage',
+        revision: 20 as CharacterRevision,
+        total_level: 20,
+        warnings: [],
+      },
+      held_classes: [],
+      pending_epic_resolution: pendingEpicResolution([boonCandidate()]),
+    };
+    const submit = vi.fn().mockResolvedValue({
+      inverse: { type: 'restore_snapshot', snapshot: {}, integrity: 'test' },
+      revision: 21,
+      idempotent_replay: false,
+    });
+    const wizard = createLevelUpWizard({
+      state,
+      cancel: () => undefined,
+      preview: vi.fn().mockResolvedValue(preview(unchanged, unchanged)),
+      submit,
+      loadSheet: vi.fn().mockResolvedValue(unchanged),
+      randomUuid: () => '30303030-3030-4030-8030-303030303030',
+    });
+
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    chooseRadio(wizard.element, '2024:feat:boon-of-fate:0');
+    click(wizard.element, LEVEL_UP_ATTR.next);
+    await settle();
+    expect(elementText(wizard.element)).toContain('Feat Boon of Fate');
+    click(wizard.element, LEVEL_UP_ATTR.confirm);
+    await settle();
+
+    expect(elementText(wizard.element)).toContain('Epic Boon choice complete');
+    expect(elementText(wizard.element)).toContain('Feat: Boon of Fate.');
+    expect(elementText(wizard.element)).toContain(
+      'without changing total or class levels',
+    );
+    expect(elementText(wizard.element)).not.toContain('level 20 complete');
+    expect(submit).toHaveBeenCalledWith(
+      20,
+      expect.objectContaining({ type: 'resolve_level_feat_choice' }),
+      '30303030-3030-4030-8030-303030303030',
+    );
     wizard.cleanup();
   });
 });

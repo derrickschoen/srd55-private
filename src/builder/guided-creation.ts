@@ -29,6 +29,10 @@ import {
 import type { CharacterCommandIntegrity } from '../commands/integrity';
 import {
   rowId,
+  sqlCreatureSize,
+  sqlCreatureType,
+  sqlNullableCreatureSize,
+  sqlNullableDamageType,
   sqlInteger,
   sqlNullableInteger,
   sqlNullableString,
@@ -41,14 +45,7 @@ import {
   abilityAllocationMethods,
   backgroundEquipmentOptions,
   classEquipmentOptions,
-  creatureSizes,
-  creatureTypes,
-  damageTypes,
-  isEnumValue,
   type KnownAbilityAllocationMethod,
-  type KnownCreatureSize,
-  type KnownCreatureType,
-  type KnownDamageType,
   type Skill,
 } from '../domain/enums';
 import { GUIDED_SPECIES_SOURCE_MARKER } from '../domain/source-markers';
@@ -723,67 +720,14 @@ function bundledBackgroundKeys(): readonly string[] {
   return bundledBackgroundTemplates().map((template) => template.content_key);
 }
 
-function sqlKnownCreatureType(
-  row: SqlRow,
-  column: string,
-): KnownCreatureType {
-  const value = sqlString(row, column);
-  if (!isEnumValue(creatureTypes, value)) {
-    throw new Error(
-      `Species template column ${column} holds unknown creature type ${JSON.stringify(value)}.`,
-    );
-  }
-  return value;
-}
-
-function sqlKnownCreatureSize(
-  row: SqlRow,
-  column: string,
-): KnownCreatureSize {
-  const value = sqlString(row, column);
-  if (!isEnumValue(creatureSizes, value)) {
-    throw new Error(
-      `Species template column ${column} holds unknown size ${JSON.stringify(value)}.`,
-    );
-  }
-  return value;
-}
-
-function sqlKnownNullableCreatureSize(
-  row: SqlRow,
-  column: string,
-): KnownCreatureSize | null {
-  const value = sqlNullableString(row, column);
-  if (value === null) {
-    return null;
-  }
-  return sqlKnownCreatureSize(row, column);
-}
-
-function sqlKnownNullableDamageType(
-  row: SqlRow,
-  column: string,
-): KnownDamageType | null {
-  const value = sqlNullableString(row, column);
-  if (value === null) {
-    return null;
-  }
-  if (!isEnumValue(damageTypes, value)) {
-    throw new Error(
-      `Species template column ${column} holds unknown damage type ${JSON.stringify(value)}.`,
-    );
-  }
-  return value;
-}
-
 const speciesTemplateRow: RowCodec<SpeciesTemplateRow> = (row) => ({
   id: sqlInteger(row, 'id'),
   content_key: sqlString(row, 'content_key'),
   rules_edition: sqlString(row, 'rules_edition'),
   name: sqlString(row, 'name'),
-  creature_type: sqlKnownCreatureType(row, 'creature_type'),
-  size: sqlKnownCreatureSize(row, 'size'),
-  alternate_size: sqlKnownNullableCreatureSize(row, 'alternate_size'),
+  creature_type: sqlCreatureType(row, 'creature_type'),
+  size: sqlCreatureSize(row, 'size'),
+  alternate_size: sqlNullableCreatureSize(row, 'alternate_size'),
   base_speed_feet: sqlInteger(row, 'base_speed_feet'),
   created_at: sqlNullableString(row, 'created_at'),
   updated_at: sqlNullableString(row, 'updated_at'),
@@ -806,15 +750,20 @@ const speciesTemplateTraitEffectRow: RowCodec<SpeciesTemplateTraitEffectRow> = (
   species_template_trait_id: sqlInteger(row, 'species_template_trait_id'),
   sort_order: sqlInteger(row, 'sort_order'),
   effect_kind: sqlString(row, 'effect_kind'),
-  damage_type: sqlKnownNullableDamageType(row, 'damage_type'),
+  damage_type: sqlNullableDamageType(row, 'damage_type'),
   hit_points_flat: sqlNullableInteger(row, 'hit_points_flat'),
   hit_points_per_level: sqlNullableInteger(row, 'hit_points_per_level'),
   speed_bonus_feet: sqlNullableInteger(row, 'speed_bonus_feet'),
+  ability: sqlNullableString(row, 'ability'),
+  amount: sqlNullableInteger(row, 'amount'),
+  maximum: sqlNullableInteger(row, 'maximum'),
   base: sqlNullableInteger(row, 'base'),
   ability_1: sqlNullableString(row, 'ability_1'),
   ability_2: sqlNullableString(row, 'ability_2'),
   allows_shield: sqlNullableInteger(row, 'allows_shield'),
   weapon_scope: sqlNullableString(row, 'weapon_scope'),
+  label: sqlString(row, 'label'),
+  notes: sqlNullableString(row, 'notes'),
   created_at: sqlNullableString(row, 'created_at'),
   updated_at: sqlNullableString(row, 'updated_at'),
 });
@@ -1156,8 +1105,9 @@ export function applyGuidedOrigin(
       const effects = db.all(
         `SELECT id, species_template_trait_id, sort_order, effect_kind,
                 damage_type, hit_points_flat, hit_points_per_level,
-                speed_bonus_feet, base, ability_1, ability_2, allows_shield,
-                weapon_scope, created_at, updated_at
+                speed_bonus_feet, ability, amount, maximum, base, ability_1,
+                ability_2, allows_shield, weapon_scope, label, notes,
+                created_at, updated_at
          FROM species_template_trait_effects
          WHERE species_template_trait_id = ?
          ORDER BY sort_order`,
@@ -1170,9 +1120,10 @@ export function applyGuidedOrigin(
           `INSERT INTO character_effects (
              character_id, sort_order, effect_kind, damage_type,
              hit_points_flat, hit_points_per_level, speed_bonus_feet,
-             base, ability_1, ability_2, allows_shield, weapon_scope,
+             ability, amount, maximum, base, ability_1, ability_2,
+             allows_shield, weapon_scope,
              source_instance_id, template_ref, label, notes
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             characterId,
             effectOrder,
@@ -1181,6 +1132,9 @@ export function applyGuidedOrigin(
             effect.hit_points_flat,
             effect.hit_points_per_level,
             effect.speed_bonus_feet,
+            effect.ability,
+            effect.amount,
+            effect.maximum,
             effect.base,
             effect.ability_1,
             effect.ability_2,

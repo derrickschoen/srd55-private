@@ -1,4 +1,5 @@
 import { GUIDED_NEW_ROUTE } from '../../../builder/contracts';
+import { levelUpPath } from '../../../builder/level-up-wizard';
 import type { CharacterRow } from '../../../domain/models';
 import type { CharacterSummary } from '../../../domain/read-models';
 import type {
@@ -79,6 +80,29 @@ export function outstandingLabel(count: number): string {
   return count === 0
     ? 'nothing outstanding'
     : `${count} unfinished ${count === 1 ? 'choice' : 'choices'}`;
+}
+
+export interface CharacterCardRouteAction {
+  readonly label: 'Level Up' | 'Open workspace';
+  readonly href: string;
+  readonly className: 'button-primary' | 'button-secondary';
+}
+
+export function characterCardRouteActions(
+  characterId: number,
+): readonly CharacterCardRouteAction[] {
+  return [
+    {
+      label: 'Level Up',
+      href: levelUpPath(characterId),
+      className: 'button-primary',
+    },
+    {
+      label: 'Open workspace',
+      href: `/characters/${String(characterId)}`,
+      className: 'button-secondary',
+    },
+  ];
 }
 
 export function catalogGapLabel(count: number): string {
@@ -338,16 +362,21 @@ function renderCards(
 
   const grid = element('div', { className: 'character-grid' });
   for (const character of characters) {
-    const open = element('a', {
-      className: 'button-primary',
-      text: 'Open workspace',
-      attributes: { href: `/characters/${character.id}` },
-    });
-    cleanups.push(
-      listen(open, 'click', (event) => {
-        event.preventDefault();
-        context.router.navigate(`/characters/${character.id}`);
-      }),
+    const routeActions = characterCardRouteActions(character.id).map(
+      (action) => {
+        const link = element('a', {
+          className: action.className,
+          text: action.label,
+          attributes: { href: action.href },
+        });
+        cleanups.push(
+          listen(link, 'click', (event) => {
+            event.preventDefault();
+            context.router.navigate(action.href);
+          }),
+        );
+        return link;
+      },
     );
     const remove = element('button', {
       className: 'button-danger',
@@ -434,7 +463,7 @@ function renderCards(
           text: classSummary(character),
         }),
         element('div', { className: 'card-actions' }, [
-          open,
+          ...routeActions,
           share,
           remove,
         ]),
