@@ -555,11 +555,14 @@ const classIdentityRow: RowCodec<ClassIdentityRow> = (row) => ({
  * The classes the wizard offers: rows of `class_definitions` whose
  * `content_key` is in the bundled set.
  *
- * NOT the ordinary catalogue query, which has no predicate at all — and NOT
- * the bundled key list alone, because a bundled key is not a promise that a
+ * NOT the ordinary catalogue query's registry join — and NOT the bundled key
+ * list alone, because a bundled key is not a promise that a
  * row exists (plan A11: seeding yields a `(name, rules_edition)` slot already
  * held by homebrew and skips that class). A key with no row is simply not
  * offered.
+ *
+ * CI-4a/HA-10 lifts this bundled-only boundary after imported class
+ * aggregates have a complete application consumer.
  *
  * `hit_die` comes from `class_sheet_traits` via LEFT JOIN and the row can be
  * absent; a null stays null so the UI renders "unknown" (D33) — never the
@@ -780,6 +783,9 @@ const speciesTemplateTraitEffectRow: RowCodec<SpeciesTemplateTraitEffectRow> = (
  * `grants_lineage_spells` is a LITERAL `false`, pinned by the seam — "the
  * seam's set is species-only; backgrounds are always false" — not a lookup
  * that happens to miss.
+ *
+ * CI-4a/HA-10 lifts these bundled-only origin filters after imported
+ * definition/template aggregates can be applied as one complete identity.
  */
 export function listGuidedOriginOptions(
   db: DatabaseContext,

@@ -256,7 +256,7 @@ function insertBackground(db: DatabaseContext, aggregate: BackgroundContentAggre
     [
       contentKey, aggregate.rules_edition, aggregate.name,
       ...aggregate.suggested_abilities, featName, ...aggregate.skill_proficiencies,
-      aggregate.tool_reference_text, aggregate.equipment_option_a_description,
+      aggregate.tool_reference_text ?? '', aggregate.equipment_option_a_description,
       aggregate.equipment_option_b_description, now, now,
     ],
   ).lastInsertId;

@@ -7,12 +7,14 @@ import {
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import { DatabaseContext } from '../../../src/db/database';
 import { CatalogQueries } from '../../../src/queries/catalog-queries';
+import { registerBundledStableContentIdentity } from '../../../src/catalog/content-registry';
 import { CharacterCrud } from '../../../src/queries/character-crud';
 import {
   OperationHistoryQueries,
 } from '../../../src/queries/operation-history';
 import { SavePointQueries } from '../../../src/queries/save-points';
 import { openTestDatabase } from '../../helpers/open-db';
+import type { ContentKey } from '../../../src/domain/ids';
 
 function digest(db: DatabaseContext, tables: readonly string[]): string {
   const rows = tables.map((table) =>
@@ -222,6 +224,12 @@ describe('character CRUD, catalog, save points, and operation history', () => {
   });
 
   it('returns deterministic decoded catalog DTOs without mutating catalog rows', () => {
+    registerBundledStableContentIdentity(db, {
+      kind: 'class', contentKey: 'q60:class:test' as ContentKey, normalizedName: 'querymage',
+    });
+    registerBundledStableContentIdentity(db, {
+      kind: 'feat', contentKey: 'q60:feat:test' as ContentKey, normalizedName: 'queryfeat',
+    });
     const classId = db.exec(
       `INSERT INTO class_definitions (
          content_key, name, rules_edition, spellcasting_ability,
@@ -235,6 +243,22 @@ describe('character CRUD, catalog, save points, and operation history', () => {
          prerequisites, grant_rules
        ) VALUES ('q60:feat:test', 'Query Feat', '2024', 1,
                  '{"level":4}', '[]')`,
+    );
+    db.exec(
+      `INSERT INTO catalog_content_identities
+         (content_key, content_kind, key_kind, catalog_layer, normalized_name)
+       VALUES ('external:class:test', 'class', 'legacy-opaque', 'external', 'externalclass'),
+              ('external:feat:test', 'feat', 'legacy-opaque', 'external', 'externalfeat')`,
+    );
+    db.exec(
+      `INSERT INTO class_definitions
+         (content_key, name, rules_edition, progression_type, supports_ritual_casting)
+       VALUES ('external:class:test', 'External Class', 'expanded', 'none', 0)`,
+    );
+    db.exec(
+      `INSERT INTO feat_definitions
+         (content_key, name, rules_edition, ability_points, repeatable)
+       VALUES ('external:feat:test', 'External Feat', 'expanded', 0, 0)`,
     );
     const identityId = db.exec(
       `INSERT INTO spell_identities (
@@ -278,6 +302,7 @@ describe('character CRUD, catalog, save points, and operation history', () => {
         progression_type: 'full',
       }),
     );
+    expect(catalog.classes.map((entry) => entry.name)).not.toContain('External Class');
     expect(catalog.sources.feat).toEqual([
       expect.objectContaining({
         name: 'Query Feat',
@@ -286,6 +311,7 @@ describe('character CRUD, catalog, save points, and operation history', () => {
         grant_rules: [],
       }),
     ]);
+    expect(catalog.sources.feat.map((entry) => entry.name)).not.toContain('External Feat');
     expect(catalog.spells).toEqual([
       expect.objectContaining({
         id: spellId,

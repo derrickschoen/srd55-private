@@ -104,6 +104,44 @@ describe('stored class and feat content-v1 projection', () => {
     expect(identity.derivedKey).toBe(featProjectorV1Vector.derivedKey);
   });
 
+  it('default-includes future stored root and child semantics so schema growth over-splits identity', () => {
+    db.exec(
+      `INSERT INTO class_definitions (
+         content_key, name, rules_edition, progression_type,
+         supports_ritual_casting
+       ) VALUES (?, 'Wayfarer', 'expanded', 'none', 0)`,
+      [CLASS_KEY],
+    );
+    const classId = db.scalar<number>('SELECT id FROM class_definitions WHERE content_key = ?', [CLASS_KEY]);
+    if (classId === null) throw new Error('Class fixture id is missing.');
+    db.exec("INSERT INTO class_resources (class_definition_id, class_level, resource_kind, maximum) VALUES (?, 1, 'rage', 2)", [classId]);
+    db.exec('ALTER TABLE class_definitions ADD COLUMN future_root_semantic INTEGER');
+    db.exec('ALTER TABLE class_resources ADD COLUMN future_child_semantic INTEGER');
+    db.exec('UPDATE class_definitions SET future_root_semantic = 1 WHERE id = ?', [classId]);
+    db.exec('UPDATE class_resources SET future_child_semantic = 1 WHERE class_definition_id = ?', [classId]);
+    const baseline = identityForStoredClass().derivedKey;
+    db.exec('UPDATE class_definitions SET future_root_semantic = 2 WHERE id = ?', [classId]);
+    const rootChanged = identityForStoredClass().derivedKey;
+    db.exec('UPDATE class_resources SET future_child_semantic = 2 WHERE class_definition_id = ?', [classId]);
+    expect(rootChanged).not.toBe(baseline);
+    expect(identityForStoredClass().derivedKey).not.toBe(rootChanged);
+  });
+
+  it('default-includes a future stored feat root semantic', () => {
+    db.exec(
+      `INSERT INTO feat_definitions (
+         content_key, name, rules_edition, category, ability_points,
+         repeatable, notes
+       ) VALUES (?, 'Keen Memory', 'expanded', 'general', 0, 0, ?)`,
+      [FEAT_KEY, 'Recall details.  \r\nPrecisely.   \r\n'],
+    );
+    db.exec('ALTER TABLE feat_definitions ADD COLUMN future_root_semantic INTEGER');
+    db.exec('UPDATE feat_definitions SET future_root_semantic = 1 WHERE content_key = ?', [FEAT_KEY]);
+    const baseline = identityForStoredFeat().derivedKey;
+    db.exec('UPDATE feat_definitions SET future_root_semantic = 2 WHERE content_key = ?', [FEAT_KEY]);
+    expect(identityForStoredFeat().derivedKey).not.toBe(baseline);
+  });
+
   it('discriminates every mechanics-bearing class child-table family', () => {
     const weaponA = 'expanded:ci3b-weapon-a' as ContentKey;
     const weaponB = 'expanded:ci3b-weapon-b' as ContentKey;
