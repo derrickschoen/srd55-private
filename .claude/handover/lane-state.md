@@ -23,6 +23,29 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
+## RESTART POINT 2026-08-03 (newest - read first)
+MAIN 4314313 (D177). MERGED TODAY: W-F 9af49bd (BAR ITEM 3 CLOSED - the
+whole wizard chain is done), HA-1 ff31fe4 (migration 0028; mint lane
+OPEN). FLOORS: vitest 3,414+ / 208 files; PW 104 / 24 specs; build 0;
+migrations 0000-0028 frozen; wire v1-v17.
+GATE QUEUE: P3 in wt/party (fix round for 3 review findings running -
+log p3-fix.log; pre-fix suite was INVALIDATED by fix-round overlap, HMR
+navigation signature; after fix: full re-gate, control, merge as 0029,
+drop residual stash@{0}); then FF-C (wt/attunement, done+ungated), SC-1
+(wt/resp, fixed+ungated), BROWSER-PROBE (wt/hyg2, digest GATE-READY).
+After P3 merges: CI-3a dispatches (mint lane, STRICTLY serial now).
+D177 GUIDELINE PROJECT: an ISOLATED FABLE MANAGER agent owns it (spawns
+its own fable researchers + codex synthesis + opus hygiene audit,
+commits docs/design/subclass-guidelines/ itself, reports SANITIZED).
+CLEAN-ROOM RULE FOR THIS SESSION: do NOT read the research task outputs
+(tasks/a14f5*, tasks/a4b95*, scratchpad/subclass-anatomy.log) - the main
+session stays unpolluted; consume only the committed guideline files.
+BLACKGUARD (D175): outline presented to owner; awaiting their taste on
+name / level-10 slot / fiendish-vs-subtle. Then codex design doc on the
+parallel track (does NOT block publication). OGL quarantine = D176.
+Open owner items: org name (D168), spike-repo deletion, invented-monk
+draft (D169), SS-2B marker extension flagged for next question round.
+
 ## MINT COLLISION 2026-08-02 (supervisor scheduling miss, full length)
 P3 (dispatched to wt/party with a MINT brief) minted 0028_party_document_
 states while HA-1's committed-but-ungated 0028 sat in wt/mint2. The brief
