@@ -39,11 +39,29 @@ async function expectLevelTwoAcceptanceSheet(page: Page): Promise<void> {
   await expect(arcana).toContainText('Arcana (Expertise)');
   await expect(arcana.locator('.sheet-figure')).toHaveText('+5');
   for (const choice of ACCEPTANCE_WIZARD_2_CHOICES.spells) {
-    await expect(
-      page.locator('[data-sheet-id^="spell:"]').filter({
+    const row = page
+      .locator(
+        choice.kind === 'spellbook_acquisition'
+          ? '[data-sheet-id^="spellbook:"]'
+          : '[data-sheet-id^="spell:"]',
+      )
+      .filter({
         has: page.getByText(choice.spell_name, { exact: true }),
-      }).first(),
-    ).toBeVisible();
+      })
+      .first();
+    await expect(row).toBeVisible();
+    if (choice.kind === 'spellbook_acquisition') {
+      await expect(row).toContainText(
+        `${choice.spell_name}Level 1Spellbook`,
+      );
+      await expect(row).not.toContainText('Prepared');
+      await expect(row).not.toContainText('Known');
+      await expect(
+        page.locator('[data-sheet-id^="spell:"]').filter({
+          has: page.getByText(choice.spell_name, { exact: true }),
+        }),
+      ).toHaveCount(0);
+    }
   }
 }
 
