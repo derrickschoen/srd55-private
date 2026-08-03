@@ -15,14 +15,30 @@
     <title>SRD-55</title>
   </head>
   <body>
+    <!-- Outside #app so it survives every screen render. It precedes the
+         viewport-filling application shell so a held boot leaves both the
+         warning and its action in the initial viewport. -->
+    <section
+      id="browser-support-notice"
+      class="browser-support-notice"
+      role="status"
+      aria-live="assertive"
+      aria-labelledby="browser-support-heading"
+      data-browser-support-state="checking"
+      hidden
+    >
+      <h2 id="browser-support-heading">Browser support warning</h2>
+      <p id="browser-support-message"></p>
+      <button id="browser-support-continue" type="button">
+        Continue anyway
+      </button>
+    </section>
     <div id="app" aria-busy="true">
       <main class="loading-shell">
         <h1>SRD-55</h1>
         <output id="status" role="status">Starting local database…</output>
       </main>
     </div>
-    <!-- Outside #app so it survives every screen render: screens replace the
-         children of #app whenever they redraw. -->
     <footer class="site-footer">
       <div class="pwa-status">
         <output
