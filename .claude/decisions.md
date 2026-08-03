@@ -7,6 +7,22 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D185 — OWNER: the register is TORMENT WITHOUT DOUBT (2026-08-03)
+
+Corrects the serene overcorrection. Owner's words: "I do not see
+serenity in this story. I see someone tormented by 'knowing' for sure
+the right thing to do while having every ounce of their humanity
+screaming stop - and the toll and the trauma of that." The two rulings
+COMPOSE: D183's certainty is EPISTEMIC (he never doubts he is right);
+the torment is MORAL AND EMBODIED (the doing costs him everything, every
+time, and the cost never converts into doubt). The knight is the
+Dyson-house figure one beat further: hands shaking, trigger pulled.
+Tenet STRUCTURE and the pinned centerpiece are locked; a final VOICE
+pass rewrites the satellites so the speaker is visibly paying -
+exhaustion, grief, white knuckles - while conceding nothing
+epistemically. "Let it be recorded that I knew" reads as carved through
+gritted teeth: the record is the trauma seeking a witness.
+
 ## D184 — OWNER: the Exception tenet is PINNED verbatim (2026-08-03)
 
 Owner pinned this tenet as a keeper, surviving all reworks word for
