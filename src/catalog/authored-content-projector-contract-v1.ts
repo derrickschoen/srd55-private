@@ -1,4 +1,5 @@
 import type {
+  AuthoringGrant,
   BackgroundContentAggregate,
   ContentFingerprintReference,
   SpeciesContentAggregate,
@@ -12,6 +13,7 @@ import type {
   CanonicalOpenPassthroughValue,
   CanonicalRuleText,
   ContentIdentitySequence,
+  ContentIdentitySet,
   ContentKind,
 } from './content-identity';
 
@@ -118,6 +120,33 @@ type CanonicalizedEffect<E extends AuthoringCharacterEffect | AuthoringFeatureEf
 export type CanonicalCharacterEffectV1 = CanonicalizedEffect<AuthoringCharacterEffect>;
 export type CanonicalFeatureEffectV1 = CanonicalizedEffect<AuthoringFeatureEffect>;
 
+/**
+ * Grant order is meaningful, but the eligibility members within these two
+ * grant arms are mathematical sets. Encoding that distinction here prevents
+ * reordered or repeated eligibility values from changing content identity.
+ */
+export type CanonicalAuthoringGrantV1 =
+  | Extract<AuthoringGrant, { readonly kind: 'fixed_spell' | 'choice_from_list' }>
+  | (Omit<
+      Extract<AuthoringGrant, { readonly kind: 'choice_from_query' }>,
+      'schools' | 'tags'
+    > & {
+      readonly schools: ContentIdentitySet<
+        Extract<AuthoringGrant, { readonly kind: 'choice_from_query' }>['schools'][number]
+      >;
+      readonly tags: ContentIdentitySet<
+        Extract<AuthoringGrant, { readonly kind: 'choice_from_query' }>['tags'][number]
+      >;
+    })
+  | (Omit<
+      Extract<AuthoringGrant, { readonly kind: 'skill_proficiency' }>,
+      'skills'
+    > & {
+      readonly skills: ContentIdentitySet<
+        Extract<AuthoringGrant, { readonly kind: 'skill_proficiency' }>['skills'][number]
+      >;
+    });
+
 export interface CanonicalSpeciesTraitV1 {
   readonly name: string;
   readonly description: CanonicalRuleText;
@@ -126,7 +155,7 @@ export interface CanonicalSpeciesTraitV1 {
 
 export interface SpeciesProjectorPayloadV1 {
   readonly reference_text: CanonicalRuleText;
-  readonly grants: ContentIdentitySequence<SpeciesContentAggregate['grants'][number]>;
+  readonly grants: ContentIdentitySequence<CanonicalAuthoringGrantV1>;
   readonly creature_type: CanonicalOpenPassthroughValue;
   readonly primary_size: CanonicalOpenPassthroughValue;
   readonly alternate_size: CanonicalOpenPassthroughValue | null;
@@ -173,7 +202,7 @@ export type SubclassProgressionProjectionV1 =
             number, number, number, number,
           ];
           readonly grants: ContentIdentitySequence<
-            SpeciesContentAggregate['grants'][number]
+            CanonicalAuthoringGrantV1
           >;
         }
       >;
