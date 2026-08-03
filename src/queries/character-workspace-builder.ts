@@ -370,7 +370,7 @@ export class CharacterWorkspaceBuilder {
           }),
         )
           .filter((definition) =>
-            isBundledSourceContentKey('class', definition.content_key)
+            isBundledSourceContentKey('class', definition.content_key, this.db)
           )
           .map(({ id, name }) => ({ id, name }))
       : this.db.all(
@@ -554,7 +554,7 @@ export class CharacterWorkspaceBuilder {
         ),
       }),
     ).filter((definition) =>
-      isBundledSourceContentKey(sourceType, definition.content_key)
+      isBundledSourceContentKey(sourceType, definition.content_key, this.db)
     );
   }
 

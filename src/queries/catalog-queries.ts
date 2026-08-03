@@ -249,7 +249,7 @@ export class CatalogQueries {
         undefined,
         decodeClass,
       ).filter((definition) =>
-        isBundledSourceContentKey('class', definition.content_key)
+        isBundledSourceContentKey('class', definition.content_key, this.db)
       ),
       subclasses: this.db.all(
         `SELECT *
@@ -329,7 +329,7 @@ export class CatalogQueries {
       undefined,
       decodeDefinition,
     ).filter((definition) =>
-      isBundledSourceContentKey(kind, definition.content_key)
+      isBundledSourceContentKey(kind, definition.content_key, this.db)
     );
   }
 }

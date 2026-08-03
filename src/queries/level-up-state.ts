@@ -335,7 +335,7 @@ export class LevelUpStateQuery {
       };
     }
     const disabledOptions = eligibleHeldClasses.flatMap((entry) => {
-      if (!isBundledSourceContentKey('class', entry.content_key)) {
+      if (!isBundledSourceContentKey('class', entry.content_key, this.db)) {
         return [this.#disabledClassOption(entry, 'class_not_bundled')];
       }
       return entry.hit_die === null
@@ -345,7 +345,7 @@ export class LevelUpStateQuery {
     const guideableHeldClasses = eligibleHeldClasses.filter(
       (entry): entry is HeldClassRow & { readonly hit_die: HitDieSize } =>
         entry.hit_die !== null &&
-        isBundledSourceContentKey('class', entry.content_key),
+        isBundledSourceContentKey('class', entry.content_key, this.db),
     );
     if (guideableHeldClasses.length === 0) {
       return {
