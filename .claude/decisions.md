@@ -7,6 +7,20 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D189 — OWNER: monk third-caster level 6 = cantrip inside Flurry of Blows (2026-08-03)
+
+Owner's words: "I want the lvl 6 valor bard mechanic to replace an attack
+with a cantrip. Maybe flurry of blows allows a cantrip if not holding a
+weapon." The monk subclass's level-6 feature: when using Flurry of Blows
+while not holding weapons, one of its Unarmed Strikes may be replaced by
+casting a cantrip (exact wording/limits to the draft). DISTANCE NOTE,
+recorded deliberately: attack-replaced-by-cantrip is a flagged signature
+(the un-redesigned EK-pattern lift is what reviewers dinged the upcoming
+official monk for). The owner's version is the REDESIGN the flagged
+product lacked: it rides the Focus-funded Bonus Action Flurry (not the
+Attack action), costs the class's own resource, and is gated unarmed-only.
+Ruled acceptable under D174 (differentiation by mechanical distance).
+
 ## D188 — OWNER: Voice of Domination SIMPLIFIED (2026-08-03)
 
 Owner's words: "Simplify the oath of domination channel divinity. 1
