@@ -82,6 +82,22 @@ converts into doubt.
    walls could stand. I do not thank anything for it anymore. I only
    keep building.
 
+## The vision itself (D186 - the reading is the flaw)
+
+The misread-prophecy layer (owner, 2026-08-03): the vision may be true
+while HIS READING is wrong - the Croesus trap, where prophecy performs
+flawlessly and interpretation does the killing. The design doc must
+give the oath a WRITTEN VISION: one short passage of concrete but
+ambiguous imagery, deliberately supporting at least three readings
+(the knight's reading; a darker reading in which his warding builds
+the ruin; a benign reading in which no action was ever needed). The
+knight's certainty attaches to his interpretation - the one
+mortal-forged link in the chain, never audited. Tenet 8 ("What Was
+Shown Needs No Second Showing") does double duty: it forbids exactly
+the re-examination that would catch the misread. DM tool: secretly
+choose a true reading, or never choose. Divination answers arrive
+accurate and get bent through his reading at the table.
+
 ## DM guidance (binding for the doc's flavor section)
 
 The toll lives entirely in the body and the room - hands steadied by

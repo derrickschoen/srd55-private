@@ -7,6 +7,21 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D186 — OWNER: the vision is MISINTERPRETABLE - the reading is the flaw (2026-08-03)
+
+Owner adds the misread-prophecy layer (the GRRM teeth-snap idea; the
+Croesus/Delphi trap - ideas only, no protected expression): the vision
+may be TRUE while his READING of it is wrong, and acting on the
+misreading can be what brings the true meaning about. Design
+consequences: the oath's flavor includes a WRITTEN VISION - short,
+concrete, deliberately readable at least three ways (his reading, a
+darker reading, a benign reading) - as a DM tool; the DM may secretly
+pick a true reading or never pick one. His certainty attaches to his
+INTERPRETATION (the one mortal-forged link); no one ever audited it,
+and the tenets' certainty language already covers it ("What Was Shown
+Needs No Second Showing" now does double work). Augury/Divination
+answers stay ambiguous AND get bent through his reading.
+
 ## D185 — OWNER: the register is TORMENT WITHOUT DOUBT (2026-08-03)
 
 Corrects the serene overcorrection. Owner's words: "I do not see
