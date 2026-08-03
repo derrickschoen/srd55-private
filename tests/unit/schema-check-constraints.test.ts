@@ -1008,6 +1008,19 @@ const catalogDataMigration =
     });
   };
 
+const partyDocumentState =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'party_document_states', {
+      forge: 'github',
+      repository: uid('party-repository'),
+      path: `characters/${uid('publication')}--pub.json`,
+      document_kind: 'character',
+      observation_state: 'Never published',
+      ...values,
+    });
+  };
+
 interface ConstraintCase {
   readonly constraint: string;
   /** Writes that MUST be refused, each with the corruption it would have made. */
@@ -1235,6 +1248,50 @@ function authoredCharacterEffectConstraintCases(
 }
 
 const CONSTRAINT_CASES: readonly ConstraintCase[] = [
+  {
+    constraint: 'party_document_states_forge_check',
+    rejects: [
+      ['an unsupported forge', partyDocumentState({ forge: 'bitbucket' })],
+    ],
+    accepts: [
+      ['the Codeberg forge', partyDocumentState({ forge: 'codeberg' })],
+    ],
+  },
+  {
+    constraint: 'party_document_states_kind_check',
+    rejects: [
+      ['an invented manifest kind', partyDocumentState({ document_kind: 'manifest' })],
+    ],
+    accepts: [
+      ['a library observation', partyDocumentState({ document_kind: 'library' })],
+    ],
+  },
+  {
+    constraint: 'party_document_states_observation_state_check',
+    rejects: [
+      ['an unnamed observation', partyDocumentState({ observation_state: 'Unknown' })],
+    ],
+    accepts: [
+      [
+        'the semicolon-bearing publish observation',
+        partyDocumentState({
+          observation_state:
+            'Published; refresh required before another publish',
+        }),
+      ],
+    ],
+  },
+  {
+    constraint: 'party_document_states_local_revision_check',
+    rejects: [
+      ['a negative local revision', partyDocumentState({ last_published_local_revision: -1 })],
+      ['a text local revision', partyDocumentState({ last_published_local_revision: 'one' })],
+    ],
+    accepts: [
+      ['the initial local revision', partyDocumentState({ last_published_local_revision: 0 })],
+      ['the defended unknown revision', partyDocumentState({ last_published_local_revision: null })],
+    ],
+  },
   {
     constraint: 'catalog_data_migrations_id_check',
     rejects: [

@@ -157,7 +157,8 @@ const allAutoIncrementTables = [
  * CI-2a's four recipient-local registry tables are keyed by their content or
  * fingerprint tuples, and CI-2b's applied marker is keyed by its immutable
  * migration id, just as D92's one-row-per-character attunement slots are keyed
- * by character_id. A table added with a natural primary key fails here and
+ * by character_id. P3's observation index is keyed by forge/repository/path,
+ * the stable roster address. A table added with a natural primary key fails here and
  * forces the decision to be made deliberately.
  */
 const naturalKeyTables = [
@@ -167,6 +168,7 @@ const naturalKeyTables = [
   'catalog_content_match_decisions',
   'catalog_data_migrations',
   'character_attunement_slots',
+  'party_document_states',
 ] as const;
 
 let sqlite3: Sqlite3Static;

@@ -1141,6 +1141,27 @@ CREATE TABLE `named_features` (
 
 CREATE UNIQUE INDEX `named_features_content_key_unique` ON `named_features` (`content_key`);
 CREATE UNIQUE INDEX `named_features_class_name_rules_edition_unique` ON `named_features` (`class_definition_id`,`name`,`rules_edition`);
+CREATE TABLE `party_document_states` (
+	`forge` VARCHAR NOT NULL,
+	`repository` VARCHAR NOT NULL,
+	`observed_ref` VARCHAR,
+	`path` VARCHAR NOT NULL,
+	`document_kind` VARCHAR NOT NULL,
+	`publication_id` VARCHAR,
+	`character_id` integer,
+	`last_observed_remote_revision` VARCHAR,
+	`last_imported_revision` VARCHAR,
+	`last_published_local_revision` integer,
+	`last_successful_refresh_at` DATETIME,
+	`observation_state` VARCHAR NOT NULL,
+	PRIMARY KEY(`forge`, `repository`, `path`),
+	FOREIGN KEY (`character_id`) REFERENCES `characters`(`id`) ON UPDATE no action ON DELETE set null,
+	CONSTRAINT "party_document_states_forge_check" CHECK(`forge` IN ('github', 'gitlab', 'codeberg')),
+	CONSTRAINT "party_document_states_kind_check" CHECK(`document_kind` IN ('library', 'character')),
+	CONSTRAINT "party_document_states_observation_state_check" CHECK(`observation_state` IN ('Never published', 'Unpublished local changes', 'Published at revision N from this device', 'Published' || char(59) || ' refresh required before another publish', 'No longer published', 'Never refreshed', 'Last refreshed successfully', 'Latest refresh attempt')),
+	CONSTRAINT "party_document_states_local_revision_check" CHECK(last_published_local_revision IS NULL OR typeof(`last_published_local_revision`) = 'integer' AND `last_published_local_revision` >= 0)
+);
+
 CREATE TABLE `species_definitions` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`content_key` VARCHAR NOT NULL,
