@@ -7,6 +7,20 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D180 — OWNER: Oath of Domination tone = the sincere tyrant; fiendish framing CUT (2026-08-03)
+
+Owner's words: evil by someone "who thinks they are doing the right
+thing" - the "if I were in charge, I could stop all of this injustice"
+philosophy, modeled on Paul Atreides and Leto II (the Golden Path: tyranny
+chosen knowingly as salvation). Consequences: NO fiendish framing
+anywhere in the oath; the 3.5 fiendish servant is CUT as a mechanic (at
+most a prose echo on find steed: "the first creature to bend the knee");
+tenets built on order-as-mercy, the burden of the one who sees, and
+self-aware monstrousness. LICENSING: Dune's philosophy is distilled as
+ideas only - no Dune names, terms, or expression may appear in the oath's
+text (a sonnet researcher produces original tenet language; clean-room
+rules apply).
+
 ## D179 — OWNER: the Blackguard conversion is OATH OF DOMINATION (2026-08-03)
 
 Name chosen: Oath of Domination. Identity: command, not fear (D178
