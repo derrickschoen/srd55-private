@@ -93,6 +93,15 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
     text: ['id', 'scheme', 'checksum'],
     numeric: ['applied_at'],
   },
+  party_document_states: {
+    integer: ['character_id', 'last_published_local_revision'],
+    text: [
+      'forge', 'repository', 'observed_ref', 'path', 'document_kind',
+      'publication_id', 'last_observed_remote_revision',
+      'last_imported_revision', 'observation_state',
+    ],
+    numeric: ['last_successful_refresh_at'],
+  },
   background_definitions: {
     integer: ['id', 'repeatable'],
     text: [
@@ -712,6 +721,9 @@ const expectedNotNull: Record<string, string[]> = {
   ],
   catalog_data_migrations: [
     'id', 'scheme', 'checksum', 'applied_at',
+  ],
+  party_document_states: [
+    'forge', 'repository', 'path', 'document_kind', 'observation_state',
   ],
   // `damage_dice`, `damage_type` and `mastery_property` are NULLABLE here and
   // NOT NULL on the template: a half-entered user weapon is a first-class
@@ -1419,6 +1431,7 @@ const expectedForeignKeys: Record<string, string[]> = {
   catalog_content_match_decisions: [
     'content_kind,target_content_key->catalog_content_identities.content_kind,content_key|RESTRICT',
   ],
+  party_document_states: ['character_id->characters.id|SET NULL'],
   class_definitions: [
     'content_key->catalog_content_identities.content_key|NO ACTION',
   ],
