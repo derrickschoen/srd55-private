@@ -7,6 +7,31 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D176 — OWNER: OGL content is QUARANTINED in its own folder (2026-08-03)
+
+"Keep ogl stuff in a separate folder with the ogl requirements in the
+same folder so ogl doesn't pollute the rest of the repo." Any content
+derived-with-text or reused from OGL 1.0a sources lives under a dedicated
+folder (docs/ogl/ unless implementation finds better) containing the OGL
+1.0a license text and the full Section 15 chain for exactly what that
+folder holds. The rest of the repo stays CC-BY/MIT with no OGL
+obligations. Code that consumes OGL-folder content must not copy its text
+elsewhere. Publish prep carries the folder as-is with its notices.
+
+## D175 — OWNER: first conversion = BLACKGUARD as the evil oath; parallel track, owner-led (2026-08-03)
+
+From the conversion walkthrough: convert ONLY Blackguard for now (the
+2024 core's vacant evil-oath slot; renamed per D174 with mechanical
+distance from 2014's Oathbreaker). Sequencing: a PARALLEL track that
+"does not block publication" - outside the D148 gate, worked as capacity
+allows. Process: one at a time, each conversion gets its own design doc
+and approval round, and the owner is involved "more than usual" - the
+supervisor presents feature outlines to the owner BEFORE codex authors
+the design doc, and the owner approves content at every stage before
+seeding. Tier-1 candidates (Horizon Walker, Duelist, Hierophant,
+Loremaster, Archmage, Dwarven Defender, Thaumaturgist) remain on the
+research shelf, unqueued.
+
 ## D174 — OWNER: conversion collision policy = rename + mechanical distance (2026-08-02)
 
 On the 3.5-SRD conversion research: "Differentiating by renaming is fine
