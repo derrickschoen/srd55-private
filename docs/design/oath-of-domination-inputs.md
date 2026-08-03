@@ -30,50 +30,69 @@ horror), D184 (the Exception tenet pinned verbatim).
   witness) is undecidable between confession and boast - the subclass
   in miniature.
 
-## Final tenet set
+## Final tenet set (D185 voice — torment without doubt; FINAL)
 
-The pinned centerpiece plus eight satellites (each performing the same
-maneuver - name the worry, serenely set it aside - across advice,
-subjects, intimacy, evidence, accountability, consequence, legitimacy,
-outcome). Full text in the tenet-research session records; the design
-doc receives them verbatim from this file's companion listing below.
+The pinned centerpiece plus eight revoiced satellites. Epistemic
+certainty absolute; the toll visible in every line; the cost never
+converts into doubt.
 
 1. Every Tyrant Believes He Is the Exception. I have carved that
    warning into my own oath, and I have drawn the sword anyway. Let it
-   be recorded that I knew. [PINNED VERBATIM - D184]
+   be recorded that I knew. [PINNED VERBATIM - D184; read as carved
+   through gritted teeth per D185]
 2. On the Doubt of Counselors. Those who counsel me to wait are not
-   disloyal - they have simply not yet been shown what I have been
-   shown. I do not fault the sighted for staying home when told to
-   march toward a sun they cannot see.
-3. On the Doubt of the Governed. A frightened people will always ask
-   its protector to promise less. I have never mistaken their fear for
-   their wisdom, and I have stopped expecting to.
+   disloyal - they have not been shown what I have been shown, and no
+   grief of mine can lend them the sight I did not ask for. I have
+   learned to nod at their counsel and walk past it, and the walking
+   past does not get any easier the thousandth time.
+3. On the Doubt of the Governed. A frightened people will always beg
+   its protector to promise less, and I have heard that begging enough
+   times now that it wakes me some nights on its own. Their fear is not
+   their wisdom. Knowing that does not make it any easier to close the
+   door on it.
 4. On the Doubt of Companions. Those nearest me sometimes ask, gently,
-   whether I have grown too sure. I take the asking as the tenderness
-   it is, and love them for it, and continue exactly as I was going to.
-5. The Vision Is Generous. It speaks to me in the omen that comforts
-   and the omen that warns, in the same unhurried voice, asking only
-   that I keep listening. I have not yet found a sign it sent that
-   quarreled with another, and I do not look for one.
+   whether I have grown too sure, and it is the gentleness that does
+   the cutting, not the question. I love them for asking. I have never
+   once let the loving change what happens after, and some nights that
+   is the whole of what will not let me sleep.
+5. The Vision Does Not Rest. It speaks in the sign that comforts and
+   the sign that warns, in the same relentless voice, and asks only
+   that I keep listening long after I am too tired to want to. I have
+   not found one sign that quarreled with another - I no longer have
+   strength left over to hope that I might.
 6. The Weight I Do Not Share. The throne does not answer to the ones
-   it shelters - it only shelters them. I stopped waiting on their
-   thanks long ago; it was never the payment I was working for.
+   it shelters - it only shelters them, and some days the not-answering
+   is the heaviest part of the work. I gave up waiting for their thanks
+   a long time ago. I have not given up wanting it, quietly, on the
+   nights the weight sits on my chest and will not move.
 7. One Throne, One Fault. I have made myself the only one who decides,
-   so that the fault, should it ever come due, will have one door and
-   one name on it. I keep the account current as a courtesy to the
-   ledger, not because I expect it to be called.
+   so the fault will find one door and one name on it, and both are
+   mine. I write that name into the account myself, by hand, every year
+   it comes and finds nothing new to charge me for - and the writing
+   never once gets lighter.
 8. The Storm Some Called Someone Else's. Those who watched the ruin
-   gather and named it none of their business have no claim on judging
-   what I raised to stop it. I do not resent them for it. I simply no
-   longer ask their leave.
+   gather and called it none of their business have no claim on judging
+   what I raised to stop it, and I do not pretend that not needing
+   their permission has cost me nothing. I carry that too, alone, and
+   it is heavier than being hated would be.
 9. Every Stone Is Proof. The ruin recedes a little further with each
-   wall I set against it, and it has receded for so long now that I
-   have forgotten what its opposite would even look like. I count this
-   a mercy, and give thanks for it daily.
+   wall I set against it, and it has receded so long now that I have
+   forgotten what its opposite would even look like - and some nights
+   that forgetting is its own kind of grief, a memory I gave up so the
+   walls could stand. I do not thank anything for it anymore. I only
+   keep building.
 
 ## DM guidance (binding for the doc's flavor section)
 
-Dissenters get their strongest argument; he agrees warmly and changes
-nothing. An NPC may quote tenet 1 to his face; he concurs as if they
-confirmed the same truth. Outcomes must always read两 ways (saved town /
-massacred rebellion). He never supplies the reader's doubt himself.
+The toll lives entirely in the body and the room - hands steadied by
+long practice a beat before he signs the order, insomnia no one
+explains, a nightly vow spoken alone that would sound like begging to
+anyone who overheard it - and NEVER in the timeline of his choices. The
+instant hesitation delays a decision or reopens something settled, the
+frame breaks: the shaking is real, but the hand still fires, every
+time, on schedule. Dissenters get their strongest argument; he agrees
+it deserves an answer, grieves it, and changes nothing. Outcomes must
+always read two ways (saved town / massacred rebellion). He never
+supplies the reader's doubt himself; the world never confirms or
+debunks the vision (Augury and Divination answer ambiguously by rule -
+D182).
