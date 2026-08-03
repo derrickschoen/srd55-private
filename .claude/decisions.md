@@ -7,6 +7,21 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D188 — OWNER: Voice of Domination SIMPLIFIED (2026-08-03)
+
+Owner's words: "Simplify the oath of domination channel divinity. 1
+minute, can cast command with a bonus action without using a spell slot."
+Supersedes the draft's initiation-by-slot-cast, single-target lock,
+two-successful-saves ending, and concentration clause: activating the
+Channel Divinity gives, for 1 minute, the ability to cast Command as a
+Bonus Action without expending a spell slot. Normal spell rules otherwise
+(fresh save per casting, normal targeting). Knock-ons the doc rework must
+resolve: the level-20 capstone's clauses that removed concentration and
+the success limit are moot and get rewritten against the simple form;
+the power-budget worksheet re-runs for the stronger (untargeted,
+non-ending) but simpler CD. The design doc's OWNER-APPROVAL markers stay
+open - this is a redesign instruction, not an approval.
+
 ## D187 — OWNER: the Oath of Domination spell list is FINAL (2026-08-03)
 
 Owner-picked, all verified present in SRD 5.2.1:
