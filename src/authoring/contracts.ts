@@ -220,6 +220,7 @@ interface PublishableHomebrewBase<K extends AuthoredContentKind> {
   readonly kind: K;
   readonly name: string;
   readonly rules_edition: RulesEdition;
+  /** Stored in the matching definition root's nullable `notes` column. */
   readonly reference_text: string;
 }
 
@@ -346,6 +347,7 @@ export interface SubclassContentFeature {
 export interface SubclassContentAggregate
   extends PublishableHomebrewBase<'subclass'> {
   readonly parent_class: ContentFingerprintReference<'class'>;
+  readonly grants: readonly AuthoringGrant[];
   readonly progression: SubclassContentProgression;
   readonly features: readonly SubclassContentFeature[];
 }
