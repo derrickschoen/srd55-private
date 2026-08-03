@@ -49,8 +49,17 @@ async function render(context: ScreenContext): Promise<() => void> {
   const flavorAppendix = sheetElement.querySelector<HTMLInputElement>(
     '[data-sheet-print-option="flavor-appendix"]',
   );
-  if (flavorAppendix !== null) {
-    flavorAppendix.checked = sheet.print_appendix_preferences.flavor;
+  const spellAppendix = sheetElement.querySelector<HTMLInputElement>(
+    '[data-sheet-print-option="spells-appendix"]',
+  );
+  const appendixOptions = [
+    { element: flavorAppendix, kind: 'flavor' },
+    { element: spellAppendix, kind: 'spells' },
+  ] as const;
+  for (const option of appendixOptions) {
+    if (option.element !== null) {
+      option.element.checked = sheet.print_appendix_preferences[option.kind];
+    }
   }
 
   const cleanups: Array<() => void> = [];
@@ -95,48 +104,53 @@ async function render(context: ScreenContext): Promise<() => void> {
   const syncPrintFields = (): void => {
     setSheetPrintContent(sheetElement, sheet, printMedia.matches, {
       flavor_appendix: flavorAppendix?.checked ?? false,
+      spell_appendix: spellAppendix?.checked ?? false,
     });
   };
   const beforePrint = (): void => {
     setSheetPrintContent(sheetElement, sheet, true, {
       flavor_appendix: flavorAppendix?.checked ?? false,
+      spell_appendix: spellAppendix?.checked ?? false,
     });
   };
   const afterPrint = (): void => {
     syncPrintFields();
   };
-  const flavorPreferenceChanged = (): void => {
-    if (flavorAppendix === null) {
-      return;
-    }
-    const enabled = flavorAppendix.checked;
-    flavorAppendix.setCustomValidity('');
-    flavorAppendix.disabled = true;
-    syncPrintFields();
-    void queries
-      .setPrintAppendixPreference(id, 'flavor', enabled)
-      .then(() => {
-        flavorAppendix.disabled = false;
-      })
-      .catch((error: unknown) => {
-        flavorAppendix.checked = !enabled;
-        flavorAppendix.disabled = false;
-        flavorAppendix.setCustomValidity(
-          error instanceof Error
-            ? error.message
-            : 'The print preference could not be saved.',
-        );
-        flavorAppendix.reportValidity();
-        syncPrintFields();
-      });
-  };
   syncPrintFields();
-  flavorAppendix?.addEventListener('change', flavorPreferenceChanged);
+  for (const option of appendixOptions) {
+    if (option.element === null) {
+      continue;
+    }
+    const input = option.element;
+    const preferenceChanged = (): void => {
+      const enabled = input.checked;
+      input.setCustomValidity('');
+      input.disabled = true;
+      syncPrintFields();
+      void queries
+        .setPrintAppendixPreference(id, option.kind, enabled)
+        .then(() => {
+          input.disabled = false;
+        })
+        .catch((error: unknown) => {
+          input.checked = !enabled;
+          input.disabled = false;
+          input.setCustomValidity(
+            error instanceof Error
+              ? error.message
+              : 'The print preference could not be saved.',
+          );
+          input.reportValidity();
+          syncPrintFields();
+        });
+    };
+    input.addEventListener('change', preferenceChanged);
+    cleanups.push(() => input.removeEventListener('change', preferenceChanged));
+  }
   printMedia.addEventListener('change', syncPrintFields);
   window.addEventListener('beforeprint', beforePrint);
   window.addEventListener('afterprint', afterPrint);
   cleanups.push(() => {
-    flavorAppendix?.removeEventListener('change', flavorPreferenceChanged);
     printMedia.removeEventListener('change', syncPrintFields);
     window.removeEventListener('beforeprint', beforePrint);
     window.removeEventListener('afterprint', afterPrint);
