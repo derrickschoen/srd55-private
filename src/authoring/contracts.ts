@@ -3,9 +3,13 @@ import type {
   CharacterLevel,
   CreatureSize,
   CreatureType,
+  DomainSourceType,
+  FreeCastPoolScope,
+  FreeCastRecovery,
   ProgressionType,
   RulesEdition,
   Skill,
+  SlotBucket,
   SpellSchool,
 } from '../domain/enums';
 import type {
@@ -13,7 +17,7 @@ import type {
   CharacterRevision,
   ContentKey,
 } from '../domain/ids';
-import type { JsonValue } from '../domain/models';
+import type { JsonObject, JsonValue } from '../domain/models';
 import type {
   CanonicalContentIdentityJson,
   ContentFingerprintDigest,
@@ -61,13 +65,42 @@ export interface ContentFingerprintReference<
   readonly digest: ContentFingerprintDigest;
 }
 
+export interface AuthoringGrantActivation {
+  readonly active_from_class_level: CharacterLevel | null;
+  readonly active_if_config: {
+    readonly key: string;
+    readonly equals: string;
+  } | null;
+  readonly distinct_config_by: string | null;
+}
+
+export interface AuthoringFreeCast {
+  readonly uses: number;
+  readonly recovery: FreeCastRecovery;
+  readonly pool_scope: FreeCastPoolScope;
+}
+
+/**
+ * Normalized mechanics consumed by the runtime grant readers. Fixed spells do
+ * not carry `count`, `required`, or lock fields here: GrantRule fixes count to
+ * one and the planner fixes required/locked to true, so varying those stored
+ * metadata fields cannot alter runtime behavior. Grant-source slot/free-cast
+ * flags are likewise absent because materializeGrantedSources never reads
+ * them. Local definition ids/keys are not identity data; the supported
+ * dynamic source arm resolves its definition from character configuration.
+ */
 export type AuthoringGrant =
-  | {
+  | (AuthoringGrantActivation & {
       readonly kind: 'fixed_spell';
       readonly rule_key: string;
       readonly spell: ContentFingerprintReference<'spell'>;
+      readonly bucket: Exclude<SlotBucket, 'spellbook'>;
       readonly always_prepared: boolean;
-    }
+      readonly with_slots: boolean;
+      readonly free_cast: AuthoringFreeCast | null;
+      readonly counts_against_limit: boolean;
+      readonly label: string | null;
+    })
   | {
       readonly kind: 'choice_from_list';
       readonly rule_key: string;
@@ -89,7 +122,17 @@ export type AuthoringGrant =
       readonly rule_key: string;
       readonly count: number;
       readonly skills: readonly Skill[];
-    };
+    }
+  | (AuthoringGrantActivation & {
+      readonly kind: 'grant_source';
+      readonly rule_key: string;
+      readonly count: number;
+      readonly source_type: DomainSourceType;
+      readonly definition_key_config: string;
+      readonly child_config:
+        | { readonly mode: 'config'; readonly path: string }
+        | { readonly mode: 'fixed'; readonly value: JsonObject };
+    });
 
 export type AuthoringDraftGrant =
   | {
@@ -265,6 +308,10 @@ export type BackgroundContentEquipment =
 
 export interface BackgroundContentAggregate
   extends PublishableHomebrewBase<'background'> {
+  readonly grants: readonly Extract<
+    AuthoringGrant,
+    { readonly kind: 'grant_source' }
+  >[];
   readonly suggested_abilities: readonly [Ability, Ability, Ability];
   readonly default_origin_feat: ContentFingerprintReference<'feat'>;
   readonly skill_proficiencies: readonly [Skill, Skill];
