@@ -88,6 +88,102 @@ describe('class, feat, species and background catalog import', () => {
     );
   });
 
+  it('normalizes a case-varied grant skill and re-imports it as a silent exact match', () => {
+    const aggregate = {
+      ...featProjectorV1Vector.aggregate,
+      name: 'Case Varied Skill Grant',
+      grants: [{
+        kind: 'skill_proficiency',
+        rule_key: 'case-varied.skill',
+        count: 1,
+        skills: ['Arcana'],
+      }],
+    };
+    const featDocument = document('feat', aggregate);
+
+    const created = new CatalogImporter(db).import({ documents: [featDocument] });
+    const matched = new CatalogImporter(db).import({ documents: [featDocument] });
+
+    expect(created.feats_created).toBe(1);
+    expect(matched.feats_matched).toBe(1);
+    expect(db.scalar<string>('SELECT grant_rules FROM feat_definitions')).toContain(
+      '"skills":["arcana"]',
+    );
+  });
+
+  it('refuses an unknown grant skill at the document parse boundary', () => {
+    const aggregate = {
+      ...featProjectorV1Vector.aggregate,
+      name: 'Unknown Skill Grant',
+      grants: [{
+        kind: 'skill_proficiency',
+        rule_key: 'unknown.skill',
+        count: 1,
+        skills: ['Chronomancy'],
+      }],
+    };
+
+    expect(() => new CatalogImporter(db).import({
+      documents: [document('feat', aggregate)],
+    })).toThrow(/aggregate\.grants\[0\]\.skills\[0\].*Chronomancy.*not a skill/u);
+    expect(db.scalar<number>('SELECT count(*) FROM feat_definitions')).toBe(0);
+  });
+
+  it('refuses an unknown grant source_type at the document parse boundary', () => {
+    const aggregate = {
+      ...featProjectorV1Vector.aggregate,
+      name: 'Unknown Source Type Grant',
+      grants: [{
+        kind: 'grant_source',
+        rule_key: 'unknown.source-type',
+        count: 1,
+        source_type: 'vehicle',
+        definition_key_config: 'chosen_source',
+      }],
+    };
+
+    expect(() => new CatalogImporter(db).import({
+      documents: [document('feat', aggregate)],
+    })).toThrow(/aggregate\.grants\[0\]\.source_type.*vehicle.*not a domain source type/u);
+    expect(db.scalar<number>('SELECT count(*) FROM feat_definitions')).toBe(0);
+  });
+
+  it('refuses a non-grant_source rule in a background document at parse time', () => {
+    const aggregate = {
+      kind: 'background',
+      name: 'Invalid Grant Background',
+      rules_edition: 'expanded',
+      reference_text: '',
+      repeatable: false,
+      grants: [{
+        kind: 'skill_proficiency',
+        rule_key: 'background.skill',
+        count: 1,
+        skills: ['arcana'],
+      }],
+      suggested_abilities: ['strength', 'dexterity', 'constitution'],
+      default_origin_feat: {
+        kind: 'feat',
+        scheme: CONTENT_FINGERPRINT_SCHEME_V1,
+        digest: 'a'.repeat(64),
+      },
+      skill_proficiencies: ['athletics', 'acrobatics'],
+      tool_reference_text: null,
+      equipment_option_a_description: 'None.',
+      equipment_option_b_description: 'None.',
+      equipment_option_a: [],
+      equipment_option_b: [],
+      effects: [],
+    };
+
+    expect(() => new CatalogImporter(db).import({
+      documents: [document('background', aggregate)],
+    })).toThrow(
+      /aggregate\.grants\[0\]\.kind.*grant_source.*skill_proficiency/u,
+    );
+    expect(db.scalar<number>('SELECT count(*) FROM background_definitions')).toBe(0);
+  });
+
   it('refuses a whitespace-padded config path in a spell-list field', () => {
     const aggregate = {
       ...featProjectorV1Vector.aggregate,

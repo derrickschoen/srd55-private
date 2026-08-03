@@ -29,13 +29,11 @@ import {
   characterEffectKinds,
   characterLevels,
   definitionTableForSourceType,
-  domainSourceTypes,
   extraAttackWeaponScopes,
   featureTemplateEffectKinds,
   isEnumValue,
   progressionTypes,
   rulesEditions,
-  skills,
   spellSchool,
   type Ability,
   type CharacterLevel,
@@ -43,7 +41,6 @@ import {
   type ExtraAttackWeaponScope,
   type ProgressionType,
   type RulesEdition,
-  type Skill,
 } from '../domain/enums';
 import type { ContentKey } from '../domain/ids';
 import type { JsonObject, JsonValue } from '../domain/models';
@@ -77,6 +74,10 @@ import {
   type ContentFingerprintCandidate,
   type ContentResolution,
 } from './content-registry';
+import {
+  normalizedGrantSkill,
+  normalizedGrantSourceType,
+} from './grant-domain-values';
 
 export interface StoredAuthoredReferenceResolverV1 {
   readonly spell: (
@@ -168,14 +169,6 @@ function ability(value: string, label: string): Ability {
 
 function nullableAbility(value: string | null, label: string): Ability | null {
   return value === null ? null : ability(value, label);
-}
-
-function skill(value: string, label: string): Skill {
-  const normalized = value.trim().toLowerCase().replaceAll(' ', '_');
-  if (!isEnumValue(skills, normalized)) {
-    return projectionError(`${label} '${value}' is not a skill.`);
-  }
-  return normalized;
 }
 
 function characterLevel(value: number, label: string): CharacterLevel {
@@ -452,12 +445,11 @@ function sourceDefinitionReference(
   references: StoredAuthoredReferenceResolverV1,
   label: string,
 ): ContentFingerprintReference<DomainSourceType> | null {
-  const sourceType = object.source_type;
-  if (typeof sourceType !== 'string' || !isEnumValue(domainSourceTypes, sourceType)) {
-    return projectionError(
-      `${label}.source_type '${String(sourceType)}' is invalid.`,
-    );
-  }
+  const sourceType = normalizedGrantSourceType(
+    object.source_type,
+    `${label}.source_type`,
+    projectionError,
+  );
   const storedId = object.source_definition_id;
   const hasStoredId = storedId !== undefined && storedId !== null;
   if (hasStoredId && (!Number.isSafeInteger(storedId) || Number(storedId) < 1)) {
@@ -585,7 +577,13 @@ function canonicalGrant(grant: AuthoringGrant): CanonicalAuthoringGrantV1 {
         if (typeof entry !== 'string') {
           return projectionError(`grant '${grant.rule_key}' ${field} must contain only strings.`);
         }
-        if (field === 'skills') return skill(entry, `grant '${grant.rule_key}' skills`);
+        if (field === 'skills') {
+          return normalizedGrantSkill(
+            entry,
+            `grant '${grant.rule_key}' skills`,
+            projectionError,
+          );
+        }
         return field === 'schools'
           ? spellSchool(nonEmpty(entry, `grant '${grant.rule_key}' schools`))
           : nonEmpty(entry, `grant '${grant.rule_key}' tags`);
@@ -709,10 +707,11 @@ function grantReferences(
       if (value === null || Array.isArray(value) || typeof value !== 'object') {
         return projectionError(`grant '${grant.rule_key}' source definition is not a fingerprint reference.`);
       }
-      const kind = (value as Readonly<Record<string, unknown>>).kind;
-      if (typeof kind !== 'string' || !isEnumValue(domainSourceTypes, kind)) {
-        return projectionError(`grant '${grant.rule_key}' source definition kind is invalid.`);
-      }
+      const kind = normalizedGrantSourceType(
+        (value as Readonly<Record<string, unknown>>).kind,
+        `grant '${grant.rule_key}' source definition kind`,
+        projectionError,
+      );
       references.push({
         role: 'grant.source_definition' as const,
         reference: fingerprintValue(value, kind, `grant '${grant.rule_key}' source definition`),
@@ -1145,7 +1144,10 @@ function readBackground(
     grants: grants as BackgroundContentAggregate['grants'],
     suggested_abilities: [ability(root.abilities[0], 'first suggested ability'), ability(root.abilities[1], 'second suggested ability'), ability(root.abilities[2], 'third suggested ability')],
     default_origin_feat: references.featByStoredName({ name: root.feat_name, edition }),
-    skill_proficiencies: [skill(root.skills[0], 'first background skill'), skill(root.skills[1], 'second background skill')],
+    skill_proficiencies: [
+      normalizedGrantSkill(root.skills[0], 'first background skill', projectionError),
+      normalizedGrantSkill(root.skills[1], 'second background skill', projectionError),
+    ],
     tool_reference_text: root.tool === '' ? null : root.tool,
     equipment_option_a_description: root.option_a,
     equipment_option_b_description: root.option_b,
