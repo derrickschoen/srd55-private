@@ -24,6 +24,51 @@ afterEach(() => {
 });
 
 describe('database lifecycle', () => {
+  it('whole-database backup preserves modifier definitions and non-empty effect children generically', async () => {
+    lifecycle.database.exec(
+      `INSERT INTO item_definitions (
+         content_key, name, rules_edition, description, requires_attunement
+       ) VALUES (
+         'expanded:legacy:backup-belt', 'Backup Belt', 'expanded',
+         'Definition text', 1
+       );
+       INSERT INTO item_definition_effects (
+         item_definition_id, sort_order, effect_kind, ability, maximum,
+         label, notes
+       ) VALUES (
+         1, 1, 'ability_override', 'strength', 23,
+         'Backup strength', 'Non-empty effect note'
+       );`,
+    );
+    const exported = await lifecycle.exportBytes();
+    lifecycle.database.exec(
+      "DELETE FROM item_definitions WHERE content_key = 'expanded:legacy:backup-belt'",
+    );
+
+    await lifecycle.replace(exported);
+
+    expect(lifecycle.database.oneRaw(
+      `SELECT definition.content_key, definition.description,
+              definition.requires_attunement, effect.sort_order,
+              effect.effect_kind, effect.ability, effect.maximum,
+              effect.label, effect.notes
+       FROM item_definitions AS definition
+       JOIN item_definition_effects AS effect
+         ON effect.item_definition_id = definition.id
+       WHERE definition.content_key = 'expanded:legacy:backup-belt'`,
+    )).toEqual({
+      content_key: 'expanded:legacy:backup-belt',
+      description: 'Definition text',
+      requires_attunement: 1,
+      sort_order: 1,
+      effect_kind: 'ability_override',
+      ability: 'strength',
+      maximum: 23,
+      label: 'Backup strength',
+      notes: 'Non-empty effect note',
+    });
+  });
+
   it('replaces the complete image, re-enables foreign keys, and survives reopen', async () => {
     lifecycle.database.exec(
       "INSERT INTO characters (name) VALUES ('Exported character')",

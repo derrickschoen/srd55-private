@@ -233,6 +233,42 @@ export function renderItems(options: ItemsPanelOptions): HTMLElement {
     'A character has exactly three attunement slots. Attuning a fourth item asks which current item to replace.';
   section.append(heading, rule);
 
+  if (options.panel.definitions.length > 0) {
+    const picker = document.createElement('fieldset');
+    picker.className = 'item-catalog-picker';
+    picker.dataset.testid = 'item-catalog-picker';
+    const legend = document.createElement('legend');
+    legend.textContent = 'Add from catalog';
+    const select = document.createElement('select');
+    select.setAttribute('aria-label', 'Item definition');
+    for (const definition of options.panel.definitions) {
+      const entry = document.createElement('option');
+      entry.value = definition.content_key;
+      entry.textContent = definition.name;
+      select.append(entry);
+    }
+    const addDefinition = document.createElement('button');
+    addDefinition.type = 'button';
+    addDefinition.textContent = 'Add catalog item';
+    addDefinition.disabled = options.disabled;
+    addDefinition.addEventListener('click', () => {
+      const definition = options.panel.definitions.find(
+        (candidate) => candidate.content_key === select.value,
+      );
+      if (definition === undefined) return;
+      options.actions.addItem({
+        name: definition.name,
+        description: definition.description,
+        quantity: 1,
+        requires_attunement: definition.requires_attunement,
+        source_instance_id: null,
+        effects: definition.effects.map((effect) => ({ ...effect })),
+      });
+    });
+    picker.append(legend, select, addDefinition);
+    section.append(picker);
+  }
+
   if (options.panel.items.length === 0) {
     const empty = document.createElement('p');
     empty.textContent = 'No possessions are recorded.';

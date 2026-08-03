@@ -218,3 +218,18 @@ BEGIN
     NEW.content_key, 'weapon', 'legacy-opaque', 'external', lower(NEW.name)
   );
 END;
+
+CREATE TRIGGER catalog_register_item_identity_before_insert
+BEFORE INSERT ON item_definitions
+BEGIN
+  SELECT RAISE(ABORT, 'item content key is registered for another kind')
+  WHERE EXISTS (
+    SELECT 1 FROM catalog_content_identities
+    WHERE content_key = NEW.content_key AND content_kind <> 'item'
+  );
+  INSERT OR IGNORE INTO catalog_content_identities (
+    content_key, content_kind, key_kind, catalog_layer, normalized_name
+  ) VALUES (
+    NEW.content_key, 'item', 'legacy-opaque', 'external', lower(NEW.name)
+  );
+END;

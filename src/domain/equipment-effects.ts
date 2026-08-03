@@ -4,6 +4,9 @@ import type {
   ExtraAttackWeaponScope,
 } from './enums';
 
+/** Maximum ordered effects accepted on one weapon or item command/catalog row. */
+export const EQUIPMENT_EFFECT_COUNT_MAX = 200;
+
 interface NamedEquipmentEffect {
   readonly label: string;
   readonly notes: string | null;

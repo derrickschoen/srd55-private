@@ -31,6 +31,7 @@ import characterFlavor from '../../drizzle/0027_character_flavor.sql?raw';
 import authorableEffectStorage from '../../drizzle/0028_authorable_effect_storage.sql?raw';
 import partyDocumentStates from '../../drizzle/0029_party_document_states.sql?raw';
 import subclassReferenceText from '../../drizzle/0030_subclass_reference_text.sql?raw';
+import itemDefinitions from '../../drizzle/0031_item_definitions.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -349,6 +350,14 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
     checksum: '52fb1c6787257624b0f8dfc0c2c542b6d65e6d3cf823594c53c03e69c24316aa',
     resultSchemaChecksum:
       'c94ad9c2acdefb444f48e21599fd9f74e3979e403eab786499acbb88bbd89744',
+  }),
+  Object.freeze({
+    id: '0031_item_definitions',
+    sql: itemDefinitions,
+    checksum:
+      '7d70a70dd06e6c2ff3d3c2ac47135b1e897b8b4023c535d42c64ca666ce7b25b',
+    resultSchemaChecksum:
+      '87728d3017863e34c7570cab7ffa59f8adb2a13e2ba71016c359840c5c73ce2c',
   }),
 ]);
 

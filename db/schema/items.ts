@@ -8,14 +8,106 @@ import {
 } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 import type { CharacterId, CharacterItemId, SourceInstanceId } from '../../src/domain/ids';
+import type {
+  ContentKey,
+  ItemDefinitionEffectId,
+  ItemDefinitionId,
+} from '../../src/domain/ids';
+import type {
+  CharacterEffectKind,
+  DamageType,
+  RulesEdition,
+} from '../../src/domain/enums';
+import {
+  characterEffectKinds,
+  rulesEditions,
+} from '../../src/domain/enums';
 import {
   datetime,
   integerAtLeast,
+  oneOf,
   sqlText,
   tinyint1,
   varchar,
 } from './columns';
 import { character_source_instances, characters } from './character';
+import { catalog_content_identities } from './catalog-content';
+import {
+  characterEffectColumns,
+  featureEffectChecks,
+} from './catalog-classes';
+
+/* ==========================================================================
+ * MODIFIER-ITEM DEFINITIONS — IMMUTABLE CATALOG VALUES COPIED ON PICK (CI-3c)
+ * ========================================================================== */
+
+export const item_definitions = sqliteTable(
+  'item_definitions',
+  {
+    id: integer('id')
+      .primaryKey({ autoIncrement: true })
+      .notNull()
+      .$type<ItemDefinitionId>(),
+    content_key: varchar<ContentKey>()('content_key')
+      .notNull()
+      .references(() => catalog_content_identities.content_key),
+    name: varchar()('name').notNull(),
+    rules_edition: varchar<RulesEdition>()('rules_edition').notNull(),
+    description: sqlText()('description').notNull(),
+    requires_attunement: tinyint1('requires_attunement')
+      .notNull()
+      .default(false),
+    created_at: datetime()('created_at'),
+    updated_at: datetime()('updated_at'),
+  },
+  (table) => [
+    check(
+      'item_definitions_rules_edition_check',
+      oneOf('rules_edition', rulesEditions),
+    ),
+    uniqueIndex('item_definitions_content_key_unique').on(table.content_key),
+    index('item_definitions_name_index').on(table.name),
+  ],
+);
+
+export const item_definition_effects = sqliteTable(
+  'item_definition_effects',
+  {
+    id: integer('id')
+      .primaryKey({ autoIncrement: true })
+      .notNull()
+      .$type<ItemDefinitionEffectId>(),
+    item_definition_id: integer('item_definition_id')
+      .notNull()
+      .$type<ItemDefinitionId>()
+      .references(() => item_definitions.id, { onDelete: 'cascade' }),
+    sort_order: integer('sort_order').notNull(),
+    ...characterEffectColumns<CharacterEffectKind, DamageType>(),
+    label: varchar()('label').notNull(),
+    notes: sqlText()('notes'),
+    created_at: datetime()('created_at'),
+    updated_at: datetime()('updated_at'),
+  },
+  (table) => [
+    ...featureEffectChecks(
+      'item_definition_effects',
+      characterEffectKinds,
+      'known-plus-passthrough',
+      false,
+    ),
+    check(
+      'item_definition_effects_sort_order_check',
+      integerAtLeast('sort_order', 1),
+    ),
+    uniqueIndex('item_definition_effects_definition_sort_unique').on(
+      table.item_definition_id,
+      table.sort_order,
+    ),
+    index('item_definition_effects_definition_index').on(
+      table.item_definition_id,
+    ),
+  ],
+);
 
 /* ==========================================================================
  * ITEMS — THE CHARACTER'S OWN, NON-MODIFYING THINGS (AC-1, D72)

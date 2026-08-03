@@ -8,10 +8,13 @@ import {
 import type { DatabaseContext } from '../db/database';
 import type {
   CharacterItem,
+  ItemDefinition,
   ItemsPanel,
 } from '../domain/read-models';
 import type { AttunementSlot } from '../domain/attunement';
 import { readOwnedEffectsByOwner } from '../commands/equipment-effects';
+import { equipmentEffectInput, projectStoredEquipmentContentV1 } from '../catalog/equipment-content-projector-v1';
+import type { ContentKey } from '../domain/ids';
 
 export class ItemQueries {
   constructor(private readonly db: DatabaseContext) {}
@@ -52,8 +55,27 @@ export class ItemQueries {
         };
       },
     );
+    const definitionRoots = this.db.all(
+      `SELECT content_key FROM item_definitions ORDER BY name, id`,
+      [],
+      (row) => sqlString(row, 'content_key') as ContentKey,
+    );
+    const definitions: ItemDefinition[] = definitionRoots.map((contentKey) => {
+      const stored = projectStoredEquipmentContentV1(this.db, {
+        kind: 'item',
+        contentKey,
+      });
+      return {
+        content_key: contentKey,
+        name: stored.aggregate.name,
+        description: stored.aggregate.description,
+        requires_attunement: stored.aggregate.requires_attunement,
+        effects: stored.aggregate.effects.map(equipmentEffectInput),
+      };
+    });
     return {
       items,
+      definitions,
     };
   }
 }

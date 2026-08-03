@@ -147,7 +147,7 @@ function workspace(
         has_extra_attack: false,
       },
     },
-    items: { items: [] },
+    items: { items: [], definitions: [] },
   };
 }
 

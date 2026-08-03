@@ -76,6 +76,13 @@ export const SHEET_ARMOR_MAX = Object.freeze({
   strength_requirement: 30,
 });
 
+/** Lower bounds shared by armor CHECKs and every armor input boundary. */
+export const SHEET_ARMOR_MIN = Object.freeze({
+  armor_class: 1,
+  dex_bonus_max: 0,
+  strength_requirement: 1,
+});
+
 /**
  * How many rows of each kind one share document may carry.
  *
