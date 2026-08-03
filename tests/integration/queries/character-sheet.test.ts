@@ -5,6 +5,10 @@ import { seedClassProgressions } from '../../../src/rules/class-progression-look
 import { seedSheetContent } from '../../../src/rules/sheet-srd';
 import { CharacterSheetBuilder } from '../../../src/queries/character-sheet-builder';
 import { CharacterNotFoundError } from '../../../src/queries/character-crud';
+import {
+  PRINT_APPENDIX_PREFERENCE_KEYS,
+  PrintAppendixPreferenceQueries,
+} from '../../../src/queries/print-appendix-preferences';
 import { characterEffects } from '../../../src/rules/origins';
 import { openTestDatabase } from '../../helpers/open-db';
 
@@ -80,6 +84,94 @@ describe('the derived character sheet', () => {
 
     expect(sheet.total_level).toBeNull();
     expect(sheet.proficiency_bonus.value).toBeNull();
+  });
+
+  it('projects all four flavor fields losslessly as one nested object', () => {
+    const alignment = '  Chaotic Good  ';
+    const appearance = 'Silver eyes\nBlue cloak';
+    const backstory =
+      '</script><img src=x onerror="globalThis.flavorWasMarkup=true"> 🪐';
+    const notes = `leading space \n${'long note '.repeat(500)}\n trailing space `;
+    db.exec(
+      `UPDATE characters
+       SET alignment = ?, appearance = ?, backstory = ?, notes = ?
+       WHERE id = ?`,
+      [alignment, appearance, backstory, notes, characterId],
+    );
+
+    expect(builder.build(characterId).flavor).toEqual({
+      alignment,
+      appearance,
+      backstory,
+      notes,
+    });
+  });
+
+  it('persists only the three named per-character print appendix preferences without revising the character', () => {
+    const preferences = new PrintAppendixPreferenceQueries(db);
+    const beforeRevision = db.scalar<number>(
+      'SELECT revision FROM characters WHERE id = ?',
+      [characterId],
+    );
+
+    expect(preferences.read(characterId)).toEqual({
+      flavor: false,
+      spells: false,
+      audit: false,
+    });
+    expect(PRINT_APPENDIX_PREFERENCE_KEYS).toEqual({
+      flavor: 'print_appendix_flavor',
+      spells: 'print_appendix_spells',
+      audit: 'print_appendix_audit',
+    });
+
+    preferences.set(characterId, 'audit', true);
+    preferences.set(characterId, 'flavor', true);
+    preferences.set(characterId, 'spells', true);
+
+    expect(preferences.read(characterId)).toEqual({
+      flavor: true,
+      spells: true,
+      audit: true,
+    });
+    expect(
+      db.allRaw(
+        `SELECT rule_key, value, note
+         FROM character_rule_overrides
+         WHERE character_id = ?
+         ORDER BY rule_key`,
+        [characterId],
+      ),
+    ).toEqual([
+      { rule_key: 'print_appendix_audit', value: 'true', note: null },
+      { rule_key: 'print_appendix_flavor', value: 'true', note: null },
+      { rule_key: 'print_appendix_spells', value: 'true', note: null },
+    ]);
+    expect(
+      db.scalar<number>('SELECT revision FROM characters WHERE id = ?', [
+        characterId,
+      ]),
+    ).toBe(beforeRevision);
+
+    preferences.set(characterId, 'flavor', false);
+
+    expect(preferences.read(characterId)).toEqual({
+      flavor: false,
+      spells: true,
+      audit: true,
+    });
+    expect(
+      db.scalar<number>(
+        `SELECT count(*) FROM character_rule_overrides
+         WHERE character_id = ? AND rule_key = ?`,
+        [characterId, PRINT_APPENDIX_PREFERENCE_KEYS.flavor],
+      ),
+    ).toBe(0);
+    expect(
+      db.scalar<number>('SELECT revision FROM characters WHERE id = ?', [
+        characterId,
+      ]),
+    ).toBe(beforeRevision);
   });
 
   it('takes the proficiency bonus from TOTAL level, not from either class', () => {
