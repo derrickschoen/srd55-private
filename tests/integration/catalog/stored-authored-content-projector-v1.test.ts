@@ -279,16 +279,30 @@ function slotJson(counts: readonly number[]): string {
 function seedSubclass(contentKey: ContentKey, aggregate: SubclassContentAggregate): void {
   const classId = db.scalar<number>('SELECT id FROM class_definitions WHERE content_key = ?', [CLASS_KEY]);
   if (classId === null) throw new Error('CI-3a class dependency is missing.');
-  const caster = aggregate.progression.mode === 'override'
-    ? aggregate.progression.caster_contribution.split('_')
-    : [];
+  let spellcastingAbility: string | null = null;
+  let casterFraction: string | null = null;
+  let casterRounding: string | null = null;
+  if (aggregate.progression.mode === 'root_only') {
+    spellcastingAbility = aggregate.progression.spellcasting_ability;
+    casterFraction = aggregate.progression.caster_fraction;
+    casterRounding = aggregate.progression.caster_rounding;
+  } else if (aggregate.progression.mode === 'override') {
+    spellcastingAbility = aggregate.progression.spellcasting_ability;
+    const caster = aggregate.progression.caster_contribution.split('_');
+    casterFraction = caster[0] === 'full'
+      ? '1'
+      : caster[0] === 'half'
+        ? '1/2'
+        : '1/3';
+    casterRounding = caster[1] ?? null;
+  }
   const subclassId = db.exec(
     `INSERT INTO subclass_definitions (
        content_key, class_definition_id, name, rules_edition,
        spellcasting_ability, caster_fraction, caster_rounding, grant_rules,
        notes
      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [contentKey, classId, aggregate.name, aggregate.rules_edition, aggregate.progression.mode === 'override' ? aggregate.progression.spellcasting_ability : null, caster[0] === 'full' ? '1' : caster[0] === 'half' ? '1/2' : caster[0] === 'third' ? '1/3' : null, caster[1] ?? null, JSON.stringify(aggregate.grants.map(storageGrant)), aggregate.reference_text],
+    [contentKey, classId, aggregate.name, aggregate.rules_edition, spellcastingAbility, casterFraction, casterRounding, JSON.stringify(aggregate.grants.map(storageGrant)), aggregate.reference_text],
   ).lastInsertId;
   if (aggregate.progression.mode === 'override') {
     for (const row of aggregate.progression.rows) {
@@ -841,6 +855,113 @@ describe('stored authored content-v1 projection', () => {
 
     expect(emptyProjection.payload.reference_text).toBe('');
     expect(emptyProjection.payload).toEqual(nullProjection.payload);
+  });
+
+  it('zero-row subclass root spellcasting columns project as a distinct runtime state', () => {
+    const vector = authoredProjectorV1Vectors[2]!;
+    const contentKey = seedVector(vector, 'bundled', 70);
+    const baselineProjection = projectStoredAuthoredContentV1(db, {
+      kind: 'subclass', contentKey, references,
+    });
+    const baseline = deriveContentIdentityV1({
+      kind: baselineProjection.kind,
+      edition: baselineProjection.aggregate.rules_edition,
+      name: baselineProjection.aggregate.name,
+      payload: baselineProjection.payload,
+    });
+    db.exec(
+      `UPDATE subclass_definitions
+       SET spellcasting_ability = 'intelligence',
+           caster_fraction = '1/3', caster_rounding = 'down'
+       WHERE content_key = ?`,
+      [contentKey],
+    );
+
+    const projection = projectStoredAuthoredContentV1(db, {
+      kind: 'subclass', contentKey, references,
+    });
+    const changed = deriveContentIdentityV1({
+      kind: projection.kind,
+      edition: projection.aggregate.rules_edition,
+      name: projection.aggregate.name,
+      payload: projection.payload,
+    });
+    expect(projection.payload.progression).toEqual({
+      mode: 'root_only',
+      spellcasting_ability: 'intelligence',
+      caster_fraction: '1/3',
+      caster_rounding: 'down',
+    });
+    expect(changed.derivedKey).not.toBe(baseline.derivedKey);
+  });
+
+  it('definition_key_config false refuses before source targeting can diverge', () => {
+    const vector = authoredProjectorV1Vectors[0]!;
+    const contentKey = seedVector(vector, 'bundled', 71);
+    db.exec(
+      `INSERT INTO feat_definitions (
+         content_key, name, rules_edition, grant_rules
+       ) VALUES ('expanded:ci3a-config-type-feat', 'Config Type Feat', 'expanded', '[]')`,
+    );
+    db.exec(
+      'UPDATE species_definitions SET grant_rules = ? WHERE content_key = ?',
+      [JSON.stringify([{
+        kind: 'grant_source', rule_key: 'source.bad-config-selector',
+        source_type: 'feat',
+        source_definition_key: 'expanded:ci3a-config-type-feat',
+        definition_key_config: false,
+      }]), contentKey],
+    );
+
+    const project = () => projectStoredAuthoredContentV1(db, {
+      kind: 'species', contentKey, references,
+    });
+    expect(project).toThrow(StoredAuthoredContentProjectionError);
+    expect(project).toThrow(/definition_key_config.*string or null/u);
+  });
+
+  it.each([
+    {
+      field: 'spell_version_key',
+      dependency: null,
+      rule: {
+        kind: 'fixed_spell', rule_key: 'locator.padded-spell',
+        bucket: 'prepared', spell_version_key: ` ${SPELL_KEY}`,
+      },
+    },
+    {
+      field: 'source_definition_key',
+      dependency: {
+        key: 'expanded:ci3a-padded-source-feat',
+        name: 'Padded Source Feat',
+      },
+      rule: {
+        kind: 'grant_source', rule_key: 'locator.padded-source',
+        source_type: 'feat',
+        source_definition_key: ' expanded:ci3a-padded-source-feat',
+      },
+    },
+  ])('$field locator differing from its trim refuses stored projection', ({ dependency, rule }) => {
+    const vector = authoredProjectorV1Vectors[0]!;
+    const contentKey = seedVector(vector, 'bundled', 72);
+    if (dependency !== null) {
+      db.exec(
+        `INSERT INTO feat_definitions (
+           content_key, name, rules_edition, grant_rules
+         ) VALUES (?, ?, 'expanded', '[]')`,
+        [dependency.key, dependency.name],
+      );
+    }
+    db.exec(
+      'UPDATE species_definitions SET grant_rules = ? WHERE content_key = ?',
+      [JSON.stringify([rule]), contentKey],
+    );
+
+    const project = () => projectStoredAuthoredContentV1(db, {
+      kind: 'species', contentKey, references,
+    });
+    expect(project).toThrow(StoredAuthoredContentProjectionError);
+    expect(project).toThrow(/must not contain leading or trailing whitespace/u);
   });
 
   it('silently adopts an exact projected stored-row self-match', () => {

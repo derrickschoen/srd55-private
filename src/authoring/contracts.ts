@@ -264,8 +264,27 @@ export interface BackgroundContentAggregate
   readonly effects: readonly AuthoringCharacterEffect[];
 }
 
+export type SubclassRootOnlyProgression = {
+  readonly mode: 'root_only';
+  readonly spellcasting_ability: Ability | null;
+} & (
+  | {
+      readonly caster_fraction: null;
+      readonly caster_rounding: null;
+    }
+  | {
+      readonly caster_fraction: '1';
+      readonly caster_rounding: null;
+    }
+  | {
+      readonly caster_fraction: '1/2' | '1/3';
+      readonly caster_rounding: 'up' | 'down';
+    }
+);
+
 export type SubclassContentProgression =
   | { readonly mode: 'inherit_parent' }
+  | SubclassRootOnlyProgression
   | {
       readonly mode: 'override';
       readonly spellcasting_ability: Ability | null;
