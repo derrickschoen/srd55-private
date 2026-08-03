@@ -2,6 +2,7 @@ import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { registerBundledStableContentIdentity } from '../../../src/catalog/content-registry';
 import { CatalogImporter } from '../../../src/catalog/catalog-importer';
+import { bundledSourceContentKeys } from '../../../src/catalog/bundled-source-membership';
 import { createApplicationLifecycle } from '../../../src/db/bootstrap';
 import { DatabaseContext } from '../../../src/db/database';
 import type { ContentKey } from '../../../src/domain/ids';
@@ -12,12 +13,23 @@ import {
   CharacterWorkspaceBuilder,
 } from '../../../src/queries/character-workspace-builder';
 import { getSqlite3, MemoryDatabaseStorage, openTestDatabase } from '../../helpers/open-db';
+import { workspaceFixtureImage } from '../../browser/fixtures/php-parity';
 import { featProjectorV1Vector } from '../../unit/catalog/fixtures/source-projector-v1-vectors';
 import {
   createBuildReportFixture,
   persistedReportTableHashes,
   type BuildReportFixture,
 } from '../reports/build-report-fixture';
+
+async function openBrowserFixtureLifecycle() {
+  const fixtureImage = await workspaceFixtureImage();
+  const sqlite3 = await getSqlite3();
+  const storage = new MemoryDatabaseStorage(sqlite3);
+  await storage.replaceFile(Uint8Array.from(fixtureImage.bytes));
+  const lifecycle = createApplicationLifecycle(sqlite3, storage);
+  lifecycle.open();
+  return { lifecycle, characterId: fixtureImage.ids.character };
+}
 
 describe('character list and workspace query builders', () => {
   let connection: Database;
@@ -127,11 +139,6 @@ describe('character list and workspace query builders', () => {
        WHERE id = ?`,
       [fixture.featSourceId],
     );
-    registerBundledStableContentIdentity(db, {
-      kind: 'species',
-      contentKey: 'q60:species:origin' as ContentKey,
-      normalizedName: 'originspecies',
-    });
     db.exec(
       `INSERT INTO species_definitions (
          content_key, name, rules_edition, repeatable, grant_rules
@@ -266,21 +273,135 @@ describe('character list and workspace query builders', () => {
       const catalog = new CatalogQueries(bootDb).read();
       const workspace = new CharacterWorkspaceBuilder(bootDb).build(character.id);
 
+      expect({
+        classes: catalog.classes.length,
+        feats: catalog.sources.feat.length,
+        species: catalog.sources.species.length,
+        backgrounds: catalog.sources.background.length,
+      }).toEqual({ classes: 12, feats: 17, species: 4, backgrounds: 4 });
+      expect({
+        classes: workspace.available_classes.length,
+        feats: workspace.source_catalog.feat.length,
+        species: workspace.source_catalog.species.length,
+        backgrounds: workspace.source_catalog.background.length,
+      }).toEqual({ classes: 12, feats: 17, species: 4, backgrounds: 4 });
       expect(catalog.classes.map((entry) => entry.name)).toContain('Fighter');
-      expect(catalog.sources.species.length).toBeGreaterThan(0);
-      expect(catalog.sources.background.length).toBeGreaterThan(0);
-      expect(catalog.sources.feat.length).toBeGreaterThan(0);
+      expect(catalog.sources.species.map((entry) => entry.name)).toEqual([
+        'Elf',
+        'Gnome',
+        'Human',
+        'Tiefling',
+      ]);
+      expect(catalog.sources.background.map((entry) => entry.name)).toEqual([
+        'Acolyte',
+        'Criminal',
+        'Sage',
+        'Soldier',
+      ]);
       expect(catalog.sources.feat.map((entry) => entry.name)).not.toContain(
         'External Selection Probe',
       );
       expect(workspace.available_classes.map((entry) => entry.name)).toContain(
         'Fighter',
       );
-      expect(workspace.source_catalog.species.length).toBeGreaterThan(0);
-      expect(workspace.source_catalog.background.length).toBeGreaterThan(0);
-      expect(workspace.source_catalog.feat.length).toBeGreaterThan(0);
       expect(workspace.source_catalog.feat.map((entry) => entry.name)).not.toContain(
         'External Selection Probe',
+      );
+    } finally {
+      lifecycle.close();
+    }
+  });
+
+  it('constructs fresh-boot manifests from every seeded aggregate definition root', async () => {
+    const sqlite3 = await getSqlite3();
+    const lifecycle = createApplicationLifecycle(
+      sqlite3,
+      new MemoryDatabaseStorage(sqlite3),
+    );
+    lifecycle.open();
+    try {
+      const bootDb = lifecycle.database;
+      const storedKeys = (table: string) => bootDb.allRaw(
+        `SELECT content_key FROM ${table} ORDER BY content_key`,
+      ).map((row) => String(row.content_key));
+      const storedUnionKeys = (...tables: readonly string[]) => [
+        ...new Set(tables.flatMap(storedKeys)),
+      ].sort();
+
+      expect(bundledSourceContentKeys('class', bootDb)).toEqual(
+        storedKeys('class_definitions'),
+      );
+      expect(bundledSourceContentKeys('feat', bootDb)).toEqual(
+        storedKeys('feat_definitions'),
+      );
+      expect(bundledSourceContentKeys('species', bootDb)).toEqual(
+        storedUnionKeys('species_definitions', 'species_templates'),
+      );
+      expect(bundledSourceContentKeys('background', bootDb)).toEqual(
+        storedUnionKeys('background_definitions', 'background_templates'),
+      );
+    } finally {
+      lifecycle.close();
+    }
+  });
+
+  it('shows every bundled aggregate after the browser replacement-image boot', async () => {
+    const { lifecycle, characterId } = await openBrowserFixtureLifecycle();
+    try {
+      const catalog = new CatalogQueries(lifecycle.database).read();
+      const workspace = new CharacterWorkspaceBuilder(lifecycle.database).build(
+        characterId,
+      );
+
+      expect({
+        classes: catalog.classes.length,
+        feats: catalog.sources.feat.length,
+        species: catalog.sources.species.length,
+        backgrounds: catalog.sources.background.length,
+      }).toEqual({ classes: 12, feats: 17, species: 5, backgrounds: 5 });
+      expect({
+        classes: workspace.available_classes.length,
+        feats: workspace.source_catalog.feat.length,
+        species: workspace.source_catalog.species.length,
+        backgrounds: workspace.source_catalog.background.length,
+      }).toEqual({ classes: 12, feats: 17, species: 5, backgrounds: 5 });
+    } finally {
+      lifecycle.close();
+    }
+  });
+
+  it('keeps the configured species seeded by the browser image selectable', async () => {
+    const { lifecycle, characterId } = await openBrowserFixtureLifecycle();
+    try {
+      const workspace = new CharacterWorkspaceBuilder(lifecycle.database).build(
+        characterId,
+      );
+
+      expect(workspace.source_catalog.species).toContainEqual(
+        expect.objectContaining({
+          content_key: '2024:species:parity-human',
+          name: 'Parity Human',
+          configuration_kind: 'origin_feat_magic_initiate',
+        }),
+      );
+    } finally {
+      lifecycle.close();
+    }
+  });
+
+  it('keeps the configured background seeded by the browser image selectable', async () => {
+    const { lifecycle, characterId } = await openBrowserFixtureLifecycle();
+    try {
+      const workspace = new CharacterWorkspaceBuilder(lifecycle.database).build(
+        characterId,
+      );
+
+      expect(workspace.source_catalog.background).toContainEqual(
+        expect.objectContaining({
+          content_key: '2024:background:custom',
+          name: 'Custom Background',
+          configuration_kind: 'origin_feat_magic_initiate',
+        }),
       );
     } finally {
       lifecycle.close();
