@@ -3,6 +3,7 @@ import type {
   CharacterLevel,
   CreatureSize,
   CreatureType,
+  GrantRuleKind,
   ProgressionType,
   RulesEdition,
   Skill,
@@ -61,35 +62,17 @@ export interface ContentFingerprintReference<
   readonly digest: ContentFingerprintDigest;
 }
 
-export type AuthoringGrant =
-  | {
-      readonly kind: 'fixed_spell';
-      readonly rule_key: string;
-      readonly spell: ContentFingerprintReference<'spell'>;
-      readonly always_prepared: boolean;
-    }
-  | {
-      readonly kind: 'choice_from_list';
-      readonly rule_key: string;
-      readonly list: string;
-      readonly count: number;
-      readonly maximum_spell_level: number;
-    }
-  | {
-      readonly kind: 'choice_from_query';
-      readonly rule_key: string;
-      readonly schools: readonly SpellSchool[];
-      readonly tags: readonly string[];
-      readonly count: number;
-      readonly minimum_spell_level: number;
-      readonly maximum_spell_level: number;
-    }
-  | {
-      readonly kind: 'skill_proficiency';
-      readonly rule_key: string;
-      readonly count: number;
-      readonly skills: readonly Skill[];
-    };
+/**
+ * Complete normalized GrantRule semantics after stored row ids have been
+ * replaced by portable fingerprint references. The open field map is
+ * deliberate: GrantRule preserves future extensions, so identity defaults to
+ * including them rather than silently colliding until this DTO is revised.
+ */
+export interface AuthoringGrant {
+  readonly kind: GrantRuleKind;
+  readonly rule_key: string;
+  readonly [field: string]: JsonValue | ContentFingerprintReference;
+}
 
 export type AuthoringDraftGrant =
   | {
@@ -220,11 +203,13 @@ interface PublishableHomebrewBase<K extends AuthoredContentKind> {
   readonly kind: K;
   readonly name: string;
   readonly rules_edition: RulesEdition;
+  /** Stored in the matching definition root's nullable `notes` column. */
   readonly reference_text: string;
 }
 
 export interface SpeciesContentAggregate
   extends PublishableHomebrewBase<'species'> {
+  readonly repeatable: boolean;
   readonly creature_type: CreatureType;
   readonly primary_size: CreatureSize;
   readonly alternate_size: CreatureSize | null;
@@ -264,6 +249,10 @@ export type BackgroundContentEquipment =
 
 export interface BackgroundContentAggregate
   extends PublishableHomebrewBase<'background'> {
+  readonly repeatable: boolean;
+  readonly grants: readonly (AuthoringGrant & {
+    readonly kind: 'grant_source';
+  })[];
   readonly suggested_abilities: readonly [Ability, Ability, Ability];
   readonly default_origin_feat: ContentFingerprintReference<'feat'>;
   readonly skill_proficiencies: readonly [Skill, Skill];
@@ -275,8 +264,27 @@ export interface BackgroundContentAggregate
   readonly effects: readonly AuthoringCharacterEffect[];
 }
 
+export type SubclassRootOnlyProgression = {
+  readonly mode: 'root_only';
+  readonly spellcasting_ability: Ability | null;
+} & (
+  | {
+      readonly caster_fraction: null;
+      readonly caster_rounding: null;
+    }
+  | {
+      readonly caster_fraction: '1';
+      readonly caster_rounding: null;
+    }
+  | {
+      readonly caster_fraction: '1/2' | '1/3';
+      readonly caster_rounding: 'up' | 'down';
+    }
+);
+
 export type SubclassContentProgression =
   | { readonly mode: 'inherit_parent' }
+  | SubclassRootOnlyProgression
   | {
       readonly mode: 'override';
       readonly spellcasting_ability: Ability | null;
@@ -346,6 +354,7 @@ export interface SubclassContentFeature {
 export interface SubclassContentAggregate
   extends PublishableHomebrewBase<'subclass'> {
   readonly parent_class: ContentFingerprintReference<'class'>;
+  readonly grants: readonly AuthoringGrant[];
   readonly progression: SubclassContentProgression;
   readonly features: readonly SubclassContentFeature[];
 }

@@ -7,6 +7,38 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D190 — OWNER: monk bake-off = three finalists, each with a Focus-spend budget lever (2026-08-03)
+
+The bake-off entries, owner-directed:
+ 1. Laughing Court MERGED with Barbed Tongue (bard list — mockery + taunt
+    as one identity), more bard spells found, Focus-point spend integrated
+    for power budget.
+ 2. The illusion pitches MERGED, "no positional stuff" (Still Point's
+    dual-position/teleport mechanics are OUT), Mirror Image is the
+    centerpiece, more illusion spells found, Focus spend integrated.
+ 3. The primal pitch: Hunter's Mark, Ensnaring Strike, Entangle as the
+    core (owner also named Thorn Whip - NOT in SRD 5.2.1, verified
+    against the oracle; substitutes from the verified primal set), more
+    primal spells found, Focus spend integrated.
+All three carry D189's level-6 cantrip-in-Flurry and the third-caster
+Wisdom chassis. Each bake-off entry = drafted level-3 bundle + curated
+verified spell list + Focus-spend mechanic + mini budget/taxonomy pass;
+owner picks the winner for the full draft.
+
+## D189 — OWNER: monk third-caster level 6 = cantrip inside Flurry of Blows (2026-08-03)
+
+Owner's words: "I want the lvl 6 valor bard mechanic to replace an attack
+with a cantrip. Maybe flurry of blows allows a cantrip if not holding a
+weapon." The monk subclass's level-6 feature: when using Flurry of Blows
+while not holding weapons, one of its Unarmed Strikes may be replaced by
+casting a cantrip (exact wording/limits to the draft). DISTANCE NOTE,
+recorded deliberately: attack-replaced-by-cantrip is a flagged signature
+(the un-redesigned EK-pattern lift is what reviewers dinged the upcoming
+official monk for). The owner's version is the REDESIGN the flagged
+product lacked: it rides the Focus-funded Bonus Action Flurry (not the
+Attack action), costs the class's own resource, and is gated unarmed-only.
+Ruled acceptable under D174 (differentiation by mechanical distance).
+
 ## D188 — OWNER: Voice of Domination SIMPLIFIED (2026-08-03)
 
 Owner's words: "Simplify the oath of domination channel divinity. 1
