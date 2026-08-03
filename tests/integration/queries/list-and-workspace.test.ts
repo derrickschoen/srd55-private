@@ -1,18 +1,35 @@
 import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { registerBundledStableContentIdentity } from '../../../src/catalog/content-registry';
+import { CatalogImporter } from '../../../src/catalog/catalog-importer';
+import { bundledSourceContentKeys } from '../../../src/catalog/bundled-source-membership';
+import { createApplicationLifecycle } from '../../../src/db/bootstrap';
 import { DatabaseContext } from '../../../src/db/database';
 import type { ContentKey } from '../../../src/domain/ids';
 import { CharacterListBuilder } from '../../../src/queries/character-list-builder';
+import { CharacterCrud } from '../../../src/queries/character-crud';
+import { CatalogQueries } from '../../../src/queries/catalog-queries';
 import {
   CharacterWorkspaceBuilder,
 } from '../../../src/queries/character-workspace-builder';
-import { openTestDatabase } from '../../helpers/open-db';
+import { getSqlite3, MemoryDatabaseStorage, openTestDatabase } from '../../helpers/open-db';
+import { workspaceFixtureImage } from '../../browser/fixtures/php-parity';
+import { featProjectorV1Vector } from '../../unit/catalog/fixtures/source-projector-v1-vectors';
 import {
   createBuildReportFixture,
   persistedReportTableHashes,
   type BuildReportFixture,
 } from '../reports/build-report-fixture';
+
+async function openBrowserFixtureLifecycle() {
+  const fixtureImage = await workspaceFixtureImage();
+  const sqlite3 = await getSqlite3();
+  const storage = new MemoryDatabaseStorage(sqlite3);
+  await storage.replaceFile(Uint8Array.from(fixtureImage.bytes));
+  const lifecycle = createApplicationLifecycle(sqlite3, storage);
+  lifecycle.open();
+  return { lifecycle, characterId: fixtureImage.ids.character };
+}
 
 describe('character list and workspace query builders', () => {
   let connection: Database;
@@ -82,7 +99,7 @@ describe('character list and workspace query builders', () => {
     );
   });
 
-  it('builds the complete editing workspace in oracle order without changing persisted rows', () => {
+  it('builds the workspace while excluding external aggregates from every planner selection catalog before CI-4a/HA-10', () => {
     const wizardId = Number(
       db.scalar(
         "SELECT id FROM class_definitions WHERE name = 'Wizard'",
@@ -128,8 +145,20 @@ describe('character list and workspace query builders', () => {
        ) VALUES (
          'q60:species:origin', 'Origin Species', '2024', 0,
          '[{"kind":"grant_source","source_type":"feat"}]'
-       )`,
+      )`,
     );
+    db.exec(
+      `INSERT INTO catalog_content_identities
+         (content_key, content_kind, key_kind, catalog_layer, normalized_name)
+       VALUES ('external:class:workspace', 'class', 'legacy-opaque', 'external', 'externalclass'),
+              ('external:feat:workspace', 'feat', 'legacy-opaque', 'external', 'externalfeat'),
+              ('external:species:workspace', 'species', 'legacy-opaque', 'external', 'externalspecies'),
+              ('external:background:workspace', 'background', 'legacy-opaque', 'external', 'externalbackground')`,
+    );
+    db.exec("INSERT INTO class_definitions (content_key, name, rules_edition, progression_type, supports_ritual_casting) VALUES ('external:class:workspace', 'External Class', 'expanded', 'none', 0)");
+    db.exec("INSERT INTO feat_definitions (content_key, name, rules_edition, ability_points, repeatable) VALUES ('external:feat:workspace', 'External Feat', 'expanded', 0, 0)");
+    db.exec("INSERT INTO species_definitions (content_key, name, rules_edition, repeatable, grant_rules) VALUES ('external:species:workspace', 'External Species', 'expanded', 0, '[]')");
+    db.exec("INSERT INTO background_definitions (content_key, name, rules_edition, repeatable, grant_rules) VALUES ('external:background:workspace', 'External Background', 'expanded', 0, '[]')");
     db.exec(
       `INSERT INTO character_save_points (
          character_id, label, snapshot, schema_version, created_at
@@ -168,6 +197,7 @@ describe('character list and workspace query builders', () => {
         'Wizard',
       ],
     );
+    expect(workspace.available_classes.map((item) => item.name)).not.toContain('External Class');
     expect(workspace.configurable_sources).toEqual([
       {
         id: fixture.featSourceId,
@@ -180,10 +210,10 @@ describe('character list and workspace query builders', () => {
       workspace.source_catalog.species.find(
         (source) => source.content_key === 'q60:species:origin',
       ),
-    ).toMatchObject({
-      repeatable: false,
-      configuration_kind: 'origin_feat_magic_initiate',
-    });
+    ).toBeUndefined();
+    expect(workspace.source_catalog.feat.map((source) => source.name)).not.toContain('External Feat');
+    expect(workspace.source_catalog.species.map((source) => source.name)).not.toContain('External Species');
+    expect(workspace.source_catalog.background.map((source) => source.name)).not.toContain('External Background');
     expect(workspace.report.invalid_selections.map((slot) => slot.id)).toEqual(
       fixture.invalidSlotIds,
     );
@@ -210,6 +240,172 @@ describe('character list and workspace query builders', () => {
     expect(persistedReportTableHashes(db, fixture.characterId)).toEqual(
       before,
     );
+  });
+
+  it('shows boot-seeded manifest members and hides an imported aggregate without identity promotion', async () => {
+    const sqlite3 = await getSqlite3();
+    const lifecycle = createApplicationLifecycle(
+      sqlite3,
+      new MemoryDatabaseStorage(sqlite3),
+    );
+    lifecycle.open();
+    try {
+      const bootDb = lifecycle.database;
+      const externalFeat = {
+        ...featProjectorV1Vector.aggregate,
+        name: 'External Selection Probe',
+      };
+      const imported = new CatalogImporter(bootDb).import({
+        documents: [JSON.stringify([{ kind: 'feat', aggregate: externalFeat }])],
+      });
+      expect(imported.feats_created).toBe(1);
+      expect(
+        bootDb.scalar<string>(
+          `SELECT catalog_layer
+           FROM catalog_content_identities
+           WHERE content_kind = 'feat' AND normalized_name = 'externalselectionprobe'`,
+        ),
+      ).toBe('external');
+
+      const character = new CharacterCrud(bootDb).create({
+        name: 'Boot Selection Probe',
+      });
+      const catalog = new CatalogQueries(bootDb).read();
+      const workspace = new CharacterWorkspaceBuilder(bootDb).build(character.id);
+
+      expect({
+        classes: catalog.classes.length,
+        feats: catalog.sources.feat.length,
+        species: catalog.sources.species.length,
+        backgrounds: catalog.sources.background.length,
+      }).toEqual({ classes: 12, feats: 17, species: 4, backgrounds: 4 });
+      expect({
+        classes: workspace.available_classes.length,
+        feats: workspace.source_catalog.feat.length,
+        species: workspace.source_catalog.species.length,
+        backgrounds: workspace.source_catalog.background.length,
+      }).toEqual({ classes: 12, feats: 17, species: 4, backgrounds: 4 });
+      expect(catalog.classes.map((entry) => entry.name)).toContain('Fighter');
+      expect(catalog.sources.species.map((entry) => entry.name)).toEqual([
+        'Elf',
+        'Gnome',
+        'Human',
+        'Tiefling',
+      ]);
+      expect(catalog.sources.background.map((entry) => entry.name)).toEqual([
+        'Acolyte',
+        'Criminal',
+        'Sage',
+        'Soldier',
+      ]);
+      expect(catalog.sources.feat.map((entry) => entry.name)).not.toContain(
+        'External Selection Probe',
+      );
+      expect(workspace.available_classes.map((entry) => entry.name)).toContain(
+        'Fighter',
+      );
+      expect(workspace.source_catalog.feat.map((entry) => entry.name)).not.toContain(
+        'External Selection Probe',
+      );
+    } finally {
+      lifecycle.close();
+    }
+  });
+
+  it('constructs fresh-boot manifests from every seeded aggregate definition root', async () => {
+    const sqlite3 = await getSqlite3();
+    const lifecycle = createApplicationLifecycle(
+      sqlite3,
+      new MemoryDatabaseStorage(sqlite3),
+    );
+    lifecycle.open();
+    try {
+      const bootDb = lifecycle.database;
+      const storedKeys = (table: string) => bootDb.allRaw(
+        `SELECT content_key FROM ${table} ORDER BY content_key`,
+      ).map((row) => String(row.content_key));
+      const storedUnionKeys = (...tables: readonly string[]) => [
+        ...new Set(tables.flatMap(storedKeys)),
+      ].sort();
+
+      expect(bundledSourceContentKeys('class', bootDb)).toEqual(
+        storedKeys('class_definitions'),
+      );
+      expect(bundledSourceContentKeys('feat', bootDb)).toEqual(
+        storedKeys('feat_definitions'),
+      );
+      expect(bundledSourceContentKeys('species', bootDb)).toEqual(
+        storedUnionKeys('species_definitions', 'species_templates'),
+      );
+      expect(bundledSourceContentKeys('background', bootDb)).toEqual(
+        storedUnionKeys('background_definitions', 'background_templates'),
+      );
+    } finally {
+      lifecycle.close();
+    }
+  });
+
+  it('shows every bundled aggregate after the browser replacement-image boot', async () => {
+    const { lifecycle, characterId } = await openBrowserFixtureLifecycle();
+    try {
+      const catalog = new CatalogQueries(lifecycle.database).read();
+      const workspace = new CharacterWorkspaceBuilder(lifecycle.database).build(
+        characterId,
+      );
+
+      expect({
+        classes: catalog.classes.length,
+        feats: catalog.sources.feat.length,
+        species: catalog.sources.species.length,
+        backgrounds: catalog.sources.background.length,
+      }).toEqual({ classes: 12, feats: 17, species: 5, backgrounds: 5 });
+      expect({
+        classes: workspace.available_classes.length,
+        feats: workspace.source_catalog.feat.length,
+        species: workspace.source_catalog.species.length,
+        backgrounds: workspace.source_catalog.background.length,
+      }).toEqual({ classes: 12, feats: 17, species: 5, backgrounds: 5 });
+    } finally {
+      lifecycle.close();
+    }
+  });
+
+  it('keeps the configured species seeded by the browser image selectable', async () => {
+    const { lifecycle, characterId } = await openBrowserFixtureLifecycle();
+    try {
+      const workspace = new CharacterWorkspaceBuilder(lifecycle.database).build(
+        characterId,
+      );
+
+      expect(workspace.source_catalog.species).toContainEqual(
+        expect.objectContaining({
+          content_key: '2024:species:parity-human',
+          name: 'Parity Human',
+          configuration_kind: 'origin_feat_magic_initiate',
+        }),
+      );
+    } finally {
+      lifecycle.close();
+    }
+  });
+
+  it('keeps the configured background seeded by the browser image selectable', async () => {
+    const { lifecycle, characterId } = await openBrowserFixtureLifecycle();
+    try {
+      const workspace = new CharacterWorkspaceBuilder(lifecycle.database).build(
+        characterId,
+      );
+
+      expect(workspace.source_catalog.background).toContainEqual(
+        expect.objectContaining({
+          content_key: '2024:background:custom',
+          name: 'Custom Background',
+          configuration_kind: 'origin_feat_magic_initiate',
+        }),
+      );
+    } finally {
+      lifecycle.close();
+    }
   });
 
   it('B2-DC resolves contributions again at the independent workspace slot-math site', () => {

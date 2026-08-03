@@ -71,7 +71,10 @@ import {
 import { CharacterCrud } from '../queries/character-crud';
 import { skillFromLabel } from '../rules/skills';
 import { characterLevel } from '../rules/character-level';
-import { bundledClassContentKeys } from '../rules/class-progression-lookup';
+import {
+  bundledSourceContentKeys,
+  isBundledSourceContentKey,
+} from '../catalog/bundled-source-membership';
 import {
   backgroundFromTemplate,
   effectsFromTemplate,
@@ -82,10 +85,6 @@ import {
   type SpeciesTemplateTraitEffectRow,
   type SpeciesTemplateTraitRow,
 } from '../rules/origins';
-import {
-  bundledBackgroundTemplates,
-  bundledSpeciesTemplates,
-} from '../rules/origins-srd';
 import {
   ORIGIN_FEAT_CONFIG_CONFIG,
   ORIGIN_FEAT_KEY_CONFIG,
@@ -521,8 +520,8 @@ export class GuidedCreationRefusal extends Error {
  * and the creation gate below read this one set, so the UI's filter and the
  * server-side gate cannot drift apart.
  */
-function bundledClassKeys(): readonly string[] {
-  return bundledClassContentKeys().classes;
+function bundledClassKeys(db: DatabaseContext): readonly string[] {
+  return bundledSourceContentKeys('class', db);
 }
 
 interface BundledClassRow {
@@ -555,11 +554,14 @@ const classIdentityRow: RowCodec<ClassIdentityRow> = (row) => ({
  * The classes the wizard offers: rows of `class_definitions` whose
  * `content_key` is in the bundled set.
  *
- * NOT the ordinary catalogue query, which has no predicate at all — and NOT
- * the bundled key list alone, because a bundled key is not a promise that a
+ * NOT the ordinary catalogue query's registry join — and NOT the bundled key
+ * list alone, because a bundled key is not a promise that a
  * row exists (plan A11: seeding yields a `(name, rules_edition)` slot already
  * held by homebrew and skips that class). A key with no row is simply not
  * offered.
+ *
+ * CI-4a/HA-10 lifts this bundled-only boundary after imported class
+ * aggregates have a complete application consumer.
  *
  * `hit_die` comes from `class_sheet_traits` via LEFT JOIN and the row can be
  * absent; a null stays null so the UI renders "unknown" (D33) — never the
@@ -569,7 +571,7 @@ const classIdentityRow: RowCodec<ClassIdentityRow> = (row) => ({
 export function listGuidedClassOptions(
   db: DatabaseContext,
 ): readonly GuidedClassOption[] {
-  const keys = bundledClassKeys();
+  const keys = bundledClassKeys(db);
   const placeholders = keys.map(() => '?').join(', ');
   return db
     .all(
@@ -617,7 +619,7 @@ function gateBundledClass(
       `No class exists for content key "${contentKey}".`,
     );
   }
-  if (!bundledClassKeys().includes(contentKey)) {
+  if (!isBundledSourceContentKey('class', contentKey, db)) {
     throw new GuidedCreationRefusal(
       'class_not_bundled',
       `"${definition.name}" is not a bundled class; the guided builder does not guide homebrew classes.`,
@@ -711,13 +713,13 @@ export type { GuidedApplyOriginResult };
  * set is derived from the same SRD parse the seeder writes from, so the option
  * list and the apply gate cannot drift apart.
  */
-function bundledSpeciesKeys(): readonly string[] {
-  return bundledSpeciesTemplates().map((template) => template.content_key);
+function bundledSpeciesKeys(db: DatabaseContext): readonly string[] {
+  return bundledSourceContentKeys('species', db);
 }
 
 /** The background twin (A5), derived from the same SRD parse the seeder uses. */
-function bundledBackgroundKeys(): readonly string[] {
-  return bundledBackgroundTemplates().map((template) => template.content_key);
+function bundledBackgroundKeys(db: DatabaseContext): readonly string[] {
+  return bundledSourceContentKeys('background', db);
 }
 
 const speciesTemplateRow: RowCodec<SpeciesTemplateRow> = (row) => ({
@@ -780,13 +782,16 @@ const speciesTemplateTraitEffectRow: RowCodec<SpeciesTemplateTraitEffectRow> = (
  * `grants_lineage_spells` is a LITERAL `false`, pinned by the seam — "the
  * seam's set is species-only; backgrounds are always false" — not a lookup
  * that happens to miss.
+ *
+ * CI-4a/HA-10 lifts these bundled-only origin filters after imported
+ * definition/template aggregates can be applied as one complete identity.
  */
 export function listGuidedOriginOptions(
   db: DatabaseContext,
   kind: OriginKind,
 ): readonly GuidedOriginOption[] {
   if (kind === 'background') {
-    const keys = bundledBackgroundKeys();
+    const keys = bundledBackgroundKeys(db);
     const placeholders = keys.map(() => '?').join(', ');
     return db
       .all(
@@ -806,7 +811,7 @@ export function listGuidedOriginOptions(
         grants_lineage_spells: false,
       }));
   }
-  const keys = bundledSpeciesKeys();
+  const keys = bundledSpeciesKeys(db);
   const placeholders = keys.map(() => '?').join(', ');
   return db
     .all(
@@ -837,7 +842,7 @@ function gateBundledSpecies(
   db: DatabaseContext,
   contentKey: string,
 ): SpeciesTemplateRow {
-  if (!bundledSpeciesKeys().includes(contentKey)) {
+  if (!isBundledSourceContentKey('species', contentKey, db)) {
     throw new GuidedCreationRefusal(
       'unknown_origin',
       `No bundled species exists for content key "${contentKey}".`,
@@ -889,7 +894,7 @@ function gateBundledBackground(
   db: DatabaseContext,
   contentKey: string,
 ): BackgroundTemplateRow {
-  if (!bundledBackgroundKeys().includes(contentKey)) {
+  if (!isBundledSourceContentKey('background', contentKey, db)) {
     throw new GuidedCreationRefusal(
       'unknown_origin',
       `No bundled background exists for content key "${contentKey}".`,
@@ -1332,10 +1337,15 @@ function deleteGuidedBackgroundSources(
  * cannot drift from the catalog — the identical reasoning as
  * `bundledBackgroundKeys` above.
  */
-function bundledOriginFeatKeysByName(): ReadonlyMap<string, string> {
+function bundledOriginFeatKeysByName(
+  db: DatabaseContext,
+): ReadonlyMap<string, string> {
   return new Map(
     bundledFeatDefinitions()
       .filter((feat) => feat.source_category === 'Origin')
+      .filter((feat) =>
+        isBundledSourceContentKey('feat', feat.content_key, db)
+      )
       .map((feat) => [feat.name, feat.content_key]),
   );
 }
@@ -1351,8 +1361,8 @@ function bundledOriginFeatKeysByName(): ReadonlyMap<string, string> {
 export function listGuidedBackgroundChoiceOptions(
   db: DatabaseContext,
 ): GuidedBackgroundChoiceOptions {
-  const featKeysByName = bundledOriginFeatKeysByName();
-  const backgroundKeys = bundledBackgroundKeys();
+  const featKeysByName = bundledOriginFeatKeysByName(db);
+  const backgroundKeys = bundledBackgroundKeys(db);
   const backgroundPlaceholders = backgroundKeys.map(() => '?').join(', ');
   const backgrounds = db
     .all(
@@ -1406,7 +1416,7 @@ function gateBundledOriginFeat(
   db: DatabaseContext,
   contentKey: string,
 ): { readonly id: number; readonly name: string } {
-  if (![...bundledOriginFeatKeysByName().values()].includes(contentKey)) {
+  if (![...bundledOriginFeatKeysByName(db).values()].includes(contentKey)) {
     throw new GuidedCreationRefusal(
       'unknown_origin',
       `No bundled Origin feat exists for content key "${contentKey}".`,

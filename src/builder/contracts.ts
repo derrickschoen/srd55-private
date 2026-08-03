@@ -124,9 +124,9 @@ export type OriginKind = 'species' | 'background';
  *
  * The bundled gate is key membership. Routing an id through the catalogue to
  * recover its key would re-open the hole this gate exists to close: the
- * ordinary catalogue query is `SELECT * FROM class_definitions` with no
- * predicate, and `class_definitions` has no provenance column at all, so a
- * class id alone cannot tell bundled from homebrew.
+ * definition row has no provenance column of its own, so a class id alone
+ * cannot tell bundled from external; selection queries must join the content
+ * identity registry or use the bundled key manifest.
  *
  * There is no `operation_uuid`. Guided creation is NOT idempotent — see the
  * note on `GuidedCreateResult`.
