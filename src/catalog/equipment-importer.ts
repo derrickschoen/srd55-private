@@ -179,7 +179,7 @@ function damageColumns(
   }
 }
 
-interface EffectColumns {
+export interface EffectColumns {
   readonly damage_type: string | null;
   readonly hit_points_flat: number | null;
   readonly hit_points_per_level: number | null;
@@ -194,7 +194,7 @@ interface EffectColumns {
   readonly weapon_scope: string | null;
 }
 
-function effectColumns(effect: AuthoringCharacterEffect): EffectColumns {
+export function effectColumns(effect: AuthoringCharacterEffect): EffectColumns {
   const empty: EffectColumns = {
     damage_type: null,
     hit_points_flat: null,

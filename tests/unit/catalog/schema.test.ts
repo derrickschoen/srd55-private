@@ -502,6 +502,10 @@ describe('browser catalog schema', () => {
       weapons: [],
       armors: [],
       items: [],
+      classes: [],
+      feats: [],
+      species: [],
+      backgrounds: [],
       kinds: new Set(['spell']),
     });
     // The declaration is per document, not per parse: the empty file still

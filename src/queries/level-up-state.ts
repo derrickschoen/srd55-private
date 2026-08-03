@@ -25,6 +25,7 @@ import {
   type LevelUpTargetFeatures,
   type ProjectedFeatCharacter,
 } from '../builder/level-up-wizard';
+import { isBundledSourceContentKey } from '../catalog/bundled-source-membership';
 import {
   sqlBoolean,
   sqlInteger,
@@ -333,22 +334,28 @@ export class LevelUpStateQuery {
         pending_epic_resolution: pendingEpicResolution,
       };
     }
-    const disabledOptions = eligibleHeldClasses
-      .filter(
-        (entry): entry is HeldClassRow & { readonly hit_die: null } =>
-          entry.hit_die === null,
-      )
-      .map((entry) => this.#disabledClassOption(entry));
+    const disabledOptions = eligibleHeldClasses.flatMap((entry) => {
+      if (!isBundledSourceContentKey('class', entry.content_key, this.db)) {
+        return [this.#disabledClassOption(entry, 'class_not_bundled')];
+      }
+      return entry.hit_die === null
+        ? [this.#disabledClassOption(entry, 'missing_hit_die')]
+        : [];
+    });
     const guideableHeldClasses = eligibleHeldClasses.filter(
       (entry): entry is HeldClassRow & { readonly hit_die: HitDieSize } =>
-        entry.hit_die !== null,
+        entry.hit_die !== null &&
+        isBundledSourceContentKey('class', entry.content_key, this.db),
     );
     if (guideableHeldClasses.length === 0) {
       return {
         kind: 'no_guideable_class',
         character: { ...summary, total_level: currentTotal },
-        explanation:
-          'Fixed HP cannot be derived for any held class until its missing hit die is repaired or catalogued.',
+        explanation: disabledOptions.some(
+          (option) => option.reason === 'class_not_bundled',
+        )
+          ? 'No held class is currently guideable; imported class application is deferred to CI-4a/HA-10.'
+          : 'Fixed HP cannot be derived for any held class until its missing hit die is repaired or catalogued.',
         class_options: disabledOptions,
         pending_epic_resolution: pendingEpicResolution,
       };
@@ -530,12 +537,26 @@ export class LevelUpStateQuery {
   }
 
   #disabledClassOption(
-    selected: HeldClassRow & { readonly hit_die: null },
+    selected: HeldClassRow,
+    reason: 'missing_hit_die' | 'class_not_bundled',
   ): LevelUpDisabledClassOption {
+    if (reason === 'class_not_bundled') {
+      return {
+        ...selected,
+        guideability: 'disabled',
+        reason,
+        explanation:
+          'Imported classes remain held but cannot be guided until CI-4a/HA-10 completes aggregate application.',
+      };
+    }
+    if (selected.hit_die !== null) {
+      throw new Error('A class with a hit die cannot be disabled for a missing hit die.');
+    }
     return {
       ...selected,
       guideability: 'disabled',
-      reason: 'missing_hit_die',
+      hit_die: null,
+      reason,
       explanation:
         'Fixed HP cannot be derived until this class is repaired or catalogued with a hit die.',
     };

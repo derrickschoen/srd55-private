@@ -219,6 +219,16 @@ describe('character list behavior', () => {
 });
 
 describe('catalog and backup entry points', () => {
+  const emptySourceCounters = {
+    classes_matched: 0,
+    feats_created: 0,
+    feats_matched: 0,
+    species_created: 0,
+    species_matched: 0,
+    backgrounds_created: 0,
+    backgrounds_matched: 0,
+  } as const;
+
   function services() {
     const persisted = {
       catalogDocuments: [] as string[],
@@ -252,6 +262,7 @@ describe('catalog and backup entry points', () => {
             items_created: 0,
             items_matched: 0,
             item_definition_effects_created: 0,
+            ...emptySourceCounters,
             text_available: false,
             descriptions_loaded: 0,
           };
@@ -338,6 +349,7 @@ describe('catalog and backup entry points', () => {
         items_created: 0,
         items_matched: 0,
         item_definition_effects_created: 0,
+        ...emptySourceCounters,
         text_available: false,
         descriptions_loaded: 0,
       }),
@@ -369,6 +381,7 @@ describe('catalog and backup entry points', () => {
         items_created: 0,
         items_matched: 0,
         item_definition_effects_created: 0,
+        ...emptySourceCounters,
         text_available: false,
         descriptions_loaded: 0,
       }),
@@ -398,11 +411,46 @@ describe('catalog and backup entry points', () => {
         items_created: 1,
         items_matched: 1,
         item_definition_effects_created: 1,
+        ...emptySourceCounters,
         text_available: false,
         descriptions_loaded: 0,
       }),
     ).toBe(
       '0 created, 0 updated, 0 tombstoned, 2 equipment definitions created, 2 equipment definitions matched',
+    );
+
+    expect(
+      catalogSummary({
+        created: 0,
+        updated: 0,
+        tombstoned: 0,
+        identities_created: 0,
+        identities_updated: 0,
+        publications_created: 0,
+        memberships_created: 0,
+        tags_created: 0,
+        attack_modes_created: 0,
+        save_abilities_created: 0,
+        subclasses_created: 0,
+        subclasses_updated: 0,
+        subclass_features_created: 0,
+        weapons_created: 0,
+        weapons_matched: 0,
+        armors_created: 0,
+        armors_matched: 0,
+        items_created: 0,
+        items_matched: 0,
+        item_definition_effects_created: 0,
+        ...emptySourceCounters,
+        feats_created: 1,
+        species_created: 1,
+        classes_matched: 1,
+        backgrounds_matched: 1,
+        text_available: false,
+        descriptions_loaded: 0,
+      }),
+    ).toBe(
+      '0 created, 0 updated, 0 tombstoned, 2 source definitions created, 2 source definitions matched',
     );
 
     // The singular is the COMMON case — one homebrew subclass in one document —
@@ -430,6 +478,7 @@ describe('catalog and backup entry points', () => {
         items_created: 0,
         items_matched: 0,
         item_definition_effects_created: 0,
+        ...emptySourceCounters,
         text_available: false,
         descriptions_loaded: 0,
       }),

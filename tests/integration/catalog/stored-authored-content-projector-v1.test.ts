@@ -379,6 +379,102 @@ describe('stored authored content-v1 projection', () => {
     },
   );
 
+  it('default-includes future species root and trait columns in identity', () => {
+    const vector = authoredProjectorV1Vectors.find(
+      (candidate) => candidate.kind === 'species' && candidate.aggregate.traits.length > 0,
+    );
+    if (vector?.kind !== 'species') throw new Error('Species probe vector is missing.');
+    const contentKey = seedVector(vector, 'bundled', 70);
+    db.exec('ALTER TABLE species_definitions ADD COLUMN future_root_semantic INTEGER');
+    db.exec('ALTER TABLE species_templates ADD COLUMN future_template_semantic INTEGER');
+    db.exec('ALTER TABLE species_template_traits ADD COLUMN future_child_semantic INTEGER');
+    db.exec('UPDATE species_definitions SET future_root_semantic = 1 WHERE content_key = ?', [contentKey]);
+    db.exec('UPDATE species_templates SET future_template_semantic = 1 WHERE content_key = ?', [contentKey]);
+    db.exec(
+      `UPDATE species_template_traits SET future_child_semantic = 1
+       WHERE species_template_id = (
+         SELECT id FROM species_templates WHERE content_key = ?
+       )`,
+      [contentKey],
+    );
+    const identity = () => {
+      const projection = projectStoredAuthoredContentV1(db, {
+        kind: 'species', contentKey, references,
+      });
+      return deriveContentIdentityV1({
+        kind: projection.kind,
+        edition: projection.aggregate.rules_edition,
+        name: projection.aggregate.name,
+        payload: projection.payload,
+      }).derivedKey;
+    };
+    const baseline = identity();
+    db.exec('UPDATE species_definitions SET future_root_semantic = 2 WHERE content_key = ?', [contentKey]);
+    const rootChanged = identity();
+    db.exec('UPDATE species_templates SET future_template_semantic = 2 WHERE content_key = ?', [contentKey]);
+    const templateChanged = identity();
+    db.exec(
+      `UPDATE species_template_traits SET future_child_semantic = 2
+       WHERE species_template_id = (
+         SELECT id FROM species_templates WHERE content_key = ?
+       )`,
+      [contentKey],
+    );
+
+    expect(rootChanged).not.toBe(baseline);
+    expect(templateChanged).not.toBe(rootChanged);
+    expect(identity()).not.toBe(templateChanged);
+  });
+
+  it('default-includes future background root and equipment columns in identity', () => {
+    const vector = authoredProjectorV1Vectors.find(
+      (candidate) =>
+        candidate.kind === 'background' &&
+        candidate.aggregate.equipment_option_a.length > 0,
+    );
+    if (vector?.kind !== 'background') throw new Error('Background probe vector is missing.');
+    const contentKey = seedVector(vector, 'bundled', 71);
+    db.exec('ALTER TABLE background_definitions ADD COLUMN future_root_semantic INTEGER');
+    db.exec('ALTER TABLE background_templates ADD COLUMN future_template_semantic INTEGER');
+    db.exec('ALTER TABLE background_equipment_items ADD COLUMN future_child_semantic INTEGER');
+    db.exec('UPDATE background_definitions SET future_root_semantic = 1 WHERE content_key = ?', [contentKey]);
+    db.exec('UPDATE background_templates SET future_template_semantic = 1 WHERE content_key = ?', [contentKey]);
+    db.exec(
+      `UPDATE background_equipment_items SET future_child_semantic = 1
+       WHERE background_template_id = (
+         SELECT id FROM background_templates WHERE content_key = ?
+       )`,
+      [contentKey],
+    );
+    const identity = () => {
+      const projection = projectStoredAuthoredContentV1(db, {
+        kind: 'background', contentKey, references,
+      });
+      return deriveContentIdentityV1({
+        kind: projection.kind,
+        edition: projection.aggregate.rules_edition,
+        name: projection.aggregate.name,
+        payload: projection.payload,
+      }).derivedKey;
+    };
+    const baseline = identity();
+    db.exec('UPDATE background_definitions SET future_root_semantic = 2 WHERE content_key = ?', [contentKey]);
+    const rootChanged = identity();
+    db.exec('UPDATE background_templates SET future_template_semantic = 2 WHERE content_key = ?', [contentKey]);
+    const templateChanged = identity();
+    db.exec(
+      `UPDATE background_equipment_items SET future_child_semantic = 2
+       WHERE background_template_id = (
+         SELECT id FROM background_templates WHERE content_key = ?
+       )`,
+      [contentKey],
+    );
+
+    expect(rootChanged).not.toBe(baseline);
+    expect(templateChanged).not.toBe(rootChanged);
+    expect(identity()).not.toBe(templateChanged);
+  });
+
   it.each([
     {
       vector: authoredGrantSetV1Vectors[0]!,

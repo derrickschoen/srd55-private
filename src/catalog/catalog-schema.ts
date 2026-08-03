@@ -38,6 +38,13 @@ import {
 import type { VersatileWeaponDamage, WeaponDamage } from '../domain/weapon-damage';
 import type { WritableWeaponRange } from '../domain/weapon-range';
 import type { ClassFeatureEffect } from '../rules/class-feature-effects';
+import {
+  parseSourceCatalogRecord,
+  type CatalogBackgroundRecord,
+  type CatalogClassRecord,
+  type CatalogFeatRecord,
+  type CatalogSpeciesRecord,
+} from './source-catalog-records';
 import { isRecord } from '../worker/handler';
 import { isImportedContentKey } from './catalog-key';
 
@@ -70,6 +77,10 @@ export const catalogRecordKinds = [
   'weapon',
   'armor',
   'item',
+  'class',
+  'feat',
+  'species',
+  'background',
 ] as const;
 export type CatalogRecordKind = (typeof catalogRecordKinds)[number];
 
@@ -265,6 +276,10 @@ export interface CatalogDocumentRecords {
   weapons: CatalogWeaponRecord[];
   armors: CatalogArmorRecord[];
   items: CatalogItemRecord[];
+  classes: CatalogClassRecord[];
+  feats: CatalogFeatRecord[];
+  species: CatalogSpeciesRecord[];
+  backgrounds: CatalogBackgroundRecord[];
   kinds: ReadonlySet<CatalogRecordKind>;
 }
 
@@ -1126,6 +1141,10 @@ export function parseCatalogDocuments(
   const weapons: CatalogWeaponRecord[] = [];
   const armors: CatalogArmorRecord[] = [];
   const items: CatalogItemRecord[] = [];
+  const classes: CatalogClassRecord[] = [];
+  const feats: CatalogFeatRecord[] = [];
+  const species: CatalogSpeciesRecord[] = [];
+  const backgrounds: CatalogBackgroundRecord[] = [];
   const kinds = new Set<CatalogRecordKind>();
   documents.forEach((document, index) => {
     const decoded = parseJsonDocument(
@@ -1174,6 +1193,18 @@ export function parseCatalogDocuments(
         case 'item':
           items.push(catalogItemRecord(value as Record<string, unknown>));
           break;
+        case 'class':
+          classes.push(parseSourceCatalogRecord(kind, value as Record<string, unknown>));
+          break;
+        case 'feat':
+          feats.push(parseSourceCatalogRecord(kind, value as Record<string, unknown>));
+          break;
+        case 'species':
+          species.push(parseSourceCatalogRecord(kind, value as Record<string, unknown>));
+          break;
+        case 'background':
+          backgrounds.push(parseSourceCatalogRecord(kind, value as Record<string, unknown>));
+          break;
         /* c8 ignore next 6 -- unreachable while the switch is exhaustive; kept
            so a new record kind is a compile error here rather than a record
            this parser drops on the floor. */
@@ -1215,6 +1246,10 @@ export function parseCatalogDocuments(
     weapons,
     armors,
     items,
+    classes,
+    feats,
+    species,
+    backgrounds,
     kinds,
   };
 }
