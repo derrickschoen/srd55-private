@@ -7,6 +7,20 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D181 — OWNER: the oath-holder is FALLIBLE; prophecy-madness reframe (2026-08-03)
+
+Refines D180: the Oath of Domination knight must NOT know for sure they
+are doing the right thing - "imagine if Paul and Leto were fallible."
+Chosen fiction: one DRIVEN MAD BY PROPHECY WHO BECOMES THE INSTRUMENT OF
+THE PROPHECY'S REALIZATION - the self-fulfilling doom: they saw a ruin,
+dominate to prevent it, and can never know whether the vision was true,
+was madness, or whether the prevention is itself the arrival. Tenets are
+being reworked to carry that uncertainty (including tenets that FORBID
+the doubt the knight secretly has - the oath self-seals its own
+madness). Mechanics unchanged (command kit, Voice of Domination). The
+archetype set widens to the classical self-fulfilling-prophecy tragedies
+(ideas only; no protected expression).
+
 ## D180 — OWNER: Oath of Domination tone = the sincere tyrant; fiendish framing CUT (2026-08-03)
 
 Owner's words: evil by someone "who thinks they are doing the right
