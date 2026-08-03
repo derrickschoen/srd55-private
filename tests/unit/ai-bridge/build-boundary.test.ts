@@ -130,9 +130,14 @@ describe('gate 4: the dist scan is chained onto the build and can actually fire'
     const browserProbeLiterals = [
       '__SRD55_BROWSER_CAPABILITY_PROBE_FAILURE__',
     ];
+    const pendingBrowserClaimLiterals = [
+      'PENDING_D153_WEBKIT_IOS_NOTICE_VARIANT',
+      'Chromium/WebKit',
+    ];
     expect(forbidden).toEqual([
       ...bridgeLiterals,
       ...browserProbeLiterals,
+      ...pendingBrowserClaimLiterals,
       ...scrapeLiterals,
     ]);
 
@@ -165,6 +170,24 @@ describe('gate 4: the dist scan is chained onto the build and can actually fire'
         mainSource.indexOf('if (import.meta.env.DEV) {'),
       );
     }
+
+    const browserNoticeSource = await read(
+      'src/pwa/browser-support-notice.ts',
+    );
+    for (const literal of pendingBrowserClaimLiterals) {
+      expect(browserNoticeSource, `forbidden literal ${literal}`).toContain(
+        literal,
+      );
+    }
+    const pendingClaim =
+      /PENDING_D153_WEBKIT_IOS_NOTICE_VARIANT\s*=\s*\n?\s*'([^']+)'/u.exec(
+        browserNoticeSource,
+      )?.[1] ?? '';
+    expect(pendingClaim).not.toBe('');
+    expect(
+      forbidden.filter((literal) => pendingClaim.includes(literal)),
+      'no forbidden artifact literal matches the pending D153 claim value',
+    ).not.toEqual([]);
   });
 
   it('covers the plugin’s HTML injection, not only its JS modules', async () => {

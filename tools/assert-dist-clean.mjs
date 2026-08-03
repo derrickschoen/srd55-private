@@ -65,6 +65,10 @@ const FORBIDDEN = [
   'child_process',
   // DEV-only browser-capability failure injection used by Playwright.
   '__SRD55_BROWSER_CAPABILITY_PROBE_FAILURE__',
+  // Pending D153 copy must remain inert until the WebKit/device spike lands.
+  'PENDING_D153_WEBKIT_IOS_NOTICE_VARIANT',
+  // The identifier can be minified; this distinctive value fragment cannot.
+  'Chromium/WebKit',
   // Kept in sync BY HAND with SCRAPE_SENTINEL in tools/scrape/provenance.ts.
   // This file is plain .mjs run by bare node, so it cannot import the .ts module
   // that defines it. The duplication is not left to trust: both
@@ -143,6 +147,9 @@ for (const path of files) {
             'Nothing under scraped/ may be committed or copied into public/.'
           : pattern === '__SRD55_BROWSER_CAPABILITY_PROBE_FAILURE__'
             ? 'The dev-only browser capability probe seam leaked into the build output.'
+          : pattern === 'PENDING_D153_WEBKIT_IOS_NOTICE_VARIANT' ||
+              pattern === 'Chromium/WebKit'
+            ? 'The pending D153 WebKit/iOS claim leaked into the build output.'
           : 'The dev-only AI bridge leaked into the build output.';
       fail(
         `forbidden literal "${pattern}" found in ${
