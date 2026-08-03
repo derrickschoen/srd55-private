@@ -32,6 +32,7 @@ export const AUTHORING_LIST_LIMITS = Object.freeze({
   effectsPerAggregate: 201,
   grants: 100,
   equipmentItemsPerOption: 100,
+  classChildRows: 100,
   queryValues: 100,
   validationIssues: 500,
 });
@@ -50,5 +51,7 @@ export const AUTHORING_NUMERIC_LIMITS = Object.freeze({
   maximumAbilityScore: 30,
   maximumEffectMagnitude: 1_000,
   maximumSpeedFeet: 10_000,
+  maximumSortOrder: 10_000,
+  maximumQuantity: 10_000,
   minimumAttackCount: 2,
 });

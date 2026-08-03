@@ -356,9 +356,15 @@ export class CharacterWorkspaceBuilder {
   private classOptions(classDefinitionId?: number): ClassOption[] {
     return classDefinitionId === undefined
       ? this.db.all(
-          `SELECT id, name
-           FROM class_definitions
-           ORDER BY name, id`,
+          `SELECT definition.id, definition.name
+           FROM class_definitions AS definition
+           INNER JOIN catalog_content_identities AS identity
+             ON identity.content_key = definition.content_key
+            AND identity.content_kind = 'class'
+            AND identity.catalog_layer = 'bundled'
+           -- CI-4a/HA-10 lifts this filter when imported classes can be
+           -- applied completely by planner consumers.
+           ORDER BY definition.name, definition.id`,
           undefined,
           (row) => ({
             id: sqlInteger(row, 'id'),
@@ -528,9 +534,16 @@ export class CharacterWorkspaceBuilder {
     sourceType: StandaloneSourceType,
   ): SourceDefinition[] {
     return this.db.all(
-      `SELECT id, content_key, name, repeatable, grant_rules
-       FROM ${sourceType}_definitions
-       ORDER BY name, id`,
+      `SELECT definition.id, definition.content_key, definition.name,
+              definition.repeatable, definition.grant_rules
+       FROM ${sourceType}_definitions AS definition
+       INNER JOIN catalog_content_identities AS identity
+         ON identity.content_key = definition.content_key
+        AND identity.content_kind = '${sourceType}'
+        AND identity.catalog_layer = 'bundled'
+       -- CI-4a/HA-10 lifts this filter after imported aggregate application
+       -- replaces today's partial AddSource consumer.
+       ORDER BY definition.name, definition.id`,
       undefined,
       (row): SourceDefinition => ({
         id: sqlInteger(row, 'id'),

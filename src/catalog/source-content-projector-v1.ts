@@ -21,6 +21,7 @@ import type { JsonObject, JsonValue } from '../domain/models';
 import { decodeClassResourceFormula } from '../domain/class-resources';
 import { decodePrimaryAbilityExpression } from '../domain/primary-ability';
 import type { AuthoringGrant, ContentFingerprintReference } from '../authoring/contracts';
+import { AUTHORING_NUMERIC_LIMITS } from '../authoring/limits';
 import {
   CHARACTER_EFFECT_FORM,
   FEATURE_ONLY_EFFECT_FORM,
@@ -92,6 +93,8 @@ export interface ClassContentAggregateV1 {
   readonly resource_formulas: readonly CanonicalClassRowV1[];
   readonly feature_effects: readonly CanonicalClassRowV1[];
   readonly named_features: readonly CanonicalClassRowV1[];
+  /** Stored-only, default-included future root columns; never accepted from documents. */
+  readonly stored_fields?: CanonicalClassRowV1;
 }
 
 export interface FeatContentAggregateV1 {
@@ -107,6 +110,8 @@ export interface FeatContentAggregateV1 {
   readonly prerequisites: readonly JsonObject[];
   readonly grants: readonly AuthoringGrant[];
   readonly notes: string | null;
+  /** Stored-only, default-included future root columns; never accepted from documents. */
+  readonly stored_fields?: CanonicalClassRowV1;
 }
 
 export type SourceContentReferenceV1 =
@@ -258,6 +263,7 @@ export function projectClassContentV1(
   aggregate: ClassContentAggregateV1,
 ): ClassProjectorPayloadV1 {
   return {
+    ...aggregate.stored_fields,
     spellcasting_ability: aggregate.spellcasting_ability === null
       ? null
       : canonicalOpenPassthroughValue(aggregate.spellcasting_ability),
@@ -369,6 +375,7 @@ export function projectFeatContentV1(
     );
   }
   return {
+    ...aggregate.stored_fields,
     category: aggregate.category === null
       ? null
       : canonicalOpenPassthroughValue(aggregate.category),
@@ -418,10 +425,20 @@ function validatedRow(
   label: string,
 ): SqlRow {
   // feat_definitions is the only table in this graph that is also a portable
-  // row-contract table. Every class field is decoded below; SQLite's CHECKs
-  // remain the authoritative source for its closed sets and bounds.
+  // row-contract table. Validate its complete current contract while leaving
+  // unforeseen columns for default inclusion below. Every class field is
+  // decoded below; SQLite's CHECKs remain authoritative for its closed sets.
   if (table === 'feat_definitions') {
-    const error = rowContractError(table, row, label);
+    const currentColumns = [
+      'id', 'content_key', 'name', 'rules_edition', 'category', 'min_level',
+      'ability_points', 'ability_increase_abilities',
+      'ability_increase_maximum', 'repeatable', 'prerequisites', 'grant_rules',
+      'notes', 'created_at', 'updated_at',
+    ];
+    const currentRow = Object.fromEntries(
+      currentColumns.map((column) => [column, row[column]]),
+    );
+    const error = rowContractError(table, currentRow, label);
     if (error !== null) fail(error);
   }
   return row;
@@ -460,7 +477,10 @@ function validatedSlots(value: JsonValue | null, label: string): JsonValue {
     return fail(`${label} must be an empty list or a slot-count object.`);
   }
   for (const [level, count] of Object.entries(value)) {
-    if (!/^[1-9]$/u.test(level) || !Number.isSafeInteger(count) || Number(count) < 1) {
+    if (
+      !/^[1-9]$/u.test(level) || !Number.isSafeInteger(count) ||
+      Number(count) < 1 || Number(count) > AUTHORING_NUMERIC_LIMITS.maximumEffectMagnitude
+    ) {
       return fail(`${label} has an invalid spell level or count.`);
     }
   }
@@ -472,6 +492,7 @@ function validatedPactSlots(value: JsonValue | null, label: string): JsonValue {
     value === null || Array.isArray(value) || typeof value !== 'object' ||
     Object.keys(value).sort().join(',') !== 'count,level' ||
     !Number.isSafeInteger(value.count) || Number(value.count) < 1 ||
+    Number(value.count) > AUTHORING_NUMERIC_LIMITS.maximumEffectMagnitude ||
     !Number.isSafeInteger(value.level) || Number(value.level) < 1 || Number(value.level) > 5
   ) {
     return fail(`${label} must contain positive count and level 1 through 5.`);
@@ -492,13 +513,26 @@ function allOwned(
   ).map((row, index) => validatedRow(table, row, `${table}[${String(index)}]`));
 }
 
-function simpleRow(
+/**
+ * Default-includes every stored child column. The only exclusions are storage
+ * identity/ownership/timestamps, or columns explicitly replaced by a portable
+ * canonical value in `overrides`. This makes a future semantic column
+ * over-split identity instead of silently collapsing it.
+ */
+function storedSemanticRow(
   row: SqlRow,
-  fields: readonly string[],
+  ownerColumns: readonly string[],
+  excluded: readonly string[] = [],
   booleans: ReadonlySet<string> = new Set(),
   prose: ReadonlySet<string> = new Set(),
+  overrides: CanonicalClassRowV1 = {},
 ): CanonicalClassRowV1 {
-  return Object.fromEntries(fields.map((field) => {
+  const omitted = new Set([
+    'id', 'created_at', 'updated_at', ...ownerColumns, ...excluded,
+  ]);
+  const projected = Object.fromEntries(Object.keys(row)
+    .filter((field) => !omitted.has(field) && !(field in overrides))
+    .map((field) => {
     const value = row[field];
     if (booleans.has(field)) return [field, sqlBoolean(row, field)];
     if (prose.has(field)) {
@@ -510,6 +544,18 @@ function simpleRow(
     }
     return [field, value];
   })) as CanonicalClassRowV1;
+  return { ...projected, ...overrides };
+}
+
+function storedRootFields(
+  row: SqlRow,
+  represented: readonly string[],
+): CanonicalClassRowV1 | undefined {
+  // The root content_key is the registry locator being recomputed, never a
+  // runtime mechanic. Every represented field is emitted through a typed
+  // canonical arm by the caller; only genuinely new columns remain here.
+  const projected = storedSemanticRow(row, [], ['content_key', ...represented]);
+  return Object.keys(projected).length === 0 ? undefined : projected;
 }
 
 /**
@@ -633,10 +679,10 @@ function classAggregate(
       if (progressionType === 'pact') {
         validatedPactSlots(pactSlots, 'class progression pact_slots');
       }
-      return {
-        class_level: sqlInteger(row, 'class_level'),
-        cantrips_known: sqlInteger(row, 'cantrips_known'),
-        prepared_count: sqlInteger(row, 'prepared_count'),
+      return storedSemanticRow(row, ['class_definition_id'], [
+        // Replaced below by parsed JSON/portable grant references.
+        'slots', 'pact_slots', 'grant_rules',
+      ], new Set(), new Set(), {
         slots,
         pact_slots: pactSlots,
         grant_rules: projectStoredGrantRulesV1(
@@ -645,7 +691,7 @@ function classAggregate(
           resolver,
           'class progression grant_rules',
         ).grants,
-      };
+      });
     });
   const sheetRows = allOwned(db, 'class_sheet_traits', 'class_definition_id', id, 'id');
   if (sheetRows.length > 1) return fail('class has more than one sheet-traits row.');
@@ -655,47 +701,62 @@ function classAggregate(
       const kind = sqlString(row, 'item_kind');
       const weaponId = sqlNullableInteger(row, 'weapon_template_id');
       const armorId = sqlNullableInteger(row, 'armor_template_id');
-      return {
-        option: sqlString(row, 'option'),
-        sort_order: sqlInteger(row, 'sort_order'),
-        quantity: sqlInteger(row, 'quantity'),
+      return storedSemanticRow(row, ['class_definition_id'], [
+        // Store-local foreign keys are replaced by one portable fingerprint.
+        'weapon_template_id', 'armor_template_id', 'item_name',
+      ], new Set(), new Set(), {
         item_name: canonicalOpenPassthroughValue(sqlString(row, 'item_name')),
-        item_kind: kind,
         reference: kind === 'weapon' && weaponId !== null
           ? equipmentReference(db, weaponId, 'weapon_templates', resolver)
           : kind === 'armor' && armorId !== null
             ? equipmentReference(db, armorId, 'armor_templates', resolver)
             : null,
-      };
+      });
     });
 
   const formulas = allOwned(db, 'class_resource_formulas', 'class_definition_id', id, 'resource_kind')
-    .map((row): CanonicalClassRowV1 => ({
-      resource_kind: sqlString(row, 'resource_kind'),
-      formula: decodeClassResourceFormula({
+    .map((row): CanonicalClassRowV1 => storedSemanticRow(
+      row,
+      ['class_definition_id'],
+      [
+        // These columns are losslessly represented by the decoded formula.
+        'formula_kind', 'minimum_class_level', 'fixed_count', 'ability',
+        'multiplier', 'later_fixed_count_steps',
+      ],
+      new Set(),
+      new Set(),
+      { formula: decodeClassResourceFormula({
         formula_kind: row.formula_kind,
         minimum_class_level: row.minimum_class_level,
         fixed_count: row.fixed_count,
         ability: row.ability,
         multiplier: row.multiplier,
         later_fixed_count_steps: row.later_fixed_count_steps,
-      }) as unknown as JsonValue,
-    }));
+      }) as unknown as JsonValue },
+    ));
 
   const namedFeatures = allOwned(db, 'named_features', 'class_definition_id', id, 'class_level, name')
     .map((row): CanonicalClassRowV1 => {
       const namedId = sqlInteger(row, 'id');
       const effects = allOwned(db, 'named_feature_effects', 'named_feature_id', namedId, 'sort_order')
         .map((effect) => genericEffectRow(effect, 'named_feature_id'));
-      return {
-        name: sqlString(row, 'name'),
-        rules_edition: sqlString(row, 'rules_edition'),
+      return storedSemanticRow(row, ['class_definition_id'], [
+        // sheet-content-lookup returns content_key, but namedFeatureGrants
+        // never reads it: runtime behavior uses name, prerequisite, level and
+        // effect only. It is a store locator, not portable class mechanics.
+        'content_key', 'prerequisite', 'description',
+      ], new Set(), new Set(), {
         prerequisite: canonicalRuleText(sqlString(row, 'prerequisite')),
         description: canonicalRuleText(sqlString(row, 'description')),
-        class_level: sqlInteger(row, 'class_level'),
         effects,
-      };
+      });
     });
+  const rootFields = storedRootFields(root, [
+    'name', 'rules_edition', 'spellcasting_ability', 'progression_type',
+    'caster_fraction', 'caster_rounding', 'prepares_or_knows',
+    'supports_ritual_casting', 'ritual_casting_mode',
+    'primary_ability_expression', 'notes',
+  ]);
 
   return {
     kind: 'class',
@@ -711,33 +772,33 @@ function classAggregate(
     primary_ability_expression: sqlNullableString(root, 'primary_ability_expression'),
     notes: sqlNullableString(root, 'notes'),
     progressions,
-    sheet_traits: sheetRows[0] === undefined ? null : simpleRow(sheetRows[0], [
-      'hit_die', 'skill_choice_count', 'skill_choice_from_any',
-      'multiclass_skill_choice_count', 'multiclass_skill_choice_pool',
-    ], new Set(['skill_choice_from_any'])),
+    sheet_traits: sheetRows[0] === undefined ? null : storedSemanticRow(
+      sheetRows[0], ['class_definition_id'], [], new Set(['skill_choice_from_any']),
+    ),
     saving_throw_proficiencies: allOwned(db, 'class_saving_throw_proficiencies', 'class_definition_id', id, 'ability')
-      .map((row) => simpleRow(row, ['ability'])),
+      .map((row) => storedSemanticRow(row, ['class_definition_id'])),
     skill_options: allOwned(db, 'class_skill_options', 'class_definition_id', id, 'skill')
-      .map((row) => simpleRow(row, ['skill'])),
+      .map((row) => storedSemanticRow(row, ['class_definition_id'])),
     armor_training: allOwned(db, 'class_armor_training', 'class_definition_id', id, 'category')
-      .map((row) => simpleRow(row, ['category', 'granted_on_multiclass_entry'], new Set(['granted_on_multiclass_entry']))),
+      .map((row) => storedSemanticRow(row, ['class_definition_id'], [], new Set(['granted_on_multiclass_entry']))),
     weapon_proficiencies: allOwned(db, 'class_weapon_proficiencies', 'class_definition_id', id, 'category')
-      .map((row) => simpleRow(row, ['category', 'property_qualifier', 'granted_on_multiclass_entry'], new Set(['granted_on_multiclass_entry']), new Set(['property_qualifier']))),
+      .map((row) => storedSemanticRow(row, ['class_definition_id'], [], new Set(['granted_on_multiclass_entry']), new Set(['property_qualifier']))),
     extra_attack_grants: allOwned(db, 'class_extra_attack_grants', 'class_definition_id', id, 'class_level')
-      .map((row) => simpleRow(row, ['class_level', 'attack_count'])),
+      .map((row) => storedSemanticRow(row, ['class_definition_id'])),
     martial_arts_dice: allOwned(db, 'class_martial_arts_dice', 'class_definition_id', id, 'class_level')
-      .map((row) => simpleRow(row, ['class_level', 'martial_arts_die'])),
+      .map((row) => storedSemanticRow(row, ['class_definition_id'])),
     weapon_mastery_grants: allOwned(db, 'class_weapon_mastery_grants', 'class_definition_id', id, 'id')
-      .map((row) => simpleRow(row, ['grant'])),
+      .map((row) => storedSemanticRow(row, ['class_definition_id'])),
     weapon_mastery_counts: allOwned(db, 'class_weapon_mastery_counts', 'class_definition_id', id, 'class_level')
-      .map((row) => simpleRow(row, ['class_level', 'mastery_count'])),
+      .map((row) => storedSemanticRow(row, ['class_definition_id'])),
     equipment_items: equipment,
     resources: allOwned(db, 'class_resources', 'class_definition_id', id, 'class_level, resource_kind')
-      .map((row) => simpleRow(row, ['class_level', 'resource_kind', 'maximum'])),
+      .map((row) => storedSemanticRow(row, ['class_definition_id'])),
     resource_formulas: formulas,
     feature_effects: allOwned(db, 'class_feature_effects', 'class_definition_id', id, 'class_level, name')
       .map((row) => genericEffectRow(row, 'class_definition_id')),
     named_features: namedFeatures,
+    ...(rootFields === undefined ? {} : { stored_fields: rootFields }),
   };
 }
 
@@ -772,6 +833,11 @@ export function readStoredFeatContentV1(
     references,
     'feat grant_rules',
   );
+  const rootFields = storedRootFields(row, [
+    'name', 'rules_edition', 'category', 'min_level', 'ability_points',
+    'ability_increase_abilities', 'ability_increase_maximum', 'repeatable',
+    'prerequisites', 'grant_rules', 'notes',
+  ]);
   return {
     kind: 'feat',
     name: sqlString(row, 'name'),
@@ -785,6 +851,7 @@ export function readStoredFeatContentV1(
     prerequisites: jsonObjects(sqlNullableString(row, 'prerequisites'), 'feat prerequisites'),
     grants: grantProjection.grants,
     notes: sqlNullableString(row, 'notes'),
+    ...(rootFields === undefined ? {} : { stored_fields: rootFields }),
   };
 }
 

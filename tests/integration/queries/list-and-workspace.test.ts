@@ -82,7 +82,13 @@ describe('character list and workspace query builders', () => {
     );
   });
 
-  it('builds the complete editing workspace in oracle order without changing persisted rows', () => {
+  it('builds the workspace while excluding external aggregates from every planner selection catalog before CI-4a/HA-10', () => {
+    db.exec(
+      `UPDATE catalog_content_identities
+       SET key_kind = 'bundled-stable', catalog_layer = 'bundled'
+       WHERE content_kind = 'class'
+         AND content_key IN (SELECT content_key FROM class_definitions)`,
+    );
     const wizardId = Number(
       db.scalar(
         "SELECT id FROM class_definitions WHERE name = 'Wizard'",
@@ -122,14 +128,31 @@ describe('character list and workspace query builders', () => {
        WHERE id = ?`,
       [fixture.featSourceId],
     );
+    registerBundledStableContentIdentity(db, {
+      kind: 'species',
+      contentKey: 'q60:species:origin' as ContentKey,
+      normalizedName: 'originspecies',
+    });
     db.exec(
       `INSERT INTO species_definitions (
          content_key, name, rules_edition, repeatable, grant_rules
        ) VALUES (
          'q60:species:origin', 'Origin Species', '2024', 0,
          '[{"kind":"grant_source","source_type":"feat"}]'
-       )`,
+      )`,
     );
+    db.exec(
+      `INSERT INTO catalog_content_identities
+         (content_key, content_kind, key_kind, catalog_layer, normalized_name)
+       VALUES ('external:class:workspace', 'class', 'legacy-opaque', 'external', 'externalclass'),
+              ('external:feat:workspace', 'feat', 'legacy-opaque', 'external', 'externalfeat'),
+              ('external:species:workspace', 'species', 'legacy-opaque', 'external', 'externalspecies'),
+              ('external:background:workspace', 'background', 'legacy-opaque', 'external', 'externalbackground')`,
+    );
+    db.exec("INSERT INTO class_definitions (content_key, name, rules_edition, progression_type, supports_ritual_casting) VALUES ('external:class:workspace', 'External Class', 'expanded', 'none', 0)");
+    db.exec("INSERT INTO feat_definitions (content_key, name, rules_edition, ability_points, repeatable) VALUES ('external:feat:workspace', 'External Feat', 'expanded', 0, 0)");
+    db.exec("INSERT INTO species_definitions (content_key, name, rules_edition, repeatable, grant_rules) VALUES ('external:species:workspace', 'External Species', 'expanded', 0, '[]')");
+    db.exec("INSERT INTO background_definitions (content_key, name, rules_edition, repeatable, grant_rules) VALUES ('external:background:workspace', 'External Background', 'expanded', 0, '[]')");
     db.exec(
       `INSERT INTO character_save_points (
          character_id, label, snapshot, schema_version, created_at
@@ -168,6 +191,7 @@ describe('character list and workspace query builders', () => {
         'Wizard',
       ],
     );
+    expect(workspace.available_classes.map((item) => item.name)).not.toContain('External Class');
     expect(workspace.configurable_sources).toEqual([
       {
         id: fixture.featSourceId,
@@ -184,6 +208,9 @@ describe('character list and workspace query builders', () => {
       repeatable: false,
       configuration_kind: 'origin_feat_magic_initiate',
     });
+    expect(workspace.source_catalog.feat.map((source) => source.name)).not.toContain('External Feat');
+    expect(workspace.source_catalog.species.map((source) => source.name)).not.toContain('External Species');
+    expect(workspace.source_catalog.background.map((source) => source.name)).not.toContain('External Background');
     expect(workspace.report.invalid_selections.map((slot) => slot.id)).toEqual(
       fixture.invalidSlotIds,
     );

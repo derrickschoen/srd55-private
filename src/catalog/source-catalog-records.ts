@@ -6,6 +6,7 @@ import {
   abilities,
   characterEffectKinds,
   extraAttackWeaponScopes,
+  featureTemplateEffectKinds,
   isEnumValue,
   rulesEditions,
   skills,
@@ -56,6 +57,24 @@ export type CatalogSourceRecord =
 function record(value: unknown, label: string): Record<string, unknown> {
   if (!isRecord(value)) throw new TypeError(`Catalog field '${label}' must be an object.`);
   return value;
+}
+
+function exactKeys(
+  value: Record<string, unknown>,
+  label: string,
+  allowed: readonly string[],
+): void {
+  const allowedKeys = new Set(allowed);
+  const unknown = Object.keys(value).find((key) => !allowedKeys.has(key));
+  if (unknown !== undefined) {
+    throw new TypeError(`Catalog field '${label}.${unknown}' is unknown.`);
+  }
+}
+
+function trimEqual(value: unknown, label: string): void {
+  if (typeof value === 'string' && value !== value.trim()) {
+    throw new TypeError(`Catalog field '${label}' contains surrounding whitespace.`);
+  }
 }
 
 function string(value: unknown, label: string): string {
@@ -146,6 +165,18 @@ function baseAggregate(value: unknown, kind: SourceCatalogRecordKind) {
 
 function validateGrant(value: unknown, label: string): void {
   const grant = record(value, label);
+  exactKeys(grant, label, [
+    'kind', 'rule_key', 'count', 'bucket', 'always_prepared', 'with_slots',
+    'free_cast', 'active_from_class_level', 'active_if_config',
+    'distinct_config_by', 'level_min', 'level_max', 'spell',
+    'spell_version_id', 'spell_version_key', 'list', 'schools', 'tags',
+    'source_type', 'source_definition', 'source_definition_id',
+    'source_definition_key', 'definition_key_config', 'child_config',
+    'child_config_config', 'capability_key', 'collection', 'access_mode',
+    'acquisitions_config', 'initial_count', 'count_per_level', 'style_key',
+    'selection_pool', 'skills', 'allows_tool_instead', 'required',
+    'counts_against_limit', 'label', 'selection_collection',
+  ]);
   boundedText(grant.rule_key, `${label}.rule_key`, AUTHORING_TEXT_LIMITS.ruleKey);
   for (const localLocator of [
     'spell_version_id', 'spell_version_key',
@@ -157,11 +188,12 @@ function validateGrant(value: unknown, label: string): void {
       );
     }
   }
-  for (const locator of ['rule_key', 'spell_version_key', 'source_definition_key'] as const) {
-    const stored = grant[locator];
-    if (typeof stored === 'string' && stored !== stored.trim()) {
-      throw new TypeError(`Catalog field '${label}.${locator}' contains surrounding whitespace.`);
-    }
+  for (const locator of [
+    'rule_key', 'spell_version_key', 'source_definition_key',
+    'definition_key_config', 'child_config_config', 'acquisitions_config',
+    'distinct_config_by',
+  ] as const) {
+    trimEqual(grant[locator], `${label}.${locator}`);
   }
   if (
     grant.definition_key_config !== undefined &&
@@ -174,6 +206,57 @@ function validateGrant(value: unknown, label: string): void {
     throw new TypeError(
       `Catalog field '${label}.source_definition' is inert when definition_key_config is present.`,
     );
+  }
+  if (grant.free_cast !== undefined && grant.free_cast !== null) {
+    const freeCast = record(grant.free_cast, `${label}.free_cast`);
+    exactKeys(freeCast, `${label}.free_cast`, [
+      'uses', 'recovery', 'pool_scope',
+    ]);
+    integer(freeCast.uses, `${label}.free_cast.uses`, 1, AUTHORING_NUMERIC_LIMITS.maximumEffectMagnitude);
+  }
+  if (grant.active_if_config !== undefined && grant.active_if_config !== null) {
+    const active = record(grant.active_if_config, `${label}.active_if_config`);
+    exactKeys(active, `${label}.active_if_config`, ['key', 'equals']);
+    trimEqual(active.key, `${label}.active_if_config.key`);
+    boundedText(active.key, `${label}.active_if_config.key`, AUTHORING_TEXT_LIMITS.contentKey);
+    boundedText(active.equals, `${label}.active_if_config.equals`, AUTHORING_TEXT_LIMITS.openVocabulary);
+  }
+  for (const field of [
+    'count', 'initial_count', 'count_per_level', 'active_from_class_level',
+  ] as const) {
+    if (grant[field] !== undefined && grant[field] !== null) {
+      integer(
+        grant[field],
+        `${label}.${field}`,
+        field === 'initial_count' ? 0 : 1,
+        field === 'active_from_class_level'
+          ? AUTHORING_NUMERIC_LIMITS.maximumClassLevel
+          : AUTHORING_NUMERIC_LIMITS.maximumEffectMagnitude,
+      );
+    }
+  }
+  for (const field of ['level_min', 'level_max'] as const) {
+    if (grant[field] !== undefined) {
+      integer(grant[field], `${label}.${field}`, 0, AUTHORING_NUMERIC_LIMITS.maximumSpellLevel);
+    }
+  }
+  for (const field of [
+    'list', 'bucket', 'source_type', 'capability_key', 'collection',
+    'access_mode', 'style_key', 'selection_pool', 'label',
+  ] as const) {
+    if (grant[field] !== undefined && grant[field] !== null) {
+      boundedText(grant[field], `${label}.${field}`, AUTHORING_TEXT_LIMITS.openVocabulary);
+    }
+  }
+  for (const field of ['schools', 'tags', 'skills'] as const) {
+    if (grant[field] !== undefined && grant[field] !== null) {
+      list(grant[field], `${label}.${field}`, AUTHORING_LIST_LIMITS.queryValues)
+        .forEach((entry, index) => boundedText(
+          entry,
+          `${label}.${field}[${String(index)}]`,
+          AUTHORING_TEXT_LIMITS.queryTag,
+        ));
+    }
   }
   if (grant.spell !== undefined) fingerprint(grant.spell, `${label}.spell`, 'spell');
   if (grant.source_definition !== undefined) {
@@ -227,7 +310,7 @@ function validateEffect(value: unknown, label: string): void {
   if (unknown !== undefined) {
     throw new TypeError(`Catalog field '${label}.${unknown}' is not valid for effect '${effect.kind}'.`);
   }
-  integer(effect.sort_order, `${label}.sort_order`, 1, Number.MAX_SAFE_INTEGER);
+  integer(effect.sort_order, `${label}.sort_order`, 1, AUTHORING_NUMERIC_LIMITS.maximumSortOrder);
   for (const field of definition.fields) {
     const valueAtField = effect[field.key];
     if (valueAtField === null || valueAtField === undefined) {
@@ -268,6 +351,11 @@ function validateEffects(value: unknown, label: string): void {
 }
 
 function validateSpecies(aggregate: Record<string, unknown>): void {
+  exactKeys(aggregate, 'aggregate', [
+    'kind', 'name', 'rules_edition', 'reference_text', 'repeatable',
+    'creature_type', 'primary_size', 'alternate_size', 'walking_speed_feet',
+    'grants', 'traits',
+  ]);
   boundedText(aggregate.name, 'aggregate.name', AUTHORING_TEXT_LIMITS.name);
   boundedString(aggregate.reference_text, 'aggregate.reference_text', AUTHORING_TEXT_LIMITS.referenceText);
   boolean(aggregate.repeatable, 'aggregate.repeatable');
@@ -278,14 +366,24 @@ function validateSpecies(aggregate: Record<string, unknown>): void {
   list(aggregate.traits, 'aggregate.traits', AUTHORING_LIST_LIMITS.traits)
     .forEach((value, index) => {
       const trait = record(value, `aggregate.traits[${String(index)}]`);
+      exactKeys(trait, `aggregate.traits[${String(index)}]`, [
+        'sort_order', 'name', 'description', 'effects',
+      ]);
       boundedText(trait.name, `aggregate.traits[${String(index)}].name`, AUTHORING_TEXT_LIMITS.shortLabel);
       boundedText(trait.description, `aggregate.traits[${String(index)}].description`, AUTHORING_TEXT_LIMITS.description);
-      integer(trait.sort_order, `aggregate.traits[${String(index)}].sort_order`, 1, Number.MAX_SAFE_INTEGER);
+      integer(trait.sort_order, `aggregate.traits[${String(index)}].sort_order`, 1, AUTHORING_NUMERIC_LIMITS.maximumSortOrder);
       validateEffects(trait.effects, `aggregate.traits[${String(index)}].effects`);
     });
 }
 
 function validateBackground(aggregate: Record<string, unknown>): void {
+  exactKeys(aggregate, 'aggregate', [
+    'kind', 'name', 'rules_edition', 'reference_text', 'repeatable', 'grants',
+    'suggested_abilities', 'default_origin_feat', 'skill_proficiencies',
+    'tool_reference_text', 'equipment_option_a_description',
+    'equipment_option_b_description', 'equipment_option_a',
+    'equipment_option_b', 'effects',
+  ]);
   boundedText(aggregate.name, 'aggregate.name', AUTHORING_TEXT_LIMITS.name);
   boundedString(aggregate.reference_text, 'aggregate.reference_text', AUTHORING_TEXT_LIMITS.referenceText);
   boolean(aggregate.repeatable, 'aggregate.repeatable');
@@ -307,8 +405,11 @@ function validateBackground(aggregate: Record<string, unknown>): void {
     list(aggregate[option], `aggregate.${option}`, AUTHORING_LIST_LIMITS.equipmentItemsPerOption)
       .forEach((value, index) => {
         const item = record(value, `aggregate.${option}[${String(index)}]`);
-        integer(item.quantity, `aggregate.${option}[${String(index)}].quantity`, 1, Number.MAX_SAFE_INTEGER);
-        integer(item.sort_order, `aggregate.${option}[${String(index)}].sort_order`, 1, Number.MAX_SAFE_INTEGER);
+        exactKeys(item, `aggregate.${option}[${String(index)}]`, item.kind === 'gear'
+          ? ['kind', 'sort_order', 'quantity', 'printed_name']
+          : ['kind', 'sort_order', 'quantity', 'printed_name', 'content']);
+        integer(item.quantity, `aggregate.${option}[${String(index)}].quantity`, 1, AUTHORING_NUMERIC_LIMITS.maximumQuantity);
+        integer(item.sort_order, `aggregate.${option}[${String(index)}].sort_order`, 1, AUTHORING_NUMERIC_LIMITS.maximumSortOrder);
         boundedText(item.printed_name, `aggregate.${option}[${String(index)}].printed_name`, AUTHORING_TEXT_LIMITS.description);
         if (item.kind === 'weapon' || item.kind === 'armor') {
           fingerprint(item.content, `aggregate.${option}[${String(index)}].content`, item.kind);
@@ -320,42 +421,234 @@ function validateBackground(aggregate: Record<string, unknown>): void {
   validateEffects(aggregate.effects, 'aggregate.effects');
 }
 
+const classEffectFields = [
+  'effect_kind', 'damage_type', 'hit_points_flat', 'hit_points_per_level',
+  'speed_bonus_feet', 'ability', 'amount', 'maximum', 'base', 'ability_1',
+  'ability_2', 'allows_shield', 'weapon_scope', 'attack_count',
+] as const;
+
+function validateClassEffect(value: unknown, label: string, named: boolean): void {
+  const effect = record(value, label);
+  exactKeys(effect, label, [
+    ...(named ? [] : ['class_level', 'name']),
+    ...classEffectFields,
+  ]);
+  if (!named) {
+    integer(effect.class_level, `${label}.class_level`, 1, AUTHORING_NUMERIC_LIMITS.maximumClassLevel);
+    boundedText(effect.name, `${label}.name`, AUTHORING_TEXT_LIMITS.name);
+  }
+  if (!isEnumValue(featureTemplateEffectKinds, effect.effect_kind)) {
+    throw new TypeError(`Catalog field '${label}.effect_kind' is invalid.`);
+  }
+  for (const field of ['damage_type', 'ability', 'ability_1', 'ability_2', 'weapon_scope'] as const) {
+    if (effect[field] !== null && effect[field] !== undefined) {
+      boundedText(effect[field], `${label}.${field}`, AUTHORING_TEXT_LIMITS.openVocabulary);
+    }
+  }
+  if (effect.allows_shield !== null && effect.allows_shield !== undefined) {
+    boolean(effect.allows_shield, `${label}.allows_shield`);
+  }
+  for (const field of [
+    'hit_points_flat', 'hit_points_per_level', 'speed_bonus_feet', 'amount',
+    'maximum', 'base', 'attack_count',
+  ] as const) {
+    if (effect[field] !== null && effect[field] !== undefined) {
+      integer(
+        effect[field],
+        `${label}.${field}`,
+        field === 'hit_points_flat' || field === 'hit_points_per_level' || field === 'amount'
+          ? -AUTHORING_NUMERIC_LIMITS.maximumEffectMagnitude
+          : 1,
+        AUTHORING_NUMERIC_LIMITS.maximumEffectMagnitude,
+      );
+    }
+  }
+}
+
+function validateClassFormula(value: unknown, label: string): void {
+  const formula = record(value, label);
+  const kind = boundedText(formula.kind, `${label}.kind`, AUTHORING_TEXT_LIMITS.openVocabulary);
+  switch (kind) {
+    case 'fixed_count':
+      exactKeys(formula, label, ['kind', 'minimum_class_level', 'count']);
+      break;
+    case 'fixed_count_by_class_level': {
+      exactKeys(formula, label, ['kind', 'steps']);
+      list(formula.steps, `${label}.steps`, AUTHORING_NUMERIC_LIMITS.maximumClassLevel)
+        .forEach((valueAtStep, index) => {
+          const step = record(valueAtStep, `${label}.steps[${String(index)}]`);
+          exactKeys(step, `${label}.steps[${String(index)}]`, ['minimum_class_level', 'count']);
+          integer(step.minimum_class_level, `${label}.steps[${String(index)}].minimum_class_level`, 1, AUTHORING_NUMERIC_LIMITS.maximumClassLevel);
+          integer(step.count, `${label}.steps[${String(index)}].count`, 1, AUTHORING_NUMERIC_LIMITS.maximumEffectMagnitude);
+        });
+      return;
+    }
+    case 'ability_modifier_minimum_one':
+      exactKeys(formula, label, ['kind', 'minimum_class_level', 'ability']);
+      break;
+    case 'class_level_multiple':
+      exactKeys(formula, label, ['kind', 'minimum_class_level', 'multiplier']);
+      integer(formula.multiplier, `${label}.multiplier`, 1, AUTHORING_NUMERIC_LIMITS.maximumEffectMagnitude);
+      break;
+    default:
+      throw new TypeError(`Catalog field '${label}.kind' is invalid.`);
+  }
+  integer(formula.minimum_class_level, `${label}.minimum_class_level`, 1, AUTHORING_NUMERIC_LIMITS.maximumClassLevel);
+  if (kind === 'fixed_count') {
+    integer(formula.count, `${label}.count`, 1, AUTHORING_NUMERIC_LIMITS.maximumEffectMagnitude);
+  }
+}
+
+function validateClassRows(
+  aggregate: Record<string, unknown>,
+  field: string,
+  allowed: readonly string[],
+  maximum: number = AUTHORING_LIST_LIMITS.classChildRows,
+): readonly Record<string, unknown>[] {
+  return list(aggregate[field], `aggregate.${field}`, maximum).map((value, index) => {
+    const label = `aggregate.${field}[${String(index)}]`;
+    const row = record(value, label);
+    exactKeys(row, label, allowed);
+    return row;
+  });
+}
+
 function validateClassGrants(aggregate: Record<string, unknown>): void {
+  exactKeys(aggregate, 'aggregate', [
+    'kind', 'name', 'rules_edition', 'spellcasting_ability',
+    'progression_type', 'caster_fraction', 'caster_rounding',
+    'prepares_or_knows', 'supports_ritual_casting', 'ritual_casting_mode',
+    'primary_ability_expression', 'notes', 'progressions', 'sheet_traits',
+    'saving_throw_proficiencies', 'skill_options', 'armor_training',
+    'weapon_proficiencies', 'extra_attack_grants', 'martial_arts_dice',
+    'weapon_mastery_grants', 'weapon_mastery_counts', 'equipment_items',
+    'resources', 'resource_formulas', 'feature_effects', 'named_features',
+  ]);
+  boundedText(aggregate.name, 'aggregate.name', AUTHORING_TEXT_LIMITS.name);
   boolean(aggregate.supports_ritual_casting, 'aggregate.supports_ritual_casting');
   for (const field of [
     'spellcasting_ability', 'caster_fraction', 'caster_rounding',
     'prepares_or_knows', 'ritual_casting_mode', 'primary_ability_expression',
     'notes',
   ] as const) {
-    if (aggregate[field] !== null && typeof aggregate[field] !== 'string') {
-      throw new TypeError(`Catalog field 'aggregate.${field}' must be string or null.`);
+    if (aggregate[field] !== null) {
+      boundedText(
+        aggregate[field],
+        `aggregate.${field}`,
+        field === 'notes' || field === 'primary_ability_expression'
+          ? AUTHORING_TEXT_LIMITS.referenceText
+          : AUTHORING_TEXT_LIMITS.openVocabulary,
+      );
     }
   }
   boundedText(aggregate.progression_type, 'aggregate.progression_type', AUTHORING_TEXT_LIMITS.openVocabulary);
   const progressions = list(aggregate.progressions, 'aggregate.progressions', AUTHORING_NUMERIC_LIMITS.maximumClassLevel);
   progressions.forEach((value, index) => {
     const progression = record(value, `aggregate.progressions[${String(index)}]`);
+    exactKeys(progression, `aggregate.progressions[${String(index)}]`, [
+      'class_level', 'cantrips_known', 'prepared_count', 'slots',
+      'pact_slots', 'grant_rules',
+    ]);
     integer(progression.class_level, `aggregate.progressions[${String(index)}].class_level`, 1, 20);
-    integer(progression.cantrips_known, `aggregate.progressions[${String(index)}].cantrips_known`, 0, Number.MAX_SAFE_INTEGER);
-    integer(progression.prepared_count, `aggregate.progressions[${String(index)}].prepared_count`, 0, Number.MAX_SAFE_INTEGER);
+    integer(progression.cantrips_known, `aggregate.progressions[${String(index)}].cantrips_known`, 0, AUTHORING_NUMERIC_LIMITS.maximumEffectMagnitude);
+    integer(progression.prepared_count, `aggregate.progressions[${String(index)}].prepared_count`, 0, AUTHORING_NUMERIC_LIMITS.maximumEffectMagnitude);
     validateGrantList(
       progression.grant_rules,
       `aggregate.progressions[${String(index)}].grant_rules`,
     );
   });
-  for (const field of [
-    'saving_throw_proficiencies', 'skill_options', 'armor_training',
-    'weapon_proficiencies', 'extra_attack_grants', 'martial_arts_dice',
-    'weapon_mastery_grants', 'weapon_mastery_counts', 'equipment_items',
-    'resources', 'resource_formulas', 'feature_effects', 'named_features',
-  ] as const) {
-    list(aggregate[field], `aggregate.${field}`, Number.MAX_SAFE_INTEGER)
-      .forEach((value, index) => record(value, `aggregate.${field}[${String(index)}]`));
+  validateClassRows(aggregate, 'saving_throw_proficiencies', ['ability'])
+    .forEach((row) => boundedText(row.ability, 'aggregate.saving_throw_proficiencies.ability', AUTHORING_TEXT_LIMITS.openVocabulary));
+  validateClassRows(aggregate, 'skill_options', ['skill'])
+    .forEach((row) => boundedText(row.skill, 'aggregate.skill_options.skill', AUTHORING_TEXT_LIMITS.openVocabulary));
+  validateClassRows(aggregate, 'armor_training', ['category', 'granted_on_multiclass_entry'])
+    .forEach((row) => {
+      boundedText(row.category, 'aggregate.armor_training.category', AUTHORING_TEXT_LIMITS.openVocabulary);
+      boolean(row.granted_on_multiclass_entry, 'aggregate.armor_training.granted_on_multiclass_entry');
+    });
+  validateClassRows(aggregate, 'weapon_proficiencies', ['category', 'property_qualifier', 'granted_on_multiclass_entry'])
+    .forEach((row) => {
+      boundedText(row.category, 'aggregate.weapon_proficiencies.category', AUTHORING_TEXT_LIMITS.openVocabulary);
+      if (row.property_qualifier !== null) {
+        boundedText(row.property_qualifier, 'aggregate.weapon_proficiencies.property_qualifier', AUTHORING_TEXT_LIMITS.openVocabulary);
+      }
+      boolean(row.granted_on_multiclass_entry, 'aggregate.weapon_proficiencies.granted_on_multiclass_entry');
+    });
+  for (const row of validateClassRows(aggregate, 'extra_attack_grants', ['class_level', 'attack_count'])) {
+    integer(row.class_level, 'aggregate.extra_attack_grants.class_level', 1, AUTHORING_NUMERIC_LIMITS.maximumClassLevel);
+    integer(row.attack_count, 'aggregate.extra_attack_grants.attack_count', AUTHORING_NUMERIC_LIMITS.minimumAttackCount, AUTHORING_NUMERIC_LIMITS.maximumEffectMagnitude);
   }
-  if (aggregate.sheet_traits !== null) record(aggregate.sheet_traits, 'aggregate.sheet_traits');
+  validateClassRows(aggregate, 'martial_arts_dice', ['class_level', 'martial_arts_die'])
+    .forEach((row) => {
+      integer(row.class_level, 'aggregate.martial_arts_dice.class_level', 1, AUTHORING_NUMERIC_LIMITS.maximumClassLevel);
+      integer(row.martial_arts_die, 'aggregate.martial_arts_dice.martial_arts_die', 1, AUTHORING_NUMERIC_LIMITS.maximumEffectMagnitude);
+    });
+  validateClassRows(aggregate, 'weapon_mastery_grants', ['grant'])
+    .forEach((row) => boundedText(row.grant, 'aggregate.weapon_mastery_grants.grant', AUTHORING_TEXT_LIMITS.openVocabulary));
+  validateClassRows(aggregate, 'weapon_mastery_counts', ['class_level', 'mastery_count'])
+    .forEach((row) => {
+      integer(row.class_level, 'aggregate.weapon_mastery_counts.class_level', 1, AUTHORING_NUMERIC_LIMITS.maximumClassLevel);
+      integer(row.mastery_count, 'aggregate.weapon_mastery_counts.mastery_count', 0, AUTHORING_NUMERIC_LIMITS.maximumEffectMagnitude);
+    });
+  for (const row of validateClassRows(aggregate, 'equipment_items', [
+    'option', 'sort_order', 'quantity', 'item_name', 'item_kind', 'reference',
+  ])) {
+    integer(row.sort_order, 'aggregate.equipment_items.sort_order', 1, AUTHORING_NUMERIC_LIMITS.maximumSortOrder);
+    integer(row.quantity, 'aggregate.equipment_items.quantity', 1, AUTHORING_NUMERIC_LIMITS.maximumQuantity);
+    boundedText(row.item_name, 'aggregate.equipment_items.item_name', AUTHORING_TEXT_LIMITS.description);
+    boundedText(row.option, 'aggregate.equipment_items.option', AUTHORING_TEXT_LIMITS.openVocabulary);
+    boundedText(row.item_kind, 'aggregate.equipment_items.item_kind', AUTHORING_TEXT_LIMITS.openVocabulary);
+    if (row.reference !== null) fingerprint(row.reference, 'aggregate.equipment_items.reference');
+  }
+  validateClassRows(aggregate, 'resources', ['class_level', 'resource_kind', 'maximum'])
+    .forEach((row) => {
+      integer(row.class_level, 'aggregate.resources.class_level', 1, AUTHORING_NUMERIC_LIMITS.maximumClassLevel);
+      boundedText(row.resource_kind, 'aggregate.resources.resource_kind', AUTHORING_TEXT_LIMITS.openVocabulary);
+      integer(row.maximum, 'aggregate.resources.maximum', 0, AUTHORING_NUMERIC_LIMITS.maximumEffectMagnitude);
+    });
+  for (const row of validateClassRows(aggregate, 'resource_formulas', ['resource_kind', 'formula'])) {
+    boundedText(row.resource_kind, 'aggregate.resource_formulas.resource_kind', AUTHORING_TEXT_LIMITS.openVocabulary);
+    validateClassFormula(row.formula, 'aggregate.resource_formulas.formula');
+  }
+  validateClassRows(
+    aggregate,
+    'feature_effects',
+    ['class_level', 'name', ...classEffectFields],
+    AUTHORING_LIST_LIMITS.effectsPerAggregate,
+  ).forEach((row, index) => validateClassEffect(row, `aggregate.feature_effects[${String(index)}]`, false));
+  validateClassRows(aggregate, 'named_features', [
+    'name', 'rules_edition', 'prerequisite', 'description', 'class_level', 'effects',
+  ], AUTHORING_LIST_LIMITS.features).forEach((row, index) => {
+    const label = `aggregate.named_features[${String(index)}]`;
+    boundedText(row.name, `${label}.name`, AUTHORING_TEXT_LIMITS.name);
+    boundedText(row.prerequisite, `${label}.prerequisite`, AUTHORING_TEXT_LIMITS.description);
+    boundedText(row.description, `${label}.description`, AUTHORING_TEXT_LIMITS.description);
+    boundedText(row.rules_edition, `${label}.rules_edition`, AUTHORING_TEXT_LIMITS.openVocabulary);
+    integer(row.class_level, `${label}.class_level`, 1, AUTHORING_NUMERIC_LIMITS.maximumClassLevel);
+    list(row.effects, `${label}.effects`, AUTHORING_LIST_LIMITS.effectsPerOwner)
+      .forEach((effect, effectIndex) => validateClassEffect(effect, `${label}.effects[${String(effectIndex)}]`, true));
+  });
+  if (aggregate.sheet_traits !== null) {
+    const sheet = record(aggregate.sheet_traits, 'aggregate.sheet_traits');
+    exactKeys(sheet, 'aggregate.sheet_traits', [
+      'hit_die', 'skill_choice_count', 'skill_choice_from_any',
+      'multiclass_skill_choice_count', 'multiclass_skill_choice_pool',
+    ]);
+    integer(sheet.hit_die, 'aggregate.sheet_traits.hit_die', 1, AUTHORING_NUMERIC_LIMITS.maximumEffectMagnitude);
+    integer(sheet.skill_choice_count, 'aggregate.sheet_traits.skill_choice_count', 1, AUTHORING_NUMERIC_LIMITS.maximumEffectMagnitude);
+    boolean(sheet.skill_choice_from_any, 'aggregate.sheet_traits.skill_choice_from_any');
+    integer(sheet.multiclass_skill_choice_count, 'aggregate.sheet_traits.multiclass_skill_choice_count', 0, AUTHORING_NUMERIC_LIMITS.maximumEffectMagnitude);
+    boundedText(sheet.multiclass_skill_choice_pool, 'aggregate.sheet_traits.multiclass_skill_choice_pool', AUTHORING_TEXT_LIMITS.openVocabulary);
+  }
 }
 
 function validateFeat(aggregate: Record<string, unknown>): void {
+  exactKeys(aggregate, 'aggregate', [
+    'kind', 'name', 'rules_edition', 'category', 'min_level',
+    'ability_points', 'ability_increase_abilities',
+    'ability_increase_maximum', 'repeatable', 'prerequisites', 'grants',
+    'notes',
+  ]);
   boundedText(aggregate.name, 'aggregate.name', AUTHORING_TEXT_LIMITS.name);
   if (aggregate.notes !== null) {
     boundedString(aggregate.notes, 'aggregate.notes', AUTHORING_TEXT_LIMITS.referenceText);
@@ -394,16 +687,37 @@ function validateFeat(aggregate: Record<string, unknown>): void {
     throw new TypeError("Catalog field 'aggregate.ability_increase_abilities' is invalid.");
   }
   list(aggregate.prerequisites, 'aggregate.prerequisites', AUTHORING_LIST_LIMITS.grants)
-    .forEach((value, index) => record(value, `aggregate.prerequisites[${String(index)}]`));
+    .forEach((value, index) => {
+      const label = `aggregate.prerequisites[${String(index)}]`;
+      const prerequisite = record(value, label);
+      if (prerequisite.kind === 'feature') {
+        exactKeys(prerequisite, label, ['kind', 'feature']);
+        boundedText(prerequisite.feature, `${label}.feature`, AUTHORING_TEXT_LIMITS.openVocabulary);
+      } else if (prerequisite.kind === 'ability_score') {
+        exactKeys(prerequisite, label, ['kind', 'abilities', 'minimum']);
+        const abilityList = list(prerequisite.abilities, `${label}.abilities`, 6);
+        if (abilityList.length === 0 || abilityList.some((ability) => !isEnumValue(abilities, ability))) {
+          throw new TypeError(`Catalog field '${label}.abilities' is invalid.`);
+        }
+        integer(
+          prerequisite.minimum,
+          `${label}.minimum`,
+          AUTHORING_NUMERIC_LIMITS.minimumAbilityScore,
+          AUTHORING_NUMERIC_LIMITS.maximumAbilityScore,
+        );
+      } else {
+        throw new TypeError(`Catalog field '${label}.kind' is invalid.`);
+      }
+    });
 }
 
 /**
  * Parses the aggregate as one closed DTO and immediately runs its production
- * projector plus the canonical serializer. Missing, non-canonical or
+ * projector plus the canonical serializer. Missing, non-canonical, unknown or
  * unsupported nested values therefore refuse at the document boundary rather
- * than becoming a partial identity. Class child row objects deliberately keep
- * unknown fields: the projector's default-include posture makes a future field
- * over-split instead of collide.
+ * than becoming a partial identity. Stored rows use the complementary
+ * default-include policy in the production projector, so either side of the
+ * boundary fails safe when a future field appears.
  */
 export function parseSourceCatalogRecord(
   kind: 'class',
@@ -425,6 +739,7 @@ export function parseSourceCatalogRecord(
   kind: SourceCatalogRecordKind,
   value: Record<string, unknown>,
 ): CatalogSourceRecord {
+  exactKeys(value, 'record', ['kind', 'aggregate']);
   const base = baseAggregate(value.aggregate, kind);
   switch (kind) {
     case 'class': {

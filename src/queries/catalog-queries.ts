@@ -237,7 +237,15 @@ export class CatalogQueries {
   read(): CatalogSnapshot {
     return {
       classes: this.db.all(
-        'SELECT * FROM class_definitions ORDER BY name, rules_edition, id',
+        `SELECT definition.*
+         FROM class_definitions AS definition
+         INNER JOIN catalog_content_identities AS identity
+           ON identity.content_key = definition.content_key
+          AND identity.content_kind = 'class'
+          AND identity.catalog_layer = 'bundled'
+         -- CI-4a/HA-10 removes this temporary consumer boundary once class
+         -- aggregates can be applied completely rather than partially.
+         ORDER BY definition.name, definition.rules_edition, definition.id`,
         undefined,
         decodeClass,
       ),
@@ -306,8 +314,20 @@ export class CatalogQueries {
       | 'species_definitions'
       | 'background_definitions',
   ): DefinitionRow[] {
+    const kind = table === 'feat_definitions'
+      ? 'feat'
+      : table === 'species_definitions'
+        ? 'species'
+        : 'background';
     return this.db.all(
-      `SELECT * FROM ${table} ORDER BY name, rules_edition, id`,
+      `SELECT definition.*
+       FROM ${table} AS definition
+       INNER JOIN catalog_content_identities AS identity
+         ON identity.content_key = definition.content_key
+        AND identity.content_kind = '${kind}'
+        AND identity.catalog_layer = 'bundled'
+       -- CI-4a/HA-10 removes this filter when aggregate consumers are cut over.
+       ORDER BY definition.name, definition.rules_edition, definition.id`,
       undefined,
       decodeDefinition,
     );

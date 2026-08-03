@@ -24,6 +24,11 @@ import { projectStoredAuthoredContentV1, storedAuthoredRegistryReferencesV1 } fr
 import { DatabaseContext } from '../../../src/db/database';
 import { creatureSize, creatureType } from '../../../src/domain/enums';
 import type { ContentKey } from '../../../src/domain/ids';
+import { CatalogQueries } from '../../../src/queries/catalog-queries';
+import {
+  listGuidedBackgroundChoiceOptions,
+  listGuidedOriginOptions,
+} from '../../../src/builder/guided-creation';
 import {
   classProjectorV1Vector,
   featProjectorV1Vector,
@@ -59,7 +64,7 @@ function fingerprint(contentKey: ContentKey) {
 }
 
 describe('class, feat, species and background catalog import', () => {
-  it('creates feat and species aggregates transactionally and silently adopts them on re-import', () => {
+  it('stores and identifies imported feat/species aggregates without exposing them to planner or guided selection before CI-4a/HA-10', () => {
     const species: SpeciesContentAggregate = {
       kind: 'species',
       name: 'Marsh Kin',
@@ -135,6 +140,10 @@ describe('class, feat, species and background catalog import', () => {
     expect(featMatched.feats_matched).toBe(1);
     expect(speciesMatched.species_matched).toBe(1);
     expect(db.scalar<number>('SELECT count(*) FROM species_definitions')).toBe(1);
+    expect(new CatalogQueries(db).read().sources.feat).toEqual([]);
+    expect(new CatalogQueries(db).read().sources.species).toEqual([]);
+    expect(listGuidedOriginOptions(db, 'species')).toEqual([]);
+    expect(listGuidedBackgroundChoiceOptions(db).origin_feats).toEqual([]);
 
     db.exec('UPDATE species_templates SET base_speed_feet = 35 WHERE content_key = ?', [speciesKey]);
     expect(() => new CatalogImporter(db).import({
@@ -142,7 +151,7 @@ describe('class, feat, species and background catalog import', () => {
     })).toThrow(ContentIdentityCollision);
   });
 
-  it('resolves background feat, weapon and armor edges by content fingerprint', () => {
+  it('imports a null-tool background, resolves catalog edges, and reprojects byte-stably', () => {
     new CatalogImporter(db).import({
       documents: [document('feat', featProjectorV1Vector.aggregate)],
     });
@@ -182,7 +191,7 @@ describe('class, feat, species and background catalog import', () => {
       suggested_abilities: ['strength', 'wisdom', 'constitution'],
       default_origin_feat: { kind: 'feat', ...featRef },
       skill_proficiencies: ['athletics', 'perception'],
-      tool_reference_text: 'Woodcarver tools',
+      tool_reference_text: null,
       equipment_option_a_description: 'A spear.',
       equipment_option_b_description: 'Mail.',
       equipment_option_a: [{
@@ -220,6 +229,21 @@ describe('class, feat, species and background catalog import', () => {
       payload: projectAuthoredContentAggregateV1(background).payload,
     });
     expect(contentKey).toBe(incoming.derivedKey);
+    expect(db.scalar<string>('SELECT tool_proficiency FROM background_templates')).toBe('');
+    const stored = projectStoredAuthoredContentV1(db, {
+      kind: 'background',
+      contentKey: contentKey as ContentKey,
+      references: storedAuthoredRegistryReferencesV1(db),
+    });
+    const reprojected = deriveContentIdentityV1({
+      kind: stored.kind,
+      edition: stored.aggregate.rules_edition,
+      name: stored.aggregate.name,
+      payload: stored.payload,
+    });
+    expect(reprojected.canonicalJson).toBe(incoming.canonicalJson);
+    expect(new CatalogQueries(db).read().sources.background).toEqual([]);
+    expect(listGuidedOriginOptions(db, 'background')).toEqual([]);
   });
 
   it('matches an installed class aggregate but refuses creation under D133', () => {
