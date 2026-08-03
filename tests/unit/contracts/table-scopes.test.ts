@@ -77,6 +77,11 @@ const SNAPSHOT_ADDITIONS = [
   // LU-1 durable ASI/Epic Boon occurrences.
   'character_level_feat_choices',
 ] as const;
+const APPLICATION_ADDITIONS = [
+  // P3's recipient-local repository observation index. It belongs in a whole
+  // database image but in none of the character portability sets below.
+  'party_document_states',
+] as const;
 const BACKUP_DIRECT_ADDITIONS = [
   'character_weapons',
   'character_species',
@@ -103,6 +108,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       // The structured equipment lines of a background template, sorted before
       // its parent because `e` precedes `t`.
       'background_equipment_items',
+      'background_template_effects',
       'background_templates',
       // CI-2a registry state is application data but not character-scoped.
       'catalog_content_aliases',
@@ -150,6 +156,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       'feat_definitions',
       'named_features',
       'named_feature_effects',
+      ...APPLICATION_ADDITIONS,
       'species_definitions',
       'species_template_trait_effects',
       'species_template_traits',
@@ -333,7 +340,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
 });
 
 describe('table scope classification', () => {
-  it('classifies all 75 tables exactly once', () => {
+  it('classifies all 77 tables exactly once', () => {
     const names = Object.keys(TABLE_SCOPES);
     // 30 Laravel-derived tables — 38 until the eight Laravel-only
     // infrastructure ones were dropped — plus the four native weapon tables,
@@ -350,8 +357,8 @@ describe('table scope classification', () => {
     // tables and CI-2b's ONE applied data-migration marker table. Each group is named
     // rather than folded into one total, so a group that vanishes while
     // another grows cannot pass unnoticed.
-    expect(names).toHaveLength(75);
-    expect(new Set(names).size).toBe(75);
+    expect(names).toHaveLength(77);
+    expect(new Set(names).size).toBe(77);
     expect([...names].sort()).toEqual([...APPLICATION_TABLES].sort());
   });
 
@@ -488,5 +495,21 @@ describe('table scope classification', () => {
         backupReference: false,
       });
     }
+  });
+
+  it('PARTY-INDEX-NOT-PORTABLE keeps the observation index out of every character surface', () => {
+    expect(TABLE_SCOPES.party_document_states).toEqual({
+      role: 'party_observation',
+      snapshot: false,
+      backupDirect: false,
+      backup: false,
+      share: false,
+      backupReference: false,
+    });
+    expect([...APPLICATION_TABLES]).toContain('party_document_states');
+    expect([...CHARACTER_STATE_TABLES]).not.toContain('party_document_states');
+    expect([...BACKUP_DIRECT_TABLES]).not.toContain('party_document_states');
+    expect([...BACKUP_TABLES]).not.toContain('party_document_states');
+    expect(Object.keys(SHARE_TABLES)).not.toContain('party_document_states');
   });
 });

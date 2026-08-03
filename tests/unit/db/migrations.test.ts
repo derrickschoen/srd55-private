@@ -190,18 +190,42 @@ describe('database migration chain', () => {
     expect(result.signature).toBe(schemaSignature(schema));
   });
 
-  it('adds nullable flavor without changing historical notes', async () => {
-    const beforeFlavor = DATABASE_MIGRATIONS
-      .slice(0, -1)
+  it('preserves pre-0028 effects while opening authored storage', async () => {
+    const beforeAuthorableEffects = DATABASE_MIGRATIONS
+      .slice(0, -2)
       .map((entry) => entry.sql)
       .join('\n');
-    const grandfathered = `private-${'n'.repeat(2_100)}`;
-    const storage = await storageHolding(beforeFlavor);
+    const storage = await storageHolding(beforeAuthorableEffects);
     const old = storage.open();
-    old.exec({
-      sql: 'INSERT INTO characters (name, notes) VALUES (?, ?)',
-      bind: ['Flavor Migration Hero', grandfathered],
-    });
+    old.exec(`
+      INSERT INTO species_templates (
+        id, content_key, rules_edition, name, creature_type, size,
+        base_speed_feet
+      ) VALUES (
+        10, 'expanded:species:migration', 'expanded', 'Migration Species',
+        'Humanoid', 'Medium', 30
+      );
+      INSERT INTO species_template_traits (
+        id, species_template_id, sort_order, name, description
+      ) VALUES (11, 10, 1, 'Old Ward', 'Preserved description.');
+      INSERT INTO species_template_trait_effects (
+        id, species_template_trait_id, sort_order, effect_kind, damage_type
+      ) VALUES (12, 11, 1, 'damage_resistance', 'Fire');
+      INSERT INTO class_definitions (
+        id, content_key, name, rules_edition, progression_type
+      ) VALUES (20, 'expanded:class:migration', 'Migration Class', 'expanded', 'none');
+      INSERT INTO subclass_definitions (
+        id, content_key, class_definition_id, name, rules_edition
+      ) VALUES (
+        21, 'expanded:subclass:migration', 20, 'Migration Subclass', 'expanded'
+      );
+      INSERT INTO subclass_features (
+        id, subclass_definition_id, class_level, sort_order, name, description
+      ) VALUES (22, 21, 3, 1, 'Echo', 'Original threshold.');
+      INSERT INTO subclass_feature_effects (
+        id, subclass_feature_id, sort_order, effect_kind, damage_type
+      ) VALUES (23, 22, 1, 'damage_resistance', 'Cold');
+    `);
     old.close();
 
     const lifecycle = new DatabaseLifecycle(
@@ -212,16 +236,80 @@ describe('database migration chain', () => {
       DATABASE_MIGRATIONS,
     );
     lifecycle.open();
-    expect(lifecycle.database.oneRaw(
-      `SELECT alignment, appearance, backstory, notes
-       FROM characters WHERE name = ?`,
-      ['Flavor Migration Hero'],
-    )).toEqual({
-      alignment: null,
-      appearance: null,
-      backstory: null,
-      notes: grandfathered,
+    expect(lifecycle.database.oneRaw(`
+      SELECT effect_kind, damage_type, ability, amount, maximum, label, notes
+      FROM species_template_trait_effects WHERE id = 12
+    `)).toEqual({
+      effect_kind: 'damage_resistance',
+      damage_type: 'Fire',
+      ability: null,
+      amount: null,
+      maximum: null,
+      label: 'Old Ward',
+      notes: null,
     });
+    expect(lifecycle.database.oneRaw(`
+      SELECT effect_kind, damage_type, label, notes
+      FROM subclass_feature_effects WHERE id = 23
+    `)).toEqual({
+      effect_kind: 'damage_resistance',
+      damage_type: 'Cold',
+      label: 'Echo',
+      notes: null,
+    });
+
+    lifecycle.database.exec(`
+      UPDATE species_templates SET
+        creature_type = 'Clockwork  Humanoid',
+        size = 'Minuscule',
+        alternate_size = 'Smáll'
+      WHERE id = 10;
+      INSERT INTO species_template_trait_effects (
+        species_template_trait_id, sort_order, effect_kind, damage_type, label
+      ) VALUES (11, 2, 'damage_resistance', 'Void  Fire', 'Void ward');
+      INSERT INTO background_templates (
+        id, content_key, rules_edition, name,
+        ability_score_1, ability_score_2, ability_score_3, feat_name,
+        skill_proficiency_1, skill_proficiency_2, tool_proficiency,
+        equipment_option_a, equipment_option_b
+      ) VALUES (
+        30, 'expanded:background:migration', 'expanded', 'Migration Background',
+        'Strength', 'Dexterity', 'Constitution', 'Alert', 'Acrobatics',
+        'Stealth', 'Astrolabe', 'Astrolabe', '50 GP'
+      );
+      INSERT INTO background_template_effects (
+        background_template_id, sort_order, effect_kind, damage_type, label
+      ) VALUES (30, 1, 'damage_resistance', 'void', 'Lowercase ward');
+      INSERT INTO subclass_features (
+        subclass_definition_id, class_level, sort_order, name, description
+      ) VALUES (21, 7, 2, 'Echo', 'Later threshold.');
+      UPDATE subclass_feature_effects
+      SET damage_type = 'Steam', label = 'Steam ward', notes = 'Exact notes.'
+      WHERE id = 23;
+    `);
+
+    expect(lifecycle.database.oneRaw(`
+      SELECT creature_type, size, alternate_size FROM species_templates
+      WHERE id = 10
+    `)).toEqual({
+      creature_type: 'Clockwork  Humanoid',
+      size: 'Minuscule',
+      alternate_size: 'Smáll',
+    });
+    expect(lifecycle.database.allRaw(`
+      SELECT class_level, name FROM subclass_features
+      WHERE subclass_definition_id = 21 ORDER BY class_level
+    `)).toEqual([
+      { class_level: 3, name: 'Echo' },
+      { class_level: 7, name: 'Echo' },
+    ]);
+    expect(lifecycle.database.oneRaw(`
+      SELECT damage_type, label FROM background_template_effects
+      WHERE background_template_id = 30
+    `)).toEqual({ damage_type: 'void', label: 'Lowercase ward' });
+    expect(lifecycle.database.scalar<number>(
+      'SELECT count(*) FROM pragma_foreign_key_check',
+    )).toBe(0);
     lifecycle.close();
   });
 

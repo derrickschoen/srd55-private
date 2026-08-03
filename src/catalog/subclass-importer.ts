@@ -295,13 +295,14 @@ function importSubclass(
         db.exec(
           `INSERT INTO subclass_feature_effects (
              subclass_feature_id, sort_order, effect_kind, attack_count,
-             weapon_scope, created_at, updated_at
-           ) VALUES (?, 1, ?, ?, ?, ?, ?)`,
+             weapon_scope, label, created_at, updated_at
+           ) VALUES (?, 1, ?, ?, ?, ?, ?, ?)`,
           [
             featureId,
             feature.effect_kind,
             feature.attack_count,
             feature.weapon_scope,
+            feature.name,
             now,
             now,
           ],

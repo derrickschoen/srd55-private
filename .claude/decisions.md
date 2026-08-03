@@ -7,6 +7,206 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D187 — OWNER: the Oath of Domination spell list is FINAL (2026-08-03)
+
+Owner-picked, all verified present in SRD 5.2.1:
+  Paladin 3:  Command, Bane
+  Paladin 5:  Suggestion, Augury
+  Paladin 9:  Clairvoyance, Slow
+  Paladin 13: Compulsion, Divination
+  Paladin 17: Dominate Person, Dream
+Dream is the standout: he SENDS the vision - nightmares as statecraft,
+the D186 misread made contagious. The list walks command (Command ->
+Suggestion -> Slow -> Compulsion -> Dominate Person) and vision (Bane's
+dread -> Augury -> Clairvoyance -> Divination -> Dream) in parallel to
+their apotheoses. Supersedes D182's provisional pairings.
+
+## D186 — OWNER: the vision is MISINTERPRETABLE - the reading is the flaw (2026-08-03)
+
+Owner adds the misread-prophecy layer (the GRRM teeth-snap idea; the
+Croesus/Delphi trap - ideas only, no protected expression): the vision
+may be TRUE while his READING of it is wrong, and acting on the
+misreading can be what brings the true meaning about. Design
+consequences: the oath's flavor includes a WRITTEN VISION - short,
+concrete, deliberately readable at least three ways (his reading, a
+darker reading, a benign reading) - as a DM tool; the DM may secretly
+pick a true reading or never pick one. His certainty attaches to his
+INTERPRETATION (the one mortal-forged link); no one ever audited it,
+and the tenets' certainty language already covers it ("What Was Shown
+Needs No Second Showing" now does double work). Augury/Divination
+answers stay ambiguous AND get bent through his reading.
+
+## D185 — OWNER: the register is TORMENT WITHOUT DOUBT (2026-08-03)
+
+Corrects the serene overcorrection. Owner's words: "I do not see
+serenity in this story. I see someone tormented by 'knowing' for sure
+the right thing to do while having every ounce of their humanity
+screaming stop - and the toll and the trauma of that." The two rulings
+COMPOSE: D183's certainty is EPISTEMIC (he never doubts he is right);
+the torment is MORAL AND EMBODIED (the doing costs him everything, every
+time, and the cost never converts into doubt). The knight is the
+Dyson-house figure one beat further: hands shaking, trigger pulled.
+Tenet STRUCTURE and the pinned centerpiece are locked; a final VOICE
+pass rewrites the satellites so the speaker is visibly paying -
+exhaustion, grief, white knuckles - while conceding nothing
+epistemically. "Let it be recorded that I knew" reads as carved through
+gritted teeth: the record is the trauma seeking a witness.
+
+## D184 — OWNER: the Exception tenet is PINNED verbatim (2026-08-03)
+
+Owner pinned this tenet as a keeper, surviving all reworks word for
+word: "Every Tyrant Believes He Is the Exception. I have carved that
+warning into my own oath, and I have drawn the sword anyway. Let it be
+recorded that I knew." It is the oath's centerpiece; under D183 it
+self-demonstrates (he knows the rule and is certain he is the
+exception - which is the rule).
+
+## D183 — OWNER: the prophet has NO doubt - certainty is the horror (2026-08-03)
+
+Refines D181: the knight is fallible IN FACT but subjectively CERTAIN -
+"believe he is right and have no doubts about it. That makes it scarier."
+Consequences for the tenets: nothing reads as suppressed inner doubt; the
+doubt-forbidding tenets aim at OTHERS' doubt; any tenet granting the
+premise of his own madness is cut; omens are always read as confirmation
+(certainty digests Augury). The ambiguity machinery (D182) stays fully
+outside his head - the reader sees what he cannot. Herbert's warning in
+its purest form: the danger is the leader who has stopped checking.
+
+## D182 — OWNER-DIRECTED: divination joins the Oath of Domination spell list (2026-08-03)
+
+Amends D179's list: each tier pairs a command spell with a VISION spell -
+Command/Bane; Suggestion/AUGURY; Slow (or Hypnotic Pattern)/CLAIRVOYANCE;
+Compulsion/DIVINATION; Dominate Person/SCRYING (alternates Hold Monster/
+Geas/Commune). All verified present in SRD 5.2.1. Rationale recorded:
+Augury and Divination give D181's never-confirm-never-debunk ambiguity
+mechanical teeth - their answers are DM-ambiguous by rule. The lost Hold
+spells' combat power is an accepted cost per the paladin's low subclass
+budget. Design doc binds the final picks.
+
+## D181 — OWNER: the oath-holder is FALLIBLE; prophecy-madness reframe (2026-08-03)
+
+Refines D180: the Oath of Domination knight must NOT know for sure they
+are doing the right thing - "imagine if Paul and Leto were fallible."
+Chosen fiction: one DRIVEN MAD BY PROPHECY WHO BECOMES THE INSTRUMENT OF
+THE PROPHECY'S REALIZATION - the self-fulfilling doom: they saw a ruin,
+dominate to prevent it, and can never know whether the vision was true,
+was madness, or whether the prevention is itself the arrival. Tenets are
+being reworked to carry that uncertainty (including tenets that FORBID
+the doubt the knight secretly has - the oath self-seals its own
+madness). Mechanics unchanged (command kit, Voice of Domination). The
+archetype set widens to the classical self-fulfilling-prophecy tragedies
+(ideas only; no protected expression).
+
+## D180 — OWNER: Oath of Domination tone = the sincere tyrant; fiendish framing CUT (2026-08-03)
+
+Owner's words: evil by someone "who thinks they are doing the right
+thing" - the "if I were in charge, I could stop all of this injustice"
+philosophy, modeled on Paul Atreides and Leto II (the Golden Path: tyranny
+chosen knowingly as salvation). Consequences: NO fiendish framing
+anywhere in the oath; the 3.5 fiendish servant is CUT as a mechanic (at
+most a prose echo on find steed: "the first creature to bend the knee");
+tenets built on order-as-mercy, the burden of the one who sees, and
+self-aware monstrousness. LICENSING: Dune's philosophy is distilled as
+ideas only - no Dune names, terms, or expression may appear in the oath's
+text (a sonnet researcher produces original tenet language; clean-room
+rules apply).
+
+## D179 — OWNER: the Blackguard conversion is OATH OF DOMINATION (2026-08-03)
+
+Name chosen: Oath of Domination. Identity: command, not fear (D178
+distance). Direction approved for the design doc: a command-family oath
+spell list from verified SRD 5.2.1 spells (Command/Bane; Suggestion/Hold
+Person; tier-9 soft; Compulsion/Dominate Beast; Dominate Person/Hold
+Monster) and a Channel Divinity exploring the owner's ask - recasting
+Command on the same target as a BONUS ACTION without a spell slot.
+Preferred shape "Voice of Domination": CD use at cast time sustains 1
+minute of bonus-action slotless recasts against that target, fresh save
+each time, ends on two successes; the deliberate bonus-action tension
+with Divine Smite is a feature. No-save repeats are forbidden. Still
+open: fiendish-servant fate and prose tone.
+
+## D178 — OWNER: Blackguard distance set includes 2014 DMG Oathbreaker AND BG3's version (2026-08-03)
+
+The converted Blackguard must keep D174-style mechanical distance from
+the 2014 DMG Oathbreaker and from Baldur's Gate 3's Oathbreaker — and
+since the DMG is NOT open content, no feature name or feature shape from
+it may be reproduced at all (a stricter bar than distance). SUPERVISOR
+FINDING at recording time: the draft outline's level-3 Channel Divinity
+was named "Dreadful Aspect" - the literal name of a 2014 DMG Oathbreaker
+Channel Divinity (also in BG3). Struck and reworked. Distance checklist
+for the design doc: no fallen/broken-oath framing (BG3's core mechanic;
+ours is a CHOSEN oath with tenets), no undead-command features, no
+aura-of-hate shape (Cha-to-melee-damage shared with fiend/undead allies),
+no one-burst fear Channel Divinity, and no DMG/BG3 feature names. The
+oath's differentiated identity: DOMINATION AND COMMAND, with fear only
+as a late accent.
+
+## D177 — OWNER: clean-room subclass creation guidelines (2026-08-03)
+
+Codex and opus collaborate on research producing SUBCLASS CREATION
+GUIDELINE FILES (docs/design/subclass-guidelines/). Content: what makes
+a subclass fun and appropriately powerful, with PER-CLASS power budgets
+(rogue/monk/ranger derive more power from their subclass; full casters
+less), plus patterns from popular homebrew and third-party work. CLEAN
+ROOM: researching agents are RETIRED with their sessions; the files
+carry only distilled design principles and original examples (SRD/CC-BY
+material may be quoted; no verbatim expression from any non-open source,
+no Product Identity) so future LLM sessions can design subclasses from
+the guidelines alone, unaware of any copyrighted source. Hygiene review
+before commit: a reviewer checks the files for copied expression and PI.
+
+## D176 — OWNER: OGL content is QUARANTINED in its own folder (2026-08-03)
+
+"Keep ogl stuff in a separate folder with the ogl requirements in the
+same folder so ogl doesn't pollute the rest of the repo." Any content
+derived-with-text or reused from OGL 1.0a sources lives under a dedicated
+folder (docs/ogl/ unless implementation finds better) containing the OGL
+1.0a license text and the full Section 15 chain for exactly what that
+folder holds. The rest of the repo stays CC-BY/MIT with no OGL
+obligations. Code that consumes OGL-folder content must not copy its text
+elsewhere. Publish prep carries the folder as-is with its notices.
+
+## D175 — OWNER: first conversion = BLACKGUARD as the evil oath; parallel track, owner-led (2026-08-03)
+
+From the conversion walkthrough: convert ONLY Blackguard for now (the
+2024 core's vacant evil-oath slot; renamed per D174 with mechanical
+distance from 2014's Oathbreaker). Sequencing: a PARALLEL track that
+"does not block publication" - outside the D148 gate, worked as capacity
+allows. Process: one at a time, each conversion gets its own design doc
+and approval round, and the owner is involved "more than usual" - the
+supervisor presents feature outlines to the owner BEFORE codex authors
+the design doc, and the owner approves content at every stage before
+seeding. Tier-1 candidates (Horizon Walker, Duelist, Hierophant,
+Loremaster, Archmage, Dwarven Defender, Thaumaturgist) remain on the
+research shelf, unqueued.
+
+## D174 — OWNER: conversion collision policy = rename + mechanical distance (2026-08-02)
+
+On the 3.5-SRD conversion research: "Differentiating by renaming is fine
+as long as the converted subclass is not too similar to the 5e/5.5
+version of the same name." Policy for any future prestige-class
+conversion: a name collision with an existing 5e/2024 subclass does NOT
+disqualify a candidate - rename the conversion AND keep its mechanics
+sufficiently distinct from the official subclass it collided with. The
+similarity test is against the official 5e/5.5 subclass, judged at
+design review. Unblocks the collision-flagged candidates (Dragon
+Disciple, Blackguard, Assassin, Shadowdancer lineages) whenever
+conversion units are ordered; no conversion unit is IN the queue yet -
+this is standing policy, not a scope addition.
+
+## D173 — OWNER: Magic Weapon stays TEXT-ONLY; the banded upcast is proven modelable (2026-08-02)
+
+Asked whether to build a spell-effect layer (the weapon_attack_bonus/
+weapon_damage_bonus effect kinds already flow into attack profiles, so
+hand-modeling via planner effects works today). Owner: "Text only is
+enough, but I want to know if we can model the weird upcast." Ruling: no
+spell-effect unit in v1; players hand-attach effects if they want the
+numbers. The upcast question is ANSWERED and recorded: the 2024 banded
+scaling (slot 2 -> +1, 3-5 -> +2, 6+ -> +3) is a closed hand-authored
+band table keyed on CHOSEN SLOT LEVEL - a new input concept (slot-level
+picker) but no formula engine; type-closeable; Pact Magic compatible.
+Not a blocker if a spell-effect layer is ever wanted.
+
 ## D172 — OWNER: AI panel ships in the public repo, documented for cloners (2026-08-02)
 
 Owner's words: "Let anyone who clones the repo run their own localist with
