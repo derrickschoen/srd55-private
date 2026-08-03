@@ -7,6 +7,20 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D187 — OWNER: the Oath of Domination spell list is FINAL (2026-08-03)
+
+Owner-picked, all verified present in SRD 5.2.1:
+  Paladin 3:  Command, Bane
+  Paladin 5:  Suggestion, Augury
+  Paladin 9:  Clairvoyance, Slow
+  Paladin 13: Compulsion, Divination
+  Paladin 17: Dominate Person, Dream
+Dream is the standout: he SENDS the vision - nightmares as statecraft,
+the D186 misread made contagious. The list walks command (Command ->
+Suggestion -> Slow -> Compulsion -> Dominate Person) and vision (Bane's
+dread -> Augury -> Clairvoyance -> Divination -> Dream) in parallel to
+their apotheoses. Supersedes D182's provisional pairings.
+
 ## D186 — OWNER: the vision is MISINTERPRETABLE - the reading is the flaw (2026-08-03)
 
 Owner adds the misread-prophecy layer (the GRRM teeth-snap idea; the
