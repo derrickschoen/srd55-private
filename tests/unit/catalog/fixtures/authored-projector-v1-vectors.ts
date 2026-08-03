@@ -14,6 +14,7 @@ import {
   canonicalRuleText,
   CONTENT_FINGERPRINT_SCHEME_V1,
   contentIdentitySequence,
+  contentIdentitySet,
   type ContentFingerprintDigest,
 } from '../../../../src/catalog/content-identity';
 import {
@@ -304,7 +305,7 @@ const overrideSubclassPayload: SubclassProjectorPayloadV1 = {
     rows: contentIdentitySequence(
       denseRows.map((row) => ({
         ...row,
-        grants: contentIdentitySequence(row.grants),
+        grants: contentIdentitySequence([]),
       })),
     ),
   },
@@ -375,3 +376,106 @@ export const authoredProjectorV1Vectors = [
     derivedKey: 'expanded:content.v1:9f768a3fcbd8ac31f1d37117772c3f638021a455fea6e024f0d7fba32e05dcf3',
   },
 ] as const;
+
+export interface AuthoredGrantSetVectorV1 {
+  readonly label: string;
+  readonly name: string;
+  readonly payloads: readonly [
+    SpeciesProjectorPayloadV1,
+    SpeciesProjectorPayloadV1,
+  ];
+  readonly canonicalJson: string;
+  readonly sha256: string;
+  readonly derivedKey: string;
+}
+
+/**
+ * HAND-WRITTEN SET ORACLES. The canonical literals were derived by applying
+ * the content-v1 object-key and set-member ordering rules on paper. Their
+ * hashes were calculated independently with Node's crypto.createHash over the
+ * reviewed literals; the production deriver was not used to obtain either.
+ */
+export const authoredGrantSetV1Vectors: readonly AuthoredGrantSetVectorV1[] = [
+  {
+    label: 'choice query school and tag order or duplicates do not change identity',
+    name: 'Grant Set Oracle',
+    payloads: [
+      {
+        reference_text: canonicalRuleText(''),
+        grants: contentIdentitySequence([{
+          kind: 'choice_from_query',
+          rule_key: 'set.query',
+          schools: contentIdentitySet([
+            'Evocation', 'Abjuration', 'Evocation',
+          ] as const),
+          tags: contentIdentitySet(['ritual', 'arcane', 'ritual'] as const),
+          count: 1,
+          minimum_spell_level: 0,
+          maximum_spell_level: 9,
+        }]),
+        creature_type: canonicalOpenPassthroughValue('Humanoid'),
+        primary_size: canonicalOpenPassthroughValue('Medium'),
+        alternate_size: null,
+        walking_speed_feet: 30,
+        traits: contentIdentitySequence([]),
+      },
+      {
+        reference_text: canonicalRuleText(''),
+        grants: contentIdentitySequence([{
+          kind: 'choice_from_query',
+          rule_key: 'set.query',
+          schools: contentIdentitySet(['Abjuration', 'Evocation'] as const),
+          tags: contentIdentitySet(['arcane', 'ritual'] as const),
+          count: 1,
+          minimum_spell_level: 0,
+          maximum_spell_level: 9,
+        }]),
+        creature_type: canonicalOpenPassthroughValue('Humanoid'),
+        primary_size: canonicalOpenPassthroughValue('Medium'),
+        alternate_size: null,
+        walking_speed_feet: 30,
+        traits: contentIdentitySequence([]),
+      },
+    ],
+    canonicalJson: '{"edition":"expanded","kind":"species","normalizedName":"grantsetoracle","payload":{"alternate_size":null,"creature_type":"Humanoid","grants":[{"count":1,"kind":"choice_from_query","maximum_spell_level":9,"minimum_spell_level":0,"rule_key":"set.query","schools":["Abjuration","Evocation"],"tags":["arcane","ritual"]}],"primary_size":"Medium","reference_text":"","traits":[],"walking_speed_feet":30},"scheme":"content-v1"}',
+    sha256: '99eb9b5e461081b98fe764cbc11d38b9d0d17c0344d306333b62089380da23d7',
+    derivedKey: 'expanded:content.v1:99eb9b5e461081b98fe764cbc11d38b9d0d17c0344d306333b62089380da23d7',
+  },
+  {
+    label: 'duplicate skill member dedupes without changing identity',
+    name: 'Grant Dedupe Oracle',
+    payloads: [
+      {
+        reference_text: canonicalRuleText(''),
+        grants: contentIdentitySequence([{
+          kind: 'skill_proficiency',
+          rule_key: 'set.skills',
+          count: 2,
+          skills: contentIdentitySet(['stealth', 'arcana', 'stealth'] as const),
+        }]),
+        creature_type: canonicalOpenPassthroughValue('Humanoid'),
+        primary_size: canonicalOpenPassthroughValue('Medium'),
+        alternate_size: null,
+        walking_speed_feet: 30,
+        traits: contentIdentitySequence([]),
+      },
+      {
+        reference_text: canonicalRuleText(''),
+        grants: contentIdentitySequence([{
+          kind: 'skill_proficiency',
+          rule_key: 'set.skills',
+          count: 2,
+          skills: contentIdentitySet(['arcana', 'stealth'] as const),
+        }]),
+        creature_type: canonicalOpenPassthroughValue('Humanoid'),
+        primary_size: canonicalOpenPassthroughValue('Medium'),
+        alternate_size: null,
+        walking_speed_feet: 30,
+        traits: contentIdentitySequence([]),
+      },
+    ],
+    canonicalJson: '{"edition":"expanded","kind":"species","normalizedName":"grantdedupeoracle","payload":{"alternate_size":null,"creature_type":"Humanoid","grants":[{"count":2,"kind":"skill_proficiency","rule_key":"set.skills","skills":["arcana","stealth"]}],"primary_size":"Medium","reference_text":"","traits":[],"walking_speed_feet":30},"scheme":"content-v1"}',
+    sha256: '9e313559ef745814f28746d2c6d6d2969dd8ff380f461ecce55d0d70536d28af',
+    derivedKey: 'expanded:content.v1:9e313559ef745814f28746d2c6d6d2969dd8ff380f461ecce55d0d70536d28af',
+  },
+];

@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { AUTHORED_PROJECTOR_INVENTORY_V1 } from '../../../src/catalog/authored-content-projector-contract-v1';
 import { deriveContentIdentityV1 } from '../../../src/catalog/content-identity';
-import { authoredProjectorV1Vectors } from './fixtures/authored-projector-v1-vectors';
+import {
+  authoredGrantSetV1Vectors,
+  authoredProjectorV1Vectors,
+} from './fixtures/authored-projector-v1-vectors';
 
 describe('HA-1 authored content-v1 projector contracts', () => {
   it.each(authoredProjectorV1Vectors)(
@@ -17,6 +20,30 @@ describe('HA-1 authored content-v1 projector contracts', () => {
       expect(identity.canonicalJson).toBe(canonicalJson);
       expect(identity.digest).toBe(sha256);
       expect(identity.derivedKey).toBe(derivedKey);
+    },
+  );
+
+  it.each(authoredGrantSetV1Vectors)(
+    'pins grant-set convergence: $label',
+    ({ name, payloads, canonicalJson, sha256, derivedKey }) => {
+      const identities = payloads.map((payload) => deriveContentIdentityV1({
+        kind: 'species',
+        edition: 'expanded',
+        name,
+        payload,
+      }));
+
+      for (const identity of identities) {
+        expect(identity.canonicalJson).toBe(canonicalJson);
+        expect(identity.digest).toBe(sha256);
+        expect(identity.derivedKey).toBe(derivedKey);
+      }
+
+      expect(identities[1]).toMatchObject({
+        canonicalJson: identities[0]!.canonicalJson,
+        digest: identities[0]!.digest,
+        derivedKey: identities[0]!.derivedKey,
+      });
     },
   );
 
