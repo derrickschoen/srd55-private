@@ -7,6 +7,20 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D179 — OWNER: the Blackguard conversion is OATH OF DOMINATION (2026-08-03)
+
+Name chosen: Oath of Domination. Identity: command, not fear (D178
+distance). Direction approved for the design doc: a command-family oath
+spell list from verified SRD 5.2.1 spells (Command/Bane; Suggestion/Hold
+Person; tier-9 soft; Compulsion/Dominate Beast; Dominate Person/Hold
+Monster) and a Channel Divinity exploring the owner's ask - recasting
+Command on the same target as a BONUS ACTION without a spell slot.
+Preferred shape "Voice of Domination": CD use at cast time sustains 1
+minute of bonus-action slotless recasts against that target, fresh save
+each time, ends on two successes; the deliberate bonus-action tension
+with Divine Smite is a feature. No-save repeats are forbidden. Still
+open: fiendish-servant fate and prose tone.
+
 ## D178 — OWNER: Blackguard distance set includes 2014 DMG Oathbreaker AND BG3's version (2026-08-03)
 
 The converted Blackguard must keep D174-style mechanical distance from
