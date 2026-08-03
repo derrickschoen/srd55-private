@@ -28,6 +28,8 @@ import featApplicationModel from '../../drizzle/0024_feat_application_model.sql?
 import characterLevelFeatChoices from '../../drizzle/0025_character_level_feat_choices.sql?raw';
 import classResources from '../../drizzle/0026_class_resources.sql?raw';
 import characterFlavor from '../../drizzle/0027_character_flavor.sql?raw';
+import authorableEffectStorage from '../../drizzle/0028_authorable_effect_storage.sql?raw';
+import partyDocumentStates from '../../drizzle/0029_party_document_states.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -321,6 +323,24 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
       '0c482287be0043139053c06ae9110d5d8ac8ccf113310b839fe1709adbb633e3',
     resultSchemaChecksum:
       '491aacb86b33ac48e3d3ca3a7da3481d2e8c4915b4c47d500c8afe9e113902fd',
+  }),
+  Object.freeze({
+    id: '0028_authorable_effect_storage',
+    sql: authorableEffectStorage,
+    checksum:
+      'f0979386f21726c89b244a6f0f2109cb6b324bc919bb531315ccff035a389cf4',
+    resultSchemaChecksum:
+      'aa1e9392364a86074aadeeb1f6796157c36da5b33e9b401297b5ec7765c6f150',
+  }),
+  // P3: recipient-local publication and repository observations. This table
+  // travels in whole database images but in no character backup/share/snapshot.
+  Object.freeze({
+    id: '0029_party_document_states',
+    sql: partyDocumentStates,
+    checksum:
+      '9969618cf3080d59e6505f15f2f7521ddbea78afb8f82be2a95aa4686cc6e402',
+    resultSchemaChecksum:
+      'fa60eb43058604c6d865c6f1380e33820c4abaec19d1c732254ed1b1a7c08c9b',
   }),
 ]);
 
