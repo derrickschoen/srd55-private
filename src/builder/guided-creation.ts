@@ -71,7 +71,10 @@ import {
 import { CharacterCrud } from '../queries/character-crud';
 import { skillFromLabel } from '../rules/skills';
 import { characterLevel } from '../rules/character-level';
-import { bundledClassContentKeys } from '../rules/class-progression-lookup';
+import {
+  bundledSourceContentKeys,
+  isBundledSourceContentKey,
+} from '../catalog/bundled-source-membership';
 import {
   backgroundFromTemplate,
   effectsFromTemplate,
@@ -82,10 +85,6 @@ import {
   type SpeciesTemplateTraitEffectRow,
   type SpeciesTemplateTraitRow,
 } from '../rules/origins';
-import {
-  bundledBackgroundTemplates,
-  bundledSpeciesTemplates,
-} from '../rules/origins-srd';
 import {
   ORIGIN_FEAT_CONFIG_CONFIG,
   ORIGIN_FEAT_KEY_CONFIG,
@@ -522,7 +521,7 @@ export class GuidedCreationRefusal extends Error {
  * server-side gate cannot drift apart.
  */
 function bundledClassKeys(): readonly string[] {
-  return bundledClassContentKeys().classes;
+  return bundledSourceContentKeys('class');
 }
 
 interface BundledClassRow {
@@ -620,7 +619,7 @@ function gateBundledClass(
       `No class exists for content key "${contentKey}".`,
     );
   }
-  if (!bundledClassKeys().includes(contentKey)) {
+  if (!isBundledSourceContentKey('class', contentKey)) {
     throw new GuidedCreationRefusal(
       'class_not_bundled',
       `"${definition.name}" is not a bundled class; the guided builder does not guide homebrew classes.`,
@@ -715,12 +714,12 @@ export type { GuidedApplyOriginResult };
  * list and the apply gate cannot drift apart.
  */
 function bundledSpeciesKeys(): readonly string[] {
-  return bundledSpeciesTemplates().map((template) => template.content_key);
+  return bundledSourceContentKeys('species');
 }
 
 /** The background twin (A5), derived from the same SRD parse the seeder uses. */
 function bundledBackgroundKeys(): readonly string[] {
-  return bundledBackgroundTemplates().map((template) => template.content_key);
+  return bundledSourceContentKeys('background');
 }
 
 const speciesTemplateRow: RowCodec<SpeciesTemplateRow> = (row) => ({
@@ -843,7 +842,7 @@ function gateBundledSpecies(
   db: DatabaseContext,
   contentKey: string,
 ): SpeciesTemplateRow {
-  if (!bundledSpeciesKeys().includes(contentKey)) {
+  if (!isBundledSourceContentKey('species', contentKey)) {
     throw new GuidedCreationRefusal(
       'unknown_origin',
       `No bundled species exists for content key "${contentKey}".`,
@@ -895,7 +894,7 @@ function gateBundledBackground(
   db: DatabaseContext,
   contentKey: string,
 ): BackgroundTemplateRow {
-  if (!bundledBackgroundKeys().includes(contentKey)) {
+  if (!isBundledSourceContentKey('background', contentKey)) {
     throw new GuidedCreationRefusal(
       'unknown_origin',
       `No bundled background exists for content key "${contentKey}".`,
@@ -1342,6 +1341,7 @@ function bundledOriginFeatKeysByName(): ReadonlyMap<string, string> {
   return new Map(
     bundledFeatDefinitions()
       .filter((feat) => feat.source_category === 'Origin')
+      .filter((feat) => isBundledSourceContentKey('feat', feat.content_key))
       .map((feat) => [feat.name, feat.content_key]),
   );
 }

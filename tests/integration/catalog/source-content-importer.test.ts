@@ -64,6 +64,50 @@ function fingerprint(contentKey: ContentKey) {
 }
 
 describe('class, feat, species and background catalog import', () => {
+  it('normalizes omitted skill-proficiency defaults before hashing and silently matches re-import', () => {
+    const aggregate = {
+      ...featProjectorV1Vector.aggregate,
+      name: 'Defaulted Skill Grant',
+      grants: [{
+        kind: 'skill_proficiency',
+        rule_key: 'defaulted.skill',
+        count: 1,
+        skills: ['arcana'],
+      }],
+    };
+    const featDocument = document('feat', aggregate);
+
+    const created = new CatalogImporter(db).import({ documents: [featDocument] });
+    const matched = new CatalogImporter(db).import({ documents: [featDocument] });
+
+    expect(created.feats_created).toBe(1);
+    expect(matched.feats_matched).toBe(1);
+    expect(db.scalar<number>('SELECT count(*) FROM feat_definitions')).toBe(1);
+    expect(db.scalar<string>('SELECT grant_rules FROM feat_definitions')).toContain(
+      '"always_prepared":false',
+    );
+  });
+
+  it('refuses a whitespace-padded config path in a spell-list field', () => {
+    const aggregate = {
+      ...featProjectorV1Vector.aggregate,
+      name: 'Padded Config List',
+      grants: [{
+        kind: 'choice_from_list',
+        rule_key: 'padded.config.list',
+        bucket: 'prepared',
+        count: 1,
+        list: ' $config.chosen_list ',
+      }],
+    };
+
+    expect(() => new CatalogImporter(db).import({
+      documents: [document('feat', aggregate)],
+    })).toThrow(/aggregate\.grants\[0\]\.list.*surrounding whitespace/u);
+    expect(db.scalar<number>('SELECT count(*) FROM feat_definitions')).toBe(0);
+  });
+
+
   it('stores and identifies imported feat/species aggregates without exposing them to planner or guided selection before CI-4a/HA-10', () => {
     const species: SpeciesContentAggregate = {
       kind: 'species',
