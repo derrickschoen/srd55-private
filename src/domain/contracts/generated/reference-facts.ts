@@ -52,6 +52,12 @@ export const FOREIGN_KEY_FACTS = [
     targetColumns: ['id'],
   },
   {
+    table: 'background_template_effects',
+    columns: ['background_template_id'],
+    target: 'background_templates',
+    targetColumns: ['id'],
+  },
+  {
     table: 'background_templates',
     columns: ['content_key'],
     target: 'catalog_content_identities',
@@ -409,6 +415,12 @@ export const FOREIGN_KEY_FACTS = [
     table: 'named_features',
     columns: ['class_definition_id'],
     target: 'class_definitions',
+    targetColumns: ['id'],
+  },
+  {
+    table: 'party_document_states',
+    columns: ['character_id'],
+    target: 'characters',
     targetColumns: ['id'],
   },
   {

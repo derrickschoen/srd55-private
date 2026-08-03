@@ -41,6 +41,13 @@ function valueChange(
   ]);
 }
 
+function finalHitPointMaximum(sheet: CharacterSheet): number | null {
+  if (sheet.hit_points.value === null) return null;
+  if (sheet.species_hit_points === null) return sheet.hit_points.value;
+  if (sheet.species_hit_points.value === null) return null;
+  return sheet.hit_points.value + sheet.species_hit_points.value;
+}
+
 function classChanges(
   before: CharacterSheet,
   after: CharacterSheet,
@@ -240,7 +247,11 @@ export function renderReview(options: {
   const changes = [
     valueChange('Total level', before.total_level, after.total_level),
     ...classChanges(before, after),
-    valueChange('Hit point maximum', before.hit_points.value, after.hit_points.value),
+    valueChange(
+      'Hit point maximum',
+      finalHitPointMaximum(before),
+      finalHitPointMaximum(after),
+    ),
     valueChange(
       'Proficiency bonus',
       before.proficiency_bonus.value,
@@ -346,9 +357,14 @@ export function renderComplete(options: {
     ...changedClasses.map(
       (entry) => `${entry.class_name} is now level ${String(entry.level)}.`,
     ),
-    ...(options.preview.before.hit_points.value === options.sheet.hit_points.value
+    ...(finalHitPointMaximum(options.preview.before) ===
+    finalHitPointMaximum(options.sheet)
       ? []
-      : [`Hit point maximum is now ${String(options.sheet.hit_points.value)}.`]),
+      : [
+          finalHitPointMaximum(options.sheet) === null
+            ? 'Hit point maximum is undetermined.'
+            : `Hit point maximum is now ${String(finalHitPointMaximum(options.sheet))}.`,
+        ]),
     ...(options.preview.before.proficiency_bonus.value ===
     options.sheet.proficiency_bonus.value
       ? []

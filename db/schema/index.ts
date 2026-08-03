@@ -20,6 +20,7 @@ export * from './catalog-spells';
 export * from './class-resources';
 export * from './character';
 export * from './origins';
+export * from './party';
 export * from './relations';
 export * from './columns';
 export * from './equipment';

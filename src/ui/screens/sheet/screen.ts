@@ -67,6 +67,16 @@ async function render(context: ScreenContext): Promise<() => void> {
     cleanups.push(() => link.removeEventListener('click', onClick));
   }
 
+  const printButton = context.root.querySelector<HTMLButtonElement>(
+    'button[data-sheet-print]',
+  );
+  if (printButton === null) {
+    throw new Error('The character sheet print button was not rendered.');
+  }
+  const printSheet = (): void => window.print();
+  printButton.addEventListener('click', printSheet);
+  cleanups.push(() => printButton.removeEventListener('click', printSheet));
+
   /**
    * `beforeprint` covers the browser's real print dialog; the media-query
    * listener covers print preview transitions and Playwright's emulated media.

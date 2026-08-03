@@ -86,6 +86,33 @@
   opacity: 0.8;
 }
 
+.sheet-spell-group + .sheet-spell-group {
+  margin-top: 1rem;
+}
+
+.sheet-spell-group-heading {
+  margin: 0 0 0.5rem;
+  font-size: 1.05rem;
+}
+
+.sheet-spell-statistics {
+  margin-bottom: 0.65rem;
+}
+
+.sheet-spell-statistics p {
+  margin: 0.15rem 0;
+}
+
+.sheet-spell-statistics-label {
+  font-weight: 600;
+}
+
+.sheet-spellbook {
+  padding-top: 0.65rem;
+  margin-top: 0.65rem;
+  border-top: 1px solid var(--border, #c9c9c9);
+}
+
 .sheet-note,
 .sheet-total {
   font-size: 0.9rem;
@@ -233,6 +260,10 @@
     color: #000;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
+  }
+
+  .sheet-spellbook {
+    border-top-color: #000;
   }
 
   .sheet-resource-box {

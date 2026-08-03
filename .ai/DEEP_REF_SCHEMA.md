@@ -77,7 +77,7 @@ artifact, keep the split.
 |---|---|
 | `generated/column-facts.ts` | GENERATED. Per-column facts: does the column exist, is it `notNull`, could drizzle-zod type it |
 | `generated/reference-facts.ts` | GENERATED. Catalog tables a backup resolves references against |
-| `rows.ts` | The Zod contracts. `COLUMN_REFINEMENTS` (`:398`), `NARROWED_REFINEMENTS` (`:478`), `rowContractError` (`:1448`) |
+| `rows.ts` | The Zod contracts. `COLUMN_REFINEMENTS` (`:400`), `NARROWED_REFINEMENTS` (`:481`), `rowContractError` (`:1501`) |
 | `row-rules.ts` | Cross-column rules a per-column contract cannot express |
 | `json-columns.ts` | WHICH text columns hold serialized JSON, and what SHAPE each reader needs |
 | `tables.ts` | The table inventory and scope classification — §3 below |
@@ -112,11 +112,11 @@ used to be hand-maintained in at least four places that did not know about each
 other, and adding a table told you nothing about whether it belonged in
 snapshots, backups, shares, both or neither.
 
-`TABLE_SCOPES` (`:167`) classifies EVERY table with:
+`TABLE_SCOPES` (`:169`) classifies EVERY table with:
 
 | Field | Meaning |
 |---|---|
-| `role` | `character_root`, `character_owned`, `catalog_spell`, `catalog_class`, `catalog_source`, `catalog_weapon`, `catalog_origin`, `catalog_armor` |
+| `role` | `character_root`, `character_owned`, `catalog_spell`, `catalog_class`, `catalog_source`, `catalog_weapon`, `catalog_origin`, `catalog_armor`, `party_observation` |
 | `snapshot` | In `CHARACTER_STATE_TABLES` — undo/redo |
 | `backupDirect` | In `directCharacterTables` — the `character_id`-keyed pass |
 | `backup` | In `backupTableNames` — the portable-character document |
@@ -137,10 +137,10 @@ Two mechanisms make this stick, and they are worth knowing by name:
    without that column is `Type 'true' is not assignable to type 'false'`. That
    fact previously lived only in a reviewer's head.
 
-Derived from the classification: `SnapshotTable` (`:1109`), `BackupTable` (`:1111`),
-`ShareTable` (`:1112`), and the ordered constants `CHARACTER_STATE_TABLES`
-(`:1310`), `DELETE_ORDER` (`:1395`), `BACKUP_TABLES` (`:1462`), `SHARE_TABLES`
-(`:1555`).
+Derived from the classification: `SnapshotTable` (`:1131`), `BackupTable` (`:1133`),
+`ShareTable` (`:1134`), and the ordered constants `CHARACTER_STATE_TABLES`
+(`:1334`), `DELETE_ORDER` (`:1419`), `BACKUP_TABLES` (`:1486`), `SHARE_TABLES`
+(`:1579`).
 
 **Classification is not the same as working.** That was Q8's bug, and D24 records
 the discipline that replaced it: each arm gets its own test — a column-for-column

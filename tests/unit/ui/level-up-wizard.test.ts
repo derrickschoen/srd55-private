@@ -256,6 +256,7 @@ function sheet(options: {
   readonly totalLevel: number;
   readonly classLevel: number;
   readonly hp: number;
+  readonly speciesHp?: number;
   readonly revisionName?: string;
 }): CharacterSheet {
   const number = (id: string, label: string, value: number) => ({
@@ -271,7 +272,13 @@ function sheet(options: {
     proficiency_bonus: number('proficiency_bonus', 'Proficiency bonus', 2),
     ability_scores: [],
     hit_points: number('hit_points', 'Hit point maximum', options.hp),
-    species_hit_points: null,
+    species_hit_points: options.speciesHp === undefined
+      ? null
+      : number(
+          'species_hit_points',
+          'Species hit points',
+          options.speciesHp,
+        ),
     armor_class: {
       ...number('armor_class', 'Armor Class', 10),
       winner: {
@@ -1254,8 +1261,18 @@ describe('W-E review, atomic confirm, and complete', () => {
   });
 
   it('W-ONE-UUID and W-LOAD-ANNOUNCE retain one UUID across an ambiguous retry and focus before disabling', async () => {
-    const before = sheet({ totalLevel: 1, classLevel: 1, hp: 9 });
-    const after = sheet({ totalLevel: 2, classLevel: 2, hp: 16 });
+    const before = sheet({
+      totalLevel: 1,
+      classLevel: 1,
+      hp: 8,
+      speciesHp: 1,
+    });
+    const after = sheet({
+      totalLevel: 2,
+      classLevel: 2,
+      hp: 14,
+      speciesHp: 2,
+    });
     const previewCall = vi.fn().mockResolvedValue(preview(before, after));
     const ambiguous = Object.assign(new Error('Worker response was lost.'), {
       code: 'transport_error',
@@ -1285,6 +1302,7 @@ describe('W-E review, atomic confirm, and complete', () => {
       class_definition_id: 11,
       target_level: 2,
     });
+    expect(elementText(wizard.element)).toContain('Hit point maximum 9 → 16');
 
     const firstConfirm = interactiveElement(wizard.element).querySelector(
       `[${LEVEL_UP_ATTR.confirm}]`,

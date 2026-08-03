@@ -36,6 +36,8 @@ export interface CharacterSheetSpellsFixture {
     readonly orphaned: number;
     readonly spellbookBucket: number;
     readonly ritualOnly: number;
+    readonly chromaticOrb: number;
+    readonly comprehendLanguages: number;
   };
 }
 
@@ -371,6 +373,19 @@ export function createCharacterSheetSpellsFixture(
     level: 1,
     ritual: true,
   });
+  const chromaticOrb = createReferenceSpell(db, 'Chromatic Orb', {
+    level: 1,
+    description: 'Unprepared spellbook acquisition one.',
+  });
+  const comprehendLanguages = createReferenceSpell(
+    db,
+    'Comprehend Languages',
+    {
+      level: 1,
+      ritual: true,
+      description: 'Unprepared spellbook acquisition two.',
+    },
+  );
 
   createSlot(
     db,
@@ -558,6 +573,23 @@ export function createCharacterSheetSpellsFixture(
      ) VALUES (?, ?)`,
     [characterId, ritualOnly],
   );
+  // Deliberately noncanonical insertion order. Echo Ward is already selected
+  // in the Wizard group, so it proves the unprepared bucket does not duplicate
+  // a prepared/known row.
+  for (const [ordinal, spellVersionId] of [
+    comprehendLanguages,
+    echoWard,
+    chromaticOrb,
+  ].entries()) {
+    db.exec(
+      `INSERT INTO wizard_spellbook_entries (
+         character_id, source_instance_id, rule_key, ordinal,
+         acquired_at_class_level, spell_version_id,
+         spell_level_min, spell_level_max, state, selection_eligibility
+       ) VALUES (?, ?, 'wizard-spellbook', ?, 2, ?, 1, 1, 'active', 'valid')`,
+      [characterId, subclassSourceId, ordinal + 7, spellVersionId],
+    );
+  }
 
   return {
     characterId,
@@ -582,6 +614,8 @@ export function createCharacterSheetSpellsFixture(
       orphaned,
       spellbookBucket,
       ritualOnly,
+      chromaticOrb,
+      comprehendLanguages,
     },
   };
 }
