@@ -203,15 +203,16 @@ function replaceTemplateFixture(
       trait.effects.forEach((effect, effectIndex) => {
         db.exec(
           `INSERT INTO species_template_trait_effects
-             (species_template_trait_id, sort_order, effect_kind,
-              damage_type, speed_bonus_feet)
-           VALUES (?, ?, ?, ?, ?)`,
+           (species_template_trait_id, sort_order, effect_kind,
+              damage_type, speed_bonus_feet, label)
+           VALUES (?, ?, ?, ?, ?, ?)`,
           [
             traitId,
             effectIndex + 1,
             effect.kind,
             effect.damageType ?? null,
             effect.speedBonusFeet ?? null,
+            trait.name,
           ],
         );
       });

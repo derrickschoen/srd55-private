@@ -632,6 +632,7 @@ const subclassFeatureEffect =
     insert(db, 'subclass_feature_effects', {
       subclass_feature_id: featureId,
       sort_order: 1,
+      label: uid('Grant'),
       ...values,
     });
   };
@@ -883,6 +884,19 @@ const speciesTemplateTraitEffect =
       species_template_trait_id: traitId,
       sort_order: 1,
       effect_kind: 'damage_resistance',
+      label: uid('Grant'),
+      ...values,
+    });
+  };
+
+const backgroundTemplateEffect =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'background_template_effects', {
+      background_template_id: newBackgroundTemplate(db),
+      sort_order: 1,
+      effect_kind: 'damage_resistance',
+      label: uid('Grant'),
       ...values,
     });
   };
@@ -994,6 +1008,19 @@ const catalogDataMigration =
     });
   };
 
+const partyDocumentState =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'party_document_states', {
+      forge: 'github',
+      repository: uid('party-repository'),
+      path: `characters/${uid('publication')}--pub.json`,
+      document_kind: 'character',
+      observation_state: 'Never published',
+      ...values,
+    });
+  };
+
 interface ConstraintCase {
   readonly constraint: string;
   /** Writes that MUST be refused, each with the corruption it would have made. */
@@ -1011,6 +1038,7 @@ interface ConstraintCase {
 function featureEffectConstraintCases(
   table: string,
   effect: (values: Values) => Write,
+  damagePolicy: 'known-only' | 'passthrough' = 'known-only',
 ): readonly ConstraintCase[] {
   return [
     {
@@ -1021,11 +1049,13 @@ function featureEffectConstraintCases(
       ],
       accepts: [['Extra Attack', effect({ effect_kind: 'extra_attack', attack_count: 2, weapon_scope: 'any_weapon' })]],
     },
-    {
-      constraint: `${table}_damage_type_check`,
-      rejects: [['a damage type outside the closed mechanical set', effect({ effect_kind: 'damage_resistance', damage_type: 'Steam' })]],
-      accepts: [['a known damage type', effect({ effect_kind: 'damage_resistance', damage_type: 'Poison' })]],
-    },
+    ...(damagePolicy === 'known-only'
+      ? [{
+          constraint: `${table}_damage_type_check`,
+          rejects: [['a damage type outside the closed mechanical set', effect({ effect_kind: 'damage_resistance', damage_type: 'Steam' })]],
+          accepts: [['a known damage type', effect({ effect_kind: 'damage_resistance', damage_type: 'Poison' })]],
+        } satisfies ConstraintCase]
+      : []),
     {
       constraint: `${table}_damage_type_kind_check`,
       rejects: [['a damage type on an HP effect', effect({ effect_kind: 'hp_modifier', hit_points_flat: 1, damage_type: 'Fire' })]],
@@ -1174,7 +1204,94 @@ function featureEffectConstraintCases(
   ];
 }
 
+/** Character-effect payload contract used by authored species/backgrounds. */
+function authoredCharacterEffectConstraintCases(
+  table: string,
+  effect: (values: Values) => Write,
+): readonly ConstraintCase[] {
+  const featureOnlyConstraints = new Set([
+    `${table}_attack_count_kind_check`,
+    `${table}_extra_attack_payload_check`,
+    `${table}_attack_count_check`,
+    `${table}_weapon_scope_check`,
+  ]);
+
+  return [
+    {
+      constraint: `${table}_kind_check`,
+      rejects: [
+        ['an unknown mechanical kind', effect({ effect_kind: 'ability_score_increase' })],
+        ['the feature-only Extra Attack kind', effect({ effect_kind: 'extra_attack' })],
+      ],
+      accepts: [
+        ['a resistance', effect({ effect_kind: 'damage_resistance', damage_type: 'Void' })],
+        ['an ability override', effect({ effect_kind: 'ability_override', ability: 'strength', maximum: 19 })],
+        ['a weapon bonus', effect({ effect_kind: 'weapon_attack_bonus', amount: 1, weapon_scope: 'any_weapon' })],
+      ],
+    },
+    ...featureEffectConstraintCases(table, effect, 'passthrough').filter(
+      ({ constraint }) =>
+        constraint !== `${table}_kind_check` &&
+        !featureOnlyConstraints.has(constraint),
+    ),
+    {
+      constraint: `${table}_ability_override_payload_check`,
+      rejects: [['an ability override without its score', effect({ effect_kind: 'ability_override', ability: 'strength' })]],
+      accepts: [['a complete ability override', effect({ effect_kind: 'ability_override', ability: 'strength', maximum: 19 })]],
+    },
+    {
+      constraint: `${table}_weapon_scope_check`,
+      rejects: [['an unknown weapon scope', effect({ effect_kind: 'weapon_attack_bonus', amount: 1, weapon_scope: 'pact_weapon' })]],
+      accepts: [['one bonded weapon', effect({ effect_kind: 'weapon_attack_bonus', amount: 1, weapon_scope: 'one_bonded_weapon' })]],
+    },
+  ];
+}
+
 const CONSTRAINT_CASES: readonly ConstraintCase[] = [
+  {
+    constraint: 'party_document_states_forge_check',
+    rejects: [
+      ['an unsupported forge', partyDocumentState({ forge: 'bitbucket' })],
+    ],
+    accepts: [
+      ['the Codeberg forge', partyDocumentState({ forge: 'codeberg' })],
+    ],
+  },
+  {
+    constraint: 'party_document_states_kind_check',
+    rejects: [
+      ['an invented manifest kind', partyDocumentState({ document_kind: 'manifest' })],
+    ],
+    accepts: [
+      ['a library observation', partyDocumentState({ document_kind: 'library' })],
+    ],
+  },
+  {
+    constraint: 'party_document_states_observation_state_check',
+    rejects: [
+      ['an unnamed observation', partyDocumentState({ observation_state: 'Unknown' })],
+    ],
+    accepts: [
+      [
+        'the semicolon-bearing publish observation',
+        partyDocumentState({
+          observation_state:
+            'Published; refresh required before another publish',
+        }),
+      ],
+    ],
+  },
+  {
+    constraint: 'party_document_states_local_revision_check',
+    rejects: [
+      ['a negative local revision', partyDocumentState({ last_published_local_revision: -1 })],
+      ['a text local revision', partyDocumentState({ last_published_local_revision: 'one' })],
+    ],
+    accepts: [
+      ['the initial local revision', partyDocumentState({ last_published_local_revision: 0 })],
+      ['the defended unknown revision', partyDocumentState({ last_published_local_revision: null })],
+    ],
+  },
   {
     constraint: 'catalog_data_migrations_id_check',
     rejects: [
@@ -2256,30 +2373,6 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     ],
   },
   {
-    constraint: 'species_templates_creature_type_check',
-    rejects: [['a homebrew type in the SRD-only catalog', speciesTemplate({ creature_type: 'Clockwork' })]],
-    accepts: [
-      ['Aberration, the first SRD member', speciesTemplate({ creature_type: 'Aberration' })],
-      ['Undead, the last SRD member', speciesTemplate({ creature_type: 'Undead' })],
-    ],
-  },
-  {
-    constraint: 'species_templates_size_check',
-    rejects: [['a homebrew size in the SRD-only catalog', speciesTemplate({ size: 'Minuscule' })]],
-    accepts: [
-      ['Tiny, the first SRD member', speciesTemplate({ size: 'Tiny' })],
-      ['Gargantuan, the last SRD member', speciesTemplate({ size: 'Gargantuan' })],
-    ],
-  },
-  {
-    constraint: 'species_templates_alternate_size_check',
-    rejects: [['a homebrew alternate size', speciesTemplate({ alternate_size: 'Minuscule' })]],
-    accepts: [
-      ['NULL when there is no second size', speciesTemplate({ alternate_size: null })],
-      ['a known second size', speciesTemplate({ alternate_size: 'Small' })],
-    ],
-  },
-  {
     constraint: 'species_templates_base_speed_check',
     rejects: [
       // Eight of the nine print 30 and the Goliath prints 35. A zero here is a
@@ -2303,6 +2396,18 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
       ['the 2024 default', backgroundTemplate({})],
       ['2014', backgroundTemplate({ rules_edition: '2014' })],
     ],
+  },
+  ...authoredCharacterEffectConstraintCases(
+    'background_template_effects',
+    backgroundTemplateEffect,
+  ),
+  {
+    constraint: 'background_template_effects_sort_order_check',
+    rejects: [
+      ['sort order zero', backgroundTemplateEffect({ sort_order: 0 })],
+      ['a text sort order', backgroundTemplateEffect({ sort_order: 'first' })],
+    ],
+    accepts: [['the first effect', backgroundTemplateEffect({ sort_order: 1 })]],
   },
   {
     constraint: 'character_species_base_speed_check',
@@ -2348,17 +2453,13 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
       ['damage_resistance', speciesTemplateTraitEffect({ effect_kind: 'damage_resistance', damage_type: 'Poison' })],
       ['hp_modifier', speciesTemplateTraitEffect({ effect_kind: 'hp_modifier', hit_points_flat: 1 })],
       ['speed', speciesTemplateTraitEffect({ effect_kind: 'speed', speed_bonus_feet: 5 })],
+      ['ability_increase', speciesTemplateTraitEffect({ effect_kind: 'ability_increase', ability: 'strength', amount: 1, maximum: 20 })],
+      ['ability_override', speciesTemplateTraitEffect({ effect_kind: 'ability_override', ability: 'strength', maximum: 19 })],
+      ['armor_class_bonus', speciesTemplateTraitEffect({ effect_kind: 'armor_class_bonus', amount: 1 })],
       ['armor_class_formula', speciesTemplateTraitEffect({ effect_kind: 'armor_class_formula', base: 13, ability_1: 'dexterity', allows_shield: 1 })],
-    ],
-  },
-  {
-    constraint: 'species_template_trait_effects_damage_type_check',
-    rejects: [
-      ['a homebrew damage type in the SRD-only catalog', speciesTemplateTraitEffect({ damage_type: 'Steam' })],
-    ],
-    accepts: [
-      ['a known damage type', speciesTemplateTraitEffect({ damage_type: 'Poison' })],
-      ['NULL when the SRD offers a resistance choice', speciesTemplateTraitEffect({ damage_type: null })],
+      ['attack_ability_override', speciesTemplateTraitEffect({ effect_kind: 'attack_ability_override', ability: 'charisma', weapon_scope: 'one_bonded_weapon' })],
+      ['weapon_attack_bonus', speciesTemplateTraitEffect({ effect_kind: 'weapon_attack_bonus', amount: 1, weapon_scope: 'any_weapon' })],
+      ['weapon_damage_bonus', speciesTemplateTraitEffect({ effect_kind: 'weapon_damage_bonus', amount: 1, weapon_scope: 'any_weapon' })],
     ],
   },
   {
@@ -2478,15 +2579,23 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     rejects: [],
     accepts: [['the required NULL scope', speciesTemplateTraitEffect({ effect_kind: 'damage_resistance', weapon_scope: null })]],
   },
-  {
-    constraint: 'species_template_trait_effects_no_ability_increase_check',
-    rejects: [
-      ['an ability contribution in the catalog effect table', speciesTemplateTraitEffect({ effect_kind: 'ability_increase' })],
-    ],
-    accepts: [
-      ['an ordinary typed resistance', speciesTemplateTraitEffect({ effect_kind: 'damage_resistance', damage_type: 'Fire' })],
-    ],
-  },
+  ...authoredCharacterEffectConstraintCases(
+    'species_template_trait_effects',
+    speciesTemplateTraitEffect,
+  ).filter(({ constraint }) => new Set([
+    'species_template_trait_effects_ability_check',
+    'species_template_trait_effects_ability_kind_check',
+    'species_template_trait_effects_amount_check',
+    'species_template_trait_effects_amount_kind_check',
+    'species_template_trait_effects_maximum_check',
+    'species_template_trait_effects_maximum_kind_check',
+    'species_template_trait_effects_ability_increase_payload_check',
+    'species_template_trait_effects_ability_override_payload_check',
+    'species_template_trait_effects_armor_class_bonus_payload_check',
+    'species_template_trait_effects_attack_ability_override_payload_check',
+    'species_template_trait_effects_weapon_attack_bonus_payload_check',
+    'species_template_trait_effects_weapon_damage_bonus_payload_check',
+  ]).has(constraint)),
   {
     constraint: 'species_template_trait_effects_sort_order_check',
     rejects: [
@@ -3075,6 +3184,7 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
   ...featureEffectConstraintCases(
     'subclass_feature_effects',
     subclassFeatureEffect,
+    'passthrough',
   ),
   {
     constraint: 'subclass_feature_effects_sort_order_check',
@@ -3618,6 +3728,10 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
         ],
         ['character_effects', characterEffect({ effect_kind: null })],
         [
+          'background_template_effects',
+          backgroundTemplateEffect({ effect_kind: null }),
+        ],
+        [
           'subclass_feature_effects',
           subclassFeatureEffect({ effect_kind: null }),
         ],
@@ -3628,6 +3742,24 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
           'SQLITE_CONSTRAINT_NOTNULL',
         );
       }
+    });
+
+    it('accepts authored passthrough vocabulary members without folding them', () => {
+      expect(() => speciesTemplate({
+        creature_type: 'Clockwork  Humanoid',
+        size: 'Minuscule',
+        alternate_size: 'Sma\u0301ll',
+      })(db)).not.toThrow();
+      expect(() => speciesTemplateTraitEffect({
+        damage_type: 'Void  Fire',
+      })(db)).not.toThrow();
+      expect(() => backgroundTemplateEffect({
+        damage_type: 'void',
+      })(db)).not.toThrow();
+      expect(() => subclassFeatureEffect({
+        effect_kind: 'damage_resistance',
+        damage_type: 'Steam',
+      })(db)).not.toThrow();
     });
 
     /**

@@ -152,12 +152,13 @@ export function insertHomebrewSubclass(
       db.exec(
         `INSERT INTO subclass_feature_effects
            (subclass_feature_id, sort_order, effect_kind, attack_count,
-            weapon_scope, created_at, updated_at)
-         VALUES (?, 1, 'extra_attack', ?, ?, ?, ?)`,
+            weapon_scope, label, created_at, updated_at)
+         VALUES (?, 1, 'extra_attack', ?, ?, ?, ?, ?)`,
         [
           featureId,
           feature.effect_attack_count,
           feature.effect_weapon_scope,
+          feature.name,
           timestamp,
           timestamp,
         ],

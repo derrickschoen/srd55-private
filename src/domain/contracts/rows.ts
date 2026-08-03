@@ -62,6 +62,7 @@ import {
   spellSchool,
   slotStates,
   effectKinds,
+  featureTemplateEffectKinds,
   speciesTemplateEffectKinds,
   srdWeaponGroups,
   weaponAttackKinds,
@@ -329,6 +330,7 @@ const speciesTemplateEffectKindEnum = z.enum(speciesTemplateEffectKinds);
  * legally belong to.
  */
 const characterEffectKindEnum = z.enum(characterEffectKinds);
+const featureTemplateEffectKindEnum = z.enum(featureTemplateEffectKinds);
 /**
  * The weapon-scope vocabulary `character_effects.weapon_scope` reuses from
  * Extra Attack's own grant model (AC-1, D72) — see the column's comment in
@@ -430,6 +432,7 @@ export const COLUMN_REFINEMENTS = {
   versatileWeaponDamageKindEnum,
   weaponRangeKindEnum,
   effectKindEnum,
+  featureTemplateEffectKindEnum,
   speciesTemplateEffectKindEnum,
   characterEffectKindEnum,
   extraAttackWeaponScopeEnum,
@@ -592,7 +595,10 @@ type NativeContractTable =
   | 'species_template_traits'
   | 'species_template_trait_effects'
   | 'background_templates'
+  | 'background_template_effects'
   | 'background_equipment_items'
+  | 'subclass_features'
+  | 'subclass_feature_effects'
   | 'class_equipment_items'
   // Every carried user-authored spell row crosses the same untrusted backup
   // boundary as the character-owned tables.
@@ -1140,11 +1146,9 @@ const REFINEMENTS = {
   'species_templates.content_key': nonEmptyText,
   'species_templates.rules_edition': rulesEditionEnum,
   'species_templates.name': nonEmptyText,
-  // Closed on the catalog side: only the bundled SRD seeder writes these rows.
-  // The corresponding character columns use the open vocabulary schemas.
-  'species_templates.creature_type': creatureTypeEnum,
-  'species_templates.size': creatureSizeEnum,
-  'species_templates.alternate_size': creatureSizeEnum,
+  'species_templates.creature_type': creatureTypeVocabulary,
+  'species_templates.size': creatureSizeVocabulary,
+  'species_templates.alternate_size': creatureSizeVocabulary,
   'species_templates.base_speed_feet': positiveInt,
   'species_templates.created_at': sqlTimestamp,
   'species_templates.updated_at': sqlTimestamp,
@@ -1161,23 +1165,25 @@ const REFINEMENTS = {
   'species_template_traits.updated_at': sqlTimestamp,
 
   // --- species_template_trait_effects --------------------------------------
-  // Contracted for the reason `species_template_traits` is: the rows are
-  // PARSED out of the SRD extract, and a parser is exactly the writer that can
-  // produce a plausible-looking wrong row. `damage_type` is closed here because
-  // this table is written only by that parser; the character copy stays open.
+  // Authorable catalog rows preserve unknown mechanical strings verbatim.
   'species_template_trait_effects.id': positiveInt,
   'species_template_trait_effects.species_template_trait_id': positiveInt,
   'species_template_trait_effects.sort_order': positiveInt,
-  'species_template_trait_effects.effect_kind': speciesTemplateEffectKindEnum,
-  'species_template_trait_effects.damage_type': damageTypeEnum,
+  'species_template_trait_effects.effect_kind': characterEffectKindEnum,
+  'species_template_trait_effects.damage_type': damageTypeVocabulary,
   // `sqlInteger` by omission would accept 1.5; these are explicitly the signed
   // integers the schema allows, and NOT `positiveInt` — Dwarven Toughness is
   // seeded `hit_points_flat = 0`, and a user's own trait may carry a penalty.
   'species_template_trait_effects.base': positiveInt,
+  'species_template_trait_effects.ability': abilityEnum,
+  'species_template_trait_effects.amount': nonZeroInt,
+  'species_template_trait_effects.maximum': abilityScore,
   'species_template_trait_effects.ability_1': abilityEnum,
   'species_template_trait_effects.ability_2': abilityEnum,
   'species_template_trait_effects.allows_shield': sqlBool,
   'species_template_trait_effects.weapon_scope': extraAttackWeaponScopeEnum,
+  'species_template_trait_effects.label': nonEmptyText,
+  'species_template_trait_effects.notes': sqlText,
   'species_template_trait_effects.created_at': sqlTimestamp,
   'species_template_trait_effects.updated_at': sqlTimestamp,
 
@@ -1200,6 +1206,53 @@ const REFINEMENTS = {
   'background_templates.equipment_option_b': nonEmptyText,
   'background_templates.created_at': sqlTimestamp,
   'background_templates.updated_at': sqlTimestamp,
+
+  // --- background_template_effects ----------------------------------------
+  'background_template_effects.id': positiveInt,
+  'background_template_effects.background_template_id': positiveInt,
+  'background_template_effects.sort_order': positiveInt,
+  'background_template_effects.effect_kind': characterEffectKindEnum,
+  'background_template_effects.damage_type': damageTypeVocabulary,
+  'background_template_effects.ability': abilityEnum,
+  'background_template_effects.amount': nonZeroInt,
+  'background_template_effects.maximum': abilityScore,
+  'background_template_effects.base': positiveInt,
+  'background_template_effects.ability_1': abilityEnum,
+  'background_template_effects.ability_2': abilityEnum,
+  'background_template_effects.allows_shield': sqlBool,
+  'background_template_effects.weapon_scope': extraAttackWeaponScopeEnum,
+  'background_template_effects.label': nonEmptyText,
+  'background_template_effects.notes': sqlText,
+  'background_template_effects.created_at': sqlTimestamp,
+  'background_template_effects.updated_at': sqlTimestamp,
+
+  // --- authored subclass feature graph ------------------------------------
+  'subclass_features.id': positiveInt,
+  'subclass_features.subclass_definition_id': positiveInt,
+  'subclass_features.class_level': classLevel,
+  'subclass_features.sort_order': positiveInt,
+  'subclass_features.name': nonEmptyText,
+  'subclass_features.description': nonEmptyText,
+  'subclass_features.created_at': sqlTimestamp,
+  'subclass_features.updated_at': sqlTimestamp,
+  'subclass_feature_effects.id': positiveInt,
+  'subclass_feature_effects.subclass_feature_id': positiveInt,
+  'subclass_feature_effects.sort_order': positiveInt,
+  'subclass_feature_effects.effect_kind': featureTemplateEffectKindEnum,
+  'subclass_feature_effects.damage_type': damageTypeVocabulary,
+  'subclass_feature_effects.ability': abilityEnum,
+  'subclass_feature_effects.amount': nonZeroInt,
+  'subclass_feature_effects.maximum': abilityScore,
+  'subclass_feature_effects.base': positiveInt,
+  'subclass_feature_effects.ability_1': abilityEnum,
+  'subclass_feature_effects.ability_2': abilityEnum,
+  'subclass_feature_effects.allows_shield': sqlBool,
+  'subclass_feature_effects.weapon_scope': extraAttackWeaponScopeEnum,
+  'subclass_feature_effects.attack_count': positiveInt,
+  'subclass_feature_effects.label': nonEmptyText,
+  'subclass_feature_effects.notes': sqlText,
+  'subclass_feature_effects.created_at': sqlTimestamp,
+  'subclass_feature_effects.updated_at': sqlTimestamp,
 
   // --- background_equipment_items ------------------------------------------
   // Contracted for the reason `background_templates` is: every row is PARSED

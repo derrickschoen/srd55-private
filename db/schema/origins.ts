@@ -10,6 +10,7 @@ import { sql } from 'drizzle-orm';
 import type {
   ArmorTemplateId,
   BackgroundEquipmentItemId,
+  BackgroundTemplateEffectId,
   BackgroundTemplateId,
   CharacterBackgroundId,
   CharacterEffectId,
@@ -36,17 +37,11 @@ import type {
   ExtraAttackWeaponScope,
   RulesEdition,
   SpeciesTemplateEffectKind,
-  KnownCreatureSize,
-  KnownCreatureType,
-  KnownDamageType,
 } from '../../src/domain/enums';
 import {
   abilities,
   backgroundEquipmentOptions,
   characterEffectKinds,
-  creatureSizes,
-  creatureTypes,
-  damageTypes,
   equipmentItemKinds,
   extraAttackWeaponScopes,
   rulesEditions,
@@ -64,17 +59,21 @@ import {
   varchar,
 } from './columns';
 import { catalog_content_identities } from './catalog-content';
+import {
+  characterEffectColumns,
+  featureEffectChecks,
+} from './catalog-classes';
 import { character_source_instances, characters } from './character';
 import { character_items } from './items';
 import { armor_templates } from './sheet';
 import { character_weapons, weapon_templates } from './weapons';
 
 /**
- * ORIGINS: species and backgrounds, and the character's own EFFECTS. Eight
+ * ORIGINS: species and backgrounds, and the character's own EFFECTS. Nine
  * tables, inventoried alongside every other table in
  * `tests/unit/schema.test.ts`.
  *
- * TWO OF THE EIGHT ARE THE EFFECT MODEL, AND THEY ARE TWO ON PURPOSE.
+ * The catalog declarations and character rows remain separate on purpose.
  * `species_template_trait_effects` declares what a CATALOG TEMPLATE GRANTS;
  * `character_effects` records what a CHARACTER HAS. Those are different
  * questions with different lifetimes, different portability rules and — the
@@ -156,7 +155,7 @@ export const species_templates = sqliteTable(
      * The character copy below uses the open `CreatureType`, so editing the
      * copied species to a homebrew type still preserves the user's value.
      */
-    creature_type: varchar<KnownCreatureType>()('creature_type').notNull(),
+    creature_type: varchar<CreatureType>()('creature_type').notNull(),
     /**
      * The size word only — `Medium`, `Small` — never the printed height range.
      * The heights are flavour and are deliberately not modelled.
@@ -165,7 +164,7 @@ export const species_templates = sqliteTable(
      * species. This table is seeder-only; the editable character copy below
      * uses the open `CreatureSize` and has no CHECK.
      */
-    size: varchar<KnownCreatureSize>()('size').notNull(),
+    size: varchar<CreatureSize>()('size').notNull(),
     /**
      * The SECOND size, when the species lets the player choose between two.
      *
@@ -179,7 +178,7 @@ export const species_templates = sqliteTable(
      * `size_is_choice = 1, alternate_size = NULL`. That is the same call
      * `character_weapons.versatile_damage_dice` already made.
      */
-    alternate_size: varchar<KnownCreatureSize>()('alternate_size'),
+    alternate_size: varchar<CreatureSize>()('alternate_size'),
     /**
      * NOT NULL here where the character's copy is nullable: every one of the
      * nine prints a `Speed: NN feet` line, and eight of them print 30. The
@@ -198,15 +197,6 @@ export const species_templates = sqliteTable(
     check(
       'species_templates_rules_edition_check',
       oneOf('rules_edition', rulesEditions),
-    ),
-    check(
-      'species_templates_creature_type_check',
-      oneOf('creature_type', creatureTypes),
-    ),
-    check('species_templates_size_check', oneOf('size', creatureSizes)),
-    check(
-      'species_templates_alternate_size_check',
-      nullOrOneOf('alternate_size', creatureSizes),
     ),
     /**
      * A species with no Speed cannot be copied onto a character usefully, and a
@@ -337,7 +327,7 @@ export const species_template_trait_effects = sqliteTable(
      */
     sort_order: integer('sort_order').notNull(),
     effect_kind:
-      varchar<SpeciesTemplateEffectKind>()('effect_kind').notNull(),
+      varchar<CharacterEffectKind>()('effect_kind').notNull(),
     /**
      * The resisted damage type, for `damage_resistance` only.
      *
@@ -348,10 +338,10 @@ export const species_template_trait_effects = sqliteTable(
      * unconditionally grants A resistance; which one is not a property of the
      * species, and there is no default that would not be an invention.
      *
-     * Closed HERE because this row is parsed solely from the bundled SRD
-     * extract. The copied `character_effects.damage_type` remains open.
+     * Open HERE because the table also stores authored species. Known values
+     * remain UI suggestions; authored spelling is stored byte-for-byte.
      */
-    damage_type: varchar<KnownDamageType>()('damage_type'),
+    damage_type: varchar<DamageType>()('damage_type'),
     /**
      * `hp_modifier`: the flat Hit Point maximum bonus, and the per-level one.
      * Two columns rather than one because an effect may carry either shape, and
@@ -385,12 +375,17 @@ export const species_template_trait_effects = sqliteTable(
      * exists for a character's own hand-written trait.
      */
     speed_bonus_feet: integer('speed_bonus_feet'),
+    ability: varchar<Ability>()('ability'),
+    amount: integer('amount'),
+    maximum: integer('maximum'),
     base: integer('base'),
     ability_1: varchar<Ability>()('ability_1'),
     ability_2: varchar<Ability>()('ability_2'),
     allows_shield: tinyint1('allows_shield'),
     weapon_scope:
       varchar<ExtraAttackWeaponScope>()('weapon_scope'),
+    label: varchar()('label').notNull(),
+    notes: sqlText()('notes'),
     created_at: datetime()('created_at'),
     updated_at: datetime()('updated_at'),
   },
@@ -402,114 +397,14 @@ export const species_template_trait_effects = sqliteTable(
      * which returns no effect for a value it does not know — the character
      * quietly loses a trait's mechanics with no error anywhere.
      */
-    check(
-      'species_template_trait_effects_kind_check',
-      oneOf('effect_kind', speciesTemplateEffectKinds),
+    ...featureEffectChecks(
+      'species_template_trait_effects',
+      characterEffectKinds,
+      'known-plus-passthrough',
+      false,
     ),
-    check(
-      'species_template_trait_effects_damage_type_check',
-      nullOrOneOf('damage_type', damageTypes),
-    ),
-    /**
-     * Every payload column belongs to exactly one kind, and none may be set
-     * without it. Separate constraints rather than one compound: SQLite names
-     * the constraint it rejected, and "which column was wrong" is the whole
-     * diagnostic value.
-     *
-     * `IS` AND `IS NOT`, NOT `=` AND `<>`, AND THIS WAS MEASURED RATHER THAN
-     * PREFERRED. Written as `effect_kind = 'damage_resistance'`, the whole
-     * expression evaluates to NULL whenever `effect_kind` is NULL — and SQLite
-     * PASSES a CHECK that evaluates to NULL, so the constraint would admit
-     * exactly the orphaned payload it exists to refuse. `effect_kind` is NOT
-     * NULL on this table so the trap cannot spring here TODAY, but the
-     * character-side table below carries the identical constraints and the
-     * copy between them is column-wise; writing the two differently is how the
-     * pair drifts. Same trap `spell_versions_level_check` documents.
-     */
-    check(
-      'species_template_trait_effects_damage_type_kind_check',
-      sql`damage_type IS NULL OR effect_kind IS 'damage_resistance'`,
-    ),
-    check(
-      'species_template_trait_effects_hit_points_kind_check',
-      sql`(hit_points_flat IS NULL AND hit_points_per_level IS NULL) OR effect_kind IS 'hp_modifier'`,
-    ),
-    check(
-      'species_template_trait_effects_speed_kind_check',
-      sql`speed_bonus_feet IS NULL OR effect_kind IS 'speed'`,
-    ),
-    check(
-      'species_template_trait_effects_base_kind_check',
-      sql`base IS NULL OR effect_kind IS 'armor_class_formula'`,
-    ),
-    check(
-      'species_template_trait_effects_ability_1_kind_check',
-      sql`ability_1 IS NULL OR effect_kind IS 'armor_class_formula'`,
-    ),
-    check(
-      'species_template_trait_effects_ability_2_kind_check',
-      sql`ability_2 IS NULL OR effect_kind IS 'armor_class_formula'`,
-    ),
-    check(
-      'species_template_trait_effects_allows_shield_kind_check',
-      sql`allows_shield IS NULL OR effect_kind IS 'armor_class_formula'`,
-    ),
-    check(
-      'species_template_trait_effects_weapon_scope_kind_check',
-      sql`weapon_scope IS NULL OR effect_kind IN ('attack_ability_override', 'weapon_attack_bonus', 'weapon_damage_bonus')`,
-    ),
-    /**
-     * The other direction: a kind that promises a number must carry one.
-     * Without this an `hp_modifier` effect with both HP columns null derives a
-     * zero, which is indistinguishable from an effect that was never mechanical
-     * and costs the character an entitlement.
-     *
-     * `damage_resistance` is deliberately absent from this list — a resistance
-     * with a null type is the Dragonborn and the Tiefling, and it is a REAL
-     * state rather than an incomplete one.
-     */
-    check(
-      'species_template_trait_effects_hp_modifier_payload_check',
-      sql`effect_kind IS NOT 'hp_modifier' OR hit_points_flat IS NOT NULL OR hit_points_per_level IS NOT NULL`,
-    ),
-    check(
-      'species_template_trait_effects_speed_payload_check',
-      sql`effect_kind IS NOT 'speed' OR speed_bonus_feet IS NOT NULL`,
-    ),
-    check(
-      'species_template_trait_effects_armor_class_formula_payload_check',
-      sql`effect_kind IS NOT 'armor_class_formula' OR (base IS NOT NULL AND ability_1 IS NOT NULL AND allows_shield IS NOT NULL)`,
-    ),
-    check(
-      'species_template_trait_effects_base_check',
-      nullOrIntegerAtLeast('base', 1),
-    ),
-    check(
-      'species_template_trait_effects_ability_1_check',
-      nullOrOneOf('ability_1', abilities),
-    ),
-    check(
-      'species_template_trait_effects_ability_2_check',
-      nullOrOneOf('ability_2', abilities),
-    ),
-    check(
-      'species_template_trait_effects_weapon_scope_check',
-      nullOrOneOf('weapon_scope', extraAttackWeaponScopes),
-    ),
-    /**
-     * `ability_increase` IS REFUSED HERE, NOT GIVEN PAYLOAD COLUMNS, and the
-     * decision is deliberate (B2). The shared `effectKinds` vocabulary widened
-     * the kind CHECK above automatically, but no 2024 SRD species grants a
-     * standing ability increase — that moved to backgrounds — and the
-     * character-side `ability_increase_source_check` requires a granting
-     * source. Admitting the
-     * kind here would seed catalog rows the copy could never deliver; refusing
-     * it makes that dead end unrepresentable instead of a runtime surprise.
-     */
-    check(
-      'species_template_trait_effects_no_ability_increase_check',
-      sql`effect_kind IS NOT 'ability_increase'`,
-    ),
+    /* Kind ownership, payload completeness, and numeric ranges are shared by
+     * the common helper above; its damage policy is intentionally per-table. */
     /** Declared order starts at 1 and is dense; 0 or a negative is a mis-parse. */
     check(
       'species_template_trait_effects_sort_order_check',
@@ -692,12 +587,9 @@ export const character_effects = sqliteTable(
      */
     sort_order: integer('sort_order').notNull(),
     /**
-     * `CharacterEffectKind`, NOT `EffectKind` — this table's own, WIDER
-     * vocabulary (AC-1, D72). See `characterEffectKinds` in
-     * `src/domain/enums.ts` for why the two stay separate arrays rather than
-     * one being unioned into the other: `species_template_trait_effects`
-     * below keeps `EffectKind` and must go on refusing these five kinds until
-     * AC-2 widens it on purpose.
+     * `CharacterEffectKind`, shared with authorable species/background
+     * declarations. Feature templates use their own superset because only
+     * those may declare `extra_attack`.
      */
     effect_kind: varchar<CharacterEffectKind>()('effect_kind').notNull(),
     /**
@@ -1159,6 +1051,46 @@ export const background_templates = sqliteTable(
     index('background_templates_name_rules_edition_index').on(
       table.name,
       table.rules_edition,
+    ),
+  ],
+);
+
+/** Ordered numeric mechanics granted directly by an authored background. */
+export const background_template_effects = sqliteTable(
+  'background_template_effects',
+  {
+    id: integer('id')
+      .primaryKey({ autoIncrement: true })
+      .notNull()
+      .$type<BackgroundTemplateEffectId>(),
+    background_template_id: integer('background_template_id')
+      .notNull()
+      .$type<BackgroundTemplateId>()
+      .references(() => background_templates.id, { onDelete: 'cascade' }),
+    sort_order: integer('sort_order').notNull(),
+    ...characterEffectColumns<CharacterEffectKind, DamageType>(),
+    label: varchar()('label').notNull(),
+    notes: sqlText()('notes'),
+    created_at: datetime()('created_at'),
+    updated_at: datetime()('updated_at'),
+  },
+  (table) => [
+    ...featureEffectChecks(
+      'background_template_effects',
+      characterEffectKinds,
+      'known-plus-passthrough',
+      false,
+    ),
+    check(
+      'background_template_effects_sort_order_check',
+      integerAtLeast('sort_order', 1),
+    ),
+    uniqueIndex('background_template_effects_template_sort_unique').on(
+      table.background_template_id,
+      table.sort_order,
+    ),
+    index('background_template_effects_background_template_id_index').on(
+      table.background_template_id,
     ),
   ],
 );

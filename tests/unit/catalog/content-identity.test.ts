@@ -19,6 +19,10 @@ import {
   isSpellVersionKey,
   normalizeCatalogKeyComponent,
 } from '../../../src/catalog/catalog-key';
+import type {
+  CharacterId,
+  PartyPublicationId,
+} from '../../../src/domain/ids';
 
 describe('CI-NAME-REMOVE', () => {
   it('removes punctuation and separators instead of hyphenating them', () => {
@@ -57,6 +61,14 @@ describe('CI-NAME-REMOVE', () => {
     expectTypeOf(
       normalizeCatalogKeyComponent('Iron Will'),
     ).not.toMatchTypeOf<NormalizedContentName>();
+  });
+});
+
+describe('PARTY-PUBLICATION-ID-BRANDED', () => {
+  it('keeps publication ids nominally distinct from strings and character ids', () => {
+    expectTypeOf<string>().not.toMatchTypeOf<PartyPublicationId>();
+    expectTypeOf<CharacterId>().not.toMatchTypeOf<PartyPublicationId>();
+    expectTypeOf<PartyPublicationId>().not.toMatchTypeOf<CharacterId>();
   });
 });
 

@@ -699,11 +699,9 @@ export type FreeCastPoolScope = (typeof freeCastPoolScopes)[number];
  * CHECK D63's "a contribution knows where it came from" would be a convention
  * rather than an invariant.
  *
- * IT IS ALSO UNREPRESENTABLE ON `species_template_trait_effects`, by its own
- * CHECK there. No 2024 SRD species grants a standing ability increase (that
- * moved to backgrounds), and the catalog-to-character copy writes a NULL
- * source — which the character-side CHECK above refuses — so admitting the
- * kind at the catalog would seed rows the copy could never deliver.
+ * Authored species/background catalogs carry this arm too. Their apply paths
+ * create a real source instance before copying it, so the character-side
+ * provenance requirement remains enforceable.
  */
 export const effectKinds = [
   'damage_resistance',
@@ -717,17 +715,9 @@ export type EffectKind = (typeof effectKinds)[number];
  * `character_effects`' OWN, WIDER vocabulary (AC-1,
  * `docs/design/2026-07-29-armor-class-items-and-effects.md` §1, D72).
  *
- * A SUPERSET OF `effectKinds`, NOT A REPLACEMENT OF IT, AND THE TWO MUST STAY
- * SEPARATE ARRAYS. `species_template_trait_effects` shares `effectKinds`'
- * CHECK today and must go on refusing these five kinds until AC-2 does the
- * work of widening it on purpose — neither table can produce them (no
- * `character_effects` row copies FROM the template with one of these kinds,
- * and no producer exists yet regardless), so a template row admitting one
- * would be schema slack with nothing behind it. Union-ing the constants would
- * widen BOTH tables' CHECKs from one edit, which is exactly the silent
- * coupling `character_effects_kind_check`'s own comment warns against days
- * before this: two tables sharing one CHECK because a query happened to filter
- * both the same way is how an invariant stops being one.
+ * A SUPERSET OF `effectKinds`, NOT A REPLACEMENT OF IT. The arrays remain
+ * separate because bundled-only feature tables add `extra_attack`, while the
+ * authored species/background tables intentionally use this exact vocabulary.
  *
  * The five new members close the Armor Class gap `sheet.ts:754-759` names in
  * its own comment — Unarmored Defense and every other alternative AC formula
@@ -744,9 +734,8 @@ export type EffectKind = (typeof effectKinds)[number];
  *  - `weapon_attack_bonus` / `weapon_damage_bonus` — weapon-scoped flat
  *    addends (a +1 weapon; a flat damage bonus).
  *
- * `character_effects.effect_kind` is retyped `CharacterEffectKind` in
- * `db/schema/origins.ts`; `species_template_trait_effects.effect_kind` KEEPS
- * `EffectKind`, unchanged, on purpose.
+ * `character_effects`, `species_template_trait_effects`, and
+ * `background_template_effects` use this vocabulary.
  */
 export const characterEffectKinds = [
   ...effectKinds,

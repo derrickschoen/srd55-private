@@ -93,6 +93,15 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
     text: ['id', 'scheme', 'checksum'],
     numeric: ['applied_at'],
   },
+  party_document_states: {
+    integer: ['character_id', 'last_published_local_revision'],
+    text: [
+      'forge', 'repository', 'observed_ref', 'path', 'document_kind',
+      'publication_id', 'last_observed_remote_revision',
+      'last_imported_revision', 'observation_state',
+    ],
+    numeric: ['last_successful_refresh_at'],
+  },
   background_definitions: {
     integer: ['id', 'repeatable'],
     text: [
@@ -418,10 +427,12 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
   species_template_trait_effects: {
     integer: [
       'id', 'species_template_trait_id', 'sort_order', 'hit_points_flat',
-      'hit_points_per_level', 'speed_bonus_feet', 'base', 'allows_shield',
+      'hit_points_per_level', 'speed_bonus_feet', 'amount', 'maximum', 'base',
+      'allows_shield',
     ],
     text: [
-      'effect_kind', 'damage_type', 'ability_1', 'ability_2', 'weapon_scope',
+      'effect_kind', 'damage_type', 'ability', 'ability_1', 'ability_2',
+      'weapon_scope', 'label', 'notes',
     ],
     numeric: ['created_at', 'updated_at'],
   },
@@ -487,6 +498,18 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
       'ability_score_2', 'ability_score_3', 'feat_name',
       'skill_proficiency_1', 'skill_proficiency_2', 'tool_proficiency',
       'equipment_option_a', 'equipment_option_b',
+    ],
+    numeric: ['created_at', 'updated_at'],
+  },
+  background_template_effects: {
+    integer: [
+      'id', 'background_template_id', 'sort_order', 'hit_points_flat',
+      'hit_points_per_level', 'speed_bonus_feet', 'amount', 'maximum', 'base',
+      'allows_shield',
+    ],
+    text: [
+      'effect_kind', 'damage_type', 'ability', 'ability_1', 'ability_2',
+      'weapon_scope', 'label', 'notes',
     ],
     numeric: ['created_at', 'updated_at'],
   },
@@ -612,7 +635,7 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
     ],
     text: [
       'effect_kind', 'damage_type', 'ability', 'ability_1', 'ability_2',
-      'weapon_scope',
+      'weapon_scope', 'label', 'notes',
     ],
     numeric: ['created_at', 'updated_at'],
   },
@@ -699,6 +722,9 @@ const expectedNotNull: Record<string, string[]> = {
   catalog_data_migrations: [
     'id', 'scheme', 'checksum', 'applied_at',
   ],
+  party_document_states: [
+    'forge', 'repository', 'path', 'document_kind', 'observation_state',
+  ],
   // `damage_dice`, `damage_type` and `mastery_property` are NULLABLE here and
   // NOT NULL on the template: a half-entered user weapon is a first-class
   // state, and an invented weapon need not have a mastery property at all.
@@ -734,7 +760,7 @@ const expectedNotNull: Record<string, string[]> = {
   // the trait row it replaced: a trait with no mechanical effect is now the
   // ABSENCE of a row rather than a row of nulls.
   species_template_trait_effects: [
-    'id', 'species_template_trait_id', 'sort_order', 'effect_kind',
+    'id', 'species_template_trait_id', 'sort_order', 'effect_kind', 'label',
   ],
   character_species: ['id', 'character_id', 'name'],
   character_species_traits: ['id', 'character_id', 'sort_order', 'name'],
@@ -757,6 +783,9 @@ const expectedNotNull: Record<string, string[]> = {
     'ability_score_2', 'ability_score_3', 'feat_name', 'skill_proficiency_1',
     'skill_proficiency_2', 'tool_proficiency', 'equipment_option_a',
     'equipment_option_b',
+  ],
+  background_template_effects: [
+    'id', 'background_template_id', 'sort_order', 'effect_kind', 'label',
   ],
   background_equipment_items: [
     'id', 'background_template_id', 'option', 'sort_order', 'quantity',
@@ -846,7 +875,7 @@ const expectedNotNull: Record<string, string[]> = {
     'id', 'named_feature_id', 'sort_order', 'effect_kind',
   ],
   subclass_feature_effects: [
-    'id', 'subclass_feature_id', 'sort_order', 'effect_kind',
+    'id', 'subclass_feature_id', 'sort_order', 'effect_kind', 'label',
   ],
 
   // --- THE TABLES INHERITED FROM THE ORIGINAL MIGRATIONS -------------------
@@ -972,14 +1001,18 @@ const expectedNamedIndexes: Record<string, string> = {
     'class_feature_effects:class_definition_id,name,class_level:unique',
   subclass_features_subclass_sort_unique:
     'subclass_features:subclass_definition_id,sort_order:unique',
-  subclass_features_subclass_name_unique:
-    'subclass_features:subclass_definition_id,name:unique',
+  subclass_features_subclass_level_name_unique:
+    'subclass_features:subclass_definition_id,class_level,name:unique',
   subclass_feature_effects_feature_sort_unique:
     'subclass_feature_effects:subclass_feature_id,sort_order:unique',
   background_templates_content_key_unique:
     'background_templates:content_key:unique',
   background_templates_name_rules_edition_index:
     'background_templates:name,rules_edition',
+  background_template_effects_template_sort_unique:
+    'background_template_effects:background_template_id,sort_order:unique',
+  background_template_effects_background_template_id_index:
+    'background_template_effects:background_template_id',
   background_equipment_items_template_option_sort_order_unique:
     'background_equipment_items:background_template_id,option,sort_order:unique',
   background_equipment_items_background_template_id_index:
@@ -1190,6 +1223,7 @@ const expectedUniqueGroups: Record<string, string[]> = {
   ],
   species_template_trait_effects: ['species_template_trait_id,sort_order'],
   background_templates: ['content_key'],
+  background_template_effects: ['background_template_id,sort_order'],
   background_equipment_items: ['background_template_id,option,sort_order'],
   class_equipment_items: ['class_definition_id,option,sort_order'],
   character_species: ['character_id'],
@@ -1225,7 +1259,8 @@ const expectedUniqueGroups: Record<string, string[]> = {
   named_feature_effects: ['named_feature_id,sort_order'],
   class_feature_effects: ['class_definition_id,name,class_level'],
   subclass_features: [
-    'subclass_definition_id,name', 'subclass_definition_id,sort_order',
+    'subclass_definition_id,class_level,name',
+    'subclass_definition_id,sort_order',
   ],
   subclass_feature_effects: ['subclass_feature_id,sort_order'],
   feat_definitions: ['content_key'],
@@ -1396,6 +1431,7 @@ const expectedForeignKeys: Record<string, string[]> = {
   catalog_content_match_decisions: [
     'content_kind,target_content_key->catalog_content_identities.content_kind,content_key|RESTRICT',
   ],
+  party_document_states: ['character_id->characters.id|SET NULL'],
   class_definitions: [
     'content_key->catalog_content_identities.content_key|NO ACTION',
   ],
@@ -1538,6 +1574,9 @@ const expectedForeignKeys: Record<string, string[]> = {
   ],
   species_template_trait_effects: [
     'species_template_trait_id->species_template_traits.id|CASCADE',
+  ],
+  background_template_effects: [
+    'background_template_id->background_templates.id|CASCADE',
   ],
   character_species: ['character_id->characters.id|CASCADE'],
   character_species_traits: ['character_id->characters.id|CASCADE'],
