@@ -20,6 +20,7 @@ import type {
   Ability,
   FeatureTemplateEffectKind,
   ExtraAttackWeaponScope,
+  DamageType,
   KnownDamageType,
   ProgressionType,
   RulesEdition,
@@ -43,11 +44,14 @@ import {
 } from './columns';
 import { catalog_content_identities } from './catalog-content';
 
-function featureEffectColumns() {
+export function featureEffectColumns<
+  K extends string = FeatureTemplateEffectKind,
+  D extends DamageType = DamageType,
+>() {
   return {
     effect_kind:
-      varchar<FeatureTemplateEffectKind>()('effect_kind').notNull(),
-    damage_type: varchar<KnownDamageType>()('damage_type'),
+      varchar<K>()('effect_kind').notNull(),
+    damage_type: varchar<D>()('damage_type'),
     hit_points_flat: integer('hit_points_flat'),
     hit_points_per_level: integer('hit_points_per_level'),
     speed_bonus_feet: integer('speed_bonus_feet'),
@@ -64,10 +68,27 @@ function featureEffectColumns() {
   };
 }
 
-function featureEffectChecks(prefix: string) {
-  return [
-    check(`${prefix}_kind_check`, oneOf('effect_kind', featureTemplateEffectKinds)),
-    check(`${prefix}_damage_type_check`, nullOrOneOf('damage_type', damageTypes)),
+/** The shared payload minus the feature-only `extra_attack` field. */
+export function characterEffectColumns<
+  K extends string,
+  D extends DamageType = DamageType,
+>() {
+  const { attack_count: _featureOnly, ...columns } =
+    featureEffectColumns<K, D>();
+  return columns;
+}
+
+export type EffectPassthroughPolicy = 'known-only' | 'known-plus-passthrough';
+
+export function featureEffectChecks(
+  prefix: string,
+  kinds: readonly string[],
+  damageTypePolicy: EffectPassthroughPolicy,
+  includeExtraAttack = true,
+) {
+  const includesAbilityOverride = kinds.includes('ability_override');
+  const common = [
+    check(`${prefix}_kind_check`, oneOf('effect_kind', kinds)),
     check(
       `${prefix}_damage_type_kind_check`,
       sql`damage_type IS NULL OR effect_kind IS 'damage_resistance'`,
@@ -82,7 +103,9 @@ function featureEffectChecks(prefix: string) {
     ),
     check(
       `${prefix}_ability_kind_check`,
-      sql`ability IS NULL OR effect_kind IN ('ability_increase', 'attack_ability_override')`,
+      includesAbilityOverride
+        ? sql`ability IS NULL OR effect_kind IN ('ability_increase', 'ability_override', 'attack_ability_override')`
+        : sql`ability IS NULL OR effect_kind IN ('ability_increase', 'attack_ability_override')`,
     ),
     check(
       `${prefix}_amount_kind_check`,
@@ -90,7 +113,9 @@ function featureEffectChecks(prefix: string) {
     ),
     check(
       `${prefix}_maximum_kind_check`,
-      sql`maximum IS NULL OR effect_kind IS 'ability_increase'`,
+      includesAbilityOverride
+        ? sql`maximum IS NULL OR effect_kind IN ('ability_increase', 'ability_override')`
+        : sql`maximum IS NULL OR effect_kind IS 'ability_increase'`,
     ),
     check(
       `${prefix}_base_kind_check`,
@@ -112,10 +137,14 @@ function featureEffectChecks(prefix: string) {
       `${prefix}_weapon_scope_kind_check`,
       sql`weapon_scope IS NULL OR effect_kind IN ('extra_attack', 'attack_ability_override', 'weapon_attack_bonus', 'weapon_damage_bonus')`,
     ),
-    check(
-      `${prefix}_attack_count_kind_check`,
-      sql`attack_count IS NULL OR effect_kind IS 'extra_attack'`,
-    ),
+    ...(includeExtraAttack
+      ? [
+          check(
+            `${prefix}_attack_count_kind_check`,
+            sql`attack_count IS NULL OR effect_kind IS 'extra_attack'`,
+          ),
+        ]
+      : []),
     check(
       `${prefix}_hp_modifier_payload_check`,
       sql`effect_kind IS NOT 'hp_modifier' OR hit_points_flat IS NOT NULL OR hit_points_per_level IS NOT NULL`,
@@ -128,6 +157,14 @@ function featureEffectChecks(prefix: string) {
       `${prefix}_ability_increase_payload_check`,
       sql`effect_kind IS NOT 'ability_increase' OR (ability IS NOT NULL AND amount IS NOT NULL AND maximum IS NOT NULL)`,
     ),
+    ...(includesAbilityOverride
+      ? [
+          check(
+            `${prefix}_ability_override_payload_check`,
+            sql`effect_kind IS NOT 'ability_override' OR (ability IS NOT NULL AND maximum IS NOT NULL)`,
+          ),
+        ]
+      : []),
     check(
       `${prefix}_armor_class_bonus_payload_check`,
       sql`effect_kind IS NOT 'armor_class_bonus' OR amount IS NOT NULL`,
@@ -148,10 +185,14 @@ function featureEffectChecks(prefix: string) {
       `${prefix}_weapon_damage_bonus_payload_check`,
       sql`effect_kind IS NOT 'weapon_damage_bonus' OR (amount IS NOT NULL AND weapon_scope IS NOT NULL)`,
     ),
-    check(
-      `${prefix}_extra_attack_payload_check`,
-      sql`effect_kind IS NOT 'extra_attack' OR (attack_count IS NOT NULL AND weapon_scope IS NOT NULL)`,
-    ),
+    ...(includeExtraAttack
+      ? [
+          check(
+            `${prefix}_extra_attack_payload_check`,
+            sql`effect_kind IS NOT 'extra_attack' OR (attack_count IS NOT NULL AND weapon_scope IS NOT NULL)`,
+          ),
+        ]
+      : []),
     check(`${prefix}_ability_check`, nullOrOneOf('ability', abilities)),
     check(
       `${prefix}_amount_check`,
@@ -168,11 +209,26 @@ function featureEffectChecks(prefix: string) {
       `${prefix}_weapon_scope_check`,
       nullOrOneOf('weapon_scope', extraAttackWeaponScopes),
     ),
-    check(
-      `${prefix}_attack_count_check`,
-      nullOrIntegerAtLeast('attack_count', 2),
-    ),
+    ...(includeExtraAttack
+      ? [
+          check(
+            `${prefix}_attack_count_check`,
+            nullOrIntegerAtLeast('attack_count', 2),
+          ),
+        ]
+      : []),
   ];
+
+  return damageTypePolicy === 'known-only'
+    ? [
+        ...common.slice(0, 1),
+        check(
+          `${prefix}_damage_type_check`,
+          nullOrOneOf('damage_type', damageTypes),
+        ),
+        ...common.slice(1),
+      ]
+    : common;
 }
 
 /**
@@ -472,8 +528,9 @@ export const subclass_features = sqliteTable(
       table.subclass_definition_id,
       table.sort_order,
     ),
-    uniqueIndex('subclass_features_subclass_name_unique').on(
+    uniqueIndex('subclass_features_subclass_level_name_unique').on(
       table.subclass_definition_id,
+      table.class_level,
       table.name,
     ),
   ],
@@ -492,12 +549,18 @@ export const subclass_feature_effects = sqliteTable(
       .$type<SubclassFeatureId>()
       .references(() => subclass_features.id, { onDelete: 'cascade' }),
     sort_order: integer('sort_order').notNull(),
-    ...featureEffectColumns(),
+    ...featureEffectColumns<FeatureTemplateEffectKind, DamageType>(),
+    label: varchar()('label').notNull(),
+    notes: sqlText()('notes'),
     created_at: datetime()('created_at'),
     updated_at: datetime()('updated_at'),
   },
   (table) => [
-    ...featureEffectChecks('subclass_feature_effects'),
+    ...featureEffectChecks(
+      'subclass_feature_effects',
+      featureTemplateEffectKinds,
+      'known-plus-passthrough',
+    ),
     check(
       'subclass_feature_effects_sort_order_check',
       integerAtLeast('sort_order', 1),
@@ -612,12 +675,16 @@ export const named_feature_effects = sqliteTable(
       .$type<NamedFeatureId>()
       .references(() => named_features.id, { onDelete: 'cascade' }),
     sort_order: integer('sort_order').notNull(),
-    ...featureEffectColumns(),
+    ...featureEffectColumns<FeatureTemplateEffectKind, KnownDamageType>(),
     created_at: datetime()('created_at'),
     updated_at: datetime()('updated_at'),
   },
   (table) => [
-    ...featureEffectChecks('named_feature_effects'),
+    ...featureEffectChecks(
+      'named_feature_effects',
+      featureTemplateEffectKinds,
+      'known-only',
+    ),
     check(
       'named_feature_effects_sort_order_check',
       integerAtLeast('sort_order', 1),
@@ -647,12 +714,16 @@ export const class_feature_effects = sqliteTable(
       .references(() => class_definitions.id, { onDelete: 'cascade' }),
     class_level: integer('class_level').notNull(),
     name: varchar()('name').notNull(),
-    ...featureEffectColumns(),
+    ...featureEffectColumns<FeatureTemplateEffectKind, KnownDamageType>(),
     created_at: datetime()('created_at'),
     updated_at: datetime()('updated_at'),
   },
   (table) => [
-    ...featureEffectChecks('class_feature_effects'),
+    ...featureEffectChecks(
+      'class_feature_effects',
+      featureTemplateEffectKinds,
+      'known-only',
+    ),
     check(
       'class_feature_effects_class_level_check',
       sql`class_level BETWEEN 1 AND 20`,

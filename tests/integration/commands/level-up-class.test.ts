@@ -279,8 +279,8 @@ describe('level_up_class', () => {
     ).lastInsertId;
     const effectId = db.exec(
       `INSERT INTO subclass_feature_effects (
-         subclass_feature_id, sort_order, effect_kind, amount
-       ) VALUES (?, 1, 'armor_class_bonus', 1)`,
+         subclass_feature_id, sort_order, effect_kind, amount, label
+       ) VALUES (?, 1, 'armor_class_bonus', 1, 'Fixture Ward')`,
       [featureId],
     ).lastInsertId;
     // AT belongs to the Rogue: a key of another class must

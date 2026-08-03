@@ -152,7 +152,7 @@ describe('open and closed domain vocabularies', () => {
     ).toBeNull();
   });
 
-  it('keeps user damage types open and refuses unknowns in SRD-only templates', async () => {
+  it('keeps authored damage types open and refuses unknowns in bundled-only weapon templates', async () => {
     const db = await database();
     const versionId = spellVersion(db, '2024:steam-spell');
     db.exec(
@@ -232,21 +232,19 @@ describe('open and closed domain vocabularies', () => {
     expect(() =>
       db.exec(
         `INSERT INTO species_template_trait_effects
-           (species_template_trait_id, sort_order, effect_kind, damage_type)
-         VALUES (?, 1, 'damage_resistance', NULL)`,
+           (species_template_trait_id, sort_order, effect_kind, damage_type, label)
+         VALUES (?, 1, 'damage_resistance', NULL, 'Open resistance')`,
         [traitId],
       ),
     ).not.toThrow();
     expect(() =>
       db.exec(
         `INSERT INTO species_template_trait_effects
-           (species_template_trait_id, sort_order, effect_kind, damage_type)
-         VALUES (?, 2, 'damage_resistance', 'Steam')`,
+           (species_template_trait_id, sort_order, effect_kind, damage_type, label)
+         VALUES (?, 2, 'damage_resistance', 'Steam', 'Steam resistance')`,
         [traitId],
       ),
-    ).toThrow(
-      /CHECK constraint failed: species_template_trait_effects_damage_type_check/u,
-    );
+    ).not.toThrow();
 
     const effectId = db.exec(
       `INSERT INTO character_effects
@@ -301,7 +299,7 @@ describe('open and closed domain vocabularies', () => {
     ).toBeNull();
   });
 
-  it('keeps a character creature type open and closes the SRD template', async () => {
+  it('keeps character and authored-template creature types open', async () => {
     const db = await database();
     const characterId = character(db, 'Clockwork Hero');
     const speciesId = db.exec(
@@ -332,10 +330,10 @@ describe('open and closed domain vocabularies', () => {
     ).toBeNull();
     expect(() =>
       speciesTemplate(db, 'species:clockwork', 'Clockwork'),
-    ).toThrow(/CHECK constraint failed: species_templates_creature_type_check/u);
+    ).not.toThrow();
   });
 
-  it('keeps a character size open while template size and nullable alternate size stay closed', async () => {
+  it('keeps character and authored-template sizes open', async () => {
     const db = await database();
     const characterId = character(db, 'Minuscule Hero');
     const speciesId = db.exec(
@@ -360,7 +358,7 @@ describe('open and closed domain vocabularies', () => {
     ).not.toThrow();
     expect(() =>
       speciesTemplate(db, 'species:minuscule', 'Humanoid', 'Minuscule'),
-    ).toThrow(/CHECK constraint failed: species_templates_size_check/u);
+    ).not.toThrow();
     expect(() =>
       speciesTemplate(
         db,
@@ -369,8 +367,6 @@ describe('open and closed domain vocabularies', () => {
         'Medium',
         'Minuscule',
       ),
-    ).toThrow(
-      /CHECK constraint failed: species_templates_alternate_size_check/u,
-    );
+    ).not.toThrow();
   });
 });
