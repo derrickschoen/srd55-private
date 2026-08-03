@@ -67,6 +67,7 @@ const speciesAggregate: SpeciesContentAggregate = {
   name: 'Void Walker',
   rules_edition: 'expanded',
   reference_text: 'Exact reference.\r\n',
+  repeatable: false,
   creature_type: creatureType('Clockwork  Humanoid'),
   primary_size: 'Large',
   alternate_size: creatureSize('Sma\u0301ll'),
@@ -74,8 +75,21 @@ const speciesAggregate: SpeciesContentAggregate = {
   grants: [{
     kind: 'fixed_spell',
     rule_key: 'void.spark',
+    count: 1,
     spell: spellReference,
+    bucket: 'prepared',
     always_prepared: true,
+    with_slots: true,
+    free_cast: {
+      uses: 1,
+      recovery: 'long_rest',
+      pool_scope: 'per_spell',
+    },
+    active_from_class_level: 3,
+    active_if_config: { key: 'lineage', equals: 'Void' },
+    distinct_config_by: null,
+    counts_against_limit: false,
+    label: 'Void Spark',
   }],
   traits: [{
     sort_order: 1,
@@ -93,11 +107,25 @@ const speciesAggregate: SpeciesContentAggregate = {
 
 const speciesPayload: SpeciesProjectorPayloadV1 = {
   reference_text: canonicalRuleText('Exact reference.\r\n'),
+  repeatable: false,
   grants: contentIdentitySequence([{
     kind: 'fixed_spell',
     rule_key: 'void.spark',
+    count: 1,
     spell: spellReference,
+    bucket: 'prepared',
     always_prepared: true,
+    with_slots: true,
+    free_cast: {
+      uses: 1,
+      recovery: 'long_rest',
+      pool_scope: 'per_spell',
+    },
+    active_from_class_level: 3,
+    active_if_config: { key: 'lineage', equals: 'Void' },
+    distinct_config_by: null,
+    counts_against_limit: false,
+    label: canonicalRuleText('Void Spark'),
   }]),
   creature_type: canonicalOpenPassthroughValue('Clockwork  Humanoid'),
   primary_size: canonicalOpenPassthroughValue('Large'),
@@ -120,6 +148,21 @@ const backgroundAggregate: BackgroundContentAggregate = {
   name: 'Void Scholar',
   rules_edition: 'expanded',
   reference_text: 'Studies the gap.',
+  repeatable: false,
+  grants: [{
+    kind: 'grant_source',
+    rule_key: 'void-scholar-origin-feat',
+    count: 1,
+    source_type: 'feat',
+    definition_key_config: 'origin_feat_key',
+    child_config_config: 'origin_feat_config',
+    active_from_class_level: null,
+    active_if_config: null,
+    distinct_config_by: null,
+    always_prepared: false,
+    with_slots: true,
+    free_cast: null,
+  }],
   suggested_abilities: ['intelligence', 'wisdom', 'charisma'],
   default_origin_feat: featReference,
   skill_proficiencies: ['arcana', 'insight'],
@@ -159,6 +202,21 @@ const backgroundAggregate: BackgroundContentAggregate = {
 
 const backgroundPayload: BackgroundProjectorPayloadV1 = {
   reference_text: canonicalRuleText('Studies the gap.'),
+  repeatable: false,
+  grants: contentIdentitySequence([{
+    kind: 'grant_source',
+    rule_key: 'void-scholar-origin-feat',
+    count: 1,
+    source_type: 'feat',
+    definition_key_config: 'origin_feat_key',
+    child_config_config: 'origin_feat_config',
+    active_from_class_level: null,
+    active_if_config: null,
+    distinct_config_by: null,
+    always_prepared: false,
+    with_slots: true,
+    free_cast: null,
+  }]),
   suggested_abilities: ['intelligence', 'wisdom', 'charisma'],
   default_origin_feat: featReference,
   skill_proficiencies: ['arcana', 'insight'],
@@ -325,8 +383,17 @@ const grantedSubclassAggregate: SubclassContentAggregate = {
   grants: [{
     kind: 'fixed_spell',
     rule_key: 'subclass.spark',
+    count: 1,
     spell: spellReference,
+    bucket: 'prepared',
     always_prepared: true,
+    with_slots: true,
+    free_cast: null,
+    active_from_class_level: null,
+    active_if_config: null,
+    distinct_config_by: null,
+    counts_against_limit: true,
+    label: null,
   }],
   progression: { mode: 'inherit_parent' },
   features: [],
@@ -338,11 +405,108 @@ const grantedSubclassPayload: SubclassProjectorPayloadV1 = {
   grants: contentIdentitySequence([{
     kind: 'fixed_spell',
     rule_key: 'subclass.spark',
+    count: 1,
     spell: spellReference,
+    bucket: 'prepared',
     always_prepared: true,
+    with_slots: true,
+    free_cast: null,
+    active_from_class_level: null,
+    active_if_config: null,
+    distinct_config_by: null,
+    counts_against_limit: true,
+    label: null,
   }]),
   progression: { mode: 'inherit_parent' },
   features: contentIdentitySequence([]),
+};
+
+const characterEffectNotesSpeciesAggregate: SpeciesContentAggregate = {
+  kind: 'species',
+  name: 'Note Walker',
+  rules_edition: 'expanded',
+  reference_text: '',
+  repeatable: false,
+  creature_type: creatureType('Humanoid'),
+  primary_size: creatureSize('Medium'),
+  alternate_size: null,
+  walking_speed_feet: 30,
+  grants: [],
+  traits: [{
+    sort_order: 1,
+    name: 'Noted Ward',
+    description: 'Keeps notes.',
+    effects: [{
+      kind: 'damage_resistance',
+      sort_order: 1,
+      label: 'Noted ward',
+      notes: 'First line\r\nSecond line   \r\n',
+      damage_type: damageType('Force'),
+    }],
+  }],
+};
+
+const characterEffectNotesSpeciesPayload: SpeciesProjectorPayloadV1 = {
+  reference_text: canonicalRuleText(''),
+  repeatable: false,
+  grants: contentIdentitySequence([]),
+  creature_type: canonicalOpenPassthroughValue('Humanoid'),
+  primary_size: canonicalOpenPassthroughValue('Medium'),
+  alternate_size: null,
+  walking_speed_feet: 30,
+  traits: contentIdentitySequence([{
+    name: 'Noted Ward',
+    description: canonicalRuleText('Keeps notes.'),
+    effects: contentIdentitySequence([{
+      kind: 'damage_resistance',
+      label: 'Noted ward',
+      notes: canonicalRuleText('First line\r\nSecond line   \r\n'),
+      damage_type: canonicalOpenPassthroughValue('Force'),
+    }]),
+  }]),
+};
+
+const extraAttackNotesSubclassAggregate: SubclassContentAggregate = {
+  kind: 'subclass',
+  name: 'Note Striker',
+  rules_edition: 'expanded',
+  reference_text: '',
+  parent_class: classReference,
+  grants: [],
+  progression: { mode: 'inherit_parent' },
+  features: [{
+    class_level: 5,
+    sort_order: 1,
+    name: 'Noted Attack',
+    description: 'Attacks twice.',
+    effects: [{
+      kind: 'extra_attack',
+      sort_order: 1,
+      label: 'Noted attack',
+      notes: 'Attack line\r\nSecond attack   \n',
+      attack_count: 2,
+      weapon_scope: 'any_weapon',
+    }],
+  }],
+};
+
+const extraAttackNotesSubclassPayload: SubclassProjectorPayloadV1 = {
+  reference_text: canonicalRuleText(''),
+  parent_class: classReference,
+  grants: contentIdentitySequence([]),
+  progression: { mode: 'inherit_parent' },
+  features: contentIdentitySequence([{
+    class_level: 5,
+    name: 'Noted Attack',
+    description: canonicalRuleText('Attacks twice.'),
+    effects: contentIdentitySequence([{
+      kind: 'extra_attack',
+      label: 'Noted attack',
+      notes: canonicalRuleText('Attack line\r\nSecond attack   \n'),
+      attack_count: 2,
+      weapon_scope: 'any_weapon',
+    }]),
+  }]),
 };
 
 /**
@@ -364,9 +528,9 @@ export const authoredProjectorV1Vectors = [
     // case and the doubled spaces in creature/damage values remain exact;
     // grants, traits, then effects remain declared-order arrays; the fixed
     // spell grant pins its complete fingerprint-reference byte region.
-    canonicalJson: '{"edition":"expanded","kind":"species","normalizedName":"voidwalker","payload":{"alternate_size":"Smáll","creature_type":"Clockwork  Humanoid","grants":[{"always_prepared":true,"kind":"fixed_spell","rule_key":"void.spark","spell":{"digest":"1111111111111111111111111111111111111111111111111111111111111111","kind":"spell","scheme":"content-v1"}}],"primary_size":"Large","reference_text":"Exact reference.","traits":[{"description":"Holds.","effects":[{"damage_type":"Void  Fire","kind":"damage_resistance","label":"Void Ward","notes":null}],"name":"Void Ward"}],"walking_speed_feet":35},"scheme":"content-v1"}',
-    sha256: '5db52e3a3e543c4e9ffaa7a1d73191c5889b60457cffe8a9fb01a5236bb05b24',
-    derivedKey: 'expanded:content.v1:5db52e3a3e543c4e9ffaa7a1d73191c5889b60457cffe8a9fb01a5236bb05b24',
+    canonicalJson: '{"edition":"expanded","kind":"species","normalizedName":"voidwalker","payload":{"alternate_size":"Smáll","creature_type":"Clockwork  Humanoid","grants":[{"active_from_class_level":3,"active_if_config":{"equals":"Void","key":"lineage"},"always_prepared":true,"bucket":"prepared","count":1,"counts_against_limit":false,"distinct_config_by":null,"free_cast":{"pool_scope":"per_spell","recovery":"long_rest","uses":1},"kind":"fixed_spell","label":"Void Spark","rule_key":"void.spark","spell":{"digest":"1111111111111111111111111111111111111111111111111111111111111111","kind":"spell","scheme":"content-v1"},"with_slots":true}],"primary_size":"Large","reference_text":"Exact reference.","repeatable":false,"traits":[{"description":"Holds.","effects":[{"damage_type":"Void  Fire","kind":"damage_resistance","label":"Void Ward","notes":null}],"name":"Void Ward"}],"walking_speed_feet":35},"scheme":"content-v1"}',
+    sha256: 'e7c9c480129d6d8e8889dac55e48dc9f5ed720057d14e3999e78c4d08d26427e',
+    derivedKey: 'expanded:content.v1:e7c9c480129d6d8e8889dac55e48dc9f5ed720057d14e3999e78c4d08d26427e',
   },
   {
     label: 'background keeps lowercase passthrough distinct',
@@ -378,9 +542,9 @@ export const authoredProjectorV1Vectors = [
     // rule text, skills/abilities, and tool text. Equipment array position
     // carries order and sort_order is absent; lowercase `void` is unchanged,
     // proving passthrough values are not case-folded.
-    canonicalJson: '{"edition":"expanded","kind":"background","normalizedName":"voidscholar","payload":{"default_origin_feat":{"digest":"2222222222222222222222222222222222222222222222222222222222222222","kind":"feat","scheme":"content-v1"},"effects":[{"damage_type":"void","kind":"damage_resistance","label":"Lowercase void ward","notes":null}],"equipment_option_a":[{"kind":"gear","printed_name":"Astrolabe","quantity":1},{"content":{"digest":"4444444444444444444444444444444444444444444444444444444444444444","kind":"weapon","scheme":"content-v1"},"kind":"weapon","printed_name":"Void Blade","quantity":1}],"equipment_option_a_description":"An astrolabe.","equipment_option_b":[{"content":{"digest":"5555555555555555555555555555555555555555555555555555555555555555","kind":"armor","scheme":"content-v1"},"kind":"armor","printed_name":"Clockwork Mail","quantity":1}],"equipment_option_b_description":"Nothing.","reference_text":"Studies the gap.","skill_proficiencies":["arcana","insight"],"suggested_abilities":["intelligence","wisdom","charisma"],"tool_reference_text":"Astrolabe only; no structured tool grant."},"scheme":"content-v1"}',
-    sha256: 'b549f874b36dfe98d88e5f8469dd2968f34fe83e8251f3ae74a88b3be93082ad',
-    derivedKey: 'expanded:content.v1:b549f874b36dfe98d88e5f8469dd2968f34fe83e8251f3ae74a88b3be93082ad',
+    canonicalJson: '{"edition":"expanded","kind":"background","normalizedName":"voidscholar","payload":{"default_origin_feat":{"digest":"2222222222222222222222222222222222222222222222222222222222222222","kind":"feat","scheme":"content-v1"},"effects":[{"damage_type":"void","kind":"damage_resistance","label":"Lowercase void ward","notes":null}],"equipment_option_a":[{"kind":"gear","printed_name":"Astrolabe","quantity":1},{"content":{"digest":"4444444444444444444444444444444444444444444444444444444444444444","kind":"weapon","scheme":"content-v1"},"kind":"weapon","printed_name":"Void Blade","quantity":1}],"equipment_option_a_description":"An astrolabe.","equipment_option_b":[{"content":{"digest":"5555555555555555555555555555555555555555555555555555555555555555","kind":"armor","scheme":"content-v1"},"kind":"armor","printed_name":"Clockwork Mail","quantity":1}],"equipment_option_b_description":"Nothing.","grants":[{"active_from_class_level":null,"active_if_config":null,"always_prepared":false,"child_config_config":"origin_feat_config","count":1,"definition_key_config":"origin_feat_key","distinct_config_by":null,"free_cast":null,"kind":"grant_source","rule_key":"void-scholar-origin-feat","source_type":"feat","with_slots":true}],"reference_text":"Studies the gap.","repeatable":false,"skill_proficiencies":["arcana","insight"],"suggested_abilities":["intelligence","wisdom","charisma"],"tool_reference_text":"Astrolabe only; no structured tool grant."},"scheme":"content-v1"}',
+    sha256: '15ff580a3544fe808e86d862306a064fe3237d7e999d2707acda4135c2ff9584',
+    derivedKey: 'expanded:content.v1:15ff580a3544fe808e86d862306a064fe3237d7e999d2707acda4135c2ff9584',
   },
   {
     label: 'subclass inherit arm and repeated names at distinct levels',
@@ -416,9 +580,31 @@ export const authoredProjectorV1Vectors = [
     // Definition grants are an ordered outer sequence. The fixed-spell grant
     // is complete and precedes parent/progression/reference in canonical key
     // order; no progression-owned caster fields are duplicated at the root.
-    canonicalJson: '{"edition":"expanded","kind":"subclass","normalizedName":"runewarden","payload":{"features":[],"grants":[{"always_prepared":true,"kind":"fixed_spell","rule_key":"subclass.spark","spell":{"digest":"1111111111111111111111111111111111111111111111111111111111111111","kind":"spell","scheme":"content-v1"}}],"parent_class":{"digest":"3333333333333333333333333333333333333333333333333333333333333333","kind":"class","scheme":"content-v1"},"progression":{"mode":"inherit_parent"},"reference_text":"A definition-level spell grant."},"scheme":"content-v1"}',
-    sha256: 'a0788cdb42eca17f771adbae441e086630d8fa262d96c9be491178f0f99bb686',
-    derivedKey: 'expanded:content.v1:a0788cdb42eca17f771adbae441e086630d8fa262d96c9be491178f0f99bb686',
+    canonicalJson: '{"edition":"expanded","kind":"subclass","normalizedName":"runewarden","payload":{"features":[],"grants":[{"active_from_class_level":null,"active_if_config":null,"always_prepared":true,"bucket":"prepared","count":1,"counts_against_limit":true,"distinct_config_by":null,"free_cast":null,"kind":"fixed_spell","label":null,"rule_key":"subclass.spark","spell":{"digest":"1111111111111111111111111111111111111111111111111111111111111111","kind":"spell","scheme":"content-v1"},"with_slots":true}],"parent_class":{"digest":"3333333333333333333333333333333333333333333333333333333333333333","kind":"class","scheme":"content-v1"},"progression":{"mode":"inherit_parent"},"reference_text":"A definition-level spell grant."},"scheme":"content-v1"}',
+    sha256: '47b18e8ffe968ed978cf2b9da087216e90d8724210f67a71e711cfae0167c255',
+    derivedKey: 'expanded:content.v1:47b18e8ffe968ed978cf2b9da087216e90d8724210f67a71e711cfae0167c255',
+  },
+  {
+    label: 'character effect notes normalize CRLF and trailing whitespace',
+    kind: 'species',
+    aggregate: characterEffectNotesSpeciesAggregate,
+    payload: characterEffectNotesSpeciesPayload,
+    // Hand-constructed from the contract: notes lose CRLF and line-final
+    // spaces, while the effect and trait remain declared-order sequences.
+    canonicalJson: '{"edition":"expanded","kind":"species","normalizedName":"notewalker","payload":{"alternate_size":null,"creature_type":"Humanoid","grants":[],"primary_size":"Medium","reference_text":"","repeatable":false,"traits":[{"description":"Keeps notes.","effects":[{"damage_type":"Force","kind":"damage_resistance","label":"Noted ward","notes":"First line\\nSecond line"}],"name":"Noted Ward"}],"walking_speed_feet":30},"scheme":"content-v1"}',
+    sha256: '6232b70f5913c9c871e7d52e8244d776fca95c626880cba342aece293466efa9',
+    derivedKey: 'expanded:content.v1:6232b70f5913c9c871e7d52e8244d776fca95c626880cba342aece293466efa9',
+  },
+  {
+    label: 'extra attack notes normalize CRLF and trailing whitespace',
+    kind: 'subclass',
+    aggregate: extraAttackNotesSubclassAggregate,
+    payload: extraAttackNotesSubclassPayload,
+    // Independently constructed extra_attack arm; this reaches the dedicated
+    // feature-effect branch rather than the character-effect helper.
+    canonicalJson: '{"edition":"expanded","kind":"subclass","normalizedName":"notestriker","payload":{"features":[{"class_level":5,"description":"Attacks twice.","effects":[{"attack_count":2,"kind":"extra_attack","label":"Noted attack","notes":"Attack line\\nSecond attack","weapon_scope":"any_weapon"}],"name":"Noted Attack"}],"grants":[],"parent_class":{"digest":"3333333333333333333333333333333333333333333333333333333333333333","kind":"class","scheme":"content-v1"},"progression":{"mode":"inherit_parent"},"reference_text":""},"scheme":"content-v1"}',
+    sha256: 'f1b7fb7a4e0214818258b11e66b9bc9845c3f2b146cfd9887a889302b3b7860e',
+    derivedKey: 'expanded:content.v1:f1b7fb7a4e0214818258b11e66b9bc9845c3f2b146cfd9887a889302b3b7860e',
   },
 ] as const;
 
@@ -447,16 +633,21 @@ export const authoredGrantSetV1Vectors: readonly AuthoredGrantSetVectorV1[] = [
     payloads: [
       {
         reference_text: canonicalRuleText(''),
+        repeatable: false,
         grants: contentIdentitySequence([{
           kind: 'choice_from_query',
           rule_key: 'set.query',
+          bucket: 'prepared',
           schools: contentIdentitySet([
             'Evocation', 'Abjuration', 'Evocation',
           ] as const),
           tags: contentIdentitySet(['ritual', 'arcane', 'ritual'] as const),
           count: 1,
-          minimum_spell_level: 0,
-          maximum_spell_level: 9,
+          always_prepared: false,
+          with_slots: true,
+          free_cast: null,
+          level_min: 0,
+          level_max: 9,
         }]),
         creature_type: canonicalOpenPassthroughValue('Humanoid'),
         primary_size: canonicalOpenPassthroughValue('Medium'),
@@ -466,14 +657,19 @@ export const authoredGrantSetV1Vectors: readonly AuthoredGrantSetVectorV1[] = [
       },
       {
         reference_text: canonicalRuleText(''),
+        repeatable: false,
         grants: contentIdentitySequence([{
           kind: 'choice_from_query',
           rule_key: 'set.query',
+          bucket: 'prepared',
           schools: contentIdentitySet(['Abjuration', 'Evocation'] as const),
           tags: contentIdentitySet(['arcane', 'ritual'] as const),
           count: 1,
-          minimum_spell_level: 0,
-          maximum_spell_level: 9,
+          always_prepared: false,
+          with_slots: true,
+          free_cast: null,
+          level_min: 0,
+          level_max: 9,
         }]),
         creature_type: canonicalOpenPassthroughValue('Humanoid'),
         primary_size: canonicalOpenPassthroughValue('Medium'),
@@ -482,9 +678,9 @@ export const authoredGrantSetV1Vectors: readonly AuthoredGrantSetVectorV1[] = [
         traits: contentIdentitySequence([]),
       },
     ],
-    canonicalJson: '{"edition":"expanded","kind":"species","normalizedName":"grantsetoracle","payload":{"alternate_size":null,"creature_type":"Humanoid","grants":[{"count":1,"kind":"choice_from_query","maximum_spell_level":9,"minimum_spell_level":0,"rule_key":"set.query","schools":["Abjuration","Evocation"],"tags":["arcane","ritual"]}],"primary_size":"Medium","reference_text":"","traits":[],"walking_speed_feet":30},"scheme":"content-v1"}',
-    sha256: '99eb9b5e461081b98fe764cbc11d38b9d0d17c0344d306333b62089380da23d7',
-    derivedKey: 'expanded:content.v1:99eb9b5e461081b98fe764cbc11d38b9d0d17c0344d306333b62089380da23d7',
+    canonicalJson: '{"edition":"expanded","kind":"species","normalizedName":"grantsetoracle","payload":{"alternate_size":null,"creature_type":"Humanoid","grants":[{"always_prepared":false,"bucket":"prepared","count":1,"free_cast":null,"kind":"choice_from_query","level_max":9,"level_min":0,"rule_key":"set.query","schools":["Abjuration","Evocation"],"tags":["arcane","ritual"],"with_slots":true}],"primary_size":"Medium","reference_text":"","repeatable":false,"traits":[],"walking_speed_feet":30},"scheme":"content-v1"}',
+    sha256: '2bcfbab57de3f1947b6e561d337ad41a3937571dd190ca287dd0ff5898835245',
+    derivedKey: 'expanded:content.v1:2bcfbab57de3f1947b6e561d337ad41a3937571dd190ca287dd0ff5898835245',
   },
   {
     label: 'duplicate skill member dedupes without changing identity',
@@ -492,11 +688,15 @@ export const authoredGrantSetV1Vectors: readonly AuthoredGrantSetVectorV1[] = [
     payloads: [
       {
         reference_text: canonicalRuleText(''),
+        repeatable: false,
         grants: contentIdentitySequence([{
           kind: 'skill_proficiency',
           rule_key: 'set.skills',
           count: 2,
           skills: contentIdentitySet(['stealth', 'arcana', 'stealth'] as const),
+          always_prepared: false,
+          with_slots: true,
+          free_cast: null,
         }]),
         creature_type: canonicalOpenPassthroughValue('Humanoid'),
         primary_size: canonicalOpenPassthroughValue('Medium'),
@@ -506,11 +706,15 @@ export const authoredGrantSetV1Vectors: readonly AuthoredGrantSetVectorV1[] = [
       },
       {
         reference_text: canonicalRuleText(''),
+        repeatable: false,
         grants: contentIdentitySequence([{
           kind: 'skill_proficiency',
           rule_key: 'set.skills',
           count: 2,
           skills: contentIdentitySet(['arcana', 'stealth'] as const),
+          always_prepared: false,
+          with_slots: true,
+          free_cast: null,
         }]),
         creature_type: canonicalOpenPassthroughValue('Humanoid'),
         primary_size: canonicalOpenPassthroughValue('Medium'),
@@ -519,8 +723,8 @@ export const authoredGrantSetV1Vectors: readonly AuthoredGrantSetVectorV1[] = [
         traits: contentIdentitySequence([]),
       },
     ],
-    canonicalJson: '{"edition":"expanded","kind":"species","normalizedName":"grantdedupeoracle","payload":{"alternate_size":null,"creature_type":"Humanoid","grants":[{"count":2,"kind":"skill_proficiency","rule_key":"set.skills","skills":["arcana","stealth"]}],"primary_size":"Medium","reference_text":"","traits":[],"walking_speed_feet":30},"scheme":"content-v1"}',
-    sha256: '9e313559ef745814f28746d2c6d6d2969dd8ff380f461ecce55d0d70536d28af',
-    derivedKey: 'expanded:content.v1:9e313559ef745814f28746d2c6d6d2969dd8ff380f461ecce55d0d70536d28af',
+    canonicalJson: '{"edition":"expanded","kind":"species","normalizedName":"grantdedupeoracle","payload":{"alternate_size":null,"creature_type":"Humanoid","grants":[{"always_prepared":false,"count":2,"free_cast":null,"kind":"skill_proficiency","rule_key":"set.skills","skills":["arcana","stealth"],"with_slots":true}],"primary_size":"Medium","reference_text":"","repeatable":false,"traits":[],"walking_speed_feet":30},"scheme":"content-v1"}',
+    sha256: '035f9bbc5106c2cb361c571b44bb9fd5c254a6ac9bdd92ebac5ac8b75e1bdaa4',
+    derivedKey: 'expanded:content.v1:035f9bbc5106c2cb361c571b44bb9fd5c254a6ac9bdd92ebac5ac8b75e1bdaa4',
   },
 ];
