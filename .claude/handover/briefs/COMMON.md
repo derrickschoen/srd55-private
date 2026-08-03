@@ -37,3 +37,9 @@ PROCESS RULES (all mandatory):
 
 REPORT: what you did; real numbers pasted; the spec table; files
 created/modified; negative-control candidates with exact test names.
+
+## Agent isolation (added 2026-08-03 after repeated violations)
+Do NOT invoke any other agent or CLI — no `claude`, no nested `codex`, no
+external reviewers. The supervisor runs all second-agent reviews. Repo
+guidance suggesting codex/claude cross-review does not apply inside a
+supervised dispatch.
