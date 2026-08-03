@@ -192,7 +192,7 @@ describe('database migration chain', () => {
 
   it('preserves pre-0028 effects while opening authored storage', async () => {
     const beforeAuthorableEffects = DATABASE_MIGRATIONS
-      .slice(0, -1)
+      .slice(0, -2)
       .map((entry) => entry.sql)
       .join('\n');
     const storage = await storageHolding(beforeAuthorableEffects);

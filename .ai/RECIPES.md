@@ -39,7 +39,7 @@ asked for.
    `src/domain/contracts/tables.ts` derives `AnyTableName` from it.
    `tests/unit/schema-modules.test.ts` fails if a file is not re-exported.
 
-3. **Classify it** in `src/domain/contracts/tables.ts`: `TABLE_SCOPES` (`:167`). You
+3. **Classify it** in `src/domain/contracts/tables.ts`: `TABLE_SCOPES` (`:169`). You
    do not get to skip this — verified by probe on this tree:
 
    ```

@@ -35,6 +35,8 @@ export type SpellVersionId = Brand<number, 'SpellVersionId'>;
 export type SpellIdentityId = Brand<number, 'SpellIdentityId'>;
 /** `characters.id`. */
 export type CharacterId = Brand<number, 'CharacterId'>;
+/** Stable random identity minted once for a published party document. */
+export type PartyPublicationId = Brand<string, 'PartyPublicationId'>;
 /** `spell_selection_slots.id`. */
 export type SlotId = Brand<number, 'SlotId'>;
 /** `wizard_spellbook_entries.id` — one addressable Wizard acquisition. */
