@@ -143,6 +143,13 @@ describe('catalog import persistence', () => {
       items_created: 0,
       items_matched: 0,
       item_definition_effects_created: 0,
+      classes_matched: 0,
+      feats_created: 0,
+      feats_matched: 0,
+      species_created: 0,
+      species_matched: 0,
+      backgrounds_created: 0,
+      backgrounds_matched: 0,
       text_available: false,
       descriptions_loaded: 0,
     });
