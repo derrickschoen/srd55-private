@@ -41,6 +41,72 @@ export class EquipmentImportReviewRequired extends Error {
   }
 }
 
+export type UnsupportedItemDefinitionEffectReason =
+  | 'requires_source_instance'
+  | 'requires_bonded_weapon_binding';
+
+export class UnsupportedItemDefinitionEffect extends Error {
+  constructor(
+    readonly itemName: string,
+    readonly effectKind: AuthoringCharacterEffect['kind'],
+    readonly reason: UnsupportedItemDefinitionEffectReason,
+  ) {
+    const explanation = reason === 'requires_source_instance'
+      ? 'character ability increases require source-instance provenance, but item definitions have no source-instance lifecycle'
+      : "the item picker has no binding choice for weapon_scope 'one_bonded_weapon'";
+    const followUp = reason === 'requires_source_instance'
+      ? 'ITEM-DEFINITION-SOURCE-PROVENANCE'
+      : 'ITEM-DEFINITION-BONDED-WEAPON-BINDING';
+    super(
+      `Item definition '${itemName}' effect '${effectKind}' is unsupported: ` +
+      `${explanation}. Follow-up unit ${followUp} must land before this ` +
+      'shape can be imported.',
+    );
+    this.name = 'UnsupportedItemDefinitionEffect';
+  }
+}
+
+function assertItemDefinitionEffectSupported(
+  itemName: string,
+  effect: AuthoringCharacterEffect,
+): void {
+  switch (effect.kind) {
+    case 'ability_increase':
+      // Species/background increases are owned by character_source_instances
+      // and cascade with that source. Items have no equivalent source type or
+      // lifecycle. Follow-up unit ITEM-DEFINITION-SOURCE-PROVENANCE must
+      // define both before the picker may materialise this effect.
+      throw new UnsupportedItemDefinitionEffect(
+        itemName,
+        effect.kind,
+        'requires_source_instance',
+      );
+    case 'attack_ability_override':
+    case 'weapon_attack_bonus':
+    case 'weapon_damage_bonus':
+      if (effect.weapon_scope === 'one_bonded_weapon') {
+        // Runtime requires a concrete bonded-weapon choice, but item
+        // definitions and the picker carry no such binding. Follow-up unit
+        // ITEM-DEFINITION-BONDED-WEAPON-BINDING owns that picker/UI and
+        // persistence seam; until then importing the shape would create an
+        // inert effect.
+        throw new UnsupportedItemDefinitionEffect(
+          itemName,
+          effect.kind,
+          'requires_bonded_weapon_binding',
+        );
+      }
+      return;
+    case 'damage_resistance':
+    case 'hp_modifier':
+    case 'speed':
+    case 'ability_override':
+    case 'armor_class_bonus':
+    case 'armor_class_formula':
+      return;
+  }
+}
+
 function timestamp(): string {
   return new Date().toISOString();
 }
@@ -84,6 +150,9 @@ function armorAggregate(record: CatalogArmorRecord): ArmorContentAggregate {
 }
 
 function itemAggregate(record: CatalogItemRecord): ItemContentAggregate {
+  for (const effect of record.effects) {
+    assertItemDefinitionEffectSupported(record.name, effect);
+  }
   return {
     kind: record.kind,
     name: record.name,

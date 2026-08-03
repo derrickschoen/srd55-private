@@ -2,6 +2,7 @@ import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { CatalogImporter } from '../../../src/catalog/catalog-importer';
 import { ContentIdentityCollision } from '../../../src/catalog/content-registry';
+import { UnsupportedItemDefinitionEffect } from '../../../src/catalog/equipment-importer';
 import { DatabaseContext } from '../../../src/db/database';
 import { openTestDatabase } from '../../helpers/open-db';
 import { equipmentProjectorV1Vectors } from '../../unit/catalog/fixtures/equipment-projector-v1-vectors';
@@ -151,5 +152,139 @@ describe('equipment catalog import', () => {
     expect(() =>
       importer.import({ documents: [JSON.stringify([records[2]])] }),
     ).toThrow(ContentIdentityCollision);
+  });
+
+  it.each([
+    {
+      label: 'ability_increase without source-instance provenance',
+      effect: {
+        kind: 'ability_increase',
+        ability: 'strength',
+        amount: 2,
+        maximum: 20,
+        label: 'Unowned increase',
+        notes: null,
+      },
+      reason: 'requires_source_instance',
+      messageFragment: 'source-instance provenance',
+      followUp: 'ITEM-DEFINITION-SOURCE-PROVENANCE',
+    },
+    {
+      label: 'one_bonded_weapon attack_ability_override without a binding',
+      effect: {
+        kind: 'attack_ability_override',
+        ability: 'charisma',
+        weaponScope: 'one_bonded_weapon',
+        label: 'Unbound attack ability',
+        notes: null,
+      },
+      reason: 'requires_bonded_weapon_binding',
+      messageFragment: "weapon_scope 'one_bonded_weapon'",
+      followUp: 'ITEM-DEFINITION-BONDED-WEAPON-BINDING',
+    },
+    {
+      label: 'one_bonded_weapon weapon_attack_bonus without a binding',
+      effect: {
+        kind: 'weapon_attack_bonus',
+        amount: 1,
+        weaponScope: 'one_bonded_weapon',
+        label: 'Unbound attack bonus',
+        notes: null,
+      },
+      reason: 'requires_bonded_weapon_binding',
+      messageFragment: "weapon_scope 'one_bonded_weapon'",
+      followUp: 'ITEM-DEFINITION-BONDED-WEAPON-BINDING',
+    },
+    {
+      label: 'one_bonded_weapon weapon_damage_bonus without a binding',
+      effect: {
+        kind: 'weapon_damage_bonus',
+        amount: 1,
+        weaponScope: 'one_bonded_weapon',
+        label: 'Unbound damage bonus',
+        notes: null,
+      },
+      reason: 'requires_bonded_weapon_binding',
+      messageFragment: "weapon_scope 'one_bonded_weapon'",
+      followUp: 'ITEM-DEFINITION-BONDED-WEAPON-BINDING',
+    },
+  ] as const)(
+    'refuses item definition $label',
+    async ({ effect, reason, messageFragment, followUp }) => {
+      connection = await openTestDatabase();
+      const db = new DatabaseContext(connection);
+      const importer = new CatalogImporter(db);
+      let refusal: unknown;
+
+      try {
+        importer.import({
+          documents: [JSON.stringify([{
+            kind: 'item',
+            name: 'Unsupported Focus',
+            edition: 'expanded',
+            description: 'Cannot cross the item picker seam.',
+            requiresAttunement: true,
+            effects: [effect],
+          }])],
+        });
+      } catch (error) {
+        refusal = error;
+      }
+
+      expect(refusal).toBeInstanceOf(UnsupportedItemDefinitionEffect);
+      if (!(refusal instanceof UnsupportedItemDefinitionEffect)) {
+        throw new Error('Expected a typed unsupported item-effect refusal.');
+      }
+      expect(refusal.effectKind).toBe(effect.kind);
+      expect(refusal.reason).toBe(reason);
+      expect(refusal.message).toContain(`'${effect.kind}'`);
+      expect(refusal.message).toContain('Unsupported Focus');
+      expect(refusal.message).toContain(messageFragment);
+      expect(refusal.message).toContain(followUp);
+      expect(db.scalar('SELECT count(*) FROM item_definitions')).toBe(0);
+    },
+  );
+
+  it('imports any_weapon item effects because they need no binding choice', async () => {
+    connection = await openTestDatabase();
+    const db = new DatabaseContext(connection);
+    const importer = new CatalogImporter(db);
+
+    expect(importer.import({
+      documents: [JSON.stringify([{
+        kind: 'item',
+        name: 'Universal Weapon Focus',
+        edition: 'expanded',
+        description: 'Applies without selecting one bonded weapon.',
+        requiresAttunement: true,
+        effects: [
+          {
+            kind: 'attack_ability_override',
+            ability: 'charisma',
+            weaponScope: 'any_weapon',
+            label: 'Universal attack ability',
+            notes: null,
+          },
+          {
+            kind: 'weapon_attack_bonus',
+            amount: 1,
+            weaponScope: 'any_weapon',
+            label: 'Universal attack bonus',
+            notes: null,
+          },
+          {
+            kind: 'weapon_damage_bonus',
+            amount: 1,
+            weaponScope: 'any_weapon',
+            label: 'Universal damage bonus',
+            notes: null,
+          },
+        ],
+      }])],
+    })).toMatchObject({
+      items_created: 1,
+      item_definition_effects_created: 3,
+    });
+    expect(db.scalar('SELECT count(*) FROM item_definition_effects')).toBe(3);
   });
 });
