@@ -109,7 +109,7 @@ describe('gate 4: the dist scan is chained onto the build and can actually fire'
     expect(pkg.scripts['build']).toContain('node tools/assert-dist-clean.mjs');
   });
 
-  it('looks for literals that really do occur in the sources they guard', async () => {
+  it('BROWSER-PROBE-SEAM-DEV-ONLY: looks for literals that really occur behind their source gates', async () => {
     const forbidden = await forbiddenLiterals();
     // The scanner now guards TWO dev-only subgraphs: the AI bridge, and the
     // local-only scraper under tools/scrape, whose output is not free-licensed
@@ -127,7 +127,14 @@ describe('gate 4: the dist scan is chained onto the build and can actually fire'
     // catches drift between that definition and the hand-kept copy in
     // assert-dist-clean.mjs (which is plain .mjs and cannot import the .ts).
     const scrapeLiterals = [SCRAPE_SENTINEL];
-    expect(forbidden).toEqual([...bridgeLiterals, ...scrapeLiterals]);
+    const browserProbeLiterals = [
+      '__SRD55_BROWSER_CAPABILITY_PROBE_FAILURE__',
+    ];
+    expect(forbidden).toEqual([
+      ...bridgeLiterals,
+      ...browserProbeLiterals,
+      ...scrapeLiterals,
+    ]);
 
     const bridgeSources = (
       await Promise.all(
@@ -149,6 +156,14 @@ describe('gate 4: the dist scan is chained onto the build and can actually fire'
     const scrapeSource = await read('tools/scrape/provenance.ts');
     for (const literal of scrapeLiterals) {
       expect(scrapeSource, `forbidden literal ${literal}`).toContain(literal);
+    }
+
+    const mainSource = await read('src/main.ts');
+    for (const literal of browserProbeLiterals) {
+      expect(mainSource, `forbidden literal ${literal}`).toContain(literal);
+      expect(mainSource.indexOf(literal)).toBeGreaterThan(
+        mainSource.indexOf('if (import.meta.env.DEV) {'),
+      );
     }
   });
 

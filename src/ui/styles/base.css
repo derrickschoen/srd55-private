@@ -84,6 +84,52 @@ a {
   color: #6d28d9;
 }
 
+.browser-support-notice {
+  width: min(100%, 72rem);
+  margin: 0 auto;
+  padding: 1rem;
+  border: 0.125rem solid #8c1d18;
+  border-radius: 0.5rem;
+  background: #fff4ef;
+  color: #49110f;
+  text-align: left;
+}
+
+.browser-support-notice h2,
+.browser-support-notice p {
+  margin: 0 0 0.75rem;
+}
+
+.browser-support-notice button {
+  min-height: 2.75rem;
+  padding: 0.55rem 0.9rem;
+  border: 0.125rem solid currentColor;
+  border-radius: 0.35rem;
+  background: #fff;
+  color: #7c1f19;
+  cursor: pointer;
+}
+
+.browser-support-hold {
+  display: grid;
+  min-height: 100vh;
+  place-content: center;
+  gap: 0.75rem;
+  padding: 2rem;
+  text-align: center;
+}
+
+.browser-support-hold h1,
+.browser-support-hold p {
+  margin: 0;
+}
+
+.dark .browser-support-notice {
+  border-color: #ffb4a9;
+  background: #321210;
+  color: #ffe8e4;
+}
+
 .dark .site-footer a {
   color: #c4b5fd;
 }
