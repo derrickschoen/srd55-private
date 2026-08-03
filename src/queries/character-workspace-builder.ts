@@ -7,6 +7,7 @@ import {
   type RowCodec,
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
+import { isBundledSourceContentKey } from '../catalog/bundled-source-membership';
 import {
   abilities,
   type Ability,
@@ -356,21 +357,22 @@ export class CharacterWorkspaceBuilder {
   private classOptions(classDefinitionId?: number): ClassOption[] {
     return classDefinitionId === undefined
       ? this.db.all(
-          `SELECT definition.id, definition.name
+          `SELECT definition.id, definition.content_key, definition.name
            FROM class_definitions AS definition
-           INNER JOIN catalog_content_identities AS identity
-             ON identity.content_key = definition.content_key
-            AND identity.content_kind = 'class'
-            AND identity.catalog_layer = 'bundled'
            -- CI-4a/HA-10 lifts this filter when imported classes can be
            -- applied completely by planner consumers.
            ORDER BY definition.name, definition.id`,
           undefined,
           (row) => ({
             id: sqlInteger(row, 'id'),
+            content_key: sqlString(row, 'content_key'),
             name: sqlString(row, 'name'),
           }),
         )
+          .filter((definition) =>
+            isBundledSourceContentKey('class', definition.content_key)
+          )
+          .map(({ id, name }) => ({ id, name }))
       : this.db.all(
           `SELECT id, name
            FROM subclass_definitions
@@ -537,10 +539,6 @@ export class CharacterWorkspaceBuilder {
       `SELECT definition.id, definition.content_key, definition.name,
               definition.repeatable, definition.grant_rules
        FROM ${sourceType}_definitions AS definition
-       INNER JOIN catalog_content_identities AS identity
-         ON identity.content_key = definition.content_key
-        AND identity.content_kind = '${sourceType}'
-        AND identity.catalog_layer = 'bundled'
        -- CI-4a/HA-10 lifts this filter after imported aggregate application
        -- replaces today's partial AddSource consumer.
        ORDER BY definition.name, definition.id`,
@@ -555,6 +553,8 @@ export class CharacterWorkspaceBuilder {
           sqlNullableString(row, 'grant_rules'),
         ),
       }),
+    ).filter((definition) =>
+      isBundledSourceContentKey(sourceType, definition.content_key)
     );
   }
 

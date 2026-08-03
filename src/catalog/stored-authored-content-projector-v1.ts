@@ -130,6 +130,7 @@ interface StoredEffectRow {
   readonly attack_count: number | null;
   readonly label: string;
   readonly notes: string | null;
+  readonly stored_fields: Readonly<Record<string, JsonValue>>;
 }
 
 export class StoredAuthoredContentProjectionError extends TypeError {
@@ -209,6 +210,51 @@ function optionalBoolean(row: SqlRow, column: string): boolean | null {
   return row[column] === null ? null : sqlBoolean(row, column);
 }
 
+/**
+ * Stored graphs default-include columns that this build does not yet know.
+ * Only relational identity, ordering, and audit metadata are excluded: none
+ * is read by a rules consumer, while every other future value is presumed
+ * semantic and therefore safely over-splits identity.
+ */
+function storedSemanticFields(
+  row: SqlRow,
+  knownColumns: readonly string[],
+  prefix = '',
+): Readonly<Record<string, JsonValue>> {
+  const excluded = new Set([
+    ...knownColumns,
+    'id',
+    'created_at',
+    'updated_at',
+  ]);
+  return Object.fromEntries(
+    Object.entries(row)
+      .filter(([column]) => !excluded.has(column))
+      .map(([column, value]) => [
+        `${prefix}${column}`,
+        jsonValue(value, `stored column ${column}`),
+      ]),
+  );
+}
+
+function projectedStoredFields(
+  value: object,
+): Readonly<Record<string, JsonValue>> {
+  const candidate = (value as Readonly<Record<string, unknown>>).stored_fields;
+  return candidate === undefined
+    ? {}
+    : jsonObject(candidate, 'stored_fields');
+}
+
+function attachStoredFields<T extends object>(
+  value: T,
+  fields: Readonly<Record<string, JsonValue>>,
+): T {
+  return Object.keys(fields).length === 0
+    ? value
+    : Object.assign(value, { stored_fields: Object.freeze(fields) });
+}
+
 function decodeEffectRow(row: SqlRow): StoredEffectRow {
   return {
     sort_order: sqlInteger(row, 'sort_order'),
@@ -228,14 +274,16 @@ function decodeEffectRow(row: SqlRow): StoredEffectRow {
     attack_count: sqlNullableInteger(row, 'attack_count'),
     label: sqlString(row, 'label'),
     notes: sqlNullableString(row, 'notes'),
+    stored_fields: storedSemanticFields(row, [
+      'sort_order', 'effect_kind', 'damage_type', 'hit_points_flat',
+      'hit_points_per_level', 'speed_bonus_feet', 'ability', 'amount',
+      'maximum', 'base', 'ability_1', 'ability_2', 'allows_shield',
+      'weapon_scope', 'attack_count', 'label', 'notes',
+      'species_template_trait_id', 'background_template_id',
+      'subclass_feature_id',
+    ]),
   };
 }
-
-const COMMON_EFFECT_COLUMNS = `
-  sort_order, effect_kind, damage_type, hit_points_flat,
-  hit_points_per_level, speed_bonus_feet, ability, amount, maximum,
-  base, ability_1, ability_2, allows_shield, weapon_scope
-`;
 
 function effectFromStoredRow(
   row: StoredEffectRow,
@@ -255,11 +303,11 @@ function effectFromStoredRow(
       `effect kind '${row.kind}' is not permitted on this stored graph.`,
     );
   }
-  const common = {
+  const common = attachStoredFields({
     sort_order: row.sort_order,
     label: nonEmpty(row.label, 'effect label'),
     notes: row.notes,
-  };
+  }, row.stored_fields);
   switch (row.kind) {
     case 'damage_resistance':
       if (row.damage_type === null) {
@@ -581,27 +629,28 @@ function canonicalCharacterEffect(
 function canonicalCharacterEffect(
   effect: AuthoringCharacterEffect,
 ): CanonicalCharacterEffectV1 {
+  const stored = projectedStoredFields(effect);
   const notes = effect.notes === null ? null : canonicalRuleText(effect.notes);
   switch (effect.kind) {
     case 'damage_resistance':
-      return { kind: effect.kind, label: effect.label, notes, damage_type: canonicalOpenPassthroughValue(effect.damage_type) };
+      return { ...stored, kind: effect.kind, label: effect.label, notes, damage_type: canonicalOpenPassthroughValue(effect.damage_type) };
     case 'hp_modifier':
-      return { kind: effect.kind, label: effect.label, notes, hit_points_flat: effect.hit_points_flat, hit_points_per_level: effect.hit_points_per_level };
+      return { ...stored, kind: effect.kind, label: effect.label, notes, hit_points_flat: effect.hit_points_flat, hit_points_per_level: effect.hit_points_per_level };
     case 'speed':
-      return { kind: effect.kind, label: effect.label, notes, speed_bonus_feet: effect.speed_bonus_feet };
+      return { ...stored, kind: effect.kind, label: effect.label, notes, speed_bonus_feet: effect.speed_bonus_feet };
     case 'ability_increase':
-      return { kind: effect.kind, label: effect.label, notes, ability: effect.ability, amount: effect.amount, maximum: effect.maximum };
+      return { ...stored, kind: effect.kind, label: effect.label, notes, ability: effect.ability, amount: effect.amount, maximum: effect.maximum };
     case 'ability_override':
-      return { kind: effect.kind, label: effect.label, notes, ability: effect.ability, maximum: effect.maximum };
+      return { ...stored, kind: effect.kind, label: effect.label, notes, ability: effect.ability, maximum: effect.maximum };
     case 'armor_class_bonus':
-      return { kind: effect.kind, label: effect.label, notes, amount: effect.amount };
+      return { ...stored, kind: effect.kind, label: effect.label, notes, amount: effect.amount };
     case 'armor_class_formula':
-      return { kind: effect.kind, label: effect.label, notes, base: effect.base, ability_1: effect.ability_1, ability_2: effect.ability_2, allows_shield: effect.allows_shield };
+      return { ...stored, kind: effect.kind, label: effect.label, notes, base: effect.base, ability_1: effect.ability_1, ability_2: effect.ability_2, allows_shield: effect.allows_shield };
     case 'attack_ability_override':
-      return { kind: effect.kind, label: effect.label, notes, ability: effect.ability, weapon_scope: effect.weapon_scope };
+      return { ...stored, kind: effect.kind, label: effect.label, notes, ability: effect.ability, weapon_scope: effect.weapon_scope };
     case 'weapon_attack_bonus':
     case 'weapon_damage_bonus':
-      return { kind: effect.kind, label: effect.label, notes, amount: effect.amount, weapon_scope: effect.weapon_scope };
+      return { ...stored, kind: effect.kind, label: effect.label, notes, amount: effect.amount, weapon_scope: effect.weapon_scope };
   }
 }
 
@@ -610,6 +659,7 @@ function canonicalFeatureEffect(
 ): CanonicalFeatureEffectV1 {
   if (effect.kind === 'extra_attack') {
     return {
+      ...projectedStoredFields(effect),
       kind: effect.kind,
       label: effect.label,
       notes: effect.notes === null ? null : canonicalRuleText(effect.notes),
@@ -688,6 +738,7 @@ function projectSpecies(
   aggregate: SpeciesContentAggregate,
 ): StoredProjection<'species'> {
   const payload: SpeciesProjectorPayloadV1 = {
+    ...projectedStoredFields(aggregate),
     reference_text: canonicalRuleText(aggregate.reference_text),
     repeatable: aggregate.repeatable,
     grants: contentIdentitySequence(aggregate.grants.map(canonicalGrant)),
@@ -698,6 +749,7 @@ function projectSpecies(
       : canonicalOpenPassthroughValue(aggregate.alternate_size),
     walking_speed_feet: aggregate.walking_speed_feet,
     traits: contentIdentitySequence(aggregate.traits.map((trait) => ({
+      ...projectedStoredFields(trait),
       name: trait.name,
       description: canonicalRuleText(trait.description),
       effects: contentIdentitySequence(trait.effects.map(canonicalCharacterEffect)),
@@ -715,15 +767,17 @@ function projectBackground(
   aggregate: BackgroundContentAggregate,
 ): StoredProjection<'background'> {
   const projectEquipment = (item: BackgroundContentEquipment) => {
+    const stored = projectedStoredFields(item);
     switch (item.kind) {
       case 'gear':
-        return { kind: item.kind, quantity: item.quantity, printed_name: item.printed_name };
+        return { ...stored, kind: item.kind, quantity: item.quantity, printed_name: item.printed_name };
       case 'weapon':
       case 'armor':
-        return { kind: item.kind, quantity: item.quantity, printed_name: item.printed_name, content: item.content };
+        return { ...stored, kind: item.kind, quantity: item.quantity, printed_name: item.printed_name, content: item.content };
     }
   };
   const payload: BackgroundProjectorPayloadV1 = {
+    ...projectedStoredFields(aggregate),
     reference_text: canonicalRuleText(aggregate.reference_text),
     repeatable: aggregate.repeatable,
     grants: contentIdentitySequence(aggregate.grants.map(canonicalGrant)),
@@ -853,9 +907,8 @@ function readEffects(
 ): readonly (AuthoringCharacterEffect | AuthoringFeatureEffect)[] {
   const feature = table === 'subclass_feature_effects';
   return db.all(
-    `SELECT ${COMMON_EFFECT_COLUMNS},
-            ${feature ? 'attack_count' : 'NULL AS attack_count'},
-            label, notes
+    `SELECT *,
+            ${feature ? 'attack_count' : 'NULL AS attack_count'}
      FROM ${table}
      WHERE ${parentColumn} = ? ORDER BY sort_order`,
     [parentId],
@@ -870,6 +923,14 @@ function readSpecies(
   contentKey: ContentKey,
   references: StoredAuthoredReferenceResolverV1,
 ): SpeciesContentAggregate {
+  const definitionRaw = db.oneRaw(
+    'SELECT * FROM species_definitions WHERE content_key = ?',
+    [contentKey],
+  );
+  const templateRaw = db.oneRaw(
+    'SELECT * FROM species_templates WHERE content_key = ?',
+    [contentKey],
+  );
   const root = db.one(
     `SELECT definition.name AS definition_name,
             definition.rules_edition AS definition_edition,
@@ -901,11 +962,14 @@ function readSpecies(
     }),
   );
   if (root === null) return projectionError(`species '${contentKey}' is incomplete or missing.`);
+  if (definitionRaw === null || templateRaw === null) {
+    return projectionError(`species '${contentKey}' is incomplete or missing.`);
+  }
   if (root.name !== root.template_name || root.edition !== root.template_edition) {
     return projectionError(`species '${contentKey}' definition/template metadata disagree.`);
   }
   const traits = db.all(
-    `SELECT id, sort_order, name, description
+    `SELECT *
      FROM species_template_traits WHERE species_template_id = ?
      ORDER BY sort_order`,
     [root.template_id],
@@ -914,14 +978,17 @@ function readSpecies(
       sort_order: sqlInteger(row, 'sort_order'),
       name: sqlString(row, 'name'),
       description: sqlString(row, 'description'),
+      stored_fields: storedSemanticFields(row, [
+        'species_template_id', 'sort_order', 'name', 'description',
+      ]),
     }),
-  ).map((trait) => ({
-    sort_order: trait.sort_order,
-    name: trait.name,
-    description: trait.description,
-    effects: readEffects(db, 'species_template_trait_effects', 'species_template_trait_id', trait.id),
-  }));
-  return {
+  ).map((trait) => attachStoredFields({
+      sort_order: trait.sort_order,
+      name: trait.name,
+      description: trait.description,
+      effects: readEffects(db, 'species_template_trait_effects', 'species_template_trait_id', trait.id),
+    }, trait.stored_fields));
+  const aggregate: SpeciesContentAggregate = {
     kind: 'species',
     name: nonEmpty(root.name, 'species name'),
     rules_edition: rulesEdition(root.edition),
@@ -934,6 +1001,20 @@ function readSpecies(
     traits,
     grants: authoringGrants(db, root.grant_rules, references, 'species grant_rules'),
   };
+  return attachStoredFields(aggregate, {
+      ...storedSemanticFields(definitionRaw, [
+        'content_key', 'name', 'rules_edition', 'repeatable', 'grant_rules',
+        'notes',
+        // Generic definition-table fields are feat mechanics only:
+        // feat-application.ts reads feat prerequisites; no species runtime
+        // consumer reads either field, so they cannot change species behavior.
+        'category', 'prerequisites',
+      ], 'definition_'),
+      ...storedSemanticFields(templateRaw, [
+        'content_key', 'name', 'rules_edition', 'creature_type', 'size',
+        'alternate_size', 'base_speed_feet',
+      ], 'template_'),
+  });
 }
 
 interface StoredEquipmentRow {
@@ -944,6 +1025,7 @@ interface StoredEquipmentRow {
   readonly kind: string;
   readonly weapon_key: ContentKey | null;
   readonly armor_key: ContentKey | null;
+  readonly stored_fields: Readonly<Record<string, JsonValue>>;
 }
 
 function readBackground(
@@ -951,6 +1033,14 @@ function readBackground(
   contentKey: ContentKey,
   references: StoredAuthoredReferenceResolverV1,
 ): BackgroundContentAggregate {
+  const definitionRaw = db.oneRaw(
+    'SELECT * FROM background_definitions WHERE content_key = ?',
+    [contentKey],
+  );
+  const templateRaw = db.oneRaw(
+    'SELECT * FROM background_templates WHERE content_key = ?',
+    [contentKey],
+  );
   const root = db.one(
     `SELECT definition.name AS definition_name,
             definition.rules_edition AS definition_edition,
@@ -985,6 +1075,9 @@ function readBackground(
     }),
   );
   if (root === null) return projectionError(`background '${contentKey}' is incomplete or missing.`);
+  if (definitionRaw === null || templateRaw === null) {
+    return projectionError(`background '${contentKey}' is incomplete or missing.`);
+  }
   if (root.name !== root.template_name || root.edition !== root.template_edition) {
     return projectionError(`background '${contentKey}' definition/template metadata disagree.`);
   }
@@ -999,8 +1092,7 @@ function readBackground(
     return projectionError('background grant_rules must contain only grant_source rules.');
   }
   const rows = db.all(
-    `SELECT item.option, item.sort_order, item.quantity,
-            item.item_name, item.item_kind,
+    `SELECT item.*,
             weapon.content_key AS weapon_key,
             armor.content_key AS armor_key
      FROM background_equipment_items AS item
@@ -1017,11 +1109,20 @@ function readBackground(
       kind: sqlString(row, 'item_kind'),
       weapon_key: sqlNullableString(row, 'weapon_key') as ContentKey | null,
       armor_key: sqlNullableString(row, 'armor_key') as ContentKey | null,
+      stored_fields: storedSemanticFields(row, [
+        'background_template_id', 'option', 'sort_order', 'quantity',
+        'item_name', 'item_kind', 'weapon_template_id', 'armor_template_id',
+        'weapon_key', 'armor_key',
+      ]),
     }),
   );
   const equipment = (option: 'a' | 'b'): readonly BackgroundContentEquipment[] =>
     rows.filter((row) => row.option === option).map((row) => {
-      const common = { sort_order: row.sort_order, quantity: row.quantity, printed_name: row.printed_name };
+      const common = attachStoredFields({
+        sort_order: row.sort_order,
+        quantity: row.quantity,
+        printed_name: row.printed_name,
+      }, row.stored_fields);
       switch (row.kind) {
         case 'gear':
           return { ...common, kind: row.kind };
@@ -1035,7 +1136,7 @@ function readBackground(
           return projectionError(`background equipment kind '${row.kind}' is invalid.`);
       }
     });
-  return {
+  const aggregate: BackgroundContentAggregate = {
     kind: 'background',
     name: nonEmpty(root.name, 'background name'),
     rules_edition: edition,
@@ -1052,6 +1153,22 @@ function readBackground(
     equipment_option_b: equipment('b'),
     effects: readEffects(db, 'background_template_effects', 'background_template_id', root.template_id),
   };
+  return attachStoredFields(aggregate, {
+      ...storedSemanticFields(definitionRaw, [
+        'content_key', 'name', 'rules_edition', 'repeatable', 'grant_rules',
+        'notes',
+        // As for species, these shared-schema fields are never read by a
+        // background runtime consumer; category/prerequisite mechanics belong
+        // to feat-application.ts and are non-mechanical here.
+        'category', 'prerequisites',
+      ], 'definition_'),
+      ...storedSemanticFields(templateRaw, [
+        'content_key', 'name', 'rules_edition', 'ability_score_1',
+        'ability_score_2', 'ability_score_3', 'feat_name',
+        'skill_proficiency_1', 'skill_proficiency_2', 'tool_proficiency',
+        'equipment_option_a', 'equipment_option_b',
+      ], 'template_'),
+  });
 }
 
 function casterContribution(

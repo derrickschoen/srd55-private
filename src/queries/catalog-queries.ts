@@ -16,6 +16,10 @@ import type {
   SubclassDefinitionRow,
 } from '../domain/models';
 import {
+  isBundledSourceContentKey,
+  type BundledSourceKind,
+} from '../catalog/bundled-source-membership';
+import {
   isEnumValue,
   materialCostKinds,
   spellAreaShapes,
@@ -239,15 +243,13 @@ export class CatalogQueries {
       classes: this.db.all(
         `SELECT definition.*
          FROM class_definitions AS definition
-         INNER JOIN catalog_content_identities AS identity
-           ON identity.content_key = definition.content_key
-          AND identity.content_kind = 'class'
-          AND identity.catalog_layer = 'bundled'
          -- CI-4a/HA-10 removes this temporary consumer boundary once class
          -- aggregates can be applied completely rather than partially.
          ORDER BY definition.name, definition.rules_edition, definition.id`,
         undefined,
         decodeClass,
+      ).filter((definition) =>
+        isBundledSourceContentKey('class', definition.content_key)
       ),
       subclasses: this.db.all(
         `SELECT *
@@ -314,7 +316,7 @@ export class CatalogQueries {
       | 'species_definitions'
       | 'background_definitions',
   ): DefinitionRow[] {
-    const kind = table === 'feat_definitions'
+    const kind: BundledSourceKind = table === 'feat_definitions'
       ? 'feat'
       : table === 'species_definitions'
         ? 'species'
@@ -322,14 +324,12 @@ export class CatalogQueries {
     return this.db.all(
       `SELECT definition.*
        FROM ${table} AS definition
-       INNER JOIN catalog_content_identities AS identity
-         ON identity.content_key = definition.content_key
-        AND identity.content_kind = '${kind}'
-        AND identity.catalog_layer = 'bundled'
        -- CI-4a/HA-10 removes this filter when aggregate consumers are cut over.
        ORDER BY definition.name, definition.rules_edition, definition.id`,
       undefined,
       decodeDefinition,
+    ).filter((definition) =>
+      isBundledSourceContentKey(kind, definition.content_key)
     );
   }
 }

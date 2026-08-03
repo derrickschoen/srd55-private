@@ -1,13 +1,18 @@
 import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { registerBundledStableContentIdentity } from '../../../src/catalog/content-registry';
+import { CatalogImporter } from '../../../src/catalog/catalog-importer';
+import { createApplicationLifecycle } from '../../../src/db/bootstrap';
 import { DatabaseContext } from '../../../src/db/database';
 import type { ContentKey } from '../../../src/domain/ids';
 import { CharacterListBuilder } from '../../../src/queries/character-list-builder';
+import { CharacterCrud } from '../../../src/queries/character-crud';
+import { CatalogQueries } from '../../../src/queries/catalog-queries';
 import {
   CharacterWorkspaceBuilder,
 } from '../../../src/queries/character-workspace-builder';
-import { openTestDatabase } from '../../helpers/open-db';
+import { getSqlite3, MemoryDatabaseStorage, openTestDatabase } from '../../helpers/open-db';
+import { featProjectorV1Vector } from '../../unit/catalog/fixtures/source-projector-v1-vectors';
 import {
   createBuildReportFixture,
   persistedReportTableHashes,
@@ -83,12 +88,6 @@ describe('character list and workspace query builders', () => {
   });
 
   it('builds the workspace while excluding external aggregates from every planner selection catalog before CI-4a/HA-10', () => {
-    db.exec(
-      `UPDATE catalog_content_identities
-       SET key_kind = 'bundled-stable', catalog_layer = 'bundled'
-       WHERE content_kind = 'class'
-         AND content_key IN (SELECT content_key FROM class_definitions)`,
-    );
     const wizardId = Number(
       db.scalar(
         "SELECT id FROM class_definitions WHERE name = 'Wizard'",
@@ -204,10 +203,7 @@ describe('character list and workspace query builders', () => {
       workspace.source_catalog.species.find(
         (source) => source.content_key === 'q60:species:origin',
       ),
-    ).toMatchObject({
-      repeatable: false,
-      configuration_kind: 'origin_feat_magic_initiate',
-    });
+    ).toBeUndefined();
     expect(workspace.source_catalog.feat.map((source) => source.name)).not.toContain('External Feat');
     expect(workspace.source_catalog.species.map((source) => source.name)).not.toContain('External Species');
     expect(workspace.source_catalog.background.map((source) => source.name)).not.toContain('External Background');
@@ -237,6 +233,58 @@ describe('character list and workspace query builders', () => {
     expect(persistedReportTableHashes(db, fixture.characterId)).toEqual(
       before,
     );
+  });
+
+  it('shows boot-seeded manifest members and hides an imported aggregate without identity promotion', async () => {
+    const sqlite3 = await getSqlite3();
+    const lifecycle = createApplicationLifecycle(
+      sqlite3,
+      new MemoryDatabaseStorage(sqlite3),
+    );
+    lifecycle.open();
+    try {
+      const bootDb = lifecycle.database;
+      const externalFeat = {
+        ...featProjectorV1Vector.aggregate,
+        name: 'External Selection Probe',
+      };
+      const imported = new CatalogImporter(bootDb).import({
+        documents: [JSON.stringify([{ kind: 'feat', aggregate: externalFeat }])],
+      });
+      expect(imported.feats_created).toBe(1);
+      expect(
+        bootDb.scalar<string>(
+          `SELECT catalog_layer
+           FROM catalog_content_identities
+           WHERE content_kind = 'feat' AND normalized_name = 'externalselectionprobe'`,
+        ),
+      ).toBe('external');
+
+      const character = new CharacterCrud(bootDb).create({
+        name: 'Boot Selection Probe',
+      });
+      const catalog = new CatalogQueries(bootDb).read();
+      const workspace = new CharacterWorkspaceBuilder(bootDb).build(character.id);
+
+      expect(catalog.classes.map((entry) => entry.name)).toContain('Fighter');
+      expect(catalog.sources.species.length).toBeGreaterThan(0);
+      expect(catalog.sources.background.length).toBeGreaterThan(0);
+      expect(catalog.sources.feat.length).toBeGreaterThan(0);
+      expect(catalog.sources.feat.map((entry) => entry.name)).not.toContain(
+        'External Selection Probe',
+      );
+      expect(workspace.available_classes.map((entry) => entry.name)).toContain(
+        'Fighter',
+      );
+      expect(workspace.source_catalog.species.length).toBeGreaterThan(0);
+      expect(workspace.source_catalog.background.length).toBeGreaterThan(0);
+      expect(workspace.source_catalog.feat.length).toBeGreaterThan(0);
+      expect(workspace.source_catalog.feat.map((entry) => entry.name)).not.toContain(
+        'External Selection Probe',
+      );
+    } finally {
+      lifecycle.close();
+    }
   });
 
   it('B2-DC resolves contributions again at the independent workspace slot-math site', () => {

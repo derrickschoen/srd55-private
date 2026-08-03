@@ -1,4 +1,5 @@
 import type {
+  AuthoringGrant,
   BackgroundContentAggregate,
   SpeciesContentAggregate,
 } from '../authoring/contracts';
@@ -163,7 +164,7 @@ function baseAggregate(value: unknown, kind: SourceCatalogRecordKind) {
   return { aggregate, name, rulesEdition };
 }
 
-function validateGrant(value: unknown, label: string): void {
+function normalizedGrant(value: unknown, label: string): AuthoringGrant {
   const grant = record(value, label);
   exactKeys(grant, label, [
     'kind', 'rule_key', 'count', 'bucket', 'always_prepared', 'with_slots',
@@ -235,6 +236,12 @@ function validateGrant(value: unknown, label: string): void {
       );
     }
   }
+  if (
+    typeof grant.list === 'string' &&
+    grant.list.trim().startsWith('$config.')
+  ) {
+    trimEqual(grant.list, `${label}.list`);
+  }
   for (const field of ['level_min', 'level_max'] as const) {
     if (grant[field] !== undefined) {
       integer(grant[field], `${label}.${field}`, 0, AUTHORING_NUMERIC_LIMITS.maximumSpellLevel);
@@ -278,7 +285,18 @@ function validateGrant(value: unknown, label: string): void {
     candidate.source_definition_key = 'portable:source';
   }
   try {
-    GrantRule.fromObject(candidate);
+    const normalized: Record<string, unknown> = GrantRule
+      .fromObject(candidate)
+      .toObject();
+    if (grant.spell !== undefined) {
+      delete normalized.spell_version_key;
+      normalized.spell = grant.spell;
+    }
+    if (grant.source_definition !== undefined) {
+      delete normalized.source_definition_key;
+      normalized.source_definition = grant.source_definition;
+    }
+    return normalized as AuthoringGrant;
   } catch (error) {
     throw new TypeError(
       `Catalog field '${label}' is not a valid grant rule: ${error instanceof Error ? error.message : String(error)}`,
@@ -287,9 +305,12 @@ function validateGrant(value: unknown, label: string): void {
   }
 }
 
-function validateGrantList(value: unknown, label: string): void {
-  list(value, label, AUTHORING_LIST_LIMITS.grants)
-    .forEach((grant, index) => validateGrant(grant, `${label}[${String(index)}]`));
+function normalizedGrantList(
+  value: unknown,
+  label: string,
+): readonly AuthoringGrant[] {
+  return list(value, label, AUTHORING_LIST_LIMITS.grants)
+    .map((grant, index) => normalizedGrant(grant, `${label}[${String(index)}]`));
 }
 
 function validateEffect(value: unknown, label: string): void {
@@ -552,7 +573,7 @@ function validateClassGrants(aggregate: Record<string, unknown>): void {
     integer(progression.class_level, `aggregate.progressions[${String(index)}].class_level`, 1, 20);
     integer(progression.cantrips_known, `aggregate.progressions[${String(index)}].cantrips_known`, 0, AUTHORING_NUMERIC_LIMITS.maximumEffectMagnitude);
     integer(progression.prepared_count, `aggregate.progressions[${String(index)}].prepared_count`, 0, AUTHORING_NUMERIC_LIMITS.maximumEffectMagnitude);
-    validateGrantList(
+    normalizedGrantList(
       progression.grant_rules,
       `aggregate.progressions[${String(index)}].grant_rules`,
     );
@@ -744,29 +765,57 @@ export function parseSourceCatalogRecord(
   switch (kind) {
     case 'class': {
       validateClassGrants(base.aggregate);
-      const aggregate = base.aggregate as unknown as ClassContentAggregateV1;
+      const aggregate = {
+        ...base.aggregate,
+        progressions: list(
+          base.aggregate.progressions,
+          'aggregate.progressions',
+          AUTHORING_NUMERIC_LIMITS.maximumClassLevel,
+        ).map((value, index) => {
+          const progression = record(
+            value,
+            `aggregate.progressions[${String(index)}]`,
+          );
+          return {
+            ...progression,
+            grant_rules: normalizedGrantList(
+              progression.grant_rules,
+              `aggregate.progressions[${String(index)}].grant_rules`,
+            ),
+          };
+        }),
+      } as unknown as ClassContentAggregateV1;
       deriveContentIdentityV1({ kind, edition: base.rulesEdition, name: base.name, payload: projectClassContentV1(aggregate) });
       return { kind, aggregate };
     }
     case 'feat': {
-      validateGrantList(base.aggregate.grants, 'aggregate.grants');
+      const grants = normalizedGrantList(base.aggregate.grants, 'aggregate.grants');
       validateFeat(base.aggregate);
-      const aggregate = base.aggregate as unknown as FeatContentAggregateV1;
+      const aggregate = {
+        ...base.aggregate,
+        grants,
+      } as unknown as FeatContentAggregateV1;
       deriveContentIdentityV1({ kind, edition: base.rulesEdition, name: base.name, payload: projectFeatContentV1(aggregate) });
       return { kind, aggregate };
     }
     case 'species': {
-      validateGrantList(base.aggregate.grants, 'aggregate.grants');
+      const grants = normalizedGrantList(base.aggregate.grants, 'aggregate.grants');
       validateSpecies(base.aggregate);
-      const aggregate = base.aggregate as unknown as SpeciesContentAggregate;
+      const aggregate = {
+        ...base.aggregate,
+        grants,
+      } as unknown as SpeciesContentAggregate;
       const payload = projectAuthoredContentAggregateV1(aggregate).payload;
       deriveContentIdentityV1({ kind, edition: base.rulesEdition, name: base.name, payload });
       return { kind, aggregate };
     }
     case 'background': {
-      validateGrantList(base.aggregate.grants, 'aggregate.grants');
+      const grants = normalizedGrantList(base.aggregate.grants, 'aggregate.grants');
       validateBackground(base.aggregate);
-      const aggregate = base.aggregate as unknown as BackgroundContentAggregate;
+      const aggregate = {
+        ...base.aggregate,
+        grants,
+      } as unknown as BackgroundContentAggregate;
       const payload = projectAuthoredContentAggregateV1(aggregate).payload;
       deriveContentIdentityV1({ kind, edition: base.rulesEdition, name: base.name, payload });
       return { kind, aggregate };

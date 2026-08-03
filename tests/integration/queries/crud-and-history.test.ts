@@ -225,23 +225,23 @@ describe('character CRUD, catalog, save points, and operation history', () => {
 
   it('returns deterministic decoded catalog DTOs without mutating catalog rows', () => {
     registerBundledStableContentIdentity(db, {
-      kind: 'class', contentKey: 'q60:class:test' as ContentKey, normalizedName: 'querymage',
+      kind: 'class', contentKey: '2024:class:wizard' as ContentKey, normalizedName: 'querymage',
     });
     registerBundledStableContentIdentity(db, {
-      kind: 'feat', contentKey: 'q60:feat:test' as ContentKey, normalizedName: 'queryfeat',
+      kind: 'feat', contentKey: '2024:feat:alert' as ContentKey, normalizedName: 'queryfeat',
     });
     const classId = db.exec(
       `INSERT INTO class_definitions (
          content_key, name, rules_edition, spellcasting_ability,
          progression_type
-       ) VALUES ('q60:class:test', 'Query Mage', '2024',
+       ) VALUES ('2024:class:wizard', 'Query Mage', '2024',
                  'intelligence', 'full')`,
     ).lastInsertId;
     db.exec(
       `INSERT INTO feat_definitions (
          content_key, name, rules_edition, repeatable,
          prerequisites, grant_rules
-       ) VALUES ('q60:feat:test', 'Query Feat', '2024', 1,
+       ) VALUES ('2024:feat:alert', 'Query Feat', '2024', 1,
                  '{"level":4}', '[]')`,
     );
     db.exec(
