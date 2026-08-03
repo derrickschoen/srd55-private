@@ -418,6 +418,12 @@ export const FOREIGN_KEY_FACTS = [
     targetColumns: ['id'],
   },
   {
+    table: 'party_document_states',
+    columns: ['character_id'],
+    target: 'characters',
+    targetColumns: ['id'],
+  },
+  {
     table: 'species_definitions',
     columns: ['content_key'],
     target: 'catalog_content_identities',

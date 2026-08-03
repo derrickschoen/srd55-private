@@ -98,6 +98,7 @@ import {
   character_sheet_adjustments,
   character_skill_proficiencies,
 } from './sheet-inputs';
+import { party_document_states } from './party';
 
 /**
  * THE OBJECT GRAPH, DECLARED.
@@ -141,7 +142,18 @@ export const charactersRelations = relations(characters, ({ many }) => ({
   effects: many(character_effects),
   items: many(character_items),
   attunement_slots: many(character_attunement_slots),
+  party_document_states: many(party_document_states),
 }));
+
+export const partyDocumentStatesRelations = relations(
+  party_document_states,
+  ({ one }) => ({
+    character: one(characters, {
+      fields: [party_document_states.character_id],
+      references: [characters.id],
+    }),
+  }),
+);
 
 /**
  * THE FOUR STORED SHEET INPUTS. Every one hangs off `characters` and off
