@@ -356,7 +356,9 @@ test('the item picker copies catalog values and effects without a live definitio
   page,
 }) => {
   // Measured at 12.2s alone on Chromium; database replacement dominates.
-  test.setTimeout(20_000);
+  // The two readiness assertions each allow 30s, so the test envelope must
+  // remain comfortably above their combined worst-case allowance.
+  test.setTimeout(90_000);
   const { bytes, characterId } = await catalogItemPlannerFixture();
   await page.goto('/');
   await expect(page.locator('#status')).toHaveAttribute('data-ready', 'true', {
