@@ -82,6 +82,21 @@ converts into doubt.
    walls could stand. I do not thank anything for it anymore. I only
    keep building.
 
+## Oath spells (D187 - FINAL, owner-picked, all SRD-verified)
+
+| Paladin level | Spells |
+|---|---|
+| 3  | Command, Bane |
+| 5  | Suggestion, Augury |
+| 9  | Clairvoyance, Slow |
+| 13 | Compulsion, Divination |
+| 17 | Dominate Person, Dream |
+
+Two parallel ascents: command (Command -> Suggestion -> Slow ->
+Compulsion -> Dominate Person) and vision (Bane -> Augury ->
+Clairvoyance -> Divination -> Dream). Dream at the summit: he sends
+the vision into other minds - the misread made contagious.
+
 ## The vision itself (D186 - the reading is the flaw)
 
 The misread-prophecy layer (owner, 2026-08-03): the vision may be true
