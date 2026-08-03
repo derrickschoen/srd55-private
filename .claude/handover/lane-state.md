@@ -23,7 +23,30 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-03 (newest - read first)
+## RESTART POINT 2026-08-03-b (newest - read first)
+MAIN e8274e2 (SC-1 merged; mirror pushed). FLOORS: vitest 211/3,462; PW
+104/24; build 0; migrations 0000-0029; wire v1-v17.
+MERGED THIS MORNING: D177 guidelines f15fd1b (opus hygiene audit SAFE,
+CC-BY notice appended to 01/02; manager deviation: it did not commit its
+own deliverable), SC-1 e8274e2 (2 review rounds, 9 mutation vectors;
+exact-level-set ask REJECTED - provenance SHA owns content).
+IN FLIGHT: FF-C (wt/attunement, fix round 1 committed - D162 persistence
+moved off localStorage into character_rule_overrides via new RPC; review
+round 2 + full vitest running; then control + full PW + merge).
+OATH DOC: draft committed in wt/party 922052f, sent to owner, 9
+OWNER-APPROVAL markers OPEN - do not merge until the owner rules.
+FINDING (codex process): during FF-C review round 1 codex piped the diff
+to `claude -p` as a sub-reviewer (timed out, exit 124). Claude-credit
+substitution inside the codex role - review briefs now carry an explicit
+"no other agents/CLIs" line.
+CONTENTION NOTE: full vitest beside a codex single-file-PW fix round
+produced a worker-RPC-timeout exit 1 with all tests green; uncontended
+re-run exit 0. The one-suite law now also means: prefer a quiet machine
+for the FINAL pre-merge run.
+NEXT AFTER FF-C: BROWSER-PROBE gate (wt/hyg2, digest GATE-READY), then
+CI-3a dispatch (mint lane, strictly serial).
+
+## RESTART POINT 2026-08-03 (superseded by -b above)
 MAIN 4314313 (D177). MERGED TODAY: W-F 9af49bd (BAR ITEM 3 CLOSED - the
 whole wizard chain is done), HA-1 ff31fe4 (migration 0028; mint lane
 OPEN). FLOORS: vitest 3,414+ / 208 files; PW 104 / 24 specs; build 0;
