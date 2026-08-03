@@ -3,6 +3,7 @@ import type { Database } from '@sqlite.org/sqlite-wasm';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { DatabaseContext } from '../../src/db/database';
+import { readLevelUpSeam } from './fixtures/level-up-seam';
 
 const schema = readFileSync(
   new URL('../../src/db/schema.sql', import.meta.url),
@@ -1355,21 +1356,43 @@ test('the planner links to the sheet, and the sheet links back', async ({
   );
 });
 
-test('the sheet route is not shadowed by the printable-list route', async ({
+test('W-NO-SHADOW level-up, sheet, print, and planner routes mount only their intended screen', async ({
   page,
 }, testInfo) => {
-  // Measured alone at 16.1s on 2026-08-02; SS-2's spell section made sheet boots heavier.
+  // Measured alone at 16.1s on 2026-08-02; SS-2's spell section made sheet
+  // boots heavier. W-F widened this test to four routes, so the 45s ceiling
+  // is sized for the heavier body too.
   testInfo.setTimeout(45_000);
-  // Screen modules are sorted by PATH and the first match wins, so `print`
-  // is tested before `sheet`. Both matchers are exact; a loose one on either
-  // side would make one of these two pages unreachable.
+  // Screen modules are sorted by PATH and the first match wins. All four
+  // matchers must remain exact or one of these intended screens is shadowed.
   const image = await sheetImage();
   await install(page, image);
-  await page.goto(`/characters/${image.characterId}/print`);
+  const seam = await readLevelUpSeam(page, image.characterId);
+  await navigateWithinApp(page, `/characters/${image.characterId}/print`);
   await expect(page.locator('[data-screen="printable-list"]')).toBeVisible();
   await expect(page.locator('[data-screen="character-sheet"]')).toHaveCount(0);
+  await expect(page.locator('.level-up-route')).toHaveCount(0);
+  await expect(page.locator('#planner-status')).toHaveCount(0);
 
-  await page.goto(`/characters/${image.characterId}/sheet`);
+  await navigateWithinApp(page, `/characters/${image.characterId}/sheet`);
   await expect(page.locator('[data-screen="character-sheet"]')).toBeVisible();
   await expect(page.locator('[data-screen="printable-list"]')).toHaveCount(0);
+  await expect(page.locator('.level-up-route')).toHaveCount(0);
+  await expect(page.locator('#planner-status')).toHaveCount(0);
+
+  await navigateWithinApp(page, seam.path);
+  await expect(page.locator('.level-up-route')).toBeVisible();
+  await expect(page.locator('[data-screen="character-sheet"]')).toHaveCount(0);
+  await expect(page.locator('[data-screen="printable-list"]')).toHaveCount(0);
+  await expect(page.locator('#planner-status')).toHaveCount(0);
+
+  await navigateWithinApp(page, `/characters/${String(image.characterId)}`);
+  await expect(page.locator('#planner-status')).toHaveAttribute(
+    'data-ready',
+    'true',
+    { timeout: 30_000 },
+  );
+  await expect(page.locator('[data-screen="character-sheet"]')).toHaveCount(0);
+  await expect(page.locator('[data-screen="printable-list"]')).toHaveCount(0);
+  await expect(page.locator('.level-up-route')).toHaveCount(0);
 });
