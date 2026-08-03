@@ -23,7 +23,19 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-03-b (newest - read first)
+## RESTART POINT 2026-08-03-c (newest - read first)
+MAIN d749f15 (FF-C merged; mirror pushed). FLOORS: vitest 211/3,470; PW
+107/24 specs; build 0; migrations 0000-0029; wire v1-v17.
+FF-C landed with D162 persistence in character_rule_overrides (new
+preference RPC), 2 review rounds, 2 supervisor controls. REJECTED review
+findings on record: share-cap edge (typed refusal at capacity = D124
+design; FLAG FOR OWNER question round), SC-1 exact-level-set (provenance
+SHA owns content).
+GATE QUEUE NEXT: BROWSER-PROBE (wt/hyg2, digest GATE-READY), then CI-3a
+dispatch (mint lane wt/attunement now free, strictly serial). OATH DOC
+still awaiting owner (wt/party 922052f). Idle lanes fast-forwarded.
+
+## RESTART POINT 2026-08-03-b (superseded by -c)
 MAIN e8274e2 (SC-1 merged; mirror pushed). FLOORS: vitest 211/3,462; PW
 104/24; build 0; migrations 0000-0029; wire v1-v17.
 MERGED THIS MORNING: D177 guidelines f15fd1b (opus hygiene audit SAFE,
