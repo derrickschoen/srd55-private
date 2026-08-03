@@ -200,6 +200,7 @@ const inheritSubclassAggregate: SubclassContentAggregate = {
   rules_edition: 'expanded',
   reference_text: 'Two thresholds share a printed name.',
   parent_class: classReference,
+  grants: [],
   progression: { mode: 'inherit_parent' },
   features: [
     {
@@ -235,6 +236,7 @@ const inheritSubclassAggregate: SubclassContentAggregate = {
 const inheritSubclassPayload: SubclassProjectorPayloadV1 = {
   reference_text: canonicalRuleText('Two thresholds share a printed name.'),
   parent_class: classReference,
+  grants: contentIdentitySequence([]),
   progression: { mode: 'inherit_parent' },
   features: contentIdentitySequence([
     {
@@ -286,6 +288,7 @@ const overrideSubclassAggregate: SubclassContentAggregate = {
   rules_edition: 'expanded',
   reference_text: '',
   parent_class: classReference,
+  grants: [],
   progression: {
     mode: 'override',
     spellcasting_ability: null,
@@ -298,6 +301,7 @@ const overrideSubclassAggregate: SubclassContentAggregate = {
 const overrideSubclassPayload: SubclassProjectorPayloadV1 = {
   reference_text: canonicalRuleText(''),
   parent_class: classReference,
+  grants: contentIdentitySequence([]),
   progression: {
     mode: 'override',
     spellcasting_ability: null,
@@ -309,6 +313,35 @@ const overrideSubclassPayload: SubclassProjectorPayloadV1 = {
       })),
     ),
   },
+  features: contentIdentitySequence([]),
+};
+
+const grantedSubclassAggregate: SubclassContentAggregate = {
+  kind: 'subclass',
+  name: 'Rune Warden',
+  rules_edition: 'expanded',
+  reference_text: 'A definition-level spell grant.',
+  parent_class: classReference,
+  grants: [{
+    kind: 'fixed_spell',
+    rule_key: 'subclass.spark',
+    spell: spellReference,
+    always_prepared: true,
+  }],
+  progression: { mode: 'inherit_parent' },
+  features: [],
+};
+
+const grantedSubclassPayload: SubclassProjectorPayloadV1 = {
+  reference_text: canonicalRuleText('A definition-level spell grant.'),
+  parent_class: classReference,
+  grants: contentIdentitySequence([{
+    kind: 'fixed_spell',
+    rule_key: 'subclass.spark',
+    spell: spellReference,
+    always_prepared: true,
+  }]),
+  progression: { mode: 'inherit_parent' },
   features: contentIdentitySequence([]),
 };
 
@@ -354,13 +387,13 @@ export const authoredProjectorV1Vectors = [
     kind: 'subclass',
     aggregate: inheritSubclassAggregate,
     payload: inheritSubclassPayload,
-    // Subclass payload orders features before parent/progression/reference.
+    // Subclass payload orders features/grants before parent/progression/reference.
     // Feature sequence retains both same-name rows because level participates
     // in identity; each effect is declared-order; the inherit union arm emits
     // only `{mode:"inherit_parent"}` and no synthesized progression rows.
-    canonicalJson: '{"edition":"expanded","kind":"subclass","normalizedName":"echoknight","payload":{"features":[{"class_level":3,"description":"First echo.","effects":[{"damage_type":"Void","kind":"damage_resistance","label":"Void ward","notes":null}],"name":"Echo"},{"class_level":7,"description":"Second echo.","effects":[{"attack_count":2,"kind":"extra_attack","label":"Echo attack","notes":null,"weapon_scope":"any_weapon"}],"name":"Echo"}],"parent_class":{"digest":"3333333333333333333333333333333333333333333333333333333333333333","kind":"class","scheme":"content-v1"},"progression":{"mode":"inherit_parent"},"reference_text":"Two thresholds share a printed name."},"scheme":"content-v1"}',
-    sha256: 'c2527c54bbbf1dadff5b96121d8e9613acc3c5f0511bf19e545585d3cb019392',
-    derivedKey: 'expanded:content.v1:c2527c54bbbf1dadff5b96121d8e9613acc3c5f0511bf19e545585d3cb019392',
+    canonicalJson: '{"edition":"expanded","kind":"subclass","normalizedName":"echoknight","payload":{"features":[{"class_level":3,"description":"First echo.","effects":[{"damage_type":"Void","kind":"damage_resistance","label":"Void ward","notes":null}],"name":"Echo"},{"class_level":7,"description":"Second echo.","effects":[{"attack_count":2,"kind":"extra_attack","label":"Echo attack","notes":null,"weapon_scope":"any_weapon"}],"name":"Echo"}],"grants":[],"parent_class":{"digest":"3333333333333333333333333333333333333333333333333333333333333333","kind":"class","scheme":"content-v1"},"progression":{"mode":"inherit_parent"},"reference_text":"Two thresholds share a printed name."},"scheme":"content-v1"}',
+    sha256: '0ce55acab6397caea551c266261b93d9a78e1246223fb5ca179d22dc4eaf093e',
+    derivedKey: 'expanded:content.v1:0ce55acab6397caea551c266261b93d9a78e1246223fb5ca179d22dc4eaf093e',
   },
   {
     label: 'subclass override arm carries exactly levels one through twenty',
@@ -371,9 +404,21 @@ export const authoredProjectorV1Vectors = [
     // in canonical key order. The rows region is literally 1..20, each with
     // the nine-slot tuple and ordered grants; empty features/reference remain
     // present because the projector contract includes those semantic fields.
-    canonicalJson: '{"edition":"expanded","kind":"subclass","normalizedName":"denseadept","payload":{"features":[],"parent_class":{"digest":"3333333333333333333333333333333333333333333333333333333333333333","kind":"class","scheme":"content-v1"},"progression":{"caster_contribution":"third_down","mode":"override","rows":[{"cantrips_known":0,"class_level":1,"grants":[],"maximum_spell_level":0,"prepared_or_known_count":0,"slot_counts":[0,0,0,0,0,0,0,0,0]},{"cantrips_known":0,"class_level":2,"grants":[],"maximum_spell_level":0,"prepared_or_known_count":0,"slot_counts":[0,0,0,0,0,0,0,0,0]},{"cantrips_known":0,"class_level":3,"grants":[],"maximum_spell_level":0,"prepared_or_known_count":0,"slot_counts":[0,0,0,0,0,0,0,0,0]},{"cantrips_known":0,"class_level":4,"grants":[],"maximum_spell_level":0,"prepared_or_known_count":0,"slot_counts":[0,0,0,0,0,0,0,0,0]},{"cantrips_known":0,"class_level":5,"grants":[],"maximum_spell_level":0,"prepared_or_known_count":0,"slot_counts":[0,0,0,0,0,0,0,0,0]},{"cantrips_known":0,"class_level":6,"grants":[],"maximum_spell_level":0,"prepared_or_known_count":0,"slot_counts":[0,0,0,0,0,0,0,0,0]},{"cantrips_known":0,"class_level":7,"grants":[],"maximum_spell_level":0,"prepared_or_known_count":0,"slot_counts":[0,0,0,0,0,0,0,0,0]},{"cantrips_known":0,"class_level":8,"grants":[],"maximum_spell_level":0,"prepared_or_known_count":0,"slot_counts":[0,0,0,0,0,0,0,0,0]},{"cantrips_known":0,"class_level":9,"grants":[],"maximum_spell_level":0,"prepared_or_known_count":0,"slot_counts":[0,0,0,0,0,0,0,0,0]},{"cantrips_known":0,"class_level":10,"grants":[],"maximum_spell_level":0,"prepared_or_known_count":0,"slot_counts":[0,0,0,0,0,0,0,0,0]},{"cantrips_known":0,"class_level":11,"grants":[],"maximum_spell_level":0,"prepared_or_known_count":0,"slot_counts":[0,0,0,0,0,0,0,0,0]},{"cantrips_known":0,"class_level":12,"grants":[],"maximum_spell_level":0,"prepared_or_known_count":0,"slot_counts":[0,0,0,0,0,0,0,0,0]},{"cantrips_known":0,"class_level":13,"grants":[],"maximum_spell_level":0,"prepared_or_known_count":0,"slot_counts":[0,0,0,0,0,0,0,0,0]},{"cantrips_known":0,"class_level":14,"grants":[],"maximum_spell_level":0,"prepared_or_known_count":0,"slot_counts":[0,0,0,0,0,0,0,0,0]},{"cantrips_known":0,"class_level":15,"grants":[],"maximum_spell_level":0,"prepared_or_known_count":0,"slot_counts":[0,0,0,0,0,0,0,0,0]},{"cantrips_known":0,"class_level":16,"grants":[],"maximum_spell_level":0,"prepared_or_known_count":0,"slot_counts":[0,0,0,0,0,0,0,0,0]},{"cantrips_known":0,"class_level":17,"grants":[],"maximum_spell_level":0,"prepared_or_known_count":0,"slot_counts":[0,0,0,0,0,0,0,0,0]},{"cantrips_known":0,"class_level":18,"grants":[],"maximum_spell_level":0,"prepared_or_known_count":0,"slot_counts":[0,0,0,0,0,0,0,0,0]},{"cantrips_known":0,"class_level":19,"grants":[],"maximum_spell_level":0,"prepared_or_known_count":0,"slot_counts":[0,0,0,0,0,0,0,0,0]},{"cantrips_known":0,"class_level":20,"grants":[],"maximum_spell_level":0,"prepared_or_known_count":0,"slot_counts":[0,0,0,0,0,0,0,0,0]}],"spellcasting_ability":null},"reference_text":""},"scheme":"content-v1"}',
-    sha256: '9f768a3fcbd8ac31f1d37117772c3f638021a455fea6e024f0d7fba32e05dcf3',
-    derivedKey: 'expanded:content.v1:9f768a3fcbd8ac31f1d37117772c3f638021a455fea6e024f0d7fba32e05dcf3',
+    canonicalJson: '{"edition":"expanded","kind":"subclass","normalizedName":"denseadept","payload":{"features":[],"grants":[],"parent_class":{"digest":"3333333333333333333333333333333333333333333333333333333333333333","kind":"class","scheme":"content-v1"},"progression":{"caster_contribution":"third_down","mode":"override","rows":[{"cantrips_known":0,"class_level":1,"grants":[],"maximum_spell_level":0,"prepared_or_known_count":0,"slot_counts":[0,0,0,0,0,0,0,0,0]},{"cantrips_known":0,"class_level":2,"grants":[],"maximum_spell_level":0,"prepared_or_known_count":0,"slot_counts":[0,0,0,0,0,0,0,0,0]},{"cantrips_known":0,"class_level":3,"grants":[],"maximum_spell_level":0,"prepared_or_known_count":0,"slot_counts":[0,0,0,0,0,0,0,0,0]},{"cantrips_known":0,"class_level":4,"grants":[],"maximum_spell_level":0,"prepared_or_known_count":0,"slot_counts":[0,0,0,0,0,0,0,0,0]},{"cantrips_known":0,"class_level":5,"grants":[],"maximum_spell_level":0,"prepared_or_known_count":0,"slot_counts":[0,0,0,0,0,0,0,0,0]},{"cantrips_known":0,"class_level":6,"grants":[],"maximum_spell_level":0,"prepared_or_known_count":0,"slot_counts":[0,0,0,0,0,0,0,0,0]},{"cantrips_known":0,"class_level":7,"grants":[],"maximum_spell_level":0,"prepared_or_known_count":0,"slot_counts":[0,0,0,0,0,0,0,0,0]},{"cantrips_known":0,"class_level":8,"grants":[],"maximum_spell_level":0,"prepared_or_known_count":0,"slot_counts":[0,0,0,0,0,0,0,0,0]},{"cantrips_known":0,"class_level":9,"grants":[],"maximum_spell_level":0,"prepared_or_known_count":0,"slot_counts":[0,0,0,0,0,0,0,0,0]},{"cantrips_known":0,"class_level":10,"grants":[],"maximum_spell_level":0,"prepared_or_known_count":0,"slot_counts":[0,0,0,0,0,0,0,0,0]},{"cantrips_known":0,"class_level":11,"grants":[],"maximum_spell_level":0,"prepared_or_known_count":0,"slot_counts":[0,0,0,0,0,0,0,0,0]},{"cantrips_known":0,"class_level":12,"grants":[],"maximum_spell_level":0,"prepared_or_known_count":0,"slot_counts":[0,0,0,0,0,0,0,0,0]},{"cantrips_known":0,"class_level":13,"grants":[],"maximum_spell_level":0,"prepared_or_known_count":0,"slot_counts":[0,0,0,0,0,0,0,0,0]},{"cantrips_known":0,"class_level":14,"grants":[],"maximum_spell_level":0,"prepared_or_known_count":0,"slot_counts":[0,0,0,0,0,0,0,0,0]},{"cantrips_known":0,"class_level":15,"grants":[],"maximum_spell_level":0,"prepared_or_known_count":0,"slot_counts":[0,0,0,0,0,0,0,0,0]},{"cantrips_known":0,"class_level":16,"grants":[],"maximum_spell_level":0,"prepared_or_known_count":0,"slot_counts":[0,0,0,0,0,0,0,0,0]},{"cantrips_known":0,"class_level":17,"grants":[],"maximum_spell_level":0,"prepared_or_known_count":0,"slot_counts":[0,0,0,0,0,0,0,0,0]},{"cantrips_known":0,"class_level":18,"grants":[],"maximum_spell_level":0,"prepared_or_known_count":0,"slot_counts":[0,0,0,0,0,0,0,0,0]},{"cantrips_known":0,"class_level":19,"grants":[],"maximum_spell_level":0,"prepared_or_known_count":0,"slot_counts":[0,0,0,0,0,0,0,0,0]},{"cantrips_known":0,"class_level":20,"grants":[],"maximum_spell_level":0,"prepared_or_known_count":0,"slot_counts":[0,0,0,0,0,0,0,0,0]}],"spellcasting_ability":null},"reference_text":""},"scheme":"content-v1"}',
+    sha256: '49306511d4dd5f33d04301c7d5035dcd1a60fa0ba063d1d20d05ee2ae784c01f',
+    derivedKey: 'expanded:content.v1:49306511d4dd5f33d04301c7d5035dcd1a60fa0ba063d1d20d05ee2ae784c01f',
+  },
+  {
+    label: 'subclass definition grant discriminates identity',
+    kind: 'subclass',
+    aggregate: grantedSubclassAggregate,
+    payload: grantedSubclassPayload,
+    // Definition grants are an ordered outer sequence. The fixed-spell grant
+    // is complete and precedes parent/progression/reference in canonical key
+    // order; no progression-owned caster fields are duplicated at the root.
+    canonicalJson: '{"edition":"expanded","kind":"subclass","normalizedName":"runewarden","payload":{"features":[],"grants":[{"always_prepared":true,"kind":"fixed_spell","rule_key":"subclass.spark","spell":{"digest":"1111111111111111111111111111111111111111111111111111111111111111","kind":"spell","scheme":"content-v1"}}],"parent_class":{"digest":"3333333333333333333333333333333333333333333333333333333333333333","kind":"class","scheme":"content-v1"},"progression":{"mode":"inherit_parent"},"reference_text":"A definition-level spell grant."},"scheme":"content-v1"}',
+    sha256: 'a0788cdb42eca17f771adbae441e086630d8fa262d96c9be491178f0f99bb686',
+    derivedKey: 'expanded:content.v1:a0788cdb42eca17f771adbae441e086630d8fa262d96c9be491178f0f99bb686',
   },
 ] as const;
 

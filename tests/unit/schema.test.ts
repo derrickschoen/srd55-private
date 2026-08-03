@@ -319,7 +319,7 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
     integer: ['id', 'class_definition_id'],
     text: [
       'content_key', 'name', 'rules_edition', 'spellcasting_ability',
-      'caster_fraction', 'caster_rounding', 'grant_rules',
+      'caster_fraction', 'caster_rounding', 'grant_rules', 'notes',
     ],
     numeric: ['created_at', 'updated_at'],
   },

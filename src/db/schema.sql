@@ -1514,6 +1514,7 @@ CREATE TABLE `subclass_definitions` (
 	`grant_rules` TEXT,
 	`created_at` DATETIME,
 	`updated_at` DATETIME,
+	`notes` TEXT,
 	FOREIGN KEY (`content_key`) REFERENCES `catalog_content_identities`(`content_key`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`class_definition_id`) REFERENCES `class_definitions`(`id`) ON UPDATE no action ON DELETE cascade
 );

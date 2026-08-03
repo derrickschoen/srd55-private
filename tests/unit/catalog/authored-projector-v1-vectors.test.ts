@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { AUTHORED_PROJECTOR_INVENTORY_V1 } from '../../../src/catalog/authored-content-projector-contract-v1';
-import { deriveContentIdentityV1 } from '../../../src/catalog/content-identity';
+import {
+  contentIdentitySequence,
+  deriveContentIdentityV1,
+} from '../../../src/catalog/content-identity';
 import {
   authoredGrantSetV1Vectors,
   authoredProjectorV1Vectors,
@@ -97,5 +100,51 @@ describe('HA-1 authored content-v1 projector contracts', () => {
     }
     expect(override.aggregate.progression.rows.map((row) => row.class_level))
       .toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
+  });
+
+  it('definition grants discriminate subclass identity', () => {
+    const granted = authoredProjectorV1Vectors[4];
+    const withDefinitionGrant = deriveContentIdentityV1({
+      kind: 'subclass',
+      edition: granted.aggregate.rules_edition,
+      name: granted.aggregate.name,
+      payload: granted.payload,
+    });
+    const withoutDefinitionGrant = deriveContentIdentityV1({
+      kind: 'subclass',
+      edition: granted.aggregate.rules_edition,
+      name: granted.aggregate.name,
+      payload: {
+        ...granted.payload,
+        grants: contentIdentitySequence([]),
+      },
+    });
+
+    expect(withDefinitionGrant.derivedKey)
+      .not.toBe(withoutDefinitionGrant.derivedKey);
+  });
+
+  it('keeps species, background, and grant convergence vector identities unchanged', () => {
+    expect([
+      ...authoredProjectorV1Vectors.slice(0, 2),
+      ...authoredGrantSetV1Vectors,
+    ].map(({ sha256, derivedKey }) => ({ sha256, derivedKey }))).toEqual([
+      {
+        sha256: '5db52e3a3e543c4e9ffaa7a1d73191c5889b60457cffe8a9fb01a5236bb05b24',
+        derivedKey: 'expanded:content.v1:5db52e3a3e543c4e9ffaa7a1d73191c5889b60457cffe8a9fb01a5236bb05b24',
+      },
+      {
+        sha256: 'b549f874b36dfe98d88e5f8469dd2968f34fe83e8251f3ae74a88b3be93082ad',
+        derivedKey: 'expanded:content.v1:b549f874b36dfe98d88e5f8469dd2968f34fe83e8251f3ae74a88b3be93082ad',
+      },
+      {
+        sha256: '99eb9b5e461081b98fe764cbc11d38b9d0d17c0344d306333b62089380da23d7',
+        derivedKey: 'expanded:content.v1:99eb9b5e461081b98fe764cbc11d38b9d0d17c0344d306333b62089380da23d7',
+      },
+      {
+        sha256: '9e313559ef745814f28746d2c6d6d2969dd8ff380f461ecce55d0d70536d28af',
+        derivedKey: 'expanded:content.v1:9e313559ef745814f28746d2c6d6d2969dd8ff380f461ecce55d0d70536d28af',
+      },
+    ]);
   });
 });

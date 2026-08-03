@@ -192,7 +192,7 @@ describe('database migration chain', () => {
 
   it('preserves pre-0028 effects while opening authored storage', async () => {
     const beforeAuthorableEffects = DATABASE_MIGRATIONS
-      .slice(0, -2)
+      .slice(0, -3)
       .map((entry) => entry.sql)
       .join('\n');
     const storage = await storageHolding(beforeAuthorableEffects);
@@ -310,6 +310,34 @@ describe('database migration chain', () => {
     expect(lifecycle.database.scalar<number>(
       'SELECT count(*) FROM pragma_foreign_key_check',
     )).toBe(0);
+    lifecycle.close();
+  });
+
+  it('adds nullable subclass reference text while preserving existing rows', async () => {
+    const beforeSubclassReferenceText = DATABASE_MIGRATIONS
+      .slice(0, -1)
+      .map((entry) => entry.sql)
+      .join('\n');
+    const storage = await storageHolding(`${beforeSubclassReferenceText}
+      INSERT INTO class_definitions (
+        id, content_key, name, rules_edition, progression_type
+      ) VALUES (1, 'expanded:class:notes', 'Notes Class', 'expanded', 'none');
+      INSERT INTO subclass_definitions (
+        id, content_key, class_definition_id, name, rules_edition, grant_rules
+      ) VALUES (
+        2, 'expanded:subclass:notes', 1, 'Notes Subclass', 'expanded', '[]'
+      );`);
+
+    const lifecycle = new DatabaseLifecycle(sqlite3, storage, schema);
+    lifecycle.open();
+
+    expect(lifecycle.database.oneRaw(`
+      SELECT name, grant_rules, notes FROM subclass_definitions WHERE id = 2
+    `)).toEqual({
+      name: 'Notes Subclass',
+      grant_rules: '[]',
+      notes: null,
+    });
     lifecycle.close();
   });
 

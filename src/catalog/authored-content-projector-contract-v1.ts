@@ -218,6 +218,7 @@ export interface CanonicalSubclassFeatureV1 {
 export interface SubclassProjectorPayloadV1 {
   readonly reference_text: CanonicalRuleText;
   readonly parent_class: ContentFingerprintReference<'class'>;
+  readonly grants: ContentIdentitySequence<CanonicalAuthoringGrantV1>;
   readonly progression: SubclassProgressionProjectionV1;
   readonly features: ContentIdentitySequence<CanonicalSubclassFeatureV1>;
 }
