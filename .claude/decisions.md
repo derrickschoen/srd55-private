@@ -7,6 +7,17 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D182 — OWNER-DIRECTED: divination joins the Oath of Domination spell list (2026-08-03)
+
+Amends D179's list: each tier pairs a command spell with a VISION spell -
+Command/Bane; Suggestion/AUGURY; Slow (or Hypnotic Pattern)/CLAIRVOYANCE;
+Compulsion/DIVINATION; Dominate Person/SCRYING (alternates Hold Monster/
+Geas/Commune). All verified present in SRD 5.2.1. Rationale recorded:
+Augury and Divination give D181's never-confirm-never-debunk ambiguity
+mechanical teeth - their answers are DM-ambiguous by rule. The lost Hold
+spells' combat power is an accepted cost per the paladin's low subclass
+budget. Design doc binds the final picks.
+
 ## D181 — OWNER: the oath-holder is FALLIBLE; prophecy-madness reframe (2026-08-03)
 
 Refines D180: the Oath of Domination knight must NOT know for sure they
