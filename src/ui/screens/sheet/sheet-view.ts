@@ -93,6 +93,87 @@ export function sheetHeaderRouteActions(
 
 export const SHEET_JSON_SCRIPT_ID = 'character-sheet-facts';
 
+export const FLAVOR_PRINT_CODE_POINT_LIMIT = 400;
+export const FLAVOR_APPENDIX_ORDER = 100;
+export const SHEET_PRINT_APPENDIX_CLASS = 'sheet-print-appendix';
+export const SHEET_PRINT_APPENDIX_PROSE_CLASS =
+  'sheet-print-appendix-prose';
+
+export interface FlavorAppendixContent {
+  readonly id: 'flavor';
+  readonly order: number;
+  readonly title: string;
+  readonly entries: readonly {
+    readonly id: 'backstory' | 'notes';
+    readonly label: string;
+    readonly text: string;
+  }[];
+}
+
+export interface SheetPrintAppendixRegistration {
+  readonly id: string;
+  readonly order: number;
+  readonly element: HTMLElement;
+}
+
+export interface FlavorPrintProjection {
+  readonly text: string;
+  readonly total_code_points: number;
+  readonly printed_code_points: number;
+  readonly continuation: string | null;
+}
+
+function presentFlavorText(value: string | null): value is string {
+  return value !== null && value.trim().length > 0;
+}
+
+/** Pure, code-point-aware projection used by the transient print DOM. */
+export function flavorPrintProjection(value: string): FlavorPrintProjection {
+  const codePoints = [...value];
+  if (codePoints.length <= FLAVOR_PRINT_CODE_POINT_LIMIT) {
+    return {
+      text: value,
+      total_code_points: codePoints.length,
+      printed_code_points: codePoints.length,
+      continuation: null,
+    };
+  }
+  return {
+    text: codePoints.slice(0, FLAVOR_PRINT_CODE_POINT_LIMIT).join(''),
+    total_code_points: codePoints.length,
+    printed_code_points: FLAVOR_PRINT_CODE_POINT_LIMIT,
+    continuation:
+      `Text cut for the main sheet: the first ${String(FLAVOR_PRINT_CODE_POINT_LIMIT)} ` +
+      `of ${String(codePoints.length)} code points are printed here. The full ` +
+      'written-text appendix option prints the rest.',
+  };
+}
+
+/** Pure appendix factory: stored text enters unchanged and no DOM is required. */
+export function flavorAppendix(
+  sheet: CharacterSheet,
+): FlavorAppendixContent | null {
+  const entries: FlavorAppendixContent['entries'][number][] = [];
+  if (presentFlavorText(sheet.flavor.backstory)) {
+    entries.push({
+      id: 'backstory',
+      label: 'Backstory',
+      text: sheet.flavor.backstory,
+    });
+  }
+  if (presentFlavorText(sheet.flavor.notes)) {
+    entries.push({ id: 'notes', label: 'Notes', text: sheet.flavor.notes });
+  }
+  return entries.length === 0
+    ? null
+    : {
+        id: 'flavor',
+        order: FLAVOR_APPENDIX_ORDER,
+        title: 'Full character written text',
+        entries,
+      };
+}
+
 /** One run of text in the readable form. `free_text` means the author is unverified. */
 export interface SheetCell {
   readonly text: string;
@@ -952,6 +1033,28 @@ export function sheetSections(sheet: CharacterSheet): readonly SheetSection[] {
     });
   }
 
+  const flavorRows: SheetRow[] = [];
+  const flavorFields = [
+    ['alignment', 'Alignment', sheet.flavor.alignment],
+    ['appearance', 'Appearance', sheet.flavor.appearance],
+    ['backstory', 'Backstory', sheet.flavor.backstory],
+    ['notes', 'Notes', sheet.flavor.notes],
+  ] as const;
+  for (const [id, label, value] of flavorFields) {
+    if (!presentFlavorText(value)) {
+      continue;
+    }
+    flavorRows.push({
+      id: `flavor:${id}`,
+      label: plain(`${label} — unverified free text`),
+      value: null,
+      detail: [{ text: value, free_text: true }],
+    });
+  }
+  if (flavorRows.length > 0) {
+    sections.push({ caption: 'Character details', rows: flavorRows });
+  }
+
   const recorded: SheetRow[] = [];
   if (sheet.armor.length === 0) {
     recorded.push({
@@ -1362,6 +1465,9 @@ function renderSheetRow(row: SheetRow): HTMLDivElement {
   }
   const detail = document.createElement('p');
   detail.className = 'sheet-formula';
+  if (row.id.startsWith('flavor:')) {
+    detail.classList.add('sheet-flavor-value');
+  }
   cells(row.detail, detail);
   value.append(detail);
   container.append(label, value);
@@ -1477,6 +1583,21 @@ export function renderSheet(sheet: CharacterSheet): HTMLElement {
   heading.append('Character sheet — ');
   heading.append(freeTextSpan(sheet.name));
   header.append(...routeActions, print, heading);
+  if (flavorAppendix(sheet) !== null) {
+    const options = document.createElement('fieldset');
+    options.className = 'sheet-print-options sheet-chrome';
+    const legend = document.createElement('legend');
+    legend.textContent = 'Print options';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.id = `sheet-print-flavor-${String(sheet.character_id)}`;
+    input.dataset.sheetPrintOption = 'flavor-appendix';
+    const label = document.createElement('label');
+    label.htmlFor = input.id;
+    label.textContent = 'Include full backstory and notes appendix';
+    options.append(legend, input, label);
+    header.append(options);
+  }
   shell.append(header);
 
   // THE WARNINGS COME FIRST AND ARE NOT COLLAPSIBLE. Each describes a
@@ -1542,6 +1663,12 @@ export function renderSheet(sheet: CharacterSheet): HTMLElement {
 
 const PRINT_FIELD_SELECTOR = '[data-sheet-print-field]';
 const PRINT_NOTICE_SELECTOR = '[data-sheet-print-notice]';
+const PRINT_APPENDIX_SELECTOR = '[data-sheet-print-appendix]';
+
+export interface SheetPrintOptions {
+  readonly flavor_appendix: boolean;
+  readonly [option: string]: boolean;
+}
 
 function emptyPaperEntry(kind: 'box' | 'line'): HTMLSpanElement {
   const entry = document.createElement('span');
@@ -1549,6 +1676,102 @@ function emptyPaperEntry(kind: 'box' | 'line'): HTMLSpanElement {
   entry.dataset.sheetPrintEntry = kind;
   entry.setAttribute('aria-label', 'Empty; fill in on paper');
   return entry;
+}
+
+function setFlavorPrintRows(
+  shell: HTMLElement,
+  sheet: CharacterSheet,
+  printMedia: boolean,
+): void {
+  const values = [
+    ['alignment', sheet.flavor.alignment, false],
+    ['appearance', sheet.flavor.appearance, false],
+    ['backstory', sheet.flavor.backstory, true],
+    ['notes', sheet.flavor.notes, true],
+  ] as const;
+  for (const [id, value, truncatable] of values) {
+    if (!presentFlavorText(value)) {
+      continue;
+    }
+    const container = shell.querySelector<HTMLElement>(
+      `[data-sheet-id="flavor:${id}"] .sheet-flavor-value`,
+    );
+    if (container === null) {
+      throw new Error(`The printable sheet requires its ${id} flavor row.`);
+    }
+    const projection =
+      printMedia && truncatable
+        ? flavorPrintProjection(value)
+        : {
+            text: value,
+            total_code_points: [...value].length,
+            printed_code_points: [...value].length,
+            continuation: null,
+          };
+    container.replaceChildren(freeTextSpan(projection.text));
+    if (projection.continuation !== null) {
+      const marker = document.createElement('span');
+      marker.className = 'sheet-flavor-continuation';
+      marker.dataset.sheetFlavorContinuation = id;
+      marker.textContent = projection.continuation;
+      container.append(marker);
+    }
+  }
+}
+
+function renderFlavorAppendix(
+  content: FlavorAppendixContent,
+): SheetPrintAppendixRegistration {
+  const appendix = document.createElement('section');
+  appendix.className = `${SHEET_PRINT_APPENDIX_CLASS} sheet-flavor-appendix`;
+  const heading = document.createElement('h2');
+  heading.textContent = content.title;
+  appendix.append(heading);
+  for (const entry of content.entries) {
+    const section = document.createElement('section');
+    section.className = 'sheet-print-appendix-section';
+    section.dataset.flavorAppendixEntry = entry.id;
+    const label = document.createElement('h3');
+    label.textContent = `${entry.label} — unverified free text`;
+    const prose = document.createElement('p');
+    prose.className = `${SHEET_PRINT_APPENDIX_PROSE_CLASS} sheet-flavor-value`;
+    prose.append(freeTextSpan(entry.text));
+    section.append(label, prose);
+    appendix.append(section);
+  }
+  return {
+    id: content.id,
+    order: content.order,
+    element: appendix,
+  };
+}
+
+/**
+ * Shared relative-order compositor. Future appendix producers register an
+ * order and element; no producer owns a closed list of appendix kinds.
+ */
+export function composeSheetPrintAppendices(
+  shell: HTMLElement,
+  registrations: readonly SheetPrintAppendixRegistration[],
+): void {
+  for (const appendix of Array.from(
+    shell.querySelectorAll(PRINT_APPENDIX_SELECTOR),
+  )) {
+    appendix.remove();
+  }
+  const notice = shell.querySelector(PRINT_NOTICE_SELECTOR);
+  for (const registration of orderedSheetPrintAppendices(registrations)) {
+    registration.element.dataset.sheetPrintAppendix = registration.id;
+    shell.insertBefore(registration.element, notice);
+  }
+}
+
+export function orderedSheetPrintAppendices(
+  registrations: readonly SheetPrintAppendixRegistration[],
+): readonly SheetPrintAppendixRegistration[] {
+  return [...registrations].sort(
+    (left, right) => left.order - right.order || left.id.localeCompare(right.id),
+  );
 }
 
 /**
@@ -1559,14 +1782,18 @@ function emptyPaperEntry(kind: 'box' | 'line'): HTMLSpanElement {
  */
 export function setSheetPrintContent(
   shell: HTMLElement,
+  sheet: CharacterSheet,
   printMedia: boolean,
+  options: SheetPrintOptions,
 ): void {
   for (const field of Array.from(
     shell.querySelectorAll(PRINT_FIELD_SELECTOR),
   )) {
     field.remove();
   }
+  composeSheetPrintAppendices(shell, []);
   shell.querySelector(PRINT_NOTICE_SELECTOR)?.remove();
+  setFlavorPrintRows(shell, sheet, printMedia);
   if (!printMedia) {
     return;
   }
@@ -1606,6 +1833,13 @@ export function setSheetPrintContent(
   experiencePointsValue.append(emptyPaperEntry('line'));
   experiencePoints.append(experiencePointsLabel, experiencePointsValue);
   totalLevel.after(experiencePoints);
+
+  const appendices: SheetPrintAppendixRegistration[] = [];
+  const flavorContent = flavorAppendix(sheet);
+  if (options.flavor_appendix && flavorContent !== null) {
+    appendices.push(renderFlavorAppendix(flavorContent));
+  }
+  composeSheetPrintAppendices(shell, appendices);
 
   const notice = document.createElement('section');
   notice.className = 'sheet-print-notice';

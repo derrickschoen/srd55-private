@@ -3,6 +3,13 @@ import type { Database } from '@sqlite.org/sqlite-wasm';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { DatabaseContext } from '../../src/db/database';
+import {
+  TABLE_SCOPES,
+  type TablesWithRole,
+} from '../../src/domain/contracts/tables';
+import {
+  PRINT_APPENDIX_PREFERENCE_KEYS,
+} from '../../src/queries/print-appendix-preferences';
 import { readLevelUpSeam } from './fixtures/level-up-seam';
 
 const schema = readFileSync(
@@ -36,20 +43,39 @@ const HOSTILE_SPELL_SOURCE =
 const HOSTILE_SPELL_PROSE =
   '</p><script data-hostile-spell-prose>appendix-payload</script>';
 const SAGE_TOOL_TEXT = 'Calligrapher’s Supplies';
+const HOSTILE_BACKSTORY =
+  'a'.repeat(399) +
+  '🪐' +
+  ' tail </script><img data-hostile-flavor src=x onerror="globalThis.flavorWasMarkup=true">';
+const LONG_NOTES = `note before\n${'long-note '.repeat(250)}\nnote after`;
+const FULL_APPEARANCE = `Silver eyes\n${'blue cloak '.repeat(80)}appearance end`;
 
 interface SheetImage {
   readonly bytes: number[];
   readonly characterId: number;
+  readonly blankFlavorCharacterId?: number;
+  readonly partialFlavorCharacterId?: number;
 }
 
 function exportedImage(
   sqlite3: Awaited<ReturnType<typeof sqlite3InitModule>>,
   connection: Database,
   characterId: number,
+  blankFlavorCharacterId?: number,
+  partialFlavorCharacterId?: number,
 ): SheetImage {
   const bytes = Array.from(sqlite3.capi.sqlite3_js_db_export(connection));
   connection.close();
-  return { bytes, characterId };
+  return {
+    bytes,
+    characterId,
+    ...(blankFlavorCharacterId === undefined
+      ? {}
+      : { blankFlavorCharacterId }),
+    ...(partialFlavorCharacterId === undefined
+      ? {}
+      : { partialFlavorCharacterId }),
+  };
 }
 
 function defineClass(
@@ -198,9 +224,24 @@ async function sheetImage(): Promise<SheetImage> {
   // Intelligence 12 (+1), Wisdom 11 (+0), Charisma 8 (−1).
   const characterId = db.exec(
     `INSERT INTO characters
-       (name, strength, dexterity, constitution, intelligence, wisdom, charisma)
-     VALUES (?, 15, 14, 13, 12, 11, 8)`,
-    [HOSTILE_NAME],
+       (name, strength, dexterity, constitution, intelligence, wisdom, charisma,
+        alignment, appearance, backstory, notes)
+     VALUES (?, 15, 14, 13, 12, 11, 8, ?, ?, ?, ?)`,
+    [
+      HOSTILE_NAME,
+      '  Chaotic Good  ',
+      FULL_APPEARANCE,
+      HOSTILE_BACKSTORY,
+      LONG_NOTES,
+    ],
+  ).lastInsertId;
+  const blankFlavorCharacterId = db.exec(
+    `INSERT INTO characters (name, alignment, appearance, backstory, notes)
+     VALUES ('No flavor recorded', NULL, '   ', NULL, '\n')`,
+  ).lastInsertId;
+  const partialFlavorCharacterId = db.exec(
+    `INSERT INTO characters (name, alignment, appearance, backstory, notes)
+     VALUES ('One flavor row', NULL, ' \t ', NULL, 'Only this row prints')`,
   ).lastInsertId;
   // D102: the background's printed tool text is retained as prose. It does not
   // become a proficiency fact, but it makes the conditional sheet gap relevant.
@@ -351,7 +392,13 @@ async function sheetImage(): Promise<SheetImage> {
     [characterId],
   );
 
-  return exportedImage(sqlite3, connection, characterId);
+  return exportedImage(
+    sqlite3,
+    connection,
+    characterId,
+    blankFlavorCharacterId,
+    partialFlavorCharacterId,
+  );
 }
 
 async function resourceShapeImage(): Promise<SheetImage> {
@@ -571,6 +618,50 @@ async function install(page: Page, image: SheetImage): Promise<void> {
   );
 }
 
+async function rows(
+  page: Page,
+  table: string,
+  where: Record<string, string | number | boolean | null> = {},
+): Promise<Record<string, unknown>[]> {
+  return page.evaluate(
+    ({ tableName, filters }) =>
+      window.staticApp.inspectRows(tableName, filters),
+    { tableName: table, filters: where },
+  ) as Promise<Record<string, unknown>[]>;
+}
+
+type CharacterScopedTable = TablesWithRole<
+  'character_root' | 'character_owned'
+>;
+
+const CHARACTER_SCOPED_TABLES = Object.entries(TABLE_SCOPES).flatMap(
+  ([table, scopes]) =>
+    scopes.role === 'character_root' || scopes.role === 'character_owned'
+      ? [table as CharacterScopedTable]
+      : [],
+);
+
+async function characterScopedRows(
+  page: Page,
+): Promise<
+  Readonly<Record<CharacterScopedTable, Record<string, unknown>[]>>
+  > {
+  return page.evaluate(
+    async (tables) =>
+      Object.fromEntries(
+        await Promise.all(
+          tables.map(async (table) => [
+            table,
+            await window.staticApp.inspectRows(table),
+          ]),
+        ),
+      ),
+    CHARACTER_SCOPED_TABLES,
+  ) as Promise<
+    Readonly<Record<CharacterScopedTable, Record<string, unknown>[]>>
+  >;
+}
+
 async function navigateWithinApp(page: Page, path: string): Promise<void> {
   await page.evaluate((target) => {
     window.history.pushState(null, '', target);
@@ -601,6 +692,13 @@ async function expectHorizontallyContained(
   expect(box.x + box.width).toBeLessThanOrEqual(
     await page.evaluate(() => window.innerWidth),
   );
+}
+
+async function expectExactText(
+  locator: Locator,
+  expected: string,
+): Promise<void> {
+  await expect.poll(() => locator.textContent()).toBe(expected);
 }
 
 test('a phone-width character sheet keeps its warnings, numbers, and controls usable', async ({
@@ -772,7 +870,7 @@ test('spellbook entries render distinctly and are never labeled Prepared or Know
   await expect(spellbook).toHaveCSS('border-top-style', 'solid');
 });
 
-test('print character sheet button calls window.print and writes nothing', async ({
+test('print button writes nothing when no named appendix preference changes', async ({
   page,
 }, testInfo) => {
   // Measured alone at 13.3s on Chromium; fixture construction dominates.
@@ -981,6 +1079,216 @@ test('print media keeps the sheet and warnings, adds paper fields, and ends with
   await expect(currentHitPoints).toHaveCount(0);
   await expect(experiencePoints).toHaveCount(0);
   await expect(notice).toHaveCount(0);
+});
+
+// Measured alone at 12.3s on this worktree; fixture construction dominates.
+test('hostile backstory remains visible inert text', async ({ page }, testInfo) => {
+  testInfo.setTimeout(20_000);
+  const image = await sheetImage();
+  await install(page, image);
+  await page.goto(`/characters/${image.characterId}/sheet`);
+
+  const backstory = page.locator('[data-sheet-id="flavor:backstory"]');
+  const backstoryText = backstory.locator(
+    '.sheet-flavor-value [data-free-text="unverified-origin"]',
+  );
+  await expect(backstory).toContainText('Backstory — unverified free text');
+  await expect(backstoryText).toHaveText(HOSTILE_BACKSTORY);
+  await expect(page.locator('[data-hostile-flavor]')).toHaveCount(0);
+  expect(
+    await page.evaluate(() => Reflect.get(globalThis, 'flavorWasMarkup')),
+  ).toBeUndefined();
+  await expect(backstory.locator('.sheet-flavor-value')).toHaveCSS(
+    'white-space',
+    'pre-wrap',
+  );
+  const facts = await page.locator('#character-sheet-facts').textContent();
+  expect(facts).not.toContain('backstory');
+  expect(facts).not.toContain(HOSTILE_BACKSTORY);
+});
+
+// Measured alone at 13.0s on this worktree; three sheet projections dominate.
+test('print shows only present flavor with unverified label', async ({
+  page,
+}, testInfo) => {
+  testInfo.setTimeout(20_000);
+  const image = await sheetImage();
+  if (
+    image.blankFlavorCharacterId === undefined ||
+    image.partialFlavorCharacterId === undefined
+  ) {
+    throw new Error('The flavor fixture requires its presence-control rows.');
+  }
+  await install(page, image);
+
+  await page.goto(`/characters/${image.partialFlavorCharacterId}/sheet`);
+  await expect(
+    page.getByRole('heading', { name: 'Character details' }),
+  ).toBeVisible();
+  await expect(page.locator('[data-sheet-id^="flavor:"]')).toHaveCount(1);
+  await expect(page.locator('[data-sheet-id="flavor:notes"]')).toContainText(
+    'Notes — unverified free textOnly this row prints',
+  );
+  await page.emulateMedia({ media: 'print' });
+  await expect(page.locator('[data-sheet-id="flavor:notes"]')).toBeVisible();
+  await page.emulateMedia({ media: 'screen' });
+
+  await navigateWithinApp(
+    page,
+    `/characters/${image.blankFlavorCharacterId}/sheet`,
+  );
+  await expect(
+    page.getByRole('heading', { name: 'Character details' }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByLabel('Include full backstory and notes appendix'),
+  ).toHaveCount(0);
+  await page.emulateMedia({ media: 'print' });
+  await expect(page.locator('[data-sheet-print-appendix]')).toHaveCount(0);
+  await page.emulateMedia({ media: 'screen' });
+});
+
+// Measured alone at 15.2s on this worktree; reload and print transitions dominate.
+test('flavor appendix is opt-in, remembered, ordered, and carries full text', async ({
+  page,
+}, testInfo) => {
+  testInfo.setTimeout(20_000);
+  const image = await sheetImage();
+  if (image.partialFlavorCharacterId === undefined) {
+    throw new Error('The flavor fixture requires its preference-control row.');
+  }
+  await install(page, image);
+  await page.goto(`/characters/${image.characterId}/sheet`);
+
+  const option = page.getByLabel('Include full backstory and notes appendix');
+  const backstory = page.locator('[data-sheet-id="flavor:backstory"]');
+  const notes = page.locator('[data-sheet-id="flavor:notes"]');
+  const alignment = page.locator(
+    '[data-sheet-id="flavor:alignment"] .sheet-flavor-value [data-free-text]',
+  );
+  const appearance = page.locator(
+    '[data-sheet-id="flavor:appearance"] .sheet-flavor-value [data-free-text]',
+  );
+  await expect(option).not.toBeChecked();
+  await expectExactText(backstory.locator('[data-free-text]'), HOSTILE_BACKSTORY);
+  await expectExactText(notes.locator('[data-free-text]'), LONG_NOTES);
+  await expectExactText(alignment, '  Chaotic Good  ');
+  await expectExactText(appearance, FULL_APPEARANCE);
+
+  await page.emulateMedia({ media: 'print' });
+  await expect(page.locator('[data-sheet-print-appendix]')).toHaveCount(0);
+  await expectExactText(
+    backstory.locator('[data-free-text]'),
+    'a'.repeat(399) + '🪐',
+  );
+  await expect(notes.locator('[data-free-text]')).not.toHaveText(LONG_NOTES);
+  await expect(
+    page.locator('[data-sheet-flavor-continuation="backstory"]'),
+  ).toContainText(
+    'Text cut for the main sheet: the first 400 of 488 code points are printed here.',
+  );
+  await expect(
+    page.locator('[data-sheet-flavor-continuation="notes"]'),
+  ).toContainText('The full written-text appendix option prints the rest.');
+  await expectExactText(alignment, '  Chaotic Good  ');
+  await expectExactText(appearance, FULL_APPEARANCE);
+
+  await page.emulateMedia({ media: 'screen' });
+  await expectExactText(backstory.locator('[data-free-text]'), HOSTILE_BACKSTORY);
+  await expectExactText(notes.locator('[data-free-text]'), LONG_NOTES);
+  await expect(page.locator('[data-sheet-flavor-continuation]')).toHaveCount(0);
+  const beforeCharacterScopedRows = await characterScopedRows(page);
+  await option.check();
+  await expect
+    .poll(async () =>
+      rows(page, 'character_rule_overrides', {
+        character_id: image.characterId,
+      }),
+    )
+    .toEqual([
+      expect.objectContaining({
+        character_id: image.characterId,
+        rule_key: PRINT_APPENDIX_PREFERENCE_KEYS.flavor,
+        value: 'true',
+        note: null,
+      }),
+    ]);
+  // SS-BROWSER-NO-WRITE, narrowed by D162: every registry-classified
+  // character table must stay unchanged. Only this character's three named
+  // print-preference rows may differ in character_rule_overrides.
+  const afterCharacterScopedRows = await characterScopedRows(page);
+  const namedPreferenceKeys = new Set<string>(
+    Object.values(PRINT_APPENDIX_PREFERENCE_KEYS),
+  );
+  const withoutNamedPreferenceRows = (tableRows: Record<string, unknown>[]) =>
+    tableRows.filter(
+      (row) =>
+        row.character_id !== image.characterId ||
+        typeof row.rule_key !== 'string' ||
+        !namedPreferenceKeys.has(row.rule_key),
+    );
+  for (const table of CHARACTER_SCOPED_TABLES) {
+    const beforeRows = beforeCharacterScopedRows[table];
+    const afterRows = afterCharacterScopedRows[table];
+    expect(
+      table === 'character_rule_overrides'
+        ? withoutNamedPreferenceRows(afterRows)
+        : afterRows,
+      `${table} changed while persisting a print preference`,
+    ).toEqual(
+      table === 'character_rule_overrides'
+        ? withoutNamedPreferenceRows(beforeRows)
+        : beforeRows,
+    );
+  }
+
+  await navigateWithinApp(
+    page,
+    `/characters/${image.partialFlavorCharacterId}/sheet`,
+  );
+  await expect(
+    page.getByLabel('Include full backstory and notes appendix'),
+  ).not.toBeChecked();
+  await navigateWithinApp(page, `/characters/${image.characterId}/sheet`);
+
+  // D104's closing control: reload from persistence before entering print.
+  await page.reload();
+  const rememberedOption = page.getByLabel(
+    'Include full backstory and notes appendix',
+  );
+  await expect(rememberedOption).toBeChecked();
+  await page.emulateMedia({ media: 'print' });
+
+  const appendix = page.locator('[data-sheet-print-appendix="flavor"]');
+  await expect(appendix).toBeVisible();
+  await expectExactText(
+    appendix.locator(
+      '[data-flavor-appendix-entry="backstory"] [data-free-text]',
+    ),
+    HOSTILE_BACKSTORY,
+  );
+  await expectExactText(
+    appendix.locator('[data-flavor-appendix-entry="notes"] [data-free-text]'),
+    LONG_NOTES,
+  );
+  await expect(appendix).toHaveCSS('break-before', 'page');
+  await expect(appendix.locator('.sheet-print-appendix-prose').first()).toHaveCSS(
+    'break-inside',
+    'auto',
+  );
+  const notice = page.locator('[data-sheet-print-notice]');
+  expect(
+    await appendix.evaluate(
+      (element) => element.nextElementSibling?.hasAttribute('data-sheet-print-notice'),
+    ),
+  ).toBe(true);
+  expect(
+    await notice.evaluate(
+      (element) => element.parentElement?.lastElementChild === element,
+    ),
+  ).toBe(true);
+  await page.emulateMedia({ media: 'screen' });
+  await expect(page.locator('[data-sheet-print-appendix]')).toHaveCount(0);
 });
 
 test('the legal screen identifies bundled SRD 5.2.1 rules text', async ({
