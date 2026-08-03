@@ -1,0 +1,170 @@
+This work includes material from the System Reference Document 5.2
+("SRD 5.2") by Wizards of the Coast LLC, available at
+https://www.dndbeyond.com/srd. The SRD 5.2 is licensed under the Creative
+Commons Attribution 4.0 International License, available at
+https://creativecommons.org/licenses/by/4.0/legalcode.
+
+--- Selective subclass catalog extract: printed pages 30, 35, 40, 46, 49, 52,
+    56-57, 61, 64, 69-70, 76 and 82. ---
+
+D152 excludes class and subclass feature paragraphs. The body therefore omits
+those paragraphs and neighbouring-column text, and keeps exactly subclass
+headings, Level N feature headings, and the Life Domain, Circle of the Land,
+Oath of Devotion, Draconic Sorcery and Fiend Patron spell tables.
+
+RE-DERIVATION: read docs/srd/full/srd-5.2.1.txt as Unicode characters and emit
+these fixed-width slices in this order:
+- 1872-1916 right, characters 61-end (Barbarian)
+- 2190-2203 left, characters 1-60; 2166-2199 right, characters 61-end (Bard)
+- 2470-2488 left, characters 1-60; 2445-2494 right, characters 61-end (Cleric)
+- 2789-2845 left, characters 1-60; then right, characters 61-end (Druid)
+- 2968-3005 left, characters 1-60 (Fighter)
+- 3130-3169 right, characters 61-end (Monk)
+- 3364-3420 right, characters 64-end; 3425-3442 left, characters 1-60 (Paladin)
+- 3649-3711 left, characters 1-60 (Ranger)
+- 3827-3885 left, characters 1-60 (Rogue)
+- 4167-4188 right, characters 56-end; 4194-4245 left, characters 1-60 (Sorcerer)
+- 4586-4607 left, characters 1-60; 4565-4603 right, characters 61-end (Warlock)
+- 4944-4959 left, characters 1-60; 4902-4944 right, characters 61-end (Wizard)
+
+From each slice emit lines whose trimmed text is a Class Subclass heading or a
+Level N heading. Also emit wrapped-name lines 1873, 2191, 2790, 3131 and 4168,
+and these spell-table lines: 2453, 2455-2456, 2458, 2460, 2462, 2464, 2466;
+2808-2810, 2812, 2814-2815, 2817, 2819, 2821-2822, 2824, 2826, 2828-2829,
+2832, 2834, 2836-2837, 2839-2841, 2843-2845; 3390-3398; 4200, 4202, 4204,
+4206-4207, 4209, 4211, 4213; and 4565-4571. Concatenate retained slices in
+the segment order above without inserting blank body lines. Every retained
+slice below is verbatim; omission is the only edit to source lines.
+
+--- Extracted catalog lines follow. ---
+   Barbarian Subclass:
+   Path of the Berserker
+   Level 3: Frenzy
+   Level 6: Mindless Rage
+   Level 10: Retaliation
+   Level 14: Intimidating Presence
+     Bard Subclass:                                         
+     College of Lore                                        
+     Level 3: Bonus Proficiencies
+   Level 3: Cutting Words
+  Level 6: Magical Discoveries
+  Level 14: Peerless Skill
+     Cleric Subclass: Life Domain                           
+     Level 3: Disciple of Life                              
+    Level 3: Life Domain Spells
+   Life Domain Spells
+   Cleric        Prepared Spells
+   Level
+         3       Aid, Bless, Cure Wounds,
+                 Lesser Restoration
+         5       Mass Healing Word, Revivify
+         7       Aura of Life, Death Ward
+         9       Greater Restoration, Mass Cure Wounds
+   Level 3: Preserve Life
+   Level 6: Blessed Healer
+   Level 17: Supreme Healing
+     Druid Subclass:                                       
+     Circle of the Land                                     
+     Level 3: Circle of the Land Spells                     
+     Arid Land                                              
+      Druid Level    Circle Spells                          
+            3        Blur, Burning Hands, Fire Bolt         
+            5        Fireball
+            7        Blight                                 
+            9        Wall of Stone                          
+     Polar Land                                             
+       Druid Level    Circle Spells
+            3         Fog Cloud, Hold Person, Ray of Frost
+            5         Sleet Storm                           
+            7         Ice Storm
+            9         Cone of Cold                          
+     Temperate Land
+       Druid Level     Circle Spells
+            3          Misty Step, Shocking Grasp, Sleep
+            5          Lightning Bolt
+            7          Freedom of Movement
+            9          Tree Stride                          
+     Tropical Land                                          
+       Druid Level     Circle Spells                        
+            3          Acid Splash, Ray of Sickness, Web    
+            5          Stinking Cloud                       
+            7          Polymorph                            
+            9          Insect Plague                        
+  Level 3: Land’s Aid
+ Level 6: Natural Recovery
+ Level 10: Nature’s Ward
+ Level 14: Nature’s Sanctuary
+     Fighter Subclass: Champion                            
+     Level 3: Improved Critical                             
+     Level 3: Remarkable Athlete
+     Level 7: Additional Fighting Style
+     Level 10: Heroic Warrior                               
+     Level 15: Superior Critical                            
+     Level 18: Survivor                                     
+ Monk Subclass: Warrior of the
+Open Hand
+Level 3: Open Hand Technique
+Level 6: Wholeness of Body
+Level 11: Fleet Step
+Level 17: Quivering Palm
+ Paladin Subclass: Oath of Devotion
+Level 3: Oath of Devotion Spells
+Oath of Devotion Spells
+    Paladin Level   Spells
+         3          Protection from Evil and Good,
+                    Shield of Faith
+         5          Aid, Zone of Truth
+         9          Beacon of Hope, Dispel Magic
+         13         Freedom of Movement,
+                    Guardian of Faith
+         17         Commune, Flame Strike
+Level 3: Sacred Weapon
+Level 7: Aura of Devotion
+     Level 15: Smite of Protection
+     Level 20: Holy Nimbus                                  
+     Ranger Subclass: Hunter                               
+     Level 3: Hunter’s Lore                                 
+     Level 3: Hunter’s Prey                                 
+     Level 7: Defensive Tactics                             
+     Level 11: Superior Hunter’s Prey                       
+     Level 15: Superior Hunter’s Defense                    
+     Rogue Subclass: Thief                                 
+     Level 3: Fast Hands
+     Level 3: Second-Story Work                             
+     Level 9: Supreme Sneak                                 
+     Level 13: Use Magic Device                             
+     Level 17: Thief’s Reflexes                             
+   Sorcerer Subclass: Draconic
+   Sorcery
+   Level 3: Draconic Resilience
+     Level 3: Draconic Spells
+     Draconic Spells
+        Sorcerer
+         Level        Spells
+            3         Alter Self, Chromatic Orb, Command,
+                      Dragon’s Breath                       
+            5         Fear, Fly
+            7         Arcane Eye, Charm Monster
+            9         Legend Lore, Summon Dragon
+     Level 6: Elemental Affinity                            
+     Level 14: Dragon Wings                                 
+     Level 18: Dragon Companion                             
+     Warlock Subclass: Fiend Patron                         
+     Level 3: Dark One’s Blessing                           
+     Level 3: Fiend Spells                                  
+    Fiend Spells
+    Warlock Level Spells
+          3         Burning Hands, Command,
+                    Scorching Ray, Suggestion
+          5         Fireball, Stinking Cloud
+          7         Fire Shield, Wall of Fire
+          9         Geas, Insect Plague
+   Level 6: Dark One’s Own Luck
+   Level 10: Fiendish Resilience
+   Level 14: Hurl Through Hell
+     Wizard Subclass: Evoker                                
+  Level 3: Evocation Savant
+ Level 3: Potent Cantrip
+ Level 6: Sculpt Spells
+ Level 10: Empowered Evocation
+ Level 14: Overchannel
