@@ -7,6 +7,15 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D184 — OWNER: the Exception tenet is PINNED verbatim (2026-08-03)
+
+Owner pinned this tenet as a keeper, surviving all reworks word for
+word: "Every Tyrant Believes He Is the Exception. I have carved that
+warning into my own oath, and I have drawn the sword anyway. Let it be
+recorded that I knew." It is the oath's centerpiece; under D183 it
+self-demonstrates (he knows the rule and is certain he is the
+exception - which is the rule).
+
 ## D183 — OWNER: the prophet has NO doubt - certainty is the horror (2026-08-03)
 
 Refines D181: the knight is fallible IN FACT but subjectively CERTAIN -
