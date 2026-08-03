@@ -21,6 +21,7 @@ import {
   RESOURCE_MARKING_SHAPES,
   flavorAppendix,
   flavorPrintProjection,
+  orderedSheetPrintAppendices,
   sheetHeaderRouteActions,
   sheetFacts,
   sheetSections,
@@ -264,6 +265,11 @@ function sheet(changes: Partial<CharacterSheet> = {}): CharacterSheet {
       appearance: null,
       backstory: null,
       notes: null,
+    },
+    print_appendix_preferences: {
+      flavor: false,
+      spells: false,
+      audit: false,
     },
     hit_point_rolls: [
       {
@@ -1061,6 +1067,17 @@ describe('the character sheet is projected twice from one value', () => {
     );
   });
 
+  it('does not truncate exactly 400 astral code points or add a continuation marker', () => {
+    const value = '🪐'.repeat(FLAVOR_PRINT_CODE_POINT_LIMIT);
+
+    expect(flavorPrintProjection(value)).toEqual({
+      text: value,
+      total_code_points: FLAVOR_PRINT_CODE_POINT_LIMIT,
+      printed_code_points: FLAVOR_PRINT_CODE_POINT_LIMIT,
+      continuation: null,
+    });
+  });
+
   it('builds the opt-in flavor appendix from full untruncated written text', () => {
     const longNotes = `before\n${'n'.repeat(FLAVOR_PRINT_CODE_POINT_LIMIT + 20)}\nafter`;
     const value = sheet({
@@ -1081,6 +1098,23 @@ describe('the character sheet is projected twice from one value', () => {
         { id: 'notes', label: 'Notes', text: longNotes },
       ],
     });
+  });
+
+  it('sorts multiple appendix registrations by order and id', () => {
+    const later = {
+      id: 'spell',
+      order: 200,
+      element: {} as HTMLElement,
+    };
+    const earlier = {
+      id: 'flavor',
+      order: 100,
+      element: {} as HTMLElement,
+    };
+
+    expect(
+      orderedSheetPrintAppendices([later, earlier]).map((entry) => entry.id),
+    ).toEqual(['flavor', 'spell']);
   });
 
   it('marks as free text exactly what a stranger could have written', () => {

@@ -85,6 +85,10 @@ import type { AttacksPerAction } from '../rules/extra-attack';
 import { recordedEquipmentPackages } from '../builder/equipment-step';
 import { CharacterNotFoundError } from './character-crud';
 import {
+  PrintAppendixPreferenceQueries,
+  type PrintAppendixPreferences,
+} from './print-appendix-preferences';
+import {
   ClassProficiencyLookup,
   EMPTY_CLASS_PROFICIENCIES,
 } from './class-proficiency-lookup';
@@ -383,6 +387,8 @@ export interface CharacterSheet {
   readonly printed_features: readonly SheetPrintedFeature[];
   /** Character-authored prose; deliberately absent from `sheetFacts`. */
   readonly flavor: CharacterFlavor;
+  /** D162 UI state; never part of the character's structured sheet facts. */
+  readonly print_appendix_preferences: PrintAppendixPreferences;
   readonly hit_point_rolls: readonly SheetHitPointRoll[];
   /** The recorded package choices, D33's answer to a blank inventory (D65). */
   readonly equipment_packages: readonly SheetEquipmentPackage[];
@@ -976,6 +982,9 @@ export class CharacterSheetBuilder {
         backstory: character.backstory,
         notes: character.notes,
       },
+      print_appendix_preferences: new PrintAppendixPreferenceQueries(
+        this.db,
+      ).read(characterId),
       hit_point_rolls: rolls.list,
       // Read through E-B's one recorded-package reader — the same source
       // resolution, choice reader and coin-line display filter the equipment

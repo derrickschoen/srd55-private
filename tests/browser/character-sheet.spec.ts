@@ -3,6 +3,9 @@ import type { Database } from '@sqlite.org/sqlite-wasm';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { DatabaseContext } from '../../src/db/database';
+import {
+  PRINT_APPENDIX_PREFERENCE_KEYS,
+} from '../../src/queries/print-appendix-preferences';
 import { readLevelUpSeam } from './fixtures/level-up-seam';
 
 const schema = readFileSync(
@@ -611,6 +614,18 @@ async function install(page: Page, image: SheetImage): Promise<void> {
   );
 }
 
+async function rows(
+  page: Page,
+  table: string,
+  where: Record<string, string | number | boolean | null> = {},
+): Promise<Record<string, unknown>[]> {
+  return page.evaluate(
+    ({ tableName, filters }) =>
+      window.staticApp.inspectRows(tableName, filters),
+    { tableName: table, filters: where },
+  ) as Promise<Record<string, unknown>[]>;
+}
+
 async function navigateWithinApp(page: Page, path: string): Promise<void> {
   await page.evaluate((target) => {
     window.history.pushState(null, '', target);
@@ -819,7 +834,7 @@ test('spellbook entries render distinctly and are never labeled Prepared or Know
   await expect(spellbook).toHaveCSS('border-top-style', 'solid');
 });
 
-test('print character sheet button calls window.print and writes nothing', async ({
+test('print button writes nothing when no named appendix preference changes', async ({
   page,
 }, testInfo) => {
   // Measured alone at 13.3s on Chromium; fixture construction dominates.
@@ -1146,7 +1161,43 @@ test('flavor appendix is opt-in, remembered, ordered, and carries full text', as
   await expectExactText(backstory.locator('[data-free-text]'), HOSTILE_BACKSTORY);
   await expectExactText(notes.locator('[data-free-text]'), LONG_NOTES);
   await expect(page.locator('[data-sheet-flavor-continuation]')).toHaveCount(0);
+  const beforeCharacter = await rows(page, 'characters', {
+    id: image.characterId,
+  });
+  const beforeOperations = await rows(page, 'character_operations', {
+    character_id: image.characterId,
+  });
+  const beforeChangeLog = await rows(page, 'change_log', {
+    character_id: image.characterId,
+  });
   await option.check();
+  await expect
+    .poll(async () =>
+      rows(page, 'character_rule_overrides', {
+        character_id: image.characterId,
+      }),
+    )
+    .toEqual([
+      expect.objectContaining({
+        character_id: image.characterId,
+        rule_key: PRINT_APPENDIX_PREFERENCE_KEYS.flavor,
+        value: 'true',
+        note: null,
+      }),
+    ]);
+  // SS-BROWSER-NO-WRITE, narrowed by D162: changing print choices may write
+  // exactly the three named preference keys and no character revision/history.
+  expect(await rows(page, 'characters', { id: image.characterId })).toEqual(
+    beforeCharacter,
+  );
+  expect(
+    await rows(page, 'character_operations', {
+      character_id: image.characterId,
+    }),
+  ).toEqual(beforeOperations);
+  expect(
+    await rows(page, 'change_log', { character_id: image.characterId }),
+  ).toEqual(beforeChangeLog);
 
   await navigateWithinApp(
     page,
@@ -1193,6 +1244,8 @@ test('flavor appendix is opt-in, remembered, ordered, and carries full text', as
       (element) => element.parentElement?.lastElementChild === element,
     ),
   ).toBe(true);
+  await page.emulateMedia({ media: 'screen' });
+  await expect(page.locator('[data-sheet-print-appendix]')).toHaveCount(0);
 });
 
 test('the legal screen identifies bundled SRD 5.2.1 rules text', async ({
