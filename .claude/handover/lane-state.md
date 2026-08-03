@@ -23,7 +23,24 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-03-c (newest - read first)
+## RESTART POINT 2026-08-03-d (newest - read first)
+MAIN f18a2b6 (HA-1b merged; mirror pushed). FLOORS: vitest 214/3,499; PW
+121/25 specs; build 0; migrations 0000-0030 FROZEN; wire v1-v17.
+MERGED TODAY (order): D177 guidelines f15fd1b, SC-1 e8274e2, FF-C d749f15,
+D188 9481808, BROWSER-PROBE 357d63c, HA-1b f18a2b6 (migration 0030;
+contract surgery from CI-3a's correct blocked report).
+MINT LANE: CI-3a re-dispatched after HA-1b (resume codex session
+019fc7ba-4370-7520-9ac9-6bae4f45131b in wt/attunement, port 44483).
+HOMEBREW TRACK: oath doc reworked per D188, with owner (wt/party 76c50d0,
+approval markers open). MONK (D169): distance research done (avoid: ki-to-
+upcast, concentration melee scaling, attack-replacement casting, "Way of
+the Arcane ___" naming); three brainstorm panels collated; owner browsing
+flavor menus (mirror/mockery + lockdown/divine-list directions); bake-off
+of 2-3 level-3 loops next once owner picks. FINDING (mine): both brainstorm
+briefs said Monk=HIGH dependence; guideline 01 measures MEDIUM - both
+agents caught it; cost nothing but the error was the supervisor's.
+
+## RESTART POINT 2026-08-03-c (superseded by -d)
 MAIN d749f15 (FF-C merged; mirror pushed). FLOORS: vitest 211/3,470; PW
 107/24 specs; build 0; migrations 0000-0029; wire v1-v17.
 FF-C landed with D162 persistence in character_rule_overrides (new
