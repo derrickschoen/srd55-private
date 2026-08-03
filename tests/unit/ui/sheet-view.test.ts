@@ -18,6 +18,7 @@ import {
 } from '../../../src/queries/character-sheet-builder';
 import {
   RESOURCE_MARKING_SHAPES,
+  sheetHeaderRouteActions,
   sheetFacts,
   sheetSections,
   type SheetCell,
@@ -28,6 +29,28 @@ import type {
   SheetResourceKind,
   SheetResourceMaximum,
 } from '../../../src/rules/sheet';
+
+describe('sheet route actions', () => {
+  it('puts the seam-generated primary Level Up link before the secondary planner link', () => {
+    expect(sheetHeaderRouteActions(41)).toEqual([
+      {
+        label: 'All characters',
+        href: '/',
+        className: 'button-secondary sheet-chrome',
+      },
+      {
+        label: 'Level Up',
+        href: '/characters/41/level-up',
+        className: 'button-primary sheet-chrome',
+      },
+      {
+        label: 'Open planner',
+        href: '/characters/41',
+        className: 'button-secondary sheet-chrome',
+      },
+    ]);
+  });
+});
 
 /**
  * D4, ON THE SHEET.
@@ -743,9 +766,28 @@ describe('the character sheet is projected twice from one value', () => {
     expect(parsed.species_hit_points).toBe(8);
     expect(row(value, 'save:strength').value).toBe('+5');
     expect(row(value, 'skill:stealth').value).toBe('+5');
+    expect(textOf(row(value, 'skill:stealth').label)).toBe(
+      'Stealth (proficient)',
+    );
     // The species contribution is printed apart AND summed, because a page
     // showing only the class total would have a Dwarf short by their level.
     expect(row(value, 'hit_points_with_species').value).toBe('62');
+  });
+
+  it('names Expertise on the skill face instead of leaving it only in the arithmetic', () => {
+    const base = sheet();
+    const expertise = sheet({
+      skills: base.skills.map((skill) => ({
+        ...skill,
+        expertise: true,
+        formula: 'dexterity modifier + twice the proficiency bonus.',
+      })),
+    });
+
+    expect(textOf(row(expertise, 'skill:stealth').label)).toBe(
+      'Stealth (Expertise)',
+    );
+    expect(row(expertise, 'skill:stealth').value).toBe('+5');
   });
 
   it('prints the winning AC source, every effect label, exclusion reason and tie rule inline', () => {
