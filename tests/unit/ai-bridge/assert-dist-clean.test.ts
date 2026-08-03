@@ -142,6 +142,8 @@ describe('the dist guard FAILS on every way the bridge could leak', () => {
     'the spawn import': 'require("child_process")',
     'the browser probe seam':
       'window.__SRD55_BROWSER_CAPABILITY_PROBE_FAILURE__="never"',
+    'the pending D153 iOS claim wording':
+      'SRD-55 is tested only in Chromium/WebKit; on iOS, keep backup exports.',
   };
 
   for (const [what, leaked] of Object.entries(leaks)) {

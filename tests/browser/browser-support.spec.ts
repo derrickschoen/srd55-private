@@ -351,6 +351,26 @@ test('/legal renders under a failing probe without waiting for Continue anyway',
   );
 });
 
+test('BROWSER-PROBE-LEGAL-CONTINUE-ACKNOWLEDGES: Continue directly on /legal releases a later database route', async ({
+  page,
+}) => {
+  test.setTimeout(20_000);
+  await injectProbeFailure(page, 'unavailable');
+  await page.goto('/legal');
+
+  await expect(page.locator('[data-testid="srd-attribution"]')).toBeVisible();
+  await expect(page.locator('#browser-support-notice')).toHaveAttribute(
+    'data-browser-support-state',
+    'capability-unavailable',
+  );
+  await page.getByRole('button', { name: 'Continue anyway' }).click();
+  await page.getByRole('link', { name: 'Back to characters' }).click();
+
+  await expect(page.locator('#status')).toHaveAttribute('data-ready', 'true', {
+    timeout: 20_000,
+  });
+});
+
 test('BROWSER-PROBE-LEGAL-RETURN-REGATES: leaving an initial legal route requires Continue before database boot', async ({
   page,
 }) => {

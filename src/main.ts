@@ -278,6 +278,7 @@ const router = new Router();
 
 let application: Application | undefined;
 let browserSupportDecision: BrowserSupportDecision | undefined;
+let browserSupportWarningAcknowledged = false;
 let databaseBootStarted = false;
 let databaseReady = false;
 
@@ -364,7 +365,11 @@ const canRenderRoute = (route: Router['current']): boolean => {
       startDatabaseBoot();
       break;
     case 'capability-warning':
-      showBrowserBootHold();
+      if (browserSupportWarningAcknowledged) {
+        startDatabaseBoot();
+      } else {
+        showBrowserBootHold();
+      }
       break;
     case undefined:
       showDatabaseBootStatus('Checking browser support…');
@@ -430,8 +435,9 @@ if (legalScreen.matches(router.current)) {
 const supportNotice = browserSupportNoticeElements();
 const browserProfile = readBrowserEngineProfile();
 supportNotice.continueButton.addEventListener('click', () => {
+  browserSupportWarningAcknowledged = true;
   if (!legalScreen.matches(router.current)) {
-    startDatabaseBoot();
+    canRenderRoute(router.current);
   }
 });
 

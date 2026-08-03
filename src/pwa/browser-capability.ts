@@ -35,12 +35,21 @@ export function observeBrowserCapability(
   probe: BrowserCapabilityProbe,
   deadlineMs: number,
 ): BrowserCapabilityObservation {
-  const settled = Promise.resolve()
-    .then(probe)
-    .catch((): BrowserCapabilityOutcome => 'probe-failed');
+  let resolveDeadline: (outcome: BrowserCapabilityOutcome) => void = () => {};
   const deadline = new Promise<BrowserCapabilityOutcome>((resolve) => {
-    const timer = setTimeout(() => resolve('probe-failed'), deadlineMs);
-    void settled.then(() => clearTimeout(timer));
+    resolveDeadline = resolve;
+  });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const settled = Promise.resolve()
+    .then(() => {
+      timer = setTimeout(() => resolveDeadline('probe-failed'), deadlineMs);
+      return probe();
+    })
+    .catch((): BrowserCapabilityOutcome => 'probe-failed');
+  void settled.then(() => {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
   });
   return {
     initial: Promise.race([settled, deadline]),

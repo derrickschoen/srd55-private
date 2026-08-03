@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   classifyBrowserSupport,
   observeBrowserCapability,
+  type BrowserCapabilityOutcome,
 } from '../../../src/pwa/browser-capability';
 
 afterEach(() => {
@@ -54,6 +55,32 @@ describe('browser capability decision', () => {
     );
     await vi.advanceTimersByTimeAsync(73);
     await expect(observation.initial).resolves.toBe('probe-failed');
+  });
+
+  it('BROWSER-PROBE-DEADLINE-STARTS-WITH-PROBE: deferred startup time does not consume the deadline', async () => {
+    vi.useFakeTimers();
+    const probe = vi.fn(
+      () =>
+        new Promise<BrowserCapabilityOutcome>(() => {
+          // Deliberately pending so only the deadline can settle `initial`.
+        }),
+    );
+    const observation = observeBrowserCapability(probe, 73);
+    let initialOutcome: BrowserCapabilityOutcome | undefined;
+    void observation.initial.then((outcome) => {
+      initialOutcome = outcome;
+    });
+
+    vi.advanceTimersByTime(73);
+    expect(probe).not.toHaveBeenCalled();
+    expect(initialOutcome).toBeUndefined();
+
+    await Promise.resolve();
+    expect(probe).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(72);
+    expect(initialOutcome).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(initialOutcome).toBe('probe-failed');
   });
 
   it('BROWSER-PROBE-LATE-OK-WITHDRAWS: retains a real success after the deadline result', async () => {
