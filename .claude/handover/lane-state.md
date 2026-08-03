@@ -23,7 +23,22 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-03-e (newest - read first)
+## RESTART POINT 2026-08-03-f (newest - read first)
+MAIN 790e980 (CI-3c merged; mirror pushed). FLOORS: vitest 218/3,664; PW
+122 (22 spec files); build 0; migrations 0000-0031 FROZEN; wire v1-v17.
+CI-3c: 3 review rounds, 2 fix rounds (r2 = shared authoritative limit
+constants by construction). Cap residual REJECTED-as-blocker on doctrine
+(zero-magnitude effects: both seams agree, inert, over-split only).
+Follow-up units recorded in code: ITEM-DEFINITION-SOURCE-PROVENANCE,
+ITEM-DEFINITION-BONDED-WEAPON-BINDING, zero-magnitude refusal candidate.
+MINT LANE NEXT: CI-3b (XL - class/feat/species/background aggregates,
+resumed codex session 019fc7ba).
+HOMEBREW: three monk FULL DRAFTS committed wt/party 9857ef8, with owner
+(11/17 features are the approval items); oath doc 76c50d0 with owner;
+after owner rulings: cleanup/polish passes per D191 addendum, then a
+review round per doc.
+
+## RESTART POINT 2026-08-03-e (superseded by -f)
 MAIN 17ba3c1 (CI-3a merged; mirror pushed). FLOORS: vitest 215/3,549; PW
 121 (22 SPEC FILES - earlier "24/25 specs" floor lines were supervisor
 counting errors; 22 is measured); build 0; migrations 0000-0030; wire

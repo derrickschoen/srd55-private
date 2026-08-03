@@ -81,6 +81,8 @@ import {
 import {
   character_attunement_slots,
   character_items,
+  item_definition_effects,
+  item_definitions,
 } from './items';
 import {
   armor_templates,
@@ -439,6 +441,27 @@ export const characterItemsRelations = relations(
       ],
     }),
     effects: many(character_effects),
+  }),
+);
+
+export const itemDefinitionsRelations = relations(
+  item_definitions,
+  ({ one, many }) => ({
+    content_identity: one(catalog_content_identities, {
+      fields: [item_definitions.content_key],
+      references: [catalog_content_identities.content_key],
+    }),
+    effects: many(item_definition_effects),
+  }),
+);
+
+export const itemDefinitionEffectsRelations = relations(
+  item_definition_effects,
+  ({ one }) => ({
+    item_definition: one(item_definitions, {
+      fields: [item_definition_effects.item_definition_id],
+      references: [item_definitions.id],
+    }),
   }),
 );
 
@@ -1187,6 +1210,7 @@ export const catalogContentIdentitiesRelations = relations(
     spell_versions: many(spell_versions),
     weapon_templates: many(weapon_templates),
     armor_templates: many(armor_templates),
+    item_definitions: many(item_definitions),
   }),
 );
 

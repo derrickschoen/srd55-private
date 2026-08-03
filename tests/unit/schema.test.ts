@@ -551,6 +551,23 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
     text: ['content_key', 'rules_edition', 'name', 'category', 'dex_bonus'],
     numeric: ['created_at', 'updated_at'],
   },
+  item_definitions: {
+    integer: ['id', 'requires_attunement'],
+    text: ['content_key', 'name', 'rules_edition', 'description'],
+    numeric: ['created_at', 'updated_at'],
+  },
+  item_definition_effects: {
+    integer: [
+      'id', 'item_definition_id', 'sort_order', 'hit_points_flat',
+      'hit_points_per_level', 'speed_bonus_feet', 'amount', 'maximum', 'base',
+      'allows_shield',
+    ],
+    text: [
+      'effect_kind', 'damage_type', 'ability', 'ability_1', 'ability_2',
+      'weapon_scope', 'label', 'notes',
+    ],
+    numeric: ['created_at', 'updated_at'],
+  },
   class_armor_training: {
     integer: ['id', 'class_definition_id', 'granted_on_multiclass_entry'],
     text: ['category'],
@@ -805,6 +822,13 @@ const expectedNotNull: Record<string, string[]> = {
   armor_templates: [
     'id', 'content_key', 'rules_edition', 'name', 'category', 'armor_class',
     'dex_bonus', 'stealth_disadvantage',
+  ],
+  item_definitions: [
+    'id', 'content_key', 'name', 'rules_edition', 'description',
+    'requires_attunement',
+  ],
+  item_definition_effects: [
+    'id', 'item_definition_id', 'sort_order', 'effect_kind', 'label',
   ],
   class_armor_training: [
     'id', 'class_definition_id', 'category', 'granted_on_multiclass_entry',
@@ -1080,6 +1104,13 @@ const expectedNamedIndexes: Record<string, string> = {
   // `class_sheet_traits` on the class alone, because it is 1:0..1 and its row's
   // EXISTENCE is what records that the class was parsed at all.
   armor_templates_content_key_unique: 'armor_templates:content_key:unique',
+  item_definitions_content_key_unique:
+    'item_definitions:content_key:unique',
+  item_definitions_name_index: 'item_definitions:name',
+  item_definition_effects_definition_sort_unique:
+    'item_definition_effects:item_definition_id,sort_order:unique',
+  item_definition_effects_definition_index:
+    'item_definition_effects:item_definition_id',
   class_sheet_traits_class_definition_id_unique:
     'class_sheet_traits:class_definition_id:unique',
   class_saving_throw_proficiencies_class_definition_id_ability_unique:
@@ -1217,6 +1248,8 @@ const expectedUniqueGroups: Record<string, string[]> = {
   class_weapon_mastery_counts: ['class_definition_id,class_level'],
   class_weapon_mastery_grants: ['class_definition_id'],
   weapon_templates: ['content_key'],
+  item_definitions: ['content_key'],
+  item_definition_effects: ['item_definition_id,sort_order'],
   species_templates: ['content_key'],
   species_template_traits: [
     'species_template_id,name', 'species_template_id,sort_order',
@@ -1375,6 +1408,7 @@ const expectedDefaults: Record<string, Record<string, string>> = {
   // same reason their fillable columns are name-identical: picking a template
   // is a column-wise copy (D1b).
   armor_templates: { rules_edition: "'2024'", stealth_disadvantage: 'false' },
+  item_definitions: { requires_attunement: 'false' },
   background_templates: { rules_edition: "'2024'" },
   species_templates: { rules_edition: "'2024'" },
   character_armor: { stealth_disadvantage: 'false' },
@@ -1460,6 +1494,12 @@ const expectedForeignKeys: Record<string, string[]> = {
   ],
   armor_templates: [
     'content_key->catalog_content_identities.content_key|NO ACTION',
+  ],
+  item_definitions: [
+    'content_key->catalog_content_identities.content_key|NO ACTION',
+  ],
+  item_definition_effects: [
+    'item_definition_id->item_definitions.id|CASCADE',
   ],
   weapon_templates: [
     'content_key->catalog_content_identities.content_key|NO ACTION',

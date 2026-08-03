@@ -154,6 +154,8 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       'class_weapon_mastery_grants',
       'class_weapon_proficiencies',
       'feat_definitions',
+      'item_definition_effects',
+      'item_definitions',
       'named_features',
       'named_feature_effects',
       ...APPLICATION_ADDITIONS,
@@ -357,8 +359,8 @@ describe('table scope classification', () => {
     // tables and CI-2b's ONE applied data-migration marker table. Each group is named
     // rather than folded into one total, so a group that vanishes while
     // another grows cannot pass unnoticed.
-    expect(names).toHaveLength(77);
-    expect(new Set(names).size).toBe(77);
+    expect(names).toHaveLength(79);
+    expect(new Set(names).size).toBe(79);
     expect([...names].sort()).toEqual([...APPLICATION_TABLES].sort());
   });
 

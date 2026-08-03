@@ -901,6 +901,38 @@ const backgroundTemplateEffect =
     });
   };
 
+const itemDefinition =
+  (values: Values): Write =>
+  (db) => {
+    insert(db, 'item_definitions', {
+      content_key: uid('item-definition'),
+      name: uid('Item'),
+      rules_edition: 'expanded',
+      description: 'Definition text.',
+      requires_attunement: 0,
+      ...values,
+    });
+  };
+
+const itemDefinitionEffect =
+  (values: Values): Write =>
+  (db) => {
+    const definitionId = insert(db, 'item_definitions', {
+      content_key: uid('item-definition'),
+      name: uid('Item'),
+      rules_edition: 'expanded',
+      description: 'Definition text.',
+      requires_attunement: 0,
+    });
+    insert(db, 'item_definition_effects', {
+      item_definition_id: definitionId,
+      sort_order: 1,
+      effect_kind: 'damage_resistance',
+      label: uid('Grant'),
+      ...values,
+    });
+  };
+
 const characterEffect =
   (values: Values): Write =>
   (db) => {
@@ -2298,14 +2330,6 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     accepts: [['a real property', weaponTemplate({ mastery_property: 'Vex' })]],
   },
   {
-    constraint: 'weapon_templates_damage_type_check',
-    rejects: [['a damage type outside SRD 5.2', weaponTemplate({ damage_type: 'Steam' })]],
-    accepts: [
-      ['Acid, the first SRD member', weaponTemplate({ damage_type: 'Acid' })],
-      ['Thunder, the last SRD member', weaponTemplate({ damage_type: 'Thunder' })],
-    ],
-  },
-  {
     constraint: 'weapon_templates_srd_group_check',
     rejects: [['the struck-down simple/martial category', weaponTemplate({ srd_group: 'simple' })]],
     accepts: [
@@ -3584,6 +3608,23 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
       ['the default single possession', characterItem({})],
       ['three identical possessions in one row', characterItem({ quantity: 3 })],
     ],
+  },
+  {
+    constraint: 'item_definitions_rules_edition_check',
+    rejects: [['an edition outside the shared catalog vocabulary', itemDefinition({ rules_edition: '5e' })]],
+    accepts: [['the external-content edition', itemDefinition({ rules_edition: 'expanded' })]],
+  },
+  ...authoredCharacterEffectConstraintCases(
+    'item_definition_effects',
+    itemDefinitionEffect,
+  ),
+  {
+    constraint: 'item_definition_effects_sort_order_check',
+    rejects: [
+      ['sort order zero', itemDefinitionEffect({ sort_order: 0 })],
+      ['a text sort order', itemDefinitionEffect({ sort_order: 'first' })],
+    ],
+    accepts: [['the first ordered effect', itemDefinitionEffect({ sort_order: 1 })]],
   },
   {
     constraint: 'character_attunement_slots_distinct_check',

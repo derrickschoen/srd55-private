@@ -7,6 +7,27 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D192 — OWNER: two simple weapons-first subclasses — double-Sneak rogue, unbound-Mark ranger (2026-08-03)
+
+Owner commissions, verbatim mechanics:
+ 1. ROGUE subclass whose engine "doubles the sneak attack dice from the
+    class table starting at level 6 or higher."
+ 2. RANGER (hunter-flavored) subclass that "removes concentration from
+    hunters mark and does not require a bonus action to move it from a
+    downed target to a live one starting at level 6 or higher."
+Design ethos, owner's words: "simple beginner friendly classes in the
+vein of champion fighter. More weapons focused than weird magic and
+extra resources to manage."
+Schedule facts applied: Rogue subclass slots are 3/9/13/17 (no 6) - the
+doubling lands at 9, permitted by "6 or higher." Ranger slots are
+3/7/11/15 - the Mark unbinding lands at 7. The engine mechanics are
+OWNER-SPECIFIED and frozen; the budget worksheets present the honest
+math (the rogue doubling will read hot against the SRD Thief comparator
+- presented, not silently softened). The drafts must check the SRD
+ranger BASE class for its own Hunter's Mark features and state the
+interaction rather than duplicate it. No new resources, no casting,
+Champion-register simplicity throughout.
+
 ## D191 — OWNER: all three monk subclasses ship; license = most permissive respecting SRD attribution (2026-08-03)
 
 Owner's words: "All 3 monk subclasses seem fun. Publish them under the

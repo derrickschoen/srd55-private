@@ -152,7 +152,7 @@ describe('open and closed domain vocabularies', () => {
     ).toBeNull();
   });
 
-  it('keeps authored damage types open and refuses unknowns in bundled-only weapon templates', async () => {
+  it('keeps authored damage types open across character and catalog weapon rows', async () => {
     const db = await database();
     const versionId = spellVersion(db, '2024:steam-spell');
     db.exec(
@@ -220,7 +220,12 @@ describe('open and closed domain vocabularies', () => {
          VALUES ('weapon:steam', 'Steam Blade', 'simple_melee', 'dice', '1d6',
                  'Steam', 'Sap')`,
       ),
-    ).toThrow(/CHECK constraint failed: weapon_templates_damage_type_check/u);
+    ).not.toThrow();
+    expect(
+      db.scalar(
+        "SELECT damage_type FROM weapon_templates WHERE content_key = 'weapon:steam'",
+      ),
+    ).toBe('Steam');
 
     const templateId = speciesTemplate(db, 'species:damage-null');
     const traitId = db.exec(
