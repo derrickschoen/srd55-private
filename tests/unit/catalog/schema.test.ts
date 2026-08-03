@@ -33,6 +33,67 @@ function record(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function itemRecord(overrides: Record<string, unknown> = {}) {
+  return {
+    kind: 'item',
+    name: 'Boundary Item',
+    edition: 'expanded',
+    description: 'Boundary description.',
+    requiresAttunement: false,
+    effects: [{
+      kind: 'armor_class_bonus',
+      amount: 1,
+      label: 'Boundary effect',
+      notes: null,
+    }],
+    ...overrides,
+  };
+}
+
+function weaponRecord(overrides: Record<string, unknown> = {}) {
+  return {
+    kind: 'weapon',
+    name: 'Boundary Weapon',
+    edition: 'expanded',
+    srdGroup: 'simple_ranged',
+    damage: { kind: 'dice', dice: '1d6' },
+    damageType: 'Piercing',
+    versatileDamage: { kind: 'not_applicable' },
+    finesse: false,
+    heavy: false,
+    light: false,
+    loading: false,
+    reach: false,
+    thrown: false,
+    twoHanded: false,
+    ammunition: true,
+    ammunitionKind: 'Arrows',
+    range: { kind: 'ranged', nearFeet: 80, farFeet: 320 },
+    masteryProperty: 'Vex',
+    otherProperties: null,
+    ...overrides,
+  };
+}
+
+function armorRecord(overrides: Record<string, unknown> = {}) {
+  return {
+    kind: 'armor',
+    name: 'Boundary Armor',
+    edition: 'expanded',
+    category: 'heavy',
+    armorClass: 18,
+    dexBonus: 'none',
+    dexBonusMax: null,
+    strengthRequirement: 15,
+    stealthDisadvantage: true,
+    ...overrides,
+  };
+}
+
+function parseEquipment(value: unknown): void {
+  parseCatalogDocuments([JSON.stringify([value])]);
+}
+
 describe('browser catalog schema', () => {
   it('parses complete equipment records and refuses partial mechanical payloads', () => {
     const item = {
@@ -86,6 +147,224 @@ describe('browser catalog schema', () => {
       masteryProperty: 'Vex',
       otherProperties: null,
     }])])).toThrow("'range.kind'");
+  });
+
+  it.each([
+    ['hit_points_flat', {
+      kind: 'hp_modifier', hitPointsFlat: 1001, hitPointsPerLevel: null,
+      label: 'HP', notes: null,
+    }],
+    ['hit_points_per_level', {
+      kind: 'hp_modifier', hitPointsFlat: null, hitPointsPerLevel: 1001,
+      label: 'HP per level', notes: null,
+    }],
+    ['speed_bonus_feet', {
+      kind: 'speed', speedBonusFeet: 1001, label: 'Speed', notes: null,
+    }],
+    ['ability_increase amount', {
+      kind: 'ability_increase', ability: 'strength', amount: 1001, maximum: 20,
+      label: 'Increase', notes: null,
+    }],
+    ['armor_class_bonus amount', {
+      kind: 'armor_class_bonus', amount: 1001, label: 'AC', notes: null,
+    }],
+    ['armor_class_formula base', {
+      kind: 'armor_class_formula', base: 1001, ability1: 'dexterity',
+      ability2: null, allowsShield: true, label: 'Formula', notes: null,
+    }],
+    ['weapon_attack_bonus amount', {
+      kind: 'weapon_attack_bonus', amount: 1001, weaponScope: 'any_weapon',
+      label: 'Attack', notes: null,
+    }],
+    ['weapon_damage_bonus amount', {
+      kind: 'weapon_damage_bonus', amount: 1001, weaponScope: 'any_weapon',
+      label: 'Damage', notes: null,
+    }],
+  ] as const)(
+    'refuses item effect $0 magnitude 1001',
+    (_label, effect) => {
+      expect(() => parseEquipment(itemRecord({ effects: [effect] }))).toThrow(
+        '1000',
+      );
+    },
+  );
+
+  it('accepts item effect magnitude 1000 exactly', () => {
+    expect(() => parseEquipment(itemRecord({
+      effects: [{
+        kind: 'armor_class_bonus',
+        amount: 1000,
+        label: 'Exact magnitude',
+        notes: null,
+      }],
+    }))).not.toThrow();
+  });
+
+  it('refuses item effect magnitude -1001 and accepts -1000 exactly', () => {
+    const speedEffect = (speedBonusFeet: number) => ({
+      kind: 'speed',
+      speedBonusFeet,
+      label: 'Exact negative magnitude',
+      notes: null,
+    });
+    expect(() => parseEquipment(itemRecord({
+      effects: [speedEffect(-1001)],
+    }))).toThrow('1000');
+    expect(() => parseEquipment(itemRecord({
+      effects: [speedEffect(-1000)],
+    }))).not.toThrow();
+  });
+
+  it('refuses item effect count 201', () => {
+    expect(() => parseEquipment(itemRecord({
+      effects: Array.from({ length: 201 }, () => ({
+        kind: 'ability_override',
+        ability: 'strength',
+        maximum: 20,
+        label: 'Counted effect',
+        notes: null,
+      })),
+    }))).toThrow('200');
+  });
+
+  it.each([
+    ['name', itemRecord({ name: 'n'.repeat(121) })],
+    ['description', itemRecord({ description: 'd'.repeat(4001) })],
+    ['effect label', itemRecord({ effects: [{
+      kind: 'ability_override', ability: 'strength', maximum: 20,
+      label: 'l'.repeat(121), notes: null,
+    }] })],
+    ['effect notes', itemRecord({ effects: [{
+      kind: 'ability_override', ability: 'strength', maximum: 20,
+      label: 'Notes', notes: 'n'.repeat(2001),
+    }] })],
+    ['effect damage type', itemRecord({ effects: [{
+      kind: 'damage_resistance', damageType: 'd'.repeat(121),
+      label: 'Resistance', notes: null,
+    }] })],
+  ] as const)('refuses item $0 above its authoritative text bound', (_label, item) => {
+    expect(() => parseEquipment(item)).toThrow('characters');
+  });
+
+  it('accepts item effect count and text fields exactly at every boundary', () => {
+    const effects = Array.from({ length: 200 }, (_, index) => index === 0
+      ? {
+          kind: 'damage_resistance',
+          damageType: 'd'.repeat(120),
+          label: 'l'.repeat(120),
+          notes: 'n'.repeat(2000),
+        }
+      : {
+          kind: 'ability_override',
+          ability: 'strength',
+          maximum: 20,
+          label: 'l'.repeat(120),
+          notes: 'n'.repeat(2000),
+        });
+    expect(() => parseEquipment(itemRecord({
+      name: 'n'.repeat(120),
+      description: 'd'.repeat(4000),
+      effects,
+    }))).not.toThrow();
+  });
+
+  it.each([
+    ['121-character name', weaponRecord({ name: 'n'.repeat(121) })],
+    ['41-character damage dice', weaponRecord({
+      damage: { kind: 'dice', dice: 'd'.repeat(41) },
+    })],
+    ['41-character custom damage', weaponRecord({
+      damage: { kind: 'custom', text: 'd'.repeat(41) },
+    })],
+    ['41-character versatile damage dice', weaponRecord({
+      versatileDamage: { kind: 'dice', dice: 'd'.repeat(41) },
+    })],
+    ['41-character versatile custom damage', weaponRecord({
+      versatileDamage: { kind: 'custom', text: 'd'.repeat(41) },
+    })],
+    ['41-character damage type', weaponRecord({ damageType: 'd'.repeat(41) })],
+    ['41-character ammunition kind', weaponRecord({
+      ammunitionKind: 'a'.repeat(41),
+    })],
+    ['501-character properties', weaponRecord({
+      otherProperties: 'p'.repeat(501),
+    })],
+  ] as const)('refuses weapon $0 above WEAPON_TEXT_LIMITS', (_label, weapon) => {
+    expect(() => parseEquipment(weapon)).toThrow('characters');
+  });
+
+  it('accepts every weapon text field exactly at WEAPON_TEXT_LIMITS', () => {
+    expect(() => parseEquipment(weaponRecord({
+      name: 'n'.repeat(120),
+      damage: { kind: 'dice', dice: 'd'.repeat(40) },
+      damageType: 'd'.repeat(40),
+      versatileDamage: { kind: 'dice', dice: 'v'.repeat(40) },
+      ammunitionKind: 'a'.repeat(40),
+      otherProperties: 'p'.repeat(500),
+    }))).not.toThrow();
+    expect(() => parseEquipment(weaponRecord({
+      damage: { kind: 'custom', text: 'd'.repeat(40) },
+      versatileDamage: { kind: 'custom', text: 'v'.repeat(40) },
+    }))).not.toThrow();
+  });
+
+  it('refuses a 121-character armor name and accepts 120 exactly', () => {
+    expect(() => parseEquipment(armorRecord({
+      name: 'n'.repeat(121),
+    }))).toThrow('120 characters');
+    expect(() => parseEquipment(armorRecord({
+      name: 'n'.repeat(120),
+    }))).not.toThrow();
+  });
+
+  it('refuses armorClass 0 and accepts armorClass 1 exactly', () => {
+    expect(() => parseEquipment(armorRecord({ armorClass: 0 }))).toThrow(
+      'armorClass',
+    );
+    expect(() => parseEquipment(armorRecord({ armorClass: 1 }))).not.toThrow();
+  });
+
+  it('refuses strengthRequirement 0 and accepts 1 exactly', () => {
+    expect(() => parseEquipment(armorRecord({
+      strengthRequirement: 0,
+    }))).toThrow('strengthRequirement');
+    expect(() => parseEquipment(armorRecord({
+      strengthRequirement: 1,
+    }))).not.toThrow();
+  });
+
+  it('refuses a shield Dexterity bonus and accepts none exactly', () => {
+    expect(() => parseEquipment(armorRecord({
+      category: 'shield',
+      dexBonus: 'full',
+      dexBonusMax: null,
+      strengthRequirement: null,
+    }))).toThrow('shield');
+    expect(() => parseEquipment(armorRecord({
+      category: 'shield',
+      dexBonus: 'none',
+      dexBonusMax: null,
+      strengthRequirement: null,
+    }))).not.toThrow();
+  });
+
+  it('refuses armor values above shared maxima and accepts the maxima exactly', () => {
+    for (const armor of [
+      armorRecord({ armorClass: 101 }),
+      armorRecord({
+        category: 'medium', dexBonus: 'capped', dexBonusMax: 21,
+      }),
+      armorRecord({ strengthRequirement: 31 }),
+    ]) {
+      expect(() => parseEquipment(armor)).toThrow();
+    }
+    expect(() => parseEquipment(armorRecord({
+      category: 'medium',
+      armorClass: 100,
+      dexBonus: 'capped',
+      dexBonusMax: 20,
+      strengthRequirement: 30,
+    }))).not.toThrow();
   });
 
   it('rejects malformed containers and every required field shape before import', () => {

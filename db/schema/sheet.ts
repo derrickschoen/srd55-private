@@ -43,6 +43,7 @@ import {
 } from './columns';
 import { catalog_content_identities } from './catalog-content';
 import { class_definitions } from './catalog-classes';
+import { SHEET_ARMOR_MIN } from '../../src/domain/sheet-limits';
 
 /**
  * THE DERIVABLE SHEET CORE (D11 part 1, D12).
@@ -661,7 +662,7 @@ export const armor_templates = sqliteTable(
       'armor_templates_dex_bonus_max_check',
       sql`(\`dex_bonus\` = 'capped') = (\`dex_bonus_max\` IS NOT NULL) AND ${nullOrIntegerAtLeast(
         'dex_bonus_max',
-        0,
+        SHEET_ARMOR_MIN.dex_bonus_max,
       )}`,
     ),
     /**
@@ -676,11 +677,14 @@ export const armor_templates = sqliteTable(
     ),
     check(
       'armor_templates_armor_class_check',
-      integerAtLeast('armor_class', 1),
+      integerAtLeast('armor_class', SHEET_ARMOR_MIN.armor_class),
     ),
     check(
       'armor_templates_strength_requirement_check',
-      nullOrIntegerAtLeast('strength_requirement', 1),
+      nullOrIntegerAtLeast(
+        'strength_requirement',
+        SHEET_ARMOR_MIN.strength_requirement,
+      ),
     ),
     /**
      * Safe here for the reason `weapon_templates` gives: this table is NATIVE,
