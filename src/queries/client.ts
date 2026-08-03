@@ -59,6 +59,10 @@ import type {
 } from './character-crud';
 import type { OperationHistory } from './operation-history';
 import type { CharacterSheet } from './character-sheet-builder';
+import type {
+  PrintAppendixKind,
+  PrintAppendixPreferences,
+} from './print-appendix-preferences';
 import {
   LEVEL_UP_RPC,
   type LevelUpPlannedEligibleSpellsParams,
@@ -98,6 +102,11 @@ export interface QueriesClient extends CatalogClient {
   ): Promise<CharacterCommandPayload>;
   buildReport(characterId: number): Promise<BuildReportResult>;
   sheet(characterId: number): Promise<CharacterSheet>;
+  setPrintAppendixPreference(
+    characterId: number,
+    kind: PrintAppendixKind,
+    enabled: boolean,
+  ): Promise<PrintAppendixPreferences>;
   printable(
     characterId: number,
     variant?: PrintableVariant,
@@ -249,6 +258,23 @@ export function createQueriesClient(rpc: RpcClient): QueriesClient {
         'queries.characters.sheet',
         characterParams(characterId),
       ),
+    setPrintAppendixPreference: (
+      characterId: number,
+      kind: PrintAppendixKind,
+      enabled: boolean,
+    ) =>
+      rpc.call<
+        {
+          character_id: number;
+          kind: PrintAppendixKind;
+          enabled: boolean;
+        },
+        PrintAppendixPreferences
+      >('queries.characters.setPrintAppendixPreference', {
+        character_id: characterId,
+        kind,
+        enabled,
+      }),
     printable: (
       characterId: number,
       variant: PrintableVariant = 'reference',
