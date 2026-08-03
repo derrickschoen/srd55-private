@@ -1,9 +1,10 @@
 import type { Brand } from '../../domain/ids';
 
+export type { PartyPublicationId } from '../../domain/ids';
+
 export type Forge = 'github' | 'gitlab' | 'codeberg';
 export type RepositoryRevision = Brand<string, 'RepositoryRevision'>;
 export type RepositoryPath = Brand<string, 'RepositoryPath'>;
-export type PartyPublicationId = Brand<string, 'PartyPublicationId'>;
 
 /**
  * A normalized repository locator. The default branch is deliberately absent

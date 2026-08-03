@@ -35,6 +35,8 @@ export type SpellVersionId = Brand<number, 'SpellVersionId'>;
 export type SpellIdentityId = Brand<number, 'SpellIdentityId'>;
 /** `characters.id`. */
 export type CharacterId = Brand<number, 'CharacterId'>;
+/** Stable random identity minted once for a published party document. */
+export type PartyPublicationId = Brand<string, 'PartyPublicationId'>;
 /** `spell_selection_slots.id`. */
 export type SlotId = Brand<number, 'SlotId'>;
 /** `wizard_spellbook_entries.id` — one addressable Wizard acquisition. */
@@ -111,6 +113,11 @@ export type CharacterSheetAdjustmentId = Brand<
 export type SpeciesTemplateId = Brand<number, 'SpeciesTemplateId'>;
 export type SpeciesTemplateTraitId = Brand<number, 'SpeciesTemplateTraitId'>;
 export type BackgroundTemplateId = Brand<number, 'BackgroundTemplateId'>;
+/** One authored numeric effect declared directly by a background template. */
+export type BackgroundTemplateEffectId = Brand<
+  number,
+  'BackgroundTemplateEffectId'
+>;
 /**
  * One printed line of one background's equipment package. A CATALOG id, on the
  * same side of the D1b severance as `BackgroundTemplateId`: nothing a character

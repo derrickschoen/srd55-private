@@ -117,7 +117,9 @@ export type TableRole =
    * three `catalog_source` ones; the role names what a table HOLDS, and no
    * consumer wants "weapons or armour" as one set.
    */
-  | 'catalog_armor';
+  | 'catalog_armor'
+  /** Non-secret local publication and repository-observation relationships. */
+  | 'party_observation';
 
 /**
  * The scopes a table can participate in.
@@ -281,6 +283,18 @@ export const TABLE_SCOPES = {
   },
   character_operations: {
     role: 'character_owned',
+    snapshot: false,
+    backupDirect: false,
+    backup: false,
+    share: false,
+    backupReference: false,
+  },
+
+  // A repository-path read model, not character truth. Its nullable
+  // `character_id` associates the newest local clone for the roster but does
+  // not make the row character-owned or portable with that character.
+  party_document_states: {
+    role: 'party_observation',
     snapshot: false,
     backupDirect: false,
     backup: false,
@@ -933,6 +947,14 @@ export const TABLE_SCOPES = {
     share: false,
     backupReference: false,
   },
+  background_template_effects: {
+    role: 'catalog_origin',
+    snapshot: false,
+    backupDirect: false,
+    backup: false,
+    share: false,
+    backupReference: false,
+  },
   /**
    * The structured equipment lines of a background TEMPLATE. All five flags
    * false, exactly as its parent — this is bundled SRD catalog content, seeded
@@ -1232,6 +1254,7 @@ export const APPLICATION_TABLES = order<AnyTableName>()([
   'armor_templates',
   'background_definitions',
   'background_equipment_items',
+  'background_template_effects',
   'background_templates',
   'catalog_content_aliases',
   'catalog_content_fingerprints',
@@ -1278,6 +1301,7 @@ export const APPLICATION_TABLES = order<AnyTableName>()([
   'feat_definitions',
   'named_features',
   'named_feature_effects',
+  'party_document_states',
   'species_definitions',
   'species_template_trait_effects',
   'species_template_traits',

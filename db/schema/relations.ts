@@ -68,6 +68,7 @@ import {
 } from './weapons';
 import {
   background_equipment_items,
+  background_template_effects,
   background_templates,
   character_background,
   character_species,
@@ -97,6 +98,7 @@ import {
   character_sheet_adjustments,
   character_skill_proficiencies,
 } from './sheet-inputs';
+import { party_document_states } from './party';
 
 /**
  * THE OBJECT GRAPH, DECLARED.
@@ -140,7 +142,18 @@ export const charactersRelations = relations(characters, ({ many }) => ({
   effects: many(character_effects),
   items: many(character_items),
   attunement_slots: many(character_attunement_slots),
+  party_document_states: many(party_document_states),
 }));
+
+export const partyDocumentStatesRelations = relations(
+  party_document_states,
+  ({ one }) => ({
+    character: one(characters, {
+      fields: [party_document_states.character_id],
+      references: [characters.id],
+    }),
+  }),
+);
 
 /**
  * THE FOUR STORED SHEET INPUTS. Every one hangs off `characters` and off
@@ -287,10 +300,21 @@ export const speciesTemplateTraitsRelations = relations(
 /** Four flat columns and no children; nothing points at it either. */
 export const backgroundTemplatesRelations = relations(
   background_templates,
-  ({ one }) => ({
+  ({ one, many }) => ({
     content_identity: one(catalog_content_identities, {
       fields: [background_templates.content_key],
       references: [catalog_content_identities.content_key],
+    }),
+    effects: many(background_template_effects),
+  }),
+);
+
+export const backgroundTemplateEffectsRelations = relations(
+  background_template_effects,
+  ({ one }) => ({
+    background_template: one(background_templates, {
+      fields: [background_template_effects.background_template_id],
+      references: [background_templates.id],
     }),
   }),
 );
