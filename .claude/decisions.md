@@ -7,6 +7,27 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D191 — OWNER: all three monk subclasses ship; license = most permissive respecting SRD attribution (2026-08-03)
+
+Owner's words: "All 3 monk subclasses seem fun. Publish them under the
+most permissive license that still respects the cc attribution that they
+work with the srd." The bake-off ends with THREE winners: Barbed Court,
+Ten Selves, Hundred Knots all proceed to full drafts and ship with the
+repo. License, taken for now under the owner's criterion: the subclass
+documents are released CC-BY-4.0 with the verbatim SRD 5.2 notice
+(uniform with docs/srd; the attribution obligation is structural since
+the docs carry SRD-derived content). Seam: per-file license headers.
+Flip option recorded: our original expression could go CC0 with the SRD
+notice retained only for SRD-derived parts - MORE permissive but a
+mixed-license file; flip before the repo goes public if the owner
+prefers. "Publish" executes through the existing publish gate
+(D121/D127/D128 unchanged - nothing goes outward today; the private
+mirror continues). OPEN, flagged for the next question round: whether
+all three are SEEDED as app content or D169's replace-EK/AT slot takes
+one (and which). Owner addendum: when the full drafts are done, run
+cleanup and polish passes on the finished subclasses before they are
+considered ship-ready.
+
 ## D190 — OWNER: monk bake-off = three finalists, each with a Focus-spend budget lever (2026-08-03)
 
 The bake-off entries, owner-directed:
