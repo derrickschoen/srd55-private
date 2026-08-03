@@ -97,6 +97,11 @@ describe('SRD extract provenance', () => {
     expect(listed).toContain('backgrounds.txt');
   });
 
+  it('covers the subclass catalog extract by name', () => {
+    const listed = extractRows().map((row) => row.file);
+    expect(listed).toContain('subclasses.txt');
+  });
+
   it('still records the PDF the extracts were derived from', () => {
     expect(sourceDocument).toContain(
       '8974902d109d6e63672d7c490bde9ccf052410503d9cfa768237154fbc5e3d87',
