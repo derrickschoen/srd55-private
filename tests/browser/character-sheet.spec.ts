@@ -4,6 +4,10 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { DatabaseContext } from '../../src/db/database';
 import {
+  TABLE_SCOPES,
+  type TablesWithRole,
+} from '../../src/domain/contracts/tables';
+import {
   PRINT_APPENDIX_PREFERENCE_KEYS,
 } from '../../src/queries/print-appendix-preferences';
 import { readLevelUpSeam } from './fixtures/level-up-seam';
@@ -626,6 +630,38 @@ async function rows(
   ) as Promise<Record<string, unknown>[]>;
 }
 
+type CharacterScopedTable = TablesWithRole<
+  'character_root' | 'character_owned'
+>;
+
+const CHARACTER_SCOPED_TABLES = Object.entries(TABLE_SCOPES).flatMap(
+  ([table, scopes]) =>
+    scopes.role === 'character_root' || scopes.role === 'character_owned'
+      ? [table as CharacterScopedTable]
+      : [],
+);
+
+async function characterScopedRows(
+  page: Page,
+): Promise<
+  Readonly<Record<CharacterScopedTable, Record<string, unknown>[]>>
+  > {
+  return page.evaluate(
+    async (tables) =>
+      Object.fromEntries(
+        await Promise.all(
+          tables.map(async (table) => [
+            table,
+            await window.staticApp.inspectRows(table),
+          ]),
+        ),
+      ),
+    CHARACTER_SCOPED_TABLES,
+  ) as Promise<
+    Readonly<Record<CharacterScopedTable, Record<string, unknown>[]>>
+  >;
+}
+
 async function navigateWithinApp(page: Page, path: string): Promise<void> {
   await page.evaluate((target) => {
     window.history.pushState(null, '', target);
@@ -1161,15 +1197,7 @@ test('flavor appendix is opt-in, remembered, ordered, and carries full text', as
   await expectExactText(backstory.locator('[data-free-text]'), HOSTILE_BACKSTORY);
   await expectExactText(notes.locator('[data-free-text]'), LONG_NOTES);
   await expect(page.locator('[data-sheet-flavor-continuation]')).toHaveCount(0);
-  const beforeCharacter = await rows(page, 'characters', {
-    id: image.characterId,
-  });
-  const beforeOperations = await rows(page, 'character_operations', {
-    character_id: image.characterId,
-  });
-  const beforeChangeLog = await rows(page, 'change_log', {
-    character_id: image.characterId,
-  });
+  const beforeCharacterScopedRows = await characterScopedRows(page);
   await option.check();
   await expect
     .poll(async () =>
@@ -1185,19 +1213,34 @@ test('flavor appendix is opt-in, remembered, ordered, and carries full text', as
         note: null,
       }),
     ]);
-  // SS-BROWSER-NO-WRITE, narrowed by D162: changing print choices may write
-  // exactly the three named preference keys and no character revision/history.
-  expect(await rows(page, 'characters', { id: image.characterId })).toEqual(
-    beforeCharacter,
+  // SS-BROWSER-NO-WRITE, narrowed by D162: every registry-classified
+  // character table must stay unchanged. Only this character's three named
+  // print-preference rows may differ in character_rule_overrides.
+  const afterCharacterScopedRows = await characterScopedRows(page);
+  const namedPreferenceKeys = new Set<string>(
+    Object.values(PRINT_APPENDIX_PREFERENCE_KEYS),
   );
-  expect(
-    await rows(page, 'character_operations', {
-      character_id: image.characterId,
-    }),
-  ).toEqual(beforeOperations);
-  expect(
-    await rows(page, 'change_log', { character_id: image.characterId }),
-  ).toEqual(beforeChangeLog);
+  const withoutNamedPreferenceRows = (tableRows: Record<string, unknown>[]) =>
+    tableRows.filter(
+      (row) =>
+        row.character_id !== image.characterId ||
+        typeof row.rule_key !== 'string' ||
+        !namedPreferenceKeys.has(row.rule_key),
+    );
+  for (const table of CHARACTER_SCOPED_TABLES) {
+    const beforeRows = beforeCharacterScopedRows[table];
+    const afterRows = afterCharacterScopedRows[table];
+    expect(
+      table === 'character_rule_overrides'
+        ? withoutNamedPreferenceRows(afterRows)
+        : afterRows,
+      `${table} changed while persisting a print preference`,
+    ).toEqual(
+      table === 'character_rule_overrides'
+        ? withoutNamedPreferenceRows(beforeRows)
+        : beforeRows,
+    );
+  }
 
   await navigateWithinApp(
     page,
