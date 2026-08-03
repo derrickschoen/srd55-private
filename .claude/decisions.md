@@ -7,6 +7,20 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D177 — OWNER: clean-room subclass creation guidelines (2026-08-03)
+
+Codex and opus collaborate on research producing SUBCLASS CREATION
+GUIDELINE FILES (docs/design/subclass-guidelines/). Content: what makes
+a subclass fun and appropriately powerful, with PER-CLASS power budgets
+(rogue/monk/ranger derive more power from their subclass; full casters
+less), plus patterns from popular homebrew and third-party work. CLEAN
+ROOM: researching agents are RETIRED with their sessions; the files
+carry only distilled design principles and original examples (SRD/CC-BY
+material may be quoted; no verbatim expression from any non-open source,
+no Product Identity) so future LLM sessions can design subclasses from
+the guidelines alone, unaware of any copyrighted source. Hygiene review
+before commit: a reviewer checks the files for copied expression and PI.
+
 ## D176 — OWNER: OGL content is QUARANTINED in its own folder (2026-08-03)
 
 "Keep ogl stuff in a separate folder with the ogl requirements in the
