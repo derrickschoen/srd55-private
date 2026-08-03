@@ -28,6 +28,7 @@ import {
   abilities,
   characterEffectKinds,
   characterLevels,
+  definitionTableForSourceType,
   domainSourceTypes,
   extraAttackWeaponScopes,
   featureTemplateEffectKinds,
@@ -38,6 +39,7 @@ import {
   spellSchool,
   type Ability,
   type CharacterLevel,
+  type DomainSourceType,
   type ExtraAttackWeaponScope,
   type ProgressionType,
   type RulesEdition,
@@ -66,6 +68,7 @@ import {
   contentIdentitySequence,
   contentIdentitySet,
   type ContentFingerprintDigest,
+  type ContentKind,
   type DerivedContentIdentityV1,
 } from './content-identity';
 import {
@@ -91,6 +94,10 @@ export interface StoredAuthoredReferenceResolverV1 {
   readonly armor: (
     contentKey: ContentKey,
   ) => ContentFingerprintReference<'armor'>;
+  readonly sourceDefinition: (
+    kind: DomainSourceType,
+    contentKey: ContentKey,
+  ) => ContentFingerprintReference<DomainSourceType>;
 }
 
 type StoredProjection<K extends AuthoredProjectorKind> =
@@ -124,8 +131,15 @@ interface StoredEffectRow {
   readonly notes: string | null;
 }
 
-function projectionError(message: string): never {
-  throw new TypeError(`Stored content-v1 projection failed: ${message}`);
+export class StoredAuthoredContentProjectionError extends TypeError {
+  constructor(message: string, options?: ErrorOptions) {
+    super(`Stored content-v1 projection failed: ${message}`, options);
+    this.name = 'StoredAuthoredContentProjectionError';
+  }
+}
+
+function projectionError(message: string, options?: ErrorOptions): never {
+  throw new StoredAuthoredContentProjectionError(message, options);
 }
 
 function nonEmpty(value: string, label: string): string {
@@ -298,65 +312,6 @@ function jsonArray(text: string | null, label: string): readonly unknown[] {
   return decoded;
 }
 
-function recordValue(value: unknown, label: string): Readonly<Record<string, unknown>> {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    return projectionError(`${label} must be an object.`);
-  }
-  return value as Readonly<Record<string, unknown>>;
-}
-
-function objectString(
-  value: Readonly<Record<string, unknown>>,
-  key: string,
-  label: string,
-): string {
-  const item = value[key];
-  if (typeof item !== 'string' || item.trim() === '') {
-    return projectionError(`${label}.${key} must be a non-empty string.`);
-  }
-  return item.trim();
-}
-
-function objectInteger(
-  value: Readonly<Record<string, unknown>>,
-  key: string,
-  label: string,
-): number {
-  const item = value[key];
-  if (!Number.isSafeInteger(item)) {
-    return projectionError(`${label}.${key} must be a safe integer.`);
-  }
-  return item as number;
-}
-
-function objectStrings(
-  value: Readonly<Record<string, unknown>>,
-  key: string,
-  label: string,
-): readonly string[] {
-  const item = value[key];
-  if (item === undefined || item === null) {
-    return [];
-  }
-  if (!Array.isArray(item) || item.some((entry) => typeof entry !== 'string')) {
-    return projectionError(`${label}.${key} must be a string array.`);
-  }
-  return item.map((entry) => nonEmpty(entry, `${label}.${key}`));
-}
-
-function optionalObjectString(
-  value: Readonly<Record<string, unknown>>,
-  key: string,
-  label: string,
-): string | null {
-  const item = value[key];
-  if (item === undefined || item === null) return null;
-  if (typeof item !== 'string' || item.trim() === '') {
-    return projectionError(`${label}.${key} must be a non-empty string or null.`);
-  }
-  return item.trim();
-}
-
 function jsonValue(value: unknown, label: string): JsonValue {
   if (
     value === null ||
@@ -393,23 +348,6 @@ function jsonObject(value: unknown, label: string): JsonObject {
   return decoded;
 }
 
-function activationFields(rule: GrantRule): {
-  readonly active_from_class_level: CharacterLevel | null;
-  readonly active_if_config: {
-    readonly key: string;
-    readonly equals: string;
-  } | null;
-  readonly distinct_config_by: string | null;
-} {
-  return {
-    active_from_class_level: rule.activeFromClassLevel === null
-      ? null
-      : characterLevel(rule.activeFromClassLevel, 'grant activation level'),
-    active_if_config: rule.activeIfConfig,
-    distinct_config_by: rule.distinctConfigBy,
-  };
-}
-
 function fixedSpellContentKey(
   db: DatabaseContext,
   object: Readonly<Record<string, unknown>>,
@@ -421,12 +359,21 @@ function fixedSpellContentKey(
     typeof storedKey === 'string' && storedKey.trim() !== ''
       ? storedKey.trim() as ContentKey
       : null;
-  const keyFromId = Number.isSafeInteger(storedId)
+  const hasStoredId = storedId !== undefined && storedId !== null;
+  if (hasStoredId && (!Number.isSafeInteger(storedId) || Number(storedId) < 1)) {
+    return projectionError(`${label}.spell_version_id must be a positive safe integer.`);
+  }
+  const keyFromId = hasStoredId
     ? db.scalar<string>(
         'SELECT content_key FROM spell_versions WHERE id = ?',
         [storedId as number],
       )
     : null;
+  if (hasStoredId && keyFromId === null) {
+    return projectionError(
+      `${label}.spell_version_id ${String(storedId)} does not resolve.`,
+    );
+  }
   if (keyFromValue !== null && keyFromId !== null && keyFromValue !== keyFromId) {
     return projectionError(`${label} spell id and key disagree.`);
   }
@@ -437,6 +384,82 @@ function fixedSpellContentKey(
   return contentKey as ContentKey;
 }
 
+function sourceDefinitionReference(
+  db: DatabaseContext,
+  object: Readonly<Record<string, unknown>>,
+  references: StoredAuthoredReferenceResolverV1,
+  label: string,
+): ContentFingerprintReference<DomainSourceType> | null {
+  const sourceType = object.source_type;
+  if (typeof sourceType !== 'string' || !isEnumValue(domainSourceTypes, sourceType)) {
+    return projectionError(
+      `${label}.source_type '${String(sourceType)}' is invalid.`,
+    );
+  }
+  const storedId = object.source_definition_id;
+  const hasStoredId = storedId !== undefined && storedId !== null;
+  if (hasStoredId && (!Number.isSafeInteger(storedId) || Number(storedId) < 1)) {
+    return projectionError(
+      `${label}.source_definition_id must be a positive safe integer.`,
+    );
+  }
+  const table = definitionTableForSourceType(sourceType);
+  if (hasStoredId) {
+    const contentKey = db.scalar<string>(
+      `SELECT content_key FROM ${table} WHERE id = ?`,
+      [storedId as number],
+    );
+    if (contentKey === null) {
+      return projectionError(
+        `${label}.source_definition_id ${String(storedId)} does not resolve.`,
+      );
+    }
+    return references.sourceDefinition(sourceType, contentKey as ContentKey);
+  }
+
+  const configuredKey = object.definition_key_config;
+  const storedKey = object.source_definition_key;
+  if (configuredKey !== undefined && configuredKey !== null) {
+    return null;
+  }
+  if (typeof storedKey !== 'string' || storedKey.trim() === '') {
+    return null;
+  }
+  const contentKey = storedKey.trim() as ContentKey;
+  const exists = db.scalar<number>(
+    `SELECT id FROM ${table} WHERE content_key = ?`,
+    [contentKey],
+  );
+  if (exists === null) {
+    return projectionError(
+      `${label}.source_definition_key '${contentKey}' does not resolve.`,
+    );
+  }
+  return references.sourceDefinition(sourceType, contentKey);
+}
+
+/**
+ * The only excluded GrantRule field is `selection_collection`. Runtime proof:
+ * GrantRule.fromObject rejects every non-null value, and constraintFor in
+ * grant-rule-planner.ts always emits null rather than reading the stored field.
+ * Every other parsed field is included by default, including unknown future
+ * extensions. The id/key fields below are mechanics-bearing replacements, not
+ * exclusions: local ids and aliases become portable fingerprint references.
+ */
+const NON_MECHANICAL_GRANT_FIELDS = new Set(['selection_collection']);
+// These four mechanics-bearing storage locators never enter canonical bytes:
+// spell ids/keys become `spell`, and fixed source ids/keys become
+// `source_definition`. When `definition_key_config` is present, the generator
+// overwrites `source_definition_key` from parent config before lookup, so that
+// fallback is inert and no replacement is emitted. In every other case the
+// fixed key is resolved to the same portable source fingerprint as an id.
+const PORTABLE_REFERENCE_FIELDS = new Set([
+  'spell_version_id',
+  'spell_version_key',
+  'source_definition_id',
+  'source_definition_key',
+]);
+
 function authoringGrants(
   db: DatabaseContext,
   text: string | null,
@@ -444,122 +467,61 @@ function authoringGrants(
   label: string,
 ): readonly AuthoringGrant[] {
   return jsonArray(text, label).map((value, index): AuthoringGrant => {
-    const rule = GrantRule.fromObject(value);
-    const object = recordValue(rule.toObject(), `${label}[${index}]`);
     const ruleLabel = `${label}[${index}]`;
-    switch (rule.kind) {
-      case 'fixed_spell':
-        if (rule.bucket === null || rule.bucket === 'spellbook') {
-          return projectionError(`${ruleLabel} fixed spell has an invalid bucket.`);
-        }
-        return {
-          ...activationFields(rule),
-          kind: rule.kind,
-          rule_key: rule.ruleKey,
-          spell: references.spell(fixedSpellContentKey(db, object, ruleLabel)),
-          bucket: rule.bucket,
-          always_prepared: rule.alwaysPrepared,
-          with_slots: rule.withSlots,
-          free_cast: rule.freeCast?.toObject() ?? null,
-          counts_against_limit: object.counts_against_limit !== false,
-          label: optionalObjectString(object, 'label', ruleLabel),
-        };
-      case 'choice_from_list':
-        return {
-          kind: rule.kind,
-          rule_key: rule.ruleKey,
-          list: objectString(object, 'list', ruleLabel),
-          count: objectInteger(object, 'count', ruleLabel),
-          maximum_spell_level: objectInteger(object, 'level_max', ruleLabel),
-        };
-      case 'choice_from_query':
-        return {
-          kind: rule.kind,
-          rule_key: rule.ruleKey,
-          schools: objectStrings(object, 'schools', ruleLabel).map(spellSchool),
-          tags: objectStrings(object, 'tags', ruleLabel),
-          count: objectInteger(object, 'count', ruleLabel),
-          minimum_spell_level: objectInteger(object, 'level_min', ruleLabel),
-          maximum_spell_level: objectInteger(object, 'level_max', ruleLabel),
-        };
-      case 'skill_proficiency':
-        return {
-          kind: rule.kind,
-          rule_key: rule.ruleKey,
-          count: objectInteger(object, 'count', ruleLabel),
-          skills: objectStrings(object, 'skills', ruleLabel).map((entry) =>
-            skill(entry, `${ruleLabel}.skills`),
-          ),
-        };
-      case 'grant_source':
-        {
-          const sourceType = objectString(object, 'source_type', ruleLabel);
-          if (!isEnumValue(domainSourceTypes, sourceType)) {
-            return projectionError(`${ruleLabel}.source_type '${sourceType}' is invalid.`);
-          }
-          const definitionKeyConfig = optionalObjectString(
-            object,
-            'definition_key_config',
-            ruleLabel,
-          );
-          if (definitionKeyConfig === null) {
-            return projectionError(
-              `${ruleLabel} fixed grant-source definitions require a fingerprint reference and are not representable by this dynamic authoring arm.`,
-            );
-          }
-          const childConfigPath = optionalObjectString(
-            object,
-            'child_config_config',
-            ruleLabel,
-          );
-          // When these config-path fields are present, the runtime overwrites
-          // source_definition_id/key and child_config. Those stored fallbacks
-          // are therefore inert metadata and deliberately excluded.
-          return {
-            ...activationFields(rule),
-            kind: rule.kind,
-            rule_key: rule.ruleKey,
-            count: rule.count ?? projectionError(`${ruleLabel}.count is required.`),
-            source_type: sourceType,
-            definition_key_config: definitionKeyConfig,
-            child_config: childConfigPath === null
-              ? {
-                  mode: 'fixed',
-                  value: jsonObject(object.child_config ?? {}, `${ruleLabel}.child_config`),
-                }
-              : { mode: 'config', path: childConfigPath },
-          };
-        }
-      case 'capability':
-      case 'spellbook_acquisition':
-      case 'fighting_style':
-      case 'weapon_mastery':
-        return projectionError(
-          `${ruleLabel} kind '${rule.kind}' is not losslessly representable by the authored content-v1 grant contract.`,
-        );
+    let rule: GrantRule;
+    try {
+      rule = GrantRule.fromObject(value);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      return projectionError(`${ruleLabel} is invalid: ${detail}`, { cause: error });
     }
+    const object = {
+      ...jsonObject(rule.toObject(), ruleLabel),
+    } as Record<string, JsonValue | ContentFingerprintReference>;
+    for (const field of NON_MECHANICAL_GRANT_FIELDS) delete object[field];
+
+    if (rule.kind === 'fixed_spell') {
+      object.spell = references.spell(
+        fixedSpellContentKey(db, object, ruleLabel),
+      );
+    } else if (rule.kind === 'grant_source') {
+      const sourceDefinition = sourceDefinitionReference(
+        db, object, references, ruleLabel,
+      );
+      if (sourceDefinition !== null) object.source_definition = sourceDefinition;
+    }
+    for (const field of PORTABLE_REFERENCE_FIELDS) delete object[field];
+    return object as AuthoringGrant;
   });
 }
 
 function canonicalGrant(grant: AuthoringGrant): CanonicalAuthoringGrantV1 {
-  switch (grant.kind) {
-    case 'fixed_spell':
-      return {
-        ...grant,
-        label: grant.label === null ? null : canonicalRuleText(grant.label),
-      };
-    case 'choice_from_list':
-    case 'grant_source':
-      return grant;
-    case 'choice_from_query':
-      return {
-        ...grant,
-        schools: contentIdentitySet(grant.schools),
-        tags: contentIdentitySet(grant.tags),
-      };
-    case 'skill_proficiency':
-      return { ...grant, skills: contentIdentitySet(grant.skills) };
+  const canonical: Record<string, CanonicalAuthoringGrantV1[string]> = {};
+  for (const [field, value] of Object.entries(grant)) {
+    if (field === 'label') {
+      if (value !== null && typeof value !== 'string') {
+        return projectionError(`grant '${grant.rule_key}' label must be text or null.`);
+      }
+      canonical[field] = value === null ? null : canonicalRuleText(value);
+    } else if (field === 'schools' || field === 'tags' || field === 'skills') {
+      if (!Array.isArray(value)) {
+        return projectionError(`grant '${grant.rule_key}' ${field} must be a string array.`);
+      }
+      const members = value.map((entry) => {
+        if (typeof entry !== 'string') {
+          return projectionError(`grant '${grant.rule_key}' ${field} must contain only strings.`);
+        }
+        if (field === 'skills') return skill(entry, `grant '${grant.rule_key}' skills`);
+        return field === 'schools'
+          ? spellSchool(nonEmpty(entry, `grant '${grant.rule_key}' schools`))
+          : nonEmpty(entry, `grant '${grant.rule_key}' tags`);
+      });
+      canonical[field] = contentIdentitySet(members);
+    } else {
+      canonical[field] = value;
+    }
   }
+  return canonical as CanonicalAuthoringGrantV1;
 }
 
 function canonicalCharacterEffect(
@@ -610,16 +572,67 @@ function canonicalFeatureEffect(
   return canonicalCharacterEffect(effect);
 }
 
-function fixedGrantReferences(
+function fingerprintValue<K extends ContentKind>(
+  value: JsonValue | ContentFingerprintReference | undefined,
+  kind: K,
+  label: string,
+): ContentFingerprintReference<K> {
+  if (value === null || Array.isArray(value) || typeof value !== 'object') {
+    return projectionError(`${label} is not a fingerprint reference.`);
+  }
+  const object = value as Readonly<Record<string, unknown>>;
+  if (
+    object.kind !== kind ||
+    object.scheme !== CONTENT_FINGERPRINT_SCHEME_V1 ||
+    typeof object.digest !== 'string' ||
+    !/^[0-9a-f]{64}$/u.test(object.digest)
+  ) {
+    return projectionError(`${label} is not a valid ${kind} content-v1 fingerprint.`);
+  }
+  return value as ContentFingerprintReference<K>;
+}
+
+function grantReferences(
   grants: readonly AuthoringGrant[],
-): readonly Extract<
-  AuthoredContentReferenceV1,
-  { readonly role: 'grant.fixed_spell' }
->[] {
-  return grants.flatMap((grant) =>
-    grant.kind === 'fixed_spell'
-      ? [{ role: 'grant.fixed_spell' as const, reference: grant.spell }]
-      : [],
+): readonly Extract<AuthoredContentReferenceV1, {
+  readonly role: 'grant.fixed_spell' | 'grant.source_definition';
+}>[] {
+  const references: Array<Extract<AuthoredContentReferenceV1, {
+    readonly role: 'grant.fixed_spell' | 'grant.source_definition';
+  }>> = [];
+  for (const grant of grants) {
+    if (grant.kind === 'fixed_spell') {
+      references.push({
+        role: 'grant.fixed_spell' as const,
+        reference: fingerprintValue(grant.spell, 'spell', `grant '${grant.rule_key}' spell`),
+      });
+    } else if (grant.kind === 'grant_source' && grant.source_definition !== undefined) {
+      const value = grant.source_definition;
+      if (value === null || Array.isArray(value) || typeof value !== 'object') {
+        return projectionError(`grant '${grant.rule_key}' source definition is not a fingerprint reference.`);
+      }
+      const kind = (value as Readonly<Record<string, unknown>>).kind;
+      if (typeof kind !== 'string' || !isEnumValue(domainSourceTypes, kind)) {
+        return projectionError(`grant '${grant.rule_key}' source definition kind is invalid.`);
+      }
+      references.push({
+        role: 'grant.source_definition' as const,
+        reference: fingerprintValue(value, kind, `grant '${grant.rule_key}' source definition`),
+      });
+    }
+  }
+  return references;
+}
+
+function grantSourceReferences(
+  grants: readonly AuthoringGrant[],
+): readonly Extract<AuthoredContentReferenceV1, {
+  readonly role: 'grant.source_definition';
+}>[] {
+  return grantReferences(grants).filter(
+    (reference): reference is Extract<AuthoredContentReferenceV1, {
+      readonly role: 'grant.source_definition';
+    }> => reference.role === 'grant.source_definition',
   );
 }
 
@@ -628,6 +641,7 @@ function projectSpecies(
 ): StoredProjection<'species'> {
   const payload: SpeciesProjectorPayloadV1 = {
     reference_text: canonicalRuleText(aggregate.reference_text),
+    repeatable: aggregate.repeatable,
     grants: contentIdentitySequence(aggregate.grants.map(canonicalGrant)),
     creature_type: canonicalOpenPassthroughValue(aggregate.creature_type),
     primary_size: canonicalOpenPassthroughValue(aggregate.primary_size),
@@ -645,7 +659,7 @@ function projectSpecies(
     kind: 'species',
     aggregate,
     payload,
-    references: Object.freeze(fixedGrantReferences(aggregate.grants)),
+    references: Object.freeze(grantReferences(aggregate.grants)),
   });
 }
 
@@ -663,6 +677,7 @@ function projectBackground(
   };
   const payload: BackgroundProjectorPayloadV1 = {
     reference_text: canonicalRuleText(aggregate.reference_text),
+    repeatable: aggregate.repeatable,
     grants: contentIdentitySequence(aggregate.grants.map(canonicalGrant)),
     suggested_abilities: aggregate.suggested_abilities,
     default_origin_feat: aggregate.default_origin_feat,
@@ -697,6 +712,7 @@ function projectBackground(
     payload,
     references: Object.freeze([
       { role: 'background.default_origin_feat' as const, reference: aggregate.default_origin_feat },
+      ...grantSourceReferences(aggregate.grants),
       ...equipmentReferences,
     ]),
   });
@@ -738,7 +754,7 @@ function projectSubclass(
     payload,
     references: Object.freeze([
       { role: 'subclass.parent_class' as const, reference: aggregate.parent_class },
-      ...fixedGrantReferences([...aggregate.grants, ...progressionGrants]),
+      ...grantReferences([...aggregate.grants, ...progressionGrants]),
     ]),
   });
 }
@@ -801,7 +817,7 @@ function readSpecies(
   const root = db.one(
     `SELECT definition.name AS definition_name,
             definition.rules_edition AS definition_edition,
-            definition.grant_rules, definition.notes,
+            definition.repeatable, definition.grant_rules, definition.notes,
             template.id AS template_id, template.name AS template_name,
             template.rules_edition AS template_edition,
             template.creature_type, template.size, template.alternate_size,
@@ -814,6 +830,7 @@ function readSpecies(
     (row) => ({
       name: sqlString(row, 'definition_name'),
       edition: sqlString(row, 'definition_edition'),
+      repeatable: sqlBoolean(row, 'repeatable'),
       grant_rules: sqlNullableString(row, 'grant_rules'),
       notes: sqlNullableString(row, 'notes'),
       template_id: sqlInteger(row, 'template_id'),
@@ -853,6 +870,7 @@ function readSpecies(
     name: nonEmpty(root.name, 'species name'),
     rules_edition: rulesEdition(root.edition),
     reference_text: root.notes ?? '',
+    repeatable: root.repeatable,
     creature_type: root.creature_type,
     primary_size: root.size,
     alternate_size: root.alternate_size,
@@ -880,7 +898,7 @@ function readBackground(
   const root = db.one(
     `SELECT definition.name AS definition_name,
             definition.rules_edition AS definition_edition,
-            definition.grant_rules, definition.notes,
+            definition.repeatable, definition.grant_rules, definition.notes,
             template.id AS template_id, template.name AS template_name,
             template.rules_edition AS template_edition,
             template.ability_score_1, template.ability_score_2,
@@ -896,6 +914,7 @@ function readBackground(
     (row) => ({
       name: sqlString(row, 'definition_name'),
       edition: sqlString(row, 'definition_edition'),
+      repeatable: sqlBoolean(row, 'repeatable'),
       grant_rules: sqlNullableString(row, 'grant_rules'),
       notes: sqlNullableString(row, 'notes'),
       template_id: sqlInteger(row, 'template_id'),
@@ -965,6 +984,7 @@ function readBackground(
     name: nonEmpty(root.name, 'background name'),
     rules_edition: edition,
     reference_text: root.notes ?? '',
+    repeatable: root.repeatable,
     grants: grants as BackgroundContentAggregate['grants'],
     suggested_abilities: [ability(root.abilities[0], 'first suggested ability'), ability(root.abilities[1], 'second suggested ability'), ability(root.abilities[2], 'third suggested ability')],
     default_origin_feat: references.featByStoredName({ name: root.feat_name, edition }),
@@ -1186,7 +1206,7 @@ export function resolveStoredAuthoredContentV1<
 
 const SHA256 = /^[0-9a-f]{64}$/u;
 
-function fingerprintReference<K extends 'spell' | 'feat' | 'class' | 'weapon' | 'armor'>(
+function fingerprintReference<K extends ContentKind>(
   db: DatabaseContext,
   kind: K,
   contentKey: ContentKey,
@@ -1236,6 +1256,8 @@ export function storedAuthoredRegistryReferencesV1(
     class: (contentKey) => fingerprintReference(db, 'class', contentKey),
     weapon: (contentKey) => fingerprintReference(db, 'weapon', contentKey),
     armor: (contentKey) => fingerprintReference(db, 'armor', contentKey),
+    sourceDefinition: (kind, contentKey) =>
+      fingerprintReference(db, kind, contentKey),
   };
   return Object.freeze(resolver);
 }

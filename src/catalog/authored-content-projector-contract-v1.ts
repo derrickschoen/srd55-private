@@ -5,6 +5,8 @@ import type {
   SpeciesContentAggregate,
   SubclassContentAggregate,
 } from '../authoring/contracts';
+import type { DomainSourceType, GrantRuleKind } from '../domain/enums';
+import type { JsonValue } from '../domain/models';
 import type {
   AuthoringCharacterEffect,
   AuthoringFeatureEffect,
@@ -38,6 +40,10 @@ export type AuthoredContentReferenceV1 =
       readonly reference: ContentFingerprintReference<'spell'>;
     }
   | {
+      readonly role: 'grant.source_definition';
+      readonly reference: ContentFingerprintReference<DomainSourceType>;
+    }
+  | {
       readonly role: 'background.default_origin_feat';
       readonly reference: ContentFingerprintReference<'feat'>;
     }
@@ -59,7 +65,10 @@ export type AuthoredContentReferenceRole =
 
 export type AuthoredProjectorReferenceV1<K extends AuthoredProjectorKind> =
   K extends 'species'
-    ? Extract<AuthoredContentReferenceV1, { readonly role: 'grant.fixed_spell' }>
+    ? Extract<
+        AuthoredContentReferenceV1,
+        { readonly role: 'grant.fixed_spell' | 'grant.source_definition' }
+      >
     : K extends 'background'
       ? Extract<
           AuthoredContentReferenceV1,
@@ -67,7 +76,8 @@ export type AuthoredProjectorReferenceV1<K extends AuthoredProjectorKind> =
             readonly role:
               | 'background.default_origin_feat'
               | 'background.equipment.weapon'
-              | 'background.equipment.armor';
+              | 'background.equipment.armor'
+              | 'grant.source_definition';
           }
         >
       : Extract<
@@ -75,6 +85,7 @@ export type AuthoredProjectorReferenceV1<K extends AuthoredProjectorKind> =
           {
             readonly role:
               | 'grant.fixed_spell'
+              | 'grant.source_definition'
               | 'subclass.parent_class';
           }
         >;
@@ -121,40 +132,18 @@ export type CanonicalCharacterEffectV1 = CanonicalizedEffect<AuthoringCharacterE
 export type CanonicalFeatureEffectV1 = CanonicalizedEffect<AuthoringFeatureEffect>;
 
 /**
- * Grant order is meaningful, but the eligibility members within these two
- * grant arms are mathematical sets. Encoding that distinction here prevents
- * reordered or repeated eligibility values from changing content identity.
+ * Grant order is meaningful, while eligibility-list members are mathematical
+ * sets. The open field map mirrors GrantRule's extension-preserving parser.
  */
-export type CanonicalAuthoringGrantV1 =
-  | (Omit<
-      Extract<AuthoringGrant, { readonly kind: 'fixed_spell' }>,
-      'label'
-    > & {
-      readonly label: CanonicalRuleText | null;
-    })
-  | Extract<
-      AuthoringGrant,
-      { readonly kind: 'choice_from_list' | 'grant_source' }
-    >
-  | (Omit<
-      Extract<AuthoringGrant, { readonly kind: 'choice_from_query' }>,
-      'schools' | 'tags'
-    > & {
-      readonly schools: ContentIdentitySet<
-        Extract<AuthoringGrant, { readonly kind: 'choice_from_query' }>['schools'][number]
-      >;
-      readonly tags: ContentIdentitySet<
-        Extract<AuthoringGrant, { readonly kind: 'choice_from_query' }>['tags'][number]
-      >;
-    })
-  | (Omit<
-      Extract<AuthoringGrant, { readonly kind: 'skill_proficiency' }>,
-      'skills'
-    > & {
-      readonly skills: ContentIdentitySet<
-        Extract<AuthoringGrant, { readonly kind: 'skill_proficiency' }>['skills'][number]
-      >;
-    });
+export interface CanonicalAuthoringGrantV1 {
+  readonly kind: GrantRuleKind;
+  readonly rule_key: string;
+  readonly [field: string]:
+    | JsonValue
+    | ContentFingerprintReference
+    | CanonicalRuleText
+    | ContentIdentitySet<JsonValue>;
+}
 
 export interface CanonicalSpeciesTraitV1 {
   readonly name: string;
@@ -164,6 +153,7 @@ export interface CanonicalSpeciesTraitV1 {
 
 export interface SpeciesProjectorPayloadV1 {
   readonly reference_text: CanonicalRuleText;
+  readonly repeatable: boolean;
   readonly grants: ContentIdentitySequence<CanonicalAuthoringGrantV1>;
   readonly creature_type: CanonicalOpenPassthroughValue;
   readonly primary_size: CanonicalOpenPassthroughValue;
@@ -177,6 +167,7 @@ export type CanonicalBackgroundEquipmentV1 =
 
 export interface BackgroundProjectorPayloadV1 {
   readonly reference_text: CanonicalRuleText;
+  readonly repeatable: boolean;
   readonly grants: ContentIdentitySequence<CanonicalAuthoringGrantV1>;
   readonly suggested_abilities: BackgroundContentAggregate['suggested_abilities'];
   readonly default_origin_feat: ContentFingerprintReference<'feat'>;
@@ -258,7 +249,10 @@ export const AUTHORED_PROJECTOR_INVENTORY_V1 = {
       'species_template_traits',
       'species_template_trait_effects',
     ],
-    outboundReferenceRoles: ['grant.fixed_spell'],
+    outboundReferenceRoles: [
+      'grant.fixed_spell',
+      'grant.source_definition',
+    ],
   },
   background: {
     kind: 'background',
@@ -272,6 +266,7 @@ export const AUTHORED_PROJECTOR_INVENTORY_V1 = {
       'background.default_origin_feat',
       'background.equipment.weapon',
       'background.equipment.armor',
+      'grant.source_definition',
     ],
   },
   subclass: {
@@ -284,6 +279,7 @@ export const AUTHORED_PROJECTOR_INVENTORY_V1 = {
     ],
     outboundReferenceRoles: [
       'grant.fixed_spell',
+      'grant.source_definition',
       'subclass.parent_class',
     ],
   },
@@ -294,5 +290,12 @@ export const AUTHORED_PROJECTOR_INVENTORY_V1 = {
 /** Compile-time closure: no unrelated content kind can enter these contracts. */
 export type _AuthoredReferenceKinds = Extract<
   ContentKind,
-  'spell' | 'feat' | 'weapon' | 'armor' | 'class'
+  | 'spell'
+  | 'feat'
+  | 'weapon'
+  | 'armor'
+  | 'class'
+  | 'subclass'
+  | 'species'
+  | 'background'
 >;

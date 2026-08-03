@@ -60,7 +60,10 @@ describe('HA-1 authored content-v1 projector contracts', () => {
           'species_template_traits',
           'species_template_trait_effects',
         ],
-        outboundReferenceRoles: ['grant.fixed_spell'],
+        outboundReferenceRoles: [
+          'grant.fixed_spell',
+          'grant.source_definition',
+        ],
       },
       background: {
         kind: 'background',
@@ -74,6 +77,7 @@ describe('HA-1 authored content-v1 projector contracts', () => {
           'background.default_origin_feat',
           'background.equipment.weapon',
           'background.equipment.armor',
+          'grant.source_definition',
         ],
       },
       subclass: {
@@ -86,6 +90,7 @@ describe('HA-1 authored content-v1 projector contracts', () => {
         ],
         outboundReferenceRoles: [
           'grant.fixed_spell',
+          'grant.source_definition',
           'subclass.parent_class',
         ],
       },
@@ -124,27 +129,50 @@ describe('HA-1 authored content-v1 projector contracts', () => {
       .not.toBe(withoutDefinitionGrant.derivedKey);
   });
 
-  it('pins revised species and background grants while grant convergence stays unchanged', () => {
+  it('pins generic grant and repeatable surgery digests', () => {
     expect([
-      ...authoredProjectorV1Vectors.slice(0, 2),
+      authoredProjectorV1Vectors[0],
+      authoredProjectorV1Vectors[1],
+      authoredProjectorV1Vectors[4],
+      authoredProjectorV1Vectors[5],
       ...authoredGrantSetV1Vectors,
     ].map(({ sha256, derivedKey }) => ({ sha256, derivedKey }))).toEqual([
       {
-        sha256: '15573f2b4dea6c5382d948d92a453fbaf6a921d3498204c1b50750a5bdfaa0f6',
-        derivedKey: 'expanded:content.v1:15573f2b4dea6c5382d948d92a453fbaf6a921d3498204c1b50750a5bdfaa0f6',
+        sha256: 'e7c9c480129d6d8e8889dac55e48dc9f5ed720057d14e3999e78c4d08d26427e',
+        derivedKey: 'expanded:content.v1:e7c9c480129d6d8e8889dac55e48dc9f5ed720057d14e3999e78c4d08d26427e',
       },
       {
-        sha256: '3058f3f81adc279d26f7ceccb9576304db7a4dda564fe8bdac31893abcce2969',
-        derivedKey: 'expanded:content.v1:3058f3f81adc279d26f7ceccb9576304db7a4dda564fe8bdac31893abcce2969',
+        sha256: '15ff580a3544fe808e86d862306a064fe3237d7e999d2707acda4135c2ff9584',
+        derivedKey: 'expanded:content.v1:15ff580a3544fe808e86d862306a064fe3237d7e999d2707acda4135c2ff9584',
       },
       {
-        sha256: '99eb9b5e461081b98fe764cbc11d38b9d0d17c0344d306333b62089380da23d7',
-        derivedKey: 'expanded:content.v1:99eb9b5e461081b98fe764cbc11d38b9d0d17c0344d306333b62089380da23d7',
+        sha256: '47b18e8ffe968ed978cf2b9da087216e90d8724210f67a71e711cfae0167c255',
+        derivedKey: 'expanded:content.v1:47b18e8ffe968ed978cf2b9da087216e90d8724210f67a71e711cfae0167c255',
       },
       {
-        sha256: '9e313559ef745814f28746d2c6d6d2969dd8ff380f461ecce55d0d70536d28af',
-        derivedKey: 'expanded:content.v1:9e313559ef745814f28746d2c6d6d2969dd8ff380f461ecce55d0d70536d28af',
+        sha256: '6232b70f5913c9c871e7d52e8244d776fca95c626880cba342aece293466efa9',
+        derivedKey: 'expanded:content.v1:6232b70f5913c9c871e7d52e8244d776fca95c626880cba342aece293466efa9',
       },
+      {
+        sha256: '2bcfbab57de3f1947b6e561d337ad41a3937571dd190ca287dd0ff5898835245',
+        derivedKey: 'expanded:content.v1:2bcfbab57de3f1947b6e561d337ad41a3937571dd190ca287dd0ff5898835245',
+      },
+      {
+        sha256: '035f9bbc5106c2cb361c571b44bb9fd5c254a6ac9bdd92ebac5ac8b75e1bdaa4',
+        derivedKey: 'expanded:content.v1:035f9bbc5106c2cb361c571b44bb9fd5c254a6ac9bdd92ebac5ac8b75e1bdaa4',
+      },
+    ]);
+  });
+
+  it('keeps grant-free subclass and extra-attack-note vector bytes unchanged', () => {
+    expect([
+      authoredProjectorV1Vectors[2].sha256,
+      authoredProjectorV1Vectors[3].sha256,
+      authoredProjectorV1Vectors[6].sha256,
+    ]).toEqual([
+      '0ce55acab6397caea551c266261b93d9a78e1246223fb5ca179d22dc4eaf093e',
+      '49306511d4dd5f33d04301c7d5035dcd1a60fa0ba063d1d20d05ee2ae784c01f',
+      'f1b7fb7a4e0214818258b11e66b9bc9845c3f2b146cfd9887a889302b3b7860e',
     ]);
   });
 });
