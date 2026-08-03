@@ -348,6 +348,19 @@ function jsonObject(value: unknown, label: string): JsonObject {
   return decoded;
 }
 
+function exactStoredContentKey(
+  value: unknown,
+  label: string,
+): ContentKey | null {
+  if (typeof value !== 'string' || value === '') return null;
+  if (value !== value.trim()) {
+    return projectionError(
+      `${label} must not contain leading or trailing whitespace.`,
+    );
+  }
+  return value as ContentKey;
+}
+
 function fixedSpellContentKey(
   db: DatabaseContext,
   object: Readonly<Record<string, unknown>>,
@@ -355,10 +368,10 @@ function fixedSpellContentKey(
 ): ContentKey {
   const storedKey = object.spell_version_key;
   const storedId = object.spell_version_id;
-  const keyFromValue =
-    typeof storedKey === 'string' && storedKey.trim() !== ''
-      ? storedKey.trim() as ContentKey
-      : null;
+  const keyFromValue = exactStoredContentKey(
+    storedKey,
+    `${label}.spell_version_key`,
+  );
   const hasStoredId = storedId !== undefined && storedId !== null;
   if (hasStoredId && (!Number.isSafeInteger(storedId) || Number(storedId) < 1)) {
     return projectionError(`${label}.spell_version_id must be a positive safe integer.`);
@@ -419,13 +432,25 @@ function sourceDefinitionReference(
 
   const configuredKey = object.definition_key_config;
   const storedKey = object.source_definition_key;
-  if (configuredKey !== undefined && configuredKey !== null) {
+  if (
+    configuredKey !== undefined &&
+    configuredKey !== null &&
+    typeof configuredKey !== 'string'
+  ) {
+    return projectionError(
+      `${label}.definition_key_config must be a string or null.`,
+    );
+  }
+  if (typeof configuredKey === 'string') {
     return null;
   }
-  if (typeof storedKey !== 'string' || storedKey.trim() === '') {
+  const contentKey = exactStoredContentKey(
+    storedKey,
+    `${label}.source_definition_key`,
+  );
+  if (contentKey === null) {
     return null;
   }
-  const contentKey = storedKey.trim() as ContentKey;
   const exists = db.scalar<number>(
     `SELECT id FROM ${table} WHERE content_key = ?`,
     [contentKey],
@@ -721,10 +746,16 @@ function projectBackground(
 function projectSubclass(
   aggregate: SubclassContentAggregate,
 ): StoredProjection<'subclass'> {
-  const projectedProgression: SubclassProjectorPayloadV1['progression'] =
-    aggregate.progression.mode === 'inherit_parent'
-      ? { mode: 'inherit_parent' }
-      : {
+  let projectedProgression: SubclassProjectorPayloadV1['progression'];
+  switch (aggregate.progression.mode) {
+    case 'inherit_parent':
+      projectedProgression = { mode: 'inherit_parent' };
+      break;
+    case 'root_only':
+      projectedProgression = aggregate.progression;
+      break;
+    case 'override':
+      projectedProgression = {
           mode: 'override',
           spellcasting_ability: aggregate.progression.spellcasting_ability,
           caster_contribution: aggregate.progression.caster_contribution,
@@ -733,6 +764,8 @@ function projectSubclass(
             grants: contentIdentitySequence(row.grants.map(canonicalGrant)),
           }))),
         };
+      break;
+  }
   const payload: SubclassProjectorPayloadV1 = {
     reference_text: canonicalRuleText(aggregate.reference_text),
     parent_class: aggregate.parent_class,
@@ -745,9 +778,9 @@ function projectSubclass(
       effects: contentIdentitySequence(feature.effects.map(canonicalFeatureEffect)),
     }))),
   };
-  const progressionGrants = aggregate.progression.mode === 'inherit_parent'
-    ? []
-    : aggregate.progression.rows.flatMap((row) => row.grants);
+  const progressionGrants = aggregate.progression.mode === 'override'
+    ? aggregate.progression.rows.flatMap((row) => row.grants)
+    : [];
   return Object.freeze({
     kind: 'subclass',
     aggregate,
@@ -1054,6 +1087,40 @@ function denseProgression(
   return rows as DenseSubclassContentProgression;
 }
 
+function rootOnlyProgression(
+  spellcastingAbility: string | null,
+  casterFraction: string | null,
+  casterRounding: string | null,
+): Extract<SubclassContentAggregate['progression'], { readonly mode: 'root_only' }> {
+  const common = {
+    mode: 'root_only' as const,
+    spellcasting_ability: nullableAbility(
+      spellcastingAbility,
+      'subclass spellcasting ability',
+    ),
+  };
+  if (casterFraction === null && casterRounding === null) {
+    return { ...common, caster_fraction: null, caster_rounding: null };
+  }
+  if (casterFraction === '1' && casterRounding === null) {
+    return { ...common, caster_fraction: casterFraction, caster_rounding: null };
+  }
+  if (
+    (casterFraction === '1/2' || casterFraction === '1/3') &&
+    (casterRounding === 'up' || casterRounding === 'down')
+  ) {
+    return {
+      ...common,
+      caster_fraction: casterFraction,
+      caster_rounding: casterRounding,
+    };
+  }
+  return projectionError(
+    `zero-row subclass caster fraction '${String(casterFraction)}' and ` +
+      `rounding '${String(casterRounding)}' are invalid.`,
+  );
+}
+
 function readSubclass(
   db: DatabaseContext,
   contentKey: ContentKey,
@@ -1105,7 +1172,15 @@ function readSubclass(
   }));
   const progression: SubclassContentAggregate['progression'] =
     progressionRows.length === 0
-      ? { mode: 'inherit_parent' }
+      ? root.spellcasting_ability === null &&
+          root.caster_fraction === null &&
+          root.caster_rounding === null
+        ? { mode: 'inherit_parent' }
+        : rootOnlyProgression(
+            root.spellcasting_ability,
+            root.caster_fraction,
+            root.caster_rounding,
+          )
       : {
           mode: 'override',
           spellcasting_ability: nullableAbility(root.spellcasting_ability, 'subclass spellcasting ability'),

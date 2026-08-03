@@ -287,6 +287,15 @@ function validateKindFields(
     const definitionId = input.source_definition_id;
     const definitionKey = input.source_definition_key;
     const definitionKeyConfig = input.definition_key_config;
+    if (
+      definitionKeyConfig !== undefined &&
+      definitionKeyConfig !== null &&
+      typeof definitionKeyConfig !== 'string'
+    ) {
+      throw new TypeError(
+        `Grant-source rule '${ruleKey}' field 'definition_key_config' must be a string or null.`,
+      );
+    }
     const hasDefinition =
       (Number.isSafeInteger(definitionId) && (definitionId as number) > 0) ||
       (typeof definitionKey === 'string' && definitionKey.trim() !== '') ||

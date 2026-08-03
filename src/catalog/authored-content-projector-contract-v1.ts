@@ -182,6 +182,10 @@ export interface BackgroundProjectorPayloadV1 {
 
 export type SubclassProgressionProjectionV1 =
   | { readonly mode: 'inherit_parent' }
+  | Extract<
+      SubclassContentAggregate['progression'],
+      { readonly mode: 'root_only' }
+    >
   | {
       readonly mode: 'override';
       readonly spellcasting_ability: Extract<
