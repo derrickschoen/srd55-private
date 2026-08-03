@@ -877,7 +877,9 @@ test('print button writes nothing when no named appendix preference changes', as
   testInfo.setTimeout(20_000);
   const image = await sheetImage();
   await install(page, image);
-  await page.goto(`/characters/${image.characterId}/sheet`);
+  await page.goto('/');
+  await ready(page);
+  await navigateWithinApp(page, `/characters/${image.characterId}/sheet`);
   const beforeDatabase = Array.from(await page.evaluate(
     () => window.staticApp.exportDatabase(),
   ));
