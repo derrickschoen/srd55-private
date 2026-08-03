@@ -67,6 +67,7 @@ import {
   CONTENT_FINGERPRINT_SCHEME_V1,
   contentIdentitySequence,
   contentIdentitySet,
+  type ContentIdentitySequence,
   type ContentFingerprintDigest,
   type ContentKind,
   type DerivedContentIdentityV1,
@@ -547,6 +548,28 @@ function canonicalGrant(grant: AuthoringGrant): CanonicalAuthoringGrantV1 {
     }
   }
   return canonical as CanonicalAuthoringGrantV1;
+}
+
+/**
+ * Shared stored-rule seam for catalog aggregates outside the authoring trio.
+ * Class progressions and feat definitions are consumed by the same GrantRule
+ * runtime, so they must use this exact validation, portable-reference fold and
+ * canonical shape rather than growing a second interpretation of stored JSON.
+ */
+export function projectStoredGrantRulesV1(
+  db: DatabaseContext,
+  text: string | null,
+  references: StoredAuthoredReferenceResolverV1,
+  label: string,
+): {
+  readonly grants: readonly AuthoringGrant[];
+  readonly canonical: ContentIdentitySequence<CanonicalAuthoringGrantV1>;
+} {
+  const grants = authoringGrants(db, text, references, label);
+  return {
+    grants,
+    canonical: contentIdentitySequence(grants.map(canonicalGrant)),
+  };
 }
 
 function canonicalCharacterEffect(
