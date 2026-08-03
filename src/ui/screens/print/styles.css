@@ -250,11 +250,6 @@
   }
 }
 
-@page {
-  size: letter;
-  margin: 0.5in;
-}
-
 @media print {
   html,
   body,
