@@ -37,6 +37,7 @@ import {
   ORIGIN_TEXT_LIMITS,
 } from '../domain/origin-limits';
 import {
+  SHEET_ARMOR_MIN,
   SHEET_ARMOR_MAX,
   SHEET_ROLL_BOUNDS,
   SHEET_SHARE_COUNTS,
@@ -1270,7 +1271,7 @@ function shareArmor(value: unknown, label: string): ShareArmor {
   armor.armor_class = integer(
     row.armor_class,
     `${label}.armor_class`,
-    1,
+    SHEET_ARMOR_MIN.armor_class,
     SHEET_ARMOR_MAX.armor_class,
   );
   if (row.dex_bonus_max !== undefined) {
@@ -1279,7 +1280,7 @@ function shareArmor(value: unknown, label: string): ShareArmor {
     armor.dex_bonus_max = integer(
       row.dex_bonus_max,
       `${label}.dex_bonus_max`,
-      0,
+      SHEET_ARMOR_MIN.dex_bonus_max,
       SHEET_ARMOR_MAX.dex_bonus_max,
     );
   }
@@ -1287,7 +1288,7 @@ function shareArmor(value: unknown, label: string): ShareArmor {
     armor.strength_requirement = integer(
       row.strength_requirement,
       `${label}.strength_requirement`,
-      1,
+      SHEET_ARMOR_MIN.strength_requirement,
       SHEET_ARMOR_MAX.strength_requirement,
     );
   }
