@@ -933,6 +933,14 @@ export const TABLE_SCOPES = {
     share: false,
     backupReference: false,
   },
+  background_template_effects: {
+    role: 'catalog_origin',
+    snapshot: false,
+    backupDirect: false,
+    backup: false,
+    share: false,
+    backupReference: false,
+  },
   /**
    * The structured equipment lines of a background TEMPLATE. All five flags
    * false, exactly as its parent — this is bundled SRD catalog content, seeded
@@ -1232,6 +1240,7 @@ export const APPLICATION_TABLES = order<AnyTableName>()([
   'armor_templates',
   'background_definitions',
   'background_equipment_items',
+  'background_template_effects',
   'background_templates',
   'catalog_content_aliases',
   'catalog_content_fingerprints',

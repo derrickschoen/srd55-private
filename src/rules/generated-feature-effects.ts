@@ -24,6 +24,7 @@ interface GeneratedEffect {
   readonly ability_2: string | null;
   readonly allows_shield: number | null;
   readonly weapon_scope: string | null;
+  readonly notes: string | null;
 }
 
 function generatedEffect(row: SqlRow): GeneratedEffect {
@@ -43,6 +44,7 @@ function generatedEffect(row: SqlRow): GeneratedEffect {
     ability_2: sqlNullableString(row, 'ability_2'),
     allows_shield: sqlNullableInteger(row, 'allows_shield'),
     weapon_scope: sqlNullableString(row, 'weapon_scope'),
+    notes: sqlNullableString(row, 'notes'),
   };
 }
 
@@ -86,8 +88,9 @@ function insertGeneratedEffects(
          character_id, sort_order, effect_kind, damage_type,
          hit_points_flat, hit_points_per_level, speed_bonus_feet,
          ability, amount, maximum, base, ability_1, ability_2,
-         allows_shield, weapon_scope, source_instance_id, template_ref, label
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         allows_shield, weapon_scope, source_instance_id, template_ref, label,
+         notes
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         characterId,
         sortOrder,
@@ -107,6 +110,7 @@ function insertGeneratedEffects(
         sourceInstanceId,
         `${templateTable}:${String(effect.id)}`,
         effect.label,
+        effect.notes,
       ],
     );
   }
@@ -130,7 +134,7 @@ export function syncAutomaticClassEffects(
     [characterId, sourceInstanceId],
   );
   const effects = db.all(
-    `SELECT ${PAYLOAD_SELECT}, effect.name AS label
+    `SELECT ${PAYLOAD_SELECT}, effect.name AS label, NULL AS notes
      FROM class_feature_effects AS effect
      WHERE effect.class_definition_id = ?
        AND effect.class_level <= ?
@@ -172,7 +176,8 @@ export function syncAutomaticSubclassEffects(
 ): void {
   clearGeneratedFeatureEffects(db, characterId, sourceInstanceId);
   const effects = db.all(
-    `SELECT ${PAYLOAD_SELECT}, feature.name AS label
+    `SELECT ${PAYLOAD_SELECT}, effect.label,
+            effect.notes AS notes
      FROM subclass_feature_effects AS effect
      JOIN subclass_features AS feature
        ON feature.id = effect.subclass_feature_id
