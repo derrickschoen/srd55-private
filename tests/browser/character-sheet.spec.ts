@@ -42,6 +42,9 @@ const HOSTILE_SPELL_SOURCE =
   '</span><img data-hostile-spell-source src=x onerror=source-payload>';
 const HOSTILE_SPELL_PROSE =
   '</p><script data-hostile-spell-prose>appendix-payload</script>';
+const LONG_SPELL_PROSE =
+  `long spell opening\n${'A deliberately long stored spell paragraph. '.repeat(180)}` +
+  '\nlong spell ending  ';
 const SAGE_TOOL_TEXT = 'Calligrapher’s Supplies';
 const HOSTILE_BACKSTORY =
   'a'.repeat(399) +
@@ -112,7 +115,7 @@ function defineSpell(
   db: DatabaseContext,
   name: string,
   level: number,
-  description: string,
+  description: string | null,
 ): number {
   spellFixtureSequence += 1;
   const identityId = db.exec(
@@ -313,8 +316,9 @@ async function sheetImage(): Promise<SheetImage> {
     1,
     HOSTILE_SPELL_PROSE,
   );
-  const fireBolt = defineSpell(db, 'Fire Bolt', 0, 'Appendix-only fire prose.');
+  const fireBolt = defineSpell(db, 'Fire Bolt', 0, LONG_SPELL_PROSE);
   const gift = defineSpell(db, 'Gift Flame', 1, 'Appendix-only gift prose.');
+  const goodberry = defineSpell(db, 'Goodberry', 1, null);
   const comprehendLanguages = defineSpell(
     db,
     'Comprehend Languages',
@@ -364,6 +368,15 @@ async function sheetImage(): Promise<SheetImage> {
     otherSpellSource,
     gift,
     'sheet-browser-gift',
+    'known',
+    1,
+  );
+  assignSpell(
+    db,
+    characterId,
+    otherSpellSource,
+    goodberry,
+    'sheet-browser-goodberry',
     'known',
     1,
   );
@@ -842,6 +855,25 @@ test('hostile spell text is visible inert and absent from sheet facts', async ({
   await expect(facts).not.toContainText(HOSTILE_SPELL_NAME);
   await expect(facts).not.toContainText(HOSTILE_SPELL_SOURCE);
   await expect(facts).not.toContainText(HOSTILE_SPELL_PROSE);
+
+  const spellOption = page.getByLabel('Include full spell text appendix');
+  await spellOption.check();
+  await expect(spellOption).toBeEnabled();
+  await page.emulateMedia({ media: 'print' });
+  const appendix = page.locator('[data-sheet-print-appendix="spells"]');
+  await expect(appendix).toContainText(HOSTILE_SPELL_NAME);
+  await expect(appendix).toContainText(HOSTILE_SPELL_SOURCE);
+  await expect(appendix).toContainText(HOSTILE_SPELL_PROSE);
+  await expect(
+    appendix.locator('[data-free-text="unverified-origin"]', {
+      hasText: HOSTILE_SPELL_NAME,
+    }),
+  ).toHaveText(HOSTILE_SPELL_NAME);
+  await expect(page.locator('[data-hostile-spell-name]')).toHaveCount(0);
+  await expect(page.locator('[data-hostile-spell-source]')).toHaveCount(0);
+  await expect(page.locator('[data-hostile-spell-prose]')).toHaveCount(0);
+  await page.emulateMedia({ media: 'screen' });
+  await expect(page.locator('[data-sheet-print-appendix]')).toHaveCount(0);
 });
 
 test('spellbook entries render distinctly and are never labeled Prepared or Known', async ({
@@ -952,6 +984,11 @@ test('print media keeps the sheet and warnings, adds paper fields, and ends with
   ).toHaveCount(0);
   await expect(sheet.locator('[data-sheet-print-notice]')).toHaveCount(0);
 
+  const spellOption = page.getByLabel('Include full spell text appendix');
+  await expect(spellOption).not.toBeChecked();
+  await spellOption.check();
+  await expect(spellOption).toBeEnabled();
+
   await page.emulateMedia({ media: 'print' });
 
   const pageRules = await page.evaluate(() =>
@@ -960,6 +997,12 @@ test('print media keeps the sheet and warnings, adds paper fields, and ends with
       .filter((rule) => rule.startsWith('@page')),
   );
   expect(pageRules.some((rule) => /size:\s*letter/.test(rule))).toBe(true);
+  expect(
+    pageRules.filter(
+      (rule) =>
+        /size:\s*letter/.test(rule) && /margin:\s*0\.5in/.test(rule),
+    ),
+  ).toHaveLength(1);
 
   await expect(page.getByRole('link', { name: 'All characters' })).toBeHidden();
   await expect(page.getByRole('link', { name: 'Open planner' })).toBeHidden();
@@ -1070,6 +1113,16 @@ test('print media keeps the sheet and warnings, adds paper fields, and ends with
   await expect(notice).toContainText(
     'Printed from SRD-55 srd55-2026-08-01-1',
   );
+  const spellAppendix = sheet.locator(
+    '[data-sheet-print-appendix="spells"]',
+  );
+  await expect(spellAppendix).toContainText(LONG_SPELL_PROSE);
+  expect(
+    await spellAppendix.evaluate(
+      (element) =>
+        element.nextElementSibling?.hasAttribute('data-sheet-print-notice'),
+    ),
+  ).toBe(true);
   await expect(notice).toHaveCSS('break-before', 'page');
   expect(
     await notice.evaluate(
@@ -1081,6 +1134,87 @@ test('print media keeps the sheet and warnings, adds paper fields, and ends with
   await expect(currentHitPoints).toHaveCount(0);
   await expect(experiencePoints).toHaveCount(0);
   await expect(notice).toHaveCount(0);
+});
+
+// Measured alone at 14.7s on Chromium; fixture construction and reload dominate.
+test('spell appendix paginates long prose with the D141 mechanism', async ({
+  page,
+}, testInfo) => {
+  testInfo.setTimeout(20_000);
+  const image = await sheetImage();
+  await install(page, image);
+  await page.goto(`/characters/${image.characterId}/sheet`);
+
+  const appendices = page.locator('[data-sheet-print-appendix]');
+  const spellOption = page.getByLabel('Include full spell text appendix');
+  await expect(spellOption).not.toBeChecked();
+  await expect(appendices).toHaveCount(0);
+  await page.emulateMedia({ media: 'print' });
+  await expect(appendices).toHaveCount(0);
+  await page.emulateMedia({ media: 'screen' });
+
+  await spellOption.check();
+  await expect(spellOption).toBeEnabled();
+  await expect
+    .poll(async () =>
+      rows(page, 'character_rule_overrides', {
+        character_id: image.characterId,
+        rule_key: PRINT_APPENDIX_PREFERENCE_KEYS.spells,
+      }),
+    )
+    .toEqual([
+      expect.objectContaining({
+        character_id: image.characterId,
+        rule_key: PRINT_APPENDIX_PREFERENCE_KEYS.spells,
+        value: 'true',
+        note: null,
+      }),
+    ]);
+
+  await page.reload();
+  const rememberedSpellOption = page.getByLabel(
+    'Include full spell text appendix',
+  );
+  await expect(rememberedSpellOption).toBeChecked();
+  await expect(appendices).toHaveCount(0);
+
+  await page.emulateMedia({ media: 'print' });
+  const appendix = page.locator('[data-sheet-print-appendix="spells"]');
+  await expect(appendices).toHaveCount(1);
+  await expect(appendix).toHaveCSS('break-before', 'page');
+  await expect(appendix.locator('h3').first()).toHaveCSS(
+    'break-after',
+    'avoid',
+  );
+  await expect(appendix.locator('h4').first()).toHaveCSS(
+    'break-after',
+    'avoid',
+  );
+  await expect(appendix.locator('.sheet-spell-appendix-summary').first())
+    .toHaveCSS('break-inside', 'avoid');
+  await expect(appendix.locator('.sheet-spell-appendix-card').first())
+    .toHaveCSS('break-inside', 'auto');
+  const longProse = appendix.locator('.sheet-spell-appendix-prose', {
+    hasText: 'long spell opening',
+  });
+  await expectExactText(longProse, LONG_SPELL_PROSE);
+  await expect(longProse).toHaveCSS('white-space', 'pre-wrap');
+  await expect(longProse).toHaveCSS('break-inside', 'auto');
+  await expect(longProse).toHaveCSS('orphans', '3');
+  await expect(longProse).toHaveCSS('widows', '3');
+  const missingCard = appendix.locator('.sheet-spell-appendix-card', {
+    hasText: 'Goodberry',
+  });
+  await expect(missingCard).toContainText(
+    'Full spell text unavailable for this imported or placeholder spell.',
+  );
+  await expect(appendix.locator('.sheet-spell-appendix-missing')).toContainText(
+    'Goodberry',
+  );
+  await expect(page.locator('body')).not.toContainText(/php artisan|Tier 2/i);
+
+  await page.emulateMedia({ media: 'screen' });
+  await expect(appendices).toHaveCount(0);
 });
 
 // Measured alone at 12.3s on this worktree; fixture construction dominates.
@@ -1259,6 +1393,10 @@ test('flavor appendix is opt-in, remembered, ordered, and carries full text', as
     'Include full backstory and notes appendix',
   );
   await expect(rememberedOption).toBeChecked();
+  const spellOption = page.getByLabel('Include full spell text appendix');
+  await expect(spellOption).not.toBeChecked();
+  await spellOption.check();
+  await expect(spellOption).toBeEnabled();
   await page.emulateMedia({ media: 'print' });
 
   const appendix = page.locator('[data-sheet-print-appendix="flavor"]');
@@ -1279,9 +1417,17 @@ test('flavor appendix is opt-in, remembered, ordered, and carries full text', as
     'auto',
   );
   const notice = page.locator('[data-sheet-print-notice]');
+  const spellAppendix = page.locator('[data-sheet-print-appendix="spells"]');
   expect(
     await appendix.evaluate(
-      (element) => element.nextElementSibling?.hasAttribute('data-sheet-print-notice'),
+      (element) =>
+        element.nextElementSibling?.getAttribute('data-sheet-print-appendix'),
+    ),
+  ).toBe('spells');
+  expect(
+    await spellAppendix.evaluate(
+      (element) =>
+        element.nextElementSibling?.hasAttribute('data-sheet-print-notice'),
     ),
   ).toBe(true);
   expect(
