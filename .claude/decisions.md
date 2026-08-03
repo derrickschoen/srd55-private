@@ -7,6 +7,45 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D191 — OWNER: all three monk subclasses ship; license = most permissive respecting SRD attribution (2026-08-03)
+
+Owner's words: "All 3 monk subclasses seem fun. Publish them under the
+most permissive license that still respects the cc attribution that they
+work with the srd." The bake-off ends with THREE winners: Barbed Court,
+Ten Selves, Hundred Knots all proceed to full drafts and ship with the
+repo. License, taken for now under the owner's criterion: the subclass
+documents are released CC-BY-4.0 with the verbatim SRD 5.2 notice
+(uniform with docs/srd; the attribution obligation is structural since
+the docs carry SRD-derived content). Seam: per-file license headers.
+Flip option recorded: our original expression could go CC0 with the SRD
+notice retained only for SRD-derived parts - MORE permissive but a
+mixed-license file; flip before the repo goes public if the owner
+prefers. "Publish" executes through the existing publish gate
+(D121/D127/D128 unchanged - nothing goes outward today; the private
+mirror continues). OPEN, flagged for the next question round: whether
+all three are SEEDED as app content or D169's replace-EK/AT slot takes
+one (and which). Owner addendum: when the full drafts are done, run
+cleanup and polish passes on the finished subclasses before they are
+considered ship-ready.
+
+## D190 — OWNER: monk bake-off = three finalists, each with a Focus-spend budget lever (2026-08-03)
+
+The bake-off entries, owner-directed:
+ 1. Laughing Court MERGED with Barbed Tongue (bard list — mockery + taunt
+    as one identity), more bard spells found, Focus-point spend integrated
+    for power budget.
+ 2. The illusion pitches MERGED, "no positional stuff" (Still Point's
+    dual-position/teleport mechanics are OUT), Mirror Image is the
+    centerpiece, more illusion spells found, Focus spend integrated.
+ 3. The primal pitch: Hunter's Mark, Ensnaring Strike, Entangle as the
+    core (owner also named Thorn Whip - NOT in SRD 5.2.1, verified
+    against the oracle; substitutes from the verified primal set), more
+    primal spells found, Focus spend integrated.
+All three carry D189's level-6 cantrip-in-Flurry and the third-caster
+Wisdom chassis. Each bake-off entry = drafted level-3 bundle + curated
+verified spell list + Focus-spend mechanic + mini budget/taxonomy pass;
+owner picks the winner for the full draft.
+
 ## D189 — OWNER: monk third-caster level 6 = cantrip inside Flurry of Blows (2026-08-03)
 
 Owner's words: "I want the lvl 6 valor bard mechanic to replace an attack

@@ -23,7 +23,24 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-03-d (newest - read first)
+## RESTART POINT 2026-08-03-e (newest - read first)
+MAIN 17ba3c1 (CI-3a merged; mirror pushed). FLOORS: vitest 215/3,549; PW
+121 (22 SPEC FILES - earlier "24/25 specs" floor lines were supervisor
+counting errors; 22 is measured); build 0; migrations 0000-0030; wire
+v1-v17.
+CI-3a: 3 review rounds at cap + 3 fix rounds (r2 inverted to generic
+default-include canonicalization; r3 seam alignment with runtime).
+Closure adjudicated by supervisor probes. One dead control disclosed
+(effect-notes vs null-only vectors) - became finding M3.
+PROCESS LESSON (cost: three killed ~25-min gate chains): do NOT launch
+the final full chain until review closure; reviews first, chain last.
+MINT LANE NOW: CI-3c dispatched (equipment/item catalog, may mint 0031,
+port 44556, resumed codex session 019fc7ba). Then CI-3b -> CI-3s -> CI-4a.
+HOMEBREW: D189 recorded (monk lvl-6 cantrip-in-Flurry, unarmed-only).
+Monk pitch catalog in wt/party 7cc8fe3 with owner; oath doc 76c50d0 with
+owner.
+
+## RESTART POINT 2026-08-03-d (superseded by -e)
 MAIN f18a2b6 (HA-1b merged; mirror pushed). FLOORS: vitest 214/3,499; PW
 121/25 specs; build 0; migrations 0000-0030 FROZEN; wire v1-v17.
 MERGED TODAY (order): D177 guidelines f15fd1b, SC-1 e8274e2, FF-C d749f15,
