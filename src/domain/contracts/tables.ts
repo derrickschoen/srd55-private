@@ -118,6 +118,8 @@ export type TableRole =
    * consumer wants "weapons or armour" as one set.
    */
   | 'catalog_armor'
+  /** Modifier-item definitions and their ordered mechanical effect graph. */
+  | 'catalog_item'
   /** Non-secret local publication and repository-observation relationships. */
   | 'party_observation';
 
@@ -863,6 +865,22 @@ export const TABLE_SCOPES = {
     share: false,
     backupReference: false,
   },
+  item_definitions: {
+    role: 'catalog_item',
+    snapshot: false,
+    backupDirect: false,
+    backup: false,
+    share: false,
+    backupReference: false,
+  },
+  item_definition_effects: {
+    role: 'catalog_item',
+    snapshot: false,
+    backupDirect: false,
+    backup: false,
+    share: false,
+    backupReference: false,
+  },
 
   // --- standalone sources -------------------------------------------------
   feat_definitions: {
@@ -1299,6 +1317,8 @@ export const APPLICATION_TABLES = order<AnyTableName>()([
   'class_weapon_mastery_grants',
   'class_weapon_proficiencies',
   'feat_definitions',
+  'item_definition_effects',
+  'item_definitions',
   'named_features',
   'named_feature_effects',
   'party_document_states',

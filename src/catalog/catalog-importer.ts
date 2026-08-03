@@ -35,6 +35,10 @@ import {
   importSubclassRecords,
   type SubclassImportCounters,
 } from './subclass-importer';
+import {
+  importEquipmentRecords,
+  type EquipmentImportCounters,
+} from './equipment-importer';
 
 /** The identity a spell version hangs off, in the three ways it is found. */
 const spellIdentity: RowCodec<{
@@ -97,13 +101,23 @@ export interface CatalogImportSummary {
   subclasses_created: number;
   subclasses_updated: number;
   subclass_features_created: number;
+  weapons_created: number;
+  weapons_matched: number;
+  armors_created: number;
+  armors_matched: number;
+  items_created: number;
+  items_matched: number;
+  item_definition_effects_created: number;
   text_available: boolean;
   descriptions_loaded: number;
 }
 
 type CounterSummary = Omit<
   CatalogImportSummary,
-  'text_available' | 'descriptions_loaded' | keyof SubclassImportCounters
+  | 'text_available'
+  | 'descriptions_loaded'
+  | keyof SubclassImportCounters
+  | keyof EquipmentImportCounters
 >;
 
 type VersionAttributes = Record<
@@ -270,9 +284,11 @@ export class CatalogImporter {
         }
         const counters = this.#importRecords(normalized, sweepSpells);
         const subclasses = importSubclassRecords(this.db, records.subclasses);
+        const equipment = importEquipmentRecords(this.db, records);
         const summary: CatalogImportSummary = {
           ...counters,
           ...subclasses,
+          ...equipment,
           text_available: textAvailable,
           descriptions_loaded: descriptions?.length ?? 0,
         };

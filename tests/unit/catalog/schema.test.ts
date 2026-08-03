@@ -34,6 +34,60 @@ function record(overrides: Record<string, unknown> = {}) {
 }
 
 describe('browser catalog schema', () => {
+  it('parses complete equipment records and refuses partial mechanical payloads', () => {
+    const item = {
+      kind: 'item',
+      name: 'Giant Belt',
+      edition: 'expanded',
+      description: 'Sets Strength.',
+      requiresAttunement: true,
+      effects: [{
+        kind: 'ability_override',
+        ability: 'strength',
+        maximum: 23,
+        label: 'Giant strength',
+        notes: null,
+      }],
+    };
+    const parsed = parseCatalogDocuments([JSON.stringify([item])]);
+    expect(parsed.items[0]).toMatchObject({
+      name: 'Giant Belt',
+      requiresAttunement: true,
+      effects: [{
+        kind: 'ability_override',
+        sort_order: 1,
+        ability: 'strength',
+        maximum: 23,
+      }],
+    });
+    expect([...parsed.kinds]).toEqual(['item']);
+    expect(() => parseCatalogDocuments([JSON.stringify([{
+      ...item,
+      effects: [{ ...item.effects[0], maximum: null }],
+    }])])).toThrow('effects[0].maximum');
+    expect(() => parseCatalogDocuments([JSON.stringify([{
+      kind: 'weapon',
+      name: 'Broken',
+      edition: 'expanded',
+      srdGroup: 'simple_ranged',
+      damage: { kind: 'dice', dice: '1d6' },
+      damageType: 'Piercing',
+      versatileDamage: { kind: 'not_applicable' },
+      finesse: false,
+      heavy: false,
+      light: false,
+      loading: false,
+      reach: false,
+      thrown: false,
+      twoHanded: false,
+      ammunition: true,
+      ammunitionKind: 'Arrows',
+      range: { kind: 'legacy', nearFeet: null, farFeet: 60 },
+      masteryProperty: 'Vex',
+      otherProperties: null,
+    }])])).toThrow("'range.kind'");
+  });
+
   it('rejects malformed containers and every required field shape before import', () => {
     const cases: Array<[unknown, string]> = [
       [{ record: {} }, 'must contain a JSON list'],
@@ -166,6 +220,9 @@ describe('browser catalog schema', () => {
     expect(parseCatalogDocuments(['[]'])).toEqual({
       spells: [],
       subclasses: [],
+      weapons: [],
+      armors: [],
+      items: [],
       kinds: new Set(['spell']),
     });
     // The declaration is per document, not per parse: the empty file still
