@@ -80,7 +80,7 @@ describe('pre-Drizzle database images', () => {
     const tableCount = (sql: string) =>
       [...sql.matchAll(/CREATE TABLE/g)].length;
     expect(tableCount(preDrizzleSchema)).toBe(38);
-    expect(tableCount(schema)).toBe(77);
+    expect(tableCount(schema)).toBe(79);
   });
 
   it('rejects a pre-Drizzle image at open instead of half-working', async () => {
@@ -126,6 +126,7 @@ describe('pre-Drizzle database images', () => {
         'class_saving_throw_proficiencies, class_sheet_traits, ' +
         'class_skill_options, class_weapon_mastery_counts, ' +
         'class_weapon_mastery_grants, class_weapon_proficiencies, ' +
+        'item_definition_effects, item_definitions, ' +
         'named_features, named_feature_effects, ' +
         'party_document_states, ' +
         'species_template_trait_effects, ' +

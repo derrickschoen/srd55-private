@@ -1,14 +1,42 @@
 import {
+  abilities,
+  armorCategories,
+  armorDexBonuses,
+  characterEffectKinds,
   classFeatureEffectKinds,
   effectReliabilityCategories,
   extraAttackWeaponScopes,
   isEnumValue,
   rulesEditions,
+  srdWeaponGroups,
   spellSchool,
+  weaponMasteryProperties,
+  type ArmorCategory,
+  type ArmorDexBonus,
+  type DamageType,
   type EffectReliabilityCategory,
   type RulesEdition,
+  type SrdWeaponGroup,
   type SpellSchool,
+  type WeaponMasteryProperty,
 } from '../domain/enums';
+import type { AuthoringCharacterEffect } from '../authoring/effect-forms';
+import { EQUIPMENT_EFFECT_COUNT_MAX } from '../domain/equipment-effects';
+import {
+  ORIGIN_EFFECT_MAGNITUDE_MAX,
+  ORIGIN_TEXT_LIMITS,
+} from '../domain/origin-limits';
+import {
+  SHEET_ARMOR_MAX,
+  SHEET_ARMOR_MIN,
+  SHEET_TEXT_LIMITS,
+} from '../domain/sheet-limits';
+import {
+  WEAPON_RANGE_MAX_FEET,
+  WEAPON_TEXT_LIMITS,
+} from '../domain/weapon-limits';
+import type { VersatileWeaponDamage, WeaponDamage } from '../domain/weapon-damage';
+import type { WritableWeaponRange } from '../domain/weapon-range';
 import type { ClassFeatureEffect } from '../rules/class-feature-effects';
 import { isRecord } from '../worker/handler';
 import { isImportedContentKey } from './catalog-key';
@@ -36,7 +64,13 @@ import { isImportedContentKey } from './catalog-key';
  * replacement, so a silently skipped kind would read as "these records are
  * gone" and be tombstoned against.
  */
-export const catalogRecordKinds = ['spell', 'subclass'] as const;
+export const catalogRecordKinds = [
+  'spell',
+  'subclass',
+  'weapon',
+  'armor',
+  'item',
+] as const;
 export type CatalogRecordKind = (typeof catalogRecordKinds)[number];
 
 export interface CatalogRecord {
@@ -165,6 +199,50 @@ export interface CatalogSubclassRecord {
   features: CatalogSubclassFeature[];
 }
 
+export interface CatalogWeaponRecord {
+  readonly kind: 'weapon';
+  readonly name: string;
+  readonly edition: RulesEdition;
+  readonly srdGroup: SrdWeaponGroup;
+  readonly damage: WeaponDamage;
+  readonly damageType: DamageType;
+  readonly versatileDamage: VersatileWeaponDamage;
+  readonly finesse: boolean;
+  readonly heavy: boolean;
+  readonly light: boolean;
+  readonly loading: boolean;
+  readonly reach: boolean;
+  readonly thrown: boolean;
+  readonly twoHanded: boolean;
+  readonly ammunition: boolean;
+  readonly ammunitionKind: string | null;
+  readonly range: WritableWeaponRange;
+  readonly masteryProperty: WeaponMasteryProperty;
+  readonly otherProperties: string | null;
+}
+
+export interface CatalogArmorRecord {
+  readonly kind: 'armor';
+  readonly name: string;
+  readonly edition: RulesEdition;
+  readonly category: ArmorCategory;
+  readonly armorClass: number;
+  readonly dexBonus: ArmorDexBonus;
+  readonly dexBonusMax: number | null;
+  readonly strengthRequirement: number | null;
+  readonly stealthDisadvantage: boolean;
+}
+
+export interface CatalogItemRecord {
+  readonly kind: 'item';
+  readonly name: string;
+  readonly edition: RulesEdition;
+  readonly description: string;
+  readonly requiresAttunement: boolean;
+  /** Ordered definition effects; array position becomes one-based sort_order. */
+  readonly effects: readonly AuthoringCharacterEffect[];
+}
+
 export interface CatalogDescription {
   versionKey: string;
   description: string;
@@ -184,6 +262,9 @@ export interface CatalogDescription {
 export interface CatalogDocumentRecords {
   spells: CatalogRecord[];
   subclasses: CatalogSubclassRecord[];
+  weapons: CatalogWeaponRecord[];
+  armors: CatalogArmorRecord[];
+  items: CatalogItemRecord[];
   kinds: ReadonlySet<CatalogRecordKind>;
 }
 
@@ -210,16 +291,37 @@ function parseJsonDocument(document: string, label: string): unknown {
   }
 }
 
-function nonEmptyString(value: unknown, field: string): string {
-  if (typeof value !== 'string' || value.trim() === '') {
+function textLength(
+  value: string,
+  field: string,
+  maximumLength: number | undefined,
+): string {
+  if (maximumLength !== undefined && value.length > maximumLength) {
     throw new TypeError(
-      `Catalog field '${field}' must be a non-empty string.`,
+      `Catalog field '${field}' must contain at most ${String(maximumLength)} characters.`,
     );
   }
   return value;
 }
 
-function nullableString(value: unknown, field: string): string | null {
+function nonEmptyString(
+  value: unknown,
+  field: string,
+  maximumLength?: number,
+): string {
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw new TypeError(
+      `Catalog field '${field}' must be a non-empty string.`,
+    );
+  }
+  return textLength(value, field, maximumLength);
+}
+
+function nullableString(
+  value: unknown,
+  field: string,
+  maximumLength?: number,
+): string | null {
   if (value === undefined || value === null) {
     return null;
   }
@@ -228,7 +330,18 @@ function nullableString(value: unknown, field: string): string | null {
       `Catalog field '${field}' must be a string or null.`,
     );
   }
-  return value;
+  return textLength(value, field, maximumLength);
+}
+
+function requiredString(
+  value: unknown,
+  field: string,
+  maximumLength?: number,
+): string {
+  if (typeof value !== 'string') {
+    throw new TypeError(`Catalog field '${field}' must be a string.`);
+  }
+  return textLength(value, field, maximumLength);
 }
 
 function stringList(
@@ -596,6 +709,382 @@ function catalogSubclassRecord(value: Record<string, unknown>): CatalogSubclassR
   };
 }
 
+function catalogEdition(value: unknown): RulesEdition {
+  const edition = nonEmptyString(value, 'edition');
+  if (!isEnumValue(rulesEditions, edition)) {
+    throw new TypeError(
+      `Catalog field 'edition' must be one of ${rulesEditions.join(', ')}.`,
+    );
+  }
+  return edition;
+}
+
+function catalogBoolean(value: unknown, field: string): boolean {
+  if (typeof value !== 'boolean') {
+    throw new TypeError(`Catalog field '${field}' must be boolean.`);
+  }
+  return value;
+}
+
+function catalogNullableInteger(
+  value: unknown,
+  field: string,
+  minimum = 0,
+  maximum = Number.MAX_SAFE_INTEGER,
+): number | null {
+  if (value === null) return null;
+  if (
+    !Number.isSafeInteger(value) ||
+    Number(value) < minimum ||
+    Number(value) > maximum
+  ) {
+    throw new TypeError(
+      `Catalog field '${field}' must be null or an integer from ${String(minimum)} through ${String(maximum)}.`,
+    );
+  }
+  return Number(value);
+}
+
+function catalogDamage(
+  value: unknown,
+  field: string,
+  versatile: boolean,
+): WeaponDamage | VersatileWeaponDamage {
+  if (!isRecord(value)) {
+    throw new TypeError(`Catalog field '${field}' must be an object.`);
+  }
+  switch (value.kind) {
+    case 'dice':
+      return {
+        kind: 'dice',
+        dice: nonEmptyString(
+          value.dice,
+          `${field}.dice`,
+          versatile
+            ? WEAPON_TEXT_LIMITS.versatile_damage_dice
+            : WEAPON_TEXT_LIMITS.damage_dice,
+        ),
+      };
+    case 'flat':
+      return {
+        kind: 'flat',
+        amount: boundedInteger(value.amount, `${field}.amount`, 0, 100_000),
+      };
+    case 'custom':
+      return {
+        kind: 'custom',
+        text: nonEmptyString(
+          value.text,
+          `${field}.text`,
+          versatile
+            ? WEAPON_TEXT_LIMITS.versatile_damage_custom
+            : WEAPON_TEXT_LIMITS.damage_custom,
+        ),
+      };
+    case 'not_recorded':
+      if (!versatile) return { kind: 'not_recorded' };
+      break;
+    case 'not_applicable':
+      if (versatile) return { kind: 'not_applicable' };
+      break;
+  }
+  throw new TypeError(
+    `Catalog field '${field}.kind' is not valid for this damage value.`,
+  );
+}
+
+function catalogRange(value: unknown): WritableWeaponRange {
+  if (!isRecord(value)) {
+    throw new TypeError("Catalog field 'range' must be an object.");
+  }
+  if (value.kind === 'none') return { kind: 'none' };
+  if (value.kind !== 'ranged') {
+    throw new TypeError("Catalog field 'range.kind' must be none or ranged.");
+  }
+  const near = boundedInteger(
+    value.nearFeet,
+    'range.nearFeet',
+    0,
+    WEAPON_RANGE_MAX_FEET,
+  );
+  const far = catalogNullableInteger(
+    value.farFeet,
+    'range.farFeet',
+    0,
+    WEAPON_RANGE_MAX_FEET,
+  );
+  if (far !== null && far < near) {
+    throw new TypeError("Catalog field 'range.farFeet' must not be less than nearFeet.");
+  }
+  return { kind: 'ranged', near_feet: near, far_feet: far };
+}
+
+function catalogItemEffect(
+  value: unknown,
+  index: number,
+): AuthoringCharacterEffect {
+  const field = `effects[${String(index)}]`;
+  if (!isRecord(value)) {
+    throw new TypeError(`Catalog field '${field}' must be an object.`);
+  }
+  if (!isEnumValue(characterEffectKinds, value.kind)) {
+    throw new TypeError(
+      `Catalog field '${field}.kind' must be one of ${characterEffectKinds.join(', ')}.`,
+    );
+  }
+  const common = {
+    sort_order: index + 1,
+    label: nonEmptyString(
+      value.label,
+      `${field}.label`,
+      ORIGIN_TEXT_LIMITS.trait_name,
+    ),
+    notes: nullableString(
+      value.notes,
+      `${field}.notes`,
+      ORIGIN_TEXT_LIMITS.notes,
+    ),
+  };
+  const integer = (
+    key: string,
+    minimum: number,
+    maximum = ORIGIN_EFFECT_MAGNITUDE_MAX,
+  ): number =>
+    boundedInteger(value[key], `${field}.${key}`, minimum, maximum);
+  const nonZeroInteger = (key: string): number => {
+    const parsed = integer(key, -ORIGIN_EFFECT_MAGNITUDE_MAX);
+    if (parsed === 0) {
+      throw new TypeError(`Catalog field '${field}.${key}' must be non-zero.`);
+    }
+    return parsed;
+  };
+  const ability = (key: string) => {
+    const parsed = nonEmptyString(value[key], `${field}.${key}`);
+    if (!isEnumValue(abilities, parsed)) {
+      throw new TypeError(`Catalog field '${field}.${key}' is not an ability.`);
+    }
+    return parsed;
+  };
+  const weaponScope = () => {
+    const parsed = nonEmptyString(value.weaponScope, `${field}.weaponScope`);
+    if (!isEnumValue(extraAttackWeaponScopes, parsed)) {
+      throw new TypeError(`Catalog field '${field}.weaponScope' is invalid.`);
+    }
+    return parsed;
+  };
+  switch (value.kind) {
+    case 'damage_resistance':
+      return {
+        ...common,
+        kind: value.kind,
+        damage_type: nonEmptyString(
+          value.damageType,
+          `${field}.damageType`,
+          ORIGIN_TEXT_LIMITS.name,
+        ) as DamageType,
+      };
+    case 'hp_modifier': {
+      const hit_points_flat = catalogNullableInteger(
+        value.hitPointsFlat,
+        `${field}.hitPointsFlat`,
+        -ORIGIN_EFFECT_MAGNITUDE_MAX,
+        ORIGIN_EFFECT_MAGNITUDE_MAX,
+      );
+      const hit_points_per_level = catalogNullableInteger(
+        value.hitPointsPerLevel,
+        `${field}.hitPointsPerLevel`,
+        -ORIGIN_EFFECT_MAGNITUDE_MAX,
+        ORIGIN_EFFECT_MAGNITUDE_MAX,
+      );
+      if (hit_points_flat === null && hit_points_per_level === null) {
+        throw new TypeError(`Catalog field '${field}' needs an HP modifier payload.`);
+      }
+      return { ...common, kind: value.kind, hit_points_flat, hit_points_per_level };
+    }
+    case 'speed':
+      return {
+        ...common,
+        kind: value.kind,
+        speed_bonus_feet: integer(
+          'speedBonusFeet',
+          -ORIGIN_EFFECT_MAGNITUDE_MAX,
+        ),
+      };
+    case 'ability_increase':
+      return {
+        ...common,
+        kind: value.kind,
+        ability: ability('ability'),
+        amount: nonZeroInteger('amount'),
+        maximum: integer('maximum', 1, 30),
+      };
+    case 'ability_override':
+      return {
+        ...common,
+        kind: value.kind,
+        ability: ability('ability'),
+        maximum: integer('maximum', 1, 30),
+      };
+    case 'armor_class_bonus':
+      return { ...common, kind: value.kind, amount: nonZeroInteger('amount') };
+    case 'armor_class_formula': {
+      const second = value.ability2;
+      let ability_2 = null;
+      if (second !== null) ability_2 = ability('ability2');
+      return {
+        ...common,
+        kind: value.kind,
+        base: integer('base', 1),
+        ability_1: ability('ability1'),
+        ability_2,
+        allows_shield: catalogBoolean(value.allowsShield, `${field}.allowsShield`),
+      };
+    }
+    case 'attack_ability_override':
+      return {
+        ...common,
+        kind: value.kind,
+        ability: ability('ability'),
+        weapon_scope: weaponScope(),
+      };
+    case 'weapon_attack_bonus':
+    case 'weapon_damage_bonus':
+      return {
+        ...common,
+        kind: value.kind,
+        amount: nonZeroInteger('amount'),
+        weapon_scope: weaponScope(),
+      };
+  }
+}
+
+function catalogWeaponRecord(value: Record<string, unknown>): CatalogWeaponRecord {
+  const group = nonEmptyString(value.srdGroup, 'srdGroup');
+  const mastery = nonEmptyString(
+    value.masteryProperty,
+    'masteryProperty',
+    WEAPON_TEXT_LIMITS.mastery_property,
+  );
+  if (!isEnumValue(srdWeaponGroups, group)) {
+    throw new TypeError("Catalog field 'srdGroup' is invalid.");
+  }
+  if (!isEnumValue(weaponMasteryProperties, mastery)) {
+    throw new TypeError("Catalog field 'masteryProperty' is invalid.");
+  }
+  return {
+    kind: 'weapon',
+    name: nonEmptyString(value.name, 'name', WEAPON_TEXT_LIMITS.name),
+    edition: catalogEdition(value.edition),
+    srdGroup: group,
+    damage: catalogDamage(value.damage, 'damage', false) as WeaponDamage,
+    damageType: nonEmptyString(
+      value.damageType,
+      'damageType',
+      WEAPON_TEXT_LIMITS.damage_type,
+    ) as DamageType,
+    versatileDamage: catalogDamage(
+      value.versatileDamage,
+      'versatileDamage',
+      true,
+    ) as VersatileWeaponDamage,
+    finesse: catalogBoolean(value.finesse, 'finesse'),
+    heavy: catalogBoolean(value.heavy, 'heavy'),
+    light: catalogBoolean(value.light, 'light'),
+    loading: catalogBoolean(value.loading, 'loading'),
+    reach: catalogBoolean(value.reach, 'reach'),
+    thrown: catalogBoolean(value.thrown, 'thrown'),
+    twoHanded: catalogBoolean(value.twoHanded, 'twoHanded'),
+    ammunition: catalogBoolean(value.ammunition, 'ammunition'),
+    ammunitionKind: nullableString(
+      value.ammunitionKind,
+      'ammunitionKind',
+      WEAPON_TEXT_LIMITS.ammunition_kind,
+    ),
+    range: catalogRange(value.range),
+    masteryProperty: mastery,
+    otherProperties: nullableString(
+      value.otherProperties,
+      'otherProperties',
+      WEAPON_TEXT_LIMITS.other_properties,
+    ),
+  };
+}
+
+function catalogArmorRecord(value: Record<string, unknown>): CatalogArmorRecord {
+  const category = nonEmptyString(value.category, 'category');
+  const dexBonus = nonEmptyString(value.dexBonus, 'dexBonus');
+  if (!isEnumValue(armorCategories, category)) {
+    throw new TypeError("Catalog field 'category' is invalid.");
+  }
+  if (!isEnumValue(armorDexBonuses, dexBonus)) {
+    throw new TypeError("Catalog field 'dexBonus' is invalid.");
+  }
+  const dexBonusMax = catalogNullableInteger(
+    value.dexBonusMax,
+    'dexBonusMax',
+    SHEET_ARMOR_MIN.dex_bonus_max,
+    SHEET_ARMOR_MAX.dex_bonus_max,
+  );
+  if ((dexBonus === 'capped') !== (dexBonusMax !== null)) {
+    throw new TypeError("Catalog fields 'dexBonus' and 'dexBonusMax' disagree.");
+  }
+  if (category === 'shield' && dexBonus !== 'none') {
+    throw new TypeError(
+      "Catalog field 'dexBonus' must be 'none' when category is 'shield'.",
+    );
+  }
+  return {
+    kind: 'armor',
+    name: nonEmptyString(value.name, 'name', SHEET_TEXT_LIMITS.armor_name),
+    edition: catalogEdition(value.edition),
+    category,
+    armorClass: boundedInteger(
+      value.armorClass,
+      'armorClass',
+      SHEET_ARMOR_MIN.armor_class,
+      SHEET_ARMOR_MAX.armor_class,
+    ),
+    dexBonus,
+    dexBonusMax,
+    strengthRequirement: catalogNullableInteger(
+      value.strengthRequirement,
+      'strengthRequirement',
+      SHEET_ARMOR_MIN.strength_requirement,
+      SHEET_ARMOR_MAX.strength_requirement,
+    ),
+    stealthDisadvantage: catalogBoolean(
+      value.stealthDisadvantage,
+      'stealthDisadvantage',
+    ),
+  };
+}
+
+function catalogItemRecord(value: Record<string, unknown>): CatalogItemRecord {
+  if (!Array.isArray(value.effects)) {
+    throw new TypeError("Catalog field 'effects' must be a list.");
+  }
+  if (value.effects.length > EQUIPMENT_EFFECT_COUNT_MAX) {
+    throw new TypeError(
+      `Catalog field 'effects' must not contain more than ${String(EQUIPMENT_EFFECT_COUNT_MAX)} rows.`,
+    );
+  }
+  return {
+    kind: 'item',
+    name: nonEmptyString(value.name, 'name', ORIGIN_TEXT_LIMITS.trait_name),
+    edition: catalogEdition(value.edition),
+    description: requiredString(
+      value.description,
+      'description',
+      ORIGIN_TEXT_LIMITS.description,
+    ),
+    requiresAttunement: catalogBoolean(
+      value.requiresAttunement,
+      'requiresAttunement',
+    ),
+    effects: value.effects.map(catalogItemEffect),
+  };
+}
+
 /**
  * Reads one element's `kind`, defaulting to `spell`. See `catalogRecordKinds`.
  *
@@ -634,6 +1123,9 @@ export function parseCatalogDocuments(
   }
   const spells: CatalogRecord[] = [];
   const subclasses: CatalogSubclassRecord[] = [];
+  const weapons: CatalogWeaponRecord[] = [];
+  const armors: CatalogArmorRecord[] = [];
+  const items: CatalogItemRecord[] = [];
   const kinds = new Set<CatalogRecordKind>();
   documents.forEach((document, index) => {
     const decoded = parseJsonDocument(
@@ -673,6 +1165,15 @@ export function parseCatalogDocuments(
             catalogSubclassRecord(value as Record<string, unknown>),
           );
           break;
+        case 'weapon':
+          weapons.push(catalogWeaponRecord(value as Record<string, unknown>));
+          break;
+        case 'armor':
+          armors.push(catalogArmorRecord(value as Record<string, unknown>));
+          break;
+        case 'item':
+          items.push(catalogItemRecord(value as Record<string, unknown>));
+          break;
         /* c8 ignore next 6 -- unreachable while the switch is exhaustive; kept
            so a new record kind is a compile error here rather than a record
            this parser drops on the floor. */
@@ -711,6 +1212,9 @@ export function parseCatalogDocuments(
           (other) => other.contentKey === record.contentKey,
         ) === index,
     ),
+    weapons,
+    armors,
+    items,
     kinds,
   };
 }

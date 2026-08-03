@@ -244,6 +244,7 @@ describe(`ported persistence invariants (${sourceLabel})`, () => {
       'catalog_register_background_template_identity_before_insert',
       'catalog_register_class_identity_before_insert',
       'catalog_register_feat_identity_before_insert',
+      'catalog_register_item_identity_before_insert',
       'catalog_register_species_definition_identity_before_insert',
       'catalog_register_species_template_identity_before_insert',
       'catalog_register_spell_identity_before_insert',

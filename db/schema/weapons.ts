@@ -15,7 +15,6 @@ import type {
 } from '../../src/domain/ids';
 import type {
   DamageType,
-  KnownDamageType,
   RulesEdition,
   SrdWeaponGroup,
   WeaponAttackKind,
@@ -29,7 +28,6 @@ import type {
 } from '../../src/domain/weapon-damage';
 import type { WeaponRangeKind } from '../../src/domain/weapon-range';
 import {
-  damageTypes,
   rulesEditions,
   srdWeaponGroups,
   weaponMasteryGrants,
@@ -333,7 +331,7 @@ export const weapon_templates = sqliteTable(
     damage_dice: varchar()('damage_dice'),
     damage_flat: integer('damage_flat'),
     damage_custom: varchar()('damage_custom'),
-    damage_type: varchar<KnownDamageType>()('damage_type').notNull(),
+    damage_type: varchar<DamageType>()('damage_type').notNull(),
     versatile_damage_kind: varchar<VersatileWeaponDamage['kind']>()(
       'versatile_damage_kind',
     )
@@ -402,10 +400,6 @@ export const weapon_templates = sqliteTable(
     check(
       'weapon_templates_mastery_property_check',
       oneOf('mastery_property', weaponMasteryProperties),
-    ),
-    check(
-      'weapon_templates_damage_type_check',
-      oneOf('damage_type', damageTypes),
     ),
     /** The four headings the source's own table uses; the picker groups on it. */
     check('weapon_templates_srd_group_check', oneOf('srd_group', srdWeaponGroups)),

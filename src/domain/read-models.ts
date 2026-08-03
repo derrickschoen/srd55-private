@@ -1,6 +1,7 @@
 import type { WeaponFields } from './command-contracts';
 import type { EquipmentEffectInput } from './equipment-effects';
 import type { AttunementSlot } from './attunement';
+import type { ContentKey } from './ids';
 import type { AttackProfileResult } from '../rules/attack-profiles';
 import type { CharacterMasteryAllowance } from '../rules/weapon-mastery-lookup';
 import type {
@@ -93,8 +94,17 @@ export interface CharacterItem {
   readonly effects: readonly EquipmentEffectInput[];
 }
 
+export interface ItemDefinition {
+  readonly content_key: ContentKey;
+  readonly name: string;
+  readonly description: string;
+  readonly requires_attunement: boolean;
+  readonly effects: readonly EquipmentEffectInput[];
+}
+
 export interface ItemsPanel {
   readonly items: readonly CharacterItem[];
+  readonly definitions: readonly ItemDefinition[];
 }
 
 export interface FreeCast {

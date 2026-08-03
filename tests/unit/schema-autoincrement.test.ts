@@ -97,6 +97,9 @@ const nativeAutoIncrementTables = [
   // AC-1 (D72): the character's own items, a surrogate key for the same
   // backup-remap reason every character-owned table above carries one.
   'character_items',
+  // CI-3c: one catalog root and its ordered effect children.
+  'item_definition_effects',
+  'item_definitions',
   // Sheet core (D11/D12): seven class-content tables plus the armour catalog.
   // Every one carries a surrogate autoincrementing key, so the claim below —
   // that `naturalKeyTables` is empty — still holds after they arrive.
@@ -193,7 +196,7 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
       return db;
     }
 
-    it('declares AUTOINCREMENT on exactly the 30 Laravel and 40 native surrogate-key tables', () => {
+    it('declares AUTOINCREMENT on exactly the 30 Laravel and 42 native surrogate-key tables', () => {
       const db = openDb();
       const declared = db
         .selectValues(
@@ -218,9 +221,9 @@ for (const [sourceLabel, schemaSql] of schemaSources) {
       // effect tables. Counted in parts so one group shrinking while another
       // grows cannot pass unnoticed. D92's slot row uses character_id as its
       // natural primary key and therefore belongs in `naturalKeyTables`.
-      expect(declared).toHaveLength(70);
+      expect(declared).toHaveLength(72);
       expect(autoIncrementTables).toHaveLength(30);
-      expect(nativeAutoIncrementTables).toHaveLength(40);
+      expect(nativeAutoIncrementTables).toHaveLength(42);
 
       const withoutAutoIncrement = db
         .selectValues(

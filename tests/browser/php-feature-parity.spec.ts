@@ -355,7 +355,7 @@ test('builds the complete character list card contract in deterministic order', 
 test('builds the complete workspace editing contract for the seeded character', async ({
   page,
 }) => {
-  // Measured at 21.5s alone on Chromium; allow for concurrent-suite contention.
+  // Measured at 23.9s alone on Chromium; allow for concurrent-suite contention.
   test.setTimeout(60_000);
   await install(page, workspaceImage);
   const before = await databaseBytes(page);
@@ -386,6 +386,7 @@ test('builds the complete workspace editing contract for the seeded character', 
   expect(workspace.spell_lists).toEqual(['Cleric', 'Druid', 'Wizard']);
   expect(workspace.save_points).toEqual([]);
   expect(workspace.items).toEqual({
+    definitions: [],
     items: [{
       id: expect.any(Number),
       name: 'Healing Potion',

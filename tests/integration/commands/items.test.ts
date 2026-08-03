@@ -5,6 +5,7 @@ import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import { DatabaseContext } from '../../../src/db/database';
 import type { CharacterCommandPayload } from '../../../src/domain/command-contracts';
 import { openTestDatabase } from '../../helpers/open-db';
+import { ItemQueries } from '../../../src/queries/items';
 
 const integrityKey = 'AC-2b-item-command-integrity-key';
 
@@ -43,6 +44,62 @@ describe('item commands and effect ownership', () => {
       command,
     });
   }
+
+  it('picker query copies a definition and effects into severed character rows', async () => {
+    db.exec(
+      `INSERT INTO item_definitions (
+         content_key, name, rules_edition, description, requires_attunement
+       ) VALUES (
+         'expanded:legacy:severed-belt', 'Severed Belt', 'expanded',
+         'Catalog description', 1
+       );
+       INSERT INTO item_definition_effects (
+         item_definition_id, sort_order, effect_kind, ability, maximum,
+         label, notes
+       ) VALUES (
+         1, 1, 'ability_override', 'strength', 23,
+         'Catalog strength', 'Catalog note'
+       );`,
+    );
+    const definition = new ItemQueries(db).panel(characterId).definitions[0];
+    if (definition === undefined) throw new Error('Definition was not queryable.');
+
+    await run({
+      type: 'add_item',
+      item: {
+        name: definition.name,
+        description: definition.description,
+        quantity: 1,
+        requires_attunement: definition.requires_attunement,
+        source_instance_id: null,
+        effects: definition.effects,
+      },
+    });
+    db.exec('DELETE FROM item_definitions WHERE id = 1');
+
+    expect(db.oneRaw(
+      `SELECT name, description, quantity, requires_attunement
+       FROM character_items WHERE character_id = ?`,
+      [characterId],
+    )).toEqual({
+      name: 'Severed Belt',
+      description: 'Catalog description',
+      quantity: 1,
+      requires_attunement: 1,
+    });
+    expect(db.oneRaw(
+      `SELECT effect_kind, ability, maximum, label, notes, template_ref
+       FROM character_effects WHERE character_id = ?`,
+      [characterId],
+    )).toEqual({
+      effect_kind: 'ability_override',
+      ability: 'strength',
+      maximum: 23,
+      label: 'Catalog strength',
+      notes: 'Catalog note',
+      template_ref: null,
+    });
+  });
 
   it('adds, updates, removes, and restores an item with its owned effects', async () => {
     const added = await run({
