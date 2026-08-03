@@ -7,6 +7,17 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D183 — OWNER: the prophet has NO doubt - certainty is the horror (2026-08-03)
+
+Refines D181: the knight is fallible IN FACT but subjectively CERTAIN -
+"believe he is right and have no doubts about it. That makes it scarier."
+Consequences for the tenets: nothing reads as suppressed inner doubt; the
+doubt-forbidding tenets aim at OTHERS' doubt; any tenet granting the
+premise of his own madness is cut; omens are always read as confirmation
+(certainty digests Augury). The ambiguity machinery (D182) stays fully
+outside his head - the reader sees what he cannot. Herbert's warning in
+its purest form: the danger is the leader who has stopped checking.
+
 ## D182 — OWNER-DIRECTED: divination joins the Oath of Domination spell list (2026-08-03)
 
 Amends D179's list: each tier pairs a command spell with a VISION spell -
