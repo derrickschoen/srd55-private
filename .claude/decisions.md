@@ -7,6 +7,22 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D193 — OWNER: build the Psionic Fist adaptation as a fourth monk subclass (2026-08-03)
+
+Owner's words: "Build the adaptation of the psion monk 3.5 prestige
+class." A fourth third-caster monk, the FAITHFUL adaptation of the 3.5
+SRD Psionic Fist (open content, verified): partial Wis-caster on the
+unbroken martial chassis, a short psychic-warrior-style Wisdom list
+(self-buff transmutation + telekinetic/telepathic touches from the
+verified SRD set), Focus in the power-point seat, mind-body fusion
+identity. Shares the family chassis: Wisdom third-caster + D189
+cantrip-in-Flurry at 6. Taken for now (D7, Blackguard precedent): an
+ORIGINAL name with a one-line concept-level ancestry disclosure ships
+CC-BY like the other three; the alternative — carrying the "Psionic
+Fist" name as OGL-attributed content in the D176 quarantine folder — is
+the flip if the owner prefers name fidelity. No psionic subsystem is
+invented (guideline F2); psionics is expressed as Wisdom casting.
+
 ## D192 — OWNER: two simple weapons-first subclasses — double-Sneak rogue, unbound-Mark ranger (2026-08-03)
 
 Owner commissions, verbatim mechanics:
