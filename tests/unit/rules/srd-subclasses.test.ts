@@ -98,7 +98,17 @@ describe('SRD subclasses extract', () => {
       '   Level 3: Frenzy\n   Level 3: Frenzy\n',
     );
     expect(() => parseSrdSubclassSections(duplicateFeature)).toThrow(
-      /duplicate feature heading Level 3: Frenzy in Barbarian/u,
+      /duplicate feature name Frenzy in Barbarian/u,
+    );
+  });
+
+  it('the duplicate-feature-name-at-another-level mutation fails', () => {
+    const duplicateFeatureName = subclassExtract.replace(
+      'Level 6: Mindless Rage',
+      'Level 6: Frenzy',
+    );
+    expect(() => parseSrdSubclassSections(duplicateFeatureName)).toThrow(
+      'SRD subclasses: duplicate feature name Frenzy in Barbarian.',
     );
   });
 
@@ -128,11 +138,87 @@ describe('SRD subclasses extract', () => {
     }
 
     const dropLifeDomainTable = subclassExtract.replace(
-      /(   Life Domain Spells\n)[\s\S]*?(?=   Level 3: Preserve Life)/u,
+      /(   Life Domain Spells\n   Cleric        Prepared Spells\n   Level\n)[\s\S]*?(?=   Level 3: Preserve Life)/u,
       '$1',
     );
     expect(() => parseSrdSubclassSections(dropLifeDomainTable)).toThrow(
       /Life Domain Spells table has no spell rows/u,
+    );
+  });
+
+  it('the missing-spell-row-continuation mutation fails', () => {
+    const missingContinuation = subclassExtract.replace(
+      '                    Shield of Faith\n',
+      '',
+    );
+    expect(() => parseSrdSubclassSections(missingContinuation)).toThrow(
+      'SRD subclasses: Oath of Devotion Spells table row ending in a comma is missing its continuation.',
+    );
+  });
+
+  it('the duplicate-level-in-one-physical-table mutation fails', () => {
+    const duplicateLevel = subclassExtract.replace(
+      '         5       Mass Healing Word, Revivify',
+      '         3       Mass Healing Word, Revivify',
+    );
+    expect(() => parseSrdSubclassSections(duplicateLevel)).toThrow(
+      'SRD subclasses: duplicate level 3 in Life Domain Spells table.',
+    );
+  });
+
+  it('the foreign-table-header mutation fails', () => {
+    const foreignHeader = subclassExtract.replace(
+      'Cleric        Prepared Spells',
+      'Sorcerer',
+    );
+    expect(() => parseSrdSubclassSections(foreignHeader)).toThrow(
+      'SRD subclasses: table header "Sorcerer" does not match Life Domain Spells.',
+    );
+  });
+
+  it('the missing-table-header mutation fails with the required-header error', () => {
+    const missingHeader = subclassExtract.replace('   Level\n', '');
+    expect(() => parseSrdSubclassSections(missingHeader)).toThrow(
+      'SRD subclasses: Life Domain Spells table is missing required header "Level".',
+    );
+  });
+
+  it('the duplicate-table-header mutation fails with the unique-header error', () => {
+    const duplicateHeader = subclassExtract.replace(
+      '   Level\n',
+      '   Level\n   Level\n',
+    );
+    expect(() => parseSrdSubclassSections(duplicateHeader)).toThrow(
+      'SRD subclasses: duplicate table header "Level" in Life Domain Spells.',
+    );
+  });
+
+  it('the table-header-after-first-row mutation fails with the ordering error', () => {
+    const lateHeader = subclassExtract
+      .replace('   Cleric        Prepared Spells\n', '')
+      .replace(
+        '                 Lesser Restoration\n',
+        '                 Lesser Restoration\n   Cleric        Prepared Spells\n',
+      );
+    expect(() => parseSrdSubclassSections(lateHeader)).toThrow(
+      'SRD subclasses: table header "Cleric Prepared Spells" appears after the first spell row in Life Domain Spells.',
+    );
+  });
+
+  it('the missing-three-druid-land-tables mutation fails', () => {
+    const missingLandTables = subclassExtract.replace(
+      /     Polar Land[\s\S]*?(?=  Level 3: Land’s Aid)/u,
+      '',
+    );
+    expect(() => parseSrdSubclassSections(missingLandTables)).toThrow(
+      'SRD subclasses: missing Polar Land table.',
+    );
+  });
+
+  it('the duplicate-physical-table-title mutation fails', () => {
+    const duplicateTableTitle = subclassExtract.replace('Polar Land', 'Arid Land');
+    expect(() => parseSrdSubclassSections(duplicateTableTitle)).toThrow(
+      'SRD subclasses: duplicate physical table title Arid Land.',
     );
   });
 
