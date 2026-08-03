@@ -12,12 +12,14 @@ import type {
   SpellVersionId,
 } from '../../../src/domain/ids';
 import type { PositiveResourceMaximum } from '../../../src/domain/class-resources';
+import { spellSchool } from '../../../src/domain/enums';
 import {
   SHEET_GAPS,
   sheetGaps,
 } from '../../../src/queries/character-sheet-builder';
 import {
   FLAVOR_PRINT_CODE_POINT_LIMIT,
+  MISSING_SPELL_TEXT_DISCLOSURE,
   RESOURCE_MARKING_SHAPES,
   flavorAppendix,
   flavorPrintProjection,
@@ -25,6 +27,7 @@ import {
   sheetHeaderRouteActions,
   sheetFacts,
   sheetSections,
+  spellAppendix,
   type SheetCell,
   type SheetRow,
   type SheetRowSection,
@@ -571,6 +574,218 @@ describe('the character sheet is projected twice from one value', () => {
       .not.toMatch(/Prepared|Known/);
   });
 
+  it('compact and appendix projections share class level name order', () => {
+    const shared = spell(201, 'Shared Ward', {
+      reference: {
+        ...spell(999, 'reference').reference,
+        description: 'Shared prose.',
+      },
+    });
+    const wizard = classSpellGroup(
+      11,
+      'Wizard',
+      [
+        spell(104, 'Shield', {
+          reference: {
+            ...spell(999, 'reference').reference,
+            description: 'Shield prose.',
+          },
+        }),
+        shared,
+      ],
+      {
+        spellbook: [
+          spell(108, 'Detect Magic', {
+            reference: {
+              ...spell(999, 'reference').reference,
+              description: 'Detect prose.',
+            },
+          }),
+          spell(107, 'Chromatic Orb', {
+            reference: {
+              ...spell(999, 'reference').reference,
+              description: 'Orb prose.',
+            },
+          }),
+        ].map(({ marker: _marker, ...entry }) => entry),
+      },
+    );
+    const cleric = classSpellGroup(12, 'Cleric', [
+      { ...shared, marker: 'prepared' },
+      spell(103, 'Bless', {
+        reference: {
+          ...spell(999, 'reference').reference,
+          description: 'Bless prose.',
+        },
+      }),
+    ]);
+    const otherSource: Extract<
+      SheetSpellGroup,
+      { readonly kind: 'other_source' }
+    > = {
+      kind: 'other_source',
+      source_instance_id: 31 as SourceInstanceId,
+      source_name: 'Magic Initiate',
+      statistics: [],
+      spells: [
+        spell(102, 'Resistance', {
+          reference: {
+            ...spell(999, 'reference').reference,
+            description: 'Resistance prose.',
+          },
+        }),
+      ],
+    };
+    const value = sheet({ spells: [otherSource, wizard, cleric] });
+    const compact = spellSectionOf(value).spell_groups.map((group) => [
+      ...group.rows.map((row) => textOf(row.label)),
+      ...group.spellbook_rows.map((row) => textOf(row.label)),
+    ]);
+    const appendix = spellAppendix(value);
+
+    expect(
+      appendix?.groups.map((group) =>
+        group.cards.map((card) => card.name),
+      ),
+    ).toEqual(compact);
+    expect(appendix?.groups.map((group) => group.name)).toEqual([
+      'Magic Initiate',
+      'Wizard',
+      'Cleric',
+    ]);
+    expect(
+      appendix?.groups
+        .flatMap((group) => group.cards)
+        .filter((card) => card.spell_version_id === shared.spell_version_id),
+    ).toHaveLength(2);
+  });
+
+  it('spellbook-only compact rows still produce full appendix cards', () => {
+    const spellbookEntry = spell(107, 'Chromatic Orb', {
+      reference: {
+        ...spell(999, 'reference').reference,
+        description: 'Spellbook-only prose.',
+      },
+    });
+    const wizard = classSpellGroup(11, 'Wizard', [], {
+      spellbook: [
+        {
+          spell_version_id: spellbookEntry.spell_version_id,
+          name: spellbookEntry.name,
+          level: spellbookEntry.level,
+          reference: spellbookEntry.reference,
+        },
+      ],
+    });
+
+    expect(
+      spellAppendix(sheet({ spells: [wizard] }))?.groups[0]?.cards,
+    ).toEqual([
+      expect.objectContaining({
+        name: 'Chromatic Orb',
+        description: { status: 'recorded', text: 'Spellbook-only prose.' },
+      }),
+    ]);
+  });
+
+  it('spell appendix card anatomy preserves recorded fields and stored bytes', () => {
+    const storedProse = '  first line\nsecond line  \n';
+    const complete = spell(101, 'Complete Spell', {
+      level: { status: 'known', value: 3 as SpellLevel },
+      reference: {
+        edition: '2014',
+        school: spellSchool('Chronomancy'),
+        casting_time: '1 action',
+        action_type: 'Action',
+        range: '60 feet',
+        duration: 'Concentration, up to 1 minute',
+        components: 'V, S, M',
+        concentration: true,
+        ritual: true,
+        upcast_levels: [4, 5],
+        upcast_summary: 'One extra target.',
+        cantrip_upgrade_levels: [5, 11],
+        cantrip_upgrade_summary: 'One extra die.',
+        attack_modes: ['melee_spell', 'ranged_spell'],
+        save_abilities: ['dexterity', 'wisdom'],
+        description: storedProse,
+      },
+    });
+
+    expect(
+      spellAppendix(
+        sheet({ spells: [classSpellGroup(11, 'Wizard', [complete])] }),
+      ),
+    ).toEqual({
+      id: 'spells',
+      order: 200,
+      title: 'Full spell text',
+      groups: [
+        {
+          id: 'class:11',
+          name: 'Wizard',
+          cards: [
+            {
+              spell_version_id: 101,
+              name: 'Complete Spell',
+              level: 'Level 3',
+              school: 'Chronomancy',
+              edition_marker: '2014 rules',
+              facts: [
+                { label: 'Casting time', value: '1 action' },
+                { label: 'Action type', value: 'Action' },
+                { label: 'Range', value: '60 feet' },
+                { label: 'Duration', value: 'Concentration, up to 1 minute' },
+                { label: 'Components', value: 'V, S, M' },
+                { label: 'Concentration', value: 'Yes' },
+                { label: 'Ritual', value: 'Yes' },
+              ],
+              supplemental: [
+                {
+                  label: 'Upcast',
+                  value: 'Spell levels 4, 5 — One extra target.',
+                },
+                {
+                  label: 'Cantrip upgrades',
+                  value: 'Character levels 5, 11 — One extra die.',
+                },
+                {
+                  label: 'Attack modes',
+                  value: 'melee_spell, ranged_spell',
+                },
+                { label: 'Save abilities', value: 'dexterity, wisdom' },
+              ],
+              description: { status: 'recorded', text: storedProse },
+            },
+          ],
+        },
+      ],
+      missing_spell_names: [],
+    });
+  });
+
+  it('missing imported spell text is stated without PHP instructions', () => {
+    const missing = spell(101, 'Goodberry');
+    const recorded = spell(102, 'Guidance', {
+      reference: {
+        ...spell(999, 'reference').reference,
+        description: 'Recorded guidance prose.',
+      },
+    });
+    const appendix = spellAppendix(
+      sheet({
+        spells: [classSpellGroup(11, 'Druid', [missing, recorded])],
+      }),
+    );
+
+    expect(appendix?.missing_spell_names).toEqual(['Goodberry']);
+    expect(appendix?.groups[0]?.cards[0]?.description).toEqual({
+      status: 'absent',
+      disclosure: MISSING_SPELL_TEXT_DISCLOSURE,
+    });
+    expect(JSON.stringify(appendix)).not.toMatch(/php artisan|Tier 2/i);
+  });
+
   it('normal spellcasting statistics render once at group level', () => {
     const value = sheet({
       spells: [
@@ -719,6 +934,17 @@ describe('the character sheet is projected twice from one value', () => {
     expect(facts).not.toContain(hostileSource);
     expect(facts).not.toContain(hostileSpell);
     expect(facts).not.toContain(hostileProse);
+    expect(spellAppendix(value)?.groups[0]).toEqual(
+      expect.objectContaining({
+        name: hostileSource,
+        cards: [
+          expect.objectContaining({
+            name: hostileSpell,
+            description: { status: 'recorded', text: hostileProse },
+          }),
+        ],
+      }),
+    );
   });
 
   it('spell section does not alter D91 resource maxima', () => {
@@ -1111,10 +1337,17 @@ describe('the character sheet is projected twice from one value', () => {
       order: 100,
       element: {} as HTMLElement,
     };
+    const futureAudit = {
+      id: 'audit',
+      order: 150,
+      element: {} as HTMLElement,
+    };
 
     expect(
-      orderedSheetPrintAppendices([later, earlier]).map((entry) => entry.id),
-    ).toEqual(['flavor', 'spell']);
+      orderedSheetPrintAppendices([later, earlier, futureAudit]).map(
+        (entry) => entry.id,
+      ),
+    ).toEqual(['flavor', 'audit', 'spell']);
   });
 
   it('marks as free text exactly what a stranger could have written', () => {

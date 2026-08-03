@@ -11,6 +11,7 @@ import type {
   SheetSpell,
   SheetSpellbookEntry,
   SheetSpellGroup,
+  SheetSpellReference,
   SheetSpellcastingStatistic,
 } from '../../../queries/character-spell-section-builder';
 import type {
@@ -95,9 +96,12 @@ export const SHEET_JSON_SCRIPT_ID = 'character-sheet-facts';
 
 export const FLAVOR_PRINT_CODE_POINT_LIMIT = 400;
 export const FLAVOR_APPENDIX_ORDER = 100;
+export const SPELL_APPENDIX_ORDER = 200;
 export const SHEET_PRINT_APPENDIX_CLASS = 'sheet-print-appendix';
 export const SHEET_PRINT_APPENDIX_PROSE_CLASS =
   'sheet-print-appendix-prose';
+export const MISSING_SPELL_TEXT_DISCLOSURE =
+  'Full spell text unavailable for this imported or placeholder spell.';
 
 export interface FlavorAppendixContent {
   readonly id: 'flavor';
@@ -108,6 +112,38 @@ export interface FlavorAppendixContent {
     readonly label: string;
     readonly text: string;
   }[];
+}
+
+export interface SpellAppendixFact {
+  readonly label: string;
+  readonly value: string;
+}
+
+export type SpellAppendixDescription =
+  | { readonly status: 'recorded'; readonly text: string }
+  | { readonly status: 'absent'; readonly disclosure: string };
+
+export interface SpellAppendixCardContent {
+  readonly spell_version_id: SheetSpellbookEntry['spell_version_id'];
+  readonly name: string;
+  readonly level: string;
+  readonly school: string;
+  readonly edition_marker: string | null;
+  readonly facts: readonly SpellAppendixFact[];
+  readonly supplemental: readonly SpellAppendixFact[];
+  readonly description: SpellAppendixDescription;
+}
+
+export interface SpellAppendixContent {
+  readonly id: 'spells';
+  readonly order: number;
+  readonly title: 'Full spell text';
+  readonly groups: readonly {
+    readonly id: string;
+    readonly name: string;
+    readonly cards: readonly SpellAppendixCardContent[];
+  }[];
+  readonly missing_spell_names: readonly string[];
 }
 
 export interface SheetPrintAppendixRegistration {
@@ -171,6 +207,154 @@ export function flavorAppendix(
         order: FLAVOR_APPENDIX_ORDER,
         title: 'Full character written text',
         entries,
+      };
+}
+
+function recordedSpellFact(
+  facts: SpellAppendixFact[],
+  label: string,
+  value: string | null,
+): void {
+  if (value !== null) {
+    facts.push({ label, value });
+  }
+}
+
+function spellProgressionFact(
+  label: 'Upcast' | 'Cantrip upgrades',
+  unit: 'Spell levels' | 'Character levels',
+  levels: readonly number[],
+  summary: string | null,
+): SpellAppendixFact | null {
+  if (levels.length === 0 && summary === null) {
+    return null;
+  }
+  const parts: string[] = [];
+  if (levels.length > 0) {
+    parts.push(`${unit} ${levels.map(String).join(', ')}`);
+  }
+  if (summary !== null) {
+    parts.push(summary);
+  }
+  return { label, value: parts.join(' — ') };
+}
+
+function spellEditionMarker(
+  edition: SheetSpellReference['edition'],
+): string | null {
+  switch (edition) {
+    case '2014':
+      return '2014 rules';
+    case '2024':
+      return null;
+    case 'expanded':
+      return 'Expanded rules';
+  }
+  const unhandled: never = edition;
+  return unhandled;
+}
+
+function spellAppendixCard(
+  spell: SheetSpellbookEntry,
+): SpellAppendixCardContent {
+  const facts: SpellAppendixFact[] = [];
+  recordedSpellFact(facts, 'Casting time', spell.reference.casting_time);
+  recordedSpellFact(facts, 'Action type', spell.reference.action_type);
+  recordedSpellFact(facts, 'Range', spell.reference.range);
+  recordedSpellFact(facts, 'Duration', spell.reference.duration);
+  recordedSpellFact(facts, 'Components', spell.reference.components);
+  facts.push(
+    {
+      label: 'Concentration',
+      value: spell.reference.concentration ? 'Yes' : 'No',
+    },
+    { label: 'Ritual', value: spell.reference.ritual ? 'Yes' : 'No' },
+  );
+
+  const supplemental: SpellAppendixFact[] = [];
+  const upcast = spellProgressionFact(
+    'Upcast',
+    'Spell levels',
+    spell.reference.upcast_levels,
+    spell.reference.upcast_summary,
+  );
+  if (upcast !== null) {
+    supplemental.push(upcast);
+  }
+  const cantripUpgrades = spellProgressionFact(
+    'Cantrip upgrades',
+    'Character levels',
+    spell.reference.cantrip_upgrade_levels,
+    spell.reference.cantrip_upgrade_summary,
+  );
+  if (cantripUpgrades !== null) {
+    supplemental.push(cantripUpgrades);
+  }
+  if (spell.reference.attack_modes.length > 0) {
+    supplemental.push({
+      label: 'Attack modes',
+      value: spell.reference.attack_modes.join(', '),
+    });
+  }
+  if (spell.reference.save_abilities.length > 0) {
+    supplemental.push({
+      label: 'Save abilities',
+      value: spell.reference.save_abilities.join(', '),
+    });
+  }
+
+  return {
+    spell_version_id: spell.spell_version_id,
+    name: spell.name,
+    level: spellLevelText(spell),
+    school: spell.reference.school,
+    edition_marker: spellEditionMarker(spell.reference.edition),
+    facts,
+    supplemental,
+    description:
+      spell.reference.description === null
+        ? {
+            status: 'absent',
+            disclosure: MISSING_SPELL_TEXT_DISCLOSURE,
+          }
+        : { status: 'recorded', text: spell.reference.description },
+  };
+}
+
+/** Pure D149 projection: consumes the compact arrays without regrouping or sorting. */
+export function spellAppendix(
+  sheet: CharacterSheet,
+): SpellAppendixContent | null {
+  const groups: SpellAppendixContent['groups'][number][] = [];
+  const missingSpellNames: string[] = [];
+  for (const group of sheet.spells) {
+    const spells: readonly SheetSpellbookEntry[] =
+      group.kind === 'class'
+        ? [...group.spells, ...group.spellbook]
+        : group.spells;
+    if (spells.length === 0) {
+      continue;
+    }
+    const cards = spells.map(spellAppendixCard);
+    for (const card of cards) {
+      if (card.description.status === 'absent') {
+        missingSpellNames.push(card.name);
+      }
+    }
+    groups.push({
+      id: spellGroupId(group),
+      name: group.kind === 'class' ? group.class_name : group.source_name,
+      cards,
+    });
+  }
+  return groups.length === 0
+    ? null
+    : {
+        id: 'spells',
+        order: SPELL_APPENDIX_ORDER,
+        title: 'Full spell text',
+        groups,
+        missing_spell_names: missingSpellNames,
       };
 }
 
@@ -1583,19 +1767,34 @@ export function renderSheet(sheet: CharacterSheet): HTMLElement {
   heading.append('Character sheet — ');
   heading.append(freeTextSpan(sheet.name));
   header.append(...routeActions, print, heading);
-  if (flavorAppendix(sheet) !== null) {
+  const hasFlavorAppendix = flavorAppendix(sheet) !== null;
+  const hasSpellAppendix = spellAppendix(sheet) !== null;
+  if (hasFlavorAppendix || hasSpellAppendix) {
     const options = document.createElement('fieldset');
     options.className = 'sheet-print-options sheet-chrome';
     const legend = document.createElement('legend');
     legend.textContent = 'Print options';
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    input.id = `sheet-print-flavor-${String(sheet.character_id)}`;
-    input.dataset.sheetPrintOption = 'flavor-appendix';
-    const label = document.createElement('label');
-    label.htmlFor = input.id;
-    label.textContent = 'Include full backstory and notes appendix';
-    options.append(legend, input, label);
+    options.append(legend);
+    if (hasFlavorAppendix) {
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.id = `sheet-print-flavor-${String(sheet.character_id)}`;
+      input.dataset.sheetPrintOption = 'flavor-appendix';
+      const label = document.createElement('label');
+      label.htmlFor = input.id;
+      label.textContent = 'Include full backstory and notes appendix';
+      options.append(input, label);
+    }
+    if (hasSpellAppendix) {
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.id = `sheet-print-spells-${String(sheet.character_id)}`;
+      input.dataset.sheetPrintOption = 'spells-appendix';
+      const label = document.createElement('label');
+      label.htmlFor = input.id;
+      label.textContent = 'Include full spell text appendix';
+      options.append(input, label);
+    }
     header.append(options);
   }
   shell.append(header);
@@ -1667,6 +1866,7 @@ const PRINT_APPENDIX_SELECTOR = '[data-sheet-print-appendix]';
 
 export interface SheetPrintOptions {
   readonly flavor_appendix: boolean;
+  readonly spell_appendix: boolean;
   readonly [option: string]: boolean;
 }
 
@@ -1739,6 +1939,91 @@ function renderFlavorAppendix(
     section.append(label, prose);
     appendix.append(section);
   }
+  return {
+    id: content.id,
+    order: content.order,
+    element: appendix,
+  };
+}
+
+function renderSpellAppendix(
+  content: SpellAppendixContent,
+): SheetPrintAppendixRegistration {
+  const appendix = document.createElement('section');
+  appendix.className = `${SHEET_PRINT_APPENDIX_CLASS} sheet-spell-appendix`;
+  const heading = document.createElement('h2');
+  heading.textContent = content.title;
+  appendix.append(heading);
+
+  if (content.missing_spell_names.length > 0) {
+    const missing = document.createElement('p');
+    missing.className = 'sheet-spell-appendix-missing';
+    missing.append('Full spell text is unavailable for: ');
+    content.missing_spell_names.forEach((name, index) => {
+      if (index > 0) {
+        missing.append(', ');
+      }
+      missing.append(freeTextSpan(name));
+    });
+    missing.append('.');
+    appendix.append(missing);
+  }
+
+  for (const group of content.groups) {
+    const groupElement = document.createElement('section');
+    groupElement.className =
+      'sheet-print-appendix-section sheet-spell-appendix-group';
+    groupElement.dataset.spellAppendixGroup = group.id;
+    const groupHeading = document.createElement('h3');
+    groupHeading.append(freeTextSpan(group.name));
+    groupElement.append(groupHeading);
+
+    for (const card of group.cards) {
+      const article = document.createElement('article');
+      article.className = 'sheet-spell-appendix-card';
+      article.dataset.spellAppendixCard = String(card.spell_version_id);
+      const summary = document.createElement('div');
+      summary.className = 'sheet-spell-appendix-summary';
+      const cardHeading = document.createElement('h4');
+      cardHeading.append(
+        freeTextSpan(card.name),
+        ` — ${card.level} · ${card.school}`,
+      );
+      if (card.edition_marker !== null) {
+        cardHeading.append(` · ${card.edition_marker}`);
+      }
+      summary.append(cardHeading);
+
+      const facts = document.createElement('dl');
+      facts.className = 'sheet-spell-appendix-facts';
+      for (const fact of [...card.facts, ...card.supplemental]) {
+        const row = document.createElement('div');
+        const term = document.createElement('dt');
+        term.textContent = fact.label;
+        const value = document.createElement('dd');
+        value.textContent = fact.value;
+        row.append(term, value);
+        facts.append(row);
+      }
+      summary.append(facts);
+
+      const prose = document.createElement('p');
+      prose.className =
+        `${SHEET_PRINT_APPENDIX_PROSE_CLASS} sheet-spell-appendix-prose`;
+      switch (card.description.status) {
+        case 'recorded':
+          prose.textContent = card.description.text;
+          break;
+        case 'absent':
+          prose.textContent = card.description.disclosure;
+          break;
+      }
+      article.append(summary, prose);
+      groupElement.append(article);
+    }
+    appendix.append(groupElement);
+  }
+
   return {
     id: content.id,
     order: content.order,
@@ -1838,6 +2123,10 @@ export function setSheetPrintContent(
   const flavorContent = flavorAppendix(sheet);
   if (options.flavor_appendix && flavorContent !== null) {
     appendices.push(renderFlavorAppendix(flavorContent));
+  }
+  const spellContent = spellAppendix(sheet);
+  if (options.spell_appendix && spellContent !== null) {
+    appendices.push(renderSpellAppendix(spellContent));
   }
   composeSheetPrintAppendices(shell, appendices);
 
