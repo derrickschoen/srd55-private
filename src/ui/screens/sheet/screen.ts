@@ -4,6 +4,9 @@ import { defineScreen, type ScreenContext } from '../../screen';
 import { renderSheet, setSheetPrintContent } from './sheet-view';
 import './styles.css';
 
+const flavorAppendixPreferenceKey = (characterId: number): string =>
+  `srd55:character:${String(characterId)}:print-option:flavor-appendix`;
+
 /**
  * THE SHEET SCREEN.
  *
@@ -45,6 +48,14 @@ async function render(context: ScreenContext): Promise<() => void> {
   context.root.replaceChildren(sheetElement);
   document.title = `${sheet.name} character sheet`;
 
+  const flavorAppendix = sheetElement.querySelector<HTMLInputElement>(
+    '[data-sheet-print-option="flavor-appendix"]',
+  );
+  if (flavorAppendix !== null) {
+    flavorAppendix.checked =
+      localStorage.getItem(flavorAppendixPreferenceKey(id)) === 'true';
+  }
+
   const cleanups: Array<() => void> = [];
   const links = Array.from(
     context.root.querySelectorAll<HTMLAnchorElement>('a[data-router-link]'),
@@ -75,19 +86,35 @@ async function render(context: ScreenContext): Promise<() => void> {
    */
   const printMedia = window.matchMedia('print');
   const syncPrintFields = (): void => {
-    setSheetPrintContent(sheetElement, printMedia.matches);
+    setSheetPrintContent(sheetElement, sheet, printMedia.matches, {
+      flavor_appendix: flavorAppendix?.checked ?? false,
+    });
   };
   const beforePrint = (): void => {
-    setSheetPrintContent(sheetElement, true);
+    setSheetPrintContent(sheetElement, sheet, true, {
+      flavor_appendix: flavorAppendix?.checked ?? false,
+    });
   };
   const afterPrint = (): void => {
-    setSheetPrintContent(sheetElement, printMedia.matches);
+    syncPrintFields();
+  };
+  const flavorPreferenceChanged = (): void => {
+    if (flavorAppendix === null) {
+      return;
+    }
+    localStorage.setItem(
+      flavorAppendixPreferenceKey(id),
+      String(flavorAppendix.checked),
+    );
+    syncPrintFields();
   };
   syncPrintFields();
+  flavorAppendix?.addEventListener('change', flavorPreferenceChanged);
   printMedia.addEventListener('change', syncPrintFields);
   window.addEventListener('beforeprint', beforePrint);
   window.addEventListener('afterprint', afterPrint);
   cleanups.push(() => {
+    flavorAppendix?.removeEventListener('change', flavorPreferenceChanged);
     printMedia.removeEventListener('change', syncPrintFields);
     window.removeEventListener('beforeprint', beforePrint);
     window.removeEventListener('afterprint', afterPrint);

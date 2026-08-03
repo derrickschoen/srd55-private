@@ -5,7 +5,10 @@ import {
   sheetGaps,
 } from '../../../src/queries/character-sheet-builder';
 import {
+  FLAVOR_PRINT_CODE_POINT_LIMIT,
   RESOURCE_MARKING_SHAPES,
+  flavorAppendix,
+  flavorPrintProjection,
   sheetFacts,
   sheetSections,
   type SheetCell,
@@ -53,6 +56,8 @@ const HOSTILE_BACKGROUND_NAME =
 const HOSTILE_TOOL_TEXT = 'Calligrapher’s Supplies';
 const HOSTILE_TRAIT_NAME = 'Gift of Tongues';
 const HOSTILE_TRAIT_TEXT = 'You know two languages of your choice.';
+const HOSTILE_BACKSTORY =
+  '</script><img src=x onerror="globalThis.flavorWasMarkup=true">\nSecond line';
 
 function sheet(changes: Partial<CharacterSheet> = {}): CharacterSheet {
   return {
@@ -217,6 +222,12 @@ function sheet(changes: Partial<CharacterSheet> = {}): CharacterSheet {
         text: HOSTILE_TRAIT_TEXT,
       },
     ],
+    flavor: {
+      alignment: null,
+      appearance: null,
+      backstory: null,
+      notes: null,
+    },
     hit_point_rolls: [
       {
         class_name: HOSTILE_CLASS_NAME,
@@ -506,6 +517,95 @@ describe('the character sheet is projected twice from one value', () => {
     ]) {
       expect(marked).toContain(hostile);
     }
+  });
+
+  it('projects only present flavor rows as byte-exact free text and keeps flavor out of facts', () => {
+    const value = sheet({
+      flavor: {
+        alignment: '  Chaotic Good  ',
+        appearance: ' \n\t ',
+        backstory: HOSTILE_BACKSTORY,
+        notes: null,
+      },
+    });
+    const section = sheetSections(value).find(
+      (entry) => entry.caption === 'Character details',
+    );
+
+    expect(section?.rows.map((entry) => entry.id)).toEqual([
+      'flavor:alignment',
+      'flavor:backstory',
+    ]);
+    expect(textOf(row(value, 'flavor:alignment').label)).toBe(
+      'Alignment — unverified free text',
+    );
+    expect(row(value, 'flavor:alignment').detail).toEqual([
+      { text: '  Chaotic Good  ', free_text: true },
+    ]);
+    expect(row(value, 'flavor:backstory').detail).toEqual([
+      { text: HOSTILE_BACKSTORY, free_text: true },
+    ]);
+    const facts = JSON.stringify(sheetFacts(value));
+    expect(facts).not.toContain('flavor');
+    expect(facts).not.toContain('backstory');
+    expect(facts).not.toContain(HOSTILE_BACKSTORY);
+  });
+
+  it('omits Character details when every flavor field is null or blank', () => {
+    const value = sheet({
+      flavor: {
+        alignment: null,
+        appearance: ' ',
+        backstory: '\n',
+        notes: null,
+      },
+    });
+
+    expect(
+      sheetSections(value).some(
+        (entry) => entry.caption === 'Character details',
+      ),
+    ).toBe(false);
+  });
+
+  it('truncates long written text on code points and always supplies a continuation marker', () => {
+    const value =
+      'a'.repeat(FLAVOR_PRINT_CODE_POINT_LIMIT - 1) + '🪐' + 'tail';
+    const projection = flavorPrintProjection(value);
+
+    expect([...projection.text]).toHaveLength(FLAVOR_PRINT_CODE_POINT_LIMIT);
+    expect(projection.text.endsWith('🪐')).toBe(true);
+    expect(projection.printed_code_points).toBe(FLAVOR_PRINT_CODE_POINT_LIMIT);
+    expect(projection.total_code_points).toBe(
+      FLAVOR_PRINT_CODE_POINT_LIMIT + 4,
+    );
+    expect(projection.continuation).toBe(
+      `Text cut for the main sheet: the first ${String(FLAVOR_PRINT_CODE_POINT_LIMIT)} ` +
+        `of ${String(FLAVOR_PRINT_CODE_POINT_LIMIT + 4)} code points are printed here. ` +
+        'The full written-text appendix option prints the rest.',
+    );
+  });
+
+  it('builds the opt-in flavor appendix from full untruncated written text', () => {
+    const longNotes = `before\n${'n'.repeat(FLAVOR_PRINT_CODE_POINT_LIMIT + 20)}\nafter`;
+    const value = sheet({
+      flavor: {
+        alignment: 'Neutral',
+        appearance: 'Silver eyes',
+        backstory: HOSTILE_BACKSTORY,
+        notes: longNotes,
+      },
+    });
+
+    expect(flavorAppendix(value)).toEqual({
+      id: 'flavor',
+      order: 100,
+      title: 'Full character written text',
+      entries: [
+        { id: 'backstory', label: 'Backstory', text: HOSTILE_BACKSTORY },
+        { id: 'notes', label: 'Notes', text: longNotes },
+      ],
+    });
   });
 
   it('marks as free text exactly what a stranger could have written', () => {

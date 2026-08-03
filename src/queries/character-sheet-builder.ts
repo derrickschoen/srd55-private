@@ -330,6 +330,13 @@ export interface SheetEquipmentPackage {
   }[];
 }
 
+export interface CharacterFlavor {
+  readonly alignment: string | null;
+  readonly appearance: string | null;
+  readonly backstory: string | null;
+  readonly notes: string | null;
+}
+
 export interface CharacterSheet {
   readonly character_id: number;
   readonly name: string;
@@ -374,6 +381,8 @@ export interface CharacterSheet {
   readonly items: readonly SheetItemRow[];
   /** Printed background/species prose; deliberately absent from `sheetFacts`. */
   readonly printed_features: readonly SheetPrintedFeature[];
+  /** Character-authored prose; deliberately absent from `sheetFacts`. */
+  readonly flavor: CharacterFlavor;
   readonly hit_point_rolls: readonly SheetHitPointRoll[];
   /** The recorded package choices, D33's answer to a blank inventory (D65). */
   readonly equipment_packages: readonly SheetEquipmentPackage[];
@@ -403,6 +412,10 @@ interface SheetCharacterRow {
    */
   readonly base_abilities: Readonly<Record<Ability, number>>;
   readonly proficiency_bonus_override: number | null;
+  readonly alignment: string | null;
+  readonly appearance: string | null;
+  readonly backstory: string | null;
+  readonly notes: string | null;
 }
 
 const sheetCharacter: RowCodec<SheetCharacterRow> = (row) => ({
@@ -415,6 +428,10 @@ const sheetCharacter: RowCodec<SheetCharacterRow> = (row) => ({
     row,
     'proficiency_bonus_override',
   ),
+  alignment: sqlNullableString(row, 'alignment'),
+  appearance: sqlNullableString(row, 'appearance'),
+  backstory: sqlNullableString(row, 'backstory'),
+  notes: sqlNullableString(row, 'notes'),
 });
 
 interface SheetClassJoinRow {
@@ -953,6 +970,12 @@ export class CharacterSheetBuilder {
       armor: armorRows,
       items: this.#items(characterId),
       printed_features: printedFeatures.features,
+      flavor: {
+        alignment: character.alignment,
+        appearance: character.appearance,
+        backstory: character.backstory,
+        notes: character.notes,
+      },
       hit_point_rolls: rolls.list,
       // Read through E-B's one recorded-package reader — the same source
       // resolution, choice reader and coin-line display filter the equipment
@@ -996,7 +1019,8 @@ export class CharacterSheetBuilder {
   #character(characterId: number): SheetCharacterRow {
     const character = this.db.one(
       `SELECT id, name, strength, dexterity, constitution, intelligence,
-              wisdom, charisma, proficiency_bonus_override
+              wisdom, charisma, proficiency_bonus_override,
+              alignment, appearance, backstory, notes
        FROM characters WHERE id = ?`,
       [characterId],
       sheetCharacter,
