@@ -126,7 +126,16 @@ export type CanonicalFeatureEffectV1 = CanonicalizedEffect<AuthoringFeatureEffec
  * reordered or repeated eligibility values from changing content identity.
  */
 export type CanonicalAuthoringGrantV1 =
-  | Extract<AuthoringGrant, { readonly kind: 'fixed_spell' | 'choice_from_list' }>
+  | (Omit<
+      Extract<AuthoringGrant, { readonly kind: 'fixed_spell' }>,
+      'label'
+    > & {
+      readonly label: CanonicalRuleText | null;
+    })
+  | Extract<
+      AuthoringGrant,
+      { readonly kind: 'choice_from_list' | 'grant_source' }
+    >
   | (Omit<
       Extract<AuthoringGrant, { readonly kind: 'choice_from_query' }>,
       'schools' | 'tags'
@@ -168,6 +177,7 @@ export type CanonicalBackgroundEquipmentV1 =
 
 export interface BackgroundProjectorPayloadV1 {
   readonly reference_text: CanonicalRuleText;
+  readonly grants: ContentIdentitySequence<CanonicalAuthoringGrantV1>;
   readonly suggested_abilities: BackgroundContentAggregate['suggested_abilities'];
   readonly default_origin_feat: ContentFingerprintReference<'feat'>;
   readonly skill_proficiencies: BackgroundContentAggregate['skill_proficiencies'];

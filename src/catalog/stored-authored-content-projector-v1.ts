@@ -28,6 +28,7 @@ import {
   abilities,
   characterEffectKinds,
   characterLevels,
+  domainSourceTypes,
   extraAttackWeaponScopes,
   featureTemplateEffectKinds,
   isEnumValue,
@@ -43,6 +44,7 @@ import {
   type Skill,
 } from '../domain/enums';
 import type { ContentKey } from '../domain/ids';
+import type { JsonObject, JsonValue } from '../domain/models';
 import { GrantRule } from '../grants/grant-rule';
 import type {
   AuthoredContentReferenceV1,
@@ -342,6 +344,72 @@ function objectStrings(
   return item.map((entry) => nonEmpty(entry, `${label}.${key}`));
 }
 
+function optionalObjectString(
+  value: Readonly<Record<string, unknown>>,
+  key: string,
+  label: string,
+): string | null {
+  const item = value[key];
+  if (item === undefined || item === null) return null;
+  if (typeof item !== 'string' || item.trim() === '') {
+    return projectionError(`${label}.${key} must be a non-empty string or null.`);
+  }
+  return item.trim();
+}
+
+function jsonValue(value: unknown, label: string): JsonValue {
+  if (
+    value === null ||
+    typeof value === 'string' ||
+    typeof value === 'boolean'
+  ) {
+    return value;
+  }
+  if (typeof value === 'number') {
+    if (!Number.isSafeInteger(value)) {
+      return projectionError(`${label} number must be a safe integer.`);
+    }
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry, index) => jsonValue(entry, `${label}[${index}]`));
+  }
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [
+        key,
+        jsonValue(entry, `${label}.${key}`),
+      ]),
+    );
+  }
+  return projectionError(`${label} must be JSON data.`);
+}
+
+function jsonObject(value: unknown, label: string): JsonObject {
+  const decoded = jsonValue(value, label);
+  if (decoded === null || Array.isArray(decoded) || typeof decoded !== 'object') {
+    return projectionError(`${label} must be a JSON object.`);
+  }
+  return decoded;
+}
+
+function activationFields(rule: GrantRule): {
+  readonly active_from_class_level: CharacterLevel | null;
+  readonly active_if_config: {
+    readonly key: string;
+    readonly equals: string;
+  } | null;
+  readonly distinct_config_by: string | null;
+} {
+  return {
+    active_from_class_level: rule.activeFromClassLevel === null
+      ? null
+      : characterLevel(rule.activeFromClassLevel, 'grant activation level'),
+    active_if_config: rule.activeIfConfig,
+    distinct_config_by: rule.distinctConfigBy,
+  };
+}
+
 function fixedSpellContentKey(
   db: DatabaseContext,
   object: Readonly<Record<string, unknown>>,
@@ -381,11 +449,20 @@ function authoringGrants(
     const ruleLabel = `${label}[${index}]`;
     switch (rule.kind) {
       case 'fixed_spell':
+        if (rule.bucket === null || rule.bucket === 'spellbook') {
+          return projectionError(`${ruleLabel} fixed spell has an invalid bucket.`);
+        }
         return {
+          ...activationFields(rule),
           kind: rule.kind,
           rule_key: rule.ruleKey,
           spell: references.spell(fixedSpellContentKey(db, object, ruleLabel)),
+          bucket: rule.bucket,
           always_prepared: rule.alwaysPrepared,
+          with_slots: rule.withSlots,
+          free_cast: rule.freeCast?.toObject() ?? null,
+          counts_against_limit: object.counts_against_limit !== false,
+          label: optionalObjectString(object, 'label', ruleLabel),
         };
       case 'choice_from_list':
         return {
@@ -415,6 +492,44 @@ function authoringGrants(
           ),
         };
       case 'grant_source':
+        {
+          const sourceType = objectString(object, 'source_type', ruleLabel);
+          if (!isEnumValue(domainSourceTypes, sourceType)) {
+            return projectionError(`${ruleLabel}.source_type '${sourceType}' is invalid.`);
+          }
+          const definitionKeyConfig = optionalObjectString(
+            object,
+            'definition_key_config',
+            ruleLabel,
+          );
+          if (definitionKeyConfig === null) {
+            return projectionError(
+              `${ruleLabel} fixed grant-source definitions require a fingerprint reference and are not representable by this dynamic authoring arm.`,
+            );
+          }
+          const childConfigPath = optionalObjectString(
+            object,
+            'child_config_config',
+            ruleLabel,
+          );
+          // When these config-path fields are present, the runtime overwrites
+          // source_definition_id/key and child_config. Those stored fallbacks
+          // are therefore inert metadata and deliberately excluded.
+          return {
+            ...activationFields(rule),
+            kind: rule.kind,
+            rule_key: rule.ruleKey,
+            count: rule.count ?? projectionError(`${ruleLabel}.count is required.`),
+            source_type: sourceType,
+            definition_key_config: definitionKeyConfig,
+            child_config: childConfigPath === null
+              ? {
+                  mode: 'fixed',
+                  value: jsonObject(object.child_config ?? {}, `${ruleLabel}.child_config`),
+                }
+              : { mode: 'config', path: childConfigPath },
+          };
+        }
       case 'capability':
       case 'spellbook_acquisition':
       case 'fighting_style':
@@ -429,7 +544,12 @@ function authoringGrants(
 function canonicalGrant(grant: AuthoringGrant): CanonicalAuthoringGrantV1 {
   switch (grant.kind) {
     case 'fixed_spell':
+      return {
+        ...grant,
+        label: grant.label === null ? null : canonicalRuleText(grant.label),
+      };
     case 'choice_from_list':
+    case 'grant_source':
       return grant;
     case 'choice_from_query':
       return {
@@ -543,6 +663,7 @@ function projectBackground(
   };
   const payload: BackgroundProjectorPayloadV1 = {
     reference_text: canonicalRuleText(aggregate.reference_text),
+    grants: contentIdentitySequence(aggregate.grants.map(canonicalGrant)),
     suggested_abilities: aggregate.suggested_abilities,
     default_origin_feat: aggregate.default_origin_feat,
     skill_proficiencies: aggregate.skill_proficiencies,
@@ -584,7 +705,7 @@ function projectBackground(
 function projectSubclass(
   aggregate: SubclassContentAggregate,
 ): StoredProjection<'subclass'> {
-  const progression: SubclassProjectorPayloadV1['progression'] =
+  const projectedProgression: SubclassProjectorPayloadV1['progression'] =
     aggregate.progression.mode === 'inherit_parent'
       ? { mode: 'inherit_parent' }
       : {
@@ -600,7 +721,7 @@ function projectSubclass(
     reference_text: canonicalRuleText(aggregate.reference_text),
     parent_class: aggregate.parent_class,
     grants: contentIdentitySequence(aggregate.grants.map(canonicalGrant)),
-    progression,
+    progression: projectedProgression,
     features: contentIdentitySequence(aggregate.features.map((feature) => ({
       class_level: feature.class_level,
       name: feature.name,
@@ -758,7 +879,8 @@ function readBackground(
 ): BackgroundContentAggregate {
   const root = db.one(
     `SELECT definition.name AS definition_name,
-            definition.rules_edition AS definition_edition, definition.notes,
+            definition.rules_edition AS definition_edition,
+            definition.grant_rules, definition.notes,
             template.id AS template_id, template.name AS template_name,
             template.rules_edition AS template_edition,
             template.ability_score_1, template.ability_score_2,
@@ -774,6 +896,7 @@ function readBackground(
     (row) => ({
       name: sqlString(row, 'definition_name'),
       edition: sqlString(row, 'definition_edition'),
+      grant_rules: sqlNullableString(row, 'grant_rules'),
       notes: sqlNullableString(row, 'notes'),
       template_id: sqlInteger(row, 'template_id'),
       template_name: sqlString(row, 'template_name'),
@@ -791,6 +914,15 @@ function readBackground(
     return projectionError(`background '${contentKey}' definition/template metadata disagree.`);
   }
   const edition = rulesEdition(root.edition);
+  const grants = authoringGrants(
+    db,
+    root.grant_rules,
+    references,
+    'background grant_rules',
+  );
+  if (grants.some((grant) => grant.kind !== 'grant_source')) {
+    return projectionError('background grant_rules must contain only grant_source rules.');
+  }
   const rows = db.all(
     `SELECT item.option, item.sort_order, item.quantity,
             item.item_name, item.item_kind,
@@ -833,6 +965,7 @@ function readBackground(
     name: nonEmpty(root.name, 'background name'),
     rules_edition: edition,
     reference_text: root.notes ?? '',
+    grants: grants as BackgroundContentAggregate['grants'],
     suggested_abilities: [ability(root.abilities[0], 'first suggested ability'), ability(root.abilities[1], 'second suggested ability'), ability(root.abilities[2], 'third suggested ability')],
     default_origin_feat: references.featByStoredName({ name: root.feat_name, edition }),
     skill_proficiencies: [skill(root.skills[0], 'first background skill'), skill(root.skills[1], 'second background skill')],

@@ -124,18 +124,18 @@ describe('HA-1 authored content-v1 projector contracts', () => {
       .not.toBe(withoutDefinitionGrant.derivedKey);
   });
 
-  it('keeps species, background, and grant convergence vector identities unchanged', () => {
+  it('pins revised species and background grants while grant convergence stays unchanged', () => {
     expect([
       ...authoredProjectorV1Vectors.slice(0, 2),
       ...authoredGrantSetV1Vectors,
     ].map(({ sha256, derivedKey }) => ({ sha256, derivedKey }))).toEqual([
       {
-        sha256: '5db52e3a3e543c4e9ffaa7a1d73191c5889b60457cffe8a9fb01a5236bb05b24',
-        derivedKey: 'expanded:content.v1:5db52e3a3e543c4e9ffaa7a1d73191c5889b60457cffe8a9fb01a5236bb05b24',
+        sha256: '15573f2b4dea6c5382d948d92a453fbaf6a921d3498204c1b50750a5bdfaa0f6',
+        derivedKey: 'expanded:content.v1:15573f2b4dea6c5382d948d92a453fbaf6a921d3498204c1b50750a5bdfaa0f6',
       },
       {
-        sha256: 'b549f874b36dfe98d88e5f8469dd2968f34fe83e8251f3ae74a88b3be93082ad',
-        derivedKey: 'expanded:content.v1:b549f874b36dfe98d88e5f8469dd2968f34fe83e8251f3ae74a88b3be93082ad',
+        sha256: '3058f3f81adc279d26f7ceccb9576304db7a4dda564fe8bdac31893abcce2969',
+        derivedKey: 'expanded:content.v1:3058f3f81adc279d26f7ceccb9576304db7a4dda564fe8bdac31893abcce2969',
       },
       {
         sha256: '99eb9b5e461081b98fe764cbc11d38b9d0d17c0344d306333b62089380da23d7',
