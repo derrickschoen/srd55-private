@@ -30,6 +30,10 @@ import {
   type ClassContentAggregateV1,
   type FeatContentAggregateV1,
 } from './source-content-projector-v1';
+import {
+  normalizedGrantSkill,
+  normalizedGrantSourceType,
+} from './grant-domain-values';
 
 export type SourceCatalogRecordKind = 'class' | 'feat' | 'species' | 'background';
 
@@ -288,6 +292,24 @@ function normalizedGrant(value: unknown, label: string): AuthoringGrant {
     const normalized: Record<string, unknown> = GrantRule
       .fromObject(candidate)
       .toObject();
+    if (normalized.skills !== undefined && normalized.skills !== null) {
+      normalized.skills = list(
+        normalized.skills,
+        `${label}.skills`,
+        AUTHORING_LIST_LIMITS.queryValues,
+      ).map((entry, index) => normalizedGrantSkill(
+        entry,
+        `Catalog field '${label}.skills[${String(index)}]'`,
+        (message): never => { throw new TypeError(message); },
+      ));
+    }
+    if (normalized.source_type !== undefined) {
+      normalized.source_type = normalizedGrantSourceType(
+        normalized.source_type,
+        `Catalog field '${label}.source_type'`,
+        (message): never => { throw new TypeError(message); },
+      );
+    }
     if (grant.spell !== undefined) {
       delete normalized.spell_version_key;
       normalized.spell = grant.spell;
@@ -812,9 +834,20 @@ export function parseSourceCatalogRecord(
     case 'background': {
       const grants = normalizedGrantList(base.aggregate.grants, 'aggregate.grants');
       validateBackground(base.aggregate);
+      const invalidGrantIndex = grants.findIndex(
+        (grant) => grant.kind !== 'grant_source',
+      );
+      if (invalidGrantIndex !== -1) {
+        const invalidGrant = grants[invalidGrantIndex]!;
+        throw new TypeError(
+          `Catalog field 'aggregate.grants[${String(invalidGrantIndex)}].kind' ` +
+            `must be 'grant_source' for background content; received ` +
+            `'${invalidGrant.kind}'.`,
+        );
+      }
       const aggregate = {
         ...base.aggregate,
-        grants,
+        grants: grants as BackgroundContentAggregate['grants'],
       } as unknown as BackgroundContentAggregate;
       const payload = projectAuthoredContentAggregateV1(aggregate).payload;
       deriveContentIdentityV1({ kind, edition: base.rulesEdition, name: base.name, payload });
