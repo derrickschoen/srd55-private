@@ -7,6 +7,26 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D194 — OWNER: rogue subclass refined — once-per-round doubling, 19-20 crit at 3, reliability theme (2026-08-03)
+
+Amends D192's rogue engine and directs the revision:
+ 1. Double Sneak Attack applies ONCE PER ROUND (not per turn). Owner's
+    rationale, recorded: "this only brings the rogue equal with a rogue
+    that contrives to sneak attack twice every round. It does not use up
+    the power budget, it just lets the rogue keep up dpr without having
+    to contort into doing an opportunity attack or rely on a battle
+    master every round."
+ 2. Level 3 becomes: critical hit on 19 or 20 (Champion's shape on the
+    rogue chassis; SRD content, original name; the 19-20 x doubled-dice
+    interaction — a crit rolls the doubled dice twice, 4x table — is
+    stated plainly in the doc).
+ 3. Remaining slots: mine Tales of the Valiant (CC-BY per the license
+    survey — legally usable with attribution; concept-level only, own
+    wording) and 3e/3.5 SRD prestige classes (OGL open content) for
+    ideas. Theme: RELIABILITY of what the rogue does in and out of
+    combat, extending Reliable Talent's register (floors, minimums,
+    treat-as-N) rather than new subsystems.
+
 ## D193 — OWNER: build the Psionic Fist adaptation as a fourth monk subclass (2026-08-03)
 
 Owner's words: "Build the adaptation of the psion monk 3.5 prestige
