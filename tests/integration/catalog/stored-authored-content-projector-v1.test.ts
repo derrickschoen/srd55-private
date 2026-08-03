@@ -11,6 +11,7 @@ import type {
 import {
   projectStoredAuthoredContentV1,
   resolveStoredAuthoredContentV1,
+  StoredAuthoredContentProjectionError,
   storedAuthoredRegistryReferencesV1,
   type StoredAuthoredReferenceResolverV1,
 } from '../../../src/catalog/stored-authored-content-projector-v1';
@@ -46,6 +47,9 @@ const dependencyReferences = {
   class: { kind: 'class', scheme: CONTENT_FINGERPRINT_SCHEME_V1, digest: '3'.repeat(64) as ContentFingerprintDigest },
   weapon: { kind: 'weapon', scheme: CONTENT_FINGERPRINT_SCHEME_V1, digest: '4'.repeat(64) as ContentFingerprintDigest },
   armor: { kind: 'armor', scheme: CONTENT_FINGERPRINT_SCHEME_V1, digest: '5'.repeat(64) as ContentFingerprintDigest },
+  subclass: { kind: 'subclass', scheme: CONTENT_FINGERPRINT_SCHEME_V1, digest: '6'.repeat(64) as ContentFingerprintDigest },
+  species: { kind: 'species', scheme: CONTENT_FINGERPRINT_SCHEME_V1, digest: '7'.repeat(64) as ContentFingerprintDigest },
+  background: { kind: 'background', scheme: CONTENT_FINGERPRINT_SCHEME_V1, digest: '8'.repeat(64) as ContentFingerprintDigest },
 } as const;
 
 const references: StoredAuthoredReferenceResolverV1 = {
@@ -54,6 +58,15 @@ const references: StoredAuthoredReferenceResolverV1 = {
   class: () => dependencyReferences.class,
   weapon: () => dependencyReferences.weapon,
   armor: () => dependencyReferences.armor,
+  sourceDefinition: (kind) => {
+    switch (kind) {
+      case 'class': return dependencyReferences.class;
+      case 'subclass': return dependencyReferences.subclass;
+      case 'feat': return dependencyReferences.feat;
+      case 'species': return dependencyReferences.species;
+      case 'background': return dependencyReferences.background;
+    }
+  },
 };
 
 let connection: Database;
@@ -104,64 +117,14 @@ function seedDependencies(): void {
 }
 
 function storageGrant(grant: AuthoringGrant): Readonly<Record<string, unknown>> {
-  switch (grant.kind) {
-    case 'fixed_spell':
-      return {
-        kind: grant.kind,
-        rule_key: grant.rule_key,
-        spell_version_key: SPELL_KEY,
-        bucket: grant.bucket,
-        always_prepared: grant.always_prepared,
-        with_slots: grant.with_slots,
-        free_cast: grant.free_cast,
-        active_from_class_level: grant.active_from_class_level,
-        active_if_config: grant.active_if_config,
-        distinct_config_by: grant.distinct_config_by,
-        counts_against_limit: grant.counts_against_limit,
-        label: grant.label,
-      };
-    case 'choice_from_list':
-      return {
-        kind: grant.kind,
-        rule_key: grant.rule_key,
-        list: grant.list,
-        count: grant.count,
-        bucket: 'prepared',
-        level_max: grant.maximum_spell_level,
-      };
-    case 'choice_from_query':
-      return {
-        kind: grant.kind,
-        rule_key: grant.rule_key,
-        schools: grant.schools,
-        tags: grant.tags,
-        count: grant.count,
-        bucket: 'prepared',
-        level_min: grant.minimum_spell_level,
-        level_max: grant.maximum_spell_level,
-      };
-    case 'skill_proficiency':
-      return {
-        kind: grant.kind,
-        rule_key: grant.rule_key,
-        count: grant.count,
-        skills: grant.skills,
-      };
-    case 'grant_source':
-      return {
-        kind: grant.kind,
-        rule_key: grant.rule_key,
-        count: grant.count,
-        source_type: grant.source_type,
-        definition_key_config: grant.definition_key_config,
-        ...(grant.child_config.mode === 'config'
-          ? { child_config_config: grant.child_config.path }
-          : { child_config: grant.child_config.value }),
-        active_from_class_level: grant.active_from_class_level,
-        active_if_config: grant.active_if_config,
-        distinct_config_by: grant.distinct_config_by,
-      };
-  }
+  const stored = Object.fromEntries(
+    Object.entries(grant).filter(
+      ([field]) => field !== 'spell' && field !== 'source_definition',
+    ),
+  );
+  return grant.kind === 'fixed_spell'
+    ? { ...stored, spell_version_key: SPELL_KEY }
+    : stored;
 }
 
 function registerRoot(
@@ -250,9 +213,9 @@ function insertEffect(
 function seedSpecies(contentKey: ContentKey, aggregate: SpeciesContentAggregate): void {
   db.exec(
     `INSERT INTO species_definitions (
-       content_key, name, rules_edition, grant_rules, notes
-     ) VALUES (?, ?, ?, ?, ?)`,
-    [contentKey, aggregate.name, aggregate.rules_edition, JSON.stringify(aggregate.grants.map(storageGrant)), aggregate.reference_text],
+       content_key, name, rules_edition, repeatable, grant_rules, notes
+     ) VALUES (?, ?, ?, ?, ?, ?)`,
+    [contentKey, aggregate.name, aggregate.rules_edition, aggregate.repeatable ? 1 : 0, JSON.stringify(aggregate.grants.map(storageGrant)), aggregate.reference_text],
   );
   const templateId = db.exec(
     `INSERT INTO species_templates (
@@ -277,9 +240,9 @@ function seedSpecies(contentKey: ContentKey, aggregate: SpeciesContentAggregate)
 function seedBackground(contentKey: ContentKey, aggregate: BackgroundContentAggregate): void {
   db.exec(
     `INSERT INTO background_definitions (
-       content_key, name, rules_edition, grant_rules, notes
-     ) VALUES (?, ?, ?, ?, ?)`,
-    [contentKey, aggregate.name, aggregate.rules_edition, JSON.stringify(aggregate.grants.map(storageGrant)), aggregate.reference_text],
+       content_key, name, rules_edition, repeatable, grant_rules, notes
+     ) VALUES (?, ?, ?, ?, ?, ?)`,
+    [contentKey, aggregate.name, aggregate.rules_edition, aggregate.repeatable ? 1 : 0, JSON.stringify(aggregate.grants.map(storageGrant)), aggregate.reference_text],
   );
   const templateId = db.exec(
     `INSERT INTO background_templates (
@@ -408,11 +371,12 @@ describe('stored authored content-v1 projection', () => {
       grants: [{
         kind: 'choice_from_query',
         rule_key: 'set.query',
+        bucket: 'prepared',
         schools: ['Evocation', 'Abjuration', 'Evocation'],
         tags: ['ritual', 'arcane', 'ritual'],
         count: 1,
-        minimum_spell_level: 0,
-        maximum_spell_level: 9,
+        level_min: 0,
+        level_max: 9,
       }] satisfies readonly AuthoringGrant[],
     },
     {
@@ -432,6 +396,7 @@ describe('stored authored content-v1 projection', () => {
         name: vector.name,
         rules_edition: 'expanded',
         reference_text: '',
+        repeatable: false,
         creature_type: 'Humanoid',
         primary_size: 'Medium',
         alternate_size: null,
@@ -553,6 +518,259 @@ describe('stored authored content-v1 projection', () => {
     expect(projectIdentity().derivedKey).not.toBe(baseline.derivedKey);
   });
 
+  it.each([
+    {
+      kind: 'choice_from_list',
+      field: 'required',
+      baseline: {
+        kind: 'choice_from_list', rule_key: 'generic.list', count: 1,
+        bucket: 'prepared', list: 'Wizard', required: true,
+      },
+      replacement: { required: false },
+    },
+    {
+      kind: 'choice_from_query',
+      field: 'active_if_config',
+      baseline: {
+        kind: 'choice_from_query', rule_key: 'generic.query', count: 1,
+        bucket: 'prepared', schools: ['Evocation'],
+        active_if_config: { key: 'path', equals: 'first' },
+      },
+      replacement: { active_if_config: { key: 'path', equals: 'second' } },
+    },
+    {
+      kind: 'skill_proficiency',
+      field: 'allows_tool_instead',
+      baseline: {
+        kind: 'skill_proficiency', rule_key: 'generic.skill', count: 1,
+        skills: ['arcana'], allows_tool_instead: false,
+      },
+      replacement: { allows_tool_instead: true },
+    },
+    {
+      kind: 'fixed_spell',
+      field: 'level_min',
+      baseline: {
+        kind: 'fixed_spell', rule_key: 'generic.fixed', count: 1,
+        bucket: 'prepared', spell_version_key: SPELL_KEY, level_min: 0,
+      },
+      replacement: { level_min: 1 },
+    },
+    {
+      kind: 'fixed_spell',
+      field: 'schools',
+      baseline: {
+        kind: 'fixed_spell', rule_key: 'generic.fixed', count: 1,
+        bucket: 'prepared', spell_version_key: SPELL_KEY,
+        schools: ['Evocation'],
+      },
+      replacement: { schools: ['Abjuration'] },
+    },
+    {
+      kind: 'fixed_spell',
+      field: 'future semantic extension',
+      baseline: {
+        kind: 'fixed_spell', rule_key: 'generic.fixed', count: 1,
+        bucket: 'prepared', spell_version_key: SPELL_KEY,
+        future_semantic_extension: 'first',
+      },
+      replacement: { future_semantic_extension: 'second' },
+    },
+  ])(
+    '$kind stored semantic field $field discriminates identity through generic grant canonicalization',
+    ({ baseline, replacement }) => {
+      const vector = authoredProjectorV1Vectors[0]!;
+      const contentKey = seedVector(vector, 'bundled', 64);
+      const projectIdentity = () => {
+        const projection = projectStoredAuthoredContentV1(db, {
+          kind: 'species', contentKey, references,
+        });
+        return deriveContentIdentityV1({
+          kind: projection.kind,
+          edition: projection.aggregate.rules_edition,
+          name: projection.aggregate.name,
+          payload: projection.payload,
+        });
+      };
+      db.exec(
+        'UPDATE species_definitions SET grant_rules = ? WHERE content_key = ?',
+        [JSON.stringify([baseline]), contentKey],
+      );
+      const first = projectIdentity();
+      db.exec(
+        'UPDATE species_definitions SET grant_rules = ? WHERE content_key = ?',
+        [JSON.stringify([{ ...baseline, ...replacement }]), contentKey],
+      );
+
+      expect(projectIdentity().derivedKey).not.toBe(first.derivedKey);
+    },
+  );
+
+  it('source_definition_id becomes a portable fingerprint and discriminates identity', () => {
+    const vector = authoredProjectorV1Vectors[0]!;
+    const contentKey = seedVector(vector, 'bundled', 65);
+    const featId = db.exec(
+      `INSERT INTO feat_definitions (
+         content_key, name, rules_edition, grant_rules
+       ) VALUES ('expanded:ci3a-source-feat', 'Source Feat', 'expanded', '[]')`,
+    ).lastInsertId;
+    const otherFeatId = db.exec(
+      `INSERT INTO feat_definitions (
+         content_key, name, rules_edition, grant_rules
+       ) VALUES ('expanded:ci3a-other-source-feat', 'Other Source Feat', 'expanded', '[]')`,
+    ).lastInsertId;
+    const sourceReferences: StoredAuthoredReferenceResolverV1 = {
+      ...references,
+      sourceDefinition: (kind, key) => {
+        if (kind !== 'feat') {
+          throw new Error('This fixture resolves only feat source definitions.');
+        }
+        return {
+          kind,
+          scheme: CONTENT_FINGERPRINT_SCHEME_V1,
+          digest: (key === 'expanded:ci3a-source-feat' ? '2' : '9')
+            .repeat(64) as ContentFingerprintDigest,
+        };
+      },
+    };
+    db.exec(
+      'UPDATE species_definitions SET grant_rules = ? WHERE content_key = ?',
+      [JSON.stringify([{
+        kind: 'grant_source', rule_key: 'source.by-id', source_type: 'feat',
+        source_definition_id: featId,
+      }]), contentKey],
+    );
+
+    const projection = projectStoredAuthoredContentV1(db, {
+      kind: 'species', contentKey, references: sourceReferences,
+    });
+    expect(projection.payload.grants.values[0]).toMatchObject({
+      source_definition: dependencyReferences.feat,
+    });
+    expect(JSON.stringify(projection.payload.grants.values[0]))
+      .not.toContain(`\"source_definition_id\":${featId}`);
+    const first = deriveContentIdentityV1({
+      kind: projection.kind,
+      edition: projection.aggregate.rules_edition,
+      name: projection.aggregate.name,
+      payload: projection.payload,
+    });
+    db.exec(
+      'UPDATE species_definitions SET grant_rules = ? WHERE content_key = ?',
+      [JSON.stringify([{
+        kind: 'grant_source', rule_key: 'source.by-id', source_type: 'feat',
+        source_definition_id: otherFeatId,
+      }]), contentKey],
+    );
+    const secondProjection = projectStoredAuthoredContentV1(db, {
+      kind: 'species', contentKey, references: sourceReferences,
+    });
+    const second = deriveContentIdentityV1({
+      kind: secondProjection.kind,
+      edition: secondProjection.aggregate.rules_edition,
+      name: secondProjection.aggregate.name,
+      payload: secondProjection.payload,
+    });
+
+    expect(second.derivedKey).not.toBe(first.derivedKey);
+  });
+
+  it('unresolvable source_definition_id refuses stored projection', () => {
+    const vector = authoredProjectorV1Vectors[0]!;
+    const contentKey = seedVector(vector, 'bundled', 66);
+    db.exec(
+      'UPDATE species_definitions SET grant_rules = ? WHERE content_key = ?',
+      [JSON.stringify([{
+        kind: 'grant_source', rule_key: 'source.missing', source_type: 'feat',
+        source_definition_id: 999_999,
+      }]), contentKey],
+    );
+
+    const project = () => projectStoredAuthoredContentV1(db, {
+      kind: 'species', contentKey, references,
+    });
+    expect(project).toThrow(StoredAuthoredContentProjectionError);
+    expect(project).toThrow(/source_definition_id 999999 does not resolve/u);
+  });
+
+  it('a supplied unresolved fixed-spell ID refuses instead of falling back to its key', () => {
+    const vector = authoredProjectorV1Vectors[0]!;
+    const contentKey = seedVector(vector, 'bundled', 67);
+    db.exec(
+      'UPDATE species_definitions SET grant_rules = ? WHERE content_key = ?',
+      [JSON.stringify([{
+        kind: 'fixed_spell', rule_key: 'spell.missing-id', bucket: 'prepared',
+        spell_version_id: 999_999, spell_version_key: SPELL_KEY,
+      }]), contentKey],
+    );
+
+    const project = () => projectStoredAuthoredContentV1(db, {
+      kind: 'species', contentKey, references,
+    });
+    expect(project).toThrow(StoredAuthoredContentProjectionError);
+    expect(project).toThrow(/spell_version_id 999999 does not resolve/u);
+  });
+
+  it('selection_collection null is excluded because runtime always emits null', () => {
+    const vector = authoredProjectorV1Vectors[0]!;
+    const contentKey = seedVector(vector, 'bundled', 69);
+    const rule = {
+      kind: 'fixed_spell', rule_key: 'selection.inert', bucket: 'prepared',
+      spell_version_key: SPELL_KEY,
+    } as const;
+    const identity = () => {
+      const projection = projectStoredAuthoredContentV1(db, {
+        kind: 'species', contentKey, references,
+      });
+      return deriveContentIdentityV1({
+        kind: projection.kind,
+        edition: projection.aggregate.rules_edition,
+        name: projection.aggregate.name,
+        payload: projection.payload,
+      });
+    };
+    db.exec(
+      'UPDATE species_definitions SET grant_rules = ? WHERE content_key = ?',
+      [JSON.stringify([rule]), contentKey],
+    );
+    const absent = identity();
+    db.exec(
+      'UPDATE species_definitions SET grant_rules = ? WHERE content_key = ?',
+      [JSON.stringify([{ ...rule, selection_collection: null }]), contentKey],
+    );
+
+    expect(identity().derivedKey).toBe(absent.derivedKey);
+  });
+
+  it.each(['species', 'background'] as const)(
+    '$kind repeatable discriminates stored identity',
+    (kind) => {
+      const vector = kind === 'species'
+        ? authoredProjectorV1Vectors[0]!
+        : authoredProjectorV1Vectors[1]!;
+      const contentKey = seedVector(vector, 'bundled', 68);
+      const table = kind === 'species'
+        ? 'species_definitions'
+        : 'background_definitions';
+      const projectIdentity = () => {
+        const projection = projectStoredAuthoredContentV1(db, {
+          kind, contentKey, references,
+        });
+        return deriveContentIdentityV1({
+          kind: projection.kind,
+          edition: projection.aggregate.rules_edition,
+          name: projection.aggregate.name,
+          payload: projection.payload,
+        });
+      };
+      db.exec(`UPDATE ${table} SET repeatable = 0 WHERE content_key = ?`, [contentKey]);
+      const notRepeatable = projectIdentity();
+      db.exec(`UPDATE ${table} SET repeatable = 1 WHERE content_key = ?`, [contentKey]);
+
+      expect(projectIdentity().derivedKey).not.toBe(notRepeatable.derivedKey);
+    },
+  );
+
   it('background Origin-feat grant rules participate in identity and malformed rules refuse projection', () => {
     const vector = authoredProjectorV1Vectors[1]!;
     const contentKey = seedVector(vector, 'bundled', 62);
@@ -595,6 +813,7 @@ describe('stored authored content-v1 projection', () => {
         source_type: 'feat',
       }]), contentKey],
     );
+    expect(projectIdentity).toThrow(StoredAuthoredContentProjectionError);
     expect(projectIdentity).toThrow(/requires a source definition reference/u);
   });
 
