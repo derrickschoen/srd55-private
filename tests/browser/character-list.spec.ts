@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readGuidedSeam } from './fixtures/guided-seam';
+import { readLevelUpSeam } from './fixtures/level-up-seam';
 
 async function ready(page: import('@playwright/test').Page): Promise<void> {
   await expect(page.locator('#status')).toHaveAttribute(
@@ -131,6 +132,68 @@ test('character shell creates, opens, confirms deletion, and persists every flow
   expect(
     await page.evaluate(() => window.staticApp.inspectRows('characters')),
   ).toEqual([]);
+});
+
+test('W-ENTRY-BOTH every character card and the sheet use the exact primary Level Up route', async ({
+  page,
+}) => {
+  await resetHome(page);
+  const characters = await page.evaluate(async () => {
+    const classes = await window.appRpc.call<
+      Record<string, never>,
+      readonly { readonly content_key: string; readonly name: string }[]
+    >('queries.characters.guidedClassOptions', {});
+    const fighter = classes.find((candidate) => candidate.name === 'Fighter');
+    if (fighter === undefined) throw new Error('Bundled Fighter was not found.');
+    const create = (name: string) => window.appRpc.call<
+      { readonly name: string; readonly class_content_key: string },
+      { readonly id: number; readonly name: string }
+    >('queries.characters.createGuided', {
+      name,
+      class_content_key: fighter.content_key,
+    });
+    return [await create('First Entry'), await create('Second Entry')];
+  });
+  await page.reload();
+  await ready(page);
+
+  for (const character of characters) {
+    const seam = await readLevelUpSeam(page, character.id);
+    const card = page.locator('.character-card').filter({
+      has: page.getByRole('heading', { name: character.name }),
+    });
+    const actions = card.locator('.card-actions a');
+    await expect(actions).toHaveCount(2);
+    await expect(actions.nth(0)).toHaveText('Level Up');
+    await expect(actions.nth(0)).toHaveAttribute('href', seam.path);
+    await expect(actions.nth(0)).toHaveClass(/button-primary/);
+    await expect(actions.nth(1)).toHaveText('Open workspace');
+    await expect(actions.nth(1)).toHaveAttribute(
+      'href',
+      `/characters/${String(character.id)}`,
+    );
+    await expect(actions.nth(1)).toHaveClass(/button-secondary/);
+  }
+
+  const first = characters[0];
+  if (first === undefined) throw new Error('No entry character was created.');
+  const firstSeam = await readLevelUpSeam(page, first.id);
+  await page
+    .locator('.character-card')
+    .filter({ has: page.getByRole('heading', { name: first.name }) })
+    .getByRole('link', { name: 'Open workspace' })
+    .click();
+  await page.getByRole('link', { name: 'Character sheet' }).click();
+  const sheetLinks = page.locator('.sheet-header a');
+  await expect(sheetLinks).toHaveCount(3);
+  await expect(sheetLinks.nth(1)).toHaveText('Level Up');
+  await expect(sheetLinks.nth(1)).toHaveAttribute('href', firstSeam.path);
+  await expect(sheetLinks.nth(1)).toHaveClass(/button-primary/);
+  await expect(sheetLinks.nth(2)).toHaveText('Open planner');
+  await expect(sheetLinks.nth(2)).toHaveClass(/button-secondary/);
+  await sheetLinks.nth(1).click();
+  await expect(page).toHaveURL(new URL(firstSeam.path, page.url()).href);
+  await expect(page.locator('.level-up-route')).toBeVisible();
 });
 
 test('catalog, complete database, and character backup controls preserve durable state and show errors', async ({
