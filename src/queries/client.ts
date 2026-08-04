@@ -44,10 +44,6 @@ import type { RpcClient } from '../rpc/client';
 import type {
   BuildReportResult,
 } from '../reports/build-report-builder';
-import type {
-  PrintableSpellList,
-  PrintableVariant,
-} from '../reports/printable-spell-list-builder';
 import type { CatalogSnapshot } from './catalog-queries';
 import type {
   CompletenessCount,
@@ -107,10 +103,6 @@ export interface QueriesClient extends CatalogClient {
     kind: PrintAppendixKind,
     enabled: boolean,
   ): Promise<PrintAppendixPreferences>;
-  printable(
-    characterId: number,
-    variant?: PrintableVariant,
-  ): Promise<PrintableSpellList>;
   operationHistory(characterId: number): Promise<OperationHistory>;
   buildState(characterId: number): Promise<GuidedBuildStateResult>;
   guidedClassOptions(): Promise<readonly GuidedClassOption[]>;
@@ -274,17 +266,6 @@ export function createQueriesClient(rpc: RpcClient): QueriesClient {
         character_id: characterId,
         kind,
         enabled,
-      }),
-    printable: (
-      characterId: number,
-      variant: PrintableVariant = 'reference',
-    ) =>
-      rpc.call<
-        { character_id: number; variant: PrintableVariant },
-        PrintableSpellList
-      >('queries.reports.printable', {
-        character_id: characterId,
-        variant,
       }),
     operationHistory: (characterId: number) =>
       rpc.call<{ character_id: number }, OperationHistory>(

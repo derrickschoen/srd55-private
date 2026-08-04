@@ -98,6 +98,7 @@ interface IdentityRow {
 }
 
 interface FingerprintRow extends IdentityRow {
+  readonly fingerprint_digest: ContentFingerprintDigest;
   readonly canonical_json: string;
 }
 
@@ -117,6 +118,10 @@ const identityRowCodec = (row: SqlRow): IdentityRow => {
 const fingerprintRowCodec = (row: SqlRow): FingerprintRow => {
   return {
     ...identityRowCodec(row),
+    fingerprint_digest: sqlString(
+      row,
+      'fingerprint_digest',
+    ) as ContentFingerprintDigest,
     canonical_json: sqlString(row, 'canonical_json'),
   };
 };
@@ -257,6 +262,7 @@ function resolveFingerprint(
          identity.content_key,
          identity.key_kind,
          identity.catalog_layer,
+         fingerprint.fingerprint_digest,
          fingerprint.canonical_json
        FROM catalog_content_fingerprints AS fingerprint
        JOIN catalog_content_identities AS identity
@@ -271,6 +277,12 @@ function resolveFingerprint(
     );
     if (rows.length === 0) {
       continue;
+    }
+
+    if (rows.some(
+      (row) => sha256(row.canonical_json) !== row.fingerprint_digest,
+    )) {
+      throw new ContentIdentityCollision();
     }
 
     if (
