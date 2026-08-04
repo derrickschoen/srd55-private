@@ -366,7 +366,7 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
     id: '0032_character_archive',
     sql: characterArchive,
     checksum:
-      '38a469bf279d8b0134f19d68b43976e1082da4bea17e4685618a5d2fac8bfd42',
+      '4da268e1ddf1ecacf4cbe50cd090f505dcc34e27e218e8f86992772e8ac37ab0',
     resultSchemaChecksum:
       'b3108351ca445275711c3e208ca6b45166d22a1bd63733a0fa82459f5b41cc91',
   }),

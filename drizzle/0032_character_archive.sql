@@ -1,3 +1,10 @@
+CREATE TEMP TABLE `__characters_sequence_before_archive` (
+	`seq` integer NOT NULL
+);
+
+INSERT INTO `__characters_sequence_before_archive` (`seq`)
+SELECT `seq` FROM `sqlite_sequence` WHERE `name` = 'characters';
+
 CREATE TABLE `__new_characters` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`name` VARCHAR NOT NULL,
@@ -52,5 +59,24 @@ FROM `characters`;
 
 DROP TABLE `characters`;
 ALTER TABLE `__new_characters` RENAME TO `characters`;
+
+UPDATE `sqlite_sequence`
+SET `seq` = max(
+	`seq`,
+	coalesce(
+		(SELECT `seq` FROM `__characters_sequence_before_archive`),
+		`seq`
+	)
+)
+WHERE `name` = 'characters';
+
+INSERT INTO `sqlite_sequence` (`name`, `seq`)
+SELECT 'characters', `seq`
+FROM `__characters_sequence_before_archive`
+WHERE NOT EXISTS (
+	SELECT 1 FROM `sqlite_sequence` WHERE `name` = 'characters'
+);
+
+DROP TABLE `__characters_sequence_before_archive`;
 
 CREATE INDEX `characters_archive_list_index` ON `characters` ("archived_at" desc,`name`,`id`);

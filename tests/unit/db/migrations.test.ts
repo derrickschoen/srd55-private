@@ -19,6 +19,10 @@ import { sha256 } from '../../../src/crypto/sha256';
 import { CHARACTER_SNAPSHOT_SCHEMA_VERSION } from '../../../src/character/character-state';
 import { verifyMigrations } from '../../../scripts/verify-migrations';
 import { bootDatabase } from '../../../src/worker/boot';
+import {
+  ACTIVE_CHARACTER_LIST_QUERY,
+  ARCHIVED_CHARACTER_LIST_QUERY,
+} from '../../../src/queries/character-lifecycle-queries';
 import { getSqlite3, MemoryDatabaseStorage } from '../../helpers/open-db';
 
 const FIRST_INDEX =
@@ -136,6 +140,153 @@ const SCHEMA_BEFORE_CHARACTER_ARCHIVE = DATABASE_MIGRATIONS
   .map((entry) => entry.sql)
   .join('\n');
 
+// These rows are hand-seeded because the tables' non-character foreign keys
+// and CHECK-specific payloads need valid domain values. The schema-derived
+// equality assertion below makes this inventory complete: adding a 27th
+// direct child fails until its fixture row is added here too.
+const SEEDED_CHARACTER_CHILD_TABLES = Object.freeze([
+  'change_log',
+  'character_armor',
+  'character_attunement_slots',
+  'character_background',
+  'character_class_levels',
+  'character_effects',
+  'character_hit_point_rolls',
+  'character_items',
+  'character_level_feat_choices',
+  'character_operations',
+  'character_rule_overrides',
+  'character_save_points',
+  'character_sheet_adjustments',
+  'character_skill_expertise_grants',
+  'character_skill_grants',
+  'character_skill_proficiencies',
+  'character_source_instances',
+  'character_species',
+  'character_species_traits',
+  'character_spell_preferences',
+  'character_weapons',
+  'party_document_states',
+  'spell_loadouts',
+  'spell_selection_slots',
+  'warning_acknowledgements',
+  'wizard_spellbook_entries',
+] as const);
+
+function directCharacterChildTables(db: Database): string[] {
+  return db
+    .selectValues(
+      `SELECT name FROM sqlite_schema
+       WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+       ORDER BY name`,
+    )
+    .map(String)
+    .filter((table) =>
+      db
+        .selectObjects(`PRAGMA foreign_key_list("${table}")`)
+        .some((row) => row.table === 'characters'),
+    );
+}
+
+const CHARACTER_ARCHIVE_CHILD_FIXTURE = `
+INSERT INTO catalog_content_identities (
+  content_key, content_kind, key_kind, catalog_layer, normalized_name
+) VALUES
+  ('migration:class', 'class', 'legacy-opaque', 'external', 'migration class'),
+  ('migration:spell', 'spell', 'legacy-opaque', 'external', 'migration spell');
+INSERT INTO class_definitions (
+  id, content_key, name, rules_edition
+) VALUES (8, 'migration:class', 'Migration Class', '2024');
+INSERT INTO spell_identities (
+  id, content_key, canonical_name, normalized_name
+) VALUES (9, 'migration:spell-identity', 'Migration Spell', 'migration spell');
+INSERT INTO spell_versions (
+  id, content_key, spell_identity_id, display_name, rules_edition, level,
+  school
+) VALUES (
+  10, 'migration:spell', 9, 'Migration Spell', '2024', 1, 'Evocation'
+);
+
+INSERT INTO character_source_instances (
+  id, character_id, instance_uuid, source_type, source_definition_id,
+  display_name
+) VALUES (11, 42, 'migration-source', 'class', 8, 'Migration Class');
+INSERT INTO character_class_levels (
+  id, character_id, class_definition_id, level
+) VALUES (12, 42, 8, 1);
+INSERT INTO character_items (id, character_id, name)
+VALUES (13, 42, 'Migration Item');
+
+INSERT INTO change_log (
+  character_id, sequence, entity_type, action_type
+) VALUES (42, 1, 'character', 'update');
+INSERT INTO character_armor (
+  character_id, slot, name, category, armor_class, dex_bonus
+) VALUES (42, 'worn', 'Migration Armor', 'light', 12, 'full');
+INSERT INTO character_attunement_slots (character_id) VALUES (42);
+INSERT INTO character_background (character_id, name)
+VALUES (42, 'Migration Background');
+INSERT INTO character_effects (
+  character_id, sort_order, effect_kind, amount, label
+) VALUES (42, 1, 'armor_class_bonus', 1, 'Migration Effect');
+INSERT INTO character_hit_point_rolls (
+  character_id, class_name, class_level, rolled_value
+) VALUES (42, 'Migration Class', 1, 6);
+INSERT INTO character_level_feat_choices (
+  character_id, character_class_level_id, class_level, choice_kind
+) VALUES (42, 12, 1, 'asi_level_feat');
+INSERT INTO character_operations (
+  character_id, operation_uuid, expected_revision, resulting_revision,
+  inverse_command
+) VALUES (42, 'migration-operation', 8, 9, '{}');
+INSERT INTO character_rule_overrides (character_id, rule_key, value)
+VALUES (42, 'migration-rule', '{}');
+INSERT INTO character_save_points (
+  id, character_id, label, snapshot, schema_version
+) VALUES (
+  7, 42, 'Before archive', '{}',
+  '${CHARACTER_SNAPSHOT_SCHEMA_VERSION}'
+);
+INSERT INTO character_sheet_adjustments (character_id) VALUES (42);
+INSERT INTO character_skill_expertise_grants (
+  character_id, source_instance_id, grant_key, ordinal,
+  granted_at_class_level, skill
+) VALUES (42, 11, 'migration-expertise', 1, 1, 'arcana');
+INSERT INTO character_skill_grants (
+  character_id, source_instance_id, grant_key, ordinal, skill
+) VALUES (42, 11, 'migration-skill', 1, 'history');
+INSERT INTO character_skill_proficiencies (character_id, skill)
+VALUES (42, 'perception');
+INSERT INTO character_species (character_id, name)
+VALUES (42, 'Migration Species');
+INSERT INTO character_species_traits (
+  character_id, sort_order, name
+) VALUES (42, 1, 'Migration Trait');
+INSERT INTO character_spell_preferences (
+  character_id, spell_version_id
+) VALUES (42, 10);
+INSERT INTO character_weapons (character_id, name)
+VALUES (42, 'Migration Weapon');
+INSERT INTO party_document_states (
+  forge, repository, path, document_kind, character_id, observation_state
+) VALUES (
+  'github', 'migration/repository', 'characters/42.json', 'character', 42,
+  'Never published'
+);
+INSERT INTO spell_loadouts (character_id, name)
+VALUES (42, 'Migration Loadout');
+INSERT INTO spell_selection_slots (
+  character_id, source_instance_id, slot_key, rule_key, bucket,
+  eligibility_kind
+) VALUES (
+  42, 11, 'migration-slot', 'migration-rule', 'known', 'choice_from_list'
+);
+INSERT INTO warning_acknowledgements (
+  character_id, warning_fingerprint
+) VALUES (42, 'migration-warning');
+INSERT INTO wizard_spellbook_entries (character_id) VALUES (42);
+`;
+
 const HISTORICAL_BACKGROUND_ROWS = `
 INSERT INTO background_templates (
   id, content_key, rules_edition, name,
@@ -207,19 +358,50 @@ describe('database migration chain', () => {
          charisma, ability_allocation_method, proficiency_bonus_override,
          rules_edition_preference, allow_legacy, revision, alignment,
          appearance, backstory, notes, created_at, updated_at
-       ) VALUES (
-         42, 'Preserved Root', 8, 14, 13, 18, 12, 11, 'manual', 4,
-         'expanded', 1, 9, 'Chaotic Good', 'Silver cloak', 'Old tower',
-         'Keep every root value.', '2040-01-02T03:04:05.000Z',
-         '2041-02-03T04:05:06.000Z'
-       );
-       INSERT INTO character_save_points (
-         id, character_id, label, snapshot, schema_version
-       ) VALUES (
-         7, 42, 'Before archive', '{}',
-         '${CHARACTER_SNAPSHOT_SCHEMA_VERSION}'
-       );`,
+       ) VALUES
+         (
+           42, 'Preserved Root', 8, 14, 13, 18, 12, 11, 'manual', 4,
+           'expanded', 1, 9, 'Chaotic Good', 'Silver cloak', 'Old tower',
+           'Keep every root value.', '2040-01-02T03:04:05.000Z',
+           '2041-02-03T04:05:06.000Z'
+         ),
+         (
+           100, 'Deleted High Water', 10, 10, 10, 10, 10, 10, NULL, NULL,
+           '2024', 0, 0, NULL, NULL, NULL, NULL, NULL, NULL
+         );
+       DELETE FROM characters WHERE id = 100;
+       ${CHARACTER_ARCHIVE_CHILD_FIXTURE}`,
     );
+    const beforeMigration = openDatabaseImage(
+      sqlite3,
+      await storage.exportFile(),
+    );
+    try {
+      // A live maximum equal to sqlite_sequence would let a broken rebuild
+      // reset both to the same value and keep this test green. The deleted id
+      // makes the high-water mark observably different from the live maximum.
+      expect(
+        beforeMigration.selectValue('SELECT max(id) FROM characters'),
+      ).toBe(42);
+      expect(
+        beforeMigration.selectValue(
+          "SELECT seq FROM sqlite_sequence WHERE name = 'characters'",
+        ),
+      ).toBe(100);
+
+      const childTables = directCharacterChildTables(beforeMigration);
+      expect(childTables).toEqual([...SEEDED_CHARACTER_CHILD_TABLES]);
+      for (const table of childTables) {
+        expect(
+          beforeMigration.selectValue(
+            `SELECT count(*) FROM "${table}" WHERE character_id = 42`,
+          ),
+          table,
+        ).toBe(1);
+      }
+    } finally {
+      beforeMigration.close();
+    }
     const lifecycle = new DatabaseLifecycle(sqlite3, storage, schema);
 
     lifecycle.open();
@@ -256,9 +438,26 @@ describe('database migration chain', () => {
     expect(lifecycle.database.oneRaw(
       'SELECT id, character_id, label FROM character_save_points WHERE id = 7',
     )).toEqual({ id: 7, character_id: 42, label: 'Before archive' });
-    expect(lifecycle.database.exec(
-      "INSERT INTO characters (name) VALUES ('After Migration')",
-    ).lastInsertId).toBe(43);
+
+    const migratedChildTables = directCharacterChildTables(
+      lifecycle.database.connection,
+    );
+    expect(migratedChildTables).toEqual([...SEEDED_CHARACTER_CHILD_TABLES]);
+    for (const table of migratedChildTables) {
+      expect(
+        lifecycle.database.scalar(
+          `SELECT count(*) FROM "${table}" WHERE character_id = ?`,
+          [42],
+        ),
+        table,
+      ).toBe(1);
+    }
+
+    expect(
+      lifecycle.database.exec(
+        "INSERT INTO characters (name) VALUES ('After Migration')",
+      ).lastInsertId,
+    ).toBe(101);
     lifecycle.close();
   });
 
@@ -268,9 +467,7 @@ describe('database migration chain', () => {
       db.exec(schema);
       expect(
         db.selectObjects(
-          `EXPLAIN QUERY PLAN
-           SELECT id, name FROM characters
-           WHERE archived_at IS NULL ORDER BY name, id`,
+          `EXPLAIN QUERY PLAN ${ACTIVE_CHARACTER_LIST_QUERY}`,
         ),
       ).toEqual([
         expect.objectContaining({
@@ -280,10 +477,7 @@ describe('database migration chain', () => {
       ]);
       expect(
         db.selectObjects(
-          `EXPLAIN QUERY PLAN
-           SELECT id, name, archived_at FROM characters
-           WHERE archived_at IS NOT NULL
-           ORDER BY archived_at DESC, name, id`,
+          `EXPLAIN QUERY PLAN ${ARCHIVED_CHARACTER_LIST_QUERY}`,
         ),
       ).toEqual([
         expect.objectContaining({
