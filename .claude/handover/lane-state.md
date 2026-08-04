@@ -23,7 +23,21 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-03-g (newest - read first)
+## RESTART POINT 2026-08-03-h (newest - read first)
+MAIN 302c137 (CI-3s-PRE merged; mirror pushed). FLOORS: vitest 226/3,739;
+PW 124 (22 spec files); build 0; migrations 0000-0031 FROZEN; wire
+v1-v17. TWELVE merges today. Rulings through D195.
+CI-3s-PRE: spell became the ninth projector (concept key + version stable
+key both in identity as portable values); template-only species state.
+ADJUDICATED REJECTION on record: concept-inherited sibling membership
+stays OUT of the fingerprint - identity is content-local; fingerprinting
+neighbor rows would break cross-store matching. CI-3s carries the
+locality comment.
+MINT LANE NOW: CI-3s re-attempt running (port 44566, session 019fc7ba).
+Then CI-4a (XL). HOMEBREW: rogue doc final per D195 (flat 2N, once-per-
+round Sneak); 7 docs with owner; polish passes after rulings.
+
+## RESTART POINT 2026-08-03-g (superseded by -h)
 MAIN 9ecdff5 (CI-3b merged - the XL unit; mirror pushed). FLOORS: vitest
 222/3,707; PW 124 (22 spec files); build 0; migrations 0000-0031 FROZEN;
 wire v1-v17. TEN merges today (guidelines, SC-1, FF-C, BROWSER-PROBE,
