@@ -12,8 +12,10 @@ import {
   contentIdentitySet,
   deriveContentIdentityV1,
 } from '../../../src/catalog/content-identity';
-import { spellSchool } from '../../../src/domain/enums';
-import { spellProjectorV1Vectors } from './fixtures/spell-projector-v1-vectors';
+import {
+  bandedSpellDocumentV1,
+  spellProjectorV1Vectors,
+} from './fixtures/spell-projector-v1-vectors';
 
 function identity(payload: SpellProjectorPayloadV1) {
   return deriveContentIdentityV1({
@@ -42,40 +44,10 @@ describe('CI-3s-PRE spell content-v1 projector contracts', () => {
   );
 
   it('document projection reproduces the hand-pinned D173 banded-upcast vector', () => {
-    const record: NormalizedCatalogRecord = {
-      identityKey: 'aether-lance',
-      versionKey: 'expanded:aether-lance',
-      name: 'Aether Lance',
-      canonicalName: 'Aether Lance',
-      edition: 'expanded',
-      level: 2,
-      school: spellSchool('Chronomancy'),
-      castingTime: '1 bonus action\r\n ',
-      range: 'Self (30-foot Cone)',
-      components: 'V, S, M (a prism worth 25+ GP)',
-      duration: 'Concentration, up to 1 minute',
-      concentration: true,
-      ritual: false,
-      attackModes: ['ranged_spell'],
-      saveAbilities: ['Dexterity'],
-      effectReliabilityCategory: 'modifier_scaled',
-      spellLists: ['Wizard', 'Artificer'],
-      sourceBooks: ['Hand Review'],
-      sourcePage: 1,
-      sourceSlug: 'aether-lance',
-      tags: ['force'],
-      healing: false,
-      requiresModForEffect: true,
-      upcastLevels: [3, 6],
-      upcastSummary: 'Slot 3–5: +2; slot 6+: +3.',
-      cantripUpgradeLevels: [],
-      cantripUpgradeSummary: null,
-      publications: [{ sourceBook: 'Hand Review', sourcePage: 1, sourceReference: 'aether-lance' }],
-      description: 'A line of force.  \r\n',
-    };
     const identity = deriveContentIdentityV1({
-      kind: 'spell', edition: record.edition, name: record.name,
-      payload: projectSpellDocumentV1(record).payload,
+      kind: 'spell', edition: bandedSpellDocumentV1.edition,
+      name: bandedSpellDocumentV1.name,
+      payload: projectSpellDocumentV1(bandedSpellDocumentV1).payload,
     });
     expect(identity.canonicalJson).toBe(spellProjectorV1Vectors[0]!.canonicalJson);
     expect(identity.digest).toBe(spellProjectorV1Vectors[0]!.sha256);
@@ -100,6 +72,14 @@ describe('CI-3s-PRE spell content-v1 projector contracts', () => {
       expect(identity(mutate(baseline)).derivedKey).not.toBe(identity(baseline).derivedKey);
     },
   );
+
+  it('spell concept membership discriminates identity', () => {
+    const baseline = spellProjectorV1Vectors[0]!.payload;
+    expect(identity({
+      ...baseline,
+      spell_identity_key: 'alternate-aether-lance',
+    }).derivedKey).not.toBe(identity(baseline).derivedKey);
+  });
 
   it('refuses whitespace-padded document locators before identity derivation', () => {
     const base = projectSpellContentAggregateV1(spellProjectorV1Vectors[0]!.aggregate);

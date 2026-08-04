@@ -3,13 +3,17 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { registerBundledStableContentIdentity } from '../../../src/catalog/content-registry';
 import {
   SpellContentProjectionError,
+  projectSpellDocumentV1,
   projectStoredSpellContentV1,
 } from '../../../src/catalog/spell-content-projector-v1';
 import { deriveContentIdentityV1 } from '../../../src/catalog/content-identity';
 import { DatabaseContext } from '../../../src/db/database';
 import type { ContentKey } from '../../../src/domain/ids';
 import { openTestDatabase } from '../../helpers/open-db';
-import { spellProjectorV1Vectors } from '../../unit/catalog/fixtures/spell-projector-v1-vectors';
+import {
+  bandedSpellDocumentV1,
+  spellProjectorV1Vectors,
+} from '../../unit/catalog/fixtures/spell-projector-v1-vectors';
 
 const CONTENT_KEY = 'expanded:ci3s-pre-aether-lance' as ContentKey;
 
@@ -28,7 +32,7 @@ describe('stored spell content-v1 projection', () => {
     const identityId = db.exec(
       `INSERT INTO spell_identities (
          content_key, canonical_name, normalized_name
-       ) VALUES ('ci3s-pre-aether-lance', 'Aether Lance', 'aether lance')`,
+       ) VALUES ('aether-lance', 'Aether Lance', 'aether lance')`,
     ).lastInsertId;
     const versionId = db.exec(
       `INSERT INTO spell_versions (
@@ -71,8 +75,50 @@ describe('stored spell content-v1 projection', () => {
       payload: projection.payload,
     });
     expect(identity.canonicalJson).toBe(vector.canonicalJson);
+    expect(identity.canonicalJson).toContain('"spell_identity_key":"aether-lance"');
+    expect(identity.canonicalJson).not.toContain('spell_identity_id');
     expect(identity.digest).toBe(vector.sha256);
     expect(identity.derivedKey).toBe(vector.derivedKey);
+  });
+
+  it('document and stored paths agree byte-for-byte for the same spell version', () => {
+    const stored = projectStoredSpellContentV1(db, CONTENT_KEY);
+    const document = projectSpellDocumentV1(bandedSpellDocumentV1);
+    const storedIdentity = deriveContentIdentityV1({
+      kind: 'spell', edition: stored.aggregate.rules_edition,
+      name: stored.aggregate.name, payload: stored.payload,
+    });
+    const documentIdentity = deriveContentIdentityV1({
+      kind: 'spell', edition: document.aggregate.rules_edition,
+      name: document.aggregate.name, payload: document.payload,
+    });
+    expect(storedIdentity.canonicalJson).toBe(documentIdentity.canonicalJson);
+    expect(storedIdentity.digest).toBe(documentIdentity.digest);
+    expect(storedIdentity.derivedKey).toBe(documentIdentity.derivedKey);
+  });
+
+  it('moving a stored version to a different spell concept changes identity', () => {
+    const before = projectStoredSpellContentV1(db, CONTENT_KEY);
+    const alternateIdentityId = db.exec(
+      `INSERT INTO spell_identities (
+         content_key, canonical_name, normalized_name
+       ) VALUES ('alternate-aether-lance', 'Alternate Aether Lance',
+                 'alternate aether lance')`,
+    ).lastInsertId;
+    db.exec(
+      'UPDATE spell_versions SET spell_identity_id = ? WHERE content_key = ?',
+      [alternateIdentityId, CONTENT_KEY],
+    );
+    const after = projectStoredSpellContentV1(db, CONTENT_KEY);
+    expect(before.payload.spell_identity_key).toBe('aether-lance');
+    expect(after.payload.spell_identity_key).toBe('alternate-aether-lance');
+    expect(deriveContentIdentityV1({
+      kind: 'spell', edition: 'expanded', name: 'Aether Lance',
+      payload: after.payload,
+    }).derivedKey).not.toBe(deriveContentIdentityV1({
+      kind: 'spell', edition: 'expanded', name: 'Aether Lance',
+      payload: before.payload,
+    }).derivedKey);
   });
 
   it('default-includes a future spell root column instead of collapsing identity', () => {
@@ -108,6 +154,15 @@ describe('stored spell content-v1 projection', () => {
     db.exec('DELETE FROM spell_list_memberships WHERE spell_version_id = ?', [versionId]);
     db.exec("INSERT INTO spell_list_memberships (spell_version_id, spell_list_key) VALUES (?, ' Wizard')", [versionId]);
     expect(() => projectStoredSpellContentV1(db, CONTENT_KEY)).toThrow(SpellContentProjectionError);
+  });
+
+  it('refuses a whitespace-padded stored spell concept key', () => {
+    db.exec(
+      `UPDATE spell_identities SET content_key = ' aether-lance'
+       WHERE content_key = 'aether-lance'`,
+    );
+    expect(() => projectStoredSpellContentV1(db, CONTENT_KEY))
+      .toThrow(SpellContentProjectionError);
   });
 
   it('refuses structured spell columns that disagree with their runtime source text', () => {

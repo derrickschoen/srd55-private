@@ -35,6 +35,7 @@ import {
 } from '../domain/spell-limits';
 import { encodeSpellRange, parseSpellRange } from '../domain/spell-range';
 import type { NormalizedCatalogRecord } from './catalog-normalize';
+import { trimEqualCatalogLocator } from './catalog-field-values';
 import {
   canonicalOpenPassthroughValue,
   canonicalRuleText,
@@ -61,6 +62,7 @@ export interface SpellContentAggregateV1 {
   readonly kind: 'spell';
   readonly name: string;
   readonly rules_edition: RulesEdition;
+  readonly spell_identity_key: string;
   readonly level: number;
   readonly school: SpellSchool;
   readonly ritual: boolean;
@@ -93,6 +95,7 @@ export interface SpellContentAggregateV1 {
 }
 
 export interface SpellProjectorPayloadV1 {
+  readonly spell_identity_key: string;
   readonly level: number;
   readonly school: CanonicalOpenPassthroughValue;
   readonly ritual: boolean;
@@ -143,10 +146,8 @@ function refuse(message: string): never {
 }
 
 function trimEqual(value: string, label: string): string {
-  if (value === '' || value !== value.trim()) {
-    return refuse(`${label} must be non-empty and equal its trim.`);
-  }
-  return value;
+  if (value === '') return refuse(`${label} must not be empty.`);
+  return trimEqualCatalogLocator(value, label, refuse);
 }
 
 function nonEmpty(value: string, label: string): string {
@@ -162,10 +163,10 @@ function jsonValue(value: unknown, label: string): JsonValue {
 
 /**
  * Default-include every future stored column. The exclusions are limited to:
- * relational ids/content locators; the envelope's name/edition; extraction
- * provenance and seed version; active/timestamp lifecycle state; and fork
- * ancestry. Runtime readers use those to find or manage a row, never to
- * adjudicate or print the spell's rules.
+ * numeric relational ids and version locators; the envelope's name/edition;
+ * extraction provenance and seed version; active/timestamp lifecycle state;
+ * and fork ancestry. The stable spell-identity key is projected explicitly
+ * because eligibility joins through that concept relationship.
  */
 function storedFields(row: SqlRow, known: readonly string[]): Readonly<Record<string, JsonValue>> {
   const excluded = new Set([
@@ -191,14 +192,14 @@ function storedFields(row: SqlRow, known: readonly string[]): Readonly<Record<st
 
 /**
  * Explicit table exclusions:
- * - spell_identities/aliases group editions and resolve names; rules readers
- *   consume the version row, not identity notes or aliases.
+ * - spell_identities.content_key is included as spell_identity_key. Identity
+ *   names/notes/timestamps and spell_identity_aliases only resolve/group that
+ *   stable concept key and do not alter eligibility after resolution.
  * - spell_version_publications is attribution/import provenance only.
  * - spell_version_damage_types and spell_version_conditions are documented in
  *   db/schema/catalog-spells.ts as dormant, with no production reader/writer.
- * None can change spell behavior, so none enters content-v1. This aggregate has
- * no mechanics-bearing cross-content reference and therefore needs no portable
- * fingerprint edge.
+ * The remaining excluded fields cannot change spell behavior. The concept
+ * membership is portable as its stable key; no raw database id enters v1.
  */
 
 function canonicalText(value: string | null): CanonicalRuleText | null {
@@ -220,6 +221,7 @@ export function projectSpellContentAggregateV1(
 ): SpellProjectorContractV1 {
   const payload: SpellProjectorPayloadV1 = {
     ...(aggregate.stored_fields === undefined ? {} : { stored_fields: aggregate.stored_fields }),
+    spell_identity_key: aggregate.spell_identity_key,
     level: aggregate.level,
     school: canonicalOpenPassthroughValue(aggregate.school),
     ritual: aggregate.ritual,
@@ -275,6 +277,7 @@ export function projectSpellDocumentV1(
     kind: 'spell',
     name: record.name,
     rules_edition: record.edition,
+    spell_identity_key: trimEqual(record.identityKey, 'identityKey'),
     level: record.level,
     school: record.school,
     ritual: record.ritual,
@@ -336,7 +339,14 @@ export function projectStoredSpellContentV1(
   contentKey: ContentKey,
 ): SpellProjectorContractV1 {
   trimEqual(contentKey, 'content key');
-  const row = db.oneRaw('SELECT * FROM spell_versions WHERE content_key = ?', [contentKey]);
+  const row = db.oneRaw(
+    `SELECT version.*, identity.content_key AS spell_identity_key
+     FROM spell_versions AS version
+     INNER JOIN spell_identities AS identity
+       ON identity.id = version.spell_identity_id
+     WHERE version.content_key = ?`,
+    [contentKey],
+  );
   if (row === null) return refuse(`spell '${contentKey}' is missing.`);
   const provenance = sqlString(row, 'provenance');
   if (provenance === 'placeholder') return refuse(`spell '${contentKey}' is a placeholder.`);
@@ -367,13 +377,17 @@ export function projectStoredSpellContentV1(
     'components', 'material_component_summary', 'material_cost_copper',
     'material_cost_kind', 'healing', 'short_summary', 'upcast_summary',
     'cantrip_upgrade_summary', 'requires_mod_for_effect',
-    'effect_reliability_category',
+    'effect_reliability_category', 'spell_identity_key',
   ];
   const future = storedFields(row, rootKnown);
   const aggregate: SpellContentAggregateV1 = {
     kind: 'spell',
     name: nonEmpty(sqlString(row, 'display_name'), 'display name'),
     rules_edition: edition,
+    spell_identity_key: trimEqual(
+      sqlString(row, 'spell_identity_key'),
+      'spell identity key',
+    ),
     level: bounded(sqlInteger(row, 'level'), SPELL_LEVEL_MIN, SPELL_LEVEL_MAX, 'spell level'),
     school: spellSchool(sqlString(row, 'school')),
     ritual: sqlBoolean(row, 'ritual'),
