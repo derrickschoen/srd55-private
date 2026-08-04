@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   parseSrdSubclasses,
+  srdSubclassSpellVersionKeyEntries,
   SrdSubclassesError,
   type SrdCircleLandSpellTable,
   type SrdSubclassManifest,
@@ -9,6 +10,7 @@ import {
   type SrdUnconditionalSpellTableName,
 } from '../../../src/rules/srd-subclasses';
 import { SRD_ATTRIBUTION_NOTICE } from '../../../src/rules/srd-attribution';
+import { parseSrdSpellDescriptions } from '../../../src/rules/spells-srd';
 
 const SOURCE_URL = new URL(
   '../../../docs/srd/source/subclasses.txt',
@@ -20,8 +22,20 @@ const FULL_SOURCE_URL = new URL(
 );
 const SOURCE = readFileSync(SOURCE_URL, 'utf8');
 
+const EXPECTED_ATTRIBUTION_PREAMBLE = `This work includes material from the System Reference Document 5.2
+("SRD 5.2") by Wizards of the Coast LLC, available at
+https://www.dndbeyond.com/srd. The SRD 5.2 is licensed under the Creative
+Commons Attribution 4.0 International License, available at
+https://creativecommons.org/licenses/by/4.0/legalcode.`;
+
 function collapseWhitespace(value: string): string {
   return value.trim().replace(/\s+/gu, ' ');
+}
+
+function normalizedLineCount(source: string, expected: string): number {
+  return source
+    .split('\n')
+    .filter((line) => collapseWhitespace(line) === expected).length;
 }
 
 const EXPECTED_SUBCLASSES = [
@@ -210,7 +224,7 @@ const EXPECTED_DRACONIC_SORCERY = [
   [3, 'Alter Self', '2024:alter-self'],
   [3, 'Chromatic Orb', '2024:chromatic-orb'],
   [3, 'Command', '2024:command'],
-  [3, 'Dragon’s Breath', '2024:dragons-breath'],
+  [3, 'Dragon’s Breath', '2024:dragon-s-breath'],
   [5, 'Fear', '2024:fear'],
   [5, 'Fly', '2024:fly'],
   [7, 'Arcane Eye', '2024:arcane-eye'],
@@ -320,6 +334,7 @@ describe('SRD subclass manifest', () => {
     const preambleEnd = SOURCE.search(/\n\s*\n/u);
     expect(preambleEnd).toBeGreaterThan(0);
 
+    expect(SOURCE.slice(0, preambleEnd)).toBe(EXPECTED_ATTRIBUTION_PREAMBLE);
     expect(collapseWhitespace(SOURCE.slice(0, preambleEnd))).toBe(
       collapseWhitespace(SRD_ATTRIBUTION_NOTICE),
     );
@@ -410,6 +425,17 @@ describe('SRD subclass manifest', () => {
     );
   });
 
+  it('resolves every explicit subclass spell key in the bundled spell catalog', () => {
+    const catalogContentKeys = new Set(
+      parseSrdSpellDescriptions().map((spell) => spell.content_key),
+    );
+    const unresolved = srdSubclassSpellVersionKeyEntries.filter(
+      ([, contentKey]) => !catalogContentKeys.has(contentKey),
+    );
+
+    expect(unresolved).toEqual([]);
+  });
+
   it('emits four unconditional rule sets and exactly 40 fixed-spell rules', () => {
     const sets = manifest().unconditional_rule_sets;
     expect(sets.map((set) => set.class_name)).toEqual([
@@ -484,6 +510,9 @@ describe('SRD subclass manifest', () => {
         kind: 'no_catalog_rule',
         reason: 'the_extracted_catalog_facts_contain_no_spell_or_choice_rule',
       });
+    }
+    for (const className of ['Bard', 'Druid', 'Fighter', 'Wizard'] as const) {
+      expect(parsed.by_class[className].mechanical_outcome.kind).toBe('deferred');
     }
     for (const className of ['Cleric', 'Paladin', 'Sorcerer', 'Warlock'] as const) {
       expect(parsed.by_class[className].mechanical_outcome.kind).toBe(
@@ -617,7 +646,7 @@ describe('SRD subclass parser rejections', () => {
     ).toThrow(/life_domain repeats level 3/u);
   });
 
-  it('rejects a foreign, missing, duplicate, or late spell-table header', () => {
+  it('rejects a foreign, missing, or duplicate spell-table header', () => {
     expect(() =>
       parseSrdSubclasses(
         SOURCE.replace('Cleric        Prepared Spells', 'Sorcerer'),
@@ -631,17 +660,61 @@ describe('SRD subclass parser rejections', () => {
     expect(() =>
       parseSrdSubclasses(SOURCE.replace('   Level\n', '   Level\n   Level\n')),
     ).toThrow(/malformed or missing table headers/u);
+  });
 
-    const lateHeader = SOURCE.replace(
-      '   Cleric        Prepared Spells\n',
-      '',
-    ).replace(
-      '                 Lesser Restoration\n',
-      '                 Lesser Restoration\n   Cleric        Prepared Spells\n',
+  it('rejects a Paladin header moved after the first row of its physical table', () => {
+    const lateHeader = SOURCE.replace('    Paladin Level   Spells\n', '').replace(
+      '                    Shield of Faith\n',
+      '                    Shield of Faith\n    Paladin Level   Spells\n',
+    );
+
+    expect(normalizedLineCount(lateHeader, 'Paladin Level Spells')).toBe(1);
+    expect(lateHeader.indexOf('    Paladin Level   Spells')).toBeGreaterThan(
+      lateHeader.indexOf('         3          Protection from Evil and Good,'),
     );
     expect(() => parseSrdSubclasses(lateHeader)).toThrow(
-      /malformed or missing table headers/u,
+      /oath_of_devotion has malformed or missing table headers before a physical table row/u,
     );
+  });
+
+  it('rejects a Circle header moved from Polar Land into Arid Land', () => {
+    const aridHeader =
+      '      Druid Level    Circle Spells                          \n';
+    const displacedHeader = SOURCE.replace(
+      aridHeader,
+      `${aridHeader}${aridHeader}`,
+    ).replace('       Druid Level    Circle Spells\n', '');
+    const aridStart = displacedHeader.indexOf('Arid Land');
+    const polarStart = displacedHeader.indexOf('Polar Land', aridStart);
+    const temperateStart = displacedHeader.indexOf('Temperate Land', polarStart);
+
+    expect(normalizedLineCount(displacedHeader, 'Druid Level Circle Spells')).toBe(4);
+    expect(
+      normalizedLineCount(
+        displacedHeader.slice(aridStart, polarStart),
+        'Druid Level Circle Spells',
+      ),
+    ).toBe(2);
+    expect(
+      normalizedLineCount(
+        displacedHeader.slice(polarStart, temperateStart),
+        'Druid Level Circle Spells',
+      ),
+    ).toBe(0);
+    expect(() => parseSrdSubclasses(displacedHeader)).toThrow(
+      /circle_of_the_land has malformed or missing table headers before a physical table row/u,
+    );
+  });
+
+  it('rejects a spell-table activation level not printed in the pinned extract', () => {
+    expect(() =>
+      parseSrdSubclasses(
+        SOURCE.replace(
+          '         3       Aid, Bless, Cure Wounds,',
+          '         4       Aid, Bless, Cure Wounds,',
+        ),
+      ),
+    ).toThrow(/spell-table activation level 4 .* expected one of 3, 5, 7, 9, 13, 17/u);
   });
 
   it('rejects missing or duplicate Circle physical tables', () => {

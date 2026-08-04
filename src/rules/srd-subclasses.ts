@@ -264,29 +264,37 @@ const TABLE_TITLE = new Map<string, SrdUnconditionalSpellTableName>([
   ['Fiend Spells', 'fiend_patron'],
 ]);
 
-const EXPECTED_TABLE_HEADERS: Readonly<
-  Record<SrdSubclassSpellTableName, readonly string[]>
+const EXPECTED_PHYSICAL_TABLE_HEADERS: Readonly<
+  Record<SrdSubclassSpellTableName, readonly (readonly string[])[]>
 > = {
-  life_domain: ['Cleric Prepared Spells', 'Level'],
+  life_domain: [['Cleric Prepared Spells', 'Level']],
   circle_of_the_land: [
-    'Druid Level Circle Spells',
-    'Druid Level Circle Spells',
-    'Druid Level Circle Spells',
-    'Druid Level Circle Spells',
+    ['Druid Level Circle Spells'],
+    ['Druid Level Circle Spells'],
+    ['Druid Level Circle Spells'],
+    ['Druid Level Circle Spells'],
   ],
-  oath_of_devotion: ['Paladin Level Spells'],
-  draconic_sorcery: ['Sorcerer', 'Level Spells'],
-  fiend_patron: ['Warlock Level Spells'],
+  oath_of_devotion: [['Paladin Level Spells']],
+  draconic_sorcery: [['Sorcerer', 'Level Spells']],
+  fiend_patron: [['Warlock Level Spells']],
 };
 
-const ALL_TABLE_HEADERS = new Set(Object.values(EXPECTED_TABLE_HEADERS).flat());
+const ALL_TABLE_HEADERS = new Set(
+  Object.values(EXPECTED_PHYSICAL_TABLE_HEADERS).flat(2),
+);
+
+/**
+ * The complete set printed at extract lines 58-62, 71-92, 114-120, 144-148,
+ * and 157-161.
+ */
+const SPELL_TABLE_ACTIVATION_LEVELS = [3, 5, 7, 9, 13, 17] as const;
 
 /**
  * Keys are transcribed explicitly from the official spell catalog. They are
  * not derived from the parsed names, so punctuation changes cannot silently
  * mint an unchecked key.
  */
-const SPELL_VERSION_KEY = new Map<string, string>([
+export const srdSubclassSpellVersionKeyEntries = [
   ['Acid Splash', '2024:acid-splash'],
   ['Aid', '2024:aid'],
   ['Alter Self', '2024:alter-self'],
@@ -305,7 +313,7 @@ const SPELL_VERSION_KEY = new Map<string, string>([
   ['Cure Wounds', '2024:cure-wounds'],
   ['Death Ward', '2024:death-ward'],
   ['Dispel Magic', '2024:dispel-magic'],
-  ['Dragon’s Breath', '2024:dragons-breath'],
+  ['Dragon’s Breath', '2024:dragon-s-breath'],
   ['Fear', '2024:fear'],
   ['Fire Shield', '2024:fire-shield'],
   ['Fire Bolt', '2024:fire-bolt'],
@@ -344,7 +352,11 @@ const SPELL_VERSION_KEY = new Map<string, string>([
   ['Wall of Stone', '2024:wall-of-stone'],
   ['Web', '2024:web'],
   ['Zone of Truth', '2024:zone-of-truth'],
-]);
+] as const satisfies readonly (readonly [string, string])[];
+
+const SPELL_VERSION_KEY = new Map<string, string>(
+  srdSubclassSpellVersionKeyEntries,
+);
 
 interface RawSection {
   readonly class_name: SrdSubclassClassName;
@@ -362,10 +374,16 @@ interface MutableSpellEntry extends SrdSubclassSpellEntry {
   readonly land?: CircleLandChoice;
 }
 
+interface MutablePhysicalSpellTable {
+  readonly land?: CircleLandChoice;
+  readonly headers: string[];
+  row_count: number;
+}
+
 interface MutableSpellTable {
   readonly table_name: SrdSubclassSpellTableName;
   readonly class_name: SrdSubclassClassName;
-  readonly headers: string[];
+  readonly physical_tables: MutablePhysicalSpellTable[];
   readonly entries: MutableSpellEntry[];
   readonly rows: { readonly level: CharacterLevel; readonly land?: CircleLandChoice }[];
   readonly circle_lands: CircleLandChoice[];
@@ -377,6 +395,10 @@ function isClassName(value: string): value is SrdSubclassClassName {
 
 function isCharacterLevel(value: number): value is CharacterLevel {
   return (characterLevels as readonly number[]).includes(value);
+}
+
+function isSpellTableActivationLevel(value: number): value is CharacterLevel {
+  return (SPELL_TABLE_ACTIVATION_LEVELS as readonly number[]).includes(value);
 }
 
 function isCircleLand(value: string): value is CircleLandChoice {
@@ -532,6 +554,7 @@ function parseSection(
   const features: SrdSubclassFeatureHeading[] = [];
   const featureNames = new Set<string>();
   let table: MutableSpellTable | undefined;
+  let physicalTable: MutablePhysicalSpellTable | undefined;
   let currentLand: CircleLandChoice | undefined;
   let continuation:
     | { readonly level: CharacterLevel; readonly land: CircleLandChoice | undefined }
@@ -585,10 +608,14 @@ function parseSection(
           `${line} appears under ${section.class_name}.`,
         );
       }
+      physicalTable = {
+        headers: [],
+        row_count: 0,
+      };
       table = {
         table_name: unconditionalTable,
         class_name: section.class_name,
-        headers: [],
+        physical_tables: [physicalTable],
         entries: [],
         rows: [],
         circle_lands: [],
@@ -605,7 +632,7 @@ function parseSection(
         table = {
           table_name: 'circle_of_the_land',
           class_name: 'Druid',
-          headers: [],
+          physical_tables: [],
           entries: [],
           rows: [],
           circle_lands: [],
@@ -623,22 +650,33 @@ function parseSection(
       }
       table.circle_lands.push(line);
       currentLand = line;
+      physicalTable = {
+        land: line,
+        headers: [],
+        row_count: 0,
+      };
+      table.physical_tables.push(physicalTable);
       continue;
     }
 
     if (ALL_TABLE_HEADERS.has(line)) {
-      if (table === undefined) {
+      if (table === undefined || physicalTable === undefined) {
         throw new SrdSubclassesError(
           `spell-table header ${JSON.stringify(line)} appears before a table title.`,
         );
       }
-      table.headers.push(line);
+      if (physicalTable.row_count !== 0) {
+        throw new SrdSubclassesError(
+          `${table.table_name} header ${JSON.stringify(line)} appears after the first row of its physical table.`,
+        );
+      }
+      physicalTable.headers.push(line);
       continue;
     }
 
     const row = /^(?<level>\d+) (?<spells>.+)$/u.exec(line);
     if (row !== null) {
-      if (table === undefined) {
+      if (table === undefined || physicalTable === undefined) {
         throw new SrdSubclassesError(
           `spell row ${JSON.stringify(line)} appears before a table title.`,
         );
@@ -653,6 +691,25 @@ function parseSection(
       if (!isCharacterLevel(rawLevel) || spells === undefined) {
         throw new SrdSubclassesError(
           `malformed spell row ${JSON.stringify(line)}.`,
+        );
+      }
+      if (!isSpellTableActivationLevel(rawLevel)) {
+        throw new SrdSubclassesError(
+          `spell-table activation level ${String(rawLevel)} is not printed in the pinned extract; expected one of ${SPELL_TABLE_ACTIVATION_LEVELS.join(', ')}.`,
+        );
+      }
+      const physicalTableIndex = table.physical_tables.indexOf(physicalTable);
+      const expectedHeaders =
+        EXPECTED_PHYSICAL_TABLE_HEADERS[table.table_name][physicalTableIndex];
+      if (
+        expectedHeaders === undefined ||
+        physicalTable.headers.length !== expectedHeaders.length ||
+        physicalTable.headers.some(
+          (header, index) => header !== expectedHeaders[index],
+        )
+      ) {
+        throw new SrdSubclassesError(
+          `${table.table_name} has malformed or missing table headers before a physical table row.`,
         );
       }
       if (table.table_name === 'circle_of_the_land' && currentLand === undefined) {
@@ -673,6 +730,7 @@ function parseSection(
           ...(currentLand === undefined ? {} : { land: currentLand }),
         }),
       );
+      physicalTable.row_count += 1;
       table.entries.push(...parseSpellNames(spells, rawLevel, currentLand));
       if (spells.endsWith(',')) {
         continuation = { level: rawLevel, land: currentLand };
@@ -775,13 +833,23 @@ function validateMutableTables(tables: readonly MutableSpellTable[]): void {
     );
   }
   for (const table of tables) {
-    const expectedHeaders = EXPECTED_TABLE_HEADERS[table.table_name];
+    const expectedPhysicalHeaders =
+      EXPECTED_PHYSICAL_TABLE_HEADERS[table.table_name];
     if (
-      table.headers.length !== expectedHeaders.length ||
-      table.headers.some((header, index) => header !== expectedHeaders[index])
+      table.physical_tables.length !== expectedPhysicalHeaders.length ||
+      table.physical_tables.some((physical, physicalIndex) => {
+        const expectedHeaders = expectedPhysicalHeaders[physicalIndex];
+        return (
+          expectedHeaders === undefined ||
+          physical.headers.length !== expectedHeaders.length ||
+          physical.headers.some(
+            (header, headerIndex) => header !== expectedHeaders[headerIndex],
+          )
+        );
+      })
     ) {
       throw new SrdSubclassesError(
-        `${table.table_name} has malformed or missing table headers.`,
+        `${table.table_name} has malformed, missing, or misplaced physical table headers.`,
       );
     }
     const expectedEntries = table.table_name === 'circle_of_the_land' ? 24 : 10;
