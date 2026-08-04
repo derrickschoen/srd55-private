@@ -149,7 +149,29 @@ describe('typed query RPC integration', () => {
     ).toBeNull();
   });
 
-  it('exposes workspace, catalog, eligibility, report, printable, and history as serializable DTOs', async () => {
+  it('sheet is the sole printable character projection', () => {
+    expect(queryHandlers.map((handler) => handler.method)).toEqual([
+      'queries.characters.list',
+      'queries.characters.get',
+      'queries.characters.create',
+      'queries.characters.delete',
+      'queries.characters.workspace',
+      'queries.characters.completeness',
+      'queries.characters.outstanding',
+      'queries.catalog.read',
+      'queries.eligibleSpells.search',
+      'queries.characters.levelUpPlannedEligibleSpells',
+      'queries.characters.levelUpState',
+      'queries.savePoints.create',
+      'queries.savePoints.restoreCommand',
+      'queries.characters.sheet',
+      'queries.characters.setPrintAppendixPreference',
+      'queries.reports.build',
+      'queries.history.read',
+    ]);
+  });
+
+  it('exposes workspace, catalog, eligibility, report, sheet, and history as serializable DTOs', async () => {
     harness = await createRpcHarness(queryHandlers);
     const fixture = createBuildReportFixture(harness.context.db);
     const slotId = Number(
@@ -265,9 +287,9 @@ describe('typed query RPC integration', () => {
     const report = await harness.call('queries.reports.build', {
       character_id: fixture.characterId,
     });
-    const printable = await harness.call(
-      'queries.reports.printable',
-      { character_id: fixture.characterId, variant: 'reference' },
+    const sheet = await harness.call(
+      'queries.characters.sheet',
+      { character_id: fixture.characterId },
     );
     const history = await harness.call('queries.history.read', {
       character_id: fixture.characterId,
@@ -307,16 +329,21 @@ describe('typed query RPC integration', () => {
         },
       },
     });
-    expect(printable).toMatchObject({
+    expect(sheet).toMatchObject({
       id: 7,
       ok: true,
       result: {
-        variant: 'reference',
-        text_status: 'not_requested',
-        character: { id: fixture.characterId, name: 'R40 Golden' },
-        source_groups: expect.arrayContaining([
-          expect.objectContaining({ source: 'Magic Initiate: Wizard' }),
-          expect.objectContaining({ source: 'Wizard 1' }),
+        character_id: fixture.characterId,
+        name: 'R40 Golden',
+        spells: expect.arrayContaining([
+          expect.objectContaining({
+            kind: 'class',
+            class_name: 'Wizard',
+          }),
+          expect.objectContaining({
+            kind: 'other_source',
+            source_name: 'Magic Initiate: Wizard',
+          }),
         ]),
       },
     });
@@ -325,7 +352,7 @@ describe('typed query RPC integration', () => {
       ok: true,
       result: { operations: [], changes: [] },
     });
-    for (const response of [catalog, report, printable]) {
+    for (const response of [catalog, report, sheet]) {
       expect(() => JSON.stringify(response)).not.toThrow();
     }
     expect(

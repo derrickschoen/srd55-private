@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -63,7 +63,9 @@ function trackedTypeScriptFiles(): string[] {
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
   });
-  return stdout.split('\0').filter((path) => path !== '');
+  return stdout
+    .split('\0')
+    .filter((path) => path !== '' && existsSync(join(repoRoot, path)));
 }
 
 /**
