@@ -82,6 +82,11 @@ import {
   catalogContentLayers,
   catalogContentMatchDecisions,
 } from '../../catalog/content-registry';
+import {
+  HEADING_ONLY_DESCRIPTION,
+  nonEmptySubclassFeatureDescription,
+  type SubclassFeatureDescription,
+} from '../subclass-feature-description';
 
 /**
  * PER-TABLE ROW CONTRACTS FOR UNTRUSTED ROWS.
@@ -166,6 +171,18 @@ const sqlText = z.string();
  * compile guard cannot see it.
  */
 const nonEmptyText = z.string().min(1);
+
+/**
+ * D152 reserves the named empty state for bundled heading-only feature rows;
+ * authored/imported feature prose occupies the branded non-empty state.
+ */
+const subclassFeatureDescription: z.ZodType<
+  SubclassFeatureDescription,
+  string
+> = z.union([
+  z.literal(HEADING_ONLY_DESCRIPTION),
+  nonEmptyText.transform(nonEmptySubclassFeatureDescription),
+]);
 
 /** A DATETIME column. Format deliberately unpinned — see the module comment. */
 const sqlTimestamp = z.string();
@@ -400,6 +417,7 @@ const contentFingerprintDigest = z.string().regex(/^[0-9a-f]{64}$/);
 export const COLUMN_REFINEMENTS = {
   sqlText,
   nonEmptyText,
+  subclassFeatureDescription,
   sqlTimestamp,
   sqlBool,
   positiveInt,
@@ -1263,7 +1281,7 @@ const REFINEMENTS = {
   'subclass_features.class_level': classLevel,
   'subclass_features.sort_order': positiveInt,
   'subclass_features.name': nonEmptyText,
-  'subclass_features.description': nonEmptyText,
+  'subclass_features.description': subclassFeatureDescription,
   'subclass_features.created_at': sqlTimestamp,
   'subclass_features.updated_at': sqlTimestamp,
   'subclass_feature_effects.id': positiveInt,
@@ -1596,7 +1614,7 @@ type ColumnAccepts<
   ? K extends JsonColumnKey
     ? string
     : K extends keyof Refinements
-      ? z.infer<Refinements[K]>
+      ? z.input<Refinements[K]>
       : number
   : never;
 
@@ -1612,23 +1630,24 @@ type RowModel<T extends RowContractTable> = InferSelectModel<TableFor<T>>;
  * THE D6b DISCHARGE, AND ITS EXACT LIMITS.
  *
  * For every contracted table and every column, every value the schema's own
- * model type permits must be a value the contract's INFERRED TYPE permits.
- * `Exclude<…>` is `never` when that holds.
+ * model type permits must be a value the contract accepts as INPUT.
+ * `Exclude<…>` is `never` when that holds. Input is deliberate: a contract may
+ * brand a successfully parsed value without narrowing what it accepts.
  *
  * WHAT THIS PROVES. Three specific mistakes stop compiling:
  *
  *  1. dropping `null` from a column the schema declares nullable;
  *  2. pairing a column with the wrong enum, or with an enum at all where the
- *     schema types the column as plain `string` — `z.enum` survives `z.infer`,
+ *     schema types the column as plain `string` — `z.enum` survives `z.input`,
  *     so enum narrowing IS visible here;
  *  3. using a scalar refinement on a column the schema types as something else
  *     (a text refinement on a `boolean` column, say).
  *
- * WHAT IT CANNOT PROVE, STATED PLAINLY SO NOBODY OVER-READS IT. `z.infer` erases
+ * WHAT IT CANNOT PROVE, STATED PLAINLY SO NOBODY OVER-READS IT. `z.input` erases
  * every runtime constraint that does not change the static type. `z.string()`
  * and `z.string().min(1)` both infer as `string`; `z.int()` and
  * `z.int().min(1).max(30)` both infer as `number`; the JSON shape refinements
- * infer as `string`. So this guard is BLIND to length, range and shape
+ * accept `string`. So this guard is BLIND to length, range and shape
  * narrowing, and the compile passing says nothing about them. That blind spot is
  * covered by declaration instead: {@link NARROWED_REFINEMENTS} lists every one,
  * `./json-columns.ts` names the reader each JSON shape mirrors, and

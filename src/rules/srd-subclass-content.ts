@@ -16,16 +16,44 @@ import {
   parseSrdSubclasses,
   srdSubclassClassNames,
   type SrdSubclassDefinition,
+  type SrdSubclassClassName,
   type SrdSubclassFeatureHeading,
 } from './srd-subclasses';
+import type { Ability } from '../domain/enums';
+import { HEADING_ONLY_DESCRIPTION } from '../domain/subclass-feature-description';
 
 interface SrdSubclassSeed {
   readonly class_name: string;
   readonly subclass_name: string;
   readonly content_key: string;
+  readonly spellcasting_ability: Ability | null;
   readonly features: readonly SrdSubclassFeatureHeading[];
   readonly grant_rules: readonly GrantRuleObject[] | null;
 }
+
+/**
+ * Authoritative SRD class abilities for the inherit-parent subclass rows.
+ *
+ * These values intentionally do not come from the live parent row. SC-3 owns
+ * the subclass aggregate, and a damaged class row must not become the source
+ * of truth that repairs a subclass to the same damaged value.
+ */
+const SRD_SUBCLASS_SPELLCASTING_ABILITIES: Readonly<
+  Record<SrdSubclassClassName, Ability | null>
+> = Object.freeze({
+  Barbarian: null,
+  Bard: 'charisma',
+  Cleric: 'wisdom',
+  Druid: 'wisdom',
+  Fighter: null,
+  Monk: null,
+  Paladin: 'charisma',
+  Ranger: 'wisdom',
+  Rogue: null,
+  Sorcerer: 'charisma',
+  Warlock: 'charisma',
+  Wizard: 'intelligence',
+});
 
 function slug(value: string): string {
   return value
@@ -69,6 +97,8 @@ function srdSubclassSeeds(): readonly SrdSubclassSeed[] {
         class_name: definition.class_name,
         subclass_name: definition.subclass_name,
         content_key: subclassContentKey(definition.subclass_name),
+        spellcasting_ability:
+          SRD_SUBCLASS_SPELLCASTING_ABILITIES[className],
         features: definition.features,
         grant_rules: grantRulesFor(definition),
       });
@@ -129,7 +159,7 @@ function sameDefinition(
   const row = db.oneRaw(
     `SELECT subclass.id, parent.content_key AS parent_content_key,
             subclass.name, subclass.rules_edition,
-            subclass.spellcasting_ability, parent.spellcasting_ability AS parent_ability,
+            subclass.spellcasting_ability,
             subclass.caster_fraction, subclass.caster_rounding,
             subclass.grant_rules, subclass.notes
        FROM subclass_definitions AS subclass
@@ -151,7 +181,7 @@ function sameDefinition(
     row.parent_content_key !== classContentKey(seed.class_name) ||
     row.name !== seed.subclass_name ||
     row.rules_edition !== BUNDLED_RULES_EDITION ||
-    row.spellcasting_ability !== row.parent_ability ||
+    row.spellcasting_ability !== seed.spellcasting_ability ||
     row.caster_fraction !== null ||
     row.caster_rounding !== null ||
     row.notes !== null ||
@@ -183,7 +213,7 @@ function hasExactFeatures(
         row.class_level === feature.class_level &&
         row.sort_order === feature.sort_position + 1 &&
         row.name === feature.name &&
-        row.description === ''
+        row.description === HEADING_ONLY_DESCRIPTION
       );
     }) &&
     Number(
@@ -224,20 +254,19 @@ function upsertDefinition(
   seed: SrdSubclassSeed,
   timestamp: string,
 ): number | null {
-  const parent = db.oneRaw(
-    `SELECT id, spellcasting_ability
-       FROM class_definitions
+  const parentId = db.scalar<number>(
+    `SELECT id FROM class_definitions
       WHERE content_key = ?`,
     [classContentKey(seed.class_name)],
   );
-  if (parent === null) {
+  if (parentId === null) {
     return null;
   }
   const holder = db.scalar<string>(
     `SELECT content_key
        FROM subclass_definitions
       WHERE class_definition_id = ? AND name = ? AND rules_edition = ?`,
-    [Number(parent.id), seed.subclass_name, BUNDLED_RULES_EDITION],
+    [parentId, seed.subclass_name, BUNDLED_RULES_EDITION],
   );
   if (holder !== null && holder !== seed.content_key) {
     return null;
@@ -261,10 +290,10 @@ function upsertDefinition(
        notes = NULL`,
     [
       seed.content_key,
-      Number(parent.id),
+      parentId,
       seed.subclass_name,
       BUNDLED_RULES_EDITION,
-      parent.spellcasting_ability,
+      seed.spellcasting_ability,
       encodedRules(seed.grant_rules),
       timestamp,
       timestamp,
@@ -298,12 +327,13 @@ function replaceOwnedDescendants(
       `INSERT INTO subclass_features (
          subclass_definition_id, class_level, sort_order, name, description,
          created_at, updated_at
-       ) VALUES (?, ?, ?, ?, '', ?, ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
         subclassId,
         feature.class_level,
         feature.sort_position + 1,
         feature.name,
+        HEADING_ONLY_DESCRIPTION,
         timestamp,
         timestamp,
       ],

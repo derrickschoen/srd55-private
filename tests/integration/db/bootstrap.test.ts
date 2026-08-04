@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import type { Sqlite3Static } from '@sqlite.org/sqlite-wasm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import schema from '../../../src/db/schema.sql?raw';
@@ -25,6 +27,19 @@ import {
 } from '../../../src/rules/srd-subclass-content';
 import { getSqlite3, MemoryDatabaseStorage } from '../../helpers/open-db';
 import { hasBundledClassResourceContent } from '../../../src/rules/class-resources-srd';
+import { CatalogImporter } from '../../../src/catalog/catalog-importer';
+
+const LONG_ROAD_SUBCLASS_DOCUMENT = readFileSync(
+  fileURLToPath(
+    new URL(
+      '../../fixtures/homebrew-catalog/college-of-the-long-road.subclass.tier1.json',
+      import.meta.url,
+    ),
+  ),
+  'utf8',
+);
+const LONG_ROAD_SUBCLASS_KEY =
+  '2024:longroad.homebrew:college-of-the-long-road';
 
 const SRD_CLASSES = [
   'Barbarian',
@@ -500,6 +515,198 @@ describe('application database bootstrap', () => {
          WHERE content_key = '2024:subclass:life-domain'`,
       ),
     ).toBe('2024:aid');
+
+    lifecycle.database.exec(
+      `UPDATE subclass_definitions
+          SET grant_rules = json_set(
+            grant_rules,
+            '$[0].counts_against_limit',
+            json('false')
+          )
+        WHERE content_key = '2024:subclass:life-domain'`,
+    );
+    expect(hasBundledSrdSubclassContent(lifecycle.database)).toBe(false);
+
+    lifecycle.reopen();
+
+    expect(hasBundledSrdSubclassContent(lifecycle.database)).toBe(true);
+    expect(
+      lifecycle.database.scalar(
+        `SELECT json_type(grant_rules, '$[0].counts_against_limit')
+         FROM subclass_definitions
+         WHERE content_key = '2024:subclass:life-domain'`,
+      ),
+    ).toBeNull();
+  });
+
+  it('repairs an owned Bard subclass in a replacement image without touching its imported sibling or reallocating the owned root', async () => {
+    const { sqlite3, lifecycle: source } = await freshApplicationLifecycle();
+    const sourceDb = source.database;
+    const imported = new CatalogImporter(sourceDb).import({
+      documents: [LONG_ROAD_SUBCLASS_DOCUMENT],
+    });
+    expect(imported.subclasses_created).toBe(1);
+    expect(imported.subclass_features_created).toBe(4);
+
+    const loreId = Number(
+      sourceDb.scalar(
+        `SELECT id FROM subclass_definitions
+         WHERE content_key = '2024:subclass:college-of-lore'`,
+      ),
+    );
+    const longRoadId = Number(
+      sourceDb.scalar(
+        'SELECT id FROM subclass_definitions WHERE content_key = ?',
+        [LONG_ROAD_SUBCLASS_KEY],
+      ),
+    );
+    expect(
+      sourceDb.scalar(
+        `SELECT class_definition_id FROM subclass_definitions WHERE id = ?`,
+        [loreId],
+      ),
+    ).toBe(
+      sourceDb.scalar(
+        `SELECT class_definition_id FROM subclass_definitions WHERE id = ?`,
+        [longRoadId],
+      ),
+    );
+
+    const importedBefore = {
+      definitions: sourceDb.allRaw(
+        'SELECT * FROM subclass_definitions WHERE id = ?',
+        [longRoadId],
+      ),
+      features: sourceDb.allRaw(
+        `SELECT * FROM subclass_features
+         WHERE subclass_definition_id = ? ORDER BY id`,
+        [longRoadId],
+      ),
+      effects: sourceDb.allRaw(
+        `SELECT effect.*
+         FROM subclass_feature_effects AS effect
+         JOIN subclass_features AS feature
+           ON feature.id = effect.subclass_feature_id
+         WHERE feature.subclass_definition_id = ? ORDER BY effect.id`,
+        [longRoadId],
+      ),
+    };
+    expect(importedBefore.definitions).toHaveLength(1);
+    expect(importedBefore.features).toHaveLength(4);
+    expect(importedBefore.effects).toHaveLength(1);
+
+    sourceDb.exec(
+      `UPDATE subclass_definitions
+          SET name = 'Corrupted College of Lore', spellcasting_ability = NULL
+        WHERE id = ?`,
+      [loreId],
+    );
+    sourceDb.exec(
+      `DELETE FROM subclass_features
+       WHERE subclass_definition_id = ? AND sort_order = 1`,
+      [loreId],
+    );
+    expect(hasBundledSrdSubclassContent(sourceDb)).toBe(false);
+
+    const replacementBytes = await source.exportBytes();
+    const target = track(
+      createApplicationLifecycle(
+        sqlite3,
+        new MemoryDatabaseStorage(sqlite3),
+      ),
+    );
+    target.open();
+    await target.replace(replacementBytes);
+
+    const repairedDb = target.database;
+    expect(hasBundledSrdSubclassContent(repairedDb)).toBe(true);
+    expect(
+      repairedDb.oneRaw(
+        `SELECT id, name, spellcasting_ability FROM subclass_definitions
+         WHERE content_key = '2024:subclass:college-of-lore'`,
+      ),
+    ).toEqual({
+      id: loreId,
+      name: 'College of Lore',
+      spellcasting_ability: 'charisma',
+    });
+    expect(
+      repairedDb.scalar(
+        'SELECT count(*) FROM subclass_features WHERE subclass_definition_id = ?',
+        [loreId],
+      ),
+    ).toBe(4);
+    expect({
+      definitions: repairedDb.allRaw(
+        'SELECT * FROM subclass_definitions WHERE id = ?',
+        [longRoadId],
+      ),
+      features: repairedDb.allRaw(
+        `SELECT * FROM subclass_features
+         WHERE subclass_definition_id = ? ORDER BY id`,
+        [longRoadId],
+      ),
+      effects: repairedDb.allRaw(
+        `SELECT effect.*
+         FROM subclass_feature_effects AS effect
+         JOIN subclass_features AS feature
+           ON feature.id = effect.subclass_feature_id
+         WHERE feature.subclass_definition_id = ? ORDER BY effect.id`,
+        [longRoadId],
+      ),
+    }).toEqual(importedBefore);
+  });
+
+  it('repairs an inherit-parent subclass from its authoritative ability when replacement-image class metadata is corrupt', async () => {
+    const { sqlite3, lifecycle: source } = await freshApplicationLifecycle();
+    const lifeDomainId = Number(
+      source.database.scalar(
+        `SELECT id FROM subclass_definitions
+         WHERE content_key = '2024:subclass:life-domain'`,
+      ),
+    );
+    source.database.exec(
+      `UPDATE class_definitions
+          SET spellcasting_ability = 'charisma'
+        WHERE content_key = '2024:class:cleric'`,
+    );
+    source.database.exec(
+      `UPDATE subclass_definitions
+          SET spellcasting_ability = 'charisma'
+        WHERE id = ?`,
+      [lifeDomainId],
+    );
+    expect(hasBundledSrdSubclassContent(source.database)).toBe(false);
+
+    const replacementBytes = await source.exportBytes();
+    const target = track(
+      createApplicationLifecycle(
+        sqlite3,
+        new MemoryDatabaseStorage(sqlite3),
+      ),
+    );
+    target.open();
+    await target.replace(replacementBytes);
+
+    // SC-3 owns the subclass, not its parent. It restores the SRD subclass's
+    // authoritative Wisdom value without laundering or rewriting the corrupt
+    // live Cleric row.
+    expect(
+      target.database.oneRaw(
+        `SELECT subclass.id,
+                subclass.spellcasting_ability AS subclass_ability,
+                parent.spellcasting_ability AS parent_ability
+         FROM subclass_definitions AS subclass
+         JOIN class_definitions AS parent
+           ON parent.id = subclass.class_definition_id
+         WHERE subclass.content_key = '2024:subclass:life-domain'`,
+      ),
+    ).toEqual({
+      id: lifeDomainId,
+      subclass_ability: 'wisdom',
+      parent_ability: 'charisma',
+    });
+    expect(hasBundledSrdSubclassContent(target.database)).toBe(true);
   });
 
   it('rejects an unresolved SRD subclass spell key after the full application seed', async () => {
