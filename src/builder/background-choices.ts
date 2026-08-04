@@ -305,17 +305,13 @@ export function printedPairing(
       : null;
 
   const printedFeat = template.feat_name.trim();
-  const parenthetical = /^(?<base>.*?)\s*\((?<option>[^)]+)\)$/.exec(
-    printedFeat,
-  )?.groups;
-  const baseName = backgroundFeatBaseName(printedFeat);
-  const option = parenthetical?.option ?? null;
-  const featKey = originFeatKeyByName.get(baseName) ?? null;
+  const parsedFeat = backgroundFeatBaseName(printedFeat);
+  const featKey = originFeatKeyByName.get(parsedFeat.base) ?? null;
   const magicInitiateList =
     featKey === MAGIC_INITIATE_FEAT_CONTENT_KEY &&
-    option !== null &&
-    (MAGIC_INITIATE_LISTS as readonly string[]).includes(option)
-      ? option
+    parsedFeat.option !== null &&
+    (MAGIC_INITIATE_LISTS as readonly string[]).includes(parsedFeat.option)
+      ? parsedFeat.option
       : null;
 
   return {
