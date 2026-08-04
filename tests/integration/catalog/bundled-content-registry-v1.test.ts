@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   bundledContentManifestV1,
   reconcileBundledContentRegistryV1,
@@ -94,6 +94,7 @@ const INDEPENDENT_ROOT_ANCHORS = [
 ] as const;
 
 const MUTATED_SPELL_KEY = '2024:acid-arrow' as ContentKey;
+const DAMAGED_SPELL_KEY = '2024:fireball' as ContentKey;
 
 function anchoredRootName(
   db: DatabaseContext,
@@ -195,6 +196,7 @@ describe('CI-3s bundled stable-key fingerprint registration', () => {
     expect(reconcileBundledContentRegistryV1(db)).toEqual({
       projected: 434,
       orphaned: 0,
+      refused: 0,
       registered: 0,
       unchanged: 434,
       moved: 0,
@@ -356,6 +358,7 @@ describe('CI-3s bundled stable-key fingerprint registration', () => {
     expect(reconcileBundledContentRegistryV1(db)).toEqual({
       projected: 433,
       orphaned: 1,
+      refused: 0,
       registered: 0,
       unchanged: 433,
       moved: 0,
@@ -384,6 +387,7 @@ describe('CI-3s bundled stable-key fingerprint registration', () => {
     expect(reconcileBundledContentRegistryV1(db)).toEqual({
       projected: 434,
       orphaned: 0,
+      refused: 0,
       registered: 0,
       unchanged: 434,
       moved: 0,
@@ -400,6 +404,7 @@ describe('CI-3s bundled stable-key fingerprint registration', () => {
     expect(reconcileBundledContentRegistryV1(db)).toEqual({
       projected: 434,
       orphaned: 0,
+      refused: 0,
       registered: 0,
       unchanged: 433,
       moved: 1,
@@ -420,6 +425,7 @@ describe('CI-3s bundled stable-key fingerprint registration', () => {
     expect(reconcileBundledContentRegistryV1(db)).toEqual({
       projected: 433,
       orphaned: 1,
+      refused: 0,
       registered: 0,
       unchanged: 433,
       moved: 0,
@@ -435,6 +441,7 @@ describe('CI-3s bundled stable-key fingerprint registration', () => {
     expect(reconcileBundledContentRegistryV1(db)).toEqual({
       projected: 433,
       orphaned: 1,
+      refused: 0,
       registered: 0,
       unchanged: 433,
       moved: 0,
@@ -450,6 +457,7 @@ describe('CI-3s bundled stable-key fingerprint registration', () => {
     expect(reconcileBundledContentRegistryV1(db)).toEqual({
       projected: 433,
       orphaned: 1,
+      refused: 0,
       registered: 0,
       unchanged: 433,
       moved: 0,
@@ -499,17 +507,114 @@ describe('CI-3s bundled stable-key fingerprint registration', () => {
          AND fingerprint_role = 'current'`,
       [MUTATED_SPELL_KEY],
     );
-
-    expect(() => reconcileBundledContentRegistryV1(db))
-      .toThrow(ContentIdentityCollision);
-    expect(db.allRaw(
-      `SELECT canonical_json, fingerprint_role
-       FROM catalog_content_fingerprints
+    const beforeIdentity = db.oneRaw(
+      `SELECT * FROM catalog_content_identities
        WHERE content_kind = 'spell' AND content_key = ?`,
       [MUTATED_SPELL_KEY],
-    )).toEqual([{
-      canonical_json: 'damaged',
-      fingerprint_role: 'current',
-    }]);
+    );
+    const beforeFingerprints = db.allRaw(
+      `SELECT * FROM catalog_content_fingerprints
+       WHERE content_kind = 'spell' AND content_key = ?
+       ORDER BY fingerprint_scheme, fingerprint_digest, fingerprint_role`,
+      [MUTATED_SPELL_KEY],
+    );
+
+    expect(reconcileBundledContentRegistryV1(db)).toEqual({
+      projected: 433,
+      orphaned: 0,
+      refused: 1,
+      registered: 0,
+      unchanged: 433,
+      moved: 0,
+    });
+    expect(db.oneRaw(
+      `SELECT * FROM catalog_content_identities
+       WHERE content_kind = 'spell' AND content_key = ?`,
+      [MUTATED_SPELL_KEY],
+    )).toEqual(beforeIdentity);
+    expect(db.allRaw(
+      `SELECT * FROM catalog_content_fingerprints
+       WHERE content_kind = 'spell' AND content_key = ?
+       ORDER BY fingerprint_scheme, fingerprint_digest, fingerprint_role`,
+      [MUTATED_SPELL_KEY],
+    )).toEqual(beforeFingerprints);
+  });
+
+  it('repairs a stale current fingerprint while refusing damaged bytes elsewhere in the same boot', () => {
+    const staleCurrent = db.oneRaw(
+      `SELECT fingerprint_digest, canonical_json
+       FROM catalog_content_fingerprints
+       WHERE content_kind = 'spell' AND content_key = ?
+         AND fingerprint_scheme = 'content-v1'
+         AND fingerprint_role = 'current'`,
+      [MUTATED_SPELL_KEY],
+    );
+    expect(staleCurrent).not.toBeNull();
+    db.exec(
+      `UPDATE spell_versions
+       SET short_summary = short_summary || ' Corrected extraction.'
+       WHERE content_key = ?`,
+      [MUTATED_SPELL_KEY],
+    );
+    db.exec(
+      `UPDATE catalog_content_fingerprints SET canonical_json = 'damaged'
+       WHERE content_kind = 'spell' AND content_key = ?
+         AND fingerprint_scheme = 'content-v1'
+         AND fingerprint_role = 'current'`,
+      [DAMAGED_SPELL_KEY],
+    );
+    const beforeRefusedIdentity = db.oneRaw(
+      `SELECT * FROM catalog_content_identities
+       WHERE content_kind = 'spell' AND content_key = ?`,
+      [DAMAGED_SPELL_KEY],
+    );
+    const beforeRefusedFingerprints = db.allRaw(
+      `SELECT * FROM catalog_content_fingerprints
+       WHERE content_kind = 'spell' AND content_key = ?
+       ORDER BY fingerprint_scheme, fingerprint_digest, fingerprint_role`,
+      [DAMAGED_SPELL_KEY],
+    );
+
+    const bootErrors = vi.spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    try {
+      lifecycle.reopen();
+      db = lifecycle.database;
+      expect(bootErrors).not.toHaveBeenCalled();
+    } finally {
+      bootErrors.mockRestore();
+    }
+    const repairedFingerprints = db.allRaw(
+      `SELECT fingerprint_digest, canonical_json, fingerprint_role
+       FROM catalog_content_fingerprints
+       WHERE content_kind = 'spell' AND content_key = ?
+         AND fingerprint_scheme = 'content-v1'
+       ORDER BY fingerprint_role, fingerprint_digest`,
+      [MUTATED_SPELL_KEY],
+    );
+    expect(repairedFingerprints).toHaveLength(2);
+    expect(repairedFingerprints).toContainEqual({
+      fingerprint_digest: staleCurrent!.fingerprint_digest,
+      canonical_json: staleCurrent!.canonical_json,
+      fingerprint_role: 'bundled-historical',
+    });
+    const repairedCurrent = repairedFingerprints.find(
+      (row) => row.fingerprint_role === 'current',
+    );
+    expect(repairedCurrent?.fingerprint_digest)
+      .not.toBe(staleCurrent!.fingerprint_digest);
+    expect(repairedCurrent?.canonical_json)
+      .toContain('Corrected extraction.');
+    expect(db.oneRaw(
+      `SELECT * FROM catalog_content_identities
+       WHERE content_kind = 'spell' AND content_key = ?`,
+      [DAMAGED_SPELL_KEY],
+    )).toEqual(beforeRefusedIdentity);
+    expect(db.allRaw(
+      `SELECT * FROM catalog_content_fingerprints
+       WHERE content_kind = 'spell' AND content_key = ?
+       ORDER BY fingerprint_scheme, fingerprint_digest, fingerprint_role`,
+      [DAMAGED_SPELL_KEY],
+    )).toEqual(beforeRefusedFingerprints);
   });
 });
