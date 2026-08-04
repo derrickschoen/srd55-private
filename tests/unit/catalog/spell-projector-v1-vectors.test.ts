@@ -81,6 +81,16 @@ describe('CI-3s-PRE spell content-v1 projector contracts', () => {
     }).derivedKey).not.toBe(identity(baseline).derivedKey);
   });
 
+  it('spell version stable key discriminates otherwise identical versions', () => {
+    const baseline = projectSpellDocumentV1(bandedSpellDocumentV1);
+    const alternate = projectSpellDocumentV1({
+      ...bandedSpellDocumentV1,
+      versionKey: 'expanded:alternate-aether-lance',
+    });
+    expect(identity(alternate.payload).derivedKey)
+      .not.toBe(identity(baseline.payload).derivedKey);
+  });
+
   it('refuses whitespace-padded document locators before identity derivation', () => {
     const base = projectSpellContentAggregateV1(spellProjectorV1Vectors[0]!.aggregate);
     const record = {

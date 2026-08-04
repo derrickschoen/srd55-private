@@ -63,6 +63,7 @@ export interface SpellContentAggregateV1 {
   readonly name: string;
   readonly rules_edition: RulesEdition;
   readonly spell_identity_key: string;
+  readonly spell_version_key: string;
   readonly level: number;
   readonly school: SpellSchool;
   readonly ritual: boolean;
@@ -96,6 +97,7 @@ export interface SpellContentAggregateV1 {
 
 export interface SpellProjectorPayloadV1 {
   readonly spell_identity_key: string;
+  readonly spell_version_key: string;
   readonly level: number;
   readonly school: CanonicalOpenPassthroughValue;
   readonly ritual: boolean;
@@ -163,10 +165,11 @@ function jsonValue(value: unknown, label: string): JsonValue {
 
 /**
  * Default-include every future stored column. The exclusions are limited to:
- * numeric relational ids and version locators; the envelope's name/edition;
+ * numeric relational ids; the envelope's name/edition;
  * extraction provenance and seed version; active/timestamp lifecycle state;
- * and fork ancestry. The stable spell-identity key is projected explicitly
- * because eligibility joins through that concept relationship.
+ * and fork ancestry. The stable spell-identity and spell-version keys are
+ * projected explicitly because eligibility joins through the concept and
+ * attack-cantrip behavior branches on the version key.
  */
 function storedFields(row: SqlRow, known: readonly string[]): Readonly<Record<string, JsonValue>> {
   const excluded = new Set([
@@ -192,7 +195,8 @@ function storedFields(row: SqlRow, known: readonly string[]): Readonly<Record<st
 
 /**
  * Explicit table exclusions:
- * - spell_identities.content_key is included as spell_identity_key. Identity
+ * - spell_identities.content_key is included as spell_identity_key and
+ *   spell_versions.content_key is included as spell_version_key. Identity
  *   names/notes/timestamps and spell_identity_aliases only resolve/group that
  *   stable concept key and do not alter eligibility after resolution.
  * - spell_version_publications is attribution/import provenance only.
@@ -221,7 +225,8 @@ export function projectSpellContentAggregateV1(
 ): SpellProjectorContractV1 {
   const payload: SpellProjectorPayloadV1 = {
     ...(aggregate.stored_fields === undefined ? {} : { stored_fields: aggregate.stored_fields }),
-    spell_identity_key: aggregate.spell_identity_key,
+    spell_identity_key: trimEqual(aggregate.spell_identity_key, 'spell identity key'),
+    spell_version_key: trimEqual(aggregate.spell_version_key, 'spell version key'),
     level: aggregate.level,
     school: canonicalOpenPassthroughValue(aggregate.school),
     ritual: aggregate.ritual,
@@ -278,6 +283,7 @@ export function projectSpellDocumentV1(
     name: record.name,
     rules_edition: record.edition,
     spell_identity_key: trimEqual(record.identityKey, 'identityKey'),
+    spell_version_key: trimEqual(record.versionKey, 'versionKey'),
     level: record.level,
     school: record.school,
     ritual: record.ritual,
@@ -387,6 +393,10 @@ export function projectStoredSpellContentV1(
     spell_identity_key: trimEqual(
       sqlString(row, 'spell_identity_key'),
       'spell identity key',
+    ),
+    spell_version_key: trimEqual(
+      sqlString(row, 'content_key'),
+      'spell version key',
     ),
     level: bounded(sqlInteger(row, 'level'), SPELL_LEVEL_MIN, SPELL_LEVEL_MAX, 'spell level'),
     school: spellSchool(sqlString(row, 'school')),

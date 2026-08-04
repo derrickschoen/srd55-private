@@ -26,6 +26,7 @@ const bandedAggregate: SpellContentAggregateV1 = {
   name: 'Aether Lance',
   rules_edition: 'expanded',
   spell_identity_key: 'aether-lance',
+  spell_version_key: 'expanded:aether-lance',
   level: 2,
   school: spellSchool('Chronomancy'),
   ritual: false,
@@ -58,6 +59,7 @@ const bandedAggregate: SpellContentAggregateV1 = {
 
 const bandedPayload: SpellProjectorPayloadV1 = {
   spell_identity_key: 'aether-lance',
+  spell_version_key: 'expanded:aether-lance',
   level: 2,
   school: canonicalOpenPassthroughValue('Chronomancy'),
   ritual: false,
@@ -99,6 +101,7 @@ const cantripAggregate: SpellContentAggregateV1 = {
   name: 'Kindling Word',
   rules_edition: '2024',
   spell_identity_key: 'kindling-word',
+  spell_version_key: '2024:kindling-word',
   level: 0,
   school: spellSchool('Evocation'),
   ritual: true,
@@ -131,6 +134,7 @@ const cantripAggregate: SpellContentAggregateV1 = {
 
 const cantripPayload: SpellProjectorPayloadV1 = {
   spell_identity_key: 'kindling-word',
+  spell_version_key: '2024:kindling-word',
   level: 0,
   school: canonicalOpenPassthroughValue('Evocation'),
   ritual: true,
@@ -169,17 +173,17 @@ export const spellProjectorV1Vectors: readonly SpellProjectorVectorV1[] = [
     label: 'banded upcast and complete structured spell semantics',
     aggregate: bandedAggregate,
     payload: bandedPayload,
-    canonicalJson: '{"edition":"expanded","kind":"spell","normalizedName":"aetherlance","payload":{"action_type":"Bonus Action","area_feet":30,"area_shape":"cone","attack_modes":["ranged_spell"],"cantrip_upgrade_levels":[],"cantrip_upgrade_summary":null,"casting_time":"1 bonus action","components":"V, S, M (a prism worth 25+ GP)","concentration":true,"duration":"Concentration, up to 1 minute","effect_reliability_category":"modifier_scaled","healing":false,"level":2,"material_component_summary":"a prism worth 25+ GP","material_cost_copper":2500,"material_cost_kind":"minimum","range":"Self (30-foot Cone)","range_feet":null,"range_kind":"self","requires_mod_for_effect":true,"ritual":false,"save_abilities":["Dexterity"],"school":"Chronomancy","short_summary":"A line of force.","spell_identity_key":"aether-lance","spell_lists":["Artificer","Wizard"],"tags":["concentration","force"],"upcast_levels":[3,6],"upcast_summary":"Slot 3–5: +2; slot 6+: +3."},"scheme":"content-v1"}',
-    sha256: 'd62b2ec3924a9f2a53fd23308e297a047b18bf426daf847b1e065dc1eda80eea',
-    derivedKey: 'expanded:content.v1:d62b2ec3924a9f2a53fd23308e297a047b18bf426daf847b1e065dc1eda80eea',
+    canonicalJson: '{"edition":"expanded","kind":"spell","normalizedName":"aetherlance","payload":{"action_type":"Bonus Action","area_feet":30,"area_shape":"cone","attack_modes":["ranged_spell"],"cantrip_upgrade_levels":[],"cantrip_upgrade_summary":null,"casting_time":"1 bonus action","components":"V, S, M (a prism worth 25+ GP)","concentration":true,"duration":"Concentration, up to 1 minute","effect_reliability_category":"modifier_scaled","healing":false,"level":2,"material_component_summary":"a prism worth 25+ GP","material_cost_copper":2500,"material_cost_kind":"minimum","range":"Self (30-foot Cone)","range_feet":null,"range_kind":"self","requires_mod_for_effect":true,"ritual":false,"save_abilities":["Dexterity"],"school":"Chronomancy","short_summary":"A line of force.","spell_identity_key":"aether-lance","spell_lists":["Artificer","Wizard"],"spell_version_key":"expanded:aether-lance","tags":["concentration","force"],"upcast_levels":[3,6],"upcast_summary":"Slot 3–5: +2; slot 6+: +3."},"scheme":"content-v1"}',
+    sha256: '07ed8c09cafd5116ae6e594f9dfa289008a44d78799bcf8dec29fc45b2d72484',
+    derivedKey: 'expanded:content.v1:07ed8c09cafd5116ae6e594f9dfa289008a44d78799bcf8dec29fc45b2d72484',
   },
   {
     label: 'cantrip upgrade and null structured material semantics',
     aggregate: cantripAggregate,
     payload: cantripPayload,
-    canonicalJson: '{"edition":"2024","kind":"spell","normalizedName":"kindlingword","payload":{"action_type":"Action","area_feet":null,"area_shape":null,"attack_modes":[],"cantrip_upgrade_levels":[11,17,5],"cantrip_upgrade_summary":"Improves at levels 5, 11, and 17.","casting_time":"Action","components":"V, S","concentration":false,"duration":"Instantaneous","effect_reliability_category":"fixed_effect","healing":true,"level":0,"material_component_summary":null,"material_cost_copper":null,"material_cost_kind":null,"range":"60 feet","range_feet":60,"range_kind":"ranged","requires_mod_for_effect":false,"ritual":true,"save_abilities":[],"school":"Evocation","short_summary":"Restores a spark.","spell_identity_key":"kindling-word","spell_lists":["Bard"],"tags":["healing","ritual"],"upcast_levels":[],"upcast_summary":null},"scheme":"content-v1"}',
-    sha256: '96bbe99ee9b1ace4fc301af6acf8c580ebddb468e2197db6c3488e3844841eaf',
-    derivedKey: '2024:content.v1:96bbe99ee9b1ace4fc301af6acf8c580ebddb468e2197db6c3488e3844841eaf',
+    canonicalJson: '{"edition":"2024","kind":"spell","normalizedName":"kindlingword","payload":{"action_type":"Action","area_feet":null,"area_shape":null,"attack_modes":[],"cantrip_upgrade_levels":[11,17,5],"cantrip_upgrade_summary":"Improves at levels 5, 11, and 17.","casting_time":"Action","components":"V, S","concentration":false,"duration":"Instantaneous","effect_reliability_category":"fixed_effect","healing":true,"level":0,"material_component_summary":null,"material_cost_copper":null,"material_cost_kind":null,"range":"60 feet","range_feet":60,"range_kind":"ranged","requires_mod_for_effect":false,"ritual":true,"save_abilities":[],"school":"Evocation","short_summary":"Restores a spark.","spell_identity_key":"kindling-word","spell_lists":["Bard"],"spell_version_key":"2024:kindling-word","tags":["healing","ritual"],"upcast_levels":[],"upcast_summary":null},"scheme":"content-v1"}',
+    sha256: '8d6710fa58ab30930c2f87423e0562b362cc487d2107f6e42a24549c42d56b70',
+    derivedKey: '2024:content.v1:8d6710fa58ab30930c2f87423e0562b362cc487d2107f6e42a24549c42d56b70',
   },
 ];
 
