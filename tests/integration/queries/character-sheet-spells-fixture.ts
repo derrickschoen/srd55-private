@@ -44,12 +44,16 @@ export interface SheetSpellRetirementFixture {
   readonly characterId: number;
   readonly spellIds: {
     readonly command: number;
+    readonly detectMagic: number;
+    readonly faerieFire: number;
     readonly goodberry: number;
     readonly mistyStep: number;
     readonly thornWhip: number;
+    readonly unseenServant: number;
   };
   readonly slotIds: {
     readonly command: number;
+    readonly faerieFire: number;
     readonly mistyStep: number;
   };
 }
@@ -95,6 +99,7 @@ interface ReferenceOptions {
   readonly cantripUpgradeSummary?: string | null;
   readonly attackModes?: readonly string[];
   readonly saveAbilities?: readonly string[];
+  readonly lists?: readonly string[];
   readonly active?: boolean;
   readonly placeholder?: boolean;
 }
@@ -236,6 +241,14 @@ function createReferenceSpell(
          spell_version_id, save_ability
        ) VALUES (?, ?)`,
       [spellId, saveAbility],
+    );
+  }
+  for (const list of options.lists ?? []) {
+    db.exec(
+      `INSERT INTO spell_list_memberships (
+         spell_version_id, spell_list_key
+       ) VALUES (?, ?)`,
+      [spellId, list],
     );
   }
   return spellId;
@@ -727,16 +740,19 @@ export function createSheetSpellRetirementFixture(
     components: 'V',
     description: RETIREMENT_COMMAND_PROSE,
     saveAbilities: ['wisdom'],
+    lists: ['Cleric'],
   });
   const guidance = createReferenceSpell(db, 'Guidance', {
     level: 0,
     description: 'A brief divine nudge.',
+    lists: ['Cleric'],
   });
   const goodberry = createReferenceSpell(db, 'Goodberry', {
     level: 1,
     school: 'Transmutation',
     castingTime: 'Action',
     description: null,
+    lists: ['Druid'],
   });
   const thornWhip = createReferenceSpell(db, 'Thorn Whip', {
     level: 0,
@@ -748,6 +764,7 @@ export function createSheetSpellRetirementFixture(
     components: 'V, S, M',
     description: RETIREMENT_LONG_PROSE,
     attackModes: ['melee_spell', 'ranged_spell'],
+    lists: ['Druid'],
   });
   const mageHand = createReferenceSpell(db, 'Mage Hand', {
     level: 0,
@@ -761,6 +778,24 @@ export function createSheetSpellRetirementFixture(
     duration: '1 round',
     components: 'V, S',
     description: 'A sudden magical barrier.',
+    lists: ['Wizard'],
+  });
+  const detectMagic = createReferenceSpell(db, 'Detect Magic', {
+    level: 1,
+    school: 'Divination',
+    castingTime: 'Action or Ritual',
+    duration: 'Concentration, up to 10 minutes',
+    concentration: true,
+    ritual: true,
+    description: 'Sense magic nearby.',
+    lists: ['Wizard'],
+  });
+  const unseenServant = createReferenceSpell(db, 'Unseen Servant', {
+    level: 1,
+    school: 'Conjuration',
+    castingTime: 'Action',
+    description: 'An invisible servant performs simple tasks.',
+    lists: ['Wizard'],
   });
   const mistyStep = createReferenceSpell(db, 'Misty Step', {
     level: 2,
@@ -842,13 +877,40 @@ export function createSheetSpellRetirementFixture(
       mistyStepSlotId,
     ],
   );
-  createSlot(db, characterId, gift10SourceId, faerieFire, 'gift-ten:1', 1, {
-    bucket: 'automatic',
-    fixed: true,
-    levelMin: 1,
-    levelMax: 1,
-    withSlots: false,
-  });
+  const faerieFireSlotId = createSlot(
+    db,
+    characterId,
+    gift10SourceId,
+    faerieFire,
+    'gift-ten:1',
+    1,
+    {
+      bucket: 'automatic',
+      fixed: true,
+      levelMin: 1,
+      levelMax: 1,
+      withSlots: false,
+    },
+  );
+  db.exec(
+    `UPDATE spell_selection_slots SET free_cast = ? WHERE id = ?`,
+    [
+      JSON.stringify({
+        uses: 2,
+        recovery: 'dawn',
+        pool_scope: 'shared',
+      }),
+      faerieFireSlotId,
+    ],
+  );
+  for (const spellId of [detectMagic, shield, unseenServant]) {
+    db.exec(
+      `INSERT INTO wizard_spellbook_entries (
+         character_id, spell_version_id
+       ) VALUES (?, ?)`,
+      [characterId, spellId],
+    );
+  }
   // D162 makes the appendix optional. Seeding this named preference lets the
   // retirement tests exercise printing while retaining a byte-exact no-write
   // oracle across render, print entry/exit, print-button click, and reload.
@@ -861,8 +923,20 @@ export function createSheetSpellRetirementFixture(
 
   return {
     characterId,
-    spellIds: { command, goodberry, mistyStep, thornWhip },
-    slotIds: { command: commandSlotId, mistyStep: mistyStepSlotId },
+    spellIds: {
+      command,
+      detectMagic,
+      faerieFire,
+      goodberry,
+      mistyStep,
+      thornWhip,
+      unseenServant,
+    },
+    slotIds: {
+      command: commandSlotId,
+      faerieFire: faerieFireSlotId,
+      mistyStep: mistyStepSlotId,
+    },
   };
 }
 

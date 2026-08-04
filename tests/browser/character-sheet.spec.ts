@@ -1213,11 +1213,15 @@ test('spell appendix paginates long prose with the D141 mechanism', async ({
   );
   await expect(appendix.locator('.sheet-spell-appendix-summary').first())
     .toHaveCSS('break-inside', 'avoid');
-  await expect(appendix.locator('.sheet-spell-appendix-card').first())
-    .toHaveCSS('break-inside', 'auto');
   const longProse = appendix.locator('.sheet-spell-appendix-prose', {
     hasText: 'long spell opening',
   });
+  const longCard = longProse.locator('..');
+  await expect(longCard).toHaveAttribute(
+    'data-spell-appendix-pagination',
+    'split_prose',
+  );
+  await expect(longCard).toHaveCSS('break-inside', 'auto');
   await expectExactText(longProse, LONG_SPELL_PROSE);
   await expect(longProse).toHaveCSS('white-space', 'pre-wrap');
   await expect(longProse).toHaveCSS('break-inside', 'auto');
@@ -1226,6 +1230,11 @@ test('spell appendix paginates long prose with the D141 mechanism', async ({
   const missingCard = appendix.locator('.sheet-spell-appendix-card', {
     hasText: 'Goodberry',
   });
+  await expect(missingCard).toHaveAttribute(
+    'data-spell-appendix-pagination',
+    'keep_together',
+  );
+  await expect(missingCard).toHaveCSS('break-inside', 'avoid');
   await expect(missingCard).toContainText(
     'Full spell text unavailable for this imported or placeholder spell.',
   );
@@ -1264,7 +1273,7 @@ test('spell section and print appendix replace the legacy print route without wr
   ).toHaveClass(/sheet-chrome/);
   await expect(
     spellSection.locator('.sheet-spell-group-heading').allTextContents(),
-  ).resolves.toEqual(['Cleric', 'Druid', 'Wizard', 'Gift 10', 'Gift 2']);
+  ).resolves.toEqual(['Cleric', 'Druid', 'Wizard', 'Gift 2', 'Gift 10']);
 
   const groups = spellSection.locator('[data-spell-group]');
   const cleric = groups.filter({ hasText: 'Cleric' });
@@ -1323,6 +1332,12 @@ test('spell section and print appendix replace the legacy print route without wr
       free_cast:
         '{"uses":1,"recovery":"long_rest","pool_scope":"per_spell"}',
     }),
+    expect.objectContaining({
+      id: image.fixture.slotIds.faerieFire,
+      fixed_spell_version_id: image.fixture.spellIds.faerieFire,
+      with_slots: 0,
+      free_cast: '{"uses":2,"recovery":"dawn","pool_scope":"shared"}',
+    }),
   ]));
   const spellOption = page.getByLabel('Include full spell text appendix');
   await expect(spellOption).toBeChecked();
@@ -1353,7 +1368,7 @@ test('spell section and print appendix replace the legacy print route without wr
   await expect(appendix).toHaveCSS('break-before', 'page');
   const appendixGroups = appendix.locator('[data-spell-appendix-group]');
   await expect(appendixGroups.locator(':scope > h3').allTextContents())
-    .resolves.toEqual(['Cleric', 'Druid', 'Wizard', 'Gift 10', 'Gift 2']);
+    .resolves.toEqual(['Cleric', 'Druid', 'Wizard', 'Gift 2', 'Gift 10']);
   await expect(appendixGroups.nth(0).locator('h4').allTextContents())
     .resolves.toEqual([
       'Guidance — Cantrip · Abjuration',
@@ -1381,6 +1396,11 @@ test('spell section and print appendix replace the legacy print route without wr
   );
   await expect(commandCards).toHaveCount(2);
   const commandCard = commandCards.first();
+  await expect(commandCard).toHaveAttribute(
+    'data-spell-appendix-pagination',
+    'keep_together',
+  );
+  await expect(commandCard).toHaveCSS('break-inside', 'avoid');
   await expectExactText(
     commandCard.locator('.sheet-spell-appendix-prose'),
     RETIREMENT_COMMAND_PROSE,
