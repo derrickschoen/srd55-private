@@ -85,14 +85,35 @@ export interface UpdateCharacterRulesCommand extends CommandBase {
   allow_legacy: boolean;
 }
 
-/** One atomic authored-text value; absence is always an explicit `null`. */
-export interface UpdateCharacterFlavorCommand extends CommandBase {
-  type: 'update_character_flavor';
+export interface CharacterFlavorValues {
   alignment: string | null;
   appearance: string | null;
   backstory: string | null;
   notes: string | null;
 }
+
+export type CharacterFlavorChanges = {
+  [Field in keyof CharacterFlavorValues]:
+    & Pick<CharacterFlavorValues, Field>
+    & Partial<Omit<CharacterFlavorValues, Field>>;
+}[keyof CharacterFlavorValues];
+
+/**
+ * One atomic authored-text write. An edit names only fields changed at the UI
+ * boundary, so an untouched grandfathered value is neither normalized nor
+ * checked against today's authoring limit. A restore is a signed internal
+ * inverse whose complete value is written byte-for-byte.
+ */
+export type UpdateCharacterFlavorCommand =
+  | (CommandBase & CharacterFlavorChanges & {
+      type: 'update_character_flavor';
+      mode?: 'edit';
+    })
+  | (CommandBase & CharacterFlavorValues & {
+      type: 'update_character_flavor';
+      mode: 'restore';
+      integrity: string;
+    });
 
 export type UpdateSourceConfigCommand =
   | (CommandBase & {

@@ -359,13 +359,14 @@ export class CharacterCommandExecutor {
           allow_legacy: Number(before.character.allow_legacy) === 1,
         };
       case 'update_character_flavor':
-        return {
+        return this.integrity.attach(characterId, {
           type: 'update_character_flavor',
+          mode: 'restore',
           alignment: sqlNullableString(before.character, 'alignment'),
           appearance: sqlNullableString(before.character, 'appearance'),
           backstory: sqlNullableString(before.character, 'backstory'),
           notes: sqlNullableString(before.character, 'notes'),
-        };
+        });
       case 'acknowledge_warning':
         return this.warningInverse(characterId, payload, before);
       // The PRECISE inverse: the same command with the selection the write

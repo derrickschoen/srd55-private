@@ -19,6 +19,7 @@ import { UpdateCharacterRulesCommand } from '../../../src/commands/update-charac
 import { UpdateCharacterFlavorCommand } from '../../../src/commands/update-character-flavor';
 import { UpdateClassCommand } from '../../../src/commands/update-class';
 import { UpdateSourceConfigCommand } from '../../../src/commands/update-source-config';
+import { CharacterCommandPayloadError } from '../../../src/commands/payload-validator';
 import { DatabaseContext } from '../../../src/db/database';
 import type {
   CharacterCommandPayload,
@@ -53,7 +54,7 @@ describe('character command factory and executor', () => {
     ).lastInsertId;
   }
 
-  it('constructs all fourteen listed command variants and protects destructive variants', async () => {
+  it('constructs all fifteen listed command variants and protects internal variants', async () => {
     const factory = new CharacterCommandFactory(db, integrity);
     const characterId = 41;
     const slotState = {
@@ -78,6 +79,14 @@ describe('character command factory and executor', () => {
     const protectedSnapshot = await integrity.attach(characterId, {
       type: 'restore_snapshot' as const,
       snapshot: { schema_version: 'a7-v1' },
+    });
+    const protectedFlavorRestore = await integrity.attach(characterId, {
+      type: 'update_character_flavor' as const,
+      mode: 'restore' as const,
+      alignment: null,
+      appearance: '   ',
+      backstory: null,
+      notes: '',
     });
     const variants: readonly [
       CharacterCommandPayload,
@@ -114,6 +123,7 @@ describe('character command factory and executor', () => {
         },
         UpdateCharacterFlavorCommand,
       ],
+      [protectedFlavorRestore, UpdateCharacterFlavorCommand],
       [
         {
           type: 'update_source_config',
@@ -151,13 +161,18 @@ describe('character command factory and executor', () => {
       [protectedSnapshot, RestoreSnapshotCommand],
     ];
 
-    expect(variants).toHaveLength(14);
+    expect(variants).toHaveLength(15);
     for (const [payload, expected] of variants) {
       expect(await factory.make(characterId, payload)).toBeInstanceOf(expected);
     }
 
     await expect(
       factory.make(characterId + 1, protectedRestore),
+    ).rejects.toThrow(
+      'This internal character command is invalid or belongs to another character.',
+    );
+    await expect(
+      factory.make(characterId + 1, protectedFlavorRestore),
     ).rejects.toThrow(
       'This internal character command is invalid or belongs to another character.',
     );
@@ -194,9 +209,10 @@ describe('character command factory and executor', () => {
       },
     });
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       inverse: {
         type: 'update_character_flavor',
+        mode: 'restore',
         alignment: 'Lawful Neutral',
         appearance: 'Old appearance',
         backstory: 'Old backstory',
@@ -205,6 +221,12 @@ describe('character command factory and executor', () => {
       revision: 1,
       idempotent_replay: false,
     });
+    expect(
+      result.inverse.type === 'update_character_flavor' &&
+      result.inverse.mode === 'restore'
+        ? result.inverse.integrity
+        : null,
+    ).toMatch(/^[0-9a-f]{64}$/u);
     expect(
       db.oneRaw(
         `SELECT alignment, appearance, backstory, notes, revision, updated_at
@@ -311,6 +333,136 @@ describe('character command factory and executor', () => {
       backstory: null,
       notes: null,
     });
+  });
+
+  it('edits another field without validating or changing grandfathered note bytes', async () => {
+    const characterId = character();
+    const prefix = 'e\u0301\u0001\0🧙';
+    const grandfathered = `${prefix}${'x'.repeat(25_000 - [...prefix].length)}`;
+    const expectedBytes = new TextEncoder().encode(grandfathered);
+    expect([...grandfathered]).toHaveLength(25_000);
+    db.exec(
+      `UPDATE characters SET alignment = 'Neutral', notes = ? WHERE id = ?`,
+      [grandfathered, characterId],
+    );
+    const executor = new CharacterCommandExecutor(db, integrity);
+
+    const result = await executor.execute({
+      character_id: characterId,
+      operation_uuid: firstOperation,
+      expected_revision: 0,
+      command: {
+        type: 'update_character_flavor',
+        alignment: 'Chaotic Good',
+      },
+    });
+
+    const stored = db.oneRaw(
+      `SELECT alignment, notes, revision FROM characters WHERE id = ?`,
+      [characterId],
+    );
+    expect(stored).toEqual({
+      alignment: 'Chaotic Good',
+      notes: grandfathered,
+      revision: 1,
+    });
+    expect(new TextEncoder().encode(String(stored?.notes))).toEqual(
+      expectedBytes,
+    );
+    expect(Number(db.scalar('SELECT count(*) FROM character_operations'))).toBe(1);
+    expect(Number(db.scalar('SELECT count(*) FROM change_log'))).toBe(1);
+    expect(result.inverse).toMatchObject({
+      type: 'update_character_flavor',
+      mode: 'restore',
+      alignment: 'Neutral',
+      notes: grandfathered,
+    });
+  });
+
+  it('undo restores null, empty-string, and whitespace-only bytes exactly', async () => {
+    const characterId = character();
+    db.exec(
+      `UPDATE characters
+       SET alignment = NULL, appearance = '   ', backstory = NULL, notes = ''
+       WHERE id = ?`,
+      [characterId],
+    );
+    const executor = new CharacterCommandExecutor(db, integrity);
+    const result = await executor.execute({
+      character_id: characterId,
+      operation_uuid: firstOperation,
+      expected_revision: 0,
+      command: {
+        type: 'update_character_flavor',
+        alignment: 'Lawful Good',
+      },
+    });
+
+    expect(
+      db.oneRaw(
+        `SELECT alignment, appearance, backstory, notes
+         FROM characters WHERE id = ?`,
+        [characterId],
+      ),
+    ).toEqual({
+      alignment: 'Lawful Good',
+      appearance: '   ',
+      backstory: null,
+      notes: '',
+    });
+
+    await executor.execute({
+      character_id: characterId,
+      operation_uuid: undoOperation,
+      expected_revision: 1,
+      command: result.inverse,
+    });
+    const restored = db.oneRaw(
+      `SELECT alignment, appearance, backstory, notes, revision
+       FROM characters WHERE id = ?`,
+      [characterId],
+    );
+    expect(restored).toEqual({
+      alignment: null,
+      appearance: '   ',
+      backstory: null,
+      notes: '',
+      revision: 2,
+    });
+    expect(new TextEncoder().encode(String(restored?.appearance))).toEqual(
+      new Uint8Array([32, 32, 32]),
+    );
+    expect(new TextEncoder().encode(String(restored?.notes))).toEqual(
+      new Uint8Array([]),
+    );
+    expect(restored?.backstory).toBeNull();
+    expect(restored?.notes).not.toBeNull();
+  });
+
+  it('refuses NUL in the payload validator before SQLite starts a write', async () => {
+    const characterId = character();
+    const executor = new CharacterCommandExecutor(db, integrity);
+    const execution = executor.execute({
+      character_id: characterId,
+      operation_uuid: firstOperation,
+      expected_revision: 0,
+      command: {
+        type: 'update_character_flavor',
+        appearance: '\0',
+      },
+    });
+
+    await expect(execution).rejects.toBeInstanceOf(CharacterCommandPayloadError);
+    await expect(execution).rejects.toThrow(
+      'appearance must not start with NUL.',
+    );
+    expect(
+      db.oneRaw('SELECT appearance, revision FROM characters WHERE id = ?', [
+        characterId,
+      ]),
+    ).toEqual({ appearance: null, revision: 0 });
+    expect(Number(db.scalar('SELECT count(*) FROM character_operations'))).toBe(0);
+    expect(Number(db.scalar('SELECT count(*) FROM change_log'))).toBe(0);
   });
 
   it('update_character_flavor is all-or-nothing', async () => {

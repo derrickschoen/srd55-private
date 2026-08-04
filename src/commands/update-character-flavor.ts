@@ -2,12 +2,18 @@ import { sqlNullableString, type RowCodec } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import { CHARACTER_TEXT_LIMITS } from '../domain/character-limits';
 import type {
+  CharacterFlavorValues,
   UpdateCharacterFlavorCommand as UpdateCharacterFlavorPayload,
 } from '../domain/command-contracts';
 
-type FlavorValues = Omit<UpdateCharacterFlavorPayload, 'type' | 'reason'>;
+const flavorFields = [
+  'alignment',
+  'appearance',
+  'backstory',
+  'notes',
+] as const;
 
-const flavorValues: RowCodec<FlavorValues> = (row) => ({
+const flavorValues: RowCodec<CharacterFlavorValues> = (row) => ({
   alignment: sqlNullableString(row, 'alignment'),
   appearance: sqlNullableString(row, 'appearance'),
   backstory: sqlNullableString(row, 'backstory'),
@@ -15,17 +21,26 @@ const flavorValues: RowCodec<FlavorValues> = (row) => ({
 });
 
 function validateFlavor(payload: UpdateCharacterFlavorPayload): void {
-  for (const field of [
-    'alignment',
-    'appearance',
-    'backstory',
-    'notes',
-  ] as const) {
+  const restore = payload.mode === 'restore';
+  let changed = 0;
+  for (const field of flavorFields) {
+    if (!restore && !Object.hasOwn(payload, field)) continue;
+    changed += 1;
     const value = payload[field];
     if (value !== null && typeof value !== 'string') {
       throw new TypeError(`${field} must be a string or null.`);
     }
     if (
+      !restore &&
+      field !== 'notes' &&
+      typeof value === 'string' &&
+      value.startsWith('\0')
+    ) {
+      // Mirrors the frozen SQLite length() CHECK at the direct-command seam.
+      throw new TypeError(`${field} must not start with NUL.`);
+    }
+    if (
+      !restore &&
       typeof value === 'string' &&
       [...value].length > CHARACTER_TEXT_LIMITS[field]
     ) {
@@ -33,6 +48,9 @@ function validateFlavor(payload: UpdateCharacterFlavorPayload): void {
         `${field} must not exceed ${String(CHARACTER_TEXT_LIMITS[field])} characters.`,
       );
     }
+  }
+  if (changed === 0) {
+    throw new TypeError('At least one character flavor field must be changed.');
   }
 }
 
@@ -44,9 +62,6 @@ function storedText(value: string | null): string | null {
 export class UpdateCharacterFlavorCommand {
   readonly actionType = 'update_character_flavor';
 
-  readonly #values: FlavorValues;
-  #previous: FlavorValues | undefined;
-
   constructor(
     private readonly db: DatabaseContext,
     private readonly payload: UpdateCharacterFlavorPayload,
@@ -54,12 +69,6 @@ export class UpdateCharacterFlavorCommand {
     // Validation belongs before the write transaction. The factory performs
     // the untrusted-payload check too; this keeps direct command use honest.
     validateFlavor(payload);
-    this.#values = {
-      alignment: storedText(payload.alignment),
-      appearance: storedText(payload.appearance),
-      backstory: storedText(payload.backstory),
-      notes: storedText(payload.notes),
-    };
   }
 
   apply(characterId: number): void {
@@ -74,17 +83,37 @@ export class UpdateCharacterFlavorCommand {
       if (previous === null) {
         throw new TypeError(`Character ${String(characterId)} does not exist.`);
       }
-      this.#previous = previous;
+      const valueFor = (
+        field: (typeof flavorFields)[number],
+      ): string | null => {
+        if (this.payload.mode === 'restore') {
+          return this.payload[field];
+        }
+        if (!Object.hasOwn(this.payload, field)) {
+          return previous[field];
+        }
+        const changed = this.payload[field];
+        if (changed === undefined) {
+          throw new TypeError(`${field} must be a string or null.`);
+        }
+        return storedText(changed);
+      };
+      const values: CharacterFlavorValues = {
+        alignment: valueFor('alignment'),
+        appearance: valueFor('appearance'),
+        backstory: valueFor('backstory'),
+        notes: valueFor('notes'),
+      };
       this.db.exec(
         `UPDATE characters
          SET alignment = ?, appearance = ?, backstory = ?, notes = ?,
              updated_at = ?
          WHERE id = ?`,
         [
-          this.#values.alignment,
-          this.#values.appearance,
-          this.#values.backstory,
-          this.#values.notes,
+          values.alignment,
+          values.appearance,
+          values.backstory,
+          values.notes,
           new Date().toISOString(),
           characterId,
         ],
@@ -92,10 +121,9 @@ export class UpdateCharacterFlavorCommand {
     });
   }
 
-  inverse(): UpdateCharacterFlavorPayload {
-    if (this.#previous === undefined) {
-      throw new Error('Cannot create an inverse before applying the command.');
-    }
-    return { type: 'update_character_flavor', ...this.#previous };
+  inverse(): never {
+    throw new Error(
+      'The executor prepares the signed character flavor restore inverse.',
+    );
   }
 }

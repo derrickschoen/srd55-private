@@ -60,6 +60,8 @@ export interface ConstructedCharacterCommand {
 function requiresIntegrity(payload: CharacterCommandPayload): boolean {
   return (
     (payload.type === 'set_slot' && payload.mode === 'restore') ||
+    (payload.type === 'update_character_flavor' &&
+      payload.mode === 'restore') ||
     (payload.type === 'acknowledge_warning' &&
       payload.mode === 'delete') ||
     payload.type === 'restore_snapshot'

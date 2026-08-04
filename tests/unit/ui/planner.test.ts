@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import type { CharacterCommandPayload } from '../../../src/domain/command-contracts';
+import type {
+  CharacterCommandPayload,
+  CharacterFlavorChanges,
+} from '../../../src/domain/command-contracts';
 import type {
   Workspace,
   WorkspaceSlot,
@@ -174,7 +177,7 @@ describe('planner ability editor', () => {
     const restoreDocument = installInteractiveDocument();
     try {
       const initial = workspace(0, 10, false);
-      let update: Workspace['flavor'] | null = null;
+      let update: CharacterFlavorChanges | null = null;
       const actions: PlannerEditorActions = {
         updateFlavor: (flavor) => {
           update = flavor;
@@ -241,19 +244,30 @@ describe('planner ability editor', () => {
       }
       expect(alignment.type).toBe('text');
       expect(appearance.tagName.toLowerCase()).toBe('textarea');
-      expect(alignment.maxLength).toBe(CHARACTER_TEXT_LIMITS.alignment);
-      expect(appearance.maxLength).toBe(CHARACTER_TEXT_LIMITS.appearance);
-      expect(backstory.maxLength).toBe(CHARACTER_TEXT_LIMITS.backstory);
-      expect(notes.maxLength).toBe(CHARACTER_TEXT_LIMITS.notes);
+      expect(alignment.maxLength).toBeUndefined();
+      expect(appearance.maxLength).toBeUndefined();
+      expect(backstory.maxLength).toBeUndefined();
+      expect(notes.maxLength).toBeUndefined();
 
-      appearance.value = '🧙🧙';
+      const exactAstral = '🧙'.repeat(CHARACTER_TEXT_LIMITS.appearance);
+      appearance.value = exactAstral;
       appearance.dispatchEvent(new Event('input'));
+      expect(appearance.value).toBe(exactAstral);
+      expect(appearance.value.length).toBe(
+        CHARACTER_TEXT_LIMITS.appearance * 2,
+      );
+      appearance.value = `${exactAstral}🧙`;
+      appearance.dispatchEvent(new Event('input'));
+      expect(appearance.value).toBe(exactAstral);
       expect(
         rendered.querySelector('[data-flavor-remaining="appearance"]')
           ?.value,
       ).toBe(
-        `${String(CHARACTER_TEXT_LIMITS.appearance - 2)} / ${String(CHARACTER_TEXT_LIMITS.appearance)} remaining`,
+        `0 / ${String(CHARACTER_TEXT_LIMITS.appearance)} remaining`,
       );
+
+      appearance.value = '🧙🧙';
+      appearance.dispatchEvent(new Event('input'));
 
       alignment.value = '  Chaotic Good  ';
       backstory.value = 'Line one\nLine two';
@@ -267,6 +281,54 @@ describe('planner ability editor', () => {
         backstory: 'Line one\nLine two',
         notes: '   ',
       });
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('submits only changed flavor fields and leaves a grandfathered note alone', () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const grandfathered = 'x'.repeat(CHARACTER_TEXT_LIMITS.notes + 5_000);
+      const base = workspace(0, 10, false);
+      const initial: Workspace = {
+        ...base,
+        flavor: { ...base.flavor, notes: grandfathered },
+      };
+      let update: CharacterFlavorChanges | null = null;
+      const rendered = interactiveElement(
+        renderCharacterDetails({
+          workspace: initial,
+          actions: {
+            updateFlavor: (flavor) => {
+              update = flavor;
+            },
+          },
+          disabled: false,
+        }),
+      );
+      expect(
+        rendered.querySelector('[data-flavor-remaining="notes"]')?.value,
+      ).toBe(
+        `5000 over the ${String(CHARACTER_TEXT_LIMITS.notes)} character limit`,
+      );
+
+      const alignment = rendered.querySelector(
+        '[data-focus-key="flavor-alignment"]',
+      );
+      if (alignment === null) {
+        throw new Error('The alignment control was not rendered.');
+      }
+      alignment.value = 'Chaotic Neutral';
+      alignment.dispatchEvent(new Event('input'));
+      rendered
+        .querySelector('[data-testid="character-details-form"]')
+        ?.dispatchEvent(new Event('submit', { cancelable: true }));
+
+      expect(update).toEqual({ alignment: 'Chaotic Neutral' });
+      expect(
+        rendered.querySelector('[data-focus-key="flavor-notes"]')?.value,
+      ).toBe(grandfathered);
     } finally {
       restoreDocument();
     }

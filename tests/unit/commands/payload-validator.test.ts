@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CharacterCommandPayloadError,
   CharacterCommandPayloadValidator,
   validateCharacterCommandPayload,
 } from '../../../src/commands/payload-validator';
@@ -250,10 +251,7 @@ describe('character command payload validation', () => {
     const astral = '🧙';
     const accepted = {
       type: 'update_character_flavor',
-      alignment: null,
-      appearance: null,
       backstory: astral.repeat(CHARACTER_TEXT_LIMITS.backstory),
-      notes: null,
     };
 
     expect(validateCharacterCommandPayload(accepted)).toEqual(accepted);
@@ -266,24 +264,70 @@ describe('character command payload validation', () => {
     );
   });
 
-  it('update_character_flavor requires the exact four-field value', () => {
-    const complete = {
+  it('update_character_flavor validates only fields present in an edit', () => {
+    const partial = {
       type: 'update_character_flavor',
       alignment: 'Chaotic Good',
-      appearance: null,
-      backstory: null,
-      notes: null,
     };
 
-    expect(validateCharacterCommandPayload(complete)).toEqual(complete);
-    const { notes: _notes, ...missingNotes } = complete;
+    expect(validateCharacterCommandPayload(partial)).toEqual(partial);
+    expectInvalid(
+      { type: 'update_character_flavor' },
+      'At least one character flavor field must be changed.',
+    );
+    expectInvalid(
+      { ...partial, extra: 'not part of the atomic value' },
+      'Unknown command field: extra.',
+    );
+    expectInvalid(
+      {
+        ...partial,
+        notes: 'x'.repeat(CHARACTER_TEXT_LIMITS.notes + 1),
+      },
+      `notes must not exceed ${String(CHARACTER_TEXT_LIMITS.notes)} characters.`,
+    );
+  });
+
+  it('update_character_flavor reports NUL at the typed payload boundary', () => {
+    const validate = () => validateCharacterCommandPayload({
+      type: 'update_character_flavor',
+      appearance: '\0',
+    });
+
+    expect(validate).toThrow(CharacterCommandPayloadError);
+    expect(validate).toThrow('appearance must not start with NUL.');
+    expect(validateCharacterCommandPayload({
+      type: 'update_character_flavor',
+      appearance: 'visible\0suffix',
+    })).toEqual({
+      type: 'update_character_flavor',
+      appearance: 'visible\0suffix',
+    });
+    expect(validateCharacterCommandPayload({
+      type: 'update_character_flavor',
+      notes: '\0',
+    })).toEqual({
+      type: 'update_character_flavor',
+      notes: '\0',
+    });
+  });
+
+  it('accepts a complete signed flavor restore without applying edit rules', () => {
+    const restore = {
+      type: 'update_character_flavor',
+      mode: 'restore',
+      alignment: null,
+      appearance: '   ',
+      backstory: 'Stored story',
+      notes: `\0${'x'.repeat(CHARACTER_TEXT_LIMITS.notes + 1)}`,
+      integrity: signature,
+    };
+
+    expect(validateCharacterCommandPayload(restore)).toEqual(restore);
+    const { notes: _notes, ...missingNotes } = restore;
     expectInvalid(
       missingNotes,
       'notes is required; use null when it is not known.',
-    );
-    expectInvalid(
-      { ...complete, extra: 'not part of the atomic value' },
-      'Unknown command field: extra.',
     );
   });
 

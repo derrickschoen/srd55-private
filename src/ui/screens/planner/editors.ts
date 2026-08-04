@@ -9,11 +9,15 @@ import type {
   Workspace,
 } from '../../../domain/read-models';
 import type { JsonObject } from '../../../domain/models';
+import type {
+  CharacterFlavorChanges,
+  CharacterFlavorValues,
+} from '../../../domain/command-contracts';
 import { CHARACTER_TEXT_LIMITS } from '../../../domain/character-limits';
 import { freeTextSpan } from '../../free-text';
 
 export interface PlannerEditorActions {
-  updateFlavor(flavor: Workspace['flavor']): void;
+  updateFlavor(flavor: CharacterFlavorChanges): void;
   updateAbility(ability: Ability, score: number): void;
   updateLegacy(allowLegacy: boolean): void;
   updateClass(
@@ -60,6 +64,33 @@ function field(
   return wrapper;
 }
 
+function changedFlavor(
+  current: CharacterFlavorValues,
+  initial: CharacterFlavorValues,
+): CharacterFlavorChanges | null {
+  const appearance = current.appearance === initial.appearance
+    ? {}
+    : { appearance: current.appearance };
+  const backstory = current.backstory === initial.backstory
+    ? {}
+    : { backstory: current.backstory };
+  const notes = current.notes === initial.notes ? {} : { notes: current.notes };
+
+  if (current.alignment !== initial.alignment) {
+    return { alignment: current.alignment, ...appearance, ...backstory, ...notes };
+  }
+  if (current.appearance !== initial.appearance) {
+    return { appearance: current.appearance, ...backstory, ...notes };
+  }
+  if (current.backstory !== initial.backstory) {
+    return { backstory: current.backstory, ...notes };
+  }
+  if (current.notes !== initial.notes) {
+    return { notes: current.notes };
+  }
+  return null;
+}
+
 export function renderCharacterDetails(options: {
   workspace: Workspace;
   actions: Pick<PlannerEditorActions, 'updateFlavor'>;
@@ -84,6 +115,12 @@ export function renderCharacterDetails(options: {
     backstory: document.createElement('textarea'),
     notes: document.createElement('textarea'),
   };
+  const initial = {
+    alignment: options.workspace.flavor.alignment ?? '',
+    appearance: options.workspace.flavor.appearance ?? '',
+    backstory: options.workspace.flavor.backstory ?? '',
+    notes: options.workspace.flavor.notes ?? '',
+  };
 
   for (const fieldName of [
     'alignment',
@@ -93,8 +130,7 @@ export function renderCharacterDetails(options: {
   ] as const) {
     const control = controls[fieldName];
     const maximum = CHARACTER_TEXT_LIMITS[fieldName];
-    control.value = options.workspace.flavor[fieldName] ?? '';
-    control.maxLength = maximum;
+    control.value = initial[fieldName];
     control.disabled = options.disabled;
     control.dataset.focusKey = `flavor-${fieldName}`;
     const wrapper = field(
@@ -104,9 +140,18 @@ export function renderCharacterDetails(options: {
     const remaining = document.createElement('output');
     remaining.dataset.flavorRemaining = fieldName;
     const refreshRemaining = (): void => {
-      remaining.value = `${String(maximum - [...control.value].length)} / ${String(maximum)} remaining`;
+      const codePoints = [...control.value].length;
+      remaining.value = codePoints <= maximum
+        ? `${String(maximum - codePoints)} / ${String(maximum)} remaining`
+        : `${String(codePoints - maximum)} over the ${String(maximum)} character limit`;
     };
-    control.addEventListener('input', refreshRemaining);
+    control.addEventListener('input', () => {
+      const codePoints = [...control.value];
+      if (codePoints.length > maximum) {
+        control.value = codePoints.slice(0, maximum).join('');
+      }
+      refreshRemaining();
+    });
     refreshRemaining();
     wrapper.append(remaining);
     form.append(wrapper);
@@ -122,12 +167,13 @@ export function renderCharacterDetails(options: {
   form.addEventListener('submit', (event) => {
     event.preventDefault();
     if (options.disabled) return;
-    options.actions.updateFlavor({
+    const changes = changedFlavor({
       alignment: controls.alignment.value,
       appearance: controls.appearance.value,
       backstory: controls.backstory.value,
       notes: controls.notes.value,
-    });
+    }, initial);
+    if (changes !== null) options.actions.updateFlavor(changes);
   });
   section.append(statement, sharing, form);
   return section;

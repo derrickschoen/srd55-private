@@ -330,21 +330,59 @@ function validateUpdateCharacterRules(record: UnknownRecord): void {
 }
 
 function validateUpdateCharacterFlavor(record: UnknownRecord): void {
-  rejectUnknown(record, [
-    'type',
+  const fields = [
     'alignment',
     'appearance',
     'backstory',
     'notes',
-    'reason',
-  ]);
-  for (const field of [
-    'alignment',
-    'appearance',
-    'backstory',
-    'notes',
-  ] as const) {
-    nullableString(record, field, CHARACTER_TEXT_LIMITS[field]);
+  ] as const;
+  const mode = record.mode ?? 'edit';
+
+  if (mode === 'restore') {
+    rejectUnknown(record, [
+      'type',
+      'mode',
+      ...fields,
+      'integrity',
+      'reason',
+    ]);
+    for (const field of fields) {
+      if (!hasOwn(record, field)) {
+        invalid(`${field} is required; use null when it is not known.`);
+      }
+      if (record[field] !== null && typeof record[field] !== 'string') {
+        invalid(`${field} must be a string or null.`);
+      }
+    }
+    validateIntegrity(record);
+    return;
+  }
+
+  if (mode !== 'edit') {
+    invalid('Unknown character flavor mutation mode.');
+  }
+  rejectUnknown(record, ['type', 'mode', ...fields, 'reason']);
+  const changed = fields.filter((field) => hasOwn(record, field));
+  if (changed.length === 0) {
+    invalid('At least one character flavor field must be changed.');
+  }
+  for (const field of changed) {
+    const value = record[field];
+    if (value === null) continue;
+    if (typeof value !== 'string') {
+      invalid(`${field} must be a string or null.`);
+    }
+    // The three frozen bounded CHECKs use SQLite length(), whose visible
+    // prefix is empty when NUL is first. Notes deliberately has no CHECK so
+    // grandfathered bytes remain storable; a later NUL has a nonempty prefix.
+    if (field !== 'notes' && value.startsWith('\0')) {
+      invalid(`${field} must not start with NUL.`);
+    }
+    if ([...value].length > CHARACTER_TEXT_LIMITS[field]) {
+      invalid(
+        `${field} must not exceed ${String(CHARACTER_TEXT_LIMITS[field])} characters.`,
+      );
+    }
   }
 }
 
