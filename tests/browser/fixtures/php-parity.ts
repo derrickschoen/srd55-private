@@ -169,6 +169,16 @@ function seedSourceCatalog(
      ) VALUES (?, 'Parity Human', '2024', 0, ?)`,
     [humanContentKey, nestedRule('human-origin-feat')],
   ).lastInsertId;
+  // This replacement-image source is a bundled aggregate, so keep both
+  // halves present just like production seeding. CI-3s fingerprints the whole
+  // aggregate and must not have to invent a missing template half at boot.
+  db.exec(
+    `INSERT INTO species_templates (
+       content_key, name, rules_edition, creature_type, size,
+       alternate_size, base_speed_feet
+     ) VALUES (?, 'Parity Human', '2024', 'humanoid', 'medium', NULL, 30)`,
+    [humanContentKey],
+  );
   const backgroundContentKey = '2024:background:custom' as ContentKey;
   registerBundledStableContentIdentity(db, {
     kind: 'background',
@@ -183,6 +193,18 @@ function seedSourceCatalog(
      )`,
     [backgroundContentKey, nestedRule('background-origin-feat')],
   ).lastInsertId;
+  db.exec(
+    `INSERT INTO background_templates (
+       content_key, name, rules_edition, ability_score_1, ability_score_2,
+       ability_score_3, feat_name, skill_proficiency_1,
+       skill_proficiency_2, tool_proficiency, equipment_option_a,
+       equipment_option_b
+     ) VALUES (
+       ?, 'Custom Background', '2024', 'intelligence', 'wisdom', 'charisma',
+       'Magic Initiate (Cleric)', 'Arcana', 'Religion', '', '', ''
+     )`,
+    [backgroundContentKey],
+  );
   return { magicInitiate, human, background };
 }
 

@@ -174,6 +174,26 @@ describe('catalog content registry resolution', () => {
     });
   });
 
+  it('refuses an ambiguous fingerprint when the second matching row is damaged', () => {
+    const first = bundled('2024:feat:first');
+    const second = bundled('2024:feat:second');
+    addAbcFingerprint(first);
+    addAbcFingerprint(second);
+    db.exec(
+      `UPDATE catalog_content_fingerprints SET canonical_json = 'damaged'
+       WHERE content_kind = 'feat' AND content_key = ?
+         AND fingerprint_scheme = 'content-v1'
+         AND fingerprint_digest = ?`,
+      [second, ABC_DIGEST],
+    );
+    const key = `2024:content.v1:${ABC_DIGEST}` as ContentKey;
+
+    expect(() => resolveContentReference(db, {
+      kind: 'feat',
+      contentKey: key,
+    })).toThrow(ContentIdentityCollision);
+  });
+
   it('labels a unique bundled fingerprint fallback as review-required', () => {
     const srdKey = bundled('2024:magic-missile', 'spell');
     addAbcFingerprint(srdKey, 'spell');

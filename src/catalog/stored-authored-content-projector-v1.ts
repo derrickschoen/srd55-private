@@ -44,6 +44,11 @@ import {
 } from '../domain/enums';
 import type { ContentKey } from '../domain/ids';
 import type { JsonObject, JsonValue } from '../domain/models';
+import {
+  backgroundFeatBaseName,
+  MAGIC_INITIATE_BASE_NAME,
+  MAGIC_INITIATE_LISTS,
+} from '../domain/background-feat-name';
 import { GrantRule } from '../grants/grant-rule';
 import type {
   AuthoredContentReferenceV1,
@@ -1564,12 +1569,26 @@ export function storedAuthoredRegistryReferencesV1(
   const resolver: StoredAuthoredReferenceResolverV1 = {
     spell: (contentKey) => fingerprintReference(db, 'spell', contentKey),
     featByStoredName: ({ name, edition }) => {
-      const keys = db.all(
+      const findKeys = (definitionName: string): readonly ContentKey[] => db.all(
         `SELECT content_key FROM feat_definitions
          WHERE name = ? AND rules_edition = ? ORDER BY content_key`,
-        [name, edition],
+        [definitionName, edition],
         (row) => sqlString(row, 'content_key') as ContentKey,
       );
+      // Feat names are open homebrew text, so parentheses can legitimately be
+      // part of the exact name. Only an absent exact match permits the legacy
+      // printed SRD Magic Initiate label to fall back to its base definition.
+      let keys = findKeys(name);
+      if (keys.length === 0) {
+        const parsed = backgroundFeatBaseName(name);
+        const isPrintedMagicInitiate =
+          parsed.base === MAGIC_INITIATE_BASE_NAME &&
+          parsed.option !== null &&
+          (MAGIC_INITIATE_LISTS as readonly string[]).includes(parsed.option);
+        if (isPrintedMagicInitiate) {
+          keys = findKeys(parsed.base);
+        }
+      }
       if (keys.length !== 1) {
         return projectionError(
           `background feat '${name}' in edition '${edition}' does not resolve uniquely.`,
