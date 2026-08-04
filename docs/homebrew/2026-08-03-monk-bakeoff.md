@@ -1,8 +1,9 @@
 # Monk third-caster bake-off: three level-3 bundles
 
 **Status:** owner comparison packet; ready for design review, not approved for
-seeding or playtest. The working names, curated lists, and original rules text
-remain provisional under D169. This packet makes no recommendation.
+seeding or playtest. The working names were approved by owner ruling 2026-08-04
+(see `rulings.md`); the curated lists and original rules text remain
+provisional under D169. This packet makes no recommendation.
 
 ## Source boundary and fixed chassis
 
@@ -72,7 +73,7 @@ weapon.
 
 ### Warrior of the Barbed Court
 
-**Working name — owner approval pending under D169.**
+**Name approved by owner ruling 2026-08-04 (see `rulings.md`).**
 
 **Fantasy.** A monk who turns an insult into a supernatural pressure-point and
 goad in order to make a foe falter whenever it lashes out at anyone else.
@@ -191,7 +192,7 @@ others less reliable.
 
 ### Warrior of the Ten Selves
 
-**Working name — owner approval pending under D169.**
+**Name approved by owner ruling 2026-08-04 (see `rulings.md`).**
 
 **Fantasy.** A monk who leaves disciplined images in every gesture in order to
 let a rehearsed self catch a blow, repair a missed strike, or misdirect an
@@ -313,7 +314,7 @@ exchange by letting the image complete one failed motion.
 
 ### Warrior of the Hundred Knots
 
-**Working name — owner approval pending under D169.**
+**Name approved by owner ruling 2026-08-04 (see `rulings.md`).**
 
 **Fantasy.** A monk who draws living bindings through strikes and surrounding
 growth in order to slow a quarry and close the routes by which it could escape.

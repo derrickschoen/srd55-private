@@ -13,8 +13,12 @@ open, see below).
 ## Cross-cutting question (from D191, carried by the bake-off doc)
 
 **Do all three monk finalists ship as app content, or does one take the
-replace-EK/AT slot (D169), and if so which?** Working names for all monk
-subclasses are also still "owner approval pending under D169."
+replace-EK/AT slot (D169), and if so which?** Asked 2026-08-04; owner said
+"you look for it" — no existing ruling found in the record (D191 left it
+OPEN); still open.
+
+Working names: **resolved** — all four approved by owner ruling 2026-08-04
+(see `rulings.md`).
 
 License flip option is recorded in the bake-off doc if the repo ever goes
 public: CC0 for our original text, SRD notice retained.

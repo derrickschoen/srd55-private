@@ -1,6 +1,6 @@
 # Warrior of the Waking Will
 
-OWNER-APPROVAL: Subclass name, “Warrior of the Waking Will.”
+Subclass name approved by owner ruling 2026-08-04 (see `rulings.md`).
 
 Status: **provisional, ready for design review only**. This is a MINT-FREE,
 docs-only full subclass draft. The family chassis is reproduced without
