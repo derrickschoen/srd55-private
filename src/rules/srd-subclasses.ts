@@ -15,6 +15,7 @@ import {
   type CharacterLevel,
 } from '../domain/enums';
 import { GrantRule } from '../grants/grant-rule';
+import { SRD_ATTRIBUTION_NOTICE } from './srd-attribution';
 
 export class SrdSubclassesError extends Error {
   constructor(message: string) {
@@ -172,14 +173,8 @@ export interface SrdSubclassManifest {
   readonly unconditional_rule_sets: readonly SrdSubclassUnconditionalRuleSet[];
 }
 
-const REQUIRED_NOTICE = `This work includes material from the System Reference Document 5.2
-("SRD 5.2") by Wizards of the Coast LLC, available at
-https://www.dndbeyond.com/srd. The SRD 5.2 is licensed under the Creative
-Commons Attribution 4.0 International License, available at
-https://creativecommons.org/licenses/by/4.0/legalcode.`;
-
-/** SC-1's provenance instructions are admitted exactly, never as free prose. */
-const REQUIRED_EXTRACT_PREAMBLE = `${REQUIRED_NOTICE}
+/** SC-1's provenance words are admitted exactly; line wrapping is immaterial. */
+const REQUIRED_EXTRACT_PREAMBLE = `${SRD_ATTRIBUTION_NOTICE}
 
 --- Selective subclass catalog extract: printed pages 30, 35, 40, 46, 49, 52,
     56-57, 61, 64, 69-70, 76 and 82. ---
@@ -215,6 +210,8 @@ slice below is verbatim; omission is the only edit to source lines.
 
 --- Extracted catalog lines follow. ---
 `;
+
+const EXTRACT_BODY_MARKER = '--- Extracted catalog lines follow. ---\n';
 
 const EXPECTED_SUBCLASS_NAMES: Readonly<
   Record<SrdSubclassClassName, string>
@@ -390,13 +387,28 @@ function normalizedLine(line: string): string {
   return line.replace(/^\f+/u, '').trim().replace(/\s+/gu, ' ');
 }
 
+function collapseWhitespace(value: string): string {
+  return value.trim().replace(/\s+/gu, ' ');
+}
+
 function extractBody(source: string): string {
-  if (!source.startsWith(REQUIRED_EXTRACT_PREAMBLE)) {
+  const bodyStart = source.indexOf(EXTRACT_BODY_MARKER);
+  if (bodyStart === -1) {
     throw new SrdSubclassesError(
       'the required attribution and extract provenance preamble are absent or altered.',
     );
   }
-  return source.slice(REQUIRED_EXTRACT_PREAMBLE.length);
+
+  const preambleEnd = bodyStart + EXTRACT_BODY_MARKER.length;
+  if (
+    collapseWhitespace(source.slice(0, preambleEnd)) !==
+    collapseWhitespace(REQUIRED_EXTRACT_PREAMBLE)
+  ) {
+    throw new SrdSubclassesError(
+      'the required attribution and extract provenance preamble are absent or altered.',
+    );
+  }
+  return source.slice(preambleEnd);
 }
 
 function rawSections(source: string): RawSection[] {

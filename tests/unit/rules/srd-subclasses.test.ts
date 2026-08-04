@@ -8,6 +8,7 @@ import {
   type SrdUnconditionalSpellTable,
   type SrdUnconditionalSpellTableName,
 } from '../../../src/rules/srd-subclasses';
+import { SRD_ATTRIBUTION_NOTICE } from '../../../src/rules/srd-attribution';
 
 const SOURCE_URL = new URL(
   '../../../docs/srd/source/subclasses.txt',
@@ -18,6 +19,10 @@ const FULL_SOURCE_URL = new URL(
   import.meta.url,
 );
 const SOURCE = readFileSync(SOURCE_URL, 'utf8');
+
+function collapseWhitespace(value: string): string {
+  return value.trim().replace(/\s+/gu, ' ');
+}
 
 const EXPECTED_SUBCLASSES = [
   ['Barbarian', 'Path of the Berserker'],
@@ -311,6 +316,15 @@ function expectDeepFrozen(value: unknown): void {
 }
 
 describe('SRD subclass manifest', () => {
+  it('the checked-in subclass extract carries the required attribution preamble', () => {
+    const preambleEnd = SOURCE.search(/\n\s*\n/u);
+    expect(preambleEnd).toBeGreaterThan(0);
+
+    expect(collapseWhitespace(SOURCE.slice(0, preambleEnd))).toBe(
+      collapseWhitespace(SRD_ATTRIBUTION_NOTICE),
+    );
+  });
+
   it('parses exactly the twelve SRD subclass sections, one per class', () => {
     const parsed = manifest();
     const actual = Object.values(parsed.by_class).map(
@@ -652,7 +666,7 @@ describe('SRD subclass parser rejections', () => {
     ).toThrow(/non-heading prose/u);
   });
 
-  it('requires the verbatim attribution and exact SC-1 provenance preamble', () => {
+  it('requires the attribution and SC-1 provenance preamble', () => {
     expect(() =>
       parseSrdSubclasses(SOURCE.replace('This work includes', 'This includes')),
     ).toThrow(/required attribution and extract provenance preamble/u);
