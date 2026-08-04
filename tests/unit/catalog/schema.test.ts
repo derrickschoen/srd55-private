@@ -415,6 +415,17 @@ describe('browser catalog schema', () => {
     ).toBe(false);
   });
 
+  it('refuses surrounding whitespace on every spell locator at parse time', () => {
+    for (const value of [
+      record({ identityKey: ' test-spell' }),
+      record({ versionKey: '2024:test-spell ' }),
+      record({ spellLists: [' Wizard'] }),
+    ]) {
+      expect(() => parseCatalogDocuments([JSON.stringify([value])]))
+        .toThrow('contains surrounding whitespace');
+    }
+  });
+
   /**
    * `kinds` IS WHAT DECIDES WHETHER THE SPELL SWEEP RUNS, so it is asserted on
    * its own rather than only through the importer. The three cases below are

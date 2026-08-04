@@ -53,6 +53,7 @@ import {
 } from './source-catalog-records';
 import { isRecord } from '../worker/handler';
 import { isImportedContentKey } from './catalog-key';
+import { trimEqualCatalogLocator } from './catalog-field-values';
 
 /**
  * THE RECORD KINDS A TIER 1 DOCUMENT MAY CARRY, AND HOW A DOCUMENT SAYS WHICH.
@@ -340,6 +341,12 @@ function nonEmptyString(
   return textLength(value, field, maximumLength);
 }
 
+function spellLocator(value: string, field: string): string {
+  return trimEqualCatalogLocator(value, field, (message) => {
+    throw new TypeError(message);
+  });
+}
+
 function nullableString(
   value: unknown,
   field: string,
@@ -452,8 +459,14 @@ function catalogRecord(value: unknown): CatalogRecord {
   }
 
   return {
-    identityKey: nonEmptyString(value.identityKey, 'identityKey'),
-    versionKey: nonEmptyString(value.versionKey, 'versionKey'),
+    identityKey: spellLocator(
+      nonEmptyString(value.identityKey, 'identityKey'),
+      'identityKey',
+    ),
+    versionKey: spellLocator(
+      nonEmptyString(value.versionKey, 'versionKey'),
+      'versionKey',
+    ),
     name: nonEmptyString(value.name, 'name'),
     edition: edition as RulesEdition,
     level: Number(level),
@@ -468,7 +481,8 @@ function catalogRecord(value: unknown): CatalogRecord {
     saveAbilities: stringList(value.saveAbilities, 'saveAbilities'),
     effectReliabilityCategory:
       reliability as EffectReliabilityCategory,
-    spellLists: stringList(value.spellLists, 'spellLists'),
+    spellLists: stringList(value.spellLists, 'spellLists').map((entry) =>
+      spellLocator(entry, 'spellLists')),
     sourceBooks: stringList(value.sourceBooks, 'sourceBooks'),
     sourcePage:
       sourcePage === undefined || sourcePage === null
