@@ -14,15 +14,19 @@ import type { DatabaseLifecycle } from '../../../src/db/database-lifecycle';
 import type { ContentKey } from '../../../src/domain/ids';
 import { getSqlite3, MemoryDatabaseStorage } from '../../helpers/open-db';
 
-const INDEPENDENT_SRD_ROOT_ANCHORS = [
-  // Transcribed independently from the checked-in SRD source text. These
-  // literals must never be generated from the manifest or persisted rows.
+const INDEPENDENT_ROOT_ANCHORS = [
+  // These root names are hand-pinned against their stated provenance, while
+  // every content_key is the repository's edition/kind/slug convention (not
+  // text transcribed from the SRD). None of these literals may be generated
+  // from the manifest or persisted rows.
+  // SRD weapon names: docs/srd/source/weapons-table.txt:10-11.
   { content_kind: 'weapon', content_key: '2024:weapon:club', root_name: 'Club' },
   {
     content_kind: 'weapon',
     content_key: '2024:weapon:dagger',
     root_name: 'Dagger',
   },
+  // SRD armor names: docs/srd/source/armor-table.txt:12-13.
   {
     content_kind: 'armor',
     content_key: '2024:armor:padded-armor',
@@ -33,24 +37,28 @@ const INDEPENDENT_SRD_ROOT_ANCHORS = [
     content_key: '2024:armor:leather-armor',
     root_name: 'Leather Armor',
   },
+  // SRD spell names: docs/srd/source/spell-descriptions.txt:18-19 and 3414-3415.
   {
     content_kind: 'spell',
     content_key: '2024:acid-arrow',
     root_name: 'Acid Arrow',
   },
   { content_kind: 'spell', content_key: '2024:fireball', root_name: 'Fireball' },
+  // SRD class names: docs/srd/source/class-level-tables.txt:10-12 and 35-37.
   {
     content_kind: 'class',
     content_key: '2024:class:barbarian',
     root_name: 'Barbarian',
   },
   { content_kind: 'class', content_key: '2024:class:bard', root_name: 'Bard' },
+  // SRD feat names: docs/srd/source/feats.txt:28-29 and 37-38.
   { content_kind: 'feat', content_key: '2024:feat:alert', root_name: 'Alert' },
   {
     content_kind: 'feat',
     content_key: '2024:feat:magic-initiate',
     root_name: 'Magic Initiate',
   },
+  // Local legacy subclasses, deliberately not SRD 5.2.1 names.
   {
     content_kind: 'subclass',
     content_key: '2024:subclass:eldritch-knight',
@@ -61,6 +69,7 @@ const INDEPENDENT_SRD_ROOT_ANCHORS = [
     content_key: '2024:subclass:arcane-trickster',
     root_name: 'Arcane Trickster',
   },
+  // SRD species names: docs/srd/source/species-descriptions.txt:47-57.
   {
     content_kind: 'species',
     content_key: '2024:species:dragonborn',
@@ -71,6 +80,7 @@ const INDEPENDENT_SRD_ROOT_ANCHORS = [
     content_key: '2024:species:dwarf',
     root_name: 'Dwarf',
   },
+  // SRD background names: docs/srd/source/backgrounds.txt:74-84.
   {
     content_kind: 'background',
     content_key: '2024:background:acolyte',
@@ -87,7 +97,7 @@ const MUTATED_SPELL_KEY = '2024:acid-arrow' as ContentKey;
 
 function anchoredRootName(
   db: DatabaseContext,
-  anchor: (typeof INDEPENDENT_SRD_ROOT_ANCHORS)[number],
+  anchor: (typeof INDEPENDENT_ROOT_ANCHORS)[number],
 ): string | null {
   let sql: string;
   switch (anchor.content_kind) {
@@ -171,7 +181,7 @@ describe('CI-3s bundled stable-key fingerprint registration', () => {
 
     expect(registryEnumeration).toEqual(expectedEnumeration);
     expect(currentEnumeration).toEqual(expectedEnumeration);
-    for (const anchor of INDEPENDENT_SRD_ROOT_ANCHORS) {
+    for (const anchor of INDEPENDENT_ROOT_ANCHORS) {
       expect(registryEnumeration).toContainEqual({
         content_kind: anchor.content_kind,
         content_key: anchor.content_key,

@@ -1,9 +1,9 @@
 import {
   MAGIC_INITIATE_ABILITIES,
   MAGIC_INITIATE_FEAT_CONTENT_KEY,
-  MAGIC_INITIATE_LISTS,
   SKILLED_FEAT_CONTENT_KEY,
 } from '../builder/background-choices';
+import { MAGIC_INITIATE_LISTS } from '../domain/background-feat-name';
 import { LEVEL_UP_SUBCLASS_LEVEL } from '../builder/level-up';
 import {
   LEVEL_UP_WARNING_KEYS,

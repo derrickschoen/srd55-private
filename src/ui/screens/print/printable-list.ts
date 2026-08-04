@@ -9,6 +9,7 @@ import {
   comparePrintableSourceGroups,
   comparePrintableSpells,
 } from '../../../reports/printable-ordering';
+import { MAGIC_INITIATE_LISTS } from '../../../domain/background-feat-name';
 import { SRD_ATTRIBUTION_NOTICE } from '../../../rules/srd-attribution';
 
 export const TEXT_UNAVAILABLE_WARNING =
@@ -286,9 +287,9 @@ export function renderPrintableList(spellList: PrintableSpellList): string {
     .join('');
   const sections = [...spellList.unprepared_sections]
     .sort((left, right) => {
-      const order = ['Cleric', 'Druid', 'Wizard'];
       return (
-        order.indexOf(left.class_name) - order.indexOf(right.class_name)
+        MAGIC_INITIATE_LISTS.indexOf(left.class_name) -
+        MAGIC_INITIATE_LISTS.indexOf(right.class_name)
       );
     })
     .map((section, index) =>
