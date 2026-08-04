@@ -32,6 +32,7 @@ import { renderAgentReference } from './agent-reference-panel';
 import { renderCompleteness } from './completeness';
 import { renderDiceHelper } from './dice';
 import {
+  renderCharacterDetails,
   renderEditors,
   type PlannerEditorActions,
 } from './editors';
@@ -523,6 +524,13 @@ function renderPlanner(
     ),
   );
   const editorActions: PlannerEditorActions = {
+    updateFlavor: (flavor) =>
+      void mutate(() =>
+        session.execute({
+          type: 'update_character_flavor',
+          ...flavor,
+        }),
+      ),
     updateAbility: (ability: Ability, score: number) =>
       void mutate(() =>
         session.execute({
@@ -618,6 +626,15 @@ function renderPlanner(
           ),
       ),
   };
+  // Keep authored identity text next to the character identity, ahead of the
+  // diagnostic/reference helpers and every rules or equipment editor.
+  primary.prepend(
+    renderCharacterDetails({
+      workspace,
+      actions: editorActions,
+      disabled: session.saving,
+    }),
+  );
   primary.append(
     renderEditors({
       workspace,

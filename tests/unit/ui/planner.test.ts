@@ -23,9 +23,11 @@ import {
   type PlannerQueryClient,
 } from '../../../src/ui/screens/planner/screen';
 import {
+  renderCharacterDetails,
   renderEditors,
   type PlannerEditorActions,
 } from '../../../src/ui/screens/planner/editors';
+import { CHARACTER_TEXT_LIMITS } from '../../../src/domain/character-limits';
 import {
   installInteractiveDocument,
   interactiveElement,
@@ -115,6 +117,12 @@ function workspace(
     classes: [],
     available_classes: [],
     allow_legacy: allowLegacy,
+    flavor: {
+      alignment: 'Neutral Good',
+      appearance: 'Silver hair',
+      backstory: 'Raised beside the old observatory.',
+      notes: null,
+    },
     configurable_sources: [],
     order_sources: [],
     source_catalog: { feat: [], species: [], background: [] },
@@ -162,12 +170,115 @@ const emptyCompleteness: CompletenessResult = {
 };
 
 describe('planner ability editor', () => {
+  it('submits one complete Character details value and counts code points live', () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const initial = workspace(0, 10, false);
+      let update: Workspace['flavor'] | null = null;
+      const actions: PlannerEditorActions = {
+        updateFlavor: (flavor) => {
+          update = flavor;
+        },
+        updateAbility: () => undefined,
+        updateLegacy: () => undefined,
+        updateClass: () => undefined,
+        removeClass: () => undefined,
+        addClass: () => undefined,
+        updateSourceList: () => undefined,
+        updateClassOrder: () => undefined,
+        addSource: () => undefined,
+        removeSource: () => undefined,
+      };
+      const rendered = interactiveElement(
+        renderCharacterDetails({
+          workspace: initial,
+          actions,
+          disabled: false,
+        }),
+      );
+      expect(rendered.querySelector('h2')?.textContent).toBe(
+        'Character details',
+      );
+      expect(
+        interactiveElement(
+          renderEditors({ workspace: initial, actions, disabled: false }),
+        ).querySelector('h2')?.textContent,
+      ).toBe('Rules editions');
+      const paragraphs = Array.from(rendered.querySelectorAll('p')).map(
+        (paragraph) => paragraph.textContent,
+      );
+      expect(paragraphs).toContain(
+        'Free text only. These words are stored and printed, but never used to calculate character facts.',
+      );
+      expect(paragraphs).toContain(
+        'Share links include these fields only when you turn on “Include my written text”.',
+      );
+      expect(
+        rendered.querySelectorAll('.planner-field').map(
+          (wrapper) => wrapper.children[0]?.textContent,
+        ),
+      ).toEqual(['Alignment', 'Appearance', 'Backstory', 'Notes']);
+
+      const alignment = rendered.querySelector(
+        '[data-focus-key="flavor-alignment"]',
+      ) as unknown as HTMLInputElement | null;
+      const appearance = rendered.querySelector(
+        '[data-focus-key="flavor-appearance"]',
+      ) as unknown as HTMLTextAreaElement | null;
+      const backstory = rendered.querySelector(
+        '[data-focus-key="flavor-backstory"]',
+      ) as unknown as HTMLTextAreaElement | null;
+      const notes = rendered.querySelector(
+        '[data-focus-key="flavor-notes"]',
+      ) as unknown as HTMLTextAreaElement | null;
+      if (
+        alignment === null ||
+        appearance === null ||
+        backstory === null ||
+        notes === null
+      ) {
+        throw new Error('The Character details controls were not rendered.');
+      }
+      expect(alignment.type).toBe('text');
+      expect(appearance.tagName.toLowerCase()).toBe('textarea');
+      expect(alignment.maxLength).toBe(CHARACTER_TEXT_LIMITS.alignment);
+      expect(appearance.maxLength).toBe(CHARACTER_TEXT_LIMITS.appearance);
+      expect(backstory.maxLength).toBe(CHARACTER_TEXT_LIMITS.backstory);
+      expect(notes.maxLength).toBe(CHARACTER_TEXT_LIMITS.notes);
+
+      appearance.value = '🧙🧙';
+      appearance.dispatchEvent(new Event('input'));
+      expect(
+        rendered.querySelector('[data-flavor-remaining="appearance"]')
+          ?.value,
+      ).toBe(
+        `${String(CHARACTER_TEXT_LIMITS.appearance - 2)} / ${String(CHARACTER_TEXT_LIMITS.appearance)} remaining`,
+      );
+
+      alignment.value = '  Chaotic Good  ';
+      backstory.value = 'Line one\nLine two';
+      notes.value = '   ';
+      rendered
+        .querySelector('[data-testid="character-details-form"]')
+        ?.dispatchEvent(new Event('submit', { cancelable: true }));
+      expect(update).toEqual({
+        alignment: '  Chaotic Good  ',
+        appearance: '🧙🧙',
+        backstory: 'Line one\nLine two',
+        notes: '   ',
+      });
+    } finally {
+      restoreDocument();
+    }
+  });
+
   it('displays base before editing and keeps the resolved total separate', () => {
     const restoreDocument = installInteractiveDocument();
     try {
       const initial = workspace(0, 10, false);
       let update: { ability: string; score: number } | null = null;
       const actions: PlannerEditorActions = {
+        updateFlavor: () => undefined,
         updateAbility: (ability, score) => {
           update = { ability, score };
         },

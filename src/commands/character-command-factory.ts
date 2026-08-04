@@ -20,6 +20,7 @@ import { LevelUpClassCommand } from './level-up-class';
 import { ResolveLevelFeatChoiceCommand } from './resolve-level-feat-choice';
 import { UpdateAbilityCommand } from './update-ability';
 import { UpdateCharacterRulesCommand } from './update-character-rules';
+import { UpdateCharacterFlavorCommand } from './update-character-flavor';
 import { UpdateClassCommand } from './update-class';
 import { UpdateSourceConfigCommand } from './update-source-config';
 import {
@@ -115,6 +116,8 @@ export class CharacterCommandFactory {
         }
       case 'update_character_rules':
         return new UpdateCharacterRulesCommand(this.db, payload);
+      case 'update_character_flavor':
+        return new UpdateCharacterFlavorCommand(this.db, payload);
       case 'update_source_config':
         return new UpdateSourceConfigCommand(
           this.db,

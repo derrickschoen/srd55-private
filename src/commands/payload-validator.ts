@@ -32,6 +32,7 @@ import {
   ORIGIN_TEXT_LIMITS,
 } from '../domain/origin-limits';
 import { attunementSlots } from '../domain/attunement';
+import { CHARACTER_TEXT_LIMITS } from '../domain/character-limits';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -40,6 +41,7 @@ const commandTypes = [
   'allocate_abilities',
   'set_slot',
   'update_character_rules',
+  'update_character_flavor',
   'update_source_config',
   'add_source',
   'remove_source',
@@ -324,6 +326,25 @@ function validateUpdateCharacterRules(record: UnknownRecord): void {
   rejectUnknown(record, ['type', 'allow_legacy', 'reason']);
   if (!hasOwn(record, 'allow_legacy') || typeof record.allow_legacy !== 'boolean') {
     invalid('allow_legacy must be a boolean.');
+  }
+}
+
+function validateUpdateCharacterFlavor(record: UnknownRecord): void {
+  rejectUnknown(record, [
+    'type',
+    'alignment',
+    'appearance',
+    'backstory',
+    'notes',
+    'reason',
+  ]);
+  for (const field of [
+    'alignment',
+    'appearance',
+    'backstory',
+    'notes',
+  ] as const) {
+    nullableString(record, field, CHARACTER_TEXT_LIMITS[field]);
   }
 }
 
@@ -1531,6 +1552,9 @@ function validateByType(
       return record;
     case 'update_character_rules':
       validateUpdateCharacterRules(record);
+      return record;
+    case 'update_character_flavor':
+      validateUpdateCharacterFlavor(record);
       return record;
     case 'update_source_config':
       validateUpdateSourceConfig(record);

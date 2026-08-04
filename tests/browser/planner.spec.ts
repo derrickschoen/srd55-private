@@ -120,6 +120,88 @@ async function persistedCharacter(
   );
 }
 
+test('update_character_flavor saves all four with one revision and disables its button while saving', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await expect(page.locator('#status')).toHaveAttribute(
+    'data-ready',
+    'true',
+    { timeout: 30_000 },
+  );
+  await page.evaluate(async () => {
+    await window.staticApp.reset();
+    await window.staticApp.writeCharacter('Flavor Planner');
+  });
+  await page.goto('/characters/1');
+  await expect(page.locator('#planner-status')).toHaveAttribute(
+    'data-ready',
+    'true',
+    { timeout: 30_000 },
+  );
+  await expect(
+    page.locator('.planner-primary > .planner-panel > h2').first(),
+  ).toHaveText('Character details');
+
+  await page.locator('[data-focus-key="flavor-alignment"]').fill(
+    '  Chaotic Good  ',
+  );
+  await page.locator('[data-focus-key="flavor-appearance"]').fill(
+    'Silver hair\nGreen cloak',
+  );
+  await page.locator('[data-focus-key="flavor-backstory"]').fill(
+    'Raised beside the old observatory.',
+  );
+  await page.locator('[data-focus-key="flavor-notes"]').fill('   ');
+
+  const disabledSynchronously = await page.evaluate(() => {
+    const save = document.querySelector<HTMLButtonElement>(
+      '[data-focus-key="flavor-save"]',
+    );
+    if (save === null) throw new Error('Character details Save is missing.');
+    save.click();
+    return document.querySelector<HTMLButtonElement>(
+      '[data-focus-key="flavor-save"]',
+    )?.disabled;
+  });
+  expect(disabledSynchronously).toBe(true);
+
+  await expect.poll(persistedCharacter.bind(null, page)).toEqual([
+    expect.objectContaining({
+      alignment: '  Chaotic Good  ',
+      appearance: 'Silver hair\nGreen cloak',
+      backstory: 'Raised beside the old observatory.',
+      notes: null,
+      revision: 1,
+    }),
+  ]);
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        window.staticApp.inspectRows('character_operations', {
+          character_id: 1,
+        }),
+      ),
+    )
+    .toEqual([
+      expect.objectContaining({
+        expected_revision: 0,
+        resulting_revision: 1,
+      }),
+    ]);
+
+  await page.getByRole('button', { name: '↶ Undo' }).click();
+  await expect.poll(persistedCharacter.bind(null, page)).toEqual([
+    expect.objectContaining({
+      alignment: null,
+      appearance: null,
+      backstory: null,
+      notes: null,
+      revision: 2,
+    }),
+  ]);
+});
+
 test('planner editors, history, focus, keyboard, and responsive state persist', async ({
   page,
 }) => {

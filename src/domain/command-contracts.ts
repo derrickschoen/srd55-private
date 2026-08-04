@@ -85,6 +85,15 @@ export interface UpdateCharacterRulesCommand extends CommandBase {
   allow_legacy: boolean;
 }
 
+/** One atomic authored-text value; absence is always an explicit `null`. */
+export interface UpdateCharacterFlavorCommand extends CommandBase {
+  type: 'update_character_flavor';
+  alignment: string | null;
+  appearance: string | null;
+  backstory: string | null;
+  notes: string | null;
+}
+
 export type UpdateSourceConfigCommand =
   | (CommandBase & {
       type: 'update_source_config';
@@ -468,6 +477,7 @@ export type CharacterCommandPayload =
   | AllocateAbilitiesCommand
   | SetSlotCommand
   | UpdateCharacterRulesCommand
+  | UpdateCharacterFlavorCommand
   | UpdateSourceConfigCommand
   | AddSourceCommand
   | RemoveSourceCommand

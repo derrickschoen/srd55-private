@@ -99,6 +99,30 @@ describe('character list and workspace query builders', () => {
     );
   });
 
+  it('projects the four persisted flavor fields as one workspace value', () => {
+    db.exec(
+      `UPDATE characters
+       SET alignment = ?, appearance = ?, backstory = ?, notes = ?
+       WHERE id = ?`,
+      [
+        'Neutral Good',
+        '  Silver hair\nGreen cloak  ',
+        'Raised beside the old observatory.',
+        'Ask about the brass key.',
+        fixture.characterId,
+      ],
+    );
+
+    expect(
+      new CharacterWorkspaceBuilder(db).build(fixture.characterId).flavor,
+    ).toEqual({
+      alignment: 'Neutral Good',
+      appearance: '  Silver hair\nGreen cloak  ',
+      backstory: 'Raised beside the old observatory.',
+      notes: 'Ask about the brass key.',
+    });
+  });
+
   it('builds the workspace while excluding external aggregates from every planner selection catalog before CI-4a/HA-10', () => {
     const wizardId = Number(
       db.scalar(

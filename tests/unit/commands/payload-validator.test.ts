@@ -3,6 +3,7 @@ import {
   CharacterCommandPayloadValidator,
   validateCharacterCommandPayload,
 } from '../../../src/commands/payload-validator';
+import { CHARACTER_TEXT_LIMITS } from '../../../src/domain/character-limits';
 
 const signature = 'a'.repeat(64);
 
@@ -243,6 +244,47 @@ describe('character command payload validation', () => {
       mode: 'acknowledge',
     });
     expect(withoutMode).not.toHaveProperty('mode');
+  });
+
+  it('update_character_flavor counts Unicode code points and refuses limit+1 by field name', () => {
+    const astral = '🧙';
+    const accepted = {
+      type: 'update_character_flavor',
+      alignment: null,
+      appearance: null,
+      backstory: astral.repeat(CHARACTER_TEXT_LIMITS.backstory),
+      notes: null,
+    };
+
+    expect(validateCharacterCommandPayload(accepted)).toEqual(accepted);
+    expectInvalid(
+      {
+        ...accepted,
+        backstory: `${accepted.backstory}${astral}`,
+      },
+      `backstory must not exceed ${String(CHARACTER_TEXT_LIMITS.backstory)} characters.`,
+    );
+  });
+
+  it('update_character_flavor requires the exact four-field value', () => {
+    const complete = {
+      type: 'update_character_flavor',
+      alignment: 'Chaotic Good',
+      appearance: null,
+      backstory: null,
+      notes: null,
+    };
+
+    expect(validateCharacterCommandPayload(complete)).toEqual(complete);
+    const { notes: _notes, ...missingNotes } = complete;
+    expectInvalid(
+      missingNotes,
+      'notes is required; use null when it is not known.',
+    );
+    expectInvalid(
+      { ...complete, extra: 'not part of the atomic value' },
+      'Unknown command field: extra.',
+    );
   });
 
   it('rejects unknown command fields and ill-typed required fields', () => {
