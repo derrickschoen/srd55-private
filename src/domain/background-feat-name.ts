@@ -9,6 +9,9 @@ export interface ParsedBackgroundFeatName {
   readonly option: string | null;
 }
 
+export const MAGIC_INITIATE_BASE_NAME = 'Magic Initiate';
+export const MAGIC_INITIATE_LISTS = ['Cleric', 'Druid', 'Wizard'] as const;
+
 export function backgroundFeatBaseName(
   printedName: string,
 ): ParsedBackgroundFeatName {

@@ -16,9 +16,8 @@ import type {
   UpdateSourceConfigCommand as UpdateSourceConfigPayload,
 } from '../domain/command-contracts';
 import type { JsonObject } from '../domain/models';
+import { MAGIC_INITIATE_LISTS } from '../domain/background-feat-name';
 import { GrantRuleSlotGenerator } from '../grants/grant-rule-slot-generator';
-
-const MAGIC_INITIATE_LISTS = ['Cleric', 'Druid', 'Wizard'] as const;
 
 /**
  * The configurable source instance, decoded once at the read.
