@@ -287,7 +287,7 @@ const ALL_TABLE_HEADERS = new Set(
  * The complete set printed at extract lines 58-62, 71-92, 114-120, 144-148,
  * and 157-161.
  */
-const SPELL_TABLE_ACTIVATION_LEVELS = [3, 5, 7, 9, 13, 17] as const;
+export const SPELL_TABLE_ACTIVATION_LEVELS = [3, 5, 7, 9, 13, 17] as const;
 
 /**
  * Keys are transcribed explicitly from the official spell catalog. They are

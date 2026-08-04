@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   parseSrdSubclasses,
+  SPELL_TABLE_ACTIVATION_LEVELS,
   srdSubclassSpellVersionKeyEntries,
   SrdSubclassesError,
   type SrdCircleLandSpellTable,
@@ -256,6 +257,90 @@ const EXPECTED_FIXED_TABLES: Readonly<
   fiend_patron: EXPECTED_FIEND_PATRON,
 };
 
+/**
+ * Authored from the same five printed tables as the tuple oracles above. This
+ * is deliberately not collected from parser output or from the explicit map
+ * it checks.
+ */
+const EXPECTED_SPELL_VOCABULARY = [
+  ...EXPECTED_LIFE_DOMAIN,
+  ...Object.values(EXPECTED_CIRCLE).flat(),
+  ...EXPECTED_OATH_OF_DEVOTION,
+  ...EXPECTED_DRACONIC_SORCERY,
+  ...EXPECTED_FIEND_PATRON,
+] as const satisfies readonly SpellTuple[];
+
+const EXPECTED_RULE_SET_IDENTITIES = {
+  Cleric: {
+    class_name: 'Cleric',
+    subclass_name: 'Life Domain',
+    spell_table: 'life_domain',
+    rule_keys: [
+      'life-domain-aid',
+      'life-domain-bless',
+      'life-domain-cure-wounds',
+      'life-domain-lesser-restoration',
+      'life-domain-mass-healing-word',
+      'life-domain-revivify',
+      'life-domain-aura-of-life',
+      'life-domain-death-ward',
+      'life-domain-greater-restoration',
+      'life-domain-mass-cure-wounds',
+    ],
+  },
+  Paladin: {
+    class_name: 'Paladin',
+    subclass_name: 'Oath of Devotion',
+    spell_table: 'oath_of_devotion',
+    rule_keys: [
+      'oath-of-devotion-protection-from-evil-and-good',
+      'oath-of-devotion-shield-of-faith',
+      'oath-of-devotion-aid',
+      'oath-of-devotion-zone-of-truth',
+      'oath-of-devotion-beacon-of-hope',
+      'oath-of-devotion-dispel-magic',
+      'oath-of-devotion-freedom-of-movement',
+      'oath-of-devotion-guardian-of-faith',
+      'oath-of-devotion-commune',
+      'oath-of-devotion-flame-strike',
+    ],
+  },
+  Sorcerer: {
+    class_name: 'Sorcerer',
+    subclass_name: 'Draconic Sorcery',
+    spell_table: 'draconic_sorcery',
+    rule_keys: [
+      'draconic-sorcery-alter-self',
+      'draconic-sorcery-chromatic-orb',
+      'draconic-sorcery-command',
+      'draconic-sorcery-dragon-s-breath',
+      'draconic-sorcery-fear',
+      'draconic-sorcery-fly',
+      'draconic-sorcery-arcane-eye',
+      'draconic-sorcery-charm-monster',
+      'draconic-sorcery-legend-lore',
+      'draconic-sorcery-summon-dragon',
+    ],
+  },
+  Warlock: {
+    class_name: 'Warlock',
+    subclass_name: 'Fiend Patron',
+    spell_table: 'fiend_patron',
+    rule_keys: [
+      'fiend-patron-burning-hands',
+      'fiend-patron-command',
+      'fiend-patron-scorching-ray',
+      'fiend-patron-suggestion',
+      'fiend-patron-fireball',
+      'fiend-patron-stinking-cloud',
+      'fiend-patron-fire-shield',
+      'fiend-patron-wall-of-fire',
+      'fiend-patron-geas',
+      'fiend-patron-insect-plague',
+    ],
+  },
+} as const;
+
 function manifest(): SrdSubclassManifest {
   return parseSrdSubclasses();
 }
@@ -317,6 +402,68 @@ function withDuplicateThiefAndNoChampion(): string {
     '   Sorcerer Subclass: Draconic',
     `${thief}   Sorcerer Subclass: Draconic`,
   );
+}
+
+function withBardBeforeBarbarian(): string {
+  const barbarian = sourceSection(
+    '   Barbarian Subclass:',
+    '     Bard Subclass:',
+  );
+  const bard = sourceSection(
+    '     Bard Subclass:',
+    '     Cleric Subclass:',
+  );
+  return SOURCE.replace(`${barbarian}${bard}`, `${bard}${barbarian}`);
+}
+
+function withLifeDomainTableInBard(): string {
+  const lifeDomainTable = sourceSection(
+    '   Life Domain Spells\n',
+    '   Level 3: Preserve Life',
+  );
+  return SOURCE.replace(lifeDomainTable, '').replace(
+    '     Cleric Subclass: Life Domain',
+    `${lifeDomainTable}     Cleric Subclass: Life Domain`,
+  );
+}
+
+function withPolarBeforeArid(): string {
+  const arid = sourceSection('     Arid Land', '     Polar Land');
+  const polar = sourceSection('     Polar Land', '     Temperate Land');
+  return SOURCE.replace(`${arid}${polar}`, `${polar}${arid}`);
+}
+
+function sourceClassOrder(source: string): string[] {
+  return [...source.matchAll(/^\f?\s*(?<className>[A-Za-z]+) Subclass:/gmu)].map(
+    (match) => match.groups?.className ?? '',
+  );
+}
+
+function ruleSetIdentity(
+  set: SrdSubclassManifest['unconditional_rule_sets'][number],
+): {
+  class_name: string;
+  subclass_name: string;
+  spell_table: string;
+  rule_keys: string[];
+} {
+  return {
+    class_name: set.class_name,
+    subclass_name: set.subclass_name,
+    spell_table: set.spell_table,
+    rule_keys: set.rules.map((rule) => rule.rule_key),
+  };
+}
+
+function fixedRuleSetThroughClass(
+  parsed: SrdSubclassManifest,
+  className: 'Cleric' | 'Paladin' | 'Sorcerer' | 'Warlock',
+): ReturnType<typeof ruleSetIdentity> {
+  const outcome = parsed.by_class[className].mechanical_outcome;
+  if (outcome.kind !== 'unconditional_fixed_spells') {
+    throw new Error(`${className} has no unconditional fixed-spell rule set.`);
+  }
+  return ruleSetIdentity(outcome.rule_set);
 }
 
 function expectDeepFrozen(value: unknown): void {
@@ -425,6 +572,37 @@ describe('SRD subclass manifest', () => {
     );
   });
 
+  it('returns the five spell tables in documented SRD order', () => {
+    expect(manifest().spell_tables.map((table) => table.table_name)).toEqual([
+      'life_domain',
+      'circle_of_the_land',
+      'oath_of_devotion',
+      'draconic_sorcery',
+      'fiend_patron',
+    ]);
+  });
+
+  it('closes spell-table activation levels to the authored printed set', () => {
+    expect(SPELL_TABLE_ACTIVATION_LEVELS).toEqual([3, 5, 7, 9, 13, 17]);
+  });
+
+  it('closes the explicit spell map to the authored five-table vocabulary', () => {
+    const authoredVocabulary = new Map(
+      EXPECTED_SPELL_VOCABULARY.map(([, printedName, contentKey]) => [
+        printedName,
+        contentKey,
+      ] as const),
+    );
+    const byPrintedName = (
+      left: readonly [string, string],
+      right: readonly [string, string],
+    ): number => left[0].localeCompare(right[0]);
+
+    expect([...srdSubclassSpellVersionKeyEntries].sort(byPrintedName)).toEqual(
+      [...authoredVocabulary.entries()].sort(byPrintedName),
+    );
+  });
+
   it('resolves every explicit subclass spell key in the bundled spell catalog', () => {
     const catalogContentKeys = new Set(
       parseSrdSpellDescriptions().map((spell) => spell.content_key),
@@ -463,6 +641,22 @@ describe('SRD subclass manifest', () => {
     }
     const ruleKeys = sets.flatMap((set) => set.rules.map((rule) => rule.rule_key));
     expect(new Set(ruleKeys).size).toBe(40);
+  });
+
+  it('pins each rule-set subclass and persisted rule locator to its table', () => {
+    expect(manifest().unconditional_rule_sets.map(ruleSetIdentity)).toEqual(
+      Object.values(EXPECTED_RULE_SET_IDENTITIES),
+    );
+  });
+
+  it('reaches the exact fixed-spell rule set through each by_class outcome', () => {
+    const parsed = manifest();
+    expect({
+      Cleric: fixedRuleSetThroughClass(parsed, 'Cleric'),
+      Paladin: fixedRuleSetThroughClass(parsed, 'Paladin'),
+      Sorcerer: fixedRuleSetThroughClass(parsed, 'Sorcerer'),
+      Warlock: fixedRuleSetThroughClass(parsed, 'Warlock'),
+    }).toEqual(EXPECTED_RULE_SET_IDENTITIES);
   });
 
   it('represents each unsupported choice or timing case as its typed deferral', () => {
@@ -570,6 +764,27 @@ describe('SRD subclass parser rejections', () => {
     expect(() => parseSrdSubclasses(duplicateHeading)).toThrow(/repeats class Rogue/u);
   });
 
+  it('rejects complete class sections swapped in the parsed source order', () => {
+    const swapped = withBardBeforeBarbarian();
+    expect(sourceClassOrder(swapped)).toEqual([
+      'Bard',
+      'Barbarian',
+      'Cleric',
+      'Druid',
+      'Fighter',
+      'Monk',
+      'Paladin',
+      'Ranger',
+      'Rogue',
+      'Sorcerer',
+      'Warlock',
+      'Wizard',
+    ]);
+    expect(() => parseSrdSubclasses(swapped)).toThrow(
+      /expected the twelve classes in SRD order; found Bard, Barbarian/u,
+    );
+  });
+
   it('rejects an unknown class name', () => {
     expect(() =>
       parseSrdSubclasses(
@@ -662,6 +877,19 @@ describe('SRD subclass parser rejections', () => {
     ).toThrow(/malformed or missing table headers/u);
   });
 
+  it('rejects the Life Domain table when its parsed owner is Bard', () => {
+    const misplaced = withLifeDomainTableInBard();
+    const bardAt = misplaced.indexOf('Bard Subclass:');
+    const tableAt = misplaced.indexOf('Life Domain Spells', bardAt);
+    const clericAt = misplaced.indexOf('Cleric Subclass:', bardAt);
+    expect(bardAt).toBeGreaterThan(-1);
+    expect(tableAt).toBeGreaterThan(bardAt);
+    expect(tableAt).toBeLessThan(clericAt);
+    expect(() => parseSrdSubclasses(misplaced)).toThrow(
+      /Life Domain Spells appears under Bard/u,
+    );
+  });
+
   it('rejects a Paladin header moved after the first row of its physical table', () => {
     const lateHeader = SOURCE.replace('    Paladin Level   Spells\n', '').replace(
       '                    Shield of Faith\n',
@@ -726,6 +954,19 @@ describe('SRD subclass parser rejections', () => {
     expect(() =>
       parseSrdSubclasses(SOURCE.replace('Polar Land', 'Arid Land')),
     ).toThrow(/repeats physical table title Arid Land/u);
+  });
+
+  it('rejects complete Circle tables swapped in the parsed land order', () => {
+    const swapped = withPolarBeforeArid();
+    const polarAt = swapped.indexOf('Polar Land');
+    const aridAt = swapped.indexOf('Arid Land', polarAt);
+    const temperateAt = swapped.indexOf('Temperate Land', aridAt);
+    expect(polarAt).toBeGreaterThan(-1);
+    expect(aridAt).toBeGreaterThan(polarAt);
+    expect(temperateAt).toBeGreaterThan(aridAt);
+    expect(() => parseSrdSubclasses(swapped)).toThrow(
+      /four land tables in printed order/u,
+    );
   });
 
   it('rejects stray prose in a subclass section', () => {
