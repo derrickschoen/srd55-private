@@ -365,6 +365,19 @@ describe('character list and workspace query builders', () => {
         species: workspace.source_catalog.species.length,
         backgrounds: workspace.source_catalog.background.length,
       }).toEqual({ classes: 12, feats: 17, species: 5, backgrounds: 5 });
+      expect(lifecycle.database.allRaw(
+        `SELECT identities.content_kind, identities.content_key
+         FROM catalog_content_identities AS identities
+         LEFT JOIN catalog_content_fingerprints AS fingerprints
+           ON fingerprints.content_kind = identities.content_kind
+          AND fingerprints.content_key = identities.content_key
+          AND fingerprints.fingerprint_scheme = 'content-v1'
+          AND fingerprints.fingerprint_role = 'current'
+         WHERE identities.key_kind = 'bundled-stable'
+           AND identities.catalog_layer = 'bundled'
+           AND fingerprints.content_key IS NULL
+         ORDER BY identities.content_kind, identities.content_key`,
+      )).toEqual([]);
     } finally {
       lifecycle.close();
     }

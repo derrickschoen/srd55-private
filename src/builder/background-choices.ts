@@ -34,6 +34,7 @@ import {
   skills,
   type Ability,
 } from '../domain/enums';
+import { backgroundFeatBaseName } from '../domain/background-feat-name';
 import { hasExactKeys } from './contracts';
 
 /**
@@ -307,7 +308,7 @@ export function printedPairing(
   const parenthetical = /^(?<base>.*?)\s*\((?<option>[^)]+)\)$/.exec(
     printedFeat,
   )?.groups;
-  const baseName = parenthetical?.base ?? printedFeat;
+  const baseName = backgroundFeatBaseName(printedFeat);
   const option = parenthetical?.option ?? null;
   const featKey = originFeatKeyByName.get(baseName) ?? null;
   const magicInitiateList =
