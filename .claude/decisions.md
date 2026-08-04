@@ -7,6 +7,20 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D197 — OWNER: registry orphaned/refused counts go to console/log only (2026-08-04)
+
+The bundled content registry returns per-entry `orphaned` and `refused`
+counts; applicationSeed currently discards them. Owner ruling (2026-08-04,
+option chosen from three): log the counts to the console — no user-visible
+surface for now. Cheap, keeps the signal for debugging, promotable to UI
+later when a settings/about surface exists to host it. Closes the
+"diagnostics decision" follow-up recorded at the CI-3s merge.
+
+Same sitting, queue placement ruled: SEEDER-SAME-CARDINALITY-CORRECTION
+is dispatched AFTER CI-4a lands (CI-4a touches the same reconciliation
+seam; landing it first avoids churn), ahead of the rest of the CI-4
+series' follow-ups.
+
 ## D196 — OWNER: rogue level 9 simplified; level 13 becomes total skill mastery (2026-08-04)
 
 Owner's words: "The above is too complicated. Just basic language that
