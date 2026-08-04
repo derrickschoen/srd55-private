@@ -8,9 +8,11 @@ import {
   type SheetSpellGroup,
 } from '../../../src/queries/character-spell-section-builder';
 import { CharacterSheetBuilder } from '../../../src/queries/character-sheet-builder';
+import { BuildReportBuilder } from '../../../src/reports/build-report-builder';
 import { getSqlite3, openTestDatabase } from '../../helpers/open-db';
 import {
   createCharacterSheetSpellsFixture,
+  createSheetSpellRetirementFixture,
   HAND_AUTHORED_D91_R_RESOURCE_BYTES,
   persistedCharacterSheetSpellTableHashes,
   type CharacterSheetSpellsFixture,
@@ -366,5 +368,123 @@ describe('typed character spell section projection', () => {
     expect(
       new TextEncoder().encode(JSON.stringify(sheet.resources)),
     ).toEqual(HAND_AUTHORED_D91_R_RESOURCE_BYTES);
+  });
+});
+
+describe('SS-4 surviving spell access and report coverage', () => {
+  let connection: Database;
+  let db: DatabaseContext;
+  let fixture: ReturnType<typeof createSheetSpellRetirementFixture>;
+
+  beforeAll(async () => {
+    connection = await openTestDatabase();
+    db = new DatabaseContext(connection);
+    fixture = createSheetSpellRetirementFixture(db);
+  });
+
+  afterAll(() => {
+    connection.close();
+  });
+
+  it('naturally orders current sheet groups independently of insertion ids', () => {
+    const section = new CharacterSpellSectionBuilder(db).build(
+      fixture.characterId,
+    );
+
+    expect(
+      section.map((group) =>
+        group.kind === 'class' ? group.class_name : group.source_name,
+      ),
+    ).toEqual(['Cleric', 'Druid', 'Wizard', 'Gift 2', 'Gift 10']);
+  });
+
+  it('preserves persisted casting modes, free-cast payloads, and Command identity', () => {
+    const routes = new SpellAccessBuilder(db).buildForCharacter(
+      fixture.characterId,
+    );
+    const route = (spellVersionId: number) => {
+      const match = routes.find(
+        (candidate) => candidate.spell_version_id === spellVersionId,
+      );
+      if (match === undefined) {
+        throw new Error(`Missing access route for spell ${String(spellVersionId)}.`);
+      }
+      return match;
+    };
+    const commandIdentityId = Number(
+      db.scalar(
+        `SELECT spell_identity_id
+         FROM spell_versions
+         WHERE id = ?`,
+        [fixture.spellIds.command],
+      ),
+    );
+
+    expect(route(fixture.spellIds.command)).toMatchObject({
+      spell_identity_id: commandIdentityId,
+      casting_mode: 'with_slots',
+    });
+    expect(route(fixture.spellIds.thornWhip)).toMatchObject({
+      casting_mode: 'at_will',
+      free_cast: null,
+    });
+    expect(route(fixture.spellIds.faerieFire)).toMatchObject({
+      casting_mode: 'free_cast_only',
+      free_cast: {
+        uses: 2,
+        recovery: 'dawn',
+        pool_scope: 'shared',
+      },
+    });
+    expect(route(fixture.spellIds.detectMagic)).toMatchObject({
+      casting_mode: 'ritual_only',
+      origin: 'capability',
+    });
+    expect(
+      db.oneRaw(
+        `SELECT with_slots, free_cast
+         FROM spell_selection_slots
+         WHERE id = ?`,
+        [fixture.slotIds.faerieFire],
+      ),
+    ).toEqual({
+      with_slots: 0,
+      free_cast: '{"uses":2,"recovery":"dawn","pool_scope":"shared"}',
+    });
+  });
+
+  it('preserves the Wizard ritual-only subset and its complete explanation', () => {
+    const wizard = new BuildReportBuilder(db).build(fixture.characterId).wizard;
+
+    expect(
+      wizard.spellbook.map((entry) => [
+        entry.spell_name,
+        entry.prepared,
+      ]),
+    ).toEqual([
+      ['Detect Magic', false],
+      ['Shield', true],
+      ['Unseen Servant', false],
+    ]);
+    expect(wizard.prepared.map((entry) => entry.spell_name)).toEqual([
+      'Shield',
+    ]);
+    expect(wizard.ritual_only.map((entry) => entry.spell_name)).toEqual([
+      'Detect Magic',
+    ]);
+    for (const phrase of [
+      '“In my book” marks only the spells that Ritual Adept can expose',
+      'does not constrain Wizard preparation',
+      'not the same as labeling a spell known or prepared',
+      'whole Wizard spell list',
+      'both in the book and as prepared',
+      'ritual-only access',
+      'that route is not a selection',
+      'consumes no preparation capacity',
+      'ignored by duplicate-waste checks',
+      'Unprepared non-ritual book spells are not castable.',
+    ]) {
+      expect(wizard.explanation).toContain(phrase);
+    }
   });
 });

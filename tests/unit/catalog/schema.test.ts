@@ -374,6 +374,7 @@ describe('browser catalog schema', () => {
       [[record({ identityKey: ' ' })], "'identityKey'"],
       [[record({ versionKey: null })], "'versionKey'"],
       [[record({ name: 1 })], "'name'"],
+      [[record({ name: '---' })], 'Content identity names must not be empty'],
       [[record({ edition: 2024 })], "'edition'"],
       [[record({ edition: '2030' })], "'edition' must be one of"],
       [[record({ level: -1 })], "'level'"],
@@ -413,6 +414,30 @@ describe('browser catalog schema', () => {
         unexpected: true,
       }),
     ).toBe(false);
+  });
+
+  it('refuses surrounding whitespace on every spell locator at parse time', () => {
+    for (const value of [
+      record({ identityKey: ' test-spell' }),
+      record({ versionKey: '2024:test-spell ' }),
+      record({ spellLists: [' Wizard'] }),
+    ]) {
+      expect(() => parseCatalogDocuments([JSON.stringify([value])]))
+        .toThrow('contains surrounding whitespace');
+    }
+  });
+
+  it('refuses surrounding whitespace on Tier 2 version keys at parse time', () => {
+    expect(() => parseDescriptionDocuments([JSON.stringify([{
+      versionKey: ' 2024:test-spell',
+      _description: 'Description.',
+    }])])).toThrow('contains surrounding whitespace');
+  });
+
+  it('refuses spell names that normalize to an empty identity name at parse time', () => {
+    expect(() => parseCatalogDocuments([
+      JSON.stringify([record({ name: '---' })]),
+    ])).toThrow('Content identity names must not be empty');
   });
 
   /**

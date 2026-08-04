@@ -10,6 +10,12 @@ import {
 import {
   PRINT_APPENDIX_PREFERENCE_KEYS,
 } from '../../src/queries/print-appendix-preferences';
+import {
+  createSheetSpellRetirementFixture,
+  RETIREMENT_COMMAND_PROSE,
+  RETIREMENT_LONG_PROSE,
+  type SheetSpellRetirementFixture,
+} from '../integration/queries/character-sheet-spells-fixture';
 import { readLevelUpSeam } from './fixtures/level-up-seam';
 
 const schema = readFileSync(
@@ -58,6 +64,10 @@ interface SheetImage {
   readonly characterId: number;
   readonly blankFlavorCharacterId?: number;
   readonly partialFlavorCharacterId?: number;
+}
+
+interface RetirementSheetImage extends SheetImage {
+  readonly fixture: SheetSpellRetirementFixture;
 }
 
 function exportedImage(
@@ -412,6 +422,17 @@ async function sheetImage(): Promise<SheetImage> {
     blankFlavorCharacterId,
     partialFlavorCharacterId,
   );
+}
+
+async function retirementSheetImage(): Promise<RetirementSheetImage> {
+  const sqlite3 = await sqlite3InitModule();
+  const connection = new sqlite3.oo1.DB(':memory:', 'c');
+  connection.exec(schema);
+  const db = new DatabaseContext(connection);
+  const fixture = createSheetSpellRetirementFixture(db);
+  const bytes = Array.from(sqlite3.capi.sqlite3_js_db_export(connection));
+  connection.close();
+  return { bytes, characterId: fixture.characterId, fixture };
 }
 
 async function resourceShapeImage(): Promise<SheetImage> {
@@ -1192,11 +1213,15 @@ test('spell appendix paginates long prose with the D141 mechanism', async ({
   );
   await expect(appendix.locator('.sheet-spell-appendix-summary').first())
     .toHaveCSS('break-inside', 'avoid');
-  await expect(appendix.locator('.sheet-spell-appendix-card').first())
-    .toHaveCSS('break-inside', 'auto');
   const longProse = appendix.locator('.sheet-spell-appendix-prose', {
     hasText: 'long spell opening',
   });
+  const longCard = longProse.locator('..');
+  await expect(longCard).toHaveAttribute(
+    'data-spell-appendix-pagination',
+    'split_prose',
+  );
+  await expect(longCard).toHaveCSS('break-inside', 'auto');
   await expectExactText(longProse, LONG_SPELL_PROSE);
   await expect(longProse).toHaveCSS('white-space', 'pre-wrap');
   await expect(longProse).toHaveCSS('break-inside', 'auto');
@@ -1205,6 +1230,11 @@ test('spell appendix paginates long prose with the D141 mechanism', async ({
   const missingCard = appendix.locator('.sheet-spell-appendix-card', {
     hasText: 'Goodberry',
   });
+  await expect(missingCard).toHaveAttribute(
+    'data-spell-appendix-pagination',
+    'keep_together',
+  );
+  await expect(missingCard).toHaveCSS('break-inside', 'avoid');
   await expect(missingCard).toContainText(
     'Full spell text unavailable for this imported or placeholder spell.',
   );
@@ -1215,6 +1245,217 @@ test('spell appendix paginates long prose with the D141 mechanism', async ({
 
   await page.emulateMedia({ media: 'screen' });
   await expect(appendices).toHaveCount(0);
+});
+
+test('spell section and print appendix replace the legacy print route without writes', async ({
+  page,
+}, testInfo) => {
+  // Measured alone at 23.0s on Chromium on merged main; fixture construction
+  // dominates, and this test boots the app twice (install, then reload). The
+  // earlier 20s budget was set against an 18.8s measurement taken before
+  // CI-3s added bundled-registry reconciliation to every open, which costs
+  // ~0.3s on a light boot and ~2s per boot on this heavier fixture. That
+  // steady-state cost is recorded as follow-up
+  // CI-3S-RECONCILE-STEADY-STATE-COST; this budget is headroom, not a mask -
+  // no assertion in this test changed.
+  testInfo.setTimeout(45_000);
+  const image = await retirementSheetImage();
+  await install(page, image);
+  const before = Array.from(await page.evaluate(
+    () => window.staticApp.exportDatabase(),
+  ));
+  const beforeCharacters = await rows(page, 'characters');
+  const beforeSlots = await rows(page, 'spell_selection_slots');
+
+  await page.goto(`/characters/${image.characterId}/sheet`);
+  const sheet = page.locator('[data-screen="character-sheet"]');
+  await expect(sheet).toBeVisible();
+  await expect(page).toHaveTitle('P50 Printable character sheet');
+  const spellSection = sheet.locator('.sheet-panel', {
+    has: page.getByRole('heading', { name: 'Spells', exact: true }),
+  });
+  await expect(spellSection).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Print character sheet' }),
+  ).toHaveClass(/sheet-chrome/);
+  await expect(
+    spellSection.locator('.sheet-spell-group-heading').allTextContents(),
+  ).resolves.toEqual(['Cleric', 'Druid', 'Wizard', 'Gift 2', 'Gift 10']);
+
+  const groups = spellSection.locator('[data-spell-group]');
+  const cleric = groups.filter({ hasText: 'Cleric' });
+  const druid = groups.filter({ hasText: 'Druid' });
+  const wizard = groups.filter({ hasText: 'Wizard' });
+  const gift2 = groups.filter({ hasText: 'Gift 2' });
+  const gift10 = groups.filter({ hasText: 'Gift 10' });
+  await expect(cleric.locator('.sheet-number dt').allTextContents())
+    .resolves.toEqual(['Guidance', 'Command']);
+  await expect(druid.locator('.sheet-number dt').allTextContents())
+    .resolves.toEqual(['Thorn Whip', 'Goodberry']);
+  await expect(wizard.locator('.sheet-number dt').allTextContents())
+    .resolves.toEqual(['Mage Hand', 'Command', 'Shield']);
+  await expect(gift2.locator('.sheet-number dt').allTextContents())
+    .resolves.toEqual(['Misty Step']);
+  await expect(gift10.locator('.sheet-number dt').allTextContents())
+    .resolves.toEqual(['Faerie Fire']);
+
+  const clericCommand = cleric.locator(
+    `[data-sheet-id$=":${String(image.fixture.spellIds.command)}"]`,
+  );
+  await expect(clericCommand).toContainText('Level 1Prepared');
+  await expect(cleric.locator('.sheet-spell-statistic')).toHaveText(
+    'Save DC 12 · Spell attack +4',
+  );
+  await expect(cleric.locator('.sheet-spell-statistic')).toHaveCount(1);
+  const wizardCommand = wizard.locator(
+    `[data-sheet-id$=":${String(image.fixture.spellIds.command)}"]`,
+  );
+  await expect(wizardCommand).toContainText('Level 1Known');
+  const mistyStep = gift2.locator(
+    `[data-sheet-id$=":${String(image.fixture.spellIds.mistyStep)}"]`,
+  );
+  await expect(mistyStep).toContainText('Level 2Known');
+  await expect(gift2.locator('.sheet-spell-statistic')).toHaveText(
+    'Save DC 14 · Spell attack +6',
+  );
+  await expect(gift2.locator('.sheet-spell-statistic')).toHaveCount(1);
+
+  expect(beforeCharacters).toEqual([
+    expect.objectContaining({
+      id: image.characterId,
+      name: 'P50 Printable',
+      revision: 0,
+    }),
+  ]);
+  expect(beforeSlots).toEqual(expect.arrayContaining([
+    expect.objectContaining({
+      id: image.fixture.slotIds.command,
+      current_spell_version_id: image.fixture.spellIds.command,
+      bucket: 'prepared',
+    }),
+    expect.objectContaining({
+      id: image.fixture.slotIds.mistyStep,
+      fixed_spell_version_id: image.fixture.spellIds.mistyStep,
+      free_cast:
+        '{"uses":1,"recovery":"long_rest","pool_scope":"per_spell"}',
+    }),
+    expect.objectContaining({
+      id: image.fixture.slotIds.faerieFire,
+      fixed_spell_version_id: image.fixture.spellIds.faerieFire,
+      with_slots: 0,
+      free_cast: '{"uses":2,"recovery":"dawn","pool_scope":"shared"}',
+    }),
+  ]));
+  const spellOption = page.getByLabel('Include full spell text appendix');
+  await expect(spellOption).toBeChecked();
+  await expect(page).not.toHaveURL(/variant=/);
+  await expect(page.getByLabel('Print variant')).toHaveCount(0);
+  await expect(page.locator('[data-variant-form]')).toHaveCount(0);
+  await expect(page.locator('[data-variant]')).toHaveCount(0);
+  await expect(page.locator('[data-screen="printable-list"]')).toHaveCount(0);
+  await expect(page.locator('[data-sheet-print-appendix]')).toHaveCount(0);
+  expect(Array.from(await page.evaluate(
+    () => window.staticApp.exportDatabase(),
+  ))).toEqual(before);
+
+  await page.evaluate(() => {
+    window.print = () => {
+      document.documentElement.dataset.sheetPrintCalls = '1';
+    };
+  });
+  await page.getByRole('button', { name: 'Print character sheet' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-sheet-print-calls', '1');
+  expect(Array.from(await page.evaluate(
+    () => window.staticApp.exportDatabase(),
+  ))).toEqual(before);
+
+  await page.emulateMedia({ media: 'print' });
+  const appendix = page.locator('[data-sheet-print-appendix="spells"]');
+  await expect(appendix).toBeVisible();
+  await expect(appendix).toHaveCSS('break-before', 'page');
+  const appendixGroups = appendix.locator('[data-spell-appendix-group]');
+  await expect(appendixGroups.locator(':scope > h3').allTextContents())
+    .resolves.toEqual(['Cleric', 'Druid', 'Wizard', 'Gift 2', 'Gift 10']);
+  await expect(appendixGroups.nth(0).locator('h4').allTextContents())
+    .resolves.toEqual([
+      'Guidance — Cantrip · Abjuration',
+      'Command — Level 1 · Enchantment',
+    ]);
+  await expect(appendixGroups.nth(1).locator('h4').allTextContents())
+    .resolves.toEqual([
+      'Thorn Whip — Cantrip · Transmutation',
+      'Goodberry — Level 1 · Transmutation',
+    ]);
+  await expect(appendix.locator('h3').first()).toHaveCSS('break-after', 'avoid');
+  await expect(appendix.locator('.sheet-spell-appendix-summary').first())
+    .toHaveCSS('break-inside', 'avoid');
+  const longCard = appendix.locator(
+    `[data-spell-appendix-card="${String(image.fixture.spellIds.thornWhip)}"]`,
+  );
+  await expect(longCard).toHaveCSS('break-inside', 'auto');
+  const longProse = longCard.locator('.sheet-spell-appendix-prose');
+  await expectExactText(longProse, RETIREMENT_LONG_PROSE);
+  await expect(longProse).toHaveCSS('break-inside', 'auto');
+  await expect(longProse).toHaveCSS('orphans', '3');
+  await expect(longProse).toHaveCSS('widows', '3');
+  const commandCards = appendix.locator(
+    `[data-spell-appendix-card="${String(image.fixture.spellIds.command)}"]`,
+  );
+  await expect(commandCards).toHaveCount(2);
+  const commandCard = commandCards.first();
+  await expect(commandCard).toHaveAttribute(
+    'data-spell-appendix-pagination',
+    'keep_together',
+  );
+  await expect(commandCard).toHaveCSS('break-inside', 'avoid');
+  await expectExactText(
+    commandCard.locator('.sheet-spell-appendix-prose'),
+    RETIREMENT_COMMAND_PROSE,
+  );
+  const goodberryCard = appendix.locator(
+    `[data-spell-appendix-card="${String(image.fixture.spellIds.goodberry)}"]`,
+  );
+  await expect(goodberryCard).toContainText(
+    'Full spell text unavailable for this imported or placeholder spell.',
+  );
+  await expect(appendix.locator('.sheet-spell-appendix-missing')).toContainText(
+    'Goodberry',
+  );
+  await expect(page.locator('body')).not.toContainText(
+    /php artisan|Tier 2 files are available/i,
+  );
+  const chromeDisplays = await page.locator('.sheet-chrome').evaluateAll(
+    (elements) => elements.map((element) => getComputedStyle(element).display),
+  );
+  expect(chromeDisplays.length).toBeGreaterThan(0);
+  expect(new Set(chromeDisplays)).toEqual(new Set(['none']));
+  const notice = page.locator('[data-sheet-print-notice]');
+  expect(await appendix.evaluate(
+    (element, noticeElement) =>
+      noticeElement instanceof Node &&
+      (element.compareDocumentPosition(noticeElement) &
+        Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+    await notice.elementHandle(),
+  )).toBe(true);
+  expect(await notice.evaluate(
+    (element) => element.parentElement?.lastElementChild === element,
+  )).toBe(true);
+  await expect(notice).toHaveCSS('break-before', 'page');
+  expect(Array.from(await page.evaluate(
+    () => window.staticApp.exportDatabase(),
+  ))).toEqual(before);
+
+  await page.emulateMedia({ media: 'screen' });
+  await expect(page.locator('[data-sheet-print-appendix]')).toHaveCount(0);
+  expect(Array.from(await page.evaluate(
+    () => window.staticApp.exportDatabase(),
+  ))).toEqual(before);
+  await page.reload();
+  await expect(page.locator('[data-screen="character-sheet"]')).toBeVisible();
+  await expect(page.getByLabel('Include full spell text appendix')).toBeChecked();
+  expect(Array.from(await page.evaluate(
+    () => window.staticApp.exportDatabase(),
+  ))).toEqual(before);
 });
 
 // Measured alone at 12.3s on this worktree; fixture construction dominates.
@@ -1812,24 +2053,35 @@ test('the planner links to the sheet, and the sheet links back', async ({
   );
 });
 
-test('W-NO-SHADOW level-up, sheet, print, and planner routes mount only their intended screen', async ({
+test('legacy print route retires while the exact sheet route remains reachable', async ({
+  page,
+}, testInfo) => {
+  // Measured alone at 10.1s on Chromium; SRD boot dominates.
+  testInfo.setTimeout(20_000);
+  const image = await sheetImage();
+  await install(page, image);
+  await navigateWithinApp(page, `/characters/${image.characterId}/print`);
+  await expect(page.locator('[data-screen="printable-list"]')).toHaveCount(0);
+  await expect(page.locator('[data-screen="character-sheet"]')).toHaveCount(0);
+  await expect(page.locator('.empty-shell')).toBeVisible();
+
+  await navigateWithinApp(page, `/characters/${image.characterId}/sheet`);
+  await expect(page.locator('[data-screen="character-sheet"]')).toHaveCount(1);
+  await expect(page.locator('[data-screen="printable-list"]')).toHaveCount(0);
+});
+
+test('W-NO-SHADOW level-up, sheet, and planner routes mount only their intended screen', async ({
   page,
 }, testInfo) => {
   // Measured alone at 16.1s on 2026-08-02; SS-2's spell section made sheet
-  // boots heavier. W-F widened this test to four routes, so the 45s ceiling
+  // boots heavier. W-F widened this test to three routes, so the 45s ceiling
   // is sized for the heavier body too.
   testInfo.setTimeout(45_000);
-  // Screen modules are sorted by PATH and the first match wins. All four
+  // Screen modules are sorted by PATH and the first match wins. All three
   // matchers must remain exact or one of these intended screens is shadowed.
   const image = await sheetImage();
   await install(page, image);
   const seam = await readLevelUpSeam(page, image.characterId);
-  await navigateWithinApp(page, `/characters/${image.characterId}/print`);
-  await expect(page.locator('[data-screen="printable-list"]')).toBeVisible();
-  await expect(page.locator('[data-screen="character-sheet"]')).toHaveCount(0);
-  await expect(page.locator('.level-up-route')).toHaveCount(0);
-  await expect(page.locator('#planner-status')).toHaveCount(0);
-
   await navigateWithinApp(page, `/characters/${image.characterId}/sheet`);
   await expect(page.locator('[data-screen="character-sheet"]')).toBeVisible();
   await expect(page.locator('[data-screen="printable-list"]')).toHaveCount(0);

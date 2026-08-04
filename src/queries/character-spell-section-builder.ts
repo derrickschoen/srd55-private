@@ -317,6 +317,54 @@ function statisticKey(statistic: SheetSpellcastingStatistic): string {
   return unhandled;
 }
 
+function compareText(left: string, right: string): number {
+  if (left === right) {
+    return 0;
+  }
+  return left < right ? -1 : 1;
+}
+
+function naturalParts(value: string): string[] {
+  return value.match(/\d+|\D+/g) ?? [];
+}
+
+/** Locale-independent natural ordering with exact spelling as the tie-breaker. */
+function compareNaturalText(left: string, right: string): number {
+  const leftParts = naturalParts(left.toLowerCase());
+  const rightParts = naturalParts(right.toLowerCase());
+  const length = Math.max(leftParts.length, rightParts.length);
+
+  for (let index = 0; index < length; index += 1) {
+    const leftPart = leftParts[index];
+    const rightPart = rightParts[index];
+    if (leftPart === undefined) {
+      return -1;
+    }
+    if (rightPart === undefined) {
+      return 1;
+    }
+    if (leftPart === rightPart) {
+      continue;
+    }
+
+    const leftIsNumber = /^\d+$/.test(leftPart);
+    const rightIsNumber = /^\d+$/.test(rightPart);
+    if (leftIsNumber && rightIsNumber) {
+      const leftNumber = Number(leftPart);
+      const rightNumber = Number(rightPart);
+      if (leftNumber !== rightNumber) {
+        return leftNumber - rightNumber;
+      }
+      if (leftPart.length !== rightPart.length) {
+        return leftPart.length - rightPart.length;
+      }
+    }
+    return compareText(leftPart, rightPart);
+  }
+
+  return compareText(left, right);
+}
+
 function compareGroups(left: MutableGroup, right: MutableGroup): number {
   if (left.kind === 'class' && right.kind === 'other_source') {
     return -1;
@@ -329,7 +377,7 @@ function compareGroups(left: MutableGroup, right: MutableGroup): number {
   const rightName =
     right.kind === 'class' ? right.class_name : right.source_name;
   if (leftName !== rightName) {
-    return leftName < rightName ? -1 : 1;
+    return compareNaturalText(leftName, rightName);
   }
   const leftId =
     left.kind === 'class'

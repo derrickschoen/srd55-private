@@ -3,13 +3,13 @@ import {
   BACKGROUND_RPC,
   MAGIC_INITIATE_ABILITIES,
   MAGIC_INITIATE_FEAT_CONTENT_KEY,
-  MAGIC_INITIATE_LISTS,
   type GuidedApplyBackgroundParams,
   type GuidedBackgroundChoiceOptions,
   type GuidedBackgroundIncrease,
   type GuidedBackgroundOption,
   type GuidedOriginFeatOption,
 } from '../../../src/builder/background-choices';
+import { MAGIC_INITIATE_LISTS } from '../../../src/domain/background-feat-name';
 import {
   applyGuidedBackgroundChoices,
   listGuidedBackgroundChoiceOptions,

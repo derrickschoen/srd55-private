@@ -31,13 +31,13 @@ import {
   BACKGROUND_STEP_ATTR,
   MAGIC_INITIATE_ABILITIES,
   MAGIC_INITIATE_FEAT_CONTENT_KEY,
-  MAGIC_INITIATE_LISTS,
   SKILLED_FEAT_CONTENT_KEY,
   type GuidedApplyBackgroundParams,
   type GuidedBackgroundChoiceOptions,
   type GuidedBackgroundIncrease,
   type GuidedBackgroundOption,
 } from '../../../builder/background-choices';
+import { MAGIC_INITIATE_LISTS } from '../../../domain/background-feat-name';
 import {
   guidedBuildPath,
   GUIDED_PANEL_ATTRIBUTE,
