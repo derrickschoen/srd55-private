@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+  bundledContentManifestV1,
   reconcileBundledContentRegistryV1,
 } from '../../../src/catalog/bundled-content-registry-v1';
 import {
@@ -13,18 +14,110 @@ import type { DatabaseLifecycle } from '../../../src/db/database-lifecycle';
 import type { ContentKey } from '../../../src/domain/ids';
 import { getSqlite3, MemoryDatabaseStorage } from '../../helpers/open-db';
 
-const EXPECTED_BUNDLED_COUNTS = [
-  { content_kind: 'armor', aggregate_count: 13 },
-  { content_kind: 'background', aggregate_count: 4 },
-  { content_kind: 'class', aggregate_count: 12 },
-  { content_kind: 'feat', aggregate_count: 17 },
-  { content_kind: 'species', aggregate_count: 9 },
-  { content_kind: 'spell', aggregate_count: 339 },
-  { content_kind: 'subclass', aggregate_count: 2 },
-  { content_kind: 'weapon', aggregate_count: 38 },
+const INDEPENDENT_SRD_ROOT_ANCHORS = [
+  // Transcribed independently from the checked-in SRD source text. These
+  // literals must never be generated from the manifest or persisted rows.
+  { content_kind: 'weapon', content_key: '2024:weapon:club', root_name: 'Club' },
+  {
+    content_kind: 'weapon',
+    content_key: '2024:weapon:dagger',
+    root_name: 'Dagger',
+  },
+  {
+    content_kind: 'armor',
+    content_key: '2024:armor:padded-armor',
+    root_name: 'Padded Armor',
+  },
+  {
+    content_kind: 'armor',
+    content_key: '2024:armor:leather-armor',
+    root_name: 'Leather Armor',
+  },
+  {
+    content_kind: 'spell',
+    content_key: '2024:acid-arrow',
+    root_name: 'Acid Arrow',
+  },
+  { content_kind: 'spell', content_key: '2024:fireball', root_name: 'Fireball' },
+  {
+    content_kind: 'class',
+    content_key: '2024:class:barbarian',
+    root_name: 'Barbarian',
+  },
+  { content_kind: 'class', content_key: '2024:class:bard', root_name: 'Bard' },
+  { content_kind: 'feat', content_key: '2024:feat:alert', root_name: 'Alert' },
+  {
+    content_kind: 'feat',
+    content_key: '2024:feat:magic-initiate',
+    root_name: 'Magic Initiate',
+  },
+  {
+    content_kind: 'subclass',
+    content_key: '2024:subclass:ek',
+    root_name: 'EK',
+  },
+  {
+    content_kind: 'subclass',
+    content_key: '2024:subclass:at',
+    root_name: 'AT',
+  },
+  {
+    content_kind: 'species',
+    content_key: '2024:species:dragonborn',
+    root_name: 'Dragonborn',
+  },
+  {
+    content_kind: 'species',
+    content_key: '2024:species:dwarf',
+    root_name: 'Dwarf',
+  },
+  {
+    content_kind: 'background',
+    content_key: '2024:background:acolyte',
+    root_name: 'Acolyte',
+  },
+  {
+    content_kind: 'background',
+    content_key: '2024:background:criminal',
+    root_name: 'Criminal',
+  },
 ] as const;
 
 const MUTATED_SPELL_KEY = '2024:acid-arrow' as ContentKey;
+
+function anchoredRootName(
+  db: DatabaseContext,
+  anchor: (typeof INDEPENDENT_SRD_ROOT_ANCHORS)[number],
+): string | null {
+  let sql: string;
+  switch (anchor.content_kind) {
+    case 'weapon':
+      sql = 'SELECT name FROM weapon_templates WHERE content_key = ?';
+      break;
+    case 'armor':
+      sql = 'SELECT name FROM armor_templates WHERE content_key = ?';
+      break;
+    case 'spell':
+      sql = 'SELECT display_name FROM spell_versions WHERE content_key = ?';
+      break;
+    case 'class':
+      sql = 'SELECT name FROM class_definitions WHERE content_key = ?';
+      break;
+    case 'feat':
+      sql = 'SELECT name FROM feat_definitions WHERE content_key = ?';
+      break;
+    case 'subclass':
+      sql = 'SELECT name FROM subclass_definitions WHERE content_key = ?';
+      break;
+    case 'species':
+      sql = 'SELECT name FROM species_templates WHERE content_key = ?';
+      break;
+    case 'background':
+      sql = 'SELECT name FROM background_templates WHERE content_key = ?';
+      break;
+  }
+  return db.scalar<string>(sql, [anchor.content_key]);
+}
 
 describe('CI-3s bundled stable-key fingerprint registration', () => {
   let lifecycle: DatabaseLifecycle;
@@ -43,28 +136,55 @@ describe('CI-3s bundled stable-key fingerprint registration', () => {
   afterEach(() => lifecycle.close());
 
   it('registers every real-boot bundled aggregate under its stable key with one current v1 fingerprint', () => {
-    const registryCounts = db.allRaw(
-      `SELECT content_kind, count(*) AS aggregate_count
+    const expectedEnumeration = bundledContentManifestV1().map((entry) => ({
+      content_kind: entry.kind,
+      content_key: entry.contentKey,
+    }));
+    const registryEnumeration = db.allRaw(
+      `SELECT content_kind, content_key
        FROM catalog_content_identities
        WHERE key_kind = 'bundled-stable' AND catalog_layer = 'bundled'
-       GROUP BY content_kind ORDER BY content_kind`,
+       ORDER BY CASE content_kind
+         WHEN 'weapon' THEN 0 WHEN 'armor' THEN 1 WHEN 'item' THEN 2
+         WHEN 'spell' THEN 3 WHEN 'class' THEN 4 WHEN 'feat' THEN 5
+         WHEN 'subclass' THEN 6 WHEN 'species' THEN 7
+         WHEN 'background' THEN 8 END,
+         content_key`,
     );
-    const currentCounts = db.allRaw(
-      `SELECT content_kind, count(*) AS aggregate_count
-       FROM catalog_content_fingerprints
-       WHERE fingerprint_scheme = 'content-v1'
-         AND fingerprint_role = 'current'
-       GROUP BY content_kind ORDER BY content_kind`,
+    const currentEnumeration = db.allRaw(
+      `SELECT fingerprint.content_kind, fingerprint.content_key
+       FROM catalog_content_fingerprints AS fingerprint
+       INNER JOIN catalog_content_identities AS identity
+         ON identity.content_kind = fingerprint.content_kind
+        AND identity.content_key = fingerprint.content_key
+       WHERE fingerprint.fingerprint_scheme = 'content-v1'
+         AND fingerprint.fingerprint_role = 'current'
+         AND identity.key_kind = 'bundled-stable'
+         AND identity.catalog_layer = 'bundled'
+       ORDER BY CASE fingerprint.content_kind
+         WHEN 'weapon' THEN 0 WHEN 'armor' THEN 1 WHEN 'item' THEN 2
+         WHEN 'spell' THEN 3 WHEN 'class' THEN 4 WHEN 'feat' THEN 5
+         WHEN 'subclass' THEN 6 WHEN 'species' THEN 7
+         WHEN 'background' THEN 8 END,
+         fingerprint.content_key`,
     );
 
-    expect(registryCounts).toEqual(EXPECTED_BUNDLED_COUNTS);
-    expect(currentCounts).toEqual(EXPECTED_BUNDLED_COUNTS);
+    expect(registryEnumeration).toEqual(expectedEnumeration);
+    expect(currentEnumeration).toEqual(expectedEnumeration);
+    for (const anchor of INDEPENDENT_SRD_ROOT_ANCHORS) {
+      expect(registryEnumeration).toContainEqual({
+        content_kind: anchor.content_kind,
+        content_key: anchor.content_key,
+      });
+      expect(anchoredRootName(db, anchor)).toBe(anchor.root_name);
+    }
     expect(db.scalar(
       `SELECT count(*) FROM catalog_content_identities
        WHERE key_kind <> 'bundled-stable' OR catalog_layer <> 'bundled'`,
     )).toBe(0);
     expect(reconcileBundledContentRegistryV1(db)).toEqual({
       projected: 434,
+      orphaned: 0,
       registered: 0,
       unchanged: 434,
       moved: 0,
@@ -169,6 +289,173 @@ describe('CI-3s bundled stable-key fingerprint registration', () => {
        FROM spell_versions WHERE content_key = ?`,
       [MUTATED_SPELL_KEY],
     )).toEqual(beforeResolution);
+  });
+
+  it('refuses a derived fingerprint key when its bundled historical canonical bytes are damaged', () => {
+    const historicalDigest = db.scalar<string>(
+      `SELECT fingerprint_digest FROM catalog_content_fingerprints
+       WHERE content_kind = 'spell' AND content_key = ?
+         AND fingerprint_scheme = 'content-v1'
+         AND fingerprint_role = 'current'`,
+      [MUTATED_SPELL_KEY],
+    );
+    expect(historicalDigest).not.toBeNull();
+    db.exec(
+      `UPDATE spell_versions
+       SET short_summary = short_summary || ' Corrected extraction.'
+       WHERE content_key = ?`,
+      [MUTATED_SPELL_KEY],
+    );
+    reconcileBundledContentRegistryV1(db);
+    db.exec(
+      `UPDATE catalog_content_fingerprints SET canonical_json = 'damaged'
+       WHERE content_kind = 'spell' AND content_key = ?
+         AND fingerprint_scheme = 'content-v1'
+         AND fingerprint_digest = ?
+         AND fingerprint_role = 'bundled-historical'`,
+      [MUTATED_SPELL_KEY, historicalDigest],
+    );
+    const incoming =
+      `2024:content.v1:${historicalDigest}` as ContentKey;
+
+    expect(() => resolveContentReference(db, {
+      kind: 'spell',
+      contentKey: incoming,
+    })).toThrow(ContentIdentityCollision);
+  });
+
+  it('reports an absent registered root as orphaned without changing its identity or fingerprints', () => {
+    const beforeIdentity = db.oneRaw(
+      `SELECT content_kind, content_key, key_kind, catalog_layer, normalized_name
+       FROM catalog_content_identities
+       WHERE content_kind = 'spell' AND content_key = ?`,
+      [MUTATED_SPELL_KEY],
+    );
+    const beforeFingerprints = db.allRaw(
+      `SELECT fingerprint_digest, canonical_json, fingerprint_role
+       FROM catalog_content_fingerprints
+       WHERE content_kind = 'spell' AND content_key = ?
+       ORDER BY fingerprint_role, fingerprint_digest`,
+      [MUTATED_SPELL_KEY],
+    );
+    db.exec(
+      'DELETE FROM spell_versions WHERE content_key = ?',
+      [MUTATED_SPELL_KEY],
+    );
+
+    expect(reconcileBundledContentRegistryV1(db)).toEqual({
+      projected: 433,
+      orphaned: 1,
+      registered: 0,
+      unchanged: 433,
+      moved: 0,
+    });
+    expect(db.oneRaw(
+      `SELECT content_kind, content_key, key_kind, catalog_layer, normalized_name
+       FROM catalog_content_identities
+       WHERE content_kind = 'spell' AND content_key = ?`,
+      [MUTATED_SPELL_KEY],
+    )).toEqual(beforeIdentity);
+    expect(db.allRaw(
+      `SELECT fingerprint_digest, canonical_json, fingerprint_role
+       FROM catalog_content_fingerprints
+       WHERE content_kind = 'spell' AND content_key = ?
+       ORDER BY fingerprint_role, fingerprint_digest`,
+      [MUTATED_SPELL_KEY],
+    )).toEqual(beforeFingerprints);
+  });
+
+  it('reconciles a template-only species aggregate', () => {
+    expect(db.scalar(
+      `SELECT count(*) FROM species_definitions
+       WHERE content_key = '2024:species:dragonborn'`,
+    )).toBe(0);
+
+    expect(reconcileBundledContentRegistryV1(db)).toEqual({
+      projected: 434,
+      orphaned: 0,
+      registered: 0,
+      unchanged: 434,
+      moved: 0,
+    });
+  });
+
+  it('reconciles agreeing definition and template species halves', () => {
+    db.exec(
+      `INSERT INTO species_definitions (
+         content_key, name, rules_edition, repeatable
+       ) VALUES ('2024:species:dragonborn', 'Dragonborn', '2024', 0)`,
+    );
+
+    expect(reconcileBundledContentRegistryV1(db)).toEqual({
+      projected: 434,
+      orphaned: 0,
+      registered: 0,
+      unchanged: 433,
+      moved: 1,
+    });
+  });
+
+  it('reports a definition-only species aggregate as orphaned before projection', () => {
+    db.exec(
+      `INSERT INTO species_definitions (
+         content_key, name, rules_edition, repeatable
+       ) VALUES ('2024:species:dragonborn', 'Dragonborn', '2024', 0)`,
+    );
+    db.exec(
+      `DELETE FROM species_templates
+       WHERE content_key = '2024:species:dragonborn'`,
+    );
+
+    expect(reconcileBundledContentRegistryV1(db)).toEqual({
+      projected: 433,
+      orphaned: 1,
+      registered: 0,
+      unchanged: 433,
+      moved: 0,
+    });
+  });
+
+  it('reports a template-only background aggregate as orphaned before projection', () => {
+    db.exec(
+      `DELETE FROM background_definitions
+       WHERE content_key = '2024:background:acolyte'`,
+    );
+
+    expect(reconcileBundledContentRegistryV1(db)).toEqual({
+      projected: 433,
+      orphaned: 1,
+      registered: 0,
+      unchanged: 433,
+      moved: 0,
+    });
+  });
+
+  it('reports a definition-only background aggregate as orphaned before projection', () => {
+    db.exec(
+      `DELETE FROM background_templates
+       WHERE content_key = '2024:background:acolyte'`,
+    );
+
+    expect(reconcileBundledContentRegistryV1(db)).toEqual({
+      projected: 433,
+      orphaned: 1,
+      registered: 0,
+      unchanged: 433,
+      moved: 0,
+    });
+  });
+
+  it('keeps disagreement between present aggregate halves fatal', () => {
+    db.exec(
+      `INSERT INTO species_definitions (
+         content_key, name, rules_edition, repeatable
+       ) VALUES ('2024:species:dragonborn', 'Not Dragonborn', '2024', 0)`,
+    );
+
+    expect(() => reconcileBundledContentRegistryV1(db)).toThrow(
+      "Bundled species '2024:species:dragonborn' has inconsistent root names.",
+    );
   });
 
   it('reprojects bundled content with its authoritative stored normalized name', () => {

@@ -1565,7 +1565,7 @@ export function storedAuthoredRegistryReferencesV1(
   const resolver: StoredAuthoredReferenceResolverV1 = {
     spell: (contentKey) => fingerprintReference(db, 'spell', contentKey),
     featByStoredName: ({ name, edition }) => {
-      const definitionName = backgroundFeatBaseName(name);
+      const definitionName = backgroundFeatBaseName(name).base;
       const keys = db.all(
         `SELECT content_key FROM feat_definitions
          WHERE name = ? AND rules_edition = ? ORDER BY content_key`,

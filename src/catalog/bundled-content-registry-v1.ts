@@ -46,6 +46,7 @@ interface BundledManifestEntryV1 {
 
 export interface BundledContentRegistryResultV1 {
   readonly projected: number;
+  readonly orphaned: number;
   readonly registered: number;
   readonly unchanged: number;
   readonly moved: number;
@@ -122,67 +123,132 @@ export function bundledContentManifestV1(): readonly BundledManifestEntryV1[] {
   return staticManifest;
 }
 
-function rootNames(
+type AggregateRootInspectionV1 =
+  | { readonly outcome: 'reconcile'; readonly name: string }
+  | { readonly outcome: 'orphaned' };
+
+function queriedRootNames(
   db: DatabaseContext,
-  entry: BundledManifestEntryV1,
+  sql: string,
+  contentKey: ContentKey,
 ): readonly string[] {
-  let sql: string;
-  switch (entry.kind) {
-    case 'class':
-      sql = 'SELECT name FROM class_definitions WHERE content_key = ?';
-      break;
-    case 'subclass':
-      sql = 'SELECT name FROM subclass_definitions WHERE content_key = ?';
-      break;
-    case 'feat':
-      sql = 'SELECT name FROM feat_definitions WHERE content_key = ?';
-      break;
-    case 'species':
-      sql = `SELECT name FROM species_definitions WHERE content_key = ?
-             UNION
-             SELECT name FROM species_templates WHERE content_key = ?`;
-      break;
-    case 'background':
-      sql = `SELECT name FROM background_definitions WHERE content_key = ?
-             UNION
-             SELECT name FROM background_templates WHERE content_key = ?`;
-      break;
-    case 'spell':
-      sql = 'SELECT display_name AS name FROM spell_versions WHERE content_key = ?';
-      break;
-    case 'weapon':
-      sql = 'SELECT name FROM weapon_templates WHERE content_key = ?';
-      break;
-    case 'armor':
-      sql = 'SELECT name FROM armor_templates WHERE content_key = ?';
-      break;
-    case 'item':
-      sql = 'SELECT name FROM item_definitions WHERE content_key = ?';
-      break;
-  }
-  const bind = entry.kind === 'species' || entry.kind === 'background'
-    ? [entry.contentKey, entry.contentKey]
-    : [entry.contentKey];
-  return db.all(sql, bind, (row) => sqlString(row, 'name'));
+  return db.all(sql, [contentKey], (row) => sqlString(row, 'name'));
 }
 
-function presentStaticEntries(
+function singleRootSql(kind: ContentKind): string | null {
+  switch (kind) {
+    case 'class':
+      return 'SELECT name FROM class_definitions WHERE content_key = ?';
+    case 'subclass':
+      return 'SELECT name FROM subclass_definitions WHERE content_key = ?';
+    case 'feat':
+      return 'SELECT name FROM feat_definitions WHERE content_key = ?';
+    case 'species':
+    case 'background':
+      return null;
+    case 'spell':
+      return 'SELECT display_name AS name FROM spell_versions WHERE content_key = ?';
+    case 'weapon':
+      return 'SELECT name FROM weapon_templates WHERE content_key = ?';
+    case 'armor':
+      return 'SELECT name FROM armor_templates WHERE content_key = ?';
+    case 'item':
+      return 'SELECT name FROM item_definitions WHERE content_key = ?';
+  }
+}
+
+function inspectAggregateRoot(
+  db: DatabaseContext,
+  entry: BundledManifestEntryV1,
+): AggregateRootInspectionV1 {
+  const sql = singleRootSql(entry.kind);
+  let halves: readonly (readonly string[])[] = sql === null
+    ? []
+    : [queriedRootNames(db, sql, entry.contentKey)];
+  let compositionCanProject: (presentHalves: readonly boolean[]) => boolean =
+    (presentHalves) => presentHalves[0] === true;
+  if (entry.kind === 'species') {
+    halves = [
+      queriedRootNames(
+        db,
+        'SELECT name FROM species_definitions WHERE content_key = ?',
+        entry.contentKey,
+      ),
+      queriedRootNames(
+        db,
+        'SELECT name FROM species_templates WHERE content_key = ?',
+        entry.contentKey,
+      ),
+    ];
+    compositionCanProject = (presentHalves) => presentHalves[1] === true;
+  }
+  if (entry.kind === 'background') {
+    halves = [
+      queriedRootNames(
+        db,
+        'SELECT name FROM background_definitions WHERE content_key = ?',
+        entry.contentKey,
+      ),
+      queriedRootNames(
+        db,
+        'SELECT name FROM background_templates WHERE content_key = ?',
+        entry.contentKey,
+      ),
+    ];
+    compositionCanProject = (presentHalves) =>
+      presentHalves[0] === true && presentHalves[1] === true;
+  }
+  const distinctNames = [...new Set(halves.flat())];
+  if (distinctNames.length > 1) {
+    throw new TypeError(
+      `Bundled ${entry.kind} '${entry.contentKey}' has inconsistent root names.`,
+    );
+  }
+  const presentHalves = halves.map((half) => half.length > 0);
+  if (
+    distinctNames.length === 0 ||
+    !compositionCanProject(presentHalves)
+  ) {
+    return Object.freeze({ outcome: 'orphaned' });
+  }
+  return Object.freeze({ outcome: 'reconcile', name: distinctNames[0]! });
+}
+
+function allBundledCandidates(
   db: DatabaseContext,
 ): readonly BundledManifestEntryV1[] {
-  const present: BundledManifestEntryV1[] = [];
-  for (const entry of bundledContentManifestV1()) {
-    const names = rootNames(db, entry);
-    if (names.length === 0) {
-      // Seeders intentionally yield a name/edition slot already occupied by
-      // user content. An absent bundled root is therefore not an aggregate to
-      // register and must not make boot destructive.
-      continue;
+  const entries = new Map(
+    bundledContentManifestV1().map((entry) => [
+      `${entry.kind}\u0000${entry.contentKey}`,
+      entry,
+    ]),
+  );
+  for (const row of db.allRaw(
+    `SELECT content_kind, content_key
+     FROM catalog_content_identities
+     WHERE key_kind = 'bundled-stable' AND catalog_layer = 'bundled'`,
+  )) {
+    const kind = sqlString(row, 'content_kind');
+    if (!isEnumValue(contentKinds, kind)) {
+      throw new TypeError(`Bundled registry row has unknown kind '${kind}'.`);
     }
-    if (names.length !== 1) {
-      throw new TypeError(
-        `Bundled ${entry.kind} '${entry.contentKey}' has inconsistent root names.`,
-      );
-    }
+    const entry = {
+      kind,
+      contentKey: sqlString(row, 'content_key') as ContentKey,
+    };
+    entries.set(`${entry.kind}\u0000${entry.contentKey}`, entry);
+  }
+  return Object.freeze([...entries.values()].sort((left, right) =>
+    KIND_ORDER[left.kind] - KIND_ORDER[right.kind] ||
+    left.contentKey.localeCompare(right.contentKey),
+  ));
+}
+
+function ensureBundledRegistryRoot(
+  db: DatabaseContext,
+  entry: BundledManifestEntryV1,
+  name: string,
+): void {
     const registry = db.oneRaw(
       `SELECT content_kind, key_kind, catalog_layer
        FROM catalog_content_identities WHERE content_key = ?`,
@@ -209,45 +275,9 @@ function presentStaticEntries(
          SET key_kind = 'bundled-stable', catalog_layer = 'bundled',
              normalized_name = ?
          WHERE content_kind = ? AND content_key = ?`,
-        [normalizeContentIdentityName(names[0]!), entry.kind, entry.contentKey],
+        [normalizeContentIdentityName(name), entry.kind, entry.contentKey],
       );
     }
-    present.push(entry);
-  }
-  return Object.freeze(present);
-}
-
-function allRegisteredBundledEntries(
-  db: DatabaseContext,
-  present: readonly BundledManifestEntryV1[],
-): readonly BundledManifestEntryV1[] {
-  const entries = new Map(
-    present.map((entry) => [`${entry.kind}\u0000${entry.contentKey}`, entry]),
-  );
-  for (const row of db.allRaw(
-    `SELECT content_kind, content_key
-     FROM catalog_content_identities
-     WHERE key_kind = 'bundled-stable' AND catalog_layer = 'bundled'`,
-  )) {
-    const kind = sqlString(row, 'content_kind');
-    if (!isEnumValue(contentKinds, kind)) {
-      throw new TypeError(`Bundled registry row has unknown kind '${kind}'.`);
-    }
-    const entry = {
-      kind,
-      contentKey: sqlString(row, 'content_key') as ContentKey,
-    };
-    if (rootNames(db, entry).length !== 1) {
-      throw new TypeError(
-        `Bundled ${kind} '${entry.contentKey}' does not name exactly one aggregate root.`,
-      );
-    }
-    entries.set(`${entry.kind}\u0000${entry.contentKey}`, entry);
-  }
-  return Object.freeze([...entries.values()].sort((left, right) =>
-    KIND_ORDER[left.kind] - KIND_ORDER[right.kind] ||
-    left.contentKey.localeCompare(right.contentKey),
-  ));
 }
 
 function projectBundledIdentityV1(
@@ -403,27 +433,39 @@ function reconcileCurrentFingerprint(
 }
 
 /**
- * Promote and fingerprint every present seeder-owned aggregate atomically.
- * Stable root keys are never updated. A changed live projection demotes the
- * old bytes to bundled-historical and installs the new projection as current.
+ * Promote and fingerprint every reconcilable seeder-owned aggregate
+ * atomically. Missing or incomplete roots are counted as orphaned and left
+ * untouched. Stable root keys are never updated. A changed live projection
+ * demotes the old bytes to bundled-historical and installs the new projection
+ * as current.
  */
 export function reconcileBundledContentRegistryV1(
   db: DatabaseContext,
 ): BundledContentRegistryResultV1 {
   return db.transaction(() => {
-    const entries = allRegisteredBundledEntries(db, presentStaticEntries(db));
+    const entries = allBundledCandidates(db);
+    let projected = 0;
+    let orphaned = 0;
     let registered = 0;
     let unchanged = 0;
     let moved = 0;
     for (const entry of entries) {
+      const root = inspectAggregateRoot(db, entry);
+      if (root.outcome === 'orphaned') {
+        orphaned += 1;
+        continue;
+      }
+      ensureBundledRegistryRoot(db, entry, root.name);
       const identity = projectBundledIdentityV1(db, entry);
       const result = reconcileCurrentFingerprint(db, entry, identity);
+      projected += 1;
       if (result === 'registered') registered += 1;
       if (result === 'unchanged') unchanged += 1;
       if (result === 'moved') moved += 1;
     }
     return Object.freeze({
-      projected: entries.length,
+      projected,
+      orphaned,
       registered,
       unchanged,
       moved,

@@ -4,7 +4,20 @@
  * the base name. Both runtime suggestion and content projection must resolve
  * that stored label through this one seam.
  */
-export function backgroundFeatBaseName(printedName: string): string {
-  const parenthetical = /^(?<base>.*?)\s*\([^)]+\)$/u.exec(printedName)?.groups;
-  return parenthetical?.base ?? printedName;
+export interface ParsedBackgroundFeatName {
+  readonly base: string;
+  readonly option: string | null;
+}
+
+export function backgroundFeatBaseName(
+  printedName: string,
+): ParsedBackgroundFeatName {
+  const trimmedName = printedName.trim();
+  const parenthetical = /^(?<base>.*?)\s*\((?<option>[^)]+)\)$/u.exec(
+    trimmedName,
+  )?.groups;
+  return Object.freeze({
+    base: parenthetical?.base ?? trimmedName,
+    option: parenthetical?.option ?? null,
+  });
 }
