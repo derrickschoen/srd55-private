@@ -211,7 +211,7 @@ export function renderBuildReport(report: BuildReportResult): string {
     <main class="build-report-page" data-screen="build-report">
       <nav class="report-controls" aria-label="Report actions">
         <a href="/characters/${characterId}" data-router-link>Back to character</a>
-        <a href="/characters/${characterId}/print" data-router-link>Printable spell list</a>
+        <a href="/characters/${characterId}/sheet" data-router-link>Character sheet</a>
       </nav>
 
       <div class="report-content">

@@ -63,7 +63,9 @@ function trackedTypeScriptFiles(): string[] {
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
   });
-  return stdout.split('\0').filter((path) => path !== '');
+  return stdout
+    .split('\0')
+    .filter((path) => path !== '');
 }
 
 /**
