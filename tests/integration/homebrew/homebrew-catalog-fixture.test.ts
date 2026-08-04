@@ -837,8 +837,8 @@ describe('the record kind discriminator', () => {
     // cannot store, and skipping it would import the document as complete while
     // dropping content the user can see in the file.
     await refuses(
-      [{ ...record(), kind: 'feat' }],
-      "'kind' must be one of spell, subclass",
+      [{ ...record(), kind: 'vehicle' }],
+      "'kind' must be one of spell, subclass, weapon, armor, item, class, feat, species, background",
     );
   });
 

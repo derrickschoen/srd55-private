@@ -368,6 +368,65 @@ describe('level-up wizard state RPC', () => {
     rpc.close();
   });
 
+  it('keeps a held imported class disabled even when its hit die is known', async () => {
+    const characterId = createCharacter('Imported Class Holder');
+    harness.context.db.exec(
+      `INSERT INTO catalog_content_identities (
+         content_key, content_kind, key_kind, catalog_layer, normalized_name
+       ) VALUES (
+         'external:class:level-up-probe', 'class', 'legacy-opaque',
+         'external', 'levelupprobe'
+       )`,
+    );
+    const importedClassId = harness.context.db.exec(
+      `INSERT INTO class_definitions (
+         content_key, name, rules_edition, progression_type,
+         supports_ritual_casting
+       ) VALUES (
+         'external:class:level-up-probe', 'Imported Adept', 'expanded',
+         'none', 0
+       )`,
+    ).lastInsertId;
+    harness.context.db.exec(
+      `INSERT INTO class_sheet_traits (
+         class_definition_id, hit_die, skill_choice_count,
+         skill_choice_from_any, multiclass_skill_choice_count,
+         multiclass_skill_choice_pool
+       ) VALUES (?, 8, 1, 0, 0, 'none')`,
+      [importedClassId],
+    );
+    harness.context.db.exec(
+      `INSERT INTO character_class_levels (
+         character_id, class_definition_id, level, is_starting_class
+       ) VALUES (?, ?, 1, 1)`,
+      [characterId, importedClassId],
+    );
+
+    const transport = new RegistryTransport();
+    const rpc = new RpcClient(transport);
+    const state = await createQueriesClient(rpc).levelUpState(characterId);
+    expect(state).toMatchObject({
+      kind: 'no_guideable_class',
+      explanation:
+        'No held class is currently guideable; imported class application is deferred to CI-4a/HA-10.',
+      class_options: [{
+        guideability: 'disabled',
+        class_definition_id: importedClassId,
+        hit_die: 8,
+        reason: 'class_not_bundled',
+        explanation:
+          'Imported classes remain held but cannot be guided until CI-4a/HA-10 completes aggregate application.',
+      }],
+    });
+    if (state.kind !== 'no_guideable_class') {
+      throw new Error('Imported held class remained guideable.');
+    }
+    expect(state.class_options[0]).not.toHaveProperty('target_level');
+    expect(state.class_options[0]).not.toHaveProperty('gains');
+    expect(state.class_options[0]).not.toHaveProperty('applicable_steps');
+    rpc.close();
+  });
+
   it('keeps known-die multiclass advancement ready and disables only the unknown class', async () => {
     const characterId = createCharacter('Mixed Hit Dice');
     const fighterId = enterClass(characterId, 'Fighter');

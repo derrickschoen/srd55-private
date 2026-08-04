@@ -237,6 +237,11 @@
 
 }
 
+@page {
+  size: letter;
+  margin: 0.5in;
+}
+
 /**
  * D89: the v1 paper sheet is this route, reflowed into one column. Disclosures
  * remain inline and D95 warnings retain the same readable size; only
@@ -276,14 +281,40 @@
     break-before: page;
   }
 
-  .sheet-print-appendix :is(h2, h3) {
+  .sheet-print-appendix :is(h2, h3, h4) {
     break-after: avoid;
+  }
+
+  .sheet-spell-appendix-summary {
+    break-inside: avoid;
+  }
+
+  .sheet-spell-appendix-card {
+    break-inside: auto;
+  }
+
+  .sheet-spell-appendix-facts {
+    margin: 0.25rem 0;
+  }
+
+  .sheet-spell-appendix-facts > div {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 0.5rem;
+  }
+
+  .sheet-spell-appendix-facts dd {
+    margin: 0;
   }
 
   .sheet-print-appendix-prose {
     break-inside: auto;
     orphans: 3;
     widows: 3;
+  }
+
+  .sheet-spell-appendix-prose {
+    white-space: pre-wrap;
   }
 
   .sheet-warnings {

@@ -433,12 +433,18 @@ export interface LevelUpGuideableClassOption extends LevelUpHeldClass {
   readonly planned_choices?: LevelUpPlannedChoiceProjection;
 }
 
-export interface LevelUpDisabledClassOption extends LevelUpHeldClass {
-  readonly guideability: 'disabled';
-  readonly hit_die: null;
-  readonly reason: 'missing_hit_die';
-  readonly explanation: string;
-}
+export type LevelUpDisabledClassOption =
+  | (LevelUpHeldClass & {
+    readonly guideability: 'disabled';
+    readonly hit_die: null;
+    readonly reason: 'missing_hit_die';
+    readonly explanation: string;
+  })
+  | (LevelUpHeldClass & {
+    readonly guideability: 'disabled';
+    readonly reason: 'class_not_bundled';
+    readonly explanation: string;
+  });
 
 export type LevelUpClassOption =
   | LevelUpGuideableClassOption

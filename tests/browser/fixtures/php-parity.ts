@@ -157,19 +157,31 @@ function seedSourceCatalog(
   // Magic Initiate rule silently rewritten to the bundled empty rule set —
   // which is exactly what happened, unobserved, while this suite could not
   // collect. A fixture species keeps a key seeding will never claim.
+  const humanContentKey = '2024:species:parity-human' as ContentKey;
+  registerBundledStableContentIdentity(db, {
+    kind: 'species',
+    contentKey: humanContentKey,
+    normalizedName: normalizeContentIdentityName('Parity Human'),
+  });
   const human = db.exec(
     `INSERT INTO species_definitions (
        content_key, name, rules_edition, repeatable, grant_rules
-     ) VALUES ('2024:species:parity-human', 'Parity Human', '2024', 0, ?)`,
-    [nestedRule('human-origin-feat')],
+     ) VALUES (?, 'Parity Human', '2024', 0, ?)`,
+    [humanContentKey, nestedRule('human-origin-feat')],
   ).lastInsertId;
+  const backgroundContentKey = '2024:background:custom' as ContentKey;
+  registerBundledStableContentIdentity(db, {
+    kind: 'background',
+    contentKey: backgroundContentKey,
+    normalizedName: normalizeContentIdentityName('Custom Background'),
+  });
   const background = db.exec(
     `INSERT INTO background_definitions (
        content_key, name, rules_edition, repeatable, grant_rules
      ) VALUES (
-       '2024:background:custom', 'Custom Background', '2024', 0, ?
+       ?, 'Custom Background', '2024', 0, ?
      )`,
-    [nestedRule('background-origin-feat')],
+    [backgroundContentKey, nestedRule('background-origin-feat')],
   ).lastInsertId;
   return { magicInitiate, human, background };
 }
