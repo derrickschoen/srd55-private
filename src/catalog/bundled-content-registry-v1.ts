@@ -47,6 +47,7 @@ interface BundledManifestEntryV1 {
 export interface BundledContentRegistryResultV1 {
   readonly projected: number;
   readonly orphaned: number;
+  readonly refused: number;
   readonly registered: number;
   readonly unchanged: number;
   readonly moved: number;
@@ -433,11 +434,13 @@ function reconcileCurrentFingerprint(
 }
 
 /**
- * Promote and fingerprint every reconcilable seeder-owned aggregate
- * atomically. Missing or incomplete roots are counted as orphaned and left
- * untouched. Stable root keys are never updated. A changed live projection
- * demotes the old bytes to bundled-historical and installs the new projection
- * as current.
+ * Promote and fingerprint every reconcilable seeder-owned aggregate. Each
+ * aggregate is reconciled atomically: a known identity collision rolls back
+ * only that aggregate, counts it as refused, and leaves its registry rows
+ * untouched. Missing or incomplete roots are counted as orphaned and also
+ * left untouched. Any other error aborts the whole pass. Stable root keys are
+ * never updated. A changed live projection demotes the old bytes to
+ * bundled-historical and installs the new projection as current.
  */
 export function reconcileBundledContentRegistryV1(
   db: DatabaseContext,
@@ -446,26 +449,40 @@ export function reconcileBundledContentRegistryV1(
     const entries = allBundledCandidates(db);
     let projected = 0;
     let orphaned = 0;
+    let refused = 0;
     let registered = 0;
     let unchanged = 0;
     let moved = 0;
     for (const entry of entries) {
-      const root = inspectAggregateRoot(db, entry);
-      if (root.outcome === 'orphaned') {
-        orphaned += 1;
-        continue;
+      try {
+        const result = db.transaction(() => {
+          const root = inspectAggregateRoot(db, entry);
+          if (root.outcome === 'orphaned') {
+            return 'orphaned' as const;
+          }
+          ensureBundledRegistryRoot(db, entry, root.name);
+          const identity = projectBundledIdentityV1(db, entry);
+          return reconcileCurrentFingerprint(db, entry, identity);
+        });
+        if (result === 'orphaned') {
+          orphaned += 1;
+          continue;
+        }
+        projected += 1;
+        if (result === 'registered') registered += 1;
+        if (result === 'unchanged') unchanged += 1;
+        if (result === 'moved') moved += 1;
+      } catch (error) {
+        if (!(error instanceof ContentIdentityCollision)) {
+          throw error;
+        }
+        refused += 1;
       }
-      ensureBundledRegistryRoot(db, entry, root.name);
-      const identity = projectBundledIdentityV1(db, entry);
-      const result = reconcileCurrentFingerprint(db, entry, identity);
-      projected += 1;
-      if (result === 'registered') registered += 1;
-      if (result === 'unchanged') unchanged += 1;
-      if (result === 'moved') moved += 1;
     }
     return Object.freeze({
       projected,
       orphaned,
+      refused,
       registered,
       unchanged,
       moved,
