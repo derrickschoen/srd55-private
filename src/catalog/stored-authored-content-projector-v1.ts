@@ -44,6 +44,7 @@ import {
 } from '../domain/enums';
 import type { ContentKey } from '../domain/ids';
 import type { JsonObject, JsonValue } from '../domain/models';
+import { backgroundFeatBaseName } from '../domain/background-feat-name';
 import { GrantRule } from '../grants/grant-rule';
 import type {
   AuthoredContentReferenceV1,
@@ -1564,10 +1565,11 @@ export function storedAuthoredRegistryReferencesV1(
   const resolver: StoredAuthoredReferenceResolverV1 = {
     spell: (contentKey) => fingerprintReference(db, 'spell', contentKey),
     featByStoredName: ({ name, edition }) => {
+      const definitionName = backgroundFeatBaseName(name);
       const keys = db.all(
         `SELECT content_key FROM feat_definitions
          WHERE name = ? AND rules_edition = ? ORDER BY content_key`,
-        [name, edition],
+        [definitionName, edition],
         (row) => sqlString(row, 'content_key') as ContentKey,
       );
       if (keys.length !== 1) {

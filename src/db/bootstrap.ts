@@ -16,6 +16,7 @@ import { ensureBundledClassEquipment } from '../rules/class-equipment-srd';
 import { ensureBundledFeatContent } from '../rules/feats-srd';
 import { reconcileLegacyLevelFeatChoices } from '../rules/legacy-level-feat-choices';
 import { ensureBundledClassResources } from '../rules/class-resources-srd';
+import { reconcileBundledContentRegistryV1 } from '../catalog/bundled-content-registry-v1';
 
 /**
  * The bundled content every application database is expected to carry: the SRD
@@ -67,6 +68,10 @@ export const applicationSeed: DatabaseSeed = (db) => {
   ensureBundledFeatContent(db);
   ensureBundledSpellContent(db);
   reconcileLegacyLevelFeatChoices(db);
+  // D84 runs only after every definition/template half and dependency catalog
+  // is present, so all nine stored projectors observe the same graph runtime
+  // consumers do. Reconciliation preserves each stable root key verbatim.
+  reconcileBundledContentRegistryV1(db);
 };
 
 /**

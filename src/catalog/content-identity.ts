@@ -317,6 +317,29 @@ export function deriveContentIdentityV1<K extends ContentKind, P>(input: {
   readonly name: string;
   readonly payload: P;
 }): DerivedContentIdentityV1<K, P> {
+  return deriveContentIdentityV1FromNormalizedName({
+    kind: input.kind,
+    edition: input.edition,
+    normalizedName: normalizeContentIdentityName(input.name),
+    payload: input.payload,
+  });
+}
+
+/**
+ * Reproject a stored graph using its authoritative persisted normalized name.
+ * New content must use `deriveContentIdentityV1`; this entry point exists so a
+ * later JavaScript Unicode-table change cannot move an already registered
+ * identity merely by reopening the database.
+ */
+export function deriveContentIdentityV1FromNormalizedName<
+  K extends ContentKind,
+  P,
+>(input: {
+  readonly kind: K;
+  readonly edition: string;
+  readonly normalizedName: NormalizedContentName;
+  readonly payload: P;
+}): DerivedContentIdentityV1<K, P> {
   if (!isCatalogKeyComponent(input.edition)) {
     throw new TypeError(
       `Content identity edition '${input.edition}' must be a valid catalog key component.`,
@@ -327,7 +350,7 @@ export function deriveContentIdentityV1<K extends ContentKind, P>(input: {
     scheme: CONTENT_FINGERPRINT_SCHEME_V1,
     kind: input.kind,
     edition: input.edition,
-    normalizedName: normalizeContentIdentityName(input.name),
+    normalizedName: input.normalizedName,
     payload: input.payload,
   });
   const canonicalJson = canonicalContentIdentityJson(envelope);

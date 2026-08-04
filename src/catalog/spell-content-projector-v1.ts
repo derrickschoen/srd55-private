@@ -199,6 +199,11 @@ function storedFields(row: SqlRow, known: readonly string[]): Readonly<Record<st
  *   spell_versions.content_key is included as spell_version_key. Identity
  *   names/notes/timestamps and spell_identity_aliases only resolve/group that
  *   stable concept key and do not alter eligibility after resolution.
+ *   Identity remains content-local: membership inherited from sibling versions
+ *   in the same concept is runtime context, not input to this version's
+ *   fingerprint. When sibling membership changes, that sibling's own
+ *   fingerprint moves; folding the sibling graph into this payload would make
+ *   unrelated version identities change together.
  * - spell_version_publications is attribution/import provenance only.
  * - spell_version_damage_types and spell_version_conditions are documented in
  *   db/schema/catalog-spells.ts as dormant, with no production reader/writer.
