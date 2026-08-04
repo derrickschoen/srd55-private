@@ -7,6 +7,17 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D195 — OWNER: rogue level 9 final wording — doubled pool, Sneak Attack once per round (2026-08-03)
+
+Supersedes D194's engine wording ("first Sneak of the round doubles, a
+second uses the normal table"). Owner's words: "At level 9 double the
+sneak attack dice pool and limit sneak attack to once per round." The
+feature does BOTH: Sneak Attack dice are doubled AND Sneak Attack itself
+becomes limited to once per round. There is no second normal-dice Sneak
+- the round's budget is exactly one doubled application (2N flat,
+matching the parity rationale: equal to the contriver's N+N without the
+contortions). Simpler to adjudicate than the D194 split.
+
 ## D194 — OWNER: rogue subclass refined — once-per-round doubling, 19-20 crit at 3, reliability theme (2026-08-03)
 
 Amends D192's rogue engine and directs the revision:
