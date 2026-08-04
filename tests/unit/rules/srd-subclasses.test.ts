@@ -540,6 +540,17 @@ describe('SRD subclass manifest', () => {
     );
   });
 
+  it('returns Circle of the Land choices in printed order', () => {
+    expect(
+      circleTable(manifest()).choices.map((choice) => choice.land),
+    ).toEqual([
+      'Arid Land',
+      'Polar Land',
+      'Temperate Land',
+      'Tropical Land',
+    ]);
+  });
+
   it('retains all 24 Circle of the Land spell entries by renewable choice', () => {
     const actual = Object.fromEntries(
       circleTable(manifest()).choices.map((choice) => [
