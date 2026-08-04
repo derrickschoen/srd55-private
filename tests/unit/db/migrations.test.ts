@@ -16,6 +16,7 @@ import {
   type DatabaseMigration,
 } from '../../../src/db/migrations';
 import { sha256 } from '../../../src/crypto/sha256';
+import { CHARACTER_SNAPSHOT_SCHEMA_VERSION } from '../../../src/character/character-state';
 import { verifyMigrations } from '../../../scripts/verify-migrations';
 import { bootDatabase } from '../../../src/worker/boot';
 import { getSqlite3, MemoryDatabaseStorage } from '../../helpers/open-db';
@@ -125,6 +126,16 @@ const SCHEMA_BEFORE_ITEM_DEFINITIONS = DATABASE_MIGRATIONS
   .map((entry) => entry.sql)
   .join('\n');
 
+const SCHEMA_BEFORE_CHARACTER_ARCHIVE = DATABASE_MIGRATIONS
+  .slice(
+    0,
+    DATABASE_MIGRATIONS.findIndex(
+      (entry) => entry.id === '0032_character_archive',
+    ),
+  )
+  .map((entry) => entry.sql)
+  .join('\n');
+
 const HISTORICAL_BACKGROUND_ROWS = `
 INSERT INTO background_templates (
   id, content_key, rules_edition, name,
@@ -188,6 +199,103 @@ function probedRegistry(targetSchema: string): readonly DatabaseMigration[] {
 }
 
 describe('database migration chain', () => {
+  it('0032 preserves a replacement image and makes historical roots active', async () => {
+    const storage = await storageHolding(
+      `${SCHEMA_BEFORE_CHARACTER_ARCHIVE}
+       INSERT INTO characters (
+         id, name, strength, dexterity, constitution, intelligence, wisdom,
+         charisma, ability_allocation_method, proficiency_bonus_override,
+         rules_edition_preference, allow_legacy, revision, alignment,
+         appearance, backstory, notes, created_at, updated_at
+       ) VALUES (
+         42, 'Preserved Root', 8, 14, 13, 18, 12, 11, 'manual', 4,
+         'expanded', 1, 9, 'Chaotic Good', 'Silver cloak', 'Old tower',
+         'Keep every root value.', '2040-01-02T03:04:05.000Z',
+         '2041-02-03T04:05:06.000Z'
+       );
+       INSERT INTO character_save_points (
+         id, character_id, label, snapshot, schema_version
+       ) VALUES (
+         7, 42, 'Before archive', '{}',
+         '${CHARACTER_SNAPSHOT_SCHEMA_VERSION}'
+       );`,
+    );
+    const lifecycle = new DatabaseLifecycle(sqlite3, storage, schema);
+
+    lifecycle.open();
+
+    expect(lifecycle.database.oneRaw(
+      `SELECT id, name, strength, dexterity, constitution, intelligence,
+              wisdom, charisma, ability_allocation_method,
+              proficiency_bonus_override, rules_edition_preference,
+              allow_legacy, revision, alignment, appearance, backstory, notes,
+              archived_at, created_at, updated_at
+       FROM characters WHERE id = 42`,
+    )).toEqual({
+      id: 42,
+      name: 'Preserved Root',
+      strength: 8,
+      dexterity: 14,
+      constitution: 13,
+      intelligence: 18,
+      wisdom: 12,
+      charisma: 11,
+      ability_allocation_method: 'manual',
+      proficiency_bonus_override: 4,
+      rules_edition_preference: 'expanded',
+      allow_legacy: 1,
+      revision: 9,
+      alignment: 'Chaotic Good',
+      appearance: 'Silver cloak',
+      backstory: 'Old tower',
+      notes: 'Keep every root value.',
+      archived_at: null,
+      created_at: '2040-01-02T03:04:05.000Z',
+      updated_at: '2041-02-03T04:05:06.000Z',
+    });
+    expect(lifecycle.database.oneRaw(
+      'SELECT id, character_id, label FROM character_save_points WHERE id = 7',
+    )).toEqual({ id: 7, character_id: 42, label: 'Before archive' });
+    expect(lifecycle.database.exec(
+      "INSERT INTO characters (name) VALUES ('After Migration')",
+    ).lastInsertId).toBe(43);
+    lifecycle.close();
+  });
+
+  it('uses the archive-list index for both lifecycle orderings', () => {
+    const db = new sqlite3.oo1.DB(':memory:', 'c');
+    try {
+      db.exec(schema);
+      expect(
+        db.selectObjects(
+          `EXPLAIN QUERY PLAN
+           SELECT id, name FROM characters
+           WHERE archived_at IS NULL ORDER BY name, id`,
+        ),
+      ).toEqual([
+        expect.objectContaining({
+          detail:
+            'SEARCH characters USING COVERING INDEX characters_archive_list_index (archived_at=?)',
+        }),
+      ]);
+      expect(
+        db.selectObjects(
+          `EXPLAIN QUERY PLAN
+           SELECT id, name, archived_at FROM characters
+           WHERE archived_at IS NOT NULL
+           ORDER BY archived_at DESC, name, id`,
+        ),
+      ).toEqual([
+        expect.objectContaining({
+          detail:
+            'SEARCH characters USING COVERING INDEX characters_archive_list_index (archived_at>?)',
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   it('0031 preserves weapon rows while opening item definitions and passthrough damage', async () => {
     const storage = await storageHolding(
       `${SCHEMA_BEFORE_ITEM_DEFINITIONS}

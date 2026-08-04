@@ -43,6 +43,7 @@ function minimalCharacterBackup(): CharacterBackupDocument {
       appearance: null,
       backstory: null,
       notes: null,
+      archived_at: null,
       created_at: null,
       updated_at: null,
     },
@@ -716,6 +717,30 @@ describe('portable character validation', () => {
     delete (missing.character as Record<string, unknown>).appearance;
     expect(() => validateCharacterBackup(missing)).toThrow(
       'Character backup character must contain exactly:',
+    );
+  });
+
+  it('requires current archive lifecycle and accepts both stored timestamp spellings', () => {
+    const iso = minimalCharacterBackup();
+    (iso.character as Record<string, unknown>).archived_at =
+      '2042-03-04T05:06:07.000Z';
+    expect(() => validateCharacterBackup(iso)).not.toThrow();
+
+    const sqlite = structuredClone(iso);
+    (sqlite.character as Record<string, unknown>).archived_at =
+      '2042-03-04 05:06:07';
+    expect(() => validateCharacterBackup(sqlite)).not.toThrow();
+
+    const missing = structuredClone(iso);
+    delete (missing.character as Record<string, unknown>).archived_at;
+    expect(() => validateCharacterBackup(missing)).toThrow(
+      'Character backup character must contain exactly:',
+    );
+
+    const wrongType = structuredClone(iso);
+    (wrongType.character as Record<string, unknown>).archived_at = 20420304;
+    expect(() => validateCharacterBackup(wrongType)).toThrow(
+      'Character backup character.archived_at',
     );
   });
 

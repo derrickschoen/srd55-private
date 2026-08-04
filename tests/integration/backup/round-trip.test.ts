@@ -9,6 +9,7 @@ import {
 import {
   CHARACTER_BACKUP_FORMAT,
   CHARACTER_BACKUP_VERSION,
+  PRE_FLAVOR_CHARACTER_BACKUP_VERSION,
   PREVIOUS_CHARACTER_BACKUP_VERSION,
 } from '../../../src/backup/backup-version';
 import {
@@ -445,22 +446,90 @@ describe('portable character backup', () => {
         '2026-07-30T12:00:00.000Z',
       ),
     ) as unknown as Record<string, unknown>;
-    historical.version = PREVIOUS_CHARACTER_BACKUP_VERSION;
+    historical.version = PRE_FLAVOR_CHARACTER_BACKUP_VERSION;
     const root = historical.character as Record<string, unknown>;
     delete root.alignment;
     delete root.appearance;
     delete root.backstory;
+    delete root.archived_at;
 
     const target = await database();
     seedCatalog(target, true);
     const imported = importCharacterBackup(target, historical);
     expect(
       target.oneRaw(
-        `SELECT alignment, appearance, backstory
+        `SELECT alignment, appearance, backstory, archived_at
          FROM characters WHERE id = ?`,
         [imported.characterId],
       ),
-    ).toEqual({ alignment: null, appearance: null, backstory: null });
+    ).toEqual({
+      alignment: null,
+      appearance: null,
+      backstory: null,
+      archived_at: null,
+    });
+  });
+
+  it('backup archive state is preserved without inventing old state', async () => {
+    const source = await database();
+    const sourceCatalog = seedCatalog(source);
+    const sourceCharacterId = seedCompleteCharacter(source, sourceCatalog);
+    const archivedAt = '2042-03-04T05:06:07.000Z';
+    source.exec('UPDATE characters SET archived_at = ? WHERE id = ?', [
+      archivedAt,
+      sourceCharacterId,
+    ]);
+    const current = exportCharacterBackup(
+      source,
+      sourceCharacterId,
+      '2042-03-05T00:00:00.000Z',
+    );
+    expect(current.version).toBe(CHARACTER_BACKUP_VERSION);
+    expect(current.character.archived_at).toBe(archivedAt);
+
+    const archivedTarget = await database();
+    seedCatalog(archivedTarget, true);
+    const archivedImport = importCharacterBackup(archivedTarget, current);
+    expect(archivedTarget.oneRaw(
+      'SELECT archived_at FROM characters WHERE id = ?',
+      [archivedImport.characterId],
+    )).toEqual({ archived_at: archivedAt });
+
+    const historical = structuredClone(current) as unknown as Record<
+      string,
+      unknown
+    >;
+    historical.version = PREVIOUS_CHARACTER_BACKUP_VERSION;
+    delete (historical.character as Record<string, unknown>).archived_at;
+    const activeTarget = await database();
+    seedCatalog(activeTarget, true);
+    const activeImport = importCharacterBackup(activeTarget, historical);
+    expect(activeTarget.oneRaw(
+      'SELECT archived_at FROM characters WHERE id = ?',
+      [activeImport.characterId],
+    )).toEqual({ archived_at: null });
+  });
+
+  it('save-point restore does not change archive lifecycle', async () => {
+    const db = await database();
+    const characterId = db.exec(
+      "INSERT INTO characters (name) VALUES ('Lifecycle Root')",
+    ).lastInsertId;
+    const state = new CharacterState(db);
+    const snapshot = state.capture(characterId);
+    expect(Object.hasOwn(snapshot.character, 'archived_at')).toBe(false);
+
+    const archivedAt = '2042-03-04T05:06:07.000Z';
+    db.exec('UPDATE characters SET archived_at = ? WHERE id = ?', [
+      archivedAt,
+      characterId,
+    ]);
+    state.restore(characterId, snapshot);
+
+    expect(db.oneRaw(
+      'SELECT archived_at FROM characters WHERE id = ?',
+      [characterId],
+    )).toEqual({ archived_at: archivedAt });
   });
 
   it('round-trips every user-authored surface using target catalog keys and restorable save points', async () => {
@@ -1120,7 +1189,8 @@ describe('an already-downloaded backup file', () => {
 
     expect(
       target.oneRaw(
-        `SELECT name, alignment, appearance, backstory, notes, revision
+        `SELECT name, alignment, appearance, backstory, notes, revision,
+                archived_at
          FROM characters WHERE id = ?`,
         [characterId],
       ),
@@ -1131,6 +1201,7 @@ describe('an already-downloaded backup file', () => {
       backstory: null,
       notes: 'written before weapons travelled',
       revision: 4,
+      archived_at: null,
     });
     // Absence of weapons is not corruption: the file says nothing about
     // weapons, and a character with no weapons is exactly what it describes.
@@ -1337,6 +1408,7 @@ describe('a backup file written while the dormant orphan column existed', () => 
         appearance: null,
         backstory: null,
         notes: null,
+        archived_at: null,
         created_at: null,
         updated_at: null,
       },
@@ -1574,7 +1646,8 @@ describe('complete database backup', () => {
     lifecycles.push(lifecycle);
     lifecycle.open();
     lifecycle.database.exec(
-      "INSERT INTO characters (name, notes) VALUES ('Image Hero', 'kept')",
+      `INSERT INTO characters (name, notes, archived_at)
+       VALUES ('Image Hero', 'kept', '2042-03-04T05:06:07.000Z')`,
     );
     // A non-character table, to prove a whole-image round trip carries more
     // than the character graph. This used to be `cache`, one of the eight
@@ -1607,8 +1680,14 @@ describe('complete database backup', () => {
     );
 
     await importDatabaseBackup(lifecycle, backup);
-    expect(lifecycle.database.allRaw('SELECT name, notes FROM characters')).toEqual(
-      [{ name: 'Image Hero', notes: 'kept' }],
+    expect(lifecycle.database.allRaw(
+      'SELECT name, notes, archived_at FROM characters',
+    )).toEqual(
+      [{
+        name: 'Image Hero',
+        notes: 'kept',
+        archived_at: '2042-03-04T05:06:07.000Z',
+      }],
     );
     expect(
       lifecycle.database.allRaw(
@@ -1637,8 +1716,14 @@ describe('complete database backup', () => {
       }),
     ).rejects.toThrow();
     expect(lifecycle.database.connection).toBe(connection);
-    expect(lifecycle.database.allRaw('SELECT name, notes FROM characters')).toEqual(
-      [{ name: 'Image Hero', notes: 'kept' }],
+    expect(lifecycle.database.allRaw(
+      'SELECT name, notes, archived_at FROM characters',
+    )).toEqual(
+      [{
+        name: 'Image Hero',
+        notes: 'kept',
+        archived_at: '2042-03-04T05:06:07.000Z',
+      }],
     );
   });
 });

@@ -32,6 +32,7 @@ import authorableEffectStorage from '../../drizzle/0028_authorable_effect_storag
 import partyDocumentStates from '../../drizzle/0029_party_document_states.sql?raw';
 import subclassReferenceText from '../../drizzle/0030_subclass_reference_text.sql?raw';
 import itemDefinitions from '../../drizzle/0031_item_definitions.sql?raw';
+import characterArchive from '../../drizzle/0032_character_archive.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -358,6 +359,16 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
       '7d70a70dd06e6c2ff3d3c2ac47135b1e897b8b4023c535d42c64ca666ce7b25b',
     resultSchemaChecksum:
       '87728d3017863e34c7570cab7ffa59f8adb2a13e2ba71016c359840c5c73ce2c',
+  }),
+  // D99: lifecycle is nullable root state, intentionally separate from the
+  // undo/save-point projection. Existing roots become active by NULL default.
+  Object.freeze({
+    id: '0032_character_archive',
+    sql: characterArchive,
+    checksum:
+      '38a469bf279d8b0134f19d68b43976e1082da4bea17e4685618a5d2fac8bfd42',
+    resultSchemaChecksum:
+      'b3108351ca445275711c3e208ca6b45166d22a1bd63733a0fa82459f5b41cc91',
   }),
 ]);
 
