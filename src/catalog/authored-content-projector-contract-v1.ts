@@ -3,9 +3,10 @@ import type {
   BackgroundContentAggregate,
   ContentFingerprintReference,
   SpeciesContentAggregate,
+  SpeciesContentTrait,
   SubclassContentAggregate,
 } from '../authoring/contracts';
-import type { DomainSourceType, GrantRuleKind } from '../domain/enums';
+import type { DamageType, DomainSourceType, GrantRuleKind } from '../domain/enums';
 import type { JsonValue } from '../domain/models';
 import type {
   AuthoringCharacterEffect,
@@ -24,7 +25,7 @@ export type AuthoredProjectorKind = 'species' | 'background' | 'subclass';
 
 export type AuthoredProjectorAggregate<K extends AuthoredProjectorKind> =
   K extends 'species'
-    ? SpeciesContentAggregate
+    ? SpeciesProjectorAggregateV1
     : K extends 'background'
       ? BackgroundContentAggregate
       : SubclassContentAggregate;
@@ -131,6 +132,20 @@ type CanonicalizedEffect<E extends AuthoringCharacterEffect | AuthoringFeatureEf
 export type CanonicalCharacterEffectV1 = CanonicalizedEffect<AuthoringCharacterEffect>;
 export type CanonicalFeatureEffectV1 = CanonicalizedEffect<AuthoringFeatureEffect>;
 
+export type SpeciesProjectorCharacterEffectV1 =
+  | Exclude<AuthoringCharacterEffect, { readonly kind: 'damage_resistance' }>
+  | (Omit<
+      Extract<AuthoringCharacterEffect, { readonly kind: 'damage_resistance' }>,
+      'damage_type'
+    > & { readonly damage_type: DamageType | null });
+
+export type CanonicalSpeciesCharacterEffectV1 =
+  | Exclude<CanonicalCharacterEffectV1, { readonly kind: 'damage_resistance' }>
+  | (Omit<
+      Extract<CanonicalCharacterEffectV1, { readonly kind: 'damage_resistance' }>,
+      'damage_type'
+    > & { readonly damage_type: CanonicalOpenPassthroughValue | null });
+
 /**
  * Grant order is meaningful, while eligibility-list members are mathematical
  * sets. The open field map mirrors GrantRule's extension-preserving parser.
@@ -148,10 +163,11 @@ export interface CanonicalAuthoringGrantV1 {
 export interface CanonicalSpeciesTraitV1 {
   readonly name: string;
   readonly description: CanonicalRuleText;
-  readonly effects: ContentIdentitySequence<CanonicalCharacterEffectV1>;
+  readonly effects: ContentIdentitySequence<CanonicalSpeciesCharacterEffectV1>;
 }
 
-export interface SpeciesProjectorPayloadV1 {
+/** A complete definition/template pair. Its shape is frozen by HA-1. */
+export interface SpeciesTwoHalfProjectorPayloadV1 {
   readonly reference_text: CanonicalRuleText;
   readonly repeatable: boolean;
   readonly grants: ContentIdentitySequence<CanonicalAuthoringGrantV1>;
@@ -161,6 +177,50 @@ export interface SpeciesProjectorPayloadV1 {
   readonly walking_speed_feet: number;
   readonly traits: ContentIdentitySequence<CanonicalSpeciesTraitV1>;
 }
+
+/**
+ * Bundled species can legitimately have a template without a definition.
+ * The explicit state prevents absence from becoming an invented empty
+ * definition while leaving the frozen two-half payload byte-identical.
+ */
+export interface SpeciesTemplateOnlyProjectorPayloadV1 {
+  readonly definition_state: 'template_only';
+  readonly creature_type: CanonicalOpenPassthroughValue;
+  readonly primary_size: CanonicalOpenPassthroughValue;
+  readonly alternate_size: CanonicalOpenPassthroughValue | null;
+  readonly walking_speed_feet: number;
+  readonly traits: ContentIdentitySequence<CanonicalSpeciesTraitV1>;
+}
+
+export type SpeciesProjectorPayloadV1 =
+  | SpeciesTwoHalfProjectorPayloadV1
+  | SpeciesTemplateOnlyProjectorPayloadV1;
+
+export interface SpeciesProjectorTraitV1
+  extends Omit<SpeciesContentTrait, 'effects'> {
+  readonly effects: readonly SpeciesProjectorCharacterEffectV1[];
+}
+
+export interface SpeciesTwoHalfProjectorAggregateV1
+  extends Omit<SpeciesContentAggregate, 'traits'> {
+  readonly traits: readonly SpeciesProjectorTraitV1[];
+}
+
+export interface SpeciesTemplateOnlyAggregateV1 {
+  readonly kind: 'species';
+  readonly definition_state: 'template_only';
+  readonly name: string;
+  readonly rules_edition: SpeciesContentAggregate['rules_edition'];
+  readonly creature_type: SpeciesContentAggregate['creature_type'];
+  readonly primary_size: SpeciesContentAggregate['primary_size'];
+  readonly alternate_size: SpeciesContentAggregate['alternate_size'];
+  readonly walking_speed_feet: number;
+  readonly traits: readonly SpeciesProjectorTraitV1[];
+}
+
+export type SpeciesProjectorAggregateV1 =
+  | SpeciesTwoHalfProjectorAggregateV1
+  | SpeciesTemplateOnlyAggregateV1;
 
 export type CanonicalBackgroundEquipmentV1 =
   Omit<BackgroundContentAggregate['equipment_option_a'][number], 'sort_order'>;
