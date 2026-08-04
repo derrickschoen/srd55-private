@@ -1,12 +1,13 @@
 import { expect, test, type Page } from '@playwright/test';
+import type { CharacterSheet } from '../../src/queries/character-sheet-builder';
 import {
   catalogBaseFixtureImage,
   catalogRecord,
-  printableFixtureImage,
+  sheetSpellFixtureImage,
   reportFixtureImage,
   workspaceFixtureImage,
   type FixtureImage,
-  type PrintableFixtureIds,
+  type SheetSpellFixtureIds,
   type ReportFixtureIds,
   type SourceCatalogIds,
   type WorkspaceFixtureIds,
@@ -21,15 +22,15 @@ type CommandResult = {
 
 let workspaceImage: FixtureImage<WorkspaceFixtureIds>;
 let reportImage: FixtureImage<ReportFixtureIds>;
-let printableImage: FixtureImage<PrintableFixtureIds>;
+let sheetSpellImage: FixtureImage<SheetSpellFixtureIds>;
 let catalogImage: FixtureImage<SourceCatalogIds>;
 
 test.beforeAll(async () => {
-  [workspaceImage, reportImage, printableImage, catalogImage] =
+  [workspaceImage, reportImage, sheetSpellImage, catalogImage] =
     await Promise.all([
       workspaceFixtureImage(),
       reportFixtureImage(),
-      printableFixtureImage(),
+      sheetSpellFixtureImage(),
       catalogBaseFixtureImage(),
     ]);
 });
@@ -2381,144 +2382,164 @@ test('builds the golden read-only report values and duplicate classifications', 
 test('builds Mutt printable sources with complete facts and only the mechanically relevant number', async ({
   page,
 }) => {
-  // Measured at 23.4s alone on Chromium; allow for concurrent-suite contention.
+  // Measured at 25.8s alone on Chromium; allow for concurrent-suite contention.
   test.setTimeout(60_000);
-  await install(page, printableImage);
+  await install(page, sheetSpellImage);
   const before = await databaseBytes(page);
-  const printable = await rpc<any>(page, 'queries.reports.printable', {
-    character_id: printableImage.ids.character,
-    variant: 'reference',
+  const sheet = await rpc<CharacterSheet>(page, 'queries.characters.sheet', {
+    character_id: sheetSpellImage.ids.character,
   });
-  expect(printable.variant).toBe('reference');
-  expect(printable.text_status).toBe('not_requested');
-  expect(printable.source_groups.map((group: any) => group.source)).toEqual([
-    'Cleric 1',
-    'Druid 1',
-    'Gift 2',
+  expect(
+    sheet.spells.map((group) =>
+      group.kind === 'class' ? group.class_name : group.source_name,
+    ),
+  ).toEqual([
+    'Cleric',
+    'Druid',
+    'Wizard',
     'Gift 10',
-    'Wizard 1',
+    'Gift 2',
   ]);
   expect(
-    printable.source_groups.map((group: Row) => ({
-      source: group.source,
-      ability: group.ability,
-      attack_bonus: group.attack_bonus,
-      save_dc: group.save_dc,
+    sheet.spells.map((group) => ({
+      source: group.kind === 'class' ? group.class_name : group.source_name,
+      statistics: group.statistics,
     })),
   ).toEqual([
     {
-      source: 'Cleric 1',
-      ability: 'wisdom',
-      attack_bonus: 4,
-      save_dc: 12,
+      source: 'Cleric',
+      statistics: [{
+        status: 'computed',
+        ability: 'wisdom',
+        attack_bonus: 4,
+        save_dc: 12,
+      }],
     },
     {
-      source: 'Druid 1',
-      ability: 'wisdom',
-      attack_bonus: 4,
-      save_dc: 12,
+      source: 'Druid',
+      statistics: [{
+        status: 'computed',
+        ability: 'wisdom',
+        attack_bonus: 4,
+        save_dc: 12,
+      }],
     },
     {
-      source: 'Gift 2',
-      ability: 'charisma',
-      attack_bonus: 6,
-      save_dc: 14,
+      source: 'Wizard',
+      statistics: [{
+        status: 'computed',
+        ability: 'intelligence',
+        attack_bonus: 5,
+        save_dc: 13,
+      }],
     },
     {
       source: 'Gift 10',
-      ability: 'charisma',
-      attack_bonus: 6,
-      save_dc: 14,
+      statistics: [{
+        status: 'computed',
+        ability: 'charisma',
+        attack_bonus: 6,
+        save_dc: 14,
+      }],
     },
     {
-      source: 'Wizard 1',
-      ability: 'intelligence',
-      attack_bonus: 5,
-      save_dc: 13,
+      source: 'Gift 2',
+      statistics: [{
+        status: 'computed',
+        ability: 'charisma',
+        attack_bonus: 6,
+        save_dc: 14,
+      }],
     },
   ]);
-  const command = printable.source_groups
-    .flatMap((group: any) => group.spells)
-    .find((spell: any) => spell.spell_version_id === printableImage.ids.command);
+  const cleric = sheet.spells.find(
+    (group) => group.kind === 'class' && group.class_name === 'Cleric',
+  );
+  const gift2 = sheet.spells.find(
+    (group) => group.kind === 'other_source' && group.source_name === 'Gift 2',
+  );
+  const command = cleric?.spells.find(
+    (spell) => spell.spell_version_id === sheetSpellImage.ids.command,
+  );
   expect(command).toEqual({
-    spell_version_id: printableImage.ids.command,
-    spell_identity_id: expect.any(Number),
+    spell_version_id: sheetSpellImage.ids.command,
     name: 'Command',
-    edition: '2024',
-    level: 1,
-    school: 'Enchantment',
-    casting_time: 'Action',
-    action_type: 'Action',
-    range: '60 feet',
-    duration: '1 round',
-    concentration: false,
-    ritual: false,
-    components: 'V',
-    spellcasting_ability: 'wisdom',
-    attack_bonus: null,
-    save_dc: 12,
-    attack_modes: [],
-    casting_mode: 'with_slots',
-    save_abilities: ['wisdom'],
-    description: null,
-    // BOTH progressions, ABSENT rather than empty-because-we-checked. The
-    // parity fixture's catalog record carries neither `upcastLevels` nor
-    // `cantripUpgradeLevels`, which is what every catalog document already in
-    // the wild looks like — and the printable card prints no line at all for
-    // either, rather than an em-dash that would claim the spell cannot be
-    // upcast.
-    upcast_levels: [],
-    upcast_summary: null,
-    cantrip_upgrade_levels: [],
-    cantrip_upgrade_summary: null,
+    level: { status: 'known', value: 1 },
+    marker: 'prepared',
+    reference: {
+      edition: '2024',
+      school: 'Enchantment',
+      casting_time: 'Action',
+      action_type: 'Action',
+      range: '60 feet',
+      duration: '1 round',
+      components: 'V',
+      concentration: false,
+      ritual: false,
+      upcast_levels: [],
+      upcast_summary: null,
+      cantrip_upgrade_levels: [],
+      cantrip_upgrade_summary: null,
+      attack_modes: [],
+      save_abilities: ['wisdom'],
+      description: 'A one-word supernatural command.',
+    },
   });
-  const thornWhip = printable.source_groups
-    .flatMap((group: Row) => group.spells)
-    .find((spell: Row) => spell.name === 'Thorn Whip');
+  const thornWhip = sheet.spells
+    .flatMap((group) => group.spells)
+    .find((spell) => spell.name === 'Thorn Whip');
   expect(thornWhip).toMatchObject({
-    action_type: 'Bonus Action',
-    spellcasting_ability: 'wisdom',
-    attack_bonus: 4,
-    save_dc: null,
-    attack_modes: ['melee_spell', 'ranged_spell'],
-    save_abilities: [],
-    casting_mode: 'at_will',
+    level: { status: 'known', value: 0 },
+    marker: 'known',
+    reference: {
+      action_type: 'Bonus Action',
+      attack_modes: ['melee_spell', 'ranged_spell'],
+      save_abilities: [],
+    },
   });
-  const mistyStep = printable.source_groups
-    .flatMap((group: any) => group.spells)
-    .find(
-      (spell: any) =>
-        spell.spell_version_id === printableImage.ids.mistyStep,
-    );
+  const mistyStep = gift2?.spells.find(
+    (spell) => spell.spell_version_id === sheetSpellImage.ids.mistyStep,
+  );
   expect(mistyStep).toMatchObject({
     name: 'Misty Step',
-    casting_mode: 'slots_and_free_cast',
-    spellcasting_ability: 'charisma',
-    attack_bonus: null,
-    save_dc: null,
+    marker: 'known',
+    level: { status: 'known', value: 2 },
   });
   expect(
     (await rows(page, 'spell_selection_slots')).find(
-      (row) => row.id === printableImage.ids.mistyStepSlot,
+      (row) => row.id === sheetSpellImage.ids.mistyStepSlot,
     ),
   ).toMatchObject({
-    fixed_spell_version_id: printableImage.ids.mistyStep,
+    fixed_spell_version_id: sheetSpellImage.ids.mistyStep,
     with_slots: 1,
     free_cast:
       '{"uses":1,"recovery":"long_rest","pool_scope":"per_spell"}',
   });
-  await page.goto(`/characters/${printableImage.ids.character}/print`);
-  await expect(page.locator('[data-screen="printable-list"]')).toBeVisible();
-  await expect(
-    page.locator(
-      `.spell-card[data-spell-version="${printableImage.ids.command}"]`,
-    ).first(),
-  ).toContainText('Saving throw: DC 12 · WIS');
-  await expect(
-    page.locator(
-      `.spell-card[data-spell-version="${printableImage.ids.mistyStep}"]`,
-    ),
-  ).toContainText('Access: Slots And Free Cast · CHA');
+  await page.goto(`/characters/${sheetSpellImage.ids.character}/sheet`);
+  const clericGroup = page.locator('[data-spell-group^="class:"]', {
+    hasText: 'Cleric',
+  });
+  await expect(clericGroup.locator('.sheet-spell-statistic')).toHaveText(
+    'Save DC 12 · Spell attack +4',
+  );
+  await expect(clericGroup.locator('.sheet-number', { hasText: 'Command' }))
+    .toContainText('Level 1Prepared');
+  const gift2Group = page.locator('[data-spell-group^="source:"]', {
+    hasText: 'Gift 2',
+  });
+  await expect(gift2Group.locator('.sheet-spell-statistic')).toHaveText(
+    'Save DC 14 · Spell attack +6',
+  );
+  await expect(gift2Group.locator('.sheet-number', { hasText: 'Misty Step' }))
+    .toContainText('Level 2Known');
+  await page.emulateMedia({ media: 'print' });
+  const commandCards = page.locator(
+    `[data-spell-appendix-card="${String(sheetSpellImage.ids.command)}"]`,
+  );
+  await expect(commandCards).toHaveCount(2);
+  await expect(commandCards.first()).toContainText(
+    'A one-word supernatural command.',
+  );
   expect(await databaseBytes(page)).toEqual(before);
 });
 

@@ -390,7 +390,7 @@ describe('W-ROUTE-EXACT level-up route', () => {
     expect(matchesLevelUpRoute('/characters/7/level-up')).toBe(7);
     for (const path of [
       '/characters/7/sheet',
-      '/characters/7/print',
+      '/characters/7/report',
       '/characters/7',
       '/characters/0/level-up',
       '/characters/007/level-up',

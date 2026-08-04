@@ -3,7 +3,6 @@ import { expect, test, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { DatabaseContext } from '../../src/db/database';
 import { createBuildReportFixture } from '../integration/reports/build-report-fixture';
-import { createPrintableListFixture } from '../integration/reports/printable-list-fixture';
 
 const schema = readFileSync(
   new URL('../../src/db/schema.sql', import.meta.url),
@@ -16,34 +15,21 @@ interface FixtureImage {
   readonly ids: Readonly<Record<string, number>>;
 }
 
-async function fixtureImage(
-  kind: 'report' | 'print',
-): Promise<FixtureImage> {
+async function fixtureImage(): Promise<FixtureImage> {
   const sqlite3 = await sqlite3InitModule();
   const connection = new sqlite3.oo1.DB(':memory:', 'c');
   connection.exec(schema);
   const db = new DatabaseContext(connection);
-  const reportFixture =
-    kind === 'report' ? createBuildReportFixture(db) : null;
-  const printFixture =
-    kind === 'print' ? createPrintableListFixture(db) : null;
+  const reportFixture = createBuildReportFixture(db);
   const bytes = Array.from(
     sqlite3.capi.sqlite3_js_db_export(connection),
   );
-  const ids =
-    reportFixture !== null
-      ? {
-          invalid: reportFixture.invalidSlotIds[1]!,
-          orphaned: reportFixture.invalidSlotIds[0]!,
-          override: reportFixture.invalidSlotIds[2]!,
-        }
-      : {
-          command: printFixture!.spellIds.command,
-          goodberry: printFixture!.spellIds.goodberry,
-          mistyStep: printFixture!.spellIds.mistyStep,
-        };
-  const characterId =
-    reportFixture?.characterId ?? printFixture!.characterId;
+  const ids = {
+    invalid: reportFixture.invalidSlotIds[1]!,
+    orphaned: reportFixture.invalidSlotIds[0]!,
+    override: reportFixture.invalidSlotIds[2]!,
+  };
+  const characterId = reportFixture.characterId;
   connection.close();
   return { bytes, characterId, ids };
 }
@@ -83,11 +69,10 @@ async function databaseState(page: Page): Promise<{
 test('build report route presents source, route, duplicate, and invalid annotations without persisted writes', async ({
   page,
 }) => {
-  // Measured at 40.2s alone on Chromium (34.9–35.8s before D91-R added the
-  // sheet resource projection, which made it heavier); this ceiling is for
-  // concurrent-lane contention.
+  // Measured at 31.6s alone on Chromium; this ceiling is for concurrent-lane
+  // contention.
   test.setTimeout(90_000);
-  const fixture = await fixtureImage('report');
+  const fixture = await fixtureImage();
   await installFixture(page, fixture);
   const before = await databaseState(page);
 
@@ -104,6 +89,13 @@ test('build report route presents source, route, duplicate, and invalid annotati
   ).toContainText(
     'shared Spellcasting slots through 2nd level and Pact Magic slots at 3rd level',
   );
+  const sheetLink = page.getByRole('link', { name: 'Character sheet' });
+  await expect(sheetLink).toHaveAttribute(
+    'href',
+    `/characters/${String(fixture.characterId)}/sheet`,
+  );
+  await expect(page.getByRole('link', { name: 'Printable spell list' }))
+    .toHaveCount(0);
 
   const mageHandRoutes = page
     .locator('.route-table tbody tr')
@@ -167,96 +159,5 @@ test('build report route presents source, route, duplicate, and invalid annotati
   await expect(
     page.locator('[data-screen="build-report"]'),
   ).toBeVisible();
-  expect(await databaseState(page)).toEqual(before);
-});
-
-test('reference and full printable routes preserve data and expose accessible print CSS', async ({
-  page,
-}) => {
-  // Measured at 30.9s alone on Chromium; this ceiling is for concurrent-lane contention.
-  test.setTimeout(90_000);
-  const fixture = await fixtureImage('print');
-  await installFixture(page, fixture);
-  const before = await databaseState(page);
-
-  await page.goto(`/characters/${fixture.characterId}/print`);
-  const printable = page.locator('[data-screen="printable-list"]');
-  await expect(printable).toHaveAttribute('data-variant', 'reference');
-  await expect(page).toHaveTitle('P50 Printable spell list');
-  await expect(page.getByLabel('Print variant')).toHaveValue('reference');
-  await expect(page.getByRole('button', { name: 'Print' })).toBeVisible();
-  await expect(page.locator('.text-notice')).toHaveCount(0);
-  await expect(page.locator('.spell-description')).toHaveCount(0);
-  await expect(
-    page.locator('.source-section > .source-heading > h2').allTextContents(),
-  ).resolves.toEqual([
-    'Cleric 1',
-    'Druid 1',
-    'Gift 2',
-    'Gift 10',
-    'Wizard 1',
-  ]);
-
-  const command = page.locator(
-    `.spell-card[data-spell-version="${fixture.ids.command}"]`,
-  ).first();
-  await expect(command).toContainText('Access: With Slots · WIS');
-  await expect(command).toContainText('Saving throw: DC 12 · WIS');
-  const mistyStep = page.locator(
-    `.spell-card[data-spell-version="${fixture.ids.mistyStep}"]`,
-  );
-  await expect(mistyStep).toContainText(
-    'Access: Slots And Free Cast · CHA',
-  );
-
-  await page.getByLabel('Print variant').selectOption('full');
-  await page.getByRole('button', { name: 'Change variant' }).click();
-  await expect(page).toHaveURL(
-    `/characters/${fixture.characterId}/print?variant=full`,
-  );
-  await expect(printable).toHaveAttribute('data-variant', 'full');
-  await expect(page.getByTestId('text-partial')).toHaveText(
-    'Some spell descriptions are unavailable. Missing text is identified on the affected spells.',
-  );
-  await expect(command.locator('.spell-description')).toHaveText(
-    'A one-word supernatural command.',
-  );
-  await expect(
-    page
-      .locator(
-        `.spell-card[data-spell-version="${fixture.ids.goodberry}"]`,
-      )
-      .locator('.spell-description'),
-  ).toHaveText('Description unavailable.');
-
-  await page.emulateMedia({ media: 'print' });
-  await expect(page.locator('.print-controls')).toHaveCSS(
-    'display',
-    'none',
-  );
-  await expect(command).toHaveCSS('break-inside', 'avoid');
-  const fullColumns = await page
-    .locator('.spell-grid')
-    .first()
-    .evaluate((element) => getComputedStyle(element).gridTemplateColumns);
-  expect(fullColumns.trim().split(/\s+/)).toHaveLength(1);
-
-  expect(before.characters).toEqual([
-    expect.objectContaining({
-      id: fixture.characterId,
-      name: 'P50 Printable',
-      revision: 0,
-    }),
-  ]);
-  expect(before.slots).toEqual(
-    expect.arrayContaining([
-      expect.objectContaining({
-        id: expect.any(Number),
-        fixed_spell_version_id: fixture.ids.mistyStep,
-        free_cast:
-          '{"uses":1,"recovery":"long_rest","pool_scope":"per_spell"}',
-      }),
-    ]),
-  );
   expect(await databaseState(page)).toEqual(before);
 });
