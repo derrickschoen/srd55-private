@@ -55,7 +55,12 @@ import type {
   CanonicalAuthoringGrantV1,
   CanonicalCharacterEffectV1,
   CanonicalFeatureEffectV1,
+  CanonicalSpeciesCharacterEffectV1,
+  SpeciesProjectorCharacterEffectV1,
+  SpeciesProjectorAggregateV1,
+  SpeciesProjectorTraitV1,
   SpeciesProjectorPayloadV1,
+  SpeciesTwoHalfProjectorAggregateV1,
   SubclassProjectorPayloadV1,
 } from './authored-content-projector-contract-v1';
 import {
@@ -284,12 +289,18 @@ function effectFromStoredRow(
 ): AuthoringCharacterEffect;
 function effectFromStoredRow(
   row: StoredEffectRow,
+  feature: false,
+  allowUnchosenResistance: true,
+): SpeciesProjectorCharacterEffectV1;
+function effectFromStoredRow(
+  row: StoredEffectRow,
   feature: true,
 ): AuthoringFeatureEffect;
 function effectFromStoredRow(
   row: StoredEffectRow,
   feature: boolean,
-): AuthoringCharacterEffect | AuthoringFeatureEffect {
+  allowUnchosenResistance = false,
+): SpeciesProjectorCharacterEffectV1 | AuthoringFeatureEffect {
   const permitted = feature ? featureTemplateEffectKinds : characterEffectKinds;
   if (!isEnumValue(permitted, row.kind)) {
     return projectionError(
@@ -304,7 +315,10 @@ function effectFromStoredRow(
   switch (row.kind) {
     case 'damage_resistance':
       if (row.damage_type === null) {
-        return projectionError('damage resistance has no damage type.');
+        if (!allowUnchosenResistance) {
+          return projectionError('damage resistance has no damage type.');
+        }
+        return { ...common, kind: row.kind, damage_type: null };
       }
       return { ...common, kind: row.kind, damage_type: sqlDamageType({ damage_type: row.damage_type }, 'damage_type') };
     case 'hp_modifier':
@@ -652,6 +666,23 @@ function canonicalCharacterEffect(
   }
 }
 
+function canonicalSpeciesCharacterEffect(
+  effect: SpeciesProjectorCharacterEffectV1,
+): CanonicalSpeciesCharacterEffectV1 {
+  if (effect.kind === 'damage_resistance') {
+    return {
+      ...projectedStoredFields(effect),
+      kind: effect.kind,
+      label: effect.label,
+      notes: effect.notes === null ? null : canonicalRuleText(effect.notes),
+      damage_type: effect.damage_type === null
+        ? null
+        : canonicalOpenPassthroughValue(effect.damage_type),
+    };
+  }
+  return canonicalCharacterEffect(effect);
+}
+
 function canonicalFeatureEffect(
   effect: AuthoringFeatureEffect,
 ): CanonicalFeatureEffectV1 {
@@ -734,8 +765,32 @@ function grantSourceReferences(
 }
 
 function projectSpecies(
-  aggregate: SpeciesContentAggregate,
+  aggregate: SpeciesProjectorAggregateV1,
 ): StoredProjection<'species'> {
+  if ('definition_state' in aggregate) {
+    const payload: SpeciesProjectorPayloadV1 = {
+      ...projectedStoredFields(aggregate),
+      definition_state: 'template_only',
+      creature_type: canonicalOpenPassthroughValue(aggregate.creature_type),
+      primary_size: canonicalOpenPassthroughValue(aggregate.primary_size),
+      alternate_size: aggregate.alternate_size === null
+        ? null
+        : canonicalOpenPassthroughValue(aggregate.alternate_size),
+      walking_speed_feet: aggregate.walking_speed_feet,
+      traits: contentIdentitySequence(aggregate.traits.map((trait) => ({
+        ...projectedStoredFields(trait),
+        name: trait.name,
+        description: canonicalRuleText(trait.description),
+        effects: contentIdentitySequence(trait.effects.map(canonicalSpeciesCharacterEffect)),
+      }))),
+    };
+    return Object.freeze({
+      kind: 'species',
+      aggregate,
+      payload,
+      references: Object.freeze([]),
+    });
+  }
   const payload: SpeciesProjectorPayloadV1 = {
     ...projectedStoredFields(aggregate),
     reference_text: canonicalRuleText(aggregate.reference_text),
@@ -751,7 +806,7 @@ function projectSpecies(
       ...projectedStoredFields(trait),
       name: trait.name,
       description: canonicalRuleText(trait.description),
-      effects: contentIdentitySequence(trait.effects.map(canonicalCharacterEffect)),
+      effects: contentIdentitySequence(trait.effects.map(canonicalSpeciesCharacterEffect)),
     }))),
   };
   return Object.freeze({
@@ -888,8 +943,14 @@ export function projectAuthoredContentAggregateV1<
 
 function readEffects(
   db: DatabaseContext,
-  table: 'species_template_trait_effects' | 'background_template_effects',
-  parentColumn: 'species_template_trait_id' | 'background_template_id',
+  table: 'species_template_trait_effects',
+  parentColumn: 'species_template_trait_id',
+  parentId: number,
+): readonly SpeciesProjectorCharacterEffectV1[];
+function readEffects(
+  db: DatabaseContext,
+  table: 'background_template_effects',
+  parentColumn: 'background_template_id',
   parentId: number,
 ): readonly AuthoringCharacterEffect[];
 function readEffects(
@@ -903,8 +964,9 @@ function readEffects(
   table: string,
   parentColumn: string,
   parentId: number,
-): readonly (AuthoringCharacterEffect | AuthoringFeatureEffect)[] {
+): readonly (SpeciesProjectorCharacterEffectV1 | AuthoringFeatureEffect)[] {
   const feature = table === 'subclass_feature_effects';
+  const species = table === 'species_template_trait_effects';
   return db.all(
     `SELECT *,
             ${feature ? 'attack_count' : 'NULL AS attack_count'}
@@ -914,14 +976,42 @@ function readEffects(
     decodeEffectRow,
   ).map((row) => feature
     ? effectFromStoredRow(row, true)
-    : effectFromStoredRow(row, false));
+    : species
+      ? effectFromStoredRow(row, false, true)
+      : effectFromStoredRow(row, false));
+}
+
+function readSpeciesTraits(
+  db: DatabaseContext,
+  templateId: number,
+): readonly SpeciesProjectorTraitV1[] {
+  return db.all(
+    `SELECT *
+     FROM species_template_traits WHERE species_template_id = ?
+     ORDER BY sort_order`,
+    [templateId],
+    (row) => ({
+      id: sqlInteger(row, 'id'),
+      sort_order: sqlInteger(row, 'sort_order'),
+      name: sqlString(row, 'name'),
+      description: sqlString(row, 'description'),
+      stored_fields: storedSemanticFields(row, [
+        'species_template_id', 'sort_order', 'name', 'description',
+      ]),
+    }),
+  ).map((trait) => attachStoredFields({
+    sort_order: trait.sort_order,
+    name: trait.name,
+    description: trait.description,
+    effects: readEffects(db, 'species_template_trait_effects', 'species_template_trait_id', trait.id),
+  }, trait.stored_fields));
 }
 
 function readSpecies(
   db: DatabaseContext,
   contentKey: ContentKey,
   references: StoredAuthoredReferenceResolverV1,
-): SpeciesContentAggregate {
+): SpeciesProjectorAggregateV1 {
   const definitionRaw = db.oneRaw(
     'SELECT * FROM species_definitions WHERE content_key = ?',
     [contentKey],
@@ -930,6 +1020,45 @@ function readSpecies(
     'SELECT * FROM species_templates WHERE content_key = ?',
     [contentKey],
   );
+  if (templateRaw === null) {
+    return projectionError(`species '${contentKey}' is incomplete or missing.`);
+  }
+  if (definitionRaw === null) {
+    const template = db.one(
+      `SELECT id, name, rules_edition, creature_type, size,
+              alternate_size, base_speed_feet
+       FROM species_templates WHERE content_key = ?`,
+      [contentKey],
+      (row) => ({
+        id: sqlInteger(row, 'id'),
+        name: sqlString(row, 'name'),
+        edition: sqlString(row, 'rules_edition'),
+        creature_type: sqlCreatureType(row, 'creature_type'),
+        size: sqlCreatureSize(row, 'size'),
+        alternate_size: row.alternate_size === null
+          ? null
+          : sqlCreatureSize(row, 'alternate_size'),
+        base_speed_feet: sqlInteger(row, 'base_speed_feet'),
+      }),
+    );
+    if (template === null) {
+      return projectionError(`species '${contentKey}' is incomplete or missing.`);
+    }
+    return attachStoredFields({
+      kind: 'species',
+      definition_state: 'template_only',
+      name: nonEmpty(template.name, 'species name'),
+      rules_edition: rulesEdition(template.edition),
+      creature_type: template.creature_type,
+      primary_size: template.size,
+      alternate_size: template.alternate_size,
+      walking_speed_feet: template.base_speed_feet,
+      traits: readSpeciesTraits(db, template.id),
+    }, storedSemanticFields(templateRaw, [
+      'content_key', 'name', 'rules_edition', 'creature_type', 'size',
+      'alternate_size', 'base_speed_feet',
+    ], 'template_'));
+  }
   const root = db.one(
     `SELECT definition.name AS definition_name,
             definition.rules_edition AS definition_edition,
@@ -961,33 +1090,11 @@ function readSpecies(
     }),
   );
   if (root === null) return projectionError(`species '${contentKey}' is incomplete or missing.`);
-  if (definitionRaw === null || templateRaw === null) {
-    return projectionError(`species '${contentKey}' is incomplete or missing.`);
-  }
   if (root.name !== root.template_name || root.edition !== root.template_edition) {
     return projectionError(`species '${contentKey}' definition/template metadata disagree.`);
   }
-  const traits = db.all(
-    `SELECT *
-     FROM species_template_traits WHERE species_template_id = ?
-     ORDER BY sort_order`,
-    [root.template_id],
-    (row) => ({
-      id: sqlInteger(row, 'id'),
-      sort_order: sqlInteger(row, 'sort_order'),
-      name: sqlString(row, 'name'),
-      description: sqlString(row, 'description'),
-      stored_fields: storedSemanticFields(row, [
-        'species_template_id', 'sort_order', 'name', 'description',
-      ]),
-    }),
-  ).map((trait) => attachStoredFields({
-      sort_order: trait.sort_order,
-      name: trait.name,
-      description: trait.description,
-      effects: readEffects(db, 'species_template_trait_effects', 'species_template_trait_id', trait.id),
-    }, trait.stored_fields));
-  const aggregate: SpeciesContentAggregate = {
+  const traits = readSpeciesTraits(db, root.template_id);
+  const aggregate: SpeciesTwoHalfProjectorAggregateV1 = {
     kind: 'species',
     name: nonEmpty(root.name, 'species name'),
     rules_edition: rulesEdition(root.edition),

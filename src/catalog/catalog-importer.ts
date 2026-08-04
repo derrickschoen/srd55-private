@@ -43,6 +43,7 @@ import {
   importSourceContentRecords,
   type SourceContentImportCounters,
 } from './source-content-importer';
+import { spellActionType, spellTags } from './spell-document-semantics';
 
 /** The identity a spell version hangs off, in the three ways it is found. */
 const spellIdentity: RowCodec<{
@@ -204,34 +205,6 @@ function sameValues(
     left.length === right.length &&
     left.every((value, index) => value === right[index])
   );
-}
-
-/**
- * THE DECLARED BOOLEAN IS THE ONLY SOURCE OF THE `ritual` AND `concentration`
- * TAGS. The record's prose is never read for them.
- *
- * Until F13 this also matched the casting time and duration text —
- * `/(?:^|\s)(?:or\s+)?R(?:$|\s)/` and `/^C(?:,|\s)/` — and OR-ed the result in.
- * `catalogRecord` in `catalog-schema.ts` makes both booleans REQUIRED, so that
- * match could never fill an absence: a document omitting either field is
- * refused before it reaches here. The only document it could change was one
- * that said `false` while its prose said otherwise, and there it overrode the
- * author's explicit declaration — for `"C, up to 1 minute"` but NOT for
- * `"Concentration, up to 1 minute"`, which is the spelling the SRD and this
- * project's own scraper (`tools/scrape/parse-spell.ts:295`) actually produce.
- *
- * D12/Q4: where a user supplies content, the user's content wins. A homebrew
- * variant that deliberately declares `concentration: false` gets `false`.
- */
-function tagsFor(record: NormalizedCatalogRecord): string[] {
-  const tags = [...record.tags];
-  if (record.ritual) {
-    tags.push('ritual');
-  }
-  if (record.concentration) {
-    tags.push('concentration');
-  }
-  return tags;
 }
 
 export class CatalogImporter {
@@ -436,7 +409,7 @@ export class CatalogImporter {
             true,
           ) || versionChanged;
 
-        const tags = tagsFor(record);
+        const tags = spellTags(record);
         versionChanged =
           this.#syncSimplePivot(
             'spell_version_tags',
@@ -631,7 +604,7 @@ export class CatalogImporter {
       ritual: encodeBoolean(record.ritual),
       concentration: encodeBoolean(record.concentration),
       casting_time: record.castingTime,
-      action_type: this.#actionType(record.castingTime),
+      action_type: spellActionType(record.castingTime),
       range: record.range,
       duration: record.duration,
       components: record.components,
@@ -644,6 +617,7 @@ export class CatalogImporter {
       upcast_summary: record.upcastSummary,
       cantrip_upgrade_summary: record.cantripUpgradeSummary,
       healing: encodeBoolean(record.healing),
+      requires_mod_for_effect: encodeBoolean(record.requiresModForEffect === true),
       effect_reliability_category:
         record.effectReliabilityCategory,
       provenance: 'import',
@@ -721,22 +695,6 @@ export class CatalogImporter {
       );
     }
     return true;
-  }
-
-  #actionType(castingTime: string | null): string | null {
-    if (castingTime === null) {
-      return null;
-    }
-    if (/\bbonus action\b/iu.test(castingTime)) {
-      return 'Bonus Action';
-    }
-    if (/\breaction\b/iu.test(castingTime)) {
-      return 'Reaction';
-    }
-    if (/\baction\b/iu.test(castingTime)) {
-      return 'Action';
-    }
-    return null;
   }
 
   #isReferenced(versionId: number): boolean {
