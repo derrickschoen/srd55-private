@@ -23,7 +23,76 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-04-a (newest - read first)
+## RESTART POINT 2026-08-04-b (newest - read first)
+MAIN ed67889 (mirror pushed). FLOORS: vitest 227/3,783; PW 125 (22 spec
+files); build 0; migrations 0000-0031 FROZEN; wire v1-v17. FIFTEEN merges.
+Rulings through D196.
+
+MERGED THIS WINDOW: CI-3s (2f53d5a, 13th), SS-4 (7e0382a, 14th), SC-2
+(ed67889, 15th).
+
+THE DEFECT CLASS OF THE NIGHT, recorded because it recurred in every
+lane: SOMETHING A CONSUMER DEPENDS ON, UNPINNED, WITH THE ORACLE BLIND
+TO IT.
+ - SC-2: per-class rule-set association (find(() => true) passed
+   everything); a hand-transcribed spell key that the oracle repeated;
+   returned Circle choice order hidden by Object.fromEntries.
+ - SS-4: compareGroups sorted 'Gift 10' before 'Gift 2', and the
+   replacement tests PINNED that reversed order after deleting the only
+   test that contradicted it.
+ - CI-3s: one bad row (absent, then damaged) froze reconciliation for all
+   434 aggregates on every boot, permanently.
+When reviewing, ask what a consumer reads and whether anything pins it.
+
+FOLLOW-UPS RECORDED IN COMMITS (no unit dispatched yet):
+ - SEEDER-SAME-CARDINALITY-CORRECTION: ensureBundledSpellContent declares
+   the catalog healthy on key and membership COUNTS, so a same-cardinality
+   SRD prose correction never reaches the store and reconciliation then
+   fingerprints stale prose as current.
+ - CI-3S-RECONCILE-STEADY-STATE-COST: reconciliation re-projects all 434
+   bundled aggregates through nine projectors on EVERY open. Measured:
+   attribution.spec 21.0s at 302c137 -> 22.9s at 7e0382a (~+0.3s per
+   light boot); ~2s per boot on the heavy retirement fixture. The
+   retirement sheet test's budget was raised 20s -> 45s with the
+   measurement written into the comment (da9c1ef).
+ - orphaned/refused counts are returned by the registry but discarded by
+   applicationSeed - needs a diagnostics decision.
+ - available_on_long_rest survives only as an enum member
+   (src/domain/enums.ts:159) with no producer and no consumer after D149.
+ - srdSubclassSpellVersionKeyEntries iteration order deliberately not
+   pinned (set-like export, consumers index by key).
+
+SUPERVISOR ERRORS THIS WINDOW, all disclosed in commits:
+ 1. A brief that forbade only the FULL suite let a lane run TARGETED
+    vitest against the supervisor's own full run -> onTaskUpdate
+    contention error -> full re-run. Briefs must forbid ALL test
+    execution while a supervisor suite is live.
+ 2. Reported a Playwright failure as HUNG. It was SLOW:
+    testInfo.setTimeout() inside a test OVERRIDES the --timeout CLI flag,
+    so the diagnostic never granted the time it claimed.
+ 3. Dispatched into wt/party against a ruling recorded only on main.
+    codex correctly BLOCKED rather than work from the brief's paraphrase.
+    Refresh the lane before citing a decision to it.
+ 4. Told codex "do not restate the notice anywhere in this module",
+    meaning the duplicated constant; it also deleted the file-header
+    attribution comment. A duplicated constant is a drift hazard; a header
+    comment on a derived work IS the attribution.
+ 5. Backgrounded a suite piped through `tail`, hiding all progress -
+    against a standing note to tee to a log instead.
+
+NEXT: CI-4a (XL, two-phase adoption review + runtime cutover), then
+CI-4b, HA-2, CI-5. Side lanes free: FF-B, AR-A, SC-3 (now unblocked by
+SC-2's manifest).
+
+HOMEBREW: D196 applied to the rogue doc (wt/party c234d56) - level 9 is a
+permanently doubled pool with the once-per-round trade stated in the
+feature text; level 13 is Skill Mastery (every skill + 2 Expertise),
+replacing Vanishing Point. Champion comparison delivered to the owner:
+the Executioner exceeds Champion on damage and out-of-combat utility, is
+behind on durability and in-combat consistency, and its only remaining
+simplicity gap is the once-per-round tracker. 7 docs still with owner.
+
+## RESTART POINT 2026-08-04-a (superseded by 08-04-b)
 MAIN 2f53d5a (CI-3s merged, THIRTEENTH; mirror pushed). FLOORS: vitest
 228/3,758; PW 124 (22 spec files); build 0; migrations 0000-0031 FROZEN;
 wire v1-v17. Rulings through D195.
