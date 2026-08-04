@@ -1250,8 +1250,15 @@ test('spell appendix paginates long prose with the D141 mechanism', async ({
 test('spell section and print appendix replace the legacy print route without writes', async ({
   page,
 }, testInfo) => {
-  // Measured alone at 18.8s on Chromium; fixture construction dominates.
-  testInfo.setTimeout(20_000);
+  // Measured alone at 23.0s on Chromium on merged main; fixture construction
+  // dominates, and this test boots the app twice (install, then reload). The
+  // earlier 20s budget was set against an 18.8s measurement taken before
+  // CI-3s added bundled-registry reconciliation to every open, which costs
+  // ~0.3s on a light boot and ~2s per boot on this heavier fixture. That
+  // steady-state cost is recorded as follow-up
+  // CI-3S-RECONCILE-STEADY-STATE-COST; this budget is headroom, not a mask -
+  // no assertion in this test changed.
+  testInfo.setTimeout(45_000);
   const image = await retirementSheetImage();
   await install(page, image);
   const before = Array.from(await page.evaluate(
