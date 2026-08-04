@@ -7,6 +7,41 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D196 — OWNER: rogue level 9 simplified; level 13 becomes total skill mastery (2026-08-04)
+
+Owner's words: "The above is too complicated. Just basic language that
+doubles the sneak attack dice pool permanently regardless of cunning
+strike use. Call out clearly that the rogue is being limited to one sneak
+attack per round in exchange for doubling the dice. At the subclass level
+after 9, give proficiency in every skill and 2 more expertise."
+
+Three rulings.
+
+1. LEVEL 9 WORDING IS SIMPLIFIED, and this supersedes D195's text (not
+   its intent). The pool is doubled PERMANENTLY. The
+   "subtract-before-doubling" Cunning Strike clause is DELETED: dice
+   forgone for Cunning Strike now come out of the doubled pool like any
+   other Sneak Attack dice, which is both simpler and slightly more
+   generous than D195. The critical-hit paragraph is DELETED from the
+   feature text - the normal critical rule already covers it. Any crit
+   arithmetic belongs in the design notes, not in the printed feature.
+
+2. THE TRADE MUST BE STATED IN THE FEATURE TEXT ITSELF, not only in the
+   worksheet: doubled dice in exchange for one Sneak Attack per round.
+   The reader must see the cost where they read the benefit.
+
+3. LEVEL 13 IS REPLACED. Vanishing Point (Hide while observed near dim
+   light or half cover) is CUT. The level-13 feature is now: proficiency
+   in EVERY skill, plus Expertise in two more skills. This keeps the
+   reliability theme and the Champion register - a broad passive with no
+   resource and no new action.
+
+Level 3 (Measured Lethality, 19-20 crit) and level 17 (Practiced
+Certainty) are unchanged. Note for the revision: with total skill
+proficiency at 13, level 17's chosen-skill floor and the level-13
+Expertise picks must not silently overlap in a way that reads as the
+same feature twice.
+
 ## D195 — OWNER: rogue level 9 final wording — doubled pool, Sneak Attack once per round (2026-08-03)
 
 Supersedes D194's engine wording ("first Sneak of the round doubles, a

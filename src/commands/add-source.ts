@@ -19,8 +19,8 @@ import { GrantRuleSlotGenerator } from '../grants/grant-rule-slot-generator';
 
 import {
   MAGIC_INITIATE_ABILITIES,
-  MAGIC_INITIATE_LISTS,
 } from '../builder/background-choices';
+import { MAGIC_INITIATE_LISTS } from '../domain/background-feat-name';
 const SOURCE_TYPES = ['class', 'feat', 'species', 'background'] as const;
 
 type MutableConfig = Record<string, unknown>;

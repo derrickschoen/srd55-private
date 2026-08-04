@@ -22,9 +22,6 @@ import {
   type PlannedGrantSource,
 } from '../../builder/level-up-wizard';
 import { BuildReportBuilder } from '../../reports/build-report-builder';
-import {
-  PrintableSpellListBuilder,
-} from '../../reports/printable-spell-list-builder';
 import { COMMAND_INTEGRITY_KEY } from './commands';
 import {
   defineRpcHandler,
@@ -54,10 +51,6 @@ interface CreateSavePointParams extends CharacterParams {
 
 interface SavePointCommandParams extends CharacterParams {
   readonly save_point_id: number;
-}
-
-interface PrintableParams extends CharacterParams {
-  readonly variant: 'reference' | 'full';
 }
 
 interface SetPrintAppendixPreferenceParams extends CharacterParams {
@@ -246,17 +239,6 @@ export function isSavePointCommandParams(
   );
 }
 
-export function isPrintableParams(
-  params: unknown,
-): params is PrintableParams {
-  return (
-    isRecord(params) &&
-    exactKeys(params, ['character_id', 'variant']) &&
-    positiveInteger(params.character_id) &&
-    (params.variant === 'reference' || params.variant === 'full')
-  );
-}
-
 export const handlers: readonly RpcHandler[] = Object.freeze([
   defineRpcHandler(
     'queries.characters.list',
@@ -373,15 +355,6 @@ export const handlers: readonly RpcHandler[] = Object.freeze([
     isCharacterParams,
     (context, params) =>
       new BuildReportBuilder(context.db).build(params.character_id),
-  ),
-  defineRpcHandler(
-    'queries.reports.printable',
-    isPrintableParams,
-    (context, params) =>
-      new PrintableSpellListBuilder(context.db).build(
-        params.character_id,
-        params.variant === 'full',
-      ),
   ),
   defineRpcHandler(
     'queries.history.read',

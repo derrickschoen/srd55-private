@@ -756,10 +756,12 @@ describe('the character sheet is projected twice from one value', () => {
                 { label: 'Save abilities', value: 'dexterity, wisdom' },
               ],
               description: { status: 'recorded', text: storedProse },
+              pagination: 'keep_together',
             },
           ],
         },
       ],
+      text_status: 'available',
       missing_spell_names: [],
     });
   });
@@ -779,11 +781,49 @@ describe('the character sheet is projected twice from one value', () => {
     );
 
     expect(appendix?.missing_spell_names).toEqual(['Goodberry']);
+    expect(appendix?.text_status).toBe('partial');
     expect(appendix?.groups[0]?.cards[0]?.description).toEqual({
       status: 'absent',
       disclosure: MISSING_SPELL_TEXT_DISCLOSURE,
     });
     expect(JSON.stringify(appendix)).not.toMatch(/php artisan|Tier 2/i);
+  });
+
+  it('classifies global spell-text completeness for partial, all-null, and all-complete appendices', () => {
+    const missing = spell(101, 'Goodberry');
+    const recorded = spell(102, 'Guidance', {
+      reference: {
+        ...spell(999, 'reference').reference,
+        description: 'Recorded guidance prose.',
+      },
+    });
+
+    expect(
+      spellAppendix(
+        sheet({
+          spells: [classSpellGroup(11, 'Druid', [missing, recorded])],
+        }),
+      )?.text_status,
+    ).toBe('partial');
+    expect(
+      spellAppendix(
+        sheet({
+          spells: [
+            classSpellGroup(11, 'Druid', [
+              missing,
+              spell(103, 'Resistance'),
+            ]),
+          ],
+        }),
+      )?.text_status,
+    ).toBe('unavailable');
+    expect(
+      spellAppendix(
+        sheet({
+          spells: [classSpellGroup(11, 'Druid', [recorded])],
+        }),
+      )?.text_status,
+    ).toBe('available');
   });
 
   it('normal spellcasting statistics render once at group level', () => {

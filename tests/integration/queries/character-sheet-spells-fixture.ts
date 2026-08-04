@@ -1,6 +1,5 @@
 import type { DatabaseContext } from '../../../src/db/database';
 import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
-import { seedClassResources } from '../../../src/rules/class-resources-srd';
 import {
   addClassLevel,
   classDefinitionId,
@@ -41,6 +40,30 @@ export interface CharacterSheetSpellsFixture {
   };
 }
 
+export interface SheetSpellRetirementFixture {
+  readonly characterId: number;
+  readonly spellIds: {
+    readonly command: number;
+    readonly detectMagic: number;
+    readonly faerieFire: number;
+    readonly goodberry: number;
+    readonly mistyStep: number;
+    readonly thornWhip: number;
+    readonly unseenServant: number;
+  };
+  readonly slotIds: {
+    readonly command: number;
+    readonly faerieFire: number;
+    readonly mistyStep: number;
+  };
+}
+
+export const RETIREMENT_COMMAND_PROSE =
+  'A one-word supernatural command.';
+export const RETIREMENT_LONG_PROSE =
+  `A thorny vine lashes out.\n${'The vine remains mechanically explicit. '.repeat(180)}` +
+  '\nThe stored spell text ends here.  ';
+
 /**
  * D91-R's resource projection for the fixture's Cleric 1 + Wizard 1 levels.
  *
@@ -76,6 +99,7 @@ interface ReferenceOptions {
   readonly cantripUpgradeSummary?: string | null;
   readonly attackModes?: readonly string[];
   readonly saveAbilities?: readonly string[];
+  readonly lists?: readonly string[];
   readonly active?: boolean;
   readonly placeholder?: boolean;
 }
@@ -219,6 +243,14 @@ function createReferenceSpell(
       [spellId, saveAbility],
     );
   }
+  for (const list of options.lists ?? []) {
+    db.exec(
+      `INSERT INTO spell_list_memberships (
+         spell_version_id, spell_list_key
+       ) VALUES (?, ?)`,
+      [spellId, list],
+    );
+  }
   return spellId;
 }
 
@@ -226,9 +258,24 @@ export function createCharacterSheetSpellsFixture(
   db: DatabaseContext,
 ): CharacterSheetSpellsFixture {
   seedClassProgressions(db);
-  seedClassResources(db);
   const clericClassId = classDefinitionId(db, 'Cleric');
   const wizardClassId = classDefinitionId(db, 'Wizard');
+  // This browser-safe fixture cannot import the Vite-only SRD resource parser.
+  // The hand-authored level-1 row is the only stored ladder value used by its
+  // Cleric 1 + Wizard 1 D91-R oracle; Wizard contributes no stored ladder row.
+  db.exec(
+    `INSERT INTO class_resources (
+       class_definition_id, class_level, resource_kind, maximum
+     ) VALUES (?, 1, 'channel_divinity', 0)`,
+    [clericClassId],
+  );
+  db.exec(
+    `INSERT INTO class_resource_formulas (
+       class_definition_id, resource_kind, formula_kind,
+       minimum_class_level, fixed_count
+     ) VALUES (?, 'divine_intervention', 'fixed_count', 10, 1)`,
+    [clericClassId],
+  );
   const subclassId = createDefinition(db, 'subclass', {
     name: 'SS-1 Chronurgy',
     classId: wizardClassId,
@@ -616,6 +663,279 @@ export function createCharacterSheetSpellsFixture(
       ritualOnly,
       chromaticOrb,
       comprehendLanguages,
+    },
+  };
+}
+
+/**
+ * Controlled SS-4 browser/parity image. It keeps every persisted fact carried
+ * by the retired printable fixture while expressing only D149 sheet subjects:
+ * current selections, class provenance, full stored text, and one free cast.
+ */
+export function createSheetSpellRetirementFixture(
+  db: DatabaseContext,
+): SheetSpellRetirementFixture {
+  seedClassProgressions(db);
+  const clericClassId = classDefinitionId(db, 'Cleric');
+  const druidClassId = classDefinitionId(db, 'Druid');
+  const wizardClassId = classDefinitionId(db, 'Wizard');
+  const giftDefinitionId = createDefinition(db, 'feat', {
+    name: 'SS-4 Gift',
+  });
+  const characterId = createCharacter(db, 'P50 Printable', {
+    intelligence: 16,
+    wisdom: 14,
+    charisma: 18,
+  });
+  addClassLevel(db, characterId, 'Wizard', 1);
+  addClassLevel(db, characterId, 'Druid', 1);
+  addClassLevel(db, characterId, 'Cleric', 1);
+
+  const clericSourceId = createSource(
+    db,
+    characterId,
+    'class',
+    clericClassId,
+    'Cleric 1',
+  );
+  const druidSourceId = createSource(
+    db,
+    characterId,
+    'class',
+    druidClassId,
+    'Druid 1',
+  );
+  const wizardSourceId = createSource(
+    db,
+    characterId,
+    'class',
+    wizardClassId,
+    'Wizard 1',
+  );
+  // Insert Gift 10 before Gift 2 so source ordering cannot follow row ids.
+  const gift10SourceId = createSource(
+    db,
+    characterId,
+    'feat',
+    giftDefinitionId,
+    'Gift 10',
+    { config: { spellcasting_ability: 'charisma' } },
+  );
+  const gift2SourceId = createSource(
+    db,
+    characterId,
+    'feat',
+    giftDefinitionId,
+    'Gift 2',
+    { config: { spellcasting_ability: 'charisma' } },
+  );
+
+  const command = createReferenceSpell(db, 'Command', {
+    level: 1,
+    school: 'Enchantment',
+    castingTime: 'Action',
+    actionType: 'Action',
+    range: '60 feet',
+    duration: '1 round',
+    components: 'V',
+    description: RETIREMENT_COMMAND_PROSE,
+    saveAbilities: ['wisdom'],
+    lists: ['Cleric'],
+  });
+  const guidance = createReferenceSpell(db, 'Guidance', {
+    level: 0,
+    description: 'A brief divine nudge.',
+    lists: ['Cleric'],
+  });
+  const goodberry = createReferenceSpell(db, 'Goodberry', {
+    level: 1,
+    school: 'Transmutation',
+    castingTime: 'Action',
+    description: null,
+    lists: ['Druid'],
+  });
+  const thornWhip = createReferenceSpell(db, 'Thorn Whip', {
+    level: 0,
+    school: 'Transmutation',
+    castingTime: 'Bonus Action',
+    actionType: 'Bonus Action',
+    range: '30 feet',
+    duration: 'Instantaneous',
+    components: 'V, S, M',
+    description: RETIREMENT_LONG_PROSE,
+    attackModes: ['melee_spell', 'ranged_spell'],
+    lists: ['Druid'],
+  });
+  const mageHand = createReferenceSpell(db, 'Mage Hand', {
+    level: 0,
+    description: 'A spectral hand appears.',
+  });
+  const shield = createReferenceSpell(db, 'Shield', {
+    level: 1,
+    castingTime: 'Reaction',
+    actionType: 'Reaction',
+    range: 'Self',
+    duration: '1 round',
+    components: 'V, S',
+    description: 'A sudden magical barrier.',
+    lists: ['Wizard'],
+  });
+  const detectMagic = createReferenceSpell(db, 'Detect Magic', {
+    level: 1,
+    school: 'Divination',
+    castingTime: 'Action or Ritual',
+    duration: 'Concentration, up to 10 minutes',
+    concentration: true,
+    ritual: true,
+    description: 'Sense magic nearby.',
+    lists: ['Wizard'],
+  });
+  const unseenServant = createReferenceSpell(db, 'Unseen Servant', {
+    level: 1,
+    school: 'Conjuration',
+    castingTime: 'Action',
+    description: 'An invisible servant performs simple tasks.',
+    lists: ['Wizard'],
+  });
+  const mistyStep = createReferenceSpell(db, 'Misty Step', {
+    level: 2,
+    school: 'Conjuration',
+    castingTime: 'Bonus Action',
+    actionType: 'Bonus Action',
+    range: 'Self',
+    duration: 'Instantaneous',
+    description: 'Teleport a short distance.',
+  });
+  const faerieFire = createReferenceSpell(db, 'Faerie Fire', {
+    level: 1,
+    school: 'Evocation',
+    castingTime: 'Action',
+    concentration: true,
+    description: 'Outline creatures in revealing light.',
+    saveAbilities: ['dexterity'],
+  });
+
+  const commandSlotId = createSlot(
+    db,
+    characterId,
+    clericSourceId,
+    command,
+    'cleric-prepared-command:1',
+    1,
+    { bucket: 'prepared', levelMin: 1, levelMax: 1 },
+  );
+  createSlot(db, characterId, clericSourceId, guidance, 'cleric-cantrip:1', 1, {
+    bucket: 'cantrip_known',
+    levelMin: 0,
+    levelMax: 0,
+    withSlots: false,
+  });
+  createSlot(db, characterId, druidSourceId, goodberry, 'druid-known:1', 1, {
+    bucket: 'known',
+    levelMin: 1,
+    levelMax: 1,
+  });
+  createSlot(db, characterId, druidSourceId, thornWhip, 'druid-cantrip:1', 1, {
+    bucket: 'cantrip_known',
+    levelMin: 0,
+    levelMax: 0,
+    withSlots: false,
+  });
+  createSlot(db, characterId, wizardSourceId, command, 'wizard-known:1', 1, {
+    bucket: 'known',
+    levelMin: 1,
+    levelMax: 1,
+  });
+  createSlot(db, characterId, wizardSourceId, mageHand, 'wizard-cantrip:1', 1, {
+    bucket: 'cantrip_known',
+    levelMin: 0,
+    levelMax: 0,
+    withSlots: false,
+  });
+  createSlot(db, characterId, wizardSourceId, shield, 'wizard-prepared:1', 1, {
+    bucket: 'prepared',
+    levelMin: 1,
+    levelMax: 1,
+  });
+  const mistyStepSlotId = createSlot(
+    db,
+    characterId,
+    gift2SourceId,
+    mistyStep,
+    'gift-two:1',
+    1,
+    { bucket: 'automatic', fixed: true, levelMin: 2, levelMax: 2 },
+  );
+  db.exec(
+    `UPDATE spell_selection_slots SET free_cast = ? WHERE id = ?`,
+    [
+      JSON.stringify({
+        uses: 1,
+        recovery: 'long_rest',
+        pool_scope: 'per_spell',
+      }),
+      mistyStepSlotId,
+    ],
+  );
+  const faerieFireSlotId = createSlot(
+    db,
+    characterId,
+    gift10SourceId,
+    faerieFire,
+    'gift-ten:1',
+    1,
+    {
+      bucket: 'automatic',
+      fixed: true,
+      levelMin: 1,
+      levelMax: 1,
+      withSlots: false,
+    },
+  );
+  db.exec(
+    `UPDATE spell_selection_slots SET free_cast = ? WHERE id = ?`,
+    [
+      JSON.stringify({
+        uses: 2,
+        recovery: 'dawn',
+        pool_scope: 'shared',
+      }),
+      faerieFireSlotId,
+    ],
+  );
+  for (const spellId of [detectMagic, shield, unseenServant]) {
+    db.exec(
+      `INSERT INTO wizard_spellbook_entries (
+         character_id, spell_version_id
+       ) VALUES (?, ?)`,
+      [characterId, spellId],
+    );
+  }
+  // D162 makes the appendix optional. Seeding this named preference lets the
+  // retirement tests exercise printing while retaining a byte-exact no-write
+  // oracle across render, print entry/exit, print-button click, and reload.
+  db.exec(
+    `INSERT INTO character_rule_overrides (
+       character_id, rule_key, value, note
+     ) VALUES (?, 'print_appendix_spells', 'true', NULL)`,
+    [characterId],
+  );
+
+  return {
+    characterId,
+    spellIds: {
+      command,
+      detectMagic,
+      faerieFire,
+      goodberry,
+      mistyStep,
+      thornWhip,
+      unseenServant,
+    },
+    slotIds: {
+      command: commandSlotId,
+      faerieFire: faerieFireSlotId,
+      mistyStep: mistyStepSlotId,
     },
   };
 }

@@ -23,7 +23,58 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-03-h (newest - read first)
+## RESTART POINT 2026-08-04-a (newest - read first)
+MAIN 2f53d5a (CI-3s merged, THIRTEENTH; mirror pushed). FLOORS: vitest
+228/3,758; PW 124 (22 spec files); build 0; migrations 0000-0031 FROZEN;
+wire v1-v17. Rulings through D195.
+CI-3s: 3 review rounds (cap) + 4 fix rounds. The recurring defect class
+tonight was ONE BAD ROW FREEZING EVERYTHING: absence (F1) and damage
+(round-3 MED) each aborted the single reconcile transaction for all 434
+aggregates on every boot, permanently. Both are now per-entry typed
+outcomes - `orphaned` and `refused` - counted in the result, rows left
+untouched, ambiguity and unknown errors still fatal. Nested
+db.transaction resolves to a real SAVEPOINT (transaction.ts:22).
+FOLLOW-UP RECORDED: SEEDER-SAME-CARDINALITY-CORRECTION -
+ensureBundledSpellContent declares the catalog healthy on key and
+membership COUNTS, so a same-cardinality SRD prose correction never
+reaches the store and reconciliation then fingerprints stale prose as
+current. Also recorded: the orphaned/refused counts are returned but
+discarded by applicationSeed (needs a diagnostics decision).
+
+IN FLIGHT:
+- SS-4 (wt/pwa, 25b12b6 + fix round 1 running). Its D135 review found the
+  strict-superset claim FALSE; supervisor raised MED->HIGH. Two items
+  confirmed by the supervisor personally: (1) compareGroups at
+  character-spell-section-builder.ts:331 compares names with plain `<`,
+  so `Gift 10` sorts before `Gift 2`, and SS-4's replacements PIN that
+  reversed order in three places after deleting the test that
+  contradicted it; (2) existsSync filters were added to two repo-wide
+  scanners (source-is-greppable, codec-slot-is-never-an-identity) so a
+  tracked-but-missing file is silently skipped - a weakened assertion.
+  DO NOT MERGE SS-4 until both are fixed and the enumerated coverage
+  losses are carried.
+- SC-2 (wt/hyg2, fd4d5b3). D135 review returned REJECT/4 HIGH; all four
+  fixed. Supervisor re-derived two facts independently rather than trust
+  citations: the catalog mints 2024:dragon-s-breath (each [^a-z0-9]+ RUN
+  becomes one '-', and the apostrophe is its own run), and the extract's
+  printed activation levels are exactly {3,5,7,9,13,17}. OWES: negative
+  controls (not yet run) and a closing review round.
+
+MERGE ORDER: SS-4 before SC-2. SS-4 DELETES
+src/ui/screens/print/printable-list.ts, which CI-3s (now in main)
+MODIFIED - modify/delete conflict, and the DELETION WINS (adjudicated in
+CI-3s review round 3, C5).
+
+PROCESS LESSON (supervisor's own error, cost: one full vitest re-run):
+a dispatch brief that forbids only the FULL suite still lets a lane run
+TARGETED vitest, which contended with the supervisor's own full run and
+produced `[vitest-worker]: Timeout calling "onTaskUpdate"`. Briefs must
+forbid ALL test execution while a supervisor suite is live.
+
+HOMEBREW: rogue doc final per D195 (flat 2N, once-per-round Sneak,
+5149e33). 7 docs with owner awaiting rulings; polish passes after.
+
+## RESTART POINT 2026-08-03-h (superseded by 08-04-a)
 MAIN 302c137 (CI-3s-PRE merged; mirror pushed). FLOORS: vitest 226/3,739;
 PW 124 (22 spec files); build 0; migrations 0000-0031 FROZEN; wire
 v1-v17. TWELVE merges today. Rulings through D195.
