@@ -5,6 +5,12 @@ import {
   ClassProgressionLookup,
   seedClassProgressions,
 } from '../../../src/rules/class-progression-lookup';
+import { GrantRule } from '../../../src/grants/grant-rule';
+import { ensureBundledSrdSubclassContent } from '../../../src/rules/srd-subclass-content';
+import {
+  parseSrdSubclasses,
+  srdSubclassClassNames,
+} from '../../../src/rules/srd-subclasses';
 import { openTestDatabase } from '../../helpers/open-db';
 
 
@@ -16,6 +22,7 @@ describe('persisted class progression catalog', () => {
     connection = await openTestDatabase();
     db = new DatabaseContext(connection);
     seedClassProgressions(db);
+    ensureBundledSrdSubclassContent(db);
   });
 
   afterEach(() => {
@@ -25,8 +32,10 @@ describe('persisted class progression catalog', () => {
   it('persists twelve complete class tables and two complete subclass tables', () => {
     expect(db.scalar('SELECT count(*) FROM class_definitions')).toBe(12);
     expect(db.scalar('SELECT count(*) FROM class_progressions')).toBe(240);
-    expect(db.scalar('SELECT count(*) FROM subclass_definitions')).toBe(2);
+    expect(db.scalar('SELECT count(*) FROM subclass_definitions')).toBe(14);
     expect(db.scalar('SELECT count(*) FROM subclass_progressions')).toBe(40);
+    expect(db.scalar('SELECT count(*) FROM subclass_features')).toBe(58);
+    expect(db.scalar('SELECT count(*) FROM subclass_feature_effects')).toBe(0);
 
     const classCoverage = db.allRaw(`
       SELECT class.name, count(*) AS rows, min(class_level) AS first_level,
@@ -40,6 +49,33 @@ describe('persisted class progression catalog', () => {
     expect(classCoverage.every((row) =>
       row.rows === 20 && row.first_level === 1 && row.last_level === 20,
     )).toBe(true);
+
+    const parsed = parseSrdSubclasses();
+    expect(
+      db.allRaw(`
+        SELECT class.name AS class_name, subclass.name AS subclass_name,
+          feature.class_level, feature.sort_order, feature.name,
+          feature.description
+        FROM subclass_features AS feature
+        JOIN subclass_definitions AS subclass
+          ON subclass.id = feature.subclass_definition_id
+        JOIN class_definitions AS class
+          ON class.id = subclass.class_definition_id
+        ORDER BY class.name, feature.sort_order
+      `),
+    ).toEqual(
+      srdSubclassClassNames.flatMap((className) => {
+        const definition = parsed.by_class[className];
+        return definition.features.map((feature) => ({
+          class_name: className,
+          subclass_name: definition.subclass_name,
+          class_level: feature.class_level,
+          sort_order: feature.sort_position + 1,
+          name: feature.name,
+          description: '',
+        }));
+      }),
+    );
   });
 
   it('persists base-class metadata with third-caster rules only on subclasses', () => {
@@ -75,8 +111,69 @@ describe('persisted class progression catalog', () => {
       `),
     ).toEqual([
       { name: 'AT', class_name: 'Rogue', spellcasting_ability: 'intelligence', caster_fraction: '1/3', caster_rounding: 'down' },
+      { name: 'Champion', class_name: 'Fighter', spellcasting_ability: null, caster_fraction: null, caster_rounding: null },
+      { name: 'Circle of the Land', class_name: 'Druid', spellcasting_ability: 'wisdom', caster_fraction: null, caster_rounding: null },
+      { name: 'College of Lore', class_name: 'Bard', spellcasting_ability: 'charisma', caster_fraction: null, caster_rounding: null },
+      { name: 'Draconic Sorcery', class_name: 'Sorcerer', spellcasting_ability: 'charisma', caster_fraction: null, caster_rounding: null },
       { name: 'EK', class_name: 'Fighter', spellcasting_ability: 'intelligence', caster_fraction: '1/3', caster_rounding: 'down' },
+      { name: 'Evoker', class_name: 'Wizard', spellcasting_ability: 'intelligence', caster_fraction: null, caster_rounding: null },
+      { name: 'Fiend Patron', class_name: 'Warlock', spellcasting_ability: 'charisma', caster_fraction: null, caster_rounding: null },
+      { name: 'Hunter', class_name: 'Ranger', spellcasting_ability: 'wisdom', caster_fraction: null, caster_rounding: null },
+      { name: 'Life Domain', class_name: 'Cleric', spellcasting_ability: 'wisdom', caster_fraction: null, caster_rounding: null },
+      { name: 'Oath of Devotion', class_name: 'Paladin', spellcasting_ability: 'charisma', caster_fraction: null, caster_rounding: null },
+      { name: 'Path of the Berserker', class_name: 'Barbarian', spellcasting_ability: null, caster_fraction: null, caster_rounding: null },
+      { name: 'Thief', class_name: 'Rogue', spellcasting_ability: null, caster_fraction: null, caster_rounding: null },
+      { name: 'Warrior of the Open Hand', class_name: 'Monk', spellcasting_ability: null, caster_fraction: null, caster_rounding: null },
     ]);
+
+    const persistedRules = db
+      .allRaw(`
+        SELECT subclass.name, subclass.grant_rules
+        FROM subclass_definitions AS subclass
+        WHERE subclass.grant_rules IS NOT NULL
+        ORDER BY subclass.name
+      `)
+      .flatMap((row) => {
+        const decoded: unknown = JSON.parse(String(row.grant_rules));
+        if (!Array.isArray(decoded)) {
+          throw new TypeError('Persisted subclass grant rules are not an array.');
+        }
+        return decoded.map((input) => {
+          const rule = GrantRule.fromObject(input);
+          return {
+            subclass_name: String(row.name),
+            kind: rule.kind,
+            rule_key: rule.ruleKey,
+            spell_version_key: rule.toObject().spell_version_key,
+            bucket: rule.bucket,
+            always_prepared: rule.alwaysPrepared,
+            with_slots: rule.withSlots,
+            active_from_class_level: rule.activeFromClassLevel,
+            active_if_config: rule.activeIfConfig,
+          };
+        });
+      });
+    expect(persistedRules).toHaveLength(40);
+    const manifest = parseSrdSubclasses();
+    expect(persistedRules).toEqual(
+      [...manifest.unconditional_rule_sets]
+        .sort((left, right) =>
+          left.subclass_name.localeCompare(right.subclass_name),
+        )
+        .flatMap((set) =>
+          set.rules.map((rule) => ({
+            subclass_name: set.subclass_name,
+            kind: 'fixed_spell',
+            rule_key: rule.rule_key,
+            spell_version_key: rule.spell_version_key,
+            bucket: 'prepared',
+            always_prepared: true,
+            with_slots: true,
+            active_from_class_level: rule.active_from_class_level,
+            active_if_config: null,
+          })),
+        ),
+    );
   });
 
   it.each([

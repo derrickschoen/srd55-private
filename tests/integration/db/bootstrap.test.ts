@@ -13,10 +13,16 @@ import { CharacterCommandExecutor } from '../../../src/commands/character-comman
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import { CharacterCompletenessQueries } from '../../../src/queries/character-completeness';
 import {
+  BUNDLED_SUBCLASS_OVERRIDE_SCHEDULE_CONTENT_KEYS,
   bundledClassContentKeys,
   hasBundledClassContent,
   seedClassProgressions,
 } from '../../../src/rules/class-progression-lookup';
+import {
+  assertBundledSrdSubclassSpellReferences,
+  bundledSubclassDefinitionContentKeys,
+  hasBundledSrdSubclassContent,
+} from '../../../src/rules/srd-subclass-content';
 import { getSqlite3, MemoryDatabaseStorage } from '../../helpers/open-db';
 import { hasBundledClassResourceContent } from '../../../src/rules/class-resources-srd';
 
@@ -35,7 +41,22 @@ const SRD_CLASSES = [
   'Wizard',
 ] as const;
 
-const SRD_SUBCLASSES = ['AT', 'EK'] as const;
+const BUNDLED_SUBCLASSES = [
+  'AT',
+  'Champion',
+  'Circle of the Land',
+  'College of Lore',
+  'Draconic Sorcery',
+  'EK',
+  'Evoker',
+  'Fiend Patron',
+  'Hunter',
+  'Life Domain',
+  'Oath of Devotion',
+  'Path of the Berserker',
+  'Thief',
+  'Warrior of the Open Hand',
+] as const;
 
 const lifecycles: DatabaseLifecycle[] = [];
 
@@ -83,25 +104,45 @@ function classNames(lifecycle: DatabaseLifecycle): string[] {
     );
 }
 
+function subclassNames(lifecycle: DatabaseLifecycle): string[] {
+  return lifecycle.database.all(
+    'SELECT name FROM subclass_definitions ORDER BY name',
+    undefined,
+    (row) => sqlString(row, 'name'),
+  );
+}
+
+function subclassFixedRuleCount(lifecycle: DatabaseLifecycle): number {
+  return lifecycle.database
+    .allRaw(
+      `SELECT grant_rules FROM subclass_definitions
+       WHERE grant_rules IS NOT NULL`,
+    )
+    .reduce((total, row) => {
+      const decoded: unknown = JSON.parse(String(row.grant_rules));
+      if (!Array.isArray(decoded)) {
+        throw new TypeError('Persisted subclass grant rules are not an array.');
+      }
+      return total + decoded.length;
+    }, 0);
+}
+
 describe('application database bootstrap', () => {
   it('gives a brand new database the twelve SRD classes with full progressions', async () => {
     const { lifecycle } = await freshApplicationLifecycle();
 
     expect(classNames(lifecycle)).toEqual([...SRD_CLASSES]);
-    expect(
-      lifecycle.database
-        .all(
-          'SELECT name FROM subclass_definitions ORDER BY name',
-          undefined,
-          (row) => sqlString(row, 'name'),
-        ),
-    ).toEqual([...SRD_SUBCLASSES]);
+    expect(subclassNames(lifecycle)).toEqual([...BUNDLED_SUBCLASSES]);
     expect(
       lifecycle.database.scalar('SELECT count(*) FROM class_progressions'),
     ).toBe(SRD_CLASSES.length * 20);
     expect(
       lifecycle.database.scalar('SELECT count(*) FROM subclass_progressions'),
-    ).toBe(SRD_SUBCLASSES.length * 20);
+    ).toBe(40);
+    expect(
+      lifecycle.database.scalar('SELECT count(*) FROM subclass_features'),
+    ).toBe(58);
+    expect(subclassFixedRuleCount(lifecycle)).toBe(40);
     expect(
       lifecycle.database.scalar(
         `SELECT count(*) FROM class_progressions
@@ -243,6 +284,9 @@ describe('application database bootstrap', () => {
       `UPDATE class_definitions SET updated_at = '1999-01-01T00:00:00.000Z'`,
     );
     lifecycle.database.exec(
+      `UPDATE subclass_definitions SET updated_at = '1999-01-01T00:00:00.000Z'`,
+    );
+    lifecycle.database.exec(
       "INSERT INTO characters (name) VALUES ('Returning User')",
     );
 
@@ -253,6 +297,12 @@ describe('application database bootstrap', () => {
     expect(
       lifecycle.database.scalar(
         `SELECT count(*) FROM class_definitions
+         WHERE updated_at <> '1999-01-01T00:00:00.000Z'`,
+      ),
+    ).toBe(0);
+    expect(
+      lifecycle.database.scalar(
+        `SELECT count(*) FROM subclass_definitions
          WHERE updated_at <> '1999-01-01T00:00:00.000Z'`,
       ),
     ).toBe(0);
@@ -313,9 +363,9 @@ describe('application database bootstrap', () => {
     );
     lifecycle.database.exec('DELETE FROM class_progressions');
 
-    // All fourteen content keys are still present, so a guard that only looked
-    // at definitions would call this database healthy and leave every level
-    // lookup on it broken forever.
+    // All twelve class definitions and both override-schedule subclass
+    // definitions are still present, so a guard that only looked at roots
+    // would call this database healthy and leave every level lookup broken.
     expect(
       lifecycle.database.scalar('SELECT count(*) FROM class_definitions'),
     ).toBe(SRD_CLASSES.length);
@@ -328,7 +378,7 @@ describe('application database bootstrap', () => {
     ).toBe(SRD_CLASSES.length * 20);
     expect(
       lifecycle.database.scalar('SELECT count(*) FROM subclass_progressions'),
-    ).toBe(SRD_SUBCLASSES.length * 20);
+    ).toBe(40);
     expect(classNames(lifecycle)).toEqual([...SRD_CLASSES]);
     expect(
       lifecycle.database.allRaw('SELECT name FROM characters'),
@@ -390,13 +440,110 @@ describe('application database bootstrap', () => {
     ).toBe('2024:class:bard');
   });
 
+  it('boot repair compares exact SRD subclass feature tuples and grant rules, not counts alone', async () => {
+    const { lifecycle } = await freshApplicationLifecycle();
+    const db = lifecycle.database;
+
+    db.exec(
+      `DELETE FROM subclass_features
+       WHERE id = (
+         SELECT feature.id
+         FROM subclass_features AS feature
+         JOIN subclass_definitions AS subclass
+           ON subclass.id = feature.subclass_definition_id
+         WHERE subclass.content_key = '2024:subclass:path-of-the-berserker'
+           AND feature.name = 'Frenzy'
+       )`,
+    );
+    expect(db.scalar('SELECT count(*) FROM subclass_features')).toBe(57);
+    expect(hasBundledSrdSubclassContent(db)).toBe(false);
+
+    lifecycle.reopen();
+
+    expect(hasBundledSrdSubclassContent(lifecycle.database)).toBe(true);
+    expect(
+      lifecycle.database.oneRaw(
+        `SELECT feature.class_level, feature.sort_order, feature.name,
+                feature.description
+         FROM subclass_features AS feature
+         JOIN subclass_definitions AS subclass
+           ON subclass.id = feature.subclass_definition_id
+         WHERE subclass.content_key = '2024:subclass:path-of-the-berserker'
+           AND feature.name = 'Frenzy'`,
+      ),
+    ).toEqual({
+      class_level: 3,
+      sort_order: 1,
+      name: 'Frenzy',
+      description: '',
+    });
+
+    lifecycle.database.exec(
+      `UPDATE subclass_definitions
+          SET grant_rules = json_set(
+            grant_rules,
+            '$[0].spell_version_key',
+            '2024:bless'
+          )
+        WHERE content_key = '2024:subclass:life-domain'`,
+    );
+    expect(subclassFixedRuleCount(lifecycle)).toBe(40);
+    expect(hasBundledSrdSubclassContent(lifecycle.database)).toBe(false);
+
+    lifecycle.reopen();
+
+    expect(hasBundledSrdSubclassContent(lifecycle.database)).toBe(true);
+    expect(
+      lifecycle.database.scalar(
+        `SELECT json_extract(grant_rules, '$[0].spell_version_key')
+         FROM subclass_definitions
+         WHERE content_key = '2024:subclass:life-domain'`,
+      ),
+    ).toBe('2024:aid');
+  });
+
+  it('rejects an unresolved SRD subclass spell key after the full application seed', async () => {
+    const { lifecycle } = await freshApplicationLifecycle();
+    lifecycle.database.exec(
+      `UPDATE subclass_definitions
+          SET grant_rules = json_set(
+            grant_rules,
+            '$[0].spell_version_key',
+            '2024:missing-subclass-spell'
+          )
+        WHERE content_key = '2024:subclass:life-domain'`,
+    );
+
+    expect(() =>
+      assertBundledSrdSubclassSpellReferences(lifecycle.database),
+    ).toThrow('2024:missing-subclass-spell');
+  });
+
   it('yields a class name already claimed by user content instead of failing the boot', async () => {
     const { sqlite3, lifecycle } = await freshApplicationLifecycle();
 
     const homebrew = bareLifecycle(sqlite3);
+    const fighterId = homebrew.database.exec(
+      `INSERT INTO class_definitions (content_key, name, rules_edition)
+       VALUES ('2024:class:fighter', 'Fighter', '2024')`,
+    ).lastInsertId;
     homebrew.database.exec(
       `INSERT INTO class_definitions (content_key, name, rules_edition)
        VALUES ('homebrew:wizard', 'Wizard', '2024')`,
+    );
+    const claimedChampionId = homebrew.database.exec(
+      `INSERT INTO subclass_definitions (
+         content_key, class_definition_id, name, rules_edition
+       ) VALUES (
+         '2024:claimed.homebrew:champion', ?, 'Champion', '2024'
+       )`,
+      [fighterId],
+    ).lastInsertId;
+    homebrew.database.exec(
+      `INSERT INTO subclass_features (
+         subclass_definition_id, class_level, sort_order, name, description
+       ) VALUES (?, 3, 1, 'Claimed Feature', 'User-authored sentinel.')`,
+      [claimedChampionId],
     );
     const homebrewBytes = await homebrew.exportBytes();
     homebrew.close();
@@ -421,16 +568,25 @@ describe('application database bootstrap', () => {
       lifecycle.database.scalar('SELECT count(*) FROM class_progressions'),
     ).toBe((SRD_CLASSES.length - 1) * 20);
 
-    // The third casters hang off Fighter and Rogue, which seeded normally, and
-    // they are resolved by content key rather than by name.
+    // Evoker yields because its bundled Wizard parent could not seed. Champion
+    // independently yields its occupied subclass slot; every other bundled
+    // sibling remains, and the user's aggregate is untouched.
+    expect(subclassNames(lifecycle)).toEqual(
+      BUNDLED_SUBCLASSES.filter((name) => name !== 'Evoker'),
+    );
     expect(
-      lifecycle.database
-        .all(
-          'SELECT name FROM subclass_definitions ORDER BY name',
-          undefined,
-          (row) => sqlString(row, 'name'),
-        ),
-    ).toEqual([...SRD_SUBCLASSES]);
+      lifecycle.database.oneRaw(
+        `SELECT subclass.content_key, feature.name, feature.description
+         FROM subclass_definitions AS subclass
+         JOIN subclass_features AS feature
+           ON feature.subclass_definition_id = subclass.id
+         WHERE subclass.name = 'Champion'`,
+      ),
+    ).toEqual({
+      content_key: '2024:claimed.homebrew:champion',
+      name: 'Claimed Feature',
+      description: 'User-authored sentinel.',
+    });
 
     // The bundle stays incomplete, so the guard keeps re-running the seed. It
     // must remain non-destructive on every one of those reruns.
@@ -443,6 +599,18 @@ describe('application database bootstrap', () => {
     expect(
       lifecycle.database.scalar('SELECT count(*) FROM class_definitions'),
     ).toBe(SRD_CLASSES.length);
+    expect(
+      lifecycle.database.scalar('SELECT count(*) FROM subclass_definitions'),
+    ).toBe(13);
+    expect(
+      lifecycle.database.scalar(
+        `SELECT count(*) FROM subclass_features
+         WHERE subclass_definition_id = (
+           SELECT id FROM subclass_definitions
+           WHERE content_key = '2024:claimed.homebrew:champion'
+         )`,
+      ),
+    ).toBe(1);
   });
 
   it('boots and stays resettable when the seed throws outright', async () => {
@@ -608,7 +776,30 @@ describe('bundled class content detection', () => {
     const keys = bundledClassContentKeys();
 
     expect(keys.classes).toHaveLength(SRD_CLASSES.length);
-    expect(keys.subclasses).toHaveLength(SRD_SUBCLASSES.length);
+    expect(keys.subclasses).toEqual([
+      '2024:subclass:ek',
+      '2024:subclass:at',
+    ]);
+    expect(BUNDLED_SUBCLASS_OVERRIDE_SCHEDULE_CONTENT_KEYS).toEqual([
+      '2024:subclass:ek',
+      '2024:subclass:at',
+    ]);
+    expect(bundledSubclassDefinitionContentKeys()).toEqual([
+      '2024:subclass:path-of-the-berserker',
+      '2024:subclass:college-of-lore',
+      '2024:subclass:life-domain',
+      '2024:subclass:circle-of-the-land',
+      '2024:subclass:champion',
+      '2024:subclass:warrior-of-the-open-hand',
+      '2024:subclass:oath-of-devotion',
+      '2024:subclass:hunter',
+      '2024:subclass:thief',
+      '2024:subclass:draconic-sorcery',
+      '2024:subclass:fiend-patron',
+      '2024:subclass:evoker',
+      '2024:subclass:ek',
+      '2024:subclass:at',
+    ]);
     expect(hasBundledClassContent(db)).toBe(true);
 
     // One missing progression row is enough. The guard is what decides whether
