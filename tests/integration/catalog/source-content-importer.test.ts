@@ -63,7 +63,116 @@ function fingerprint(contentKey: ContentKey) {
   };
 }
 
+function backgroundReferencingFeat(
+  name: string,
+  featKey: ContentKey,
+): BackgroundContentAggregate {
+  return {
+    kind: 'background',
+    name,
+    rules_edition: 'expanded',
+    reference_text: 'Studies runes.',
+    repeatable: false,
+    grants: [],
+    suggested_abilities: ['intelligence', 'wisdom', 'charisma'],
+    default_origin_feat: { kind: 'feat', ...fingerprint(featKey) },
+    skill_proficiencies: ['arcana', 'insight'],
+    tool_reference_text: null,
+    equipment_option_a_description: 'Runes.',
+    equipment_option_b_description: 'More runes.',
+    equipment_option_a: [],
+    equipment_option_b: [],
+    effects: [],
+  };
+}
+
 describe('class, feat, species and background catalog import', () => {
+  it('imports a parenthetical homebrew feat and an exact-name background reference', () => {
+    const feat = {
+      ...featProjectorV1Vector.aggregate,
+      name: 'Rune Adept (Frost)',
+    };
+    new CatalogImporter(db).import({ documents: [document('feat', feat)] });
+    const featKey = db.scalar<string>(
+      `SELECT content_key FROM feat_definitions
+       WHERE name = 'Rune Adept (Frost)'`,
+    );
+    if (featKey === null) throw new Error('Parenthetical feat fixture is missing.');
+
+    const result = new CatalogImporter(db).import({
+      documents: [document(
+        'background',
+        backgroundReferencingFeat('Frost Rune Keeper', featKey as ContentKey),
+      )],
+    });
+    const backgroundKey = db.scalar<string>(
+      `SELECT content_key FROM background_definitions
+       WHERE name = 'Frost Rune Keeper'`,
+    );
+    if (backgroundKey === null) throw new Error('Background fixture is missing.');
+    const projected = projectStoredAuthoredContentV1(db, {
+      kind: 'background',
+      contentKey: backgroundKey as ContentKey,
+      references: storedAuthoredRegistryReferencesV1(db),
+    });
+
+    expect(result.backgrounds_created).toBe(1);
+    expect(db.scalar<string>(
+      `SELECT feat_name FROM background_templates
+       WHERE content_key = ?`,
+      [backgroundKey],
+    )).toBe('Rune Adept (Frost)');
+    expect(projected.aggregate.default_origin_feat).toEqual({
+      kind: 'feat',
+      ...fingerprint(featKey as ContentKey),
+    });
+  });
+
+  it('does not resolve a parenthetical feat reference to a colliding base name', () => {
+    for (const name of ['Rune Adept', 'Rune Adept (Frost)']) {
+      new CatalogImporter(db).import({
+        documents: [document('feat', { ...featProjectorV1Vector.aggregate, name })],
+      });
+    }
+    const baseKey = db.scalar<string>(
+      `SELECT content_key FROM feat_definitions WHERE name = 'Rune Adept'`,
+    );
+    const frostKey = db.scalar<string>(
+      `SELECT content_key FROM feat_definitions
+       WHERE name = 'Rune Adept (Frost)'`,
+    );
+    if (baseKey === null || frostKey === null) {
+      throw new Error('Same-base feat fixtures are missing.');
+    }
+
+    const result = new CatalogImporter(db).import({
+      documents: [document(
+        'background',
+        backgroundReferencingFeat('Collision Keeper', frostKey as ContentKey),
+      )],
+    });
+    const backgroundKey = db.scalar<string>(
+      `SELECT content_key FROM background_definitions
+       WHERE name = 'Collision Keeper'`,
+    );
+    if (backgroundKey === null) throw new Error('Collision background is missing.');
+    const projected = projectStoredAuthoredContentV1(db, {
+      kind: 'background',
+      contentKey: backgroundKey as ContentKey,
+      references: storedAuthoredRegistryReferencesV1(db),
+    });
+
+    expect(result.backgrounds_created).toBe(1);
+    expect(projected.aggregate.default_origin_feat).toEqual({
+      kind: 'feat',
+      ...fingerprint(frostKey as ContentKey),
+    });
+    expect(projected.aggregate.default_origin_feat).not.toEqual({
+      kind: 'feat',
+      ...fingerprint(baseKey as ContentKey),
+    });
+  });
+
   it('normalizes omitted skill-proficiency defaults before hashing and silently matches re-import', () => {
     const aggregate = {
       ...featProjectorV1Vector.aggregate,

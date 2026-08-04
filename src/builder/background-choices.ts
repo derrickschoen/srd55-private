@@ -34,16 +34,17 @@ import {
   skills,
   type Ability,
 } from '../domain/enums';
+import {
+  backgroundFeatBaseName,
+  MAGIC_INITIATE_LISTS,
+} from '../domain/background-feat-name';
 import { hasExactKeys } from './contracts';
 
 /**
- * Magic Initiate's two closed choice sets. Declared HERE — a leaf module —
- * and imported by `add_source` (which enforced them first), so the guided
- * picker and the expert command validate the same sets without the UI bundle
- * swallowing the command machinery. `update-source-config.ts` predates this
- * and still carries its own list copy.
+ * Magic Initiate's closed casting-ability choice set. Its spell lists and
+ * printed base name live in the lower-level background-feat-name domain seam
+ * so builder, catalog, command, query, and rules consumers share one source.
  */
-export const MAGIC_INITIATE_LISTS = ['Cleric', 'Druid', 'Wizard'] as const;
 export const MAGIC_INITIATE_ABILITIES = [
   'intelligence',
   'wisdom',
@@ -304,17 +305,13 @@ export function printedPairing(
       : null;
 
   const printedFeat = template.feat_name.trim();
-  const parenthetical = /^(?<base>.*?)\s*\((?<option>[^)]+)\)$/.exec(
-    printedFeat,
-  )?.groups;
-  const baseName = parenthetical?.base ?? printedFeat;
-  const option = parenthetical?.option ?? null;
-  const featKey = originFeatKeyByName.get(baseName) ?? null;
+  const parsedFeat = backgroundFeatBaseName(printedFeat);
+  const featKey = originFeatKeyByName.get(parsedFeat.base) ?? null;
   const magicInitiateList =
     featKey === MAGIC_INITIATE_FEAT_CONTENT_KEY &&
-    option !== null &&
-    (MAGIC_INITIATE_LISTS as readonly string[]).includes(option)
-      ? option
+    parsedFeat.option !== null &&
+    (MAGIC_INITIATE_LISTS as readonly string[]).includes(parsedFeat.option)
+      ? parsedFeat.option
       : null;
 
   return {
