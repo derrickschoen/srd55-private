@@ -14,11 +14,10 @@ import './styles.css';
  * three print-appendix preferences are the sole exception: their named
  * character_rule_overrides rows are UI state, not character revisions.
  *
- * `matches` IS EXACT, AND THAT IS LOAD-BEARING. `src/ui/app.ts` sorts screen
- * modules by PATH and renders the FIRST match, so `print` (p) is tested before
- * `sheet` (s). A loose matcher here would never be reached for
- * `/characters/1/print`; an exact one for `/characters/:id/sheet` is
- * unambiguous in both directions.
+ * `matches` IS EXACT, AND THAT IS LOAD-BEARING. A character id alone belongs
+ * to the planner, while any fourth segment is a different route. Matching the
+ * complete `/characters/:id/sheet` shape keeps ownership unambiguous in both
+ * directions regardless of eager screen-module discovery order.
  */
 function characterId(route: Route): number | null {
   const value = route.segments[1];

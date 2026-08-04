@@ -17,8 +17,8 @@ import {
   createSpell,
 } from '../../integration/reports/build-report-fixture';
 import {
-  createPrintableListFixture,
-} from '../../integration/reports/printable-list-fixture';
+  createSheetSpellRetirementFixture,
+} from '../../integration/queries/character-sheet-spells-fixture';
 
 const schema = readFileSync(
   new URL('../../../src/db/schema.sql', import.meta.url),
@@ -72,11 +72,12 @@ export interface ReportFixtureIds {
   readonly shield2024: number;
 }
 
-export interface PrintableFixtureIds {
+export interface SheetSpellFixtureIds {
   readonly character: number;
   readonly command: number;
   readonly mistyStep: number;
   readonly commandSlot: number;
+  readonly faerieFireSlot: number;
   readonly mistyStepSlot: number;
 }
 
@@ -635,16 +636,17 @@ export async function reportFixtureImage(): Promise<
   });
 }
 
-export async function printableFixtureImage(): Promise<
-  FixtureImage<PrintableFixtureIds>
+export async function sheetSpellFixtureImage(): Promise<
+  FixtureImage<SheetSpellFixtureIds>
 > {
   return image((db) => {
-    const fixture = createPrintableListFixture(db);
+    const fixture = createSheetSpellRetirementFixture(db);
     return {
       character: fixture.characterId,
       command: fixture.spellIds.command,
       mistyStep: fixture.spellIds.mistyStep,
       commandSlot: fixture.slotIds.command,
+      faerieFireSlot: fixture.slotIds.faerieFire,
       mistyStepSlot: fixture.slotIds.mistyStep,
     };
   });

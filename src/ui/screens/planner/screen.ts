@@ -422,17 +422,13 @@ function renderPlanner(
   status.setAttribute('role', 'status');
   status.dataset.ready = 'true';
   status.value = session.saving ? 'Saving…' : 'Autosaved';
-  const print = document.createElement('a');
-  print.href = `/characters/${session.characterId}/print`;
-  print.className = 'button-secondary';
-  print.textContent = 'Print spells';
   const sheet = document.createElement('a');
   sheet.href = `/characters/${session.characterId}/sheet`;
   sheet.className = 'button-secondary';
   sheet.textContent = 'Character sheet';
   const actions = document.createElement('div');
   actions.className = 'planner-header-actions';
-  actions.append(status, sheet, print);
+  actions.append(status, sheet);
   header.append(identity, actions);
   shell.append(header);
   if (session.error !== null) {
