@@ -754,6 +754,10 @@ describe('stored authored content-v1 projection', () => {
     const projection = projectStoredAuthoredContentV1(db, {
       kind: 'species', contentKey, references: sourceReferences,
     });
+    expect(projection.payload).toHaveProperty('grants');
+    if (!('grants' in projection.payload)) {
+      throw new Error('The paired species fixture projected as template-only.');
+    }
     expect(projection.payload.grants.values[0]).toMatchObject({
       source_definition: dependencyReferences.feat,
     });

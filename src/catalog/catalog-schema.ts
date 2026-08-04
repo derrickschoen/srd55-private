@@ -37,6 +37,12 @@ import {
 } from '../domain/weapon-limits';
 import type { VersatileWeaponDamage, WeaponDamage } from '../domain/weapon-damage';
 import type { WritableWeaponRange } from '../domain/weapon-range';
+import {
+  SPELL_CANTRIP_UPGRADE_LEVEL_MAX,
+  SPELL_LEVEL_MAX,
+  SPELL_LEVEL_MIN,
+  SPELL_UPCAST_LEVEL_MAX,
+} from '../domain/spell-limits';
 import type { ClassFeatureEffect } from '../rules/class-feature-effects';
 import {
   parseSourceCatalogRecord,
@@ -106,6 +112,8 @@ export interface CatalogRecord {
   sourceSlug: string | null;
   tags: string[];
   healing: boolean;
+  /** Defaults false for legacy documents; stored spell semantics retain it. */
+  requiresModForEffect?: boolean;
   /**
    * THE UPCAST PROGRESSION — the owner's *"a list of levels that can upcast and
    * a text description"*, in SPELL SLOT LEVELS.
@@ -386,7 +394,11 @@ function catalogRecord(value: unknown): CatalogRecord {
   }
 
   const level = value.level;
-  if (!Number.isInteger(level) || Number(level) < 0 || Number(level) > 9) {
+  if (
+    !Number.isInteger(level) ||
+    Number(level) < SPELL_LEVEL_MIN ||
+    Number(level) > SPELL_LEVEL_MAX
+  ) {
     throw new TypeError(
       "Catalog field 'level' must be an integer from 0 through 9.",
     );
@@ -432,6 +444,12 @@ function catalogRecord(value: unknown): CatalogRecord {
   if (value.healing !== undefined && typeof value.healing !== 'boolean') {
     throw new TypeError("Catalog field 'healing' must be boolean.");
   }
+  if (
+    value.requiresModForEffect !== undefined &&
+    typeof value.requiresModForEffect !== 'boolean'
+  ) {
+    throw new TypeError("Catalog field 'requiresModForEffect' must be boolean.");
+  }
 
   return {
     identityKey: nonEmptyString(value.identityKey, 'identityKey'),
@@ -459,6 +477,7 @@ function catalogRecord(value: unknown): CatalogRecord {
     sourceSlug: nullableString(value.sourceSlug, 'sourceSlug'),
     tags: stringList(value.tags, 'tags', true),
     healing: value.healing === true,
+    requiresModForEffect: value.requiresModForEffect === true,
     ...upcast(value),
   };
 }
@@ -468,10 +487,6 @@ function catalogRecord(value: unknown): CatalogRecord {
  * tenth; `spell_versions.level` is already bounded 0..9 by its own CHECK for
  * the same reason.
  */
-const HIGHEST_SLOT_LEVEL = 9;
-/** The highest character level, matching every other level bound in the schema. */
-const HIGHEST_CHARACTER_LEVEL = 20;
-
 /**
  * A LIST OF LEVELS: INTEGERS, IN RANGE, NO DUPLICATES, SORTED.
  *
@@ -563,13 +578,13 @@ function upcast(value: Record<string, unknown>): {
     upcastLevels: levelList(
       value.upcastLevels,
       'upcastLevels',
-      HIGHEST_SLOT_LEVEL,
+      SPELL_UPCAST_LEVEL_MAX,
     ),
     upcastSummary: nullableString(value.upcastSummary, 'upcastSummary'),
     cantripUpgradeLevels: levelList(
       value.cantripUpgradeLevels,
       'cantripUpgradeLevels',
-      HIGHEST_CHARACTER_LEVEL,
+      SPELL_CANTRIP_UPGRADE_LEVEL_MAX,
     ),
     cantripUpgradeSummary: nullableString(
       value.cantripUpgradeSummary,
