@@ -290,6 +290,10 @@
   }
 
   .sheet-spell-appendix-card {
+    break-inside: avoid;
+  }
+
+  .sheet-spell-appendix-card[data-spell-appendix-pagination='split_prose'] {
     break-inside: auto;
   }
 

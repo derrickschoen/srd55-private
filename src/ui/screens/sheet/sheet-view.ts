@@ -97,6 +97,7 @@ export const SHEET_JSON_SCRIPT_ID = 'character-sheet-facts';
 export const FLAVOR_PRINT_CODE_POINT_LIMIT = 400;
 export const FLAVOR_APPENDIX_ORDER = 100;
 export const SPELL_APPENDIX_ORDER = 200;
+export const SPELL_APPENDIX_SPLIT_CODE_POINT_THRESHOLD = 2_000;
 export const SHEET_PRINT_APPENDIX_CLASS = 'sheet-print-appendix';
 export const SHEET_PRINT_APPENDIX_PROSE_CLASS =
   'sheet-print-appendix-prose';
@@ -132,12 +133,14 @@ export interface SpellAppendixCardContent {
   readonly facts: readonly SpellAppendixFact[];
   readonly supplemental: readonly SpellAppendixFact[];
   readonly description: SpellAppendixDescription;
+  readonly pagination: 'keep_together' | 'split_prose';
 }
 
 export interface SpellAppendixContent {
   readonly id: 'spells';
   readonly order: number;
   readonly title: 'Full spell text';
+  readonly text_status: 'partial' | 'unavailable' | 'available';
   readonly groups: readonly {
     readonly id: string;
     readonly name: string;
@@ -303,6 +306,13 @@ function spellAppendixCard(
     });
   }
 
+  const description: SpellAppendixDescription =
+    spell.reference.description === null
+      ? {
+          status: 'absent',
+          disclosure: MISSING_SPELL_TEXT_DISCLOSURE,
+        }
+      : { status: 'recorded', text: spell.reference.description };
   return {
     spell_version_id: spell.spell_version_id,
     name: spell.name,
@@ -311,13 +321,12 @@ function spellAppendixCard(
     edition_marker: spellEditionMarker(spell.reference.edition),
     facts,
     supplemental,
-    description:
-      spell.reference.description === null
-        ? {
-            status: 'absent',
-            disclosure: MISSING_SPELL_TEXT_DISCLOSURE,
-          }
-        : { status: 'recorded', text: spell.reference.description },
+    description,
+    pagination:
+      description.status === 'recorded' &&
+      [...description.text].length > SPELL_APPENDIX_SPLIT_CODE_POINT_THRESHOLD
+        ? 'split_prose'
+        : 'keep_together',
   };
 }
 
@@ -353,6 +362,16 @@ export function spellAppendix(
         id: 'spells',
         order: SPELL_APPENDIX_ORDER,
         title: 'Full spell text',
+        text_status:
+          missingSpellNames.length === 0
+            ? 'available'
+            : groups.every((group) =>
+                group.cards.every(
+                  (card) => card.description.status === 'absent',
+                ),
+              )
+              ? 'unavailable'
+              : 'partial',
         groups,
         missing_spell_names: missingSpellNames,
       };
@@ -1982,6 +2001,7 @@ function renderSpellAppendix(
       const article = document.createElement('article');
       article.className = 'sheet-spell-appendix-card';
       article.dataset.spellAppendixCard = String(card.spell_version_id);
+      article.dataset.spellAppendixPagination = card.pagination;
       const summary = document.createElement('div');
       summary.className = 'sheet-spell-appendix-summary';
       const cardHeading = document.createElement('h4');

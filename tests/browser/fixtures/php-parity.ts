@@ -77,6 +77,7 @@ export interface SheetSpellFixtureIds {
   readonly command: number;
   readonly mistyStep: number;
   readonly commandSlot: number;
+  readonly faerieFireSlot: number;
   readonly mistyStepSlot: number;
 }
 
@@ -623,6 +624,7 @@ export async function sheetSpellFixtureImage(): Promise<
       command: fixture.spellIds.command,
       mistyStep: fixture.spellIds.mistyStep,
       commandSlot: fixture.slotIds.command,
+      faerieFireSlot: fixture.slotIds.faerieFire,
       mistyStepSlot: fixture.slotIds.mistyStep,
     };
   });

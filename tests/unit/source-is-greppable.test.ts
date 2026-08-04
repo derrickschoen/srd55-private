@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -56,7 +56,7 @@ function trackedFiles(): string[] {
     maxBuffer: 64 * 1024 * 1024,
   })
     .split('\0')
-    .filter((path) => path !== '' && existsSync(join(repoRoot, path)));
+    .filter((path) => path !== '');
 }
 
 /** Where the NUL bytes are in one buffer, as 1-based line numbers. */

@@ -2397,8 +2397,8 @@ test('builds Mutt printable sources with complete facts and only the mechanicall
     'Cleric',
     'Druid',
     'Wizard',
-    'Gift 10',
     'Gift 2',
+    'Gift 10',
   ]);
   expect(
     sheet.spells.map((group) => ({
@@ -2434,7 +2434,7 @@ test('builds Mutt printable sources with complete facts and only the mechanicall
       }],
     },
     {
-      source: 'Gift 10',
+      source: 'Gift 2',
       statistics: [{
         status: 'computed',
         ability: 'charisma',
@@ -2443,7 +2443,7 @@ test('builds Mutt printable sources with complete facts and only the mechanicall
       }],
     },
     {
-      source: 'Gift 2',
+      source: 'Gift 10',
       statistics: [{
         status: 'computed',
         ability: 'charisma',
@@ -2514,6 +2514,14 @@ test('builds Mutt printable sources with complete facts and only the mechanicall
     with_slots: 1,
     free_cast:
       '{"uses":1,"recovery":"long_rest","pool_scope":"per_spell"}',
+  });
+  expect(
+    (await rows(page, 'spell_selection_slots')).find(
+      (row) => row.id === sheetSpellImage.ids.faerieFireSlot,
+    ),
+  ).toMatchObject({
+    with_slots: 0,
+    free_cast: '{"uses":2,"recovery":"dawn","pool_scope":"shared"}',
   });
   await page.goto(`/characters/${sheetSpellImage.ids.character}/sheet`);
   const clericGroup = page.locator('[data-spell-group^="class:"]', {
