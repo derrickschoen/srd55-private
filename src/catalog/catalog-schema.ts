@@ -54,6 +54,7 @@ import {
 import { isRecord } from '../worker/handler';
 import { isImportedContentKey } from './catalog-key';
 import { trimEqualCatalogLocator } from './catalog-field-values';
+import { normalizeContentIdentityName } from './content-identity';
 
 /**
  * THE RECORD KINDS A TIER 1 DOCUMENT MAY CARRY, AND HOW A DOCUMENT SAYS WHICH.
@@ -347,6 +348,12 @@ function spellLocator(value: string, field: string): string {
   });
 }
 
+function spellIdentityName(value: unknown): string {
+  const name = nonEmptyString(value, 'name');
+  normalizeContentIdentityName(name);
+  return name;
+}
+
 function nullableString(
   value: unknown,
   field: string,
@@ -467,7 +474,7 @@ function catalogRecord(value: unknown): CatalogRecord {
       nonEmptyString(value.versionKey, 'versionKey'),
       'versionKey',
     ),
-    name: nonEmptyString(value.name, 'name'),
+    name: spellIdentityName(value.name),
     edition: edition as RulesEdition,
     level: Number(level),
     school: spellSchool(nonEmptyString(value.school, 'school')),
@@ -1307,12 +1314,13 @@ export function parseDescriptionDocuments(
           `Tier 2 catalog document ${index + 1} contains a non-object record.`,
         );
       }
-      const versionKey = value.versionKey;
-      if (typeof versionKey !== 'string' || versionKey.trim() === '') {
+      const rawVersionKey = value.versionKey;
+      if (typeof rawVersionKey !== 'string' || rawVersionKey.trim() === '') {
         throw new TypeError(
           `Tier 2 catalog document ${index + 1} contains an invalid versionKey.`,
         );
       }
+      const versionKey = spellLocator(rawVersionKey, 'versionKey');
       const description = value._description;
       if (typeof description !== 'string' || description.trim() === '') {
         throw new TypeError(

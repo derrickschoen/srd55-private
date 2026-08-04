@@ -15,7 +15,7 @@ import {
   spellProjectorV1Vectors,
 } from '../../unit/catalog/fixtures/spell-projector-v1-vectors';
 
-const CONTENT_KEY = 'expanded:ci3s-pre-aether-lance' as ContentKey;
+const CONTENT_KEY = 'expanded:aether-lance' as ContentKey;
 
 describe('stored spell content-v1 projection', () => {
   let connection: Database;
@@ -76,6 +76,9 @@ describe('stored spell content-v1 projection', () => {
     });
     expect(identity.canonicalJson).toBe(vector.canonicalJson);
     expect(identity.canonicalJson).toContain('"spell_identity_key":"aether-lance"');
+    expect(identity.canonicalJson).toContain(
+      '"spell_version_key":"expanded:aether-lance"',
+    );
     expect(identity.canonicalJson).not.toContain('spell_identity_id');
     expect(identity.digest).toBe(vector.sha256);
     expect(identity.derivedKey).toBe(vector.derivedKey);
@@ -95,6 +98,7 @@ describe('stored spell content-v1 projection', () => {
     expect(storedIdentity.canonicalJson).toBe(documentIdentity.canonicalJson);
     expect(storedIdentity.digest).toBe(documentIdentity.digest);
     expect(storedIdentity.derivedKey).toBe(documentIdentity.derivedKey);
+    expect(stored.payload.spell_version_key).toBe(bandedSpellDocumentV1.versionKey);
   });
 
   it('moving a stored version to a different spell concept changes identity', () => {
