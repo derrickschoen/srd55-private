@@ -43,3 +43,24 @@ Do NOT invoke any other agent or CLI — no `claude`, no nested `codex`, no
 external reviewers. The supervisor runs all second-agent reviews. Repo
 guidance suggesting codex/claude cross-review does not apply inside a
 supervised dispatch.
+
+## Freeze scope differs for mint and mint-free lanes (added 2026-08-04)
+
+A MINT-FREE lane must not touch `src/db/schema.sql`, any existing migration,
+or the wire schemas.
+
+A MINT lane MUST change `src/db/schema.sql`, in lockstep with the migration it
+adds. Fresh databases execute `schema.sql` directly and migrations apply only
+to existing images (`database-lifecycle.ts`), while `scripts/verify-migrations.ts`
+requires the migration chain to reproduce `schema.sql`'s exact signature. So a
+new column added only by a migration is absent from fresh boots AND fails
+signature verification. Precedent: the 0031 mint changed
+`drizzle/0031_item_definitions.sql` and `src/db/schema.sql` in one commit.
+
+What stays frozen for a mint lane: every ALREADY-EXISTING migration file, and
+the wire schemas. "Frozen migrations 0000-00NN" means do not edit those files -
+it never means do not add the next one.
+
+This rule exists because a supervisor addendum once pasted the mint-free freeze
+list onto a mint lane's brief and made the unit infeasible by construction.
+Codex correctly stopped and said so rather than guessing.
