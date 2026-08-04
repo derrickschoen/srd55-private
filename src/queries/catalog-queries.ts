@@ -16,6 +16,10 @@ import type {
   SubclassDefinitionRow,
 } from '../domain/models';
 import {
+  isBundledSourceContentKey,
+  type BundledSourceKind,
+} from '../catalog/bundled-source-membership';
+import {
   isEnumValue,
   materialCostKinds,
   spellAreaShapes,
@@ -237,9 +241,15 @@ export class CatalogQueries {
   read(): CatalogSnapshot {
     return {
       classes: this.db.all(
-        'SELECT * FROM class_definitions ORDER BY name, rules_edition, id',
+        `SELECT definition.*
+         FROM class_definitions AS definition
+         -- CI-4a/HA-10 removes this temporary consumer boundary once class
+         -- aggregates can be applied completely rather than partially.
+         ORDER BY definition.name, definition.rules_edition, definition.id`,
         undefined,
         decodeClass,
+      ).filter((definition) =>
+        isBundledSourceContentKey('class', definition.content_key, this.db)
       ),
       subclasses: this.db.all(
         `SELECT *
@@ -306,10 +316,20 @@ export class CatalogQueries {
       | 'species_definitions'
       | 'background_definitions',
   ): DefinitionRow[] {
+    const kind: BundledSourceKind = table === 'feat_definitions'
+      ? 'feat'
+      : table === 'species_definitions'
+        ? 'species'
+        : 'background';
     return this.db.all(
-      `SELECT * FROM ${table} ORDER BY name, rules_edition, id`,
+      `SELECT definition.*
+       FROM ${table} AS definition
+       -- CI-4a/HA-10 removes this filter when aggregate consumers are cut over.
+       ORDER BY definition.name, definition.rules_edition, definition.id`,
       undefined,
       decodeDefinition,
+    ).filter((definition) =>
+      isBundledSourceContentKey(kind, definition.content_key, this.db)
     );
   }
 }

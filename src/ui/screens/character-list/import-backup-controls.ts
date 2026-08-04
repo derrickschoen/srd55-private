@@ -200,6 +200,17 @@ export function catalogSummary(summary: CatalogImportSummary): string {
       `${String(equipmentMatched)} equipment definitions matched`,
     );
   }
+  const sourcesCreated =
+    summary.feats_created + summary.species_created + summary.backgrounds_created;
+  const sourcesMatched =
+    summary.classes_matched + summary.feats_matched + summary.species_matched +
+    summary.backgrounds_matched;
+  if (sourcesCreated > 0 || sourcesMatched > 0) {
+    parts.push(
+      `${String(sourcesCreated)} source definitions created`,
+      `${String(sourcesMatched)} source definitions matched`,
+    );
+  }
   return parts.join(', ');
 }
 
