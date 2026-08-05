@@ -5,6 +5,28 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-04 — Monk seed-scope call DEFERRED to seeding time
+
+Asked (second round, after the record search below confirmed no buried
+ruling): which monk subclasses seed as app content vs. one taking D169's
+replace-EK/AT slot.
+
+Owner's answer (via the supervision record, pasted as the ruling): "defer
+the seed-scope call to seeding time ... and let the homebrew session proceed
+through the per-doc mechanics rulings in pending-rulings.md first — you'll
+know far more about which designs survive review when the seeding decision
+actually gates something. If you'd rather settle it now, the record best
+supports: one bake-off winner takes the D169 slot, the others remain
+published docs, with Waking Will ruled on separately."
+
+Supporting context the answer supplied: nothing is seedable yet regardless
+(all four drafts sit at "ready for design review only"); the bake-off packet
+was structured to pick one winner; Waking Will was commissioned separately
+under D193 and can be ruled on its own terms.
+
+Effect: seed-scope stays OPEN, re-asked at seeding time, not before. It
+leaves the active session queue; the per-doc mechanics rulings proceed.
+
 ## 2026-08-04 — All four monk working names approved (D169 name clause closed)
 
 Asked: "Which working names are approved as final under D169? (Leave one

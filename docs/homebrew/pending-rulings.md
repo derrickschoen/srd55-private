@@ -13,9 +13,11 @@ open, see below).
 ## Cross-cutting question (from D191, carried by the bake-off doc)
 
 **Do all three monk finalists ship as app content, or does one take the
-replace-EK/AT slot (D169), and if so which?** Asked 2026-08-04; owner said
-"you look for it" — no existing ruling found in the record (D191 left it
-OPEN); still open.
+replace-EK/AT slot (D169), and if so which?** **DEFERRED to seeding time**
+by owner ruling 2026-08-04 (see `rulings.md`) — not an active queue item;
+re-ask when a seeding unit actually gates on it. The record's lean, if
+settled then: one bake-off winner takes the slot, Waking Will ruled
+separately.
 
 Working names: **resolved** — all four approved by owner ruling 2026-08-04
 (see `rulings.md`).
