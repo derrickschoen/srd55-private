@@ -554,7 +554,7 @@ test('captures every restorable character table and reports exact state differen
   });
   expect(document).toMatchObject({
     format: 'dnd-multiclass-spells/character',
-    version: 3,
+    version: 4,
     source_character_id: workspaceImage.ids.character,
     character: { name: 'R40 Golden', revision: 0 },
   });
@@ -2744,7 +2744,7 @@ test('whole-database and portable-character export/import round-trip, corrupt-ve
   }, workspaceImage.ids.character);
   expect(exported.character).toMatchObject({
     format: 'dnd-multiclass-spells/character',
-    version: 3,
+    version: 4,
     source_character_id: workspaceImage.ids.character,
   });
   expect(exported.database).toMatchObject({

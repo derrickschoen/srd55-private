@@ -801,6 +801,7 @@ const REFINEMENTS = {
   'characters.appearance': sqlText,
   'characters.backstory': sqlText,
   'characters.notes': sqlText,
+  'characters.archived_at': sqlTimestamp,
   'characters.created_at': sqlTimestamp,
   'characters.updated_at': sqlTimestamp,
 

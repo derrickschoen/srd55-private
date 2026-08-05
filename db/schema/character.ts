@@ -107,9 +107,18 @@ export const characters = sqliteTable('characters', {
   appearance: sqlText()('appearance'),
   backstory: sqlText()('backstory'),
   notes: sqlText()('notes'),
+  /**
+   * D99 library lifecycle. NULL is active; a timestamp is archived.
+   *
+   * This deliberately remains independent of `CHARACTER_STATE_COLUMNS`:
+   * restoring a build save point must not change whether the library root is
+   * archived. A future nullable archive-group relation may be added beside it
+   * without changing this state representation (D138).
+   */
+  archived_at: datetime()('archived_at'),
   created_at: datetime()('created_at'),
   updated_at: datetime()('updated_at'),
-}, () => [
+}, (table) => [
   /**
    * 1..30 is not a house rule: it is the range `UpdateAbilityCommand` refuses
    * outside of ("Ability scores must be between 1 and 30."), the range the
@@ -180,6 +189,15 @@ export const characters = sqliteTable('characters', {
   check(
     'characters_backstory_check',
     nullOrTextLengthAtMost('backstory', CHARACTER_TEXT_LIMITS.backstory),
+  ),
+  check(
+    'characters_archived_at_check',
+    sql`archived_at IS NULL OR typeof(archived_at) = 'text'`,
+  ),
+  index('characters_archive_list_index').on(
+    sql`${table.archived_at} desc`,
+    table.name,
+    table.id,
   ),
 ]);
 

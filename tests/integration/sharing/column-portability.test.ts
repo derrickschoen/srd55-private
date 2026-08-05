@@ -245,6 +245,10 @@ const PROBES: { readonly [N in ProbedTable]: Probe<N> } = {
         option: 'writtenText',
         why: 'D124 puts every character-authored text field behind the single written-text option, default off.',
       },
+      archived_at: {
+        kind: 'omitted',
+        why: 'D99 archive state is local library lifecycle, not shared character content. A recipient imports a new active clone and never inherits the sender’s archive decision.',
+      },
       created_at: OWNED_TIMESTAMP,
       updated_at: OWNED_TIMESTAMP,
     },
@@ -1133,12 +1137,12 @@ function seedSender(db: DatabaseContext, catalog: Catalog): number {
        name, strength, dexterity, constitution, intelligence, wisdom,
        charisma, ability_allocation_method, proficiency_bonus_override,
        rules_edition_preference, allow_legacy, revision, alignment, appearance,
-       backstory, notes, created_at, updated_at
+       backstory, notes, archived_at, created_at, updated_at
      ) VALUES (
        'Portability Probe', 8, 14, 13, 18, 12, 11, 'manual', 4, 'expanded',
        1, 7, 'Chaotic Good', 'Silver scales and a blue cloak.',
        'Left the northern watch to find a vanished mentor.',
-       'sender private character note', ?, ?
+       'sender private character note', '2042-03-04T05:06:07.000Z', ?, ?
      )`,
     [SENDER_TIME, SENDER_TIME],
   ).lastInsertId;
@@ -2089,6 +2093,17 @@ describe('every column of every shared table is classified', () => {
 });
 
 describe('a share link carries every column it claims to', () => {
+  it('share import never inherits sender archive state', () => {
+    expect(trip.sender.oneRaw(
+      'SELECT archived_at FROM characters WHERE id = ?',
+      [trip.senderCharacterId],
+    )).toEqual({ archived_at: '2042-03-04T05:06:07.000Z' });
+    expect(trip.recipient.oneRaw(
+      'SELECT archived_at FROM characters WHERE id = ?',
+      [trip.recipientCharacterId],
+    )).toEqual({ archived_at: null });
+  });
+
   it('written-text consent ports all four flavor columns together', () => {
     const columns = 'alignment, appearance, backstory, notes';
     const sender = trip.sender.oneRaw(

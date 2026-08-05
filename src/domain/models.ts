@@ -118,6 +118,8 @@ export interface CharacterRow extends TimestampedRow {
   appearance: string | null;
   backstory: string | null;
   notes: string | null;
+  /** NULL is active; a timestamp is archived library lifecycle state. */
+  archived_at: string | null;
 }
 
 export interface ClassDefinitionRow extends TimestampedRow {

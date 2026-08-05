@@ -82,6 +82,7 @@ function decodeCharacter(row: SqlRow): CharacterRow {
     appearance: sqlNullableString(row, 'appearance'),
     backstory: sqlNullableString(row, 'backstory'),
     notes: sqlNullableString(row, 'notes'),
+    archived_at: sqlNullableString(row, 'archived_at'),
     created_at: sqlNullableString(row, 'created_at'),
     updated_at: sqlNullableString(row, 'updated_at'),
   };
