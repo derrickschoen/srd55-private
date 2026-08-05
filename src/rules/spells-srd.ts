@@ -25,7 +25,23 @@ import {
   officialSpellKey,
 } from '../catalog/catalog-key';
 import { normalizeCatalogName } from '../catalog/catalog-normalize';
-import { ensureBundledStableContentIdentity } from '../catalog/content-registry';
+import {
+  ContentIdentityCollision,
+  ensureBundledStableContentIdentity,
+  reconcileCurrentContentFingerprintV1,
+} from '../catalog/content-registry';
+import {
+  deriveContentIdentityV1FromNormalizedName,
+  type DerivedContentIdentityV1,
+  type NormalizedContentName,
+} from '../catalog/content-identity';
+import {
+  projectSpellContentAggregateV1,
+  projectStoredSpellContentV1,
+} from '../catalog/spell-content-projector-v1';
+import type { BundledStoredProjectionV1 } from '../catalog/bundled-content-registry-v1';
+import { sha256 } from '../crypto/sha256';
+import { sqlString } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import {
   encodeSpellComponents,
@@ -36,6 +52,7 @@ import {
   spellSchools,
   type KnownSpellSchool,
 } from '../domain/enums';
+import type { ContentKey } from '../domain/ids';
 
 export const BUNDLED_SPELL_RULES_EDITION = '2024';
 export const BUNDLED_SPELL_SEED_VERSION = 'srd-5.2.1';
@@ -404,7 +421,7 @@ function placeholders(values: readonly unknown[]): string {
   return values.map(() => '?').join(', ');
 }
 
-export function hasBundledSpellContent(db: DatabaseContext): boolean {
+function hasBundledSpellCardinality(db: DatabaseContext): boolean {
   const spells = parseSrdSpellDescriptions();
   const memberships = parseSrdSpellListMemberships();
   const keys = spells.map((spell) => spell.content_key);
@@ -433,12 +450,476 @@ export function hasBundledSpellContent(db: DatabaseContext): boolean {
   );
 }
 
-export function ensureBundledSpellContent(db: DatabaseContext): boolean {
-  if (hasBundledSpellContent(db)) {
-    return false;
+export interface BundledSpellSeedSources {
+  readonly descriptionExtract?: string;
+  readonly listExtracts?: Readonly<Partial<Record<SrdSpellList, string>>>;
+}
+
+export type BundledSpellSeedRefusalReason =
+  | 'user-owned-key'
+  | 'registry-owned-elsewhere'
+  | 'current-fingerprint-integrity'
+  | 'replacement-refused';
+
+export type BundledSpellSeedEntryOutcome =
+  | {
+      readonly kind: 'healthy' | 'updated';
+      readonly contentKey: ContentKey;
+    }
+  | {
+      readonly kind: 'refused';
+      readonly contentKey: ContentKey;
+      readonly reason: BundledSpellSeedRefusalReason;
+    };
+
+export interface BundledSpellSeedResult {
+  readonly outcomes: readonly BundledSpellSeedEntryOutcome[];
+  readonly healthy: number;
+  readonly updated: number;
+  readonly refused: number;
+}
+
+interface ValidatedBundledSpellSource {
+  readonly spells: readonly SrdSpellDescription[];
+  readonly memberships: readonly SrdSpellListMembership[];
+  readonly membershipsByName: ReadonlyMap<
+    string,
+    readonly SrdSpellListMembership[]
+  >;
+}
+
+class BundledSpellSeedEntryRefusal extends Error {
+  constructor(readonly reason: BundledSpellSeedRefusalReason) {
+    super(reason);
+    this.name = 'BundledSpellSeedEntryRefusal';
   }
-  seedSpellContent(db);
-  return true;
+}
+
+function bundledSpellSource(
+  sources: BundledSpellSeedSources = Object.freeze({}),
+): ValidatedBundledSpellSource {
+  const spells = parseSrdSpellDescriptions(sources.descriptionExtract);
+  const memberships = parseSrdSpellListMemberships(sources.listExtracts);
+  const byName = new Map(spells.map((spell) => [spell.name, spell]));
+  const membershipsByName = new Map<string, SrdSpellListMembership[]>();
+  for (const membership of memberships) {
+    if (!byName.has(membership.spell_name)) {
+      throw new SrdSpellError(
+        `${membership.spell_list_key} lists ${membership.spell_name}, which has no description.`,
+      );
+    }
+    membershipsByName.set(membership.spell_name, [
+      ...(membershipsByName.get(membership.spell_name) ?? []),
+      membership,
+    ]);
+  }
+  return Object.freeze({ spells, memberships, membershipsByName });
+}
+
+function seedSpellIdentityV1(
+  spell: SrdSpellDescription,
+  memberships: readonly SrdSpellListMembership[],
+  normalizedName: NormalizedContentName,
+): DerivedContentIdentityV1<'spell', unknown> {
+  const range = encodeSpellRange(parseSpellRange(spell.range));
+  const components = encodeSpellComponents(
+    parseSpellComponents(spell.components),
+  );
+  const projection = projectSpellContentAggregateV1({
+    kind: 'spell',
+    name: spell.name,
+    rules_edition: BUNDLED_SPELL_RULES_EDITION,
+    spell_identity_key: spell.identity_key,
+    spell_version_key: spell.content_key,
+    level: spell.level,
+    school: spell.school,
+    ritual: spell.ritual,
+    concentration: spell.concentration,
+    casting_time: spell.casting_time,
+    action_type: spell.action_type,
+    range: spell.range,
+    ...range,
+    duration: spell.duration,
+    components: spell.components,
+    ...components,
+    healing: false,
+    short_summary: spell.description,
+    upcast_summary: null,
+    cantrip_upgrade_summary: null,
+    requires_mod_for_effect: false,
+    effect_reliability_category: 'fixed_effect',
+    spell_lists: memberships.map((membership) => ({
+      value: membership.spell_list_key,
+    })),
+    tags: [],
+    attack_modes: [],
+    save_abilities: [],
+    upcast_levels: [],
+    cantrip_upgrade_levels: [],
+  });
+  return deriveContentIdentityV1FromNormalizedName({
+    kind: 'spell',
+    edition: BUNDLED_SPELL_RULES_EDITION,
+    normalizedName,
+    payload: projection.payload,
+  });
+}
+
+function writeBundledSpell(
+  db: DatabaseContext,
+  spell: SrdSpellDescription,
+  memberships: readonly SrdSpellListMembership[],
+  timestamp: string,
+): number {
+  const collision = db.oneRaw(
+    `SELECT id, provenance FROM spell_versions WHERE content_key = ?`,
+    [spell.content_key],
+  );
+  if (collision !== null && collision.provenance !== 'srd') {
+    throw new SrdSpellError(
+      `cannot seed ${spell.content_key}: the key already belongs to provenance ${JSON.stringify(collision.provenance)}.`,
+    );
+  }
+
+  db.exec(
+    `INSERT INTO spell_identities (
+       content_key, canonical_name, normalized_name, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(content_key) DO NOTHING`,
+    [
+      spell.identity_key,
+      spell.name,
+      normalizeCatalogName(spell.name),
+      timestamp,
+      timestamp,
+    ],
+  );
+  const identity = db.oneRaw(
+    `SELECT id, canonical_name, normalized_name
+     FROM spell_identities WHERE content_key = ?`,
+    [spell.identity_key],
+  );
+  if (
+    identity === null ||
+    identity.canonical_name !== spell.name ||
+    identity.normalized_name !== normalizeCatalogName(spell.name)
+  ) {
+    throw new SrdSpellError(
+      `identity key ${spell.identity_key} belongs to different spell data.`,
+    );
+  }
+
+  const range = encodeSpellRange(parseSpellRange(spell.range));
+  const components = encodeSpellComponents(
+    parseSpellComponents(spell.components),
+  );
+  ensureBundledStableContentIdentity(db, {
+    kind: 'spell',
+    contentKey: spell.content_key,
+    normalizedName: normalizeCatalogName(spell.name),
+  });
+  db.exec(
+    `INSERT INTO spell_versions (
+       content_key, spell_identity_id, display_name, rules_edition,
+       level, school, ritual, concentration, casting_time, action_type,
+       range, range_kind, range_feet, area_shape, area_feet,
+       duration, components, material_component_summary,
+       material_cost_copper, material_cost_kind, short_summary,
+       provenance, seed_version, is_active, created_at, updated_at
+     ) VALUES (
+       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+       'srd', ?, 1, ?, ?
+     )
+     ON CONFLICT(content_key) DO UPDATE SET
+       spell_identity_id = excluded.spell_identity_id,
+       display_name = excluded.display_name,
+       rules_edition = excluded.rules_edition,
+       level = excluded.level,
+       school = excluded.school,
+       ritual = excluded.ritual,
+       concentration = excluded.concentration,
+       casting_time = excluded.casting_time,
+       action_type = excluded.action_type,
+       range = excluded.range,
+       range_kind = excluded.range_kind,
+       range_feet = excluded.range_feet,
+       area_shape = excluded.area_shape,
+       area_feet = excluded.area_feet,
+       duration = excluded.duration,
+       components = excluded.components,
+       material_component_summary = excluded.material_component_summary,
+       material_cost_copper = excluded.material_cost_copper,
+       material_cost_kind = excluded.material_cost_kind,
+       short_summary = excluded.short_summary,
+       seed_version = excluded.seed_version,
+       is_active = 1,
+       updated_at = excluded.updated_at
+     WHERE spell_versions.provenance = 'srd'`,
+    [
+      spell.content_key,
+      Number(identity.id),
+      spell.name,
+      BUNDLED_SPELL_RULES_EDITION,
+      spell.level,
+      spell.school,
+      sqlBool(spell.ritual),
+      sqlBool(spell.concentration),
+      spell.casting_time,
+      spell.action_type,
+      spell.range,
+      range.range_kind,
+      range.range_feet,
+      range.area_shape,
+      range.area_feet,
+      spell.duration,
+      spell.components,
+      components.material_component_summary,
+      components.material_cost_copper,
+      components.material_cost_kind,
+      spell.description,
+      BUNDLED_SPELL_SEED_VERSION,
+      timestamp,
+      timestamp,
+    ],
+  );
+  const versionId = Number(
+    db.scalar(
+      `SELECT id FROM spell_versions
+       WHERE content_key = ? AND provenance = 'srd'`,
+      [spell.content_key],
+    ),
+  );
+  if (!Number.isSafeInteger(versionId) || versionId < 1) {
+    throw new SrdSpellError(`failed to seed ${spell.content_key}.`);
+  }
+  db.exec(
+    'DELETE FROM spell_list_memberships WHERE spell_version_id = ?',
+    [versionId],
+  );
+  for (const membership of memberships) {
+    db.exec(
+      `INSERT INTO spell_list_memberships (
+         spell_version_id, spell_list_key, created_at, updated_at
+       ) VALUES (?, ?, ?, ?)`,
+      [versionId, membership.spell_list_key, timestamp, timestamp],
+    );
+  }
+  return versionId;
+}
+
+function reconcileBundledSpellEntry(
+  db: DatabaseContext,
+  spell: SrdSpellDescription,
+  memberships: readonly SrdSpellListMembership[],
+  storedProjection: BundledStoredProjectionV1 | undefined,
+): BundledSpellSeedEntryOutcome {
+  const contentKey = spell.content_key as ContentKey;
+  try {
+    return db.transaction(() => {
+      const root = db.oneRaw(
+        'SELECT provenance FROM spell_versions WHERE content_key = ?',
+        [contentKey],
+      );
+      if (root !== null && sqlString(root, 'provenance') !== 'srd') {
+        return Object.freeze({
+          kind: 'refused' as const,
+          contentKey,
+          reason: 'user-owned-key' as const,
+        });
+      }
+      const registry = db.oneRaw(
+        `SELECT content_kind, key_kind, catalog_layer, normalized_name
+         FROM catalog_content_identities WHERE content_key = ?`,
+        [contentKey],
+      );
+      if (registry !== null) {
+        const isBundled =
+          sqlString(registry, 'content_kind') === 'spell' &&
+          (sqlString(registry, 'key_kind') === 'bundled-stable' &&
+              sqlString(registry, 'catalog_layer') === 'bundled' ||
+            sqlString(registry, 'key_kind') === 'legacy-opaque' &&
+              sqlString(registry, 'catalog_layer') === 'external');
+        if (!isBundled) {
+          return Object.freeze({
+            kind: 'refused' as const,
+            contentKey,
+            reason: 'registry-owned-elsewhere' as const,
+          });
+        }
+      }
+
+      const normalizedName = registry === null
+        ? null
+        : sqlString(registry, 'normalized_name') as NormalizedContentName;
+      const desired = normalizedName === null
+        ? null
+        : seedSpellIdentityV1(spell, memberships, normalizedName);
+      if (
+        desired !== null &&
+        storedProjection !== undefined &&
+        storedProjection.identity.digest === desired.digest &&
+        storedProjection.identity.canonicalJson === desired.canonicalJson &&
+        root !== null
+      ) {
+        return Object.freeze({ kind: 'healthy' as const, contentKey });
+      }
+      if (storedProjection === undefined && root !== null) {
+        const current = db.oneRaw(
+          `SELECT fingerprint_digest, canonical_json
+           FROM catalog_content_fingerprints
+           WHERE content_kind = 'spell' AND content_key = ?
+             AND fingerprint_scheme = 'content-v1'
+             AND fingerprint_role = 'current'`,
+          [contentKey],
+        );
+        if (
+          current !== null &&
+          sha256(sqlString(current, 'canonical_json')) !==
+            sqlString(current, 'fingerprint_digest')
+        ) {
+          throw new BundledSpellSeedEntryRefusal(
+            'current-fingerprint-integrity',
+          );
+        }
+        throw new BundledSpellSeedEntryRefusal('replacement-refused');
+      }
+
+      try {
+        writeBundledSpell(db, spell, memberships, new Date().toISOString());
+      } catch (error) {
+        if (error instanceof SrdSpellError) {
+          throw new BundledSpellSeedEntryRefusal('replacement-refused');
+        }
+        throw error;
+      }
+      const installedRegistry = db.oneRaw(
+        `SELECT key_kind, catalog_layer, normalized_name
+         FROM catalog_content_identities
+         WHERE content_kind = 'spell' AND content_key = ?`,
+        [contentKey],
+      );
+      if (installedRegistry === null) {
+        throw new BundledSpellSeedEntryRefusal('replacement-refused');
+      }
+      if (
+        sqlString(installedRegistry, 'key_kind') === 'legacy-opaque' &&
+        sqlString(installedRegistry, 'catalog_layer') === 'external'
+      ) {
+        db.exec(
+          `UPDATE catalog_content_identities
+           SET key_kind = 'bundled-stable', catalog_layer = 'bundled'
+           WHERE content_kind = 'spell' AND content_key = ?`,
+          [contentKey],
+        );
+      }
+      const authoritativeName = sqlString(
+        installedRegistry,
+        'normalized_name',
+      ) as NormalizedContentName;
+      const installed = projectStoredSpellContentV1(db, contentKey);
+      const installedIdentity = deriveContentIdentityV1FromNormalizedName({
+        kind: 'spell',
+        edition: installed.aggregate.rules_edition,
+        normalizedName: authoritativeName,
+        payload: installed.payload,
+      });
+      const installedDesired = seedSpellIdentityV1(
+        spell,
+        memberships,
+        authoritativeName,
+      );
+      if (
+        installedIdentity.digest !== installedDesired.digest ||
+        installedIdentity.canonicalJson !== installedDesired.canonicalJson
+      ) {
+        throw new BundledSpellSeedEntryRefusal('replacement-refused');
+      }
+      try {
+        reconcileCurrentContentFingerprintV1(db, {
+          kind: 'spell',
+          contentKey,
+          identity: installedDesired,
+        });
+      } catch (error) {
+        if (error instanceof ContentIdentityCollision) {
+          throw new BundledSpellSeedEntryRefusal(
+            'current-fingerprint-integrity',
+          );
+        }
+        throw error;
+      }
+      return Object.freeze({ kind: 'updated' as const, contentKey });
+    });
+  } catch (error) {
+    if (error instanceof BundledSpellSeedEntryRefusal) {
+      return Object.freeze({
+        kind: 'refused',
+        contentKey,
+        reason: error.reason,
+      });
+    }
+    throw error;
+  }
+}
+
+/**
+ * Compare every shipped spell projection with the stored identities computed
+ * by this boot's general bundled reconciliation. Equality therefore means the
+ * source, live stored aggregate, and reconciled registry current bytes agree.
+ * A difference replaces only the SRD aggregate, validates that write with one
+ * new projection, then moves registry history in the same nested transaction.
+ */
+export function ensureBundledSpellContent(
+  db: DatabaseContext,
+  storedProjections: readonly BundledStoredProjectionV1[],
+  sources: BundledSpellSeedSources = Object.freeze({}),
+): BundledSpellSeedResult {
+  const source = bundledSpellSource(sources);
+  const storedByKey = new Map(
+    storedProjections.filter((projection) => projection.kind === 'spell')
+      .map((projection) => [projection.contentKey, projection]),
+  );
+  const outcomes = source.spells.map((spell) => reconcileBundledSpellEntry(
+    db,
+    spell,
+    source.membershipsByName.get(spell.name) ?? Object.freeze([]),
+    storedByKey.get(spell.content_key as ContentKey),
+  ));
+  return Object.freeze({
+    outcomes: Object.freeze(outcomes),
+    healthy: outcomes.filter((outcome) => outcome.kind === 'healthy').length,
+    updated: outcomes.filter((outcome) => outcome.kind === 'updated').length,
+    refused: outcomes.filter((outcome) => outcome.kind === 'refused').length,
+  });
+}
+
+/**
+ * Install only absent bundled spell roots before the general registry pass.
+ * Present roots are deliberately never rewritten here: reconciliation must
+ * observe their actual stored state before the source-wins seeder runs.
+ */
+export function installMissingBundledSpellContent(
+  db: DatabaseContext,
+): void {
+  if (hasBundledSpellCardinality(db)) {
+    return;
+  }
+  const source = bundledSpellSource();
+  const timestamp = new Date().toISOString();
+  for (const spell of source.spells) {
+    if (db.oneRaw(
+      'SELECT 1 FROM spell_versions WHERE content_key = ?',
+      [spell.content_key],
+    ) !== null) {
+      continue;
+    }
+    db.transaction(() => writeBundledSpell(
+      db,
+      spell,
+      source.membershipsByName.get(spell.name) ?? Object.freeze([]),
+      timestamp,
+    ));
+  }
 }
 
 /**
@@ -450,153 +931,26 @@ export function ensureBundledSpellContent(db: DatabaseContext): boolean {
  * refuses the collision transactionally and leaves the existing row untouched.
  */
 export function seedSpellContent(db: DatabaseContext): void {
-  if (hasBundledSpellContent(db)) {
+  if (hasBundledSpellCardinality(db)) {
     return;
   }
-  const spells = parseSrdSpellDescriptions();
-  const memberships = parseSrdSpellListMemberships();
-  const byName = new Map(spells.map((spell) => [spell.name, spell]));
-  for (const membership of memberships) {
-    if (!byName.has(membership.spell_name)) {
-      throw new SrdSpellError(
-        `${membership.spell_list_key} lists ${membership.spell_name}, which has no description.`,
-      );
-    }
-  }
+  const source = bundledSpellSource();
 
   db.transaction(() => {
     const timestamp = new Date().toISOString();
     const versionIds = new Map<string, number>();
-    for (const spell of spells) {
-      const collision = db.oneRaw(
-        `SELECT id, provenance FROM spell_versions WHERE content_key = ?`,
-        [spell.content_key],
-      );
-      if (collision !== null && collision.provenance !== 'srd') {
-        throw new SrdSpellError(
-          `cannot seed ${spell.content_key}: the key already belongs to provenance ${JSON.stringify(collision.provenance)}.`,
-        );
-      }
-
-      db.exec(
-        `INSERT INTO spell_identities (
-           content_key, canonical_name, normalized_name, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(content_key) DO NOTHING`,
-        [
-          spell.identity_key,
-          spell.name,
-          normalizeCatalogName(spell.name),
-          timestamp,
-          timestamp,
-        ],
-      );
-      const identity = db.oneRaw(
-        `SELECT id, canonical_name, normalized_name
-         FROM spell_identities WHERE content_key = ?`,
-        [spell.identity_key],
-      );
-      if (
-        identity === null ||
-        identity.canonical_name !== spell.name ||
-        identity.normalized_name !== normalizeCatalogName(spell.name)
-      ) {
-        throw new SrdSpellError(
-          `identity key ${spell.identity_key} belongs to different spell data.`,
-        );
-      }
-
-      const range = encodeSpellRange(parseSpellRange(spell.range));
-      const components = encodeSpellComponents(
-        parseSpellComponents(spell.components),
-      );
-      ensureBundledStableContentIdentity(db, {
-        kind: 'spell',
-        contentKey: spell.content_key,
-        normalizedName: normalizeCatalogName(spell.name),
-      });
-      db.exec(
-        `INSERT INTO spell_versions (
-           content_key, spell_identity_id, display_name, rules_edition,
-           level, school, ritual, concentration, casting_time, action_type,
-           range, range_kind, range_feet, area_shape, area_feet,
-           duration, components, material_component_summary,
-           material_cost_copper, material_cost_kind, short_summary,
-           provenance, seed_version, is_active, created_at, updated_at
-         ) VALUES (
-           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-           'srd', ?, 1, ?, ?
-         )
-         ON CONFLICT(content_key) DO UPDATE SET
-           spell_identity_id = excluded.spell_identity_id,
-           display_name = excluded.display_name,
-           rules_edition = excluded.rules_edition,
-           level = excluded.level,
-           school = excluded.school,
-           ritual = excluded.ritual,
-           concentration = excluded.concentration,
-           casting_time = excluded.casting_time,
-           action_type = excluded.action_type,
-           range = excluded.range,
-           range_kind = excluded.range_kind,
-           range_feet = excluded.range_feet,
-           area_shape = excluded.area_shape,
-           area_feet = excluded.area_feet,
-           duration = excluded.duration,
-           components = excluded.components,
-           material_component_summary = excluded.material_component_summary,
-           material_cost_copper = excluded.material_cost_copper,
-           material_cost_kind = excluded.material_cost_kind,
-           short_summary = excluded.short_summary,
-           seed_version = excluded.seed_version,
-           is_active = 1,
-           updated_at = excluded.updated_at
-         WHERE spell_versions.provenance = 'srd'`,
-        [
-          spell.content_key,
-          Number(identity.id),
-          spell.name,
-          BUNDLED_SPELL_RULES_EDITION,
-          spell.level,
-          spell.school,
-          sqlBool(spell.ritual),
-          sqlBool(spell.concentration),
-          spell.casting_time,
-          spell.action_type,
-          spell.range,
-          range.range_kind,
-          range.range_feet,
-          range.area_shape,
-          range.area_feet,
-          spell.duration,
-          spell.components,
-          components.material_component_summary,
-          components.material_cost_copper,
-          components.material_cost_kind,
-          spell.description,
-          BUNDLED_SPELL_SEED_VERSION,
-          timestamp,
-          timestamp,
-        ],
-      );
-      const versionId = Number(
-        db.scalar(
-          `SELECT id FROM spell_versions
-           WHERE content_key = ? AND provenance = 'srd'`,
-          [spell.content_key],
-        ),
-      );
-      if (!Number.isSafeInteger(versionId) || versionId < 1) {
-        throw new SrdSpellError(`failed to seed ${spell.content_key}.`);
-      }
-      versionIds.set(spell.name, versionId);
-      db.exec(
-        'DELETE FROM spell_list_memberships WHERE spell_version_id = ?',
-        [versionId],
-      );
+    for (const spell of source.spells) {
+      versionIds.set(spell.name, writeBundledSpell(
+        db,
+        spell,
+        Object.freeze([]),
+        timestamp,
+      ));
     }
-
-    for (const membership of memberships) {
+    // Preserve the independently printed class-list order in row ids. The
+    // content-v1 projector treats membership as a set, but exports and source
+    // provenance tests deliberately retain the source document's ordering.
+    for (const membership of source.memberships) {
       const versionId = versionIds.get(membership.spell_name);
       if (versionId === undefined) {
         throw new SrdSpellError(
