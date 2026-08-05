@@ -1,8 +1,8 @@
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
-import { expect, test } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { DatabaseContext } from '../../src/db/database';
 import { createBuildReportFixture } from '../integration/reports/build-report-fixture';
+import { expect, test } from './fixtures/parallel-test';
 
 const schema = readFileSync(
   new URL('../../src/db/schema.sql', import.meta.url),
@@ -123,11 +123,13 @@ async function persistedCharacter(
 test('planner editors, history, focus, keyboard, and responsive state persist', async ({
   page,
 }) => {
+  // The four-worker pool measured this test at 15.3s; 40s gives all three
+  // load-sensitive readiness waits at least 2.5x pool headroom.
   await page.goto('/');
   await expect(page.locator('#status')).toHaveAttribute(
     'data-ready',
     'true',
-    { timeout: 30_000 },
+    { timeout: 40_000 },
   );
   await page.evaluate(async () => {
     await window.staticApp.reset();
@@ -137,7 +139,7 @@ test('planner editors, history, focus, keyboard, and responsive state persist', 
   await expect(page.locator('#planner-status')).toHaveAttribute(
     'data-ready',
     'true',
-    { timeout: 30_000 },
+    { timeout: 40_000 },
   );
   await expect(
     page.getByRole('heading', { name: 'Browser Planner' }),
@@ -220,7 +222,7 @@ test('planner editors, history, focus, keyboard, and responsive state persist', 
   await expect(page.locator('#planner-status')).toHaveAttribute(
     'data-ready',
     'true',
-    { timeout: 30_000 },
+    { timeout: 40_000 },
   );
   await expect
     .poll(persistedCharacter.bind(null, page))
@@ -239,12 +241,14 @@ test('planner editors, history, focus, keyboard, and responsive state persist', 
 test('B2-EDIT displays base before editing and keeps the resolved total separate', async ({
   page,
 }) => {
+  // The four-worker pool measured this test at 16.2s; 45s gives both
+  // load-sensitive readiness waits at least 2.5x pool headroom.
   const { bytes, fixture } = await contributionPlannerFixture();
   await page.goto('/');
   await expect(page.locator('#status')).toHaveAttribute(
     'data-ready',
     'true',
-    { timeout: 30_000 },
+    { timeout: 45_000 },
   );
   await page.evaluate(
     (database) =>
@@ -255,7 +259,7 @@ test('B2-EDIT displays base before editing and keeps the resolved total separate
   await expect(page.locator('#planner-status')).toHaveAttribute(
     'data-ready',
     'true',
-    { timeout: 30_000 },
+    { timeout: 45_000 },
   );
 
   const intelligence = page.locator(
@@ -296,11 +300,13 @@ test('B2-EDIT displays base before editing and keeps the resolved total separate
 test('the item editor authors an ability override that resolves on the sheet', async ({
   page,
 }) => {
+  // The four-worker pool measured this test at 15.1s; 40s gives both
+  // load-sensitive readiness waits at least 2.5x pool headroom.
   await page.goto('/');
   await expect(page.locator('#status')).toHaveAttribute(
     'data-ready',
     'true',
-    { timeout: 30_000 },
+    { timeout: 40_000 },
   );
   await page.evaluate(async () => {
     await window.staticApp.reset();
@@ -310,7 +316,7 @@ test('the item editor authors an ability override that resolves on the sheet', a
   await expect(page.locator('#planner-status')).toHaveAttribute(
     'data-ready',
     'true',
-    { timeout: 30_000 },
+    { timeout: 40_000 },
   );
 
   const items = page.locator('[data-testid="items-panel"]');
@@ -355,14 +361,14 @@ test('the item editor authors an ability override that resolves on the sheet', a
 test('the item picker copies catalog values and effects without a live definition link', async ({
   page,
 }) => {
-  // Measured at 12.2s alone on Chromium; database replacement dominates.
-  // The two readiness assertions each allow 30s, so the test envelope must
+  // The four-worker pool measured 15.8s; both load-sensitive readiness waits
+  // use 40s for at least 2.5x pool headroom. The test envelope must
   // remain comfortably above their combined worst-case allowance.
   test.setTimeout(90_000);
   const { bytes, characterId } = await catalogItemPlannerFixture();
   await page.goto('/');
   await expect(page.locator('#status')).toHaveAttribute('data-ready', 'true', {
-    timeout: 30_000,
+    timeout: 40_000,
   });
   await page.evaluate(
     (database) => window.staticApp.replaceDatabase(Uint8Array.from(database)),
@@ -372,7 +378,7 @@ test('the item picker copies catalog values and effects without a live definitio
   await expect(page.locator('#planner-status')).toHaveAttribute(
     'data-ready',
     'true',
-    { timeout: 30_000 },
+    { timeout: 40_000 },
   );
 
   const picker = page.locator('[data-testid="item-catalog-picker"]');
@@ -409,14 +415,15 @@ test('the item picker copies catalog values and effects without a live definitio
 test('the attunement replacement modal traps, cancels, and restores keyboard focus', async ({
   page,
 }) => {
-  // Measured at 9.1s alone on Chromium; keep local contention below this test.
-  test.setTimeout(20_000);
+  // The four-worker parallel pool measured 15.2s; 40s gives the test and both
+  // load-sensitive readiness waits at least 2.5x pool headroom.
+  test.setTimeout(40_000);
   const { bytes, characterId, itemIds } = await attunementPlannerFixture();
   await page.goto('/');
   await expect(page.locator('#status')).toHaveAttribute(
     'data-ready',
     'true',
-    { timeout: 30_000 },
+    { timeout: 40_000 },
   );
   await page.evaluate(
     (database) =>
@@ -427,7 +434,7 @@ test('the attunement replacement modal traps, cancels, and restores keyboard foc
   await expect(page.locator('#planner-status')).toHaveAttribute(
     'data-ready',
     'true',
-    { timeout: 30_000 },
+    { timeout: 40_000 },
   );
 
   const invoker = page.locator(
@@ -484,12 +491,14 @@ test('the attunement replacement modal traps, cancels, and restores keyboard foc
 test('planner parity flows persist override, clear, selection, acknowledgement, and source edits', async ({
   page,
 }) => {
+  // The four-worker pool measured this test at 19.9s; 50s gives all three
+  // load-sensitive readiness waits at least 2.5x pool headroom.
   const { bytes, fixture } = await plannerFixture();
   await page.goto('/');
   await expect(page.locator('#status')).toHaveAttribute(
     'data-ready',
     'true',
-    { timeout: 30_000 },
+    { timeout: 50_000 },
   );
   await page.evaluate(
     (database) =>
@@ -500,7 +509,7 @@ test('planner parity flows persist override, clear, selection, acknowledgement, 
   await expect(page.locator('#planner-status')).toHaveAttribute(
     'data-ready',
     'true',
-    { timeout: 30_000 },
+    { timeout: 50_000 },
   );
 
   await expect(page.getByText('Pact Magic: 2 × level 3')).toBeVisible();
@@ -700,7 +709,7 @@ test('planner parity flows persist override, clear, selection, acknowledgement, 
   await expect(page.locator('#planner-status')).toHaveAttribute(
     'data-ready',
     'true',
-    { timeout: 30_000 },
+    { timeout: 50_000 },
   );
   await expect(
     page.getByText('Acknowledged: Intentional browser conflict'),
@@ -722,11 +731,13 @@ test('planner parity flows persist override, clear, selection, acknowledgement, 
 test('surfaces unfinished choices separately from warnings on both screens', async ({
   page,
 }) => {
+  // The four-worker pool measured this test at 12.9s; 35s gives all three
+  // load-sensitive readiness waits at least 2.5x pool headroom.
   await page.goto('/');
   await expect(page.locator('#status')).toHaveAttribute(
     'data-ready',
     'true',
-    { timeout: 30_000 },
+    { timeout: 35_000 },
   );
   await page.evaluate(async () => {
     await window.staticApp.reset();
@@ -736,7 +747,7 @@ test('surfaces unfinished choices separately from warnings on both screens', asy
   await expect(page.locator('#status')).toHaveAttribute(
     'data-ready',
     'true',
-    { timeout: 30_000 },
+    { timeout: 35_000 },
   );
 
   const card = page.locator('.character-card').first();
@@ -751,7 +762,7 @@ test('surfaces unfinished choices separately from warnings on both screens', asy
   await expect(page.locator('#planner-status')).toHaveAttribute(
     'data-ready',
     'true',
-    { timeout: 30_000 },
+    { timeout: 35_000 },
   );
   const panel = page.locator('.outstanding-panel');
   await expect(panel.locator('h2').first()).toHaveText(

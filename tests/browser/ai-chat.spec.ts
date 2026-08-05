@@ -16,12 +16,13 @@
  *      previously only documentation, and it is the one a browser can settle.
  */
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
-import { expect, test, type ConsoleMessage, type Page } from '@playwright/test';
+import type { ConsoleMessage, Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { DatabaseContext } from '../../src/db/database';
 import { createBuildReportFixture } from '../integration/reports/build-report-fixture';
+import { expect, test } from './fixtures/parallel-test';
 
 const schema = readFileSync(
   new URL('../../src/db/schema.sql', import.meta.url),
@@ -50,8 +51,10 @@ async function plannerImage(): Promise<{ bytes: number[]; characterId: number }>
 }
 
 async function ready(page: Page, selector: string): Promise<void> {
+  // The four-worker pool measured the second-loopback caller at 28.8s; 75s
+  // gives this load-sensitive readiness wait at least 2.5x pool headroom.
   await expect(page.locator(selector)).toHaveAttribute('data-ready', 'true', {
-    timeout: 30_000,
+    timeout: 75_000,
   });
 }
 
@@ -74,8 +77,10 @@ async function ask(page: Page, question: string): Promise<string> {
   });
   await page.locator('#ai-chat-question').fill(question);
   await page.locator(`${PANEL} button[type="submit"]`).click();
+  // The four-worker pool measured the slowest streaming caller at 17.1s; 45s
+  // gives reply completion at least 2.5x headroom under pool contention.
   await expect(page.locator(`${PANEL} .ai-chat-status`)).toHaveText('Done.', {
-    timeout: 30_000,
+    timeout: 45_000,
   });
   return (await page.locator(`${PANEL} .ai-chat-output`).textContent()) ?? '';
 }
@@ -222,8 +227,10 @@ test('a hostile page on another loopback origin cannot reach the bridge, even ho
   page,
   baseURL,
 }, testInfo) => {
-  // Measured alone at 22.5s on 2026-07-31; its second loopback server increases contention sensitivity.
-  testInfo.setTimeout(60_000);
+  // The four-worker parallel pool measured 28.8s; its second loopback server
+  // increases contention sensitivity, and 75s preserves at least 2.5x
+  // wall-clock headroom under parallel-pool contention.
+  testInfo.setTimeout(75_000);
   await openPlanner(page);
   const secret = await page
     .locator('meta[name="ai-bridge-token"]')

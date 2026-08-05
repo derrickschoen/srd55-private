@@ -1,4 +1,5 @@
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
+import { expect, test } from './fixtures/parallel-test';
 import { ACCEPTANCE_WIZARD_2_CHOICES } from './fixtures/level-up-characters';
 
 const CHARACTER_NAME = 'Acceptance Arcanist';
@@ -68,13 +69,15 @@ async function expectLevelTwoAcceptanceSheet(page: Page): Promise<void> {
 test('an unassisted sitting creates a caster through the current guided level 1 journey', async ({
   page,
 }) => {
-  // Measured at 13.5s alone through fifteen level-1 writes and the level-2 pass.
-  test.setTimeout(20_000);
+  // The four-worker parallel pool measured 19.3s through the fifteen level-1
+  // writes and level-2 pass; 50s preserves at least 2.5x wall-clock headroom
+  // under parallel-pool contention.
+  test.setTimeout(50_000);
   await page.goto('/');
   await expect(page.locator('#status')).toHaveAttribute(
     'data-ready',
     'true',
-    { timeout: 30_000 },
+    { timeout: 50_000 },
   );
   await expect(
     page.getByRole('heading', { name: 'No characters yet' }),

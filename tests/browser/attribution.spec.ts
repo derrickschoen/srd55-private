@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures/parallel-test';
 
 const NOTICE =
   'This work includes material from the System Reference Document 5.2 ' +
@@ -125,11 +125,13 @@ test('the footer survives screens the router does not match', async ({
 });
 
 test('no licensor wordmark appears outside the notice', async ({ page }) => {
-  test.setTimeout(20_000);
+  // The four-worker parallel pool measured 9.8s; 25s preserves at least 2.5x
+  // wall-clock headroom under parallel-pool contention.
+  test.setTimeout(25_000);
   const wordmark = /D&D|Dungeons|Wizards/;
 
   await page.goto('/not-a-screen');
-  await expect(page.locator('.empty-shell')).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('.empty-shell')).toBeVisible({ timeout: 25_000 });
   expect(await page.title()).not.toMatch(wordmark);
   expect(await page.locator('body').innerText()).not.toMatch(wordmark);
 

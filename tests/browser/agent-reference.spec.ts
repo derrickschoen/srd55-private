@@ -1,5 +1,5 @@
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
-import { expect, test, type Page } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { DatabaseContext } from '../../src/db/database';
 import type { Ability } from '../../src/domain/enums';
@@ -8,6 +8,7 @@ import type { Workspace } from '../../src/domain/read-models';
 import type { CompletenessResult } from '../../src/queries/character-completeness';
 import type { AgentReference } from '../../src/ui/screens/planner/agent-reference';
 import { createBuildReportFixture } from '../integration/reports/build-report-fixture';
+import { expect, test } from './fixtures/parallel-test';
 
 const schema = readFileSync(
   new URL('../../src/db/schema.sql', import.meta.url),
@@ -47,8 +48,10 @@ async function plannerImage(): Promise<{
 }
 
 async function ready(page: Page, selector: string): Promise<void> {
+  // The four-worker pool measured this file's slowest caller at 17.4s; 45s
+  // gives this load-sensitive readiness wait at least 2.5x pool headroom.
   await expect(page.locator(selector)).toHaveAttribute('data-ready', 'true', {
-    timeout: 30_000,
+    timeout: 45_000,
   });
 }
 

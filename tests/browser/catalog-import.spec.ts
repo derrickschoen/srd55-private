@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures/parallel-test';
 
 function record(overrides: Record<string, unknown> = {}) {
   return {
@@ -26,18 +26,21 @@ function record(overrides: Record<string, unknown> = {}) {
 }
 
 async function ready(page: import('@playwright/test').Page) {
+  // The four-worker pool measured the slowest caller at 15.5s; 40s gives this
+  // load-sensitive readiness wait at least 2.5x pool headroom.
   await expect(page.locator('#status')).toHaveAttribute(
     'data-ready',
     'true',
-    { timeout: 30_000 },
+    { timeout: 40_000 },
   );
 }
 
 test('catalog RPC dry-runs, commits atomically, tombstones, and persists across reloads', async ({
   page,
 }) => {
-  // Measured 10.4s alone on CI-3b; reloads and worker persistence dominate.
-  test.setTimeout(20_000);
+  // The four-worker parallel pool measured 14.8s; 40s preserves at least 2.5x
+  // wall-clock headroom while reloads and worker persistence contend in pool.
+  test.setTimeout(40_000);
   await page.goto('/');
   await ready(page);
   const catalog = JSON.stringify([record()]);
@@ -169,8 +172,9 @@ test('catalog RPC dry-runs, commits atomically, tombstones, and persists across 
 test('a subclass import lands, survives a reload, and outlives a spell replacement', async ({
   page,
 }) => {
-  // Measured 10.6s alone on CI-3b; this includes three persistence reloads.
-  test.setTimeout(20_000);
+  // The four-worker parallel pool measured 15.5s across three persistence
+  // reloads; 40s preserves at least 2.5x headroom under pool contention.
+  test.setTimeout(40_000);
   await page.goto('/');
   await ready(page);
 
@@ -265,8 +269,9 @@ test('a subclass import lands, survives a reload, and outlives a spell replaceme
 test('a feat aggregate imports through RPC under a derived identity and survives reload', async ({
   page,
 }) => {
-  // Measured 7.8s alone on CI-3b; worker boot plus one reload dominates.
-  test.setTimeout(20_000);
+  // The four-worker parallel pool measured 12.2s; 35s preserves at least 2.5x
+  // wall-clock headroom while worker boot and reload contend in the pool.
+  test.setTimeout(35_000);
   await page.goto('/');
   await ready(page);
   const feat = JSON.stringify([{

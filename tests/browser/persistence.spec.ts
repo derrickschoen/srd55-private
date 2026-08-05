@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures/parallel-test';
 async function waitForWorker(page: import('@playwright/test').Page) {
   await expect(page.locator('#status')).toHaveAttribute('data-ready', 'true', {
     timeout: 30_000,
