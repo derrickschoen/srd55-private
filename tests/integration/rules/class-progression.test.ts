@@ -5,7 +5,144 @@ import {
   ClassProgressionLookup,
   seedClassProgressions,
 } from '../../../src/rules/class-progression-lookup';
+import {
+  bundledSrdSubclassDefinitionContentKeys,
+  ensureBundledSrdSubclassContent,
+} from '../../../src/rules/srd-subclass-content';
+import {
+  HEADING_ONLY_DESCRIPTION,
+} from '../../../src/domain/subclass-feature-description';
+import {
+  parseSrdSubclasses,
+  srdSubclassClassNames,
+} from '../../../src/rules/srd-subclasses';
 import { openTestDatabase } from '../../helpers/open-db';
+
+function expectedSrdFixedSpellRule(
+  subclassName: string,
+  rulePrefix: string,
+  activeFromClassLevel: number,
+  spellSlug: string,
+): Readonly<Record<string, unknown>> {
+  return {
+    subclass_name: subclassName,
+    rule: {
+      kind: 'fixed_spell',
+      rule_key: `${rulePrefix}-${spellSlug}`,
+      spell_version_key: `2024:${spellSlug}`,
+      bucket: 'prepared',
+      always_prepared: true,
+      with_slots: true,
+      active_from_class_level: activeFromClassLevel,
+      count: 1,
+      free_cast: null,
+    },
+  };
+}
+
+const EXPECTED_SRD_FIXED_SPELL_RULES = [
+  ['Draconic Sorcery', 'draconic-sorcery', 3, 'alter-self'],
+  ['Draconic Sorcery', 'draconic-sorcery', 3, 'chromatic-orb'],
+  ['Draconic Sorcery', 'draconic-sorcery', 3, 'command'],
+  ['Draconic Sorcery', 'draconic-sorcery', 3, 'dragon-s-breath'],
+  ['Draconic Sorcery', 'draconic-sorcery', 5, 'fear'],
+  ['Draconic Sorcery', 'draconic-sorcery', 5, 'fly'],
+  ['Draconic Sorcery', 'draconic-sorcery', 7, 'arcane-eye'],
+  ['Draconic Sorcery', 'draconic-sorcery', 7, 'charm-monster'],
+  ['Draconic Sorcery', 'draconic-sorcery', 9, 'legend-lore'],
+  ['Draconic Sorcery', 'draconic-sorcery', 9, 'summon-dragon'],
+  ['Fiend Patron', 'fiend-patron', 3, 'burning-hands'],
+  ['Fiend Patron', 'fiend-patron', 3, 'command'],
+  ['Fiend Patron', 'fiend-patron', 3, 'scorching-ray'],
+  ['Fiend Patron', 'fiend-patron', 3, 'suggestion'],
+  ['Fiend Patron', 'fiend-patron', 5, 'fireball'],
+  ['Fiend Patron', 'fiend-patron', 5, 'stinking-cloud'],
+  ['Fiend Patron', 'fiend-patron', 7, 'fire-shield'],
+  ['Fiend Patron', 'fiend-patron', 7, 'wall-of-fire'],
+  ['Fiend Patron', 'fiend-patron', 9, 'geas'],
+  ['Fiend Patron', 'fiend-patron', 9, 'insect-plague'],
+  ['Life Domain', 'life-domain', 3, 'aid'],
+  ['Life Domain', 'life-domain', 3, 'bless'],
+  ['Life Domain', 'life-domain', 3, 'cure-wounds'],
+  ['Life Domain', 'life-domain', 3, 'lesser-restoration'],
+  ['Life Domain', 'life-domain', 5, 'mass-healing-word'],
+  ['Life Domain', 'life-domain', 5, 'revivify'],
+  ['Life Domain', 'life-domain', 7, 'aura-of-life'],
+  ['Life Domain', 'life-domain', 7, 'death-ward'],
+  ['Life Domain', 'life-domain', 9, 'greater-restoration'],
+  ['Life Domain', 'life-domain', 9, 'mass-cure-wounds'],
+  ['Oath of Devotion', 'oath-of-devotion', 3, 'protection-from-evil-and-good'],
+  ['Oath of Devotion', 'oath-of-devotion', 3, 'shield-of-faith'],
+  ['Oath of Devotion', 'oath-of-devotion', 5, 'aid'],
+  ['Oath of Devotion', 'oath-of-devotion', 5, 'zone-of-truth'],
+  ['Oath of Devotion', 'oath-of-devotion', 9, 'beacon-of-hope'],
+  ['Oath of Devotion', 'oath-of-devotion', 9, 'dispel-magic'],
+  ['Oath of Devotion', 'oath-of-devotion', 13, 'freedom-of-movement'],
+  ['Oath of Devotion', 'oath-of-devotion', 13, 'guardian-of-faith'],
+  ['Oath of Devotion', 'oath-of-devotion', 17, 'commune'],
+  ['Oath of Devotion', 'oath-of-devotion', 17, 'flame-strike'],
+] as const;
+
+const THIRD_CASTER_LEVELS = [
+  [1, 0, 0, []],
+  [2, 0, 0, []],
+  [3, 3, 1, { 1: 2 }],
+  [4, 4, 1, { 1: 3 }],
+  [5, 4, 1, { 1: 3 }],
+  [6, 4, 1, { 1: 3 }],
+  [7, 5, 2, { 1: 4, 2: 2 }],
+  [8, 6, 2, { 1: 4, 2: 2 }],
+  [9, 6, 2, { 1: 4, 2: 2 }],
+  [10, 7, 2, { 1: 4, 2: 3 }],
+  [11, 8, 2, { 1: 4, 2: 3 }],
+  [12, 8, 2, { 1: 4, 2: 3 }],
+  [13, 9, 3, { 1: 4, 2: 3, 3: 2 }],
+  [14, 10, 3, { 1: 4, 2: 3, 3: 2 }],
+  [15, 10, 3, { 1: 4, 2: 3, 3: 2 }],
+  [16, 11, 3, { 1: 4, 2: 3, 3: 3 }],
+  [17, 11, 3, { 1: 4, 2: 3, 3: 3 }],
+  [18, 11, 3, { 1: 4, 2: 3, 3: 3 }],
+  [19, 12, 4, { 1: 4, 2: 3, 3: 3, 4: 1 }],
+  [20, 13, 4, { 1: 4, 2: 3, 3: 3, 4: 1 }],
+] as const;
+
+function expectedThirdCasterRules(
+  prefix: string,
+  cantripsKnown: number,
+  preparedCount: number,
+  maximumSpellLevel: number,
+): readonly Readonly<Record<string, unknown>>[] {
+  return [
+    ...(cantripsKnown === 0
+      ? []
+      : [
+          {
+            kind: 'choice_from_list',
+            rule_key: `${prefix}-cantrips`,
+            count: cantripsKnown,
+            bucket: 'cantrip_known',
+            list: 'Wizard',
+            level_min: 0,
+            level_max: 0,
+            with_slots: false,
+          },
+        ]),
+    ...(preparedCount === 0
+      ? []
+      : [
+          {
+            kind: 'choice_from_list',
+            rule_key: `${prefix}-prepared`,
+            count: preparedCount,
+            bucket: 'prepared',
+            list: 'Wizard',
+            level_min: 1,
+            level_max: maximumSpellLevel,
+            with_slots: true,
+          },
+        ]),
+  ];
+}
 
 
 describe('persisted class progression catalog', () => {
@@ -16,6 +153,7 @@ describe('persisted class progression catalog', () => {
     connection = await openTestDatabase();
     db = new DatabaseContext(connection);
     seedClassProgressions(db);
+    ensureBundledSrdSubclassContent(db);
   });
 
   afterEach(() => {
@@ -25,8 +163,10 @@ describe('persisted class progression catalog', () => {
   it('persists twelve complete class tables and two complete subclass tables', () => {
     expect(db.scalar('SELECT count(*) FROM class_definitions')).toBe(12);
     expect(db.scalar('SELECT count(*) FROM class_progressions')).toBe(240);
-    expect(db.scalar('SELECT count(*) FROM subclass_definitions')).toBe(2);
+    expect(db.scalar('SELECT count(*) FROM subclass_definitions')).toBe(14);
     expect(db.scalar('SELECT count(*) FROM subclass_progressions')).toBe(40);
+    expect(db.scalar('SELECT count(*) FROM subclass_features')).toBe(58);
+    expect(db.scalar('SELECT count(*) FROM subclass_feature_effects')).toBe(0);
 
     const classCoverage = db.allRaw(`
       SELECT class.name, count(*) AS rows, min(class_level) AS first_level,
@@ -39,6 +179,51 @@ describe('persisted class progression catalog', () => {
     expect(classCoverage).toHaveLength(12);
     expect(classCoverage.every((row) =>
       row.rows === 20 && row.first_level === 1 && row.last_level === 20,
+    )).toBe(true);
+
+    const parsed = parseSrdSubclasses();
+    expect(
+      db.allRaw(`
+        SELECT class.name AS class_name, subclass.name AS subclass_name,
+          feature.class_level, feature.sort_order, feature.name,
+          feature.description
+        FROM subclass_features AS feature
+        JOIN subclass_definitions AS subclass
+          ON subclass.id = feature.subclass_definition_id
+        JOIN class_definitions AS class
+          ON class.id = subclass.class_definition_id
+        ORDER BY class.name, feature.sort_order
+      `),
+    ).toEqual(
+      srdSubclassClassNames.flatMap((className) => {
+        const definition = parsed.by_class[className];
+        return definition.features.map((feature) => ({
+          class_name: className,
+          subclass_name: definition.subclass_name,
+          class_level: feature.class_level,
+          sort_order: feature.sort_position + 1,
+          name: feature.name,
+          description: HEADING_ONLY_DESCRIPTION,
+        }));
+      }),
+    );
+  });
+
+  it('marks every SC-3 feature description with the D152 heading-only constant', () => {
+    expect(HEADING_ONLY_DESCRIPTION).toBe('');
+    const contentKeys = bundledSrdSubclassDefinitionContentKeys();
+    const rows = db.allRaw(
+      `SELECT feature.description
+         FROM subclass_features AS feature
+         JOIN subclass_definitions AS subclass
+           ON subclass.id = feature.subclass_definition_id
+        WHERE subclass.content_key IN (${contentKeys.map(() => '?').join(', ')})`,
+      [...contentKeys],
+    );
+
+    expect(rows).toHaveLength(58);
+    expect(rows.every(
+      (row) => row.description === HEADING_ONLY_DESCRIPTION,
     )).toBe(true);
   });
 
@@ -75,8 +260,50 @@ describe('persisted class progression catalog', () => {
       `),
     ).toEqual([
       { name: 'AT', class_name: 'Rogue', spellcasting_ability: 'intelligence', caster_fraction: '1/3', caster_rounding: 'down' },
+      { name: 'Champion', class_name: 'Fighter', spellcasting_ability: null, caster_fraction: null, caster_rounding: null },
+      { name: 'Circle of the Land', class_name: 'Druid', spellcasting_ability: 'wisdom', caster_fraction: null, caster_rounding: null },
+      { name: 'College of Lore', class_name: 'Bard', spellcasting_ability: 'charisma', caster_fraction: null, caster_rounding: null },
+      { name: 'Draconic Sorcery', class_name: 'Sorcerer', spellcasting_ability: 'charisma', caster_fraction: null, caster_rounding: null },
       { name: 'EK', class_name: 'Fighter', spellcasting_ability: 'intelligence', caster_fraction: '1/3', caster_rounding: 'down' },
+      { name: 'Evoker', class_name: 'Wizard', spellcasting_ability: 'intelligence', caster_fraction: null, caster_rounding: null },
+      { name: 'Fiend Patron', class_name: 'Warlock', spellcasting_ability: 'charisma', caster_fraction: null, caster_rounding: null },
+      { name: 'Hunter', class_name: 'Ranger', spellcasting_ability: 'wisdom', caster_fraction: null, caster_rounding: null },
+      { name: 'Life Domain', class_name: 'Cleric', spellcasting_ability: 'wisdom', caster_fraction: null, caster_rounding: null },
+      { name: 'Oath of Devotion', class_name: 'Paladin', spellcasting_ability: 'charisma', caster_fraction: null, caster_rounding: null },
+      { name: 'Path of the Berserker', class_name: 'Barbarian', spellcasting_ability: null, caster_fraction: null, caster_rounding: null },
+      { name: 'Thief', class_name: 'Rogue', spellcasting_ability: null, caster_fraction: null, caster_rounding: null },
+      { name: 'Warrior of the Open Hand', class_name: 'Monk', spellcasting_ability: null, caster_fraction: null, caster_rounding: null },
     ]);
+
+    const persistedRules = db
+      .allRaw(`
+        SELECT subclass.name, subclass.grant_rules
+        FROM subclass_definitions AS subclass
+        WHERE subclass.grant_rules IS NOT NULL
+        ORDER BY subclass.name
+      `)
+      .flatMap((row) => {
+        const decoded: unknown = JSON.parse(String(row.grant_rules));
+        if (!Array.isArray(decoded)) {
+          throw new TypeError('Persisted subclass grant rules are not an array.');
+        }
+        return decoded.map((rule) => ({
+          subclass_name: String(row.name),
+          rule,
+        }));
+      });
+    expect(persistedRules).toHaveLength(40);
+    expect(persistedRules).toEqual(
+      EXPECTED_SRD_FIXED_SPELL_RULES.map(
+        ([subclassName, rulePrefix, activeFromClassLevel, spellSlug]) =>
+          expectedSrdFixedSpellRule(
+            subclassName,
+            rulePrefix,
+            activeFromClassLevel,
+            spellSlug,
+          ),
+      ),
+    );
   });
 
   it.each([
@@ -221,30 +448,54 @@ describe('persisted class progression catalog', () => {
     }
   });
 
-  it('persists all third-caster preparation and slot breakpoints', () => {
+  it('persists every legacy third-caster count, slot row, and complete grant-rule payload', () => {
     expect(
       db.allRaw(`
-        SELECT subclass.name, progression.class_level, progression.prepared_count,
-          progression.max_spell_level, progression.slots
+        SELECT subclass.name, progression.class_level,
+          progression.cantrips_known, progression.prepared_count,
+          progression.max_spell_level, progression.slots,
+          progression.grant_rules
         FROM subclass_progressions progression
         JOIN subclass_definitions subclass
           ON subclass.id = progression.subclass_definition_id
-        WHERE progression.class_level IN (3, 7, 13, 19)
         ORDER BY subclass.name, progression.class_level
       `).map((row) => ({
         ...row,
         slots: JSON.parse(String(row.slots)),
+        grant_rules: JSON.parse(String(row.grant_rules)),
       })),
-    ).toEqual([
-      { name: 'AT', class_level: 3, prepared_count: 3, max_spell_level: 1, slots: { 1: 2 } },
-      { name: 'AT', class_level: 7, prepared_count: 5, max_spell_level: 2, slots: { 1: 4, 2: 2 } },
-      { name: 'AT', class_level: 13, prepared_count: 9, max_spell_level: 3, slots: { 1: 4, 2: 3, 3: 2 } },
-      { name: 'AT', class_level: 19, prepared_count: 12, max_spell_level: 4, slots: { 1: 4, 2: 3, 3: 3, 4: 1 } },
-      { name: 'EK', class_level: 3, prepared_count: 3, max_spell_level: 1, slots: { 1: 2 } },
-      { name: 'EK', class_level: 7, prepared_count: 5, max_spell_level: 2, slots: { 1: 4, 2: 2 } },
-      { name: 'EK', class_level: 13, prepared_count: 9, max_spell_level: 3, slots: { 1: 4, 2: 3, 3: 2 } },
-      { name: 'EK', class_level: 19, prepared_count: 12, max_spell_level: 4, slots: { 1: 4, 2: 3, 3: 3, 4: 1 } },
-    ]);
+    ).toEqual(
+      [
+        ['AT', 'at', 3, 4],
+        ['EK', 'ek', 2, 3],
+      ].flatMap(
+        ([name, prefix, startingCantrips, levelTenCantrips]) =>
+          THIRD_CASTER_LEVELS.map(
+            ([classLevel, preparedCount, maximumSpellLevel, slots]) => {
+              const cantripsKnown =
+                classLevel < 3
+                  ? 0
+                  : classLevel < 10
+                    ? Number(startingCantrips)
+                    : Number(levelTenCantrips);
+              return {
+                name,
+                class_level: classLevel,
+                cantrips_known: cantripsKnown,
+                prepared_count: preparedCount,
+                max_spell_level: maximumSpellLevel,
+                slots,
+                grant_rules: expectedThirdCasterRules(
+                  String(prefix),
+                  cantripsKnown,
+                  preparedCount,
+                  maximumSpellLevel,
+                ),
+              };
+            },
+          ),
+      ),
+    );
   });
 
   it('looks up the persisted class-table count independently of ability score', () => {

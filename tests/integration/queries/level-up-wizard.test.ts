@@ -30,6 +30,119 @@ import {
   type RpcHarness,
 } from '../../helpers/rpc-harness';
 
+const EXPECTED_SUBCLASS_VARIANTS = [
+  {
+    class_name: 'Barbarian',
+    options: [{
+      content_key: '2024:subclass:path-of-the-berserker',
+      name: 'Path of the Berserker',
+      rules_edition: '2024',
+    }],
+  },
+  {
+    class_name: 'Bard',
+    options: [{
+      content_key: '2024:subclass:college-of-lore',
+      name: 'College of Lore',
+      rules_edition: '2024',
+    }],
+  },
+  {
+    class_name: 'Cleric',
+    options: [{
+      content_key: '2024:subclass:life-domain',
+      name: 'Life Domain',
+      rules_edition: '2024',
+    }],
+  },
+  {
+    class_name: 'Druid',
+    options: [{
+      content_key: '2024:subclass:circle-of-the-land',
+      name: 'Circle of the Land',
+      rules_edition: '2024',
+    }],
+  },
+  {
+    class_name: 'Fighter',
+    options: [
+      {
+        content_key: '2024:subclass:champion',
+        name: 'Champion',
+        rules_edition: '2024',
+      },
+      {
+        content_key: '2024:subclass:ek',
+        name: 'EK',
+        rules_edition: '2024',
+      },
+    ],
+  },
+  {
+    class_name: 'Monk',
+    options: [{
+      content_key: '2024:subclass:warrior-of-the-open-hand',
+      name: 'Warrior of the Open Hand',
+      rules_edition: '2024',
+    }],
+  },
+  {
+    class_name: 'Paladin',
+    options: [{
+      content_key: '2024:subclass:oath-of-devotion',
+      name: 'Oath of Devotion',
+      rules_edition: '2024',
+    }],
+  },
+  {
+    class_name: 'Ranger',
+    options: [{
+      content_key: '2024:subclass:hunter',
+      name: 'Hunter',
+      rules_edition: '2024',
+    }],
+  },
+  {
+    class_name: 'Rogue',
+    options: [
+      {
+        content_key: '2024:subclass:at',
+        name: 'AT',
+        rules_edition: '2024',
+      },
+      {
+        content_key: '2024:subclass:thief',
+        name: 'Thief',
+        rules_edition: '2024',
+      },
+    ],
+  },
+  {
+    class_name: 'Sorcerer',
+    options: [{
+      content_key: '2024:subclass:draconic-sorcery',
+      name: 'Draconic Sorcery',
+      rules_edition: '2024',
+    }],
+  },
+  {
+    class_name: 'Warlock',
+    options: [{
+      content_key: '2024:subclass:fiend-patron',
+      name: 'Fiend Patron',
+      rules_edition: '2024',
+    }],
+  },
+  {
+    class_name: 'Wizard',
+    options: [{
+      content_key: '2024:subclass:evoker',
+      name: 'Evoker',
+      rules_edition: '2024',
+    }],
+  },
+] as const;
+
 /**
  * W-A's three state assertions and their negative-control candidates:
  *
@@ -236,7 +349,8 @@ describe('level-up wizard state RPC', () => {
       fighterClassId,
       2,
     );
-    await expect(client.levelUpState(fighterId)).resolves.toMatchObject({
+    const fighterSubclassState = await client.levelUpState(fighterId);
+    expect(fighterSubclassState).toMatchObject({
       kind: 'ready',
       class_options: [{
         current_level: 2,
@@ -249,14 +363,60 @@ describe('level-up wizard state RPC', () => {
           'complete',
         ],
         subclass_choice: {
-          options: [expect.objectContaining({
-            content_key: '2024:subclass:ek',
-            name: 'EK',
-            rules_edition: '2024',
-          })],
+          options: [
+            expect.objectContaining({
+              content_key: '2024:subclass:champion',
+              name: 'Champion',
+              rules_edition: '2024',
+            }),
+            expect.objectContaining({
+              content_key: '2024:subclass:ek',
+              name: 'EK',
+              rules_edition: '2024',
+            }),
+          ],
         },
       }],
     });
+    if (fighterSubclassState.kind !== 'ready') {
+      throw new Error('Fighter level 3 did not return ready state.');
+    }
+    const fighterSubclassOption = fighterSubclassState.class_options[0];
+    if (fighterSubclassOption?.guideability !== 'guideable') {
+      throw new Error('Fighter level 3 was not guideable.');
+    }
+    expect(fighterSubclassOption.subclass_choice?.options.map((option) => ({
+      content_key: option.content_key,
+      name: option.name,
+      rules_edition: option.rules_edition,
+    }))).toEqual(EXPECTED_SUBCLASS_VARIANTS[4].options);
+
+    for (const expected of EXPECTED_SUBCLASS_VARIANTS) {
+      if (expected.class_name === 'Fighter') continue;
+      const characterId = createCharacter(`${expected.class_name} Subclasses`);
+      const definitionId = enterClass(characterId, expected.class_name);
+      raiseClassLevelForTest(
+        harness.context.db,
+        characterId,
+        definitionId,
+        2,
+      );
+      const state = await client.levelUpState(characterId);
+      if (state.kind !== 'ready') {
+        throw new Error(`${expected.class_name} level 3 did not return ready state.`);
+      }
+      const option = state.class_options.find(
+        (candidate) => candidate.class_definition_id === definitionId,
+      );
+      if (option?.guideability !== 'guideable') {
+        throw new Error(`${expected.class_name} level 3 was not guideable.`);
+      }
+      expect(option.subclass_choice?.options.map((subclass) => ({
+        content_key: subclass.content_key,
+        name: subclass.name,
+        rules_edition: subclass.rules_edition,
+      }))).toEqual(expected.options);
+    }
 
     raiseClassLevelForTest(
       harness.context.db,

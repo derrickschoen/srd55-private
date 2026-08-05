@@ -541,10 +541,20 @@ describe('the College of the Long Road imports and reaches the sheet', () => {
       ]);
     expect(owners).toEqual([
       [SUBCLASS_KEY, 'longroad.homebrew'],
-      // Bundled: the middle segment is a record-kind literal with no dot, so it
-      // is not an owner namespace and never will be.
       ['2024:subclass:at', null],
+      ['2024:subclass:champion', null],
+      ['2024:subclass:circle-of-the-land', null],
+      ['2024:subclass:college-of-lore', null],
+      ['2024:subclass:draconic-sorcery', null],
       ['2024:subclass:ek', null],
+      ['2024:subclass:evoker', null],
+      ['2024:subclass:fiend-patron', null],
+      ['2024:subclass:hunter', null],
+      ['2024:subclass:life-domain', null],
+      ['2024:subclass:oath-of-devotion', null],
+      ['2024:subclass:path-of-the-berserker', null],
+      ['2024:subclass:thief', null],
+      ['2024:subclass:warrior-of-the-open-hand', null],
     ]);
   });
 
@@ -611,7 +621,7 @@ describe('the College of the Long Road imports and reaches the sheet', () => {
     expect(JSON.stringify(response)).toContain('2024:class:hedge-knight');
     expect(
       rpc.context.db.scalar('SELECT count(*) AS n FROM subclass_definitions'),
-    ).toBe(2);
+    ).toBe(14);
   });
 });
 
@@ -708,7 +718,10 @@ describe('importing one kind leaves the other kind alone', () => {
     });
     expect(
       rpc.context.db.scalar(
-        'SELECT count(*) AS n FROM subclass_features',
+        `SELECT count(*) AS n FROM subclass_features
+         WHERE subclass_definition_id =
+           (SELECT id FROM subclass_definitions WHERE content_key = ?)`,
+        [SUBCLASS_KEY],
       ),
     ).toBe(4);
   });
@@ -735,7 +748,12 @@ describe('importing one kind leaves the other kind alone', () => {
     ).toBe(0);
     // The subclass in the same call is still imported, and still never removed.
     expect(
-      rpc.context.db.scalar('SELECT count(*) AS n FROM subclass_features'),
+      rpc.context.db.scalar(
+        `SELECT count(*) AS n FROM subclass_features
+         WHERE subclass_definition_id =
+           (SELECT id FROM subclass_definitions WHERE content_key = ?)`,
+        [SUBCLASS_KEY],
+      ),
     ).toBe(4);
   });
 });
