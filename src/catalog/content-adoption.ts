@@ -547,11 +547,40 @@ function reviewConflictDetails(
   return Object.freeze(details.map((detail) => Object.freeze({ ...detail })));
 }
 
+function isExactAssertedPlaceholderUpgrade(
+  db: DatabaseContext,
+  projection: ContentImportProjection,
+  resolution: ContentResolution,
+): resolution is Extract<ContentResolution, { readonly kind: 'exact' }> {
+  return projection.kind === 'spell' &&
+    projection.installExact === true &&
+    resolution.kind === 'exact' &&
+    resolution.contentKey === projection.assertedKey &&
+    db.scalar<number>(
+      `SELECT 1
+       FROM spell_versions AS spell
+       JOIN catalog_content_identities AS identity
+         ON identity.content_kind = 'spell'
+        AND identity.content_key = spell.content_key
+       WHERE spell.content_key = ? AND spell.provenance = 'placeholder'
+         AND identity.key_kind = 'asserted'
+         AND identity.catalog_layer = 'external'`,
+      [resolution.contentKey],
+    ) === 1;
+}
+
 function withLiveTargetSnapshot(
   db: DatabaseContext,
   entry: EvaluatedEntry,
 ): EvaluatedEntry {
   if (entry.targetContentKey === undefined || entry.outcome.kind === 'refused') {
+    return entry;
+  }
+  if (
+    entry.resolution.kind === 'exact' &&
+    entry.targetContentKey === entry.resolution.contentKey &&
+    isExactAssertedPlaceholderUpgrade(db, entry.projection, entry.resolution)
+  ) {
     return entry;
   }
   try {
@@ -894,6 +923,18 @@ function evaluate(
       continue;
     }
     const identity = resolved.identity;
+    const resolution: ContentResolution = isExactAssertedPlaceholderUpgrade(
+      db,
+      projection,
+      resolved.resolution,
+    )
+      ? Object.freeze({
+          kind: 'exact' as const,
+          contentKey: resolved.resolution.contentKey,
+          matchClass: 'trivial-self-match' as const,
+          reviewRequired: false as const,
+        })
+      : resolved.resolution;
     const remembered = rememberedContentMatchDecision(db, {
       kind: projection.kind,
       scheme: identity.envelope.scheme,
@@ -914,7 +955,7 @@ function evaluate(
         node,
         projection,
         identity,
-        resolution: resolved.resolution,
+        resolution,
         outcome,
         incomingDigest: incomingIdentity.digest,
         targetContentKey: remembered.targetContentKey,
@@ -924,7 +965,6 @@ function evaluate(
       continue;
     }
 
-    const resolution = resolved.resolution;
     if (resolution.kind === 'ambiguous') {
       const entry: EvaluatedEntry = {
         node,

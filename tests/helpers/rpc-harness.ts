@@ -71,12 +71,15 @@ export async function createRpcHarness(
           )) as R,
         );
       } catch (error) {
+        const rpcError = error instanceof RpcError
+          ? error
+          : new RpcError(
+              'handler_error',
+              error instanceof Error ? error.message : String(error),
+            );
         return rpcFailure(
           requestId,
-          new RpcError(
-            'handler_error',
-            error instanceof Error ? error.message : String(error),
-          ).toPayload(),
+          rpcError.toPayload(),
         );
       }
     },

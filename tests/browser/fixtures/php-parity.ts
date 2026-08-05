@@ -427,7 +427,7 @@ export async function workspaceFixtureImage(): Promise<
     const fixture = createBuildReportFixture(db);
     db.exec(
       `UPDATE characters
-       SET allow_legacy = 0
+       SET allow_legacy = 0, notes = NULL
        WHERE id = ?`,
       [fixture.characterId],
     );

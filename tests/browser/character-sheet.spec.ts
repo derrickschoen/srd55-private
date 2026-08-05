@@ -1,6 +1,6 @@
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
 import type { Database } from '@sqlite.org/sqlite-wasm';
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { DatabaseContext } from '../../src/db/database';
 import {
@@ -17,6 +17,7 @@ import {
   type SheetSpellRetirementFixture,
 } from '../integration/queries/character-sheet-spells-fixture';
 import { readLevelUpSeam } from './fixtures/level-up-seam';
+import { expect, test } from './fixtures/parallel-test';
 
 const schema = readFileSync(
   new URL('../../src/db/schema.sql', import.meta.url),
@@ -638,8 +639,10 @@ async function abilityOverrideImage(): Promise<SheetImage> {
 }
 
 async function ready(page: Page): Promise<void> {
+  // The four-worker pool measured this file's slowest completed caller at
+  // 26.3s; 70s gives this load-sensitive boot wait at least 2.5x headroom.
   await expect(page.locator('#status')).toHaveAttribute('data-ready', 'true', {
-    timeout: 30_000,
+    timeout: 70_000,
   });
 }
 
@@ -738,8 +741,9 @@ async function expectExactText(
 test('a phone-width character sheet keeps its warnings, numbers, and controls usable', async ({
   page,
 }) => {
-  // Measured at 13.8s alone on Chromium at 390x844.
-  test.setTimeout(20_000);
+  // The four-worker parallel pool measured 16.6s on Chromium at 390x844;
+  // 45s preserves at least 2.5x wall-clock headroom under pool contention.
+  test.setTimeout(45_000);
   await page.setViewportSize({ width: 390, height: 844 });
   const image = await sheetImage();
   await install(page, image);
@@ -765,8 +769,9 @@ test('a phone-width character sheet keeps its warnings, numbers, and controls us
 test('the sheet prints the derived numbers, and prints what it lacks', async ({
   page,
 }, testInfo) => {
-  // Measured alone at 13.8s on 2026-07-31; full SRD boot repair dominates.
-  testInfo.setTimeout(20_000);
+  // The four-worker parallel pool measured 16.2s; 45s preserves at least 2.5x
+  // wall-clock headroom while full-SRD boot repair contends in the pool.
+  testInfo.setTimeout(45_000);
   const image = await sheetImage();
   await install(page, image);
   await page.goto(`/characters/${image.characterId}/sheet`);
@@ -834,8 +839,9 @@ test('the sheet prints the derived numbers, and prints what it lacks', async ({
 test('hostile spell text is visible inert and absent from sheet facts', async ({
   page,
 }, testInfo) => {
-  // Measured alone at 12.1s on Chromium; fixture construction dominates.
-  testInfo.setTimeout(20_000);
+  // The four-worker parallel pool measured 16.2s; 45s preserves at least 2.5x
+  // wall-clock headroom while fixture construction contends in the pool.
+  testInfo.setTimeout(45_000);
   const image = await sheetImage();
   await install(page, image);
   await page.goto(`/characters/${image.characterId}/sheet`);
@@ -900,8 +906,9 @@ test('hostile spell text is visible inert and absent from sheet facts', async ({
 test('spellbook entries render distinctly and are never labeled Prepared or Known', async ({
   page,
 }, testInfo) => {
-  // Measured alone at 12.3s on Chromium; fixture construction dominates.
-  testInfo.setTimeout(20_000);
+  // The four-worker parallel pool measured 16.5s; 45s preserves at least 2.5x
+  // wall-clock headroom while fixture construction contends in the pool.
+  testInfo.setTimeout(45_000);
   const image = await sheetImage();
   await install(page, image);
   await page.goto(`/characters/${image.characterId}/sheet`);
@@ -926,8 +933,9 @@ test('spellbook entries render distinctly and are never labeled Prepared or Know
 test('print button writes nothing when no named appendix preference changes', async ({
   page,
 }, testInfo) => {
-  // Measured alone at 13.3s on Chromium; fixture construction dominates.
-  testInfo.setTimeout(20_000);
+  // The four-worker parallel pool measured 18.0s; 45s preserves 2.5x
+  // wall-clock headroom while fixture construction contends in the pool.
+  testInfo.setTimeout(45_000);
   const image = await sheetImage();
   await install(page, image);
   await page.goto('/');
@@ -979,8 +987,9 @@ test('print button writes nothing when no named appendix preference changes', as
 test('print media keeps the sheet and warnings, adds paper fields, and ends with attribution', async ({
   page,
 }, testInfo) => {
-  // Measured alone at 10.1s on 2026-07-31; full SRD boot repair dominates.
-  testInfo.setTimeout(20_000);
+  // The four-worker parallel pool measured 14.2s; 40s preserves at least 2.5x
+  // wall-clock headroom while full-SRD boot repair contends in the pool.
+  testInfo.setTimeout(40_000);
   const image = await sheetImage();
   await install(page, image);
   await navigateWithinApp(page, `/characters/${image.characterId}/sheet`);
@@ -1157,11 +1166,12 @@ test('print media keeps the sheet and warnings, adds paper fields, and ends with
   await expect(notice).toHaveCount(0);
 });
 
-// Measured alone at 14.7s on Chromium; fixture construction and reload dominate.
 test('spell appendix paginates long prose with the D141 mechanism', async ({
   page,
 }, testInfo) => {
-  testInfo.setTimeout(20_000);
+  // The four-worker parallel pool measured 19.6s; 50s preserves at least 2.5x
+  // headroom while fixture construction and reload contend in the pool.
+  testInfo.setTimeout(50_000);
   const image = await sheetImage();
   await install(page, image);
   await page.goto(`/characters/${image.characterId}/sheet`);
@@ -1250,15 +1260,16 @@ test('spell appendix paginates long prose with the D141 mechanism', async ({
 test('spell section and print appendix replace the legacy print route without writes', async ({
   page,
 }, testInfo) => {
-  // Measured alone at 23.0s on Chromium on merged main; fixture construction
-  // dominates, and this test boots the app twice (install, then reload). The
+  // The four-worker parallel pool measured 26.3s; 70s preserves at least 2.5x
+  // wall-clock headroom while fixture construction and two app boots contend.
+  // The earlier 45s budget was based on 23.0s alone on merged main. The
   // earlier 20s budget was set against an 18.8s measurement taken before
   // CI-3s added bundled-registry reconciliation to every open, which costs
   // ~0.3s on a light boot and ~2s per boot on this heavier fixture. That
   // steady-state cost is recorded as follow-up
   // CI-3S-RECONCILE-STEADY-STATE-COST; this budget is headroom, not a mask -
   // no assertion in this test changed.
-  testInfo.setTimeout(45_000);
+  testInfo.setTimeout(70_000);
   const image = await retirementSheetImage();
   await install(page, image);
   const before = Array.from(await page.evaluate(
@@ -1458,9 +1469,10 @@ test('spell section and print appendix replace the legacy print route without wr
   ))).toEqual(before);
 });
 
-// Measured alone at 12.3s on this worktree; fixture construction dominates.
 test('hostile backstory remains visible inert text', async ({ page }, testInfo) => {
-  testInfo.setTimeout(20_000);
+  // The four-worker parallel pool measured 17.1s; 45s preserves at least 2.5x
+  // wall-clock headroom while fixture construction contends in the pool.
+  testInfo.setTimeout(45_000);
   const image = await sheetImage();
   await install(page, image);
   await page.goto(`/characters/${image.characterId}/sheet`);
@@ -1484,11 +1496,12 @@ test('hostile backstory remains visible inert text', async ({ page }, testInfo) 
   expect(facts).not.toContain(HOSTILE_BACKSTORY);
 });
 
-// Measured alone at 13.0s on this worktree; three sheet projections dominate.
 test('print shows only present flavor with unverified label', async ({
   page,
 }, testInfo) => {
-  testInfo.setTimeout(20_000);
+  // The four-worker parallel pool measured 16.2s; 45s preserves at least 2.5x
+  // wall-clock headroom while three sheet projections contend in the pool.
+  testInfo.setTimeout(45_000);
   const image = await sheetImage();
   if (
     image.blankFlavorCharacterId === undefined ||
@@ -1525,11 +1538,13 @@ test('print shows only present flavor with unverified label', async ({
   await page.emulateMedia({ media: 'screen' });
 });
 
-// Measured alone at 15.2s on this worktree; reload and print transitions dominate.
 test('flavor appendix is opt-in, remembered, ordered, and carries full text', async ({
   page,
 }, testInfo) => {
-  testInfo.setTimeout(20_000);
+  // The four-worker pool hit the old 20.0s ceiling; isolation completes in
+  // 16.3s. A 50s budget supplies 2.5x headroom over the capped parallel
+  // measurement for reload and print-transition contention in the pool.
+  testInfo.setTimeout(50_000);
   const image = await sheetImage();
   if (image.partialFlavorCharacterId === undefined) {
     throw new Error('The flavor fixture requires its preference-control row.');
@@ -1691,8 +1706,9 @@ test('the legal screen identifies bundled SRD 5.2.1 rules text', async ({
 });
 
 test('resource print shape is fixed by type and a hostile absence class name renders inert and marked', async ({ page }, testInfo) => {
-  // Measured alone at 12.7s on 2026-07-31; full SRD boot repair dominates.
-  testInfo.setTimeout(20_000);
+  // The four-worker parallel pool measured 17.0s; 45s preserves at least 2.5x
+  // wall-clock headroom while full-SRD boot repair contends in the pool.
+  testInfo.setTimeout(45_000);
   const image = await resourceShapeImage();
   await install(page, image);
   await page.goto(`/characters/${image.characterId}/sheet`);
@@ -1824,8 +1840,9 @@ test('the structured block says exactly what the page says, and hides nothing', 
 test('a Monk equipping Shell Shield walks from AC 16 to 15 with a strict-reduction warning', async ({
   page,
 }, testInfo) => {
-  // Measured alone at 12.2s on 2026-07-31; full SRD boot repair dominates.
-  testInfo.setTimeout(20_000);
+  // The four-worker parallel pool measured 16.6s; 45s preserves at least 2.5x
+  // wall-clock headroom while full-SRD boot repair contends in the pool.
+  testInfo.setTimeout(45_000);
   const image = await monkShieldImage();
   await install(page, image);
   // Route inside the already-running app so this test has exactly one full
@@ -1909,9 +1926,11 @@ test('a Monk equipping Shell Shield walks from AC 16 to 15 with a strict-reducti
   // rendered number is the readiness signal: the sheet subtree is built
   // complete and installed in one replaceChildren (sheet screen.ts:43-44),
   // so the number cannot appear from a half-rendered page.
+  // The four-worker pool measured this test at 16.6s; 45s gives the
+  // load-sensitive post-reload sheet wait at least 2.5x pool headroom.
   await expect(page.locator('[data-sheet-value="armor_class"]')).toHaveText(
     '15',
-    { timeout: 30_000 },
+    { timeout: 45_000 },
   );
   await expect(
     page.locator('[data-sheet-id^="armor_class:excluded:"]').filter({
@@ -1952,8 +1971,9 @@ test('Scute Wrap is honoured over the higher Armadillo formula and the exclusion
 test('an unattuned Cloak grants nothing while its state and Ring of Shell bonus stay visible', async ({
   page,
 }, testInfo) => {
-  // Measured alone at 10.5s on 2026-07-31; full SRD boot repair dominates.
-  testInfo.setTimeout(20_000);
+  // The four-worker parallel pool measured 13.3s; 35s preserves at least 2.5x
+  // wall-clock headroom while full-SRD boot repair contends in the pool.
+  testInfo.setTimeout(35_000);
   const image = await armadilloItemsImage();
   await install(page, image);
   await navigateWithinApp(page, `/characters/${image.characterId}/sheet`);
@@ -1979,8 +1999,9 @@ test('an unattuned Cloak grants nothing while its state and Ring of Shell bonus 
 test('ability overrides render the winning source and the floored source term', async ({
   page,
 }, testInfo) => {
-  // Measured alone at 10.4s on 2026-07-31; full SRD boot repair dominates.
-  testInfo.setTimeout(20_000);
+  // The four-worker parallel pool measured 13.0s; 35s preserves at least 2.5x
+  // wall-clock headroom while full-SRD boot repair contends in the pool.
+  testInfo.setTimeout(35_000);
   const image = await abilityOverrideImage();
   await install(page, image);
   await navigateWithinApp(page, `/characters/${image.characterId}/sheet`);
@@ -2035,8 +2056,9 @@ test('ability overrides render the winning source and the floored source term', 
 test('the planner links to the sheet, and the sheet links back', async ({
   page,
 }, testInfo) => {
-  // Measured alone at 16.2s on 2026-08-02; SS-2's spell section made sheet boots heavier.
-  testInfo.setTimeout(45_000);
+  // The four-worker parallel pool measured 19.3s; 50s preserves at least 2.5x
+  // headroom while the heavier sheet boots contend in the parallel pool.
+  testInfo.setTimeout(50_000);
   const image = await sheetImage();
   await install(page, image);
   await page.goto(`/characters/${image.characterId}`);
@@ -2056,8 +2078,9 @@ test('the planner links to the sheet, and the sheet links back', async ({
 test('legacy print route retires while the exact sheet route remains reachable', async ({
   page,
 }, testInfo) => {
-  // Measured alone at 10.1s on Chromium; SRD boot dominates.
-  testInfo.setTimeout(20_000);
+  // The four-worker parallel pool measured 13.3s; 35s preserves at least 2.5x
+  // wall-clock headroom while SRD boot contends in the parallel pool.
+  testInfo.setTimeout(35_000);
   const image = await sheetImage();
   await install(page, image);
   await navigateWithinApp(page, `/characters/${image.characterId}/print`);
@@ -2095,10 +2118,12 @@ test('W-NO-SHADOW level-up, sheet, and planner routes mount only their intended 
   await expect(page.locator('#planner-status')).toHaveCount(0);
 
   await navigateWithinApp(page, `/characters/${String(image.characterId)}`);
+  // The four-worker pool measured this test at 14.6s; 40s gives the
+  // load-sensitive planner readiness wait at least 2.5x pool headroom.
   await expect(page.locator('#planner-status')).toHaveAttribute(
     'data-ready',
     'true',
-    { timeout: 30_000 },
+    { timeout: 40_000 },
   );
   await expect(page.locator('[data-screen="character-sheet"]')).toHaveCount(0);
   await expect(page.locator('[data-screen="printable-list"]')).toHaveCount(0);

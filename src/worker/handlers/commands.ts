@@ -1,6 +1,13 @@
-import { CharacterCommandExecutor } from '../../commands/character-command-executor';
+import {
+  CharacterCommandExecutor,
+  characterCommandRpcResult,
+} from '../../commands/character-command-executor';
 import { CharacterCommandIntegrity } from '../../commands/integrity';
-import type { CharacterCommandRequest } from '../../domain/command-contracts';
+import type {
+  CharacterCommandRequest,
+  RestoreCharacterSavePointRequest,
+  UndoCharacterOperationRequest,
+} from '../../domain/command-contracts';
 import {
   defineRpcHandler,
   isRecord,
@@ -37,16 +44,78 @@ export function isCommandsExecuteParams(
   );
 }
 
+export function isCommandsUndoParams(
+  params: unknown,
+): params is UndoCharacterOperationRequest {
+  return (
+    isRecord(params) &&
+    Object.keys(params).length === 3 &&
+    Number.isSafeInteger(params.character_id) &&
+    Number(params.character_id) >= 1 &&
+    isUuid(params.operation_uuid) &&
+    Number.isSafeInteger(params.expected_revision) &&
+    Number(params.expected_revision) >= 0
+  );
+}
+
+export function isCommandsRestoreSavePointParams(
+  params: unknown,
+): params is RestoreCharacterSavePointRequest {
+  return (
+    isRecord(params) &&
+    Object.keys(params).length === 3 &&
+    Number.isSafeInteger(params.character_id) &&
+    Number(params.character_id) >= 1 &&
+    Number.isSafeInteger(params.save_point_id) &&
+    Number(params.save_point_id) >= 1 &&
+    Number.isSafeInteger(params.expected_revision) &&
+    Number(params.expected_revision) >= 0
+  );
+}
+
 export const handlers: readonly RpcHandler[] = Object.freeze([
   defineRpcHandler(
     'commands.execute',
     isCommandsExecuteParams,
     async (context, params) => {
       try {
-        return await new CharacterCommandExecutor(
+        const result = await new CharacterCommandExecutor(
           context.db,
           new CharacterCommandIntegrity(COMMAND_INTEGRITY_KEY),
         ).execute(params);
+        return characterCommandRpcResult(result);
+      } catch (error) {
+        const translated = characterCommandRpcError(error);
+        if (translated !== null) throw translated;
+        throw error;
+      }
+    },
+  ),
+  defineRpcHandler(
+    'commands.undo',
+    isCommandsUndoParams,
+    async (context, params) => {
+      try {
+        return await new CharacterCommandExecutor(
+          context.db,
+          new CharacterCommandIntegrity(COMMAND_INTEGRITY_KEY),
+        ).undo(params);
+      } catch (error) {
+        const translated = characterCommandRpcError(error);
+        if (translated !== null) throw translated;
+        throw error;
+      }
+    },
+  ),
+  defineRpcHandler(
+    'commands.restoreSavePoint',
+    isCommandsRestoreSavePointParams,
+    async (context, params) => {
+      try {
+        return new CharacterCommandExecutor(
+          context.db,
+          new CharacterCommandIntegrity(COMMAND_INTEGRITY_KEY),
+        ).restoreSavePoint(params);
       } catch (error) {
         const translated = characterCommandRpcError(error);
         if (translated !== null) throw translated;

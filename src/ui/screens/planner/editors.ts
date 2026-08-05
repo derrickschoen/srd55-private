@@ -9,9 +9,15 @@ import type {
   Workspace,
 } from '../../../domain/read-models';
 import type { JsonObject } from '../../../domain/models';
+import type {
+  CharacterFlavorChanges,
+  CharacterFlavorValues,
+} from '../../../domain/command-contracts';
+import { CHARACTER_TEXT_LIMITS } from '../../../domain/character-limits';
 import { freeTextSpan } from '../../free-text';
 
 export interface PlannerEditorActions {
+  updateFlavor(flavor: CharacterFlavorChanges): void;
   updateAbility(ability: Ability, score: number): void;
   updateLegacy(allowLegacy: boolean): void;
   updateClass(
@@ -43,7 +49,11 @@ function panel(title: string): [HTMLElement, HTMLElement] {
 
 function field(
   label: string,
-  input: HTMLInputElement | HTMLSelectElement | HTMLOutputElement,
+  input:
+    | HTMLInputElement
+    | HTMLSelectElement
+    | HTMLTextAreaElement
+    | HTMLOutputElement,
 ): HTMLLabelElement {
   const wrapper = document.createElement('label');
   wrapper.className = 'planner-field';
@@ -52,6 +62,121 @@ function field(
   input.classList.add('planner-input');
   wrapper.append(caption, input);
   return wrapper;
+}
+
+function changedFlavor(
+  current: CharacterFlavorValues,
+  initial: CharacterFlavorValues,
+): CharacterFlavorChanges | null {
+  const appearance = current.appearance === initial.appearance
+    ? {}
+    : { appearance: current.appearance };
+  const backstory = current.backstory === initial.backstory
+    ? {}
+    : { backstory: current.backstory };
+  const notes = current.notes === initial.notes ? {} : { notes: current.notes };
+
+  if (current.alignment !== initial.alignment) {
+    return { alignment: current.alignment, ...appearance, ...backstory, ...notes };
+  }
+  if (current.appearance !== initial.appearance) {
+    return { appearance: current.appearance, ...backstory, ...notes };
+  }
+  if (current.backstory !== initial.backstory) {
+    return { backstory: current.backstory, ...notes };
+  }
+  if (current.notes !== initial.notes) {
+    return { notes: current.notes };
+  }
+  return null;
+}
+
+export function renderCharacterDetails(options: {
+  workspace: Workspace;
+  actions: Pick<PlannerEditorActions, 'updateFlavor'>;
+  disabled: boolean;
+}): HTMLElement {
+  const [section] = panel('Character details');
+  const statement = document.createElement('p');
+  statement.textContent =
+    'Free text only. These words are stored and printed, but never used to calculate character facts.';
+  const sharing = document.createElement('p');
+  sharing.textContent =
+    'Share links include these fields only when you turn on “Include my written text”.';
+  const form = document.createElement('form');
+  form.className = 'character-details-form';
+  form.dataset.testid = 'character-details-form';
+
+  const alignment = document.createElement('input');
+  alignment.type = 'text';
+  const controls = {
+    alignment,
+    appearance: document.createElement('textarea'),
+    backstory: document.createElement('textarea'),
+    notes: document.createElement('textarea'),
+  };
+  const initial = {
+    alignment: options.workspace.flavor.alignment ?? '',
+    appearance: options.workspace.flavor.appearance ?? '',
+    backstory: options.workspace.flavor.backstory ?? '',
+    notes: options.workspace.flavor.notes ?? '',
+  };
+
+  for (const fieldName of [
+    'alignment',
+    'appearance',
+    'backstory',
+    'notes',
+  ] as const) {
+    const control = controls[fieldName];
+    const maximum = CHARACTER_TEXT_LIMITS[fieldName];
+    control.value = initial[fieldName];
+    control.disabled = options.disabled;
+    control.dataset.focusKey = `flavor-${fieldName}`;
+    const wrapper = field(
+      fieldName[0]!.toUpperCase() + fieldName.slice(1),
+      control,
+    );
+    const remaining = document.createElement('output');
+    remaining.dataset.flavorRemaining = fieldName;
+    const refreshRemaining = (): void => {
+      const codePoints = [...control.value].length;
+      remaining.value = codePoints <= maximum
+        ? `${String(maximum - codePoints)} / ${String(maximum)} remaining`
+        : `${String(codePoints - maximum)} over the ${String(maximum)} character limit`;
+    };
+    control.addEventListener('input', () => {
+      const codePoints = [...control.value];
+      if (codePoints.length > maximum) {
+        control.value = codePoints.slice(0, maximum).join('');
+      }
+      refreshRemaining();
+    });
+    refreshRemaining();
+    wrapper.append(remaining);
+    form.append(wrapper);
+  }
+
+  const save = document.createElement('button');
+  save.type = 'submit';
+  save.className = 'button-primary';
+  save.textContent = 'Save character details';
+  save.disabled = options.disabled;
+  save.dataset.focusKey = 'flavor-save';
+  form.append(save);
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    if (options.disabled) return;
+    const changes = changedFlavor({
+      alignment: controls.alignment.value,
+      appearance: controls.appearance.value,
+      backstory: controls.backstory.value,
+      notes: controls.notes.value,
+    }, initial);
+    if (changes !== null) options.actions.updateFlavor(changes);
+  });
+  section.append(statement, sharing, form);
+  return section;
 }
 
 function option(

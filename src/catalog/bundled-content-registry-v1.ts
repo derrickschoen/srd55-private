@@ -14,6 +14,7 @@ import {
 import { bundledArmorTemplates } from '../rules/armor-srd';
 import { parseSrdSpellDescriptions } from '../rules/spells-srd';
 import { bundledWeaponTemplates } from '../rules/weapons-srd';
+import { bundledSubclassDefinitionContentKeys } from '../rules/srd-subclass-content';
 import {
   CONTENT_FINGERPRINT_SCHEME_V1,
   contentKinds,
@@ -95,7 +96,7 @@ export function bundledContentManifestV1(): readonly BundledManifestEntryV1[] {
       kind: 'feat' as const,
       contentKey: row.content_key as ContentKey,
     })),
-    ...bundledClassContentKeys().subclasses.map((contentKey) => ({
+    ...bundledSubclassDefinitionContentKeys().map((contentKey) => ({
       kind: 'subclass' as const,
       contentKey: contentKey as ContentKey,
     })),

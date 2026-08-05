@@ -38,7 +38,6 @@ import type {
   LevelUpPlannedGrantLocator,
   LevelUpPlannedGrantSource,
   LevelUpPlannedSpellChoice,
-  RestoreSnapshotCommand as RestoreSnapshotPayload,
 } from '../domain/command-contracts';
 import {
   LEVEL_UP_REFUSAL_REASONS,
@@ -48,6 +47,7 @@ import {
   type LevelUpSubchoiceRefusalIssue,
 } from '../builder/level-up';
 import { GrantRuleSlotGenerator } from '../grants/grant-rule-slot-generator';
+import type { StoredCharacterSnapshotInverse } from './stored-inverses';
 import {
   fillSkillGrant,
   SkillGrantRefusal,
@@ -154,7 +154,7 @@ export class LevelUpClassCommand {
   constructor(
     private readonly db: DatabaseContext,
     private readonly payload: LevelUpClassPayload,
-    private readonly integrity: CharacterCommandIntegrity,
+    _integrity: CharacterCommandIntegrity,
     state?: CharacterState,
     generator?: GrantRuleSlotGenerator,
   ) {
@@ -651,13 +651,13 @@ export class LevelUpClassCommand {
    * source instances together, and a field-by-field inverse cannot express
    * that set.
    */
-  async inverse(): Promise<RestoreSnapshotPayload> {
+  async inverse(): Promise<StoredCharacterSnapshotInverse> {
     if (this.#characterId === null || this.#before === null) {
       throw new Error('Cannot create an inverse before applying the command.');
     }
-    return this.integrity.attach(this.#characterId, {
-      type: 'restore_snapshot',
+    return {
+      type: 'internal_snapshot_restore',
       snapshot: this.#before,
-    }) as unknown as Promise<RestoreSnapshotPayload>;
+    };
   }
 }

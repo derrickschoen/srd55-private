@@ -6,6 +6,10 @@ import {
   type DatabaseStorage,
 } from './database-lifecycle';
 import { ensureBundledClassContent } from '../rules/class-progression-lookup';
+import {
+  assertBundledSrdSubclassSpellReferences,
+  ensureBundledSrdSubclassContent,
+} from '../rules/srd-subclass-content';
 import { ensureBundledWeaponContent } from '../rules/weapons-srd';
 import { ensureBundledOriginContent } from '../rules/origins-srd';
 import { ensureBundledSpeciesDefinitions } from '../rules/origin-definitions-srd';
@@ -52,6 +56,7 @@ import { reconcileBundledContentRegistryV1 } from '../catalog/bundled-content-re
  */
 export const applicationSeed: DatabaseSeed = (db) => {
   ensureBundledClassContent(db);
+  ensureBundledSrdSubclassContent(db);
   ensureBundledClassResources(db);
   ensureBundledWeaponContent(db);
   ensureBundledSheetContent(db);
@@ -67,6 +72,7 @@ export const applicationSeed: DatabaseSeed = (db) => {
   ensureBundledBackgroundDefinitions(db);
   ensureBundledFeatContent(db);
   ensureBundledSpellContent(db);
+  assertBundledSrdSubclassSpellReferences(db);
   reconcileLegacyLevelFeatChoices(db);
   // D84 runs only after every definition/template half and dependency catalog
   // is present, so all nine stored projectors observe the same graph runtime

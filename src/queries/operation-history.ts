@@ -6,7 +6,6 @@ import {
   sqlString,
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
-import type { CharacterCommandPayload } from '../domain/command-contracts';
 import type { JsonValue } from '../domain/models';
 
 export interface OperationDto {
@@ -14,7 +13,7 @@ export interface OperationDto {
   readonly operation_uuid: string;
   readonly expected_revision: number;
   readonly resulting_revision: number;
-  readonly inverse_command: CharacterCommandPayload;
+  readonly history_action: 'command' | 'undo' | 'redo';
   readonly created_at: string;
 }
 
@@ -42,6 +41,21 @@ function nullableJson(value: string | null): JsonValue | null {
   return value === null ? null : parseJson(value);
 }
 
+function historyAction(value: string): OperationDto['history_action'] {
+  const parsed: unknown = parseJson(value);
+  if (
+    parsed !== null &&
+    typeof parsed === 'object' &&
+    !Array.isArray(parsed) &&
+    (parsed as Record<string, unknown>).type === 'internal_operation_undo'
+  ) {
+    const action = (parsed as Record<string, unknown>).action;
+    if (action === 'undo' || action === 'redo') return action;
+    throw new Error('Stored operation history envelope is invalid.');
+  }
+  return 'command';
+}
+
 export class OperationHistoryQueries {
   constructor(private readonly db: DatabaseContext) {}
 
@@ -59,10 +73,7 @@ export class OperationHistoryQueries {
           operation_uuid: sqlString(row, 'operation_uuid'),
           expected_revision: sqlInteger(row, 'expected_revision'),
           resulting_revision: sqlInteger(row, 'resulting_revision'),
-          inverse_command: parseJson(
-            sqlString(row, 'inverse_command'),
-            'Stored inverse command',
-          ) as unknown as CharacterCommandPayload,
+          history_action: historyAction(sqlString(row, 'inverse_command')),
           created_at: sqlNullableString(row, 'created_at') ?? '',
         }),
       ),

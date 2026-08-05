@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures/parallel-test';
 
 const SRD_CLASSES = [
   'Barbarian',
@@ -16,8 +16,10 @@ const SRD_CLASSES = [
 ];
 
 async function waitForWorker(page: import('@playwright/test').Page) {
+  // The four-worker pool measured the caller at 12.1s; 35s gives this
+  // load-sensitive worker wait at least 2.5x pool headroom.
   await expect(page.locator('#status')).toHaveAttribute('data-ready', 'true', {
-    timeout: 30_000,
+    timeout: 35_000,
   });
 }
 
@@ -55,7 +57,9 @@ test('a fresh OPFS install carries the bundled classes and keeps them across res
   await page.evaluate(() => window.staticApp.reset());
   expect(await classNames(page)).toEqual(SRD_CLASSES);
   expect(await countRows(page, 'class_progressions')).toBe(240);
-  expect(await countRows(page, 'subclass_definitions')).toBe(2);
+  expect(await countRows(page, 'subclass_definitions')).toBe(14);
+  expect(await countRows(page, 'subclass_features')).toBe(58);
+  expect(await countRows(page, 'subclass_progressions')).toBe(40);
 
   // The read-only SRD spell layer ships beside the classes.
   expect(await countRows(page, 'spell_versions')).toBe(339);
@@ -66,4 +70,7 @@ test('a fresh OPFS install carries the bundled classes and keeps them across res
   // Re-opening the stored image must neither duplicate the content nor lose it.
   expect(await classNames(page)).toEqual(SRD_CLASSES);
   expect(await countRows(page, 'class_progressions')).toBe(240);
+  expect(await countRows(page, 'subclass_definitions')).toBe(14);
+  expect(await countRows(page, 'subclass_features')).toBe(58);
+  expect(await countRows(page, 'subclass_progressions')).toBe(40);
 });

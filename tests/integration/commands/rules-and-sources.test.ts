@@ -225,7 +225,7 @@ describe('character rule and source commands', () => {
     });
   });
 
-  it('updates nested Magic Initiate config and constraints, signs a snapshot inverse, and rolls back a broken parent', async () => {
+  it('updates nested Magic Initiate config and constraints, mints an internal snapshot inverse, and rolls back a broken parent', async () => {
     classDefinition('Cleric', 'wisdom', []);
     classDefinition('Wizard', 'intelligence', []);
     const magicInitiateId = definition(
@@ -327,7 +327,8 @@ describe('character rule and source commands', () => {
     });
 
     const inverse = await changed.inverse();
-    expect(await integrity.isValid(characterId, inverse)).toBe(true);
+    expect(inverse).toMatchObject({ type: 'internal_snapshot_restore' });
+    expect(inverse).not.toHaveProperty('integrity');
     state.restore(characterId, inverse.snapshot);
     expect(state.capture(characterId)).toEqual(before);
 
@@ -580,7 +581,8 @@ describe('character rule and source commands', () => {
     });
 
     const inverse = await added.inverse();
-    expect(await integrity.isValid(characterId, inverse)).toBe(true);
+    expect(inverse).toMatchObject({ type: 'internal_snapshot_restore' });
+    expect(inverse).not.toHaveProperty('integrity');
     state.restore(characterId, inverse.snapshot);
     expect(state.capture(characterId)).toEqual(empty);
   });
@@ -909,7 +911,8 @@ describe('character rule and source commands', () => {
     });
 
     const inverse = await removed.inverse();
-    expect(await integrity.isValid(characterId, inverse)).toBe(true);
+    expect(inverse).toMatchObject({ type: 'internal_snapshot_restore' });
+    expect(inverse).not.toHaveProperty('integrity');
     state.restore(characterId, inverse.snapshot);
     expect(state.capture(characterId)).toEqual(before);
 

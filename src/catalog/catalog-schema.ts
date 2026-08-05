@@ -59,6 +59,10 @@ import type {
   ContentImportChoices,
   ContentImportPlanToken,
 } from './content-adoption';
+import {
+  nonEmptySubclassFeatureDescription,
+  type NonEmptySubclassFeatureDescription,
+} from '../domain/subclass-feature-description';
 
 /**
  * THE RECORD KINDS A TIER 1 DOCUMENT MAY CARRY, AND HOW A DOCUMENT SAYS WHICH.
@@ -174,7 +178,7 @@ export interface CatalogRecord {
 export interface CatalogSubclassFeature {
   classLevel: number;
   name: string;
-  description: string;
+  description: NonEmptySubclassFeatureDescription;
   effect: ClassFeatureEffect | null;
 }
 
@@ -715,7 +719,9 @@ function catalogSubclassFeature(
     name: nonEmptyString(value.name, `${label}.name`),
     // NOT NULL in the table, and an empty one is a parse bug at the far end of
     // whatever produced the document.
-    description: nonEmptyString(value.description, `${label}.description`),
+    description: nonEmptySubclassFeatureDescription(
+      nonEmptyString(value.description, `${label}.description`),
+    ),
     effect: catalogFeatureEffect(value.effect, label),
   };
 }

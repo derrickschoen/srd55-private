@@ -2,6 +2,11 @@ import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { SpellAccessBuilder } from '../../../src/access/spell-access-builder';
 import { CatalogImporter } from '../../../src/catalog/catalog-importer';
+import {
+  normalizeContentIdentityName,
+  type ContentKind,
+} from '../../../src/catalog/content-identity';
+import { ensureBundledStableContentIdentity } from '../../../src/catalog/content-registry';
 import { AddSourceCommand } from '../../../src/commands/add-source';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import { RemoveSourceCommand } from '../../../src/commands/remove-source';
@@ -36,6 +41,7 @@ import {
 } from '../../../src/sharing/schema';
 import { ShareWireRetirementError } from '../../../src/sharing/wire-schemas';
 import { handlers as sharingHandlers } from '../../../src/worker/handlers/sharing';
+import { buildAgentReference } from '../../../src/ui/screens/planner/agent-reference';
 import type { HandlerContext } from '../../../src/worker/handler';
 import { rpcRegistry } from '../../../src/worker/registry';
 import {
@@ -143,8 +149,22 @@ async function database(): Promise<DatabaseContext> {
   return new DatabaseContext(connection);
 }
 
+function registerFixtureIdentity(
+  db: DatabaseContext,
+  kind: ContentKind,
+  contentKey: string,
+  name: string,
+): void {
+  ensureBundledStableContentIdentity(db, {
+    kind,
+    contentKey,
+    normalizedName: normalizeContentIdentityName(name),
+  });
+}
+
 function seedCatalog(db: DatabaseContext, padding = false) {
   if (padding) {
+    registerFixtureIdentity(db, 'class', '2024:class:padding', 'Padding');
     db.exec(
       `INSERT INTO class_definitions
          (content_key, name, rules_edition)
@@ -156,6 +176,7 @@ function seedCatalog(db: DatabaseContext, padding = false) {
        (content_key, canonical_name, normalized_name)
      VALUES ('spell:fixture-shield', 'Fixture Shield', 'fixture shield')`,
   ).lastInsertId;
+  registerFixtureIdentity(db, 'spell', '2024:fixture-shield', 'Fixture Shield');
   const spellId = db.exec(
     `INSERT INTO spell_versions (
        content_key, spell_identity_id, display_name, rules_edition,
@@ -180,6 +201,7 @@ function seedCatalog(db: DatabaseContext, padding = false) {
   // generated slot set, so that difference is inert — but it is a difference,
   // and any future assertion on slot counts must seed its own levels rather
   // than trust this fixture to be identical on both paths.
+  registerFixtureIdentity(db, 'class', '2024:class:wizard', 'Wizard');
   db.exec(
     `INSERT INTO class_definitions (
        content_key, name, rules_edition, spellcasting_ability,
@@ -249,10 +271,12 @@ function seedCatalog(db: DatabaseContext, padding = false) {
  * claim about bytes, not about strings that happen to be ASCII.
  */
 const SENDER_NOTE =
-  'Table politics 🎲\tdo NOT share:\nAsked "why?" about Rhea\'s arc \\ unresolved.';
-const SENDER_ALIGNMENT = 'Chaotic Good';
-const SENDER_APPEARANCE = 'Copper scales 🎲\nBlue cloak.';
-const SENDER_BACKSTORY = 'Left Waterdeep after the watch asked "why?" \\ twice.';
+  '[notes sentinel] Table politics 🎲\tdo NOT share:\nAsked "why?" about Rhea\'s arc \\ unresolved.';
+const SENDER_ALIGNMENT = '[alignment sentinel] Chaotic Good';
+const SENDER_APPEARANCE =
+  '[appearance sentinel] Copper scales 🎲\nBlue cloak.';
+const SENDER_BACKSTORY =
+  '[backstory sentinel] Left Waterdeep after the watch asked "why?" \\ twice.';
 
 function seedCharacter(
   db: DatabaseContext,
@@ -733,8 +757,14 @@ describe('minimal character sharing', () => {
   });
 
   it('applies byte-faithful subclass config before regenerating configured slots', async () => {
-    const seedSubclass = (db: DatabaseContext, classId: number) =>
-      db.exec(
+    const seedSubclass = (db: DatabaseContext, classId: number) => {
+      registerFixtureIdentity(
+        db,
+        'subclass',
+        '2024:subclass:configured-path',
+        'Configured Path',
+      );
+      return db.exec(
         `INSERT INTO subclass_definitions (
            content_key, class_definition_id, name, rules_edition,
            spellcasting_ability, grant_rules
@@ -757,6 +787,7 @@ describe('minimal character sharing', () => {
           ]),
         ],
       ).lastInsertId;
+    };
     const source = await database();
     const catalog = seedCatalog(source);
     const subclassId = seedSubclass(source, catalog.classId);
@@ -865,6 +896,12 @@ describe('minimal character sharing', () => {
 
   it('does not advertise readiness when a transitive grant source is missing', async () => {
     const target = await database();
+    registerFixtureIdentity(
+      target,
+      'feat',
+      '2024:feat:granting-parent',
+      'Granting Parent',
+    );
     target.exec(
       `INSERT INTO feat_definitions (
          content_key, name, rules_edition, repeatable, grant_rules
@@ -910,6 +947,12 @@ describe('minimal character sharing', () => {
 
   it('preserves subclass acquisition timing across its descendant tree', async () => {
     const seedTimingCatalog = (db: DatabaseContext) => {
+      registerFixtureIdentity(
+        db,
+        'class',
+        '2024:class:timing-start',
+        'Timing Start',
+      );
       const otherClassId = db.exec(
         `INSERT INTO class_definitions (
            content_key, name, rules_edition, spellcasting_ability,
@@ -925,6 +968,7 @@ describe('minimal character sharing', () => {
          ) VALUES (?, 1, '[]')`,
         [otherClassId],
       );
+      registerFixtureIdentity(db, 'class', '2024:class:timing', 'Timing');
       const classId = db.exec(
         `INSERT INTO class_definitions (
            content_key, name, rules_edition, spellcasting_ability,
@@ -940,6 +984,12 @@ describe('minimal character sharing', () => {
          ) VALUES (?, 1, '[]')`,
         [classId],
       );
+      registerFixtureIdentity(
+        db,
+        'background',
+        '2024:background:timing-grandchild',
+        'Timing Grandchild',
+      );
       db.exec(
         `INSERT INTO background_definitions (
            content_key, name, rules_edition, grant_rules
@@ -947,6 +997,12 @@ describe('minimal character sharing', () => {
            '2024:background:timing-grandchild',
            'Timing Grandchild', '2024', '[]'
          )`,
+      );
+      registerFixtureIdentity(
+        db,
+        'feat',
+        '2024:feat:timing-child',
+        'Timing Child',
       );
       db.exec(
         `INSERT INTO feat_definitions (
@@ -965,6 +1021,12 @@ describe('minimal character sharing', () => {
             },
           ]),
         ],
+      );
+      registerFixtureIdentity(
+        db,
+        'subclass',
+        '2024:subclass:timing-path',
+        'Timing Path',
       );
       const subclassId = db.exec(
         `INSERT INTO subclass_definitions (
@@ -1483,6 +1545,7 @@ describe('a share link that predates weapons', () => {
     seedCatalog(target);
     // The link names a feat the catalog must hold, or the import is refused for
     // a reason that has nothing to do with weapons.
+    registerFixtureIdentity(target, 'feat', '2024:feat:alert', 'Alert');
     target.exec(
       `INSERT INTO feat_definitions (content_key, name, rules_edition)
        VALUES ('2024:feat:alert', 'Alert', '2024')`,
@@ -1517,6 +1580,7 @@ describe('a share link that predates weapons', () => {
     // no longer reach this far.
     const target = await database();
     seedCatalog(target);
+    registerFixtureIdentity(target, 'feat', '2024:feat:alert', 'Alert');
     target.exec(
       `INSERT INTO feat_definitions (content_key, name, rules_edition)
        VALUES ('2024:feat:alert', 'Alert', '2024')`,
@@ -1619,6 +1683,38 @@ describe('written-text consent governs a character note', () => {
       backstory: SENDER_BACKSTORY,
       notes: SENDER_NOTE,
     });
+    expect(
+      buildAgentReference(
+        new CharacterWorkspaceBuilder(target).build(imported.characterId),
+        null,
+      ).free_text.filter((entry) => entry.field.startsWith('character.')),
+    ).toEqual([
+      {
+        field: 'character.name',
+        value: withText.character.name,
+        origin: 'unverified-origin',
+      },
+      {
+        field: 'character.alignment',
+        value: SENDER_ALIGNMENT,
+        origin: 'unverified-origin',
+      },
+      {
+        field: 'character.appearance',
+        value: SENDER_APPEARANCE,
+        origin: 'unverified-origin',
+      },
+      {
+        field: 'character.backstory',
+        value: SENDER_BACKSTORY,
+        origin: 'unverified-origin',
+      },
+      {
+        field: 'character.notes',
+        value: SENDER_NOTE,
+        origin: 'unverified-origin',
+      },
+    ]);
   });
 
   it('carries nothing when nobody asks, and the sender still has the note', async () => {
@@ -1747,6 +1843,12 @@ describe('written-text consent governs a character note', () => {
  */
 describe('an effect knows which source granted it, across a link', () => {
   const seedProvenanceCatalog = (db: DatabaseContext) => {
+    registerFixtureIdentity(
+      db,
+      'class',
+      '2024:class:provenance',
+      'Provenance',
+    );
     const classId = db.exec(
       `INSERT INTO class_definitions (
          content_key, name, rules_edition, spellcasting_ability,
@@ -1760,6 +1862,12 @@ describe('an effect knows which source granted it, across a link', () => {
          class_definition_id, class_level, grant_rules
        ) VALUES (?, 1, '[]')`,
       [classId],
+    );
+    registerFixtureIdentity(
+      db,
+      'feat',
+      '2024:feat:provenance-grant',
+      'Granted Feat',
     );
     db.exec(
       `INSERT INTO feat_definitions (
@@ -1786,6 +1894,12 @@ describe('an effect knows which source granted it, across a link', () => {
         ]),
       ],
     );
+    registerFixtureIdentity(
+      db,
+      'subclass',
+      '2024:subclass:provenance-path',
+      'Provenance Path',
+    );
     const subclassId = db.exec(
       `INSERT INTO subclass_definitions (
          content_key, class_definition_id, name, rules_edition,
@@ -1796,6 +1910,12 @@ describe('an effect knows which source granted it, across a link', () => {
        )`,
       [classId],
     ).lastInsertId;
+    registerFixtureIdentity(
+      db,
+      'feat',
+      '2024:feat:provenance-taken',
+      'Taken Feat',
+    );
     const featId = db.exec(
       `INSERT INTO feat_definitions (
          content_key, name, rules_edition, repeatable, grant_rules
@@ -2070,6 +2190,12 @@ describe('an effect knows which source granted it, across a link', () => {
 
 describe('B2 contribution sharing', () => {
   function seedBackground(db: DatabaseContext): number {
+    registerFixtureIdentity(
+      db,
+      'background',
+      '2024:background:ability-guard',
+      'Ability Guard',
+    );
     return db.exec(
       `INSERT INTO background_definitions (
          content_key, name, rules_edition, repeatable, grant_rules
@@ -2178,6 +2304,12 @@ describe('D83 ability override sharing', () => {
       `INSERT INTO characters (name, strength)
        VALUES ('Shared Giant Strength', 20)`,
     ).lastInsertId;
+    registerFixtureIdentity(
+      source,
+      'feat',
+      '2024:feat:giant-boon',
+      'Giant Boon',
+    );
     const featId = source.exec(
       `INSERT INTO feat_definitions (content_key, name, rules_edition)
        VALUES ('2024:feat:giant-boon', 'Giant Boon', '2024')`,
@@ -2229,6 +2361,12 @@ describe('D83 ability override sharing', () => {
     ]);
 
     const target = await database();
+    registerFixtureIdentity(
+      target,
+      'feat',
+      '2024:feat:giant-boon',
+      'Giant Boon',
+    );
     target.exec(
       `INSERT INTO feat_definitions (content_key, name, rules_edition)
        VALUES ('2024:feat:giant-boon', 'Giant Boon', '2024')`,
@@ -2311,11 +2449,13 @@ describe('a v5 round trip preserves skill grant provenance (S-SHARE)', () => {
     readonly featId: number;
   } {
     const wizardId = seedCatalog(db).classId;
+    registerFixtureIdentity(db, 'class', '2024:class:fighter', 'Fighter');
     const fighterId = db.exec(
       `INSERT INTO class_definitions (content_key, name, rules_edition)
        VALUES ('2024:class:fighter', 'Fighter', '2024')
        ON CONFLICT(content_key) DO UPDATE SET name = excluded.name`,
     ).lastInsertId;
+    registerFixtureIdentity(db, 'feat', '2024:feat:alert', 'Alert');
     const featId = db.exec(
       `INSERT INTO feat_definitions (content_key, name, rules_edition)
        VALUES ('2024:feat:alert', 'Alert', '2024')

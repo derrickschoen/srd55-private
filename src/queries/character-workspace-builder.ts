@@ -58,11 +58,19 @@ interface SlotWithOrder extends WorkspaceSlot {
 interface WorkspaceCharacter {
   readonly revision: number;
   readonly allow_legacy: boolean;
+  readonly alignment: string | null;
+  readonly appearance: string | null;
+  readonly backstory: string | null;
+  readonly notes: string | null;
 }
 
 const workspaceCharacter: RowCodec<WorkspaceCharacter> = (row) => ({
   revision: sqlInteger(row, 'revision'),
   allow_legacy: sqlBoolean(row, 'allow_legacy'),
+  alignment: sqlNullableString(row, 'alignment'),
+  appearance: sqlNullableString(row, 'appearance'),
+  backstory: sqlNullableString(row, 'backstory'),
+  notes: sqlNullableString(row, 'notes'),
 });
 
 /**
@@ -218,7 +226,7 @@ export class CharacterWorkspaceBuilder {
 
   build(characterId: number): Workspace {
     const character = this.db.one(
-      `SELECT revision, allow_legacy
+      `SELECT revision, allow_legacy, alignment, appearance, backstory, notes
        FROM characters
        WHERE id = ?`,
       [characterId],
@@ -261,6 +269,12 @@ export class CharacterWorkspaceBuilder {
       classes: this.classes(characterId),
       available_classes: this.classOptions(),
       allow_legacy: character.allow_legacy,
+      flavor: {
+        alignment: character.alignment,
+        appearance: character.appearance,
+        backstory: character.backstory,
+        notes: character.notes,
+      },
       configurable_sources: this.configurableSources(characterId),
       order_sources: orderSources(this.db, characterId),
       source_catalog: {

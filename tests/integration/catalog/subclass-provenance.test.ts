@@ -14,6 +14,8 @@ import { UpdateClassCommand } from '../../../src/commands/update-class';
 import { DatabaseContext } from '../../../src/db/database';
 import { raiseClassLevelForTest } from '../../helpers/class-levels';
 import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
+import { ensureBundledSrdSubclassContent } from '../../../src/rules/srd-subclass-content';
+import { ensureBundledSpellContent } from '../../../src/rules/spells-srd';
 import {
   assessImportCompatibility,
   exportCharacterShare,
@@ -46,6 +48,8 @@ async function database(): Promise<DatabaseContext> {
   connections.push(connection);
   const db = new DatabaseContext(connection);
   seedClassProgressions(db);
+  ensureBundledSrdSubclassContent(db);
+  ensureBundledSpellContent(db);
   reconcileBundledContentRegistryV1(db);
   return db;
 }
@@ -120,9 +124,20 @@ describe('an imported subclass stays distinguishable from a bundled one', () => 
         ]),
     ).toEqual([
       [SUBCLASS_KEY, 'longroad.homebrew'],
-      // The seeder's own two, whose middle segment is a record-kind literal.
       ['2024:subclass:at', null],
+      ['2024:subclass:champion', null],
+      ['2024:subclass:circle-of-the-land', null],
+      ['2024:subclass:college-of-lore', null],
+      ['2024:subclass:draconic-sorcery', null],
       ['2024:subclass:ek', null],
+      ['2024:subclass:evoker', null],
+      ['2024:subclass:fiend-patron', null],
+      ['2024:subclass:hunter', null],
+      ['2024:subclass:life-domain', null],
+      ['2024:subclass:oath-of-devotion', null],
+      ['2024:subclass:path-of-the-berserker', null],
+      ['2024:subclass:thief', null],
+      ['2024:subclass:warrior-of-the-open-hand', null],
     ]);
   });
 

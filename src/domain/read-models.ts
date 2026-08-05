@@ -311,6 +311,12 @@ export interface Workspace {
   classes: CharacterClass[];
   available_classes: ClassOption[];
   allow_legacy: boolean;
+  flavor: {
+    readonly alignment: string | null;
+    readonly appearance: string | null;
+    readonly backstory: string | null;
+    readonly notes: string | null;
+  };
   configurable_sources: Array<{
     id: number;
     display_name: string;

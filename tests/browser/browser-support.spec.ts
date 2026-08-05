@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures/parallel-test';
 
 const CAPABILITY_WARNING =
   'This browser cannot open the local data store. SRD-55 is tested only in Chromium; continuing may not work and may lose data. Keep backup exports.';
@@ -191,13 +191,15 @@ test('BROWSER-PROBE-HANG-NOT-DEAD-SCREEN: a missing reply reaches the warning de
 test('BROWSER-PROBE-LATE-OK-WITHDRAWS: late capability success removes the warning and releases boot', async ({
   page,
 }) => {
-  // Measured alone at 5.1 s: this covers the deadline and then sqlite boot.
-  test.setTimeout(20_000);
+  // The four-worker parallel pool measured 8.5s across the deadline and sqlite
+  // boot; the 25s test and load-sensitive expectation budgets preserve at
+  // least 2.5x wall-clock headroom under pool contention.
+  test.setTimeout(25_000);
   await injectLateAvailableProbe(page);
   await page.goto('/');
 
   const notice = page.locator('#browser-support-notice');
-  await expect(notice).toBeVisible({ timeout: 5_000 });
+  await expect(notice).toBeVisible({ timeout: 25_000 });
   await expect(notice).toHaveAttribute(
     'data-browser-support-state',
     'capability-probe-failed',
@@ -220,13 +222,13 @@ test('BROWSER-PROBE-LATE-OK-WITHDRAWS: late capability success removes the warni
     }
   });
 
-  await expect(notice).toBeHidden({ timeout: 5_000 });
+  await expect(notice).toBeHidden({ timeout: 25_000 });
   await expect(notice).toHaveAttribute(
     'data-browser-support-state',
     'supported',
   );
   await expect(page.locator('#status')).toHaveAttribute('data-ready', 'true', {
-    timeout: 20_000,
+    timeout: 25_000,
   });
 });
 

@@ -1,4 +1,3 @@
-import { CharacterCommandIntegrity } from '../../commands/integrity';
 import { EligibleSpellSearch } from '../../eligibility/eligible-spell-search';
 import { CatalogQueries } from '../../queries/catalog-queries';
 import {
@@ -22,7 +21,6 @@ import {
   type PlannedGrantSource,
 } from '../../builder/level-up-wizard';
 import { BuildReportBuilder } from '../../reports/build-report-builder';
-import { COMMAND_INTEGRITY_KEY } from './commands';
 import {
   defineRpcHandler,
   isEmptyParams,
@@ -47,10 +45,6 @@ interface EligibleSpellParams extends CharacterParams {
 
 interface CreateSavePointParams extends CharacterParams {
   readonly label: string;
-}
-
-interface SavePointCommandParams extends CharacterParams {
-  readonly save_point_id: number;
 }
 
 interface SetPrintAppendixPreferenceParams extends CharacterParams {
@@ -228,17 +222,6 @@ export function isCreateSavePointParams(
   );
 }
 
-export function isSavePointCommandParams(
-  params: unknown,
-): params is SavePointCommandParams {
-  return (
-    isRecord(params) &&
-    exactKeys(params, ['character_id', 'save_point_id']) &&
-    positiveInteger(params.character_id) &&
-    positiveInteger(params.save_point_id)
-  );
-}
-
 export const handlers: readonly RpcHandler[] = Object.freeze([
   defineRpcHandler(
     'queries.characters.list',
@@ -323,16 +306,6 @@ export const handlers: readonly RpcHandler[] = Object.freeze([
         params.character_id,
       );
     },
-  ),
-  defineRpcHandler(
-    'queries.savePoints.restoreCommand',
-    isSavePointCommandParams,
-    (context, params) =>
-      new SavePointQueries(context.db).restoreCommand(
-        params.character_id,
-        params.save_point_id,
-        new CharacterCommandIntegrity(COMMAND_INTEGRITY_KEY),
-      ),
   ),
   defineRpcHandler(
     'queries.characters.sheet',

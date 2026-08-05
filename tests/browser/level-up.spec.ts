@@ -1,8 +1,9 @@
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import {
   ACCEPTANCE_WIZARD_2_CHOICES,
 } from './fixtures/level-up-characters';
 import { readLevelUpSeam } from './fixtures/level-up-seam';
+import { expect, test } from './fixtures/parallel-test';
 
 interface CreatedCharacter {
   readonly id: number;
@@ -15,10 +16,12 @@ interface StoredRow {
 }
 
 async function ready(page: Page): Promise<void> {
+  // The four-worker pool measured this file's slowest caller at 19.2s; 50s
+  // gives this load-sensitive readiness wait at least 2.5x pool headroom.
   await expect(page.locator('#status')).toHaveAttribute(
     'data-ready',
     'true',
-    { timeout: 30_000 },
+    { timeout: 50_000 },
   );
 }
 
@@ -68,7 +71,9 @@ async function selectPlannedSpell(
   const input = page.getByRole('combobox', { name: accessibleName }).nth(index);
   await input.fill(spellName);
   const option = page.getByRole('option').filter({ hasText: spellName });
-  await expect(option).toBeVisible({ timeout: 10_000 });
+  // The four-worker pool measured the slowest caller at 17.4s; 45s gives this
+  // worker-backed option wait at least 2.5x headroom under pool contention.
+  await expect(option).toBeVisible({ timeout: 45_000 });
   await option.click();
   await expect(input).toHaveValue(spellName);
 }
@@ -206,9 +211,11 @@ async function openWizardPlannedReview(
   character: CreatedCharacter,
 ): Promise<void> {
   await page.goto(`/characters/${String(character.id)}/level-up`);
+  // The four-worker pool measured the caller at 17.4s; 45s gives both
+  // load-sensitive review waits at least 2.5x pool headroom.
   await expect(
     page.getByRole('heading', { name: `Level up — ${character.name}` }),
-  ).toBeFocused({ timeout: 30_000 });
+  ).toBeFocused({ timeout: 45_000 });
   await page.locator('[data-level-up-next]').click();
   await expect(page.getByRole('heading', { name: 'Gains' })).toBeFocused();
   await page.locator('[data-level-up-next]').click();
@@ -241,7 +248,7 @@ async function openWizardPlannedReview(
     page.getByRole('heading', { name: 'Review', exact: true }),
   ).toBeFocused();
   await expect(page.locator('[data-level-up-confirm]')).toBeEnabled({
-    timeout: 30_000,
+    timeout: 45_000,
   });
 }
 
@@ -262,9 +269,11 @@ async function openReadyReview(
   character: CreatedCharacter,
 ): Promise<void> {
   await page.goto(`/characters/${String(character.id)}/level-up`);
+  // The four-worker pool measured the slowest caller at 12.2s; 35s gives both
+  // load-sensitive review waits at least 2.5x pool headroom.
   await expect(
     page.getByRole('heading', { name: `Level up — ${character.name}` }),
-  ).toBeFocused({ timeout: 30_000 });
+  ).toBeFocused({ timeout: 35_000 });
   await page.locator('[data-level-up-next]').click();
   await expect(page.getByRole('heading', { name: 'Gains' })).toBeFocused();
   await page.locator('[data-level-up-next]').click();
@@ -272,7 +281,7 @@ async function openReadyReview(
     page.getByRole('heading', { name: 'Review', exact: true }),
   ).toBeFocused();
   await expect(page.locator('[data-level-up-confirm]')).toBeEnabled({
-    timeout: 30_000,
+    timeout: 35_000,
   });
 }
 
@@ -294,7 +303,9 @@ test('W-KEYBOARD Tab order, reverse travel, native choice keys, and moved focus 
   const routeHeading = page.getByRole('heading', {
     name: `Level up — ${character.name}`,
   });
-  await expect(routeHeading).toBeFocused({ timeout: 30_000 });
+  // The four-worker pool measured this test at 12.9s; 35s gives this
+  // load-sensitive route-focus wait at least 2.5x pool headroom.
+  await expect(routeHeading).toBeFocused({ timeout: 35_000 });
   const classChoice = page.getByRole('radio', { name: /Fighter 3 → 4/ });
   const advancedPlanner = page.getByRole('link', {
     name: 'Advanced: open planner',
@@ -374,9 +385,11 @@ test('W-INCOMPLETE classless cards explain the advanced door while held-class wa
   const held = await createFighter(page, 'Unfinished Fighter');
   const heldSeam = await readLevelUpSeam(page, held.id);
   await page.goto(heldSeam.path);
+  // The four-worker pool measured this test at 19.2s; 50s gives both
+  // load-sensitive held-class waits at least 2.5x pool headroom.
   await expect(
     page.getByRole('heading', { name: `Level up — ${held.name}` }),
-  ).toBeFocused({ timeout: 30_000 });
+  ).toBeFocused({ timeout: 50_000 });
   await expect(
     page.getByRole('heading', { name: 'Choose a held class' }),
   ).toBeVisible();
@@ -394,7 +407,7 @@ test('W-INCOMPLETE classless cards explain the advanced door while held-class wa
     page.getByRole('heading', { name: 'Review', exact: true }),
   ).toBeFocused();
   await expect(page.locator('[data-level-up-confirm]')).toBeEnabled({
-    timeout: 30_000,
+    timeout: 50_000,
   });
   expect(
     await page.locator('[data-level-up-warning] strong').allTextContents(),
@@ -404,8 +417,9 @@ test('W-INCOMPLETE classless cards explain the advanced door while held-class wa
 test('W-DOUBLE-CONFIRM two rapid activations create one level, revision, history operation, and UUID', async ({
   page,
 }) => {
-  // Measured 9.0s in isolation on 2026-08-02.
-  test.setTimeout(20_000);
+  // The four-worker parallel pool measured 12.2s; 35s preserves at least 2.5x
+  // wall-clock headroom under parallel-pool contention.
+  test.setTimeout(35_000);
   const character = await createFighter(page, 'Atomic Confirm Fighter');
   expect(character.revision).toBe(0);
   await openReadyReview(page, character);
@@ -421,7 +435,7 @@ test('W-DOUBLE-CONFIRM two rapid activations create one level, revision, history
 
   await expect(
     page.getByRole('heading', { name: 'Fighter level 2 complete' }),
-  ).toBeFocused({ timeout: 30_000 });
+  ).toBeFocused({ timeout: 35_000 });
   await expect(page.getByText('Open character sheet')).toBeVisible();
   await expect(page.getByText('Download a backup', { exact: false })).toHaveCount(0);
 
@@ -468,8 +482,9 @@ test('W-DOUBLE-CONFIRM two rapid activations create one level, revision, history
 test('W-BROWSER-PLANNED-DRAFT carries planned_subchoices from UI through Review and Complete', async ({
   page,
 }) => {
-  // Measured alone at 12.0s on Chromium including the post-commit sheet.
-  test.setTimeout(40_000);
+  // The four-worker parallel pool measured 17.4s including the post-commit
+  // sheet; 45s preserves at least 2.5x headroom under pool contention.
+  test.setTimeout(45_000);
   const character = await createCharacter(page, 'Planned Wizard', 'Wizard');
   await completeWizardLevelOneChoices(page, character.id);
   await openWizardPlannedReview(page, character);
@@ -486,7 +501,7 @@ test('W-BROWSER-PLANNED-DRAFT carries planned_subchoices from UI through Review 
   await page.locator('[data-level-up-confirm]').click();
   await expect(
     page.getByRole('heading', { name: 'Wizard level 2 complete' }),
-  ).toBeFocused({ timeout: 30_000 });
+  ).toBeFocused({ timeout: 45_000 });
   await expect(page.locator('.level-up-route')).toHaveAttribute('aria-busy', 'false');
   for (const name of ACCEPTANCE_WIZARD_2_CHOICES.spells.map(
     (choice) => choice.spell_name,
@@ -594,8 +609,9 @@ test('W-BROWSER-LU2-ROLLBACK a UI draft refused at its locator restores every da
 test('W-STALE external edit after Preview keeps the draft and requires explicit reload without levelling', async ({
   page,
 }) => {
-  // Measured 9.2s in isolation on 2026-08-02.
-  test.setTimeout(20_000);
+  // The four-worker parallel pool measured 12.0s; 30s preserves 2.5x
+  // wall-clock headroom under parallel-pool contention.
+  test.setTimeout(30_000);
   const character = await createFighter(page, 'Stale Review Fighter');
   await openReadyReview(page, character);
   const externalOperation = '40404040-4040-4040-8040-404040404040';

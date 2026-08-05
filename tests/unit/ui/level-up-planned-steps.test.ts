@@ -390,7 +390,7 @@ describe('W-LU2-DRAFT planned Skills, Expertise, and Spells', () => {
       command_fingerprint: 'server-reviewed-planned-command',
     });
     const submit = vi.fn().mockResolvedValue({
-      inverse: { type: 'restore_snapshot', snapshot: {}, integrity: 'test' },
+      operation_uuid: 'level-up-operation',
       revision: 5,
       idempotent_replay: false,
     });

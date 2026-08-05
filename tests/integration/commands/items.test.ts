@@ -2,6 +2,7 @@ import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CharacterCommandExecutor } from '../../../src/commands/character-command-executor';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
+import { validateCharacterCommandPayload } from '../../../src/commands/payload-validator';
 import { DatabaseContext } from '../../../src/db/database';
 import type { CharacterCommandPayload } from '../../../src/domain/command-contracts';
 import { openTestDatabase } from '../../helpers/open-db';
@@ -173,7 +174,7 @@ describe('item commands and effect ownership', () => {
       item: { quantity: 3 },
     });
 
-    await run(updated.inverse);
+    await run(validateCharacterCommandPayload(updated.inverse));
     expect(
       db.scalar('SELECT quantity FROM character_items WHERE id = ?', [itemId]),
     ).toBe(3);
@@ -193,7 +194,7 @@ describe('item commands and effect ownership', () => {
     expect(db.scalar('SELECT count(*) FROM character_items')).toBe(0);
     expect(db.scalar('SELECT count(*) FROM character_effects')).toBe(0);
 
-    await run(removed.inverse);
+    await run(validateCharacterCommandPayload(removed.inverse));
     expect(
       db.oneRaw(
         'SELECT id, name, quantity FROM character_items WHERE id = ?',
@@ -313,8 +314,8 @@ describe('item commands and effect ownership', () => {
       slot_3_item_id: null,
     });
 
-    await run(filled.inverse);
-    await run(unattuned.inverse);
+    await run(validateCharacterCommandPayload(filled.inverse));
+    await run(validateCharacterCommandPayload(unattuned.inverse));
     expect(
       db.oneRaw(
         `SELECT slot_1_item_id, slot_2_item_id, slot_3_item_id
@@ -381,7 +382,7 @@ describe('item commands and effect ownership', () => {
       slot_3_item_id: itemIds[2],
     });
 
-    await run(replaced.inverse);
+    await run(validateCharacterCommandPayload(replaced.inverse));
     expect(
       db.scalar(
         `SELECT slot_2_item_id FROM character_attunement_slots
@@ -433,7 +434,7 @@ describe('item commands and effect ownership', () => {
       ),
     ).toBeNull();
 
-    await run(removed.inverse);
+    await run(validateCharacterCommandPayload(removed.inverse));
     expect(
       db.scalar(
         `SELECT slot_1_item_id FROM character_attunement_slots

@@ -545,6 +545,23 @@ describe('browser catalog schema', () => {
     ]).toEqual(['subclass']);
   });
 
+  it('refuses the bundled heading-only marker in Tier-1 subclass prose', () => {
+    const subclass = {
+      kind: 'subclass',
+      contentKey: '2024:homebrew.unit:heading-only',
+      parentClassKey: '2024:class:bard',
+      name: 'Heading Only',
+      edition: '2024',
+      features: [
+        { classLevel: 3, name: 'A Heading', description: '' },
+      ],
+    };
+
+    expect(() => parseCatalogDocuments([JSON.stringify([subclass])])).toThrow(
+      "Catalog field 'features[0].description' must be a non-empty string.",
+    );
+  });
+
   it('merges split publications and pivots and chooses canonical names by edition', () => {
     const parsed = parseCatalogDocuments([
       JSON.stringify([

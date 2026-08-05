@@ -1,12 +1,15 @@
-import { expect, test, type Page } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import { readGuidedSeam } from './fixtures/guided-seam';
 import { readLevelUpSeam } from './fixtures/level-up-seam';
+import { expect, test } from './fixtures/parallel-test';
 
 async function ready(page: import('@playwright/test').Page): Promise<void> {
+  // The four-worker pool measured this file's slowest caller at 19.5s; 50s
+  // gives this load-sensitive readiness wait at least 2.5x pool headroom.
   await expect(page.locator('#status')).toHaveAttribute(
     'data-ready',
     'true',
-    { timeout: 30_000 },
+    { timeout: 50_000 },
   );
 }
 

@@ -54,8 +54,20 @@ export class CharacterCommandPreflight {
     request: CharacterCommandPreflightRequest,
   ): Promise<PreparedCharacterCommand> {
     this.assertExpectedRevision(request, request.command);
-    const payload = this.#validator.validate(request.command);
-    const command = await this.#factory.make(request.character_id, payload);
+    return this.preparePayload(request.character_id, request.command);
+  }
+
+  /**
+   * Validation/construction without a revision assertion. Internal undo uses
+   * this while preparing persisted bytes, then performs all authorization in
+   * the same transaction as the eventual write.
+   */
+  async preparePayload(
+    characterId: number,
+    input: unknown,
+  ): Promise<PreparedCharacterCommand> {
+    const payload = this.#validator.validate(input);
+    const command = await this.#factory.make(characterId, payload);
     return { payload, command };
   }
 
