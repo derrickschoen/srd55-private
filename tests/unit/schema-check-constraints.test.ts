@@ -1447,6 +1447,20 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     ],
   },
   {
+    constraint: 'characters_archived_at_check',
+    rejects: [
+      ['an integer lifecycle value', character({ archived_at: 20420304 })],
+      ['a binary lifecycle value', character({
+        archived_at: new Uint8Array([65]) as unknown as string,
+      })],
+    ],
+    accepts: [
+      ['the active NULL', character({ archived_at: null })],
+      ['an ISO timestamp', character({ archived_at: '2042-03-04T05:06:07.000Z' })],
+      ['a SQLite timestamp', character({ archived_at: '2042-03-04 05:06:07' })],
+    ],
+  },
+  {
     constraint: 'character_class_levels_spellcasting_ability_override_check',
     rejects: [
       ['an ability that does not exist', classLevel({ spellcasting_ability_override: 'luck' })],

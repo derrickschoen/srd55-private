@@ -418,6 +418,7 @@ export const COLUMN_FACTS = {
     appearance: { base: 'degraded', notNull: false },
     backstory: { base: 'degraded', notNull: false },
     notes: { base: 'degraded', notNull: false },
+    archived_at: { base: 'degraded', notNull: false },
     created_at: { base: 'degraded', notNull: false },
     updated_at: { base: 'degraded', notNull: false },
   },

@@ -30,6 +30,7 @@ import {
   CHARACTER_BACKUP_FORMAT,
   CHARACTER_BACKUP_VERSION,
   LEGACY_CHARACTER_BACKUP_VERSION,
+  PRE_FLAVOR_CHARACTER_BACKUP_VERSION,
   PREVIOUS_CHARACTER_BACKUP_VERSION,
 } from './backup-version';
 import { CHARACTER_TEXT_LIMITS } from '../domain/character-limits';
@@ -127,6 +128,17 @@ export interface LegacyCharacterBackupDocument {
 export interface PreviousCharacterBackupDocument {
   readonly format: typeof CHARACTER_BACKUP_FORMAT;
   readonly version: typeof PREVIOUS_CHARACTER_BACKUP_VERSION;
+  readonly exported_at: string;
+  readonly source_character_id: number;
+  readonly character: BackupRow;
+  readonly tables: CharacterBackupTables;
+  readonly references: CharacterBackupReferences;
+  readonly spell_definitions: CharacterBackupSpellDefinitions;
+}
+
+export interface PreFlavorCharacterBackupDocument {
+  readonly format: typeof CHARACTER_BACKUP_FORMAT;
+  readonly version: typeof PRE_FLAVOR_CHARACTER_BACKUP_VERSION;
   readonly exported_at: string;
   readonly source_character_id: number;
   readonly character: BackupRow;
@@ -1079,6 +1091,7 @@ function validateDocument(input: unknown): ValidatedDocument {
   if (
     version !== CHARACTER_BACKUP_VERSION &&
     version !== PREVIOUS_CHARACTER_BACKUP_VERSION &&
+    version !== PRE_FLAVOR_CHARACTER_BACKUP_VERSION &&
     version !== LEGACY_CHARACTER_BACKUP_VERSION
   ) {
     assertBackupHeader(
@@ -1130,6 +1143,14 @@ function validateDocument(input: unknown): ValidatedDocument {
     'id',
     ...CHARACTER_STATE_COLUMNS,
     'revision',
+    'archived_at',
+    'created_at',
+    'updated_at',
+  ] as const;
+  const preArchiveCharacterColumns = [
+    'id',
+    ...CHARACTER_STATE_COLUMNS,
+    'revision',
     'created_at',
     'updated_at',
   ] as const;
@@ -1155,18 +1176,23 @@ function validateDocument(input: unknown): ValidatedDocument {
     rawCharacter,
     version === CHARACTER_BACKUP_VERSION
       ? currentCharacterColumns
-      : preFlavorCharacterColumns,
+      : version === PREVIOUS_CHARACTER_BACKUP_VERSION
+        ? preArchiveCharacterColumns
+        : preFlavorCharacterColumns,
     'Character backup character',
   );
   const character: MutableRow =
     version === CHARACTER_BACKUP_VERSION
       ? rawCharacter
-      : {
-          ...rawCharacter,
-          alignment: null,
-          appearance: null,
-          backstory: null,
-        };
+      : version === PREVIOUS_CHARACTER_BACKUP_VERSION
+        ? { ...rawCharacter, archived_at: null }
+        : {
+            ...rawCharacter,
+            alignment: null,
+            appearance: null,
+            backstory: null,
+            archived_at: null,
+          };
   if (character.id !== characterId) {
     throw new BackupValidationError(
       'Character backup character belongs to another character.',
@@ -1462,6 +1488,7 @@ export function validateCharacterBackup(
 ): asserts input is
   | CharacterBackupDocument
   | PreviousCharacterBackupDocument
+  | PreFlavorCharacterBackupDocument
   | LegacyCharacterBackupDocument {
   validateDocument(input);
 }

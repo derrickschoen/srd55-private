@@ -69,6 +69,67 @@ const INDEPENDENT_ROOT_ANCHORS = [
     content_key: '2024:subclass:at',
     root_name: 'AT',
   },
+  // SRD subclass names: docs/srd/source/subclasses.txt:40-165.
+  {
+    content_kind: 'subclass',
+    content_key: '2024:subclass:path-of-the-berserker',
+    root_name: 'Path of the Berserker',
+  },
+  {
+    content_kind: 'subclass',
+    content_key: '2024:subclass:college-of-lore',
+    root_name: 'College of Lore',
+  },
+  {
+    content_kind: 'subclass',
+    content_key: '2024:subclass:life-domain',
+    root_name: 'Life Domain',
+  },
+  {
+    content_kind: 'subclass',
+    content_key: '2024:subclass:circle-of-the-land',
+    root_name: 'Circle of the Land',
+  },
+  {
+    content_kind: 'subclass',
+    content_key: '2024:subclass:champion',
+    root_name: 'Champion',
+  },
+  {
+    content_kind: 'subclass',
+    content_key: '2024:subclass:warrior-of-the-open-hand',
+    root_name: 'Warrior of the Open Hand',
+  },
+  {
+    content_kind: 'subclass',
+    content_key: '2024:subclass:oath-of-devotion',
+    root_name: 'Oath of Devotion',
+  },
+  {
+    content_kind: 'subclass',
+    content_key: '2024:subclass:hunter',
+    root_name: 'Hunter',
+  },
+  {
+    content_kind: 'subclass',
+    content_key: '2024:subclass:thief',
+    root_name: 'Thief',
+  },
+  {
+    content_kind: 'subclass',
+    content_key: '2024:subclass:draconic-sorcery',
+    root_name: 'Draconic Sorcery',
+  },
+  {
+    content_kind: 'subclass',
+    content_key: '2024:subclass:fiend-patron',
+    root_name: 'Fiend Patron',
+  },
+  {
+    content_kind: 'subclass',
+    content_key: '2024:subclass:evoker',
+    root_name: 'Evoker',
+  },
   // SRD species names: docs/srd/source/species-descriptions.txt:47-57.
   {
     content_kind: 'species',
@@ -194,11 +255,11 @@ describe('CI-3s bundled stable-key fingerprint registration', () => {
        WHERE key_kind <> 'bundled-stable' OR catalog_layer <> 'bundled'`,
     )).toBe(0);
     expect(reconcileBundledContentRegistryV1(db)).toEqual({
-      projected: 434,
+      projected: 446,
       orphaned: 0,
       refused: 0,
       registered: 0,
-      unchanged: 434,
+      unchanged: 446,
       moved: 0,
     });
   });
@@ -356,11 +417,11 @@ describe('CI-3s bundled stable-key fingerprint registration', () => {
     );
 
     expect(reconcileBundledContentRegistryV1(db)).toEqual({
-      projected: 433,
+      projected: 445,
       orphaned: 1,
       refused: 0,
       registered: 0,
-      unchanged: 433,
+      unchanged: 445,
       moved: 0,
     });
     expect(db.oneRaw(
@@ -385,11 +446,11 @@ describe('CI-3s bundled stable-key fingerprint registration', () => {
     )).toBe(0);
 
     expect(reconcileBundledContentRegistryV1(db)).toEqual({
-      projected: 434,
+      projected: 446,
       orphaned: 0,
       refused: 0,
       registered: 0,
-      unchanged: 434,
+      unchanged: 446,
       moved: 0,
     });
   });
@@ -402,11 +463,11 @@ describe('CI-3s bundled stable-key fingerprint registration', () => {
     );
 
     expect(reconcileBundledContentRegistryV1(db)).toEqual({
-      projected: 434,
+      projected: 446,
       orphaned: 0,
       refused: 0,
       registered: 0,
-      unchanged: 433,
+      unchanged: 445,
       moved: 1,
     });
   });
@@ -423,11 +484,11 @@ describe('CI-3s bundled stable-key fingerprint registration', () => {
     );
 
     expect(reconcileBundledContentRegistryV1(db)).toEqual({
-      projected: 433,
+      projected: 445,
       orphaned: 1,
       refused: 0,
       registered: 0,
-      unchanged: 433,
+      unchanged: 445,
       moved: 0,
     });
   });
@@ -439,11 +500,11 @@ describe('CI-3s bundled stable-key fingerprint registration', () => {
     );
 
     expect(reconcileBundledContentRegistryV1(db)).toEqual({
-      projected: 433,
+      projected: 445,
       orphaned: 1,
       refused: 0,
       registered: 0,
-      unchanged: 433,
+      unchanged: 445,
       moved: 0,
     });
   });
@@ -455,11 +516,11 @@ describe('CI-3s bundled stable-key fingerprint registration', () => {
     );
 
     expect(reconcileBundledContentRegistryV1(db)).toEqual({
-      projected: 433,
+      projected: 445,
       orphaned: 1,
       refused: 0,
       registered: 0,
-      unchanged: 433,
+      unchanged: 445,
       moved: 0,
     });
   });
@@ -520,11 +581,11 @@ describe('CI-3s bundled stable-key fingerprint registration', () => {
     );
 
     expect(reconcileBundledContentRegistryV1(db)).toEqual({
-      projected: 433,
+      projected: 445,
       orphaned: 0,
       refused: 1,
       registered: 0,
-      unchanged: 433,
+      unchanged: 445,
       moved: 0,
     });
     expect(db.oneRaw(

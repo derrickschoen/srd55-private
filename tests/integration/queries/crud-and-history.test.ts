@@ -52,6 +52,7 @@ describe('character CRUD, catalog, save points, and operation history', () => {
       rules_edition_preference: '2024',
       allow_legacy: false,
       revision: 0,
+      archived_at: null,
       created_at: '2026-07-23T10:00:00.000Z',
       updated_at: '2026-07-23T10:00:00.000Z',
     });

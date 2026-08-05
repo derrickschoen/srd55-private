@@ -168,7 +168,7 @@ function classSeeds(): Readonly<Record<string, ClassSeed>> {
   };
 }
 
-const BUNDLED_RULES_EDITION = '2024';
+export const BUNDLED_RULES_EDITION = '2024';
 
 /** Every bundled progression table covers character levels 1 through 20. */
 const PROGRESSION_LEVELS = 20;
@@ -177,8 +177,18 @@ export function classContentKey(name: string): string {
   return `${BUNDLED_RULES_EDITION}:class:${name.toLowerCase()}`;
 }
 
-const EK_CONTENT_KEY = '2024:subclass:ek';
-const AT_CONTENT_KEY = '2024:subclass:at';
+/**
+ * The subclasses whose spellcasting schedules override their parent classes.
+ * D169 keeps this as the single replacement seam: a future owner-approved
+ * content-swap unit replaces these members with the invented Monk subclass.
+ */
+export const BUNDLED_SUBCLASS_OVERRIDE_SCHEDULE_CONTENT_KEYS = [
+  '2024:subclass:ek',
+  '2024:subclass:at',
+] as const;
+
+const [EK_CONTENT_KEY, AT_CONTENT_KEY] =
+  BUNDLED_SUBCLASS_OVERRIDE_SCHEDULE_CONTENT_KEYS;
 
 /**
  * Content keys of every class and subclass this module bundles. The seeder
@@ -190,7 +200,7 @@ export function bundledClassContentKeys(): {
 } {
   return {
     classes: Object.keys(classSeeds()).map(classContentKey),
-    subclasses: [EK_CONTENT_KEY, AT_CONTENT_KEY],
+    subclasses: BUNDLED_SUBCLASS_OVERRIDE_SCHEDULE_CONTENT_KEYS,
   };
 }
 
@@ -212,9 +222,10 @@ function countRows(
  * that already carries the content is not rewritten on every open.
  *
  * Counting the progression rows rather than only the definition keys matters:
- * a database holding the fourteen definition keys with missing progression rows
- * is broken — every level lookup on it throws — and a definitions-only guard
- * would declare it healthy and never repair it.
+ * a database holding all twelve class definitions and both override-schedule
+ * subclass definitions with missing progression rows is broken — every level
+ * lookup on it throws — and a definitions-only guard would declare it healthy
+ * and never repair it.
  */
 export function hasBundledClassContent(db: DatabaseContext): boolean {
   const keys = bundledClassContentKeys();

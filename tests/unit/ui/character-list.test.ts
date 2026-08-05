@@ -38,6 +38,7 @@ function character(id: number, name: string): CharacterRow {
     appearance: null,
     backstory: null,
     notes: null,
+    archived_at: null,
     created_at: '2026-07-23T00:00:00.000Z',
     updated_at: '2026-07-23T00:00:00.000Z',
   };
