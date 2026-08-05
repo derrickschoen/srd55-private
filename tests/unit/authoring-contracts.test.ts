@@ -50,8 +50,10 @@ describe('authoring contract seam', () => {
   });
 
   /**
-   * Measured alone at 3.20s on this worktree. The 10s timeout is local to the
-   * compiler probe and leaves enough headroom for a contended full suite.
+   * Measured alone at 3.1s post-CI-4a (3.20s originally). The 10s budget was
+   * exceeded under a full parallel suite on the CI-4a-merged tree (the probe
+   * compiles a larger contract surface and competes with every worker), so the
+   * timeout carries full-suite headroom, not just isolated headroom.
    */
   it(
     'rejects every closed-union and registry probe',
@@ -107,6 +109,6 @@ describe('authoring contract seam', () => {
       expect(output).not.toContain('error TS2307');
       expect(actualDiagnostics, output).toEqual(expectedDiagnostics);
     },
-    10_000,
+    30_000,
   );
 });
