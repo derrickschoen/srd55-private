@@ -27,6 +27,11 @@ import {
 } from '../../../src/rules/srd-subclass-content';
 import { getSqlite3, MemoryDatabaseStorage } from '../../helpers/open-db';
 import { hasBundledClassResourceContent } from '../../../src/rules/class-resources-srd';
+import {
+  ensureBundledStableContentIdentity,
+  registerAssertedContentIdentity,
+} from '../../../src/catalog/content-registry';
+import { assertedExternalContentKey } from '../../../src/catalog/catalog-key';
 import { CatalogImporter } from '../../../src/catalog/catalog-importer';
 
 const LONG_ROAD_SUBCLASS_DOCUMENT = readFileSync(
@@ -730,21 +735,52 @@ describe('application database bootstrap', () => {
     const { sqlite3, lifecycle } = await freshApplicationLifecycle();
 
     const homebrew = bareLifecycle(sqlite3);
+    const homebrewWizardKey = assertedExternalContentKey(
+      'class',
+      '2024',
+      'Wizard',
+    );
+    registerAssertedContentIdentity(homebrew.database, {
+      kind: 'class',
+      edition: '2024',
+      name: 'Wizard',
+      payload: {},
+      assertedKey: homebrewWizardKey,
+    });
+    ensureBundledStableContentIdentity(homebrew.database, {
+      kind: 'class',
+      contentKey: '2024:class:fighter',
+      normalizedName: 'fighter',
+    });
     const fighterId = homebrew.database.exec(
       `INSERT INTO class_definitions (content_key, name, rules_edition)
        VALUES ('2024:class:fighter', 'Fighter', '2024')`,
     ).lastInsertId;
     homebrew.database.exec(
       `INSERT INTO class_definitions (content_key, name, rules_edition)
-       VALUES ('homebrew:wizard', 'Wizard', '2024')`,
+       VALUES (?, 'Wizard', '2024')`,
+      [homebrewWizardKey],
     );
+    const claimedChampionKey = assertedExternalContentKey(
+      'subclass',
+      '2024',
+      'Champion',
+      'claimed.homebrew',
+    );
+    registerAssertedContentIdentity(homebrew.database, {
+      kind: 'subclass',
+      edition: '2024',
+      name: 'Champion',
+      payload: {},
+      assertedKey: claimedChampionKey,
+    });
     const claimedChampionId = homebrew.database.exec(
       `INSERT INTO subclass_definitions (
          content_key, class_definition_id, name, rules_edition
        ) VALUES (
-         '2024:claimed.homebrew:champion', ?, 'Champion', '2024'
+         ?, ?, 'Champion', '2024'
        )`,
-      [fighterId],
+      [claimedChampionKey, fighterId],
     ).lastInsertId;
     homebrew.database.exec(
       `INSERT INTO subclass_features (
@@ -764,7 +800,7 @@ describe('application database bootstrap', () => {
       lifecycle.database.allRaw(
         'SELECT content_key, name FROM class_definitions ORDER BY name',
       ),
-    ).toContainEqual({ content_key: 'homebrew:wizard', name: 'Wizard' });
+    ).toContainEqual({ content_key: homebrewWizardKey, name: 'Wizard' });
     expect(classNames(lifecycle)).toEqual([...SRD_CLASSES]);
     expect(
       lifecycle.database.scalar(
@@ -790,7 +826,7 @@ describe('application database bootstrap', () => {
          WHERE subclass.name = 'Champion'`,
       ),
     ).toEqual({
-      content_key: '2024:claimed.homebrew:champion',
+      content_key: claimedChampionKey,
       name: 'Claimed Feature',
       description: 'User-authored sentinel.',
     });
@@ -814,8 +850,9 @@ describe('application database bootstrap', () => {
         `SELECT count(*) FROM subclass_features
          WHERE subclass_definition_id = (
            SELECT id FROM subclass_definitions
-           WHERE content_key = '2024:claimed.homebrew:champion'
+           WHERE content_key = ?
          )`,
+        [claimedChampionKey],
       ),
     ).toBe(1);
   });
@@ -871,6 +908,11 @@ describe('application database bootstrap', () => {
   it('validates, audits, and reopens a Monk formula image after equipping a shield', async () => {
     const sqlite3 = await getSqlite3();
     const fixture = bareLifecycle(sqlite3);
+    ensureBundledStableContentIdentity(fixture.database, {
+      kind: 'class',
+      contentKey: '2024:class:monk',
+      normalizedName: 'monk',
+    });
     const monkId = fixture.database.exec(
       `INSERT INTO class_definitions (
          content_key, name, rules_edition
@@ -1043,9 +1085,22 @@ describe('bundled class content detection', () => {
 
     // A homebrew class with its own progressions must not be able to make up
     // the numbers for a bundled class that lost rows.
+    const homebrewArtificerKey = assertedExternalContentKey(
+      'class',
+      '2024',
+      'Artificer',
+    );
+    registerAssertedContentIdentity(db, {
+      kind: 'class',
+      edition: '2024',
+      name: 'Artificer',
+      payload: {},
+      assertedKey: homebrewArtificerKey,
+    });
     const homebrewId = db.exec(
       `INSERT INTO class_definitions (content_key, name, rules_edition)
-       VALUES ('homebrew:artificer', 'Artificer', '2024')`,
+       VALUES (?, 'Artificer', '2024')`,
+      [homebrewArtificerKey],
     ).lastInsertId;
     for (let level = 1; level <= 20; level++) {
       db.exec(

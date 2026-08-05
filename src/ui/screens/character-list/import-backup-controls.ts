@@ -1,4 +1,8 @@
 import type { CatalogImportSummary } from '../../../catalog/catalog-importer';
+import type {
+  CatalogImportCommitResult,
+  CatalogImportResult,
+} from '../../../catalog/catalog-importer';
 import type { CatalogClient } from '../../../catalog/client';
 import { createCatalogClient } from '../../../catalog/client';
 import type {
@@ -16,6 +20,8 @@ import type { CharacterSummary } from '../../../domain/read-models';
 import type { RpcClient } from '../../../rpc/client';
 import { encodePartyDocument } from '../../../party/storage/document-bytes';
 import { element, listen, type Cleanup } from '../../dom';
+import type { ContentImportPlan } from '../../../catalog/content-adoption';
+import { createContentAdoptionDialog } from '../../content-adoption-dialog';
 
 export interface ReadableFile {
   readonly name: string;
@@ -29,7 +35,10 @@ export interface SavedFile {
 }
 
 export interface ImportBackupServices {
-  readonly catalog: Pick<CatalogClient, 'importCatalog'>;
+  readonly catalog: Pick<CatalogClient, 'importCatalog'> & Partial<Pick<
+    CatalogClient,
+    'planImport' | 'commitImport' | 'listMatchDecisions' | 'forgetMatchDecision'
+  >>;
   readonly backup: Pick<
     BackupClient,
     | 'exportDatabase'
@@ -96,13 +105,25 @@ export class ImportBackupController {
   constructor(private readonly services: ImportBackupServices) {}
 
   async importCatalog(files: readonly ReadableFile[]): Promise<string> {
+    const prepared = await this.prepareCatalogImport(files);
+    if (isContentImportPlan(prepared.result)) {
+      throw new TypeError('Catalog import requires content-adoption review.');
+    }
+    return catalogSummary(prepared.result);
+  }
+
+  async prepareCatalogImport(files: readonly ReadableFile[]): Promise<{
+    readonly documents: readonly string[];
+    readonly result: CatalogImportResult;
+  }> {
     if (files.length === 0) {
       throw new TypeError('Choose at least one catalog JSON file.');
     }
-    const summary = await this.services.catalog.importCatalog(
-      await Promise.all(files.map((file) => file.text())),
-    );
-    return catalogSummary(summary);
+    const documents = await Promise.all(files.map((file) => file.text()));
+    return {
+      documents,
+      result: await this.services.catalog.importCatalog(documents),
+    };
   }
 
   async exportDatabase(): Promise<void> {
@@ -156,6 +177,13 @@ export class ImportBackupController {
       document as CharacterBackupDocument,
     );
   }
+}
+
+export function isContentImportPlan(
+  value: CatalogImportResult,
+): value is ContentImportPlan {
+  return 'token' in value && Array.isArray(value.reviews) &&
+    Array.isArray(value.outcomes);
 }
 
 /**
@@ -226,6 +254,7 @@ export function createImportBackupControls(
   const controller = new ImportBackupController(services);
   let characters = [...options.characters];
   const cleanups: Cleanup[] = [];
+  let adoptionCleanup: Cleanup | undefined;
   const status = element('p', {
     className: 'transfer-status',
     attributes: { role: 'status', 'aria-live': 'polite' },
@@ -286,10 +315,45 @@ export function createImportBackupControls(
   cleanups.push(
     listen(catalogButton, 'click', () => {
       void run(catalogButton, async () => {
-        const message = await controller.importCatalog(files(catalogInput));
-        await options.onPersistedChange();
-        catalogInput.value = '';
-        return `Catalog imported: ${message}.`;
+        const prepared = await controller.prepareCatalogImport(files(catalogInput));
+        if (!isContentImportPlan(prepared.result)) {
+          await options.onPersistedChange();
+          catalogInput.value = '';
+          return `Catalog imported: ${catalogSummary(prepared.result)}.`;
+        }
+        if (prepared.result.reviews.length === 0) {
+          throw new TypeError('Catalog import was refused before adoption review.');
+        }
+        if (
+          services.catalog.planImport === undefined ||
+          services.catalog.commitImport === undefined
+        ) {
+          throw new TypeError('Catalog adoption services are unavailable.');
+        }
+        adoptionCleanup?.();
+        const rendered = createContentAdoptionDialog({
+          plan: prepared.result,
+          replan: (choices) => services.catalog.planImport!(
+            prepared.documents,
+            choices,
+          ),
+          commit: (plan, choices) => services.catalog.commitImport!(
+            prepared.documents,
+            plan.token,
+            choices,
+          ),
+          onCommitted: async (result) => {
+            const catalogResult = result as typeof result &
+              Extract<CatalogImportCommitResult, { readonly kind: 'committed' }>;
+            await options.onPersistedChange();
+            catalogInput.value = '';
+            announce(`Catalog imported: ${catalogSummary(catalogResult.summary)}.`);
+          },
+          onCancel: () => announce('Catalog import cancelled.'),
+        });
+        adoptionCleanup = rendered.cleanup;
+        root.append(rendered.element);
+        return 'Review each matching catalog entry before importing.';
       });
     }),
   );
@@ -399,6 +463,56 @@ export function createImportBackupControls(
     status,
   ]);
 
+  const receiptSelect = element('select', {
+    attributes: { 'aria-label': 'Remembered catalog match choice' },
+  });
+  const forgetReceipt = element('button', {
+    text: 'Forget remembered choice',
+    attributes: { type: 'button' },
+  });
+  const refreshReceipts = async (): Promise<void> => {
+    if (services.catalog.listMatchDecisions === undefined) {
+      receiptSelect.disabled = true;
+      forgetReceipt.disabled = true;
+      return;
+    }
+    const receipts = await services.catalog.listMatchDecisions();
+    receiptSelect.replaceChildren(...receipts.map((receipt) => element('option', {
+      text: `${receipt.kind}: ${receipt.decision} → ${receipt.targetContentKey}`,
+      attributes: {
+        value: JSON.stringify({
+          kind: receipt.kind,
+          scheme: receipt.scheme,
+          digest: receipt.digest,
+        }),
+      },
+    })));
+    receiptSelect.disabled = receipts.length === 0;
+    forgetReceipt.disabled = receipts.length === 0;
+  };
+  root.querySelector('.transfer-grid')?.append(element('div', {
+    className: 'transfer-control',
+  }, [
+    element('label', {}, [element('span', { text: 'Remembered catalog choices' }), receiptSelect]),
+    forgetReceipt,
+  ]));
+  cleanups.push(listen(forgetReceipt, 'click', () => {
+    void run(forgetReceipt, async () => {
+      if (services.catalog.forgetMatchDecision === undefined) {
+        throw new TypeError('Catalog receipt service is unavailable.');
+      }
+      const input = JSON.parse(receiptSelect.value) as Parameters<
+        NonNullable<typeof services.catalog.forgetMatchDecision>
+      >[0];
+      const result = await services.catalog.forgetMatchDecision(input);
+      await refreshReceipts();
+      return result.forgotten
+        ? 'Remembered catalog choice forgotten.'
+        : 'That remembered catalog choice no longer exists.';
+    });
+  }));
+  void refreshReceipts().catch((error: unknown) => announce(errorMessage(error), true));
+
   const updateCharacters = (
     nextCharacters: readonly CharacterSummary[],
   ): void => {
@@ -414,6 +528,7 @@ export function createImportBackupControls(
     element: root,
     updateCharacters,
     cleanup: () => {
+      adoptionCleanup?.();
       for (const cleanup of cleanups.splice(0)) {
         cleanup();
       }

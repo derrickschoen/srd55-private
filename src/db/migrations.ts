@@ -33,6 +33,7 @@ import partyDocumentStates from '../../drizzle/0029_party_document_states.sql?ra
 import subclassReferenceText from '../../drizzle/0030_subclass_reference_text.sql?raw';
 import itemDefinitions from '../../drizzle/0031_item_definitions.sql?raw';
 import characterArchive from '../../drizzle/0032_character_archive.sql?raw';
+import assertedContentKeys from '../../drizzle/0033_asserted_content_keys.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -369,6 +370,18 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
       '4da268e1ddf1ecacf4cbe50cd090f505dcc34e27e218e8f86992772e8ac37ab0',
     resultSchemaChecksum:
       'b3108351ca445275711c3e208ca6b45166d22a1bd63733a0fa82459f5b41cc91',
+  }),
+  // D203 / CI-4a: externally asserted portable slug keys receive their own
+  // authority class. Existing rows copy byte-for-byte; no CI-4b rekey/backfill
+  // occurs. Every fresh root, including spells, must be registered before
+  // insertion; no branch is permitted to mint legacy-opaque.
+  Object.freeze({
+    id: '0033_asserted_content_keys',
+    sql: assertedContentKeys,
+    checksum:
+      '60d15e1ef963e1765f8451cfea25ffd5eed6a0302e7d0fb55bfb294d58f8750b',
+    resultSchemaChecksum:
+      '88c4c7c8e7498cc7c8e61e400bb356d68e5d493d13e124bbb2975a025a2a4f6d',
   }),
 ]);
 

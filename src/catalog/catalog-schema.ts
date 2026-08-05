@@ -55,6 +55,10 @@ import { isRecord } from '../worker/handler';
 import { isImportedContentKey } from './catalog-key';
 import { trimEqualCatalogLocator } from './catalog-field-values';
 import { normalizeContentIdentityName } from './content-identity';
+import type {
+  ContentImportChoices,
+  ContentImportPlanToken,
+} from './content-adoption';
 import {
   nonEmptySubclassFeatureDescription,
   type NonEmptySubclassFeatureDescription,
@@ -1381,6 +1385,59 @@ export function isCatalogImportParams(
     return false;
   }
   return params.dryRun === undefined || typeof params.dryRun === 'boolean';
+}
+
+export interface CatalogImportPlanParams extends CatalogImportParams {
+  readonly choices?: ContentImportChoices;
+}
+
+export interface CatalogImportCommitParams extends CatalogImportParams {
+  readonly token: ContentImportPlanToken;
+  readonly choices?: ContentImportChoices;
+}
+
+export function isContentImportChoices(value: unknown): value is ContentImportChoices {
+  return isRecord(value) && Object.values(value).every((choice) =>
+    isRecord(choice) &&
+    Object.keys(choice).every((key) => key === 'decision' || key === 'cloneName') &&
+    (choice.decision === 'match' || choice.decision === 'clone') &&
+    (choice.cloneName === undefined || typeof choice.cloneName === 'string'),
+  );
+}
+
+function catalogImportBase(value: Record<string, unknown>): CatalogImportParams {
+  return {
+    documents: value.documents as string[],
+    ...(value.textDocuments === undefined
+      ? {}
+      : { textDocuments: value.textDocuments as string[] }),
+    ...(value.dryRun === undefined ? {} : { dryRun: value.dryRun as boolean }),
+  };
+}
+
+export function isCatalogImportPlanParams(
+  params: unknown,
+): params is CatalogImportPlanParams {
+  if (!isRecord(params)) return false;
+  const base = catalogImportBase(params);
+  return isCatalogImportParams(base) &&
+    Object.keys(params).every((key) =>
+      ['documents', 'textDocuments', 'dryRun', 'choices'].includes(key),
+    ) &&
+    (params.choices === undefined || isContentImportChoices(params.choices));
+}
+
+export function isCatalogImportCommitParams(
+  params: unknown,
+): params is CatalogImportCommitParams {
+  if (!isRecord(params)) return false;
+  const base = catalogImportBase(params);
+  return isCatalogImportParams(base) &&
+    Object.keys(params).every((key) =>
+      ['documents', 'textDocuments', 'dryRun', 'token', 'choices'].includes(key),
+    ) &&
+    typeof params.token === 'string' && /^[0-9a-f]{64}$/.test(params.token) &&
+    (params.choices === undefined || isContentImportChoices(params.choices));
 }
 
 export function isForkSpellParams(

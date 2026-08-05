@@ -39,6 +39,8 @@ import {
   type RowCodec,
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
+import { normalizeContentIdentityName } from '../catalog/content-identity';
+import { ensureBundledStableContentIdentity } from '../catalog/content-registry';
 import { GrantRule } from '../grants/grant-rule';
 import {
   bundledBackgroundTemplates,
@@ -160,6 +162,11 @@ export function seedBackgroundDefinitions(db: DatabaseContext): void {
       if (holder !== null && holder !== definition.content_key) {
         continue;
       }
+      ensureBundledStableContentIdentity(db, {
+        kind: 'background',
+        contentKey: definition.content_key,
+        normalizedName: normalizeContentIdentityName(definition.name),
+      });
       db.exec(
         `INSERT INTO background_definitions (
            content_key, name, rules_edition, repeatable, grant_rules,

@@ -63,6 +63,21 @@ ALTER TABLE "__new_migration_parent" RENAME TO migration_parent;`;
 
 let sqlite3: Sqlite3Static;
 
+function expectTriggerRefusal(action: () => void, message: string): void {
+  try {
+    action();
+  } catch (error) {
+    expect(error).toMatchObject({
+      name: 'SQLite3Error',
+      resultCode: 1811,
+      message:
+        `SQLITE_CONSTRAINT_TRIGGER: sqlite3 result code 1811: ${message}`,
+    });
+    return;
+  }
+  throw new Error('Expected SQLite trigger refusal');
+}
+
 beforeEach(async () => {
   sqlite3 = await getSqlite3();
 });
@@ -135,6 +150,16 @@ const SCHEMA_BEFORE_CHARACTER_ARCHIVE = DATABASE_MIGRATIONS
     0,
     DATABASE_MIGRATIONS.findIndex(
       (entry) => entry.id === '0032_character_archive',
+    ),
+  )
+  .map((entry) => entry.sql)
+  .join('\n');
+
+const SCHEMA_BEFORE_ASSERTED_CONTENT_KEYS = DATABASE_MIGRATIONS
+  .slice(
+    0,
+    DATABASE_MIGRATIONS.findIndex(
+      (entry) => entry.id === '0033_asserted_content_keys',
     ),
   )
   .map((entry) => entry.sql)
@@ -350,6 +375,76 @@ function probedRegistry(targetSchema: string): readonly DatabaseMigration[] {
 }
 
 describe('database migration chain', () => {
+  it('0033 preserves legacy identities and requires external roots to assert portable keys first', async () => {
+    const storage = await storageHolding(
+      `${SCHEMA_BEFORE_ASSERTED_CONTENT_KEYS}
+       INSERT INTO item_definitions (
+         content_key, rules_edition, name, description, requires_attunement
+       ) VALUES (
+         'expanded:preserved-belt', 'expanded', 'Preserved Belt', '', 0
+       );`,
+    );
+    const lifecycle = new DatabaseLifecycle(sqlite3, storage, schema);
+    lifecycle.open();
+    try {
+      expect(lifecycle.database.oneRaw(
+        `SELECT content_kind, key_kind, catalog_layer
+         FROM catalog_content_identities
+         WHERE content_key = 'expanded:preserved-belt'`,
+      )).toEqual({
+        content_kind: 'item',
+        key_kind: 'legacy-opaque',
+        catalog_layer: 'external',
+      });
+      expectTriggerRefusal(() => lifecycle.database.exec(
+        `INSERT INTO item_definitions (
+           content_key, rules_edition, name, description, requires_attunement
+         ) VALUES (
+           'expanded:content.item:new-belt', 'expanded', 'New Belt', '', 0
+         )`,
+      ),
+        'item content key must be registered before insert',
+      );
+      expectTriggerRefusal(() => lifecycle.database.exec(
+        `INSERT INTO item_definitions (
+           content_key, rules_edition, name, description, requires_attunement
+         ) VALUES (
+           'fresh-unrecognized-root', 'expanded', 'Fresh Root', '', 0
+         )`,
+      ),
+        'item content key must be registered before insert',
+      );
+      expect(lifecycle.database.scalar<number>(
+        `SELECT count(*) FROM catalog_content_identities
+         WHERE content_key = 'fresh-unrecognized-root'
+           OR key_kind = 'legacy-opaque'
+             AND content_key <> 'expanded:preserved-belt'`,
+      )).toBe(0);
+
+      lifecycle.database.exec(
+        `INSERT INTO catalog_content_identities (
+           content_key, content_kind, key_kind, catalog_layer, normalized_name
+         ) VALUES (
+           'expanded:content.item:new-belt', 'item', 'asserted', 'external',
+           'new belt'
+         )`,
+      );
+      lifecycle.database.exec(
+        `INSERT INTO item_definitions (
+           content_key, rules_edition, name, description, requires_attunement
+         ) VALUES (
+           'expanded:content.item:new-belt', 'expanded', 'New Belt', '', 0
+         )`,
+      );
+      expect(lifecycle.database.scalar<number>(
+        `SELECT count(*) FROM item_definitions
+         WHERE content_key = 'expanded:content.item:new-belt'`,
+      )).toBe(1);
+    } finally {
+      lifecycle.close();
+    }
+  });
+
   it('0032 preserves a replacement image and makes historical roots active', async () => {
     const storage = await storageHolding(
       `${SCHEMA_BEFORE_CHARACTER_ARCHIVE}
@@ -529,11 +624,17 @@ describe('database migration chain', () => {
       updated_at: '2041-02-03T04:05:06.000Z',
     });
     lifecycle.database.exec(
-      `INSERT INTO weapon_templates (
+      `INSERT INTO catalog_content_identities (
+         content_key, content_kind, key_kind, catalog_layer, normalized_name
+       ) VALUES (
+         'expanded:content.weapon:storm-pike', 'weapon', 'asserted', 'external',
+         'stormpike'
+       );
+       INSERT INTO weapon_templates (
          content_key, name, srd_group, damage_kind, damage_dice, damage_type,
          range_kind, mastery_property
        ) VALUES (
-         'expanded:legacy:storm-pike', 'Storm Pike', 'martial_melee',
+         'expanded:content.weapon:storm-pike', 'Storm Pike', 'martial_melee',
          'dice', '1d8', 'Storm Fire', 'none', 'Vex'
        )`,
     );
@@ -628,13 +729,19 @@ describe('database migration chain', () => {
       INSERT INTO species_template_trait_effects (
         species_template_trait_id, sort_order, effect_kind, damage_type, label
       ) VALUES (11, 2, 'damage_resistance', 'Void  Fire', 'Void ward');
+      INSERT INTO catalog_content_identities (
+        content_key, content_kind, key_kind, catalog_layer, normalized_name
+      ) VALUES (
+        'expanded:content.background:migration', 'background', 'asserted',
+        'external', 'migrationbackground'
+      );
       INSERT INTO background_templates (
         id, content_key, rules_edition, name,
         ability_score_1, ability_score_2, ability_score_3, feat_name,
         skill_proficiency_1, skill_proficiency_2, tool_proficiency,
         equipment_option_a, equipment_option_b
       ) VALUES (
-        30, 'expanded:background:migration', 'expanded', 'Migration Background',
+        30, 'expanded:content.background:migration', 'expanded', 'Migration Background',
         'Strength', 'Dexterity', 'Constitution', 'Alert', 'Acrobatics',
         'Stealth', 'Astrolabe', 'Astrolabe', '50 GP'
       );

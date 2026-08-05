@@ -11,6 +11,7 @@ import type {
   AddSourceCommand as AddSourcePayload,
   UpdateSourceConfigCommand as UpdateSourceConfigPayload,
 } from '../../../src/domain/command-contracts';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import { openTestDatabase } from '../../helpers/open-db';
 
 type SourceType = 'class' | 'feat' | 'species' | 'background';
@@ -48,6 +49,14 @@ describe('character rule and source commands', () => {
     rules: readonly Record<string, unknown>[],
     repeatable = false,
   ): number {
+    const kind = table === 'feat_definitions'
+      ? 'feat'
+      : table === 'species_definitions'
+        ? 'species'
+        : 'background';
+    registerFixtureContentIdentity(db, {
+      kind, contentKey, name, keyKind: 'bundled-stable',
+    });
     return db.exec(
       `INSERT INTO ${table} (
          content_key, name, rules_edition, repeatable, grant_rules
@@ -66,12 +75,16 @@ describe('character rule and source commands', () => {
     ability: string | null,
     rules: readonly Record<string, unknown>[],
   ): number {
+    const contentKey = `2024:class:${name.toLowerCase()}`;
+    registerFixtureContentIdentity(db, {
+      kind: 'class', contentKey, name, keyKind: 'bundled-stable',
+    });
     const classId = db.exec(
       `INSERT INTO class_definitions (
          content_key, name, rules_edition, spellcasting_ability,
          progression_type
        ) VALUES (?, ?, '2024', ?, 'full')`,
-      [`2024:class:${name.toLowerCase()}`, name, ability],
+      [contentKey, name, ability],
     ).lastInsertId;
     db.exec(
       `INSERT INTO class_progressions (
@@ -89,6 +102,9 @@ describe('character rule and source commands', () => {
     list?: string,
     level = 0,
   ): number {
+    registerFixtureContentIdentity(db, {
+      kind: 'spell', contentKey: key, name, keyKind: 'bundled-stable',
+    });
     const identityId = db.exec(
       `INSERT INTO spell_identities (
          content_key, canonical_name, normalized_name

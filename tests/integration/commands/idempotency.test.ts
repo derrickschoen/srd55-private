@@ -4,6 +4,7 @@ import { CharacterCommandExecutor } from '../../../src/commands/character-comman
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import { RevisionConflict } from '../../../src/commands/revision-conflict';
 import { DatabaseContext } from '../../../src/db/database';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import { openTestDatabase } from '../../helpers/open-db';
 
 const operationA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -142,6 +143,10 @@ describe('command idempotency and stale-slot merge guards', () => {
   });
 
   it('merges only a stale edit whose exact owned slot was untouched', async () => {
+    registerFixtureContentIdentity(db, {
+      kind: 'spell', contentKey: 'x50:spell', name: 'X50 Spell',
+      keyKind: 'bundled-stable',
+    });
     const identityId = db.exec(
       `INSERT INTO spell_identities
          (content_key, canonical_name, normalized_name)

@@ -193,7 +193,7 @@ CREATE TABLE `catalog_content_identities` (
 	`normalized_name` VARCHAR NOT NULL,
 	`created_at` DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	CONSTRAINT "catalog_content_identities_content_kind_check" CHECK(`content_kind` IN ('class', 'subclass', 'feat', 'species', 'background', 'spell', 'weapon', 'armor', 'item')),
-	CONSTRAINT "catalog_content_identities_key_kind_check" CHECK("catalog_content_identities"."key_kind" IN ('derived', 'bundled-stable', 'legacy-opaque')),
+	CONSTRAINT "catalog_content_identities_key_kind_check" CHECK("catalog_content_identities"."key_kind" IN ('derived', 'asserted', 'bundled-stable', 'legacy-opaque')),
 	CONSTRAINT "catalog_content_identities_catalog_layer_check" CHECK("catalog_content_identities"."catalog_layer" IN ('bundled', 'external')),
 	CONSTRAINT "catalog_content_identities_normalized_name_check" CHECK(length("catalog_content_identities"."normalized_name") > 0),
 	CONSTRAINT "catalog_content_identities_key_layer_check" CHECK((
@@ -227,6 +227,43 @@ CREATE TABLE `catalog_content_identities` (
             "catalog_content_identities"."content_key",
             instr("catalog_content_identities"."content_key", ':content.v1:') + 12
           ) NOT GLOB '*[^0-9a-f]*')
+        OR ("catalog_content_identities"."key_kind" = 'asserted'
+          AND "catalog_content_identities"."catalog_layer" = 'external'
+          -- Exact grammar shared with isAssertedExternalContentKey:
+          -- edition:name, or edition:dotted.owner:name. Every component is a
+          -- lowercase alphanumeric/hyphen slug with no empty hyphen segment.
+          AND length("catalog_content_identities"."content_key") > 2
+          AND "catalog_content_identities"."content_key" NOT GLOB '*[^a-z0-9:.-]*'
+          AND instr("catalog_content_identities"."content_key", ':') > 1
+          AND substr("catalog_content_identities"."content_key", 1, 1) NOT IN ('-', '.', ':')
+          AND substr("catalog_content_identities"."content_key", -1, 1) NOT IN ('-', '.', ':')
+          AND instr("catalog_content_identities"."content_key", '::') = 0
+          AND instr("catalog_content_identities"."content_key", '..') = 0
+          AND instr("catalog_content_identities"."content_key", '--') = 0
+          AND instr("catalog_content_identities"."content_key", ':.') = 0
+          AND instr("catalog_content_identities"."content_key", '.:') = 0
+          AND instr("catalog_content_identities"."content_key", ':-') = 0
+          AND instr("catalog_content_identities"."content_key", '-:') = 0
+          AND instr("catalog_content_identities"."content_key", '.-') = 0
+          AND instr("catalog_content_identities"."content_key", '-.') = 0
+          AND (
+            (length("catalog_content_identities"."content_key") - length(replace("catalog_content_identities"."content_key", ':', '')) = 1
+              AND instr("catalog_content_identities"."content_key", '.') = 0)
+            OR
+            (length("catalog_content_identities"."content_key") - length(replace("catalog_content_identities"."content_key", ':', '')) = 2
+              AND instr(substr("catalog_content_identities"."content_key", instr("catalog_content_identities"."content_key", ':') + 1), ':') > 1
+              AND instr(substr("catalog_content_identities"."content_key", 1, instr("catalog_content_identities"."content_key", ':') - 1), '.') = 0
+              AND instr(substr(
+                "catalog_content_identities"."content_key",
+                instr("catalog_content_identities"."content_key", ':') + 1,
+                instr(substr("catalog_content_identities"."content_key", instr("catalog_content_identities"."content_key", ':') + 1), ':') - 1
+              ), '.') > 1
+              AND instr(substr(
+                "catalog_content_identities"."content_key",
+                instr("catalog_content_identities"."content_key", ':') +
+                  instr(substr("catalog_content_identities"."content_key", instr("catalog_content_identities"."content_key", ':') + 1), ':') + 1
+              ), '.') = 0)
+          ))
         OR ("catalog_content_identities"."key_kind" = 'bundled-stable'
           AND "catalog_content_identities"."catalog_layer" = 'bundled')
         OR ("catalog_content_identities"."key_kind" = 'legacy-opaque'
@@ -1860,12 +1897,9 @@ BEGIN
     SELECT RAISE(ABORT, 'a spell slot cannot hold both a fixed grant and a user selection');
 END;
 
--- CI-2a registry guards. Aggregate roots cannot outrun their content-key
--- parent. These BEFORE INSERT triggers are the SQL boundary for the existing
--- seed/import writers while CI-3x replaces those writers with semantic
--- projectors. Every identity minted here is deliberately legacy-opaque:
--- neither a key's spelling nor a legacy row's source metadata proves its
--- provenance, and these triggers create no fingerprint.
+-- CI-2a/CI-4a registry guards. Every fresh aggregate root, including a spell,
+-- must pass through the asserted/bundled registration seam first. None of
+-- these triggers is permitted to mint legacy-opaque.
 CREATE TRIGGER catalog_register_class_identity_before_insert
 BEFORE INSERT ON class_definitions
 BEGIN
@@ -1874,11 +1908,10 @@ BEGIN
     SELECT 1 FROM catalog_content_identities
     WHERE content_key = NEW.content_key AND content_kind <> 'class'
   );
-  INSERT OR IGNORE INTO catalog_content_identities (
-    content_key, content_kind, key_kind, catalog_layer, normalized_name
-  ) VALUES (
-    NEW.content_key, 'class', 'legacy-opaque', 'external',
-    lower(NEW.name)
+  SELECT RAISE(ABORT, 'class content key must be registered before insert')
+  WHERE NOT EXISTS (
+    SELECT 1 FROM catalog_content_identities
+    WHERE content_key = NEW.content_key AND content_kind = 'class'
   );
 END;
 
@@ -1890,11 +1923,10 @@ BEGIN
     SELECT 1 FROM catalog_content_identities
     WHERE content_key = NEW.content_key AND content_kind <> 'subclass'
   );
-  INSERT OR IGNORE INTO catalog_content_identities (
-    content_key, content_kind, key_kind, catalog_layer, normalized_name
-  ) VALUES (
-    NEW.content_key, 'subclass', 'legacy-opaque', 'external',
-    lower(NEW.name)
+  SELECT RAISE(ABORT, 'subclass content key must be registered before insert')
+  WHERE NOT EXISTS (
+    SELECT 1 FROM catalog_content_identities
+    WHERE content_key = NEW.content_key AND content_kind = 'subclass'
   );
 END;
 
@@ -1906,11 +1938,10 @@ BEGIN
     SELECT 1 FROM catalog_content_identities
     WHERE content_key = NEW.content_key AND content_kind <> 'feat'
   );
-  INSERT OR IGNORE INTO catalog_content_identities (
-    content_key, content_kind, key_kind, catalog_layer, normalized_name
-  ) VALUES (
-    NEW.content_key, 'feat', 'legacy-opaque', 'external',
-    lower(NEW.name)
+  SELECT RAISE(ABORT, 'feat content key must be registered before insert')
+  WHERE NOT EXISTS (
+    SELECT 1 FROM catalog_content_identities
+    WHERE content_key = NEW.content_key AND content_kind = 'feat'
   );
 END;
 
@@ -1922,11 +1953,10 @@ BEGIN
     SELECT 1 FROM catalog_content_identities
     WHERE content_key = NEW.content_key AND content_kind <> 'species'
   );
-  INSERT OR IGNORE INTO catalog_content_identities (
-    content_key, content_kind, key_kind, catalog_layer, normalized_name
-  ) VALUES (
-    NEW.content_key, 'species', 'legacy-opaque', 'external',
-    lower(NEW.name)
+  SELECT RAISE(ABORT, 'species content key must be registered before insert')
+  WHERE NOT EXISTS (
+    SELECT 1 FROM catalog_content_identities
+    WHERE content_key = NEW.content_key AND content_kind = 'species'
   );
 END;
 
@@ -1938,11 +1968,10 @@ BEGIN
     SELECT 1 FROM catalog_content_identities
     WHERE content_key = NEW.content_key AND content_kind <> 'background'
   );
-  INSERT OR IGNORE INTO catalog_content_identities (
-    content_key, content_kind, key_kind, catalog_layer, normalized_name
-  ) VALUES (
-    NEW.content_key, 'background', 'legacy-opaque', 'external',
-    lower(NEW.name)
+  SELECT RAISE(ABORT, 'background content key must be registered before insert')
+  WHERE NOT EXISTS (
+    SELECT 1 FROM catalog_content_identities
+    WHERE content_key = NEW.content_key AND content_kind = 'background'
   );
 END;
 
@@ -1954,14 +1983,11 @@ BEGIN
     SELECT 1 FROM catalog_content_identities
     WHERE content_key = NEW.content_key AND content_kind <> 'spell'
   );
-  INSERT OR IGNORE INTO catalog_content_identities (
-    content_key, content_kind, key_kind, catalog_layer, normalized_name
-  )
-  SELECT
-    NEW.content_key, 'spell', 'legacy-opaque', 'external',
-    normalized_name
-  FROM spell_identities
-  WHERE id = NEW.spell_identity_id;
+  SELECT RAISE(ABORT, 'spell content key must be registered before insert')
+  WHERE NOT EXISTS (
+    SELECT 1 FROM catalog_content_identities
+    WHERE content_key = NEW.content_key AND content_kind = 'spell'
+  );
 END;
 
 CREATE TRIGGER catalog_register_species_template_identity_before_insert
@@ -1972,10 +1998,10 @@ BEGIN
     SELECT 1 FROM catalog_content_identities
     WHERE content_key = NEW.content_key AND content_kind <> 'species'
   );
-  INSERT OR IGNORE INTO catalog_content_identities (
-    content_key, content_kind, key_kind, catalog_layer, normalized_name
-  ) VALUES (
-    NEW.content_key, 'species', 'legacy-opaque', 'external', lower(NEW.name)
+  SELECT RAISE(ABORT, 'species content key must be registered before insert')
+  WHERE NOT EXISTS (
+    SELECT 1 FROM catalog_content_identities
+    WHERE content_key = NEW.content_key AND content_kind = 'species'
   );
 END;
 
@@ -1987,10 +2013,10 @@ BEGIN
     SELECT 1 FROM catalog_content_identities
     WHERE content_key = NEW.content_key AND content_kind <> 'background'
   );
-  INSERT OR IGNORE INTO catalog_content_identities (
-    content_key, content_kind, key_kind, catalog_layer, normalized_name
-  ) VALUES (
-    NEW.content_key, 'background', 'legacy-opaque', 'external', lower(NEW.name)
+  SELECT RAISE(ABORT, 'background content key must be registered before insert')
+  WHERE NOT EXISTS (
+    SELECT 1 FROM catalog_content_identities
+    WHERE content_key = NEW.content_key AND content_kind = 'background'
   );
 END;
 
@@ -2002,10 +2028,10 @@ BEGIN
     SELECT 1 FROM catalog_content_identities
     WHERE content_key = NEW.content_key AND content_kind <> 'armor'
   );
-  INSERT OR IGNORE INTO catalog_content_identities (
-    content_key, content_kind, key_kind, catalog_layer, normalized_name
-  ) VALUES (
-    NEW.content_key, 'armor', 'legacy-opaque', 'external', lower(NEW.name)
+  SELECT RAISE(ABORT, 'armor content key must be registered before insert')
+  WHERE NOT EXISTS (
+    SELECT 1 FROM catalog_content_identities
+    WHERE content_key = NEW.content_key AND content_kind = 'armor'
   );
 END;
 
@@ -2017,10 +2043,10 @@ BEGIN
     SELECT 1 FROM catalog_content_identities
     WHERE content_key = NEW.content_key AND content_kind <> 'weapon'
   );
-  INSERT OR IGNORE INTO catalog_content_identities (
-    content_key, content_kind, key_kind, catalog_layer, normalized_name
-  ) VALUES (
-    NEW.content_key, 'weapon', 'legacy-opaque', 'external', lower(NEW.name)
+  SELECT RAISE(ABORT, 'weapon content key must be registered before insert')
+  WHERE NOT EXISTS (
+    SELECT 1 FROM catalog_content_identities
+    WHERE content_key = NEW.content_key AND content_kind = 'weapon'
   );
 END;
 
@@ -2032,9 +2058,9 @@ BEGIN
     SELECT 1 FROM catalog_content_identities
     WHERE content_key = NEW.content_key AND content_kind <> 'item'
   );
-  INSERT OR IGNORE INTO catalog_content_identities (
-    content_key, content_kind, key_kind, catalog_layer, normalized_name
-  ) VALUES (
-    NEW.content_key, 'item', 'legacy-opaque', 'external', lower(NEW.name)
+  SELECT RAISE(ABORT, 'item content key must be registered before insert')
+  WHERE NOT EXISTS (
+    SELECT 1 FROM catalog_content_identities
+    WHERE content_key = NEW.content_key AND content_kind = 'item'
   );
 END;

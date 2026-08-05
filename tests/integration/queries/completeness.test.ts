@@ -11,6 +11,7 @@ import {
 import { CharacterListBuilder } from '../../../src/queries/character-list-builder';
 import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
 import { openTestDatabase } from '../../helpers/open-db';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import {
   addClassLevel,
   classDefinitionId,
@@ -62,6 +63,10 @@ const magicInitiateRules = [
 ];
 
 function seedMagicInitiate(db: DatabaseContext): number {
+  registerFixtureContentIdentity(db, {
+    kind: 'feat', contentKey: '2024:feat:magic-initiate',
+    name: 'Magic Initiate', keyKind: 'bundled-stable',
+  });
   return db.exec(
     `INSERT INTO feat_definitions (
        content_key, name, rules_edition, repeatable, grant_rules

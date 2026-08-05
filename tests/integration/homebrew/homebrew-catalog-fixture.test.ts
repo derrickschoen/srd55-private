@@ -3,7 +3,10 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { handlers } from '../../../src/worker/handlers/catalog';
-import type { CatalogImportSummary } from '../../../src/catalog/catalog-importer';
+import type {
+  CatalogImportResult,
+  CatalogImportSummary,
+} from '../../../src/catalog/catalog-importer';
 import {
   importedContentKeyOwner,
   isSpellVersionKey,
@@ -12,6 +15,7 @@ import type { DatabaseContext } from '../../../src/db/database';
 import { attacksPerAction } from '../../../src/rules/sheet';
 import { SheetContentLookup } from '../../../src/rules/sheet-content-lookup';
 import { createRpcHarness, type RpcHarness } from '../../helpers/rpc-harness';
+import { assertContentImportPlan } from '../../helpers/content-import-plan';
 
 const fixtureDir = fileURLToPath(
   new URL('../../fixtures/homebrew-catalog/', import.meta.url),
@@ -149,7 +153,7 @@ describe('the homebrew catalog fixture imports through the existing path', () =>
         effect_reliability_category: 'mixed',
       },
       {
-        content_key: 'expanded:longroad.homebrew:fiddlers-poultice',
+        content_key: 'expanded:longroad.homebrew:fiddler-s-poultice',
         display_name: "Fiddler's Poultice",
         level: 1,
         school: 'Transmutation',
@@ -172,7 +176,7 @@ describe('the homebrew catalog fixture imports through the existing path', () =>
         effect_reliability_category: 'ritual_utility',
       },
       {
-        content_key: 'expanded:longroad.homebrew:roadmenders-cadence',
+        content_key: 'expanded:longroad.homebrew:roadmender-s-cadence',
         display_name: "Roadmender's Cadence",
         level: 1,
         school: 'Abjuration',
@@ -416,7 +420,7 @@ describe('the College of the Long Road imports and reaches the sheet', () => {
     expect(dumped).not.toContain('The Long Road Companion');
   });
 
-  it('is idempotent, and a revised document replaces the feature list whole', async () => {
+  it('is idempotent, and routes a revised same-key subclass to review', async () => {
     const rpc = await open();
     await importCatalog(rpc, { documents: [SUBCLASS] });
 
@@ -429,22 +433,43 @@ describe('the College of the Long Road imports and reaches the sheet', () => {
       subclass_features_created: 0,
     });
 
-    // A revision that DROPS a feature drops it from the database. Within one
-    // subclass the document is authoritative — nothing references a
-    // `subclass_features` row, so there is nothing left dangling.
+    // A revision that drops features has a different immutable fingerprint.
+    // The shared key therefore identifies a collision for review, not a
+    // request to mutate the installed subclass in place.
     const revised = JSON.parse(SUBCLASS) as {
       features: { name: string }[];
     }[];
     (revised[0] as { features: unknown[] }).features = (
       revised[0] as { features: unknown[] }
     ).features.slice(0, 2);
-    expect(
-      await importCatalog(rpc, { documents: [JSON.stringify(revised)] }),
-    ).toMatchObject({
-      subclasses_created: 0,
-      subclasses_updated: 1,
-      subclass_features_created: 2,
-    });
+    const response = await rpc.call<
+      { documents: string[] },
+      CatalogImportResult
+    >('catalog.import', { documents: [JSON.stringify(revised)] });
+    expect(response).toMatchObject({ ok: true });
+    if (!response.ok) {
+      throw new Error('Expected the revised subclass import to return a plan.');
+    }
+    assertContentImportPlan(
+      response.result,
+      'Expected the revised asserted subclass to require content review.',
+    );
+    expect(response.result.outcomes).toEqual([{
+      id: `subclass:${SUBCLASS_KEY}`,
+      kind: 'review',
+      contentKey: SUBCLASS_KEY,
+      matchClass: 'key-collision',
+    }]);
+    expect(response.result.reviews).toEqual([
+      expect.objectContaining({
+        id: `subclass:${SUBCLASS_KEY}`,
+        kind: 'subclass',
+        incomingName: 'College of the Long Road',
+        localName: 'College of the Long Road',
+        targetContentKey: SUBCLASS_KEY,
+        matchClass: 'key-collision',
+      }),
+    ]);
     expect(
       rpc.context.db
         .allRaw(
@@ -454,7 +479,7 @@ describe('the College of the Long Road imports and reaches the sheet', () => {
           [subclassId(rpc.context.db)],
         )
         .map((row) => String(row.name)),
-    ).toEqual(['Marching Song', 'Road Trained']);
+    ).toEqual(['Marching Song', 'Road Trained', 'Extra Attack', 'Last Mile']);
   });
 
   it('raises the attack count at Bard 6, and not at Bard 5', async () => {
@@ -577,24 +602,39 @@ describe('the College of the Long Road imports and reaches the sheet', () => {
     expect(byKey).toMatchObject({ ok: false });
     expect(JSON.stringify(byKey)).toContain('imported content key');
 
-    // BY NAME: a legal imported key, but the (class, name, edition) slot is
-    // already held by the bundled EK. Refused before anything is
-    // written, rather than left to raise an opaque SQLITE_CONSTRAINT halfway
-    // through the transaction.
-    const byName = await rpc.call('catalog.import', {
+    // BY NAME: the key follows the shared name-derived grammar, but the
+    // (class, name, edition) slot is already held by the bundled Eldritch
+    // Knight. Planning succeeds and records a typed install refusal without
+    // writing anything, rather than raising an RPC error midway through.
+    const byName = await rpc.call<
+      { documents: string[] },
+      CatalogImportResult
+    >('catalog.import', {
       documents: [
         JSON.stringify([
           {
             ...record,
-            contentKey: '2024:longroad.homebrew:not-ek',
+            contentKey: '2024:longroad.homebrew:ek',
             parentClassKey: '2024:class:fighter',
             name: 'EK',
           },
         ]),
       ],
     });
-    expect(byName).toMatchObject({ ok: false });
-    expect(JSON.stringify(byName)).toContain('2024:subclass:ek');
+    expect(byName).toMatchObject({ ok: true });
+    if (!byName.ok) {
+      throw new Error('Expected the subclass name conflict to return a plan.');
+    }
+    assertContentImportPlan(
+      byName.result,
+      'Expected the subclass name conflict to produce an import plan.',
+    );
+    expect(byName.result.reviews).toEqual([]);
+    expect(byName.result.outcomes).toEqual([{
+      id: 'subclass:2024:longroad.homebrew:ek',
+      kind: 'refused',
+      reason: 'install_refused',
+    }]);
 
     // Neither attempt touched the seeded row.
     expect(
@@ -798,7 +838,7 @@ describe('the frozen pre-subclass document still imports unchanged', () => {
       ),
     ).toEqual([
       {
-        content_key: '2014:quarrymans-warning',
+        content_key: '2014:quarryman-s-warning',
         // Both defaulted by the parser, because the document predates them.
         healing: 0,
         effect_reliability_category: 'fixed_effect',

@@ -16,6 +16,7 @@ import {
   createRpcHarness,
   type RpcHarness,
 } from '../../helpers/rpc-harness';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 
 let harness: RpcHarness | undefined;
 
@@ -56,6 +57,9 @@ function insertHomebrewClass(
   contentKey: string,
   name: string,
 ): void {
+  registerFixtureContentIdentity(rpcHarness.context.db, {
+    kind: 'class', contentKey, name, keyKind: 'asserted',
+  });
   rpcHarness.context.db.exec(
     `INSERT INTO class_definitions (content_key, name, rules_edition)
      VALUES (?, ?, ?)`,
@@ -108,7 +112,7 @@ function classOptionKeysFromRpcResult(value: unknown): ReadonlySet<string> {
 describe('guided class gate', () => {
   it('refuses an existing homebrew class through the real RPC with the domain discriminator', async () => {
     const rpcHarness = await realApplicationDatabase();
-    const homebrewContentKey = 'test:class:chronomancer';
+    const homebrewContentKey = '2024:test.homebrew:chronomancer';
     const attemptedName = 'Homebrew Refusal';
     insertHomebrewClass(
       rpcHarness,
@@ -265,7 +269,7 @@ describe('listGuidedClassOptions', () => {
     const rpcHarness = await realApplicationDatabase();
     insertHomebrewClass(
       rpcHarness,
-      'test:class:cartographer',
+      '2024:test.homebrew:cartographer',
       'Cartographer',
     );
 

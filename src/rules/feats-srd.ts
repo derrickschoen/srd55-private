@@ -15,6 +15,8 @@
 import featsExtract from '../../docs/srd/source/feats.txt?raw';
 import type { BindableValue } from '@sqlite.org/sqlite-wasm';
 import type { DatabaseContext } from '../db/database';
+import { normalizeContentIdentityName } from '../catalog/content-identity';
+import { ensureBundledStableContentIdentity } from '../catalog/content-registry';
 import { rowContractError } from '../domain/contracts/rows';
 import type {
   AbilityIncreaseAbilities,
@@ -502,6 +504,11 @@ export function seedFeatContent(db: DatabaseContext): boolean {
       if (nameHolder !== null && nameHolder !== feat.content_key) {
         continue;
       }
+      ensureBundledStableContentIdentity(db, {
+        kind: 'feat',
+        contentKey: feat.content_key,
+        normalizedName: normalizeContentIdentityName(feat.name),
+      });
 
       const values = persistedValues(feat);
       const row = {

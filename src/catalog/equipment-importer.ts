@@ -2,11 +2,7 @@ import type { DatabaseContext } from '../db/database';
 import type { AuthoringCharacterEffect } from '../authoring/effect-forms';
 import type { ContentKey } from '../domain/ids';
 import type { VersatileWeaponDamage, WeaponDamage } from '../domain/weapon-damage';
-import {
-  ContentIdentityCollision,
-  registerDerivedContentIdentity,
-  resolveContentAggregate,
-} from './content-registry';
+import { assertedExternalContentKey } from './catalog-key';
 import type {
   CatalogArmorRecord,
   CatalogItemRecord,
@@ -15,14 +11,17 @@ import type {
 import {
   projectArmorContentV1,
   projectItemContentV1,
-  projectStoredEquipmentContentV1,
   projectWeaponContentV1,
   type ArmorContentAggregate,
   type EquipmentContentAggregate,
   type ItemContentAggregate,
   type WeaponContentAggregate,
 } from './equipment-content-projector-v1';
-import { deriveContentIdentityV1 } from './content-identity';
+import type {
+  ContentImportNode,
+  ContentImportProjection,
+} from './content-adoption';
+import { projectStoredContentV1 } from './stored-content-projector-v1';
 
 export interface EquipmentImportCounters {
   readonly weapons_created: number;
@@ -34,12 +33,9 @@ export interface EquipmentImportCounters {
   readonly item_definition_effects_created: number;
 }
 
-export class EquipmentImportReviewRequired extends Error {
-  constructor(kind: EquipmentContentAggregate['kind'], name: string) {
-    super(`${kind} '${name}' matched reviewable catalog content; import requires an explicit match or clone decision.`);
-    this.name = 'EquipmentImportReviewRequired';
-  }
-}
+export type MutableEquipmentImportCounters = {
+  -readonly [K in keyof EquipmentImportCounters]: EquipmentImportCounters[K];
+};
 
 export type UnsupportedItemDefinitionEffectReason =
   | 'requires_source_instance'
@@ -255,57 +251,6 @@ export function effectColumns(effect: AuthoringCharacterEffect): EffectColumns {
   }
 }
 
-function assertStoredIdentity(
-  db: DatabaseContext,
-  aggregate: EquipmentContentAggregate,
-  expectedCanonicalJson: string,
-  contentKey: ContentKey,
-): void {
-  const identity = (() => {
-    switch (aggregate.kind) {
-      case 'weapon': {
-        const stored = projectStoredEquipmentContentV1(db, {
-          kind: aggregate.kind,
-          contentKey,
-        });
-        return deriveContentIdentityV1({
-          kind: stored.kind,
-          edition: stored.aggregate.rules_edition,
-          name: stored.aggregate.name,
-          payload: stored.payload,
-        });
-      }
-      case 'armor': {
-        const stored = projectStoredEquipmentContentV1(db, {
-          kind: aggregate.kind,
-          contentKey,
-        });
-        return deriveContentIdentityV1({
-          kind: stored.kind,
-          edition: stored.aggregate.rules_edition,
-          name: stored.aggregate.name,
-          payload: stored.payload,
-        });
-      }
-      case 'item': {
-        const stored = projectStoredEquipmentContentV1(db, {
-          kind: aggregate.kind,
-          contentKey,
-        });
-        return deriveContentIdentityV1({
-          kind: stored.kind,
-          edition: stored.aggregate.rules_edition,
-          name: stored.aggregate.name,
-          payload: stored.payload,
-        });
-      }
-    }
-  })();
-  if (identity.canonicalJson !== expectedCanonicalJson) {
-    throw new ContentIdentityCollision();
-  }
-}
-
 function insertWeapon(
   db: DatabaseContext,
   aggregate: WeaponContentAggregate,
@@ -394,86 +339,88 @@ function insertItem(
   return aggregate.effects.length;
 }
 
-function importOne(
-  db: DatabaseContext,
+function projectionForAggregate(
   aggregate: EquipmentContentAggregate,
-): { readonly created: boolean; readonly effectsCreated: number } {
+  assertedKey: ContentKey,
+  counters: MutableEquipmentImportCounters,
+): ContentImportProjection {
   const payload = aggregate.kind === 'weapon'
     ? projectWeaponContentV1(aggregate)
     : aggregate.kind === 'armor'
       ? projectArmorContentV1(aggregate)
       : projectItemContentV1(aggregate);
-  const resolved = resolveContentAggregate(db, {
+  return {
     kind: aggregate.kind,
     edition: aggregate.rules_edition,
     name: aggregate.name,
+    assertedKey,
     payload,
-  });
-  if (resolved.resolution.kind === 'exact') {
-    if (resolved.resolution.matchClass !== 'trivial-self-match') {
-      throw new EquipmentImportReviewRequired(aggregate.kind, aggregate.name);
-    }
-    assertStoredIdentity(
-      db,
-      aggregate,
-      resolved.identity.canonicalJson,
-      resolved.resolution.contentKey,
-    );
-    return { created: false, effectsCreated: 0 };
-  }
-  if (resolved.resolution.kind !== 'missing') {
-    throw new EquipmentImportReviewRequired(aggregate.kind, aggregate.name);
-  }
-  const identity = registerDerivedContentIdentity(db, {
-    kind: aggregate.kind,
-    edition: aggregate.rules_edition,
-    name: aggregate.name,
-    payload,
-  });
-  let effectsCreated = 0;
-  switch (aggregate.kind) {
-    case 'weapon':
-      insertWeapon(db, aggregate, identity.derivedKey);
-      break;
-    case 'armor':
-      insertArmor(db, aggregate, identity.derivedKey);
-      break;
-    case 'item':
-      effectsCreated = insertItem(db, aggregate, identity.derivedKey);
-      break;
-  }
-  return { created: true, effectsCreated };
+    projectStored: (database, contentKey) =>
+      projectStoredContentV1(database, aggregate.kind, contentKey),
+    install: (database, contentKey, _projection, phase) => {
+      const existing = database.scalar<number>(
+        `SELECT 1 FROM ${aggregate.kind === 'weapon'
+          ? 'weapon_templates'
+          : aggregate.kind === 'armor'
+            ? 'armor_templates'
+            : 'item_definitions'} WHERE content_key = ?`,
+        [contentKey],
+      ) === 1;
+      if (existing) {
+        if (phase === 'commit') {
+          counters[`${aggregate.kind}s_matched` as
+            | 'weapons_matched'
+            | 'armors_matched'
+            | 'items_matched'] += 1;
+        }
+        return;
+      }
+      let effectsCreated = 0;
+      switch (aggregate.kind) {
+        case 'weapon': insertWeapon(database, aggregate, contentKey); break;
+        case 'armor': insertArmor(database, aggregate, contentKey); break;
+        case 'item': effectsCreated = insertItem(database, aggregate, contentKey); break;
+      }
+      if (phase === 'commit') {
+        counters[`${aggregate.kind}s_created` as
+          | 'weapons_created'
+          | 'armors_created'
+          | 'items_created'] += 1;
+        counters.item_definition_effects_created += effectsCreated;
+      }
+    },
+  };
 }
 
-export function importEquipmentRecords(
-  db: DatabaseContext,
+export function equipmentImportNodes(
   records: {
     readonly weapons: readonly CatalogWeaponRecord[];
     readonly armors: readonly CatalogArmorRecord[];
     readonly items: readonly CatalogItemRecord[];
   },
-): EquipmentImportCounters {
-  const counters = {
-    weapons_created: 0,
-    weapons_matched: 0,
-    armors_created: 0,
-    armors_matched: 0,
-    items_created: 0,
-    items_matched: 0,
-    item_definition_effects_created: 0,
-  };
-  for (const record of records.weapons) {
-    const result = importOne(db, weaponAggregate(record));
-    counters[result.created ? 'weapons_created' : 'weapons_matched'] += 1;
-  }
-  for (const record of records.armors) {
-    const result = importOne(db, armorAggregate(record));
-    counters[result.created ? 'armors_created' : 'armors_matched'] += 1;
-  }
-  for (const record of records.items) {
-    const result = importOne(db, itemAggregate(record));
-    counters[result.created ? 'items_created' : 'items_matched'] += 1;
-    counters.item_definition_effects_created += result.effectsCreated;
-  }
-  return counters;
+  counters: MutableEquipmentImportCounters,
+): readonly ContentImportNode[] {
+  const aggregates: readonly EquipmentContentAggregate[] = [
+    ...records.weapons.map(weaponAggregate),
+    ...records.armors.map(armorAggregate),
+    ...records.items.map(itemAggregate),
+  ];
+  return Object.freeze(aggregates.map((aggregate) => {
+    const assertedKey = assertedExternalContentKey(
+      aggregate.kind,
+      aggregate.rules_edition,
+      aggregate.name,
+    );
+    const reproject: NonNullable<ContentImportNode['reproject']> =
+      ({ name, assertedKey: nextKey }) => {
+        const renamed = { ...aggregate, name } as EquipmentContentAggregate;
+        return projectionForAggregate(renamed, nextKey, counters);
+      };
+    const node: ContentImportNode = Object.freeze({
+      id: `${aggregate.kind}:${assertedKey}`,
+      projection: projectionForAggregate(aggregate, assertedKey, counters),
+      reproject,
+    });
+    return node;
+  }));
 }

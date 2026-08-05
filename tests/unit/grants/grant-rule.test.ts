@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { FreeCast } from '../../../src/grants/free-cast';
 import { GrantRule } from '../../../src/grants/grant-rule';
 import { DatabaseContext } from '../../../src/db/database';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import { openTestDatabase } from '../../helpers/open-db';
 
 describe('GrantRule', () => {
@@ -25,12 +26,16 @@ describe('GrantRule', () => {
     const rules = inputs.map((input) => GrantRule.fromObject(input).toObject());
     persistedDefinition += 1;
     const contentKey = `2024:feat:grant-rule-${persistedDefinition}`;
+    const name = `Grant Rule ${persistedDefinition}`;
+    registerFixtureContentIdentity(db, {
+      kind: 'feat', contentKey, name, keyKind: 'bundled-stable',
+    });
 
     db.exec(
       `INSERT INTO feat_definitions
          (content_key, name, rules_edition, grant_rules)
        VALUES (?, ?, '2024', ?)`,
-      [contentKey, `Grant Rule ${persistedDefinition}`, JSON.stringify(rules)],
+      [contentKey, name, JSON.stringify(rules)],
     );
 
     const stored = db.scalar<string>(

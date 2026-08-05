@@ -90,14 +90,8 @@ test('catalog RPC dry-runs, commits atomically, tombstones, and persists across 
     }),
   ]);
 
-  const failed = await page.evaluate(async (documents) => {
-    try {
-      await window.appRpc.call('catalog.import', { documents });
-      return false;
-    } catch {
-      return true;
-    }
-  }, [
+  const refusalPlan = await page.evaluate((documents) =>
+    window.appRpc.call('catalog.import', { documents }), [
     JSON.stringify([
       record({
         identityKey: 'conflict',
@@ -111,7 +105,20 @@ test('catalog RPC dry-runs, commits atomically, tombstones, and persists across 
       }),
     ]),
   ]);
-  expect(failed).toBe(true);
+  expect(refusalPlan).toEqual(expect.objectContaining({
+    reviews: [],
+    outcomes: expect.arrayContaining([
+      expect.objectContaining({
+        id: 'spell:2024:magic-missile',
+        kind: 'refused',
+        reason: 'target_integrity_refused',
+      }),
+    ]),
+    spellActivityChanges: [{
+      contentKey: '2024:browser-spell',
+      action: 'deactivate',
+    }],
+  }));
   expect(
     await page.evaluate(() =>
       window.staticApp.inspectRows('spell_versions', {
@@ -291,7 +298,7 @@ test('a subclass import lands, survives a reload, and outlives a spell replaceme
   ).toHaveLength(1);
 });
 
-test('a feat aggregate imports through RPC under a derived identity and survives reload', async ({
+test('a feat aggregate imports through RPC under an asserted identity and survives reload', async ({
   page,
 }) => {
   // The four-worker parallel pool measured 12.2s; 35s preserves at least 2.5x
@@ -331,7 +338,7 @@ test('a feat aggregate imports through RPC under a derived identity and survives
   );
   expect(await stored()).toEqual([
     expect.objectContaining({
-      content_key: expect.stringMatching(/^expanded:content\.v1:[0-9a-f]{64}$/),
+      content_key: 'expanded:content.feat:browser-keen-memory',
       notes: 'Remembers the browser boundary.',
     }),
   ]);

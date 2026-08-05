@@ -2,6 +2,7 @@ import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
 import { readFileSync } from 'node:fs';
 import { DatabaseContext } from '../../src/db/database';
 import { createBuildReportFixture } from '../integration/reports/build-report-fixture';
+import { registerBrowserFixtureContentIdentity } from './fixtures/content-identity';
 import { expect, test } from './fixtures/parallel-test';
 
 const schema = readFileSync(
@@ -92,14 +93,23 @@ async function catalogItemPlannerFixture() {
   const characterId = db.exec(
     "INSERT INTO characters (name) VALUES ('Catalog item picker')",
   ).lastInsertId;
+  const contentKey = registerBrowserFixtureContentIdentity(db, {
+    kind: 'item',
+    edition: 'expanded',
+    name: 'Browser Giant Belt',
+    keyKind: 'asserted',
+  });
   db.exec(
     `INSERT INTO item_definitions (
        content_key, name, rules_edition, description, requires_attunement
      ) VALUES (
-       'expanded:legacy:browser-belt', 'Browser Giant Belt', 'expanded',
+       ?, 'Browser Giant Belt', 'expanded',
        'Catalog-only definition', 1
-     );
-     INSERT INTO item_definition_effects (
+     )`,
+    [contentKey],
+  );
+  db.exec(
+    `INSERT INTO item_definition_effects (
        item_definition_id, sort_order, effect_kind, ability, maximum,
        label, notes
      ) VALUES (
@@ -472,7 +482,7 @@ test('the item picker copies catalog values and effects without a live definitio
 
   const picker = page.locator('[data-testid="item-catalog-picker"]');
   await expect(picker.getByLabel('Item definition')).toHaveValue(
-    'expanded:legacy:browser-belt',
+    'expanded:content.item:browser-giant-belt',
   );
   await picker.getByRole('button', { name: 'Add catalog item' }).click();
 

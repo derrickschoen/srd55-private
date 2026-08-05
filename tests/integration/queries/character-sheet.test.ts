@@ -10,6 +10,7 @@ import {
   PrintAppendixPreferenceQueries,
 } from '../../../src/queries/print-appendix-preferences';
 import { characterEffects } from '../../../src/rules/origins';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import { openTestDatabase } from '../../helpers/open-db';
 
 /**
@@ -243,6 +244,10 @@ describe('the derived character sheet', () => {
   });
 
   it('B2-HP sends a Constitution contribution through CharacterSheetBuilder hit-point math', () => {
+    registerFixtureContentIdentity(db, {
+      kind: 'feat', contentKey: 'test:feat:hardy', name: 'Hardy',
+      keyKind: 'bundled-stable',
+    });
     const featId = db.exec(
       `INSERT INTO feat_definitions (
          content_key, name, rules_edition, repeatable, grant_rules
@@ -439,6 +444,10 @@ describe('the derived character sheet', () => {
        VALUES (?, 'Human', 30)`,
       [characterId],
     );
+    registerFixtureContentIdentity(db, {
+      kind: 'feat', contentKey: 'test:feat:armadillo-boon',
+      name: 'Armadillo Boon', keyKind: 'bundled-stable',
+    });
     const featId = db.exec(
       `INSERT INTO feat_definitions (
          content_key, name, rules_edition, repeatable, grant_rules
@@ -1071,6 +1080,10 @@ describe('the derived character sheet', () => {
     // exactly what the catalog-import work makes possible. `seedSheetContent`
     // supplies the row for all twelve printed classes, so this is the only
     // shape that produces the gap.
+    registerFixtureContentIdentity(db, {
+      kind: 'class', contentKey: 'homebrew:bladewright', name: 'Bladewright',
+      keyKind: 'asserted',
+    });
     const homebrewId = db.exec(
       `INSERT INTO class_definitions (content_key, name, rules_edition)
        VALUES ('homebrew:bladewright', 'Bladewright', '2024')`,

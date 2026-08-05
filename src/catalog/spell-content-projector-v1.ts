@@ -316,24 +316,6 @@ export function projectSpellDocumentV1(
   return projectSpellContentAggregateV1(aggregate);
 }
 
-function childMembers<T>(
-  db: DatabaseContext,
-  table: string,
-  column: string,
-  versionId: number,
-  decode: (row: SqlRow) => T,
-): readonly StoredMember<T>[] {
-  return db.allRaw(
-    `SELECT * FROM ${table} WHERE spell_version_id = ? ORDER BY ${column}`,
-    [versionId],
-  ).map((row) => {
-    const fields = storedFields(row, ['spell_version_id', column]);
-    return Object.keys(fields).length === 0
-      ? { value: decode(row) }
-      : { value: decode(row), stored_fields: fields };
-  });
-}
-
 function bounded(value: number, low: number, high: number, label: string): number {
   if (!Number.isSafeInteger(value) || value < low || value > high) {
     return refuse(`${label} must be an integer from ${String(low)} through ${String(high)}.`);
@@ -345,20 +327,42 @@ function assertEqual(actual: unknown, expected: unknown, label: string): void {
   if (actual !== expected) refuse(`${label} disagrees with its printed source field.`);
 }
 
-export function projectStoredSpellContentV1(
-  db: DatabaseContext,
-  contentKey: ContentKey,
+export interface StoredSpellContentRowsV1 {
+  readonly version: SqlRow;
+  readonly spellIdentityKey: string;
+  readonly spellLists: readonly SqlRow[];
+  readonly tags: readonly SqlRow[];
+  readonly attackModes: readonly SqlRow[];
+  readonly saveAbilities: readonly SqlRow[];
+  readonly upcastLevels: readonly SqlRow[];
+  readonly cantripUpgradeLevels: readonly SqlRow[];
+}
+
+function membersFromRows<T>(
+  rows: readonly SqlRow[],
+  column: string,
+  decode: (row: SqlRow) => T,
+): readonly StoredMember<T>[] {
+  return [...rows]
+    .sort((left, right) => String(left[column]).localeCompare(String(right[column])))
+    .map((row) => {
+      const fields = storedFields(row, ['spell_version_id', column]);
+      return Object.keys(fields).length === 0
+        ? { value: decode(row) }
+        : { value: decode(row), stored_fields: fields };
+    });
+}
+
+/** The frozen stored-row projector over portable backup rows. */
+export function projectStoredSpellRowsContentV1(
+  input: StoredSpellContentRowsV1,
 ): SpellProjectorContractV1 {
+  const row: SqlRow = {
+    ...input.version,
+    spell_identity_key: input.spellIdentityKey,
+  };
+  const contentKey = sqlString(row, 'content_key') as ContentKey;
   trimEqual(contentKey, 'content key');
-  const row = db.oneRaw(
-    `SELECT version.*, identity.content_key AS spell_identity_key
-     FROM spell_versions AS version
-     INNER JOIN spell_identities AS identity
-       ON identity.id = version.spell_identity_id
-     WHERE version.content_key = ?`,
-    [contentKey],
-  );
-  if (row === null) return refuse(`spell '${contentKey}' is missing.`);
   const provenance = sqlString(row, 'provenance');
   if (provenance === 'placeholder') return refuse(`spell '${contentKey}' is a placeholder.`);
   const edition = sqlString(row, 'rules_edition');
@@ -367,7 +371,6 @@ export function projectStoredSpellContentV1(
   if (!isEnumValue(effectReliabilityCategories, reliability)) {
     return refuse(`unknown effect reliability category '${reliability}'.`);
   }
-  const id = sqlInteger(row, 'id');
   const castingTime = sqlNullableString(row, 'casting_time');
   const rangeText = sqlNullableString(row, 'range');
   const componentText = sqlNullableString(row, 'components');
@@ -425,19 +428,45 @@ export function projectStoredSpellContentV1(
     cantrip_upgrade_summary: sqlNullableString(row, 'cantrip_upgrade_summary'),
     requires_mod_for_effect: sqlBoolean(row, 'requires_mod_for_effect'),
     effect_reliability_category: reliability,
-    spell_lists: childMembers(db, 'spell_list_memberships', 'spell_list_key', id,
+    spell_lists: membersFromRows(input.spellLists, 'spell_list_key',
       (child) => trimEqual(sqlString(child, 'spell_list_key'), 'spell list key')),
-    tags: childMembers(db, 'spell_version_tags', 'tag', id,
-      (child) => sqlString(child, 'tag')),
-    attack_modes: childMembers(db, 'spell_version_attack_modes', 'attack_mode', id,
+    tags: membersFromRows(input.tags, 'tag', (child) => sqlString(child, 'tag')),
+    attack_modes: membersFromRows(input.attackModes, 'attack_mode',
       (child) => sqlString(child, 'attack_mode')),
-    save_abilities: childMembers(db, 'spell_version_save_abilities', 'save_ability', id,
+    save_abilities: membersFromRows(input.saveAbilities, 'save_ability',
       (child) => sqlString(child, 'save_ability')),
-    upcast_levels: childMembers(db, 'spell_version_upcast_levels', 'level', id,
+    upcast_levels: membersFromRows(input.upcastLevels, 'level',
       (child) => bounded(sqlInteger(child, 'level'), SPELL_UPCAST_LEVEL_MIN, SPELL_UPCAST_LEVEL_MAX, 'upcast level')),
-    cantrip_upgrade_levels: childMembers(db, 'spell_version_cantrip_upgrade_levels', 'level', id,
+    cantrip_upgrade_levels: membersFromRows(input.cantripUpgradeLevels, 'level',
       (child) => bounded(sqlInteger(child, 'level'), SPELL_CANTRIP_UPGRADE_LEVEL_MIN, SPELL_CANTRIP_UPGRADE_LEVEL_MAX, 'cantrip upgrade level')),
     ...(Object.keys(future).length === 0 ? {} : { stored_fields: future }),
   };
   return projectSpellContentAggregateV1(aggregate);
+}
+
+export function projectStoredSpellContentV1(
+  db: DatabaseContext,
+  contentKey: ContentKey,
+): SpellProjectorContractV1 {
+  trimEqual(contentKey, 'content key');
+  const row = db.oneRaw(
+    `SELECT version.*, identity.content_key AS spell_identity_key
+     FROM spell_versions AS version
+     INNER JOIN spell_identities AS identity
+       ON identity.id = version.spell_identity_id
+     WHERE version.content_key = ?`,
+    [contentKey],
+  );
+  if (row === null) return refuse(`spell '${contentKey}' is missing.`);
+  const id = sqlInteger(row, 'id');
+  return projectStoredSpellRowsContentV1({
+    version: row,
+    spellIdentityKey: sqlString(row, 'spell_identity_key'),
+    spellLists: db.allRaw('SELECT * FROM spell_list_memberships WHERE spell_version_id = ?', [id]),
+    tags: db.allRaw('SELECT * FROM spell_version_tags WHERE spell_version_id = ?', [id]),
+    attackModes: db.allRaw('SELECT * FROM spell_version_attack_modes WHERE spell_version_id = ?', [id]),
+    saveAbilities: db.allRaw('SELECT * FROM spell_version_save_abilities WHERE spell_version_id = ?', [id]),
+    upcastLevels: db.allRaw('SELECT * FROM spell_version_upcast_levels WHERE spell_version_id = ?', [id]),
+    cantripUpgradeLevels: db.allRaw('SELECT * FROM spell_version_cantrip_upgrade_levels WHERE spell_version_id = ?', [id]),
+  });
 }

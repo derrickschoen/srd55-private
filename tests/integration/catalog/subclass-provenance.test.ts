@@ -7,6 +7,7 @@ import {
   importCharacterBackup,
 } from '../../../src/backup/character-backup';
 import { CatalogImporter } from '../../../src/catalog/catalog-importer';
+import { reconcileBundledContentRegistryV1 } from '../../../src/catalog/bundled-content-registry-v1';
 import { importedContentKeyOwner } from '../../../src/catalog/catalog-key';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import { UpdateClassCommand } from '../../../src/commands/update-class';
@@ -14,11 +15,13 @@ import { DatabaseContext } from '../../../src/db/database';
 import { raiseClassLevelForTest } from '../../helpers/class-levels';
 import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
 import { ensureBundledSrdSubclassContent } from '../../../src/rules/srd-subclass-content';
+import { ensureBundledSpellContent } from '../../../src/rules/spells-srd';
 import {
   assessImportCompatibility,
   exportCharacterShare,
   importCharacterShare,
 } from '../../../src/sharing/character-share';
+import { assertContentImportPlan } from '../../helpers/content-import-plan';
 import { openTestDatabase } from '../../helpers/open-db';
 
 const SUBCLASS = readFileSync(
@@ -46,6 +49,8 @@ async function database(): Promise<DatabaseContext> {
   const db = new DatabaseContext(connection);
   seedClassProgressions(db);
   ensureBundledSrdSubclassContent(db);
+  ensureBundledSpellContent(db);
+  reconcileBundledContentRegistryV1(db);
   return db;
 }
 
@@ -133,6 +138,32 @@ describe('an imported subclass stays distinguishable from a bundled one', () => 
       ['2024:subclass:path-of-the-berserker', null],
       ['2024:subclass:thief', null],
       ['2024:subclass:warrior-of-the-open-hand', null],
+    ]);
+  });
+
+  it('returns a typed refusal when an exact subclass key projects damaged live rules', async () => {
+    const db = await database();
+    importSubclass(db);
+    db.exec(
+      `UPDATE subclass_features SET description = description || ' Damaged.'
+       WHERE subclass_definition_id = (
+         SELECT id FROM subclass_definitions WHERE content_key = ?
+       )`,
+      [SUBCLASS_KEY],
+    );
+
+    const refusal = new CatalogImporter(db).import({
+      documents: [SUBCLASS],
+    });
+    assertContentImportPlan(
+      refusal,
+      'Expected the damaged subclass import to return a plan.',
+    );
+    expect(refusal.outcomes).toEqual([
+      expect.objectContaining({
+        kind: 'refused',
+        reason: 'target_integrity_refused',
+      }),
     ]);
   });
 

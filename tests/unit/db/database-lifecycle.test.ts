@@ -8,6 +8,7 @@ import {
   getSqlite3,
   MemoryDatabaseStorage,
 } from '../../helpers/open-db';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 
 let lifecycle: DatabaseLifecycle;
 let storage: MemoryDatabaseStorage;
@@ -25,6 +26,10 @@ afterEach(() => {
 
 describe('database lifecycle', () => {
   it('whole-database backup preserves modifier definitions and non-empty effect children generically', async () => {
+    registerFixtureContentIdentity(lifecycle.database, {
+      kind: 'item', contentKey: 'expanded:legacy:backup-belt',
+      name: 'Backup Belt', keyKind: 'bundled-stable',
+    });
     lifecycle.database.exec(
       `INSERT INTO item_definitions (
          content_key, name, rules_edition, description, requires_attunement

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DatabaseContext } from '../../../src/db/database';
 import { BuildReportBuilder } from '../../../src/reports/build-report-builder';
 import { openTestDatabase } from '../../helpers/open-db';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import {
   addClassLevel,
   classDefinitionId,
@@ -506,15 +507,20 @@ describe('deterministic read-only build report', () => {
     ] as const;
 
     for (const [fraction, rounding, progression, expectedCaster] of cases) {
+      const contentKey = `r40:fraction:${fraction}:${rounding}`;
+      const name = `Test ${fraction} ${rounding}`;
+      registerFixtureContentIdentity(db, {
+        kind: 'subclass', contentKey, name, keyKind: 'bundled-stable',
+      });
       const subclassId = db.exec(
         `INSERT INTO subclass_definitions (
            content_key, class_definition_id, name, rules_edition,
            spellcasting_ability, caster_fraction, caster_rounding
          ) VALUES (?, ?, ?, '2024', 'intelligence', ?, ?)`,
         [
-          `r40:fraction:${fraction}:${rounding}`,
+          contentKey,
           fighterId,
-          `Test ${fraction} ${rounding}`,
+          name,
           fraction,
           rounding,
         ],
@@ -549,6 +555,10 @@ describe('deterministic read-only build report', () => {
       expect(persistedReportTableHashes(db, characterId)).toEqual(before);
     }
 
+    registerFixtureContentIdentity(db, {
+      kind: 'subclass', contentKey: 'r40:unsupported',
+      name: 'Unsupported Fraction', keyKind: 'bundled-stable',
+    });
     const unsupportedSubclassId = db.exec(
       `INSERT INTO subclass_definitions (
          content_key, class_definition_id, name, rules_edition,

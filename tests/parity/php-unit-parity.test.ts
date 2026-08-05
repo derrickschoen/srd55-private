@@ -11,6 +11,7 @@ import { DatabaseContext } from '../../src/db/database';
 import { BuildReportBuilder } from '../../src/reports/build-report-builder';
 import { seedClassProgressions } from '../../src/rules/class-progression-lookup';
 import { openTestDatabase } from '../helpers/open-db';
+import { registerFixtureContentIdentity } from '../helpers/content-identity';
 
 describe('PHP Unit cross-slice parity', () => {
   let connection: Database;
@@ -36,6 +37,10 @@ describe('PHP Unit cross-slice parity', () => {
       [characterId],
     ).lastInsertId;
     const spellIds = ['fixed', 'selected'].map((kind) => {
+      registerFixtureContentIdentity(db, {
+        kind: 'spell', contentKey: `t80:assignment-${kind}`,
+        name: `Parity ${kind}`, keyKind: 'bundled-stable',
+      });
       const identityId = db.exec(
         `INSERT INTO spell_identities (
            content_key, canonical_name, normalized_name

@@ -31,6 +31,7 @@ import {
   encodeShareFragment,
 } from '../../../src/sharing/codec';
 import { openTestDatabase } from '../../helpers/open-db';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 
 /**
  * DOES EVERY COLUMN OF A SHARED TABLE SURVIVE A SHARE LINK — AND IF NOT, IS
@@ -1011,6 +1012,10 @@ interface Catalog {
 
 function seedCatalog(db: DatabaseContext, includeFork = true): Catalog {
   const spell = (key: string, name: string, level: number): number => {
+    registerFixtureContentIdentity(db, {
+      kind: 'spell', contentKey: key, name,
+      keyKind: 'bundled-stable',
+    });
     const identityId = db.exec(
       `INSERT INTO spell_identities (content_key, canonical_name, normalized_name)
        VALUES (?, ?, ?)`,
@@ -1036,26 +1041,28 @@ function seedCatalog(db: DatabaseContext, includeFork = true): Catalog {
     "UPDATE spell_versions SET provenance = 'srd' WHERE id = ?",
     [bundledSourceId],
   );
-  const chosenSpellId = includeFork
-    ? spell('2024:fixture-shield', 'Sender-Only Fixture Shield', 1)
-    : bundledSourceId;
+  const chosenSpellId = spell(
+    '2024:fixture-shield',
+    includeFork ? 'Sender-Only Fixture Shield' : 'Recipient Fixture Shield',
+    includeFork ? 1 : 2,
+  );
   if (includeFork) {
     db.exec(
       `UPDATE spell_versions
        SET forked_from_content_key = '2024:shield',
-           rules_edition = 'sender-only-edition',
+           rules_edition = '2014',
            ritual = 1,
            concentration = 1,
-           casting_time = 'Distinct action',
-           action_type = 'reaction',
-           range = '60 feet (10-foot Sphere)',
+           casting_time = 'Reaction',
+           action_type = 'Reaction',
+           range = '60 feet',
            range_kind = 'ranged',
            range_feet = 60,
-           area_shape = 'sphere',
-           area_feet = 10,
-           duration = 'Distinct duration',
-           components = 'V, S, M',
-           material_component_summary = 'distinct material',
+           area_shape = NULL,
+           area_feet = NULL,
+           duration = 'Concentration, up to 1 minute',
+           components = 'V, S, M (a distinct material worth 123 CP)',
+           material_component_summary = 'a distinct material worth 123 CP',
            material_cost_copper = 123,
            material_cost_kind = 'exact',
            healing = 1,
@@ -1072,8 +1079,37 @@ function seedCatalog(db: DatabaseContext, includeFork = true): Catalog {
        WHERE id = ?`,
       [SENDER_TIME, SENDER_TIME, chosenSpellId],
     );
+  } else {
+    db.exec(
+      `UPDATE spell_versions
+       SET school = 'Illusion',
+           casting_time = 'Action',
+           action_type = 'Action',
+           range = 'Self (10-foot Sphere)',
+           range_kind = 'self',
+           range_feet = NULL,
+           area_shape = 'sphere',
+           area_feet = 10,
+           duration = 'Instantaneous',
+           components = 'V',
+           is_active = 0
+       WHERE id = ?`,
+      [chosenSpellId],
+    );
   }
   const spareSpellId = spell('2024:mage-armor', 'Mage Armor', 1);
+  registerFixtureContentIdentity(db, {
+    kind: 'class', contentKey: '2024:class:wizard', name: 'Wizard',
+    keyKind: 'bundled-stable',
+  });
+  registerFixtureContentIdentity(db, {
+    kind: 'subclass', contentKey: '2024:subclass:evoker', name: 'Evoker',
+    keyKind: 'bundled-stable',
+  });
+  registerFixtureContentIdentity(db, {
+    kind: 'feat', contentKey: '2024:feat:alert', name: 'Alert',
+    keyKind: 'bundled-stable',
+  });
   const classId = db.exec(
     `INSERT INTO class_definitions (
        content_key, name, rules_edition, spellcasting_ability, progression_type

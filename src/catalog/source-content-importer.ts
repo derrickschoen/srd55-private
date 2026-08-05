@@ -9,12 +9,8 @@ import type {
   SpeciesContentAggregate,
 } from '../authoring/contracts';
 import type { ContentKey } from '../domain/ids';
-import { CONTENT_FINGERPRINT_SCHEME_V1, deriveContentIdentityV1 } from './content-identity';
-import {
-  ContentIdentityCollision,
-  registerDerivedContentIdentity,
-  resolveContentAggregate,
-} from './content-registry';
+import { CONTENT_FINGERPRINT_SCHEME_V1 } from './content-identity';
+import { assertedExternalContentKey } from './catalog-key';
 import { effectColumns } from './equipment-importer';
 import type {
   CatalogBackgroundRecord,
@@ -25,15 +21,18 @@ import type {
 import {
   projectClassContentV1,
   projectFeatContentV1,
-  projectStoredClassContentV1,
-  projectStoredFeatContentV1,
   type FeatContentAggregateV1,
 } from './source-content-projector-v1';
 import {
   projectAuthoredContentAggregateV1,
-  projectStoredAuthoredContentV1,
-  storedAuthoredRegistryReferencesV1,
 } from './stored-authored-content-projector-v1';
+import {
+  remapProjectionFingerprintReferences,
+  type ContentImportDependencyTarget,
+  type ContentImportNode,
+  type ContentImportProjection,
+} from './content-adoption';
+import { projectStoredContentV1 } from './stored-content-projector-v1';
 
 export interface SourceContentImportCounters {
   readonly classes_matched: number;
@@ -45,12 +44,9 @@ export interface SourceContentImportCounters {
   readonly backgrounds_matched: number;
 }
 
-export class SourceContentImportReviewRequired extends Error {
-  constructor(kind: 'class' | 'feat' | 'species' | 'background', name: string) {
-    super(`${kind} '${name}' matched reviewable catalog content; import requires an explicit match or clone decision.`);
-    this.name = 'SourceContentImportReviewRequired';
-  }
-}
+export type MutableSourceContentImportCounters = {
+  -readonly [K in keyof SourceContentImportCounters]: SourceContentImportCounters[K];
+};
 
 export class ExternalClassImportRefused extends Error {
   constructor(name: string) {
@@ -171,13 +167,6 @@ function idForReference(
   return id;
 }
 
-function assertStored(
-  incomingCanonical: string,
-  storedCanonical: string,
-): void {
-  if (incomingCanonical !== storedCanonical) throw new ContentIdentityCollision();
-}
-
 function insertFeat(db: DatabaseContext, aggregate: FeatContentAggregateV1, contentKey: ContentKey): void {
   const now = timestamp();
   db.exec(
@@ -276,30 +265,6 @@ function insertBackground(db: DatabaseContext, aggregate: BackgroundContentAggre
   insertEffects(db, 'background_template_effects', 'background_template_id', templateId, aggregate.effects);
 }
 
-function findStoredMatch(
-  db: DatabaseContext,
-  kind: 'class' | 'feat',
-  canonicalJson: string,
-): ContentKey | null {
-  const table = kind === 'class' ? 'class_definitions' : 'feat_definitions';
-  const references = storedAuthoredRegistryReferencesV1(db);
-  const matches = db.allRaw(`SELECT content_key FROM ${table} ORDER BY content_key`)
-    .map((row) => String(row.content_key) as ContentKey)
-    .filter((contentKey) => {
-      const projection = kind === 'class'
-        ? projectStoredClassContentV1(db, contentKey, references)
-        : projectStoredFeatContentV1(db, contentKey, references);
-      const identity = deriveContentIdentityV1({
-        kind: projection.kind,
-        edition: projection.aggregate.rules_edition,
-        name: projection.aggregate.name,
-        payload: projection.payload,
-      });
-      return identity.canonicalJson === canonicalJson;
-    });
-  return matches.length === 1 ? matches[0]! : null;
-}
-
 function rootMetadataConflict(
   db: DatabaseContext,
   kind: 'class' | 'feat' | 'species' | 'background',
@@ -321,104 +286,84 @@ function rootMetadataConflict(
   return row !== null && (row.name !== name || row.rules_edition !== edition);
 }
 
-function importClass(db: DatabaseContext, record: CatalogClassRecord): void {
-  const aggregate = record.aggregate;
-  const payload = projectClassContentV1(aggregate);
-  const identity = deriveContentIdentityV1({ kind: 'class', edition: aggregate.rules_edition, name: aggregate.name, payload });
-  const resolved = resolveContentAggregate(db, {
-    kind: 'class',
-    edition: aggregate.rules_edition,
-    name: aggregate.name,
-    payload,
-    metadataConflict: rootMetadataConflict(
-      db, 'class', identity.derivedKey, aggregate.name, aggregate.rules_edition,
-    ),
-  });
-  if (resolved.resolution.kind === 'exact' && !resolved.resolution.reviewRequired) {
-    const stored = projectStoredClassContentV1(
-      db,
-      resolved.resolution.contentKey,
-      storedAuthoredRegistryReferencesV1(db),
-    );
-    const storedIdentity = deriveContentIdentityV1({
-      kind: stored.kind,
-      edition: stored.aggregate.rules_edition,
-      name: stored.aggregate.name,
-      payload: stored.payload,
-    });
-    assertStored(identity.canonicalJson, storedIdentity.canonicalJson);
-    return;
+type SourceAggregate =
+  | CatalogClassRecord['aggregate']
+  | CatalogFeatRecord['aggregate']
+  | CatalogSpeciesRecord['aggregate']
+  | CatalogBackgroundRecord['aggregate'];
+
+function sourcePayload(aggregate: SourceAggregate): unknown {
+  switch (aggregate.kind) {
+    case 'class': return projectClassContentV1(aggregate);
+    case 'feat': return projectFeatContentV1(aggregate);
+    case 'species':
+    case 'background': return projectAuthoredContentAggregateV1(aggregate).payload;
   }
-  if (resolved.resolution.kind !== 'missing') throw new SourceContentImportReviewRequired('class', aggregate.name);
-  if (findStoredMatch(db, 'class', identity.canonicalJson) !== null) return;
-  throw new ExternalClassImportRefused(aggregate.name);
 }
 
-function importCreatable(
+function sourceProjection(
+  aggregate: SourceAggregate,
+  assertedKey: ContentKey,
+  counters: MutableSourceContentImportCounters,
+): ContentImportProjection {
+  return {
+    kind: aggregate.kind,
+    edition: aggregate.rules_edition,
+    name: aggregate.name,
+    assertedKey,
+    payload: sourcePayload(aggregate),
+    projectStored: (database, contentKey) =>
+      projectStoredContentV1(database, aggregate.kind, contentKey),
+    install: (database, contentKey, _projection, phase) => {
+      const table = aggregate.kind === 'class'
+        ? 'class_definitions'
+        : aggregate.kind === 'feat'
+          ? 'feat_definitions'
+          : aggregate.kind === 'species'
+            ? 'species_definitions'
+            : 'background_definitions';
+      if (database.scalar<number>(
+        `SELECT 1 FROM ${table} WHERE content_key = ?`,
+        [contentKey],
+      ) === 1) return;
+      switch (aggregate.kind) {
+        case 'class': throw new ExternalClassImportRefused(aggregate.name);
+        case 'feat': insertFeat(database, aggregate, contentKey); break;
+        case 'species': insertSpecies(database, aggregate, contentKey); break;
+        case 'background': insertBackground(database, aggregate, contentKey); break;
+      }
+      if (phase === 'commit') {
+        const counter = aggregate.kind === 'feat'
+          ? 'feats_created'
+          : aggregate.kind === 'species'
+            ? 'species_created'
+            : 'backgrounds_created';
+        counters[counter] += 1;
+      }
+    },
+  };
+}
+
+function sourceProjectionForDatabase(
   db: DatabaseContext,
-  record: CatalogFeatRecord | CatalogSpeciesRecord | CatalogBackgroundRecord,
-): boolean {
-  const aggregate = record.aggregate;
-  const payload = aggregate.kind === 'feat'
-    ? projectFeatContentV1(aggregate)
-    : projectAuthoredContentAggregateV1(aggregate).payload;
-  const identity = deriveContentIdentityV1({
-    kind: aggregate.kind,
-    edition: aggregate.rules_edition,
-    name: aggregate.name,
-    payload,
-  });
-  const resolved = resolveContentAggregate(db, {
-    kind: aggregate.kind,
-    edition: aggregate.rules_edition,
-    name: aggregate.name,
-    payload,
+  aggregate: SourceAggregate,
+  assertedKey: ContentKey,
+  counters: MutableSourceContentImportCounters,
+): ContentImportProjection {
+  const projection = sourceProjection(aggregate, assertedKey, counters);
+  return {
+    ...projection,
     metadataConflict: rootMetadataConflict(
       db,
       aggregate.kind,
-      identity.derivedKey,
+      assertedKey,
       aggregate.name,
       aggregate.rules_edition,
     ),
-  });
-  if (resolved.resolution.kind === 'exact') {
-    if (resolved.resolution.matchClass !== 'trivial-self-match') {
-      throw new SourceContentImportReviewRequired(aggregate.kind, aggregate.name);
-    }
-    const references = storedAuthoredRegistryReferencesV1(db);
-    const stored = aggregate.kind === 'feat'
-      ? projectStoredFeatContentV1(db, resolved.resolution.contentKey, references)
-      : projectStoredAuthoredContentV1(db, { kind: aggregate.kind, contentKey: resolved.resolution.contentKey, references });
-    const storedIdentity = deriveContentIdentityV1({ kind: stored.kind, edition: stored.aggregate.rules_edition, name: stored.aggregate.name, payload: stored.payload });
-    assertStored(resolved.identity.canonicalJson, storedIdentity.canonicalJson);
-    return false;
-  }
-  if (resolved.resolution.kind !== 'missing') throw new SourceContentImportReviewRequired(aggregate.kind, aggregate.name);
-  const registered = registerDerivedContentIdentity(db, { kind: aggregate.kind, edition: aggregate.rules_edition, name: aggregate.name, payload });
-  switch (aggregate.kind) {
-    case 'feat': insertFeat(db, aggregate, registered.derivedKey); break;
-    case 'species': insertSpecies(db, aggregate, registered.derivedKey); break;
-    case 'background': insertBackground(db, aggregate, registered.derivedKey); break;
-  }
-  const references = storedAuthoredRegistryReferencesV1(db);
-  const stored = aggregate.kind === 'feat'
-    ? projectStoredFeatContentV1(db, registered.derivedKey, references)
-    : projectStoredAuthoredContentV1(db, {
-        kind: aggregate.kind,
-        contentKey: registered.derivedKey,
-        references,
-      });
-  const storedIdentity = deriveContentIdentityV1({
-    kind: stored.kind,
-    edition: stored.aggregate.rules_edition,
-    name: stored.aggregate.name,
-    payload: stored.payload,
-  });
-  assertStored(registered.canonicalJson, storedIdentity.canonicalJson);
-  return true;
+  };
 }
 
-export function importSourceContentRecords(
+export function sourceContentImportNodes(
   db: DatabaseContext,
   records: {
     readonly classes: readonly CatalogClassRecord[];
@@ -426,28 +371,39 @@ export function importSourceContentRecords(
     readonly species: readonly CatalogSpeciesRecord[];
     readonly backgrounds: readonly CatalogBackgroundRecord[];
   },
-): SourceContentImportCounters {
-  const counters = {
-    classes_matched: 0,
-    feats_created: 0,
-    feats_matched: 0,
-    species_created: 0,
-    species_matched: 0,
-    backgrounds_created: 0,
-    backgrounds_matched: 0,
-  };
-  for (const record of records.classes) {
-    importClass(db, record);
-    counters.classes_matched += 1;
-  }
-  for (const record of records.feats) {
-    counters[importCreatable(db, record) ? 'feats_created' : 'feats_matched'] += 1;
-  }
-  for (const record of records.species) {
-    counters[importCreatable(db, record) ? 'species_created' : 'species_matched'] += 1;
-  }
-  for (const record of records.backgrounds) {
-    counters[importCreatable(db, record) ? 'backgrounds_created' : 'backgrounds_matched'] += 1;
-  }
-  return counters;
+  counters: MutableSourceContentImportCounters,
+): readonly ContentImportNode[] {
+  const aggregates: readonly SourceAggregate[] = [
+    ...records.classes.map((record) => record.aggregate),
+    ...records.feats.map((record) => record.aggregate),
+    ...records.species.map((record) => record.aggregate),
+    ...records.backgrounds.map((record) => record.aggregate),
+  ];
+  return Object.freeze(aggregates.map((aggregate) => {
+    const assertedKey = assertedExternalContentKey(
+      aggregate.kind,
+      aggregate.rules_edition,
+      aggregate.name,
+    );
+    const build = (
+      name: string,
+      nextKey: ContentKey,
+      dependencies: ReadonlyMap<string, ContentImportDependencyTarget>,
+    ): ContentImportProjection => {
+      const renamed = remapProjectionFingerprintReferences(
+        { ...aggregate, name },
+        dependencies,
+      ) as SourceAggregate;
+      return sourceProjectionForDatabase(db, renamed, nextKey, counters);
+    };
+    const reproject: NonNullable<ContentImportNode['reproject']> =
+      ({ name, assertedKey: nextKey, dependencies }) =>
+        build(name, nextKey, dependencies);
+    const node: ContentImportNode = Object.freeze({
+      id: `${aggregate.kind}:${assertedKey}`,
+      projection: build(aggregate.name, assertedKey, new Map()),
+      reproject,
+    });
+    return node;
+  }));
 }

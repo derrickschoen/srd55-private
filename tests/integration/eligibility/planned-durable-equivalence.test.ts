@@ -16,6 +16,7 @@ import { openTestDatabase } from '../../helpers/open-db';
 import { LevelUpClassCommand, LevelUpRefusal } from '../../../src/commands/level-up-class';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import { CharacterState } from '../../../src/character/character-state';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 
 describe('planned and durable spell eligibility', () => {
   let connection: Database;
@@ -34,6 +35,10 @@ describe('planned and durable spell eligibility', () => {
     const characterId = db.exec(
       "INSERT INTO characters (name) VALUES ('Equivalence Wizard')",
     ).lastInsertId;
+    registerFixtureContentIdentity(db, {
+      kind: 'class', contentKey: 'class:equivalence-wizard',
+      name: 'Equivalence Wizard', keyKind: 'bundled-stable',
+    });
     const classId = db.exec(
       `INSERT INTO class_definitions
          (content_key, name, rules_edition, progression_type)
@@ -73,6 +78,9 @@ describe('planned and durable spell eligibility', () => {
       ['spell:beta', 'Beta Ward', 'Wizard'],
       ['spell:cleric', 'Cleric Ward', 'Cleric'],
     ] as const) {
+      registerFixtureContentIdentity(db, {
+        kind: 'spell', contentKey: key, name, keyKind: 'bundled-stable',
+      });
       const identityId = db.exec(
         `INSERT INTO spell_identities (
            content_key, canonical_name, normalized_name

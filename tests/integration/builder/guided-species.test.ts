@@ -22,6 +22,7 @@ import {
   createRpcHarness,
   type RpcHarness,
 } from '../../helpers/rpc-harness';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 
 let harness: RpcHarness | undefined;
 
@@ -780,6 +781,12 @@ describe('bundled species definition seed', () => {
     db.exec('DELETE FROM species_definitions WHERE content_key = ?', [
       elf.content_key,
     ]);
+    registerFixtureContentIdentity(db, {
+      kind: 'species',
+      contentKey: 'homebrew:species:elf',
+      name: String(bundledSlot['name']),
+      keyKind: 'bundled-stable',
+    });
     db.exec(
       `INSERT INTO species_definitions (
          content_key, name, rules_edition, repeatable, grant_rules, notes

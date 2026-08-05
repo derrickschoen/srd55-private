@@ -9,6 +9,7 @@ import { BackupValidationError } from '../../../src/backup/backup-version';
 import { DatabaseContext } from '../../../src/db/database';
 import { openTestDatabase } from '../../helpers/open-db';
 import { APPLICATION_TABLES } from '../../../src/domain/contracts/tables';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 
 /**
  * THE MALFORMED-ARTIFACT PROOF FOR THE PORTABLE BACKUP.
@@ -28,6 +29,14 @@ async function database(): Promise<DatabaseContext> {
 }
 
 function seedCatalog(db: DatabaseContext): { classId: number; spellId: number } {
+  registerFixtureContentIdentity(db, {
+    kind: 'spell', contentKey: '2024:shield', name: 'Shield',
+    keyKind: 'bundled-stable',
+  });
+  registerFixtureContentIdentity(db, {
+    kind: 'class', contentKey: 'class:wizard', name: 'Wizard',
+    keyKind: 'bundled-stable',
+  });
   const identityId = db.exec(
     `INSERT INTO spell_identities (content_key, canonical_name, normalized_name)
      VALUES ('spell:shield', 'Shield', 'shield')`,
@@ -464,6 +473,10 @@ describe('F11: the per-class level bound, in both directions', () => {
     // the whole character would be a worse answer than stating the number, which
     // `total_level_exceeds_maximum` in `src/rules/sheet.ts` does.
     const { db, characterId } = await characterAtLevel(20);
+    registerFixtureContentIdentity(db, {
+      kind: 'class', contentKey: 'class:fighter', name: 'Fighter',
+      keyKind: 'bundled-stable',
+    });
     const secondClassId = db.exec(
       `INSERT INTO class_definitions
          (content_key, name, rules_edition, spellcasting_ability, progression_type)
@@ -487,6 +500,10 @@ describe('F11: the per-class level bound, in both directions', () => {
     ).toBe(25);
 
     const target = await targetDatabase();
+    registerFixtureContentIdentity(target, {
+      kind: 'class', contentKey: 'class:fighter', name: 'Fighter',
+      keyKind: 'bundled-stable',
+    });
     target.exec(
       `INSERT INTO class_definitions
          (content_key, name, rules_edition, spellcasting_ability, progression_type)

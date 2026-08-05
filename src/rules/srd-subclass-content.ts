@@ -6,6 +6,8 @@
  * https://creativecommons.org/licenses/by/4.0/legalcode.
  */
 import { normalizeCatalogKeyComponent } from '../catalog/catalog-key';
+import { normalizeContentIdentityName } from '../catalog/content-identity';
+import { ensureBundledStableContentIdentity } from '../catalog/content-registry';
 import type { DatabaseContext } from '../db/database';
 import { GrantRule, type GrantRuleObject } from '../grants/grant-rule';
 import {
@@ -268,6 +270,11 @@ function upsertDefinition(
   if (holder !== null && holder !== seed.content_key) {
     return null;
   }
+  ensureBundledStableContentIdentity(db, {
+    kind: 'subclass',
+    contentKey: seed.content_key,
+    normalizedName: normalizeContentIdentityName(seed.subclass_name),
+  });
   db.exec(
     `INSERT INTO subclass_definitions (
        content_key, class_definition_id, name, rules_edition,

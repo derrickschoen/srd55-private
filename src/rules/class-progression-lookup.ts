@@ -7,6 +7,8 @@
  */
 import type { Ability, ProgressionType } from '../domain/enums';
 import type { DatabaseContext } from '../db/database';
+import { normalizeContentIdentityName } from '../catalog/content-identity';
+import { ensureBundledStableContentIdentity } from '../catalog/content-registry';
 import { CasterContribution } from './caster-contribution';
 import { contributesToSharedSlots } from './progression-type';
 import {
@@ -312,6 +314,11 @@ function upsertClass(
   if (holder !== null && holder !== contentKey) {
     return null;
   }
+  ensureBundledStableContentIdentity(db, {
+    kind: 'class',
+    contentKey,
+    normalizedName: normalizeContentIdentityName(name),
+  });
 
   db.exec(
     `INSERT INTO class_definitions (
@@ -548,6 +555,11 @@ function upsertThirdCaster(
   if (holder !== null && holder !== contentKey) {
     return null;
   }
+  ensureBundledStableContentIdentity(db, {
+    kind: 'subclass',
+    contentKey,
+    normalizedName: normalizeContentIdentityName(subclassName),
+  });
 
   db.exec(
     `INSERT INTO subclass_definitions (

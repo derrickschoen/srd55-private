@@ -14,10 +14,21 @@ import { fragmentFromShareLink } from '../../../src/ui/screens/character-list/sh
 import {
   ImportBackupController,
   catalogSummary,
+  createImportBackupControls,
   type ImportBackupServices,
   type ReadableFile,
   type SavedFile,
 } from '../../../src/ui/screens/character-list/import-backup-controls';
+import type {
+  ContentImportPlan,
+  ContentImportPlanToken,
+} from '../../../src/catalog/content-adoption';
+import type { ContentFingerprintDigest } from '../../../src/catalog/content-identity';
+import type { ContentKey } from '../../../src/domain/ids';
+import {
+  installInteractiveDocument,
+  interactiveElement,
+} from '../../fixtures/interactive-dom';
 
 function character(id: number, name: string): CharacterRow {
   return {
@@ -298,7 +309,7 @@ describe('catalog and backup entry points', () => {
               String((document.character as { name?: unknown }).name),
             ),
           );
-          return { characterId: id };
+          return { characterId: id, spellOutcomes: [] };
         },
       },
       confirm: () => confirmation,
@@ -484,6 +495,108 @@ describe('catalog and backup entry points', () => {
         descriptions_loaded: 0,
       }),
     ).toBe('0 created, 0 updated, 0 tombstoned, 0 subclasses created, 1 subclass updated');
+  });
+
+  it('opens the real adoption dialog and routes its accepted choice through catalog commit', async () => {
+    const fixture = services();
+    const committedSummary = await fixture.value.catalog.importCatalog([]);
+    if ('token' in committedSummary) throw new Error('Expected summary fixture.');
+    const reviewPlan: ContentImportPlan = {
+      token: 'initial-plan' as ContentImportPlanToken,
+      inputHash: 'input',
+      graphHash: 'graph',
+      targetHash: 'target',
+      spellActivityChanges: [],
+      reviews: [{
+        id: 'spell:external-fireball',
+        kind: 'spell',
+        incomingName: 'Fireball',
+        localName: 'Fireball',
+        targetContentKey: '2024:fireball' as ContentKey,
+        incomingFingerprint: 'a'.repeat(64) as ContentFingerprintDigest,
+        matchClass: 'srd-fallback',
+        defaultChoice: 'match',
+        selectedChoice: 'match',
+        cloneName: 'Fireball (Private copy)',
+        dependencies: [],
+        conflictDetails: [],
+      }],
+      outcomes: [{
+        id: 'spell:external-fireball',
+        kind: 'review',
+        contentKey: '2024:fireball' as ContentKey,
+        matchClass: 'srd-fallback',
+      }],
+    };
+    const commits: Array<{
+      readonly documents: readonly string[];
+      readonly token: ContentImportPlanToken;
+      readonly choices: unknown;
+    }> = [];
+    let persistedChanges = 0;
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const controls = createImportBackupControls({
+        rpc: null as never,
+        characters: [],
+        onPersistedChange: () => { persistedChanges += 1; },
+        services: {
+          ...fixture.value,
+          catalog: {
+            importCatalog: async () => reviewPlan,
+            planImport: async () => reviewPlan,
+            commitImport: async (documents, token, choices) => {
+              commits.push({ documents, token, choices });
+              return {
+                kind: 'committed',
+                outcomes: reviewPlan.outcomes,
+                summary: committedSummary,
+              };
+            },
+          },
+        },
+      });
+      const root = interactiveElement(controls.element);
+      const catalogInput = root.querySelectorAll('input')[0];
+      if (catalogInput === undefined) throw new Error('Catalog input missing.');
+      Object.defineProperty(catalogInput, 'files', {
+        configurable: true,
+        value: [readableFile('catalog.json', '[{"name":"Fireball"}]')],
+      });
+      const importButton = root.querySelectorAll('button').find((button) =>
+        button.textContent === 'Import catalog',
+      );
+      if (importButton === undefined) throw new Error('Import button missing.');
+      importButton.click();
+      for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+
+      const dialog = root.querySelector('[data-testid="content-adoption-modal"]');
+      expect(dialog).not.toBeNull();
+      const commitButton = dialog?.querySelectorAll('button').find((button) =>
+        button.textContent === 'Import with these choices',
+      );
+      if (commitButton === undefined) throw new Error('Commit button missing.');
+      commitButton.click();
+      for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+
+      expect(commits).toEqual([{
+        documents: ['[{"name":"Fireball"}]'],
+        token: reviewPlan.token,
+        choices: {
+          'spell:external-fireball': {
+            decision: 'match',
+            cloneName: 'Fireball (Private copy)',
+          },
+        },
+      }]);
+      expect(persistedChanges).toBe(1);
+      expect(root.querySelectorAll('button').some((button) =>
+        button.textContent === 'Forget remembered choice',
+      )).toBe(true);
+      controls.cleanup();
+    } finally {
+      restoreDocument();
+    }
   });
 
   it('confirms database replacement and persists the selected SQLite bytes', async () => {

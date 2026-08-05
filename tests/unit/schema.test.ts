@@ -5,6 +5,8 @@ import sqlite3InitModule, {
 import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { schemaSources } from '../helpers/schema-sources';
+import { DatabaseContext } from '../../src/db/database';
+import { registerFixtureContentIdentity } from '../helpers/content-identity';
 import preDrizzleSchema from '../fixtures/schema-pre-drizzle.sql?raw';
 
 type SqlRow = Record<string, string | number | bigint | null>;
@@ -1876,6 +1878,15 @@ describe(`schema (${sourceLabel})`, () => {
         (content_key, name, srd_group, damage_kind, damage_type,
          range_kind, range_near_feet, range_far_feet, mastery_property)
       VALUES`;
+    const context = new DatabaseContext(db);
+    registerFixtureContentIdentity(context, {
+      kind: 'weapon', contentKey: 'missing-near', name: 'Missing near',
+      keyKind: 'bundled-stable',
+    });
+    registerFixtureContentIdentity(context, {
+      kind: 'weapon', contentKey: 'inverted', name: 'Inverted',
+      keyKind: 'bundled-stable',
+    });
     expect(() =>
       db.exec(
         `${templatePrefix}

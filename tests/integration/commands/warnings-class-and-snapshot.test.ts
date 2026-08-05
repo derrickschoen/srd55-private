@@ -19,6 +19,7 @@ import { DuplicateWarningDetector } from '../../../src/duplicates/duplicate-warn
 import { SpellSelectionService } from '../../../src/eligibility/spell-selection-service';
 import { openTestDatabase } from '../../helpers/open-db';
 import { raiseClassLevelForTest } from '../../helpers/class-levels';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 
 const integrityKey = 'C43-test-integrity-key';
 
@@ -52,12 +53,16 @@ describe('warning, class, and snapshot commands', () => {
     > = { 1: [] },
     ability: string | null = 'intelligence',
   ): number {
+    const contentKey = `class:${crypto.randomUUID()}`;
+    registerFixtureContentIdentity(db, {
+      kind: 'class', contentKey, name, keyKind: 'bundled-stable',
+    });
     const classId = db.exec(
       `INSERT INTO class_definitions (
          content_key, name, rules_edition, spellcasting_ability,
          progression_type
        ) VALUES (?, ?, '2024', ?, 'full')`,
-      [`class:${crypto.randomUUID()}`, name, ability],
+      [contentKey, name, ability],
     ).lastInsertId;
     for (const [level, rules] of Object.entries(progressions)) {
       db.exec(
@@ -75,13 +80,17 @@ describe('warning, class, and snapshot commands', () => {
     name: string,
     rules: readonly Record<string, unknown>[] = [],
   ): number {
+    const contentKey = `subclass:${crypto.randomUUID()}`;
+    registerFixtureContentIdentity(db, {
+      kind: 'subclass', contentKey, name, keyKind: 'bundled-stable',
+    });
     return db.exec(
       `INSERT INTO subclass_definitions (
          content_key, class_definition_id, name, rules_edition,
          spellcasting_ability, grant_rules
        ) VALUES (?, ?, ?, '2024', 'intelligence', ?)`,
       [
-        `subclass:${crypto.randomUUID()}`,
+        contentKey,
         classId,
         name,
         JSON.stringify(rules),
@@ -96,15 +105,19 @@ describe('warning, class, and snapshot commands', () => {
        ) VALUES (?, ?, ?)`,
       [`identity:${crypto.randomUUID()}`, name, name.toLowerCase()],
     ).lastInsertId;
-    const ids = (['2014', '2024'] as const).map((edition) =>
-      db.exec(
+    const ids = (['2014', '2024'] as const).map((edition) => {
+      const contentKey = `${edition}:${name.toLowerCase()}`;
+      registerFixtureContentIdentity(db, {
+        kind: 'spell', contentKey, name, keyKind: 'bundled-stable',
+      });
+      return db.exec(
         `INSERT INTO spell_versions (
            content_key, spell_identity_id, display_name, rules_edition,
            level, school, is_active
          ) VALUES (?, ?, ?, ?, 1, 'Evocation', 1)`,
-        [`${edition}:${name.toLowerCase()}`, identityId, name, edition],
-      ).lastInsertId,
-    );
+        [contentKey, identityId, name, edition],
+      ).lastInsertId;
+    });
     return [ids[0]!, ids[1]!];
   }
 
@@ -118,13 +131,18 @@ describe('warning, class, and snapshot commands', () => {
     );
     const versions = spellIdentityVersions('Conflict Spell');
     for (const [index, versionId] of versions.entries()) {
+      const name = `Conflict source ${index + 1}`;
+      const contentKey = `feat:${crypto.randomUUID()}`;
+      registerFixtureContentIdentity(db, {
+        kind: 'feat', contentKey, name, keyKind: 'bundled-stable',
+      });
       const featId = db.exec(
         `INSERT INTO feat_definitions (
            content_key, name, rules_edition, grant_rules
          ) VALUES (?, ?, '2024', '[]')`,
         [
-          `feat:${crypto.randomUUID()}`,
-          `Conflict source ${index + 1}`,
+          contentKey,
+          name,
         ],
       ).lastInsertId;
       const sourceId = db.exec(

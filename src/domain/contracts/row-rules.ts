@@ -44,6 +44,7 @@
 import { WEAPON_RANGE_MAX_FEET } from '../weapon-limits';
 import { sha256 } from '../../crypto/sha256';
 import { parseDerivedContentKeyV1 } from '../../catalog/content-identity';
+import { isAssertedExternalContentKey } from '../../catalog/catalog-key';
 import { decodeClassResourceFormula } from '../class-resources';
 
 /** A row as it arrives from JSON: keys are strings, values are not yet trusted. */
@@ -85,6 +86,14 @@ export function catalogContentIdentityInvariantError(
     return null;
   }
   if (keyKind === 'bundled-stable' && layer === 'bundled') {
+    return null;
+  }
+  if (
+    keyKind === 'asserted' &&
+    layer === 'external' &&
+    typeof row.content_key === 'string' &&
+    isAssertedExternalContentKey(row.content_key)
+  ) {
     return null;
   }
   if (keyKind === 'legacy-opaque' && layer === 'external') {

@@ -13,6 +13,7 @@ import { seedClassProgressions } from '../../../src/rules/class-progression-look
 import { seedSheetContent } from '../../../src/rules/sheet-srd';
 import { openTestDatabase } from '../../helpers/open-db';
 import { raiseClassLevelForTest } from '../../helpers/class-levels';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 
 /**
  * Hand-transcribed from `docs/srd/source/skills-table.txt`, not produced by the
@@ -367,6 +368,10 @@ describe('skill grants as outstanding items', () => {
     // for it would put a number the user cannot act on into an outstanding
     // item (D33). It must still BE the starting class, so the Bard entered
     // second contributes its ENTRY grant of one — from the whole vocabulary.
+    registerFixtureContentIdentity(db, {
+      kind: 'class', contentKey: '2024:class:runeblade', name: 'Runeblade',
+      keyKind: 'bundled-stable',
+    });
     db.exec(
       `INSERT INTO class_definitions (content_key, name, rules_edition)
        VALUES ('2024:class:runeblade', 'Runeblade', '2024')`,

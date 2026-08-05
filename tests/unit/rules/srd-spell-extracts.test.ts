@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { reconcileBundledContentRegistryV1 } from '../../../src/catalog/bundled-content-registry-v1';
 import { CatalogImporter } from '../../../src/catalog/catalog-importer';
 import {
   assertSpellVersionCommandAllowed,
@@ -13,6 +14,7 @@ import {
   seedSpellContent,
   type SrdSpellList,
 } from '../../../src/rules/spells-srd';
+import { assertContentImportPlan } from '../../helpers/content-import-plan';
 import { openTestDatabase } from '../../helpers/open-db';
 
 const VERBATIM_ATTRIBUTION = `This work includes material from the System Reference Document 5.2
@@ -643,10 +645,11 @@ describe('SRD spell extracts', () => {
     connection.close();
   });
 
-  it('refuses edit and delete commands with the exact read-only message', async () => {
+  it('keeps direct commands read-only, reviews SRD edits, and imports renamed clones', async () => {
     const connection = await openTestDatabase();
     const db = new DatabaseContext(connection);
     seedSpellContent(db);
+    reconcileBundledContentRegistryV1(db);
     const acidArrowId = Number(
       db.scalar(
         "SELECT id FROM spell_versions WHERE content_key = '2024:acid-arrow'",
@@ -661,33 +664,46 @@ describe('SRD spell extracts', () => {
     ).toThrow(SRD_SPELL_READ_ONLY_MESSAGE);
 
     const importer = new CatalogImporter(db);
-    expect(() =>
-      importer.import({
-        documents: [
-          JSON.stringify([
-            catalogRecord({
-              identityKey: 'acid-arrow',
-              versionKey: '2024:acid-arrow',
-              name: 'Edited Acid Arrow',
-            }),
-          ]),
-        ],
-      }),
-    ).toThrow(SRD_SPELL_READ_ONLY_MESSAGE);
-    expect(() =>
-      importer.import({
-        documents: [
-          JSON.stringify([
-            catalogRecord({
-              identityKey: 'acid-arrow',
-              versionKey: 'expanded:user.homebrew:acidic-arrow',
-              name: 'Renamed Acid Arrow',
-              edition: 'expanded',
-            }),
-          ]),
-        ],
-      }),
-    ).toThrow(SRD_SPELL_READ_ONLY_MESSAGE);
+    const editResult = importer.import({
+      documents: [
+        JSON.stringify([
+          catalogRecord({
+            identityKey: 'fireball',
+            versionKey: '2024:fireball',
+            name: 'Fireball',
+          }),
+        ]),
+      ],
+    });
+    assertContentImportPlan(
+      editResult,
+      'Expected the SRD edit to require content review.',
+    );
+    expect(editResult.reviews.map(({ id, kind, matchClass }) => ({
+      id,
+      kind,
+      matchClass,
+    }))).toEqual([{
+      id: 'spell:2024:fireball',
+      kind: 'spell',
+      matchClass: 'key-collision',
+    }]);
+    const renamedImport = importer.import({
+      documents: [
+        JSON.stringify([
+          catalogRecord({
+            identityKey: 'acid-arrow',
+            versionKey: 'expanded:user.homebrew:acidic-arrow',
+            name: 'Renamed Acid Arrow',
+            edition: 'expanded',
+          }),
+        ]),
+      ],
+    });
+    expect(renamedImport).toMatchObject({
+      created: 1,
+      identities_created: 1,
+    });
     expect(
       db.oneRaw(
         `SELECT display_name, provenance
@@ -751,8 +767,15 @@ describe('SRD spell extracts', () => {
     const identityId = db.exec(
       `INSERT INTO spell_identities (
          content_key, canonical_name, normalized_name
-       ) VALUES ('acid-arrow', 'Acid Arrow', 'acid arrow')`,
+      ) VALUES ('acid-arrow', 'Acid Arrow', 'acid arrow')`,
     ).lastInsertId;
+    db.exec(
+      `INSERT INTO catalog_content_identities (
+         content_key, content_kind, key_kind, catalog_layer, normalized_name
+       ) VALUES (
+         '2024:acid-arrow', 'spell', 'asserted', 'external', 'user acid arrow'
+       )`,
+    );
     db.exec(
       `INSERT INTO spell_versions (
          content_key, spell_identity_id, display_name, rules_edition,

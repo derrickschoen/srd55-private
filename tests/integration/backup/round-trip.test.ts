@@ -28,6 +28,7 @@ import {
   MemoryDatabaseStorage,
   openTestDatabase,
 } from '../../helpers/open-db';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 
 const opened: Database[] = [];
 const lifecycles: DatabaseLifecycle[] = [];
@@ -46,6 +47,14 @@ async function database(): Promise<DatabaseContext> {
 
 function seedCatalog(db: DatabaseContext, withPadding = false): CatalogIds {
   if (withPadding) {
+    registerFixtureContentIdentity(db, {
+      kind: 'spell', contentKey: 'dummy:spell', name: 'Dummy',
+      keyKind: 'bundled-stable',
+    });
+    registerFixtureContentIdentity(db, {
+      kind: 'class', contentKey: 'dummy:class', name: 'Dummy',
+      keyKind: 'bundled-stable',
+    });
     const dummyIdentity = db.exec(
       `INSERT INTO spell_identities
          (content_key, canonical_name, normalized_name)
@@ -63,6 +72,14 @@ function seedCatalog(db: DatabaseContext, withPadding = false): CatalogIds {
        VALUES ('dummy:class', 'Dummy', '2024')`,
     );
   }
+  registerFixtureContentIdentity(db, {
+    kind: 'spell', contentKey: '2024:shield', name: 'Shield',
+    keyKind: 'bundled-stable',
+  });
+  registerFixtureContentIdentity(db, {
+    kind: 'class', contentKey: 'class:wizard', name: 'Wizard',
+    keyKind: 'bundled-stable',
+  });
   const identityId = db.exec(
     `INSERT INTO spell_identities
        (content_key, canonical_name, normalized_name)
@@ -1657,6 +1674,14 @@ describe('complete database backup', () => {
       `INSERT INTO spell_identities (content_key, canonical_name, normalized_name)
        VALUES ('spell:fireball', 'Fireball', 'fireball')`,
     );
+    registerFixtureContentIdentity(lifecycle.database, {
+      kind: 'class', contentKey: 'expanded:class:image', name: 'Image Class',
+      keyKind: 'bundled-stable',
+    });
+    registerFixtureContentIdentity(lifecycle.database, {
+      kind: 'subclass', contentKey: 'expanded:subclass:image',
+      name: 'Image Subclass', keyKind: 'bundled-stable',
+    });
     lifecycle.database.exec(`
       INSERT INTO class_definitions (
         content_key, name, rules_edition, progression_type

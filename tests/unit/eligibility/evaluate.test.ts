@@ -5,6 +5,7 @@ import {
   eligibilityInvalidReasons,
   SpellSelectionEligibility,
 } from '../../../src/eligibility/spell-selection-eligibility';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import { openTestDatabase } from '../../helpers/open-db';
 
 interface Fixture {
@@ -64,6 +65,10 @@ function spell(
     tags?: readonly string[];
   } = {},
 ): number {
+  registerFixtureContentIdentity(context, {
+    kind: 'spell', contentKey: `version:${key}`, name: key,
+    keyKind: 'bundled-stable',
+  });
   const identityId =
     options.identityId ??
     context.exec(

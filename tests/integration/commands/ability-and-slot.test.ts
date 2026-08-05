@@ -12,6 +12,7 @@ import type {
 } from '../../../src/commands/set-slot/shared';
 import { DatabaseContext } from '../../../src/db/database';
 import { eligibilityInvalidReasons } from '../../../src/eligibility/spell-selection-eligibility';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import { openTestDatabase } from '../../helpers/open-db';
 
 const integrityKey = 'C41-command-integrity-key';
@@ -48,6 +49,10 @@ function addSpell(
     list?: string;
   } = {},
 ): number {
+  registerFixtureContentIdentity(db, {
+    kind: 'spell', contentKey: `version:${key}`, name: key,
+    keyKind: 'bundled-stable',
+  });
   const identityId = db.exec(
     `INSERT INTO spell_identities
        (content_key, canonical_name, normalized_name)

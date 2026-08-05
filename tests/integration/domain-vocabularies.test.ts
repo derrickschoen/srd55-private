@@ -12,6 +12,7 @@ import {
 import { DatabaseContext } from '../../src/db/database';
 import { rowContractError } from '../../src/domain/contracts/rows';
 import { CatalogQueries } from '../../src/queries/catalog-queries';
+import { registerFixtureContentIdentity } from '../helpers/content-identity';
 import { openTestDatabase } from '../helpers/open-db';
 
 let connection: Database | null = null;
@@ -38,6 +39,9 @@ function spellVersion(
   key: string,
   school = 'Evocation',
 ): number {
+  registerFixtureContentIdentity(db, {
+    kind: 'spell', contentKey: key, name: key, keyKind: 'bundled-stable',
+  });
   const identityId = db.exec(
     `INSERT INTO spell_identities
        (content_key, canonical_name, normalized_name)
@@ -59,6 +63,10 @@ function speciesTemplate(
   size = 'Medium',
   alternateSize: string | null = null,
 ): number {
+  registerFixtureContentIdentity(db, {
+    kind: 'species', contentKey: key, name: key,
+    keyKind: 'bundled-stable',
+  });
   return db.exec(
     `INSERT INTO species_templates
        (content_key, name, creature_type, size, alternate_size, base_speed_feet)
@@ -71,7 +79,7 @@ function catalogRecord(school: string): Record<string, unknown> {
   return {
     identityKey: 'custom-school-identity',
     versionKey: '2024:homebrew.example:custom-school',
-    name: 'Custom School Spell',
+    name: 'Custom School',
     edition: '2024',
     level: 1,
     school,
@@ -212,6 +220,10 @@ describe('open and closed domain vocabularies', () => {
       ),
     ).toBeNull();
 
+    registerFixtureContentIdentity(db, {
+      kind: 'weapon', contentKey: 'weapon:steam', name: 'Steam Blade',
+      keyKind: 'bundled-stable',
+    });
     expect(() =>
       db.exec(
         `INSERT INTO weapon_templates

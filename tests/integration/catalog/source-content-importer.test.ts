@@ -13,12 +13,15 @@ import {
 import {
   ContentIdentityCollision,
   registerBundledStableContentIdentity,
+  registerContentFingerprint,
   registerDerivedContentIdentity,
 } from '../../../src/catalog/content-registry';
+import { assertedExternalContentKey } from '../../../src/catalog/catalog-key';
 import {
   ExternalClassImportRefused,
-  SourceContentImportReviewRequired,
 } from '../../../src/catalog/source-content-importer';
+import { projectClassContentV1 } from '../../../src/catalog/source-content-projector-v1';
+import { projectStoredEquipmentContentV1 } from '../../../src/catalog/equipment-content-projector-v1';
 import { projectAuthoredContentAggregateV1 } from '../../../src/catalog/stored-authored-content-projector-v1';
 import { projectStoredAuthoredContentV1, storedAuthoredRegistryReferencesV1 } from '../../../src/catalog/stored-authored-content-projector-v1';
 import { DatabaseContext } from '../../../src/db/database';
@@ -33,6 +36,7 @@ import {
   classProjectorV1Vector,
   featProjectorV1Vector,
 } from '../../unit/catalog/fixtures/source-projector-v1-vectors';
+import { assertContentImportPlan } from '../../helpers/content-import-plan';
 import { openTestDatabase } from '../../helpers/open-db';
 
 let connection: Database;
@@ -395,9 +399,16 @@ describe('class, feat, species and background catalog import', () => {
     expect(listGuidedBackgroundChoiceOptions(db).origin_feats).toEqual([]);
 
     db.exec('UPDATE species_templates SET base_speed_feet = 35 WHERE content_key = ?', [speciesKey]);
-    expect(() => new CatalogImporter(db).import({
+    const damaged = new CatalogImporter(db).import({
       documents: [speciesDocument],
-    })).toThrow(ContentIdentityCollision);
+    });
+    assertContentImportPlan(
+      damaged,
+      'Expected the damaged species import to return a plan.',
+    );
+    expect(damaged.outcomes).toEqual([
+      expect.objectContaining({ kind: 'refused', reason: 'target_integrity_refused' }),
+    ]);
   });
 
   it('imports a null-tool background, resolves catalog edges, and reprojects byte-stably', () => {
@@ -419,6 +430,27 @@ describe('class, feat, species and background catalog import', () => {
          'Piercing', 'not_applicable', 0, 0, 0, 0, 1, 0, 0, 0, 'none', 'Sap')`,
       [weaponIdentity.derivedKey],
     );
+    const storedWeapon = projectStoredEquipmentContentV1(db, {
+      kind: 'weapon', contentKey: weaponIdentity.derivedKey,
+    });
+    const liveWeaponIdentity = deriveContentIdentityV1({
+      kind: storedWeapon.kind,
+      edition: storedWeapon.aggregate.rules_edition,
+      name: storedWeapon.aggregate.name,
+      payload: storedWeapon.payload,
+    });
+    db.exec(
+      `DELETE FROM catalog_content_fingerprints
+       WHERE content_kind = 'weapon' AND content_key = ?`,
+      [weaponIdentity.derivedKey],
+    );
+    registerContentFingerprint(db, {
+      kind: 'weapon', contentKey: weaponIdentity.derivedKey,
+      scheme: liveWeaponIdentity.envelope.scheme,
+      digest: liveWeaponIdentity.digest,
+      canonicalJson: liveWeaponIdentity.canonicalJson,
+      role: 'current',
+    });
     const armorIdentity = registerDerivedContentIdentity(db, {
       kind: 'armor', edition: 'expanded', name: 'Reed Mail', payload: { armor_class: 13 },
     });
@@ -429,6 +461,27 @@ describe('class, feat, species and background catalog import', () => {
        ) VALUES (?, 'expanded', 'Reed Mail', 'light', 13, 'full', 0)`,
       [armorIdentity.derivedKey],
     );
+    const storedArmor = projectStoredEquipmentContentV1(db, {
+      kind: 'armor', contentKey: armorIdentity.derivedKey,
+    });
+    const liveArmorIdentity = deriveContentIdentityV1({
+      kind: storedArmor.kind,
+      edition: storedArmor.aggregate.rules_edition,
+      name: storedArmor.aggregate.name,
+      payload: storedArmor.payload,
+    });
+    db.exec(
+      `DELETE FROM catalog_content_fingerprints
+       WHERE content_kind = 'armor' AND content_key = ?`,
+      [armorIdentity.derivedKey],
+    );
+    registerContentFingerprint(db, {
+      kind: 'armor', contentKey: armorIdentity.derivedKey,
+      scheme: liveArmorIdentity.envelope.scheme,
+      digest: liveArmorIdentity.digest,
+      canonicalJson: liveArmorIdentity.canonicalJson,
+      role: 'current',
+    });
     const featRef = fingerprint(featKey as ContentKey);
     const background: BackgroundContentAggregate = {
       kind: 'background',
@@ -445,11 +498,11 @@ describe('class, feat, species and background catalog import', () => {
       equipment_option_b_description: 'Mail.',
       equipment_option_a: [{
         kind: 'weapon', sort_order: 1, quantity: 1, printed_name: 'Marsh Spear',
-        content: { kind: 'weapon', scheme: weaponIdentity.envelope.scheme, digest: weaponIdentity.digest },
+        content: { kind: 'weapon', scheme: liveWeaponIdentity.envelope.scheme, digest: liveWeaponIdentity.digest },
       }],
       equipment_option_b: [{
         kind: 'armor', sort_order: 1, quantity: 1, printed_name: 'Reed Mail',
-        content: { kind: 'armor', scheme: armorIdentity.envelope.scheme, digest: armorIdentity.digest },
+        content: { kind: 'armor', scheme: liveArmorIdentity.envelope.scheme, digest: liveArmorIdentity.digest },
       }],
       effects: [],
     };
@@ -477,7 +530,11 @@ describe('class, feat, species and background catalog import', () => {
       name: background.name,
       payload: projectAuthoredContentAggregateV1(background).payload,
     });
-    expect(contentKey).toBe(incoming.derivedKey);
+    expect(contentKey).toBe(assertedExternalContentKey(
+      'background',
+      background.rules_edition,
+      background.name,
+    ));
     expect(db.scalar<string>('SELECT tool_proficiency FROM background_templates')).toBe('');
     const stored = projectStoredAuthoredContentV1(db, {
       kind: 'background',
@@ -495,7 +552,7 @@ describe('class, feat, species and background catalog import', () => {
     expect(listGuidedOriginOptions(db, 'background')).toEqual([]);
   });
 
-  it('matches an installed class aggregate but refuses creation under D133', () => {
+  it('requires review for an installed bundled class and refuses creation under D133', () => {
     const key = 'expanded:bundled-wayfarer' as ContentKey;
     registerBundledStableContentIdentity(db, {
       kind: 'class', contentKey: key, normalizedName: 'wayfarer',
@@ -506,18 +563,45 @@ describe('class, feat, species and background catalog import', () => {
        VALUES (?, 'Wayfarer', 'expanded', 'none', 0)`,
       [key],
     );
-    const matched = new CatalogImporter(db).import({
+    const classIdentity = deriveContentIdentityV1({
+      kind: 'class',
+      edition: classProjectorV1Vector.aggregate.rules_edition,
+      name: classProjectorV1Vector.aggregate.name,
+      payload: projectClassContentV1(classProjectorV1Vector.aggregate),
+    });
+    registerContentFingerprint(db, {
+      kind: 'class',
+      contentKey: key,
+      scheme: classIdentity.envelope.scheme,
+      digest: classIdentity.digest,
+      canonicalJson: classIdentity.canonicalJson,
+      role: 'current',
+    });
+    const classReview = new CatalogImporter(db).import({
       documents: [document('class', classProjectorV1Vector.aggregate)],
     });
-    expect(matched.classes_matched).toBe(1);
+    assertContentImportPlan(
+      classReview,
+      'Expected the class import to require content review.',
+    );
+    expect(classReview.reviews).toEqual([
+      expect.objectContaining({ kind: 'class' }),
+    ]);
 
     const missing = {
       ...classProjectorV1Vector.aggregate,
       name: 'Uninstalled Class',
     };
-    expect(() => new CatalogImporter(db).import({
+    const missingPlan = new CatalogImporter(db).import({
       documents: [document('class', missing)],
-    })).toThrow(ExternalClassImportRefused);
+    });
+    assertContentImportPlan(
+      missingPlan,
+      'Expected the uninstalled class import to return a plan.',
+    );
+    expect(missingPlan.outcomes).toEqual([
+      expect.objectContaining({ kind: 'refused', reason: 'install_refused' }),
+    ]);
     expect(db.scalar<number>('SELECT count(*) FROM class_definitions')).toBe(1);
   });
 
@@ -525,12 +609,19 @@ describe('class, feat, species and background catalog import', () => {
     new CatalogImporter(db).import({
       documents: [document('feat', featProjectorV1Vector.aggregate)],
     });
-    expect(() => new CatalogImporter(db).import({
+    const review = new CatalogImporter(db).import({
       documents: [document('feat', {
         ...featProjectorV1Vector.aggregate,
         name: 'Keen-Memory',
       })],
-    })).toThrow(SourceContentImportReviewRequired);
+    });
+    assertContentImportPlan(
+      review,
+      'Expected the feat metadata conflict to require content review.',
+    );
+    expect(review.reviews).toEqual([
+      expect.objectContaining({ kind: 'feat', matchClass: 'metadata-conflict' }),
+    ]);
     expect(db.scalar<number>('SELECT count(*) FROM feat_definitions')).toBe(1);
   });
 });

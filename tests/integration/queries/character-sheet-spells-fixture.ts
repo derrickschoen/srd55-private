@@ -8,6 +8,7 @@ import {
   createSpell,
   persistedReportTableHashes,
 } from '../reports/build-report-fixture';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 
 export interface CharacterSheetSpellsFixture {
   readonly characterId: number;
@@ -108,7 +109,7 @@ let sequence = 0;
 
 function key(label: string): string {
   sequence += 1;
-  return `ss1:${label}:${sequence}`;
+  return `2024:ss1.fixture:${label}-${sequence}`;
 }
 
 function createDefinition(
@@ -122,6 +123,12 @@ function createDefinition(
   },
 ): number {
   const contentKey = key(kind);
+  registerFixtureContentIdentity(db, {
+    kind,
+    contentKey,
+    name: options.name,
+    keyKind: 'asserted',
+  });
   if (kind === 'subclass') {
     if (options.classId === undefined) {
       throw new Error('The SS-1 subclass fixture requires its parent class.');

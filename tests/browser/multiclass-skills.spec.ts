@@ -2,6 +2,7 @@ import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
 import type { Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { DatabaseContext } from '../../src/db/database';
+import { registerBrowserFixtureContentIdentity } from './fixtures/content-identity';
 import { expect, test } from './fixtures/parallel-test';
 
 const schema = readFileSync(
@@ -70,11 +71,18 @@ async function multiclassImage(options: {
     entryPool: 'none' | 'class_list' | 'any',
     entryCount: number,
   ): number => {
+    const contentKey = `2024:class:${name.toLowerCase()}`;
+    registerBrowserFixtureContentIdentity(db, {
+      kind: 'class',
+      contentKey,
+      name,
+      keyKind: 'bundled-stable',
+    });
     const id = db.exec(
       `INSERT INTO class_definitions
          (content_key, name, rules_edition, progression_type)
        VALUES (?, ?, '2024', 'none')`,
-      [`2024:class:${name.toLowerCase()}`, name],
+      [contentKey, name],
     ).lastInsertId;
     db.exec(
       `INSERT INTO class_progressions (class_definition_id, class_level)

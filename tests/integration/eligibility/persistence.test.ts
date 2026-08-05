@@ -6,6 +6,7 @@ import {
   SpellSelectionEligibility,
 } from '../../../src/eligibility/spell-selection-eligibility';
 import { SpellSelectionService } from '../../../src/eligibility/spell-selection-service';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import { openTestDatabase } from '../../helpers/open-db';
 
 interface Fixture {
@@ -62,6 +63,10 @@ function spell(
     list?: string;
   } = {},
 ): number {
+  registerFixtureContentIdentity(context, {
+    kind: 'spell', contentKey: `version:${name}`, name,
+    keyKind: 'bundled-stable',
+  });
   const identityId = context.exec(
     `INSERT INTO spell_identities
        (content_key, canonical_name, normalized_name)

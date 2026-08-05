@@ -8,6 +8,7 @@ import {
   type CharacterStateSnapshot,
 } from '../../../src/character/character-state';
 import { DatabaseContext } from '../../../src/db/database';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import { openTestDatabase } from '../../helpers/open-db';
 
 type MutableSnapshot = Record<string, any>;
@@ -42,6 +43,18 @@ function seedFixture(): void {
        ('spell:inactive', 'Inactive Spell', 'inactive spell', ?, ?)`,
     [createdAt, updatedAt, createdAt, updatedAt],
   );
+  registerFixtureContentIdentity(db, {
+    kind: 'spell', contentKey: '2024:active', name: 'Active Spell',
+    keyKind: 'bundled-stable',
+  });
+  registerFixtureContentIdentity(db, {
+    kind: 'spell', contentKey: '2024:inactive', name: 'Inactive Spell',
+    keyKind: 'bundled-stable',
+  });
+  registerFixtureContentIdentity(db, {
+    kind: 'class', contentKey: 'class:wizard', name: 'Wizard',
+    keyKind: 'bundled-stable',
+  });
   activeSpellId = db.exec(
     `INSERT INTO spell_versions (
        content_key, spell_identity_id, display_name, rules_edition, level,

@@ -1,5 +1,6 @@
 import type { SqlValue } from '@sqlite.org/sqlite-wasm';
 import { normalizeCatalogName } from '../catalog/catalog-normalize';
+import { registerAssertedPlaceholderContentIdentity } from '../catalog/content-registry';
 import { assertSourceRepeatable } from '../commands/add-source';
 import {
   sqlVersatileWeaponDamage,
@@ -1443,6 +1444,10 @@ export function ensureSharedSpell(
   }
   const name = (displayName ?? fallbackSpellName(key)).slice(0, 120);
   const now = timestamp();
+  registerAssertedPlaceholderContentIdentity(db, {
+    contentKey: key,
+    normalizedName: normalizeCatalogName(name),
+  });
   const identityId = db.exec(
     `INSERT INTO spell_identities (
        content_key, canonical_name, normalized_name, created_at, updated_at
