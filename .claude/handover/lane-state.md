@@ -23,7 +23,63 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-05-a (newest - read first)
+## RESTART POINT 2026-08-05-b (newest - read first)
+MAIN 12ba5ec (mirror pushed). FLOORS: vitest 231/3,855; PW 126 on the
+PARALLEL POOL (~9 min wall, was 24-28 serial); build 0; migrations
+0000-0033 FROZEN (0033 = asserted keys + registry-first triggers);
+backup v4; wire v1-v17. TWENTY merges. Rulings through D203.
+
+THE WAVE COMPLETED THIS WINDOW - five merges:
+ - AR-A (b66ead2, 16th): character archive, 0032, backup v4,
+   sequence-preserving rebuild.
+ - SC-3 (4827c77, 17th): twelve SRD subclasses seeded with registered
+   identities; D152-typed branded descriptions.
+ - FF-B (a6b12e8, 18th): flavor + internal undo RPC; signed restores
+   deleted end to end (R5/D199/D201).
+ - INFRA (ca4ac55, 19th, D200): parallel Playwright pool - per-worker
+   OPFS origins, parity split, audited budgets. EVERY future chain's
+   browser gate is ~9 min.
+ - CI-4a (47484b1, 20th): two-phase adoption plan/token/commit, review
+   dialog through public RPCs, mint 0033, registry-first triggers, the
+   fixture population swept to match. Eleven fix rounds; two early
+   dispatches correctly BLOCKED (-> D198, D203).
+Post-merge budget fix 12ba5ec (compiler probe 10s->30s, supervisor-
+authored, FLAGGED for independent review next lane round).
+
+KNOWN NOISE, adjudicated: vitest parallel-worker "onTaskUpdate" RPC
+timeout appearing AFTER all tests pass (recorded as
+SC3-VITEST-WORKER-RPC-NOISE; serial run clean; treat all-pass + noise
+as green, never gate on the exit code alone without reading counts).
+
+QUEUE NEXT: CI-4b (semantic backfill/rekey - 0034 next free mint);
+SEEDER-SAME-CARDINALITY-CORRECTION (owner: after CI-4a, now due);
+VET-SEED (D202, rogue "Veteran" as bundled content - kit in wt/party
+docs/homebrew, owner session may still be refining; confirm before
+dispatch); HA-2; CI-5. Follow-ups: SUBCLASS-EMPTY-PROSE-AUDIT,
+reconcile steady-state cost, dead enum available_on_long_rest.
+
+WORKTREES: wt/attunement, wt/hyg2, wt/print, wt/ci4a, wt/infra all
+MERGED and idle (safe to reuse or prune); wt/party belongs to the
+owner's subclass session - do not touch docs/homebrew from supervision.
+
+SUPERVISOR ERRORS THIS WINDOW, disclosed in full in the transcript:
+ 1. Piped a git merge through tail; the conflict exit vanished and a
+    30-min chain ran on a conflicted tree (1106 meaningless failures,
+    discarded). Merges now run bare with an explicit conflict check.
+    Same pipe-exit trap also hit a vitest waiter (self-matching ps
+    loop, 43 wasted sleeps) - third instance of the class this window.
+ 2. Pushed the mirror in the same compound command as the post-merge
+    suite read - the push chained off grep, not the verdict. Push only
+    after reading counts.
+ 3. INFRA-3 brief omitted the no-second-agent-CLI line; codex ran one.
+    The line is now standard in every brief.
+Positive pattern worth keeping: the sonnet workflow digest of FF-B's
+diff-vs-briefs caught a real functional regression (four live commands'
+undo refused as legacy) that had ZERO test coverage - supervisor
+verified in source before dispatching the fix. Workflow digests before
+gates on multi-round lanes earn their cost.
+
+## RESTART POINT 2026-08-05-a (superseded by 08-05-b)
 MAIN b66ead2 (mirror pushed). FLOORS: vitest 227/3,794; PW 125; build 0;
 migrations 0000-0032 FROZEN (0032 = character archive, first
 sequence-preserving rebuild); backup v4; wire v1-v17. SIXTEEN merges.
