@@ -1269,10 +1269,10 @@ test('undoes a structural class change through its snapshot inverse', async ({
     (await rows(page, 'character_operations')).find(
       (row) => row.operation_uuid === changed.operation_uuid,
     )?.inverse_command,
-  )) as { snapshot: { schema_version: string } };
-  expect(storedClassInverse).toMatchObject({
-    type: 'restore_snapshot',
-    snapshot: { schema_version: 'a7-v16' },
+  )) as { type: string; snapshot: { schema_version: string } };
+  expect(storedClassInverse).toEqual({
+    type: 'internal_snapshot_restore',
+    snapshot: expect.objectContaining({ schema_version: 'a7-v16' }),
   });
   expect(storedClassInverse.snapshot.schema_version).not.toBe('a7-v15');
   await undo(
@@ -1655,6 +1655,14 @@ test('adds a class source with planned slots and addressed spellbook acquisition
   const character = await rpc<any>(page, 'queries.characters.create', {
     name: 'Class Source Command',
   });
+  await rpc<unknown>(page, 'queries.savePoints.create', {
+    character_id: character.id,
+    label: 'Before class-source experiment',
+  });
+  const cleanSlate = forCharacter(
+    await rows(page, 'character_save_points'),
+    character.id,
+  )[0]!;
   const added = await execute(
     page,
     character.id,
@@ -1835,7 +1843,18 @@ test('adds a class source with planned slots and addressed spellbook acquisition
         .map((row) => row.action_type),
     ),
   ).toEqual(new Set(['add_source']));
-  await undo(page, character.id, 2, added.operation_uuid);
+  expect(await undo(page, character.id, 2, added.operation_uuid)).toEqual({
+    status: 'refused',
+    reason: 'operation_not_latest',
+    current_revision: 2,
+  });
+  const restored = await restoreSavePoint(
+    page,
+    character.id,
+    cleanSlate.id,
+    2,
+  );
+  expect(restored).toMatchObject({ status: 'applied', revision: 3 });
   expect(
     forCharacter(await rows(page, 'character_class_levels'), character.id),
   ).toEqual([]);
