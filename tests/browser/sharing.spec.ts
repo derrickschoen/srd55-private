@@ -1,8 +1,8 @@
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
 import { readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
-import { expect, test } from '@playwright/test';
 import { DatabaseContext } from '../../src/db/database';
+import { expect, test } from './fixtures/parallel-test';
 
 const schema = readFileSync(
   new URL('../../src/db/schema.sql', import.meta.url),
@@ -42,10 +42,12 @@ async function oversizedShareImage(): Promise<readonly number[]> {
 }
 
 async function ready(page: import('@playwright/test').Page): Promise<void> {
+  // The four-worker pool measured this file's slowest caller at 23.7s; 60s
+  // gives this load-sensitive readiness wait at least 2.5x pool headroom.
   await expect(page.locator('#status')).toHaveAttribute(
     'data-ready',
     'true',
-    { timeout: 30_000 },
+    { timeout: 60_000 },
   );
 }
 

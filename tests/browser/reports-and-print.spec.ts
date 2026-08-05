@@ -1,8 +1,9 @@
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
-import { expect, test, type Page } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { DatabaseContext } from '../../src/db/database';
 import { createBuildReportFixture } from '../integration/reports/build-report-fixture';
+import { expect, test } from './fixtures/parallel-test';
 
 const schema = readFileSync(
   new URL('../../src/db/schema.sql', import.meta.url),
@@ -35,10 +36,12 @@ async function fixtureImage(): Promise<FixtureImage> {
 }
 
 async function ready(page: Page): Promise<void> {
+  // The four-worker pool measured the caller at 46.4s; 120s gives this
+  // load-sensitive readiness wait at least 2.5x pool headroom.
   await expect(page.locator('#status')).toHaveAttribute(
     'data-ready',
     'true',
-    { timeout: 30_000 },
+    { timeout: 120_000 },
   );
 }
 
@@ -69,9 +72,9 @@ async function databaseState(page: Page): Promise<{
 test('build report route presents source, route, duplicate, and invalid annotations without persisted writes', async ({
   page,
 }) => {
-  // Measured at 31.6s alone on Chromium; this ceiling is for concurrent-lane
-  // contention.
-  test.setTimeout(90_000);
+  // The four-worker parallel pool measured 46.4s; 120s preserves at least
+  // 2.5x wall-clock headroom under parallel-pool contention.
+  test.setTimeout(120_000);
   const fixture = await fixtureImage();
   await installFixture(page, fixture);
   const before = await databaseState(page);

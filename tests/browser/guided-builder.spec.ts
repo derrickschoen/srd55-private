@@ -1,11 +1,14 @@
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
+import { expect, test } from './fixtures/parallel-test';
 import { readGuidedSeam } from './fixtures/guided-seam';
 
 async function ready(page: Page): Promise<void> {
+  // The four-worker pool measured this file's slowest caller at 25.2s; 65s
+  // gives this load-sensitive readiness wait at least 2.5x pool headroom.
   await expect(page.locator('#status')).toHaveAttribute(
     'data-ready',
     'true',
-    { timeout: 30_000 },
+    { timeout: 65_000 },
   );
 }
 
@@ -64,8 +67,9 @@ async function expectHorizontallyContained(
 test('a phone-width guided journey keeps the first level 1 screens and controls usable', async ({
   page,
 }) => {
-  // Measured at 10.1s alone on Chromium at 390x844.
-  test.setTimeout(20_000);
+  // The four-worker parallel pool measured 12.1s on Chromium at 390x844;
+  // 35s preserves at least 2.5x wall-clock headroom under pool contention.
+  test.setTimeout(35_000);
   await page.setViewportSize({ width: 390, height: 844 });
   await resetHome(page);
 
@@ -143,8 +147,9 @@ test('a phone-width guided journey keeps the first level 1 screens and controls 
 test('the empty-database front door chooses class first, persists once named, and survives reload without a planner escape', async ({
   page,
 }) => {
-  // Measured at 20.2s alone on Chromium; allow for concurrent-suite contention.
-  test.setTimeout(60_000);
+  // The four-worker parallel pool measured 25.2s; 65s preserves at least
+  // 2.5x wall-clock headroom under parallel-pool contention.
+  test.setTimeout(65_000);
   await page.setViewportSize({ width: 390, height: 844 });
   await resetHome(page);
 

@@ -1,8 +1,10 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures/parallel-test';
 
 async function waitForWorker(page: import('@playwright/test').Page) {
+  // The four-worker pool measured the caller at 12.2s; 35s gives this
+  // load-sensitive worker wait at least 2.5x pool headroom.
   await expect(page.locator('#status')).toHaveAttribute('data-ready', 'true', {
-    timeout: 30_000,
+    timeout: 35_000,
   });
 }
 

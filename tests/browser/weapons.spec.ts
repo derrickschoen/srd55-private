@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import type { Page } from '@playwright/test';
+import { expect, test } from './fixtures/parallel-test';
 
 /**
  * The weapons panel, driven the way a browser AI extension would drive it:
@@ -9,8 +10,10 @@ import { expect, test, type Page } from '@playwright/test';
 
 async function openPlanner(page: Page, name: string): Promise<void> {
   await page.goto('/');
+  // The four-worker pool measured this file's slowest caller at 13.7s; 35s
+  // gives these load-sensitive readiness waits at least 2.5x pool headroom.
   await expect(page.locator('#status')).toHaveAttribute('data-ready', 'true', {
-    timeout: 30_000,
+    timeout: 35_000,
   });
   await page.evaluate(async (characterName) => {
     await window.staticApp.reset();
@@ -20,7 +23,7 @@ async function openPlanner(page: Page, name: string): Promise<void> {
   await expect(page.locator('#planner-status')).toHaveAttribute(
     'data-ready',
     'true',
-    { timeout: 30_000 },
+    { timeout: 35_000 },
   );
 }
 
@@ -37,7 +40,9 @@ async function addFighterLevel(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'Add class', exact: true }).click();
   await expect(page.getByTestId('weapon-mastery-status')).toContainText(
     'Fighter',
-    { timeout: 15_000 },
+    // The pool's slowest caller measured 13.7s; 35s keeps at least 2.5x
+    // headroom for this worker-backed update under parallel contention.
+    { timeout: 35_000 },
   );
 }
 
@@ -136,10 +141,12 @@ async function levelClassTo(
   // The level-ups ran through the worker, not the planner's own actions, so
   // the screen re-reads them on a fresh load.
   await page.goto('/characters/1');
+  // The four-worker pool measured this file's slowest caller at 13.7s; 35s
+  // gives the load-sensitive post-level readiness wait 2.5x pool headroom.
   await expect(page.locator('#planner-status')).toHaveAttribute(
     'data-ready',
     'true',
-    { timeout: 30_000 },
+    { timeout: 35_000 },
   );
 }
 
@@ -453,8 +460,10 @@ test('the attack profiles derive from the weapon, the class and nothing stored',
   // the profile's own count moves with it. Levelled through the guarded
   // command — the planner's level input is retired (level-up plan §3).
   await levelClassTo(page, 'Fighter', 5);
+  // The four-worker pool measured this test at 13.4s; 35s gives this
+  // worker-backed profile update at least 2.5x pool headroom.
   await expect(profiles).toContainText('The Attack action gives 2 attacks.', {
-    timeout: 15_000,
+    timeout: 35_000,
   });
   // Level 5 also moves the proficiency bonus to +3.
   await expect(page.getByTestId('attack-profile-numbers').first()).toHaveText(
@@ -542,6 +551,8 @@ test('a Wizard’s Greatsword loses the proficiency bonus, and both screens say 
 test('the damage-type choice is undecided on both sides until it is made', async ({
   page,
 }) => {
+  // The four-worker pool measured this test at 10.2s; 30s gives its
+  // load-sensitive picker and polling waits at least 2.5x pool headroom.
   await page.goto('/');
   await expect(page.locator('#status')).toHaveAttribute('data-ready', 'true', {
     timeout: 30_000,
@@ -574,7 +585,7 @@ test('the damage-type choice is undecided on both sides until it is made', async
   // gives the character a spell access route, which is the only input the
   // cantrip recogniser reads.
   const picker = page.getByLabel('Spell selection for slot 1');
-  await expect(picker).toBeVisible({ timeout: 15_000 });
+  await expect(picker).toBeVisible({ timeout: 30_000 });
   await picker.fill('True Strike');
   await page.getByRole('option', { name: /True Strike/ }).first().click();
   await expect
@@ -583,7 +594,7 @@ test('the damage-type choice is undecided on both sides until it is made', async
         page.evaluate(() =>
           window.staticApp.inspectRows('spell_selection_slots', { id: 1 }),
         ),
-      { timeout: 15_000 },
+      { timeout: 30_000 },
     )
     .toEqual([
       expect.objectContaining({
@@ -602,7 +613,7 @@ test('the damage-type choice is undecided on both sides until it is made', async
   const trueStrikeBlock = page
     .locator('[data-testid="attack-profile"][data-kind="true_strike"]')
     .first();
-  await expect(trueStrikeBlock).toBeVisible({ timeout: 15_000 });
+  await expect(trueStrikeBlock).toBeVisible({ timeout: 30_000 });
 
   const control = page.getByRole('combobox', {
     name: 'Damage type for True Strike with Longsword',
@@ -674,6 +685,8 @@ test('the damage-type choice is undecided on both sides until it is made', async
 test('a grant it cannot apply is stated on the page, not folded into the number', async ({
   page,
 }) => {
+  // The four-worker pool measured this test at 12.9s; 35s gives both
+  // worker-backed rendering waits at least 2.5x pool headroom.
   await openPlanner(page, 'Blade Pact');
 
   await page
@@ -687,7 +700,7 @@ test('a grant it cannot apply is stated on the page, not folded into the number'
   // through the guarded command (level-up plan §3).
   await expect(
     page.getByRole('status', { name: 'Warlock level' }),
-  ).toBeVisible({ timeout: 15_000 });
+  ).toBeVisible({ timeout: 35_000 });
   await levelClassTo(page, 'Warlock', 5);
 
   await page.getByRole('button', { name: 'Add weapon' }).click();
@@ -703,7 +716,7 @@ test('a grant it cannot apply is stated on the page, not folded into the number'
   // scoped model exists to avoid, and this is the row it would have been wrong
   // on.
   await expect(profiles).toContainText('The Attack action gives one attack.', {
-    timeout: 15_000,
+    timeout: 35_000,
   });
   await expect(profiles).toContainText(
     'features this application cannot apply are listed below',

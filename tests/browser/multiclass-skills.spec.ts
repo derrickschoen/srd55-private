@@ -1,7 +1,8 @@
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
-import { expect, test, type Page } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { DatabaseContext } from '../../src/db/database';
+import { expect, test } from './fixtures/parallel-test';
 
 const schema = readFileSync(
   new URL('../../src/db/schema.sql', import.meta.url),
@@ -163,8 +164,10 @@ async function multiclassImage(options: {
 
 async function install(page: Page, image: MulticlassImage): Promise<void> {
   await page.goto('/');
+  // The four-worker pool measured the slowest caller at 17.1s; 45s gives both
+  // load-sensitive readiness waits at least 2.5x pool headroom.
   await expect(page.locator('#status')).toHaveAttribute('data-ready', 'true', {
-    timeout: 30_000,
+    timeout: 45_000,
   });
   await page.evaluate(
     (bytes) => window.staticApp.replaceDatabase(Uint8Array.from(bytes)),
@@ -174,7 +177,7 @@ async function install(page: Page, image: MulticlassImage): Promise<void> {
   await expect(page.locator('#planner-status')).toHaveAttribute(
     'data-ready',
     'true',
-    { timeout: 30_000 },
+    { timeout: 45_000 },
   );
 }
 

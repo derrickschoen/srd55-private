@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
 import { serviceWorkerSource } from '../../tools/pwa/service-worker';
+import { expect, test } from './fixtures/parallel-test';
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {

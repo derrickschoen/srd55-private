@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures/parallel-test';
 
 async function ready(page: import('@playwright/test').Page) {
   await expect(page.locator('#status')).toHaveAttribute(
@@ -11,8 +11,9 @@ async function ready(page: import('@playwright/test').Page) {
 test('commands.execute persists, replays, reports conflicts, and survives reload', async ({
   page,
 }) => {
-  // Measured 5.5s in isolation on 2026-07-31.
-  test.setTimeout(20_000);
+  // The four-worker parallel pool measured 11.7s; 30s preserves at least 2.5x
+  // wall-clock headroom under parallel-pool contention.
+  test.setTimeout(30_000);
   await page.goto('/');
   await ready(page);
   const result = await page.evaluate(async () => {
@@ -172,8 +173,9 @@ test('commands.execute persists, replays, reports conflicts, and survives reload
 test('malformed level-up subchoices survive worker transport as structured data', async ({
   page,
 }) => {
-  // Measured 4.3s in isolation on 2026-07-31.
-  test.setTimeout(20_000);
+  // The four-worker parallel pool measured 8.9s; 25s preserves at least 2.5x
+  // wall-clock headroom under parallel-pool contention.
+  test.setTimeout(25_000);
   await page.goto('/');
   await ready(page);
   const refusal = await page.evaluate(async () => {
