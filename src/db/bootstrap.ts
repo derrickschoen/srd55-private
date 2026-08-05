@@ -71,7 +71,12 @@ export const applicationSeed: DatabaseSeed = (db) => {
   // D84 runs only after every definition/template half and dependency catalog
   // is present, so all nine stored projectors observe the same graph runtime
   // consumers do. Reconciliation preserves each stable root key verbatim.
-  reconcileBundledContentRegistryV1(db);
+  const registry = reconcileBundledContentRegistryV1(db);
+  if (registry.orphaned > 0 || registry.refused > 0) {
+    console.warn(
+      `Bundled content registry reconciliation: ${String(registry.orphaned)} orphaned, ${String(registry.refused)} refused.`,
+    );
+  }
 };
 
 /**

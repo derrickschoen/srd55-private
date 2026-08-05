@@ -3,7 +3,10 @@ type Listener = (event: Event) => void;
 export class InteractiveTestElement {
   readonly children: InteractiveTestElement[] = [];
   readonly attributes = new Map<string, string>();
-  readonly classList: { add: (...tokens: string[]) => void };
+  readonly classList: {
+    add: (...tokens: string[]) => void;
+    toggle: (token: string, force?: boolean) => boolean;
+  };
   readonly dataset: Record<string, string>;
   className = '';
   textContent: string | null = null;
@@ -25,13 +28,23 @@ export class InteractiveTestElement {
     readonly tagName: string,
     private readonly owner: InteractiveTestDocument,
   ) {
+    const classNames = (): Set<string> =>
+      new Set(this.className.split(/\s+/u).filter(Boolean));
     this.classList = {
       add: (...tokens) => {
-        const names = new Set(this.className.split(/\s+/u).filter(Boolean));
+        const names = classNames();
         for (const token of tokens) {
           names.add(token);
         }
         this.className = [...names].join(' ');
+      },
+      toggle: (token, force) => {
+        const names = classNames();
+        const enabled = force ?? !names.has(token);
+        if (enabled) names.add(token);
+        else names.delete(token);
+        this.className = [...names].join(' ');
+        return enabled;
       },
     };
     this.dataset = new Proxy<Record<string, string>>(

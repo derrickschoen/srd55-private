@@ -35,6 +35,8 @@
 import weaponsTableExtract from '../../docs/srd/source/weapons-table.txt?raw';
 import masteryProgressionExtract from '../../docs/srd/source/weapon-mastery-progression.txt?raw';
 import type { DatabaseContext } from '../db/database';
+import { normalizeContentIdentityName } from '../catalog/content-identity';
+import { ensureBundledStableContentIdentity } from '../catalog/content-registry';
 import {
   damageTypes,
   isEnumValue,
@@ -611,6 +613,11 @@ export function seedWeaponContent(db: DatabaseContext): void {
 
 function seedWeaponTemplates(db: DatabaseContext, timestamp: string): void {
   for (const template of bundledWeaponTemplates()) {
+    ensureBundledStableContentIdentity(db, {
+      kind: 'weapon',
+      contentKey: template.content_key,
+      normalizedName: normalizeContentIdentityName(template.name),
+    });
     const damage = damageColumnValues(template.damage);
     const versatile = damageColumnValues(template.versatile_damage);
     const row = {

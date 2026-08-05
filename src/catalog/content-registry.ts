@@ -13,9 +13,14 @@ import {
   type ContentKind,
   type DerivedContentIdentityV1,
 } from './content-identity';
+import {
+  assertedExternalContentKeyFromDeclared,
+  isAssertedExternalContentKey,
+} from './catalog-key';
 
 export const catalogContentKeyKinds = [
   'derived',
+  'asserted',
   'bundled-stable',
   'legacy-opaque',
 ] as const;
@@ -60,13 +65,13 @@ export type ContentResolution =
   | {
       readonly kind: 'exact';
       readonly contentKey: ContentKey;
-      readonly matchClass: 'metadata-conflict';
+      readonly matchClass: 'metadata-conflict' | 'key-collision';
       readonly reviewRequired: true;
     }
   | {
       readonly kind: 'alias';
       readonly contentKey: ContentKey;
-      readonly matchClass: 'alias';
+      readonly matchClass: 'alias' | 'key-collision';
       readonly reviewRequired: true;
     }
   | {
@@ -132,6 +137,38 @@ function uniqueSortedContentKeys(rows: readonly IdentityRow[]): readonly Content
   );
 }
 
+/**
+ * Exact keys and aliases are authority locators, not permission to trust
+ * damaged registry bytes. Reference-only callers use this check even when no
+ * incoming canonical payload exists to compare.
+ */
+export function assertContentFingerprintIntegrity(
+  db: DatabaseContext,
+  input: {
+    readonly kind: ContentKind;
+    readonly contentKey: string;
+  },
+): void {
+  const rows = db.all(
+    `SELECT
+       identity.content_key,
+       identity.key_kind,
+       identity.catalog_layer,
+       fingerprint.fingerprint_digest,
+       fingerprint.canonical_json
+     FROM catalog_content_fingerprints AS fingerprint
+     JOIN catalog_content_identities AS identity
+       ON identity.content_key = fingerprint.content_key
+      AND identity.content_kind = fingerprint.content_kind
+     WHERE fingerprint.content_kind = ? AND fingerprint.content_key = ?`,
+    [input.kind, input.contentKey],
+    fingerprintRowCodec,
+  );
+  if (rows.some((row) => sha256(row.canonical_json) !== row.fingerprint_digest)) {
+    throw new ContentIdentityCollision();
+  }
+}
+
 function exactResolution(
   db: DatabaseContext,
   contentKind: ContentKind,
@@ -150,6 +187,44 @@ function exactResolution(
     return null;
   }
 
+  assertContentFingerprintIntegrity(db, {
+    kind: contentKind,
+    contentKey: identity.content_key,
+  });
+
+  if (derivedIdentity !== undefined) {
+    const storedCurrent = db.one(
+      `SELECT
+         identity.content_key,
+         identity.key_kind,
+         identity.catalog_layer,
+         fingerprint.fingerprint_digest,
+         fingerprint.canonical_json
+       FROM catalog_content_fingerprints AS fingerprint
+       JOIN catalog_content_identities AS identity
+         ON identity.content_key = fingerprint.content_key
+        AND identity.content_kind = fingerprint.content_kind
+       WHERE fingerprint.content_kind = ?
+         AND fingerprint.content_key = ?
+         AND fingerprint.fingerprint_scheme = ?
+         AND fingerprint.fingerprint_role = 'current'`,
+      [contentKind, contentKey, derivedIdentity.envelope.scheme],
+      fingerprintRowCodec,
+    );
+    if (
+      storedCurrent === null ||
+      storedCurrent.fingerprint_digest !== derivedIdentity.digest ||
+      storedCurrent.canonical_json !== derivedIdentity.canonicalJson
+    ) {
+      return Object.freeze({
+        kind: 'exact',
+        contentKey: identity.content_key,
+        matchClass: 'key-collision',
+        reviewRequired: true,
+      });
+    }
+  }
+
   if (metadataConflict) {
     return Object.freeze({
       kind: 'exact',
@@ -159,35 +234,13 @@ function exactResolution(
     });
   }
 
-  if (
-    derivedIdentity !== undefined &&
-    contentKey === derivedIdentity.derivedKey
-  ) {
-    const storedCanonical = db.scalar<string>(
-      `SELECT canonical_json
-       FROM catalog_content_fingerprints
-       WHERE content_kind = ?
-         AND content_key = ?
-         AND fingerprint_scheme = ?
-         AND fingerprint_digest = ?`,
-      [
-        contentKind,
-        contentKey,
-        derivedIdentity.envelope.scheme,
-        derivedIdentity.digest,
-      ],
-    );
-    if (storedCanonical !== null) {
-      if (storedCanonical !== derivedIdentity.canonicalJson) {
-        throw new ContentIdentityCollision();
-      }
-      return Object.freeze({
-        kind: 'exact',
-        contentKey: identity.content_key,
-        matchClass: 'trivial-self-match',
-        reviewRequired: false,
-      });
-    }
+  if (derivedIdentity !== undefined) {
+    return Object.freeze({
+      kind: 'exact',
+      contentKey: identity.content_key,
+      matchClass: 'trivial-self-match',
+      reviewRequired: false,
+    });
   }
 
   return Object.freeze({
@@ -202,6 +255,7 @@ function resolveAlias(
   db: DatabaseContext,
   contentKind: ContentKind,
   aliasKey: ContentKey,
+  derivedIdentity: DerivedContentIdentityV1<ContentKind, unknown> | undefined,
 ): ContentResolution | null {
   const rows = db.all(
     `SELECT identity.content_key, identity.key_kind, identity.catalog_layer
@@ -226,9 +280,43 @@ function resolveAlias(
       reviewRequired: false,
     });
   }
+  const contentKey = candidates[0]!;
+  assertContentFingerprintIntegrity(db, { kind: contentKind, contentKey });
+  if (derivedIdentity !== undefined) {
+    const storedCurrent = db.one(
+      `SELECT
+         identity.content_key,
+         identity.key_kind,
+         identity.catalog_layer,
+         fingerprint.fingerprint_digest,
+         fingerprint.canonical_json
+       FROM catalog_content_fingerprints AS fingerprint
+       JOIN catalog_content_identities AS identity
+         ON identity.content_key = fingerprint.content_key
+        AND identity.content_kind = fingerprint.content_kind
+       WHERE fingerprint.content_kind = ?
+         AND fingerprint.content_key = ?
+         AND fingerprint.fingerprint_scheme = ?
+         AND fingerprint.fingerprint_role = 'current'`,
+      [contentKind, contentKey, derivedIdentity.envelope.scheme],
+      fingerprintRowCodec,
+    );
+    if (
+      storedCurrent === null ||
+      storedCurrent.fingerprint_digest !== derivedIdentity.digest ||
+      storedCurrent.canonical_json !== derivedIdentity.canonicalJson
+    ) {
+      return Object.freeze({
+        kind: 'alias',
+        contentKey,
+        matchClass: 'key-collision',
+        reviewRequired: true,
+      });
+    }
+  }
   return Object.freeze({
     kind: 'alias',
-    contentKey: candidates[0]!,
+    contentKey,
     matchClass: 'alias',
     reviewRequired: true,
   });
@@ -343,6 +431,7 @@ function resolveInRegistry(
     db,
     input.contentKind,
     input.aliasKey ?? input.primaryKey,
+    input.derivedIdentity,
   );
   if (alias !== null) {
     return alias;
@@ -364,6 +453,7 @@ export function resolveContentAggregate<K extends ContentKind, P>(
     readonly declaredAlias?: ContentKey;
     readonly compatibleFingerprints?: readonly ContentFingerprintCandidate[];
     readonly metadataConflict?: boolean;
+    readonly assertedKey?: ContentKey;
   },
 ): {
   readonly identity: DerivedContentIdentityV1<K, P>;
@@ -380,7 +470,7 @@ export function resolveContentAggregate<K extends ContentKind, P>(
   ]);
   const resolution = resolveInRegistry(db, {
     contentKind: input.kind,
-    primaryKey: identity.derivedKey,
+    primaryKey: input.assertedKey ?? identity.derivedKey,
     ...(input.declaredAlias === undefined
       ? {}
       : { aliasKey: input.declaredAlias }),
@@ -448,6 +538,70 @@ export function registerDerivedContentIdentity<K extends ContentKind, P>(
   return identity;
 }
 
+export class ContentIdentityKeyRefusal extends Error {
+  constructor(
+    readonly reason: 'invalid_asserted_key' | 'name_key_mismatch' | 'key_collision',
+  ) {
+    super(
+      reason === 'invalid_asserted_key'
+        ? 'The asserted content key is outside the portable slug grammar.'
+        : reason === 'name_key_mismatch'
+          ? 'The asserted content key is not derived from the aggregate name.'
+          : 'The asserted content key is already registered to different content.',
+    );
+    this.name = 'ContentIdentityKeyRefusal';
+  }
+}
+
+export function registerAssertedContentIdentity<K extends ContentKind, P>(
+  db: DatabaseContext,
+  input: {
+    readonly kind: K;
+    readonly edition: string;
+    readonly name: string;
+    readonly payload: P;
+    readonly assertedKey: ContentKey;
+  },
+): DerivedContentIdentityV1<K, P> {
+  if (!isAssertedExternalContentKey(input.assertedKey)) {
+    throw new ContentIdentityKeyRefusal('invalid_asserted_key');
+  }
+  let expected: ContentKey;
+  try {
+    expected = assertedExternalContentKeyFromDeclared(
+      input.kind,
+      input.edition,
+      input.name,
+      input.assertedKey,
+    );
+  } catch {
+    throw new ContentIdentityKeyRefusal('invalid_asserted_key');
+  }
+  if (expected !== input.assertedKey) {
+    throw new ContentIdentityKeyRefusal('name_key_mismatch');
+  }
+  const identity = deriveContentIdentityV1(input);
+  try {
+    db.exec(
+      `INSERT INTO catalog_content_identities (
+         content_key, content_kind, key_kind, catalog_layer, normalized_name
+       ) VALUES (?, ?, 'asserted', 'external', ?)`,
+      [input.assertedKey, input.kind, identity.envelope.normalizedName],
+    );
+  } catch {
+    throw new ContentIdentityKeyRefusal('key_collision');
+  }
+  registerContentFingerprint(db, {
+    kind: input.kind,
+    contentKey: input.assertedKey,
+    scheme: identity.envelope.scheme,
+    digest: identity.digest,
+    canonicalJson: identity.canonicalJson,
+    role: 'current',
+  });
+  return identity;
+}
+
 export function registerBundledStableContentIdentity(
   db: DatabaseContext,
   input: {
@@ -462,6 +616,65 @@ export function registerBundledStableContentIdentity(
      ) VALUES (?, ?, 'bundled-stable', 'bundled', ?)`,
     [input.contentKey, input.kind, input.normalizedName],
   );
+}
+
+/** Trusted seeders call this before inserting a root on a fresh image. */
+export function ensureBundledStableContentIdentity(
+  db: DatabaseContext,
+  input: {
+    readonly kind: ContentKind;
+    readonly contentKey: string;
+    readonly normalizedName: string;
+  },
+): void {
+  const existing = db.one(
+    `SELECT content_key, key_kind, catalog_layer
+     FROM catalog_content_identities
+     WHERE content_kind = ? AND content_key = ?`,
+    [input.kind, input.contentKey],
+    identityRowCodec,
+  );
+  if (existing === null) {
+    registerBundledStableContentIdentity(db, {
+      ...input,
+      contentKey: input.contentKey as ContentKey,
+    });
+    return;
+  }
+  if (
+    existing.key_kind === 'bundled-stable' && existing.catalog_layer === 'bundled' ||
+    existing.key_kind === 'legacy-opaque' && existing.catalog_layer === 'external'
+  ) {
+    return;
+  }
+  throw new ContentIdentityKeyRefusal('key_collision');
+}
+
+/**
+ * Register an unavailable share spell under the exact portable key asserted by
+ * the share document. A placeholder has no projectable rules payload, so it
+ * deliberately has no fingerprint until a real catalog aggregate replaces it.
+ */
+export function registerAssertedPlaceholderContentIdentity(
+  db: DatabaseContext,
+  input: {
+    readonly contentKey: string;
+    readonly normalizedName: string;
+  },
+): void {
+  if (!isAssertedExternalContentKey(input.contentKey)) {
+    throw new ContentIdentityKeyRefusal('invalid_asserted_key');
+  }
+  try {
+    db.exec(
+      `INSERT INTO catalog_content_identities (
+         content_key, content_kind, key_kind, catalog_layer, normalized_name
+       ) VALUES (?, 'spell', 'asserted', 'external', ?)`,
+      [input.contentKey, input.normalizedName],
+    );
+  } catch {
+    throw new ContentIdentityKeyRefusal('key_collision');
+  }
 }
 
 export function registerContentFingerprint(

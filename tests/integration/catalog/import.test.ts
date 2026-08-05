@@ -7,6 +7,7 @@ import {
 import { DatabaseContext } from '../../../src/db/database';
 import { SpellSelectionEligibility } from '../../../src/eligibility/spell-selection-eligibility';
 import { handlers } from '../../../src/worker/handlers/catalog';
+import { assertContentImportPlan } from '../../helpers/content-import-plan';
 import { createRpcHarness, type RpcHarness } from '../../helpers/rpc-harness';
 import { openTestDatabase } from '../../helpers/open-db';
 
@@ -78,7 +79,7 @@ describe('catalog import persistence', () => {
     const documents = [
       document(
         record({
-          versionKey: '2014:test-spell',
+          versionKey: '2014:legacy-spell',
           name: 'Legacy Spell',
           edition: '2014',
           attackModes: [],
@@ -169,7 +170,7 @@ describe('catalog import persistence', () => {
       ),
     ).toEqual([
       {
-        content_key: '2014:test-spell',
+        content_key: '2014:legacy-spell',
         rules_edition: '2014',
         spell_identity_id: 1,
       },
@@ -234,7 +235,7 @@ describe('catalog import persistence', () => {
         'SELECT id, content_key FROM spell_versions ORDER BY id',
       ),
     ).toEqual([
-      { id: 1, content_key: '2014:test-spell' },
+      { id: 1, content_key: '2014:legacy-spell' },
       { id: 2, content_key: '2024:test-spell' },
     ]);
     test.connection.close();
@@ -349,7 +350,7 @@ describe('catalog import persistence', () => {
     );
     new SpellSelectionEligibility(test.db).refresh(slotId);
 
-    const withText = test.importer.import({
+    const review = test.importer.import({
       documents: [
         document(
           record({
@@ -369,12 +370,7 @@ describe('catalog import persistence', () => {
         ]),
       ],
     });
-    expect(withText).toMatchObject({
-      updated: 1,
-      identities_updated: 1,
-      text_available: true,
-      descriptions_loaded: 1,
-    });
+    expect(review).toMatchObject({ created: 1, tombstoned: 1 });
     expect(
       test.db.oneRaw(
         `SELECT display_name, school, short_summary, is_active
@@ -384,6 +380,16 @@ describe('catalog import persistence', () => {
     ).toEqual({
       display_name: 'Test Spell',
       school: 'Evocation',
+      short_summary: null,
+      is_active: 0,
+    });
+    expect(test.db.oneRaw(
+      `SELECT content_key, display_name, school, short_summary, is_active
+       FROM spell_versions WHERE display_name = 'Renamed Spell'`,
+    )).toEqual({
+      content_key: '2024:renamed-spell',
+      display_name: 'Renamed Spell',
+      school: 'Illusion',
       short_summary: 'Complete local spell text.',
       is_active: 1,
     });
@@ -395,26 +401,6 @@ describe('catalog import persistence', () => {
         versionId,
       ),
     ).toEqual(['Wizard']);
-    expect(
-      test.db.allRaw(
-        'SELECT alias, normalized_alias FROM spell_identity_aliases',
-      ),
-    ).toEqual([
-      { alias: 'Test Spell', normalized_alias: 'test spell' },
-    ]);
-
-    expect(
-      test.importer.import({
-        documents: [document(record({ name: 'Renamed Spell' }))],
-      }).updated,
-    ).toBe(0);
-    expect(
-      test.db.scalar(
-        'SELECT short_summary FROM spell_versions WHERE id = ?',
-        [versionId],
-      ),
-    ).toBe('Complete local spell text.');
-
     expect(test.importer.import({ documents: ['[]'] }).tombstoned).toBe(1);
     expect(
       test.db.oneRaw(
@@ -440,7 +426,7 @@ describe('catalog import persistence', () => {
 
     expect(
       test.importer.import({
-        documents: [document(record({ name: 'Renamed Spell' }))],
+        documents: [document(record())],
       }).updated,
     ).toBe(1);
     expect(
@@ -464,24 +450,8 @@ describe('catalog import persistence', () => {
     test.connection.close();
   });
 
-  /**
-   * THE EXEMPTIONS FROM THE FREEZE THAT ARE A FILL RATHER THAN A CHANGE.
-   *
-   * A referenced version is frozen so a spell cannot change under a character
-   * who already chose it. Both progressions are NET-NEW — no document written
-   * before they existed carries either — so every version that predates them
-   * has both facts ABSENT, and a version is referenced exactly when a character
-   * uses it, which is exactly when the printable card renders it. Frozen
-   * unconditionally, the only spells that can ever print a progression are the
-   * ones nobody plays.
-   *
-   * THREE CLAIMS, AND THE SECOND AND THIRD ARE THE ONES THAT MATTER. The fill
-   * is all-or-nothing within a fact, so a stored summary can never end up
-   * describing a document's levels; and the two facts are gated SEPARATELY, so
-   * a version frozen on its slot-level upcasting can still be given the Cantrip
-   * Upgrade it has never had.
-   */
-  it('fills a referenced version’s ABSENT upcast progression, and refuses to change one it has', async () => {
+  /** Asserted content is immutable: supplying a new rules fact is a new value. */
+  it('refuses to mutate an asserted referenced version when an absent rules field is later supplied', async () => {
     const test = await database();
     test.importer.import({ documents: [document(record())] });
     const versionId = Number(test.db.scalar('SELECT id FROM spell_versions'));
@@ -498,12 +468,16 @@ describe('catalog import persistence', () => {
       upcastLevels: [2, 3],
       upcastSummary: 'One additional creature per slot level above 1.',
     };
-    // A referenced version: the rules stay frozen (the rename is refused) and
-    // the absent upcast progression is supplied.
-    const filled = test.importer.import({
-      documents: [document(record({ name: 'Renamed Spell', ...upcast }))],
+    const review = test.importer.import({
+      documents: [document(record(upcast))],
     });
-    expect(filled.updated).toBe(1);
+    assertContentImportPlan(
+      review,
+      'Expected the asserted spell change to require content review.',
+    );
+    expect(review.reviews).toEqual([
+      expect.objectContaining({ kind: 'spell', matchClass: 'key-collision' }),
+    ]);
     expect(
       test.db.oneRaw(
         `SELECT display_name, upcast_summary
@@ -512,81 +486,11 @@ describe('catalog import persistence', () => {
       ),
     ).toEqual({
       display_name: 'Test Spell',
-      upcast_summary: 'One additional creature per slot level above 1.',
+      upcast_summary: null,
     });
     expect(
       values(test.db, 'spell_version_upcast_levels', 'level', versionId),
-    ).toEqual(['2', '3']);
-
-    // Re-importing the same progression changes nothing.
-    expect(
-      test.importer.import({ documents: [document(record(upcast))] }).updated,
-    ).toBe(0);
-
-    // A DIFFERENT progression on the now-non-absent version is REFUSED WHOLE.
-    // Filling column by column would leave the stored summary — which says
-    // "per slot level above 1" — describing the levels `4, 6, 8`.
-    expect(
-      test.importer.import({
-        documents: [
-          document(
-            record({
-              upcastLevels: [4, 6, 8],
-              upcastSummary: 'Every other slot level.',
-            }),
-          ),
-        ],
-      }).updated,
-    ).toBe(0);
-    expect(
-      test.db.oneRaw(
-        'SELECT upcast_summary FROM spell_versions WHERE id = ?',
-        [versionId],
-      ),
-    ).toEqual({
-      upcast_summary: 'One additional creature per slot level above 1.',
-    });
-    expect(
-      values(test.db, 'spell_version_upcast_levels', 'level', versionId),
-    ).toEqual(['2', '3']);
-
-    // AND THE CANTRIP UPGRADE IS STILL FILLABLE, because it is a different
-    // fact. One gate for both would have frozen a progression nobody stored.
-    expect(
-      test.importer.import({
-        documents: [
-          document(
-            record({
-              ...upcast,
-              cantripUpgradeLevels: [5, 11, 17],
-              cantripUpgradeSummary: 'The cantrip ladder.',
-            }),
-          ),
-        ],
-      }).updated,
-    ).toBe(1);
-    expect(
-      test.db.oneRaw(
-        `SELECT upcast_summary, cantrip_upgrade_summary
-         FROM spell_versions WHERE id = ?`,
-        [versionId],
-      ),
-    ).toEqual({
-      upcast_summary: 'One additional creature per slot level above 1.',
-      cantrip_upgrade_summary: 'The cantrip ladder.',
-    });
-    expect(
-      values(
-        test.db,
-        'spell_version_cantrip_upgrade_levels',
-        'level',
-        versionId,
-      ),
-    ).toEqual(['5', '11', '17']);
-    // The slot ladder is untouched by the cantrip fill.
-    expect(
-      values(test.db, 'spell_version_upcast_levels', 'level', versionId),
-    ).toEqual(['2', '3']);
+    ).toEqual([]);
     test.connection.close();
   });
 
@@ -599,10 +503,18 @@ describe('catalog import persistence', () => {
        VALUES ('user-spell', 'User Spell', 'user spell')`,
     ).lastInsertId;
     test.db.exec(
+      `INSERT INTO catalog_content_identities (
+         content_key, content_kind, key_kind, catalog_layer, normalized_name
+       ) VALUES (
+         'expanded:local.test:user-spell', 'spell', 'asserted', 'external',
+         'user spell'
+       )`,
+    );
+    test.db.exec(
       `INSERT INTO spell_versions (
          content_key, spell_identity_id, display_name, rules_edition,
          level, school, provenance
-       ) VALUES ('user:spell', ?, 'User Spell', 'expanded', 1,
+       ) VALUES ('expanded:local.test:user-spell', ?, 'User Spell', 'expanded', 1,
                  'Evocation', 'user')`,
       [userIdentityId],
     );
@@ -622,7 +534,7 @@ describe('catalog import persistence', () => {
         provenance: 'import',
       },
       {
-        content_key: 'user:spell',
+        content_key: 'expanded:local.test:user-spell',
         is_active: 1,
         provenance: 'user',
       },
@@ -642,7 +554,61 @@ describe('catalog import persistence', () => {
       ),
     ).toEqual([
       { content_key: '2024:test-spell', is_active: 0 },
-      { content_key: 'user:spell', is_active: 1 },
+      { content_key: 'expanded:local.test:user-spell', is_active: 1 },
+    ]);
+    test.connection.close();
+  });
+
+  it('CI4A-H3 binds omission deactivation and identical reactivation into the plan token', async () => {
+    const test = await database();
+    const spellA = record({
+      identityKey: 'spell-a',
+      versionKey: '2024:spell-a',
+      name: 'Spell A',
+    });
+    const spellB = record({
+      identityKey: 'spell-b',
+      versionKey: '2024:spell-b',
+      name: 'Spell B',
+    });
+    test.importer.import({ documents: [document(spellA, spellB)] });
+
+    const oldBPlan = test.importer.plan({ documents: [document(spellB)] });
+    expect(oldBPlan.spellActivityChanges).toEqual([{
+      contentKey: '2024:spell-a',
+      action: 'deactivate',
+    }]);
+
+    const omitBPlan = test.importer.plan({ documents: [document(spellA)] });
+    expect(omitBPlan.spellActivityChanges).toEqual([{
+      contentKey: '2024:spell-b',
+      action: 'deactivate',
+    }]);
+    expect(
+      test.importer.commit(
+        { documents: [document(spellA)] },
+        omitBPlan.token,
+      ).kind,
+    ).toBe('committed');
+
+    const freshBPlan = test.importer.plan({ documents: [document(spellB)] });
+    expect(freshBPlan.spellActivityChanges).toEqual([
+      { contentKey: '2024:spell-a', action: 'deactivate' },
+      { contentKey: '2024:spell-b', action: 'reactivate' },
+    ]);
+    expect(
+      test.importer.commit(
+        { documents: [document(spellB)] },
+        oldBPlan.token,
+      ),
+    ).toMatchObject({ kind: 'stale-plan' });
+    expect(
+      test.db.allRaw(
+        `SELECT content_key, is_active FROM spell_versions ORDER BY content_key`,
+      ),
+    ).toEqual([
+      { content_key: '2024:spell-a', is_active: 1 },
+      { content_key: '2024:spell-b', is_active: 0 },
     ]);
     test.connection.close();
   });
@@ -670,9 +636,16 @@ describe('catalog import persistence', () => {
       }),
     );
 
-    expect(() =>
-      test.importer.import({ documents: [conflicting] }),
-    ).toThrow();
+    const refused = test.importer.import({
+      documents: [conflicting],
+    });
+    assertContentImportPlan(
+      refused,
+      'Expected the conflicting spell import to return a plan.',
+    );
+    expect(refused.outcomes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'refused', reason: 'install_refused' }),
+    ]));
     expect(
       test.db.oneRaw(
         `SELECT

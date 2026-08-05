@@ -1,9 +1,5 @@
 import type { BindableValue } from '@sqlite.org/sqlite-wasm';
 import {
-  assertImportedSpellIdentityWritable,
-  assertImportedSpellKeyWritable,
-} from '../commands/srd-spell-policy';
-import {
   encodeBoolean,
   sqlBoolean,
   sqlInteger,
@@ -32,18 +28,38 @@ import {
   type CatalogImportParams,
 } from './catalog-schema';
 import {
-  importSubclassRecords,
+  subclassImportNodes,
   type SubclassImportCounters,
 } from './subclass-importer';
 import {
-  importEquipmentRecords,
+  equipmentImportNodes,
   type EquipmentImportCounters,
 } from './equipment-importer';
 import {
-  importSourceContentRecords,
+  sourceContentImportNodes,
   type SourceContentImportCounters,
 } from './source-content-importer';
 import { spellActionType, spellTags } from './spell-document-semantics';
+import { projectSpellDocumentV1 } from './spell-content-projector-v1';
+import type { ContentKey } from '../domain/ids';
+import {
+  commitContentImport,
+  planContentImport,
+  type ContentImportChoices,
+  type ContentImportCommitResult,
+  type ContentImportNode,
+  type ContentImportPlan,
+  type ContentImportPlanToken,
+  type ContentImportProjection,
+  type ContentImportSpellActivityChange,
+} from './content-adoption';
+import {
+  assertedExternalContentKey,
+  assertedExternalContentKeyFromDeclared,
+  normalizeCatalogKeyComponent,
+} from './catalog-key';
+import { projectStoredContentV1 } from './stored-content-projector-v1';
+import { deriveContentIdentityV1 } from './content-identity';
 
 /** The identity a spell version hangs off, in the three ways it is found. */
 const spellIdentity: RowCodec<{
@@ -122,6 +138,21 @@ export interface CatalogImportSummary {
   backgrounds_matched: number;
   text_available: boolean;
   descriptions_loaded: number;
+}
+
+export type CatalogImportResult = CatalogImportSummary | ContentImportPlan;
+
+export type CatalogImportCommitResult =
+  | (Extract<ContentImportCommitResult, { readonly kind: 'committed' }> & {
+      readonly summary: CatalogImportSummary;
+    })
+  | Exclude<ContentImportCommitResult, { readonly kind: 'committed' }>;
+
+interface PreparedCatalogImport {
+  readonly nodes: readonly ContentImportNode[];
+  readonly normalized: readonly NormalizedCatalogRecord[];
+  readonly sweepSpells: boolean;
+  readonly summary: CatalogImportSummary;
 }
 
 type CounterSummary = Omit<
@@ -241,55 +272,327 @@ export class CatalogImporter {
    * ever, so a spell-only import cannot reach a subclass. See
    * `src/catalog/subclass-importer.ts`.
    */
-  import(params: CatalogImportParams): CatalogImportSummary {
+  import(params: CatalogImportParams): CatalogImportSummary;
+  import(params: CatalogImportParams): CatalogImportResult {
+    const prepared = this.#prepare(params);
+    const plan = this.#planPrepared(prepared, Object.freeze({}));
+    if (
+      plan.reviews.length > 0 ||
+      plan.outcomes.some((outcome) => outcome.kind === 'refused')
+    ) {
+      return plan;
+    }
+    const commit = (): CatalogImportCommitResult => this.#commitPrepared(
+      prepared,
+      plan.token,
+      Object.freeze({}),
+    );
+    if (params.dryRun === true) {
+      try {
+        return this.db.transaction(() => {
+          const result = commit();
+          if (result.kind !== 'committed') {
+            return result.kind === 'stale-plan' ? result.freshPlan : plan;
+          }
+          throw new DryRunRollback(result.summary);
+        });
+      } catch (error) {
+        if (error instanceof DryRunRollback) return error.summary;
+        throw error;
+      }
+    }
+    const result = commit();
+    if (result.kind === 'committed') return result.summary;
+    return result.kind === 'stale-plan'
+      ? result.freshPlan
+      : plan;
+  }
+
+  plan(
+    params: CatalogImportParams,
+    choices: ContentImportChoices = Object.freeze({}),
+  ): ContentImportPlan {
+    return this.#planPrepared(this.#prepare(params), choices);
+  }
+
+  commit(
+    params: CatalogImportParams,
+    token: ContentImportPlanToken,
+    choices: ContentImportChoices = Object.freeze({}),
+  ): CatalogImportCommitResult {
+    return this.#commitPrepared(this.#prepare(params), token, choices);
+  }
+
+  #prepare(params: CatalogImportParams): PreparedCatalogImport {
     const records = parseCatalogDocuments(params.documents);
     const descriptions = parseDescriptionDocuments(params.textDocuments);
     const normalized = normalizeCatalogRecords(records.spells, descriptions);
-    const textAvailable = descriptions !== null;
-    // `kinds` is never empty: at least one document is required, and every
-    // document declares at least one kind — an empty one declares `spell`.
-    const sweepSpells = records.kinds.has('spell');
+    const summary: CatalogImportSummary = {
+      created: 0,
+      updated: 0,
+      tombstoned: 0,
+      identities_created: 0,
+      identities_updated: 0,
+      publications_created: 0,
+      memberships_created: 0,
+      tags_created: 0,
+      attack_modes_created: 0,
+      save_abilities_created: 0,
+      subclasses_created: 0,
+      subclasses_updated: 0,
+      subclass_features_created: 0,
+      weapons_created: 0,
+      weapons_matched: 0,
+      armors_created: 0,
+      armors_matched: 0,
+      items_created: 0,
+      items_matched: 0,
+      item_definition_effects_created: 0,
+      classes_matched: 0,
+      feats_created: 0,
+      feats_matched: 0,
+      species_created: 0,
+      species_matched: 0,
+      backgrounds_created: 0,
+      backgrounds_matched: 0,
+      text_available: descriptions !== null,
+      descriptions_loaded: descriptions?.length ?? 0,
+    };
+    const nodes = [
+      ...normalized.map((record) => this.#spellImportNode(record, summary)),
+      ...subclassImportNodes(this.db, records.subclasses, summary),
+      ...equipmentImportNodes(records, summary),
+      ...sourceContentImportNodes(this.db, records, summary),
+    ];
+    return Object.freeze({
+      nodes: Object.freeze(nodes),
+      normalized: Object.freeze(normalized),
+      sweepSpells: records.kinds.has('spell'),
+      summary,
+    });
+  }
 
-    try {
-      return this.db.transaction(() => {
-        // An official-looking two-part key is legal in legacy/imported
-        // documents, so key grammar alone cannot separate it from the bundled
-        // SRD layer. Resolve every target before any write and refuse an
-        // attempted edit explicitly. Omission is different: the tombstone
-        // sweep below is scoped to `provenance = 'import'`, so a normal user
-        // import simply leaves all bundled rows alone.
-        for (const record of normalized) {
-          assertImportedSpellKeyWritable(this.db, record.versionKey);
-          assertImportedSpellIdentityWritable(
-            this.db,
-            record.identityKey,
-            record.canonicalName,
-            normalizeCatalogName(record.canonicalName),
+  #spellImportNode(
+    record: NormalizedCatalogRecord,
+    summary: CatalogImportSummary,
+  ): ContentImportNode<'spell'> {
+    const declaredProjection = projectSpellDocumentV1(record);
+    const declaredIdentity = deriveContentIdentityV1({
+      kind: 'spell',
+      edition: record.edition,
+      name: record.name,
+      payload: declaredProjection.payload,
+    });
+    const declaredFingerprintExists = this.db.scalar<number>(
+      `SELECT 1 FROM catalog_content_fingerprints
+       WHERE content_kind = 'spell' AND fingerprint_scheme = ?
+         AND fingerprint_digest = ?
+       LIMIT 1`,
+      [declaredIdentity.envelope.scheme, declaredIdentity.digest],
+    ) === 1;
+    const declaredKeyIsBundled = this.db.scalar<string>(
+      `SELECT catalog_layer FROM catalog_content_identities
+       WHERE content_kind = 'spell' AND content_key = ?`,
+      [record.versionKey],
+    ) === 'bundled';
+    const assertedKey = declaredFingerprintExists && declaredKeyIsBundled
+      ? assertedExternalContentKey('spell', record.edition, record.name)
+      : assertedExternalContentKeyFromDeclared(
+          'spell', record.edition, record.name, record.versionKey,
+        );
+    const baseRecord = assertedKey !== record.versionKey && !declaredFingerprintExists
+      ? {
+          ...record,
+          versionKey: assertedKey,
+          identityKey: `user-spell:${normalizeCatalogKeyComponent(record.name)}`,
+        }
+      : record;
+    const build = (
+      name: string,
+      nextKey: ContentKey,
+    ): ContentImportProjection<'spell'> => {
+      const renamed = name === baseRecord.name && nextKey === assertedKey
+        ? baseRecord
+        : {
+            ...baseRecord,
+            name,
+            canonicalName: name,
+            versionKey: nextKey,
+            identityKey: `user-spell:${normalizeCatalogKeyComponent(name)}`,
+          };
+      const projected = projectSpellDocumentV1(renamed);
+      return {
+        kind: 'spell',
+        edition: renamed.edition,
+        name: renamed.name,
+        assertedKey: nextKey,
+        payload: projected.payload,
+        installExact: true,
+        ...(baseRecord === record && assertedKey !== record.versionKey
+          ? { declaredAlias: record.versionKey as ContentKey }
+          : {}),
+        projectStored: (database, contentKey) =>
+          projectStoredContentV1(database, 'spell', contentKey) as
+            ReturnType<ContentImportProjection<'spell'>['projectStored']>,
+        install: (_database, _contentKey, _projection, phase) => {
+          const counters = this.#importRecords([renamed], false);
+          if (phase === 'commit') this.#mergeCounterSummary(summary, counters);
+        },
+      };
+    };
+    const reproject: NonNullable<ContentImportNode<'spell'>['reproject']> =
+      ({ name, assertedKey: nextKey }) => build(name, nextKey);
+    const node: ContentImportNode<'spell'> = Object.freeze({
+      id: `spell:${record.versionKey}`,
+      projection: build(record.name, assertedKey),
+      reproject,
+    });
+    return node;
+  }
+
+  #mergeCounterSummary(
+    summary: CatalogImportSummary,
+    counters: CounterSummary,
+  ): void {
+    for (const key of Object.keys(counters) as (keyof CounterSummary)[]) {
+      summary[key] += counters[key];
+    }
+  }
+
+  #commitPrepared(
+    prepared: PreparedCatalogImport,
+    token: ContentImportPlanToken,
+    choices: ContentImportChoices,
+  ): CatalogImportCommitResult {
+    const planned = this.#planPrepared(prepared, choices);
+    if (planned.token !== token) {
+      return Object.freeze({ kind: 'stale-plan', freshPlan: planned });
+    }
+    const spellKeys = planned.outcomes.flatMap((outcome) => {
+      const node = prepared.nodes.find((candidate) => candidate.id === outcome.id);
+      return node?.projection.kind === 'spell' && outcome.kind !== 'refused'
+        ? [outcome.contentKey]
+        : [];
+    });
+    const result = commitContentImport(this.db, {
+      nodes: prepared.nodes,
+      token: planned.token,
+      choices,
+      spellActivityChanges: planned.spellActivityChanges,
+      afterInstall: () => {
+        if (prepared.sweepSpells) {
+          this.#sweepAbsentSpells(
+            spellKeys,
+            prepared.summary,
           );
         }
-        const counters = this.#importRecords(normalized, sweepSpells);
-        const subclasses = importSubclassRecords(this.db, records.subclasses);
-        const equipment = importEquipmentRecords(this.db, records);
-        const sources = importSourceContentRecords(this.db, records);
-        const summary: CatalogImportSummary = {
-          ...counters,
-          ...subclasses,
-          ...equipment,
-          ...sources,
-          text_available: textAvailable,
-          descriptions_loaded: descriptions?.length ?? 0,
-        };
-        if (params.dryRun === true) {
-          throw new DryRunRollback(summary);
-        }
-        return summary;
-      });
-    } catch (error) {
-      if (error instanceof DryRunRollback) {
-        return error.summary;
-      }
-      throw error;
+      },
+    });
+    if (result.kind !== 'committed') return result;
+    for (const outcome of result.outcomes) {
+      if (outcome.kind === 'create' || outcome.kind === 'refused') continue;
+      const kind = prepared.nodes.find((node) => node.id === outcome.id)
+        ?.projection.kind;
+      if (kind === 'class') prepared.summary.classes_matched += 1;
+      if (kind === 'feat') prepared.summary.feats_matched += 1;
+      if (kind === 'species') prepared.summary.species_matched += 1;
+      if (kind === 'background') prepared.summary.backgrounds_matched += 1;
+      if (kind === 'weapon') prepared.summary.weapons_matched += 1;
+      if (kind === 'armor') prepared.summary.armors_matched += 1;
+      if (kind === 'item') prepared.summary.items_matched += 1;
     }
+    return Object.freeze({ ...result, summary: Object.freeze({ ...prepared.summary }) });
+  }
+
+  #planPrepared(
+    prepared: PreparedCatalogImport,
+    choices: ContentImportChoices,
+  ): ContentImportPlan {
+    const unbound = planContentImport(this.db, prepared.nodes, choices);
+    const seenSpellKeys = unbound.outcomes.flatMap((outcome) => {
+      const node = prepared.nodes.find((candidate) => candidate.id === outcome.id);
+      return node?.projection.kind === 'spell' && outcome.kind !== 'refused'
+        ? [outcome.contentKey]
+        : [];
+    });
+    const installedSpellKeys = unbound.outcomes.flatMap((outcome) => {
+      const node = prepared.nodes.find((candidate) => candidate.id === outcome.id);
+      return node?.projection.kind === 'spell' &&
+          (outcome.kind === 'create' || outcome.kind === 'match')
+        ? [outcome.contentKey]
+        : [];
+    });
+    const activity = this.#spellActivityChanges(
+      installedSpellKeys,
+      seenSpellKeys,
+      prepared.sweepSpells,
+    );
+    return planContentImport(this.db, prepared.nodes, choices, activity);
+  }
+
+  #spellActivityChanges(
+    installedKeys: readonly ContentKey[],
+    seenKeys: readonly ContentKey[],
+    sweepSpells: boolean,
+  ): readonly ContentImportSpellActivityChange[] {
+    const seen = new Set<string>(seenKeys);
+    const changes: ContentImportSpellActivityChange[] = [];
+    if (installedKeys.length > 0) {
+      const inactive = this.db.allRaw(
+        `SELECT content_key FROM spell_versions
+         WHERE is_active = 0
+           AND content_key IN (${placeholders(installedKeys)})`,
+        installedKeys,
+      );
+      for (const row of inactive) {
+        changes.push({
+          contentKey: String(row.content_key) as ContentKey,
+          action: 'reactivate',
+        });
+      }
+    }
+    if (sweepSpells) {
+      const active = this.db.allRaw(
+        `SELECT content_key FROM spell_versions
+         WHERE provenance = 'import' AND is_active = 1
+         ORDER BY content_key`,
+      );
+      for (const row of active) {
+        const contentKey = String(row.content_key) as ContentKey;
+        if (!seen.has(contentKey)) {
+          changes.push({ contentKey, action: 'deactivate' });
+        }
+      }
+    }
+    return Object.freeze(changes.sort((left, right) =>
+      left.contentKey === right.contentKey
+        ? left.action.localeCompare(right.action)
+        : left.contentKey.localeCompare(right.contentKey),
+    ).map((change) => Object.freeze(change)));
+  }
+
+  #sweepAbsentSpells(
+    seenVersionKeys: readonly string[],
+    summary: Pick<CatalogImportSummary, 'tombstoned'>,
+  ): void {
+    const tombstones = this.db.all(
+      `SELECT id
+       FROM spell_versions
+       WHERE provenance = 'import' AND is_active = 1
+         ${seenVersionKeys.length === 0
+          ? ''
+          : `AND content_key NOT IN (${placeholders(seenVersionKeys)})`}`,
+      seenVersionKeys.length === 0 ? undefined : seenVersionKeys,
+      rowId,
+    );
+    for (const versionId of tombstones) {
+      this.db.exec(
+        `UPDATE spell_versions SET is_active = 0, updated_at = ? WHERE id = ?`,
+        [timestamp(), versionId],
+      );
+      summary.tombstoned += 1;
+    }
+    this.#refreshAffectedSelections(tombstones);
   }
 
   #importRecords(

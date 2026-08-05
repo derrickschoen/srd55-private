@@ -1,9 +1,18 @@
 import type { DatabaseContext } from '../db/database';
+import { assertContentFingerprintIntegrity } from '../catalog/content-registry';
+import type { ContentKey } from '../domain/ids';
 
 export const SRD_SPELL_READ_ONLY_MESSAGE =
   'Bundled SRD spells are read-only. Copy the spell to customise it.';
 
 export type SpellCatalogMutation = 'edit' | 'delete';
+
+export class SrdSpellPolicyRefusal extends Error {
+  constructor(readonly reason: 'bundled_read_only') {
+    super(SRD_SPELL_READ_ONLY_MESSAGE);
+    this.name = 'SrdSpellPolicyRefusal';
+  }
+}
 
 /**
  * The command-layer boundary for catalogue mutations.
@@ -24,7 +33,7 @@ export function assertSpellVersionCommandAllowed(
     [versionId],
   );
   if (provenance === 'srd') {
-    throw new Error(SRD_SPELL_READ_ONLY_MESSAGE);
+    throw new SrdSpellPolicyRefusal('bundled_read_only');
   }
 }
 
@@ -37,6 +46,16 @@ export function assertImportedSpellKeyWritable(
   db: DatabaseContext,
   contentKey: string,
 ): void {
+  if (db.scalar<number>(
+    `SELECT 1 FROM catalog_content_identities
+     WHERE content_kind = 'spell' AND content_key = ?`,
+    [contentKey],
+  ) === 1) {
+    assertContentFingerprintIntegrity(db, {
+      kind: 'spell',
+      contentKey: contentKey as ContentKey,
+    });
+  }
   const versionId = db.scalar(
     `SELECT id FROM spell_versions
      WHERE content_key = ? AND provenance = 'srd'`,

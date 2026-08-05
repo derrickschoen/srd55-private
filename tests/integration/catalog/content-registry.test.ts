@@ -22,6 +22,11 @@ import { DatabaseContext } from '../../../src/db/database';
 import type { ContentKey } from '../../../src/domain/ids';
 import { APPLICATION_TABLES } from '../../../src/domain/contracts/tables';
 import { openTestDatabase } from '../../helpers/open-db';
+import {
+  assertedExternalContentKey,
+  assertedExternalContentKeyFromDeclared,
+  isAssertedExternalContentKey,
+} from '../../../src/catalog/catalog-key';
 
 const ABC_DIGEST =
   'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad';
@@ -80,6 +85,44 @@ function addAbcFingerprint(
 }
 
 describe('catalog content registry resolution', () => {
+  it('keeps the asserted-key SQL CHECK exactly aligned with the shared normalizer grammar', () => {
+    const emitted = [
+      assertedExternalContentKey('item', '2024', 'Clockwork Ægis'),
+      assertedExternalContentKey('feat', 'Expanded Rules', 'Iron--Will', 'com.example.brews'),
+      assertedExternalContentKeyFromDeclared('spell', '2024', 'True Strike', '2024:true-strike'),
+    ];
+    for (const [index, contentKey] of emitted.entries()) {
+      expect(isAssertedExternalContentKey(contentKey), contentKey).toBe(true);
+      expect(() => db.exec(
+        `INSERT INTO catalog_content_identities
+           (content_key, content_kind, key_kind, catalog_layer, normalized_name)
+         VALUES (?, 'item', 'asserted', 'external', ?)`,
+        [contentKey, `emitted${String(index)}`],
+      ), contentKey).not.toThrow();
+    }
+
+    // Residual delta: EMPTY. These are representatives of every broader form
+    // the former SQL approximation accepted beyond the normalizer.
+    const formerlySqlOnly = [
+      '2024:owner:name:extra',
+      '2024:owner:name',
+      '2024.bad:name',
+      '2024:owner.name.bad',
+      '2024:owner.-name:thing',
+      '2024-:name',
+      '2024:-name',
+    ];
+    for (const contentKey of formerlySqlOnly) {
+      expect(isAssertedExternalContentKey(contentKey), contentKey).toBe(false);
+      expect(() => db.exec(
+        `INSERT INTO catalog_content_identities
+           (content_key, content_kind, key_kind, catalog_layer, normalized_name)
+         VALUES (?, 'item', 'asserted', 'external', 'sql-only')`,
+        [contentKey],
+      ), contentKey).toThrow('catalog_content_identities_key_layer_check');
+    }
+  });
+
   it('classifies the exact derived key and bytes as a trivial self-match without a receipt', () => {
     const identity = registerDerivedContentIdentity(db, HAND_PINNED_FEAT);
     expect(identity.derivedKey).toBe(HAND_PINNED_FEAT_KEY);

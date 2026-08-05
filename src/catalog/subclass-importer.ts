@@ -1,9 +1,23 @@
 import { sqlInteger, sqlString } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
+import type { SubclassContentAggregate } from '../authoring/contracts';
+import type { CharacterLevel } from '../domain/enums';
+import type { ContentKey } from '../domain/ids';
 import type {
   CatalogSubclassFeature,
   CatalogSubclassRecord,
 } from './catalog-schema';
+import {
+  projectAuthoredContentAggregateV1,
+  storedAuthoredRegistryReferencesV1,
+} from './stored-authored-content-projector-v1';
+import {
+  remapProjectionFingerprintReferences,
+  type ContentImportDependencyTarget,
+  type ContentImportNode,
+  type ContentImportProjection,
+} from './content-adoption';
+import { projectStoredContentV1 } from './stored-content-projector-v1';
 
 /**
  * THE SUBCLASS ARM OF `catalog.import`.
@@ -51,6 +65,10 @@ export interface SubclassImportCounters {
   subclasses_updated: number;
   subclass_features_created: number;
 }
+
+export type MutableSubclassImportCounters = {
+  -readonly [K in keyof SubclassImportCounters]: SubclassImportCounters[K];
+};
 
 /** A feature row as stored, for the comparison that keeps re-import a no-op. */
 interface StoredFeature {
@@ -167,6 +185,125 @@ function parentClassId(db: DatabaseContext, record: CatalogSubclassRecord): numb
     );
   }
   return Number(id);
+}
+
+function importedAggregate(
+  db: DatabaseContext,
+  record: CatalogSubclassRecord,
+): SubclassContentAggregate {
+  const references = storedAuthoredRegistryReferencesV1(db);
+  return {
+    kind: 'subclass',
+    name: record.name,
+    rules_edition: record.edition,
+    reference_text: '',
+    parent_class: references.class(record.parentClassKey as ContentKey),
+    grants: [],
+    progression: { mode: 'inherit_parent' },
+    features: record.features.map((feature, index) => ({
+      class_level: feature.classLevel as CharacterLevel,
+      sort_order: index + 1,
+      name: feature.name,
+      description: feature.description,
+      effects: feature.effect === null
+        ? []
+        : [{
+            ...feature.effect,
+            sort_order: 1,
+            label: feature.name,
+            notes: null,
+          }],
+    })),
+  };
+}
+
+function resolvedReferenceKey(
+  db: DatabaseContext,
+  reference: SubclassContentAggregate['parent_class'],
+): ContentKey {
+  const keys = db.allRaw(
+    `SELECT content_key FROM catalog_content_fingerprints
+     WHERE content_kind = ? AND fingerprint_scheme = ?
+       AND fingerprint_digest = ?
+       AND fingerprint_role IN ('current', 'compatible')
+     ORDER BY content_key`,
+    [reference.kind, reference.scheme, reference.digest],
+  ).map((row) => String(row.content_key) as ContentKey);
+  if (keys.length !== 1) {
+    throw new TypeError(
+      `Subclass parent fingerprint '${reference.digest}' does not resolve uniquely.`,
+    );
+  }
+  return keys[0]!;
+}
+
+function subclassProjection(
+  db: DatabaseContext,
+  record: CatalogSubclassRecord,
+  aggregate: SubclassContentAggregate,
+  assertedKey: ContentKey,
+  counters: MutableSubclassImportCounters,
+): ContentImportProjection<'subclass'> {
+  const projected = projectAuthoredContentAggregateV1(aggregate);
+  return {
+    kind: 'subclass',
+    edition: aggregate.rules_edition,
+    name: aggregate.name,
+    assertedKey,
+    payload: projected.payload,
+    installExact: true,
+    projectStored: (database, contentKey) =>
+      projectStoredContentV1(database, 'subclass', contentKey) as
+        ReturnType<ContentImportProjection<'subclass'>['projectStored']>,
+    install: (database, contentKey, _projection, phase) => {
+      const installedRecord: CatalogSubclassRecord = {
+        ...record,
+        contentKey,
+        name: aggregate.name,
+        edition: aggregate.rules_edition,
+        parentClassKey: resolvedReferenceKey(database, aggregate.parent_class),
+      };
+      const sink: MutableSubclassImportCounters = phase === 'commit'
+        ? counters
+        : {
+            subclasses_created: 0,
+            subclasses_updated: 0,
+            subclass_features_created: 0,
+          };
+      importSubclass(database, installedRecord, sink);
+    },
+  };
+}
+
+export function subclassImportNodes(
+  db: DatabaseContext,
+  records: readonly CatalogSubclassRecord[],
+  counters: MutableSubclassImportCounters,
+): readonly ContentImportNode<'subclass'>[] {
+  return Object.freeze(records.map((record) => {
+    const aggregate = importedAggregate(db, record);
+    const assertedKey = record.contentKey as ContentKey;
+    const build = (
+      name: string,
+      nextKey: ContentKey,
+      dependencies: ReadonlyMap<string, ContentImportDependencyTarget>,
+    ): ContentImportProjection<'subclass'> => {
+      const renamed = remapProjectionFingerprintReferences(
+        { ...aggregate, name },
+        dependencies,
+      ) as SubclassContentAggregate;
+      return subclassProjection(db, record, renamed, nextKey, counters);
+    };
+    const reproject: NonNullable<ContentImportNode<'subclass'>['reproject']> =
+      ({ name, assertedKey: nextKey, dependencies }) =>
+        build(name, nextKey, dependencies);
+    const node: ContentImportNode<'subclass'> = Object.freeze({
+      id: `subclass:${assertedKey}`,
+      projection: build(record.name, assertedKey, new Map()),
+      reproject,
+    });
+    return node;
+  }));
 }
 
 function importSubclass(
@@ -316,26 +453,4 @@ function importSubclass(
   if (existing !== null && changed) {
     counters.subclasses_updated += 1;
   }
-}
-
-/**
- * Imports every subclass record in one Tier 1 parse.
- *
- * CALLED INSIDE THE IMPORTER'S TRANSACTION, so a refusal anywhere rolls the
- * whole call back — spells included. That is the correct blast radius: a
- * document is one edit, and half of one applied is worse than none of it.
- */
-export function importSubclassRecords(
-  db: DatabaseContext,
-  records: readonly CatalogSubclassRecord[],
-): SubclassImportCounters {
-  const counters: SubclassImportCounters = {
-    subclasses_created: 0,
-    subclasses_updated: 0,
-    subclass_features_created: 0,
-  };
-  for (const record of records) {
-    importSubclass(db, record, counters);
-  }
-  return counters;
 }

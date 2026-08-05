@@ -70,6 +70,8 @@
  *    of what was left out and why.
  */
 import { officialSpellKey } from '../catalog/catalog-key';
+import { normalizeContentIdentityName } from '../catalog/content-identity';
+import { ensureBundledStableContentIdentity } from '../catalog/content-registry';
 import {
   sqlNullableString,
   type RowCodec,
@@ -407,6 +409,11 @@ export function seedSpeciesDefinitions(db: DatabaseContext): void {
       if (holder !== null && holder !== definition.content_key) {
         continue;
       }
+      ensureBundledStableContentIdentity(db, {
+        kind: 'species',
+        contentKey: definition.content_key,
+        normalizedName: normalizeContentIdentityName(definition.name),
+      });
       db.exec(
         `INSERT INTO species_definitions (
            content_key, name, rules_edition, repeatable, grant_rules,

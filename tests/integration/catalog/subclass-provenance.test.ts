@@ -7,6 +7,7 @@ import {
   importCharacterBackup,
 } from '../../../src/backup/character-backup';
 import { CatalogImporter } from '../../../src/catalog/catalog-importer';
+import { reconcileBundledContentRegistryV1 } from '../../../src/catalog/bundled-content-registry-v1';
 import { importedContentKeyOwner } from '../../../src/catalog/catalog-key';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import { UpdateClassCommand } from '../../../src/commands/update-class';
@@ -18,6 +19,7 @@ import {
   exportCharacterShare,
   importCharacterShare,
 } from '../../../src/sharing/character-share';
+import { assertContentImportPlan } from '../../helpers/content-import-plan';
 import { openTestDatabase } from '../../helpers/open-db';
 
 const SUBCLASS = readFileSync(
@@ -44,6 +46,7 @@ async function database(): Promise<DatabaseContext> {
   connections.push(connection);
   const db = new DatabaseContext(connection);
   seedClassProgressions(db);
+  reconcileBundledContentRegistryV1(db);
   return db;
 }
 
@@ -120,6 +123,32 @@ describe('an imported subclass stays distinguishable from a bundled one', () => 
       // The seeder's own two, whose middle segment is a record-kind literal.
       ['2024:subclass:at', null],
       ['2024:subclass:ek', null],
+    ]);
+  });
+
+  it('returns a typed refusal when an exact subclass key projects damaged live rules', async () => {
+    const db = await database();
+    importSubclass(db);
+    db.exec(
+      `UPDATE subclass_features SET description = description || ' Damaged.'
+       WHERE subclass_definition_id = (
+         SELECT id FROM subclass_definitions WHERE content_key = ?
+       )`,
+      [SUBCLASS_KEY],
+    );
+
+    const refusal = new CatalogImporter(db).import({
+      documents: [SUBCLASS],
+    });
+    assertContentImportPlan(
+      refusal,
+      'Expected the damaged subclass import to return a plan.',
+    );
+    expect(refusal.outcomes).toEqual([
+      expect.objectContaining({
+        kind: 'refused',
+        reason: 'target_integrity_refused',
+      }),
     ]);
   });
 

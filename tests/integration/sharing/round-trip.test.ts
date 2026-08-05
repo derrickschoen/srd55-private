@@ -1182,7 +1182,7 @@ describe('minimal character sharing', () => {
     ).toHaveLength(1);
   });
 
-  it('keeps the shared name of a placeholder referenced only by a loadout', async () => {
+  it('CI4A-H1 imports an unavailable shared spell under its asserted key without minting legacy-opaque', async () => {
     const source = await database();
     const characterId = source.exec(
       "INSERT INTO characters (name) VALUES ('Loadout Mage')",
@@ -1216,6 +1216,20 @@ describe('minimal character sharing', () => {
         [spellKey],
       ),
     ).toBe(spellName);
+    expect(
+      target.oneRaw(
+        `SELECT key_kind, catalog_layer
+         FROM catalog_content_identities
+         WHERE content_kind = 'spell' AND content_key = ?`,
+        [spellKey],
+      ),
+    ).toEqual({ key_kind: 'asserted', catalog_layer: 'external' });
+    expect(
+      target.scalar(
+        `SELECT count(*) FROM catalog_content_identities
+         WHERE key_kind = 'legacy-opaque'`,
+      ),
+    ).toBe(0);
   });
 
   it('wraps every low-level malformed fragment as ShareValidationError', async () => {

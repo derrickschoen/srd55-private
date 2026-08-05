@@ -25,6 +25,7 @@ import {
   officialSpellKey,
 } from '../catalog/catalog-key';
 import { normalizeCatalogName } from '../catalog/catalog-normalize';
+import { ensureBundledStableContentIdentity } from '../catalog/content-registry';
 import type { DatabaseContext } from '../db/database';
 import {
   encodeSpellComponents,
@@ -509,6 +510,11 @@ export function seedSpellContent(db: DatabaseContext): void {
       const components = encodeSpellComponents(
         parseSpellComponents(spell.components),
       );
+      ensureBundledStableContentIdentity(db, {
+        kind: 'spell',
+        contentKey: spell.content_key,
+        normalizedName: normalizeCatalogName(spell.name),
+      });
       db.exec(
         `INSERT INTO spell_versions (
            content_key, spell_identity_id, display_name, rules_edition,

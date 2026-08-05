@@ -23,6 +23,7 @@ import { datetime, oneOf, varchar } from './columns';
 
 export type CatalogContentKeyKind =
   | 'derived'
+  | 'asserted'
   | 'bundled-stable'
   | 'legacy-opaque';
 export type CatalogContentLayer = 'bundled' | 'external';
@@ -89,7 +90,7 @@ export const catalog_content_identities = sqliteTable(
     ),
     check(
       'catalog_content_identities_key_kind_check',
-      sql`${table.key_kind} IN ('derived', 'bundled-stable', 'legacy-opaque')`,
+      sql`${table.key_kind} IN ('derived', 'asserted', 'bundled-stable', 'legacy-opaque')`,
     ),
     check(
       'catalog_content_identities_catalog_layer_check',
@@ -132,6 +133,43 @@ export const catalog_content_identities = sqliteTable(
             ${table.content_key},
             instr(${table.content_key}, ':content.v1:') + 12
           ) NOT GLOB '*[^0-9a-f]*')
+        OR (${table.key_kind} = 'asserted'
+          AND ${table.catalog_layer} = 'external'
+          -- Exact grammar shared with isAssertedExternalContentKey:
+          -- edition:name, or edition:dotted.owner:name. Every component is a
+          -- lowercase alphanumeric/hyphen slug with no empty hyphen segment.
+          AND length(${table.content_key}) > 2
+          AND ${table.content_key} NOT GLOB '*[^a-z0-9:.-]*'
+          AND instr(${table.content_key}, ':') > 1
+          AND substr(${table.content_key}, 1, 1) NOT IN ('-', '.', ':')
+          AND substr(${table.content_key}, -1, 1) NOT IN ('-', '.', ':')
+          AND instr(${table.content_key}, '::') = 0
+          AND instr(${table.content_key}, '..') = 0
+          AND instr(${table.content_key}, '--') = 0
+          AND instr(${table.content_key}, ':.') = 0
+          AND instr(${table.content_key}, '.:') = 0
+          AND instr(${table.content_key}, ':-') = 0
+          AND instr(${table.content_key}, '-:') = 0
+          AND instr(${table.content_key}, '.-') = 0
+          AND instr(${table.content_key}, '-.') = 0
+          AND (
+            (length(${table.content_key}) - length(replace(${table.content_key}, ':', '')) = 1
+              AND instr(${table.content_key}, '.') = 0)
+            OR
+            (length(${table.content_key}) - length(replace(${table.content_key}, ':', '')) = 2
+              AND instr(substr(${table.content_key}, instr(${table.content_key}, ':') + 1), ':') > 1
+              AND instr(substr(${table.content_key}, 1, instr(${table.content_key}, ':') - 1), '.') = 0
+              AND instr(substr(
+                ${table.content_key},
+                instr(${table.content_key}, ':') + 1,
+                instr(substr(${table.content_key}, instr(${table.content_key}, ':') + 1), ':') - 1
+              ), '.') > 1
+              AND instr(substr(
+                ${table.content_key},
+                instr(${table.content_key}, ':') +
+                  instr(substr(${table.content_key}, instr(${table.content_key}, ':') + 1), ':') + 1
+              ), '.') = 0)
+          ))
         OR (${table.key_kind} = 'bundled-stable'
           AND ${table.catalog_layer} = 'bundled')
         OR (${table.key_kind} = 'legacy-opaque'

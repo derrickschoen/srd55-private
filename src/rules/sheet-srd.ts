@@ -22,6 +22,8 @@
  * not carry is not invented here.
  */
 import type { DatabaseContext } from '../db/database';
+import { normalizeContentIdentityName } from '../catalog/content-identity';
+import { ensureBundledStableContentIdentity } from '../catalog/content-registry';
 import { encodePrimaryAbilityExpression } from '../domain/primary-ability';
 import {
   parseSrdClassTraits,
@@ -293,6 +295,11 @@ export function seedSheetContent(db: DatabaseContext): void {
 
 function seedArmorTemplates(db: DatabaseContext, timestamp: string): void {
   for (const armor of bundledArmorTemplates()) {
+    ensureBundledStableContentIdentity(db, {
+      kind: 'armor',
+      contentKey: armor.content_key,
+      normalizedName: normalizeContentIdentityName(armor.name),
+    });
     db.exec(
       `INSERT INTO armor_templates (
          content_key, rules_edition, name, category, armor_class, dex_bonus,

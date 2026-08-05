@@ -19,6 +19,11 @@ import {
 } from '../../../src/rules/class-progression-lookup';
 import { getSqlite3, MemoryDatabaseStorage } from '../../helpers/open-db';
 import { hasBundledClassResourceContent } from '../../../src/rules/class-resources-srd';
+import {
+  ensureBundledStableContentIdentity,
+  registerAssertedContentIdentity,
+} from '../../../src/catalog/content-registry';
+import { assertedExternalContentKey } from '../../../src/catalog/catalog-key';
 
 const SRD_CLASSES = [
   'Barbarian',
@@ -394,9 +399,22 @@ describe('application database bootstrap', () => {
     const { sqlite3, lifecycle } = await freshApplicationLifecycle();
 
     const homebrew = bareLifecycle(sqlite3);
+    const homebrewWizardKey = assertedExternalContentKey(
+      'class',
+      '2024',
+      'Wizard',
+    );
+    registerAssertedContentIdentity(homebrew.database, {
+      kind: 'class',
+      edition: '2024',
+      name: 'Wizard',
+      payload: {},
+      assertedKey: homebrewWizardKey,
+    });
     homebrew.database.exec(
       `INSERT INTO class_definitions (content_key, name, rules_edition)
-       VALUES ('homebrew:wizard', 'Wizard', '2024')`,
+       VALUES (?, 'Wizard', '2024')`,
+      [homebrewWizardKey],
     );
     const homebrewBytes = await homebrew.exportBytes();
     homebrew.close();
@@ -410,7 +428,7 @@ describe('application database bootstrap', () => {
       lifecycle.database.allRaw(
         'SELECT content_key, name FROM class_definitions ORDER BY name',
       ),
-    ).toContainEqual({ content_key: 'homebrew:wizard', name: 'Wizard' });
+    ).toContainEqual({ content_key: homebrewWizardKey, name: 'Wizard' });
     expect(classNames(lifecycle)).toEqual([...SRD_CLASSES]);
     expect(
       lifecycle.database.scalar(
@@ -496,6 +514,11 @@ describe('application database bootstrap', () => {
   it('validates, audits, and reopens a Monk formula image after equipping a shield', async () => {
     const sqlite3 = await getSqlite3();
     const fixture = bareLifecycle(sqlite3);
+    ensureBundledStableContentIdentity(fixture.database, {
+      kind: 'class',
+      contentKey: '2024:class:monk',
+      normalizedName: 'monk',
+    });
     const monkId = fixture.database.exec(
       `INSERT INTO class_definitions (
          content_key, name, rules_edition
@@ -645,9 +668,22 @@ describe('bundled class content detection', () => {
 
     // A homebrew class with its own progressions must not be able to make up
     // the numbers for a bundled class that lost rows.
+    const homebrewArtificerKey = assertedExternalContentKey(
+      'class',
+      '2024',
+      'Artificer',
+    );
+    registerAssertedContentIdentity(db, {
+      kind: 'class',
+      edition: '2024',
+      name: 'Artificer',
+      payload: {},
+      assertedKey: homebrewArtificerKey,
+    });
     const homebrewId = db.exec(
       `INSERT INTO class_definitions (content_key, name, rules_edition)
-       VALUES ('homebrew:artificer', 'Artificer', '2024')`,
+       VALUES (?, 'Artificer', '2024')`,
+      [homebrewArtificerKey],
     ).lastInsertId;
     for (let level = 1; level <= 20; level++) {
       db.exec(

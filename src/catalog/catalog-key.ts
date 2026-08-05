@@ -1,4 +1,6 @@
 import type { Brand } from '../domain/ids';
+import type { ContentKey } from '../domain/ids';
+import type { ContentKind } from './content-identity';
 
 const KEY_COMPONENT = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const OWNER_NAMESPACE =
@@ -134,4 +136,68 @@ export function homebrewSpellKey(
   return `${normalizeCatalogKeyComponent(
     edition,
   )}:${normalizedOwner}:${normalizeCatalogKeyComponent(name)}`;
+}
+
+/**
+ * D198's single stable-key seam for every newly published external aggregate.
+ * The namespace is portable text, while the final component is always derived
+ * from the display name by the same normalizer used by bundled stable keys.
+ */
+export function assertedExternalContentKey(
+  kind: ContentKind,
+  edition: string,
+  name: string,
+  ownerNamespace = `content.${kind}`,
+): ContentKey {
+  const normalizedOwner = ownerNamespace
+    .split('.')
+    .map(normalizeCatalogKeyComponent)
+    .join('.');
+  if (!OWNER_NAMESPACE.test(normalizedOwner)) {
+    throw new TypeError(
+      `Asserted content owner namespace '${normalizedOwner}' is invalid.`,
+    );
+  }
+  return `${normalizeCatalogKeyComponent(edition)}:${normalizedOwner}:${normalizeCatalogKeyComponent(name)}` as ContentKey;
+}
+
+export function assertedExternalContentKeyFromDeclared(
+  kind: ContentKind,
+  edition: string,
+  name: string,
+  declaredKey?: string,
+): ContentKey {
+  if (declaredKey !== undefined) {
+    const parts = declaredKey.split(':');
+    if (
+      parts.length === 2 &&
+      KEY_COMPONENT.test(parts[0]!) &&
+      KEY_COMPONENT.test(parts[1]!)
+    ) {
+      return `${normalizeCatalogKeyComponent(edition)}:${normalizeCatalogKeyComponent(name)}` as ContentKey;
+    }
+  }
+  const declaredOwner = declaredKey === undefined
+    ? null
+    : importedContentKeyOwner(declaredKey);
+  return assertedExternalContentKey(
+    kind,
+    edition,
+    name,
+    declaredOwner ?? `content.${kind}`,
+  );
+}
+
+export function isAssertedExternalContentKey(value: string): boolean {
+  const parts = value.split(':');
+  if (parts.length === 2) {
+    return KEY_COMPONENT.test(parts[0]!) && KEY_COMPONENT.test(parts[1]!);
+  }
+  if (parts.length !== 3) {
+    return false;
+  }
+  const [edition, owner, name] = parts as [string, string, string];
+  return KEY_COMPONENT.test(edition) &&
+    OWNER_NAMESPACE.test(owner) &&
+    KEY_COMPONENT.test(name);
 }

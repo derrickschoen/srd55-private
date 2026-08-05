@@ -10,6 +10,15 @@ import {
 import type { DatabaseContext } from '../db/database';
 import type { SqlRow } from '../db/codecs';
 import {
+  commitContentImport,
+  planContentImport,
+  type ContentImportEntryOutcome,
+  type ContentImportNode,
+} from '../catalog/content-adoption';
+import { projectStoredContentV1 } from '../catalog/stored-content-projector-v1';
+import { projectStoredSpellRowsContentV1 } from '../catalog/spell-content-projector-v1';
+import type { ContentKey } from '../domain/ids';
+import {
   migrateLegacyTraitRows,
   splitLegacyTraitEffect,
 } from '../rules/legacy-trait-effects';
@@ -149,7 +158,20 @@ export interface PreFlavorCharacterBackupDocument {
 
 export interface CharacterImportResult {
   readonly characterId: number;
+  readonly spellOutcomes: readonly CharacterBackupSpellOutcome[];
 }
+
+export type CharacterBackupSpellOutcome =
+  | {
+      readonly contentKey: string;
+      readonly targetContentKey: string;
+      readonly kind: 'adopted' | 'matched';
+    }
+  | {
+      readonly contentKey: string;
+      readonly kind: 'refused';
+      readonly reason: string;
+    };
 
 interface ValidatedDocument {
   readonly document: CharacterBackupDocument;
@@ -1773,6 +1795,7 @@ function resolveReferences(
   db: DatabaseContext,
   maps: Readonly<Record<ReferenceKind, Map<number, string>>>,
   portableSpellKeys: ReadonlySet<string>,
+  portableSpellTargets: ReadonlyMap<string, string> = new Map(),
 ): ResolvedReferences {
   return Object.fromEntries(
     referenceKinds.map((kind) => {
@@ -1781,6 +1804,9 @@ function resolveReferences(
         return [kind, new Map<number, number>()];
       }
       const keys = [...source.values()];
+      const targetKeys = kind === 'spell_versions'
+        ? keys.map((key) => portableSpellTargets.get(key) ?? key)
+        : keys;
       const rows = db.all<{
         id: number;
         content_key: string;
@@ -1789,9 +1815,9 @@ function resolveReferences(
         `SELECT id, content_key,
                 ${kind === 'spell_versions' ? 'is_active' : 'NULL'} AS is_active
          FROM "${kind}"
-         WHERE content_key IN (${keys.map(() => '?').join(', ')})
+         WHERE content_key IN (${targetKeys.map(() => '?').join(', ')})
         `,
-        keys,
+        targetKeys,
         (row) => ({
           id: Number(row.id),
           content_key: String(row.content_key),
@@ -1802,7 +1828,10 @@ function resolveReferences(
       const byKey = new Map(rows.map((row) => [row.content_key, row]));
       const resolved = new Map<number, number>();
       for (const [sourceId, contentKey] of source) {
-        const target = byKey.get(contentKey);
+        const targetKey = kind === 'spell_versions'
+          ? portableSpellTargets.get(contentKey) ?? contentKey
+          : contentKey;
+        const target = byKey.get(targetKey);
         if (
           target === undefined ||
           (kind === 'spell_versions' &&
@@ -1862,120 +1891,178 @@ function insertPortableRow(
 }
 
 /**
- * Restores only definitions whose version content_key is absent.
- *
- * A local row with the same key wins wholesale: neither it nor its pivots are
- * updated. The file format has no explicit replace instruction, so treating
- * presence as permission to overwrite would destroy user-owned catalogue data.
+ * Portable definitions enter through the same content-adoption protocol as a
+ * catalog document. Exact projected matches are automatic; every non-exact
+ * destination adoption is explicit in the returned per-spell outcome.
  */
 function restoreSpellDefinitions(
   db: DatabaseContext,
   definitions: CharacterBackupSpellDefinitions,
-): ReadonlySet<string> {
+): {
+  readonly portableKeys: ReadonlySet<string>;
+  readonly targets: ReadonlyMap<string, string>;
+  readonly outcomes: readonly CharacterBackupSpellOutcome[];
+} {
   const portableKeys = new Set(
     definitions.spell_versions.map((row) => String(row.content_key)),
   );
   if (portableKeys.size === 0) {
-    return portableKeys;
+    return {
+      portableKeys,
+      targets: new Map(),
+      outcomes: Object.freeze([]),
+    };
   }
-  const existingKeys = new Set(
-    db
-      .allRaw(
-        `SELECT content_key
-         FROM spell_versions
-         WHERE content_key IN (${[...portableKeys].map(() => '?').join(', ')})`,
-        [...portableKeys],
-      )
-      .map((row) => String(row.content_key)),
+  const identities = new Map(
+    definitions.spell_identities.map((row) => [Number(row.id), row]),
   );
-  const versionsToInsert = definitions.spell_versions.filter(
-    (row) => !existingKeys.has(String(row.content_key)),
+  const children = (
+    table: Exclude<SpellDefinitionTable,
+      'spell_identities' | 'spell_identity_aliases' | 'spell_versions'>,
+    versionId: number,
+  ): readonly BackupRow[] => definitions[table].filter(
+    (row) => Number(row.spell_version_id) === versionId,
   );
-  if (versionsToInsert.length === 0) {
-    return portableKeys;
+  const nodes: ContentImportNode<'spell'>[] = definitions.spell_versions.map(
+    (version) => {
+      const oldVersionId = Number(version.id);
+      const oldIdentityId = Number(version.spell_identity_id);
+      const identity = identities.get(oldIdentityId);
+      if (identity === undefined) {
+        throw new BackupValidationError(
+          `Character backup cannot resolve carried spell identity ${oldIdentityId}.`,
+        );
+      }
+      const projected = projectStoredSpellRowsContentV1({
+        version: version as SqlRow,
+        spellIdentityKey: String(identity.content_key),
+        spellLists: children('spell_list_memberships', oldVersionId) as SqlRow[],
+        tags: children('spell_version_tags', oldVersionId) as SqlRow[],
+        attackModes: children('spell_version_attack_modes', oldVersionId) as SqlRow[],
+        saveAbilities: children('spell_version_save_abilities', oldVersionId) as SqlRow[],
+        upcastLevels: children('spell_version_upcast_levels', oldVersionId) as SqlRow[],
+        cantripUpgradeLevels: children(
+          'spell_version_cantrip_upgrade_levels',
+          oldVersionId,
+        ) as SqlRow[],
+      });
+      const contentKey = String(version.content_key) as ContentKey;
+      return Object.freeze({
+        id: `backup-spell:${contentKey}`,
+        projection: Object.freeze({
+          kind: 'spell' as const,
+          edition: projected.aggregate.rules_edition,
+          name: projected.aggregate.name,
+          assertedKey: contentKey,
+          payload: projected.payload,
+          projectStored: (database: DatabaseContext, targetKey: ContentKey) =>
+            projectStoredContentV1(database, 'spell', targetKey) as {
+              readonly kind: 'spell';
+              readonly edition: string;
+              readonly name: string;
+              readonly payload: unknown;
+            },
+          install: (database: DatabaseContext) => {
+            installPortableSpellDefinition(
+              database,
+              definitions,
+              version,
+              identity,
+            );
+          },
+        }),
+      });
+    },
+  );
+  const plan = planContentImport(db, nodes);
+  const committed = commitContentImport(db, { nodes, token: plan.token });
+  const protocolOutcomes = committed.kind === 'committed'
+    ? committed.outcomes
+    : committed.kind === 'refused'
+      ? committed.outcomes
+      : committed.freshPlan.outcomes;
+  const outcomes = protocolOutcomes.map(characterBackupSpellOutcome);
+  if (committed.kind !== 'committed') {
+    throw new BackupValidationError(
+      `Character backup spell adoption was refused: ${JSON.stringify(outcomes)}.`,
+    );
   }
+  const targets = new Map(outcomes.flatMap((outcome) =>
+    outcome.kind === 'refused'
+      ? []
+      : [[outcome.contentKey, outcome.targetContentKey] as const],
+  ));
+  return { portableKeys, targets, outcomes: Object.freeze(outcomes) };
+}
 
-  const neededIdentityIds = new Set(
-    versionsToInsert.map((row) => Number(row.spell_identity_id)),
+function installPortableSpellDefinition(
+  db: DatabaseContext,
+  definitions: CharacterBackupSpellDefinitions,
+  version: BackupRow,
+  identity: BackupRow,
+): void {
+  const oldIdentityId = Number(identity.id);
+  const existingIdentity = db.oneRaw(
+    'SELECT id FROM spell_identities WHERE content_key = ?',
+    [String(identity.content_key)],
   );
-  const identityIds = new Map<number, number>();
-  const insertedIdentityIds = new Set<number>();
-  for (const row of definitions.spell_identities) {
-    const oldId = Number(row.id);
-    if (!neededIdentityIds.has(oldId)) {
-      continue;
+  const insertedIdentity = existingIdentity === null;
+  const identityId = insertedIdentity
+    ? insertPortableRow(db, 'spell_identities', identity, {})
+    : Number(existingIdentity.id);
+  if (insertedIdentity) {
+    for (const alias of definitions.spell_identity_aliases) {
+      if (Number(alias.spell_identity_id) === oldIdentityId) {
+        insertPortableRow(db, 'spell_identity_aliases', alias, {
+          spell_identity_id: identityId,
+        });
+      }
     }
-    const existing = db.oneRaw(
-      'SELECT id FROM spell_identities WHERE content_key = ?',
-      [String(row.content_key)],
-    );
-    if (existing !== null) {
-      identityIds.set(oldId, Number(existing.id));
-      continue;
-    }
-    identityIds.set(
-      oldId,
-      insertPortableRow(db, 'spell_identities', row, {}),
-    );
-    insertedIdentityIds.add(oldId);
   }
-  for (const row of definitions.spell_identity_aliases) {
-    const oldIdentityId = Number(row.spell_identity_id);
-    if (!insertedIdentityIds.has(oldIdentityId)) {
-      continue;
-    }
-    insertPortableRow(db, 'spell_identity_aliases', row, {
-      spell_identity_id: identityIds.get(oldIdentityId),
-    });
-  }
-
-  const versionIds = new Map<number, number>();
-  for (const row of versionsToInsert) {
-    const oldIdentityId = Number(row.spell_identity_id);
-    const identityId = identityIds.get(oldIdentityId);
-    if (identityId === undefined) {
-      throw new BackupValidationError(
-        `Character backup cannot resolve carried spell identity ${oldIdentityId}.`,
-      );
-    }
-    const editionCollision = db.oneRaw(
-      `SELECT content_key
-       FROM spell_versions
-       WHERE spell_identity_id = ? AND rules_edition = ?`,
-      [identityId, String(row.rules_edition)],
-    );
-    if (editionCollision !== null) {
-      throw new BackupValidationError(
-        `Character backup cannot restore spell "${String(row.content_key)}": ` +
-          `local identity already has rules edition "${String(row.rules_edition)}".`,
-      );
-    }
-    versionIds.set(
-      Number(row.id),
-      insertPortableRow(db, 'spell_versions', row, {
-        spell_identity_id: identityId,
-      }),
+  const editionCollision = db.oneRaw(
+    `SELECT content_key FROM spell_versions
+     WHERE spell_identity_id = ? AND rules_edition = ?`,
+    [identityId, String(version.rules_edition)],
+  );
+  if (editionCollision !== null) {
+    throw new BackupValidationError(
+      `Character backup cannot restore spell "${String(version.content_key)}": ` +
+        `local identity already has rules edition "${String(version.rules_edition)}".`,
     );
   }
+  const versionId = insertPortableRow(db, 'spell_versions', version, {
+    spell_identity_id: identityId,
+  });
   for (const table of spellDefinitionTables) {
     if (
       table === 'spell_identities' ||
       table === 'spell_identity_aliases' ||
       table === 'spell_versions'
-    ) {
-      continue;
-    }
+    ) continue;
     for (const row of definitions[table]) {
-      const versionId = versionIds.get(Number(row.spell_version_id));
-      if (versionId === undefined) {
-        continue;
+      if (Number(row.spell_version_id) === Number(version.id)) {
+        insertPortableRow(db, table, row, { spell_version_id: versionId });
       }
-      insertPortableRow(db, table, row, {
-        spell_version_id: versionId,
-      });
     }
   }
-  return portableKeys;
+}
+
+function characterBackupSpellOutcome(
+  outcome: ContentImportEntryOutcome,
+): CharacterBackupSpellOutcome {
+  const contentKey = outcome.id.replace(/^backup-spell:/, '');
+  if (outcome.kind === 'refused') {
+    return Object.freeze({
+      contentKey,
+      kind: 'refused' as const,
+      reason: outcome.reason,
+    });
+  }
+  return Object.freeze({
+    contentKey,
+    targetContentKey: outcome.contentKey,
+    kind: outcome.kind === 'match' ? 'matched' as const : 'adopted' as const,
+  });
 }
 
 function topologicalSources(rows: readonly BackupRow[]): BackupRow[] {
@@ -2937,14 +3024,15 @@ export function importCharacterBackup(
   const validated = validateDocument(input);
 
   return db.transaction((transaction) => {
-    const portableSpellKeys = restoreSpellDefinitions(
+    const restoredSpells = restoreSpellDefinitions(
       transaction,
       validated.document.spell_definitions,
     );
     const references = resolveReferences(
       transaction,
       validated.referenceMaps,
-      portableSpellKeys,
+      restoredSpells.portableKeys,
+      restoredSpells.targets,
     );
     const characterId = insertPortableRow(
       transaction,
@@ -2989,6 +3077,9 @@ export function importCharacterBackup(
         snapshot: snapshots[index],
       });
     }
-    return { characterId };
+    return {
+      characterId,
+      spellOutcomes: restoredSpells.outcomes,
+    };
   });
 }

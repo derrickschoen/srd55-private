@@ -6,7 +6,11 @@ import {
   type CharacterBackupSpellDefinitions,
 } from '../../../src/backup/character-backup';
 import { DatabaseContext } from '../../../src/db/database';
+import { deriveContentIdentityV1 } from '../../../src/catalog/content-identity';
+import { registerContentFingerprint } from '../../../src/catalog/content-registry';
+import { projectStoredContentV1 } from '../../../src/catalog/stored-content-projector-v1';
 import { SPELL_DEFINITION_TABLES } from '../../../src/domain/contracts/tables';
+import type { ContentKey } from '../../../src/domain/ids';
 import { openTestDatabase } from '../../helpers/open-db';
 
 const opened: Database[] = [];
@@ -55,6 +59,17 @@ function seedReferencedSpell(
       timestamp,
     ],
   );
+  db.exec(
+    `INSERT INTO catalog_content_identities (
+       content_key, content_kind, key_kind, catalog_layer, normalized_name
+     ) VALUES (?, 'spell', ?, ?, ?)`,
+    [
+      contentKey,
+      provenance === 'srd' ? 'bundled-stable' : 'asserted',
+      provenance === 'srd' ? 'bundled' : 'external',
+      displayName.toLowerCase(),
+    ],
+  );
   const versionId = db.exec(
     `INSERT INTO spell_versions (
        content_key, spell_identity_id, display_name, rules_edition, level,
@@ -65,9 +80,10 @@ function seedReferencedSpell(
        requires_mod_for_effect, effect_reliability_category, provenance,
        seed_version, is_active, created_at, updated_at, forked_from_content_key
      ) VALUES (
-       ?, ?, ?, '2024', 3, 'Chronomancy', 1, 1, '1 reaction', 'reaction',
-       '90 feet', 'ranged', 90, 'sphere', 15, 'Concentration, up to 1 minute',
-       'V, S, M', 'a silver hourglass', 2500, 'minimum', 0,
+       ?, ?, ?, '2024', 3, 'Chronomancy', 1, 1, '1 reaction', 'Reaction',
+       '90 feet', 'ranged', 90, NULL, NULL, 'Concentration, up to 1 minute',
+       'V, S, M (a silver hourglass worth 25+ GP)',
+       'a silver hourglass worth 25+ GP', 2500, 'minimum', 0,
        'Complete short summary.', 'Complete upcast summary.',
        'Complete cantrip upgrade summary.', 1, 'mixed', ?, 'seed-17', 1,
        ?, ?, ?
@@ -131,6 +147,16 @@ function seedReferencedSpell(
      VALUES (?, 5)`,
     [versionId],
   );
+  const stored = projectStoredContentV1(db, 'spell', contentKey as ContentKey);
+  const fingerprint = deriveContentIdentityV1(stored);
+  registerContentFingerprint(db, {
+    kind: 'spell',
+    contentKey: contentKey as ContentKey,
+    scheme: fingerprint.envelope.scheme,
+    digest: fingerprint.digest,
+    canonicalJson: fingerprint.canonicalJson,
+    role: 'current',
+  });
   const characterId = db.exec(
     `INSERT INTO characters (name, notes, created_at, updated_at)
      VALUES (?, 'portable character', ?, ?)`,
@@ -185,15 +211,15 @@ function expectedDefinitions(
         ritual: 1,
         concentration: 1,
         casting_time: '1 reaction',
-        action_type: 'reaction',
+        action_type: 'Reaction',
         range: '90 feet',
         range_kind: 'ranged',
         range_feet: 90,
-        area_shape: 'sphere',
-        area_feet: 15,
+        area_shape: null,
+        area_feet: null,
         duration: 'Concentration, up to 1 minute',
-        components: 'V, S, M',
-        material_component_summary: 'a silver hourglass',
+        components: 'V, S, M (a silver hourglass worth 25+ GP)',
+        material_component_summary: 'a silver hourglass worth 25+ GP',
         material_cost_copper: 2500,
         material_cost_kind: 'minimum',
         healing: 0,
@@ -259,6 +285,24 @@ function storedDefinitions(db: DatabaseContext): CharacterBackupSpellDefinitions
       db.allRaw(`SELECT * FROM "${table}" ORDER BY id`),
     ]),
   ) as unknown as CharacterBackupSpellDefinitions;
+}
+
+function refreshSpellFingerprint(db: DatabaseContext, contentKey: string): void {
+  db.exec(
+    `DELETE FROM catalog_content_fingerprints
+     WHERE content_kind = 'spell' AND content_key = ?`,
+    [contentKey],
+  );
+  const stored = projectStoredContentV1(db, 'spell', contentKey as ContentKey);
+  const fingerprint = deriveContentIdentityV1(stored);
+  registerContentFingerprint(db, {
+    kind: 'spell',
+    contentKey: contentKey as ContentKey,
+    scheme: fingerprint.envelope.scheme,
+    digest: fingerprint.digest,
+    canonicalJson: fingerprint.canonicalJson,
+    role: 'current',
+  });
 }
 
 afterEach(() => {
@@ -387,23 +431,28 @@ describe('portable character backup user-authored spells', () => {
     });
   });
 
-  it('installs an absent definition but keeps a colliding local content_key wholesale', async () => {
+  it('CI4A-H2 surfaces different-content adoption and restores a new external spell into a fresh database', async () => {
     const source = await database();
     const carried = seedReferencedSpell(
       source,
       'user',
-      '2024:local.dnd-wt:collision',
+      '2024:local.dnd-wt:carried-version',
       'Carried Version',
       '2024:time-stop',
     );
     const document = exportCharacterBackup(source, carried.characterId);
 
     const emptyTarget = await database();
-    importCharacterBackup(emptyTarget, document);
+    const freshImport = importCharacterBackup(emptyTarget, document);
+    expect(freshImport.spellOutcomes).toEqual([{
+      contentKey: '2024:local.dnd-wt:carried-version',
+      targetContentKey: '2024:local.dnd-wt:carried-version',
+      kind: 'adopted',
+    }]);
     expect(
       emptyTarget.scalar(
         'SELECT display_name FROM spell_versions WHERE content_key = ?',
-        ['2024:local.dnd-wt:collision'],
+        ['2024:local.dnd-wt:carried-version'],
       ),
     ).toBe('Carried Version');
 
@@ -411,12 +460,27 @@ describe('portable character backup user-authored spells', () => {
     const local = seedReferencedSpell(
       collisionTarget,
       'user',
-      '2024:local.dnd-wt:collision',
-      'Local Version',
+      '2024:local.dnd-wt:carried-version',
+      'Carried Version',
       '2024:local-ancestor',
+    );
+    collisionTarget.exec(
+      `UPDATE spell_versions
+       SET short_summary = 'Different local rules.'
+       WHERE id = ?`,
+      [local.versionId],
+    );
+    refreshSpellFingerprint(
+      collisionTarget,
+      '2024:local.dnd-wt:carried-version',
     );
     const before = storedDefinitions(collisionTarget);
     const imported = importCharacterBackup(collisionTarget, document);
+    expect(imported.spellOutcomes).toEqual([{
+      contentKey: '2024:local.dnd-wt:carried-version',
+      targetContentKey: '2024:local.dnd-wt:carried-version',
+      kind: 'adopted',
+    }]);
     expect(storedDefinitions(collisionTarget)).toEqual(before);
     expect(
       collisionTarget.oneRaw(
@@ -425,7 +489,7 @@ describe('portable character backup user-authored spells', () => {
         [local.versionId],
       ),
     ).toEqual({
-      display_name: 'Local Version',
+      display_name: 'Carried Version',
       provenance: 'user',
       forked_from_content_key: '2024:local-ancestor',
     });

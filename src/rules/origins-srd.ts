@@ -73,6 +73,8 @@ import speciesExtract from '../../docs/srd/source/species-descriptions.txt?raw';
 import backgroundsExtract from '../../docs/srd/source/backgrounds.txt?raw';
 import type { BindableValue } from '@sqlite.org/sqlite-wasm';
 import type { DatabaseContext } from '../db/database';
+import { normalizeContentIdentityName } from '../catalog/content-identity';
+import { ensureBundledStableContentIdentity } from '../catalog/content-registry';
 import {
   creatureSizes,
   creatureTypes,
@@ -1200,6 +1202,11 @@ export function seedOriginContent(db: DatabaseContext): void {
 
 function seedSpecies(db: DatabaseContext, timestamp: string): void {
   for (const template of bundledSpeciesTemplates()) {
+    ensureBundledStableContentIdentity(db, {
+      kind: 'species',
+      contentKey: template.content_key,
+      normalizedName: normalizeContentIdentityName(template.name),
+    });
     const row = {
       content_key: template.content_key,
       rules_edition: BUNDLED_ORIGIN_RULES_EDITION,
@@ -1345,6 +1352,11 @@ function seedSpecies(db: DatabaseContext, timestamp: string): void {
 
 function seedBackgrounds(db: DatabaseContext, timestamp: string): void {
   for (const template of bundledBackgroundTemplates()) {
+    ensureBundledStableContentIdentity(db, {
+      kind: 'background',
+      contentKey: template.content_key,
+      normalizedName: normalizeContentIdentityName(template.name),
+    });
     const row = {
       content_key: template.content_key,
       rules_edition: BUNDLED_ORIGIN_RULES_EDITION,

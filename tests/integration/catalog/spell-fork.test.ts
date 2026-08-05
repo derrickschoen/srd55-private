@@ -1,17 +1,28 @@
 import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { CatalogImporter } from '../../../src/catalog/catalog-importer';
+import { reconcileBundledContentRegistryV1 } from '../../../src/catalog/bundled-content-registry-v1';
 import { exportCharacterBackup } from '../../../src/backup/character-backup';
 import {
   FORK_NAME_REQUIRED_MESSAGE,
+  type ForkSpellCommitResult,
   forkSrdSpell,
+  type ForkSpellImportResult,
   type ForkSpellResult,
 } from '../../../src/catalog/spell-fork';
 import {
+  ContentIdentityCollision,
+  ContentIdentityKeyRefusal,
+} from '../../../src/catalog/content-registry';
+import {
+  assertImportedSpellKeyWritable,
   assertSpellVersionCommandAllowed,
 } from '../../../src/commands/srd-spell-policy';
 import { DatabaseContext } from '../../../src/db/database';
 import { seedSpellContent } from '../../../src/rules/spells-srd';
+import { projectStoredSpellContentV1 } from '../../../src/catalog/spell-content-projector-v1';
+import type { ContentImportPlan } from '../../../src/catalog/content-adoption';
+import type { CatalogImportCommitResult } from '../../../src/catalog/catalog-importer';
 import {
   exportCharacterShare,
   importCharacterShare,
@@ -74,6 +85,116 @@ function importedRecord(versionKey: string, name: string): string {
 }
 
 describe('bundled spell forks', () => {
+  it('plans and commits an external Fireball fallback with a receipt through public catalog RPC', async () => {
+    harness = await createRpcHarness(handlers);
+    seedSpellContent(harness.context.db);
+    reconcileBundledContentRegistryV1(harness.context.db);
+    const stored = projectStoredSpellContentV1(
+      harness.context.db,
+      '2024:fireball' as import('../../../src/domain/ids').ContentKey,
+    ).aggregate;
+    const values = <T>(members: readonly ({ readonly value: T } | T)[]): T[] =>
+      members.map((member) => typeof member === 'object' && member !== null && 'value' in member
+        ? member.value
+        : member as T);
+    const tier1 = JSON.stringify([{
+      identityKey: stored.spell_identity_key,
+      versionKey: stored.spell_version_key,
+      name: stored.name,
+      edition: stored.rules_edition,
+      level: stored.level,
+      school: stored.school,
+      castingTime: stored.casting_time,
+      range: stored.range,
+      components: stored.components,
+      duration: stored.duration,
+      concentration: stored.concentration,
+      ritual: stored.ritual,
+      attackModes: values(stored.attack_modes),
+      saveAbilities: values(stored.save_abilities),
+      effectReliabilityCategory: stored.effect_reliability_category,
+      spellLists: values(stored.spell_lists),
+      sourceBooks: [],
+      sourcePage: null,
+      sourceSlug: null,
+      tags: values(stored.tags),
+      healing: stored.healing,
+      requiresModForEffect: stored.requires_mod_for_effect,
+      upcastLevels: values(stored.upcast_levels),
+      upcastSummary: stored.upcast_summary,
+      cantripUpgradeLevels: values(stored.cantrip_upgrade_levels),
+      cantripUpgradeSummary: stored.cantrip_upgrade_summary,
+    }]);
+    const params = {
+      documents: [tier1],
+      ...(stored.short_summary === null
+        ? {}
+        : { textDocuments: [JSON.stringify([{
+            versionKey: stored.spell_version_key,
+            _description: stored.short_summary,
+          }])] }),
+    };
+
+    const planned = await harness.call<typeof params, ContentImportPlan>(
+      'catalog.import',
+      params,
+    );
+    expect(planned.ok).toBe(true);
+    if (!planned.ok) throw new Error(planned.error.message);
+    expect(planned.result.reviews).toEqual([
+      expect.objectContaining({
+        id: 'spell:2024:fireball',
+        targetContentKey: '2024:fireball',
+        matchClass: 'srd-fallback',
+        defaultChoice: 'match',
+      }),
+    ]);
+
+    const committed = await harness.call<
+      typeof params & { token: ContentImportPlan['token']; choices: Record<string, { decision: 'match' }> },
+      CatalogImportCommitResult
+    >('catalog.commitImport', {
+      ...params,
+      token: planned.result.token,
+      choices: { 'spell:2024:fireball': { decision: 'match' } },
+    });
+    expect(committed).toMatchObject({
+      ok: true,
+      result: { kind: 'committed' },
+    });
+    expect(harness.context.db.oneRaw(
+      `SELECT decision, target_content_key
+       FROM catalog_content_match_decisions
+       WHERE content_kind = 'spell'`,
+    )).toEqual({ decision: 'match', target_content_key: '2024:fireball' });
+
+    const receipts = await harness.call<Record<string, never>, readonly {
+      readonly kind: string;
+      readonly scheme: 'content-v1';
+      readonly digest: string;
+    }[]>('catalog.matchDecisions', {});
+    expect(receipts.ok).toBe(true);
+    if (!receipts.ok) throw new Error(receipts.error.message);
+    expect(receipts.result).toHaveLength(1);
+
+    const receipt = receipts.result[0]!;
+    const forgotten = await harness.call<
+      { readonly kind: string; readonly scheme: 'content-v1'; readonly digest: string },
+      { readonly forgotten: boolean }
+    >('catalog.forgetMatchDecision', {
+      kind: receipt.kind,
+      scheme: receipt.scheme,
+      digest: receipt.digest,
+    });
+    expect(forgotten).toMatchObject({
+      ok: true,
+      result: { forgotten: true },
+    });
+    expect(harness.context.db.scalar<number>(
+      'SELECT count(*) FROM catalog_content_match_decisions',
+    )).toBe(0);
+  });
+
   it('dispatches an editable user-owned copy with ancestry and enumerated memberships', async () => {
     harness = await createRpcHarness(handlers);
     seedSpellContent(harness.context.db);
@@ -159,6 +280,115 @@ describe('bundled spell forks', () => {
     });
   });
 
+  it('routes two different source spells under the same asserted name to review', async () => {
+    const db = await seededDatabase();
+    const first = forkSrdSpell(db, {
+      sourceContentKey: '2024:fireball',
+      name: 'Homebrew Spell',
+    });
+
+    const review = forkSrdSpell(db, {
+      sourceContentKey: '2024:acid-arrow',
+      name: 'Homebrew Spell',
+    }) as ForkSpellImportResult;
+    expect('reviews' in review && review.reviews).toEqual([
+      expect.objectContaining({ matchClass: 'key-collision' }),
+    ]);
+    expect(db.oneRaw(
+      `SELECT id, forked_from_content_key FROM spell_versions
+       WHERE content_key = ?`,
+      [first.contentKey],
+    )).toEqual({
+      id: first.spellVersionId,
+      forked_from_content_key: '2024:fireball',
+    });
+    expect(db.scalar<number>(
+      `SELECT count(*) FROM spell_versions WHERE display_name = 'Homebrew Spell'`,
+    )).toBe(1);
+  });
+
+  it('commits an explicit clone choice for a fork collision through public catalog RPC', async () => {
+    harness = await createRpcHarness(handlers);
+    seedSpellContent(harness.context.db);
+
+    const first = await harness.call<
+      { readonly sourceContentKey: string; readonly name: string },
+      ForkSpellImportResult
+    >('catalog.forkSpell', {
+      sourceContentKey: '2024:fireball',
+      name: 'Homebrew Spell',
+    });
+    expect(first.ok).toBe(true);
+
+    const params = {
+      sourceContentKey: '2024:acid-arrow',
+      name: 'Homebrew Spell',
+    };
+    const planned = await harness.call<typeof params, ForkSpellImportResult>(
+      'catalog.forkSpell',
+      params,
+    );
+    expect(planned.ok).toBe(true);
+    if (!planned.ok || !('reviews' in planned.result)) {
+      throw new Error('Expected a review-bearing fork plan.');
+    }
+    expect(planned.result.reviews).toEqual([
+      expect.objectContaining({
+        id: 'spell-fork:2024:local.dnd-wt:homebrew-spell',
+        matchClass: 'key-collision',
+      }),
+    ]);
+
+    const choices = {
+      'spell-fork:2024:local.dnd-wt:homebrew-spell': {
+        decision: 'clone' as const,
+        cloneName: 'Homebrew Spell II',
+      },
+    };
+    const replanned = await harness.call<
+      typeof params & { readonly choices: typeof choices },
+      ContentImportPlan
+    >('catalog.planForkSpell', { ...params, choices });
+    expect(replanned.ok).toBe(true);
+    if (!replanned.ok) throw new Error(replanned.error.message);
+    const committed = await harness.call<
+      typeof params & {
+        readonly token: ContentImportPlan['token'];
+        readonly choices: typeof choices;
+      },
+      ForkSpellCommitResult
+    >('catalog.commitForkSpell', {
+      ...params,
+      token: replanned.result.token,
+      choices,
+    });
+    expect(committed).toMatchObject({
+      ok: true,
+      result: {
+        kind: 'committed',
+        spell: {
+          contentKey: '2024:local.dnd-wt:homebrew-spell-ii',
+          displayName: 'Homebrew Spell II',
+          forkedFromContentKey: '2024:acid-arrow',
+        },
+      },
+    });
+  });
+
+  it('returns a typed integrity refusal for damaged canonical bytes on an exact spell key', async () => {
+    const db = await seededDatabase();
+    reconcileBundledContentRegistryV1(db);
+    db.exec(
+      `UPDATE catalog_content_fingerprints SET canonical_json = 'damaged'
+       WHERE content_kind = 'spell' AND content_key = '2024:fireball'
+         AND fingerprint_role = 'current'`,
+    );
+
+    expect(() =>
+      assertImportedSpellKeyWritable(db, '2024:fireball')
+    ).toThrow(ContentIdentityCollision);
+  });
+
   it('survives import tombstoning and SRD re-seeding while the import control is tombstoned', async () => {
     const db = await seededDatabase();
     const fork = forkSrdSpell(db, {
@@ -167,13 +397,13 @@ describe('bundled spell forks', () => {
     const importer = new CatalogImporter(db);
     importer.import({
       documents: [
-        importedRecord('2024:user.test:discarded', 'Discarded Control'),
+        importedRecord('2024:user.test:discarded-control', 'Discarded Control'),
       ],
     });
 
     const summary = importer.import({
       documents: [
-        importedRecord('2024:user.test:retained', 'Retained Control'),
+        importedRecord('2024:user.test:retained-control', 'Retained Control'),
       ],
     });
     expect(summary.tombstoned).toBe(1);
@@ -183,8 +413,8 @@ describe('bundled spell forks', () => {
          FROM spell_versions
          WHERE id = ?
             OR content_key IN (
-              '2024:user.test:discarded',
-              '2024:user.test:retained'
+              '2024:user.test:discarded-control',
+              '2024:user.test:retained-control'
             )
          ORDER BY content_key`,
         [fork.spellVersionId],
@@ -196,12 +426,12 @@ describe('bundled spell forks', () => {
         is_active: 1,
       },
       {
-        content_key: '2024:user.test:discarded',
+        content_key: '2024:user.test:discarded-control',
         provenance: 'import',
         is_active: 0,
       },
       {
-        content_key: '2024:user.test:retained',
+        content_key: '2024:user.test:retained-control',
         provenance: 'import',
         is_active: 1,
       },

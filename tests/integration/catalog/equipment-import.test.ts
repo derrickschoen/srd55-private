@@ -1,9 +1,13 @@
 import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { CatalogImporter } from '../../../src/catalog/catalog-importer';
+import { assertedExternalContentKey } from '../../../src/catalog/catalog-key';
 import { ContentIdentityCollision } from '../../../src/catalog/content-registry';
-import { UnsupportedItemDefinitionEffect } from '../../../src/catalog/equipment-importer';
+import {
+  UnsupportedItemDefinitionEffect,
+} from '../../../src/catalog/equipment-importer';
 import { DatabaseContext } from '../../../src/db/database';
+import { assertContentImportPlan } from '../../helpers/content-import-plan';
 import { openTestDatabase } from '../../helpers/open-db';
 import { equipmentProjectorV1Vectors } from '../../unit/catalog/fixtures/equipment-projector-v1-vectors';
 
@@ -60,7 +64,7 @@ describe('equipment catalog import', () => {
   let connection: Database | undefined;
   afterEach(() => connection?.close());
 
-  it('installs all hand-pinned aggregates under their derived keys and re-imports as silent exact matches', async () => {
+  it('installs all hand-pinned aggregates under asserted name-derived keys and re-imports as silent exact matches', async () => {
     connection = await openTestDatabase();
     const db = new DatabaseContext(connection);
     const importer = new CatalogImporter(db);
@@ -94,9 +98,9 @@ describe('equipment catalog import', () => {
        WHERE content_kind IN ('weapon', 'armor', 'item')
        ORDER BY content_kind`,
     )).toEqual([
-      { content_kind: 'armor', content_key: equipmentProjectorV1Vectors[1].derivedKey },
-      { content_kind: 'item', content_key: equipmentProjectorV1Vectors[2].derivedKey },
-      { content_kind: 'weapon', content_key: equipmentProjectorV1Vectors[0].derivedKey },
+      { content_kind: 'armor', content_key: assertedExternalContentKey('armor', 'expanded', 'Mirror Coat') },
+      { content_kind: 'item', content_key: assertedExternalContentKey('item', 'expanded', 'Giant Belt') },
+      { content_kind: 'weapon', content_key: assertedExternalContentKey('weapon', 'expanded', 'Storm Pike') },
     ]);
     expect(db.oneRaw(
       `SELECT quantity, slot_1_item_id
@@ -116,26 +120,27 @@ describe('equipment catalog import', () => {
     expect(db.scalar('SELECT count(*) FROM item_definition_effects')).toBe(1);
   });
 
-  it('same-name semantic changes create distinct definitions instead of overwriting', async () => {
+  it('same-name semantic changes require review instead of overwriting the asserted key', async () => {
     connection = await openTestDatabase();
     const db = new DatabaseContext(connection);
     const importer = new CatalogImporter(db);
     const item = records[2];
     importer.import({ documents: [JSON.stringify([item])] });
-    importer.import({
-      documents: [JSON.stringify([{
-        ...item,
-        requiresAttunement: false,
-      }])],
+    const plan = importer.import({
+      documents: [JSON.stringify([{ ...item, requiresAttunement: false }])],
     });
+    assertContentImportPlan(
+      plan,
+      'Expected the asserted item change to require content review.',
+    );
+    expect(plan.reviews).toEqual([
+      expect.objectContaining({ kind: 'item', matchClass: 'key-collision' }),
+    ]);
 
     expect(db.allRaw(
       `SELECT name, requires_attunement
        FROM item_definitions ORDER BY requires_attunement`,
-    )).toEqual([
-      { name: 'Giant Belt', requires_attunement: 0 },
-      { name: 'Giant Belt', requires_attunement: 1 },
-    ]);
+    )).toEqual([{ name: 'Giant Belt', requires_attunement: 1 }]);
   });
 
   it('equal digest with different canonical bytes throws instead of adopting', async () => {
@@ -149,9 +154,16 @@ describe('equipment catalog import', () => {
        WHERE content_kind = 'item'`,
     );
 
-    expect(() =>
-      importer.import({ documents: [JSON.stringify([records[2]])] }),
-    ).toThrow(ContentIdentityCollision);
+    const refused = importer.import({
+      documents: [JSON.stringify([records[2]])],
+    });
+    assertContentImportPlan(
+      refused,
+      'Expected the colliding item import to return a plan.',
+    );
+    expect(refused.outcomes).toEqual([
+      expect.objectContaining({ kind: 'refused', reason: 'identity_collision' }),
+    ]);
   });
 
   it.each([
