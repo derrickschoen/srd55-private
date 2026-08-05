@@ -5,6 +5,7 @@
  * Commons Attribution 4.0 International License, available at
  * https://creativecommons.org/licenses/by/4.0/legalcode.
  */
+import { normalizeCatalogKeyComponent } from '../catalog/catalog-key';
 import type { DatabaseContext } from '../db/database';
 import { GrantRule, type GrantRuleObject } from '../grants/grant-rule';
 import {
@@ -58,15 +59,8 @@ const SRD_SUBCLASS_SPELLCASTING_ABILITIES: Readonly<
   Wizard: 'intelligence',
 });
 
-function slug(value: string): string {
-  return value
-    .toLowerCase()
-    .replaceAll(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '');
-}
-
 function subclassContentKey(name: string): string {
-  return `${BUNDLED_RULES_EDITION}:subclass:${slug(name)}`;
+  return `${BUNDLED_RULES_EDITION}:subclass:${normalizeCatalogKeyComponent(name)}`;
 }
 
 function normalizedRuleObjects(
