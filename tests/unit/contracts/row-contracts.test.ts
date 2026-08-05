@@ -43,6 +43,7 @@ function characterRow(): Record<string, unknown> {
     appearance: null,
     backstory: null,
     notes: null,
+    archived_at: null,
     created_at: null,
     updated_at: null,
   };

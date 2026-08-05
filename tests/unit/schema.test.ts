@@ -166,7 +166,7 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
       'name', 'ability_allocation_method', 'rules_edition_preference',
       'alignment', 'appearance', 'backstory', 'notes',
     ],
-    numeric: ['created_at', 'updated_at'],
+    numeric: ['archived_at', 'created_at', 'updated_at'],
   },
   class_definitions: {
     integer: ['id', 'supports_ritual_casting'],
@@ -998,6 +998,7 @@ const expectedNamedIndexes: Record<string, string> = {
   character_operations_operation_uuid_unique:
     'character_operations:operation_uuid:unique',
   character_weapons_character_id_index: 'character_weapons:character_id',
+  characters_archive_list_index: 'characters:archived_at,name,id',
   class_weapon_mastery_counts_class_definition_id_class_level_unique:
     'class_weapon_mastery_counts:class_definition_id,class_level:unique',
   class_weapon_mastery_grants_class_definition_id_unique:
