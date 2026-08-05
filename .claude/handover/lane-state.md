@@ -23,7 +23,79 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-04-b (newest - read first)
+## RESTART POINT 2026-08-05-a (newest - read first)
+MAIN b66ead2 (mirror pushed). FLOORS: vitest 227/3,794; PW 125; build 0;
+migrations 0000-0032 FROZEN (0032 = character archive, first
+sequence-preserving rebuild); backup v4; wire v1-v17. SIXTEEN merges.
+Rulings through D203.
+
+MERGED THIS WINDOW: AR-A (b66ead2, 16th) - archived_at, migration 0032,
+backup v4, sqlite_sequence preserved across the rebuild; post-merge
+vitest 3794/3794.
+
+OWNER RULINGS BATCH (all 2026-08-04/05, recorded):
+ - D197 registry orphaned/refused counts -> console/log only.
+ - D198 derived-key installer superseded: keys are asserted name-derived
+   slugs; installer = registry key-first install seam (design doc carries
+   a supersession banner).
+ - D199 legacy command-history compat WIPED (zero-users window used).
+ - D200 suite-speed infra unit AUTHORIZED (split php-feature-parity,
+   config edits allowed for that unit only; queue after this wave).
+ - D201 PHP parity = reference-only; divergence by adjudication.
+ - D202 rogue ships as BUNDLED "Veteran" (owner-authored kit in wt/party
+   docs/homebrew + rulings.md; supersedes Executioner arc). VET-SEED unit
+   after SC-3 merges.
+ - D203 CI-4a mint 0033 authorized: key_kind 'asserted', CHECK + 0020
+   trigger-guard updates, schema.sql lockstep, no rekey/backfill.
+
+IN FLIGHT AT WRITE TIME:
+ - SC-3 (wt/hyg2): fix rounds 1-4 committed; review rounds exhausted
+   (round 2 closing found 1 MED, adjudicated: brand landed in round 3,
+   audit half -> follow-up SUBCLASS-EMPTY-PROSE-AUDIT). Fix round 4
+   registered the twelve subclasses in the CI-3s registry (invariant beat
+   the SC-5 deferral), extended the wizard pin (14 ordered options),
+   fixed anchors. FULL CHAIN RUNNING (port 4191). Merge on green.
+ - FF-B (wt/print): rounds - review 1/2/3 (cap), fixes 1-4 all
+   UNCOMMITTED in the worktree. Round 3 found 2 HIGH (restore_snapshot
+   side door -> replaced by restore-by-ID; stack-top authorization ->
+   resulting_revision rule, wrong-oracle test flipped) + 3 MED (envelope
+   parity oracle updated per D201; planner reload reconstruction; execute
+   applied-state) + LOW/doc. Round 4 implemented the D199 wipe (typed
+   legacy_operation refusal). NEXT: supervisor verification probes +
+   commit + full chain + merge. Review rounds are at cap - gates carry
+   the weight.
+ - CI-4a (wt/ci4a, NEW worktree): rounds 1-2 correctly BLOCKED (design
+   contradiction -> D198; missing key classification -> D203). Round 3
+   RUNNING with mint 0033 authorized, 0032 present in lane.
+
+QUEUE AFTER THESE: CI-4b, HA-2, CI-5, suite-infra unit (D200), VET-SEED
+(D202), plus recorded follow-ups (seeder same-cardinality after CI-4a
+per owner; reconcile steady-state cost; SUBCLASS-EMPTY-PROSE-AUDIT;
+dead enum available_on_long_rest).
+
+HOMEBREW: moved to docs/homebrew/ in wt/party (67ee0df) with README,
+lessons.md, pending-rulings.md. The owner runs a SEPARATE subclass
+session in wt/party: it records rulings in docs/homebrew/rulings.md
+(NOT decisions.md); supervision folds them into decisions.md at that
+lane's merge. Already recorded there: Veteran kit, four monk names
+approved, monk seed-scope deferred. Do not touch docs/homebrew from
+supervision.
+
+SUPERVISOR ERRORS THIS WINDOW, disclosed in full in the transcript:
+ 1. REPEATED recorded error #1: FF-B fix-2 brief allowed targeted vitest;
+    the AR-A full suite started AFTER dispatch -> contention artifact +
+    25-min re-run. Guards must bind at RUN time: every brief now carries
+    a ps-poll before every test command (or a total test ban).
+ 2. Chain script piped vitest through `tail -40`: failure list truncated
+    to 1 of 6 names, and VITEST_EXIT captured tail's status. Chains now
+    write raw logs + real exit codes.
+ 3. Emitted a literal NUL byte into a dispatch brief while describing NUL
+    rejection; caught by own pre-dispatch scan.
+Codex ran `claude -p` inside two dispatches (its global config says to);
+both hung/added nothing and burn Claude credits - briefs now forbid
+second-agent CLIs; consider a COMMON.md line (owner asked, unanswered).
+
+## RESTART POINT 2026-08-04-b (superseded by 08-05-a)
 MAIN ed67889 (mirror pushed). FLOORS: vitest 227/3,783; PW 125 (22 spec
 files); build 0; migrations 0000-0031 FROZEN; wire v1-v17. FIFTEEN merges.
 Rulings through D196.
