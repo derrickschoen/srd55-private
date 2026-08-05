@@ -5,6 +5,15 @@ supervision loop folds these into `.claude/decisions.md` at merge; this file
 is the only decisions-writer inside a subclass session (one writer per
 append-only file).
 
+## 2026-08-04 — Veteran: Master of Experience uses the BROAD reading (all 18 skills)
+
+Asked: whether Master of Experience (17) grants Expertise only in already-
+proficient skills (~9 natively) or implies proficiency in every skill first.
+Owner's answer: "Broad: all 18 skills" — the feature grants proficiency in
+every skill first, then Expertise in all, matching the superseded D196
+Skill Mastery intent. Applied to the doc as a one-sentence proficiency
+grant preceding the owner's verbatim Expertise sentence.
+
 ## 2026-08-04 — VETERAN: owner-authored full kit replaces the Executioner draft
 
 Interrupting the session's follow-up questions, the owner supplied the

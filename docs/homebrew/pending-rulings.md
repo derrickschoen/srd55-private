@@ -14,11 +14,10 @@ exist and their license (D190/D191/D193); all four monk working names
 
 ## rogue-veteran-subclass.md — Veteran (owner-authored kit)
 
-- **Master of Experience (17) proficiency reading**: SRD Expertise attaches
-  to proficient skills; the Veteran reaches ~9 proficiencies natively.
-  Strict reading = Expertise in ~9 skills; broad reading = proficiency in
-  every skill first (D196's superseded Skill Mastery suggests this intent).
-  Owner clarification requested (doc wording note 1).
+- Master of Experience (17) proficiency reading: **resolved** — broad
+  reading (all 18 skills), owner ruling 2026-08-04 in `rulings.md`. No open
+  ruling items remain on this doc; playtests and the benchmark build card
+  are test debt, not rulings.
 
 ## Cross-cutting question (from D191, carried by the bake-off doc)
 
