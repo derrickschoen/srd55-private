@@ -64,3 +64,10 @@ it never means do not add the next one.
 This rule exists because a supervisor addendum once pasted the mint-free freeze
 list onto a mint lane's brief and made the unit infeasible by construction.
 Codex correctly stopped and said so rather than guessing.
+
+## Second-agent CLIs are forbidden in dispatches (D207, 2026-08-05)
+
+A codex dispatch never invokes another agent CLI (claude or otherwise) for critique,
+review, or anything else. Internal self-review is welcome but carries no gate weight;
+the supervisor runs all reviews. This line is standing; briefs need not repeat it but
+may.

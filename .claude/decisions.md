@@ -7,6 +7,42 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D207 — OWNER: three standing orders (2026-08-05)
+
+All three made permanent: (1) COMMON.md forbids codex dispatches from
+invoking any second-agent CLI (claude or otherwise); internal
+self-review is fine but carries no gate weight. (2) Dead-code deletion
+license: any lane may delete dead members it finds in files it already
+touches, reported and supervisor-verified (first target:
+available_on_long_rest). (3) Merged idle worktrees are pruned and
+recreated on demand. wt/party is the owner's subclass-session lane and
+is never pruned by supervision.
+
+## D206 — OWNER: homebrew rulings fold as POINTER ONLY (2026-08-05)
+
+docs/homebrew/rulings.md is the authoritative record of subclass-session
+rulings. decisions.md carries this single pointer entry rather than
+per-ruling D-numbers. Rulings recorded there to date include the Veteran
+kit supersession of the Executioner arc, four monk working names, the
+monk seed-scope deferral, and Master of Experience = broad reading (all
+18 skills).
+
+## D205 — OWNER: CI-4b becomes WIPE AND RESEED (2026-08-05)
+
+Owner's words: "Wipe old stuff and reseed in all cases. No users yet."
+No rekeying migration, no old-key aliases, no backfill of legacy rows:
+content that predates the asserted/bundled key scheme is wiped and
+reseeded under the current scheme. D60 makes this legal exactly now;
+the legacy-opaque closed set empties by deletion rather than surviving
+as a fossil. The CI-4b brief is authored to this scope (mint only if
+the wipe itself genuinely needs a migration; 0034 next free).
+
+## D204 — OWNER: wt/party merges BEFORE VET-SEED (2026-08-05)
+
+The homebrew docs and rulings merge to main first; the VET-SEED unit
+builds the rogue Veteran as bundled content from the MERGED state, not
+from a worktree paraphrase.
+
 ## D203 — CI-4a mint 0033 AUTHORIZED: 'asserted' key classification (2026-08-04)
 
 CI-4a round 2 correctly stopped: D198's asserted slug keys have no legal
