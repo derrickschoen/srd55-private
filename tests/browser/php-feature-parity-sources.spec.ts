@@ -10,8 +10,10 @@ import {
   install,
   operation,
   rejectedRpc,
+  restoreSavePoint,
   rows,
   rpc,
+  undo,
 } from './fixtures/php-feature-parity-helpers';
 
 let workspaceImage: FixtureImage<WorkspaceFixtureIds>;
@@ -152,12 +154,11 @@ test('round-trips source configuration with one audit group and rejects unsuppor
       workspaceImage.ids.character,
     ),
   ).toHaveLength(1);
-  await execute(
+  await undo(
     page,
     workspaceImage.ids.character,
     1,
-    changed.inverse,
-    171,
+    changed.operation_uuid,
   );
   expect({
     sources: forCharacter(
@@ -247,6 +248,14 @@ test('adds a class source with planned slots and addressed spellbook acquisition
   const character = await rpc<any>(page, 'queries.characters.create', {
     name: 'Class Source Command',
   });
+  await rpc<unknown>(page, 'queries.savePoints.create', {
+    character_id: character.id,
+    label: 'Before class-source experiment',
+  });
+  const cleanSlate = forCharacter(
+    await rows(page, 'character_save_points'),
+    character.id,
+  )[0]!;
   const added = await execute(
     page,
     character.id,
@@ -427,7 +436,18 @@ test('adds a class source with planned slots and addressed spellbook acquisition
         .map((row) => row.action_type),
     ),
   ).toEqual(new Set(['add_source']));
-  await execute(page, character.id, 2, added.inverse, 192);
+  expect(await undo(page, character.id, 2, added.operation_uuid)).toEqual({
+    status: 'refused',
+    reason: 'operation_not_latest',
+    current_revision: 2,
+  });
+  const restored = await restoreSavePoint(
+    page,
+    character.id,
+    cleanSlate.id,
+    2,
+  );
+  expect(restored).toMatchObject({ status: 'applied', revision: 3 });
   expect(
     forCharacter(await rows(page, 'character_class_levels'), character.id),
   ).toEqual([]);
@@ -606,12 +626,11 @@ test('removes a root source through the command and cascades to its nested feat'
         .filter((row) => row.source_instance_id === childId)
         .map((row) => row.state),
     ).toEqual(['orphaned', 'orphaned', 'orphaned']);
-    await execute(
+    await undo(
       page,
       workspaceImage.ids.character,
       expectedRevision + 1,
-      removed.inverse,
-      210 + index,
+      removed.operation_uuid,
     );
     expect(
       (await rows(page, 'character_source_instances')).filter((row) =>
@@ -659,7 +678,11 @@ test('round-trips warning acknowledgement with idempotent replay and grouped aud
     },
     22,
   );
-  expect(changed.inverse).toEqual({
+  expect(JSON.parse(String(
+    (await rows(page, 'character_operations')).find(
+      (row) => row.operation_uuid === changed.operation_uuid,
+    )?.inverse_command,
+  ))).toEqual({
     type: 'acknowledge_warning',
     mode: 'delete',
     warning_fingerprint: warning.warning_fingerprint,
@@ -703,17 +726,29 @@ test('round-trips warning acknowledgement with idempotent replay and grouped aud
     action_type: 'acknowledge_warning',
     reversible: 1,
   });
-  const deleted = await execute(
+  const deleted = await undo(
     page,
     workspaceImage.ids.character,
     2,
-    changed.inverse,
-    220,
+    changed.operation_uuid,
   );
-  expect(deleted.inverse).toEqual({
-    type: 'acknowledge_warning',
-    warning_fingerprint: warning.warning_fingerprint,
-    note: 'Intentional.',
+  expect(deleted.status).toBe('applied');
+  if (deleted.status !== 'applied') {
+    throw new Error(`Undo refused: ${deleted.reason}`);
+  }
+  expect(JSON.parse(String(
+    (await rows(page, 'character_operations')).find(
+      (row) => row.operation_uuid === deleted.operation_uuid,
+    )?.inverse_command,
+  ))).toEqual({
+    type: 'internal_operation_undo',
+    action: 'undo',
+    target_operation_uuid: operation(22),
+    command: {
+      type: 'acknowledge_warning',
+      warning_fingerprint: warning.warning_fingerprint,
+      note: 'Intentional.',
+    },
   });
   expect(
     forCharacter(
@@ -721,12 +756,11 @@ test('round-trips warning acknowledgement with idempotent replay and grouped aud
       workspaceImage.ids.character,
     ),
   ).toEqual([]);
-  await execute(
+  await undo(
     page,
     workspaceImage.ids.character,
     3,
-    deleted.inverse,
-    221,
+    deleted.operation_uuid,
   );
   expect(
     forCharacter(
@@ -810,4 +844,3 @@ test('merges a stale slot edit only when intervening operations left that slot u
     ),
   ).toHaveLength(2);
 });
-

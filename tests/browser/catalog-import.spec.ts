@@ -221,6 +221,28 @@ test('a subclass import lands, survives a reload, and outlives a spell replaceme
         content_key: '2024:browser.homebrew:choir-of-the-iron-hymn',
       }),
     );
+  const importedFeatures = async () => {
+    const [definition] = await stored();
+    return page.evaluate(
+      (subclassDefinitionId) =>
+        window.staticApp.inspectRows('subclass_features', {
+          subclass_definition_id: subclassDefinitionId,
+        }),
+      Number(definition?.id),
+    );
+  };
+  const seededFeatureCount = async () => {
+    const [definition] = await stored();
+    const importedId = Number(definition?.id);
+    return page.evaluate(
+      async (subclassDefinitionId) =>
+        (await window.staticApp.inspectRows('subclass_features')).filter(
+          (row) =>
+            Number(row.subclass_definition_id) !== subclassDefinitionId,
+        ).length,
+      importedId,
+    );
+  };
   expect(await stored()).toEqual([
     expect.objectContaining({
       content_key: '2024:browser.homebrew:choir-of-the-iron-hymn',
@@ -232,13 +254,15 @@ test('a subclass import lands, survives a reload, and outlives a spell replaceme
   await page.reload();
   await ready(page);
   expect(await stored()).toHaveLength(1);
-  // The seeder runs at every boot and upserts its own two subclasses. An
+  // The seeder runs at every boot and repairs its own fourteen subclasses. An
   // imported row parked beside them must be neither overwritten nor swept.
   expect(
     await page.evaluate(() =>
       window.staticApp.inspectRows('subclass_definitions'),
     ),
-  ).toHaveLength(3);
+  ).toHaveLength(15);
+  expect(await importedFeatures()).toHaveLength(2);
+  expect(await seededFeatureCount()).toBe(58);
 
   // A spell import is a FULL REPLACEMENT of the spell catalog. It must not
   // reach the subclass — this is the silent-data-loss case.
@@ -248,9 +272,8 @@ test('a subclass import lands, survives a reload, and outlives a spell replaceme
     JSON.stringify([record()]),
   );
   expect(await stored()).toHaveLength(1);
-  expect(
-    await page.evaluate(() => window.staticApp.inspectRows('subclass_features')),
-  ).toHaveLength(2);
+  expect(await importedFeatures()).toHaveLength(2);
+  expect(await seededFeatureCount()).toBe(58);
 
   // And the reverse: emptying the spell catalog leaves the subclass alone too.
   await page.evaluate(() =>
@@ -259,6 +282,8 @@ test('a subclass import lands, survives a reload, and outlives a spell replaceme
   await page.reload();
   await ready(page);
   expect(await stored()).toHaveLength(1);
+  expect(await importedFeatures()).toHaveLength(2);
+  expect(await seededFeatureCount()).toBe(58);
   expect(
     await page.evaluate(() =>
       window.staticApp.inspectRows('spell_versions', { is_active: 0 }),

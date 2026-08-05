@@ -13,8 +13,10 @@ import {
   operation,
   ready,
   rejectedRpc,
+  restoreSavePoint,
   rows,
   rpc,
+  undo,
 } from './fixtures/php-feature-parity-helpers';
 
 let workspaceImage: FixtureImage<WorkspaceFixtureIds>;
@@ -123,7 +125,12 @@ test('undo restores the prior spell selection', async ({ page }) => {
     },
     8,
   );
-  expect(changed.inverse).toEqual({
+  const storedInverse = JSON.parse(String(
+    (await rows(page, 'character_operations')).find(
+      (row) => row.operation_uuid === changed.operation_uuid,
+    )?.inverse_command,
+  ));
+  expect(storedInverse).toEqual({
     type: 'set_slot',
     slot_id: workspaceImage.ids.targetSlot,
     mode: 'restore',
@@ -138,12 +145,11 @@ test('undo restores the prior spell selection', async ({ page }) => {
     },
     integrity: expect.any(String),
   });
-  await execute(
+  await undo(
     page,
     workspaceImage.ids.character,
     1,
-    changed.inverse,
-    80,
+    changed.operation_uuid,
   );
   expect(
     (await rows(page, 'spell_selection_slots')).find(
@@ -308,21 +314,13 @@ test('round-trips a named save point through the mutation path', async ({
     },
     10,
   );
-  const restore = await rpc<Record<string, unknown>>(
-    page,
-    'queries.savePoints.restoreCommand',
-    {
-      character_id: workspaceImage.ids.character,
-      save_point_id: point.id,
-    },
-  );
-  await execute(
+  const restored = await restoreSavePoint(
     page,
     workspaceImage.ids.character,
+    point.id,
     1,
-    restore,
-    100,
   );
+  expect(restored).toMatchObject({ status: 'applied', revision: 2 });
   expect(
     (await rows(page, 'characters')).find(
       (row) => row.id === workspaceImage.ids.character,
@@ -422,11 +420,7 @@ test('returns the exact mutation envelope, inverse, operation, and reversible au
     12,
   );
   expect(result).toEqual({
-    inverse: {
-      type: 'update_ability',
-      ability: 'wisdom',
-      score: 14,
-    },
+    operation_uuid: operation(12),
     revision: 1,
     idempotent_replay: false,
   });
@@ -438,7 +432,11 @@ test('returns the exact mutation envelope, inverse, operation, and reversible au
     character_id: workspaceImage.ids.character,
     expected_revision: 0,
     resulting_revision: 1,
-    inverse_command: JSON.stringify(result.inverse),
+    inverse_command: JSON.stringify({
+      type: 'update_ability',
+      ability: 'wisdom',
+      score: 14,
+    }),
   });
   expect(
     (await rows(page, 'change_log')).find(
@@ -559,18 +557,21 @@ test('undoes a structural class change through its snapshot inverse', async ({
     },
     14,
   );
-  expect(changed.inverse).toMatchObject({
-    type: 'restore_snapshot',
-    snapshot: { schema_version: 'a7-v16' },
-    integrity: expect.any(String),
+  const storedClassInverse = JSON.parse(String(
+    (await rows(page, 'character_operations')).find(
+      (row) => row.operation_uuid === changed.operation_uuid,
+    )?.inverse_command,
+  )) as { type: string; snapshot: { schema_version: string } };
+  expect(storedClassInverse).toEqual({
+    type: 'internal_snapshot_restore',
+    snapshot: expect.objectContaining({ schema_version: 'a7-v16' }),
   });
-  expect(changed.inverse.snapshot.schema_version).not.toBe('a7-v15');
-  await execute(
+  expect(storedClassInverse.snapshot.schema_version).not.toBe('a7-v15');
+  await undo(
     page,
     workspaceImage.ids.character,
     1,
-    changed.inverse,
-    140,
+    changed.operation_uuid,
   );
   expect({
     levels: forCharacter(
@@ -675,12 +676,11 @@ test('round-trips character rules and rejects legacy selection while legacy rule
   expect(rulesAudit.map((row) => row.action_type)).toEqual([
     'update_character_rules',
   ]);
-  await execute(
+  await undo(
     page,
     workspaceImage.ids.character,
     1,
-    enabled.inverse,
-    160,
+    enabled.operation_uuid,
   );
   const rejected = await rejectedRpc(page, 'commands.execute', {
     character_id: workspaceImage.ids.character,
@@ -720,4 +720,3 @@ test('round-trips character rules and rejects legacy selection while legacy rule
     ),
   ).toEqual([]);
 });
-

@@ -147,6 +147,7 @@ test('builds the complete workspace editing contract for the seeded character', 
     'classes',
     'available_classes',
     'allow_legacy',
+    'flavor',
     'configurable_sources',
     'order_sources',
     'source_catalog',
@@ -160,6 +161,12 @@ test('builds the complete workspace editing contract for the seeded character', 
   ]);
   expect(workspace.revision).toBe(0);
   expect(workspace.allow_legacy).toBe(false);
+  expect(workspace.flavor).toEqual({
+    alignment: null,
+    appearance: null,
+    backstory: null,
+    notes: null,
+  });
   expect(workspace.spell_lists).toEqual(['Cleric', 'Druid', 'Wizard']);
   expect(workspace.save_points).toEqual([]);
   expect(workspace.items).toEqual({

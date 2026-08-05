@@ -4,10 +4,20 @@ import { expect } from './parallel-test';
 
 export type Row = Record<string, any>;
 type CommandResult = {
-  inverse: Record<string, any>;
+  operation_uuid: string;
   revision: number;
   idempotent_replay: boolean;
 };
+
+type UndoResult =
+  | (CommandResult & { status: 'applied' })
+  | {
+      status: 'refused';
+      reason: string;
+      current_revision: number | null;
+    };
+
+type SavePointRestoreResult = UndoResult;
 
 export async function ready(page: Page): Promise<void> {
   // The four-worker pool measured the slowest parity caller at 39.4s; 100s
@@ -96,6 +106,32 @@ export async function execute(
     operation_uuid: operation(index),
     expected_revision: expectedRevision,
     command,
+  });
+}
+
+export async function undo(
+  page: Page,
+  characterId: number,
+  expectedRevision: number,
+  operationUuid: string,
+): Promise<UndoResult> {
+  return rpc<UndoResult>(page, 'commands.undo', {
+    character_id: characterId,
+    operation_uuid: operationUuid,
+    expected_revision: expectedRevision,
+  });
+}
+
+export async function restoreSavePoint(
+  page: Page,
+  characterId: number,
+  savePointId: number,
+  expectedRevision: number,
+): Promise<SavePointRestoreResult> {
+  return rpc<SavePointRestoreResult>(page, 'commands.restoreSavePoint', {
+    character_id: characterId,
+    save_point_id: savePointId,
+    expected_revision: expectedRevision,
   });
 }
 

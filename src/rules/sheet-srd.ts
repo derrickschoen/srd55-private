@@ -648,8 +648,8 @@ function sameClassFeatureEffect(
  * bundleable, and these two rows are the only Extra Attack content in this
  * repository that the old `(class, level)` model could not hold. They are the
  * proof the D19 model works on SHIPPABLE content rather than only on a fixture:
- * the owner's subclass example is not free-licensed (D3, D19 §1) and no
- * subclass feature is seeded anywhere.
+ * the owner's subclass example is not free-licensed (D3, D19 §1), and the SRD
+ * subclass seed contains heading-only rows with no mechanical effects.
  *
  * DELETE-THEN-INSERT, BUT ONLY OVER THE CONTENT KEYS THIS SEEDER OWNS. The
  * class-content seeder above clears six tables per class with

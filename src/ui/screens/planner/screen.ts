@@ -12,7 +12,9 @@ import type {
 } from '../../../domain/read-models';
 import type {
   CharacterCommandPreviewWarning,
-  CharacterCommandResult,
+  CharacterCommandRpcResult,
+  RestoreCharacterSavePointResult,
+  UndoCharacterOperationResult,
 } from '../../../commands/character-command-executor';
 import { createCommandsClient } from '../../../commands/client';
 import type {
@@ -32,6 +34,7 @@ import { renderAgentReference } from './agent-reference-panel';
 import { renderCompleteness } from './completeness';
 import { renderDiceHelper } from './dice';
 import {
+  renderCharacterDetails,
   renderEditors,
   type PlannerEditorActions,
 } from './editors';
@@ -68,7 +71,17 @@ export interface PlannerCommandClient {
     expectedRevision: number,
     command: CharacterCommandPayload,
     operationUuid?: string,
-  ): Promise<CharacterCommandResult>;
+  ): Promise<CharacterCommandRpcResult>;
+  undo(
+    characterId: number,
+    expectedRevision: number,
+    operationUuid: string,
+  ): Promise<UndoCharacterOperationResult>;
+  restoreSavePoint(
+    characterId: number,
+    savePointId: number,
+    expectedRevision: number,
+  ): Promise<RestoreCharacterSavePointResult>;
 }
 
 export interface PlannerQueryClient
@@ -78,7 +91,6 @@ export interface PlannerQueryClient
     | 'completeness'
     | 'eligibleSpells'
     | 'createSavePoint'
-    | 'savePointRestoreCommand'
     | 'operationHistory'
   > {}
 
@@ -88,11 +100,12 @@ export class PlannerSession {
   history: OperationHistory | null = null;
   saving = false;
   error: string | null = null;
+  committedRefreshFailure = false;
   stale = false;
   previewWarnings: readonly CharacterCommandPreviewWarning[] = [];
   attunementReplacement: AttunementReplacement | null = null;
-  readonly #undo: CharacterCommandPayload[] = [];
-  readonly #redo: CharacterCommandPayload[] = [];
+  readonly #undo: string[] = [];
+  readonly #redo: string[] = [];
 
   constructor(
     readonly characterId: number,
@@ -109,27 +122,35 @@ export class PlannerSession {
   }
 
   async load(): Promise<void> {
-    await this.#refresh();
+    await this.#refresh(true);
   }
 
   async execute(command: CharacterCommandPayload): Promise<boolean> {
     if (this.saving || this.workspace === null) return false;
     this.saving = true;
     this.error = null;
+    this.committedRefreshFailure = false;
     this.previewWarnings = [];
+    let applied = false;
     try {
       const result = await this.commands.execute(
         this.characterId,
         this.workspace.revision,
         command,
       );
-      this.#undo.push(result.inverse);
+      applied = true;
+      this.#undo.length = 0;
+      this.#undo.push(result.operation_uuid);
       this.#redo.length = 0;
       this.previewWarnings = result.preview_warnings ?? [];
       this.attunementReplacement = null;
       await this.#refresh();
       return true;
     } catch (error) {
+      if (applied) {
+        this.#recordCommittedRefreshFailure();
+        return false;
+      }
       const replacement = attunementReplacement(error, command);
       if (replacement !== null) {
         this.attunementReplacement = replacement;
@@ -148,24 +169,40 @@ export class PlannerSession {
 
   async undo(): Promise<boolean> {
     if (!this.canUndo || this.workspace === null) return false;
-    const command = this.#undo.pop();
-    if (command === undefined) return false;
+    const operationUuid = this.#undo.pop();
+    if (operationUuid === undefined) return false;
     this.saving = true;
     this.error = null;
+    this.committedRefreshFailure = false;
     this.previewWarnings = [];
+    let applied = false;
     try {
-      const result = await this.commands.execute(
+      const result = await this.commands.undo(
         this.characterId,
         this.workspace.revision,
-        command,
+        operationUuid,
       );
-      this.#redo.push(result.inverse);
+      if (result.status === 'refused') {
+        if (result.reason === 'revision_mismatch') {
+          this.#undo.push(operationUuid);
+        }
+        this.#recordUndoRefusal(result, 'Undo failed.');
+        return false;
+      }
+      applied = true;
+      this.#undo.length = 0;
+      this.#redo.length = 0;
+      this.#redo.push(result.operation_uuid);
       this.previewWarnings = result.preview_warnings ?? [];
       await this.#refresh();
       return true;
     } catch (error) {
-      this.#undo.push(command);
-      this.#recordError(error, 'Undo failed.');
+      if (applied) {
+        this.#recordCommittedRefreshFailure();
+      } else {
+        this.#undo.push(operationUuid);
+        this.#recordError(error, 'Undo failed.');
+      }
       return false;
     } finally {
       this.saving = false;
@@ -174,24 +211,40 @@ export class PlannerSession {
 
   async redo(): Promise<boolean> {
     if (!this.canRedo || this.workspace === null) return false;
-    const command = this.#redo.pop();
-    if (command === undefined) return false;
+    const operationUuid = this.#redo.pop();
+    if (operationUuid === undefined) return false;
     this.saving = true;
     this.error = null;
+    this.committedRefreshFailure = false;
     this.previewWarnings = [];
+    let applied = false;
     try {
-      const result = await this.commands.execute(
+      const result = await this.commands.undo(
         this.characterId,
         this.workspace.revision,
-        command,
+        operationUuid,
       );
-      this.#undo.push(result.inverse);
+      if (result.status === 'refused') {
+        if (result.reason === 'revision_mismatch') {
+          this.#redo.push(operationUuid);
+        }
+        this.#recordUndoRefusal(result, 'Redo failed.');
+        return false;
+      }
+      applied = true;
+      this.#undo.length = 0;
+      this.#redo.length = 0;
+      this.#undo.push(result.operation_uuid);
       this.previewWarnings = result.preview_warnings ?? [];
       await this.#refresh();
       return true;
     } catch (error) {
-      this.#redo.push(command);
-      this.#recordError(error, 'Redo failed.');
+      if (applied) {
+        this.#recordCommittedRefreshFailure();
+      } else {
+        this.#redo.push(operationUuid);
+        this.#recordError(error, 'Redo failed.');
+      }
       return false;
     } finally {
       this.saving = false;
@@ -202,6 +255,7 @@ export class PlannerSession {
     if (this.saving) return false;
     this.saving = true;
     this.error = null;
+    this.committedRefreshFailure = false;
     try {
       this.workspace = await this.queries.createSavePoint(
         this.characterId,
@@ -223,22 +277,41 @@ export class PlannerSession {
   }
 
   async restoreSavePoint(id: number): Promise<boolean> {
+    if (this.saving || this.workspace === null) return false;
+    this.saving = true;
+    this.error = null;
+    this.committedRefreshFailure = false;
+    this.previewWarnings = [];
+    let applied = false;
     try {
-      const command = await this.queries.savePointRestoreCommand(
+      const result = await this.commands.restoreSavePoint(
         this.characterId,
         id,
+        this.workspace.revision,
       );
-      return await this.execute(command);
+      if (result.status === 'refused') {
+        this.#recordSavePointRefusal(result);
+        return false;
+      }
+      applied = true;
+      this.#undo.length = 0;
+      this.#undo.push(result.operation_uuid);
+      this.#redo.length = 0;
+      await this.#refresh();
+      return true;
     } catch (error) {
-      this.error =
-        error instanceof Error
-          ? error.message
-          : 'Save point restore failed.';
+      if (applied) {
+        this.#recordCommittedRefreshFailure();
+      } else {
+        this.#recordError(error, 'Save point restore failed.');
+      }
       return false;
+    } finally {
+      this.saving = false;
     }
   }
 
-  async #refresh(): Promise<void> {
+  async #refresh(restoreHistoryCursor = false): Promise<void> {
     const [workspace, history, completeness] = await Promise.all([
       this.queries.workspace(this.characterId),
       this.queries.operationHistory(this.characterId),
@@ -252,6 +325,26 @@ export class PlannerSession {
     this.workspace = workspace;
     this.history = history;
     this.completeness = completeness;
+    if (restoreHistoryCursor) this.#restoreHistoryCursor(history);
+  }
+
+  #restoreHistoryCursor(history: OperationHistory): void {
+    this.#undo.length = 0;
+    this.#redo.length = 0;
+    const latest = history.operations[0];
+    if (latest === undefined) return;
+    if (latest.history_action === 'undo') {
+      this.#redo.push(latest.operation_uuid);
+    } else {
+      this.#undo.push(latest.operation_uuid);
+    }
+  }
+
+  #recordCommittedRefreshFailure(): void {
+    this.stale = true;
+    this.committedRefreshFailure = true;
+    this.error =
+      'The change was saved, but the latest character state could not be loaded.';
   }
 
   #recordError(error: unknown, fallback: string): void {
@@ -266,6 +359,35 @@ export class PlannerSession {
     ) {
       this.stale = true;
     }
+  }
+
+  #recordUndoRefusal(
+    refusal: Extract<UndoCharacterOperationResult, { status: 'refused' }>,
+    fallback: string,
+  ): void {
+    const messages: Readonly<Record<typeof refusal.reason, string>> = {
+      character_not_found: 'The character no longer exists.',
+      operation_not_found: 'That history operation no longer exists.',
+      operation_character_mismatch: 'That history operation belongs to another character.',
+      revision_mismatch: 'The character changed before the history action could run.',
+      operation_not_latest: 'Only the operation that produced the current revision can be undone.',
+      legacy_operation: 'This development-era history operation can no longer be undone.',
+    };
+    this.error = messages[refusal.reason] ?? fallback;
+    if (refusal.reason === 'revision_mismatch') this.stale = true;
+  }
+
+  #recordSavePointRefusal(
+    refusal: Extract<RestoreCharacterSavePointResult, { status: 'refused' }>,
+  ): void {
+    const messages: Readonly<Record<typeof refusal.reason, string>> = {
+      character_not_found: 'The character no longer exists.',
+      save_point_not_found: 'That save point no longer exists.',
+      save_point_character_mismatch: 'That save point belongs to another character.',
+      revision_mismatch: 'The character changed before the save point could be restored.',
+    };
+    this.error = messages[refusal.reason];
+    if (refusal.reason === 'revision_mismatch') this.stale = true;
   }
 }
 
@@ -435,7 +557,9 @@ function renderPlanner(
     const error = document.createElement('div');
     error.className = 'planner-error';
     error.setAttribute('role', 'alert');
-    error.textContent = `Could not save: ${session.error}`;
+    error.textContent = session.committedRefreshFailure
+      ? session.error
+      : `Could not save: ${session.error}`;
     if (session.stale) {
       const reload = document.createElement('a');
       reload.href = `/characters/${session.characterId}`;
@@ -523,6 +647,13 @@ function renderPlanner(
     ),
   );
   const editorActions: PlannerEditorActions = {
+    updateFlavor: (flavor) =>
+      void mutate(() =>
+        session.execute({
+          type: 'update_character_flavor',
+          ...flavor,
+        }),
+      ),
     updateAbility: (ability: Ability, score: number) =>
       void mutate(() =>
         session.execute({
@@ -618,6 +749,15 @@ function renderPlanner(
           ),
       ),
   };
+  // Keep authored identity text next to the character identity, ahead of the
+  // diagnostic/reference helpers and every rules or equipment editor.
+  primary.prepend(
+    renderCharacterDetails({
+      workspace,
+      actions: editorActions,
+      disabled: session.saving,
+    }),
+  );
   primary.append(
     renderEditors({
       workspace,

@@ -19,7 +19,7 @@ import type {
 } from './weapon-damage';
 import type { WeaponRange } from './weapon-range';
 import type { EquipmentEffectInput } from './equipment-effects';
-import type { CharacterSnapshot, JsonObject } from './models';
+import type { JsonObject } from './models';
 import type { AttunementSlot } from './attunement';
 
 interface CommandBase {
@@ -84,6 +84,30 @@ export interface UpdateCharacterRulesCommand extends CommandBase {
   type: 'update_character_rules';
   allow_legacy: boolean;
 }
+
+export interface CharacterFlavorValues {
+  alignment: string | null;
+  appearance: string | null;
+  backstory: string | null;
+  notes: string | null;
+}
+
+export type CharacterFlavorChanges = {
+  [Field in keyof CharacterFlavorValues]:
+    & Pick<CharacterFlavorValues, Field>
+    & Partial<Omit<CharacterFlavorValues, Field>>;
+}[keyof CharacterFlavorValues];
+
+/**
+ * One atomic authored-text write. The payload names only fields changed at the
+ * UI boundary, so an untouched grandfathered value is neither normalized nor
+ * checked against today's authoring limit. Undo bytes are not part of this
+ * public command: the worker resolves them from persisted operation history.
+ */
+export type UpdateCharacterFlavorCommand = CommandBase &
+  CharacterFlavorChanges & {
+    type: 'update_character_flavor';
+  };
 
 export type UpdateSourceConfigCommand =
   | (CommandBase & {
@@ -457,17 +481,12 @@ export interface FillSkillGrantCommand extends CommandBase {
   skill: Skill | null;
 }
 
-export interface RestoreSnapshotCommand extends CommandBase {
-  type: 'restore_snapshot';
-  snapshot: CharacterSnapshot | JsonObject;
-  integrity: string;
-}
-
 export type CharacterCommandPayload =
   | UpdateAbilityCommand
   | AllocateAbilitiesCommand
   | SetSlotCommand
   | UpdateCharacterRulesCommand
+  | UpdateCharacterFlavorCommand
   | UpdateSourceConfigCommand
   | AddSourceCommand
   | RemoveSourceCommand
@@ -488,14 +507,25 @@ export type CharacterCommandPayload =
   | RestoreAttunementSlotCommand
   | SetArmorCommand
   | SetHitPointRollCommand
-  | FillSkillGrantCommand
-  | RestoreSnapshotCommand;
+  | FillSkillGrantCommand;
 
 export interface CharacterCommandRequest {
   character_id: number;
   operation_uuid: string;
   expected_revision: number;
   command: CharacterCommandPayload;
+}
+
+export interface UndoCharacterOperationRequest {
+  readonly character_id: number;
+  readonly operation_uuid: string;
+  readonly expected_revision: number;
+}
+
+export interface RestoreCharacterSavePointRequest {
+  readonly character_id: number;
+  readonly save_point_id: number;
+  readonly expected_revision: number;
 }
 
 export interface CommandImplementation {

@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import type { CharacterCommandPayload } from '../../../src/domain/command-contracts';
 import type { Workspace } from '../../../src/domain/read-models';
 import { createQueriesClient } from '../../../src/queries/client';
 import {
@@ -163,7 +162,6 @@ describe('typed query RPC integration', () => {
       'queries.characters.levelUpPlannedEligibleSpells',
       'queries.characters.levelUpState',
       'queries.savePoints.create',
-      'queries.savePoints.restoreCommand',
       'queries.characters.sheet',
       'queries.characters.setPrintAppendixPreference',
       'queries.reports.build',
@@ -373,7 +371,7 @@ describe('typed query RPC integration', () => {
     ).toEqual(before);
   });
 
-  it('persists save points and returns a signed restore DTO bound to the character', async () => {
+  it('persists save points without exposing their snapshot bytes through query RPCs', async () => {
     harness = await createRpcHarness(queryHandlers);
     const created = await harness.call<
       { name: string },
@@ -415,21 +413,6 @@ describe('typed query RPC integration', () => {
       throw new Error('Save-point creation unexpectedly failed.');
     }
     const savePointId = workspace.result.save_points[0]!.id;
-    const command = await harness.call<
-      { character_id: number; save_point_id: number },
-      CharacterCommandPayload
-    >('queries.savePoints.restoreCommand', {
-      character_id: characterId,
-      save_point_id: savePointId,
-    });
-    expect(command).toMatchObject({
-      ok: true,
-      result: {
-        type: 'restore_snapshot',
-        integrity: expect.stringMatching(/^[a-f0-9]{64}$/),
-        snapshot: { character: { name: 'RPC Snapshot Hero' } },
-      },
-    });
     expect(
       Number(
         harness.context.db.scalar(

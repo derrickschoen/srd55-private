@@ -2,7 +2,7 @@ import {
   CharacterState,
   type CharacterStateSnapshot,
 } from '../character/character-state';
-import { CharacterCommandIntegrity } from './integrity';
+import type { CharacterCommandIntegrity } from './integrity';
 import {
   sqlInteger,
   sqlNullableInteger,
@@ -12,12 +12,11 @@ import {
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import type {
-  RestoreSnapshotCommand,
   UpdateSourceConfigCommand as UpdateSourceConfigPayload,
 } from '../domain/command-contracts';
-import type { JsonObject } from '../domain/models';
 import { MAGIC_INITIATE_LISTS } from '../domain/background-feat-name';
 import { GrantRuleSlotGenerator } from '../grants/grant-rule-slot-generator';
+import type { StoredCharacterSnapshotInverse } from './stored-inverses';
 
 /**
  * The configurable source instance, decoded once at the read.
@@ -94,7 +93,7 @@ export class UpdateSourceConfigCommand {
   constructor(
     private readonly db: DatabaseContext,
     private readonly payload: UpdateSourceConfigPayload,
-    private readonly integrity: CharacterCommandIntegrity,
+    _integrity: CharacterCommandIntegrity,
     state?: CharacterState,
     generator?: GrantRuleSlotGenerator,
   ) {
@@ -263,16 +262,16 @@ export class UpdateSourceConfigCommand {
     this.#generator.generateForSource(source.id);
   }
 
-  async inverse(): Promise<RestoreSnapshotCommand> {
+  async inverse(): Promise<StoredCharacterSnapshotInverse> {
     if (
       this.#characterId === undefined ||
       this.#previousState === undefined
     ) {
       throw new Error('Cannot create an inverse before applying the command.');
     }
-    return this.integrity.attach(this.#characterId, {
-      type: 'restore_snapshot',
-      snapshot: this.#previousState as unknown as JsonObject,
-    });
+    return {
+      type: 'internal_snapshot_restore',
+      snapshot: this.#previousState,
+    };
   }
 }
