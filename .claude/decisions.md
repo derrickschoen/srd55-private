@@ -7,6 +7,63 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D203 — CI-4a mint 0033 AUTHORIZED: 'asserted' key classification (2026-08-04)
+
+CI-4a round 2 correctly stopped: D198's asserted slug keys have no legal
+registry classification — the schema CHECK permits derived digests,
+legacy-opaque (closed set, pre-existing rows only) and bundled-stable,
+and the 0020 triggers would auto-register new slug roots as
+legacy-opaque. Supervisor authorization: MINT 0033 adding a NEW key_kind
+'asserted' for externally asserted slug keys. Closed sets stay closed:
+'derived' keeps its digest meaning, 'legacy-opaque' stays pre-existing
+rows only, no reinterpretation of stored rows, no rekey/backfill (that
+is CI-4b). CHECK constraint and root-registration guards updated so
+import/fork paths can never mint legacy-opaque. schema.sql moves in
+lockstep. Merge order: AR-A (0032) merges BEFORE CI-4a (0033).
+
+## D202 — OWNER: rogue ships as BUNDLED content named "Veteran" (2026-08-04)
+
+Owner: "Seed as bundled content. I have worked on it in the other
+session and renamed it 'Veteran'." The owner-authored kit lives in
+wt/party docs/homebrew/2026-08-04-rogue-veteran-subclass.md with its
+ruling in docs/homebrew/rulings.md; it SUPERSEDES the Executioner arc
+(D194-D196 record the history). Seeding is a VET-SEED unit queued after
+SC-3 merges (rides the SRD-subclass seeding machinery), as bundled
+content like the twelve SRD subclasses — not through the import path.
+
+## D201 — OWNER: PHP parity is reference-only; divergence by ruling (2026-08-04)
+
+The PHP-parity suite documents the ancestor and keeps running as
+regression cover, but is no longer a binding oracle: deliberate
+divergences are permitted when recorded as adjudications. Ratifies the
+FF-B envelope adjudication (public command responses no longer expose
+inverse bytes; the parity expectation was updated to the new contract).
+
+## D200 — OWNER: suite-speed infra unit AUTHORIZED (2026-08-04)
+
+php-feature-parity.spec.ts (~8 min serial) dominates the ~25-30 min
+Playwright gate. A dedicated supervised unit may split it into
+parallel-safe spec files and make the accompanying config changes. The
+config-edit prohibition is a no-paths-to-green rule; this is a deliberate
+authorized infra unit. Conditions: no assertion changes, strict-superset
+test census before/after (same test titles, supervisor-verified), and
+the unit touches nothing else. Queue: after the current lane wave
+(FF-B/SC-3/AR-A/CI-4a) drains.
+
+## D199 — OWNER: legacy command-history compatibility is WIPED (2026-08-04)
+
+Under D60 (zero users) the owner ruled dev-era operation history
+disposable rather than carrying unauthenticatable grandfathered bytes:
+"Wipe it now." FF-B drops the legacy signed-inverse decoder paths and
+legacy restore_snapshot stored-row acceptance; an operation whose stored
+inverse is a legacy shape gets a typed refusal (not decoded, not
+re-signed, not applied). The unauthenticated-legacy-bytes MED from
+FF-B review 3 closes by deletion. New-write validation (limits, NUL)
+applies everywhere; the grandfathered-bytes carve-outs FF-B rounds 1-3
+built for legacy rows are removed as dead paths. Stored legacy rows may
+remain as inert unreadable history; no migration, no row deletion
+required (mint-free).
+
 ## D198 — content-identity design's derived-key installer superseded by the CI-3s asserted-key reality (2026-08-04)
 
 CI-4a's dispatch BLOCKED on a genuine contradiction codex proved and the
