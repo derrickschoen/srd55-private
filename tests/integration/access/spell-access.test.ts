@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SpellAccessBuilder } from '../../../src/access/spell-access-builder';
 import { DatabaseContext } from '../../../src/db/database';
 import type { SlotBucket } from '../../../src/domain/enums';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import { openTestDatabase } from '../../helpers/open-db';
 
 interface SpellOptions {
@@ -76,6 +77,9 @@ describe('persisted spell access routes', () => {
     name: string,
     options: SpellOptions = {},
   ): number {
+    registerFixtureContentIdentity(db, {
+      kind: 'spell', contentKey: key, name, keyKind: 'bundled-stable',
+    });
     const identityId = db.exec(
       `INSERT INTO spell_identities
          (content_key, canonical_name, normalized_name)
@@ -118,11 +122,15 @@ describe('persisted spell access routes', () => {
     name: string,
     rules: readonly Record<string, unknown>[] = [],
   ): number {
+    const contentKey = `feat:${crypto.randomUUID()}`;
+    registerFixtureContentIdentity(db, {
+      kind: 'feat', contentKey, name, keyKind: 'bundled-stable',
+    });
     return db.exec(
       `INSERT INTO feat_definitions
          (content_key, name, rules_edition, grant_rules)
        VALUES (?, ?, '2024', ?)`,
-      [`feat:${crypto.randomUUID()}`, name, JSON.stringify(rules)],
+      [contentKey, name, JSON.stringify(rules)],
     ).lastInsertId;
   }
 
@@ -131,12 +139,16 @@ describe('persisted spell access routes', () => {
     ability: string | null,
     rules: readonly Record<string, unknown>[] = [],
   ): number {
+    const contentKey = `class:${crypto.randomUUID()}`;
+    registerFixtureContentIdentity(db, {
+      kind: 'class', contentKey, name, keyKind: 'bundled-stable',
+    });
     const classId = db.exec(
       `INSERT INTO class_definitions (
          content_key, name, rules_edition, spellcasting_ability,
          progression_type
        ) VALUES (?, ?, '2024', ?, 'full')`,
-      [`class:${crypto.randomUUID()}`, name, ability],
+      [contentKey, name, ability],
     ).lastInsertId;
     db.exec(
       `INSERT INTO class_progressions
@@ -152,12 +164,16 @@ describe('persisted spell access routes', () => {
     name: string,
     ability: string | null,
   ): number {
+    const contentKey = `subclass:${crypto.randomUUID()}`;
+    registerFixtureContentIdentity(db, {
+      kind: 'subclass', contentKey, name, keyKind: 'bundled-stable',
+    });
     return db.exec(
       `INSERT INTO subclass_definitions (
          content_key, class_definition_id, name, rules_edition,
          spellcasting_ability
        ) VALUES (?, ?, ?, '2024', ?)`,
-      [`subclass:${crypto.randomUUID()}`, classId, name, ability],
+      [contentKey, classId, name, ability],
     ).lastInsertId;
   }
 

@@ -63,6 +63,21 @@ ALTER TABLE "__new_migration_parent" RENAME TO migration_parent;`;
 
 let sqlite3: Sqlite3Static;
 
+function expectTriggerRefusal(action: () => void, message: string): void {
+  try {
+    action();
+  } catch (error) {
+    expect(error).toMatchObject({
+      name: 'SQLite3Error',
+      resultCode: 1811,
+      message:
+        `SQLITE_CONSTRAINT_TRIGGER: sqlite3 result code 1811: ${message}`,
+    });
+    return;
+  }
+  throw new Error('Expected SQLite trigger refusal');
+}
+
 beforeEach(async () => {
   sqlite3 = await getSqlite3();
 });
@@ -381,20 +396,24 @@ describe('database migration chain', () => {
         key_kind: 'legacy-opaque',
         catalog_layer: 'external',
       });
-      expect(() => lifecycle.database.exec(
+      expectTriggerRefusal(() => lifecycle.database.exec(
         `INSERT INTO item_definitions (
            content_key, rules_edition, name, description, requires_attunement
          ) VALUES (
            'expanded:content.item:new-belt', 'expanded', 'New Belt', '', 0
          )`,
-      )).toThrow(/content key must be registered before insert/u);
-      expect(() => lifecycle.database.exec(
+      ),
+        'item content key must be registered before insert',
+      );
+      expectTriggerRefusal(() => lifecycle.database.exec(
         `INSERT INTO item_definitions (
            content_key, rules_edition, name, description, requires_attunement
          ) VALUES (
            'fresh-unrecognized-root', 'expanded', 'Fresh Root', '', 0
          )`,
-      )).toThrow(/content key must be registered before insert/u);
+      ),
+        'item content key must be registered before insert',
+      );
       expect(lifecycle.database.scalar<number>(
         `SELECT count(*) FROM catalog_content_identities
          WHERE content_key = 'fresh-unrecognized-root'

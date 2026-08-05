@@ -34,6 +34,7 @@ import {
   authoredProjectorV1Vectors,
 } from '../../unit/catalog/fixtures/authored-projector-v1-vectors';
 import { openTestDatabase } from '../../helpers/open-db';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 
 const SPELL_KEY = 'expanded:ci3a-spell' as ContentKey;
 const FEAT_KEY = 'expanded:ci3a-feat' as ContentKey;
@@ -719,6 +720,14 @@ describe('stored authored content-v1 projection', () => {
   it('source_definition_id becomes a portable fingerprint and discriminates identity', () => {
     const vector = authoredProjectorV1Vectors[0]!;
     const contentKey = seedVector(vector, 'bundled', 65);
+    registerFixtureContentIdentity(db, {
+      kind: 'feat', contentKey: 'expanded:ci3a-source-feat',
+      name: 'Source Feat', keyKind: 'bundled-stable',
+    });
+    registerFixtureContentIdentity(db, {
+      kind: 'feat', contentKey: 'expanded:ci3a-other-source-feat',
+      name: 'Other Source Feat', keyKind: 'bundled-stable',
+    });
     const featId = db.exec(
       `INSERT INTO feat_definitions (
          content_key, name, rules_edition, grant_rules
@@ -998,6 +1007,10 @@ describe('stored authored content-v1 projection', () => {
   it('definition_key_config false refuses before source targeting can diverge', () => {
     const vector = authoredProjectorV1Vectors[0]!;
     const contentKey = seedVector(vector, 'bundled', 71);
+    registerFixtureContentIdentity(db, {
+      kind: 'feat', contentKey: 'expanded:ci3a-config-type-feat',
+      name: 'Config Type Feat', keyKind: 'bundled-stable',
+    });
     db.exec(
       `INSERT INTO feat_definitions (
          content_key, name, rules_edition, grant_rules
@@ -1045,6 +1058,10 @@ describe('stored authored content-v1 projection', () => {
     const vector = authoredProjectorV1Vectors[0]!;
     const contentKey = seedVector(vector, 'bundled', 72);
     if (dependency !== null) {
+      registerFixtureContentIdentity(db, {
+        kind: 'feat', contentKey: dependency.key, name: dependency.name,
+        keyKind: 'bundled-stable',
+      });
       db.exec(
         `INSERT INTO feat_definitions (
            content_key, name, rules_edition, grant_rules

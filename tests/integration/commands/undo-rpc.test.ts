@@ -19,6 +19,7 @@ import {
 } from '../../helpers/rpc-harness';
 import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
 import { seedFeatContent } from '../../../src/rules/feats-srd';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 
 const flavorOperation = '10000000-0000-4000-8000-000000000001';
 
@@ -71,6 +72,9 @@ describe('internal operation undo RPC', () => {
     contentKey: string,
     name: string,
   ): number {
+    registerFixtureContentIdentity(harness.context.db, {
+      kind: 'feat', contentKey, name, keyKind: 'bundled-stable',
+    });
     return harness.context.db.exec(
       `INSERT INTO feat_definitions (
          content_key, name, rules_edition, repeatable, grant_rules
@@ -207,6 +211,14 @@ describe('internal operation undo RPC', () => {
 
   it('undoes and redoes update_source_config with the current internal snapshot inverse', async () => {
     const db = harness.context.db;
+    registerFixtureContentIdentity(db, {
+      kind: 'class', contentKey: 'test:undo-cleric', name: 'Cleric',
+      keyKind: 'bundled-stable',
+    });
+    registerFixtureContentIdentity(db, {
+      kind: 'class', contentKey: 'test:undo-wizard', name: 'Wizard',
+      keyKind: 'bundled-stable',
+    });
     db.exec(
       `INSERT INTO class_definitions (
          content_key, name, rules_edition, spellcasting_ability,

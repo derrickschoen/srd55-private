@@ -10,6 +10,7 @@ import { DatabaseContext } from '../../../src/db/database';
 import type { ContentKey } from '../../../src/domain/ids';
 import { equipmentProjectorV1Vectors } from '../../unit/catalog/fixtures/equipment-projector-v1-vectors';
 import { openTestDatabase } from '../../helpers/open-db';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 
 describe('stored equipment content-v1 projection', () => {
   let connection: Database;
@@ -24,6 +25,12 @@ describe('stored equipment content-v1 projection', () => {
 
   function seed(aggregate: EquipmentContentAggregate, ordinal: number): ContentKey {
     const contentKey = `expanded:ci3c:${String(ordinal)}` as ContentKey;
+    registerFixtureContentIdentity(db, {
+      kind: aggregate.kind,
+      contentKey,
+      name: aggregate.name,
+      keyKind: 'bundled-stable',
+    });
     if (aggregate.kind === 'weapon') {
       db.exec(
         `INSERT INTO weapon_templates (

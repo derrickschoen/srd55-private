@@ -6,6 +6,7 @@ import { bundledSourceContentKeys } from '../../../src/catalog/bundled-source-me
 import { createApplicationLifecycle } from '../../../src/db/bootstrap';
 import { DatabaseContext } from '../../../src/db/database';
 import type { ContentKey } from '../../../src/domain/ids';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import { CharacterListBuilder } from '../../../src/queries/character-list-builder';
 import { CharacterCrud } from '../../../src/queries/character-crud';
 import { CatalogQueries } from '../../../src/queries/catalog-queries';
@@ -129,6 +130,10 @@ describe('character list and workspace query builders', () => {
         "SELECT id FROM class_definitions WHERE name = 'Wizard'",
       ),
     );
+    registerFixtureContentIdentity(db, {
+      kind: 'subclass', contentKey: 'q60:subclass:abjurer', name: 'Abjurer',
+      keyKind: 'bundled-stable',
+    });
     const subclassId = db.exec(
       `INSERT INTO subclass_definitions (
          content_key, class_definition_id, name, rules_edition
@@ -162,6 +167,14 @@ describe('character list and workspace query builders', () => {
        SET config = '{"chosen_list":"Wizard","spellcasting_ability":"wisdom"}'
        WHERE id = ?`,
       [fixture.featSourceId],
+    );
+    db.exec(
+      `INSERT INTO catalog_content_identities
+         (content_key, content_kind, key_kind, catalog_layer, normalized_name)
+       VALUES (
+         'q60:species:origin', 'species', 'legacy-opaque', 'external',
+         'originspecies'
+       )`,
     );
     db.exec(
       `INSERT INTO species_definitions (

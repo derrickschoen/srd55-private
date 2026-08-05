@@ -12,6 +12,7 @@ import { seedWeaponContent } from '../../../src/rules/weapons-srd';
 import { attacksPerAction } from '../../../src/rules/sheet';
 import { attackProfiles } from '../../../src/rules/attack-profiles';
 import { openTestDatabase } from '../../helpers/open-db';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import {
   insertHomebrewSubclass,
   HOMEBREW_EXTRA_ATTACK_FEATURE,
@@ -405,6 +406,10 @@ describe('the grants a character actually has, read from the database', () => {
     // legitimately coexist. A name-only lookup picks whichever row the query
     // returned last, which would surface an invocation on a character who
     // cannot take it and hide it from one who can.
+    registerFixtureContentIdentity(db, {
+      kind: 'class', contentKey: '2014:class:warlock', name: 'Warlock',
+      keyKind: 'bundled-stable',
+    });
     db.exec(
       `INSERT INTO class_definitions (content_key, name, rules_edition)
        VALUES ('2014:class:warlock', 'Warlock', '2014')`,

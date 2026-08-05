@@ -13,6 +13,7 @@ import {
   sqlJson,
   sqlString,
 } from '../../src/db/codecs';
+import { registerFixtureContentIdentity } from '../helpers/content-identity';
 
 const triggerMessage =
   'a spell slot cannot hold both a fixed grant and a user selection';
@@ -35,6 +36,10 @@ function openDb(schemaSql: string, applySchema = true): Database {
 }
 
 function seedSpell(db: Database): number {
+  registerFixtureContentIdentity(new DatabaseContext(db), {
+    kind: 'spell', contentKey: '2024:spell:test', name: 'Test Spell',
+    keyKind: 'bundled-stable',
+  });
   db.exec(`
     INSERT INTO spell_identities
       (content_key, canonical_name, normalized_name)
@@ -269,6 +274,19 @@ describe(`ported persistence invariants (${sourceLabel})`, () => {
       ),
     ).toBe(foreignKeyError);
 
+    const context = new DatabaseContext(db);
+    registerFixtureContentIdentity(context, {
+      kind: 'class', contentKey: 'class:wizard', name: 'Wizard',
+      keyKind: 'bundled-stable',
+    });
+    registerFixtureContentIdentity(context, {
+      kind: 'class', contentKey: 'class:fighter', name: 'Fighter',
+      keyKind: 'bundled-stable',
+    });
+    registerFixtureContentIdentity(context, {
+      kind: 'subclass', contentKey: 'subclass:ek',
+      name: 'EK', keyKind: 'bundled-stable',
+    });
     db.exec(`
       INSERT INTO class_definitions
         (content_key, name, rules_edition, progression_type)

@@ -5,6 +5,7 @@ import {
   EligibleSpellSearch,
   EligibleSpellSearchNotFoundError,
 } from '../../../src/eligibility/eligible-spell-search';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import { openTestDatabase } from '../../helpers/open-db';
 
 interface SearchFixture {
@@ -70,6 +71,10 @@ function spell(
 ): number {
   spellSequence += 1;
   const unique = `${name}:${options.edition ?? '2024'}:${spellSequence}`;
+  registerFixtureContentIdentity(context, {
+    kind: 'spell', contentKey: `version:${unique}`, name,
+    keyKind: 'bundled-stable',
+  });
   const identityId =
     options.identityId ??
     context.exec(

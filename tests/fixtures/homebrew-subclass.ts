@@ -1,4 +1,5 @@
 import type { DatabaseContext } from '../../src/db/database';
+import { registerFixtureContentIdentity } from '../helpers/content-identity';
 
 /**
  * AN ORIGINAL HOMEBREW BARD SUBCLASS. A TEST FIXTURE, NEVER SEED CONTENT.
@@ -118,6 +119,12 @@ export function insertHomebrewSubclass(
   const classId = Number(
     db.scalar('SELECT id FROM class_definitions WHERE name = ?', [className]),
   );
+  registerFixtureContentIdentity(db, {
+    kind: 'subclass',
+    contentKey: HOMEBREW_SUBCLASS_KEY,
+    name: HOMEBREW_SUBCLASS_NAME,
+    keyKind: 'asserted',
+  });
   const timestamp = new Date().toISOString();
   const subclassId = db.exec(
     `INSERT INTO subclass_definitions

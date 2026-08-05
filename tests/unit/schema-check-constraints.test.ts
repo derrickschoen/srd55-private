@@ -3,6 +3,9 @@ import sqlite3InitModule, {
   type Sqlite3Static,
 } from '@sqlite.org/sqlite-wasm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import type { ContentKind } from '../../src/catalog/content-identity';
+import { DatabaseContext } from '../../src/db/database';
+import { registerFixtureContentIdentity } from '../helpers/content-identity';
 import { schemaSources } from '../helpers/schema-sources';
 
 /**
@@ -82,7 +85,33 @@ function caughtErrorMessage(action: () => void): string {
   throw new Error('Expected SQLite operation to throw');
 }
 
+const ROOT_CONTENT_KINDS: Readonly<Record<string, ContentKind>> = {
+  class_definitions: 'class',
+  subclass_definitions: 'subclass',
+  feat_definitions: 'feat',
+  species_definitions: 'species',
+  species_templates: 'species',
+  background_definitions: 'background',
+  background_templates: 'background',
+  spell_versions: 'spell',
+  weapon_templates: 'weapon',
+  armor_templates: 'armor',
+  item_definitions: 'item',
+};
+
 function insert(db: Database, table: string, values: Values): number {
+  const kind = ROOT_CONTENT_KINDS[table];
+  const contentKey = values.content_key;
+  if (kind !== undefined && typeof contentKey === 'string') {
+    const fixtureName = values.name ?? values.display_name ?? contentKey;
+    registerFixtureContentIdentity(new DatabaseContext(db), {
+      kind,
+      contentKey,
+      name: typeof fixtureName === 'string' ? fixtureName : contentKey,
+      keyKind: 'bundled-stable',
+    });
+  }
+
   const columns = Object.keys(values);
   db.exec({
     sql: `INSERT INTO "${table}" (${columns

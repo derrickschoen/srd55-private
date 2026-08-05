@@ -5,6 +5,7 @@ import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import { validateCharacterCommandPayload } from '../../../src/commands/payload-validator';
 import { DatabaseContext } from '../../../src/db/database';
 import type { CharacterCommandPayload } from '../../../src/domain/command-contracts';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import { openTestDatabase } from '../../helpers/open-db';
 import { ItemQueries } from '../../../src/queries/items';
 
@@ -47,6 +48,10 @@ describe('item commands and effect ownership', () => {
   }
 
   it('picker query copies a definition and effects into severed character rows', async () => {
+    registerFixtureContentIdentity(db, {
+      kind: 'item', contentKey: 'expanded:legacy:severed-belt',
+      name: 'Severed Belt', keyKind: 'bundled-stable',
+    });
     db.exec(
       `INSERT INTO item_definitions (
          content_key, name, rules_edition, description, requires_attunement
@@ -240,6 +245,10 @@ describe('item commands and effect ownership', () => {
   });
 
   it('hard-deleting a source cascades through its item into the item effects', () => {
+    registerFixtureContentIdentity(db, {
+      kind: 'feat', contentKey: 'test:cascade-feat', name: 'Cascade Feat',
+      keyKind: 'bundled-stable',
+    });
     const definitionId = db.exec(
       `INSERT INTO feat_definitions (
          content_key, name, rules_edition, repeatable

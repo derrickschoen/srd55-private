@@ -36,6 +36,7 @@ import {
   WEAPON_TEXT_LIMITS,
 } from '../../../src/domain/weapon-limits';
 import { getSqlite3, openTestDatabase } from '../../helpers/open-db';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 
 const connections: Database[] = [];
 
@@ -133,6 +134,9 @@ function spell(
   name: string,
   level = 1,
 ): number {
+  registerFixtureContentIdentity(db, {
+    kind: 'spell', contentKey: key, name, keyKind: 'bundled-stable',
+  });
   const identityId = db.exec(
     `INSERT INTO spell_identities
        (content_key, canonical_name, normalized_name)
@@ -159,6 +163,14 @@ function definition(
   rules: readonly Record<string, unknown>[] = [],
   repeatable = false,
 ): number {
+  const kind = table === 'feat_definitions'
+    ? 'feat'
+    : table === 'species_definitions'
+      ? 'species'
+      : 'background';
+  registerFixtureContentIdentity(db, {
+    kind, contentKey: key, name, keyKind: 'bundled-stable',
+  });
   return db.exec(
     `INSERT INTO ${table} (
        content_key, name, rules_edition, repeatable, grant_rules
@@ -173,6 +185,9 @@ function classDefinition(
   name: string,
   rules: readonly Record<string, unknown>[] = [],
 ): number {
+  registerFixtureContentIdentity(db, {
+    kind: 'class', contentKey: key, name, keyKind: 'bundled-stable',
+  });
   const id = db.exec(
     `INSERT INTO class_definitions (
        content_key, name, rules_edition, spellcasting_ability,
@@ -1054,13 +1069,18 @@ describe('adversarial character-share fidelity', () => {
         '2024:class:homebrew-mage',
         'Homebrew Mage',
       );
+      const subclassKey = '2024:sharing.fixture:configured-path';
+      registerFixtureContentIdentity(db, {
+        kind: 'subclass', contentKey: subclassKey, name: 'Configured Path',
+        keyKind: 'asserted',
+      });
       const subclassId = db.exec(
         `INSERT INTO subclass_definitions (
            content_key, class_definition_id, name, rules_edition,
            spellcasting_ability, grant_rules
          ) VALUES (?, ?, 'Configured Path', '2024', 'wisdom', ?)`,
         [
-          '2024:subclass:configured-path',
+          subclassKey,
           classId,
           JSON.stringify([
             {

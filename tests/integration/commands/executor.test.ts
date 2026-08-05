@@ -24,6 +24,7 @@ import type {
   CharacterCommandPayload,
 } from '../../../src/domain/command-contracts';
 import { CHARACTER_TEXT_LIMITS } from '../../../src/domain/character-limits';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import { openTestDatabase } from '../../helpers/open-db';
 
 const key = 'X50-executor-integration-key';
@@ -672,6 +673,10 @@ describe('character command factory and executor', () => {
 
   it('assigns every row from one multi-entity command to one audit group', async () => {
     const characterId = character();
+    registerFixtureContentIdentity(db, {
+      kind: 'spell', contentKey: 'x50:legacy-spell', name: 'Legacy Spell',
+      keyKind: 'bundled-stable',
+    });
     const identityId = db.exec(
       `INSERT INTO spell_identities
          (content_key, canonical_name, normalized_name)

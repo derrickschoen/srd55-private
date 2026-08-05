@@ -5,6 +5,7 @@ import { slotIdentity } from '../../helpers/row-codecs';
 import { SpellSelectionService } from '../../../src/eligibility/spell-selection-service';
 import { GrantRuleSlotGenerator } from '../../../src/grants/grant-rule-slot-generator';
 import { openTestDatabase } from '../../helpers/open-db';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 
 type Rule = Record<string, unknown>;
 
@@ -39,6 +40,9 @@ describe('grant-rule slot generation', () => {
       active?: boolean;
     } = {},
   ): number {
+    registerFixtureContentIdentity(db, {
+      kind: 'spell', contentKey: key, name, keyKind: 'bundled-stable',
+    });
     const identityId = db.exec(
       `INSERT INTO spell_identities
          (content_key, canonical_name, normalized_name)
@@ -78,12 +82,17 @@ describe('grant-rule slot generation', () => {
   }
 
   function feat(rules: readonly Rule[], repeatable = false): number {
+    const contentKey = `feat:${crypto.randomUUID()}`;
+    registerFixtureContentIdentity(db, {
+      kind: 'feat', contentKey, name: 'Generator Feat',
+      keyKind: 'bundled-stable',
+    });
     return db.exec(
       `INSERT INTO feat_definitions (
          content_key, name, rules_edition, repeatable, grant_rules
        ) VALUES (?, 'Generator Feat', '2024', ?, ?)`,
       [
-        `feat:${crypto.randomUUID()}`,
+        contentKey,
         repeatable ? 1 : 0,
         JSON.stringify(rules),
       ],
@@ -439,6 +448,10 @@ describe('grant-rule slot generation', () => {
       level: 1,
       lists: ['Wizard'],
     });
+    registerFixtureContentIdentity(db, {
+      kind: 'class', contentKey: 'class:progression-wizard',
+      name: 'Progression Wizard', keyKind: 'bundled-stable',
+    });
     const classId = db.exec(
       `INSERT INTO class_definitions
          (content_key, name, rules_edition, progression_type)
@@ -576,6 +589,14 @@ describe('grant-rule slot generation', () => {
   it('combines static subclass rules with effective progression rules', () => {
     const characterId = character('Subclass Character');
     const fixedId = spell('2024:subclass-fixed', 'Subclass Fixed');
+    registerFixtureContentIdentity(db, {
+      kind: 'class', contentKey: 'class:subclass-owner',
+      name: 'Subclass Owner', keyKind: 'bundled-stable',
+    });
+    registerFixtureContentIdentity(db, {
+      kind: 'subclass', contentKey: 'subclass:combined', name: 'Combined',
+      keyKind: 'bundled-stable',
+    });
     const classId = db.exec(
       `INSERT INTO class_definitions
          (content_key, name, rules_edition, progression_type)

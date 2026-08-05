@@ -2,6 +2,7 @@ import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DatabaseContext } from '../../../src/db/database';
 import { resolveCharacterAbilities } from '../../../src/rules/ability-contributions';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import { openTestDatabase } from '../../helpers/open-db';
 
 describe('B2 persisted ability contributions', () => {
@@ -17,6 +18,10 @@ describe('B2 persisted ability contributions', () => {
       `INSERT INTO characters (name, strength)
        VALUES ('Contribution Layers', 15)`,
     ).lastInsertId;
+    registerFixtureContentIdentity(db, {
+      kind: 'background', contentKey: 'test:background:contribution-layers',
+      name: 'Contribution Layers', keyKind: 'bundled-stable',
+    });
     const definitionId = db.exec(
       `INSERT INTO background_definitions (
          content_key, name, rules_edition, repeatable, grant_rules

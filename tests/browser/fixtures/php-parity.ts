@@ -1,14 +1,7 @@
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
 import { readFileSync } from 'node:fs';
-import {
-  normalizeContentIdentityName,
-} from '../../../src/catalog/content-identity';
-import {
-  registerBundledStableContentIdentity,
-} from '../../../src/catalog/content-registry';
 import { sqlInteger, sqlNullableInteger } from '../../../src/db/codecs';
 import { DatabaseContext } from '../../../src/db/database';
-import type { ContentKey } from '../../../src/domain/ids';
 import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
 import {
   createBuildReportFixture,
@@ -19,6 +12,7 @@ import {
 import {
   createSheetSpellRetirementFixture,
 } from '../../integration/queries/character-sheet-spells-fixture';
+import { registerBrowserFixtureContentIdentity } from './content-identity';
 
 const schema = readFileSync(
   new URL('../../../src/db/schema.sql', import.meta.url),
@@ -115,6 +109,12 @@ function seedSourceCatalog(
   db: DatabaseContext,
   existingMagicInitiateId?: number,
 ): SourceCatalogIds {
+  registerBrowserFixtureContentIdentity(db, {
+    kind: 'feat',
+    contentKey: '2024:feat:magic-initiate',
+    name: 'Magic Initiate',
+    keyKind: 'bundled-stable',
+  });
   const magicInitiate =
     existingMagicInitiateId ??
     db.exec(
@@ -127,11 +127,6 @@ function seedSourceCatalog(
     ).lastInsertId;
 
   if (existingMagicInitiateId !== undefined) {
-    registerBundledStableContentIdentity(db, {
-      kind: 'feat',
-      contentKey: '2024:feat:magic-initiate' as ContentKey,
-      normalizedName: normalizeContentIdentityName('Magic Initiate'),
-    });
     db.exec(
       `UPDATE feat_definitions
        SET content_key = '2024:feat:magic-initiate',
@@ -158,11 +153,12 @@ function seedSourceCatalog(
   // Magic Initiate rule silently rewritten to the bundled empty rule set —
   // which is exactly what happened, unobserved, while this suite could not
   // collect. A fixture species keeps a key seeding will never claim.
-  const humanContentKey = '2024:species:parity-human' as ContentKey;
-  registerBundledStableContentIdentity(db, {
+  const humanContentKey = '2024:species:parity-human';
+  registerBrowserFixtureContentIdentity(db, {
     kind: 'species',
     contentKey: humanContentKey,
-    normalizedName: normalizeContentIdentityName('Parity Human'),
+    name: 'Parity Human',
+    keyKind: 'bundled-stable',
   });
   const human = db.exec(
     `INSERT INTO species_definitions (
@@ -180,11 +176,12 @@ function seedSourceCatalog(
      ) VALUES (?, 'Parity Human', '2024', 'humanoid', 'medium', NULL, 30)`,
     [humanContentKey],
   );
-  const backgroundContentKey = '2024:background:custom' as ContentKey;
-  registerBundledStableContentIdentity(db, {
+  const backgroundContentKey = '2024:background:custom';
+  registerBrowserFixtureContentIdentity(db, {
     kind: 'background',
     contentKey: backgroundContentKey,
-    normalizedName: normalizeContentIdentityName('Custom Background'),
+    name: 'Custom Background',
+    keyKind: 'bundled-stable',
   });
   const background = db.exec(
     `INSERT INTO background_definitions (
@@ -366,10 +363,11 @@ function controlledSpell(
     level: options.level ?? 0,
     edition: options.edition ?? '2024',
   });
-  registerBundledStableContentIdentity(db, {
+  registerBrowserFixtureContentIdentity(db, {
     kind: 'spell',
-    contentKey: key as ContentKey,
-    normalizedName: normalizeContentIdentityName(name),
+    contentKey: key,
+    name,
+    keyKind: 'bundled-stable',
   });
   db.exec(
     'UPDATE spell_versions SET content_key = ? WHERE id = ?',

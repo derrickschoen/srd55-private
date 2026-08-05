@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { sqlString } from '../../../src/db/codecs';
 import { DatabaseContext } from '../../../src/db/database';
 import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 
 export interface BuildReportFixture {
   readonly characterId: number;
@@ -50,7 +51,7 @@ let sequence = 0;
 
 function nextKey(prefix: string): string {
   sequence += 1;
-  return `r40:${prefix}:${sequence}`;
+  return `2024:r40.fixture:${prefix.replaceAll(':', '-')}-${sequence}`;
 }
 
 export function classDefinitionId(
@@ -156,13 +157,17 @@ export function createSpell(
   const identityId =
     options.identityId ?? createSpellIdentity(db, name);
   const edition = options.edition ?? '2024';
+  const contentKey = nextKey(`version:${edition}`);
+  registerFixtureContentIdentity(db, {
+    kind: 'spell', contentKey, name, keyKind: 'asserted',
+  });
   const versionId = db.exec(
     `INSERT INTO spell_versions (
        content_key, spell_identity_id, display_name, rules_edition,
        level, school, ritual, is_active
      ) VALUES (?, ?, ?, ?, ?, 'Abjuration', ?, 1)`,
     [
-      nextKey(`version:${edition}`),
+      contentKey,
       identityId,
       name,
       edition,
@@ -262,11 +267,16 @@ export function createBuildReportFixture(
     'Wizard 1',
     { spellcasting_ability: 'intelligence' },
   );
+  const featContentKey = nextKey('feat');
+  registerFixtureContentIdentity(db, {
+    kind: 'feat', contentKey: featContentKey, name: 'Report Fixture Feat',
+    keyKind: 'asserted',
+  });
   const featDefinitionId = db.exec(
     `INSERT INTO feat_definitions (
        content_key, name, rules_edition, repeatable, grant_rules
      ) VALUES (?, 'Report Fixture Feat', '2024', 1, '[]')`,
-    [nextKey('feat')],
+    [featContentKey],
   ).lastInsertId;
   const featSourceId = createSource(
     db,

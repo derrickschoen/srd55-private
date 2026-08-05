@@ -25,6 +25,7 @@ import {
 } from '../../../src/builder/contracts';
 import type { CharacterRow } from '../../../src/domain/models';
 import { RpcError } from '../../../src/rpc/protocol';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import { parseRoute } from '../../../src/ui/router';
 import {
   createBackgroundStep,
@@ -222,7 +223,11 @@ describe('guided class chooser', () => {
 
   it('explains the real homebrew-class refusal honestly and does not navigate', async () => {
     harness = await createRpcHarness([]);
-    const contentKey = 'test:class:homebrew-refusal';
+    const contentKey = '2024:test.homebrew:homebrew-refusal';
+    registerFixtureContentIdentity(harness.context.db, {
+      kind: 'class', contentKey, name: 'Homebrew Refusal Class',
+      keyKind: 'asserted',
+    });
     harness.context.db.exec(
       `INSERT INTO class_definitions (content_key, name, rules_edition)
        VALUES (?, ?, ?)`,

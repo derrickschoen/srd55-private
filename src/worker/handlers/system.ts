@@ -1,4 +1,7 @@
 import type { BindableValue } from '@sqlite.org/sqlite-wasm';
+import { assertedExternalContentKey } from '../../catalog/catalog-key';
+import { normalizeContentIdentityName } from '../../catalog/content-identity';
+import { registerAssertedPlaceholderContentIdentity } from '../../catalog/content-registry';
 import { applicationTables } from '../../db/database-lifecycle';
 import type { SqlRow } from '../../db/codecs';
 import {
@@ -102,17 +105,28 @@ function seedViolationFixture(
   spellId: number;
 } {
   return context.db.transaction((db) => {
+    const spellName = 'Worker Test Spell';
+    const spellContentKey = assertedExternalContentKey(
+      'spell',
+      'worker',
+      spellName,
+      `fixture.${prefix}`,
+    );
+    registerAssertedPlaceholderContentIdentity(db, {
+      contentKey: spellContentKey,
+      normalizedName: normalizeContentIdentityName(spellName),
+    });
     const identityId = db.exec(
       `INSERT INTO spell_identities
          (content_key, canonical_name, normalized_name)
        VALUES (?, 'Worker Test Spell', 'worker test spell')`,
-      [`${prefix}:identity`],
+      [spellContentKey],
     ).lastInsertId;
     const spellId = db.exec(
       `INSERT INTO spell_versions
          (content_key, spell_identity_id, display_name, rules_edition, level, school)
        VALUES (?, ?, 'Worker Test Spell', '2024', 1, 'Evocation')`,
-      [`${prefix}:version`, identityId],
+      [spellContentKey, identityId],
     ).lastInsertId;
     const aliceId = db.exec(
       "INSERT INTO characters (name) VALUES ('Worker Alice')",

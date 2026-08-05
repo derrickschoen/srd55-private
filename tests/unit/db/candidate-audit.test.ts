@@ -24,6 +24,7 @@ import {
   snapshotCharacterColumnsFor,
 } from '../../../src/character/character-state';
 import { rowContractError } from '../../../src/domain/contracts/rows';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 
 /**
  * THE MALFORMED-ARTIFACT PROOF FOR WHOLE-IMAGE RESTORE.
@@ -59,6 +60,10 @@ function freshDatabase(): Database {
 
 /** Two characters, each with one class source instance. */
 function seedTwoCharacters(db: Database): void {
+  registerFixtureContentIdentity(new DatabaseContext(db), {
+    kind: 'class', contentKey: 'class:wizard', name: 'Wizard',
+    keyKind: 'bundled-stable',
+  });
   db.exec(
     `INSERT INTO class_definitions (content_key, name, rules_edition)
      VALUES ('class:wizard', 'Wizard', '2024')`,
@@ -75,6 +80,15 @@ function seedTwoCharacters(db: Database): void {
 
 /** Two catalog spells, both active, so a slot has something legal to point at. */
 function seedSpellVersions(db: Database): void {
+  const context = new DatabaseContext(db);
+  registerFixtureContentIdentity(context, {
+    kind: 'spell', contentKey: 'spell:fireball:2024', name: 'Fireball',
+    keyKind: 'bundled-stable',
+  });
+  registerFixtureContentIdentity(context, {
+    kind: 'spell', contentKey: 'spell:shield:2024', name: 'Shield',
+    keyKind: 'bundled-stable',
+  });
   db.exec(
     `INSERT INTO spell_identities
        (id, content_key, canonical_name, normalized_name)
@@ -402,6 +416,10 @@ describe('candidate database semantic audit', () => {
 
   it('refuses a source-parent cycle', () => {
     const db = freshDatabase();
+    registerFixtureContentIdentity(new DatabaseContext(db), {
+      kind: 'class', contentKey: 'class:wizard', name: 'Wizard',
+      keyKind: 'bundled-stable',
+    });
     db.exec(
       `INSERT INTO class_definitions (content_key, name, rules_edition)
        VALUES ('class:wizard', 'Wizard', '2024')`,

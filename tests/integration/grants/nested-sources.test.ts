@@ -5,6 +5,7 @@ import { DatabaseContext } from '../../../src/db/database';
 import { slotIdentity } from '../../helpers/row-codecs';
 import { GrantRuleSlotGenerator } from '../../../src/grants/grant-rule-slot-generator';
 import { openTestDatabase } from '../../helpers/open-db';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 
 describe('nested granted sources', () => {
   let connection: Database;
@@ -33,6 +34,12 @@ describe('nested granted sources', () => {
     rules: readonly Record<string, unknown>[],
     repeatable = false,
   ): number {
+    registerFixtureContentIdentity(db, {
+      kind: table === 'feat_definitions' ? 'feat' : 'species',
+      contentKey: key,
+      name,
+      keyKind: 'bundled-stable',
+    });
     return db.exec(
       `INSERT INTO ${table} (
          content_key, name, rules_edition, repeatable, grant_rules
@@ -145,6 +152,10 @@ describe('nested granted sources', () => {
 
   it('tombstones removed descendants and revives the same source and selected slot with capability rules', () => {
     const characterId = character();
+    registerFixtureContentIdentity(db, {
+      kind: 'spell', contentKey: '2024:nested-ritual', name: 'Nested Ritual',
+      keyKind: 'bundled-stable',
+    });
     const identityId = db.exec(
       `INSERT INTO spell_identities
          (content_key, canonical_name, normalized_name)

@@ -15,6 +15,7 @@ import {
 import { SavePointQueries } from '../../../src/queries/save-points';
 import { openTestDatabase } from '../../helpers/open-db';
 import type { ContentKey } from '../../../src/domain/ids';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 
 function digest(db: DatabaseContext, tables: readonly string[]): string {
   const rows = tables.map((table) =>
@@ -242,6 +243,10 @@ describe('character CRUD, catalog, save points, and operation history', () => {
          (content_key, name, rules_edition, ability_points, repeatable)
        VALUES ('external:feat:test', 'External Feat', 'expanded', 0, 0)`,
     );
+    registerFixtureContentIdentity(db, {
+      kind: 'spell', contentKey: 'q60:spell:test', name: 'Query Bolt',
+      keyKind: 'bundled-stable',
+    });
     const identityId = db.exec(
       `INSERT INTO spell_identities (
          content_key, canonical_name, normalized_name

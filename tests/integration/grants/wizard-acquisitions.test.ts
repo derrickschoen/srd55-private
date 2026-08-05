@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DatabaseContext } from '../../../src/db/database';
 import { assignSpellSelection } from '../../../src/eligibility/spell-selection-assignment';
 import { GrantRuleSlotGenerator } from '../../../src/grants/grant-rule-slot-generator';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import { openTestDatabase } from '../../helpers/open-db';
 
 /**
@@ -29,6 +30,9 @@ describe('planned Wizard acquisitions', () => {
     key: string,
     options: { list?: string; active?: boolean } = {},
   ): number {
+    registerFixtureContentIdentity(db, {
+      kind: 'spell', contentKey: key, name: key, keyKind: 'bundled-stable',
+    });
     const identityId = db.exec(
       `INSERT INTO spell_identities
          (content_key, canonical_name, normalized_name)
@@ -73,12 +77,17 @@ describe('planned Wizard acquisitions', () => {
     const characterId = db.exec(
       "INSERT INTO characters (name) VALUES ('Wizard Acquisition')",
     ).lastInsertId;
+    const contentKey = `wizard-source:${crypto.randomUUID()}`;
+    registerFixtureContentIdentity(db, {
+      kind: 'feat', contentKey, name: 'Wizard Spellbook',
+      keyKind: 'bundled-stable',
+    });
     const definitionId = db.exec(
       `INSERT INTO feat_definitions
          (content_key, name, rules_edition, grant_rules)
        VALUES (?, 'Wizard Spellbook', '2024', ?)`,
       [
-        `wizard-source:${crypto.randomUUID()}`,
+        contentKey,
         JSON.stringify([
           acquisitionRule(count),
           {

@@ -17,6 +17,7 @@ import {
   type SheetSpellRetirementFixture,
 } from '../integration/queries/character-sheet-spells-fixture';
 import { readLevelUpSeam } from './fixtures/level-up-seam';
+import { registerBrowserFixtureContentIdentity } from './fixtures/content-identity';
 import { expect, test } from './fixtures/parallel-test';
 
 const schema = readFileSync(
@@ -99,10 +100,17 @@ function defineClass(
   saves: readonly string[],
   contentKeyName: string = name,
 ): number {
+  const contentKey = `2024:class:${contentKeyName.toLowerCase()}`;
+  registerBrowserFixtureContentIdentity(db, {
+    kind: 'class',
+    contentKey,
+    name,
+    keyKind: 'bundled-stable',
+  });
   const id = db.exec(
     `INSERT INTO class_definitions (content_key, name, rules_edition)
      VALUES (?, ?, '2024')`,
-    [`2024:class:${contentKeyName.toLowerCase()}`, name],
+    [contentKey, name],
   ).lastInsertId;
   db.exec(
     `INSERT INTO class_sheet_traits
@@ -129,6 +137,12 @@ function defineSpell(
   description: string | null,
 ): number {
   spellFixtureSequence += 1;
+  const contentKey = registerBrowserFixtureContentIdentity(db, {
+    kind: 'spell',
+    edition: 'sheet-browser',
+    name,
+    keyKind: 'asserted',
+  });
   const identityId = db.exec(
     `INSERT INTO spell_identities (
        content_key, canonical_name, normalized_name
@@ -141,7 +155,7 @@ function defineSpell(
        level, school, short_summary, is_active
      ) VALUES (?, ?, ?, '2024', ?, 'Abjuration', ?, 1)`,
     [
-      `sheet-browser:version:${String(spellFixtureSequence)}`,
+      contentKey,
       identityId,
       name,
       level,
@@ -304,10 +318,17 @@ async function sheetImage(): Promise<SheetImage> {
      ) VALUES (?, ?, 'class', ?, 'Wizard 3', 'active')`,
     [characterId, crypto.randomUUID(), wizardId],
   ).lastInsertId;
+  const hostileFeatContentKey = registerBrowserFixtureContentIdentity(db, {
+    kind: 'feat',
+    edition: 'sheet-browser',
+    name: 'Hostile spell source',
+    keyKind: 'asserted',
+  });
   const featDefinition = db.exec(
     `INSERT INTO feat_definitions (
        content_key, name, rules_edition, repeatable, grant_rules
-     ) VALUES ('sheet-browser:feat', 'Hostile spell source', '2024', 1, '[]')`,
+     ) VALUES (?, 'Hostile spell source', '2024', 1, '[]')`,
+    [hostileFeatContentKey],
   ).lastInsertId;
   const otherSpellSource = db.exec(
     `INSERT INTO character_source_instances (

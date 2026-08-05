@@ -14,6 +14,7 @@ import {
   MemoryDatabaseStorage,
   openTestDatabase,
 } from '../../helpers/open-db';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 
 const VERBATIM_ATTRIBUTION = `This work includes material from the System Reference Document 5.2
 ("SRD 5.2") by Wizards of the Coast LLC, available at
@@ -570,6 +571,10 @@ describe('bundled SRD feats', () => {
     const connection = await openTestDatabase();
     try {
       const db = new DatabaseContext(connection);
+      registerFixtureContentIdentity(db, {
+        kind: 'feat', contentKey: 'homebrew:feat:magic-initiate',
+        name: 'Magic Initiate', keyKind: 'bundled-stable',
+      });
       db.exec(
         `INSERT INTO feat_definitions (
            content_key, name, rules_edition, category, ability_points, notes

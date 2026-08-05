@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { CatalogImporter } from '../../../src/catalog/catalog-importer';
 import { CatalogQueries } from '../../../src/queries/catalog-queries';
 import { DatabaseContext } from '../../../src/db/database';
+import { assertContentImportPlan } from '../../helpers/content-import-plan';
 import { openTestDatabase } from '../../helpers/open-db';
 
 /**
@@ -24,7 +25,7 @@ function record(overrides: Record<string, unknown> = {}) {
   return {
     identityKey: 'sv-spell',
     versionKey: '2024:sv-spell',
-    name: 'Structured Spell',
+    name: 'SV Spell',
     edition: '2024',
     level: 1,
     school: 'Evocation',
@@ -168,7 +169,7 @@ describe('the catalog importer stores the structured spell values', () => {
           record({
             identityKey: 'sv-every',
             versionKey: '2024:sv-every',
-            name: 'Every Slot Level',
+            name: 'SV Every',
             // Shuffled on the way in, so a passing test cannot be the document's
             // order surviving by accident.
             upcastLevels: [...everyLevel].reverse(),
@@ -177,7 +178,7 @@ describe('the catalog importer stores the structured spell values', () => {
           record({
             identityKey: 'sv-every-other',
             versionKey: '2024:sv-every-other',
-            name: 'Every Other Slot Level',
+            name: 'SV Every Other',
             upcastLevels: [7, 3, 9, 5],
             upcastSummary: 'One more attack per two slot levels above 2.',
           }),
@@ -247,7 +248,7 @@ describe('the catalog importer stores the structured spell values', () => {
     });
   });
 
-  it('replaces each level list on re-import rather than accumulating it', async () => {
+  it('routes a revised same-key ladder to review without mutating either list', async () => {
     connection = await openTestDatabase();
     const db = new DatabaseContext(connection);
     const importer = new CatalogImporter(db);
@@ -258,27 +259,47 @@ describe('the catalog importer stores the structured spell values', () => {
         ]),
       ],
     });
-    importer.import({
+    const revision = importer.import({
       documents: [
         JSON.stringify([
           record({ upcastLevels: [2], cantripUpgradeLevels: [5] }),
         ]),
       ],
     });
-    // A ladder that got SHORTER must not keep its old tail. A document is the
-    // whole truth about the record it describes, and both tables obey it.
+    assertContentImportPlan(
+      revision,
+      'Expected the revised asserted spell to require content review.',
+    );
+    expect(revision.outcomes).toEqual([{
+      id: 'spell:2024:sv-spell',
+      kind: 'review',
+      contentKey: '2024:sv-spell',
+      matchClass: 'key-collision',
+    }]);
+    expect(revision.reviews).toEqual([
+      expect.objectContaining({
+        id: 'spell:2024:sv-spell',
+        kind: 'spell',
+        incomingName: 'SV Spell',
+        localName: 'SV Spell',
+        targetContentKey: '2024:sv-spell',
+        matchClass: 'key-collision',
+      }),
+    ]);
+    // Asserted content is immutable. The proposed shorter ladders remain in
+    // the review plan, while the installed spell retains its original lists.
     expect(
       db
         .allRaw('SELECT level FROM spell_version_upcast_levels ORDER BY level')
         .map((row) => row.level),
-    ).toEqual([2]);
+    ).toEqual([2, 3, 4]);
     expect(
       db
         .allRaw(
           'SELECT level FROM spell_version_cantrip_upgrade_levels ORDER BY level',
         )
         .map((row) => row.level),
-    ).toEqual([5]);
+    ).toEqual([5, 11, 17]);
   });
 
   it('carries the whole structured set out through the catalog read model', () => {

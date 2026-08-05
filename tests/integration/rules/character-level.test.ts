@@ -2,6 +2,7 @@ import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DatabaseContext } from '../../../src/db/database';
 import { characterLevel } from '../../../src/rules/character-level';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import { openTestDatabase } from '../../helpers/open-db';
 
 describe('shared character level', () => {
@@ -22,11 +23,15 @@ describe('shared character level', () => {
   });
 
   function addClass(name: string, level: number): number {
+    const contentKey = `test:class:${name.toLowerCase()}`;
+    registerFixtureContentIdentity(db, {
+      kind: 'class', contentKey, name, keyKind: 'bundled-stable',
+    });
     const classId = db.exec(
       `INSERT INTO class_definitions (
          content_key, name, rules_edition, progression_type
        ) VALUES (?, ?, '2024', 'none')`,
-      [`test:class:${name.toLowerCase()}`, name],
+      [contentKey, name],
     ).lastInsertId;
     db.exec(
       `INSERT INTO character_class_levels (
