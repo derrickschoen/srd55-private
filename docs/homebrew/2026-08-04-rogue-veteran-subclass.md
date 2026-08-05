@@ -119,7 +119,9 @@ once, even if you later gain another.
 
 ### Level 17: Master of Experience
 
-You gain Expertise in every skill in which you don't already have Expertise.
+You gain proficiency in every skill in which you don't already have
+proficiency. You gain Expertise in every skill in which you don't already
+have Expertise.
 
 ### Level 17: Heightened Lethality
 
@@ -132,15 +134,13 @@ You gain blindsight out to a range of 10 feet.
 
 ## 4. Wording Notes (flags on the frozen text, not edits)
 
-1. **Master of Experience vs. Expertise's proficiency prerequisite —
-   OWNER-CLARIFICATION requested.** SRD Expertise attaches to skills you are
-   proficient in. A rogue Veteran reaches roughly nine proficiencies without
-   outside sources (four base Rogue, two background, one Seasoned
-   Professional, two Extensive Experience). Strict reading: Expertise only
-   in proficient skills (~9 of 18). Broad reading: the feature implies
-   proficiency in every skill first (the superseded D196 Skill Mastery
-   granted exactly that, which suggests the broad intent). The readings
-   differ across about half the skill list.
+1. **Master of Experience — RESOLVED by owner ruling 2026-08-04 (broad
+   reading).** SRD Expertise attaches to proficient skills, and the Veteran
+   reaches only ~9 of 18 proficiencies natively, so the owner was asked
+   which reading holds. Ruling: all 18 skills — proficiency in everything
+   first, then Expertise in everything. The feature text's first sentence
+   implements the ruling; the second is the owner's original sentence
+   verbatim.
 2. **Fighting Style mapping.** SRD 5.2.1 expresses the Fighter's options as
    Fighting Style *feats* — Archery, Defense, Great Weapon Fighting,
    Two-Weapon Fighting — each with prerequisite "Fighting Style Feature"
@@ -209,10 +209,11 @@ can see") and Sure Strike ("must be able to see the target").
 
 ### 5.3 Skill line
 
-Proficiencies: +1 at 3, +2 at 9; Expertise +2 at 9; Expertise in everything
-at 17 under either reading of wording note 1 (the readings differ in whether
-unproficient skills join). The Executioner's universal proficiency at 13 is
-gone; the skill payload now concentrates at 17.
+Proficiencies: +1 at 3, +2 at 9; Expertise +2 at 9; at 17, proficiency and
+Expertise in **all 18 skills** (owner ruling, wording note 1). The
+Executioner's universal proficiency at 13 is gone; the whole skill payload
+now lands at 17, larger than before (D196's version added Expertise in two
+skills; this adds it in all).
 
 ### 5.4 Comparator verdicts
 
@@ -286,8 +287,8 @@ per-round output are identical. Reflexes is the only Long Rest quantity
 
 Disclose to the table before play: the Veteran deals its (from 9, doubled)
 Sneak Attack essentially every round regardless of the attack roll; from 13
-its weapon attacks crit on 19–20 (18–20 from 17); at 17 it has Expertise in
-(at least) every skill it is proficient in. Ask the other weapon-damage
+its weapon attacks crit on 19–20 (18–20 from 17); at 17 it has proficiency
+and Expertise in every skill. Ask the other weapon-damage
 player and every skill specialist whether these make their best moments less
 necessary or less visible, and record participation in play. The
 conversation exposes the harmed seats; it does not balance the kit.
@@ -312,8 +313,7 @@ kit), the superseded Executioner draft and its D192/D194/D195/D196 history,
 the six files in `subclass-guidelines/`, and SRD 5.2.1. No web source or
 third-party text was consulted.
 
-**Open items:** wording note 1 (Master of Experience proficiency reading —
-OWNER-CLARIFICATION), the owner-benchmark build card, and all playtests
+**Open items:** the owner-benchmark build card, and all playtests
 (acquisition 3–5, mid-tier 9, 13, 17, outsider dips, harmed seats,
 cold-reader, fifth-use timing).
 
