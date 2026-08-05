@@ -26,14 +26,17 @@ files are append-only records.
 | `2026-08-03-monk-waking-will.md` | Full draft — Warrior of the Waking Will (D193: Psionic Fist adaptation, self-buff concentration monk). |
 | `2026-08-03-oath-of-domination-subclass.md` | Full draft — Paladin Oath of Domination (command/prophecy, D186/D188 tenets + simplified Voice). |
 | `2026-08-03-ranger-simple-subclass.md` | Full draft — Ranger "Pursuer" (D192 owner-frozen Hunter's Mark engine, level-7 unbind labeled a known hot outlier). |
-| `2026-08-03-rogue-simple-subclass.md` | Full draft — rogue Executioner. **Settled through D196**: level 9 permanently doubled Sneak Attack pool traded for once per round, stated in the feature text; level 13 Skill Mastery (every skill + 2 Expertise). |
+| `2026-08-04-rogue-veteran-subclass.md` | Full draft — rogue **Veteran** (owner-authored kit, ruling 2026-08-04 in `rulings.md`, supersedes the Executioner/D194–D196 arc). Guaranteed-outcomes identity: Sneak Attack on a miss, doubled pool at 9, crit ladder at 13/17, Expertise-everything at 17. One wording clarification open. |
 | `oath-of-domination-inputs.md` | The owner's raw inputs for the Oath of Domination. |
 
 ## Status at a glance
 
 Settled by ruling: which subclasses exist and under what license (D190, D191,
-D193), the rogue doc in full (D194–D196), the ranger engine's mechanics
-(D192, frozen — but its power level is *not* approved).
+D193), the rogue Veteran kit in full (owner-authored, ruling 2026-08-04 in
+`rulings.md`, superseding the Executioner/D194–D196 arc — one wording
+clarification open), all four monk working names (ruling 2026-08-04), the
+ranger engine's mechanics (D192, frozen — but its power level is *not*
+approved). The monk seed-scope question is deferred to seeding time.
 
 Open: every other doc's named features, identities, and numbers carry
 OWNER-APPROVAL markers — see `pending-rulings.md`. All drafts are

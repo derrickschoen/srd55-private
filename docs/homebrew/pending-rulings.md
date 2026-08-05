@@ -5,10 +5,20 @@ Digest of every open OWNER-APPROVAL item across the homebrew docs, compiled
 docs' own words) and reviewed by the supervisor. Work this file top to
 bottom in a subclass session; record rulings in `rulings.md` (newest first).
 
-Settled and NOT in this queue: the rogue Executioner (D194–D196, doc
-updated); which subclasses exist and their license (D190/D191/D193); the
-ranger engine's mechanics (D192 — frozen, but its *power level* is still
-open, see below).
+Settled and NOT in this queue: the rogue kit — now the owner-authored
+**Veteran** (ruling 2026-08-04 in `rulings.md`, superseding the
+Executioner/D194–D196 arc) except one wording item below; which subclasses
+exist and their license (D190/D191/D193); all four monk working names
+(ruling 2026-08-04); the ranger engine's mechanics (D192 — frozen, but its
+*power level* is still open, see below).
+
+## rogue-veteran-subclass.md — Veteran (owner-authored kit)
+
+- **Master of Experience (17) proficiency reading**: SRD Expertise attaches
+  to proficient skills; the Veteran reaches ~9 proficiencies natively.
+  Strict reading = Expertise in ~9 skills; broad reading = proficiency in
+  every skill first (D196's superseded Skill Mastery suggests this intent).
+  Owner clarification requested (doc wording note 1).
 
 ## Cross-cutting question (from D191, carried by the bake-off doc)
 
