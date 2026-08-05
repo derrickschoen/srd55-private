@@ -1,4 +1,3 @@
-import type { CharacterCommandPayload } from '../domain/command-contracts';
 import type { CharacterRow } from '../domain/models';
 import {
   EQUIPMENT_RPC,
@@ -92,10 +91,6 @@ export interface QueriesClient extends CatalogClient {
     characterId: number,
     label: string,
   ): Promise<Workspace>;
-  savePointRestoreCommand(
-    characterId: number,
-    savePointId: number,
-  ): Promise<CharacterCommandPayload>;
   buildReport(characterId: number): Promise<BuildReportResult>;
   sheet(characterId: number): Promise<CharacterSheet>;
   setPrintAppendixPreference(
@@ -228,17 +223,6 @@ export function createQueriesClient(rpc: RpcClient): QueriesClient {
       >('queries.savePoints.create', {
         character_id: characterId,
         label,
-      }),
-    savePointRestoreCommand: (
-      characterId: number,
-      savePointId: number,
-    ) =>
-      rpc.call<
-        { character_id: number; save_point_id: number },
-        CharacterCommandPayload
-      >('queries.savePoints.restoreCommand', {
-        character_id: characterId,
-        save_point_id: savePointId,
       }),
     buildReport: (characterId: number) =>
       rpc.call<{ character_id: number }, BuildReportResult>(

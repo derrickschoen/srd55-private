@@ -312,11 +312,10 @@ describe('allocation undo and pre-v8 snapshots', () => {
     });
     expectPersistedAllocation(db, characterId, 'manual', ALL_TENS);
 
-    await executor.execute({
+    await executor.undo({
       character_id: characterId,
-      operation_uuid: '30000000-0000-4000-8000-000000000002',
+      operation_uuid: allocated.operation_uuid,
       expected_revision: 1,
-      command: allocated.inverse,
     });
 
     expect(

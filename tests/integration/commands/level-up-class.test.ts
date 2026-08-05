@@ -465,17 +465,19 @@ describe('level_up_class', () => {
       ),
     ).toBe(1);
     // The inverse is a SNAPSHOT (§8b), the shape `update_class` uses.
-    expect(result.inverse).toMatchObject({ type: 'restore_snapshot' });
+    expect(result.inverse).toMatchObject({
+      type: 'internal_snapshot_restore',
+    });
+    expect(result.inverse).not.toHaveProperty('integrity');
 
-    await executor.execute({
+    await executor.undo({
       character_id: characterId,
-      operation_uuid: crypto.randomUUID(),
+      operation_uuid: result.operation_uuid,
       expected_revision: Number(
         db.scalar('SELECT revision FROM characters WHERE id = ?', [
           characterId,
         ]),
       ),
-      command: result.inverse,
     });
     expect(state.capture(characterId)).toEqual(before);
     expect(stateBytes()).toEqual(beforeBytes);
@@ -594,11 +596,10 @@ describe('level_up_class', () => {
         [choiceId],
       ),
     ).toMatchObject({ maximum: 30 });
-    await executor.execute({
+    await executor.undo({
       character_id: characterId,
-      operation_uuid: crypto.randomUUID(),
+      operation_uuid: resolved.operation_uuid,
       expected_revision: 1,
-      command: resolved.inverse,
     });
     expect(
       db.scalar(

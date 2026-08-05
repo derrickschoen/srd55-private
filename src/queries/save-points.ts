@@ -9,26 +9,8 @@ import {
   CharacterState,
   CHARACTER_SNAPSHOT_SCHEMA_VERSION,
 } from '../character/character-state';
-import type { RestoreSnapshotCommand } from '../domain/command-contracts';
 import type { SavePoint } from '../domain/read-models';
-import type { CharacterCommandIntegrity } from '../commands/integrity';
 import { CharacterNotFoundError } from './character-crud';
-
-interface StoredSavePoint {
-  readonly id: number;
-  readonly snapshot: string;
-}
-
-export class SavePointNotFoundError extends Error {
-  readonly status = 404;
-
-  constructor(characterId: number, savePointId: number) {
-    super(
-      `Save point ${savePointId} does not belong to character ${characterId}.`,
-    );
-    this.name = 'SavePointNotFoundError';
-  }
-}
 
 function decodeSavePoint(row: SqlRow): SavePoint {
   return {
@@ -109,35 +91,4 @@ export class SavePointQueries {
     });
   }
 
-  async restoreCommand(
-    characterId: number,
-    savePointId: number,
-    integrity: CharacterCommandIntegrity,
-  ): Promise<RestoreSnapshotCommand> {
-    const point = this.db.one(
-      `SELECT id, snapshot
-       FROM character_save_points
-       WHERE character_id = ? AND id = ?`,
-      [characterId, savePointId],
-      (row): StoredSavePoint => ({
-        id: sqlInteger(row, 'id'),
-        snapshot: sqlString(row, 'snapshot'),
-      }),
-    );
-    if (point === null) {
-      throw new SavePointNotFoundError(characterId, savePointId);
-    }
-    const snapshot: unknown = JSON.parse(point.snapshot);
-    if (
-      snapshot === null ||
-      Array.isArray(snapshot) ||
-      typeof snapshot !== 'object'
-    ) {
-      throw new Error(`Save point ${point.id} contains an invalid snapshot.`);
-    }
-    return integrity.attach(characterId, {
-      type: 'restore_snapshot',
-      snapshot,
-    }) as Promise<RestoreSnapshotCommand>;
-  }
 }

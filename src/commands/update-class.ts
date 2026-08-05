@@ -18,11 +18,11 @@ import {
   syncAutomaticSubclassEffects,
 } from '../rules/generated-feature-effects';
 import type {
-  RestoreSnapshotCommand as RestoreSnapshotPayload,
   UpdateClassCommand as UpdateClassPayload,
 } from '../domain/command-contracts';
 import { GrantRuleSlotGenerator } from '../grants/grant-rule-slot-generator';
 import type { CharacterCommandIntegrity } from './integrity';
+import type { StoredCharacterSnapshotInverse } from './stored-inverses';
 
 /**
  * Both rows below were declared with `unknown` fields: honest about the column
@@ -275,7 +275,7 @@ export class UpdateClassCommand {
   constructor(
     private readonly db: DatabaseContext,
     private readonly payload: UpdateClassPayload,
-    private readonly integrity: CharacterCommandIntegrity,
+    _integrity: CharacterCommandIntegrity,
     state?: CharacterState,
     generator?: GrantRuleSlotGenerator,
   ) {
@@ -393,14 +393,14 @@ export class UpdateClassCommand {
     });
   }
 
-  async inverse(): Promise<RestoreSnapshotPayload> {
+  async inverse(): Promise<StoredCharacterSnapshotInverse> {
     if (this.#characterId === null || this.#before === null) {
       throw new Error('Cannot create an inverse before applying the command.');
     }
-    return this.integrity.attach(this.#characterId, {
-      type: 'restore_snapshot',
+    return {
+      type: 'internal_snapshot_restore',
       snapshot: this.#before,
-    }) as unknown as Promise<RestoreSnapshotPayload>;
+    };
   }
 
   private remove(characterId: number, classId: number): void {

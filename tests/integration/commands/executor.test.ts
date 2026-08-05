@@ -9,7 +9,6 @@ import { CharacterCommandExecutor } from '../../../src/commands/character-comman
 import { CharacterCommandFactory } from '../../../src/commands/character-command-factory';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import { RemoveSourceCommand } from '../../../src/commands/remove-source';
-import { RestoreSnapshotCommand } from '../../../src/commands/restore-snapshot';
 import { ClearSlotCommand } from '../../../src/commands/set-slot/clear';
 import { KeepOverrideSlotCommand } from '../../../src/commands/set-slot/keep-override';
 import { RestoreSlotCommand } from '../../../src/commands/set-slot/restore';
@@ -54,7 +53,7 @@ describe('character command factory and executor', () => {
     ).lastInsertId;
   }
 
-  it('constructs all fifteen listed command variants and protects internal variants', async () => {
+  it('constructs every public command variant and refuses both stored-only restore forms', async () => {
     const factory = new CharacterCommandFactory(db, integrity);
     const characterId = 41;
     const slotState = {
@@ -75,18 +74,6 @@ describe('character command factory and executor', () => {
       type: 'acknowledge_warning' as const,
       mode: 'delete' as const,
       warning_fingerprint: 'conflicting_versions:test',
-    });
-    const protectedSnapshot = await integrity.attach(characterId, {
-      type: 'restore_snapshot' as const,
-      snapshot: { schema_version: 'a7-v1' },
-    });
-    const protectedFlavorRestore = await integrity.attach(characterId, {
-      type: 'update_character_flavor' as const,
-      mode: 'restore' as const,
-      alignment: null,
-      appearance: '   ',
-      backstory: null,
-      notes: '',
     });
     const variants: readonly [
       CharacterCommandPayload,
@@ -123,7 +110,6 @@ describe('character command factory and executor', () => {
         },
         UpdateCharacterFlavorCommand,
       ],
-      [protectedFlavorRestore, UpdateCharacterFlavorCommand],
       [
         {
           type: 'update_source_config',
@@ -158,10 +144,9 @@ describe('character command factory and executor', () => {
         { type: 'update_class', class_definition_id: 1 },
         UpdateClassCommand,
       ],
-      [protectedSnapshot, RestoreSnapshotCommand],
     ];
 
-    expect(variants).toHaveLength(15);
+    expect(variants).toHaveLength(13);
     for (const [payload, expected] of variants) {
       expect(await factory.make(characterId, payload)).toBeInstanceOf(expected);
     }
@@ -171,14 +156,23 @@ describe('character command factory and executor', () => {
     ).rejects.toThrow(
       'This internal character command is invalid or belongs to another character.',
     );
-    await expect(
-      factory.make(characterId + 1, protectedFlavorRestore),
-    ).rejects.toThrow(
-      'This internal character command is invalid or belongs to another character.',
-    );
+    await expect(factory.make(characterId, {
+      type: 'update_character_flavor',
+      mode: 'restore',
+      alignment: null,
+      appearance: '   ',
+      backstory: null,
+      notes: '',
+      integrity: '0'.repeat(64),
+    })).rejects.toThrow('Unknown command field: mode.');
+    await expect(factory.make(characterId, {
+      type: 'restore_snapshot',
+      snapshot: { schema_version: 'a7-v1' },
+      integrity: '0'.repeat(64),
+    })).rejects.toThrow('Unknown character command type.');
   });
 
-  it('update_character_flavor saves one revision and one history operation, and undo restores all four', async () => {
+  it('update_character_flavor stores a current inverse and refuses the legacy stored-row fixture without writes', async () => {
     const characterId = character();
     db.exec(
       `UPDATE characters
@@ -194,6 +188,7 @@ describe('character command factory and executor', () => {
     );
     const executor = new CharacterCommandExecutor(db, integrity, {
       clock: () => '2026-08-04T12:00:00.000Z',
+      randomUuid: () => undoOperation,
     });
     const result = await executor.execute({
       character_id: characterId,
@@ -211,22 +206,16 @@ describe('character command factory and executor', () => {
 
     expect(result).toMatchObject({
       inverse: {
-        type: 'update_character_flavor',
-        mode: 'restore',
+        type: 'internal_flavor_restore',
         alignment: 'Lawful Neutral',
         appearance: 'Old appearance',
         backstory: 'Old backstory',
         notes: 'Old notes',
       },
+      operation_uuid: firstOperation,
       revision: 1,
       idempotent_replay: false,
     });
-    expect(
-      result.inverse.type === 'update_character_flavor' &&
-      result.inverse.mode === 'restore'
-        ? result.inverse.integrity
-        : null,
-    ).toMatch(/^[0-9a-f]{64}$/u);
     expect(
       db.oneRaw(
         `SELECT alignment, appearance, backstory, notes, revision, updated_at
@@ -282,11 +271,29 @@ describe('character command factory and executor', () => {
       notes: 'Ask about the brass key.',
     });
 
-    await executor.execute({
+    const frozenSignedInverse = JSON.stringify({
+      type: 'update_character_flavor',
+      mode: 'restore',
+      alignment: 'Lawful Neutral',
+      appearance: 'Old appearance',
+      backstory: 'Old backstory',
+      notes: 'Old notes',
+      integrity: 'already-persisted-signature-bytes',
+    });
+    db.exec(
+      `UPDATE character_operations SET inverse_command = ?
+       WHERE operation_uuid = ?`,
+      [frozenSignedInverse, firstOperation],
+    );
+    const undo = await executor.undo({
       character_id: characterId,
-      operation_uuid: undoOperation,
+      operation_uuid: firstOperation,
       expected_revision: 1,
-      command: result.inverse,
+    });
+    expect(undo).toEqual({
+      status: 'refused',
+      reason: 'legacy_operation',
+      current_revision: 1,
     });
     expect(
       db.oneRaw(
@@ -295,19 +302,26 @@ describe('character command factory and executor', () => {
         [characterId],
       ),
     ).toEqual({
-      alignment: 'Lawful Neutral',
-      appearance: 'Old appearance',
-      backstory: 'Old backstory',
-      notes: 'Old notes',
-      revision: 2,
+      alignment: '  Chaotic Good  ',
+      appearance: 'Silver hair\nGreen cloak',
+      backstory: null,
+      notes: 'Ask about the brass key.',
+      revision: 1,
     });
-    expect(Number(db.scalar('SELECT count(*) FROM character_operations'))).toBe(2);
-    expect(Number(db.scalar('SELECT count(*) FROM change_log'))).toBe(2);
+    expect(Number(db.scalar('SELECT count(*) FROM character_operations'))).toBe(1);
+    expect(Number(db.scalar('SELECT count(*) FROM change_log'))).toBe(1);
+    expect(db.scalar(
+      `SELECT inverse_command FROM character_operations
+       WHERE operation_uuid = ?`,
+      [firstOperation],
+    )).toBe(frozenSignedInverse);
   });
 
   it('update_character_flavor preserves nonblank bytes and stores whitespace-only as null', async () => {
     const characterId = character();
-    const executor = new CharacterCommandExecutor(db, integrity);
+    const executor = new CharacterCommandExecutor(db, integrity, {
+      randomUuid: () => undoOperation,
+    });
     await executor.execute({
       character_id: characterId,
       operation_uuid: firstOperation,
@@ -372,8 +386,7 @@ describe('character command factory and executor', () => {
     expect(Number(db.scalar('SELECT count(*) FROM character_operations'))).toBe(1);
     expect(Number(db.scalar('SELECT count(*) FROM change_log'))).toBe(1);
     expect(result.inverse).toMatchObject({
-      type: 'update_character_flavor',
-      mode: 'restore',
+      type: 'internal_flavor_restore',
       alignment: 'Neutral',
       notes: grandfathered,
     });
@@ -411,11 +424,10 @@ describe('character command factory and executor', () => {
       notes: '',
     });
 
-    await executor.execute({
+    await executor.undo({
       character_id: characterId,
-      operation_uuid: undoOperation,
+      operation_uuid: firstOperation,
       expected_revision: 1,
-      command: result.inverse,
     });
     const restored = db.oneRaw(
       `SELECT alignment, appearance, backstory, notes, revision
@@ -439,23 +451,25 @@ describe('character command factory and executor', () => {
     expect(restored?.notes).not.toBeNull();
   });
 
-  it('refuses NUL in the payload validator before SQLite starts a write', async () => {
+  it('refuses NUL anywhere in all four fields as a typed refusal before SQLite starts a write', async () => {
     const characterId = character();
     const executor = new CharacterCommandExecutor(db, integrity);
-    const execution = executor.execute({
-      character_id: characterId,
-      operation_uuid: firstOperation,
-      expected_revision: 0,
-      command: {
-        type: 'update_character_flavor',
-        appearance: '\0',
-      },
-    });
+    for (const field of ['alignment', 'appearance', 'backstory', 'notes'] as const) {
+      const execution = executor.execute({
+        character_id: characterId,
+        operation_uuid: firstOperation,
+        expected_revision: 0,
+        command: {
+          type: 'update_character_flavor',
+          [field]: 'visible\0suffix',
+        } as unknown as CharacterCommandPayload,
+      });
 
-    await expect(execution).rejects.toBeInstanceOf(CharacterCommandPayloadError);
-    await expect(execution).rejects.toThrow(
-      'appearance must not start with NUL.',
-    );
+      await expect(execution).rejects.toBeInstanceOf(CharacterCommandPayloadError);
+      await expect(execution).rejects.toThrow(
+        `${field} must not contain NUL.`,
+      );
+    }
     expect(
       db.oneRaw('SELECT appearance, revision FROM characters WHERE id = ?', [
         characterId,
@@ -556,6 +570,7 @@ describe('character command factory and executor', () => {
     const characterId = character();
     const executor = new CharacterCommandExecutor(db, integrity, {
       clock: () => '2026-07-23T12:00:00.000Z',
+      randomUuid: () => undoOperation,
     });
     const result = await executor.execute({
       character_id: characterId,
@@ -575,6 +590,7 @@ describe('character command factory and executor', () => {
         ability: 'wisdom',
         score: 13,
       },
+      operation_uuid: firstOperation,
       revision: 1,
       idempotent_replay: false,
     });
@@ -627,11 +643,10 @@ describe('character command factory and executor', () => {
       wisdom: 18,
     });
 
-    await executor.execute({
+    await executor.undo({
       character_id: characterId,
-      operation_uuid: undoOperation,
+      operation_uuid: result.operation_uuid,
       expected_revision: 1,
-      command: result.inverse,
     });
     expect(
       db.oneRaw(

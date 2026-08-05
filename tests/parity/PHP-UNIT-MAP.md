@@ -29,7 +29,7 @@ state before and after derivation.
 
 | # | PHP oracle case | TypeScript evidence | Parity disposition |
 |---:|---|---|---|
-| 1 | Payload validator: accepts every complete command payload and preserves every allowed field | `V` all variants; `X` constructs all thirteen and persists accepted mutations | Covered |
+| 1 | Payload validator: accepts every complete public command payload and preserves every allowed field | `V` all public variants; `X` “constructs every public command variant and refuses both stored-only restore forms,” then persists accepted mutations | Covered |
 | 2 | Payload validator: accepts each command enum branch | `V` every slot/source/warning/class branch; `X` persisted command variants | Covered |
 | 3 | Payload validator: accepts every restored slot state and eligibility enum | `V` restored-row enum matrix; `X` ability/slot restore rows | Covered |
 | 4 | Payload validator: rejects exact string and scalar boundaries | `V` exact string, Unicode, integer, integrity, and object boundaries | Covered |

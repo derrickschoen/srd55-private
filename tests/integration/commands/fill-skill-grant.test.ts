@@ -2,6 +2,7 @@ import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CharacterCommandExecutor } from '../../../src/commands/character-command-executor';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
+import { validateCharacterCommandPayload } from '../../../src/commands/payload-validator';
 import { UpdateClassCommand } from '../../../src/commands/update-class';
 import { DatabaseContext } from '../../../src/db/database';
 import type { Skill } from '../../../src/domain/enums';
@@ -289,7 +290,7 @@ describe('fill_skill_grant through the real executor', () => {
       character_id: characterId,
       operation_uuid: crypto.randomUUID(),
       expected_revision: revision(),
-      command: cleared.inverse,
+      command: validateCharacterCommandPayload(cleared.inverse),
     });
     expect(grantRow(grant)).toMatchObject({ skill });
   });

@@ -10,7 +10,6 @@ import {
   CharacterCommandPayloadValidator,
 } from './payload-validator';
 import { RemoveSourceCommand } from './remove-source';
-import { RestoreSnapshotCommand } from './restore-snapshot';
 import { ClearSlotCommand } from './set-slot/clear';
 import { KeepOverrideSlotCommand } from './set-slot/keep-override';
 import { RestoreSlotCommand } from './set-slot/restore';
@@ -42,11 +41,12 @@ import {
   UnattuneItemCommand,
   UpdateItemCommand,
 } from './items';
+import type { StoredCommandInverse } from './stored-inverses';
 
 export interface ConstructedCharacterCommand {
   readonly actionType: string;
   apply(characterId: number): void | Promise<void>;
-  inverse(): CharacterCommandPayload | Promise<CharacterCommandPayload>;
+  inverse(): StoredCommandInverse | Promise<StoredCommandInverse>;
   /**
    * Opt-in marker: this command's inverse is only knowable AFTER `apply()`, so
    * the executor stores `inverse()` rather than what `prepareInverse` built.
@@ -60,11 +60,8 @@ export interface ConstructedCharacterCommand {
 function requiresIntegrity(payload: CharacterCommandPayload): boolean {
   return (
     (payload.type === 'set_slot' && payload.mode === 'restore') ||
-    (payload.type === 'update_character_flavor' &&
-      payload.mode === 'restore') ||
     (payload.type === 'acknowledge_warning' &&
-      payload.mode === 'delete') ||
-    payload.type === 'restore_snapshot'
+      payload.mode === 'delete')
   );
 }
 
@@ -178,12 +175,6 @@ export class CharacterCommandFactory {
         return new SetHitPointRollCommand(this.db, payload);
       case 'fill_skill_grant':
         return new FillSkillGrantCommand(this.db, payload);
-      case 'restore_snapshot':
-        return new RestoreSnapshotCommand(
-          this.db,
-          payload,
-          this.integrity,
-        );
     }
   }
 }

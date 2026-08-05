@@ -190,6 +190,13 @@ test('update_character_flavor saves all four with one revision and disables its 
       }),
     ]);
 
+  await page.reload();
+  await expect(page.locator('#planner-status')).toHaveAttribute(
+    'data-ready',
+    'true',
+    { timeout: 30_000 },
+  );
+  await expect(page.getByRole('button', { name: '↶ Undo' })).toBeEnabled();
   await page.getByRole('button', { name: '↶ Undo' }).click();
   await expect.poll(persistedCharacter.bind(null, page)).toEqual([
     expect.objectContaining({

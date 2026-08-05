@@ -223,11 +223,6 @@ describe('character command payload validation', () => {
           ability_increases: [{ ability: 'wisdom', amount: 1 }],
         },
       },
-      {
-        type: 'restore_snapshot',
-        snapshot: { version: 'a7-v1', tables: {} },
-        integrity: signature,
-      },
     ];
 
     const validator = new CharacterCommandPayloadValidator();
@@ -288,31 +283,19 @@ describe('character command payload validation', () => {
     );
   });
 
-  it('update_character_flavor reports NUL at the typed payload boundary', () => {
-    const validate = () => validateCharacterCommandPayload({
-      type: 'update_character_flavor',
-      appearance: '\0',
-    });
+  it('update_character_flavor refuses NUL anywhere in every field at the typed payload boundary', () => {
+    for (const field of ['alignment', 'appearance', 'backstory', 'notes']) {
+      const validate = () => validateCharacterCommandPayload({
+        type: 'update_character_flavor',
+        [field]: 'visible\0suffix',
+      });
 
-    expect(validate).toThrow(CharacterCommandPayloadError);
-    expect(validate).toThrow('appearance must not start with NUL.');
-    expect(validateCharacterCommandPayload({
-      type: 'update_character_flavor',
-      appearance: 'visible\0suffix',
-    })).toEqual({
-      type: 'update_character_flavor',
-      appearance: 'visible\0suffix',
-    });
-    expect(validateCharacterCommandPayload({
-      type: 'update_character_flavor',
-      notes: '\0',
-    })).toEqual({
-      type: 'update_character_flavor',
-      notes: '\0',
-    });
+      expect(validate).toThrow(CharacterCommandPayloadError);
+      expect(validate).toThrow(`${field} must not contain NUL.`);
+    }
   });
 
-  it('accepts a complete signed flavor restore without applying edit rules', () => {
+  it('has no public flavor or snapshot restore payload', () => {
     const restore = {
       type: 'update_character_flavor',
       mode: 'restore',
@@ -323,11 +306,27 @@ describe('character command payload validation', () => {
       integrity: signature,
     };
 
-    expect(validateCharacterCommandPayload(restore)).toEqual(restore);
-    const { notes: _notes, ...missingNotes } = restore;
     expectInvalid(
-      missingNotes,
-      'notes is required; use null when it is not known.',
+      restore,
+      'Unknown command field: mode.',
+    );
+    expectInvalid(
+      {
+        type: 'internal_flavor_restore',
+        alignment: null,
+        appearance: null,
+        backstory: null,
+        notes: null,
+      },
+      'Unknown character command type.',
+    );
+    expectInvalid(
+      {
+        type: 'restore_snapshot',
+        snapshot: { schema_version: 'a7-v1', character: { notes: 'state' } },
+        integrity: signature,
+      },
+      'Unknown character command type.',
     );
   });
 
@@ -486,14 +485,6 @@ describe('character command payload validation', () => {
           },
         },
         'Feat ability increases cannot total more than 2.',
-      ],
-      [
-        {
-          type: 'restore_snapshot',
-          snapshot: [],
-          integrity: signature,
-        },
-        'Character snapshot must be an object.',
       ],
       // RETIRED COMMANDS REFUSE AS UNKNOWN (skills-with-provenance §3.5):
       // `choose_multiclass_skill` could not name the grant it filled and
@@ -682,22 +673,6 @@ describe('character command payload validation', () => {
           reason: 'r'.repeat(256),
         },
         'reason must not exceed 255 characters.',
-      ],
-      [
-        {
-          type: 'restore_snapshot',
-          snapshot: {},
-          integrity: 'a'.repeat(63),
-        },
-        'integrity must be a 64-character hexadecimal signature.',
-      ],
-      [
-        {
-          type: 'restore_snapshot',
-          snapshot: {},
-          integrity: 'g'.repeat(64),
-        },
-        'integrity must be a 64-character hexadecimal signature.',
       ],
       [
         {

@@ -17,8 +17,9 @@ import type {
   AcknowledgeWarningCommand,
   CharacterCommandPayload,
   CharacterCommandRequest,
-  RestoreSnapshotCommand,
+  RestoreCharacterSavePointRequest,
   SetSlotCommand,
+  UndoCharacterOperationRequest,
 } from '../domain/command-contracts';
 import { isEnumValue, skills } from '../domain/enums';
 import type { JsonObject } from '../domain/models';
@@ -32,12 +33,23 @@ import {
 } from './character-command-factory';
 import { CharacterCommandPreflight } from './character-command-preflight';
 import type { CharacterCommandIntegrity } from './integrity';
+import { CharacterCommandPayloadValidator } from './payload-validator';
 import { RevisionConflict } from './revision-conflict';
 import {
   resolvesInverseAfterApply,
   type ResolvesInverseAfterApply,
 } from './weapons';
 import { CharacterSheetBuilder } from '../queries/character-sheet-builder';
+import {
+  applyStoredCharacterFlavorInverse,
+  type StoredCharacterFlavorInverse,
+} from './update-character-flavor';
+import type {
+  StoredCharacterInverse,
+  StoredCharacterSnapshotInverse,
+  StoredCommandInverse,
+  StoredOperationUndoInverse,
+} from './stored-inverses';
 
 export interface CharacterCommandPreviewWarning {
   readonly code: 'armor_class_reduced';
@@ -48,7 +60,8 @@ export interface CharacterCommandPreviewWarning {
 }
 
 export interface CharacterCommandResult {
-  readonly inverse: CharacterCommandPayload;
+  readonly inverse: StoredCharacterInverse;
+  readonly operation_uuid: string;
   readonly revision: number;
   readonly idempotent_replay: boolean;
   /**
@@ -63,11 +76,50 @@ export interface CharacterCommandExecutorOptions {
   readonly state?: CharacterState;
   readonly audit?: CharacterAuditWriter;
   readonly clock?: () => string;
+  readonly randomUuid?: () => string;
 }
+
+export interface CharacterCommandRpcResult {
+  readonly operation_uuid: string;
+  readonly revision: number;
+  readonly idempotent_replay: boolean;
+  readonly preview_warnings?: readonly CharacterCommandPreviewWarning[];
+}
+
+export type UndoCharacterOperationRefusalReason =
+  | 'character_not_found'
+  | 'operation_not_found'
+  | 'operation_character_mismatch'
+  | 'revision_mismatch'
+  | 'operation_not_latest'
+  | 'legacy_operation';
+
+export type UndoCharacterOperationResult =
+  | ({ readonly status: 'applied' } & CharacterCommandRpcResult)
+  | {
+      readonly status: 'refused';
+      readonly reason: UndoCharacterOperationRefusalReason;
+      readonly current_revision: number | null;
+    };
+
+export type RestoreCharacterSavePointRefusalReason =
+  | 'character_not_found'
+  | 'save_point_not_found'
+  | 'save_point_character_mismatch'
+  | 'revision_mismatch';
+
+export type RestoreCharacterSavePointResult =
+  | ({ readonly status: 'applied' } & CharacterCommandRpcResult)
+  | {
+      readonly status: 'refused';
+      readonly reason: RestoreCharacterSavePointRefusalReason;
+      readonly current_revision: number | null;
+    };
 
 interface OperationRow {
   readonly character_id: number;
   readonly inverse_command: string | null;
+  readonly resulting_revision: number;
 }
 
 /**
@@ -79,17 +131,158 @@ interface OperationRow {
 const operationRow: RowCodec<OperationRow> = (row) => ({
   character_id: sqlInteger(row, 'character_id'),
   inverse_command: sqlNullableString(row, 'inverse_command'),
+  resulting_revision: sqlInteger(row, 'resulting_revision'),
 });
 
 type SnapshotRow = Readonly<Record<string, unknown>>;
 
 const systemClock = () => new Date().toISOString();
 
-function parseInverse(value: unknown): CharacterCommandPayload {
+function parseInverse(value: unknown): unknown {
   if (typeof value !== 'string') {
     throw new Error('Stored inverse command is invalid.');
   }
-  return JSON.parse(value) as CharacterCommandPayload;
+  return JSON.parse(value) as unknown;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function storedFlavorInverse(
+  value: unknown,
+): StoredCharacterFlavorInverse | null {
+  if (
+    !isRecord(value) ||
+    value.type !== 'internal_flavor_restore'
+  ) {
+    return null;
+  }
+  const allowed = new Set([
+    'type',
+    'alignment',
+    'appearance',
+    'backstory',
+    'notes',
+  ]);
+  if (Object.keys(value).some((key) => !allowed.has(key))) {
+    throw new Error('Stored character flavor inverse is invalid.');
+  }
+  const fields = ['alignment', 'appearance', 'backstory', 'notes'] as const;
+  for (const field of fields) {
+    if (
+      !Object.hasOwn(value, field) ||
+      (value[field] !== null && typeof value[field] !== 'string')
+    ) {
+      throw new Error('Stored character flavor inverse is invalid.');
+    }
+  }
+  return {
+    type: 'internal_flavor_restore',
+    alignment: value.alignment as string | null,
+    appearance: value.appearance as string | null,
+    backstory: value.backstory as string | null,
+    notes: value.notes as string | null,
+  };
+}
+
+function storedSnapshotInverse(
+  value: unknown,
+): StoredCharacterSnapshotInverse | null {
+  if (!isRecord(value) || value.type !== 'internal_snapshot_restore') {
+    return null;
+  }
+  if (
+    Object.keys(value).some((key) => !['type', 'snapshot'].includes(key)) ||
+    !isRecord(value.snapshot)
+  ) {
+    throw new Error('Stored snapshot inverse is invalid.');
+  }
+  return {
+    type: 'internal_snapshot_restore',
+    snapshot: value.snapshot,
+  };
+}
+
+function isLegacyStoredCommand(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  return (
+    (
+      value.type === 'update_character_flavor' &&
+      value.mode === 'restore'
+    ) ||
+    value.type === 'restore_snapshot'
+  );
+}
+
+interface DecodedStoredOperationUndoEnvelope {
+  readonly type: 'internal_operation_undo';
+  readonly action: 'undo' | 'redo';
+  readonly target_operation_uuid: string;
+  readonly command: Record<string, unknown>;
+}
+
+function storedOperationUndoEnvelope(
+  value: unknown,
+): DecodedStoredOperationUndoEnvelope | null {
+  if (!isRecord(value) || value.type !== 'internal_operation_undo') {
+    return null;
+  }
+  if (
+    Object.keys(value).some((key) => ![
+      'type',
+      'action',
+      'target_operation_uuid',
+      'command',
+    ].includes(key)) ||
+    (value.action !== 'undo' && value.action !== 'redo') ||
+    typeof value.target_operation_uuid !== 'string' ||
+    !isRecord(value.command) ||
+    value.command.type === 'internal_operation_undo'
+  ) {
+    throw new Error('Stored operation undo inverse is invalid.');
+  }
+  return {
+    type: 'internal_operation_undo',
+    action: value.action,
+    target_operation_uuid: value.target_operation_uuid,
+    command: value.command,
+  };
+}
+
+const storedPayloadValidator = new CharacterCommandPayloadValidator();
+
+function storedCommandInverse(value: unknown): StoredCommandInverse {
+  const flavor = storedFlavorInverse(value);
+  if (flavor !== null) return flavor;
+  const snapshot = storedSnapshotInverse(value);
+  if (snapshot !== null) return snapshot;
+  return storedPayloadValidator.validate(value);
+}
+
+function storedCharacterInverse(value: unknown): StoredCharacterInverse {
+  const envelope = storedOperationUndoEnvelope(value);
+  if (envelope === null) return storedCommandInverse(value);
+  if (isLegacyStoredCommand(envelope.command)) {
+    throw new Error('Stored operation undo inverse is legacy.');
+  }
+  return {
+    ...envelope,
+    command: storedCommandInverse(envelope.command),
+  };
+}
+
+export function characterCommandRpcResult(
+  result: CharacterCommandResult,
+): CharacterCommandRpcResult {
+  return {
+    operation_uuid: result.operation_uuid,
+    revision: result.revision,
+    idempotent_replay: result.idempotent_replay,
+    ...(result.preview_warnings === undefined
+      ? {}
+      : { preview_warnings: result.preview_warnings }),
+  };
 }
 
 function warningFingerprint(value: string): string {
@@ -132,8 +325,8 @@ function slotRestoreState(row: SnapshotRow) {
  */
 function resolveInverse(
   command: ConstructedCharacterCommand,
-  prepared: CharacterCommandPayload,
-): CharacterCommandPayload {
+  prepared: StoredCommandInverse,
+): StoredCommandInverse {
   if (!resolvesInverseAfterApply(command)) {
     return prepared;
   }
@@ -173,6 +366,7 @@ export class CharacterCommandExecutor {
   readonly #state: CharacterState;
   readonly #audit: CharacterAuditWriter;
   readonly #clock: () => string;
+  readonly #randomUuid: () => string;
 
   constructor(
     private readonly db: DatabaseContext,
@@ -186,6 +380,7 @@ export class CharacterCommandExecutor {
     this.#audit =
       options.audit ?? new CharacterAuditLog(db, this.#state);
     this.#clock = options.clock ?? systemClock;
+    this.#randomUuid = options.randomUuid ?? (() => crypto.randomUUID());
   }
 
   async execute(
@@ -209,12 +404,129 @@ export class CharacterCommandExecutor {
     );
   }
 
+  async undo(
+    request: UndoCharacterOperationRequest,
+  ): Promise<UndoCharacterOperationResult> {
+    const replay = this.replayUndo(request);
+    if (replay !== null) return replay;
+    const authorized = this.authorizeUndo(request);
+    if (authorized.status === 'refused') return authorized;
+
+    const stored = parseInverse(authorized.inverse_command);
+    const envelope = storedOperationUndoEnvelope(stored);
+    const storedCommand = envelope?.command ?? stored;
+    if (isLegacyStoredCommand(storedCommand)) {
+      return {
+        status: 'refused',
+        reason: 'legacy_operation',
+        current_revision: request.expected_revision,
+      };
+    }
+    const commandInverse = storedCommandInverse(storedCommand);
+    const flavor = storedFlavorInverse(commandInverse);
+    const operationUuid = this.#randomUuid();
+    if (flavor !== null) {
+      return this.db.transaction(() => {
+        const current = this.authorizeUndo(request);
+        if (current.status === 'refused') return current;
+        const result = this.recordUndoEnvelope(
+          this.commitStoredFlavorUndo(request, operationUuid, flavor),
+          current.action,
+          request.operation_uuid,
+        );
+        return {
+          status: 'applied' as const,
+          ...characterCommandRpcResult(result),
+        };
+      });
+    }
+
+    const snapshot = storedSnapshotInverse(commandInverse);
+    if (snapshot !== null) {
+      return this.db.transaction(() => {
+        const current = this.authorizeUndo(request);
+        if (current.status === 'refused') return current;
+        const result = this.recordUndoEnvelope(
+          this.commitStoredSnapshot(
+            request.character_id,
+            request.expected_revision,
+            operationUuid,
+            snapshot,
+          ),
+          current.action,
+          request.operation_uuid,
+        );
+        return {
+          status: 'applied' as const,
+          ...characterCommandRpcResult(result),
+        };
+      });
+    }
+
+    const { payload, command } = await this.#preflight.preparePayload(
+      request.character_id,
+      commandInverse,
+    );
+    const executionRequest: CharacterCommandRequest = {
+      character_id: request.character_id,
+      operation_uuid: operationUuid,
+      expected_revision: request.expected_revision,
+      command: payload,
+    };
+    const before = this.#state.capture(request.character_id);
+    const inverse = await this.prepareInverse(
+      request.character_id,
+      payload,
+      before,
+    );
+    return this.db.transaction(() => {
+      const current = this.authorizeUndo(request);
+      if (current.status === 'refused') return current;
+      const result = this.recordUndoEnvelope(
+        this.commit(executionRequest, payload, command, before, inverse),
+        current.action,
+        request.operation_uuid,
+      );
+      return {
+        status: 'applied' as const,
+        ...characterCommandRpcResult(result),
+      };
+    });
+  }
+
+  restoreSavePoint(
+    request: RestoreCharacterSavePointRequest,
+  ): RestoreCharacterSavePointResult {
+    return this.db.transaction(() => {
+      const authorized = this.authorizeSavePointRestore(request);
+      if (authorized.status === 'refused') return authorized;
+      const parsed: unknown = JSON.parse(authorized.snapshot);
+      const snapshot = storedSnapshotInverse({
+        type: 'internal_snapshot_restore',
+        snapshot: parsed,
+      });
+      if (snapshot === null) {
+        throw new Error('Stored save-point snapshot is invalid.');
+      }
+      const result = this.commitStoredSnapshot(
+        request.character_id,
+        request.expected_revision,
+        this.#randomUuid(),
+        snapshot,
+      );
+      return {
+        status: 'applied',
+        ...characterCommandRpcResult(result),
+      };
+    });
+  }
+
   private commit(
     request: CharacterCommandRequest,
     payload: CharacterCommandPayload,
     command: ConstructedCharacterCommand,
     before: CharacterStateSnapshot,
-    inverse: CharacterCommandPayload,
+    inverse: StoredCommandInverse,
   ): CharacterCommandResult {
     const replay = this.replay(request.character_id, request.operation_uuid);
     if (replay !== null) {
@@ -286,6 +598,7 @@ export class CharacterCommandExecutor {
 
     return {
       inverse: storedInverse,
+      operation_uuid: request.operation_uuid,
       revision: nextRevision,
       idempotent_replay: false,
       ...(previewWarnings.length === 0
@@ -299,7 +612,7 @@ export class CharacterCommandExecutor {
     operationUuid: string,
   ): CharacterCommandResult | null {
     const operation = this.db.one(
-      `SELECT character_id, inverse_command
+      `SELECT character_id, inverse_command, resulting_revision
        FROM character_operations
        WHERE operation_uuid = ?`,
       [operationUuid],
@@ -312,7 +625,8 @@ export class CharacterCommandExecutor {
       throw new RevisionConflict(this.currentRevisionOrZero(characterId));
     }
     return {
-      inverse: parseInverse(operation.inverse_command),
+      inverse: storedCharacterInverse(parseInverse(operation.inverse_command)),
+      operation_uuid: operationUuid,
       revision: this.#preflight.currentRevision(characterId),
       idempotent_replay: true,
     };
@@ -331,7 +645,7 @@ export class CharacterCommandExecutor {
     characterId: number,
     payload: CharacterCommandPayload,
     before: CharacterStateSnapshot,
-  ): Promise<CharacterCommandPayload> {
+  ): Promise<StoredCommandInverse> {
     switch (payload.type) {
       case 'update_ability':
         return {
@@ -359,14 +673,13 @@ export class CharacterCommandExecutor {
           allow_legacy: Number(before.character.allow_legacy) === 1,
         };
       case 'update_character_flavor':
-        return this.integrity.attach(characterId, {
-          type: 'update_character_flavor',
-          mode: 'restore',
+        return {
+          type: 'internal_flavor_restore',
           alignment: sqlNullableString(before.character, 'alignment'),
           appearance: sqlNullableString(before.character, 'appearance'),
           backstory: sqlNullableString(before.character, 'backstory'),
           notes: sqlNullableString(before.character, 'notes'),
-        });
+        };
       case 'acknowledge_warning':
         return this.warningInverse(characterId, payload, before);
       // The PRECISE inverse: the same command with the selection the write
@@ -438,12 +751,308 @@ export class CharacterCommandExecutor {
       case 'update_class':
       case 'level_up_class':
       case 'resolve_level_feat_choice':
-      case 'restore_snapshot':
-        return this.integrity.attach(characterId, {
-          type: 'restore_snapshot',
+        return {
+          type: 'internal_snapshot_restore',
           snapshot: snapshotJson(before),
-        }) as Promise<RestoreSnapshotCommand>;
+        };
     }
+  }
+
+  private authorizeUndo(
+    request: UndoCharacterOperationRequest,
+  ):
+    | {
+        readonly status: 'authorized';
+        readonly action: 'undo' | 'redo';
+        readonly inverse_command: string;
+      }
+    | Extract<UndoCharacterOperationResult, { status: 'refused' }> {
+    const revision = this.db.scalar(
+      'SELECT revision FROM characters WHERE id = ?',
+      [request.character_id],
+    );
+    if (revision === null) {
+      return {
+        status: 'refused',
+        reason: 'character_not_found',
+        current_revision: null,
+      };
+    }
+    const currentRevision = Number(revision);
+    const operation = this.db.oneRaw(
+      `SELECT character_id, inverse_command, resulting_revision
+       FROM character_operations
+       WHERE operation_uuid = ?`,
+      [request.operation_uuid],
+    );
+    if (operation === null) {
+      return {
+        status: 'refused',
+        reason: 'operation_not_found',
+        current_revision: currentRevision,
+      };
+    }
+    if (Number(operation.character_id) !== request.character_id) {
+      return {
+        status: 'refused',
+        reason: 'operation_character_mismatch',
+        current_revision: currentRevision,
+      };
+    }
+    if (request.expected_revision !== currentRevision) {
+      return {
+        status: 'refused',
+        reason: 'revision_mismatch',
+        current_revision: currentRevision,
+      };
+    }
+    // The authorization fact is persisted on the target operation itself.
+    // Logical stack reconstruction cannot substitute for this comparison: a
+    // compensation write advances the character and makes every older row
+    // ineligible, even when a reconstructed stack would put one on top.
+    if (Number(operation.resulting_revision) !== currentRevision) {
+      return {
+        status: 'refused',
+        reason: 'operation_not_latest',
+        current_revision: currentRevision,
+      };
+    }
+    if (typeof operation.inverse_command !== 'string') {
+      throw new Error('Stored inverse command is invalid.');
+    }
+    const envelope = storedOperationUndoEnvelope(
+      parseInverse(operation.inverse_command),
+    );
+    const action = envelope?.action === 'undo' ? 'redo' : 'undo';
+    return {
+      status: 'authorized',
+      action,
+      inverse_command: operation.inverse_command,
+    };
+  }
+
+  private authorizeSavePointRestore(
+    request: RestoreCharacterSavePointRequest,
+  ):
+    | { readonly status: 'authorized'; readonly snapshot: string }
+    | Extract<RestoreCharacterSavePointResult, { status: 'refused' }> {
+    const revision = this.db.scalar(
+      'SELECT revision FROM characters WHERE id = ?',
+      [request.character_id],
+    );
+    if (revision === null) {
+      return {
+        status: 'refused',
+        reason: 'character_not_found',
+        current_revision: null,
+      };
+    }
+    const currentRevision = Number(revision);
+    const point = this.db.oneRaw(
+      `SELECT character_id, snapshot
+       FROM character_save_points
+       WHERE id = ?`,
+      [request.save_point_id],
+    );
+    if (point === null) {
+      return {
+        status: 'refused',
+        reason: 'save_point_not_found',
+        current_revision: currentRevision,
+      };
+    }
+    if (Number(point.character_id) !== request.character_id) {
+      return {
+        status: 'refused',
+        reason: 'save_point_character_mismatch',
+        current_revision: currentRevision,
+      };
+    }
+    if (request.expected_revision !== currentRevision) {
+      return {
+        status: 'refused',
+        reason: 'revision_mismatch',
+        current_revision: currentRevision,
+      };
+    }
+    if (typeof point.snapshot !== 'string') {
+      throw new Error('Stored save-point snapshot is invalid.');
+    }
+    return { status: 'authorized', snapshot: point.snapshot };
+  }
+
+  private replayUndo(
+    request: UndoCharacterOperationRequest,
+  ): UndoCharacterOperationResult | null {
+    const revision = this.db.scalar(
+      'SELECT revision FROM characters WHERE id = ?',
+      [request.character_id],
+    );
+    if (revision === null) return null;
+    const latest = this.db.oneRaw(
+      `SELECT operation_uuid, expected_revision, resulting_revision,
+              inverse_command
+       FROM character_operations
+       WHERE character_id = ?
+       ORDER BY id DESC
+       LIMIT 1`,
+      [request.character_id],
+    );
+    if (
+      latest === null ||
+      Number(latest.expected_revision) !== request.expected_revision ||
+      Number(latest.resulting_revision) !== Number(revision) ||
+      typeof latest.operation_uuid !== 'string' ||
+      typeof latest.inverse_command !== 'string'
+    ) {
+      return null;
+    }
+    const envelope = storedOperationUndoEnvelope(
+      parseInverse(latest.inverse_command),
+    );
+    if (envelope?.target_operation_uuid !== request.operation_uuid) {
+      return null;
+    }
+    return {
+      status: 'applied',
+      operation_uuid: latest.operation_uuid,
+      revision: Number(revision),
+      idempotent_replay: true,
+    };
+  }
+
+  private recordUndoEnvelope(
+    result: CharacterCommandResult,
+    action: 'undo' | 'redo',
+    targetOperationUuid: string,
+  ): CharacterCommandResult {
+    if (result.inverse.type === 'internal_operation_undo') {
+      throw new Error('An operation undo inverse cannot be nested.');
+    }
+    const command: StoredCommandInverse = result.inverse;
+    const envelope: StoredOperationUndoInverse = {
+      type: 'internal_operation_undo',
+      action,
+      target_operation_uuid: targetOperationUuid,
+      command,
+    };
+    const updated = this.db.exec(
+      `UPDATE character_operations
+       SET inverse_command = ?
+       WHERE operation_uuid = ?`,
+      [JSON.stringify(envelope), result.operation_uuid],
+    );
+    if (updated.changes !== 1) {
+      throw new Error('The operation undo inverse was not stored.');
+    }
+    return { ...result, inverse: envelope };
+  }
+
+  private commitStoredFlavorUndo(
+    request: UndoCharacterOperationRequest,
+    operationUuid: string,
+    flavor: StoredCharacterFlavorInverse,
+  ): CharacterCommandResult {
+    const before = this.#state.capture(request.character_id);
+    const inverse: StoredCharacterFlavorInverse = {
+      type: 'internal_flavor_restore',
+      alignment: sqlNullableString(before.character, 'alignment'),
+      appearance: sqlNullableString(before.character, 'appearance'),
+      backstory: sqlNullableString(before.character, 'backstory'),
+      notes: sqlNullableString(before.character, 'notes'),
+    };
+    const timestamp = this.#clock();
+    applyStoredCharacterFlavorInverse(
+      this.db,
+      request.character_id,
+      flavor,
+      timestamp,
+    );
+    const nextRevision = request.expected_revision + 1;
+    this.db.exec(
+      'UPDATE characters SET revision = ? WHERE id = ?',
+      [nextRevision, request.character_id],
+    );
+    const after = this.#state.capture(request.character_id);
+    this.#audit.append({
+      characterId: request.character_id,
+      operationUuid,
+      actionType: 'update_character_flavor',
+      reason: null,
+      before,
+      after,
+    });
+    this.db.exec(
+      `INSERT INTO character_operations (
+         character_id, operation_uuid, expected_revision,
+         resulting_revision, inverse_command, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        request.character_id,
+        operationUuid,
+        request.expected_revision,
+        nextRevision,
+        JSON.stringify(inverse),
+        timestamp,
+        timestamp,
+      ],
+    );
+    return {
+      inverse,
+      operation_uuid: operationUuid,
+      revision: nextRevision,
+      idempotent_replay: false,
+    };
+  }
+
+  private commitStoredSnapshot(
+    characterId: number,
+    expectedRevision: number,
+    operationUuid: string,
+    stored: StoredCharacterSnapshotInverse,
+  ): CharacterCommandResult {
+    const before = this.#state.capture(characterId);
+    this.#state.restore(characterId, stored.snapshot);
+    const inverse: StoredCharacterSnapshotInverse = {
+      type: 'internal_snapshot_restore',
+      snapshot: snapshotJson(before),
+    };
+    const nextRevision = expectedRevision + 1;
+    const timestamp = this.#clock();
+    this.db.exec(
+      'UPDATE characters SET revision = ?, updated_at = ? WHERE id = ?',
+      [nextRevision, timestamp, characterId],
+    );
+    const after = this.#state.capture(characterId);
+    this.#audit.append({
+      characterId,
+      operationUuid,
+      actionType: 'restore_snapshot',
+      reason: null,
+      before,
+      after,
+    });
+    this.db.exec(
+      `INSERT INTO character_operations (
+         character_id, operation_uuid, expected_revision,
+         resulting_revision, inverse_command, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        characterId,
+        operationUuid,
+        expectedRevision,
+        nextRevision,
+        JSON.stringify(inverse),
+        timestamp,
+        timestamp,
+      ],
+    );
+    return {
+      inverse,
+      operation_uuid: operationUuid,
+      revision: nextRevision,
+      idempotent_replay: false,
+    };
   }
 
   private async warningInverse(
@@ -474,10 +1083,6 @@ export class CharacterCommandExecutor {
     payload: CharacterCommandPayload,
     command: ConstructedCharacterCommand,
   ): void {
-    if (payload.type === 'restore_snapshot') {
-      this.#state.restore(characterId, payload.snapshot);
-      return;
-    }
     if (payload.type === 'acknowledge_warning') {
       this.applyWarning(characterId, payload);
       return;

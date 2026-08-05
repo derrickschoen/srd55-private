@@ -66,7 +66,6 @@ const commandTypes = [
   // (skills-with-provenance §3.5): deliberately absent, so both refuse as
   // 'Unknown character command type.' — the S-LEGACY control's assertion.
   'fill_skill_grant',
-  'restore_snapshot',
 ] as const;
 
 /**
@@ -103,10 +102,20 @@ export interface MalformedPlannedSubchoiceData {
   readonly field: string;
 }
 
+export interface InvalidCharacterFlavorData {
+  readonly reason: 'invalid_character_flavor';
+  readonly field: 'alignment' | 'appearance' | 'backstory' | 'notes';
+  readonly issue: 'contains_nul';
+}
+
+export type CharacterCommandPayloadErrorData =
+  | MalformedPlannedSubchoiceData
+  | InvalidCharacterFlavorData;
+
 export class CharacterCommandPayloadError extends TypeError {
   constructor(
     message: string,
-    readonly data: MalformedPlannedSubchoiceData | null = null,
+    readonly data: CharacterCommandPayloadErrorData | null = null,
   ) {
     super(message);
     this.name = 'CharacterCommandPayloadError';
@@ -336,32 +345,7 @@ function validateUpdateCharacterFlavor(record: UnknownRecord): void {
     'backstory',
     'notes',
   ] as const;
-  const mode = record.mode ?? 'edit';
-
-  if (mode === 'restore') {
-    rejectUnknown(record, [
-      'type',
-      'mode',
-      ...fields,
-      'integrity',
-      'reason',
-    ]);
-    for (const field of fields) {
-      if (!hasOwn(record, field)) {
-        invalid(`${field} is required; use null when it is not known.`);
-      }
-      if (record[field] !== null && typeof record[field] !== 'string') {
-        invalid(`${field} must be a string or null.`);
-      }
-    }
-    validateIntegrity(record);
-    return;
-  }
-
-  if (mode !== 'edit') {
-    invalid('Unknown character flavor mutation mode.');
-  }
-  rejectUnknown(record, ['type', 'mode', ...fields, 'reason']);
+  rejectUnknown(record, ['type', ...fields, 'reason']);
   const changed = fields.filter((field) => hasOwn(record, field));
   if (changed.length === 0) {
     invalid('At least one character flavor field must be changed.');
@@ -372,11 +356,15 @@ function validateUpdateCharacterFlavor(record: UnknownRecord): void {
     if (typeof value !== 'string') {
       invalid(`${field} must be a string or null.`);
     }
-    // The three frozen bounded CHECKs use SQLite length(), whose visible
-    // prefix is empty when NUL is first. Notes deliberately has no CHECK so
-    // grandfathered bytes remain storable; a later NUL has a nonempty prefix.
-    if (field !== 'notes' && value.startsWith('\0')) {
-      invalid(`${field} must not start with NUL.`);
+    if (value.includes('\0')) {
+      throw new CharacterCommandPayloadError(
+        `${field} must not contain NUL.`,
+        {
+          reason: 'invalid_character_flavor',
+          field,
+          issue: 'contains_nul',
+        },
+      );
     }
     if ([...value].length > CHARACTER_TEXT_LIMITS[field]) {
       invalid(
@@ -1558,16 +1546,6 @@ function validateFillSkillGrant(record: UnknownRecord): void {
   }
 }
 
-function validateRestoreSnapshot(record: UnknownRecord): void {
-  rejectUnknown(record, ['type', 'snapshot', 'integrity', 'reason']);
-  const snapshot = objectValue(
-    record.snapshot,
-    'Character snapshot must be an object.',
-  );
-  canonicalizeJson(snapshot);
-  validateIntegrity(record);
-}
-
 /**
  * Returns the validated record, normalized where a validator rewrites it. Every
  * arm returns and nothing follows the switch, so omitting a command type is a
@@ -1653,9 +1631,6 @@ function validateByType(
       return record;
     case 'fill_skill_grant':
       validateFillSkillGrant(record);
-      return record;
-    case 'restore_snapshot':
-      validateRestoreSnapshot(record);
       return record;
   }
 }

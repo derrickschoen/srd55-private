@@ -15,10 +15,20 @@ import {
 
 type Row = Record<string, any>;
 type CommandResult = {
-  inverse: Record<string, any>;
+  operation_uuid: string;
   revision: number;
   idempotent_replay: boolean;
 };
+
+type UndoResult =
+  | (CommandResult & { status: 'applied' })
+  | {
+      status: 'refused';
+      reason: string;
+      current_revision: number | null;
+    };
+
+type SavePointRestoreResult = UndoResult;
 
 let workspaceImage: FixtureImage<WorkspaceFixtureIds>;
 let reportImage: FixtureImage<ReportFixtureIds>;
@@ -120,6 +130,32 @@ async function execute(
     operation_uuid: operation(index),
     expected_revision: expectedRevision,
     command,
+  });
+}
+
+async function undo(
+  page: Page,
+  characterId: number,
+  expectedRevision: number,
+  operationUuid: string,
+): Promise<UndoResult> {
+  return rpc<UndoResult>(page, 'commands.undo', {
+    character_id: characterId,
+    operation_uuid: operationUuid,
+    expected_revision: expectedRevision,
+  });
+}
+
+async function restoreSavePoint(
+  page: Page,
+  characterId: number,
+  savePointId: number,
+  expectedRevision: number,
+): Promise<SavePointRestoreResult> {
+  return rpc<SavePointRestoreResult>(page, 'commands.restoreSavePoint', {
+    character_id: characterId,
+    save_point_id: savePointId,
+    expected_revision: expectedRevision,
   });
 }
 
@@ -797,7 +833,12 @@ test('undo restores the prior spell selection', async ({ page }) => {
     },
     8,
   );
-  expect(changed.inverse).toEqual({
+  const storedInverse = JSON.parse(String(
+    (await rows(page, 'character_operations')).find(
+      (row) => row.operation_uuid === changed.operation_uuid,
+    )?.inverse_command,
+  ));
+  expect(storedInverse).toEqual({
     type: 'set_slot',
     slot_id: workspaceImage.ids.targetSlot,
     mode: 'restore',
@@ -812,12 +853,11 @@ test('undo restores the prior spell selection', async ({ page }) => {
     },
     integrity: expect.any(String),
   });
-  await execute(
+  await undo(
     page,
     workspaceImage.ids.character,
     1,
-    changed.inverse,
-    80,
+    changed.operation_uuid,
   );
   expect(
     (await rows(page, 'spell_selection_slots')).find(
@@ -982,21 +1022,13 @@ test('round-trips a named save point through the mutation path', async ({
     },
     10,
   );
-  const restore = await rpc<Record<string, unknown>>(
-    page,
-    'queries.savePoints.restoreCommand',
-    {
-      character_id: workspaceImage.ids.character,
-      save_point_id: point.id,
-    },
-  );
-  await execute(
+  const restored = await restoreSavePoint(
     page,
     workspaceImage.ids.character,
+    point.id,
     1,
-    restore,
-    100,
   );
+  expect(restored).toMatchObject({ status: 'applied', revision: 2 });
   expect(
     (await rows(page, 'characters')).find(
       (row) => row.id === workspaceImage.ids.character,
@@ -1096,11 +1128,7 @@ test('returns the exact mutation envelope, inverse, operation, and reversible au
     12,
   );
   expect(result).toEqual({
-    inverse: {
-      type: 'update_ability',
-      ability: 'wisdom',
-      score: 14,
-    },
+    operation_uuid: operation(12),
     revision: 1,
     idempotent_replay: false,
   });
@@ -1112,7 +1140,11 @@ test('returns the exact mutation envelope, inverse, operation, and reversible au
     character_id: workspaceImage.ids.character,
     expected_revision: 0,
     resulting_revision: 1,
-    inverse_command: JSON.stringify(result.inverse),
+    inverse_command: JSON.stringify({
+      type: 'update_ability',
+      ability: 'wisdom',
+      score: 14,
+    }),
   });
   expect(
     (await rows(page, 'change_log')).find(
@@ -1233,18 +1265,21 @@ test('undoes a structural class change through its snapshot inverse', async ({
     },
     14,
   );
-  expect(changed.inverse).toMatchObject({
+  const storedClassInverse = JSON.parse(String(
+    (await rows(page, 'character_operations')).find(
+      (row) => row.operation_uuid === changed.operation_uuid,
+    )?.inverse_command,
+  )) as { snapshot: { schema_version: string } };
+  expect(storedClassInverse).toMatchObject({
     type: 'restore_snapshot',
     snapshot: { schema_version: 'a7-v16' },
-    integrity: expect.any(String),
   });
-  expect(changed.inverse.snapshot.schema_version).not.toBe('a7-v15');
-  await execute(
+  expect(storedClassInverse.snapshot.schema_version).not.toBe('a7-v15');
+  await undo(
     page,
     workspaceImage.ids.character,
     1,
-    changed.inverse,
-    140,
+    changed.operation_uuid,
   );
   expect({
     levels: forCharacter(
@@ -1349,12 +1384,11 @@ test('round-trips character rules and rejects legacy selection while legacy rule
   expect(rulesAudit.map((row) => row.action_type)).toEqual([
     'update_character_rules',
   ]);
-  await execute(
+  await undo(
     page,
     workspaceImage.ids.character,
     1,
-    enabled.inverse,
-    160,
+    enabled.operation_uuid,
   );
   const rejected = await rejectedRpc(page, 'commands.execute', {
     character_id: workspaceImage.ids.character,
@@ -1527,12 +1561,11 @@ test('round-trips source configuration with one audit group and rejects unsuppor
       workspaceImage.ids.character,
     ),
   ).toHaveLength(1);
-  await execute(
+  await undo(
     page,
     workspaceImage.ids.character,
     1,
-    changed.inverse,
-    171,
+    changed.operation_uuid,
   );
   expect({
     sources: forCharacter(
@@ -1802,7 +1835,7 @@ test('adds a class source with planned slots and addressed spellbook acquisition
         .map((row) => row.action_type),
     ),
   ).toEqual(new Set(['add_source']));
-  await execute(page, character.id, 2, added.inverse, 192);
+  await undo(page, character.id, 2, added.operation_uuid);
   expect(
     forCharacter(await rows(page, 'character_class_levels'), character.id),
   ).toEqual([]);
@@ -1981,12 +2014,11 @@ test('removes a root source through the command and cascades to its nested feat'
         .filter((row) => row.source_instance_id === childId)
         .map((row) => row.state),
     ).toEqual(['orphaned', 'orphaned', 'orphaned']);
-    await execute(
+    await undo(
       page,
       workspaceImage.ids.character,
       expectedRevision + 1,
-      removed.inverse,
-      210 + index,
+      removed.operation_uuid,
     );
     expect(
       (await rows(page, 'character_source_instances')).filter((row) =>
@@ -2034,7 +2066,11 @@ test('round-trips warning acknowledgement with idempotent replay and grouped aud
     },
     22,
   );
-  expect(changed.inverse).toEqual({
+  expect(JSON.parse(String(
+    (await rows(page, 'character_operations')).find(
+      (row) => row.operation_uuid === changed.operation_uuid,
+    )?.inverse_command,
+  ))).toEqual({
     type: 'acknowledge_warning',
     mode: 'delete',
     warning_fingerprint: warning.warning_fingerprint,
@@ -2078,17 +2114,29 @@ test('round-trips warning acknowledgement with idempotent replay and grouped aud
     action_type: 'acknowledge_warning',
     reversible: 1,
   });
-  const deleted = await execute(
+  const deleted = await undo(
     page,
     workspaceImage.ids.character,
     2,
-    changed.inverse,
-    220,
+    changed.operation_uuid,
   );
-  expect(deleted.inverse).toEqual({
-    type: 'acknowledge_warning',
-    warning_fingerprint: warning.warning_fingerprint,
-    note: 'Intentional.',
+  expect(deleted.status).toBe('applied');
+  if (deleted.status !== 'applied') {
+    throw new Error(`Undo refused: ${deleted.reason}`);
+  }
+  expect(JSON.parse(String(
+    (await rows(page, 'character_operations')).find(
+      (row) => row.operation_uuid === deleted.operation_uuid,
+    )?.inverse_command,
+  ))).toEqual({
+    type: 'internal_operation_undo',
+    action: 'undo',
+    target_operation_uuid: operation(22),
+    command: {
+      type: 'acknowledge_warning',
+      warning_fingerprint: warning.warning_fingerprint,
+      note: 'Intentional.',
+    },
   });
   expect(
     forCharacter(
@@ -2096,12 +2144,11 @@ test('round-trips warning acknowledgement with idempotent replay and grouped aud
       workspaceImage.ids.character,
     ),
   ).toEqual([]);
-  await execute(
+  await undo(
     page,
     workspaceImage.ids.character,
     3,
-    deleted.inverse,
-    221,
+    deleted.operation_uuid,
   );
   expect(
     forCharacter(

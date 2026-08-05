@@ -4,7 +4,6 @@ import {
 } from '../character/character-state';
 import type {
   ResolveLevelFeatChoiceCommand as ResolveLevelFeatChoicePayload,
-  RestoreSnapshotCommand,
 } from '../domain/command-contracts';
 import type { DatabaseContext } from '../db/database';
 import { sqlInteger, sqlNullableInteger, sqlString } from '../db/codecs';
@@ -12,6 +11,7 @@ import { characterLevel } from '../rules/character-level';
 import { GrantRuleSlotGenerator } from '../grants/grant-rule-slot-generator';
 import type { CharacterCommandIntegrity } from './integrity';
 import { applyLevelFeatSelection } from './level-feat-choice';
+import type { StoredCharacterSnapshotInverse } from './stored-inverses';
 
 /** Resolve one durable D70 Epic Boon defer state without moving class level. */
 export class ResolveLevelFeatChoiceCommand {
@@ -25,7 +25,7 @@ export class ResolveLevelFeatChoiceCommand {
   constructor(
     private readonly db: DatabaseContext,
     private readonly payload: ResolveLevelFeatChoicePayload,
-    private readonly integrity: CharacterCommandIntegrity,
+    _integrity: CharacterCommandIntegrity,
     state?: CharacterState,
     generator?: GrantRuleSlotGenerator,
   ) {
@@ -84,13 +84,13 @@ export class ResolveLevelFeatChoiceCommand {
     });
   }
 
-  async inverse(): Promise<RestoreSnapshotCommand> {
+  async inverse(): Promise<StoredCharacterSnapshotInverse> {
     if (this.#characterId === null || this.#before === null) {
       throw new Error('Cannot create an inverse before applying the command.');
     }
-    return this.integrity.attach(this.#characterId, {
-      type: 'restore_snapshot',
+    return {
+      type: 'internal_snapshot_restore',
       snapshot: this.#before,
-    }) as unknown as Promise<RestoreSnapshotCommand>;
+    };
   }
 }

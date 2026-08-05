@@ -70,6 +70,7 @@ describe('command idempotency and stale-slot merge guards', () => {
 
     expect(replay).toEqual({
       inverse: first.inverse,
+      operation_uuid: operationA,
       revision: 2,
       idempotent_replay: true,
     });

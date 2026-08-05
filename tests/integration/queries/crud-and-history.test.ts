@@ -87,14 +87,11 @@ describe('character CRUD, catalog, save points, and operation history', () => {
     expect(crud.delete(character.id).deleted).toBe(false);
   });
 
-  it('persists an exact save-point snapshot and returns a character-bound restore command', async () => {
+  it('persists an exact save-point snapshot without projecting its state bytes', () => {
     const characterId = db.exec(
       `INSERT INTO characters (name, intelligence)
        VALUES ('Snapshot Hero', 17)`,
     ).lastInsertId;
-    const integrity = new CharacterCommandIntegrity(
-      'Q60-save-point-integrity',
-    );
     const savePoints = new SavePointQueries(
       db,
       undefined,
@@ -132,18 +129,6 @@ describe('character CRUD, catalog, save points, and operation history', () => {
     expect(JSON.parse(String(stored?.snapshot)).schema_version)
       .not.toBe('a7-v15');
 
-    const command = await savePoints.restoreCommand(
-      characterId,
-      point.id,
-      integrity,
-    );
-    expect(command).toMatchObject({
-      type: 'restore_snapshot',
-      snapshot: { character: { intelligence: 17 } },
-      integrity: expect.stringMatching(/^[a-f0-9]{64}$/),
-    });
-    expect(await integrity.isValid(characterId, command)).toBe(true);
-    expect(await integrity.isValid(characterId + 1, command)).toBe(false);
     expect(
       Number(
         db.scalar(
@@ -183,11 +168,7 @@ describe('character CRUD, catalog, save points, and operation history', () => {
         operation_uuid: '60606060-6060-4060-8060-606060606060',
         expected_revision: 0,
         resulting_revision: 1,
-        inverse_command: {
-          type: 'update_ability',
-          ability: 'wisdom',
-          score: 13,
-        },
+        history_action: 'command',
         created_at: '2026-07-23T12:00:00.000Z',
       },
     ]);

@@ -21,26 +21,21 @@ const flavorValues: RowCodec<CharacterFlavorValues> = (row) => ({
 });
 
 function validateFlavor(payload: UpdateCharacterFlavorPayload): void {
-  const restore = payload.mode === 'restore';
   let changed = 0;
   for (const field of flavorFields) {
-    if (!restore && !Object.hasOwn(payload, field)) continue;
+    if (!Object.hasOwn(payload, field)) continue;
     changed += 1;
     const value = payload[field];
     if (value !== null && typeof value !== 'string') {
       throw new TypeError(`${field} must be a string or null.`);
     }
     if (
-      !restore &&
-      field !== 'notes' &&
       typeof value === 'string' &&
-      value.startsWith('\0')
+      value.includes('\0')
     ) {
-      // Mirrors the frozen SQLite length() CHECK at the direct-command seam.
-      throw new TypeError(`${field} must not start with NUL.`);
+      throw new TypeError(`${field} must not contain NUL.`);
     }
     if (
-      !restore &&
       typeof value === 'string' &&
       [...value].length > CHARACTER_TEXT_LIMITS[field]
     ) {
@@ -86,9 +81,6 @@ export class UpdateCharacterFlavorCommand {
       const valueFor = (
         field: (typeof flavorFields)[number],
       ): string | null => {
-        if (this.payload.mode === 'restore') {
-          return this.payload[field];
-        }
         if (!Object.hasOwn(this.payload, field)) {
           return previous[field];
         }
@@ -123,7 +115,34 @@ export class UpdateCharacterFlavorCommand {
 
   inverse(): never {
     throw new Error(
-      'The executor prepares the signed character flavor restore inverse.',
+      'The executor persists the character flavor inverse internally.',
     );
   }
+}
+
+export interface StoredCharacterFlavorInverse extends CharacterFlavorValues {
+  readonly type: 'internal_flavor_restore';
+}
+
+/** Internal-only exact write used after an operation-history authorization. */
+export function applyStoredCharacterFlavorInverse(
+  db: DatabaseContext,
+  characterId: number,
+  inverse: StoredCharacterFlavorInverse,
+  updatedAt: string,
+): void {
+  db.exec(
+    `UPDATE characters
+     SET alignment = ?, appearance = ?, backstory = ?, notes = ?,
+         updated_at = ?
+     WHERE id = ?`,
+    [
+      inverse.alignment,
+      inverse.appearance,
+      inverse.backstory,
+      inverse.notes,
+      updatedAt,
+      characterId,
+    ],
+  );
 }

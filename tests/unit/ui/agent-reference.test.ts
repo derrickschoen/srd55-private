@@ -638,6 +638,11 @@ describe('planner build reference projection', () => {
         value: HOSTILE_CHARACTER_NAME,
         origin: 'unverified-origin',
       },
+      ...['alignment', 'appearance', 'backstory', 'notes'].map((field) => ({
+        field: `character.${field}`,
+        value: HOSTILE_FLAVOR,
+        origin: 'unverified-origin' as const,
+      })),
       {
         field: 'sources[ref=2].display_name',
         value: HOSTILE_SOURCE_NAME,
@@ -655,7 +660,7 @@ describe('planner build reference projection', () => {
         origin: 'unverified-origin',
       },
     ]);
-    expect(projection.reference.free_text.omitted_count).toBe(4);
+    expect(projection.reference.free_text.omitted_count).toBe(8);
     expect(projection.reference.free_text.omitted_fields).toEqual(
       projection.free_text.map((entry) => entry.field),
     );
@@ -919,6 +924,10 @@ describe('planner build reference text sections', () => {
 
     expect(ledger?.rows.map((row) => row[1])).toEqual([
       { text: HOSTILE_CHARACTER_NAME, free_text: true },
+      ...Array.from({ length: 4 }, () => ({
+        text: HOSTILE_FLAVOR,
+        free_text: true,
+      })),
       { text: HOSTILE_SOURCE_NAME, free_text: true },
       { text: HOSTILE_SPELL_NAME, free_text: true },
       { text: HOSTILE_SPELL_LIST, free_text: true },
