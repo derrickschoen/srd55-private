@@ -7,6 +7,108 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D203 — CI-4a mint 0033 AUTHORIZED: 'asserted' key classification (2026-08-04)
+
+CI-4a round 2 correctly stopped: D198's asserted slug keys have no legal
+registry classification — the schema CHECK permits derived digests,
+legacy-opaque (closed set, pre-existing rows only) and bundled-stable,
+and the 0020 triggers would auto-register new slug roots as
+legacy-opaque. Supervisor authorization: MINT 0033 adding a NEW key_kind
+'asserted' for externally asserted slug keys. Closed sets stay closed:
+'derived' keeps its digest meaning, 'legacy-opaque' stays pre-existing
+rows only, no reinterpretation of stored rows, no rekey/backfill (that
+is CI-4b). CHECK constraint and root-registration guards updated so
+import/fork paths can never mint legacy-opaque. schema.sql moves in
+lockstep. Merge order: AR-A (0032) merges BEFORE CI-4a (0033).
+
+## D202 — OWNER: rogue ships as BUNDLED content named "Veteran" (2026-08-04)
+
+Owner: "Seed as bundled content. I have worked on it in the other
+session and renamed it 'Veteran'." The owner-authored kit lives in
+wt/party docs/homebrew/2026-08-04-rogue-veteran-subclass.md with its
+ruling in docs/homebrew/rulings.md; it SUPERSEDES the Executioner arc
+(D194-D196 record the history). Seeding is a VET-SEED unit queued after
+SC-3 merges (rides the SRD-subclass seeding machinery), as bundled
+content like the twelve SRD subclasses — not through the import path.
+
+## D201 — OWNER: PHP parity is reference-only; divergence by ruling (2026-08-04)
+
+The PHP-parity suite documents the ancestor and keeps running as
+regression cover, but is no longer a binding oracle: deliberate
+divergences are permitted when recorded as adjudications. Ratifies the
+FF-B envelope adjudication (public command responses no longer expose
+inverse bytes; the parity expectation was updated to the new contract).
+
+## D200 — OWNER: suite-speed infra unit AUTHORIZED (2026-08-04)
+
+php-feature-parity.spec.ts (~8 min serial) dominates the ~25-30 min
+Playwright gate. A dedicated supervised unit may split it into
+parallel-safe spec files and make the accompanying config changes. The
+config-edit prohibition is a no-paths-to-green rule; this is a deliberate
+authorized infra unit. Conditions: no assertion changes, strict-superset
+test census before/after (same test titles, supervisor-verified), and
+the unit touches nothing else. Queue: after the current lane wave
+(FF-B/SC-3/AR-A/CI-4a) drains.
+
+## D199 — OWNER: legacy command-history compatibility is WIPED (2026-08-04)
+
+Under D60 (zero users) the owner ruled dev-era operation history
+disposable rather than carrying unauthenticatable grandfathered bytes:
+"Wipe it now." FF-B drops the legacy signed-inverse decoder paths and
+legacy restore_snapshot stored-row acceptance; an operation whose stored
+inverse is a legacy shape gets a typed refusal (not decoded, not
+re-signed, not applied). The unauthenticated-legacy-bytes MED from
+FF-B review 3 closes by deletion. New-write validation (limits, NUL)
+applies everywhere; the grandfathered-bytes carve-outs FF-B rounds 1-3
+built for legacy rows are removed as dead paths. Stored legacy rows may
+remain as inert unreadable history; no migration, no row deletion
+required (mint-free).
+
+## D198 — content-identity design's derived-key installer superseded by the CI-3s asserted-key reality (2026-08-04)
+
+CI-4a's dispatch BLOCKED on a genuine contradiction codex proved and the
+supervisor verified: `docs/design/2026-07-30-content-identity.md` excludes
+`content_key` from fingerprints and derives clone keys from the projector
+digest, but the frozen spell projector v1 includes `spell_version_key`
+(the content key) in identity — deliberately, per the CI-3s-PRE
+adjudication (portable stable keys ARE content). A digest-derived key
+stored back into the row changes the next projection: circular. The
+design also requires a "CI-3a immutable installer" that history never
+built (the merged CI-3a was the stored-row projector unit).
+
+Ruling (supervisor, D7 default):
+1. Keys are ASSERTED, name-derived portable slugs through the one shared
+   stable-key normalization — never digest-derived, never random salts,
+   never opaque UUIDs. Determinism and cross-store reproducibility (the
+   design's motive) survive; circularity does not.
+2. A derived renamed clone's key comes from its NEW NAME via that seam;
+   collisions and empty normalized names are the existing typed refusals.
+3. "The immutable installer" is read as the registry's key-first install
+   seam (CI-3s). The CI-4a cutover routes catalog import and spell-fork
+   publishing through that single seam; no direct key mutation outside it.
+4. The design doc's section-11 roadmap rows are henceforth read THROUGH
+   the adjudication layer (D-numbers + CI-chain adjudications); where they
+   conflict, the adjudications win. A supersession banner is added to the
+   doc. Control name corrected: CI-REVIEW does not exist in the doc;
+   CI-SRD-FALLBACK-REVIEW is the fifth control.
+Seam: content-v2 projectors excluding keys remain possible later if
+digest-derived identity is ever truly wanted. Cost to flip: a projector
+version bump plus reconciliation, the path CI-3s already supports.
+
+## D197 — OWNER: registry orphaned/refused counts go to console/log only (2026-08-04)
+
+The bundled content registry returns per-entry `orphaned` and `refused`
+counts; applicationSeed currently discards them. Owner ruling (2026-08-04,
+option chosen from three): log the counts to the console — no user-visible
+surface for now. Cheap, keeps the signal for debugging, promotable to UI
+later when a settings/about surface exists to host it. Closes the
+"diagnostics decision" follow-up recorded at the CI-3s merge.
+
+Same sitting, queue placement ruled: SEEDER-SAME-CARDINALITY-CORRECTION
+is dispatched AFTER CI-4a lands (CI-4a touches the same reconciliation
+seam; landing it first avoids churn), ahead of the rest of the CI-4
+series' follow-ups.
+
 ## D196 — OWNER: rogue level 9 simplified; level 13 becomes total skill mastery (2026-08-04)
 
 Owner's words: "The above is too complicated. Just basic language that

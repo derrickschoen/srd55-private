@@ -1,5 +1,17 @@
 # Content-derived identity and complete non-SRD export
 
+> **SUPERSESSION NOTICE (D198, 2026-08-04).** Read this document THROUGH the
+> adjudication layer in `.claude/decisions.md`; where they conflict, the
+> adjudications win. Specifically superseded here: (1) `content_key` is NOT
+> excluded from fingerprints — the frozen spell projector v1 deliberately
+> carries `spell_version_key` in identity (CI-3s-PRE adjudication: portable
+> stable keys ARE content); (2) digest-derived clone/primary keys are DEAD —
+> they are circular against (1); keys are asserted, name-derived slugs via the
+> shared stable-key normalization with typed collision refusals; (3) the
+> "immutable installer" is realized as the CI-3s registry's key-first install
+> seam, not a separate CI-3a unit; (4) the fifth review control's name is
+> CI-SRD-FALLBACK-REVIEW.
+
 ## Revision 3
 
 - **A1:** Exact-byte content found under the derived primary key computed from
