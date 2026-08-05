@@ -1,7 +1,13 @@
+declare const headingOnlyDescriptionBrand: unique symbol;
 declare const nonEmptySubclassFeatureDescriptionBrand: unique symbol;
 
+export type HeadingOnlyDescription = '' & {
+  readonly [headingOnlyDescriptionBrand]: true;
+};
+
 /** D152: bundled v1 subclass rows carry feature headings, but not feature prose. */
-export const HEADING_ONLY_DESCRIPTION = '' as const;
+// This cast defines the named empty state and is the only sanctioned cast to it.
+export const HEADING_ONLY_DESCRIPTION = '' as HeadingOnlyDescription;
 
 export type NonEmptySubclassFeatureDescription = string & {
   readonly [nonEmptySubclassFeatureDescriptionBrand]: true;
@@ -9,7 +15,7 @@ export type NonEmptySubclassFeatureDescription = string & {
 
 /** The two description states permitted in a persisted subclass feature row. */
 export type SubclassFeatureDescription =
-  | typeof HEADING_ONLY_DESCRIPTION
+  | HeadingOnlyDescription
   | NonEmptySubclassFeatureDescription;
 
 /**

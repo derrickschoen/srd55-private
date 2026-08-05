@@ -20,7 +20,10 @@ import {
   type SrdSubclassFeatureHeading,
 } from './srd-subclasses';
 import type { Ability } from '../domain/enums';
-import { HEADING_ONLY_DESCRIPTION } from '../domain/subclass-feature-description';
+import {
+  HEADING_ONLY_DESCRIPTION,
+  type HeadingOnlyDescription,
+} from '../domain/subclass-feature-description';
 
 interface SrdSubclassSeed {
   readonly class_name: string;
@@ -313,6 +316,7 @@ function replaceOwnedDescendants(
   db: DatabaseContext,
   subclassId: number,
   features: readonly SrdSubclassFeatureHeading[],
+  description: HeadingOnlyDescription,
   timestamp: string,
 ): void {
   db.exec(
@@ -333,7 +337,7 @@ function replaceOwnedDescendants(
         feature.class_level,
         feature.sort_position + 1,
         feature.name,
-        HEADING_ONLY_DESCRIPTION,
+        description,
         timestamp,
         timestamp,
       ],
@@ -355,6 +359,7 @@ export function ensureBundledSrdSubclassContent(db: DatabaseContext): boolean {
           transactionDb,
           subclassId,
           seed.features,
+          HEADING_ONLY_DESCRIPTION,
           timestamp,
         );
       }
