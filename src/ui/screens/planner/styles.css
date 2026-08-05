@@ -128,6 +128,17 @@
   font-weight: 700;
 }
 
+.character-details-form {
+  display: grid;
+  gap: 0.8rem;
+  margin-top: 0.8rem;
+}
+
+.character-details-form textarea {
+  min-height: 6rem;
+  resize: vertical;
+}
+
 .multiclass-skill-controls {
   display: grid;
   gap: 0.75rem;
@@ -189,7 +200,8 @@
 
 button:disabled,
 input:disabled,
-select:disabled {
+select:disabled,
+textarea:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }

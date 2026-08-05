@@ -123,12 +123,12 @@ export const JSON_COLUMNS = {
   'character_save_points.snapshot': {
     shape: 'object',
     allowEmpty: false,
-    reader: 'SavePointReader.restoreCommand (src/queries/save-points.ts:130) — refuses a non-object outright',
+    reader: 'CharacterCommandExecutor.restoreSavePoint (src/commands/character-command-executor.ts) — fetches stored bytes internally and refuses a non-object outright',
   },
   'character_operations.inverse_command': {
     shape: 'object',
     allowEmpty: false,
-    reader: 'parseInverse (src/commands/character-command-executor.ts:58) and parseJson (src/queries/operation-history.ts:62)',
+    reader: 'parseInverse (src/commands/character-command-executor.ts); operation-history queries deliberately do not expose inverse bytes',
   },
   'change_log.previous_value': {
     shape: 'value',

@@ -3,8 +3,8 @@ import {
   type CharacterStateSnapshot,
 } from '../character/character-state';
 import type { DatabaseContext } from '../db/database';
-import type { RestoreSnapshotCommand as RestoreSnapshotPayload } from '../domain/command-contracts';
 import type { CharacterCommandIntegrity } from './integrity';
+import type { StoredRestoreSnapshotInverse as RestoreSnapshotPayload } from './stored-inverses';
 
 export class RestoreSnapshotCommand {
   readonly actionType = 'restore_snapshot';

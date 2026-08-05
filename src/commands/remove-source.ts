@@ -2,15 +2,14 @@ import {
   CharacterState,
   type CharacterStateSnapshot,
 } from '../character/character-state';
-import { CharacterCommandIntegrity } from './integrity';
+import type { CharacterCommandIntegrity } from './integrity';
 import { rowId } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import type {
   RemoveSourceCommand as RemoveSourcePayload,
-  RestoreSnapshotCommand,
 } from '../domain/command-contracts';
-import type { JsonObject } from '../domain/models';
 import { GrantRuleSlotGenerator } from '../grants/grant-rule-slot-generator';
+import type { StoredCharacterSnapshotInverse } from './stored-inverses';
 
 export class RemoveSourceCommand {
   readonly actionType = 'remove_source';
@@ -23,7 +22,7 @@ export class RemoveSourceCommand {
   constructor(
     private readonly db: DatabaseContext,
     private readonly payload: RemoveSourcePayload,
-    private readonly integrity: CharacterCommandIntegrity,
+    _integrity: CharacterCommandIntegrity,
     state?: CharacterState,
     generator?: GrantRuleSlotGenerator,
   ) {
@@ -60,13 +59,13 @@ export class RemoveSourceCommand {
     });
   }
 
-  async inverse(): Promise<RestoreSnapshotCommand> {
+  async inverse(): Promise<StoredCharacterSnapshotInverse> {
     if (this.#characterId === undefined || this.#before === undefined) {
       throw new Error('Cannot create an inverse before applying the command.');
     }
-    return this.integrity.attach(this.#characterId, {
-      type: 'restore_snapshot',
-      snapshot: this.#before as unknown as JsonObject,
-    });
+    return {
+      type: 'internal_snapshot_restore',
+      snapshot: this.#before,
+    };
   }
 }

@@ -10,7 +10,6 @@ import {
   CharacterCommandPayloadValidator,
 } from './payload-validator';
 import { RemoveSourceCommand } from './remove-source';
-import { RestoreSnapshotCommand } from './restore-snapshot';
 import { ClearSlotCommand } from './set-slot/clear';
 import { KeepOverrideSlotCommand } from './set-slot/keep-override';
 import { RestoreSlotCommand } from './set-slot/restore';
@@ -20,6 +19,7 @@ import { LevelUpClassCommand } from './level-up-class';
 import { ResolveLevelFeatChoiceCommand } from './resolve-level-feat-choice';
 import { UpdateAbilityCommand } from './update-ability';
 import { UpdateCharacterRulesCommand } from './update-character-rules';
+import { UpdateCharacterFlavorCommand } from './update-character-flavor';
 import { UpdateClassCommand } from './update-class';
 import { UpdateSourceConfigCommand } from './update-source-config';
 import {
@@ -41,11 +41,12 @@ import {
   UnattuneItemCommand,
   UpdateItemCommand,
 } from './items';
+import type { StoredCommandInverse } from './stored-inverses';
 
 export interface ConstructedCharacterCommand {
   readonly actionType: string;
   apply(characterId: number): void | Promise<void>;
-  inverse(): CharacterCommandPayload | Promise<CharacterCommandPayload>;
+  inverse(): StoredCommandInverse | Promise<StoredCommandInverse>;
   /**
    * Opt-in marker: this command's inverse is only knowable AFTER `apply()`, so
    * the executor stores `inverse()` rather than what `prepareInverse` built.
@@ -60,8 +61,7 @@ function requiresIntegrity(payload: CharacterCommandPayload): boolean {
   return (
     (payload.type === 'set_slot' && payload.mode === 'restore') ||
     (payload.type === 'acknowledge_warning' &&
-      payload.mode === 'delete') ||
-    payload.type === 'restore_snapshot'
+      payload.mode === 'delete')
   );
 }
 
@@ -115,6 +115,8 @@ export class CharacterCommandFactory {
         }
       case 'update_character_rules':
         return new UpdateCharacterRulesCommand(this.db, payload);
+      case 'update_character_flavor':
+        return new UpdateCharacterFlavorCommand(this.db, payload);
       case 'update_source_config':
         return new UpdateSourceConfigCommand(
           this.db,
@@ -173,12 +175,6 @@ export class CharacterCommandFactory {
         return new SetHitPointRollCommand(this.db, payload);
       case 'fill_skill_grant':
         return new FillSkillGrantCommand(this.db, payload);
-      case 'restore_snapshot':
-        return new RestoreSnapshotCommand(
-          this.db,
-          payload,
-          this.integrity,
-        );
     }
   }
 }

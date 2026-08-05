@@ -36,6 +36,7 @@ import {
 } from '../../../src/sharing/schema';
 import { ShareWireRetirementError } from '../../../src/sharing/wire-schemas';
 import { handlers as sharingHandlers } from '../../../src/worker/handlers/sharing';
+import { buildAgentReference } from '../../../src/ui/screens/planner/agent-reference';
 import type { HandlerContext } from '../../../src/worker/handler';
 import { rpcRegistry } from '../../../src/worker/registry';
 import {
@@ -249,10 +250,12 @@ function seedCatalog(db: DatabaseContext, padding = false) {
  * claim about bytes, not about strings that happen to be ASCII.
  */
 const SENDER_NOTE =
-  'Table politics 🎲\tdo NOT share:\nAsked "why?" about Rhea\'s arc \\ unresolved.';
-const SENDER_ALIGNMENT = 'Chaotic Good';
-const SENDER_APPEARANCE = 'Copper scales 🎲\nBlue cloak.';
-const SENDER_BACKSTORY = 'Left Waterdeep after the watch asked "why?" \\ twice.';
+  '[notes sentinel] Table politics 🎲\tdo NOT share:\nAsked "why?" about Rhea\'s arc \\ unresolved.';
+const SENDER_ALIGNMENT = '[alignment sentinel] Chaotic Good';
+const SENDER_APPEARANCE =
+  '[appearance sentinel] Copper scales 🎲\nBlue cloak.';
+const SENDER_BACKSTORY =
+  '[backstory sentinel] Left Waterdeep after the watch asked "why?" \\ twice.';
 
 function seedCharacter(
   db: DatabaseContext,
@@ -1605,6 +1608,38 @@ describe('written-text consent governs a character note', () => {
       backstory: SENDER_BACKSTORY,
       notes: SENDER_NOTE,
     });
+    expect(
+      buildAgentReference(
+        new CharacterWorkspaceBuilder(target).build(imported.characterId),
+        null,
+      ).free_text.filter((entry) => entry.field.startsWith('character.')),
+    ).toEqual([
+      {
+        field: 'character.name',
+        value: withText.character.name,
+        origin: 'unverified-origin',
+      },
+      {
+        field: 'character.alignment',
+        value: SENDER_ALIGNMENT,
+        origin: 'unverified-origin',
+      },
+      {
+        field: 'character.appearance',
+        value: SENDER_APPEARANCE,
+        origin: 'unverified-origin',
+      },
+      {
+        field: 'character.backstory',
+        value: SENDER_BACKSTORY,
+        origin: 'unverified-origin',
+      },
+      {
+        field: 'character.notes',
+        value: SENDER_NOTE,
+        origin: 'unverified-origin',
+      },
+    ]);
   });
 
   it('carries nothing when nobody asks, and the sender still has the note', async () => {

@@ -2,20 +2,19 @@ import {
   CharacterState,
   type CharacterStateSnapshot,
 } from '../character/character-state';
-import { CharacterCommandIntegrity } from './integrity';
+import type { CharacterCommandIntegrity } from './integrity';
 import type { SqlRow } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
 import { characterLevel } from '../rules/character-level';
 import type {
   AddSourceCommand as AddSourcePayload,
-  RestoreSnapshotCommand,
 } from '../domain/command-contracts';
 import {
   definitionTableForSourceType,
   type AddableSourceType,
 } from '../domain/enums';
-import type { JsonObject } from '../domain/models';
 import { GrantRuleSlotGenerator } from '../grants/grant-rule-slot-generator';
+import type { StoredCharacterSnapshotInverse } from './stored-inverses';
 
 import {
   MAGIC_INITIATE_ABILITIES,
@@ -127,7 +126,7 @@ export class AddSourceCommand {
   constructor(
     private readonly db: DatabaseContext,
     private readonly payload: AddSourcePayload,
-    private readonly integrity: CharacterCommandIntegrity,
+    _integrity: CharacterCommandIntegrity,
     state?: CharacterState,
     generator?: GrantRuleSlotGenerator,
   ) {
@@ -383,13 +382,13 @@ export class AddSourceCommand {
       : name;
   }
 
-  async inverse(): Promise<RestoreSnapshotCommand> {
+  async inverse(): Promise<StoredCharacterSnapshotInverse> {
     if (this.#characterId === undefined || this.#before === undefined) {
       throw new Error('Cannot create an inverse before applying the command.');
     }
-    return this.integrity.attach(this.#characterId, {
-      type: 'restore_snapshot',
-      snapshot: this.#before as unknown as JsonObject,
-    });
+    return {
+      type: 'internal_snapshot_restore',
+      snapshot: this.#before,
+    };
   }
 }

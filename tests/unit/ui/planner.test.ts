@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import type { CharacterCommandPayload } from '../../../src/domain/command-contracts';
+import type {
+  CharacterCommandPayload,
+  CharacterFlavorChanges,
+} from '../../../src/domain/command-contracts';
 import type {
   Workspace,
   WorkspaceSlot,
 } from '../../../src/domain/read-models';
 import type { CompletenessResult } from '../../../src/queries/character-completeness';
 import type { OperationHistory } from '../../../src/queries/operation-history';
-import type { CharacterCommandResult } from '../../../src/commands/character-command-executor';
+import type { CharacterCommandRpcResult } from '../../../src/commands/character-command-executor';
 import { RpcError } from '../../../src/rpc/protocol';
 import {
   defaultGridFilters,
@@ -23,13 +26,24 @@ import {
   type PlannerQueryClient,
 } from '../../../src/ui/screens/planner/screen';
 import {
+  renderCharacterDetails,
   renderEditors,
   type PlannerEditorActions,
 } from '../../../src/ui/screens/planner/editors';
+import { CHARACTER_TEXT_LIMITS } from '../../../src/domain/character-limits';
 import {
   installInteractiveDocument,
   interactiveElement,
 } from '../../fixtures/interactive-dom';
+
+const unexpectedUndo: PlannerCommandClient['undo'] = async () => {
+  throw new Error('Unexpected test undo.');
+};
+
+const unexpectedSavePointRestore: PlannerCommandClient['restoreSavePoint'] =
+  async () => {
+    throw new Error('Unexpected test save-point restore.');
+  };
 
 function slot(
   changes: Partial<WorkspaceSlot> = {},
@@ -115,6 +129,12 @@ function workspace(
     classes: [],
     available_classes: [],
     allow_legacy: allowLegacy,
+    flavor: {
+      alignment: 'Neutral Good',
+      appearance: 'Silver hair',
+      backstory: 'Raised beside the old observatory.',
+      notes: null,
+    },
     configurable_sources: [],
     order_sources: [],
     source_catalog: { feat: [], species: [], background: [] },
@@ -162,12 +182,174 @@ const emptyCompleteness: CompletenessResult = {
 };
 
 describe('planner ability editor', () => {
+  it('submits one complete Character details value and counts code points live', () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const initial = workspace(0, 10, false);
+      let update: CharacterFlavorChanges | null = null;
+      const actions: PlannerEditorActions = {
+        updateFlavor: (flavor) => {
+          update = flavor;
+        },
+        updateAbility: () => undefined,
+        updateLegacy: () => undefined,
+        updateClass: () => undefined,
+        removeClass: () => undefined,
+        addClass: () => undefined,
+        updateSourceList: () => undefined,
+        updateClassOrder: () => undefined,
+        addSource: () => undefined,
+        removeSource: () => undefined,
+      };
+      const rendered = interactiveElement(
+        renderCharacterDetails({
+          workspace: initial,
+          actions,
+          disabled: false,
+        }),
+      );
+      expect(rendered.querySelector('h2')?.textContent).toBe(
+        'Character details',
+      );
+      expect(
+        interactiveElement(
+          renderEditors({ workspace: initial, actions, disabled: false }),
+        ).querySelector('h2')?.textContent,
+      ).toBe('Rules editions');
+      const paragraphs = Array.from(rendered.querySelectorAll('p')).map(
+        (paragraph) => paragraph.textContent,
+      );
+      expect(paragraphs).toContain(
+        'Free text only. These words are stored and printed, but never used to calculate character facts.',
+      );
+      expect(paragraphs).toContain(
+        'Share links include these fields only when you turn on “Include my written text”.',
+      );
+      expect(
+        rendered.querySelectorAll('.planner-field').map(
+          (wrapper) => wrapper.children[0]?.textContent,
+        ),
+      ).toEqual(['Alignment', 'Appearance', 'Backstory', 'Notes']);
+
+      const alignment = rendered.querySelector(
+        '[data-focus-key="flavor-alignment"]',
+      ) as unknown as HTMLInputElement | null;
+      const appearance = rendered.querySelector(
+        '[data-focus-key="flavor-appearance"]',
+      ) as unknown as HTMLTextAreaElement | null;
+      const backstory = rendered.querySelector(
+        '[data-focus-key="flavor-backstory"]',
+      ) as unknown as HTMLTextAreaElement | null;
+      const notes = rendered.querySelector(
+        '[data-focus-key="flavor-notes"]',
+      ) as unknown as HTMLTextAreaElement | null;
+      if (
+        alignment === null ||
+        appearance === null ||
+        backstory === null ||
+        notes === null
+      ) {
+        throw new Error('The Character details controls were not rendered.');
+      }
+      expect(alignment.type).toBe('text');
+      expect(appearance.tagName.toLowerCase()).toBe('textarea');
+      expect(alignment.maxLength).toBeUndefined();
+      expect(appearance.maxLength).toBeUndefined();
+      expect(backstory.maxLength).toBeUndefined();
+      expect(notes.maxLength).toBeUndefined();
+
+      const exactAstral = '🧙'.repeat(CHARACTER_TEXT_LIMITS.appearance);
+      appearance.value = exactAstral;
+      appearance.dispatchEvent(new Event('input'));
+      expect(appearance.value).toBe(exactAstral);
+      expect(appearance.value.length).toBe(
+        CHARACTER_TEXT_LIMITS.appearance * 2,
+      );
+      appearance.value = `${exactAstral}🧙`;
+      appearance.dispatchEvent(new Event('input'));
+      expect(appearance.value).toBe(exactAstral);
+      expect(
+        rendered.querySelector('[data-flavor-remaining="appearance"]')
+          ?.value,
+      ).toBe(
+        `0 / ${String(CHARACTER_TEXT_LIMITS.appearance)} remaining`,
+      );
+
+      appearance.value = '🧙🧙';
+      appearance.dispatchEvent(new Event('input'));
+
+      alignment.value = '  Chaotic Good  ';
+      backstory.value = 'Line one\nLine two';
+      notes.value = '   ';
+      rendered
+        .querySelector('[data-testid="character-details-form"]')
+        ?.dispatchEvent(new Event('submit', { cancelable: true }));
+      expect(update).toEqual({
+        alignment: '  Chaotic Good  ',
+        appearance: '🧙🧙',
+        backstory: 'Line one\nLine two',
+        notes: '   ',
+      });
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('submits only changed flavor fields and leaves a grandfathered note alone', () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const grandfathered = 'x'.repeat(CHARACTER_TEXT_LIMITS.notes + 5_000);
+      const base = workspace(0, 10, false);
+      const initial: Workspace = {
+        ...base,
+        flavor: { ...base.flavor, notes: grandfathered },
+      };
+      let update: CharacterFlavorChanges | null = null;
+      const rendered = interactiveElement(
+        renderCharacterDetails({
+          workspace: initial,
+          actions: {
+            updateFlavor: (flavor) => {
+              update = flavor;
+            },
+          },
+          disabled: false,
+        }),
+      );
+      expect(
+        rendered.querySelector('[data-flavor-remaining="notes"]')?.value,
+      ).toBe(
+        `5000 over the ${String(CHARACTER_TEXT_LIMITS.notes)} character limit`,
+      );
+
+      const alignment = rendered.querySelector(
+        '[data-focus-key="flavor-alignment"]',
+      );
+      if (alignment === null) {
+        throw new Error('The alignment control was not rendered.');
+      }
+      alignment.value = 'Chaotic Neutral';
+      alignment.dispatchEvent(new Event('input'));
+      rendered
+        .querySelector('[data-testid="character-details-form"]')
+        ?.dispatchEvent(new Event('submit', { cancelable: true }));
+
+      expect(update).toEqual({ alignment: 'Chaotic Neutral' });
+      expect(
+        rendered.querySelector('[data-focus-key="flavor-notes"]')?.value,
+      ).toBe(grandfathered);
+    } finally {
+      restoreDocument();
+    }
+  });
+
   it('displays base before editing and keeps the resolved total separate', () => {
     const restoreDocument = installInteractiveDocument();
     try {
       const initial = workspace(0, 10, false);
       let update: { ability: string; score: number } | null = null;
       const actions: PlannerEditorActions = {
+        updateFlavor: () => undefined,
         updateAbility: (ability, score) => {
           update = { ability, score };
         },
@@ -223,6 +405,52 @@ describe('planner ability editor', () => {
 });
 
 describe('planner persisted workflow', () => {
+  it('restores a save point through the command RPC using only its id and expected revision', async () => {
+    let persisted = { revision: 4, wisdom: 18, allowLegacy: false };
+    const queries: PlannerQueryClient = {
+      workspace: async () => workspace(
+        persisted.revision,
+        persisted.wisdom,
+        persisted.allowLegacy,
+      ),
+      operationHistory: async () => noHistory,
+      completeness: async () => emptyCompleteness,
+      eligibleSpells: async () => [],
+      createSavePoint: async () => workspace(4, 18, false),
+    };
+    const commands: PlannerCommandClient = {
+      execute: async () => {
+        throw new Error('Unexpected test execute.');
+      },
+      undo: unexpectedUndo,
+      restoreSavePoint: async (
+        characterId,
+        savePointId,
+        expectedRevision,
+      ) => {
+        expect({ characterId, savePointId, expectedRevision }).toEqual({
+          characterId: 7,
+          savePointId: 91,
+          expectedRevision: 4,
+        });
+        persisted = { ...persisted, revision: 5, wisdom: 10 };
+        return {
+          status: 'applied',
+          operation_uuid: 'save-point-restore-operation',
+          revision: 5,
+          idempotent_replay: false,
+        };
+      },
+    };
+    const session = new PlannerSession(7, queries, commands);
+    await session.load();
+
+    await expect(session.restoreSavePoint(91)).resolves.toBe(true);
+    expect(session.workspace?.revision).toBe(5);
+    expect(session.workspace?.report.character.abilities.wisdom).toBe(10);
+    expect(session.canUndo).toBe(true);
+  });
+
   it('filters deterministically and refreshes persisted command, undo, and redo state', async () => {
     let persisted = {
       revision: 0,
@@ -245,38 +473,54 @@ describe('planner persisted workflow', () => {
           persisted.wisdom,
           persisted.allowLegacy,
         ),
-      savePointRestoreCommand: async () => ({
+    };
+    let nextOperation = 0;
+    const inverses = new Map<string, CharacterCommandPayload>();
+    const apply = (command: CharacterCommandPayload): CharacterCommandPayload => {
+      if (command.type !== 'update_ability') {
+        throw new Error('Unexpected test command.');
+      }
+      const inverse: CharacterCommandPayload = {
         type: 'update_ability',
-        ability: 'wisdom',
-        score: 10,
-      }),
+        ability: command.ability,
+        score: persisted.wisdom,
+      };
+      persisted = {
+        ...persisted,
+        revision: persisted.revision + 1,
+        wisdom: command.score,
+      };
+      return inverse;
     };
     const commands: PlannerCommandClient = {
       execute: async (
         _characterId: number,
         expectedRevision: number,
         command: CharacterCommandPayload,
-      ): Promise<CharacterCommandResult> => {
+      ): Promise<CharacterCommandRpcResult> => {
         expect(expectedRevision).toBe(persisted.revision);
-        if (command.type !== 'update_ability') {
-          throw new Error('Unexpected test command.');
-        }
-        const inverse: CharacterCommandPayload = {
-          type: 'update_ability',
-          ability: command.ability,
-          score: persisted.wisdom,
-        };
-        persisted = {
-          ...persisted,
-          revision: persisted.revision + 1,
-          wisdom: command.score,
-        };
+        const operationUuid = `operation-${String(nextOperation += 1)}`;
+        inverses.set(operationUuid, apply(command));
         return {
-          inverse,
+          operation_uuid: operationUuid,
           revision: persisted.revision,
           idempotent_replay: false,
         };
       },
+      undo: async (_characterId, expectedRevision, operationUuid) => {
+        expect(expectedRevision).toBe(persisted.revision);
+        const command = inverses.get(operationUuid);
+        if (command === undefined) throw new Error('Missing test inverse.');
+        const nextUuid = `operation-${String(nextOperation += 1)}`;
+        inverses.set(nextUuid, apply(command));
+        return {
+          status: 'applied',
+          operation_uuid: nextUuid,
+          revision: persisted.revision,
+          idempotent_replay: false,
+        };
+      },
+      restoreSavePoint: unexpectedSavePointRestore,
     };
     const session = new PlannerSession(7, queries, commands);
     await session.load();
@@ -318,6 +562,128 @@ describe('planner persisted workflow', () => {
     });
   });
 
+  it('keeps committed undo and redo stacks intact when their refresh fails', async () => {
+    let persisted = { revision: 0, wisdom: 10, allowLegacy: false };
+    let failRefresh = false;
+    let latestOperation: {
+      readonly uuid: string;
+      readonly action: 'command' | 'undo' | 'redo';
+    } | null = null;
+    const queries: PlannerQueryClient = {
+      workspace: async () => {
+        if (failRefresh) throw new Error('Post-commit refresh failed.');
+        return workspace(
+          persisted.revision,
+          persisted.wisdom,
+          persisted.allowLegacy,
+        );
+      },
+      operationHistory: async () => latestOperation === null
+        ? noHistory
+        : {
+            operations: [{
+              id: persisted.revision,
+              operation_uuid: latestOperation.uuid,
+              expected_revision: persisted.revision - 1,
+              resulting_revision: persisted.revision,
+              history_action: latestOperation.action,
+              created_at: '2026-08-04T12:00:00.000Z',
+            }],
+            changes: [],
+          },
+      completeness: async () => emptyCompleteness,
+      eligibleSpells: async () => [],
+      createSavePoint: async () => workspace(0, 10, false),
+    };
+    let nextOperation = 0;
+    const inverses = new Map<string, CharacterCommandPayload>();
+    const apply = (command: CharacterCommandPayload) => {
+      if (command.type !== 'update_ability') {
+        throw new Error('Unexpected test command.');
+      }
+      const inverse: CharacterCommandPayload = {
+        type: 'update_ability',
+        ability: command.ability,
+        score: persisted.wisdom,
+      };
+      persisted = {
+        ...persisted,
+        revision: persisted.revision + 1,
+        wisdom: command.score,
+      };
+      return inverse;
+    };
+    const commands: PlannerCommandClient = {
+      execute: async (_characterId, expectedRevision, command) => {
+        expect(expectedRevision).toBe(persisted.revision);
+        const operationUuid = `refresh-operation-${String(nextOperation += 1)}`;
+        inverses.set(operationUuid, apply(command));
+        latestOperation = { uuid: operationUuid, action: 'command' };
+        return {
+          operation_uuid: operationUuid,
+          revision: persisted.revision,
+          idempotent_replay: false,
+        };
+      },
+      undo: async (_characterId, expectedRevision, operationUuid) => {
+        expect(expectedRevision).toBe(persisted.revision);
+        const command = inverses.get(operationUuid);
+        if (command === undefined) throw new Error('Missing test inverse.');
+        const nextUuid = `refresh-operation-${String(nextOperation += 1)}`;
+        inverses.set(nextUuid, apply(command));
+        latestOperation = {
+          uuid: nextUuid,
+          action: latestOperation?.action === 'undo' ? 'redo' : 'undo',
+        };
+        return {
+          status: 'applied',
+          operation_uuid: nextUuid,
+          revision: persisted.revision,
+          idempotent_replay: false,
+        };
+      },
+      restoreSavePoint: unexpectedSavePointRestore,
+    };
+    const session = new PlannerSession(7, queries, commands);
+    await session.load();
+
+    failRefresh = true;
+    await expect(session.execute({
+      type: 'update_ability',
+      ability: 'wisdom',
+      score: 18,
+    })).resolves.toBe(false);
+    expect(persisted).toMatchObject({ revision: 1, wisdom: 18 });
+    expect(session.error).toBe(
+      'The change was saved, but the latest character state could not be loaded.',
+    );
+    expect(session.committedRefreshFailure).toBe(true);
+    expect(session.canUndo).toBe(true);
+
+    failRefresh = false;
+    await session.load();
+    expect(session.canUndo).toBe(true);
+    failRefresh = true;
+    await expect(session.undo()).resolves.toBe(false);
+    expect(persisted).toMatchObject({ revision: 2, wisdom: 10 });
+    expect(session.stale).toBe(true);
+    expect(session.canUndo).toBe(false);
+    expect(session.canRedo).toBe(true);
+
+    failRefresh = false;
+    await session.load();
+    failRefresh = true;
+    await expect(session.redo()).resolves.toBe(false);
+    expect(persisted).toMatchObject({ revision: 3, wisdom: 18 });
+    expect(session.canUndo).toBe(true);
+    expect(session.canRedo).toBe(false);
+
+    failRefresh = false;
+    await session.load();
+    await expect(session.undo()).resolves.toBe(true);
+    expect(persisted).toMatchObject({ revision: 4, wisdom: 10 });
+  });
+
   it('marks revision conflicts stale and preserves durable state for reload', async () => {
     const durable = {
       revision: 4,
@@ -340,11 +706,6 @@ describe('planner persisted workflow', () => {
           durable.wisdom,
           durable.allowLegacy,
         ),
-      savePointRestoreCommand: async () => ({
-        type: 'update_ability',
-        ability: 'wisdom',
-        score: 10,
-      }),
     };
     const commands: PlannerCommandClient = {
       execute: async () => {
@@ -354,6 +715,8 @@ describe('planner persisted workflow', () => {
           { current_revision: 5 },
         );
       },
+      undo: unexpectedUndo,
+      restoreSavePoint: unexpectedSavePointRestore,
     };
     const session = new PlannerSession(7, queries, commands);
     await session.load();
@@ -385,10 +748,6 @@ describe('planner persisted workflow', () => {
       completeness: async () => emptyCompleteness,
       eligibleSpells: async () => [],
       createSavePoint: async () => workspace(3, 10, false),
-      savePointRestoreCommand: async () => ({
-        type: 'attune_item',
-        item_id: 40,
-      }),
     };
     const commands: PlannerCommandClient = {
       execute: async () => {
@@ -405,6 +764,8 @@ describe('planner persisted workflow', () => {
           },
         );
       },
+      undo: unexpectedUndo,
+      restoreSavePoint: unexpectedSavePointRestore,
     };
     const session = new PlannerSession(7, queries, commands);
     await session.load();
@@ -459,18 +820,15 @@ describe('completeness panel wording', () => {
       },
       eligibleSpells: async () => [],
       createSavePoint: async () => workspace(0, 10, false),
-      savePointRestoreCommand: async () => ({
-        type: 'update_ability',
-        ability: 'wisdom',
-        score: 10,
-      }),
     };
     const commands: PlannerCommandClient = {
       execute: async () => ({
-        inverse: { type: 'update_ability', ability: 'wisdom', score: 10 },
+        operation_uuid: 'completeness-operation',
         revision: 1,
         idempotent_replay: false,
       }),
+      undo: unexpectedUndo,
+      restoreSavePoint: unexpectedSavePointRestore,
     };
     const session = new PlannerSession(7, queries, commands);
 
@@ -492,15 +850,10 @@ describe('completeness panel wording', () => {
       completeness: async () => emptyCompleteness,
       eligibleSpells: async () => [],
       createSavePoint: async () => workspace(0, 10, false),
-      savePointRestoreCommand: async () => ({
-        type: 'update_ability',
-        ability: 'wisdom',
-        score: 10,
-      }),
     };
     const commands: PlannerCommandClient = {
       execute: async () => ({
-        inverse: { type: 'set_armor', slot: 'shield', armor: null },
+        operation_uuid: 'armor-operation',
         revision: 1,
         idempotent_replay: false,
         preview_warnings: [
@@ -514,6 +867,8 @@ describe('completeness panel wording', () => {
           },
         ],
       }),
+      undo: unexpectedUndo,
+      restoreSavePoint: unexpectedSavePointRestore,
     };
     const session = new PlannerSession(7, queries, commands);
     await session.load();
@@ -580,18 +935,15 @@ describe('completeness panel wording', () => {
         Promise.reject(new Error('Character 7 does not exist.')),
       eligibleSpells: async () => [],
       createSavePoint: async () => workspace(0, 10, false),
-      savePointRestoreCommand: async () => ({
-        type: 'update_ability',
-        ability: 'wisdom',
-        score: 10,
-      }),
     };
     const commands: PlannerCommandClient = {
       execute: async () => ({
-        inverse: { type: 'update_ability', ability: 'wisdom', score: 10 },
+        operation_uuid: 'fallback-operation',
         revision: 1,
         idempotent_replay: false,
       }),
+      undo: unexpectedUndo,
+      restoreSavePoint: unexpectedSavePointRestore,
     };
     const session = new PlannerSession(7, queries, commands);
 

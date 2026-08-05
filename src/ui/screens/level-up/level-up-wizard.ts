@@ -19,7 +19,7 @@ import type { LevelUpPlannedSubchoices } from '../../../domain/command-contracts
 import type { Skill } from '../../../domain/enums';
 import type { CharacterRevision } from '../../../domain/ids';
 import type { EligibleSpell } from '../../../domain/read-models';
-import type { CharacterCommandResult } from '../../../commands/character-command-executor';
+import type { CharacterCommandRpcResult } from '../../../commands/character-command-executor';
 import type { CharacterSheet } from '../../../queries/character-sheet-builder';
 import { element, type Cleanup } from '../../dom';
 import {
@@ -78,7 +78,7 @@ export interface LevelUpWizardServices {
     expectedRevision: CharacterRevision,
     command: LevelUpPreviewCommand,
     operationUuid: string,
-  ) => Promise<CharacterCommandResult>;
+  ) => Promise<CharacterCommandRpcResult>;
   readonly loadSheet?: () => Promise<CharacterSheet>;
   readonly reloadState?: () => void | Promise<void>;
   readonly randomUuid?: () => string;

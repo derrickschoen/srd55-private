@@ -2,6 +2,7 @@ import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CharacterCommandExecutor } from '../../../src/commands/character-command-executor';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
+import { validateCharacterCommandPayload } from '../../../src/commands/payload-validator';
 import { DatabaseContext } from '../../../src/db/database';
 import type {
   CharacterCommandPayload,
@@ -287,10 +288,10 @@ describe('weapon commands', () => {
     // after apply rather than before.
     expect(added.inverse).toEqual({ type: 'remove_weapon', weapon_id: id });
 
-    const undone = await run(added.inverse);
+    const undone = await run(validateCharacterCommandPayload(added.inverse));
     expect(weapons()).toHaveLength(0);
 
-    await run(undone.inverse);
+    await run(validateCharacterCommandPayload(undone.inverse));
     expect(weapons()[0]).toMatchObject({ id, name: 'Greatsword' });
   });
 
@@ -346,7 +347,7 @@ describe('weapon commands', () => {
       ability: 'charisma',
     });
 
-    await run(updated.inverse);
+    await run(validateCharacterCommandPayload(updated.inverse));
     expect(
       db.oneRaw(
         `SELECT id, effect_kind, amount
@@ -369,7 +370,7 @@ describe('weapon commands', () => {
         [weaponId],
       ),
     ).toBe(0);
-    await run(removed.inverse);
+    await run(validateCharacterCommandPayload(removed.inverse));
     expect(
       db.oneRaw(
         `SELECT id, character_weapon_id
@@ -395,7 +396,7 @@ describe('weapon commands', () => {
     const removed = await run({ type: 'remove_weapon', weapon_id: second!.id });
     expect(weapons().map((weapon) => weapon.id)).toEqual([first!.id]);
 
-    await run(removed.inverse);
+    await run(validateCharacterCommandPayload(removed.inverse));
     const restored = weapons().find((weapon) => weapon.id === second!.id);
     // Same id, so any earlier inverse in the undo stack still points at it.
     expect(restored).toMatchObject({
@@ -420,7 +421,7 @@ describe('weapon commands', () => {
     });
     expect(weapons()[0]).toMatchObject({ name: 'Something else' });
 
-    await run(edited.inverse);
+    await run(validateCharacterCommandPayload(edited.inverse));
     expect(weapons()[0]).toEqual(original);
   });
 
@@ -438,7 +439,7 @@ describe('weapon commands', () => {
       weapon_id: id,
       selected: false,
     });
-    await run(selected.inverse);
+    await run(validateCharacterCommandPayload(selected.inverse));
     expect(weapons()[0]!.mastery_selected).toBe(false);
   });
 

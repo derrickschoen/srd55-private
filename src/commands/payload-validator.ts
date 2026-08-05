@@ -32,6 +32,7 @@ import {
   ORIGIN_TEXT_LIMITS,
 } from '../domain/origin-limits';
 import { attunementSlots } from '../domain/attunement';
+import { CHARACTER_TEXT_LIMITS } from '../domain/character-limits';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -40,6 +41,7 @@ const commandTypes = [
   'allocate_abilities',
   'set_slot',
   'update_character_rules',
+  'update_character_flavor',
   'update_source_config',
   'add_source',
   'remove_source',
@@ -64,7 +66,6 @@ const commandTypes = [
   // (skills-with-provenance §3.5): deliberately absent, so both refuse as
   // 'Unknown character command type.' — the S-LEGACY control's assertion.
   'fill_skill_grant',
-  'restore_snapshot',
 ] as const;
 
 /**
@@ -101,10 +102,20 @@ export interface MalformedPlannedSubchoiceData {
   readonly field: string;
 }
 
+export interface InvalidCharacterFlavorData {
+  readonly reason: 'invalid_character_flavor';
+  readonly field: 'alignment' | 'appearance' | 'backstory' | 'notes';
+  readonly issue: 'contains_nul';
+}
+
+export type CharacterCommandPayloadErrorData =
+  | MalformedPlannedSubchoiceData
+  | InvalidCharacterFlavorData;
+
 export class CharacterCommandPayloadError extends TypeError {
   constructor(
     message: string,
-    readonly data: MalformedPlannedSubchoiceData | null = null,
+    readonly data: CharacterCommandPayloadErrorData | null = null,
   ) {
     super(message);
     this.name = 'CharacterCommandPayloadError';
@@ -324,6 +335,42 @@ function validateUpdateCharacterRules(record: UnknownRecord): void {
   rejectUnknown(record, ['type', 'allow_legacy', 'reason']);
   if (!hasOwn(record, 'allow_legacy') || typeof record.allow_legacy !== 'boolean') {
     invalid('allow_legacy must be a boolean.');
+  }
+}
+
+function validateUpdateCharacterFlavor(record: UnknownRecord): void {
+  const fields = [
+    'alignment',
+    'appearance',
+    'backstory',
+    'notes',
+  ] as const;
+  rejectUnknown(record, ['type', ...fields, 'reason']);
+  const changed = fields.filter((field) => hasOwn(record, field));
+  if (changed.length === 0) {
+    invalid('At least one character flavor field must be changed.');
+  }
+  for (const field of changed) {
+    const value = record[field];
+    if (value === null) continue;
+    if (typeof value !== 'string') {
+      invalid(`${field} must be a string or null.`);
+    }
+    if (value.includes('\0')) {
+      throw new CharacterCommandPayloadError(
+        `${field} must not contain NUL.`,
+        {
+          reason: 'invalid_character_flavor',
+          field,
+          issue: 'contains_nul',
+        },
+      );
+    }
+    if ([...value].length > CHARACTER_TEXT_LIMITS[field]) {
+      invalid(
+        `${field} must not exceed ${String(CHARACTER_TEXT_LIMITS[field])} characters.`,
+      );
+    }
   }
 }
 
@@ -1499,16 +1546,6 @@ function validateFillSkillGrant(record: UnknownRecord): void {
   }
 }
 
-function validateRestoreSnapshot(record: UnknownRecord): void {
-  rejectUnknown(record, ['type', 'snapshot', 'integrity', 'reason']);
-  const snapshot = objectValue(
-    record.snapshot,
-    'Character snapshot must be an object.',
-  );
-  canonicalizeJson(snapshot);
-  validateIntegrity(record);
-}
-
 /**
  * Returns the validated record, normalized where a validator rewrites it. Every
  * arm returns and nothing follows the switch, so omitting a command type is a
@@ -1531,6 +1568,9 @@ function validateByType(
       return record;
     case 'update_character_rules':
       validateUpdateCharacterRules(record);
+      return record;
+    case 'update_character_flavor':
+      validateUpdateCharacterFlavor(record);
       return record;
     case 'update_source_config':
       validateUpdateSourceConfig(record);
@@ -1591,9 +1631,6 @@ function validateByType(
       return record;
     case 'fill_skill_grant':
       validateFillSkillGrant(record);
-      return record;
-    case 'restore_snapshot':
-      validateRestoreSnapshot(record);
       return record;
   }
 }

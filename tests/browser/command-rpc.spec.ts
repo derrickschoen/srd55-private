@@ -32,7 +32,7 @@ test('commands.execute persists, replays, reports conflicts, and survives reload
         };
       },
       {
-        inverse: Record<string, unknown>;
+        operation_uuid: string;
         revision: number;
         idempotent_replay: boolean;
       }
@@ -82,20 +82,12 @@ test('commands.execute persists, replays, reports conflicts, and survives reload
 
   expect(result).toEqual({
     first: {
-      inverse: {
-        type: 'update_ability',
-        ability: 'wisdom',
-        score: 10,
-      },
+      operation_uuid: '50505050-5050-4050-8050-505050505050',
       revision: 1,
       idempotent_replay: false,
     },
     replay: {
-      inverse: {
-        type: 'update_ability',
-        ability: 'wisdom',
-        score: 10,
-      },
+      operation_uuid: '50505050-5050-4050-8050-505050505050',
       revision: 1,
       idempotent_replay: true,
     },

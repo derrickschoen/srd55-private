@@ -1145,7 +1145,7 @@ describe('W-E review, atomic confirm, and complete', () => {
       steps: ['class', 'gains', 'subclass', 'review', 'complete'],
     });
     const submit = vi.fn().mockResolvedValue({
-      inverse: { type: 'restore_snapshot', snapshot: {}, integrity: 'test' },
+      operation_uuid: 'level-up-operation',
       revision: 5,
       idempotent_replay: false,
     });
@@ -1196,7 +1196,7 @@ describe('W-E review, atomic confirm, and complete', () => {
       cancel: () => undefined,
       preview: vi.fn().mockResolvedValue(preview(before, after)),
       submit: vi.fn().mockResolvedValue({
-        inverse: { type: 'restore_snapshot', snapshot: {}, integrity: 'test' },
+        operation_uuid: 'level-up-operation',
         revision: 5,
         idempotent_replay: false,
       }),
@@ -1291,7 +1291,7 @@ describe('W-E review, atomic confirm, and complete', () => {
     const submit = vi.fn()
       .mockRejectedValueOnce(ambiguous)
       .mockResolvedValueOnce({
-        inverse: { type: 'restore_snapshot', snapshot: {}, integrity: 'test' },
+        operation_uuid: 'level-up-operation',
         revision: 5,
         idempotent_replay: true,
       });
@@ -1570,7 +1570,7 @@ describe('W-E review, atomic confirm, and complete', () => {
       pending_epic_resolution: pendingEpicResolution([boonCandidate()]),
     };
     const submit = vi.fn().mockResolvedValue({
-      inverse: { type: 'restore_snapshot', snapshot: {}, integrity: 'test' },
+      operation_uuid: 'level-up-operation',
       revision: 21,
       idempotent_replay: false,
     });

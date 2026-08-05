@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CharacterCommandPayloadError,
   CharacterCommandPayloadValidator,
   validateCharacterCommandPayload,
 } from '../../../src/commands/payload-validator';
+import { CHARACTER_TEXT_LIMITS } from '../../../src/domain/character-limits';
 
 const signature = 'a'.repeat(64);
 
@@ -221,11 +223,6 @@ describe('character command payload validation', () => {
           ability_increases: [{ ability: 'wisdom', amount: 1 }],
         },
       },
-      {
-        type: 'restore_snapshot',
-        snapshot: { version: 'a7-v1', tables: {} },
-        integrity: signature,
-      },
     ];
 
     const validator = new CharacterCommandPayloadValidator();
@@ -243,6 +240,94 @@ describe('character command payload validation', () => {
       mode: 'acknowledge',
     });
     expect(withoutMode).not.toHaveProperty('mode');
+  });
+
+  it('update_character_flavor counts Unicode code points and refuses limit+1 by field name', () => {
+    const astral = '🧙';
+    const accepted = {
+      type: 'update_character_flavor',
+      backstory: astral.repeat(CHARACTER_TEXT_LIMITS.backstory),
+    };
+
+    expect(validateCharacterCommandPayload(accepted)).toEqual(accepted);
+    expectInvalid(
+      {
+        ...accepted,
+        backstory: `${accepted.backstory}${astral}`,
+      },
+      `backstory must not exceed ${String(CHARACTER_TEXT_LIMITS.backstory)} characters.`,
+    );
+  });
+
+  it('update_character_flavor validates only fields present in an edit', () => {
+    const partial = {
+      type: 'update_character_flavor',
+      alignment: 'Chaotic Good',
+    };
+
+    expect(validateCharacterCommandPayload(partial)).toEqual(partial);
+    expectInvalid(
+      { type: 'update_character_flavor' },
+      'At least one character flavor field must be changed.',
+    );
+    expectInvalid(
+      { ...partial, extra: 'not part of the atomic value' },
+      'Unknown command field: extra.',
+    );
+    expectInvalid(
+      {
+        ...partial,
+        notes: 'x'.repeat(CHARACTER_TEXT_LIMITS.notes + 1),
+      },
+      `notes must not exceed ${String(CHARACTER_TEXT_LIMITS.notes)} characters.`,
+    );
+  });
+
+  it('update_character_flavor refuses NUL anywhere in every field at the typed payload boundary', () => {
+    for (const field of ['alignment', 'appearance', 'backstory', 'notes']) {
+      const validate = () => validateCharacterCommandPayload({
+        type: 'update_character_flavor',
+        [field]: 'visible\0suffix',
+      });
+
+      expect(validate).toThrow(CharacterCommandPayloadError);
+      expect(validate).toThrow(`${field} must not contain NUL.`);
+    }
+  });
+
+  it('has no public flavor or snapshot restore payload', () => {
+    const restore = {
+      type: 'update_character_flavor',
+      mode: 'restore',
+      alignment: null,
+      appearance: '   ',
+      backstory: 'Stored story',
+      notes: `\0${'x'.repeat(CHARACTER_TEXT_LIMITS.notes + 1)}`,
+      integrity: signature,
+    };
+
+    expectInvalid(
+      restore,
+      'Unknown command field: mode.',
+    );
+    expectInvalid(
+      {
+        type: 'internal_flavor_restore',
+        alignment: null,
+        appearance: null,
+        backstory: null,
+        notes: null,
+      },
+      'Unknown character command type.',
+    );
+    expectInvalid(
+      {
+        type: 'restore_snapshot',
+        snapshot: { schema_version: 'a7-v1', character: { notes: 'state' } },
+        integrity: signature,
+      },
+      'Unknown character command type.',
+    );
   });
 
   it('rejects unknown command fields and ill-typed required fields', () => {
@@ -400,14 +485,6 @@ describe('character command payload validation', () => {
           },
         },
         'Feat ability increases cannot total more than 2.',
-      ],
-      [
-        {
-          type: 'restore_snapshot',
-          snapshot: [],
-          integrity: signature,
-        },
-        'Character snapshot must be an object.',
       ],
       // RETIRED COMMANDS REFUSE AS UNKNOWN (skills-with-provenance §3.5):
       // `choose_multiclass_skill` could not name the grant it filled and
@@ -596,22 +673,6 @@ describe('character command payload validation', () => {
           reason: 'r'.repeat(256),
         },
         'reason must not exceed 255 characters.',
-      ],
-      [
-        {
-          type: 'restore_snapshot',
-          snapshot: {},
-          integrity: 'a'.repeat(63),
-        },
-        'integrity must be a 64-character hexadecimal signature.',
-      ],
-      [
-        {
-          type: 'restore_snapshot',
-          snapshot: {},
-          integrity: 'g'.repeat(64),
-        },
-        'integrity must be a 64-character hexadecimal signature.',
       ],
       [
         {

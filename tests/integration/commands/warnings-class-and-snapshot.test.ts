@@ -12,9 +12,9 @@ import { UpdateClassCommand } from '../../../src/commands/update-class';
 import { DatabaseContext } from '../../../src/db/database';
 import type {
   AcknowledgeWarningCommand as AcknowledgeWarningPayload,
-  RestoreSnapshotCommand as RestoreSnapshotPayload,
   UpdateClassCommand as UpdateClassPayload,
 } from '../../../src/domain/command-contracts';
+import type { StoredRestoreSnapshotInverse as RestoreSnapshotPayload } from '../../../src/commands/stored-inverses';
 import { DuplicateWarningDetector } from '../../../src/duplicates/duplicate-warning-detector';
 import { SpellSelectionService } from '../../../src/eligibility/spell-selection-service';
 import { openTestDatabase } from '../../helpers/open-db';
@@ -434,9 +434,11 @@ describe('warning, class, and snapshot commands', () => {
       subclass_definition_id: null,
       is_starting_class: 1,
     });
-    await expect(
-      integrity.isValid(characterId, await added.inverse()),
-    ).resolves.toBe(true);
+    const addedInverse = await added.inverse();
+    expect(addedInverse).toMatchObject({
+      type: 'internal_snapshot_restore',
+    });
+    expect(addedInverse).not.toHaveProperty('integrity');
 
     const state = new CharacterState(db);
     const beforeRemoval = state.capture(characterId);
@@ -468,12 +470,12 @@ describe('warning, class, and snapshot commands', () => {
       current_spell_version_id: spellId,
       slot_state: 'orphaned',
     });
-    const undoRemoval = new RestoreSnapshotCommand(
-      db,
-      await removed.inverse(),
-      integrity,
-    );
-    await undoRemoval.apply(characterId);
+    const removalInverse = await removed.inverse();
+    expect(removalInverse).toMatchObject({
+      type: 'internal_snapshot_restore',
+    });
+    expect(removalInverse).not.toHaveProperty('integrity');
+    state.restore(characterId, removalInverse.snapshot);
     expect(state.capture(characterId)).toEqual(beforeRemoval);
   });
 

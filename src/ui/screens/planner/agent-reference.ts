@@ -1010,12 +1010,24 @@ export function buildAgentReference(
   };
 
   const sourceNames = registry.withheldNames();
+  const flavorFields = [
+    'alignment',
+    'appearance',
+    'backstory',
+    'notes',
+  ] as const;
   const freeText: FreeTextEntry[] = [
     {
       field: 'character.name',
       value: report.character.name,
       origin: FREE_TEXT_ORIGIN,
     },
+    ...flavorFields.flatMap((field) => {
+      const value = workspace.flavor[field];
+      return value === null
+        ? []
+        : [{ field: `character.${field}`, value, origin: FREE_TEXT_ORIGIN }];
+    }),
     ...[...sourceNames.entries()]
       .sort(([left], [right]) => left - right)
       .map(([ref, value]) => ({
