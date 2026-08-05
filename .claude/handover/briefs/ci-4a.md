@@ -13,11 +13,34 @@ section-11 row **CI-4a**, quoted verbatim:
 > installer only after this UI exists. CI-REVIEW/CLONE/DEPENDENT controls land
 > here.
 
-Also bound: the control definitions for **CI-REVIEW**, **CI-REVIEW-DEFAULT**,
-**CI-REVIEW-REMEMBER**, **CI-CLONE-DERIVED** and **CI-DEPENDENT-REPLAN** in the
-same document, each quoted with its "Must fail" clause. Every one of those five
-is a NEGATIVE CONTROL you must land and must demonstrate failing under exactly
-the mutation the doc names.
+Also bound: the control definitions for **CI-SRD-FALLBACK-REVIEW**,
+**CI-REVIEW-DEFAULT**, **CI-REVIEW-REMEMBER**, **CI-CLONE-DERIVED** and
+**CI-DEPENDENT-REPLAN** in the same document, each quoted with its "Must fail"
+clause. Every one of those five is a NEGATIVE CONTROL you must land and must
+demonstrate failing under exactly the mutation the doc names.
+
+## D198 — the contradiction a prior dispatch correctly BLOCKED on is RESOLVED
+
+A previous CI-4a dispatch stopped because the design doc's derived-key
+immutable-installer scheme is circular against the frozen spell projector
+(identity contains `spell_version_key`, so a digest-derived key stored back
+into the row changes the next digest). That stop was correct and is now
+adjudicated (D198, recorded in `.claude/decisions.md`; the design doc carries a
+supersession banner). Binding resolution — do not relitigate:
+
+1. Keys are ASSERTED, name-derived portable slugs through the ONE shared
+   stable-key normalization seam the repo already has. Never digest-derived,
+   never random salts, never opaque UUIDs.
+2. A derived renamed clone's key comes from its NEW NAME via that seam;
+   collisions and empty normalized names surface as the EXISTING typed
+   refusals (ContentIdentityCollision et al.), refusing, not throwing raw.
+3. "The immutable installer" IS the CI-3s registry's key-first install seam.
+   The cutover means: catalog import and spell-fork publishing route through
+   that single seam; no code path mutates asserted keys outside it. Spell
+   forks stop publishing UUID-derived keys.
+4. Do NOT run any second-agent CLI (claude or otherwise) for critique loops;
+   the supervisor runs all reviews. Your own self-review is welcome but its
+   verdict carries no gate weight.
 
 ## What this unit is, in one sentence
 
@@ -75,18 +98,21 @@ These were argued and settled during CI-3a/3b/3c/3s. Do not relitigate them:
 3. **Dependency-aware review**: cloning a parent forces its dependents'
    fingerprints to be recomputed and the plan refreshed BEFORE commit
    (CI-DEPENDENT-REPLAN).
-4. **Derived renamed clones**: a clone's key is the production projector's
-   digest of its renamed content - never a random salt, never an opaque key -
-   its name changes, incoming references use the new key, and a remembered
-   clone absorbs the Nth import without cloning again (CI-CLONE-DERIVED).
+4. **Derived renamed clones** (as amended by D198): a clone's key is derived
+   from its NEW NAME through the shared stable-key normalization seam - never
+   a random salt, never an opaque key, never a content digest - its name
+   changes, incoming references use the new key, and a remembered clone
+   absorbs the Nth import without cloning again (CI-CLONE-DERIVED).
 5. **Atomic remembered decisions**: the receipt in
    `catalog_content_match_decisions` is written inside the enclosing import
    commit. A second identical import produces no review rows and no new catalog
    rows; a forced later failure leaves NEITHER character NOR receipt
    (CI-REVIEW-REMEMBER).
-6. **The cutover**: catalog import and spell-fork publishing use the immutable
-   installer only, and only now that this UI exists. No silent adoption remains
-   anywhere.
+6. **The cutover** (as amended by D198): catalog import and spell-fork
+   publishing route through the registry's key-first install seam only, and
+   only now that this UI exists. No code path mutates asserted keys outside
+   that seam; spell forks stop publishing UUID-derived keys. No silent
+   adoption remains anywhere.
 7. All five controls land and are demonstrated failing under the doc's named
    mutation.
 

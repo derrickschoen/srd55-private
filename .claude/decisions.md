@@ -7,6 +7,37 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D198 — content-identity design's derived-key installer superseded by the CI-3s asserted-key reality (2026-08-04)
+
+CI-4a's dispatch BLOCKED on a genuine contradiction codex proved and the
+supervisor verified: `docs/design/2026-07-30-content-identity.md` excludes
+`content_key` from fingerprints and derives clone keys from the projector
+digest, but the frozen spell projector v1 includes `spell_version_key`
+(the content key) in identity — deliberately, per the CI-3s-PRE
+adjudication (portable stable keys ARE content). A digest-derived key
+stored back into the row changes the next projection: circular. The
+design also requires a "CI-3a immutable installer" that history never
+built (the merged CI-3a was the stored-row projector unit).
+
+Ruling (supervisor, D7 default):
+1. Keys are ASSERTED, name-derived portable slugs through the one shared
+   stable-key normalization — never digest-derived, never random salts,
+   never opaque UUIDs. Determinism and cross-store reproducibility (the
+   design's motive) survive; circularity does not.
+2. A derived renamed clone's key comes from its NEW NAME via that seam;
+   collisions and empty normalized names are the existing typed refusals.
+3. "The immutable installer" is read as the registry's key-first install
+   seam (CI-3s). The CI-4a cutover routes catalog import and spell-fork
+   publishing through that single seam; no direct key mutation outside it.
+4. The design doc's section-11 roadmap rows are henceforth read THROUGH
+   the adjudication layer (D-numbers + CI-chain adjudications); where they
+   conflict, the adjudications win. A supersession banner is added to the
+   doc. Control name corrected: CI-REVIEW does not exist in the doc;
+   CI-SRD-FALLBACK-REVIEW is the fifth control.
+Seam: content-v2 projectors excluding keys remain possible later if
+digest-derived identity is ever truly wanted. Cost to flip: a projector
+version bump plus reconciliation, the path CI-3s already supports.
+
 ## D197 — OWNER: registry orphaned/refused counts go to console/log only (2026-08-04)
 
 The bundled content registry returns per-entry `orphaned` and `refused`
