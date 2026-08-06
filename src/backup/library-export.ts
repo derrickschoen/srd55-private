@@ -1,3 +1,5 @@
+import { canonicalJson } from '../commands/canonical-json';
+import { sha256 } from '../crypto/sha256';
 import type { DatabaseContext } from '../db/database';
 import type { ContentKey } from '../domain/ids';
 import {
@@ -19,6 +21,10 @@ import { BackupValidationError } from './backup-version';
 
 export interface LibraryImportResult {
   readonly outcomes: Extract<ContentImportCommitResult, { readonly kind: 'committed' }>['outcomes'];
+}
+
+function libraryImportOperationIdentity(document: LibraryExportDocument): string {
+  return sha256(canonicalJson(document));
 }
 
 export function exportWholeLibrary(
@@ -43,7 +49,13 @@ export function planLibraryImport(
 ): PortableImportPlan {
   validateLibraryDocument(document);
   return portableImportPlan(
-    planContentImport(db, libraryContentImportNodes(db, document), choices),
+    planContentImport(
+      db,
+      libraryContentImportNodes(db, document),
+      choices,
+      Object.freeze([]),
+      libraryImportOperationIdentity(document),
+    ),
   );
 }
 
@@ -58,6 +70,7 @@ export function commitLibraryImport(
     nodes: libraryContentImportNodes(db, document),
     token,
     choices,
+    operationIdentity: libraryImportOperationIdentity(document),
   });
 }
 

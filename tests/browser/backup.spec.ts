@@ -1,4 +1,9 @@
 import { expect, test } from './fixtures/parallel-test';
+import type {
+  CharacterBackupDocument,
+  CharacterImportCommitResult,
+} from '../../src/backup/character-backup';
+import type { PortableImportPlan } from '../../src/backup/portable-content';
 
 async function waitForWorker(page: import('@playwright/test').Page) {
   // The four-worker pool measured the caller at 12.2s; 35s gives this
@@ -19,10 +24,7 @@ test('typed backup RPC round-trips both durable formats and rejects before persi
     const created = await window.staticApp.writeCharacter('Portable Browser Hero');
     const character = await window.appRpc.call<
       { characterId: number },
-      {
-        source_character_id: number;
-        character: Record<string, unknown>;
-      }
+      CharacterBackupDocument
     >('backup.exportCharacter', { characterId: created.id });
     const database = await window.appRpc.call<
       Record<string, never>,
@@ -34,10 +36,25 @@ test('typed backup RPC round-trips both durable formats and rejects before persi
     >('backup.exportDatabase', {});
     await window.staticApp.writeCharacter('Removed by database restore');
     await window.appRpc.call('backup.importDatabase', { backup: database });
+    const plan = await window.appRpc.call<
+      { document: CharacterBackupDocument; choices: Record<string, never> },
+      PortableImportPlan
+    >('backup.planCharacterImport', { document: character, choices: {} });
     const imported = await window.appRpc.call<
-      { document: typeof character },
-      { characterId: number }
-    >('backup.importCharacter', { document: character });
+      {
+        document: CharacterBackupDocument;
+        token: PortableImportPlan['token'];
+        choices: Record<string, never>;
+      },
+      CharacterImportCommitResult
+    >('backup.commitCharacterImport', {
+      document: character,
+      token: plan.token,
+      choices: {},
+    });
+    if (imported.kind !== 'committed') {
+      throw new Error(`Character import was ${imported.kind}.`);
+    }
     return {
       characterFormat: String(
         (character as { format?: unknown }).format,
@@ -45,7 +62,7 @@ test('typed backup RPC round-trips both durable formats and rejects before persi
       sourceCharacterId: character.source_character_id,
       databaseFormat: database.format,
       databaseVersion: database.version,
-      importedId: imported.characterId,
+      importedId: imported.result.characterId,
     };
   });
 
@@ -66,11 +83,26 @@ test('typed backup RPC round-trips both durable formats and rejects before persi
   const rejected = await page.evaluate(async () => {
     const document = await window.appRpc.call<
       { characterId: number },
-      Record<string, any>
+      CharacterBackupDocument
     >('backup.exportCharacter', { characterId: 1 });
-    document.character.id = 999;
+    (document.character as Record<string, unknown>).id = 999;
     try {
-      await window.appRpc.call('backup.importCharacter', { document });
+      const plan = await window.appRpc.call<
+        { document: CharacterBackupDocument; choices: Record<string, never> },
+        PortableImportPlan
+      >('backup.planCharacterImport', { document, choices: {} });
+      await window.appRpc.call<
+        {
+          document: CharacterBackupDocument;
+          token: PortableImportPlan['token'];
+          choices: Record<string, never>;
+        },
+        CharacterImportCommitResult
+      >('backup.commitCharacterImport', {
+        document,
+        token: plan.token,
+        choices: {},
+      });
       return { rejected: false, message: null };
     } catch (error) {
       return {

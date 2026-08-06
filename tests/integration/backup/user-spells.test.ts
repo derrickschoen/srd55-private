@@ -7,6 +7,11 @@ import {
   planCharacterBackupImport,
   type CharacterBackupSpellDefinitions,
 } from '../../../src/backup/character-backup';
+import {
+  commitLibraryImport,
+  exportWholeLibrary,
+  planLibraryImport,
+} from '../../../src/backup/library-export';
 import { PRE_FLAVOR_CHARACTER_BACKUP_VERSION } from '../../../src/backup/backup-version';
 import { DatabaseContext } from '../../../src/db/database';
 import { deriveContentIdentityV1 } from '../../../src/catalog/content-identity';
@@ -45,7 +50,7 @@ function seedReferencedSpell(
     [
       `identity:${contentKey}`,
       `${displayName} Canonical`,
-      displayName.toLowerCase(),
+      `${displayName.toLowerCase()} canonical`,
       timestamp,
       timestamp,
     ],
@@ -186,7 +191,7 @@ function expectedDefinitions(
         id: 1,
         content_key: `identity:${contentKey}`,
         canonical_name: `${displayName} Canonical`,
-        normalized_name: displayName.toLowerCase(),
+        normalized_name: `${displayName.toLowerCase()} canonical`,
         notes: 'identity note',
         created_at: timestamp,
         updated_at: timestamp,
@@ -308,6 +313,23 @@ function refreshSpellFingerprint(db: DatabaseContext, contentKey: string): void 
   });
 }
 
+interface MutablePortableSpellIdentity {
+  canonical_name: string;
+  normalized_name: string;
+  aliases: Array<{
+    alias: string;
+    normalized_alias: string;
+  }>;
+}
+
+function carriedSpellIdentity(document: ReturnType<typeof exportWholeLibrary>) {
+  const spell = document.content.find((entry) => entry.kind === 'spell');
+  if (spell?.spell_identity === undefined) {
+    throw new Error('Expected the library fixture to carry one spell identity.');
+  }
+  return spell.spell_identity as MutablePortableSpellIdentity;
+}
+
 afterEach(() => {
   for (const connection of opened.splice(0)) {
     if (connection.isOpen()) {
@@ -403,7 +425,7 @@ describe('portable character backup user-authored spells', () => {
       );
       expect(document.content[0]?.spell_identity).toEqual({
         canonical_name: `${displayName} Canonical`,
-        normalized_name: displayName.toLowerCase(),
+        normalized_name: `${displayName.toLowerCase()} canonical`,
         aliases: [{
           alias: `${displayName} Alias`,
           normalized_alias: `${displayName.toLowerCase()} alias`,
@@ -426,7 +448,7 @@ describe('portable character backup user-authored spells', () => {
         [contentKey],
       )).toEqual({
         canonical_name: `${displayName} Canonical`,
-        normalized_name: displayName.toLowerCase(),
+        normalized_name: `${displayName.toLowerCase()} canonical`,
       });
       expect(target.allRaw(
         `SELECT alias.alias, alias.normalized_alias
@@ -594,5 +616,167 @@ describe('portable character backup user-authored spells', () => {
         [imported.characterId],
       ),
     ).toBe(local.versionId);
+  });
+
+  it('refuses a canonical spell identity whose normalized_name does not match shared normalization', async () => {
+    const source = await database();
+    seedReferencedSpell(
+      source,
+      'user',
+      '2024:local.dnd-wt:normalized-canonical',
+      'Normalized Canonical',
+      null,
+    );
+    const document = structuredClone(exportWholeLibrary(source));
+    carriedSpellIdentity(document).normalized_name = 'unrelated identity';
+
+    const target = await database();
+    expect(() => planLibraryImport(target, document)).toThrow(
+      'normalized_name does not match canonical_name normalization',
+    );
+    expect(target.scalar<number>('SELECT count(*) FROM spell_versions')).toBe(0);
+  });
+
+  it('refuses an alias whose normalized_alias does not match shared normalization', async () => {
+    const source = await database();
+    seedReferencedSpell(
+      source,
+      'user',
+      '2024:local.dnd-wt:normalized-alias',
+      'Normalized Alias',
+      null,
+    );
+    const document = structuredClone(exportWholeLibrary(source));
+    carriedSpellIdentity(document).aliases[0]!.normalized_alias = 'unrelated alias';
+
+    const target = await database();
+    expect(() => planLibraryImport(target, document)).toThrow(
+      'aliases must contain non-empty aliases with matching normalization',
+    );
+    expect(target.scalar<number>('SELECT count(*) FROM spell_versions')).toBe(0);
+  });
+
+  it('binds spell identity sidecars into library import plan tokens', async () => {
+    const source = await database();
+    seedReferencedSpell(
+      source,
+      'user',
+      '2024:local.dnd-wt:bound-sidecar',
+      'Bound Sidecar',
+      null,
+    );
+    const document = exportWholeLibrary(source);
+    const target = await database();
+    const plan = planLibraryImport(target, document);
+    const substituted = structuredClone(document);
+    const identity = carriedSpellIdentity(substituted);
+    identity.canonical_name = 'Substituted Canonical';
+    identity.normalized_name = 'substituted canonical';
+
+    const committed = commitLibraryImport(target, substituted, plan.token);
+
+    expect(committed.kind).toBe('stale-plan');
+    expect(target.scalar<number>('SELECT count(*) FROM spell_versions')).toBe(0);
+    expect(target.scalar<number>('SELECT count(*) FROM spell_identities')).toBe(0);
+  });
+
+  it('refuses an exact spell match with conflicting canonical identity metadata', async () => {
+    const contentKey = '2024:local.dnd-wt:exact-canonical-conflict';
+    const source = await database();
+    seedReferencedSpell(
+      source,
+      'user',
+      contentKey,
+      'Exact Canonical Conflict',
+      null,
+    );
+    const document = exportWholeLibrary(source);
+    const target = await database();
+    const local = seedReferencedSpell(
+      target,
+      'user',
+      contentKey,
+      'Exact Canonical Conflict',
+      null,
+    );
+    target.exec(
+      `UPDATE spell_identities
+       SET canonical_name = 'Conflicting Canonical',
+           normalized_name = 'conflicting canonical'
+       WHERE id = ?`,
+      [local.identityId],
+    );
+
+    const plan = planLibraryImport(target, document);
+    expect(plan.outcomes).toEqual([
+      expect.objectContaining({ kind: 'refused', reason: 'install_refused' }),
+    ]);
+    const committed = commitLibraryImport(target, document, plan.token);
+    expect(committed).toEqual(expect.objectContaining({
+      kind: 'refused',
+      reason: 'entry_refused',
+    }));
+    expect(target.scalar<number>('SELECT count(*) FROM spell_versions')).toBe(1);
+  });
+
+  it('refuses an exact spell match with a conflicting alias', async () => {
+    const contentKey = '2024:local.dnd-wt:exact-alias-conflict';
+    const source = await database();
+    seedReferencedSpell(source, 'user', contentKey, 'Exact Alias Conflict', null);
+    const document = exportWholeLibrary(source);
+    const target = await database();
+    const local = seedReferencedSpell(
+      target,
+      'user',
+      contentKey,
+      'Exact Alias Conflict',
+      null,
+    );
+    target.exec(
+      `UPDATE spell_identity_aliases SET alias = 'EXACT ALIAS CONFLICT ALIAS'
+       WHERE spell_identity_id = ?`,
+      [local.identityId],
+    );
+
+    const plan = planLibraryImport(target, document);
+    expect(plan.outcomes).toEqual([
+      expect.objectContaining({ kind: 'refused', reason: 'install_refused' }),
+    ]);
+    const committed = commitLibraryImport(target, document, plan.token);
+    expect(committed).toEqual(expect.objectContaining({
+      kind: 'refused',
+      reason: 'entry_refused',
+    }));
+    expect(target.scalar<number>('SELECT count(*) FROM spell_versions')).toBe(1);
+  });
+
+  it('commits an exact spell match with an identical identity sidecar', async () => {
+    const contentKey = '2024:local.dnd-wt:exact-identical-sidecar';
+    const source = await database();
+    seedReferencedSpell(
+      source,
+      'user',
+      contentKey,
+      'Exact Identical Sidecar',
+      null,
+    );
+    const document = exportWholeLibrary(source);
+    const target = await database();
+    seedReferencedSpell(
+      target,
+      'user',
+      contentKey,
+      'Exact Identical Sidecar',
+      null,
+    );
+
+    const plan = planLibraryImport(target, document);
+    expect(plan.outcomes).toEqual([
+      expect.objectContaining({ kind: 'match', contentKey }),
+    ]);
+    const committed = commitLibraryImport(target, document, plan.token);
+    expect(committed.kind).toBe('committed');
+    expect(target.scalar<number>('SELECT count(*) FROM spell_versions')).toBe(1);
+    expect(target.scalar<number>('SELECT count(*) FROM spell_identity_aliases')).toBe(1);
   });
 });

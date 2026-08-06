@@ -6,6 +6,7 @@ import type {
   AuthoringFeatureEffect,
 } from '../authoring/effect-forms';
 import { AUTHORING_DOCUMENT_LIMITS } from '../authoring/limits';
+import { normalizeCatalogName } from '../catalog/catalog-normalize';
 import {
   contentFingerprintReferenceKey,
   remapProjectionFingerprintReferences,
@@ -813,16 +814,24 @@ function validatedSpellIdentity(
   if (typeof value.normalized_name !== 'string' || value.normalized_name === '') {
     throw new BackupValidationError(`${label}.normalized_name must be non-empty text.`);
   }
+  if (normalizeCatalogName(value.canonical_name) !== value.normalized_name) {
+    throw new BackupValidationError(
+      `${label}.normalized_name does not match canonical_name normalization.`,
+    );
+  }
   if (
     !Array.isArray(value.aliases) ||
     value.aliases.some((alias, aliasIndex) => {
       const row = backupRecord(alias, `${label}.aliases[${String(aliasIndex)}]`);
       exactKeys(row, ['alias', 'normalized_alias'], `${label}.aliases[${String(aliasIndex)}]`);
       return typeof row.alias !== 'string' || row.alias.trim() === '' ||
-        typeof row.normalized_alias !== 'string' || row.normalized_alias === '';
+        typeof row.normalized_alias !== 'string' || row.normalized_alias === '' ||
+        normalizeCatalogName(row.alias) !== row.normalized_alias;
     })
   ) {
-    throw new BackupValidationError(`${label}.aliases must contain non-empty alias fields.`);
+    throw new BackupValidationError(
+      `${label}.aliases must contain non-empty aliases with matching normalization.`,
+    );
   }
   const aliases = value.aliases as Array<{
     readonly alias: string;
@@ -1044,7 +1053,10 @@ function installSpell(
   metadata: PortableSpellIdentityMetadata,
   contentKey: ContentKey,
 ): void {
-  if (db.scalar<number>('SELECT 1 FROM spell_versions WHERE content_key = ?', [contentKey]) === 1) return;
+  const versionAlreadyInstalled = db.scalar<number>(
+    'SELECT 1 FROM spell_versions WHERE content_key = ?',
+    [contentKey],
+  ) === 1;
   const now = new Date().toISOString();
   const existingIdentity = db.oneRaw(
     `SELECT id, canonical_name, normalized_name
@@ -1093,6 +1105,7 @@ function installSpell(
       [identityId, alias.alias, alias.normalized_alias, now, now],
     );
   }
+  if (versionAlreadyInstalled) return;
   const versionId = db.exec(
     `INSERT INTO spell_versions (
        content_key, spell_identity_id, display_name, rules_edition, level,
@@ -1190,6 +1203,7 @@ function portableNode(
           name: current.name,
           assertedKey: nextKey,
           payload: current.payload,
+          installExact: entry.kind === 'spell',
           projectStored: (database, contentKey) =>
             projectStoredContentV1(database, entry.kind, contentKey),
           install: (database, contentKey) => {
