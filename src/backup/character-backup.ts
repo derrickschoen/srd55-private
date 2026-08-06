@@ -700,9 +700,12 @@ function validateCharacterRows(
   maps: Readonly<Record<ReferenceKind, Map<number, string>>>,
   label: string,
 ): void {
-  const legacyNumericTemplateRefSourceIds = new Set(
+  const degradableNumericTemplateRefSourceIds = new Set(
     (tables.character_source_instances ?? [])
-      .filter((row) => row.source_type === 'background' || row.source_type === 'subclass')
+      .filter((row) =>
+        row.source_type === 'species' ||
+        row.source_type === 'background' ||
+        row.source_type === 'subclass')
       .map((row) => row.id),
   );
   for (const table of CHARACTER_STATE_TABLES) {
@@ -726,7 +729,7 @@ function validateCharacterRows(
         table === 'character_effects' &&
         typeof row.template_ref === 'number' &&
         Number.isSafeInteger(row.template_ref) &&
-        legacyNumericTemplateRefSourceIds.has(row.source_instance_id)
+        degradableNumericTemplateRefSourceIds.has(row.source_instance_id)
           ? { ...row, template_ref: null }
           : legacy === null ? row : legacy.row;
       assertRowShape(
@@ -2604,16 +2607,26 @@ function speciesEffectTemplateRefResolver(
       sourceSpeciesDefinitionId === null ||
       speciesDefinitionId === null ||
       sourceInstanceId === null ||
-      typeof row.template_ref !== 'string' ||
-      (!storedSpeciesEffectTemplateRef.test(row.template_ref) &&
-        !portableSpeciesEffectTemplateRef.test(row.template_ref))
+      row.template_ref === null
     ) {
       return row.template_ref;
     }
     const sourceContentKey = sourceKeys.get(sourceSpeciesDefinitionId) ?? '';
+    const aggregate = portableSpecies.get(sourceContentKey);
+    if (typeof row.template_ref !== 'string') {
+      const target = targetSpecies(speciesDefinitionId);
+      return addNotice(
+        row,
+        sourceContentKey || target.contentKey,
+        aggregate?.name ?? target.name,
+      );
+    }
+    if (
+      !storedSpeciesEffectTemplateRef.test(row.template_ref) &&
+      !portableSpeciesEffectTemplateRef.test(row.template_ref)
+    ) return row.template_ref;
     const target = targetSpecies(speciesDefinitionId);
     const identity = decodedPortableSpeciesEffectTemplateRef(row.template_ref);
-    const aggregate = portableSpecies.get(sourceContentKey);
     const sourceTrait = identity === null || aggregate === undefined
       ? undefined
       : aggregate.traits.find((trait) =>

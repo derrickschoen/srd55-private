@@ -228,6 +228,16 @@ function overrideProgression(
   };
 }
 
+function projectedSubclassIdentity(aggregate: SubclassContentAggregate) {
+  const projected = projectAuthoredContentAggregateV1(aggregate);
+  return deriveContentIdentityV1({
+    kind: 'subclass',
+    edition: aggregate.rules_edition,
+    name: aggregate.name,
+    payload: projected.payload,
+  });
+}
+
 export function subclassDraftToAggregate(
   db: DatabaseContext,
   draft: SubclassAuthoringDraft,
@@ -318,7 +328,8 @@ export function subclassDraftToAggregate(
         });
         unchangedRootOnlyCopy =
           base.progression.mode === 'root_only' &&
-          canonicalJson(base) === canonicalJson(aggregate);
+          projectedSubclassIdentity(base).canonicalJson ===
+            projectedSubclassIdentity(aggregate).canonicalJson;
       } catch {
         // The normal validation issue below is the public boundary for a stale
         // or otherwise unreadable copied base.
@@ -396,8 +407,7 @@ export function previewSubclassPublish(db: DatabaseContext, draft: StoredHomebre
   if (collision !== undefined) throw new SubclassPublishError('The asserted subclass key already names different content.', { reason: 'content_key_collision', content_key: collision.targetContentKey });
   const refused = plan.outcomes.find((outcome) => outcome.kind === 'refused');
   if (refused?.kind === 'refused') throw new SubclassPublishError('The subclass publisher refused the aggregate.', { reason: 'publish_refused', refusal: refused.reason });
-  const projected = projectAuthoredContentAggregateV1(aggregate);
-  const identity = deriveContentIdentityV1({ kind: 'subclass', edition: aggregate.rules_edition, name: aggregate.name, payload: projected.payload });
+  const identity = projectedSubclassIdentity(aggregate);
   return Object.freeze({
     token: encodedToken(draft, aggregate, plan.token),
     facts: Object.freeze({
