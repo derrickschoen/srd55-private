@@ -43,6 +43,7 @@ export const RECORDED_SCHEMA_PREFIX_IDS = [
   '0031_item_definitions',
   '0032_character_archive',
   '0033_asserted_content_keys',
+  '0034_remove_legacy_opaque',
 ] as const;
 
 export const PREFIX_MIGRATION_ID = 'test_catalog_prefix_probe';
