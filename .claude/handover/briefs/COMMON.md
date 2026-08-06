@@ -79,7 +79,10 @@ A MINT lane, in the same dispatch that adds migration 00NN:
   they exist - four-way, composer idempotence proven);
 - extends the hand-authored historical prefix inventory
   (tests/helpers/catalog-data-migration-prefixes.ts);
-- extends the schema column/index inventories, row-contract fixtures, and .ai
-  Symbol anchors its changes touch;
+- extends EVERY hand-authored schema inventory its changes touch: column/index
+  inventories, row-contract fixtures, the AUTOINCREMENT census
+  (schema-autoincrement.test.ts), CHECK-constraint coverage
+  (schema-check-constraints.test.ts), pre-Drizzle signature counts
+  (schema-signature.test.ts), and .ai Symbol anchors;
 - updates migrations.ts checksums for 00NN only.
 Every one of these was missed at least once and cost a fix round.
