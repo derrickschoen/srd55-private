@@ -44,6 +44,7 @@ function itemProjection(
     readonly declaredAlias?: ContentKey;
     readonly metadataConflict?: boolean;
     readonly conflictDetails?: ContentImportProjection<'item'>['conflictDetails'];
+    readonly referenceOnly?: ContentImportProjection<'item'>['referenceOnly'];
   } = {},
 ): ContentImportProjection<'item'> {
   const assertedKey = assertedExternalContentKey('item', '2024', name);
@@ -62,6 +63,9 @@ function itemProjection(
     ...(options.conflictDetails === undefined
       ? {}
       : { conflictDetails: options.conflictDetails }),
+    ...(options.referenceOnly === undefined
+      ? {}
+      : { referenceOnly: options.referenceOnly }),
     projectStored: (database, contentKey) => {
       const row = database.oneRaw(
         `SELECT rules_edition, name, description
@@ -166,6 +170,12 @@ describe('the D82 content-adoption dialog', () => {
     commitNewItem(db, exact);
     commitNewItem(db, metadata);
     commitNewItem(db, sameNameStored);
+    const unevidencedStored = itemNode(
+      'unevidenced-stored',
+      'Unevidenced Relic',
+      { rule: 'local-only' },
+    );
+    commitNewItem(db, unevidencedStored);
 
     const aliasKey = '2014:item:alias-relic' as ContentKey;
     bundledItem(
@@ -231,6 +241,11 @@ describe('the D82 content-adoption dialog', () => {
         }],
       }),
       itemNode('same-name-distinct', 'shared-relic', { rule: 'incoming' }),
+      itemNode('unevidenced', 'Unevidenced Relic', { rule: 'not-evidence' }, {
+        referenceOnly: {
+          contentKey: unevidencedStored.projection.assertedKey,
+        },
+      }),
       itemNode('alias-distinct', 'Incoming Alias Source', { rule: 'incoming-alias-rules' }, {
         declaredAlias: collisionAlias,
       }),
@@ -245,7 +260,7 @@ describe('the D82 content-adoption dialog', () => {
     const previewPlan = portableImportPlan(planContentImport(db, nodes));
     expect(previewPlan.preview.new_by_kind.item).toBe(1);
     expect(previewPlan.preview.matched_by_kind.item).toBe(1);
-    expect(previewPlan.preview.review_required_by_kind.item).toBe(6);
+    expect(previewPlan.preview.review_required_by_kind.item).toBe(7);
     expect(previewPlan.preview.refused_by_kind.item).toBe(1);
     expect(Object.fromEntries(previewPlan.outcomes.map((outcome) => [
       outcome.id,
@@ -256,6 +271,7 @@ describe('the D82 content-adoption dialog', () => {
       'portable:item:alias': 'review',
       'portable:item:compatible': 'review',
       'portable:item:same-name-distinct': 'review',
+      'portable:item:unevidenced': 'review',
       'portable:item:refused': 'refused',
     });
     expect(Object.fromEntries(previewPlan.reviews.map((review) => [
@@ -267,6 +283,7 @@ describe('the D82 content-adoption dialog', () => {
       'portable:item:srd': 'srd-fallback',
       'portable:item:metadata-review': 'metadata-conflict',
       'portable:item:same-name-distinct': 'key-collision',
+      'portable:item:unevidenced': 'key-collision',
       'portable:item:alias-distinct': 'key-collision',
     });
     expect(previewPlan.reviews.find((review) =>
@@ -294,8 +311,8 @@ describe('the D82 content-adoption dialog', () => {
       });
       const text = elementText(rendered.element);
 
-      expect(text).toContain('item: 1 new, 1 matched, 6 needs review, 1 refused');
-      expect(text).toContain('3 conflicts must be reviewed below.');
+      expect(text).toContain('item: 1 new, 1 matched, 7 needs review, 1 refused');
+      expect(text).toContain('4 conflicts must be reviewed below.');
       const dialog = interactiveElement(rendered.element);
       const renderedReasons = Object.fromEntries(
         dialog.querySelectorAll('.content-adoption-row').map((row) => [
@@ -309,6 +326,7 @@ describe('the D82 content-adoption dialog', () => {
         'portable:item:srd': 'SRD fingerprint fallback',
         'portable:item:metadata-review': 'Metadata conflict',
         'portable:item:same-name-distinct': 'Same name, distinct rules content',
+        'portable:item:unevidenced': 'Reference supplied no rules evidence',
         'portable:item:alias-distinct': 'Alias points to distinct rules content',
       });
       expect(text).toContain(
@@ -317,6 +335,9 @@ describe('the D82 content-adoption dialog', () => {
       expect(text).toContain('Depends on: portable:item:exact');
       expect(text).toContain(
         'The normalized name is already in use for different rules. Rename the private copy to keep both.',
+      );
+      expect(text).toContain(
+        'The share supplied only a reference, not incoming rules. Confirm that your local content should stand in for it, or keep a renamed private copy.',
       );
       expect(text).toContain(
         'The incoming alias points to differently named local content with different rules.',

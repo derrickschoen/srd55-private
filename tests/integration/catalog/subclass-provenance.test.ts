@@ -20,8 +20,10 @@ import { ensureBundledSrdSubclassContent } from '../../../src/rules/srd-subclass
 import { seedSpellContent } from '../../../src/rules/spells-srd';
 import {
   assessImportCompatibility,
+  commitCharacterShareImport,
   exportCharacterShare,
   importCharacterShare,
+  previewCharacterShare,
 } from '../../../src/sharing/character-share';
 import { assertContentImportPlan } from '../../helpers/content-import-plan';
 import { openTestDatabase } from '../../helpers/open-db';
@@ -321,6 +323,13 @@ describe('an imported subclass stays distinguishable from a bundled one', () => 
       walker(source, importSubclass(source)),
     );
     expect(shared.classes[0]?.subclassKey).toBe(SUBCLASS_KEY);
+    const sourceCurrentFingerprint = source.scalar<string>(
+      `SELECT fingerprint_digest FROM catalog_content_fingerprints
+       WHERE content_kind = 'subclass' AND content_key = ?
+         AND fingerprint_role = 'current'`,
+      [SUBCLASS_KEY],
+    );
+    expect(sourceCurrentFingerprint).toMatch(/^[0-9a-f]{64}$/);
 
     // A recipient without it is TOLD, in terms of the key. `missingSubclassIssue`
     // is what the share screen prints, and this is the sentence that only means
@@ -333,18 +342,52 @@ describe('an imported subclass stays distinguishable from a bundled one', () => 
       }),
     ]);
 
-    // A recipient WITH it resolves against their own copy, which is the
-    // posture `src/sharing/character-share.ts` states: catalog tables are the
-    // recipient's, resolved by content key, never rows that travel.
+    // A recipient WITH it still needs to confirm that its independently
+    // imported copy stands in: the share carries the same key but no rules
+    // evidence, so even a matching current local fingerprint cannot prove
+    // that the sender held the same rules. Match resolves to the recipient's
+    // row; catalog rows never travel through the share.
     const recipient = await database();
     const recipientSubclassId = importSubclass(recipient);
     expect(assessImportCompatibility(recipient, shared)).toEqual([]);
-    const imported = importCharacterShare(recipient, shared);
+    expect(() => importCharacterShare(recipient, shared)).toThrow(
+      'requires review before import',
+    );
+    expect(recipient.scalar<number>('SELECT count(*) FROM characters')).toBe(0);
+
+    const preview = previewCharacterShare(recipient, shared);
+    expect(preview.adoptionPlan.reviews).toEqual([
+      expect.objectContaining({
+        kind: 'subclass',
+        targetContentKey: SUBCLASS_KEY,
+        incomingFingerprint: null,
+        matchClass: 'key-collision',
+        defaultChoice: 'match',
+      }),
+    ]);
+    expect(recipient.scalar<string>(
+      `SELECT fingerprint_digest FROM catalog_content_fingerprints
+       WHERE content_kind = 'subclass' AND content_key = ?
+         AND fingerprint_role = 'current'`,
+      [SUBCLASS_KEY],
+    )).toBe(sourceCurrentFingerprint);
+    const choices = Object.fromEntries(preview.adoptionPlan.reviews.map((review) => [
+      review.id,
+      { decision: 'match' as const },
+    ]));
+    const committed = commitCharacterShareImport(
+      recipient,
+      shared,
+      preview.adoptionPlan.token,
+      choices,
+    );
+    expect(committed.kind).toBe('committed');
+    if (committed.kind !== 'committed') throw new Error('Expected commit.');
     expect(
       recipient.scalar(
         `SELECT subclass_definition_id AS id FROM character_class_levels
          WHERE character_id = ?`,
-        [imported.characterId],
+        [committed.result.characterId],
       ),
     ).toBe(recipientSubclassId);
   });
