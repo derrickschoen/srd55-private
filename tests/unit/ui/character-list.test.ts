@@ -758,6 +758,7 @@ describe('catalog and backup entry points', () => {
           },
         },
       });
+      document.body.append(controls.element);
       const root = interactiveElement(controls.element);
       const catalogInput = root.querySelectorAll('input')[0];
       if (catalogInput === undefined) throw new Error('Catalog input missing.');
@@ -774,6 +775,8 @@ describe('catalog and backup entry points', () => {
 
       const dialog = root.querySelector('[data-testid="content-adoption-modal"]');
       expect(dialog).not.toBeNull();
+      expect(dialog?.isConnected).toBe(true);
+      expect(dialog?.open).toBe(true);
       const commitButton = dialog?.querySelectorAll('button').find((button) =>
         button.textContent === 'Import with these choices',
       );
@@ -897,6 +900,7 @@ describe('catalog and backup entry points', () => {
           },
         },
       });
+      document.body.append(controls.element);
       const root = interactiveElement(controls.element);
       const characterInput = root.querySelectorAll('input')[2];
       if (characterInput === undefined) throw new Error('Character input missing.');
@@ -916,7 +920,10 @@ describe('catalog and backup entry points', () => {
         '[data-testid="content-adoption-modal"]',
       );
       if (dialogNode === null) throw new Error('Adoption dialog missing.');
-      const commitButton = interactiveElement(dialogNode)
+      const dialog = interactiveElement(dialogNode);
+      expect(dialog.isConnected).toBe(true);
+      expect(dialog.open).toBe(true);
+      const commitButton = dialog
         .querySelectorAll('button')
         .find((button) => button.textContent === 'Import with these choices');
       if (commitButton === undefined) throw new Error('Commit button missing.');

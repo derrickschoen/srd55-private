@@ -117,6 +117,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
       'catalog_content_fingerprints',
       'catalog_content_identities',
       'catalog_content_match_decisions',
+      'catalog_content_supersessions',
       'catalog_data_migrations',
       'class_equipment_items',
       'change_log',
@@ -344,7 +345,7 @@ describe('derived table scopes reproduce the hand-maintained lists', () => {
 });
 
 describe('table scope classification', () => {
-  it('classifies all 80 tables exactly once', () => {
+  it('classifies all 81 tables exactly once', () => {
     const names = Object.keys(TABLE_SCOPES);
     // 30 Laravel-derived tables — 38 until the eight Laravel-only
     // infrastructure ones were dropped — plus the four native weapon tables,
@@ -361,8 +362,8 @@ describe('table scope classification', () => {
     // tables and CI-2b's ONE applied data-migration marker table. Each group is named
     // rather than folded into one total, so a group that vanishes while
     // another grows cannot pass unnoticed.
-    expect(names).toHaveLength(80);
-    expect(new Set(names).size).toBe(80);
+    expect(names).toHaveLength(81);
+    expect(new Set(names).size).toBe(81);
     expect([...names].sort()).toEqual([...APPLICATION_TABLES].sort());
   });
 
@@ -531,5 +532,20 @@ describe('table scope classification', () => {
     expect([...BACKUP_DIRECT_TABLES]).not.toContain('catalog_content_drafts');
     expect([...BACKUP_TABLES]).not.toContain('catalog_content_drafts');
     expect(Object.keys(SHARE_TABLES)).not.toContain('catalog_content_drafts');
+  });
+
+  it('CI7-SUPERSESSION-LOCAL keeps version lineage out of character documents', () => {
+    expect(TABLE_SCOPES.catalog_content_supersessions).toEqual({
+      role: 'catalog_registry',
+      snapshot: false,
+      backupDirect: false,
+      backup: false,
+      share: false,
+      backupReference: false,
+    });
+    expect([...APPLICATION_TABLES]).toContain('catalog_content_supersessions');
+    expect([...CHARACTER_STATE_TABLES]).not.toContain('catalog_content_supersessions');
+    expect([...BACKUP_TABLES]).not.toContain('catalog_content_supersessions');
+    expect(Object.keys(SHARE_TABLES)).not.toContain('catalog_content_supersessions');
   });
 });

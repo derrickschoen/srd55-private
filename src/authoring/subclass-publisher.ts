@@ -6,12 +6,14 @@ import {
   assertedExternalContentKey,
 } from '../catalog/catalog-key';
 import {
-  commitContentImport,
-  planContentImport,
   type ContentImportChoices,
   type ContentImportNode,
   type ContentImportProjection,
 } from '../catalog/content-adoption';
+import {
+  commitImmutableCatalogPublication,
+  planImmutableCatalogPublication,
+} from '../catalog/authoring-lifecycle';
 import { deriveContentIdentityV1 } from '../catalog/content-identity';
 import {
   projectAuthoredContentAggregateV1,
@@ -404,7 +406,10 @@ export function previewSubclassPublish(db: DatabaseContext, draft: StoredHomebre
   const aggregate = subclassDraftToAggregate(db, draft.document, draft.base_content_key);
   const assertedKey = assertedKeyFor(aggregate);
   const node = authoringNode(db, aggregate, assertedKey);
-  const plan = planContentImport(db, [node], Object.freeze({}), Object.freeze([]), operationIdentity(draft, aggregate));
+  const plan = planImmutableCatalogPublication(db, {
+    node,
+    operationIdentity: operationIdentity(draft, aggregate),
+  });
   const collision = plan.reviews.find((review) => review.matchClass === 'key-collision');
   if (collision !== undefined) throw new SubclassPublishError('The asserted subclass key already names different content.', { reason: 'content_key_collision', content_key: collision.targetContentKey });
   const refused = plan.outcomes.find((outcome) => outcome.kind === 'refused');
@@ -473,22 +478,28 @@ export function commitSubclassPublish(
   const node = authoringNode(db, aggregate, assertedKey);
   const choices = choicesFor(preview, decisions, node.id);
   const operation = operationIdentity(draft, aggregate);
-  const chosenPlan = planContentImport(db, [node], choices, Object.freeze([]), operation);
+  const publication = {
+    node,
+    operationIdentity: operation,
+    supersedesContentKey: draft.base_content_key,
+    afterInstall: (transaction: DatabaseContext) => {
+      const deleted = transaction.exec(
+        'DELETE FROM catalog_content_drafts WHERE draft_uuid = ? AND revision = ?',
+        [draft.draft_uuid, draft.revision],
+      );
+      if (deleted.changes !== 1) throw new Error('Draft changed before publish commit.');
+    },
+  } as const;
+  const chosenPlan = planImmutableCatalogPublication(db, publication, choices);
   const refusal = chosenPlan.outcomes.find((outcome) => outcome.kind === 'refused');
   if (refusal?.kind === 'refused') {
     throw new SubclassPublishError('The chosen subclass publish was refused.', refusal.reason === 'clone_key_collision'
       ? { reason: 'content_key_collision', content_key: assertedKey }
       : { reason: 'publish_refused', refusal: refusal.reason });
   }
-  const committed = commitContentImport(db, {
-    nodes: [node],
+  const committed = commitImmutableCatalogPublication(db, publication, {
     token: chosenPlan.token,
     choices,
-    operationIdentity: operation,
-    afterInstall: (transaction) => {
-      const deleted = transaction.exec('DELETE FROM catalog_content_drafts WHERE draft_uuid = ? AND revision = ?', [draft.draft_uuid, draft.revision]);
-      if (deleted.changes !== 1) throw new Error('Draft changed before publish commit.');
-    },
   });
   if (committed.kind === 'stale-plan') throw new SubclassPublishError('The publish plan is stale.', { reason: 'stale_publish_plan', draft_uuid: draft.draft_uuid });
   if (committed.kind === 'refused') throw new SubclassPublishError('The subclass publish transaction was refused.', { reason: 'publish_refused', refusal: committed.reason });

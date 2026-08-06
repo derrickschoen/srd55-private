@@ -171,6 +171,7 @@ const naturalKeyTables = [
   'catalog_content_fingerprints',
   'catalog_content_identities',
   'catalog_content_match_decisions',
+  'catalog_content_supersessions',
   'catalog_data_migrations',
   'character_attunement_slots',
   'party_document_states',

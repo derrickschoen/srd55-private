@@ -600,6 +600,7 @@ type NativeContractTable =
   | 'catalog_content_fingerprints'
   | 'catalog_content_aliases'
   | 'catalog_content_match_decisions'
+  | 'catalog_content_supersessions'
   | 'feat_definitions'
   | 'character_weapons'
   | 'weapon_templates'
@@ -699,6 +700,11 @@ const REFINEMENTS = {
   'catalog_content_match_decisions.decision': contentMatchDecisionEnum,
   'catalog_content_match_decisions.target_content_key': nonEmptyText,
   'catalog_content_match_decisions.reviewed_at': sqlTimestamp,
+
+  'catalog_content_supersessions.content_kind': contentKindEnum,
+  'catalog_content_supersessions.superseded_content_key': nonEmptyText,
+  'catalog_content_supersessions.successor_content_key': nonEmptyText,
+  'catalog_content_supersessions.recorded_at': sqlTimestamp,
 
   'catalog_content_drafts.draft_uuid': nonEmptyText,
   'catalog_content_drafts.content_kind': authoredContentKindEnum,

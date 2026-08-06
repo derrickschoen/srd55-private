@@ -32,7 +32,7 @@ import { UpdateClassCommand } from '../../../src/commands/update-class';
 import { applicationSeed } from '../../../src/db/bootstrap';
 import { DatabaseContext } from '../../../src/db/database';
 import { damageType, type CharacterLevel } from '../../../src/domain/enums';
-import type { ContentKey } from '../../../src/domain/ids';
+import type { CharacterId, ContentKey } from '../../../src/domain/ids';
 import { SourceRuleReader } from '../../../src/grants/source-rule-reader';
 import { BuildReportBuilder } from '../../../src/reports/build-report-builder';
 import { SavePointQueries } from '../../../src/queries/save-points';
@@ -1184,4 +1184,138 @@ describe('HA-5 subclass publisher', () => {
     expect(saved.character_effects.find((effect) => effect.label === 'First Aegis')?.template_ref)
       .toBeNull();
   }, 20_000);
+
+  it('versions subclass lineage without changing an existing character', async () => {
+    const db = await database();
+    const authoring = service(db);
+    const original = publish(authoring, savedSubclass(authoring, 'Versioned Aegis'));
+    const character = characterWithSubclass(db, original.result.content_key, 3);
+    db.exec(
+      `INSERT INTO character_effects (
+         character_id, sort_order, effect_kind, amount, source_instance_id,
+         template_ref, label
+       ) VALUES (?, 99, 'armor_class_bonus', 9, ?, NULL, 'Manual Aegis note')`,
+      [character.characterId, character.sourceId],
+    );
+    const copied = authoring.createDraft({
+      content_kind: 'subclass',
+      base_content_key: original.result.content_key,
+    });
+    if (copied.document.kind !== 'subclass') throw new Error('Subclass draft required.');
+    const revised = authoring.saveDraft({
+      draft_uuid: copied.draft_uuid,
+      expected_revision: copied.revision,
+      document: {
+        ...copied.document,
+        name: 'Versioned Aegis Revised',
+        features: copied.document.features.map((feature, index) =>
+          index === 0 ? { ...feature, description: 'Revised mapped defense.' } : feature),
+      },
+    });
+    const successor = publish(authoring, revised);
+
+    expect(successor.result).toMatchObject({ outcome: 'created', previous_key_usage_count: 1 });
+    expect(authoring.usages(original.result.content_key).usages).toHaveLength(1);
+    expect(authoring.usages(successor.result.content_key).usages).toHaveLength(0);
+    expect(db.scalar<string>(
+      `SELECT subclass.content_key
+       FROM character_class_levels AS level
+       JOIN subclass_definitions AS subclass ON subclass.id = level.subclass_definition_id
+       WHERE level.character_id = ?`,
+      [character.characterId],
+    )).toBe(original.result.content_key);
+    expect(db.oneRaw(
+      `SELECT content_kind, superseded_content_key, successor_content_key
+       FROM catalog_content_supersessions`,
+    )).toEqual({
+      content_kind: 'subclass',
+      superseded_content_key: original.result.content_key,
+      successor_content_key: successor.result.content_key,
+    });
+    expect(authoring.list().published).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        content_key: original.result.content_key,
+        superseded_by: successor.result.content_key,
+      }),
+      expect.objectContaining({
+        content_key: successor.result.content_key,
+        superseded_by: null,
+      }),
+    ]));
+    const replacement = authoring.previewReplacement({
+      old_content_key: original.result.content_key,
+      new_content_key: successor.result.content_key,
+      character_id: character.characterId as CharacterId,
+    });
+    expect(replacement.review).toEqual([
+      expect.objectContaining({
+        candidate_content_key: successor.result.content_key,
+        reason: 'key-collision',
+      }),
+    ]);
+    expect(authoring.commitReplacement({
+      token: replacement.token,
+      decisions: [{
+        candidate_content_key: successor.result.content_key,
+        decision: 'match',
+      }],
+      choices: [],
+    })).toMatchObject({
+      content_kind: 'subclass',
+      character_id: character.characterId,
+      new_content_key: successor.result.content_key,
+    });
+    expect(db.oneRaw(
+      `SELECT subclass.content_key, effect.template_ref, source.state
+       FROM character_class_levels AS level
+       JOIN subclass_definitions AS subclass ON subclass.id = level.subclass_definition_id
+       JOIN character_effects AS effect
+         ON effect.character_id = level.character_id AND effect.label = 'Manual Aegis note'
+       JOIN character_source_instances AS source ON source.id = effect.source_instance_id
+       WHERE level.character_id = ?`,
+      [character.characterId],
+    )).toEqual({
+      content_key: successor.result.content_key,
+      template_ref: null,
+      state: 'active',
+    });
+  });
+
+  it('rolls subclass installation and lineage back atomically', async () => {
+    const db = await database();
+    const authoring = service(db);
+    const original = publish(authoring, savedSubclass(authoring, 'Atomic Aegis'));
+    const copied = authoring.createDraft({
+      content_kind: 'subclass',
+      base_content_key: original.result.content_key,
+    });
+    if (copied.document.kind !== 'subclass') throw new Error('Subclass draft required.');
+    const revised = authoring.saveDraft({
+      draft_uuid: copied.draft_uuid,
+      expected_revision: copied.revision,
+      document: { ...copied.document, name: 'Atomic Aegis Revised' },
+    });
+    const preview = authoring.previewPublish({
+      draft_uuid: revised.draft_uuid,
+      expected_revision: revised.revision,
+    });
+    db.exec(
+      `CREATE TEMP TRIGGER ci7_refuse_subclass_supersession
+       BEFORE INSERT ON catalog_content_supersessions
+       BEGIN SELECT RAISE(ABORT, 'CI7 injected subclass lineage failure'); END`,
+    );
+    expect(authoringError(() => authoring.commitPublish({
+      token: preview.token,
+      decisions: [],
+    })).data).toEqual({ reason: 'publish_refused', refusal: 'commit_failed' });
+    expect(db.scalar<number>('SELECT count(*) FROM catalog_content_supersessions')).toBe(0);
+    expect(db.scalar<number>(
+      `SELECT count(*) FROM subclass_definitions
+       WHERE content_key = 'expanded:content.subclass:atomic-aegis-revised'`,
+    )).toBe(0);
+    expect(authoring.readDraft(revised.draft_uuid).revision).toBe(revised.revision);
+    expect(authoring.list().published).toEqual([
+      expect.objectContaining({ content_key: original.result.content_key, superseded_by: null }),
+    ]);
+  });
 });

@@ -9,6 +9,7 @@ import {
   forkSrdSpell,
   type ForkSpellImportResult,
   type ForkSpellResult,
+  planSrdSpellFork,
 } from '../../../src/catalog/spell-fork';
 import {
   ContentIdentityCollision,
@@ -305,6 +306,35 @@ describe('bundled spell forks', () => {
     expect(db.scalar<number>(
       `SELECT count(*) FROM spell_versions WHERE display_name = 'Homebrew Spell'`,
     )).toBe(1);
+  });
+
+  it('CI7-SPELL-SELF-MATCH silently reuses one byte-identical fork through the common lifecycle', async () => {
+    const db = await seededDatabase();
+    const params = {
+      sourceContentKey: '2024:fireball',
+      name: 'Ember Sphere',
+    };
+
+    const first = forkSrdSpell(db, params);
+    const repeatedPlan = planSrdSpellFork(db, params);
+    expect(repeatedPlan.reviews).toEqual([]);
+    expect(repeatedPlan.outcomes).toEqual([
+      {
+        id: `spell-fork:${first.contentKey}`,
+        kind: 'match',
+        contentKey: first.contentKey,
+      },
+    ]);
+
+    const repeated = forkSrdSpell(db, params);
+    expect(repeated).toEqual(first);
+    expect(db.scalar<number>(
+      'SELECT count(*) FROM spell_versions WHERE content_key = ?',
+      [first.contentKey],
+    )).toBe(1);
+    expect(db.scalar<number>(
+      'SELECT count(*) FROM catalog_content_match_decisions',
+    )).toBe(0);
   });
 
   it('commits an explicit clone choice for a fork collision through public catalog RPC', async () => {

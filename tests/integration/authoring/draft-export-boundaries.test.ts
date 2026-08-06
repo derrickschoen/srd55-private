@@ -5,11 +5,19 @@ import {
   exportDatabaseBackup,
   importDatabaseBackup,
 } from '../../../src/backup/database-backup';
-import type { SpeciesAuthoringDraft } from '../../../src/authoring/contracts';
+import {
+  exportSelectedLibraryContent,
+  exportWholeLibrary,
+} from '../../../src/backup/library-export';
+import type {
+  HomebrewDraftUuid,
+  SpeciesAuthoringDraft,
+} from '../../../src/authoring/contracts';
 import { CatalogAuthoringService } from '../../../src/authoring/draft-service';
 import { DatabaseContext } from '../../../src/db/database';
 import { DatabaseLifecycle } from '../../../src/db/database-lifecycle';
 import schema from '../../../src/db/schema.sql?raw';
+import type { ContentKey } from '../../../src/domain/ids';
 import { CharacterCompletenessQueries } from '../../../src/queries/character-completeness';
 import { CharacterSheetBuilder } from '../../../src/queries/character-sheet-builder';
 import { CharacterWorkspaceBuilder } from '../../../src/queries/character-workspace-builder';
@@ -56,7 +64,10 @@ function character(db: DatabaseContext, name: string): number {
 function insertSentinelDraft(
   db: DatabaseContext,
   sentinel: string,
-): string {
+): {
+  readonly draftUuid: HomebrewDraftUuid;
+  readonly documentBytes: string;
+} {
   let sequence = 0;
   const service = new CatalogAuthoringService(db, {
     randomUuid: () => `${sentinel}-uuid-${String(++sequence)}`,
@@ -68,15 +79,18 @@ function insertSentinelDraft(
     name: `${sentinel}-NAME`,
     reference_text: `${sentinel}-PAYLOAD`,
   };
-  service.saveDraft({
+  const saved = service.saveDraft({
     draft_uuid: created.draft_uuid,
     expected_revision: created.revision,
     document,
   });
-  return String(db.scalar(
-    'SELECT document_json FROM catalog_content_drafts WHERE draft_uuid = ?',
-    [created.draft_uuid],
-  ));
+  return {
+    draftUuid: saved.draft_uuid,
+    documentBytes: String(db.scalar(
+      'SELECT document_json FROM catalog_content_drafts WHERE draft_uuid = ?',
+      [created.draft_uuid],
+    )),
+  };
 }
 
 function bytes(value: unknown): Uint8Array {
@@ -94,6 +108,29 @@ function containsBytes(haystack: Uint8Array, text: string): boolean {
 }
 
 describe('catalog drafts stay local to the authoring library', () => {
+  it('whole-library-draft-leak-pin excludes DRAFT-LEAK-SENTINEL-whole-library', async () => {
+    const db = await database();
+    const sentinel = 'DRAFT-LEAK-SENTINEL-whole-library';
+    insertSentinelDraft(db, sentinel);
+
+    const document = exportWholeLibrary(db, '2026-08-05T12:59:00.000Z');
+
+    expect(document.content).toEqual([]);
+    expect(containsBytes(bytes(document), sentinel)).toBe(false);
+  });
+
+  it('selected-library-draft-refusal-pin refuses DRAFT-LEAK-SENTINEL-selected-library', async () => {
+    const db = await database();
+    const sentinel = 'DRAFT-LEAK-SENTINEL-selected-library';
+    const draft = insertSentinelDraft(db, sentinel);
+
+    expect(() => exportSelectedLibraryContent(
+      db,
+      [String(draft.draftUuid) as ContentKey],
+      '2026-08-05T12:59:30.000Z',
+    )).toThrow(`Selected library content '${String(draft.draftUuid)}' is not external content.`);
+  });
+
   it('character-share-draft-leak-pin excludes DRAFT-LEAK-SENTINEL-character-share', async () => {
     const db = await database();
     const characterId = character(db, 'Share boundary character');
@@ -179,7 +216,10 @@ describe('catalog drafts stay local to the authoring library', () => {
     lifecycles.push(lifecycle);
     lifecycle.open();
     const sentinel = 'DRAFT-LEAK-SENTINEL-whole-database-backup';
-    const exactDocumentBytes = insertSentinelDraft(lifecycle.database, sentinel);
+    const { documentBytes: exactDocumentBytes } = insertSentinelDraft(
+      lifecycle.database,
+      sentinel,
+    );
 
     const backup = await exportDatabaseBackup(
       lifecycle,
