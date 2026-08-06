@@ -6,6 +6,8 @@ import {
   type ShareClient,
 } from '../../../sharing/client';
 import type { SharePreview } from '../../../sharing/character-share';
+import type { ContentImportPlan } from '../../../catalog/content-adoption';
+import { createContentAdoptionDialog } from '../../content-adoption-dialog';
 import { element, listen, type Cleanup } from '../../dom';
 
 const QR_MAX_LINK_LENGTH = 2_000;
@@ -152,6 +154,8 @@ export function createShareControls(
   const browser = options.browser ?? defaultBrowserSharing();
   const cleanups: Cleanup[] = [];
   let activeFragment: string | null = null;
+  let activePreview: SharePreview | null = null;
+  let adoptionCleanup: Cleanup | null = null;
   let exporting: Pick<CharacterSummary, 'id' | 'name'> | null = null;
 
   const status = element('p', {
@@ -299,6 +303,7 @@ export function createShareControls(
       const fragment = fragmentFromShareLink(value);
       const result = await client.preview(fragment);
       activeFragment = fragment;
+      activePreview = result;
       previewTitle.textContent = result.name;
       previewDetails.textContent = previewText(result);
       previewPanel.hidden = false;
@@ -306,6 +311,7 @@ export function createShareControls(
       announce('Preview ready. Nothing has been imported.');
     } catch (error) {
       activeFragment = null;
+      activePreview = null;
       announceFailure(error);
     } finally {
       previewButton.disabled = false;
@@ -317,18 +323,67 @@ export function createShareControls(
       void preview(input.value);
     }),
     listen(addButton, 'click', () => {
-      if (activeFragment === null || addButton.disabled) {
+      if (
+        activeFragment === null || activePreview === null ||
+        addButton.disabled
+      ) {
+        return;
+      }
+      const fragment = activeFragment;
+      const showAdoptionDialog = (plan: ContentImportPlan): void => {
+        adoptionCleanup?.();
+        const rendered = createContentAdoptionDialog({
+          plan,
+          replan: async (choices) =>
+            (await client.preview(fragment, choices)).adoptionPlan,
+          commit: (submitted, choices) => client.commitCharacter(
+            fragment,
+            submitted.token,
+            choices,
+          ),
+          onCommitted: async (result) => {
+            const shareResult = result as typeof result & {
+              readonly result: { readonly characterId: number };
+            };
+            await options.onPersistedChange();
+            announce(`Character added as #${shareResult.result.characterId}.`);
+            addButton.hidden = true;
+            activeFragment = null;
+            activePreview = null;
+          },
+          onCancel: () => announce('Shared character import cancelled.'),
+        });
+        adoptionCleanup = rendered.cleanup;
+        root.append(rendered.element);
+      };
+      if (
+        activePreview.adoptionPlan.reviews.length > 0 ||
+        activePreview.adoptionPlan.outcomes.some(
+          (outcome) => outcome.kind === 'refused',
+        )
+      ) {
+        showAdoptionDialog(activePreview.adoptionPlan);
+        announce('Review each matching catalog entry before importing.');
         return;
       }
       addButton.disabled = true;
       announce('Adding a new character…');
       void client
-        .importCharacter(activeFragment)
+        .commitCharacter(fragment, activePreview.adoptionPlan.token, {})
         .then(async (result) => {
+          if (result.kind === 'stale-plan') {
+            showAdoptionDialog(result.freshPlan);
+            announce('The catalog changed. Review the refreshed share import.');
+            return;
+          }
+          if (result.kind === 'refused') {
+            throw new TypeError('Shared character import was refused.');
+          }
           await options.onPersistedChange();
-          announce(`Character added as #${result.characterId}.`);
+          announce(`Character added as #${result.result.characterId}.`);
           addButton.hidden = true;
           activeFragment = null;
+          activePreview = null;
         })
         .catch((error: unknown) => announceFailure(error))
         .finally(() => {
@@ -487,6 +542,7 @@ export function createShareControls(
       exportButton.focus();
     },
     cleanup: () => {
+      adoptionCleanup?.();
       for (const cleanup of cleanups.splice(0)) {
         cleanup();
       }

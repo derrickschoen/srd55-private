@@ -113,6 +113,7 @@ describe('character share links', () => {
           createFragmentResult: async () => ({ kind: 'encoded', fragment: 'fragment' }),
           preview: async () => ({}) as never,
           importCharacter: async () => ({}) as never,
+          commitCharacter: async () => ({}) as never,
         },
         browser: { baseUrl: 'https://example.test/' },
       });
@@ -123,6 +124,115 @@ describe('character share links', () => {
       expect(elementText(controls.element)).toContain(
         'Use a complete character JSON backup when the recipient also needs external content.',
       );
+      controls.cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('CI-SHARE-REFERENCE opens the common adoption dialog for a fallback match', async () => {
+    const token = 'a'.repeat(64) as ContentImportPlanToken;
+    const plan: ContentImportPlan = {
+      token,
+      inputHash: 'b'.repeat(64),
+      graphHash: 'c'.repeat(64),
+      targetHash: 'd'.repeat(64),
+      spellActivityChanges: [],
+      outcomes: [{
+        id: 'spell:share:fallback',
+        kind: 'review',
+        contentKey: '2024:fireball' as ContentKey,
+        matchClass: 'srd-fallback',
+      }],
+      reviews: [{
+        id: 'spell:share:fallback',
+        kind: 'spell',
+        incomingName: 'Fireball',
+        localName: 'Fireball',
+        targetContentKey: '2024:fireball' as ContentKey,
+        incomingFingerprint: 'e'.repeat(64) as ContentFingerprintDigest,
+        matchClass: 'srd-fallback',
+        defaultChoice: 'match',
+        selectedChoice: 'match',
+        cloneName: 'Fireball (Private copy)',
+        dependencies: [],
+        conflictDetails: [],
+      }],
+    };
+    const submitted: unknown[] = [];
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const controls = createShareControls({
+        rpc: null as never,
+        onPersistedChange: () => undefined,
+        client: {
+          exportDebug: async () => [] as never,
+          createFragment: async () => 'fragment',
+          createFragmentResult: async () => ({ kind: 'encoded', fragment: 'fragment' }),
+          preview: async () => ({
+            name: 'Shared Mage',
+            classes: [],
+            sourceCount: 0,
+            selectionCount: 0,
+            spellbookCount: 1,
+            placeholderCount: 0,
+            weaponCount: 0,
+            armorCount: 0,
+            hitPointRollCount: 0,
+            skillProficiencyCount: 0,
+            includesAcknowledgements: false,
+            includesLoadouts: false,
+            includesWrittenText: false,
+            adoptionPlan: plan,
+          }),
+          importCharacter: async () => ({ characterId: 1 }),
+          commitCharacter: async (fragment, submittedToken, choices) => {
+            submitted.push({ fragment, token: submittedToken, choices });
+            return { kind: 'committed', outcomes: plan.outcomes, result: { characterId: 7 } };
+          },
+        },
+        browser: { baseUrl: 'https://example.test/' },
+      });
+      const root = interactiveElement(controls.element);
+      const input = root.querySelectorAll('input').find((candidate) =>
+        candidate.getAttribute('aria-label') === 'Character share link',
+      );
+      const previewButton = root.querySelectorAll('button').find((button) =>
+        button.textContent === 'Preview link',
+      );
+      const addButton = root.querySelectorAll('button').find((button) =>
+        button.textContent === 'Add to my characters',
+      );
+      if (input === undefined || previewButton === undefined || addButton === undefined) {
+        throw new Error('Share controls are incomplete.');
+      }
+      input.value = '#fragment';
+      previewButton.click();
+      for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
+      addButton.click();
+
+      const dialog = root.querySelector('[data-testid="content-adoption-modal"]');
+      expect(dialog).not.toBeNull();
+      expect(elementText(dialog as unknown as Node)).toContain(
+        'SRD fingerprint fallback',
+      );
+      const commit = dialog?.querySelectorAll('button').find((button) =>
+        button.textContent === 'Import with these choices',
+      );
+      if (commit === undefined) throw new Error('Adoption commit button missing.');
+      commit.click();
+      for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
+
+      expect(submitted).toEqual([{
+        fragment: 'fragment',
+        token,
+        choices: {
+          'spell:share:fallback': {
+            decision: 'match',
+            cloneName: 'Fireball (Private copy)',
+          },
+        },
+      }]);
       controls.cleanup();
     } finally {
       restoreDocument();

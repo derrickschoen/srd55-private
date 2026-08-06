@@ -1419,7 +1419,8 @@ describe('minimal character sharing', () => {
       writtenText: true,
     });
     await expect(decodeShareFragment(fragment)).resolves.toEqual(optedIn);
-    await expect(client.preview(fragment)).resolves.toMatchObject({
+    const planned = await client.preview(fragment);
+    expect(planned).toMatchObject({
       name: 'Share Hero',
       includesAcknowledgements: true,
       includesLoadouts: true,
@@ -1430,6 +1431,14 @@ describe('minimal character sharing', () => {
     );
     await expect(client.importCharacter(fragment)).resolves.toEqual({
       characterId: 2,
+    });
+    await expect(client.commitCharacter(
+      fragment,
+      planned.adoptionPlan.token,
+      {},
+    )).resolves.toMatchObject({
+      kind: 'committed',
+      result: { characterId: 3 },
     });
 
     const invalidRequests: readonly {
@@ -1479,10 +1488,22 @@ describe('minimal character sharing', () => {
         method: 'share.preview',
         params: { fragment, extra: true },
       },
+      {
+        method: 'share.preview',
+        params: { fragment, token: 'a'.repeat(64) },
+      },
       { method: 'share.importCharacter', params: null },
       {
         method: 'share.importCharacter',
         params: { fragment, extra: true },
+      },
+      {
+        method: 'share.importCharacter',
+        params: { fragment, choices: {} },
+      },
+      {
+        method: 'share.importCharacter',
+        params: { fragment, token: 'a'.repeat(64) },
       },
     ];
     for (const [index, request] of invalidRequests.entries()) {

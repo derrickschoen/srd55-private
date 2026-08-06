@@ -16,6 +16,8 @@ export type ShareImportIssueCode =
   | 'missing_class'
   | 'missing_subclass'
   | 'missing_source'
+  | 'ambiguous_content_reference'
+  | 'unprojectable_content_reference'
   | 'subclass_class_mismatch'
   | 'source_not_repeatable'
   | 'selection_slot_missing'
@@ -102,6 +104,35 @@ export function missingSourceIssue(
     contentKeys: [key],
     summary: `your catalog has no ${label} '${key}'.`,
     remedy: `Load a catalog that defines this ${label}, then open the link again.`,
+  };
+}
+
+export function ambiguousReferenceIssue(
+  type: string,
+  key: string,
+  candidates: readonly string[],
+): ShareImportIssue {
+  const label = SOURCE_LABEL[type] ?? type;
+  return {
+    code: 'ambiguous_content_reference',
+    contentKeys: [key, ...candidates],
+    summary: `${label} reference '${key}' matches more than one local catalog entry.`,
+    remedy:
+      'Remove the ambiguous catalog alias or fingerprint registration, then open the link again.',
+  };
+}
+
+export function unprojectableReferenceIssue(
+  type: string,
+  key: string,
+): ShareImportIssue {
+  const label = SOURCE_LABEL[type] ?? type;
+  return {
+    code: 'unprojectable_content_reference',
+    contentKeys: [key],
+    summary: `${label} reference '${key}' matched local content that cannot be reviewed safely.`,
+    remedy:
+      'Reload or repair the matching catalog content, then open the link again.',
   };
 }
 

@@ -7,6 +7,7 @@ import {
   CONTENT_FINGERPRINT_SCHEME_V1,
   contentKinds,
   deriveContentIdentityV1,
+  parseDerivedContentKeyV1,
   type ContentFingerprintDigest,
   type ContentFingerprintScheme,
   type ContentKind,
@@ -20,6 +21,7 @@ import {
   rememberContentMatchDecision,
   rememberedContentMatchDecision,
   resolveContentAggregate,
+  resolveContentReference,
   type CatalogContentMatchDecision,
   type ContentResolution,
 } from './content-registry';
@@ -52,6 +54,14 @@ export interface ContentImportProjection<K extends ContentKind = ContentKind> {
    * byte-identical self-match being published now.
    */
   readonly allowRememberedDecision?: boolean;
+  /**
+   * A share link carries only this asserted reference, never aggregate bytes.
+   * The local candidate supplies the projection solely so Clone can copy it;
+   * Match must resolve this key through the registry's reference-only path.
+   */
+  readonly referenceOnly?: {
+    readonly contentKey: ContentKey;
+  };
   readonly install: (
     db: DatabaseContext,
     contentKey: ContentKey,
@@ -174,6 +184,7 @@ interface EvaluatedEntry {
   readonly outcome: ContentImportEntryOutcome;
   readonly reviewedDecision?: CatalogContentMatchDecision;
   readonly incomingDigest: ContentFingerprintDigest;
+  readonly incomingScheme: ContentFingerprintScheme;
   readonly targetContentKey?: ContentKey;
   readonly targetDigest?: ContentFingerprintDigest;
   readonly targetCanonicalJson?: string;
@@ -215,7 +226,24 @@ function inputHash(nodes: readonly ContentImportNode[]): string {
     declaredAlias: node.projection.declaredAlias ?? null,
     metadataConflict: node.projection.metadataConflict ?? false,
     conflictDetails: node.projection.conflictDetails ?? [],
+    referenceOnly: node.projection.referenceOnly ?? null,
   }))));
+}
+
+function incomingDecisionFingerprint(
+  projection: ContentImportProjection,
+  identity: ReturnType<typeof deriveContentIdentityV1>,
+): {
+  readonly scheme: ContentFingerprintScheme;
+  readonly digest: ContentFingerprintDigest;
+} {
+  const parsed = projection.referenceOnly === undefined
+    ? null
+    : parseDerivedContentKeyV1(projection.referenceOnly.contentKey);
+  return parsed ?? Object.freeze({
+    scheme: identity.envelope.scheme,
+    digest: identity.digest,
+  });
 }
 
 interface ProjectionFingerprintReference {
@@ -724,8 +752,12 @@ function projectNode(
     name: cloning ? cloneName : node.projection.name,
     assertedKey,
   };
-  if (!cloning || projection.declaredAlias === undefined) return projection;
-  const { declaredAlias: _declaredAlias, ...cloneProjection } = projection;
+  if (!cloning) return projection;
+  const {
+    declaredAlias: _declaredAlias,
+    referenceOnly: _referenceOnly,
+    ...cloneProjection
+  } = projection;
   return cloneProjection;
 }
 
@@ -838,6 +870,7 @@ function evaluate(
         name: projection.name,
         payload: projection.payload,
       });
+      const incomingFingerprint = incomingDecisionFingerprint(projection, identity);
       const entry: EvaluatedEntry = {
         node,
         projection,
@@ -849,7 +882,8 @@ function evaluate(
             ? 'unresolved_reference'
             : 'dependency_refused',
         ),
-        incomingDigest: identity.digest,
+        incomingDigest: incomingFingerprint.digest,
+        incomingScheme: incomingFingerprint.scheme,
       };
       entries.push(entry);
       byId.set(id, entry);
@@ -872,6 +906,10 @@ function evaluate(
       name: incomingProjection.name,
       payload: incomingProjection.payload,
     });
+    const incomingFingerprint = incomingDecisionFingerprint(
+      incomingProjection,
+      incomingIdentity,
+    );
     const projected = projectNode(node, choice, dependencyMap);
     if ('id' in projected && projected.kind === 'refused') {
       const projection = node.projection;
@@ -887,7 +925,8 @@ function evaluate(
         identity,
         resolution: { kind: 'missing', reviewRequired: false },
         outcome: projected,
-        incomingDigest: incomingIdentity.digest,
+        incomingDigest: incomingFingerprint.digest,
+        incomingScheme: incomingFingerprint.scheme,
       };
       entries.push(entry);
       byId.set(id, entry);
@@ -896,17 +935,31 @@ function evaluate(
     const projection = projected as ContentImportProjection;
     let resolved: ReturnType<typeof resolveContentAggregate>;
     try {
-      resolved = resolveContentAggregate(db, {
+      const identity = deriveContentIdentityV1({
         kind: projection.kind,
         edition: projection.edition,
         name: projection.name,
         payload: projection.payload,
-        assertedKey: projection.assertedKey,
-        ...(projection.declaredAlias === undefined
-          ? {}
-          : { declaredAlias: projection.declaredAlias }),
-        metadataConflict: projection.metadataConflict ?? false,
       });
+      resolved = projection.referenceOnly === undefined
+        ? resolveContentAggregate(db, {
+            kind: projection.kind,
+            edition: projection.edition,
+            name: projection.name,
+            payload: projection.payload,
+            assertedKey: projection.assertedKey,
+            ...(projection.declaredAlias === undefined
+              ? {}
+              : { declaredAlias: projection.declaredAlias }),
+            metadataConflict: projection.metadataConflict ?? false,
+          })
+        : Object.freeze({
+            identity,
+            resolution: resolveContentReference(db, {
+              kind: projection.kind,
+              contentKey: projection.referenceOnly.contentKey,
+            }),
+          });
     } catch (error) {
       const identity = deriveContentIdentityV1({
         kind: projection.kind,
@@ -925,7 +978,8 @@ function evaluate(
             ? 'identity_collision'
             : 'install_refused',
         ),
-        incomingDigest: incomingIdentity.digest,
+        incomingDigest: incomingFingerprint.digest,
+        incomingScheme: incomingFingerprint.scheme,
       };
       entries.push(entry);
       byId.set(id, entry);
@@ -944,10 +998,24 @@ function evaluate(
           reviewRequired: false as const,
         })
       : resolved.resolution;
+    if (projection.referenceOnly !== undefined && resolution.kind === 'missing') {
+      const entry: EvaluatedEntry = {
+        node,
+        projection,
+        identity,
+        resolution,
+        outcome: refused(id, 'unresolved_reference'),
+        incomingDigest: incomingFingerprint.digest,
+        incomingScheme: incomingFingerprint.scheme,
+      };
+      entries.push(entry);
+      byId.set(id, entry);
+      continue;
+    }
     const remembered = rememberedContentMatchDecision(db, {
       kind: projection.kind,
-      scheme: identity.envelope.scheme,
-      digest: incomingIdentity.digest,
+      scheme: incomingFingerprint.scheme,
+      digest: incomingFingerprint.digest,
     });
     if (
       projection.allowRememberedDecision !== false &&
@@ -967,7 +1035,8 @@ function evaluate(
         identity,
         resolution,
         outcome,
-        incomingDigest: incomingIdentity.digest,
+        incomingDigest: incomingFingerprint.digest,
+        incomingScheme: incomingFingerprint.scheme,
         targetContentKey: remembered.targetContentKey,
       });
       entries.push(entry);
@@ -988,7 +1057,8 @@ function evaluate(
             : 'ambiguous_fingerprint',
           resolution.candidates,
         ),
-        incomingDigest: incomingIdentity.digest,
+        incomingDigest: incomingFingerprint.digest,
+        incomingScheme: incomingFingerprint.scheme,
       };
       entries.push(entry);
       byId.set(id, entry);
@@ -1014,7 +1084,8 @@ function evaluate(
         resolution,
         outcome,
         reviewedDecision: 'match',
-        incomingDigest: incomingIdentity.digest,
+        incomingDigest: incomingFingerprint.digest,
+        incomingScheme: incomingFingerprint.scheme,
         targetContentKey: resolution.contentKey,
       });
       if (entry.outcome.kind === 'refused') {
@@ -1028,7 +1099,7 @@ function evaluate(
         incomingName: projection.name,
         localName: localName(db, projection.kind, resolution.contentKey),
         targetContentKey: resolution.contentKey,
-        incomingFingerprint: incomingIdentity.digest,
+        incomingFingerprint: incomingFingerprint.digest,
         matchClass: reviewClass,
         defaultChoice: 'match',
         selectedChoice: 'match',
@@ -1038,7 +1109,7 @@ function evaluate(
           db,
           projection,
           reviewClass,
-          incomingIdentity.digest,
+          incomingFingerprint.digest,
           resolution.contentKey,
         ),
       });
@@ -1059,7 +1130,8 @@ function evaluate(
           identity,
           resolution,
           outcome: refused(id, 'clone_key_collision'),
-          incomingDigest: incomingIdentity.digest,
+          incomingDigest: incomingFingerprint.digest,
+          incomingScheme: incomingFingerprint.scheme,
         };
         entries.push(entry);
         byId.set(id, entry);
@@ -1083,7 +1155,8 @@ function evaluate(
             kind: 'match',
             contentKey: resolution.contentKey,
           }),
-          incomingDigest: incomingIdentity.digest,
+          incomingDigest: incomingFingerprint.digest,
+          incomingScheme: incomingFingerprint.scheme,
           targetContentKey: resolution.contentKey,
         });
         if (liveExactTarget.outcome.kind === 'refused') {
@@ -1121,7 +1194,8 @@ function evaluate(
                 ? 'clone_key_collision'
                 : 'install_refused',
           ),
-          incomingDigest: incomingIdentity.digest,
+          incomingDigest: incomingFingerprint.digest,
+          incomingScheme: incomingFingerprint.scheme,
         };
         entries.push(entry);
         byId.set(id, entry);
@@ -1145,7 +1219,8 @@ function evaluate(
       ...(choice.decision === 'clone'
         ? { reviewedDecision: 'clone' as const }
         : {}),
-      incomingDigest: incomingIdentity.digest,
+      incomingDigest: incomingFingerprint.digest,
+      incomingScheme: incomingFingerprint.scheme,
       targetContentKey: contentKey,
     });
     entries.push(entry);
@@ -1270,7 +1345,7 @@ export function commitContentImport(
         ) {
           rememberContentMatchDecision(db, {
             kind: entry.projection.kind,
-            scheme: entry.identity.envelope.scheme,
+            scheme: entry.incomingScheme,
             digest: entry.incomingDigest,
             decision: entry.reviewedDecision,
             targetContentKey: entry.targetContentKey,
