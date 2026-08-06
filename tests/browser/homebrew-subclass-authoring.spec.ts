@@ -14,6 +14,17 @@ async function ready(page: Page): Promise<void> {
   );
 }
 
+async function homebrewReady(page: Page): Promise<void> {
+  await expect(page.locator('.homebrew-status')).toHaveText(
+    'Homebrew library loaded.',
+    { timeout: 65_000 },
+  );
+  await expect(page.locator('#homebrew-tab-panel')).toHaveAttribute(
+    'aria-busy',
+    'false',
+  );
+}
+
 test('authors a subclass timeline and persists only threshold-eligible character effects', async ({
   page,
 }) => {
@@ -48,7 +59,7 @@ test('authors a subclass timeline and persists only threshold-eligible character
   await page.getByLabel('Timeline level').selectOption('3');
   await page.getByRole('button', { name: 'Add level' }).click();
   await page.getByRole('button', { name: 'Add feature at level 3' }).click();
-  const levelThree = page.locator('.subclass-level-group').filter({ hasText: 'Level 3' });
+  const levelThree = page.getByRole('region', { name: 'Level 3', exact: true });
   await levelThree.getByLabel('Feature name').fill('Threshold Ward');
   await levelThree.getByLabel('Feature description').fill('The ward becomes mechanical at Fighter level 3.');
   await levelThree.getByRole('button', { name: 'Add effect' }).click();
@@ -64,7 +75,7 @@ test('authors a subclass timeline and persists only threshold-eligible character
   await page.getByLabel('Timeline level').selectOption('6');
   await page.getByRole('button', { name: 'Add level' }).click();
   await page.getByRole('button', { name: 'Add feature at level 6' }).click();
-  const levelSix = page.locator('.subclass-level-group').filter({ hasText: 'Level 6' });
+  const levelSix = page.getByRole('region', { name: 'Level 6', exact: true });
   await levelSix.getByLabel('Feature name').fill('Later Ward');
   await levelSix.getByLabel('Feature description').fill('This later mechanic must not exist at Fighter level 3.');
   await levelSix.getByRole('button', { name: 'Add effect' }).click();
@@ -201,10 +212,15 @@ test('authors a subclass timeline and persists only threshold-eligible character
     expect.objectContaining({ label: 'Threshold armor', amount: 2 }),
   ]));
 
+  // The boot shell's #status is replaced by the mounted route. Homebrew owns
+  // its readiness signal through the loaded status and settled tab panel.
   await page.reload();
-  await ready(page);
+  await homebrewReady(page);
   expect(await page.evaluate((characterId) => window.staticApp.inspectRows(
     'character_effects',
     { character_id: characterId },
   ), journey.characterId)).toEqual(journey.afterLevelThree);
+
+  await page.getByRole('link', { name: '← Characters' }).click();
+  await ready(page);
 });
