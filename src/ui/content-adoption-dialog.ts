@@ -9,7 +9,13 @@ import {
   normalizeContentIdentityName,
   type ContentKind,
 } from '../catalog/content-identity';
+import type {
+  PublishDecision,
+  PublishPreview,
+  PublishResult,
+} from '../authoring/contracts';
 import { clear, element, listen, type Cleanup } from './dom';
+import { attachModalTrap, type ModalTrap } from './modal-trap';
 
 export interface ContentAdoptionDialogOptions {
   readonly mount: HTMLElement;
@@ -32,6 +38,15 @@ export interface ContentAdoptionDialog {
   /** Resolves after the latest user-triggered replan or commit settles. */
   readonly whenSettled: () => Promise<void>;
   readonly cleanup: Cleanup;
+}
+
+export interface PublishAdoptionDialogOptions {
+  readonly mount: HTMLElement;
+  readonly preview: PublishPreview;
+  readonly commit: (decisions: readonly PublishDecision[]) => Promise<PublishResult>;
+  readonly onCommitted: (result: PublishResult) => void | Promise<void>;
+  readonly onCancel?: () => void;
+  readonly restoreFocus: () => void;
 }
 
 function sameIdentityName(review: ContentImportReviewRow): boolean {
@@ -168,14 +183,6 @@ function createPreview(plan: ContentImportPlan): HTMLElement {
   ]);
 }
 
-function openModal(dialog: HTMLDialogElement): void {
-  if (typeof dialog.showModal === 'function') {
-    if (!dialog.open) dialog.showModal();
-    return;
-  }
-  dialog.setAttribute('open', '');
-}
-
 /**
  * The common D82 review surface. Replanning is mandatory after every choice:
  * it disables commit, simulates the whole dependency graph, and only enables
@@ -199,8 +206,11 @@ export function createContentAdoptionDialog(
   let plan = options.plan;
   let generation = 0;
   let disposed = false;
+  let closed = false;
   let latestOperation: Promise<void> = Promise.resolve();
   const cleanups: Cleanup[] = [];
+  let focusable: HTMLElement[] = [];
+  let modal: ModalTrap;
 
   const heading = element('h2', {
     text: 'Review content import',
@@ -269,6 +279,7 @@ export function createContentAdoptionDialog(
 
   function renderRows(): void {
     clear(list);
+    const rowControls: HTMLElement[] = [];
     for (const row of rows.values()) {
       const selected = choices[row.id] ?? {
         decision: 'match' as const,
@@ -335,6 +346,7 @@ export function createContentAdoptionDialog(
           ...(selected.decision === 'match' ? { disabled: '' } : {}),
         },
       });
+      cloneName.disabled = selected.decision === 'match';
       fieldset.append(
         match,
         element('label', { text: 'Match', attributes: { for: matchId } }),
@@ -356,12 +368,19 @@ export function createContentAdoptionDialog(
         latestOperation = refresh();
       });
       list.append(fieldset);
+      rowControls.push(match, clone, cloneName);
     }
+    focusable = [...rowControls, cancel, commit];
   }
 
-  cleanups.push(listen(cancel, 'click', () => {
-    dialog.close?.();
+  const cancelDialog = (): void => {
+    if (disposed || closed) return;
+    closed = true;
+    modal.close();
     options.onCancel?.();
+  };
+  cleanups.push(listen(cancel, 'click', () => {
+    cancelDialog();
   }));
   cleanups.push(listen(commit, 'click', () => {
     if (commit.disabled) return;
@@ -388,13 +407,18 @@ export function createContentAdoptionDialog(
         return;
       }
       await options.onCommitted(result);
-      dialog.close?.();
+      closed = true;
+      modal.close();
     });
   }));
 
   renderRows();
-  options.mount.append(dialog);
-  openModal(dialog);
+  modal = attachModalTrap({
+    dialog,
+    mount: options.mount,
+    focusable: () => focusable,
+    onDismiss: cancelDialog,
+  });
   return {
     element: dialog,
     whenSettled: () => latestOperation,
@@ -402,7 +426,191 @@ export function createContentAdoptionDialog(
       disposed = true;
       generation += 1;
       for (const cleanup of cleanups.splice(0)) cleanup();
-      dialog.close?.();
+      modal.cleanup();
+    },
+  };
+}
+
+function publishReasonLabel(reason: PublishPreview['review'][number]['reason']): string {
+  switch (reason) {
+    case 'alias': return 'Alias';
+    case 'compatible-fingerprint': return 'Compatible fingerprint';
+    case 'srd-fallback': return 'SRD fingerprint fallback';
+    case 'metadata-conflict': return 'Metadata conflict';
+  }
+}
+
+/**
+ * Authoring's CI-4a review surface. It deliberately lives beside catalog
+ * adoption so import and publish cannot drift into two different match/clone
+ * vocabularies or modal disciplines.
+ */
+export function createPublishAdoptionDialog(
+  options: PublishAdoptionDialogOptions,
+): ContentAdoptionDialog {
+  const dialog = document.createElement('dialog');
+  dialog.className = 'content-adoption-modal';
+  dialog.setAttribute('aria-modal', 'true');
+  dialog.setAttribute('aria-labelledby', 'publish-adoption-heading');
+  dialog.setAttribute('aria-describedby', 'publish-adoption-explanation');
+  dialog.dataset.testid = 'content-adoption-modal';
+
+  const selections = new Map<string, {
+    decision: 'match' | 'clone';
+    cloneName: string;
+  }>();
+  for (const review of options.preview.review) {
+    selections.set(review.candidate_content_key, {
+      decision: review.default_decision,
+      cloneName: `${options.preview.aggregate.name} (Private copy)`,
+    });
+  }
+
+  const status = element('p', {
+    attributes: { role: 'status', 'aria-live': 'polite' },
+  });
+  const rows = element('div', { className: 'content-adoption-list' });
+  const cancel = element('button', {
+    text: 'Cancel',
+    attributes: { type: 'button' },
+  });
+  const commit = element('button', {
+    text: 'Publish with these choices',
+    attributes: { type: 'button' },
+  });
+  dialog.append(
+    element('h2', {
+      text: 'Review content adoption',
+      attributes: { id: 'publish-adoption-heading' },
+    }),
+    element('p', {
+      text: 'Choose whether the draft should use matching installed content or publish a renamed private copy.',
+      attributes: { id: 'publish-adoption-explanation' },
+    }),
+    status,
+    rows,
+    element('div', { className: 'content-adoption-actions' }, [cancel, commit]),
+  );
+
+  const focusable: HTMLElement[] = [];
+  for (const [index, review] of options.preview.review.entries()) {
+    const key = review.candidate_content_key;
+    const selected = selections.get(key)!;
+    const prefix = `publish-adoption-${String(index + 1)}`;
+    const match = element('input', {
+      attributes: {
+        id: `${prefix}-match`,
+        type: 'radio',
+        name: prefix,
+        value: 'match',
+        ...(selected.decision === 'match' ? { checked: '' } : {}),
+      },
+    });
+    const clone = element('input', {
+      attributes: {
+        id: `${prefix}-clone`,
+        type: 'radio',
+        name: prefix,
+        value: 'clone',
+        ...(selected.decision === 'clone' ? { checked: '' } : {}),
+      },
+    });
+    const cloneName = element('input', {
+      attributes: {
+        id: `${prefix}-clone-name`,
+        type: 'text',
+        value: selected.cloneName,
+        ...(selected.decision === 'match' ? { disabled: '' } : {}),
+      },
+    });
+    cloneName.value = selected.cloneName;
+    cloneName.disabled = selected.decision === 'match';
+    const choose = (decision: 'match' | 'clone'): void => {
+      selections.set(key, { decision, cloneName: cloneName.value });
+      cloneName.disabled = decision === 'match';
+    };
+    match.addEventListener('change', () => choose('match'));
+    clone.addEventListener('change', () => choose('clone'));
+    cloneName.addEventListener('input', () => choose('clone'));
+    rows.append(element('fieldset', {
+      className: 'content-adoption-row',
+      attributes: { 'data-content-key': key },
+    }, [
+      element('legend', { text: review.candidate_name }),
+      element('p', { text: `Match reason: ${publishReasonLabel(review.reason)}` }),
+      match,
+      element('label', { text: 'Match', attributes: { for: `${prefix}-match` } }),
+      clone,
+      element('label', { text: 'Clone instead', attributes: { for: `${prefix}-clone` } }),
+      element('label', { text: 'Private copy name', attributes: { for: `${prefix}-clone-name` } }),
+      cloneName,
+    ]));
+    focusable.push(match, clone, cloneName);
+  }
+  focusable.push(cancel, commit);
+
+  let disposed = false;
+  let closed = false;
+  let latestOperation = Promise.resolve();
+  let modal: ModalTrap;
+  const decisions = (): readonly PublishDecision[] =>
+    options.preview.review.map((review) => {
+      const selected = selections.get(review.candidate_content_key)!;
+      return selected.decision === 'match'
+        ? {
+            candidate_content_key: review.candidate_content_key,
+            decision: 'match' as const,
+          }
+        : {
+            candidate_content_key: review.candidate_content_key,
+            decision: 'clone' as const,
+            clone_name: selected.cloneName,
+          };
+    });
+  const close = (): void => {
+    if (closed) return;
+    closed = true;
+    modal.close();
+  };
+  const onCancel = (): void => {
+    if (disposed || closed) return;
+    close();
+    options.onCancel?.();
+  };
+  const onCommit = (): void => {
+    if (commit.disabled || disposed || closed) return;
+    commit.disabled = true;
+    status.textContent = 'Publishing…';
+    latestOperation = options.commit(decisions()).then(async (result) => {
+      if (disposed) return;
+      await options.onCommitted(result);
+      if (!disposed) close();
+    }).catch((error: unknown) => {
+      if (disposed) return;
+      commit.disabled = false;
+      status.textContent = error instanceof Error ? error.message : String(error);
+      status.setAttribute('role', 'alert');
+      commit.focus();
+    });
+  };
+  cancel.addEventListener('click', onCancel);
+  commit.addEventListener('click', onCommit);
+  modal = attachModalTrap({
+    dialog,
+    mount: options.mount,
+    focusable: () => focusable,
+    onDismiss: onCancel,
+    restoreFocus: options.restoreFocus,
+  });
+
+  return {
+    element: dialog,
+    whenSettled: () => latestOperation,
+    cleanup: () => {
+      disposed = true;
+      cancel.removeEventListener('click', onCancel);
+      commit.removeEventListener('click', onCommit);
+      modal.cleanup();
     },
   };
 }

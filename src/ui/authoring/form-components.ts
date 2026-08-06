@@ -128,6 +128,8 @@ export interface EffectCardOptions {
   readonly count: number;
   readonly allowFeatureOnly: boolean;
   readonly disabled?: boolean;
+  /** Backend validation path owned by this effect within its aggregate. */
+  readonly pathPrefix?: readonly (string | number)[];
   readonly onKindChange: (kind: AuthorableEffectKind) => void;
   readonly onCommonChange: (
     field: 'label' | 'notes',
@@ -160,11 +162,16 @@ function fieldControl(
   id: string,
   disabled: boolean,
   onChange: EffectCardOptions['onFieldChange'],
+  path?: readonly (string | number)[],
 ): HTMLElement {
   const current = fieldValue(effect, field.key);
   if (field.control === 'boolean') {
     const input = element('input', {
-      attributes: { id, type: 'checkbox' },
+      attributes: {
+        id,
+        type: 'checkbox',
+        ...(path === undefined ? {} : { 'data-authoring-path': authoringPathKey(path) }),
+      },
     });
     input.checked = current === true;
     input.disabled = disabled;
@@ -180,6 +187,7 @@ function fieldControl(
         max: String(field.maximum),
         step: '1',
         ...(field.required ? { required: '' } : {}),
+        ...(path === undefined ? {} : { 'data-authoring-path': authoringPathKey(path) }),
       },
     });
     input.value = typeof current === 'number' ? String(current) : '';
@@ -197,6 +205,7 @@ function fieldControl(
         type: 'text',
         list: `${id}-known-values`,
         ...(field.required ? { required: '' } : {}),
+        ...(path === undefined ? {} : { 'data-authoring-path': authoringPathKey(path) }),
       },
     });
     input.value = typeof current === 'string' ? current : '';
@@ -218,6 +227,7 @@ function fieldControl(
     attributes: {
       id,
       ...(field.required ? { required: '' } : {}),
+      ...(path === undefined ? {} : { 'data-authoring-path': authoringPathKey(path) }),
     },
   });
   appendOption(select, '', 'Choose…');
@@ -258,7 +268,12 @@ export function createEffectCard(options: EffectCardOptions): HTMLFieldSetElemen
   }));
 
   const prefix = `authoring-effect-${effect.draft_item_uuid}`;
-  const kind = element('select', { attributes: { id: `${prefix}-kind` } });
+  const kind = element('select', { attributes: {
+    id: `${prefix}-kind`,
+    ...(options.pathPrefix === undefined
+      ? {}
+      : { 'data-authoring-path': authoringPathKey([...options.pathPrefix, 'kind']) }),
+  } });
   for (const availableKind of supportedKinds(options.allowFeatureOnly)) {
     appendOption(kind, availableKind, effectDefinition(availableKind).label);
   }
@@ -276,7 +291,12 @@ export function createEffectCard(options: EffectCardOptions): HTMLFieldSetElemen
   }), kind);
 
   const label = element('input', {
-    attributes: { id: `${prefix}-label`, type: 'text', required: '' },
+    attributes: {
+      id: `${prefix}-label`, type: 'text', required: '',
+      ...(options.pathPrefix === undefined
+        ? {}
+        : { 'data-authoring-path': authoringPathKey([...options.pathPrefix, 'label']) }),
+    },
   });
   label.value = effect.label;
   label.disabled = disabled;
@@ -291,12 +311,24 @@ export function createEffectCard(options: EffectCardOptions): HTMLFieldSetElemen
     const id = `${prefix}-${field.key}`;
     card.append(
       element('label', { text: field.label, attributes: { for: id } }),
-      fieldControl(effect, field, id, disabled, options.onFieldChange),
+      fieldControl(
+        effect,
+        field,
+        id,
+        disabled,
+        options.onFieldChange,
+        options.pathPrefix === undefined ? undefined : [...options.pathPrefix, field.key],
+      ),
     );
   }
 
   const notes = element('textarea', {
-    attributes: { id: `${prefix}-notes` },
+    attributes: {
+      id: `${prefix}-notes`,
+      ...(options.pathPrefix === undefined
+        ? {}
+        : { 'data-authoring-path': authoringPathKey([...options.pathPrefix, 'notes']) }),
+    },
   });
   notes.value = effect.notes ?? '';
   notes.disabled = disabled;

@@ -2,6 +2,7 @@ import type { DraftRevision } from '../../authoring/contracts';
 import type { HomebrewDraftUuid } from '../../authoring/ids';
 import { RpcError } from '../../rpc/protocol';
 import { element } from '../dom';
+import { attachModalTrap, type ModalTrap } from '../modal-trap';
 
 export interface DraftRevisionConflict {
   readonly draft_uuid: HomebrewDraftUuid;
@@ -91,21 +92,22 @@ export function createDraftConflictDialog(
 
   let disposed = false;
   let dismissed = false;
+  let completedAction: DraftConflictAction = 'keep-local';
   let latestOperation = Promise.resolve();
   const controls = [keep, load];
+  let modal: ModalTrap;
   const finish = (
     action: DraftConflictAction,
     operation: () => void | Promise<void>,
   ): void => {
     if (dismissed || disposed) return;
     dismissed = true;
+    completedAction = action;
     keep.disabled = true;
     load.disabled = true;
     latestOperation = Promise.resolve().then(operation).then(() => {
       if (disposed) return;
-      dialog.close?.();
-      dialog.remove();
-      options.restoreFocus(action);
+      modal.close();
     }).catch((error: unknown) => {
       dismissed = false;
       keep.disabled = false;
@@ -117,37 +119,16 @@ export function createDraftConflictDialog(
   };
   const onKeep = (): void => finish('keep-local', options.onKeepLocal);
   const onLoad = (): void => finish('load-saved', options.onLoadSaved);
-  const onCancel = (event: Event): void => {
-    event.preventDefault();
-    finish('keep-local', options.onKeepLocal);
-  };
-  const onKeydown = (event: KeyboardEvent): void => {
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      finish('keep-local', options.onKeepLocal);
-      return;
-    }
-    if (event.key !== 'Tab') return;
-    const active = document.activeElement;
-    if (event.shiftKey && (active === keep || !controls.includes(active as HTMLButtonElement))) {
-      event.preventDefault();
-      load.focus();
-    } else if (!event.shiftKey && (active === load || !controls.includes(active as HTMLButtonElement))) {
-      event.preventDefault();
-      keep.focus();
-    }
-  };
+  const onCancel = (): void => finish('keep-local', options.onKeepLocal);
   keep.addEventListener('click', onKeep);
   load.addEventListener('click', onLoad);
-  dialog.addEventListener('cancel', onCancel);
-  dialog.addEventListener('keydown', onKeydown);
-  options.mount.append(dialog);
-  if (typeof dialog.showModal === 'function') {
-    if (!dialog.open) dialog.showModal();
-  } else {
-    dialog.setAttribute('open', '');
-  }
-  keep.focus();
+  modal = attachModalTrap({
+    dialog,
+    mount: options.mount,
+    focusable: () => controls,
+    onDismiss: onCancel,
+    restoreFocus: () => options.restoreFocus(completedAction),
+  });
 
   return {
     element: dialog,
@@ -156,10 +137,7 @@ export function createDraftConflictDialog(
       disposed = true;
       keep.removeEventListener('click', onKeep);
       load.removeEventListener('click', onLoad);
-      dialog.removeEventListener('cancel', onCancel);
-      dialog.removeEventListener('keydown', onKeydown);
-      dialog.close?.();
-      dialog.remove();
+      modal.cleanup();
     },
   };
 }

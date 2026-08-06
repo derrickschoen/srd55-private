@@ -23,12 +23,22 @@ import { assertedExternalContentKey } from '../../../src/catalog/catalog-key';
 import { canonicalJson } from '../../../src/commands/canonical-json';
 import { DatabaseContext } from '../../../src/db/database';
 import type { ContentKey } from '../../../src/domain/ids';
+import type {
+  DraftRevision,
+  PublishPreview,
+  PublishResult,
+} from '../../../src/authoring/contracts';
+import type { HomebrewDraftUuid } from '../../../src/authoring/ids';
 import { portableImportPlan } from '../../../src/backup/portable-content';
-import { createContentAdoptionDialog } from '../../../src/ui/content-adoption-dialog';
+import {
+  createContentAdoptionDialog,
+  createPublishAdoptionDialog,
+} from '../../../src/ui/content-adoption-dialog';
 import {
   elementText,
   installInteractiveDocument,
   interactiveElement,
+  type InteractiveTestElement,
 } from '../../fixtures/interactive-dom';
 import { openTestDatabase } from '../../helpers/open-db';
 
@@ -143,6 +153,56 @@ function commitNewItem(db: DatabaseContext, node: ContentImportNode<'item'>): vo
   if (committed.kind !== 'committed') {
     throw new TypeError(`Could not install test item: ${committed.kind}.`);
   }
+}
+
+function publishPreview(): PublishPreview {
+  return {
+    token: 'publish-dialog-token' as never,
+    facts: {
+      draft_uuid: 'publish-dialog-draft' as HomebrewDraftUuid,
+      draft_revision: 1 as DraftRevision,
+      content_kind: 'species',
+      canonical_json: '{}' as never,
+      candidate_content_keys: ['2024:species:human' as ContentKey],
+      candidate_identities: [],
+    },
+    aggregate: {
+      kind: 'species',
+      name: 'Incoming Human',
+      rules_edition: 'expanded',
+      reference_text: '',
+      repeatable: false,
+      creature_type: 'Humanoid',
+      primary_size: 'Medium',
+      alternate_size: null,
+      walking_speed_feet: 30,
+      traits: [],
+      grants: [],
+    },
+    review: [{
+      candidate_content_key: '2024:species:human' as ContentKey,
+      candidate_name: 'Human',
+      reason: 'srd-fallback',
+      default_decision: 'match',
+    }],
+  };
+}
+
+const publishResult: PublishResult = {
+  outcome: 'matched_existing',
+  content_key: '2024:species:human' as ContentKey,
+  name: 'Human',
+  catalog_layer: 'bundled',
+  previous_key_usage_count: 0,
+};
+
+function keydown(key: string, shiftKey = false): KeyboardEvent {
+  const event = new Event('keydown', { cancelable: true }) as KeyboardEvent;
+  Object.defineProperties(event, {
+    key: { value: key },
+    shiftKey: { value: shiftKey },
+  });
+  return event;
 }
 
 describe('the D82 content-adoption dialog', () => {
@@ -357,6 +417,61 @@ describe('the D82 content-adoption dialog', () => {
     }
   });
 
+  it('D108-CI8 traps focus and restores the invoker for Cancel, native cancel, and Escape', async () => {
+    const connection = await openTestDatabase();
+    connections.push(connection);
+    const db = new DatabaseContext(connection);
+    const plan = planContentImport(db, [itemNode(
+      'modal-discipline', 'Modal Discipline', { rule: 'shared trap' },
+    )]);
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const actions: readonly ((dialog: InteractiveTestElement) => void)[] = [
+        (dialog) => dialog.querySelectorAll('button').find((candidate) =>
+          candidate.textContent === 'Cancel',
+        )?.click(),
+        (dialog) => { dialog.dispatchEvent(new Event('cancel', { cancelable: true })); },
+        (dialog) => { dialog.dispatchEvent(keydown('Escape')); },
+      ];
+      for (const [index, action] of actions.entries()) {
+        const invoker = document.createElement('button');
+        document.body.append(invoker);
+        invoker.focus();
+        let cancellations = 0;
+        const rendered = createContentAdoptionDialog({
+          mount: document.body,
+          plan,
+          replan: async () => plan,
+          commit: async () => ({ kind: 'committed', outcomes: plan.outcomes }),
+          onCommitted: () => undefined,
+          onCancel: () => { cancellations += 1; },
+        });
+        const dialog = interactiveElement(rendered.element);
+        const buttons = dialog.querySelectorAll('button');
+        const cancel = buttons.find((candidate) => candidate.textContent === 'Cancel');
+        const commit = buttons.find((candidate) =>
+          candidate.textContent === 'Import with these choices');
+        if (cancel === undefined || commit === undefined) {
+          throw new Error('CI-8 modal controls are missing.');
+        }
+        expect(document.activeElement).toBe(cancel);
+        if (index === 0) {
+          dialog.dispatchEvent(keydown('Tab', true));
+          expect(document.activeElement).toBe(commit);
+          dialog.dispatchEvent(keydown('Tab'));
+          expect(document.activeElement).toBe(cancel);
+        }
+        action(dialog);
+        expect(cancellations).toBe(1);
+        expect(dialog.isConnected).toBe(false);
+        expect(document.activeElement).toBe(invoker);
+        rendered.cleanup();
+      }
+    } finally {
+      restoreDocument();
+    }
+  });
+
   it('lists every review with Match selected and replans before clone commit', async () => {
     const connection = await openTestDatabase();
     connections.push(connection);
@@ -517,6 +632,143 @@ describe('the D82 content-adoption dialog', () => {
       expect(db.scalar<number>(
         'SELECT count(*) FROM catalog_content_match_decisions',
       )).toBe(1);
+      rendered.cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+});
+
+describe('the D108 publish-adoption dialog', () => {
+  it('D108-PUBLISH commits the untouched default Match and restores focus after success', async () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const invoker = document.createElement('button');
+      document.body.append(invoker);
+      invoker.focus();
+      const submitted: unknown[] = [];
+      const committed: PublishResult[] = [];
+      const rendered = createPublishAdoptionDialog({
+        mount: document.body,
+        preview: publishPreview(),
+        commit: async (decisions) => {
+          submitted.push(decisions);
+          return publishResult;
+        },
+        onCommitted: (result) => { committed.push(result); },
+        restoreFocus: () => invoker.focus(),
+      });
+      const dialog = interactiveElement(rendered.element);
+      const inputs = dialog.querySelectorAll('input');
+      expect(inputs[0]?.getAttribute('checked')).toBe('');
+      expect(inputs[1]?.getAttribute('checked')).toBeNull();
+      expect(inputs[2]?.disabled).toBe(true);
+      dialog.querySelectorAll('button').find((candidate) =>
+        candidate.textContent === 'Publish with these choices',
+      )?.click();
+      await rendered.whenSettled();
+
+      expect(submitted).toEqual([[{
+        candidate_content_key: '2024:species:human',
+        decision: 'match',
+      }]]);
+      expect(committed).toEqual([publishResult]);
+      expect(dialog.isConnected).toBe(false);
+      expect(document.activeElement).toBe(invoker);
+      rendered.cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('D108-PUBLISH Cancel, native cancel, and Escape all dismiss and restore the invoker', () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const actions: readonly ((dialog: InteractiveTestElement) => void)[] = [
+        (dialog) => dialog.querySelectorAll('button').find((candidate) =>
+          candidate.textContent === 'Cancel',
+        )?.click(),
+        (dialog) => { dialog.dispatchEvent(new Event('cancel', { cancelable: true })); },
+        (dialog) => { dialog.dispatchEvent(keydown('Escape')); },
+      ];
+      for (const action of actions) {
+        const invoker = document.createElement('button');
+        document.body.append(invoker);
+        invoker.focus();
+        let cancellations = 0;
+        const rendered = createPublishAdoptionDialog({
+          mount: document.body,
+          preview: publishPreview(),
+          commit: async () => publishResult,
+          onCommitted: () => undefined,
+          onCancel: () => { cancellations += 1; },
+          restoreFocus: () => invoker.focus(),
+        });
+        const dialog = interactiveElement(rendered.element);
+        action(dialog);
+        expect(cancellations).toBe(1);
+        expect(dialog.isConnected).toBe(false);
+        expect(document.activeElement).toBe(invoker);
+        rendered.cleanup();
+      }
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('D108-PUBLISH wraps Tab and Shift+Tab across enabled modal controls', () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const rendered = createPublishAdoptionDialog({
+        mount: document.body,
+        preview: publishPreview(),
+        commit: async () => publishResult,
+        onCommitted: () => undefined,
+        restoreFocus: () => undefined,
+      });
+      const dialog = interactiveElement(rendered.element);
+      const inputs = dialog.querySelectorAll('input');
+      const commit = dialog.querySelectorAll('button').find((candidate) =>
+        candidate.textContent === 'Publish with these choices',
+      );
+      if (commit === undefined || inputs[0] === undefined) {
+        throw new Error('Publish modal controls are missing.');
+      }
+
+      expect(document.activeElement).toBe(inputs[0]);
+      dialog.dispatchEvent(keydown('Tab', true));
+      expect(document.activeElement).toBe(commit);
+      dialog.dispatchEvent(keydown('Tab'));
+      expect(document.activeElement).toBe(inputs[0]);
+      rendered.cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('D108-PUBLISH renders commit errors as alerts and restores an enabled retry control', async () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const rendered = createPublishAdoptionDialog({
+        mount: document.body,
+        preview: publishPreview(),
+        commit: async () => { throw new Error('Publish adoption was refused.'); },
+        onCommitted: () => undefined,
+        restoreFocus: () => undefined,
+      });
+      const dialog = interactiveElement(rendered.element);
+      const commit = dialog.querySelectorAll('button').find((candidate) =>
+        candidate.textContent === 'Publish with these choices',
+      );
+      if (commit === undefined) throw new Error('Publish control is missing.');
+      commit.click();
+      await rendered.whenSettled();
+
+      expect(dialog.isConnected).toBe(true);
+      expect(dialog.querySelector('[role="alert"]')?.textContent)
+        .toBe('Publish adoption was refused.');
+      expect(commit.disabled).toBe(false);
+      expect(document.activeElement).toBe(commit);
       rendered.cleanup();
     } finally {
       restoreDocument();
