@@ -23,6 +23,7 @@ import {
 import { projectStoredContentV1 } from '../catalog/stored-content-projector-v1';
 import { projectStoredSpellRowsContentV1 } from '../catalog/spell-content-projector-v1';
 import type { ContentKey } from '../domain/ids';
+import type { SpeciesContentAggregate } from '../authoring/contracts';
 import {
   migrateLegacyTraitRows,
   splitLegacyTraitEffect,
@@ -185,6 +186,20 @@ export interface PreFlavorCharacterBackupDocument {
 export interface CharacterImportResult {
   readonly characterId: number;
   readonly spellOutcomes: readonly CharacterBackupSpellOutcome[];
+  readonly notices: readonly CharacterImportNotice[];
+}
+
+export interface CharacterImportNotice {
+  readonly kind: 'species_effect_template_ref_unresolved';
+  readonly effect: {
+    readonly templateRef: string;
+    readonly label: string;
+    readonly effectKind: string;
+  };
+  readonly species: {
+    readonly contentKey: string;
+    readonly name: string;
+  };
 }
 
 export type CharacterImportCommitResult =
@@ -1635,6 +1650,150 @@ function selectCharacterRows(
   );
 }
 
+interface PortableSpeciesEffectTemplateIdentity {
+  readonly traitName: string;
+  readonly traitSortOrder: number;
+  readonly effectSortOrder: number;
+}
+
+const storedSpeciesEffectTemplateRef =
+  /^species_template_trait_effects:(\d+)$/u;
+const portableSpeciesEffectTemplateRef =
+  /^species_template_trait_effects:portable:(\d+):(\d+):(.+)$/u;
+
+function encodedPortableSpeciesEffectTemplateRef(
+  identity: PortableSpeciesEffectTemplateIdentity,
+): string {
+  return `species_template_trait_effects:portable:${String(identity.traitSortOrder)}:${String(identity.effectSortOrder)}:${encodeURIComponent(identity.traitName)}`;
+}
+
+function decodedPortableSpeciesEffectTemplateRef(
+  value: string,
+): PortableSpeciesEffectTemplateIdentity | null {
+  const match = portableSpeciesEffectTemplateRef.exec(value);
+  if (match === null) return null;
+  const traitSortOrder = Number(match[1]);
+  const effectSortOrder = Number(match[2]);
+  if (
+    !Number.isSafeInteger(traitSortOrder) || traitSortOrder < 1 ||
+    !Number.isSafeInteger(effectSortOrder) || effectSortOrder < 1
+  ) return null;
+  try {
+    const traitName = decodeURIComponent(match[3]!);
+    return traitName === ''
+      ? null
+      : { traitName, traitSortOrder, effectSortOrder };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Replace a store-local species effect id with the trait identity that the
+ * portable aggregate preserves. The copied character effect remains the
+ * user's value; only its provenance locator changes inside the backup file.
+ */
+function portableSpeciesEffectRef(
+  db: DatabaseContext,
+  row: BackupRow,
+  sourceRows: ReadonlyMap<number, BackupRow>,
+): unknown {
+  if (typeof row.template_ref !== 'string') return row.template_ref;
+  const match = storedSpeciesEffectTemplateRef.exec(row.template_ref);
+  if (match === null || row.source_instance_id === null) return row.template_ref;
+  const source = sourceRows.get(Number(row.source_instance_id));
+  if (source === undefined || source.source_type !== 'species') {
+    return row.template_ref;
+  }
+  const identity = db.oneRaw(
+    `SELECT trait.name AS trait_name,
+            trait.sort_order AS trait_sort_order,
+            effect.sort_order AS effect_sort_order
+     FROM species_template_trait_effects AS effect
+     JOIN species_template_traits AS trait
+       ON trait.id = effect.species_template_trait_id
+     JOIN species_templates AS template
+       ON template.id = trait.species_template_id
+     JOIN species_definitions AS definition
+       ON definition.content_key = template.content_key
+     WHERE effect.id = ? AND definition.id = ?`,
+    [Number(match[1]), Number(source.source_definition_id)],
+  );
+  if (identity === null) return row.template_ref;
+  return encodedPortableSpeciesEffectTemplateRef({
+    traitName: String(identity.trait_name),
+    traitSortOrder: Number(identity.trait_sort_order),
+    effectSortOrder: Number(identity.effect_sort_order),
+  });
+}
+
+function portableSpeciesEffectRows(
+  db: DatabaseContext,
+  rows: readonly BackupRow[],
+  sourceRows: ReadonlyMap<number, BackupRow>,
+): readonly BackupRow[] {
+  return rows.map((row) => ({
+    ...row,
+    template_ref: portableSpeciesEffectRef(db, row, sourceRows),
+  }));
+}
+
+function portableSpeciesEffectSnapshot(
+  db: DatabaseContext,
+  snapshot: unknown,
+): unknown {
+  if (typeof snapshot !== 'string') return snapshot;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(snapshot);
+  } catch {
+    return snapshot;
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return snapshot;
+  }
+  const record = parsed as MutableRow;
+  if (
+    !Array.isArray(record.character_source_instances) ||
+    !Array.isArray(record.character_effects)
+  ) return snapshot;
+  const sourceRows = new Map(
+    (record.character_source_instances as BackupRow[]).map((row) => [
+      Number(row.id),
+      row,
+    ]),
+  );
+  return JSON.stringify({
+    ...record,
+    character_effects: portableSpeciesEffectRows(
+      db,
+      record.character_effects as BackupRow[],
+      sourceRows,
+    ),
+  });
+}
+
+function portableSpeciesEffectTables(
+  db: DatabaseContext,
+  tables: CharacterBackupTables,
+): CharacterBackupTables {
+  const sourceRows = new Map(
+    tables.character_source_instances.map((row) => [Number(row.id), row]),
+  );
+  return {
+    ...tables,
+    character_effects: portableSpeciesEffectRows(
+      db,
+      tables.character_effects,
+      sourceRows,
+    ),
+    character_save_points: tables.character_save_points.map((row) => ({
+      ...row,
+      snapshot: portableSpeciesEffectSnapshot(db, row.snapshot),
+    })),
+  };
+}
+
 export function exportCharacterBackup(
   db: DatabaseContext,
   characterId: number,
@@ -1666,10 +1825,10 @@ export function exportCharacterBackup(
            ORDER BY id`,
           loadoutIds,
         );
-  const allTables = {
+  const allTables = portableSpeciesEffectTables(db, {
     ...tables,
     spell_loadout_entries: entries,
-  } as CharacterBackupTables;
+  } as CharacterBackupTables);
 
   const referenceIds = Object.fromEntries(
     referenceKinds.map((kind) => [kind, new Set<number>()]),
@@ -2165,12 +2324,202 @@ interface CurrentImportMaps {
   readonly sourceRows: Map<number, BackupRow>;
 }
 
+const speciesEffectTemplateColumns = [
+  'effect_kind',
+  'damage_type',
+  'hit_points_flat',
+  'hit_points_per_level',
+  'speed_bonus_feet',
+  'ability',
+  'amount',
+  'maximum',
+  'base',
+  'ability_1',
+  'ability_2',
+  'allows_shield',
+  'weapon_scope',
+  'label',
+  'notes',
+] as const;
+
+interface TargetSpeciesEffectRows {
+  readonly contentKey: string;
+  readonly name: string;
+  readonly effects: readonly BackupRow[];
+}
+
+/**
+ * Rebind generated species-effect provenance to this database's installed
+ * aggregate. The portable ref first identifies the source aggregate's trait;
+ * payload equality is then checked only inside the corresponding target trait.
+ */
+function speciesEffectTemplateRefResolver(
+  db: DatabaseContext,
+  document: CharacterBackupDocument,
+  notices: CharacterImportNotice[],
+): (
+  row: BackupRow,
+  sourceType: string | null,
+  sourceSpeciesDefinitionId: number | null,
+  speciesDefinitionId: number | null,
+  sourceInstanceId: number | null,
+) => unknown {
+  const sourceKeys = new Map(
+    document.references.species_definitions.map((reference) => [
+      reference.id,
+      reference.content_key,
+    ]),
+  );
+  const portableSpecies = new Map(
+    document.content
+      .filter((entry) => entry.kind === 'species')
+      .map((entry) => [
+        entry.content_key,
+        entry.aggregate as SpeciesContentAggregate,
+      ]),
+  );
+  const candidates = new Map<number, TargetSpeciesEffectRows>();
+  const used = new Map<number, Set<number>>();
+  const noticed = new Set<string>();
+  const targetSpecies = (definitionId: number): TargetSpeciesEffectRows => {
+    const existing = candidates.get(definitionId);
+    if (existing !== undefined) return existing;
+    const root = db.oneRaw(
+      'SELECT content_key, name FROM species_definitions WHERE id = ?',
+      [definitionId],
+    );
+    if (root === null) {
+      throw new BackupValidationError(
+        `Character backup species definition ${String(definitionId)} is missing.`,
+      );
+    }
+    const resolved = {
+      contentKey: String(root.content_key),
+      name: String(root.name),
+      effects: db.allRaw(
+        `SELECT effect.id, trait.name AS trait_name,
+                trait.sort_order AS trait_sort_order,
+                effect.sort_order AS effect_sort_order,
+                ${speciesEffectTemplateColumns
+                  .map((column) => `effect.${column}`)
+                  .join(', ')}
+         FROM species_definitions AS definition
+         JOIN species_templates AS template
+           ON template.content_key = definition.content_key
+         JOIN species_template_traits AS trait
+           ON trait.species_template_id = template.id
+         JOIN species_template_trait_effects AS effect
+           ON effect.species_template_trait_id = trait.id
+         WHERE definition.id = ?
+         ORDER BY trait.sort_order, effect.sort_order, effect.id`,
+        [definitionId],
+      ),
+    };
+    candidates.set(definitionId, resolved);
+    return resolved;
+  };
+  const addNotice = (
+    row: BackupRow,
+    sourceContentKey: string,
+    speciesName: string,
+  ): null => {
+    const templateRef = String(row.template_ref);
+    const marker = [
+      templateRef,
+      String(row.effect_kind),
+      String(row.label),
+      sourceContentKey,
+    ].join('\u0000');
+    if (!noticed.has(marker)) {
+      noticed.add(marker);
+      notices.push(Object.freeze({
+        kind: 'species_effect_template_ref_unresolved',
+        effect: Object.freeze({
+          templateRef,
+          label: String(row.label),
+          effectKind: String(row.effect_kind),
+        }),
+        species: Object.freeze({
+          contentKey: sourceContentKey,
+          name: speciesName,
+        }),
+      }));
+    }
+    return null;
+  };
+  return (
+    row,
+    sourceType,
+    sourceSpeciesDefinitionId,
+    speciesDefinitionId,
+    sourceInstanceId,
+  ) => {
+    if (
+      sourceType !== 'species' ||
+      sourceSpeciesDefinitionId === null ||
+      speciesDefinitionId === null ||
+      sourceInstanceId === null ||
+      typeof row.template_ref !== 'string' ||
+      (!storedSpeciesEffectTemplateRef.test(row.template_ref) &&
+        !portableSpeciesEffectTemplateRef.test(row.template_ref))
+    ) {
+      return row.template_ref;
+    }
+    const sourceContentKey = sourceKeys.get(sourceSpeciesDefinitionId) ?? '';
+    const target = targetSpecies(speciesDefinitionId);
+    const identity = decodedPortableSpeciesEffectTemplateRef(row.template_ref);
+    const aggregate = portableSpecies.get(sourceContentKey);
+    const sourceTrait = identity === null || aggregate === undefined
+      ? undefined
+      : aggregate.traits.find((trait) =>
+          trait.name === identity.traitName &&
+          trait.sort_order === identity.traitSortOrder &&
+          trait.effects.some((effect) =>
+            effect.sort_order === identity.effectSortOrder),
+        );
+    // External species carry an aggregate, so their trait identity must exist
+    // there. Bundled species carry no manifest entry; the export-side lookup
+    // and the resolved target trait are the two available witnesses.
+    if (
+      identity === null ||
+      (aggregate !== undefined && sourceTrait === undefined)
+    ) {
+      return addNotice(
+        row,
+        sourceContentKey || target.contentKey,
+        aggregate?.name ?? target.name,
+      );
+    }
+    let claimed = used.get(sourceInstanceId);
+    if (claimed === undefined) {
+      claimed = new Set();
+      used.set(sourceInstanceId, claimed);
+    }
+    const targetEffect = target.effects.find((effect) =>
+      !claimed.has(Number(effect.id)) &&
+      effect.trait_name === identity.traitName &&
+      Number(effect.trait_sort_order) === identity.traitSortOrder &&
+      speciesEffectTemplateColumns.every((column) => effect[column] === row[column]));
+    if (targetEffect === undefined) {
+      return addNotice(
+        row,
+        sourceContentKey || target.contentKey,
+        aggregate?.name ?? target.name,
+      );
+    }
+    const id = Number(targetEffect.id);
+    claimed.add(id);
+    return `species_template_trait_effects:${String(id)}`;
+  };
+}
+
 function importCurrentTables(
   db: DatabaseContext,
   document: CharacterBackupDocument,
   characterId: number,
   references: ResolvedReferences,
   legacyArmorClassEffects: readonly LegacyArmorClassBonus[],
+  notices: CharacterImportNotice[],
 ): CurrentImportMaps {
   const maps: CurrentImportMaps = {
     character_class_levels: new Map(),
@@ -2200,6 +2549,11 @@ function importCurrentTables(
       ]),
     ),
   };
+  const speciesTemplateRef = speciesEffectTemplateRefResolver(
+    db,
+    document,
+    notices,
+  );
 
   for (const row of document.tables.character_class_levels) {
     maps.character_class_levels.set(
@@ -2555,6 +2909,16 @@ function importCurrentTables(
       }
       sourceId = mapped;
     }
+    const sourceRow = oldSourceId === null ? undefined : maps.sourceRows.get(oldSourceId);
+    const sourceType = sourceRow === undefined ? null : String(sourceRow.source_type);
+    const speciesDefinitionId =
+      sourceType === 'species'
+        ? resolvedId(
+            references,
+            'species_definitions',
+            sourceRow?.source_definition_id,
+          )
+        : null;
     const oldItemId =
       row.character_item_id === null ? null : Number(row.character_item_id);
     const itemId =
@@ -2582,6 +2946,15 @@ function importCurrentTables(
         source_instance_id: sourceId,
         character_item_id: itemId ?? null,
         character_weapon_id: weaponId ?? null,
+        template_ref: speciesTemplateRef(
+          row,
+          sourceType,
+          sourceType === 'species'
+            ? Number(sourceRow?.source_definition_id)
+            : null,
+          speciesDefinitionId,
+          oldSourceId,
+        ),
       }),
     );
   }
@@ -2685,6 +3058,8 @@ function portableSnapshots(
   characterId: number,
   references: ResolvedReferences,
   current: CurrentImportMaps,
+  document: CharacterBackupDocument,
+  notices: CharacterImportNotice[],
 ): string[] {
   const ids: Record<SnapshotTable, Map<number, number>> = {
     character_class_levels: new Map(current.character_class_levels),
@@ -2737,6 +3112,11 @@ function portableSnapshots(
   const sourceRows = new Map(current.sourceRows);
 
   const transformed = snapshots.map((snapshot) => {
+    const speciesTemplateRef = speciesEffectTemplateRefResolver(
+      db,
+      document,
+      notices,
+    );
     const rowsOf = (table: SnapshotTable): readonly BackupRow[] =>
       snapshot.rows[table] ?? [];
     const orderedSources = topologicalSources(
@@ -2918,29 +3298,50 @@ function portableSnapshots(
         // foreign key would then refuse on the next restore, mid-undo.
         case 'character_effects':
           return [
-            ...rowsOf(table).map((row) => ({
-              ...row,
-              id: ids[table].get(Number(row.id)),
-              character_id: characterId,
-              source_instance_id:
-                row.source_instance_id === null
-                  ? null
-                  : ids.character_source_instances.get(
-                      Number(row.source_instance_id),
-                    ) ?? null,
-              character_item_id:
-                row.character_item_id === null
-                  ? null
-                  : ids.character_items.get(
-                      Number(row.character_item_id),
-                    ) ?? null,
-              character_weapon_id:
-                row.character_weapon_id === null
-                  ? null
-                  : ids.character_weapons.get(
-                      Number(row.character_weapon_id),
-                    ) ?? null,
-            })),
+            ...rowsOf(table).map((row) => {
+              const oldSourceId = row.source_instance_id === null
+                ? null
+                : Number(row.source_instance_id);
+              const source = oldSourceId === null ? undefined : sourceRows.get(oldSourceId);
+              const sourceType = source === undefined ? null : String(source.source_type);
+              const speciesDefinitionId = sourceType === 'species'
+                ? resolvedId(
+                    references,
+                    'species_definitions',
+                    source?.source_definition_id,
+                  )
+                : null;
+              return {
+                ...row,
+                id: ids[table].get(Number(row.id)),
+                character_id: characterId,
+                source_instance_id:
+                  oldSourceId === null
+                    ? null
+                    : ids.character_source_instances.get(oldSourceId) ?? null,
+                character_item_id:
+                  row.character_item_id === null
+                    ? null
+                    : ids.character_items.get(
+                        Number(row.character_item_id),
+                      ) ?? null,
+                character_weapon_id:
+                  row.character_weapon_id === null
+                    ? null
+                    : ids.character_weapons.get(
+                        Number(row.character_weapon_id),
+                      ) ?? null,
+                template_ref: speciesTemplateRef(
+                  row,
+                  sourceType,
+                  sourceType === 'species'
+                    ? Number(source?.source_definition_id)
+                    : null,
+                  speciesDefinitionId,
+                  oldSourceId,
+                ),
+              };
+            }),
             ...snapshot.legacyArmorClassBonuses.map((effect, index) => ({
               ...effect,
               id: next.character_effects.value++,
@@ -3055,6 +3456,7 @@ export function importCharacterBackup(
   const validated = validateDocument(input);
 
   return db.transaction((transaction) => {
+    const notices: CharacterImportNotice[] = [];
     const restoredSpells = restoreSpellDefinitions(
       transaction,
       validated.legacySpellDefinitions,
@@ -3089,6 +3491,7 @@ export function importCharacterBackup(
       characterId,
       references,
       validated.legacyArmorClassBonuses,
+      notices,
     );
     // The reconciler runs AFTER the grants are restored (plan §3.2) — and only
     // when the document actually carried grants. A file written before the
@@ -3113,6 +3516,8 @@ export function importCharacterBackup(
       characterId,
       references,
       current,
+      validated.document,
+      notices,
     );
     for (const [index, row] of validated.document.tables.character_save_points.entries()) {
       insertPortableRow(transaction, 'character_save_points', row, {
@@ -3126,6 +3531,7 @@ export function importCharacterBackup(
         ...restoredSpells.outcomes,
         ...restoredContent.spellOutcomes,
       ]),
+      notices: Object.freeze(notices),
     };
   });
 }

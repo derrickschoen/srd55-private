@@ -9,6 +9,7 @@ import type {
   CharacterCommandPayload,
 } from '../../../src/domain/command-contracts';
 import { CharacterSheetBuilder } from '../../../src/queries/character-sheet-builder';
+import { registerAssertedFixtureContentIdentity } from '../../helpers/content-identity';
 import { openTestDatabase } from '../../helpers/open-db';
 
 const key = 'S1-sheet-command-integrity-key';
@@ -495,19 +496,40 @@ describe('sheet input commands', () => {
   it('writes one change-log entry per affected row, under an accepted entity type', async () => {
     await run({ type: 'set_armor', slot: 'worn', armor: armor() });
     // The skill path is now the ADDRESSED fill (§3.5): a hand-planted species
-    // choice grant — Skillful's pool is any skill, so no seeded class content
-    // is needed — filled through the real executor. The fill writes the grant
-    // AND derives the projection, so both entity types must be accepted.
+    // choice grant backed by an external species whose authored pool includes
+    // Arcana, filled through the real executor. The fill writes the grant AND
+    // derives the projection, so both entity types must be accepted.
+    const speciesKey = registerAssertedFixtureContentIdentity(db, {
+      kind: 'species',
+      edition: 'expanded',
+      name: 'Audit Savant',
+      ownerNamespace: 'sheet.inputs',
+    });
+    const speciesDefinitionId = db.exec(
+      `INSERT INTO species_definitions (
+         content_key, name, rules_edition, repeatable, grant_rules
+       ) VALUES (?, 'Audit Savant', 'expanded', 0, ?)`,
+      [
+        speciesKey,
+        JSON.stringify([{
+          kind: 'skill_proficiency',
+          rule_key: 'audit-skill',
+          count: 1,
+          skills: ['arcana'],
+        }]),
+      ],
+    ).lastInsertId;
     const sourceId = db.exec(
       `INSERT INTO character_source_instances (
-         character_id, instance_uuid, source_type, display_name, state
-       ) VALUES (?, ?, 'species', 'Human', 'active')`,
-      [characterId, crypto.randomUUID()],
+         character_id, instance_uuid, source_type, source_definition_id,
+         display_name, state
+       ) VALUES (?, ?, 'species', ?, 'Audit Savant', 'active')`,
+      [characterId, crypto.randomUUID(), speciesDefinitionId],
     ).lastInsertId;
     const grantId = db.exec(
       `INSERT INTO character_skill_grants (
          character_id, source_instance_id, grant_key, ordinal, skill, state
-       ) VALUES (?, ?, 'species_skillful', 1, NULL, 'active')`,
+       ) VALUES (?, ?, 'audit-skill', 1, NULL, 'active')`,
       [characterId, sourceId],
     ).lastInsertId;
     await run({

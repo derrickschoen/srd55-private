@@ -321,6 +321,7 @@ function originOption(
   return {
     content_key: contentKey,
     name,
+    catalog_layer: 'bundled',
     grants_lineage_spells: grantsLineageSpells,
   };
 }

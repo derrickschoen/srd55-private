@@ -71,7 +71,7 @@ function referenceKey(
   reference: ContentFingerprintReference,
 ): ContentKey {
   const rows = db.allRaw(
-    `SELECT identity.content_key
+    `SELECT DISTINCT identity.content_key
      FROM catalog_content_fingerprints AS fingerprint
      JOIN catalog_content_identities AS identity
        ON identity.content_kind = fingerprint.content_kind
@@ -83,8 +83,8 @@ function referenceKey(
      ORDER BY identity.content_key`,
     [reference.kind, reference.scheme, reference.digest],
   ).map((row) => String(row.content_key) as ContentKey);
-  if (rows.length !== 1) throw new UnresolvedSourceContentReference(reference.kind, reference.digest);
-  return rows[0]!;
+  if (rows.length === 1) return rows[0]!;
+  throw new UnresolvedSourceContentReference(reference.kind, reference.digest);
 }
 
 function isReference(value: unknown): value is ContentFingerprintReference {

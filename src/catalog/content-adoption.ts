@@ -46,6 +46,12 @@ export interface ContentImportProjection<K extends ContentKind = ContentKind> {
   readonly conflictDetails?: readonly ContentImportConflictDetail[];
   /** Immutable aggregates omit this; mutable exact-key imports opt in. */
   readonly installExact?: boolean;
+  /**
+   * Ordinary imports may reuse a decision the user already reviewed. Authoring
+   * previews opt out: D198 permits a dialog-free publish only for the exact,
+   * byte-identical self-match being published now.
+   */
+  readonly allowRememberedDecision?: boolean;
   readonly install: (
     db: DatabaseContext,
     contentKey: ContentKey,
@@ -944,6 +950,7 @@ function evaluate(
       digest: incomingIdentity.digest,
     });
     if (
+      projection.allowRememberedDecision !== false &&
       remembered !== null &&
       rememberedTargetExists(db, projection.kind, remembered.targetContentKey)
     ) {
