@@ -6,6 +6,7 @@ import type {
   StoredHomebrewDraft,
 } from '../../../src/authoring/contracts';
 import type { HomebrewDraftUuid } from '../../../src/authoring/ids';
+import type { GuidedClassOption } from '../../../src/builder/contracts';
 import type { ContentKey } from '../../../src/domain/ids';
 import { RpcError } from '../../../src/rpc/protocol';
 import { parseRoute, type Router } from '../../../src/ui/router';
@@ -53,6 +54,34 @@ function speciesDraft(
     updated_at: '2026-08-06T12:00:00.000Z',
   };
 }
+
+function subclassDraft(): StoredHomebrewDraft {
+  return {
+    draft_uuid: 'draft-subclass' as HomebrewDraftUuid,
+    content_kind: 'subclass',
+    document_version: 1,
+    base_content_key: null,
+    revision: 2 as DraftRevision,
+    document: {
+      kind: 'subclass',
+      document_version: 1,
+      name: 'Timeline Ward',
+      rules_edition: 'expanded',
+      reference_text: '',
+      parent_class_content_key: '2024:class:fighter' as ContentKey,
+      progression: { mode: 'inherit_parent' },
+      features: [],
+    },
+    created_at: '2026-08-06T12:00:00.000Z',
+    updated_at: '2026-08-06T12:00:00.000Z',
+  };
+}
+
+const parentClasses: readonly GuidedClassOption[] = [{
+  content_key: '2024:class:fighter' as ContentKey,
+  name: 'Fighter',
+  hit_die: 10,
+}];
 
 const library: AuthoringLibrary = {
   published: [
@@ -516,6 +545,30 @@ describe('HA-6 homebrew library routing and tabs', () => {
       expect(root.querySelectorAll('img')).toHaveLength(0);
       expect(root.querySelectorAll('[data-free-text="unverified-origin"]'))
         .toHaveLength(1);
+      cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('routes a subclass draft into the timeline form with bundled parent choices', async () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const screenContext = context(
+        'https://example.test/homebrew/drafts/draft-subclass',
+        [],
+      );
+      const cleanup = await renderHomebrewLibrary(screenContext, {
+        client: authoringClient({ readDraft: async () => subclassDraft() }),
+        parentClasses,
+      });
+      const root = interactiveElement(screenContext.root);
+
+      expect(root.querySelector('[data-authoring-form-kind="subclass"]')).not.toBeNull();
+      expect(root.querySelector('form')?.getAttribute('aria-label'))
+        .toBe('Subclass authoring form');
+      expect(root.querySelectorAll('option').map((option) => option.textContent))
+        .toContain('Fighter');
       cleanup();
     } finally {
       restoreDocument();
