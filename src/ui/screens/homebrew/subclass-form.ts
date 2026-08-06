@@ -430,6 +430,14 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
     }, 0);
   };
 
+  const discardStalePreview = (): void => {
+    options.mount.querySelector('.subclass-publish-preview')?.remove();
+    const liveStatus = options.mount.querySelector<HTMLElement>('.subclass-authoring-status');
+    if (liveStatus === null) return;
+    liveStatus.textContent = 'Draft changed; preview again.';
+    liveStatus.setAttribute('role', 'alert');
+  };
+
   const render = (): void => {
     clear(options.mount);
     const form = element('form', {
@@ -1319,9 +1327,7 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
       }).then((publishPreview) => {
         if (disposed) return;
         if (editGeneration !== previewGeneration) {
-          options.mount.querySelector('.subclass-publish-preview')?.remove();
-          status.textContent = 'Draft changed; preview again.';
-          status.setAttribute('role', 'alert');
+          discardStalePreview();
           return;
         }
         clear(validationMount);
@@ -1364,9 +1370,7 @@ export function renderSubclassForm(options: SubclassFormOptions): Cleanup {
       }).catch((error: unknown) => {
         if (disposed) return;
         if (editGeneration !== previewGeneration) {
-          options.mount.querySelector('.subclass-publish-preview')?.remove();
-          status.textContent = 'Draft changed; preview again.';
-          status.setAttribute('role', 'alert');
+          discardStalePreview();
           return;
         }
         const issues = validationIssues(error);

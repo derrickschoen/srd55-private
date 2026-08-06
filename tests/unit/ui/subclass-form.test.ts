@@ -805,11 +805,13 @@ describe('HA-8 subclass timeline form', () => {
         finish: ((result: Awaited<ReturnType<AuthoringClient['saveDraft']>>) => void) | null;
       } = { finish: null };
       let saveCalls = 0;
+      const saveExpectedRevisions: DraftRevision[] = [];
       let laterSavedDocument: SubclassAuthoringDraft | null = null;
       const authoring = client({
         saveDraft: (params) => {
           if (params.document.kind !== 'subclass') throw new Error('Expected subclass.');
           saveCalls += 1;
+          saveExpectedRevisions.push(params.expected_revision);
           if (saveCalls === 1) {
             return new Promise((resolve) => { saveControl.finish = resolve; });
           }
@@ -853,6 +855,7 @@ describe('HA-8 subclass timeline form', () => {
       button(root, 'Save draft').click();
       await settle();
       expect(laterSavedDocument?.name).toBe('Newer local edit');
+      expect(saveExpectedRevisions).toEqual([0, 1]);
       expect(router.navigate('/clean-after-latest-save')).toBe(true);
 
       cleanup();
@@ -862,7 +865,7 @@ describe('HA-8 subclass timeline form', () => {
     }
   });
 
-  it('drops a publish preview that resolves after the draft changes', async () => {
+  it('drops a publish preview that resolves after a rerendering feature edit', async () => {
     const restoreDocument = installInteractiveDocument();
     try {
       const previewControl: {
@@ -885,10 +888,57 @@ describe('HA-8 subclass timeline form', () => {
       });
       const root = interactiveElement(mount);
 
-      root.querySelector('form')?.dispatchEvent(new Event('submit', { cancelable: true }));
+      const previewForm = root.querySelector('form');
+      previewForm?.dispatchEvent(new Event('submit', { cancelable: true }));
       if (previewControl.finish === null) throw new Error('Preview resolver was not installed.');
-      input(control(root, 'input', 'subclass-name'), 'Changed during preview');
+      const featureLevel = control(root, 'select', 'subclass-feature-feature-three-a-level');
+      featureLevel.value = '4';
+      featureLevel.dispatchEvent(new Event('change'));
       previewControl.finish(preview());
+      await settle();
+
+      const attachedForm = root.querySelector('form');
+      expect(previewForm?.isConnected).toBe(false);
+      expect(attachedForm?.isConnected).toBe(true);
+      expect(root.querySelector('[data-authoring-action="publish-subclass"]')).toBeNull();
+      expect(attachedForm?.querySelector('.subclass-authoring-status')?.textContent)
+        .toBe('Draft changed; preview again.');
+      expect(button(root, 'Preview publish').disabled).toBe(false);
+      cleanup();
+    } finally {
+      restoreDocument();
+    }
+  });
+
+  it('drops a rejected publish preview after the draft changes', async () => {
+    const restoreDocument = installInteractiveDocument();
+    try {
+      const previewControl: {
+        fail: ((reason?: unknown) => void) | null;
+      } = { fail: null };
+      const screenContext = context();
+      const mount = document.createElement('div');
+      screenContext.root.append(mount);
+      const draft = stored();
+      if (!isStoredSubclassDraft(draft)) throw new Error('Subclass fixture did not narrow.');
+      const cleanup = renderSubclassForm({
+        context: screenContext,
+        client: client({
+          previewPublish: () => new Promise<PublishPreview>((_resolve, reject) => {
+            previewControl.fail = reject;
+          }),
+        }),
+        mount,
+        draft,
+        parentClasses: parents,
+        windowObject: new EventTarget() as unknown as Window,
+      });
+      const root = interactiveElement(mount);
+
+      root.querySelector('form')?.dispatchEvent(new Event('submit', { cancelable: true }));
+      if (previewControl.fail === null) throw new Error('Preview rejecter was not installed.');
+      input(control(root, 'input', 'subclass-name'), 'Changed during rejected preview');
+      previewControl.fail(new Error('Preview failed.'));
       await settle();
 
       expect(root.querySelector('[data-authoring-action="publish-subclass"]')).toBeNull();
