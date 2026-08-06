@@ -140,6 +140,7 @@ CREATE TABLE `background_templates` (
 	`ability_score_2` VARCHAR NOT NULL,
 	`ability_score_3` VARCHAR NOT NULL,
 	`feat_name` VARCHAR NOT NULL,
+	`default_origin_feat_content_key` VARCHAR,
 	`skill_proficiency_1` VARCHAR NOT NULL,
 	`skill_proficiency_2` VARCHAR NOT NULL,
 	`tool_proficiency` VARCHAR NOT NULL,
@@ -148,6 +149,7 @@ CREATE TABLE `background_templates` (
 	`created_at` DATETIME,
 	`updated_at` DATETIME,
 	FOREIGN KEY (`content_key`) REFERENCES `catalog_content_identities`(`content_key`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`default_origin_feat_content_key`) REFERENCES `feat_definitions`(`content_key`) ON UPDATE no action ON DELETE no action,
 	CONSTRAINT "background_templates_rules_edition_check" CHECK(`rules_edition` IN ('2014', '2024', 'expanded'))
 );
 
@@ -2037,6 +2039,12 @@ BEGIN
     SELECT 1 FROM catalog_content_identities
     WHERE content_key = NEW.content_key AND content_kind = 'background'
   );
+  SELECT RAISE(ABORT, 'background default Origin feat key must name an installed feat')
+  WHERE NEW.default_origin_feat_content_key IS NOT NULL
+    AND NOT EXISTS (
+      SELECT 1 FROM feat_definitions
+      WHERE content_key = NEW.default_origin_feat_content_key
+    );
 END;
 
 CREATE TRIGGER catalog_register_armor_identity_before_insert

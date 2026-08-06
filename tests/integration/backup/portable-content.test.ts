@@ -118,6 +118,7 @@ function seedClosureLibrary(db: DatabaseContext): ClosureFixture {
     repeatable: false,
     grants: [],
     suggested_abilities: ['intelligence', 'wisdom', 'charisma'],
+    default_origin_feat_content_key: featKey,
     default_origin_feat: { kind: 'feat', ...fingerprint(db, featKey) },
     skill_proficiencies: ['arcana', 'insight'],
     tool_reference_text: null,
@@ -193,6 +194,12 @@ function rekeyExternalContentAsDerived(
       `UPDATE species_definitions
        SET grant_rules = replace(grant_rules, ?, ?)`,
       [assertedKey, derivedKey],
+    );
+    transaction.exec(
+      `UPDATE background_templates
+       SET default_origin_feat_content_key = ?
+       WHERE default_origin_feat_content_key = ?`,
+      [derivedKey, assertedKey],
     );
     transaction.exec(
       `UPDATE catalog_content_identities

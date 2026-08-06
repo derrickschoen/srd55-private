@@ -95,6 +95,7 @@ import {
 } from '../rules/background-definitions-srd';
 import {
   BACKGROUND_ABILITY_INCREASE_MAXIMUM,
+  isGuidedOriginFeatOfferable,
   printedPairing,
   type GuidedApplyBackgroundParams,
   type GuidedBackgroundChoiceOptions,
@@ -1370,31 +1371,6 @@ function deleteGuidedBackgroundSources(
 }
 
 /**
- * The bundled ORIGIN feats, keyed by printed name. Derived from the same SRD
- * parse the feat seeder writes from, so the suggestion resolver and the gate
- * cannot drift from the catalog — the identical reasoning as
- * `bundledBackgroundKeys` above.
- */
-function installedOriginFeatKeysByName(
-  db: DatabaseContext,
-): ReadonlyMap<string, string> {
-  const rows = db.all(
-    `SELECT feat.name, feat.content_key
-     FROM feat_definitions AS feat
-     JOIN catalog_content_identities AS identity
-       ON identity.content_kind = 'feat'
-      AND identity.content_key = feat.content_key
-     WHERE feat.category = 'origin'
-     ORDER BY feat.name, feat.content_key`,
-    undefined,
-    (row) => ({ name: sqlString(row, 'name'), content_key: sqlString(row, 'content_key') }),
-  );
-  const counts = new Map<string, number>();
-  for (const row of rows) counts.set(row.name, (counts.get(row.name) ?? 0) + 1);
-  return new Map(rows.filter((row) => counts.get(row.name) === 1).map((row) => [row.name, row.content_key]));
-}
-
-/**
  * The background step's option data: every bundled background with its
  * printed pairing (the background's own DEFAULT, per D61/D68 never a
  * constraint), and
@@ -1405,12 +1381,11 @@ function installedOriginFeatKeysByName(
 export function listGuidedBackgroundChoiceOptions(
   db: DatabaseContext,
 ): GuidedBackgroundChoiceOptions {
-  const featKeysByName = installedOriginFeatKeysByName(db);
   const backgrounds = db
     .all(
       `SELECT template.content_key, template.name, template.ability_score_1,
               template.ability_score_2, template.ability_score_3,
-              template.feat_name
+              template.feat_name, template.default_origin_feat_content_key
        FROM background_templates AS template
        JOIN catalog_content_identities AS identity
          ON identity.content_kind = 'background'
@@ -1428,16 +1403,21 @@ export function listGuidedBackgroundChoiceOptions(
         ability_score_2: sqlString(row, 'ability_score_2'),
         ability_score_3: sqlString(row, 'ability_score_3'),
         feat_name: sqlString(row, 'feat_name'),
+        default_origin_feat_content_key: sqlNullableString(
+          row,
+          'default_origin_feat_content_key',
+        ),
       }),
     )
     .map((template) => ({
       content_key: template.content_key,
       name: template.name,
-      pairing: printedPairing(template, featKeysByName),
+      pairing: printedPairing(template),
     }));
 
   const originFeats = db.all(
-    `SELECT feat.content_key, feat.name
+    `SELECT feat.content_key, feat.name, feat.grant_rules,
+            identity.catalog_layer
      FROM feat_definitions AS feat
      JOIN catalog_content_identities AS identity
        ON identity.content_kind = 'feat'
@@ -1448,8 +1428,12 @@ export function listGuidedBackgroundChoiceOptions(
     (row) => ({
       content_key: sqlString(row, 'content_key'),
       name: sqlString(row, 'name'),
+      grant_rules: sqlNullableString(row, 'grant_rules'),
+      catalog_layer: sqlString(row, 'catalog_layer'),
     }),
-  );
+  ).filter((feat) =>
+    isGuidedOriginFeatOfferable(feat.catalog_layer, feat.grant_rules)
+  ).map(({ content_key, name }) => ({ content_key, name }));
 
   return { backgrounds, origin_feats: originFeats };
 }
@@ -1467,7 +1451,7 @@ function gateInstalledOriginFeat(
   contentKey: string,
 ): { readonly id: number; readonly name: string } {
   const feat = db.one(
-    `SELECT feat.id, feat.name
+    `SELECT feat.id, feat.name, feat.grant_rules, identity.catalog_layer
      FROM feat_definitions AS feat
      JOIN catalog_content_identities AS identity
        ON identity.content_kind = 'feat'
@@ -1477,15 +1461,20 @@ function gateInstalledOriginFeat(
     (row) => ({
       id: sqlInteger(row, 'id'),
       name: sqlString(row, 'name'),
+      grant_rules: sqlNullableString(row, 'grant_rules'),
+      catalog_layer: sqlString(row, 'catalog_layer'),
     }),
   );
-  if (feat === null) {
+  if (
+    feat === null ||
+    !isGuidedOriginFeatOfferable(feat.catalog_layer, feat.grant_rules)
+  ) {
     throw new GuidedCreationRefusal(
       'unknown_origin',
       `No installed Origin feat exists for content key "${contentKey}".`,
     );
   }
-  return feat;
+  return { id: feat.id, name: feat.name };
 }
 
 /**

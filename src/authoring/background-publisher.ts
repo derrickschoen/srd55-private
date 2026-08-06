@@ -166,19 +166,9 @@ export function backgroundDraftToAggregate(
         rulesEdition: sqlString(row, 'rules_edition'),
       }),
     );
-    const matchingKeys = feat === null || draft.rules_edition === null
-      ? []
-      : db.all(
-          `SELECT content_key FROM feat_definitions
-           WHERE name = ? AND rules_edition = ? ORDER BY content_key`,
-          [feat.name, draft.rules_edition],
-          (row) => sqlString(row, 'content_key'),
-        );
     defaultOriginFeat =
       feat?.category === 'origin' &&
-      feat.rulesEdition === draft.rules_edition &&
-      matchingKeys.length === 1 &&
-      matchingKeys[0] === draft.default_origin_feat_content_key
+      feat.rulesEdition === draft.rules_edition
         ? authoringFingerprintReference(db, 'feat', draft.default_origin_feat_content_key)
         : null;
     if (defaultOriginFeat === null) {
@@ -198,7 +188,8 @@ export function backgroundDraftToAggregate(
     const resolved = resolvedAuthoringEffect(effect, index + 1, ['effects', index], issues);
     return resolved === null ? [] : [resolved];
   });
-  if (issues.length > 0 || draft.rules_edition === null || defaultOriginFeat === null ||
+  if (issues.length > 0 || draft.rules_edition === null ||
+      draft.default_origin_feat_content_key === null || defaultOriginFeat === null ||
       draft.suggested_abilities.length !== 3 || draft.skill_proficiencies.length !== 2) {
     throw new BackgroundSemanticValidationError(Object.freeze(issues));
   }
@@ -227,6 +218,7 @@ export function backgroundDraftToAggregate(
       draft.suggested_abilities[1]!,
       draft.suggested_abilities[2]!,
     ] as const,
+    default_origin_feat_content_key: draft.default_origin_feat_content_key,
     default_origin_feat: defaultOriginFeat,
     skill_proficiencies: [
       draft.skill_proficiencies[0]!,

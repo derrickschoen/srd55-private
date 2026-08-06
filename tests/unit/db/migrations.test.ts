@@ -1336,6 +1336,66 @@ describe('database migration chain', () => {
     lifecycle.close();
   });
 
+  it('0037 backfills only unambiguous background feat keys and preserves ambiguous legacy absence', async () => {
+    const beforeKeyedBackgroundFeat = DATABASE_MIGRATIONS
+      .slice(0, DATABASE_MIGRATIONS.findIndex(
+        (entry) => entry.id === '0037_background_default_origin_feat_key',
+      ))
+      .map((entry) => entry.sql)
+      .join('\n');
+    const storage = await storageHolding(`${beforeKeyedBackgroundFeat}
+      INSERT INTO catalog_content_identities (
+        content_key, content_kind, key_kind, catalog_layer, normalized_name
+      ) VALUES
+        ('expanded:migration.fixture:unique-feat', 'feat', 'asserted', 'external', 'unique feat'),
+        ('expanded:migration.fixture:ambiguous-feat-a', 'feat', 'asserted', 'external', 'shared feat'),
+        ('expanded:migration.fixture:ambiguous-feat-b', 'feat', 'asserted', 'external', 'shared feat'),
+        ('expanded:migration.fixture:unique-background', 'background', 'asserted', 'external', 'unique background'),
+        ('expanded:migration.fixture:ambiguous-background', 'background', 'asserted', 'external', 'ambiguous background');
+      INSERT INTO feat_definitions (
+        content_key, name, rules_edition, category
+      ) VALUES
+        ('expanded:migration.fixture:unique-feat', 'Unique Feat', 'expanded', 'origin'),
+        ('expanded:migration.fixture:ambiguous-feat-a', 'Shared Feat', 'expanded', 'origin'),
+        ('expanded:migration.fixture:ambiguous-feat-b', 'Shared Feat', 'expanded', 'origin');
+      INSERT INTO background_templates (
+        id, content_key, rules_edition, name, ability_score_1,
+        ability_score_2, ability_score_3, feat_name, skill_proficiency_1,
+        skill_proficiency_2, tool_proficiency, equipment_option_a,
+        equipment_option_b
+      ) VALUES
+        (41, 'expanded:migration.fixture:unique-background', 'expanded',
+         'Unique Background', 'Strength', 'Dexterity', 'Constitution',
+         'Unique Feat', 'Athletics', 'Acrobatics', 'Tools', 'A', 'B'),
+        (42, 'expanded:migration.fixture:ambiguous-background', 'expanded',
+         'Ambiguous Background', 'Strength', 'Dexterity', 'Constitution',
+         'Shared Feat', 'Athletics', 'Acrobatics', 'Tools', 'A', 'B');`);
+    const lifecycle = new DatabaseLifecycle(
+      sqlite3,
+      storage,
+      schema,
+      () => undefined,
+      DATABASE_MIGRATIONS,
+    );
+    lifecycle.open();
+    expect(lifecycle.database.allRaw(
+      `SELECT id, content_key, default_origin_feat_content_key
+       FROM background_templates ORDER BY id`,
+    )).toEqual([
+      {
+        id: 41,
+        content_key: 'expanded:migration.fixture:unique-background',
+        default_origin_feat_content_key: 'expanded:migration.fixture:unique-feat',
+      },
+      {
+        id: 42,
+        content_key: 'expanded:migration.fixture:ambiguous-background',
+        default_origin_feat_content_key: null,
+      },
+    ]);
+    lifecycle.close();
+  });
+
   it('uses the archive-list indexes for character and creation lifecycle orderings', () => {
     const db = new sqlite3.oo1.DB(':memory:', 'c');
     try {

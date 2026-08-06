@@ -422,7 +422,8 @@ function validateSpecies(aggregate: Record<string, unknown>): void {
 function validateBackground(aggregate: Record<string, unknown>): void {
   exactKeys(aggregate, 'aggregate', [
     'kind', 'name', 'rules_edition', 'reference_text', 'repeatable', 'grants',
-    'suggested_abilities', 'default_origin_feat', 'skill_proficiencies',
+    'suggested_abilities', 'default_origin_feat_content_key',
+    'default_origin_feat', 'skill_proficiencies',
     'tool_reference_text', 'equipment_option_a_description',
     'equipment_option_b_description', 'equipment_option_a',
     'equipment_option_b', 'effects',
@@ -435,6 +436,11 @@ function validateBackground(aggregate: Record<string, unknown>): void {
     throw new TypeError("Catalog field 'aggregate.suggested_abilities' must contain three abilities.");
   }
   fingerprint(aggregate.default_origin_feat, 'aggregate.default_origin_feat', 'feat');
+  boundedText(
+    aggregate.default_origin_feat_content_key,
+    'aggregate.default_origin_feat_content_key',
+    AUTHORING_TEXT_LIMITS.contentKey,
+  );
   const skillList = list(aggregate.skill_proficiencies, 'aggregate.skill_proficiencies', 2);
   if (skillList.length !== 2 || skillList.some((skill) => !isEnumValue(skills, skill))) {
     throw new TypeError("Catalog field 'aggregate.skill_proficiencies' must contain two skills.");

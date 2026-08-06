@@ -55,7 +55,7 @@ const dependencyReferences = {
 
 const references: StoredAuthoredReferenceResolverV1 = {
   spell: () => dependencyReferences.spell,
-  featByStoredName: () => dependencyReferences.feat,
+  feat: () => dependencyReferences.feat,
   class: () => dependencyReferences.class,
   weapon: () => dependencyReferences.weapon,
   armor: () => dependencyReferences.armor,
@@ -83,7 +83,10 @@ afterEach(() => {
   connection.close();
 });
 
-function registerBundled(kind: 'class' | 'weapon' | 'armor', contentKey: ContentKey): void {
+function registerBundled(
+  kind: 'class' | 'feat' | 'weapon' | 'armor',
+  contentKey: ContentKey,
+): void {
   registerBundledStableContentIdentity(db, {
     kind,
     contentKey,
@@ -93,6 +96,7 @@ function registerBundled(kind: 'class' | 'weapon' | 'armor', contentKey: Content
 
 function seedDependencies(): void {
   registerBundled('class', CLASS_KEY);
+  registerBundled('feat', FEAT_KEY);
   registerBundled('weapon', WEAPON_KEY);
   registerBundled('armor', ARMOR_KEY);
   db.exec(
@@ -239,6 +243,22 @@ function seedSpecies(contentKey: ContentKey, aggregate: SpeciesContentAggregate)
 }
 
 function seedBackground(contentKey: ContentKey, aggregate: BackgroundContentAggregate): void {
+  if (db.scalar<string>(
+    'SELECT content_key FROM catalog_content_identities WHERE content_key = ?',
+    [aggregate.default_origin_feat_content_key],
+  ) === null) {
+    registerBundledStableContentIdentity(db, {
+      kind: 'feat',
+      contentKey: aggregate.default_origin_feat_content_key,
+      normalizedName: 'ci3a-background-feat',
+    });
+  }
+  db.exec(
+    `INSERT OR IGNORE INTO feat_definitions (
+       content_key, name, rules_edition, category, ability_points, repeatable
+     ) VALUES (?, 'CI-3a Feat', 'expanded', 'origin', 0, 0)`,
+    [aggregate.default_origin_feat_content_key],
+  );
   db.exec(
     `INSERT INTO background_definitions (
        content_key, name, rules_edition, repeatable, grant_rules, notes
@@ -248,11 +268,12 @@ function seedBackground(contentKey: ContentKey, aggregate: BackgroundContentAggr
   const templateId = db.exec(
     `INSERT INTO background_templates (
        content_key, name, rules_edition, ability_score_1, ability_score_2,
-       ability_score_3, feat_name, skill_proficiency_1,
+       ability_score_3, feat_name, default_origin_feat_content_key,
+       skill_proficiency_1,
        skill_proficiency_2, tool_proficiency, equipment_option_a,
        equipment_option_b
-     ) VALUES (?, ?, ?, ?, ?, ?, 'CI-3a Feat', ?, ?, ?, ?, ?)`,
-    [contentKey, aggregate.name, aggregate.rules_edition, ...aggregate.suggested_abilities, ...aggregate.skill_proficiencies, aggregate.tool_reference_text ?? '', aggregate.equipment_option_a_description, aggregate.equipment_option_b_description],
+     ) VALUES (?, ?, ?, ?, ?, ?, 'CI-3a Feat', ?, ?, ?, ?, ?, ?)`,
+    [contentKey, aggregate.name, aggregate.rules_edition, ...aggregate.suggested_abilities, aggregate.default_origin_feat_content_key, ...aggregate.skill_proficiencies, aggregate.tool_reference_text ?? '', aggregate.equipment_option_a_description, aggregate.equipment_option_b_description],
   ).lastInsertId;
   for (const [option, equipment] of [['a', aggregate.equipment_option_a], ['b', aggregate.equipment_option_b]] as const) {
     for (const item of equipment) {

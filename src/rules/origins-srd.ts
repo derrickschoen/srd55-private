@@ -91,6 +91,11 @@ import {
   type ParsedEquipmentItem,
 } from './equipment-packages';
 import { rowContractError } from '../domain/contracts/rows';
+import { backgroundFeatBaseName } from '../domain/background-feat-name';
+import {
+  bundledFeatDefinitions,
+  ensureBundledFeatContent,
+} from './feats-srd';
 import { weaponContentKey } from './weapons-srd';
 
 /**
@@ -1193,6 +1198,10 @@ export function ensureBundledOriginContent(db: DatabaseContext): boolean {
 }
 
 export function seedOriginContent(db: DatabaseContext): void {
+  // Background templates now carry a real FK to their printed Origin feat.
+  // Direct callers of this seeder therefore need the same prerequisite that
+  // application boot supplies, just as the equipment rows need weapons first.
+  ensureBundledFeatContent(db);
   const timestamp = new Date().toISOString();
   db.transaction(() => {
     seedSpecies(db, timestamp);
@@ -1357,6 +1366,21 @@ function seedBackgrounds(db: DatabaseContext, timestamp: string): void {
       contentKey: template.content_key,
       normalizedName: normalizeContentIdentityName(template.name),
     });
+    const featName = backgroundFeatBaseName(template.feat_name).base;
+    const bundledFeat = bundledFeatDefinitions().find(
+      (candidate) => candidate.name === featName && candidate.grouping === 'origin',
+    );
+    const installedFeat = bundledFeat === undefined ? null : db.oneRaw(
+      `SELECT content_key FROM feat_definitions
+       WHERE content_key = ? AND category = 'origin' AND rules_edition = ?`,
+      [bundledFeat.content_key, BUNDLED_ORIGIN_RULES_EDITION],
+    );
+    if (bundledFeat === undefined || installedFeat === null) {
+      throw new OriginExtractError(
+        `Background ${template.name} default feat ${featName} does not ` +
+          'resolve to its installed bundled Origin feat.',
+      );
+    }
     const row = {
       content_key: template.content_key,
       rules_edition: BUNDLED_ORIGIN_RULES_EDITION,
@@ -1365,6 +1389,7 @@ function seedBackgrounds(db: DatabaseContext, timestamp: string): void {
       ability_score_2: template.ability_score_2,
       ability_score_3: template.ability_score_3,
       feat_name: template.feat_name,
+      default_origin_feat_content_key: bundledFeat.content_key,
       skill_proficiency_1: template.skill_proficiency_1,
       skill_proficiency_2: template.skill_proficiency_2,
       tool_proficiency: template.tool_proficiency,
@@ -1377,10 +1402,11 @@ function seedBackgrounds(db: DatabaseContext, timestamp: string): void {
     db.exec(
       `INSERT INTO background_templates (
          content_key, rules_edition, name, ability_score_1, ability_score_2,
-         ability_score_3, feat_name, skill_proficiency_1, skill_proficiency_2,
+         ability_score_3, feat_name, default_origin_feat_content_key,
+         skill_proficiency_1, skill_proficiency_2,
          tool_proficiency, equipment_option_a, equipment_option_b,
          created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(content_key) DO UPDATE SET
          rules_edition = excluded.rules_edition,
          name = excluded.name,
@@ -1388,6 +1414,7 @@ function seedBackgrounds(db: DatabaseContext, timestamp: string): void {
          ability_score_2 = excluded.ability_score_2,
          ability_score_3 = excluded.ability_score_3,
          feat_name = excluded.feat_name,
+         default_origin_feat_content_key = excluded.default_origin_feat_content_key,
          skill_proficiency_1 = excluded.skill_proficiency_1,
          skill_proficiency_2 = excluded.skill_proficiency_2,
          tool_proficiency = excluded.tool_proficiency,
@@ -1402,6 +1429,7 @@ function seedBackgrounds(db: DatabaseContext, timestamp: string): void {
         row.ability_score_2,
         row.ability_score_3,
         row.feat_name,
+        row.default_origin_feat_content_key,
         row.skill_proficiency_1,
         row.skill_proficiency_2,
         row.tool_proficiency,

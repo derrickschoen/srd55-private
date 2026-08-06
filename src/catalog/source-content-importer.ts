@@ -27,6 +27,7 @@ import {
   projectAuthoredContentAggregateV1,
 } from './stored-authored-content-projector-v1';
 import {
+  contentFingerprintReferenceKey,
   remapProjectionFingerprintReferences,
   type ContentImportDependencyTarget,
   type ContentImportNode,
@@ -225,19 +226,11 @@ function insertSpecies(db: DatabaseContext, aggregate: SpeciesContentAggregate, 
 function insertBackground(db: DatabaseContext, aggregate: BackgroundContentAggregate, contentKey: ContentKey): void {
   const now = timestamp();
   const featKey = referenceKey(db, aggregate.default_origin_feat);
-  const featName = db.scalar<string>('SELECT name FROM feat_definitions WHERE content_key = ?', [featKey]);
-  if (featName === null) throw new UnresolvedSourceContentReference('feat', aggregate.default_origin_feat.digest);
-  const featKeys = db.allRaw(
-    `SELECT content_key FROM feat_definitions
-     WHERE name = ? AND rules_edition = ? ORDER BY content_key`,
-    [featName, aggregate.rules_edition],
-  ).map((row) => String(row.content_key));
-  if (featKeys.length !== 1 || featKeys[0] !== featKey) {
-    // background_templates stores only the printed feat name. Until that seam
-    // can carry a fingerprint, an ambiguous name cannot faithfully preserve
-    // the document's selected feat.
+  if (featKey !== aggregate.default_origin_feat_content_key) {
     throw new UnresolvedSourceContentReference('feat', aggregate.default_origin_feat.digest);
   }
+  const featName = db.scalar<string>('SELECT name FROM feat_definitions WHERE content_key = ?', [featKey]);
+  if (featName === null) throw new UnresolvedSourceContentReference('feat', aggregate.default_origin_feat.digest);
   db.exec(
     `INSERT INTO background_definitions
        (content_key, name, rules_edition, repeatable, grant_rules, notes, created_at, updated_at)
@@ -247,12 +240,14 @@ function insertBackground(db: DatabaseContext, aggregate: BackgroundContentAggre
   const templateId = db.exec(
     `INSERT INTO background_templates (
        content_key, rules_edition, name, ability_score_1, ability_score_2,
-       ability_score_3, feat_name, skill_proficiency_1, skill_proficiency_2,
+       ability_score_3, feat_name, default_origin_feat_content_key,
+       skill_proficiency_1, skill_proficiency_2,
        tool_proficiency, equipment_option_a, equipment_option_b, created_at, updated_at
-     ) VALUES (${Array.from({ length: 14 }, () => '?').join(', ')})`,
+     ) VALUES (${Array.from({ length: 15 }, () => '?').join(', ')})`,
     [
       contentKey, aggregate.rules_edition, aggregate.name,
-      ...aggregate.suggested_abilities, featName, ...aggregate.skill_proficiencies,
+      ...aggregate.suggested_abilities, featName, featKey,
+      ...aggregate.skill_proficiencies,
       aggregate.tool_reference_text ?? '', aggregate.equipment_option_a_description,
       aggregate.equipment_option_b_description, now, now,
     ],
@@ -334,10 +329,19 @@ export function portableSourceContentImportNode(
     nextKey: ContentKey,
     dependencies: ReadonlyMap<string, ContentImportDependencyTarget>,
   ): ContentImportProjection => {
-    const remapped = remapProjectionFingerprintReferences(
+    const remappedReferences = remapProjectionFingerprintReferences(
       { ...aggregate, name },
       dependencies,
     ) as SourceAggregate;
+    const remapped = aggregate.kind === 'background'
+      ? {
+          ...remappedReferences,
+          default_origin_feat_content_key:
+            dependencies.get(contentFingerprintReferenceKey(
+              aggregate.default_origin_feat,
+            ))?.contentKey ?? aggregate.default_origin_feat_content_key,
+        }
+      : remappedReferences;
     const projection = sourceProjectionForDatabase(
       db,
       remapped,

@@ -175,6 +175,12 @@ BEGIN
     SELECT 1 FROM catalog_content_identities
     WHERE content_key = NEW.content_key AND content_kind = 'background'
   );
+  SELECT RAISE(ABORT, 'background default Origin feat key must name an installed feat')
+  WHERE NEW.default_origin_feat_content_key IS NOT NULL
+    AND NOT EXISTS (
+      SELECT 1 FROM feat_definitions
+      WHERE content_key = NEW.default_origin_feat_content_key
+    );
 END;
 
 CREATE TRIGGER catalog_register_armor_identity_before_insert

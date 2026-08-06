@@ -44,11 +44,6 @@ import {
 } from '../domain/enums';
 import type { ContentKey } from '../domain/ids';
 import type { JsonObject, JsonValue } from '../domain/models';
-import {
-  backgroundFeatBaseName,
-  MAGIC_INITIATE_BASE_NAME,
-  MAGIC_INITIATE_LISTS,
-} from '../domain/background-feat-name';
 import { GrantRule } from '../grants/grant-rule';
 import type {
   AuthoredContentReferenceV1,
@@ -93,10 +88,9 @@ export interface StoredAuthoredReferenceResolverV1 {
   readonly spell: (
     contentKey: ContentKey,
   ) => ContentFingerprintReference<'spell'>;
-  readonly featByStoredName: (input: {
-    readonly name: string;
-    readonly edition: RulesEdition;
-  }) => ContentFingerprintReference<'feat'>;
+  readonly feat: (
+    contentKey: ContentKey,
+  ) => ContentFingerprintReference<'feat'>;
   readonly class: (
     contentKey: ContentKey,
   ) => ContentFingerprintReference<'class'>;
@@ -1160,6 +1154,7 @@ function readBackground(
             template.rules_edition AS template_edition,
             template.ability_score_1, template.ability_score_2,
             template.ability_score_3, template.feat_name,
+            template.default_origin_feat_content_key,
             template.skill_proficiency_1, template.skill_proficiency_2,
             template.tool_proficiency, template.equipment_option_a,
             template.equipment_option_b
@@ -1179,6 +1174,10 @@ function readBackground(
       template_edition: sqlString(row, 'template_edition'),
       abilities: [sqlString(row, 'ability_score_1'), sqlString(row, 'ability_score_2'), sqlString(row, 'ability_score_3')] as const,
       feat_name: sqlString(row, 'feat_name'),
+      default_origin_feat_content_key: sqlNullableString(
+        row,
+        'default_origin_feat_content_key',
+      ) as ContentKey | null,
       skills: [sqlString(row, 'skill_proficiency_1'), sqlString(row, 'skill_proficiency_2')] as const,
       tool: sqlString(row, 'tool_proficiency'),
       option_a: sqlString(row, 'equipment_option_a'),
@@ -1193,6 +1192,11 @@ function readBackground(
     return projectionError(`background '${contentKey}' definition/template metadata disagree.`);
   }
   const edition = rulesEdition(root.edition);
+  if (root.default_origin_feat_content_key === null) {
+    return projectionError(
+      `background '${contentKey}' has no keyed default Origin feat reference.`,
+    );
+  }
   const grants = authoringGrants(
     db,
     root.grant_rules,
@@ -1255,7 +1259,8 @@ function readBackground(
     repeatable: root.repeatable,
     grants: grants as BackgroundContentAggregate['grants'],
     suggested_abilities: [ability(root.abilities[0], 'first suggested ability'), ability(root.abilities[1], 'second suggested ability'), ability(root.abilities[2], 'third suggested ability')],
-    default_origin_feat: references.featByStoredName({ name: root.feat_name, edition }),
+    default_origin_feat_content_key: root.default_origin_feat_content_key,
+    default_origin_feat: references.feat(root.default_origin_feat_content_key),
     skill_proficiencies: [
       normalizedGrantSkill(root.skills[0], 'first background skill', projectionError),
       normalizedGrantSkill(root.skills[1], 'second background skill', projectionError),
@@ -1279,6 +1284,7 @@ function readBackground(
       ...storedSemanticFields(templateRaw, [
         'content_key', 'name', 'rules_edition', 'ability_score_1',
         'ability_score_2', 'ability_score_3', 'feat_name',
+        'default_origin_feat_content_key',
         'skill_proficiency_1', 'skill_proficiency_2', 'tool_proficiency',
         'equipment_option_a', 'equipment_option_b',
       ], 'template_'),
@@ -1568,34 +1574,7 @@ export function storedAuthoredRegistryReferencesV1(
 ): StoredAuthoredReferenceResolverV1 {
   const resolver: StoredAuthoredReferenceResolverV1 = {
     spell: (contentKey) => fingerprintReference(db, 'spell', contentKey),
-    featByStoredName: ({ name, edition }) => {
-      const findKeys = (definitionName: string): readonly ContentKey[] => db.all(
-        `SELECT content_key FROM feat_definitions
-         WHERE name = ? AND rules_edition = ? ORDER BY content_key`,
-        [definitionName, edition],
-        (row) => sqlString(row, 'content_key') as ContentKey,
-      );
-      // Feat names are open homebrew text, so parentheses can legitimately be
-      // part of the exact name. Only an absent exact match permits the legacy
-      // printed SRD Magic Initiate label to fall back to its base definition.
-      let keys = findKeys(name);
-      if (keys.length === 0) {
-        const parsed = backgroundFeatBaseName(name);
-        const isPrintedMagicInitiate =
-          parsed.base === MAGIC_INITIATE_BASE_NAME &&
-          parsed.option !== null &&
-          (MAGIC_INITIATE_LISTS as readonly string[]).includes(parsed.option);
-        if (isPrintedMagicInitiate) {
-          keys = findKeys(parsed.base);
-        }
-      }
-      if (keys.length !== 1) {
-        return projectionError(
-          `background feat '${name}' in edition '${edition}' does not resolve uniquely.`,
-        );
-      }
-      return fingerprintReference(db, 'feat', keys[0]!);
-    },
+    feat: (contentKey) => fingerprintReference(db, 'feat', contentKey),
     class: (contentKey) => fingerprintReference(db, 'class', contentKey),
     weapon: (contentKey) => fingerprintReference(db, 'weapon', contentKey),
     armor: (contentKey) => fingerprintReference(db, 'armor', contentKey),

@@ -495,7 +495,7 @@ export class CatalogAuthoringService {
       rules_edition: aggregate.rules_edition,
       reference_text: aggregate.reference_text,
       suggested_abilities: aggregate.suggested_abilities,
-      default_origin_feat_content_key: this.#contentKeyFor(aggregate.default_origin_feat),
+      default_origin_feat_content_key: aggregate.default_origin_feat_content_key,
       skill_proficiencies: aggregate.skill_proficiencies,
       tool_reference_text: aggregate.tool_reference_text,
       equipment_option_a_description: aggregate.equipment_option_a_description,

@@ -687,6 +687,11 @@ function validateCharacterRows(
   maps: Readonly<Record<ReferenceKind, Map<number, string>>>,
   label: string,
 ): void {
+  const backgroundSourceIds = new Set(
+    (tables.character_source_instances ?? [])
+      .filter((row) => row.source_type === 'background')
+      .map((row) => row.id),
+  );
   for (const table of CHARACTER_STATE_TABLES) {
     const rows = tables[table];
     if (rows === undefined) {
@@ -704,9 +709,16 @@ function validateCharacterRows(
         table === 'character_species_traits'
           ? splitLegacyTraitEffect(row)
           : null;
+      const contractRow =
+        table === 'character_effects' &&
+        typeof row.template_ref === 'number' &&
+        Number.isSafeInteger(row.template_ref) &&
+        backgroundSourceIds.has(row.source_instance_id)
+          ? { ...row, template_ref: null }
+          : legacy === null ? row : legacy.row;
       assertRowShape(
         table,
-        legacy === null ? row : legacy.row,
+        contractRow,
         `${label}.${table}[${index}]`,
       );
       if (legacy?.effect != null) {
@@ -2592,13 +2604,8 @@ function backgroundEffectTemplateRefResolver(
       sourceType !== 'background' ||
       sourceBackgroundDefinitionId === null ||
       backgroundDefinitionId === null ||
-      typeof row.template_ref !== 'string' ||
-      (!storedBackgroundEffectTemplateRef.test(row.template_ref) &&
-        !portableBackgroundEffectTemplateRef.test(row.template_ref))
+      row.template_ref === null
     ) return row.template_ref;
-
-    const portableMatch = portableBackgroundEffectTemplateRef.exec(row.template_ref);
-    const sortOrder = portableMatch === null ? null : Number(portableMatch[1]);
     const target = db.oneRaw(
       'SELECT content_key, name FROM background_definitions WHERE id = ?',
       [backgroundDefinitionId],
@@ -2610,6 +2617,33 @@ function backgroundEffectTemplateRefResolver(
     }
     const sourceContentKey = sourceKeys.get(sourceBackgroundDefinitionId) ?? String(target.content_key);
     const aggregate = portableBackgrounds.get(sourceContentKey);
+    const unresolved = (): null => {
+      const marker = [row.template_ref, row.effect_kind, row.label, sourceContentKey].join('\u0000');
+      if (!noticed.has(marker)) {
+        noticed.add(marker);
+        notices.push(Object.freeze({
+          kind: 'background_effect_template_ref_unresolved',
+          effect: Object.freeze({
+            templateRef: String(row.template_ref),
+            label: String(row.label),
+            effectKind: String(row.effect_kind),
+          }),
+          background: Object.freeze({
+            contentKey: sourceContentKey,
+            name: aggregate?.name ?? String(target.name),
+          }),
+        }));
+      }
+      return null;
+    };
+    if (
+      typeof row.template_ref !== 'string' ||
+      (!storedBackgroundEffectTemplateRef.test(row.template_ref) &&
+        !portableBackgroundEffectTemplateRef.test(row.template_ref))
+    ) return unresolved();
+
+    const portableMatch = portableBackgroundEffectTemplateRef.exec(row.template_ref);
+    const sortOrder = portableMatch === null ? null : Number(portableMatch[1]);
     const sourceEffectExists = aggregate === undefined || sortOrder === null
       ? sortOrder !== null
       : aggregate.effects.some((effect) => effect.sort_order === sortOrder);
@@ -2627,23 +2661,7 @@ function backgroundEffectTemplateRefResolver(
     if (candidate !== null) {
       return `background_template_effects:${String(candidate.id)}`;
     }
-    const marker = [row.template_ref, row.effect_kind, row.label, sourceContentKey].join('\u0000');
-    if (!noticed.has(marker)) {
-      noticed.add(marker);
-      notices.push(Object.freeze({
-        kind: 'background_effect_template_ref_unresolved',
-        effect: Object.freeze({
-          templateRef: String(row.template_ref),
-          label: String(row.label),
-          effectKind: String(row.effect_kind),
-        }),
-        background: Object.freeze({
-          contentKey: sourceContentKey,
-          name: aggregate?.name ?? String(target.name),
-        }),
-      }));
-    }
-    return null;
+    return unresolved();
   };
 }
 

@@ -129,19 +129,17 @@ export function authoringFingerprintReference<K extends ContentKind>(
     (row) => sqlString(row, 'content_key'),
   );
   if (targets.length !== 1 || targets[0] !== contentKey) return null;
-  if (kind === 'spell') {
-    try {
-      const stored = projectStoredContentV1(db, kind, contentKey);
-      const live = deriveContentIdentityV1({
-        kind: stored.kind,
-        edition: stored.edition,
-        name: stored.name,
-        payload: stored.payload,
-      });
-      if (live.digest !== rows[0]) return null;
-    } catch {
-      return null;
-    }
+  try {
+    const stored = projectStoredContentV1(db, kind, contentKey);
+    const live = deriveContentIdentityV1({
+      kind: stored.kind,
+      edition: stored.edition,
+      name: stored.name,
+      payload: stored.payload,
+    });
+    if (live.digest !== rows[0]) return null;
+  } catch {
+    return null;
   }
   return Object.freeze({
     kind,

@@ -14,7 +14,7 @@ const unsupported = (): never => {
 };
 const references: StoredAuthoredReferenceResolverV1 = {
   spell: unsupported,
-  featByStoredName: unsupported,
+  feat: unsupported,
   class: unsupported,
   weapon: unsupported,
   armor: unsupported,

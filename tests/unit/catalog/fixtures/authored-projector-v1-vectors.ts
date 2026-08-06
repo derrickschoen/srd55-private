@@ -22,6 +22,7 @@ import {
   creatureType,
   damageType,
 } from '../../../../src/domain/enums';
+import type { ContentKey } from '../../../../src/domain/ids';
 
 const digest = (digit: string) =>
   digit.repeat(64) as ContentFingerprintDigest;
@@ -164,6 +165,7 @@ const backgroundAggregate: BackgroundContentAggregate = {
     free_cast: null,
   }],
   suggested_abilities: ['intelligence', 'wisdom', 'charisma'],
+  default_origin_feat_content_key: 'expanded:feat:void-adept' as ContentKey,
   default_origin_feat: featReference,
   skill_proficiencies: ['arcana', 'insight'],
   tool_reference_text: 'Astrolabe only; no structured tool grant.',

@@ -452,15 +452,16 @@ describe('catalog authoring draft service', () => {
     const templateId = db.exec(
       `INSERT INTO background_templates (
          content_key, rules_edition, name, ability_score_1, ability_score_2,
-         ability_score_3, feat_name, skill_proficiency_1,
+         ability_score_3, feat_name, default_origin_feat_content_key,
+         skill_proficiency_1,
          skill_proficiency_2, tool_proficiency, equipment_option_a,
          equipment_option_b
        ) VALUES (
          ?, 'expanded', 'Ordered Artisan', 'Wisdom', 'Intelligence',
-         'Charisma', 'Authoring Origin Feat', 'Insight', 'Arcana',
+         'Charisma', 'Authoring Origin Feat', ?, 'Insight', 'Arcana',
          'Glassblower tools', 'Choose the satchel.', 'Choose the ledger.'
        )`,
-      [contentKey],
+      [contentKey, featKey],
     ).lastInsertId;
     db.exec(
       `INSERT INTO background_equipment_items (

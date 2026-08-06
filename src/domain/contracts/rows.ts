@@ -1263,6 +1263,7 @@ const REFINEMENTS = {
   'background_templates.ability_score_2': nonEmptyText,
   'background_templates.ability_score_3': nonEmptyText,
   'background_templates.feat_name': nonEmptyText,
+  'background_templates.default_origin_feat_content_key': nonEmptyText,
   'background_templates.skill_proficiency_1': nonEmptyText,
   'background_templates.skill_proficiency_2': nonEmptyText,
   'background_templates.tool_proficiency': nonEmptyText,

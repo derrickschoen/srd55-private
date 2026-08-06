@@ -79,6 +79,7 @@ function backgroundReferencingFeat(
     repeatable: false,
     grants: [],
     suggested_abilities: ['intelligence', 'wisdom', 'charisma'],
+    default_origin_feat_content_key: featKey,
     default_origin_feat: { kind: 'feat', ...fingerprint(featKey) },
     skill_proficiencies: ['arcana', 'insight'],
     tool_reference_text: null,
@@ -275,6 +276,7 @@ describe('class, feat, species and background catalog import', () => {
         skills: ['arcana'],
       }],
       suggested_abilities: ['strength', 'dexterity', 'constitution'],
+      default_origin_feat_content_key: 'expanded:feat:invalid' as ContentKey,
       default_origin_feat: {
         kind: 'feat',
         scheme: CONTENT_FINGERPRINT_SCHEME_V1,
@@ -496,6 +498,7 @@ describe('class, feat, species and background catalog import', () => {
       repeatable: false,
       grants: [],
       suggested_abilities: ['strength', 'wisdom', 'constitution'],
+      default_origin_feat_content_key: featKey as ContentKey,
       default_origin_feat: { kind: 'feat', ...featRef },
       skill_proficiencies: ['athletics', 'perception'],
       tool_reference_text: null,
@@ -554,7 +557,12 @@ describe('class, feat, species and background catalog import', () => {
     });
     expect(reprojected.canonicalJson).toBe(incoming.canonicalJson);
     expect(new CatalogQueries(db).read().sources.background).toEqual([]);
-    expect(listGuidedOriginOptions(db, 'background')).toEqual([]);
+    expect(listGuidedOriginOptions(db, 'background')).toEqual([{
+      content_key: contentKey,
+      name: 'Fen Guard',
+      catalog_layer: 'external',
+      grants_lineage_spells: false,
+    }]);
   });
 
   it('requires review for an installed bundled class and refuses creation under D133', () => {

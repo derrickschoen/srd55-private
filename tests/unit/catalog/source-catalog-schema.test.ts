@@ -9,6 +9,7 @@ import {
   type ContentFingerprintDigest,
 } from '../../../src/catalog/content-identity';
 import { creatureSize, creatureType } from '../../../src/domain/enums';
+import type { ContentKey } from '../../../src/domain/ids';
 import { classProjectorV1Vector } from './fixtures/source-projector-v1-vectors';
 
 const digest = 'a'.repeat(64) as ContentFingerprintDigest;
@@ -42,6 +43,7 @@ function background(): BackgroundContentAggregate {
     repeatable: false,
     grants: [],
     suggested_abilities: ['strength', 'wisdom', 'constitution'],
+    default_origin_feat_content_key: 'expanded:feat:fixture' as ContentKey,
     default_origin_feat: { kind: 'feat', scheme: CONTENT_FINGERPRINT_SCHEME_V1, digest },
     skill_proficiencies: ['athletics', 'perception'],
     tool_reference_text: null,

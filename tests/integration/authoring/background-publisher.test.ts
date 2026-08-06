@@ -22,7 +22,13 @@ import {
   listGuidedClassOptions,
   listGuidedOriginOptions,
 } from '../../../src/builder/guided-creation';
+import {
+  applyGuidedEquipment,
+  guidedEquipmentStepState,
+} from '../../../src/builder/equipment-step';
 import { assertedExternalContentKey } from '../../../src/catalog/catalog-key';
+import { CatalogImporter } from '../../../src/catalog/catalog-importer';
+import { normalizeContentIdentityName } from '../../../src/catalog/content-identity';
 import { authoringFingerprintReference } from '../../../src/authoring/species-publisher';
 import {
   commitContentImport,
@@ -30,6 +36,7 @@ import {
 } from '../../../src/catalog/content-adoption';
 import {
   registerContentAlias,
+  registerBundledStableContentIdentity,
   rememberContentMatchDecision,
 } from '../../../src/catalog/content-registry';
 import { portableSourceContentImportNode } from '../../../src/catalog/source-content-importer';
@@ -37,8 +44,8 @@ import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import { applicationSeed } from '../../../src/db/bootstrap';
 import { DatabaseContext } from '../../../src/db/database';
 import type { ContentKey } from '../../../src/domain/ids';
-import { applyEquipmentPackageChoice } from '../../../src/grants/equipment-grants';
 import { SavePointQueries } from '../../../src/queries/save-points';
+import { featProjectorV1Vector } from '../../unit/catalog/fixtures/source-projector-v1-vectors';
 import { openTestDatabase } from '../../helpers/open-db';
 
 const opened: Database[] = [];
@@ -336,7 +343,14 @@ describe('HA-4 background publisher', () => {
        WHERE character_id = ? AND grant_key LIKE '%tool%'`,
       [character.id],
     )).toBe(0);
-    applyEquipmentPackageChoice(db, {
+    expect(guidedEquipmentStepState(db, character.id).background_package)
+      .toEqual(expect.objectContaining({
+        content_key: expectedKey,
+        offered: expect.arrayContaining([
+          expect.objectContaining({ option: 'a' }),
+        ]),
+      }));
+    applyGuidedEquipment(db, {
       character_id: character.id,
       kind: 'background',
       content_key: expectedKey,
@@ -353,6 +367,7 @@ describe('HA-4 background publisher', () => {
         kind: 'background',
         content_key: expectedKey,
         aggregate: expect.objectContaining({
+          default_origin_feat_content_key: originFeatKey(db),
           default_origin_feat: expect.objectContaining({ kind: 'feat' }),
           equipment_option_a: expect.arrayContaining([
             expect.objectContaining({ kind: 'weapon', content: expect.objectContaining({ kind: 'weapon' }) }),
@@ -382,6 +397,282 @@ describe('HA-4 background publisher', () => {
       'SELECT name FROM character_background WHERE character_id = ?',
       [character.id],
     )).toBe('Void Cartographer');
+  }, 20_000);
+
+  it('round-trips and applies the keyed default feat when another installed Origin feat has the same name', async () => {
+    const db = await database(true);
+    const selectedKey = '2024:feat:alert' as ContentKey;
+    const selectedName = db.scalar<string>(
+      'SELECT name FROM feat_definitions WHERE content_key = ?',
+      [selectedKey],
+    );
+    if (selectedName === null) throw new Error('The bundled Alert feat is missing.');
+    const duplicateKey = '2024:alternate.owner:same-name-alert' as ContentKey;
+    registerBundledStableContentIdentity(db, {
+      kind: 'feat',
+      contentKey: duplicateKey,
+      normalizedName: normalizeContentIdentityName(selectedName),
+    });
+    db.exec(
+      `INSERT INTO feat_definitions (
+         content_key, name, rules_edition, category, min_level,
+         ability_points, ability_increase_abilities,
+         ability_increase_maximum, repeatable, prerequisites, grant_rules,
+         notes, created_at, updated_at
+       )
+       SELECT ?, name, rules_edition, category, min_level,
+              ability_points, ability_increase_abilities,
+              ability_increase_maximum, repeatable, prerequisites, grant_rules,
+              'Distinct same-named installed fixture', created_at, updated_at
+       FROM feat_definitions WHERE content_key = ?`,
+      [duplicateKey, selectedKey],
+    );
+    expect(db.allRaw(
+      `SELECT content_key FROM feat_definitions
+       WHERE name = ? AND rules_edition = '2024' ORDER BY content_key`,
+      [selectedName],
+    )).toEqual([
+      { content_key: duplicateKey },
+      { content_key: selectedKey },
+    ]);
+
+    const authoring = service(db);
+    const published = publish(authoring, savedBackground(
+      db,
+      authoring,
+      'Keyed Alert Surveyor',
+      (document) => ({
+        ...document,
+        default_origin_feat_content_key: selectedKey,
+      }),
+    ));
+    const backgroundKey = published.result.content_key;
+    expect(db.oneRaw(
+      `SELECT feat_name, default_origin_feat_content_key
+       FROM background_templates WHERE content_key = ?`,
+      [backgroundKey],
+    )).toEqual({
+      feat_name: selectedName,
+      default_origin_feat_content_key: selectedKey,
+    });
+    expect(listGuidedBackgroundChoiceOptions(db).backgrounds.find(
+      (option) => option.content_key === backgroundKey,
+    )?.pairing.suggested_feat_content_key).toBe(selectedKey);
+    expect(exportSelectedLibraryContent(
+      db,
+      [backgroundKey],
+      '2042-06-09T00:00:00.000Z',
+    ).content[0]).toEqual(expect.objectContaining({
+      aggregate: expect.objectContaining({
+        default_origin_feat_content_key: selectedKey,
+      }),
+    }));
+    const copied = authoring.createDraft({
+      content_kind: 'background',
+      base_content_key: backgroundKey,
+    });
+    expect(copied.document).toEqual(expect.objectContaining({
+      default_origin_feat_content_key: selectedKey,
+    }));
+
+    const guidedClass = listGuidedClassOptions(db)[0];
+    if (guidedClass === undefined) throw new Error('A guided class is required.');
+    const character = createGuidedCharacter(
+      db,
+      { name: 'Keyed Alert Hero', class_content_key: guidedClass.content_key },
+      new CharacterCommandIntegrity('ha4-keyed-alert-apply'),
+    );
+    applyGuidedBackgroundChoices(db, {
+      character_id: character.id,
+      content_key: backgroundKey,
+      increases: [
+        { ability: 'strength', amount: 2 },
+        { ability: 'dexterity', amount: 1 },
+      ],
+      origin_feat_content_key: selectedKey,
+      origin_feat_config: {},
+    });
+    expect(db.scalar<string>(
+      `SELECT feat.content_key
+       FROM character_source_instances AS child
+       JOIN feat_definitions AS feat ON feat.id = child.source_definition_id
+       WHERE child.character_id = ? AND child.source_type = 'feat'`,
+      [character.id],
+    )).toBe(selectedKey);
+  }, 20_000);
+
+  it('withholds configurable external Origin feats while retaining external no-config feats', async () => {
+    const db = await database(true);
+    const importer = new CatalogImporter(db);
+    const passive = {
+      ...featProjectorV1Vector.aggregate,
+      name: 'Passive Origin Echo',
+      rules_edition: 'expanded',
+      category: 'origin',
+      grants: [],
+    };
+    const configurable = {
+      ...featProjectorV1Vector.aggregate,
+      name: 'Configurable Origin Echo',
+      rules_edition: 'expanded',
+      category: 'origin',
+      grants: [{
+        kind: 'choice_from_list',
+        rule_key: 'configurable-echo-cantrip',
+        count: 1,
+        bucket: 'cantrip_known',
+        list: '$config.chosen_list',
+        level_min: 0,
+        level_max: 0,
+      }],
+    };
+    importer.import({
+      documents: [JSON.stringify([
+        { kind: 'feat', aggregate: passive },
+        { kind: 'feat', aggregate: configurable },
+      ])],
+    });
+    const options = listGuidedBackgroundChoiceOptions(db).origin_feats;
+    expect(options).toContainEqual(expect.objectContaining({
+      name: 'Passive Origin Echo',
+    }));
+    expect(options).not.toContainEqual(expect.objectContaining({
+      name: 'Configurable Origin Echo',
+    }));
+  });
+
+  it('refuses a drifted live weapon dependency instead of trusting its registered digest', async () => {
+    const db = await database(true);
+    db.exec(
+      `UPDATE weapon_templates SET damage_type = 'Drifted Void'
+       WHERE content_key = '2024:weapon:club'`,
+    );
+    const authoring = service(db);
+    const draft = savedBackground(db, authoring, 'Drifted Weapon Surveyor');
+    const error = authoringError(() => authoring.previewPublish({
+      draft_uuid: draft.draft_uuid,
+      expected_revision: draft.revision,
+    }));
+    expect(error.data).toEqual(expect.objectContaining({
+      reason: 'validation_failed',
+      issues: expect.arrayContaining([{
+        path: ['equipment_option_a', 0, 'content_key'],
+        code: 'unresolved_reference',
+        message: 'Weapon content key does not resolve to one current fingerprint.',
+      }]),
+    }));
+    expect(db.scalar<number>(
+      `SELECT count(*) FROM background_definitions
+       WHERE name = 'Drifted Weapon Surveyor'`,
+    )).toBe(0);
+  });
+
+  it('surfaces and applies an external background package with external dependencies, and refuses a missing dependency by name', async () => {
+    const db = await database(true);
+    const externalWeapon = {
+      kind: 'weapon',
+      name: 'Storm Pike',
+      edition: 'expanded',
+      srdGroup: 'martial_melee',
+      damage: { kind: 'dice', dice: '1d8' },
+      damageType: 'Lightning',
+      versatileDamage: { kind: 'dice', dice: '1d10' },
+      finesse: false,
+      heavy: false,
+      light: false,
+      loading: false,
+      reach: true,
+      thrown: false,
+      twoHanded: false,
+      ammunition: false,
+      ammunitionKind: null,
+      range: { kind: 'none' },
+      masteryProperty: 'Push',
+      otherProperties: '',
+    };
+    new CatalogImporter(db).import({ documents: [JSON.stringify([externalWeapon])] });
+    const weaponKey = assertedExternalContentKey('weapon', 'expanded', 'Storm Pike');
+    const authoring = service(db);
+    const published = publish(authoring, savedBackground(
+      db,
+      authoring,
+      'Storm Quartermaster',
+      (document) => ({
+        ...document,
+        equipment_option_a_description: 'Storm Pike and field pack',
+        equipment_option_a: [{
+          kind: 'weapon',
+          draft_item_uuid: itemUuid('storm-pike-package'),
+          quantity: 1,
+          printed_name: 'Storm Pike',
+          content_key: weaponKey,
+        }],
+      }),
+    ));
+    const guidedClass = listGuidedClassOptions(db)[0];
+    if (guidedClass === undefined) throw new Error('A guided class is required.');
+    const character = createGuidedCharacter(
+      db,
+      { name: 'Storm Quartermaster Hero', class_content_key: guidedClass.content_key },
+      new CharacterCommandIntegrity('ha4-external-equipment'),
+    );
+    applyGuidedBackgroundChoices(db, {
+      character_id: character.id,
+      content_key: published.result.content_key,
+      increases: [
+        { ability: 'strength', amount: 2 },
+        { ability: 'dexterity', amount: 1 },
+      ],
+      origin_feat_content_key: originFeatKey(db),
+      origin_feat_config: {},
+    });
+    const state = guidedEquipmentStepState(db, character.id);
+    expect(state.background_package).toEqual(expect.objectContaining({
+      content_key: published.result.content_key,
+      offered: expect.arrayContaining([expect.objectContaining({
+        option: 'a',
+        contents: [expect.objectContaining({ item_name: 'Storm Pike' })],
+      })]),
+    }));
+    applyGuidedEquipment(db, {
+      character_id: character.id,
+      kind: 'background',
+      content_key: published.result.content_key,
+      option: 'a',
+    });
+    expect(db.allRaw(
+      'SELECT name FROM character_weapons WHERE character_id = ?',
+      [character.id],
+    )).toEqual([{ name: 'Storm Pike' }]);
+
+    const missing = savedBackground(
+      db,
+      authoring,
+      'Missing Dependency Quartermaster',
+      (document) => ({
+        ...document,
+        equipment_option_a: [{
+          kind: 'weapon',
+          draft_item_uuid: itemUuid('missing-package-weapon'),
+          quantity: 1,
+          printed_name: 'Missing Pike',
+          content_key: 'expanded:weapon:missing-pike' as ContentKey,
+        }],
+      }),
+    );
+    const error = authoringError(() => authoring.previewPublish({
+      draft_uuid: missing.draft_uuid,
+      expected_revision: missing.revision,
+    }));
+    expect(error.data).toEqual(expect.objectContaining({
+      reason: 'validation_failed',
+      issues: expect.arrayContaining([
+        expect.objectContaining({
+          path: ['equipment_option_a', 0, 'content_key'],
+          code: 'unresolved_reference',
+        }),
+      ]),
+    }));
   }, 20_000);
 
   it('silently self-matches byte-identical external content and refuses a typed asserted-key collision', async () => {
@@ -606,6 +897,150 @@ describe('HA-4 background publisher', () => {
         reference?.startsWith('background_template_effects:') === true);
     expect(savedRefs).toEqual(targetRefs);
     expect(savedRefs.every((reference) => !sourceRefs.includes(reference))).toBe(true);
+  }, 20_000);
+
+  it('binds identical effect payloads to the correct background template identity', async () => {
+    const source = await database(true);
+    const sourceAuthoring = service(source);
+    const selected = publish(
+      sourceAuthoring,
+      savedBackground(source, sourceAuthoring, 'Second Shared Ward Background'),
+    );
+    const guidedClass = listGuidedClassOptions(source)[0];
+    if (guidedClass === undefined) throw new Error('A guided class is required.');
+    const character = createGuidedCharacter(
+      source,
+      { name: 'Shared Ward Bearer', class_content_key: guidedClass.content_key },
+      new CharacterCommandIntegrity('ha4-shared-background-source'),
+    );
+    applyGuidedBackgroundChoices(source, {
+      character_id: character.id,
+      content_key: selected.result.content_key,
+      increases: [
+        { ability: 'strength', amount: 2 },
+        { ability: 'dexterity', amount: 1 },
+      ],
+      origin_feat_content_key: originFeatKey(source),
+      origin_feat_config: {},
+    });
+    const document = exportCharacterBackup(
+      source,
+      character.id,
+      '2042-06-09T00:00:00.000Z',
+    );
+
+    const target = await database(true);
+    const targetAuthoring = service(target);
+    const competing = publish(
+      targetAuthoring,
+      savedBackground(target, targetAuthoring, 'First Shared Ward Background'),
+    );
+    publish(
+      targetAuthoring,
+      savedBackground(target, targetAuthoring, 'Second Shared Ward Background'),
+    );
+    const plan = planCharacterBackupImport(target, document);
+    const committed = commitCharacterBackupImport(target, document, plan.token);
+    expect(committed.kind).toBe('committed');
+    if (committed.kind !== 'committed') throw new Error('Character import did not commit.');
+    expect(committed.result.notices).toEqual([]);
+    const importedRefs = target.allRaw(
+      `SELECT template_ref FROM character_effects
+       WHERE character_id = ?
+         AND template_ref LIKE 'background_template_effects:%'
+       ORDER BY sort_order`,
+      [committed.result.characterId],
+    ).map((row) => String(row.template_ref));
+    const selectedRefs = target.allRaw(
+      `SELECT 'background_template_effects:' || effect.id AS template_ref
+       FROM background_template_effects AS effect
+       JOIN background_templates AS template
+         ON template.id = effect.background_template_id
+       WHERE template.content_key = ? ORDER BY effect.sort_order`,
+      [selected.result.content_key],
+    ).map((row) => String(row.template_ref));
+    const competingRefs = target.allRaw(
+      `SELECT 'background_template_effects:' || effect.id AS template_ref
+       FROM background_template_effects AS effect
+       JOIN background_templates AS template
+         ON template.id = effect.background_template_id
+       WHERE template.content_key = ? ORDER BY effect.sort_order`,
+      [competing.result.content_key],
+    ).map((row) => String(row.template_ref));
+    expect(importedRefs).toEqual(selectedRefs);
+    expect(importedRefs.some((reference) => competingRefs.includes(reference))).toBe(false);
+  }, 20_000);
+
+  it('imports an older raw numeric background effect ref as null with a typed notice', async () => {
+    const source = await database(true);
+    const sourceAuthoring = service(source);
+    const published = publish(
+      sourceAuthoring,
+      savedBackground(source, sourceAuthoring, 'Numeric Ref Surveyor'),
+    );
+    const guidedClass = listGuidedClassOptions(source)[0];
+    if (guidedClass === undefined) throw new Error('A guided class is required.');
+    const character = createGuidedCharacter(
+      source,
+      { name: 'Numeric Ref Bearer', class_content_key: guidedClass.content_key },
+      new CharacterCommandIntegrity('ha4-numeric-ref-source'),
+    );
+    applyGuidedBackgroundChoices(source, {
+      character_id: character.id,
+      content_key: published.result.content_key,
+      increases: [
+        { ability: 'strength', amount: 2 },
+        { ability: 'dexterity', amount: 1 },
+      ],
+      origin_feat_content_key: originFeatKey(source),
+      origin_feat_config: {},
+    });
+    const exported = exportCharacterBackup(
+      source,
+      character.id,
+      '2042-06-09T00:00:00.000Z',
+    );
+    let replaced = false;
+    const document = {
+      ...exported,
+      tables: {
+        ...exported.tables,
+        character_effects: (exported.tables.character_effects ?? []).map((row) => {
+          if (
+            !replaced &&
+            typeof row.template_ref === 'string' &&
+            row.template_ref.startsWith('background_template_effects:portable:')
+          ) {
+            replaced = true;
+            return { ...row, template_ref: 9001 };
+          }
+          return row;
+        }),
+      },
+    };
+    expect(replaced).toBe(true);
+    const target = await database(true);
+    const plan = planCharacterBackupImport(target, document);
+    const committed = commitCharacterBackupImport(target, document, plan.token);
+    expect(committed.kind).toBe('committed');
+    if (committed.kind !== 'committed') throw new Error('Character import did not commit.');
+    expect(committed.result.notices).toContainEqual({
+      kind: 'background_effect_template_ref_unresolved',
+      effect: {
+        templateRef: '9001',
+        label: 'Void aptitude',
+        effectKind: 'ability_increase',
+      },
+      background: {
+        contentKey: published.result.content_key,
+        name: 'Numeric Ref Surveyor',
+      },
+    });
+    expect(target.scalar<string>(
+      `SELECT template_ref FROM character_effects
+       WHERE character_id = ? AND label = 'Void aptitude'`,
+      [committed.result.characterId],
+    )).toBeNull();
   }, 20_000);
 
   it('returns a typed notice when a background effect no longer matches its portable template', async () => {

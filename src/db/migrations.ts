@@ -37,6 +37,7 @@ import assertedContentKeys from '../../drizzle/0033_asserted_content_keys.sql?ra
 import removeLegacyOpaque from '../../drizzle/0034_remove_legacy_opaque.sql?raw';
 import catalogContentDrafts from '../../drizzle/0035_catalog_content_drafts.sql?raw';
 import catalogContentArchive from '../../drizzle/0036_catalog_content_archive.sql?raw';
+import backgroundDefaultOriginFeatKey from '../../drizzle/0037_background_default_origin_feat_key.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -418,6 +419,17 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
       '1df1bd509d44f3647dfbfd9ff3a5b9e8040476d21bd0a942f402bc00e6ec1267',
     resultSchemaChecksum:
       'cbf37d18775ad5e489c7adb90df5aa24c04d4194569750de2de86b66844ae066',
+  }),
+  // HA-4 N1: a printed feat name is display text, not identity. Legacy rows
+  // backfill only on an unambiguous edition/name match; current writers store
+  // the exact installed Origin feat key.
+  Object.freeze({
+    id: '0037_background_default_origin_feat_key',
+    sql: backgroundDefaultOriginFeatKey,
+    checksum:
+      'd20d81a4defa39c0d8f8445f8f8fb70743845d26188fe1ecff047b87bc676148',
+    resultSchemaChecksum:
+      '960027dde562045c21181e2cf9efbf8ffbcf57549eaabf568e22f30780ceed22',
   }),
 ]);
 

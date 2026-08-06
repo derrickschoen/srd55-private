@@ -505,6 +505,7 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
     text: [
       'content_key', 'rules_edition', 'name', 'ability_score_1',
       'ability_score_2', 'ability_score_3', 'feat_name',
+      'default_origin_feat_content_key',
       'skill_proficiency_1', 'skill_proficiency_2', 'tool_proficiency',
       'equipment_option_a', 'equipment_option_b',
     ],
@@ -1518,6 +1519,7 @@ const expectedForeignKeys: Record<string, string[]> = {
   ],
   background_templates: [
     'content_key->catalog_content_identities.content_key|NO ACTION',
+    'default_origin_feat_content_key->feat_definitions.content_key|NO ACTION',
   ],
   armor_templates: [
     'content_key->catalog_content_identities.content_key|NO ACTION',

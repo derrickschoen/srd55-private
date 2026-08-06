@@ -265,6 +265,7 @@ export interface BackgroundContentAggregate
     readonly kind: 'grant_source';
   })[];
   readonly suggested_abilities: readonly [Ability, Ability, Ability];
+  readonly default_origin_feat_content_key: ContentKey;
   readonly default_origin_feat: ContentFingerprintReference<'feat'>;
   readonly skill_proficiencies: readonly [Skill, Skill];
   readonly tool_reference_text: string | null;
