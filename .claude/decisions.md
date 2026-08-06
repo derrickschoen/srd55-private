@@ -7,6 +7,19 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D214 — OWNER: purge purges the whole lineage set; set restore is all-or-nothing (2026-08-06)
+
+Resolves the D138-vs-CI-7 collision (supersession lineage rows are permanent
+and RESTRICT-lock their content, so a superseded creation could never be
+hard-deleted). Ruling: (1) permanent purge from the archive view removes the
+ENTIRE connected lineage chain — every version, its lineage rows, and attached
+characters — in one atomic scoped purge seam; 0039's permanence trigger gains
+exactly one guarded exception for this path and lineage stays immutable
+everywhere else. True deletion, no zombie/stub rows. (2) A deleted set
+(creation + attached characters) archives and restores as ONE unit; partial
+restore is not offered — restore the set, then delete individual characters
+normally. HA-11 pins both.
+
 ## D213 — OWNER: after HA-12, keep hardening autonomously (2026-08-06)
 
 When the named design-doc queue empties at HA-12, the loop continues on
