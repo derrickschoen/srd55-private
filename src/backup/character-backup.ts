@@ -26,6 +26,7 @@ import type { ContentKey } from '../domain/ids';
 import type {
   BackgroundContentAggregate,
   SpeciesContentAggregate,
+  SubclassContentAggregate,
 } from '../authoring/contracts';
 import {
   migrateLegacyTraitRows,
@@ -213,6 +214,18 @@ export type CharacterImportNotice =
         readonly effectKind: string;
       };
       readonly background: {
+        readonly contentKey: string;
+        readonly name: string;
+      };
+    }
+  | {
+      readonly kind: 'subclass_effect_template_ref_unresolved';
+      readonly effect: {
+        readonly templateRef: string;
+        readonly label: string;
+        readonly effectKind: string;
+      };
+      readonly subclass: {
         readonly contentKey: string;
         readonly name: string;
       };
@@ -1684,6 +1697,13 @@ interface PortableSpeciesEffectTemplateIdentity {
   readonly effectSortOrder: number;
 }
 
+interface PortableSubclassEffectTemplateIdentity {
+  readonly featureName: string;
+  readonly featureLevel: number;
+  readonly featureSortOrder: number;
+  readonly effectSortOrder: number;
+}
+
 const storedSpeciesEffectTemplateRef =
   /^species_template_trait_effects:(\d+)$/u;
 const portableSpeciesEffectTemplateRef =
@@ -1692,6 +1712,10 @@ const storedBackgroundEffectTemplateRef =
   /^background_template_effects:(\d+)$/u;
 const portableBackgroundEffectTemplateRef =
   /^background_template_effects:portable:(\d+)$/u;
+const storedSubclassEffectTemplateRef =
+  /^subclass_feature_effects:(\d+)$/u;
+const portableSubclassEffectTemplateRef =
+  /^subclass_feature_effects:portable:(\d+):(\d+):(\d+):(.+)$/u;
 
 function encodedPortableSpeciesEffectTemplateRef(
   identity: PortableSpeciesEffectTemplateIdentity,
@@ -1715,6 +1739,35 @@ function decodedPortableSpeciesEffectTemplateRef(
     return traitName === ''
       ? null
       : { traitName, traitSortOrder, effectSortOrder };
+  } catch {
+    return null;
+  }
+}
+
+function encodedPortableSubclassEffectTemplateRef(
+  identity: PortableSubclassEffectTemplateIdentity,
+): string {
+  return `subclass_feature_effects:portable:${String(identity.featureLevel)}:${String(identity.featureSortOrder)}:${String(identity.effectSortOrder)}:${encodeURIComponent(identity.featureName)}`;
+}
+
+function decodedPortableSubclassEffectTemplateRef(
+  value: string,
+): PortableSubclassEffectTemplateIdentity | null {
+  const match = portableSubclassEffectTemplateRef.exec(value);
+  if (match === null) return null;
+  const featureLevel = Number(match[1]);
+  const featureSortOrder = Number(match[2]);
+  const effectSortOrder = Number(match[3]);
+  if (
+    !Number.isSafeInteger(featureLevel) || featureLevel < 1 || featureLevel > 20 ||
+    !Number.isSafeInteger(featureSortOrder) || featureSortOrder < 1 ||
+    !Number.isSafeInteger(effectSortOrder) || effectSortOrder < 1
+  ) return null;
+  try {
+    const featureName = decodeURIComponent(match[4]!);
+    return featureName === ''
+      ? null
+      : { featureName, featureLevel, featureSortOrder, effectSortOrder };
   } catch {
     return null;
   }
@@ -1784,6 +1837,34 @@ function portableBackgroundEffectRef(
     : `background_template_effects:portable:${String(sortOrder)}`;
 }
 
+function portableSubclassEffectRef(
+  db: DatabaseContext,
+  row: BackupRow,
+  sourceRows: ReadonlyMap<number, BackupRow>,
+): unknown {
+  if (typeof row.template_ref !== 'string') return row.template_ref;
+  const match = storedSubclassEffectTemplateRef.exec(row.template_ref);
+  if (match === null || row.source_instance_id === null) return row.template_ref;
+  const source = sourceRows.get(Number(row.source_instance_id));
+  if (source === undefined || source.source_type !== 'subclass') return row.template_ref;
+  const identity = db.oneRaw(
+    `SELECT feature.name AS feature_name, feature.class_level,
+            feature.sort_order AS feature_sort_order,
+            effect.sort_order AS effect_sort_order
+     FROM subclass_feature_effects AS effect
+     JOIN subclass_features AS feature ON feature.id = effect.subclass_feature_id
+     WHERE effect.id = ? AND feature.subclass_definition_id = ?`,
+    [Number(match[1]), Number(source.source_definition_id)],
+  );
+  if (identity === null) return row.template_ref;
+  return encodedPortableSubclassEffectTemplateRef({
+    featureName: String(identity.feature_name),
+    featureLevel: Number(identity.class_level),
+    featureSortOrder: Number(identity.feature_sort_order),
+    effectSortOrder: Number(identity.effect_sort_order),
+  });
+}
+
 function portableSpeciesEffectRows(
   db: DatabaseContext,
   rows: readonly BackupRow[],
@@ -1791,11 +1872,14 @@ function portableSpeciesEffectRows(
 ): readonly BackupRow[] {
   return rows.map((row) => ({
     ...row,
-    template_ref: portableBackgroundEffectRef(
-      db,
-      { ...row, template_ref: portableSpeciesEffectRef(db, row, sourceRows) },
-      sourceRows,
-    ),
+    template_ref: portableSubclassEffectRef(db, {
+      ...row,
+      template_ref: portableBackgroundEffectRef(
+        db,
+        { ...row, template_ref: portableSpeciesEffectRef(db, row, sourceRows) },
+        sourceRows,
+      ),
+    }, sourceRows),
   }));
 }
 
@@ -2665,6 +2749,101 @@ function backgroundEffectTemplateRefResolver(
   };
 }
 
+function subclassEffectTemplateRefResolver(
+  db: DatabaseContext,
+  document: CharacterBackupDocument,
+  notices: CharacterImportNotice[],
+): (
+  row: BackupRow,
+  sourceType: string | null,
+  sourceSubclassDefinitionId: number | null,
+  subclassDefinitionId: number | null,
+) => unknown {
+  const sourceKeys = new Map(
+    document.references.subclass_definitions.map((reference) => [
+      reference.id,
+      reference.content_key,
+    ]),
+  );
+  const portableSubclasses = new Map(
+    document.content
+      .filter((entry) => entry.kind === 'subclass')
+      .map((entry) => [
+        entry.content_key,
+        entry.aggregate as SubclassContentAggregate,
+      ]),
+  );
+  const noticed = new Set<string>();
+  return (row, sourceType, sourceSubclassDefinitionId, subclassDefinitionId) => {
+    if (
+      sourceType !== 'subclass' ||
+      sourceSubclassDefinitionId === null ||
+      subclassDefinitionId === null ||
+      row.template_ref === null
+    ) return row.template_ref;
+    const target = db.oneRaw(
+      'SELECT content_key, name FROM subclass_definitions WHERE id = ?',
+      [subclassDefinitionId],
+    );
+    if (target === null) {
+      throw new BackupValidationError(
+        `Character backup subclass definition ${String(subclassDefinitionId)} is missing.`,
+      );
+    }
+    const sourceContentKey = sourceKeys.get(sourceSubclassDefinitionId) ?? String(target.content_key);
+    const aggregate = portableSubclasses.get(sourceContentKey);
+    const unresolved = (): null => {
+      const marker = [row.template_ref, row.effect_kind, row.label, sourceContentKey].join('\u0000');
+      if (!noticed.has(marker)) {
+        noticed.add(marker);
+        notices.push(Object.freeze({
+          kind: 'subclass_effect_template_ref_unresolved',
+          effect: Object.freeze({
+            templateRef: String(row.template_ref),
+            label: String(row.label),
+            effectKind: String(row.effect_kind),
+          }),
+          subclass: Object.freeze({
+            contentKey: sourceContentKey,
+            name: aggregate?.name ?? String(target.name),
+          }),
+        }));
+      }
+      return null;
+    };
+    if (
+      typeof row.template_ref !== 'string' ||
+      (!storedSubclassEffectTemplateRef.test(row.template_ref) &&
+        !portableSubclassEffectTemplateRef.test(row.template_ref))
+    ) return unresolved();
+    const identity = decodedPortableSubclassEffectTemplateRef(row.template_ref);
+    const sourceFeature = identity === null || aggregate === undefined
+      ? undefined
+      : aggregate.features.find((feature) =>
+          feature.name === identity.featureName &&
+          feature.class_level === identity.featureLevel &&
+          feature.sort_order === identity.featureSortOrder &&
+          feature.effects.some((effect) => effect.sort_order === identity.effectSortOrder));
+    if (identity === null || (aggregate !== undefined && sourceFeature === undefined)) {
+      return unresolved();
+    }
+    const candidate = db.allRaw(
+      `SELECT effect.*
+       FROM subclass_feature_effects AS effect
+       JOIN subclass_features AS feature ON feature.id = effect.subclass_feature_id
+       WHERE feature.subclass_definition_id = ?
+         AND feature.class_level = ? AND feature.sort_order = ?
+         AND feature.name = ? AND effect.sort_order = ?`,
+      [subclassDefinitionId, identity.featureLevel, identity.featureSortOrder,
+        identity.featureName, identity.effectSortOrder],
+    ).find((effect) =>
+      speciesEffectTemplateColumns.every((column) => effect[column] === row[column])) ?? null;
+    return candidate === null
+      ? unresolved()
+      : `subclass_feature_effects:${String(candidate.id)}`;
+  };
+}
+
 function importCurrentTables(
   db: DatabaseContext,
   document: CharacterBackupDocument,
@@ -2707,6 +2886,11 @@ function importCurrentTables(
     notices,
   );
   const backgroundTemplateRef = backgroundEffectTemplateRefResolver(
+    db,
+    document,
+    notices,
+  );
+  const subclassTemplateRef = subclassEffectTemplateRefResolver(
     db,
     document,
     notices,
@@ -3084,6 +3268,14 @@ function importCurrentTables(
             sourceRow?.source_definition_id,
           )
         : null;
+    const subclassDefinitionId =
+      sourceType === 'subclass'
+        ? resolvedId(
+            references,
+            'subclass_definitions',
+            sourceRow?.source_definition_id,
+          )
+        : null;
     const oldItemId =
       row.character_item_id === null ? null : Number(row.character_item_id);
     const itemId =
@@ -3111,24 +3303,34 @@ function importCurrentTables(
         source_instance_id: sourceId,
         character_item_id: itemId ?? null,
         character_weapon_id: weaponId ?? null,
-        template_ref: backgroundTemplateRef(
+        template_ref: subclassTemplateRef(
           {
             ...row,
-            template_ref: speciesTemplateRef(
-              row,
+            template_ref: backgroundTemplateRef(
+              {
+                ...row,
+                template_ref: speciesTemplateRef(
+                  row,
+                  sourceType,
+                  sourceType === 'species'
+                    ? Number(sourceRow?.source_definition_id)
+                    : null,
+                  speciesDefinitionId,
+                  oldSourceId,
+                ),
+              },
               sourceType,
-              sourceType === 'species'
+              sourceType === 'background'
                 ? Number(sourceRow?.source_definition_id)
                 : null,
-              speciesDefinitionId,
-              oldSourceId,
+              backgroundDefinitionId,
             ),
           },
           sourceType,
-          sourceType === 'background'
+          sourceType === 'subclass'
             ? Number(sourceRow?.source_definition_id)
             : null,
-          backgroundDefinitionId,
+          subclassDefinitionId,
         ),
       }),
     );
@@ -3293,6 +3495,11 @@ function portableSnapshots(
       notices,
     );
     const backgroundTemplateRef = backgroundEffectTemplateRefResolver(
+      db,
+      document,
+      notices,
+    );
+    const subclassTemplateRef = subclassEffectTemplateRefResolver(
       db,
       document,
       notices,
@@ -3498,6 +3705,13 @@ function portableSnapshots(
                     source?.source_definition_id,
                   )
                 : null;
+              const subclassDefinitionId = sourceType === 'subclass'
+                ? resolvedId(
+                    references,
+                    'subclass_definitions',
+                    source?.source_definition_id,
+                  )
+                : null;
               return {
                 ...row,
                 id: ids[table].get(Number(row.id)),
@@ -3518,24 +3732,34 @@ function portableSnapshots(
                     : ids.character_weapons.get(
                         Number(row.character_weapon_id),
                       ) ?? null,
-                template_ref: backgroundTemplateRef(
+                template_ref: subclassTemplateRef(
                   {
                     ...row,
-                    template_ref: speciesTemplateRef(
-                      row,
+                    template_ref: backgroundTemplateRef(
+                      {
+                        ...row,
+                        template_ref: speciesTemplateRef(
+                          row,
+                          sourceType,
+                          sourceType === 'species'
+                            ? Number(source?.source_definition_id)
+                            : null,
+                          speciesDefinitionId,
+                          oldSourceId,
+                        ),
+                      },
                       sourceType,
-                      sourceType === 'species'
+                      sourceType === 'background'
                         ? Number(source?.source_definition_id)
                         : null,
-                      speciesDefinitionId,
-                      oldSourceId,
+                      backgroundDefinitionId,
                     ),
                   },
                   sourceType,
-                  sourceType === 'background'
+                  sourceType === 'subclass'
                     ? Number(source?.source_definition_id)
                     : null,
-                  backgroundDefinitionId,
+                  subclassDefinitionId,
                 ),
               };
             }),

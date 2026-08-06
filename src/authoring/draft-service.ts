@@ -70,6 +70,12 @@ import {
   commitBackgroundPublish,
   previewBackgroundPublish,
 } from './background-publisher';
+import {
+  commitSubclassPublish,
+  previewSubclassPublish,
+  SubclassPublishError,
+  SubclassSemanticValidationError,
+} from './subclass-publisher';
 
 interface DraftRow {
   readonly draft_uuid: HomebrewDraftUuid;
@@ -165,6 +171,15 @@ function publishServiceError(error: unknown): never {
     }, { cause: error });
   }
   if (error instanceof BackgroundPublishError) {
+    throw new AuthoringServiceError(error.message, error.data, { cause: error });
+  }
+  if (error instanceof SubclassSemanticValidationError) {
+    throw new AuthoringServiceError('Subclass publish validation failed.', {
+      reason: 'validation_failed',
+      issues: error.issues,
+    }, { cause: error });
+  }
+  if (error instanceof SubclassPublishError) {
     throw new AuthoringServiceError(error.message, error.data, { cause: error });
   }
   throw error;
@@ -774,9 +789,7 @@ export class CatalogAuthoringService {
         case 'background':
           return previewBackgroundPublish(this.db, draft);
         case 'subclass':
-          throw new AuthoringServiceError('Subclass publishing is not implemented.', {
-            reason: 'invalid_reference',
-          });
+          return previewSubclassPublish(this.db, draft);
       }
     } catch (error) {
       return publishServiceError(error);
@@ -815,9 +828,9 @@ export class CatalogAuthoringService {
             this.db, draft, input.token, input.decisions, previousKeyUsageCount,
           );
         case 'subclass':
-          throw new AuthoringServiceError('Subclass publishing is not implemented.', {
-            reason: 'invalid_reference',
-          });
+          return commitSubclassPublish(
+            this.db, draft, input.token, input.decisions, previousKeyUsageCount,
+          );
       }
     } catch (error) {
       return publishServiceError(error);

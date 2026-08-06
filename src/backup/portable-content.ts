@@ -1210,12 +1210,22 @@ function portableNode(
           dependencies,
         ) as SubclassContentAggregate | SpellContentAggregateV1;
         const current = projectPortableAggregate(entry.kind, aggregate);
+        const localSubclass = entry.kind === 'subclass'
+          ? db.oneRaw(
+              'SELECT name, rules_edition FROM subclass_definitions WHERE content_key = ?',
+              [nextKey],
+            )
+          : null;
         return {
           kind: entry.kind,
           edition: current.edition,
           name: current.name,
           assertedKey: nextKey,
           payload: current.payload,
+          metadataConflict: localSubclass !== null && (
+            localSubclass.name !== current.name ||
+            localSubclass.rules_edition !== current.edition
+          ),
           installExact: entry.kind === 'spell',
           projectStored: (database, contentKey) =>
             projectStoredContentV1(database, entry.kind, contentKey),
@@ -1242,6 +1252,33 @@ function portableNode(
       });
     }
   }
+}
+
+/**
+ * The one immutable subclass installer used by portable import and HA-5
+ * publishing. Keeping authoring on this node means preview and commit exercise
+ * the same projection, dependency remap, and aggregate write as restore.
+ */
+export function portableSubclassContentImportNode(
+  db: DatabaseContext,
+  aggregate: SubclassContentAggregate,
+  assertedKey: ContentKey,
+): ContentImportNode<'subclass'> {
+  const projected = projectAuthoredContentAggregateV1(aggregate);
+  const identity = deriveContentIdentityV1({
+    kind: 'subclass',
+    edition: aggregate.rules_edition,
+    name: aggregate.name,
+    payload: projected.payload,
+  });
+  return portableNode(db, {
+    kind: 'subclass',
+    content_key: assertedKey,
+    key_kind: 'asserted',
+    fingerprint_scheme: identity.envelope.scheme,
+    fingerprint_digest: identity.digest,
+    aggregate,
+  }) as ContentImportNode<'subclass'>;
 }
 
 /**

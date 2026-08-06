@@ -241,13 +241,12 @@ function duplicateItemUuids(
     check(grant.draft_item_uuid, ['grants', grantIndex, 'draft_item_uuid']));
 }
 
-function resolvedGrant(
+export function resolvedAuthoringGrant(
   db: DatabaseContext,
   draft: AuthoringDraftGrant,
-  index: number,
+  path: readonly (string | number)[],
   issues: AuthoringValidationIssue[],
 ): AuthoringGrant | null {
-  const path = ['grants', index] as const;
   const ruleKeyReady = authoringNonEmpty(draft.rule_key, [...path, 'rule_key'], issues);
   switch (draft.kind) {
     case 'fixed_spell': {
@@ -357,7 +356,7 @@ export function speciesDraftToAggregate(
       authoringIssue(issues, ['grants', index, 'rule_key'], 'duplicate', 'Grant rule key must be unique.');
     }
     ruleKeys.add(grant.rule_key);
-    const resolved = resolvedGrant(db, grant, index, issues);
+    const resolved = resolvedAuthoringGrant(db, grant, ['grants', index], issues);
     return resolved === null ? [] : [resolved];
   });
   const traits = draft.traits.flatMap((trait, traitIndex) => {
