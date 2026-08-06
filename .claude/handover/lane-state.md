@@ -23,7 +23,37 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-06-f (newest - read first)
+## RESTART POINT 2026-08-06-g (newest - read first)
+MAIN 7e4d4e6 (mirror pushed). FLOORS: vitest 248/4,067; PW 127 pool
+(~9.3 min; homebrew-species-authoring journey added, measured 17.7s of a
+90s budget); build 0; migrations 0000-0037 FROZEN on main (0038/0039
+minted unmerged in wt/ci7); backup v5. THIRTY-FOUR merges. Rulings
+through D210.
+
+NOISE RULE UPDATE: the vitest onTaskUpdate teardown noise now reproduces
+even under --maxWorkers=1 on loaded trees - the serial-clean criterion no
+longer discriminates. Adjudication basis is now COMPLETE ALL-PASS COUNTS
+(files and tests both green and total); exit code alone still never
+gates. If counts are short or any failure prints, it is NOT noise.
+
+MERGED SINCE 08-06-f:
+ - HA-7 (7e4d4e6, 34th): species authoring form, mint-free. Real
+   publisher preview/commit with all refusal paths pinned, byte-equal
+   rehydration, shared modal-trap now backing publish/conflict/CI-8
+   dialogs, browser journey proves persisted grant application.
+
+IN FLIGHT: CI-7 (wt/ci7) - fix round 2 running. Lane carries mints 0038
+(catalog_content_supersessions) + 0039 (cycle/rewrite guard triggers),
+the reference-retarget command (round 1 found the report claimed it
+UNBUILT - recorded; round 2 found retarget spell-loss + DELETE+INSERT
+lineage rewrite - fixes in flight). Next review is round 3 (cap).
+
+QUEUE after CI-7: HA-8 (subclass timeline form), HA-9 (background form),
+then HA-10 -> HA-11 -> HA-12. Parked owner questions unchanged.
+
+WORKTREES: wt/party (owner's - never prune), wt/ci7 (active).
+
+## RESTART POINT 2026-08-06-f (superseded by 08-06-g)
 MAIN 959ac04 (mirror pushed). FLOORS: vitest 246/4,049 (onTaskUpdate
 noise rule stands); PW 126 pool; build 0; migrations 0000-0037 FROZEN
 (next free mint 0038); backup v5. THIRTY-THREE merges. Rulings through
