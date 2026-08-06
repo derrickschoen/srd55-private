@@ -3,8 +3,10 @@ import { fileURLToPath } from 'node:url';
 import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  commitCharacterBackupImport,
   exportCharacterBackup,
   importCharacterBackup,
+  planCharacterBackupImport,
 } from '../../../src/backup/character-backup';
 import { CatalogImporter } from '../../../src/catalog/catalog-importer';
 import { reconcileBundledContentRegistryV1 } from '../../../src/catalog/bundled-content-registry-v1';
@@ -34,6 +36,12 @@ const SUBCLASS = readFileSync(
   'utf8',
 );
 const SUBCLASS_KEY = '2024:longroad.homebrew:college-of-the-long-road';
+const REVISED_MARCHING_SONG =
+  "Your recipient's revised Marching Song rules apply instead of carried prose.";
+const REVISED_SUBCLASS = SUBCLASS.replace(
+  "You always have Roadmender's Cadence prepared, and it does not count against the number of spells you can prepare.",
+  REVISED_MARCHING_SONG,
+);
 
 const connections: Database[] = [];
 afterEach(() => {
@@ -56,6 +64,15 @@ async function database(): Promise<DatabaseContext> {
 
 function importSubclass(db: DatabaseContext): number {
   new CatalogImporter(db).import({ documents: [SUBCLASS] });
+  return Number(
+    db.scalar('SELECT id FROM subclass_definitions WHERE content_key = ?', [
+      SUBCLASS_KEY,
+    ]),
+  );
+}
+
+function importRevisedSubclass(db: DatabaseContext): number {
+  new CatalogImporter(db).import({ documents: [REVISED_SUBCLASS] });
   return Number(
     db.scalar('SELECT id FROM subclass_definitions WHERE content_key = ?', [
       SUBCLASS_KEY,
@@ -96,13 +113,12 @@ function walker(db: DatabaseContext, subclassId: number): number {
  * A BACKUP, AND IN A SHARE LINK.
  *
  * `spell_versions` settles this with a `provenance` column. `subclass_definitions`
- * HAS NO SUCH COLUMN, and adding one would not have helped in two of the three
- * places anyway: `src/domain/contracts/tables.ts` marks the table
- * `backupReference: true`, which means a backup carries it AS A CONTENT KEY and
- * carries no other field of it, and `src/sharing/character-share.ts` carries
- * exactly one `subclassKey` per class. So the CONTENT KEY is the only field that
- * crosses all three boundaries, and the grammar in
- * `src/catalog/catalog-key.ts` is what makes it say where the row came from.
+ * HAS NO SUCH COLUMN. CI-5 character backups now carry both a key reference and
+ * a complete external-content manifest aggregate, while
+ * `src/sharing/character-share.ts` still carries exactly one `subclassKey` per
+ * class. The key is therefore the common provenance fact across all three
+ * boundaries, and `catalog_content_identities.catalog_layer` independently
+ * records imported/external rather than bundled after manifest installation.
  *
  * This file follows one imported subclass across all three, rather than
  * asserting the grammar in isolation — a rule about keys is only worth
@@ -167,14 +183,14 @@ describe('an imported subclass stays distinguishable from a bundled one', () => 
     ]);
   });
 
-  it('travels through a character backup as its key, and resolves by it', async () => {
+  it('travels through a character backup with imported provenance and preserves a revised recipient copy through review', async () => {
     const source = await database();
     const characterId = walker(source, importSubclass(source));
     const document = exportCharacterBackup(source, characterId);
 
-    // The backup names the subclass by content key and by nothing else — no
-    // name, no features, no parent class. That is `backupReference: true`, and
-    // it is why the key has to carry the provenance.
+    // The reference still names the subclass by its portable key, whose owner
+    // keeps imported content distinguishable from bundled content. CI-5 also
+    // carries the complete external aggregate in the authenticated manifest.
     expect(document.references.subclass_definitions).toEqual([
       { id: expect.any(Number), content_key: SUBCLASS_KEY },
     ]);
@@ -183,18 +199,112 @@ describe('an imported subclass stays distinguishable from a bundled one', () => 
         document.references.subclass_definitions[0]?.content_key ?? '',
       ),
     ).toBe('longroad.homebrew');
-    // And no subclass FEATURE travels: `subclass_features` is
-    // `backupReference: false`, so a recipient whose copy of the subclass has
-    // been revised gets THEIR revision rather than a stale row.
-    expect(JSON.stringify(document)).not.toContain('Marching Song');
+    expect(document.content).toEqual([
+      expect.objectContaining({
+        kind: 'subclass',
+        content_key: SUBCLASS_KEY,
+        aggregate: expect.objectContaining({
+          features: expect.arrayContaining([
+            expect.objectContaining({ name: 'Marching Song' }),
+          ]),
+        }),
+      }),
+    ]);
 
-    // A recipient who has imported the same document resolves it.
+    // A recipient with a divergent, registry-current revision is not silently
+    // overwritten by the carried aggregate. The direct seam refuses the
+    // review-required collision; an explicit Match keeps the recipient's row
+    // and resolves the imported character to that row.
     const recipient = await database();
-    importSubclass(recipient);
-    const imported = importCharacterBackup(recipient, document);
+    const recipientSubclassId = importRevisedSubclass(recipient);
+    expect(() => importCharacterBackup(recipient, document)).toThrow(
+      'requires adoption review',
+    );
+    expect(recipient.scalar<number>('SELECT count(*) FROM characters')).toBe(0);
+
+    const plan = planCharacterBackupImport(recipient, document);
+    expect(plan.reviews).toEqual([
+      expect.objectContaining({
+        kind: 'subclass',
+        targetContentKey: SUBCLASS_KEY,
+        matchClass: 'key-collision',
+        defaultChoice: 'match',
+      }),
+    ]);
+    const committed = commitCharacterBackupImport(
+      recipient,
+      document,
+      plan.token,
+      Object.fromEntries(plan.reviews.map((review) => [
+        review.id,
+        { decision: 'match' as const },
+      ])),
+    );
+    expect(committed.kind).toBe('committed');
+    if (committed.kind !== 'committed') throw new Error('Expected commit.');
     expect(
-      recipient.scalar(
-        `SELECT subclass.content_key AS key
+      recipient.oneRaw(
+        `SELECT subclass.id, subclass.content_key AS key,
+                feature.description
+         FROM character_class_levels AS level
+         JOIN subclass_definitions AS subclass
+           ON subclass.id = level.subclass_definition_id
+         JOIN subclass_features AS feature
+           ON feature.subclass_definition_id = subclass.id
+          AND feature.name = 'Marching Song'
+         WHERE level.character_id = ?`,
+        [committed.result.characterId],
+      ),
+    ).toEqual({
+      id: recipientSubclassId,
+      key: SUBCLASS_KEY,
+      description: REVISED_MARCHING_SONG,
+    });
+  });
+
+  it('auto-adopts a fingerprint-verified manifest subclass into a bare recipient before resolving the character', async () => {
+    const source = await database();
+    const document = exportCharacterBackup(
+      source,
+      walker(source, importSubclass(source)),
+    );
+
+    // A missing exact asserted key is the CI-4a create path: it needs no match
+    // review, but still registers external provenance before installing the
+    // aggregate and resolving the character's reference.
+    const bare = await database();
+    const plan = planCharacterBackupImport(bare, document);
+    expect(plan.reviews).toEqual([]);
+    expect(plan.outcomes).toEqual([
+      expect.objectContaining({
+        id: `portable:subclass:${SUBCLASS_KEY}`,
+        kind: 'create',
+        contentKey: SUBCLASS_KEY,
+      }),
+    ]);
+    expect(plan.preview.new_by_kind.subclass).toBe(1);
+    const imported = importCharacterBackup(bare, document);
+    expect(
+      bare.oneRaw(
+        `SELECT identity.key_kind, identity.catalog_layer,
+                subclass.id, subclass.content_key
+         FROM catalog_content_identities AS identity
+         JOIN subclass_definitions AS subclass
+           ON subclass.content_key = identity.content_key
+         WHERE identity.content_kind = 'subclass'
+           AND identity.content_key = ?`,
+        [SUBCLASS_KEY],
+      ),
+    ).toEqual({
+      key_kind: 'asserted',
+      catalog_layer: 'external',
+      id: expect.any(Number),
+      content_key: SUBCLASS_KEY,
+    });
+    expect(importedContentKeyOwner(SUBCLASS_KEY)).toBe('longroad.homebrew');
+    expect(
+      bare.scalar(
+        `SELECT subclass.content_key
          FROM character_class_levels AS level
          JOIN subclass_definitions AS subclass
            ON subclass.id = level.subclass_definition_id
@@ -202,19 +312,6 @@ describe('an imported subclass stays distinguishable from a bundled one', () => 
         [imported.characterId],
       ),
     ).toBe(SUBCLASS_KEY);
-  });
-
-  it('refuses a backup whose subclass the recipient has not imported', async () => {
-    const source = await database();
-    const document = exportCharacterBackup(
-      source,
-      walker(source, importSubclass(source)),
-    );
-
-    // The bundled catalog alone is not enough, and the failure names the key
-    // rather than resolving to some other subclass that happened to be there.
-    const bare = await database();
-    expect(() => importCharacterBackup(bare, document)).toThrow(SUBCLASS_KEY);
   });
 
   it('travels through a share link as subclassKey, and is missed by key', async () => {
