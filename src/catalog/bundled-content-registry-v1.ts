@@ -82,6 +82,22 @@ const KIND_ORDER: Readonly<Record<ContentKind, number>> = Object.freeze({
   background: 8,
 });
 
+const RECONCILIATION_KIND_ORDER: Readonly<Record<ContentKind, number>> =
+  Object.freeze({
+    // Spell reconciliation is the stored-projection half of the spell seed
+    // pass. It runs first so its after-kind hook can complete the seeder's
+    // source comparison and hard-failure gate before general reconciliation.
+    spell: 0,
+    weapon: 1,
+    armor: 2,
+    item: 3,
+    class: 4,
+    feat: 5,
+    subclass: 6,
+    species: 7,
+    background: 8,
+  });
+
 let staticManifest: readonly BundledManifestEntryV1[] | undefined;
 
 class BundledRegistryEntryRefusal extends Error {}
@@ -259,7 +275,8 @@ function allBundledCandidates(
     entries.set(`${entry.kind}\u0000${entry.contentKey}`, entry);
   }
   return Object.freeze([...entries.values()].sort((left, right) =>
-    KIND_ORDER[left.kind] - KIND_ORDER[right.kind] ||
+    RECONCILIATION_KIND_ORDER[left.kind] -
+      RECONCILIATION_KIND_ORDER[right.kind] ||
     left.contentKey.localeCompare(right.contentKey),
   ));
 }

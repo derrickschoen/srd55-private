@@ -79,12 +79,13 @@ export const applicationSeed: DatabaseSeed = (db) => {
   // boot the exact-cardinality guard writes nothing; present rows, including
   // drifted rows, remain untouched for reconciliation to observe.
   installMissingBundledSpellContent(db);
-  reconcileLegacyLevelFeatChoices(db);
   // D84 runs only after every definition/template half and dependency catalog
   // is present, so all nine stored projectors observe the same graph runtime
-  // consumers do. The spell seeder consumes the spell projections produced by
-  // THIS pass before later kinds project their dependency graph. It may skip
-  // only a duplicate seeder projection, never general reconciliation.
+  // consumers do. Spell is the first reconciled kind: its projection is the
+  // stored half of the existing seed pass, and the hook completes that pass in
+  // its pinned order before general reconciliation continues to later kinds.
+  // A subclass-reference failure therefore skips both the legacy repair and
+  // every later registry kind while retaining one stored spell projection.
   let spells: BundledSpellSeedResult | undefined;
   const registryPass = reconcileBundledContentRegistryWithStoredProjectionsV1(
     db,
@@ -92,6 +93,8 @@ export const applicationSeed: DatabaseSeed = (db) => {
       afterKind: (kind, storedProjections) => {
         if (kind === 'spell') {
           spells = ensureBundledSpellContent(db, storedProjections);
+          assertBundledSrdSubclassSpellReferences(db);
+          reconcileLegacyLevelFeatChoices(db);
         }
       },
     },
@@ -100,7 +103,6 @@ export const applicationSeed: DatabaseSeed = (db) => {
     throw new TypeError('Bundled spell reconciliation did not run.');
   }
   const registry = registryPass.summary;
-  assertBundledSrdSubclassSpellReferences(db);
   if (
     spells.updated > 0 || spells.refused > 0 ||
     registry.orphaned > 0 || registry.refused > 0

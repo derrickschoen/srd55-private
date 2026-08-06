@@ -906,20 +906,27 @@ export function installMissingBundledSpellContent(
   }
   const source = bundledSpellSource();
   const timestamp = new Date().toISOString();
-  for (const spell of source.spells) {
-    if (db.oneRaw(
-      'SELECT 1 FROM spell_versions WHERE content_key = ?',
-      [spell.content_key],
-    ) !== null) {
-      continue;
+  // One seed pass is one durable transaction. OPFS commits are materially
+  // expensive, and committing once per missing spell made a real browser boot
+  // pay that cost hundreds of times. This also restores the seed pass's atomic
+  // failure semantics: either every absent bundled root is installed for the
+  // projector, or none is.
+  db.transaction(() => {
+    for (const spell of source.spells) {
+      if (db.oneRaw(
+        'SELECT 1 FROM spell_versions WHERE content_key = ?',
+        [spell.content_key],
+      ) !== null) {
+        continue;
+      }
+      writeBundledSpell(
+        db,
+        spell,
+        source.membershipsByName.get(spell.name) ?? Object.freeze([]),
+        timestamp,
+      );
     }
-    db.transaction(() => writeBundledSpell(
-      db,
-      spell,
-      source.membershipsByName.get(spell.name) ?? Object.freeze([]),
-      timestamp,
-    ));
-  }
+  });
 }
 
 /**
