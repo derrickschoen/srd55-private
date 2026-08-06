@@ -739,6 +739,7 @@ function planToken(input: {
   readonly inputHash: string;
   readonly graphHash: string;
   readonly targetHash: string;
+  readonly operationIdentity: string | null;
   readonly spellActivityChanges: readonly ContentImportSpellActivityChange[];
   readonly choices: readonly { readonly id: string; readonly cloneName: string | null }[];
   readonly outcomes: readonly ContentImportEntryOutcome[];
@@ -753,6 +754,7 @@ function evaluate(
   choices: ContentImportChoices,
   phase: 'plan' | 'commit' = 'plan',
   spellActivityChanges: readonly ContentImportSpellActivityChange[] = Object.freeze([]),
+  operationIdentity: string | null = null,
 ): Evaluation {
   const beforeGraphHash = registryGraphHash(db);
   const hashedInput = inputHash(nodes);
@@ -777,6 +779,7 @@ function evaluate(
         inputHash: hashedInput,
         graphHash: beforeGraphHash,
         targetHash: sha256(canonicalJson([])),
+        operationIdentity,
         spellActivityChanges,
         choices: canonicalChoices(nodes, choices),
         outcomes,
@@ -1150,6 +1153,7 @@ function evaluate(
       inputHash: hashedInput,
       graphHash: beforeGraphHash,
       targetHash: liveTargetHash,
+      operationIdentity,
       spellActivityChanges,
       choices: canonicalChoices(nodes, choices),
       outcomes,
@@ -1170,6 +1174,7 @@ export function planContentImport(
   nodes: readonly ContentImportNode[],
   choices: ContentImportChoices = Object.freeze({}),
   spellActivityChanges: readonly ContentImportSpellActivityChange[] = Object.freeze([]),
+  operationIdentity: string | null = null,
 ): ContentImportPlan {
   try {
     db.transaction(() => {
@@ -1179,6 +1184,7 @@ export function planContentImport(
         choices,
         'plan',
         spellActivityChanges,
+        operationIdentity,
       ));
     });
   } catch (error) {
@@ -1210,17 +1216,21 @@ export function commitContentImport(
     readonly token: ContentImportPlanToken;
     readonly choices?: ContentImportChoices;
     readonly spellActivityChanges?: readonly ContentImportSpellActivityChange[];
+    /** Digest of enclosing writes that must remain identical through commit. */
+    readonly operationIdentity?: string;
     /** Enclosing character/document writes run here and share the transaction. */
     readonly afterInstall?: (db: DatabaseContext) => void;
   },
 ): ContentImportCommitResult {
   const choices = input.choices ?? Object.freeze({});
   const spellActivityChanges = input.spellActivityChanges ?? Object.freeze([]);
+  const operationIdentity = input.operationIdentity ?? null;
   const freshPlan = planContentImport(
     db,
     input.nodes,
     choices,
     spellActivityChanges,
+    operationIdentity,
   );
   if (freshPlan.token !== input.token) {
     return Object.freeze({ kind: 'stale-plan', freshPlan });
@@ -1241,6 +1251,7 @@ export function commitContentImport(
         choices,
         'commit',
         spellActivityChanges,
+        operationIdentity,
       );
       if (evaluation.plan.token !== input.token) {
         throw new PlanRollback(evaluation);

@@ -401,6 +401,14 @@ describe('portable character backup user-authored spells', () => {
         'spell',
         contentKey as ContentKey,
       );
+      expect(document.content[0]?.spell_identity).toEqual({
+        canonical_name: `${displayName} Canonical`,
+        normalized_name: displayName.toLowerCase(),
+        aliases: [{
+          alias: `${displayName} Alias`,
+          normalized_alias: `${displayName.toLowerCase()} alias`,
+        }],
+      });
 
       const target = await database();
       const imported = importCharacterBackup(target, document);
@@ -409,6 +417,31 @@ describe('portable character backup user-authored spells', () => {
         'spell',
         contentKey as ContentKey,
       )).toEqual(sourceProjection);
+      expect(target.oneRaw(
+        `SELECT identity.canonical_name, identity.normalized_name
+         FROM spell_identities AS identity
+         JOIN spell_versions AS version
+           ON version.spell_identity_id = identity.id
+         WHERE version.content_key = ?`,
+        [contentKey],
+      )).toEqual({
+        canonical_name: `${displayName} Canonical`,
+        normalized_name: displayName.toLowerCase(),
+      });
+      expect(target.allRaw(
+        `SELECT alias.alias, alias.normalized_alias
+         FROM spell_identity_aliases AS alias
+         JOIN spell_identities AS identity
+           ON identity.id = alias.spell_identity_id
+         JOIN spell_versions AS version
+           ON version.spell_identity_id = identity.id
+         WHERE version.content_key = ?
+         ORDER BY alias.normalized_alias`,
+        [contentKey],
+      )).toEqual([{
+        alias: `${displayName} Alias`,
+        normalized_alias: `${displayName.toLowerCase()} alias`,
+      }]);
       expect(
         target.oneRaw(
           `SELECT name, notes, created_at, updated_at

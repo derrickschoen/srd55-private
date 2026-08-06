@@ -9,6 +9,8 @@ import {
 } from '../character/character-state';
 import type { DatabaseContext } from '../db/database';
 import type { SqlRow } from '../db/codecs';
+import { canonicalJson } from '../commands/canonical-json';
+import { sha256 } from '../crypto/sha256';
 import {
   commitContentImport,
   planContentImport,
@@ -3135,11 +3137,72 @@ export function planCharacterBackupImport(
   choices: ContentImportChoices = Object.freeze({}),
 ): PortableImportPlan {
   const validated = validateDocument(input);
-  return portableImportPlan(planContentImport(
+  const nodes = portableContentImportNodes(db, validated.document.content);
+  const plan = planContentImport(
     db,
-    portableContentImportNodes(db, validated.document.content),
+    nodes,
     choices,
-  ));
+    Object.freeze([]),
+    characterImportOperationIdentity(validated),
+  );
+  assertPlannedCharacterReferences(db, validated, nodes, plan);
+  return portableImportPlan(plan);
+}
+
+function characterImportOperationIdentity(validated: ValidatedDocument): string {
+  return sha256(canonicalJson({
+    document: validated.document,
+    legacySpellDefinitions: validated.legacySpellDefinitions,
+  }));
+}
+
+function assertPlannedCharacterReferences(
+  db: DatabaseContext,
+  validated: ValidatedDocument,
+  nodes: readonly ContentImportNode[],
+  plan: import('../catalog/content-adoption').ContentImportPlan,
+): void {
+  const portableTargets = new Map<string, string>();
+  const refusedPortable = new Set<string>();
+  for (const [index, node] of nodes.entries()) {
+    const entry = validated.document.content[index];
+    const outcome = plan.outcomes.find((candidate) => candidate.id === node.id);
+    if (entry === undefined || outcome === undefined) continue;
+    if (outcome.kind === 'refused') {
+      refusedPortable.add(`${entry.kind}\u0000${entry.content_key}`);
+    } else {
+      portableTargets.set(
+        `${entry.kind}\u0000${entry.content_key}`,
+        outcome.contentKey,
+      );
+    }
+  }
+  const legacySpellKeys = new Set(
+    validated.legacySpellDefinitions.spell_versions.map((row) =>
+      String(row.content_key)),
+  );
+  for (const referenceKind of referenceKinds) {
+    const contentKind = contentKindForReference[referenceKind];
+    for (const contentKey of validated.referenceMaps[referenceKind].values()) {
+      const marker = `${contentKind}\u0000${contentKey}`;
+      const targetKey = portableTargets.get(marker);
+      if (targetKey !== undefined) continue;
+      if (refusedPortable.has(marker)) continue;
+      if (referenceKind === 'spell_versions' && legacySpellKeys.has(contentKey)) {
+        continue;
+      }
+      const available = db.scalar<number>(
+        `SELECT 1 FROM "${referenceKind}"
+         WHERE content_key = ?${referenceKind === 'spell_versions' ? ' AND is_active = 1' : ''}`,
+        [contentKey],
+      ) === 1;
+      if (!available) {
+        throw new BackupValidationError(
+          `Character backup requires unavailable active ${referenceKind} content_key "${contentKey}".`,
+        );
+      }
+    }
+  }
 }
 
 /**
@@ -3156,11 +3219,13 @@ export function commitCharacterBackupImport(
 ): CharacterImportCommitResult {
   const validated = validateDocument(input);
   const nodes = portableContentImportNodes(db, validated.document.content);
+  const operationIdentity = characterImportOperationIdentity(validated);
   let imported: CharacterImportResult | null = null;
   const committed = commitContentImport(db, {
     nodes,
     token,
     choices,
+    operationIdentity,
     afterInstall: (transaction) => {
       imported = importCharacterBackup(transaction, input);
     },

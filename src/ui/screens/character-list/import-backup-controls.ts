@@ -7,7 +7,6 @@ import type { CatalogClient } from '../../../catalog/client';
 import { createCatalogClient } from '../../../catalog/client';
 import type {
   CharacterBackupDocument,
-  CharacterImportResult,
 } from '../../../backup/character-backup';
 import type { BackupClient } from '../../../backup/client';
 import { createBackupClient } from '../../../backup/client';
@@ -44,8 +43,9 @@ export interface ImportBackupServices {
     | 'exportDatabase'
     | 'importDatabase'
     | 'exportCharacter'
-    | 'importCharacter'
-  > & Partial<Pick<BackupClient, 'planCharacterImport' | 'commitCharacterImport'>>;
+    | 'planCharacterImport'
+    | 'commitCharacterImport'
+  >;
   readonly confirm: (message: string) => boolean;
   readonly save: (file: SavedFile) => void;
   readonly now: () => string;
@@ -166,18 +166,10 @@ export class ImportBackupController {
     });
   }
 
-  async importCharacter(file: ReadableFile): Promise<CharacterImportResult> {
-    const document = await this.readCharacterDocument(file);
-    return this.services.backup.importCharacter(document);
-  }
-
   async prepareCharacterImport(file: ReadableFile): Promise<{
     readonly document: CharacterBackupDocument;
     readonly plan: ContentImportPlan;
   }> {
-    if (this.services.backup.planCharacterImport === undefined) {
-      throw new TypeError('Character adoption services are unavailable.');
-    }
     const document = await this.readCharacterDocument(file);
     return {
       document,
@@ -443,15 +435,6 @@ export function createImportBackupControls(
         if (file === undefined) {
           throw new TypeError('Choose a character JSON backup.');
         }
-        if (
-          services.backup.planCharacterImport === undefined ||
-          services.backup.commitCharacterImport === undefined
-        ) {
-          const imported = await controller.importCharacter(file);
-          await options.onPersistedChange();
-          characterInput.value = '';
-          return `Character imported as #${imported.characterId}.`;
-        }
         const prepared = await controller.prepareCharacterImport(file);
         if (prepared.plan.reviews.length === 0) {
           const committed = await services.backup.commitCharacterImport(
@@ -469,18 +452,18 @@ export function createImportBackupControls(
         adoptionCleanup?.();
         const rendered = createContentAdoptionDialog({
           plan: prepared.plan,
-          replan: (choices) => services.backup.planCharacterImport!(
+          replan: (choices) => services.backup.planCharacterImport(
             prepared.document,
             choices,
           ),
-          commit: (plan, choices) => services.backup.commitCharacterImport!(
+          commit: (plan, choices) => services.backup.commitCharacterImport(
             prepared.document,
             plan.token,
             choices,
           ),
           onCommitted: async (result) => {
             const committed = result as Extract<
-              Awaited<ReturnType<NonNullable<BackupClient['commitCharacterImport']>>>,
+              Awaited<ReturnType<BackupClient['commitCharacterImport']>>,
               { readonly kind: 'committed' }
             >;
             await options.onPersistedChange();

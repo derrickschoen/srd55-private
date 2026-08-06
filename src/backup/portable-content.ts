@@ -17,6 +17,7 @@ import {
 import { projectContentGraphInDependencyOrder } from '../catalog/content-registry';
 import {
   assertedExternalContentKey,
+  assertedExternalContentKeyFromDeclared,
   isAssertedExternalContentKey,
 } from '../catalog/catalog-key';
 import {
@@ -40,7 +41,6 @@ import {
   projectItemContentV1,
   projectWeaponContentV1,
 } from '../catalog/equipment-content-projector-v1';
-import { normalizeCatalogName } from '../catalog/catalog-normalize';
 import { parseSourceCatalogRecord } from '../catalog/source-catalog-records';
 import {
   projectClassContentV1,
@@ -82,6 +82,16 @@ export type PortableContentAggregateValue =
   | EquipmentContentAggregate
   | SpellContentAggregateV1;
 
+/** Spell lookup metadata is portable, but deliberately not fingerprinted. */
+export interface PortableSpellIdentityMetadata {
+  readonly canonical_name: string;
+  readonly normalized_name: string;
+  readonly aliases: readonly {
+    readonly alias: string;
+    readonly normalized_alias: string;
+  }[];
+}
+
 export interface PortableContentAggregate {
   readonly kind: ContentKind;
   readonly content_key: string;
@@ -89,6 +99,7 @@ export interface PortableContentAggregate {
   readonly fingerprint_scheme: ContentFingerprintScheme;
   readonly fingerprint_digest: ContentFingerprintDigest;
   readonly aggregate: PortableContentAggregateValue;
+  readonly spell_identity?: PortableSpellIdentityMetadata;
 }
 
 export interface LibraryExportDocument {
@@ -368,6 +379,7 @@ interface LocalPortableEntry {
   readonly localContentKey: ContentKey;
   readonly portableContentKey: ContentKey;
   readonly aggregate: PortableContentAggregateValue;
+  readonly spellIdentity?: PortableSpellIdentityMetadata;
   readonly dependencies: readonly {
     readonly reference: {
       readonly kind: ContentKind;
@@ -471,6 +483,9 @@ function localPortableEntry(
     throw new BackupValidationError(`Stored ${kind} '${contentKey}' does not match its current fingerprint.`);
   }
   const aggregate = projected.aggregate as PortableContentAggregateValue;
+  const spellIdentity = kind === 'spell'
+    ? portableSpellIdentityMetadata(db, aggregate as SpellContentAggregateV1)
+    : undefined;
   const portableContentKey = portableAssertedKey(
     kind,
     contentKey,
@@ -493,7 +508,36 @@ function localPortableEntry(
     localContentKey: contentKey,
     portableContentKey,
     aggregate,
+    ...(spellIdentity === undefined ? {} : { spellIdentity }),
     dependencies: Object.freeze(dependencies),
+  });
+}
+
+function portableSpellIdentityMetadata(
+  db: DatabaseContext,
+  aggregate: SpellContentAggregateV1,
+): PortableSpellIdentityMetadata {
+  const identity = db.oneRaw(
+    `SELECT id, canonical_name, normalized_name
+     FROM spell_identities WHERE content_key = ?`,
+    [aggregate.spell_identity_key],
+  );
+  if (identity === null) {
+    throw new BackupValidationError(
+      `Portable spell identity '${aggregate.spell_identity_key}' is missing.`,
+    );
+  }
+  return Object.freeze({
+    canonical_name: String(identity.canonical_name),
+    normalized_name: String(identity.normalized_name),
+    aliases: Object.freeze(db.allRaw(
+      `SELECT alias, normalized_alias FROM spell_identity_aliases
+       WHERE spell_identity_id = ? ORDER BY normalized_alias, alias`,
+      [Number(identity.id)],
+    ).map((row) => Object.freeze({
+      alias: String(row.alias),
+      normalized_alias: String(row.normalized_alias),
+    }))),
   });
 }
 
@@ -608,6 +652,9 @@ export function exportPortableContentClosure(
           fingerprint_scheme: identity.envelope.scheme,
           fingerprint_digest: identity.digest,
           aggregate,
+          ...(local.spellIdentity === undefined
+            ? {}
+            : { spell_identity: local.spellIdentity }),
         });
       },
     );
@@ -687,14 +734,15 @@ export function exportLibraryDocument(
 
 function validatedEntry(input: unknown, index: number): PortableContentAggregate {
   const value = backupRecord(input, `Portable content[${String(index)}]`);
-  exactKeys(value, [
-    'kind', 'content_key', 'key_kind', 'fingerprint_scheme',
-    'fingerprint_digest', 'aggregate',
-  ], `Portable content[${String(index)}]`);
   if (typeof value.kind !== 'string' || !(contentKinds as readonly string[]).includes(value.kind)) {
     throw new BackupValidationError(`Portable content[${String(index)}].kind is unsupported.`);
   }
   const kind = value.kind as ContentKind;
+  exactKeys(value, [
+    'kind', 'content_key', 'key_kind', 'fingerprint_scheme',
+    'fingerprint_digest', 'aggregate',
+    ...(kind === 'spell' ? ['spell_identity'] : []),
+  ], `Portable content[${String(index)}]`);
   if (typeof value.content_key !== 'string' || value.content_key.length === 0) {
     throw new BackupValidationError(`Portable content[${String(index)}].content_key must be non-empty text.`);
   }
@@ -713,10 +761,31 @@ function validatedEntry(input: unknown, index: number): PortableContentAggregate
   jsonDepth(value.aggregate);
   const aggregate = value.aggregate as PortableContentAggregateValue;
   const projected = projectPortableAggregate(kind, aggregate);
+  let expectedKey: ContentKey;
+  try {
+    expectedKey = assertedExternalContentKeyFromDeclared(
+      kind,
+      projected.edition,
+      projected.name,
+      value.content_key,
+    );
+  } catch {
+    throw new BackupValidationError(
+      `Portable content[${String(index)}].content_key cannot be derived from its aggregate.`,
+    );
+  }
+  if (expectedKey !== value.content_key) {
+    throw new BackupValidationError(
+      `Portable content[${String(index)}].content_key does not match its aggregate kind, edition, and name.`,
+    );
+  }
   const identity = deriveContentIdentityV1({ kind, ...projected });
   if (identity.digest !== value.fingerprint_digest) {
     throw new BackupValidationError(`Portable content[${String(index)}] fingerprint does not match its aggregate.`);
   }
+  const spellIdentity = kind === 'spell'
+    ? validatedSpellIdentity(value.spell_identity, index)
+    : undefined;
   return Object.freeze({
     kind,
     content_key: value.content_key,
@@ -724,6 +793,49 @@ function validatedEntry(input: unknown, index: number): PortableContentAggregate
     fingerprint_scheme: CONTENT_FINGERPRINT_SCHEME_V1,
     fingerprint_digest: value.fingerprint_digest as ContentFingerprintDigest,
     aggregate,
+    ...(spellIdentity === undefined ? {} : { spell_identity: spellIdentity }),
+  });
+}
+
+function validatedSpellIdentity(
+  input: unknown,
+  index: number,
+): PortableSpellIdentityMetadata {
+  const label = `Portable content[${String(index)}].spell_identity`;
+  const value = backupRecord(input, label);
+  exactKeys(value, ['canonical_name', 'normalized_name', 'aliases'], label);
+  if (
+    typeof value.canonical_name !== 'string' ||
+    value.canonical_name.trim() === ''
+  ) {
+    throw new BackupValidationError(`${label}.canonical_name must be non-empty text.`);
+  }
+  if (typeof value.normalized_name !== 'string' || value.normalized_name === '') {
+    throw new BackupValidationError(`${label}.normalized_name must be non-empty text.`);
+  }
+  if (
+    !Array.isArray(value.aliases) ||
+    value.aliases.some((alias, aliasIndex) => {
+      const row = backupRecord(alias, `${label}.aliases[${String(aliasIndex)}]`);
+      exactKeys(row, ['alias', 'normalized_alias'], `${label}.aliases[${String(aliasIndex)}]`);
+      return typeof row.alias !== 'string' || row.alias.trim() === '' ||
+        typeof row.normalized_alias !== 'string' || row.normalized_alias === '';
+    })
+  ) {
+    throw new BackupValidationError(`${label}.aliases must contain non-empty alias fields.`);
+  }
+  const aliases = value.aliases as Array<{
+    readonly alias: string;
+    readonly normalized_alias: string;
+  }>;
+  const normalized = aliases.map((alias) => alias.normalized_alias);
+  if (new Set(normalized).size !== normalized.length) {
+    throw new BackupValidationError(`${label}.aliases must be unique after normalization.`);
+  }
+  return Object.freeze({
+    canonical_name: value.canonical_name,
+    normalized_name: value.normalized_name,
+    aliases: Object.freeze(aliases.map((alias) => Object.freeze({ ...alias }))),
   });
 }
 
@@ -929,19 +1041,57 @@ function memberValue<T>(member: T | { readonly value: T }): T {
 function installSpell(
   db: DatabaseContext,
   aggregate: SpellContentAggregateV1,
+  metadata: PortableSpellIdentityMetadata,
   contentKey: ContentKey,
 ): void {
   if (db.scalar<number>('SELECT 1 FROM spell_versions WHERE content_key = ?', [contentKey]) === 1) return;
   const now = new Date().toISOString();
-  let identityId = db.scalar<number>('SELECT id FROM spell_identities WHERE content_key = ?', [aggregate.spell_identity_key]);
-  if (identityId === null) {
+  const existingIdentity = db.oneRaw(
+    `SELECT id, canonical_name, normalized_name
+     FROM spell_identities WHERE content_key = ?`,
+    [aggregate.spell_identity_key],
+  );
+  let identityId: number;
+  if (existingIdentity === null) {
     identityId = db.exec(
       `INSERT INTO spell_identities (
          content_key, canonical_name, normalized_name, created_at, updated_at
        ) VALUES (?, ?, ?, ?, ?)`,
-      [aggregate.spell_identity_key, aggregate.name,
-        normalizeCatalogName(aggregate.name), now, now],
+      [aggregate.spell_identity_key, metadata.canonical_name,
+        metadata.normalized_name, now, now],
     ).lastInsertId;
+  } else {
+    identityId = Number(existingIdentity.id);
+    if (
+      existingIdentity.canonical_name !== metadata.canonical_name ||
+      existingIdentity.normalized_name !== metadata.normalized_name
+    ) {
+      throw new BackupValidationError(
+        `Portable spell identity '${aggregate.spell_identity_key}' conflicts with local identity metadata.`,
+      );
+    }
+  }
+  for (const alias of metadata.aliases) {
+    const existingAlias = db.oneRaw(
+      `SELECT spell_identity_id, alias FROM spell_identity_aliases
+       WHERE normalized_alias = ?`,
+      [alias.normalized_alias],
+    );
+    if (existingAlias !== null) {
+      if (
+        Number(existingAlias.spell_identity_id) === identityId &&
+        existingAlias.alias === alias.alias
+      ) continue;
+      throw new BackupValidationError(
+        `Portable spell alias '${alias.alias}' conflicts with a local identity.`,
+      );
+    }
+    db.exec(
+      `INSERT INTO spell_identity_aliases (
+         spell_identity_id, alias, normalized_alias, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?)`,
+      [identityId, alias.alias, alias.normalized_alias, now, now],
+    );
   }
   const versionId = db.exec(
     `INSERT INTO spell_versions (
@@ -1015,6 +1165,14 @@ function portableNode(
       );
     case 'subclass':
     case 'spell': {
+      const spellIdentity = entry.kind === 'spell'
+        ? entry.spell_identity
+        : undefined;
+      if (entry.kind === 'spell' && spellIdentity === undefined) {
+        throw new BackupValidationError(
+          `Portable spell '${entry.content_key}' is missing identity metadata.`,
+        );
+      }
       const build = (
           name: string,
           nextKey: ContentKey,
@@ -1038,7 +1196,12 @@ function portableNode(
             if (entry.kind === 'subclass') {
               installSubclass(database, aggregate as SubclassContentAggregate, contentKey);
             } else {
-              installSpell(database, aggregate as SpellContentAggregateV1, contentKey);
+              installSpell(
+                database,
+                aggregate as SpellContentAggregateV1,
+                spellIdentity as PortableSpellIdentityMetadata,
+                contentKey,
+              );
             }
           },
         };

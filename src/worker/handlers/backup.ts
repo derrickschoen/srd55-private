@@ -1,7 +1,6 @@
 import {
   exportCharacterBackup,
   commitCharacterBackupImport,
-  importCharacterBackup,
   planCharacterBackupImport,
 } from '../../backup/character-backup';
 import { isContentImportChoices } from '../../catalog/catalog-schema';
@@ -22,10 +21,6 @@ interface ImportDatabaseParams {
 
 interface ExportCharacterParams {
   characterId: number;
-}
-
-interface ImportCharacterParams {
-  document: unknown;
 }
 
 function isSingleValueParams(
@@ -53,12 +48,6 @@ function isExportCharacterParams(
     Number.isSafeInteger(params.characterId) &&
     Number(params.characterId) >= 1
   );
-}
-
-function isImportCharacterParams(
-  params: unknown,
-): params is ImportCharacterParams {
-  return isSingleValueParams(params, 'document');
 }
 
 function isPlanCharacterParams(params: unknown): params is {
@@ -101,12 +90,6 @@ export const handlers: readonly RpcHandler[] = Object.freeze([
     isExportCharacterParams,
     (context, params) =>
       exportCharacterBackup(context.db, params.characterId),
-  ),
-  defineRpcHandler(
-    'backup.importCharacter',
-    isImportCharacterParams,
-    (context, params) =>
-      importCharacterBackup(context.db, params.document),
   ),
   defineRpcHandler(
     'backup.planCharacterImport',

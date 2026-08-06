@@ -266,6 +266,28 @@ describe('portable content manifests', () => {
     });
   });
 
+  it.each([
+    ['wrong slug', 'expanded:content.species:not-closure-species'],
+    ['wrong kind segment', 'expanded:content.background:closure-species'],
+    ['wrong edition segment', '2024:content.species:closure-species'],
+  ])('refuses a portable asserted key with a %s', async (_label, assertedKey) => {
+    const source = await database();
+    const fixture = seedClosureLibrary(source);
+    const document = structuredClone(exportCharacterBackup(
+      source,
+      seedClosureCharacter(source, fixture),
+      exportedAt,
+    ));
+    const species = document.content.find((entry) => entry.kind === 'species');
+    if (species === undefined) throw new Error('Species fixture is missing.');
+    (species as { content_key: string }).content_key = assertedKey;
+
+    const target = await database();
+    expect(() => importCharacterBackup(target, document)).toThrow(
+      /content_key does not match its aggregate kind, edition, and name/,
+    );
+  });
+
   it('CI5-CROSS-IMPORT-CONVERGENCE imports DB-A export into DB-B twice without duplicate content', async () => {
     const source = await database();
     const fixture = seedClosureLibrary(source);
@@ -517,7 +539,27 @@ describe('portable content manifests', () => {
     });
   });
 
-  it('CI5-ATOMIC rolls back content and character writes after a final reference refusal', async () => {
+  it('binds a character import plan token to the complete character payload', async () => {
+    const source = await database();
+    const fixture = seedClosureLibrary(source);
+    const first = exportCharacterBackup(
+      source,
+      seedClosureCharacter(source, fixture),
+      exportedAt,
+    );
+    const swapped = structuredClone(first);
+    (swapped.character as { name: string }).name = 'Swapped Character';
+
+    const target = await database();
+    const plan = planCharacterBackupImport(target, first);
+    const committed = commitCharacterBackupImport(target, swapped, plan.token);
+
+    expect(committed).toEqual(expect.objectContaining({ kind: 'stale-plan' }));
+    expect(target.scalar<number>('SELECT count(*) FROM characters')).toBe(0);
+    expect(target.scalar<number>('SELECT count(*) FROM catalog_content_identities')).toBe(0);
+  });
+
+  it('CI5-ATOMIC refuses an unavailable character reference during planning without writes', async () => {
     const source = await database();
     const fixture = seedClosureLibrary(source);
     const document = structuredClone(exportCharacterBackup(
@@ -535,25 +577,9 @@ describe('portable content manifests', () => {
     };
 
     const target = await database();
-    const plan = planCharacterBackupImport(target, document);
-    expect(plan.outcomes).toEqual([
-      expect.objectContaining({ kind: 'create', contentKey: fixture.featKey }),
-      expect.objectContaining({ kind: 'create', contentKey: fixture.backgroundKey }),
-      expect.objectContaining({ kind: 'create', contentKey: fixture.speciesKey }),
-    ]);
-    expect(plan.preview.new_by_kind).toMatchObject({
-      feat: 1,
-      species: 1,
-      background: 1,
-    });
-    expect(commitCharacterBackupImport(
-      target,
-      document,
-      plan.token,
-    )).toEqual(expect.objectContaining({
-      kind: 'refused',
-      reason: 'commit_failed',
-    }));
+    expect(() => planCharacterBackupImport(target, document)).toThrow(
+      'Character backup requires unavailable active species_definitions content_key "expanded:content.species:unavailable".',
+    );
     expect(target.scalar<number>('SELECT count(*) FROM catalog_content_identities')).toBe(0);
     expect(target.scalar<number>('SELECT count(*) FROM catalog_content_fingerprints')).toBe(0);
     expect(target.scalar<number>('SELECT count(*) FROM characters')).toBe(0);

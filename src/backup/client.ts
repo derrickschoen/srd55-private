@@ -2,7 +2,6 @@ import type { RpcClient } from '../rpc/client';
 import type {
   CharacterBackupDocument,
   CharacterImportCommitResult,
-  CharacterImportResult,
 } from './character-backup';
 import type { DatabaseBackup } from './database-backup';
 import type {
@@ -15,9 +14,6 @@ export interface BackupClient {
   exportDatabase(): Promise<DatabaseBackup>;
   importDatabase(backup: DatabaseBackup): Promise<{ imported: true }>;
   exportCharacter(characterId: number): Promise<CharacterBackupDocument>;
-  importCharacter(
-    document: CharacterBackupDocument,
-  ): Promise<CharacterImportResult>;
   planCharacterImport(
     document: CharacterBackupDocument,
     choices: ContentImportChoices,
@@ -45,11 +41,6 @@ export function createBackupClient(rpc: RpcClient): BackupClient {
       rpc.call<{ characterId: number }, CharacterBackupDocument>(
         'backup.exportCharacter',
         { characterId },
-      ),
-    importCharacter: (document: CharacterBackupDocument) =>
-      rpc.call<{ document: CharacterBackupDocument }, CharacterImportResult>(
-        'backup.importCharacter',
-        { document },
       ),
     planCharacterImport: (
       document: CharacterBackupDocument,
