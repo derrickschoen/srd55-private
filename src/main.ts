@@ -5,6 +5,10 @@ import {
 } from './rpc/client';
 import type { RpcRequest, RpcResponse } from './rpc/protocol';
 import type { SqlRow } from './db/codecs';
+import {
+  bootDatabaseWorkerWithRetry,
+  databaseBootFailureMessage,
+} from './db/database-worker-boot';
 import type { SystemInfo } from './worker/handlers/system';
 import { Application } from './ui/app';
 import { Router } from './ui/router';
@@ -160,6 +164,11 @@ class DatabaseWorkerTransport implements RpcTransport {
   terminate(): void {
     this.#worker?.terminate();
     this.#worker = undefined;
+  }
+
+  restart(): void {
+    this.terminate();
+    this.activate();
   }
 }
 
@@ -324,19 +333,7 @@ const startDatabaseBoot = (): void => {
   // is never persisted and never changes whether the notice is rendered.
   databaseBootStarted = true;
   const bootStatus = showDatabaseBootStatus('Starting local database…');
-  try {
-    databaseWorkerTransport.activate();
-  } catch (error) {
-    bootStatus.value =
-      error instanceof Error
-        ? `Failed: ${error.message}`
-        : `Failed: ${String(error)}`;
-    bootStatus.dataset.ready = 'false';
-    root.setAttribute('aria-busy', 'false');
-    return;
-  }
-  system
-    .info()
+  void bootDatabaseWorkerWithRetry(databaseWorkerTransport, system.info)
     .then(() => {
       databaseReady = true;
       if (application === undefined) {
@@ -346,10 +343,7 @@ const startDatabaseBoot = (): void => {
       }
     })
     .catch((error: unknown) => {
-      bootStatus.value =
-        error instanceof Error
-          ? `Failed: ${error.message}`
-          : `Failed: ${String(error)}`;
+      bootStatus.value = `Failed: ${databaseBootFailureMessage(error)}`;
       bootStatus.dataset.ready = 'false';
       root.setAttribute('aria-busy', 'false');
     });

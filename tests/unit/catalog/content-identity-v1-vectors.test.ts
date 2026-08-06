@@ -5,6 +5,7 @@ import {
   contentIdentitySequence,
   contentIdentitySet,
   deriveContentIdentityV1,
+  CONTENT_FINGERPRINT_SCHEME_V1,
 } from '../../../src/catalog/content-identity';
 import {
   frozenContentIdentityV1Vectors,
@@ -63,6 +64,12 @@ function deriveFixtureAggregate(
 }
 
 describe('CI-FROZEN-V1 hand-pinned vectors', () => {
+  it('CI-8 content-v1 fingerprint scheme stays frozen', () => {
+    expect(CONTENT_FINGERPRINT_SCHEME_V1).toBe('content-v1');
+    expect(deriveFixtureAggregate(frozenContentIdentityV1Vectors[0]!.aggregate)
+      .envelope.scheme).toBe('content-v1');
+  });
+
   it.each(frozenContentIdentityV1Vectors)(
     'pins $label',
     ({ aggregate, equivalentAggregates, canonicalJson, sha256, derivedKey }) => {

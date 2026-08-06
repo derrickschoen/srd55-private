@@ -8,6 +8,7 @@ import {
   registerContentAlias,
   registerContentFingerprint,
   registerDerivedContentIdentity,
+  registerAssertedContentIdentity,
   rememberContentMatchDecision,
   rememberedContentMatchDecision,
   resolveContentAggregate,
@@ -313,12 +314,15 @@ describe('catalog registry controls', () => {
   it('keeps new registration on the closed derived/asserted/bundled paths', () => {
     registerDerivedContentIdentity(db, HAND_PINNED_FEAT);
     bundled('2024:feat:bundled');
-    db.exec(
-      `INSERT INTO catalog_content_identities (
-         content_key, content_kind, key_kind, catalog_layer, normalized_name
-       ) VALUES ('expanded:asserted-feat', 'feat', 'asserted', 'external',
-                 'asserted feat')`,
-    );
+    registerAssertedContentIdentity(db, {
+      kind: 'feat',
+      edition: 'expanded',
+      name: 'Asserted Feat',
+      payload: { rule: 'asserted path' },
+      assertedKey: assertedExternalContentKey(
+        'feat', 'expanded', 'Asserted Feat',
+      ),
+    });
 
     expect(
       db.allRaw(
