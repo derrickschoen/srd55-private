@@ -24,7 +24,12 @@ post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
 ## RESTART POINT 2026-08-06-i (newest - read first)
-MAIN f341f4b (MIRROR PUSH PENDING - held until quiet post-merge suite).
+MAIN 92204c5 (mirror pushed). GATE DEBT CLEARED: full vitest on main
+248/4,087 complete all-pass, zero errors, run WHILE two codex processes
+loaded the machine - the budget fix holds. 92204c5 is supervisor-
+authored (hang-guard budgets 120s/30s for the two contention-flaky db
+tests, measured arithmetic inline) and still needs its independent codex
+review - bundle into the next read-only dispatch.
 THIRTY-SIX merges. Rulings through D214 (purge removes whole lineage set
 via one guarded 0039 exception; set restore all-or-nothing; HA-11 pins).
 
