@@ -38,6 +38,8 @@ import removeLegacyOpaque from '../../drizzle/0034_remove_legacy_opaque.sql?raw'
 import catalogContentDrafts from '../../drizzle/0035_catalog_content_drafts.sql?raw';
 import catalogContentArchive from '../../drizzle/0036_catalog_content_archive.sql?raw';
 import backgroundDefaultOriginFeatKey from '../../drizzle/0037_background_default_origin_feat_key.sql?raw';
+import catalogContentSupersessions from '../../drizzle/0038_catalog_content_supersessions.sql?raw';
+import catalogContentSupersessionGuards from '../../drizzle/0039_catalog_content_supersession_guards.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -434,6 +436,26 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
       'f98f35c6e38eed6755915863bae874c6df4aa50433743289c2e9bfdd23d3a86d',
     replayPolicy: 'skip_when_result_schema_matches',
   }),
+  // CI-7: an immutable edit records recipient-local version lineage while
+  // leaving both catalog aggregates and every character reference untouched.
+  Object.freeze({
+    id: '0038_catalog_content_supersessions',
+    sql: catalogContentSupersessions,
+    checksum:
+      '1b52fb3e323c95d751bc3597d559c49af63eb17ae41fbda0d5866c510cde429c',
+    resultSchemaChecksum:
+      '98b62b5428ca4cfe04e9f9e9a8c9921e5751250a6a2af66ce9c907d3bfa6bb6d',
+  }),
+  // CI-7: version edges are permanent historical facts. Storage rejects
+  // mutation or deletion of an existing edge and any same-kind cycle.
+  Object.freeze({
+    id: '0039_catalog_content_supersession_guards',
+    sql: catalogContentSupersessionGuards,
+    checksum:
+      'd18e373f4792a7a12259cf9744d8bc9b29502d399626d111a16c6f72a233704d',
+    resultSchemaChecksum:
+      '406099a77335a08cf23f76d7425d7c6cf8c1a19d7e93c8532cb52497000640ca',
+  }),
 ]);
 
 export function databaseSchemaChecksum(signature: string): string {
@@ -510,13 +532,16 @@ export function applyMigrationSuffix(
     transactionOpen = true;
     try {
       for (const migration of pending) {
-        // 0037 alone declares that an explicit replay against its exact result
-        // schema is a no-op. Every other migration keeps the historical
-        // dispatcher behaviour and executes its SQL when included in a suffix.
+        // 0037 alone declares that an explicit replay against its own result,
+        // or against the already-reached target schema of a later chain, is a
+        // no-op. Every other migration retains normal suffix execution.
         if (
           migration.replayPolicy === 'skip_when_result_schema_matches' &&
-          databaseSchemaChecksum(signatureOf(db)) ===
-          migration.resultSchemaChecksum
+          (
+            databaseSchemaChecksum(signatureOf(db)) ===
+              migration.resultSchemaChecksum ||
+            signatureOf(db) === expectedSignature
+          )
         ) {
           continue;
         }

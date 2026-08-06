@@ -1084,6 +1084,32 @@ const catalogContentIdentity =
     });
   };
 
+const catalogContentSupersession =
+  (values: Values): Write =>
+  (db) => {
+    const suffix = uid('catalog-content-supersession');
+    const oldKey = `2024:test.owner:${suffix}-old`;
+    const newKey = `2024:test.owner:${suffix}-new`;
+    for (const [contentKey, normalizedName] of [
+      [oldKey, `${suffix}old`],
+      [newKey, `${suffix}new`],
+    ] as const) {
+      insert(db, 'catalog_content_identities', {
+        content_key: contentKey,
+        content_kind: 'species',
+        key_kind: 'asserted',
+        catalog_layer: 'external',
+        normalized_name: normalizedName,
+      });
+    }
+    insert(db, 'catalog_content_supersessions', {
+      content_kind: 'species',
+      superseded_content_key: oldKey,
+      successor_content_key: newKey,
+      ...values,
+    });
+  };
+
 const catalogDataMigration =
   (values: Values): Write =>
   (db) => {
@@ -1353,6 +1379,42 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     constraint: 'catalog_content_drafts_uuid_check',
     rejects: [['an empty draft UUID', catalogContentDraft({ draft_uuid: '' })]],
     accepts: [['a non-empty durable UUID', catalogContentDraft({})]],
+  },
+  {
+    constraint: 'catalog_content_supersessions_content_kind_check',
+    rejects: [[
+      'an unknown content kind',
+      catalogContentSupersession({ content_kind: 'unknown' }),
+    ]],
+    accepts: [[
+      'a species version edge',
+      catalogContentSupersession({ content_kind: 'species' }),
+    ]],
+  },
+  {
+    constraint: 'catalog_content_supersessions_distinct_keys_check',
+    rejects: [[
+      'a self-supersession',
+      (db) => {
+        const key = `2024:test.owner:${uid('self-supersession')}`;
+        insert(db, 'catalog_content_identities', {
+          content_key: key,
+          content_kind: 'species',
+          key_kind: 'asserted',
+          catalog_layer: 'external',
+          normalized_name: uid('selfsupersession'),
+        });
+        insert(db, 'catalog_content_supersessions', {
+          content_kind: 'species',
+          superseded_content_key: key,
+          successor_content_key: key,
+        });
+      },
+    ]],
+    accepts: [[
+      'two distinct immutable versions',
+      catalogContentSupersession({}),
+    ]],
   },
   {
     constraint: 'catalog_content_drafts_kind_check',

@@ -137,6 +137,12 @@ export const COLUMN_FACTS = {
     target_content_key: { base: 'degraded', notNull: true },
     reviewed_at: { base: 'degraded', notNull: true },
   },
+  catalog_content_supersessions: {
+    content_kind: { base: 'degraded', notNull: true },
+    superseded_content_key: { base: 'degraded', notNull: true },
+    successor_content_key: { base: 'degraded', notNull: true },
+    recorded_at: { base: 'degraded', notNull: true },
+  },
   catalog_data_migrations: {
     id: { base: 'degraded', notNull: true },
     scheme: { base: 'degraded', notNull: true },

@@ -22,8 +22,9 @@ common way to break this repository.** Its first four lines say so, and
 The schema modules under `db/schema/`:
 
 Published content lifecycle state begins at
-`db/schema/catalog-content.ts`: `catalog_content_identities` (`:71`); portable
-manifests deliberately project the aggregate, not that local archive metadata.
+`db/schema/catalog-content.ts`: `catalog_content_identities` and
+`catalog_content_supersessions`; portable manifests deliberately project the
+aggregate, not recipient-local archive or immutable-version-lineage metadata.
 
 | File | Holds |
 |---|---|
@@ -39,7 +40,7 @@ manifests deliberately project the aggregate, not that local archive metadata.
 | `columns.ts` | The column primitives (`varchar`, `sqlText`, `datetime`, `tinyint1`) |
 | `relations.ts` | Drizzle relation blocks |
 | `index.ts` | Re-exports EVERY module above. Not optional — see below |
-| `triggers.sql` | The two hand-authored triggers |
+| `triggers.sql` | Hand-authored storage invariants, including insert/update/delete-guarded immutable acyclic content lineage |
 
 `db/schema/origins.ts`:
 
@@ -89,7 +90,7 @@ artifact, keep the split.
 |---|---|
 | `generated/column-facts.ts` | GENERATED. Per-column facts: does the column exist, is it `notNull`, could drizzle-zod type it |
 | `generated/reference-facts.ts` | GENERATED. Catalog tables a backup resolves references against |
-| `rows.ts` | The Zod contracts. `COLUMN_REFINEMENTS` (`:419`), `NARROWED_REFINEMENTS` (`:502`), `rowContractError` (`:1566`) |
+| `rows.ts` | The Zod contracts. `COLUMN_REFINEMENTS` (`:419`), `NARROWED_REFINEMENTS` (`:502`), `rowContractError` (`:1572`) |
 | `row-rules.ts` | Cross-column rules a per-column contract cannot express |
 | `json-columns.ts` | WHICH text columns hold serialized JSON, and what SHAPE each reader needs |
 | `tables.ts` | The table inventory and scope classification — §3 below |
@@ -149,10 +150,10 @@ Two mechanisms make this stick, and they are worth knowing by name:
    without that column is `Type 'true' is not assignable to type 'false'`. That
    fact previously lived only in a reviewer's head.
 
-Derived from the classification: `SnapshotTable` (`:1162`), `BackupTable` (`:1164`),
-`ShareTable` (`:1165`), and the ordered constants `CHARACTER_STATE_TABLES`
-(`:1368`), `DELETE_ORDER` (`:1453`), `BACKUP_TABLES` (`:1520`), `SHARE_TABLES`
-(`:1613`).
+Derived from the classification: `SnapshotTable` (`:1170`), `BackupTable` (`:1172`),
+`ShareTable` (`:1173`), and the ordered constants `CHARACTER_STATE_TABLES`
+(`:1377`), `DELETE_ORDER` (`:1462`), `BACKUP_TABLES` (`:1529`), `SHARE_TABLES`
+(`:1622`).
 
 **Classification is not the same as working.** That was Q8's bug, and D24 records
 the discipline that replaced it: each arm gets its own test — a column-for-column

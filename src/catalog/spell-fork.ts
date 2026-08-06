@@ -6,8 +6,6 @@ import { normalizeCatalogName } from './catalog-normalize';
 import type { DatabaseContext } from '../db/database';
 import type { ContentKey } from '../domain/ids';
 import {
-  commitContentImport,
-  planContentImport,
   type ContentImportChoices,
   type ContentImportCommitResult,
   type ContentImportNode,
@@ -15,6 +13,11 @@ import {
   type ContentImportPlanToken,
   type ContentImportProjection,
 } from './content-adoption';
+import {
+  commitImmutableCatalogPublication,
+  planImmutableCatalogPublication,
+  type ImmutableCatalogPublication,
+} from './authoring-lifecycle';
 import {
   projectSpellContentAggregateV1,
   projectStoredSpellContentV1,
@@ -134,7 +137,7 @@ function prepareSrdSpellFork(
   db: DatabaseContext,
   params: ForkSpellParams,
 ): {
-  readonly node: ContentImportNode<'spell'>;
+  readonly publication: ImmutableCatalogPublication<'spell'>;
   readonly result: (contentKey: ContentKey) => ForkSpellResult;
 } {
   const source = db.oneRaw(
@@ -273,7 +276,7 @@ function prepareSrdSpellFork(
     reproject: ({ name, assertedKey }) => buildProjection(name, assertedKey),
   };
   return {
-    node,
+    publication: Object.freeze({ node }),
     result: (contentKey) => {
       if (installed !== null) return installed;
       const existing = db.oneRaw(
@@ -297,7 +300,7 @@ export function planSrdSpellFork(
   choices: ContentImportChoices = Object.freeze({}),
 ): ContentImportPlan {
   const prepared = prepareSrdSpellFork(db, params);
-  return planContentImport(db, [prepared.node], choices);
+  return planImmutableCatalogPublication(db, prepared.publication, choices);
 }
 
 export function commitSrdSpellFork(
@@ -307,8 +310,7 @@ export function commitSrdSpellFork(
   choices: ContentImportChoices = Object.freeze({}),
 ): ForkSpellCommitResult {
   const prepared = prepareSrdSpellFork(db, params);
-  const result = commitContentImport(db, {
-    nodes: [prepared.node],
+  const result = commitImmutableCatalogPublication(db, prepared.publication, {
     token,
     choices,
   });
@@ -332,9 +334,11 @@ export function forkSrdSpell(
   params: ForkSpellParams,
 ): ForkSpellImportResult {
   const prepared = prepareSrdSpellFork(db, params);
-  const plan = planContentImport(db, [prepared.node]);
+  const plan = planImmutableCatalogPublication(db, prepared.publication);
   if (plan.reviews.length > 0 || plan.outcomes[0]?.kind === 'refused') return plan;
-  const committed = commitContentImport(db, { nodes: [prepared.node], token: plan.token });
+  const committed = commitImmutableCatalogPublication(db, prepared.publication, {
+    token: plan.token,
+  });
   if (committed.kind !== 'committed') {
     return committed.kind === 'stale-plan' ? committed.freshPlan : plan;
   }

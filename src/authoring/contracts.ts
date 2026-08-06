@@ -527,6 +527,7 @@ interface ReplacementPlanBase<K extends AuthoredContentKind> {
   readonly character_name: string;
   readonly changes: readonly ReplacementChange[];
   readonly required_choices: readonly ReplacementChoiceRequirement[];
+  readonly review: readonly ReplacementReviewItem[];
 }
 
 export interface SpeciesReplacementPlan
@@ -571,12 +572,51 @@ export interface ReplacementChoiceSelection {
   readonly value: string;
 }
 
+export interface ReplacementReviewItem {
+  readonly candidate_content_key: ContentKey;
+  readonly candidate_name: string;
+  readonly reason: PublishReviewReason | 'key-collision';
+  readonly default_decision: 'match';
+}
+
+export interface ReplacementDecision {
+  readonly candidate_content_key: ContentKey;
+  readonly decision: Extract<CatalogContentMatchDecision, 'match'>;
+}
+
+export type ReplacementNotice =
+  | {
+      readonly kind: 'retargeted_selection_invalid';
+      readonly table:
+        | 'spell_selection_slots'
+        | 'wizard_spellbook_entries'
+        | 'character_skill_grants'
+        | 'character_skill_expertise_grants';
+      readonly source_path: readonly string[];
+      readonly rule_key: string;
+      readonly ordinal: number;
+      readonly selected_value: number | Skill;
+      readonly reason:
+        | 'target_source_missing'
+        | 'target_rule_missing'
+        | 'target_rule_changed'
+        | 'selection_ineligible';
+      readonly detail: string | null;
+    }
+  | {
+      readonly kind: 'retargeted_level_feat_invalid';
+      readonly source_path: readonly string[];
+      readonly character_level_feat_choice_id: number;
+      readonly reason: 'target_source_missing';
+    };
+
 export interface ReplacementResult {
   readonly content_kind: AuthoredContentKind;
   readonly character_id: CharacterId;
   readonly character_revision: CharacterRevision;
   readonly old_content_key: ContentKey;
   readonly new_content_key: ContentKey;
+  readonly notices: readonly ReplacementNotice[];
 }
 
 export type AuthoringValidationIssueCode =
@@ -642,6 +682,20 @@ export type AuthoringErrorData =
   | {
       readonly reason: 'replacement_choices_required';
       readonly choices: readonly ReplacementChoiceRequirement[];
+    }
+  | {
+      readonly reason: 'replacement_review_required';
+      readonly candidates: readonly ContentKey[];
+    }
+  | {
+      readonly reason: 'replacement_refused';
+      readonly refusal:
+        | 'ambiguous_target'
+        | 'target_integrity_refused'
+        | 'character_reference_not_found'
+        | 'unsupported_character_choices'
+        | 'wrong_parent_class'
+        | 'commit_failed';
     }
   | {
       readonly reason:

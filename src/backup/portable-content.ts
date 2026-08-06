@@ -1294,6 +1294,7 @@ export function localContentReferenceImportNode(
     readonly kind: ContentKind;
     readonly incomingContentKey: ContentKey;
     readonly localContentKey: ContentKey;
+    readonly allowRememberedDecision?: boolean;
   },
 ): ContentImportNode {
   const stored = projectStoredPortableContentV1(
@@ -1328,6 +1329,9 @@ export function localContentReferenceImportNode(
     projection: ContentImportProjection,
   ): ContentImportProjection => Object.freeze({
     ...projection,
+    ...(input.allowRememberedDecision === undefined
+      ? {}
+      : { allowRememberedDecision: input.allowRememberedDecision }),
     referenceOnly: Object.freeze({
       contentKey: input.incomingContentKey,
     }),

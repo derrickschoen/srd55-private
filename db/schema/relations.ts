@@ -41,6 +41,7 @@ import {
   catalog_content_fingerprints,
   catalog_content_identities,
   catalog_content_match_decisions,
+  catalog_content_supersessions,
 } from './catalog-content';
 import { catalog_content_drafts } from './catalog-authoring';
 import {
@@ -1205,6 +1206,12 @@ export const catalogContentIdentitiesRelations = relations(
     fingerprints: many(catalog_content_fingerprints),
     aliases: many(catalog_content_aliases),
     decisions: many(catalog_content_match_decisions),
+    superseded_versions: many(catalog_content_supersessions, {
+      relationName: 'superseded_content',
+    }),
+    successor_versions: many(catalog_content_supersessions, {
+      relationName: 'successor_content',
+    }),
     drafts_based_on_content: many(catalog_content_drafts),
     classes: many(class_definitions),
     subclasses: many(subclass_definitions),
@@ -1275,6 +1282,34 @@ export const catalogContentMatchDecisionsRelations = relations(
       fields: [
         catalog_content_match_decisions.content_kind,
         catalog_content_match_decisions.target_content_key,
+      ],
+      references: [
+        catalog_content_identities.content_kind,
+        catalog_content_identities.content_key,
+      ],
+    }),
+  }),
+);
+
+export const catalogContentSupersessionsRelations = relations(
+  catalog_content_supersessions,
+  ({ one }) => ({
+    superseded_content_identity: one(catalog_content_identities, {
+      relationName: 'superseded_content',
+      fields: [
+        catalog_content_supersessions.content_kind,
+        catalog_content_supersessions.superseded_content_key,
+      ],
+      references: [
+        catalog_content_identities.content_kind,
+        catalog_content_identities.content_key,
+      ],
+    }),
+    successor_content_identity: one(catalog_content_identities, {
+      relationName: 'successor_content',
+      fields: [
+        catalog_content_supersessions.content_kind,
+        catalog_content_supersessions.successor_content_key,
       ],
       references: [
         catalog_content_identities.content_kind,

@@ -504,6 +504,14 @@ export const TABLE_SCOPES = {
     share: false,
     backupReference: false,
   },
+  catalog_content_supersessions: {
+    role: 'catalog_registry',
+    snapshot: false,
+    backupDirect: false,
+    backup: false,
+    share: false,
+    backupReference: false,
+  },
   catalog_data_migrations: {
     role: 'catalog_registry',
     snapshot: false,
@@ -512,8 +520,8 @@ export const TABLE_SCOPES = {
     share: false,
     backupReference: false,
   },
-  // D139: drafts never enter character backup, share, closure, or a future
-  // library export. A whole-database image still carries every application
+  // D139: drafts never enter character backup, share, closure, or library
+  // export. A whole-database image still carries every application
   // table and is the only portable container allowed to retain these rows.
   catalog_content_drafts: {
     role: 'catalog_draft',
@@ -1292,6 +1300,7 @@ export const APPLICATION_TABLES = order<AnyTableName>()([
   'catalog_content_fingerprints',
   'catalog_content_identities',
   'catalog_content_match_decisions',
+  'catalog_content_supersessions',
   'catalog_data_migrations',
   'class_equipment_items',
   'change_log',

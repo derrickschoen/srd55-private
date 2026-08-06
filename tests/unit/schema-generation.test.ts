@@ -34,9 +34,12 @@ describe('schema generation freshness', () => {
     );
   });
 
-  it('emits both named triggers as the postlude', async () => {
+  it('emits the critical named triggers as the postlude', async () => {
     const sql = await composeSchemaSql();
     for (const trigger of [
+      'catalog_content_supersessions_prevent_cycle_before_insert',
+      'catalog_content_supersessions_refuse_delete_before_delete',
+      'catalog_content_supersessions_refuse_update_before_update',
       'spell_slots_exclusive_assignment_insert',
       'spell_slots_exclusive_assignment_update',
     ]) {

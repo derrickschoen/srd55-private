@@ -5,7 +5,7 @@ import {
   sqlString,
 } from '../db/codecs';
 import type { DatabaseContext } from '../db/database';
-import type { ContentKey } from '../domain/ids';
+import type { CharacterId, ContentKey } from '../domain/ids';
 import type { JsonValue } from '../domain/models';
 import { skills, spellSchool, type Skill } from '../domain/enums';
 import {
@@ -39,6 +39,10 @@ import type {
   PublishDecision,
   PublishPreview,
   PublishResult,
+  ReplacementChoiceSelection,
+  ReplacementDecision,
+  ReplacementPlan,
+  ReplacementResult,
   SpeciesAuthoringDraft,
   StoredHomebrewDraft,
   SubclassAuthoringDraft,
@@ -76,6 +80,12 @@ import {
   SubclassPublishError,
   SubclassSemanticValidationError,
 } from './subclass-publisher';
+import type { ReplacementPlanToken } from './ids';
+import {
+  commitReferenceRetarget,
+  previewReferenceRetarget,
+  ReferenceRetargetError,
+} from './reference-retarget';
 
 interface DraftRow {
   readonly draft_uuid: HomebrewDraftUuid;
@@ -93,6 +103,7 @@ interface PublishedRow {
   readonly content_kind: AuthoredContentKind;
   readonly name: string;
   readonly rules_edition: PublishedHomebrewSummary['rules_edition'];
+  readonly superseded_by: ContentKey | null;
 }
 
 export class AuthoringServiceError extends Error {
@@ -144,6 +155,7 @@ function publishedRow(row: SqlRow): PublishedRow {
     content_kind: authoredKind(sqlString(row, 'content_kind')),
     name: sqlString(row, 'name'),
     rules_edition: edition,
+    superseded_by: sqlNullableString(row, 'superseded_by') as ContentKey | null,
   };
 }
 
@@ -180,6 +192,13 @@ function publishServiceError(error: unknown): never {
     }, { cause: error });
   }
   if (error instanceof SubclassPublishError) {
+    throw new AuthoringServiceError(error.message, error.data, { cause: error });
+  }
+  throw error;
+}
+
+function replacementServiceError(error: unknown): never {
+  if (error instanceof ReferenceRetargetError) {
     throw new AuthoringServiceError(error.message, error.data, { cause: error });
   }
   throw error;
@@ -605,7 +624,8 @@ export class CatalogAuthoringService {
                 WHEN 'species' THEN species.rules_edition
                 WHEN 'background' THEN background.rules_edition
                 WHEN 'subclass' THEN subclass.rules_edition
-              END AS rules_edition
+              END AS rules_edition,
+              supersession.successor_content_key AS superseded_by
        FROM catalog_content_identities AS identity
        LEFT JOIN species_definitions AS species
          ON identity.content_kind = 'species' AND species.content_key = identity.content_key
@@ -613,6 +633,9 @@ export class CatalogAuthoringService {
          ON identity.content_kind = 'background' AND background.content_key = identity.content_key
        LEFT JOIN subclass_definitions AS subclass
          ON identity.content_kind = 'subclass' AND subclass.content_key = identity.content_key
+       LEFT JOIN catalog_content_supersessions AS supersession
+         ON supersession.content_kind = identity.content_kind
+        AND supersession.superseded_content_key = identity.content_key
        WHERE identity.catalog_layer = 'external'
          AND identity.content_kind IN ('species', 'background', 'subclass')
          AND (
@@ -623,7 +646,7 @@ export class CatalogAuthoringService {
        ORDER BY identity.content_kind, name, identity.content_key`,
       undefined,
       publishedRow,
-    ).map((row) => ({ ...row, catalog_layer: 'external' as const, superseded_by: null }));
+    ).map((row) => ({ ...row, catalog_layer: 'external' as const }));
 
     const rows = this.db.all(
       `SELECT draft_uuid, content_kind, document_version, base_content_key,
@@ -891,5 +914,29 @@ export class CatalogAuthoringService {
       content_key: contentKey,
       usages: Object.freeze(usages),
     });
+  }
+
+  previewReplacement(input: {
+    readonly old_content_key: ContentKey;
+    readonly new_content_key: ContentKey;
+    readonly character_id: CharacterId;
+  }): ReplacementPlan {
+    try {
+      return previewReferenceRetarget(this.db, input);
+    } catch (error) {
+      return replacementServiceError(error);
+    }
+  }
+
+  commitReplacement(input: {
+    readonly token: ReplacementPlanToken;
+    readonly decisions: readonly ReplacementDecision[];
+    readonly choices: readonly ReplacementChoiceSelection[];
+  }): ReplacementResult {
+    try {
+      return commitReferenceRetarget(this.db, input);
+    } catch (error) {
+      return replacementServiceError(error);
+    }
   }
 }

@@ -312,6 +312,19 @@ CREATE TABLE `catalog_content_match_decisions` (
 	CONSTRAINT "catalog_content_match_decisions_decision_check" CHECK("catalog_content_match_decisions"."decision" IN ('match', 'clone'))
 );
 
+CREATE TABLE `catalog_content_supersessions` (
+	`content_kind` VARCHAR NOT NULL,
+	`superseded_content_key` VARCHAR NOT NULL,
+	`successor_content_key` VARCHAR NOT NULL,
+	`recorded_at` DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	PRIMARY KEY(`content_kind`, `superseded_content_key`),
+	FOREIGN KEY (`content_kind`,`superseded_content_key`) REFERENCES `catalog_content_identities`(`content_kind`,`content_key`) ON UPDATE no action ON DELETE restrict,
+	FOREIGN KEY (`content_kind`,`successor_content_key`) REFERENCES `catalog_content_identities`(`content_kind`,`content_key`) ON UPDATE no action ON DELETE restrict,
+	CONSTRAINT "catalog_content_supersessions_content_kind_check" CHECK(`content_kind` IN ('class', 'subclass', 'feat', 'species', 'background', 'spell', 'weapon', 'armor', 'item')),
+	CONSTRAINT "catalog_content_supersessions_distinct_keys_check" CHECK("catalog_content_supersessions"."superseded_content_key" <> "catalog_content_supersessions"."successor_content_key")
+);
+
+CREATE INDEX `catalog_content_supersessions_successor_index` ON `catalog_content_supersessions` (`content_kind`,`successor_content_key`);
 CREATE TABLE `catalog_data_migrations` (
 	`id` VARCHAR PRIMARY KEY NOT NULL,
 	`scheme` VARCHAR NOT NULL,
@@ -1862,15 +1875,58 @@ CREATE UNIQUE INDEX `wizard_spellbook_entries_source_rule_ordinal_unique` ON `wi
 CREATE UNIQUE INDEX `wizard_spellbook_entries_character_id_spell_version_id_unique` ON `wizard_spellbook_entries` (`character_id`,`spell_version_id`) WHERE spell_version_id IS NOT NULL AND state = 'active';
 CREATE INDEX `wizard_spellbook_entries_character_id_state_index` ON `wizard_spellbook_entries` (`character_id`,`state`);
 
--- Browser-product invariants that Drizzle cannot represent.
+-- Browser-product invariants that Drizzle cannot represent: immutable,
+-- acyclic version lineage plus cross-row character/catalog guards.
 --
--- These are NOT Laravel parity: they enforce, at the storage layer, that a
+-- These are NOT Laravel parity. The spell triggers enforce, at storage, that a
 -- spell slot never holds both a fixed grant and a user selection. The named
 -- CHECK constraint on spell_selection_slots covers INSERT/UPDATE of NULLs;
 -- these triggers produce the specific error message the product surfaces.
 --
 -- This file is appended verbatim as the postlude of the generated schema by
 -- scripts/compose-schema.ts.
+
+-- CI-7 version lineage is historical evidence. An old key gets exactly one
+-- successor, and no later writer may rewrite that edge.
+CREATE TRIGGER catalog_content_supersessions_refuse_update_before_update
+BEFORE UPDATE ON catalog_content_supersessions
+BEGIN
+  SELECT RAISE(ABORT, 'catalog content supersession lineage is immutable');
+END;
+
+-- Both identity foreign keys are ON DELETE RESTRICT, not CASCADE: installed
+-- identities that participate in history cannot be uninstalled. A direct
+-- edge delete therefore has no legitimate cascade exception and must always
+-- refuse, closing DELETE+INSERT as a successor-rewrite path.
+CREATE TRIGGER catalog_content_supersessions_refuse_delete_before_delete
+BEFORE DELETE ON catalog_content_supersessions
+BEGIN
+  SELECT RAISE(ABORT, 'catalog content supersession lineage is immutable');
+END;
+
+-- Walk the same-kind successor chain before accepting a new edge. UNION (not
+-- UNION ALL) also terminates safely if this guard is installed over damaged
+-- legacy data; the candidate edge is refused when its successor reaches its
+-- own superseded key.
+CREATE TRIGGER catalog_content_supersessions_prevent_cycle_before_insert
+BEFORE INSERT ON catalog_content_supersessions
+WHEN NEW.superseded_content_key <> NEW.successor_content_key
+ AND EXISTS (
+  WITH RECURSIVE successor_chain(content_key) AS (
+    SELECT NEW.successor_content_key
+    UNION
+    SELECT lineage.successor_content_key
+    FROM catalog_content_supersessions AS lineage
+    INNER JOIN successor_chain AS chain
+      ON lineage.content_kind = NEW.content_kind
+     AND lineage.superseded_content_key = chain.content_key
+  )
+  SELECT 1 FROM successor_chain
+  WHERE content_key = NEW.superseded_content_key
+)
+BEGIN
+  SELECT RAISE(ABORT, 'catalog content supersession would create a cycle');
+END;
 
 CREATE TRIGGER spell_slots_exclusive_assignment_insert
     BEFORE INSERT ON spell_selection_slots

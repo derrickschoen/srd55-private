@@ -113,6 +113,15 @@ function catalogContentIdentityRow(): Record<string, unknown> {
   };
 }
 
+function catalogContentSupersessionRow(): Record<string, unknown> {
+  return {
+    content_kind: 'species',
+    superseded_content_key: '2024:test.owner:armadillo-v1',
+    successor_content_key: '2024:test.owner:armadillo-v2',
+    recorded_at: '2026-08-06T10:01:00.000Z',
+  };
+}
+
 function slotRow(): Record<string, unknown> {
   return {
     id: 12,
@@ -282,6 +291,13 @@ describe('per-table row contracts', () => {
         'Catalog identity',
       ),
     ).toBeNull();
+    expect(
+      rowContractError(
+        'catalog_content_supersessions',
+        catalogContentSupersessionRow(),
+        'Catalog supersession',
+      ),
+    ).toBeNull();
   });
 
   it('holds creation archive storage to nullable SQL timestamps', () => {
@@ -319,6 +335,16 @@ describe('per-table row contracts', () => {
         'Catalog draft',
       ),
     ).toContain('Catalog draft.revision:');
+  });
+
+  it('holds supersession metadata to the closed content-kind contract', () => {
+    expect(
+      rowContractError(
+        'catalog_content_supersessions',
+        { ...catalogContentSupersessionRow(), content_kind: 'unknown' },
+        'Catalog supersession',
+      ),
+    ).toContain('Catalog supersession.content_kind:');
   });
 
   it('refuses an unknown column, which would become an INSERT identifier', () => {
