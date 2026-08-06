@@ -82,6 +82,7 @@ export interface GuidedClassOption {
 export interface GuidedOriginOption {
   readonly content_key: string;
   readonly name: string;
+  readonly catalog_layer: 'bundled' | 'external';
   readonly grants_lineage_spells: boolean;
 }
 

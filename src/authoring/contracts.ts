@@ -613,6 +613,14 @@ export type AuthoringErrorData =
       readonly draft_uuid: HomebrewDraftUuid;
     }
   | {
+      readonly reason: 'content_key_collision';
+      readonly content_key: ContentKey;
+    }
+  | {
+      readonly reason: 'publish_refused';
+      readonly refusal: string;
+    }
+  | {
       readonly reason: 'publish_review_required';
       readonly candidates: readonly ContentKey[];
     }

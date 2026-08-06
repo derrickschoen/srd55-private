@@ -120,4 +120,64 @@ describe('catalog authoring RPC handlers', () => {
       },
     });
   });
+
+  it('publishes a complete species through the public preview and commit handlers', async () => {
+    const rpc = await open();
+    const createdResponse = await rpc.call<Record<string, unknown>, StoredHomebrewDraft>(
+      AUTHORING_RPC.createDraft,
+      { content_kind: 'species' },
+    );
+    if (!createdResponse.ok) throw new Error(createdResponse.error.message);
+    const created = createdResponse.result;
+    const savedResponse = await rpc.call<Record<string, unknown>, StoredHomebrewDraft>(
+      AUTHORING_RPC.saveDraft,
+      {
+        draft_uuid: created.draft_uuid,
+        expected_revision: created.revision,
+        document: {
+          ...created.document,
+          name: 'RPC Clockwork',
+          rules_edition: 'expanded',
+          creature_type: 'Clockwork',
+          primary_size: 'Colossal',
+          walking_speed_feet: 30,
+        },
+      },
+    );
+    if (!savedResponse.ok) throw new Error(savedResponse.error.message);
+    const saved = savedResponse.result;
+    const preview = await rpc.call(AUTHORING_RPC.previewPublish, {
+      draft_uuid: saved.draft_uuid,
+      expected_revision: saved.revision,
+    });
+    expect(preview).toMatchObject({
+      ok: true,
+      result: {
+        aggregate: { kind: 'species', name: 'RPC Clockwork' },
+        review: [],
+      },
+    });
+    if (!preview.ok || typeof preview.result !== 'object' || preview.result === null) {
+      throw new Error('Species preview failed.');
+    }
+    const token = Reflect.get(preview.result, 'token');
+    if (typeof token !== 'string') throw new Error('Species preview token is missing.');
+    expect(await rpc.call(AUTHORING_RPC.commitPublish, {
+      token,
+      decisions: [],
+    })).toMatchObject({
+      ok: true,
+      result: {
+        outcome: 'created',
+        content_key: 'expanded:content.species:rpc-clockwork',
+        catalog_layer: 'external',
+      },
+    });
+    expect(await rpc.call(AUTHORING_RPC.readDraft, {
+      draft_uuid: saved.draft_uuid,
+    })).toMatchObject({
+      ok: false,
+      error: { data: { reason: 'draft_not_found' } },
+    });
+  });
 });

@@ -349,20 +349,20 @@ export function syncClassSkillGrants(
 
 /**
  * THE GENERATOR'S SPECIES ARM (S-B, §3.4) — the same sync/revive as the class
- * arm, scoped to the two SPECIES grant keys, with the desired set read from
- * the seam's `SPECIES_SKILL_GRANT_PLANS` literal (Elf's Keen Senses, Human's
- * Skillful) keyed by the source definition's content key. A species with no
- * plan — Gnome, Tiefling, every homebrew — desires nothing, and a source that
- * is not a species desires nothing, so the call is a no-op everywhere the
- * plan does not reach. §3.8 pins the GENERATOR as the minter of unfilled
- * grants, which is why this is an arm rather than code in the guided apply:
- * the expert `add_source` path reaches it identically.
+ * arm. Bundled grants come from `SPECIES_SKILL_GRANT_PLANS`; installed
+ * authored species contribute typed `skill_proficiency` rules through the
+ * shared rule reader. The dynamic scope also includes previously generated
+ * keys so removing an authored rule or changing species orphans stale grants
+ * instead of leaving them active. §3.8 pins the GENERATOR as the minter of
+ * unfilled grants, which is why this is an arm rather than code in the guided
+ * apply: the expert `add_source` path reaches it identically.
  */
 export function syncSpeciesSkillGrants(
   db: DatabaseContext,
   source: SkillGrantSource,
 ): void {
   const desired: DesiredSkillGrant[] = [];
+  const scopeKeys = new Set<string>(SPECIES_SKILL_GRANT_KEYS);
   if (source.sourceType === 'species' && source.sourceDefinitionId !== null) {
     const contentKey = db.scalar<string>(
       'SELECT content_key FROM species_definitions WHERE id = ?',
@@ -375,8 +375,21 @@ export function syncSpeciesSkillGrants(
     for (let ordinal = 1; ordinal <= (plan?.count ?? 0); ordinal += 1) {
       desired.push({ grantKey: String(plan?.grant_key), ordinal });
     }
+    for (const rule of new SourceRuleReader(db).activeRulesForSource(source.id)) {
+      if (rule.kind !== GrantRule.SKILL_PROFICIENCY) continue;
+      scopeKeys.add(rule.ruleKey);
+      for (let ordinal = 1; ordinal <= (rule.count ?? 0); ordinal += 1) {
+        desired.push({ grantKey: rule.ruleKey, ordinal });
+      }
+    }
+    for (const row of db.allRaw(
+      'SELECT DISTINCT grant_key FROM character_skill_grants WHERE source_instance_id = ?',
+      [source.id],
+    )) {
+      if (typeof row.grant_key === 'string') scopeKeys.add(row.grant_key);
+    }
   }
-  syncScopedSkillGrants(db, source, [...SPECIES_SKILL_GRANT_KEYS], desired);
+  syncScopedSkillGrants(db, source, [...scopeKeys], desired);
 }
 
 interface DesiredSkillGrant {
@@ -599,12 +612,41 @@ export interface UnfilledSpeciesSkillGrant {
   readonly available: readonly Skill[];
 }
 
+function speciesSkillPool(
+  db: DatabaseContext,
+  grant: SkillGrantRow,
+): Skill[] | null {
+  const sourceType = db.scalar<string>(
+    'SELECT source_type FROM character_source_instances WHERE id = ?',
+    [grant.source_instance_id],
+  );
+  if (sourceType !== 'species') return null;
+  if (isEnumValue(SPECIES_SKILL_GRANT_KEYS, grant.grant_key)) {
+    const plan = Object.values(SPECIES_SKILL_GRANT_PLANS).find(
+      (candidate) => candidate.grant_key === grant.grant_key,
+    );
+    if (plan !== undefined) {
+      return plan.pool === 'any_skill' ? [...skills] : [...plan.pool];
+    }
+  }
+  const rule = new SourceRuleReader(db)
+    .activeRulesForSource(grant.source_instance_id)
+    .find((candidate) =>
+      candidate.kind === GrantRule.SKILL_PROFICIENCY &&
+      candidate.ruleKey === grant.grant_key);
+  if (rule === undefined) return null;
+  const configured = rule.toObject().skills;
+  if (!Array.isArray(configured) || !configured.every((value) => isEnumValue(skills, value))) {
+    return null;
+  }
+  return configured as Skill[];
+}
+
 /**
- * The unfilled ACTIVE species choice grants (Keen Senses, Skillful), each
- * with its available choices — the seam's plan pool minus every skill an
- * active grant already holds, §3.3's same held-skill rule the class arm
- * applies. Shared by planner completeness and the guided step (S-C) so the
- * two surfaces cannot disagree about what a species still owes.
+ * The unfilled ACTIVE bundled or authored species choice grants, each with
+ * its available choices minus every skill an active grant already holds.
+ * This is §3.3's same held-skill rule the class arm applies and is shared by
+ * planner completeness and the guided step (S-C).
  */
 export function unfilledSpeciesSkillGrants(
   db: DatabaseContext,
@@ -614,20 +656,9 @@ export function unfilledSpeciesSkillGrants(
   const held = new Set<Skill>(resolved.skills);
   const unfilled: UnfilledSpeciesSkillGrant[] = [];
   for (const grant of resolved.grants) {
-    if (
-      grant.state !== 'active' ||
-      grant.skill !== null ||
-      !isEnumValue(SPECIES_SKILL_GRANT_KEYS, grant.grant_key)
-    ) {
-      continue;
-    }
-    const plan = Object.values(SPECIES_SKILL_GRANT_PLANS).find(
-      (candidate) => candidate.grant_key === grant.grant_key,
-    );
-    if (plan === undefined) {
-      continue;
-    }
-    const pool = plan.pool === 'any_skill' ? [...skills] : [...plan.pool];
+    if (grant.state !== 'active' || grant.skill !== null) continue;
+    const pool = speciesSkillPool(db, grant);
+    if (pool === null) continue;
     unfilled.push({
       grant_id: grant.id,
       source_instance_id: grant.source_instance_id,
@@ -684,11 +715,10 @@ export class SkillGrantRefusal extends Error {
 
 /**
  * The pool an ADDRESSED grant may be filled from, before removing held
- * skills: the class pool for the two class keys (§4 S-B: "validates the
- * choice against the class pool"), the seam's literal plans for the two
- * species keys. Null for any other key — `background_skill` grants are minted
- * FILLED and have no fillable pool, so addressing one falls to the
- * `grant_already_filled` refusal before this is ever consulted.
+ * skills: the class pool for the two class keys (§4 S-B), the seam's literal
+ * bundled species plans, or an authored species skill rule. Null for any
+ * other key — `background_skill` grants are minted FILLED and have no
+ * fillable pool, so addressing one falls to `grant_already_filled` first.
  */
 function fillablePool(
   db: DatabaseContext,
@@ -705,15 +735,8 @@ function fillablePool(
     }
     return classSkillPool(db, grant.grant_key, Number(classDefinitionId));
   }
-  if (isEnumValue(SPECIES_SKILL_GRANT_KEYS, grant.grant_key)) {
-    const plan = Object.values(SPECIES_SKILL_GRANT_PLANS).find(
-      (candidate) => candidate.grant_key === grant.grant_key,
-    );
-    if (plan === undefined) {
-      return null;
-    }
-    return plan.pool === 'any_skill' ? [...skills] : [...plan.pool];
-  }
+  const speciesPool = speciesSkillPool(db, grant);
+  if (speciesPool !== null) return speciesPool;
   const sourceRule = new SourceRuleReader(db)
     .activeRulesForSource(grant.source_instance_id)
     .find((rule) => rule.ruleKey === grant.grant_key);

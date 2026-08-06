@@ -36,6 +36,9 @@ import type {
   HomebrewDraft,
   HomebrewDraftSummary,
   PublishedHomebrewSummary,
+  PublishDecision,
+  PublishPreview,
+  PublishResult,
   SpeciesAuthoringDraft,
   StoredHomebrewDraft,
   SubclassAuthoringDraft,
@@ -53,6 +56,14 @@ import {
   encodeCurrentDraft,
 } from './draft-codecs';
 import type { HomebrewDraftItemUuid, HomebrewDraftUuid } from './ids';
+import type { PublishPlanToken } from './ids';
+import {
+  commitSpeciesPublish,
+  previewSpeciesPublish,
+  publishTokenDraftUuid,
+  SpeciesPublishError,
+  SpeciesSemanticValidationError,
+} from './species-publisher';
 
 interface DraftRow {
   readonly draft_uuid: HomebrewDraftUuid;
@@ -129,6 +140,19 @@ function validationError(error: DraftCodecError): AuthoringServiceError {
     reason: 'validation_failed',
     issues: error.issues,
   }, { cause: error });
+}
+
+function speciesPublishServiceError(error: unknown): never {
+  if (error instanceof SpeciesSemanticValidationError) {
+    throw new AuthoringServiceError('Species publish validation failed.', {
+      reason: 'validation_failed',
+      issues: error.issues,
+    }, { cause: error });
+  }
+  if (error instanceof SpeciesPublishError) {
+    throw new AuthoringServiceError(error.message, error.data, { cause: error });
+  }
+  throw error;
 }
 
 function itemUuid(randomUuid: () => string): HomebrewDraftItemUuid {
@@ -711,6 +735,60 @@ export class CatalogAuthoringService {
       );
       if (result.changes !== 1) throw this.#notFound(draftUuid);
     });
+  }
+
+  previewPublish(input: {
+    readonly draft_uuid: HomebrewDraftUuid;
+    readonly expected_revision: DraftRevision;
+  }): PublishPreview {
+    const draft = this.readDraft(input.draft_uuid);
+    if (draft.revision !== input.expected_revision) {
+      throw new AuthoringServiceError('Draft revision is stale.', {
+        reason: 'stale_draft_revision',
+        draft_uuid: draft.draft_uuid,
+        expected_revision: input.expected_revision,
+        actual_revision: draft.revision,
+      });
+    }
+    try {
+      return previewSpeciesPublish(this.db, draft);
+    } catch (error) {
+      return speciesPublishServiceError(error);
+    }
+  }
+
+  commitPublish(input: {
+    readonly token: PublishPlanToken;
+    readonly decisions: readonly PublishDecision[];
+  }): PublishResult {
+    const draftUuid = publishTokenDraftUuid(input.token);
+    if (draftUuid === null) {
+      throw new AuthoringServiceError('Publish token is invalid.', {
+        reason: 'invalid_reference',
+      });
+    }
+    const row = this.#draftRow(draftUuid);
+    if (row === null) {
+      throw new AuthoringServiceError('The publish plan is stale.', {
+        reason: 'stale_publish_plan',
+        draft_uuid: draftUuid,
+      });
+    }
+    const draft = this.#decode(row);
+    const previousKeyUsageCount = draft.base_content_key === null
+      ? 0
+      : this.usages(draft.base_content_key).usages.length;
+    try {
+      return commitSpeciesPublish(
+        this.db,
+        draft,
+        input.token,
+        input.decisions,
+        previousKeyUsageCount,
+      );
+    } catch (error) {
+      return speciesPublishServiceError(error);
+    }
   }
 
   usages(contentKey: ContentKey): ContentUsageList {

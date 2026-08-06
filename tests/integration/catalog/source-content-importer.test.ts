@@ -317,7 +317,7 @@ describe('class, feat, species and background catalog import', () => {
   });
 
 
-  it('stores and identifies imported feat/species aggregates without exposing them to planner or guided selection before CI-4a/HA-10', () => {
+  it('stores imported feat/species aggregates and exposes complete species only through the HA-3 guided seam', () => {
     const species: SpeciesContentAggregate = {
       kind: 'species',
       name: 'Marsh Kin',
@@ -395,7 +395,12 @@ describe('class, feat, species and background catalog import', () => {
     expect(db.scalar<number>('SELECT count(*) FROM species_definitions')).toBe(1);
     expect(new CatalogQueries(db).read().sources.feat).toEqual([]);
     expect(new CatalogQueries(db).read().sources.species).toEqual([]);
-    expect(listGuidedOriginOptions(db, 'species')).toEqual([]);
+    expect(listGuidedOriginOptions(db, 'species')).toEqual([{
+      content_key: speciesKey,
+      name: 'Marsh Kin',
+      catalog_layer: 'external',
+      grants_lineage_spells: false,
+    }]);
     expect(listGuidedBackgroundChoiceOptions(db).origin_feats).toEqual([]);
 
     db.exec('UPDATE species_templates SET base_speed_feet = 35 WHERE content_key = ?', [speciesKey]);

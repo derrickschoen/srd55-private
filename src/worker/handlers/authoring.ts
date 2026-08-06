@@ -3,6 +3,8 @@ import {
   type ContentUsagesParams,
   type CreateDraftParams,
   type DiscardDraftParams,
+  type CommitPublishParams,
+  type PreviewPublishParams,
   type ReadDraftParams,
   type SaveDraftParams,
 } from '../../authoring/client';
@@ -81,6 +83,31 @@ function isContentUsagesParams(value: unknown): value is ContentUsagesParams {
     isBoundedKey(value.content_key);
 }
 
+function isPreviewPublishParams(value: unknown): value is PreviewPublishParams {
+  return isRecord(value) &&
+    hasExactKeys(value, ['draft_uuid', 'expected_revision']) &&
+    isDraftUuid(value.draft_uuid) &&
+    isDraftRevision(value.expected_revision);
+}
+
+function isPublishDecision(value: unknown): boolean {
+  if (!isRecord(value) || !isBoundedKey(value.candidate_content_key)) return false;
+  if (value.decision === 'match') {
+    return hasExactKeys(value, ['candidate_content_key', 'decision']);
+  }
+  return value.decision === 'clone' &&
+    hasExactKeys(value, ['candidate_content_key', 'decision', 'clone_name']) &&
+    typeof value.clone_name === 'string' && value.clone_name.trim() !== '' &&
+    [...value.clone_name].length <= AUTHORING_TEXT_LIMITS.name;
+}
+
+function isCommitPublishParams(value: unknown): value is CommitPublishParams {
+  return isRecord(value) &&
+    hasExactKeys(value, ['token', 'decisions']) &&
+    typeof value.token === 'string' && value.token.length > 0 &&
+    Array.isArray(value.decisions) && value.decisions.every(isPublishDecision);
+}
+
 function authoringError(error: unknown): never {
   if (error instanceof AuthoringServiceError) {
     throw new RpcError(
@@ -144,6 +171,28 @@ export const handlers: readonly RpcHandler[] = [
           params.expected_revision,
         );
         return null;
+      } catch (error) {
+        return authoringError(error);
+      }
+    },
+  ),
+  defineRpcHandler(
+    AUTHORING_RPC.previewPublish,
+    isPreviewPublishParams,
+    ({ db }, params) => {
+      try {
+        return new CatalogAuthoringService(db).previewPublish(params);
+      } catch (error) {
+        return authoringError(error);
+      }
+    },
+  ),
+  defineRpcHandler(
+    AUTHORING_RPC.commitPublish,
+    isCommitPublishParams,
+    ({ db }, params) => {
+      try {
+        return new CatalogAuthoringService(db).commitPublish(params);
       } catch (error) {
         return authoringError(error);
       }

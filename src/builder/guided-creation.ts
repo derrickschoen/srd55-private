@@ -771,9 +771,9 @@ const speciesTemplateTraitEffectRow: RowCodec<SpeciesTemplateTraitEffectRow> = (
 });
 
 /**
- * The species the wizard offers: rows of `species_templates` whose
- * `content_key` is in the bundled set — the same shape as the class list, for
- * the same reasons (a bundled key with no row is simply not offered).
+ * The species the wizard offers: bundled templates plus complete external
+ * definition/template aggregates. Requiring both external halves keeps the
+ * application source and catalogue definition on one identity.
  *
  * `grants_lineage_spells` comes from the seam's pinned literal set, NEVER from
  * trait text — sniffing text is how two agents invent two different lists.
@@ -783,8 +783,8 @@ const speciesTemplateTraitEffectRow: RowCodec<SpeciesTemplateTraitEffectRow> = (
  * seam's set is species-only; backgrounds are always false" — not a lookup
  * that happens to miss.
  *
- * CI-4a/HA-10 lifts these bundled-only origin filters after imported
- * definition/template aggregates can be applied as one complete identity.
+ * Background authoring remains outside HA-3, so backgrounds retain their
+ * bundled-only filter.
  */
 export function listGuidedOriginOptions(
   db: DatabaseContext,
@@ -808,26 +808,33 @@ export function listGuidedOriginOptions(
       .map(({ content_key, name }) => ({
         content_key,
         name,
+        catalog_layer: 'bundled' as const,
         grants_lineage_spells: false,
       }));
   }
-  const keys = bundledSpeciesKeys(db);
-  const placeholders = keys.map(() => '?').join(', ');
   return db
     .all(
-      `SELECT content_key, name
-       FROM species_templates
-       WHERE content_key IN (${placeholders})
-       ORDER BY name`,
-      [...keys],
+      `SELECT template.content_key, template.name, identity.catalog_layer
+       FROM species_templates AS template
+       JOIN catalog_content_identities AS identity
+         ON identity.content_kind = 'species'
+        AND identity.content_key = template.content_key
+       LEFT JOIN species_definitions AS definition
+         ON definition.content_key = template.content_key
+       WHERE identity.catalog_layer = 'bundled'
+          OR definition.content_key IS NOT NULL
+       ORDER BY template.name, template.content_key`,
+      undefined,
       (row) => ({
         content_key: sqlString(row, 'content_key'),
         name: sqlString(row, 'name'),
+        catalog_layer: sqlString(row, 'catalog_layer'),
       }),
     )
-    .map(({ content_key, name }) => ({
+    .map(({ content_key, name, catalog_layer }) => ({
       content_key,
       name,
+      catalog_layer: catalog_layer === 'external' ? 'external' as const : 'bundled' as const,
       grants_lineage_spells: grantsLineageSpells(content_key),
     }));
 }
@@ -838,28 +845,30 @@ export function listGuidedOriginOptions(
  * so a key outside the bundled set and a bundled key whose row is absent both
  * refuse with the same reason: neither is a species the guided builder knows.
  */
-function gateBundledSpecies(
+function gateInstalledSpecies(
   db: DatabaseContext,
   contentKey: string,
 ): SpeciesTemplateRow {
-  if (!isBundledSourceContentKey('species', contentKey, db)) {
-    throw new GuidedCreationRefusal(
-      'unknown_origin',
-      `No bundled species exists for content key "${contentKey}".`,
-    );
-  }
   const template = db.one(
-    `SELECT id, content_key, rules_edition, name, creature_type, size,
-            alternate_size, base_speed_feet, created_at, updated_at
-     FROM species_templates
-     WHERE content_key = ?`,
+    `SELECT template.id, template.content_key, template.rules_edition,
+            template.name, template.creature_type, template.size,
+            template.alternate_size, template.base_speed_feet,
+            template.created_at, template.updated_at
+     FROM species_templates AS template
+     JOIN catalog_content_identities AS identity
+       ON identity.content_kind = 'species'
+      AND identity.content_key = template.content_key
+     LEFT JOIN species_definitions AS definition
+       ON definition.content_key = template.content_key
+     WHERE template.content_key = ?
+       AND (identity.catalog_layer = 'bundled' OR definition.content_key IS NOT NULL)`,
     [contentKey],
     speciesTemplateRow,
   );
   if (template === null) {
     throw new GuidedCreationRefusal(
       'unknown_origin',
-      `The bundled species "${contentKey}" has no row in this database.`,
+      `The installed species "${contentKey}" is incomplete or unavailable.`,
     );
   }
   return template;
@@ -1031,7 +1040,7 @@ export function applyGuidedOrigin(
       };
     }
 
-    const template = gateBundledSpecies(db, params.content_key);
+    const template = gateInstalledSpecies(db, params.content_key);
 
     // Replace the previous apply's grant bridge first (A6): the marker finds
     // it without reference to the rows the statements below delete.
