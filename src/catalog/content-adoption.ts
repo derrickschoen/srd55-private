@@ -122,7 +122,7 @@ export interface ContentImportReviewRow {
   readonly incomingName: string;
   readonly localName: string;
   readonly targetContentKey: ContentKey;
-  readonly incomingFingerprint: ContentFingerprintDigest;
+  readonly incomingFingerprint: ContentFingerprintDigest | null;
   readonly matchClass: ContentImportMatchClass;
   readonly defaultChoice: 'match';
   readonly selectedChoice: CatalogContentMatchDecision;
@@ -236,13 +236,33 @@ function incomingDecisionFingerprint(
 ): {
   readonly scheme: ContentFingerprintScheme;
   readonly digest: ContentFingerprintDigest;
+  readonly evidenceDigest: ContentFingerprintDigest | null;
 } {
-  const parsed = projection.referenceOnly === undefined
-    ? null
-    : parseDerivedContentKeyV1(projection.referenceOnly.contentKey);
-  return parsed ?? Object.freeze({
-    scheme: identity.envelope.scheme,
-    digest: identity.digest,
+  if (projection.referenceOnly === undefined) {
+    return Object.freeze({
+      scheme: identity.envelope.scheme,
+      digest: identity.digest,
+      evidenceDigest: identity.digest,
+    });
+  }
+  const parsed = parseDerivedContentKeyV1(projection.referenceOnly.contentKey);
+  if (parsed !== null) {
+    return Object.freeze({ ...parsed, evidenceDigest: parsed.digest });
+  }
+
+  // A reference-only share contributes no aggregate bytes. Scope its receipt
+  // to the share reference itself instead of presenting the recipient's local
+  // clone candidate as incoming evidence. The same reference remains stable
+  // across repeat shares, while a backup receipt for the candidate's genuine
+  // fingerprint cannot be reused here.
+  return Object.freeze({
+    scheme: CONTENT_FINGERPRINT_SCHEME_V1,
+    digest: sha256(canonicalJson({
+      receiptScope: 'share-reference-v1',
+      kind: projection.kind,
+      contentKey: projection.referenceOnly.contentKey,
+    })) as ContentFingerprintDigest,
+    evidenceDigest: null,
   });
 }
 
@@ -567,14 +587,14 @@ function reviewConflictDetails(
   db: DatabaseContext,
   projection: ContentImportProjection,
   match: ContentImportMatchClass,
-  incomingDigest: ContentFingerprintDigest,
+  incomingDigest: ContentFingerprintDigest | null,
   targetContentKey: ContentKey,
 ): readonly ContentImportConflictDetail[] {
   const details = [...(projection.conflictDetails ?? [])];
   if (match === 'key-collision') {
     details.push({
       field: 'Rules identity',
-      incomingValue: incomingDigest,
+      incomingValue: incomingDigest ?? 'not supplied by reference',
       localValue: currentFingerprintDigest(db, projection.kind, targetContentKey),
     });
   }
@@ -1099,7 +1119,7 @@ function evaluate(
         incomingName: projection.name,
         localName: localName(db, projection.kind, resolution.contentKey),
         targetContentKey: resolution.contentKey,
-        incomingFingerprint: incomingFingerprint.digest,
+        incomingFingerprint: incomingFingerprint.evidenceDigest,
         matchClass: reviewClass,
         defaultChoice: 'match',
         selectedChoice: 'match',
@@ -1109,7 +1129,7 @@ function evaluate(
           db,
           projection,
           reviewClass,
-          incomingFingerprint.digest,
+          incomingFingerprint.evidenceDigest,
           resolution.contentKey,
         ),
       });

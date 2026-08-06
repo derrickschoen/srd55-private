@@ -173,6 +173,7 @@ function exactResolution(
   contentKind: ContentKind,
   contentKey: ContentKey,
   derivedIdentity: DerivedContentIdentityV1<ContentKind, unknown> | undefined,
+  referenceFingerprint: ContentFingerprintCandidate | undefined,
   metadataConflict: boolean,
 ): ContentResolution | null {
   const identity = db.one(
@@ -190,6 +191,40 @@ function exactResolution(
     kind: contentKind,
     contentKey: identity.content_key,
   });
+
+  // D84 makes bundled stable keys authoritative even when extraction fixes
+  // move their fingerprints. External references have no such authority: an
+  // embedded content.v1 digest must agree with the recipient's current
+  // fingerprint, and an asserted key with no fingerprint evidence needs the
+  // recipient's explicit confirmation.
+  if (
+    derivedIdentity === undefined &&
+    !(identity.catalog_layer === 'bundled' && identity.key_kind === 'bundled-stable')
+  ) {
+    if (referenceFingerprint === undefined) {
+      return Object.freeze({
+        kind: 'exact',
+        contentKey: identity.content_key,
+        matchClass: 'key-collision',
+        reviewRequired: true,
+      });
+    }
+    const storedCurrentDigest = db.scalar<string>(
+      `SELECT fingerprint_digest
+       FROM catalog_content_fingerprints
+       WHERE content_kind = ? AND content_key = ?
+         AND fingerprint_scheme = ? AND fingerprint_role = 'current'`,
+      [contentKind, contentKey, referenceFingerprint.scheme],
+    );
+    if (storedCurrentDigest !== referenceFingerprint.digest) {
+      return Object.freeze({
+        kind: 'exact',
+        contentKey: identity.content_key,
+        matchClass: 'key-collision',
+        reviewRequired: true,
+      });
+    }
+  }
 
   if (derivedIdentity !== undefined) {
     const storedCurrent = db.one(
@@ -412,6 +447,7 @@ function resolveInRegistry(
     readonly aliasKey?: ContentKey;
     readonly fingerprints: readonly ContentFingerprintCandidate[];
     readonly derivedIdentity?: DerivedContentIdentityV1<ContentKind, unknown>;
+    readonly exactReferenceFingerprint?: ContentFingerprintCandidate;
     readonly metadataConflict: boolean;
   },
 ): ContentResolution {
@@ -420,6 +456,7 @@ function resolveInRegistry(
     input.contentKind,
     input.primaryKey,
     input.derivedIdentity,
+    input.exactReferenceFingerprint,
     input.metadataConflict,
   );
   if (exact !== null) {
@@ -488,13 +525,19 @@ export function resolveContentReference(
   },
 ): ContentResolution {
   const parsed = parseDerivedContentKeyV1(input.contentKey);
+  const referenceFingerprint: ContentFingerprintCandidate | undefined =
+    parsed === null
+      ? undefined
+      : { scheme: parsed.scheme, digest: parsed.digest };
+  const fingerprints: readonly ContentFingerprintCandidate[] =
+    referenceFingerprint === undefined ? [] : [referenceFingerprint];
   return resolveInRegistry(db, {
     contentKind: input.kind,
     primaryKey: input.contentKey,
-    fingerprints:
-      parsed === null
-        ? []
-        : [{ scheme: parsed.scheme, digest: parsed.digest }],
+    fingerprints,
+    ...(referenceFingerprint === undefined
+      ? {}
+      : { exactReferenceFingerprint: referenceFingerprint }),
     metadataConflict: false,
   });
 }
