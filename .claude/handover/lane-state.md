@@ -23,7 +23,36 @@ request/response pair with disclosure. A real 401 was captured
 post-review (spike/20-bad-token-401.txt); 403/413 fixtures stay marked
 SYNTHETIC with port-level assertions only.
 
-## RESTART POINT 2026-08-05-c (newest - read first)
+## RESTART POINT 2026-08-06-a (newest - read first)
+MAIN ba97db9 (mirror pushed). FLOORS: vitest 231/3,863; PW 126 on the
+pool (~9 min); build 0; migrations 0000-0034 FROZEN (0034 = the D205
+wipe: legacy-opaque no longer exists as a vocabulary member); wire
+v1-v17. TWENTY-FIVE merges. Rulings through D210.
+
+MERGED SINCE 08-05-c:
+ - NOTICE (4a95c71, 24th, D209): root attribution inventory + four
+   missing SRD headers. Nine docs/homebrew notice gaps flagged to the
+   owner's subclass session (listed in the notice.log report).
+ - CI-4b (b959a9d, 25th, D205): wipe and reseed, mint 0034. Legacy-
+   opaque identities, aggregates, subtrees, FK-less source-instance
+   references with descendants, and stale history all deleted; 447
+   bundled identities reseed on boot; the vocabulary itself removed;
+   self-heal legacy paths and available_on_long_rest deleted. The CI-4
+   SERIES IS CLOSED.
+COMMON.md gained the mint checklist (three-times-learned) and the
+standing no-second-agent-CLI line. NOTE: codex's own config still
+injects Claude reviews - repeat the one-liner even in micro briefs.
+
+QUEUE: HA-2, then CI-5 (read their design rows fresh - the docs carry
+D198/D205 supersession banners now). Follow-ups:
+SUBCLASS-EMPTY-PROSE-AUDIT; SC3-VITEST-WORKER-RPC-NOISE (not seen since
+the atomic-install fix - may be dead, keep the standing rule: never
+gate on exit code alone, read counts).
+
+WORKTREES: wt/party only (owner's session - never prune). All lane
+worktrees pruned per D207; recreate from main on demand.
+
+## RESTART POINT 2026-08-05-c (superseded by 08-06-a)
 MAIN 8606517 (mirror pushed). FLOORS: vitest 231/3,861; PW 126 on the
 pool (~9 min); build 0; migrations 0000-0033 FROZEN; wire v1-v17.
 TWENTY-THREE merges. Rulings through D210 (D206 pointer:
