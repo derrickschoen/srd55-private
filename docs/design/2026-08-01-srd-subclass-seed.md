@@ -300,6 +300,8 @@ two” assumption. Its insert trigger registers every new subclass identity as
 (`src/db/schema.sql:1695-1700`, `src/db/schema.sql:1717-1731`). The twelve new
 definitions therefore behave exactly like the existing two until CI-3x lands.
 
+> Superseded by D205/0034: `legacy-opaque` no longer exists.
+
 The “exactly two dense bundled schedules” statement is real but narrower than
 “exactly two bundled subclasses.” The current design proved that both existing
 keys have 20 rows (`docs/design/2026-07-30-homebrew-authoring-forms.md:104-110`,

@@ -310,9 +310,15 @@ describe('catalog content registry resolution', () => {
 });
 
 describe('catalog registry controls', () => {
-  it('keeps new registration on the closed derived/bundled paths', () => {
+  it('keeps new registration on the closed derived/asserted/bundled paths', () => {
     registerDerivedContentIdentity(db, HAND_PINNED_FEAT);
     bundled('2024:feat:bundled');
+    db.exec(
+      `INSERT INTO catalog_content_identities (
+         content_key, content_kind, key_kind, catalog_layer, normalized_name
+       ) VALUES ('expanded:asserted-feat', 'feat', 'asserted', 'external',
+                 'asserted feat')`,
+    );
 
     expect(
       db.allRaw(
@@ -321,6 +327,7 @@ describe('catalog registry controls', () => {
          ORDER BY key_kind`,
       ),
     ).toEqual([
+      { key_kind: 'asserted', catalog_layer: 'external' },
       { key_kind: 'bundled-stable', catalog_layer: 'bundled' },
       { key_kind: 'derived', catalog_layer: 'external' },
     ]);
@@ -427,7 +434,7 @@ describe('catalog registry controls', () => {
         constraint: 'catalog_content_identities_content_kind_check',
         sql: `INSERT INTO catalog_content_identities
           (content_key, content_kind, key_kind, catalog_layer, normalized_name)
-          VALUES ('bad:kind', 'vehicle', 'legacy-opaque', 'external', 'bad')`,
+          VALUES ('bad:kind', 'vehicle', 'bundled-stable', 'bundled', 'bad')`,
       },
       {
         constraint: 'catalog_content_identities_key_kind_check',
@@ -439,19 +446,19 @@ describe('catalog registry controls', () => {
         constraint: 'catalog_content_identities_catalog_layer_check',
         sql: `INSERT INTO catalog_content_identities
           (content_key, content_kind, key_kind, catalog_layer, normalized_name)
-          VALUES ('bad:catalog-layer', 'feat', 'legacy-opaque', 'local', 'bad')`,
+          VALUES ('bad:catalog-layer', 'feat', 'bundled-stable', 'local', 'bad')`,
       },
       {
         constraint: 'catalog_content_identities_normalized_name_check',
         sql: `INSERT INTO catalog_content_identities
           (content_key, content_kind, key_kind, catalog_layer, normalized_name)
-          VALUES ('bad:name', 'feat', 'legacy-opaque', 'external', '')`,
+          VALUES ('bad:name', 'feat', 'bundled-stable', 'bundled', '')`,
       },
       {
         constraint: 'catalog_content_identities_key_layer_check',
         sql: `INSERT INTO catalog_content_identities
           (content_key, content_kind, key_kind, catalog_layer, normalized_name)
-          VALUES ('bad:layer', 'feat', 'legacy-opaque', 'bundled', 'bad')`,
+          VALUES ('expanded:bad-layer', 'feat', 'asserted', 'bundled', 'bad')`,
       },
       {
         constraint: 'catalog_content_identities_key_layer_check',

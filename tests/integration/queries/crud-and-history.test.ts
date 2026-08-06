@@ -227,21 +227,23 @@ describe('character CRUD, catalog, save points, and operation history', () => {
        ) VALUES ('2024:feat:alert', 'Query Feat', '2024', 1,
                  '{"level":4}', '[]')`,
     );
-    db.exec(
-      `INSERT INTO catalog_content_identities
-         (content_key, content_kind, key_kind, catalog_layer, normalized_name)
-       VALUES ('external:class:test', 'class', 'legacy-opaque', 'external', 'externalclass'),
-              ('external:feat:test', 'feat', 'legacy-opaque', 'external', 'externalfeat')`,
-    );
+    registerFixtureContentIdentity(db, {
+      kind: 'class', contentKey: 'expanded:external-class-test',
+      name: 'External Class', keyKind: 'asserted',
+    });
+    registerFixtureContentIdentity(db, {
+      kind: 'feat', contentKey: 'expanded:external-feat-test',
+      name: 'External Feat', keyKind: 'asserted',
+    });
     db.exec(
       `INSERT INTO class_definitions
          (content_key, name, rules_edition, progression_type, supports_ritual_casting)
-       VALUES ('external:class:test', 'External Class', 'expanded', 'none', 0)`,
+       VALUES ('expanded:external-class-test', 'External Class', 'expanded', 'none', 0)`,
     );
     db.exec(
       `INSERT INTO feat_definitions
          (content_key, name, rules_edition, ability_points, repeatable)
-       VALUES ('external:feat:test', 'External Feat', 'expanded', 0, 0)`,
+       VALUES ('expanded:external-feat-test', 'External Feat', 'expanded', 0, 0)`,
     );
     registerFixtureContentIdentity(db, {
       kind: 'spell', contentKey: 'q60:spell:test', name: 'Query Bolt',

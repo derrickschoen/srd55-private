@@ -25,6 +25,7 @@ import {
 } from '../../../src/worker/handlers/queries';
 import { rpcRegistry } from '../../../src/worker/registry';
 import { raiseClassLevelForTest } from '../../helpers/class-levels';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import {
   createRpcHarness,
   type RpcHarness,
@@ -535,20 +536,16 @@ describe('level-up wizard state RPC', () => {
 
   it('keeps a held imported class disabled even when its hit die is known', async () => {
     const characterId = createCharacter('Imported Class Holder');
-    harness.context.db.exec(
-      `INSERT INTO catalog_content_identities (
-         content_key, content_kind, key_kind, catalog_layer, normalized_name
-       ) VALUES (
-         'external:class:level-up-probe', 'class', 'legacy-opaque',
-         'external', 'levelupprobe'
-       )`,
-    );
+    registerFixtureContentIdentity(harness.context.db, {
+      kind: 'class', contentKey: 'expanded:level-up-probe',
+      name: 'Imported Adept', keyKind: 'asserted',
+    });
     const importedClassId = harness.context.db.exec(
       `INSERT INTO class_definitions (
          content_key, name, rules_edition, progression_type,
          supports_ritual_casting
        ) VALUES (
-         'external:class:level-up-probe', 'Imported Adept', 'expanded',
+         'expanded:level-up-probe', 'Imported Adept', 'expanded',
          'none', 0
        )`,
     ).lastInsertId;

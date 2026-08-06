@@ -18,7 +18,6 @@ import {
   CONTENT_FINGERPRINT_SCHEME_V1,
   contentKinds,
   deriveContentIdentityV1FromNormalizedName,
-  normalizeContentIdentityName,
   type ContentKind,
   type DerivedContentIdentityV1,
   type NormalizedContentName,
@@ -284,7 +283,6 @@ function allBundledCandidates(
 function ensureBundledRegistryRoot(
   db: DatabaseContext,
   entry: BundledManifestEntryV1,
-  name: string,
 ): void {
     const registry = db.oneRaw(
       `SELECT content_kind, key_kind, catalog_layer
@@ -298,21 +296,9 @@ function ensureBundledRegistryRoot(
     }
     const keyKind = sqlString(registry, 'key_kind');
     const layer = sqlString(registry, 'catalog_layer');
-    if (
-      (keyKind !== 'legacy-opaque' || layer !== 'external') &&
-      (keyKind !== 'bundled-stable' || layer !== 'bundled')
-    ) {
+    if (keyKind !== 'bundled-stable' || layer !== 'bundled') {
       throw new BundledRegistryEntryRefusal(
         `Bundled ${entry.kind} '${entry.contentKey}' is registered as ${keyKind}/${layer}.`,
-      );
-    }
-    if (keyKind === 'legacy-opaque') {
-      db.exec(
-        `UPDATE catalog_content_identities
-         SET key_kind = 'bundled-stable', catalog_layer = 'bundled',
-             normalized_name = ?
-         WHERE content_kind = ? AND content_key = ?`,
-        [normalizeContentIdentityName(name), entry.kind, entry.contentKey],
       );
     }
 }
@@ -413,7 +399,7 @@ export function reconcileBundledContentRegistryWithStoredProjectionsV1(
           if (root.outcome === 'orphaned') {
             return 'orphaned' as const;
           }
-          ensureBundledRegistryRoot(db, entry, root.name);
+          ensureBundledRegistryRoot(db, entry);
           const identity = projectBundledIdentityV1(db, entry);
           const fingerprint = reconcileCurrentContentFingerprintV1(db, {
             kind: entry.kind,

@@ -7,6 +7,7 @@ import { seedClassResources } from '../../../src/rules/class-resources-srd';
 import { seedSheetContent } from '../../../src/rules/sheet-srd';
 import type { SheetResourceMaximum } from '../../../src/rules/sheet';
 import { openTestDatabase } from '../../helpers/open-db';
+import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 
 describe('character sheet resource projection', () => {
   let connection: Database;
@@ -207,15 +208,14 @@ describe('character sheet resource projection', () => {
       }),
     );
 
-    db.exec(
-      `INSERT INTO catalog_content_identities (
-         content_key, content_kind, key_kind, catalog_layer, normalized_name
-       ) VALUES ('homebrew:class:chronomancer', 'class', 'legacy-opaque', 'external', 'chronomancer')`,
-    );
+    registerFixtureContentIdentity(db, {
+      kind: 'class', contentKey: 'expanded:chronomancer',
+      name: 'Chronomancer', keyKind: 'asserted',
+    });
     const homebrewId = db.exec(
       `INSERT INTO class_definitions (
          content_key, name, rules_edition, progression_type
-       ) VALUES ('homebrew:class:chronomancer', 'Chronomancer', 'expanded', 'none')`,
+       ) VALUES ('expanded:chronomancer', 'Chronomancer', 'expanded', 'none')`,
     ).lastInsertId;
     const unknown = db.exec(
       `INSERT INTO characters (name) VALUES ('Unknown catalog')`,

@@ -6,7 +6,10 @@ import {
   normalizeContentIdentityName,
   type ContentKind,
 } from '../../../src/catalog/content-identity';
-import { ensureBundledStableContentIdentity } from '../../../src/catalog/content-registry';
+import {
+  catalogContentKeyKinds,
+  ensureBundledStableContentIdentity,
+} from '../../../src/catalog/content-registry';
 import { AddSourceCommand } from '../../../src/commands/add-source';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import { RemoveSourceCommand } from '../../../src/commands/remove-source';
@@ -1292,6 +1295,15 @@ describe('minimal character sharing', () => {
          WHERE key_kind = 'legacy-opaque'`,
       ),
     ).toBe(0);
+    expect(catalogContentKeyKinds).toEqual([
+      'derived',
+      'asserted',
+      'bundled-stable',
+    ]);
+    expect(target.scalar<number>(
+      `SELECT count(*) FROM sqlite_schema
+       WHERE sql LIKE '%legacy-opaque%'`,
+    )).toBe(0);
   });
 
   it('wraps every low-level malformed fragment as ShareValidationError', async () => {

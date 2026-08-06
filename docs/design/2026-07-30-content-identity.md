@@ -522,6 +522,8 @@ catalog_content_fingerprints
     WHERE fingerprint_role = 'current'
 ```
 
+> Superseded by D205/0034: `legacy-opaque` no longer exists.
+
 `catalog_layer` answers the export/licensing question. `key_kind` answers why
 the visible primary key has authority. Fingerprint rows answer which frozen
 semantic projections can match the aggregate. They are intentionally
@@ -1314,6 +1316,8 @@ inside a projector:
   catalog/character references, add old-key aliases, retain unprojectable rows
   as `legacy-opaque`, and exercise idempotence/rollback from every schema
   prefix.
+
+  > Superseded by D205/0034: `legacy-opaque` no longer exists.
 - **CI-5 — XL: character backup v3 complete content manifest.** Semantic plus
   legacy-opaque portable union, strict validation/limits, all-external export,
   dependency-safe transactional plan/install, D82 modal integration, fresh

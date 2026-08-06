@@ -22,7 +22,6 @@ export const catalogContentKeyKinds = [
   'derived',
   'asserted',
   'bundled-stable',
-  'legacy-opaque',
 ] as const;
 export type CatalogContentKeyKind = (typeof catalogContentKeyKinds)[number];
 
@@ -642,8 +641,7 @@ export function ensureBundledStableContentIdentity(
     return;
   }
   if (
-    existing.key_kind === 'bundled-stable' && existing.catalog_layer === 'bundled' ||
-    existing.key_kind === 'legacy-opaque' && existing.catalog_layer === 'external'
+    existing.key_kind === 'bundled-stable' && existing.catalog_layer === 'bundled'
   ) {
     return;
   }

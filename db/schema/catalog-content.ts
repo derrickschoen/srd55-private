@@ -24,8 +24,7 @@ import { datetime, oneOf, varchar } from './columns';
 export type CatalogContentKeyKind =
   | 'derived'
   | 'asserted'
-  | 'bundled-stable'
-  | 'legacy-opaque';
+  | 'bundled-stable';
 export type CatalogContentLayer = 'bundled' | 'external';
 export type CatalogContentFingerprintRole =
   | 'current'
@@ -90,7 +89,7 @@ export const catalog_content_identities = sqliteTable(
     ),
     check(
       'catalog_content_identities_key_kind_check',
-      sql`${table.key_kind} IN ('derived', 'asserted', 'bundled-stable', 'legacy-opaque')`,
+      sql`${table.key_kind} IN ('derived', 'asserted', 'bundled-stable')`,
     ),
     check(
       'catalog_content_identities_catalog_layer_check',
@@ -172,8 +171,6 @@ export const catalog_content_identities = sqliteTable(
           ))
         OR (${table.key_kind} = 'bundled-stable'
           AND ${table.catalog_layer} = 'bundled')
-        OR (${table.key_kind} = 'legacy-opaque'
-          AND ${table.catalog_layer} = 'external')
       )`,
     ),
     uniqueIndex('catalog_content_identities_kind_key_unique').on(
